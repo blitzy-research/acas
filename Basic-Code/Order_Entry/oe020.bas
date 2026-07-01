@@ -1,0 +1,860 @@
+	REM ******************************************************************\
+	    *								                                 *\
+	    *	   OE020.BAS	   ORDER ENTRY NEW ORDER PROGRAM	         *\
+	    *								                                 *\
+	    ******************************************************************
+
+	REM ***  The following variable names are used in this program	***\
+	    ***       ORDNO%	      - Order number		        	***\
+	    ***       CUSTORDNO$      - Customer order number		    ***\
+	    ***       CUSTNAME$       - Customer name			        ***\
+	    ***       CUSTADD1$ }					                    ***\
+	    ***       CUSTADD2$ }     - Customer address		        ***\
+	    ***       CUSTADD3$ }				                     	***\
+	    ***       POSTCODE$ }					                    ***\
+	    ***       CUSTTEL$	      - Customer telephone number   	***\
+	    ***       INV.NAME$       - Invoice name			        ***\
+	    ***       INV.ADD1$     }					                ***\
+	    ***       INV.ADD2$     } - Invoice address 		        ***\
+	    ***       INV.ADD2$     }			                 		***\
+	    ***       INV.POSTCODE$ }					                ***\
+	    ***       INV.TEL$	      - Invoice telephone number	    ***\
+	    ***       PARTNO$(n)      - Part number			            ***\
+	    ***       PARTDESC$(n)    - Part description		        ***\
+	    ***       QUANTITY%(n)    - Quantity			            ***\
+	    ***       PRICE(n)	      - Price				            ***\
+	    ***       VAT(n)	      - VAT rate			            ***\
+	    ***       INSTOCK%(n)     - In stock indicator		        ***\
+	    ***       PAY%	      - Payment method		            	***\
+	    ***       INVOICE%	      - Invoice flag        			***\
+	    ***       CREDNAME$       - Credit card name	        	***\
+	    ***       CREDNO$	      - Credit card number		        ***\
+	    ***       EXPIRY$	      - Credit card expiry date 	    ***
+
+%INCLUDE oecommon
+	DIM PR1.PASSWORD$(3), PR1.CREDCARD.CODE%(4), PR1.CREDCARD.NAME$(4)
+
+	REM-----OPEN & READ PARAMETER FILES------------------------------------
+
+	GOSUB 80000 : GOSUB 80200 : GOSUB 80020 : GOSUB 80220
+
+	DIM LINE$(41), PARTNO$(100), PARTDESC$(100), QUANTITY%(100),	  \
+		PRICE(100), VAT(100), INSTOCK%(100), SUSP.PARTNO$(100),   \
+		SUSP.PARTDESC$(100), SUSP.QUANTITY%(100),SUSP.PRICE(100), \
+		SUSP.VAT(100), ERROR.MSG$(18)
+
+	REM-----SET UP SCREEN LAYOUT-------------------------------------------
+
+	DATA "FUNCTION 01 - INPUT NEW ORDER"
+	DATA "ORDER NO  [     ]"
+	DATA "CUST REF  [          ]"
+	DATA "CUST NO   [     ]"
+	DATA "CUST NAME [                              ]"
+	DATA "CUST ADD1 [                              ]"
+	DATA "CUST ADD2 [                              ]"
+	DATA "CUST ADD3 [                        ]"
+	DATA "POST CODE [         ]"
+	DATA "TEL NO    [             ]"
+	DATA "SELECT PAYMENT METHOD     [ ]"
+	DATA "1=CASH/P.O."
+	DATA "2=CHEQUE"
+	DATA "3=CREDIT CARD"
+	DATA "4=CREDIT"
+	DATA "INVOICE REQUIRED (Y/N)    [ ]"
+	DATA "IS INVOICE ADDRESS SAME"
+	DATA "AS CUSTOMER ADDRESS (Y/N) [ ]"
+	DATA "INV NAME  [                              ]"
+	DATA "INV ADD1  [                              ]"
+	DATA "INV ADD2  [                              ]"
+	DATA "INV ADD3  [                        ]"
+	DATA "CASH PAYMENT"
+	DATA "CHEQUE PAYMENT"
+	DATA "CLEAR CHEQUE (Y/N) [ ]"
+	DATA "CREDIT CARD PAYMENT"
+	DATA "CARD NO     [              ]"
+	DATA "CARD NAME   [                ]"
+	DATA "EXPIRY DATE [     ]"
+	DATA "DO YOU WISH TO CONTINUE"
+	DATA "WITH THE ORDER (Y/N)    [ ]"
+	DATA "CREDIT PAYMENT"
+	DATA "TOTAL ORDER VALUE [         ]"
+	DATA "STOCK NO    [          ]"
+	DATA "DESCRIPTION [                              ]"
+	DATA "PRICE       [        ]"
+	DATA "VAT RATE    [     ]"
+	DATA "QUANTITY    [     ]"
+	DATA "DETAILS O.K. (Y/N) [ ]    "
+	DATA "ORDER TOTAL O.K. (Y/N) [ ]"
+	DATA "INVOICE NUMBER        [     ]"
+
+	FOR I%=1 TO 41 : READ LINE$(I%) : NEXT I%
+
+	REM-----SET UP ERROR MESSAGES------------------------------------------
+
+	DATA "Invalid order number"
+	DATA "Invalid customer number"
+	DATA "Invalid customer name"
+	DATA "Invalid address line 1"
+	DATA "Invalid address line 2"
+	DATA "Invalid - must be 1, 2, 3 or 4"
+	DATA "Invalid - must be Y or N"
+	DATA "Invalid invoice number"
+	DATA "Invalid invoice name"
+	DATA "Invalid credit card number"
+	DATA "Unrecognised credit card company"
+	DATA "Invalid card name"
+	DATA "Invalid expiry date"
+	DATA "Null stock number"
+	DATA "Description too long"
+	DATA "Invalid price"
+	DATA "Invalid vat rate"
+	DATA "Invalid quantity"
+
+	FOR I%=1 TO 18 : READ ERROR.MSG$(I%) : NEXT I%
+
+	REM-----OPEN OTHER FILES-----------------------------------------------
+
+	IF END #4 THEN 80310
+	GOSUB 80300
+
+	REM-----POSITION AT END OF DISPATCH NOTE FILE--------------------------
+
+	TRUE%=-1
+	WHILE TRUE%
+		IF END #4 THEN 1.1
+		GOSUB 80320
+		IF END #4 THEN 80330
+		IF D1.RECTYPE%=1 THEN GOSUB 80322 \
+		ELSE GOSUB 80324
+	WEND
+1.1	IF END #5 THEN 80410
+	GOSUB 80400
+	IF END #6 THEN 80510
+	GOSUB 80500
+	IF END #7 THEN 80610
+	GOSUB 80600
+
+	REM-----POSITION AT END OF CREDIT CARD VERIFICATION FILE---------------
+
+	TRUE%=-1
+	WHILE TRUE%
+		IF END #7 THEN 1.2
+		GOSUB 80620
+	WEND
+1.2	IF END #8 THEN 80710
+	GOSUB 80700
+
+	REM-----POSITION AT END OF INVOICE FILE--------------------------------
+
+	TRUE%=-1
+	WHILE TRUE%
+		IF END #8 THEN 1.3
+		GOSUB 80720
+		IF END #8 THEN 80730
+		IF I1.RECTYPE%=1 THEN GOSUB 80722 \
+		ELSE GOSUB 80724
+	WEND
+1.3	IF PR1.CUSTFIL.IND%=0 THEN 3
+
+	REM *****************************************\
+	    * PLACE CODE TO OPEN CUSTOMER FILE HERE *\
+	    *****************************************
+
+3	IF PR1.STOCKFIL.IND%=0 THEN 4
+
+	REM **************************************\
+	    * PLACE CODE TO OPEN STOCK FILE HERE *\
+	    **************************************
+
+4	ESC.FLAG1%=0 : ESC.FLAG2%=0
+	FOR I%=1 TO 100
+		INSTOCK%(I%)=0	     : PARTNO$(I%)=""        : PARTDESC$(I%)=""
+		QUANTITY%(I%)=0      : PRICE(I%)=0	     : VAT(I%)=0
+		SUSP.PARTNO$(I%)=""  : SUSP.PARTDESC$(I%)=""
+		SUSP.QUANTITY%(I%)=0 : SUSP.PRICE(I%)=0      : SUSP.VAT(I%)=0
+	NEXT I%
+
+	REM-----DISPLAY SCREEN-------------------------------------------------
+
+5	PRINT CLRS$
+	GOSUB 11010 : GOSUB 11020 : GOSUB 11030 : GOSUB 11040
+	GOSUB 11050 : GOSUB 11060 : GOSUB 11070 : GOSUB 11080
+	GOSUB 11090 : GOSUB 11100 : GOSUB 11110 : GOSUB 11120
+	GOSUB 11130 : GOSUB 11140 : GOSUB 11150 : GOSUB 11160
+
+	REM-----GET ORDER NUMBER-----------------------------------------------
+
+	IF PR1.ORDNO.GEN%=1 THEN					  \
+		ORDNO%=PR3.ORDER.NO%	 : PR3.ORDER.NO%=PR3.ORDER.NO%+1 :\
+		R%=ROW%(3) : C%=COL%(12) : Z$=STR$(ORDNO%) : GOSUB 12100 :\
+		ESC.FLAG1%=1		 : GOTO 8
+6	R%=ROW%(3) : C%=COL%(12) : LENGTH%=5 : GOSUB 12200
+	IF F%=0 THEN 7
+	IF F%=1 THEN 6700
+	IF F%=2 THEN 5
+	Z=VAL(Z$)
+	IF Z>0 AND Z<100000 AND Z-INT(Z)=0 THEN ORDNO%=Z : GOTO 8
+	ERROR$=ERROR.MSG$(1) : GOSUB 9100
+7	GOSUB 11020 : GOTO 6
+
+	REM-----GET CUSTOMER DETAILS-------------------------------------------
+
+8	R%=ROW%(4) : C%=COL%(12) : LENGTH%=10 : GOSUB 12200
+	IF F%=1 		     THEN 6700
+	IF F%=2 AND PR1.INVNO.GEN%=0 THEN GOSUB 11020 : GOSUB 11030 : GOTO 6
+	IF F%=0 OR F%=2 	     THEN GOSUB 11030 : GOTO 8
+	CUSTORDNO$=Z$
+	IF PR1.CUSTFIL.IND%=0 THEN \
+		R%=ROW%(5) : C%=COL%(12) : Z$="Z9999" : GOSUB 12100 : GOTO 20
+15	R%=ROW%(5) : C%=COL%(12) : LENGTH%=10 : GOSUB 12200
+	IF F%=0   THEN 16
+	IF F%=1   THEN 6700
+	IF F%=2   THEN GOSUB 11030 : GOSUB 11040 : GOTO 8
+	IF Z$<>"" THEN CUSTNO$=Z$  : GOTO 18
+	ERROR$=ERROR.MSG$(2)	   : GOSUB 9100
+16	GOSUB 11040 : GOTO 15
+18	IF CUSTNO$="Z9999" THEN 20
+
+	REM ****************************************************\
+	    *	   INSERT CUSTOMER FILE READ ROUTINE HERE      *\
+	    ****************************************************
+
+20	R%=ROW%(6) : C%=COL%(12) : LENGTH%=30 : GOSUB 12200
+	IF F%=0  THEN 26
+	IF F%=1  THEN 6700
+	IF F%<>2 THEN 25
+	GOSUB 11040 : GOSUB 11050
+	IF PR1.CUSTFIL.IND%=0 THEN GOSUB 11030 : GOTO 8 \
+	ELSE GOTO 15
+25	IF Z$<>"" THEN CUSTNAME$=Z$ : GOTO 30
+	ERROR$=ERROR.MSG$(3)	    : GOSUB 9100
+26	GOSUB 11050 : GOTO 20
+30	R%=ROW%(7) : C%=COL%(12) : LENGTH%=30 : GOSUB 12200
+	IF F%=0   THEN 31
+	IF F%=1   THEN 6700
+	IF F%=2   THEN GOSUB 11050  : GOSUB 11060 : GOTO 20
+	IF Z$<>"" THEN CUSTADD1$=Z$ : GOTO 40
+	ERROR$=ERROR.MSG$(4)	    : GOSUB 9100
+31	GOSUB 11060 : GOTO 30
+40	R%=ROW%(8) : C%=COL%(12) : LENGTH%=30 : GOSUB 12200
+	IF F%=0   THEN GOSUB 11070  : GOTO 40
+	IF F%=1   THEN 6700
+	IF F%=2   THEN GOSUB 11060  : GOSUB 11070 : GOTO 30
+	IF Z$<>"" THEN CUSTADD2$=Z$ : GOTO 50
+	ERROR$=ERROR.MSG$(5)	    : GOSUB 9100
+50	R%=ROW%(9) : C%=COL%(12) : LENGTH%=24 : GOSUB 12200
+	IF F%=0 THEN GOSUB 11080 : GOTO 50
+	IF F%=1 THEN 6700
+	IF F%=2 THEN GOSUB 11070 : GOSUB 11080 : GOTO 40
+	CUSTADD3$=Z$
+60	R%=ROW%(10) : C%=COL%(12) : LENGTH%=9 : GOSUB 12200
+	IF F%=0 THEN GOSUB 11090 : GOTO 60
+	IF F%=1 THEN 6700
+	IF F%=2 THEN GOSUB 11080 : GOSUB 11090 : GOTO 50
+	POSTCODE$=Z$
+70	R%=ROW%(11) : C%=COL%(12) : LENGTH%=13 : GOSUB 12200
+	IF F%=0 THEN GOSUB 11100 : GOTO 70
+	IF F%=1 THEN 6700
+	IF F%=2 THEN GOSUB 11100 : GOSUB 11090 : GOTO 60
+	CUSTTEL$=Z$
+80	R%=ROW%(3) : C%=COL%(78) : LENGTH%=1 : GOSUB 12200
+	IF F%=0 THEN GOSUB 11110 : GOTO 80
+	IF F%=1 THEN 6700
+	IF F%=2 THEN GOSUB 11100 : GOSUB 11110 : GOTO 70
+	PAY%=VAL(Z$)
+	IF PAY%<1 OR PAY%>4 THEN \
+		ERROR$=ERROR.MSG$(6) :\
+		GOSUB 9100 : GOSUB 11110 : GOTO 80
+90	R%=ROW%(8) : C%=COL%(78) : LENGTH%=1 : GOSUB 12200
+	IF F%=0   THEN GOSUB 11160 : GOTO 90
+	IF F%=1   THEN 6700
+	IF F%=2   THEN GOSUB 11160 : GOSUB 11110 : GOTO 80
+	Z$=UCASE$(Z$)
+	IF Z$="Y" THEN INVOICE%=1 : GOTO 100
+	IF Z$="N" THEN INVOICE%=0 : GOTO 200
+	ERROR$=ERROR.MSG$(7)	  : GOSUB 9100 : GOSUB 11160
+	GOTO 90
+100	GOSUB 11410
+	IF PR1.INVNO.GEN%=1 THEN				  \
+		INVOICE.NO%    =PR3.INVOICE.NO% 		 :\
+		PR3.INVOICE.NO%=PR3.INVOICE.NO%+1		 :\
+		ESC.FLAG2%     =1    : R%=ROW%(9)  : C%=COL%(74) :\
+		Z$=STR$(INVOICE.NO%) : GOSUB 12100 : GOTO 110
+105	R%=ROW%(9) : C%=COL%(75) : LENGTH%=5 : GOSUB 12200
+	IF F%=0 THEN GOSUB 11410 : GOTO 105
+	IF F%=1 THEN 6700
+	IF F%=2 THEN R%=ROW%(9)  : C%=COL%(51) : Z$=EOL$ : GOSUB 12100 :\
+		GOSUB 11160	 : GOTO 90
+	Z=VAL(Z$)
+	IF Z<1 OR Z>99999 OR Z-INT(Z)<>0 THEN \
+		ERROR$=ERROR.MSG$(8) : GOSUB 9100 : GOTO 100
+	INVOICE.NO%=Z
+110	GOSUB 11170 : GOSUB 11180
+	R%=ROW%(11) : C%=COL%(78) : LENGTH%=1 : GOSUB 12200
+	IF F%=0  THEN 110
+	IF F%=1  THEN 6700
+	IF F%<>2 THEN 115
+	R%=ROW%(11) : C%=COL%(51) : Z$=EOL$ : GOSUB 12100
+	R%=ROW%(10) : C%=COL%(51) : Z$=EOL$ : GOSUB 12100
+	IF PR1.INVNO.GEN%<>1 THEN 100
+	PR3.INVOICE.NO%=PR3.INVOICE.NO%-1	: ESC.FLAG2%=0
+	R%=ROW%(9) : C%=COL%(51) : Z$=EOL$	: GOSUB 12100  : GOSUB 11160
+	R%=ROW%(8) : C%=COL%(51) : Z$=LINE$(16) : GOSUB 12100  : GOTO 90
+115	Z$=UCASE$(Z$)
+	IF Z$="Y" THEN                                         \
+		INV.NAME$    =CUSTNAME$ : INV.ADD1$=CUSTADD1$ :\
+		INV.ADD2$    =CUSTADD2$ : INV.ADD3$=CUSTADD3$ :\
+		INV.POSTCODE$=POSTCODE$ : INV.TEL$ =CUSTTEL$  :\
+		GOTO 200
+	IF Z$<>"N" THEN \
+		ERROR$=ERROR.MSG$(7) :\
+		GOSUB 9100 : GOTO 110
+	GOSUB 11190 : GOSUB 11200  : GOSUB 11210 : GOSUB 11220
+	R%=ROW%(17) : C%=COL%(1)  : Z$=LINE$(9)  : GOSUB 12100
+	R%=ROW%(18) : C%=COL%(1)  : Z$=LINE$(10) : GOSUB 12100
+120	R%=ROW%(13) : C%=COL%(12) : LENGTH%=30 : GOSUB 12200
+	IF F%=0  THEN GOSUB 11190 : GOTO 120
+	IF F%=1  THEN 6700
+	IF F%<>2 THEN 125
+	R%=ROW%(13) : C%=COL%(1) : Z$=EOP$ : GOSUB 12100
+	GOSUB 11180 : GOTO 110
+125	IF Z$="" THEN \
+		ERROR$=ERROR.MSG$(9) :\
+		GOSUB 9100 : GOSUB 11190 : GOTO 120
+	INV.NAME$=Z$
+130	R%=ROW%(14) : C%=COL%(12) : LENGTH%=30 : GOSUB 12200
+	IF F%=0  THEN GOSUB 11200 : GOTO 130
+	IF F%=1  THEN 6700
+	IF F%=2  THEN GOSUB 11200 : GOSUB 11190 : GOTO 120
+	IF Z$="" THEN ERROR$=ERROR.MSG$(4) :\
+		GOSUB 9100 : GOSUB 11200 : GOTO 130
+	INV.ADD1$=Z$
+140	R%=ROW%(15) : C%=COL%(12) : LENGTH%=30 : GOSUB 12200
+	IF F%=0  THEN GOSUB 11210 : GOTO 140
+	IF F%=1  THEN 6700
+	IF F%=2  THEN GOSUB 11210 : GOSUB 11200 : GOTO 130
+	IF Z$="" THEN \
+		ERROR$=ERROR.MSG$(5) :\
+		GOSUB 9100 : GOSUB 11210 : GOTO 140
+	INV.ADD2$=Z$
+150	R%=ROW%(16) : C%=COL%(12) : LENGTH%=24 : GOSUB 12200
+	IF F%=0 THEN GOSUB 11220 : GOTO 150
+	IF F%=1 THEN 6700
+	IF F%=2 THEN GOSUB 11220 : GOSUB 11210 : GOTO 140
+	INV.ADD3$=Z$
+160	R%=ROW%(17) : C%=COL%(12) : LENGTH%=9 : GOSUB 12200
+	IF F%=0 THEN R%=ROW%(17) : C%=COL%(1) : Z$=LINE$(9) : GOSUB 12100 :\
+		GOTO 160
+	IF F%=1 THEN 6700
+	IF F%=2 THEN GOSUB 11220 :\
+		R%=ROW%(17)	 : C%=COL%(1) : Z$=LINE$(9) : GOSUB 12100 :\
+		GOTO 150
+	INV.POSTCODE$=Z$
+170	R%=ROW%(18) : C%=COL%(12) : LENGTH%=13 : GOSUB 12200
+	IF F%=0 THEN R%=ROW%(18) : C%=COL%(1) : Z$=LINE$(10) : GOSUB 12100 :\
+		GOTO 170
+	IF F%=1 THEN 6700
+	IF F%=2 THEN R%=ROW%(18) : C%=COL%(1) : Z$=LINE$(10) : GOSUB 12100 :\
+		R%=ROW%(17)	 : C%=COL%(1) : Z$=LINE$(9)  : GOSUB 12100 :\
+		GOTO 160
+	INV.TEL$=Z$
+200	R%=ROW%(13) : C%=COL%(1) : Z$=EOP$ : GOSUB 12100
+	ON PAY% GOTO 1000,2000,3000,4000
+
+	REM-----CASH PAYMENT ROUTINE-------------------------------------------
+
+1000	GOSUB 11230 : GOTO 5000
+
+	REM-----CHEQUE PAYMENT ROUTINE-----------------------------------------
+
+2000	GOSUB 11240
+2010	GOSUB 11250
+	R%=ROW%(16) : C%=COL%(21) : LENGTH%=1 : GOSUB 12200
+	IF F%=0 	    THEN 2010
+	IF F%=1 	    THEN 6700
+	IF F%=2 	    THEN 2010
+	Z$=UCASE$(Z$)
+	IF Z$="Y" OR Z$="N" THEN CHEQUE.FLAG$=Z$ : GOTO 5000
+	ERROR$=ERROR.MSG$(7) : GOSUB 9100
+	GOTO 2010
+
+	REM-----CREDIT CARD PAYMENT ROUTINE------------------------------------
+
+3000	GOSUB 11260
+3010	GOSUB 11270 : GOSUB 11280 : GOSUB 11290
+	R%=ROW%(16) : C%=COL%(14) : LENGTH%=14 : GOSUB 12200
+	IF F%=0  THEN 3010
+	IF F%=1  THEN 6700
+	IF F%=2  THEN 3010
+	IF Z$="" THEN ERROR$=ERROR.MSG$(10) :\
+		GOSUB 9100 : GOTO 3010
+	CREDNO$=Z$
+	Z%=VAL(LEFT$(Z$,2))
+	FOR I%=1 TO 4
+		IF Z%=PR1.CREDCARD.CODE%(I%) THEN	  \
+			CREDNAME$=PR1.CREDCARD.NAME$(I%) :\
+			R%=ROW%(17) : C%=COL%(14)	 :\
+			Z$=PR1.CREDCARD.NAME$(I%)	 :\
+			GOSUB 12100 : GOTO 3100
+	NEXT I%
+	ERROR$=ERROR.MSG$(11) : GOSUB 9100
+3030	GOSUB 11300 : GOSUB 11310
+	R%=ROW%(20) : C%=COL%(26) : LENGTH%=1 : GOSUB 12200
+	IF F%=0   THEN 3030
+	IF F%=1   THEN 6700
+	IF F%=2   THEN 3010
+	Z$=UCASE$(Z$)
+	IF Z$="N" THEN GOTO 90000
+	IF Z$="Y" THEN GOTO 3050
+	ERROR$=ERROR.MSG$(7) : GOSUB 9100 : GOTO 3030
+3050	R%=ROW%(17) : C%=COL%(14) : LENGTH%=16 : GOSUB 12200
+	IF F%=0  THEN GOSUB 11280 : GOTO 3050
+	IF F%=1  THEN 6700
+	IF F%=2  THEN 3010
+	IF Z$="" THEN ERROR$=ERROR.MSG$(12) : GOSUB 9100 : GOSUB 11280 :\
+		GOTO 3050
+	CREDNAME$=Z$
+3100	R%=ROW%(18) : C%=COL%(14) : LENGTH%=5 : GOSUB 12200
+	IF F%=0 THEN GOSUB 11290 : GOTO 3100
+	IF F%=1 THEN 6700
+	IF F%=2 THEN 3010
+	K%=VAL(LEFT$(Z$,2))	    : L%=VAL(RIGHT$(Z$,2)) : K$=MID$(Z$,3,1)
+	I%=VAL(MID$(PR3.DATE$,4,2)) : J%=VAL(RIGHT$(PR3.DATE$,2))
+	IF K%<1 OR K%>12 OR L%<J% OR K$<>"/" OR (L%=J% AND K%<I%) THEN   \
+		ERROR$=ERROR.MSG$(13) : GOSUB 9100 : GOSUB 11290 :\
+		GOTO 3100
+	EXPIRY$=Z$
+	GOTO 5000
+
+	REM-----CREDIT PAYMENT ROUTINE-----------------------------------------
+
+4000	GOSUB 11320 : GOTO 5000
+
+	REM-----STOCK DETAILS ROUTINE------------------------------------------
+
+5000	J%=0
+	IF PR1.STOCKFIL.IND%=0 THEN 5200
+
+	REM *********************************************\
+	    *  PLACE CODING FOR LINKED STOCK FILE HERE	*\
+	    *********************************************
+
+5200	GOSUB 11340 : GOSUB 11350 : GOSUB 11360 : GOSUB 11370 : GOSUB 11380
+5210	R%=ROW%(14) : C%=COL%(49) : LENGTH%=10	: GOSUB 12200
+	IF F%=0 	  THEN GOSUB 11340		  : GOTO 5210
+	IF F%=1 	  THEN 6700
+	IF F%=2 	  THEN 5200
+	IF Z$="" AND J%=0 THEN ERROR$=ERROR.MSG$(14) : GOSUB 9100 :\
+		GOSUB 11340 : GOTO 5210
+	IF Z$=""          THEN 6000
+	J%=J%+1
+	PARTNO$(J%)=Z$
+5220	R%=ROW%(15) : C%=COL%(49) : LENGTH%=30 : GOSUB 12200
+	IF F%=0   THEN GOSUB 11350 : GOTO 5220
+	IF F%=1   THEN 6700
+	IF F%=2   THEN 5200
+	IF Z$<>"" THEN PARTDESC$(J%)=Z$ : GOTO 5230
+	ERROR$=ERROR.MSG$(15)		: GOSUB 9100 : GOSUB 11350 : GOTO 5220
+5230	R%=ROW%(16) : C%=COL%(49) : LENGTH%=8 : GOSUB 12200
+	IF F%=0  THEN GOSUB 11360 : GOTO 5230
+	IF F%=1  THEN 6700
+	IF F%=2  THEN GOSUB 11360 : GOSUB 11350 : GOTO 5220
+	IF Z$="" THEN F%=5        : GOTO 5235
+	FOR K%=1 TO LEN(Z$)
+		K1=ASC(MID$(Z$,K%,1))
+		IF K1=46 OR (K1>47 AND K1<58) THEN F%=4 \
+		ELSE F%=5 : GOTO 5235
+	NEXT K%
+5235	Z=VAL(Z$)
+	IF Z<.01 OR Z>99999.99 OR F%=5 THEN \
+		ERROR$=ERROR.MSG$(16) : GOSUB 9100 : GOSUB 11360 : GOTO 5230
+	PRICE(J%)=Z
+5240	R%=ROW%(17) : C%=COL%(49) : LENGTH%=5 : GOSUB 12200
+	IF F%=0  THEN GOSUB 11370 : GOTO 5240
+	IF F%=1  THEN 6700
+	IF F%=2  THEN GOSUB 11370 : GOSUB 11360 : GOTO 5230
+	IF Z$="" THEN F%=5        : GOTO 5245
+	FOR K%=1 TO LEN(Z$)
+		K1=ASC(MID$(Z$,K%,1))
+		IF K1=46 OR (K1>47 AND K1<58) THEN F%=4 \
+		ELSE F%=5 : GOTO 5245
+	NEXT K%
+5245	Z=VAL(Z$)
+	IF Z<0 OR Z>99.99 OR F%=5 THEN \
+		ERROR$=ERROR.MSG$(17) : GOSUB 9100 : GOSUB 11370 :\
+		GOTO 5240
+	VAT(J%)=Z
+5250	R%=ROW%(18) : C%=COL%(49) : LENGTH%=5 : GOSUB 12200
+	IF F%=0  THEN GOSUB 11380 : GOTO 5250
+	IF F%=1  THEN 6700
+	IF F%=2  THEN GOSUB 11380 : GOSUB 11370 : GOTO 5240
+	IF Z$="" THEN F%=5        : GOTO 5255
+	FOR K%=1 TO LEN(Z$)
+		K1=ASC(MID$(Z$,K%,1))
+		IF K1>47 AND K1<58 THEN F%=4 \
+		ELSE F%=5 : GOTO 5255
+	NEXT K%
+5255	Z=VAL(Z$)
+	IF Z<1 OR Z>99999 OR Z-INT(Z)<>0 OR F%=5 THEN \
+		ERROR$=ERROR.MSG$(18) : GOSUB 9100 : GOSUB 11380 :\
+		GOTO 5250
+	QUANTITY%(J%)=Z
+	GOTO 5200
+
+	REM-----CHECK STOCK DETAILS ROUTINE------------------------------------
+
+	REM-----CLEAR BOTTOM OF SCREEN-----------------------------------------
+
+6000	R%=ROW%(13) : C%=COL%(1) : Z$=EOP$ : GOSUB 12100
+
+	REM-----GET ORDER TOTAL FROM USER--------------------------------------
+
+6005	GOSUB 11330
+	R%=ROW%(14) : C%=COL%(20) : LENGTH%=10 : GOSUB 12200
+	IF F%=0 THEN 6005
+	IF F%=1 THEN 6700
+	IF F%=2 THEN 6005
+	ORDER.TOTAL=VAL(Z$)
+
+	REM-----CALCULATE HASH TOTAL-------------------------------------------
+
+6010	HASH.TOTAL=0
+	FOR I%=1 TO J%
+		HASH.TOTAL=HASH.TOTAL+(QUANTITY%(I%)*PRICE(I%))+  \
+			(QUANTITY%(I%)*PRICE(I%)*VAT(I%)/100)
+	NEXT I%
+
+	REM-----CHECK FOR INPUT ERRORS-----------------------------------------
+
+	IF HASH.TOTAL=ORDER.TOTAL THEN 6500
+
+	REM-----ALLOW CHANGE TO ORDER DETAILS----------------------------------
+
+	ERROR$="Total input does not match calculated total" : GOSUB 9100
+	FOR I%=1 TO J%
+		GOSUB 11340 : GOSUB 11350 : GOSUB 11360 : GOSUB 11370
+		GOSUB 11380
+		R%=ROW%(14) : C%=COL%(49) : Z$=PARTNO$(I%)	  : GOSUB 12100
+		R%=ROW%(15) : C%=COL%(49) : Z$=PARTDESC$(I%)	  : GOSUB 12100
+		R%=ROW%(16) : C%=COL%(49) : Z$=STR$(PRICE(I%))	  : GOSUB 12100
+		R%=ROW%(17) : C%=COL%(49) : Z$=STR$(VAT(I%))	  : GOSUB 12100
+		R%=ROW%(18) : C%=COL%(49) : Z$=STR$(QUANTITY%(I%)): GOSUB 12100
+6020		GOSUB 11390
+		R%=ROW%(20) : C%=COL%(56) : LENGTH%=1 : GOSUB 12200
+		IF F%=0 OR F%=2 THEN 6020
+		IF F%=1 	THEN 6700
+		Z$=UCASE$(Z$)
+		IF Z$="Y"       THEN GOTO 6100
+		IF Z$<>"N"      THEN ERROR$=ERROR.MSG$(7) :\
+			GOSUB 9100 : GOTO 6020
+
+	REM-----RE-ENTER DATA--------------------------------------------------
+
+6025		GOSUB 11340 : GOSUB 11350 : GOSUB 11360
+		GOSUB 11370 : GOSUB 11380
+6030		R%=ROW%(14) : C%=COL%(49) : LENGTH%=10 : GOSUB 12200
+		IF F%=0   THEN 6025
+		IF F%=1   THEN 6700
+		IF F%=2   THEN 6025
+		IF Z$<>"" THEN PARTNO$(I%)=Z$ : GOTO 6040
+		R%=ROW%(14) : C%=COL%(49) : Z$=PARTNO$(I%) : GOSUB 12100
+6040		R%=ROW%(15) : C%=COL%(49) : LENGTH%=30 : GOSUB 12200
+		IF F%=0   THEN GOSUB 11350 : GOTO 6040
+		IF F%=1   THEN 6700
+		IF F%=2   THEN 6025
+		IF Z$<>"" THEN PARTDESC$(I%)=Z$ : GOTO 6050
+		R%=ROW%(15) : C%=COL%(49) : Z$=PARTDESC$(I%) : GOSUB 12100
+6050		R%=ROW%(16) : C%=COL%(49) : LENGTH%=8 : GOSUB 12200
+		IF F%=0   THEN GOSUB 11360 : GOTO 6050
+		IF F%=1   THEN 6700
+		IF F%=2   THEN GOSUB 11360 : GOSUB 11350 : GOTO 6040
+		IF Z$<>"" THEN 6053
+		R%=ROW%(16) : C%=COL%(49) : Z$=STR$(PRICE(I%)) : GOSUB 12100
+		GOTO 6060
+6053		FOR K%=1 TO LEN(Z$)
+			K1=ASC(MID$(Z$,K%,1))
+			IF K1=46 OR (K1>47 AND K1<58) THEN F%=4 \
+			ELSE F%=5 : GOTO 6055
+		NEXT K%
+6055		Z=VAL(Z$)
+		IF Z<.01 OR Z>99999.99 OR F%=5 THEN \
+			ERROR$=ERROR.MSG$(16) : GOSUB 9100 :\
+			GOSUB 11360	      : GOTO 6050
+		PRICE(I%)=Z
+6060		R%=ROW%(17) : C%=COL%(49) : LENGTH%=5 : GOSUB 12200
+		IF F%=0   THEN GOSUB 11370 : GOTO 6060
+		IF F%=1   THEN 6700
+		IF F%=2   THEN GOSUB 11370 : GOSUB 11360 : GOTO 6050
+		IF Z$<>"" THEN 6063
+		R%=ROW%(17) : C%=COL%(49) : Z$=STR$(VAT(I%)) : GOSUB 12100
+		GOTO 6070
+6063		FOR K%=1 TO LEN(Z$)
+			K1=ASC(MID$(Z$,K%,1))
+			IF K1=46 OR (K1>47 AND K1<58) THEN F%=4 \
+			ELSE F%=5 : GOTO 6065
+		NEXT K%
+6065		Z=VAL(Z$)
+		IF Z<0 OR Z>99999 OR F%=5 THEN \
+			ERROR$=ERROR.MSG$(17) : GOSUB 9100 :\
+			GOSUB 11370	      : GOTO 6060
+		VAT(I%)=Z
+6070		R%=ROW%(18) : C%=COL%(49) : LENGTH%=5 : GOSUB 12200
+		IF F%=0   THEN GOSUB 11380 : GOTO 6070
+		IF F%=1   THEN 6700
+		IF F%=2   THEN GOSUB 11380 : GOSUB 11370 : GOTO 6060
+		IF Z$<>"" THEN 6073
+		R%=ROW%(18) : C%=COL%(49) : Z$=STR$(QUANTITY%(I%)): GOSUB 12100
+		GOTO 6100
+6073		FOR K%=1 TO LEN(Z$)
+			K1=ASC(MID$(Z$,K%,1))
+			IF K1>47 AND K1<58 THEN F%=4 \
+			ELSE F%=5 : GOTO 6075
+		NEXT K%
+6075		Z=VAL(Z$)
+		IF Z<1 OR Z>99999 OR Z-INT(Z)<>0 OR F%=5 THEN \
+			ERROR$=ERROR.MSG$(18) : GOSUB 9100 :\
+			GOSUB 11380	     : GOTO 6070
+		QUANTITY%(I%)=Z
+6100	NEXT I%
+6110	GOSUB 11400 : R%=ROW%(20) : C%=COL%(60) : LENGTH%=1 : GOSUB 12200
+	IF F%=0 OR F%=2 THEN 6110
+	IF F%=1 	THEN 6700
+	Z$=UCASE$(Z$)
+	IF Z$="N"       THEN GOTO 6005
+	IF Z$<>"Y"      THEN ERROR$=ERROR.MSG$(7) : GOSUB 9100 : GOTO 6110
+	GOTO 6010
+
+	REM-----WRITE ORDER TO DISK--------------------------------------------
+
+	REM *************************************\
+	    *  INSERT STOCK CHECK ROUTINE HERE	*\
+	    *************************************
+
+6500	DISP.FIRSTREC%=0 : SUSP.FIRSTREC%=0
+	CRED.FIRSTREC%=0 : INV.FIRSTREC%=0
+	M%=0
+	FOR I%=1 TO J%
+
+	REM-----TEST FOR CASH PAYMENT------------------------------------------
+
+		IF PAY%<>1 THEN 6550
+
+	REM-----TEST IF IN STOCK-----------------------------------------------
+
+6505		IF INSTOCK%(I%)=1   THEN REASON%=1 : GOSUB 6900
+
+	REM-----WRITE DISPATCH NOTE--------------------------------------------
+
+		IF DISP.FIRSTREC%=1 THEN 6520
+		D1.ORDNO%   =ORDNO%    : D1.RECTYPE%  =1
+		D1.CUSTNAME$=CUSTNAME$ : D1.CUSTADD1$ =CUSTADD1$
+		D1.CUSTADD2$=CUSTADD2$ : D1.CUSTADD3$ =CUSTADD3$
+		D1.POSTCODE$=POSTCODE$ : D1.CUSTORDNO$=CUSTORDNO$
+		D1.DATE$    =PR3.DATE$ : D1.PAY%      =PAY%
+		IF END#4 THEN 80345
+		GOSUB 80340
+		DISP.FIRSTREC%=1
+6520		D1.RECTYPE% =2		   : D1.PARTNO$  =PARTNO$(I%)
+		D1.PARTDESC$=PARTDESC$(I%) : D1.QUANTITY%=QUANTITY%(I%)
+		D1.INSTOCK% =INSTOCK%(I%)
+		IF END #4 THEN 80355
+		GOSUB 80350
+
+	REM-----TEST IF INVOICE IS TO BE CREATED-------------------------------
+
+		IF INVOICE%=0 OR INSTOCK%(I%)=1 THEN 6549
+		IF INV.FIRSTREC%=1		THEN 6540
+
+	REM-----WRITE INVOICE--------------------------------------------------
+
+		I1.ORDNO%   =ORDNO%	   : I1.RECTYPE%  =1
+		I1.CUSTNAME$=INV.NAME$	   : I1.CUSTADD1$ =INV.ADD1$
+		I1.CUSTADD2$=INV.ADD2$	   : I1.CUSTADD3$ =INV.ADD3$
+		I1.POSTCODE$=INV.POSTCODE$ : I1.CUSTORDNO$=CUSTORDNO$
+		I1.DATE$    =PR3.DATE$	   : I1.PAY%	  =PAY%
+		I1.INVOICE.NO%=INVOICE.NO%
+		IF END #8 THEN 80745
+		GOSUB 80740
+		INV.FIRSTREC%=1
+6540		I1.RECTYPE% =2		   : I1.PARTNO$  =PARTNO$(I%)
+		I1.PARTDESC$=PARTDESC$(I%) : I1.QUANTITY%=QUANTITY%(I%)
+		I1.PRICE    =PRICE(I%)	   : I1.VAT	 =VAT(I%)
+		IF END #8 THEN 80755
+		GOSUB 80750
+6549		GOTO 6699
+
+	REM-----TEST FOR CHEQUE PAYMENT----------------------------------------
+
+6550		IF PAY%<>2 THEN 6600
+		IF CHEQUE.FLAG$="Y" THEN REASON%=2 : GOSUB 6900 : GOTO 6699
+		GOTO 6505
+
+	REM-----TEST FOR CREDIT CARD PAYMENT-----------------------------------
+
+6600		IF PAY%<>3	    THEN 6650
+		IF CRED.FIRSTREC%=1 THEN 6620
+		C1.CREDNO$     =CREDNO$     : C1.ORDNO$ =STR$(ORDNO%)
+		C1.CREDNAME$   =CREDNAME$   : C1.EXPIRY$=EXPIRY$
+		C1.ORDER.TOTAL$=STR$(ORDER.TOTAL)
+		IF INVOICE%=0 THEN 6615
+		C1.CUSTNAME$=INV.NAME$	   : C1.CUSTADD1$=INV.ADD1$
+		C1.CUSTADD2$=INV.ADD2$	   : C1.CUSTADD3$=INV.ADD3$
+		C1.POSTCODE$=INV.POSTCODE$ : C1.CUSTTEL$ =INV.TEL$
+		GOTO 6618
+6615		C1.CUSTNAME$=CUSTNAME$ : C1.CUSTADD1$=CUSTADD1$
+		C1.CUSTADD2$=CUSTADD2$ : C1.CUSTADD3$=CUSTADD3$
+		C1.POSTCODE$=POSTCODE$ : C1.CUSTTEL$ =CUSTTEL$
+6618		IF END #7 THEN 80645
+		GOSUB 80640
+		CRED.FIRSTREC%=1
+6620		REASON%=3 : GOSUB 6900 : GOTO 6699
+
+	REM ***  CREDIT PAYMENT  ***
+
+6650		IF PR1.CUSTFIL.IND%=0 THEN 6649
+
+	REM ***********************************\
+	    *  INSERT CREDIT RATING TEST HERE *\
+	    ***********************************
+
+6649	GOTO 6505
+6699	NEXT I%
+	IF M%<>0			    THEN GOSUB 6930
+	IF ESC.FLAG2%=1 AND INV.FIRSTREC%=0 THEN \
+		PR3.INVOICE.NO%=PR3.INVOICE.NO%-1
+	GOTO 4
+
+	REM-----WRITE UPDATED PARAMETER FILE 3---------------------------------
+
+6700	IF ESC.FLAG1%=1 THEN PR3.ORDER.NO%  =PR3.ORDER.NO%-1
+	IF ESC.FLAG2%=1 THEN PR3.INVOICE.NO%=PR3.INVOICE.NO%-1
+	IF END #3 THEN 80245
+	GOSUB 80240
+	CLOSE 1,3,4,5,6,7,8
+	IF PR1.CUSTFIL.IND%=1  THEN CLOSE 9
+	IF PR1.STOCKFIL.IND%=1 THEN CLOSE 10
+	GOTO 90000
+
+	REM-----SUSPENSE FILE WRITE SUBROUTINE---------------------------------
+
+6900	IF SUSP.FIRSTREC =1 THEN 6920
+
+	REM-----CREATE INDEX RECORD--------------------------------------------
+
+	N%=1
+	IF END #6 THEN 80530
+	GOSUB 80520
+	S1.FIL%=S2.KEY% : S2.FIL%=S2.RECNO%
+	S2.KEY%=ORDNO%	: S2.RECNO%=S1.FIL%+1 : N%=S2.FIL%+1
+	IF END #6 THEN 80555
+	GOSUB 80550
+	S2.FIL%=S2.FIL%+1
+
+	REM-----WRITE RECTYPE 1 TO MAIN SUSPENSE FILE--------------------------
+
+	S1.ORDNO%     =ORDNO%	  : S1.RECTYPE% =1
+	S1.DEL%       =0	  : S1.NEXTREC% =S1.FIL%+2
+	S1.CUSTNAME$  =CUSTNAME$  : S1.CUSTADD1$=CUSTADD1$
+	S1.CUSTADD2$  =CUSTADD2$  : S1.CUSTADD3$=CUSTADD3$
+	S1.POSTCODE$  =POSTCODE$  : S1.CUSTTEL$ =CUSTTEL$
+	S1.CUST.ORDNO$=CUSTORDNO$ : S1.PAY%	=PAY%
+	S1.REASON%    =REASON%	  : S1.DATE$	=PR3.DATE$
+	S1.DATE%      =PR3.DATE%  : S1.INVOICE% =INVOICE%
+	N%=S1.FIL%+1
+	IF END #5 THEN 80445
+	GOSUB 80440
+	S1.FIL%=N% : SUSP.FIRSTREC%=1
+	IF INVOICE%=0 THEN 6920
+
+	REM-----WRITE RECORD TYPE 3--------------------------------------------
+
+	S1.RECTYPE% =3	       : S1.DEL%	 =0
+	S1.NEXTREC% =S1.FIL%+2 : S1.INV.NAME$	 =INV.NAME$
+	S1.INV.ADD1$=INV.ADD1$ : S1.INV.ADD2$	 =INV.ADD2$
+	S1.INV.ADD3$=INV.ADD3$ : S1.INV.POSTCODE$=INV.POSTCODE$
+	S1.INV.TEL$ =INV.TEL$
+	N%=S1.FIL%+1
+	IF END #5 THEN 80465
+	GOSUB 80460
+	S1.FIL%=N%
+6920	M%=M%+1
+	SUSP.PARTNO$(M%)  =PARTNO$(I%)	 : SUSP.PARTDESC$(M%)=PARTDESC$(I%)
+	SUSP.QUANTITY%(M%)=QUANTITY%(I%) : SUSP.PRICE(M%)    =PRICE(I%)
+	SUSP.VAT(M%)	  =VAT(I%)
+	RETURN
+6930	S1.RECTYPE%=2 : S1.DEL%=0
+	FOR I%=1 TO M%
+		IF I%=M% THEN S1.NEXTREC%=0 \
+		ELSE S1.NEXTREC%=S1.FIL%+2
+		S1.PARTNO$  =SUSP.PARTNO$(I%) : S1.PARTDESC$=SUSP.PARTDESC$(I%)
+		S1.QUANTITY%=SUSP.QUANTITY%(I%) : S1.PRICE  =SUSP.PRICE(I%)
+		S1.VAT	    =SUSP.VAT(I%)
+		N%=S1.FIL%+1
+		IF END #5 THEN 80455
+		GOSUB 80450
+		S1.FIL%=N%
+	NEXT I%
+	S2.KEY%=S1.FIL% : S2.RECNO%=S2.FIL% : N%=1
+	IF END #6 THEN 80555
+	GOSUB 80550
+	RETURN
+
+	REM-----ERROR ROUTINE--------------------------------------------------
+
+9100	R%=ROW%(23) : C%=COL%(1) : Z$=BELL$+ERROR$+EOL$ : GOSUB 12100
+	RETURN
+
+10000	STOP
+
+11010	R%=ROW%(1)  : C%=COL%(27) : Z$=LINE$(1)  : GOSUB 12100 : RETURN
+11020	R%=ROW%(3)  : C%=COL%(1)  : Z$=LINE$(2)  : GOSUB 12100 : RETURN
+11030	R%=ROW%(4)  : C%=COL%(1)  : Z$=LINE$(3)  : GOSUB 12100 : RETURN
+11040	R%=ROW%(5)  : C%=COL%(1)  : Z$=LINE$(4)  : GOSUB 12100 : RETURN
+11050	R%=ROW%(6)  : C%=COL%(1)  : Z$=LINE$(5)  : GOSUB 12100 : RETURN
+11060	R%=ROW%(7)  : C%=COL%(1)  : Z$=LINE$(6)  : GOSUB 12100 : RETURN
+11070	R%=ROW%(8)  : C%=COL%(1)  : Z$=LINE$(7)  : GOSUB 12100 : RETURN
+11080	R%=ROW%(9)  : C%=COL%(1)  : Z$=LINE$(8)  : GOSUB 12100 : RETURN
+11090	R%=ROW%(10) : C%=COL%(1)  : Z$=LINE$(9)  : GOSUB 12100 : RETURN
+11100	R%=ROW%(11) : C%=COL%(1)  : Z$=LINE$(10) : GOSUB 12100 : RETURN
+11110	R%=ROW%(3)  : C%=COL%(51) : Z$=LINE$(11) : GOSUB 12100 : RETURN
+11120	R%=ROW%(4)  : C%=COL%(52) : Z$=LINE$(12) : GOSUB 12100 : RETURN
+11130	R%=ROW%(5)  : C%=COL%(52) : Z$=LINE$(13) : GOSUB 12100 : RETURN
+11140	R%=ROW%(6)  : C%=COL%(52) : Z$=LINE$(14) : GOSUB 12100 : RETURN
+11150	R%=ROW%(7)  : C%=COL%(52) : Z$=LINE$(15) : GOSUB 12100 : RETURN
+11160	R%=ROW%(8)  : C%=COL%(51) : Z$=LINE$(16) : GOSUB 12100 : RETURN
+11170	R%=ROW%(10) : C%=COL%(51) : Z$=LINE$(17) : GOSUB 12100 : RETURN
+11180	R%=ROW%(11) : C%=COL%(51) : Z$=LINE$(18) : GOSUB 12100 : RETURN
+11190	R%=ROW%(13) : C%=COL%(1)  : Z$=LINE$(19) : GOSUB 12100 : RETURN
+11200	R%=ROW%(14) : C%=COL%(1)  : Z$=LINE$(20) : GOSUB 12100 : RETURN
+11210	R%=ROW%(15) : C%=COL%(1)  : Z$=LINE$(21) : GOSUB 12100 : RETURN
+11220	R%=ROW%(16) : C%=COL%(1)  : Z$=LINE$(22) : GOSUB 12100 : RETURN
+11230	R%=ROW%(14) : C%=COL%(1)  : Z$=LINE$(23) : GOSUB 12100 : RETURN
+11240	R%=ROW%(14) : C%=COL%(1)  : Z$=LINE$(24) : GOSUB 12100 : RETURN
+11250	R%=ROW%(16) : C%=COL%(1)  : Z$=LINE$(25) : GOSUB 12100 : RETURN
+11260	R%=ROW%(14) : C%=COL%(1)  : Z$=LINE$(26) : GOSUB 12100 : RETURN
+11270	R%=ROW%(16) : C%=COL%(1)  : Z$=LINE$(27) : GOSUB 12100 : RETURN
+11280	R%=ROW%(17) : C%=COL%(1)  : Z$=LINE$(28) : GOSUB 12100 : RETURN
+11290	R%=ROW%(18) : C%=COL%(1)  : Z$=LINE$(29) : GOSUB 12100 : RETURN
+11300	R%=ROW%(19) : C%=COL%(1)  : Z$=LINE$(30) : GOSUB 12100 : RETURN
+11310	R%=ROW%(20) : C%=COL%(1)  : Z$=LINE$(31) : GOSUB 12100 : RETURN
+11320	R%=ROW%(14) : C%=COL%(1)  : Z$=LINE$(32) : GOSUB 12100 : RETURN
+11330	R%=ROW%(14) : C%=COL%(1)  : Z$=LINE$(33) : GOSUB 12100 : RETURN
+11340	R%=ROW%(14) : C%=COL%(36) : Z$=LINE$(34) : GOSUB 12100 : RETURN
+11350	R%=ROW%(15) : C%=COL%(36) : Z$=LINE$(35) : GOSUB 12100 : RETURN
+11360	R%=ROW%(16) : C%=COL%(36) : Z$=LINE$(36) : GOSUB 12100 : RETURN
+11370	R%=ROW%(17) : C%=COL%(36) : Z$=LINE$(37) : GOSUB 12100 : RETURN
+11380	R%=ROW%(18) : C%=COL%(36) : Z$=LINE$(38) : GOSUB 12100 : RETURN
+11390	R%=ROW%(20) : C%=COL%(36) : Z$=LINE$(39) : GOSUB 12100 : RETURN
+11400	R%=ROW%(20) : C%=COL%(36) : Z$=LINE$(40) : GOSUB 12100 : RETURN
+11410	R%=ROW%(9)  : C%=COL%(51) : Z$=LINE$(41) : GOSUB 12100 : RETURN
+
+%include oeinpout
+%include oepr1fil
+%include oepr3fil
+%include oedisfil
+%include oesusfil
+%include oesusind
+%include oecrefil
+%include oeinvfil
+%include oefilsub
+%include oegetpgm

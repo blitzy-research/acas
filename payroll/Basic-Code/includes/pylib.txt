@@ -1,0 +1,84 @@
+PAYROLL INCLUDES  JAN. 21, 1980
+IPY941CM - Local common area for Print 941 modules
+IPYACT - payroll account record description
+IPYACTHD - payroll account header record description
+IPYAPCOM - common local to apply programs
+IPYCAL -   California special tax record
+IPYCFILE - common area file payroll file information
+IPYCHAIN - %chain directive for payroll menu
+	12/02/79 100,13600,1100,5200
+
+IPYCHK - payroll check record descrition
+IPYCHKHD - payroll check header record description
+IPYCKCAT - check cats descs?
+IPYCKH - payroll check history record descrition
+IPYCKHHD - payroll
+IPYCOH -  payroll company history record description
+	11/18/79 changed ytd,qtd eic variable names from liab to credit
+	12/02/79 added coh.q.co.futa.liab(4)
+
+IPYCOMM - payroll system common
+IPYCONST - payroll system equates
+	11/18/79 null$ set to ""
+	11/18/79 VER 0.4 -----
+	12/02/79 VER 0.5 -----
+	01/21/80 VER 1.0 -----
+
+IPYCPR1 - payroll pr1 common
+	11/18/79 added gl data drive
+	11/18/79 added console width poke address
+	12/02/79 changed default gross acct to dist acct
+
+IPYCPR2 - payroll pr2 common
+	12/02/79 pr2.no.of.xx.applies% number of sm, wb applies this quarter
+	12/02/79 pr2.just.closed.year% no applies run since year end close
+	12/02/79 pr2.last.check.no$    last check number written by PYCHECKS
+
+IPYDED -  system earning/deduction record description
+IPYDMCAL - State of Cal. special tax info. array dims
+IPYDMCHK - check record array dims
+IPYDMCKH - check history record array dims
+IPYDMCOH - company history array dimensions
+	12/02/79 dim coh.q.co.futa.liab(4)
+
+IPYDMDED - system ded/earn array dimensions
+IPYDMEMP - employee master array dimensions
+	11/18/79 added emp.ed.acct.no%(1-3)
+
+IPYDMHIS - employee history array dimensions
+IPYDMSWT - state tax table array dimensions
+	11/12/79 changed by A.C.
+
+IPYEDESC - pay category earn/ded description array
+IPYEMP - employee master record description
+	11/18/79 added emp.ed.acct.no%(1-3)
+	12/02/79 emp.co.futa.exempt%, emp.co.sui.exempt%
+
+IPYEMPHD - employee master file header record description
+IPYHIS - employee history record description
+IPYHISHD - employee history file header record description
+	11/12/79 fixed SE error on compile
+
+IPYHRS - hours batch record description
+IPYHRSHD - hours batch file header record description
+IPYJRNCM - local common area for the Payroll Journal Program
+IPYOKCAT
+IPYPAY - payroll pay record description
+IPYPAYHD - payroll pay header record description
+
+IPYPR1 - payroll unchanging parameter record description
+	11/18/79 added gl data drive (pr1.gld.drive%)
+	11/18/79 added console width poke address(pr1.console.width.poke.addr%)
+	11/18/79 added optional limit to check amounts(pr1.void.check.amt)
+
+IPYPR2 - payroll chainging parameter record description
+	12/02/79 pr2.no.of.xx.applies% number of sm, wb applies this quarter
+	12/02/79 pr2.just.closed.year% no applies run since year end close
+	12/02/79 pr2.last.check.no$    last check number written by PYCHECKS
+
+IPYPYO - detail pay out record added 11/18/79
+IPYSTAT - payroll system chaining status equates
+	11/18/79 added default$
+
+IPYSWT - payroll state withholding record descrition
+	11/13/79 changed by A.C.

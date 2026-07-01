@@ -1,0 +1,140 @@
+Stock Control - Changelog
+
+2025-09-20 Vincent Coen * 3.3.00 Version update and builds reset.
+
+2025-03-07 Vincent Coen * Updates to st020, st030 BUT testing in progress.
+                          These will allow support for Back Order Processing.
+
+2024-01-05 Vincent Coen * Fixed st020 to read, rewrite param file 4 field updating.
+
+2024-12-13 Vincent Coen * For Sl010, 020 & 030 changed Page-Lines from 45 to 56
+                          as wasting paper.
+
+2024-12-13 Vincent Coen * stockconvert2 added note regarding compiling it.
+                          code changes - adding close any opened files if
+                          error condition does a STOP RUN - stops warning
+                          messages.
+
+2024-03-30 Vincent Coen * st020 updated to support NEW field stock-Arrived-Date
+                          Includes changes to fdstock.cob and wsstock.cob.
+                          Must remember to add it to Table record - DONE
+                          AND stockMT - DONE.
+
+                          Created program - stockconvert2.cbl to be used to
+                          convert file stockctl to initialise the new field
+                          stock-arrival-date as a safeguard.
+                          Users should run it aftert making a back up of ALL
+                          data files. Three is no provision for tables but the
+                          file ACAS.sql has been updated to include it.
+                          This MUST be created doing :
+                          cobc -x stockconvert2.cbl
+
+                          Note that the acas build scripts will create a .so for
+                          this program, that will never be called and can be
+                          ignored or deleted.
+
+                          Note that st030 has NOT been updated to report on
+                          it owing to not enough space on a report line to
+                          contain it.
+                          This field is updated when ever new stock arrives via
+                          st020 Additions and it is used with Back orders
+                          reporting in sl970.
+
+2024-03-15 Vincent Coen * st010 updated to support BO -Flag.
+
+2024-02-07 Vincent Coen * For st010 use individual move zeros intead of initialise
+                          as it has used spaces for stock-TD fields with GC v3.2.
+                          MUST REMEMBER TO CHECK THIS FOR THE OTHER files & records.
+
+2024-02-07 Vincent Coen * Redefined stock-pre-sales with stock-committed.
+                          Different names but same purpose.
+                          Deleted st030.cbl-SORT-2 as this code is in st030.cbl.
+
+2024-01-24 Vincent Coen * Found program st030.cbl-SORT-2 and this sorts stock
+                          file in  description alpha order. as the START verb
+                          may well not do so - subject to testing.
+                          This code was written in August 2023.
+                             No I do not remember it :(
+
+2023-05-05 Vincent Coen * Confirmed that recs with Stock-Services-Flag set
+                          do not have processing for adds or deducts but are
+                          reported on.
+
+2023-02-24 Vincent Coen * Update to Stock Control User Manual. mostly minor.
+
+2023-02-06 Vincent Coen * st010 added initialise stock-record in places in
+                          addition to performing zz070-  JIC as new stock rec
+                          looks not set.
+
+2018-04-29 Vincent Coen * All FH call routines changed to clear Access-Type for
+                          any other than Open so that the logger is cleaner.
+                          ALL FH checked for EOF repeats so that status is
+                          cleared if doing any function other than read next.
+                          This applies to all ACAS systems.
+                          Found bugs for backup, wrong field being used for all
+                          systems.
+                          Stop doing a display on exit as causes a stop msg
+                          from runtime.
+
+20/04/18 Vincent Coen   * Updated st010 to support swapout of screen data when
+                          F1 is pressed.
+                          If works ok, will do the same for SL invoicing when
+                          seaching for stock ref info.
+
+21/03/18 Vincent Coen   * Updated sl940 for the missing Audit, stock file
+                          update before deleting an invoice. Updated Building
+                          and SL manuals with new messages.
+                          Update some of the MT (Audit, Anal  other unit using
+                          Delete-All functions to match code updates.
+                          Also All LD programs updated for calling-data as used
+                          in the common call params now to support Autorun for
+                          st020, st040 there might be more for special
+                          processing such as end of month allowing run via stock
+                          to print audit and run End of period processing at
+                          00:01 on 1st of month.
+                          Need to so the same for other systems as needed as
+                          well as XL150. No doubt more manual changes needed
+                          but wait for system and End to End testing.
+
+13/03/18 Vincent Coen   * All programs but excluding st050 now uses the standard
+                          ACAS FH calling procedures instead of using FH routine
+                          names ie., acas011-Open now uses Stock-Open.
+                          [Should consider making st050 also use FH ] !
+                          This way all ACAS programs use the same processes.
+                          All effected programs have had their build number
+                          incremented.
+                          Also all ACAS menu programs are now coded more in line
+                          with each other. Yes, all system will need re-testing.
+                          Stock manual currently being updated again to conform
+                          as well as new manual called ACAS - Building the ACAS
+                          System  which cover the install and build of GnuCOBOL
+                          Cobol compiler and all required packages as well as
+                          the build and install of ACAS. Included is a full list
+                          of All Warning and Error messages produced by ACAS
+                          split down by program and system.
+                          This will reduce the number of manuals that had the
+                          same information and subsequently the number of areas
+                          that could require updates of the same material.
+
+                          TO BE TESTED:----- Is anal and audit updated from new
+                          invoices.
+                          Likewise is totals deducted from Stock recs
+                          Likewise has current and monthly totals been updated
+                          as I cannot see where, CAN NOW along with new code.
+
+10/02/18 Vincent Coen   * Stock along with the other ACAS systems is now ready
+                          for system testing but the first is IRS as a set of
+                          accounts is required to start.
+                          I may well make use of irs testing to do some testing
+                          of General but will only use it without any mPC/Branch
+                          testing but this should cover a lot of ground.
+                          The usage of Branches or mPC (multiple profit centres)
+                          is an expansion of the facilities within IRS so should
+                          map well - I hope.
+
+                          I will have to go to the local supermarket to grab
+                          details of different produce in cans as my basic
+                          stock products.
+
+                          Or maybe use their on-line systems to get some details.
+                          Yes, wishful thought!

@@ -1,0 +1,56 @@
+General Ledger - Changelog
+
+ccyy-mm-dd  Who            What
+
+19/09/25 Vincent Coen   * Updated version to v3.3 from v3.2 / v3.02 (same)
+
+05/06/23 Vincent Coen   * Tidy up print programs to use actual size in fdprint.cpy
+                          for  gl030, 060, 072, 120.
+
+13/11/21 Vincent Coen   * gl030 removed adding 1 to ws-menu if PC = space
+                          No idea why used but it change user selection
+                          It could how ever be a way to force gl030b to run
+                          but it is not in the right place within the code so
+                          further testing should see why if the  gl030b is not
+                          being run instead of 03a if PC not used.
+
+12/11/21 Vincent Coen   * gl030 Re-aligned menu as it had bad options from 3
+                          under some conditions..
+
+20/05/18 Vincent Coen   * gl030 updates for start of support as using to / from
+                          accounts instead of using defaults via F9 but very
+                          early days.
+                          Increased default table size back to 33 but only as
+                          temp values in posting program does NOT get written
+                          out to file.
+                          Also the layout of file is grouped for all fields to
+                          suuport this as group 33 is used for this purpose.
+                          GL030 still needs to be changed to support this.
+                          This is to bring it inline to irs030 when complete.
+                          Possible more coding changes from testing.
+                          Yep, finally starting to test GL using core CoA from
+                          irs as a model.
+                          Found bugs for backup, wrong field being used for all
+                          systems.
+                          Stop doing a display on exit as causes a stop msg from
+                          runtime.
+
+29/04/18 Vincent Coen   * All FH call routines changed to clear Access-Type for
+                          any other than Open so that the logger is cleaner.
+                          ALL FH checked for EOF repeats so that status is
+                          cleared if doing any function other than read next.
+                          This applies to all ACAS systems.
+
+10/02/18 Vincent Coen   * General along with the other ACAS systems is now ready
+                          for system testing so the first is IRS as a set of
+                          accounts is required to start but these CoA will be
+                          used as a modal for GL without mPC or Branch
+                          processing as that will come later.
+
+                          Without these, IRS has a few more functions over
+                          General as these two features (mPC and Branches) is
+                          the primary reason for using GL over IRS.
+
+                          At least it gives me a chance os converting the IRS
+                          CoA (Chart of Accounts) to G/L if it is possible!
+

@@ -1,0 +1,325 @@
+This is a rolling document with the latest, lower down.
+
+Notes for Payroll 15/10/2025 using Cobol with the Free GnuCobol compiler as is
+the rest of ACAS.
+
+Adding this folder is a wee bit premature as I have only just started work on
+it.  However this is for the attempt to rewrite the USA Payroll system current
+as CBASIC code into Cobol to match up with the rest of ACAS.
+
+It is very early days with only the following modules/programs written and even
+then some coding error are present no doubt.
+I can say py000.cbl should be good as that came from existing code of another
+system - sales. payroll.cbl came from sales.cbl with some changes but there are
+a lot of comments to cover temp coding from CBASIC code present such as menu
+screens that may well need to be used here OR in another program.
+
+At the moment the payroll parameters are stored in their own file and this is
+only a Cobol relative file (same as the ACAS system file) - for the moment as
+the primary problem I have is the format for each field present within it.
+I DO have to examine the basic code to see if I can get a better idea of the
+format for each field other than guessing.
+Note that some of these fields are boolean in basic and for the
+moment I have set them as pic x - set to use Y or N.
+
+Once working out the params, I may well add it into the ACAS system file as
+record 5 or records 5 and 6 where 6 is updated by the payroll system when
+running - may be.
+
+Lots more to do including removing the various prints in payroll menu and
+replacing with a sub menu that has them all in as the menu screen looks too
+cluttered.  Decisions, decisions..
+
+This is actually difficult as I have no way of looking at a basic compiler
+printout of each program showing the includes which does make it tricky.
+
+For the moment I am using the Old Payroll manual as a basis for some broad logic
+with the details coming from the basic code - well that's the idea any way.
+
+I will use the c code accept_numeric (if possible) for the input of all numbers.
+I know it works with comp, 3 field definitions and hoping does the same for
+display fields, i.e., pic 9(6) / s9(6).99.  etc.
+
+It is a lot cleaner - just have to ensure that it is linked to every programs
+that uses it.
+
+More later.
+
+17/10/25 vbc - Added/changed comments above regarding use of accept_numeric.
+11/11/25 vbc -
+
+Changed type of file for param to relative, Programs where code is complete :
+payroll.cbl - Main menu & application program
+py000.cbl  -  Today's date changer
+py900.cbl  -  Parameter entry program for all 6 processes, etc.
+
+Next is a program for State and other tax table entries etc but still have to
+decide if only one file will be used as format is same for all other than
+California.  OK, it was but do not know about now !
+
+So will need to find a few states such as NY, Texas, California and another one
+to see if the formats are the same or different and if a Text file is available
+along with any documentation.  I will need the date new tables are available and
+"assume" a month or two before the new year.
+
+A few assumptions - not good :)
+
+Any programs shown as complete does NOT mean any have been tested in any way :)
+They have not apart from do they load and the first screen looks correct -
+very maybe.
+
+Next updated as coding comtinues :
+
+This block last updated 11/03/2026.
+
+py010 completed for Employee data entry which replace 3 basic programs under
+options M & N which is now omitted at least until I reorder the program names.
+
+So now we have Payroll menu completed options for :-
+
+A - Date Entry
+
+C - Pay Transaction Proof
+D - Pay Transaction Sort   - NOT needed as data file in sorted order.
+
+H - Print Payment Register  - pyrgstr [ temp prog name ]
+I - Account Entry           - py920
+J - Deduction/Earning Entry - py900
+K - History Entry           - py930
+L - Employee Data Entry     - py010
+M  }
+N  }  NOT NEEDED as included in py900.
+O - Print Quarterly 941 Report
+P - End Current Quarter     - pyperend
+Q - Print W2 Report         - printw2
+R - Print Yearly 940 Report - print940 [ temp prog name ]
+S - End Current Year        - pyperend
+T - Print Employee Report   - empprint [ temp prog name ]
+U - Print History Report    - hisprint [ temp prog name ]
+V - Print Vacation Report   - vacprint [ temp prog name ]
+W - Print Account List      - py920 option 2 ( of 2)
+Y - Payroll Parameter Entry - py900
+Z - ACAS System Setup       - sy002 - Existing program.
+
+Options M and N removed as data entry is in py010 via a sub menu.
+
+Still outstanding as of 27th March 2026
+
+B - Pay Transaction Entry  -  Coding.
+E - Apply Payroll
+F - Print Payroll Journal
+G - Print Pay Checks/BACS
+
+NOTE that the program name are subject to change as more programs/modules are
+coded - I would like to use py100 and up for print programs.
+and py0nn for Pay data entry.
+Of course could end up changing my mind on this and yes such changes will mean
+changes to the payroll menu program but am considering moving all print
+functions to a separate menu program say using py100 for that purpose with
+py110 onwards for each one.
+
+I am using RW (Report Writer) where ever possible for them,
+providing the reports are straight forward to code as my RW skill set is
+very, very rusty, and so far has not reduce the amount of coding needed by
+much but does present the reporting content in a clean & understandable manner.
+
+The benefit is to keep most of the coding in the RD WS area.
+
+I was never a high user of RW as most off the compilers did not have it,
+possibly IBM, ICL, Honeywell, Burroughs,  etc, wanted more money to add the
+facility into the Cobol compiler monthly or as a one off payment, etc.
+One of the main benefits of using the GNU Cobol compiler as it is free to obtain
+and use and work on all *nix systems including Linux, OSX and even Windows.
+
+Double bonus.
+
+14/12/2025 Notes
+
+PY930 started to process :-
+1. Employee Historic totals passed to Company histories.
+2. Company Liabilities (taxes collected on behalf of State, Federal & Local
+government.
+3. Payment history of taxes paid both employee contributions and company.
+
+This is mostly the screens used with only basic coding to date.
+
+So as of today coded programs are :
+payroll	- Main menu for Payroll.
+
+py000	- Date entry - allows change of today's date.
+
+py010	- Employee data entry four screens containing :
+          1. Primary Data entry included name & address etc.
+          2. Earn/Ded & Cost entry.
+          3. Rate Data entry.
+          4. Employee History entry.
+          The last one to record payments of new employee from last employer
+          for current year.
+
+py900	- Company data entry:
+	      1. Company ID and general data.
+	      2. Pay Intervals and Default Employee Payroll Data.
+          3. Payroll System Configuration and GL Interface.
+          4. Standard Deduction Rates.
+          5. Federal Withholding Tax Table Entry.
+          6. System Earning and Deduction Information
+
+py920   - Account Table maintenance.
+
+py930   - Employee History maintenance.
+
+py9nn   - Tax table data entry per state, local and Federal by current and next year.
+
+
+
+These program name / numbers are subject to change and more than likely will be.
+Some may be merged together.
+
+The py100 series will be for reports of all types mostly with py100 acting as menu.
+py110 and onwards for each report type including 940, 941 and W-2 reports.
+
+py0nn  series for handling the primary processing with py010 written more or less.
+
+py20 +  to process the main payroll apply processes and pay data entry steps.
+
+The copy books stored in folder copybooks are subject to changes where some field
+formats were guessed at and closer examination of the basic code as well as new
+Cobol code reveals some more changes as new coding is added.
+
+Update the payroll manual in folder ACAS-Manuals which is 1.0 or v1.0C for the
+Cobol version.
+
+The ones ending in 1.0B are for the CBasic version only which is stored within
+Basic-Code folder.
+
+A lot more to do.
+
+02/01/2026   - Update but mostly from December 2025 : -
+
+New program still in development hisprint.cbl to replace hisprint.bas.
+This program have may well be changed to the std convention of pynnn later on
+but it helps me see what has been done via the basic programs etc.
+
+Creating a TODO (& Done) file to remind me what the status of program and what
+still needs doing taking content from here to start with.
+
+12/04/2026   - Updates and up to date full list - current position.
+
+empprint   - Employee report by category if required.
+hisprint   - Employee History report
+payroll    - Updated.
+print940   - Print 940 form at End of Qty/year. May need updating.
+print941   - Print 941 form at End of year.     May need updating.
+printw2    - Print W2  form at End of year.     Needs updating to 2026 form.
+py000      - Today's Date updater.
+py010      - Employee data entry in FULL as replaces many basic progs
+             May need more coding.
+py020      - Hours entry - Coding in progress.
+py030      - Hours Proof report.
+py900      - Payroll parameter menu and fixed data maintenance.
+py920      - Account number maintenance and report.
+py930      - Coding completed.
+pyperend   - End Quarter and End year.
+pyrgstr    - Check register report.
+vacprint   - Vacations report
+
+copybooks:
+
+wspyparam1  - Updated 1 or 2 fields from x to bin-short.
+                                   from bin to x.
+wspycoh     - } added new fields and moved position for some.
+wspyhis-emp - }   Ditto
+
+IN Progress :  See lower for later info.
+
+
+
+Sundries:
+
+README     - opps that is this file :)
+build-cbasic.txt
+           - How to use this program.
+
+Cbasic program sources that have been migrated etc, have been moved from folder
+Basic-Code to Basic-Code/Completed-Migrations and no, this folder is not in svn
+as not needed by anyone - the original basic code is still present though at
+the higher folder level if needed and as this occurs I have removed the svn area
+of these migrated program files.  Just my way of keeping track of what is still
+outstanding
+
+Talking of Basic code I have created a small program that reads basic source,
+creating o/p file with the include routines added, BUT it needs to be run 2
+times.
+
+Read the notes for using it in file build-cbasic.txt but a snapshot:
+
+For those that wish to use it the driving params are :
+build-cbasic P1 P2  io-file.ext P3 P4  where
+P1 =  In FN.txt  ie, input-file.ext
+P2 =  Out FN.ext ie, output-file.ext
+P3 = basic file extensions ie ".bas" or ".BAS" - depending on case of sources.
+P4 = folder holding the include sources.
+
+So examples of a run where the output file names are extended with '-1', '-2'
+etc (so that when using a text editor like kate it knows that it is a basic
+source file ) :
+
+cd Basic-Code
+build-cbasic print940.bas print940-1.bas ".bas" includes
+build-cbasic print940-1.bas print940-2.bas ".bas" includes
+
+Output from program on above example is :
+
+build-cbasic print940.bas print940-1.bas ".bas" includes
+build-cbasic v1.0.7 Starting
+SY006 Not Found includes/ipypr2.bas continuing
+SY006 Not Found ipypr2.bas continuing
+EOC - Completed - Phase n
+Src in  -    389
+Src out -    905
+Inc In  -    517
+
+build-cbasic print940-1.bas print940-2.bas ".bas" includes
+build-cbasic v1.0.7 Starting
+SY006 Not Found includes/ipypr2.bas continuing
+SY006 Not Found ipypr2.bas continuing
+EOC - Completed - Phase n
+Src in  -    906
+Src out -  1,285
+Inc In  -    380
+
+Here  the o/p shows that one include file cannot be found in both the
+Basic-code folder and the includes folder so there is no reason for another run
+as indicated by the SY006 messages.
+
+The reason for doing more than one pass is that the program only has one include
+file area declared so if there are includes in the source of an include it will
+not process it but will report that this occurred via the SY006 message.
+
+So there is one include file that is missing - luckily not important - I hope.
+
+I have added this program to the cobol sources.
+
+12/04/2026.
+
+In progress is py020 - Hours data entry.
+
+Please note that the print940, 941 and W2 programs have to be changed to match
+with current layouts of these forms and will only do so after completing the
+primary payroll apply programs so that I am aware of the make up of various coh,
+Employee history fields which are needed for these reports.
+
+I am aware that there is additional reports required such as 1099 and may be
+others that may need to be added. These will be looked at, after all primary
+programs have been written.
+
+These reports that make use of the US IRS form layouts can be required to have
+changes possibly year by year if the IRS form fillers decide to make changes but
+that said such should be minor in nature and in any event these days most of
+this type of document is sent online so the format and absolute position of
+layout is not so important as far as I can tell.
+
+
+Vincent Coen
+Create      15/10/2025.
+Last update 12/04/2026.

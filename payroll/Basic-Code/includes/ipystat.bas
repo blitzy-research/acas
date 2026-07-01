@@ -1,0 +1,10 @@
+startup$		="STARTUP"        rem   12/14/79
+rebuild.pr1$		="FIXPR1"
+rebuild.pr2$		="FIXPR2"
+in.apply$		="APPLICATION"
+in.dedent$		="DEDENT"
+in.parent$		="PARENTRY"
+normal$ 		="NORMAL"
+default$		="DEFAULTS"
+quarter.end$		="QEND"
+year.end$		="YEND"

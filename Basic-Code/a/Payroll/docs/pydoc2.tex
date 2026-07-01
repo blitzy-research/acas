@@ -1,0 +1,1748 @@
+.bp41
+.he
+.mt7
+.mb9
+.po8
+.ll65
+.ig
+CHAPTER 9
+T H E	 A C C O U N T	  F I L E
+A N D	 G L	I N T E R F A C E
+.sp2
+.pp5
+At first time startup the Payroll System moves directly to
+the Account Entry program after Parameter Entry is complete.
+If you have chosen to use the default Payroll System (as explained in
+Chapter 7), no requests are issued and the default account file is
+created automatically.	If you have chosen to do further customization,
+the Account Entry screen appears so you can add or change account
+information.
+Once the startup sequence
+is complete and the account file created,
+you enter or change account
+information by choosing the Account Entry program from the system menu.
+.he Reference: Chapter 9
+.pp
+The default Payroll Account File contains four accounts (Figure 5.1).
+.sp
+.cp9
+.li
+      Payroll System				 (General Ledger)
+ Account Reference Number     Account Name	  Account Number
+
+	   1		 CASH			      011100
+	   2		 ACCRUED LIABILITY	      121100
+	   3		 SALARY EXPENSE 	      411100
+	   4		 ACCRUED PAYROLL COSTS LIAB.  131100
+
+	      (Figure 5.1:  The Default Account File)
+.sp2
+These accounts are the bare minimum required for payroll processing.
+Account number 1 is the cash account credited when checks are written.
+If you do not select the automatic check writing feature you may want
+to change this to an accounts payable account.	Account number 2 is the
+liability account credited when you incur a liability by withholding money
+from an employee's wages for taxes or other deductions.  Account number
+3 is the salary expense account debited for the total cost of the
+employee to the company (employee gross plus employer payroll costs).
+If you choose the option to distribute employee cost to more than one
+account, additional accounts (e.g., Admin. Salaries, Programming Costs,
+Collins Project--Salaries, etc.) would be used for distributing
+the cost of the employee to the employer.   The fourth account, Accrued Payroll
+Costs Liability, is debited for the employers
+payroll expenses, such as Company
+FICA and Company FUTA.
+.pp
+Whether you choose GL interface or not, all account numbers must conform
+to the following numbering scheme:
+.sp
+.in5
+.ti-3
+1. The first digit of a CASH account must be 0 (zero), e.g. 011100.
+.sp
+.ti-3
+2. The first digit of a LIABILITY account must be 1 (one), e.g., 121100.
+.sp
+.ti-3
+3. The first digit of an EXPENSE account must be 4 (four), e.g., 411100.
+.qi
+.sp
+.pp
+The four default accounts, plus additional accounts
+you may enter should always be
+referred to by their Payroll System account reference numbers.	The Payroll
+System account reference number is the relative position of the account
+record on the Account file.  For example, the first
+account on the account file has account reference number 1,
+the second account has account reference number 2, and so on.
+.pp
+If you select
+the General Ledger interface option you must enter a valid four or
+six digit General Ledger account number for each account. The fourth digit
+from the left may never be zero, since that would mean it was a title
+account and not a balance holding account (see the GL Reference Manual).
+The General
+Ledger data disk with the chart of accounts file must be mounted on one
+of the disk drives when you enter the GL account numbers so the Accont Entry
+program can verify the accuracy of the account information you key in.
+The Account Entry program prompts you to insert the GL data disk at
+the proper time.
+.pp
+If you do not
+selected the General Ledger interface option you may enter any number of up to
+six digits, subject to the first digit numbering restrictions explained above.
+A printout showing the account numbers and names currently
+in use can be generated from the system menu at any time.
+.pp
+Systemwide and employee specific deductions, and company payroll costs
+such as CO FUTA and CO SUI should be liability accounts (begin with 1).
+The accounts used to distribute the employees cost to the company should
+be expense accounts (begin with 4).  If the accounts are numbered
+improperly an imbalance will show on the Payroll Journal Ledger Account
+Summary.  The GL batch will also be incorrect.
+.pp
+Before you can respond to any Payroll System request for an account number
+with an account
+number other than one already on the account file, the new account name and
+number
+must first have been entered onto the file through the Account Entry program.
+This is because
+the Payroll System checks the account information you enter against
+the account file before it accepts the entry
+to make sure you do not enter an invalid or non-existent
+account.
+.he
+.bp
+.ig
+CHAPTER 10
+S Y S T E M - W I D E
+E A R N I N G S    A N D   D E D U C T I O N S
+.sp2
+.pp5
+At first time startup, after Parameter Entry and Account Entry, the
+Payroll System moves directly to the program used to enter system-wide
+earnings and deduction information.  If you have choosen to use the
+default Payroll System (as explained in Chapter 7), the System Deduction
+Entry program issues no requests and creates the default System Deduction
+and Earnings file automatically (see Figures 10.1, 10.2, and 10.3 for the
+values in the default file).
+Once the startup sequence is complete and the System Deduction and Earnings
+file created,
+you call this program directly from the menu.
+The System Deduction Entry Program
+is used for entering standard withholding and deduction information, changing
+the Federal tax table, and creating up to five
+system-wide earnings or deductions of your choice.
+.he Reference: Chapter 10
+.sp
+.ce
+STANDARD DEDUCTION RATES
+.pp
+The System Deduction Entry program requests the following
+information:
+.sp
+.in5
+.ti-5
+FWT: Whether Federal income tax is to be withheld from employee paychecks,
+and if so, what account should be credited with the accrued liability.
+.sp
+.ti-5
+SWT: Whether state income tax is to be withheld from employee paychecks,
+and if so, what account should be credited with the accrued liability.
+.sp
+.ti-5
+LWT: Whether local income tax is to be withheld from employee paychecks,
+and if so, what account
+should be credited with the accrued liability.
+.sp
+.ti-5
+FICA: Whether Social Security tax is
+to be deducted from an employee's earnings,
+the account to be credited with the accrued liability,
+the rate at which it is to be deducted, and the highest total
+salary subject
+to the deduction.
+.sp
+.ti-5
+CO FICA: Whether the company must pay into the Social Security fund for
+an employee, the account to be credited with the accrued liability,
+the rate of the
+employer's contribution, and the highest total salary subject to the tax.
+.sp
+.ti-5
+SDI: Whether a deduction should be made from an employee's gross pay
+for State Disability Insurance, the account to be credited with the
+accrued liability, the rate at which the deduction is to be made,
+and the highest total salary subject to the deduction.
+.sp
+.ti-5
+CO FUTA: Whether the company must pay into the Federal Unemployment
+Tax fund, the account number to be credited with the accrued
+liability, the rate
+at which the tax is calculated, and the highest total
+salary subject to the tax.
+.sp
+.ti-5
+FUTA MAX STATE CREDIT: The highest rate that can be credited against the
+CO FUTA rate if the employer makes a contribution to a state unemployment
+insurance fund.  For example, if the CO FUTA rate is 3.4, the CO SUI
+rate 3.0, and the largest rate that can be credited against the
+FUTA liability is 2.7 (FUTA MAX STATE CREDIT), the effective FUTA
+rate will be 0.4 percent (3.4 - 2.7).  If the CO FUTA rate is 3.4,
+the CO SUI rate 2.0, and the FUTA MAX STATE CREDIT is 2.7, the effective
+FUTA rate will be 1.4 percent (3.4 - 2.0).
+.sp
+.ti-5
+CO SUI: Whether the company must pay into a state unemployment tax fund,
+the account to be credited with the accrued liability, the rate at which the
+contribution is calculated, and the highest total salary subject to the tax.
+.sp
+.ti-5
+EIC: Whether the company must make an advance payment for the earned
+income credit to employees who request it,
+the liability account to be offset by the advance payment,
+the rate at which the payment is calculated, and the highest annual equivalent
+wage to which
+that rate applies.
+.sp
+.ti-5
+EIC EXCESS: Provision has been made for entering the rate and limit
+used for calculating the reduction in the earned income credit payment
+that results when an employee's annual equivalent wage exceeds the
+EIC EXCESS limit.
+.qi
+.cp18
+.sp
+.po12
+.li
+		 STANDARD DEDUCTION RATES
+
+		  ACCT
+	   USED?   NO	      RATE	    LIMIT
+
+   FWT:     [Y]   [  2]
+   SWT:     [Y]   [  2]
+   LWT:     [N]   [  2]
+   FICA:    [Y]   [  2]    [   6.13]  [   22,900.00]
+   CO FICA: [Y]   [  4]    [   6.13]  [   22,900.00]
+   SDI:     [N]   [  2]    [   1.00]  [    6,000.00]
+   CO FUTA: [Y]   [  4]    [   3.40]  [    6,000.00]
+   FUTA MAX STATE CREDIT:  [   2.70]
+   CO SUI:  [Y]   [  4]    [   0.00]  [    6,000.00]
+   EIC:     [N]   [  2]    [  10.00]  [    5,000.00]
+   EIC EXCESS:		   [  12.50]  [    6,000.00]
+
+    (Figure 10.1: Default Standard Deduction Rates)
+.po8
+.sp2
+.ce
+FEDERAL WITHHOLDING TAX TABLE ENTRY
+.pp
+Applewood Computers distributes the Payroll System with the current
+Federal withholding tax table. Income tax withholding is based on the
+percentage method (see IRS circular E, Employer's Tax Guide), using the
+ANNUAL payroll period table.  The System Deduction Entry program lets you
+to change this table when necessary.  See Chapter 22 for details.
+.sp
+.cp13
+.po13
+.li
+	      FEDERAL WITHHOLDING TAX TABLE ENTRY
+
+	       ALLOWANCE AMOUNT:  [    1,000.00]
+
+	   M A R R I E D		S I N G L E
+	CUTOFF	    PERCENT	    CUTOFF	 PERCENT
+1. [   2,400.00] [     15.00]	[   1,420.00] [     15.00]
+2. [   6,600.00] [     18.00]	[   3,300.00] [     18.00]
+3. [  10,900.00] [     21.00]	[   6,800.00] [     21.00]
+4. [  15,000.00] [     24.00]	[  10.200.00] [     26.00]
+5. [  19,200.00] [     28.00]	[  14,200.00] [     30.00]
+6. [  23,600.00] [     32.00]	[  17,200.00] [     34.00]
+7. [  28,900.00] [     37.00]	[  22,500.00] [     39.00]
+
+	   (Figure 10.2: Default Federal Tax Table)
+.sp2
+.po8
+.ce
+SYSTEM EARNING AND DEDUCTION INFORMATION
+.pp
+The Payroll System lets you define up to
+five system-wide earnings or deductions categories
+of your choice.  You enter a description, state whether it is
+an earning or deduction, and state in which box on the paycheck stub it is
+to be printed.
+If a deduction, you also enter the account number to be
+credited with the
+liability. You state whether the earning or deduction is a percentage
+of the employee's salary or a flat amount each pay period.
+You can also state whether there is a limit to the amount that can
+be earned or deducted in one year, and if so, enter that amount.
+If the entry is an earning, you can assign a tax exclusion code to it that
+indicates one of the following:
+.sp
+.in8
+.ti-3
+1. Subject to all taxes and percentage based deductions.
+.ti-3
+2. Subject to all taxes and percentage based deductions except FICA.
+.ti-3
+3. Subject to all taxes and percentage based deductions
+except Federal, state, and local income taxes.
+.ti-3
+4. Not subject to taxation or percentage based deductions.
+.qi
+.sp2
+.po4
+.li
+	       SYSTEM EARNING AND DEDUCTION INFORMATION
+
+   USED?    DESC       E/D ACCT A/P  FACTOR   LIMITED  LIMIT   XLCD CAT
+
+1. [N] [	     ] [E] [  ] [A] [	  0.00] [Y] [	  0.00] [1] [2]
+2. [N] [	     ] [E] [  ] [A] [	  0.00] [Y] [	  0.00] [1] [2]
+3. [N] [	     ] [E] [  ] [A] [	  0.00] [Y] [	  0.00] [1] [2]
+4. [N] [	     ] [E] [  ] [A] [	  0.00] [Y] [	  0.00] [1] [2]
+5. [N] [	     ] [E] [  ] [A] [	  0.00] [Y] [	  0.00] [1] [2]
+
+    (Figure 10.3: Default System Earning and Deduction Information)
+.br
+.po8
+.he
+.bp
+.ig
+CHAPTER 11
+P U T T I N G	E M P L O Y E E S   O N   T H E   S Y S T E M
+.sp2
+.pp5
+Putting employees on the Payroll System is a three step procedure:
+.he Reference: Chapter 11
+.sp
+.in8
+.ti-3
+1. Enter the employee's name, address, social security number,
+and other information through the Employee Entry Program.
+.sp
+.ti-3
+2. Enter earnings, deduction, exemption, and costing information for the
+employee through the Employee Ded/Earn and Cost program.
+.sp
+.ti-3
+3. Enter pay interval, pay rate, withholding allowance,
+vacation, sick leave, and comp time information
+for the employee through the Employee Rate Entry program.
+.qi
+.sp
+Step one must
+be completed for an employee before step two or
+step three can be taken for
+that employee.	This is simply to say that before pay rate or
+deduction information for an employee can be entered, a record for
+the employee must be created by the Employee Entry program.
+.sp2
+.ce
+EMPLOYEE ENTRY
+.pp
+When you select the Employee Entry program from the system menu,
+an entry screen appears with the cursor waiting
+at the Employee Number field.  From there you can give commands
+to add new employees
+to the file, or to change or examine information for employees
+already on the file.
+.pp
+The Employee Entry program requests the following information:
+.in5
+.sp
+.ti-5
+EMPLOYEE NUMBER: Unless you are entering information for an employee
+for the first time, in which case the program assigns the next available
+number to the employee automatically,
+you may enter the five digit number of an employee
+whose record you wish to examine or change.  To examine
+or change information for an employee, instead of accessing
+the employee's record by the employee number, you can
+issue a series of
+Next-Record or Previous-Record commands to "thumb" through the file.
+.sp
+.ti-5
+NAME:
+.ti-5
+ADDRESS: Two lines are available for the street address.
+.ti-5
+CITY:
+.ti-5
+STATE:
+.ti-5
+ZIP:
+.ti-5
+PHONE:
+.ti-5
+SOCIAL SECURITY NUMBER:
+.ti-5
+BANK ACCOUNT NUMBER: This is an optional entry for informational
+purposes only.
+.ti-5
+BIRTH DATE:
+.ti-5
+SEX:
+.sp
+.ti-5
+PENSION (Y/N): State whether the employee is covered under a pension
+plan.  This information is required for the W-2 form.
+.sp
+.ti-5
+JOB CODE: This is an optional entry for informational purposes only.
+.sp
+.ti-5
+START DATE: The date the employee started working for the company.
+.sp
+.ti-5
+TERM. DATE: If an employee left or was terminated, enter the date he or she
+left the company's employ.
+.sp
+.ti-5
+EMPLOYMENT STATUS: You can designate an employee as Active, On Leave, or
+Terminated. Automatic pay generation is suppressed for employees on
+leave.
+The year-end closing program deletes
+terminated employees from the file after a W-2 form has been printed, and
+makes the number available for reassignment. You can print W-2 forms for
+terminated employees at any time.
+.qi
+.sp2
+.ce
+EMPLOYEE DEDUCTION/EARNINGS AND COST DISTRIBUTION
+.pp
+When you select the Employee Deductions/Earnings and Cost Dist.
+program from the system
+menu, an entry screen appears with the cursor
+waiting at the Employee Number field.  You can then enter an employee
+number, or issue a Next-Record or Previous-Record command until
+you find the desired employee record.  After the program displays the
+employee's name and social
+security number, you can make entries or changes to the
+following requests:
+.in5
+.sp
+.ti-5
+GL COST DISTRIBUTION OF EMPLOYEE GROSS AND EMPLOYER COST: The sum of
+all employee pay (including tips collected but excluding tips reported
+and EIC payments)
+and additional payroll expenses paid by the employer for
+the employee can be distributed to up to five accounts if
+the option is requested in Parameter Entry.  If you do not want a
+particular pay type to be so distributed, you may have to make an
+adjusting entry to your General Ledger. To set up the distribution accounts
+you enter the Payroll System Account Reference
+number (see Chapter 9) and the
+percentage of the total cost of the employee to the employer that is
+to be allocated to that account.  Thus, if a particular employee works
+part of the time in one department and part in another, the cost
+of that employee can be distributed to the appropriate department
+or project for accounting purposes.
+.sp
+.ti-5
+EXEMPTIONS FROM TAX WITHHOLDING:  A series of YES or NO requests
+lets you exempt a specific employee from Federal, state,
+local, FICA, or SDI withholding.
+.sp
+.ti-5
+EXEMPTIONS FROM SYSTEM DEDUCTIONS:  Five YES or NO requests
+permit you to exempt specific employees from any of the
+five system-wide earnings or
+deductions you can create through the
+System Deduction Entry program (see Chapter 10).
+.sp
+.ti-5
+EMPLOYEE SPECIFIC DEDUCTIONS:  These Payroll System requests let
+you define up to three earnings or deductions for
+a specific employee.  You enter a description, state whether it is
+an earning or deduction, and state in which box on the paycheck stub it
+is to be printed.  If a deduction, you enter the account number to be
+credited with the liability. If an earning, the expense is debited
+to the account or accounts specified for distributing the employee's
+cost to the company.
+You can state whether the earning or deduction is a percentage of the
+employee's salary, or a flat amount each pay period.
+You can also state if there is a limit to the amount that may be earned or
+deducted in one year, and if so, enter the amount.
+If the entry is an earning, you can state whether the
+amount is:
+.sp
+.in12
+.ti-3
+1. Subject to all taxes and percentage based deductions.
+.sp
+.ti-3
+2. Subject to all taxes and percentage based deductions
+except FICA.
+.sp
+.ti-3
+3. Subject to all taxes and percentage based deductions
+except Federal, state, and local income taxes.
+.sp
+.ti-3
+4. Not subject to taxation or percentage based deductions.
+.qi
+.sp2
+.ce
+EMPLOYEE RATE ENTRY
+.pp
+When you select the Employee Rate Entry program from the system menu,
+an entry screen appears with the cursor waiting at
+the Employee Number field.  You can then enter an employee number, or
+issue Next-Record and Previous-Record commands until you find the
+desired record. After the program displays
+the employee's name and Social Security number,
+you can enter or change the following information:
+.sp
+.li
+PAY INTERVALS AND PAY RATES:
+.in5
+.sp
+.ti-5
+PAY TYPE:  State whether the employee is paid
+by the hour or is a salaried employee.	This information affects only
+certain report printing procedures.
+.sp
+.ti-5
+PAY INTERVAL: State whether the employee is paid weekly, bi-weekly,
+monthly, or semi-monthly.
+.sp
+.ti-5
+PAY RATE (1-4): The Payroll System allows four types of pay rates.
+The descriptive name given to each pay rate in
+Parameter Entry appears beside
+the current rate amount.  Usually these are "Regular Pay", "Overtime",
+"Special Overtime", and "Other Pay", "Commission Pay", or "Piecework Pay",
+but they can take any description.
+.pp
+Unless you enter an overriding Rate1 transaction through the Pay Transaction
+Entry program, an employee is paid the Rate1 amount times the
+number of Autogen Units established for that employee
+(for example, $5.50 x 40 hrs, or $1,500 x 1 pay unit). If no Autogen Units
+have been established for an employee, you must enter a RATE1 transaction
+through the Pay Transaction Entry program for the number of units the
+employee worked
+if the employee is to receive any Regular (Rate1) pay.
+.pp
+A special RATE0 (Rate Zero) transaction can be made through the Pay
+Transaction Entry program, so that
+any pay units over the number of Normal Units established for that employee
+are paid at Rate2 and all Normal Units are paid at RATE1.
+The Rate2 and Rate3 default values
+are Rate1 times the Rate2 and Rate3 Factors (entered through
+Parameter Entry), respectively.
+Of course, RATE2 and
+RATE3 can be changed to any value you desire for an employee.
+.sp
+.ti-5
+RATE4 TAX EXCLUSION TYPE: You can set the tax exclusion status for
+individual employees according to the table below:
+.sp
+.qi
+.cp10
+.li
+	    1. Subject to all taxes and
+	       percentage based deductions.
+	    2. Subject to all taxes and
+	       percentage based deductions
+	       except FICA.
+	    3. Subject to all taxes and
+	       percentage based deductions
+	       except FWT. SWT, LWT.
+	    4. Not subject to taxes or
+	       percent deductions.
+.in5
+.sp
+.ti-5
+AUTOGEN UNITS: Many employees, especially those on a salary, receive
+the same pay amount each pay period. Instead of entering a Rate1 transaction
+each time for these employees, you can set the number of Rate1 units
+for which pay will be automatically generated.	Of course, other types of
+transactions can be entered for the employee (a bonus, advance on wages,
+vacation taken, etc.), but if a Rate1 transaction is entered, automatic pay
+generation will be suppressed and the employee paid for the number of Rate1
+units entered.	You would normally set the number of
+Autogen Units for a salaried employee to 1 (with the Rate1 rate set to
+the amount the employee earns each pay period, such as $1,200.00).
+.sp
+.ti-5
+NORMAL UNITS: This is the number of units an employee normally works
+in one pay period.  If you enter a RATE0 transaction through the
+Pay Transaction Entry program, the employee is paid at RATE2 for units
+over the Normal Units figure.  Normal Units are usually expressed in hours
+for hourly employees, pay periods for salaried employees, pieces for
+piecework employees, etc.
+.sp
+.ti-5
+MAXIMUM PAY: This is the most gross pay an employee may receive in one pay
+period without an warning message being issued when the employee is processed
+by the Apply Payroll and the Print Payroll Journal program.
+The default value for this field comes from
+multiplying the Rate1 amount times the Maximum Pay Factor entered
+in Parameter Entry.
+.qi
+.sp
+.li
+TAX WITHHOLDING ALLOWANCES:
+.in5
+.sp
+.ti-5
+MARITAL STATUS: Married or Single. Needed for figuring
+tax withholding.
+.sp2
+.qi
+.li
+FEDERAL WH ALLOWANCES:
+STATE	WH ALLOWANCES:
+.in5
+.ti-5
+LOCAL	WH ALLOWANCES: Enter the number of withholding allowances for
+Federal, state, and local income tax.
+.qi
+.sp2
+.li
+STATE OF CALIFORNIA SPECIAL INFORMATION:
+.in5
+.sp
+.ti-5
+HEAD OF HOUSEHOLD: State whether the employee is considered a head
+of household for California tax purposes.  This and the following request
+are asked only if California (CA) is the state given in the company address
+in Parameter Entry.
+.sp
+.ti-5
+SPECIAL WITHHOLDING ALLOWANCES:  Enter the number of special withholding
+allowances to which the employee is entitled under California's tax laws.
+.sp2
+.ti-5
+VACATION RATE: Enter the number of days or hours of vacation the
+employee accumulates each pay period.  To avoid confusion, enter this,
+as well as sick leave and compensatory time off information, consistently
+in terms of days or hours for all employees on the system.  If both hours
+or days are used on the same payroll system,
+an employee might accidently accumulate vacation time in hours, but use
+it up in days or vice versa.
+.sp2
+.ti-5
+VACATION ACCUMULATED: When first setting up your Payroll System,
+enter the amount of vacation time the employee has acccumulated so far in the
+year, or has remaining from the year before.
+Once set,
+this figure increases by the Vacation Rate each
+pay period. Although it should not be necessary, you can change
+the value in this field
+at any time.
+.sp
+.ti-5
+VACATION USED: This field keeps track of vacation used
+during the current year.  Although you normally record Vacation Used
+through the Pay Transaction Entry program, you can make changes to this
+field directly if needed.
+At the end of the year Vacation Used is subtracted from
+Vacation Accumulated. The difference, if any, is placed in the
+Vacation Accumulated field and the Vacation Used field is set to zero.
+.sp
+.ti-5
+SICK LEAVE RATE: Works the same as Vacation Rate.
+.sp
+.ti-5
+SICK LEAVE ACCUMULATED: Works the same as Vacation Accumulated.
+.sp
+.ti-5
+SICK LEAVE USED: Works the same as Vacation Used.
+.sp
+.ti-5
+COMP TIME ACCUMULATED: If an employee has earned compensatory time off during
+the current year,
+this field tells how much.  Comp time earned is recorded
+by a special transaction
+in the
+Pay Transaction Entry program. At first time startup the
+amount of comp time accumulated should be entered directly to this field.
+Note that Comp Time Accumulated is not the same as comp time available
+(remaining).  That figure results from subtracting Comp Time Used from
+Comp Time Accumulated.
+.sp
+.ti-5
+COMP TIME USED: This field tells how much compensatory time off an employee
+has taken so far this year.  When an employee uses up comp time,
+a comp time taken transaction should
+be entered through the Pay Transaction Entry program, although the Employee
+Rate Entry program
+does permit direct access to this field.  At the end of the year
+Comp Time Used is subtracted from Comp Time Accumulated.  The difference,
+if any, is placed in the Comp Time Accumulated field, and the Comp Time
+Used field set to zero.
+.qi
+.he
+.bp
+.ig
+CHAPTER 12
+T H E	P A Y R O L L	P R O C E S S I N G    C Y C L E
+.sp2
+.pp5
+Once the Payroll System setup steps are complete,
+you can begin the regular payroll
+processing cycle. The payroll processing cycle is the sequence of
+steps you repeat for every working period to compute earnings and deductions,
+generate paychecks, and
+update historical information.	For the purpose of explanation,
+the quarter and year end processing steps are not considered part
+of the payroll processing cycle, although they too are repeated
+on a regular basis.  This chapter explains the payroll processing
+cycle in general terms.  The following chapters cover steps in the cycle more
+fully.
+.he Reference: Chapter 12
+.pp
+In the simplest case (when all employees on the system are paid
+on the same pay interval) the steps in the payroll processing cycle
+are repeated once for every pay period.  Thus, if all employees are paid
+weekly, you would repeat the following steps once a week:
+.sp
+.li
+	     1. Enter Pay Transactions.
+	     2. Print a Pay Transaction Audit Proof.
+	     3. Back up all files.
+	     4. Sort the Pay Transaction batch file.
+	     5. Run the Apply Payroll program.
+	     6. Print the Payroll Journal.
+	     7. Print Paychecks and/or the Paycheck Register.
+.pp
+When weekly and bi-weekly employees are on the system, every other week
+both are processed
+by the same cycle.  Similarly, when semi-monthly and
+monthly employees are on the system, both are processed by
+the same cycle at the end of each month.  Note, however, that
+although you may enter transactions for all four types into the same
+transaction batch, the Apply Payroll program does not process
+week-based and month-based employees in the same run.  Thus, the
+Payroll Journal, paychecks, and Paycheck Register are always printed
+separately for month-based and week-based employees, even if
+they are to be paid on the same day.
+.pp
+When you run the Apply Payroll program, it asks whether
+you want to process week-based (weekly and bi-weekly)
+or month-based employees (monthly and semi-monthly).  If you
+answer that you want to process week-based
+employees, the Payroll Application program separates out the
+month-based employee transactions and
+stores them on the Pay Detail file.  Later, when you process
+the month-based employees, the Payroll Application program will use
+the transaction information stored on the Pay Detail file, as well
+as any additional transactions for month-based employees on the current
+transaction file.
+.pp
+If weekly and bi-weekly employees are on the system, when you instruct
+the Payroll Application program to process week-based employees, it
+will know whether to process only weekly employees, or both
+weekly and bi-weekly employees by checking the week-base
+"application number"
+to see which were processed last time.	If only
+weekly employees were processed during the last week-based application,
+it knows to process weekly and bi-weekly employees next.  The same is true
+for month-based employees.
+.pp
+When end of period processing should occur is determined not by how many
+times you've repeated the cycle, but by the check date you enter at the
+beginning of the Apply Payroll program.  This is the date that is
+printed on each paycheck, and thus the date that determines which
+quarter is to be charged for the payroll costs.  The date you enter is
+checked against the Payroll System's internal calendar, and if end of
+period processing is required, you are not allowed to run the
+Payroll Application program until the end of period processing steps
+are completed.
+.sp2
+.ce
+ENTER PAY TRANSACTIONS
+.pp
+During this step you may enter any of a number of possible pay transactions for
+an employee.  Among those possible are transactions for
+Rate1 pay (Regular), Rate2 pay (Overtime), Rate3 pay
+(Special Overtime), Rate4 pay (commission), vacation taken,
+sick leave taken,
+comp time taken or earned, bonus pay, tips collected, tips reported,
+advance pay, advance repayment,
+sick pay, vacation pay, expense reimbursement, or additional withholding.
+Unless you enter a Rate1 pay transaction, an employee automatically
+receives the Rate1 amount times the Autogen Units figure set for that employee.
+If no automatic pay units have been established, the employee receives no
+Rate1 pay.
+.pp
+Transactions may be entered for any employee, whether week-based or
+month-based.  A transaction takes effect the next time the employee
+is processed by the Apply Payroll program.  Any transactions not
+used by the Apply Payroll program are stored on the Pay Detail file
+until the next application for that interval.
+.sp2
+.ce
+PRINT A PAY TRANSACTION AUDIT PROOF
+.pp
+Once the batch of pay transactions is complete and accurate, you must
+generate a hardcopy transaction proof report as part of the
+accounting audit trail.  Although a batch proof may be obtained as a working
+proof
+any time during the development of the batch, only the final proof is
+considered the audit proof.
+The audit proof must be taken before the file is sorted, and if
+it is to retain it status as the audit proof, additional pay transactions
+may not be entered.
+.sp2
+.ce
+BACK UP ALL FILES
+.pp
+In order to process as many employees as possible,
+the Apply Payroll program does not automatically create backup versions
+of all the files it processes.
+If the program is run at the wrong time, or if some difficulty
+arises during or after processing, it may be very difficult to get back
+to where you where before the application took place.  For this reason,
+we strongly recommend that you make backup copies of all your disks before
+going to the next processing step. Use the full-disk single density copy
+program SDCOPY (see Chapter 35) provided with the
+Payroll system if you are operating in
+single density, use the full-disk copy program the manufacturer of your disk
+drives should have provided with your equipment, or if that is not available,
+use the CP/M PIP program.
+Label the disks as backup disks and use them over and over.
+It is always wise to keep your files backed up at least
+one generation.
+That way, should any problems arise the recovery procedure is quick
+and relatively easy. (Be sure to make copies of your
+backup files before you use them for
+recovery.)  Do not minimize the importance of this step; adequate backups
+are crucial to successful error recovery.  The information on your disks
+represents a substantial investment in time and effort.
+.sp2
+.ce
+SORT THE PAY TRANSACTION BATCH FILE
+.pp
+The Pay Transaction file is the only Payroll System file that must
+be sorted for payroll application
+processing.  To sort it you simply choose
+the sort program from the menu (or if your CP/M compatible operating system
+does not have the SUBMIT command, you run the sort outside the Payroll
+System; see Chapter 26).
+You must have room for the sorted output and temporary workfiles
+on the same disk as the input file.  The QSORT sorting program requires
+a sort parameter file which the Payroll System creates
+automatically at first time startup
+after the Parameter Entry, Account Entry, and System Deduction Entry steps
+are complete.  Whenever you change the
+location of the Pay Transaction file through the Parameter Entry program,
+you must run
+the Create Sort Parameters program to generate a new sort parameter file.
+The Create Sort Parameter File program issues no requests.  Be sure to print
+the audit proof before you sort the batch.
+.sp2
+.cp6
+.ce
+RUN THE APPLY PAYROLL PROGRAM
+.pp
+The Apply Payroll program
+separates transactions for employees to be paid this application from
+those to be paid later, creates a check file with the
+earnings and deduction
+information needed for each check, updates the company history and
+employee history files, and creates a General Ledger
+batch file (if GL interface
+is requested).	The Apply Payroll program consumes all the
+records in the Pay Transaction file and creates a new Pay Detail file that
+contains detailed transaction information both for employees
+paid on this application (so the Payroll Journal can be printed)
+and employees to be paid on the next application.
+.sp2
+.ce
+PRINT THE PAYROLL JOURNAL
+.pp
+Before you can run the Apply Payroll program again, you must print
+at least one copy of the Payroll Journal.  This report is part of the
+official audit trail. It is a detailed record of the pay transactions
+for the employees paid this application. It also summarizes company-wide
+earning and deduction information, and presents a ledger account
+summary.
+.sp2
+.ce
+PRINT PAYCHECKS AND/OR THE PAYCHECK REGISTER
+.pp
+After you complete the previous steps, you print the paychecks
+and the Paycheck Register.  If you have not requested
+computer check printing,
+print the check register and take
+the information you need from it to prepare the paychecks manually.
+The paychecks produced by the Payroll System check
+writing program are designed to use Moore Business Form paychecks.
+.he
+.bp
+.ig
+CHAPTER 13
+E N T E R I N G    P A Y    T R A N S A C T I O N S
+.sp2
+.pp5
+The Pay Transaction Entry program is used to enter employee time,
+commissions, tips, bonuses, sick pay, vacation pay, advances, and
+other types of pay.  It is also used to enter vacation, sick leave,
+and comp time taken, reimbursement for expenses, repayment of advances,
+and additional withholding when requested.  Detailed instructions on
+how to enter the various transactions
+can be found in Chapter 26.  This chapter presents a general
+overview of the Pay Transaction Entry program's facilities.
+.he Reference: Chapter 13
+.pp
+You may enter any number of transactions, in any order, for any active
+employee.  For example, if some of your employees are paid by the
+hour once a week on Tuesday for the week before,
+and some are paid a salary once
+a month on the first Tuesday of the following month, transactions
+may be entered into the same batch for both groups.
+.sp
+.cp9
+.li
+
+		 |	month 1 	 |   month 2
+		 |week1|week2|week3|week4|week1|week2|
+		 |mtwtf|mtwtf|mtwtf|mtwtf|mtwtf|mtwtf| etc...
+		 -------------------------------------
+PAYDAY (weekly) 	 t     t     t	   t	 t
+PAYDAY (monthly)			   t
+
+	Figure 13.1: Weekly employees paid every Tuesday.
+		     Monthly employees paid first Tuesday.
+.sp
+The hours worked by the hourly employees can be entered at the end of each
+day, or at the end of the week,
+as long as you enter them some time before the payroll
+application and paycheck printing scheduled for Tuesday.  Special
+transactions for hourly employees, such as
+reimbursement for expenses, comp time earned,
+advances, etc., can be entered at any time until the Tuesday
+deadline.  Transactions for monthly employees can be entered any time
+during or after the month, as long as you  enter them before the
+first Tuesday of the next month, which is when the payroll application
+program is scheduled to be run and paychecks printed.
+.pp
+Since salaried
+employees normally receive a regular amount each pay period, a Rate1
+pay transaction is usually not required, although special transactions
+may be needed.	When no Rate1 transaction has been entered for an
+active employee, the Apply Payroll program automatically generates
+a transaction for the Rate1 amount times the number of Autogen
+Units established for the employee
+(usually 1 unit for monthly employees, 40 for an hourly employee paid
+weekly, etc.).
+.pp
+In the example above, each
+Tuesday the Apply Payroll program is run once for the weekly employees.
+On the first Tuesday of the second month you would
+run it twice, once for the week-based
+employees, and once for the month-based employees.  The paycheck,
+check register, and payroll journal print programs are also run
+once for week-based and once for month-based employees.
+.pp
+The Pay Transaction Entry program requests four items of information
+for each transaction: 1). the number of the employee who
+is affected, 2). the transaction type or
+code, 3).
+the number of units (in hours, days, dollars, pieces, etc.), and 4).
+a date, either the date the work was
+done, vacation taken, bonus given, etc., or the date the transaction is
+entered onto the file.	The date you give is your decision, although
+if none is entered, the run date given at startup is used in default.
+This date is for reference only.  The date used as the General Ledger
+transaction reference is the check date entered when you begin the
+Apply Payroll program.
+.pp
+Below is a complete list of the transactions you may enter through
+the Pay Transaction Entry program.  Beside each is the transaction (or
+rate) code you would enter to indicate the transaction type.
+.in5
+.sp
+.ti-5
+(0)  AUTOMATIC CALCULATION OF REGULAR AND OVERTIME PAY:  When you  enter
+a Rate0 transaction and the number of units,
+the Payroll System automatically calculates pay at Rate2
+for units over the normal number of units, and Rate1 for the normal units.
+For example, if Normal Units is set to 40 for an hourly employee, a Rate0
+transaction of 48 units causes pay for the first 40 units to be calculated
+at Rate1, and pay for the next 8 units to be calculated at Rate2.  This
+transaction type is intended as a convenience. The same thing could be
+accomplished by two transactions, a Rate1 transaction for 40 hours, and
+a Rate2 transaction for 8 hours.
+.sp
+.ti-5
+(1)  RATE1 PAY: When you enter a Rate1 transaction, the employee
+is paid at Rate1 for the given number of units.  Rate1 is normally
+Regular Pay, but can be given any description through the Parameter
+Entry program.	Entering a Rate1 transaction always
+overrides (suppresses) automatically
+generated pay. If a Rate1 transaction is not entered, the Rate1 pay
+amount is calulated according to the number of Autogen Units set
+for the employee through the Employee Rate Entry program.
+Rate1 pay is subject to all taxes and percentage-based
+deductions that apply to the
+employee.
+.sp
+.ti-5
+(2)  RATE2 PAY: When you enter a Rate2 transaction, the employee
+is paid at Rate2 for the number of units entered.  Rate2 is normally
+overtime pay, but can be given any description through the Parameter
+Entry program. Rate2 pay is subject to all taxes and percentage-based
+deductions that
+apply to the employee.
+.sp
+.ti-5
+(3)  RATE3 PAY: When you enter a Rate3 transaction, the employee
+is paid at Rate3 for the number of units entered.  Rate3 is normally
+special overtime pay, but can be given any description through the
+Parameter Entry program. Rate3 pay is subject to all taxes and
+percentage-based deductions that apply to that employee.
+.sp
+.ti-5
+(4)  RATE4 PAY: When you enter a Rate4 transaction, the employee
+is paid at Rate4 for the number of units entered.  Rate4 is normally
+used to enter commission pay, piecework pay, or "other" pay,
+but can be given any
+description through the Parameter Entry program. If a
+laborer who receives 65 cents per box (Rate4) for picking fruit
+picks 50 boxes,
+you would answer 4 at the
+request for the transaction code, and 50 for the number of units.
+If a salesperson who is paid once a month for 1 unit at Rate1
+(for example, 1 unit at $1,500 per unit) is to receive in addition to his
+or her regular pay a commission of $500
+for closing a large sale, you would set Rate4 for the employee to
+one dollar ($1.00) and enter a Rate4 transaction at 500 units, in
+addition to entering the normal Rate1 transaction.
+Rate4 pay is taxed according to the exclusion code set for Rate4 pay
+in Parameter Entry.
+.sp
+.ti-5
+(5)  VACATION TAKEN: To record the fact that an employee has used
+some of his or her accumulated vacation time, you would enter
+a transaction with a transaction code of 5. The number of units
+would be the number of days or hours the employee took for vacation.
+.sp
+.ti-5
+(6)  SICK LEAVE TAKEN:	To record the fact that an employee has used
+some of his or her accumulated sick leave, you would enter a
+transaction for that employee with the transaction code of 6.  The
+number of units would be the number of days or hours the employee
+took in sick leave.
+.sp
+.ti-5
+(7)  COMP TIME TAKEN: To record the fact that an employee has used
+some of his or her accumulated comp time, you would enter a
+transaction for that employee with the transaction code of 7.  The
+number of units would be the number of days or hours the employee
+took in compensatory time off.
+.sp
+.ti-5
+(8)  COMP TIME EARNED: To record the fact that an employee has
+earned compensatory time off, you would enter a transaction for
+that employee with the transaction code of 8.  The number of units
+would be the number of hours or days the employee has earned.
+.sp
+.ti-5
+(9)  BONUS: To give an employee a bonus, you would would
+enter a transaction for that employee with the transaction code of
+9.  The number of units would be the dollar amount of the bonus.
+If all or most employees are to receive the bonus, if the bonus is to be
+distributed over several pay periods, or if the amount is a
+percentage of an employee's salary, you will probably want to use the
+System Deduction Entry program or the Employee Deduction/Earnings and
+Cost program to order the bonus.  Bonus transactions entered through
+the Pay Transaction Entry program are subject to all taxes and
+percentage-based deductions
+that apply to the employee.
+.sp
+.ti-5
+(10) TIPS COLLECTED: To pay an employee for tips collected by the employer
+you would enter a transaction with the transaction code of 10. The
+number of units would be the dollar amount of the tips owed by the employer
+to the employee.  Tips are added to the employee's other earnings, and are
+subject to all taxes and percentage-based
+deductions that apply to the employee, including
+FICA.  Since the employer is not required to pay FICA tax on employee
+tips, tips are excluded from the employee's earnings for the purpose of
+calculating the employer's FICA tax contribution.
+.sp
+.ti-5
+(11) ADVANCE: To pay an employee an advance on his or her salary, you would
+enter a transaction with a transaction code of 11.  The number of units
+would be the dollar amount of the advance.  An advance is not subject
+to any taxes or percentage-based deductions. It is distributed to the
+cost accounts set for the employee.  An adjusting General Ledger entry may
+be required.
+.sp
+.ti-5
+(12) SICK PAY: To mark employee pay as sick pay, you would enter a transaction
+with a transaction code of 12.	The number of units would be the dollar
+amount of the sick pay.  Sick pay is subject to all taxes and
+percentage-based
+deductions that apply to the employee.
+.sp
+.ti-5
+(13) VACATION PAY: To mark employee pay as vacation pay, you would enter
+a transaction with a transaction code of 13.  The number of units
+would be the dollar amount of the vacation pay.  Vacation pay is
+subject to all taxes and percentage-based deductions that apply to the
+employee.
+.sp
+.ti-5
+(14) OTHER EXCLUDED PAY: Pay transactions with a transaction code of 14
+are excluded from all taxes and percentage-based
+deductions that apply to the employee.
+.sp
+.ti-5
+(15) EXPENSE REIMBURSEMENT: To reimburse an employee for expenses, you
+would enter a transaction with a transaction code of 15.  The number
+of units would be the dollar amount of the reimbursement.  The amount
+is added to the employee's net earnings and is not subject to any taxes
+or percentage-based
+deductions that apply to the employee. It is, however, distributed to the
+ledger accounts set for the employee.  An adjusting General Ledger entry
+may be required.
+.sp
+.ti-5
+(17) OTHER PAY: Pay transactions with a transaction code of 17 are subject
+to all taxes and percentage-based deductions that apply to the employee.
+.sp
+.ti-5
+(18) TIPS REPORTED: Tips reported are tips pocketed by the employee
+when earned and later
+reported to the employer.  Because Tips Reported are tips that have already
+been collected by the employee, the employer does not pay the employee
+for them.  However, these tips must be added to the employee's earnings
+for tax purposes.  Tips Reported are included in the employee's gross taxable
+earnings, but are also deducted from earnings since
+the employee has already collected them.  The employer is exempt from
+paying FICA tax on employee tips. Tips reported are not distributed to the
+cost accounts set for an employee.
+.sp
+.ti-5
+(27) ADVANCE REPAY: To deduct money from an employee's net pay for
+the repayment of an advance on his or her salary, you would enter a
+transaction with a transaction code of 27.  The number of units would
+be the dollar amount of the repayment.
+.sp
+.ti-5
+(28) FWT ADD-ON: If an employee requests additional Federal income tax
+withholding,
+you would enter a transaction with a transaction code of 28.  The number
+of units would be the dollar amount of the additional withholding.
+.sp
+.ti-5
+(29) SWT ADD-ON: If an employee requests additional state income tax
+withholding,
+you would enter a transaction with a transaction code of 29.  The number
+of units would be the dollar amount of the additional withholding.
+.sp
+.ti-5
+(30) LWT ADD-ON: If an employee requests additional local income tax
+withholding,
+you would enter a transaction with a transaction code of 30.  The number
+of units would be the dollar amount of the additional withholding.
+.sp
+.ti-5
+(31) FICA ADD-ON: If an employee requests additional FICA tax withholding,
+you would enter a transaction with a transaction code of 31.  The number
+of units would be the dollar amount of the additional withholding.
+.qi
+.he
+.bp
+.ig
+CHAPTER 14
+P A Y R O L L	 A P P L I C A T I O N
+.he Reference: Chapter 14
+.sp2
+.pp5
+The Apply Payroll program is the main processing program of
+the Payroll System.  It calculates employee gross earnings by
+multiplying the number of pay units
+times the rate information stored on
+the Employee Master file, and adding bonuses, tips, and other pay
+transactions.  If no Rate1 units have been entered for an Active
+employee, the program generates pay for that employee automatically,
+according to the number of Autogen Units set for the employee (unless
+set to zero units).  The Payroll Application program calculates income
+tax withholding, and deductions for FICA, SDI, and
+user-defined deductions.  The program updates registers of
+historical information, such as quarter and year to date withholding
+for employees, company liabilities, vacation used, etc.  It
+creates a Check File that contains the information needed to produce
+checks and print the Paycheck Register.  If the option has been selected,
+the Apply Payroll program creates a General Ledger batch file for
+entry into your General Ledger.  Finally, as a matter of housekeeping,
+the program increase the apply number for the interval base (i.e.,
+if the application was for week-based employees, it increases its counter
+of the number of times the application program has been run for week-based
+employees by one), and resets the Last Day of Last Period for the
+intervals (pay periods) processed by the application.
+.pp
+Before you run the Payroll Application make certain that:
+.sp
+.in5
+.ti-3
+1. Transactions for employees to be paid by this run of
+the Apply Payroll program have been entered into the
+Pay Transaction batch file, and checked carefully
+for accuracy and completeness.
+If you forget someone, you must re-run the application using your
+backup files since there is no provision for processing individual
+employees separately.
+You cannot just run another application since this would
+throw off the Payroll System's internal count of the applications run
+and distort the historical statistics accumulated so far.
+.sp
+.ti-3
+2. You have backup copies of all of your processing disks.  Do not
+neglect this step.
+.sp
+.ti-3
+3. A final, audit proof of the Pay Transaction batch has been printed
+to protect the audit trail.
+If this has not been done, the application program will not let you
+continue.
+.sp
+.ti-3
+4. The Pay Transaction file has been sorted into employee number
+order.
+.qi
+.pp
+The Payroll System allows you to pay employees on any combination of
+four pay schedules: weekly, bi-weekly, monthly, and semi-monthly.
+The weekly and bi-weekly schedules (or "intervals") are called week-based
+intervals, and the semi-monthly and monthly schedules are called
+month-based intervals.	Week-based employees and month-based employees
+are never processed by the same run of the Apply Payroll program,
+although transactions for both kinds of employees can exist on the
+Pay Transaction file.  The weekly and semi-monthly pay intervals are
+referred to as the "fast" intervals because payroll application occurs
+twice as often for them as for the so-called "slow"intervals, bi-weekly
+and monthly (there may be 52 or 53 weekly applications in one year, and
+only 26 or 27 bi-weekly applications; payroll application occurs 24 times
+a year for semi-monthly employees, while application takes place only
+12 time a year for the "slow" monthly employees).
+.pp
+The Payroll System maintains two counters of the number of
+applications that have been run.  One counter keeps track of week-based
+applications, the other of month-based applications.  When "fast"
+interval employees are on the system, each run of the application program
+increases the counter for that interval base by one.  When "slow" interval
+employees are on the system, each run of the application program increases
+the counter for that interval base by two.  When both fast and slow intervals
+of the interval base are used (i.e., semi-monthly and monthly, weekly and
+bi-weekly), every other application processes both fast and slow employees,
+which should occur only when the application number is even. When you add
+new intervals to the system, they should be timed to coincide with the
+the proper odd or even number.
+.pp
+In general, only fast interval employees are processed on odd applications.
+An even application processes both fast and slow interval employees (or
+just slow interval employees if the fast inteval is not used).	The
+payroll application for month-based employees
+that takes place at the end of the month for
+work done during the month (the whole month for
+monthly employees, the last half for semi-monthly) should always be even.
+The application number for week-based applications will, of course,
+be even every two weeks.
+.pp
+When you run the Payroll Application program, before beginning it asks
+you for a Check Date.  This is the date that will print on the checks,
+and thus the date you legally incur liabilities for such things as
+Federal, state, local and FICA withholding.  This is also the date
+on the General Ledger transactions.  The Apply Payroll program
+checks this date carefully to make sure end of period processing
+is not required. If it is, you are not permitted to run the application
+until you have completed end of period processing.
+.he
+.bp
+.ig
+CHAPTER 15
+P R I N T I N G    P A Y C H E C K S
+A N D	 T H E	  P A Y C H E C K    R E G I S T E R
+.sp2
+.pp5
+The Payroll System paychecks are designed to print on Moore Business
+Form payroll checks; contact your local representative.
+Earning and Deduction information
+prints in 16 boxes on the check stub. Box 1 holds the Gross Pay amount,
+boxes 2 through 7 hold other earnings categories, box 8 contains the
+Net Pay amount, and boxes 9 through 16 are reserved for deductions.
+A complete list of which values are assigned to which boxes appears
+below in Figure 15.1.
+.he Reference: Chapter 15
+.pp
+When you create a employee specific or systemwide earning or deduction
+category, you are asked to enter the check category where the amount
+should be printed. Boxes (check categories) 2 through 7 are set aside
+for earnings, while boxes 9 through 16 are set aside for deductions.
+You cannot assign a deduction to an earnings box or vice versa.
+When more than one item is assigned to a box, they are added together.
+.pp
+Earning or deduction amounts generated by payroll
+transactions are assigned to stub boxes automatically by the system
+and cannot be changed, though that does not prevent you from assigning
+other items to those boxes.
+.sp
+.cp30
+.li
+	  STUB BOX		 ITEM
+
+ EARNINGS    1		     Gross Earnings
+	     2		     Rate1 Pay (Regular)
+	     3		     Rate2 Pay (Overtime)
+	     4		     Rate3 Pay (Special Overtime)
+	     5		     Rate4 Pay (Commission)
+	     6		     Other Pay transaction
+			     Other Excluded Pay transaction
+			     Bonus transaction
+			     Vacation Pay transaction
+			     Sick Pay transaction
+			     EIC Payment
+			     Expense Reimbursement transaction
+	     7		     Tips Collected
+	     8		     Net Pay
+
+ DEDUCTIONS  9		     Federal Withholding
+			     FWT Add On transaction
+	    10		     State Withholding
+			     SWT Add On transaction
+	    11		     Local Withholding
+			     LWT Add On transaction
+	    12		     FICA Withholding
+			     FICA Add On transaction
+	    13		     SDI Withholding
+	    14		     Tips Reported transaction
+			     Advance Repayment
+	    15		     [no system assigned significance]
+	    16		     [no system assigned significance]
+.pp
+To print the checks after the Apply Payroll program has been run and
+a Check file created, you call the Print Pay Checks program from the menu.
+It will tell you what the number of the last check printed was, and
+ask you to enter the Starting Check Number for this run (it can be
+any number you desire).  The program lets you print a test form
+to check your form alignment.
+.he
+.bp
+.ig
+CHAPTER 16
+E N D	O F   P E R I O D   P R O C E S S I N G
+.sp2
+.pp5
+At the end of each quarter you must print the Federal 941 Report,
+the Employer's Quarterly Federal Tax Return and run the Close
+for the Quarter program.  At the end of each year you must print
+the Federal 940 Report,  W-2 forms
+for all employees, and run the Close for the Year program.
+.he Reference: Chapter 16
+.sp2
+.ce
+ENDING THE QUARTER
+.pp
+The quarter end processing steps must be undertaken sometime after
+the last application of the last quarter, and before the first payroll
+application of the next quarter.  The Apply Payroll program does not
+let you continue if the Check Date you enter is past the last day
+of the quarter (Figure 16.1), and the Print 941
+Report and Close for Quarter programs
+have not been run.  You are  also prevented from continuing if not enough
+applications have been run for the quarter to end (3 monthly, 6 semi-monthly,
+at least 13 weekly, and at least 6 bi-weekly).	New intervals may only
+be added after quarter end processing and before the first application of
+the next quarter.
+.sp
+.cp6
+.li
+	      QUARTER		LAST DAY OF QUARTER
+
+		 1		    March 31
+		 2		    June 30
+		 3		    September 30
+		 4		    December 31
+
+		      (Figure 16.1)
+.pp
+The 941 Report may be printed directly onto the government form, or
+you can print it on plain paper and transfer the information by hand.
+You can suppress the automatic printing of your company name and address
+if you wish to use the printed label provided by the government.
+The Print 941 Report program displays a facsimilie reproduction of the
+941 report with the current figures, and allows you to change several
+of the items displayed.  You can enter an adjustment of withheld income
+tax from previous quarters, an adjustment of FICA taxes, or change
+the payment dates and amounts if necessary to correspond to the actual
+dates and payment amounts. The report may be printed as many times as
+you desire.
+.pp
+The Close for Quarter program resets various registers of historical
+information to zero in preparation for beginning the next quarter.  This
+program issues no requests.  You must print the 941 report before you are
+permitted to run the Close for the Quarter program.
+.sp
+.ce
+ENDING THE YEAR
+.pp
+The year end processing steps must be undertaken sometime after the Close
+for the Quarter program has been run for the fourth quarter, and before
+the first run of the Apply Payroll program for the new year.
+The Apply Payroll program does not let you continue if the Check
+Date you enter is past the first of the year and the Close for the Year
+program has not been run.  The Close for the Year program may not be
+run until the Federal 940 Report and the W-2 forms have been printed.
+And the Federal 940 Report and the W-2 forms may not be printed until
+the Close for the Quarter program has been run for the fourth quarter.
+.sp
+.li
+		   YEAR END PROCESSING STEPS
+
+		1. Close for the fourth quarter.
+		2. Print Federal 940 Report.
+		3. Print W-2 forms for all employees.
+		4. Run Close for the Year program.
+
+		 (Figure 16.2: Ending the Year)
+.pp
+Print the 940 report on plain paper and transfer the information to
+the government form.  There are no requests issued by this program.
+.pp
+The W-2 forms print in the standard W-2 format.  The Print
+W-2 Report program lets you specify the number of forms to print for each
+employee.  This option makes it possible to print W-2's  on multiple copy
+carbon forms, or print the required number of W-2 forms on carbonless forms.
+You can suppress printing of local and state withholding amounts for
+the run, or print Federal, state, and local withholding information together.
+The program also lets you set the starting print column if you wish.
+.pp
+You can produce W-2 forms for all employees, a range of employees,
+terminated employees only, or for a single employee.  The Print W-2
+Report program may be run as many times as needed before you run the
+Close for the Year program.
+.pp
+The Close for the Year program resets various registers of
+historical information in preparation for the new year.  It issues
+no requests.  It does not run until the 940 Report has been printed
+and W-2 forms have been printed for all employees.
+.he
+.bp
+.ig
+CHAPTER 17
+O P T I O N A L    R E P O R T S
+.sp2
+.pp5
+The reports below (Figure 17.1)
+are optional in that their production is not
+a prerequisite to further processing steps.  They can be produced
+at any time.
+.he Reference: Chapter 17
+.sp
+.li
+	       1. Account Print
+	       2. Employee Master List
+	       3. Employee History Report
+	       4. Vacation Report
+.pp
+The Account Print is a short report that lists the currently
+valid Payroll System accounts.	To produce the Account Print you
+align the paper in your printer, and
+choose the Print Accounts program from the menu.
+.pp
+The Employee Master List can be produced in two versions.  One is
+a short version that gives an employee's name, number, social
+security number, pay interval, status (active, terminated, on leave),
+pay type (hourly, salaried), phone number, start date, birth date,
+Rate1 rate, and job code.  It prints one line for each employee.
+.pp
+The full version of the Employee Master List devotes one page
+to each employee.  It lists all of the above, plus information
+on pay rates, vacation, sick leave, comp time, withholding allowances,
+tax exemptions, employee specific earnings and deductions, and
+cost distribution.
+.pp
+When you select the Print Employee Master List program from the system menu,
+another menu appears from which you can select the desired printing
+option.  This menu is reproduced below (Figure 17.2).
+.sp
+.cp19
+.li
+		 Y O U R    C O M P A N Y    N A M E
+			 AC PAYROLL SYSTEM
+00/00/00	   EMPLOYEE MASTER LIST PRINT MENU
+
+    1. ALL EMPLOYEES			8. ALL HOURLY EMPLOYEES
+    2. ALL WEEKLY EMPLOYEES		9. ALL SALARIED EMPLOYEES
+    3. ALL BI-WEEKLY EMPLOYEES	       10. ALL ACTIVE EMPLOYEES
+    4. ALL SEMI-MONTHLY EMPLOYEES      11. ALL ON-LEAVE EMPLOYEES
+    5. ALL MONTHLY EMPLOYEES	       12. ALL TERMINATED EMPLOYEES
+    6. ALL WEEK BASED EMPLOYEES        13. ALL DELETED EMPLOYEES
+    7. ALL MONTH BASED EMPLOYEES       14. A RANGE OF EMPLOYEES
+
+	       ENTER YOUR SELECTION NUMBER: [  ]
+
+	       RANGE FROM [	] TO [	   ]
+
+	       FULL INFORMATION OR SINGLE LINE (F OR S) [ ]
+
+			  (Figure 17.1)
+.pp
+The Employee History Report presents summarized quarter to date and
+year to date earnings and deduction information.  To print this report
+you choose the Print History Report from the system menu.
+.pp
+The Vacation Report includes information on sick pay and comp time.
+To print this report you select it from the system menu.
+.he
+.bp
+.ig
+CHAPTER 18
+I N T E R A C T I N G	 W I T H    T H E    S Y S T E M
+.sp2
+.pp5
+This chapter explains how to interact with
+the Payroll System, and provides
+additional information that may be useful to
+those new to microcomputer operation.
+.he Operations: Chapter 18
+.sp2
+.ce
+HOW TO ANSWER A REQUEST
+.pp
+First, move the cursor to the bracketed field that corresponds to
+the request.  (The cursor is the moving spot of light on the screen,
+usually triangular or rectangular in shape.  It may or may not be
+blinking, depending on your equipment.)  If the field is empty,
+type in your response, and then press the RETURN key.
+If the field is full, type in your response over the current value
+and press RETURN.  For example,
+.sp
+.cp5
+.li
+    COMPANY NAME: [Universal Enterprises       ]  <Current Value>
+
+    COMPANY NAME: [Universal Inc.rprises       ]  <Your Entry>
+
+    COMPANY NAME: [Universal Inc.	       ]  <After RETURN>
+.sp
+If the current value is acceptable, just press RETURN.
+.sp2
+.ce
+HOW TO MOVE FROM REQUEST TO REQUEST
+.pp
+After you type in your response to a request and hit RETURN, the
+cursor moves along a fixed path to the next request, or around
+to the first request.  To change
+the value currently in a field, you press RETURN to move the cursor
+forward to the desired request, and type in your response.  To move
+back one field (that is, one request) in a Display Management
+System entry screen,
+give the command:
+.sp
+.li
+		CTRL-B
+.sp
+Note, however, that when the cursor is at a field labeled Employee Number
+or Record number, the CTRL-B command means something different.  At those
+locations CTRL-B causes the program to display the previous record on the
+file (i.e., "go BACK and get the previous record").
+.sp2
+.cp6
+.ce
+HOW TO "THUMB" THROUGH A FILE
+.pp
+When you select the Employee Entry, Employee Ded/Earn and Cost, or the
+Employee Rate Entry programs, the appropriate entry screen appears with
+the cursor waiting at the Employee Number request.  If there are records
+on the Employee Master file, you can "thumb" through the file by any
+combination of the following three methods:
+.sp
+.in3
+.ti-3
+1. Give the command CTRL-N to get the NEXT record on the file.	When
+no records have been accessed, this command gets the first record on the
+file.
+.sp
+.ti-3
+2. Give the command CTRL-B to go BACK and get the previous record on the
+file.  When no records have been accessed, this command brings up the last
+record on the file.
+.sp
+.ti-3
+3. Enter the five digit employee number to get the record for that employee.
+.qi
+.pp
+When you select the Pay Transaction Entry, or the Account Entry programs
+the appropriate entry screen appears with the cursor waiting at the
+Record Number request.	If valid records exist on the file you can
+"thumb" through the file by any combination of the following three
+methods:
+.sp
+.in3
+.ti-3
+1. Give the command CTRL-N to get the NEXT record on the file.	When
+no records have been accessed, this command gets the first record on
+the file.
+.sp
+.ti-3
+2. Give the command CTRL-B to go BACK and get the previous record on
+the file.  When no records have been accessed, this command gets the
+last record on the file.
+.sp
+.ti-3
+3. Enter the "relative record number" of the record you want to access.
+The relative record number is the position of the record relative to the
+beginning of the file.	For example, the first record on the file has
+relative record number 1, the second has relative record number 2, etc.
+The Payroll System Account Reference Number is the same thing as the
+relative record number of an Account File record.
+.qi
+.sp2
+.cp6
+.ce
+HOW TO FIX A TYPOGRAHPICAL ERROR
+.pp
+To back up and erase one character before pressing RETURN, give
+the command:
+.sp
+.li
+	     CTRL-H
+.sp
+as many times as necessary to back up to the erroneous entry, then
+type in the correct characters.  Hit RETURN to continue.
+.pp
+If you've already pressed RETURN, give
+the command CTRL-B to go back to the previous field and type in the
+correct response.
+.sp2
+.cp6
+.ce
+HOW TO CANCEL AN ENTRY
+.pp
+While adding an employee record through the Employee Entry program,
+an account through the Account Entry program, or a pay transaction
+through the Pay Transaction Entry program, before hitting ESCAPE to
+begin the next record, you can cancel the entire employee, account,
+or transaction record by giving the command:
+.sp
+.li
+		CTRL-X
+.sp
+Once the entry has been completed and entered onto the system by hitting
+ESCAPE, the cancel command has no effect.
+.sp2
+.cp4
+.ce
+HOW TO GIVE A CONTROL COMMAND
+.pp
+To give a CONTROL command, such as CTRL-H or CTRL-N, you hold down
+the CONTROL key (CTRL or CTL on some keyboards) as you would a SHIFT
+key on a typewriter, and while holding it down, type the appropriate
+letter (either upper or lower case).  You can depress the CONTROL key
+for as long as it takes to enter the command.
+.sp2
+.cp6
+.ce
+HOW TO ENTER A NUMBER
+.pp
+When you answer a request with a mult-digit number or dollar amount,
+do not type in the commas, if any.  The program inserts them where needed.
+Two is the largest number of digits allowed to the right of the decimal
+point.	You must type in the decimal point (period) when you enter a
+decimal number.  When you enter a flat dollar amount (no cents), you need
+not type in the period and two zeros, the program inserts them for you.
+.sp
+.cp8
+.li
+     EXAMPLE: To enter $4,520.00 into the MAX PAY field,
+	      type in:
+
+		  MAX PAY: [4520	]
+
+	      After hitting RETURN, the field shows,
+
+		  MAX PAY: [	4,520.00]
+.sp
+.cp8
+.li
+     EXAMPLE: To enter $4,520.35 into the MAX PAY field,
+	      type in:
+
+		  MAX PAY: [4520.35	]
+
+	      After hitting RETURN, the field shows,
+
+		  MAX PAY: [	4,520.35]
+.sp2
+.cp6
+.ce
+HOW TO ENTER A DATE
+.pp
+The Payroll System checks all date entries to make sure they
+are valid dates and conform to the date format (MM/DD/YY or DD/MM/YY)
+specified in
+Parameter Entry.  The system bars you from entering
+a date such as April 31 (since April has only 30 days).
+Nor will it let you enter February 29 for a non-leap-year.
+The American date format (MM/DD/YY) is used unless you specifically
+request the international format (DD/MM/YY).  You need not type leading
+zeros for single digit months or days, but you are required to type
+in the slash marks (/).
+.sp
+.li
+      EXAMPLE: To enter March 5, 1980, you would type:
+
+		   [3/5/79  ]
+
+	       and then RETURN.  After RETURN, the field
+	       would show:
+
+		   [03/05/79]
+.sp2
+.cp6
+.ce
+HOW TO HANDLE THE "FLOPPY" DISKS
+.pp
+NEVER touch the magnetic material exposed through the protective sleeve.
+.pp
+NEVER let the disk come within the force of a magnetic field (such as
+the tip of a magnetized screwdriver).
+.pp
+NEVER remove a disk from a disk drive while the "access" light is on.
+Wait until the CP/M prompt character is showing, or the program instructs
+you to remove it.
+.pp
+NEVER turn the power on or off while a disk is inserted in the machine.
+.pp
+ALWAYS insert the disk into the drive with the exposed "slot" pointing
+toward the rear of the machine.  The direction in which the label should
+face depends on your equipement.
+.pp
+ALWAYS put the disk back in its protective sleeve and store it safely
+away when you are through using it.
+.sp2
+.cp6
+.ce
+HOW TO END THE CURRENT FUNCTION OR PROGRAM
+.pp
+Hitting the ESCAPE key takes you one "layer" out of the system.  For
+example, while adding employees to the Employee Master file in the
+Employee Entry program, ESCAPE signals that you have completed the record
+for that employee and are ready to add another.  An ESCAPE right after
+the previous ESCAPE (before you begin the next employee
+record), takes you out of the Add-Records mode, and returns the
+cursor to the Employee Number field where you can give other commands
+(such as CTRL-N or CTRL-B).  A third ESCAPE ends the Employee Entry
+program and returns you to the main system menu.  ESCAPE at the system
+menu ends the Payroll System altogether.  When the CP/M prompt appears
+and the access light goes out, you can remove the disks.
+.sp2
+.cp3
+.ce
+HOW TO END A PRINTOUT
+.pp
+If your paper should jam in the printer, or if you want to end a
+printout for some other reason, just press any key on the keyboard.
+To restart where you left off, type "RUN".  To end the program, type
+"STOP".
+

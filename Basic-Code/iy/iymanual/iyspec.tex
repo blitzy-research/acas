@@ -1,0 +1,477 @@
+.mt9
+.mb7
+.po8
+.ll65
+.ig
+CHAPTER I
+DISTRIBUTION DISK PROGRAMS
+.sp2
+.li
+		  PARTENT.INT
+		  IYPARENT.INT
+		  ADDITION.INT
+		  DEPLETE.INT
+		  UPDATE.INT
+		  IY.INT
+		  REORDER.INT
+		  PARTPRNT.INT
+		  VALUE.INT
+		  ACTIVITY.INT
+		  PROOF.INT
+		  PARTFILE.INT
+
+		  CRTDEF.INT
+
+		  SDCOPY.COM
+		  QSORT.COM
+.BR
+.bp
+.mt9
+.mb7
+.po5
+.ll70
+.ig
+CHAPTER II
+F I L E    A C C E S S I N G
+.sp3
+.ce
+ADD AND DEPLETE
+.sp3
+.li
+FILES READ:		   FILES WRITTEN TO:
+-------------------------------------------------------------
+IYPRT.100		   IYPR2.101
+			   IYPRT.100 (1 to 3) update in place
+			   IYAUD.001
+
+FILES CREATED:		   WHEN:
+-------------------------------------------------------------
+IYAUD.000		   if no audit file present or
+			   if requested
+
+FILES RENAMED:		   WHEN:
+-------------------------------------------------------------
+from:	     to:
+IYPRT.101    IYPRT.100	   at beginning (1 to 3)
+IYAUD.001    IYAUD.000	   at beginning if not created
+IYPRT.100    IYPRT.101	   at end (1 to 3)
+IYAUD.000    IYAUD.001	   at end
+.bp
+.ce
+PARTENT
+.sp3
+.li
+FILES READ:		   FILES WRITTEN TO:
+-------------------------------------------------------------
+IYPRT.100*		   IYPRT.110 if present
+IYPRT.110*		   IYPRT.100 if present
+IYPRT.000*		   IYPRT.000 if present
+*one file of any of	   IYPR2.101 at end of processing
+these three types
+on 1 to 3 parameter
+specified drives
+
+FILES CREATED:		   WHEN:
+------------------------------------------------------------
+none
+
+FILES RENAMED:		   WHEN:
+------------------------------------------------------------
+from:	     to:
+IYPRT.111    IYPRT.110	   at startup, if present
+IYPRT.101    IYPRT.100	   at startup, if present
+IYPRT.001    IYPRT.000	   at startup, if present
+
+IYPRT.110    IYPRT.111	   at end, if present
+IYPRT.100    IYPRT.101	   at end, if present
+IYPRT.000    IYPRT.001	   at end, if presnet
+
+FILES DELETED:		   WHEN:
+------------------------------------------------------------
+none
+.br
+.bp
+.ce
+PART FILE
+.sp3
+.li
+FILES READ:		   FILES WRITTEN TO:
+------------------------------------------------------------
+IYPRT.101 when recopying   IYPRT.100  when recopying
+			   IYPR2.101  at end of processing
+
+FILES CREATED:		   WHEN:
+------------------------------------------------------------
+IYPRT.100		   when recopying
+IYPRT.101		   at system startup
+IYPR2.101		   if not present
+
+FILES RENAMED:		   WHEN:
+-----------------------------------------------------------
+from:	     to:
+IYPRT.100    IYPRT.101	   at end of processing
+.br
+.bp
+.ce
+IY
+.sp3
+.li
+FILES READ:		   FILES WRITTEN TO:
+----------------------------------------------------------
+IYPR1.101 when first run   $$$.SUB
+IYPR2.102 when first run
+CRT.DEF if present when
+	first run
+
+FILES CREATED:		   WHEN:
+----------------------------------------------------------
+$$$.SUB 		   if sort requested
+
+FILES RENAMED:		   WHEN:
+----------------------------------------------------------
+none
+
+FILES DELETED:		   WHEN:
+----------------------------------------------------------
+none
+.br
+.bp
+.ce
+REORDER
+.sp3
+.li
+FILES READ:		   FILES WRITTEN TO:
+----------------------------------------------------------
+IYPRT.101 on up to 3	    none
+parameter specified drives
+
+FILES CREATED:		   WHEN:
+----------------------------------------------------------
+none
+
+FILES RENAMED:		   WHEN:
+----------------------------------------------------------
+none
+
+FILES DELETED:		   WHEN:
+----------------------------------------------------------
+none
+.br
+.bp
+.ce
+IYPARENT
+.sp3
+.li
+FILES READ:		   FILES WRITTEN TO:
+----------------------------------------------------------
+IYPR1.101 at start	   IYPR1.101 at end
+
+FILES CREATED:		   WHEN:
+----------------------------------------------------------
+IYPR1.101		   if none present
+
+FILES RENAMED:		   WHEN:
+----------------------------------------------------------
+none
+
+FILES DELETED:		   WHEN:
+----------------------------------------------------------
+none
+.br
+.bp
+.ce
+PARTPRNT
+.sp3
+.li
+FILES READ:		   FILES WRITTEN TO:
+----------------------------------------------------------
+IYPRT.001 or 101 or 111   IYPR2
+(1 to 3)
+
+FILES CREATED:		   WHEN:
+----------------------------------------------------------
+none
+
+FILES RENAMED:		   WHEN:
+----------------------------------------------------------
+from:	     to:
+IYPRT.111    IYPRT.101	   if no duplicates
+(1 to 3)
+
+FILES DELETED:		   WHEN:
+----------------------------------------------------------
+none (at present)
+.br
+.bp
+.ce
+UPDATE
+.sp3
+.li
+FILES READ:		   FILES WRITTEN TO:
+----------------------------------------------------------
+IYPRT.100 (1 to 3)	   IYPRT.100 (1 to 3)
+
+FILES CREATED:		   WHEN:
+----------------------------------------------------------
+none
+
+FILES RENAMED:		   WHEN:
+----------------------------------------------------------
+from:	     to:
+IYPRT.101    IYPRT.100	   at beginning (1 to 3)
+IYPRT.100    IYPRT.101	   at end (1 to 3)
+
+FILES DELETED:		   WHEN:
+----------------------------------------------------------
+none
+.br
+.bp
+.ce
+SORTPARM
+.sp3
+.li
+FILES READ:		   FILES WRITTEN TO:
+---------------------------------------------------------
+			   PART1.SRT
+			   PART2.SRT if 2 item files
+			   PART3.SRT if 3 item files
+
+FILES CREATED:		   WHEN:
+---------------------------------------------------------
+PART1.SRT
+PART2.SRT if 2 item files
+PART3.SRT if 3 item files
+
+FILES RENAMED:		   WHEN:
+---------------------------------------------------------
+none
+
+FILES DELETED:
+---------------------------------------------------------
+none
+.br
+.bp
+.ce
+VALUE
+.sp3
+.li
+FILES READ:		   FILES WRITTEN TO:
+---------------------------------------------------------
+IYPRT.101		   none
+(1 to 3, according to
+parameter file)
+
+FILES CREATED:		   WHEN:
+---------------------------------------------------------
+none
+
+FILES RENAMED:		   WHEN:
+---------------------------------------------------------
+none
+
+FILES DELETED:
+---------------------------------------------------------
+none
+.bp
+.br
+.mt9
+.mb7
+.po5
+.ll74
+.ig
+CHAPTER III
+F I L E   D E S C R I P T I O N S
+.sp2
+.ce
+IYPRT (DATA RECORD)
+.sp
+.li
+FIELD NAME	LENGTH	 OVHD	START	FMT/COMMENTS
+-----------------------------------------------------------------<
+PRT.NUMBER$	 10	  3	  2	Part number-file sort key
+PRT.VENDOR$	  5	  3	 14	Vendor for part
+PRT.ORDER.DATE$   6	  3	 22	Date order placed
+PRT.ORDER.DUE$	  6	  3	 31	Date order due
+PRT.DESC$	 30/var   3	 40	Description
+PRT.CONSTRUCT	  6/var   1	varies	not used
+PRT.DELETED%	  2/var   1	  "     T/F delete flag
+PRT.RETAIL	  8/var   1	  "     Retail price
+PRT.VALUE	 10/var   1	  "     Inventory value
+PRT.COST	  8/var   1	  "     Unit cost
+PRT.REORD.PT	  6/var   1	  "     Reorder point
+PRT.STD.REORD	  6/var   1	  "     Standard reorder quantity
+PRT.BK.ORDER	  6/var   1	  "     Quantity back ordered
+PRT.ON.ORDER	  6/var   1	  "     Quantity on order
+PRT.STOCK	  6/var   1	  "     Quantity in stock
+PRT.WIP 	  6/var   1	  "     not used
+PRT.STK.ADD	  6/var   1	  "     Level 1 accumulator for
+					additions
+PRT.STK.DEP	  6/var   1	  "     Level 1 accumulator for
+					depletions
+PRT.TD.STK.ADD	  7/var   1	  "     Level 2 accumulator for
+					additions
+PRT.TD.STK.DEP	  7/var   1	  "     Level 2 accumulator for
+					depletions
+PRT.WIP.ADD	  6/var   1	  "     not used
+PRT.WIP.DEP	  6/var   1	  "     not used
+PRT.TD.WIP.ADD	  7/var   1	  "     not used
+PRT.TD.WIP.DEP	  7/var   0	  "     not used
+
+cr/lf			  2
+		  ------------
+		  TOTAL RECORD LENGTH :  214
+.bp
+.ce
+IYPRT (HEADER RECORD)
+.sp2
+.li
+FIELD NAME	   LENGTH   OVHD   START     FMT/COMMENTS
+--------------------------------------------------------------------<
+PRT.NO.RECS%	    5/var    1	   varies    Number of records in
+					     the file
+PRT.DELETED.RECS%   5/var    1	     "       Number of deleted
+					     records
+PRT.LAST.UPDATE$    6	     3	     "       Date file last updated
+PRT.DRIVE$	    1	     3	     "       Drive that file must
+					     run on
+PRT.HIGH.PRT.NO$    10/var   2	     "       Highest part number in
+					     file
+.bp
+.ce
+IYPR1 (PARAMETER FILE #1)
+.sp2
+.li
+FIELD NAME			LENGTH	 OVHD START  FMT/COMMENTS
+--------------------------------------------------------------------
+PR1.CO.NAME$			 60/var   3  varies  Company name
+PR1.DEBUGGING%			  2/var   1    "     T/F If true,
+		  enables print of information useful to programmers
+PR1.CRT.DEF.FILE$		  8/var   3  varies  currently unused
+PR1.BELL.USED%			  2/var   1    "     T/F If true,
+		  console bell sounds on detecting an error
+PR1.MANU.USED%			  1/var   1  varies  not used
+PR1.OE.USED%			  1/var   1    "     not used
+PR1.INVOICE.USED%		  1/var   1    "     not used
+PR1.PURCHASING.USED%		  1/var   1    "     not used
+PR1.ANY.AUDIT.USED%		  2/var   1    "     T/F If true, at
+		  least one type of audit trail is currently used
+PR1.ADDITIONS.AUDIT.USED%	  2/var   1  varies  T/F If true,
+		  additions to stock are audited
+PR1.DEPLETIONS.AUDIT.USED%	  2/var   1  varies  T/F If true,
+		  depletions of stock are audited
+PR1.START.JOB.AUDIT.USED%	  1/var   1  varies  not used
+PR1.START.JOB.AUDIT.SUMMARY.USED% 1/var   1    "     not used
+PR1.END.JOB.AUDIT.USED% 	  1/var   1    "     not used
+PR1.END.JOB.AUDIT.SUMMARY.USED%   1/var   1    "     not used
+PR1.AUDIT.DRIVE$		  1	  3    "     Disk drive to
+		  place audit file
+PR1.BOM.DRIVE$			  1	  3    "     not used
+PR1.CURRENT.PERIOD$		  7/var   3    "     Prints in
+		  report headings
+PR1.TO.DATE.PERIOD$		  7/var   3    "     Prints in
+		  report headings
+PR1.BOM.INDICATOR$		  0/var   3    "     not used
+PR1.ARRAY.SIZE% 		  4/var   1    "     Array size
+		  used by heuristic binary search routine
+PR1.LINES.PER.PAGE%		  3/var   1  varies  Number of
+		  print lines on 1 page
+PR1.PAGE.LENGTH%		  3/var   1    "     Physical
+		  page length in lines (one-sixth of an inch per
+		  line
+PR1.PAGE.WIDTH% 		  3/var   1    "     Page width
+		  to center report headings
+
+.br
+.bp
+.sp2
+.ce
+IYPR1 (CONTINUED)
+.sp3
+.li
+PR1.DATE.MO%			  1/var   1    "     Position of
+PR1.DATE.DY%			  1/var   1    "     month,day,yr
+PR1.DATE.YR%			  1/var   1    "     in external
+		  date, currently supports MM/DD/YY, DD/MM/YY
+		  (1,2,3 or 2,1,3 respectively)
+
+PR1.64.COL.CRT% 		  1/var   1  varies  not used
+PR1.AVERAGE.USED%		  2/var   1    "     T/F If true,
+		  averaged valuation is computed
+
+PR1.1%,PR1.2%,PR1.3%,PR1.4%,PR1.5%,   1/var  1	varies	Spares
+PR1.6%,PR1.7%,PR1.8%,PR1.9%,PR1.10%,
+PR1.11%,PR1.12%,
+PR1.S1$,PR1.S2$,PR1.S3$ 	      0/var  3	  "     Spares
+PR1.S4$ 			      0/var  2	  "     Spares
+.bp
+.ce
+IYPR2 (PARAMETER FILE #2)
+.sp2
+.li
+FIELD NAME		   LENGTH   OVHD START	FMT/COMMENTS
+--------------------------------------------------------------------
+PR2.AUDIT.NUMBER%	   2/var     1	 varies Current audit batch
+			 number
+PR2.ACTIVITY.REPORT.RUN%   2/var     1	   "    T/F If true, the
+			 activity report has been run for all parts
+PR2.PART.FILE.SORT.NEEDED% 2/var     1	 varies T/F If true, at
+			 least one part file must be sorted before
+			 regular processing can continue
+PR2.PART.FILES% 	   2/var     1	 varies Number of system
+			 part files
+PR2.PART.DRIVE$(1)	   1	     3	   "    Drive to place 1st
+			 part file
+PR2.PART.DRIVE$(2)	   1	     3	   "    Drive to place 2nd
+			 part file
+PR2.PART.DRIVE$(3)	   1	     3	   "    Drive to place 3rd
+			 part file
+PR2.LO.NUMBER$(2)	   10/var    3	   "    Lowest part number
+			 to be in part file #2
+PR2.LO NUMBER$(3)	   10/var    3	 varies Lowest part number
+			 to be in part file #3
+PR2.LAST.UPDATE$	   6	     3	 varies Date of last part
+			 file update
+PR2.1%,PR2.2%,PR2.3%,
+PR2.4%,PR2.5%		   1/var     1	   "    Spares
+PR2.S1$ 		   0/var     3	   "    Spares
+PR2.S2$ 		   0/var     2	   "    Spares
+.br
+.bp
+.ce
+IYAUD (AUDIT FILE)
+.sp2
+.li
+FIELD NAME	   LENGTH  OVHD  START	 FMT/COMMENTS
+--------------------------------------------------------------------
+AUD.PRT.NO$	   10	    3	   2	 Part number
+AUD.DESC$	   30/var   3	  14	 Part description
+AUD.DEPLETION%	    1/var   1	 varies  not used
+AUD.REVERSE.TRANS%  2/var   1	   "     T/F True if a transaction
+		cancellation
+AUD.TRANS.QTY	    6/var   1	   "     Transaction quantity
+AUD.VALUE.CHG	   11/var   1	   "     Inventory value change
+AUD.UNIT.COST	    8/var   0	   "     Unit cost
+		   -------------
+		   TOTAL RECORD LENGTH : 80
+.br
+.bp
+.ce
+IYAUD (HEADER RECORD)
+.sp2
+.li
+FIELD NAME     LENGTH	OVHD   START   FMT/COMMENTS
+--------------------------------------------------------------------
+AUD.PROOFED%	2/var	 1     varies  T/F True if proofed since
+	  last updated
+AUD.PROOF.NO%	5/var	 1	 "     Number of proofs run on
+	  current batch
+AUD.ADD.RUN%	2/var	 1	 "     T/F True if an additions
+	  batch
+AUD.DEP.RUN%	2/var	 1	 "     T/F True if a depletion
+	  batch
+AUD.START.JOB%	1/var	 1	 "     not used
+AUD.END.JOB%	1/var	 1	 "     not used
+AUD.RUN.DATE$	6	 3	 "     Date last modified
+AUD.NO.RECS%	5/var	 0	 "     Number of audit records
+.br
+#

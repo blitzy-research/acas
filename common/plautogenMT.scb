@@ -1,0 +1,1814 @@
+       >>source free
+*>***********************************************
+*>                                              *
+*>             Purchase Autogen                 *
+*>             Table RDB Handler                *
+*>                                              *
+*>***********************************************
+*>
+ identification division.
+ Program-Id.            plautogenMT.
+*>**
+*> Author.              Vincent B Coen, FBCS, FIDM, FIDPM, CPL
+*>                      for Applewood Computers.
+*>**
+*> Security.            Copyright (C) 2023-2026 & later, Vincent Bryan Coen.
+*>                      Distributed under the GNU General Public License
+*>                      v2.0. Only. See the file COPYING for details.
+*>**
+*> Remarks.             Purchase Autogen File RDB Handler using amended JC preSQL.
+*>                      **********************************************
+*>           13/06/23   Updated for PUAUTOGEN record layouts differences.
+*>
+*>                      This version uses an amended JC pre-Sql processor.
+*>                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+*>
+*>  This module and that for the FH handles one record at a time for
+*>    the header and the invoice lines based on the key last two digits
+*>      being 00 or not respectively.
+*>
+*>===========================================================================
+*>
+*> Coding completed but needs dry testing and verifying against sales to see
+*>  what functions are used and how to confirm correct logic.
+*>
+*>          Logic to be used:  [ for programmer ]
+*>
+*>                      THIS module handles two tables - primary and a secondary one
+*>                      The primary (PUAUTOGEN-REC) has all columns that directly link
+*>                      to the Cobol file Header data and
+*>                      PUAUTOGEN-LINES-REC for up to 40 rows for those both using the
+*>                      same key for the search. This hold the invoice item lines with one
+*>                      row per line. This table only holds this record type.
+*>
+*>                      Both of these tables consist of the existing Cobol file records.
+*>
+*>                      During processing for write, rewrite, delete, seek/search operations
+*>                      will examine the last two chars of the key (Line or test) and if
+*>                      zero its a main table row and if 01 - 40 is a Line item row so
+*>                      easy to work out where to write out to.
+*>
+*>                      FOR start we do for both tables saving into -RG1.
+*>                         See if we need this code  ????????
+*>
+*>                      Reading both next and indexed is a little more complex :
+*>
+*>                      Read next needs to know what the previous record key (test) was so if
+*>                      it is:
+*>                      If 00 then read line table for same invoice starting at 01  and at
+*>                      invoice change read primary table.
+*>
+*>                      if not 00 then read line table unless invoice changed then
+*>                      change to primary read.
+*>
+*>                      If read indexed if test = 00 use primary otherwise use
+*>                      line table.
+*>
+*>                      So we need to keep track of previous read key and operation ?
+*>                      and the prior key (JIC).
+*>
+*>===========================================================================
+*>
+*>                      This and associated modules relate to ACAS versions v3.02 and later.
+*>
+*>                      This modules does all file handling using RDB and is called
+*>                      from the ACAS
+*>                      Purchase Autogen file handler acas030
+*>                      which in turn is called
+*>                      from each ACAS application module that requires file/RDB data handling.
+*>
+*>                      If RDBMS (Relational Database Management Systems) is in use it will be
+*>                      called by the specific module to handle similar processing as a Cobol
+*>                      flat file and will pass the equivalent
+*>                      RDB (Relational Database) row as a Cobol file record (01 level) moving
+*>                      row by row to the correct Cobol flat file fields as required.
+*>
+*>                      RDB DAL (Data Access Layer) modules are individually modified to handle:
+*>                      MS SQL server, Mysql, DB2, Postgres and Oracle as available and tested.
+*>                      These are contained in separate directories for each RDB, e.g.
+*>                       'MSSQL' (MS SQL Server), 'Mysql', 'DB2', 'Postgres'. 'Oracle'.
+*>                       You need to compile from the correct directory for the specific
+*>                       RDB you will use and have installed along with all of the development
+*>                       libraries and include files etc using the correct pre-compiler tool
+*>                       to process the Exec SQL code converting to Cobol calls etc.
+*>                       see the RDB specific ACAS notes.
+*>
+*>                      For specific SQL servers supported, the pre-compiler system is included
+*>                       where ever possible but for some, copyright reasons may prevent
+*>                       inclusion. In some cases for one specific RDB more than one precompiler
+*>                       is used as an experiment to help find the ideal one to use.
+*>
+*>                      If you wish to convert a running ACAS system over from Flat files
+*>                      to RDBMS see below.
+*>
+*>                      Depending on the RDB you wish to use there is
+*>                      also, included LMs (Load Modules) to convert each ISAM
+*>                      (Indexed Sequential) file to the rdb database tables.
+*>                      These will also need to be compiled from the
+*>                      specific LM directory that contains the rdb DAL modules.
+*>                      These will be very RDB specific.
+*>
+*>    As the MySQL versioning is the first of the DAL and FH processes being
+*>    developed all sources are in the common directory.
+*>**
+*>  File Handling:
+*>     Uses the Global Error / Access logging file within the FH acas0nn module
+*>               and in all DALs.
+*>**
+*> Called by Modules:
+*>                      acas030 - Purchase Autogen Cobol Handler.
+*>
+*>**
+*> Error Messages Used.
+*>                      SM004 SQL Err no in 'mysql-procedures'
+*>                      SM901 Note error and hit return.
+*>**
+*> Version.             1.00 14/05/2023.
+*>
+*>**
+*> Changes.
+*> 14/05/23 vbc - .00 Code taken from PLinvoiceMT and changelog cleared down
+*> 12/07/23 vbc - .01 In bc050-Process-Read and bc300-Update-Rg1 changed to set KOR-x1 to 2
+*>                    from 'to 1'. Ditto in plinvoiceMT, slinvoiceMt, plautogenMT, slautogenMT.
+*> 27/07/23 vbc - .02 In bc050-Process-Read and bc300-Update-Rg1 changed to set KOR-x1 to 2
+*>                    from 'to 1'. Ditto plinvoiceMT & *autogenMT - in progress - did say
+*>                    that these have only been dry tested.......
+*>                    RG1 processing missing for (re)writes also need to check that load
+*>                    and unload is present - ditto for header records.
+*>                    New proc - bc090-Process-Rewrite used in ba090-Process-Rewrite
+*>                    fix bug where data NOT moved to/from ws-invoice-record
+*>                    and WS-Invoice-Line - I hope.
+*>                    Remove setup code in bc300-Update-rg1 as in caller.
+*>                    Amendments taken from slautogenMT.scb with sl -> pl changes.
+*> 08/08/23 vbc - .03 Table keys NOT being moved to for both tables but not from - stops overwrite keys.
+*> 16/04/24 vbc       Copyright notice update superseding all previous notices.
+*> 19/09/25 vbc -3.3.00 Version update and builds reset.
+*>**
+*>  Module USAGE
+*>**************
+*>
+*>    On Entry:         Set up Linkage areas -
+*>    ********              WS-Invoice-Record = Contents of data record to be written/read
+*>                          File-Access = File-Function as needed.
+*>                                        Access-Type   as needed.
+*>                          File-Defs (File-Definitions) = Paths set up.
+*>
+*>    On Exit:          Linkage contains:
+*>    *******               Record = containing a read data record or table row for both tables.
+*>                          Fs-Reply = 0, 99 or other value where
+*>                                     0  = Operation completed successfully
+*>                                     10 = End of (Cobol) File returned to calling module only.
+*>                                     21 = Invalid key on START OR key not found
+*>                                     22 - Attempt to duplicate a key value.
+*>                                     23 = Key not found.     from read indexed
+*>                                     99 = Indicates an error see WE-Error, SQL-ERR/MSG & SQL-State for more info
+*>                          WE-Error   0    = Operation completed successfully
+*>
+*>                                     999  = Not used here - Yet.
+*>                                     998* = File-Key-No Out Of Range not 1, 2 or 3.
+*>                                     997* = Access-Type wrong (< 5 or > 8)
+*>                                     996* = File Delete key out of range (not = 1 or 2)
+*>                                     995* = During Delete SQLSTATE not '00000' investigate using MSG-Err/Msg
+*>                                            or row count not > 0
+*>                                     994* = During Rewrite,                     ^^ see above ^^
+*>                                     992* = Invalid Function requested in File-Function
+*>                                     990* = Unknown and unexpected error, again ^^ see above ^^
+*>                                     989* = Unexpected error on Read-Indexed, investigate as above.
+*>                                     911* = Rdb Error during initializing,
+*>                                            possibly can not connect to database
+*>                                             Check connect data and
+*>                                             see SQL-Err & SQL-MSG
+*>                                     910* = Table locked > 5 seconds
+*>                                     901  = File Def Record size not =< than ws record size
+*>                                            Module needs ws definition changing to correct size
+*>                                            FATAL, Stop using system, fix source code
+*>                                            and recompile before using system again.
+*>                                     8nn  = Processing on RG Table & rows.
+*>                                     890  = Unknown and unexpected error, again ^^ see above on RG processing
+*>                                     880  = Unexpected range error in Rg1 secondary key.
+*>                                            Report to programming team.
+*>                                     Other = any other rdbms errors see specific
+*>                                             (Rdbms) manual
+*>                          SQL-Err   = Error code from RDBMS is set if above 2 are non zero
+*>                          SQL-Msg   = Non space providing more info if SQL-Err non '00000'
+*>                                      * = FS-Reply = 99.
+*>                          SQL-State = In support of SQL-Err for dup keys etc but could be used for other errors.
+*>
+*>       During testing a log file will be created containing datetime stamp, task and return codes
+*>       for FS-Reply, WE-Error & SQL-State with table used - in this case the Payments File.
+*>       WARNING - This file could get large so needs manually deleting after examination.
+*>
+*>       NOTE that the value in SQL-State is the standard ANSI RDBMS error code to help keep
+*>         DAL handler changes to a minimum when reusing code for other RDBs - hopefully
+*>
+*>********************************************************************************************
+*>
+*> Copyright Notice.
+*> ****************
+*>
+*> This notice supersedes all prior copyright notices & was updated 2024-04-16.
+*>
+*> These files and programs are part of the Applewood Computers Accounting
+*> System and is Copyright (c) Vincent B Coen. 1976-2026 and later.
+*>
+*> This program is now free software; you can redistribute it and/or modify it
+*> under the terms listed here and of the GNU General Public License as
+*> published by the Free Software Foundation; version 3 and later as revised
+*> for PERSONAL USAGE ONLY and that includes for use within a business but
+*> EXCLUDES repackaging or for Resale, Rental or Hire in ANY way.
+*>
+*> Persons interested in repackaging, redevelopment for the purpose of resale or
+*> distribution in a rental or hire mode must get in touch with the copyright
+*> holder with your commercial plans and proposals.
+*>
+*> ACAS is distributed in the hope that it will be useful, but WITHOUT
+*> ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+*> FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+*> for more details. If it breaks, you own both pieces but I will endeavour
+*> to fix it, providing you tell me about the problem.
+*>
+*> You should have received a copy of the GNU General Public License along
+*> with ACAS; see the file COPYING.  If not, write to the Free Software
+*> Foundation, 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA.
+*>
+*>**********************************************************************************
+*>
+ environment division.
+ copy "envdiv.cob".
+*>
+ input-output section.
+ Data Division.
+ Working-Storage Section.
+ 77  prog-name           pic x(21)    value "plautogenMT (3.3.00)".
+*>
+*> JC WS requirements here
+*>
+ 77  ws-Where           pic x(512).
+ 77  ws-Where-2         pic x(512).    *> RG1
+*>
+*>  Used within presql generated code
+*>
+ 01  WS-Reply           pic x           value space.
+ 01  WS-MYSQL-I         PIC S9(4) COMP.
+ 01  WS-MYSQL-EDIT      PIC -Z(18)9.9(9).
+*>
+ *> TESING data
+ 01  WS-Temp-ED-Row         pic 9(7).  *> for row cnt. 10M-1 Inv. records
+*>
+*>  This will hold the last key read so we can know if the next request
+*>    is for a body row or not.
+*>      we will need to also hold the value from WS-ih-Lines in
+*>       the invoice table - stored in WS-Actual-Lines-In-Row.
+*>
+*>     Not used for writing but could be for deletes.
+*>
+ 01  WS-Last-Read-Key.
+     03  WS-Last-Read-Invoice pic 9(8)    value zero.
+     03  WS-Last-Read-Line    pic 99      value 40.
+ 01  WS-Actual-Lines-In-Row   pic 99      value zero.
+*>
+*> The communication area for the MySQL database changed for free/mysql
+*>
+*>  jc preSQL MySQL stuff ends
+*>
+*> Metadata on primary keys...   for PUAUTOGEN-REC
+*>
+ 01  Table-Of-KeyNames.
+     03  filler         pic x(30) value 'PINVOICE-KEY                  '.   *> In PUAUTOGEN-REC
+     03  filler         pic x(8)  value '00010010'.  *> offset/length
+     03  filler         pic x(3)  value 'STR'.       *> data type
+ *>
+     03  filler         pic x(30) value 'IL-LINE-KEY'.                      *> In PUAUTOGEN-LINES-REC
+     03  filler         pic x(8)  value '00010010'.  *> offset/length
+     03  filler         pic x(3)  value 'STR'.       *> data type
+ 01  filler redefines Table-Of-KeyNames.
+     03  KeyOfReference occurs 2
+                             indexed by KOR-x1.
+         05  keyname    pic x(30).
+         05  KOR-offset pic 9(4).
+         05  KOR-length pic 9(4).
+         05  KOR-Type   pic XXX.                    *> Not used currently
+*>
+*>  Start of RG (Repeat Groups)                        NOT USED - YET.
+*> Metadata on Repeating Groups...                     but acts as a reminder
+*>
+ 01  RG-Table.
+     03  filler  pic x(30) value 'PUAUTOGEN-LINES-REC'. *> table name
+     03  filler  pic s9(9) comp-5 value 40.         *> Max row count
+     03  filler  pic s9(9) comp-5 value zero.       *> current row
+*>                                                     Repeats as needed = None.
+ 01  filler redefines RG-Table.
+     03  RG-Entry          occurs 1
+                          indexed by RG-x1.
+         05 RG-recname    pic x(30).
+         05 RG-maxoccurs  pic s9(9) comp-5.
+         05 RG-noloaded   pic s9(9) comp-5.        *> Number loaded.
+*>
+ 01  DAL-Data.
+         05  MOST-Relation   pic xxx.                  *> valid are >=, <=, <, >, =
+         05  Most-Cursor-Set pic 9    value zero.
+             88  Cursor-Not-Active    value zero.
+             88  Cursor-Active        value 1.
+         05  Most-Cursor-Set-2 pic 9  value zero.      *> RG 1
+             88  Cursor-Not-Active-2  value zero.
+             88  Cursor-Active-2      value 1.
+*>
+*>  Variables common to all DALs
+*>  ****************************
+*>
+ 01  subscripts usage comp-5.
+     12 J                    pic s9(4).
+     12 K                    pic s9(4).
+     12 L                    pic s9(4).
+     12 J2                   pic s9(4).
+     12 K2                   pic s9(4).
+     12 L2                   pic s9(4).
+     12 M                    pic s9(4).
+*>
+ 01  WS-Body-Key             pic x(9).  *> NOT USED
+*>
+ 01  work-fields.
+     03  ws-env-lines    pic 999              value zero.
+     03  ws-lines        binary-char unsigned value zero.
+     03  ws-22-lines     binary-char unsigned value zero.
+     03  ws-23-lines     binary-char unsigned value zero.
+     03  ws-98-lines     binary-char unsigned value zero.
+     03  ws-99-lines     binary-char unsigned value zero.
+*>
+ 01  Error-Messages.
+     03  SM901          pic x(31) value "SM901 Note error and hit return".
+*>
+ 01  WS-Invoice-Line.
+     03  WS-il-Key.                     *> 10 bytes
+         05  WS-il-Invoice pic 9(8).
+         05  WS-il-Line    pic 99.
+     03  WS-il-Product     pic x(13).   *> +1 17/5/13
+     03  WS-il-Pa          pic xx.
+     03  filler            pic xx.
+     03  WS-il-Qty         binary-short.
+     03  WS-il-Type        pic x.
+     03  WS-il-Description pic x(24).
+     03  filler            pic xx.
+     03  WS-il-Net         pic s9(7)v99   comp-3.
+     03  WS-il-Unit        pic s9(7)v99   comp-3.
+     03  WS-il-Discount    pic 99v99      comp.
+     03  WS-il-Vat         pic s9(7)v99   comp-3.
+     03  WS-il-Vat-Code    pic 9.
+     03  WS-il-Update      pic x.
+         88 WS-il-Analyised                       value "Z".
+*>
+/MYSQL VAR\
+      BASE=ACASDB
+      TABLE=PUAUTOGEN-REC,HV
+      TABLE=PUAUTOGEN-LINES-REC,HV1
+/MYSQL-END\
+*>
+ Linkage Section.
+*>**************
+*>
+*>**********************************************************************
+ copy "wsfnctn.cob".                         *> File-Access
+*>
+*>**********************************************************************
+*>
+ copy "Test-Data-Flags.cob".  *> set sw-testing to zero to stop logging.
+*>
+*>  Using the first record but not the 2nd as it uses occurs 40 but
+*>   to reduce Ram usage get rid of the occurs.
+*>
+ copy "plwspinv.cob"   replacing PInvoice-Header  by WS-Invoice-Record
+                                 leading ==ih-==  by ==WS-ih-==
+                                  ==occurs 40.==  by ==.==
+                                  ==il-==         by ==Un-Used-il-==.
+*>
+ screen section.
+*>=============
+*>
+ 01  Display-Message-1       foreground-color 2.
+     03          value "WS-Where="               line 23 col  1.
+     03  from WS-Where (1:J)           pic x(69)         col 10.
+*>
+ 01  Display-Message-2       foreground-color 2.
+     03      value "SM004 SQL Err No.="           line 4 col  1.
+     03  using Ws-Mysql-Error-Number   pic x(4)          col 19.
+     03      value " Para="                              col 23.
+     03  using WS-No-Paragraph         pic 9(3)          col 29.
+     03      value " SQL Cmd="                           col 32.
+     03  using Ws-Mysql-Command        pic x(199)        col 41.
+     03      value "SQL Err Msg="                 line 7 col  1.
+     03  using Ws-Mysql-Error-Message  pic x(67)         col 13.
+*>
+*>
+ PROCEDURE DIVISION   using File-Access
+                            ACAS-DAL-Common-data
+                            WS-Invoice-Record.   *>  Ws record
+*>**********************************************
+ ba-ACAS-DAL-Process  section.
+     accept   ws-env-lines from lines.
+     if       ws-env-lines < 24
+              move  24 to ws-env-lines ws-lines
+     else
+              move  ws-env-lines to ws-lines
+     end-if
+*> Force Esc, PgUp, PgDown, PrtSC to be detected
+     set      ENVIRONMENT "COB_SCREEN_EXCEPTIONS" to "Y".
+     set      ENVIRONMENT "COB_SCREEN_ESC" to "Y".
+*>
+     add      2 to ws-lines giving ws-99-lines.
+     add      1 to ws-lines giving ws-98-lines.
+*>
+ ba010-Initialise.
+*>
+     move     zero   to SQL-State.
+*>
+*>                        We-Error
+*>                        Fs-Reply.
+*>
+     move     spaces to WS-MYSQL-Error-Message
+                        WS-MYSQL-Error-Number
+                        WS-Log-Where
+                        WS-File-Key
+                        SQL-Msg
+                        SQL-Err.
+*>
+*>  Work out what is being requested and convert to action!!
+*>
+*>    This version uses the JC pre-Sql processor.
+*>    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+*>
+     evaluate File-Function
+        when  1
+              go to ba020-Process-Open          *> Coded / D.tested
+        when  2
+              go to ba030-Process-Close         *> Coded / D.tested
+        when  3
+        when  34                                *> Read-Next-Header - Special
+              go to ba040-Process-Read-Next     *>         cursor active
+        when  4
+              go to ba050-Process-Read-Indexed
+        when  5
+              go to ba070-Process-Write         *> Coded / D.tested
+*>
+*> option 6 is a special to cleardown all LINE data for 1 invoice
+*>
+        when  6
+              go to ba085-Process-Delete-All    *> Coded / D.Tested --- DELETE-ALL  Special
+        when  7
+              go to ba090-Process-Rewrite
+        when  8
+              go to ba080-Process-Delete
+        when  9
+              go to ba060-Process-Start         *> Coded / D.tested -> read-next ?
+        when  other
+              go to ba100-Bad-Function
+     end-evaluate.
+*>
+*> Paragraphs used for RDB and log file
+*>
+*>  ba020-Process-Open         - P = 1
+*>  ba030-Process-Close        - P = 2
+*>  ba040-Process-Read-Next    - P = 3
+*>  ba041-Reread               - P = 4
+*>  ba050-Process-Read-Indexed - P = 5  SELECT
+*>  ba050-Process-Read-Indexed - P = 6  FETCH
+*>  ba060-Process-Start        - P = 8  SELECT  Invoice HEAD
+*>  ba060-Process-Start        - P = 57 SELECT  Invoice LINE
+*>  ba070-Process-Write        - P = 10 bb200-insert    HEAD
+*>  ba080-Process-Delete       - P = 13 DELETE          HEAD
+*>  ba085-Process-Delete-All   - P = 15 DELETE          HEAD
+*>  ba090-Process-Rewrite      - P = 17 UPDATE          HEAD
+*>  ba998-Free                 - P = 20 FREE
+*>  bc050-Process-Read-Indexed - P = 51 SELECT          LINES
+*>                                   52 FETCH           --
+*>  bc070-Process-Write        - P = 53 INSERT          --
+*>                                   56 UPDATE          --
+*>  bc080-Process-Delete       - P = 54 DELETE          --
+*>  bc085-Process-Delete-All   - P = 55 DELETE          --
+*>  bc090-Process-Rewrite      - P = 56 UPDATE          --
+*>
+ ba020-Process-Open.             *> dry tested - no rg01 requirements.
+ *>
+ *>  Manual process MYSQL INIT
+ *>    then perform MYSQL-1000-OPEN  THRU MYSQL-1090-EXIT
+ *>
+     string   DB-Schema      delimited by space
+              X"00"          delimited by size
+                               into WS-MYSQL-BASE-NAME
+     end-string.
+     string   DB-Host        delimited by space
+              X"00"          delimited by size
+                               into WS-MYSQL-HOST-NAME
+     end-string.
+     string   DB-UName       delimited by space
+              X"00"          delimited by size
+                               into WS-MYSQL-IMPLEMENTATION
+     end-string.
+     string   DB-UPass       delimited by space
+              X"00"          delimited by size
+                               into WS-MYSQL-PASSWORD
+     end-string.
+     string   DB-Port        delimited by space
+              X"00"          delimited by size
+                               into WS-MYSQL-PORT-NUMBER
+     end-string.
+     string   DB-Socket      delimited by space
+              X"00"          delimited by size
+                               into WS-MYSQL-SOCKET
+     end-string.
+     move     1 to ws-No-Paragraph.
+     PERFORM  MYSQL-1000-OPEN  THRU MYSQL-1090-EXIT.
+     if       fs-reply not = zero
+              go   to ba999-end.
+*>
+*> *> /MYSQL INIT\
+*>       BASE=ACASDB
+*>       IMPLEMENTATION=dev-prog-001
+*>       PASSWORD=mysqlpass
+*> *> /MYSQL-END\
+*>
+     move    "OPEN PL AUTOGEN" to WS-File-Key
+     set     Cursor-Not-Active to true
+     go      to ba999-end.
+*>
+ ba030-Process-Close.             *> dry tested - no rg01 requirements.
+     if      Cursor-Active
+             perform ba998-Free.
+*>
+     move     2 to ws-No-Paragraph.
+     move    "CLOSE PL AUTOGEN" to WS-File-Key.
+ /MYSQL CLOSE\
+ /MYSQL-END\
+     go      to ba999-end.
+*>
+ ba040-Process-Read-Next.             *> dry test.. - Has rg01 requirements.
+*>
+*>  Here we have for a given key first read and transfer a inv header
+*>   then pass on for the same key all body lines all one at
+*>     a time. This will mean that the DAL has to keep track of the
+*>       original request. so lets look at for any given invoice read in
+*>           then read body into WS and pass back.
+*>
+*>   Here a SELECT first then fetch if no cursor active using lowest
+*>    possible key of "0000000000"
+*>           [ PINVOICE-KEY ]
+*>
+     if       Cursor-Not-Active
+              set      KOR-x1 to 1                *> 1 = Primary
+              move     KOR-offset (KOR-x1) to K
+              move     KOR-length (KOR-x1) to L
+*>
+              move     spaces to WS-Where
+              move     1   to J
+              string   "`"                   delimited by size
+                       KeyName (KOR-x1)      delimited by space
+                       "`"                   delimited by size
+                       " >= "                delimited by size
+                       '"0000000000"'        delimited by size  *> for 1st time active only
+                       ' ORDER BY '          delimited by size
+                       "`"                   delimited by size
+                       keyname (KOR-x1)      delimited by space
+                       "`"                   delimited by size
+                         ' ASC'              delimited by size
+                                      into ws-Where
+                                      with pointer J
+              end-string
+*>
+              move     ws-Where (1:J)   to WS-Log-Where       *>  For test logging
+              move     3 to ws-No-Paragraph
+              /MYSQL SELECT\
+                   TABLE=PUAUTOGEN-REC
+                   WHERE=ws-Where (1:J)
+              /MYSQL-END\
+           move    "0000000000" to WS-File-Key
+              if    Testing-2
+                    display Display-Message-1 with erase eos
+              end-if
+*>
+*>  It could be an empty table so test for it
+*>
+              if       WS-MYSQL-Count-Rows = zero
+                       call  "MySQL_errno" using WS-MYSQL-Error-Number
+                       call  "MySQL_sqlstate" using WS-MYSQL-SQLstate
+                       move  WS-MYSQL-SqlState   to SQL-State
+                       if    WS-MYSQL-Error-Number  not = "0  "    *> set non '0' if no rows ?
+                             move WS-MYSQL-Error-Number to SQL-Err
+                             call "MySQL_error" using WS-MYSQL-Error-Message
+                             move WS-MYSQL-Error-Message to SQL-Msg
+                       end-if       *> do not really need to do this meaning the above CALL
+                       move 10 to fs-reply
+                       move 10 to WE-Error        *> should be 0 'JIC' likewise the others
+                       move    "No Data" to WS-File-Key
+                       go to ba999-End       *> can clear the dup code after testing
+              end-if                         *> We have data
+              set      Cursor-Active to true
+              move     WS-MYSQL-Count-Rows to WS-Temp-ED-Row
+              move    spaces to WS-File-Key
+              string   "> 0 got cnt=" delimited by size
+                       WS-Temp-ED-Row delimited by size
+                       " recs for INVOICE-REC Table"
+                        into WS-File-Key
+              end-string
+              perform ba999-End                         *> log it
+     end-if.
+*>
+ ba041-Reread.
+*>
+*>  If here cursor is set (even from start), so get the next row
+*>
+     move     spaces to WS-Log-Where.
+     move     4 to ws-No-Paragraph.
+     move     zero to return-code.
+*>
+*>  First check if a prev read has occured
+*>
+     if       WS-Last-Read-Invoice = zero      *> DALS Not yet called
+              go to ba042-Fetch.               *>  so get header rec.
+*>
+*> Check for status of body-line counts etc & get the next row in sequence within invoice.
+*>  but 1st support for Read-Next-Header to bypass line processing.
+*>
+     if       FN-Read-Next-Header
+              go to ba042-Fetch.
+*>
+     if       WS-Last-Read-Line < WS-Actual-Lines-In-Row
+              add 1 WS-Last-Read-Line giving   WS-ih-Test
+              move  WS-Last-Read-Invoice    to WS-ih-Invoice
+              perform bc050-Process-Read-Indexed thru bc059-Exit
+              if     fs-Reply not = zero    *> = 23    *> no row found
+                     initialise WS-Invoice-Record
+                     move spaces to WS-File-Key
+                     string WS-Invoice-Key
+                            " Not Found"
+                                 into WS-File-Key
+                     end-string
+                     go to ba999-End        *> This should NOT happen
+              else     *> got a row
+                     move WS-ih-Test to WS-Last-Read-Line
+                     go to ba999-End
+              end-if
+     end-if.
+*>
+*> Not, so get next invoice Header rec
+*>
+ ba042-Fetch.
+     /MYSQL FETCH\
+            TABLE=PUAUTOGEN-REC
+     /MYSQL-END\
+     end-call
+*>
+     if       return-code = -1     *> no more data so free cursor & return
+              move 10 to fs-Reply
+                         WE-Error      *> should be 0 likewise the others
+              move    "EOF" to WS-File-Key
+              set Cursor-Not-Active to true
+              go to ba999-End
+     end-if
+*>
+     if       WS-MYSQL-Count-Rows = zero   *> no data but should not happen here
+              call  "MySQL_errno" using WS-MYSQL-Error-Number
+              call  "MySQL_sqlstate" using WS-MYSQL-SQLstate
+              move  WS-MYSQL-SqlState   to SQL-State
+              if    WS-MYSQL-Error-Number  not = "0  "
+                    call "MySQL_error" using WS-MYSQL-Error-Message
+                    move WS-MYSQL-Error-Number  to SQL-Err   *> Not really needed but help for testing
+                    move WS-MYSQL-Error-Message to SQL-Msg   *>  ditto
+                    initialize WS-Invoice-Record with filler
+                   move    "EOF2" to WS-File-Key
+              end-if
+              move 10 to fs-reply                  *> EOF equivilent !!
+              move 10 to WE-Error
+              set Cursor-Not-Active to true
+              go to ba999-End
+     end-if.
+*>
+     if       fs-reply = 10                 *> should not happen as tested prior
+              set Cursor-Not-Active to true
+              move    "EOF3" to WS-File-Key
+              go to ba999-End
+     end-if.
+*>
+     perform  bb100-UnloadHVs.       *> transfer/move HV vars to Record layout
+     move     WS-Invoice-Key to WS-File-Key.
+     move     zero to fs-reply WE-Error.
+     go       to ba999-End.      *> exit.
+*>
+ ba050-Process-Read-Indexed.             *> dry test.. - Has rg01 requirements.
+*>
+*>  Test what the key end is (Line or test) & if not zero
+*>   we do RG1 insead of primary table
+*>
+     if       WS-ih-test not = zero     *> if true  process line RG
+              perform  bc050-Process-Read-Indexed  thru bc059-Exit
+              go       to ba999-exit.
+*>
+*>  Now do on correct key within WHERE
+*>  Sets up key and compare data
+*>
+     set      KOR-x1 to 1.      *> 1 = Primary
+     move     KOR-offset (KOR-x1) to K
+     move     KOR-length (KOR-x1) to L
+*>
+     move     spaces to WS-Where
+     move     1   to J
+     string   "`"                   delimited by size
+              KeyName (KOR-x1)      delimited by space
+              "`"                   delimited by size
+              '="'                  delimited by size
+              WS-Invoice-Record (K:L)       delimited by size
+              '"'                   delimited by size
+                      into WS-Where
+                        with pointer J
+     end-string
+     move     WS-Where (1:J)   to WS-Log-Where.    *>  For test logging
+     if    Testing-2
+           display Display-Message-1 with erase eos
+     end-if
+     move     5 to ws-No-Paragraph
+     /MYSQL SELECT\
+            TABLE=PUAUTOGEN-REC
+            WHERE=WS-Where (1:J)
+     /MYSQL-END\
+*>
+     if     WS-MYSQL-Count-Rows = zero
+            move 23  to fs-Reply             *> could also be 21 or 14
+            move zero to WE-Error
+            go to ba998-Free
+     end-if
+     move     6 to ws-No-Paragraph
+     /MYSQL FETCH\
+            TABLE=PUAUTOGEN-REC
+     /MYSQL-END\
+     end-call
+*>
+     if       WS-MYSQL-Count-Rows not > zero
+              call  "MySQL_errno" using WS-MYSQL-Error-Number
+              call  "MySQL_sqlstate" using WS-MYSQL-SQLstate
+              move  WS-MYSQL-SqlState   to SQL-State
+              if    WS-MYSQL-Error-Number  not = "0  "
+                    move 990 to WE-Error
+                    call "MySQL_error" using WS-MYSQL-Error-Message
+                    move WS-MYSQL-Error-Number to SQL-Err
+                    move WS-MYSQL-Error-Message to SQL-Msg
+              else
+                    move 989  to WE-Error
+                    move zero to SQL-Err
+                    move spaces to SQL-Msg
+              end-if
+              move 23   to fs-reply
+              move spaces to WS-File-Key
+              go to ba998-Free
+     end-if                        *> row count zero should show up as a MYSQL error ?
+     perform bb100-UnloadHVs       *> transfer/move HV vars to ws-Record layout
+     move     HV-PINVOICE-KEY to WS-File-Key.
+     perform ba999-End.
+*>
+     move     zero to FS-Reply WE-Error.
+     perform  ba998-Free.                       *> Free cursor
+     go       to ba999-Exit.
+*>
+ ba060-Process-Start.            *>  coded for header & lines [ NEEDED ? check all calling code ].
+*>                                   Need to see if bcnn-Read-Next is needed
+*>                                   if not than rg1 processing can be removed.
+*>
+*>  Check for Param error 1st on start
+*>
+     if       access-type < 5 or > 8                   *> not using not < or not >
+              move 99 to FS-Reply
+              move 997 to WE-Error                     *> Invalid calling parameter settings     997
+              go to ba999-end
+     end-if
+*>
+*>  First clear any active cursors
+*>
+     if       Cursor-Active
+              perform ba998-Free.
+*>
+*>   Header Records First.
+*>
+*>  Now do Start on correct key before read-next  within WHERE
+*>  Set up MOST-relation for condition test and key on Header table.
+*>
+     set      KOR-x1 to 1.
+     move     KOR-offset (KOR-x1) to K
+     move     KOR-length (KOR-x1) to L
+*>
+     move     spaces to MOST-Relation.
+     move     1   to J.
+     evaluate Access-Type
+              when  5                           *> fn-equal-to
+                    move "=  " to MOST-Relation
+              when  6                           *> fn-less-than
+                    move "<  " to MOST-Relation
+              when  7                           *> fn-greater-than
+                    move ">  " to MOST-Relation
+              when  8                           *> fn-not-less-than
+                    move ">= " to MOST-Relation
+              when  9                           *> fn-not-greater-than [ not currently used in ACAS ]
+                    move "<= " to MOST-Relation
+     end-evaluate
+*>
+     move     spaces to WS-Where
+     string   "`"                   delimited by size
+              KeyName (KOR-x1)      delimited by space
+              "`"                   delimited by size
+              MOST-relation         delimited by space
+              '"'                   delimited by size
+              WS-Invoice-Record (K:L)       delimited by size
+              '"'                   delimited by size
+              ' ORDER BY '          delimited by size
+              "`"                   delimited by size
+              keyname (KOR-x1)      delimited by space
+              "`"                   delimited by size
+                ' ASC  '            delimited by size
+                             into WS-Where
+                             with pointer J
+     end-string
+     move     WS-Where (1:J)  to WS-Log-Where.    *>  For test logging
+     move     WS-Invoice-Record (K:L) to WS-File-Key
+     if    Testing-2
+           display Display-Message-1 with erase eos
+     end-if
+*>
+     move     8 to ws-No-Paragraph
+     /MYSQL SELECT\
+            TABLE=PUAUTOGEN-REC
+            WHERE=WS-Where (1:J)
+     /MYSQL-END\
+*>
+     if       WS-MYSQL-Count-Rows not zero
+              set Cursor-Active to true
+     end-if
+*>
+     if       WS-MYSQL-Count-Rows = zero
+              call  "MySQL_errno" using WS-MYSQL-Error-Number
+              call  "MySQL_sqlstate" using WS-MYSQL-SQLstate
+              move  WS-MYSQL-SqlState   to SQL-State
+              if    WS-MYSQL-Error-Number  not = "0  "
+                    call "MySQL_error" using WS-MYSQL-Error-Message
+                    move WS-MYSQL-Error-Number  to SQL-Err
+                    move WS-MYSQL-Error-Message to SQL-Msg
+              end-if
+              move 21 to fs-reply                  *> this may need changing for val in WE-Error!!
+              move zero to WE-Error
+     else
+              move  zero to FS-Reply WE-Error
+              move     WS-MYSQL-Count-Rows to WS-Temp-ED-Row
+              string   MOST-relation
+                       WS-Invoice-Record (K:L)
+                       " got " delimited by size
+                       WS-Temp-ED-Row delimited by size
+                       " recs"
+                        into WS-File-Key
+              end-string
+     end-if
+     perform  ba999-End.
+*>
+*>  Extra code for RG1 table -- Line Body Items - ASSUMING here so ?
+*>
+     set      KOR-x1 to 2.
+     move     KOR-offset (KOR-x1) to K2.
+     move     KOR-length (KOR-x1) to L2.
+     move     1   to J2.
+     move     spaces to WS-Where-2.
+     string   "`"                   delimited by size
+              KeyName (KOR-x1)      delimited by space
+              "`"                   delimited by size
+              MOST-relation         delimited by space
+              WS-Invoice-Record (K2:L2)       delimited by size
+              ' ORDER BY '          delimited by size
+              "`"                   delimited by size
+              keyname (KOR-x1)      delimited by space
+              "`"                   delimited by size
+                ' ASC  '            delimited by size
+                             into WS-Where-2
+                             with pointer J2
+     end-string
+*>
+*>    Save the pointers (PUAUTOGEN-REC) [ and we will restore at end ]
+*>
+     move     WS-Mysql-Result     to WS-Mysql-Save-Result.     *> primary Tbl
+     move     WS-Mysql-Count-Rows to WS-Mysql-Save-Count-Rows.
+     move     zero to WS-Mysql-Count-Rows.
+*>
+     move     57 to ws-No-Paragraph
+     /MYSQL SELECT\
+            TABLE=PUAUTOGEN-LINES-REC
+            WHERE=WS-Where-2 (1:J2)
+     /MYSQL-END\
+*>
+     if       WS-MYSQL-Count-Rows not zero
+              set Cursor-Active-2 to true
+     else
+              set Cursor-Not-Active-2 to true
+     end-if
+*>
+*> Should not be zero for invoice Line table if still unposted and cleared.
+*>
+     if       WS-MYSQL-Count-Rows = zero
+              call  "MySQL_errno" using WS-MYSQL-Error-Number
+              call  "MySQL_sqlstate" using WS-MYSQL-SQLstate
+              move  WS-MYSQL-SqlState   to SQL-State
+              if    WS-MYSQL-Error-Number  not = "0  "
+                    call "MySQL_error" using WS-MYSQL-Error-Message
+                    move WS-MYSQL-Error-Number  to SQL-Err
+                    move WS-MYSQL-Error-Message to SQL-Msg
+              end-if
+              move 21 to fs-reply                  *> this may need changing for val in WE-Error!!
+              move zero to WE-Error
+     else
+              move  zero to FS-Reply WE-Error
+              move     WS-MYSQL-Count-Rows to WS-Temp-ED-Row
+              string   MOST-relation
+                       WS-Invoice-Record (K2:L2)
+                       " got " delimited by size
+                       WS-Temp-ED-Row delimited by size
+                       " recs RG1 (Lines)"
+                        into WS-File-Key
+              end-string
+     end-if
+*>
+*>  Save pointer and count for RG1 also Cursor2 active (or not )
+*>
+*>  ALL this does depend on application code  in slnnn ???? <<<<<<<
+*>
+     move     WS-Mysql-Result to WS-Mysql-Save-Result-RG1.    *> RG 1 Tb2
+     move     WS-Mysql-Count-Rows to WS-Mysql-Save-Count-Rows-RG1.
+*>
+*> Restore the Primary table pointer & row count.
+*>
+     move     WS-Mysql-Save-Result to WS-Mysql-Result.     *> primary Tbl
+     move     WS-Mysql-Save-Count-Rows to WS-Mysql-Count-Rows.
+*>
+     go       to ba999-end.
+*>
+*>  Now a read next will process a Fetch from cursor ( or cursor-2 )
+*>
+ ba070-Process-Write.             *> dry test... - Has rg01 requirements.
+*>
+*>  Are we being requested writing a body line (rg01) ? lets check
+*>    but rec still in WS-Invoice-Record
+*>
+     if       WS-ih-Test not = zero               *> It is a line row
+              perform  bc070-Process-Write thru bc070-Exit
+              go to ba999-Exit.                    *> logging rec done.
+*>
+*>  Nope its a Invoice Header
+*>
+     perform  bb000-HV-Load.                       *>  move WS-Invoice-Record fields to HV fields
+     move     WS-Invoice-Key to WS-File-Key.
+     move     zero to FS-Reply
+                      WE-Error
+                      SQL-State.
+     move     spaces to SQL-Msg
+     move     zero to SQL-Err
+     move     10 to ws-No-Paragraph.
+     perform  bb200-Insert.
+     if       WS-MYSQL-COUNT-ROWS not = 1
+              call  "MySQL_errno" using WS-MYSQL-Error-Number
+              call  "MySQL_sqlstate" using WS-MYSQL-SQLstate
+              move  WS-MYSQL-SqlState   to SQL-State
+              move  99 to fs-reply                  *> this may need changing for val in WE-Error!!
+              if    WS-MYSQL-Error-Number  not = "0  "
+                    call "MySQL_error" using Ws-Mysql-Error-Message
+                    move WS-MYSQL-Error-Number  to SQL-Err
+                    move WS-MYSQL-Error-Message to SQL-Msg
+                    if    Sql-State = "23000"      *> Dup key
+                       or SQL-Err (1:4) = "1062"   *> Ditto, ditto
+                                     or = "1022"
+                          move 22 to fs-reply
+                    end-if
+              end-if
+     end-if
+     perform  ba999-End.
+*>
+     go       to ba999-Exit.
+*>
+ ba080-Process-Delete.             *> dry tested. - Has rg01 requirements.
+*>
+*>
+*>  Are we being requested deleting a body line ? lets check
+*>
+*> [ Deleting all for a key should go to Delete-ALL   ???? ]
+*>
+     if       WS-ih-Test not = zero
+              perform  bc080-Process-Delete thru bc080-Exit
+              go to ba999-Exit.
+*>
+*>  Nope its a Invoice Header
+*>
+     set      KOR-x1 to 1.
+     move     KOR-offset (KOR-x1) to K
+     move     KOR-length (KOR-x1) to L
+*>
+     move     spaces to WS-Where
+     move     1   to J
+     string   "`"                   delimited by size
+              KeyName (KOR-x1)      delimited by space
+              "`"                   delimited by size
+              '="'                  delimited by size
+              WS-Invoice-Record (K:L)       delimited by size
+              '"'                   delimited by size
+                      into WS-Where
+                        with pointer J
+     end-string
+     move     WS-Invoice-Record (K:L)  to WS-File-Key.
+     move     WS-Where (1:J)   to WS-Log-Where.    *>  For test logging
+     if    Testing-2
+           display Display-Message-1 with erase eos
+     end-if
+     move     13 to ws-No-Paragraph.
+     /MYSQL DELETE\
+            TABLE=PUAUTOGEN-REC
+            WHERE=WS-Where (1:J)
+     /MYSQL-END\
+     if       WS-MYSQL-COUNT-ROWS not = 1
+              call "MySQL_errno" using WS-MYSQL-Error-Number
+              call  "MySQL_sqlstate" using WS-MYSQL-SQLstate
+              move  WS-MYSQL-SqlState   to SQL-State
+              if    WS-MYSQL-Error-Number  not = "0  "
+                    call "MySQL_error" using Ws-Mysql-Error-Message
+                    move WS-MYSQL-Error-Number  to SQL-Err
+                    move WS-MYSQL-Error-Message to SQL-Msg
+              end-if
+              move 99 to fs-reply
+              move 995 to WE-Error
+              go to ba999-End
+     else
+              move spaces to SQL-Msg
+              move zero   to SQL-Err
+     end-if.
+     perform  ba999-End.
+*>
+     move     zero to FS-Reply WE-Error.
+     go       to ba999-Exit.
+*>
+ ba085-Process-Delete-ALL.    *> Delete all recs for a given invoice key
+*>                                 / lines
+*>
+*> This is the equivalent of :
+*>           EXEC SQL
+*>              DELETE
+*>              FROM PUAUTOGEN-REC WHERE IH-INVOICE = {key value (1:8)}
+*>           END-EXEC.
+*>
+*>  This will delete all lines for given invoice.
+*>
+*>           EXEC SQL
+*>              DELETE
+*>              FROM PUAUTOGEN-LINES-REC WHERE IL-INVOICE = {key value (1:8)}
+*>           END-EXEC.
+*>
+*>  That creates the following code from dbpre
+*>
+*>   MOVE LOW-VALUES TO SQLCA-STATEMENT.
+*>   STRING
+*>     "DELETE " DELIMITED BY SIZE
+*>     "FROM " DELIMITED BY SIZE
+*>     "SAINVOICE-REC " DELIMITED BY SIZE
+*>     "WHERE `IH-INVOICE`="
+*>         key value (1:8)
+*>            INTO SQLCA-STATEMENT.
+*>   CALL "MySQL_query" USING SQLCA-STATEMENT.
+*>   MOVE LOW-VALUES TO SQLCA-STATEMENT.
+*>   STRING
+*>     "DELETE " DELIMITED BY SIZE
+*>     "FROM " DELIMITED BY SIZE
+*>     "SAINV-LINES-REC " DELIMITED BY SIZE
+*>     "WHERE `IL-INVOICE`="
+*>         key value (1:8)
+*>            INTO SQLCA-STATEMENT.
+*>   CALL "MySQL_query" USING SQLCA-STATEMENT.
+*>
+*>  Then doing same for other table
+*>
+*> So if this does not work it will be changed.
+*>
+     set      KOR-x1 to 1
+     move     KOR-offset (KOR-x1) to K
+     move     KOR-length (KOR-x1) to L
+*>
+     move     spaces to WS-Where
+     move     1   to J
+     string   "`"                   delimited by size
+              KeyName (KOR-x1)      delimited by space
+              "`"                   delimited by size
+              '="'                  delimited by size          *> was '<"'
+              WS-Invoice-Record (K:L)    delimited by size
+              '"'                   delimited by size
+                      into WS-Where
+                        with pointer J
+     end-string
+     move     spaces to WS-File-Key
+     move     WS-Invoice-Key to WS-File-Key
+     move     WS-Where (1:J)   to WS-Log-Where.   *>  For test logging
+     if    Testing-2
+           display Display-Message-1 with erase eos
+     end-if
+     move     15 to ws-No-Paragraph.
+     /MYSQL DELETE\
+            TABLE=PUAUTOGEN-REC
+            WHERE=WS-Where (1:J)
+     /MYSQL-END\
+     if       WS-MYSQL-COUNT-ROWS not > zero    *> Changed for delete-ALL
+              call  "MySQL_errno" using WS-MYSQL-Error-Number
+              call  "MySQL_sqlstate" using WS-MYSQL-SQLstate
+              move  WS-MYSQL-SqlState   to SQL-State
+              if    WS-MYSQL-Error-Number  not = "0  "
+                    call "MySQL_error" using Ws-Mysql-Error-Message
+                    move WS-MYSQL-Error-Number  to SQL-Err
+                    move WS-MYSQL-Error-Message to SQL-Msg
+              end-if
+              move 99  to fs-reply
+              move 995 to WE-Error
+              go to ba999-End
+     else      *> of course there could be no data in table
+              move spaces to SQL-Msg
+              move zero   to SQL-Err
+     end-if.
+     move     zero to FS-Reply
+                      WE-Error.
+     perform  ba999-End.
+*>
+*> Process RG data  where key is inv # for all lines within inv#
+*>
+     perform  bc085-Process-Delete-ALL thru bc085-Exit.
+     go       to ba999-Exit.
+*>
+ ba090-Process-Rewrite.             *> dry tested - Has rg01 requirements.
+*>
+*>  Are we being requested rewriting a body line ? lets check but
+*>    rec still in WS-Invoice-Record
+*>
+     if       WS-ih-Test not = zero
+              perform  bc090-Process-ReWrite thru bc090-Exit
+              go to ba999-Exit.                    *> logging rec done.
+*>
+*>  Nope its a Invoice Header
+*>
+     perform  bb000-HV-Load.       *> Load up the HV fields from table record in WS
+     move     WS-Invoice-Key to WS-File-Key.
+     move     17 to ws-No-Paragraph.
+     set      KOR-x1 to 1            *> 1 = Primary
+     move     KOR-offset (KOR-x1) to K
+     move     KOR-length (KOR-x1) to L
+*>
+     move     spaces to WS-Where
+     move     1   to J
+     string   "`"                   delimited by size
+              KeyName (KOR-x1)      delimited by space
+              "`"                   delimited by size
+              '="'                  delimited by size
+              WS-Invoice-Record (K:L)       delimited by size
+              '"'                   delimited by size
+                      into WS-Where
+                        with pointer J
+     end-string
+     move     WS-Where (1:J)   to WS-Log-Where.    *>  For test logging
+     perform  bb300-Update.
+*>
+     if       Testing-2
+              display Display-Message-1 with erase eos
+     end-if
+*>
+     if       WS-MYSQL-COUNT-ROWS not = 1
+              call  "MySQL_errno" using WS-MYSQL-Error-Number
+              call  "MySQL_sqlstate" using WS-MYSQL-SQLstate
+              move  WS-MYSQL-SqlState   to SQL-State
+              if    WS-MYSQL-Error-Number  not = "0  "
+                    call "MySQL_error" using Ws-Mysql-Error-Message
+                    move WS-MYSQL-Error-Number  to SQL-Err
+                    move WS-MYSQL-Error-Message to SQL-Msg
+              end-if
+              move 99 to fs-reply                  *> this may need changing for val in WE-Error!!
+              move 994 to WE-Error
+              go to ba999-End
+     end-if
+     move     zero   to FS-Reply
+                        WE-Error
+                        SQL-Err.
+     move     spaces to SQL-Msg.
+     perform  ba999-End.
+*>
+     go       to ba999-Exit.
+*>
+ ba100-Bad-Function.
+*>
+*> Houston; We have a problem
+*>
+     move     990 to WE-Error.
+     move     99 to Fs-Reply.
+     go       to ba999-end.
+*>
+/MYSQL PRO\
+/MYSQL-END\
+*>
+ ba998-Free.
+     move     20 to ws-No-Paragraph.
+     /MYSQL FREE\
+            TABLE=PUAUTOGEN-REC
+     /MYSQL-END\
+     set      Cursor-Not-Active to true.
+*>
+ ba999-end.
+*>  Any Clean ups before quiting    move data record ?????  do so at the start as well ??????
+*>
+     if       Testing-1
+              perform Ca-Process-Logs
+     end-if.
+*>
+ ba999-exit.
+     exit program.
+*>
+ bb000-HV-Load      Section.
+*>*************************
+*>
+*>  Load the Host variables with data from the passed record
+*>
+*> This Method loads the Host Variables for the Base table with
+*> the data passed in the data-buffer.
+*>
+     initialize TD-PUAUTOGEN-REC.
+*>
+     move     WS-Invoice-Key      to HV-PINVOICE-KEY.
+*>
+     move     WS-ih-Invoice       to HV-IH-INVOICE.
+     move     WS-ih-Test          to HV-IH-TEST.
+     move     WS-ih-Supplier      to HV-IH-SUPPLIER
+     move     WS-ih-Date          to HV-IH-DAT
+     move     WS-ih-Freq          to HV-IH-FREQ
+     move     WS-ih-Repeat        to HV-IH-REPEAT
+     move     WS-ih-Last-Date     to HV-IH-LAST-DATE
+     move     WS-ih-Type          to HV-IH-TYPE
+     move     WS-ih-Ref           to HV-IH-REF
+     move     WS-ih-P-C           to HV-IH-P-C
+     move     WS-ih-Net           to HV-IH-NET
+     move     WS-ih-Extra         to HV-IH-EXTRA
+     move     WS-ih-Carriage      to HV-IH-CARRIAGE
+     move     WS-ih-Vat           to HV-IH-VAT
+     move     WS-ih-Discount      to HV-IH-DISCOUNT
+     move     WS-ih-E-Vat         to HV-IH-E-VAT
+     move     WS-ih-C-Vat         to HV-IH-C-VAT
+     move     WS-ih-Status        to HV-IH-STATUS
+     move     WS-ih-Lines         to HV-IH-LINES
+     move     WS-ih-Deduct-Days   to HV-IH-DEDUCT-DAYS
+     move     WS-ih-Deduct-Amt    to HV-IH-DEDUCT-AMT
+     move     WS-ih-Deduct-Vat    to HV-IH-DEDUCT-VAT
+     move     WS-ih-Days          to HV-IH-DAYS
+     move     WS-ih-CR            to HV-IH-CR
+     move     WS-ih-Day-Book-Flag to HV-IH-DAY-BOOK-FLAG
+     move     WS-ih-Update        to HV-IH-UPDATE.
+*>
+ bb000-Exit.
+     exit section.
+*>
+ bb100-UnloadHVs    Section.
+*>*************************
+*>
+*>  Load the data buffer in the interface with data from the host variables.
+*>
+     initialize WS-Invoice-Record.
+*>
+     move     HV-IH-INVOICE       to WS-ih-Invoice
+     move     HV-IH-TEST          to WS-ih-Test
+     move     HV-IH-SUPPLIER      to WS-ih-Supplier
+     move     HV-IH-DAT           to WS-ih-Date
+     move     HV-IH-FREQ          to WS-ih-Freq
+     move     HV-IH-REPEAT        to WS-ih-Repeat
+     move     HV-IH-LAST-DATE     to WS-ih-Last-Date
+     move     HV-IH-TYPE          to WS-ih-Type
+     move     HV-IH-REF           to WS-ih-Ref
+     move     HV-IH-P-C           to WS-ih-P-C
+     move     HV-IH-NET           to WS-ih-Net
+     move     HV-IH-EXTRA         to WS-ih-Extra
+     move     HV-IH-CARRIAGE      to WS-ih-Carriage
+     move     HV-IH-VAT           to WS-ih-Vat
+     move     HV-IH-DISCOUNT      to WS-ih-Discount
+     move     HV-IH-E-VAT         to WS-ih-E-Vat
+     move     HV-IH-C-VAT         to WS-ih-C-Vat
+     move     HV-IH-STATUS        to WS-ih-Status
+     move     HV-IH-LINES         to WS-ih-Lines
+     move     HV-IH-DEDUCT-DAYS   to WS-ih-Deduct-Days
+     move     HV-IH-DEDUCT-AMT    to WS-ih-Deduct-Amt
+     move     HV-IH-DEDUCT-VAT    to WS-ih-Deduct-Vat
+     move     HV-IH-DAYS          to WS-ih-Days
+     move     HV-IH-CR            to WS-ih-CR
+     move     HV-IH-DAY-BOOK-FLAG to WS-ih-Day-Book-Flag
+     move     HV-IH-UPDATE        to WS-ih-Update.
+*>
+*>  THIS BLOCK SPECIAL FOR THIS DAL AS IT ALSO processes a RG.
+*>  ---------------------------------------------------------
+*>   Here save the ih-Lines to WS so we can keep track of body-lines.
+*>
+     move     HV-IH-LINES         to WS-Actual-Lines-In-Row.
+*>
+*>   Save sih Invoice & test as last key read.
+*>
+     move     HV-IH-INVOICE       to WS-Last-Read-Invoice.
+     move     HV-IH-TEST          to WS-Last-Read-Line. *> should be zero
+*>
+ bb100-Exit.
+     exit section.
+*>
+ bb200-Insert Section.
+*>*******************
+*>
+ /MYSQL INSERT\
+        TABLE=PUAUTOGEN-REC
+ /MYSQL-END\
+       .     *> period here
+*>
+ bb200-Exit.
+     exit section.
+*>
+ bb300-Update Section.
+*>*******************
+*>
+ /MYSQL UPDATE\
+     TABLE=PUAUTOGEN-REC
+     WHERE=WS-Where (1:J)
+ /MYSQL-END\
+       .     *> period here
+*>
+ bb300-Exit.
+     exit section.
+*>
+ bc000-RG-Process section.
+*>***********************
+*>
+*> This section contains mirror processes in ba000 section that act
+*> in support of paragraph based process to only deal with the
+*> RG ( Repeat Group ) segments of data.
+*>
+*>  Like ba000 processes they handle one action at a time and do not
+*>  do multiple commands or row at once.  This may come later but only
+*>   on a as needed basis.
+*>
+*>  So, bc050 processes the RG table for the held key obtained in
+*>  ba040 & ba050.  Same applies to Rewrite, Write & Delete.
+*>
+*>   This form will be used to process the invoice files tables for
+*>    both Sales & Purchase Ledgers.
+*>
+*>  Note that ws-No-Paragraph start at 51 for RG processing.
+*>  Each bc para must end with a bc0n0-Exit
+*>
+*>   Last para used is 58.
+*>
+ bc050-Process-Read-Indexed.    *> Dry chk complete.
+*>
+*>  This routine is called by for both Read-Next ?? and Read-Indexed.
+*>
+*>    But first save the pointers [and we will restore at end].
+*>
+     move     WS-Mysql-Result     to WS-Mysql-Save-Result.     *> primary Tbl
+     move     WS-Mysql-Count-Rows to WS-Mysql-Save-Count-Rows.
+     move     zero to WS-Mysql-Count-Rows.
+*>
+*>  Use the Key for the primary table to get the RGs that could be up to 40
+*>   one at a time on request.
+*>
+*>   WS-Last-Read-Key is the last one read so if changes we are done.
+*>
+*>  NEED TO TRANSFER RECORD TO/FROM 01 levels
+*>
+     set      KOR-x1 to 2.                    *> was  1 = Primary 12/07/23
+     move     KOR-offset (KOR-x1) to K
+     move     KOR-length (KOR-x1) to L
+     move     spaces to WS-Where
+     move     1   to J
+     string   "`"                   delimited by size
+              KeyName (KOR-x1)      delimited by space
+              "`"                   delimited by size
+              '="'                  delimited by size
+              WS-Invoice-Record (K:L)    delimited by size
+              '"'                   delimited by size
+                      into WS-Where
+                        with pointer J
+     end-string.
+     move     WS-Where (1:J)   to WS-Log-Where.    *>  For test logging
+     if    Testing-2
+           display Display-Message-1 with erase eos
+     end-if
+     move     51 to ws-No-Paragraph.
+     /MYSQL SELECT\
+            TABLE=PUAUTOGEN-LINES-REC
+            WHERE=WS-Where (1:J)
+     /MYSQL-END\
+*>
+*> Test for no data but this should not happen - Bug in code somewhere
+*>  when inserting it. So we will do a log report for analysis.
+*>
+     if       WS-MYSQL-Count-Rows = zero    *> This should not happen as have to be > 0
+              call    "MySQL_errno" using WS-MYSQL-Error-Number
+              call    "MySQL_sqlstate" using WS-MYSQL-SQLstate
+              move    WS-MYSQL-SqlState   to SQL-State
+              if      WS-MYSQL-Error-Number  not = "0  "    *> set non '0' if no rows ?
+                      move WS-MYSQL-Error-Number to SQL-Err
+                      call "MySQL_error" using WS-MYSQL-Error-Message
+                      move WS-MYSQL-Error-Message to SQL-Msg
+              end-if
+              move    23  to fs-reply
+              move    890 to WE-Error
+              move    spaces to WS-File-Key
+              string  "No RG1 Data for "
+                      WS-Invoice-Record (K:L)
+                        into WS-File-Key
+              end-string
+              initialise WS-Invoice-Record       *> Clear both in case called does not spot end of
+                         WS-Invoice-Line         *> data for Invoice and to help debugging if so
+              go      to bc058-Restore-Pointers  *> do ba999-end at end
+     end-if
+*>
+     move     WS-MYSQL-Count-Rows to WS-Temp-ED-Row.
+     string   "RG > 0 got cnt=" delimited by size
+              WS-Temp-ED-Row delimited by size
+                 " recs, KEY="
+              WS-Invoice-Record (K:L)
+                        into WS-File-Key
+     end-string.
+     perform ba999-End.                         *> log it & continue
+*>
+ bc051-Fetch-RG1.
+*>
+*>  Now get the data from RG table/s.
+*>
+     move     52 to ws-No-Paragraph
+     /MYSQL FETCH\
+            TABLE=PUAUTOGEN-LINES-REC
+     /MYSQL-END\
+     end-call
+*>
+     if       WS-MYSQL-Count-Rows  > zero
+*> transfer/move HV1 vars to ws-Invoice-Line then to ws-Invoice-Record
+              perform  bc100-UnloadHVs-rg1
+              move     WS-Invoice-Line to WS-Invoice-Record
+     else
+              initialise WS-Invoice-Line   *> Incase called does not spot no more data for invoice.
+                         WS-Invoice-Record
+              move 23 to FS-Reply
+     end-if
+*>
+*> No more rows for key
+*>
+     move     WS-Invoice-Record (K:L) to WS-File-Key.
+     move     zero to FS-Reply WE-Error.
+*>
+ bc058-Restore-Pointers.
+*>
+*> Restore the Primary table pointer & row count.
+*>
+     move     WS-Mysql-Save-Result to WS-Mysql-Result.     *> primary Tbl
+     move     WS-Mysql-Save-Count-Rows to WS-Mysql-Count-Rows.
+     perform  ba999-End.
+*>
+ bc059-Exit.  Exit.
+*>
+ bc070-Process-Write.  *> dry coded. tested - 1
+*>
+     move     WS-Invoice-Record  to  WS-Invoice-Line.
+     perform  bc000-HV-Load-rg1.
+     move     WS-Invoice-Key to WS-File-Key.   *> Same as WS-il-Key
+     move     zero to FS-Reply WE-Error.
+     move     spaces to SQL-Msg
+                        SQL-State.
+     move     zero to SQL-Err.
+     move     53  to ws-No-Paragraph.
+     perform  bc200-Insert-rg1.          *> chgd 26/07/23
+*>
+     if       WS-MYSQL-COUNT-ROWS not = 1
+              call  "MySQL_errno" using WS-MYSQL-Error-Number
+              call  "MySQL_sqlstate" using WS-MYSQL-SQLstate
+              move  WS-MYSQL-SqlState   to SQL-State
+              move  99 to fs-reply                  *> this may need changing for val in WE-Error!!
+              if    WS-MYSQL-Error-Number  not = "0  "
+                 or Sql-State = "23000"      *> Dup key (rec already present)
+                    call "MySQL_error" using Ws-Mysql-Error-Message
+                    move WS-MYSQL-Error-Number  to SQL-Err
+                    move WS-MYSQL-Error-Message to SQL-Msg
+                    if   Sql-State = "23000"      *> Dup key (rec already present)
+                      or SQL-Err (1:4) = "1062"
+                      or               = "1022"
+                         move 22 to fs-reply
+                    else
+                         move 99 to fs-reply                  *> this may need changing for val in WE-Error!!
+                    end-if
+              end-if
+              move    spaces to WS-File-Key
+              string  "Cant Re|WriteRG1 Data on "
+                      WS-Invoice-Record (K:L)
+                      " RG="
+                      WS-il-Line
+                          into WS-File-Key
+              end-string
+     end-if
+     perform ba999-End.
+*>
+ bc070-Exit.  Exit.
+*>
+ bc080-Process-Delete.     *> Dry tested.
+*>
+*>  Delete one invoice-line (Item). But data is in WS-Invoice-Record
+*>
+     set      KOR-x1 to 2.      *> inv.line
+     move     KOR-offset (KOR-x1) to K
+     move     KOR-length (KOR-x1) to L
+*>
+     move     spaces to WS-Where
+     move     1   to J
+     string   "`"                   delimited by size
+              KeyName (KOR-x1)      delimited by space
+              "`"                   delimited by size
+              '="'                  delimited by size
+              WS-Invoice-Record (K:L)       delimited by size
+              '"'                   delimited by size
+                      into WS-Where
+                        with pointer J
+     end-string
+     move     WS-Invoice-Record (K:L)  to WS-File-Key.
+     move     WS-Where (1:J)   to WS-Log-Where.    *>  For test logging
+     if    Testing-2
+           display Display-Message-1 with erase eos
+     end-if
+     move     54 to ws-No-Paragraph.           *> Delete all rows (9<=) for key
+     /MYSQL DELETE\
+            TABLE=PUAUTOGEN-LINES-REC
+            WHERE=WS-Where (1:J)
+     /MYSQL-END\
+*>
+*>  We could have from 0 to 1 so this Error report is moot.
+*>
+     if       WS-MYSQL-COUNT-ROWS not > zero
+              call "MySQL_errno" using WS-MYSQL-Error-Number
+              call  "MySQL_sqlstate" using WS-MYSQL-SQLstate
+              move  WS-MYSQL-SqlState   to SQL-State
+              if    WS-MYSQL-Error-Number  not = "0  "
+                    call "MySQL_error" using Ws-Mysql-Error-Message
+                    move WS-MYSQL-Error-Number  to SQL-Err
+                    move WS-MYSQL-Error-Message to SQL-Msg
+              end-if
+              move spaces to WS-File-Key
+              move WS-MYSQL-COUNT-ROWS to WS-Temp-ED-Row
+              string "Delete for "
+                     WS-Invoice-Record (K:L)
+                     " only found (rg01) "
+                     WS-Temp-ED-Row
+                     " Rows"
+                          into WS-File-Key
+              end-string
+              go to ba999-End
+     else
+              move spaces to SQL-Msg SQL-State
+              move zero   to SQL-Err
+     end-if.
+     move     zero to FS-Reply WE-Error.
+     perform  ba999-End.
+*>
+ bc080-Exit.  Exit.
+*>
+ bc085-Process-Delete-ALL.    *> THIS IS NON STANDARD - NEEDED (pl810)? - Coded/ D.Tested.
+*>
+*> Processes RG rows - Called by ba085-Process-Delete-All
+*>  As coded it will delete all body-lines within a given invoice, hopefully.
+*> This is the equivalent of :
+*>           EXEC SQL
+*>              DELETE
+*>              FROM PUAUTOGEN-LINES-REC WHERE 'IL-INVOICE' = WS-ih-Invoice
+*>           END-EXEC.
+*>
+*>  That creates the following code from dbpre
+*>
+*>   MOVE LOW-VALUES TO SQLCA-STATEMENT
+*>   STRING
+*>   "DELETE " DELIMITED SIZE
+*>     "FROM " DELIMITED SIZE
+*>     "PUAUTOGEN-LINES-REC " DELIMITED SIZE
+*>     "WHERE 'IL-INVOICE' = " '"' WS-ih-Invoice '"' *> "
+*>   INTO SQLCA-STATEMENT.
+*>   CALL "MySQL_query" USING SQLCA-STATEMENT
+*>
+*> So if this does not work, it will be changed.
+*>
+     set      KOR-x1 to 2
+     move     KOR-offset (KOR-x1) to K
+     move     KOR-length (KOR-x1) to L
+*>
+     move     spaces to WS-Where
+     move     1   to J
+     string
+ *>             "`"                   delimited by size
+ *>             KeyName (KOR-x1)      delimited by space    *>   ?????? should be SA
+ *>             "`"                   delimited by size
+ *>             WS-Invoice-Record (K:L)    delimited by size
+*>
+              "'IL-INVOICE'"        delimited by size
+              '="'                  delimited by size      *> was '<"'
+              WS-ih-Invoice         delimited by size
+              '"'                   delimited by size
+                      into WS-Where
+                        with pointer J
+     end-string
+     move     spaces to WS-File-Key
+     move     WS-Where (1:J)   to WS-Log-Where.   *>  For test logging
+     if    Testing-2
+           display Display-Message-1 with erase eos
+     end-if
+     move     55  to ws-No-Paragraph.
+     /MYSQL DELETE\
+            TABLE=PUAUTOGEN-LINES-REC
+            WHERE=WS-Where (1:J)
+     /MYSQL-END\
+     move     WS-MYSQL-COUNT-ROWS to WS-Temp-ED-Row
+     string   "Deleting All lines in " delimited by size
+               WS-ih-Invoice           delimited by size
+               " with "
+                WS-Temp-Ed-Row (6:2)   delimited by size
+                " lines."
+                      into WS-File-Key
+     end-string                                   *> for logging
+     if       WS-MYSQL-COUNT-ROWS not > zero    *> Changed for delete-ALL
+              call  "MySQL_errno" using WS-MYSQL-Error-Number
+              call  "MySQL_sqlstate" using WS-MYSQL-SQLstate
+              move  WS-MYSQL-SqlState   to SQL-State
+              if    WS-MYSQL-Error-Number  not = "0  "
+                    call "MySQL_error" using Ws-Mysql-Error-Message
+                    move WS-MYSQL-Error-Number  to SQL-Err
+                    move WS-MYSQL-Error-Message to SQL-Msg
+                    move 99 to fs-reply
+                    move 995 to WE-Error
+              end-if
+              perform  ba999-End
+              go   to bc085-Exit
+     else      *> of course there could be no data in table
+              move spaces to SQL-Msg
+              move zero   to SQL-Err
+     end-if.
+     move     zero to FS-Reply WE-Error.
+     perform  ba999-End.
+*>
+ bc085-Exit.  Exit.
+*>
+ bc090-Process-Rewrite section.
+*>****************************
+*>
+     move     WS-Invoice-Record  to WS-Invoice-Line.
+     perform  bc000-HV-Load-rg1.       *> Load up the HV rg1 fields from table record in WS
+     move     WS-il-Key to WS-File-Key.
+*>
+     move     56    to ws-No-Paragraph.
+     set      KOR-x1 to 2            *> 2 = Lines
+     move     KOR-offset (KOR-x1) to K
+     move     KOR-length (KOR-x1) to L
+*>
+     move     spaces to WS-Where
+     move     1   to J
+     string   "`"                   delimited by size
+              KeyName (KOR-x1)      delimited by space
+              "`"                   delimited by size
+              '="'                  delimited by size
+              WS-Invoice-Record (K:L)       delimited by size
+              '"'                   delimited by size
+                      into WS-Where
+                        with pointer J
+     end-string
+     move     WS-Where (1:J)   to WS-Log-Where.    *>  For test logging
+*>
+     perform  bc300-Update-rg1.
+*>
+     if       Testing-2
+              display Display-Message-1 with erase eos
+     end-if
+*>
+     if       WS-MYSQL-COUNT-ROWS not = 1
+              call  "MySQL_errno" using WS-MYSQL-Error-Number
+              call  "MySQL_sqlstate" using WS-MYSQL-SQLstate
+              move  WS-MYSQL-SqlState   to SQL-State
+              if    WS-MYSQL-Error-Number  not = "0  "
+                    call "MySQL_error" using Ws-Mysql-Error-Message
+                    move WS-MYSQL-Error-Number  to SQL-Err
+                    move WS-MYSQL-Error-Message to SQL-Msg
+              end-if
+              move 99 to fs-reply                  *> this may need changing for val in WE-Error!!
+              move 994 to WE-Error
+              perform ba999-End
+              go to bc090-Exit
+     end-if
+     move     zero   to FS-Reply
+                        WE-Error
+                        SQL-Err.
+     move     spaces to SQL-Msg.
+     perform  ba999-End.
+*>
+ bc090-Exit.  exit.
+*>
+ bc000-HV-Load-rg1 Section.     *> Dry chk ?
+*>*************************
+*>
+*>  Load the Host variables with data from the passed record
+*>
+*> Accommodate Repeating Groups...
+*> Now load the RG multi-rows into the 'OCCURS' fields of record.
+*>
+*> Loading RG table: PUAUTOGEN-LINES-REC
+*> <<<<  this should be a move from invoice-rec to line rec >>>>> <<>>
+*>
+     initialize TD-PUAUTOGEN-LINES-REC.
+*>
+     move     WS-il-Key         to HV1-IL-LINE-KEY
+     move     WS-il-Line        to HV1-IL-LINE
+     move     WS-il-Invoice     to HV1-IL-INVOICE
+     move     WS-il-Product     to HV1-IL-PRODUCT
+     move     WS-il-Pa          to HV1-IL-PA
+     move     WS-il-Qty         to HV1-IL-QTY
+     move     WS-il-Type        to HV1-IL-TYPE
+     move     WS-il-Description to HV1-IL-DESCRIPTION
+     move     WS-il-Net         to HV1-IL-NET
+     move     WS-il-Unit        to HV1-IL-UNIT
+     move     WS-il-Discount    to HV1-IL-DISCOUNT
+     move     WS-il-Vat         to HV1-IL-VAT
+     move     WS-il-Vat-Code    to HV1-IL-VAT-CODE
+     move     WS-il-Update      to HV1-IL-UPDATE.
+*>
+*> End of PUAUTOGEN-LINES-REC unload...
+*> End of Repeating Group processing...
+*>
+ bc000-Exit.
+     exit section.
+*>
+ bc100-UnloadHVs-rg1 Section.    *> Dry chk ?
+*>**************************
+*>
+*>  Load the data buffer in the interface with data from the host variables.
+*>
+*> Accommodate Repeating Groups...
+*> Now unload the RG multi-rows into the fields of record.
+*>
+*> Unloading RG table: PUAUTOGEN-LINES-REC
+*>
+     initialize WS-Invoice-Line.
+*>
+     move     HV1-IL-LINE-KEY    to  WS-il-Key.
+     move     HV1-IL-LINE        to  WS-il-Line
+     move     HV1-IL-PRODUCT     to  WS-il-Product
+     move     HV1-IL-PA          to  WS-il-Pa
+     move     HV1-IL-QTY         to  WS-il-Qty
+     move     HV1-IL-TYPE        to  WS-il-Type
+     move     HV1-IL-DESCRIPTION to  WS-il-Description
+     move     HV1-IL-NET         to  WS-il-Net
+     move     HV1-IL-UNIT        to  WS-il-Unit
+     move     HV1-IL-DISCOUNT    to  WS-il-Discount
+     move     HV1-IL-VAT         to  WS-il-Vat
+     move     HV1-IL-VAT-CODE    to  WS-il-Vat-Code
+     move     HV1-IL-UPDATE      to  WS-il-Update.
+*>
+*> End of PUAUTOGEN-LINES-REC unload... but save the last read line.
+*>
+     move     HV1-IL-Line to WS-Last-Read-Line.
+*>
+*> Now move it to primary WS record area.
+*>
+     move     WS-Invoice-Line to WS-Invoice-Record.
+*>
+*> End of Repeating Group processing...
+*>
+ bc100-Exit.
+     exit section.
+*>
+ bc200-Insert-rg1 Section.
+*>***********************
+*>
+ /MYSQL INSERT\
+        TABLE=PUAUTOGEN-LINES-REC
+ /MYSQL-END\
+       .     *> period here
+*>
+ bc200-Exit.
+     exit section.
+*>
+ bc300-Update-rg1 Section.
+*>***********************
+*>
+ /MYSQL UPDATE\
+     TABLE=PUAUTOGEN-LINES-REC
+     WHERE=WS-Where (1:J)
+ /MYSQL-END\
+       .     *> period here
+*>
+ bc300-Exit.
+     exit section.
+*>
+ bc998-Free.
+     move     58 to ws-No-Paragraph.
+     /MYSQL FREE\
+            TABLE=PUAUTOGEN-LINES-REC
+     /MYSQL-END\
+     set      Cursor-Not-Active-2 to true.
+*>
+ Ca-Process-Logs.
+*>**************
+*>
+     call     "fhlogger" using File-Access
+                               ACAS-DAL-Common-data.
+*>
+ ca-Exit.     exit.
+*>
+end program plautogenMT.

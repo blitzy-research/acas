@@ -1,0 +1,7 @@
+NOTES for IRS for v3.02.3.2 & v3.3 [ RDB support ]
+
+None, All completed.
+
+Created   17/11/2016 vbc.
+Updated   29/01/2018 vbc.
+Verified  25/06/2023 vbc.

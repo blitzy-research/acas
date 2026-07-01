@@ -1,0 +1,339 @@
+IRS Changelog
+
+ccyy-mm-dd  Who       What
+
+2025-09-20 Vince Coen <vbcoen@gmail.com>
+                  + Version and Revision update to v3.3.
+
+2024-01-05 Vince Coen <vbcoen@gmail.com>
+                  * irs Read & update param file from irs param data.
+
+2023-08-01 Vince Coen <vbcoen@gmail.com>
+                  * irs030 bug in opening a already open file (acasirsub1) in
+                    initialise-main fix: added a close before 2nd open.
+                    Only appeared when running with -d -g
+
+2023-06-25 Vince Coen <vbcoen@gmail.com>
+                  * Updated copyright notice to 2023.
+
+2021-02-20 Vince Coen <vbcoen@gmail.com>
+                  * Updated the IRS comp scripts to echo modules compiled
+
+2020-06-17 Vince Coen <vbcoen@gmail.com>
+                  * Updated all IRS sources to -2020 & added v2.53 in 26/09/89.
+                    where date and version taken from early code base (Cobol 2).
+
+2019-09-25 Vince Coen <vbcoen@gmail.com>
+                  * The file irsposting (file 008) was still set as a sequential
+                    and was not brought up by the compiler or any one else.
+                    Now fixed - I hope!  Effects acas008 & selirspost.cpy.
+                    IF data still present post it before recompiling.
+
+2018-05-06 Vince Coen <vbcoen@gmail.com>
+                  * THIS SECTION INCLUDES IMPORTANT CHANGES REQUIRING THE BUILD
+                    AND RUNNING OF acasconvert1 on all directories containing
+                    file irsdflt.dat, dflt.dat and this one needs to be changed
+                    to irsdflt.dat.
+                    Note that V3.02 ACAS update requires that all existing irs
+                    files be copied to the ACAS data directory and others below
+                    it for other clients etc, & the files renamed to have 'irs'
+                    at the beginning i.e., dflt.dat -> irsdflt.data
+                    The only file NOT to be copied over is system.dat that has
+                    been replaced by using the normal ACAS one.
+                    This file is NOT compatable between irs and ACAS and has
+                    been discontinued in faviour of the one from ACAS which has
+                    been modified to support irs.
+                    IF you are currently using a v3.01 version of ACAS your will
+                    need to run acasconvert1 copy over the files as outlined
+                    above then rerun the ACAS system set up process to update
+                    the new irs data within the ACAS system parameter file.
+
+                  * All FH call routines changed to clear Access-Type for any
+                    other than Open so that the logger is cleaner.
+                    ALL FH checked for EOF repeats so that status is cleared if
+                    doing any function other than read next. This applies to all
+                    ACAS systems.
+                    Fixed issues with export/import CoA in irs010 along with a
+                    warning regarding comma limited file it i.e., can be written
+                    but not read.
+                    Added time to date headings so that user can see what list
+                    is latest.
+                    Other minor bug fixes found during testing :
+                    Creating new CoA from imported file (coa-TEST-2.txt copied
+                    to coa-archive-ltd.txt).
+                    Changing various defaults and posting to new and existing
+                    file.
+                    Reporting via Audit Ledgers, VAT Day Book etc.
+                    Final account production without EOY processing.
+                    Postings amend and delete (for zero amounts in bad postings
+                    along with a renumber all postings etc.
+                    Reporting Analysis for statistics.
+                    Consider creating another version of the posting program to:
+                    A.  Support a temporary default #33 but ends when quiting
+                        the program. This WAS in GL but commented out, may need
+                        to bring it back subject to testing.
+                    B.  After then changing way it works to NOT use default
+                        a/cs but accept from to accounts as well as CR, DR etc.
+                    Add in a batch running total that resets if default a/c
+                    changed. Useful if entering from a batch report such as a
+                    PC exp. summary as I would have found it most handy to verify
+                    entered data and matching up with the IBM commercial version
+                    to some extent as need to remove multi copies of ACAS code
+                    for differing platforms.
+
+                    ************************************************************
+                    The Default file layout has been changed so if you are
+                    updating ACAS and IRS specifically from the previous version
+                    AND have existing data you MUST run acasconvert1 to change
+                    the layout. If you do not have any existing data then you do
+                    not run acasconvert1.
+                    Program will rename the old file as irsdflt.saved before
+                    creating the new version.
+                    THIS PROGRAM MUST BE RUN PRIOR TO UPDATING THE ACAS SYSTEM
+                    IN EVERY DIRECTORY YOU HAVE IRS DATA IN.
+
+                    So what different? the fields were stored in three block
+                    namely:
+                    1.  All 32 account numbers.
+                    2   All 32 posting  codes.
+                    3   All 32 VAT codes,
+
+                    Now they are stored in group format as :
+                    block occurs 33.
+                      Account-number
+                      Post code
+                      VAT code
+
+                    The 33rd block is not stored in the record as it is a place
+                    holder for the temporary default 33 used only in the posting
+                    program.
+
+                    There is no change for the RDB table as the default 33 is
+                    never saved or read in.
+
+                    USAGE:
+                      Compile the program and save to your ~/bin directory.
+                      Change to each data used for running ACAS and
+                       run acasconvert1
+                      It will rename the old file as irsdflt.saved
+                    ***********************************************************
+                    New code to support temp default 33 in posting prog, irs030
+                    along with the layout changes to the dflt file (see above).
+                    New coding started to support not using defaults in postings
+                    but account to / from instead but a lot more coding still
+                    required.
+                    Possible support for search by CoA account description but
+                    this may cause issues for coding within Cobol - have to
+                    experiement.
+                    Coding also to be added in GL to support all but subject to
+                    testing.
+                    Found bugs for backup, wrong field used for all systems.
+
+2018-04-19 Vince Coen <vbcoen@gmail.com>
+        v3.02.19  * Manual described in .18 has now been completed although
+                    subject to updates as ACAS - Building The System & contains:
+                    Obtaining, building, testing and installing the GnuCOBOL
+                    compiler.
+                    Building and installing the ACAS system with two
+                    modes - with and without RDBMS support,
+                    For users wishing to run RDBMS - Obtaining and installing
+                    MySQL or Mariadb and configuring it.
+                    Setting up users and Installing the ACASDB database so
+                    it is ready for use by ACAS.
+                    Warning and Error messages produced by each program or
+                    module by each, along with a description for dealing with
+                    each one. This may well also be in each of the system
+                    manuals but I am tempted to just have them in this manual if
+                    nothing to ease manual Maintainence.
+
+                    Again as a follow on from .18 below as IRS is fully part of
+                    ACAS it uses the same parameter file and if a user will be
+                    using it to service multiple clients accounts then for each
+                    one will have to be in different directories say under ACAS
+                    so that for users using the RDBMS system it will only hold
+                    the one file - the system parameter file which will specify
+                    the RDBMS database used for that ONE client.
+                    For users only using the Cobol file system then each
+                    directory will hold all files for that client so and example
+                    of the directory structure as say set up for Linux user
+                    acas-user :
+                    /home/acas-user
+                    /home/acas-user/ACAS
+                    /home/acas-user/ACAS/client-1
+                    /home/acas-user/ACAS/client-2
+                    /home/acas-user/ACAS/client-3
+
+                    Where client is the name of the client to be processed.
+
+                    Remember if using RDBMS for the data then each client must
+                    have their own database so instead of the default one
+                    ACASDB then using the above example :
+                    ACASDB-client1
+                    ACASDB-client2
+                    Fred-BloggsDB   for Fred Bloggs and Sons.
+
+                    Remember to set up a back up procedure for each clients
+                    database again see the above mentioned manual.
+
+                    Spell check run to find any typo's and yes there was a few.
+
+                    IRS030 - Posting have now two changes ->
+                    1.   On request for Default # will accept F1 to display
+                         Defaults
+                    2.   On request for date input during posting will accept F3
+                         to close batch and request new default etc.
+                         Displays give details of these function keys where
+                         accepted.
+                    All programs now report names of all FH & DAL units used in
+                    each and supplied extra purpose for info in remark section.
+                    Bugs cleared from ir030 during displays.
+
+
+2018-02-10  Vince Coen <vbcoen@gmail.com>
+        v3.02.18  * All upgrades outlined as in 3.02.17 have been completed
+                    and the IRS system is currently under system testing.
+                    All error messages have been renamed to match up to
+                    the standards set up for the rest of ACAS. This means
+                    that other than messages starting with SM, SY start with
+                    IR. The 900 series are system wide common messages and for
+                    program / module specific start with the program 2nd digit
+                    number the same as the message such as IR041 is from irs040
+                    and IR062 is from irs060. Will help for the manual updates.
+                    Within a program/module the series will go from IR0x0 to
+                    IR0x9 if needed (and not so far) will then go to A - Z & if
+                    that gets reached then lower case alphabetic's will be used.
+
+                    Two new scripts have been created to handle back ups for
+                    Pre EOY and Post EOY processing and these are predefined
+                    within the IRS program as acasbkup-Pre-EOY.sh and
+                    acasbkup-Post-EOY.sh and as set up will create a back up
+                    with the name extension of '-PRE' or '-POST' '-EOY'.
+                    These scripts are run before loading irs060 and after it
+                    finishes. This way a definite back up has occurred.
+
+                    IRS has now been fully integrated within the rest of ACAS
+                    and that includes using the same system parameter file, as
+                    well as the same RDBMS database.
+                    This means that for users wishing to use multiple clients
+                    with the system such as using IRS will need to have separate
+                    RDBMS Databases or different directories for the Cobol files
+                    including that of the system.dat parameter file for each
+                    client and this is needed even if using RDBMS.
+
+                    This is because the Cobol system parameter file is always
+                    read first in order to see if RDB processing is used or
+                    Cobol files and if RDB, then where to go for the data, i.e.,
+                    what server and where it is as well as the user and password
+                    information.
+
+                    I will consider doing this another way if user's have such
+                    a need.
+
+                    The RW (Report Writer)  versions of some of the reporting
+                    programs have not been upgraded, message wise and possible
+                    other updates as no one seems to be using them.
+                    This means I may well drop them but they could be left in
+                    as examples of using the RWCS within GnuCOBOL.
+
+                    As testing continues the IRS manual will be updated as well
+                    as creating a new manual just for the installation of the
+                    required elements of the Cobol Compiler and ACAS itself.
+                    This manual will also include the parameter file set up
+                    process that covers all ACAS sub systems. If nothing else it
+                    will save upgrading each and every manual where changes are
+                    needed because of a new compiler release.
+
+2016-10-16  Vince Coen <vbcoen@btconnect.com>
+        v3.02.17  * This version within the directory IRS
+                    is linked directly to the rest of ACAS where
+                    usage of IRS will be used with the other elements
+                    of ACAS such as Stock, Sales, Purchase and
+                    when used with Cobol files uses the same directory
+                    as ACAS.
+                    It is used totally in place of the Nominal Ledger
+                    namely (General sub system) where users wish to use
+                    a simpler tool to process Nominal Ledger data.
+                    Using the General sub system at the same time will
+                    result in problems and has not been tested in any
+                    way - so do not do it as they WILL clash.
+
+                    Changes made:
+                    All FH (File Handlers) are being rewritten to use
+                    acasirsn (where n = 1 through 5) in place of
+                    irsub1 through 5. These will call the RDBMS DAL
+                    Data Access Layer modules to access the Mysql
+                    database system.
+                    Written acsirs1
+                            irsnominalMT
+
+                    TODO:
+                      sys002 changes to support param capture & printing.
+                            irsnominalLD - New
+                            irspostMT    - New
+                            irspostLD    - New
+
+                            Link systemMT, dfltMT & finalMT to replace
+                            usage of irsub2 (System parameter records),
+                                     irsub3 (Defaults records),
+                                     irsub5 (Final record)
+                                     along with acas000
+                             in all IRS programs.
+                    The two versions are in different directories
+                    incomplete_records_system - The standalone system.
+                    IRS                       - Integrated with ACAS.
+                    Note that the integrated version with RDBMS support
+                    has had a version change to v3.02 but with the same
+                    build number series.
+                    The independent version is v3.01.
+
+                    It is expected that the v3.02 will be the normally
+                    used for all requirements.
+
+2016-10-14  Vince Coen <vbcoen@btconnect.com>
+        v3.01.17  * Capture in irs020 and print in irs060
+                    Finished Account titles if used.
+                    Use PL-Approp-AC if PL-App-Created set in irs060.
+                    This option is not expected to be used for the UK
+                    but might be needed for users in other countries
+                    where final account presentation might be different.
+                    Update manual for all changes excluding RDB differences
+                    as not yet finished coding.
+
+2013-12-16  Vince Coen <vbcoen@btconnect.com>
+        v3.01.16  * Added in support for GnuCOBOL v2.1 with
+                    Report Writer (RWCS) functions for reports.
+                    The original versions without RWCS have same name+
+                    -original added, e.g., irs020-original.cbl.
+
+2013-05-07  Vince Coen <vbcoen@btconnect.com>
+        v3.01.15  * Bugs in irs050/055 that produced odd reports caused
+                    by postsort file incorrectly set as ssequential instead of
+                    line seq. Cleanup in code for various programs for a
+                    precursor to more changes when time permits.
+                    Updated the manual with figures and text but still need
+                    to work out how to switch some pages to landscape as
+                    totally forgotten! after which will add report samples.
+                    Added in support for import/export of Chart of Accounts
+                    from a text file in irs020.
+
+2010-03-14  Vince Coen <vbcoen@btconnect.com>
+        v3.01.14  * Cleanup multiple field displays to comply with standards.
+
+2009-02-27  Vince Coen <vbcoen@btconnect.com>
+        v3.01.13  * Added in summary reporting to Trial Balance.
+                    Examine code to add extra facilities
+                    for postings to allow for change of default a/c.
+                    Other minor fixes as well as data backup support.
+                    Also setup for final accounts heads
+
+2009-02-21  Vince Coen <vbcoen@btconnect.com>
+        v3.01.11  * Increased size of screen layouts if LINES defined as a
+                    environment variable and tested in screen of 43 lines.
+                    (check with 'set | grep LINES' in Linux).
+
+2009-02-20  Vince Coen <vbcoen@btconnect.com>
+        v3.00.10  * Fixed various bugs many caused due conversion to free
+                    format, layouts in printing and displays.
+                    Very provisional support for large screen sizing but more
+                    to do & increment version to 3.01 from 3.00.
+

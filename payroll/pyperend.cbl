@@ -1,0 +1,691 @@
+       >>source free
+*>****************************************************************
+*>               Period End (Quarterly or Yearly).               *
+*>                                                               *
+*>    Based on param in WS-Calling-Data (WS-Process-Func)        *
+*>                                                               *
+*>****************************************************************
+*>
+ identification          division.
+*>================================
+*>
+      program-id.       pyperend.  *> Will be py100 ? (from pyperend)
+*>**
+*>    Author.           Vincent B Coen FBCS, FIDM, FIDPM, 25/03/2026.
+*>**
+*>    Security.         Copyright (C) 2025 - 2026 & later, Vincent Bryan Coen.
+*>                      Distributed under the GNU General Public License.
+*>                      See the file COPYING for details.
+*>**
+*>    Remarks.          Payroll Period End (Quarterly or Yearly).
+*>                      Semi-sourced from Basic code from pyperend.
+*>**
+*>    Version.          See Prog-Name In Ws.
+*>**
+*>    Called Modules.   NONE.
+*>**
+*>    Functions Used:
+*>                      CURRENT-DATE.
+*>    Files used :
+*>                      pypr1.   Params           -  Updated
+*>                      pyemp.   Employee Master  - QTD/YTD etc reset depending on if yearly
+*>                               Terminated - are deleted - BUT NOT UNTIL TESTED.
+*>                      pyhis.   Employee History - QTD/YTD etc reset   proc running else quarterly
+*>                      pycoh.   Company History.               reset all YTD & QTD fields etc.
+*>
+*>    Error messages used.
+*> System wide:   CHANGE ALL TO MATCH
+*>                      SY00 needs a clean up
+*> Program specific:
+*>                      PY00     needs a clean up
+*>                      PY?  -  ?. DITTO
+*>**
+*> Changes:
+*> 25/03/2026 vbc - 1.0.00 Created - starting.
+*>                         After testing version will be set to v3.3.
+*>                         WARNING: You MUST set the terminal program to be 80
+*>                         cols wide and MORE than 27 lines deep and this is to
+*>                         allow for the some of the extra lines beyond 24 to
+*>                         be used as areas for the warning or error messages
+*>                         to be displayed. 28 lines is the minimum.
+*>                         This procedure must be applied at all times when
+*>                         running Payroll.
+*>                         For almost all terminal programs, can be achieved
+*>                         by pulling the left and bottom edges of the terminal
+*>                         screen with the mouse and holding right button and
+*>                         pulling until the correct number is displayed, and
+*>                         doing so, one at a time or pulling bottom right
+*>                         corner.
+*> 27/03/2026 vbc -        Coding complete - NOT TESTED.
+*>
+*>*************************************************************************
+*> Copyright Notice.
+*> ****************
+*>
+*> These files and programs are part of the Applewood Computers Accounting
+*> System and is Copyright (c) Vincent B Coen. 1976-2026 and later.
+*>
+*> This program is now free software; you can redistribute it and/or modify it
+*> under the terms listed here and of the GNU General Public License as
+*> published by the Free Software Foundation; version 3 and later as revised
+*> for PERSONAL USAGE ONLY and that includes for use within a business but
+*> EXCLUDES repackaging or for Resale, Rental or Hire in ANY way.
+*>
+*> Persons interested in repackaging, redevelopment for the purpose of resale or
+*> distribution in a rental or hire mode must get in touch with the copyright
+*> with your commercial plans and proposals to vbcoen@gmail.com.
+*>
+*> ACAS is distributed in the hope that it will be useful, but WITHOUT
+*> ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+*> FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+*> for more details. If it breaks, you own both pieces but I will endeavour
+*> to fix it, providing you tell me about the problem.
+*>
+*> You should have received a copy of the GNU General Public License along
+*> with ACAS; see the file COPYING.  If not, write to the Free Software
+*> Foundation, 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA.
+*>
+*>*************************************************************************
+*>
+ environment             division.
+*>================================
+*>
+ copy "envdiv.cob".
+ SPECIAL-NAMES.
+       CRT STATUS IS COB-CRT-STATUS.
+ REPOSITORY.
+       FUNCTION ALL INTRINSIC.
+*>
+ input-output            section.
+ file-control.
+ copy "selpyparam1.cob".
+ copy "selpyemp.cob".
+ copy "selpyhis.cob".
+ copy "selpycoh.cob".
+*>
+ data                    division.
+*>================================
+*>
+ file section.
+*>
+ copy "fdpyparam1.cob".
+ copy "fdpyemp.cob".
+ copy "fdpyhis.cob".
+ copy "fdpycoh.cob".
+*>
+ working-storage section.
+*>-----------------------
+ 77  prog-name               pic x(17) value "PYPEREND (1.0.00)".  *> First release pre testing.
+*>
+ 01  WS-Data.
+     03  Menu-Reply          pic x.
+     03  PY-PR1-Status       pic xx       value zero.
+     03  PY-Emp-Status       pic xx       value zero.
+     03  PY-His-Emp-Status   pic xx       value zero.
+     03  PY-Coh-Status       pic xx       value zero.
+*>
+     03  WS-Reply            pic x.
+     03  WS-Answer           pic xxx.
+     03  WS-Eval-Msg         pic x(25)    value spaces.
+     03  WS-Err-Msg          pic x(40)    value spaces.  *> Make large enough for longest SY msg
+     03  WS-Env-Columns      pic 999      value zero.
+     03  WS-Env-Lines        pic 999      value zero.
+     03  WS-22-Lines         pic 99.
+     03  WS-23-Lines         pic 99.
+     03  WS-Lines            pic 99.
+*>
+ 01  WS-Test-Date            pic x(10).
+ 01  WS-Test-YMD             pic 9(8).
+ 01  WS-PR1-Dating           pic 9(8).
+ 01  WS-Date-Formats.
+     03  WS-Swap             pic 99.
+     03  WS-Conv-Date        pic x(10).
+     03  WS-Date             pic x(10)   value "99/99/9999".
+     03  WS-UK redefines WS-Date.   *> Other optional format
+         05  WS-Days         pic 99.
+         05  filler          pic x.
+         05  WS-Month        pic 99.
+         05  filler          pic x.
+         05  WS-Year         pic 9(4).
+     03  WS-USA redefines WS-Date.  *> Default format
+         05  WS-USA-Month    pic 99.
+         05  filler          pic x.
+         05  WS-USA-Days     pic 99.
+         05  filler          pic x.
+         05  filler          pic 9(4).
+     03  WS-Intl redefines WS-Date.   *> Not used.
+         05  WS-Intl-Year    pic 9(4).
+         05  filler          pic x.
+         05  WS-Intl-Month   pic 99.
+         05  filler          pic x.
+         05  WS-Intl-Days    pic 99.
+*>
+ 01  WS-Quarter-Table.
+     03   filler         pic x(6) value "First".
+     03   filler         pic x(6) value "Second".
+     03   filler         pic x(6) value "Third".
+     03   filler         pic x(6) value "Fourth".
+ 01  WS-Quarters redefines WS-Quarter-Table
+                         pic x(6) occurs 4.
+*>
+ 01  WS-Local-Vars.
+     03  WS-Ending.
+         05  WS-Ending9  pic 9     value zero.
+     03  WS-OK           pic x     value "N".      *> = Y to continue
+     03  WS-New-Year     pic 9(4)  value zero.
+     03  WS-Delete-OK    pic x     value "N".
+*>
+ 01  Error-Messages.
+*> System Wide
+     03  SY001           pic x(46) value "SY001 Aborting run - Note error and hit Return".
+ *>    03  SY002           pic x(31) value "SY002 Note error and hit Return".
+ *>    03  SY003           pic x(51) value "SY003 Aborting function - Note error and hit Return".
+     03  SY004           pic x(20) value "SY004 Now Hit Return".
+ *>    03  SY005           pic x(18) value "SY005 Invalid Date".
+ *>    03  SY008           pic x(32) value "SY008 Note message & Hit Return ".
+     03  SY010           pic x(46) value "SY010 Terminal program not set to length => 28".
+ *>    03  SY011           pic x(47) value "SY011 Error on systemMT processing, FS-Reply = ".
+     03  SY013           pic x(47) value "SY013 Terminal program not set to Columns => 80".
+ *>    03  SY014           pic x(30) value "SY014 Press return to continue".
+     03  SY015           pic x(30) value "SY015 Completed Unsuccessfully".
+     03  SY016           pic x(28) value "SY016 Completed Successfully".
+*>
+*> Module General ?
+*>
+     03  PY001           pic x(36) value "PY001 Re/Write PARAM record Error = ".
+     03  PY002           pic x(32) value "PY002 Read PARAM record Error = ".
+ *>    03  PY004           pic x(29) value "PY004 To quit, use ESCape key".
+*>
+     03  PY015           pic x(33) value "PY015 Error Reading Emp Record - ".
+     03  PY016           pic x(33) value "PY016 Error Reading His Record - ".
+     03  PY017           pic x(33) value "PY017 Error Reading Coh Record - ".
+*>
+     03  PY018           pic x(35) value "PY018 Error Rewriting Emp Record - ".
+     03  PY019           pic x(35) value "PY019 Error Rewriting His Record - ".
+     03  PY020           pic x(35) value "PY020 Error Rewriting Coh Record - ".
+*>
+*> Module specific
+*>
+     03  PY721           pic x(24) value "PY721 Emp File Not Found".
+     03  PY722           pic x(24) value "PY722 His File Not Found".
+     03  PY723           pic x(24) value "PY723 Coh File Not Found".
+ *>    03  PY724           pic x(32) value "PY724 Unexpected Eof On Coh File".
+     03  PY725           pic x(24) value "PY725 PR2 File Not Found".
+     03  PY726           pic x(48) value "PY726 Can't End Year.  Fourth Quarter Not Closed".
+ *>    03  PY727           pic x(48) value "PY727 Can't End Year.  Fourth Quarter Not Closed".
+     03  PY728           pic x(38) value "PY728 Can't End Year.  940 Not Printed".
+     03  PY729           pic x(37) value "PY729 Can't End Year.  W2 Not Printed".
+ *>    03  PY730           pic x(55) value "PY730 Can't End Quarter.  Not Enough Week based Applies".
+ *>    03  PY731           pic x(56) value "PY731 Can't End Quarter.  Not Enough Month based Applies".
+     03  PY732           pic x(41) value "PY732 Can't End Quarter.  941 Not Printed".
+     03  PY733           pic x(38) value "PY733 Can't End Year.  Just Ended Year".
+     03  PY734           pic x(52) value "PY734 Bug - Do not know what to process - Not Q or Y".
+     03  PY735           pic x(37) value "PY735 Bug - Wrong value for Ending - ".
+*>
+     03  PY736           pic x(25) value "PY736 Ending for the Year".                         *> 15
+     03  PY737           pic x(38) value "PY737 Ending for the        Quarter Of".            *> 16
+ *>    03  PY738           pic x(71) value "PY738 The Next Check Date Must Be Within January, February, or March of".     *> 17
+ *>    03  PY739           pic x(63) value "PY739 The Next Check Date Must Be Within April, May, or June of".             *> 18
+ *>    03  PY740           pic x(70) value "PY740 The Next Check Date Must Be Within July, August, or September of".      *> 19
+ *>    03  PY741           pic x(74) value "PY741 The Next Check Date Must Be Within October, November, or December of".  *> 20
+ *>    03  PY742           pic x(48) value "PY742 Employee Processing Will Begin Momentarily".  *> 21
+ *>    03  PY743           pic x(37) value "PY743 Now Processing Employee Number:".             *> 22
+     03  PY744           pic x(44) value "PY744 If All Period Ending Information Shown".      *> 23
+     03  PY745           pic x(36) value "PY745 Is Correct, Type 'YES'   [   ]".              *> 24
+     03  PY746           pic x(47) value "PY746 Terminated Employees are Being Deleted - ".   *> 25
+     03  PY747           pic x(42) value "PY747 Can I DELETE terminated Employees - ".
+*>
+ 01  COB-CRT-Status      pic 9(4)         value zero.
+     copy "screenio.cpy".
+*>
+*>  might be needed but test remed out
+*>
+ copy "wstime.cob".
+*>
+ *> copy "wsmaps03.cob".    *> for maps04
+ copy "wsfnctn.cob".
+*>
+ copy "Test-Data-Flags.cob".  *> set sw-Testing to zero to stop logging.
+*>
+ linkage section.
+*>***************
+*>
+ copy "wscall.cob".
+ copy "wssystem.cob"   replacing System-Record by WS-System-Record.
+ copy "wsnames.cob".
+*>
+ 01  To-Day              pic x(10).
+*>
+ procedure division using WS-Calling-Data  *> ACAS
+                          WS-System-Record *> ACAS
+                          To-Day           *> ACAS
+                          File-Defs.       *> ACAS
+*>
+ aa000-Main                  section.
+*>**********************************
+*> Force Esc, PgUp, PgDown, PrtSC to be detected
+     set      ENVIRONMENT "COB_SCREEN_EXCEPTIONS" to "Y".
+     set      ENVIRONMENT "COB_SCREEN_ESC" to "Y".
+     move     Current-Date to WSE-Date-block.
+*>
+     perform  forever
+              accept   WS-Env-Lines   from lines
+              if       WS-Env-Lines < 28
+                       display  SY010    at 0101 with erase eos
+                       accept   WS-Reply at 0133
+                       move     8 to WS-Term-Code
+                       exit perform cycle
+              end-if
+              accept   WS-Env-Columns from Columns
+              if       WS-Env-Columns < 80
+                       display  SY013    at 0101 with erase eos
+                       accept   WS-Reply at 0130
+                       move     8 to WS-Term-Code
+                       exit perform cycle
+              end-if
+     end-perform.
+*>
+*> Set up error message areas on screen - NEEDED ?
+*>
+     subtract 2 from WS-Env-Lines giving WS-22-Lines.
+     subtract 1 from WS-Env-Lines giving WS-23-Lines.
+     move     WS-Env-Lines to WS-Lines.
+*>
+     move     1 to RRN.
+     open     input PY-Param1-File.
+     if       PY-PR1-Status not = "00"      *> Does not exist yet so lets create it & write rec
+              close    PY-Param1-File
+              display  PY725 at line WS-23-Lines col 1 with erase eos
+              display  SY001         at line WS-Lines    col 1
+              accept   WS-Reply      at line WS-Lines    col 48 AUTO
+              move     16 to WS-Term-Code
+              goback   returning 1.
+*>
+     move     1 to RRN.
+     read     PY-Param1-File key RRN.
+     if       PY-PR1-Status not = "00"
+              perform  ZZ040-Evaluate-Message
+              display  PY002         at line WS-23-Lines col 1 with erase eos
+              display  PY-PR1-Status at line WS-23-Lines col 33
+              display  WS-Eval-Msg   at line WS-23-Lines col 36
+              display  SY001         at line WS-Lines    col 1
+              accept   WS-Reply      at line WS-Lines    col 48 AUTO
+              close    PY-Param1-File
+              move     16 to WS-Term-Code
+              goback   returning 1.
+*> PR1 left open
+ *>    move     zero  to  Menu-Reply.
+*>
+     open     i-o PY-Employee-File.
+     if       PY-Emp-Status not = zeros
+              display  PY721 at line  WS-23-Lines col 1 with erase eos
+              display  SY001         at line WS-Lines    col 1
+              accept   WS-Reply      at line WS-Lines    col 48 AUTO
+              close    PY-Param1-File
+              close    PY-Employee-File
+              move     16 to WS-Term-Code
+              goback   returning 2.
+ *>
+     open     i-o PY-History-File.
+     if       PY-His-Emp-Status not = zeros
+              display  PY722 at line  WS-23-Lines col 1 with erase eos
+              display  SY001         at line WS-Lines    col 1
+              accept   WS-Reply      at line WS-Lines    col 48 AUTO
+              close    PY-Param1-File
+                       PY-Employee-File
+                       PY-History-File
+              move     16 to WS-Term-Code
+              goback   returning 3.
+*>
+     open     i-o PY-Comp-Hist-File.
+     if       PY-Coh-Status not = zeros
+              display  PY723 at line  WS-23-Lines col 1 with erase eos
+              display  SY001         at line WS-Lines    col 1
+              accept   WS-Reply      at line WS-Lines    col 48 AUTO
+              close    PY-Param1-File
+                       PY-Employee-File
+                       PY-History-File
+                       PY-Comp-Hist-File
+              move     16 to WS-Term-Code
+              goback   returning 4.
+*>
+     move     1 to RRN.
+     read     PY-Comp-Hist-File.
+     if       PY-Coh-Status not = zeros
+              move     PY-Coh-Status to PY-PR1-Status
+              perform  ZZ040-Evaluate-Message
+              display  PY017 at line  WS-23-Lines col 1 with erase eos
+              display  PY-Emp-Status at line WS-23-Lines col 34
+              display  WS-Eval-Msg   at line WS-23-Lines col 37
+              display  SY001         at line WS-Lines    col 1
+              accept   WS-Reply      at line WS-Lines    col 48 AUTO
+              close    PY-Param1-File
+                       PY-Employee-File
+                       PY-History-File
+                       PY-Comp-Hist-File
+              move     16 to WS-Term-Code
+              goback   returning 4.
+*>
+*> Determine which period
+*>
+     display  space at 0101 erase eos.  *> should be already
+*> start 400
+     if       WS-Process-Func = 1      *> Quarter end proceesing requested  410
+              move     "Q" to WS-Ending
+      else
+       if     WS-Process-Func = 2   *> Year end proceesing requested
+              move     "Y" to WS-Ending
+        else                        *> A  bug some where?
+              display  PY734 at line WS-22-Lines  col 1 with erase eos
+              display  SY001 at line WS-Lines     col 1
+              accept   WS-Reply  at line WS-Lines col 48 AUTO
+              close    PY-Param1-File
+                       PY-Employee-File
+                       PY-History-File
+                       PY-Comp-Hist-File
+              move     16 to WS-Term-Code
+              goback   returning 5.
+*>
+     if       WS-Ending = "Y"
+       and    PY-PR2-Last-Q-Ended not = 4
+              display  PY726 at line WS-22-Lines  col 1 with erase eos
+              display  SY001 at line WS-Lines     col 1
+              accept   WS-Reply  at line WS-Lines col 48 AUTO
+              close    PY-Param1-File
+                       PY-Employee-File
+                       PY-History-File
+                       PY-Comp-Hist-File
+              move     16 to WS-Term-Code
+              goback   returning 6.
+*>
+     if       WS-Ending = "Q"      *> Determine which Quarter start 420
+              evaluate PY-PR2-Last-Q-Ended
+                when   4
+                       move     1 to WS-Ending  *> Set to next Q
+                when   3
+                       move     4 to WS-Ending
+                when   2
+                       move     3 to WS-Ending
+                when   1
+                       move     2 to WS-Ending
+                when   other
+                       display  PY735 at line WS-22-Lines  col 1 with erase eos
+                       display  SY001 at line WS-Lines     col 1
+                       accept   WS-Reply  at line WS-Lines col 48 AUTO
+                       close    PY-Param1-File
+                                PY-Employee-File
+                                PY-History-File
+                                PY-Comp-Hist-File
+                       move     16 to WS-Term-Code
+                       goback   returning 7
+              end-evaluate.
+*> 430 EOY ?
+     move     space    to WS-OK.
+     if       WS-Ending = "Y"
+              if       PY-PR2-940-Printed not = "Y" *> 08 728
+                       move     "N" to WS-OK
+                       display  PY728 at 1201
+              else
+               if      PY-PR2-W2-Printed not = "Y"  *> 09 729
+                       move     "N" to WS-OK
+                       display  PY729 at 1301
+               else
+                if     PY-PR2-Just-Closed-Year = "Y" *> 13 733
+                       move     "N" to WS-OK
+                       display  PY733 at 1401
+                else
+                       move     "Y" to WS-OK.
+*> 435 EOQ ?
+     if       WS-Ending not = "Y"
+       and    PY-PR2-941-Printed not = "Y"  *> 12  732
+              move     "N" to WS-OK
+              display  PY732 at 1501
+     end-if
+*> 400 B
+     if       WS-OK not = "Y"
+              close    PY-Param1-File
+                       PY-Employee-File
+                       PY-History-File
+                       PY-Comp-Hist-File
+              display  SY015 at 1501
+              display  SY001 at 1601
+              accept   WS-Reply at 1648
+              move     16 to WS-Term-Code
+              goback   returning 8.         *> Not ready for EOY / EOQ
+*> 400 C
+     if       WS-Ending = "Y"
+              add      1  PY-PR2-Year giving WS-New-Year.
+*> 440 450
+     if       WS-OK = "N"
+              display  SY015 at 2201 foreground-color 6
+              close    PY-Param1-File
+                       PY-Employee-File
+                       PY-History-File
+                       PY-Comp-Hist-File
+              move     16 to WS-Term-Code
+              goback   returning 8.
+*>
+     move     PY-PR2-Year to WS-Year.
+     if       WS-Ending = "Y"
+              display  PY736   at 1201    *> next 27
+              display  WS-Year at 1227
+     else
+              display  PY737   at 1201    *> next 27
+              display  WS-Quarters (WS-Ending9)  at 1222
+              display  WS-Year at 1240.
+*> 440 still
+     if       WS-Ending = 4
+              add       1 to WS-Year
+              move      1 to WS-Ending9
+     else
+              add       1 to WS-Ending9.
+     display  PY737   at 1201.
+     display  WS-Quarters (WS-Ending9)  at 1222.
+     display  WS-Year at 1240.
+*> 450
+     display  PY744 at line WS-22-Lines     col 1.
+     display  PY745 at line WS-23-Lines     col 1.
+     accept   WS-Answer at line WS-23-Lines col 32 UPPER.
+     if       WS-Answer = "YES"
+              move     "Y" to WS-OK
+     else
+              move     "N" to WS-OK.
+     display  PY747 at line WS-22-Lines   col 1.
+     display  PY745 at line WS-23-Lines   col 1.
+     accept   WS-Answer at line WS-23-Lines col 32 UPPER.
+     if       WS-Answer = "YES"
+              move     "Y" to WS-Delete-OK
+     else
+              move     "N" to WS-Delete-OK.
+*>
+     display  space    at line WS-22-Lines col 1 erase eos.
+*>
+     if       WS-OK = "N"
+              display  SY015 at 2201 foreground-color 6
+              close    PY-Param1-File
+                       PY-Employee-File
+                       PY-History-File
+                       PY-Comp-Hist-File
+              move     16 to WS-Term-Code
+              goback   returning 8.
+*>
+*> Get the Emp and matching His Emp records
+*>
+     perform  forever
+              read     PY-Employee-File next at end
+                       exit perform
+              end-read
+              if       PY-Emp-Status not = zero
+                       move     PY-Emp-Status to PY-PR1-Status
+                       perform  ZZ040-Evaluate-Message
+                       display  PY015         at line WS-23-Lines col 1 foreground-color 6 erase eos
+                       display  PY-Emp-Status at line WS-23-Lines col 34
+                       display  WS-Eval-Msg   at line WS-23-Lines col 37
+                       display  SY001         at line WS-Lines    col 1
+                       accept   WS-Reply      at line WS-Lines    col 48 AUTO
+                       close    PY-Param1-File
+                                PY-Employee-File
+                                PY-History-File
+                                PY-Comp-Hist-File
+                       move     16 to WS-Term-Code
+                       goback   returning 10
+              end-if
+              move     Emp-No to His-Emp-No
+              read     PY-History-File key His-Emp-No
+              if       PY-His-Emp-Status not = zero
+                       move     PY-His-Emp-Status to PY-PR1-Status
+                       perform  ZZ040-Evaluate-Message
+                       display  PY016         at line WS-23-Lines col 1 foreground-color 6 erase eos
+                       display  PY-Emp-Status at line WS-23-Lines col 34
+                       display  WS-Eval-Msg   at line WS-23-Lines col 37
+                       display  SY001         at line WS-Lines    col 1
+                       accept   WS-Reply      at line WS-Lines    col 48 AUTO
+                       close    PY-Param1-File
+                                PY-Employee-File
+                                PY-History-File
+                                PY-Comp-Hist-File
+                       move     16 to WS-Term-Code
+                       goback   returning 11
+              end-if
+*>
+*> So have both Employee and Employee History records - lucky us
+*>
+              if       WS-Ending = "Y"
+                       subtract Emp-Vac-Used from Emp-Vac-Accum
+                       subtract Emp-SL-Used  from Emp-SL-Accum
+                       subtract Emp-Comp-Used from Emp-Comp-Accum
+                       move     zero to Emp-Vac-Used
+                                        Emp-SL-Used
+                                        Emp-Comp-Used
+              end-if
+*>
+              if       Emp-Status = "T"
+                 and   WS-Ending = "Y"
+                       move     "D" to Emp-Status *> mark it but not delete it - YET
+                       display  PY746  at line WS-22-Lines col 1
+                       display  Emp-No at line WS-22-Lines col 48
+              else
+                       display  space  at line WS-22-Lines col 1 erase eol
+              end-if
+*>
+              if       WS-Ending = "Y"
+                       initialise
+                                His-YTD
+                                His-QTD
+              end-if
+*>
+              rewrite  PY-Employee-Record
+              if       PY-Emp-Status not = zeros  *> ABORT
+                       move     PY-Emp-Status to PY-PR1-Status
+                       perform  ZZ040-Evaluate-Message
+                       display  PY018         at line WS-23-Lines col 1 foreground-color 6 erase eos
+                       display  PY-Emp-Status at line WS-23-Lines col 34
+                       display  WS-Eval-Msg   at line WS-23-Lines col 37
+                       display  SY001         at line WS-Lines    col 1
+                       accept   WS-Reply      at line WS-Lines    col 48 AUTO
+                       close    PY-Param1-File
+                                PY-Employee-File
+                                PY-History-File
+                                PY-Comp-Hist-File
+                       move     16 to WS-Term-Code
+                       goback   returning 12
+              end-if
+*>
+              rewrite  PY-History-Record
+              if       PY-His-Emp-Status not = zeros  *> ABORT
+                       move     PY-His-Emp-Status to PY-PR1-Status
+                       perform  ZZ040-Evaluate-Message
+                       display  PY019         at line WS-23-Lines col 1 foreground-color 6 erase eos
+                       display  PY-Emp-Status at line WS-23-Lines col 34
+                       display  WS-Eval-Msg   at line WS-23-Lines col 37
+                       display  SY001         at line WS-Lines    col 1
+                       accept   WS-Reply      at line WS-Lines    col 48 AUTO
+                       close    PY-Param1-File
+                                PY-Employee-File
+                                PY-History-File
+                                PY-Comp-Hist-File
+                       move     16 to WS-Term-Code
+                       goback   returning 12
+              end-if
+     end-perform.
+*>
+     if       WS-Ending = "Y"  *> Year Init.
+              initialise
+                       Coh-YTD
+                       Coh-Date-Tax
+                       Coh-Q-Taxes
+
+     else     *> Quarter init.
+              move     Coh-QTD-Co-futa-Liab to Coh-Q-Co-Futa-Liab (WS-Ending9)
+              move     Coh-QTD-FWT-Liab     to Coh-Q-Tax (WS-Ending9)
+              add      Coh-QTD-Fica-Liab
+                       Coh-QTD-Co-Fica-Liab  to Coh-Q-Fica-Tax (WS-Ending9)
+              initialise
+                       Coh-QTD
+                       Coh-Date-Tax
+     end-if
+     move     1 to RRN.
+     rewrite  PY-Comp-Hist-Record.
+     if       PY-Coh-Status not = zeros    *> ABORT
+              move     PY-Coh-Status to PY-PR1-Status
+              perform  ZZ040-Evaluate-Message
+              display  PY020         at line WS-23-Lines col 1 foreground-color 6 erase eos
+              display  PY-Coh-Status at line WS-23-Lines col 34
+              display  WS-Eval-Msg   at line WS-23-Lines col 37
+              display  SY001         at line WS-Lines    col 1
+              accept   WS-Reply      at line WS-Lines    col 48 AUTO
+              close    PY-Param1-File
+                       PY-Employee-File
+                       PY-History-File
+                       PY-Comp-Hist-File
+              move     16 to WS-Term-Code
+              goback   returning 12
+     end-if
+*>
+*> Update PR2
+*>
+     if       WS-Ending = "Y"
+              Move     PY-PR2-Year to PY-PR2-Last-Year-Ended
+              add      1 to PY-PR2-Year
+              move     "N" to PY-PR2-940-Printed
+                              PY-PR2-W2-Printed
+              move     "Y" to PY-PR2-Just-Closed-Year
+     else
+              move     WS-Ending9 to PY-PR2-Last-Q-Ended
+              move     "N"  to PY-PR2-941-Printed
+                               PY-PR2-Just-Closed-Year
+              move     zero to PY-PR2-No-of-WB-Applies
+                               PY-PR2-No-of-SM-Applies
+     end-if,
+*>
+*> EOJ
+*>
+     rewrite  PY-Param1-Record.
+     if       PY-PR1-Status not = "00"   *> If error just report it as too late now - data recovery and rerun ?
+              perform  ZZ040-Evaluate-Message
+              display  PY001         at line WS-23-Lines col 1 with erase eos
+              display  PY-PR1-Status at line WS-23-Lines col 37
+              display  WS-Eval-Msg   at line WS-23-Lines col 40
+              display  SY001         at line WS-Lines    col 1
+              accept   WS-Reply      at line WS-Lines    col 48 AUTO.
+*>
+     close    PY-Param1-File
+              PY-Employee-File
+              PY-History-File
+              PY-Comp-Hist-File.
+     move     0 to WS-Term-Code.
+     display  SY016 at line WS-23-Lines  col 1 with erase eos.
+     display  SY004 at line WS-Lines     col 1.
+     accept   WS-Reply  at line WS-Lines col 22 AUTO.
+     goback.
+*>
+*>
+ ZZ040-Evaluate-Message      Section.
+*>**********************************
+*>
+*> For PY-PR1 parameter file anfd other using PR-PR1-Status.
+*>
+     copy "FileStat-Msgs-2.cpy" replacing MSG  by WS-Eval-Msg
+                                        STATUS by PY-PR1-Status.
+     exit     section.
+*>

@@ -1,0 +1,1115 @@
+       >>source free
+*>****************************************************************
+*>          Employee Regular Hours Entry Program                 *
+*>                                                               *
+*>****************************************************************
+*>
+ identification          division.
+*>================================
+*>
+      program-id.       py020.
+*>**
+*>    Author.           Vincent B Coen FBCS, FIDM, FIDPM, 19/10/2025.
+*>**
+*>    Security.         Copyright (C) 2025 - 2026 & later, Vincent Bryan Coen.
+*>                      Distributed under the GNU General Public License.
+*>                      See the file COPYING for details.
+*>**
+*>    Remarks.          Employee Hours Entry..
+*>                      Semi-sourced from Basic code from hrsent.
+*>**
+*>    Version.          See Prog-Name In Ws.
+*>**
+*>    Called Modules.
+*>                      (CBL_) ACCEPT_NUMERIC.c as STATIC.
+*>                      CBL_DELETE_FILE.
+*>                      CBL_GC_SCR_DUMP.
+*>                      CBL_GC_SCR_RESTORE.
+*>**
+*>    Functions Used:
+*>                      TEST-DATE-YYYYMMDD.    ??
+*>                      UPPER-CASE.            ??
+*>    Files used :
+*>                      pypr1.   Params
+*>                      pyhrs.   Pay Hours Transactions
+*>                      pyemp.   Employee Master.
+*>                      pyhis.   Employee History.
+*>
+*>    Error messages used.
+*> System wide:
+*>                      SY002, 3, 4, 5, 10, 11, 13, 14.
+*> Program specific:
+*>                      PY001, 2 - 10  ??
+*>                      PY101 - 121.   ??
+*>                      PY        ??
+*>**
+*> Changes:
+*> 04/04/2026 vbc - 1.0.00 Created - starting.
+*> 07/04/2026 vbc -    .01 Changed Hrs-File to Sequential as can have multi
+*>                         records for same employee.
+*>
+*>*************************************************************************
+*>
+*> Copyright Notice.
+*> ****************
+*>
+*> This notice supersedes all prior copyright notices & was updated 2024-04-16.
+*>
+*> These files and programs are part of the Applewood Computers Accounting
+*> System and is Copyright (c) Vincent B Coen. 1976-2026 and later.
+*>
+*> This program is now free software; you can redistribute it and/or modify it
+*> under the terms listed here and of the GNU General Public License as
+*> published by the Free Software Foundation; version 3 and later as revised
+*> for PERSONAL USAGE ONLY and that includes for use within a business but
+*> EXCLUDES repackaging or for Resale, Rental or Hire in ANY way.
+*>
+*> Persons interested in repackaging, redevelopment for the purpose of resale or
+*> distribution in a rental or hire mode must get in touch with the copyright
+*> with your commercial plans and proposals to vbcoen@gmail.com.
+*>
+*> ACAS is distributed in the hope that it will be useful, but WITHOUT
+*> ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+*> FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+*> for more details. If it breaks, you own both pieces but I will endeavour
+*> to fix it, providing you tell me about the problem.
+*>
+*> You should have received a copy of the GNU General Public License along
+*> with ACAS; see the file COPYING.  If not, write to the Free Software
+*> Foundation, 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA.
+*>
+*>*************************************************************************
+*>
+ environment             division.
+*>================================
+*>
+ copy "envdiv.cob".
+ SPECIAL-NAMES.
+       CRT STATUS IS COB-CRT-STATUS.
+ REPOSITORY.
+       FUNCTION ALL INTRINSIC.
+*>
+ input-output            section.
+ file-control.
+ copy "selpyparam1.cob".
+ copy "selpyhrs.cob".
+ copy "selpyemp.cob".
+*>
+ data                    division.
+*>================================
+*>
+ file section.
+*>
+ copy "fdpyparam1.cob".
+ copy "fdpyhrs.cob".
+ copy "fdpyemp.cob".
+*>
+ working-storage section.
+*>-----------------------
+ 77  prog-name               pic x(15) value "PY020 (1.0.00)".  *> First release pre testing.
+*>
+ copy "Test-Data-Flags.cob".  *> set sw-Testing to zero to stop logging.
+*>
+ 01  WS-Data.
+     03  Menu-Reply          pic x.
+     03  PY-PR1-Status       pic xx       value zero.
+     03  PY-Hrs-Status       pic xx       value zero.
+     03  PY-Emp-Status       pic xx       value zero.
+*>
+     03  WS-Reply            pic x.
+     03  WS-Eval-Msg         pic x(25)    value spaces.
+     03  WS-Err-Msg          pic x(40)    value spaces.  *> Make large enough for longest SY msg
+     03  WS-Env-Columns      pic 999      value zero.
+     03  WS-Env-Lines        pic 999      value zero.
+     03  WS-22-Lines         pic 99.
+     03  WS-23-Lines         pic 99.
+     03  WS-Lines            pic 99.
+     03  A                   pic 99       value zero.
+     03  B                   pic 99       value zero.
+     03  C                   pic 99       value zero.
+     03  WS-Trans-Area-Size  pic 99.
+     03  WS-Wide-Screen-Used pic x        value "N".   *> Set to "Y" IF WS-Wnv-Columns => 120.
+*>
+     03  WS-Entry-Mode       pic x        value space.
+         88  WS-Valid-Entry-Mode          values "A" "D" "U". *> Add, Delete & Update
+     03  WS-DNames           pic x        value "Y".
+         88  WS-Disp-Names                value "Y".
+     03  WS-Employee-In.
+         05  WS-Employee-No  pic 9(6)     value zero.  *> excl chk digit
+         05  WS-Emp-Chk-Dig  pic x.
+     03  WS-Employee-Number  redefines WS-Employee-In
+                             pic 9(7).
+     03  WS-Un-Proofed-Flag  pic x        value "Y".
+*>
+     03  WS-Heading          pic x(40)    value "Payroll". *> for zz020-Headings
+*>
+*> The following for GC and screen with *nix NOT tested with Windows
+*>
+ 01  wScreenName             pic x(256).
+ 01  wInt                    binary-long.
+*>
+*>  Temp vars used with ACCEPT_NUMERIC C routine
+*>
+ 01  WS-Temp-Numbers.
+     03  WS-Temp-Rate        pic 99.99.
+ *>    03  WS-Temp-Percent     pic 99.99.  *>  NOT YET USED
+     03  WS-Temp-Limit       pic 99999.99.
+     03  WS-Temp-Factor      pic 99999.99.
+     03  WS-Temp-Units       pic z(4)9.99.
+*>
+ 01  WS-Test-Date            pic x(10).
+ 01  WS-Test-YMD             pic 9(8).
+ 01  WS-PR1-Dating           pic 9(8).
+ 01  WS-Date-Formats.
+     03  WS-Swap             pic 99.
+     03  WS-Conv-Date        pic x(10).
+     03  WS-Date             pic x(10)   value "99/99/9999".
+     03  WS-UK redefines WS-Date.   *> Other optional format
+         05  WS-Days         pic 99.
+         05  filler          pic x.
+         05  WS-Month        pic 99.
+         05  filler          pic x.
+         05  WS-Year         pic 9(4).
+     03  WS-USA redefines WS-Date.  *> Default format
+         05  WS-USA-Month    pic 99.
+         05  filler          pic x.
+         05  WS-USA-Days     pic 99.
+         05  filler          pic x.
+         05  filler          pic 9(4).
+     03  WS-Intl redefines WS-Date.   *> Not used.
+         05  WS-Intl-Year    pic 9(4).
+         05  filler          pic x.
+         05  WS-Intl-Month   pic 99.
+         05  filler          pic x.
+         05  WS-Intl-Days    pic 99.
+*>
+ 01  Error-Messages.
+*> System Wide
+     03  SY001           pic x(46) value "SY001 Aborting run - Note error and hit Return".
+     03  SY002           pic x(31) value "SY002 Note error and hit Return".
+     03  SY003           pic x(51) value "SY003 Aborting function - Note error and hit Return".
+     03  SY004           pic x(20) value "SY004 Now Hit Return".
+     03  SY005           pic x(18) value "SY005 Invalid Date".
+*>     03  SY006           pic x(22) value "SY006 Invalid Response".
+     03  SY008           pic x(32) value "SY008 Note message & Hit Return ".
+     03  SY010           pic x(46) value "SY010 Terminal program not set to length => 28".
+     03  SY013           pic x(47) value "SY013 Terminal program not set to Columns => 80".
+     03  SY014           pic x(30) value "SY014 Press return to continue".
+*>     03  SY015           pic x(20) value "SY015 Must be Y or N".
+*>     03  SY016           pic x(38) value "SY016 Do you wish to Continue (Y/N) - ".
+*>
+*> Module General ?
+*>
+     03  PY001           pic x(36) value "PY001 Re/Write PARAM record Error = ".
+     03  PY002           pic x(32) value "PY002 Read PARAM record Error = ".
+*>     03  PY004           pic x(29) value "PY004 To quit, use ESCape key".
+*>
+*> Module specific
+*>
+     03  PY050           pic x(24) value "PY050 PR1 File not Found".
+     03  PY052           pic x(24) value "PY051 Emp File not Found".
+     03  PY053           pic x(24) value "PY053 Hrs File not Found".
+     03  PY054           pic x(31) value "PY054 Employee Record not Found".
+     03  PY055           pic x(43) value "PY055 Hrs record not Found on Update/Delete".
+*>     03  PY056           pic x(34) value "PY056 Hours File of type 000 Found".
+     03  PY057           pic x(36) value "PY057 Invalid Mode must be A, D or U".
+     03  PY058           pic x(36) value "PY058 Failed to Delete Hrs Record = ".
+     03  PY059           pic x(38) value "PY059 Hrs - Error on writing record - ".
+*>     03  PY060           pic x(25) value "PY060 Invalid Check Digit".
+*>     03  PY061           pic x(29) value "PY061 Invalid Employee Number".
+*>     03  PY062           pic x(60) value "PY062 Trans. Code Cannot be less than Zero or greater than 5".
+     03  PY065           pic x(30) value "PY065 Invalid Transaction Code".
+*>     03  PY066           pic x(37) value "PY066 There are no Hours File Records".
+*>     03  PY067           pic x(46) value "PY067 Terminated, Deleted, or Invalid Employee".
+     03  PY068           pic x(44) value "PY068 Creating Check digit FAILED - Aborting".
+*>
+*> Next - two tables that are linked to each to other, eg #4 sames for both.
+*>
+ 01  WS-ED-Description-Table.
+     03  filler          pic x(17) value "00Rate 0".         *> 1 for normal and 2 for any OT.
+     03  filler          pic x(17) value "01Regular Pay".    *> Rate 1
+     03  filler          pic x(17) value "02Overtime Pay".   *> Rate 2
+     03  filler          pic x(17) value "03Special OT Pay". *> Rate 3
+     03  filler          pic x(17) value "04Commission".     *> Rate 4
+     03  filler          pic x(17) value "05Vacation Taken".
+     03  filler          pic x(17) value "06Sick Lve Taken".
+     03  filler          pic x(17) value "07Comp Time Taken". *> Compensatory Time Off
+     03  filler          pic x(17) value "08Comp Time Earnd".
+     03  filler          pic x(17) value "09Bonus".
+     03  filler          pic x(17) value "10Tips Collected".
+     03  filler          pic x(17) value "11Advance".
+     03  filler          pic x(17) value "12Sick Pay".
+     03  filler          pic x(17) value "13Vacation Pay".
+     03  filler          pic x(17) value "14Other Excld Pay".
+     03  filler          pic x(17) value "15Expense Reimb".
+     03  filler          pic x(17) value "16Eic".
+     03  filler          pic x(17) value "17Other Pay".
+     03  filler          pic x(17) value "18Tips Reported".
+     03  filler          pic x(17) value "19".
+     03  filler          pic x(17) value "20Fwt".
+     03  filler          pic x(17) value "21Swt".
+     03  filler          pic x(17) value "22Lwt".
+     03  filler          pic x(17) value "23Fica".
+     03  filler          pic x(17) value "24Sdi".
+     03  filler          pic x(17) value "25".
+     03  filler          pic x(17) value "26".
+     03  filler          pic x(17) value "27Advance Repay".
+     03  filler          pic x(17) value "28Fwt Add-on".
+     03  filler          pic x(17) value "29Swt Add-on".
+     03  filler          pic x(17) value "30Lwt Add-on".
+     03  filler          pic x(17) value "31Fica Add-on".
+     03  filler          pic x(17) value "32".
+     03  filler          pic x(17) value "33Sys1".
+     03  filler          pic x(17) value "34Sys2".
+     03  filler          pic x(17) value "35Sys3".
+     03  filler          pic x(17) value "36Sys4".
+     03  filler          pic x(17) value "37Sys5".
+     03  filler          pic x(17) value "38Emp1".
+     03  filler          pic x(17) value "39Emp2".
+     03  filler          pic x(17) value "40Emp3".
+     03  filler          pic x(17) value "41".
+     03  filler          pic x(17) value "42Company Fica".
+     03  filler          pic x(17) value "43Company Futa".
+     03  filler          pic x(17) value "44Company Sui".
+     03  filler          pic x(17) value "45".
+     03  filler          pic x(17) value "46Other Co Cost".
+     03  filler          pic x(17) value "47".
+     03  filler          pic x(17) value "48".
+     03  filler          pic x(17) value "49".
+     03  filler          pic x(17) value "50Other Ded".        *>    Need 4 more for other and MCare
+     03  filler          pic x(17) value "51Mcare".
+     03  filler          pic x(17) value "52".
+     03  filler          pic x(17) value "53".
+     03  filler          pic x(17) value "54".                 *>      00 - 54  = 55 entries
+ 01  filler           redefines WS-ED-Description-Table.
+     03  WS-ED-Desc-Table           occurs 55.
+         05  WS-ED-No    pic 99.
+         05  WS-ED-Desc  pic x(15).
+ 01  WS-Tables-Sizes     pic 99    value 55.    *> MUST be same values as
+*>                                                 tables above and below, i.e.,
+*>                                                 WS-ED-Description-Table  and
+*>                                                 WS-OK-To-Enter-Table.
+*>
+ 01  WS-OK-To-Enter-Table.
+*>
+*> Entries with value Y can be entered & rest not. There are 22 set to Y
+*>                                                 as of 2026/04/12
+*> Precede with Check Category - see Fig 26.1 in manual.
+*>
+*>                                                 -  Transaction
+*>                                                    Code  Type/Desc
+*>
+     03  filler          pic xxx   value "00N".    *>     00                  - Rate 0 Auto calc Reg & OT
+     03  filler          pic xxx   value "02Y".    *>     01   Regular Pay    - Rate 1
+     03  filler          pic xxx   value "03Y".    *>     02   Overtime Pay   - Rate 2
+     03  filler          pic xxx   value "04Y".    *>     03   Special Ot PaY - Rate 3
+     03  filler          pic xxx   value "05Y".    *>     04   Commission     - Rate 4
+     03  filler          pic xxx   value "00Y".    *>     05   Vacation Taken
+     03  filler          pic xxx   value "00Y".    *>     06   Sick Leave Taken
+     03  filler          pic xxx   value "00Y".    *>     07   Comp Time Taken
+     03  filler          pic xxx   value "00Y".    *>     08   Comp Time Earnd
+     03  filler          pic xxx   value "06Y".    *>     09   Bonus
+     03  filler          pic xxx   value "07Y".    *>     10   Tips Collected
+     03  filler          pic xxx   value "06Y".    *>     11   Advance
+     03  filler          pic xxx   value "06Y".    *>     12   Sick Pay
+     03  filler          pic xxx   value "06Y".    *>     13   Vacation Pay
+     03  filler          pic xxx   value "06Y".    *>     14   Other Excluded Pay
+     03  filler          pic xxx   value "06Y".    *>     15   Expense Reimbursement
+     03  filler          pic xxx   value "00N".    *>     16   Eic
+     03  filler          pic xxx   value "06Y".    *>     17   Other Pay
+     03  filler          pic xxx   value "14Y".    *>     18   Tips Reported
+     03  filler          pic xxx   value "00N".    *>     19
+     03  filler          pic xxx   value "00N".    *>     20   FWT
+     03  filler          pic xxx   value "00N".    *>     21   SWT
+     03  filler          pic xxx   value "00N".    *>     22   LWT
+     03  filler          pic xxx   value "00N".    *>     23   FICA
+     03  filler          pic xxx   value "00N".    *>     24   SDI
+     03  filler          pic xxx   value "00N".    *>     25
+     03  filler          pic xxx   value "00N".    *>     26
+     03  filler          pic xxx   value "14Y".    *>     27   Advance Repay
+     03  filler          pic xxx   value "09Y".    *>     28   FWT  Add-on
+     03  filler          pic xxx   value "10Y".    *>     29   SWT  Add-on
+     03  filler          pic xxx   value "11Y".    *>     30   LWT  Add-on
+     03  filler          pic xxx   value "12Y".    *>     31   FICa Add-on
+     03  filler          pic xxx   value "00N".    *>     32
+     03  filler          pic xxx   value "00N".    *>     33   Sys1
+     03  filler          pic xxx   value "00N".    *>     34   Sys2
+     03  filler          pic xxx   value "00N".    *>     35   Sys3
+     03  filler          pic xxx   value "00N".    *>     36   Sys4
+     03  filler          pic xxx   value "00N".    *>     37   Sys5
+     03  filler          pic xxx   value "00N".    *>     38   Emp1
+     03  filler          pic xxx   value "00N".    *>     39   Emp2
+     03  filler          pic xxx   value "00N".    *>     40   Emp3
+     03  filler          pic xxx   value "00N".    *>     41
+     03  filler          pic xxx   value "00N".    *>     42   Company Fica
+     03  filler          pic xxx   value "00N".    *>     43   Company Futa
+     03  filler          pic xxx   value "00N".    *>     44   Company Sui
+     03  filler          pic xxx   value "00N".    *>     45
+     03  filler          pic xxx   value "00N".    *>     46   Other Co Cost (future use)  - ALL NEW onwards
+     03  filler          pic xxx   value "00N".    *>     47
+     03  filler          pic xxx   value "00N".    *>     48
+     03  filler          pic xxx   value "00N".    *>     49
+     03  filler          pic xxx   value "00N".    *>     50   Other Ded
+     03  filler          pic xxx   value "00N".    *>     51   MCare
+     03  filler          pic xxx   value "00N".    *>     52
+     03  filler          pic xxx   value "00N".    *>     53
+     03  filler          pic xxx   value "00N".    *>     54
+ 01  filler redefines WS-OK-To-Enter-Table.
+     03  WS-OK-Lists                occurs 55.
+         05  WS-OK-Cat   pic 99.
+         05  WS-OK-2-Ent pic x.
+*>
+ 01  Error-Code          pic 999.  *> NOT USED ??
+*>
+ 01  COB-CRT-Status      pic 9(4)         value zero.
+     copy "screenio.cpy".
+*>
+     copy "an-accept.ws".  *> Support WS for ACCEPT_NUMERIC routine
+*>
+     copy "wspyhrs.cob"   replacing LEADING ==PY-Pay== by ==WS-Pay==
+                                    LEADING ==Hrs==    by ==WS-Hrs==.
+*>
+*>  might be needed
+*>
+ copy "wsfnctn.cob".
+ copy "wsmaps03.cob".    *> for maps04
+ copy "wsmaps09.cob".
+ copy "wstime.cob".
+*>
+ linkage section.
+*>***************
+*>
+ copy "wscall.cob".
+ copy "wssystem.cob"   replacing System-Record by WS-System-Record.
+ copy "wsnames.cob".
+*>
+ 01  To-Day              pic x(10).
+*>
+ screen section.
+*>
+ 01  Display-Heads                background-color cob-color-black
+                                  foreground-color 3
+                                  erase eos.
+     03  from  Prog-Name  pic x(15)  line  1 col  1 foreground-color 2.
+     03  value "Employee Hours Data Entry"   col 29.
+     03  from  U-Date     pic x(10)          col 71 foreground-color 2.
+     03  from  Usera      pic x(32)  line  3 col  1.
+*>
+ *>    03  value "Copyright (c) 2025-" line 24 col  1 foreground-color 3.
+ *>    03  from  wse-year              line 24 col 20 foreground-color 3.
+ *>    03  value "Applewood Computers" line 24 col 25 foreground-color 3.
+ *>    03  from maps-ser-xx            line 24 col 74 foreground-color 3. *> mp or MP
+ *>    03  from curs2                  line 24 col 76 foreground-color 3. *> = 9999 - O/S version
+*>
+ 01  SS-Data-Entry-1    background-color cob-color-black
+                        foreground-color cob-color-green
+                        erase eos.
+     03  from  Prog-Name  pic x(17)                 line  1 col  1 foreground-color 2.
+     03  value "Payroll Regular Hours Data Entry "          col 29.
+     03  from  U-Date     pic x(10)                         col 71 foreground-color 2.
+     03  from  Usera      pic x(32)                 line  3 col  1.
+*>
+     03  value "Batch: "                                                         line  5 col 41.
+     03  from  WS-Hrs-Batch-No pic zz,zz9                                        line  5 col 48. *> Max size 64k
+     03  value "Entry Mode  [ ] - A = Add, D = Delete, U = Update, Esc = Quit "  line  6 col  1.
+     03  value "  +-----------------------------------------------------------+" line  8 col  1.
+     03  value "  |  Employee No.  [       ]                                  |" line  9 col  1.
+     03  value "  |  Trans Code    [  ]                                       |" line 10 col  1.
+     03  value "  |  Units         [        ]                                 |" line 11 col  1.
+     03  value "  |  Date          [          ]                               |" line 12 col  1.  *> Locale format ie mm/dd or dd/mm & year
+     03  value "  |                                                           |" line 13 col  1.   *> & saved as ccyymmdd
+     03  value "  +-----------------------------------------------------------+" line 14 col  1.
+*>
+*> Manual data entry :-
+*>
+*>     03  using WS-Entry-Mode    pic x                                  line  6 col 14.
+ *>    03  using WS-Emp-No        pic 9(7)                               line  9 col 21.
+ *>    03  from  Emp-Search-Name  pic x(32)                              line  9 col 30.
+ *>     03  WS-ED-Desc (WS-Trans-Code)                                   line 10 col 25.
+*>     03  using  WS-DNames pic x                                        line 17 col 27.
+*>         88  WS-Disp-Names value "Y"   KILL THIS & ABOVE
+*>
+     03  value "Emp number zero or Escape to quit "                    line 19 col 5.
+     03  value "F1 = List Transactions types "                         line 20 col 5.
+*>
+*>
+*> next replace Q for displaying names
+ *>    03  value "Confirm Delete record [N]"                                       line 17 col 1 erase eol.
+*>
+
+*>
+*> Uses direct displays for the data - This one assumes screen width is 80 cols
+*>  Only, See SS-Show-Trans-Codes-Heads-Wide for cc 81 to
+*>
+ 01  SS-Show-Trans-Codes-Heads  background-color cob-color-black
+                                foreground-color cob-color-green
+                                erase eos.
+     03  from  Prog-Name  pic x(15)                                    line  1 col  1 foreground-color 2.
+     03  value "Transaction Codes"                                             col 29.
+     03  from  U-Date     pic x(10)                                            col 71 foreground-color 2.
+     03  from  Usera      pic x(32)                                    line  3 col  1.
+*>
+     03  value "Trans  Description     Check"                          line  4 col 11.
+     03  value "Code                   Number"                         line  5 col 11.
+*>     03  from  WS-ED-No (B)   pic 99                               line A col  13.
+*>     03  from  WS-ED-Desc (B) pic x(15)                            line A col  18.
+*>     03  from  WS-OK-Cat (B)  pic z9                               line A col  36.
+*>
+*> This group IF screen width is 120 or wider.
+*>  display to the right of main data display area.
+*>  IT ASSUMES THAT THE program cannot change width directly with terminal
+*>  program via a CALL or similar.
+*>
+*> If in use needs switch to advise in use AND to redisplay if SS-Data-Entry-1
+*> is re-displayed.
+*>
+ 01  SS-Show-Trans-Codes-Heads-Wide   background-color cob-color-black
+                                      foreground-color cob-color-green.
+     03  from  Prog-Name  pic x(15)                                    line  1 col  81 foreground-color 2.
+     03  value "Transaction Codes"                                             col 109.
+     03  from  U-Date     pic x(10)                                            col 151 foreground-color 2.
+     03  from  Usera      pic x(32)                                    line  3 col  81.
+*>
+     03  value "Trans  Description     Check"                          line  4 col  91.
+     03  value "Code                   Number"                         line  5 col  91.
+*>     03  from  WS-ED-No (B)   pic 99                               line A col  93.
+*>     03  from  WS-ED-Desc (B) pic x(15)                            line A col  98.
+*>     03  from  WS-OK-Cat (B)  pic z9                               line A col  116.
+*>
+ procedure division using WS-Calling-Data  *> ACAS
+                          WS-System-Record *> ACAS
+                          To-Day           *> ACAS
+                          File-Defs.       *> ACAS
+*>
+ aa000-Main                  section.
+*>**********************************
+*> Force Esc, PgUp, PgDown, PrtSC to be detected
+     set      ENVIRONMENT "COB_SCREEN_EXCEPTIONS" to "Y".
+     set      ENVIRONMENT "COB_SCREEN_ESC" to "Y".
+     move     current-Date to WSE-Date-block.
+*>
+     perform  forever
+              accept   WS-Env-Lines   from lines
+              if       WS-Env-Lines < 28
+                       display  SY010    at 0101 with erase eos
+                       accept   WS-Reply at 0133
+                       exit perform cycle
+              else
+                       display space at 0101 erase eos
+              end-if
+              accept   WS-Env-Columns from Columns
+              if       WS-Env-Columns < 80
+                       display  SY013    at 0101 with erase eos
+                       accept   WS-Reply at 0130
+                       exit perform cycle
+              else
+                       display space at 0101 erase eos
+              end-if
+     end-perform.
+*>
+*> Set up error message areas on screen
+*>
+     subtract 2 from WS-Env-Lines giving WS-22-Lines.
+     subtract 1 from WS-Env-Lines giving WS-23-Lines.
+     move     WS-Env-Lines to WS-Lines.
+     subtract 5 from ws-22-lines giving WS-Trans-Area-Size.  *> Area for disp of trans codes via F1
+*>
+*> Flag, used if F1 pressed for trans code disp and screen width => 120
+*>
+     if       WS-Env-Columns > 119
+              move     "Y" to WS-Wide-Screen-Used.
+*>
+*> Pre setup params for accept_numeric routine
+*>
+     move     zeros to AN-Error-Code
+                       AN-Return-Code.
+     SET      AN-FG-IS-Green    to TRUE.
+     SET      AN-BG-IS-Black    to TRUE.
+     SET      AN-FG2-IS-Cyan    to TRUE.
+     SET      AN-Mode-IS-Update to TRUE.  *> could be AN-MODE-IS-NO-UPDATE to
+*>
+*>  Set up delete file for screen save/restore if used via F1 key and width < 120.
+*>
+     move     spaces to WScreenName.   *>  Path-Work.
+     string   ACAS-Path       delimited by space
+              z"py-temp.scr"  delimited by size
+                                 into wScreenName.
+*>
+     open     input    PY-Param1-File.          *> Needed for date format
+     if       PY-PR1-Status not = "00"      *> Does not exist yet so lets create it & write rec
+              perform  ZZ040-Evaluate-Message
+              display  PY050         at line WS-23-Lines col 1 with erase eos
+              display  SY001         at line WS-Lines    col 1
+              accept   WS-Reply      at line WS-Lines    col 48 AUTO
+              close    PY-Param1-File
+              move     16 to WS-Term-Code
+              goback   returning 1
+     end-if.
+     move     1 to RRN.
+     read     PY-Param1-File.              *> Needed for date format Only
+     if       PY-PR1-Status not = "00"      *> Does not exist yet so lets create it & write rec
+              perform  ZZ040-Evaluate-Message
+              display  PY002         at line WS-23-Lines col 1 with erase eos
+              display  PY-PR1-Status at line WS-23-Lines col 33
+              display  WS-Eval-Msg   at line WS-23-Lines col 36
+              display  SY001         at line WS-Lines    col 1
+              accept   WS-Reply      at line WS-Lines    col 48 AUTO
+              close    PY-Param1-File
+              move     16 to WS-Term-Code
+              goback   returning 1
+     end-if.
+*>
+     open     input    PY-Employee-File.
+     if       PY-Emp-Status not = "00"
+              display  PY052         at line WS-23-Lines col 1 with erase eos
+              display  SY001         at line WS-Lines    col 1
+              accept   WS-Reply      at line WS-Lines    col 48 AUTO
+              close    PY-Param1-File
+                       PY-Employee-File
+              move     16 to WS-Term-Code
+              goback   returning 2
+     end-if.
+     open     input    PY-Pay-Transactions-File.
+     if       PY-Hrs-Status not = "00"
+              close    PY-Pay-Transactions-File
+              open     output PY-Pay-Transactions-File
+              if       PY-Hrs-Status not = "00"
+                       move     PY-Hrs-Status to PY-PR1-Status
+                       perform  ZZ040-Evaluate-Message
+                       display  PY053         at line WS-23-Lines col 1 with erase eos
+                       display  PY-PR1-Status at line WS-23-Lines col 26
+                       display  WS-Eval-Msg   at line WS-23-Lines col 29
+                       display  SY001         at line WS-Lines    col 1
+                       accept   WS-Reply      at line WS-Lines    col 48 AUTO
+                       close    PY-Param1-File
+                                PY-Employee-File
+                                PY-Pay-Transactions-File
+                       move     16 to WS-Term-Code
+                       goback   returning 3
+              end-if
+     end-if.
+     close        PY-Pay-Transactions-File.
+     open     i-o PY-Pay-Transactions-File.
+     move     zeros to Hrs-Key.
+     read     PY-Pay-Transactions-File into WS-Pay-Header-Record
+              key Hrs-Key.
+*>
+*> Batch no updated by 1 if Trans does not exist such as deleted after all recs processed for
+*>  week, month by week & month cycles etc. Remember to delete then after proc in Apply procs.
+*>
+     if       PY-Hrs-Status not = zeros
+              initialise WS-Pay-Header-Record
+              move     "N" to WS-Hrs-Proofed
+              if       PY-PR2-Hrs-Batch-No not = zero
+                       add      1  to PY-PR2-Hrs-Batch-No
+                       move     PY-PR2-Hrs-Batch-No to WS-Hrs-Batch-No
+              else
+                       move     1   to WS-Hrs-Batch-No
+                                       PY-PR2-Hrs-Batch-No
+              end-if
+              write    PY-Pay-Transactions-Record from WS-Pay-Header-Record
+              rewrite  PY-Param1-Record.    *> Update batch-no
+*>
+*> All files not open with Trans as I-O, param and Emp as INPUT
+*>
+ aa020-Main-Processing.
+*>
+     perform  forever
+              display  SS-Data-Entry-1  *> Basic Data capture
+              move     "A" to WS-Entry-Mode
+              accept   WS-Entry-Mode at 0614 foreground-color 3 UPPER  *> NEEDED  ???
+              if       COB-CRT-STATUS = COB-SCR-F1       *> Used after all data captures
+                       perform  zz100-Preset-Window
+              end-if
+              if       not WS-Valid-Entry-Mode
+                       display  PY057 at line WS-22-Lines col 1 foreground-color 6
+              else
+                       display  space at line WS-22-Lines col 1 erase eol
+              end-if
+*>
+              perform  aa140-AN-Emp-No                 *> Get emp # at 0921
+              if       COB-CRT-STATUS = COB-SCR-ESC    *> Finished, so quit
+                       go to aa999-EOJ
+              end-if
+              if       COB-CRT-STATUS = COB-SCR-F1       *> Used after all data captures
+                       perform  zz100-Preset-Window
+              end-if
+*> Validate or add chk digit
+              move     WS-Employee-Number to Customer-Code
+*> Create check digit using 1st 6 digits - ignores a 7th
+              move     "C"  to  maps09-reply
+              perform  Maps09
+              if       Maps09-Reply not = "Y"     *> Should not happen Aborting, check for a bug in code here
+                       display  PY068    at line WS-23-Lines col 1 foreground-color 4
+                       display  SY003    at line WS-Lines col 1
+                       accept   WS-Reply at line WS-lines col 53
+                       close     PY-Param1-File
+                                 PY-Pay-Transactions-File
+                                 PY-Employee-File
+                       goback   returning 4
+              end-if
+              initialise
+                       PY-Pay-Transactions-Record     *> In case rec not found
+              move     Customer-Code      to WS-Employee-Number
+                                             Emp-No
+                                             Hrs-Emp-No
+              display  WS-Employee-Number at 0921   *> chk digit added
+*>
+*> Attempt to read Hours record and display fields otherwise ignore
+*>
+              read     PY-Pay-Transactions-File key Hrs-Emp-No
+              if       PY-Hrs-Status = 23 or = 21
+                       if       WS-Entry-Mode = "U" or = "D"    *> Update / Delete
+                                display PY055 at line WS-22-Lines col 1 foreground-color 4
+                                                                        erase eol
+                                exit perform cycle
+                       else
+                                display space at line WS-22-Lines col 1 erase eol
+                       end-if
+              end-if
+*>
+              read     PY-Employee-File
+              if       PY-Emp-Status = 23 or = 21
+                       display  PY054 at line WS-22-Lines col 1 foreground-color 4 erase eol
+                       exit perform cycle
+              else
+                       display  space at line WS-22-Lines col 1 erase eol
+              end-if
+*> check for invalid Employees for pay
+              if       Emp-Status = "T"
+                       display  "Terminated Employee" at 0930 foreground-color 4
+              end-if
+              if       Emp-Status = "D"
+                       display  "Deleted Employee"    at 0930 foreground-color 4
+              end-if
+              if       Emp-Status = "L"
+                       display  "Employee on Leave"   at 0930 foreground-color 4
+              end-if
+              if       Emp-Status = "T" or = "D" or = "L"   *> abort this input
+                       display  SY008    at line WS-23-Lines col 1 foreground-color 4 erase eol
+                       accept   WS-Reply at line WS-23-Lines col 34
+                       exit perform cycle
+              else
+                       display  space     at line WS-23-Lines col 1 erase eol
+              end-if
+              display  Emp-Search-Name at 0930
+*>
+*> Trans code starts at zero
+*>
+              perform  forever
+                       accept   Hrs-Trans-Code  at 1021 foreground-color 3
+                       if       Hrs-Trans-Code not = zero
+                          and   WS-OK-2-Ent (Hrs-Trans-Code + 1) not = "Y"
+                                display  PY065    at line WS-23-Lines col 1 foreground-color 4 erase eol
+                                accept   WS-Reply at line WS-23-Lines col 34
+                                exit perform cycle
+                       else
+                                display  space     at line WS-23-Lines col 1 erase eol
+                       end-if
+*> So a valid code or zero (treated as rate0)
+                       display  WS-ED-Desc (Hrs-Trans-Code + 1) at 1025
+              end-perform
+*>
+              if       WS-Entry-Mode = "D"
+                       move     Hrs-Units to WS-Temp-Units
+                       display  WS-Temp-Units at 1121
+                       move     Hrs-Effective-Date to WSE-Date-9
+                       move     WSE-Year     to WS-Year
+                       if       PY-PR1-Date-Format = 2
+                                move     WSE-Days  to WS-USA-Days
+                                move     WSE-Month to WS-USA-Month
+                       else
+                                move     WSE-Days  to WS-Days
+                                move     WSE-Month to WS-Month
+                       end-if
+                       display  WS-Date at 1221
+                       display  "Confirm Delete record [N] - This is NOT Recoverable" at 1701 foreground-color 4
+                       move     "N" to WS-Reply
+                       accept   WS-Reply at 1724 UPPER
+                       if       WS-Reply = "Y"
+                                delete   PY-Pay-Transactions-File record
+                                if       PY-Hrs-Status not = "00"
+                                         move     PY-Hrs-Status to PY-PR1-Status
+                                         perform  ZZ040-Evaluate-Message
+                                         display  PY058         at line WS-23-Lines col 1 foreground-color 4 erase eos
+                                         display  PY-Hrs-Status at line WS-23-Lines col 37
+                                         display  WS-Eval-Msg   at line WS-23-Lines col 40
+                                         display  SY014         at line WS-Lines    col 1
+                                         accept   WS-Reply      at line WS-Lines    col 31
+                                         exit perform cycle
+                                end-if
+                        end-if
+                        exit perform cycle
+              end-if
+              MOVE     11  TO AN-LINE
+              MOVE     21  TO AN-COLUMN
+              call     STATIC "ACCEPT_NUMERIC" using by REFERENCE Hrs-Units
+                                                     by REFERENCE AN-ACCEPT-NUMERIC
+              perform  AN-Test-Status
+              if       COB-CRT-STATUS = COB-SCR-ESC    *> back to top
+                 or    Hrs-Units = zeros
+                       exit perform cycle
+              end-if
+              perform  forever
+                       accept   WS-Date at 1221
+                       perform  zz010-Test-YMD
+                       if       A not = zero       *> Date error
+                                display  SY005    at line WS-23-Lines col 1 foreground-color 4 erase eol
+                                accept   WS-Reply at line WS-23-Lines col 20
+                                exit perform cycle
+                       else
+                                display spaces    at line WS-23-Lines col 1 erase eol
+                       end-if
+              end-perform
+              move     WS-Test-YMD to Hrs-Effective-Date
+              write    PY-Pay-Transactions-Record
+              if       PY-Hrs-Status not = "00"
+                       display  PY059  at line WS-23-Lines col 1 foreground-color 4 erase eol
+                       display  PY-Hrs-Status at line WS-23-Lines col 39
+                       move     PY-Hrs-Status to PY-PR1-Status
+                       perform  ZZ040-Evaluate-Message
+                       display  WS-Eval-Msg   at line WS-23-Lines col 42
+                       display  SY014         at line WS-Lines    col 1
+                       accept   WS-Reply      at line WS-Lines    col 31
+                       close    PY-Param1-File
+                                PY-Pay-Transactions-File
+                                PY-Employee-File
+                       goback   returning 8
+              else
+                       add      1 to Hrs-No-Recs
+              end-if
+     end-perform.
+     move     "Y" to WS-Un-Proofed-Flag.
+     go  to   aa999-EOJ.
+*>
+ aa100-Bad-Data-Display.
+     display  WS-Err-Msg at line WS-23-Lines col 1.
+     display  SY002      at line WS-Lines    col 1.
+*>
+ aa125-Test-PR1-Status.
+     if       PY-PR1-Status not = "00"   *> WE have a real problem :(
+              perform  ZZ040-Evaluate-Message
+              display  PY001         at line WS-23-Lines col 1 with erase eos
+              display  PY-PR1-Status at line WS-23-Lines col 37
+              display  WS-Eval-Msg   at line WS-23-Lines col 40
+              display  SY002         at line WS-Lines    col 1
+              accept   WS-Reply      at line WS-Lines    col 33 AUTO
+     end-if.
+*>
+ aa140-AN-Emp-No.
+     MOVE     09  TO AN-LINE.
+     MOVE     21  TO AN-COLUMN.
+     call     STATIC "ACCEPT_NUMERIC" using by REFERENCE WS-Employee-Number
+                                            by REFERENCE AN-ACCEPT-NUMERIC.
+     perform  AN-Test-Status.
+*>
+ aa999-EOJ.
+*>
+*> need to update PR1 & hrs header
+*>
+     if       WS-Un-Proofed-Flag = "Y"  *> set if hrs file had a re/write
+      and     WS-Hrs-Proofed = "Y"
+              move     "N" to WS-Hrs-Proofed
+              move     zeros to WS-Hrs-Head-Key
+              rewrite  PY-Pay-Header-Record from WS-Pay-Header-Record.
+     rewrite  PY-Param1-Record.
+*>
+     close    PY-Param1-File
+              PY-Pay-Transactions-File
+              PY-Employee-File.
+     goback.
+*>
+ zz010-Test-YMD              section.   *> NEEDED ??
+*>**********************************
+*>
+     move     WS-Year  to WS-Test-YMD (1:4).
+     if       PY-PR1-Date-Format = 2   *> test for USA - mmddyyyy - -> yyyymmdd
+              move     WS-Days  to WS-Test-YMD (5:2)
+              move     WS-Month to WS-Test-YMD (7:2)
+     else
+              move     WS-Days  to WS-Test-YMD (7:2)  *> test for UK - ddmmyyyy -> yyyymmdd
+              move     WS-Month to WS-Test-YMD (5:2).
+*>
+     move     zero  to A.
+     move     TEST-DATE-YYYYMMDD (WS-Test-YMD) to A.
+
+ zz010-Exit.  exit section.
+*>
+ zz020-Display-Heads         section.
+*>**********************************
+*>
+     display  " " at 0101 with erase eos.
+     display  Prog-Name              at 0101 with foreground-color 2.
+     display  WS-Heading             at 0131 with foreground-color 2.
+     move     To-Day to WS-Date.
+     perform  zz070-Convert-Date.
+     display  WS-Date                at 0171 with foreground-color 2.
+*>
+ zz020-Exit.  exit section.
+*>
+ ZZ040-Evaluate-Message      Section.
+*>**********************************
+*>
+*> For PY-PR1 parameter file anfd other using PR-PR1-Status.
+*>
+     copy "FileStat-Msgs-2.cpy" replacing MSG    by WS-Eval-Msg
+                                        STATUS by PY-PR1-Status.
+*>
+ ZZ040-Eval-Msg-Exit.
+     exit     section.
+*>
+ zz050-Validate-Date        section.
+*>*********************************
+*>
+*>  Converts USA/Intl to UK date format for processing.
+*>*******************************
+*> Input:   WS-Test-Date
+*> output:  U-Date/WS-Date as uk date format
+*>          U-Bin not zero if valid date
+*>
+     move     WS-Test-Date to WS-Date.
+     if       Date-Form = zero
+              move 1 to Date-Form.
+     if       Date-UK
+              go to zz050-Test-Date.
+     if       Date-USA                *> swap month and days
+              move WS-Days  to WS-Swap
+              move WS-Month to WS-Days
+              move WS-Swap  to WS-Month
+              go to zz050-Test-Date.
+*>
+*> So its International date format
+*>
+     move     "dd/mm/ccyy" to WS-Date.  *> swap Intl to UK form
+     move     WS-Test-Date (1:4) to WS-Year.
+     move     WS-Test-Date (6:2) to WS-Month.
+     move     WS-Test-Date (9:2) to WS-Days.
+*>
+ zz050-Test-Date.
+     move     WS-Date to U-Date.
+     move     zero to U-Bin.
+     perform  maps04.
+*>
+ zz050-exit.
+     exit     section.
+*>
+ zz060-Convert-Date        section.
+*>********************************
+*>
+*>  Converts date in binary to UK/USA/Intl date format
+*>****************************************************
+*> Input:   U-Bin
+*> output:  WS-Date as uk/US/Inlt date format
+*>          U-Date & WS-Date = spaces if invalid date
+*>
+     perform  maps04.
+     if       U-Date = spaces
+              move spaces to WS-Date
+              go to zz060-Exit.
+     move     U-Date to WS-Date.
+*>
+     if       Date-Form = zero
+              move 1 to Date-Form.
+     if       Date-UK
+              go to zz060-Exit.
+     if       Date-USA                *> swap month and days
+              move WS-Days  to WS-Swap
+              move WS-Month to WS-Days
+              move WS-Swap  to WS-Month
+              go to zz060-Exit.
+*>
+*> So its International date format
+*>
+     move     "ccyy/mm/dd" to WS-Date.  *> swap Intl to UK form
+     move     U-Date (7:4) to WS-Intl-Year.
+     move     U-Date (4:2) to WS-Intl-Month.
+     move     U-Date (1:2) to WS-Intl-Days.
+*>
+ zz060-Exit.
+     exit     section.
+*>
+ zz070-Convert-Date          section.
+*>**********************************
+*>
+*>  Converts date in To-Day to UK/USA/Intl date format using ACAS param
+*>*********************************************************************
+*> Input:   To-Day
+*> output:  WS-Date as uk/US/Inlt date format
+*>
+     move     To-Day to WS-Date.
+*>
+     if       Date-Form = zero
+              move 1 to Date-Form.
+     if       Date-UK
+              go to zz070-Exit.
+     if       Date-USA                *> Swap month and days
+              move WS-Days  to WS-Swap
+              move WS-Month to WS-Days
+              move WS-Swap  to WS-Month
+              go to zz070-Exit.
+*>
+*> So its International date format
+*>
+     move     "ccyy/mm/dd" to WS-Date.  *> Swap Intl to UK form
+     move     To-Day (7:4) to WS-Intl-Year.
+     move     To-Day (4:2) to WS-Intl-Month.
+     move     To-Day (1:2) to WS-Intl-Days.
+*>
+ zz070-Exit.
+     exit     section.
+*>
+ zz100-Preset-Window section.
+*>**************************
+*>
+     if       WS-Wide-Screen-Used = "N"
+              perform  zz110-Set-Window
+     else
+              perform  zz130-Show-Trans-Types.
+*>
+ zz100-Exit.  exit section.
+*>
+ zz110-Set-Window   section.
+*>*************************
+*>
+*> Save screen, show the defaults then restore the prev. screen.
+*>
+     if       Cob-CRT-Status = Cob-Scr-F1
+              move     z"py-temp.scr"  to wScreenName
+ *>             call     "scr_dump"    using wScreenName
+              call     "CBL_GC_SCR_DUMP" using wScreenName
+                                         returning wInt
+              perform  zz120-Show-Trans-Types
+*>              call     "scr_restore" using wScreenName
+              call      "CBL_GC_SCR_RESTORE" using wScreenName
+                                             returning wInt
+              call     "CBL_DELETE_FILE" using wScreenName  *>     Path-Work
+     end-if.
+ zz110-Exit.   exit section.
+*>
+ zz120-Show-Trans-Types     section.
+*>*********************************
+*>
+*> This routine WILL search through all of the table
+*>  despite the later half of it only having N in field
+*>  WS-OK-2-Ent set as N - IT is just in case the tables
+*>  is expanded over time in the life of Payroll system.
+*>
+     display  SS-Show-Trans-Codes-Heads.
+*>
+     move     5 to A.    *> Line #
+     move     zero to B. *> table pos
+     perform  forever
+              if       A = WS-Tables-Sizes       *> Size of the two tables chg value if table changed
+                       display  SY004    at line WS-23-Lines col  1 erase eol
+                       accept   WS-Reply at line WS-23-Lines col 32 AUTO
+                       exit perform
+              end-if
+              add      1 to A
+*>
+*> We needs 22 lines to display all Trans codes so really terminal depth should
+*> be 22 + 6 + 3 => 31 to display all on one screen full.
+*>
+              if       A > WS-22-Lines
+                       display  SY014    at line WS-23-Lines col  1 erase eol
+                       accept   WS-Reply at line WS-23-Lines col 32 AUTO
+                       display  SS-Show-Trans-Codes-Heads
+                       move     6 to A
+              end-if
+              add      1 to B
+              if       WS-OK-2-Ent (B) = "N"
+                 and   B not = 1
+                       exit perform cycle
+              end-if
+*>
+              display  WS-ED-No (B)    at line A  col 13
+              display  WS-ED-Desc (B)  at line A  col 18
+              display  WS-OK-Cat (B)   at line A  col 26
+              exit perform cycle
+     end-perform.
+*>
+ zz120-Exit.  exit section.
+*>
+ zz130-Show-Trans-Types     section.
+*>*********************************
+*>
+*> This routine WILL search through all of the table
+*>  despite the later half of it only having N in field
+*>  WS-OK-2-Ent set as N - IT is just in case the tables
+*>  is expanded over time in the life of Payroll system.
+*>
+*> THIS routine as against zz120 will show data from cc 81 leaving
+*> existing display present.
+*>
+     display  SS-Show-Trans-Codes-Heads-Wide.
+*>
+     move     5 to A.    *> Line #
+     move     zero to B. *> table pos
+     perform  forever
+              if       A = WS-Tables-Sizes       *> Size of the two tables chg value if table changed
+                       display  SY004    at line WS-23-Lines col  81 erase eol
+                       accept   WS-Reply at line WS-23-Lines col 112 AUTO
+                       exit perform
+              end-if
+              add      1 to A
+*>
+*> We needs 22 lines to display all Trans codes so really terminal depth should
+*> be 22 + 6 + 3 => 31 to display all on one screen full.
+*>
+              if       A > WS-22-Lines
+                       display  SY014    at line WS-23-Lines col  81 erase eol
+                       accept   WS-Reply at line WS-23-Lines col 112 AUTO
+                       move     zero to C
+                       perform  forever   *> Manually clear down displ from cc 81
+                                add      1 to C
+                                if       C > WS-22-Lines
+                                         exit perform
+                                end-if
+                                display  space at line C col 81 erase eol
+                                exit perform cycle
+                       end-perform
+                       display  SS-Show-Trans-Codes-Heads-Wide
+                       move     6 to A
+              end-if
+              add      1 to B
+              if       WS-OK-2-Ent (B) = "N"
+                 and   B not = 1
+                       exit perform cycle
+              end-if
+*>
+              display  WS-ED-No (B)    at line A  col 93
+              display  WS-ED-Desc (B)  at line A  col 98
+              display  WS-OK-Cat (B)   at line A  col 106
+              exit perform cycle
+     end-perform.
+*>
+ zz130-Exit.  exit section.
+*>
+
+
+
+*> SAMPLE CODE BLOCK ===== >>
+*> in use AN coding
+*>                       MOVE     15  TO AN-LINE
+*>                       MOVE     33  TO AN-COLUMN
+*>                       set      AN-MODE-IS-UPDATE TO TRUE
+*>                       call     STATIC "ACCEPT_NUMERIC" using by REFERENCE TERMS-CODE-DUE-DayS
+*>                                                              by REFERENCE AN-ACCEPT-NUMERIC
+ *>                      perform  AN-Test-Status.
+*>
+ maps04.
+*>******
+*>
+     call     "maps04"  using  Maps03-WS.
+*>
+ maps04-Exit. exit.
+*>
+ Maps09.
+*>*****
+*>
+     call     "maps09"  using  maps09-ws. *>  customer-code.
+*>
+ maps09-Exit. exit.
+*>
+
+     copy "an-accept.pl".
+*>

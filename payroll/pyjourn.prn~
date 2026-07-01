@@ -1,0 +1,1828 @@
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0001
+
+LINE    .....................................................SOURCE.....................................................
+
+000001         >>source free
+000002  *>****************************************************************
+000003  *>               Employee Journal Detail Report                  *
+000004  *>                                                               *
+000005  *>                 Employee Detailed                             *
+000006  *>                                                               *
+000007  *>            pyjourn1 used for summary report                   *
+000008  *>                                                               *
+000009  *>            Uses RW (Report writer for prints)                 +
+000010  *>                                                               *
+000011  *>          Program names will be changed to pynnn               *
+000012  *>                                                               *
+000013  *>****************************************************************
+000014  *>
+000015   identification          division.
+000016  *>================================
+000017  *>
+000018        program-id.       pyjourn.  *> to be renamed pynnn later.
+000019  *>**
+000020  *>    Author.           Vincent B Coen FBCS, FIDM, FIDPM, 14/04/2026.
+000021  *>**
+000022  *>    Security.         Copyright (C) 2025 - 2026 & later, Vincent Bryan Coen.
+000023  *>                      Distributed under the GNU General Public License.
+000024  *>                      See the file COPYING for details.
+000025  *>**
+000026  *>    Remarks.          Employee Journal Detail Report.
+000027  *>                       This program uses RW (Report Writer)
+000028  *>
+000029  *>                      Semi-sourced from Basic code from pyjourn.
+000030  *>**
+000031  *>    Version.          See Prog-Name In Ws.
+000032  *>**
+000033  *>    Called Modules.    IS IT ??
+000034  *>                      (CBL_) ACCEPT_NUMERIC.c as static.
+000035  *>
+000036  *>**
+000037  *>    Functions Used:
+000038  *>                      None.
+000039  *>    Files used :
+000040  *>                      pypr1.   Params
+000041  *>                      pyemp.   Employee Master.
+000042  *>
+000043  *>    Error messages used.
+000044  *> System wide:
+000045  *>                      SY001, 10 & 13
+000046  *> Program specific:
+000047  *>                      PY001 - 3.
+000048  *>
+000049  *>**
+000050  *> Changes:
+000051  *> 14/04/2026 vbc - 1.0.00 Created - Started coding from pyjourn.
+000052  *>
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0002
+
+LINE    .....................................................SOURCE.....................................................
+
+000053  *>**
+000054  *>*************************************************************************
+000055  *>
+000056  *> Copyright Notice.
+000057  *> ****************
+000058  *>
+000059  *> This notice supersedes all prior copyright notices & was updated 2024-04-16.
+000060  *>
+000061  *> These files and programs are part of the Applewood Computers Accounting
+000062  *> System and is Copyright (c) Vincent B Coen. 1979-2026 and later.
+000063  *>
+000064  *> This program is now free software; you can redistribute it and/or modify it
+000065  *> under the terms listed here and of the GNU General Public License as
+000066  *> published by the Free Software Foundation; version 3 and later as revised
+000067  *> for PERSONAL USAGE ONLY and that includes for use within a business but
+000068  *> EXCLUDES repackaging or for Resale, Rental or Hire in ANY way.
+000069  *>
+000070  *> Persons interested in repackaging, redevelopment for the purpose of resale or
+000071  *> distribution in a rental or hire mode must get in touch with the copyright
+000072  *> with your commercial plans and proposals to vbcoen@gmail.com.
+000073  *>
+000074  *> ACAS is distributed in the hope that it will be useful, but WITHOUT
+000075  *> ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+000076  *> FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+000077  *> for more details. If it breaks, you own both pieces but I will endeavour
+000078  *> to fix it, providing you tell me about the problem.
+000079  *>
+000080  *> You should have received a copy of the GNU General Public License along
+000081  *> with ACAS; see the file COPYING.  If not, write to the Free Software
+000082  *> Foundation, 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA.
+000083  *>
+000084  *>*************************************************************************
+000085  *>
+000086   environment             division.
+000087  *>================================
+000088  *>
+000089   copy "envdiv.cob".
+000001C  configuration section.
+000002C  source-computer.      Linux.
+000003C  object-computer.      Linux.
+000004C *> special-names.
+000005C *>     console is crt.
+000090   SPECIAL-NAMES.
+000091         CRT STATUS is COB-CRT-STATUS.
+000092   REPOSITORY.
+000093         FUNCTION ALL INTRINSIC.
+000094  *>
+000095   input-output            section.
+000096   file-control.
+000097   copy "selpyparam1.cob".
+000001C *>
+000002C *> Payroll param-1 (USA)
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0003
+
+LINE    .....................................................SOURCE.....................................................
+
+000003C *>
+000004C      select  PY-Param1-File  assign        File-47
+000005C                              access        dynamic
+000006C                              organization  is relative
+000007C                              relative key  is RRN
+000008C                              status        PY-PR1-Status.
+000098   copy "selpyemp.cob".
+000001C *>
+000002C *> Payroll Employee (USA)
+000003C *>
+000004C      select  PY-Employee-File
+000005C                              assign               File-43
+000006C                              access               dynamic
+000007C                              organization         indexed
+000008C                              record key is        Emp-No
+000009C                              alternate record key Emp-Search-Name with duplicates
+000010C                              status               PY-Emp-Status.
+000011C *>
+000099   copy "selpypay.cob".
+000001C *>
+000002C *> Payroll Pay
+000003C *>
+000004C      select  PY-Pay-File
+000005C                              assign        File-46
+000006C                              access        dynamic
+000007C                              organization  indexed
+000008C                              record key is Pay-Emp-No
+000009C                              status        PY-Pay-Status.
+000010C *>
+000100   copy "selpyact.cob.
+error: syntax error, unexpected Text-Name, expecting .
+000101   copy "selpyded.cob".
+000102   copy "selpychk.cob".
+000103
+000104  *>
+000105   copy "selprint.cob".    *> 132
+000106  *>
+000107   data                    division.
+000108  *>================================
+000109  *>
+000110   file section.
+000111  *>
+000112   copy "fdpyparam1.cob".
+000113   copy "fdpyemp.cob".
+000114   copy "fdpypay.cob".
+000115   copy "fdpyact.cob.
+000116   copy "fdpyded.cob".
+000117   copy "fdpychk.cob".
+000118
+000119  *>
+000120   fd  Print-File
+000121       reports are Employee-Detailed-Journal-Report.
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0004
+
+LINE    .....................................................SOURCE.....................................................
+
+000122  *>
+000123   working-storage section.
+000124  *>-----------------------
+000125   77  prog-name               pic x(17) value "pyjourn (1.0.00)".  *> First release pre testing.
+000126  *>
+000127  *>  This will print 1 copy to CUPS print spool specified on line 3 override via setup at SOJ
+000128  *>
+000129   copy "print-spool-command.cob".     *> CHECK PRN file for content Landscape mode
+000130  *>
+000131   copy "wsmaps03.cob".
+000132   copy "wsfnctn.cob".
+000133  *>
+000134   copy "Test-Data-Flags.cob".           *> set sw-Testing to zero to stop logging.
+000135  *>                                        ABOVE SHOULD BE OFF
+000136  *> WS area for file layouts for headers etc
+000137  *>
+000138  *> Need the header fields
+000139  *>
+000140   copy "wspypay.cob"     replacing ==PY-Pay== by ==WS-Pay==
+000141                                    == Pay== by == WS-Pay==.
+000142  *>
+000143
+000144  *>
+000145   01  WS-Data.
+000146       03  WS-Reply            pic x.
+000147       03  PY-PR1-Status       pic xx.
+000148       03  PY-Emp-Status       pic xx.
+000149  *>
+000150       03  WS-Eval-Msg         pic x(25)    value spaces.
+000151       03  WS-Env-Columns      pic 999      value zero.
+000152       03  WS-Env-Lines        pic 999      value zero.
+000153       03  WS-22-Lines         pic 99.
+000154       03  WS-23-Lines         pic 99.
+000155       03  WS-Lines            pic 99.
+000156       03  A                   pic 99       value zero.
+000157       03  B                   pic 99       value zero.
+000158       03  C                   pic 99       value zero.
+000159       03  D                   pic 999      value zero.    *> to set up accounts table with "Unknown" in desc
+000160       03  F                   pic 9        value zero.
+000161       03  WS-Page-Lines       binary-char unsigned value 56.   *> Narrow reports as system is for Landscape used.
+000162       03  WS-Rec-Cnt          pic 99       value zero.
+000163       03  WS-Page-Cnt         pic 999      value zero.
+000164       03  WS-Line-Cnt         pic 999      value 90.   *> Force heads at start
+000165  *>
+000166   01  WS-Test-YMD             pic 9(8).
+000167   01  WS-Test-Date.
+000168       03  WS-Test-Month       pic 99.
+000169       03  WS-Test-Days        pic 99.
+000170       03  WS-Test-Year        pic 9(4).
+000171   01  WS-Test-Date9 redefines WS-Test-Date
+000172                               pic 9(8).
+000173  *>
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0005
+
+LINE    .....................................................SOURCE.....................................................
+
+000174   01  WS-Temp-Date.
+000175       03  WS-Temp-Year        pic 9(4).
+000176       03  WS-Temp-Month       pic 99.
+000177       03  WS-Temp-Days        pic 99.
+000178   01  WS-Temp-Date9  redefines WS-Temp-Date
+000179                               pic 9(8).  *> For direct moving 9(8) to Date.
+000180  *>
+000181   01  WS-Accumulators-1.
+000182       03  WS-            pic s9(7)v99.
+000183       03  WS-            pic s9(7)v99.
+000184       03  WS-            pic s9(7)v99.
+000185       03  WS-            pic s9(7)v99.
+000186       03  WS-            pic s9(7)v99.
+000187       03  WS-            pic s9(7)v99.
+000188       03  WS-            pic s9(7)v99.
+000189       03  WS-            pic s9(7)v99.
+000190       03  WS-            pic s9(7)v99.
+000191       03  WS-            pic s9(7)v99.
+000192       03  WS-            pic s9(7)v99.
+000193       03  WS-            pic s9(7)v99.
+000194       03  WS-            pic s9(7)v99.
+000195       03  WS-            pic s9(7)v99.
+000196       03  WS-            pic s9(7)v99.
+000197       03  WS-            pic s9(7)v99.
+000198       03  WS-            pic s9(7)v99.
+000199       03  WS-            pic s9(7)v99.
+000200       03  WS-            pic s9(7)v99.
+000201       03  WS-            pic s9(7)v99.
+000202       03  WS-            pic s9(7)v99.
+000203       03  WS-            pic s9(7)v99.
+000204       03  WS-            pic s9(7)v99.
+000205       03  WS-            pic s9(7)v99.
+000206       03  WS-            pic s9(7)v99.
+000207       03  WS-            pic s9(7)v99.
+000208       03  WS-            pic s9(7)v99.
+000209       03  WS-            pic s9(7)v99.
+000210       03  WS-            pic s9(7)v99.
+000211       03  WS-            pic s9(7)v99.
+000212       03  WS-            pic s9(7)v99.
+000213       03  WS-            pic s9(7)v99.
+000214       03  WS-            pic s9(7)v99.
+000215       03  WS-            pic s9(7)v99.
+000216       03  WS-Exemptions  pic x(256).
+000217
+000218   01  WS-Accumulators-2.
+000219       03  WS-Acct-Amt              pic s9(7)v99.        *> (1)     9(5)  ?
+000220       03  WS-Total-Units           pic s9(7)v99.        *> (1)     ditto ?
+000221       03  WS-Dist-Out              pic s9(7)v99.        *> (1)     ditto ?
+000222  *>
+000223       03  WS-Total-Reg-Wages       pic s9(7)v99.
+000224       03  WS-Total-Other-Earn      pic s9(7)v99.
+000225       03  WS-Total-Tips            pic s9(7)v99.
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0006
+
+LINE    .....................................................SOURCE.....................................................
+
+000226       03  WS-Total-Tips-Reported   pic s9(7)v99.
+000227       03  WS-Total-Fwt             pic s9(7)v99.
+000228       03  WS-Total-Swt             pic s9(7)v99.
+000229       03  WS-Total-Lwt             pic s9(7)v99.
+000230       03  WS-Total-Fica            pic s9(7)v99.
+000231       03  WS-Total-Sdi             pic s9(7)v99.
+000232       03  WS-Total-Eic             pic s9(7)v99.
+000233       03  WS-Total-Other-Ded       pic s9(7)v99.
+000234       03  WS-Total-Net             pic s9(7)v99.
+000235       03  WS-Total-Co-Fica         pic s9(7)v99.
+000236       03  WS-Total-Co-Futa         pic s9(7)v99.
+000237       03  WS-Total-Co-Sui          pic s9(7)v99.
+000238       03  WS-Total-Vac-Taken       pic s9(7)v99.
+000239       03  WS-Total-Sl-Taken        pic s9(7)v99.
+000240       03  WS-Total-Comp-Taken      pic s9(7)v99.
+000241       03  WS-Total-Comp-Earned     pic s9(7)v99.
+000242       03  WS-Total-Units           pic s9(7)v99.        *>  (1)
+000243  *>
+000244   01  WS-File-Status.
+000245       03  WS-Chk-Exists            pic x  value "N".
+000246
+000247  *>
+000248   01  WS-Date-Formats.
+000249       03  WS-Swap             pic 99.
+000250       03  WS-Conv-Date        pic x(10).
+000251       03  WS-Date             pic x(10)   value "99/99/9999".
+000252       03  WS-UK redefines WS-Date.   *> Other optional format
+000253           05  WS-Days         pic 99.
+000254           05  filler          pic x.
+000255           05  WS-Month        pic 99.
+000256           05  filler          pic x.
+000257           05  WS-Year         pic 9(4).
+000258       03  WS-USA redefines WS-Date.  *> Default format
+000259           05  WS-USA-Month    pic 99.
+000260           05  filler          pic x.
+000261           05  WS-USA-Days     pic 99.
+000262           05  filler          pic x.
+000263           05  filler          pic 9(4).
+000264       03  WS-Intl redefines WS-Date.   *> Not used.
+000265           05  WS-Intl-Year    pic 9(4).
+000266           05  filler          pic x.
+000267           05  WS-Intl-Month   pic 99.
+000268           05  filler          pic x.
+000269           05  WS-Intl-Days    pic 99.
+000270  *>
+000271   01  hdtime                            value spaces.
+000272       03  hd-hh               pic xx.
+000273       03  hd-mm               pic xx.
+000274       03  hd-ss               pic xx.
+000275       03  hd-uu               pic xx.
+000276  *>
+000277   01  WS-Table1.
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0007
+
+LINE    .....................................................SOURCE.....................................................
+
+000278  *>
+000279  *>       1=earning
+000280  *>       2=deduction
+000281  *>       3=other
+000282       03  WS-Desc-Table.
+000283           05  WS-ED-Descs    occurs 50.
+000284               07  WS-EDO      pic 9.
+000285               07  WS-ED-Desc  pic x(15).
+000286       03  filler redefines WS-Desc-Table.
+000287           05  filler          pic x(16) value "1REGULAR PAY".
+000288           05  filler          pic x(16) value "1OVERTIME PAY".
+000289           05  filler          pic x(16) value "1SPECIAL OT PAY".
+000290           05  filler          pic x(16) value "1COMMISSION".
+000291           05  filler          pic x(16) value "3VACATION TAKEN".  *>  NOT ON CHECKS
+000292           05  filler          pic x(16) value "3SICK LVE TAKEN".  *>  NOT ON CHECKS
+000293           05  filler          pic x(16) value "3COMP TIME TAKEN". *>  NOT ON CHECKS
+000294           05  filler          pic x(16) value "3COMP TIME EARND". *>  NOT ON CHECKS
+000295           05  filler          pic x(16) value "1BONUS".
+000296           05  filler          pic x(16) value "1TIPS COLLECTED".
+000297           05  filler          pic x(16) value "3ADVANCE".
+000298           05  filler          pic x(16) value "1SICK PAY".
+000299           05  filler          pic x(16) value "1VACATION PAY".
+000300           05  filler          pic x(16) value "1OTHER EXCLD PAY".
+000301           05  filler          pic x(16) value "3EXPENSE REIMB".
+000302           05  filler          pic x(16) value "1EIC".
+000303           05  filler          pic x(16) value "1OTHER PAY".
+000304           05  filler          pic x(16) value "1TIPS REPORTED".
+000305           05  filler          pic x(16) value "3".
+000306           05  filler          pic x(16) value "2FWT".
+000307           05  filler          pic x(16) value "2SWT".
+000308           05  filler          pic x(16) value "2LWT".
+000309           05  filler          pic x(16) value "2FICA".
+000310           05  filler          pic x(16) value "2SDI".
+000311           05  filler          pic x(16) value "3".
+000312           05  filler          pic x(16) value "3".
+000313           05  filler          pic x(16) value "2ADVANCE REPAY".
+000314           05  filler          pic x(16) value "2FWT ADD-ON".
+000315           05  filler          pic x(16) value "2SWT ADD-ON".
+000316           05  filler          pic x(16) value "2LWT ADD-ON".
+000317           05  filler          pic x(16) value "2FICA ADD-ON".
+000318           05  filler          pic x(16) value "3".
+000319           05  filler          pic x(16) value "0SYS1".           *>  from sys1   FROM DED FILE
+000320           05  filler          pic x(16) value "0SYS2".           *>  from sys2   FROM DED FILE
+000321           05  filler          pic x(16) value "0SYS3".           *>  from sys3   FROM DED FILE
+000322           05  filler          pic x(16) value "0SYS4".           *>  from sys4   FROM DED FILE
+000323           05  filler          pic x(16) value "0SYS5".           *>  from sys5   FROM DED FILE
+000324           05  filler          pic x(16) value "0EMP1".           *>  from emp1   FROM EMP FILE
+000325           05  filler          pic x(16) value "0EMP2".           *>  from emp2   FROM EMP FILE
+000326           05  filler          pic x(16) value "0EMP3".           *>  from emp3   FROM EMP FILE
+000327           05  filler          pic x(16) value "3".
+000328           05  filler          pic x(16) value "3COMPANY FICA".   *> NOT ON CHECKS
+000329           05  filler          pic x(16) value "3COMPANY FUTA".   *> NOT ON CHECKS
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0008
+
+LINE    .....................................................SOURCE.....................................................
+
+000330           05  filler          pic x(16) value "3COMPANY SUI".    *> NOT ON CHECKS
+000331           05  filler          pic x(16) value "3".
+000332           05  filler          pic x(16) value "3OTHER CO COST".  *> NOT ON CHECKS
+000333           05  filler          pic x(16) value "3".
+000334           05  filler          pic x(16) value "3".
+000335           05  filler          pic x(16) value "3".
+000336           05  filler          pic x(16) value "2OTHER DED".
+000337  *>
+000338
+000339
+000340
+000341
+000342
+000343
+000344   01  Error-Messages.   *> ANY NEEDED ???
+000345  *> System Wide
+000346       03  SY001           pic x(46) value "SY001 Aborting run - Note error and hit Return".
+000347       03  SY010           pic x(46) value "SY010 Terminal program not set to length => 28".
+000348       03  SY013           pic x(47) value "SY013 Terminal program not set to Columns => 80".
+000349  *>
+000350  *> Module General
+000351  *>
+000352       03  PY001           pic x(45) value "PY001 Payroll Parameter file does not exist -".
+000353       03  PY002           pic x(32) value "PY002 Read PARAM record Error = ".
+000354       03  PY003           pic x(31) value "PY003 Employee File not Found -".
+000355  *>
+000356  *> Module specific
+000357  *>
+000358       03  PY761           pic x(24) value "PY761 Pay file not found".
+000359       03  PY762           pic x(24) value "PY762 Emp file not found".
+000360       03  PY763           pic x(24) value "PY763 Act file not found".
+000361       03  PY764           pic x(24) value "PY764 Ded file not found".
+000362       03  PY765           pic x(54) value "PY765 Net pay exceeds system max. check will be voided".
+000363       03  PY766           pic x(26) value "PY766 Batch total not zero".
+000364       03  PY767           pic x(50) value "PY767 Net pay less than zero. check will be voided".
+000365       03  PY772           pic x(32) value "PY772 Unexpected eof on Pay file".   *> pyjourn1
+000366  *>
+000367       03  PY768           pic x(  ) value "PY768 Error Reading Pay file - ".
+000368       03  PY769           pic x(  ) value "PY769 Error Reading Emp file - ".
+000369       03  PY770           pic x(  ) value "PY770 Error Reading Act file - ".
+000370       03  PY771           pic x(  ) value "PY771 Error Reading Ded file - ".
+000371  *>
+000372   01  Error-Code          pic 999.
+000373  *>
+000374   01  COB-CRT-Status      pic 9(4)         value zero.
+000375       copy "screenio.cpy".
+000376  *>
+000377   copy "wstime.cob".
+000378  *>
+000379   linkage section.
+000380  *>***************
+000381  *>
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0009
+
+LINE    .....................................................SOURCE.....................................................
+
+000382  >>LISTING OFF   *> Just in case one day it works !!!
+000386  >>LISTING ON
+000387  *>
+000388   01  To-Day              pic x(10).
+000389  *>
+000390   Report section.    *> All MAY NEED CHANGING
+000391  *>**************
+000392  *>
+000393   RD  Employee-Detailed-Journal-Report
+000394       control      Final
+000395       Page Limit   WS-Page-Lines
+000396       Heading      1
+000397       First Detail 6
+000398       Last  Detail WS-Page-Lines.
+000399  *>
+000400   01  Report-Detailed-Head-1  Type Page Heading.
+000401  *>
+000402  *> Print layouts to 132 cols Landscape
+000403  *>
+000404       03  line  1.
+000405           05  col  50     pic x(40)   source UserA.
+000406           05  col 108     pic x(10)   source U-Date.
+000407           05  col 120     pic x(8)    source WSD-Time.
+000408       03  line  2.
+000409           05  col   1     pic x(17)   source Prog-Name.
+000410           05  col  56     pic x(19)   value "ACAS Payroll System".
+000411           05  col 124     pic x(5)    value "Page ".
+000412           05  col 129     pic zz9     source Page-Counter.
+000413       03  Line  3.
+000414           05  col  54     pic x(22)   value "Payroll Journal Report".
+000415       03  line  4.
+000416           05  col   1     pic x(9)    value "Interval: ".
+000417           05  col  10     pic x       using WS-Hdr-Interval.   *> Hdr needs reading and store in WS
+000418           05  col  54     pic x(23)   value "Employee Payroll Detail".
+000419           05  col  98                 value "From: ".
+000420           05  col 104     pic x(10)   using WS-Rep-From-Date.
+000421           05  col 116                 value "To: ".
+000422           05  col 120     pic x(10)   using WS-Rep-To-Date.
+000423       03  line  5.
+000424           05  col 108     pic x(12)   value "Check Date: ".
+000425           05  col 120     pic x(10)   using WS-Check-Date.
+000426  *>
+000427   01  Emp-Detail type is detail.
+000428       03  line  6.
+000429           05  col   1                 value "#".
+000430           05  col   2     pic 9(7)    using Emp-No.
+000431           05  col  10     pic x(32)   using Emp-Name.
+000432
+000433
+000434       03  line + 2.
+000435           05  col   1     pic 9(7)          source Emp-No.
+000436           05  col  10     pic x(32)         source Emp-Name.
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0010
+
+LINE    .....................................................SOURCE.....................................................
+
+000437           05  col  39     pic zz,zz9.99     source Emp-Vac-Rate.
+000438           05  col  48     pic zz,zz9.99     source Emp-Vac-Accum.
+000439           05  col  62     pic zz,zz9.99     source Emp-Vac-Used.
+000440           05  col  78     pic zz,zz9.99     source Emp-SL-Rate.
+000441           05  col  86     pic zz,zz9.99     source Emp-SL-Accum.
+000442           05  col 100     pic zz,zz9.99     source Emp-SL-Used.
+000443       03  line + 2.
+000444           05  col  15     pic x(12)         value "(Active)    "   present when Emp-Status = "A".
+000445           05  col  15     pic x(12)         value "(Terminated)"   present when Emp-Status = "T".
+000446           05  col  15     pic x(12)         value "(On-Leave)  "   present when Emp-Status = "L".
+000447           05  col  15     pic x(12)         value "(Deleted)   "   present when Emp-Status = "D".
+000448           05  col  40                       value "Comp. Time Accumulated:".
+000449           05  col  61     pic zz,zz9.99  source Emp-Comp-Accum.
+000450           05  col  84                       value "Comp. Time Used:".
+000451           05  col  99     pic zz,zz9.99  source Emp-Comp-Used.
+000452  *>
+000453  *> Can we add these line to previous line and are we aligned from titles ??  <<<
+000454  *>
+000455
+000456  *>
+000457   01  type control Footing Final line plus 2.
+000458       03  col 1           pic x(34)         value "Total - Employee Account Records :".
+000459       03  col 36          pic zzz9          source WS-Rec-Cnt.
+000460  *>
+000461   procedure division using WS-Calling-Data  *> ACAS
+000462                            WS-System-Record *> ACAS
+000463                            To-Day           *> ACAS
+000464                            File-Defs.       *> ACAS
+000465  *>
+000466   aa000-Main                  section.
+000467  *>**********************************
+000468  *> Force Esc, PgUp, PgDown, PrtSC to be detected
+000469       set      ENVIRONMENT "COB_SCREEN_EXCEPTIONS" to "Y".
+000470       set      ENVIRONMENT "COB_SCREEN_ESC" to "Y".
+000471       move     CURRENT-DATE to WSE-Date-block.
+000472       move     WSE-HH  to  WSD-HH.
+000473       move     WSE-MM  to  WSD-MM.
+000474       move     WSE-SS  to  WSD-SS.  *> WSD-Time
+000475       move     Print-Spool-Name to PSN.  *> set ACAS prt spool for o/p
+000476  *>
+000477  *> Get current-date into locale format for display and printing
+000478  *>
+000479       perform  ZZ070-Convert-Date.
+000480       move     WS-Date to WS-Conv-Date.  *> Use for reporting etc.
+000481  *>
+000482  *> Terminal-Sizing.
+000483  *>
+000484       perform  forever
+000485                accept   WS-Env-Lines   from lines
+000486                if       WS-Env-Lines < 28
+000487                         display  SY010    at 0101 with erase eos
+000488                         accept   WS-Reply at 0133
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0011
+
+LINE    .....................................................SOURCE.....................................................
+
+000489                         move     8 to WS-Term-Code
+000490                         exit perform cycle
+000491                end-if
+000492                accept   WS-Env-Columns from Columns
+000493                if       WS-Env-Columns < 80
+000494                         display  SY013    at 0101 with erase eos
+000495                         accept   WS-Reply at 0130
+000496                         move     8 to WS-Term-Code
+000497                         exit perform cycle
+000498                end-if
+000499       end-perform.
+000500  *>
+000501  *> Set up error message areas on screen - assumes terninal set for => 28 deep
+000502  *>  and must be 80 wide   BUT only needs depth of 24 or more.
+000503  *>
+000504       subtract 2 from WS-Env-Lines giving WS-22-Lines.
+000505       subtract 1 from WS-Env-Lines giving WS-23-Lines.
+000506       move     WS-Env-Lines to WS-Lines.
+000507       move     zero         to WS-Term-Code.
+000508  *>
+000509   aa010-Open-PY-Files.
+000510  *>
+000511  *> Check for files and Quit if any are missing or there is no data for Emp.
+000512  *>
+000513  *>  Param file not really needed for this program ?
+000514  *>
+000515       open     input PY-Param1-File.
+000516       if       PY-PR1-Status not = "00"      *> Does not exist yet so lets create it & write rec
+000517                perform  ZZ040-Evaluate-Message
+000518                display  PY001         at line WS-23-Lines col 1 foreground-color 4 erase eos
+000519                display  PY-PR1-Status at line WS-23-Lines col 47
+000520                display  WS-Eval-Msg   at line WS-23-Lines col 50
+000521                display  SY001         at line WS-Lines    col 1 foreground-color 2
+000522                accept   WS-Reply      at line WS-Lines    col 48 AUTO
+000523                close    PY-Param1-File
+000524                move     1 to WS-Term-Code
+000525                goback   returning 1        *> == no param file
+000526       end-if.
+000527  *>
+000528  *> Get PY params data for line count etc
+000529  *>
+000530       move     1        to RRN.
+000531       read     PY-Param1-File key RRN
+000532       if       PY-PR1-Status not = "00"
+000533                perform  ZZ040-Evaluate-Message
+000534                display  PY002         at line WS-23-Lines col 1 with erase eos
+000535                display  PY-PR1-Status at line WS-23-Lines col 33
+000536                display  WS-Eval-Msg   at line WS-23-Lines col 36
+000537                display  SY001         at line WS-Lines    col 1
+000538                accept   WS-Reply      at line WS-Lines    col 48 AUTO
+000539                close    PY-Param1-File
+000540                move     1 to WS-Term-Code
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0012
+
+LINE    .....................................................SOURCE.....................................................
+
+000541                goback   returning 6
+000542       end-if.
+000543  *>
+000544       close    PY-Param1-File.             *> Record still in WS area
+000545       move     zero  to  Return-Code.
+000546  *>
+000547       open     input    PY-Employee-File.    *> Now OPEN
+000548       if       PY-Emp-Status not = zero
+000549                move     PY-Emp-Status to PY-PR1-Status
+000550                perform  ZZ040-Evaluate-Message
+000551                display  PY003         at line WS-23-Lines col 1 foreground-color 4 erase eos
+000552                display  PY-Emp-Status at line WS-23-Lines col 33 foreground-color 4
+000553                display  WS-Eval-Msg   at line WS-23-Lines col 36
+000554                display  SY001         at line WS-Lines    col 1
+000555                accept   WS-Reply      at line WS-Lines    col 48 auto
+000556                close    PY-Employee-File
+000557                move     1 to WS-Term-Code
+000558                goback   returning 3.
+000559  *>
+000560       move     zeros to WS-Page-Cnt.
+000561       move     90    to WS-Line-Cnt.
+000562  *>
+000563       open     output Print-File.
+000564       perform  aa050-Report-Vacation.
+000565       close    PY-Employee-File.
+000566       if       Page-Counter > zero           *> Don't print a empty report
+000567                close Print-File
+000568                call     "SYSTEM" using Print-Report  *> Landscape
+000569                goback
+000570       end-if.
+000571  *>
+000572   aa000-Exit.  Exit section.
+000573  *>
+000574   ZZ040-Evaluate-Message      Section.
+000575  *>**********************************
+000576  *>
+000577  *> For PY-PR1 parameter file anfd other using PR-PR1-Status.
+000578  *>
+000579       copy "FileStat-Msgs-2.cpy" replacing MSG    by WS-Eval-Msg
+000580                                          STATUS by PY-PR1-Status.
+000581  *>
+000582   ZZ040-Eval-Msg-Exit.
+000583       exit     section.
+000584  *>
+000585   aa050-Report-Vacation     section.
+000586  *>********************************
+000587  *>
+000588  *> At this point Emp is opened for input and Print-File for output.
+000589  *>
+000590       move     zero to WS-Rec-Cnt.
+000591       subtract 1 from Page-Lines giving WS-Page-Lines.  *> Could be the same ??  <<<<
+000592  *>
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0013
+
+LINE    .....................................................SOURCE.....................................................
+
+000593       initiate Employee-Vacation-Report.
+000594       perform  forever
+000595                read     PY-Employee-File next record
+000596                if       PY-Emp-Status not = "00"   *> EOF
+000597                         exit perform
+000598                end-if
+000599                add      1 to WS-Rec-Cnt
+000600                generate Emp-Detail
+000601       end-perform.
+000602       terminate
+000603                Employee-Vacation-Report.
+000604  *>
+000605   aa050-Exit.  exit section.
+000606  *>
+000607   zz070-Convert-Date          section.
+000608  *>**********************************
+000609  *>
+000610  *>  Converts date in WSE-Date to UK/USA/Intl date format using current-date
+000611  *>*************************************************************************
+000612  *> Input:   WSE-Date via CURRENT-DATE
+000613  *> output:  WS-Date as uk/US/Inlt date format
+000614  *>
+000615  *> first create in UK date
+000616       move     WSE-Year  to WS-Year.
+000617       move     WSE-Month to WS-Month.
+000618       move     WSE-Days  to WS-Days.
+000619
+000620  *>
+000621       if       Date-Form = zero
+000622                move 1 to Date-Form.
+000623  *>
+000624       if       Date-UK          *> nothing to do as in UK format
+000625                go to zz070-Exit.
+000626       if       Date-USA                *> Swap month and days
+000627                move WS-Days  to WS-Swap
+000628                move WS-Month to WS-Days
+000629                move WS-Swap  to WS-Month
+000630                go to zz070-Exit.
+000631  *>
+000632  *> So its International date format
+000633  *>
+000634       move     "ccyy/mm/dd" to WS-Date.  *> Swap to Intl
+000635       move     WSE-Year  to WS-Intl-Year.
+000636       move     WSE-Month to WS-Intl-Month.
+000637       move     WSE-Days  to WS-Intl-Days.
+000638  *>
+000639   zz070-Exit.
+000640       exit     section.
+000641  *>
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0014
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+01024 FILE                PY-Param1-File
+01024 GROUP          01   PY-Param1-Record
+00907 GROUP          03   PY-PR1-Block
+00300 GROUP          05   PY-PR1-Company-Data
+00060 ALPHANUMERIC   07   PY-PR1-Co-Name                 X(60)
+00032 ALPHANUMERIC   07   PY-PR1-Trade-Name              X(32)
+00032 ALPHANUMERIC   07   PY-PR1-Co-Address-1            X(32)
+00032 ALPHANUMERIC   07   PY-PR1-Co-Address-2            X(32)
+00032 ALPHANUMERIC   07   PY-PR1-Co-Address-3            X(32)
+00032 ALPHANUMERIC   07   PY-PR1-Co-Address-4            X(32)
+00012 GROUP          07   PY-PR1-Co-Post-Code
+00010 ALPHANUMERIC   09   PY-PR1-Co-Zip                  X(10)
+00002 ALPHANUMERIC   09   PY-PR1-Co-State                XX
+00012 ALPHANUMERIC   07   PY-PR1-Co-Phone                X(12)
+00030 ALPHANUMERIC   07   PY-PR1-Co-Email                X(30)
+00001 ALPHANUMERIC   07   PY-PR1-Pay-Method              X
+00001 ALPHANUMERIC   07   PY-PR1-Payslip-Md              X
+00024 ALPHANUMERIC   07   PY-PR1-Tax-ID                  X(24)
+00001 NUMERIC        05   PY-PR1-Offset-Cash-Acct        BINARY-CHAR COMP-5
+00001 NUMERIC        05   PY-PR1-Dflt-Gross-Acct         BINARY-CHAR COMP-5
+00001 NUMERIC        05   PY-PR1-Dflt-Dist-Acct          BINARY-CHAR COMP-5
+00001 NUMERIC        05   PY-PR1-Max-Dist-Accts          BINARY-CHAR COMP-5
+00004 NUMERIC        05   PY-PR1-Min-Wage                9(5)V99 COMP-3
+00004 NUMERIC        05   PY-PR1-Void-Check-Amt          9(5)V99 COMP-3
+00004 NUMERIC        05   PY-PR1-Rate2-Factor            9(5)V99 COMP-3
+00004 NUMERIC        05   PY-PR1-Rate3-Factor            9(5)V99 COMP-3
+00004 NUMERIC        05   PY-PR1-Max-Pay-Factor          9(5)V99 COMP-3
+00004 NUMERIC        05   PY-PR1-Dflt-Pay-Rate           9(5)V99 COMP-3
+00004 NUMERIC        05   PY-PR1-Dflt-Vac-Rate           9(5)V99 COMP-3
+00004 NUMERIC        05   PY-PR1-Dflt-SL-Rate            9(5)V99 COMP-3
+00004 NUMERIC        05   PY-PR1-Dflt-Norm-Units         9(5)V99 COMP-3
+00008 NUMERIC        05   PY-PR1-Last-Day-Pay-Period     9(8)
+00001 ALPHANUMERIC   05   PY-PR1-Void-Checks-Over-Max    X
+00001 NUMERIC        05   PY-PR1-Rate4-Exclusion-Type    9
+00001 ALPHANUMERIC   05   PY-PR1-Check-Printing-Used     X
+00001 ALPHANUMERIC   05   PY-PR1-Check-History-Used      X
+00001 ALPHANUMERIC   05   PY-PR1-S-Used                  X
+00001 ALPHANUMERIC   05   PY-PR1-M-Used                  X
+00001 ALPHANUMERIC   05   PY-PR1-W-Used                  X
+00001 ALPHANUMERIC   05   PY-PR1-B-Used                  X
+00001 ALPHANUMERIC   05   PY-PR1-JC-Used                 X
+00001 ALPHANUMERIC   05   PY-PR1-GL-Used                 X
+00001 ALPHANUMERIC   05   PY-PR1-IRS-Used                X
+00001 ALPHANUMERIC   05   PY-PR1-Dflt-Pay-Interval       X
+00001 ALPHANUMERIC   05   PY-PR1-Dist-Used               X
+00001 ALPHANUMERIC   05   PY-PR1-Currency-Sign           X
+00001 ALPHANUMERIC   05   PY-PR1-OS-Delimiter            X
+00001 ALPHANUMERIC   05   PY-PR1-Debugging               X
+00001 ALPHANUMERIC   05   PY-PR1-Hard-Delete             X
+00001 ALPHANUMERIC   05   PY-PR1-Dflt-HS-Type            X
+00001 ALPHANUMERIC   05   PY-PR1-B2B-File-Type           X
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0015
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+00015 ALPHANUMERIC   05   PY-PR1-Rate-Name               X(15), OCCURS 4
+00015 ALPHANUMERIC   05   PY-PR1-Fed-ID                  X(15)
+00015 ALPHANUMERIC   05   PY-PR1-State-ID                X(15)
+00015 ALPHANUMERIC   05   PY-PR1-Local-ID                X(15)
+00001 NUMERIC        05   PY-PR1-Date-Format             9
+00008 GROUP          05   PY-PR1-Date
+00002 NUMERIC        07   PY-PR1-Date-Mo                 99
+00002 NUMERIC        07   PY-PR1-Date-Dy                 99
+00004 NUMERIC        07   PY-PR1-Date-Yr                 9(4)
+00002 NUMERIC        05   PY-PR1-Page-Lines-P            99
+00002 NUMERIC        05   PY-PR1-Page-Lines-L            99
+00003 NUMERIC        05   PY-PR1-Page-Width-P            999
+00003 NUMERIC        05   PY-PR1-Page-Width-L            999
+00001 ALPHANUMERIC   05   PY-PR1-User-Prog-Used          X
+00008 ALPHANUMERIC   05   PY-PR1-User-Prog               X(8)
+00020 ALPHANUMERIC   05   PY-PR1-User-Prog-Desc          X(20)
+00001 NUMERIC        05   PY-PR1-Max-Chk-Cats            BINARY-CHAR COMP-5
+00001 NUMERIC        05   PY-PR1-Max-Emp-Eds             BINARY-CHAR COMP-5
+00001 NUMERIC        05   PY-PR1-Max-Ed-Cats             BINARY-CHAR COMP-5
+00001 NUMERIC        05   PY-PR1-Max-Swt-Entries         BINARY-CHAR COMP-5
+00001 NUMERIC        05   PY-PR1-Lo-Ded-Chk-Cat          BINARY-CHAR COMP-5
+00001 NUMERIC        05   PY-PR1-Hi-Ded-Chk-Cat          BINARY-CHAR COMP-5
+00001 NUMERIC        05   PY-PR1-Lo-Earn-Chk-Cat         BINARY-CHAR COMP-5
+00001 NUMERIC        05   PY-PR1-Hi-Earn-Chk-Cat         BINARY-CHAR COMP-5
+00001 NUMERIC        05   PY-PR1-Max-Sys-Eds             BINARY-CHAR COMP-5
+00337 GROUP          05   PY-PR1-Print-Control
+00048 ALPHANUMERIC   07   PY-PR1-Print-Spool-Name        X(48)
+00048 ALPHANUMERIC   07   PY-PR1-Print-Spool-Name2       X(48)
+00048 ALPHANUMERIC   07   PY-PR1-Print-Spool-Name3       X(48)
+00001 ALPHANUMERIC   07   PY-PR1-Print-Ctl-Flag          X
+00032 ALPHANUMERIC   07   PY-PR1-Font-Small              X(32)
+00032 ALPHANUMERIC   07   PY-PR1-Font-Normal             X(32)
+00032 ALPHANUMERIC   07   PY-PR1-Font-Reset              X(32)
+00032 ALPHANUMERIC   07   PY-PR1-Colour-1                X(32)
+00032 ALPHANUMERIC   07   PY-PR1-Colour-2                X(32)
+00032 ALPHANUMERIC   07   PY-PR1-Colour-Reset            X(32)
+00001 ALPHANUMERIC   05   PY-PR1-Quote-Char              X
+00040 GROUP          05   PY-PR1-B2B-Fields
+00002 NUMERIC        07   PY-PR1-B2B-Field-Order         99, OCCURS 20
+00088 GROUP          03   PY-PR2-Block
+00004 NUMERIC        05   PY-PR2-Year                    9(4)
+00004 NUMERIC        05   PY-PR2-Year-Next               9(4)
+00004 NUMERIC        05   PY-PR2-Last-Year-Ended         9(4)
+00004 NUMERIC        05   PY-PR2-Last-SM-Apply-No        9(4)
+00004 NUMERIC        05   PY-PR2-Last-WB-Apply-No        9(4)
+00004 NUMERIC        05   PY-PR2-Hrs-Batch-No            9(4)
+00008 NUMERIC        05   PY-PR2-Last-Day-Last-W         9(8)
+00008 NUMERIC        05   PY-PR2-Last-Day-Last-B         9(8)
+00008 NUMERIC        05   PY-PR2-Last-Day-Last-S         9(8)
+00008 NUMERIC        05   PY-PR2-Last-Day-Last-M         9(8)
+00008 NUMERIC        05   PY-PR2-Check-Date              9(8)
+00004 NUMERIC        05   PY-PR2-Last-Employee-No        9(8) COMP
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0016
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+00002 NUMERIC        05   PY-PR2-No-Active-Emps          BINARY-SHORT COMP-5
+00002 NUMERIC        05   PY-PR2-No-Employees            BINARY-SHORT COMP-5
+00002 NUMERIC        05   PY-PR2-No-Of-SM-Applies        BINARY-SHORT COMP-5
+00002 NUMERIC        05   PY-PR2-No-Of-WB-Applies        BINARY-SHORT COMP-5
+00001 NUMERIC        05   PY-PR2-No-Accts                BINARY-CHAR COMP-5
+00001 ALPHANUMERIC   05   PY-PR2-Just-Closed-Year        X
+00001 ALPHANUMERIC   05   PY-PR2-940-Printed             X
+00001 ALPHANUMERIC   05   PY-PR2-941-Printed             X
+00001 ALPHANUMERIC   05   PY-PR2-W2-Printed              X
+00001 NUMERIC        05   PY-PR2-Last-Q-Ended            9
+00006 NUMERIC        05   PY-PR2-Last-Check-No           9(6)
+00029 ALPHANUMERIC   03   FILLER                         X(29)
+
+00508 FILE                PY-Employee-File
+00508 GROUP          01   PY-Employee-Record
+00004 NUMERIC        03   Emp-No                         9(7) COMP
+00001 ALPHANUMERIC   03   Emp-Status                     X
+00001 ALPHANUMERIC   03   Emp-HS-Type                    X
+00001 ALPHANUMERIC   03   Emp-Pay-Interval               X
+00002 ALPHANUMERIC   03   Emp-Taxing-State               XX
+00003 ALPHANUMERIC   03   Emp-Job-Code                   XXX
+00004 NUMERIC        03   Emp-Start-Date                 9(8) COMP
+00004 NUMERIC        03   Emp-Birth-Date                 9(8) COMP
+00004 NUMERIC        03   Emp-Term-Date                  9(8) COMP
+00001 ALPHANUMERIC   03   Emp-Sex                        X
+00001 ALPHANUMERIC   03   Emp-Marital                    X
+00001 NUMERIC        03   Emp-Pay-Freq                   BINARY-CHAR COMP-5
+00001 ALPHANUMERIC   03   Emp-Next-Del                   X
+00004 NUMERIC        03   Emp-SSN                        9(9) COMP
+00002 NUMERIC        03   Emp-Cur-Apply-No               99
+00032 ALPHANUMERIC   03   Emp-Name                       X(32)
+00032 ALPHANUMERIC   03   Emp-Search-Name                X(32)
+00032 ALPHANUMERIC   03   Emp-Address-1                  X(32)
+00032 ALPHANUMERIC   03   Emp-Address-2                  X(32)
+00032 ALPHANUMERIC   03   Emp-Address-3                  X(32)
+00032 ALPHANUMERIC   03   Emp-Address-4                  X(32)
+00012 GROUP          03   Emp-Post-Code
+00010 ALPHANUMERIC   05   Emp-Zip                        X(10)
+00002 ALPHANUMERIC   05   Emp-State                      XX
+00011 NUMERIC        03   Emp-Phone-No                   9(11)
+00030 ALPHANUMERIC   03   Emp-Email                      X(30)
+00024 ALPHANUMERIC   03   Emp-Bank-Acct-No               X(24)
+00001 NUMERIC        03   Emp-Rate4-Exclusion            9
+00001 ALPHANUMERIC   03   Emp-Cal-Head-Of-House          X
+00001 NUMERIC        03   Emp-Cal-Ded-Allow              99 COMP
+00001 NUMERIC        03   Emp-FWT-Allow                  99 COMP
+00001 NUMERIC        03   Emp-SWT-Allow                  99 COMP
+00001 NUMERIC        03   Emp-LWT-Allow                  99 COMP
+00001 ALPHANUMERIC   03   Emp-Pension-Used               X
+00001 ALPHANUMERIC   03   Emp-Eic-Used                   X
+00001 ALPHANUMERIC   03   Emp-FWT-Exempt                 X
+00001 ALPHANUMERIC   03   Emp-SWT-Exempt                 X
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0017
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+00001 ALPHANUMERIC   03   Emp-LWT-Exempt                 X
+00001 ALPHANUMERIC   03   Emp-FICA-Exempt                X
+00001 ALPHANUMERIC   03   Emp-SDI-Exempt                 X
+00001 ALPHANUMERIC   03   Emp-Co-FUTA-Exempt             X
+00001 ALPHANUMERIC   03   Emp-Co-SUI-Exempt              X
+00001 ALPHANUMERIC   03   Emp-Mcare-Exempt               X
+00001 ALPHANUMERIC   03   Emp-Sys-Exempt                 X, OCCURS 5
+00004 NUMERIC        03   Emp-Rate                       9(5)V99 COMP-3, OCCURS 4
+00002 NUMERIC        03   Emp-Auto-Units                 999 COMP-3
+00002 NUMERIC        03   Emp-Normal-Units               999 COMP-3
+00005 NUMERIC        03   Emp-Max-Pay                    9(6)V99 COMP-3
+00004 NUMERIC        03   Emp-Vac-Rate                   9(5)V99 COMP-3
+00004 NUMERIC        03   Emp-Vac-Accum                  9(5)V99 COMP-3
+00004 NUMERIC        03   Emp-Vac-Used                   9(5)V99 COMP-3
+00004 NUMERIC        03   Emp-SL-Rate                    9(5)V99 COMP-3
+00004 NUMERIC        03   Emp-SL-Accum                   9(5)V99 COMP-3
+00004 NUMERIC        03   Emp-SL-Used                    9(5)V99 COMP-3
+00004 NUMERIC        03   Emp-Comp-Accum                 9(5)V99 COMP-3
+00004 NUMERIC        03   Emp-Comp-Used                  9(5)V99 COMP-3
+00020 GROUP          03   Emp-Dist-Grp                   OCCURS 5
+00001 NUMERIC        05   Emp-Dist-Acct                  BINARY-CHAR COMP-5
+00003 NUMERIC        05   Emp-Dist-Pcent                 999V99 COMP-3
+00096 GROUP          03   Emp-ED-Grp                     OCCURS 3
+00001 ALPHANUMERIC   05   Emp-Ed-Used                    X
+00031 GROUP          05   Emp-Ed-Group
+00005 NUMERIC        07   Emp-ED-Factor                  9(6)V99 COMP-3
+00005 NUMERIC        07   Emp-ED-Limit                   9(6)V99 COMP-3
+00001 ALPHANUMERIC   07   Emp-ED-Amt-Pcent               X
+00001 NUMERIC        07   Emp-ED-Acct-No                 BINARY-CHAR COMP-5
+00015 ALPHANUMERIC   07   Emp-ED-Desc                    X(15)
+00001 ALPHANUMERIC   07   Emp-ED-Earn-Ded                X
+00001 NUMERIC        07   Emp-ED-Exclusion               9
+00001 ALPHANUMERIC   07   Emp-ED-Limit-Used              X
+00001 NUMERIC        07   Emp-ED-Chk-Cat                 99 COMP
+00011 ALPHANUMERIC   03   FILLER                         X(11)
+
+00024 FILE                PY-Pay-File
+00024 GROUP          01   PY-Pay-Record
+00007 NUMERIC        03   Pay-Emp-No                     9(7)
+00001 ALPHANUMERIC   03   Pay-Interval                   X
+00004 NUMERIC        03   Pay-EFf-Date                   9(8) COMP
+00002 NUMERIC        03   Pay-Apply-No                   9(4) COMP
+00001 NUMERIC        03   Pay-Reporting-Cat              9
+00001 ALPHANUMERIC   03   Pay-Extended                   X
+00004 NUMERIC        03   Pay-Units                      S9(5)V99 COMP-3
+00004 NUMERIC        03   Pay-Amt                        S9(5)V99 COMP-3
+
+00024 GROUP          01   PY-Pay-Header
+00007 NUMERIC        03   Pay-Hdr-No                     9(7)
+00001 ALPHANUMERIC   03   Pay-Hdr-Interval               X
+00002 NUMERIC        03   Pay-Hdr-Last-Apply-No          9(4) COMP
+00002 NUMERIC        03   Pay-Hdr-Journal-Printed        9(4) COMP
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0018
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+00004 NUMERIC        03   Pay-Hdr-Last-Day-of-Last-Per   9(8) COMP
+00008 ALPHANUMERIC   03   FILLER                         X(8)
+
+00339 FILE                PY-System-Deduction-File
+00339 GROUP          01   PY-System-Deduction-Record
+00001 ALPHANUMERIC   03   Ded-FWT-Used                   X
+00001 ALPHANUMERIC   03   Ded-SWT-Used                   X
+00001 ALPHANUMERIC   03   Ded-LWT-Used                   X
+00001 ALPHANUMERIC   03   Ded-FICA-Used                  X
+00001 ALPHANUMERIC   03   Ded-CO-FICA-Used               X
+00001 ALPHANUMERIC   03   Ded-SDI-Used                   X
+00001 ALPHANUMERIC   03   Ded-CO-FUTA-Used               X
+00001 ALPHANUMERIC   03   Ded-CO-SUI-Used                X
+00001 ALPHANUMERIC   03   Ded-EIC-Used                   X
+00004 NUMERIC        03   Ded-FWT-Allowance-Amt          S9(5)V99 COMP-3
+00002 NUMERIC        03   Ded-FWT-Acct-No                99
+00002 NUMERIC        03   Ded-SWT-Acct-No                99
+00002 NUMERIC        03   Ded-LWT-Acct-No                99
+00002 NUMERIC        03   Ded-FICA-Acct-No               99
+00002 NUMERIC        03   Ded-CO-FICA-Acct-No            99
+00002 NUMERIC        03   Ded-SDI-Acct-No                99
+00002 NUMERIC        03   Ded-CO-FUTA-Acct-No            99
+00002 NUMERIC        03   Ded-CO-SUI-Acct-No             99
+00002 NUMERIC        03   Ded-EIC-Acct-No                99
+00003 NUMERIC        03   Ded-FICA-Rate                  99V99 COMP-3
+00004 NUMERIC        03   Ded-FICA-Limit                 9(5)V99 COMP-3
+00003 NUMERIC        03   Ded-CO-FICA-Rate               99V99 COMP-3
+00004 NUMERIC        03   Ded-CO-FICA-Limit              9(5)V99 COMP-3
+00003 NUMERIC        03   Ded-SDI-Rate                   99V99 COMP-3
+00004 NUMERIC        03   Ded-SDI-Limit                  9(5)V99 COMP-3
+00003 NUMERIC        03   Ded-CO-FUTA-Rate               99V99 COMP-3
+00004 NUMERIC        03   Ded-CO-FUTA-Limit              9(5)V99 COMP-3
+00004 NUMERIC        03   Ded-CO-FUTA-Max-Credit         9(5)V99 COMP-3
+00003 NUMERIC        03   Ded-CO-SUI-Rate                99V99 COMP-3
+00004 NUMERIC        03   Ded-CO-SUI-Limit               9(5)V99 COMP-3
+00003 NUMERIC        03   Ded-EIC-Rate                   99V99 COMP-3
+00004 NUMERIC        03   Ded-EIC-Limit                  9(5)V99 COMP-3
+00003 NUMERIC        03   Ded-EIC-Excess-Rate            99V99 COMP-3
+00004 NUMERIC        03   Ded-EIC-Excess-Limit           9(5)V99 COMP-3
+00049 GROUP          03   Ded-FWT-Mar                    OCCURS 7
+00004 NUMERIC        05   Ded-FWT-Mar-Cutoff             9(5)V99 COMP-3
+00003 NUMERIC        05   Ded-FWT-Mar-Percent            9(3)V99 COMP-3
+00049 GROUP          03   Ded-FWT-Sin                    OCCURS 7
+00004 NUMERIC        05   Ded-FWT-Sin-Cutoff             9(5)V99 COMP-3
+00003 NUMERIC        05   Ded-FWT-Sin-Percent            9(3)V99 COMP-3
+00002 NUMERIC        03   Ded-Sys-Entries-Used           99
+00155 GROUP          03   Ded-Sys-Data-Blocks            OCCURS 5
+00001 ALPHANUMERIC   05   Ded-Sys-Amt-Percent            X
+00002 NUMERIC        05   Ded-Sys-Chk-Cat                99
+00001 ALPHANUMERIC   05   Ded-Sys-Earn-Ded               X
+00001 NUMERIC        05   Ded-Sys-Exclusion              9
+00001 ALPHANUMERIC   05   Ded-Sys-Limit-Used             X
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0019
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+00001 ALPHANUMERIC   05   Ded-Sys-Used                   X
+00015 ALPHANUMERIC   05   Ded-Sys-Desc                   X(15)
+00001 NUMERIC        05   Ded-Sys-Acct-No                BINARY-CHAR COMP-5
+00004 NUMERIC        05   Ded-Sys-Factor                 9(5)V99 COMP-3
+00004 NUMERIC        05   Ded-Sys-Limit                  9(5)V99 COMP-3
+
+00076 FILE                PY-Check-File
+00076 GROUP          01   PY-Chk-Record
+00007 NUMERIC        03   Chk-Emp-No                     9(7)
+00001 NUMERIC        03   Chk-Interval                   9
+00004 NUMERIC        03   Chk-Check-No                   9(6) COMP
+00004 NUMERIC        03   Chk-Amt                        9(5)V99 COMP-3, OCCURS 16
+
+00076 GROUP          01   PY-Chk-Hdr-Record
+00007 NUMERIC        03   Chk-Hdr-No                     9(7)
+00001 NUMERIC        03   Chk-hdr-Interval               9
+00002 NUMERIC        03   Chk-hdr-Apply-No               9(4) COMP
+00004 NUMERIC        03   Chk-hdr-Slow-From-Date         9(8) COMP
+00004 NUMERIC        03   Chk-hdr-Fast-From-Date         9(8) COMP
+00004 NUMERIC        03   Chk-hdr-To-Date                9(8) COMP
+00001 ALPHANUMERIC   03   Chk-hdr-Register-Printed       X
+00001 ALPHANUMERIC   03   Chk-hdr-Checks-Printed         X
+00052 ALPHANUMERIC   03   FILLER                         X(52)
+
+00591 FILE                print-file
+
+      WORKING-STORAGE SECTION
+
+00004 NUMERIC        77   RETURN-CODE
+00017 ALPHANUMERIC   77   prog-name                      X(17)
+
+00189 GROUP          01   Print-Report
+00117 ALPHANUMERIC   03   FILLER                         X(117)
+00048 ALPHANUMERIC   03   PSN                            X(48)
+00024 ALPHANUMERIC   03   PP-Name                        X(24)
+
+00024 ALPHANUMERIC   01   PP-Print-File-Name             X(24)
+
+00014 GROUP          01   maps03-ws
+00010 ALPHANUMERIC   03   u-date                         X(10)
+00010 GROUP          03   u-UK, REDEFINES u-date
+00002 NUMERIC        05   u-days                         99
+00001 ALPHANUMERIC   05   FILLER                         X
+00002 NUMERIC        05   u-month                        99
+00001 ALPHANUMERIC   05   FILLER                         X
+00004 GROUP          05   u-year
+00002 NUMERIC        07   u-cc                           99
+00002 NUMERIC        07   u-yy                           99
+00010 GROUP          03   u-USA, REDEFINES u-date
+00002 NUMERIC        05   u-usa-month                    99
+00001 ALPHANUMERIC   05   FILLER                         X
+00002 NUMERIC        05   u-usa-days                     99
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0020
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+00001 ALPHANUMERIC   05   FILLER                         X
+00004 ALPHANUMERIC   05   FILLER                         X(4)
+00010 GROUP          03   u-Intl, REDEFINES u-date
+00004 GROUP          05   u-intl-year
+00002 NUMERIC        07   u-intl-cc                      99
+00002 NUMERIC        07   u-intl-yy                      99
+00001 ALPHANUMERIC   05   FILLER                         X
+00002 NUMERIC        05   u-intl-month                   99
+00001 ALPHANUMERIC   05   FILLER                         X
+00002 NUMERIC        05   u-intl-days                    99
+00004 NUMERIC        03   u-bin                          BINARY-LONG COMP-5
+
+02065 GROUP          01   File-Access
+00003 NUMERIC        03   We-Error                       999
+00004 NUMERIC        03   RRN                            9(5) COMP
+00002 NUMERIC        03   Fs-Reply                       99
+00001 ALPHANUMERIC   03   s1                             X
+00004 NUMERIC        03   Curs                           9(4)
+00004 GROUP          03   FILLER, REDEFINES Curs
+00002 NUMERIC        05   Lin                            99
+00002 NUMERIC        05   Cole                           99
+00004 NUMERIC        03   Curs2                          9(4)
+00004 GROUP          03   FILLER, REDEFINES Curs2
+00002 NUMERIC        05   Lin2                           99
+00002 NUMERIC        05   Col2                           99
+00525 ALPHANUMERIC   03   ACAS-Path                      X(525)
+00525 ALPHANUMERIC   03   Path-Work                      X(525)
+00022 ALPHANUMERIC   03   FS-Action                      X(22)
+00832 GROUP          03   Logging-Data
+00001 ALPHANUMERIC   05   Accept-Reply                   X
+00001 NUMERIC        05   File-Key-No                    9
+00001 NUMERIC        05   ws-Log-System                  9
+00003 NUMERIC        05   ws-No-Paragraph                999
+00005 ALPHANUMERIC   05   SQL-Err                        X(5)
+00512 ALPHANUMERIC   05   SQL-Msg                        X(512)
+00005 ALPHANUMERIC   05   SQL-State                      X(5)
+00064 ALPHANUMERIC   05   WS-File-Key                    X(64)
+00231 ALPHANUMERIC   05   WS-Log-Where                   X(231)
+00002 NUMERIC        05   WS-Log-File-No                 99
+00007 NUMERIC        05   WS-Count-Rows                  9(7)
+00137 GROUP          03   RDB-Data
+00012 ALPHANUMERIC   05   DB-Schema                      X(12)
+00012 ALPHANUMERIC   05   DB-UName                       X(12)
+00012 ALPHANUMERIC   05   DB-UPass                       X(12)
+00032 ALPHANUMERIC   05   DB-Host                        X(32)
+00064 ALPHANUMERIC   05   DB-Socket                      X(64)
+00005 ALPHANUMERIC   05   DB-Port                        X(5)
+00001 NUMERIC        03   Main-Record-Move-Flag          9
+      CONDITIONAL    88   MRMF-Move-FD
+      CONDITIONAL    88   MRMF-Move-WS
+00002 GROUP          03   FA-RDBMS-Flat-Statuses
+00001 NUMERIC        07   FA-File-System-Used            9
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0021
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+      CONDITIONAL    88   FA-FS-Cobol-Files-Used
+      CONDITIONAL    88   FA-FS-RDBMS-Used
+      CONDITIONAL    88   FA-FS-Valid-Options
+00001 NUMERIC        07   FA-File-Duplicates-In-Use      9
+      CONDITIONAL    88   FA-FS-Duplicate-Processing
+00002 NUMERIC        03   File-Function                  99
+      CONDITIONAL    88   fn-open
+      CONDITIONAL    88   fn-close
+      CONDITIONAL    88   fn-read-next
+      CONDITIONAL    88   fn-read-indexed
+      CONDITIONAL    88   fn-write
+      CONDITIONAL    88   fn-Delete-All
+      CONDITIONAL    88   fn-re-write
+      CONDITIONAL    88   fn-delete
+      CONDITIONAL    88   fn-start
+      CONDITIONAL    88   fn-Write-Raw
+      CONDITIONAL    88   fn-Read-Next-Raw
+      CONDITIONAL    88   fn-Read-By-Name
+      CONDITIONAL    88   fn-Read-By-Batch
+      CONDITIONAL    88   fn-Read-By-Cust
+      CONDITIONAL    88   fn-Read-Next-Header
+00001 NUMERIC        03   Access-Type                    9
+      CONDITIONAL    88   fn-input
+      CONDITIONAL    88   fn-i-o
+      CONDITIONAL    88   fn-output
+      CONDITIONAL    88   fn-extend
+      CONDITIONAL    88   fn-equal-to
+      CONDITIONAL    88   fn-less-than
+      CONDITIONAL    88   fn-greater-than
+      CONDITIONAL    88   fn-not-less-than
+      CONDITIONAL    88   fn-not-greater-than
+
+00008 GROUP          01   ACAS-DAL-Common-data
+00001 NUMERIC        03   SW-Testing                     9
+      CONDITIONAL    88   Testing-1
+00001 NUMERIC        03   SW-Testing-2                   9
+      CONDITIONAL    88   Testing-2
+00006 NUMERIC        03   Log-File-Rec-Written           9(6)
+
+00024 GROUP          01   PY-Pay-Record
+00007 NUMERIC        03   Pay-Emp-No                     9(7)
+00001 ALPHANUMERIC   03   Pay-Interval                   X
+00004 NUMERIC        03   Pay-EFf-Date                   9(8) COMP
+00002 NUMERIC        03   Pay-Apply-No                   9(4) COMP
+00001 NUMERIC        03   Pay-Reporting-Cat              9
+00001 ALPHANUMERIC   03   Pay-Extended                   X
+00004 NUMERIC        03   Pay-Units                      S9(5)V99 COMP-3
+00004 NUMERIC        03   Pay-Amt                        S9(5)V99 COMP-3
+
+00024 GROUP          01   PY-Pay-Header
+00007 NUMERIC        03   Pay-Hdr-No                     9(7)
+00001 ALPHANUMERIC   03   Pay-Hdr-Interval               X
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0022
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+00002 NUMERIC        03   Pay-Hdr-Last-Apply-No          9(4) COMP
+00002 NUMERIC        03   Pay-Hdr-Journal-Printed        9(4) COMP
+00004 NUMERIC        03   Pay-Hdr-Last-Day-of-Last-Per   9(8) COMP
+00008 ALPHANUMERIC   03   FILLER                         X(8)
+
+00061 GROUP          01   WS-Data
+00001 ALPHANUMERIC   03   WS-Reply                       X
+00002 ALPHANUMERIC   03   PY-PR1-Status                  XX
+00002 ALPHANUMERIC   03   PY-Emp-Status                  XX
+00025 ALPHANUMERIC   03   WS-Eval-Msg                    X(25)
+00003 NUMERIC        03   WS-Env-Columns                 999
+00003 NUMERIC        03   WS-Env-Lines                   999
+00002 NUMERIC        03   WS-22-Lines                    99
+00002 NUMERIC        03   WS-23-Lines                    99
+00002 NUMERIC        03   WS-Lines                       99
+00002 NUMERIC        03   A                              99
+00002 NUMERIC        03   B                              99
+00002 NUMERIC        03   C                              99
+00003 NUMERIC        03   D                              999
+00001 NUMERIC        03   F                              9
+00001 NUMERIC        03   WS-Page-Lines                  BINARY-CHAR COMP-5
+00002 NUMERIC        03   WS-Rec-Cnt                     99
+00003 NUMERIC        03   WS-Page-Cnt                    999
+00003 NUMERIC        03   WS-Line-Cnt                    999
+
+00008 NUMERIC        01   WS-Test-YMD                    9(8)
+
+00008 GROUP          01   WS-Test-Date
+00002 NUMERIC        03   WS-Test-Month                  99
+00002 NUMERIC        03   WS-Test-Days                   99
+00004 NUMERIC        03   WS-Test-Year                   9(4)
+
+00008 NUMERIC        01   WS-Test-Date9                  9(8), REDEFINES WS-Test-Date
+
+00008 GROUP          01   WS-Temp-Date
+00004 NUMERIC        03   WS-Temp-Year                   9(4)
+00002 NUMERIC        03   WS-Temp-Month                  99
+00002 NUMERIC        03   WS-Temp-Days                   99
+
+00008 NUMERIC        01   WS-Temp-Date9                  9(8), REDEFINES WS-Temp-Date
+
+00256 GROUP          01   WS-Accumulators-1
+00256 ALPHANUMERIC   03   WS-Exemptions                  X(256)
+
+00207 GROUP          01   WS-Accumulators-2
+00009 NUMERIC        03   WS-Acct-Amt                    S9(7)V99
+00009 NUMERIC        03   WS-Total-Units                 S9(7)V99
+00009 NUMERIC        03   WS-Dist-Out                    S9(7)V99
+00009 NUMERIC        03   WS-Total-Reg-Wages             S9(7)V99
+00009 NUMERIC        03   WS-Total-Other-Earn            S9(7)V99
+00009 NUMERIC        03   WS-Total-Tips                  S9(7)V99
+00009 NUMERIC        03   WS-Total-Tips-Reported         S9(7)V99
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0023
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+00009 NUMERIC        03   WS-Total-Fwt                   S9(7)V99
+00009 NUMERIC        03   WS-Total-Swt                   S9(7)V99
+00009 NUMERIC        03   WS-Total-Lwt                   S9(7)V99
+00009 NUMERIC        03   WS-Total-Fica                  S9(7)V99
+00009 NUMERIC        03   WS-Total-Sdi                   S9(7)V99
+00009 NUMERIC        03   WS-Total-Eic                   S9(7)V99
+00009 NUMERIC        03   WS-Total-Other-Ded             S9(7)V99
+00009 NUMERIC        03   WS-Total-Net                   S9(7)V99
+00009 NUMERIC        03   WS-Total-Co-Fica               S9(7)V99
+00009 NUMERIC        03   WS-Total-Co-Futa               S9(7)V99
+00009 NUMERIC        03   WS-Total-Co-Sui                S9(7)V99
+00009 NUMERIC        03   WS-Total-Vac-Taken             S9(7)V99
+00009 NUMERIC        03   WS-Total-Sl-Taken              S9(7)V99
+00009 NUMERIC        03   WS-Total-Comp-Taken            S9(7)V99
+00009 NUMERIC        03   WS-Total-Comp-Earned           S9(7)V99
+00009 NUMERIC        03   WS-Total-Units                 S9(7)V99
+
+00001 GROUP          01   WS-File-Status
+00001 ALPHANUMERIC   03   WS-Chk-Exists                  X
+
+00022 GROUP          01   WS-Date-Formats
+00002 NUMERIC        03   WS-Swap                        99
+00010 ALPHANUMERIC   03   WS-Conv-Date                   X(10)
+00010 ALPHANUMERIC   03   WS-Date                        X(10)
+00010 GROUP          03   WS-UK, REDEFINES WS-Date
+00002 NUMERIC        05   WS-Days                        99
+00001 ALPHANUMERIC   05   FILLER                         X
+00002 NUMERIC        05   WS-Month                       99
+00001 ALPHANUMERIC   05   FILLER                         X
+00004 NUMERIC        05   WS-Year                        9(4)
+00010 GROUP          03   WS-USA, REDEFINES WS-Date
+00002 NUMERIC        05   WS-USA-Month                   99
+00001 ALPHANUMERIC   05   FILLER                         X
+00002 NUMERIC        05   WS-USA-Days                    99
+00001 ALPHANUMERIC   05   FILLER                         X
+00004 NUMERIC        05   FILLER                         9(4)
+00010 GROUP          03   WS-Intl, REDEFINES WS-Date
+00004 NUMERIC        05   WS-Intl-Year                   9(4)
+00001 ALPHANUMERIC   05   FILLER                         X
+00002 NUMERIC        05   WS-Intl-Month                  99
+00001 ALPHANUMERIC   05   FILLER                         X
+00002 NUMERIC        05   WS-Intl-Days                   99
+
+00008 GROUP          01   hdtime
+00002 ALPHANUMERIC   03   hd-hh                          XX
+00002 ALPHANUMERIC   03   hd-mm                          XX
+00002 ALPHANUMERIC   03   hd-ss                          XX
+00002 ALPHANUMERIC   03   hd-uu                          XX
+
+00800 GROUP          01   WS-Table1
+00800 GROUP          03   WS-Desc-Table
+00800 GROUP          05   WS-ED-Descs                    OCCURS 50
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0024
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+00001 NUMERIC        07   WS-EDO                         9
+00015 ALPHANUMERIC   07   WS-ED-Desc                     X(15)
+00800 GROUP          03   FILLER, REDEFINES WS-Desc-Table
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0025
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+
+00505 GROUP          01   Error-Messages
+00046 ALPHANUMERIC   03   SY001                          X(46)
+00046 ALPHANUMERIC   03   SY010                          X(46)
+00047 ALPHANUMERIC   03   SY013                          X(47)
+00045 ALPHANUMERIC   03   PY001                          X(45)
+00032 ALPHANUMERIC   03   PY002                          X(32)
+00031 ALPHANUMERIC   03   PY003                          X(31)
+00024 ALPHANUMERIC   03   PY761                          X(24)
+00024 ALPHANUMERIC   03   PY762                          X(24)
+00024 ALPHANUMERIC   03   PY763                          X(24)
+00024 ALPHANUMERIC   03   PY764                          X(24)
+00054 ALPHANUMERIC   03   PY765                          X(54)
+00026 ALPHANUMERIC   03   PY766                          X(26)
+00050 ALPHANUMERIC   03   PY767                          X(50)
+00032 ALPHANUMERIC   03   PY772                          X(32)
+00000 ALPHANUMERIC   03   PY768                          INVALID
+00000 ALPHANUMERIC   03   PY769                          INVALID
+00000 ALPHANUMERIC   03   PY770                          INVALID
+00000 ALPHANUMERIC   03   PY771                          INVALID
+
+00003 NUMERIC        01   Error-Code                     999
+
+00004 NUMERIC        01   COB-CRT-STATUS                 9(4)
+
+00022 GROUP          01   ws-time
+00006 GROUP          03   wsa-date
+00002 NUMERIC        05   wsa-yy                         99
+00002 NUMERIC        05   wsa-mm                         99
+00002 NUMERIC        05   wsa-dd                         99
+00008 GROUP          03   wsb-time
+00002 NUMERIC        05   wsb-hh                         99
+00002 NUMERIC        05   wsb-mm                         99
+00002 NUMERIC        05   wsb-ss                         99
+00002 ALPHANUMERIC   05   FILLER                         XX
+00008 GROUP          03   wsd-time
+00002 NUMERIC        05   wsd-hh                         99
+00001 ALPHANUMERIC   05   wsd-sa                         X
+00002 NUMERIC        05   wsd-mm                         99
+00001 ALPHANUMERIC   05   wsd-sb                         X
+00002 NUMERIC        05   wsd-ss                         99
+
+00021 GROUP          01   wse-date-block
+00008 GROUP          03   wse-date
+00004 NUMERIC        05   wse-year                       9(4)
+00002 NUMERIC        05   wse-month                      99
+00002 NUMERIC        05   wse-days                       99
+00008 NUMERIC        03   WSE-Date-9                     9(8), REDEFINES wse-date
+00006 GROUP          03   wse-time
+00002 NUMERIC        05   wse-hh                         99
+00002 NUMERIC        05   wse-mm                         99
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0026
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+00002 NUMERIC        05   wse-ss                         99
+00007 ALPHANUMERIC   03   FILLER                         X(7)
+
+      LINKAGE SECTION
+
+00041 GROUP          01   WS-Calling-Data
+00008 ALPHANUMERIC   03   WS-Called                      X(8)
+00008 ALPHANUMERIC   03   WS-Caller                      X(8)
+00008 ALPHANUMERIC   03   WS-Del-Link                    X(8)
+00002 NUMERIC        03   WS-Term-Code                   99
+00001 NUMERIC        03   WS-Process-Func                9
+00001 NUMERIC        03   WS-Sub-Function                9
+00013 ALPHANUMERIC   03   WS-CD-Args                     X(13)
+
+01024 GROUP          01   WS-System-Record
+00512 GROUP          03   System-Data-Block
+00001 NUMERIC        05   System-Record-Version-Prime    BINARY-CHAR COMP-5
+00001 NUMERIC        05   System-Record-Version-Secondar BINARY-CHAR COMP-5
+00010 GROUP          05   Vat-Rates
+00002 NUMERIC        07   Vat-Rate-1                     99V99 COMP
+00002 NUMERIC        07   Vat-Rate-2                     99V99 COMP
+00002 NUMERIC        07   Vat-Rate-3                     99V99 COMP
+00002 NUMERIC        07   Vat-Rate-4                     99V99 COMP
+00002 NUMERIC        07   Vat-Rate-5                     99V99 COMP
+00002 NUMERIC        05   Vat-Rate                       99V99 COMP, OCCURS 5, REDEFINES Vat-Rates
+00001 NUMERIC        05   Cyclea                         BINARY-CHAR COMP-5
+00001 NUMERIC        05   Scycle                         BINARY-CHAR COMP-5, REDEFINES Cyclea
+00001 NUMERIC        05   Period                         BINARY-CHAR COMP-5
+00001 NUMERIC        05   Page-Lines                     BINARY-CHAR COMP-5
+00004 NUMERIC        05   Next-Invoice                   BINARY-LONG COMP-5
+00004 NUMERIC        05   Run-Date                       BINARY-LONG COMP-5
+00004 NUMERIC        05   Start-Date                     BINARY-LONG COMP-5
+00004 NUMERIC        05   End-Date                       BINARY-LONG COMP-5
+00032 GROUP          05   Suser
+00032 ALPHANUMERIC   07   Usera                          X(32)
+00032 ALPHANUMERIC   05   User-Code                      X(32)
+00024 ALPHANUMERIC   05   Address-1                      X(24)
+00024 ALPHANUMERIC   05   Address-2                      X(24)
+00024 ALPHANUMERIC   05   Address-3                      X(24)
+00024 ALPHANUMERIC   05   Address-4                      X(24)
+00012 ALPHANUMERIC   05   Post-Code                      X(12)
+00024 ALPHANUMERIC   05   Country                        X(24)
+00048 ALPHANUMERIC   05   Print-Spool-Name               X(48)
+00012 ALPHANUMERIC   05   Phone-No                       X(12)
+00020 ALPHANUMERIC   05   FILLER                         X(20)
+00001 NUMERIC        05   Pass-Value                     9
+00006 GROUP          05   Level
+00001 NUMERIC        07   Level-1                        9
+      CONDITIONAL    88   G-L
+00001 NUMERIC        07   Level-2                        9
+      CONDITIONAL    88   B-L
+00001 NUMERIC        07   Level-3                        9
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0027
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+      CONDITIONAL    88   S-L
+00001 NUMERIC        07   Level-4                        9
+      CONDITIONAL    88   Stock
+00001 NUMERIC        07   Level-5                        9
+      CONDITIONAL    88   IRS
+      CONDITIONAL    88   IRS-No
+00001 NUMERIC        07   Level-6                        9
+      CONDITIONAL    88   Payroll
+00004 ALPHANUMERIC   05   Pass-Word                      X(4)
+00001 NUMERIC        05   Host                           9
+      CONDITIONAL    88   Multi-User
+00001 NUMERIC        05   Op-System                      9
+      CONDITIONAL    88   valid-os-type
+      CONDITIONAL    88   No-OS
+      CONDITIONAL    88   Dos
+      CONDITIONAL    88   Windows
+      CONDITIONAL    88   Mac
+      CONDITIONAL    88   Os2
+      CONDITIONAL    88   Unix
+      CONDITIONAL    88   Linux
+      CONDITIONAL    88   OS-Single
+00001 NUMERIC        05   Current-Quarter                9
+00002 GROUP          05   RDBMS-Flat-Statuses
+00001 NUMERIC        07   File-System-Used               9
+      CONDITIONAL    88   FS-Cobol-Files-Used
+      CONDITIONAL    88   FS-MySql-Used
+      CONDITIONAL    88   FS-RDBMS-Used
+      CONDITIONAL    88   FS-Valid-Options
+00001 NUMERIC        07   File-Duplicates-In-Use         9
+      CONDITIONAL    88   FS-Duplicate-Processing
+00004 GROUP          05   Maps-Ser
+00002 ALPHANUMERIC   07   Maps-Ser-xx                    XX
+00002 NUMERIC        07   Maps-Ser-nn                    BINARY-SHORT COMP-5
+00001 NUMERIC        05   Date-Form                      9
+      CONDITIONAL    88   Date-UK
+      CONDITIONAL    88   Date-USA
+      CONDITIONAL    88   Date-Intl
+      CONDITIONAL    88   Date-Valid-Formats
+00001 NUMERIC        05   Data-Capture-Used              9
+      CONDITIONAL    88   DC-Cobol-Standard
+      CONDITIONAL    88   DC-GUI
+      CONDITIONAL    88   DC-Widget
+00012 ALPHANUMERIC   05   RDBMS-DB-Name                  X(12)
+00012 ALPHANUMERIC   05   RDBMS-User                     X(12)
+00012 ALPHANUMERIC   05   RDBMS-Passwd                   X(12)
+00011 ALPHANUMERIC   05   VAT-Reg-Number                 X(11)
+00001 ALPHANUMERIC   05   Param-Restrict                 X
+00005 ALPHANUMERIC   05   RDBMS-Port                     X(5)
+00032 ALPHANUMERIC   05   RDBMS-Host                     X(32)
+00064 ALPHANUMERIC   05   RDBMS-Socket                   X(64)
+00004 NUMERIC        05   Stats-Date-Period              9(4)
+00030 ALPHANUMERIC   05   Company-Email                  X(30)
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0028
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+00080 GROUP          03   General-Ledger-Block
+00001 ALPHANUMERIC   05   P-C                            X
+      CONDITIONAL    88   Profit-Centres
+      CONDITIONAL    88   Branches
+00001 ALPHANUMERIC   05   P-C-Grouped                    X
+      CONDITIONAL    88   Grouped
+00001 ALPHANUMERIC   05   P-C-Level                      X
+      CONDITIONAL    88   Revenue-Only
+00001 ALPHANUMERIC   05   Comps                          X
+      CONDITIONAL    88   Comparatives
+00001 ALPHANUMERIC   05   Comps-Active                   X
+      CONDITIONAL    88   Comparatives-Active
+00001 ALPHANUMERIC   05   M-V                            X
+      CONDITIONAL    88   Minimum-Validation
+00001 ALPHANUMERIC   05   Arch                           X
+      CONDITIONAL    88   Archiving
+00001 ALPHANUMERIC   05   Trans-Print                    X
+      CONDITIONAL    88   Mandatory
+00001 ALPHANUMERIC   05   Trans-Printed                  X
+      CONDITIONAL    88   Trans-Done
+00001 NUMERIC        05   Header-Level                   9
+00001 NUMERIC        05   Sales-Range                    9
+00001 NUMERIC        05   Purchase-Range                 9
+00001 ALPHANUMERIC   05   Vat                            X
+      CONDITIONAL    88   Auto-Vat
+00001 ALPHANUMERIC   05   Batch-Id                       X
+      CONDITIONAL    88   Preserve-Batch
+00001 ALPHANUMERIC   05   Ledger-2nd-Index               X
+      CONDITIONAL    88   Index-2
+00001 ALPHANUMERIC   05   IRS-Instead                    X
+      CONDITIONAL    88   IRS-Used
+      CONDITIONAL    88   IRS-Both-Used
+00002 NUMERIC        05   Ledger-Sec                     BINARY-SHORT COMP-5
+00002 NUMERIC        05   Updates                        BINARY-SHORT COMP-5
+00002 NUMERIC        05   Postings                       BINARY-SHORT COMP-5
+00002 NUMERIC        05   Next-Batch                     BINARY-SHORT COMP-5
+00004 NUMERIC        05   Extra-Charge-Ac                BINARY-LONG COMP-5
+00004 NUMERIC        05   Vat-Ac                         BINARY-LONG COMP-5
+00048 ALPHANUMERIC   05   Print-Spool-Name2              X(48)
+00088 GROUP          03   Purchase-Ledger-Block
+00004 NUMERIC        05   Next-Folio                     BINARY-LONG COMP-5
+00004 NUMERIC        05   BL-Pay-Ac                      BINARY-LONG COMP-5
+00004 NUMERIC        05   P-Creditors                    BINARY-LONG COMP-5
+00004 NUMERIC        05   BL-Purch-Ac                    BINARY-LONG COMP-5
+00004 NUMERIC        05   BL-End-Cycle-Date              BINARY-LONG COMP-5
+00002 NUMERIC        05   BL-Next-Batch                  BINARY-SHORT COMP-5
+00001 NUMERIC        05   Age-To-Pay                     BINARY-CHAR COMP-5
+00001 ALPHANUMERIC   05   Purchase-Ledger                X
+      CONDITIONAL    88   P-L-Exists
+00001 ALPHANUMERIC   05   PL-Delim                       X
+00001 NUMERIC        05   Entry-Level                    9
+00001 NUMERIC        05   P-Flag-A                       9
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0029
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+00001 NUMERIC        05   P-Flag-I                       9
+00001 NUMERIC        05   P-Flag-P                       9
+00001 ALPHANUMERIC   05   PL-Stock-Link                  X
+00048 ALPHANUMERIC   05   Print-Spool-Name3              X(48)
+00001 ALPHANUMERIC   05   PL-Autogen                     X
+00002 NUMERIC        05   PL-Next-Rec                    BINARY-SHORT COMP-5
+00007 ALPHANUMERIC   05   FILLER                         X(7)
+00128 GROUP          03   Sales-Ledger-Block
+00001 ALPHANUMERIC   05   Sales-Ledger                   X
+      CONDITIONAL    88   S-L-Exists
+00001 ALPHANUMERIC   05   SL-Delim                       X
+00001 ALPHANUMERIC   05   Oi-3-Flag                      X
+00001 ALPHANUMERIC   05   Cust-Flag                      X
+00001 ALPHANUMERIC   05   Oi-5-Flag                      X
+00001 ALPHANUMERIC   05   S-Flag-Oi-3                    X
+00001 NUMERIC        05   Full-Invoicing                 9
+00001 NUMERIC        05   S-Flag-A                       9
+00001 NUMERIC        05   S-Flag-I                       9
+00001 NUMERIC        05   S-Flag-P                       9
+00001 NUMERIC        05   SL-Dunning                     9
+00001 NUMERIC        05   SL-Charges                     9
+00001 ALPHANUMERIC   05   Sl-Own-Nos                     X
+00001 NUMERIC        05   SL-Stats-Run                   9
+00001 NUMERIC        05   Sl-Day-Book                    9
+00001 NUMERIC        05   invoicer                       9
+      CONDITIONAL    88   I-Level-0
+      CONDITIONAL    88   I-Level-1
+      CONDITIONAL    88   I-Level-2
+      CONDITIONAL    88   Not-Invoicing
+00014 ALPHANUMERIC   05   Extra-Desc                     X(14)
+00001 ALPHANUMERIC   05   Extra-Type                     X
+      CONDITIONAL    88   Discount
+      CONDITIONAL    88   Charge
+00001 ALPHANUMERIC   05   Extra-Print                    X
+00001 ALPHANUMERIC   05   SL-Stock-Link                  X
+00001 ALPHANUMERIC   05   SL-Stock-Audit                 X
+      CONDITIONAL    88   Stock-Audit-On
+00002 NUMERIC        05   SL-Late-Per                    99V99 COMP
+00002 NUMERIC        05   SL-Disc                        99V99 COMP
+00002 NUMERIC        05   Extra-Rate                     99V99 COMP
+00001 NUMERIC        05   SL-Days-1                      BINARY-CHAR COMP-5
+00001 NUMERIC        05   SL-Days-2                      BINARY-CHAR COMP-5
+00001 NUMERIC        05   SL-Days-3                      BINARY-CHAR COMP-5
+00001 NUMERIC        05   SL-Credit                      BINARY-CHAR COMP-5
+00002 NUMERIC        05   FILLER                         BINARY-SHORT COMP-5
+00002 NUMERIC        05   SL-Min                         BINARY-SHORT COMP-5
+00002 NUMERIC        05   SL-Max                         BINARY-SHORT COMP-5
+00002 NUMERIC        05   PF-Retention                   BINARY-SHORT COMP-5
+00002 NUMERIC        05   First-Sl-Batch                 BINARY-SHORT COMP-5
+00004 NUMERIC        05   First-Sl-Inv                   BINARY-LONG COMP-5
+00004 NUMERIC        05   SL-Limit                       BINARY-LONG COMP-5
+00004 NUMERIC        05   SL-Pay-Ac                      BINARY-LONG COMP-5
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0030
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+00004 NUMERIC        05   S-Debtors                      BINARY-LONG COMP-5
+00004 NUMERIC        05   SL-Sales-Ac                    BINARY-LONG COMP-5
+00004 NUMERIC        05   S-End-Cycle-Date               BINARY-LONG COMP-5
+00001 ALPHANUMERIC   05   SL-Comp-Head-Pick              X
+      CONDITIONAL    88   SL-Comp-Pick
+00001 ALPHANUMERIC   05   SL-Comp-Head-Inv               X
+      CONDITIONAL    88   SL-Comp-Inv
+00001 ALPHANUMERIC   05   SL-Comp-Head-Stat              X
+      CONDITIONAL    88   SL-Comp-Stat
+00001 ALPHANUMERIC   05   SL-Comp-Head-Lets              X
+      CONDITIONAL    88   SL-Comp-Lets
+00001 ALPHANUMERIC   05   SL-VAT-Printed                 X
+      CONDITIONAL    88   SL-VAT-Prints
+00002 NUMERIC        05   SL-Invoice-Lines               99
+00001 ALPHANUMERIC   05   SL-Autogen                     X
+00002 NUMERIC        05   SL-Next-Rec                    BINARY-SHORT COMP-5
+00001 ALPHANUMERIC   05   SL-BO-Flag                     X
+00001 ALPHANUMERIC   05   SL-BO-Default                  X
+00014 ALPHANUMERIC   05   FILLER                         X(14)
+00004 NUMERIC        05   GL-BL-Pay-Ac                   BINARY-LONG COMP-5
+00004 NUMERIC        05   GL-P-Creditors                 BINARY-LONG COMP-5
+00004 NUMERIC        05   GL-BL-Purch-Ac                 BINARY-LONG COMP-5
+00004 NUMERIC        05   GL-SL-Pay-Ac                   BINARY-LONG COMP-5
+00004 NUMERIC        05   GL-S-Debtors                   BINARY-LONG COMP-5
+00004 NUMERIC        05   GL-SL-Sales-Ac                 BINARY-LONG COMP-5
+00088 GROUP          03   Stock-Control-Block
+00006 ALPHANUMERIC   05   Stk-Abrev-Ref                  X(6)
+00001 NUMERIC        05   Stk-Debug                      9
+00001 NUMERIC        05   Stk-Manu-Used                  9
+00001 NUMERIC        05   Stk-OE-Used                    9
+00001 NUMERIC        05   Stk-Audit-Used                 9
+00001 NUMERIC        05   Stk-Mov-Audit                  9
+00001 ALPHANUMERIC   05   Stk-Period-Cur                 X
+00001 ALPHANUMERIC   05   Stk-Period-dat                 X
+00001 ALPHANUMERIC   05   FILLER                         X
+00001 ALPHANUMERIC   05   Stock-Control                  X
+      CONDITIONAL    88   Stock-Control-Exists
+00001 NUMERIC        05   Stk-Averaging                  9
+      CONDITIONAL    88   Stock-Averaging
+00001 NUMERIC        05   Stk-Activity-Rep-Run           9
+00001 ALPHANUMERIC   05   Stk-BO-Active                  X
+00001 NUMERIC        05   Stk-Page-Lines                 BINARY-CHAR COMP-5
+00001 NUMERIC        05   Stk-Audit-No                   BINARY-CHAR COMP-5
+00068 ALPHANUMERIC   05   FILLER                         X(68)
+00128 GROUP          03   IRS-Entry-Block
+00024 ALPHANUMERIC   05   Client                         X(24)
+00005 NUMERIC        05   Next-Post                      9(5)
+00012 GROUP          05   Vat-Rates2
+00004 NUMERIC        07   vat1                           99V99
+00004 NUMERIC        07   vat2                           99V99
+00004 NUMERIC        07   vat3                           99V99
+00012 GROUP          05   Vat-Group, REDEFINES Vat-Rates2
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0031
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+00004 NUMERIC        07   Vat-Psent                      99V99, OCCURS 3
+00001 NUMERIC        05   IRS-Pass-Value                 9
+00001 NUMERIC        05   Save-Sequ                      9
+00018 ALPHANUMERIC   05   System-Work-Group              X(18)
+00001 ALPHANUMERIC   05   PL-App-Created                 X
+00006 NUMERIC        05   PL-Approp-AC6                  9(6)
+00006 GROUP          05   FILLER, REDEFINES PL-Approp-AC6
+00001 NUMERIC        07   FILLER                         9
+00005 NUMERIC        07   PL-Approp-AC                   9(5)
+00001 NUMERIC        05   1st-Time-Flag                  9
+00059 ALPHANUMERIC   05   FILLER                         X(59)
+00128 GROUP          03   IRS-Data-Block, REDEFINES IRS-Entry-Block
+00128 ALPHANUMERIC   05   FILLER                         X(128)
+
+30859 GROUP          01   File-Defs
+30856 GROUP          02   file-defs-a
+00532 ALPHANUMERIC   03   pre-trans-name                 X(532)
+00532 ALPHANUMERIC   03   post-trans-name                X(532)
+00532 ALPHANUMERIC   03   file-0                         X(532)
+00532 ALPHANUMERIC   03   file-2                         X(532)
+00532 ALPHANUMERIC   03   file-3                         X(532)
+00532 ALPHANUMERIC   03   file-4                         X(532)
+00532 ALPHANUMERIC   03   file-5                         X(532)
+00532 ALPHANUMERIC   03   file-6                         X(532)
+00532 ALPHANUMERIC   03   file-7                         X(532)
+00532 ALPHANUMERIC   03   file-8                         X(532)
+00532 ALPHANUMERIC   03   file-9                         X(532)
+00532 ALPHANUMERIC   03   file-10                        X(532)
+00532 ALPHANUMERIC   03   file-11                        X(532)
+00532 ALPHANUMERIC   03   file-12                        X(532)
+00532 ALPHANUMERIC   03   file-13                        X(532)
+00532 ALPHANUMERIC   03   file-14                        X(532)
+00532 ALPHANUMERIC   03   file-15                        X(532)
+00532 ALPHANUMERIC   03   file-16                        X(532)
+00532 ALPHANUMERIC   03   file-17                        X(532)
+00532 ALPHANUMERIC   03   file-18                        X(532)
+00532 ALPHANUMERIC   03   file-19                        X(532)
+00532 ALPHANUMERIC   03   file-20                        X(532)
+00532 ALPHANUMERIC   03   file-21                        X(532)
+00532 ALPHANUMERIC   03   file-22                        X(532)
+00532 ALPHANUMERIC   03   file-23                        X(532)
+00532 ALPHANUMERIC   03   file-24                        X(532)
+00532 ALPHANUMERIC   03   file-26                        X(532)
+00532 ALPHANUMERIC   03   file-27                        X(532)
+00532 ALPHANUMERIC   03   file-28                        X(532)
+00532 ALPHANUMERIC   03   file-29                        X(532)
+00532 ALPHANUMERIC   03   file-30                        X(532)
+00532 ALPHANUMERIC   03   file-31                        X(532)
+00532 ALPHANUMERIC   03   file-32                        X(532)
+00532 ALPHANUMERIC   03   file-33                        X(532)
+00532 ALPHANUMERIC   03   file-34                        X(532)
+00532 ALPHANUMERIC   03   file-35                        X(532)
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0032
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+00532 ALPHANUMERIC   03   file-36                        X(532)
+00532 ALPHANUMERIC   03   file-37                        X(532)
+00532 ALPHANUMERIC   03   file-38                        X(532)
+00532 ALPHANUMERIC   03   file-39                        X(532)
+00532 ALPHANUMERIC   03   File-40                        X(532)
+00532 ALPHANUMERIC   03   file-41                        X(532)
+00532 ALPHANUMERIC   03   File-42                        X(532)
+00532 ALPHANUMERIC   03   File-43                        X(532)
+00532 ALPHANUMERIC   03   file-44                        X(532)
+00532 ALPHANUMERIC   03   file-45                        X(532)
+00532 ALPHANUMERIC   03   File-46                        X(532)
+00532 ALPHANUMERIC   03   File-47                        X(532)
+00532 ALPHANUMERIC   03   file-48                        X(532)
+00532 ALPHANUMERIC   03   file-49                        X(532)
+00532 ALPHANUMERIC   03   file-50                        X(532)
+00532 ALPHANUMERIC   03   file-51                        X(532)
+00532 ALPHANUMERIC   03   file-52                        X(532)
+00532 ALPHANUMERIC   03   file-53                        X(532)
+00532 ALPHANUMERIC   03   file-54                        X(532)
+00532 ALPHANUMERIC   03   file-55                        X(532)
+00532 ALPHANUMERIC   03   file-56                        X(532)
+00532 ALPHANUMERIC   03   file-57                        X(532)
+30856 GROUP          02   FILLER, REDEFINES file-defs-a
+00532 ALPHANUMERIC   03   System-File-Names              X(532), OCCURS 58
+00002 NUMERIC        02   File-Defs-Count                BINARY-SHORT COMP-5
+00001 ALPHANUMERIC   02   File-Defs-os-Delimiter         X
+
+00010 ALPHANUMERIC   01   To-Day                         X(10)
+
+      REPORT SECTION
+
+00591 GROUP          01   Report-Detailed-Head-1
+00127 GROUP          03   FILLER
+00040 ALPHANUMERIC   05   FILLER                         X(40)
+00010 ALPHANUMERIC   05   FILLER                         X(10)
+00008 ALPHANUMERIC   05   FILLER                         X(8)
+00131 GROUP          03   FILLER
+00017 ALPHANUMERIC   05   FILLER                         X(17)
+00019 ALPHANUMERIC   05   FILLER                         X(19)
+00005 ALPHANUMERIC   05   FILLER                         X(5)
+00003 NUMERIC        05   FILLER                         ZZ9
+00075 GROUP          03   FILLER
+00022 ALPHANUMERIC   05   FILLER                         X(22)
+00129 GROUP          03   FILLER
+00009 ALPHANUMERIC   05   FILLER                         X(9)
+00023 ALPHANUMERIC   05   FILLER                         X(23)
+00006 ALPHANUMERIC   05   FILLER                         X(6)
+00004 ALPHANUMERIC   05   FILLER                         X(4)
+00010 ALPHANUMERIC   05   FILLER                         X(10)
+00129 GROUP          03   FILLER
+00012 ALPHANUMERIC   05   FILLER                         X(12)
+00010 ALPHANUMERIC   05   FILLER                         X(10)
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0033
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+00591 GROUP          01   Emp-Detail
+00041 GROUP          03   FILLER
+00001 ALPHANUMERIC   05   FILLER                         X(1)
+00032 ALPHANUMERIC   05   FILLER                         X(32)
+00108 GROUP          03   FILLER
+00007 NUMERIC        05   FILLER                         9(7)
+00032 ALPHANUMERIC   05   FILLER                         X(32)
+00009 NUMERIC        05   FILLER                         ZZ,ZZ9.99
+00009 NUMERIC        05   FILLER                         ZZ,ZZ9.99
+00009 NUMERIC        05   FILLER                         ZZ,ZZ9.99
+00009 NUMERIC        05   FILLER                         ZZ,ZZ9.99
+00009 NUMERIC        05   FILLER                         ZZ,ZZ9.99
+00009 NUMERIC        05   FILLER                         ZZ,ZZ9.99
+00107 GROUP          03   FILLER
+00012 ALPHANUMERIC   05   FILLER                         X(12)
+00012 ALPHANUMERIC   05   FILLER                         X(12)
+00012 ALPHANUMERIC   05   FILLER                         X(12)
+00012 ALPHANUMERIC   05   FILLER                         X(12)
+00023 ALPHANUMERIC   05   FILLER                         X(23)
+00009 NUMERIC        05   FILLER                         ZZ,ZZ9.99
+00016 ALPHANUMERIC   05   FILLER                         X(16)
+00009 NUMERIC        05   FILLER                         ZZ,ZZ9.99
+
+00591 GROUP          01   FILLER
+00034 ALPHANUMERIC   03   FILLER                         X(34)
+00004 NUMERIC        03   FILLER                         ZZZ9
+
+
+GnuCOBOL 3.2.0          pyjourn.cbl                                                   Tue Apr 14 2026 22:03:59  Page 0034
+
+Error/Warning summary:
+
+pyjourn.cbl:100: error: syntax error, unexpected Text-Name, expecting .
+
+1 warning in compilation group
+56 errors in compilation group

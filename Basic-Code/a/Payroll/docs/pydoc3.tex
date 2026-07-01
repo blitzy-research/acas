@@ -1,0 +1,1656 @@
+.he
+.bp76
+.mt7
+.mb9
+.po8
+.ll65
+.ig
+CHAPTER 19
+S E T T I N G	 U P
+.sp2
+.pp5
+The first step in setting up your Payroll System is to make
+two copies of the distribution disks.
+One distribution
+disk contains the Startup programs, another contains the normal processing
+programs, and a third contains the state and local tax table files and two
+utility programs.
+.he Operations: Chapter 19
+.pp
+To copy the disks
+place a formatted disk containing the CP/M operating system,
+and PIP
+on drive A.  Place the (write protected) Startup distribution disk
+on drive
+B and hit the RESET switch on your machine.  Type the command,
+.sp
+.li
+		A>PIP A:=B:*.*[ov]
+.sp
+and follow with RETURN.  When the PIP is complete, remove the distribution
+disk from drive B, replacing it with a formatted disk that has the CP/M
+system SYSGEN'ed onto it.
+Enter CTRL-C or RESET the machine, and give
+the command,
+.sp
+.li
+		A>PIP B:=A:*.*[ov]
+.sp
+You now have a Startup Master Disk and a Startup Work Disk.  Repeat the
+same process to create a Processing Master Disk and a Processing Work Disk.
+Copy the Tax disk in the same way. Label one copy the Tax Master Disk and
+the other copy the Payroll Data Disk.
+The two work disks with the programs
+will need CRUN2.COM PIP'ed onto them.  If you are operating
+in single density you will probably not be able to fit CRUN2 and PIP on the
+disks together.  Remove PIP from the work disks (if it is on them) and
+PIP CRUN2 onto the work disks from another disk that does have PIP.  CRT.DEF
+(if used) should also be PIP'ed onto these disks before you can begin.
+.pp
+If you can use the two disk configuration described in Chapter 7,
+the programs on the Startup Disk and the Processing Disk may be combined
+on one disk.
+.pp
+The second step in setting up the Payroll System is to define the
+characteristics of your CRT to the Display Management System.
+.pp
+If you have the Hazeltine 1500 CRT, the Payroll system will run
+immediately; you may erase all files with the filetype of DEF, and the
+CRTDEF.INT program from your system master and work disks (but not the
+Applewood Computers distribution disk!).  You can use the commands,
+.sp
+.li
+		ERA *.DEF
+	   and, ERA CRTDEF.INT
+.pp
+If you have one of the CRT devices listed below, you must use the CP/M
+REN command to rename the DEF file corresponding to your CRT to the name
+CRT.DEF:
+.sp
+.cp11
+.li
+       CRT			     DEF FILE
+    --------------------------------------------------
+
+    ADM 3A			     ADM3A.DEF
+    BEEHIVE 150 		     B150.DEF
+    BEEHIVE 152 		     B152.DEF
+    BEEHIVE 157 		     B157.DEF
+    CROMEMCO 3100		     CRO3100.DEF
+    DYNABYTE NAKED TERMINAL	     DYNABYTE.DEF
+    SOROC IQ 120		     SOROC120.DEF
+    IMSAI VIOC			     VIOC.DEF
+.sp
+With the disk holding the DEF files on drive A, type the command:
+.sp
+.li
+		A>REN A:CRT.DEF=A:nnnnnnnn.ttt
+.sp
+where nnnnnnnn.ttt stands for the filename and filetype (suffix)
+of your CRT definition file.  Erase the remaining DEF files from
+your disk one at a time (for example, ERA ADM3A.DEF, ERA B150.DEF, etc.).
+Erase also the CRTDEF.INT program.
+The Payroll system always expects to find the CRT.DEF file on
+the currently logged disk drive.
+.pp
+If you have neither the Hazeltine 1500 device, nor one of
+the CRT's listed above, see Chapter 32 for instructions on how to
+create a CRT.DEF file that defines
+your CRT to the Display Management System by running the
+CRTDEF.INT program.
+.pp
+The third step in setting up the Payroll system is to erase the state
+tax table files you do not need from your data disk and rename the local
+tax table file.
+The state
+withholding tax table files (except for California) take the form,
+.sp
+.li
+		PYSWTaa.101
+.sp
+where "aa" is the two character state abbreviation.  There are four
+tax table files for California:
+.sp
+.cp4
+.li
+	PYCALS.101	     [S=Single]
+	PYCALM.101	     [M=Married]
+	PYCALH.101	     [H=Head of Household]
+	PYCALX.100
+.sp
+Be sure to keep all four on the data disk if the California tables
+are to be used.
+.pp
+The local tax table files have the filetype of LWT, and a filename that
+indicates the locality (for example, NEWYORK.LWT).  Find the one for your
+locality and rename it to PYLWT.101.  For example,
+.sp
+.li
+		A>REN A:PYLWT.101=A:NEWYORK.LWT
+.sp3
+.cp12
+.ce
+MID-YEAR SETUP PROCEDURE
+.pp
+When you set up the Payroll System in mid-year, after the other setup
+steps are complete, you must run the History Update program.  This
+program can be run by choosing it from the menu.  You can run it
+as often as necessary until the first payroll application has taken
+place.	After the first application, the History Update program will
+not run.
+.pp
+When you select the History Update program from the menu the Update
+Employee History entry screen appears with the cursor waiting at
+the Employee Number field.  You can enter the number of the employee
+whose history you wish to update (all employees must be updated before
+the first application), or give one of the following commands:
+.sp
+.li
+	  CTRL-N: Get the NEXT record on the file;  or
+		  the first if none have been accessed.
+	  CTRL-B: Go BACK to the previous record; or to
+		  the last if none have been accessed.
+	  ESCAPE: End the Employee History Update section
+		  of the program and go on to the remaining
+		  section.
+.sp
+After accessing an employee record, move the cursor to the first
+request by hitting RETURN.  Type in the information and then
+hit ESCAPE to return the cursor to the Employee Number field
+where you can call up the record for the next employee.  ESCAPE
+again (form the Employee Number field) ends this section of the
+program, begins a short processing program, and then
+brings up the "mini" menu shown in Figure 19.1.
+The standard commands, CTRL-B, CTRL-S, AND CTRL-R (go back a field,
+save data to disk, and refresh a garbled DMS screen) can be given
+at any point (although CTRL-B means something different when issued
+from the Employee Number field).
+.sp
+.cp10
+.li
+	      Y O U R	 C O M P A N Y	  N A M E
+			PAYROLL SYSTEM
+  00/00/00	     HISTORY UPDATE MENU
+
+
+	      1. UPDATE EMPLOYEE HISTORY TOTALS
+	      2. UPDATE COMPANY LIABILITIES, VACATION, ETC.
+	      3. UPDATE PAYMENTS HISTORY
+
+		  ENTER SELECTION NUMBER: [ ]
+.pp
+The Update Employee History Totals entry screen is an exact reproduction
+of the Update Employee History screen, except that there is no Employee
+Number field since this screen presents the totals of the individual
+employees.  You can make changes if necessary, but if the sum of the
+individual totals does not equal the actual company totals you should
+make sure that the individual employee information has been entered
+correctly.  Press ESCAPE to end this section of the program and return
+to the History Update Menu.
+.pp
+Menu choices 2 and 3 are explained in Chapter 7.  To enter the
+information requested by those menu items, simply choose them
+from the menu and type in the data.  Hit ESCAPE to return to the
+History Update Menu.  ESCAPE from the menu brings up the Payroll
+System menu.
+.pp
+If you want to change historical information for individual employees
+or enter information for the first time for a newly added employee
+(before the first payroll application), you would run the program
+again.	Of course, if you do so you may have to adjust the new totals
+through the Update Employee History Totals program again.
+.he
+.bp
+.ig
+CHAPTER 20
+S E T T I N G	 S Y S T E M	P A R A M E T E R S
+.sp2
+.pp5
+At first time startup, after you type CRUN2 PY to call up the system
+the system menu appears.
+The program asks you if you want to use the default Payroll System or
+answer the full range of Parameter Entry requests (QUICK PARAMETER ENTRY
+or PARAMETER ENTRY, respectively).
+.he Operations: Chapter 20
+.pp
+If you choose the default Payroll System (menu item 10)
+a limited parameter entry screen
+appears, allowing you to enter your company name, address, and government
+ID numbers. You also enter the pay interval you want to use (the default
+system allows only one pay schedule), and the last day of the previous
+pay period.  When you finish answering these requests and hit ESCAPE, the
+startup sequence continues.  It creates the default account file,
+the default System Deductions and Earnings file, the
+Sort Parameter file, and then presents the system menu.  Once your
+system is set up, to examine or change the parameter values
+choose the Parameter Entry program from the menu.
+.pp
+If you choose not to use the default system,
+select the Parameter Entry program from the menu (menu item 9).
+A "mini" menu lists the three parts of the Parameter Entry program.
+Answer the requests for part one, part two, and part three, hitting
+ESCAPE when you finish answering the requests for each part. Press
+ESCAPE at the "mini" menu to end the Parameter Entry program.  The
+Payroll System startup sequence will call up the Account Entry program
+automatically, allow you to enter or change account information, then
+call up the System Deductions Entry program, and allow you to enter or
+change that information.  After the program goes on to Create Sort Parameters,
+the system menu returns.  Any further parameter changes can be made
+by calling the Parameter Entry, Account Entry, or System Deduction Entry
+programs directly from the menu.
+.pp
+The list below shows selected parameter requests and restrictions on
+their responses.  See Chapter 18 for instructions on how to enter numbers
+and dates.
+.sp
+.li
+     CO NAME: 60 characters maximum
+     ADDRESS: 3 lines of 30 characters each
+     CITY: 18 characters maximum
+     STATE: Official two-character state abbreviation
+     ZIP: 5 digit number only
+     GOVT ID NOS.: 10 digit number maximum
+     VACATION RATE: 99,999.99 maximum entry
+     S.L. RATE: 99,999.99 maximum entry
+     RATE1,2,3, and 4 DESCRIPTIVE NAME: 15 characters each
+     RATE1 DEFAULT: 99,999.99 maximum entry
+     RATE2 FACTOR: 99,999.99 maximum entry
+     RATE3 FACTOR: 99,999.99 maximum entry
+     MAX PAY FACTOR: 99,999.99 maximum entry
+     NORMAL UNITS: 99,999.99 maximum entry
+     USER DEFINED PROGRAM NAME: Valid 8 character CP/M filename;
+       no asterisks, periods, colons, double quotes, or question
+       marks. It may not start with a number.
+     USER DEFINED PROGRAM DESC: 30 characters maximum
+     CHECK WRITING MAX AMOUNT (BEFORE VOIDING): 9,999,999.99 max
+     OFFSET CASH ACCOUNT: 1 to 3 digit Payroll System Account
+       Reference Number
+     DEFAULT DIST ACCOUNT: 1 to 3 digit Payroll System Account
+       Reference Number
+.sp2
+.ce
+DISK DRIVE ALLOCATION
+.pp
+The default disk drive allocation scheme is presented below (Figure 20.1).
+Most
+people will not need or want to alter it.  Those with more than
+two drives may want to assign the Employee Master file, the Employee
+History file, or the Pay Transaction (Hours) file to drive C or D if
+they have a large number of employees, or expect many transactions.
+.sp
+.cp5
+.li
+  TAX TABLES	  [B]	PAYROLL ACCOUNTS  [B]	TRANS BATCH [B]
+  SYSTEM DED/EARN [B]	EMPLOYEE MASTER   [B]	PAY CHECK   [B]
+  COMPANY HISTORY [B]	EMPLOYEE HISTORY  [B]	PAY DETAIL  [B]
+
+	(Figure 20.1: Default Disk Drive Allocation Scheme)
+.pp
+The system creates the two parameter files (PYPR1 and PYPR2)
+on the drive you specify
+as the System File Drive at first time startup.  It always expects them
+on that drive and issues an error message if they are not.  The
+System File Drive can be either drive A or B only.  If you chose
+the default Payroll System no request is issued for the System File Drive
+since drive B is assumed.
+Answering the System File Drive request with RETURN defaults to the
+currently logged drive. The Sort Parameter file is also created on the
+System File Drive.
+.pp
+If you choose the General Ledger interface option,
+never make the GL DATA DRIVE the same as the PAYROLL ACCOUNT FILE.
+.pp
+The CRT.DEF file, if used, should always reside on the currently logged
+drive.
+.he
+.bp
+.ig
+CHAPTER 21
+T H E	 A C C O U N T	  F I L E
+A N D	 G L	I N T E R F A C E
+.sp2
+.pp5
+At first time startup, after parameter entry is complete, the Payroll
+System goes automatically to the Account Entry program.  If you
+have chosen the default Payroll System, no requests are issued and
+the default account file shown below (Figure 21.1) is created.	If you
+do not choose the default Payroll System, the Account Entry program gives
+you the opportunity to add to or modify the existing account information.
+Whether you have chosen the default Payroll System or not, after the
+startup sequence is over, you can examine or modify the Payroll Account
+file by choosing the Account Entry program from the menu.
+.he Operations: Chapter 21
+.sp
+.li
+    Payroll System			       (General Ledger)
+ Account Reference No.	    Account Name	Account Number
+
+	1	       CASH			    011100
+	2	       ACCRUED LIABILITY	    121100
+	3	       SALARY EXPENSE		    411100
+	4	       ACCRUED PAYROLL COSTS LIAB.  131100
+
+	    (Figure 21.1: The Default Account File)
+.pp
+If you have selected the General Ledger interface option the Account
+Entry program prompts you to insert the disk with your GL Chart of
+Accounts file into the drive you named as the GL DATA DRIVE during
+parameter entry.  On a two drive system with the Account file on B,
+this would have to be drive A.	Remove the A disk when instructed and
+insert the GL data disk.  At the end of Account Entry, switch them
+back to the original configuration when instructed.
+.pp
+When the cursor is waiting at the RECORD NUMBER field, you may enter
+the Payroll System Account Reference Number (the relative record number,
+see Chapter 9)
+of the account you wish to examine or change, or issue one of the
+following commands:
+.sp
+.cp7
+.li
+	    CTRL-N: Get NEXT account on the file.
+	    CTRL-B: Go BACK to previous record.
+	    CTRL-A: ADD new accounts to the file.
+	    CTRL-S: SAVE newly entered or changed account
+		    information to disk.
+	    CTRL-R: Refresh garbled DMS screen
+	    RETURN: Move cursor to ACCOUNT NUMBER field.
+	    ESCAPE: End the Account Entry program.
+.sp
+Once established, an account may not be deleted from the file, and
+should not be reused in the current year.  The CTRL-A command puts
+the program in an Add-Records mode.  While in this mode,
+after entering the Account Number and Name, hit ESCAPE to add the record
+to the file and begin the next.  If no more additions are needed, hit
+ESCAPE again to leave the Add-Records mode.  You can then issue any of the
+commands above, or ESCAPE once more to end the Account Entry program.
+.pp
+The CTRL-S command saves additions and modifications to the Account file
+out to disk.  Although the Account Entry program saves new account information
+out to disk automatically when it ends, the CTRL-S command minimizes the
+loss of data (and thus the loss of time and labor) that might occur should
+an equipment or other failure occur before the program ends normally.
+.pp
+The CTRL-R command can be issued from any Display Management System
+screen to refresh the screen.  No data is changed and the cursor remains
+where it was when the command was given.  You will need this command
+rarely, if ever.
+.pp
+When the cursor is at either the ACCOUNT NUMBER or ACCOUNT NAME field,
+the following commands are available:
+.sp
+.li
+	    RETURN: Move cursor to next field.
+	    CTRL-B: Move cursor BACK one field.
+	    CTRL-X: Cancel current account entry transaction.
+	    ESCAPE: Enters the account information and returns
+		    the cursor to the Record Number field;
+		    when in add-records mode, begins next record
+		    or leaves add-records mode.
+	    CTRL-R: Refresh garbled DMS screen.
+.pp
+If you have chosen the General Ledger interface option, the Account
+Entry program checks each account number you enter to make sure it
+is a valid GL account and displays
+the current GL account name in the
+Payroll Account Name field as the default.  The fourth digit from the
+left should not be a zero (e.g., 411000), since this indicates the
+account is a title account and not a balance holding account (see your
+GL Reference Manual).
+Changing the account name
+does not alter your GL chart of accounts file.
+.pp
+Whether GL interface is selected or not the following rules apply
+to account numbers:
+.sp
+.in5
+.ti-3
+1. The first digit of a CASH account must be 0 (zero).
+.sp
+.ti-3
+2. The first digit of a LIABILITY account must be 1 (one).
+.sp
+.ti-3
+3. The first digit of an EXPENSE account must be 4 (four).
+.qi
+.pp
+If GL interface has been selected, the Payroll Application program
+creates a General Ledger batch file that can be processed by
+Applewood Computers's General Ledger after it is PIP'ed over to the GL data disk.
+There is no provision for switching disks to receive the GL batch
+file as it is output by the Payroll Application program.  If you have
+a three or four drive system, however, you can assign the GL batch
+file (through Parameter Entry) to a drive separate from the other
+Payroll system files.  When you run the Payroll Application program,
+it places the GL batch on the disk in that drive.
+.he
+.bp
+.ig
+CHAPTER 22
+S Y S T E M - W I D E
+E A R N I N G S   A N D   D E D U C T I O N S
+.sp2
+.pp5
+To enter or change standard withholding and deduction information,
+alter the Federal tax table, and enter or change the five user-definable
+earnings and deductions categories, select the menu choice "System
+Deduction Entry".  A "mini" menu will appear from which you can make the
+desired selection:
+.he Operations: Chapter 22
+.sp
+.li
+	1. STANDARD DEDUCTION RATES
+	2. FEDERAL WITHHOLDING TAX TABLE ENTRY
+	3. SYSTEM EARNING AND DEDUCTION INFORMATION
+.pp
+After the appropriate Display Management System screen appears, you can
+move the cursor along a fixed path from field to field indefinitely,
+or until you have made all the entries you wish to make.  RETURN moves
+the cursor to the next field, CTRL-B moves the cursor back one field.
+ESCAPE at any point returns you to the "mini" menu shown above; ESCAPE
+from there returns you to the main system menu.
+.sp2
+.ce
+1. STANDARD DEDUCTION RATES
+.pp
+Each deduction category can be enabled or disabled systemwide by answering
+Yes or No
+to the USED? request.  Enter Y for Yes
+and N for No (in upper or lower case).
+.pp
+An account number may also be entered for each
+category.  Enter the Payroll System account reference number,
+not the General Ledger
+account number.
+A printout
+of the accounts on the account file is available at any time from the
+system menu.
+.pp
+Rate and Limit information for FICA, COMPANY FICA, SDI, COMPANY FUTA,
+COMPANY SUI, AND EIC (Earned Income Credit) can be entered with up
+to two digits to the right of the decimal.  Commas
+are inserted automatically.
+.pp
+If any employees have requested advance payment of their Earned Income
+Credit by filing form W-5 (Earned Income Credit Advance Payment
+Certificate), enter the rate used to figure the payment, and the
+highest ANNUAL wage upon which the payment may be based.  For example,
+if the current rate is 10% of wages up to an annual equivalent wage
+of $5,000, enter 10% and $5,000.  The advanced EIC
+payment for
+employees whose annual equivalent
+wage is over a certain limit must be reduced by a given percentage
+of the wages over that limit.  (The "annual equivalent wage" is
+the amount an employee would earn yearly based on the wage
+he or she receives in one pay period.
+For example, if an employee
+earns $1,000 per month, the annual equivalent wage is $12,000.)
+Enter the rate at which the payment is reduced, and the annual equivalent
+wage beyond which the reduction must occur.  For example, if the
+advanced payment must be reduced by 12.5% of the amount over $6,000,
+enter those figures as the EIC EXCESS RATE and LIMIT, respectively.
+.sp2
+.ce
+2. FEDERAL WITHHOLDING TAX TABLE ENTRY
+.pp
+Federal withholding is calculated by the percentage method, as explained
+in the IRS Employer's Tax Guide (Circular E), using the Annual Payroll
+Period table.  Applewood Computers distributes the Payroll System with the current
+withholding table, but if the table changes you must enter the new
+information.  There is a separate table for married and single employees.
+Do not enter commas.  The table published by the IRS should appear somewhat
+like the one below:
+.sp
+.cp5
+.li
+    Over--   But not over--		      of  excess over--
+    $1,420   --$3,300	   15%		      --$1,420
+    $3,300   --$6,800	   $282.00 plus 18%   --$3,300
+    $6,800   --$10,200	   $912.00 plus 21%   --$6,800
+    etc...
+.sp
+Take the figure in the "Over--" column, and enter it into the "Wages
+Over" column on the Federal Withholding Tax Table Entry screen.  Take
+the corresponding percentage (15%, 18%, 21%, etc.) from the IRS table,
+and enter it into the "Percent" column on the Tax Table Entry screen.
+For example,
+.sp
+.cp6
+.li
+		     S I N G L E
+	   WAGES OVER		 PERCENT
+	 [	 1,420]      [		15]
+	 [	 3,300]      [		18]
+	 [	 6,800]      [		21]
+	 etc...
+.sp2
+.ce
+3. SYSTEM EARNING AND DEDUCTION INFORMATION
+.pp
+To create a system-wide earnings or deduction category, enter a 15
+character description, and state whether it is an earning or deduction
+(E=Earning, D=Deduction).  For a deduction,
+enter the number of the Payroll System
+account to which the liablity will be credited. For earnings and deductions
+enter the
+Check Category where it should be printed (see Chapters 15 and 28), and
+enter the information required to calculate the earning or deduction.
+.pp
+If there is a limit to the amount that can be earned or deducted in
+one year, enter a Y for Yes to the LIMIT? request, and enter the amount of the
+limit into the LIMIT field.  If you answer the Limit Used? (LIMIT?) request
+with N (No),
+the earning or deduction is calculated every pay period.
+.pp
+The FACTOR can be either a flat amount to be added or subtracted
+each pay period, or a percentage of the employee's gross pay.
+If a flat amount, enter A (Amount)
+at the A/P? request; if a percentage, enter a P (Percentage).  The factor
+may contain two digits to the right of the decimal. Do not
+enter commas.
+.pp
+To enter the tax status of an earnings category, key one of the numbers
+below into the EXCLD (Excluded) field:
+.sp
+.cp7
+.li
+	1   Fully taxable.
+	2   Subject to all taxes except FICA.
+	3   Subject to all taxes except Federal,
+	    state, and local income taxes.
+	4   Not subject to taxation.
+
+	 (Figure 22.1: Tax Exclusion Code)
+.sp2
+.in8
+.ti-8
+EXAMPLE: If a $500 bonus is to be paid to all employees at the rate
+of $50 per pay period
+you would make the entry below.  No account number is needed since
+earnings are distributed according to the distribution accounts
+set for each employee.
+.qi
+.ll72
+.sp
+.cp4
+.li
+USED? E/D DESC	   E/D	ACCT  A/P    FACTOR LIMITED  LIMIT XLCD CAT
+
+ [Y][BONUS	 ] [E] [   ]  [A] [    50.00] [Y] [  500.00][1][ 6]
+.ll65
+.sp2
+.in8
+.ti-8
+EXAMPLE: If 2% of the employees' gross pay is to be deducted for a
+supplemental health care plan every pay period, make the entry
+as shown here:
+.qi
+.sp
+.ll72
+.li
+[Y][SUPP HEALTH ] [D] [  2]  [P] [     2.00] [N] [	  ][  ][15]
+.ll65
+.qi
+.he
+.po8
+.bp
+.ig
+CHAPTER 23
+E N T E R I N G   A N D    C H A N G I N G
+E M P L O Y E E    I N F O R M A T I O N
+.sp2
+.pp5
+Putting an employee on the Payroll System is a three step process:
+.he Operations: Chapter 23
+.sp
+.li
+	1. Create an employee record using
+	   the EMPLOYEE ENTRY program.
+
+	2. Enter deduction/earnings and cost
+	   information using the EMPLOYEE
+	   DED/EARN AND COST program.
+
+	3. Enter pay rate, vacation rate, sick
+	   leave rate, and other information
+	   with the EMPLOYEE RATE ENTRY program.
+.sp
+Steps one and two are covered in this chapter, step three in the following
+chapter (Chapter 24). The information entered through these three programs
+is stored on the Employee Master file.
+.sp2
+.ce
+EMPLOYEE ENTRY
+.pp5
+When you select the Employee Entry program from the Payroll system
+menu the Employee Entry screen (see Chapter 32) appears with the cursor
+waiting at the EMPLOYEE NUMBER field.
+From there
+you can give commands to change, examine,
+or save employee records:
+.sp
+.li
+	  CTRL-A:  ADD records to the employee file.
+	  CTRL-N:  Get the NEXT record on the file.
+	  CTRL-B:  Go BACK to the previous record.
+	  CTRL-S:  SAVE newly entered or changed records
+		   to disk.
+	  CTRL-R:  REFRESH garbled DMS screen.
+	  ESCAPE:  End the Employee Entry program.
+.sp2
+.ce
+ADD AN EMPLOYEE RECORD
+.pp
+To add an employee to the file, give the command
+CTRL-A when the cursor is at the EMPLOYEE NUMBER field.
+The program finds the first available employee number, displays it in
+the Employee Number field, and moves the cursor to the NAME field
+where you can begin entering data for the employee.
+.pp
+Employee
+numbers are assigned automatically; the lowest available number is always
+assigned first.  Employee numbers take the following form:
+.sp
+.li
+		  nnnnc
+.sp
+where "nnnn" is any number from 1 to 9999 and "c" is a "check digit"
+that protects against miskeys and transposition errors.  When
+an employee number is requested, enter all five digits.  The relative
+position of the record on the file can be easily determined by
+ignoring the check digit.
+.pp
+Press ESCAPE after entering the data for each employee.  The program
+will display the next available employee number and mode the cursor
+to the Name field where you can begin the next record.
+An ESCAPE at the first request of the
+next record takes the program out of the Add-Records mode and returns
+the cursor to the Employee Number field.  ESCAPE from there ends the
+Employee Entry program.
+.in6
+.ti-6
+.sp
+NAME: Enter the name in the form:
+.sp
+.li
+		   Firstname Middlename Lastname
+.in6
+Up to 30 characters are allowed.
+.ti-6
+.sp
+ADDRESS: Up to 30 characters per line.
+.ti-6
+.sp
+CITY: 18 characters maximum.
+.ti-6
+.sp
+STATE: Official two character abbreviation.  If the state is California (CA),
+special requests are issued for head of household status and number of special
+withholding allowances.
+.ti-6
+.sp
+ZIP: Five digits.  This field accepts only numbers.
+.ti-6
+.sp
+SOCIAL SECURITY NO.: Accepts only the numbers 1 through 9, and dashes
+(-). Must have the format (nnn-nn-nnnn).
+.ti-6
+.sp
+BANK ACCOUNT NO.: Accepts only the numbers 1 through 9, and dashes (-).
+Optional entry.  25 characters maximum.
+.ti-6
+.sp
+BIRTH DATE: Accepts only the numbers 1 through 9, and slashes (/).
+Enter in the form MM/DD/YY or DD/MM/YY, depending on the date
+format you chose in Parameter Entry.
+.ti-6
+.sp
+SEX: Male = M, Female = F.
+.ti-6
+.sp
+PENSION (Y/N): Y = Yes, the employee is on a company pension plan;
+N = No, the employee is not on a company pension plan.
+.ti-6
+.sp
+JOB CODE: 3 characters, letters or numbers. Informational only.
+.ti-6
+.sp
+START DATE: Enter MM/DD/YY or DD/MM/YY, depending on the date format
+you chose in Parameter Entry.
+.ti-6
+.sp
+TERM. DATE: Enter MM/DD/YY or DD/MM/YY, depending on the date format
+you chose in the Parameter Entry.
+.ti-6
+.sp
+EMPLOYMENT STATUS: A = Active, L = On Leave, T = Terminated.
+Transactions may not be entered for employess who are On Leave
+or Terminated (unless the Display Employee Name option in Transaction
+Entry is declined). Autogen pay is suppressed for Employees On Leave.
+A terminated employee's record remains on the file until year's end.
+After you print a (W-2) form , and Close for the Year the employee's
+number is available for reassignment.
+.qi
+.sp2
+.ce
+CHANGE AN EMPLOYEE RECORD
+.pp
+To the change information on an employee record,
+with the cursor at the Employee Number field call up the record for the
+employee by any combination of the following methods:
+.sp
+.li
+	     1. Enter the 5 digit Employee Number.
+	     2. Give the CTRL-N, get next record command.
+	     3. Give the CTRL-B, get previous record command.
+.sp
+If no record is present,
+CTRL-N gets the first record on the file, CTRL-B the last.
+Hit RETURN to move the cursor to the field you want to change and type
+in the new response.
+Outside of the Employee Number field CTRL-B backs the cursor
+up one field.  ESCAPE at
+any point enters the changes onto the file and returns the
+cursor to the Employee Number field where you can call up more records or
+issue other commands.
+.sp2
+.ce
+EXAMINE AN EMPLOYEE RECORD
+.pp
+Call up the record as explained above
+for changing a record.
+.sp2
+.ce
+SAVE NEWLY ENTERED OR CHANGED RECORDS
+.pp
+The SAVE command, which can
+be given when the cursor is at the Employee Number field, updates the
+disk file with the newly created records or the changes made to the
+old records.  Diligent use of this command can save
+you hours of work should a system failure occur due to a hardware
+or other type of problem (such as a pulled plug or write protected
+disk).	As a rule of thumb, use the Save command as soon as you
+enter more records than you would care to enter again. One hard
+lesson is usually enough to demonstrate the value of this command.
+.cp12
+.sp3
+.ce
+EMPLOYEE DED/EARN AND COST DIST.
+.pp
+The Employee Deduction/Earnings and Cost Dist. program is used
+to specify the accounts to which an employee's gross earnings and
+associated costs should be distributed, to exempt an employee from
+system-wide earnings or deductions, or to enter earnings or deductions
+that apply to a particular employee only.
+.pp
+When you select the program from the menu an entry screen appears with the
+cursor waiting at the EMPLOYEE NUMBER field.  You may call up an
+employee record by any combination of the following methods:
+.sp
+.li
+		1. Enter the five digit employee number.
+
+		2. Give the CTRL-N command to call up the
+		   first record on the file, or if a record
+		   is already present, the next record.
+
+		3. Give the CTRL-B command to call up the
+		   last record on the file, or if a record
+		   is already present, the previous record.
+.in6
+.sp
+.ti-6
+GL COST DISTRIBUTION OF EMPLOYEE GROSS AND EMPLOYER COST: The total
+cost of an employee to the employer can be distributed to up to five ledger
+accounts.  Enter the Payroll System Account Reference Number and the percentage
+of the total to be distributed to that account.  The total of the percentages
+must equal 100.00 before you can go on to the next employee.  For example,
+if the employee cost is to be divided evenly between three accounts,
+the following entry would be correct:
+.sp
+.li
+	     ACCOUNT [ 10]    PERCENT  [   33.33]
+	     ACCOUNT [ 11]    PERCENT  [   33.33]
+	     ACCOUNT [ 12]    PERCENT  [   33.34]
+	     ACCOUNT [	 ]    PERCENT  [	]
+	     ACCOUNT [	 ]    PERCENT  [	]
+			      TOTAL    [  100.00]
+.sp
+.ti-6
+EXEMPTIONS FROM TAX WITHHOLDING:  To exempt an individual employee
+from Federal, state, local, FICA, or SDI withholding, enter Y for
+Yes, the employee is exempt, and N for No, the employee is not exempt.
+.sp
+.ti-6
+EXEMPTIONS FROM SYSTEM DEDUCTIONS: To exempt an individual employee from
+any of the five user-defined system-wide earnings or deduction
+categories, enter
+a Y for Yes, the employee is exempt, or N for No, the employee is not
+exempt.
+.sp
+.ti-6
+EMPLOYEE SPECIFIC DEDUCTIONS: Up to three earnings
+or deduction categories can be established for a specific employee.
+The procedure is exactly the same as described for creating the systemwide
+earnings or deductions.  See Chapter 23 for
+instructions.
+.qi
+.pp
+After entering or adjusting the information in the entry fields,
+an ESCAPE will update the employee file and return the cursor to
+the Employee Number field.  From there, you can call up another employee
+record, or press ESCAPE to end the program.
+.he
+.bp
+.ig
+CHAPTER 24
+E N T E R I N G    A N D    C H A N G I N G
+P A Y	R A T E    I N F O R M A T I O N
+.sp2
+.pp5
+When you select the Employee Rate Entry program from the system menu,
+the Employee Rate Entry screen (see Chapter 32) appears with the cursor
+waiting at the Employee Number field.  You can call up the record for an
+employee by any combination of the following methods:
+.he Operations: Chapter 24
+.sp
+.li
+	   1. Enter the five digit employee number.
+	   2. Give the CTRL-N command to call up the
+	      first record on the file, or if a record
+	      is already present, the next record.
+	   3. Give the CTRL-B command to call up the
+	      last record on the file, or if a record
+	      is already present, the previous record.
+.sp
+After the program displays the record, hit RETURN to begin entering data.
+After answering the requests for an employee, press ESCAPE to return the
+cursor to the Employee Number field.  You can then call up additional
+records or press ESCAPE again to end the program.
+.sp2
+.ce
+PAY INTERVAL AND PAY RATES
+.in6
+.sp
+.ti-6
+PAY TYPE: H = Hourly, S = Salaried.
+.sp
+.ti-6
+PAY INTERVAL: Enter the frequency with which the employee is paid:
+.sp
+.li
+	       W = Weekly
+	       B = Bi-weekly
+	       M = Monthly
+	       S = Semi-monthly
+.sp
+.ti-6
+RATE1 THROUGH RATE4: The descriptive names of Rate1 through Rate4
+set in Parameter Entry
+appear beside the pay rates currently in effect.  If the default or
+current value is acceptable, you can hit RETURN at each field.
+.pp
+The largest values allowed in the Rate fields are as follows:
+.sp
+.li
+	       Rate1.........99,999.99
+	       Rate2.........99,999.99
+	       Rate3.........99,999.99
+	       Rate4.........99,999.99
+.sp
+Do not enter commas.
+.sp
+.ti-6
+RATE4 TAX EXCLUSION TYPE:  See Chapter 36, Command Summary for the
+Tax Exclusion Type code.
+.sp
+.ti-6
+AUTOGEN UNITS: Enter the number of units per pay period.  This is
+usually 1 (one) for salaried employees.  If an hourly employee is to
+receive automatically generated pay enter the number of hours per pay
+period (for example, 40 for weekly pay, 80 for bi-weekly, etc.).
+If the employee is not to receive automatic pay, enter 0 (zero) autogen
+units.
+.sp
+.ti-6
+NORMAL UNITS: Enter the number of Rate1 pay units an employee
+normally receives in one pay period.  When a Rate0 transaction is entered
+through the Pay Transaction entry program, the employee will automatically
+be paid at Rate2 for all units over the normal units value.
+The largest value allowed in the
+Normal Units field is 999.99.
+.sp
+MAXIMUM PAY: Warnings appear on screen during payroll application and
+journal printout for
+employees whose gross pay exceeds this amount in one
+pay period.
+The largest value allowed in this field is 999,999.99.
+.qi
+.sp2
+.ce
+TAX WITHHOLDING ALLOWANCES
+.in6
+.sp
+.ti-6
+MARITAL STATUS: M = Married, S = Single.
+.sp
+.ti-6
+FEDERAL WH ALLOWANCES:
+.ti-6
+STATE	WH ALLOWANCES:
+.ti-6
+LOCAL	WH ALLOWANCES: Enter the number of withholding allowances claimed
+by the employee for Federal, state, and local tax purposes.  These fields
+accept only numbers from 1 to 99.
+.qi
+.sp2
+.ce
+STATE OF CALIFORNIA SPECIAL INFORMATION
+.in6
+.sp
+.ti-6
+HEAD OF HOUSEHOLD: Enter Y for Yes, the employee is considered the head
+of household for California tax purposes,
+or N for No, the employee is not considered
+the head of household.
+.sp
+.ti-6
+SPECIAL WITHHOLDING ALLOWANCES: Enter the number of special withholding
+allowances claimed by the employee for California tax purposes.  This
+field accepts only numbers from 1 to 99.
+.qi
+.sp2
+.ce
+VACATION, SICK LEAVE, AND COMP TIME INFORMATION
+.in6
+.sp
+.ti-6
+VACATION RATE: Enter the number of vacation units the employee should
+receive every pay period.  For example, if an employee earns 10 days
+of vacation per year, and is paid on a monthly schedule, enter the
+vacation rate as 10/12 = .83 days per month.  If an employee earns
+80 hours of vacation per year and is paid bi-weekly, calculate the
+number of hours of vacation he or she earns every two weeks and enter
+that number as the vacation rate (80/26 = 3.08).
+The largest value allowed by this field is 99,999.99.  Only two digits
+to the right of the decimal are allowed.
+.sp
+.ti-6
+VACATION ACCUMULATED:  Enter the number of vacation units the employee
+has accumulated. Note that this is not the number of units the
+employee has remaining.
+The largest value accepted by the field is 99,999.99.
+.sp
+.ti-6
+VACATION USED:	Enter the number of vacation units the employee has
+used so far this year.	The difference between Vacation Used and
+Vacation Accumulated is the number of vacation units the
+employee has remaining.
+.sp
+.ti-6
+SICK LEAVE RATE: Enter the sick leave rate as explained above for
+the Vaction Rate.  The largest value accepted by the field is
+99,999.99.
+.sp
+.ti-6
+SICK LEAVE ACCUMULATED: Enter the number of sick leave units the employee
+has accumulated,
+as explained above for Vacation Accumulated.  The largest value accepted
+by the field is 99,999.99.
+.sp
+.ti-6
+SICK LEAVE USED: Enter the number of sick leave units the employee
+has used so far this year as explained above for Vacation Used.
+The difference between Used and Accumulated is the number of sick leave
+units the employee has remaining.
+.sp
+.ti-6
+COMP TIME ACCUMULATED: Enter the
+number of comp time units he or she has accumulated so far this year.
+This is not the number of comp time units the employee has remaining.
+The largest value accepted by the field
+is 99,999.99.
+.sp
+.ti-6
+COMP TIME USED:  Enter the amount of comp time the employee
+has used so far this year.
+The difference between Comp Time Accumulated and Comp Time Used
+is the amount of compensatory time the employee has remaining.
+The largest value accepted by this field is 99,999.99.
+.qi
+.he
+.bp
+.ig
+CHAPTER 25
+T H E	P A Y R O L L	P R O C E S S I N G    C Y C L E
+.sp2
+.pp5
+Once the setup steps have been completed you can begin the regular
+processing cycle you will repeat every pay period.  There are seven
+steps in the payroll processing cycle:
+.he Operations: Chapter 25
+.sp
+.li
+	   1. Enter Pay Transactions
+	   2. Print a Pay Transaction Batch Proof
+	   3. Back up all files.
+	   4. Sort the Pay Transaction batch.
+	   5. Run the Apply Payroll program.
+	   6. Print the Payroll Journal.
+	   7. Print Paychecks and/or the Paycheck Register.
+.sp
+Chapter 26 covers the first four steps.  Chapter 27 handles
+five and six, and Chapter 28 step seven.
+.sp
+.in6
+.ti-4
+(1) ENTER PAY TRANSACTIONS: To do this step, choose the Enter Pay
+Transactions program from the system menu.  This program creates a
+"batch" file of pay transactions; the file is named PYHRS.001 when
+unsorted and PYHRS.101 after it has been sorted. You can add transactions
+to the
+batch, change transactions, delete transactions, and examine transactions.
+Working proofs of the batch may be printed at any time until the final audit
+proof is taken.  The file is completely consumed by the
+Apply Payroll program.
+.sp
+.ti-4
+(2) PRINT A PAY TRANSACTION AUDIT PROOF:  When the Pay Transaction
+batch is accurate and complete, run the Pay Transaction Proof program
+from the system menu to generate a hardcopy audit proof.
+.sp
+.ti-4
+(3) BACK UP ALL FILES:	Before taking any further steps, copy all of your
+disks.	Use the full disk copy program provided with the Payroll System
+(SDCOPY) for copying single density 8" IBM standard format disks, or
+some other copy program such as PIP.
+.sp
+.ti-4
+(4) SORT THE PAY TRANSACTION BATCH:  To sort the batch of pay transactions,
+choose the Sort Pay Transactions program from the system menu.	Be sure
+there is room on the disk with the Pay Transaction file for both the
+sorted and unsorted version, and for temporary workfiles whose total size
+will never be larger than
+the input file.  Use the CP/M STAT command to find the
+size of the input (unsorted) PYHRS.001 file, and the amount of space
+remaining on the disk (for example, STAT PYHRS.001).
+If your CP/M derviative operating system does not
+have the SUBMIT command, run the sort outside the Payroll System as
+explained in Chapter 26.
+.sp
+.ti-4
+(5) RUN THE PAYROLL APPLICATION PROGRAM:  Call the Apply Payroll program
+from the system menu, enter the date you wish printed on the checks, and
+state whether the application is for month-based or week-based employees.
+Make sure there is room on the disk for both the old and the new Pay Detail
+files, since both exist at the same time during processing. The program may
+take some time to run with many employees on the system.
+.sp
+.ti-4
+(6) PRINT THE PAYROLL JOURNAL: Before the next payroll application can
+take place you must print at least one copy of the Payroll Journal.
+Choose the Print Payroll Journal program from the system menu.
+.sp
+.ti-4
+(7) PRINT PAYCHECKS AND/OR THE PAYCHECK REGISTER: If you have chosen
+automatic paycheck printing, load the printer with the paychecks, print
+a dummy paycheck until they are aligned properly, and then print the
+paychecks for employees to be paid that period.  Also print the
+paycheck register.  If you did not choose automatic paycheck printing,
+print the Paycheck Register so you can prepare checks
+from it.
+.qi
+.he
+.bp
+.ig
+CHAPTER 26
+E N T E R I N G    E M P L O Y E E    P A Y
+T R A N S A C T I O N S
+.sp2
+.pp5
+When you select the Pay Transaction Entry program from the Payroll
+System menu, if no transaction batch exists the program asks
+if you want to create one.  Answer Yes to create a new batch, and
+No if for some reason (such as if the wrong disk is inserted)
+you do not.  If you answer No, the Pay Transaction Entry program ends
+and the menu returns. If you answer Yes, the program asks if
+you want to Display Employee Names.  If you answer Yes, the
+program displays an employee's name beside his or her  employee number
+to help make sure you enter the correct transaction information
+for the employee.  The Employee Name option also causes the Pay
+Transaction Entry program to reject transactions
+for Terminated employees, and issuea a warning when a transaction is
+entered for an employee On Leave.
+.he Operations: Chapter 26
+.pp
+After you answer the employee name option request, the transaction
+entry screen appears with the cursor waiting in the Record Number
+field.	The following commands are available while the cursor
+is in the Record Number field:
+.sp
+.in11
+.ti-8
+CTRL-A: ADD transactions to the file.
+.ti-8
+CTRL-N: Gets the NEXT record on the file; when no records have been
+accessed, gets the first transaction record.
+.ti-8
+CTRL-B: Goes BACK one record on the file; when no records have been
+accessed, brings up the last transaction on the file.
+.ti-8
+CTRL-D: DELETE the transaction.
+.ti-8
+CTRL-S: SAVE newly entered or changed records to disk.
+.ti-8
+CTRL-R: REFRESH garbled DMS screen.
+.ti-8
+RETURN: Move the cursor to the first request
+(when a record has been accessed).
+.ti-8
+ESCAPE: End the Pay Transaction Entry program.
+.ti-8
+ENTER RELATIVE RECORD NUMBER: To call up a particular transaction,
+enter the position of the transaction record relative to the beginning
+of the file. Transactions are stored in the order they are entered.
+For example, the third record entered is third on the file, and thus
+has the relative record number of 3.
+.qi
+.sp2
+.cp6
+.ce
+ADDING TRANSACTIONS
+.pp
+To add transactions to the file give the command CTRL-A.  This puts
+the program in the Add-Records mode and moves the cursor to the
+Employee Number field.	Enter the 5 digit employee number, the
+transaction code, and the number of units (dollars, hours, pieces, etc.),
+and a date.  Figure 26.1 lists the Payroll System transaction codes and
+the check category where the item prints, if applicable.
+Refer to Chapter 13 for a description of each transaction type.
+The date can be the date you enter the transaction,
+or any reference date you choose.  The default date is the run date
+you give when you call up the Payroll System.
+.pp
+While in the Add-Records mode, RETURN moves the cursor forward one field,
+and CTRL-B moves it back one field.  After you answer all the requests for
+a transaction, you can move through the fields indefinitely with RETURN
+or CTRL-B to adjust the information, or you can press ESCAPE at any point
+to begin the next record.  ESCAPE enters the transaction onto the file
+and returns the cursor to the Employee Number field, where you can enter
+another employee number and begin a new transaction.  To leave the Add-Records
+mode, after hitting ESCAPE to enter the transaction, press ESCAPE at the first
+request of the next transaction.
+This moves the cursor to the Record Number field where you can give one of
+the commands listed above, or ESCAPE again to end the program.
+.sp2
+.cp30
+.li
+	PAYROLL SYSTEM TRANSACTION CODES
+
+    TRANSACTION     TRANSACTION        CHECK
+       CODE	       TYPE	      CATEGORY
+
+	(0)	  Rate0 Pay
+	(1)	  Rate1 Pay		 2
+	(2)	  Rate2 Pay		 3
+	(3)	  Rate3 Pay		 4
+	(4)	  Rate4 Pay		 5
+	(5)	  Vacation Taken
+	(6)	  Sick Leave Taken
+	(7)	  Comp Time Taken
+	(8)	  Comp Time Earned
+	(9)	  Bonus 		 6
+       (10)	  Tips Collected	 7
+       (11)	  Advance		 6
+       (12)	  Sick Pay		 6
+       (13)	  Vacation Pay		 6
+       (14)	  Other Excluded Pay	 6
+       (15)	  Expense Reimbursement  6
+       (17)	  Other Pay		 6
+       (18)	  Tips Reported 	14
+       (27)	  Advance Repay 	14
+       (28)	  FWT Add-On		 9
+       (29)	  SWT Add-On		10
+       (30)	  LWT Add-On		11
+       (31)	  FICA Add-On		12
+
+  (Figure 26.1 Transaction Codes and Check Categories)
+.sp2
+.ce
+CHANGING TRANSACTIONS
+.pp
+To change a transaction entered previously, first locate it by giving
+the CTRL-N,
+CTRL-B, or Relative Record Number command at the Record Number field.
+When the transaction you wish to change is showing, hit RETURN to move
+the cursor from the Record Number field to the Employee Number field.
+Press RETURN to move the cursor forward to the response you wish to change,
+and type in the new response.  You can use the CTRL-B command to move
+the cusor back one field.  When the changes are complete, hit ESCAPE
+to return the cursor to the Record Number field where you can issue one
+of the commands listed above.
+.sp2
+.cp6
+.ce
+EXAMINING TRANSACTIONS
+.pp
+To examine previously entered transactions you simply locate the
+transaction by giving one of the following commands from the the
+Record Number field:
+.sp
+.in6
+.ti-3
+1. Enter the Relative Record Number of the Transaction. For example,
+to bring up the fifteenth record on the file, you would enter 15
+and hit RETURN.
+.sp
+.ti-3
+2. Give the CTRL-N command to display the NEXT transaction on the
+file; gets the first record if none are showing.
+.sp
+.ti-3
+3. Give the CTRL-B command to display the previous transaction on
+the file ("Go BACK one record"); gets the last record is none are
+showing.
+.qi
+.sp2
+.cp6
+.ce
+DELETING TRANSACTIONS
+.pp
+To delete a transaction, first bring up the transaction by the
+CTRL-N, CTRL-B, or Relative Record Number command, and then
+give the command,
+.sp
+.li
+		CTRL-D
+.sp
+Once you delete a transaction, you can no longer access it.
+The remaining transactions keep their same relative record numbers
+since the deleted transaction is not physically removed from the file,
+but only marked as deleted.
+.sp2
+.cp6
+.ce
+SAVING NEWLY ENTERED OR CHANGED TRANSACTIONS
+.pp
+The CTRL-S command protects you against the possible loss of perhaps hours
+of labor in the event of an equipment failure.	The CTRL-S command
+saves the transactions added or changed during the current
+run of the program out to disk.  Should the program end prematurely
+for any reason, all transactions saved up to the point of system
+failure would be stored safely on disk.  A rule of thumb is to give
+the CTRL-S command when you have keyed in more transactions
+than you would care to enter again.  It usually takes one hard lesson
+to appreciate the value of this command.
+.sp2
+.cp4
+.ce
+REFRESH GARBLED DMS SCREEN
+.pp
+If for some reason a Display Management System screen should become
+garbled, the CTRL-R command refreshes it.  The cursor position
+and data showing on the screen remain unchanged.  You can issued
+this command at any point.  You will rarely, if ever, need to use it.
+.sp2
+.cp6
+.ce
+PROOFING THE TRANSACTION BATCH
+.pp
+At any point during the development of the Pay Transaction batch file
+you can order a numbered printout of the transactions exactly as
+they have been entered.  To do so, choose the Transaction Proof
+program from the Payroll System menu.  When you finish entering
+transactions for all employees to be paid on the next payroll application,
+print a final proof report and save it as part of your audit trail.
+If you enter additional transactions, the sorting program will warn you
+that not all of the transactions have been proofed, and give you an
+opportunity to do so.  Check your transaction entries very carefully to
+make sure all employees will be paid the correct amounts.  Once a
+Payroll Application is run, it cannot be run over, except from your backup
+files.
+.sp2
+.cp6
+.ce
+SORTING THE TRANSACTION BATCH
+.pp
+Before it can be processed by the Apply Payroll program, the
+Pay Transaction file must be sorted into employee number order.
+To do so, select the Sort the Transaction Batch program from the
+system menu.  Be sure there is room on the disk for both the sorted
+and unsorted versions (they are of equal size), and if the file
+is large, for temporary workfiles whose total size will never exceed
+the size of the input (unsorted) file.	 Use the CP/M STAT command
+to find the size of the input file and the amount of space remaining on
+the disk. When the STAT command is on drive A and you wish to find the
+space available on B, give the command:
+.sp
+.li
+		A>STAT B:
+.sp
+and follow with RETURN.  To find the size of the unsorted transaction
+batch, you would enter:
+.sp
+.li
+		A>STAT B:PYHRS.001
+.sp
+since PYHRS.001 is the name of the unsorted file.
+.pp
+Because the sorting program (QSORT.COM) is not a CBASIC language program,
+when you choose the Sort Transaction Batch program from the menu, the
+Payroll System ends automatically, performs the sort under the CP/M
+environment, and then returns.	To do this it uses the SUBMIT command.
+If your CP/M derivative operating system does not have this command (most
+do), you
+cannot sort the transaction batch from the menu.  Instead, you must
+end the Payroll System, and with QSORT on the currently logged drive, and
+the Sort Parameter file
+on the System File Drive (if B), type:
+.sp
+.li
+		A>QSORT B:PYHOURS
+.sp
+When sorting is complete, re-enter the Payroll System by typing
+CRUN2 PY.
+.he
+.bp
+.ig
+CHAPTER 27
+P A Y R O L L	 A P P L I C A T I O N
+.sp2
+.pp5
+The Apply Payroll program is the central processing program of
+the Payroll System.  It is the program that calculates earnings
+and deductions, updates historical information, and creates
+a check file to be used by the check printing program.	If General
+Ledger interface is selected, it creates the batch of transactions
+that can be processed without alteration by the Applewood Computers General Ledger.
+.he Operations: Chapter 27
+.pp
+Before running the Apply Payroll program be certain the following
+steps have been taken:
+.sp
+.in6
+.ti-3
+1. MAKE SURE THE PAY TRANSACTION BATCH FILE IS COMPLETE AND ACCURATE.
+Study the final transaction proof (the audit proof) to be certain
+that pay transactions have been entered correctly or an appropriate
+number of Autogen Units set for each employee. You cannot run the
+Apply Payroll program over again, except by using your backup files.
+.sp
+.ti-3
+2. MAKE SURE A FINAL (AUDIT) PROOF OF THE BATCH HAS BEEN PRINTED.
+The proof should be taken before the batch is sorted.
+.sp
+.ti-3
+3. MAKE SURE YOU HAVE MADE DUPLICATE COPIES OF EVERY DISK.  This "backing
+up" is crucial to many error recovery procedures. If you forget to
+pay an employee or enter incorrect transaction information, you must have
+these backup disks to repair the error.  Copy all of your processing disks
+after printing the audit proof and before sorting the transaction batch.
+See Chapter 35 for error recovery procedures and instructions
+for using SDCOPY, the single-density full-disk copying program distributed
+with the Payroll System. If you neglect this step error recovery will
+consume much more time than it should.	The information on the disk
+is far more valuable than the disk itself.
+.sp
+.ti-3
+4. MAKE SURE THE BATCH HAS BEEN SORTED BY EMPLOYEE NUMBER.  See Chapter
+26 for instructions.
+.qi
+.sp2
+.cp10
+.ce
+RUNNING THE APPLY PAYROLL PROGRAM
+.pp
+To apply payroll for the period, select the Apply Payroll program
+from the system menu and enter the Check Date.
+This is the pay date that will be printed on the checks, and also
+the reference date of the General Ledger transactions.	It is the
+date you incur withholding liabilities.  See Chapter 18 for instructions
+on how to enter a date.
+.pp
+If the program cannot tell, it will ask you to state whether the
+application is for week-based or month-based employees.  Enter
+W for week-based and M for month based.  Type "RUN" to begin the
+processing.
+.pp
+The Apply Payroll program knows whether to process
+"fast" interval employees (weekly or semi-monthly), "slow" interval
+employees (bi-weekly or monthly), or both fast and slow interval employees
+by checking Ending Day of Last Period for the interval.
+.he
+.bp
+.ig
+CHAPTER 28
+P R I N T I N G    P A Y C H E C K S
+A N D	 T H E	  P A Y C H E C K    R E G I S T E R
+.sp2
+.pp5
+To print the paychecks, select the Print Pay Checks program from the
+system menu. The program displays the last check number and
+requests the starting check number.  This can be any number you want.
+.he Operations: Chapter 28
+.pp
+The program gives you an opportunity to align the check forms in
+the printer.  Type Y or hit RETURN to print a test form.  When the
+forms are aligned properly, respond to the test form request with N.
+.pp
+Should your forms jam in the printer, you can press ESCAPE to stop
+or RETURN to continue.	There is no facility for reprinting individual
+checks.  If a check is spoiled rerun the printout from the
+beginning.  If someone didn't get paid or got paid the wrong amount,
+rerun the application with your backup files.
+.pp
+To print the check register, select the Print Pay Check Register program
+from the system menu.	Be sure your paper is aligned properly.
+.he
+.bp
+.ig
+CHAPTER 29
+E N D I N G    T H E	Q U A R T E R
+.sp2
+.pp5
+The end of quarter processing steps should be taken after
+the last payroll application of the quarter and before the first
+payroll application of the next quarter.  The Apply Payroll program
+will not let you continue if the Check Date you enter falls within
+the new quarter and the quarter end processing steps have not been
+taken.	These steps are:
+.he Operations: Chapter 29
+.sp
+.li
+		1. Print 941 Report.
+		2. Run Close for the Quarter program.
+
+	     (Figure 29.1: Quarter End Processing Steps)
+.sp2
+.ce
+PRINT 941 REPORT
+.pp
+To print the Federal 941 report, Employer's Quarterly Federal Tax
+Return, select the Print 941 Report program from the system menu.
+The first half of a facsimilie reproduction of the 941 report
+appears on screen with the current values inserted in the appropriate
+fields.  If you wish to use the stick-on label provided with the
+government form, you can suppress printing of your company's name and
+address information by answering No (N) to the PRINT NAME AND ADDRESS
+request.
+.pp
+You may change two of the fields on this screen:
+ADJUSTMENT OF WITHHELD INCOME TAX FROM PREVIOUS QUARTERS and ADJUSTMENT
+OF FICA TAXES.	The values in these fields are subtracted from the
+INCOME TAX WITHHELD and TOTAL FICA TAXES figures respectively.
+Hit RETURN until the cursor is at the field you wish to change and type
+in the new value.  The new adjusted totals are computed automatically.
+When the data on this screen is complete and accurate, press ESCAPE to
+bring up the second half of the facsimilie form.
+.pp
+This screen lets you change the date of deposit and the amount
+deposited to conform to the actual dates and amounts.  The program
+assumes your deposits are the same as your liabilies for the period.
+If this is not the case, move the cursor forward  to the fields that need to
+be changed by RETURN (or CTRL-B to go back), and type in the new value.
+The totals are re-computed automatically.  Hit ESCAPE when the data is
+correct and follow the instructions to align the form in your printer.
+.pp
+To align the form, insert it into the printer so that the line of
+dashes prints directly on top of the black
+line below the space for the company name and address.	If the line
+prints high or low, move the form up or down in the printer accordingly
+until it is aligned properly.  You may repeat the alignment process
+until it is correct.  When the form is aligned properly, press RETURN
+as instructed.	Alternatively, print the report on plain paper and
+transfer the information  by hand.
+You can run the Print 941 Form program as many
+times you want.
+.sp2
+.ce
+RUN CLOSE FOR THE QUARTER PROGRAM
+.pp
+After you print the 941 form, run the Close For the Quarter program.
+This program issues no requests, except for confirmation that it should
+be run.  The program will not continue if the 941 form has not been
+printed, or not enough applications have taken place.  New interals
+may only be added at the start of a new quarter.
+.he
+.bp
+.ig
+CHAPTER 30
+E N D I N G    T H E	Y E A R
+.sp2
+.pp5
+The end of the year processing steps should be taken after end of
+quarter processing is complete for the fourth quarter, and before
+the first payroll application of the new year.	The Apply Payroll program
+will not let you continue if the Check Date you enter falls within the
+new year and the year end processing steps have not been taken.
+.he Operations: Chapter 30
+.sp
+.li
+		1. Close for the fourth quarter.
+		2. Print 940 Report
+		3. Print W-2 forms for all employees.
+		4. Run Close For the Year program.
+
+	      (Figure 30.1: Year End Processing Steps)
+.sp2
+.ce
+PRINT 940 REPORT
+.pp
+To print the Federal 940 Report, after
+closing the fourth quarter (October, November, December) in the usual
+way (see Chapter 29), select the Print 940 Report program from the system
+menu.  Since the 940 report is designed to be printed on plain paper and
+the information
+transferred to the government form manually, check to make sure the
+paper is aligned correctly in your printer, and press RETURN to begin
+printing.
+.sp2
+.ce
+PRINT W-2 FORMS FOR ALL EMPLOYEES
+.pp
+To print W-2 forms, select the Print W-2 Report program from the system
+menu.  A screen will appear from which you can choose various printing
+options:
+.sp
+.in6
+.ti-3
+1. Select ALL EMPLOYEES, RANGE OF EMPLOYEES, TERMINATED EMPLOYEES, or
+A SINGLE EMPLOYEE.  ALL EMPLOYEES instructs the program to print W-2
+forms for all Active, On Leave, and Terminated employees.  The ALL
+EMPLOYEES selection must be chosen before you are allowed to close for
+the year.
+If you
+select a RANGE OF EMPLOYEES, you will be asked to enter the starting
+employee number and the ending employee number.  The program checks
+to make sure the range you enter is valid.  If you select A SINGLE
+EMPLOYEE, the program asks for the five digit employee number. Selecting
+TERMINATED EMPLOYEES causes the program to print W-2 forms for terminated
+employees only. This can be done at any time during the year.
+.sp
+.ti-3
+2. PRINT STATE AND LOCAL AMOUNT: To suppress printing of the
+state and local withholding information, enter N for No.
+.sp
+.ti-3
+3. NUMBER OF FORMS PER EMPLOYEE: Enter the number of forms to
+print for each employee.  For example, when you print on three
+part carbon forms (one part for the Federal return,
+one for the state, and one
+for the employee's personal records), you would enter 1.  If you
+do not use carbon forms, and want to print one form for Federal, one for
+state, one for local, and one for the employee, you would enter 4.
+If a form for local income tax is not needed you would enter 3.
+.sp
+.ti-3
+4. NUMBER OF LINES BETWEEN FORMS: Enter the number of lines between the
+last print line of the previous form and the first print line of the
+next form.
+.sp
+.ti-3
+5. STARTING PRINT COLUMN: If you need to shift the
+printing to the left or the right, add or subtract the required number
+of positions to or from the current value.
+.qi
+.pp
+After answering the above requests, align your continuous form W-2's
+in the printer and answer Y for Yes to the PRINT TEST FORM question.
+When you hit RETURN a dummy W-2 form will be printed.  Adjust the alignment
+of the forms in the printer and print another dummy form.  If the alignment
+is correct, answer N for No to the PRINT TEST FORM request and hit RETURN.
+Otherwise repeat the alignment process until the forms are aligned
+properly.
+.sp2
+.ce
+RUN CLOSE FOR THE YEAR PROGRAM
+.pp
+After you print the 940 form and W-2 forms for ALL EMPLOYEES who worked
+for you in the previous year, run the Close For the Year program.
+This program issues no requests, except for confirmation that it should
+be run.  The program will not continue if the 940 and W-2 forms have
+not been printed.
+.he
+.bp
+.ig
+CHAPTER 31
+P R O D U C I N G   T H E   O P T I O N A L   R E P O R T S
+.sp2
+.pp5
+The reports listed below can be printed at any time by choosing
+the print program from the menu.  A 132 column printer
+is assumed.  Be sure your printer is in the REMOTE mode if it
+has a Local/Remote switch, and the paper aligned properly.  If
+a printer malfunction should occur, press any key on the keyboard
+to halt the printout.  To continue, type "RUN".  To end the print
+program, type "STOP".
+.he Operations: Chapter 31
+.sp
+.li
+		   THE OPTIONAL REPORTS
+
+		 1. ACCOUNT PRINT
+		 2. EMPLOYEE MASTER REPORT
+		 3. EMPLOYEE HISTORY REPORT
+		 4. VACATION REPORT
+
+	     (Figure 31.1: The Optional Reports)
+.pp
+The Account Print, Employee History Report,
+and Vacation Report programs issue no requests.  Just align the paper
+in your printer and select them from the menu.
+.pp
+The Employee Master List offers a full and a short version.
+The full Employee Master Report prints one employee per page, the
+short report one employee per line.  Answer the request for
+which version you want by typing F for the full page version and
+S for the single line version.
+.pp
+The Employee Master Report also offers a wide range of printing options.
+These are presented in menu form (see Chapter 32 for a reproduction
+of the menu).  Select the desired print option.  If you opt to print
+a range of employees, the program asks you to enter the starting and
+ending employee numbers.  The program checks your entries to make
+sure the range is valid.
+.he
+

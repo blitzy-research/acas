@@ -1,0 +1,795 @@
+.mt7
+.mb7
+.po6
+.ll70
+.ce
+PAY TRANSACTION FILE (PYHRS.001)
+.sp2
+.li
+FIELD NAME		CHARS	OVHD	START	FORMAT/DESCRIPTION
+---------------------------------------------------------------------
+hrs.emp.no$		5	3	2	nnnnq check digit
+hrs.eff.date$		6	3	10
+hrs.rate%		1	1	19
+hrs.units		8/varies1	21
+hrs.deleted%		2/v	1	30/v
+end of record			1	33/v
+		----------------------------
+TOTAL:				34
+
+
+			HEADER RECORD
+
+
+hrs.hdr.no.recs%	4/v	1	2
+hrs.hdr.batch.no%	4/v	1	7/v
+hrs.hdr.proof.no%	4/v	1	12/v
+hrs.hdr.proofed%	2	1	17/v
+hrs.hdr.101		1/v	1	20/v	reserved for future use
+end of record			1	22/v
+		----------------------------
+TOTAL:				23
+.br
+.bp
+.ce
+EMPLOYEE MASTER FILE  (PYEMP.101)
+.sp2
+.li
+FIELD NAME		CHARS	OVHD  START	FORMAT/DESCRIPTION
+-------------------------------------------------------------------
+emp.no$ 		5	3	2	NNNNQ check digit
+emp.status$		1	3	10
+emp.hs.type$		1	3	14
+emp.pay.interval$	1	3	18
+emp.taxing.state$	2	3	22
+emp.job.code$		3	3	27
+emp.start.date$ 	6	3	33
+emp.birth.date$ 	6	3	42
+emp.term.date$		6	3	51
+emp.sex$		1	3	60
+emp.marital$		1	3	64
+emp.ssn$		10	3	68
+emp.pay.freq%		2	1	81
+emp.emp.name$		30	3	84	last sort field
+emp.next.del%		2	1	117
+emp.cur.apply.no%	4/var	1	120
+emp.phone$		13/var	3	125/var
+emp.addr1$		30/v	3
+emp.addr2$		30/v	3
+emp.city$		18/v	3
+emp.state$		2	3
+emp.zip$		5	3
+emp.rate(1)		8/v	1
+emp.rate(2)		8/v	1
+emp.rate(3)		8/v	1
+emp.rate(4)		8/v	1
+emp.auto.units		8/v	1
+emp.normal.units	8/v	1
+emp.max.pay		8/v	1
+emp.rate4.exclusion%	1	1
+emp.eic.used%		2	1
+emp.cal.head.of.house%	2	1
+emp.cal.ded.allow%	2	1
+emp.fwt.allow%		2	1
+emp.swt.allow%		2	1
+emp.lwt.allow%		2	1
+emp.pension.used%	2	1
+emp.bank.acct.no$	25/v	3
+emp.fwt.exempt% 	2	1
+emp.swt.exempt% 	2	1
+emp.lwt.exempt% 	2	1
+emp.fica.exempt%	2	1
+emp.sdi.exempt% 	2	1
+emp.co.futa.exempt%	2	1
+emp.co.sui.exempt%	2	1
+emp.sys.exempt%(1)	2	1
+emp.sys.exempt%(2)	2	1
+emp.sys.exempt%(3)	2	1
+emp.sys.exempt%(4)	2	1
+emp.sys.exempt%(5)	2	1
+emp.vac.rate		8/v	1
+emp.vac.accum		8/v	1
+emp.vac.used		8/v	1
+emp.sl.rate		8/v	1
+emp.sl.accum		8/v	1
+emp.sl.used		8/v	1
+emp.comp.accum		8/v	1
+emp.comp.used		8/v	1
+emp.dist.acct%(1)	4/v	1
+emp.dist.percent(1)	6/v	1
+emp.dist.acct%(2)	4/v	1
+emp.dist.percent(2)	6/v	1
+emp.dist.acct%(3)	4/v	1
+emp.dist.percent(3)	6/v	1
+emp.dist.acct%(4)	4/v	1
+emp.dist.percent(4)	6/v	1
+emp.dist.acct%(5)	4/v	1
+emp.dist.percent(5)	6/v	1
+emp.ed.desc$(1) 	15	3
+emp.ed.factor(1)	8/v	1
+emp.ed.limit(1) 	8/v	1
+emp.ed.earn.ded$(1)	1	3
+emp.ed.exclusion%(1)	1	1
+emp.ed.amt.percent$(1)	1	3
+emp.ed.limit.used%(1)	2	1
+emp.ed.chk.cat%(1)	2	1
+emp.ed.acct.no%(1)	4/v	1
+emp.ed.desc$(2) 	15	3
+emp.ed.factor(2)	8/v	1
+emp.ed.limit(2) 	8/v	1
+emp.ed.earn.ded$(2)	1	3
+emp.ed.exclusion%(2)	1	1
+emp.ed.amt.percent$(2)	1	3
+emp.ed.limit.used%(2)	2	1
+emp.ed.chk.cat%(2)	2	1
+emp.ed.acct.no%(2)	4/v	1
+emp.ed.desc$(3) 	15	3
+emp.ed.factor(3)	8/v	1
+emp.ed.limit(3) 	8/v	1
+emp.ed.earn.ded$(3)	1	3
+emp.ed.exclusion%(3)	1	1
+emp.ed.amt.percent$(3)	1	3
+emp.ed.limit.used%(3)	2	1
+emp.ed.chk.cat%(3)	2	1
+emp.ed.acct.no%(3)	4/v	1
+end of record			1
+		_____________________________
+TOTAL:				695
+
+
+.cp12
+.li
+		HEADER RECORD
+
+
+emp.hdr.no.recs%	4	1	2
+emp.hdr.no.del.recs%	4	1	7
+emp.hdr.next.del.rec%	3/v	1
+emp.hdr.101		1/v	1			reserved for future use
+emp.hdr.102		1/v	1			reserved for future use
+emp.hdr.201$		0/v	3			reserved for future use
+end of record			1
+		--------------------------------
+TOTAL:				24
+.br
+.bp
+.ce
+EMPLOYEE HISTORY FILE  (PYHIS.101)
+.sp2
+.li
+FIELD NAME		     CHARS     OVHD   START	FORMAT/COMMENTS
+--------------------------------------------------------------------
+his.emp.no$			5	3	2	nnnnq check digit
+his.qtd.income.taxable		8/var	1	10
+his.qtd.other.taxable		8/var	1	var
+his.qtd.other.nontaxable	8/var	1	var
+his.qtd.fica.taxable		8/var	1	var
+his.qtd.tips			8/var	1	var
+his.qtd.net			8/var	1	var
+his.qtd.eic			8/var	1	var
+his.qtd.fwt			8/var	1	var
+his.qtd.swt			8/var	1	var
+his.qtd.lwt			8/var	1	var
+his.qtd.fica			8/var	1	var
+his.qtd.sdi			8/var	1	var
+his.qtd.sys(1)			8/var	1	var
+his.qtd.sys(2)			8/var	1	var
+his.qtd.sys(3)			8/var	1	var
+his.qtd.sys(4)			8/var	1	var
+his.qtd.sys(5)			8/var	1	var
+his.qtd.emp(1)			8/var	1	var
+his.qtd.emp(2)			8/var	1	var
+his.qtd.emp(3)			8/var	1	var
+his.qtd.other.ded		8/var	1	var
+his.qtd.units(1)		8/var	1	var
+his.qtd.units(2)		8/var	1	var
+his.qtd.units(3)		8/var	1	var
+his.qtd.units(4)		8/var	1	var
+his.ytd.income.taxable		9/var	1	var
+his.ytd.other.taxable		9/var	1	var
+his.ytd.other.nontaxable	9/var	1	var
+his.ytd.fica.taxable		9/var	1	var
+his.ytd.tips			9/var	1	var
+his.ytd.net			9/var	1	var
+his.ytd.eic			9/var	1	var
+his.ytd.fwt			9/var	1	var
+his.ytd.swt			9/var	1	var
+his.ytd.lwt			9/var	1	var
+his.ytd.fica			9/var	1	var
+his.ytd.sdi			9/var	1	var
+his.ytd.sys(1)			9/var	1	var
+his.ytd.sys(2)			9/var	1	var
+his.ytd.sys(3)			9/var	1	var
+his.ytd.sys(4)			9/var	1	var
+his.ytd.sys(5)			9/var	1	var
+his.ytd.emp(1)			9/var	1	var
+his.ytd.emp(2)			9/var	1	var
+his.ytd.emp(3)			9/var	1	var
+his.ytd.other.ded		9/var	1	var
+his.ytd.units(1)		8/var	1	var
+his.ytd.units(2)		8/var	1	var
+his.ytd.units(3)		8/var	1	var
+his.ytd.units(4)		8/var	1	var
+
+end of record				1
+			-----------------------------
+				426	54
+			----------------------------
+TOTAL:					480
+
+
+.cp13
+.li
+			 HEADER RECORD
+
+
+his.hdr.no.recs%		4/var	1	2
+his.hdr.last.to.date$		6	3	var
+his.hdr.101			1/v	1		reserved for future use
+his.hdr.102			1/v	1		reserved for future use
+his.hdr.201$			0/v	3		reserved for future use
+end of record				1
+			----------------------------
+				12	10
+			----------------------------
+TOTAL:					22
+.br
+.bp
+.ce
+SYSTEM DEDUCTION FILE  (PYDED.101)
+.sp2
+.li
+FIELD			CHARS	OVHD	START	FORMAT/COMMENTS
+-------------------------------------------------------------------
+ded.fwt.used%		2/v	1	2
+ded.fwt.acct.no%	3/v	1
+ded.fwt.allowance.amt	7/v	1
+ded.fwt.mar.cutoff(01)	7/v	1
+ded.fwt.mar.percent(01) 7/v	1
+ded.fwt.mar.cutoff(02)	7/v	1
+ded.fwt.mar.percent(02) 7/v	1
+ded.fwt.mar.cutoff(03)	7/v	1
+ded.fwt.mar.percent(03) 7/v	1
+ded.fwt.mar.cutoff(04)	7/v	1
+ded.fwt.mar.percent(04) 7/v	1
+ded.fwt.mar.cutoff(05)	7/v	1
+ded.fwt.mar.percent(05) 7/v	1
+ded.fwt.mar.cutoff(06)	7/v	1
+ded.fwt.mar.percent(06) 7/v	1
+ded.fwt.mar.cutoff(07)	7/v	1
+ded.fwt.mar.percent(07) 7/v	1
+ded.fwt.sin.cutoff(01)	7/v	1
+ded.fwt.sin.percent(01) 7/v	1
+ded.fwt.sin.cutoff(02)	7/v	1
+ded.fwt.sin.percent(02) 7/v	1
+ded.fwt.sin.cutoff(03)	7/v	1
+ded.fwt.sin.percent(03) 7/v	1
+ded.fwt.sin.cutoff(04)	7/v	1
+ded.fwt.sin.percent(04) 7/v	1
+ded.fwt.sin.cutoff(05)	7/v	1
+ded.fwt.sin.percent(05) 7/v	1
+ded.fwt.sin.cutoff(06)	7/v	1
+ded.fwt.sin.percent(06) 7/v	1
+ded.fwt.sin.cutoff(07)	7/v	1
+ded.fwt.sin.percent(07) 7/v	1
+ded.swt.used%		2/v	1
+ded.swt.acct.no%	3/v	1
+ded.lwt.used%		2/v	1
+ded.lwt.acct.no%	3/v	1
+ded.fica.used%		2/v	1
+ded.fica.acct.no%	3/v	1
+ded.fica.rate		7/v	1
+ded.fica.limit		7/v	1
+ded.co.fica.used%	2/v	1
+ded.co.fica.acct.no%	3/v	1
+ded.co.fica.rate	7/v	1
+ded.co.fica.limit	7/v	1
+ded.sdi.used%		2/v	1
+ded.sdi.acct.no%	3/v	1
+ded.sdi.rate		7/v	1
+ded.sdi.limit		7/v	1
+ded.co.futa.used%	2/v	1
+ded.co.futa.acct.no%	3/v	1
+ded.co.futa.rate	7/v	1
+ded.co.futa.limit	7/v	1
+ded.co.futa.max.credit	7/v	1
+ded.co.sui.used%	2/v	1
+ded.co.sui.acct.no%	3/v	1
+ded.co.sui.rate 	7/v	1
+ded.co.sui.limit	7/v	1
+ded.eic.used%		2/v	1
+ded.eic.acct.no%	3/v	1
+ded.eic.rate		7/v	1
+ded.eic.limit		7/v	1
+ded.eic.excess.rate	7/v	1
+ded.eic.excess.limit	7/v	1
+ded.sys.used%(01)	2/v	1
+ded.sys.acct.no%(01)	3/v	1
+ded.sys.chk.cat%(01)	2/v	1
+ded.sys.desc$(01)	15/v	3
+ded.sys.limit(01)	7/v	1
+ded.sys.factor(01)	7/v	1
+ded.sys.earn.ded$(01)	1	3
+ded.sys.amt.percent$(01)1	3
+ded.sys.exclusion%(01)	1	1
+ded.sys.limit.used%(01) 2/v	1
+ded.sys.used%(02)	2/v	1
+ded.sys.acct.no%(02)	3/v	1
+ded.sys.chk.cat%(02)	2/v	1
+ded.sys.desc$(02)	15/v	3
+ded.sys.limit(02)	7/v	1
+ded.sys.factor(02)	7/v	1
+ded.sys.earn.ded$(02)	1	3
+ded.sys.amt.percent$(02)1	3
+ded.sys.exclusion%(02)	1	1
+ded.sys.limit.used%(02) 2/v	1
+ded.sys.used%(03)	2/v	1
+ded.sys.acct.no%(03)	3/v	1
+ded.sys.chk.cat%(03)	2/v	1
+ded.sys.desc$(03)	15/v	1
+ded.sys.limit(03)	7/v	1
+ded.sys.factor(03)	7/v	1
+ded.sys.earn.ded$(03)	1	3
+ded.sys.amt.percent$(3) 1	3
+ded.sys.exclusion%(03)	1	1
+ded.sys.limit.used%(03) 2/v	1
+ded.sys.used%(04)	2/v	1
+ded.sys.acct.no%(04)	3/v	1
+ded.sys.chk.cat%(04)	2/v	1
+ded.sys.desc$(04)	15/v	3
+ded.sys.limit(04)	7/v	1
+ded.sys.factor(04)	7/v	1
+ded.sys.earn.ded$(04)	1	3
+ded.sys.amt.percent$(04)1	3
+ded.sys.exclusion%(04)	1	1
+ded.sys.limit.used%(04) 2/v	1
+ded.sys.used%(05)	2/v	1
+ded.sys.acct.no%(05)	3/v	1
+ded.sys.chk.cat%(05)	2/v	1
+ded.sys.desc$(05)	15/v	3
+ded.sys.limit(05)	7/v	1
+ded.sys.factor(05)	7/v	1
+ded.sys.earn.ded$(05)	1	3
+ded.sys.amt.percent$(05)1	3
+ded.sys.exclusion%(05)	1	1
+ded.sys.limit.used%(05) 2/v	1
+.br
+.bp
+.ce
+FIRST PARAMETER FILE  (PYPR1.101)
+.sp2
+.li
+FIELD			CHARS	OVHD	START	FORMAT/COMMENTS
+-------------------------------------------------------------------
+pr1.debugging%		2/V	1	2
+pr1.co.name$		30/V	3
+pr1.co.addr1$		30/V	3
+pr1.co.addr2$		30/V	3
+pr1.co.addr3$		30/V	3
+pr1.co.city$		20/V	3
+pr1.co.state$		2/V	3
+pr1.co.zip$		5/V	3
+pr1.co.phone$		12/V	3
+pr1.ded.drive%		1	1		DRIVE CODES:0=CUR LOG,
+						1=A 2=B 3=C 4=D
+pr1.gld.drive%		1	1
+pr1.emp.drive%		1	1
+pr1.his.drive%		1	1
+pr1.hrs.drive%		1	1
+pr1.act.drive%		1	1
+pr1.glx.drive%		1	1
+pr1.chk.drive%		1	1
+pr1.tax.drive%		1	1
+pr1.pay.drive%		1	1
+pr1.pyo.drive%		1	1
+pr1.ckh.drive%		1	1
+pr1.coh.drive%		1	1
+pr1.cho.drive%		1	1
+pr1.offset.cash.acct%	3/v	1
+pr1.rate2.factor	7/v	1
+pr1.rate3.factor	7/v	1
+pr1.rate4.exclusion.type%1	1
+pr1.rate.name$(1)	15/v	3
+pr1.rate.name$(2)	15/v	3
+pr1.rate.name$(3)	15/v	3
+pr1.rate.name$(4)	15/v	3
+pr1.min.wage		7/v	1
+pr1.check.printing.used% 2/v	1
+pr1.bell.suppressed%	2/v	1
+pr1.s.used%		2/v	1
+pr1.m.used%		2/v	1
+pr1.w.used%		2/v	1
+pr1.b.used%		2/v	1
+pr1.chk.history.used%	2/v	1
+pr1.void.chks.over.max% 2/v	1
+pr1.void.check.amt	7/v	1
+pr1.leading.crlf%	2/v	1
+pr1.console.width.poke.addr% 5/v 1
+pr1.jc.used%		2/v	1
+pr1.gl.used%		2/v	1
+pr1.default.pay.interval$ 1	3
+pr1.default.gross.acct% 3/v	1
+pr1.default.pay.rate	7/v	1
+pr1.gl.file.suffix$	2	3
+pr1.default.norm.units	7/v	1
+pr1.default.hs.type$	1	3
+pr1.max.pay.factor	7/v	1
+pr1.default.vac.rate	7/v	1
+pr1.default.sl.rate	7/v	1
+pr1.fed.id$		15	3
+pr1.state.id$		15	3
+pr1.local.id$		15	3
+pr1.date.dy%		2/v	1
+pr1.date.mo%		2/v	1
+pr1.date.yr%		2/v	1
+pr1.lines.per.page%	2/v	1
+pr1.page.width% 	3/v	1
+pr1.user.program.used%	2/v	1
+pr1.user.program$	8/v	3
+pr1.user.prog.desc$	15/v	3
+pr1.101 		1/v	1	reserved for future use
+pr1.102 		1/v	1	reserved for future use
+pr1.103 		1/v	1	reserved for future use
+pr1.104 		1/v	1	reserved for future use
+pr1.105 		1/v	1	reserved for future use
+pr1.106 		1/v	1	reserved for future use
+pr1.107 		1/v	1	reserved for future use
+pr1.108 		1/v	1	reserved for future use
+pr1.109 		1/v	1	reserved for future use
+pr1.110 		1/v	1	reserved for future use
+pr1.111 		1/v	1	reserved for future use
+pr1.112 		1/v	1	reserved for future use
+pr1.113 		1/v	1	reserved for future use
+pr1.114 		1/v	1	reserved for future use
+pr1.115 		1/v	1	reserved for future use
+pr1.201$		0/v	3	reserved for future use
+pr1.202$		0/v	3	reserved for future use
+pr1.203$		0/v	3	reserved for future use
+pr1.204$		0/v	3	reserved for future use
+pr1.205$		0/v	3	reserved for future use
+pr1.206$		0/v	3	reserved for future use
+pr1.207$		0/v	3	reserved for future use
+pr1.208$		0/v	3	reserved for future use
+pr1.209$		0/v	3	reserved for future use
+pr1.210$		0/v	3	reserved for future use
+.br
+.bp
+.ce
+SECOND PARAMETER FILE  (PYPR2.101)
+.sp2
+.li
+FIELD			CHARS	OVHD	START	FORMAT/COMMENTS
+-------------------------------------------------------------------
+pr2.year%		2/V	1	2
+pr2.last.sm.apply.no%	4/v	1
+pr2.last.wb.apply.no%	4/v	1
+pr2.hrs.batch.no%	4/v	1
+pr2.last.day.of.last.w$ 6	3
+pr2.last.day.of.last.b$ 6	3
+pr2.last.day.of.last.s$ 6	3
+pr2.last.day.of.last.m$ 6	3
+pr2.940.printed%	2/v	1
+pr2.941.printed%	2/v	1
+pr2.w2.printed% 	2/v	1
+pr2.no.acts%		3/v	1
+pr2.no.active.emps%	3/v	1
+pr2.no.employees%	3/v	1
+pr2.check.date$ 	6	3
+pr2.last.q.ended%	2/v	1
+pr2.last.check.no$	15/v	3
+pr2.no.of.wb.applies%	4/v	1
+pr2.no.of.sm.applies%	4/v	1
+pr2.just.closed.year%	2/v	1
+pr2.101 		1/v	1
+pr2.102 		1/v	1
+pr2.103 		1/v	1
+pr2.104 		1/v	1
+pr2.105 		1/v	1
+pr2.201$		0/v	31
+pr2.202$		0/v	31
+pr2.203$		0/v	31
+pr2.204$		0/v	31
+pr2.205$		0/v	31
+.br
+.bp
+.ce
+ACCOUNT FILE  (PYACT.101)
+.sp2
+.li
+FIELD			CHARS	OVHD	START	FORMAT/COMMENTS
+---------------------------------------------------------------
+act.no$ 		6	3	2
+act.desc$		30	3	11
+end of record			1	44
+		---------------------------
+TOTAL:				45
+
+
+
+
+
+				HEADER RECORD
+
+act.hdr.no.recs%	 4/v	1	2
+end of record			1	7/v
+		-----------------------------
+TOTAL:				8
+.br
+.bp
+.ce
+PAY DETAIL FILE  (PYPAY.101)
+.sp2
+.li
+FIELD NAME		CHARS	OVHD	START	FORMAT/DESCRIPTION
+--------------------------------------------------------------------
+pay.emp.no$		5	3	2	nnnnq check digit
+pay.eff.date$		6	3	10
+pay.interval$		1	3	19
+pay.apply.no%		4/v	1	23
+pay.reporting.cat%	2	1	28/v
+pay.units		8/v	1	31/v
+pay.amt 		8/v	1	40/v
+pay.extended%		2	1	49/v
+end of record			1	52
+		-----------------------------
+TOTAL:				53
+
+			HEADER RECORD
+
+
+pay.hdr.no.recs%		4/V	1	2
+pay.hdr.interval$		1	3	7/v
+pay.hdr.last.apply.no%		4/v	1
+pay.hdr.journal.printed%	4/v	1
+pay.hdr.last.day.of.last.per$	6	3
+pay.hdr.101			1/v	1	reserved for future use
+pay.hdr.102			1/v	1	reserved for future use
+pay.hdr.201$			0/v	3	reserved for future use
+end of record				1
+			--------------------------------
+TOTAL:					37
+.br
+.bp
+.ce
+CHECK FILE  (PYCHK.101)
+.sp2
+.li
+FIELD			CHARS	OVHD	START	FORMAT/COMMENTS
+-------------------------------------------------------------------
+chk.emp.no$		5	3	2	nnnnq check digit
+chk.interval$		1	3	10
+chk.check.no$		5	3	14
+chk.amt(01)		8/v	1	22
+chk.amt(02)		8/v	1	31/v
+chk.amt(03)		8/v	1	40/v
+chk.amt(04)		8/v	1	49/v
+chk.amt(05)		8/v	1	58/v
+chk.amt(06)		8/v	1	67/v
+chk.amt(07)		8/v	1	76/v
+chk.amt(08)		8/v	1	85/v
+chk.amt(09)		8/v	1	94/v
+chk.amt(10)		8/v	1	103/v
+chk.amt(11)		8/v	1	112/v
+chk.amt(12)		8/v	1	121/v
+chk.amt(13)		8/v	1	130/v
+chk.amt(14)		8/v	1	139/v
+chk.amt(15)		8/v	1	148/v
+chk.amt(16)		8/v	1	157/v
+end of record			1	166/v
+		-----------------------------
+TOTAL:				167
+
+
+			HEADER RECORD
+
+chk.hdr.no.recs%	4/v	1	2
+chk.hdr.interval$	1	3	7/v
+chk.hdr.apply.no%	4/v	1
+chk.hdr.register.printed% 2	1
+chk.hdr.checks.printed% 2	1
+chk.hdr.slow.from.date$ 6	3
+chk.hdr.fast.from.date$ 6	3
+chk.hdr.to.date$	6	3
+chk.hdr.101		1/v	1		reserved for future use
+chk.hdr.102		1/v	1		reserved for future use
+chk.hdr.201$		0/v	3		reserved for future use
+end of record			1
+		----------------------------
+TOTAL:				57
+.br
+.bp
+.ce
+COMPANY HISTORY FILE  (PYCOH.101)
+.sp2
+.li
+FIELD			CHARS	OVHD	START	FORMAT/COMMENTS
+-------------------------------------------------------------------
+coh.last.apply.no%	4/v	1	2
+coh.interval$		1	3
+coh.starting.up%	2	1
+coh.qtd.income.taxable	9/v	1
+coh.qtd.other.taxable	9/v	1
+coh.qtd.other.nontaxable9/v	1
+coh.qtd.fica.taxable	9/v	1
+coh.qtd.tips		9/v	1
+coh.qtd.net		9/v	1
+coh.qtd.eic.credit	9/v	1
+coh.qtd.fwt.liab	9/v	1
+coh.qtd.swt.liab	9/v	1
+coh.qtd.lwt.liab	9/v	1
+coh.qtd.fica.liab	9/v	1
+coh.qtd.sdi.liab	9/v	1
+coh.qtd.co.futa.liab	9/v	1
+coh.qtd.co.fica.liab	9/v	1
+coh.qtd.co.sui.liab	9/v	1
+coh.qtd.sys(01) 	9/v	1
+coh.qtd.sys(02) 	9/v	1
+coh.qtd.sys(03) 	9/v	1
+coh.qtd.sys(04) 	9/v	1
+coh.qtd.sys(05) 	9/v	1
+coh.qtd.emp(01) 	9/v	1
+coh.qtd.emp(02) 	9/v	1
+coh.qtd.emp(03) 	9/v	1
+coh.qtd.other.ded	9/v	1
+coh.qtd.units(01)	9/v	1
+coh.qtd.units(02)	9/v	1
+coh.qtd.units(03)	9/v	1
+coh.qtd.units(04)	9/v	1
+coh.qtd.comp.time.earned9/v	1
+coh.qtd.comp.time.taken 9/v	1
+coh.qtd.vac.earned	9/v	1
+coh.qtd.vac.taken	9/v	1
+coh.qtd.sl.earned	9/v	1
+coh.qtd.sl.taken	9/v	1
+coh.ytd.income.taxable	9/v	1
+coh.ytd.other.taxable	9/v	1
+coh.ytd.other.nontaxable9/v	1
+coh.ytd.fica.taxable	9/v	1
+coh.ytd.tips		9/v	1
+coh.ytd.net		9/v	1
+coh.ytd.eic.credit	9/v	1
+coh.ytd.fwt.liab	9/v	1
+coh.ytd.swt.liab	9/v	1
+coh.ytd.lwt.liab	9/v	1
+coh.ytd.fica.liab	9/v	1
+coh.ytd.sdi.liab	9/v	1
+coh.ytd.co.futa.liab	9/v	1
+coh.ytd.co.fica.liab	9/v	1
+coh.ytd.co.sui.liab	9/v	1
+coh.ytd.sys(01) 	9/v	1
+coh.ytd.sys(02) 	9/v	1
+coh.ytd.sys(03) 	9/v	1
+coh.ytd.sys(04) 	9/v	1
+coh.ytd.sys(05) 	9/v	1
+coh.ytd.emp(01) 	9/v	1
+coh.ytd.emp(02) 	9/v	1
+coh.ytd.emp(03) 	9/v	1
+coh.ytd.other.ded	9/v	1
+coh.ytd.units(01)	9/v	1
+coh.ytd.units(02)	9/v	1
+coh.ytd.units(03)	9/v	1
+coh.ytd.units(04)	9/v	1
+coh.ytd.comp.time.earned9/v	1
+coh.ytd.comp.time.taken 9/v	1
+coh.ytd.vac.earned	9/v	1
+coh.ytd.vac.taken	9/v	1
+coh.ytd.sl.earned	9/v	1
+coh.ytd.sl.taken	9/v	1
+coh.date$(01)		6	3
+coh.date$(02)		6	3
+coh.date$(03)		6	3
+coh.date$(04)		6	3
+coh.date$(05)		6	3
+coh.date$(06)		6	3
+coh.date$(07)		6	3
+coh.date$(08)		6	3
+coh.date$(09)		6	3
+coh.date$(10)		6	3
+coh.date$(11)		6	3
+coh.date$(12)		6	3
+coh.tax(01)		9/v	1
+coh.tax(02)		9/v	1
+coh.tax(03)		9/v	1
+coh.tax(04)		9/v	1
+coh.tax(05)		9/v	1
+coh.tax(06)		9/v	1
+coh.tax(07)		9/v	1
+coh.tax(08)		9/v	1
+coh.tax(09)		9/v	1
+coh.tax(10)		9/v	1
+coh.tax(11)		9/v	1
+coh.tax(12)		9/v	1
+coh.q.tax(01)		9/v	1
+coh.q.tax(02)		9/v	1
+coh.q.tax(03)		9/v	1
+coh.q.tax(04)		9/v	1
+coh.q.fica.tax(01)	9/v	1
+coh.q.fica.tax(02)	9/v	1
+coh.q.fica.tax(03)	9/v	1
+coh.q.fica.tax(04)	9/v	1
+coh.q.co.futa.liab(1)	9/v	1
+coh.q.co.futa.liab(2)	9/v	1
+coh.q.co.futa.liab(3)	9/v	1
+coh.q.co.futa.liab(4)	9/v	1
+.br
+.bp
+.ce
+STATE AND LOCAL WITHHOLDING TABLES
+.sp
+.ce
+(PYSWTss.101, ss=state abbrev.; PYCALs, s=S,M, or, H; PYLWT.101)
+.sp2
+.li
+FIELD				      CHARS  OVHD  START FMT/COMMENTS
+-------------------------------------------------------------------
+withhold.deduction.amount(agency%)	7/V    1    2
+withhold.num.entries%(agency%)		7/V    1
+withhold.cutoff(01,agency%)		7/V    1
+withhold.cutoff(02,agency%)		7/V    1
+withhold.cutoff(03,agency%)		7/V    1
+withhold.cutoff(04,agency%)		7/V    1
+withhold.cutoff(05,agency%)		7/V    1
+withhold.cutoff(06,agency%)		7/V    1
+withhold.cutoff(07,agency%)		7/V    1
+withhold.cutoff(08,agency%)		7/V    1
+withhold.cutoff(09,agency%)		7/V    1
+withhold.cutoff(10,agency%)		7/V    1
+withhold.cutoff(11,agency%)		7/V    1
+withhold.cutoff(12,agency%)		7/V    1
+withhold.cutoff(13,agency%)		7/V    1
+withhold.cutoff(14,agency%)		7/V    1
+withhold.cutoff(15,agency%)		7/V    1
+withhold.percent(01,agency%)		7/V    1
+withhold.percent(02,agency%)		7/V    1
+withhold.percent(03,agency%)		7/V    1
+withhold.percent(04,agency%)		7/V    1
+withhold.percent(05,agency%)		7/V    1
+withhold.percent(06,agency%)		7/V    1
+withhold.percent(07,agency%)		7/V    1
+withhold.percent(08,agency%)		7/V    1
+withhold.percent(09,agency%)		7/V    1
+withhold.percent(10,agency%)		7/V    1
+withhold.percent(11,agency%)		7/V    1
+withhold.percent(12,agency%)		7/V    1
+withhold.percent(13,agency%)		7/V    1
+withhold.percent(14,agency%)		7/V    1
+withhold.percent(15,agency%)		7/V    1
+.br
+.bp
+.ce
+SPECIAL CALIFORNIA TABLE  (PYCALX.101)
+.sp2
+.li
+FIELD			       CHARS	OVHD	START	FMT/COMMENTS
+-------------------------------------------------------------------
+cal.estimated.ded.amt		7/V	1	2
+cal.low.income.exempt(01)	7/v	1
+cal.low.income.exempt(02)	7/v	1
+cal.low.income.exempt(03)	7/v	1
+cal.low.income.exempt(04)	7/v	1
+cal.standard.deduction(01)	7/v	1
+cal.standard.deduction(02)	7/v	1
+cal.standard.deduction(03)	7/v	1
+cal.standard.deduction(04)	7/v	1
+cal.tax.credit(01,1)		7/v	1
+cal.tax.credit(01,2)		7/v	1
+cal.tax.credit(02,1)		7/v	1
+cal.tax.credit(02,2)		7/v	1
+cal.tax.credit(03,1)		7/v	1
+cal.tax.credit(03,2)		7/v	1
+cal.tax.credit(04,1)		7/v	1
+cal.tax.credit(04,2)		7/v	1
+cal.tax.credit(05,1)		7/v	1
+cal.tax.credit(05,2)		7/v	1
+cal.tax.credit(06,1)		7/v	1
+cal.tax.credit(06,2)		7/v	1
+cal.tax.credit(07,1)		7/v	1
+cal.tax.credit(07,2)		7/v	1
+cal.tax.credit(08,1)		7/v	1
+cal.tax.credit(08,2)		7/v	1
+cal.tax.credit(09,1)		7/v	1
+cal.tax.credit(09,2)		7/v	1
+cal.tax.credit(10,1)		7/v	1
+cal.tax.credit(10,2)		7/v	1
+.br
+

@@ -1,0 +1,1441 @@
+       >>source free
+*>****************************************************************
+*>                History Update Maintenance                     *
+*>                                                               *
+*>****************************************************************
+*>
+ identification          division.
+*>================================
+*>
+      program-id.       py930.
+*>**
+*>    Author.           Vincent B Coen FBCS, FIDM, FIDPM, 19/10/2025.
+*>**
+*>    Security.         Copyright (C) 2025 - 2026 & later, Vincent Bryan Coen.
+*>                      Distributed under the GNU General Public License.
+*>                      See the file COPYING for details.
+*>**
+*>    Remarks.          History Update Maintanence.
+*>
+*>                      Semi-sourced from Basic code from pyupdhis?, pyupdmen, pyupdth,
+*>                                 pyupdli, pyupdpm.  ALL now extended with includes.
+*> pyupdhis  cpt 19 pg 94  & 95
+*>**
+*>    Version.          See Prog-Name In Ws.
+*>**
+*>    Called Modules.
+*>                      (CBL_) ACCEPT_NUMERIC.c as static.
+*>**
+*>    Functions Used:
+*>                      CURRENT-DATE
+*>                      TEST-DATE-YYYYMMDD.
+*>                      UPPER-CASE.
+*>    Files used :
+*>
+*>    Error messages used.   CHANGES NEEDED <<<<<<<<<<
+*> System wide:
+*>                      SY001 - 5, 8, 10 - 14.
+*> Program specific:
+*>                      PY001 - 7.
+*>                      PY101 - 126.
+*>**
+*> Changes:
+*> 03/12/2025 vbc - 1.0.00 Created - starting.
+*>                         After testing version will be set to v3.3.
+*>
+*>                         WARNING: You MUST set the terminal program to be 80
+*>                         cols wide and MORE than 27 lines deep and this is to
+*>                         allow for the some of the extra lines beyond 24 to
+*>                         be used as areas for the warning or error messages
+*>                         to be displayed. 26 lines is the minimum.
+*>                         This procedure must be applied at all times when
+*>                         running Payroll.
+*>                         For almost all terminal programs, can be achieved
+*>                         by pulling the left and bottom edges of the terminal
+*>                         screen with the mouse and holding right button and
+*>                         pulling until the correct number is displayed, and
+*>                         doing so, one at a time or pulling bottom right
+*>                         corner.
+*> 09/12/2025 vbc -        Increased minimum screen depth = 28.
+*> 14/12/2025 vbc -        Started coding, on coding break from 15 Dec to 7 Feb.
+*> 28/02/2026 vbc -        Coding continuing & replaced code for terminal sizing
+*>                         - all progs.
+*> 03/03/2026 vbc -        Coding completed.
+*>
+*>*************************************************************************
+*> Copyright Notice.
+*> ****************
+*>
+*> This notice supersedes all prior copyright notices & was updated 2024-04-16.
+*>
+*> These files and programs are part of the Applewood Computers Accounting
+*> System and is Copyright (c) Vincent B Coen. 1976-2026 and later.
+*>
+*> This program is now free software; you can redistribute it and/or modify it
+*> under the terms listed here and of the GNU General Public License as
+*> published by the Free Software Foundation; version 3 and later as revised
+*> for PERSONAL USAGE ONLY and that includes for use within a business but
+*> EXCLUDES repackaging or for Resale, Rental or Hire in ANY way.
+*>
+*> Persons interested in repackaging, redevelopment for the purpose of resale or
+*> distribution in a rental or hire mode must get in touch with the copyright
+*> holder with your commercial plans and proposals to vbcoen@gmail.com.
+*>
+*> ACAS is distributed in the hope that it will be useful, but WITHOUT
+*> ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+*> FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+*> for more details. If it breaks, you own both pieces but I will endeavour
+*> to fix it, providing you tell me about the problem.
+*>
+*> You should have received a copy of the GNU General Public License along
+*> with ACAS; see the file COPYING.  If not, write to the Free Software
+*> Foundation, 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA.
+*>
+*>*************************************************************************
+*>
+ environment             division.
+*>================================
+*>
+ copy "envdiv.cob".
+ SPECIAL-NAMES.
+       CRT STATUS is COB-CRT-STATUS.
+ REPOSITORY.
+       FUNCTION ALL INTRINSIC.
+*>
+ input-output            section.
+ file-control.
+ copy "selpyparam1.cob".
+ copy "selpyemp.cob".
+ copy "selpyhis.cob".
+ copy "selpycoh.cob".
+*>
+ data                    division.
+*>================================
+*>
+ file section.
+*>
+ copy "fdpyparam1.cob".
+ copy "fdpyemp.cob".
+ copy "fdpyhis.cob".
+ copy "fdpycoh.cob".
+*>
+ working-storage section.
+*>-----------------------
+ 77  prog-name               pic x(15) value "PY930 (1.0.00)".
+*>
+ copy "wsmaps03.cob".
+ copy "wsfnctn.cob".
+*>
+ copy "Test-Data-Flags.cob".           *> set sw-Testing to zero to stop logging.
+*>
+ 01  WS-Data.
+     03  Menu-Reply          pic x.
+*>
+     03  PY-PR1-Status       pic xx       value zeros.
+     03  PY-Emp-Status       pic xx       value zeros.
+     03  PY-His-Emp-Status   pic xx       value zeros.
+     03  PY-Coh-Status       pic xx       value zeros.
+*>
+     03  WS-Reply            pic x.
+     03  WS-Eval-Msg         pic x(25)    value spaces.
+     03  WS-Err-Msg          pic x(40)    value spaces.  *> Make large enough for longest SY msg
+     03  WS-Env-Columns      pic 999      value zero.
+     03  WS-Env-Lines        pic 999      value zero.
+     03  WS-22-Lines         pic 99.
+     03  WS-23-Lines         pic 99.
+     03  WS-Lines            pic 99.
+     03  A                   pic 99       value zero.
+*>     03  B                   pic 99       value zero.
+     03  C                   pic 999      value zero.
+*>
+*> The following for GC and screen with *nix NOT tested with Windows -  NOT YET USED
+*>
+ *> 01  wScreenName             pic x(256).
+ *> 01  wInt                    binary-long.
+*>
+*>  Temp vars used with ACCEPT_NUMERIC C routine
+*>
+ 01  WS-Temp-Numbers.
+ *>    03  WS-Temp-Rate        pic 99.99.     *>  NOT YET USED
+ *>    03  WS-Temp-Percent     pic 99.99.     *>  NOT YET USED
+ *>    03  WS-Temp-Limit       pic 99999.99.   *>  NOT YET USED
+ *>    03  WS-Temp-Factor      pic 99999.99.   *>  NOT YET USED
+ *>    03  WS-Temp-Act-No      pic 99.         *>  NOT YET USED
+ *>    03  WS-Temp-Used        pic x.          *>  NOT YET USED
+*>
+     03  WS-Temp-Amount      pic 9(7)v99  comp-3.  *> NOT YET USED
+     03  WS-Display-Amount   pic z(6)9.99.
+*>
+     03  filler     occurs 12.
+         05  WS-Tax-Date     pic 99x99x9999   value "99/99/9999".    *> mm/dd/ccyy or dd/mm/ccyy from/to Coh-Date using WS-Test-YMD.
+         05  WS-Tax-Amount   pic 9(7)99       value zeros.
+*>
+ 01  WS-Starting-Up          pic x       value "N".  *> Set for a new Employee Entry so History can be added ONLY.
+*>
+ 01  WS-Test-Date            pic x(10).
+ 01  WS-Test-YMD             pic 9(8).
+ 01  WS-PR1-Dating           pic 9(8).
+ 01  WS-Date-Formats.
+     03  WS-Swap             pic 99.
+     03  WS-Conv-Date        pic x(10).
+     03  WS-Date             pic x(10)   value "99/99/9999".
+     03  WS-UK redefines WS-Date.   *> Other optional format
+         05  WS-Days         pic 99.
+         05  filler          pic x.
+         05  WS-Month        pic 99.
+         05  filler          pic x.
+         05  WS-Year         pic 9(4).
+     03  WS-USA redefines WS-Date.  *> Default format
+         05  WS-USA-Month    pic 99.
+         05  filler          pic x.
+         05  WS-USA-Days     pic 99.
+         05  filler          pic x.
+         05  filler          pic 9(4).
+     03  WS-Intl redefines WS-Date.   *> Not used.
+         05  WS-Intl-Year    pic 9(4).
+         05  filler          pic x.
+         05  WS-Intl-Month   pic 99.
+         05  filler          pic x.
+         05  WS-Intl-Days    pic 99.
+*>
+ 01  Error-Messages.
+*> System Wide
+     03  SY001           pic x(46) value "SY001 Aborting run - Note error and hit Return".
+     03  SY002           pic x(31) value "SY002 Note error and hit Return".
+     03  SY003           pic x(51) value "SY003 Aborting function - Note error and hit Return".
+     03  SY004           pic x(20) value "SY004 Now Hit Return".
+ *>    03  SY005           pic x(18) value "SY005 Invalid Date".
+ *>    03  SY008           pic x(32) value "SY008 Note message & Hit Return ".
+     03  SY010           pic x(46) value "SY010 Terminal program not set to length => 28".
+ *>    03  SY011           pic x(47) value "SY011 Error on systemMT processing, FS-Reply = ".
+     03  SY013           pic x(47) value "SY013 Terminal program not set to Columns => 80".
+ *>    03  SY014           pic x(30) value "SY014 Press return to continue".
+*>
+*> Module General ?
+*>
+ *>    03  PY001           pic x(36) value "PY001 Re/Write PARAM record Error = ".
+     03  PY002           pic x(32) value "PY002 Read PARAM record Error = ".
+ *>    03  PY004           pic x(29) value "PY004 To quit, use ESCape key".
+ *>    03  PY006           pic x(40) value "PY006 No records to show, return to quit".      *> NOT USED YET
+ *>    03  PY007           pic x(45) value "PY007 No more records to show, return to quit". *> NOT USED YET
+*>
+ *>    03  PY010           pic x(47) value "PY010 Error on creating Company History File - ".
+     03  PY011           pic x(45) value "PY011 Error Writing Company History Record - ".
+     03  PY012           pic x(41) value "PY012 Error Writing Emp History Record - ".
+     03  PY013           pic x(43) value "PY013 Error Reading Company History File - ".
+ *>    03  PY014           pic x(41) value "PY014 Error Reading Emp History Record - ".
+     03  PY015           pic x(52) value "PY015 History update Can not run after apply has run".  *> was PY929 (basic)
+     03  PY016           pic x(43) value "PY016 Error Opening Company History File - ".           *> Should not happened as
+*>                                                                                                 opened or created earlier.
+ *>    03  PY017           pic x(54) value "PY017 History Update will use values Added to existing".
+ *>    03  PY018           pic x(50) value "PY018 History Update only applies for CURRENT Year".
+*>
+*> Module specific    <<<< REMOVE UNUSED
+*>
+     03  PY101           pic x(31) value "PY101 Invalid option, try again".
+ *>    03  PY102           pic x(36) value "PY102 Bad Parameter Data - Try again".
+     03  PY105           pic x(14) value "PY105 Bad Date".
+ *>    03  PY106           pic x(33) value "PY106 Bad value Qtr - Range 1 - 4".
+ *>    03  PY108           pic x(38) value "PY108 Bad Exclusion code - Range 1 - 4".
+ *>    03  PY109           pic x(38) value "PY109 Bad Pay Interval - not = S,M,B,W".
+ *>    03  PY110           pic x(27) value "PY110 Pay Type not = H or S".
+ *>    03  PY119           pic x(20) value "PY119 Must be Y or N".
+     03  PY125           pic x(43) value "PY125 Payroll Parameter file does not exist".
+ *>    03  PY126           pic x(32) value "PY126 Use menu option Y to do so".
+*>
+*> from pyupdhis
+*>
+ *>    03  PY925           pic x(45) value "PY925 Non-numeric input or exceeds 999,999.99".
+ *>    03  PY929           pic x(52) value "PY929 History update may not run after apply has run".
+     03  PY930           pic x(58) value "PY930 Employee and History files must be present".
+ *>    03  PY931           pic x(45) value "PY931 Invalid or non-existant employee number".
+*>
+ 01  Error-Code          pic 999.
+*>
+ 01  COB-CRT-Status      pic 9(4)         value zero.
+     copy "screenio.cpy".
+*>
+     copy "an-accept.ws".  *> Support WS for ACCEPT_NUMERIC routine
+*>
+ copy "wstime.cob".
+*>
+ linkage section.
+*>***************
+*>
+ copy "wscall.cob".
+ copy "wssystem.cob"   replacing System-Record by WS-System-Record.
+ copy "wsnames.cob".
+*>
+ 01  To-Day              pic x(10).
+*>
+ screen section.
+*>
+ 01  Display-Heads                background-color cob-color-black
+                                  foreground-color 3
+                                  erase eos.
+     03  from  Prog-Name  pic x(15)  line  1 col  1 foreground-color 2.
+     03  value "Payroll Employee History Maintenance"    col 29.
+     03  from  U-Date     pic x(10)          col 71 foreground-color 2.
+     03  from  Usera      pic x(32)  line  3 col  1.
+*>
+*> History Menu
+*>
+01  SS-History-Menu  background-color cob-color-black
+                     foreground-color cob-color-green
+                     erase eos.
+     03  from  Prog-Name  pic x(15)                              line  1 col  1 foreground-color 2.
+     03  value "Employee History Maintenance"                            col 29.
+     03  from  U-Date     pic x(10)                                      col 71 foreground-color 2.
+     03  from  Usera      pic x(32)                              line  3 col  1.
+*>
+     03  value "          History Update Menu"                   line  4 col 10.
+     03  value "  1.  Update Employee History Totals"            line  6 col 10.   *> pyupdth
+     03  value "  2.  Update Company Liabilities, Vacation etc." line  7 col 10.   *> pyupdli
+     03  value "  3.  Update Payments History"                   line  8 col 10.   *> pyupdpm
+     03  value "  X or Esc to quit menu option"                  line 10 col 10.
+     03  value "Select Option  [ ]"                              line 13 col 30.
+     03  using Menu-Reply    pic x                                       col 46 foreground-color 3.
+*>
+ 01  SS-Employee-History-Data-1  background-color cob-color-black
+                                 foreground-color cob-color-green
+                                 erase eos.
+     03  from  Prog-Name  pic x(15)                              line  1 col  1 foreground-color 2.
+     03  value "Employee History Maintenance"                            col 29.
+     03  from  U-Date     pic x(10)                                      col 71 foreground-color 2.
+     03  from  Usera      pic x(32)                              line  3 col  1.
+     03  value "Employee History Totals (Group)"                 line  4 col 29.
+*>
+     03  value "                         QTD Earnings By Tax Catagories" line  7 col  1.
+     03  value "Income:[          ]  Other:[          ] No Taxes:[          ] Fica:[          ]" line  8 col 1.
+     03  value "                Eic Credit:[          ]     Tips:[          ]  Net:[          ]" line  9 col 1.
+     03  value "QTD Taxes Withheld:    Fwt:[          ]      Swt:[          ]  Lwt:[          ]" line 10 col 1.
+     03  value "                      Fica:[          ]      Sdi:[          ]"                   line 11 col 1.
+     03  value "                            QTD Earnings And Deductions"                         line 12 col 1.
+     03  value "Sys: 1:[          ] 2:[          ] 3:[          ] 4:[          ] 5:[          ]" line 13 col 1.
+     03  value "Emp: 1:[          ] 2:[          ] 3:[          ] Other Deductions:[          ]" line 14 col 1.
+     03  value "Units By Pay Type:  1:[          ] 2:[          ] 3:[          ] 4:[          ]" line 15 col 1.
+     03  value "                         YTD Earnings By Tax Catagories"                         line 16 col 1.
+     03  value "Income:[          ]  Other:[          ] No Taxes:[          ] Fica:[          ]" line 17 col 1.
+     03  value "                Eic Credit:[          ]     Tips:[          ]  Net:[          ]" line 18 col 1.
+     03  value "YTD Taxes Withheld:    Fwt:[          ]      Swt:[          ]  Lwt:[          ]" line 19 col 1.
+     03  value "                      Fica:[          ]      Sdi:[          ]"                   line 20 col 1.
+     03  value "                            YTD Earnings and Deductions"                         line 21 col 1.
+     03  value "Sys: 1:[          ] 2:[          ] 3:[          ] 4:[          ] 5:[          ]" line 22 col 1.
+     03  value "Emp: 1:[          ] 2:[          ] 3:[          ] Other Deductions:[          ]" line 23 col 1.
+     03  value "Units by Pay Type:  1:[          ] 2:[          ] 3:[          ] 4:[          ]" line 24 col 1.
+     03  from CoH-QTD-Income-Taxable    pic z(6)9.99                         line  8 col 9.  *> all these for inital display
+     03  from CoH-QTD-Other-Taxable     pic z(6)9.99                         line  8 col 29. *> as all manually entered via
+     03  from CoH-QTD-Other-NonTaxable  pic z(6)9.99                         line  8 col 51. *>  accept_numeric routine
+     03  from CoH-QTD-Fica-Taxable      pic z(6)9.99                         line  8 col 69.
+*>
+     03  from COH-QTD-EIC-Credit        pic z(6)9.99                         line  9 col 29.
+     03  from COH-QTD-Tips              pic z(6)9.99                         line  9 col 51.
+     03  from COH-QTD-Net               pic z(6)9.99                         line  9 col 69.
+*>
+     03  from CoH-QTD-FWT-Liab          pic z(6)9.99                         line 10 col 29.
+     03  from CoH-QTD-SWT-Liab          pic z(6)9.99                         line 10 col 51.
+     03  from CoH-QTD-LWT-Liab          pic z(6)9.99                         line 10 col 69.
+*>
+     03  from CoH-QTD-FICA-Liab         pic z(6)9.99                         line 11 col 29.
+     03  from Coh-QTD-SDI-Liab          pic z(6)9.99                         line 11 col 51.
+*>
+     03  from CoH-QTD-Sys (1)           pic z(6)9.99                         line 13 col  9.
+     03  from CoH-QTD-Sys (2)           pic z(6)9.99                         line 13 col 24.
+     03  from CoH-QTD-Sys (3)           pic z(6)9.99                         line 13 col 39.
+     03  from CoH-QTD-Sys (4)           pic z(6)9.99                         line 13 col 54.
+     03  from CoH-QTD-Sys (5)           pic z(6)9.99                         line 13 col 69.
+*>
+     03  from CoH-QTD-Emp (1)           pic z(6)9.99                         line 14 col  9.
+     03  from CoH-QTD-Emp (2)           pic z(6)9.99                         line 14 col 24.
+     03  from CoH-QTD-Emp (3)           pic z(6)9.99                         line 14 col 39.
+     03  from CoH-QTD-Other-Ded         pic z(6)9.99                         line 14 col 69.
+*>
+     03  from CoH-QTD-Units (1)         pic z(6)9.99                         line 15 col 24.
+     03  from CoH-QTD-Units (2)         pic z(6)9.99                         line 15 col 39.
+     03  from CoH-QTD-Units (3)         pic z(6)9.99                         line 15 col 54.
+     03  from CoH-QTD-Units (4)         pic z(6)9.99                         line 15 col 69.
+*>
+     03  from CoH-YTD-Income-Taxable    pic z(6)9.99                         line 17 col  9.
+     03  from CoH-YTD-Other-Taxable     pic z(6)9.99                         line 17 col 29.
+     03  from CoH-YTD-Other-NonTaxable  pic z(6)9.99                         line 17 col 51.
+     03  from CoH-YTD-Fica-Taxable      pic z(6)9.99                         line 17 col 69.
+*>
+     03  from CoH-YTD-EIC-Credit        pic z(6)9.99                         line 18 col 29.
+     03  from CoH-YTD-Tips              pic z(6)9.99                         line 18 col 51.
+     03  from CoH-YTD-Net               pic z(6)9.99                         line 18 col 69.
+*>
+     03  from CoH-YTD-FWT-Liab          pic z(6)9.99                         line 19 col 29.
+     03  from CoH-YTD-SWT-Liab          pic z(6)9.99                         line 19 col 51.
+     03  from CoH-YTD-LWT-Liab          pic z(6)9.99                         line 19 col 69.
+*>
+     03  from CoH-YTD-FICA-Liab         pic z(6)9.99                         line 20 col 29.
+     03  from CoH-YTD-SDI-Liab          pic z(6)9.99                         line 20 col 51.
+*>
+     03  from CoH-YTD-Sys (1)           pic z(6)9.99                         line 22 col  9.
+     03  from CoH-YTD-Sys (2)           pic z(6)9.99                         line 22 col 24.
+     03  from CoH-YTD-Sys (3)           pic z(6)9.99                         line 22 col 39.
+     03  from CoH-YTD-Sys (4)           pic z(6)9.99                         line 22 col 54.
+     03  from CoH-YTD-Sys (5)           pic z(6)9.99                         line 22 col 69.
+*>
+     03  from CoH-YTD-Emp (1)           pic z(6)9.99                         line 23 col  9.
+     03  from CoH-YTD-Emp (2)           pic z(6)9.99                         line 23 col 24.
+     03  from CoH-YTD-Emp (3)           pic z(6)9.99                         line 23 col 39.
+     03  from CoH-YTD-Other-Ded         pic z(6)9.99                         line 23 col 69.
+*>
+     03  from CoH-YTD-Units (1)         pic z(6)9.99                         line 24 col 24.
+     03  from CoH-YTD-Units (2)         pic z(6)9.99                         line 24 col 39.
+     03  from CoH-YTD-Units (3)         pic z(6)9.99                         line 24 col 54.
+     03  from CoH-YTD-Units (4)         pic z(6)9.99                         line 24 col 69.
+*>
+     03  Value "* Escape to quit Entry"                          line 22 col  1 foreground-color 6.
+*>
+ 01  SS-Company-Liability-Data  background-color cob-color-black
+                                  foreground-color cob-color-green
+                                  erase eos.
+     03  from  Prog-Name  pic x(15)                              line  1 col  1 foreground-color 2.
+     03  value " History Maintenance"                                    col 28.
+     03  from  U-Date     pic x(10)                                      col 71 foreground-color 2.
+     03  from  Usera      pic x(32)                              line  3 col  1.
+     03  value "Update Company Liabilities"                      line  4 col 25.
+*>
+     03  value "                  Company Liabilities (Not Totalled from History)" line  6 col  1.
+     03  value "                               Quarter to Date"                    line  7 col  1.
+     03  value "         FICA:[          ]   FUTA:[          ]   SUI:[          ]" line  8 col  1.
+     03  value "                                 Year to Date"                     line  9 col  1.
+     03  value "         FICA:[          ]   FUTA:[          ]   SUI:[          ]" line 10 col  1.
+     03  value "                        Quarter to Date (Not Totalled)"            line 12 col  1.
+     03  value "                                     Earned              Taken"    line 13 col  1.
+     03  value "              Vacation Time:      [          ]       [          ]" line 14 col  1.
+     03  value "              Sick Leave:         [          ]       [          ]" line 15 col  1.
+     03  value "              Comp Time:          [          ]       [          ]" line 16 col  1.
+     03  value "                  Year to Date (Totalled from Employee Records)"   line 18 col  1.
+     03  value "                                     Earned              Taken"    line 19 col  1.
+     03  value "              Vacation Time:      [          ]       [          ]" line 20 col  1.
+     03  value "              Sick Leave:         [          ]       [          ]" line 21 col  1.
+     03  value "              Comp Time:          [          ]       [          ]" line 22 col  1.
+     03  value "{ Return or Tab for next field }"                                  line 24 col  1.
+     03  value "{ ESC to quit - data will still be saved }"                        line 25 col  1.
+*>  Amounts here  all use ACCEPT_NUMERIC for data i/p
+     03  from Coh-QTD-Co-Fica-Liab      pic z(6)9.99             line  8 col 16.
+     03  from Coh-QTD-Co-Futa-Liab      pic z(6)9.99             line  8 col 36.
+     03  from Coh-QTD-Co-Sui-Liab       pic z(6)9.99             line  8 col 55.
+*>
+     03  from Coh-YTD-Co-Fica-Liab      pic z(6)9.99             line 10 col 16.
+     03  from Coh-YTD-Co-Futa-Liab      pic z(6)9.99             line 10 col 36.
+     03  from Coh-YTD-Co-Sui-Liab       pic z(6)9.99             line 10 col 55.
+*>
+     03  from Coh-QTD-Vac-Earned        pic z(6)9.99             line 14 col 36.
+     03  from Coh-QTD-Vac-Taken         pic z(6)9.99             line 14 col 55.
+     03  from Coh-QTD-SL-Earned         pic z(6)9.99             line 15 col 36.
+     03  from Coh-QTD-SL-Taken          pic z(6)9.99             line 15 col 55.
+     03  from Coh-QTD-Comp-Time-Earned  pic z(6)9.99             line 16 col 36.
+     03  from Coh-QTD-Comp-Time-Taken   pic z(6)9.99             line 16 col 55.
+*>
+     03  from Coh-YTD-Vac-Earned        pic z(6)9.99             line 20 col 36.
+     03  from Coh-YTD-Vac-Taken         pic z(6)9.99             line 20 col 55.
+     03  from Coh-YTD-SL-Earned         pic z(6)9.99             line 21 col 36.
+     03  from Coh-YTD-SL-Taken          pic z(6)9.99             line 21 col 55.
+     03  from Coh-YTD-Comp-Time-Earned  pic z(6)9.99             line 22 col 36.
+     03  from Coh-YTD-Comp-Time-Taken   pic z(6)9.99             line 22 col 55.
+*>
+*>
+ 01  SS-Payment-History-Data  background-color cob-color-black
+                              foreground-color cob-color-green
+                              erase eos.
+     03  from  Prog-Name  pic x(15)                              line  1 col  1 foreground-color 2.
+     03  value " History Maintenance"                                    col 28.
+     03  from  U-Date     pic x(10)                                      col 71 foreground-color 2.
+     03  from  Usera      pic x(32)                              line  3 col  1.
+     03  value "Update Payment History"                          line  4 col 28.
+*>
+     03  value "                        FWT Tax Payments for Quarter"    line  6 col  1.
+     03  value "                       1.[          ]  On  [          ]" line  7 col  1.
+     03  value "                       2.[          ]  On  [          ]" line  8 col  1.
+     03  value "                       3.[          ]  On  [          ]" line  9 col  1.
+     03  value "                       4.[          ]  On  [          ]" line 10 col  1.
+     03  value "                       5.[          ]  On  [          ]" line 11 col  1.
+     03  value "                       6.[          ]  On  [          ]" line 12 col  1.
+     03  value "                       7.[          ]  On  [          ]" line 13 col  1.
+     03  value "                       8.[          ]  On  [          ]" line 14 col  1.
+     03  value "                       9.[          ]  On  [          ]" line 15 col  1.
+     03  value "                      10.[          ]  On  [          ]" line 16 col  1.
+     03  value "                      11.[          ]  On  [          ]" line 17 col  1.
+     03  value "                      12.[          ]  On  [          ]" line 18 col  1.
+*> Only amounts here  all use ACCEPT_NUMERIC for data i/p
+     03  from Coh-Tax (1)  pic z(6)9.99                                  line  7 col 27 foreground-color 3.
+     03  from Coh-Tax (2)  pic z(6)9.99                                  line  8 col 27 foreground-color 3.
+     03  from Coh-Tax (3)  pic z(6)9.99                                  line  9 col 27 foreground-color 3.
+     03  from Coh-Tax (4)  pic z(6)9.99                                  line 10 col 27 foreground-color 3.
+     03  from Coh-Tax (5)  pic z(6)9.99                                  line 11 col 27 foreground-color 3.
+     03  from Coh-Tax (6)  pic z(6)9.99                                  line 12 col 27 foreground-color 3.
+     03  from Coh-Tax (7)  pic z(6)9.99                                  line 13 col 27 foreground-color 3.
+     03  from Coh-Tax (8)  pic z(6)9.99                                  line 14 col 27 foreground-color 3.
+     03  from Coh-Tax (9)  pic z(6)9.99                                  line 15 col 27 foreground-color 3.
+     03  from Coh-Tax (10) pic z(6)9.99                                  line 16 col 27 foreground-color 3.
+     03  from Coh-Tax (11) pic z(6)9.99                                  line 17 col 27 foreground-color 3.
+     03  from Coh-Tax (12) pic z(6)9.99                                  line 18 col 27 foreground-color 3.
+*>
+     03  using WS-Tax-Date (01) pic 99x99x9999                           line  7 col 45.
+     03  using WS-Tax-Date (02) pic 99x99x9999                           line  8 col 45.
+     03  using WS-Tax-Date (03) pic 99x99x9999                           line  9 col 45.
+     03  using WS-Tax-Date (04) pic 99x99x9999                           line 18 col 45.
+     03  using WS-Tax-Date (05) pic 99x99x9999                           line 11 col 45.
+     03  using WS-Tax-Date (06) pic 99x99x9999                           line 12 col 45.
+     03  using WS-Tax-Date (07) pic 99x99x9999                           line 13 col 45.
+     03  using WS-Tax-Date (08) pic 99x99x9999                           line 14 col 45.
+     03  using WS-Tax-Date (09) pic 99x99x9999                           line 15 col 45.
+     03  using WS-Tax-Date (10) pic 99x99x9999                           line 16 col 45.
+     03  using WS-Tax-Date (11) pic 99x99x9999                           line 17 col 45.
+     03  using WS-Tax-Date (12) pic 99x99x9999                           line 18 col 45.
+*>
+     03  value "                           Quarterly Tax Payments"       line 19 col  1.
+     03  value "FWT:   1.[          ]  2.[          ]  3.[          ]  4.[          ]"
+                                                                         line 20 col  1.
+     03  value "FICA:  1.[          ]  2.[          ]  3.[          ]  4.[          ]"
+                                                                         line 21 col  1.
+     03  value "FUTA:  1.[          ]  2.[          ]  3.[          ]  4.[          ]"
+                                                                         line 22 col  1.
+     03  value "{ Return or Tab for next field }"                        line 24 col  1.
+     03  value "{ ESC to quit, Pg Up for previous; Pg Down for next set or pair }"
+                                                                         line 25 col  1.
+     03  value "For ESC - Data will still be saved"                      line 26 col  5.
+*>
+*>  ALL use ACCEPT_NUMERIC for data i/p & use Coh-All-Q-Tax
+*>
+     03  from Coh-Q-Tax (1) pic z(6)9.99                                 line 20 col 11 foreground-color 3.
+     03  from Coh-Q-Tax (2) pic z(6)9.99                                 line 20 col 27 foreground-color 3.
+     03  from Coh-Q-Tax (3) pic z(6)9.99                                 line 20 col 43 foreground-color 3.
+     03  from Coh-Q-Tax (4) pic z(6)9.99                                 line 20 col 59 foreground-color 3.
+     03  from Coh-Q-Fica-Tax (1) pic z(6)9.99                            line 21 col 11 foreground-color 3.
+     03  from Coh-Q-Fica-Tax (2) pic z(6)9.99                            line 21 col 27 foreground-color 3.
+     03  from Coh-Q-Fica-Tax (3) pic z(6)9.99                            line 21 col 43 foreground-color 3.
+     03  from Coh-Q-Fica-Tax (4) pic z(6)9.99                            line 21 col 59 foreground-color 3.
+     03  from Coh-Q-Co-Futa-Liab (1) pic z(6)9.99                        line 22 col 11 foreground-color 3.
+     03  from Coh-Q-Co-Futa-Liab (2) pic z(6)9.99                        line 22 col 27 foreground-color 3.
+     03  from Coh-Q-Co-Futa-Liab (3) pic z(6)9.99                        line 22 col 43 foreground-color 3.
+     03  from Coh-Q-Co-Futa-Liab (4) pic z(6)9.99                        line 22 col 59 foreground-color 3.
+
+ *>    03  using WS-Date     pic 99/99/9999     line  7 (+ 1)  col 45. *> x 1
+*>
+*>
+ procedure division using WS-Calling-Data  *> ACAS
+                          WS-System-Record *> ACAS
+                          To-Day           *> ACAS
+                          File-Defs.       *> ACAS
+*>
+ aa000-Main                  section.
+*>**********************************
+*> Force Esc, PgUp, PgDown, PrtSC to be detected
+     set      ENVIRONMENT "COB_SCREEN_EXCEPTIONS" to "Y".
+     set      ENVIRONMENT "COB_SCREEN_ESC" to "Y".
+     move     Current-Date to WSE-Date-Block.
+     move     WSE-HH  to  WSD-HH.
+     move     WSE-MM  to  WSD-MM.
+     move     WSE-SS  to  WSD-SS.
+*>
+     perform  forever
+              accept   WS-Env-Lines   from lines
+              if       WS-Env-Lines < 28
+                       display  SY010    at 0101 with erase eos
+                       accept   WS-Reply at 0133
+                       move     8 to WS-Term-Code
+                       exit perform cycle
+              end-if
+              accept   WS-Env-Columns from Columns
+              if       WS-Env-Columns < 80
+                       display  SY013    at 0101 with erase eos
+                       accept   WS-Reply at 0130
+                       move     8 to WS-Term-Code
+                       exit perform cycle
+              end-if
+     end-perform.
+*>
+*> Set up error message areas on screen
+*>
+     subtract 2 from WS-Env-Lines giving WS-22-Lines.
+     subtract 1 from WS-Env-Lines giving WS-23-Lines.
+     move     WS-Env-Lines to WS-Lines.     accept   WS-Env-Lines   from lines.
+     if       WS-Env-Lines < 28
+              display SY010    at 0101 with erase eos
+              accept  WS-Reply at 0133
+              goback.
+     accept   WS-Env-Columns from Columns.
+     if       WS-Env-Columns < 80
+              display SY013    at 0101 with erase eos
+              accept  WS-Reply at 0133
+              goback.
+*>
+*> Pre setup params for accept_numeric routine
+*>
+     move     zeros to AN-Error-Code
+                       AN-Return-Code.
+     SET      AN-FG-IS-Green    to TRUE.
+     SET      AN-BG-IS-Black    to TRUE.
+     SET      AN-FG2-IS-Cyan    to TRUE.
+     SET      AN-Mode-IS-Update to TRUE.    *> could be AN-MODE-IS-NO-UPDATE to
+*>                                             TRUE on first use.
+*>
+*> Next error should never happen as tested in Payroll menu program
+*>
+     open     input    PY-Param1-File.
+     if       PY-PR1-Status not = zero      *> Does not exist Abort
+              move     1 to WS-Term-Code
+              close    PY-Param1-File
+              display  PY125 at line WS-22-Lines col 1 foreground-color 4 erase eos
+              display  SY001 at line WS-Lines    col 1 foreground-color 2
+              accept   Menu-Reply at line WS-Lines col 48
+              goback   returning 1   *> == no param file
+     end-if.
+     move     1 to RRN.
+     read     PY-Param1-File.
+     if       PY-PR1-Status not = zero
+              perform  aa110-Test-PR1-Status-Read.
+*>
+     move     space to  Menu-Reply
+     move     zero  to  Return-Code.
+*>
+*> Check for Company Hist - COH file and Abort if not exist.
+*>
+     open     input PY-Comp-Hist-File.
+     if       PY-COH-Status not = zero
+              perform  aa115-Coh-Open-File-Error
+              close    PY-Comp-Hist-File
+                       PY-Param1-File
+              goback   returning 1
+     end-if
+     move     1  to RRN.
+     read     PY-Comp-Hist-File.
+     if       PY-CoH-Status not = zero
+              perform  aa125-Coh-Read-Error
+              close    PY-Comp-Hist-File
+                       PY-Param1-File
+              goback   returning 2
+     end-if
+     close    PY-Comp-Hist-File         *> Opened and closed in ca and da routines
+              PY-Param1-File.           *> We do have the recs now.
+*>
+     open     i-o PY-Employee-File.
+     if       PY-Emp-Status not = zeros
+              display  PY930 at line WS-22-Lines col 1 foreground-color 4 erase eos
+              display  SY001 at line WS-Lines    col 1 foreground-color 2
+              accept   Menu-Reply at line WS-Lines col 48
+              close    PY-Employee-File
+              goback   returning 3    *> No Emp file
+     end-if.
+     open     i-o PY-History-File.
+     if       PY-His-Emp-Status not = zeros
+              display  PY930 at line WS-22-Lines col 1 foreground-color 4 erase eos
+              display  SY001 at line WS-Lines    col 1 foreground-color 2
+              accept   Menu-Reply at line WS-Lines col 48
+              close    PY-History-File
+              close    PY-Employee-File
+              goback   returning 4    *> No Emp Hist file
+     end-if.
+*>
+ aa010-Menu.
+     display  SS-History-Menu.
+     perform  forever
+              if       Return-Code = 16    *> Trap Error from ba, ca or da, so quit
+                       close    PY-Employee-File
+                                PY-History-File
+                       goback
+              end-if
+              accept   SS-History-Menu
+              move     UPPER-CASE (Menu-Reply) to Menu-Reply
+              if       Menu-Reply = "X"
+                        or  Cob-CRT-Status = Cob-Scr-Esc
+                            close    PY-Employee-File
+                                     PY-History-File
+                            goback
+              end-if
+              evaluate Menu-Reply
+                       when = 1
+                            perform  ba000-Update-Emp-Hist-Totals *> Emp & His fiels are open
+                            exit perform cycle
+                       when = 2
+                            perform  ca000-Update-Comp-Liabilities *> Emp & His fiels are open
+                            exit perform cycle
+                       when = 3
+                            perform  da000-Update-Pay-History
+                            exit perform cycle
+                       when other
+                            display PY101 at line WS-23-Lines col 1 foreground-color 4
+                            display SY004 at line WS-Lines    col 1
+                            accept  WS-Reply at line WS-Lines col 22
+                            exit perform cycle
+              end-evaluate
+     end-perform.
+     goback.
+*>
+ aa000-Exit.  Exit section.
+*>
+ *> aa050-Report                section.   *> REMOVE ALL ????
+*>**********************************
+*>
+ *>    open     input  PY-Accounts-File.
+ *>    if       PY-Act-Status not = "00"
+ *>             close    PY-Accounts-File
+ *>             display  PY117 at line WS-23-lines col 1 with foreground-color 4 highlight erase eos
+ *>             exit section
+ *>    end-if
+ *>    open     output Print-File.
+*>*>
+ *>    move     zero to WS-Rec-Cnt.
+ *>    subtract 1 from Page-Lines giving WS-Page-Lines.
+ *>    move     To-Day to U-Date.
+*>*>
+ *>    initiate Account-File-Report.
+ *>    perform  aa060-Produce-Report.
+ *>    terminate
+ *>             Account-File-Report.
+ *>    close    Print-File.
+ *>    close    PY-Accounts-File
+ *>    call     "SYSTEM" using Print-Report.
+*>*>
+ *>aa050-Exit.   exit section.
+*>*>
+ *>aa060-Produce-Report   section.   *> REMOVE ALL ????
+*> *>*>*****************************
+*>
+ *>    move     zero to WS-Rec-Cnt.
+ *>    perform  forever
+ *>             read     PY-Accounts-File next record
+ *>             if       PY-Act-Status not = "00"   *> EOF
+ *>                      exit perform
+ *>             end-if
+ *>             add      1 to WS-Rec-Cnt
+ *>             generate Account-Detail
+ *>             exit perform cycle
+ *>    end-perform.
+*>*>
+ *>aa060-Exit.  exit section.
+*>
+ aa070-accept-numeric section.
+*>
+*> Dummy prototype
+*> ^^^^^^^^^^^^^^^
+*>
+*>    Should all be using Cyan (3) for input
+*>
+     MOVE     14  TO AN-LINE.
+     MOVE     30  TO AN-COLUMN.
+     set      AN-MODE-IS-UPDATE TO TRUE.
+     call     STATIC "ACCEPT_NUMERIC" using by REFERENCE PY-PR1-Dflt-Vac-Rate
+                                            by REFERENCE AN-ACCEPT-NUMERIC.
+     perform  AN-Test-Status.  *> not bother for all others as not used
+*>
+ aa080-Date-Capture   section.
+*> Dummy Prototype
+*>
+     move     "00/00/0000" to WS-Date.          *> NEED TO TEST DATES
+     move     WSE-Year to WS-Year.
+     move     12       to WS-Month.
+     move     31       to WS-Days.
+*>
+
+
+*>
+ aa100-Test-PR1-Status-Open.
+ *>    if       PY-PR1-Status not = "00"   *> WE have a real problem :(
+              perform  ZZ040-Evaluate-Message
+              display  PY125         at line WS-23-Lines col 1 with erase eos
+              display  PY-PR1-Status at line WS-23-Lines col 45
+              display  WS-Eval-Msg   at line WS-23-Lines col 48
+              display  SY001         at line WS-Lines    col 1
+              accept   WS-Reply      at line WS-Lines    col 33 AUTO.
+ *>    end-if.
+*>
+ aa110-Test-PR1-Status-Read.
+ *>    if       PY-PR1-Status not = "00"   *> WE have a real problem :(
+              display  PY002         at line WS-23-Lines col 1 with erase eos
+              display  PY-PR1-Status at line WS-23-Lines col 33
+              display  WS-Eval-Msg   at line WS-23-Lines col 35
+              display  SY001         at line WS-Lines    col 1
+              accept   WS-Reply      at line WS-Lines    col 48 AUTO.
+ *>    end-if.
+*>
+ aa115-Coh-Open-File-Error.
+     display  PY016 at line WS-23-Lines col 1 erase eos
+                            foreground-color 4 BEEP.
+     display  PY-COH-Status at line WS-23-Lines col 44.
+     move     PY-COH-Status to PY-PR1-Status.
+     perform  ZZ040-Evaluate-Message.
+     display  WS-Eval-Msg   at line WS-23-lines col 47.
+     display  SY003 at line WS-lines col 01 with foreground-color cob-color-red
+                                                 erase eol BEEP.
+     accept   WS-Reply at line WS-lines col 53 AUTO.
+*>
+ aa120-Coh-Write-Error.
+     display  PY011 at line WS-23-Lines col 1 erase eos
+                            foreground-color 4 BEEP.
+     display  PY-COH-Status at line WS-23-Lines col 46.
+     move     PY-COH-Status to PY-PR1-Status.
+     perform  ZZ040-Evaluate-Message.
+     display  WS-Eval-Msg   at line WS-23-lines col 49.
+     display  SY003 at line WS-lines col 01 with foreground-color cob-color-red
+                                                 erase eol BEEP.
+     accept   WS-Reply at line WS-lines col 52 AUTO.
+*>
+ aa125-Coh-Read-Error.
+     display  PY013 at line WS-23-Lines col 1 erase eos
+                            foreground-color 4 BEEP.
+     display  PY-COH-Status at line WS-23-Lines col 44.
+     move     PY-COH-Status to PY-PR1-Status.
+     perform  ZZ040-Evaluate-Message.
+     display  WS-Eval-Msg   at line WS-23-lines col 47.
+     display  SY001 at line WS-lines col 01 with foreground-color cob-color-red
+                                                 erase eol BEEP.
+     accept   WS-Reply at line WS-lines col 52 AUTO.
+*>
+ aa130-Emp-His-File-Error.
+     display  PY012 at line WS-23-Lines col 1 erase eos
+                            foreground-color 4 BEEP.
+     display  PY-His-Emp-Status at line WS-23-Lines col 42.
+     move     PY-His-Emp-Status to PY-PR1-Status.
+     perform  ZZ040-Evaluate-Message.
+     display  WS-Eval-Msg   at line WS-23-lines col 45.
+     display  SY003 at line WS-lines col 01 with foreground-color cob-color-red
+                                                 erase eol BEEP.
+     accept   WS-Reply at line WS-lines col 52 AUTO.
+*>
+ aa135-Emp-File-Error.
+     display  PY012 at line WS-23-Lines col 1 erase eos
+                            foreground-color 4 BEEP.
+     display  PY-His-Emp-Status at line WS-23-Lines col 42.
+     move     PY-His-Emp-Status to PY-PR1-Status.
+     perform  ZZ040-Evaluate-Message.
+     display  WS-Eval-Msg   at line WS-23-lines col 45.
+     display  SY003 at line WS-lines col 01 with foreground-color cob-color-red
+                                                 erase eol BEEP.
+     accept   WS-Reply at line WS-lines col 52 AUTO.
+*>
+ aa200-Bad-Data-Display.
+     display  WS-Err-Msg at line WS-23-Lines col 1.
+     display  SY002      at line WS-Lines    col 1.
+*>
+ Dummy-Exit.  exit.
+*>
+ ba000-Update-Emp-Hist-Totals   section.
+*>************************************
+*>
+*> From pyupd
+*>
+*> We need to test if a payroll run has occurred this year and if so only
+*>  allow for a change IF we have a newly entered employee who has not
+*>  yet been subject to a payroll run as history data can then be wrong.
+*>
+*> THIS LAST PART IS NOT IN KEEPING WITH SSG but I view it as a logic bug
+*>
+*> Special keys in USE can only be F7 = Previous, F8 = Next although really for
+*> searching though the employee records but not here !
+*>
+*> Extra option for adding history data to existing values IF a payrol run has
+*> occured via new option "Add amounts"  as against only changing amounts -
+*> would need a warning msg that it is only valid for CURRENT YEAR
+*>
+*> Emp and Emp History files open - leave open as may be required for ca000
+*>
+*> Next for compatability with pyupdhis ????
+*>
+     if       Coh-Starting-Up = "N"    *> Not apply for pyupdpm,
+              display  PY015 at line WS-23-Lines col 1 foreground-color 4
+                                                       erase eos
+              display  SY003 at line WS-Lines    col 1 foreground-color 4
+              accept   WS-Reply at line WS-Lines col 53
+  *>            close    PY-Comp-Hist-File
+              go to    ba999-Exit.
+*>
+*> See pyupdhis
+*>
+*> Open and Get Capture Coh data
+*>
+     open     i-o PY-Comp-Hist-File.
+     if       PY-COH-Status not = zero
+              perform  aa115-Coh-Open-File-Error
+              close    PY-Comp-Hist-File
+                       PY-Param1-File
+              goback   returning 1
+     end-if.
+     move     1 to RRN.
+     read     PY-Comp-Hist-File.
+     if       PY-CoH-Status not = zeros
+              perform  aa115-Coh-Open-File-Error
+              close    PY-Comp-Hist-File
+              go to ba999-Exit.
+*>
+     display  SS-Employee-History-Data-1.
+*>
+     move     8  to AN-Line.
+     move     9  to AN-Column.
+     set      AN-MODE-IS-NO-UPDATE to true.   *> all init fields.
+*>
+     move     CoH-QTD-Income-Taxable  to WS-Temp-Amount.
+     perform  ba100-Get-Amount.
+     move     WS-Temp-Amount to CoH-QTD-Income-Taxable
+     move     29 to AN-Column.
+     move     CoH-QTD-Other-Taxable to WS-Temp-Amount.
+     perform  ba100-Get-Amount.
+     move     WS-Temp-Amount to CoH-QTD-Other-Taxable.
+     move     51 to AN-Column.
+     move     CoH-QTD-Other-NonTaxable to WS-Temp-Amount.
+     perform  ba100-Get-Amount.
+     move     WS-Temp-Amount to CoH-QTD-Other-NonTaxable.
+     move     69 to AN-Column.
+     move     CoH-QTD-Fica-Taxable to WS-Temp-Amount.
+     perform  ba100-Get-Amount.
+     move     WS-Temp-Amount to CoH-QTD-Fica-Taxable.
+*>
+     move     9  to AN-Line.
+     move     29  to AN-Column.
+     move     CoH-QTD-EIC-Credit to WS-Temp-Amount.
+     perform  ba100-Get-Amount.
+     move     WS-Temp-Amount to CoH-QTD-EIC-Credit.
+     move     51 to AN-Column.
+     move     CoH-QTD-Tips  to WS-Temp-Amount.
+     perform  ba100-Get-Amount.
+     move     WS-Temp-Amount to CoH-QTD-Tips.
+     move     69 to AN-Column.
+     move     CoH-QTD-Net to WS-Temp-Amount.
+     perform  ba100-Get-Amount.
+     move     WS-Temp-Amount to CoH-QTD-Net.
+*>
+     move     10  to AN-Line.
+     move     29  to AN-Column.
+     move     CoH-QTD-FWT-Liab to WS-Temp-Amount.
+     perform  ba100-Get-Amount.
+     move     WS-Temp-Amount to CoH-QTD-FWT-Liab.
+     move     51 to AN-Column.
+     move     CoH-QTD-SWT-Liab  to WS-Temp-Amount.
+     perform  ba100-Get-Amount.
+     move     WS-Temp-Amount to CoH-QTD-SWT-Liab.
+     move     69 to AN-Column.
+     move     CoH-QTD-LWT-Liab to WS-Temp-Amount.
+     perform  ba100-Get-Amount.
+     move     WS-Temp-Amount to CoH-QTD-LWT-Liab.
+*>
+     move     11  to AN-Line.
+     move     29  to AN-Column.
+     move     CoH-QTD-FICA-Liab to WS-Temp-Amount.
+     perform  ba100-Get-Amount.
+     move     WS-Temp-Amount to CoH-QTD-FICA-Liab.
+     move     51 to AN-Column.
+     move     CoH-QTD-SDI-Liab  to WS-Temp-Amount.
+     perform  ba100-Get-Amount.
+     move     WS-Temp-Amount to CoH-QTD-SDI-Liab.
+*>
+     move     13  to AN-Line.
+     move     zero to C.
+     perform  varying AN-Column from 9 by 15 until AN-Column > 69
+              add      1 to C
+              move     CoH-QTD-Sys (C)  to  WS-Temp-Amount
+              perform  ba100-Get-Amount
+              move     WS-Temp-Amount to CoH-QTD-Sys (C)
+              if       C = 5
+                       exit perform
+              end-if
+              exit perform cycle
+     end-perform.
+*>
+     move     14  to AN-Line.
+     move     zero to C.
+     perform  varying AN-Column from 9 by 15 until AN-Column > 39
+              add      1 to C
+              move     CoH-QTD-Emp (C)  to  WS-Temp-Amount
+              perform  ba100-Get-Amount
+              move     WS-Temp-Amount to CoH-QTD-Emp (C)
+              if       C = 3            *> We done (all 3)
+                       exit perform
+              end-if
+              exit perform cycle
+     end-perform.
+*>
+     move     69  to AN-Column.
+     move     CoH-QTD-Other-Ded to WS-Temp-Amount
+     perform  ba100-Get-Amount
+     move     WS-Temp-Amount to CoH-QTD-Other-Ded.
+*>
+     move     15  to AN-Line.
+     move     zero to C.
+     perform  varying AN-Column from 24 by 15 until AN-Column > 69
+              add      1 to C
+              move     CoH-QTD-Units (C)  to  WS-Temp-Amount
+              perform  ba100-Get-Amount
+              move     WS-Temp-Amount to CoH-QTD-Units (C)
+              if       C = 4
+                       exit perform
+              end-if
+              exit perform cycle
+     end-perform.
+*>
+     move     17  to AN-Line.
+     move     9  to AN-Column.
+     move     CoH-YTD-Income-Taxable  to WS-Temp-Amount.
+     perform  ba100-Get-Amount.
+     move     WS-Temp-Amount to CoH-YTD-Income-Taxable
+     move     29 to AN-Column.
+     move     CoH-YTD-Other-Taxable to WS-Temp-Amount.
+     perform  ba100-Get-Amount.
+     move     WS-Temp-Amount to CoH-YTD-Other-Taxable.
+     move     51 to AN-Column.
+     move     CoH-YTD-Other-NonTaxable to WS-Temp-Amount.
+     perform  ba100-Get-Amount.
+     move     WS-Temp-Amount to CoH-YTD-Other-NonTaxable.
+     move     69 to AN-Column.
+     move     CoH-YTD-Fica-Taxable to WS-Temp-Amount.
+     perform  ba100-Get-Amount.
+     move     WS-Temp-Amount to CoH-YTD-Fica-Taxable.
+*>
+     move     18  to AN-Line.
+     move     29  to AN-Column.
+     move     CoH-YTD-EIC-Credit to WS-Temp-Amount.
+     perform  ba100-Get-Amount.
+     move     WS-Temp-Amount to CoH-YTD-EIC-Credit.
+     move     51 to AN-Column.
+     move     CoH-YTD-Tips  to WS-Temp-Amount.
+     perform  ba100-Get-Amount.
+     move     WS-Temp-Amount to CoH-YTD-Tips.
+     move     69 to AN-Column.
+     move     CoH-YTD-Net to WS-Temp-Amount.
+     perform  ba100-Get-Amount.
+     move     WS-Temp-Amount to CoH-YTD-Net.
+*>
+     move     19  to AN-Line.
+     move     29  to AN-Column.
+     move     CoH-YTD-FWT-Liab to WS-Temp-Amount.
+     perform  ba100-Get-Amount.
+     move     WS-Temp-Amount to CoH-YTD-FWT-Liab.
+     move     51 to AN-Column.
+     move     CoH-YTD-SWT-Liab  to WS-Temp-Amount.
+     perform  ba100-Get-Amount.
+     move     WS-Temp-Amount to CoH-YTD-SWT-Liab.
+     move     69 to AN-Column.
+     move     CoH-YTD-LWT-Liab to WS-Temp-Amount.
+     perform  ba100-Get-Amount.
+     move     WS-Temp-Amount to CoH-YTD-LWT-Liab.
+*>
+     move     20  to AN-Line.
+     move     29  to AN-Column.
+     move     CoH-YTD-FICA-Liab to WS-Temp-Amount.
+     perform  ba100-Get-Amount.
+     move     WS-Temp-Amount to CoH-YTD-FICA-Liab.
+     move     51 to AN-Column.
+     move     CoH-YTD-SDI-Liab  to WS-Temp-Amount.
+     perform  ba100-Get-Amount.
+     move     WS-Temp-Amount to CoH-YTD-SDI-Liab.
+*>
+     move     22  to AN-Line.
+     move     zero to C.
+     perform  varying AN-Column from 9 by 15 until AN-Column > 69
+              add      1 to C
+              move     CoH-YTD-Sys (C)  to  WS-Temp-Amount
+              perform  ba100-Get-Amount
+              move     WS-Temp-Amount to CoH-YTD-Sys (C)
+              if       C = 5
+                       exit perform
+              end-if
+              exit perform cycle
+     end-perform.
+*>
+     move     23  to AN-Line.
+     move     zero to C.
+     perform  varying AN-Column from 9 by 15 until AN-Column > 39
+              add      1 to C
+              move     CoH-YTD-Emp (C)  to  WS-Temp-Amount
+              perform  ba100-Get-Amount
+              move     WS-Temp-Amount to CoH-YTD-Emp (C)
+              if       C = 3
+                       exit perform
+              end-if
+              exit perform cycle
+     end-perform.
+*>
+     move     69  to AN-Column.
+     move     CoH-YTD-Other-Ded to WS-Temp-Amount
+     perform  ba100-Get-Amount
+     move     WS-Temp-Amount to CoH-YTD-Other-Ded.
+*>
+     move     24  to AN-Line.
+     move     zero to C.
+     perform  varying AN-Column from 24 by 15 until AN-Column > 69
+              add      1 to C
+              move     CoH-YTD-Units (C)  to  WS-Temp-Amount
+              perform  ba100-Get-Amount
+              move     WS-Temp-Amount to CoH-YTD-Units (C)
+              if       C = 4
+                       exit perform
+              end-if
+              exit perform cycle
+     end-perform.
+*>
+     move     1 to RRN.
+     rewrite  PY-Comp-Hist-Record.
+     go       to  ba999-Exit.
+*>
+*> DO NOT NEED THIS - CORRECT ?
+ ba100-Get-Amount.
+     call     STATIC "ACCEPT_NUMERIC" using by REFERENCE WS-Temp-Amount
+                                            by REFERENCE AN-ACCEPT-NUMERIC.
+     if       Cob-Crt-Status = Cob-Scr-Esc
+              move     1 to RRN
+              rewrite  PY-Comp-Hist-Record
+              go to ba999-Exit.
+*>
+ ba-Dummy.    exit.
+*>
+ ba999-Exit.  exit section.
+*>
+ ca000-Update-Comp-Liabilities section.
+*>************************************
+*>
+*> From pyupdli
+*>
+*> Displayed from record but data capture using AN routine
+*>
+ *> ca000-Open-File.
+     open     i-o PY-Comp-Hist-File.
+     if       PY-COH-Status not = zero
+              perform  aa115-Coh-Open-File-Error
+              close    PY-Comp-Hist-File
+                       PY-Param1-File
+              goback   returning 1
+     end-if.
+*>
+     display  SS-Company-Liability-Data.
+     perform  forever   *> Only used to ESCape out for ALL data capture
+*> Liabilities
+              move      8 to AN-LINE
+              move     16 to AN-COLUMN
+              call     STATIC "ACCEPT_NUMERIC" using by REFERENCE Coh-QTD-Co-Fica-Liab
+                                                     by REFERENCE AN-ACCEPT-NUMERIC
+              perform  AN-Test-Status
+              if       COB-CRT-Status = COB-SCR-ESC   *> Quit Sub process
+                       exit perform
+              end-if
+              move     36 to AN-COLUMN
+              call     STATIC "ACCEPT_NUMERIC" using by REFERENCE Coh-QTD-Co-Futa-Liab
+                                                     by REFERENCE AN-ACCEPT-NUMERIC
+              perform  AN-Test-Status
+              if       COB-CRT-Status = COB-SCR-ESC   *> Quit Sub process
+                       exit perform
+              end-if
+              move     55 to AN-COLUMN
+              call     STATIC "ACCEPT_NUMERIC" using by REFERENCE Coh-QTD-Co-Sui-Liab
+                                                     by REFERENCE AN-ACCEPT-NUMERIC
+              perform  AN-Test-Status
+              if       COB-CRT-Status = COB-SCR-ESC   *> Quit Sub process
+                       exit perform
+              end-if
+*>
+              move     10 to AN-LINE
+              move     16 to AN-COLUMN
+              call     STATIC "ACCEPT_NUMERIC" using by REFERENCE Coh-YTD-Co-Fica-Liab
+                                                     by REFERENCE AN-ACCEPT-NUMERIC
+              perform  AN-Test-Status
+              if       COB-CRT-Status = COB-SCR-ESC   *> Quit Sub process
+                       exit perform
+              end-if
+              move     36 to AN-COLUMN
+              call     STATIC "ACCEPT_NUMERIC" using by REFERENCE Coh-YTD-Co-Futa-Liab
+                                                     by REFERENCE AN-ACCEPT-NUMERIC
+              perform  AN-Test-Status
+              if       COB-CRT-Status = COB-SCR-ESC   *> Quit Sub process
+                       exit perform
+              end-if
+              move     55 to AN-COLUMN
+              call     STATIC "ACCEPT_NUMERIC" using by REFERENCE Coh-YTD-Co-Sui-Liab
+                                                     by REFERENCE AN-ACCEPT-NUMERIC
+              perform  AN-Test-Status
+              if       COB-CRT-Status = COB-SCR-ESC   *> Quit Sub process
+                       exit perform
+              end-if
+*>
+*> Qtr to date
+*>
+              move     14 to AN-LINE
+              move     36 to AN-COLUMN
+              call     STATIC "ACCEPT_NUMERIC" using by REFERENCE Coh-QTD-Vac-Earned
+                                                     by REFERENCE AN-ACCEPT-NUMERIC
+              perform  AN-Test-Status
+              if       COB-CRT-Status = COB-SCR-ESC   *> Quit Sub process
+                       exit perform
+              end-if
+              move     55 to AN-COLUMN
+              call     STATIC "ACCEPT_NUMERIC" using by REFERENCE Coh-QTD-Vac-Taken
+                                                     by REFERENCE AN-ACCEPT-NUMERIC
+              perform  AN-Test-Status
+              if       COB-CRT-Status = COB-SCR-ESC   *> Quit Sub process
+                       exit perform
+              end-if
+*>
+              move     15 to AN-LINE
+              move     36 to AN-COLUMN
+              call     STATIC "ACCEPT_NUMERIC" using by REFERENCE Coh-QTD-SL-Earned
+                                                     by REFERENCE AN-ACCEPT-NUMERIC
+              perform  AN-Test-Status
+              if       COB-CRT-Status = COB-SCR-ESC   *> Quit Sub process
+                       exit perform
+              end-if
+              move     55 to AN-COLUMN
+              call     STATIC "ACCEPT_NUMERIC" using by REFERENCE Coh-QTD-SL-Taken
+                                                     by REFERENCE AN-ACCEPT-NUMERIC
+              perform  AN-Test-Status
+              if       COB-CRT-Status = COB-SCR-ESC   *> Quit Sub process
+                       exit perform
+              end-if
+*>
+              move     16 to AN-LINE
+              move     36 to AN-COLUMN
+              call     STATIC "ACCEPT_NUMERIC" using by REFERENCE Coh-QTD-Comp-Time-Earned
+                                                     by REFERENCE AN-ACCEPT-NUMERIC
+              perform  AN-Test-Status
+              if       COB-CRT-Status = COB-SCR-ESC   *> Quit Sub process
+                       exit perform
+              end-if
+              move     55 to AN-COLUMN
+              call     STATIC "ACCEPT_NUMERIC" using by REFERENCE Coh-QTD-Comp-Time-Taken
+                                                     by REFERENCE AN-ACCEPT-NUMERIC
+              perform  AN-Test-Status
+              if       COB-CRT-Status = COB-SCR-ESC   *> Quit Sub process
+                       exit perform
+              end-if
+*>
+*> Year to date
+*>
+              move     20 to AN-LINE
+              move     36 to AN-COLUMN
+              call     STATIC "ACCEPT_NUMERIC" using by REFERENCE Coh-YTD-Vac-Earned
+                                                     by REFERENCE AN-ACCEPT-NUMERIC
+              perform  AN-Test-Status
+              if       COB-CRT-Status = COB-SCR-ESC   *> Quit Sub process
+                       exit perform
+              end-if
+              move     55 to AN-COLUMN
+              call     STATIC "ACCEPT_NUMERIC" using by REFERENCE Coh-YTD-Vac-Taken
+                                                     by REFERENCE AN-ACCEPT-NUMERIC
+              perform  AN-Test-Status
+              if       COB-CRT-Status = COB-SCR-ESC   *> Quit Sub process
+                       exit perform
+              end-if
+*>
+              move     21 to AN-LINE
+              move     36 to AN-COLUMN
+              call     STATIC "ACCEPT_NUMERIC" using by REFERENCE Coh-YTD-SL-Earned
+                                                     by REFERENCE AN-ACCEPT-NUMERIC
+              perform  AN-Test-Status
+              if       COB-CRT-Status = COB-SCR-ESC   *> Quit Sub process
+                       exit perform
+              end-if
+              move     55 to AN-COLUMN
+              call     STATIC "ACCEPT_NUMERIC" using by REFERENCE Coh-YTD-SL-Taken
+                                                     by REFERENCE AN-ACCEPT-NUMERIC
+              perform  AN-Test-Status
+              if       COB-CRT-Status = COB-SCR-ESC   *> Quit Sub process
+                       exit perform
+              end-if
+*>
+              move     22 to AN-LINE
+              move     36 to AN-COLUMN
+              call     STATIC "ACCEPT_NUMERIC" using by REFERENCE Coh-YTD-Comp-Time-Earned
+                                                     by REFERENCE AN-ACCEPT-NUMERIC
+              perform  AN-Test-Status
+              if       COB-CRT-Status = COB-SCR-ESC   *> Quit Sub process
+                       exit perform
+              end-if
+              move     55 to AN-COLUMN
+              call     STATIC "ACCEPT_NUMERIC" using by REFERENCE Coh-YTD-Comp-Time-Taken
+                                                     by REFERENCE AN-ACCEPT-NUMERIC
+              perform  AN-Test-Status
+              if       COB-CRT-Status = COB-SCR-ESC   *> Quit Sub process
+                       exit perform
+              end-if
+     end-perform.
+*> Save record
+     move     1 to RRN.
+     rewrite  PY-Comp-Hist-Record.     *> Save updated rec JIC
+     if       PY-Coh-Status not = zeros
+              perform  aa115-Coh-Open-File-Error
+              close    PY-Comp-Hist-File
+              goback   returning 7.
+*>
+     close    PY-Comp-Hist-File.
+*>
+ ca999-Exit.  exit section.
+*>
+ da000-Update-Pay-History      section.
+*>************************************
+*> From pyupdpm
+*>
+*> The date is transcribed to the locate format and Payment amount is
+*> displayed directly to screen
+*> However to capture it from keyboard the ACEPT_NUMERIC routine is used
+*> as it uses same process as entering amounts into a calculator.
+*>
+ *> da000-Open-File.
+     open     i-o PY-Comp-Hist-File.
+     if       PY-COH-Status not = zero
+              perform  aa115-Coh-Open-File-Error
+              close    PY-Comp-Hist-File
+                       PY-Param1-File
+              goback   returning 1
+     end-if.
+*>
+ *> da010-Display-Block.  *> Set up the display for Pay dates
+     perform  varying C from 1 by 1 until C > 12
+              move     CoH-Date (C) to WS-Test-YMD  *> pic 9(8) ccyymmdd
+              move     "99/99/9999" to WS-Date
+              move     WS-Test-YMD (1:4) to WS-Year
+              if       PY-PR1-Date-Format = 2   *> US format
+                       move     WS-Test-YMD (5:2) to WS-USA-Month
+                       move     WS-Test-YMD (7:2) to WS-USA-Days
+              else                              *>    PY-PR1-Date-Format = 1    UK format
+                       move     WS-Test-YMD (5:2) to WS-Month
+                       move     WS-Test-YMD (7:2) to WS-Days
+              end-if
+              move     WS-Date  to WS-Tax-Date (C)
+     end-perform.
+*>
+     display  SS-Payment-History-Data.
+*>
+ *> da020-Get-Data-Block.
+     MOVE      6   TO AN-LINE.          *> Increments from 7 by 1 until > 12
+     MOVE     27   TO AN-COLUMN.
+     set      AN-MODE-IS-UPDATE TO TRUE.
+     perform  varying C from 1  by 1 until C > 12
+              if        C > 12          *> JIC
+                        exit perform
+              end-if
+              add      1  to AN-LINE
+*>
+*> Deal with tax payment amount
+*>
+              move     CoH-Tax (C) to WS-Temp-Amount
+              call     STATIC "ACCEPT_NUMERIC" using by REFERENCE WS-Temp-Amount
+                                                     by REFERENCE AN-ACCEPT-NUMERIC
+              perform  AN-Test-Status
+              if       COB-CRT-Status = COB-SCR-PAGE-UP
+                       subtract 1 from C    *> Allows for add 1 at start of perform
+                       subtract 1 from AN-LINE
+                       exit perform cycle
+              end-if
+              if       COB-CRT-Status = COB-SCR-PAGE-DOWN
+                       exit perform cycle                 *> does + 1 line no [C]
+              end-if
+              if       COB-CRT-Status = COB-SCR-ESC   *> Quit Sub process
+                       exit perform
+              end-if
+              move     WS-Temp-Amount to CoH-Tax (C)
+*>
+*> Deal with tax payment Date ( original is ccyymmdd
+*>
+              perform forever   *> until we have a valid date
+                       accept   WS-Tax-Date (C) at line AN-LINE col 45 foreground-color 3
+                       move     WS-Tax-Date (C) to WS-Date
+                       perform  zz010-Test-YMD
+                       if       A not = zero   *> Error in date
+                                display  PY105         at line AN-Line col 57 foreground-color 4 erase eol
+                                evaluate A
+                                   when  1
+                                         display "YY"  at line AN-Line col 72 foreground-color 4
+                                         exit perform cycle
+                                   when  2
+                                         display "MM"  at line AN-Line col 72 foreground-color 4
+                                         exit perform cycle
+                                   when  3
+                                         display "DD"  at line AN-Line col 72 foreground-color 4
+                                         exit perform cycle
+                                end-evaluate
+                       end-if
+                       display space at line AN-Line col 72 erase eol  *> Clr any error msg
+                       exit perform
+                       move     WS-Test-YMD to CoH-Date (C)
+              end-perform
+     end-perform.
+     move     1 to RRN.
+     rewrite  PY-Comp-Hist-Record.     *> Save updated rec JIC
+     if       PY-Coh-Status not = zeros
+              perform  aa115-Coh-Open-File-Error
+              close    PY-Comp-Hist-File
+              goback   returning 7.
+*>
+ *> da030-Process-QTY-Tax-Pay.
+*>
+*>  Use Coh-All-Q-Tax x 12 in # order by x 4
+*>
+     MOVE     20   TO AN-LINE.          *> 20, 21 & 22
+     MOVE     11   TO AN-COLUMN.
+     set      AN-MODE-IS-UPDATE TO TRUE.
+     display  "ESC to quit" at 2501 erase eol.
+     perform  varying  C from 1 by 1 until C > 12
+              if       C > 12
+                       exit perform
+              end-if
+              if       C = 5
+                       move     11 to AN-COLUMN
+                       move     21 to AN-LINE
+              end-if
+              if       C = 9
+                       move     11 to AN-COLUMN
+                       move     22 to AN-LINE
+              end-if
+*>
+*> Deal with Quarterly tax payments
+*>
+              move     Coh-All-Q-Tax (C) to WS-Temp-Amount
+              call     STATIC "ACCEPT_NUMERIC" using by REFERENCE WS-Temp-Amount
+                                                     by REFERENCE AN-ACCEPT-NUMERIC
+              perform  AN-Test-Status
+              if       COB-CRT-Status = COB-SCR-ESC   *> Quit Sub process
+                       exit perform
+              end-if
+              move     WS-Temp-Amount to Coh-All-Q-Tax (C)
+              if       C = 4 or = 8
+                       add       1 to AN-LINE
+                       move     11 to AN-COLUMN
+              else
+                       add      16 to AN-COLUMN
+              end-if
+     end-perform.
+     move     1 to RRN.
+     rewrite  PY-Comp-Hist-Record.     *> Save updated rec
+     if       PY-Coh-Status not = zeros
+              perform  aa115-Coh-Open-File-Error
+              close    PY-Comp-Hist-File
+              goback   returning 7.
+*>
+     close    PY-Comp-Hist-File.
+*>
+ da999-exit.  exit section.
+*>
+*> Common routines.  NOT USED ?
+*>
+     copy "an-accept.pl".
+*>
+ zz010-Test-YMD              section.
+*>**********************************
+*>
+*>  A = zer0 then no error.
+*>
+     move     WS-Year  to WS-Test-YMD (1:4).
+     if       PY-PR1-Date-Format = 2   *> test for USA - mmddyyyy - -> yyyymmdd
+              move     WS-USA-Days  to WS-Test-YMD (7:2)
+              move     WS-USA-Month to WS-Test-YMD (5:2)
+     else
+              move     WS-Days  to WS-Test-YMD (7:2)  *> test for UK - ddmmyyyy -> yyyymmdd
+              move     WS-Month to WS-Test-YMD (5:2).
+*>
+     move     zero  to A.
+     move     TEST-DATE-YYYYMMDD (WS-Test-YMD) to A.
+*>
+ zz010-Exit.  exit section.
+*>
+ ZZ040-Evaluate-Message      section.
+*>**********************************
+*>
+*> For PY-PR1 parameter file anfd other using PR-PR1-Status.
+*>
+     copy "FileStat-Msgs-2.cpy" replacing MSG    by WS-Eval-Msg
+                                        STATUS by PY-PR1-Status.
+*>
+ ZZ040-Eval-Msg-Exit.
+     exit     section.
+*>

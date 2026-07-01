@@ -1,0 +1,119 @@
+.mt7
+.mb9
+.po8
+.ll65
+.ig
+SPECIFICATIONS MANUAL
+I. Distribution Disk Programs and Files
+.sp2
+.li
+   Startup Disk        Normal Processing Disk	    Data Disk
+
+    DEDENT.INT		    APPLY1.INT		    ADM3A.DEF
+    DEDENT1.INT 	    APPLY2.INT		    B150.DEF
+    DEDENT2.INT 	    APPLY3.INT		    B152.DEF
+    DEDENT3.INT 	    EMPPRINT.INT	    B157.DEF
+    EMPDENT.INT 	    HISPRINT.INT	    COLUMBUS.LWT
+    EMPENT.INT		    HRSENT.INT		    CRO3100.DEF
+    PY.INT		    HRSPROOF.INT	    DYNABYTE.DEF
+    PYACTENT.INT	    PRINT940.INT	    HAZ1500.DEF
+    PYACTPRT.INT	    PRINT941.INT	    NEWYORK.LWT
+    PYPAR2.INT		    PRINTW2.INT 	    PTVDM.DEF
+    PYPAR3.INT		    PRNT941B.INT	    PYCALH.101
+    PYPARENT.INT	    PY.INT		    PYCALM.101
+    PYSRTPRM.INT	    PYCHECKS.INT	    PYCALS.101
+    PYTOTHIS.INT	    PYJOURN.INT 	    PYCALX.101
+    PYUPDHIS.INT	    PYJOURN1.INT	    PYSWTIL.101
+    PYUPDLI.INT 	    PYPEREND.INT	    PYSWTNJ.101
+    PYUPDMEN.INT	    PYRGSTR.INT 	    PYSWTNY.101
+    PYUPDPM.INT 	    VACPRINT.INT	    PYSWTOH.101
+    PYUPDTH.INT 	    QSORT.COM		    PYSWTPA.101
+    RATENT.INT					    SOROC120.DEF
+						    VIOC.DEF
+.bp
+.po16
+.li
+ENTRY PROGRAMS:
+
+
+Parameter Entry:		  PYPARENT.INT
+				  PYPAR2.INT
+				  PYPAR3.INT
+
+Account Entry:			  PYACTENT.INT
+
+Deduction/Earning Entry:	  DEDENT.INT
+				  DEDENT1.INT
+				  DEDENT2.INT
+				  DEDENT3.INT
+
+Employee Entry: 		  EMPENT.INT
+
+Employee Ded/Earn and Cost Dist.: EMPDENT.INT
+
+Employee Pay Rate Entry:	  RATENT.INT
+
+History Entry:			  PYUPDHIS.INT
+				  PYTOTHIS.INT
+				  PYUPDMEN.INT
+				  PYUPDTH.INT
+				  PYUPDLI.INT
+				  PYUPDPM.INT
+
+Pay Transaction Entry:		  HRSENT.INT
+.br
+.bp
+.li
+PROCESSING PROGRAMS:
+
+
+Apply Payroll:			  APPLY1.INT
+				  APPLY2.INT
+				  APPLY3.INT
+
+End the Current Quarter:	  PYPEREND.INT
+
+End the Current Year:		  PYPEREND.INT
+.br
+.bp
+.li
+PRINT PROGRAMS:
+
+
+Print Account List:		  PYACTPRT.INT
+
+Print Employee Master List:	  EMPPRINT.INT
+
+Print History Report:		  HISPRINT.INT
+
+Print Vacation Report:		  VACPRINT.INT
+
+Pay Transaction Proof:		  HRSPROOF.INT
+
+Print Payroll Journal:		  PYJOURN.INT
+				  PYJOURN1.INT
+
+Print Paychecks:		  PYCHECKS.INT
+
+Print Check Register:		  PYRGSTR.INT
+
+Print Quarterly 941 Report:	  PRINT941.INT
+				  PRNT941B.INT
+
+Print Yearly 940 Report:	  PRINT940.INT
+
+Print W2 Report:		  PRINTW2.INT
+.br
+.bp
+.li
+UTILITY PROGRAMS:
+
+
+Pay Transaction Sort:		  QSORT.COM
+
+Payroll System Menu:		  PY.INT
+
+CRT Definition Program: 	  CRTDEF.INT
+
+Single-Density Copy Program:	  SDCOPY.COM
+.br

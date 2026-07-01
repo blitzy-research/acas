@@ -1,0 +1,178 @@
+Record for changes at system level - Also recorded in sub systems Changelog.
+
+2026-03-01 Vincent Coen * Replaced function TEST-FORMATTED-DATETIME with
+                          TEST-DATE-YYYYMMDD in sl970 as does not test enough.
+
+2025-11-13 Vincent Coen * For ALL xx000.cbl (all systems) Date routine has
+                          3.3.01 Chg wsa-date test from 000000 to 00000000. Wow.
+                          Never spotted error, but modern PCs provides date/time
+                          Work contines developing USA Payroll sub system.
+
+2025-09-20 Vincent Coen * 3.3.00 Version update and builds reset.
+
+2025-03-23 Vincent Coen * Updated All *RES source for bugs with wrong messages
+                          For source and target files now using .seq for src
+                          and .dat for target, added test for on output file
+                          to confirm no non zero return codes.
+                          Have not done the same for *UNL as the reporting
+                          messages will indicate that as zero output.
+                          These program have Not had a version change.
+
+2025-03-07 Vincent Coen * Revised scripts masterUNL.sh, masterRES.sh &
+                          masterLD and so far only tested masterUNL.
+                          Updates to sl970, sl910, st020, st030 BUT testing
+                          in progress.
+                          These will allow support for Back Order Processing.
+                          Still to do - sl800 series programs for autogen
+                          ditto for pl800 although may not be completely coded
+                          if at all, as waiting for testing of sl800 series
+                          first.
+
+2024-12-26 Vincent Coen * Update copyright notices for 2025 for all sources.
+
+2024-12-15 Vincent Coen * Back order code now complete - awaiting system testing
+                          for Sales Invoicing program - sl910.
+
+2024-03-30 Vincent Coen * New program sl970 added and into sl900 menu.
+                          More changes to st020 for BO record, Added new
+                          field in Stock (Stock_Arrival-Date) fd, ws stock
+                          updated. Ditto for Tables in ACASDB.sql.
+                          No convert program created for stock as no one is
+                          reporting that system is used for prod there again...
+                          Nuts amending program acasconvert1 to update stock.
+
+2024-09-15 Vincent Coen * SL910 updates -
+                          All BO coding now complete BUT zz210-Delete... has a goto
+                          to bypass code so that the BO file does not need to be
+                          rebuilt after every BO test but last test must be without
+                          the goto.
+
+2024-09-11 Vincent Coen * SL910 updates -
+                          BO (Back Order) processing coding complete other than
+                          for deleted BO records now invoiced. That is next,
+                          using a new small table to record the BO table entries
+                          invoiced. This to be used to then delete the BO record
+                          Support for using vat codes 4 & 5 for Sales tax - USA?
+
+2024-04-13 Vincent Coen * 1. BO rec check in sl010 if trying to delete cust.
+    and                   2. New menu function Amend Back Order Status option 6
+2024-04-14                allows change to selected range, just one or all
+                          customers changing BO status using Y or N.
+                          3. Adding code to process BO in sl910 on first starting
+                          All new code but taken from existing where ever poss.
+                          All BO code removed from sl920 as pointless as sl970
+                          can deal with amend and delete as well as reporting.
+                          4. Updates to manuals :
+                          ACAS - Building the ACAS System
+                          ACAS - Stock Control
+                          ACAS - Sales Ledger
+                          covering BO additions and changes and some clean ups for
+                          ACAS - System Set up Procedures
+
+2024-03-17 Vincent Coen * BO support for sl910 and sl920, more to do.
+
+2024-03-15 Vincent Coen <vbcoen@gmail.com>
+                        *  Support for BO-Flags in system, Stock, SL recs.
+                           likewise in entry, amend and reporting. Stock is
+                           limited in reporting.
+
+2024-03-10 Vincent Coen <vbcoen@gmail.com>
+                        * Sales and Purchase - invoice / folio data entry has
+                          extra code to check for dup keys when writing out
+                          invoices/folio recs & if happens will get system rec
+                          to get next invoice / folio number and rewrite the
+                          system rec. Ditto apples when first using a invoice /
+                          folio #.
+                          This will reduce risk of dup keys being used just in
+                          case more than one user is entering invoices or folios
+                          at same time. These is a risk of file or record locks
+                          depending on ISAM library being used and the same
+                          applies to a data base as well and that depends on the
+                          setting for it when set up to ensure multi users can
+                          have the same table opened at same time and this will
+                          reduce/remove such possible problems.
+                          Mysql and mariadb & others can be controlled this way.
+
+2024-02-08 Vincent Coen <vbcoen@gmail.com>
+                        * Sales Ledger file has had a new field for Partial Ship
+                          Flag to indicate customer will accept a incomplete
+                          order, where the intention is to send later any and
+                          all outstanding stock items once received.
+
+                        * Stock Control file has had new fields, Stat Date (not
+                          yet used) and Stock-Committed to show qty ordered on
+                          invoices, receipts etc prior to invoice and pack lists
+                          printed. Here committed + Qty On hand = total stock
+                          held at this point of time. No coding has yet been
+                          done for this. This field is the same as
+                          stock-Pre-Sales (redefined) also limited coding for
+                          this to help not accept an order for zero stock items.
+                          More work is needed may be in these areas at some
+                          point, subject to testing.
+
+                          This all relates to some extent to BO (Back Order)
+                          processing but no user / business has requested it at
+                          this point.  The requirements for processing of back
+                          orders varies between business types and in most cases
+                          is undertaken by the Sales teams manually to reduce
+                          the differences between requirements and by orders.
+
+                          In a Nutshell :-
+
+                          There are two different types of function for BO
+                          namely 1. Pre Orders against a product that has not
+                          arrived in stock because of quantities ordered are
+                          needed to estimate a stock order where delivery time
+                          is known and not a long period OR 2. Is in transit
+                          with a known short arrival date, OR 3 where product
+                          is out of stock and time of arrival is or is not known
+                          as an absolute date period etc.
+
+                          In the later case if to be invoiced for a credit
+                          customer the possible extra P&P costs are just added
+                          to a new invoice OR where order is prepaid the company
+                          will cover the P&P costs reducing profit margin or a
+                          email or letter is sent out for the extra monies
+                          required which in turn might annoy a customer and the
+                          order is cancelled.
+
+                          So the question comes into being of what a computer
+                          should do for this set of differing requirements.
+
+                          Basically not so easy, hence the reason it has been
+                          left to be dealt with manually so far.
+
+                          Suggestions on how it can be done for most if not all
+                          ACAS users please get in touch.
+
+2023-08-01 Vincent Coen <vbcoen@gmail.com>
+                        * irs030 bug in opening already open file (acasirsub1)
+                          in initialise-main fix: added a close before 2nd open.
+                          Only appeared when running with -d -g
+
+27/07/2023 Vincent Coen * All four affected DAL modules have been fixed.
+                          Currently waiting on testing using the *LD programs
+                          after creating some new invoices.
+
+12/07/2023 Vincent Coen * For all LD programs updated to fix various bugs & other
+                          code cleanups.
+                          For *invoiceMT.scb and *autogenMT fix bug using wrong
+                          key in routines bc050-Process-Read-Index and
+                          bc300-Update-rg1.
+                          Other changes in common, see Changelog there.
+
+16-12-2022 Vincent Coen * PL190 - Spelling error for lit. Supplier.
+23-02-2023 Vincent Coen * In Common, acas016 & other acas0nn some had a missing
+                          period on a move 999 to we-error. Why wasn't it
+                          spotted ages ago?
+07-03-2023 Vincent Coen * SL930 & 950 force support for single sided paper and
+                          for sl930 support to print out to named files i.e.,
+                          "FILE:" preceding print spool name in parameter file
+                          for prt-2 and -3. Used for testing to fix blank lines.
+24-03-2023 Vincent Coen * Updates to ACAS - Stock Control User Manual.
+03/04/2023 Vincent Coen * Update to sys002 and more IRS, SL, Stock manual changes.
+16/06/2023 Vincent Coen * Changes for acas004, 030, sl810-830, *LD to process file
+                          acas.param if system.dat not set for DB params useful
+                          during testing when real tests are for Cobol files.
+27/06/2023 Vincent Coen * Added new scripts prtpdf.sh prt-A4.sh & prtpdf-Letter.sh
+                          from the ACAS folder. Updated sl930 for email ops.

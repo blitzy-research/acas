@@ -1,0 +1,244 @@
+SSG LIBRARY USED BY THE PAYROLL SYSTEM	  DEC. 03,1979
+
+ZABORT - fn.abort%
+	standard report abort function
+
+ZBRACKET - fn.bracket$(number,left.digits%,cents%)
+	Returns a format string which places a negative number in
+	brackets (<0.00> or <0> if cents% set to false). If the number
+	input is positive the bracket positions are filled by blanks
+
+ZCKDIGIT - fn.ck.dig$(no$)
+	returns a single check digit calculated from no$
+
+ZCOMMON - standard common area for SSG	programs
+	has chained.from.root%,common.drive$,common.date$, etc.
+
+ZCONFIRM - fn.confirmed%
+	TYPE "RUN" TO CONTINUE   TYPE "STOP" TO STOP PROGRAM
+
+ZCONST - equates for all systems - required by DMS functions
+
+ZDATEINC - I don't know what this is.
+
+ZDATEIO - fn.date.in$, fn.date.out$
+	fn.date.in$  takes yr%,mo%,dy%	and returns a internal date
+			string (YYMMDD)
+	fn.date.out$ takes an internal string (YYMMDD) and returns it
+		as MM/DD/YY  , DD/MM/YY  etc. depending on the parameter file
+		fields pr1.date.mo%, pr1.date.dy%, pr1.date.yr%
+
+ZDMS - dms functions except init, clear, and attribute changes
+	all return trash% except as noted
+	zdmssca -   fn.crt.sca$(row%, column%)
+		returns a string to set the cursor address to row%, column%
+		used by other dms functions
+	zdmsmsg -   fn.msg%(text$)
+		displays text$ on standard message line
+	zdmsemsg -  fn.emsg%(emsg%)
+		calls fn.msg% using EMSG$(emsg%) as text
+	zdmslit -   fn.lit%(id%)
+		displays field(id%) as a literal, sets usage to true
+	zdmsput -   fn.put%(value$, id%)
+		displays formatted value$ at field id%
+		stores value for refresh
+	zdmsptal -  fn.put.all%(i.o%)
+		displays all used output (literal) fields using fn.lit%
+		if i.o%, displays all I/O (data entry) fields using fn.put%
+	zdmsget -   fn.get%(ctl.mask%, id%)
+		gets data at field id%, uses crt.ctl.mask$(ctl.mask%) as
+		list of acceptable control characters. (valid data is always
+		accepted, screen refresh and backspace are handled internally)
+		CONTROL CHARACTER LISTS
+			crt.ctl.mask$(1)= ctl.stopit$
+			crt.ctl.mask$(2)= crt.ctl.mask$(1)+ctl.cr$+ctl.back$
+			crt.ctl.mask$(3)= crt.ctl.mask$(2)+ctl.cancel$
+			crt.ctl.mask$(4)= crt.ctl.mask$(2)+ctl.next$+ctl.save$+ctl.adding$
+			crt.ctl.mask$(5)= crt.ctl.mask$(4)+ctl.delete$
+			crt.ctl.mask$(6)= crt.ctl.mask$(2)+ctl.next$
+
+		RETURNS:in.len% - length of input
+			in$  - input string, null if in.status%<> req.valid%
+			in.uc$- upper case of input string, or null
+			in.status% -	req.valid%
+					req.stopit%
+					req.cr%
+					req.back%
+					req.cancel%
+					req.next%
+					req.save%
+					req.adding%
+					req.delete%
+	12/02/79 all dms functions nolisted
+
+ZDMSABRT - fn.abort%
+	cursor addressed report interrupt function
+	returns true if stop requested
+	12/02/79 clears itself before exit
+
+ZDMSBRT - fn.set.brt%(t.f%, id%)
+	sets or clears brightness attribute for field specified
+
+ZDMSCLR - fn.clr%(id%)
+	clears specified field
+	if a literal field, sets to unused
+	if a data entry field, clears data buffer used for screen refresh
+	11/18/79 sets any field cleared to not used
+
+ZDMSCNST - equates for dms functions
+	11/18/79 added ctl mask 6 (see notes for ZDMS)
+
+ZDMSCOMM - common area to pass DMS variables from one program to another
+
+ZDMSCONF - fn.confirmed%
+	requests operator confirmation to continue, returns true
+	if continuation requested, false if stop requested
+	12/02/79 clears message line upon exit
+
+ZDMSEMSG - fn.emsg%(emsg%)
+
+ZDMSEOL  -  fn.crt.eol%(row%, column%)
+	requires zdms
+	erases from row, column to the end of the line
+
+ZDMSGET - fn.get%(ctl.mask%, id%)
+	gets input at screen field id%, uses control character mask ctl.mask%
+	to limit acceptable control characters
+	11/12/79 sets in.uc$ correctly
+	11/18/79 clears message line upon exit
+	12/02/79 clears message based on flag
+
+ZDMSHAZL - fn.crt.initialize%(file$, disk$)
+	quick CRT initialize for Hazeltine 1500
+
+ZDMSINIT - fn.crt.initialize%(file$, disk$)
+	initializes dms system
+	sets crt characteristics to hazeltine 1500
+	returns if file$ is null, or if not
+	     searches for file$+".DEF" on the disk specified
+	     resets crt characteristics to those specified by the file
+	returns 0 - sucess
+		1 - file not found
+		2 - file is not correct format
+
+ZDMSLIT - fn.lit%(id%)
+	displays literal specified, sets attribute to used
+
+ZDMSMSG - fn.msg%(text$)
+	displays text$ on standard message line
+	12/02/79 sets global flag that message issued
+
+ZDMSPTAL - fn.put.all%(i.o%)
+	puts all literals that are currently used on screen using fn.lit%
+	if i.o% then puts all used io fields on screen using fn.put%
+	11/13/79 fixed to refresh all fields correctly
+
+ZDMSPUT - fn.put%(value$, id%)
+	displays value$ in id field position
+	11/13/79 fixed SB error on string display
+	11/18/79 sets id% attribute to used
+	12/03/79 treats an output only field as a string field
+
+ZDMSRST - fn.reset%
+	clears screen, resets to background
+	12/03/79 fixed to set background correctly
+
+ZDMSSCA - fn.crt.sca$(r%,c%) fn.crt.sca.row$(r%) fn.crt.sca.column$(c%)
+	returns a string which will set a cursor address
+
+ZDMSTEST - fn.test%(bit%, id%)
+	tests attribute bit specified
+
+ZDMSUSED - fn.set.used%(t.f%, id%)
+	sets usage of field id% to used or not used based on t.f%
+
+ZDRIVE - fn.get.drive%(desc$)
+	requires ZINPUT
+	uses fn.input%	to get a drive reference A-Z  Allows cr%
+
+ZDSPYORN -  fn.dsp.yorn$(boolean.value%)
+	returns "Y" if  value% is true, "N" if value is false
+
+ZEDITDTE - fn.leap.year%(year%), fn.edit.date%(date$)
+	requires ZNUMBER, ZPARSE
+	fn.leap.year% is used by fn.edit.date%
+	fn.edit.date% takes an external form date and converts it
+	to 3 integers:	mo%,dy%,yr%  using the parameter specified
+	date form fields as a guide. (parsing either as MM/DD/YY or
+	DD/MM/YY)
+
+ZEOJ - standard end of job for all programs except for sytem menu drivers
+	it prints cursor addressed EOJ messages and sets common.return.code%
+	to 0, 1, 2  for normal, error, premature EOJ
+	11/18/79 changed 999.2 message
+	12/02/79 uses function name instead of program name
+		 prints abort on line 23
+
+ZFILCONV - file name functions
+	fn.drive.in%(temp$) converts @,a,b,c,d to 0,1,2,3,4
+	fn.drive.out$(temp%) converts 0,1,2,3,4 to @,A,B,C,D
+	fn.file.name.out$(c.name$,c.type$,c.drive%,c.password$,c.params$)
+	provides a file name properly constructed. c.password$,c.params$ use
+	undefined at present
+
+ZFLIP	 - fn.name.flip$(name$)
+	converts last name*first name  to  first name last name
+
+ZGETDATE - fn.get.date$(description$)
+	includes ZEDITDTE, ZDATEI/O
+	requires ZNUMBER,ZPARSE for zeditdte,  ZINPUT
+	uses fn.input%, fn.edit.date%, fn.date.in$ to input a valid date
+	and return it in internal form
+
+ZHEADING - fn.hdr%(report$)
+	requires ZSTRING, ZDATEI/O
+	prints a standard report heading, including company name,
+	date, and the report name string used as a parameter.
+	returns a line count
+
+ZINPUT -	fn.input%(desc$,length%)
+	uses an input line to get input, uses  "ENTER " and the description
+	string parameter as a prompt. If the length parameter is < 255, the
+	string input is disallowed if longer than the length specified.
+	global variables cr% and stopit%  are set if the response is carriage
+	return and "stop" or escape  respectively. If double quotes,
+	line feeds, or ctl Z's are imbedded in the input string, the
+	global flag invalid% is set to true.
+	The function returns a true if any of the global flags are set.
+
+ZNUMBER - fn.num%(number$)
+	uses the match function to find any non-numeric characters if the
+	string parameter
+
+ZNUMERIC - fn.numeric%(number$,left.digits%,right.digits%)
+	includes ZNUMBER
+	checks that the string parameter contains only numeric characters
+	except for a single decimal point, and that the number of characters
+	on either side of the decimal point are within the limit specified
+
+ZPARSE - fn.parse%(data$,delimiter$)
+	parses the string parameter into the dimensioned variable
+	token$(1), incrementing the subscript each time the delimiter string
+	is encountered.  Token$(x) is dimensioned to 5 elements if token.limit%
+	is not set to a different value the first time the function is called.
+
+ZSERIAL - Serial number check
+
+ZSTRING - fn.spread$(string$,amt%), fn.pad$(string$,n%),
+ fn.center%(string$,width%)
+	fn.spread$ pads each character in the string parameter with the
+	number of blanks specified in the amount parameter
+	fn.pad$ returns a string of the left-most n% characters of
+	string parameter and a blank string.
+	fn.center returns a tab value which will center the input string
+	on a page of width width%.
+
+ZSYSDRIV - fn.get.sys.drive%
+	looks for file system$+"pr1.101" on drives A and B.
+	returns A, B or a null string
+
+ZYORN	-   fn.yorn%(cr.default%)
+	does input line, no prompt
+	returns true if yes, false if no, cr.default% if cr
+	does not set any global flags for stop or back
+

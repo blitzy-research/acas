@@ -1,0 +1,13 @@
+dim emp.rate			(4)	 rem 11/18/79
+dim emp.sys.exempt%		(pr1.max.sys.eds%)
+dim emp.dist.acct%		(pr1.max.dist.accts%)
+dim emp.dist.percent		(pr1.max.dist.accts%)
+dim emp.ed.desc$		(pr1.max.emp.eds%)
+dim emp.ed.factor		(pr1.max.emp.eds%)
+dim emp.ed.limit		(pr1.max.emp.eds%)
+dim emp.ed.earn.ded$		(pr1.max.emp.eds%)
+dim emp.ed.exclusion%		(pr1.max.emp.eds%)
+dim emp.ed.amt.percent$ 	(pr1.max.emp.eds%)
+dim emp.ed.limit.used%		(pr1.max.emp.eds%)
+dim emp.ed.chk.cat%		(pr1.max.emp.eds%)
+dim emp.ed.acct.no%		(pr1.max.emp.eds%)

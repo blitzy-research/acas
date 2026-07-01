@@ -1,0 +1,286 @@
+Sales Ledger - Changelog
+
+ccyy-mm-dd  Who           What
+
+2026-03-01 Vincent Coen * Replaced function TEST-FORMATTED-DATETIME with
+                          TEST-DATE-YYYYMMDD in sl970 as does not test enough.
+
+2025-10-05 Vincent Coen * 3.3.01 Changed sl060,100 BL-close for GL & IRS.
+                          But need to check with GL if posting will work.
+
+2025-09-20 Vincent Coen * 3.3.00 Version update and builds reset.
+
+2025-01-05 Vincent Coen * Micro coding chg for sl910 to match pl020.
+
+2025-03-07 Vincent Coen * Updates to sl970, sl910 BUT testing in progress.
+                          These will allow support for Back Order Processing.
+                          Still to do - sl800 series programs for autogen.
+
+2025-01-05 Vincent Coen * Update sl130 to read param rec and rewrite after FLAG
+                          update. Will need to do same for any prog that updates
+                          ANY param fields. Use zz900/910 in S/P l130 code
+                          for any programs that also update any paran fields.
+                          Updated sl910 -missing rewrite.
+                          Updated accept X with UPPER and remove function
+                          Upper-Case although might have missed 1 or 2.
+
+2024-12-12 Vincent Coen * SL910 Updates to fix functions if BO Qty = 0 by
+                          confirming on "D" to delete BO record or S = Skip
+                          this time etc.
+                          Ready for testing... and yes I am expecting the odd
+                          bug :(
+
+
+2024-03-30 Vincent Coen * New program sl970 added and into sl900 menu.
+                          More changes to st020 for BO record, Added new
+                          field in Stock (Stock_Arrival-Date) fd, ws stock
+                          updated. Ditto for Tables in ACASDB.sql.
+                          No convert program created for stock as no one is
+                          reporting that system is used for prod there again..
+                          Nuts amending program acasconvert1 to update stock.
+
+2024-09-15 Vincent Coen * SL910 updates -
+                          All BO coding now complete BUT zz210-Delete... has a goto
+                          to bypass code so that the BO file does not need to be
+                          rebuilt after every BO test but last test must be without
+                          the goto.
+
+2024-09-11 Vincent Coen * SL910 updates -
+                          BO (Back Order) processing coding complete other than
+                          for deleted BO records now invoiced. That is next,
+                          using a new small table to record the BO table entries
+                          invoiced. This to be used to then delete the BO record
+                          Support for using vat codes 4 & 5 for Sales tax - USA?
+
+2024-04-13 Vincent Coen * 1. BO rec check in sl010 if trying to delete cust.
+    and                   2. New menu function Amend Back Order Status option 6
+2024-04-14                allows change to selected range, just one or all
+                          customers changing BO status using Y or N.
+                          3. Adding code to process BO in sl910 on first starting
+                          All new code but taken from existing where ever poss.
+                          All BO code removed from sl920 as pointless as sl970
+                          can deal with amend and delete as well as reporting.
+                          4. Updates to manuals :
+                          ACAS - Building the ACAS System
+                          ACAS - Stock Control
+                          ACAS - Sales Ledger
+                          covering BO additions and changes and some clean ups for
+                          ACAS - System Set up Procedures
+
+2024-03-17 Vincent Coen * BO support for sl910 more to do.
+                          New program sl970 for BO reporting and amends/deletes
+                          accessed via Sales menu T.A.
+                          BO Only supported in Level-2 invoicing with linked
+                          stock - where stock control in use.
+
+2024-03-15 Vincent Coen * Support or new field Sales-Partial-Ship-Flag in sl010,
+                          sl160.
+
+2024-03-10 Vincent Coen * SL910 changes - support for reading system rec every time
+                          a new invoice is input to get next one and system rec
+                          rewritten. On writing if dup key get another invoice #
+                          using same process.
+                          This will reduce the possiblility of dup recs if more than
+                          one person is inputting invoices at same time.
+
+2024-02-08 Vincent Coen * For Sales record :-
+                          Added Partial ship flag into the filler, no rec size
+                          change. This to support Back Ordering etc, may be.
+
+2023-08-23 Vincent Coen * The process that posts posting records to GL from SL
+                          and PL must be tested in detaails in GL.
+                          as I suspect it will not work due to the way GL uses
+                          batched postings. ONLY applies if GL in use.
+
+2023-06-27 Vincent Coen * sl930 Added email processing and including prtpdf
+                          scripts.
+                          THIS NEEDS TO BE TESTED AND THERE IS TEST CODE WITHIN
+                          sl930 that after testing needs to be removed for
+                          production.
+
+2023-06-09 Vincent Coen * SL200, sl810 & possible others, bug fixes found during
+                          testing - more to find ?
+
+2023-05-20 Vincent Coen * New Autogen programs coding complete - sl800, 810, 820
+                          830.  Dry testing next before functional testing and
+                          YES I am expecting bugs :(
+                          Must remember to call sl830 post autogen records,
+                          BEFORE running the Invoice post processing via the
+                          sales menu in case it was not run.
+                          The sl830 posting program creates Invoice records so
+                          that the normal invoice posting flow can continue
+                          without any issues if not run daily and it will action
+                          Autogen invoicing in a date window of munus 2, plus 2
+                          days around the next date due to allow for weekends &
+                          bank holidays etc.
+                          It would be a problem if more than 4 days elapsed
+                          without running such as a computer system shutdown due
+                          to extended holiday or other break.
+
+                          With these new programs a new file has been created
+                          which is file04 named slautogen.dat and once testing
+                          has completed I will also create the SLauogen rdbms
+                          table to match although I might do this earlier while
+                          I remeber to do so...
+
+                          If you have been getting the night builds you should
+                          delete sales sources sl845.* sl850.* as they are
+                          redundant as were only used as place holders while
+                          coding sl830.
+                          In any event they will not compile without errors.
+
+                          Note that although I have allowed for same programs
+                          for Purchase Ledger this has not been coded as I am
+                          not so sure they will be useful to anyone BUT if you
+                          have a need for such let me know via email and I will
+                          add them after testing the sales ledger versions.
+                          There are very minor differences as far as I remember.
+                          In the meanwhile I have allowed for the supporting
+                          file and table entries but again not coded.
+
+2023-05-20 Vincent Coen * sl050 added line items to reports to match sl820.
+                          Have to see if it is now too much reporting though.
+                          Need to check report layouts during testing.
+                          it may well have been in use in older versions !
+                          Updates to sl810, sl820 - more in progess.
+
+2023-05-04 Vincent Coen * Some manual changes with Autogen included as well
+                          as usage details by program.
+                          Four new programs namely:
+                          sl800 (Autogen menu), sl810 (Autogen Entry/amend)
+                          sl820 (Autogen Proof) and sl830 (Autogen Post).
+                          sl810 relies on Stock control being used in invoice
+                          mode 2 (line items).
+                          sl830 auto invoice numbering with Stock control and
+                          Analysis and valuing in operation.
+                          These are in creation mode so not usable at the moment
+                          but the Autogen menu is available but should not be
+                          used at this time to access any of the options.
+                          CAUTION the above program numbers may change subject
+                          for the need for additional coding / programs etc.
+
+2023-04-08 Vincent Coen * Updates to SL manual, more printer size changes for
+                          portrait size - stops blank lines on 7305 printer.
+
+2023-04-03 Vincent Coen * Changed printer from 132 to 80 in sl070 & pl070.
+
+2023-03-06 Vincent Coen * SL930 and 950 added VAT number at end of business
+                          address if non spaces in system record. Better at the
+                          top than near the bottom as could end up anywhere in
+                          position. Clean file to end by cc80.
+
+2023-02-18 Vincent Coen * Sl930 printer routine changed to accept "FILE:
+                          in System print file names instead of cups spool names
+                          so that files are saved as is.
+                          IT IS UP TO USER TO PROCESS THEM MANUALLY.
+                          Useful for testing mostly.
+                          IMPORTANT = = = = = = = >>>>
+                          Changes for bug in aa020-Open for acas016,29,22,26,29.
+                          Used in S/L invoice, otm3, P/L Ledger, Invoice & otm5.
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                          acas-nightly.rar has been updated  00:01 GMT 19 Feb.
+
+2020-06-16 Vincent Coen * All programs that use special stationery have had
+                          Changes namely sl190, sl110, sl930 and sl950.
+                          Most changes are very minor in nature but to support
+                          use of plain paper requiring the printing of extra
+                          heading lines.
+                          There may be more to do - subject to testing.
+                          This is still outstanding - 2023-02-19.
+
+2018-04-29 Vincent Coen * All FH call routines changed to clear Access-Type for
+                          any other than Open so that the logger is cleaner.
+                          ALL FH checked for EOF repeats so that status is
+                          cleared if doing any function other than read next.
+                          This applies to all ACAS systems.
+                          Found bugs for backup, wrong field being used for all
+                          systems. Stop doing a display on exit as causes a
+                          stop msg from runtime.
+                          Date format change as of this update to Intl / Unix.
+
+These are in dd/mm/yy order as I can't be bother to change them
+
+22/03/18 Vincent Coen   * Autorun code now in runable via sales or purchase.
+                          THIS is NOT recommended.
+
+21/03/18 Vincent Coen   * Updated sl940 for the missing Audit, stock file update
+                          before deleting an invoice. Updated Buiding and SL
+                          manuals with new messages.
+                          Update some of the MT (Audit, Anal and other unit
+                          using Delete-All functions to match code updates.
+                          Also All LD programs updated for calling-data as used
+                          in the common call params now to support Autorun for
+                          st020, st040 there might be more for special
+                          processing such as end of month allowing run via stock
+                          to print audit and run End of period processing at
+                          00:01 on 1st of month.
+                          Need to so the same for other systems as needed as
+                          well as XL150. No doubt more manual changes needed
+                          but wait for system and End to End testing.
+
+10/02/18 Vincent Coen   * Sales along with the other ACAS systems is now ready
+                          for system testing so the first is IRS as a set of
+                          accounts is required to start.
+                          I may well make use of irs testing to do some testing
+                          of General but will only use it without any mPC/Branch
+                          testing but this should cover a lot of ground.
+                          The usage of Branches or mPC (multiple profit centres)
+                          is an expansion of the facilities within IRS so should
+                          map well - I hope.
+
+26/08/17 Vincent Coen   * Revisit code checking all for itm3 and invoice for
+                          any errors prior to revisit and finish off Purchase
+                          as found problems within that may be also in Sales.
+                          Some problem found but mostly silly ones - so far.
+                          Done - sales, sl000 - sl920.
+                                 sl930, sl940, sl950, sl960.
+
+                          Testing to be started after full data backup of
+                          v3.01.07 and creating new source dir - ACAS-3.02.01
+                          AND new data dir for init testing using Cobol files
+                          only. Why? because there are RDB loader programs for
+                          all files but NOT the other way around.
+                          After Cobol file testing, test loader programs and
+                          re-test using RDB, create new rdb database for loading
+                          all data from the start into RDB verifying all
+                          operations.
+
+                          At the same time of system testing update / rewrite
+                          all ACAS manuals and create a new manual for full
+                          systems set up may well create new program ACAS-setup
+                          to create files/tables and data that is required for
+                          use such as :
+                          System Parameter Files
+                          Analysis
+                          IRS Chart of Accounts using default set (company).
+                          Stock with base data.
+                          Sales and invoicing with base data.
+                          Purchase with base data.
+
+                          Look at creating automated testing scripts if I can
+                          find a free CHOTS tool for Linux as existing is
+                          commercial product and is some what old in the tooth.
+
+09/02/17 Vincent Coen   * Updated all ACAS systems to 3.02 to use RDB or Cobol
+                          files.
+                          Changed sl190 to use sorted Open item file or RDB.
+                          to provide sorted history per customer.
+                          This bug has been there for ages - why has no one
+                          reported it?
+
+18/05/13 Vincent Coen	  * Remapped all invoice & open item files to support
+                          link to SC (Stock Control) when using Invoicing so
+                          that product codes has 13 chars, descriptions has 32
+                          chars.
+                          Data entry will use SC if linked using stock code or
+                          abbrev code or description. Search available on Stock
+                          code, Abrev & description using function keys to
+                          instigate a search.
+                          F3 = Search on Abrev code display 1st with F2 for next
+                               record
+                          F6 = Search on description display 1st with F5 for
+                               next record.
+                          Currently Invoice entry sl910 still allows manual item
+                          entry even when stock is linked, must decide if this
+                          must be removed.!!!
+

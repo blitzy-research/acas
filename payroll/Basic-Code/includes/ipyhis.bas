@@ -1,0 +1,21 @@
+		his.emp.no$,\	       rem   9/25/79
+		his.qtd.income.taxable,his.qtd.other.taxable,\
+		his.qtd.other.nontaxable,his.qtd.fica.taxable,\
+		his.qtd.tips,his.qtd.net,his.qtd.eic,\
+		his.qtd.fwt,his.qtd.swt,\
+		his.qtd.lwt,his.qtd.fica,his.qtd.sdi,his.qtd.sys(1),\
+		his.qtd.sys(2),his.qtd.sys(3),his.qtd.sys(4),his.qtd.sys(5),\
+		his.qtd.emp(1),his.qtd.emp(2),his.qtd.emp(3),\
+		his.qtd.other.ded,\
+		his.qtd.units(1),his.qtd.units(2),\
+		his.qtd.units(3),his.qtd.units(4),\
+		his.ytd.income.taxable,his.ytd.other.taxable,\
+		his.ytd.other.nontaxable,his.ytd.fica.taxable,\
+		his.ytd.tips,his.ytd.net,his.ytd.eic,\
+		his.ytd.fwt,his.ytd.swt,\
+		his.ytd.lwt,his.ytd.fica,his.ytd.sdi,his.ytd.sys(1),\
+		his.ytd.sys(2),his.ytd.sys(3),his.ytd.sys(4),his.ytd.sys(5),\
+		his.ytd.emp(1),his.ytd.emp(2),his.ytd.emp(3),\
+		his.ytd.other.ded,\
+		his.ytd.units(1),his.ytd.units(2),\
+		his.ytd.units(3),his.ytd.units(4)

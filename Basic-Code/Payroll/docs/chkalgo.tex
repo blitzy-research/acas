@@ -1,0 +1,22 @@
+.mt7
+.mb9
+.po8
+.ll65
+.ce
+CHECK DIGIT ALGORITHM
+.sp3
+.li
+rem	   Nov. 21, 1978
+def fn.chk.dig$(no$)
+	 sum%=0
+	 xx5%=1
+	 while xx5%<=len(no$)
+		 sum%=sum%+xx5%val(mid$(no$,xx5%,1))
+		 xx5%=xx5%+1
+	 wend
+	 remainder%=sum%-(int(sum%/11)*11)
+	 if remainder%=10 then remainder%=0
+	 fn.ck.dig$=str$(remainder%)
+	 return
+fend
+.br

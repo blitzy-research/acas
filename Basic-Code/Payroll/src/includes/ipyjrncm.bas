@@ -1,0 +1,26 @@
+common acct.amt(1)			rem 12/17/79
+common total.units(1)
+common dist.out(1)
+common total.reg.wages
+common total.other.earn
+common total.tips
+common total.tips.reported
+common total.fwt
+common total.swt
+common total.lwt
+common total.fica
+common total.sdi
+common total.eic
+common total.other.ded
+common total.net
+common total.co.fica
+common total.co.futa
+common total.co.sui
+common total.vac.taken
+common total.sl.taken
+common total.comp.taken
+common total.comp.earned
+common total.units(01)
+common page%
+common from.date$
+common chk.hdr.to.date$

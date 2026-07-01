@@ -1,0 +1,70 @@
+Notes taken from the source code.
+
+ Purpose.             Using a Cbasic source program will add in all include
+                      files via the #include statements finding such code in
+                      folder ./includes.
+
+                      The program also accepts chars $, % and #, if used
+                      preceding 'include'
+                      i.e.,  #include "name", $include "name" and %include
+                      "name".
+
+            Call proc: build-cbasic arg1 arg2 arg3 arg4
+                       Where arg1 = input file with ext
+                             arg2 = Output file with ext
+                             arg3 = Include source file extension, i.e. ".bas"
+                                    or ".BAS"
+                                     Where filename used in sources is without
+                                     one, i.e.,  #include "cb-010" (# can also
+                                     be $ or %)
+                             arg4 = Include folder if not current (active)
+                                    folder I.e.,  includes
+                                    which is BELOW current folder where the
+                                    includes sources can be found.
+
+  Program will search any found include files (having stripped off any quotes
+  in the folder supplied as arg4). IT will NOT examine content of the copybook
+  (include) files for more include statements This means that a 2nd pass may be
+  required.
+
+ If it cannot find a include file it will write out to O/P file a msg of :
+   SY006 Not Found includes/filename.bas Continuing
+
+        Actual example of commands used :
+
+   Pass 1 :
+  build-cbasic pyupdhis.bas pyupdhis-1.bas ".bas" includes
+
+   Pass 2 (if needed - as one or more include files may in turn also contain
+   includes) and if SY006 is issued :
+
+  build-cbasic pyupdhis-1.bas pyupdhis-2.bas ".bas"  includes
+
+  Basically continue with extra passes untill there is no more warning of files
+  not found but note the counts displayed for in. out and inc(ludes).
+
+***
+  To build program - install the gnucobol compiler via your Linux package
+  manager OR go to sourceforge.net/p/gnucobol url, Files and install latest
+  release which as of 6th February 2026 is v3.2.
+
+  For Windows versions as well, go to Arnolds url at :
+   https://www.arnoldtrembley.com/GnuCOBOL.htm
+  Note running Linux using WSL2 under Windows v10 or v11 - use same procedure
+  as for Linux, assuming a package manager is available.
+
+ Once installed go to folder holding source of this program and enter :
+  cobc -x build-cbasic.cbl  and this will compile program without a source
+  listing otherwise for such a listing run
+  cobc -x build-cbasic.cbl -T build-cbasic.prn
+
+ It should compile without any warnings or errors being reported.
+
+
+06/02/2026 vbc -  v1.0.5 Released with these notes.
+09/03/2026 vbc -         Minor edits for typos.
+
+Vincent B Coen, 17 Stag Green Avenue
+                Hatfield, UK.
+vbcoen@gmail.com - for any problems etc.
+

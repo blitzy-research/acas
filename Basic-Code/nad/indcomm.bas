@@ -1,0 +1,22 @@
+common chained.from.root%	rem Dec. 17, 1979
+common chained%
+common common.chaining.status$
+common common.serial.number$
+common common.drive$
+common common.date$
+common common.return.code%
+common common.menu.item%
+common common.params.in.common%
+common pr1.no.recs%
+common pr1.debugging%
+common pr1.co.name$
+common pr1.print.title$
+common pr1.page.width%
+common pr1.lines.per.page%
+common pr1.page.len%
+common pr1.date.format%
+common pr1.ref.on.label%
+common pr1.start.ref%
+common pr1.length.ref%
+common pr1.bell.suppressed%
+%page 58

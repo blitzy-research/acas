@@ -1,0 +1,148 @@
+	REM *****************************************************************\
+	    *								                                *\
+	    *	   OE.BAS	   ORDER ENTRY SIGN-ON PROGRAM		            *\
+	    *								                                *\
+	    *****************************************************************
+
+      REM **********************************************************************\
+          *   Source for OE are copyright (c) 1979 - 2023 and later            *\
+          *   Vincent B Coen. The code may be used by any one providing no fee *\
+          *   has been charged amnd is for your own usageor your business.     *\
+          **********************************************************************
+
+%CHAIN 50, 20000, 2000, 2000
+%INCLUDE OECOMMON
+
+	DIM PR1.PASSWORD$(3), PR1.CREDCARD.CODE%(4), PR1.CREDCARD.NAME$(4),\
+		ROW%(24), COL%(80)
+
+	BELL$=CHR$(128+7)
+	CLRS$=CHR$(128+27)+CHR$(128+42) : AF$=CHR$(128+27)+CHR$(128+61)
+	EOP$=CHR$(128+27)+CHR$(128+89)	: EOL$=CHR$(128+27)+CHR$(128+84)
+
+	REM ***  SET SCREEN WIDTH  ***
+
+	POKE 272,132
+	CONSOLE
+
+	REM ***  OPEN PARAMETER FILES  ***
+
+	GOSUB 80000 : GOSUB 80200
+
+	REM ***  READ PARAMETER FILE 1	***
+
+	GOSUB 80020
+
+	REM ***  VERIFY PASSWORD  ***
+
+	PASSWORD$=LEFT$(COMMAND$,5)
+	IF PASSWORD$="QCRED" THEN \
+		B$="OE090B" : GOTO 650
+	FOR I%=1 TO 3
+		IF PASSWORD$=PR1.PASSWORD$(I%) THEN 10
+	NEXT I%
+	GOTO 9020
+
+10	IF LEN(COMMAND$)>5 THEN 20
+
+	REM ***  GET TODAY'S DATE  ***
+
+	PRINT "ENTER DATE (DD/MM/YY)";
+	INPUT LINE DATE$
+	IF LEN(DATE$)<>8 THEN 9040
+	GOTO 30
+
+20	DATE$=MID$(COMMAND$,7,8)
+
+30	D1=VAL(LEFT$(DATE$,2))
+	D2=VAL(MID$(DATE$,4,2))
+	D3=VAL(RIGHT$(DATE$,2))
+	IF D1<1 OR D3<80 THEN 9040
+	ON D2 GOTO 40,50,40,60,40,60,40,40,60,40,60,40
+	GOTO 9040
+
+40	IF D1>31 THEN 9040
+	GOTO 70
+
+50	D4=(D3/4)-(INT(D3/4))
+	IF D4=0 AND D1>29 THEN 9040
+	IF D1>28 THEN 9040
+	GOTO 70
+
+60	IF D1>30 THEN 9040
+
+70	Z$=MID$(DATE$,3,1)+MID$(DATE$,6,1)
+	IF Z$<>"//" THEN 9040
+
+%INCLUDE OEDATES
+
+500	REM ***  READ PARAMETER FILE 3	***
+
+	GOSUB 80220
+	IF A%<PR3.DATE% THEN 9070
+
+	REM ***  TEST FOR START-OF-DAY AND END-OF-DAY FLAGS  ***
+
+	IF A%>PR3.DATE% THEN 510
+	IF PR3.STARTOF.DAY%=0 AND PR3.ENDOF.DAY%=1 THEN \
+		B$="OE100" : GOTO 650
+	IF PR3.STARTOF.DAY%=1 AND PR3.ENDOF.DAY%=0 THEN 9010
+	GOTO 9080
+
+510	IF PR3.STARTOF.DAY%=1 AND PR3.ENDOF.DAY%=0 THEN \
+		A$="START OF DAY" : GOSUB 600 : GOTO 520
+	GOTO 550
+
+520	IF Z$<>"YES" THEN 10000
+	PR3.LASTDATE$=PR3.DATE$
+	PR3.LASTDATE%=PR3.DATE%
+	PR3.DATE$    =DATE$
+	PR3.DATE%    =A%
+	IF END #3 THEN 80245
+	GOSUB 80240 : B$="OE010" : GOTO 650
+
+550	IF PR3.STARTOF.DAY%=0 AND PR3.ENDOF.DAY%=1 THEN \
+		A$="END OF DAY" : GOSUB 600 : GOTO 560
+	GOTO 9080
+
+560	IF Z$="YES" THEN \
+		B$="OE100" : GOTO 650
+	GOTO 10000
+
+600	PRINT BELL$; "RUN "; A$; "(YES/NO)";
+	INPUT LINE Z$
+	Z$=UCASE$(Z$)
+	IF Z$="Y" OR Z$="YES" OR Z$="N" OR Z$="NO" THEN 610
+	PRINT BELL$; "INCORRECT ANSWER - MUST BE YES OR NO"
+	GOTO 600
+
+610	RETURN
+
+	REM ***  GET NEXT PROGRAM  ***
+
+650	FOR I%=1 TO 24 : ROW%(I%)=I%+31 : NEXT I%
+	FOR I%=1 TO 80 : COL%(I%)=I%+31 : NEXT I%
+	CLOSE 1,3
+	CHAIN B$
+
+	REM ***  ERROR ROUTINES  ***
+
+9010	PRINT BELL$; "END OF DAY HAS BEEN RUN FOR "; DATE$
+	GOTO 10000
+
+9020	PRINT BELL$; "INVALID PASSWORD"
+	GOTO 10000
+
+9040	PRINT BELL$; "INVALID DATE"
+	GOTO 10000
+
+9070	PRINT BELL$; "EARLY DATE"
+	GOTO 10000
+
+9080	PRINT BELL$; "OEPR3.FIL CORRUPT"
+
+10000	STOP
+
+%INCLUDE OEPR1FIL
+%INCLUDE OEPR3FIL
+%INCLUDE OEFILSUB

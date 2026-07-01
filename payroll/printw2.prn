@@ -1,0 +1,2494 @@
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0001
+
+LINE    .....................................................SOURCE.....................................................
+
+000001         >>source free
+000002  *>****************************************************************
+000003  *>               Print W-2 Forms on plain paper for              *
+000004  *>                 selected employees.                           *
+000005  *>                                                               *
+000006  *>   Temp program name may be py220 - coding from printw2        *
+000007  *>                                                               *
+000008  *>    Prograam uses RW - Report Writer.                          *
+000009  *>                                                               *
+000010  *>****************************************************************
+000011  *>
+000012   identification          division.
+000013  *>================================
+000014  *>
+000015        program-id.       printw2.
+000016  *>**
+000017        Author.           Vincent B Coen FBCS, FIDM, FIDPM, 08/03/2026.
+000018  *>**
+000019  *>    Security.         Copyright (C) 2025 - 2026 & later, Vincent Bryan Coen.
+000020  *>                      Distributed under the GNU General Public License.
+000021  *>                      See the file COPYING for details.
+000022  *>**
+000023  *>    Remarks.          Print Form 940 Report for end of year processing.
+000024  *>                      Semi-sourced from Basic code from print940.
+000025  *>**
+000026  *>    Version.          See Prog-Name In Ws.
+000027  *>**
+000028  *>    Called Modules.   NONE other than SYSTEM to lpr.
+000029  *>**
+000030  *>    Functions Used:   NONE.
+000031  *>
+000032  *>    Files used :
+000033  *>                      pypr1.   Params  for PR2 data
+000034  *>                      pyded.   Deductions
+000035  *>                      pycoh.   Company History.
+000036  *>                      pyhis.   Employee History.
+000037  *>
+000038  *>    Error messages used.
+000039  *> System wide:
+000040  *>                      SY00.
+000041  *> Program specific:
+000042  *>                      PY00
+000043  *>                      PY
+000044  *>**
+000045  *> Changes:
+000046  *> 12/03/2026 vbc - 1.0.00 Coding starting.
+000047  *>                         After testing version will be set to v3.3.
+000048  *>                         WARNING: You MUST set the terminal program to be 80
+000049  *>                         cols wide and MORE than 27 lines deep and this is to
+000050  *>                         allow for the some of the extra lines beyond 24 to
+000051  *>                         be used as areas for the warning or error messages
+000052  *>                         to be displayed. 26 lines is the minimum.
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0002
+
+LINE    .....................................................SOURCE.....................................................
+
+000053  *>                         This procedure must be applied at all times when
+000054  *>                         running Payroll.
+000055  *>                         For almost all terminal programs, can be achieved
+000056  *>                         by pulling the left and bottom edges of the terminal
+000057  *>                         screen with the mouse and holding right button and
+000058  *>                         pulling until the correct number is displayed, and
+000059  *>                         doing so, one at a time or pulling bottom right
+000060  *>                         corner.
+000061  *>
+000062  *>*************************************************************************
+000063  *> Copyright Notice.
+000064  *> ****************
+000065  *>
+000066  *> These files and programs are part of the Applewood Computers Accounting
+000067  *> System and is Copyright (c) Vincent B Coen. 1976-2026 and later.
+000068  *>
+000069  *> This program is now free software; you can redistribute it and/or modify it
+000070  *> under the terms listed here and of the GNU General Public License as
+000071  *> published by the Free Software Foundation; version 3 and later as revised
+000072  *> for PERSONAL USAGE ONLY and that includes for use within a business but
+000073  *> EXCLUDES repackaging or for Resale, Rental or Hire in ANY way.
+000074  *>
+000075  *> Persons interested in repackaging, redevelopment for the purpose of resale or
+000076  *> distribution in a rental or hire mode must get in touch with the copyright
+000077  *> holder with your commercial plans and proposals to vbcoen@gmail.com.
+000078  *>
+000079  *> ACAS is distributed in the hope that it will be useful, but WITHOUT
+000080  *> ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+000081  *> FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+000082  *> for more details. If it breaks, you own both pieces but I will endeavour
+000083  *> to fix it, providing you tell me about the problem.
+000084  *>
+000085  *> You should have received a copy of the GNU General Public License along
+000086  *> with ACAS; see the file COPYING.  If not, write to the Free Software
+000087  *> Foundation, 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA.
+000088  *>
+000089  *>*************************************************************************
+000090  *>
+000091   environment             division.
+000092  *>================================
+000093  *>
+000094   copy "envdiv.cob".
+000001C  configuration section.
+000002C  source-computer.      Linux.
+000003C  object-computer.      Linux.
+000004C *> special-names.
+000005C *>     console is crt.
+000095  *> SPECIAL-NAMES.
+000096  *>       CRT STATUS IS COB-CRT-STATUS.
+000097   REPOSITORY.
+000098         FUNCTION ALL INTRINSIC.
+000099  *>
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0003
+
+LINE    .....................................................SOURCE.....................................................
+
+000100   input-output            section.
+000101   file-control.
+000102   copy "selpyparam1.cob".
+000001C *>
+000002C *> Payroll param-1 (USA)
+000003C *>
+000004C      select  PY-Param1-File  assign        File-47
+000005C                              access        dynamic
+000006C                              organization  is relative
+000007C                              relative key  is RRN
+000008C                              status        PY-PR1-Status.
+000103   copy "selpyemp.cob".
+000001C *>
+000002C *> Payroll Employee (USA)
+000003C *>
+000004C      select  PY-Employee-File
+000005C                              assign               File-43
+000006C                              access               dynamic
+000007C                              organization         indexed
+000008C                              record key is        Emp-No
+000009C                              alternate record key Emp-Search-Name with duplicates
+000010C                              status               PY-Emp-Status.
+000011C *>
+000104   copy "selpyhis.cob".
+000001C *>
+000002C *> Payroll History
+000003C *>
+000004C      select  PY-History-File
+000005C                              assign        File-45
+000006C                              access        dynamic
+000007C                              organization  indexed
+000008C                              record key is His-Emp-No
+000009C                              status        PY-His-Emp-Status.
+000010C *>
+000105  *>
+000106   copy "selprint.cob".    *> 132
+000001C *>
+000002C *> removed org line seq as causing double line printing in OC CE
+000003C *>
+000004C        select  print-file     assign        "prt-1"
+000005C                               organization line sequential.
+000107  *>
+000108   data                    division.
+000109  *>================================
+000110  *>
+000111   file section.
+000112  *>
+000113   copy "fdpyparam1.cob".
+000001C *>*******************************************
+000002C *>                                          *
+000003C *>  File Definition For Payroll Param  File *
+000004C *>                                          *
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0004
+
+LINE    .....................................................SOURCE.....................................................
+
+000005C *>*******************************************
+000006C *>   Record Size 1024 Bytes (13/10/25)
+000007C *>   see wspyparam1.cob for later updates
+000008C *>
+000009C  fd  PY-Param1-File.
+000010C *>
+000011C  copy "wspyparam1.cob".
+000001C *>*******************************************
+000002C *>                                          *
+000003C *>  Record Definition For Py param1 File    *
+000004C *>     Uses RRN = 1                         *
+000005C *>                                          *
+000006C *>  If moved to ACAS system file will be    *
+000007C *>    record 5 and if split for PR1 rec 6.  *
+000008C *>     amd only the FH will need a change & *
+000009C *>      possibly the DAL if all of Payroll  *
+000010C *>      is to be supported in Mysql         *
+000011C *> A decision to be made after testing.     *
+000012C *>                                          *
+000013C *>*******************************************
+000014C *>
+000015C *>  File size 624 bytes padded to 1024 by filler.
+000016C *>     RESIZE NEEDED 1/12/25
+000017C *>
+000018C *> 13/10/25 vbc - Created.
+000019C *>  Consider adding to system file as rec #5 after basic testing
+000020C *> 08/11/25 vbc - Rec  changed still 1024.
+000021C *> 11/11/25 vbc - Moved PR2 fields embedded within PR1 area to PR2 rec size the same.
+000022C *> 26/11/25 vbc - Added new field PY-PR2-Last-Employee-no - filler adjusted.
+000023C *> 28/11/25 vbc - Added new field PY-PR1-Tax-ID  to ident employer with IRS set
+000024C *>                as x(24) as format not known.
+000025C *> 09/03/26 vbc - PR2 fields changed from x to bin-short unsigned.
+000026C *>   WILL NEED RESIZING..
+000027C *>
+000028C  01  PY-Param1-Record.
+000029C      03  PY-PR1-Block.                         *> Size = 670
+000030C          05  PY-PR1-Company-Data.                 *> size 298
+000031C              07  PY-PR1-Co-Name       pic x(60). *> Applewood Computers  [ 60 ] ?
+000032C              07  PY-PR1-Trade-Name    pic x(32).
+000033C              07  PY-PR1-Co-Address-1  pic x(32). *> 17 Stag Green Avenue [ 30 ]
+000034C              07  PY-PR1-Co-Address-2  pic x(32). *> Hatfield             [ 30 ]
+000035C              07  PY-PR1-Co-Address-3  pic x(32). *> Hertfordshire        [ 30 ]
+000036C              07  PY-PR1-Co-Address-4  pic x(32). *> spaces
+000037C              07  PY-PR1-Co-Post-Code.
+000038C                  09  PY-PR1-Co-Zip    pic x(10).
+000039C                  09  PY-PR1-Co-State  pic xx.
+000040C              07  PY-PR1-Co-Phone      pic x(12). *> 01234-123456
+000041C              07  PY-PR1-Co-Email      pic x(30). *> vbcoen@gmail.com
+000042C              07  PY-PR1-Tax-ID        pic x(24). *> Used for Employer ID for IRS  NEW 27/11/25
+000043C *>
+000044C *> Only set if PY-PR1-IRS-Used or PY-PR1-GL-Used  = "Y" <<<<<<<<<<<<<<<<<<<<<<<<<<
+000045C *>
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0005
+
+LINE    .....................................................SOURCE.....................................................
+
+000046C          05  PY-PR1-Offset-Cash-Acct  binary-char unsigned.    *> def 1  another file rec 5 or 6 digits
+000047C          05  PY-PR1-Dflt-Gross-Acct   binary-char unsigned.    *>   DITTO
+000048C          05  PY-PR1-Dflt-Dist-Acct    binary-char unsigned.    *>  def 3
+000049C          05  PY-PR1-Max-Dist-Accts    binary-char unsigned.   *> rem 11/06/79 these aren't in pr1 file, Are now!
+000050C *>
+000051C          05  PY-PR1-Min-Wage          pic 9(5)v99    comp-3.  *>  def 0
+000052C          05  PY-PR1-Void-Check-Amt    pic 9(5)v99    comp-3.
+000053C *>
+000054C          05  PY-PR1-Rate2-Factor      pic 9(5)v99    comp-3.  *> def 1.5
+000055C          05  PY-PR1-Rate3-Factor      pic 9(5)v99    comp-3.  *> def 2.0
+000056C          05  PY-PR1-Max-Pay-Factor    pic 9(5)v99    comp-3.  *> def 3.0
+000057C          05  PY-PR1-Dflt-Pay-Rate     pic 9(5)v99    comp-3.  *> def 1.0
+000058C          05  PY-PR1-Dflt-Vac-Rate     pic 9(5)v99    comp-3.  *> def 0.42
+000059C          05  PY-PR1-Dflt-SL-Rate      pic 9(5)v99    comp-3.  *> def 0.21
+000060C          05  PY-PR1-Dflt-Norm-Units   pic 9(5)v99    comp-3.  *> def 1  Regular
+000061C *>
+000062C          05  PY-PR1-Last-Day-Pay-Period  pic 9(8). *> temp entry ? from param entry *nix format
+000063C          05  PY-PR1-Void-Checks-Over-Max pic x.    *> def N      - Y or N
+000064C          05  PY-PR1-Rate4-Exclusion-Type pic 9.    *> def 1  (1..4)
+000065C          05  PY-PR1-Check-Printing-Used  pic x.    *> def Y (or N)
+000066C          05  PY-PR1-Check-History-Used   pic x.    *> def N      - or Y
+000067C          05  PY-PR1-S-Used               pic x.    *> def N      - or N Semi M
+000068C          05  PY-PR1-M-Used               pic x.    *> def Y      - Y  Month
+000069C          05  PY-PR1-W-Used               pic x.    *> Def N   "  - Y  Weekly
+000070C          05  PY-PR1-B-Used               pic x.    *> def N   "  - Y  Bi Month
+000071C          05  PY-PR1-JC-Used              pic x.    *> def N      - Y
+000072C          05  PY-PR1-GL-Used              pic x.    *> def N      - or Y
+000073C          05  PY-PR1-IRS-Used             pic x.    *> del Y      - or N
+000074C          05  PY-PR1-Dflt-Pay-Interval    pic x.    *> def S  could be SMBW - S=Salary,W=Weekly, M=Monthly & B=Bi
+000074+ -Monthly
+000075C          05  PY-PR1-Dist-Used            pic x.    *> def N  was binary-char unsigned.    *> def Y ????? what
+000076C          05  PY-PR1-Currency-Sign        pic x.    *> Def "$"
+000077C          05  PY-PR1-OS-Delimiter         pic x.    *>   / for *nix and \ for windows Used via ACAS param
+000078C          05  PY-PR1-Debugging            pic x.    *> Def N (or Y !
+000079C          05  PY-PR1-Hard-Delete          pic x.    *> Def N (or Y)
+000080C *>
+000081C *>  Where are these stored, if anywhere ?
+000082C *>
+000083C *> interval$(1)="SEMI-MONTHLY"
+000084C *> interval$(2)="MONTHLY"
+000085C *> interval$(3)="BIWEEKLY"
+000086C *> interval$(4)="WEEKLY"
+000087C *>
+000088C          05  PY-PR1-Dflt-HS-Type      pic x.     *> def S  Dflt-Pay-Type ??
+000089C          05  PY-PR1-Rate-Name         pic x(15)       occurs 4.   *> def  "REGULAR"
+000090C                                                                   *> def  "OVERTIME" "SPEC. OVERTIME" "COMMISSIO
+000090+ N"
+000091C          05  PY-PR1-Fed-ID            pic x(15). *> "FEDERAL ID"
+000092C          05  PY-PR1-State-ID          pic x(15). *> "STATE ID"
+000093C          05  PY-PR1-Local-ID          pic x(15). *> "LOCAL ID"
+000094C          05  PY-PR1-Date-Format       pic 9.     *> Def: 2=mm/dd/ccyy,  1=dd/mm/ccyy
+000095C *>                                                  ( Value reversed from BASIC code to match ACAS.
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0006
+
+LINE    .....................................................SOURCE.....................................................
+
+000096C          05  PY-PR1-Date.                        *> WHAT IS THIS FOR ? - will ASSUME today for the BUT NEEDED -
+000096+ SO FAR NO.
+000097C *>                                                  moment defaulting to USA mode - ditto for other dates
+000098C              07  PY-PR1-Date-Mo       pic 99.    *> def 1
+000099C              07  PY-PR1-Date-Dy       pic 99.    *> def 2
+000100C              07  PY-PR1-Date-Yr       pic 9(4).  *> def 3 Added CC
+000101C          05  PY-PR1-Page-Lines-P      pic 99.    *> def 60  Portrait
+000102C          05  PY-PR1-Page-Lines-L      pic 99.    *> def 60  Landscape
+000103C          05  PY-PR1-Page-Width-P      pic 999.   *> def 132  -- Portrait paper = 80
+000104C          05  PY-PR1-Page-Width-L      pic 999.   *> def 132  -- landscape paper = 120
+000105C          05  PY-PR1-User-Prog-Used    pic x.     *>  N   ----  These three not used
+000106C          05  PY-PR1-User-Prog         pic x(8).  *> spaces
+000107C          05  PY-PR1-User-Prog-Desc    pic x(20). *> spaces
+000108C          05  PY-PR1-Max-Chk-Cats      binary-char.  *>     This block values to be determined
+000109C          05  PY-PR1-Max-Emp-Eds       binary-char.  *>  3  NEEDED <<   a number but not really neeeded as fields
+000109+  are exact #
+000110C          05  PY-PR1-Max-Ed-Cats       binary-char.  *>
+000111C          05  PY-PR1-Max-Swt-Entries   binary-char.  *>            A / marks in use for any one line
+000112C          05  PY-PR1-Lo-Ded-Chk-Cat    binary-char.  *>
+000113C          05  PY-PR1-Hi-Ded-Chk-Cat    binary-char.  *>
+000114C          05  PY-PR1-Lo-Earn-Chk-Cat   binary-char.  *>
+000115C          05  PY-PR1-Hi-Earn-Chk-Cat   binary-char.  *>
+000116C          05  PY-PR1-Max-Sys-Eds       binary-char.  *> 5
+000117C *>
+000118C          05  PY-PR1-Print-Spool-Name  pic x(48). *> All 3 from ACAS system params
+000119C          05  PY-PR1-Print-Spool-Name2 pic x(48). *> but only 1st used (or is it)
+000120C          05  PY-PR1-Print-Spool-Name3 pic x(48). *>     consider creating a pdf file from prt-1
+000121C *>
+000122C      03  PY-PR2-Block.                        *> Size = 94  COULD BE REC 2 ? (+ filler = 640 or 768 etc) (RRN =
+000122+ 2). sizes wrong
+000123C          05  PY-PR2-Year              pic 9(4).  *> current year
+000124C          05  PY-PR2-Year-Next         pic 9(4).  *> Year + 1  --- New field
+000125C          05  PY-PR2-Last-SM-Apply-No  pic 9(4).  *> def 0
+000126C          05  PY-PR2-Last-WB-Apply-No  pic 9(4).  *> def 0
+000127C          05  PY-PR2-Hrs-Batch-No      pic 9(4).  *> def 0
+000128C          05  PY-PR2-Last-Day-Last-W   pic 9(8).  *> }
+000129C          05  PY-PR2-Last-Day-Last-B   pic 9(8).  *> }
+000130C          05  PY-PR2-Last-Day-Last-S   pic 9(8).  *> }  use todays to yyyymmdd
+000131C          05  PY-PR2-Last-Day-Last-M   pic 9(8).  *> }       error,  may be not ??????
+000132C          05  PY-PR2-Check-Date        pic 9(8).  *> }
+000133C          05  PY-PR2-Last-Employee-No  pic 9(8)   comp.    *>  ?? NEW for py010 data entry EXCLUDES check digit.
+000133+ allows for # = 64k
+000134C          05  PY-PR2-No-Active-Emps    binary-short unsigned.   *> def 0 - NEEDED ??
+000135C          05  PY-PR2-No-Employees      binary-short unsigned.   *> def 0 - NEEDED ??
+000136C          05  PY-PR2-No-Of-SM-Applies  binary-short unsigned.   *> SIZE emough 65k ?  - 12/02/79 pr2.no.of.xx.app
+000136+ lies% = number of sm, wb applies this quarter
+000137C          05  PY-PR2-No-Of-WB-Applies  binary-short unsigned.   *> SIZE emough 65k ?    DITTO
+000138C          05  PY-PR2-Just-Closed-Year  binary-short unsigned.   *>                    - 12/02/79 pr2.just.closed.
+000138+ year% = no applies run since year end close
+000139C          05  PY-PR2-No-Accts          binary-char  unsigned.    *> def 4 = 4 accounts ? is it needed ??
+000140C          05  PY-PR2-940-Printed       pic x.     *> N  (or Y)
+000141C          05  PY-PR2-941-Printed       pic x.     *> N  (or Y)
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0007
+
+LINE    .....................................................SOURCE.....................................................
+
+000142C          05  PY-PR2-W2-Printed        pic x.     *> N  (or Y)
+000143C          05  PY-PR2-Last-Q-Ended      pic 9.     *> 4 ( vals 1, 2, 3 or 4 )
+000144C          05  PY-PR2-Last-Check-No     pic 9(15). *> 000000                - 12/02/79 pr2.last.check.no$    = las
+000144+ t check number written by PYCHECKS
+000145C *>
+000146C      03  filler                       pic x(260).  *> could just be 768.
+000147C *>
+000012C *>
+000114   copy "fdpyemp.cob".
+000001C *>*******************************************
+000002C *>                                          *
+000003C *>  File Definition For PY Employee File    *
+000004C *>                                          *
+000005C *>*******************************************
+000006C *>   Record Size 508 Bytes
+000007C *>   see wspyemp.cob for later updates
+000008C *>
+000009C  fd  PY-Employee-File.
+000010C *>
+000011C  copy "wspyemp.cob".
+000001C *>*******************************************
+000002C *>                                          *
+000003C *>  Record Definition For Employee          *
+000004C *>           File                           *
+000005C *>     Uses Emp-No as key                   *
+000006C *>*******************************************
+000007C *>  File size 508 bytes.
+000008C *>
+000009C *> THESE FIELDS DEFINITIONS MAY NEED CHANGING
+000010C *>
+000011C *> 29/10/25 vbc - Created.
+000012C *> 10/11/25 vbc - Field changes.
+000013C *> 20/11/25 vbc - Phone# 12 -> 13 reduced filler to 14 & removed dup phone field.
+000014C *> 28/11/25 vbc - Zip code, SSN sizes chg.  Date fiormats are all ccyymmdd.
+000015C *> 02/12/25 vbc - Fields with -Allow chgd from x to 99.size will be the same.
+000016C *> 17/03/26 vbc - Mcare-Exempt added - File size change ?
+000017C *>
+000018C  01  PY-Employee-Record.
+000019C      03  Emp-No                pic 9(7)   comp.
+000020C      03  Emp-Status            pic x.     *> A = Active, T = Terminated, L = On leave & Hidden D = Deleted
+000021C      03  Emp-HS-Type           pic x.     *> H = Hourly or S = Salaried
+000022C      03  Emp-Pay-Interval      pic x.     *> W, M, B ( Bi weekly), S (semi-monthly
+000023C      03  Emp-Taxing-State      pic xx.    *> USA state code
+000024C      03  Emp-Job-Code          pic xxx.   *> information only
+000025C      03  Emp-Start-Date        pic 9(8)   comp. *> date started ccyymmdd
+000026C      03  Emp-Birth-Date        pic 9(8)   comp. *> ccyymmdd
+000027C      03  Emp-Term-Date         pic 9(8)   comp. *> date left  ccyymmdd - (last date of pay ?)
+000028C      03  Emp-Sex               pic x.     *> M, F
+000029C      03  Emp-Marital           pic x.     *> S, M
+000030C      03  Emp-Pay-Freq          binary-char.     *> 52, 24 or same / 2 = 26 / 12 Subject to change when looking a
+000030+ t basic code
+000031C      03  Emp-Next-Del          pic x.     *> No idea yet
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0008
+
+LINE    .....................................................SOURCE.....................................................
+
+000032C      03  Emp-SSN               pic 9(9)   comp.  *> 000-00-0000 & one spare for growth Excludes "-"
+000033C      03  Emp-Cur-Apply-No      pic 99.    *>  9  or ??  2 bytes
+000034C      03  Emp-Name              pic x(32). *> last 1st & middle init -NO> 1st middle last (middle can be initial
+000034+ only
+000035C      03  Emp-Search-Name       pic x(32). *> Uses Emp-Name to create Last, Middle & First Name - INDEX 2
+000036C      03  Emp-Address-1         pic x(32).
+000037C      03  Emp-Address-2         pic x(32).
+000038C      03  Emp-Address-3         pic x(32).
+000039C      03  Emp-Address-4         pic x(32).
+000040C      03  Emp-Post-Code.                   *> UK = 8 Canada 7 incl space,
+000041C          05  Emp-Zip           pic x(10).  *> 5 & + 5
+000042C          05  Emp-State         pic xx.
+000043C      03  Emp-Phone-No          pic 9(11). *> 01234-123456 / (123)-456-7890 09/12/25 reduced from 13
+000044C      03  Emp-Email             pic x(30). *> vbcoen@btconnect.com  + 10
+000045C      03  Emp-Bank-Acct-No      pic x(24). *> Allows also for sortcode/acct # (6+8) & - between numbers )
+000046C      03  Emp-Rate4-Exclusion   pic 9.     *> 1 = all taxes, 2 = All taxes except FICA,
+000047C                                           *> 3 = All except FICA,SWT, LWT 4 = none
+000048C      03  Emp-Cal-Head-Of-House pic x.     *> Y or N for all these
+000049C      03  Emp-Cal-Ded-Allow     pic 99    comp.
+000050C      03  Emp-FWT-Allow         pic 99    comp.
+000051C      03  Emp-SWT-Allow         pic 99    comp.
+000052C      03  Emp-LWT-Allow         pic 99    comp.
+000053C      03  Emp-Pension-Used      pic x. *> Y or N
+000054C      03  Emp-Eic-Used          pic x. *> all Y or N
+000055C      03  Emp-FWT-Exempt        pic x. *>
+000056C      03  Emp-SWT-Exempt        pic x. *>
+000057C      03  Emp-LWT-Exempt        pic x. *>
+000058C      03  Emp-FICA-Exempt       pic x. *>
+000059C      03  Emp-SDI-Exempt        pic x. *>
+000060C      03  Emp-Co-FUTA-Exempt    pic x. *>
+000061C      03  Emp-Co-SUI-Exempt     pic x. *>
+000062C      03  Emp-Mcare-Exempt      pic x. *>
+000063C      03  Emp-Sys-Exempt        pic x    occurs 5.
+000064C      03  Emp-Rate              pic 9(5)v99   comp-3  occurs 4.
+000065C      03  Emp-Auto-Units        pic 999       comp-3.
+000066C      03  Emp-Normal-Units      pic 999       comp-3.
+000067C      03  Emp-Max-Pay           pic 9(6)v99   comp-3.
+000068C      03  Emp-Vac-Rate          pic 9(5)v99   comp-3.
+000069C      03  Emp-Vac-Accum         pic 9(5)v99   comp-3.
+000070C      03  Emp-Vac-Used          pic 9(5)v99   comp-3.
+000071C      03  Emp-SL-Rate           pic 9(5)v99   comp-3.
+000072C      03  Emp-SL-Accum          pic 9(5)v99   comp-3.
+000073C      03  Emp-SL-Used           pic 9(5)v99   comp-3.
+000074C      03  Emp-Comp-Accum        pic 9(5)v99   comp-3.
+000075C      03  Emp-Comp-Used         pic 9(5)v99   comp-3.
+000076C      03  Emp-Dist-Grp                   occurs 5.   *> Distribution account and %
+000077C          05  Emp-Dist-Acct     binary-char  unsigned.
+000078C          05  Emp-Dist-Pcent    pic 999v99      comp-3.
+000079C      03  Emp-ED-Grp                     occurs 3.  *> Should this be 5 or even 10 ?
+000080C          05  Emp-Ed-Used       pic x.   *> Y or N /
+000081C          05  Emp-Ed-Group.
+000082C              07  Emp-ED-Factor     pic 9(6)v99   comp-3.
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0009
+
+LINE    .....................................................SOURCE.....................................................
+
+000083C              07  Emp-ED-Limit      pic 9(6)v99   comp-3.
+000084C              07  Emp-ED-Amt-Pcent  pic x.   *> A  or P /
+000085C              07  Emp-ED-Acct-No    binary-char  unsigned. *> /
+000086C              07  Emp-ED-Desc       pic x(15).  *> /
+000087C              07  Emp-ED-Earn-Ded   pic x.   *> D or E /
+000088C              07  Emp-ED-Exclusion  pic 9.   *> /
+000089C              07  Emp-ED-Limit-Used pic x.   *> Y or N
+000090C              07  Emp-ED-Chk-Cat    pic 99   comp.  *> /
+000091C      03  filler                pic x(11).
+000092C *>
+000012C *>
+000115   copy "fdpyhis.cob".
+000001C *>*******************************************
+000002C *>                                          *
+000003C *>  File Definition For PY Employee History *
+000004C *>                 File                     *
+000005C *>                                          *
+000006C *>*******************************************
+000007C *>   Record Size 232 Bytes
+000008C *>   see wspyhis.cob for later updates
+000009C *>
+000010C  fd  PY-History-File.
+000011C *>
+000012C  copy "wspyhis.cob".
+000001C *>*******************************************
+000002C *>                                          *
+000003C *>  Record Definition For Employee          *
+000004C *>       History  File                      *
+000005C *>     Uses His-Emp-No as key               *
+000006C *>*******************************************
+000007C *>  File size 314 bytes.
+000008C *>
+000009C *> THESE FIELD DEFINITIONS MAY NEED CHANGING
+000010C *>
+000011C *> 29/10/25 vbc - Created.
+000012C *> 09/12/25 vbc - Added xtras DEDs for QTD & YTD
+000013C *> 17/03/26 vbc - MCare added for QTD & YTD.
+000014C *>
+000015C  01  PY-History-Record.
+000016C      03  His-Emp-No                    pic 9(7)   comp.
+000017C      03  His-QTD                                  comp-3.
+000018C          05  His-QTD-Income-Taxable    pic 9(7)v99.
+000019C          05  His-QTD-Other-Taxable     pic 9(7)v99.
+000020C          05  His-QTD-Other-NonTaxable  pic 9(7)v99.
+000021C          05  His-QTD-Fica-Taxable      pic 9(7)v99.
+000022C          05  His-QTD-Tips              pic 9(7)v99.
+000023C          05  His-QTD-Net               pic 9(7)v99.
+000024C          05  His-QTD-EIC               pic 9(7)v99.
+000025C          05  His-QTD-FWT               pic 9(7)v99.
+000026C          05  His-QTD-SWT               pic 9(7)v99.
+000027C          05  His-QTD-LWT               pic 9(7)v99.
+000028C          05  His-QTD-FICA              pic 9(7)v99.
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0010
+
+LINE    .....................................................SOURCE.....................................................
+
+000029C          05  His-QTD-SDI               pic 9(7)v99.
+000030C          05  His-QTD-MCare             pic 9(7)v99.
+000031C          05  His-QTD-Sys               pic 9(7)v99  occurs 5.
+000032C          05  His-QTD-Emp               pic 9(7)v99  occurs 3.
+000033C          05  His-QTD-Units             pic 9(7)v99  occurs 4.
+000034C          05  His-QTD-Other-Ded         pic 9(7)v99.
+000035C          05  His-QTD-Extras            pic 9(7)v99  occurs 5. *> extra state/fed deductions enough ?
+000036C      03  His-YTD                                  comp-3.
+000037C          05  His-YTD-Income-Taxable    pic 9(7)v99.
+000038C          05  His-YTD-Other-Taxable     pic 9(7)v99.
+000039C          05  His-YTD-Other-NonTaxable  pic 9(7)v99.
+000040C          05  His-YTD-Fica-Taxable      pic 9(7)v99.
+000041C          05  His-YTD-Tips              pic 9(7)v99.
+000042C          05  His-YTD-Net               pic 9(7)v99.
+000043C          05  His-YTD-EIC               pic 9(7)v99.
+000044C          05  His-YTD-FWT               pic 9(7)v99.
+000045C          05  His-YTD-SWT               pic 9(7)v99.
+000046C          05  His-YTD-LWT               pic 9(7)v99.
+000047C          05  His-YTD-FICA              pic 9(7)v99.
+000048C          05  His-YTD-SDI               pic 9(7)v99.
+000049C          05  His-YTD-MCare             pic 9(7)v99.
+000050C          05  His-YTD-Sys               pic 9(7)v99  occurs 5.
+000051C          05  His-YTD-Emp               pic 9(7)v99  occurs 3.
+000052C          05  His-YTD-Units             pic 9(7)v99  occurs 4.
+000053C          05  His-YTD-Other-Ded         pic 9(7)v99.
+000054C          05  His-YTD-Extras            pic 9(7)v99  occurs 5. *> extra state/fed deductions enough ?
+000055C      03  filler                        pic x(4).
+000056C *>
+000057C *>   IS this header rec needed (Last-To-Date ? )
+000058C *>
+000059C  01  PY-History-Header.
+000060C      03  Hdr-His-No                    pic 9(7)   comp.     *> value zero.
+000061C      03  Hdr-His-Last-To-Date          pic 9(8)   comp.   *> ccyymmdd
+000062C      03  FILLER                        pic x(320).        *> Expansion ?
+000063C *>
+000013C *>
+000116  *>
+000117   fd  Print-File
+000118       report is w2-Report.
+000119  *>
+000120   working-storage section.
+000121  *>-----------------------
+000122   77  prog-name               pic x(17) value "PRINTw2 (1.0.00)".  *> First release pre testing. Prog name will b
+000122+ e changed.
+000123  *>
+000124   copy "print-spool-command-p.cob".     *> CHECK PRN file for content Portrait mode
+000001C *>
+000002C *> 2023/02/18 vbc - Added PP-Name and Print-File-Name - Portrait
+000003C *>
+000004C  01  Print-Report.
+000005C      03  filler          pic x(117)     value
+000006C      "lpr -r -o 'orientation-requested=3 page-left=36 page-top=24 " &
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0011
+
+LINE    .....................................................SOURCE.....................................................
+
+000007C      "page-right=24 sides=two-sided-long-edge cpi=12 lpi=8' -P ".
+000008C      03  PSN             pic x(48)      value "Smart_Tank_7300 ".  *> This is the Cups print spool, change it fo
+000008+ r yours
+000009C      03  PP-Name         pic x(24)      value "prt-1".      *> Don't change this line 2023-02-18 chngd from 15
+000010C *>
+000011C  01  PP-Print-File-Name  pic x(24)      value "prt-1".
+000125  *>
+000126  *> copy "wsmaps03.cob". *> NEEDED ?
+000127   copy "wsfnctn.cob".  *> NEEDED ?
+000001C *>**********************************
+000002C *>                                 *
+000003C *>  File Access Control Functions  *
+000004C *>                                 *
+000005C *>**********************************
+000006C *> 28/05/16 vbc - Added RDB setup fields - socket, host, port to user, passwd, schema.
+000007C *> 25/08/16 vbc - Amended size of RDBMS-Socket from 32 to 64 chars.
+000008C *> 01/10/16 vbc - Changed WE-Error & Rrn to pic 999 / 9.  To see if it is the cause
+000009C *>                of No data in SYSTOT-REC bug after running sys4LD.
+000010C *> 29/10/16 vbc - FS-Action increased size from 20 to 22 for logest msg in sys002.
+000011C *>  7/12/16 vbc - Increased Access-Type to 99 from 9 for extra adhoc functions
+000012C *>                such as select x ORDER BY etc.
+000013C *>                Not used yet.
+000014C *> 22/12/16 vbc - Oops, previous chg should have been for File-Function.
+000015C *>                next-read-raw changed to 13.
+000016C *> 06/01/17 vbc - Increased size of rrn for GL. System to be recompiled.
+000017C *> 18/04/17 vbc - Added function Read-Next-Header (34) for SL020, 50, 140.
+000018C *> 21/04/18 vbc - Added ACAS-Path and Path-Work for scr save/dumps delete files).
+000019C *> 20/05/23 vbc - Added notes for read header for sl820.
+000020C *> 06/08/23 vbc - Activated  fn-not-greater-than (for Stock file).
+000021C *>
+000022C  01  File-Access.
+000023C      03  We-Error        pic 999.
+000024C      03  Rrn             pic 9(5)   comp.     *> increased from 9 for GL.
+000025C      03  Fs-Reply        pic 99.
+000026C      03  s1              pic x.               *> this is USED for some programs 28.05.18.
+000027C      03  Curs            pic 9(4).
+000028C      03  filler redefines Curs.
+000029C          05  Lin         pic 99.
+000030C          05  Cole        pic 99.
+000031C      03  Curs2           pic 9(4).
+000032C      03  filler redefines Curs2.
+000033C          05  Lin2        pic 99.
+000034C          05  Col2        pic 99.
+000035C *>
+000036C *> Holds path to current working dir - used for screen dump & restores.
+000037C *>
+000038C      03  ACAS-Path       pic x(525)     value spaces.
+000039C      03  Path-Work       pic x(525)     value spaces.
+000040C *>
+000041C      03  FS-Action       pic x(22)  value spaces.
+000042C *> current range 1 thru 3
+000043C *>     1 = Stock-Key (or only key), 2 = Stock-Abrev-Key, 3 = Stock-Desc
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0012
+
+LINE    .....................................................SOURCE.....................................................
+
+000044C      03  Logging-Data.
+000045C          05  Accept-Reply    pic x      value space.
+000046C          05  File-Key-No     pic 9.
+000047C          05  ws-Log-System   pic 9      value zero.       *> loaded by caller of FHlogger
+000048C          05  ws-No-Paragraph pic 999.
+000049C          05  SQL-Err         pic x(5).
+000050C          05  SQL-Msg         pic x(512) value spaces.
+000051C          05  SQL-State       pic x(5).
+000052C          05  WS-File-Key     pic x(64)  value spaces.     *> loaded by caller of FHlogging increased to 64-- 30/
+000052+ 12/16
+000053C          05  WS-Log-Where    pic x(231) value spaces.
+000054C          05  WS-Log-File-No  pic 99     value zeroes.     *> loaded by caller of FHlogger
+000055C          05  WS-Count-Rows   pic 9(7)   value zeroes.     *> used in Delete-All in valueMT
+000056C      03  RDB-Data.
+000057C          05  DB-Schema   pic x(12)  value spaces.
+000058C          05  DB-UName    pic x(12)  value spaces.
+000059C          05  DB-UPass    pic x(12)  value spaces.
+000060C          05  DB-Host     pic x(32)  value spaces.
+000061C          05  DB-Socket   pic x(64)  value spaces.
+000062C          05  DB-Port     pic x(5)   value spaces.
+000063C *>
+000064C *>  Helps to tell MT to move file record from the FD or the WS record. NOT YET USED
+000065C *>
+000066C      03  Main-Record-Move-Flag pic 9 value zero.
+000067C          88  MRMF-Move-FD           value 1.
+000068C          88  MRMF-Move-WS           value 2.
+000069C *>
+000070C *>   need to change next one if used in the DAL, e.g., move "66" ...
+000071C *>
+000072C      03  FA-RDBMS-Flat-Statuses.                        *> Comes from System-Record via acas0nn
+000073C          07  FA-File-System-Used  pic 9.
+000074C              88  FA-FS-Cobol-Files-Used        value zero.
+000075C              88  FA-FS-RDBMS-Used              value 1.
+000076C *>                 88  FA-FS-MySql-Used          value 1.  *> ditto
+000077C *>                 88  FA-FS-Oracle-Used         value 2.  *> THESE NOT IN USE
+000078C *>                 88  FA-FS-Postgres-Used       value 3.  *> ditto
+000079C *>                 88  FA-FS-DB2-Used            value 4.  *> ditto
+000080C *>                 88  FA-FS-MS-SQL-Used         value 5.  *> ditto
+000081C              88  FA-FS-Valid-Options           values 0 thru 1.    *> 5. (not in use unless 1-5)
+000082C          07  FA-File-Duplicates-In-Use pic 9.                      *> NO LONGER USED other than for a '6' = rdb.
+000083C              88  FA-FS-Duplicate-Processing    value 1.
+000084C *>
+000085C *> Block for File/table access via acas000 thru acas033 for IS files and rdbms
+000086C *> Also see RDBMS-Flat-Statuses in System-Record
+000087C *>
+000088C      03  File-Function   pic 99.
+000089C          88  fn-open            value 1.
+000090C          88  fn-close           value 2.
+000091C          88  fn-read-next       value 3.
+000092C          88  fn-read-indexed    value 4.
+000093C          88  fn-write           value 5.
+000094C          88  fn-Delete-All      value 6.       *> 10/10/16 - Delete all records.
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0013
+
+LINE    .....................................................SOURCE.....................................................
+
+000095C          88  fn-re-write        value 7.
+000096C          88  fn-delete          value 8.
+000097C          88  fn-start           value 9.
+000098C *>
+000099C          88  fn-Write-Raw       value 15.
+000100C          88  fn-Read-Next-Raw   value 13.       *> 14/11/16 - Special 4 LD.
+000101C *>
+000102C          88  fn-Read-By-Name    value 31.       *> 15/01/17 for Salesled (SL160), could be used for GL ledger?
+000103C          88  fn-Read-By-Batch   value 32.       *> 08/02/17 for OTM3/5 (sl095/pl095)
+000104C          88  fn-Read-By-Cust    value 33.       *> 09/02/17 for OTM3 (sl110, 120, 190)
+000105C          88  fn-Read-Next-Header value 34.      *> 18/04/17 for Invoice (sl020, 50, 140, 820)
+000106C *>
+000107C      03  Access-Type     pic 9.                *> For rdbms 2 should cover all !!!
+000108C          88  fn-input           value 1.
+000109C          88  fn-i-o             value 2.
+000110C          88  fn-output          value 3.
+000111C          88  fn-extend          value 4.       *> not valid for ISAM
+000112C          88  fn-equal-to        value 5.
+000113C          88  fn-less-than       value 6.
+000114C          88  fn-greater-than    value 7.
+000115C          88  fn-not-less-than   value 8.
+000116C          88  fn-not-greater-than value 9.
+000117C *>
+000128  *>
+000129   copy "Test-Data-Flags.cob".  *> set sw-Testing to zero to stop logging.  *> NEEDED ?
+000001C *>
+000002C *>  This data is present in ALL ACAS modules.
+000003C *>   When testing comlete you can set SW-Testing to zero
+000004C *>    to stop the logging file being produced.
+000005C *>
+000006C  01 ACAS-DAL-Common-data.     *> For DAL processing.
+000007C *>
+000008C *> log file reporting for testing otherwise zero
+000009C *>
+000010C      03  SW-Testing               pic 9   value 1.    *>   zero.
+000011C          88  Testing-1                    value 1.
+000012C *>
+000013C *>  Testing only for displays ws-where etc  otherwise zero
+000014C *>
+000015C      03  SW-Testing-2             pic 9   value zero.
+000016C          88  Testing-2                    value 1.
+000017C *>
+000018C      03  Log-File-Rec-Written     pic 9(6) value zero.    *> in both acas0nn and a DAL.
+000019C *>
+000130  *>
+000131   01  WS-Data.
+000132       03  Menu-Reply          pic x.
+000133       03  PY-PR1-Status       pic xx       value zero.
+000134       03  PY-Emp-Status       pic xx       value zero.
+000135       03  PY-His-Emp-Status   pic xx       value zero.
+000136  *>
+000137       03  WS-Reply            pic x.
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0014
+
+LINE    .....................................................SOURCE.....................................................
+
+000138       03  WS-Eval-Msg         pic x(25)    value spaces.
+000139       03  WS-Env-Columns      pic 999      value zero.
+000140       03  WS-Env-Lines        pic 999      value zero.
+000141       03  WS-22-Lines         pic 99.
+000142       03  WS-23-Lines         pic 99.
+000143       03  WS-Lines            pic 99.
+000144       03  A                   pic 99       value zero.
+000145       03  B                   pic 99       value zero.
+000146       03  C                   pic 99       value zero.
+000147       03  WS-Page-Lines       binary-char unsigned value 56. *> Narrow reports as system is for Landscape used.
+000148       03  WS-Rec-Cnt          pic 99       value zero.
+000149       03  WS-Page-Cnt         pic 999      value zero.
+000150       03  WS-Line-Cnt         pic 999      value 90.         *> Force heads at start
+000151       03  WS-RS-From-Emp      pic 9(7)     value zeros.
+000152       03  WS-RS-To-Emp        pic 9(7)     value zeros.
+000153       03  WS-RS-Single-Emp    pic 9(7)     value zero.    *> fld.single.emp% = 4 :lit.single.emp%  = 27
+000154       03  WS-RS-Term-Emp      pic x        value space.   *> fld.term.emp%       = 3     :lit.term.emp%    = 25
+000155       03  WS-RS-Report-Type   pic x        value space.        *> Selected option 1 - 4
+000156       03  WS-RS-State-Local   pic x        value "N".          *> print State & local amts  fld.print.local% = 6
+000157       03  WS-RS-Emp-Forms-Cnt pic 99       value zero.         *> @ forms per emplyee (# copies)
+000158   *>    03  WS-RS-Start-Prt-Col pic 99       value 1.            *> Default 1 = start col 1.
+000159   *>    03  WS-RS-No-Lines-Between-Forms
+000160   *>                            pic 99       value zero.         *> standard FF if zero.
+000161       03  WS-RS-Prt-Test-Form pic x        value "N".          *> Print a test form for paper alignment (if matri
+000161+ x prt) - fld.test.form% = 10
+000162       03  WS-All-Emp          pic x        value "N".          *> set to "Y" if ALL employees reported on via sta
+000162+ rt up setting & menu.
+000163  *>
+000164  *> RW cannot handle doing this
+000165  *>
+000166  *> 01  WS-Line-Positioning.
+000167  *>     03  WS-Disp             pic 99       value 5.    *> Default 5   OR IS IT as against 0 ?
+000168  *>     03  WS-Col1             pic 99       value 4.  *> + WS-Disp. *>.   *> NEED TO SET THESE AFTER acxepting M
+000168+ enu screen <<<<<<
+000169  *>     03  WS-Col2             pic 99       value 21. *> + WS-Disp.
+000170  *>     03  WS-Col3             pic 99       value 34. *> + WS-Disp.
+000171  *>     03  WS-Col4             pic 99       value 49. *> + WS-Disp.
+000172  *>     03  WS-Col5             pic 99       value 64. *> + WS-Disp.
+000173
+000174  *> REMINDER
+000175  *> col1% = disp% + 4
+000176  *> col2% = disp% + 21
+000177  *> col3% = disp% + 34
+000178  *> col4% = disp% + 49
+000179  *> col5% = disp% + 64
+000180
+000181  *>
+000182   01  WS-Process-Flags.
+000183       03  WS-Test-Form        pic x       value "N".
+000184       03  WS-Pnt-Local-Amount pic x       value "N".  *> Print state and Local amounts?
+000185       03  WS-Forms-Per-Emp    pic 9       value 1.    *> Default.
+000186       03  WS-Printed-Per-Emp  pic 99      value zero. *> Cnt printed so far   NOT USED
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0015
+
+LINE    .....................................................SOURCE.....................................................
+
+000187       03  WS-Lines-2-Next-Frm pic 99      value 99.   *> Default Not needed for non matrix printers set as 99 to
+000187+ ignore
+000188  *>
+000189       03  WS-Year-End         pic x        value "N".
+000190       03  WS-End-of-Qtr       pic 9(8).    *> ccyymmdd
+000191       03  WS-Qtr-End redefines WS-End-of-Qtr.
+000192           05  WS-EoQ-Year     pic 9(4).
+000193           05  WS-EoQ-Month    pic 99.
+000194           05  WS-EoQ-Day      pic 99.
+000195       03  WS-Common-Date      pic 9(8).    *> ccyymmdd of To-Day which is Local / default date format.
+000196  *>
+000197  *> Date variables etc
+000198  *>
+000199   01  WS-Accumulator-Fields       value zeros.
+000200       03  WS-Sub-EIC          pic s9(9)v99   comp-3.
+000201       03  WS-Sub-FWT          pic s9(9)v99   comp-3.
+000202       03  WS-Sub-FICA         pic s9(9)v99   comp-3.
+000203       03  WS-Sub-FICA-Gross   pic s9(9)v99   comp-3.
+000204       03  WS-Sub-Tips         pic s9(9)v99   comp-3.
+000205       03  WS-Sub-SWT          pic s9(9)v99   comp-3.
+000206       03  WS-Sub-LWT          pic s9(9)v99   comp-3.
+000207       03  WS-Sub-MCARE        pic s9(9)v99   comp-3.
+000208       03  WS-Sub-Gross        pic s9(9)v99   comp-3.
+000209       03  WS-Sub-Totals       pic s9(9)v99   comp-3.
+000210  *>
+000211  *>
+000212   01  WS-Emp-Temp-Fields-for-RW.
+000213       03  Tmp-his-ytd-gross   pic s9(9)v99   comp-3.    *> Temp field not in the HIS file record
+000214       03  Tmp-his-ytd-fica-gross
+000215                               pic s9(9)v99   comp-3.    *> Temp field not in the HIS file record
+000216  *>
+000217  *> MORE ?
+000218       03  WS-Emp-SSN          pic 999/99/9999.
+000219       03  WS-Emp-SSN-X.
+000220           05  filler          pic 999.
+000221           05  WS-Emp-Slash1   pic x.    *> Needs to have '-' to sl 1 & 2 pre printing.
+000222           05  filler          pic 99.
+000223           05  WS-Emp-Slash2   pic x.
+000224           05  filler          pic 9(4).
+000225  *>
+000226           03  WS-Emp-Rev-Name                 value spaces.  *> frm Emp-Name
+000227               05  WS-Emp-First-Nm pic x(16).
+000228               05  WS-Emp-Surname  pic x(16).
+000229               05  WS-Emp-Sufx     pic xx.
+000230  *>
+000231   01  WS-Test-Date            pic x(10).
+000232   01  WS-Test-YMD             pic 9(8).
+000233   01  WS-PR1-Dating           pic 9(8).
+000234   01  WS-Date-Formats.
+000235       03  WS-Swap             pic 99.
+000236       03  WS-Conv-Date        pic x(10).
+000237       03  WS-Date             pic x(10)   value "99/99/9999".
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0016
+
+LINE    .....................................................SOURCE.....................................................
+
+000238       03  WS-UK redefines WS-Date.   *> Other optional format
+000239           05  WS-Days         pic 99.
+000240           05  filler          pic x.
+000241           05  WS-Month        pic 99.
+000242           05  filler          pic x.
+000243           05  WS-Year         pic 9(4).
+000244       03  WS-USA redefines WS-Date.  *> Default format
+000245           05  WS-USA-Month    pic 99.
+000246           05  filler          pic x.
+000247           05  WS-USA-Days     pic 99.
+000248           05  filler          pic x.
+000249           05  filler          pic 9(4).
+000250       03  WS-Intl redefines WS-Date.   *> Not used.
+000251           05  WS-Intl-Year    pic 9(4).
+000252           05  filler          pic x.
+000253           05  WS-Intl-Month   pic 99.
+000254           05  filler          pic x.
+000255           05  WS-Intl-Days    pic 99.
+000256  *>
+000257   01  COB-CRT-Status      pic 9(4)         value zero.   *> NEEDED ?
+000258       copy "screenio.cpy".
+000001C       *>  Copyright (C) 2008-2012, 2015-2016, 2019, 2021
+000002C       *>  Free Software Foundation, Inc.
+000003C       *>  Written by Roger While, Simon Sobisch
+000004C       *>
+000005C       *>  This file is part of GnuCOBOL.
+000006C       *>
+000007C       *>  The GnuCOBOL compiler is free software: you can redistribute
+000008C       *>  it and/or modify it under the terms of the GNU General Public
+000009C       *>  License as published by the Free Software Foundation, either
+000010C       *>  version 3 of the License, or (at your option) any later
+000011C       *>  version.
+000012C       *>
+000013C       *>  GnuCOBOL is distributed in the hope that it will be useful,
+000014C       *>  but WITHOUT ANY WARRANTY; without even the implied warranty of
+000015C       *>  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+000016C       *>  GNU General Public License for more details.
+000017C       *>
+000018C       *>  You should have received a copy of the GNU General Public
+000019C       *>  License along with GnuCOBOL.
+000020C       *>  If not, see <https://www.gnu.org/licenses/>.
+000021C
+000022C
+000023C       *>   Colors
+000024C        78  COB-COLOR-BLACK                  VALUE 0.
+000025C        78  COB-COLOR-BLUE                   VALUE 1.
+000026C        78  COB-COLOR-GREEN                  VALUE 2.
+000027C        78  COB-COLOR-CYAN                   VALUE 3.
+000028C        78  COB-COLOR-RED                    VALUE 4.
+000029C        78  COB-COLOR-MAGENTA                VALUE 5.
+000030C        78  COB-COLOR-YELLOW                 VALUE 6.
+000031C        78  COB-COLOR-WHITE                  VALUE 7.
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0017
+
+LINE    .....................................................SOURCE.....................................................
+
+000032C
+000033C       *>   mouse mask, apply to COB-MOUSE-FLAGS
+000034C        78  COB-AUTO-MOUSE-HANDLING          VALUE 1.
+000035C        78  COB-ALLOW-LEFT-DOWN              VALUE 2.
+000036C        78  COB-ALLOW-LEFT-UP                VALUE 4.
+000037C        78  COB-ALLOW-LEFT-DOUBLE            VALUE 8.
+000038C        78  COB-ALLOW-MIDDLE-DOWN            VALUE 16.
+000039C        78  COB-ALLOW-MIDDLE-UP              VALUE 32.
+000040C        78  COB-ALLOW-MIDDLE-DOUBLE          VALUE 64.
+000041C        78  COB-ALLOW-RIGHT-DOWN             VALUE 128.
+000042C        78  COB-ALLOW-RIGHT-UP               VALUE 256.
+000043C        78  COB-ALLOW-RIGHT-DOUBLE           VALUE 512.
+000044C        78  COB-ALLOW-MOUSE-MOVE             VALUE 1024.
+000045C        78  COB-ALLOW-ALL-SCREEN-ACTIONS     VALUE 16384. *> reserved
+000046C
+000047C       *> Values that may be returned in CRT STATUS (or COB-CRT-STATUS)
+000048C       *> Normal return - Value 0000
+000049C        78  COB-SCR-OK                       VALUE  0.
+000050C
+000051C       *>  Function keys - Values 1xxx
+000052C        78  COB-SCR-F1                       VALUE  1001.
+000053C        78  COB-SCR-F2                       VALUE  1002.
+000054C        78  COB-SCR-F3                       VALUE  1003.
+000055C        78  COB-SCR-F4                       VALUE  1004.
+000056C        78  COB-SCR-F5                       VALUE  1005.
+000057C        78  COB-SCR-F6                       VALUE  1006.
+000058C        78  COB-SCR-F7                       VALUE  1007.
+000059C        78  COB-SCR-F8                       VALUE  1008.
+000060C        78  COB-SCR-F9                       VALUE  1009.
+000061C        78  COB-SCR-F10                      VALUE  1010.
+000062C        78  COB-SCR-F11                      VALUE  1011.
+000063C        78  COB-SCR-F12                      VALUE  1012.
+000064C        78  COB-SCR-F13                      VALUE  1013.
+000065C        78  COB-SCR-F14                      VALUE  1014.
+000066C        78  COB-SCR-F15                      VALUE  1015.
+000067C        78  COB-SCR-F16                      VALUE  1016.
+000068C        78  COB-SCR-F17                      VALUE  1017.
+000069C        78  COB-SCR-F18                      VALUE  1018.
+000070C        78  COB-SCR-F19                      VALUE  1019.
+000071C        78  COB-SCR-F20                      VALUE  1020.
+000072C        78  COB-SCR-F21                      VALUE  1021.
+000073C        78  COB-SCR-F22                      VALUE  1022.
+000074C        78  COB-SCR-F23                      VALUE  1023.
+000075C        78  COB-SCR-F24                      VALUE  1024.
+000076C        78  COB-SCR-F25                      VALUE  1025.
+000077C        78  COB-SCR-F26                      VALUE  1026.
+000078C        78  COB-SCR-F27                      VALUE  1027.
+000079C        78  COB-SCR-F28                      VALUE  1028.
+000080C        78  COB-SCR-F29                      VALUE  1029.
+000081C        78  COB-SCR-F30                      VALUE  1030.
+000082C        78  COB-SCR-F31                      VALUE  1031.
+000083C        78  COB-SCR-F32                      VALUE  1032.
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0018
+
+LINE    .....................................................SOURCE.....................................................
+
+000084C        78  COB-SCR-F33                      VALUE  1033.
+000085C        78  COB-SCR-F34                      VALUE  1034.
+000086C        78  COB-SCR-F35                      VALUE  1035.
+000087C        78  COB-SCR-F36                      VALUE  1036.
+000088C        78  COB-SCR-F37                      VALUE  1037.
+000089C        78  COB-SCR-F38                      VALUE  1038.
+000090C        78  COB-SCR-F39                      VALUE  1039.
+000091C        78  COB-SCR-F40                      VALUE  1040.
+000092C        78  COB-SCR-F41                      VALUE  1041.
+000093C        78  COB-SCR-F42                      VALUE  1042.
+000094C        78  COB-SCR-F43                      VALUE  1043.
+000095C        78  COB-SCR-F44                      VALUE  1044.
+000096C        78  COB-SCR-F45                      VALUE  1045.
+000097C        78  COB-SCR-F46                      VALUE  1046.
+000098C        78  COB-SCR-F47                      VALUE  1047.
+000099C        78  COB-SCR-F48                      VALUE  1048.
+000100C        78  COB-SCR-F49                      VALUE  1049.
+000101C        78  COB-SCR-F50                      VALUE  1050.
+000102C        78  COB-SCR-F51                      VALUE  1051.
+000103C        78  COB-SCR-F52                      VALUE  1052.
+000104C        78  COB-SCR-F53                      VALUE  1053.
+000105C        78  COB-SCR-F54                      VALUE  1054.
+000106C        78  COB-SCR-F55                      VALUE  1055.
+000107C        78  COB-SCR-F56                      VALUE  1056.
+000108C        78  COB-SCR-F57                      VALUE  1057.
+000109C        78  COB-SCR-F58                      VALUE  1058.
+000110C        78  COB-SCR-F59                      VALUE  1059.
+000111C        78  COB-SCR-F60                      VALUE  1060.
+000112C        78  COB-SCR-F61                      VALUE  1061.
+000113C        78  COB-SCR-F62                      VALUE  1062.
+000114C        78  COB-SCR-F63                      VALUE  1063.
+000115C        78  COB-SCR-F64                      VALUE  1064.
+000116C       *>  Exception keys - Values 2xxx
+000117C        78  COB-SCR-PAGE-UP                  VALUE  2001.
+000118C        78  COB-SCR-PAGE-DOWN                VALUE  2002.
+000119C        78  COB-SCR-KEY-UP                   VALUE  2003.
+000120C        78  COB-SCR-KEY-DOWN                 VALUE  2004.
+000121C        78  COB-SCR-ESC                      VALUE  2005.
+000122C        78  COB-SCR-PRINT                    VALUE  2006.
+000123C        78  COB-SCR-TAB                      VALUE  2007.
+000124C        78  COB-SCR-BACK-TAB                 VALUE  2008.
+000125C        78  COB-SCR-KEY-LEFT                 VALUE  2009.
+000126C        78  COB-SCR-KEY-RIGHT                VALUE  2010.
+000127C       *>  The following exception keys are currently *only* returned
+000128C       *>  on ACCEPT OMITTED
+000129C        78  COB-SCR-INSERT                   VALUE  2011.
+000130C        78  COB-SCR-DELETE                   VALUE  2012.
+000131C        78  COB-SCR-BACKSPACE                VALUE  2013.
+000132C        78  COB-SCR-KEY-HOME                 VALUE  2014.
+000133C        78  COB-SCR-KEY-END                  VALUE  2015.
+000134C       *>  Exception keys for mouse handling
+000135C        78  COB-SCR-MOUSE-MOVE               VALUE  2040.
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0019
+
+LINE    .....................................................SOURCE.....................................................
+
+000136C        78  COB-SCR-LEFT-PRESSED             VALUE  2041.
+000137C        78  COB-SCR-LEFT-RELEASED            VALUE  2042.
+000138C        78  COB-SCR-LEFT-DBL-CLICK           VALUE  2043.
+000139C        78  COB-SCR-MID-PRESSED              VALUE  2044.
+000140C        78  COB-SCR-MID-RELEASED             VALUE  2045.
+000141C        78  COB-SCR-MID-DBL-CLICK            VALUE  2046.
+000142C        78  COB-SCR-RIGHT-PRESSED            VALUE  2047.
+000143C        78  COB-SCR-RIGHT-RELEASED           VALUE  2048.
+000144C        78  COB-SCR-RIGHT-DBL-CLICK          VALUE  2049.
+000145C        78  COB-SCR-SHIFT-MOVE               VALUE  2050.
+000146C        78  COB-SCR-SHIFT-LEFT-PRESSED       VALUE  2051.
+000147C        78  COB-SCR-SHIFT-LEFT-RELEASED      VALUE  2052.
+000148C        78  COB-SCR-SHIFT-LEFT-DBL-CLICK     VALUE  2053.
+000149C        78  COB-SCR-SHIFT-MID-PRESSED        VALUE  2054.
+000150C        78  COB-SCR-SHIFT-MID-RELEASED       VALUE  2055.
+000151C        78  COB-SCR-SHIFT-MID-DBL-CLICK      VALUE  2056.
+000152C        78  COB-SCR-SHIFT-RIGHT-PRESSED      VALUE  2057.
+000153C        78  COB-SCR-SHIFT-RIGHT-RELEASED     VALUE  2058.
+000154C        78  COB-SCR-SHIFT-RIGHT-DBL-CLICK    VALUE  2059.
+000155C        78  COB-SCR-CTRL-MOVE                VALUE  2060.
+000156C        78  COB-SCR-CTRL-LEFT-PRESSED        VALUE  2061.
+000157C        78  COB-SCR-CTRL-LEFT-RELEASED       VALUE  2062.
+000158C        78  COB-SCR-CTRL-LEFT-DBL-CLICK      VALUE  2063.
+000159C        78  COB-SCR-CTRL-MID-PRESSED         VALUE  2064.
+000160C        78  COB-SCR-CTRL-MID-RELEASED        VALUE  2065.
+000161C        78  COB-SCR-CTRL-MID-DBL-CLICK       VALUE  2066.
+000162C        78  COB-SCR-CTRL-RIGHT-PRESSED       VALUE  2067.
+000163C        78  COB-SCR-CTRL-RIGHT-RELEASED      VALUE  2068.
+000164C        78  COB-SCR-CTRL-RIGHT-DBL-CLICK     VALUE  2069.
+000165C        78  COB-SCR-ALT-MOVE                 VALUE  2070.
+000166C        78  COB-SCR-ALT-LEFT-PRESSED         VALUE  2071.
+000167C        78  COB-SCR-ALT-LEFT-RELEASED        VALUE  2072.
+000168C        78  COB-SCR-ALT-LEFT-DBL-CLICK       VALUE  2073.
+000169C        78  COB-SCR-ALT-MID-PRESSED          VALUE  2074.
+000170C        78  COB-SCR-ALT-MID-RELEASED         VALUE  2075.
+000171C        78  COB-SCR-ALT-MID-DBL-CLICK        VALUE  2076.
+000172C        78  COB-SCR-ALT-RIGHT-PRESSED        VALUE  2077.
+000173C        78  COB-SCR-ALT-RIGHT-RELEASED       VALUE  2078.
+000174C        78  COB-SCR-ALT-RIGHT-DBL-CLICK      VALUE  2079.
+000175C        78  COB-SCR-WHEEL-UP                 VALUE  2080.
+000176C        78  COB-SCR-WHEEL-DOWN               VALUE  2081.
+000177C       *>78 COB-SCR-WHEEL-LEFT               VALUE  2082.  *reserved*
+000178C       *>78 COB-SCR-WHEEL-RIGHT              VALUE  2083.  *reserved*
+000179C        78  COB-SCR-SHIFT-WHEEL-UP           VALUE  2084.
+000180C        78  COB-SCR-SHIFT-WHEEL-DOWN         VALUE  2085.
+000181C       *>78 COB-SCR-SHIFT-WHEEL-LEFT         VALUE  2086.  *reserved*
+000182C       *>78 COB-SCR-SHIFT-WHEEL-RIGHT        VALUE  2087.  *reserved*
+000183C        78  COB-SCR-CTRL-WHEEL-UP            VALUE  2088.
+000184C        78  COB-SCR-CTRL-WHEEL-DOWN          VALUE  2089.
+000185C       *>78 COB-SCR-CTRL-WHEEL-LEFT          VALUE  2090.  *reserved*
+000186C       *>78 COB-SCR-CTRL-WHEEL-RIGHT         VALUE  2091.  *reserved*
+000187C        78  COB-SCR-ALT-WHEEL-UP             VALUE  2092.
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0020
+
+LINE    .....................................................SOURCE.....................................................
+
+000188C        78  COB-SCR-ALT-WHEEL-DOWN           VALUE  2093.
+000189C       *>78 COB-SCR-ALT-WHEEL-LEFT           VALUE  2094.  *reserved*
+000190C       *>78 COB-SCR-ALT-WHEEL-RIGHT          VALUE  2095.  *reserved*
+000191C       *>  Input validation - Values 8xxx
+000192C        78  COB-SCR-NO-FIELD                 VALUE  8000.
+000193C        78  COB-SCR-TIME-OUT                 VALUE  8001.
+000194C       *>  Other errors - Values 9xxx
+000195C        78  COB-SCR-FATAL                    VALUE  9000.
+000196C        78  COB-SCR-MAX-FIELD                VALUE  9001.
+000259  *>
+000260   copy "wstime.cob".
+000001C  01  ws-time.
+000002C      03  wsa-date.
+000003C        05  wsa-yy        pic 99.
+000004C        05  wsa-mm        pic 99.
+000005C        05  wsa-dd        pic 99.
+000006C      03  wsb-time.
+000007C        05  wsb-hh        pic 99.
+000008C        05  wsb-mm        pic 99.
+000009C        05  wsb-ss        pic 99.
+000010C        05  filler        pic xx.
+000011C      03  wsd-time.
+000012C        05  wsd-hh        pic 99.
+000013C        05  wsd-sa        pic x  value ":".
+000014C        05  wsd-mm        pic 99.
+000015C        05  wsd-sb        pic x  value ":".
+000016C        05  wsd-ss        pic 99.
+000017C *>
+000018C  01  wse-date-block.
+000019C      03  wse-date.
+000020C          05  wse-year    pic 9(4).
+000021C          05  wse-month   pic 99.
+000022C          05  wse-days    pic 99.
+000023C      03  WSE-Date-9 redefines wse-date
+000024C                          pic 9(8).
+000025C      03  wse-time.
+000026C          05  wse-hh      pic 99.
+000027C          05  wse-mm      pic 99.
+000028C          05  wse-ss      pic 99.
+000029C      03  filler          pic x(7).
+000030C *>
+000031C
+000261  *>
+000262   01  Error-Messages.   *>   CHANGE FOR PROG
+000263  *> System Wide
+000264       03  SY001           pic x(46) value "SY001 Aborting run - Note error and hit Return".
+000265       03  SY002           pic x(31) value "SY002 Note error and hit Return".
+000266       03  SY003           pic x(51) value "SY003 Aborting function - Note error and hit Return".
+000267       03  SY004           pic x(20) value "SY004 Now Hit Return".
+000268       03  SY005           pic x(18) value "SY005 Invalid Date".
+000269       03  SY008           pic x(32) value "SY008 Note message & Hit Return ".
+000270       03  SY010           pic x(46) value "SY010 Terminal program not set to length => 28".
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0021
+
+LINE    .....................................................SOURCE.....................................................
+
+000271       03  SY013           pic x(47) value "SY013 Terminal program not set to Columns => 80".
+000272       03  SY014           pic x(30) value "SY014 Press return to continue".
+000273       03  SY015           pic x(20) value "SY015 Must be Y or N".
+000274       03  SY016           pic x(38) value "SY016 Do you wish to Continue (Y/N) - ".
+000275  *>
+000276  *> Module General ?  ANY NEEDED
+000277  *>
+000278       03  PY011           pic x(36) value "PY011 Re/Write PARAM record Error = ".
+000279       03  PY012           pic x(32) value "PY012 Read PARAM record Error = ".
+000280       03  PY014           pic x(29) value "PY014 To quit, use ESCape key".
+000281
+000282  *>
+000283  *> Module specific
+000284  *>   from printw2
+000285  *>
+000286       03  PY621           pic x(44) value "PY621 System has not achieved Year-End state".
+000287       03  PY622           pic x(29) value "PY622 Employee File not found".
+000288       03  PY623           pic x(37) value "PY623 Unexpected EOF on Employee File".
+000289       03  PY624           pic x(28) value "PY624 History File not found".
+000290       03  PY625           pic x(36) value "PY625 Unexpected eof on History File".
+000291       03  PY626           pic x(24) value "PY626 PR1 File not found".
+000292       03  PY627           pic x(33) value "PY627 Unable to write to PR1 File".
+000293       03  PY628           pic x(22) value "PY628 Invalid response".
+000294       03  PY629           pic x(18) value "PY629 Y or NO Only".
+000295   *>    03  PY630           pic x(26) value "PY630 Numeric integer Only".
+000296   *>    03  PY631           pic x(25) value "PY631 Invalid check digit".
+000297       03  PY632           pic x(30) value "PY632 Employee number too high".
+000298       03  PY633           pic x(56) value "PY633 Starting employee number cannot be > ending number".
+000299       03  PY634           pic x(18) value "PY634 Out of range".   *> 1 thru 50
+000300       03  PY635           pic x(51) value "PY635 There are no Terminated employees in the File".
+000301       03  PY636           pic x(35) value "PY636 Error Reading History File - ".
+000302       03  PY637           pic x(36) value "PY637 Error Reading Employee File - ".
+000303       03  PY638           pic x(53) value "PY638 From Employee number cannot be > than To number".
+000304  *>
+000305   linkage section.
+000306  *>***************
+000307  *>
+000308   copy "wscall.cob".
+000001C *> 14/03/18 vbc - 1.01   WS-CD-Args for passing extra info to called process
+000002C *>                        that will help in a cron call by time via menu
+000003C *>                        program. picked by position within WS-Args.
+000004C *> 14/11/25 vbc - 1.02 - Chg WS-Term-Code from 9 to 99.
+000005C *>
+000006C  01  WS-Calling-Data.
+000007C      03  WS-Called       pic x(8).
+000008C      03  WS-Caller       pic x(8).
+000009C      03  WS-Del-Link     pic x(8).
+000010C      03  WS-Term-Code    pic 99.
+000011C *>                                 new 18/5/13
+000012C      03  WS-Process-Func pic 9.
+000013C      03  WS-Sub-Function pic 9.
+000014C      03  WS-CD-Args      pic x(13).    *> Changed / Added 14/03/18
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0022
+
+LINE    .....................................................SOURCE.....................................................
+
+000015C *>
+000309   copy "wssystem.cob"   replacing System-Record by WS-System-Record.
+000001C *>
+000002C *>*******************************************
+000003C *>                                          *
+000004C *>  Record Definition For The System File   *
+000005C *>                                          *
+000006C *>*******************************************
+000007C *>  File size 1024 with fillers
+000008C *>   Cleared down update details 01/02/09 to 12/06/13
+000009C *>
+000010C *> 22/09/15 vbc - Added Param-Restrict (Access) within a current filler.
+000011C *>                Set this will stop display of option Z in sub-system menus.
+000012C *>                Need to detect actual user though when setup or could just use
+000013C *>                chown for sys002 to admin user?
+000014C *> 25/06/16 vbc - Added RDBMS-Port & needs RDBMS-Host, RDBMS-Socket.
+000015C *>                Increased 'System-data' from 384 to 512 bytes & removed O/E
+000016C *>                  Block (128) as it is unused.
+000017C *> 26/06/16 vbc - Updated MySQL Load scripts ACASDB.sql in ACAS/mysql.
+000018C *>                  Prima is yet to be done !!!
+000019C *> 19/10/16 vbc - Changed PL-Approp-AC in IRS block from 9(5) to 9(6) for GL
+000020C *>                support & reduced filler by 1.
+000021C *>                With IRS data mapped into ACAS the IRS block can reduce to 32 bytes
+000022C *>                Just need to change all of the IRS programs to use ACAS fields but
+000023C *>                also NEED to change the date processing to use same in rest of ACAS
+000024C *>                and not binary days since 01/01/2000 and hold dates in dd/mm/yy form.
+000025C *>                Added 2 88s to Op-System for IRS.
+000026C *> 27/10/16 vbc - Changed level-5 to IRS instead of omitted O/E.
+000027C *> 15/01/18 vbc - Added Stats-Date-Period with a filler & vers = 14.
+000028C *> 02/02/18 vbc - Replaced file-statuses with filler x(32).
+000029C *> 10/02/18 vbc - For PL-Approp-AC6 move filler to beginning of field as irs
+000030C *>                does not need the leading digit (uses only 5).
+000031C *> 17/03/18 vbc - Added SL-Invoice-Lines within last filler so gone from 45 to 43.
+000032C *> 18/03/18 vbc - Added false for Level-5 & 6, e.g., zero.
+000033C *> 06/06/18 vbc - Added six new fields as bin-long to support for G-L and IRS used at same time.
+000034C *>                RDBMS needs to be updated. Done 06/06/16 -> Mariadb backups.
+000035C *>                sys002 needs to be updated if implemented.
+000036C *>                systemMT needs to be updated (in un/load moves).
+000037C *> 03/06/20 vbc - Changes to some RDBMS values.
+000038C *> 10/12/22 vbc - Remove File-Duplicates-In-Use - not used.
+000039C *> 14/04/23 vbc - SL-Autogen added (& PL-Autogen) both using FILLER space.
+000040C *> 15/05/23 vbc - SL-Next-Rec and PL-Next-Rec bin-short unsigned for next Autogen record key.
+000041C *> 26/06/23 vbc - Added Company-Email repacing filler.
+000042C *> 09/09/23 vbc - Pre support for OE but as comments for now as will not be used in ACAS - pointless.
+000043C *> 10/09/23 vbc - Removed condition Payroll-No as not used.
+000044C *> 13/03/24 vbc - In fillers added fields SL-BO-Flag and Stk-BO-Active,
+000045C *> 18/12/24 vbc - Clean up remd out texts & added Co. Phone No reducing filler.
+000046C *> 14/11/25 vbc - Support for Payroll in use that replaces OE usage as not needed.
+000047C *>
+000048C  01 WS-System-Record.
+000049C *>******************
+000050C *>   System Data   *
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0023
+
+LINE    .....................................................SOURCE.....................................................
+
+000051C *>******************
+000052C      03  System-Data-Block.               *>  512 bytes (25/06/16)
+000053C          05  System-Record-Version-Prime      binary-char.
+000054C          05  System-Record-Version-Secondary  binary-char.
+000055C          05  Vat-Rates                    comp.
+000056C              07 Vat-Rate-1   pic 99v99.   *> Standard rate
+000057C              07 Vat-Rate-2   pic 99v99.   *> Reduced rate
+000058C              07 Vat-Rate-3   pic 99v99.   *> Minimal or exempt
+000059C              07 Vat-Rate-4   pic 99v99.   *> 2b used for local sales tax   Not UK
+000060C              07 Vat-Rate-5   pic 99v99.   *> 2b used for local sales tax   Not UK
+000061C          05  Vat-Rate redefines Vat-Rates pic 99v99 comp occurs 5.
+000062C          05  Cyclea          binary-char.  *> 99.
+000063C          05  Scycle Redefines cyclea  binary-char.
+000064C          05  Period          binary-char.  *> 99.
+000065C          05  Page-Lines      binary-char  unsigned. *> 999. Portrait / default
+000066C          05  Next-Invoice    binary-long. *> 9(8) comp.
+000067C          05  Run-Date        binary-long. *> 9(8) comp.
+000068C          05  Start-Date      binary-long. *> 9(8) comp.
+000069C          05  End-Date        binary-long. *> 9(8) comp.
+000070C          05  Suser.                       *> IRS
+000071C              07  Usera       pic x(32).
+000072C          05  User-Code       pic x(32).   *> encrypted username not used on OS versions so also b 4 client?
+000073C          05  Address-1       pic x(24).
+000074C          05  Address-2       pic x(24).
+000075C          05  Address-3       pic x(24).
+000076C          05  Address-4       pic x(24).
+000077C          05  Post-Code       pic x(12).   *> or ZipCode size should cover all countries
+000078C          05  Country         pic x(24).
+000079C          05  Print-Spool-Name pic x(48).
+000080C          05  Phone-No        pic x(12).  *> added 21/10/25 reducing filler.
+000081C          05  FILLER          pic x(20).
+000082C          05  Pass-Value      pic 9.
+000083C          05  Level.
+000084C              07  Level-1     pic 9.
+000085C                  88  G-L                    value 1.    *> General (Nominal) ledger
+000086C              07  Level-2     pic 9.
+000087C                  88  B-L                    value 1.    *> Purchase (Payables) ledger
+000088C              07  Level-3     pic 9.
+000089C                  88  S-L                    value 1.    *> Sales (Receivables) ledger
+000090C              07  Level-4     pic 9.
+000091C                  88  Stock                  value 1.    *> Stock Control (Inventory)
+000092C              07  Level-5     pic 9.
+000093C                  88  IRS                    value 1.    *> IRS used (instead of General).
+000094C                  88  IRS-No                 value zero. *> IRS NOT Used.
+000095C              07  Level-6     pic 9.
+000096C                  88  Payroll                value 1.    *> Payroll - USA
+000097C          05  Pass-Word       pic x(4).
+000098C          05  Host            pic 9.
+000099C              88  Multi-User                 value 1.
+000100C          05  Op-System       pic 9.
+000101C              88  valid-os-type              values 1 2 3 4 5 6.
+000102C              88  No-OS                      value zero.
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0024
+
+LINE    .....................................................SOURCE.....................................................
+
+000103C              88  Dos                        value 1.
+000104C              88  Windows                    value 2.
+000105C              88  Mac                        value 3.
+000106C              88  Os2                        value 4.
+000107C              88  Unix                       value 5.
+000108C              88  Linux                      value 6.
+000109C              88  OS-Single                  values 1 2 4.
+000110C          05  Current-Quarter pic 9.
+000111C          05  RDBMS-Flat-Statuses.
+000112C              07  File-System-Used  pic 9.
+000113C                  88  FS-Cobol-Files-Used    value zero.
+000114C                  88  FS-MySql-Used          value 1.
+000115C                                           *> THESE NOT IN USE at this time
+000116C                  88  FS-RDBMS-Used          value 1.  *> Was generic
+000117C *>                 88  FS-Oracle-Used         value 3.  *> ditto   -  change values to order in which
+000118C *>                 88  FS-Postgres-Used       value 2.  *> ditto       they are implemented
+000119C *>                 88  FS-DB2-Used            value 4.  *> ditto        or made available
+000120C *>                 88  FS-MS-SQL-Used         value 5.  *> ditto
+000121C *>                 88  FS-ODBC-Used           value 6.  *> ditto
+000122C                  88  FS-Valid-Options       values 0 thru 1.    *> 5. (not in use unless 1-5)
+000123C              07  File-Duplicates-In-Use pic 9.           *> No longer in use
+000124C                  88  FS-Duplicate-Processing value 1.    *>  Ditto
+000125C          05  Maps-Ser.      *> Not needed in OpenSource version, = 9999 (No Maintenance Contract]
+000126C              07  Maps-Ser-xx pic xx.        *> Allows for 36^2  customers = 60,466,176
+000127C              07  Maps-Ser-nn binary-short.  *>     x  129600 - 2  - Very very large.
+000128C          05  Date-Form       pic 9.
+000129C              88  Date-UK                    value 1.            *> dd/mm/yyyy
+000130C              88  Date-USA                   value 2.            *> mm/dd/yyyy
+000131C              88  Date-Intl                  value 3.            *> yyyy/mm/dd
+000132C              88  Date-Valid-Formats         values 1 2 3.
+000133C          05  Data-Capture-Used pic 9.
+000134C              88  DC-Cobol-Standard          value zero.
+000135C              88  DC-GUI                     value 1.
+000136C              88  DC-Widget                  value 2.
+000137C          05  RDBMS-DB-Name   pic x(12)      value "ACASDB".     *> change in setup
+000138C          05  RDBMS-User      pic x(12)      value "ACAS-User".  *> change in setup
+000139C          05  RDBMS-Passwd    pic x(12)      value "PaSsWoRd".   *> change in setup
+000140C          05  VAT-Reg-Number  pic x(11)      value spaces.
+000141C          05  Param-Restrict  pic x.                             *> Only via ACAS?
+000142C          05  RDBMS-Port      pic x(5)       value "3306".       *> change in setup
+000143C          05  RDBMS-Host      pic x(32)      value spaces.       *> change in setup
+000144C          05  RDBMS-Socket    pic x(64)      value spaces.       *> change in setup v3
+000145C          05  Stats-Date-Period pic 9(4).                      *> added 15/01/18.
+000146C          05  Company-Email   pic x(30).                         *> changed from filler 26/06/23
+000147C *>***************
+000148C *>   G/L Data   *
+000149C *>***************
+000150C      03  General-Ledger-Block.               *> 80 bytes
+000151C          05  P-C             pic x.
+000152C              88  Profit-Centres             value "P".
+000153C              88  Branches                   value "B".
+000154C          05  P-C-Grouped     pic x.
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0025
+
+LINE    .....................................................SOURCE.....................................................
+
+000155C              88  Grouped                    value "Y".
+000156C          05  P-C-Level       pic x.
+000157C              88  Revenue-Only               value "R".
+000158C          05  Comps           pic x.
+000159C              88  Comparatives               value "Y".
+000160C          05  Comps-Active    pic x.
+000161C              88  Comparatives-Active        value "Y".
+000162C          05  M-V             pic x.
+000163C              88  Minimum-Validation         value "Y".
+000164C          05  Arch            pic x.
+000165C              88  Archiving                  value "Y".
+000166C          05  Trans-Print     pic x.
+000167C              88  Mandatory                  value "Y".
+000168C          05  Trans-Printed   pic x.
+000169C              88  Trans-Done                 value "Y".
+000170C          05  Header-Level    pic 9.                      *> Not directly used in sys002 but anywhere ?
+000171C          05  Sales-Range     pic 9.
+000172C          05  Purchase-Range  pic 9.
+000173C          05  Vat             pic x.
+000174C              88  Auto-Vat                   value "Y".
+000175C          05  Batch-Id        pic x.
+000176C              88  Preserve-Batch             value "Y".
+000177C          05  Ledger-2nd-Index pic x.                     *> But file uses SINGLE INDEX only & gl030 uses a table
+000177+ .
+000178C              88  Index-2                    value "Y".
+000179C          05  IRS-Instead     pic x.
+000180C              88  IRS-Used                   value "Y".
+000181C              88  IRS-Both-Used              value "B".   *> 26/11/16
+000182C          05  Ledger-Sec      binary-short.  *> 9(4) comp
+000183C          05  Updates         binary-short.  *> 9(4) comp
+000184C          05  Postings        binary-short.  *> 9(4) comp
+000185C          05  Next-Batch      binary-short.  *> 9(4) comp  should be unsigned used for all ledgers
+000186C          05  Extra-Charge-Ac binary-long.   *> 9(8) comp        NOTHING IS USING THIS FIELD IN SALES or PURCHASE
+000187C          05  Vat-Ac          binary-long.   *> 9(8) comp
+000188C          05  Print-Spool-Name2 pic x(48).
+000189C *>******************
+000190C *>   P(B)/L Data   *
+000191C *>******************
+000192C      03  Purchase-Ledger-Block.             *> 88 bytes
+000193C          05  Next-Folio      binary-long.   *> 9(8) comp
+000194C          05  BL-Pay-Ac       binary-long.   *> 9(8) comp
+000195C          05  P-Creditors     binary-long.   *> 9(8) comp
+000196C          05  BL-Purch-Ac     binary-long.   *> 9(8) comp
+000197C          05  BL-End-Cycle-Date binary-long. *> 9(8) comp
+000198C          05  BL-Next-Batch   binary-short.  *> 9(4) comp  should be unsigned - unused ?
+000199C          05  Age-To-Pay      binary-char.   *> 9(4) comp should be unsigned
+000200C          05  Purchase-Ledger pic x.
+000201C              88  P-L-Exists                 value "Y".
+000202C          05  PL-Delim        pic x.
+000203C          05  Entry-Level     pic 9.
+000204C          05  P-Flag-A        pic 9.
+000205C          05  P-Flag-I        pic 9.
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0026
+
+LINE    .....................................................SOURCE.....................................................
+
+000206C          05  P-Flag-P        pic 9.
+000207C          05  PL-Stock-Link   pic x.
+000208C          05  Print-Spool-Name3 pic x(48).
+000209C          05  PL-Autogen      pic x          value space.        *> added 14/04/23 NOT USED YET
+000210C          05  PL-Next-Rec     binary-short unsigned.            *> 2 bytes 0 - 65k
+000211C          05  FILLER          pic x(7).
+000212C *>***************
+000213C *>   S/L Data   *
+000214C *>***************
+000215C      03  Sales-Ledger-Block.                *> 128 bytes
+000216C          05  Sales-Ledger    pic x.
+000217C              88  S-L-Exists                 value "Y".
+000218C          05  SL-Delim        pic x.
+000219C          05  Oi-3-Flag       pic x.         *> 'Y' used in sl060 why?
+000220C          05  Cust-Flag       pic x.
+000221C          05  Oi-5-Flag       pic x.
+000222C          05  S-Flag-Oi-3     pic x.         *> 'Z' when otm3 created, used in sl060 why? NO LONGER USED
+000223C          05  Full-Invoicing  pic 9.
+000224C          05  S-Flag-A        pic 9.         *> '1' used in sl060 why?
+000225C          05  S-Flag-I        pic 9.         *> '2' used in sl060 why?
+000226C          05  S-Flag-P        pic 9.
+000227C          05  SL-Dunning      pic 9.
+000228C          05  SL-Charges      pic 9.
+000229C          05  Sl-Own-Nos      pic x.
+000230C          05  SL-Stats-Run    pic 9.
+000231C          05  Sl-Day-Book     pic 9.
+000232C          05  invoicer        pic 9.
+000233C              88  I-Level-0                  value 0.  *> show totals only (no net & vat) not used?
+000234C              88  I-Level-1                  value 1.  *> Show net, vat
+000235C              88  I-Level-2                  value 2.  *> show Details + vat etc looks wrong in sl910 totals only
+000235+  (no net & vat)
+000236C              88  Not-Invoicing              value 9.  *> show totals only (no net & vat) but not found yet nor l
+000236+ evel 3 (see sl900)
+000237C          05  Extra-Desc      pic x(14).
+000238C          05  Extra-Type      pic x.
+000239C              88  Discount                   value "D".
+000240C              88  Charge                     value "C".
+000241C          05  Extra-Print     pic x.
+000242C          05  SL-Stock-Link   pic x.
+000243C          05  SL-Stock-Audit  pic x.
+000244C              88  Stock-Audit-On             value "Y".   *> Invoicing will create an audit record (15/05/13)
+000245C          05  SL-Late-Per     pic 99v99    comp.
+000246C          05  SL-Disc         pic 99v99    comp.
+000247C          05  Extra-Rate      pic 99v99    comp.
+000248C          05  SL-Days-1       binary-char.    *> 999  comp.
+000249C          05  SL-Days-2       binary-char.    *> 999  comp.
+000250C          05  SL-Days-3       binary-char.    *> 999  comp.
+000251C          05  SL-Credit       binary-char.    *> 999  comp.
+000252C          05  FILLER          binary-short.   *> No longer used.
+000253C          05  SL-Min          binary-short.   *> 9999  comp.
+000254C          05  SL-Max          binary-short.   *> 9999  comp.
+000255C          05  PF-Retention    binary-short.   *> 9999  comp.
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0027
+
+LINE    .....................................................SOURCE.....................................................
+
+000256C          05  First-Sl-Batch  binary-short.   *> 9999  comp.   *>unused ?
+000257C          05  First-Sl-Inv    binary-long.    *> 9(8) comp.
+000258C          05  SL-Limit        binary-long.    *> 9(8) comp.
+000259C          05  SL-Pay-Ac       binary-long.    *> 9(8) comp.
+000260C          05  S-Debtors       binary-long.    *> 9(8) comp.
+000261C          05  SL-Sales-Ac     binary-long.    *> 9(8) comp.
+000262C          05  S-End-Cycle-Date binary-long.   *> 9(8) comp.
+000263C          05  SL-Comp-Head-Pick Pic x.
+000264C              88  SL-Comp-Pick               value "Y".
+000265C          05  SL-Comp-Head-Inv  pic x.
+000266C              88  SL-Comp-Inv                value "Y".
+000267C          05  SL-Comp-Head-Stat pic x.
+000268C              88  SL-Comp-Stat               value "Y".
+000269C          05  SL-Comp-Head-Lets pic x.
+000270C              88  SL-Comp-Lets               value "Y".
+000271C          05  SL-VAT-Printed  pic x.
+000272C              88  SL-VAT-Prints              value "Y".
+000273C          05  SL-Invoice-Lines pic 99.
+000274C          05  SL-Autogen      pic x          value space.        *> added 14/04/23
+000275C          05  SL-Next-Rec     binary-short unsigned.             *> 2 bytes 0 - 65k
+000276C          05  SL-BO-Flag      pic x          value space.      *> support for Back Ordering - may be = Y for true
+000276+ .
+000277C          05  SL-BO-Default   pic x.
+000278C          05  FILLER          pic X(14).                       *> was x (16)
+000279C *> GL overflow
+000280C          05  GL-BL-Pay-Ac    binary-long.    *> 9(8) comp    THESE 6 ADDED 06/06/18 to poss. support GL and IRS
+000281C          05  GL-P-Creditors  binary-long.    *> 9(8) comp    RUNNING at same time.
+000282C          05  GL-BL-Purch-Ac  binary-long.    *> 9(8) comp
+000283C          05  GL-SL-Pay-Ac    binary-long.    *> 9(8) comp.
+000284C          05  GL-S-Debtors    binary-long.    *> 9(8) comp.
+000285C          05  GL-SL-Sales-Ac  binary-long.    *> 9(8) comp.
+000286C *>***************
+000287C *> Stock Data   *
+000288C *>***************
+000289C *>
+000290C      03  Stock-Control-Block.                *> 88 bytes
+000291C          05  Stk-Abrev-Ref   pic x(6).
+000292C          05  Stk-Debug       pic 9.          *> T/F (1/0).
+000293C          05  Stk-Manu-Used   pic 9.          *> T/F (Bomp/Wip)
+000294C          05  Stk-OE-Used     pic 9.          *> T/F.
+000295C          05  Stk-Audit-Used  pic 9.          *> T/F.
+000296C          05  Stk-Mov-Audit   pic 9.          *> T/F.
+000297C          05  Stk-Period-Cur  pic x.          *> M=Monthly, Q=Quarterly, Y=Yearly
+000298C          05  Stk-Period-dat  pic x.          *>  --  ditto  --
+000299C          05  FILLER          pic x.          *> was stk-date-form
+000300C          05  Stock-Control   pic x.
+000301C              88  Stock-Control-Exists   value "Y".
+000302C          05  Stk-Averaging   pic 9.          *> T/F.
+000303C              88  Stock-Averaging        value 1.
+000304C          05  Stk-Activity-Rep-Run pic 9.     *> T/F.  =17 bytes 0=no, 1=add, 2=del, 3=both
+000305C          05  Stk-BO-Active   pic x.          *> was filler 13/03/24
+000306C          05  Stk-Page-Lines  binary-char unsigned.  *> 9999 comp. Taken from Print-Lines
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0028
+
+LINE    .....................................................SOURCE.....................................................
+
+000307C          05  Stk-Audit-No    binary-char unsigned.  *> 9999 comp.
+000308C          05  FILLER          pic x(68).             *> 64    (just in case)
+000309C      03  IRS-Entry-Block.                               *>  128 bytes
+000310C          05  Client             pic x(24).      *>              24      *> Not needed as will use suser
+000311C          05  Next-Post          pic 9(5).       *>              29
+000311+     N   5
+000312C          05  Vat-Rates2.                                             *> these can be replaced by the other VAT b
+000312+ lk
+000313C              07  vat1           pic 99v99.      *>              33   *> Standard  changed from vat (11/06/13)
+000314C              07  vat2           pic 99v99.      *>              37   *> reduced 1 [not yet used]
+000315C              07  vat3           pic 99v99.      *>              41   *> reduced 2 [not yet used]
+000316C          05  Vat-Group redefines Vat-Rates2.
+000317C              07  Vat-Psent      pic 99v99    occurs 3.
+000318C          05  IRS-Pass-Value     pic 9.      *>          42  (Was Pass-Value in IRS system file)
+000319C          05  Save-Sequ          pic 9.           *>             43
+000320C          05  System-Work-Group  pic x(18).       *>             61
+000321C          05  PL-App-Created     pic x.           *>             62
+000322C          05  PL-Approp-AC6      pic 9(6).        *>             68   changed for GL support if needed ?. Both ne
+000322+ eded in RDB
+000323C          05  FILLER redefines PL-Approp-AC6.
+000324C              07  FILLER         pic 9.           *>                   loose leading char for IRS
+000325C              07  PL-Approp-AC   pic 9(5).        *>                   For IRS
+000326C          05  1st-Time-Flag      pic 9.           *>             69    (was First-Time-Flag in IRS system file)
+000326+     N  32
+000327C          05  FILLER             pic x(59).       *>             128  Old fn-1 to 5 files
+000328C      03  IRS-Data-Block redefines IRS-Entry-Block.
+000329C          05  FILLER-Dummy4   pic x(128).
+000330C *>
+000310   copy "wsnames.cob".
+000001C *>
+000002C *> Sales, Purchase, Stock, General & now IRS for v3.3 with integrated IRS
+000003C *>    for use in xl150 and ??
+000004C *>
+000005C *>  Files used in Sales, Stock, Purchase, General & IRS
+000006C *> 17/11/16 vbc - Added IRS files + their renaming with irs prefix.
+000007C *> 04/12/16 vbc - Added irs055 sort file as file-38.
+000008C *> 09/05/23 vbc - Added PL & SL autogen (files04, 30 increased count to 38
+000009C *> 16/03/24 vbc - Added Sales Bo-Stk-Itm as file31  increased count to 39
+000010C *> 21/10/25 vbc - Added Payroll - USA/Canada - other files needed for elsewhere
+000011C *>                inc UK / Europe etc.
+000012C *>
+000013C  01  File-Defs.
+000014C      02  file-defs-a.
+000015C          03  pre-trans-name   pic x(532)  value "pretrans.tmp". *> gl071
+000016C          03  post-trans-name  pic x(532)  value "postrans.tmp". *> gl071
+000017C  copy "file00.cob".    *> "system"
+000001C      03  file-0         pic x(532)        value "system.dat".
+000018C *>                        No file 1
+000019C  copy "file02.cob".    *> "archive".
+000001C      03  file-2         pic x(532)        value "archive.dat".
+000020C  copy "file03.cob".    *> "final".
+000001C      03  file-3         pic x(532)        value "final.dat".
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0029
+
+LINE    .....................................................SOURCE.....................................................
+
+000021C  copy "file04.cob".    *> "SLautogen"
+000001C      03  file-4         pic x(532)        value "slautogen.dat".
+000022C  copy "file05.cob".    *> "ledger".
+000001C      03  file-5         pic x(532)        value "ledger.dat".
+000023C  copy "file06.cob".    *> "posting".
+000001C      03  file-6         pic x(532)        value "posting.dat".
+000024C  copy "file07.cob".    *> "batch".
+000001C      03  file-7         pic x(532)        value "batch.dat".
+000025C  copy "file08.cob".    *> "postings2irs.dat"
+000001C      03  file-8         pic x(532)        value "postings2irs.dat".
+000026C  copy "file09.cob".    *> "tmp-stock".
+000001C      03  file-9         pic x(532)        value "tmp-stock.dat".
+000027C  copy "file10.cob".    *> "staudit".
+000001C      03  file-10        pic x(532)        value "staudit.dat".
+000028C  copy "file11.cob".    *> "stockctl".
+000001C      03  file-11        pic x(532)        value "stockctl.dat".
+000029C  copy "file12.cob".    *> "salesled".
+000001C      03  file-12        pic x(532)        value "salesled.dat".
+000030C  copy "file13.cob".    *> "value.dat"
+000001C      03  file-13        pic x(532)        value "value.dat".
+000031C  copy "file14.cob".    *> "delivery.dat"
+000001C      03  file-14        pic x(532)        value "delivery.dat".
+000032C  copy "file15.cob".    *> "analysis.dat"
+000001C      03  file-15        pic x(532)        value "analysis.dat".
+000033C  copy "file16.cob".    *> "invoice ".
+000001C      03  file-16        pic x(532)        value "invoice.dat".
+000034C  copy "file17.cob".    *> "delinvno".
+000001C      03  file-17        pic x(532)        value "delinvno.dat".
+000035C  copy "file18.cob".    *> "openitm2".
+000001C      03  file-18        pic x(532)        value "openitm2.dat".
+000036C  copy "file19.cob".    *> "openitm3".
+000001C      03  file-19        pic x(532)        value "openitm3.dat".
+000037C  copy "file20.cob".    *> "oisort".
+000001C      03  file-20        pic x(532)        value "oisort.wrk".
+000038C  copy "file21.cob".    *> "work.tmp"
+000001C      03  file-21        pic x(532)        value "work.tmp".
+000039C  copy "file22.cob".    *> "purchled"
+000001C      03  file-22        pic x(532)        value "purchled.dat".
+000040C  copy "file23.cob".    *> "delfolio.dat"
+000001C      03  file-23        pic x(532)        value "delfolio.dat".
+000041C  copy "file24.cob".    *> dummy to build file-02
+000001C      03  file-24        pic x(532)        value spaces.
+000042C *>                        No file 25
+000043C  copy "file26.cob".    *> "pinvoice"
+000001C      03  file-26        pic x(532)        value "pinvoice.dat".
+000044C  copy "file27.cob".    *> "poisort"
+000001C      03  file-27        pic x(532)        value "poisort.wrk".
+000045C  copy "file28.cob".    *> "openitm4"
+000001C      03  file-28        pic x(532)        value "openitm4.dat".
+000046C  copy "file29.cob".    *> "openitm5"
+000001C      03  file-29        pic x(532)        value "openitm5.dat".
+000047C  copy "file30.cob".    *> "PLautogen.dat"
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0030
+
+LINE    .....................................................SOURCE.....................................................
+
+000001C      03  file-30        pic x(532)        value "plautogen.dat".
+000048C  copy "file31.cob".    *> "boStkitm.dat" NEw 16/03/24
+000001C      03  file-31        pic x(532)        value "bostkitm.dat".
+000049C  copy "file32.cob".    *> "pay.dat"
+000001C      03  file-32        pic x(532)        value "pay.dat".
+000050C  copy "file33.cob".    *> "cheque.dat"
+000001C      03  file-33        pic x(532)        value "cheque.dat".
+000051C          03  file-34          pic x(532)  value "irsacnts.dat".        *> IRS ex file 1  These 4 added 19/10/16
+000051+ for IRS integration
+000052C          03  file-35          pic x(532)  value "irsdflt.dat".         *> IRS ex file 3  all name have 'irs' pre
+000052+ fix.
+000053C          03  file-36          pic x(532)  value "irspost.dat".         *> IRS ex file 4
+000054C          03  file-37          pic x(532)  value "irsfinal.dat".        *> IRS ex file 5
+000055C          03  file-38          pic x(532)  value "postsort.dat".        *> IRS ex irs055 sort file.
+000056C
+000057C *> Code for Payroll  AND INCREASE occurs both times
+000058C          03  file-39          pic x(532)  value "pyact.dat".               *> PY account
+000059C          03  file-40          pic x(532)  value "pychk.dat".               *> PY check / bacs
+000060C          03  file-41          pic x(532)  value "pycoh.dat".               *> PY company history
+000061C          03  file-42          pic x(532)  value "pyded.dat".               *> PY deduction {/ earnings}
+000062C          03  file-43          pic x(532)  value "pyemp.dat".               *> PY employee master
+000063C          03  file-44          pic x(532)  value "pyhis.dat".               *> PY employee (pay) history
+000064C          03  file-45          pic x(532)  value "pyhrs.dat".               *> PY pay trans
+000065C          03  file-46          pic x(532)  value "pypay.dat".               *> PY pay detail jrn + header ???
+000066C          03  file-47          pic x(532)  value "pypr1.dat".               *> PY param 1
+000067C          03  file-48          pic x(532)  value "pypr2.dat".               *> PY param 2
+000068C *> TABLES Blk 1
+000069C          03  file-49          pic x(532)  value "pycalm.dat".              *> PY  calx - x = s,m,h, x?
+000070C          03  file-50          pic x(532)  value "pycals.dat".              *> PY
+000071C          03  file-51          pic x(532)  value "pycalh.dat".              *> PY
+000072C          03  file-52          pic x(532)  value "pycalx.dat".              *> PY  california special tables ???
+000073C          03  file-53          pic x(532)  value "pylwt.dat".               *> PY  tax table ???
+000074C          03  file-54          pic x(532)  value "pyswtaa.dat".             *> PY  swt aa = State abbrev. code On
+000074+ ly one used
+000075C          03  file-55          pic x(532)  value "pyglcoann.dat".           *> PY gl CoA transfer ??
+000076C          03  file-56          pic x(532)  value "pyglgjbss.dat".           *> PY  ???
+000077C *> Not sure about these two up/down
+000078C            03  file-57          pic x(532)  value "pycal.dat".             *> PY  ??? calm,s,h etc
+000079C *>
+000080C      02  filler         redefines file-defs-a.
+000081C          03  System-File-Names   pic x(532) occurs 58.            *> 39 chg for sales BO file plus py
+000082C      02  File-Defs-Count         binary-short value 58.           *> MUST be the same as above occurs
+000083C      02  File-Defs-os-Delimiter  pic x.                           *> if = \ or / then paths have been set.
+000084C *>
+000311  *>
+000312   01  To-Day              pic x(10).   *> In local format nn/nn/yyyy
+000313  *>
+000314   Report section.    *> All MAY NEED CHANGING
+000315  *>*************
+000316  *>
+000317   RD  W2-Report
+000318       control      Final
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0031
+
+LINE    .....................................................SOURCE.....................................................
+
+000319       Page Limit   WS-Page-Lines
+000320   *>    Heading      1
+000321       First Detail 7
+000322       Last  Detail WS-Page-Lines.
+000323  *>
+000324  *> WARNING: Line # and Col #  can change from year to year for all fields
+000325  *>  and this section may well need changes when the new W-2 form becomes available
+000326  *>
+000327  *>  Line offset based on above First Detail number and is always subject to
+000328  *>  testing - i.e., running a test print.
+000329  *>
+000330  *>  Therefore these layouts may well need changes and the program recompiled to
+000331  *>  match up with any new W-2 forms
+000332  *>
+000333  *>  ONLY applies when printing on to pre-printed stationary
+000334  *>
+000335  *> 01  W2-Detail type is detail.    *> As per W-2 form for 2026.---  REPEAT generate WS-RS-Emp-Forms-Cnt TIMES
+000336  *>                                   CURRENTLY REMARKED OUT AS USING one from cbasic 1980-ish
+000337  *>                                   in order to get data sources etc.
+000338  *>     03  line 1.
+000339  *>         05  col  20  pic x(11)        source WS-Emp-SSN-X.   *> pre moves first
+000340  *>     03  line 3.
+000341  *>         05  col   4  pic pic x(15)    source PY-PR1-Fed-ID.
+000342  *>         05  col  43  pic zzz,zz9.99    *> SUM His-YTD-Income-Taxable   His-YTD-Other-Taxable
+000343  *>                                               His-YTD-Other-NonTaxable His-YTD-Tips.   *> sub.gross
+000344  *>         05  col  59  pic zzz,zz9.99   source His-YTD-FWT.
+000345  *>     03  line 5.
+000346  *>         05  col   4  pic x(32)        source PY-PR1-Trade-Name.
+000347  *>         05  col  43  pic zzz,zz9.99   source ss wages
+000348  *>         05  col  59  pic zzz,zz9.99   source ss tax withheld
+000349  *>     03  line 6.
+000350  *>         05  col   4  pic x(32)        source PY-PR1-Co-Address-1.
+000351  *>     03  line 7.
+000352  *>         05  col   4  pic x(32)        source PY-PR1-Co-Address-2.
+000353  *>         05  col  43  pic zzz,zz9.99   source mcare wages & tips
+000354  *>         05  col  59  pic zzz,zz9.99   source His-YTD-MCare.
+000355  *>     03  line 8.
+000356  *>         05  col   4  pic x(32)        source PY-PR1-Co-Address-3.
+000357  *>     03  line 9.
+000358  *>         05  col   4  pic xx           source PY-PR1-Co-State.
+000359  *>         05  col   7  pic x(10)        source PY-PR1-Co-Zip.
+000360  *>         05  col  43  pic zzz,zz9.99   source SS tips
+000361  *>         05  col  59  pic zzz,zz9.99   source allocated tips
+000362  *> *>    03  line 11.
+000363  *> *>        05  col   4  pic x(20)        source 'control number' ???
+000364  *> *>        05  col  59  pic zzz,zz9.99   source dependant care benefits
+000365  *>     03  line 12.
+000366  *>         05  col  43  pic x(8)         source non qualified plans
+000367  *>     03  line 13.
+000368  *>         05  col   4  pic x(16)        source WS-Emp-First-Nm.      *> 1st name & init 2 be extracted Emp-Name
+000369  *>         05  col  16  pic x(15)        source       *> surname      *> Emp-Search-name or emp-name
+000370  *>         05  col  36  pic xx           source       *> Suffix       *> Ditto if surname has edditional text af
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0032
+
+LINE    .....................................................SOURCE.....................................................
+
+000370+ ter
+000371  *>         05  col  59  pic xxxbx(10)    source       *> Box 12/a ?
+000372  *>     03  line 14.
+000373  *>         05  col  44  pic x            source       *> Stat emp x
+000374  *>         05  col  49  pic x            source       *> retirement plan
+000375  *>         05  col  54  pic x            source       *> 3rd pty sick pay
+000376  *>     03  line 15.
+000377  *>         05  col   4  pic x(32)        source Emp-Address-1.
+000378  *>         05  col  59  pic xxxbx(10)    source       *> box 12b
+000379  *>     03  line 16.
+000380  *>         05  col   4  pic x(32)        source Emp-Address-2.
+000381  *>         05  col  43  pic x(14)        source       *> box 14a line 1
+000382  *>     03  line 17.
+000383  *>         05  col   4  pic x(32)        source Emp-Address-3.
+000384  *>         05  col  43  pic x(14)        source       *> box 14a line 2
+000385  *>         05  col  59  pic xxxbx(10)    source       *> box 12c
+000386  *>     03  line 18.
+000387  *>         05  col   4  pic x(32)        source Emp-Address-4.
+000388  *>         05  col  43  pic x(14)        source       *> box 14a line 3
+000389  *>     03  line 19.
+000390  *>         05  col   4  pic xx           source Emp-State.
+000391  *>         05  col   7  pic x(10)        source Emp-Zip.
+000392  *>         05  col  59  pic xxxbx(10)    source       *> box 12d
+000393  *>     03  line 20.
+000394  *>         05  col  43  pic x(6)bx(6)    source       *> box 14b
+000395  *>     03  line 22.  *> Employers state details
+000396  *>         05  col   4  pic xx           source PY-PR1-Co-State. *> box 15
+000397  *>         05  col   7  pic x(15)        source PY-PR1-State-ID. *> ditto
+000398  *>         05  col  21  pic zzz,zz9.99    *> SUM His-YTD-Income-Taxable   His-YTD-Other-Taxable
+000399   *>                                              His-YTD-Other-NonTaxable His-YTD-Tips.   *> sub.gross
+000400  *>         05  col  32  pic zzz,zz9.99   source His-YTD-SWT.      *> box 17 state income tax      other ??
+000401  *>         05  col  43  pic zzz,zz9.99    *> SUM His-YTD-Income-Taxable   His-YTD-Other-Taxable
+000402   *>                                              His-YTD-Other-NonTaxable His-YTD-Tips.   *> sub.gross
+000403   *>                                                                  box 18 local wages, tips etc His-YTD-LWT ??
+000403+ ?
+000404  *>         05  col  54  pic zz,zz9.99    source  His-YTD-LWT.      *> box 19
+000405  *>         05  col  65  x(5)             source       *> box 20 Locality name       ???
+000406  *> *>
+000407  *> *> Line 24 - Employers Secondary State details  not used in PY at least yet but is it needed ??
+000408  *> *>
+000409  *> *>    03  line 24.
+000410  *> *>
+000411  *> *>        05  col   4  pic xx           source PY-PR1-Co-State. *> box 15
+000412  *> *>        05  col   7  pic x(15)        source PY-PR1-State-ID. *> ditto
+000413  *> *>        05  col  21  pic zzz,zz9.99   source       *> box 16 state wages, tips etc
+000414  *> *>        05  col  32  pic zzz,zz9.99   source       *> box 17 state income tax
+000415  *> *>        05  col  43  pic zzz,zz9.99   source       *> box 18 local wages, tips etc
+000416  *> *>        05  col  54  pic zz,zz9.99    source       *> box 19 local income tax
+000417  *> *>        05  col  65  x(5)             source       *> box 20 Locality name
+000418  *>
+000419
+000420   *>       col1% = disp% + 4  :\
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0033
+
+LINE    .....................................................SOURCE.....................................................
+
+000421   *>       col2% = disp% + 21 :\
+000422   *>       col3% = disp% + 34 :\
+000423   *>       col4% = disp% + 49 :\
+000424   *>       col5% = disp% + 64
+000425
+000426   01  W2-Detail type is detail. *> From basic code REPEAT generate WS-RS-Emp-Forms-Cnt TIMES
+000427       03  line 3.    *> 310
+000428           05  col  26  pic x(15)          source PY-PR1-State-ID.
+000429       03  line + 2.
+000430           05  col   4  pic x(34)          source PY-PR1-Trade-Name. *> Caution check form field length
+000431       03  line + 1.
+000432           05  col   4  pic x(32)          source PY-PR1-Co-Address-1.
+000433       03  line + 1.
+000434           05  col   4  pic x(32)          source PY-PR1-Co-Address-2.
+000435           05  col  34  pic x(15)          source PY-PR1-Fed-ID.
+000436       03  line + 1.
+000437           05  col   4  pic x(32)          source PY-PR1-Co-Address-3.
+000438       03  line + 1.
+000439           05  col   4  pic x(32)          source PY-PR1-Co-Address-4
+000440                                             present when PY-PR1-Co-Address-4 not = spaces.
+000441  *>
+000442  *> Employee data
+000443  *>
+000444
+000445   *>   his.ytd.fica.gross = his.ytd.fica.taxable
+000446
+000447
+000448
+000449       03  line + 1.
+000450           05  col   4  pic xx             source PY-PR1-Co-State.
+000451           05  col + 10 pic x(10)          source PY-PR1-Co-Zip.
+000452           05  col + 21 pic zzz,zzz,zz9.99 source His-YTD-EIC.
+000453  *>
+000454       03  line + 2.
+000455           05  col   4  pic x(11)          source WS-Emp-SSN-X.  *> created after reading Emp rec
+000456           05  col  21  pic zzz,zzz,zz9.99 source His-YTD-FWT.
+000457           05  col  34  pic zzz,zzz,zz9.99 source Tmp-his-ytd-gross.
+000458  *>       Equals                            SUM His-YTD-Income-Taxable   His-YTD-Other-Taxable
+000459  *>                                             His-YTD-Other-NonTaxable His-YTD-Tips.   *> sub.gross
+000460  *>
+000461           05  col  49  pic zzz,zzz,zz9.99 source His-YTD-FICA.
+000462           05  col  64  pic zzz,zzz,zz9.99 source Tmp-his-ytd-FICA-Gross. *> both tmp flds are the same RECHECK AL
+000462+ L fields HERE
+000463   *> SUM His-YTD-Income-Taxable   His-YTD-Other-Taxable
+000464   *>     His-YTD-Other-Nontaxable His-YTD-Tips
+000465  *>
+000466       03  line + 2.
+000467           05  col   4  pic x(32)          source Emp-Name.
+000468           05  col  34  pic x              source Emp-Pension-Used.
+000469           05  col  64  pic zzz,zzz,zz9.99 source His-YTD-Tips.
+000470       03  line + 2.
+000471           05  col   4  pic x(32)          source Emp-Address-1.
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0034
+
+LINE    .....................................................SOURCE.....................................................
+
+000472       03  line + 1                         present when WS-Pnt-Local-Amount = "Y".
+000473           05  col  34  pic zzz,zzz,zz9.99 source His-YTD-SWT.
+000474           05  col  49  pic zzz,zzz,zz9.99 source Tmp-his-ytd-gross.
+000475    *>    Equals                             SUM His-YTD-Income-Taxable   His-YTD-Other-Taxable
+000476    *>                                           His-YTD-Other-NonTaxable His-YTD-Tips.   *> sub.gross
+000477           05  col  64  pic xx             source PY-PR1-Co-State.
+000478       03  line + 1
+000479               col   4  pic x(32)          source Emp-Address-2.
+000480       03  line + 1
+000481               col   4  pic x(32)          source Emp-Address-3.
+000482       03  line + 1.
+000483           05  col   4  pic x(32)          source Emp-Address-4.
+000484       03  line + 1                          present when WS-Pnt-Local-Amount = "Y".
+000485           05  col  34  pic zzz,zzz,zz9.99 source His-YTD-LWT.
+000486           05  col  49  pic zzz,zzz,zz9.99 source Tmp-his-ytd-gross.
+000487  *>       Equals                            SUM His-YTD-Income-Taxable   His-YTD-Other-Taxable
+000488  *>                                             His-YTD-Other-NonTaxable His-YTD-Tips.   *> sub.gross
+000489           05  col  64  pic x(24)          source PY-PR1-Co-Address-4
+000490                                            present when PY-PR1-Co-Address-4 not = spaces.
+000491       03  line + 1.
+000492           05  col   4  pic xx             source Emp-State.
+000493           05  col  14  pic x(10)          source Emp-Zip.
+000494  *> Sub total form element
+000495
+000496
+000497       03  line + 2                         present when WS-Pnt-Local-Amount = "Y".
+000498           05  col  34  pic zzz,zzz,zz9.99 source WS-Sub-LWT.
+000499           05  col  49  pic zzz,zzz,zz9.99 source WS-Sub-Gross.
+000500           05  col  64  pic x(24)          source PY-PR1-Co-Address-3
+000501                                            present when PY-PR1-Co-Address-4 = spaces.
+000502           05  col  64  pic x(24)          source PY-PR1-Co-Address-4
+000503                                            present when PY-PR1-Co-Address-4 not = spaces.
+000504  *>
+000505
+000506
+000507
+000508
+000509
+000510   screen section.
+000511  *>*************
+000512  *>
+000513  *> two lines are replaced with a blanl line as values not required for inkjet/laser printers.
+000514  *>  WARNING using RW may not work for such printers - cannot test with these as not used in Development.
+000515  *>
+000516   01  SS-Menu-Options background-color cob-color-black
+000517                       foreground-color cob-color-green
+000518                       erase eos.
+000519       03  from  Prog-Name  pic x(15)                              line  1 col  1 foreground-color 2.
+000520       03  value "Print W-2 Reports"                                       col 31.
+000521       03  from  To-Day     pic x(10)                                      col 71 foreground-color 2.
+000522       03  from  Usera      pic x(32)                              line  3 col  1.
+000523  *>
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0035
+
+LINE    .....................................................SOURCE.....................................................
+
+000524       03  value
+000525           "                             Employee Selection"                               line  5 col  1.
+000526  03 value "-------------------------------------+--------------------------------------"  line  6 col  1.
+000527  03 value "                                     |"                                        line  7 col  1.
+000528  03 value "     1  All Employees                |  Print State and Local Amounts  [ ]"    line  8 col  1.
+000529  03 value "     2  Range of Employees           |"                                        line  9 col  1.
+000530  03 value "     3  Terminated Employees         |  Number of Forms Per Employee   [ ]"    line 10 col  1.
+000531  03 value "     4  A Single Employee            |"                                        line 11 col  1.
+000532  *> 03 value "                                     |  Number of Lines Between Forms  [  ]"   line 12 col  1.
+000533  03  value "                                    |"                                        line 12 col  1. *> inst
+000533+ ead of above
+000534  03 value "        Enter Selection [ ]          |"                                        line 13 col  1.
+000535  *> 03 value "                                     |  Starting Print Column          [  ]"   line 14 col  1.
+000536  03 value "                                     |"                                        line 14 col  1. *> inst
+000536+ ead of above
+000537  03 value "-------------------------------------+--------------------------------------"  line 15 col  1.
+000538  03 value "  Starting Employee Number [       ] |"                                        line 16 col  1.
+000539  03 value "      Employee Number   [       ]    |        Print Test Form [ ]"             line 17 col  1.
+000540  03 value "  Ending Employee Number   [       ] |"                                        line 18 col  1.
+000541  03 value "-------------------------------------+--------------------------------------"  line 19 col  1.
+000542  *>
+000543  *> Manual accepts as order is top left select, top right 4, then left to right.
+000544  *>
+000545   *>    03  using WS-RS-Report-Type            pic x                line 13 col 26 foreground-color 3.
+000546   *>    03  using WS-RS-State-Local            pic x                line  8 col 73 foreground-color 3.
+000547   *>    03  using WS-RS-Emp-Forms-Cnt          pic 9                line 10 col 73 foreground-color 3.
+000548  *> *>    03  using WS-RS-No-Lines-Between-Forms pic 99               line 12 col 73 foreground-color 3.
+000549  *> *>    03  using WS-RS-Start-Prt-Col          pic 99               line 14 col 73 foreground-color 3.
+000550   *>    03  using WS-RS-From-Emp               pic 9(7)             line 16 col 29 foreground-color 3.
+000551   *>    03  using WS-RS-Single-Emp             pic 9(7)             line 17 col 26 foreground-color 3.
+000552   *>    03  using WS-RS-Prt-Test-Form          pic x                line 17 col 64 foreground-color 3. *> UPPER
+000553   *>    03  using WS-RS-To-Emp                 pic 9(7)             line 18 col 29 foreground-color 3.
+000554  *>
+000555   procedure division using WS-Calling-Data  *> ACAS
+000556                            WS-System-Record *> ACAS
+000557                            To-Day           *> ACAS
+000558                            File-Defs.       *> ACAS
+000559  *>
+000560   aa000-Main                  section.
+000561  *>**********************************
+000562  *> Force Esc, PgUp, PgDown, PrtSC to be detected
+000563       set      ENVIRONMENT "COB_SCREEN_EXCEPTIONS" to "Y".
+000564       set      ENVIRONMENT "COB_SCREEN_ESC" to "Y".
+000565       move     Current-Date to WSE-Date-block.
+000566       move     WSE-Date-9  to WS-Test-YMD.
+000567       move     Print-Spool-Name to PSN.  *> set ACAS prt spool for o/p
+000568  *>
+000569  *> Create common-date in ccyymmdd form.
+000570  *>   assuming To-Day is in Locale format ie USA mm.dd/ccyy
+000571  *>
+000572       move     To-Day (7:4)      to WS-Common-Date (1:4).
+000573       if       PY-PR1-Date-Format = 2
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0036
+
+LINE    .....................................................SOURCE.....................................................
+
+000574                move To-Day (1:2) to WS-Common-Date (5:2)  *> mm
+000575                move To-Day (4:2) to WS-Common-Date (7:2)  *> dd
+000576       else
+000577                move To-Day (4:2) to WS-Common-Date (5:2)  *> mm
+000578                move To-Day (1:2) to WS-Common-Date (7:2). *> dd
+000579  *>
+000580       perform  forever
+000581                accept   WS-Env-Lines   from lines
+000582                if       WS-Env-Lines < 28
+000583                         display  SY010    at 0101 with erase eos
+000584                         accept   WS-Reply at 0133
+000585                         move     8 to WS-Term-Code
+000586                         exit perform cycle
+000587                end-if
+000588                accept   WS-Env-Columns from Columns
+000589                if       WS-Env-Columns < 80
+000590                         display  SY013    at 0101 with erase eos
+000591                         accept   WS-Reply at 0130
+000592                         move     8 to WS-Term-Code
+000593                         exit perform cycle
+000594                end-if
+000595       end-perform.
+000596  *>
+000597  *> Set up error message areas on screen anyway
+000598  *>
+000599       subtract 2 from WS-Env-Lines giving WS-22-Lines.
+000600       subtract 1 from WS-Env-Lines giving WS-23-Lines.
+000601       move     WS-Env-Lines to WS-Lines.
+000602  *>
+000603  *> Open all files if any missing Abort.
+000604  *> For all files other than His-Emp read only record.
+000605  *>
+000606       move     1 to RRN.
+000607       open     i-o      PY-Param1-File.
+000608       if       PY-PR1-Status not = "00"      *> Does not exist yet so lets create it & write rec
+000609                close    PY-Param1-File
+000610                display  PY626 at line WS-23-Lines col 1 foreground-color 6 erase eos
+000611                display  SY001 at line WS-Lines    col 1
+000612                accept   WS-Reply at line WS-Lines col 48 AUTO
+000613                move     16 to WS-Term-Code
+000614                goback   returning 1.
+000615  *>
+000616       read     PY-Param1-File key RRN.
+000617       if       PY-PR1-Status not = "00"
+000618                perform  ZZ040-Evaluate-Message
+000619                display  PY012         at line WS-23-Lines col 1 with erase eos
+000620                display  PY-PR1-Status at line WS-23-Lines col 33
+000621                display  WS-Eval-Msg   at line WS-23-Lines col 36
+000622                display  SY001         at line WS-Lines    col 1
+000623                accept   WS-Reply      at line WS-Lines    col 48 AUTO
+000624                close    PY-Param1-File
+000625                move     16 to WS-Term-Code
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0037
+
+LINE    .....................................................SOURCE.....................................................
+
+000626                goback   returning 1.
+000627  *>
+000628  *>  Check if ok to run  - other tests remarked out in basic code
+000629  *>
+000630       move     "Y" to WS-Year-End.
+000631  *>
+000632  *> This code block does not update any fields in PR1 PR2 NOW but might later
+000633  *> if program is updated for additional tests etc.
+000634  *>
+000635       move     WS-Common-Date to WS-Test-YMD
+000636       if       PY-PR2-Last-Q-Ended = 4
+000637                move     WS-Test-YMD  to WS-End-of-Qtr
+000638                if       WS-EoQ-Month = 01
+000639                         subtract 1 from WS-EoQ-Year  *> decr year for last yr as running in new year
+000640                end-if
+000641                move     1231     to WS-End-of-Qtr (5:4)
+000642       else
+000643                move     WS-Common-Date to WS-End-of-Qtr.
+000644  *>
+000645   display "End of Qtr now " WS-End-of-Qtr.   *> FOR TESTING ONLY
+000646  *>
+000647       open     input    PY-Employee-File.
+000648       if       PY-Emp-Status not = zeros
+000649                display  PY622 at line WS-23-Lines col 1 foreground-color 6 erase eos
+000650                display  SY001 at line WS-Lines    col 1
+000651                accept   WS-Reply at line WS-Lines col 48 AUTO
+000652                close    PY-Employee-File
+000653                         PY-Param1-File
+000654                move     16 to WS-Term-Code
+000655                goback   returning 2.
+000656
+000657  *>
+000658       open     input    PY-History-File.
+000659       if       PY-His-Emp-Status not = zeros
+000660                display  PY624 at line WS-23-Lines col 1 foreground-color 6
+000661                                                         erase eos
+000662                display  SY001 at line WS-Lines    col 1
+000663                accept   WS-Reply at line WS-Lines col 48 AUTO
+000664                close    PY-Employee-File
+000665                         PY-History-File
+000666                         PY-Param1-File
+000667                move     16 to WS-Term-Code
+000668                goback   returning 3.
+000669  *>
+000670  *> Get values for Emp start, end and other values testing as we go - start again if error found
+000671  *>
+000672       perform  forever
+000673                display  SS-Menu-Options
+000674                accept   WS-RS-State-Local   at line 8  col 73 UPPER UPDATE foreground-color 3
+000675                if       WS-RS-State-Local not = "Y" and not = "N"
+000676                         display  PY629      at line WS-23-Lines col 1 erase eos
+000677                         exit perform cycle
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0038
+
+LINE    .....................................................SOURCE.....................................................
+
+000678                else  *> clr error msg
+000679                         display  space      at line WS-23-Lines col 1 erase eos
+000680                end-if
+000681                accept   WS-RS-Emp-Forms-Cnt at line 10 col 73 UPDATE foreground-color 3
+000682                if       WS-RS-Emp-Forms-Cnt < 1
+000683                         display  PY634      at line WS-23-Lines col 1 erase eos
+000684                         exit perform cycle
+000685                else
+000686                         display  space      at line WS-23-Lines col 1 erase eos
+000687                end-if
+000688  *>              accept   WS-RS-No-Lines-Between-Forms at line 12 col 73 UPDATE foreground-color 3
+000689                accept   WS-RS-Report-Type   at line 13 col 26 UPDATE foreground-color 3
+000690                if       WS-RS-Report-Type < 1 or > 4
+000691                         display  PY634      at line WS-23-Lines col 1 erase eos
+000692                         exit perform cycle
+000693                else
+000694                         display  space      at line WS-23-Lines col 1 erase eos
+000695                end-if
+000696  *>              accept   WS-RS-Start-Prt-Col at line 14 col 73 foreground-color 3
+000697                if       WS-RS-Report-Type = 2
+000698                         accept   WS-RS-From-Emp      at line 16 col 29 UPDATE foreground-color 3
+000699                end-if
+000700                accept   WS-RS-Prt-Test-Form at line 17 col 64 UPPER UPDATE foreground-color 3
+000701                if       WS-RS-Prt-Test-Form not = "Y" and not = "N"
+000702                         display  PY629      at line WS-23-Lines col 1 erase eos
+000703                         exit perform cycle
+000704                else  *> clr error msg
+000705                         display  space      at line WS-23-Lines col 1 erase eos
+000706                end-if
+000707  *>
+000708                if       WS-RS-Report-Type = 4  *> Single employee
+000709                         accept   WS-RS-Single-Emp at line 17 col 26 UPDATE foreground-color 3
+000710                         exit perform
+000711                end-if
+000712  *>
+000713                if       WS-RS-Report-Type = 2
+000714                         accept   WS-RS-To-Emp        at line 18 col 29 UPDATE foreground-color 3
+000715                end-if
+000716  *> Test for from / to correct ranges
+000717                if       WS-RS-Report-Type = 2                     *> Range > test
+000718                  and    WS-RS-From-Emp > WS-RS-To-Emp
+000719                         display  PY633      at line WS-23-Lines col 1 erase eos
+000720                         exit perform cycle
+000721                else  *> clr error msg
+000722                         display  space      at line WS-23-Lines col 1 erase eos
+000723                end-if
+000724  *>
+000725                if       WS-RS-Report-Type = 2                     *> Range < test
+000726                  and    WS-RS-To-Emp < WS-RS-From-Emp
+000727                         display  PY638      at line WS-23-Lines col 1 erase eos
+000728                         exit perform cycle
+000729                else  *> clr error msg
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0039
+
+LINE    .....................................................SOURCE.....................................................
+
+000730                         display  space      at line WS-23-Lines col 1 erase eos
+000731                end-if
+000732  *>
+000733                if       WS-RS-Report-Type = 4                     *> Single Emp check exist
+000734                         move     zeros to PY-Emp-Status
+000735                                           PY-His-Emp-Status
+000736                         move     WS-RS-Single-Emp  to His-Emp-No
+000737                                                       Emp-No
+000738                         start    PY-History-File  key = His-Emp-No
+000739                         start    PY-Employee-File key = Emp-No
+000740                         if       PY-His-Emp-Status not = zeros
+000741                             or   PY-Emp-Status not = zeros
+000742                                  display  "**"  at line 17 col 33  foreground-color 6 blink
+000743                                  display  PY634 at line WS-23-Lines col 1 erase eos
+000744                                  exit perform cycle
+000745                         else
+000746                                  display  space      at line WS-23-Lines col 1 erase eos
+000747                                  display  "  "       at line 17 col 33
+000748                         end-if
+000749                end-if
+000750  *>
+000751                if       WS-RS-Report-Type = 2                     *> Range check they exist
+000752                         move     zeros to PY-Emp-Status
+000753                                           PY-His-Emp-Status
+000754                         if       WS-RS-From-Emp not = zeros
+000755                                  move     WS-RS-From-Emp  to His-Emp-No
+000756                                                              Emp-No
+000757                                  start    PY-History-File  key = His-Emp-No
+000758                                  start    PY-Employee-File key = Emp-No
+000759                                  if       PY-His-Emp-Status not = zeros
+000760                                      or   PY-Emp-Status not = zeros
+000761                                           display  "**"  at line 16 col 33  foreground-color 6 blink
+000762                                           display  PY634 at line WS-23-Lines col 1 erase eos
+000763                                           exit perform cycle
+000764                                  else
+000765                                           display  "  "       at line 16 col 33
+000766                                           display  space      at line WS-23-Lines col 1 erase eos
+000767                                  end-if
+000768                         end-if
+000769                         move     zeros to PY-Emp-Status
+000770                                           PY-His-Emp-Status
+000771                         if       WS-RS-To-Emp not = zeros
+000772                                  move     WS-RS-To-Emp  to His-Emp-No
+000773                                                            Emp-No
+000774                                  start    PY-History-File  key = His-Emp-No
+000775                                  start    PY-Employee-File key = Emp-No
+000776                                  if       PY-His-Emp-Status not = zeros
+000777                                      or   PY-Emp-Status not = zeros
+000778                                           display  "**"  at line 18 col 33  foreground-color 6 blink
+000779                                           display  PY634 at line WS-23-Lines col 1 erase eos
+000780                                           exit perform cycle
+000781                                  else
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0040
+
+LINE    .....................................................SOURCE.....................................................
+
+000782                                           display  "  "       at line 18 col 33
+000783                                           display  space      at line WS-23-Lines col 1 erase eos
+000784                                  end-if
+000785                         end-if
+000786                end-if
+000787       end-perform.
+000788  *>
+000789  *> All params for program tested and pass
+000790  *>
+000791
+000792
+000793
+000794  *>
+000795  *> Will be Reading Emp & History in main body
+000796  *>
+000797       initialise
+000798                WS-Accumulator-Fields.   *> Do we really need these ?
+000799  *>
+000800       open     output Print-File.
+000801       initiate W2-Report.
+000802  *>
+000803  *> Check for test print
+000804  *>
+000805       if       WS-RS-Prt-Test-Form = "Y"
+000806                perform  zz100-Test-Form-Setup.
+000807
+000808       if       WS-RS-Report-Type = 2
+000809                move     zeros to PY-His-Emp-Status
+000810                move     WS-RS-From-Emp  to His-Emp-No
+000811                                            Emp-No
+000812                start    PY-History-File  key = His-Emp-No
+000813                if       PY-His-Emp-Status not = zeros
+000814                         start    PY-History-File  key not < His-Emp-No
+000815                end-if
+000816       end-if.
+000817       if       WS-RS-Report-Type = 4
+000818                move     WS-RS-Single-Emp  to His-Emp-No
+000819                                              Emp-No
+000820                start    PY-History-File  key = His-Emp-No
+000821                if       PY-His-Emp-Status not = zeros   *> Request for single Emp failed
+000822                         display  PY634    at line WS-23-Lines foreground-color 6 erase eos
+000823                         display  SY001    at line WS-Lines col 1
+000824                         accept   WS-Reply at line WS-Lines col 48
+000825                         close    PY-Employee-File
+000826                                  PY-History-File
+000827                                  PY-Param1-File
+000828                         goback
+000829                end-if
+000830       end-if.
+000831  *>
+000832       perform  forever
+000833                if       WS-RS-Prt-Test-Form not = "Y"
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0041
+
+LINE    .....................................................SOURCE.....................................................
+
+000834                         read     PY-History-File next record at end
+000835                                  close    PY-History-File
+000836                                  exit     perform
+000837                         end-read
+000838                else
+000839                         move     zeros to PY-His-Emp-Status
+000840                end-if
+000841  *> Acccumulate
+000842                if       PY-His-Emp-Status not = zero  *> Selected Emp # not found
+000843                         display  PY636 at line WS-23-Lines col 1 foreground-color 6
+000844                                                                 erase eos
+000845                         display  PY-His-Emp-Status at line WS-23-Lines col 36
+000846                         move     PY-His-Emp-Status to PY-PR1-Status
+000847                         display  WS-Eval-Msg   at line WS-23-Lines col 39
+000848                         display  SY003         at line WS-Lines    col 1
+000849                         accept   WS-Reply      at line WS-Lines    col 52 AUTO
+000850                         close    PY-Employee-File
+000851                                  PY-History-File
+000852                                  Print-File
+000853                                  PY-Param1-File
+000854                         move     16 to WS-Term-Code
+000855                         goback   returning 5
+000856                end-if
+000857                if       WS-RS-Prt-Test-Form not = "Y"
+000858                 and     WS-RS-Report-Type = 2
+000859                  and    His-Emp-No > WS-RS-To-Emp   *> Finished printing Range of Emp
+000860                         exit perform
+000861                end-if
+000862  *> CHECK these vars against the test form vars <<<<<<<<<<<<<<<<<<<<
+000863                if       WS-RS-Prt-Test-Form not = "Y"
+000864                         move     His-YTD-FICA-Taxable to  Tmp-his-ytd-fica-gross  *> needed for test form print
+000865                         add      His-YTD-Income-Taxable   His-YTD-Other-Taxable
+000866                                  His-YTD-Other-NonTaxable His-YTD-Tips          *> sub.gross
+000867                                                     giving Tmp-his-ytd-gross
+000868  *>
+000869                if       WS-RS-Prt-Test-Form not = "Y"
+000870                         move     His-Emp-No to Emp-No
+000871                         read     PY-Employee-File key Emp-No
+000872                         if       PY-Emp-Status not = zero
+000873  *>
+000874  *> Most likely 23 = key not found could be a major problem, so abort run as no point continuing
+000875  *>
+000876                                  display  PY637 at line WS-22-Lines col 1 foreground-color 6
+000877                                                                           erase eos
+000878                                  display  PY-Emp-Status   at line WS-22-Lines col 37
+000879                                  move     PY-Emp-Status to PY-PR1-Status
+000880                                  display  WS-Eval-Msg     at line WS-22-Lines col 40
+000881                                  display  "For Employee " at line WS-23-Lines col 1
+000882                                  display  Emp-No          at line WS-23-Lines col 14
+000883                                  display  SY003           at line WS-Lines    col 1
+000884                                  accept   WS-Reply        at line WS-Lines    col 52 AUTO
+000885                                  close    PY-Employee-File
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0042
+
+LINE    .....................................................SOURCE.....................................................
+
+000886                                           PY-History-File
+000887                                           Print-File
+000888                                           PY-Param1-File
+000889                                  move     16 to WS-Term-Code
+000890                                  goback   returning 5
+000891                         end-if
+000892                end-if
+000893  *>
+000894  *> can now generate report for Emp
+000895  *>
+000896                if       WS-RS-Prt-Test-Form not = "Y"
+000897                         if       WS-RS-Report-Type = 3
+000898                            and   Emp-Status not = "T"
+000899                                  exit perform cycle
+000900                         end-if
+000901                end-if
+000902                if       WS-RS-Prt-Test-Form not = "Y"
+000903                         if       WS-RS-Emp-Forms-Cnt not = zero
+000904                                  perform  WS-RS-Emp-Forms-Cnt times  *> could be 1, 2 or more - we test for zero
+000904+ on i/p
+000905                                           generate W2-Detail
+000906                                  end-perform
+000907                                  exit perform cycle
+000908                         end-if
+000909                else
+000910                         generate W2-Detail
+000911                         exit  perform
+000912                end-if
+000913       end-perform.
+000914       terminate
+000915                W2-Report.
+000916  *>
+000917       close    Print-File.
+000918       call     "SYSTEM" using Print-Report.  *>
+000919  *>
+000920  *> Finish off   NEEDED ?
+000921  *>
+000922       if       WS-RS-Prt-Test-Form not = "Y"
+000923                if       WS-Year-End not = "Y"   *> from basic code and always set
+000924                   or    WS-All-Emp not = "Y"    *> we did not print all employees so not setting WS-Printed
+000925                         close    PY-Employee-File
+000926                                  PY-History-File
+000927                                  Print-File
+000928                                  PY-Param1-File
+000929                         display  PY621    at line WS-23-Lines col 1 foreground-color 6
+000930                         display  SY001    at line WS-Lines    col 1
+000931                         accept   WS-Reply at line WS-Lines    col 48 AUTO
+000932                         goback   returning 8
+000933                end-if
+000934                move     "Y" to PY-PR2-W2-Printed
+000935                move     1 to RRN
+000936                rewrite  PY-Param1-Record
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0043
+
+LINE    .....................................................SOURCE.....................................................
+
+000937                if       PY-PR1-Status not = zeros
+000938                         perform  ZZ040-Evaluate-Message
+000939                         display  PY011         at line WS-23-Lines col 1 with erase eos
+000940                         display  PY-PR1-Status at line WS-23-Lines col 37
+000941                         display  WS-Eval-Msg   at line WS-23-Lines col 40
+000942                         display  SY002         at line WS-Lines    col 1
+000943                         accept   WS-Reply      at line WS-Lines    col 48 AUTO
+000944                         close    PY-Param1-File
+000945                         move     16 to WS-Term-Code
+000946                         goback   returning 11
+000947                end-if
+000948       end-if.
+000949  *>
+000950       close    PY-Param1-File.
+000951       close    PY-Employee-File
+000952                PY-History-File.
+000953       goback.
+000954  *>
+000955   ZZ040-Evaluate-Message      Section.
+000956  *>**********************************
+000957  *>
+000958  *> For PY-PR1 parameter file anfd other using PR-PR1-Status.
+000959  *>
+000960       copy "FileStat-Msgs-2.cpy" replacing MSG  by WS-Eval-Msg
+000961                                          STATUS by PY-PR1-Status.
+000001C *> ***************************************************************
+000002C *> ** Author: Gary L. Cutler                                    **
+000003C *> **         CutlerGL@gmail.com                                **
+000004C *> ** Amendments Vincent B. Coen                                **
+000005C *> **         vbcoen@gmail.com                                  **
+000006C *> **                                                           **
+000007C *> ** This copybook defines an EVALUATE statement capable of    **
+000008C *> ** translating two-digit FILE-STATUS codes to a message.     **
+000009C *> **                                                           **
+000010C *> ** Use the REPLACING option to COPY to change the names of   **
+000011C *> ** the MSG and STATUS identifiers to                         **
+000012C *> ** the names your program needs.                             **
+000013C *> Such as replacing STATUS by fs-reply msg by exception-msg.   **
+000014C *>                                                              **
+000015C *> ** chg 09/08/23 vbc for missing statuses                     **
+000016C *> ** Chg 11/12/23 vbc for missing statuses                     **
+000017C *> ** Chg 10/04/25 vbc match all quotes & spacing/layout        **
+000018C *> ** chg to FREE format                                        **
+000019C *> ** Chg 24/08/25 vbc #91 description.                         **
+000020C *> ** Chg 15.11.25 vbc Replace all ' for "                      **
+000021C *> ***************************************************************
+000022C *>
+000023C      EVALUATE PY-PR1-Status
+000024C           WHEN "00" MOVE "Success                  " TO WS-Eval-Msg
+000025C           WHEN "02" MOVE "Success Duplicate        " TO WS-Eval-Msg
+000026C           WHEN "04" MOVE "Success Incomplete       " TO WS-Eval-Msg
+000027C           WHEN "05" MOVE "Success Optional, Missing" TO WS-Eval-Msg
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0044
+
+LINE    .....................................................SOURCE.....................................................
+
+000028C           when "06" move "Multiple Records LS      " TO WS-Eval-Msg
+000029C           WHEN "07" MOVE "Success No Unit          " TO WS-Eval-Msg
+000030C           when "09" move "Success LS Bad Data      " TO WS-Eval-Msg
+000031C           WHEN "10" MOVE "End Of File              " TO WS-Eval-Msg
+000032C           WHEN "14" MOVE "Out Of Key Range         " TO WS-Eval-Msg
+000033C           WHEN "21" MOVE "Key Invalid              " TO WS-Eval-Msg
+000034C           WHEN "22" MOVE "Key Exists               " TO WS-Eval-Msg
+000035C           WHEN "23" MOVE "Key Not Exists           " TO WS-Eval-Msg
+000036C           WHEN "24" MOVE "Key Boundary violation   " TO WS-Eval-Msg
+000037C           WHEN "30" MOVE "Permanent Error          " TO WS-Eval-Msg
+000038C           WHEN "31" MOVE "Inconsistent Filename    " TO WS-Eval-Msg
+000039C           WHEN "34" MOVE "Boundary Violation       " TO WS-Eval-Msg
+000040C           WHEN "35" MOVE "File Not Found           " TO WS-Eval-Msg
+000041C           WHEN "37" MOVE "Permission Denied        " TO WS-Eval-Msg
+000042C           WHEN "38" MOVE "Closed With Lock         " TO WS-Eval-Msg
+000043C           WHEN "39" MOVE "Conflict Attribute       " TO WS-Eval-Msg
+000044C           WHEN "41" MOVE "Already Open             " TO WS-Eval-Msg
+000045C           WHEN "42" MOVE "Not Open                 " TO WS-Eval-Msg
+000046C           WHEN "43" MOVE "Read Not Done            " TO WS-Eval-Msg
+000047C           WHEN "44" MOVE "Record Overflow          " TO WS-Eval-Msg
+000048C           WHEN "46" MOVE "Read Error               " TO WS-Eval-Msg
+000049C           WHEN "47" MOVE "Input Denied             " TO WS-Eval-Msg
+000050C           WHEN "48" MOVE "Output Denied            " TO WS-Eval-Msg
+000051C           WHEN "49" MOVE "I/O Denied               " TO WS-Eval-Msg
+000052C           WHEN "51" MOVE "Record Locked            " TO WS-Eval-Msg
+000053C           WHEN "52" MOVE "End-Of-Page              " TO WS-Eval-Msg
+000054C           WHEN "57" MOVE "I/O Linage               " TO WS-Eval-Msg
+000055C           WHEN "61" MOVE "File Sharing Failure     " TO WS-Eval-Msg
+000056C           WHEN "71" MOVE "Bad Character LS         " TO WS-Eval-Msg
+000057C           WHEN "91" MOVE "Feature Not Available    " TO WS-Eval-Msg
+000058C           WHEN OTHER
+000059C                   MOVE "Unknown File Status      " TO WS-Eval-Msg
+000060C *>
+000061C      END-EVALUATE.
+000062C
+000962  *>
+000963   ZZ040-Eval-Msg-Exit.
+000964       exit     section.
+000965  *>
+000966   zz100-Test-Form-Setup       section.
+000967  *>**********************************
+000968  *>
+000969       if       WS-RS-Prt-Test-Form = "N"
+000970                go to zz100-Exit.
+000971       initialise
+000972                PY-Employee-Record
+000973                PY-History-Record.
+000974       move     "NOAH COUNT, ESQ."  to Emp-Name.
+000975       move     "123456 789th AVE." to Emp-Address-1.
+000976       move     "APARTMENT 98765"   to Emp-Address-2.
+000977       move     "CHICAGO"           to Emp-Address-3.
+000978       move     "IL"                to Emp-State.
+GnuCOBOL 3.2.0          printw2.cbl                                                   Mon Mar 23 2026 22:39:40  Page 0045
+
+LINE    .....................................................SOURCE.....................................................
+
+000979       move     "12345"             to Emp-Zip.
+000980       move     111111.11           to His-YTD-Eic.
+000981       move     123456789           to Emp-SSN.
+000982       move     "Y"                 to Emp-Pension-Used
+000983       move     222222.22           to His-YTD-FWT.
+000984       move     333333.33           to Tmp-his-ytd-gross.
+000985       move     444444.44           to His-YTD-FICA.
+000986       move     555555.55           to Tmp-his-ytd-fica-gross.
+000987       move     666666.66           to His-YTD-Tips.
+000988       move     777777.77           to His-YTD-SWT.
+000989       move     888888.88           to His-YTD-Other-Taxable.
+000990       move     999999.99           to His-YTD-LWT.
+000991       move     zeros               to WS-Sub-Totals.
+000992  *> missed
+000993       move     111.11              to His-YTD-Income-Taxable.
+000994       move     323.22              to His-YTD-Other-NonTaxable.
+000995       move     1234                to Emp-No.
+000996  *>
+000997  *>  Any more to add ?
+000998  *>
+000999   zz100-Exit.  exit section.
+001000  *>
+
+
+0 warnings in compilation group
+0 errors in compilation group

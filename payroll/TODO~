@@ -1,0 +1,113 @@
+This is a rolling document with the latest, lower down but has a rolling status
+at the top.
+
+
+Written and so now we have Payroll menu completed options in menu order for :-
+
+A - Date Entry              - py000
+
+H - Print Payment Register  - pyrgstr [ temp prog name ]
+I - Account Entry           - py920
+J - Deduction/Earning Entry - py900
+K - History Entry           - py930
+L - Employee Data Entry     - py010
+
+P - End Current Quarter     - pyperend
+Q - Print W2 Report         - printw2 - needs 2026 form to be used.
+R - Print Yearly 940 Report - print940 [ temp prog name ]
+S - End Current Year        - pyperend
+T - Print Employee Report   - empprint [ temp prog name ]
+U - Print History Report    - hisprint [ temp prog name ]
+V - Print Vacation Report   - vacprint [ temp prog name ]
+W - Print Account List      - py920 option 2 ( of 2)
+Y - Payroll Parameter Entry - py900
+Z - ACAS System Setup       - sy002 - Existing program.
+
+Options M and N removed as data entry is in py010 via a sub menu.
+
+Still outstanding as of 11th March 2026
+
+B - Pay Transaction Entry
+C - Pay Transaction Proof
+D - Pay Transaction Sort   - May not be needed.
+E - Apply Payroll
+F - Print Payroll Journal
+G - Print Pay Checks/BACS
+O - Print Quarterly 941 Report
+
+So as of today coded programs are :
+
+payroll	 - Main menu for Payroll.
+
+py000	 - Date entry - allows change of todays date.
+
+py010	 - Employee data entry four screens containing :
+           1. Primary Data entry included name & address etc.
+           2. Earn/Ded & Cost entry.
+           3. Rate Data entry.
+           4. Employee History entry.
+           The last one to record payments of new employee from last employer
+           for current year.
+
+py900	 - Company data entry:
+	       1. Company ID and general data.
+	       2. Pay Intervals and Default Employee Payroll Data.
+           3. Payroll System Configuration and GL Interface.
+           4. Standard Deduction Rates.
+           5. Federal Withholding Tax Table Entry.
+           6. System Earning and Deduction Information
+
+py920    - Account Table maintenance.
+
+py930    - Employee History maintenance.
+
+empprint - Employee report
+hisprint - Emp History report
+print940 - EoY 940 Report
+pyperend - Quarterly and year ends.
+pyrgstr  - Payment Register report
+vacprint - Vacation report
+
+ To be reviewed or done :
+py9nn    - Tax table data entry per state, local and Federal by current and next year.
+
+
+
+Notes for me, OK reminders.
+
+Warning:  All Warning & Error messages to be renumbered for prog specific and uniqueness.
+          Doing so, near end of coding & try and make use of the manuals details for such.
+
+          New program code is using program names that match the basic ones. This will
+          make it easier to spot any missed as once the Cobol version is completed
+          the basic source will be more to folder Completed-Migrations (Not on the CVS
+          system as mostly for me to keep track on).
+
+These program name / numbers are subject to change and more than likely will be.
+Some may be merged together.
+
+The py100 series will be for reports of all types mostly with py100 acting as menu.
+py110 and onwards for each report type including 940, 941 and W-2 reports.
+
+py0nn  series for handling the primary processing with py010 written more or less.
+
+py20 +  to process the main payroll apply processes and pay data entry steps.
+
+The copy books stored in folder copybooks are subject to changes where some field
+formats were guessed at and closer examination of the basic code as well as new
+Cobol code reveals some more changes as new coding is added.
+
+Update the payroll manual in folder ACAS-Manuals which is 1.0 or v1.0C for the
+Cobol version.
+
+The ones ending in 1.0B are for the CBasic version only which is stored within
+Basic-Code folder.
+
+A lot more to do.
+
+
+Vincent Coen
+Create  03/02/2026.
+Updated 10/02/2026.
+Updated 12/03/2026.
+Updated.27/03/2026.

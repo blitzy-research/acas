@@ -1,0 +1,2677 @@
+.mt4
+.mb6
+.po4
+.ll80
+.ig
+CHAPTER 32
+D M S	S C R E E N    F O R M A T S
+.sp2
+.li
+		Y O U R    C O M P A N Y    N A M E
+			   PAYROLL SYSTEM
+  00/00/00		PAYROLL SYSTEM MENU
+
+   1.  PAY TRANSACTION ENTRY		15.  PRINT QUARTERLY 941 REPORT
+   2.  PAY TRANSACTION PROOF		16.  END THE CURRENT QUARTER
+   3.  PAY TRANSACTION SORT		17.  PRINT W2 REPORT
+   4.  APPLY PAYROLL			18.  PRINT YEARLY 940 REPORT
+   5.  PRINT PAYROLL JOURNAL		19.  END THE CURRENT YEAR
+   6.  PRINT PAYCHECKS
+   7.  PRINT CHECK REGISTER		20.  PRINT EMPLOYEE MASTER LIST
+   8.  SET SYSTEM DATE			21.  PRINT HISTORY REPORT
+					22.  PRINT VACATION REPORT
+   9.  PARAMETER ENTRY			23.  PRINT ACCOUNT LIST
+  10.  QUICK PARAMETER ENTRY
+  11.  ACCOUNT ENTRY			24.  EMPLOYEE ENTRY
+  12.  DEDUCTION/EARNING ENTRY		25.  EMPLOYEE DED/EARN AND COST DIST.
+  13.  CREATE SORT PARAMETER FILES	26.  EMPLOYEE PAY RATE ENTRY
+  14.  HISTORY ENTRY			27.  USER DEFINED PROGRAM
+
+		    ENTER A SELECTION NUMBER [	]
+		    ENTER TODAY'S DATE [        ]
+.sp3
+.he Appendix: Chapter 32
+.li
+		  Y O U R    C O M P A N Y    N A M E
+			    PAYROLL SYSTEM
+  00/00/00		    PARAMETER ENTRY
+
+ ---------------------------------------------------------------------------
+ PAY INTERVAL USED(S,M,W,B  IF MORE THAN ONE, SELECT SCREEN 2)[ 	   ]
+ DATE FORM (1=MM/DD/YY, 2=DD/MM/YY)    [ ]	   LAST QUARTER ENDED	 [ ]
+ ENDING DAY OF LAST PAY PERIOD	[	 ]		CURRENT YEAR	[  ]
+ ---------------------------------------------------------------------------
+ COMPANY
+    NAME    [								 ]
+    ADDRESS 1 [ 			     ]	CITY  [ 		 ]
+    ADDRESS 2 [ 			     ]	STATE [  ]    ZIP  [	 ]
+    ADDRESS 3 [ 			     ]	PHONE	   [		 ]
+    GOVT ID	   FEDERAL		  STATE 	       LOCAL
+    NUMBERS   [ 	      ]     [		    ]	 [		 ]
+    ----------------------------------------------------------------------
+    LINES PER PAGE  [  ]    SUPPRESS CONSOLE BELL [ ]	 DEBUGGING AID [ ]
+.bp
+.sp8
+.li
+		1. COMPANY ID AND GENERAL PARAMETERS
+		2. PAY INTERVALS AND DEFAULT EMPLOYEE PAYROLL DATA
+		3. PAYROLL SYSTEM CONFIGURATION AND GL INTERFACE
+
+			    SELECT A SCREEN  [ ]
+
+			ENTER TODAY'S DATE [        ]
+
+		   ENTER THE SYSTEM FILE DRIVE	(A OR B) [ ]
+.sp4
+.li
+		   Y O U R   C O M P A N Y    N A M E
+			    PAYROLL SYSTEM
+  00/00/00		    PARAMETER ENTRY
+
+     -------------------------------------------------------------------
+     |		     P A Y   I N T E R V A L   U S A G E	       |
+     | SEMI-MONTHLY [ ] END OF LAST SEMI-MONTHLY PAY PERIOD [	     ] |
+     | MONTHLY	    [ ] END OF LAST MONTHLY PAY PERIOD	    [	     ] |
+     | BIWEEKLY     [ ] END OF LAST BIWEEKLY PAY PERIOD     [	     ] |
+     | WEEKLY	    [ ] END OF LAST WEEKLY PAY PERIOD	    [	     ] |
+     -------------------------------------------------------------------
+	      D E F A U L T   E M P L O Y E E	V A L U E S
+   -- RATE NAME  -----------  DEFAULT  ------  DESCRIPTION  ---------
+    VACATION	     RATE   [	      ] (UNITS EARNED PER PAY PERIOD)
+    SICK LEAVE	     RATE   [	      ] (UNITS EARNED PER PAY PERIOD)
+ 1 [		   ] RATE   [	      ] (DOLLARS PER UNIT)
+ 2 [		   ] FACTOR [	      ] (RATE 1 * FACTOR = DEFAULT RATE 2)
+ 3 [		   ] FACTOR [	      ] (RATE 1 * FACTOR = DEFAULT RATE 3)
+ 4 [		   ] EXCLUSION TYPE [ ] (RATE 4 CAN BE EXEMPTED FROM TAXES)
+ --------------------------------------------------------------------------
+  DEFAULT PAY INTERVAL (ANY USED INTERVAL) [ ]	MAX PAY FACTOR [	 ]
+  DEFAULT PAY TYPE (H=HOURLY, S=SALARIED)  [ ]	NORMAL UNITS   [	 ]
+.bp
+.li
+		    Y O U R   C O M P A N Y   N A M E
+			    PAYROLL SYSTEM
+  00/00/00		    PARAMETER ENTRY
+
+		   D I S K   D R I V E	 A L L O C A T I O N
+    SINGLE RECORD FILES 	  STATIC  FILES 	   PAY CYCLE FILES
+    TAX TABLES	    [ ]        PAYROLL ACCOUNTS [ ]	   HOURS BATCH	[ ]
+    SYSTEM DED/EARN [ ]        EMPLOYEE MASTER	[ ]	   PAY CHECK	[ ]
+    COMPANY HISTORY [ ]        EMPLOYEE HISTORY [ ]	   PAY DETAIL	[ ]
+    -----------------------------------------------------------------------
+      G E N E R A L   L E D G E R      |      C H E C K   W R I T I N G
+    GL INTERFACE USED (Y OR N) [ ]     |  COMPUTER CHECK PRINT (Y OR N) [ ]
+    GL BATCH FILE OUTPUT DRIVE [ ]     |  VOID CHECKS OVER MAX (Y OR N) [ ]
+    GL COA FILE SUFFIX	      [  ]     |  MAXIMUM AMOUNT     [		  ]
+    GL DATA DRIVE	       [ ]     |-----------------------------------
+    ------------------------------------------|    PAYROLL SYSTEM ACCOUNTS
+     U S E R   D E F I N E D   P R O G R A M  |  OFFSET CASH  ACCOUNT [   ]
+    PROGRAM USED [ ]  PROGRAM NAME [	    ] |  DEFAULT DIST ACCOUNT [   ]
+    DESC.    [				    ] |
+    -----------------------------------------------------------------------
+	  DISTRIBUTE EMPLOYEE COST TO  1-5 GL ACCOUNTS (Y OR N) [ ]
+	       (IF N, ONE ACCOUNT CAN BE ENTERED PER EMPLOYEE)
+.sp5
+.li
+		Y O U R   C O M P A N Y   N A M E
+			 PAYROLL SYSTEM
+  00/00/00		  ACCOUNT ENTRY
+
+	RECORD NO. [   ]
+
+	   ACCOUNT NUMBER:[	 ]
+	   ACCOUNT NAME:  [				 ]
+
+
+	PLACE GL CHART OF ACCOUNTS FILE IN DRIVE: d
+	REPLACE DISKETTES IN ORIGINAL CONFIGURATION
+
+	TYPE RETURN TO CONTINUE:
+.bp
+.li
+		      Y O U R	C O M P A N Y	 N A M E
+			       PAYROLL SYSTEM
+  00/00/00		   SYSTEMWIDE DEDUCTION MENU
+
+
+
+		  1.  STANDARD DEDUCTION RATES
+		  2.  FEDERAL WITHOLDING TAX TABLE ENTRY
+		  3.  SYSTEM EARNING AND DEDUCTION INFORMATION
+
+
+
+			   ENTER SELECTION NUMBER: [ ]
+.sp6
+.li
+		  Y O U R    C O M P A N Y    N A M E
+			     PAYROLL SYSTEM
+  00/00/00		STANDARD DEDUCTION RATES
+
+			      ACCT
+		       USED    NO      RATE	LIMIT
+
+	       FWT:	[ ]   [   ]
+	       SWT:	[ ]   [   ]
+	       LWT:	[ ]   [   ]
+	       FICA:	[ ]   [   ]   [     ] [ 	  ]
+	       CO FICA: [ ]   [   ]   [     ] [ 	  ]
+	       SDI:	[ ]   [   ]   [     ] [ 	  ]
+	       CO FUTA: [ ]   [   ]   [     ] [ 	  ]
+	       FUTA MAX STATE CREDIT: [     ]
+	       CO SUI:	[ ]   [   ]   [     ] [ 	  ]
+	       EIC:	[ ]   [   ]   [     ] [ 	  ]
+	       EIC EXCESS:	      [     ] [ 	  ]
+.bp
+.li
+		       Y O U R	 C O M P A N Y	 N A M E
+				PAYROLL SYSTEM
+  00/00/00	      FEDERAL WITHHOLDING TAX TABLE ENTRY
+
+
+		       ALLOWANCE AMOUNT:  [	      ]
+
+		     M A R R I E D		  S I N G L E
+		WAGES OVER:   PERCENT	   WAGES OVER:	 PERCENT
+	   1.  [	   ]  [     ]	  [	      ]  [     ]
+	   2.  [	   ]  [     ]	  [	      ]  [     ]
+	   3.  [	   ]  [     ]	  [	      ]  [     ]
+	   4.  [	   ]  [     ]	  [	      ]  [     ]
+	   5.  [	   ]  [     ]	  [	      ]  [     ]
+	   6.  [	   ]  [     ]	  [	      ]  [     ]
+	   7.  [	   ]  [     ]	  [	      ]  [     ]
+
+	       (Use ANNUAL tables from IRS CIRCULAR 'E' only!)
+.sp7
+.li
+		    Y O U R    C O M P A N Y	N A M E
+			      PAYROLL SYSTEM
+  00/00/00	  SYSTEM EARNING AND DEDUCTION INFORMATION
+
+USED  EARN/DED DESC   E/D ACCT. A/P   FACTOR   LIMITED	 LIMIT	  XLCD CAT
+1[ ][		    ] [ ] [   ] [ ] [	       ] [ ] [		  ][ ][  ]
+2[ ][		    ] [ ] [   ] [ ] [	       ] [ ] [		  ][ ][  ]
+3[ ][		    ] [ ] [   ] [ ] [	       ] [ ] [		  ][ ][  ]
+4[ ][		    ] [ ] [   ] [ ] [	       ] [ ] [		  ][ ][  ]
+5[ ][		    ] [ ] [   ] [ ] [	       ] [ ] [		  ][ ][  ]
+.bp
+.li
+		   Y O U R   C O M P A N Y   N A M E
+			     PAYROLL SYSTEM
+  00/00/00		     EMPLOYEE ENTRY
+
+ EMPLOYEE NUMBER [     ] ------------------------------------------------
+    |	  NAME		 [				]		|
+    |	  ADDRESS     1  [				]		|
+    |		      2  [				]		|
+    |		  CITY	 [		    ]  STATE [	]  ZIP [     ]	|
+    |		  PHONE  [	       ]				|
+    ---------------------------------------------------------------------
+    SOC SEC NO.   [	      ] 		 |    PENSION (Y/N)   [ ]
+    BANK ACCT NO. [			    ]	 |    JOB CODE	    [	]
+    BIRTH DATE	  [	   ]			 |    TAXING STATE   [	]
+    SEX 	  [ ]				 |
+    ---------------------------------------------------------------------
+    START DATE [	]      |      EMPLOYMENT STATUS      [		]
+    TERM. DATE [	]      |      (A=ACTIVE, L=ON LEAVE, T=TERMINATED)
+
+	     THE EMPLOYEE MASTER AND HISTORY FILES ARE NOT PRESENT
+	     TYPE  ""RUN"" TO CREATE BOTH FILES.    PRESS THE ESCAPE
+	     KEY TO RETURN TO THE PAYROLL SYSTEM MENU [   ]
+.sp4
+.li
+		 Y O U R   C O M P A N Y   N A M E
+			  PAYROLL SYSTEM
+  00/00/00	     EMPLOYEE EARN/DED AND COST
+
+EMPL NO. [     ]    NAME				   SSN
+ --------------------------------------------------------------------------
+ C O S T   D I S T R I B U T I O N   |	  E X E M P T I O N S	F R O M
+ O F   E M P L O Y E E	 G R O S S   |	   T A X    W I T H O L D I N G
+ A N D	 E M P L O Y E R   C O S T   |	FICA EXEMPT [ ]  FEDERAL EXEMPT [ ]
+ ACCOUNT [   ]	PERCENT  [	]    |	FUTA EXEMPT [ ]  STATE	 EXEMPT [ ]
+ ACCOUNT [   ]	PERCENT  [	]    |	SUI  EXEMPT [ ]  LOCAL	 EXEMPT [ ]
+ ACCOUNT [   ]	PERCENT  [	]    |	SDI  EXEMPT [ ]
+ ACCOUNT [   ]	PERCENT  [	]    |	---------------------------------
+ ACCOUNT [   ]	PERCENT  [	]    |	EXEMPTIONS FROM SYSTEM DEDUCTIONS
+		TOTAL	  nnn.nn     |	   1[ ]  2[ ]  3[ ]  4[ ]  5[ ]
+--------------------------------------------------------------------------
+E M P L O Y E E   S P E C I F I C   D E D U C T I O N S / E A R N I N G S
+
+USED  EARN/DED DESC   E/D ACCT. A/P   FACTOR   LIMITED	  LIMIT   XCLD CAT
+1[ ][		    ] [ ] [   ] [ ] [	       ] [ ] [		  ][ ][  ]
+2[ ][		    ] [ ] [   ] [ ] [	       ] [ ] [		  ][ ][  ]
+3[ ][		    ] [ ] [   ] [ ] [	       ] [ ] [		  ][ ][  ]
+
+			    ACCOUNT NUMBER [   ]
+
+.bp
+.li
+		  Y O U R   C O M P A N Y   N A M E
+			   PAYROLL SYSTEM
+  00/00/00		 EMPLOYEE RATE ENTRY
+
+ EMPL NO [     ]   NAME 				   SSN
+---------------------------------------------------------------------------
+   PAY INTERVAL  AND  PAY RATES    |	    T A X   W I T H O L D I N G
+PAY TYPE (H=HOURLY,S=SALARIED) [ ] |		A L L O W A N C E S
+PAY INTERVAL (S=SEMI-MONTHLY,  [ ] |  MARITAL STATUS(M=MARRIED,S=SINGLE)[ ]
+(M=MONTHLY, W=WEEKLY, B=BIWEEKLY)  |	      FEDERAL  WH  ALLOWANCES  [  ]
+rate1 desc. name  RATE [	 ] |	      STATE    WH  ALLOWANCES  [  ]
+rate2 desc. name  RATE [	 ] |	      LOCAL    WH  ALLOWANCES  [  ]
+rate3 desc. name  RATE [	 ] |  EARNED INCOME CREDIT USED (Y OR N)[ ]
+rate4 desc. name  RATE [	 ] |  S T A T E   O F	C A L I F O R N I A
+RATE 4 TAX EXCLUSION TYPE(1-4) [ ] |  S P E C I A L   I N F O R M A T I O N
+AUTOGEN UNITS	       [	 ] |  HEAD OF HOUSEHOLD 	(Y OR N)[ ]
+NORMAL UNITS	       [	 ] |  SPECIAL  WITHOLDING ALLOWANCES   [  ]
+MAXIMUM PAY	      [ 	 ] |---------------------------------------
+     (VAC. AND S.L.  RATES ARE UNITS EARNED PER PAY INTERVAL)
+   VACATION	RATE   [	 ] ACCUMULATED [	 ] USED [	  ]
+   SICK LEAVE	RATE   [	 ] ACCUMULATED [	 ] USED [	  ]
+   COMPENSATORY TIME		   ACCUMULATED [	 ] USED [	  ]
+.sp5
+.li
+		     Y O U R	C O M P A N Y	 N A M E
+			       PAYROLL SYSTEM
+  00/00/00		    PAY TRANSACTION ENTRY		  BATCH: nnn
+
+
+
+
+
+	   RECORD NUMBER [    ]--------------------------------------|
+	     |							     |
+	     |	EMPLOYEE NO.  [     ]  employee name		     |
+	     |	TRANS CODE    [  ]     description		     |
+	     |	UNITS	      [ 	   ]			     |
+	     |	DATE	      [        ]			     |
+	     |							     |
+	     |-------------------------------------------------------|
+
+			   DISPLAY EMPLOYEE NAMES [ ]
+.bp
+.li
+		      Y O U R	C O M P A N Y	N A M E
+			       PAYROLL SYSTEM
+  00/00/00		      PRINT PAY CHECKS
+
+
+	       TYPE ""Y"" OR PRESS  RETURN  TO PRINT A TEST FORM
+	       TYPE ""N"" WHEN THE FORMS ARE PROPERLY ALIGNED [ ]
+
+	       THE LAST CHECK PRINTED WAS CHECK NUMBER	 nnnnn
+
+	       THE STARTING CHECK NUMBER WILL BE	[     ]
+
+	       THE COMPUTER IS PRINTING CHECK NUMBER	 nnnnn
+	       THE CHECK IS PAYABLE TO EMPLOYEE NUMBER	 nnnnn
+
+		    PRESS THE ESCAPE KEY TO STOP
+		    PRESS THE RETURN KEY TO CONTINUE   [ ]
+
+	       THE CHECK AMOUNT EXCEEDS THE MAXIMUM ALLOWED.
+			 THIS CHECK WILL BE VOIDED.
+
+		       ALL CHECKS HAVE BEEN PRINTED
+.sp5
+.li
+		    Y O U R    C O M P A N Y	N A M E
+			      PAYROLL SYSTEM
+  00/00/00	      EMPLOYEE MASTER LIST PRINT MENU
+
+       1. ALL EMPLOYEES 		   8. ALL HOURLY EMPLOYEES
+       2. ALL WEEKLY EMPLOYEES		   9. ALL SALARIED EMPLOYEES
+       3. ALL BI-WEEKLY EMPLOYEES	  10. ALL ACTIVE EMPLOYEES
+       4. ALL SEMI-MONTHLY EMPLOYEES	  11. ALL ON-LEAVE EMPLOYEES
+       5. ALL MONTHLY EMPLOYEES 	  12. ALL TERMINATED EMPLOYEES
+       6. ALL WEEK BASED EMPLOYEES	  13. ALL DELETED EMPLOYEES
+       7. ALL MONTH BASED EMPLOYEES	  14. A RANGE OF EMPLOYEES
+
+		  ENTER YOUR SELECTION NUMBER: [  ]
+
+		  RANGE FROM [	   ] TO [     ]
+
+		  FULL INFORMATION OR SINGLE LINE (F OR S) [ ]
+.bp
+.li
+	      Y O U R	 C O M P A N Y	  N  A M E
+			 PAYROLL SYSTEM
+  00/00/00		PRINT 941 REPORT
+		company name				date qtr ended
+		trade name
+		address 				I.D. number
+		address
+		city		      state  zipcode
+		PRINT NAME AND ADDRESS	[ ]
+NUMBER OF EMPLOYEES
+TOTAL WAGES AND TIPS
+TOTAL INCOME TAX WITHHELD
+ADJUSTMENT OF WITHHELD INCOME TAX FROM PREVIOUS QUARTERS    [		   ]
+ADJUSTED TOTAL OF INCOME TAX WITHHELD
+TAXABLE FICA WAGES PAID 		    TIMES 12.26% =
+TAXABLE TIPS REPORTED			    TIMES  6.13% =
+TOTAL FICA TAXES
+ADJUSTMENT OF FICA TAXES				    [		   ]
+ADJUSTED TOTAL OF FICA TAXES
+TOTAL TAXES
+EARNED INCOME CREDIT
+NET TAXES
+.sp2
+.li
+DEPOSIT PER END  00/00/00	 LIABILITY	   DATE 	AMOUNT
+OVERPAYMENT FROM PREVIOUS QUARTER...........................[		 ]
+ FIRST	 | DAYS 1 THROUGH 7	 n,nnn,nnn.nn	[	 ]  [		 ]
+ MONTH	 | DAYS 8 THROUGH 15	 n,nnn,nnn.nn	[	 ]  [		 ]
+ OF	 | DAYS 16 THROUGH 22	 n,nnn,nnn.nn	[	 ]  [		 ]
+ QUARTER | DAYS 23 THROUGH END	 n,nnn,nnn.nn	[	 ]  [		 ]
+   FIRST MONTH TOTAL:		 n,nnn,nnn.nn
+ SECOND  | DAYS 1 THROUGH 7	 n,nnn,nnn.nn	[	 ]  [		 ]
+ MONTH	 | DAYS 8 THROUGH 15	 n,nnn,nnn.nn	[	 ]  [		 ]
+ OF	 | DAYS 16 THROUGH 22	 n,nnn,nnn.nn	[	 ]  [		 ]
+ QUARTER | DAYS 23 THROUGH END	 n,nnn,nnn.nn	[	 ]  [		 ]
+   SECOND MONTH TOTAL:		 n,nnn,nnn.nn
+ THIRD	 | DAYS 1 THROUGH 7	 n,nnn,nnn.nn	[	 ]  [		 ]
+ MONTH	 | DAYS 8 THROUGH 15	 n,nnn,nnn.nn	[	 ]  [		 ]
+ OF	 | DAYS 16 THROUGH 22	 n,nnn,nnn.nn	[	 ]  [		 ]
+ QUARTER | DAYS 23 THROUGH END	 n,nnn,nnn.nn	[	 ]  [		 ]
+   THIRD MONTH TOTAL:		 n,nnn,nnn.nn
+TOTAL FOR QUARTER:		 n,nnn,nnn.nn		    [		 ]
+FINAL DEPOSIT FOR QUARTER:......................[	 ]  [		 ]
+TOTAL DEPOSITS FOR QUARTER:.................................
+OVERPAYMENT:....		  UNDEPOSITED TAXES DUE:....
+.bp
+.li
+		     Y O U R	C O M P A N Y	 N A M E
+			       PAYROLL SYSTEM
+ 00/00/00		      PRINT W-2 REPORT
+
+ ---------------------------------------------------------------------------
+				     |
+      1  ALL EMPLOYEES		     |	PRINT STATE AND LOCAL AMOUNTS  [ ]
+      2  RANGE OF EMPLOYEES	     |
+      3  TERMINATED EMPLOYEES	     |	NUMBER OF FORMS PER EMPLOYEE   [  ]
+      4  A SINGLE EMPLOYEE	     |
+				     |	NUMBER OF LINES BETWEEN FORMS  [  ]
+	 ENTER SELECTION [ ]	     |
+				     |	STARTING PRINT COLUMN	       [  ]
+ ------------------------------------|--------------------------------------
+   STARTING EMPLOYEE NUMBER [	  ]  |
+       EMPLOYEE NUMBER	 [     ]     |	      PRINT TEST FORM [ ]
+   ENDING EMPLOYEE NUMBER   [	  ]  |
+ ---------------------------------------------------------------------------
+
+		  NOW PRINTING EMPLOYEE NUMBER nnnnn
+.sp6
+.li
+		      Y O U R	C O M P A N Y	N A M E
+			      PAYROLL SYSTEM
+  00/00/00		    HISTORY UPDATE MENU
+
+
+
+		  1.  UPDATE EMPLOYEE HISTORY TOTALS
+		  2.  UPDATE COMPANY LIABILITIES,VACATION ETC.
+		  3.  UPDATE PAYMENTS HISTORY
+
+
+
+			 ENTER SELECTION NUMBER: [ ]
+.bp
+.po3
+.ll81
+.li
+		      Y O U R	C O M P A N Y	 N A M E
+				PAYROLL SYSTEM
+  00/00/00		    UPDATE EMPLOYEE HISTORY
+     EMP NO:[	  ]
+			 QTD EARNINGS BY TAX CATAGORIES
+INCOME:[	  ]  OTHER:[	      ] NO TAXES:[	    ] FICA:[	      ]
+		EIC CREDIT:[	      ]     TIPS:[	    ]  NET:[	      ]
+QTD TAXES WITHHELD:    FWT:[	      ]      SWT:[	    ]  LWT:[	      ]
+		      FICA:[	      ]      SDI:[	    ]
+			    QTD EARNINGS AND DEDUCTIONS
+SYS: 1:[	  ] 2:[ 	 ] 3:[		] 4:[	       ] 5:[	      ]
+EMP: 1:[	  ] 2:[ 	 ] 3:[		] OTHER DEDUCTIONS:[	      ]
+UNITS BY PAY TYPE:  1:[ 	 ] 2:[		] 3:[	       ] 4:[	      ]
+			 YTD EARNINGS BY TAX CATAGORIES
+INCOME:[	  ]  OTHER:[		NO TAXES:[	    ] FICA:[	      ]
+		EIC CREDIT:[	      ]     TIPS:[	    ]  NET:[	      ]
+YTD TAXES WITHHELD:    FWT:[	      ]      SWT:[	    ]  LWT:[	      ]
+		      FICA:[	      ]      SDI:[	    ]
+			    YTD EARNINGS AND DEDUCTIONS
+SYS: 1:[	  ] 2:[ 	 ] 3:[		] 4:[	       ] 5:[	      ]
+EMP: 1:[	  ] 2:[ 	 ] 3:[		] OTHER DEDUCTIONS:[	      ]
+UNITS BY PAY TYPE:  1:[ 	 ] 2:[		] 3:[	       ] 4:[	      ]
+.sp2
+.li
+		       Y O U R	 C O M P A N Y	 N A M E
+				PAYROLL SYSTEM
+  00/00/00		    EMPLOYEE HISTORY TOTALS
+			 QTD EARNINGS BY TAX CATAGORIES
+INCOME[ 	   ]OTHER[	      ]NO TAXES[	    ]FICA[	      ]
+	       EIC CREDIT[	      ]    TIPS[	    ] NET[	      ]
+QTD TAXES WITHHELD:   FWT[	      ]     SWT[	    ] LWT[	      ]
+		     FICA[	      ]     SDI[	    ]
+			    QTD EARNINGS AND DEDUCTIONS
+SYS:1[		  ]2[		 ]3[		]4[	       ]5[	      ]
+EMP:1[		  ]2[		 ]3[		]OTHER DEDUCTIONS[	      ]
+UNITS BY PAY TYPE: 1[		 ]2[		]3[	       ]4[	      ]
+
+			 YTD EARNINGS BY TAX CATAGORIES
+INCOME[ 	   ]OTHER[	      ]NO TAXES[	    ]FICA[	      ]
+	       EIC CREDIT[	      ]    TIPS[	    ] NET[	      ]
+YTD TAXES WITHHELD:   FWT[	      ]     SWT[	    ] LWT[	      ]
+		     FICA[	      ]     SDI[	    ]
+			    YTD EARNINGS AND DEDUCTIONS
+SYS:1[		  ]2[		 ]3[		]4[	       ]5[	      ]
+EMP:1[		  ]2[		 ]3[		]OTHER DEDUCTIONS[	      ]
+UNITS BY PAY TYPE: 1[		 ]2[		]3[	       ]4[	      ]
+.bp
+.li
+		      Y O U R	C O M P A N Y	N A M E
+				PAYROLL SYSTEM
+  00/00/00		  UPDATE COMPANY LIABILITIES
+
+		   COMPANY LIABILITIES(NOT TOTALED FROM HISTORY)
+				QUARTER TO DATE
+	  FICA:[	    ] FUTA:[		] SUI:[ 	   ]
+				  YEAR TO DATE
+	  FICA:[	    ] FUTA:[		] SUI:[ 	   ]
+
+			 QUARTER TO DATE(NOT TOTALED)
+					EARNED		   TAKEN
+	       VACATION TIME:	   [		]     [ 	   ]
+	       SICK LEAVE:	   [		]     [ 	   ]
+	       COMP TIME:	   [		]     [ 	   ]
+
+		    YEAR TO DATE(TOTALED FROM EMPLOYEE RECORDS)
+					EARNED		   TAKEN
+	       VACATION TIME:	   [		]     [ 	   ]
+	       SICK LEAVE:	   [		]     [ 	   ]
+	       COMP TIME:	   [		]     [ 	   ]
+.sp3
+.li
+		     Y O U R   C O M P A N Y   N A M E
+				PAYROLL SYSTEM
+  00/00/00		   UPDATE PAYMENTS HISTORY
+			 FWT TAX PAYMENTS FOR QUARTER
+		       1. [	       ] ON [	     ]
+		       2. [	       ] ON [	     ]
+		       3. [	       ] ON [	     ]
+		       4. [	       ] ON [	     ]
+		       5. [	       ] ON [	     ]
+		       6. [	       ] ON [	     ]
+		       7. [	       ] ON [	     ]
+		       8. [	       ] ON [	     ]
+		       9. [	       ] ON [	     ]
+		       10.[	       ] ON [	     ]
+		       11.[	       ] ON [	     ]
+		       12.[	       ] ON [	     ]
+			    QUARTERLY TAX PAYMENTS
+  FWT:	1.[	       ] 2.[		] 3.[		 ] 4.[		  ]
+  FICA: 1.[	       ] 2.[		] 3.[		 ] 4.[		  ]
+  FUTA: 1.[	       ] 2.[		] 3.[		 ] 4.[		  ]
+.he
+.bp
+.mt7
+.mb9
+.po8
+.ll65
+.ig
+CHAPTER 33
+D M S	S E T U P    F O R   N O N - S T A N D A R D   C R T ' S
+.sp2
+.pp5
+To create a new CRT.DEF file, run the CRTDEF program, answering all the
+requests that pertain to the CRT you are using.  When the program requests
+the name of the CRT definition file to create, respond with CRT.  The
+program will create a file named CRT.DEF.  This file should always reside
+on the
+disk which is on the currently logged drive.
+All of the other DEF files can be omitted from your work disks or system
+master (but not from the original Applewood Computers distribution disk!),
+as well as the CRTDEF.INT
+program. The CRTDEF program should only have to be executed once to define
+the CRT you are using.
+.he Appendix: Chapter 33
+.pp
+The utility program CRTDEF is used to define the physical characteristics of
+a CRT display device (e.g., number of rows and columns, screen clear
+sequence, cursor addressing sequence, etc.) to the Display Management System.
+The program will prompt for
+values for all CRT control sequences which are supported by the DMS system.
+.pp
+The CRTDEF program does not use screen formatting and will work on any serial
+CRT.  It will request data for almost every conceivable type of CRT control
+procedure.  Not all of these procedures are need by the Payroll
+System programs.  The only control sequences that are necessary are
+the direct cursor addressing control characters and translation tables,
+destructive backspace, and the clear screen character.	Any other requests
+can be ignored by pressing RETURN.
+Some control items will cause the system to execute faster because it can take
+advantage of more sophisticated hardware features.
+.pp
+If you are modifying an existing CRT definition file, the CRTDEF program
+will present a menu so you can choose which section of the program to run by
+entering the number of the desired selection.  If you are creating a CRT
+defintion file for the first time, the menu does not appear; all of the
+requests that are not applicable can be answered with a RETURN.
+.pp
+When the program issues a request, the current value of the control sequence
+is displayed and your are prompted for a new value or acceptance
+of the current value.	To accept the current value, just press the RETURN
+key.
+.pp
+When the program starts, it requests the name of the CRT definition
+file.  For the Payroll System, always
+enter CRT.  This is the name of the definition file that is created by
+CRTDEF and the DEF file the Payroll System will look for.
+.pp
+CRTDEF then requests whether this run will create the initial version
+of the file or edit an existing copy.  The first time you run this
+program enter a "C" for create.  If you are modifying a DEF file that was
+entered incorrectly, enter an "M" for modify.
+.cp8
+.sp2
+THE CONTROL SEQUENCE REQUESTS:
+.pp
+Most of the CRT control sequences are entered in the form:
+.sp
+.li
+	<number of items>,<item-1>,<item-2>, . . .
+.sp
+The values of the items are the data characters which will be transmitted
+to the CRT device to effect the specified control operation.  These
+values are specified as decimal integers between 0-255.  To enter an
+ESCAPE, for example, use the decimal equivalent of the ASCII value which
+is 27 in decimal.  If a control sequence consisted of an ESCAPE followed by
+a left parenthesis, you would enter:
+.sp
+.li
+	2,27,40
+.sp
+Where the 2 indicates that there are two characters that must be sent to the
+CRT for this function, and the 27 and 40 are the decimal representations
+of an ESCAPE and a left parenthesis.
+.pp
+Please note that the CRTDEF program does not check the values for validity.
+Valid values range from 0 to 255 but any integer value may be supplied.  The
+value modulo 256 will be used.
+.pp
+The values specified are stored in character strings and are written
+to the disk file as such.  CBASIC and CP/M impose restrictions on the
+values which may be contained in these strings.  The restrictions are:
+.sp
+.li
+	CP/M:  CTRL-Z (26) is used as an end-of-file marker.
+.sp
+.li
+	CBASIC:  A RETURN (10) or a LINE-FEED (13) character
+		 denotes an end of line sequence.
+.sp
+The way around the restrictions for most terminals which might happen to use
+these characters for CRT control is to specify the value as <value>+128.
+This sets the ASCII parity bit to ON.  For example, to send a decimal
+10, send 138 instead.
+.pp
+The ASCII terminals will ignore the parity bit because the defined
+ASCII set is 7 bits.  (Normally the CBIOS [operating system] will force
+the parity bit to a fixed value before transmitting it to the terminal,
+so the problem never really arises.)
+.sp2
+REQUESTS ISSUED BY CRTDEF:
+.sp
+NUMBER OF ROWS FOR DISPLAY:
+.in8
+This is the number of rows (lines) of vertical display on your CRT.
+.qi
+.sp
+.li
+NUMBER OF COLUMNS FOR CRT DISPLAY:
+.in8
+This is the number of columns (characters across) displayed on your CRT.
+.qi
+.sp
+.li
+SPECIFY CURSOR ROW ADDRESS POSITIONING CONTROL CHARACTERS:
+	row 1  current value:  0
+		   new value:
+.in8
+Enter the value required by the CRT to position the cursor at the desired row.
+Don't include the position control character sequence, merely the number
+that will be translated into a row address.  This request will be issued
+once for every possible row.
+.qi
+.sp
+.li
+SPECIFY CURSOR COLUMN ADDRESS POSITIONING CONTROL CHARACTERS:
+	column 1   current value:  0
+		       new value:
+.in8
+Enter the value required by the CRT to position the cursor at the desired
+column.  Don't include the position control character sequence, merely the
+number that will be translated into a column address.  This request will
+be issued once for every possible column.
+.qi
+.sp
+.li
+CRT CONTROL:  SET CURSOR ADDRESS:
+.in8
+As described above, this request starts with "CRT control:" and thus requires
+the number of elements to precede the values of the elements and for them to
+be separated by commas.
+.sp
+Enter the values only if your CRT uses one control character sequence to send
+the cursor to both row and column.  Enter the characters required to send the
+cursor to a ROW and a COLUMN at the same time.
+.qi
+.sp
+.li
+SET ROW ADDRESS PREFIX:
+.in8
+If the CRT requires different control characters for ROW and COLUMN, enter
+the row characters here (the previous request can be left a zero).  If the
+CRT address row and column at the same time this can be left zero.
+.qi
+.sp
+.li
+SET COLUMN ADDRESS PREFIX:
+.in8
+If the CRT requires different control characters for ROW and COLUMN, enter
+the column characters here.  If the CRT addresses row and column at the same
+time this can be left zero.
+.qi
+.sp
+.li
+SPECIFY ORDER OF PRESENTATION OF ROW AND COLUMN ADDRESS:
+.in8
+Enter an "R" or a "C" for the order in which the control characters are to
+be sent.
+.qi
+.sp
+.li
+SPECIFY FORMAT OF ROW AND COLUMN CURSOR CONTROL CHARACTERS:
+.in8
+Most CRT's require control information to be sent as hexadecimal characters,
+but some require ASCII numbers.  Enter an "H" or a "D" for the correct format.
+.qi
+.sp
+.li
+CLEAR SCREEN:
+.in8
+Enter the characters for clearing the CRT screen.  This is a required entry.
+.qi
+.sp
+.li
+CLEAR FOREGROUND DATA FIELDS:
+.in8
+If your CRT supports different display intensities, enter the
+foreground/background
+control characters for this and the next 2 requests.
+.qi
+.sp
+.li
+ENTER FOREGROUND MODE:
+
+ENTER BACKGROUND MODE:
+
+RETURN CURSOR TO HOME POSITION:
+
+MOVE CURSOR UP ONE ROW:
+
+MOVE CURSOR DOWN ONE ROW:
+
+MOVE CURSOR LEFT ONE COLUMN:
+
+MOVE CURSOR RIGHT ONE COLUMN:
+
+.cp7
+.li
+DESTRUCTIVE BACKSPACE:
+.in8
+This sequence must be entered.	This is the sequence of characters
+that will erase the previously typed in character.  This will
+almost always be a backspace followed by a blank followed by a backspace.
+In decimal, this translates to an 8, a 32, another 8.  Key in:
+3,8,32,8.
+.qi
+.sp
+.li
+SOUND CONSOLE ALARM
+.in8
+This is normally a 1,7.
+.qi
+.sp
+.li
+ERASE TO END OF CURRENT LINE:
+
+ERASE TO END OF SCREEN:
+
+INSERT A NEW LINE INTO THE DISPLAY:
+
+DELETE CURRENT LINE FROM DISPLAY:
+
+NUMBER OF STORAGE LOCATIONS TO BE SET AT CRT INITIALIZATION:
+.in8
+Specify number of storage locations to be set or press RETURN.	If your
+CRT requires memory to be initialized before operating, enter the number
+of bytes that must be set at this request.
+.qi
+.sp
+.li
+CURRENT STORAGE ENTRY AND VALUES:   0	 0
+SET STORAGE ENTRY 1:
+.in8
+Specify memory location and value.  This request will be
+issued for each location
+specified in the previous request.  Enter the decimal value for each byte.
+.qi
+.sp
+.li
+INITIALIZATION SUBROUTINE ADDRESS:
+.in8
+If a machine code routine resides in memory that must be branched to on
+startup, enter its address in decimal.
+.qi
+.sp
+.li
+INITIALIZATION I/O PORT:
+.in8
+If data needs to be transmitted to an I/O port, enter its number.
+.qi
+.sp
+.li
+DATA TO BE TRANSMITTED TO I/O PORT:
+.in8
+Enter the number of values and the decimal values of the characters that
+must be sent to the I/O port.
+.qi
+.sp
+.li
+DATA TO BE TRANSMITTED TO CONSOLE:
+.in8
+If data must be sent to the console device itself at startup time, enter
+the number of bytes and their decimal values here.
+.qi
+.sp
+.pp
+The requests which follow, or
+options 8 and 10 on the CRTDEF menu, are provided to allow you to change
+the normal definition of the special function control keys in the system.
+If, for example, your operating system or computer does not allow free use
+of a CONTROL-A character (enter adding mode), the CRTDEF program would
+allow you to define a CONTROL-Y entered at the keyboard to be interpreted
+by the program as though you had entered a CONTROL-A.  Because the
+facility is completely generalized, it should be possible to compensate
+for the special requirements of all of the CP/M derivative operating
+systems.
+.pp
+In addition, the use of control keys can be completely bypassed if
+necessary.  A prefixing character can be defined that substitutes for
+a control key.	In this manner, for example, an at-sign (@) or an
+up arrow (^) can be designated as the prefix character.  Then an
+@A sequence  would be interpreted the same as a CONTROL-A.
+.pp
+The menu option #8 requests
+allow a control character translation table to be entered.  It
+issues up to 31 requests for each control character possible.  If, for
+example, your system has forced you to not use a CONTROL-A (ASCII value
+of 1) and you will substitute a CONTROL-Y (ASCII value of 25), when the
+request:
+.sp
+.li
+	CHARACTER  25	    CURRENT TRANSLATION   25
+	ENTER NEW VALUE (OR STOP) >
+.sp
+is issued, respond with the value 1.  Don't forget that 8 is the backspace
+and 13 is the carriage return.
+.pp
+The menu option #10 requests are
+used only if you cannot use any control characters at all.
+They will define instead a prefix character and the individual values
+represented by the prefix character followed by one of the 127 possible
+ASCII values.
+.pp
+The first request issued is for the value of the prefix character itself.
+Enter its decimal ASCII value.	An at-sign, for example, would be 64.
+Remember that once a character is defined as the prefixing character it
+cannot be used as a valid data character anywhere else.
+This is very important, so choose carefully.
+.pp
+The next request is used merely to quickly fill all 127 elements of the
+table with a default.	The default should be some invalid character
+combination such as a zero.
+.pp
+The program will then issue up to 127 requests for translation of individual
+characters.  If you wish for the character sequence "prefix-A" (65), don't
+forget to enter the same interpreted value at the lower-case value of "A" (97).
+.pp
+If you use the prefix character facility of option 10, you should use the
+control character translation facility of option 8 to "mask" out all special
+function control characters.  This involves setting them to some harmless
+but invalid value, such as a zero or 10 (LINE FEED).  All programs will
+then reject this character with an explicit error message.
+.pp
+After all requests have been answered (when the menu is not used) or after
+each menu funtion (when the menu is used), the program will display:
+.sp
+.li
+	Specify S(ave), E(dit), or Q(uit)
+.sp
+If all the data was entered correctly, enter an S.  If the data needs
+to be edited, enter an E and the menu will appear, allowing the
+data just entered to be modified.  If you are unsure about the entries
+appropriate for your device, see your dealer.
+.he
+.bp
+.ig
+CHAPTER 34
+E R R O R    M E S S A G E S
+.sp2
+.ce
+CBASIC ERROR MESSAGES
+.pp5
+Applewood Computers software is designed to trap all errors that can arise under
+normal circumstances, but due to language limitations and/or hardware
+problems, some errors may occur which the programs themselves cannot
+handle.  These errors are CBASIC errors.  They appear in the following
+form:
+.he Appendix: Chapter 34
+.sp
+.li
+		ERROR aa
+.sp
+where "aa" are two alphabetic characters issued by the CBASIC runtime
+package CRUN2.	The occurance of a CBASIC error message usually
+indicates a serious problem in your INT or data files.
+.sp
+.in10
+.ti-10
+ERROR RE: This is caused by a record in a file which has too few
+or too many file delimiter characters (quotes or commas), or
+whose length is incorrect.  When a program attempts to
+read the record, what is on the disk does not match the record description,
+and CRUN2 issues an ERROR RE message.
+.sp
+This problem may result from hardware
+problems like a bad write, a voltage surge, etc., but by far
+the most common cause is a bad RAM location, which either changes
+some character into a quote or a comma, or changes one of these
+file delimters into some other character.  This error is virtually never
+the result of a program bug.  Once a bad record is in the file, it must be
+repaired or removed with the editor, or the entire file must
+be rebuilt.  Bad records can be detected by TYPE'ing the
+file and manually searching for the missing or extra
+quote or comma.  If you are not familiar with the use of the CP/M editor,
+read the CP/M documentation before attempting to change the file.
+Also read the File Definition in the Payroll System Specifications
+Manual, because some files may require that the header record be
+changed if a record is manually deleted.
+.sp
+.ti-10
+ERROR IV: This error occurs if you try to run a program compiled
+by CBASIC version 1 with CRUN2, or if the INT file that you are
+trying to run is null.	If the latter is the case, recopy the
+file from the original disk, using the verify option [vo] of PIP (for
+example, PIP A:=B:*.INT[vo]).
+.sp
+.ti-10
+ERROR DZ: This error occurs if you try to divide by zero, or if you try
+to run a program compiled under CBASIC2 with CRUN version 1.  Since
+none of the Payroll System programs allow division with a
+denominator of zero, make sure your runtime package is
+indeed CRUN2 (ideally version number 2.04).
+.sp
+.ti-10
+ERROR OM or GARBAGE ON SCREEN DURING AN ENTRY PROGRAM: This means
+that the program has run out of memory--should not occur if you have
+at least 54K of RAM and a standard-size version of CP/M.
+.sp
+.ti-10
+ERROR SB: Your program files (INT files) may be damaged.  Make new
+copies using the CP/M PIP program [vo] option.	For example,
+.sp
+.li
+	  PIP A:=B:*.INT[vo]
+.sp
+.ti-10
+ERROR RG: See ERROR SB.
+.qi
+.sp2
+.ce
+PAYROLL SYSTEM ERROR MESSAGES
+.sp
+.ce
+SYSTEMWIDE MESSAGES
+.sp
+.in6
+.ti-6
+PY016 CONTROL CHARACTER NOT ACCEPTED
+.sp
+.ti-6
+PYO17 LENGTH LIMIT EXCEEDED
+.sp
+.ti-6
+PY044 INVALID COMMAND SEQUENCE: Contact your distributor.
+.sp
+.ti-6
+PY045 INVALID COMMAND SEQUENCE: Contact your distributor.
+.qi
+.sp2
+.ce
+PAY TRANSACTION ENTRY (HRSENT.INT)
+.sp
+.in6
+.ti-6
+PY051 EMPLOYEE FILE NOT FOUND ON DRIVE d: Where "d" is a drive name.
+Make sure the proper disk has
+been inserted.	The employee master file should be named PYEMP.101.
+.sp
+.ti-6
+PY052 EMPLOYEE FILE IS NULL:  Use the CP/M TYPE command to examine the file.
+If giving the TYPE command returns the CP/M prompt, erase the null employee
+file and bring your backup disks up to date, or re-run the
+employee Entry program.
+.sp
+.ti-6
+PY053 Y OR N ONLY
+.sp
+.ti-6
+PY054 INVALID RESPONSE
+.sp
+.ti-6
+PY055 HOURS FILE OF TYPE 000 FOUND:  A previous run the the Pay
+Transaction Entry
+program ended prematurely.  TYPE the file to determine if it is null.  If
+it is, erase it and re-enter the transactions.	If it is not, rename the
+file to PYHRS.001, print a proof of the file, and make sure the
+transactions are complete and correct.
+.sp
+.ti-6
+PY056 MUST BE NUMERIC INTEGER
+.sp
+.ti-6
+PY057 NOT NUMERIC
+.sp
+.ti-6
+PY058 EXCEEDS NUMBER OF RECORDS ON HOURS FILE
+.sp
+.ti-6
+PY059 INVALID CONTROL CHARACTER: See the documentation.
+.sp
+.ti-6
+PY060 INVALID CHECK DIGIT: The check digit is the rightmost digit of the
+five digit employee number.  The check digit is calculated from the other
+four digits to insure against miskeys and transposition errors.  A list of
+employees and their employee numbers can be printed at any time.
+.sp
+.ti-6
+PY061 INVALID EMPLOYEE NUMBER:	This employee number is not on file.
+The short version of the Employee Master List lists the valid
+employee numbers.
+.sp
+.ti-6
+PY062 TRANS CODE CANNOT BE LESS THAN ZERO OR GREATER THAN 50:  See Chapter 13
+or 26 for a list of valid transaction codes.
+.sp
+.ti-6
+PY063 INVALID DATE: See Chapter 18 for instructions on How to Entry a Date.
+.sp
+.ti-6
+PY064 PR2 FILE NOT FOUND ON SYSTEM DRIVE: Should not occur. Contact your
+distributor.
+.sp
+.ti-6
+PY065 INVALID TRANS CODE: See Chapter 13 or 26 for a list of valid transaction
+codes.
+.sp
+.ti-6
+PY066 THERE ARE NO HOURS FILE RECORDS:	Make sure the wrong disk was not
+inserted, or give the CRTL-A command to begin adding records.
+.qi
+.sp2
+.ce
+PAYROLL SYSTEM MENU  (PY.INT)
+.sp
+.in6
+.ti-6
+PY101 ONE OF THE TWO PARAMETER ENTRY OPTIONS MUST BE SELECTED:	One of your
+parameter files is not present.  At first time startup this is normal.
+Make sure the correct disk is inserted.  If the missing file is the PR1
+file, it can be recreated by running Parameter Entry.  If it is the
+PR2 file, the problem is more serious.	Parameter Entry will create this
+file, but the information on it is updated in the course of Payroll System
+processing and will most likely be inaccurate.	To bring it up to date may
+require the use of an editor.  Check the file specifications to find which
+fields should be changed.  This recovery procedure is recommend for those
+with substantial data processing knowledge only.
+.sp
+.ti-6
+PY102 DMS ERROR: The CRT.DEF file is invalid for some reason.  Determine
+the reason, then PIP a valid CRT.DEF file onto the disk using the [vo]
+option of PIP (e.g., PIP A:=B:CRT.DEF[vo]).
+.sp
+.ti-6
+PY103 ERROR DURING CHAIN TO SORT: Check to see if your disk or directory
+is full.  If not, contact your distributor.
+.sp
+.ti-6
+PY104 ERROR DURING CHAIN TO SORT: See PY103.
+.sp
+.ti-6
+PY105 THE PROGRAM IS NOT ON THE CURRENTLY LOGGED DISK:	INT files are
+expected to be on the currently logged drive.  Make sure the correct
+programs disk is inserted.
+.sp
+.ti-6
+PY106 THE SORT PARAMETER FILE IS NOT ON THE SYSTEM DISK:  The Sort Parameter
+file PYHOURS.SRT is expected to be on the drive named as the System File
+Drive at first time startup.  A new file can be created by running the
+Create Sort Parameters program.
+.sp
+.ti-6
+PY107 UNABLE TO OPEN PARAMETER FILE: This error should not occur.  Contact
+your distributor.
+.sp
+.ti-6
+PY110 INVALID SECOND PARAMETER FILE:  Invalid information is on the second
+parameter file (PYPR2).  A new one can be created by running the Parameter
+Entry program, but since this file contains information that is updated
+in the course of normal payroll processing, the new file will most likely
+be inaccurate.	Check the file specifications and use an editor to change
+the file where necessary.  This recovery procedure is recommended only for
+those with substantial data processing knowledge.
+.sp
+.ti-6
+PY111 QSORT IS NOT ON THE CURRENTLY LOGGED DISK: Make sure the correct
+disk is inserted.
+.sp
+.ti-6
+PY112 THAT'S NOT A VALID RESPONSE: The number of a menu item, ESCAPE, and
+CTRL-R are the only valid responses.
+.sp
+.ti-6
+PY114 THE SYSTEM DRIVE HAS NOT BEEN INITIALIZED: This error should not
+occur.	Contact your distributor.
+.sp
+.ti-6
+PY115 INVALID DATE: See Chapter 18 for instructions on how to enter a date.
+.sp
+.ti-6
+PY116 INVALID PARAMETER FILE:  The first parameter file (PYPR1) contains
+invalid information.  A new file may be created by running Parameter Entry.
+.sp
+.ti-6
+PY117 OPERATOR REQUESTED RETURN TO MENU:  Should not occur.  Contact your
+distributor.
+.sp
+.ti-6
+PY118 **ERROR**  THE PROGRAM WAS TERMINATED BEFORE COMPLETION:	Should not
+occur.	Contact your distributor.
+.sp
+.ti-6
+PY119 THE PARAMETER ENTRY PROGRAM IS NOT ON THE PROGRAM DISK: Check to make
+sure the correct disk has been inserted.
+.qi
+.sp2
+.ce
+EMPLOYEE ENTRY (EMPENT.INT)
+.sp
+.in6
+.ti-6
+PY131 THIS PROGRAM MODULE MUST BE SELECTED FROM THE PAYROLL MENU:
+Payroll System programs must be run from the menu.  Call up the menu
+by typing CRUN2 PY.
+.sp
+.ti-6
+PY132 DOUBLE QUOTES (") ARE INVALID CHARACTERS: Use single quotes (') if
+needed.
+.sp
+.ti-6
+PY133 ONLY INTEGERS ARE ACCEPTED AT THIS FIELD: Integers are whole numbers
+with no decimals (5, but not 5.23).
+.sp
+.ti-6
+PY134 THAT'S NOT AN ACCEPTABLE NUMERIC FORMAT FOR THIS FIELD: See Chapter
+18 for instructions on How to Enter a Number.
+.sp
+.ti-6
+PY135 VALID DATES ARE THE ONLY ACCEPTABLE ENTRIES AT THIS FIELD:  See Chapter
+18 on How to Enter a Date.
+.sp
+.ti-6
+PY136 Y  OR  N	ARE THE ONLY ACCEPTABLE ENTRIES AT THIS FIELD
+.sp
+.ti-6
+PY138 TYPE  RUN  TO CONTINUE, PRESS THE ESCAPE KEY TO STOP: RUN creates
+the Employee Master File, ESCAPE ends the Employee Entry program.
+.sp
+.ti-6
+PY139 SYSTEM STARTUP DETECTED: Informational only.
+.sp
+.ti-6
+PY140 THERE IS NO EMPLOYEE FILE, BUT A HISTORY FILE EXISTS:  The Employee
+Master file (PYEMP.101) and the Employee History File (PYHIST.101) are created
+together and always have the same number of records.  Make sure your
+files are in the drives specified in Parameter Entry.  Bring your backup
+files up to date if necessary.
+.sp
+.ti-6
+PY141 THE EMPLOYEE FILE IS INVALID OR IS A NULL FILE: TYPE the file
+to see if it is null (if it is, the CP/M prompt simply returns).  Bring
+your backup files up to date.
+.sp
+.ti-6
+PY142 UNEXPECTED END OF FILE ON EMPLOYEE FILE: The record count on the
+header record does not match the actual number of records.  This error
+should not occur.  Bring your backup files up to date to recover.
+.sp
+.ti-6
+PY145 UNABLE TO CREATE THE EMPLOYEE FILE - DISK WRITE-PROTECTED?: Should
+not occur.  Contact your distributor.
+.sp
+.ti-6
+PY150 THERE IS NO HISTORY FILE, BUT AN EMPLOYEE FILE EXISTS: Make sure the
+correct disks are inserted.  Bring your backups up to date to recover.
+.sp
+.ti-6
+PY151 THE HISTORY FILE IS INVALID OR IS A NULL FILE: TYPE the file to
+determine if it is null (the CP/M prompt will return immediately).  Bring your
+backups up to date to recover.
+.sp
+.ti-6
+PY152 UNABLE TO ADD THE HISTORY RECORD TO THE HISTORY FILE: See
+if your disk is full by the STAT command (for example, A>STAT B:).  If it is
+not, contact your distributor.
+.sp
+.ti-6
+PY155 UNABLE TO CREATE THE HISTORY FILE - DISK WRITE-PROTECTED?: Check to
+see if the disk is write protected.  If it is not, contact your distributor.
+.sp
+.ti-6
+PY160 UNABLE TO UPDATE THE SECOND PARAMETER FILE: This error should not
+occur.	Run the Employee Entry program again.  If this error occurs repeatedly,
+contact your distributor.
+.sp
+.ti-6
+PY161 ERROR DURING FILE SAVE: The SAVE did not work properly.  Run Employee
+Entry to see if any data has been lost and re-enter it if necessary.  If the
+error occurs repeatedly, contact your distributor.
+.sp
+.ti-6
+PY169 THE SECOND PARAMETER FILE DOES NOT EXIST OR IS NULL: This error is
+not likely to occur.  Re-run the menu program (CRUN2 PY).  See if
+the parameter files (PYPR1.101 and PYPR2.101) are on the correct disk.
+.sp
+.ti-6
+PY171 THAT'S NOT A VALID CONTROL RESPONSE: See the documentation.
+.sp
+.ti-6
+PY172 THERE AREN'T THAT MANY EMPLOYEES ON THE SYSTEM
+.sp
+.ti-6
+PY173 THAT'S NOT A VALID EMPLOYEE NUMBER: Your response contained or
+non-numeric character or an invalid check digit.
+.sp
+.ti-6
+PY174 SOCIAL SECURITY NUMBERS MUST BE OF THE FORMAT 000-00-0000: You are
+required not type in the dashes (-).
+.sp
+.ti-6
+PY175 THE ONLY THING I KNOW ABOUT SEX IS   M  OR  F
+.sp
+.ti-6
+PY176 EMPLOYEE STATUS CAN BE  A(ACTIVE) L(ON LEAVE) T(TERMINATED): This field
+accepts A, L, or T only.
+.sp
+.ti-6
+PY180 THAT'S AN UNUSED EMPLOYEE NUMBER: Employee status has been changed
+from Terminated to Deleted by the Close for the Year program.  This number
+will be reassigned after lower unused employee numbers are assigned.
+.qi
+.sp2
+.ce
+EMPLOYEE RATE ENTRY (RATENT.INT)
+.sp
+.in6
+.ti-6
+PY201 THIS PROGRAM MODULE MUST BE SELECTED FROM THE PAYROLL MENU: See PY131.
+.sp
+.ti-6
+PY202 THAT'S NOT A VALID CONTROL RESPONSE: See the documentation.
+.sp
+.ti-6
+PY203 THAT'S NOT A VALID CONTROL RESPONSE: See the documentation.
+.sp
+.ti-6
+PY205 ONLY INTEGERS ARE ACCEPTED AT THIS FIELD: See PY133.
+.sp
+.ti-6
+PY206 THAT'S NOT AN ACCEPTABLE NUMERIC FORMAT FOR THIS FIELD: See PY134.
+.sp
+.ti-6
+PY207 DOUBLE QUOTES (") ARE INVALID CHARACTERS: See PY132.
+.sp
+.ti-6
+PY208 Y  AND  N   ARE THE ONLY ACCEPTABLE ENTRIES AT THIS FIELD
+.sp
+.ti-6
+PY209 THAT'S NOT A VALID DATE: See Chapter 18 on How to Enter a Date.
+.sp
+.ti-6
+PY210 THE EMPLOYEE FILE WAS NOT FOUND: Make sure the correct disks are
+inserted and the files on the drives set for them during Parameter Entry.
+Bring your backup files up to date to recover.
+.sp
+.ti-6
+PY211 THE EMPLOYEE FILE WAS NULL OR INVALID: See PY141.
+.sp
+.ti-6
+PY212 UNABLE TO READ THE EMPLOYEE RECORD -- END OF FILE FOUND: The counter
+in the header record disagrees with the actual number of records on the file.
+Bring your backup files up to date.
+.sp
+.ti-6
+PY213 UNABLE TO WRITE THE EMPLOYEE RECORD: Check to see if disk is write
+protected.  If it is not, contact your distributor.
+.sp
+.ti-6
+PY216 THAT'S NOT A VALID EMPLOYEE NUMBER:  See PY173.
+.sp
+.ti-6
+PY217 THERE AREN'T THAT MANY EMPLOYEES ON THE SYSTEM
+.sp
+.ti-6
+PY218 THAT'S AN UNUSED EMPLOYEE NUMBER: See PY180.
+.sp
+.ti-6
+PY219 THERE ARE NO EMPLOYEES ON THE SYSTEM: No employees were added
+during Employee Entry.	See Chapter 23 for instructions on adding employees.
+.sp
+.ti-6
+PY221 H AND S  ARE THE ONLY VALID ENTRIES AT THIS FIELD: H=Hourly, S=Salaried.
+.sp
+.ti-6
+PY222 THAT'S NOT ONE OF THE PAY INTERVALS CURRENTLY USED:  The pay intervals
+to be used are set through the Parameter Entry program.
+.sp
+.ti-6
+PY223 M  AND  S  ARE THE ONLY VALID ENTRIES AT THIS FIELD: M=Married, S=Single.
+.sp
+.ti-6
+PY226 THERE ARE FOUR TAX EXCLUSION TYPES NUMBERED ONE THRU FOUR: See Chapter
+10 or Chapter 22 for the four tax exclusion codes.
+.sp
+.ti-6
+PY229 THIS EMPLOYEE HAS BEEN EXEMPTED FROM FEDERAL TAX WITHHOLDING: An
+employee's exemption status can be changed through the Employee Ded/Earn
+and Cost program.
+.sp
+.ti-6
+PY230 THIS EMPLOYEE HAS BEEN EXEMPTED FROM STATE TAX WITHHOLDING: See PY229.
+.sp
+.ti-6
+PY231 THIS EMPLOYEE HAS BEEN EXEMPTED FROM LOCAL TAX WITHHOLDING: See PY229.
+.qi
+.sp2
+.ce
+EMPLOYEE EARN/DED AND COST (EMPDENT.INT)
+.sp
+.in6
+.ti-6
+PY241 THIS PROGRAM MODULE MUST BE SELECTED FROM THE PAYROLL MENU: See PY131.
+.sp
+.ti-6
+PY242 THAT'S NOT A VALID CONTROL RESPONSE: See the documentation.
+.sp
+.ti-6
+PY243 THAT'S NOT A VALID CONTROL RESPONSE: See the documentation.
+.sp
+.ti-6
+PY245 ONLY INTEGERS ARE ACCEPTED AT THIS FIELD: See PY133.
+.sp
+.ti-6
+PY246 THAT'S NOT AN ACCEPTABLE NUMERIC FORMAT FOR THIS FIELD: See PY134.
+.sp
+.ti-6
+PY247 DOUBLE QUOTES (") ARE INVALID CHARACTERS: See PY132.
+.sp
+.ti-6
+PY248 Y  AND  N   ARE THE ONLY ACCEPTABLE ENTRIES AT THIS FIELD
+.sp
+.ti-6
+PY249 THAT'S NOT A VALID DATE: See Chapter 18 on How to Enter a Date.
+.sp
+.ti-6
+PY250 THE EMPLOYEE FILE WAS NOT FOUND: See PY210.
+.sp
+.ti-6
+PY251 THE EMPLOYEE FILE WAS NULL OR INVALID: See PY141.
+.sp
+.ti-6
+PY252 UNABLE TO READ THE EMPLOYEE RECORD -- END OF FILE FOUND: See PY212.
+.sp
+.ti-6
+PY253 UNABLE TO WRITE THE EMPLOYEE RECORD: See PY213.
+.sp
+.ti-6
+PY256 THAT'S NOT A VALID EMPLOYEE NUMBER: See PY173.
+.sp
+.ti-6
+PY257 THERE AREN'T THAT MANY EMPLOYEES ON THE SYSTEM
+.sp
+.ti-6
+PY258 THAT'S AN UNUSED EMPLOYEE NUMBER: See PY180.
+.sp
+.ti-6
+PY259 THERE ARE NO EMPLOYEES ON THE SYSTEM: See PY219.
+.sp
+.ti-6
+PY264 AN INVALID CHECK CATEGORY HAS BEEN ENTERED: See Chapter 15 and
+Chapter 28.
+.sp
+.ti-6
+PY265 E AND D  ARE THE ONLY VALID ENTRIES AT THIS FIELD: E=Earning
+D=Deduction.
+.sp
+.ti-6
+PY266 THERE ARE FOUR TAX EXCLUSION TYPES NUMBERED ONE THRU FOUR: See PY226.
+.sp
+.ti-6
+PY267 A AND P  ARE THE ONLY VALID ENTRIES AT THIS FIELD: A=flat Amount,
+P=Percentage of gross taxable earnings.
+.sp
+.ti-6
+PY268 CHECK CATEGORIES CAN BE  2-7 (EARNINGS) OR 9-16 (DEDUCTIONS):
+See Chapter 15 and Chapter 28 for a treatment of check categories.
+.sp
+.ti-6
+PY269 THAT'S NOT A VALID PAYROLL SYSTEM ACCOUNT:  Accounts must always
+be referred to be their Payroll System Account Reference Number, which
+is the relative position of the account on the account file.  An account
+must have been entered onto the Account file through the Account Entry
+program before it is considered a valid account.
+.sp
+.ti-6
+PY270 THE ACCOUNT DISTRIBUTION PERCENTAGES MUST TOTAL 100.0%: The program
+will not let you leave until the percentages total 100.0.
+.qi
+.sp2
+.ce
+PARAMETER ENTRY (PYPARENT.INT)
+.sp
+.in6
+.ti-6
+PY281 PROGRAM MUST BE SELECTED FROM THE PAYROLL MENU: See PY131.
+.sp
+.ti-6
+PY281 ONLY INTEGERS ARE ACCEPTED AT THIS FIELD: See PY133.
+.sp
+.ti-6
+PY283 THAT'S NOT AN ACCEPTABLE NUMERIC FORMAT FOR THIS FIELD: See PY134.
+.sp
+.ti-6
+PY284 DOUBLE QUOTES ARE INVALID CHARACTERS: See PY132.
+.sp
+.ti-6
+PY285 Y  AND  N  ARE THE ONLY ACCEPTABLE ENTRIES AT THIS FIELD
+.sp
+.ti-6
+PY286 THAT'S NOT A VALID DATE: See Chapter 18 for instructions on How
+to Enter a Date.
+.sp
+.ti-6
+PY287 THAT'S NOT AN ACCEPTABLE ENTRY FOR THIS FIELD
+.sp
+.ti-6
+PY288 THAT'S NOT IN THE ACCEPTABLE RANGE FOR THIS FIELD
+.sp
+.ti-6
+PY289 THAT'S NOT A VALID PAYROLL SYSTEM ACCOUNT: See PY269.
+.sp
+.ti-6
+PY290  THE ACCOUNT ENTRY MODULE IS NOT ON THE PROGRAM DISK:  Your system
+may be set up incorrectly. See Chapter 19 for detailed instructions.
+Run Account Entry to create the default account file.
+.sp
+.ti-6
+PY291 THAT PARAMETER ENTRY MODULE IS NOT ON THE PROGRAM DISK:  Your system
+may be set up incorrectly.  See Chapter 19 for detailed instructions.
+.sp
+.ti-6
+PY292 UNABLE TO UPDATE PARAMETER FILE AT END OF PROGRAM: Make sure the
+parameter files are on the correct disk.  Rerun Parameter Entry to create
+a new PYPR1 file. This error should not occur.
+.sp
+.ti-6
+PY293 UNABLE TO UPDATE SECOND PARAMETER FILE AT END OF PROGRAM:  Make sure
+the PYPR2 file is on the correct disk.	This error should not occur.
+.sp
+.ti-6
+PY294 THAT'S NOT A VALID PAY INTERVAL: Valid pay intervals are W(eekly),
+B(i-weekly), S(emi-monthly), and M(onthly).
+.sp
+.ti-6
+PY295 COULDN'T CREATE THE PARAMETER FILE:  Check to see if your disk
+if write-protected or the directory full.
+.sp
+.ti-6
+PY296 COULDN'T WRITE TO THE PARAMETER FILE: Check to see if your disk is
+full.
+.sp
+.ti-6
+PY297 COULDN'T CREATE THE SECOND PARAMETER FILE: See PY295.
+.sp
+.ti-6
+PY298 COULDN'T WRITE TO THE SECOND PARAMETER FILE: See PY296.
+.sp
+.ti-6
+PY300 THE SYSTEM DRIVE MUST BE	A  OR  B: Other drives are not allowed.
+.qi
+.sp2
+.ce
+PARAMETER ENTRY (PYPAR2.INT)
+.sp
+.in6
+.ti-6
+PY311 PROGRAM MUST BE SELECTED FROM THE PARAMETER ENTRY MENU: To call
+up the Parameter Entry menu, call up the Payroll System by CRUN2 PY,
+and then select the Parameter Entry program from the system menu.
+.sp
+.ti-6
+PY311 ONLY INTEGERS ARE ACCEPTED AT THIS FIELD: See PY133.
+.sp
+.ti-6
+PY313 THAT'S NOT AN ACCEPTABLE NUMERIC FORMAT FOR THIS FIELD: See PY134.
+.sp
+.ti-6
+PY314 DOUBLE QUOTES ARE INVALID CHARACTERS: See PY132.
+.sp
+.ti-6
+PY315 Y  AND  N  ARE THE ONLY ACCEPTABLE ENTRIES AT THIS FIELD
+.sp
+.ti-6
+PY316 THAT'S NOT A VALID DATE: See Chapter 18 for instructions on How
+to Enter a Date.
+.sp
+.ti-6
+PY317 THAT'S NOT AN ACCEPTABLE ENTRY FOR THIS FIELD
+.sp
+.ti-6
+PY318 THAT'S NOT IN THE ACCEPTABLE RANGE FOR THIS FIELD
+.sp
+.ti-6
+PY319 THAT'S NOT A VALID PAYROLL SYSTEM ACCOUNT: See PY269.
+.sp
+.ti-6
+PY322 UNABLE TO UPDATE PARAMETER FILE AT END OF PROGRAM: See PY292.
+.sp
+.ti-6
+PY323 UNABLE TO UPDATE SECOND PARAMETER FILE AT END OF PROGRAM: See PY293.
+.sp
+.ti-6
+PY324 THAT'S NOT A VALID PAY INTERVAL: See PY294.
+.qi
+.sp2
+.ce
+PARAMETER ENTRY (PYPAR3.INT)
+.sp
+.in6
+.ti-6
+PY331 PROGRAM MUST BE SELECTED FROM THE PARAMETER ENTRY MENU: See PY311.
+.sp
+.ti-6
+PY332 ONLY INTEGERS ARE ACCEPTED AT THIS FIELD: See PY131.
+.sp
+.ti-6
+PY333 THAT'S NOT AN ACCEPTABLE NUMERIC FORMAT FOR THIS FIELD: See PY134.
+.sp
+.ti-6
+PY334 DOUBLE QUOTES ARE INVALID CHARACTERS: See PY132.
+.sp
+.ti-6
+PY335 Y  AND  N  ARE THE ONLY ACCEPTABLE ENTRIES AT THIS FIELD
+.sp
+.ti-6
+PY336 THAT'S NOT A VALID DATE: See Chapter 18 for instructions on How
+to Enter a Date.
+.sp
+.ti-6
+PY337 THAT'S NOT AN ACCEPTABLE ENTRY FOR THIS FIELD
+.sp
+.ti-6
+PY338 THAT'S NOT IN THE ACCEPTABLE RANGE FOR THIS FIELD
+.sp
+.ti-6
+PY339 THAT'S NOT A VALID PAYROLL SYSTEM ACCOUNT: See PY269.
+.sp
+.ti-6
+PY342 UNABLE TO UPDATE PARAMETER FILE AT END OF PROGRAM: See PY292.
+.sp
+.ti-6
+PY344 THAT'S NOT A VALID DRIVE: Valid drive names under CP/M are A, B,
+C, and D.
+.qi
+.sp2
+.ce
+SYSTEM DEDUCTION ENTRY MENU (DEDENT.INT)
+.sp
+.in6
+.ti-6
+PY351 DEDENT MUST BE RUN FROM PY MENU: To call up the Payroll System menu,
+type CRUN2 PY.
+.sp
+.ti-6
+PY353 PYDED - DEDUCTION FILE NOT PRESENT: At first time startup
+the program should ask if you want
+to create it.
+.sp
+.ti-6
+PY354 IMPROPERLY FORMED NUMBER OR OUT OF RANGE: The numbers 1 through
+3 are the only valid responses.
+.qi
+.sp2
+.ce
+STANDARD DEDUCTION RATES (DEDENT1.INT)
+.sp
+.in6
+.ti-6
+PY351 DEDENT MUST BE RUN FROM PY MENU: To call up the Payroll System menu,
+type CRUN2 PY.
+.sp
+.ti-6
+PY352 INVALID RESPONSE
+.sp
+.ti-6
+PY353 PYDED - DEDUCTION FILE NOT PRESENT: Have you switched disks?  This
+error should not occur under normal circumstances.  Recreate the file through
+the System Deduction Entry program.
+.sp
+.ti-6
+PY354 IMPROPERLY FORMED NUMBER OR OUT OF RANGE: See Chapter 18 for How to
+Enter a Number.  The maximum rate must be less than 100.0%.
+.sp
+.ti-6
+PY355 ANSWER MUST BE 'Y' OR 'N'
+.qi
+.sp2
+.ce
+FEDERAL WITHOLDING TABLES (DEDENT2.INT)
+.sp
+.in6
+.ti-6
+PY351 DEDENT MUST BE RUN FROM PY MENU: To call up the Payroll System menu,
+type CRUN2 PY.
+.sp
+.ti-6
+PY352 INVALID RESPONSE
+.sp
+.ti-6
+PY353 PYDED - DEDUCTION FILE NOT PRESENT: See PY353 under Standard Deduction
+Rates above.
+.sp
+.ti-6
+PY354 IMPROPERLY FORMED NUMBER OR OUT OF RANGE: See PY354 under Standard
+Deduction Rates above.
+.sp
+.ti-6
+PY356 FWT CUTOFFS AND PERCENTS MUST BE IN ASCENDING ORDER:  Change
+the incorrect data. See Chapter 10 for a discussion of how to enter
+Federal Tax Withholding information.
+.sp
+.ti-6
+PY357 INVALID USE OF CONTROL CHARACTER: See the documentation.
+.qi
+.sp2
+.ce
+SYSTEM WIDE EARNINGS AND DEDUCTIONS (DEDENT3.INT)
+.sp
+.in6
+.ti-6
+PY351 DEDENT MUST BE RUN FROM PY MENU: To call up the Payroll System
+menu, type CRUN2 PY.
+.sp
+.ti-6
+PY352 INVALID RESPONSE
+.sp
+.ti-6
+PY353 PYDED - DEDUCTION FILE NOT PRESENT: See PY353 under Standard Deduction
+Rates above.
+.sp
+.ti-6
+PY354 IMPROPERLY FORMED NUMBER OR OUT OF RANGE
+.sp
+.ti-6
+PY355 ANSWER MUST BE 'Y' OR 'N'
+.sp
+.ti-6
+PY358 ANSWER MUST BE 'E' OR 'D': E=Earning D=Deduction.
+.sp
+.ti-6
+PY359 ANSWER MUST BE 'A' OR 'P': A=flat Amount P=Percentage of gross
+taxable pay.
+.sp
+.ti-6
+PY360 CHK CAT MUST BE 2-7 FOR EARNINGS, 9-16 FOR DEDUCTIONS: See Chapter 15
+and Chapter 28.
+.qi
+.sp2
+.ce
+ACCOUNT ENTRY (PYACTENT.INT)
+.sp
+.in6
+.ti-6
+PY451 INVALID RESPONSE
+.sp
+.ti-6
+PY452 PROGRAM NOT RUN FROM MENU:  This program must be selected for the
+system menu.  To call up the Payroll System menu, type CRUN2 PY.
+.sp
+.ti-6
+PY454 UNEXPECTED END OF ACCOUNT FILE: The counter on the header record
+disagrees with the actual number of records on the file.  Bring your
+backup file up to date, or recreate the account file.
+.sp
+.ti-6
+PY455 RECORD INFORMATION IS NOT VALID: Enter a valid account number
+into the record or give the CTRL-X command to cancel the addition or
+change.
+.sp
+.ti-6
+PY456 INVALID RECORD NUMBER: Your entry was out of the range of account
+records, or not an integer.
+.sp
+.ti-6
+PY459 CHART OF ACCOUNTS FILE NOT FOUND,INSERT CORRECT DISK: If you have
+chosen the General Ledger interface option, this message prompts you to
+insert the GL data disk with the Chart of Accounts file into the drive
+you set as the GL Date Drive during parameter entry.  Be sure the
+two character file suffix that identifies the Chart of Accounts file as
+that of your company has been correctly entered in Parameter Entry.
+.sp
+.ti-6
+PY460 UNEXPECTED END OF CHART OF ACCOUNTS FILE: This error should not
+occur.	Contact your distributor.
+.sp
+.ti-6
+PY461 INVALID ACCOUNT NUMBER: If the GL interface option has been chosen,
+the account number you enter must be a number already on the Chart of
+Accounts.  A four digit Chart of Accounts number is valid.  However,
+you may not enter an account number with a zero in the fourth position
+(1120 or 112034) since this signifies a title account.	If GL interface
+is not selected, any 1 to 6 digit number is acceptable.
+.sp
+.ti-6
+PY462 MISSING PR2 FILE, NOT UPDATED: Did you reinsert the disk with the
+second parameter file?	May occur if you try to give the CTRL-S command
+to save newly entered or changed information while the disk with the
+parameter file is switched out to make room for the GL data disk.  If
+so, end the program, reinsert the disk, and then Save the file.
+.sp
+.ti-6
+PY463 ACCOUNT FILE NOT PRESENT,INSERT CORRECT DISK: Is the Account file
+on the disk you removed to make room for the GL data disk?  Find or
+recreate the file.
+.qi
+.sp2
+.ce
+CREATE SORT PARAMETER FILE (PYSRTPRM.INT)
+.sp
+.in6
+.ti-6
+PY482 UNABLE TO CREATE PYHOURS.SRT:  Check to see if there is space on
+your disk or if the disk is write protected.  If there is space and
+the disk is write-enabled, contact your distributor since this error
+should not occur.
+.qi
+.sp2
+.ce
+APPLY PAYROLL (APPLY1.INT)
+.sp
+.in6
+.ti-6
+PY501 INVALID DATE: See Chapter 18 for instructions on How to Enter
+a Date.
+.sp
+.ti-6
+PY502 CHECK DATE IS NOT IN CURRENT QUARTER: If you want the checks to
+carry that pay date, you'll have to run the end of period processing
+steps first.  See Chapters 16, 29, and 30.
+.sp
+.ti-6
+PY503 CHECK DATE IS NOT IN CURRENT YEAR: If you want the checks to carry
+that pay date, you'll have to close for the fourth quarter and close
+for the year first.  See Chapters 16, 29, and 30.
+.sp
+.ti-6
+PY504 MUST BE M OR W: M=Month-based employees, W=Week based employees.
+.sp
+.ti-6
+PY505 CURRENT CHECKS NOT PRINTED: The Print Pay Checks and Print Pay
+Check Register programs must be run before another payroll application
+may take place.  Pay Check printing is not required if you did not order
+automatic check writing during parameter entry.
+.sp
+.ti-6
+PY506 CHECK DATE EARLIER THAN PREVIOUS CHECK DATE:  The check date must
+always be past the last check date.
+.sp
+.ti-6
+PY507 PYPAY.100 FOUND: The previous payroll application ended prematurely.
+Determine the reason, then rerun the apply using updated backup files.
+.sp
+.ti-6
+PY508 CURRENT PAYROLL JOURNAL NOT PRINTED: You must print at least one
+copy of the Payroll Journal report before you can run the Apply Payroll
+program again.
+.sp
+.ti-6
+PY509 EMP FILE NOT FOUND: Make sure the correct disk has been inserted,
+and the file is on the drive specified for it in Parameter Entry.
+If necessary, bring your backup files up to date and use them.
+.sp
+.ti-6
+PY510 DED FILE NOT FOUND: See PY509.
+.sp
+.ti-6
+PY511 SWT OR CALx FILE NOT FOUND: See PY509.
+.sp
+.ti-6
+PY512 LWT FILE NOT FOUND: See PY509.
+.sp
+.ti-6
+PY513 HIS FILE NOT FOUND: See PY509.
+.sp
+.ti-6
+PY514 YES, ESCAPE OR BACK ONLY: The only valid responses to this request
+are YES to continue processing, ESCAPE to end the program, and CTRL-B
+to go back to the previous request to change your response.
+.sp
+.ti-6
+PY515 ACT FILE NOT FOUND: See PY509.
+.sp
+.ti-6
+PY516 PR2 FILE NOT FOUND: See PY509.
+.sp
+.ti-6
+PY517 YES OR ESCAPE ONLY: Type YES to continue, and press ESCAPE to end the
+program.
+.sp
+.ti-6
+PY518 YES OR ESCAPE ONLY: The Company History file does not exist until
+after the first payroll application.  The first time you run the Apply
+Payroll program, type YES to continue.	If the file has been created by
+a previous application, end the current application with ESCAPE, and
+check to see if the correct disk has been inserted or if the Company
+History file is on the drive you set for it during Parameter Entry.
+.sp
+.ti-6
+PY519 CAN'T APPLY.  QUARTER NEEDS ENDING: You're trying to apply too
+many times in one quarter.
+.sp
+.ti-6
+PY520 CAN'T APPLY.  QUARTER NEEDS ENDING: See PY519.
+.sp
+.ti-6
+PY521 CAN'T APPLY.  YEAR NEEDS ENDING: You've closed for the fourth
+quarter, but not for the year.
+.sp
+.ti-6
+PY522 CURRENT REGISTER NOT PRINTED: You must print the Check Register
+before the program allows another payroll application.
+.sp
+.ti-6
+PY523 CHK.100 FILE FOUND: The previous payroll application ended prematurely.
+Determine the reason, then bring your backup files up to date and
+rerun the application.
+.qi
+.sp2
+.ce
+APPLY PAYROLL (APPLY2.INT)
+.sp
+.in6
+.ti-6
+PY552 NOT PROPERLY CHAINED: This error should not occur. Contact your
+distributor.
+.sp
+.ti-6
+PY553 HOURS TRANS REJECTED FOR TERMINATED OR ON-LEAVE EMP:  The Apply
+Payroll program found pay transactions for terminated or on leave employees.
+If you want the transaction to be put through, change the employee's status
+through the Employee Entry program.
+.sp2
+.ce
+APPLY PAYROLL  (APPLY3.INT)
+.sp
+.in6
+.ti-6
+PY562 NOT PROPERLY CHAINED: This error should not occur.  Contact your
+distributor.
+.sp
+.ti-6
+PY563 NET PAY EXCEEDS EMPLOYEE MAXIMUM: Informational message. You can
+change the MAX PAY amount for any employee through the Employee Rate
+Entry program.
+.sp
+.ti-6
+PY564 NET PAY EXCEEDS SYSTEM LIMIT - CHECK WILL BE VOIDED: Informational
+message. You can suppress voiding or change maximum amount through the
+Parameter Entry program.
+.sp
+.ti-6
+PY565 NET PAY CALCULATED FOR LESS THAN ZERO - NO CHECK MADE: Make sure
+the employee's earning, deduction, and pay transaction information is
+correct.
+.sp2
+.ce
+PRINT 940 REPORT (PRINT940.INT)
+.sp
+.in6
+.ti-6
+PY581 PR2 FILE NOT FOUND: This error should not occur.	Contact your
+distributor.
+.sp
+.ti-6
+PY582 COH FILE NOT FOUND: Check to make sure the correct disks were inserted
+and that the file is on the drive specified during Parameter Entry.
+.sp
+.ti-6
+PY583 DED FILE NOT FOUND: See PY582.
+.sp
+.ti-6
+PY584 SYSTEM HAS NOT ACHIEVED YEAR-END STATUS: The program allows you to
+continue, but the report will be inaccurate.
+.sp
+.ti-6
+PY585 UNABLE TO WRITE TO PR2: This error should not occur.  Contact your
+distributor.
+.sp
+.ti-6
+PY586 HIS FILE NOT FOUND: See PY582.
+.sp
+.ti-6
+PY587 UNEXPECTED EOF ON HIS FILE: The counter in the header record disagrees
+with the actual number of records on the Employee History file.  Try to
+determine the reason before you continue.  Bring your backup files up to
+recover.
+.qi
+.sp2
+.ce
+PRINT 941 REPORT (PRINT941.INT)
+.sp
+.in6
+.ti-6
+PY601 SYSTEM HAS NOT ACHIEVED QUARTER-END STATUS: The program allows you to
+continue, but the report generated will be inaccurate.
+.sp
+.ti-6
+PY602 PR2 FILE NOT FOUND: This error should not occur.	Contact your
+distributor.
+.sp
+.ti-6
+PY603 COH FILE NOT FOUND: See PY582.
+.sp
+.ti-6
+PY604 UNABLE TO WRITE PR2 FILE: This error should not occur.  Contact your
+distributor.
+.sp
+.ti-6
+PY605 'Y' OR 'N' ONLY
+.sp
+.ti-6
+PY606 NOT NUMERIC
+.sp
+.ti-6
+PY607 INVALID DATE: See Chapter 18 for How to Enter a Date.
+.sp
+.ti-6
+PY609 INVALID RESPONSE
+.sp
+.ti-6
+PY610 PR2 FILE NOT FOUND--SECTION TWO: This error should not occur.  Contact
+your distributor.
+.sp
+.ti-6
+PY611 UNABLE TO WRITE PR2--SECTION TWO:  See PY610.
+.sp
+.ti-6
+PY612 COH FILE NOT FOUND--SECTION TWO: See PY610.
+.qi
+.sp2
+.ce
+PRINT W2 REPORT (PRINTW2.INT)
+.sp
+.in6
+.ti-6
+PY621 SYSTEM HAS NOT ACHIEVED YEAR-END STATE:  Informational message.  W-2
+forms are normally produced at the end of the year, although they may be
+printed at any time.
+.sp
+.ti-6
+PY622 EMPLOYEE FILE NOT FOUND: See PY582.
+.sp
+.ti-6
+PY623 UNEXPECTED EOF ON EMPLOYEE FILE:	The count of employee records held
+on the PR2 file disagrees with the actual number.  Determine the reason
+for this, then bring your backup files up to date to recover.
+.sp
+.ti-6
+PY624 HISTORY FILE NOT FOUND: See PY582.
+.sp
+.ti-6
+PY625 UNEXPECTED EOF ON HISTORY FILE:  The count of employee records held
+on the PR2 file disagrees with the actual number of records on the
+Employee History file.	Determine the reason for this, then bring your
+backup files up to date to recover.
+.sp
+.ti-6
+PY626 PR2 FILE NOT FOUND: This error should not occur.	Contact your
+distributor.
+.sp
+.ti-6
+PY627 UNABLE TO WRITE TO PR2 FILE
+.sp
+.ti-6
+PY628 INVALID RESPONSE
+.sp
+.ti-6
+PY629 Y, YES, N, OR NO ONLY
+.sp
+.ti-6
+PY630 NUMERIC INTEGER ONLY
+.sp
+.ti-6
+PY631 INVALID CHECK DIGIT
+.sp
+.ti-6
+PY632 EMPLOYEE NUMBER TOO HIGH
+.sp
+.ti-6
+PY633 STARTING EMPLOYEE NUMBER CANNOT BE GREATER THAN ENDING NUMBER
+.sp
+.ti-6
+PY634 OUT OF RANGE
+.qi
+.sp2
+.ce
+PRINT PAY CHECKS (PYCHECKS)
+.sp
+.in6
+.ti-6
+PY641 THIS MODULE MUST BE SELECTED FROM THE PAYROLL SYSTEM MENU: See PY131.
+.sp
+.ti-6
+PY642 THE SECOND PARAMETER FILE IS NOT ON THE SYSTEM DRIVE: Make certain
+you have the correct disk inserted.
+.sp
+.ti-6
+PY643 CHECK FILE WAS NOT RENAMED FOLLOWING EARLIER PROCESSING:	A check
+file was left with the filetype of 100. Try to
+determine why the rename failed.  TYPE the file to see if it is null
+(the CP/M prompt will simply return).  If it is not null, rename it
+to 101 and continue.
+.sp
+.ti-6
+PY644 NO CHECK FILE FOUND: Check to make sure the correct disks are inserted.
+The file should have been created by the last run of the Apply Payroll program.
+.sp
+.ti-6
+PY645 CHECK FILE RENAME WAS UNSUCESSFUL:  A rename failed.  Your disk
+may be write-protected; check for this, then try again.  If it fails
+repeatedly, contact your distributor.
+.sp
+.ti-6
+PY646 THE CHECK FILE IS A NULL FILE: Some problem must have occurred during
+earlier processing.  Use your backup files to rerun the last payroll
+application.
+.sp
+.ti-6
+PY647 UNABLE TO READ CHECK RECORD:  The counter in the header record disagrees
+with the actual number or records on the file.	Use your backup files to
+rerun the last payroll application.
+.sp
+.ti-6
+PY648 ERROR WHILE WRITING CHECK RECORD: Your disk may be write-protected.
+If the Check file has the wrong filetype of 100, rename to type 101.
+.sp
+.ti-6
+PY649 NO EMPLOYEE MASTER FILE FOUND: Check to make sure the correct disk
+is inserted.  Bring your backup files up to date and use them.
+.sp
+.ti-6
+PY650 THE EMPLOYEE FILE IS A NULL FILE: Bring your backup files up to date
+and use them.
+.sp
+.ti-6
+PY651 UNABLE TO READ EMPLOYEE MASTER RECORD:  The count of records that is
+kept on the header record is wrong.  Check to see if data
+is missing from the employee file.  Bring your backup files up to date
+and use them.
+.sp
+.ti-6
+PY652 UNABLE TO UPDATE THE SECOND PARAMETER FILE:  This error should not
+occur.	Contact your distributor.
+.sp
+.ti-6
+PY660 THAT'S NOT A VALID RESPONSE: Valid responses are Y or RETURN to
+print another test form, N to begin printing checks, and ESCAPE to end
+the program.
+.sp
+.ti-6
+PY661 THAT'S NOT A VALID CHECK NUMBER: Enter a valid 5 digit check number.
+The number you enter at this request will be the number of the first
+check printed by the computer.
+.sp
+.ti-6
+PY662 ESC AND RETURN ARE THE ONLY RESPONSES ACCEPTED AT THIS FIELD
+.qi
+.sp2
+.ce
+PRINT EMPLOYEE MASTER LIST (EMPPRINT.INT)
+.sp
+.in6
+.ti-6
+PY671 INVALID RESPONSE
+.sp
+.ti-6
+PY672 PROGRAM NOT RUN FROM MENU: See PY131.
+.sp
+.ti-6
+PY674 UNEXPECTED END OF EMPLOYEE FILE: If you have not yet created the
+Employee Master file through the Employee Entry program, do so now.
+This error should not occur if a valid Employee Master file exists.
+.sp
+.ti-6
+PY675 SELECTION MUST BE 1 TO 14
+.sp
+.ti-6
+PY676 INVALID OR NON-EXISTANT EMPLOYEE NUMBER: The Employee Master List
+shows all the valid employee numbers.
+.sp
+.ti-6
+PY677 FROM NUMBER MUST NOT BE GREATER THAN TO NUMBER
+.sp
+.ti-6
+PY678 TO NUMBER MUST NOT BE LESS THAN FROM NUMBER
+.sp
+.ti-6
+PY679 ANSWER MUST BE 'F' OR 'S': F=Full detail, S=Short version.
+.sp
+.ti-6
+PY680 UNEXPECTED END OF ACCOUNT FILE: The Account file is not present, or
+the counter in the header record disagrees with the actual number of
+records on the file.  Check to see if the correct disk is inserted,
+build a new account file, or use your backup file.
+.sp
+.ti-6
+PY681 INVALID ACCOUNT NUMBER: An account number set for an employee's
+GL Cost Distribution or an Employee Specific deduction is invalid.
+A three digit Payroll System Account Reference numbers is the only valid
+response to an account number request.
+.qi
+.sp2
+.ce
+PRINT PAY CHECK REGISTER (PYRGSTR.INT)
+.sp
+.in6
+.ti-6
+PY701 INVALID RESPONSE
+.sp
+.ti-6
+PY702 PROGRAM NOT RUN FROM MENU: See PY131.
+.sp
+.ti-6
+PY704 UNEXPECTED END OF EMPLOYEE FILE: The Employee Master file may not be
+present.  Make sure you inserted the correct disk.  If the Employee Master
+file is present, contact your distributor.
+.sp
+.ti-6
+PY705 UNEXPECTED END OF CHECK FILE: The check file may not be present.
+Determine whether the last payroll application was run to successful
+completion.  If this is not the problem, contact your distributor.
+.qi
+.sp2
+.ce
+CLOSE FOR QUARTER, CLOSE FOR YEAR (PYPEREND.INT)
+.sp
+.in6
+.ti-6
+PY721 EMP FILE NOT FOUND: Check to make sure the correct disks have
+been inserted, and that the file is on the drive you specified for it
+during Parameter Entry.
+.sp
+.ti-6
+PY722 HIS FILE NOT FOUND: See PY721.
+.sp
+.ti-6
+PY723 COH FILE NOT FOUND: See PY721.
+.sp
+.ti-6
+PY724 UNEXPECTED EOF ON COH FILE: This error should not occur. Contact
+your distributor.
+.sp
+.ti-6
+PY725 PR2 FILE NOT FOUND: See PY721.
+.sp
+.ti-6
+PY726 CAN'T END YEAR.  FOURTH QUARTER NOT CLOSED: Close for the fourth
+quarter before closing for the year.  See Chapters 16, 29, and 30.
+.sp
+.ti-6
+PY727 CAN'T END YEAR.  FOURTH QUARTER NOT CLOSED: See PY726.
+.sp
+.ti-6
+PY728 CAN'T END YEAR.  940 NOT PRINTED: The 940 report must be printed
+before you can run the Close for the Year program.  See Chapter 30.
+.sp
+.ti-6
+PY729 CAN'T END YEAR.  W2 NOT PRINTED:  W-2 forms must be printed
+for all employees (Active, On Leave, and Terminated) before you can
+run the Close for the Year program.  See Chapter 30.
+.sp
+.ti-6
+PY730 CAN'T END QUARTER.  NOT ENOUGH WEEK BASED APPLIES:  There must
+be at least 13 weekly applications and at least 7 bi-weekly application before
+you can close for the quarter.
+.sp
+.ti-6
+PY731 CAN'T END QUARTER.  NOT ENOUGH MONTH BASED APPLIES: There must
+be 3 monthly applications, and 6 semi-monthly applications before
+you can close for the quarter.
+.sp
+.ti-6
+PY732 CAN'T END QUARTER.  941 NOT PRINTED: Must print the 941 Report
+before you close for the quarter.  See Chapter 16 and Chapter 29.
+.sp
+.ti-6
+PY733 CAN'T END YEAR.  JUST ENDED YEAR:  You've already run the Close
+for the Year program.
+.qi
+.sp2
+.ce
+PRINT PAYROLL JOURNAL (PYJOURN.INT)
+.sp
+.in6
+.ti-6
+PY761 PAY FILE NOT FOUND: See PY721.
+.sp
+.ti-6
+PY762 EMP FILE NOT FOUND: See PY721.
+.sp
+.ti-6
+PY763 ACT FILE NOT FOUND: See PY721.
+.sp
+.ti-6
+PY764 DED FILE NOT FOUND: See PY721.
+.sp
+.ti-6
+PY765 NET PAY EXCEEDS SYSTEM MAX. CHECK WILL BE VOIDED: See PY564.
+.sp
+.ti-6
+PY767 NET PAY LESS THAN ZERO. CHECK WILL BE VOIDED: See PY564.
+.qi
+.sp2
+.ce
+PRINT PAYROLL JOURNAL (PYJOURN1.INT)
+.sp
+.in6
+.ti-6
+PY771 ACT FILE NOT FOUND: This error should not occur.	Contact your
+distributor.
+.sp
+.ti-6
+PY772 UNEXPECTED EOF ON PAY FILE: The file exists but has no header record.
+This error should not occur. Contact your distributor.
+.sp
+.ti-6
+PY773 BATCH TOTAL NOT ZERO: If you are not using the GL interface option
+this error is not serious.  If you are using GL interface, the batch of
+GL transactions
+created by the last payroll application is incorrect.  This error means
+the accounts have not been set up correctly. For example, you may
+have given the number of a cash account for accrued liabilities.  In general,
+the Ledger Account Summary printed at the end of the Payroll Journal will
+be off by twice the offending amount.  Change the incorrect account information
+and rerun the application with updated
+backup files, or change the batch through the General Ledger facilities and
+correct the accounts before the next application.  See Chapter 9 and Chapter
+21.
+.qi
+.sp2
+.ce
+TRANSACTION PROOF (HRSPROOF.INT)
+.sp
+.in6
+.ti-6
+PY781 INVALID RESPONSE
+.sp
+.ti-6
+PY782 PROGRAM NOT RUN FROM MENU
+.sp
+.ti-6
+PY784 UNEXPECTED END OF TRANSACTION FILE: The Pay Transaction (Hours) file
+may not be present.  Make sure it has been created.  If it is present,
+contact your distributor.
+.sp
+.ti-6
+PY785 UNEXPECTED END OF EMPLOYEE FILE:	The Employee Master file may not
+be present.  Check to make sure the correct disk has been inserted.  If
+the file is present, contact your distributor.
+.qi
+.sp2
+.ce
+PRINT HISTORY REPORT (HISPRINT.INT)
+.sp
+.in6
+.ti-6
+PY801 INVALID RESPONSE
+.sp
+.ti-6
+PY802 PROGRAM NOT RUN FROM MENU: See PY131.
+.sp
+.ti-6
+PY803 INVALID USE OF CONTROL CHARACTER
+.sp
+.ti-6
+PY804 UNEXPECTED END OF HISTORY FILE: The count of employee history records
+held on the header record disagrees with the actual number.
+Determine the reason for this, then bring your backup files up to date to
+recover.
+.sp
+.ti-6
+PY805 HISTORY FILE NOT FOUND: See PY582.
+.sp
+.ti-6
+PY806 EMPLOYEE FILE NOT FOUND: See PY582.
+.sp
+.ti-6
+PY807 UNEXPECTED END OF EMPLOYEE FILE: There are fewer records on the
+Employee Master file than on the Employee History file.  Determine the
+reason, then bring your backup files up to date to recover.
+.sp
+.ti-6
+PY808 DEDUCTION FILE NOT FOUND: See PY582.
+.qi
+.sp2
+.ce
+PRINT VACATION REPORT  (VACPRINT.INT)
+.sp
+.in6
+.ti-6
+PY821 INVALID RESPONSE
+.sp
+.ti-6
+PY822 PROGRAM NOT RUN FROM MENU: See PY131.
+.sp
+.ti-6
+PY823 INVALID USE OF CONTROL CHARACTER
+.sp
+.ti-6
+PY824 UNEXPECTED END OF EMPLOYEE FILE: See PY623.
+.sp
+.ti-6
+PY825 EMPLOYEE FILE NOT FOUND: See PY582.
+.qi
+.sp2
+.ce
+HISTORY UPDATE (PYUPDHIS.INT)
+.sp
+.in6
+.ti-6
+PY921 INVALID RESPONSE
+.sp
+.ti-6
+PY922 PROGRAM NOT RUN FROM MENU: See PY131.
+.sp
+.ti-6
+PY923 INVALID USE OF CONTROL CHARACTER: The CTRL-A command is not allowed.
+An employee must first have been entered through the Employee Entry program.
+.sp
+.ti-6
+PY924 UNEXPECTED END OF FILE: Make sure the Employee Master file, the
+Employee History file, and the Company History files are on the correct
+disk.  If this is not the problem, contact your distributor.
+.sp
+.ti-6
+PY925 NON-NUMERIC INPUT OR EXCEEDS 999,999.99
+.sp
+.ti-6
+PY929 HISTORY UPDATE MAY NOT RUN AFTER APPLY HAS RUN:  The History Update
+program not be run after the first run of the Apply Payroll program in order to
+protect the auditability of the Payroll System.
+.sp
+.ti-6
+PY930 EMPLOYEE FILE AND HISTORY FILE MUST BE PRESENT: Check to see if the
+correct disks have been inserted or that these files have been created
+through Employee Entry.
+.sp
+.ti-6
+PY931 INVALID OR NON-EXISTANT EMPLOYEE NUMBER
+.sp
+.ti-6
+PY933 NON-NUMERIC INPUT OR EXCEEDS 9,999,999.99
+.sp
+.ti-6
+PY934 IMPROPERLY FORMED DATE: See Chapter 18 for instructions on How
+to Enter a Date.
+.qi
+.sp2
+.ce
+PRINT ACCOUNTS	(PYACTPRT.INT)
+.sp
+.in6
+.ti-6
+PY961 INVALID RESPONSE
+.sp
+.ti-6
+PY962 PROGRAM NOT RUN FROM MENU: See PY131.
+.sp
+.ti-6
+PY963 INVALID USE OF CONTROL CHARACTER
+.sp
+.ti-6
+PY964 UNEXPECTED END OF ACCOUNT FILE: The counter on the header record
+disagrees with the number of records actually on the file.  Determine the
+reason, then bring your backup account file up to date or create a new one.
+.sp
+.ti-6
+PY965 ACCOUNT FILE NOT FOUND: See PY582.
+.qi
+.sp3
+.cp12
+.ce
+QSORT ERROR MESSAGES
+.pp
+If the QSORT program encounters a problem during processing it will print
+a numbered error message to the system console and stop running.  The error
+message will contain a descriptive phrase that should usually be enough to
+indicate to the user what the problem is.  If more information is desired
+the message can be found in the following section by using the error number
+that preceeds each error message in the format:
+.sp
+.li
+	QSnn   msg
+.sp
+where nn is the error number and msg is the descriptive phrase.
+.sp
+.in5
+.ti-5
+QS01 MISSING OR INVALID SORT PARAMETERS:
+This message indicates one of the following:
+.in8
+a) The parameter file name was omitted from the command-line when
+the QSORT program was initiated.
+.br
+b) The parameter file name on the command-line was incorrectly
+typed, was too long, had embedded blanks, had the wrong drive
+specification or the file is not cataloged with the file type
+of 'SRT'.
+.br
+c) The key specification parameters are incorrectly formed.
+.sp
+.in5
+.ti-5
+QS02 OPEN ERROR:
+This message is issued if the QSORT attempts to open a file that does not
+exist on the specified drive.  Check the directory for the name of the
+input file.
+.sp
+.ti-5
+QS03 CLOSE ERROR:
+This message is issued if the QSORT program attempts to close a file that
+is not present.  If this error occurs it may be due to a system error or
+to a diskette being changed during the sort process.
+.sp
+.ti-5
+QS04 NO DIR SPACE:
+This message indicates that the program is attempting to create a new file
+and there is not enough room in the diskette directory.  The file being
+created may be the output file or one of the sort work files.  Remove any
+unnecessary files from the diskette.
+.sp
+.ti-5
+QS05 INPUT TOO LARGE:
+This message will be issued if the QSORT program cannot fit the input
+data into the maximum allowable number of work files or if the available
+memory is too small for the merging routine.
+.sp
+.ti-5
+QS06 not used
+.sp
+.ti-5
+QS07 OUT OF DISK SPACE:
+This message is issued if the sort program runs out of room on a disk write.
+This can occur on the output file or one of the sort work files.  Remove any
+unnecessary files from the diskette.
+.sp
+.ti-5
+QS08 FILE ERROR:
+This message indicates that CP/M cannot locate a directory entry for an output
+or work file.  This error only occurs on a write and is an indication of a
+possible serious system error.
+.sp
+.ti-5
+QS09 NO DIR SPACE:
+This message is similar to QS04 except that it will only occur when a file,
+either output or sort work, is being extended by the system.  A file must be
+extended every 16K bytes.
+.sp
+.ti-5
+QS10 not used:
+.sp
+.ti-5
+QS11 READ ERROR:
+This message indicates a serious program error and should never occur.	It
+means that the sort program is attempting to read past the end of file on
+an input or work file.
+.qi
+.he
+.bp
+.ce
+CHAPTER 35
+.sp
+.ce
+E R R O R    R E C O V E R Y
+.pp5
+When certain programs end abnormally they may leave a file with an
+inproper filetype.  Under normal conditions the filetypes of most
+files in the system should end with a 1 (one) to indicate the
+file is a valid current file.  Since the 1 is changed to a 0 (zero)
+when the file is being processed, and renamed back to 1 when
+processing is complete, you will never see a zero as the third digit
+unless the program ended before the rename took place, or the rename
+failed for some other reason.
+.he Appendix: Chapter 35
+.pp
+Before renaming the file with the CP/M REN command, you should try to
+learn why the program ended prematurely or the rename failed.  It is
+quite possible that the problem is hardware related, and it may even be
+due to a problem with the operating system.
+.pp
+To rename a file, give the REN command in the following form:
+.sp
+.li
+	    REN D:nnnnnnnn.ttt=D:nnnnnnnn.ttt
+.sp
+where D is a drive reference, nnnnnnnn an 8 character filename, and ttt
+the 3 character filetype.  The filename and type to the left of the
+equal sign is that to which the file on the right will be renamed.  For
+example, to rename PYPAY.100 to PYPAY.101 give the command,
+.sp
+.li
+	    REN B:PYPAY.101=B:PYPAY.100
+.sp
+if the PYPAY.100 file is on B and you want the PYPAP.101 file on B also.
+The rename cannot take place if a file with the same name as that
+to which the other file is to be renamed already exists on the
+designated drive.
+.pp
+Certain error conditions may arise because a disk or its directory is full,
+or the disk write-protected.  If the disk is write-protected, remove
+the write-protect tab or apply a write-enable tab (whichever is
+appropriate for your system).  Unless your disk contains many other files
+besides those used and created by the Payroll System, the disk directory
+should not be full.  However, since the number of files a directory can
+hold does vary, you should find out the capacity of the directory
+you are using.
+.pp
+To check to see if a disk is full, use the CP/M STAT command.  Although
+this command should be on the currently logged drive, it can give you
+the status of files on other drives.  For example, to find the number
+of bytes remaining on the B drive with STAT on the A drive, type
+the command,
+.sp
+.li
+	    STAT B:
+.sp
+See the CP/M Features and Facilities manual for complete instructions
+on how to use the STAT command.
+.pp
+If a header record is incorrect, you may be able to correct it using a file
+editor.  Check the file specifications for the necessary
+information.  Be certain to get the record length correct.  This
+recovery procedure is suggested only for those with substantial
+operating experience or data processing knowledge.  In any case,
+back up your files before attempting to modify them with an editor.
+For others, the best solution is to bring your backup files up to date.
+.sp2
+.ce
+USING SDCOPY
+.pp
+A utility program is distributed with every Payroll System that can be
+used to back up single density disks in a minimum amount of time.
+The program, called SDCOPY.COM, also verified the copied data to ensure
+the copy is identical to the original.
+.pp
+To execute the program, type SDCOPY at the CP/M prompt and follow with
+RETURN.  The program responds with the log-on message and "mount" message
+shown in figure 35.1.  The program is now stopped and either or both
+disks may be removed from their drives.  The disk to be copied (the "source"
+disk) must be
+place in drive A and the backup disk in drive B.  The "destination" disk
+in drive B may be a freshly formatted, blank disk, or any other disk.
+Any data or programs on the destination disk are irretrievably destroyed
+and replaced with the contents of the source disk.
+.sp
+.cp14
+.li
+    A>sdcopy rs1
+    SDCOPY VER:2.0
+    PUT SOURCE ON A, DESTINATION ON B, THEN TYPE RETURN  [return]
+
+    SUCCESSFUL COPY
+    PUT SOURCE ON A, DESTINATION ON B, THEN TYPE RETURN  [return]
+
+    SUCCESSFULL COPY
+    PUT SOURCE ON A, DESTINATION ON B, THEN TYPE RETURN  [ctrl-c]
+
+    INSERT SYSTEM DISKETTE, THEN TYPE RETURN TO REBOOT	 [return]
+    A>
+
+	 (Figure 35.1: The SDCOPY mount message)
+.pp
+When both the source and destination disks have been inserted, hit RETURN
+and the SDCOPY program will begin to copy.  When the copy is complete,
+you can repeat (if the repeat option has been specified, as above), or
+enter CTRL-C to end the program.  After entering CTRL-C, put
+the program disk in drive A, and hit RETURN. The system will then be in the
+normal operating mode awaiting further commands.  The new backup
+copy should be placed in a secure location.
+.pp
+The SDCOPY program offers several options.  Each option may be specified
+by typing a single charcter following the program name and separated by
+at least one space.  If an "R" is typed, the copy program repeats.  The
+program repeatedly displays the mount message (allowing both disks
+to be changed) until a CTRL-C is entered instead of the RETURN key.  This
+allows several disks to be conveniently copied at one time.
+.pp
+If an "S" is typed, the copy program stops copying at the first
+empty data "track".  For partially full disks this option can
+speed up program execution.  This option may only be used to copy source
+disks that have been "SYSGEN'ed".
+.pp
+Because the access times of various manufacturer's disk controllers vary,
+data is spread around the revolving disks at varying distances.  Consecutive
+items of data in a file may not necessarily occupy physically consecutive
+positions on the disk.	This is termed "skewing".  The SDCOPY program
+will run up to ten times faster if the skewing is properly set.  Nine
+differenct skews are possible and they are specified by typing a number
+from one to nine after the name SDCOPY.  Trial and error is the best
+way to find the optimum skewing for each manufacturer's drives.  A
+one is the best for Digital System and a four is best for Micromation.
+If no skewing number is used, the SDCOPY program defaults to four.
+.pp
+Any combination of the options may be specified for any run of
+SDCOPY.  The characters may be in any order and need not separated by
+spaces.
+.pp
+The SDCOPY program will only run on standard CP/M systems that are based
+on 8 inch, 3740 compatible floppy disks.  The program will not work
+on double density systems.  The disk drive manufacturer should have
+provided a full disk copy program with the hardware.
+.bp
+.mt7
+.mb7
+.po8
+.ll65
+.ig
+CHAPTER 36
+C O M M A N D	 S U M M A R Y
+.sp2
+.in8
+.ti-8
+ESCAPE: Ends the current function or program.
+.sp
+.ti-8
+RETURN: Enters data and advances to next request; accepts default value;
+moves cursor forward through DMS screen.
+.sp
+.ti-8
+CTRL-H: Backs cursor up one position, erasing character in that position.
+.sp
+.ti-8
+CTRL-R: Refreshes garbled DMS screen.
+.sp
+.ti-8
+CTRL-X: Cancels current addition or change, works only before ESCAPE has
+been pressed.
+.sp
+.ti-8
+CTRL-A: Add records to the file.
+.sp
+.ti-8
+CTRL-D: Delete record currently accessed.
+.sp
+.ti-8
+CTRL-S: Save records added or changed so far.
+.sp
+.ti-8
+CTRL-N: Get the next record on the file.
+.sp
+.ti-8
+CTRL-B: Get the previous record on the file; go back one request.
+.qi
+.sp3
+.po5
+.li
+	  TRANSACTION CODES			 TAX EXCLUSION CODES
+
+ 0  Rate0 Pay	       12  Sick Pay	      1  Subject to all taxes
+ 1  Rate1 Pay	       13  Vacation Pay 	 and percent deductions
+ 2  Rate2 Pay	       14  Other Excl. Pay
+ 3  Rate3 Pay	       15  Exp. Reimburse.    2  Subject to all taxes
+ 4  Rate4 Pay	       17  Other Pay		 and percent deductions
+ 5  Vacation Taken     18  Tips Reported	 except FICA
+ 6  Sick Leave Taken   27  Advance Repay.
+ 7  Comp Time Taken    28  FWT Add-On	      3  Subject to all taxes
+ 8  Comp Time Earned   29  SWT Add-On		 and percent deductions
+ 9  Bonus	       30  LWT Add-On		 except FWT, SWT, & LWT
+10  Tips Collected     31  FICA Add-On
+11  Advance	       50  Other Deds.	      4  Not subject to taxes or
+						 percent deductions.
+
+		TO CALL UP THE PAYROLL SYSTEM:
+
+   CRUN2 PY MM/DD/YY  [date optional, not accepted at first startup]
+.br
+.po8
+

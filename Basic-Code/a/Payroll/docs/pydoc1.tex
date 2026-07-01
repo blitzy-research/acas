@@ -1,0 +1,1875 @@
+.mt9
+.mb7
+.po8
+.ll65
+.ig
+CHAPTER 1
+U S I N G   T H E   D O C U M E N T A T I O N
+.sp2
+.pp5
+Before you operate the Payroll System, read this manual thoroughly
+and do the Practice Run outlined in Chapter 4.
+.he Introduction: Chapter 1
+.pp
+The SSG Payroll System documentation includes two manuals.  This
+manual is a Reference Manual which provides all the background information
+and instructions necessary for successful operation.  The other is a
+Specifications Manual which contains technical information on file accessing
+and file descriptions.	The Specifications Manual is available only
+with the purchase of the system itself.
+.pp
+The Reference Manual contains an Introduction, a Reference Section, an
+Operations Section, and an Appendix.  The Reference section deals with
+general concepts and procedures.  The Operations section gives
+additional specifics on running the programs. After you get a good
+understanding of the system from the Reference section, you
+should rarely have to refer to it.  From then on, most questions can
+be answered by referring to the Operations section.
+.pp
+While Applewood Computers is glad to provide support to
+registered owners of its products, please
+read the documentation carefully and check for hardware
+problems before giving us a call.
+.he
+.bp
+.ig
+CHAPTER 2
+F E A T U R E S    A N D    F A C I L I T I E S
+.sp2
+.pp5
+The Applewood Computers Payroll System is a sophisticated payroll
+processing program for small and medium businesses.  A two drive
+single-density 8" system can handle about 50 employees paid monthly
+and submitting daily time cards.  The same microcomputer system can
+handle approximately 100 employees if only one or two pay transactions
+are needed each pay period.  A double-density system can handle about
+200-300 such employees.  Systems with more than two drives will
+be able to handle more employees.
+.he Introduction: Chapter 2
+.pp
+The Payroll System calculates deductions from employee wages
+for Federal income tax withholding, Social Security tax (FICA), State Disablity
+Insurance (SDI), and state and local income tax withholding for many state
+and local governments.	The Payroll System also calculates the employer's
+FICA, FUTA (Federal Unemployment Tax), and SUI (State Unemployment
+Insurance) contributions.  Advance Earned Income Credit (EIC) payments
+and reduction in payments for earnings over the EIC limit are also
+handled by the system.
+.pp
+In addition to the standard deductions listed above, you can define
+up to five system-wide earnings or deductions and up to three employee
+specific earnings or deductions.  Of course any employee can be exempted
+from the standard and system-wide earnings and deductions categories.  User
+defined earnings and deductions can be a flat amount each pay period,
+or a percentage of the employee's gross taxable pay.  You can limit
+the amount that can be earned or deducted in one year, or the amount
+earned or deducted can be without limit.  The user-defined earnings
+categories can be marked as subject to all taxes and percentage based
+deductions, subject to all except FICA, subject to all except Federal,
+state, and local taxes, or not subject to any taxes or percentage based
+deductions.
+.pp
+Provision has been made for entering an employee's head of household
+status and special withholding allowances for California tax purposes.
+.pp
+The Payroll System supports additional Federal, state, local, and FICA
+withholding if requested by an employee.
+.pp
+The system handles tips collected by the employer, and tips
+reported to but not collected by the employer.	The Payroll System
+exempts the employer from FICA tax on tips, and taxes the employee
+correctly for them.
+.pp
+The Payroll System permits three fully taxable pay rates, plus one
+rate with a tax status that may be defined differently for different employees.
+These normally
+correspond to regular pay, overtime pay, special overtime, and
+commission, piecework,pay, or other pay, though the descriptive name may be any
+you desire.
+.pp
+The system can generate recurring pay amounts automatically (with a
+simple override procedure), and calculate overtime pay automatically.
+The Payroll System calculates vacation and sick leave
+earned, and provides for comp time entry.
+.pp
+The Payroll System handles employee bonuses,
+expense reimbursement, salary advances and repayments, sick pay, and
+vacation pay.
+.pp
+It supports weekly, bi-weekly, monthly, and semi-monthly pay schedules for
+employees classified as active, on leave, or terminated.
+.pp
+It will print paychecks automatically, and if the option is requested,
+void checks over a stated maximum amount.  As an added safety feature,
+the Payroll System gives an error message when an employee
+receives payment in
+excess of the maximum you set for him or her.
+.pp
+You can distribute an employee's total cost to the company to up
+to five ledger accounts.  The system is completely
+auditable, and interfaces
+with the Structued Systems Group General Ledger.
+.pp
+The Payroll System prints 941 government reporting
+forms every quarter, and 940 and W-2 forms
+at the end of every year.
+.pp
+It produces payroll transaction working and audit proof reports, a
+Payroll Journal that details earnings and deduction information by
+employee (with a company wide and ledger account summary),
+and a paycheck register from
+which checks may be prepared manually if desired.  The system prints
+out the master employee file in a full or short form for some
+or all employees, and also prints an employee history report
+which presents summarized quarter and year-to-date pay information.
+You can order a report of vacation, sick leave, and comp time
+accumulated and used, as well as
+a printout of the accounts currently used by the Payroll System.
+.pp
+Structured Systems' Display Management System provides full screen
+formatting to make data entry a simple matter of filling in the blanks.
+Default values for all requests speed data entry and
+ensure successful processing.  The Applewood Computers Payroll
+System incorporates extensive processing safeguards and error
+checking routines, and employs our most advanced defensive programming
+techniques.
+.he
+.bp
+.ig
+CHAPTER 3
+S Y S T E M    O V E R V I E W
+.sp2
+.pp5
+The Applewood Computers Payroll System is "menu driven", which
+means you run the programs by choosing them from a "menu" list.
+The Payroll System employs SSG's Display Management System, a full-screen
+display formatting utility that enables you to
+view a number of requests and their current values at once.  To enter
+a new value or change an old one, you move the cursor to the desired
+field and type in the new response.  The Payroll System edits your
+responses to its requests and checks them carefully for reasonableness
+and validity, issuing descriptive error messages when necessary.
+.he Introduction: Chapter 3
+.pp
+The Payroll System breaks logically into three parts: System Setup,
+the Payroll Processing Cycle, and End of Period Processing.  Once
+installation of your Payroll System is complete, you will rarely need
+to take the System Setup steps again.  The Payroll
+Processing Cycle is repeated once for every pay period, and End of Period
+Processing once at the end of each quarter and year.
+.sp2
+.ce
+SYSTEM SETUP
+.pp
+Step One of System Setup is to make two copies of the "distribution"
+disks you received from SSG.  One set you use only for making
+additional copies, the other set is for actual processing.
+.pp
+Step Two of System Setup is to describe the characteristics of you
+CRT (console) device to the Display Management System.	For most
+this is a simple renaming process. Others may need to run the
+CRT definition program described in Chapter 33.
+.pp
+Step Three of System Setup involves erasing the unneeded state tax
+table files from disk, and renaming the tax table file
+for your local government.
+.pp
+Step Four of System Setup is called Parameter Entry.  During this
+step you tell the system what options you want to use, as well as
+other information to make processing more efficient.  At first time
+startup the Payroll System lets you choose between using a simpler
+"default" version of the system (Quick Parameter Entry),
+and doing further customization.
+If you choose the default Payroll System, the parameter requests you
+answer during system startup are limited in number.
+If you choose further customization at first time startup,
+the system presents you with the full range of parameter requests, and
+allows you to change account and deduction information.
+If all employees are paid on the same schedule, and if no additional
+accounts or special earnings or deduction categories are needed, the
+default system will be the simplest setup procedure.  Of course, you can
+always choose to do further customization later.
+.pp
+Step Five of System Setup is Account Entry.  If you choose the
+default Payroll System option at first time startup, no requests are
+issued and the program creates a default account file containing
+a cash, accrued liablity, salary expense, and accrued payroll
+cost liability account.
+If you choose further customization, you can add additional accounts,
+or change the existing default accounts.  If you select the General
+Ledger interface option, the Account Entry program prompts you to
+insert the disk with your GL chart of accounts file so it can
+verify the account information you enter.
+.pp
+Step Six of System Setup is called System-wide Earnings and Deduction
+Entry.	During this step you tell the system which of the standard
+deduction categories you wish to use (such as Federal, state, and
+local income tax, FICA, SDI, FUTA, EIC, etc.), and enter current
+rate and limit information.  During this step you can define up to
+five system-wide earnings or deductions to suit the specific needs of your
+company.  Individuals may of course be exempted.  If you choose
+the default Payroll System option, at first time
+startup the program creates a default Earnings and Deductions file and
+allows no entries or changes.  You can, however, make changes to the
+default file at a later time through the Deduction/Earning Entry program.
+.pp
+Step Seven of System Setup is called Employee Entry.  There are two
+programs to be run for this step.  The first is Employee Entry,
+which creates a record on the Employee Master and History
+files for each
+employee, and assigns him or her a number.  The second is the
+Employee Deduction/Earnings and Cost Distribution
+program, which you can use to
+exempt specific employees from system-wide earnings or deductions,
+establish up to three earings or deductions categories for a particular
+employee, and distribute an employee's cost to the company to up
+to five ledger accounts.
+.pp
+Step Eight of System Setup is Employee Pay Rate Entry.	During this step
+you enter an employee's pay frequency, set the four
+pay rates (usually regular, overtime, special overtime, and
+commission, although you can give them any description), and
+set the number of Normal Units (used for automatic computation of
+overtime), and set the number of Autogen Units (used for automatic generation
+of recurring pay amounts).  During this step you also enter the
+rate at which vacation and sick leave are accumulated, and the
+vacation, sick leave, and comp time accumulated and used so far in the
+current year.
+.pp
+When you set up your Payroll System in mid-year, a ninth setup step is
+required.  After the first eight steps are complete, you
+run the History Entry program to bring the earnings, deduction,
+and tax information up to date for each employee and for the company
+as a whole.
+It will not run after the first
+payroll application has taken place.
+See Chapter 7 and Chapter 19 for instructions.
+.sp2
+.ce
+PROCESSING CYCLE
+.pp
+When setup is complete, you can begin the processing cycle
+you repeat for each pay interval to calculate employee earnings and deductions,
+produce paychecks, and update historical information.  The Payroll System
+permits four pay intervals: weekly, bi-weekly, monthly, and semi-monthly.
+The weekly and bi-weekly schedules are called week-based intervals, and
+the monthly and semi-monthly schedules are called month-based intervals.
+Although pay transactions for all four intervals can be entered into
+the same pay transaction batch, the central program of the processing
+cycle, Apply Payroll, never processes week-based and month-based
+employees together.  When weekly and bi-weekly employees are
+on the system, the Apply Payroll program processes them together
+every two weeks.  When monthly and semi-monthly employees are on the system,
+the Apply Payroll program processes them together at the end of
+each month.
+.pp
+For the purpose of this overview, the Payroll Processing Cycle can be
+broken into four steps: enter pay transactions, sort the transaction file,
+apply payroll for the period, and print paychecks and/or the paycheck
+register.
+.pp
+The first step in the cycle, Enter Pay Transactions, is for entering
+employee time, vacation or sick leave used, comp time earned, tips
+reported or collected, bonuses, advances on pay, advance repayment,
+and other transactions.  A working proof report of the transactions entered
+so far is available at any time.  When transactions have been entered for
+all the employees to be paid by the next payroll application, a final proof
+for the audit trail must be generated.
+.pp
+After making backup copies of your disks, you take the second step in
+the cycle, Sort the Transaction file.
+.pp
+The third step in the cycle is to Apply Payroll for the period.  The
+Apply Payroll program is the main processing program of the system.
+It separates
+transactions for week-based employees from those for month-based,
+and if both intervals for the interval base are not to be processed
+by this application (e.g., semi-monthly, but not monthly), it separates
+those that are to be processed from those that are not.  The Apply Payroll
+program produces a check file from which the paychecks and
+the Paycheck Register are produced, updates the Company History and
+Employee History files, and creates a General Ledger batch file if
+that option has been requested.  Before you can run the application program
+again, you must
+print a Payroll Journal report that presents detailed and summarized
+transaction information for each employee, a company payroll summary,
+and a ledger account summary.
+.pp
+The fourth step in the cycle is to actually print the pay checks and
+the Paycheck Register.	If you do not choose the automatic check
+printing option, you can use the Paycheck Register to manually prepare
+the paychecks.
+.sp2
+.ce
+END OF PERIOD PROCESSING
+.pp
+After the last payroll application of each quarter,
+and before the first payroll application
+of the next quarter, you must print the Federal 941 report
+(Employer's Quarterly
+Federal Tax Return), and run the
+Close for Quarter program to reset quarter to date statistical
+registers to zero.
+.pp
+After Closing for the fourth quarter, and before the first payroll application
+of the next year, you must print the Federal 940 report,
+print W-2 forms for all employees,
+and run the Close for the Year program to reset
+year to date statistical registers to zero.
+.he
+.bp
+.ig
+CHAPTER 4
+P R A C T I C E    R U N
+.sp2
+.pp5
+Before you begin this practice run, follow the procedure outlined in
+Chapter 19 for making copies of the SSG distribution disks, installing
+the Display Management System, and setting up the tax tables for your state
+and local government. It is assumed you are using state tax tables.  If you
+are not you must run the Deduction/Earning Entry program and set
+State Withholding Used to No before running
+the Apply Payroll program.
+Follow the Practice Run
+instructions carefully, making the
+entries exactly as directed.  When you are done,
+you may want to work with the practice run data for
+several processing cycles more before starting for real.
+.he Introduction: Chapter 4
+.pp
+Make sure you have the programs, tax files, and if needed, the CRT.DEF file
+on the proper disks.  If you are using the three disk configuration (Startup,
+Processing, and Data disk), you will need to replace the startup disk with
+the processing disk after you have completed Employee Rate Entry.
+If you are using the two disk configuration (a Program disk, and a Data disk),
+you will not need to change disks.
+See that CRUN2.COM (the CBASIC run time interpreter
+program) is on the currently logged disk drive, and make sure
+the disk you put in drive A has an operating system on it. Hit the RESET switch
+on your machine, and
+when the CP/M prompt character is showing, call up the Payroll System by
+typing:
+.sp
+.li
+		A>CRUN2 PY
+.sp
+After you press RETURN, the CRUN version number, the SSG copyright message,
+the Payroll System version number, and
+the serial number of your Payroll Package appear.
+.pp
+When the Payroll System menu appears select number 10, Quick Parameter Entry.
+Be sure to hit RETURN after each response.  If you key in the
+wrong character, give the command CTRL-H to back up and erase one character
+(hold down the CONTROL key and type the letter "H").
+.pp
+When the Parameter Entry screen appears, hit RETURN until the cursor is
+at the Company Name field.  If you go by, you can back up
+by giving the command CTRL-B.
+Type in the information
+below, hitting RETURN after each entry:
+.sp
+.li
+   NAME:       Universal Practice Company
+   ADDRESS 1:  2120 Main Street
+   ADDRESS 2:  [hit RETURN]
+   ADDRESS 3:  [hit RETURN]
+   CITY:       Anytown
+   STATE:      [enter the 2 character abbreviation of your state]
+   ZIP:        60609
+   PHONE:      (408)222-3322
+   GOVT ID NUMBERS:
+     FEDERAL:  01-0092688
+     STATE:    72-7228809
+     LOCAL:   [hit RETURN to skip the local ID number]
+.sp
+Make no other entries or changes.  Hit ESCAPE to end Parameter Entry.
+Answer the date request with 1/16/80.
+After RETURN,
+the system creates an account file, a deduction file, and
+a sort parameter file, and the menu returns.  Choose number 24, Employee
+Entry.
+.pp
+When the Employee Entry screen appears, type "RUN" to create the Employee
+Master and History files.
+When the cursor is waiting at the
+Employee Number field, give the command:
+.sp
+.li
+		CTRL-A
+.sp
+The program will display the first available employee number and
+move the cursor to the NAME field.  Type in the following information
+for the first employee:
+.sp
+.li
+   NAME:      Brian Boisterous
+   ADDRESS 1: 747 Airport Way
+   ADDRESS 2: Apartment 3B
+   CITY:      Anytown
+   STATE:     [your state]
+   ZIP:       60715
+   PHONE:     (408)635-2929
+   SOCIAL SECURITY NUMBER:     167-82-4906
+   BANK ACCOUNT NUMBER:        8705-05654
+   BIRTH DATE:		       11/21/46
+   SEX:        M
+   PENSION:    N
+   JOB CODE:   [hit RETURN]
+   START DATE: 7/4/75
+   EMPLOYMENT STATUS: [hit RETURN]
+   TERM. DATE: [hit RETURN]
+.sp
+Now press ESCAPE to begin the next employee.
+Remember to press RETURN after each response.  You can go back one
+field by CTRL-B, forward one field by RETURN, and erase an erroneous
+character by CTRL-H.  Enter the information below for the second employee.
+.sp
+.li
+   NAME:      Margaret Mellow
+   ADDRESS 1: 23 Lovely Lane
+   ADDRESS 2: [hit RETURN]
+   CITY:      Anytown
+   STATE:     [your state]
+   ZIP:       60715
+   PHONE:     (408)635-3030
+   SOCIAL SECURITY NUMBER:     916-22-1066
+   BANK ACCOUNT NUMBER:        893-25619
+   BIRTH DATE:		       4/1/51
+   SEX:        F
+   PENSION:    Y
+   JOB CODE:   [hit RETURN]
+   START DATE: 12/15/74
+   EMPLOYMENT STATUS:  [hit RETURN]
+   TERM. DATE: [hit RETURN]
+.sp
+Press ESCAPE when the entries are correct.  Hit ESCAPE again
+to leave the add-records mode, and then a third time
+to end the Employee Entry program.  When the menu returns select number
+26, Employee Pay Rate Entry (we will skip the Employee Ded/Earn and Cost Dist.
+program since the default values are fine for now).  When the Employee Pay
+Rate Entry screen appears with the cursor waiting at the Employee Number
+field, give the command:
+.sp
+.li
+		CTRL-N
+.sp
+to bring up the employee record for the first employee you entered.
+Press RETURN to begin entering information for the employee.
+Leave the Pay Type set to Salaried (S) and the Pay Interval set to
+Semi-Monthly (S) by hitting RETURN at those requests.  Enter the following
+rate information (do not enter commas, do enter the decimal):
+.sp
+.li
+   REGULAR:	   1150.75
+   OVERTIME:	   [hit RETURN]
+   SPEC. OVERTIME: [hit RETURN]
+   COMMISSION:	   1
+.sp
+Answer the remaining requests with the following information:
+.sp
+.li
+   RATE4 TAX EXCLUS. TYPE: [hit RETURN]
+   AUTOGEN UNITS:	   1
+   NORMAL UNITS:	   [hit RETURN]
+   MAXIMUM PAY: 	   5000
+   MARITAL STATUS:	   [hit RETURN]
+   FEDERAL WH ALLOWANCES:  1
+   STATE   WH ALLOWANCES:  1
+   LOCAL   WH ALLOWANCES:  [hit RETURN]
+   EIC USED (Y OR N):	   [hit RETURN]
+.sp
+Leave the remaining values unchanged and hit ESCAPE to begin the
+next employee.	When the cursor is at the Employee Number field,
+give the CTRL-N command to get the next employee record.  After the
+name and social security number appear, press RETURN to begin entering
+the information below
+.sp
+.li
+   PAY TYPE:		   H
+   PAY INTERVAL:	   [hit RETURN]
+   REGULAR:		   5
+   OVERTIME:		   7.50
+   SPECIAL OVERTIME:	   10.00
+   COMMISSION:		   [hit RETURN]
+   RATE4 TAX EXCLUS. TYPE: [hit RETURN]
+   AUTOGEN UNITS:	   [hit RETURN]
+   NORMAL UNITS:	   80
+   MAXIMUM PAY: 	   [hit RETURN]
+   MARITAL STATUS:	   M
+   FEDERAL WH ALLOWANCES:  3
+   STATE   WH ALLOWANCES:  3
+   LOCAL   WH ALLOWANCES:  [hit RETURN]
+   EIC USED (Y OR N):	   [hit RETURN]
+.sp
+Make no more entries and press ESCAPE to end the employee.  Press
+ESCAPE once more to end the Employee Rate Entry program.  The setup steps
+are now complete. If you are using the three disk configuration, press ESCAPE
+once more to end the Payroll System.  Replace the Startup Disk in A with the
+Processing disk, give the command CTRL-C, and then call up the Payroll System
+by typing CRUN2 PY 1/16/80.
+.pp
+Assume that the first working period (January 1 to January 15) is now
+over.  Today is January 16. Today you will enter pay transactions, generate
+an audit proof report of the transactions, sort the batch of pay
+transactions, apply payroll for the period, print paychecks (on plain paper),
+and print the Paycheck Register.  To begin, select menu item number 1,
+Pay Transaction Entry.
+When the Pay Transaction Entry screen appears, hit RETURN at the Display
+Employee Names request.  When
+the cursor is waiting at the Record Number field, give the command:
+.sp
+.li
+		CTRL-A
+.sp
+to begin adding transactions to the file.  Type in the transaction information
+below, hitting ESCAPE to begin the next transaction. Do not enter the Record
+Number, it is presented for reference only.
+.sp
+.cp12
+.po11
+.li
+Record	Employee   Transaction		  Effective
+Number	 Number       Code	 Units	    Date
+
+  1	 00014	       8	   8	   [RETURN]  [ESCAPE]
+  2	[RETURN]      10	  43.55    [RETURN]  [ESCAPE]
+  3	[RETURN]      11	 200	   [RETURN]  [ESCAPE]
+  4	[RETURN]       4	 124.75    [RETURN]  [ESCAPE]
+  5	 00028	       0	  88	   [RETURN]  [ESCAPE]
+  6	[RETURN]       9	  50.00    [RETURN]  [ESCAPE]
+  7	[RETURN]      15	  13.12    [RETURN]  [ESCAPE]
+  8	[RETURN]      18	  22.12    [RETURN]  [ESCAPE]
+  9	[RETURN]      28	  25.12    [RETURN]  [ESCAPE]
+.po8
+.sp
+After entering in the last transaction, press ESCAPE to leave the add-records
+mode,
+and ESCAPE again to end the Pay Transaction
+Entry program and return to the menu.
+.pp
+Align the paper in your printer (132 column printer is assumed), choose
+menu item number 2, Pay Transaction Proof.
+If the paper should jam, hitting any key
+on the keyboard will end the printout.
+.pp
+When the printout is finished and the menu returns, choose menu item
+number 3, Pay Transaction Sort.  When the sort is complete the
+menu will return.
+.pp
+Choose menu item number 4, Apply Payroll, and when asked, type "YES"to
+confirm that the interval to be processed is correct.
+Give the Check Date as 1/16/80.  When asked, type "YES" to create the
+Company History file.
+The menu returns when processing is over.
+.pp
+Make sure the paper in your printer is aligned correctly, then print
+the Payroll Journal by choosing menu item number 5, Print Payroll
+Journal.
+.pp
+Now select the Print Paychecks program, menu item number 6.  Use
+plain paper. Answer N (NO) to the test form request.
+Give the starting check number as 1 and then press RETURN.
+.pp
+When the menu returns, choose item number 7, Print Check Register.
+.pp
+When the menu returns after the Check Register is printed,
+select number 20, Print Employee Master List.  When the printing option
+menu appears, select number 1, ALL EMPLOYEES.  Enter F at the request
+for the Full or Single line option.  When the printout ends and the print
+option menu returns, press ESCAPE to return to the main system menu.
+.pp
+Press ESCAPE at the system menu to end the Payroll System.
+Continue practicing with this data, or erase
+all files except the INT files, the COM files,
+the tax files, and the CRT.DEF file
+(if used) before starting for real.  When the CP/M prompt appears, remove
+the disks and store them safely away.
+.he
+.bp
+.ig
+CHAPTER 5
+G A T H E R I N G    Y O U R	M A T E R I A L S
+.sp2
+.pp5
+Having the information you need right at hand makes system setup an
+easy task.  After you read the documentation thoroughly, decide what
+Payroll System options you want to use and gather the
+data you'll need for each employee and for the company as a whole.
+.he Introduction: Chapter 5
+.pp
+Many of the requests in the Parameter Entry program are for "default"
+values.  Defaults are items of information used in the absence of other
+instructions (i.e., "in default").  The default values you set in
+Parameter Entry appear as the current values in the corresponding
+Employee Entry requests. In certain situations they can save a great
+deal of time.  For example, if many employees accumulate vacation at
+the same rate, you would enter that rate at the request for the default
+vacation rate, and thus avoid having to key in the same answer for
+many employees.  If you think carefully about the default values you
+enter, you might be able to save yourself a substantial amount
+of time and effort.  Specifically,
+the Parameter Entry program lets you set default values for:
+.sp
+.cp7
+.li
+	1. Vacation Rate
+	2. Sick Leave Rate
+	3. Pay Rates 1 through 4
+	4. Rate4 Tax Exclusion Type
+	5. Employee Pay Interval (e.g., weekly, monthly, etc.)
+	6. Pay Type (hourly or salaried)
+	7. Maximum Pay Factor (see Chapter 8)
+	8. Normal Units (see Chapter 8)
+.pp
+The Payroll System account file created automatically by the system contains
+four default accounts: cash, accrued liabilities, salary expense, and accrued
+payroll costs liability.  If you plan to add or change accounts, or if you've
+chosen the GL interface option, it will save time to have your chart
+of accounts handy also.
+.pp
+By far the best thing you can do to speed system setup along is to have the
+personnel information you need gathered in one place before you sit
+down to the machine.  In addition to having the information you need for
+setting up the system-wide earnings and deductions (such as FICA rate
+and limit, EIC rates, etc.), you'll want to have information on earnings
+and deductions that apply to specific employees (such as insurance or
+savings account deductions).
+.pp
+An Employee Data Collection Form is provided (Figure 5.1) to help you
+gather personnel data in a form that requires little or no adaptation
+to be entered into the Payroll System.	We suggest you make as many
+copies of this form as you need (plus a few extra), and fill one out
+for each employee.  If you're unsure how to answer any request, re-read
+the documentation for a full explanation.
+.he
+.bp
+.mt4
+.mb5
+.ce2
+Applewood Computers PAYROLL SYSTEM
+EMPLOYEE ENTRY DATA COLLECTION FORM
+.sp2
+.li
+Name:_____________________________________________________
+
+Address:__________________________________________________
+
+	__________________________________________________
+
+City:____________________  State:_____	Zipcode:__________
+
+Phone: (      ) ________-______________
+
+Social Security No.: ______-____-________
+
+Bank Account No. (optional) ______________________________
+
+Birthdate: ____/____/____     Sex: ______
+
+Pension Plan:	 Y   or  N   (circle one)
+
+Job Code (3 characters, optional):  __________
+
+Starting Date: ____/____/____
+
+Employment Status: Active  On Leave  Terminated  (circle one)
+
+Termination Date (if applicable): ____/____/____
+
+Distribution of Employee Cost to Company:
+
+	      Account No.	     Percentage
+
+	      __________	     __________
+
+	      __________	     __________
+
+	      __________	     __________
+
+	      __________	     __________
+
+	      __________	     __________
+			    Total:	 100 %
+
+Exempt From Withholding?
+
+	      Federal	     Y	  or   N     (circle one)
+	      FICA	     Y	  or   N     (circle one)
+	      State	     Y	  or   N     (circle one)
+	      SDI	     Y	  or   N     (circle one)
+	      Local	     Y	  or   N     (circle one)
+	      FUTA	     Y	  or   N     (circle one)
+	      SUI	     Y	  or   N     (circle one)
+.sp
+.ce
+(Figure 5.1)
+.bp
+.li
+Pay Type:    Hourly   Salaried	   (circle one)
+
+Pay Interval:  Semi-Monthly  Monthly  Weekly  Bi-Weekly  (circle one)
+
+Rate1 Pay Rate:  _______________
+
+Rate2 Pay Rate:  _______________
+
+Rate3 Pay Rate:  _______________
+
+Rate4 Pay Rate:  _______________  Rate4 Tax Exclusion Type:  ______
+
+Automatic Pay Units (see Chapter 11):  ____________
+
+Normal Pay Units (see Chapter 11):  ____________
+
+Maximum Pay (see Chapter 11):  ____________
+
+Marital Status:   Married    Single    (circle one)
+
+Withholding Allowances:   Federal __________
+
+			  State   __________
+
+			  Local   __________
+
+Advance Earned Income Credit Option Used?   Y	or   N	(circle one)
+
+State of California Special Information:
+	   Head of Household:	 Y   or   N   (circle one)
+	   Special Withholding Allowances: __________
+
+Vacation Rate:	_______________
+
+Vacation Accumulated This Year:  _______________
+
+Vacation Used This Year:  _______________
+
+Sick Leave Rate:  _______________
+
+Sick Leave Accumulated This Year:  _______________
+
+Sick Leave Used This Year:  _______________
+
+Comp Time Accumulated This Year:  _______________
+
+Comp Time Used This Year:  _______________
+.sp
+.ce
+(Figure 5.1)
+.he Introduction: Chapter 5
+.mt7
+.mb9
+.bp
+.ce
+MID-YEAR SETUP
+.pp5
+To bring the Payroll System up to date when starting in mid-year, you
+run the History Update program (see Chapters 7 and 19).  This program
+requests quarter and year to date earnings and deduction information
+for each employee, and for the company as a whole.  You also enter
+quarter and year to date information on company FICA, FUTA, and SUI
+costs, and quarter to date vacation earned and taken.  Finally, the
+program asks you to enter the amount and date of Federal
+tax deposits for the current quarter, and the amount of Federal,
+FICA, and FUTA tax payments for previous quarters.  See Chapter 32
+for reproductions of the entry screens.  An Employee History Update Data
+Collection Form is provided for your convenience.  Make as many copies
+of this form as needed and fill one out for each employee (Active,
+On Leave, and Terminated).
+.he
+.mt5
+.mb5
+.bp
+.ce3
+Applewood Computers PAYROLL SYSTEM
+EMPLOYEE HISTORY UPDATE DATA COLLECTION FORM
+Q U A R T E R	 T O	D A T E    I N F O R M A T I O N
+.sp2
+.li
+Employee Name: ______________________________  Number: ____________
+
+
+
+	  QUARTER TO DATE EARNINGS BY TAX CATEGORIES
+
+1. Income (subject to all taxes)		   ________________
+
+2. Other (subject to all but FWT, SWT, and LWT)    ________________
+
+3. No Taxes (income not subject to taxation)	   ________________
+
+4. FICA (income subject to FICA tax; not	   ________________
+   including tips)
+5. EIC CREDIT (advance EIC payment received)	   ________________
+
+6. TIPS (collected and reported)		   ________________
+
+7. NET (sum of checks written)			   ________________
+
+
+
+		QUARTER TO DATE TAXES WITHHELD
+
+       FEDERAL __________   STATE __________  LOCAL __________
+
+		 FICA __________  SDI __________
+
+
+
+	     QUARTER TO DATE EARNINGS AND DEDUCTIONS
+
+SYS1 ________ SYS2 ________ SYS3 ________ SYS4 ________ SYS5 ________
+
+	  EMP1 ___________  EMP2 ____________  EMP3 ____________
+
+OTHER DEDUCTIONS: _______________
+
+UNITS BY PAY TYPE: 1 _________	2 _________  3 _________  4 _________
+.sp3
+.ce
+(Figure 5.2)
+.bp
+.ce3
+Applewood Computers PAYROLL SYSTEM
+EMPLOYEE HISTORY UPDATE DATA COLLECTION FORM
+Y E A R    T O	  D A T E    I N F O R M A T I O N
+.sp2
+.li
+Employee Name: ______________________________  Number: ____________
+
+
+
+	    YEAR TO DATE EARNINGS BY TAX CATEGORIES
+
+1. Income (subject to all taxes)		   ________________
+
+2. Other (subject to all but FWT, SWT, and LWT)    ________________
+
+3. No Taxes (income not subject to taxation)	   ________________
+
+4. FICA (income subject to FICA tax; not	   ________________
+   including tips)
+5. EIC CREDIT (advance EIC payment received)	   ________________
+
+6. TIPS (collected and reported)		   ________________
+
+7. NET (sum of checks written)			   ________________
+
+
+
+		  YEAR TO DATE TAXES WITHHELD
+
+       FEDERAL __________   STATE __________  LOCAL __________
+
+		 FICA __________  SDI __________
+
+
+
+	      YEAR TO DATE EARNINGS AND DEDUCTIONS
+
+SYS1 ________ SYS2 ________ SYS3 ________ SYS4 ________ SYS5 ________
+
+	  EMP1 ___________  EMP2 ____________  EMP3 ____________
+
+OTHER DEDUCTIONS: _______________
+
+UNITS BY PAY TYPE: 1 _________	2 _________  3 _________  4 _________
+.sp3
+.ce
+(Figure 5.2)
+.he
+.mt7
+.mb9
+.bp
+.ig
+CHAPTER 6
+B A C K G R O U N D   I N F O R M A T I O N
+HARDWARE AND SOFTWARE REQUIREMENTS
+.sp2
+.pp5
+The SSG Payroll System
+will run on any 8080 or Z-80 based microcomputer
+under the control of the CP/M operating system or a CP/M compatible
+operating system.  Your microcomputer system must have the following
+minimum hardware and software components:
+.he Introduction: Chapter 6
+.pp
+1.  54K (kilobytes) of Random Access Memory (RAM)  (CP/M configured)
+.pp
+2.  Two floppy disk drives with a minimum capacity of 256K each,
+although additional disk capacity is recommended.
+.pp
+3.  A 132 column wide printer capable of skipping to the top of the next
+form in response to the ASCII form-feed character.
+.pp
+4.  For the console device, a CRT (Cathode Ray Tube) with a direct cursor
+addressing facility, a clear screen control, and
+minimum dimensions
+of 24 lines by 80 columns.
+.pp
+5.  System software including an operating system and the CBASIC2 language
+(version 2.04 or earlier).
+.pp
+Many microcomputers can be expanded or adapted to meet these requirements.
+Your local dealer can give you specific information about the hardware
+and software currently available.
+.sp2
+.cp6
+.ce
+THE CBASIC PROGRAMMING LANGUAGE
+.pp
+The programs that make up the Payroll System are written
+in a dialect of the BASIC programming language, called CBASIC2.
+CBASIC2 is a product of Software Systems; questions relating to
+the CBASIC2 language should be referred to Software Systems.
+.pp
+Applewood Computers distributes its programs in an intermediate
+file format (with the filetype INT), which must be further translated
+at run time by a
+facility of the CBASIC2 language called the "interpreter".  The interpreter's
+program name CRUN2 must precede any INT program for it to run.
+For example, to run the Payroll System you would enter CRUN2 PY.
+This run time interpreter comes as a part of the CBASIC2
+language package.
+With the CBASIC2 language you
+can also write programs yourself to extend the capabilities
+of the Payroll
+System, or to perform other data processing tasks.
+.sp2
+.cp6
+.ce
+THE CP/M OPERATING SYSTEM
+.pp
+An operating system is a set of instructions which enables the computer to,
+among other things, read and write information on floppy disks, move and
+maintain files, and provide for console communication.	The Payroll
+System
+employs the CP/M operating system, or one compatible with CP/M.  CP/M (TM) is a
+product of the Digital Research Company. Questions concerning the
+CP/M system specifically should be referred directly to that company.
+.pp
+CP/M comes documented by a series of six manuals.  The first of the six,
+"Features and Facilities", contains useful and important information
+relating to your operation of the Payroll System.  Be particularly
+careful to read and understand the DIR, ERA, REN, PIP, SYSGEN, TYPE,
+and STAT commands before using the Payroll System.
+.sp2
+.cp6
+.ce
+LOGGING ON
+.pp
+When you first turn your computer on, its random access memory (RAM) is
+empty.	Since in this state the computer can do nothing,
+a feature has been built into the microcomputer hardware that
+directs it to look on a predetermined section of a certain disk drive to find
+what to do next.  If everything is working normally, your computer should
+look on the outer two tracks of the A disk, find the CP/M operating system
+(if it has been SYSGEN'ed onto the disk; see the CP/M "Features and Facilities"
+manual for details on how this is done), load it into the RAM, and then
+display "A>" on the CRT, indicating it is ready to go to work.  This
+process is called "booting" since the computer is, in effect, lifting itself
+up by its own bootstraps.
+.pp
+The "A>" character is called a "prompt".  When the A> prompt appears on the
+screen, the operating system is said to be "logged on" to the A disk drive.
+While logged on to the A drive, you can call up programs or data files on that
+disk by typing the program name.
+To request a file on another disk (unless this is done automatically
+by the program you are using) first log on to that disk by keying in
+the drive name (the letter B on a two disk drive system), followed by a
+colon (:) and a carriage return, and then type the program name.
+(The carriage return is simply the RETURN
+key as it is on a typewriter; it is sometimes referred to as CR.)
+.sp
+.cp10
+.li
+	For example,
+.sp
+.li
+	   A>		   [system prompt]
+	   A>B: 	   [user enters B:, then RETURN]
+	   B>
+.sp
+To return to the A drive, enter:
+.sp
+.li
+	   B>A: 	   [user enters A:, then RETURN]
+	   A>
+.pp
+Whenever the prompt appears you are operating under the CP/M
+environment.  It goes away when you enter the Payroll System, and
+returns when you leave it.
+.sp2
+.ce
+FULL-DISK BACKUP
+.pp
+Caution and common sense dictate that whenever you purchase or receive a
+new program or system  on a floppy disk, you immediately copy it
+onto a fresh disk and store the original in a fire-proof, moisture-proof  box
+to protect it against inevitable human error and unpredictable system failure.
+With the original SSG distribution disk tucked safely away from the ravages of
+dirt, grease, magnet, and mangle, you avoid the cost and inconvenience of
+unnecessary replacement.  This warning applies doubly for disks
+containing data crucial
+to your operation.  Do not make the mistake of being "penny wise and pound
+foolish"; the disk itself is almost always worth far less than the information
+residing on it.
+.pp
+The manufacturer of your disk drives should have provided a full-disk copy
+program with the disk hardware.  If this program is not available, use the
+PIP command that comes with the CP/M operating system. To do so,
+place a properly formatted disk containing an
+operating system and the PIP program on
+drive A, and the Payroll System
+distribution disk (the disk you received from Applewood Computers)
+on drive B.  Hit the RESET
+switch on your machine and then type
+.sp
+.li
+	A>PIP A:=B:*.*[OV]
+.sp
+This will copy all the programs and files on B onto the A disk and verify
+that they were copied correctly.
+See the CP/M documentation
+for a complete description of the PIP program.
+.sp2
+.ce
+CHANGING DISKS BETWEEN PROGRAMS
+.pp
+Whenever you change disks between programs it is of the utmost importance
+that you enter a CONTROL-C character immediately after inserting the new disk.
+The
+CTRL-C character, which appears on your screen as ^C, informs the computer
+that a new disk with different data has been inserted.	This
+"re-booting" causes the CP/M system to reset its internal
+maps of disk usage, and prevents it from writing over (thus destroying)
+files which exist on the new disk.
+.pp
+To enter CTRL-C, or any CONTROL character, hold down the CONTROL key (CTRL
+or CTL on some machines), while at the same time pressing the letter C
+(either upper or lower case).
+.he
+.bp
+.ig
+CHAPTER 7
+S Y S T E M    S E T U P
+.sp2
+.pp5
+This chapter covers the initial steps in setting up your Payroll System:
+copying the distribution disks, setting up the
+Display Management System, and setting up the tax tables for your
+state and locality.  It also explains the sequence of events that occurs
+when the Payroll System is run for the first time, and the mid-year startup
+procedure.
+Chapter 8 deals with setting the Payroll System
+parameters.  Chapter 9 covers setting up the Payroll System accounts
+Chapter 10 covers establishing the earnings or deductions that
+are to apply to all employees (unless exempted), and
+changing the Federal Withholding Tax Table.  Chapter 11 treats the
+final setup steps, putting employees on the system, and entering their
+pay rate information.
+.he Reference: Chapter 7
+.pp
+The Payroll System is distributed on three diskettes.  One disk holds
+the programs needed for setting up your Payroll System (Startup Disk).
+One holds the
+programs needed for normal processing (Processing Disk).
+And one holds the state and local
+tax table files, the CRT definition files, the CRT definition program
+CRTDEF.INT, and the single density copy program SDCOPY.COM (see the
+Payroll System Specifications Manual).	This third distribution disk
+is called the Tax Disk, but the copy you make of that disk will be called
+the Data Disk once you begin.
+.pp
+The disks you receive are called the distribution disks.  They should
+never be used for normal processing.  Two sets of copies should be made
+of the distribution disks, and they should then be stored safely away.
+One set should be labelled the "System Master Disks" and used to make
+additional copies of the programs that may be needed.  The other set
+should be labelled "Work Disks" and may be used for actual processing.
+(See Figure 7.1).
+.pp
+If you are using double density disks (or otherwise have at least
+500K per disk), you need only two disks to run the Payroll System, a program
+disk and a data disk.
+One disk that size will hold all the programs (INT and COM files), plus
+PIP, STAT, and CRUN2.  If you are operating in single density, you will
+need three disks, a startup disk, a normal processing disk, and a data disk.
+Once CRUN2 is on the disks with the programs, PIP and STAT will most likely
+not fit on the disk also.  There should be no trouble fitting them on the
+data disk, however.
+.sp
+.cp34
+.li
+
+
+
+						     DISTRIBUTION DISKS
+
+
+      STARTUP DISK     PROCESSING DISK	   TAX DISK
+
+
+
+						     SYSTEM MASTER DISKS
+
+
+
+      STARTUP MASTER   PROCESSING MASTER  TAX MASTER
+
+
+
+							  WORK DISKS
+						     (3 DISK CONFIGURATION)
+
+
+      STARTUP WORK   PROCESSING WORK	PAYROLL DATA
+	 DISK		 DISK		    DISK
+
+
+							  WORK DISKS
+						     (2 DISK CONFIGURATION)
+
+
+
+      PAYROLL PROGRAM DISK	  PAYROLL DATA DISK
+
+		 (Figure 7.1: Disk Labelling)
+.pp
+If you are using the three disk configuration, you will need to change disks
+when the setup steps are complete (from the Startup disk to the Processing
+disk), and whenever you want to run a program that is not on the disk currently
+inserted.  The menu program is distributed on both the Startup and the
+Processing disks.  CRUN2 and CRT.DEF (if used) should be on both disks.
+.cp5
+.sp
+STARTUP DISK MUST BE IN DRIVE A FOR:
+.sp
+.in6
+.ti-3
+1. The Payroll System first time startup sequence.
+.sp
+.ti-3
+2. Adding, changing, or examining employee records (i.e., using Employee
+Entry, Employee Ded/Earn and Cost Dist., and Employee Pay Rate Entry).
+.sp
+.ti-3
+3. Adding, changing, or examining accounts (i.e., using Account Entry).
+.sp
+.ti-3
+4. Printing the Account List.
+.sp
+.ti-3
+5. Changing or examining Standard deduction information, the Federal
+Tax Table, and System-wide earnings and deductions.
+.sp
+.ti-3
+6. Changing or examining system parameters.
+.sp
+.ti-3
+7. Running the History Entry program.
+.qi
+.sp2
+.cp5
+.li
+THE PROCESSING DISK MUST BE IN DRIVE A FOR:
+.sp
+.in6
+.ti-3
+1. Pay Transaction Entry, Proof, and Sort.
+.sp
+.ti-3
+2. All print programs except Print the Account List.
+.sp
+.ti-3
+3. Payroll Application.
+.sp
+.ti-3
+4. End of Period Processing.
+.qi
+.pp
+After copying the distribution disks, you install the Display
+Management System.  Because CRT devices differ widely, the Display
+Management System (DMS) must know the characteristics of your CRT.
+The Display Management System comes ready to run on a Hazeltine 1500 CRT
+device.
+CRT definition (DEF) files are provided on the distribution disks for
+a number of other popular CRT's listed in Chapter 19.  If you
+have a CRT for which there is a CRT definition file, a simple
+renaming process is all that's needed. If not, you must run the program
+described in Chapter 33 to create one before you continue.
+.pp
+The next step is to set up the state and, if needed, local tax tables.
+Applewood Computers distributes the Payroll System with a number
+of state and local tax table files.  Each file is named to indicate
+which state or local government it is for.  Use the CP/M DIR command
+to locate the file for your state and erase the other state files.  To
+set up the local tax table, you locate the one for your local government
+and rename it according to the instructions in Chapter 19.
+.pp
+Normally when you call up the Payroll System a menu appears from which
+you choose the programs to run.  However, the first time the
+system is run you are automatically taken
+through a sequence of startup steps before the full range of menu options
+is made available to you.
+After you give the command to call
+up the Payroll System (CRUN2 PY), the CRUN version number appears
+at the top of your screen, followed by the SSG copyright message,
+the Payroll System version number, and the serial number of your Payroll System
+package.
+The system menu then appears with a message prompting you to choose
+one of the two parameter entry programs (Quick Parameter Entry or Parameter
+Entry),
+depending on whether you want to use
+the default parameter values, accounts, and systemwide deductions,
+or customize the system further by answering
+additional parameter requests and entering other account and deduction
+information.
+Read the chapter on Setting System
+Parameters (Chapter 8) and note the default values presented beside
+each request to decide which startup option to choose.	Read also the
+chapters on the Account File (Chapter 9) and System-wide Earnings and
+Deductions (Chapter 10), noting the defaults created by the programs
+described in those chapters.
+.pp
+If you choose
+the default Payroll System (Quick Parameter Entry),
+after you answer the limited number
+of parameter requests, the system goes on to create the default
+account file, the default system-wide deduction and earnings file,
+and the sort parameter file.  Later, if you need to, you can change
+the default values in these files by choosing the appropriate program
+from the menu and making the entries in the normal way.  (Default values
+are values used in the absence of other instructions, i.e., "in default".)
+.pp
+If you do not
+use the default Payroll System, after you answer all the parameter requests,
+the system goes on to the Account Entry program, and then the System
+Deduction Entry program where you can make entries or changes.
+After these steps, it creates the sort parameter file used by the sorting
+program (there are no requests), and then presents you with the system
+menu, from which you can run the final setup programs.
+.sp2
+.cp6
+.ce
+MID-YEAR SETUP PROCEDURE
+.pp5
+The accuracy of many of the Payroll System reports (especially the
+government reporting forms), and the correctness of certain earning
+and deduction calculations (for example FICA, which applies only to
+a limited part of an employee's earnings), depend on historical
+information you enter through the History Entry program distributed
+with the Payroll System.
+.pp
+The History Entry program should be run after the Employee Pay
+Rate Entry setup step is complete.  It can be run as many times as
+necessary before the first run of the Apply Payroll program.  After
+that point, the program is automatically disabled to protect the
+audit trail.  The program is run from the menu.
+.pp
+Quarter to date and year to date earnings, withholding, and deduction
+information must be entered for each employee, active, on leave, and
+terminated.  The Employee History Update Data Collection Form
+in Chapter 5 is provided for your convenience.	Reproductions of the
+entry screens can be found in Chapter 32.  The program requests the
+following information for each employee, totals it, and then presents
+the company-wide totals for modification.  The year to date requests
+have been omitted since they
+are identical to the quarter to date requests.
+.sp
+QUARTER TO DATE EARNINGS BY TAX CATEGORIES:
+.sp
+.in8
+.ti-8
+INCOME: This request is for income
+subject to all taxes earned
+in the current quarter (FWT, SWT, LWT, FICA, FUTA, SUI, SDI).
+.sp
+.ti-8
+OTHER:	This request is for income subject to all except Federal, state, and
+local income taxes
+earned in the current quarter (FICA, SDI, FUTA, SUI).
+.sp
+.ti-8
+NO TAXES: This request is for income not subject to taxation received
+in the current quarter.
+.sp
+.ti-8
+FICA:	This request is for income subject to FICA tax earned in the
+current quarter. Do not include tips since they are handled separately.
+.sp
+.ti-8
+EIC CREDIT: This request is for the amount of advance Earned Income
+Credit payments received so far in the current quarter.
+.sp
+.ti-8
+TIPS:	This request is for the amount of tips collected (by the employer)
+and reported (by the employee to the employer) so far in the current quarter.
+.sp
+.ti-8
+NET:	This request is for the net pay received so far in the current
+quarter.  This is normally the sum of checks written to the employee.
+.qi
+.sp
+QUARTER TO DATE TAXES WITHHELD
+.sp
+.in8
+.ti-8
+FEDERAL: Enter the amount of Federal Taxes withheld from the employee
+so far in the current quarter.
+.sp
+.ti-8
+STATE:	Enter the amount of state taxes withheld from the employee so far
+in the current quarter.
+.sp
+.ti-8
+LOCAL:	Enter the amount of local taxes withheld from the employee so far
+in the current quarter.
+.qi
+.sp
+QUARTER TO DATE EARNINGS AND DEDUCTIONS
+.sp
+.in8
+.ti-8
+SYS1 THROUGH SYS5: If you have established systemwide earnings or deduction
+categories through the Deduction/Earning Entry program, these requests
+let you enter the amounts paid or withheld so far in the current quarter
+for each employee.
+.sp
+.ti-8
+EMP1 THROUGH EMP3: If you have established employee specific earnings or
+deduction categories through the Ded/Earn and Cost Distribution
+program, these
+requests allow you to enter the amounts paid or withheld so far in the
+current quarter for each employee.
+.sp
+.ti-8
+OTHER DEDUCTIONS: If you have made any other deductions from an employee's
+wages enter the amount deducted so far in the current quarter.
+.sp
+.ti-8
+UNITS BY PAY TYPE 1 THROUGH 4: Enter the number of pay units each
+employee has accumulated so far in the current quarter.  For example,
+if an employee has worked 120 regular hours and 20 overtime hours, you
+would enter 120 for Rate (Type) 1, and 20 for Rate2. The information you
+enter has no effect on calculations or government reports.  It is
+for informational purposes only.
+.qi
+.sp2
+.pp
+After you answer the requests described above for quarter and year
+to date information for each employee, the program updates each record
+on the Employee History file. It then totals the information
+to arrive at a company-wide total, which it presents for modification when
+you choose Update Employee History Totals from the "mini" menu that appears
+when you are done entering information for each employee.
+.pp
+A second menu choice, Update Company Liabilities, Vacation, Etc., lets
+you enter the amount of the FICA, FUTA, and SUI liabilities incurred
+by the company (NOT withheld from wages)
+in the current quarter and year.  Since the vacation,
+sick leave, and comp time information you entered through the Employee
+Rate Entry program is for the year to date, this entry screen lets you enter
+company-wide quarter to date information if desired.  The year to date
+vacation, sick leave, and comp time information is totaled from each
+employee record and presented also.  You can modify this information
+if necessary.
+.pp
+A third menu choice, Update Payments History, lets you enter the amount
+and date of the Federal tax payments you have made so far in the
+current quarter.  The total Federal, FICA, and FUTA tax payments you have
+made in each of the quarters so far during the year are also requested.
+.he
+.bp
+.ig
+CHAPTER 8
+SETTING SYSTEM PARAMETERS
+.sp2
+.pp5
+Parameters are items of information that tell the Payroll System
+what options you want to exercise, where it can find certain files it
+needs during processing, and certain other things it needs to know to operate
+efficiently.  Because not all users have the same needs, you can adapt
+the Payroll System to your requirements by changing parameter (pronounced
+pe-'ram-et-er) values,
+rather than by expensive and complex reprogramming.
+.he Reference: Chapter 8
+.pp
+Payroll System users fall into one of two classes.  Some can
+use the default
+parameter values that come with the Payroll System, and will only need
+to answer a few parameter requests (for their company name, ID
+numbers, etc.). Others may want to
+customize the system further by answering additional parameter requests
+and by changing account and deduction information.
+To decide which class you belong to, read the description of each
+parameter request
+presented in this chapter and note whether the default value
+is adequate for your needs.  If you choose the default Payroll system
+at startup (Quick Parameter Entry), you
+need only answer the first set of requests presented below
+(Parameter Requests that Must Be Answered In Any Case).
+Whether you use the "default" Payroll System,
+or choose to customize it further, the first set of parameter requests
+shown below must be answered in any case.  Of course, if your needs change
+you can change the parameter values later through the regular Parameter
+Entry program.
+.sp
+.ce
+PARAMETER REQUESTS THAT MUST BE ANSWERED IN ANY CASE
+.in5
+.sp
+.ti-5
+PAY INTERVAL USED [S]: You must use at least one of the four possible
+pay schedules: weekly (W), bi-weekly (B), monthly (M), or semi-monthly (S).
+The default Payroll System allows only one pay interval.  If you need more,
+you should choose the option to do further customization.
+.sp
+.ti-5
+DATE FORM: [MM/DD/YY]: State whether you want to enter dates in
+the American (MM/DD/YY)
+or international date format (DD/MM/YY).
+.sp
+.ti-5
+ENDING DAY OF LAST PERIOD [12/31/79]: If only one pay interval is used,
+you would enter the last day of the last working period.  The Payroll
+System adds one day to arrive at the first day of the new period, and
+the appropriate number of days to arrive at the last day. The ending day
+for the monthly interval must be the last day of the month.  The ending
+day for the semi-monthly interval must be the 15th of the month, or the
+last day of the month.	The last day of the last period for weekly or
+bi-weekly intervals can be any you desire.
+.sp
+.ti-5
+LAST QUARTER ENDED [4]: State which quarter was the last quarter ended.
+.sp
+.ti-5
+CURRENT YEAR [1980]: Enter the current year.
+.qi
+.sp
+.li
+FEDERAL ID NUMBER:
+STATE	ID NUMBER:
+LOCAL	ID NUMBER:
+.in5
+.sp
+.ti-5
+LINES PER PAGE [ 66]: Enter the length in lines. The print programs
+assume 132 column wide paper.
+.sp
+.ti-5
+DEBUGGING AID [ No]: Leave set to No.
+.sp
+.ti-5
+CONSOLE BELL [Yes]: When set to Yes, the console alarm sounds if
+an error occurs.
+.sp
+.ti-5
+COMPANY NAME: This field allows 60 characters, but since the W-2 forms
+permit only 30 characters and the
+941 form accepts only 43 characters, an abbreviated version may be
+preferable.  If the company name exceeds these limits, the excess is
+truncated.
+.qi
+.sp
+.li
+ADDRESS: Three lines are provided for the street address.
+CITY:
+STATE:
+ZIP:
+PHONE:
+.sp2
+.ce2
+ADDITIONAL REQUESTS YOU ANSWER
+IF YOU DO NOT USE THE DEFAULT PAYROLL SYSTEM
+.sp
+.li
+PAY INTERVAL USAGE
+.in5
+.ti-5
+SEMI-MONTHLY [Y] END OF LAST SEMI-MONTHLY PAY PERIOD [12/31/79]:
+If any employees are paid on a semi-monthly schedule, you would state
+that the semi-monthly interval is to be used, and enter the last day
+of the previous semi-monthly pay period, either the 15th of the month or
+the last day of the month.
+.sp
+.ti-5
+MONTHLY [N] END OF LAST MONTHLY PAY PERIOD [12/31/79]:	If any employees
+are paid once a month, you would state that the monthly interval is to
+be used, and enter the last day of the previous month.
+.sp
+.ti-5
+BIWEEKLY [N] END OF LAST BIWEEKLY PAY PERIOD [12/31/79]: If any employees
+are paid every two weeks, you would state that the biweekly interval is
+to be used, and enter the last day of the previous biweekly pay period.
+This can be any day you want, although if both the bi-weekly and the weekly
+intervals are used, the last day of the last period should be entered so
+they are the same every two weeks.
+.sp
+.ti-5
+WEEKLY [N] END OF LAST WEEKLY PAY PERIOD [12/31/79]: If any employees are
+paid weekly, you would state that the weekly interval is to be used, and
+enter the last day of the previous weekly pay period.
+.qi
+.sp2
+DEFAULT EMPLOYEE VALUES: Default values are values used in the absence of other
+instructions or information.  The Default Employee Values are the values
+that will appear as the current answers to the requests issued by the three
+employee entry programs (see Chapter 11).
+They are intended to speed system setup
+by making it unnecessary to type in the same answers over and over for
+many employees.  If, for example, most employees accumulate vacation at the
+same rate each pay period, you would enter that rate as the default.  It
+is faster to change the vacation rate for the few exceptions than to enter
+the same value for the many who accumulate vacation at the same rate.
+.in5
+.sp
+.ti-5
+VACATION RATE [xxxxx0.42]: This is the default rate in days or hours
+(use one or
+the other consistently to avoid confusion) an employee accumulates vacation
+each pay period.  For example, if an employee paid semi-monthly
+receives 10 days
+per year, he or she would accumulate vacation at a rate of .42 days per
+period (10 days/24 pay periods = .42 days per month).
+.sp
+.ti-5
+SICK LEAVE RATE [xxxxx0.21]: This is the default rate in days or hours at which
+an employee
+accumulates sick leave each pay period.  For example, if an employee paid
+on a semi-monthly schedule receives 5 days per year, he or she would
+accumulate sick leave at a rate of .21 days per pay period (5 days/24
+pay periods = .21 days per period).
+.sp
+.ti-5
+RATE1 DESCRIPTIVE NAME [REGULARxxxxxxxx] AND DEFAULT VALUE [xxxxx1.00]:
+This is the first of four user-definable pay rate types.  The four rates
+usually take the descriptive names shown below (these are the default
+descriptive names), but you can change them to meet your particular needs.
+.sp
+.li
+	     RATE1 -- Regular Pay
+	     RATE2 -- Overtime Pay
+	     RATE3 -- Special Overtime
+	     RATE4 -- Commission Pay
+.sp
+Although the RATE1 through RATE4 pay rates can be set for each employee
+individually, the RATE2 and RATE3 default values are multiples of the
+default RATE1 amount.  For example, default RATE2 can
+be established as 1.5 times
+RATE1, which would correspond to the usual practice of paying employees
+one and one-half times their regular rate for overtime or other special
+working conditions.
+.sp
+.ti-5
+RATE2 DESCRIPTIVE NAME [OVERTIMExxxxxxx] AND FACTOR [xxxxx1.50]: The
+RATE2 default value is the result of multiplying the RATE1 default amount
+times the RATE2 FACTOR.  For example, if the RATE1 default value is $5.00
+per hour, and the RATE2 FACTOR is 1.5, the RATE2 default value would be
+$7.50 per hour.  Of course, you can change the RATE2 value for any employee.
+.sp
+.ti-5
+RATE3 DESCRIPTIVE NAME [SPEC. OVERTIMEx] AND FACTOR [xxxxx2.00]: The RATE3
+default value is the result of multiplying the RATE1 default amount times
+the RATE3 FACTOR.  For example, if the RATE1 default value is $5.00 per hour,
+and the RATE3 FACTOR is 2.0, the RATE3 default value would be $10.00
+per hour.  Of course, you can change the RATE3 value for any employee.
+.sp
+.ti-5
+RATE4 DESCRIPTIVE NAME [COMMISSIONxxxxx] AND EXCLUSION TYPE [1]: RATE1,
+RATE2, and RATE3 pay transactions are subject to all taxes and deductions
+that apply to the employee for whom they are entered.  The tax status
+of RATE4 transactions, however, can be defined by the user for each employee
+according to a
+tax exclusion code (see Chapter 20). The Exclusion Type you enter here is
+a default value that can be changed for any employee.
+Exclusion type 1 means Rate4 earnings
+are subject to all taxes and deductions.
+.sp
+.ti-5
+DEFAULT PAY INTERVAL [S]: Enter the pay schedule by which most employees
+are paid.  This default value is intended to speed the Employee Rate
+Entry setup step.  If most employees are paid on a semi-monthly schedule
+you would give that as the Default Pay Interval.  The pay interval for
+employees not paid semi-monthly would have to be changed to the appropriate
+interval individually.
+.sp
+.ti-5
+DEFAULT PAY TYPE (HOURLY OR SALARIED) [S]: If most employees are salaried,
+you would set the default pay type to Salaried.  Again, this is intended
+as a convenience.  The Pay Type you enter for an employee only affects
+certain report printing procedures.  Don't worry if an employee does not
+fit neatly into one or the other classification.
+.sp
+.ti-5
+MAX PAY FACTOR [xxxxx3.00]: The number you enter at this request, multiplied
+by the RATE1 amount produces the maximum amount of pay an employee can
+receive without an error message being issued when the Apply Payroll and
+Print Payroll Journal programs are run.
+It serves as a check to make sure no employee is paid an
+inordinate amount (due to any kind of error) in a given pay period.  For
+example, entering 2.0 as the MAX PAY FACTOR would ensure that any employee
+paid over twice the normal amount would be brought to the attention of the
+operator.
+The maximum amount a particular employee can receive appears in the MAX PAY
+field in the Employee Rate Entry program, and of course can be changed
+for any employee.
+.sp
+.ti-5
+NORMAL UNITS [xxxxx0.00]: This is the default value for the normal number of
+pay units an employee accumulates in one pay period.  Most hourly employees
+who are paid weekly work 40 hours a week, and thus would have 40 normal
+units.	The same workers, if paid every two weeks would have 80 normal
+units.	The normal number of pay units for salaried employees is usually 1
+(one) per period.  This parameter value is only a default and is intended
+to speed up the entry of employee pay rate information in the Employee Pay
+Rate Entry program.  It can be changed for any employee.
+.pp
+A special RATE0 transaction can be entered through the Pay Transaction
+Entry program that causes the Payroll System to calculate any pay units
+over the Normal Units figure at RATE2.	Units up to the Normal Units amount
+are paid at RATE1.  Thus, if an hourly employee normally works a 40 hour
+week, and is paid at RATE2 for hours worked over the normal 40 hours,
+a RATE0 transaction for 48 units would cause the employee to be
+paid at RATE1 for the first 40 hours, and RATE2 (the overtime rate) for
+the last 8 hours.
+.qi
+.sp2
+DISK DRIVE ALLOCATION: The data and parameter files created and used by
+the Payroll System vary in size depending on several factors.  Some files
+store information used to control payroll processing (such as the Parameter,
+Tax Table, Account, and System Deduction files), or summarized
+historical information for printing government forms or Payroll System
+reports (such as the Company History or Employee History files).  These
+files (except for the Employee History file)
+are generally quite small.  Other files, such as the Employee Master,
+Pay Transaction Batch, Pay Detail, and Pay Check files may vary in size
+depending on the number of employees on the system or the number of
+pay transactions per employee per pay period.  For example, if a pay
+transaction is entered daily for hourly employees who are paid once
+a month, the transaction batch file may grow quite large.  Each
+record on the Employee Master file is over 700 bytes long and with many
+employees, the file can grow large also.
+.pp
+During or after certain
+processing steps more than one version
+of a file may exist at the same time.
+During the Apply Payroll step, for example, two versions of the Pay
+Detail file, an old version and a new version, exist simultaneously.
+When you sort the Pay Transaction batch file, both the sorted and unsorted
+versions exist on the disk together until after the Apply Payroll
+program has been run to completion.  An old version and a current version
+of the Check file exit simultaneously also.
+If your disk storage capacity is
+limited and you expect disk space to be critical, you should monitor
+the size of your files (using the CP/M STAT command) throughout the pay
+period so you can make adjustments well before payday arrives.	If you
+have a dual-drive single density microcomputer system and find yourself
+cramped for disk space, you might seriously consider going to a
+double density system, or adding additional disk drives. Otherwise
+you may find yourself needing to pull files off the data disk to create
+more space.
+.pp
+The Payroll System creates and expects to find two parameter files
+(PYPR1.101 and PYPR2.101)
+on the drive you name as the SYSTEM FILE DRIVE the first time you run the
+Payroll System.  (If you choose the default Payroll System option, drive B
+is assumed and no request issued.)
+The SYSTEM FILE DRIVE must be either drive A or drive B.
+Most users should make drive B the SYSTEM FILE DRIVE.  The CRT.DEF file,
+if used, should always reside on the currently logged drive.  Most of the files
+listed below can be assigned to any drive, although the vast majority
+of users should assign them to drive B.  Users with more than two
+disk drives may want to assign the Pay Transaction batch file or the
+Employee Master and History files
+to drive C or D if the number of transactions or
+employees is large.
+.in5
+.sp
+.ti-5
+TAX TABLES [B]: These files contain the state or local tax tables.  Each
+tax file consists of one record and is thus very small.
+.sp
+.ti-5
+SYSTEM DED/EARN [B] (PYDED.101): This is a very
+small file containing system-wide
+earnings and deduction information and the Federal tax table.  It is
+created by the Deduction/Earning Entry program.
+.sp
+.ti-5
+COMPANY HISTORY [B] (PYCOH.101): This is a small file
+created and updated by the
+Apply Payroll program.	It holds quarter and year to date gross
+pay, direct payroll expenses, and tax withholding statistics.
+.sp
+.ti-5
+PAYROLL ACCOUNTS [B] (PYACT.101): This file holds the account
+names and numbers that
+correspond to the Payroll System Account Reference Numbers.  If you select
+the General Ledger interface option, it cross-references the Payroll
+System Account Reference Numbers with the SSG General Ledger account
+numbers.  It is a small file, with one record for each account.
+.sp
+.ti-5
+EMPLOYEE MASTER [B] (PYEMP.101): This file holds information for calculating
+employee earnings and deductions, as well as descriptive information
+used by the various Payroll System printing programs.  There is one
+very larger record (over 700 bytes) for each employee.	The file may be
+large if many employees are on the system.
+.sp
+.ti-5
+EMPLOYEE HISTORY [B] (PYHIS.101): This file contains summarized
+quarter and year to
+date information on employee earnings and deductions.  It is created and
+added to by the Employee Entry and Employee Deduction/Earnings and Cost
+Distribution
+programs.  The Apply Payroll program updates the information on the
+file.  There is one record for each employee.  The file may be large
+with many employees on the system. The Employee History and Employee Master
+file always exist at the same time and contain the same number of records
+under normal circumstances.
+.sp
+.ti-5
+TRANSACTION BATCH [B] (PYHRS.001): This temporary file holds the batch of pay
+transactions to be processed by the next run of the Apply Payroll
+program.  After sorting, a sorted version (PYHRS.101)
+and an unsorted version (PYHRS.001) of the
+file exist on the same disk.
+The Payroll Application program completely consumes the sorted version, and
+erases the unsorted version at the end of processing.
+The file may be large or small, depending on the number of
+employees and the number of transactions per pay period.
+.sp
+.ti-5
+PAY CHECK [B] (PYCHK.101): The Pay Check file is
+created by the Apply Payroll
+program.  Each record contains only the information needed to produce a
+paycheck for each employee to be paid for the period.  The Apply Payroll
+program creates a backup version of the Pay Check
+file (PYCHK.102) before creating a new one.
+.sp
+.ti-5
+PAY DETAIL [B] (PYPAY.101): The Pay Detail file
+contains detailed pay transaction
+information for employees who are to be paid on the next run of the
+Apply Payroll program for their pay interval,
+and employees who were paid on the last
+payroll application.  Once created the Pay Detail file is permanent.
+The Apply Payroll program creates a
+backup version of the old Pay Detail file before it creates the new one,
+and erases it when the program ends.
+The file may be
+large or small depending on the number of employees and the number of
+transactions per employee per pay period.
+.qi
+.sp2
+.li
+GENERAL LEDGER
+.in5
+.ti-5
+GL INTERFACE USED (Y OR N) [N]:  This request tells the Payroll System
+if it should create a file of General Ledger transactions,
+and require the GL data disk with the chart of
+accounts file to be "on-line" (in one of the disk drives)
+when you run the Account Entry program.
+.sp
+.ti-5
+GL BATCH FILE OUTPUT DRIVE [B]: This is the drive location where the
+Payroll Application program should create the General Ledger batch file.
+.sp
+.ti-5
+GL COA FILE SUFFIX [SS]: This is the two character suffix that identifies
+the GL chart of accounts file as that of a particular company.	See you
+GL manual for details.
+.sp
+.ti-5
+GL DATA DRIVE [A]: This is the drive into which the GL data disk with the chart
+of accounts should be inserted when you run the Account Entry
+program, if you have selected the GL interface option.	It should never be
+the same drive as the Account file or the Parameter files (the System File
+Drive).
+.qi
+.sp2
+.li
+USER DEFINED PROGRAM
+.in5
+.ti-5
+PROGRAM USED [N]: The Payroll System menu provides room for one program
+created by the user.  To take advantage of this feature you would answer
+Yes to this request.
+.sp
+.ti-5
+PROGRAM [xxxxxxxx]: Give the eight character filename of the program you
+created.
+.sp
+.ti-5
+DESC. [xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx]: Space is provided for a brief
+description of the program. The description you enter here appears
+on the Payroll System menu.
+.qi
+.sp2
+.li
+CHECK WRITING
+.in5
+.ti-5
+COMPUTER CHECK PRINT (Y OR N) [Y]: To tell the Payroll system you want
+to use the automatic check printing feature, you would answer Yes to this
+request.
+.sp
+.ti-5
+VOID CHECKS OVER MAX (Y OR N) [N]: As an added safety feature, you can
+order any checks written over a specified maximum amount to be voided.
+.sp
+.ti-5
+MAXIMUM AMOUNT [xxxx5,000.00]:	This is the most a check can be written
+for without being voided if you answer the previous request affirmatively.
+.qi
+.sp2
+.li
+PAYROLL SYSTEM ACCOUNTS
+.in5
+.ti-5
+OFFSET CASH ACCOUNT [xx1]: This is the Payroll System account reference
+number to be credited with the amount of the payroll checks written.
+You cannot change this account reference number
+unless the account to which it is
+to be changed already exists on the account file.  If you do not choose
+to use the automatic check writing feature, you might want to change this
+to an accounts payable account.
+.sp
+.ti-5
+DEFAULT DIST ACCOUNT [xx3]: This is the Payroll System account reference
+number debited for 100% of an employee's total cost
+to the company (gross pay plus company payroll expenses)
+in the absence of other
+accounts distribution information for the employee.  You cannot change this
+account number unless the account to which it is to be changed already
+exists on the account file.
+.sp
+.ti-5
+DISTRIBUTE EMPLOYEE COST TO 1-5 GL ACCOUNTS (Y OR N) [N]: If you want to
+be able to distribute the total cost of an employee to more than one
+account, answer Yes.
+.qi
+.sp2
+.ce
+SORT PARAMETERS
+.pp
+The Pay Transaction file is the only file in the Payroll System that is
+sorted before processing (specifically, for the Apply Payroll
+program).  A set of sort parameters (input drive, workfile drive, sorted
+output drive location)
+must be created a some point for use by the sorting program.
+The input drive is assumed to be the drive location specified for the
+Pay Transaction file during Parameter Entry.  The sorting program creates the
+temporary
+work files, and the sorted output file
+on the same drive as the input file, and consequently
+there are no requests
+for this information.  Whenever the Pay Transaction file drive location
+is changed in Parameter Entry, you must create a new sort parameter file.
+At first time startup, the system creates one automatically after the
+Account Entry and Deduction/Earning Entry programs have been run.  After
+that, you choose the Create Sort Parameters program from the system menu
+to create a new sort parameter file.  The sort parameter file (PYHOURS.SRT)
+is created on the System File drive.
+.he

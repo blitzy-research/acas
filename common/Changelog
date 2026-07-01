@@ -1,0 +1,62 @@
+Record for changes at system level - Also recorded in sub systems Changelog.
+
+2025-09-19 Vincent Coen * 3.3.00 Version update and builds reset.
+
+
+2025-03-23 Vincent Coen * Updated All *RES source for bugs with wrong messages
+                          For source and target files now using .seq for src
+                          and .dat for target, added test for on output file
+                          to confirm no non zero return codes.
+                          Have not done the same for *UNL as the reporting
+                          messages will indicate that as zero output.
+                          These program have Not had a version change.
+
+2025-03-07 Vincent Coen * Revised scripts masterUNL.sh, masterRES.sh &
+                          masterLD and so far only tested masterUNL.
+                          Updates to sl970, sl910, st020, st030 BUT testing
+                          in progress.
+                          These will allow support for Back Order Processing.
+                          Still to do - st800 series programs for autogen
+                          ditto for pl800 although may not be completely coded
+                          if at all as waiting for testing of sl800 series
+                          first.
+
+2025-01-05 Vincent Coen * Update sl130 to read param rec and rewrite after FLAG
+                          update. Will need to do same for any prog that updates
+                          ANY param fields. Sames for SL130. Use zz900/910 code
+                          for any programs that also update any paran fields.
+                          Match up date format as used with systems Changelogs,
+                          i.e., yyyy-mm-dd and not dd-mm-yyyy.
+
+2024-03-15 Vincent Coen * For sys002 added support for fields
+                          SL-BO-Flag & Stk-BO-Active in system file.
+                          Ditto SL customer create/amend etc & Stock
+                          create/amend.
+
+2023-07-27 Vincent Coen * All four affected DAL modules have been fixed.
+                          Currently waiting on testing using the *LD programs
+                          after creating some new invoices.
+                          New programs added pl800 (recurring menu) plus change
+                          to purchase menu and pl180 to cater for it.
+                          The active progrms not yet written as awaiting tests
+                          for the SL versions.
+
+2023-07-12 Vincent Coen * For all LD prgrams updated to fix various bugs & other
+                          code cleanups.
+                          For *invoiceMT.scb and *autogenMT fix bug using wrong
+                          key in routines bc050-Process-Read-Index &
+                          bc300-Update-rg1.
+
+2023-07-02 Vincent Coen * For all *LD programs changed them to read acas.param
+                          file if exists when system param rec does not hold
+                          rdbms data. This so the system param does not need to
+                          be changed just to load up tables.
+                          The acas.param file uses the same details as the other
+                          param files Other than the name in DBNAME as ACASDB.
+
+2023-06-16 Vincent Coen * Changes for acas004, 030, sl810-830, *LD to process
+                          file acas.param if system.dat not set for DB params
+                          useful during testing when real tests are for Cobol
+                          files. So need to create a call'd module to process to
+                          be COPY'd in for all programs needing it.
+

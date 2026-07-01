@@ -1,0 +1,1409 @@
+.bp73
+.mt9
+.mb7
+.po8
+.ll70
+.ig
+CHAPTER 27
+D M S	  D I S P L A Y    F O R M A T S
+.li
+		     Your Company Name
+
+	 I N V E N T O R Y   C O N T R O L   S Y S T E M
+
+[  /  /  ]	      PROCESSING CYCLE
+
+[ ]  1 ADD TO STOCK		     [ ]  4 REORDER REPORT
+[ ]  2 DEPLETE STOCK		     [ ]  5 VALUATION REPORT
+[ ]  3 TRANSACTION PROOF	     [ ]  6 ACTIVITY REPORT
+				     [ ]  7 START ACTIVITY PERIOD
+
+		       SYSTEM STARTUP
+
+[ ]  8 PARAMETER ENTRY		     [ ]  9 CREATE SORT PARAMETER FILES
+
+		   ITEM FILE MAINTENANCE
+
+[ ] 10 ITEM ENTRY		     [ ] 12 ITEM FILE PRINT
+[ ] 11 ITEM FILE SORT		     [ ] 13 ITEM FILE RECOPY
+
+		   SELECT A PROGRAM > [  ]
+
+***********************************************************************
+
+		      Your Company Name
+      00/00/00	  P A R A M E T E R   E N T R Y   M E N U
+
+		  1  GENERAL PARAMETERS
+		  2  AUDIT PARAMETERS
+
+		  SELECT A SCREEN > [  ]
+.BR
+.he Appendix: Chapter 27
+.BP
+.LI
+		     Your Company Name
+
+		     PARAMETER ENTRY
+    00/00/00	G E N E R A L	 P A R A M E T E R S
+
+COMPANY NAME [						     ]
+
+CURRENT PERIOD [       ]	       AVERAGE VALUATION  [   ]
+     (WEEK, MONTH, QUARTER)
+
+TO DATE PERIOD [       ]	       ARRAY SIZE	[     ]
+     (MONTH, QUARTER, YEAR)
+
+DATE FORM		  [ ]	       CONSOLE BELL USED   [  ]
+     (1 MM/DD/YY  2 DD/MM/YY)
+
+PAGE WIDTH	[   ]		       DEBUGGING	   [  ]
+
+LINES PER PAGE	[   ]
+.br
+.bp
+.sp3
+.LI
+			 Your Company Name
+
+			  PARAMETER ENTRY
+	 00/00/00      A U D I T   P A R A M E T E R S
+
+		       AUDIT DRIVE  [ ]
+
+		       ADDITIONS AUDIT USED [ ]
+		       DEPLETIONS AUDIT USED [ ]
+
+
+
+****************************************************************
+
+
+			 Your Company Name
+  DATE [  /  /	]      INVENTORY CONTROL SYSTEM
+			 I T E M   E N T R Y
+
+  ACCESS KEY					    ITEM NUMBER
+[	    ]					    [	      ]
+
+DESCRIPTION	  [				 ]
+
+STOCKROOM QUANTITY [	   ]		VENDOR NUMBER [     ]
+
+REORDER POINT	   [	   ]		COST / UNIT   [       ]
+
+STD REORDER QTY    [	   ]		QTY ORDERED [	     ]
+
+RETAIL PRICE	   [	       ]	DATE ORDERED  [        ]
+
+INVENTORY VALUE    [		 ]	DATE DUE      [        ]
+
+					BACK ORDERED  [       ]
+.br
+.bp
+.li
+			Your Company Name
+		     INVENTORY CONTROL SYSTEM
+
+DATE [	/  /  ]      ADDITIONS TO STOCK 	BATCH NUMBER [	    ]
+
+
+ITEM NUMBER   [ 	 ]		 QUANTITY ORDERED  [	    ]
+
+QUANTITY ADDED [       ]		 DATE ORDERED [        ]
+
+UNIT COST      [	  ]		 DATE DUE     [        ]
+
+STOCKROOM QUANTITY [	    ]		 QUANTITY BACKORDERED [        ]
+
+	    DESCRIPTION [				 ]
+
+
+************************************************************************
+
+
+		       Your Company Name
+		   INVENTORY CONTROL SYSTEM
+
+DATE [	/  /  ]    DEPLETIONS FROM STOCK	   BATCH NUMBER  [     ]
+
+
+
+		  ITEM NUMBER	 [	  ]
+
+		  QUANTITY DEPLETED [	     ]
+
+		  STOCKROOM QUANTITY [	      ]
+
+		  DESCRIPTION [ 			]
+.br
+.he
+.bp
+.mt9
+.mb7
+.po8
+.ll65
+.ig
+CHAPTER 28
+D M S	S E T U P    F O R   N O N - S T A N D A R D   C R T ' S
+.pp
+To create a new CRT.DEF file, run the CRTDEF program, answering all the
+requests that pertain to the CRT you are using.  When the program requests
+the name of the CRT definition file to create, respond with CRT.  The
+program will create a file named CRT.DEF.  This file should be placed on your
+program disk (which should be on the currently logged drive).
+All of the other DEF files can be omitted from your work disks or system
+master (but not from the SSG distribution disk), as well as the CRTDEF.INT
+program.
+.he Appendix: Chapter 28
+.pp
+The utility program CRTDEF is used to define the physical characteristics of
+a CRT display device (e.g., number of rows and columns, screen clear
+sequence, cursor addressing sequence, etc.).  The program will prompt for
+values for all CRT control sequences which are supported by the DMS system.
+.pp
+The program should only have to be executed once to define the CRT you are
+using.	It does not have to be kept on the sytem disk after it is run.
+.pp
+The CRTDEF program does not use screen formatting and will work on any serial
+CRT.  It will request data for almost every conceivable type of CRT control
+procedure.  Not all of these procedures are need by the Inventory Control
+System programs.  The only control sequences that are necessary to run are
+the direct cursor addressing control characters and translation tables,
+destructive backspace, and the clear screen character.	Any other requests
+can be ignored by pressing RETURN.
+.pp
+Some control items will cause the system to execute faster because it can take
+advantage of more sophisticated hardware features.
+.pp
+If you are modifying an existing CRT definition file, the CRTDEF program
+will present a menu so that you may choose which section of the program to run.
+Enter the number of your desired selection.  If you are creating a CRT
+defintion file for the first time, the menu does not appear and all of the
+requests that are not applicable can be answered to with a RETURN.
+.pp
+When the program issues a request  the current value of the control sequence
+is displayed and the user is prompted for either a new value or acceptance
+of the current value.	To accept the current value, just press the RETURN
+key.
+.pp
+When the program starts up, it will request the name of the CRT physical
+characteristics definition file.  For the Inventory Control System, always
+enter CRT.  This is the name of the definition file that is created by
+CRTDEF and the DEF file the Inventory Control System will look for.
+.pp
+CRTDEF will then request whether this run will create the intial version
+of the file or edit an existing copy.  The first time you run this
+program enter a C for create.  If you are modifying a DEF file that was
+entered incorrectly, enter an M for modify.
+.cp8
+.sp2
+THE CONTROL SEQUENCE REQUESTS:
+.pp
+Most of the CRT control sequences are entered in the form:
+.sp
+.ti8
+<number of items>,<item-1>,<item-2>, . . .
+.pp
+The values of the items are the data characters which will be transmitted
+to the CRT device to effect the speciafied control operation.  These
+values are specified as decimal integers between 0-255.  To enter an
+ESCAPE, for example, use the decimal equivalent of the ASCII value which
+is 27 in decimal.  If a control sequence consisted of an ESCAPE followed by
+a left parenthesis, you would enter:
+.sp
+.ti8
+2,27,40
+.sp
+.ad
+Where the 2 indicates that there are two characters that must be sent to the
+CRT for this function and the 27 and 40 are the decimal representations
+of an ESCAPE and a left parenthesis.
+.pp
+Please note that the CRTDEF program does not check the values for validity.
+Valid values range from 0 to 255 but any integer value may be supplied.  The
+value modulo 256 will be used.
+.pp
+The values specified are stored in character strings and are written
+to the disk file as such.  CBASIC and CP/M impose restrictions on the
+values which may be contained in these strings.  The restrictions are:
+.sp
+.ti8
+CP/M:  CTRL-Z (26) is used as an end-of-file marker.
+.sp
+.ti8
+CBASIC:  A RETURN (10) or a LINE-FEED (13) character will denote an end of
+line sequence.
+.pp
+The way around the restrictions for most terminals which might happen to use
+these characters for CRT control is to specify the value as <value>+128.
+This sets the ASCII parity bit to ON.  For example, to send a decimal
+10, send 138 instead.
+.pp
+The ASCII terminals will ignore the parity bit because the defined
+ASCII set is 7 bits.  (Normally the CBIOS [operating system] will force
+the parity bit to a fixed value before transmitting it to the terminal,
+so the problem never really arises.
+.sp2
+REQUESTS ISSUED BY CRTDEF:
+.sp
+NUMBER OF ROWS FOR DISPLAY:
+.in8
+This is the number of rows (lines) of vertical display on your CRT.
+.sp
+.li
+NUMBER OF COLUMNS FOR CRT DISPLAY:
+.in8
+This is the number of columns (characters across) displayed on your CRT.
+.sp
+.li
+SPECIFY CURSOR ROW ADDRESS POSITIONING CONTROL CHARACTERS:
+	row 1  current value:  0
+		   new value:
+.in8
+Enter the value required by the CRT to position the cursor at the desired row.
+Don't include the position control character sequence, merely the number
+that will be translated into a row address.  This request will be issued
+once for every possible row.
+.sp
+.li
+SPECIFY CURSOR COLUMN ADDRESS POSITIONING CONTROL CHARACTERS:
+	column 1   current value:  0
+		       new value:
+.in8
+Enter the value required by the CRT to position the cursor at the desired
+column.  Don't include the position control character sequence, merely the
+number that will be translated into a column address.  This request will
+be issued once for every possible column.
+.sp
+.li
+CRT CONTROL:  SET CURSOR ADDRESS:
+.in8
+As described above, this request starts with "CRT control:" and thus requires
+the number of elements to precede the values of the elements and for them to
+be separated by commas.
+.sp
+Enter the values only if your CRT uses one contrl character sequence to send
+the cursor to both row and column.  Enter the characters required to send the
+cursor to a ROW and a COLUMN at the same time.
+.bp
+.li
+SET ROW ADDRESS PREFIX:
+.in8
+If the CRT requires different control characters for ROW and COLUMN, enter
+the row characters here (the previous request can be left a zero).  If the
+CRT address row and column at the same time this can be left zero.
+.sp
+.li
+SET COLUMN ADDRESS PREFIX:
+.in8
+If the CRT requires different control characters for ROW and COLUMN, enter
+the column characters here.  If the CRT addresses row and column at the same
+time this can be left zero.
+.sp
+.li
+SPECIFY ORDER OF PRESENTATION OF ROW AND COLUMN ADDRESS:
+.in8
+Enter an "R" or a "C" for the order in which the control characters are to
+be sent.
+.sp
+.li
+SPECIFY FORMAT OF ROW AND COLUMN CURSOR CONTROL CHARACTERS:
+.in8
+Most CRT's require control information to be sent as hexadecimal characters,
+but some require ASCII numbers.  Enter an "H" or a "D" for the correct format.
+.sp
+.li
+CLEAR SCREEN:
+.in8
+Enter the characters for clearing the CRT screen.  This is a required entry.
+.sp
+.li
+CLEAR FOREGROUND DATA FIELDS:
+.in8
+If your CRT supports different display intensities, enter the
+foreground/background
+control characters for this and the next 2 requests.
+.sp
+.li
+ENTER FOREGROUND MODE:
+.SP
+.li
+ENTER BACKGROUND MODE:
+.SP
+.li
+RETURN CURSOR TO HOME POSITION:
+.SP
+.li
+MOVE CURSOR UP ONE ROW:
+.SP
+.li
+MOVE CURSOR DOWN ONE ROW:
+.SP
+.li
+MOVE CURSOR LEFT ONE COLUMN:
+.SP
+.li
+MOVE CURSOR RIGHT ONE COLUMN:
+.SP
+.li
+DESTRUCTIVE BACKSPACE:
+.in8
+This sequence must be entered.	This is the sequence of characters
+that will erase the previously typed in character.  This will
+almost always be a backspace followed by a blank followed by a backspace.
+In decimal, this translates to an 8, a 32, another 8.  Key in:
+3,8,32,8.
+.sp
+.li
+SOUND CONSOLE ALARM
+.in8
+This is normally a 1,7.
+.sp
+.li
+ERASE TO END OF CURRENT LINE:
+.SP
+.li
+ERASE TO END OF SCREEN:
+.SP
+.li
+INSERT A NEW LINE INTO THE DISPLAY:
+.SP
+.li
+DELETE CURRENT LINE FROM DISPLAY:
+.SP
+.li
+NUMBER OF STORAGE LOCATIONS TO BE SET AT CRT INITIALIZATION:
+.in8
+Specify number of storage locations to be set or press RETURN.	If your
+CRT requires memory to be initialized before operating, enter the number
+of bytes that must be set at this request.
+.sp
+.li
+CURRENT STORAGE ENTRY AND VALUES:   0	 0
+.br
+.li
+SET STORAGE ENTRY 1:
+.in8
+Specify memory location and value.  This request will be issued for each location
+specified in the previous request.  Enter the decimal value for each byte.
+.sp
+.li
+INITIALIZATION SUBROUTINE ADDRESS:
+.in8
+If a machine code routine resides in memory that must be branched to on
+startup, enter its address in decimal.
+.sp
+.li
+INITIALIZATION I/O PORT:
+.in8
+If data needs to be transmitted to an I/O port, enter its number.
+.sp
+.li
+DATA TO BE TRANSMITTED TO CONSOLE:
+.in8
+If data must be sent to the console device itself at startup time, enter
+the number of bytes and their decimal values here.
+.qi
+.sp
+.pp
+The requests which follow, or
+options 8 and 10 on the CRTDEF menu are provided to allow you to change
+the normal definition of the special function control keys in the system.
+If, for example, your operating system or computer does not allow free use
+of a CONTROL-A character (enter adding mode), the CRTDEF program would
+allow you to define a CONTROL-Y entered at the keyboard to be interpreed
+by the program as though you had entered a CONTROL-A.  Because the
+facilitiy is completely generalized, it should be possible to compensate
+for the special requirements of all of the CP/M derivative operating
+systems.
+.pp
+In addition, the use of control keys can be completely bypassed if
+necessary.  A prefixing character can be defined that substitutes for
+a control key.	In this manner, for example, an at-sign (@) or an
+up arrow (^) can be designated as the prefix character.  Then an
+@A sequence  would be interpreted the same as a CONTROL-A.
+.pp
+The option #8 requests
+allow a control character translation table to be entered.  It
+issues up to 31 requests for each control character possible.  If, for
+example, your system has forced you to not use a CONTROL-A (ASCII value
+of 1) and you will substitute a CONTROL-Y (ASCII value of 25), when the
+request:
+.sp
+.li
+	CHARACTER  25	    CURRENT TRANSLATION   25
+	ENTER NEW VALUE (OR STOP) >
+.br
+.sp
+.ad
+is issued, respond with the value 1.  Don't forget that 8 is the backspace
+and 13 is the carriage return.
+.pp
+The option #10 requests are
+used only if you cannot use any control characters at all.
+They will define instead a prefix character and the individual values
+represented by the prefix character followed by one of the 127 possible
+ASCII values.
+.pp
+The first request issued is for the value of the prefix character itself.
+Enter its decimal ASCII value.	An at-sign, for example, would be 64.
+Remember that once a character is defined as the prefixing character it
+cannot be used as a valid data character anywhere else.
+This is very important, so choose carefully.
+.pp
+The next request is used merely to quickly fill all 127 elements of the
+table with a default.	The default should be some invalid character
+combination such as a zero.
+.pp
+The program will then issue up to 127 requests for translation of individual
+characters.  If you wish for the character sequence "prefix-A" (65). Don't
+forget to enter the same interpred value at the lower-case value of "A" (97).
+.pp
+If you use the prefix character facility of option 10, you should use the
+control character translation facility of option 8 to "mask" out all special
+function control characters.  This involves setting them to some harmless
+but invalid value, such as a zero or 10 (LINE FEED).  All programs will
+then reject this character with an explicit error message.
+.pp
+After all requests have been answered (when the menu is not used) or after
+each menu funtion (when the menu is used), the program will display:
+.sp
+.li
+	Specify S(ave), E(dit), or Q(uit)
+.pp
+If all the data was entered correctly, enter an S.  If the data needs
+to be edited, enter an E and the menu will appear, allowing the
+data just entered to be modified.  If you are unsure about the entries
+appropriate for your device, see your dealer.
+.he
+.bp
+.ig
+CHAPTER 29
+E R R O R    M E S S A G E S
+.sp2
+.ce
+CBASIC ERROR MESSAGES
+.pp5
+SSG software is designed to trap all errors which can arise under normal
+circumstances, but due to language limitations and/or hardware problems,
+some errors may occur which the programs themselves cannot handle.  These
+errors are CBASIC errors.  They appear in the following form,
+.he Appendix: Chapter 29
+.sp
+.ti10
+ERROR aa
+.sp
+.ad
+where aa is two alphabetic characters issued by the CBASIC runtime package
+CRUN2.	The occurance of a CBASIC error message usually indicates a serious
+problem in your INT or data files.
+.in8
+.sp
+.ti-8
+ERROR RE:  This is caused by a record in a file which has too few or too
+many file delimiter characters (quotes or commas), or whose length is
+incorrect.  When a program then attempts to read that record, what
+is on the disk does not match the record description, and CRUN2 issues
+this message.
+.sp
+It is possible for this problem to occur because of various hardware problems
+such as a bad write, a voltage surge, etc., but far and away the most
+common cause  is a bad RAM location, which either changes some character
+into a quote or a comma, or changes one of these file delimiters into
+some other character.  This error is virtually never the result of a
+program bug.  Once a bad record is in the file, it must be repaired or
+removed with the editor, or the entire file must be rebuilt.  Bad records
+can be detected by TYPE'ing the file and manually searching for a missing
+or extra quote or comma.  If you are not familiar with the use of the
+editor, read the CP/M
+documentation before attempting to change the file.  Also
+read the File Definition in the Inventory Control System Specifications
+Manual, because
+some files may require that the header record be changed if a record
+is manually deleted.
+.sp
+.ti-8
+ERROR IV:  This error occurs if you try to run a program compiled by
+CBASIC version 1 with CRUN2, or if the INT file that you are trying to run
+is null.  If the latter is the case, recopy the file from the original disk,
+using the verify option [vo] of PIP.
+.sp
+.ti-8
+ERROR DZ:  This error occurs if you try to divide by zero, or if you try
+to run a program compiled under CBASIC2 with CRUN version 1.  Since none
+of the Inventory Control System programs will allow a division with a
+denominator of zero, you should verify that your runtime package is indeed
+CRUN2 (ideally version number 2.04 or higher).
+.sp
+.ti-8
+ERROR OM or GARBAGE ON SCREEN DURING AN ENTRY PROGRAM:	This means that the
+program has run out of memory--should not occur if you have at least 48K
+of RAM and a standard-sized version of CP/M.
+.qi
+.sp3
+.ce
+INVENTORY CONTROL SYSTEM ERROR MESSAGES
+.sp
+.pp5
+The terms "part" and "item" are used interchangeably throughout
+the documentation.  Messages that instruct you to contact your distributor
+generally indicate an error condition that should not arise under normal
+circumstances.
+.sp
+.ce
+SYSTEMWIDE MESSAGES
+.sp
+.in6
+.ti-6
+IY000 PROGRAM MUST BE RUN FROM MENU: To enter the Inventory Control System,
+type CRUN2 IY.
+.sp
+.ti-6
+IY002 INVALID DRIVE SPECIFIED:	Must be a single alphabetic character.
+.sp
+.ti-6
+IY005 INVALID DATE:  MM/DD/YY or DD/MM/YY only.
+.sp
+.ti-6
+IY044 INVALID COMMAND SEQUENCE: Contact your distributor.
+.sp
+.ti-6
+IY045 INVALID COMMAND SEQUENCE: Contact your distributor.
+.sp
+.ti-6
+IY086 NO VALID PART RECORDS: Build the item file through the ITEM ENTRY
+menu function.
+.sp2
+.ce
+ITEM ENTRY (PARTENT.INT)
+.sp
+.in6
+.ti-6
+IY101 PART FILE FOUND FROM ABORTED RUN:  A part file was found whose type had
+a final digit of 0.  This occurs if a program which writes to a part file
+ends abnormally.  Determine the reason, rename the
+part file (or files) so that its last digit is 1, and continue. See Chapter
+30.
+.sp
+.ti-6
+IY102 PART FILE NOT FOUND:  Mount the correct disks on the appropriate drives
+and continue.
+.sp
+.ti-6
+IY103 PART FILE MOUNTED ON WRONG DRIVE:  See IY102.
+.sp
+.ti-6
+IY104 UNEXPECTED END OF FILE ON PART FILE:  The part file is null or the
+header record incorrect.  Use the TYPE command to check for the former.
+The simplest recovery procedure is to bring your backup file up to date.
+See Chapter 30.
+.sp
+.ti-6
+IY105 not used
+.sp
+.ti-6
+IY106 RENAME FAILED: A rename failed during processing.  There should be no
+damage to the file.  See Chapter 30 for how to rename the file.
+.sp
+.ti-6
+IY107 A QUOTE IS AN INVALID CHARACTER: No double quotes allowed in any file.
+.sp
+.ti-6
+IY108 INVALID PART NUMBER: Must be A-Z, 0-9,
+a slash (/), or a dash (-).
+.sp
+.ti-6
+IY109 NOT AN INTEGER: 0-9 only, no decimals or commas.
+.SP
+.TI-6
+IY110 NOT NUMERIC: Not a numeric character, or
+too many digits to the left or to the right of the decimal.
+See documentation for size limits.
+.SP
+.TI-6
+IY111 THAT'S NOT A VALID RESPONSE: You entered an invalid control character
+for that field. See documentation for appropriate response.
+.SP
+.TI-6
+IY112 RENAME FAILED AT END: One or more item files will need to be renamed.
+There should be no damage to the file.	See Chapter 30 for how to rename the
+file.
+.sp
+.ti-6
+IY113 INVALID PART FILE KEY: For the access key @D(rive)N(umber), D is
+not a valid drive reference, or N a valid record number.
+.sp
+.ti-6
+IY114 PART NUMBER NOT FOUND: Either the file is not in sorted order, or
+the part specified is not on the file.
+.sp
+.ti-6
+IY115 A SORT WILL BE REQUIRED IF THIS PART IS ADDED: Only the file affected
+will need to be sorted.  See Chapter 22 for sorting procedures.
+.sp
+.ti-6
+IY116 PART NUMBER ALREADY IN FILE: No duplicate part numbers allowed.
+.sp
+.ti-6
+IY117 NO PR2 FILE FOUND: Your system disk is not in the drive where it was
+at the start of the current run.  If not, contact your distributor.
+.sp
+.ti-6
+IY118 RECORD NUMBER OUT OF RANGE: For the access key @D(rive)N(umber),
+N is not a valid record number on drive D.
+.sp
+.ti-6
+IY119 INVALID PART NUMBER: see IY108
+.sp
+.ti-6
+IY120 NO PR2 FILE FOUND: Contact your distributor.
+.sp
+.ti-6
+IY121 THERE ARE NO VALID PART RECORDS. YOU'LL HAVE TO ADD SOME: Should
+appear only at system startup.
+.sp
+.ti-6
+IY122 THE PART RECORD IS BEING DELETED: informational message.
+.sp2
+.ce
+PARAMETER ENTRY (IYPARENT.INT)
+.sp
+.ti-6
+IY201 THIS PROGRAM MUST BE RUN FROM THE IY MENU: Type CRUN2 IY to enter the
+Inventory Control System.
+.sp
+.ti-6
+IY202 INVALID INPUT: Invalid control characters or an invalid response.
+Consult the documentation for the appropriate response.
+.SP
+.TI-6
+IY203 not used
+.SP
+.TI-6
+IY204 INVALID DRIVE SPECIFIED: System drive must be either A or B.
+.SP
+.TI-6
+IY205 not used
+.SP
+.TI-6
+IY206 NO PARAMETER FILE. WILL CREATE DEFAULT FILE BEFORE CONTINUING:
+This message should only appear at system startup.  If you do receive it,
+stop the program and locate the parameter file, or allow the program to
+create one.
+.SP
+.TI-6
+IY207 UNEXPECTED END OF PARAMETER FILE: Parameter file not found when stop
+requested. Contact your distributor.
+.SP2
+.CE
+ADD TO STOCK (ADDITION.INT)
+.SP
+.TI-6
+IY301 PART FILE FOUND FROM ABORTED RUN: see IY101
+.sp
+.ti-6
+IY302 PART FILE NOT FOUND: see IY102
+.sp
+.ti-6
+IY303 PART FILE MOUNTED ON WRONG DRIVE: see IY102
+.sp
+.ti-6
+IY304 UNEXPECTED END OF FILE ON PART FILE: see IY104
+.sp
+.ti-6
+IY305 not used
+.sp
+.ti-6
+IY306 not used
+.sp
+.ti-6
+IY307 not used
+.sp
+.ti-6
+IY308 PR2 FILE NOT FOUND: The program was unable to find the PR2 file, or
+found a null one.  Either PIP a good PR2 file onto the system disk, or
+recreate one with the Parameter Entry program. This should only if disks are
+switched improperly during ITEM FILE RECOPY or sorting.
+.sp
+.ti-6
+IY309 TOO MANY DIGITS: Your entry was not numeric, or contained too many
+digits.  The fields for quantity added, quantity on order, or quantity on
+back order accept up to 6 digit entries.
+.SP
+.TI-6
+IY310 INVALID RESPONSE: An inappropriate control character was entered.
+See the documentation for the valid response.
+.SP
+.TI-6
+IY311 INVALID RESPONSE: re-enter appropriate data.
+.sp
+.ti-6
+IY312 QUANTITY IN STOCK MAY NOT BE LESS THAN ZERO
+.SP
+.TI-6
+IY313 CURRENT PERIOD STOCK ADDITIONS CANNOT GO BELOW ZERO
+.SP
+.TI-6
+IY314 CURRENT PERIOD STOCK ADDITIONS CANNOT EXCEED 999999
+.SP
+.TI-6
+IY315 TO DATE STOCK ADDITIONS CANNOT GO BELOW ZERO
+.SP
+.TI-6
+IY316 TO DATE STOCK ADDITIONS CANNOT EXCEED 999999
+.SP
+.TI-6
+IY317 CANNOT BE LESS THAN ZERO: The quantity on order or back-ordered cannot
+be less than zero or greater than 999999.
+.SP
+.TI-6
+IY318 CANNOT EXCEED 999999: An attempt was made to either reduce an activity
+accumulator below zero or increase one beyond its maximum.  The
+accumulator will be set to zero or its maximum by the program.
+.sp
+.ti-6
+IY319 INVALID DATE: Dates must be of the form MM/DD/YY or DD/MM/YY,
+depending on what was specified in the Parameter Entry program.
+.sp
+.ti-6
+IY320 AUDIT FILE CREATE FAILED: The ADD TO STOCK program
+was unable to create the audit
+file.  Perhaps the disk is full, or is write-protected.
+.sp
+.ti-6
+IY321 AUDIT FILE FOUND FROM PREVIOUS ABORTED RUN:  The ADD TO STOCK or
+DEPLETE STOCK program ended abnormally on its previous run, leaving an audit
+file of type 000.  Find and correct the cause of the aborted run.  If the
+audit file appears to be complete, rename it to type 001 and continue,
+otherwise, erase it.  See Chapter 30.
+.sp
+.ti-6
+IY322 AUDIT FILE OPEN FAILED:  The ADD TO STOCK program
+was unable to open an audit file
+which was listed in the directory, or found a null file.  Erase the file
+and continue. See Chapter 30.
+.sp
+.ti-6
+IY323 Y, N, OR ESCAPE ONLY: Re-enter appropriate data.
+.sp
+.ti-6
+IY324 NOT NUMERIC: Re-enter appropriate data.
+.sp
+.ti-6
+IY325 NULL AUDIT FILE FOUND: Possible hardware problem.
+.sp
+.ti-6
+IY326 PART VALUE SET TO 9,999,999.99: This is the maximum inventory value
+allowed for an item.  If it is not large enough for your needs, congratulations
+on your good fortune.
+.sp
+.ti-6
+IY327 AUDIT FILE OPEN FAILED AFTER SAVING FILES: see IY322
+.sp
+.ti-6
+IY328 INVALID PART NUMBER: The part number specified does not exist in
+the part file(s). Re-enter a valid part number: A-Z, 0-9, slashes (/), or
+dashes (-) only.
+.sp
+.ti-6
+IY329 INVALID PART KEY: A part key must be of the form @Dnnn, where
+D is the drive reference for the desired part file, and nnn is the record
+number of the desired part within that file.
+.sp
+.ti-6
+IY330 VALUE SET TO ZERO: The transaction would take the value below zero.
+.sp2
+.CE
+DEPLETE STOCK (DEPLETE.INT)
+.sp
+.ti-6
+IY351 PART FILE FOUND FROM ABORTED RUN: see IY101
+.sp
+.ti-6
+IY352 PART FILE NOT FOUND: see IY102
+.sp
+.ti-6
+IY353 PART FILE MOUNTED ON WRONG DRIVE: see IY102
+.sp
+.ti-6
+IY354 UNEXPECTED END OF FILE ON PART FILE: see IY104
+.sp
+.ti-6
+IY355 INVALID DEPLETION QUANTITY: Your entry was not numeric, or its length
+was greater than 6.
+.sp
+.ti-6
+IY356 PR2 FILE NOT FOUND: see IY308
+.SP
+.TI-6
+IY357 not used
+.SP
+.TI-6
+IY358 PR2 FILE NOT FOUND: see IY308
+.SP
+.TI-6
+IY359 UNEXPECTED EOF ON AUDIT FILE: Contact your distributor.
+.sp
+.TI-6
+IY360 INVALID RESPONSE: Valid entries include CTRL-N, CTRL-B, ESCAPE,
+and, if a valid
+record has been read, RETURN, CTRL-R, and CTRL-S.
+.SP
+.TI-6
+IY361 PART VALUE SET TO MIN. (ZERO): The depletion based on the current
+average value per unit has forced the inventory value to zero.
+.SP
+.TI-6
+IY362 STOCK MAY NOT BE LESS THAN ZERO: Your entry would set the quantity
+on hand below zero.
+.SP
+.TI-6
+IY363 CURRENT DEPLETIONS AT MIN. (ZERO): informational message.
+.SP
+.TI-6
+IY364 CURRENT DEPLETIONS AT MAX. (9,999,999): informational message.
+.SP
+.TI-6
+IY365 TO DATE DEPLETIONS AT MIN. (ZERO): informational message.
+.SP
+.TI-6
+IY366 TO DATE DEPLETIONS AT MAX. (9,999,999): informational message.
+.SP
+.TI-6
+IY367 PART VALUE SET TO MAX. (9,999,999): When backing out a depletion, the
+inventory value has exceeded the maximum, based on the current average value.
+.SP
+.TI-6
+IY368 STOCK MAY NOT EXCEED 999,999: Your entry would cause the stock on hand
+quantity to exceed the maximum.
+.SP
+.TI-6
+IY369 INVALID RESPONSE: This field will accept only a valid depletion quantity,
+CTRL-B, CTRL-R, CTRL-X, or RETURN.
+.SP
+.TI-6
+IY370 AUDIT FILE CREATE FAILED: Your disk or directory may be full.  If not,
+contact your distributor.
+.SP
+.TI-6
+IY371 AUDIT FILE FOUND FROM PREVIOUS ABORTED RUN: An IYAUD.000 file has been
+found, meaning the ADD TO STOCK  or DEPLETE STOCK program ended abnormally.
+Determine the reason for the abnormal ending, rename the file to type 001,
+and continue.  See Chapter 30.
+.SP
+.TI-6
+IY372 AUDIT FILE OPEN FAILED: Contact your distributor.
+.SP
+.TI-6
+IY373 Y, N, OR ESCAPE ONLY: Y, N, T, True, Ok, or ESCAPE only.
+.SP
+.TI-6
+IY374 not used
+.SP
+.TI-6
+IY375 not used
+.SP
+.TI-6
+IY376 not used
+.SP
+.TI-6
+IY377 OPEN FAILED: Contact your distributor.
+.SP
+.TI-6
+IY378 INVALID PART NUMBER: See IY328.
+.SP
+.TI-6
+IY379 INVALID PART KEY: See IY329.
+.SP2
+.CE
+START AN ACTIVITY PERIOD (UPDATE.INT)
+.SP
+.TI-6
+IY401 PART FILE FOUND FROM PREVIOUS ABORTED RUN: see IY101
+.sp
+.ti-6
+IY402 PART FILE NOT FOUND: see IY102
+.SP
+.TI-6
+IY403 PART FILE MOUNTED ON WRONG DRIVE: see IY102
+.sp
+.ti-6
+IY404 UNEXPECTED END OF FILE ON PART FILE: see IY104
+.sp
+.ti-6
+IY405 PR2 FILE NOT FOUND OR NULL: see IY308
+.SP
+.TI-6
+IY406 ACTIVITY REPORT HAS NOT BEEN RUN: Run the Activity Report, if desired,
+and continue.
+.sp
+.ti-6
+IY407 INVALID RESPONSE: Inappropriate entry.  See the documentation for
+the proper response.
+.SP
+.TI-6
+IY408 Y, YES, N, OR NO ONLY: Re-enter appropriate data.
+.sp
+.ti-6
+IY409 not used
+.sp2
+.CE
+IY MENU (IY.INT)
+.SP
+.TI-6
+IY421 NO PARAMETER FILE: Contact your distributor.
+.SP
+.TI-6
+IY422 DMS ERROR: CRT.DEF is an invalid definition file.  Contact your
+distributor.
+.SP
+.TI-6
+IY423 ERROR DURING CHAIN TO SORT: Disk or directory full, or disk is write
+protected.  See Chapter 30.  If none of these, contact your distributor.
+.SP
+.TI-6
+IY424 ERROR DURING CHAIN TO SORT: see IY423
+.SP
+.TI-6
+IY425 THE PROGRAM IS NOT ON THE CURRENTLY LOGGED DISK: All INT files should
+be located on the currently logged drive.
+.SP
+.TI-6
+IY426 THE SORT PARAMETER FILE IS NOT ON THE SYSTEM DISK: Run the CREATE SORT
+PARAMETER FILES  function.
+.SP
+.TI-6
+IY427 ERROR DURING CHAIN TO SORT: see IY423
+.SP
+.TI-6
+IY428 not used
+.SP
+.TI-6
+IY429 THIS PROGRAM CAN ONLY BE RUN ON VERIFIED SORTED PART FILES:  All item
+files must be sorted and checked for duplicate records (by running the ITEM
+FILE PRINT program) before the program
+selected can be run.
+.SP
+.TI-6
+IY430 INVALID SECOND PARAMETER FILE: Invalid information in the IYPR2
+parameter file. See Chapter 30.
+.SP
+.TI-6
+IY431 QSORT IS NOT ON THE CURRENTLY LOGGED DISK: QSORT	is expected on the
+currently logged disk.	See documentation
+Chapter 22 for sorting procedures.
+.SP
+.TI-6
+IY432 THAT'S NOT A VALID RESPONSE: The menu selection must be numeric.
+ESC or CTRL-R (Refresh the screen) are the only other valid commands.
+.SP
+.TI-6
+IY433 NO SECOND PARAMETER FILE. CHAINING TO PARTFILE: Since no parameter
+file exists, the program
+will create one and allow you to change the default values.
+PARTFILE is the program responsible for the ITEM FILE RECOPY function.
+.SP
+.TI-6
+IY434 THE SYSTEM DRIVE HAS NOT BEEN INITIALIZED: You cannot continue until
+you specify either drive A or drive B as the system drive (the drive where
+the parameter and SRT files are expected).
+.SP
+.TI-6
+IY435 INVALID DATE: DD/MM/YY or MM/DD/YY only.
+.sp
+.ti-6
+IY436 INVALID PARAMETER FILE: IYPR1 contains invalid information. See
+Chapter 30.
+.SP
+.TI-6
+IY437 OPERATOR REQUESTED RETURN TO MENU: informational message.
+.SP
+.TI-6
+IY438 **ERROR**  THE PROGRAM WAS TERMINATED BEFORE COMPLETION: A fatal error
+occured in the program just run. Determine the cause,
+if possible, and continue.  See Chapter 30.
+.SP
+.TI-6
+IY439 TRANSACTION HISTORY IS NOT CURRENTLY RECORDED: Auditability was not
+requested.  Run PARAMETER ENTRY program to select it if desired.
+.SP
+.TI-6
+IY440 not used
+.sp2
+.ce
+REORDER REPORT (REORDER.INT)
+.sp
+.ti-6
+IY441 PART FILE MOUNTED ON WRONG DRIVE: see IY103
+.SP
+.TI-6
+IY442 UNEXPECTED EOF ON PART FILE: The part file was not found or contains
+invalid information.  Find the partfile, or bring your backup file up to date.
+.SP
+.TI-6
+IY443 THAT'S NOT A VALID RESPONSE: Only numeric entries allowed, no control
+characters.
+.SP
+.TI-6
+IY444 INVALID PART NUMBER: see IY108
+.SP2
+.CE
+ITEM FILE PRINT (PARTPRNT.INT)
+.SP
+.TI-6
+IY461 PART FILE FOUND FROM PREVIOUS ABORTED RUN: see IY101
+.SP
+.TI-6
+IY462 PART FILE NOT FOUND: see IY102
+.SP
+.TI-6
+IY463 PART FILE MOUNTED ON WRONG DRIVE: see IY102
+.SP
+.TI-6
+IY464 UNEXPECTED END OF FILE ON PART FILE: see IY104
+.SP
+.TI-6
+IY465 PART FILE RENAME FAILED: The program tried to rename an item file of
+type 111 to 101 at end.
+.sp
+.ti-6
+IY466 DUPLICATE PART NUMBER FOUND ON DRIVE: RUN PARTENT TO DELETE: Programs
+in the Inventory Control System will not operate properly if there are
+duplicate part numbers.  Delete the flagged duplicates with the ITEM ENTRY
+program, and
+re-run the ITEM FILE PRINT program.
+.sp
+.ti-6
+IY467 not used
+.SP
+.TI-6
+IY468 PR2 FILE NOT FOUND: see IY308
+.sp
+.ti-6
+IY469 INVALID RESPONSE: Re-enter appropriate data.
+.sp
+.ti-6
+IY470 INVALID PART NUMBER: A-Z, 0-9, slash (/), or dash (-) only.
+.SP
+.TI-6
+IY471 TYPE 111 PART FILE FOUND WHEN TYPE 101 PRESENT: Remove 101 file.
+.sp2
+.CE
+CREATE SORT PARAMETER FILES (SORTPARM.INT)
+.SP
+.TI-6
+IY491 INVALID RESPONSE: Inappropriate entry.   See documentation for proper
+response.
+.SP
+.TI-6
+IY492 DRIVE REFERENCE MUST BE A-Z: Re-enter appropriate data.
+.sp
+.ti-6
+IY493 UNABLE TO CREATE: Directory may be full or disk may not be write
+enabled.
+.sp
+.ti-6
+IY494 UNABLE TO WRITE: The CREATE SORT PARAMETER FILES program
+was unable to create or write to the
+specified file.  Perhaps the disk is full or write-protected.
+.sp2
+.CE
+VALUATION REPORT (VALUE.INT)
+.sp
+.ti-6
+IY501 INVALID PART NUMBER: see IY108
+.sp
+.ti-6
+IY502 STARTING PART NUMBER GREATER THAN ENDING PART NUMBER: Re-enter
+appropriate data.
+.sp
+.ti-6
+IY503 PART FILE MOUNTED ON WRONG DRIVE: see IY102
+.SP
+.TI-6
+IY504 UNEXPECTED END OF FILE ON PART FILE: see IY104
+.SP
+.TI-6
+IY505 not used
+.sp
+.ti-6
+IY506 INVALID RESPONSE: Re-enter appropriate data.
+.SP2
+.CE
+ACTIVITY REPORT (ACTIVITY.INT)
+.sp
+.ti-6
+IY511 PART FILE ON WRONG DRIVE: See IY102.
+.sp
+.ti-6
+IY512 UNEXPECTED EOF ON PART FILE: See IY104.
+.sp
+.ti-6
+IY513 PROGRAM MUST BE RUN FROM MENU: See IY201.
+.SP
+.TI-6
+IY514 OPTION NUMBER OUT OF RANGE: Your entry was not numeric, greater than
+6, or less than 1.
+.SP
+.TI-6
+IY515 INVALID PART NUMBER: A-Z, 0-9, slash (/), or dash (-) only. A RETURN
+defaults to the first part number on the file.
+.SP
+.TI-6
+IY516 INVALID PART NUMBER: A-Z, 0-9, slash (/), or dash (-) only. A RETURN
+defaults to the end of the file.
+.SP
+.TI-6
+IY517 ENDING PART NUMBER IS LESS THAN STARTING PART NUMBER
+.SP
+.TI-6
+IY518 PR2 FILE NOT FOUND: See IY308.
+.SP2
+.CE
+TRANSACTION PROOF (PROOF.INT)
+.SP
+.ti-6
+IY521 PROGRAM MUST BE CALLED FROM MENU: See IY201.
+.SP
+.TI-6
+IY522 PROGRAM CAN'T RUN. NO AUDITING REQUESTED: Change the audit parameters
+through the PARAMETER ENTRY program if auditability desired.
+.SP2
+.CE
+ITEM FILE RECOPY (PARTFILE)
+.SP
+.TI-6
+IY531 UNEXPECTED EOF ON PART FILE READ: Invalid information in part file
+header record. See Chapter 30.
+.SP
+.TI-6
+IY532 INVALID RESPONSE: Not a valid response.  See documentation for valid
+responses.
+.SP
+.TI-6
+IY533 INVALID PART FILE PARAMETERS: See documentation for proper file
+allocation.
+.SP
+.TI-6
+IY534 END OF FILE ON PART FILE CREATE: See Chapter 30.
+.SP
+.TI-6
+IY535 THAT'S NOT THE RIGHT INPUT FILE: Put the correct file on the input
+drive.
+.SP
+.TI-6
+IY536 NO INPUT FILE FOUND ON DRIVE A: Put the correct item file on drive A.
+.SP
+.TI-6
+IY537 INVALID PART FILE: The input file is null.  See Chapter 30.
+.SP
+.TI-6
+IY538 THAT'S NOT THE RIGHT OUTPUT FILE: You've changed the B disk before
+being prompted to do so.
+.SP
+.TI-6
+IY539 UNEXPECTED EOF ON WRITE TO PART FILE: See IY423 and Chapter 30.
+.SP
+.TI-6
+IY540 NO OUTPUT FILE FOUND: You've removed the B disk before being prompted.
+.SP
+.TI-6
+IY541 INVALID OUTPUT FILE FOUND: The output file is null.  See Chapter 30.
+.SP
+.TI-6
+IY542 THERE IS A PART FILE ON THE DISK ON DRIVE B: No part files should reside
+on the disk used to receive the recopied output.  Mount a disk that does not
+contain an IYPRT file.
+.SP
+.TI-6
+IY543 THERE IS NO SECOND PARAMETER FILE ON THAT DISK: Check to make sure
+your system disk (the disk with IYPR1 and IYPR2)
+is in the drive named as the system drive (either A or B).
+.SP
+.TI-6
+IY544 UNABLE TO CREATE PART FILE. IS THE DISK WRITE PROTECTED?: Same as IY423.
+See Chapter 30.
+.SP
+.TI-6
+IY545 UNABLE TO WRITE TO PART FILE: see IY544.
+.SP
+.TI-6
+IY546 INVALID DATE: MM/DD/YY or DD/MM/YY only.
+.SP
+.TI-6
+IY547 UNABLE TO CREATE PR2 FILE: see IY544.
+.SP
+.TI-6
+IY548 NO INPUT FILE FOUND ON DRIVE A: Put item file to be recopied on drive A
+as directed.
+.SP
+.TI-6
+IY549 INVALID PART FILE: The file on the input drive is null.  See Chapter 30.
+.SP
+.TI-6
+IY550 INVALID PART FILE: Files must be in sorted order.  If copying continues,
+item files will not be in sorted order.
+.qi
+.he
+.bp
+.ig
+CHAPTER 30
+E R R O R    R E C O V E R Y
+.pp5
+When certain programs, notably the data and parameter entry, recopy, and
+update programs end abnormally they may leave a file with an improper
+filetype.  Under normal conditions the filetypes of item, parameter, and
+audit files should end with a 1 (one) to indicate the file is a valid
+current file (for example, IYAUD.001).	Since the 1 is changed to a 0 (zero)
+when the file is being processed, and renamed back to 1 when processing
+is complete, you will never see a zero as the third digit unless the program
+ended before the rename took place, or the rename failed for some other reason.
+.he Appendix: Chapter 30
+.pp
+Before renaming the file with the CP/M REN command, you should try to
+learn why the program ended prematurely or the rename failed.  It is quite
+possible that the problem is hardware related, and it may even be due to
+a problem with the operating system.
+.pp
+To rename a file, give the REN command in the following form:
+.sp
+.in10
+REN D:nnnnnnnn.ttt=D:nnnnnnnn.ttt
+.qi
+.sp
+.ad
+where D is a drive reference, nnnnnnnn an 8 character filename, and ttt the
+3 character filetype.  The filename and type to the left of the equal sign
+is that to which the file on the right will be renamed.  For example, to rename
+IYPRT.100 to IYPRT.101 give the command,
+.sp
+.in10
+REN A:IYPRT.101=IYPRT.100
+.qi
+.sp
+.ad
+if IYPRT.100 is on A, and you want IYPRT.101 on the A drive as well.  The
+rename cannot take place if a file with the same name as that to which the
+other file is to be renamed already exists on the designated drive.
+.pp
+Certain error conditions may arise because a disk or its directory is full,
+or the disk write-protected.  If the disk is write protected, remove the
+write-protect tab or apply a write-enable tab (whichever is appropriate for
+your system).  Unless your disk contains many other files besides those used
+and created by the Inventory Control System, the disk directory should not
+be full.  However, since the number of files a directory can hold does
+vary, you should find out the capacity of the directory you are using.
+.pp
+To check to see if a disk is full use the CP/M STAT command.  Although this
+command should be on the currently logged drive, it can give you the status
+of files on other drives.   For example, to find the number of bytes
+remaining on the B drive with STAT on the A drive type the command,
+.sp
+.in10
+STAT B:
+.qi
+.sp
+.ad
+See the CP/M Features and Facilities manual for complete instructions on
+how to use the STAT command.
+.pp
+Some error messages make reference to a null file or null header record.
+An INVALID FILE error message may also indicate a null file since no SSG
+files are created as null files.  All SSG files have one record written
+to them upon creation, either a header record, or if a parameter file,
+the entire file is made up of one record.
+If the entire file is null, the TYPE command, instead of displaying the
+file contents, will simply return the CP/M prompt character.  If the header
+record is null, the first record to appear will be a data record.  Currently
+only the item and audit files use header records.
+.pp
+If a header record is incorrect, you may be able to correct it using a file
+editor.  Check the file specifications for the necessary information.
+Be certain to get the record length correct. This
+recovery procedure is suggested only for those with substantial operating
+experience or data processing knowledge.  In any case, back up your files
+before attempting to modify them with an editor.
+For others, the best solution is to
+bring your backup file up to date.
+.pp
+To recover from certain error conditions you may need to recreate the first of
+the two parameter files IYPR1.	Since no information in this file is
+altered by processing, once the file has been created by the PARAMETER ENTRY
+program you can continue.
+.pp
+If a recovery procedure requires you to recreate the second parameter file
+IYPR2 you may need to alter the file to get back to where you were.  This
+is because the IYPR2 file contains information that is altered during the
+normal processing cycle.  You may want to reset the batch number to
+correspond with the current number.  To do so, check the file specifications
+and make the changes with an editor. The IYPR2 file also contains a
+flag which indicates whether any files are unsorted.  You need not reset this
+flag if you make sure all your item files are in sorted order before
+continuing.
+.bp
+.pp
+Message IY438 **ERROR** THE PROGRAM WAS TERMINATED BEFORE COMPLETION appears
+at the system menu after a fatal error.  The error that caused IY438 to
+appear should have displayed its error message briefly before the menu and
+IY438 appeared.  If for some reason you did not notice which error it was,
+restart the system and try to continue where you left off.  A rename may be
+required if the program just run was either ADD TO STOCK, DEPLETE STOCK,
+ITEM ENTRY, OR START A NEW ACTIVITY PERIOD.
+If the error
+occurs again, be sure to take note of the message.
+.he
+.bp
+.ig
+CHAPTER 31
+C O M M A N D	 S U M M A R Y
+.in9
+.ti-9
+ESCAPE:  Ends the current function or program.
+.sp
+.ti-9
+RETURN:  Enters data and advances to next request, accepts default value,
+moves cursor forward through DMS screen fields.
+.sp
+.ti-9
+STOP:	 Typing S-T-O-P followed by RETURN is the same as ESCAPE, use at
+non-DMS screen requests only.
+.sp
+.ti-9
+CTRL-H:  Backs cursor up one position, erasing the character in that position.
+.sp
+.ti-9
+DELETE (SHIFT-DELETE):	Backs up cursor one position, erasing the character
+in that position; use at non-DMS requests.
+.sp
+.ti-9
+CTRL-R:  Refreshes garbled DMS screen.
+.sp
+.ti-9
+CTRL-X:  Cancels current add to stock, deplete stock, or item entry
+transaction.
+.sp
+.ti-9
+CTRL-A:  At ITEM ENTRY access key field, puts program in add-records mode.
+.sp
+.ti-9
+CTRL-D:  At ITEM ENTRY access key field, deletes record currently displayed.
+.sp
+.ti-9
+CTRL-S:  At ITEM ENTRY access key field, saves records added or changed so
+far this session.
+.sp
+.ti-9
+CTRL-N:  At ITEM ENTRY access key field, if no record currently displayed,
+gets first record on file; if a record is currently displayed, gets next
+record after it.
+.sp
+.ti-9
+CTRL-B:  At ITEM ENTRY access key field, gets record before currently
+displayed record; within a DMS screen, moves cursor back one field.
+.sp
+.ti-9
+^ (UP ARROW):  Moves cursor back one request at non-DMS screen request.
+.qi
+#

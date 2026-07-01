@@ -1,0 +1,248 @@
+
+ REM ******************************************************************\
+     *								                                  *\
+     *	   OE120.BAS	  ORDER ENTRY END OF DAY PROGRAM              *\
+	 *                                                                *\
+	 ******************************************************************
+
+%INCLUDE oecommon
+
+	DIM PR1.PASSWORD$(3), PR1.CREDCARD.CODE%(4), PR1.CREDCARD.NAME$(4),   \
+		LINE$(6)
+
+	DATA "PLACE SUSPENSE FILE ON DRIVE "
+	DATA "PRESS CARRIAGE RETURN WHEN READY"
+	DATA "CREATING NEW SUSPENSE FILE"
+	DATA "START OF DAY HAS NOT BEEN RUN"
+
+	FOR I%=1 TO 4 : READ LINE$(I%) : NEXT I%
+
+	REM-----OPEN PARAMETER FILES 1 AND 3-----------------------------------
+
+	GOSUB 80000 : GOSUB 80200
+
+	REM-----READ PARAMETER FILES 1 AND 3-----------------------------------
+
+	GOSUB 80020 : GOSUB 80220
+
+	REM-----TEST THAT START OF DAY HAS BEEN RUN----------------------------
+
+	IF PR3.ENDOF.DAY%=1 THEN 10
+	PRINT CLRS$
+	R%=ROW%(4) : C%=COL%(24) : Z$=BELL$+LINE$(4) : GOSUB 12100
+	GOTO 90990
+
+	REM-----ISSUE DISK MESSAGE---------------------------------------------
+
+10	PRINT CLRS$
+	R%=ROW%(3) : C%=COL%(24) : Z$=BELL$+LINE$(1)+LEFT$(PR1.SUSP.DRV$,1)
+	GOSUB 12100
+	R%=ROW%(5) : C%=COL%(24) : Z$=BELL$+LINE$(2) : GOSUB 12100
+	R%=ROW%(5) : C%=COL%(56) : LENGTH%=1 : GOSUB 12200
+	IF F%=1 THEN 90000
+	INITIALIZE
+
+	REM-----DELETE ANY OLD 301 SUSPENSE FILES------------------------------
+
+	NAME1$=PR1.SUSP.DRV$+"OESUSFIL."
+	NAME2$=PR1.SUSP.DRV$+"OESUSIND."
+	FILE$=NAME1$+"301"
+	IF SIZE(FILE$)=0 THEN 15
+	N%=11
+	GOSUB 85200
+	DELETE 11
+
+15	FILE$=NAME2$+"301"
+	IF SIZE(FILE$)=0 THEN 20
+	N%=11
+	GOSUB 85200
+	DELETE 11
+
+	REM-----BACKUP 201 TO 301----------------------------------------------
+
+20	OLDFILE$=NAME1$+"201"
+	IF SIZE(OLDFILE$)=0 THEN 25
+	NEWFILE$=NAME1$+"301"
+	Z%=RENAME(NEWFILE$,OLDFILE$)
+	OLDFILE$=NAME2$+"201"
+	NEWFILE$=NAME2$+"301"
+	Z%=RENAME(NEWFILE$,OLDFILE$)
+
+	REM-----CREATE TEMPORARY BACKUP SUSPENSE FILES-------------------------
+
+25	FILE$=NAME1$+"$$$" : M%=205 : N%=11
+	IF END #11 THEN 9000
+	GOSUB 85300
+
+	FILE$=NAME2$+"$$$" : M%=12 : N%=12
+	IF END #12 THEN 9010
+	GOSUB 85300
+
+	REM-----OPEN OLD SUSPENSE FILE-----------------------------------------
+
+	IF END #5 THEN 80410
+	GOSUB 80400
+
+	IF END #6 THEN 80510
+	GOSUB 80500
+
+	REM-----WRITE FIRST RECORD ON BACKUP INDEX-----------------------------
+
+	FILE1.RECS%=0 : FILE2.RECS%=1
+	S2.KEY%=FILE1.RECS% : S2.RECNO%=FILE2.RECS% : N%=1
+	IF END #12 THEN 8070
+	GOSUB 8060
+
+	REM-----READ FIRST RECORD ON INDEX-------------------------------------
+
+	N%=1
+	IF END #6 THEN 80530
+	GOSUB 80520
+	INDEX.END%=S2.RECNO%
+
+	REM-----READ INDEX AND BACK UP FILE------------------------------------
+
+	FOR I%=2 TO INDEX.END%
+		N%=I%
+		GOSUB 80520
+		GOSUB 1000
+	NEXT I%
+
+	REM-----WRITE INDEX RECORD 1-------------------------------------------
+
+	S2.KEY%=FILE1.RECS% : S2.RECNO%=FILE2.RECS%
+	N%=1
+	IF END #12 THEN 8070
+	GOSUB 8060
+
+	REM-----CLOSE OLD SUSPENSE FILES AND RENAME AS BACKUP FILES------------
+
+	CLOSE 5,6
+	DUMMY%=RENAME(NAME1$+"201",NAME1$+"101")
+	DUMMY%=RENAME(NAME2$+"201",NAME2$+"101")
+
+	REM-----CLOSE TEMP FILES AND RENAME AS MAIN FILES----------------------
+
+	CLOSE 11,12
+	DUMMY%=RENAME(NAME1$+"101",NAME1$+"$$$")
+	DUMMY%=RENAME(NAME2$+"101",NAME2$+"$$$")
+
+	REM-----WRITE PARAMETER FILE 3-----------------------------------------
+
+	PR3.STARTOF.DAY%=1 : PR3.ENDOF.DAY%=0
+	IF END #3 THEN 80245
+	GOSUB 80240
+	CLOSE 3
+	GOTO 90990
+
+	REM-----WRITE NEW BACKUP FILES-----------------------------------------
+
+	REM-----READ SUSPENSE REC TYPE 1---------------------------------------
+
+1000	N%=S2.RECNO%
+	IF END #5 THEN 80422
+	GOSUB 80420
+	IF S1.DEL%=1 THEN 1100
+
+	REM-----MAKE ENTRY IN NEW INDEX----------------------------------------
+
+	FILE1.RECS%=FILE1.RECS%+1 : FILE2.RECS%=FILE2.RECS%+1
+	S2.KEY%=S1.ORDNO% : S2.RECNO%=FILE1.RECS%
+	N%=FILE2.RECS%
+	IF END #12 THEN 8070
+	GOSUB 8060
+
+	REM-----WRITE REC TYPE 1 TO NEW SUSPENSE FILE--------------------------
+
+	OLD.NEXTREC%=S1.NEXTREC% : S1.NEXTREC%=FILE1.RECS%+1 : N%=FILE1.RECS%
+	IF END #11 THEN 8010
+	GOSUB 8000
+
+	REM-----TEST FOR REC TYPE 3--------------------------------------------
+
+	IF S1.INVOICE%=0 THEN 1010
+
+	REM-----READ REC TYPE 3------------------------------------------------
+
+	N%=OLD.NEXTREC%
+	IF END #5 THEN 80430
+	GOSUB 80428
+
+	REM-----WRITE RECTYPE 3------------------------------------------------
+
+	FILE1.RECS%=FILE1.RECS%+1
+	OLD.NEXTREC%=S1.NEXTREC% : S1.NEXTREC%=FILE1.RECS%+1 : N%=FILE1.RECS%
+	IF END #11 THEN 8050
+	GOSUB 8040
+
+	REM-----READ REC TYPE 2------------------------------------------------
+
+1010	IF OLD.NEXTREC%=0 THEN 1100
+	N%=OLD.NEXTREC%
+	IF END #5 THEN 80426
+	GOSUB 80424
+	OLD.NEXTREC%=S1.NEXTREC%
+	IF S1.DEL%=1 THEN 1010
+
+	REM-----WRITE REC TYPE 2-----------------------------------------------
+
+	FILE1.RECS%=FILE1.RECS%+1
+	IF OLD.NEXTREC%<>0 THEN S1.NEXTREC%=FILE1.RECS%+1
+	N%=FILE1.RECS%
+	IF END #11 THEN 8030
+	GOSUB 8020
+	GOTO 1010
+
+1100	RETURN
+
+	REM-----WRITE SUSPENSE RECORD TYPE 1-----------------------------------
+
+8000	PRINT #11,N%; S1.ORDNO%, S1.RECTYPE%, S1.DEL%, S1.NEXTREC%, \
+		S1.CUSTNAME$, S1.CUSTADD1$, S1.CUSTADD2$, S1.CUSTADD3$, \
+		S1.POSTCODE$, S1.CUSTTEL$, S1.CUST.ORDNO$, S1.PAY%,\
+		S1.REASON%, S1.DATE$, S1.DATE%, S1.INVOICE%
+	RETURN
+
+8010	ERROR$="UNABLE TO WRITE BACKUP SUSPENSE RECORD TYPE 1"
+	GOTO 85000
+
+	REM-----WRITE SUSPENSE RECORD 2----------------------------------------
+
+8020	PRINT #11,N%; S1.ORDNO%, S1.RECTYPE%, S1.DEL%, S1.NEXTREC%, \
+		S1.PARTNO$, S1.PARTDESC$, S1.QUANTITY%, S1.PRICE, S1.VAT
+	RETURN
+
+8030	ERROR$="UNABLE TO WRITE BACKUP SUSPENSE RECORD TYPE 2"
+	GOTO 85000
+
+	REM-----WRITE SUSPENSE RECORD 3----------------------------------------
+
+8040	PRINT #11,N%; S1.ORDNO%, S1.RECTYPE%, S1.DEL%, S1.NEXTREC%,\
+		S1.INV.NAME$, S1.INV.ADD1$, S1.INV.ADD2$, S1.INV.ADD3$,\
+		S1.INV.POSTCODE$, S1.INV.TEL$
+	RETURN
+
+8050	ERROR$="UNABLE TO WRITE BACKUP SUSPENSE RECORD TYPE 3"
+	GOTO 85000
+
+	REM-----WRITE SUSPENSE INDEX RECORD------------------------------------
+
+8060	PRINT #12,N%; S2.KEY%, S2.RECNO%
+	RETURN
+
+8070	ERROR$="UNABLE TO WRITE BACKUP SUSPENSE FILE INDEX"
+	GOTO 85000
+
+9000	ERROR$="UNABLE TO OPEN BACKUP SUSPENSE FILE"
+	GOTO 85000
+
+9010	ERROR$="UNABLE TO OPEN BACKUP SUSPENSE FILE INDEX"
+	GOTO 85000
+
+%include oeinpout
+%include oepr1fil
+%include oepr3fil
+%include oesusfil
+%include oesusind
+%include oefilsub
+%include oegetpgm

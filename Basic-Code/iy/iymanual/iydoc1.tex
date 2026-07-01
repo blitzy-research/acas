@@ -1,0 +1,1395 @@
+.mt9
+.mb7
+.po8
+.ll65
+.he
+.bp38
+.ig
+CHAPTER 16
+O P E R A T I O N A L	O V E R V I E W
+.sp2
+.ce
+SETUP
+.pp5
+System setup involves four steps:
+.he Operations: Chapter 16
+.sp
+.in10
+.ti-4
+1.  Make two copies of the SSG distribution disk.
+.sp
+.ti-4
+2.  Define your CRT to the Display Management System.
+.sp
+.ti-4
+3.  Set the system parameters.
+.sp
+.ti-4
+4.  Build the item file.
+.qi
+.pp
+To make the copies of the distribution disk you need two formatted
+disks with the CP/M operating system SYSGEN'ed on (see the CP/M Features
+and Facilities manual on how to do this).  These disks should also
+hold the CP/M PIP and STAT commands, as well as the CBASIC runtime
+interpreter CRUN2.  After you PIP all the Inventory Control System files
+onto your disks, store the SSG distribution disk safely away; use one
+of your newly created disks as a system master and one as a work disk.
+If you need to make new or additional work disks, make them from the
+system master disk, not the SSG distribution disk.
+.pp
+The Display Management System comes ready to run on a Hazeltine 1500
+CRT device; if you have a Hazeltine 1500 you just erase the DEF type
+files and the CRTDEF.INT program from your two disks
+(not the SSG distribution disk!) and continue.	 If you have one
+of the CRT's listed in the following chapter the procedure involves
+renaming the file that corresponds to your CRT to CRT.DEF; you then
+erase the rest of the DEF files and the CRTDEF.INT program and begin.
+If you have neither a Hazeltine 1500, nor any of the CRT's listed in the
+next chapter, you define your CRT to the Display Management System by
+running the CRTDEF.INT program and answering its requests.
+.pp
+To set the system parameters you call up the Inventory Control System
+by the command CRUN2 IY, set the GENERAL PARAMETERS according to your
+needs, set the AUDIT PARAMETERS, set the ITEM FILE PARAMETERS, and
+the SORT PARAMETERS.  At first time start-up the system takes you
+immediately to the PARAMETER ENTRY program where you set the general
+and audit parameters, and then to the section of the ITEM FILE RECOPY
+program where you set the item file parameters.  Once these are set, the
+system menu comes up and you should choose
+the CREATE SORT PARAMETER FILES program.
+.pp
+To build the item file you call the ITEM ENTRY program through the system
+menu.  If no valid records exist on the file the program goes right into
+the adding mode; if records do exist on the file you must give the
+add records command (CTRL-A).  Enter the item number, then the information
+for the the item.  Enter ESCAPE at any time to to place the information in
+the file and begin adding the next item.
+.sp2
+.ce
+NORMAL PROCESSING
+.pp
+Normal processing includes adding to stock when goods arrive, depleting
+stock when they leave, generating the reports, and, if you wish auditability,
+printing the transaction proofs.
+.pp
+To add to stock you select the ADD TO STOCK program from the menu, access
+the item by item number, relative record number, or sequentially by a next-
+record or previous record command, and
+enter the quantity added and its cost.	The program updates the quantities
+on order and back-ordered by subtracting the amount added from both values.
+You can then change the order dates or adjust the other
+order information.  ESCAPE enters the transaction and
+begins the next additions to stock.  ESCAPE once more
+returns you to the system menu.
+.pp
+To record depletions from stock select the menu program DEPLETE STOCK.	Access
+the part as for adding to stock and enter the quantity depleted.  The program
+automatically updates the quantity in stock.
+.pp
+If you've chosen the auditability option (at the AUDIT PARAMETERS screen of
+the PARAMETER ENTRY program), and want both additions and depletions
+audited, you must erase the current audit file before going from
+add to stock to deplete stock, or from deplete stock to add to stock.
+This is because the audit file	holds additions or depletions, but not
+both kinds of transactions at the same time.
+To ensure accuracy and completeness you should print a transaction proof
+before you erase the audit file.  If you've chosen to audit additions only,
+or depletions only, there is no need to erase the file, but you should
+proof and erase it regularly so it does not grow unnecessarily large.
+.pp
+To generate a report, select the desired reporting program from the system
+menu, choose the report options available, set up your printer, and print.
+.pp
+When you add new items to your stock they must be added to the master item
+file through the ITEM ENTRY program.  If the addition of the item means
+the file is no longer ordered by item number, a sort will be required.
+How you run the sort depends on how many item files you have, how many
+disk drives you have, and the size of the item files.  Chapter 22 gives
+full details.
+.pp
+If you wish to change the distribution of the items among the item files,
+or when you want to physically remove deleted records from the file, you
+run the program ITEM FILE RECOPY from the system menu, changing disks as
+directed by the program.
+.pp
+If the number of item files changes, or if you want to alter your sorting
+procedures, you will need to change the sort parameters through the CREATE
+SORT PARAMETER FILES program.
+.he
+.bp
+.ig
+CHAPTER 17
+S Y S T E M    I N S T A L L A T I O N
+.pp5
+The first step in installing the Inventory Control System is to make
+two system disks from the SSG distribution disk.
+.he Operations: Chapter 17
+.pp
+Place a freshly formatted disk containing the CP/M operating system,
+the CBASIC runtime interpreter CRUN2, and the CP/M PIP and STAT commands
+on drive A.  Place the (write-protected)
+SSG distribution disk on drive B and hit the
+RESET switch on your machine.  Type the command,
+.sp
+.ti20
+A>PIP A:=B:*.*[OV]
+.sp
+.ad
+and follow with RETURN.  When the PIP is complete, remove the distribution
+disk from drive B and replace it with a formatted disk with the
+CP/M operating system SYSGEN'ed onto it.  Reset the machine, then
+give the command,
+.sp
+.ti20
+A>PIP B:=A:*.*[OV]
+.pp
+The second step in installing the Inventory Control System is to
+define the characteristics of your CRT to the Display Management
+System.
+.pp
+If you have the Hazeltine 1500 CRT, the Inventory Control
+System will run immediately, just erase all files with the filetype
+(or suffix) of DEF and the CRTDEF.INT program from your work disks.
+.pp
+If you have any of the following CRT's you must use the CP/M REN command
+to rename the DEF file	corresponding to your CRT to the filename CRT.DEF:
+.cp12
+.sp
+.li
+      CRT			      DEF FILE
+   -------------------------------------------------------
+   ADM 3A			      ADM3A.DEF
+   BEEHIVE 150			      B150.DEF
+   BEEHIVE 152			      B152.DEF
+   BEEHIVE 157			      B157.DEF
+   CROMEMCO 3100		      CRO3100.DEF
+   DYNABYTE NAKED TERMINAL	      DYNABYTE.DEF
+   SOROC IQ 120 		      SOROC120.DEF
+   IMSAI VIOC			      VIOC.DEF
+.bp
+.ad
+Type the command,
+.sp
+.ti20
+A>REN A:CRT.DEF=A:nnnnnnnn.ttt[v]
+.sp
+.ad
+where nnnnnnnn.ttt stands for the filename and filetype of your CRT
+definition file.  Erase the remaining DEF files from your work disk
+(not the SSG distribution disk!), but do not erase the CRT.DEF file.
+Erase also the CRTDEF.INT program.
+.pp
+If you have neither the Hazeltine 1500 terminal, nor any of the CRT's
+listed above, see Chapter 28 for instructions on how to define your
+CRT to the DMS by running the CRTDEF.INT program.
+.pp
+The Inventory Control System will always expect to find the CRT.DEF
+file on the currently logged drive.
+.pp
+You can now call up the Inventory Control System and begin setting
+the system parameters and building the item file, the last steps remaining
+in the system setup sequence.
+.he
+.bp
+.ig
+CHAPTER 18
+I N T E R A C T I N G	W I T H   T H E    S Y S T E M
+.pp5
+At first time startup
+the Inventory Control System creates a default parameter file,
+goes directly into the PARAMETER ENTRY program, then into the ITEM FILE
+RECOPY program (to set the item file parameters), and then to the system
+menu.  Once the system is installed, the command
+.he Operations: Chapter 18
+.sp
+.ti20
+A>CRUN2 IY
+.sp
+.ad
+brings up the system menu immediately.	All functions except for
+sorting under certain circumstances (see Chapter 22), can be performed
+by choosing programs from the system menu (see Chapter 27 for a reproduction
+of the system menu).
+.pp
+Entry programs use formatted screen displays with prompts for information
+and bracketed fields to receive the data or
+parameter values you enter.  RETURN moves the CRT cursor forward
+along a predetermined route
+through the fields on the screen.  CTRL-B backs the cursor up one field in the
+DMS screen.
+.pp
+If your entry does not fill the field completely you must hit RETURN to
+go on to the next field.  Whatever you type into the field becomes the
+current value for that field, regardless of what other characters may
+still remain in the field.  For example, if the current value in the
+Company Name field is [Ajax Enterprises 	], and your new entry
+is "Ajax Inc.", the field would look like this before you hit the
+RETURN key: [Ajax Inc.rprises	      ].  After hitting RETURN the field
+would show [Ajax Inc.----------------].
+.pp
+To end any Inventory Control System function press the ESCAPE key.
+ESCAPE takes you one "layer" out of the program.  For example,
+while adding items to the file you hit ESCAPE to begin adding the next
+item.  ESCAPE again takes you out of the adding mode but leaves
+you at the ITEM ENTRY screen where you can examine, change, or delete
+other file records.  ESCAPE once more removes you from the ITEM ENTRY
+screen and program altogether and returns the system menu.  ESCAPE at the
+system menu ends the Inventory Control System.	The procedure for leaving
+the ADD TO STOCK and DEPLETE STOCK programs is similar, though you need not
+hit ESCAPE between depletion transactions.
+Typing the word
+STOP works similarly at non-DMS controlled requests.
+.pp
+To cancel a transaction such as entering a new item into the file, adding
+to stock, or depleting stock, issue the command CTRL-X at any field on the
+DMS screen.  Should a DMS screen become garbled for any reason, the command
+CTRL-R refreshes it.
+.pp
+To back up one request when not in a Display Management System
+screen (such as at the report option requests) you should enter an up-arrow
+(^) followed by RETURN.
+.pp
+To back the cursor up one space in a DMS screen field, use the command
+CTRL-H.  At non-DMS requests, use the DELETE command.
+.he
+.bp
+.ig
+CHAPTER 19
+S E T T I N G	S Y S T E M   P A R A M E T E R S
+A N D	D R I V E   A L L O C A T I O N
+.pp5
+The procedure for setting system parameters at initial startup differs
+from the procedure for setting the parameters once the system is installed.
+When no parameter files or valid inventory records exist, after asking for
+the "system drive", the system goes immediately to the PARAMETER ENTRY
+program where you can examine or change
+the general and audit parameters.  After
+these are set, the system moves on to the section of the ITEM FILE RECOPY
+program that allows you to set or change the item file parameters (see
+Chapter 23). After the item file parameters are set, the system menu
+comes up.  You should choose the CREATE SORT PARAMETER FILES program, and
+then the ITEM ENTRY program.  If no valid records exist on the item file
+the program goes automatically into the adding mode, with the cursor in the
+item number field. You then enter the item number
+and other information for that item.
+.he Operations: Chapter 19
+.pp
+After first time startup, to change the parameters
+you call the appropriate program from the system menu directly.
+All fields for parameter (and data) entry are edited to exclude double
+quotation marks (") and invalid
+control characters, and to ensure the correctness
+of the entry (e.g., alphabetic characters not allowed in the vendor number
+field).
+.sp
+.ce
+GENERAL PARAMETERS
+.pp
+Set the general parameters through the menu function PARAMETER ENTRY.  This
+brings up the PARAMETER ENTRY MENU.  Choose GENERAL PARAMETERS and make
+the desired entries or changes subject to the restrictions listed below:
+.sp
+.in15
+.ti-10
+COMPANY NAME:  Maximum length is 60 characters
+.sp
+.ti-10
+CURRENT PERIOD:  Accepts week, month, or quarter only.
+.sp
+.ti-10
+TO DATE PERIOD:  Accepts month, quarter, or year only.
+.sp
+.ti-10
+DATE FORMAT:  Accepts MM/DD/YY or DD/MM/YY.
+.sp
+.ti-10
+PAGE WIDTH:  Accepts any value from 1 to 999.  Since the Inventory
+Control System requires a 132 column printer, the PAGE WIDTH parameter
+control the placement of the report headings.  A value less than 132
+moves the heading to the left, a value greater than 132 moves it to
+the right.
+.sp
+.ti-10
+LINES PER PAGE:  Accepts any value from 3 to 999.  The default is 60
+lines, or 10 inches, measured from the top of the first printed line.
+.sp
+.ti-10
+AVERAGE VALUATION:  When set to NO, the value of the inventory must be
+calculated manually, outside the system, and the INVENTORY VALUE field
+updated through the ITEM ENTRY program if you wish a valuation report.
+.sp
+.ti-10
+ARRAY SIZE:  This value depends on the amount of Random Access Memory
+(RAM) available.  The larger the array, the faster the record access,
+although unless you expect to access many items during a run of the system
+a larger array size does not substantially speed up record access.
+Use the chart below to determine the right size for your computer (memory
+sizes are CP/M configured):
+.sp
+.cp6
+.li
+		   RAM		      ARRAY SIZE
+		------------------------------------
+		   45K			  100
+		   48K			  175
+		   56K			  500
+		   64K			 1000
+.sp
+.ti-10
+CONSOLE BELL:  Sounds the console "bell" when errors occur.
+.sp
+.ti-10
+DEBUGGING:  Leave set to NO.
+.qi
+.sp3
+.ce
+AUDIT PARAMETERS
+.pp
+Set the audit parameters through the PARAMETER ENTRY program.  When the
+PARAMETER ENTRY MENU comes up, choose AUDIT PARAMETERS.  Enter the
+disk drive where the audit file is to reside (A-D), and then set the
+ADDITIONS AUDIT USED and DEPLETIONS AUDIT USED values as desired.
+For no auditability, set both to NO.
+.bp
+.ce
+ITEM FILE PARAMETERS
+.pp
+Set or change the item file parameters through the menu program ITEM FILE
+RECOPY.  When asked if you wish to change the parameters answer YES.  A NO
+answer tells the program you don't wish to change the parameters, but want
+to remove deleted records from the file.  If you anticipate only one
+item file, enter the drive location (A-D).  If more than one, enter the drive
+location for each, and the lowest item number on item file #2 and item file #3.
+Item numbers may contain only the letters A through Z, the numbers 0 through
+9, dashes, or slashes.
+.sp3
+.ce
+SORT PARAMETERS
+.pp
+For each item file you order, there is a corresponding sort parameter file.
+If you change the number of item files, or if they grow to a size that
+makes the current set of sort parameters unworkable, you will need to change
+the values in the sort parameter files.  After calling the menu program
+CREATE SORT FILE PARAMETERS, set the workfile and output drive locations,
+and indicate whether you want to be able to switch disks to receive the sorted
+output.  The program assumes the input drive is the same drive as that
+specified for the item file.  The sort parameter files are named (if three
+item files exist) PART1.SRT, PART2.SRT, and PART3.SRT.
+.sp3
+.ce
+DISK DRIVE ALLOCATION
+.sp1
+.pp
+The Inventory Control System always
+expects to find the program files (those with
+the filetype of INT) and QSORT
+on the currently logged drive.	The two parameter
+files IYPR1.101 AND IYPR2.101 are placed on the drive specified as the
+"system" drive at system startup.  The system drive must be either drive A or
+B only.  If they are found to be on a different
+drive than the one specified as the system drive, the program assumes that
+that drive is now the system drive.  The sort parameter files PART1.SRT,
+PART2.SRT, and PART3.SRT are also expected to be on the system drive,
+unless they are placed on a special sorting disk (see Chapter 22). The
+audit file drive is established through the PARAMETER ENTRY program and can
+be on any drive location.  The CRT.DEF file (if used) is expected to reside on
+the currently logged drive.
+.pp
+The chart below suggests the best file allocation for one to three
+item files on two to four disk drives:
+.bp
+.li
+  2 DRIVE SYSTEM
+  --------------------------------------------------------------
+  1 Item File:	       A: INT FILES
+			  QSORT
+			  SYSTEM DRIVE: IYPR1
+					IYPR2
+					SRT FILES
+			  AUDIT FILE (IYAUD)
+		       B: ITEM FILE #1 (IYPRT)
+
+  2 Item Files:        A: INT FILES
+			  QSORT
+			  ITEM FILE #1 (IYPRT)
+		       B: SYSTEM DRIVE: IYPR1
+					IYPR2
+					SRT FILES
+			  AUDIT FILE (IYAUD)
+			  ITEM FILE #2 (IYPRT)
+.br
+.sp6
+.li
+  3 DRIVE SYSTEM
+  --------------------------------------------------------------
+  1 Item File:	       A: INT FILES
+			  QSORT
+		       B: SYSTEM DRIVE: IYPR1
+					IYPR2
+					SRT FILES
+			  AUDIT FILE (IYAUD)
+		       C: ITEM FILE #1 (IYPRT)
+
+  2 Item Files:        A: INT FILES
+			  QSORT
+			  ITEM FILE #1 (IYPRT)
+		       B: SYSTEM DRIVE: IYPR1
+					IYPR2
+					SRT FILES
+			  AUDIT FILE (IYAUD)
+		       B: ITEM FILE #1 (IYPRT)
+		       C: ITEM FILE #2 (IYPRT)
+
+.bp
+.li
+  3 Item Files:        A: INT FILES
+			  QSORT
+			  ITEM FILE #1 (IYPRT)
+		       B: SYSTEM DRIVE: IYPR1
+					IYPR2
+					SRT FILES
+			  AUDIT FILE (IYAUD)
+			  ITEM FILE #2 (IYPRT)
+		       C: ITEM FILE #3 (IYPRT)
+
+.br
+.sp6
+.li
+  4 DRIVE SYSTEM
+  -------------------------------------------------------------
+  1 Item File:	       A: INT FILES
+			  QSORT
+		       B: SYSTEM DRIVE: IYPR1
+					IYPR2
+					SRT FILES
+			  AUDIT FILE (IYAUD)
+		       C: ITEM FILE #1 (IYPRT)
+		       D: not used, or AUDIT FILE
+
+  2 Item Files:        A: INT FILES
+			  QSORT
+		       B: SYSTEM DRIVE: IYPR1
+					IYPR2
+					SRT FILES
+			  AUDIT FILE (IYAUD)
+		       C: ITEM FILE #1 (IYPRT)
+		       D: ITEM FILE #2 (IYPRT)
+
+  3 Item Files:        A: INT FILES
+			  QSORT
+			  SYSTEM DRIVE: IYPR1
+					IYPR2
+					SRT FILES
+			  AUDIT FILE (IYAUD)
+		       B: ITEM FILE #1 (IYPRT)
+		       C: ITEM FILE #2 (IYPRT)
+		       D: ITEM FILE #3 (IYPRT)
+
+.he
+.bp
+.ig
+CHAPTER 20
+B U I L D I N G   T H E   I T E M   F I L E
+.pp
+Once the system parameters have been set, to build the item file, select the
+ITEM ENTRY program from the system menu.  If no valid records are on the
+item file, the program goes automatically into the adding mode with the
+cursor waiting at the item number field.  If there are valid records on
+the item file the cursor goes to the access key field; the command
+CTRL-A moves the cursor to the item number field and puts the program in
+the adding mode.
+.he Operations: Chapter 20
+.pp
+To add an item to the file, give the item number and hit RETURN.  The item
+number may not be more than 10 characters long, may contain only the
+letters A through Z, the numbers 0 through 9, dashes, or slashes.  After
+the program displays the relative record number of the item in the
+access key field, enter the rest of the information for the item.
+To advance the cursor
+after each entry hit RETURN (if the field is not filled), to move back
+one field use the command CTRL-B, to back up to make an erasure use a
+CTRL-H command, and to cancel a transaction (such as an item entry),
+use the command CTRL-X.
+.cp15
+.pp
+Note the allowed entries for each field:
+.sp
+.li
+	  DESCRIPTION:	     30 characters maximum
+	  STOCKROOM QTY:     999,999
+	  REORDER POINT:     999,999
+	  REORDER QTY:	     999,999
+	  RETAIL PRICE:      99,999.99
+	  INVENTORY VALUE:   9,999,999.99
+	  VENDOR NUMBER:     any 5 digit number
+	  COST/UNIT:	     99,999.99
+	  QTY ON ORDER:      999,999
+	  DATE ORDERED:      MM/DD/YY or DD/MM/YY
+	  DATE DUE:	     MM/DD/YY or DD/MM/YY
+	  BACKORDER QTY:     999,999
+.pp
+If you wish the ACTIVITY REPORT to reflect original additions to the
+file, do not make entries for the stockroom quantity, inventory value
+(unless you have chosen not to use average valuation), or
+cost per unit.	Instead, make all other entries for the item, then
+use the ADD TO STOCK program to enter the stockroom quantity, inventory
+value, and cost per unit.
+.bp
+.pp
+When you enter an item out of order, the item file is renamed to a
+filetype with a zero in the first position (e.g., IYPRT.001)
+that indicates it is unsorted.	Before you can operate any programs
+other than ITEM ENTRY, ITEM FILE PRINT, or ITEM FILE SORT, you must sort
+the file (see Chapter 22).
+.pp
+Once you enter a valid item number, ESCAPE at any point adds the record
+to the end of the file and readies the program for the next item.  Another
+ESCAPE right after the first takes you out of the adding mode and moves
+the cursor to the access key field where you can issue commands to
+access records, delete records, or save records to disk (see Chapter 21).
+ESCAPE from the access key field returns you to the system menu.
+.pp
+While entering items onto the item file, the CTRL-S command updates the
+disk directory, thereby
+saving the records you have created in case a catastrophic
+hardware failure occurs that causes the data to be lost (such as
+a pulled plug).  Whenever you have entered more records than you would
+care to enter again, leave the adding mode and give the command CTRL-S.
+One unpleasant experience is usually enough to demonstrate the value of this
+function.
+.he
+.bp
+.ig
+CHAPTER 21
+ADDING, CHANGING, DELETING, AND EXAMINING FILE ITEMS
+.pp
+Use the ITEM ENTRY program to add new items to the file, to change
+field values for file items, to delete items no longer stocked, or
+to examine items on the file.
+.he Operations: Chapter 21
+.pp
+To add a new item select ITEM ENTRY from the system menu, and if valid
+records exist on the file, issue the CTRL-A command to add records.  See
+Chapter 20 for how to add an item to the file.	If adding the item to the
+end of the file puts the file out of order (for example, if you
+add item number A2-4600 to an item file whose last record holds item number
+A3-4550) the file will have to be sorted. A disordered file is renamed to
+indicate that it is out of order (from IYPRT.101 to IYPRT.001 for example).
+.pp
+When you add a new item to the file and
+want the stockroom quantity to be reflected on the ACTIVITY REPORT or
+audit proofs, do not enter that quantity through ITEM ENTRY;
+instead, enter that information through the ADD TO STOCK
+program.  If you've chosen inventory valuation, or want the addition
+reflected on the audit proof, do not enter the stockroom quantity, unit
+cost, or inventory value through ITEM ENTRY, but rather through the
+ADD TO STOCK program.
+.pp
+To change an item already on the file, access the record by one of three
+methods when the cursor is at the access key field:
+.sp
+.in10
+.ti-4
+1.  Enter the item number.
+.sp
+.ti-4
+2.  Enter the record number relative to the beginning of the file,
+in the form @Dnnn, where D is the drive reference, and nnn is the relative
+record number of the item on that drive.  For example, @C25 gets the
+twenty-fifth record on the item file on drive C.
+.sp
+.ti-4
+3.  Enter the CTRL-N command to bring up the first record on the item file,
+CTRL-N for the next record, and CTRL-B for the previous record.
+.sp
+.qi
+.ad
+Move the cursor forward to the desired field with RETURN, or back a
+field with CTRL-B (once a record is accessed).
+Type in the new value and hit RETURN to enter it.
+If you want auditability, do not change the stockroom quantity, inventory
+value, or cost per unit fields through the ITEM ENTRY program.	If
+you choose the average valuation feature, do not change the stockroom
+quantity, inventory value, or cost per unit through ITEM ENTRY.
+You may alter the item number, but note that this may put the file out of
+order and necessitate a sort before you can use any program besides ITEM
+ENTRY, ITEM FILE PRINT, or ITEM FILE SORT.
+.pp
+To delete an item from the file, access the record as explained above
+for changing a record and issue the command CTRL-D.  Although not physically
+removed from the file, the item can no longer be accessed.  To physically
+remove deleted records you must run the ITEM FILE RECOPY program (see Chapter
+23). Because the record for each inventory item contains more information
+than is shown on the ITEM ENTRY screen, you should delete rather than change
+an item (since you cannot change all the information on the record).
+.pp
+To examine an inventory item, call the ITEM ENTRY program from the system
+menu, and with the cursor at the access key field call the item by item number,
+relative record number, or the next-record and previous-record
+commands.  If you have
+chosen to audit additions and depletions, it is usually best to use ITEM ENTRY
+to examine the item; besides the
+additional information, the audit file does not
+need to  be proofed and erased, for example, if it is of the depletions type
+and you want information from the additions screen.
+.he
+.bp
+.ig
+CHAPTER 22
+S O R T I N G	T H E	I T E M   F I L E
+.pp5
+Sorting procedures vary depending on the number of item files, the
+size of the item files, and the number of disk drives available.
+This chapter suggests sorting procedures for each of the configurations
+suggested in Chapter 19. Other procedures besides those given in this
+chapter are available; you may want to experiment some to find the one
+best for you.
+.pp
+Only item file #1 can be sorted from the system menu, and then only
+if there is space available on any drive other than the input drive
+to hold the workfile.  The workfiles created (and erased at the end of
+the sort) equal the size of the input file.  Space to receive the sorted
+output need not be available since you can instruct the system to prompt
+you to remove the disk with the original input file and insert an empty
+disk to receive the output file.
+.pp
+If space is not available for the workfile (use the CP/M STAT command;
+see the CP/M Features and Facilities manual) you need to create a special
+sorting disk that contains the program QSORT.COM and the necessary
+sort parameter files.  When you sort the item files outside of the Inventory
+Control System this special sorting disk holds the temporary workfiles.
+The input file should not be so large that it cannot fit on the sorting disk
+with QSORT and the small sort parameter files.
+.pp
+All item files have the same filename of IYPRT.  To determine whether an
+IYPRT file is the first, second, or third item file, use the CP/M TYPE
+command.  The first record to appear is the "header record".  The header
+record contains the file's drive reference and the higest item number on
+that file.
+.pp
+All item files have a three digit filetype (or suffix).  A zero as the
+leftmost digit indicates the file is unsorted, a 1 (one) indicates it
+is sorted. A 1 (one) as the middle digit indicates the file has been
+sorted, but not checked for duplicates (if, of course, the first digit is
+1).  Under normal circumstances, the rightmost digit appears as 1.
+.mt8
+.bp
+.mb5
+.ce
+SUGGESTED SORTING PROCEDURES
+.sp2
+1. ONE ITEM FILE ON A 2 DRIVE SYSTEM (WITH FILE LESS THAN 1/3 DISK):
+.sp6
+.li
+	      A 		  B
+
+	   INT FILES	       ITEM FILE #1
+	   QSORT.COM
+	   PARAM FILES
+	   SRT FILES
+	   AUDIT FILE
+.sp
+.li
+Sort Parameters:
+
+	  INPUT DRIVE:	     B
+	  OUTPUT DRIVE:      B
+	  WORKFILE DRIVE:    B
+	  SWITCH?:	     NO
+.br
+.sp
+.in10
+.ti-10
+Suggested Procedure:
+Run directly from menu when sorting required. The (unsorted) input file is
+erased if the ITEM ENTRY program is run at any time after the sort.
+.qi
+.sp2
+.br
+2. ONE ITEM FILE ON A 2 DRIVE SYSTEM (WITH SPACE ON A FOR THE WORKFILE AND
+THE FILE NO LARGER THAN 1/2 DISK):
+.sp6
+.li
+	      A 		     B
+
+	   INT FILES		  ITEM FILE #1
+	   QSORT
+	   PARAM FILES
+	   SRT FILE
+	   AUDIT FILES
+.sp
+.li
+Sort Parameters:
+
+	  INPUT DRIVE:	    B
+	  OUTPUT DRIVE:     B
+	  WORKFILE DRIVE:   A
+	  SWITCH?:	    NO
+.mt9
+.bp
+.mb7
+.in10
+.ti-10
+Sorting Procedure:
+Run directly from the menu when required.  The input file is erased if the
+ITEM ENTRY program is run at any time after the sort.
+.qi
+.sp2
+.br
+3. ONE ITEM FILE ON A 2 DRIVE SYSTEM (WITH ITEM FILE LARGER THAN 1/2 DISK
+AND INSUFFICIENT SPACE ON A FOR THE WORKFILE):
+.sp6
+.li
+	      A 		   B
+
+	   INT FILES		ITEM FILE #1
+	   QSORT
+	   PARAM FILES
+	   SRT FILES
+	   AUDIT FILE
+.sp
+.li
+Sort Parameters:
+
+	  INPUT DRIVE:	      B
+	  OUTPUT DRIVE:       B
+	  WORKFILE DRIVE:     A
+	  SWITCH?:	      YES
+.sp
+.in10
+.ti-10
+Sorting Procedures:  Must run this sort outside the Inventory Control System.
+You will need to make up a special sorting disk with QSORT.COM, the
+sort parameter file PART1.SRT, and the CP/M operating system.  Perform the
+following steps:
+.sp
+1. To make the special sorting disk, end the Inventory Control System and
+remove the disk currently on drive B.  Insert an empty, formatted disk
+(with the CP/M operating system) on
+B.  Give the CTRL-C to reset the maps of disk usage.   Type the command
+PIP B:=A:QSORT.COM[V], the command PIP B:=A:*.SRT[V], and the command
+PIP B:=A:PIP.COM[V] (for convenience).	The B disk is now your special
+sorting disk.
+.bp
+2. Remove the disk on drive A and replace with the sorting disk on B.
+Put the disk that was originally on B on drive B. Give the CTRL-C command.
+The A drive should now hold
+the following files: QSORT.COM, PART1.SRT, and PIP.COM.  The B drive
+should hold only the first item file, IYPRT.001 (the filetype 001 indicates
+the item file is unsorted; when sorted it changes to type 101).
+.sp
+3. Type the command QSORT PART1.  When the sort finishes, the system prompts
+you to remove the B disk with the unsorted item file, and replace it with
+an empty disk to receive the sorted output from the workfiles on A.  Do not
+reboot.
+.qi
+.sp2
+.br
+4. TWO ITEM FILES ON A 2 DRIVE SYSTEM:
+.sp6
+.li
+	      A 		 B
+
+	   INT FILES	      ITEM FILE #2
+	   QSORT	      PARAM FILES
+	   ITEM FILE #1       SRT FILES
+			      AUDIT FILE
+.sp
+.li
+Sort Parameters for Item File #1:
+
+	  INPUT DRIVE:	    A
+	  OUTPUT DRIVE:     A
+	  WORKFILE DRIVE:   B
+	  SWITCH?:	    YES
+
+Sort Parameters for Item File #2:
+
+	  INPUT DRIVE:	    B
+	  OUTPUT DRIVE:     B
+	  WORKFILE DRIVE:   A
+	  SWITCH?:	    YES
+.sp
+.in10
+.ti-10
+Sorting Procedure:  Item file #1 can be sorted from the menu, without
+disk switching if there is room on A to receive the sorted output, and room
+on B to hold the temporary workfiles (which are the same size as the input
+file).	Otherwise, sort both files outside the Inventory Control System
+using the parameters given above.
+.sp
+1. Prepare a special sorting disk containing QSORT, PIP, and the two SRT files
+(and the CP/M operating system).   In this case you need to get QSORT from
+the disk that was on A, and the SRT files from the disk that was on B
+(the "system drive").
+.sp
+2. Put the sorting disk on B, and the disk with item file #1 on A.  Give
+the CTRL-C command.  Type the command B:QSORT PART1 (to run the sort from
+drive B).  Switch the A disk to receive the sorted output when prompted.
+.sp
+3. Remove the disk now in A, set it aside, and insert the special sorting
+disk that was on B into A.  Put the disk with item file #2 on drive B.
+Give the CTRL-C command.  Type the command QSORT PART2.  When instructed
+by the program remove the B disk and replace it with a disk to
+receive the sorted output from A.
+.sp
+4. You now have the two original disks which contain the unsorted item files
+(and other files), one sorting disk, and two disks containing only the sorted
+files.	You must now either PIP the files that were on the original disks
+onto the new, sorted, disks, or erase the unsorted files from the old
+disks and PIP the sorted files back in their place.  Make sure the files
+are allocated properly before re-entering the Inventory Control System.
+.qi
+.sp2
+.br
+5. ONE ITEM FILE ON A 3 DRIVE SYSTEM:
+.sp6
+.li
+	      A 		   B			C
+
+	   INT FILES		PARAM FILES	     ITEM FILE #1
+	   QSORT		SRT FILES
+				AUDIT FILE
+
+.bp
+.li
+Sort Parameters for Item File #1:
+
+	  INPUT DRIVE:	     C
+	  OUTPUT DRIVE:      C
+	  WORKFILE DRIVE:    B
+	  SWITCH?:     YES (if file is greater than 1/2 disk)
+		       NO  (if file is less than 1/2 disk)
+.sp
+.in10
+.ti-10
+Sorting Procedure:  May be run from the system menu.  Switch disks when
+prompted if switching requested.  If the parameter files, and audit file on
+drive B occupy too much space and do not allow the workfile to fit, you
+should PIP those files onto the A drive and erase them from the B drive.
+Or, you could prepare the special sorting disk as explained above and
+run the sort outside the system.
+.qi
+.sp2
+.br
+6. TWO ITEM FILES ON A 3 DRIVE SYSTEM (WITH SPACE AVAILABLE ON A AT LEAST
+EQUAL TO THE SIZE OF ITEM FILE #1):
+.sp6
+.li
+	      A 	       B	      C
+
+	   INT FILES	    ITEM FILE #1   ITEM FILE #2
+	   QSORT
+	   PARAM FILES
+	   SRT PARAMS
+	   AUDIT FILE
+
+Sort Parameters for Item File #1:
+
+	  INPUT DRIVE:	     B
+	  OUTPUT DRIVE:      B
+	  WORKFILE DRIVE:    A
+	  SWITCH?:     YES (if file is larger than 1/2 disk)
+		       NO  (if file is less than 1/2 disk)
+
+Sort Parameters for Item File #2:
+
+	 INPUT DRIVE:	    C
+	 OUTPUT DRIVE:	    C
+	 WORKFILE DRIVE:    B
+	 SWITCH?:     YES (if file is greater than 1/2 disk)
+		      NO  (if file is less than 1/2 disk)
+.br
+.bp
+.in10
+.ti-10
+Sorting Procedure:  May sort item file #1
+directly from the system menu.	Be sure
+QSORT is on the currently logged drive (which in this case should be drive
+A), and PART1.SRT is on the drive named as the system drive (also drive
+A for this configuration).
+.sp
+1. Select the SORT ITEM FILE program from the menu and switch disks when
+prompted.
+.sp
+2. Sort Item File #2  outside of the system.  Follow the procedure for sorting
+item file #2 as explained in the section below.
+.qi
+.sp2
+.br
+7.  TWO ITEM FILES ON A 3 DRIVE SYSTEM (WITH INSUFFICIENT SPACE AVAILABLE
+ON DRIVE A FOR THE ITEM FILE #1 WORKFILE):
+.sp6
+.li
+	      A 		 B		    C
+
+	   INT FILES	      ITEM FILE #1	 ITEM FILE #2
+	   QSORT
+	   PARAM FILES
+	   SRT FILES
+	   AUDIT FILE
+
+Sort Parameters for Item File #1:
+
+	  INPUT DRIVE:	     B
+	  OUTPUT DRIVE:      B
+	  WORKFILE DRIVE:    C
+	  SWITCH?:     YES (if file is larger than 1/2 disk)
+		       NO  (if file is less than 1/2 disk)
+
+Sort Parameter for Item File #2:
+
+	  INPUT DRIVE:	     C
+	  OUTPUT DRIVE:      C
+	  WORKFILE DRIVE:    B
+	  SWITCH?:     YES (if file is larger than 1/2 disk)
+		       NO  (if file is less than 1/2 disk)
+.bp
+.in10
+.ti-10
+Sorting Procedure:  Must sort both item files outside the system.
+Be sure QSORT is on the currently logged drive, and the sort parameter
+files on the drive named as the system drive (these should both be drive
+A under this configuration).
+.sp
+1. With QSORT, PART1.SRT, and PART2.SRT on
+drive A, put the disk with item file #1 on drive B.  Put an empty, formatted,
+disk on drive C.  Give the CTRL-C command.
+.sp
+2. Type QSORT PART1.  When the sort routine finishes, switch the B disks
+to receive the sorted output if switching was ordered.
+.sp
+3. Remove the disk now in B and replace with the blank disk that served as
+the workfile on C.  Put the disk with item file #2 on drive C and give
+the CTRL-C command.
+.sp
+4. Type QSORT PART2.  Switch disks on drive C to receive the sorted output
+if switching was ordered.  Remove the blank disk from drive B, replace
+it with the sorted item file #1, give the CTRL-C command, and you're ready
+to re-enter the Inventory Control System.
+.qi
+.sp2
+.br
+8.  THREE ITEM FILES ON A 3 DRIVE SYSTEM:
+.sp6
+.li
+	      A 		  B		     C
+
+	   INT FILES	       ITEM FILE #2	  ITEM FILE #3
+	   QSORT	       PARAM FILES
+	   ITEM FILE #1        SRT FILES
+			       AUDIT FILE
+
+.bp
+.li
+Sort Parameters for Item File #1:
+
+	  INPUT DRIVE:	     A
+	  OUTPUT DRIVE:      A
+	  WORKFILE DRIVE:    B
+	  SWITCH?: YES (if space on A less than item file #1)
+		   NO  (if space on A greater than item file #1)
+
+Sort Parameters for Item File #2:
+
+	  INPUT DRIVE:	     B
+	  OUTPUT DRIVE:      B
+	  WORKFILE DRIVE:    A
+	  SWITCH?: YES (if space on B less than item file #2)
+		   NO  (if space on B greater than item file #2)
+
+Sort Parameters for Item File #3:
+
+	  INPUT DRIVE:	     C
+	  OUTPUT DRIVE:      C
+	  WORKFILE DRIVE:    A
+	  SWITCH?: YES (if space on C less than item file #3)
+		   NO  (if space on C greater than item file #3)
+.br
+.sp
+Sorting Procedure: All files must be sorted outside the system.
+.sp
+.in10
+1.  Make a special sorting disk that contains the CP/M system, QSORT, PIP,
+and the three
+sort parameter files PART1.SRT, PART2.SRT, and PART3.SRT
+Place this
+disk on drive B.  Put the disk with item file #1 on drive A and
+give the CTRL-C command.
+.sp
+2.  Type B:QSORT PART1.  Switch A disks to receive the sorted output
+from the workfile on B if switching has been requested.
+.sp
+3.  To sort item file #2, put the disk that contains that file on drive
+B, the sorting disk on A, and give the CTRL-C command.	Type
+QSORT PART2.  Switch B disks to receive the sorted output from the workfile
+on A if switching has been requested.
+.sp
+4.  To sort item file #3, put the disk that contains that item file on drive
+C, the sorting disk on drive A, and give the CTRL-C command.  Type
+QSORT PART3.  Switch C disks to receive the sorted output from the workfile
+on A if switching has been requested.
+.sp
+5.  You now have the original A, B, and C disk which contain the unsorted
+item files and the other Inventory Control System programs and files, one
+special sorting disk, and three disks containing only the sorted item files.
+To get back to the original configuration, you must either PIP the programs
+and other files onto the disks with the sorted files, or
+erase the unsorted files from the original
+disks, and PIP the sorted files onto the original disks in their place.
+Be sure all programs and files reside on the proper disks before restarting
+the Inventory Control System.
+.qi
+.sp2
+.br
+9.  ONE ITEM FILE ON A 4 DRIVE SYSTEM
+.sp6
+.li
+	   A		  B		    C		   D
+
+	INT FILES      PARAM FILES	 ITEM FILE #1	not used, or
+	QSORT	       SRT FILES			AUDIT FILE
+		       AUDIT FILE
+
+Sort Parameter for Item File #1:
+
+	  INPUT DRIVE:	     C
+	  OUTPUT DRIVE:      C
+	  WORKFILE DRIVE:    A, B, or D
+	  SWITCH?:     YES (if file is larger than 1/2 disk)
+		       NO  (if file is less than 1/2 disk)
+.br
+.sp
+.in10
+.ti-10
+Sorting Procedure:  Run directly from the system menu.	Be sure QSORT is
+on the currently logged drive and the SRT files on the drive named as
+the system drive (in this case, B).
+.qi
+.bp
+10.  TWO ITEM FILES ON A 4 DRIVE SYSTEM
+.sp6
+.li
+      A 	       B		   C		    D
+
+   INT FILES	    PARAM FILES 	ITEM FILE #1	 ITEM FILE #2
+   QSORT	    SRT FILES
+		    AUDIT FILE
+
+Sort Parameters for Item File #1:
+
+	  INPUT DRIVE:	     C
+	  OUTPUT DRIVE:      C
+	  WORKFILE DRIVE:    D
+	  SWITCH?:     YES (if file is larger than 1/2 disk)
+		       NO  (if file is less than 1/2 disk)
+
+Sort Parameters for Item File #2:
+
+	  INPUT DRIVE:	     D
+	  OUTPUT DRIVE:      D
+	  WORKFILE DRIVE:    C
+	  SWITCH?:     YES (if file is larger than 1/2 disk)
+		       NO  (if file is less than 1/2 disk)
+.br
+.sp
+Sorting Procedure:
+.sp
+.in10
+1. To sort item file #1,
+be sure that QSORT is on the currently logged drive (in this case
+drive A) and the sort parameter files on the system drive (in this case
+drive B).  Put the disk with item file #1 on drive C, and a empty, formatted,
+disk on drive D.  Give the CTRL-C command.
+Type QSORT PART1.  Switch the C disks when prompted if
+switching has been requested.
+.bp
+2. To sort item file #2,
+make sure QSORT is on the currently logged drive (A) and the
+sort parameter (SRT) files on the
+system drive (B). Put an empty, formatted, disk on drive B, and the unsorted
+item file #2 on drive D.  Give the CTRL-C command.  Type QSORT PART2.  Switch
+D disks to receive the sorted output from the workfile if switching has been
+requested.
+.sp
+Make sure all disks and files are in their correct locations before beginning.
+.qi
+.sp2
+11.  THREE ITEM FILES ON A 4 DRIVE SYSTEM:
+.sp6
+.li
+	   A		     B		   C		    D
+
+	INT FILES	  ITEM FILE #1	ITEM FILE #2	 ITEM FILE #3
+	QSORT
+	PARAM FILES
+	SRT FILES
+	AUDIT FILE
+
+Sort Parameters for Item File #1:
+
+	  INPUT DRIVE:	     B
+	  OUTPUT DRIVE:      B
+	  WORKFILE DRIVE:    A
+	  SWITCH?:     YES (if file larger than 1/2 disk)
+		       NO  (if file is less than 1/2 disk)
+
+Sort Parameters for Item File #2:
+
+	  INPUT DRIVE:	     C
+	  OUTPUT DRIVE:      C
+	  WORKFILE DRIVE:    A
+	  SWITCH?:     YES (if file larger than 1/2 disk)
+		       NO  (if file is less than 1/2 disk)
+
+.bp
+.li
+Sort Parameters for Item File #3:
+
+	  INPUT DRIVE:	     D
+	  OUTPUT DRIVE:      D
+	  WORKFILE DRIVE:    A
+	  SWITCH?:     YES (if file larger than 1/2 disk)
+		       NO  (if file is less than 1/2 disk)
+.br
+.sp
+Sorting Procedure:
+.sp
+.in10
+1.  Make up a special sorting disk containing the CP/M system, QSORT, PIP,
+and the three sort parameter
+files (SRT).
+.sp
+2.  Put the special sorting disk in drive A, the disk
+with item file #1 on drive B, the disk with item file #2 on drive C, and
+the disk with item file #3 on drive D.	Give the CTRL-C command.
+.sp
+3.  Type QSORT PART1. Switch B disks when prompted if switching requested.
+.sp
+4.  Type QSORT PART2. Switch C disks when prompted if switching requested.
+.sp
+5.  Type QSORT PART3.  Switch D disks when prompted if switching requested.
+.sp
+6.  Replace the sorting disk in A with the disk containing the other programs
+and files.  Give the CTRL-C command before restarting the Inventory Control
+System.
+.qi
+.he
+.bp
+.ig
+CHAPTER 23
+R E C O P Y I N G    T H E    I T E M	F I L E
+.pp5
+When you alter the item file parameters (see Chapter 19), or when you want
+to remove deleted records from the file, select the ITEM FILE
+RECOPY program from the system menu.  The program first asks if you want
+to change the item file parameters.  YES allows you to do so.  NO
+tells the program you just want to remove deleted records.
+.he Operations: Chapter 23
+.pp
+Under the direction and prompting of the ITEM FILE RECOPY program, each
+item file is recopied, in turn, from the A drive to the B drive.  When
+you are instructed, put the disk with the item file to be recopied
+on drive A and
+a new disk on B.  Hit RETURN to begin the recopy.
+.pp
+The program tells you when to remove the disk from the A drive
+and replace it with the disk containing the
+next item file to be recopied.	The program
+also prompts you to replace the disk on the B drive with another disk
+at the proper time. The disk you place on B should never contain another item
+file (a file with the filename of IYPRT).
+.pp
+Since the disks with the item files being recopied often contain other
+files as well, these files must be moved to the new disks
+at some point before you can operate the Inventory Control System.
+This is best
+done before starting the recopy program, by using the PIP command.
+Be sure there is room enough on each disk to receive the recopied files.
+For example, you would not want to increase the size of an item file
+(by changing the item file parameters) so
+much that it does not fit on the disk with the other files.  If this
+happens, you should re-allocate the Inventory Control System programs and
+files (see Chapter 19 for suggestions).
+.pp
+After all the item files have been recopied (you must recopy all of them when
+running the recopy program), the program checks to see if your system disk
+is in the drive you designated as the system drive.  The system disk is
+the disk with the two parameter files (IYPR1 AND IYPR2) and the
+sort parameter files, not necessarily the disk with the INT files.  If
+it does not find the system disk where it should be, the program instructs
+you to put it there.  After checking for the system disk, the program
+looks on the currently logged drive for the disk with the INT files, and
+prompts you to put it there if it is not already.
+.he
+.bp
+.ig
+CHAPTER 24
+A D D I N G   T O   S T O C K
+.pp5
+Use the ADD TO STOCK program to increase the stockroom quantity, or
+change order information for an inventory item.
+.he Operations: Chapter 24
+.pp
+To use this program, the item files must be sorted by item number
+(see Chapter 22), and the audit file must be of the additions type
+if you have requested additions transactions to be audited.  If the
+audit file is not an additions audit file, you should print a transaction
+proof of the current depletions file, and erase it,
+before you begin the add to stock
+transactions.  The ADD TO STOCK program creates a new additions audit file
+and increases the "batch number" by one.
+.pp
+When the program asks if you want to erase the audit file, you may respond
+with Y (YES), which erases it, with N (NO), which leaves it intact and
+ends the ADD TO STOCK program, or with ESCAPE, which is the same as NO.
+.pp
+To make an addition to stock, first call up the record for that inventory
+item.  With the cursor at the ITEM NUMBER field,
+.sp
+.in10
+.ti-4
+1.  Enter the item number in its exact form.
+.sp
+.ti-4
+2.  Enter an @ (at-sign) followed by the drive reference and record number
+relative to the beginning of the item file on that drive.  For example,
+to get the 36th record on item file #2 located
+on drive B, enter "@B36" followed
+by RETURN.  The @ (at-sign) indicates that what follows it is a relative
+record number, and not an item number.
+.sp
+.ti-4
+3.  Give the CTRL-N command to bring up the first record on the first
+item file, and after that, to bring up the record following whichever
+record is present. CTRL-B brings up the record immediately preceding
+the record currently displayed.
+.qi
+.sp
+.ad
+Enter the quantity added to stock and hit RETURN to advance to the next
+field if the quantity added field is not filled.  Enter the cost per unit
+of the stock received and update the order information fields.	Do not enter
+commas, the program inserts them where needed. If an order
+is filled and you wish to clear the date fields, type "none" in the field.
+You may cycle through the fields with RETURN and CTRL-B (for going back
+a field), adjusting the information as necessary until it is correct.
+The record itself, and the associated accumulators are not updated until
+you hit ESCAPE.  You may then enter another addition to stock transaction,
+or enter ESCAPE again to return to the system menu.
+.pp
+An addition to stock increases the stockroom quantity and decreases the
+quantity on order and the quantity back-ordered.  The quantity back-ordered
+is treated as a subset of the quantity on order.
+.pp
+To back out (correct) an addition to stock that was made too large,
+enter a negative
+number in the amount of the error (at the same unit cost as the original
+entry).  Do not correct such an error by an offsetting depletion from stock as
+this will make the activity report inaccurate.	For example, if you discover
+you have made an entry too large by 10 units, enter -10 in the quantity
+added field and the appropriate value in the cost per unit field
+to correct the error.  If the entry was made too small, just add the
+additional units in the regualar way.
+.he
+.bp
+.ig
+CHAPTER 25
+D E P L E T I N G    S T O C K
+.pp5
+Use the DEPLETE STOCK program to decrease the stockroom quantity
+when goods leave your inventory.
+.he Operations: Chapter 25
+.pp
+To use this program, the item files must be sorted by item number
+(see Chapter 22), and the audit file must be of the depletions type
+if you have requested depletions transactions to be audited.  If
+the audit file is not a depletions audit file, you should print
+a transaction proof of the current additions file, and erase it, before
+you begin the deplete stock transactions.  The DEPLETE STOCK program
+creates a new depletions audit file and increases the "batch number"
+by one.
+.pp
+When the program asks if you want to erase the sudit file you may respond
+with Y (YES), which erases it, with N (NO), which ends the DEPLETE STOCK
+program, or with ESCAPE, which is the same as NO.
+.pp
+To make a depletion from stock, first call up the record for that inventory
+item.  With the cursor at the item number field,
+.sp
+.in10
+.ti-4
+1.  Enter the item number in the exact form.
+.sp
+.ti-4
+2.  Enter an @ (at-sign) followed by the drive reference and record number
+relative to the beginning of the item file on that drive.  For example,
+to get the 36th record on item file #2 located on drive B, enter
+"@B36" followed by RETURN.  The @ (at-sign) indicates that what follows it
+is a relative record number, and not an item number.
+.sp
+.ti-4
+3.  Give the CTRL-N command to bring up the first record on the first item
+file, and after that, to bring up the record following whichever record
+is present.  CTRL-B brings up the record immediately preceding the record
+currently displayed.
+.qi
+.sp
+.ad
+Enter the quantity leaving stock and follow with RETURN.
+The program updates the stockroom
+quantity, and, if average valuation has been requested, decreases the
+inventory value based on the current average value the item.  The cursor
+returns to the item number field where you can enter a new number to begin
+the next transaction.
+ESCAPE returns you to the system menu.
+.pp
+To back out (correct) a depletion made too large, enter a negative
+amount in the quantity depleted field in the amount of the error.  Do not
+correct the error by making an addition to stock, as this makes the
+activity report inaccurate.
+.bp
+.pp
+If you've chosen the average valuation feature, an addition to stock
+between the time a depletion error is made and the time it is discovered
+may change the average value of that item.  Consequently, the adjustement
+of the error corrects the stockroom quantity, but the new inventory
+value, computed using a different average value for the item, may not be the
+same.  The difference will usually not be critical, however, since
+inventory value is an estimate based on averages anyway.  Allowing only
+an addition or depletion audit file to exist at one time helps prevent this
+situation from arising, since a careful examination of the transaction proofs
+may allow you to
+catch the error before an addition to stock changes the average value
+of the inventory item.
+.he
+.bp
+.ig
+CHAPTER 26
+P R O D U C I N G   T H E   R E P O R T S
+.pp5
+Once system setup is complete you can print Inventory Control
+System reports from the system menu at any time.  For all but the
+ITEM FILE PRINT, the item files must be in sorted order.
+.pp
+To print a report, select the desired report program from the system menu
+and choose the report options you wish to employ.
+Be sure your printer is ready and the paper aligned.
+After the printout finishes, the system menu returns.
+.pp
+For certain reports, a range option is available that lets you select
+a range of high and low item numbers.  Leaving the range
+values blank by hitting RETURN reports on all inventory items. Giving
+a low value but not a high value reports on all items with numbers
+above and including that value.  Giving a high value but not a low value
+reports on all items with numbers below and including that value.
+.pp
+If the average valuation option has not been chosen, the VALUATION
+REPORT will not be useful unless you have maintained the inventory
+value manually.
+.pp
+At the end of each current period or to-date period, reset the
+appropriate activity registers to zero by running the START AN ACTIVITY
+PERIOD program and answering its requests.
+#

@@ -1,0 +1,1000 @@
+.mt7
+.mb7
+.po8
+.ll70
+.sp2
+.ig
+P A Y R O L L	      S Y S T E M
+P R O G R A M	      F I L E	     A C C E S S I N G
+.sp
+.ce
+PAY TRANSACTION ENTRY (HRSENT.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       PYHRS.000			PYHRS.000
+
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       PYHRS.000	      AT START IF PYHRS.001 NOT FOUND
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+ PYHRS.001  PYHRS.000	      AT START IF PRESENT
+ PYHRS.000  PYHRS.001	      AT END
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+       PYHRS.101	      AT START IF PRESENT
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+ PYHRS.000	AT SAVE TIME	   NO.RECS%,PROOFED%,PROOF.NO%
+		AND AT EOJ
+.br
+.bp
+.ce
+EMPLOYEE ENTRY (EMPENT.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       PYEMP.101			PYEMP.101
+					PYHIS.101
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       PYEMP.101	      AT START IF NOT PRESENT
+       PYHIS.101	      AT START IF NOT PRESENT
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+     NONE
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+     NONE
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+ PYEMP.101	AT SAVE TIME	   NO.RECS%,NO.DEL.RECS%,FIRST.DEL.REC%
+		AND AT EOJ	   .
+ PYHIS.101	AT SAVE TIME	   NO.RECS%
+		AND AT EOJ
+.br
+.bp
+.ce
+EMPLOYEE DED/EARN AND COST DIST. (EMPDENT.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       PYEMP.101			PYEMP.101
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+     NONE
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+     NONE
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+     NONE
+.br
+.bp
+.ce
+EMPOYEE PAY RATE ENTRY	(RATENT.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       PYEMP.101			PYEMP.101
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+     NONE
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+     NONE
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+     NONE
+.br
+.bp
+.ce
+DEDUCTION/EARNING ENTRY  (DEDENT.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       PYDED.101			PYDED.101
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       PYDED.101	      AT START IF NOT PRESENT
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+     NONE
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+     NONE
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+     NONE
+.br
+.bp
+.ce
+DEDUCTION/EARNING ENTRY  (DEDENT1.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       PYDED.101			PYDED.101
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+     NONE
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+     NONE
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+     NONE
+.br
+.bp
+.ce
+DEDUCTION/EARNING ENTRY  (DEDENT2.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       PYDED.101			PYDED.101
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+     NONE
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+     NONE
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+     NONE
+.br
+.bp
+.ce
+DEDUCTION/EARNING ENTRY  (DEDENT3.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       PYDED.101			PYDED.101
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+     NONE
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+     NONE
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+     NONE
+.br
+.bp
+.ce
+PARAMETER ENTRY  (PYPARENT.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       NONE				PYPR1.101
+					PYPR2.101
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       PYPR1.101	      AT START IF NOT PRESENT AND
+			      CHAINING.STATUS$=STARTUP$
+       PYPR2.101	      AT START IF NOT PRESENT AND
+			      CHAINING.STATUS$=STARTUP$
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+      NONE
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+      NONE
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+      NONE
+.br
+.bp
+.ce
+PARAMETER ENTRY  (PYPAR2.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       NONE				PYPR1.101
+					PYPR2.101
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+      NONE
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+      NONE
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+      NONE
+.br
+.bp
+.ce
+PARAMETER ENTRY  (PYPAR3.INT)
+.sp2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       NONE				PYPR1.101
+
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+      NONE
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+      NONE
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+      NONE
+.br
+.bp
+.ce
+CREATE SORT PARAMETER FILES   (PYSRTPRM.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       NONE				PYHOURS.SRT
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       PYHOURS.SRT	      DURING EXECUTION IF NOT PRESENT
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+     NONE
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+      NONE
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+      NONE
+.br
+.bp
+.ce
+END THE CURRENT QUARTER OR YEAR  (PYPEREND.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       PYEMP.101			PYEMP.101
+       PYHIS.101			PYHIS.101
+       PYCOH.101			PYCOH.101
+					PYPR2.101
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+       NONE
+
+.br
+.bp
+.ce
+PRINT PAYROLL JOURNAL  (PYJOURN.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       PYPAY.101			NONE
+       PYEMP.101
+       PYACT.101
+       PYDED.101
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+       NONE
+.br
+.bp
+.ce
+PRINT PAYROLL JOURNAL  (PYJOURN1.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       PYACT.101			NONE
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+ PYPAY.101	AT END		   PAY.HDR.JOURNAL.PRINTED%
+.br
+.bp
+.ce
+PRINT PAYCHECKS  (PYCHECKS.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       PYEMP.101
+       PYCHK.100			PYCHK.100
+					PYPR2.101
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+ PYCHK.101  PYCHK.100	      AT START
+ PYCHK.100  PYCHK.101	      AT END
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+ PYCHK.100	AT END		   CHK.HDR.CHECKS.PRINTED%
+		BEFORE RENAMING
+.br
+.bp
+.ce
+ACCOUNT ENTRY  (PYACTENT.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       PYACT.101			PYACT.101
+       PGLCOAnn.101
+					PYPR2.101
+
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       PYACT.101	      AT START IF PYACT.101 NOT FOUND
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+      NONE
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+      NONE
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+ PYACT.101	AT SAVE TIME	   NO.RECS%
+		AND AT EOJ
+.br
+.bp
+.ce
+APPLY PAYROLL  (APPLY1.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       PYCHK.100
+       PYCHK.101
+       PYPAY.101
+       PYACT.101
+       PYCOH.101
+       PYLWT.101
+       PYCALM.101
+       PYCALS.101
+       PYCALH.101
+       PYCALX.101
+       PYHRS.101
+       PYPAY.100			PYPAY.100
+       PYEMP.101
+       PYHIS.101
+       PYDED.101
+       PYSWTaa.101
+       PYCAL.101
+					PYPR2.101
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       PYPAY.100	      AT START
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+ PYCHK.101  PYCHK.102	      AT START IF PRESENT
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+       PYHRS.001	      AT END IF PRESENT
+       PYCHK.102	      AT START IF PRESENT
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+       NONE
+
+.br
+.bp
+.ce
+APPLY PAYROLL  (APPLY2.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       PYPAY.101
+       PYEMP.101
+       PYHIS.101
+       PYCOH.101			PYCOH.101
+       PYDED.101
+					PYPAY.100
+       PYLWT.101
+       PYHRS.101
+       PYSWTaa.101
+       PYCALS.101
+       PYCALM.101
+       PYCALH.101
+       PYCALX.101
+
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+ PYPAY.100	AT END		   .
+ PYEMP.101	AT END		   .
+
+.br
+.bp
+.ce
+APPLY PAYROLL  (APPLY3.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       PYPAY.100
+       PYEMP.101
+       PYHIS.101			PYHIS.101
+       PYCOH.101			PYCOH.101
+       PYDED.101
+					PYCHK.101
+       PYACT.101
+					PGLGJBss.100
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       PYCHK.100	      AT START
+       PYCOH.101	      AT START IF NOT PRESENT
+       PGLGJBss.100	      AT START
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+ PGLGJBss.100 PGLGJBss.101    AT START IF PRESENT
+ PYPAY.100  PYPAY.101	      AT END
+ PYPAY.101  PYPAY.102	      AT START IF PRESENT
+ PYCHK.100  PYCHK.101	      AT END
+ PYCHK.101  PYCHK.102	      AT START IF PRESENT
+ PYHRS.101  PYHRS.102	      AT END IF PRESENT
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+       PGLGJBss.101	      AT END IF PRESENT
+       PYCHK.102	      AT END IF PRESENT
+       PYHRS.102	      AT END IF PRESENT
+       PYPAY.102	      AT END IF PRESENT
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+ PYPAY.101	AT END		   .
+ PYCHK.101	AT END		   .
+ PYHIS.101	AT END
+
+.br
+.bp
+.ce
+PRINT EMPLOYEE MASTER LIST  (EMPPRINT.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       PYEMP.101
+       PYACT.101
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+      NONE
+.br
+.bp
+.ce
+PAY TRANSACTION PROOF  (HRSPROOF.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       PYHIS.001
+       PYEMP.101
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+      PYHRS.001   AT END	HRS.HDR.PROOFED%,HRS.HDR.PROOF.NO%
+.br
+.bp
+.ce
+PRINT QUARTERLY 941 REPORT  (PRINT941.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       PYCOH.101			PYPR2.101
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+      NONE
+.br
+.bp
+.ce
+PRINT YEARLY 940 REPORT  (PRINT940.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       PYCOH.101			PYPR2.101
+       PYDED.101
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+      NONE
+.br
+.bp
+.ce
+PRINT ACCOUNT LIST  (PYACTPRT.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       PYACT.101
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+      NONE
+.br
+.bp
+.ce
+PRINT HISTORY REPORT  (HISPRINT.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       PYHIS.101
+       PYEMP.101
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+      NONE
+.br
+.bp
+.ce
+PRINT W2 REPORT  (PRINTW2.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       PYEMP.101
+       PYHIS.101			PYPR2.101
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+      NONE
+.br
+.bp
+.ce
+PAYROLL SYSTEM MENU  (PY.INY)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       PYPR1.101
+       PYPR2.101
+       CRT.DEF
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       ONLY .SUB FILES FOR SORTING
+       NO DATA FILES
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+       NONE
+.br
+.bp
+.ce
+PRINT CHECK REGISTER  (PYRGSTR.INT)
+.sp 2
+.li
+
+DATA FILES READ:		   FILES WRITTEN TO:
+-----------------------------------------------------------------
+       PYCHK.101
+       PYEMP.101
+
+FILES CREATED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES RENAMED:
+  FROM:        TO:		  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+FILES DELETED:			  WHEN
+-----------------------------------------------------------------
+       NONE
+
+
+HEADER RECORDS UPDATED:
+FILES:		 WHEN:		    FIELDS:
+-----------------------------------------------------------------
+      PYCHK.101  AT END 	 CHK.HDR.REGISTER.PRINTED%
+.br
+

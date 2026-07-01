@@ -1,0 +1,273 @@
+This readme file is supplied with the ACAS-nightly builds.
+
+Also read README for more up to date information and how to build information
+and details of specific code changes by system.
+
+Note that individual programs have their own change log within the source and
+this is near the start of each and here it is by date and version and build
+numbers.
+
+The nightly builds are created every night at midnight or there about with
+the ACAS source code for release v3.3, subject to any changes occurring.
+
+This is the release that supports RDBMS along with the normal Cobol file
+processing.
+
+Currently only MySQL and Mariadb is supported.
+
+Updated - 23-09-2025.
+
+Of course during testing, bugs may well be found that involve some coding changes.
+
+All testing uses Cobol files and this for three reasons:
+
+1.  There are load programs created to transfer data from Cobol files to DB
+    tables with one load program per file but not the other way round. Many of
+    these programs have been tested with test data but not all.
+
+    This has helped to test many of the FH (File Handlers) on open, close, read
+    logic and the DAL's (Data Access Layer) that control access to a table and
+    have also had some testing for open, close, write, rewrite logic.
+
+2.  Existing system flows using files have had (hopefully) minimum logic changes
+    and this will help for system testing.
+
+3.  Reduces time for testing as work within MySql is not needed.
+
+
+That said, when compiling ACAS v3.3 for use with RDBMS - Mysql, it WILL require
+that you have installed the MySql or Mariadb client package so that the its
+routine hooks can be found by the linker which is called by the Cobol compiler
+after compiling the resultant C code.
+
+It is a recommended practice to also install the MySql server service as well.
+This is regardless as to it being used. Should point out that for many Linux
+distros MySQL or MariaDB is installed as standard although elements of Postgres
+can also be present. You must make sure that the mysql/mariadb service is running
+and this therefore must be set to always start at system boot.
+
+There is new scripts to build a non rdbms ACAS system so
+use comp-all-no-rdbms.sh instead of comp-all.sh and therefore the need to install
+Mysql is removed.
+
+I have created a module that can be used in place of the RDB libraries that just
+have the entry points for the DAL modules that in turn call RDB libraries.
+This way, users can test a Cobol only system without having to install
+MySQL or MariaDB server and client libraries.
+
+This process requires you to run build scripts that start with :
+comp-all-no-rdbms/sh  when in the ACAS folder which in turn runs within each of
+the sub system folders their own script such as comp-sales-no-rdbms.sh.
+This individual scripts can be run by themselves if you only wish to rebuild one
+or two systems but I must admit I am lazy as to remembering what changes have
+been made where, so I always tend to do the lot.
+Note that for system testing I often run the script that end in -diags, I.e.,
+comp-all-no-rdbms-diags.sh so that any major problem will show up as this process
+also produces runtime error diagnostics etc., although sometimes the extra
+trace log it produces is handy providing you have set the environment variables:
+
+COB_SET_TRACE=1
+COB_TRACE_FILE=/home/username/trace.log
+
+Where username is your user name when running ACAS.
+
+This trace log is a text file and can be a large file some times. I use under
+Linux the text editor kate but I do have a reasonable amount of Ram installed at
+32 GB, so kate is happy with such as it loads the whole file into memory when
+starting.
+
+In-house testing platform actually uses two or more drives, the first is a SSD
+and this is for booting the O/S (operating system) along with its components but
+as there can be more than one version of the O/S present on the SSD - often
+three or more so that the second drive which is a hard drive contains all of the
+user areas mounted as /home.
+
+For this reason the Mysql parameter file that sits in /etc as my.cfg is changed
+to use a different directory point for the databases etc from /var/lib/mySql to
+/home/mysql but my distribution is Mageia and uses mariadb instead of mysqld but
+for all purposes it behave exactly the same as the Mysql server.
+
+This way, regardless of the version of Linux in use the data in use for MySql is
+always the same. NOTE - This is based on the fact that the SAME version of MySQL
+is always used.  VERY IMPORTANT POINT. As different versions may not have the
+same system structure or content.
+
+SO in a nut shell even compiling for only testing Cobol files you MUST have
+installed the MySql (or Mariadb) client package.  See the module
+called dummy-rdbmsMT.cbl which is used with the 'no-rdbms' build option scripts.
+
+This module just has a entry point for each of the DAL modules.
+
+A bit of background in the way the various ACAS sub systems work :
+
+In all cases (using Cobol files or tables) the system will start by reading the
+Cobol parameter file and this consists of four records :
+1.  Parameters for the entire system, IRS, GL, SL, PL, Stock etc.
+2.  GL Default record. - Used or not.
+3.  Final Account settings record holding new description for 26 headings for GL
+    but not implemented - No one has requested it so on the back burner.
+4.  Sales and Purchase ledger totals for this and last month.
+
+Records 2 and 3 may not be used depending on system settings in record 1.
+All cases there is only one record for each type and yes records 2, 3 & 4 could
+be in a file of their own but as they are only one record for each it is in the
+system file.
+
+Having read in each of these records, the systems reads the COBOL file system.dat
+and will uodate the tables at EOJ. See next block.
+
+At the end of processing for any of the sub systems (Sales,
+Purchase, Stock, IRS etc) it will write out all of these records to the Cobol
+systems file and if used, the RDB tables.  This is to ensure that both are
+always up to date.  This processing of updating the system file / db table can
+also occur during the running of the ACAS system to keep specific data up to
+date.   If you are using the system as Cobol files only ACAS will NOT attempt to
+process RDB tables.
+
+Clearly the Cobol file parameter system record must always be used at least
+initially to determine what data system is being used and if rdbms, what system
+setting to use to access it. A copy is therefore also made to the RDB system
+table to match.
+
+This is to future proof the process as it may be changed in that the system
+parameter file is not need if using RDBMS as a file can be used to read in the
+rdbms connect information, however as there is password information present
+this might be a security risk if user sites do not fully make use of multi Linux
+users who can run specific elements of ACAS and correctly set the file
+attributes to prevent users reading this file.
+It would involve being very specific on these attributes.
+
+WITH the creation of the dummy RDB module and separate build script see above
+there is no need to install any RDB systems client or server.
+
+My order of testing both by system logic / requirements and minimum changes made
+for this update :
+
+1.  IRS - Data needed by the other systems to post data to, for accounting & audit.
+    Here using the default CoA (Chart of Accounts) file that is included with
+    the ACAS distribution including the nightly build. File name is
+    coa-archived.txt
+    This is a limited type company set of accounts suitable for most businesses
+    of any type but will require some fine tuning to suit an individual business
+    but good enough for testing. This is a text file that can be edited (having
+    made a back up first) to change if needed, see lines starting with :
+
+    T00145002450A - Dividends
+
+    through to
+
+    T00145002545D - Dividends
+
+    Where A to D can be changed to directors names.
+
+    Likewise
+    T00186002860Dir - A
+
+    through
+
+    T00186005860Dir - D
+
+    Also look at lines starting :
+    T0017900
+    T0018200
+    T0019300
+    T0019900
+
+    Unless you need to change the descriptions of any others just leave them as
+    is, as if there is no data posted to any they will not print out except when
+    printing the full CoA. This said you might want to add some new entries both
+    nominal and sub nominal accounts.
+
+    For reference the supplied CoA can be used as a model to create bespoke
+    versions for various different types of organisations such as limited
+    liability (as supplied), sole trader, partnerships, charities, local
+    governments such as parish councils.
+
+    For testing purposes the current settings are fine unless your country
+    requirements require it.
+
+    This file is used to create the CoA using IRS through menu options -
+    3->6 (Import the Chart).
+
+    This will save you having to enter a lot of CoA chart entries.
+
+    Don't forget to specify in the system params that you are using IRS (setting
+    Y or B for Both).  If set to B (both) then the sales and purchase system will
+    create posting records for each system IRS and GL even if you are not going
+    to use one for a short time.  Note that here when using both you will have
+    to be very careful to make use of the same account numbers for both that
+    applies to the same type of account - allowing for the fact that the account
+    number for GL can be 6 digits where IRS uses 5 (including leading zeros).
+
+2.  For both Sales & Purchase, set up the analysis codes the default ones will
+    be created even if no others are set up but you may want to set up 2 or 3
+    extra for each ledger. If nothing else to check that analysis processes are
+    working. You MUST set up the correct account codes during the Analysis code
+    set up or amend them after - another reason to create the IRS CoA at the
+    begginning of testing or for that matter production. Failure to do so when
+    running Sales or Purchase Ledgers could result in errors being display about
+    missing accounts etc and possibly no error messages depending on where it
+    occurs. So, make sure these are set up as the system 'assumes' they have
+    been created.
+
+3.  Stock, create some stock - Here I raid the kitchen cupboards for cans
+    and enter these as stock products as all have bar codes and it is easy to
+    create abbreviated codes for them.  Later you can enter a few WIP type
+    products such as ready made meals - Oh, beef, peas, beans, vegetables etc
+    where each has a specific weight amount used for a set meal such as 30 gm's.
+    [ My current test data set, uses clothes instead of tin goods.]
+
+    If you don't like this as an example use you own but remember each element
+    must be created as a stock item in their own right before creating the end
+    product. Another possibility is creating a printed circuit board with
+    components such as specific - resisters, capacitors, IC's, sockets, wiring.
+
+    One of the uses that some stores utilise this function for is where products
+    arrive in volume such as Cans of baked beans 60 to a case where the can has
+    a bar code and the case holding them also has a bar code that is not the same
+    as the individual cans.
+
+    In this case by accepting in a full case of 60 the system will end up
+    registering all 60 cans in one hit. This needs to be tested any way.
+
+    During this, you will have to create in conjunction with Purchase Ledger some
+    suppliers for each stock product but create at least two per stock item.
+
+4.  Sales ledger with invoicing, create some customers say 5 - 10. create
+    invoices 1 -3 per customer, proof, print, post. Do same a little down the
+    line for payments on some.
+
+5.  Purchase ledger do the same for a few suppliers such as linked to stock
+    vendors/suppliers. Note the PL does not use stock control for this as it can
+    be used for any item a business could purchase.
+
+    NOTE that PL records received invoices, or manually produced purchase orders
+    or packing notes supplied with goods received, etc.
+
+
+================================================================================
+
+Note the nightly build archive is ONLY updated if there has been any
+changes to the sources that result in a larger archive file. This should cover
+most if not all changes but..
+
+Programs that load the rdbms (MySQL or Mariadb):
+
+All have been created..
+
+Tested Load Modules:
+IRS      - Complete.
+Stock    - Complete.
+Sales    - Same as above.
+Purchase - Same as above.
+
+Nightly Builds comments:
+By using the nightly build it gives you, the user a chance to look at the next
+version very early on, but the code may well not be fully tested.
+
+Updated all source and manuals to release v3.3.
+
+Many of the above notes are redundant BUT they should still be read for
+background information.
+
+Updated: vbc - 25th September 2025.

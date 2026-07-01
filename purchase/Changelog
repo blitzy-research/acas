@@ -1,0 +1,81 @@
+Purchase Ledger - Changelog
+
+dd/mm/yy  Who           What
+
+2025-10-05 Vincent Coen * 3.3.01 Changed pl060,100 BL-close for GL & IRS.
+                          But need to check with GL if posting will work.
+
+2025-08-19 Vincent Coen * Update / bug fixes tpo pl020.
+
+2025-01-05 Vincent Coen * Update pl130 to read param rec and rewrite after FLAG
+                          update. Will need to do same for any prog that updates
+                          ANY param fields. Use zz900/910 in S/P l130 code
+                          for any programs that also update any paran fields.
+                          Ditto for pl020.
+
+10/03/24 Vincent Coen   * PL920 changes - support for reading system rec every time
+                          a new folio is input to get next one and system rec
+                          rewritten. On writing if dup key get another folio #
+                          using same process.
+                          This will reduce the possiblility of dup recs if more than
+                          one person is inputting folios at same time.
+
+23/08/23 Vincent Coen   * The process that posts posting records to GL from SL
+                          and PL must be tested in detaails in GL.
+                          as I suspect it will not work due to the way GL uses
+                          batched postings. ONLY applies if GL in use.
+
+27/07/23 Vincent Coen   * New programs added pl800 (recurring menu) plus change
+                          to purchase menu and pl180 to cater for it.
+                          The active progrms not yet written as awaiting tests
+                          for the SL versions.
+
+03/04/23 Vincent Coen   * Changed printer from 132 to 80 in sl070 & pl070.
+
+16/12/22 Vincent Coen   * PL190 spelling error for lit - Supplier.
+
+29/04/18 Vincent Coen   * All FH call routines changed to clear Access-Type for
+                          any other than Open so that the logger is cleaner.
+                          ALL FH checked for EOF repeats so that status is
+                          cleared if doing any function other than read next.
+                          This applies to all ACAS systems.
+                          Found bugs for backup, wrong field being used for all
+                          systems. Stop doing a display on exit as causes a stop
+                          msg from runtime.
+
+29/03/18 Vincent Coen   * Chgs to pl020, 030 by msgs # adjusted to match up
+                          and added tests for folios on hold and paid.
+                          Still need to do more including checks for what
+                          happens with SC linked to verify recs are updated and
+                          if so when.
+
+22/03/18 Vincent Coen   * Autorun code now in runable via sales or purchase.
+                          THIS is NOT recommended.
+
+                          Update some of the MT (Audit, Anal and other unit
+                          using Delete-All functions to match code updates.
+                          Also All LD programs updated for calling-data as used
+                          in the common call params now to support Autorun for
+                          st020, st040 there might be more for special
+                          processing such as end of month allowing run via stock
+                          to print audit and run End of period processing
+                          at 00:01 on 1st of month.
+                          Need to so the same for other systems as needed as
+                          well as XL150. No doubt more manual changes needed
+                          but wait for system and End to End testing.
+
+10/02/18 Vincent Coen   * Purchase along with the other ACAS systems is now
+                          ready for system testing so the first is IRS as a
+                          set of accounts is required to start.
+                          I may well make use of irs testing to do some testing
+                          of General but will only use it without any mPC/Branch
+                          testing but this should cover a lot of ground.
+                          The usage of Branches or mPC (multiple profit centres)
+                          is an expansion of the facilities within IRS so should
+                          map well - I hope.
+
+26/08/17 Vincent Coen   * Work done on in Sales has been passed to PL as well
+                          checking for any errors as seen in SL.
+
+                          All comments made in the changelog for Sales generally
+                          apply here as well.

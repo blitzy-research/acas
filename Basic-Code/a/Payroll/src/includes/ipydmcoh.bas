@@ -1,0 +1,11 @@
+dim coh.qtd.sys 		(pr1.max.sys.eds%)     rem 12/02/79
+dim coh.qtd.emp 		(pr1.max.emp.eds%)
+dim coh.qtd.units		(04)
+dim coh.ytd.sys 		(pr1.max.sys.eds%)
+dim coh.ytd.emp 		(pr1.max.emp.eds%)
+dim coh.ytd.units		(04)
+dim coh.date$			(12)
+dim coh.tax			(12)
+dim coh.q.tax			(04)
+dim coh.q.fica.tax		(04)
+dim coh.q.co.futa.liab		(04)

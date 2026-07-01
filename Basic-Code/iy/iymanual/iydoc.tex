@@ -1,0 +1,1291 @@
+.mt9
+.mb7
+.po8
+.ll65
+.hm4
+.bp
+.ig
+CHAPTER 1
+H O W	T O   U S E   T H I S	M A N U A L
+.pp5
+For best results read through this manual thoroughly at least once before
+operating the system and do the practice run outlined in Chapter 4.
+.pp
+The Inventory Control System documentation includes two manuals.  This
+manual is a Users' Manual which provides all the background information
+and instructions necessary for successful operation.  The other is a
+Specifications Manual which contains technical information on file accessing
+and file descriptions.	The Specifications Manual is available only
+with the purchase of the system itself.
+.pp
+The Users' Manual divides into an Introduction, a Reference Section, an
+Operations Section, and an Appendix.  The Reference sections deal with
+general concepts and procedures.  The Operations sections give
+additional specifics on running the programs.
+.pp
+While Structured Systems Group is glad to provide helpful support to
+registered owners of its products, if you have a problem, please make certain
+you have read and understood the documentation and checked for hardware
+malfunctions before giving us a call.
+.he
+.bp
+.ig
+CHAPTER 2
+F E A T U R E S   A N D   F A C I L I T I E S
+.pp5
+The Structured Systems Group Inventory Control System provides small
+to medium businesses with up-to-date and accurate information on the
+quantity, value, and activity of their inventory items.  The Inventory
+Control System has been designed to serve as the central program module
+of a complete inventory management system.
+The present
+Inventory Control System is the first component of that complete inventory
+package.  It
+stands able to meet the full needs of many
+businesses.  The system performs all the basic inventory control functions
+such as adding to and depleting stock, adding new items to stock,
+deleting items no longer carried, keeping track of quantities on hand,
+quantities on order, quantities back-ordered, and inventory values.  Access
+to file records by item number is quick, allowing timely management information
+and fast customer service.
+.he Introduction: Chapter 2
+.pp
+A special "auditability option" lets you create an ongoing hardcopy
+record of stock additions, depletions, or both
+additions and depletions.
+If data is accidentally entered incorrectly, or if discrepancies
+arise between your accounting and inventory records, the hardcopy transaction
+proofs simplify the job of tracking down the errors.
+.pp
+The Inventory Control System generates a number of informative reports,
+including:
+.sp
+.in4
+.ti-4
+1.  A detailed printout of the master item file, called the ITEM LIST,
+that includes information on vendor number, retail price, average unit
+value, most recent unit cost, quantity in stock, reorder point, reorder
+quantity, date ordered, date due, quantity on order, and quantity back-ordered.
+.sp
+.ti-4
+2.  A STOCK ACTIVITY REPORT that details the current period or period to date
+activity for all or a selected range of stock items.  In addition to current
+quantity on hand, retail price, unit cost, and stock value by item, the
+report displays quantities added, quantities depleted, and the net change in
+stock.
+.sp
+.ti-4
+3.  A STOCK VALUATION REPORT that gives the average value of the item, the
+replacement cost,
+stockroom quantity, stockroom value, retail price for each item, and the
+total inventory value for all items included in the report.
+.bp
+.ti-4
+4.  A REORDER REPORT that automatically selects all out-of-stock items,
+items below the reorder point, or items on order, as well as a range of
+these items.
+.qi
+.sp
+.ad
+See Chapter 15 for sample reports.
+.pp
+The Inventory Control System incorporates SSG's Display Management System
+(DMS), a full-screen formatting utility.  Like all Structured Systems Group
+packages the Inventory Control System employs the most advanced human
+engineering techniques.  Defensive programming ensures successful system
+operation and trauma-free learning.  Edited input and logical commands
+make for the clearest and easiest operation possible.
+.pp
+The Inventory Control System permits up to four disk drives and three item files.
+The maximum number of inventory item records supported by the system is 32,767.
+.he
+.bp
+.ig
+CHAPTER 3
+O V E R V I E W   O F	S E T U P   A N D   O P E R A T I O N
+.pp5
+Because the Inventory Control System is menu driven, you run the programs
+by selecting them from the system menu.  The Inventory Control System also
+employs SSG's Display Management System, a screen formatting system that
+simplifies data and parameter entry. By moving the CRT cursor from field
+to field within the display you enter or change the values in the fields.
+The system edits your input, and issues descriptive error messages to ensure
+smooth operation.
+.he Introduction: Chapter 3
+.sp
+.ce
+SYSTEM SETUP
+.pp
+The first step in system setup is to make a "system master" and "work disk"
+from the "distribution disk" received from SSG.  The second step in system
+setup is to define the characteristics of your CRT to the Display
+Management System.  Step three of system setup is to set the system parameters.
+There are four sets of parameters:
+.sp
+.in8
+.ti-4
+1.  General System Parameters:	These determine the company name, page
+length, system date, date format (American or international), and whether
+to sound the console "bell" if an error occurs.
+.sp
+.ti-4
+2.  Item File Parameters:  These establish the number of item files (up to
+3 are allowed), their drive locations, and the starting item number for
+each item file.
+.sp
+.ti-4
+3.  Audit File Parameters:  These determine whether the auditability option
+is to be used, and if chosen, establishes whether the audit file is for
+recording additions or depletions, or both, and which drive location holds
+the audit file.
+.sp
+.ti-4
+4.  Sort File Parameters:  These establish the input, workfile, and output
+drive locations for sorting the item files.
+.qi
+.pp
+Finally, step four is to actually build the item file by entering information
+for each inventory item.
+.bp
+.sp
+.ce
+NORMAL OPERATION
+.pp
+Once your system is set up and the item file built, normal operation involves
+adding quantities received, depleting quantities moved out of stock, and
+producing the reports.
+.pp
+You can access inventory records from the item list in three ways:
+.sp
+.in8
+.ti-4
+1.  By entering the drive name and record number relative to the beginning
+of the file on that drive (i.e., the 4th record on drive B).
+.sp
+.ti-4
+2.  By entering the item number.
+.sp
+.ti-4
+3.  Sequentially, by a next-record, or previous-record command.
+.qi
+.pp
+Besides entering the quantity to be added to stock, you can also change
+the unit cost, date ordered, date expected, quantity on order, and quantity
+back-ordered.  If you want it to, the program automatically recomputes the
+inventory value for that item by the weighted average method.
+.pp
+To deplete stock you enter the quantity leaving your stock.  If you desire,
+the program
+automatically recomputes the value of the remaining inventory by
+subtracting the value of the items leaving stock.  This value is determined
+by multiplying the average value of a stock item by the number of units
+leaving stock.
+.pp
+If you choose not to calculate the value of your inventory by the weighted
+average method, yet still wish to keep track of your inventory value,
+you must calculate and change the inventory value manually.
+.pp
+Should you mistakenly add more units to stock than were actually received,
+you can fix the error by reversing the transaction.  Reversing a transaction
+is handled by adding a negative amount to stock, not by depleting the stock
+in the amount of the error.  This method of "backing out" a transaction
+maintains the accuracy of the stock activity report.  Erroneous depletions
+are handled similarly.
+.pp
+If you choose the auditability option, normal operation also involves
+generating TRANSACTION PROOF REPORTS after each session of adding to stock
+or depleting stock.  The transaction proof reports are a hardcopy record
+of the actual entries to the system, and thus serve as a check on the
+accuracy of your entries, or a way to trace bookkeeping discrepancies.
+Each transaction proof is numbered and dated to provide a continuous record of
+your entries to the system.
+.pp
+At the end of each current or to-date period, the START A NEW ACTIVITY PERIOD
+program lets you zero out the activity registers.
+.sp2
+.ce
+REPORT PRODUCTION
+.pp
+Generating reports is a matter of choosing the report from the system
+menu and telling the system which report options you want to use (such
+as reporting only on a range of inventory items for example).  Chapter
+15 presents examples of the reports available from the Inventory Control
+System.
+.sp2
+.ce
+FILE MAINTENANCE
+.pp
+When a new item is added to the item file, sorting may be needed,
+depending on the item number.  After a sort, the program requires you
+to check for duplicate item numbers by running the ITEM FILE
+PRINT program which
+can be instructed to print the entire item list with duplicate items flagged,
+or to print only duplicates if found.
+.pp
+Duplicate file items or items no longer in stock can be removed by a delete
+command.  After deletions are made, the ITEM FILE RECOPY program physically
+removes the deleted records from the file,thereby compacting it to save disk
+space.
+.pp
+You can change the item file parameters, for example, to inform the system
+that additional drives are to be used, or to redistribute the inventory
+items onto different drives.
+.he
+.bp
+.sp8
+.ce
+[ GRAPHIC ]
+.bp
+.ig
+CHAPTER 4
+P R A C T I C E    R U N
+.pp5
+This Practice Run section provides a quick hands-on introduction to the
+Inventory Control System.  Follow the instructions carefully and
+make the entries exactly
+as directed.  The Practice Run covers setting up a system
+master (or program) disk, implementing the Display Management System,
+establishing system parameters, building an item file, adding to stock,
+depleting stock, and generating reports.
+.he Introduction: Chapter 4
+.pp
+First, create a "system master" from the "distribution disk" you received
+from SSG.  Place a formatted disk containing the CP/M operating
+system, the CBASIC runtime interpreter program CRUN2, and the CP/M
+PIP program on drive A (see the CP/M Features and Facilities manual
+for how to SYSGEN an operating system onto the disk).  Place the SSG
+distribution disk (write-protected)
+on drive B and hit the RESET switch on your machine.
+When the CP/M prompt character is showing (A>), type:
+.sp
+.ti10
+PIP A:=B:*.*[OV]
+.sp
+.ad
+and follow with RETURN; this command copies the programs on drive B onto
+the disk on drive A.  When the PIP ends, remove the distribution disk
+from B and store it in a safe place.
+.pp
+Now you will set up the Display Management System for your CRT. The
+Inventory Control System comes ready to run on a Hazeltine 1500. If you
+have that device, you need only erase the DEF type files from your system
+master (or "program") disk (not from the SSG distribution disk!). Type
+the command,
+.sp
+.in10
+ERA *.DEF
+.qi
+.sp
+.ad
+and continue.
+.pp
+If you have one of the CRT's
+listed in Chapter 17, locate the file that corresponds to your CRT and
+then rename that file to a file called CRT.DEF by the command,
+.sp
+.ti10
+REN A:CRT.DEF=A:nnnnnnnn.ttt
+.sp
+.ad
+where nnnnnnnn.ttt is the filename and filetype of your CRT definition file.
+You may then erase the remaining DEF files by the CP/M ERA command (be
+sure not to erase CRT.DEF).  If you have neither a Hazeltine 1500 nor one of
+the CRT's listed in Chapter 17, see Chapter 28 for instructions on how
+to run the CRTDEF program to define your CRT to the DMS.
+.pp
+You should now have a system master with the Inventory Control System
+programs on
+drive A.  Insert an empty, formatted disk for a data disk on drive B.
+Give the CTRL-C command or hit the RESET switch on your machine to indicate
+that a new disk has been inserted.  You are now ready to begin operating
+the system.
+.pp
+To begin, enter:
+.sp
+.ti10
+CRUN2 IY
+.sp
+.ad
+at the CP/M prompt character, and follow with RETURN.
+.pp
+Before continuing, the system creates a default parameter file.  When it
+asks you to ENTER SYSTEM DRIVE, enter A followed by RETURN; this is the
+drive where all parameter files will be located.
+.pp
+First up is the PARAMETER ENTRY MENU (see Chapter 27 for reproductions
+of the screen formats).  At the SELECT A SCREEN request enter 1 followed
+by RETURN to bring up the GENERAL PARAMETERS screen.  Make no changes
+to the values shown on this screen, except to enter your company name, if
+desired.  The CRT cursor should already be at the company name field.
+.pp
+If you make an error while keying in any entry to the system the command
+CTRL-H backs the cursor up so you can correct the entry.  Enter ESCAPE
+at any point to go from the General Parameters screen to the Parameter
+Entry menu; enter ESCAPE once more to continue.
+.pp
+When asked for the date enter 2/1/79.  Follow with
+RETURN.  The ITEM FILE PARAMETERS screen which appears next displays the
+defaults you will use.	Make no changes or entries.  Enter ESCAPE to go
+on to the main system menu.
+.pp
+At the SYSTEM MENU select program 9, CREATE SORT PARAMETER FILES, and
+follow with RETURN.  After a message tells which drive holds the file
+to be sorted (the input drive), give the temporary workfile drive as
+drive B and follow with RETURN.  Enter N (for NO) followed by RETURN
+when asked if you want to switch disks.  When asked if you want to PRINT
+SORT PARAMETERS? answer YES, then RETURN.
+Turn on your printer, align the paper, and
+hit RETURN to print.
+.pp
+When the system menu returns, select program 10, ITEM ENTRY, and hit RETURN.
+When the cursor is in the Item Number field, enter P-1, for item number P-1.
+Hit RETURN.  After the program displays the ACCESS KEY, the cursor
+moves to the description field.  Make entries for the item by filling in
+the blanks with the information in the table below, hitting RETURN to advance
+to the next field if a field is not filled. (Use CTRL-B to back the cursor
+up one field if necessary.)  After making all the entries for the item, hit
+ESCAPE to begin making entries for the second item.  Enter P-2 in the item
+number field and continue as before.  After you've entered information
+for the last item, hit ESCAPE to return the cursor to the item number field.
+Enter ESCAPE again to move the cursor to the access key field.	Enter
+ESCAPE from there to return to the system menu.
+.sp
+.po5
+.ll75
+.cp9
+.li
+ITEM DESC.  STOCK REO REO RETAIL INV.  VEND. COST/ QTY DATE   DATE   B-
+ #	    ROOM  PT. QTY  PRICE VALUE	 #   UNIT  ORD ORD    DUE    ORD
+------------------------------------------------------------------------
+P-1  hammer  12    6   18   9.55 60.00 00001  5.00
+P-2  saw      0    5   12  18.99  0.00 00001 10.00  12 1/1/79 3/1/79  0
+P-4  nails   20   30  100   1.50 20.00 00002  1.00 100 1/7/79 3/7/79  0
+P-3  tacks   15   10   50   1.25  7.50 00002   .50
+P-5  tape    12   15   25   1.75  8.00 00015   .75  25 1/7/79 3/7/79  0
+P-6  glue    25   10   35   2.00 25.00 00015  1.00
+.po8
+.ll65
+.pp
+At the system menu, select program 11, ITEM FILE SORT.
+When the sort ends, the system menu reappears.
+Select program 12, ITEM FILE PRINT.  Answer YES to the question,
+DO YOU WISH TO PRINT ITEM FILES?  and follow with RETURN (be sure
+your printer is ready).
+.pp
+You've now completed the system setup and are ready to begin normal processing.
+Choose program 1, ADD TO STOCK, from the system menu.  When the
+ADDITIONS TO STOCK screen appears with the cursor in the item number
+field (see Chapter 27 for a reproduction of the display format), enter
+the dummy transaction data in the table below.
+After entering the data for a
+transaction hit ESCAPE to begin the next.  After entering the last addition
+to stock, hit ESCAPE, and ESCAPE again to return to the system menu.
+.cp6
+.sp
+.li
+    ITEM    QTY      UNIT    QTY   DATE     DATE    QTY
+     #	   ADDED     COST    ORD   ORD	    DUE    B-ORD
+    -----------------------------------------------------
+    P-2     12	    10.00	   NONE     NONE
+    P-4     75	     1.00			     25
+    P-5     25	     1.00	   NONE     NONE
+.sp
+.ad
+Ready your printer, then select program 3, TRANSACTION PROOF, to print
+the additions audit file, a record of your entries to the system.
+.pp
+When the system menu returns, select program 2, DEPLETE STOCK.	A
+message that the existing audit file has been proofed, but is not of
+the depletions type appears.  It asks if you wish to erase it.	Answer
+YES, then RETURN.  When the DEPLETIONS FROM STOCK screen appears, enter
+the data in the table below, hitting the RETURN key after entering the quantity
+depleted to begin the next transaction.
+After entering
+the last transaction, hit ESCAPE to return to the system menu.
+.sp
+.cp8
+.li
+	ITEM	       QUANTITY
+	 #	       DEPLETED
+     -----------------------------
+	P-1		  2
+	P-3		  6
+	P-4		 30
+	P-5		 10
+	P-6		 16
+.pp
+Now run program 3, TRANSACTION PROOF, to print the depletions audit file.
+The system menu returns after the printout.
+.pp
+Print the REORDER REPORT by selecting program 4.  When asked to SELECT A
+REPORT OPTION, key in 3 to indicate you want a report on items that
+are understocked (whose stockroom quantity is lower than the reorder point).
+First make sure your printer is turned on, with the paper adjusted.  The
+system menu reappears after the printout.
+.pp
+Print an ACTIVITY REPORT by choosing program 6 from the system menu.
+When asked to select the ACTIVITY REPORT OPTION, enter 1 to generate
+a report that covers all items.  The system menu returns after the
+report prints out.  Enter ESCAPE from there to end the Invetory Control
+System.  That's all there is to it.
+.he
+.bp
+.ig
+CHAPTER 5
+A D A P T I N G    O F F I C E	  P R O C E D U R E
+.pp5
+Adapting your office routine to accomodate computerized inventory control
+is a minor process in most cases.  As with any endeavor, careful planning
+and forethought smooths the process considerably.
+This section suggests procedures for setting up, normal operation, using
+the reports, and backing up for safety.
+.he Introduction: Chapter 5
+.sp
+.ce
+SETUP
+.pp
+From your company records or a physical inventory compile a list of the
+items
+you stock.  Arrange the items into logical groupings if possible.
+Besides the normal operational advantages, such an arrangement means
+the ACTIVITY, REORDER and VALUATION REPORTS cover related items when
+you exercise the report range option.
+.pp
+Assign an item number to each item,
+leaving numbers open between logical groupings
+to allow for adding more items at a later time.
+You may use your current numbering system,
+or renumber the list to conform to the system's 10 character item number
+limit.	A cross-reference between old and new numbers could be maintained,
+either manually, or automatically with SSG's Analyst system.
+.pp
+Item numbers may contain the characters A through Z, the numbers 0 through
+9, slashes (/), and dashes (-).  Be sure the slashes and dashes line up.
+For example, the dashes in the following item numbers are aligned properly:
+.sp
+.li
+	    A180-005-6
+	    A180-005-7
+	    A180-016-5
+.sp
+.ad
+To enter the number A180-5-6 instead of A180-005-6 would be inproper.
+In the examples above, the first character of the item number (A) gives
+the warehouse location.  The next character (1) the department number,
+the next two (80) give the dissection, the three characters following the
+dash (005 and 016) are a product code, and the final number is a size code.
+.pp
+After compiling the complete list of inventory items and assigning
+them numbers, make an accurate determination of the quantity on hand
+and value for each, either by physical inventory or company records.
+.pp
+In addition, you should have retail price, cost per unit, reorder point,
+and standard reorder quantity information for each item.  For items
+currently on order you should also have information on the date ordered,
+date due, quantity ordered, and, if applicable, quantity back-ordered.
+.pp
+You may assign a vendor number for each item.  The system is set up to
+use the 5 digit vendor numbers of the SSG Accounts Payable system.  If
+you buy the same item through several vendors, you can establish a
+separate record for each vendor, or leave the vendor number blank.
+.sp2
+.ce
+NORMAL OPERATION
+.pp
+Under normal circumstances, additions to stock can be keyed directly into
+the system when they arrive, or batched for later processing.  You can
+take the information  from packing slips, invoices, and other original
+media, or prepare a form of your own. The packing slips and invoices
+can then be routed through your operation normally.
+If you choose the auditability option, the batch processing method (saving
+up additions or depletions
+for entry all at once) helps ensure the accuracy of your transaction
+proof reports (see Chapter 13).
+.pp
+You can handle depletions from stock similarly.  Enter the depletions
+when they occur, or batch them for later entry.  You can take the information
+directly from customer orders, pull-sheets, or forms designed especially
+for the task.
+.pp
+Reorder or backorder information can be entered directly from your purchase
+order books, buy sheets, or other media.
+.sp2
+.ce
+USING THE REPORTS
+.pp
+The reports generated by the Inventory Control System provide
+management, accounting, and stockroom personnel with up-to-date
+and accurate
+information on availability, turnover, order status, inventory value,
+as well as retail and replacement costs.
+.pp
+If you choose the system's auditability option,
+after adding to stock or depleting it you must generate a TRANSACTION
+PROOF as a check on your entries.
+Since the TRANSACTION PROOF details either additions or depletions,
+but not both on the same report, batch processing is recommended if
+auditability is selected.
+Batching the entries means you generate one report for
+additions, and one report for depletions.
+.pp
+The Inventory Control System prepares the reports listed below at any time:
+.sp
+.in10
+.ti-3
+1. ITEM LIST: a multi-purpose listing of all inventory items for use by
+management, buyers, counter, and
+stockroom personnel.
+.sp
+.ti-3
+2. ACTIVITY REPORT: most useful for the company buyers and marketing
+staff.
+.sp
+.ti-3
+3. STOCK VALUATION REPORT: useful information for the company accountant,
+controller, or other management. In some states, a real time saver at tax
+time.
+.sp
+.ti-3
+4. REORDER REPORT: a real help to your buyer, and up-to-date information
+on availability for counter personnel or salespeople.
+.qi
+.sp2
+.ce
+BACKING UP FOR SAFETY
+.pp
+In order to achieve greater storage, the Inventory Control System
+cannot automatically back up item files.  Therefore, it is important
+for you to have at least one up-to-date copy of the file at all
+times.	The simplest procedure is to make exact copies of the disks
+containing the item (or even parameter) files with the full-disk copy
+program that should have been provided with your disk hardware.  If this
+program is not available, use the PIP command, or the SDCOPY program
+provided on the SSG distribution disk.
+.pp
+SDCOPY works only for copying single density 8" IBM 3740 standard
+compatible disks on a CP/M system.  To run the program, type SDCOPY at
+the CP/M prompt, and follow with RETURN.  When the message PUT SOURCE ON
+A, DESTINATION ON B, THEN TYPE RETURN appears, you remove any disks
+currently in the A and B drives and put the disk to be copied on A.  Put
+an empty, formatted disk (or any disk you don't mind writing over) on B.
+Hit RETURN to begin.  When the copy is complete the reboot message
+PLACE SYSTEM DISK IN DRIVE A, TYPE RETURN TO REBOOT appears.  Remove the
+two disks and insert the disk that was originally on A.
+You can use the same disks over and over as the backup disks.
+.pp
+A printout of the ITEM LIST also provides a margin of safety.  Should your
+hardware be out of operation for an extended period, or your files
+destroyed, this hardcopy backup enables you to track the changes in
+stock manually until the problem is taken care of.
+.he
+.bp
+.ig
+CHAPTER 6
+O P E R A T I O N A L	 B A C K G R O U N D
+.sp2
+.ce
+HARDWARE AND SOFTWARE REQUIREMENTS
+.he Reference: Chapter 6
+.sp
+.pp5
+The SSG Inventory Control System
+will run on any 8080 or Z-80 based microcomputer
+under the control of the CP/M operating system or a CP/M compatible
+operating system.  Your microcomputer system must have the following
+minimum hardware and software components:
+.pp
+1.  48K (kilobytes) of Random Access Memory (RAM).  (CP/M configured for
+45K or larger.)
+.pp
+2.  Two floppy disk drives with a minimum capacity of 200K.
+.pp
+3.  A 132 column wide printer capable of skipping to the top of the next
+form in response to the ASCII form-feed character.
+.pp
+4.  For the console device, a CRT (Cathode Ray Tube) with a direct cursor
+addressing facility, a clear screen control, and
+minimum dimensions
+of 24 lines by 80 columns.
+.pp
+5.  System software including an operating system and the CBASIC2 language.
+.pp
+Many microcomputers can be expanded or adapted to meet these requirements.
+Your local dealer can give you specific information about the hardware
+currently available.
+.sp3
+.ce
+THE CBASIC PROGRAMMING LANGUAGE
+.sp
+.pp
+The programs which make up the Inventory Control System are written
+in a dialect of the BASIC programming language, called CBASIC-2,
+which is a product of Software Systems. (Questions relating to
+the CBASIC language should be refered to Software Systems.)
+.pp
+Structured Systems Group distributes its programs in an intermediate
+file format (with the filetype INT), which must be further translated
+at run time by a
+facility of the CBASIC language called the "interpreter".  The interpreter's
+program name CRUN2 must precede any INT program for it to run.
+For example, to run the Inventory Control System you would enter CRUN2 IY.
+This run time interpreter comes as a part of the CBASIC
+language package.
+With the CBASIC language you
+can also write programs yourself to extend the capabilities
+of the Inventory Control
+System, or to perform other data processing tasks.
+.sp3
+.ce
+THE CP/M OPERATING SYSTEM
+.sp
+.pp
+An operating system is a set of instructions which enables the computer to,
+among other things, read and write information on floppy disks, move and
+maintain files, and provide for console communication.	The Inventory Control
+System
+employs the CP/M operating system, or one compatible with CP/M.  CP/M (TM) is a
+product of the Digital Research Company, and any questions concerning the
+CP/M system specifically should be referred directly to that company.
+.pp
+CP/M comes documented by a series of six manuals.  The first of the six,
+"Features and Facilities", contains useful and important information
+relating to your operation of the Inventory Control System.  Be particularly
+careful to read and understand the DIR, ERA, REN, PIP, SYSGEN, TYPE,
+and STAT commands before using the Inventory Control System.
+.sp3
+.ce
+LOGGING ON
+.sp
+.pp
+When you first turn your computer on, its random access memory (RAM) is
+completely empty.  In this state the computer can do nothing.
+Usually, however,
+a feature has literally been built into the microcomputer hardware which
+directs it to look on a predetermined section of a certain disk drive to find
+what to do next.  If everything is working normally, your computer should
+look on the outer two tracks of the A disk, find the CP/M operating system
+(if it has been SYSGEN'ed onto the disk; see the CP/M "Features and Facilities"
+manual for details on how this is done), load it into the RAM, and then
+display "A>" on the CRT, indicating it is ready to go to work.  This
+process is called "booting" since the computer is, in effect, lifting itself
+up by its own bootstraps.
+.pp
+The "A>" character is called a "prompt".  When the A> prompt appears on the
+screen, the operating system is said to be "logged on" to the A disk drive.
+While logged on to the A drive, you can call up programs or data files on that
+disk by typing the program name.
+To request a file on another disk (unless this is done automatically
+by the program you are using) first log on to that disk by keying in
+the drive name (the letter B on a two disk system), followed by a
+colon (:) and a carriage return and then type the program name.
+(The carriage return is simply the RETURN
+key as it is on a typewriter; it is referred to as CR.)
+.sp
+.li
+	For example,
+.sp
+.li
+	   A>		   [system prompt]
+	   A>B: 	   [user enters B:, then RETURN]
+	   B>
+.sp
+.ad
+To return to the A drive, enter:
+.sp
+.li
+	   B>A: cr
+.pp
+Whenever the prompt appears you are operating under the CP/M
+environment.  It goes away when you enter the Inventory Control System, and
+returns when you leave it.
+.sp3
+.ce
+FULL-DISK BACKUP
+.sp
+.pp
+Caution and common sense dictate that whenever you purchase or receive a
+new program or system  on a floppy disk, you immediately copy it
+onto a fresh disk and store the original in a fire-proof, moisture-proof  box
+to protect it against inevitable human error and unpredicable system failure.
+With the original SSG distribution disk tucked safely away from the ravages of
+dirt, grease, magnet, and mangle, you avoid the cost and inconvenience of
+unnecessary replacement.  This warning applies doubly for disks
+containing data crucial
+to your operation.  Do not make the mistake of being "penny wise and pound
+foolish"; the disk itself is almost always worth far less than the information
+residing on it.
+.pp
+The manufacturer of your disk drive(s) should have provided a full-disk copy
+program with the disk hardware.  If this program is not available, use the
+PIP command that comes with the CP/M operating system, or the SDCOPY program
+provided with the Inventory Control System and explained in the previous
+chapter.
+.pp
+To use	PIP
+place a fresh disk containing an operating system and the PIP program on
+drive A, and the Inventory Control System
+distribution disk on drive B.  Hit the reset
+switch on your machine and then type
+.sp
+.li
+	A>PIP A:=B:*.*[OV]
+.sp
+.ad
+This will copy all the programs and files on B onto the A disk.
+See the CP/M documentation supplied with
+your system for a complete description of the PIP program.
+.sp3
+.ce
+CHANGING DISKS BETWEEN PROGRAMS
+.sp
+.pp
+Whenever  you change disks between programs it is of the utmost importance
+that you enter a CTRL-C character immediately after inserting the new disk.
+The
+CTRL-C character, which appears on your screen as ^C, informs the computer
+that a new disk with different data has been inserted.	This "bootstrap"
+operation (or "re-booting") causes the CP/M system to reset its internal
+maps of disk usage, and prevents it from writing over (thus destroying)
+files which exist on the new disk.
+.pp
+To enter CTRL-C, or any CONTROL character, hold down the CONTROL key (CTRL
+or CTL on some machines), while simultaneously pressing the letter C
+(either upper or lower case).
+Never key in a CTRL-C character unless the CP/M prompt is showing.  Doing
+so may end the Inventory Control System, with
+a probable loss of data.
+.he
+.bp
+.ig
+CHAPTER 7
+SETTING UP THE DISPLAY MANAGEMENT SYSTEM
+.pp5
+The Structured Systems Group Display Management System is a full-screen
+information display and data entry utility.
+Chapter 27 of this manual shows each of the screen formats used by
+the Inventory Control System.  Data and parameter entry  to the Inventory
+Control System takes place by "filling in the blanks" on the screen.
+The Display Management System
+makes it possible for related information and requests to
+appear on the screen together.	This makes for easy record or parameter
+review and fast, accurate, data entry.
+.pp
+Because most CRT devices differ, the Display Management System must
+be informed of the characteristics of your particular device.  These
+characteristics are held in a file of the type DEF that is read by DMS.
+There
+are three different methods for defining your CRT to the DMS, depending
+on your situation:
+.sp
+.in10
+.ti-3
+1. If you have a Hazeltine 1500 device, you need do nothing besides
+erase all the DEF type files on your system master or program disk
+(but not the SSG distribution disk!), as well as the program CRTDEF.INT.
+.sp
+.ti-3
+2. If your CRT appears on the list below you must carry out a simple
+REN (rename) command
+(see Chapter 17), and then erase all the DEF
+files on your system disk, except the one called CRT.DEF.  You may also erase
+CRTDEF.INT.
+.qi
+.sp
+.li
+		    ADM 3A
+		    BEEHIVE 150
+		    BEEHIVE 152
+		    BEEHIVE 157
+		    CROMEMCO 3100
+		    DYNABYTE NAKED TERMINAL
+		    SOROC IQ 120
+		    IMSAI VIOC
+.sp
+.in10
+.ti-3
+3. If you have neither a Hazeltine 1500, nor one of the CRT's above,
+you must run a program provided on your disk called CRTDEF.  CRTDEF creates
+a file by an interactive question an answer process
+that defines your CRT to the Display Management System.
+Chapter 28 gives complete instructions.
+.qi
+.he
+.bp
+.ig
+CHAPTER 8
+G E N E R A L	A N D	A U D I T   P A R A M E T E R S
+.pp5
+Parameters can be defined as constant elements or
+factors within which actions or
+choices are constrained.  Because not all users have the same needs, you can
+adapt the Inventory Control System to your requirements
+by changing parameter values, rather than by expensive and complex
+reprogramming.	The Inventory Control System parameters divide into four
+general types:
+.he Reference: Chapter 8
+.sp
+.in7
+.br
+1. General Paramters
+.br
+2. Audit Parameters
+.br
+3. Item File Parameters
+.br
+4. Sort Parameters
+.qi
+.sp
+.ad
+This chapter covers the first two.  Chapter 9 covers the last two.
+.pp
+The General Parameters control such things as the company name, date format
+(whether American or international), page width, lines to print per page,
+or whether the console bell sounds when an error occurs.  Other parameters
+classified as general parameters determine what time periods (week, month,
+quarter) are used for accumulating current period stock activity statistics,
+and what time periods (month, quarter, year) for accumulating to-date
+activity statistics.  The average valuation parameter lets you decide
+whether you want the system to calculate the value of your stock by the
+weighted average method and print a VALUATION REPORT.  Another
+parameter sets an array size according to the amount of random access
+memory you have; the larger the array, the faster inventory items can
+be retrieved from the file.
+.pp
+The Audit Parameters let you determine whether you want to keep a hardcopy
+record of your addition and depletion entries to the system as a way to
+trace accounting or inventory errors, and check the accuracy of your
+entries.  You can order a record of additions to stock, a record of
+depletions from stock, or both.  You can also state on which disk
+drive to place the audit file which accumulates the entry information.
+.pp
+When you implement the Inventory Control System for the first time, you
+move directly to the parameter entry screens where you can examine
+the default parameter values and
+change them as needed.	Later, you set the general and audit
+parameters by selecting
+the PARAMETER ENTRY program from the system menu.
+.he
+.bp
+.ig
+CHAPTER 9
+ITEM FILE AND SORT PARAMETERS
+.pp5
+By changing the Item File and Sort Parameters the Inventory Control
+System can be set up to accomodate different numbers
+of disk drives, and different numbers of stock items.  If the number
+of items you stock is greater than the number that fits on a single
+disk, you will need to break up the item file and spread it over
+several disks by changing the Item File parameters.  And, since access
+to inventory items requires sorted item files, the Sort Parameters must
+be set to correspond to the item file arrangement.
+.he Reference: Chapter 9
+.pp
+What are the item file parameters?  The system needs to know how many
+item files you want.  Up to 3 files are possible, with one item
+file only per disk.  For each item file you specify, the Inventory
+Control System must know its disk drive location.  If more
+than one item file is desired, the system will want to know the lowest
+(first) item number on the second file, and the lowest (first)
+on the third file.
+.pp
+At first time startup, the program asks for the Item File parameters
+automatically, right after you've set the General and Audit parameters.
+Later, if the number of items you stock grows, or if you wish to
+redistribute the inventory items to different item files, you can
+change the Item File parameters through the program on the main system
+menu called ITEM FILE RECOPY.  After you change the parameters, the
+program creates any new item files, and redistributes the inventory
+items according to the new parameters.
+.pp
+To sort an item file, the system must know where to locate it (the input
+drive), where to build the temporary workfile it needs for the sort (the
+workfile drive), and where to put the sorted file when finished (the
+output drive).	The sort parameter files contain this information.
+.bp
+.pp
+If your item files are large, or the number of
+disk drives available is limited, you may need to remove the input file
+disk and replace it with another disk to receive the sorted
+output.  The Inventory Control System provides for this possibility;
+the Sort Parameter Files inform the system that you want this switching
+to occur.  The next chapter describes disk drive allocation and
+sort procedures in more detail.
+.pp
+If your files increase in size or number, you may need to alter
+the sort parameters.  You can do this by choosing the
+CREATE SORT PARAMETER FILES program from the system menu.
+At the end of the CREATE SORT PARAMETER FILES function you can print out
+the sort parameters for a hardcopy reference.
+.he
+.bp
+.ig
+CHAPTER 10
+DISK DRIVE ALLOCATION AND SORTING CONSIDERATIONS
+.pp5
+The disk drive you assign each item file depends on how many disk drives
+you have, how many item files you have, and how large your item files are.
+The possible configurations range from one item file on a two drive system,
+to three item files on a four drive system.
+Chapter 19 suggests the best arrangement
+for each possibility.
+.he Reference: Chapter 10
+.pp
+Files other than item files (such as the audit and INT files)
+may occupy a significant amount of disk space,
+and thus should be assigned drive locations with this in mind.	The
+program (INT) files take up the most room, and are always assumed to be
+on the currently logged drive. The two parameter files (IYPR1 and IYPR2)
+and the one to three
+sort parameter files (type SRT) take up little room, and reside on the
+drive you specify at the beginning of the program as the "system drive".
+The system drive must be either drive A or drive B.
+The audit file may be large or small depending on how often you proof and
+erase the
+current batch of transactions and begin a new one.  You specify the
+drive location of the audit file at the AUDIT PARAMETERS screen that comes
+up when you choose the PARAMETER ENTRY program from the system menu.
+.pp
+An item file must be sorted only when you add an item to it out of order
+or cause it to become disordered by changing an item number.
+Only the file affected must be sorted.	For example, if item file
+#1 begins with item number K400 and runs to item number M800, adding an
+item with a number that falls in between (if, of course, such a number is
+available; otherwise a duplication would occur) such as L200
+necessitates a sort.
+After the sort, you must check for duplicates by running the ITEM FILE
+PRINT program.	Only the ITEM ENTRY, ITEM FILE PRINT, and ITEM FILE SORT
+programs can be run when unsorted files exist.
+.pp
+Only item file #1 may be sorted from the menu, and then only if
+disk space is available (on any drive) to hold the temporary workfiles
+needed for the sort.  There need not be space available for the
+sorted output, since you can arrange to replace the input (unsorted)
+disk with another disk to receive the sorted output.
+The disk used to receive the sorted output may not contain an item file
+of any kind.
+.bp
+.pp
+To sort the other item files, or item file #1 if it is large, you end
+the Inventory Control System and use a special sorting disk (which
+contains the QSORT program and the appropriate sort parameter files),
+to run the sort outside the system.
+A printout of the sort parameters you specified
+(input location, workfile location, and output location
+for each partfile) which you can generate
+at the end of the CREATE SORT
+PARAMETER FILES program
+helps you keep track of where each disk should
+be.  Complete details and a step-by-step explanation are found in
+Chapter 22.
+.he
+.bp
+.ig
+CHAPTER 11
+B U I L D I N G   T H E   I T E M   F I L E
+.pp5
+The item file is a master list of all items in your stock.  Each
+item takes up one record on the file.  Each record contains the item
+number, a description of the item, its cost, its retail price, the value
+of the quantity on hand,
+reorder information, vendor number, and information on activity.
+.he Reference: Chapter 11
+.pp
+Building the item file is the final step in system setup.
+If no valid records exist on the file, as is the case when you first install
+your Inventory Control System, the system goes immediately into the adding
+mode when you choose the ITEM ENTRY program from the menu.  Once valid
+items exist on the file, a control command is needed to add additional records
+to the file.
+.pp
+To add items to the file, choose the ITEM ENTRY program from the system
+menu.  When the item entry screen (see Chapter 27) appears,
+enter the adding mode by the appropriate control command, or begin adding
+if this is the first time setup.
+Once in the item entry adding mode you enter the item's number.  After
+the program displays the item's drive location and record number relative
+to the beginning of the file on that drive, you enter a description of the item
+(for example, "Sport shirts, lg.") and the current stockroom quantity.
+Enter the reorder point, reorder quantity, vendor number, cost per unit
+(usually the last price paid), the quantity on order, the date ordered,
+the date due in, and the quantity back ordered (if any).  After making
+these entries you can move the cursor from field to field indefinitely by
+RETURN, or begin the next record by hitting ESCAPE.
+.pp
+The ITEM ENTRY program is primarily for building the item file, but
+can also be used to examine, change, or delete items from the file.  A SAVE
+command is also available; this command updates the disk directory
+so the entries you make are not lost should the program end prematurely
+due to a hardware failure (such as a pulled plug).
+.pp
+You can access records to examine or delete them by entering the
+item number in the ACCESS KEY field, by entering the drive and number
+of the item relative to the beginning of the file
+on that drive, or by a next-record
+or previous-record command.
+.bp
+.pp
+You may also use the ITEM ENTRY program to update or change the reorder
+information, the item description, and vendor number.  If, however, the
+stockroom quantity is altered through this program, the stock activity
+report will not reflect this change, and will thus be inaccurate.  If
+auditability has been requested you should not alter the inventory value
+through this program since it would not be reflected in the transaction
+proofs.
+.he
+.bp
+.ig
+CHAPTER 12
+A D D I N G   A N D   D E P L E T I N G    S T O C K
+.pp5
+Once your system is set up and the master item file built, additions
+to and depletions from stock are handled by the ADD TO STOCK and
+DEPLETE STOCK menu functions.  When you select the ADD TO STOCK or
+DEPLETE STOCK programs from the system menu the ADDITIONS TO STOCK
+or DEPLETIONS FROM STOCK screens appear with the CRT cursor in the
+ITEM NUMBER field (see Chapter 27 for reproductions of the DMS screen
+formats).  You may then call up the appropriate records by one of three
+methods:
+.he Reference: Chapter 12
+.sp
+.in10
+.ti-4
+1.  Enter the item number.
+.sp
+.ti-4
+2.  Enter the drive location and record number relative to the beginning
+of that drive's item file.
+.sp
+.ti-4
+3.  Give a next-record or previous-record command.
+.qi
+.pp
+When the record appears on the STOCK ADDITIONS screen you can enter the
+number of units received and their cost, and update the order information.
+The program automatically adds to the stockroom quantity for the item,
+subtracting like amounts from the quantity ordered and backordered
+figures (the quantity back-ordered is treated as a subset of the quantity
+on order).  If you've chosen the average valuation feature the program also
+increases the inventory value by the amount derived from multiplying the
+number of units times the unit cost.  It also adds the number of units to the
+current period and to-date period activity registers for the item which are
+the basis of the ACTIVITY REPORT.  If you've chosen to audit additions to
+stock, the transaction is recorded in the audit file.
+.pp
+When items leave your stock you use the DEPLETE STOCK program to enter the
+change.  Access to records works the same as for addition to stock.
+When the record appears, you enter the number of units leaving your stock.
+The DEPLETE STOCK program decreases the stockroom quantity figure and adds
+to the current period and to-date period activity registers.
+.pp
+If you've chosen average valuation the DEPLETE STOCK program also decreases
+the inventory value for the item based on the weighted average value of the
+item.  For example, if 5 units were added at $10 each, 5 units at $12 each,
+and 10 units at $20 each the weighted average is figured as follows:
+.cp8
+.sp
+.li
+	       5 @ $10 = $50
+	       5 @  12 =  60
+	      10 @  20 = 200
+	     ----	-----
+	      20	 310
+
+	   Weighted average = 310/20 = $15.50 per unit
+.sp
+.ad
+Should a depletion from stock occur now, the inventory value for the
+item would decrease at the rate of $15.50 per unit.  The weighted average
+is recomputed each time new items are added to stock.
+.pp
+If you've chosen to audit depletions from stock the transaction is recorded
+in the audit file.  If you've ordered both additions and depletions
+audited you must print a TRANSACTION PROOF of the current audit file,
+and then erase it, before you can go from the ADD TO STOCK program to
+the DEPLETE STOCK program or vice versa.
+The transaction proof is a hardcopy record of your addition and
+depletion entries and their effect on inventory value.	You generate the
+transaction proof by choosing the TRANSACTION PROOF program from the
+system menu.   With the auditability option, batching transactions
+(grouping them for entry all at once) is best, although you could move
+back and forth from addtion to depletions as long as you printed the
+transaction proof and erased the audit file
+each time.  See Chapter 13 for more information on
+the auditability option and transaction proofs.
+.pp
+Additions and Depletions should only be made through the addition and
+depletion programs, not through the ITEM ENTRY program.  This keeps
+the activity registers accurate, and records the transactions in
+the audit file.
+.pp
+If the number of units added to stock is too large,
+you must correct the mistake by making a
+negative addition to stock in the amount
+of the error, not by making an offsetting depletion.
+Similarly, if the amount depleted is too large, you must "back out" of
+the error by making a negative depletion, not an offsetting addition.
+This makes sure the activity registers do not reflect additions and depletions
+that did not actually take place.
+.pp
+If you choose to track the value of your inventory by the average
+valuation facility, the amount subtracted from the inventory value (when
+backing out an addition to stock error), or the amount added (when backing
+out a depletion error) could differ from the original amount if the average
+value for the item has changed.  Allowing the audit file to contain only
+add to stock transactions or deplete stock transactions, but not both
+at the same time, increases the chance that you will catch the error on the
+on the transaction proof
+before the average value of the item is altered by an intervening addition
+at a different cost per unit.
+.he
+.bp
+.ig
+CHAPTER 13
+A U D I T A B I L I T Y    A N D   T R A N S A C T I O N
+P R O O F S
+.pp5
+The auditability option of the Inventory Control System allows the user to
+leave a hardcopy inventory transaction history.  In addition to its use
+in documenting sound financial and managerial practice, this hardcopy trail
+facilitates error tracing and recovery.  It provides an ongoing check on
+the accuracy of your inventory control system, making your automated
+inventory and your physical inventory match as closely as possible.
+.he Reference: Chapter 13
+.pp5
+The hardcopy printout is called a TRANSACTION PROOF.  The transaction proof
+shows the item added or depleted, the quantity, the unit cost, and the
+change in stock value brought about by the transaction.  It also shows
+addition or depletion errors that were backed out as cancelled transactions.
+.pp
+You can order additions only, depletions only, or both additions and
+depletions to be audited.  You make these choices when setting the
+system's AUDIT PARAMETERS. A special audit file is created at the beginning
+of the ADD TO STOCK or DEPLETE STOCK program, and resides
+on the disk drive you specify in the AUDIT PARAMETERS until erased.
+.pp
+If you begin by adding to stock, the audit file created will be of the
+additions type and will only accept add to stock transactions.	To maintain
+the accuracy of your transaction history you must
+print a transaction proof covering all additions transactions and then
+erase the additions audit file before you choose the DEPLETE STOCK
+program from the menu.	If you try to use the deplete stock program
+while the additions audit file exists, a message informs you that the
+current audit file is of the additions type. The message says whether all the
+transactions in the file have been proofed, and asks if you wish to erase it.
+.pp
+If you begin by making depletions, a depletions audit file is created
+and likewise must be proofed and erased before you return to
+the add to stock program.
+.bp
+.pp
+Of course, you can choose not to proof the audit file, erase it, and
+go on to the desired function.	Doing so, however, means the transaction proofs
+will not provide a complete and accurate record of your entries to the
+system, and thus somewhat defeats the purpose of the auditability feature.
+.pp
+Each time an audit file is erased and a new one created the batch number
+that identifies the audit file increases by one.  Each time an
+audit file is proofed, the proof number for that batch increases by one.
+Thus you can tell by looking at the audit proofs that a particular
+audit file was never proofed since a batch number would be missing.
+However, even if the batch numbers are contiguous the audit trail may not
+be complete, since a batch may have been proofed at least once, but not
+after additional transactions have been entered.  You should always
+print a transaction proof before erasing a file.
+.he
+.bp
+.ig
+CHAPTER 14
+A D D I N G ,  D E L E T I N G ,  A N D   C H A N G I N G
+F I L E    I T E M S
+.pp5
+As you add new items to your stock and remove others no longer carried,
+you'll want to add or delete item file records.  Your may also
+want to alter the reorder point, reorder quantity, retail price, vendor
+number, cost per unit, or update
+order dates and quantities for an item.  These
+additions, deletions, and changes are made through the ITEM ENTRY
+program.
+.pp
+All records added to the file are placed at the end of the file regardless
+of the item number of the record.  If the item number of the new inventory
+item is greater than the item number of the last record on the file, the
+file remains in sorted order.  If it is less, adding the record puts the file
+out of order.
+The program issues a message that if the item is
+added the file will need to be sorted.	After sorting, to make sure
+the file does not contain items with duplicate numbers, you must run
+the ITEM FILE PRINT program.  This program prints out the entire item
+list, marking any duplicates with asterisks, or, if you desire, prints
+out only duplicate records that it finds.
+.pp
+To add a new item you call the ITEM ENTRY program from the menu and give
+the command for adding new items.  Enter the item number and then
+the information for the item.
+.pp
+When you first build the item file, you might want to leave certain
+item numbers unused so new items of the same logical type will
+be placed on the file at appropriate points.  Doing so will mean that
+when you choose the option of reporting on a range of items, the range
+will include related items.
+.pp
+To delete an item no longer carried in stock, you call the ITEM ENTRY program
+from the menu, bring up the record, and issue the delete command.
+Although the deleted record remains physically on the file until you
+run the ITEM FILE RECOPY program, you cannot access or report on it.
+.pp
+To change an item on the file, call the ITEM ENTRY program from the
+menu,  bring up the record and change the desired fields.  If you have
+chosen the auditability option, never change
+the stockroom quantity field through the ITEM ENTRY program; use the
+ADD TO STOCK or DEPLETE STOCK programs.
+If you've chosen to use the average
+valuation feature, make no changes to the inventory value field; it
+adjusts automatically whenever stock is added or depleted.  Changing
+the item number may put the file out of order and necessitate a sort.
+.he
+.bp
+.ig
+CHAPTER 15
+P R O D U C I N G    T H E    R E P O R T S
+.pp5
+You can order any of the four reports produced by the Inventory Control
+System at any time by choosing them from the menu.  You can order
+an ITEM LIST, a REORDER REPORT, a STOCK ACTIVITY REPORT, or a
+stock VALUATION REPORT.
+.he Reference: Chapter 15
+.pp
+To print the ITEM LIST choose the ITEM FILE PRINT program from the
+system menu.  You can print the entire list, or only a selected
+range of items.  The ITEM LIST shows the disk drive location, relative record
+number, item number, item description, vendor number, retail price,
+inventory value, cost per unit, number in stock, reorder point, reorder
+quantity, date ordered, and quantity back-ordered.  In addition, this
+report states the total number of records, the total number of deleted
+records, and the drive location for each item file.
+.pp
+Using the REORDER REPORT you can report on items whose stockroom
+quantity has fallen below the reorder point, on items out of stock
+completely, or on items currently on order.  For each of these reorder report
+options you can order a report on all, or only on a range of
+items.
+.pp
+You can order an ACTIVITY REPORT on all items, on items active
+in the current period (week, month, or quarter), or on items active
+during the month, quarter, or year-to-date period.  For each activity
+report option you can choose to report on all, or only a selected range
+of items.  At the end of the current period (week, month, or quarter),
+or at the end of the to-date period (month, quarter, or year)
+you must reset the activity registers to zero.	To do this you run
+the START AN ACTIVITY PERIOD program.
+.pp
+The inventory VALUATION REPORT is available whether or not you have chosen
+to use the average valuation facility.	However, if you do not choose
+average valuation, the report will be  meaningful only if you manually
+compute the changes in inventory value and enter them through the ITEM ENTRY
+program.
+You can order the report on all file items, or only a selected range.
+In addition to giving the inventory value by item, the report also
+prints a total value for all items.
+.pp
+Representative report samples appear on the following pages.
+#

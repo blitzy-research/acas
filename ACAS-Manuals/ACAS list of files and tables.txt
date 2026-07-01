@@ -1,0 +1,99 @@
+*>
+*> Last updated 14/05/23.
+*>
+*> This acts as a list of files used within the ACAS system so any changes,  update this block !!
+*>       fillers with 'values space' can used for this purpose but could also be for SQL databases tables
+*>  [File/system numbers with * do not use RDB] As unused or Temporary files used between processes / programs.
+*>   C = Coding in progress.
+*>   Y = Completed coding not dry tested yet.
+*>   X = Completed with dry testing.
+*>   - = Will not be converted as temp type files.
+*>   ? = Not yet done.
+*>   sp = Not used.  [ sp = space ]
+*>
+*>  List of files by filenn = #
+*>
+*>01  ws-file-names.                                     *>     FH DAL created ?
+*>                Sys#  F#                                        LD   created ?
+*>    03  file00   0    10   "system".      X X X *> Used by all systems: SL, PL, ST, GL, IRS
+*>    03  filler             "glwork".      - - - *>  DOES NOT APPEAR TO BE USED in general (maybe temp ?)
+*>    03  file02             "archive".     - - - *> General - Online and offline copies?
+*>    03  file03             "final".       - - - *> General temp file in gl120 P&L print
+*>    03  file04   3    16   "slautogen"    C C C *> Sales
+*>    03  file05   2    11   "ledger".      X X X *> General
+*>    03  file06   2    12   "posting".     X X X *> General & Sales & Purchase
+*>    03  file07   2    13   "batch".       X X X *> General & Sales & Purchase
+*>    03  file08   1    15   "postings2irs".X X X *>   Sales & Purchase
+*>    03  file09             "tmp-stock".   - - - *>  Stock temp file
+*>    03  file10   5    13   "staudit".     X X X *>  Stock
+*>    03  file11   5    12   "stockctl".    X X X *>  Stock - RDB
+*>    03  file12   3    11   "salesled".    X X X *>   Sales & Stock (used in??)
+*>    03  file13   6    13   "value".       X X X *>   Sales & Purchase
+*>    03  file14   6    14   "delivery".    X X X *>   Sales & Purchase
+*>    03  file15   6    12   "analysis".    X X X *>   Stock & Purchase
+*>    03  file16   3    12   "invoice ".    X X X *>   Sales
+*>    03  file17   3    13   "delinvno".    X X X *>   Sales
+*>    03  file18   3*   14*  "openitm2".    - - - *>   Sales  Temp file (sl055 -> sl060)
+*>    03  file19   3    15   "openitm3".    X X X *>   Sales
+*>    03  file20             "oisort".      - - - *>   Sales
+*>    03  file21             "work".        - - - *>   Sales, Purchase & General (temp)
+*>    03  file22   4    11   "purchled".    X X X *>    Purchase & Stock (used in??)
+*>    03  file23   4    13   "delfolio".    X X X *>    Purchase
+*>    03  file24             space.               *> General - dummy for gl080
+*>    03  filler             space.               *>  UNUSED
+*>    03  file26   4    12   "pinvoice".    Y Y Y *>    Purchase
+*>    03  file27             "poisort".     - - - *>    Purchase
+*>    03  file28   4*   14*  "openitm4".    - - - *>    Purchase  temp file (pl055 -> pl060)
+*>    03  file29   4    15   "openitm5".    Y Y Y *>    Purchase
+*>    03  file30   4    17   "plautogen"    C C C *>    Purchase
+*>    03  file31             "bostkitm"           *>    Sales and Stock - Bakc Orders
+*>    03  file32   4    16   "pay     ".    X X X *>    Purchase
+*>    03  file33             "cheque.dat".  ?     *>    Purchase
+*>    03  file34   1    11   "irsacnts.dat".X X X *>   IRS ex file 1 renamed
+*>    03  file35   1    12   "irsdflt.dat". X X X *>   IRS ex file 3 renamed
+*>    03  file36   1    13   "irspost.dat". X X X *>   IRS ex file 4 renamed
+*>    03  file37   1    14   "irsfinal.dat".X X X *>   IRS ex file 5 renamed
+*>    03  file38             "postsort.dat".      *>   IRS ex irs055 TEMP sort file.
+*>
+*> List of files by system # / file #
+*>
+*>    03  file00   0    10   "system".      X X X *> Used by all systems: SL, PL, ST, GL, IRS
+*>    03  file34   1    11   "irsacnts.dat".X X X *>   IRS ex file 1 renamed
+*>    03  file35   1    12   "irsdflt.dat". X X X *>   IRS ex file 3 renamed
+*>    03  file36   1    13   "irspost.dat". X X X *>   IRS ex file 4 renamed
+*>    03  file37   1    14   "irsfinal.dat".X X X *>   IRS ex file 5 renamed
+*>    03  file08   1    15   "postings2irs".X X X *>   Sales & Purchase
+*>    03  file05   2    11   "ledger".      X X X *> General
+*>    03  file06   2    12   "posting".     X X X *> General & Sales & Purchase
+*>    03  file07   2    13   "batch".       X X X *> General & Sales & Purchase
+*>    03  file12   3    11   "salesled".    X X X *>   Sales & Stock (used in??)
+*>    03  file16   3    12   "invoice ".    X X X *>   Sales
+*>    03  file17   3    13   "delinvno".    X X X *>   Sales
+*>    03  file18   3*   14*  "openitm2".    - - - *>   Sales  Temp file (sl055 -> sl060)
+*>    03  file19   3    15   "openitm3".    X X X *>   Sales
+*>    03  file04   3    16   "slautogen"    C C C *> Sales
+*>    03  file22   4    11   "purchled".    X X X *>    Purchase & Stock (used in??)
+*>    03  file26   4    12   "pinvoice".    Y Y Y *>    Purchase
+*>    03  file23   4    13   "delfolio".    X X X *>    Purchase
+*>    03  file28   4*   14*  "openitm4".    - - - *>    Purchase  temp file (pl055 -> pl060)
+*>    03  file29   4    15   "openitm5".    Y Y Y *>    Purchase
+*>    03  file32   4    16   "pay     ".    X X X *>    Purchase
+*>    03  file30   4    17   "plautogen"    C C C *>    Purchase
+*>    03  file11   5    12   "stockctl".    X X X *>  Stock - RDB
+*>    03  file10   5    13   "staudit".     X X X *>  Stock
+*>    03  file15   6    12   "analysis".    X X X *>   Stock & Purchase
+*>    03  file13   6    13   "value".       X X X *>   Sales & Purchase
+*>    03  file14   6    14   "delivery".    X X X *>   Sales & Purchase
+*>    03  filler   9    51   "glwork".      - - - *>  DOES NOT APPEAR TO BE USED in general (maybe temp ?)
+*>    03  file02   9    52   "archive".     - - - *> General - Online and offline copies?
+*>    03  file03   9    53   "final".       - - - *> General temp file in gl120 P&L print
+*>    03  file09   9    54   "tmp-stock".   - - - *>  Stock temp file
+*>    03  file20   9    55   "oisort".      - - - *>   Sales
+*>    03  file21   9    56   "work".        - - - *>   Sales, Purchase & General (temp)
+*>    03  file24   9    57   space.               *> General - dummy for gl080
+*>    03  filler   9    58   space.               *>  UNUSED
+*>    03  file27   9    59   "poisort".     - - - *>    Purchase
+*>    03  filler   9    60   space.               *>  UNUSED
+*>    03  file33   9    61   "cheque.dat".  ?     *>    Purchase
+*>    03  file38   9    62   "postsort.dat".      *>   IRS ex irs055 TEMP sort file.
+

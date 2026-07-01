@@ -1,0 +1,54 @@
+rem-----WHAT CAN BE ENTERED AT HRSENT SCREEN--12/7/79---------
+rem	 rate zero is also OK!
+dim cat.ok.to.enter%(pr1.max.ed.cats%)
+cat.ok.to.enter%(01)=true%	rem REGULAR PAY
+cat.ok.to.enter%(02)=true%	rem OVERTIME PAY
+cat.ok.to.enter%(03)=true%	rem SPECIAL OT PAY
+cat.ok.to.enter%(04)=true%	rem COMMISSION
+cat.ok.to.enter%(05)=true%	rem VACATION TAKEN
+cat.ok.to.enter%(06)=true%	rem SICK LVE TAKEN
+cat.ok.to.enter%(07)=true%	rem COMP TIME TAKEN
+cat.ok.to.enter%(08)=true%	rem COMP TIME EARND
+cat.ok.to.enter%(09)=true%	rem BONUS
+cat.ok.to.enter%(10)=true%	rem TIPS COLLECTED
+cat.ok.to.enter%(11)=true%	rem ADVANCE
+cat.ok.to.enter%(12)=true%	rem SICK PAY
+cat.ok.to.enter%(13)=true%	rem VACATION PAY
+cat.ok.to.enter%(14)=true%	rem OTHER EXCLD PAY
+cat.ok.to.enter%(15)=true%	rem EXPENSE REIMB
+cat.ok.to.enter%(16)=false%	rem EIC
+cat.ok.to.enter%(17)=true%	rem OTHER PAY
+cat.ok.to.enter%(18)=true%	rem TIPS REPORTED
+cat.ok.to.enter%(19)=false%	rem
+cat.ok.to.enter%(20)=false%	rem FWT
+cat.ok.to.enter%(21)=false%	rem SWT
+cat.ok.to.enter%(22)=false%	rem LWT
+cat.ok.to.enter%(23)=false%	rem FICA
+cat.ok.to.enter%(24)=false%	rem SDI
+cat.ok.to.enter%(25)=false%	rem
+cat.ok.to.enter%(26)=false%	rem
+cat.ok.to.enter%(27)=true%	rem ADVANCE REPAY
+cat.ok.to.enter%(28)=true%	rem FWT ADD-ON
+cat.ok.to.enter%(29)=true%	rem SWT ADD-ON
+cat.ok.to.enter%(30)=true%	rem LWT ADD-ON
+cat.ok.to.enter%(31)=true%	rem FICA ADD-ON
+cat.ok.to.enter%(32)=false%	rem
+cat.ok.to.enter%(33)=false%	rem SYS1
+cat.ok.to.enter%(34)=false%	rem SYS2
+cat.ok.to.enter%(35)=false%	rem SYS3
+cat.ok.to.enter%(36)=false%	rem SYS4
+cat.ok.to.enter%(37)=false%	rem SYS5
+cat.ok.to.enter%(38)=false%	rem EMP1
+cat.ok.to.enter%(39)=false%	rem EMP2
+cat.ok.to.enter%(40)=false%	rem EMP3
+cat.ok.to.enter%(41)=false%	rem
+cat.ok.to.enter%(42)=false%	rem COMPANY FICA
+cat.ok.to.enter%(43)=false%	rem COMPANY FUTA
+cat.ok.to.enter%(44)=false%	rem COMPANY SUI
+cat.ok.to.enter%(45)=false%	rem
+cat.ok.to.enter%(46)=false%	rem OTHER CO COST (future use)
+cat.ok.to.enter%(47)=false%	rem
+cat.ok.to.enter%(48)=false%	rem
+cat.ok.to.enter%(49)=false%	rem
+cat.ok.to.enter%(50)=false%	rem OTHER DED
+rem----------------------------------------------------------------

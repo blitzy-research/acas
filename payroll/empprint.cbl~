@@ -1,0 +1,1251 @@
+       >>source free
+*>****************************************************************
+*>                  Employee Master Reporting                    *
+*>                                                               *
+*>            Uses RW (Report writer for prints)                 +
+*>                                                               *
+*>****************************************************************
+*>
+ identification          division.
+*>================================
+*>
+      program-id.       empprint.  *> to be renamed pynnn later.
+*>**
+*>    Author.           Vincent B Coen FBCS, FIDM, FIDPM, 20/01/2026.
+*>**
+*>    Security.         Copyright (C) 2025 - 2026 & later, Vincent Bryan Coen.
+*>                      Distributed under the GNU General Public License.
+*>                      See the file COPYING for details.
+*>**
+*>    Remarks.          Employee History Reporting.
+*>                       This program uses RW (Report Writer) - I hope, as
+*>                         very rusty using it.
+*>
+*>                      Semi-sourced from Basic code from empprint.
+*>**
+*>    Version.          See Prog-Name In Ws.
+*>**
+*>    Called Modules.    IS IT ??
+*>                      (CBL_) ACCEPT_NUMERIC.c as static.
+*>**
+*>    Functions Used:  Are they ?
+*>                      UPPER-CASE.
+*>    Files used :
+*>                      pypr1.   Params
+*>                      pyemp.   Employee Master.
+*>                      pyact.   Accounts (IRS or GL).
+*>
+*>    Error messages used.   CHANGES NEEDED <<<<<<<<<<
+*> System wide:
+*>                      SY001 - 5, 8, 10 - 14.  ??
+*> Program specific:
+*>                      PY001 - 7. ??
+*>                      PY101 - 126. ??
+*>                      PY 801 - 809 ??
+*>                      PY 675 - 681 ??
+*>**
+*> Changes:
+*> 20/01/2026 vbc - 1.0.00 Created - Started coding.
+*> 02/02/2026 vbc          Completed - other stuff got in the way.
+*>
+*>**
+*>*************************************************************************
+*> Copyright Notice.
+*> ****************
+*>
+*> This notice supersedes all prior copyright notices & was updated 2024-04-16.
+*>
+*> These files and programs are part of the Applewood Computers Accounting
+*> System and is Copyright (c) Vincent B Coen. 1976-2026 and later.
+*>
+*> This program is now free software; you can redistribute it and/or modify it
+*> under the terms listed here and of the GNU General Public License as
+*> published by the Free Software Foundation; version 3 and later as revised
+*> for PERSONAL USAGE ONLY and that includes for use within a business but
+*> EXCLUDES repackaging or for Resale, Rental or Hire in ANY way.
+*>
+*> Persons interested in repackaging, redevelopment for the purpose of resale or
+*> distribution in a rental or hire mode must get in touch with the copyright
+*> with your commercial plans and proposals to vbcoen@gmail.com.
+*>
+*> ACAS is distributed in the hope that it will be useful, but WITHOUT
+*> ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+*> FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+*> for more details. If it breaks, you own both pieces but I will endeavour
+*> to fix it, providing you tell me about the problem.
+*>
+*> You should have received a copy of the GNU General Public License along
+*> with ACAS; see the file COPYING.  If not, write to the Free Software
+*> Foundation, 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA.
+*>
+*>*************************************************************************
+*>
+ environment             division.
+*>================================
+*>
+ copy "envdiv.cob".
+ SPECIAL-NAMES.
+       CRT STATUS is COB-CRT-STATUS.
+ REPOSITORY.
+       FUNCTION ALL INTRINSIC.
+*>
+ input-output            section.
+ file-control.
+ copy "selpyparam1.cob".
+ copy "selpyemp.cob".
+ copy "selpyact.cob".
+*>
+ copy "selprint.cob".    *> 132
+*>
+ data                    division.
+*>================================
+*>
+ file section.
+*>
+ copy "fdpyparam1.cob".
+ copy "fdpyemp.cob".
+ copy "fdpyact.cob".
+*>
+ fd  Print-File
+     reports are Employee-Compressed-Report
+                 Employee-Master-Report.
+*>
+ working-storage section.
+*>-----------------------
+ 77  prog-name               pic x(17) value "empprint (1.0.00)".  *> First release pre testing.
+*>
+*>  This will print 1 copy to CUPS print spool specified on line 3 override via setup at SOJ
+*>
+ copy "print-spool-command.cob".     *> CHECK PRN file for content Landscape mode
+*>
+ copy "wsmaps03.cob".
+ copy "wsfnctn.cob".
+*>
+ copy "Test-Data-Flags.cob".           *> set sw-Testing to zero to stop logging.
+*>                                        ABOVE SHOULD BE OFF
+*> REMARK OUT ANY IN USE
+*>
+ 01  WS-Data.
+     03  Menu-Reply          pic x.
+     03  PY-PR1-Status       pic xx.
+     03  PY-Emp-Status       pic xx.
+     03  PY-Act-Status       pic xx.
+*>
+     03  WS-SSN.
+         05  WS-SSN9         pic 999/99/9999  value zero. *> then replace / for -
+     03  WS-Phone-No.
+         05  WS-Phone-No9    pic 999/999/9999 value zero.  *> need to allow for 7 digits
+     03  WS-Start-Date       pic x(10).
+     03  WS-Term-Date        pic x(10).
+     03  WS-Emp-Birth        pic x(10).
+     03  WS-Tax-Exemptions   pic x(50).   *> set in PD use string to here from all Exempt fields eg  x 12
+     03  WS-Exclusion-Code   pic x(48).               *> set in PD to build see line 23
+     03  WS-Max              binary-char  value zero. *> from PY-PR1-Max-Sys-Eds & MUST be created in PY setup NEEDED ?
+     03  WS-Lines-Per-Emp    binary-char  value 22.   *> lines per employee - NOT USED YET
+*>
+     03  WS-Reply            pic x.
+     03  WS-Menu-Option      pic 99       value zero.
+     03  WS-RS-From-Emp      pic 9(7)     value zeros.
+     03  WS-RS-To-Emp        pic 9(7)     value zeros.
+     03  WS-RS-Report-Type   pic x        value space.
+     03  WS-RS-Title         pic x(20)    value spaces.  *> i.e., All Employees.
+*>
+     03  WS-Eval-Msg         pic x(25)    value spaces.
+     03  WS-Env-Columns      pic 999      value zero.
+     03  WS-Env-Lines        pic 999      value zero.
+     03  WS-22-Lines         pic 99.
+     03  WS-23-Lines         pic 99.
+     03  WS-Lines            pic 99.
+     03  A                   pic 99       value zero.
+     03  B                   pic 99       value zero.
+     03  C                   pic 99       value zero.
+     03  D                   pic 999      value zero.    *> to set up accounts table with "Unknown" in desc
+     03  F                   pic 9        value zero.
+     03  WS-Page-Lines       binary-char unsigned value 56.   *> Narrow reports as system is for Landscape used.
+     03  WS-Rec-Cnt          pic 99       value zero.
+     03  WS-Page-Cnt         pic 999      value zero.
+     03  WS-Line-Cnt         pic 999      value 90.   *> Force heads at start
+*>
+ 01  WS-Account-Table.
+     03  WS-Act-Entries              occurs 99.
+         05  WS-Act-Exists       pic x.   *> needed ??
+ *>        05  WS-Act-No           pic 99.  *> Needed ??
+         05  WS-Act-GL-No        pic 9(6).
+         05  WS-Act-Desc         pic x(24).
+*>
+*> Next one MUST be same size as the WS-Act-Entries occurs value.
+ 01  WS-Account-Table-Size   pic 99  value 99.
+ 01  WS-Account-Count        pic 99  value zero.  *> Table Entries in use - NOT USED
+*>
+*>
+ 01  WS-Test-YMD             pic 9(8).
+ 01  WS-Test-Date.
+     03  WS-Test-Month       pic 99.
+     03  WS-Test-Days        pic 99.
+     03  WS-Test-Year        pic 9(4).
+ 01  WS-Test-Date9 redefines WS-Test-Date
+                             pic 9(8).
+*>
+ 01  WS-Temp-Date.
+     03  WS-Temp-Year        pic 9(4).
+     03  WS-Temp-Month       pic 99.
+     03  WS-Temp-Days        pic 99.
+ 01  WS-Temp-Date9  redefines WS-Temp-Date
+                             pic 9(8).  *> For direct moving 9(8) to Date.
+*>
+*> 01  WS-PR1-Dating           pic 9(8).
+ 01  WS-Date-Formats.
+     03  WS-Swap             pic 99.
+     03  WS-Conv-Date        pic x(10).
+     03  WS-Date             pic x(10)   value "99/99/9999".
+     03  WS-UK redefines WS-Date.   *> Other optional format
+         05  WS-Days         pic 99.
+         05  filler          pic x.
+         05  WS-Month        pic 99.
+         05  filler          pic x.
+         05  WS-Year         pic 9(4).
+     03  WS-USA redefines WS-Date.  *> Default format
+         05  WS-USA-Month    pic 99.
+         05  filler          pic x.
+         05  WS-USA-Days     pic 99.
+         05  filler          pic x.
+         05  filler          pic 9(4).
+     03  WS-Intl redefines WS-Date.   *> Not used.
+         05  WS-Intl-Year    pic 9(4).
+         05  filler          pic x.
+         05  WS-Intl-Month   pic 99.
+         05  filler          pic x.
+         05  WS-Intl-Days    pic 99.
+*>
+ 01  hdtime                            value spaces.
+     03  hd-hh               pic xx.
+     03  hd-mm               pic xx.
+     03  hd-ss               pic xx.
+     03  hd-uu               pic xx.
+*>
+*>
+ 01  Error-Messages.   *> ANY NEEDED ???
+*> System Wide
+     03  SY001           pic x(46) value "SY001 Aborting run - Note error and hit Return".
+ *>    03  SY002           pic x(31) value "SY002 Note error and hit Return".
+     03  SY003           pic x(51) value "SY003 Aborting function - Note error and hit Return".
+ *>    03  SY004           pic x(20) value "SY004 Now Hit Return".
+ *>    03  SY005           pic x(18) value "SY005 Invalid Date".
+ *>    03  SY008           pic x(32) value "SY008 Note message & Hit Return ".
+     03  SY010           pic x(46) value "SY010 Terminal program not set to length => 28".
+     03  SY013           pic x(47) value "SY013 Terminal program not set to Columns => 80".
+ *>    03  SY014           pic x(30) value "SY014 Press return to continue".
+*>
+*> Module General
+*>
+     03  PY001           pic x(45) value "PY001 Payroll Parameter file does not exist -".
+     03  PY002           pic x(32) value "PY002 Read PARAM record Error = ".
+ *>    03  PY004           pic x(29) value "PY004 To quit, use ESCape key".
+*>
+*> Module specific    <<<< REMOVE UNUSED
+*>
+     03  PY125           pic x(22) value "PY125 Accounts No > 99".
+     03  PY126           pic x(51) value "PY126 Bad value in Account no field - Accounts file".
+*>
+ *>    03  PY805           pic x(39) value "PY805 Employee History File not Found -".
+     03  PY806           pic x(31) value "PY806 Employee File not Found -".
+     03  PY808           pic x(32) value "PY808 Deduction File not found -".
+     03  PY809           pic x(38) value "PY809 Company History File not found -".
+     03  PY810           pic x(32) value "PY810 Accounts File not Found - ".
+*>
+
+     03  PY675           pic x(31)  value  "PY675 Selection must be 1 to 14".
+     03  PY676           pic x(45)  value  "PY676 Invalid or non-existant employee number".
+     03  PY677           pic x(52)  value  "PY677 From number must not be greater than to number".
+     03  PY678           pic x(52)  value  "PY678 To number must not to be less than from number".
+     03  PY679           pic x(31)  value  "PY679 Answer must be 'F' or 'S'".
+     03  PY680           pic x(36)  value  "PY680 Unexpected end of account file".
+     03  PY681           pic x(28)  value  "PY681 Invalid account number".
+*>
+
+ 01  Error-Code          pic 999.
+*>
+ 01  COB-CRT-Status      pic 9(4)         value zero.
+     copy "screenio.cpy".
+*>
+ copy "wstime.cob".
+*>
+ linkage section.
+*>***************
+*>
+ copy "wscall.cob".
+ copy "wssystem.cob"   replacing System-Record by WS-System-Record.
+ copy "wsnames.cob".
+*>
+ 01  To-Day              pic x(10).
+*>
+ Report section.    *> All NEEDS CHANGING
+*>**************
+*>
+ RD  Employee-Master-Report
+     control      Final
+     Page Limit   WS-Page-Lines
+     Heading      1
+     First Detail 5
+     Last  Detail WS-Page-Lines.
+*>
+*> Print layouts to 132 cols Landscape
+*>
+ 01  Report-Emp-Head Type is Page Heading.
+     03  line 1.
+         05  col  50     pic x(40)   source UserA.
+         05  col 110     pic x(10)   source WS-Date.  *> IS this correct format ?  Check report
+         05  col 122     pic x(8)    source WSD-Time.
+     03  line 2.
+         05  col  1      pic x(17)   source Prog-Name.
+         05  col 51      pic x(19)   value "ACAS Payroll System".
+         05  col 124     pic x(5)    value "Page ".
+         05  col 129     pic zz9     source Page-Counter.
+     03  Line 3.
+         05  col 53      pic x(53)   value "Employee Master Report".
+     03  line 4.
+         05  col 61       pic x(20) source WS-RS-Title.
+*>
+ 01  Employee-Report-Foot Type Report Footing.
+     03  line + 2.
+         05  col 5      pic x(23)    value "Total Records printed: ".
+         05  col 29     pic zzz9     source WS-Rec-Cnt.
+*>
+ 01  Employee-Detail type is detail.    *> ALL to be CHANGED
+     03  line 6.
+         05  col 39                  value "Social Security".
+         05  col 69                  value "Head of".
+         05  col 87                  value "Taxing".
+         05  col 95                  value "Pension".
+         05  col 107                 value "Bank Account".
+*>
+     03  line 7.
+         05  col 3                   value "No.".
+         05  col 11                  value "Name and Address".
+         05  col 43                  value "Number".
+         05  col 56                  value "Sex".
+         05  col 60                  value "Married".
+         05  col 68                  value "Household".
+         05  col 79                  value "Status".
+         05  col 88                  value "State".
+         05  col 96                  value "Plan".
+         05  col 110                 value "Number".
+*>
+     03  line 9.
+         05  col 1   pic x(7)        source Emp-No.
+         05  col 9   pic x(32)       source Emp-Name.
+         05  col 41  pic x(11)       source WS-SSN.    *> CHANGE in PD - Done
+         05  col 57  pic x           source Emp-Sex.
+         05  col 63  pic x           source Emp-Marital.
+         05  col 71                  value "Yes"        present when Emp-Cal-Head-Of-House = "Y".
+         05  col 71                  value "No "        present when Emp-Cal-Head-Of-House = "N".
+*>
+         05  col 77                  value "Active    " present when Emp-Status = "A".
+         05  col 77                  value "Terminated" present when Emp-Status = "T".
+         05  col 77                  value "On-Leave  " present when Emp-Status = "L".
+         05  col 77                  value "Deleted   " present when Emp-Status = "D".
+*>
+         05  col 89  pic xx          source PY-PR1-Co-State.  *>  Emp-Taxing-State$ NOT USED AT PRESENT  << CHECK THIS !
+         05  col 97                  value "No "        present when Emp-Pension-Used = "N".
+         05  col 97                  value "Yes"        present when Emp-Pension-Used = "Y".
+         05  col 103 pic x(24)       source Emp-Bank-Acct-No.
+*>
+     03  line 10.
+         05  col 9   pic x(32)       source Emp-Address-1.
+*>
+     03  line 11.
+         05  col 9   pic x(32)       source Emp-Address-2.
+         05  col 50                  value "Date".
+         05  col 99                  value "Rate".
+         05  col 108                 value "Accumulated".
+         05  col 123                 value "Used".
+*>
+     03  line 12.
+         05  col 9   pic x(28)       source Emp-Address-3 present when Emp-Address-3 not = spaces.  *> fld = 32 ch
+         05  col 38                  value "Birth".
+         05  col 48  pic x(12)       source WS-Emp-Birth.    *> needs to be converted ditto - Done
+         05  col 59                  value "Job Code:".
+         05  col 69  pic xxx         source Emp-Job-Code.
+         05  col 83                  value "Vacation".
+         05  col 93  pic zzz,zz9.99  source Emp-Vac-Rate.
+         05  col 105 pic zzz,zz9.99  source Emp-Vac-Accum.
+         05  col 117 pic zzz,zz9.99  source Emp-Vac-Used.
+*>
+     03  line 13.
+         05  col 9   pic x(32)       source Emp-Address-4 present when Emp-Address-4 not = spaces.  *> fld = 32 ch
+         05  col 38                  value "Start".
+         05  col 48  pic x(10)       source WS-Start-Date.   *> Converted - Done
+         05  col 59                  value "Interval:".
+         05  col 69                  value "Weekly      " present when Emp-Pay-Interval = "W".
+         05  col 69                  value "Monthly     " present when Emp-Pay-Interval = "M".
+         05  col 69                  value "Bi-Weekly   " present when Emp-Pay-Interval = "B".
+         05  col 69                  value "Semi-Monthly" present when Emp-Pay-Interval = "S".
+         05  col 83                  value "Sick Leave".
+         05  col 93  pic zzz,zz9.99  source Emp-SL-Rate.
+         05  col 105 pic zzz,zz9.99  source Emp-SL-Accum.
+         05  col 117 pic zzz,zz9.99  source Emp-SL-Used.
+*>
+     03  line 14.
+         05  col 9   pic xx          source Emp-State.
+         05  col 12  pic x(10)       source Emp-Zip.
+         05  col 38                  value "Terminate".
+         05  col 48  pic x(10)       source WS-Term-Date.    *> Converted - Done
+         05  col 59                  value "Pay Type:".
+         05  col 69  pic x(8)        value "Hourly  "     present when Emp-HS-Type = "H".
+         05  col 69  pic x(8)        value "Salaried"     present when Emp-HS-Type = "S".
+         05  col 83                  value "Comp Time".
+         05  col 105 pic zzz,zz9.99  source Emp-Comp-Accum.
+         05  col 117 pic zzz,zz9.99  source Emp-Comp-Used.
+*>
+     03  line 15.
+         05  col 12  pic x(12)       source WS-Phone-No.   *> converted in Proc - Done
+         05  col 59                  value "Pay Frequency: ".
+         05  col 74  pic z9          source Emp-Pay-Freq.
+*>
+     03  line 17.
+         05  col 48                  value "Pay Rates".
+         05  col 101                 value "FWT  SWT  LWT".
+*>
+     03  line 18.
+         05  col 8                   value "Current Apply No:".
+         05  col 26   pic z9         source Emp-Cur-Apply-No.
+         05  col 32   pic x(15)      source PY-PR1-Rate-Name (1).
+         05  col 47   pic zzz,zz9.99 source Emp-Rate (1).
+         05  col 62                  value "Number Of Witholding Allowances:".
+         05  col 101  pic z9         source Emp-FWT-Allow.
+         05  col 106  pic z9         source Emp-SWT-Allow.
+         05  col 111  pic z9         source Emp-LWT-Allow.
+*>
+     03  line 19.
+         05  col 32   pic x(15)      source PY-PR1-Rate-Name (2).
+         05  col 47   pic zzz,zz9.99 source Emp-Rate (2).
+         05  col 62                  value  "Number Of Deduction Allowances (Cal):".
+         05  col 106  pic z9         source Emp-Cal-Ded-Allow.
+*>
+     03  line 20.
+         05  col 32   pic x(15)      source PY-PR1-Rate-Name (3).
+         05  col 47   pic zzz,zz9.99 source Emp-Rate (3).
+*>
+     03  line 21.
+         05  col 32   pic x(15)      source PY-PR1-Rate-Name (4).
+         05  col 47   pic zzz,zz9.99 source Emp-Rate (4).
+         05  col 62                  value  "Tax Exemptions:".
+         05  col 79   pic x(50)      source WS-Tax-Exemptions.    *> Set in P D. created by :: aa050 - Done
+
+
+     03  line 22.
+         05  col 32                  value "Maximum".
+         05  col 47  pic zzz,zz9.99  source Emp-Max-Pay.
+         05  col 62                  value "Earned Income Credit: ".
+         05  col 84                  value "Eligible"   present when Emp-Eic-Used = "Y".
+         05  col 84                  value "Ineligible" present when Emp-Eic-Used = "N".
+*>
+     03  line 23.
+         05  col 62   pic x(48)        source WS-Exclusion-Code.
+*>
+     03  line 24.
+		 05  col 32                    value "Auto Generated Units:".
+         05  col 53   pic zz9          source Emp-Auto-Units.
+         05  col 62                    value "Normal Pay Units:".
+         05  col 81   pic zz9          source Emp-Normal-Units.
+*>
+     03  line 25.
+         05  col 63                    value "Employee Specific Deductions".
+     03  line 26.
+         05  col 36                    value "Description                  Acct            Factor              "&
+                                             "Limit    Xcld Chk Cat".
+*>
+*>  This is present to 3 occurances but it 'could' be higher - may be ? Emp record would need changes
+*>
+     03  line 28.
+         05  col 22                    value "Not"  present when Emp-ED-Chk-Cat (1) = zero.
+         05  col 26                    value "Used".
+         05  col 31                    value "1:".
+         05  col 34   pic x(15)        source Emp-ED-Desc (1).
+         05  col 52                    value "Earning"   present when Emp-ED-Earn-Ded (1) = "E".
+         05  col 52                    value "Deduction" present when Emp-ED-Earn-Ded (1) = "D".
+         05  col 64   pic zz9          source Emp-ED-Acct-No (1).
+         05  col 70                    value "Amount"    present when Emp-ED-Amt-Pcent (1) = "A".
+         05  col 70                    value "Percent"   present when Emp-ED-Amt-Pcent (1) not = "A".
+         05  col 78   pic zzz,zz9.99   source Emp-ED-Factor (1).
+         05  col 89                    value "Limited"   present when Emp-ED-Limit-Used (1) = "Y".
+         05  col 89                    value "No Limit"  present when Emp-ED-Limit-Used (1) = "N".
+         05  col 99  pic z,zzz,zz9.99  source Emp-ED-Limit (1).
+         05  col 113 pic 9             source Emp-ED-Exclusion (1).
+         05  col 117 pic z9            source Emp-ED-Chk-Cat (1).
+     03  line 29.
+         05  col 22                    value "Not"  present when Emp-ED-Chk-Cat (2) = zero.
+         05  col 26                    value "Used".
+         05  col 31                    value "2:".
+         05  col 34   pic x(15)        source Emp-ED-Desc (2).
+         05  col 52                    value "Earning"   present when Emp-ED-Earn-Ded (2) = "E".
+         05  col 52                    value "Deduction" present when Emp-ED-Earn-Ded (2) = "D".
+         05  col 64   pic zz9          source Emp-ED-Acct-No (2).
+         05  col 70                    value "Amount"    present when Emp-ED-Amt-Pcent (2) = "A".
+         05  col 70                    value "Percent"   present when Emp-ED-Amt-Pcent (2) not = "A".
+         05  col 78   pic zzz,zz9.99   source Emp-ED-Factor (2).
+         05  col 89                    value "Limited"   present when Emp-ED-Limit-Used (2) = "Y".
+         05  col 89                    value "No Limit"  present when Emp-ED-Limit-Used (2) = "N".
+         05  col 99  pic z,zzz,zz9.99  source Emp-ED-Limit (2).
+         05  col 113 pic 9             source Emp-ED-Exclusion (2).
+         05  col 117 pic z9            source Emp-ED-Chk-Cat (2).
+     03  line 30.
+         05  col 22                    value "Not"  present when Emp-ED-Chk-Cat (3) = zero.
+         05  col 26                    value "Used".
+         05  col 31                    value "3:".
+         05  col 34   pic x(15)        source Emp-ED-Desc (3).
+         05  col 52                    value "Earning"   present when Emp-ED-Earn-Ded (3) = "E".
+         05  col 52                    value "Deduction" present when Emp-ED-Earn-Ded (3) = "D".
+         05  col 64   pic zz9          source Emp-ED-Acct-No (3).
+         05  col 70                    value "Amount"    present when Emp-ED-Amt-Pcent (3) = "A".
+         05  col 70                    value "Percent"   present when Emp-ED-Amt-Pcent (3) not = "A".
+         05  col 78   pic zzz,zz9.99   source Emp-ED-Factor (3).
+         05  col 89                    value "Limited"   present when Emp-ED-Limit-Used (3) = "Y".
+         05  col 89                    value "No Limit"  present when Emp-ED-Limit-Used (3) = "N".
+         05  col 99  pic z,zzz,zz9.99  source Emp-ED-Limit (3).
+         05  col 113 pic 9             source Emp-ED-Exclusion (3).
+         05  col 117 pic z9            source Emp-ED-Chk-Cat (3).
+*>
+     03  line 32.
+         05  col 63                    value "Cost Distribution".
+     03  line 33.
+         05  col 50                    value "Acct".
+         05  col 67                    value "Name".
+         05  col 87                    value "Percent".
+*>
+*> create act table for the possible 5 entries   NEEDS CHANGES
+*>
+*> THIS IS A TEST FOR VARYING until    ONLY produces same error without the until.
+ *>   03  line  + 1       varying A from 1 by 1   until A > PY-PR1-Max-Dist-Accts.
+ *>        05  col 51  pic zzz9          source Emp-Dist-Acct (A) present when Emp-Dist-Acct (A) not = zero.
+ *>        05  col 56  pic x(24)         source Act-Desc .
+ *>        05  col 87  pic zz9.99        source Emp-Dist-Pcent (A).
+*>
+
+     03  line 35                                    present when PY-PR1-Max-Dist-Accts > 0
+                                                              and Emp-Dist-Pcent (1) not = zero.
+         05  col 51  pic zzz9          source Emp-Dist-Acct (1) present when Emp-Dist-Acct (1) not = zero.
+         05  col 56  pic x(24)         source Act-Desc .
+         05  col 87  pic zz9.99        source Emp-Dist-Pcent (1).
+     03  line + 1                                    present when PY-PR1-Max-Dist-Accts > 1
+                                                              and Emp-Dist-Pcent (2) not = zero.
+         05  col 51  pic zzz9          source Emp-Dist-Acct (2) present when Emp-Dist-Acct (2) not = zero.
+         05  col 56  pic x(24)         source Act-Desc .
+         05  col 87  pic zz9.99        source Emp-Dist-Pcent (2).
+     03  line + 1                                    present when PY-PR1-Max-Dist-Accts > 2
+                                                              and Emp-Dist-Pcent (3) not = zero.
+         05  col 51  pic zzz9          source Emp-Dist-Acct (3) present when Emp-Dist-Acct (3) not = zero.
+         05  col 56  pic x(24)         source Act-Desc .
+         05  col 87  pic zz9.99        source Emp-Dist-Pcent (3).
+     03  line + 1                                    present when PY-PR1-Max-Dist-Accts > 3
+                                                              and Emp-Dist-Pcent (4) not = zero.
+         05  col 51  pic zzz9          source Emp-Dist-Acct (4) present when Emp-Dist-Acct (4) not = zero.
+         05  col 56  pic x(24)         source Act-Desc .
+         05  col 87  pic zz9.99        source Emp-Dist-Pcent (4).
+     03  line + 1                                    present when PY-PR1-Max-Dist-Accts > 4
+                                                              and Emp-Dist-Pcent (5) not = zero.
+         05  col 51  pic zzz9          source Emp-Dist-Acct (5) present when Emp-Dist-Acct (5) not = zero.
+         05  col 56  pic x(24)         source Act-Desc .
+         05  col 87  pic zz9.99        source Emp-Dist-Pcent (5).
+*>
+ RD  Employee-Compressed-Report
+     control      Final
+     Page Limit   WS-Page-Lines
+     Heading      1
+     First Detail 5
+     Last  Detail WS-Page-Lines.
+*>
+ 01  Report-Emp-Head-2  Type Page Heading.
+*>
+*> Print layouts to 132 cols Landscape
+*>
+     03  line  1.
+         05  col  50     pic x(40)   source UserA.
+         05  col 110     pic x(10)   source U-Date.
+         05  col 122     pic x(8)    source WSD-Time.
+     03  line 2.
+         05  col  1      pic x(17)   source Prog-Name.
+         05  col 51      pic x(19)   value "ACAS Payroll System".
+         05  col 124     pic x(5)    value "Page ".
+         05  col 129     pic zz9     source Page-Counter.
+     03  Line  3.
+         05  col 53      pic x(48)   value "Employee Compressed Report".
+     03  line  4.
+         05  col 61       pic x(20) source WS-RS-Title.
+     03  line 6                                                      .
+         05  col 1                   value "No.".
+         05  col 10                  value "Name".
+         05  col 42                  value "S.S.N.".
+         05  col 50                  value "Pay Interval".
+         05  col 64                  value "Status".
+         05  col 76                  value "Type".
+         05  col 84                  value "Phone".
+         05  col 97                  value "Start".
+         05  col 106                 value "Birth".
+         05  col 117                 value "Rate 1".
+         05  col 125                 value "Job Code".
+
+ 01  Emp-Detail-Compress type is detail.
+     03  line + 2.
+         05  col 1       pic 9(7)          source Emp-No.
+         05  col 9       pic x(32)         source Emp-Name.
+         05  col 41      pic 999/99/9999   source WS-SSN.    *> CHANGE - mod frm ws-ssn9 rep / for - using ws-ssn - Done
+         05  col 52      pic x(12)         value "Weekly"       present when Emp-Pay-Interval = "W".
+         05  col 52      pic x(12)         value "Monthly"      present when Emp-Pay-Interval = "M".
+         05  col 52      pic x(12)         value "Bi-Weekly"    present when Emp-Pay-Interval = "B".
+         05  col 52      pic x(12)         value "Semi-Monthly" present when Emp-Pay-Interval = "S".
+*>
+         05  col 65      pic x(12)         value "Active"       present when Emp-Status = "A".
+         05  col 65      pic x(12)         value "Terminated"   present when Emp-Status = "T".
+         05  col 65      pic x(12)         value "On-Leave"     present when Emp-Status = "L".
+         05  col 65      pic x(12)         value "Deleted"      present when Emp-Status = "D".
+*>
+         05  col 76      pic x(6)          value "Hourly"       present when Emp-HS-Type = "H".
+         05  col 76      pic x(6)          value "Salary"       present when Emp-HS-Type = "S".
+*>
+         05  col 82      pic x(12)         source WS-Phone-No.    *> Convert for WS-Phone-No9 (999/99/9999 & replace / for - DONE
+         05  col 96      pic x(10)         source WS-Start-Date.   *> needs to be converted - Done
+         05  col 105     pic x(10)         source WS-Emp-Birth.    *> needs to be converted - Done
+         05  col 114     pic zz,zz9.99     source Emp-Rate (1).
+         05  col 127     pic xxx           source Emp-Job-Code.
+*>
+ 01  type control Footing Final line plus 2.
+     03  col 1           pic x(25)         value "Total - Account Records :".
+     03  col 26          pic zzz9          source WS-Rec-Cnt.
+*>
+ screen section.
+*>**************
+*>
+ 01  Menu-Selections-1           background-color cob-color-black
+                                 foreground-color cob-color-green.
+     03  from Prog-Name          pic x(17)          line  1 col  1.
+     03  value "Employee Master Print Menu"         line  1 col 28.
+     03  from WS-Conv-Date       pic x(10)                  col 71.
+     03  value "Report Attributes"                  line  3 col 32.
+     03  value "Select an Report Option Number : [" line  5 col  1.
+     03  using WS-Menu-Option    pic 99                     col 35 foreground-color 3.
+     03  value "]"                                          col 37.
+     03  value " 1. All Employees"                  line  7 col 10.
+     03  value " 2. All Weekly Employees"           line  8 col 10.
+     03  value " 3. All Bi-Weekly Employees"        line  9 col 10.
+     03  value " 4. All Semi-Monthly Employees"     line 10 col 10.
+     03  value " 5. All Monthly Employees"          line 11 col 10.
+     03  value " 6. All Week Based Employees"       line 12 col 10.
+     03  value " 7. All Month Based Employees"      line 13 col 10.
+     03  value " 8. All Hourly Employees"           line 14 col 10.
+     03  value " 9. All Salaried Employees"         line 15 col 10.
+     03  value "10. All Active Employees"           line 16 col 10.
+     03  value "11. All On-Leave Employees"         line 17 col 10.
+     03  value "12. All Terminated Employees"       line 18 col 10.
+     03  value "13. All Deleted Employees"          line 19 col 10.
+     03  value "14. A Range of (All) Employees"     line 20 col 10.
+     03  value "Range from [       ] to [       ]"  line 21 col 14.
+ *>    03  WS-RS-From-Emp     pic 9(7)                line 21 col 26.  *> Via accept
+ *>    03  WS-RS-To-Emp       pic 9(7)                line 21 col 39.  *> Via accept
+     03  value "Full Information or Single Line (F or S) [ ]"
+                                                    line 22 col 14.
+ *>    03  WS-RS-Report-Type  pic x                   line 22 col 56.  *> Via accept
+     03  value "99. Or Esc to Quit and Return to Menu"
+                                                    line 23 col 10.
+*>
+ procedure division using WS-Calling-Data  *> ACAS
+                          WS-System-Record *> ACAS
+                          To-Day           *> ACAS
+                          File-Defs.       *> ACAS
+*>
+ aa000-Main                  section.
+*>**********************************
+*> Force Esc, PgUp, PgDown, PrtSC to be detected
+     set      ENVIRONMENT "COB_SCREEN_EXCEPTIONS" to "Y".
+     set      ENVIRONMENT "COB_SCREEN_ESC" to "Y".
+     move     CURRENT-DATE to WSE-Date-block.
+     move     WSE-HH  to  WSD-HH.
+     move     WSE-MM  to  WSD-MM.
+     move     WSE-SS  to  WSD-SS.  *> WSD-Time
+     move     Print-Spool-Name to PSN.  *> set ACAS prt spool for o/p
+*>
+*> Get current-date into locale format for display and printing
+*>
+     perform  ZZ070-Convert-Date.
+     move     WS-Date to WS-Conv-Date.  *> Use for reporting etc.
+*>
+*> Error return codes :-
+*>   WS-Term-Code :
+*>    0 = No Errors
+*>    1 = Missing files
+*>    8 = Error with Lines < 28 or Column < 80
+*>
+*>   Return-Code :
+*>    0 = No Errors.
+*>    1 = No Payroll param file
+*>    3 = No Employee file
+*>    4 = No Account file
+*>    6 = No Param data record exists
+*>
+*> Terminal-Sizing.
+*>
+     perform  forever
+              accept   WS-Env-Lines   from lines
+              if       WS-Env-Lines < 28
+                       display  SY010    at 0101 with erase eos
+                       accept   WS-Reply at 0133
+                       move     8 to WS-Term-Code
+                       exit perform cycle
+              end-if
+              accept   WS-Env-Columns from Columns
+              if       WS-Env-Columns < 80
+                       display  SY013    at 0101 with erase eos
+                       accept   WS-Reply at 0130
+                       move     8 to WS-Term-Code
+                       exit perform cycle
+              end-if
+     end-perform.
+*>
+*> Set up error message areas on screen - assumes terninal set for => 28 deep
+*>  and must be 80 wide   BUT only needs depth of 24 or more.
+*>
+     subtract 2 from WS-Env-Lines giving WS-22-Lines.
+     subtract 1 from WS-Env-Lines giving WS-23-Lines.
+     move     WS-Env-Lines to WS-Lines.
+     move     zero         to WS-Term-Code.
+*>
+ aa010-Open-PY-Files.
+*>
+*> Check for files and Quit if any are missing or there is no data for Emp or History etc.
+*>
+     open     input PY-Param1-File.
+     if       PY-PR1-Status not = "00"      *> Does not exist yet so lets create it & write rec
+              perform  ZZ040-Evaluate-Message
+              display  PY001         at line WS-23-Lines col 1 foreground-color 4 erase eos
+              display  PY-PR1-Status at line WS-23-Lines col 47
+              display  WS-Eval-Msg   at line WS-23-Lines col 50
+              display  SY001         at line WS-Lines    col 1 foreground-color 2
+              accept   WS-Reply      at line WS-Lines    col 48 AUTO
+              close    PY-Param1-File
+              move     1 to WS-Term-Code
+              goback   returning 1        *> == no param file
+     end-if.
+*>
+*> Get PY params data for line count etc
+*>
+     move     1        to RRN.
+     read     PY-Param1-File key RRN
+     if       PY-PR1-Status not = "00"
+              perform  ZZ040-Evaluate-Message
+              display  PY002         at line WS-23-Lines col 1 with erase eos
+              display  PY-PR1-Status at line WS-23-Lines col 33
+              display  WS-Eval-Msg   at line WS-23-Lines col 36
+              display  SY001         at line WS-Lines    col 1
+              accept   WS-Reply      at line WS-Lines    col 48 AUTO
+              close    PY-Param1-File
+              move     1 to WS-Term-Code
+              goback   returning 6
+     end-if.
+*>
+     close    PY-Param1-File.             *> Record still in WS area
+     move     zero  to  Return-Code.
+*>
+     open     input    PY-Accounts-File.   *> Account records   Now OPEN
+     if       PY-Act-Status not = zero
+              move     PY-Act-Status to PY-PR1-Status
+              perform  ZZ040-Evaluate-Message
+              display  PY810         at line WS-23-Lines col 1 foreground-color 4 erase eos
+              display  PY-Act-Status at line WS-23-Lines col 33  foreground-color 4
+              display  WS-Eval-Msg   at line WS-23-Lines col 36
+              display  SY001         at line WS-Lines    col 1
+              accept   WS-Reply    at line WS-Lines    col 48 AUTO
+              close    PY-Accounts-File
+              move     1 to WS-Term-Code
+              goback   returning 4.         *> Abort as no Act data
+*>
+     open     input    PY-Employee-File.    *> Now OPEN
+     if       PY-Emp-Status not = zero
+              move     PY-Emp-Status to PY-PR1-Status
+              perform  ZZ040-Evaluate-Message
+              display  PY806         at line WS-23-Lines col 1 foreground-color 4 erase eos
+              display  PY-Emp-Status at line WS-23-Lines col 33 foreground-color 4
+              display  WS-Eval-Msg   at line WS-23-Lines col 36
+              display  SY001         at line WS-Lines    col 1
+              accept   WS-Reply      at line WS-Lines    col 48 auto
+              close    PY-Employee-File
+              move     1 to WS-Term-Code
+              goback   returning 3.
+*>
+     move     zeros to WS-Page-Cnt.
+     move     90    to WS-Line-Cnt.
+     perform  aa020-Load-Account-Records.
+     if       Return-Code not = zero        *> Got error/s so Abort run
+              go to aa000-Fin.
+*>
+     perform  aa030-Report-Selection.
+     if       Return-Code not = zero        *> Selection quit by 99 / Escape key
+              go to aa000-Fin.              *>  as user changed mind.
+*>
+*> First do a compressed report to act as an index.
+*>
+     open     output Print-File.
+     perform  aa050-Report-Compressed.
+     if       WS-RS-Report-Type = "F"
+              perform  aa060-Report-Full    *> Does a Start first of Emp file
+     end-if
+     close    PY-Employee-File
+     if       Page-Counter > zero           *> Don't print a empty report
+              close Print-File
+              call     "SYSTEM" using Print-Report.  *> Landscape
+              goback.
+*>
+ aa000-Fin.
+     close    PY-Employee-File.
+     goback.
+*>
+ aa000-Exit.  Exit section.
+*>
+ aa020-Load-Account-Records  section.
+*>**********************************
+*>
+*>  Taken from py010 but preset table with lit "Unknown" to help
+*>   detect bad data
+*>
+*> Tables have data stored by Act-No so only can handle act-no > 0 and < 100
+*>  Now, read in all account records storing details in WS-Account-Table
+*>  as saves searching the file multiple times for same values.
+*>
+     initialise
+              WS-Account-Table.
+     move     zero to Return-Code.
+     perform  varying  D from 1 by 1 until D > WS-Account-Table-Size
+              move     "Unknown" to WS-Act-Desc (D)
+     end-perform.
+*>
+     perform  forever
+              read     PY-Accounts-File Next at end
+                       exit perform
+              end-read
+              if       Act-No   > WS-Account-Table-Size    *> Table needs increasing
+                                                           *> then a recompile program
+                       display  PY125 at line WS-22-Lines col 1 foreground-color 4 erase eos
+                       display  SY001 at line WS-23-Lines col 1 foreground-color 4
+                       accept   Menu-Reply at line WS-23-Lines col 48
+                       move     8 to Return-Code
+                       exit perform
+              end-if
+*>
+*> Again should not happen unless user did not increase table size when needed
+*>
+              if       Act-No < 1           *> Invalid # must never be zero
+                       display  PY126 at line WS-22-Lines col 1 foreground-color 4 erase eos
+                       display  SY001 at line WS-23-Lines col 1 foreground-color 4
+                       accept   Menu-Reply at line WS-23-Lines col 48
+                       move     8 to Return-Code
+                       exit perform
+              end-if
+              move     Act-GL-No  to  WS-Act-GL-No (Act-No)
+              move     Act-Desc   to  WS-Act-Desc  (Act-No)
+              exit perform
+     end-perform.
+     close    PY-Accounts-File.
+*>
+*> Now only need to do a simple access of table to get acct # & Desc.
+*>
+ aa020-Exit.   exit section.
+*>
+ aa030-Report-Selection      section.
+*>**********************************
+*>
+     display  space at 0101 with erase eos.
+     move     zero to Return-Code.
+*>
+ aa033-Accept.
+     accept   Menu-Selections-1.
+     if       WS-Menu-Option = 99
+        or    Cob-CRT-Status = Cob-Scr-Esc
+              move     99 to WS-Menu-Option
+              move     8  to Return-Code
+              go to    aa030-Exit.
+*>
+     if       WS-Menu-Option not > zero and < 15
+              display  PY675 at line WS-Lines col 10 foreground-color 4
+              go to    aa033-Accept.
+*>
+ aa036-Get-From-To.
+     if       WS-Menu-Option = 14    *> Range
+              move     zeros  to WS-RS-From-Emp
+                                 WS-RS-To-Emp
+              accept   WS-RS-From-Emp at 2126 foreground-color 3    *> Force insert mode not update
+              accept   WS-RS-To-Emp   at 2139 foreground-color 3    *>   Ditto
+              if       WS-RS-From-Emp > WS-RS-To-Emp
+                       display   PY677 at line WS-Lines col 10 foreground-color 4
+                       go to aa036-Get-From-To
+              end-if
+              display  spaces at line WS-Lines col 10 erase eol  *> Clear error msg
+              if       WS-RS-To-Emp < WS-RS-From-Emp
+                       display   PY678 at line WS-Lines col 10 foreground-color 4
+                       go to aa036-Get-From-To
+              end-if
+              display  spaces at line WS-Lines col 10 erase eol  *> Clear error msg
+     end-if.
+*>
+ aa038-Get-Sub-Option.
+     accept   WS-RS-Report-Type at 2256 foreground-color 3 UPPER.
+     if       WS-RS-Report-Type not = "S" and not = "F"
+              display  PY679  at line WS-Lines col 10 foreground-color 4
+              go to aa038-Get-Sub-Option.
+     display  spaces at line WS-Lines col 10 erase eol.  *> JIC extra lines added here
+     evaluate WS-Menu-Option
+              when 1
+                   move "All Employees" to WS-RS-Title
+              when 2
+                   move "All Weekly Employees" to WS-RS-Title
+              when 3
+                   move "All Bi-Weekly Employees" to WS-RS-Title  *>23cc
+              when 4
+                   move "All Semi-Monthly Employees" to WS-RS-Title *> 26
+              when 5
+                   move "All Monthly Employees" to WS-RS-Title
+              when 6
+                   move "All Week Based Employees" to WS-RS-Title
+              when 7
+                   move "All Month Based Employees" to WS-RS-Title
+              when 8
+                   move "All Hourly Employees" to WS-RS-Title
+              when 9
+                   move "All Salaried Employees" to WS-RS-Title
+              when 10
+                   move "All Active Employees" to WS-RS-Title
+              when 11
+                   move "All On-Leave Employees" to WS-RS-Title
+              when 12
+                   move "All Terminated Employees" to WS-RS-Title
+              when 13
+                   move "All Deleted Employees" to WS-RS-Title
+              when 14
+                   move "A Range of Employees" to WS-RS-Title
+     end-evaluate.
+*>
+ aa030-Exit.  exit section.
+*>
+ aa040-Extract-Both-Descriptions  section.
+*>***************************************
+*>
+*> This section extracts and converts texual forms for :
+*> For Both reports:=
+*>
+*> Employee SSN. Phone no, Dates for Start, Birth & Term(ination) if applicable.
+*>
+     move     Emp-SSN to WS-SSN9.
+     inspect  WS-SSN replacing all "/" by "-".
+     move     Emp-Phone-No to WS-Phone-No9.
+     move     WS-Phone-No9 to WS-Phone-No.
+     inspect  WS-Phone-No replacing all "/" by "-".
+     move     Emp-Start-Date to WS-Temp-Date9.      *> 9(8)
+     perform  aa050-Convert-Date.
+     move     WS-Date to WS-Start-Date.
+     move     Emp-Birth-Date to WS-Temp-Date9.
+     perform  aa050-Convert-Date.
+     move     WS-Date to WS-Emp-Birth.
+*>
+ aa040-Exit.  exit section.
+*>
+ aa045-Extract-Full-Descriptions  section.
+*>***************************************
+*>
+*> For Full reports only
+*> Set up WS areas for reporting will need these in FULL report
+*>
+     move     spaces to WS-Term-Date.
+     if       Emp-Term-Date not = zeros
+              move     Emp-Term-Date to WS-Temp-Date9
+              perform  aa050-Convert-Date
+              move     WS-Date to WS-Term-Date.
+*>
+     move     spaces to WS-Tax-Exemptions.
+     move     1 to D.
+     if       Emp-FWT-Exempt = "Y"
+              string   "FWT " into WS-Tax-Exemptions
+                       pointer D.
+     if       Emp-SWT-Exempt = "Y"
+              string   "SWT " into WS-Tax-Exemptions
+                       pointer D.
+     if       Emp-LWT-Exempt = "Y"
+              string   "LWT " into WS-Tax-Exemptions
+                       pointer D.
+     if       Emp-FICA-Exempt = "Y"
+              string   "FICA " into WS-Tax-Exemptions
+                       pointer D.
+     if       Emp-SDI-Exempt = "Y"
+              string   "SDI " into WS-Tax-Exemptions
+                       pointer D.
+     if       Emp-Co-FUTA-Exempt = "Y"
+              string   "FUTA " into WS-Tax-Exemptions
+                       pointer D.
+     if       Emp-Co-SUI-Exempt = "Y"
+              string   "SUI " into WS-Tax-Exemptions
+                       pointer D.
+*>
+     perform  varying  F from 1 by 1 until F > PY-PR1-Max-Sys-Eds
+                                          or > 5
+              if       Emp-Sys-Exempt (F) = "Y"
+                       string   "SYS"  delimited by size
+                                F      delimited by size
+                                " "    delimited by size
+                           into WS-Tax-Exemptions
+                                pointer D
+                       end-string
+              end-if
+     end-perform.
+*>
+     move     spaces to WS-Exclusion-Code.
+     string   PY-PR1-Rate-Name (4)   delimited by "  "
+              " Exclusion Code: "    delimited by size
+              Emp-Rate4-Exclusion
+                  into WS-Exclusion-Code.
+*>
+*> Any more that are not covered by RW syntax, place here.
+*>
+ aa045-Exit.  exit section.
+*>
+ aa050-Report-Compressed     section.
+*>**********************************
+*>
+*> At this point Emp is opened for input and Print-File for output.
+*>  treat Emp recs as primary
+*>
+     move     zero to WS-Rec-Cnt.
+     subtract 1 from Page-Lines giving WS-Page-Lines.  *> Could be the same ??  <<<<
+*>
+*> If condensed then just that is printed but if Full will produce both
+*> first Short then full where the short report acts as a kind of index for
+*> the full one. Two reasons for this -
+*>
+*>  1. Aid to help testing and
+*>  2. Make it easier to locate a specific employee, i.e., if employee is
+*>     7th one then the full report will show it on page 7.
+*>
+*>  This is a change from the manual (at this time as I have not made any manual
+*>  changes yet).
+*>
+     initiate Employee-Compressed-Report.
+     perform  forever
+              read     PY-Employee-File next record
+              if       PY-Emp-Status not = "00"   *> EOF
+                       exit perform
+              end-if
+              evaluate WS-Menu-Option
+                       when 1
+                            continue
+                       when 2
+                            if  Emp-Pay-Interval not = "W"
+                                exit perform cycle
+                       when 3
+                            if  Emp-Pay-Interval not = "B"
+                                exit perform cycle
+                       when 4
+                            if  Emp-Pay-Interval not = "S"
+                                exit perform cycle
+                       when 5
+                            if  Emp-Pay-Interval not = "M"
+                                exit perform cycle
+                       when 6
+                            if  Emp-Pay-Interval not = "W"
+                             or Emp-Pay-Interval not = "B"
+                                exit perform cycle
+                       when 7
+                            if  Emp-Pay-Interval not = "S"
+                             or Emp-Pay-Interval not = "M"
+                                exit perform cycle
+                       when 8
+                            if  Emp-HS-Type not = "H"
+                                exit perform cycle
+                       when 9
+                            if  Emp-HS-Type not = "S"
+                                exit perform cycle
+                       when 10
+                            if  Emp-Status not = "A"
+                                exit perform cycle
+                       when 11
+                            if  Emp-Status not = "L"
+                                exit perform cycle
+                       when 12
+                            if  Emp-Status not = "T"
+                                exit perform cycle
+                       when 13
+                            if  Emp-Status not = "D"    *> Deleted are we not deleted such records or only end of year ?
+                                exit perform cycle
+                       when 14
+                            if    WS-RS-From-Emp < Emp-No
+                                  exit perform cycle
+                            end-if
+                            if    WS-RS-To-Emp not = zero
+                             and  Emp-No > WS-RS-To-Emp
+                                  exit perform cycle
+                            end-if
+              end-evaluate
+              add      1 to WS-Rec-Cnt
+              perform  aa040-Extract-Both-Descriptions
+              generate Emp-Detail-Compress
+     end-perform.
+     terminate
+              Employee-Compressed-Report.
+     go   to  aa050-Exit.
+*>
+ aa050-Convert-Date.
+*>
+*> Input:  WS-Temp-Date9.
+*> Output: WS-Date as 99/99/9999
+*>
+     move     "99/99/9999" to WS-Date.
+     if       PY-PR1-Date-Format = 2    *> USA mm/dd/ccyy
+              string   WS-Temp-Month "/" WS-Temp-Days "/" WS-Temp-Year
+                       into WS-Date
+     else
+              string   WS-Temp-Days "/" WS-Temp-Month "/" WS-Temp-Year
+                       into WS-Date.
+*>
+ aa050-Exit.  exit section.
+*>
+ aa060-Report-Full   section.
+*>**************************
+     move     zero to WS-Rec-Cnt
+                      Page-Counter.
+     subtract 1 from Page-Lines giving WS-Page-Lines.  *> Could be the same ?? & see aa050  <<<<
+     move     PY-PR1-Max-Sys-Eds to WS-Max.    *> These are more a PY system default.
+     start    PY-Employee-File first.
+*>
+     initiate Employee-Master-Report.
+     perform  forever
+              read     PY-Employee-File next record
+              if       PY-Emp-Status not = "00"   *> EOF
+                       exit perform
+              end-if
+              evaluate WS-Menu-Option
+                       when 1
+                            continue
+                       when 2
+                            if  Emp-Pay-Interval not = "W"
+                                exit perform cycle
+                       when 3
+                            if  Emp-Pay-Interval not = "B"
+                                exit perform cycle
+                       when 4
+                            if  Emp-Pay-Interval not = "S"
+                                exit perform cycle
+                       when 5
+                            if  Emp-Pay-Interval not = "M"
+                                exit perform cycle
+                       when 6
+                            if  Emp-Pay-Interval not = "W"
+                             or Emp-Pay-Interval not = "B"
+                                exit perform cycle
+                       when 7
+                            if  Emp-Pay-Interval not = "S"
+                             or Emp-Pay-Interval not = "M"
+                                exit perform cycle
+                       when 8
+                            if  Emp-HS-Type not = "H"
+                                exit perform cycle
+                       when 9
+                            if  Emp-HS-Type not = "S"
+                                exit perform cycle
+                       when 10
+                            if  Emp-Status not = "A"
+                                exit perform cycle
+                       when 11
+                            if  Emp-Status not = "L"
+                                exit perform cycle
+                       when 12
+                            if  Emp-Status not = "T"
+                                exit perform cycle
+                       when 13
+                            if  Emp-Status not = "D"    *> Deleted are we not deleted such records or only end of year -?
+                                exit perform cycle
+                       when 14
+                            if  WS-RS-From-Emp < Emp-No
+                                exit perform cycle
+                            end-if
+                            if  WS-RS-To-Emp not = zero
+                            and Emp-No > WS-RS-To-Emp
+                                exit perform cycle
+                            end-if
+              end-evaluate
+              add      1 to WS-Rec-Cnt
+              perform  aa040-Extract-Both-Descriptions
+              perform  aa045-Extract-Full-Descriptions
+              generate Employee-Detail
+     end-perform.
+     terminate
+              Employee-Master-Report.
+*>
+ aa060-Exit.  exit section.
+*>
+ ZZ040-Evaluate-Message      Section.
+*>**********************************
+*>
+*> For PY-PR1 parameter file anfd other using PR-PR1-Status.
+*>
+     copy "FileStat-Msgs-2.cpy" replacing MSG    by WS-Eval-Msg
+                                        STATUS by PY-PR1-Status.
+*>
+ ZZ040-Eval-Msg-Exit.
+     exit     section.
+*>
+ zz070-Convert-Date          section.
+*>**********************************
+*>
+*>  Converts date in WSE-Date to UK/USA/Intl date format using current-date
+*>*************************************************************************
+*> Input:   WSE-Date via CURRENT-DATE
+*> output:  WS-Date as uk/US/Inlt date format
+*>
+*> first create in UK date
+     move     WSE-Year  to WS-Year.
+     move     WSE-Month to WS-Month.
+     move     WSE-Days  to WS-Days.
+
+*>
+     if       Date-Form = zero
+              move 1 to Date-Form.
+*>
+     if       Date-UK          *> nothing to do as in UK format
+              go to zz070-Exit.
+     if       Date-USA                *> Swap month and days
+              move WS-Days  to WS-Swap
+              move WS-Month to WS-Days
+              move WS-Swap  to WS-Month
+              go to zz070-Exit.
+*>
+*> So its International date format
+*>
+     move     "ccyy/mm/dd" to WS-Date.  *> Swap to Intl
+     move     WSE-Year  to WS-Intl-Year.
+     move     WSE-Month to WS-Intl-Month.
+     move     WSE-Days  to WS-Intl-Days.
+*>
+ zz070-Exit.
+     exit     section.
+*>
+*> For report but zz070 does mostly the same
+*>
+ zz080-Convert-Date  section.  *> NOT USED
+*>**************************
+*>
+*> Convert from yyyymmdd in WS-Test-Date9 to selected form
+*>
+*>     move     To-Day to U-Date.
+*>     if       Date-USA
+*>              move U-Date   to WS-Date
+*>              move WS-Days  to WS-Swap
+*>              move WS-Month to WS-Days
+*>              move WS-Swap  to WS-Month
+*>              move WS-Date  to U-Date
+*>     end-if.
+*>     if       Date-Intl
+*>              move "ccyy/mm/dd" to WS-date   *> swap Intl to UK form
+*>              move U-Date (7:4) to WS-Intl-Year
+*>              move U-Date (4:2) to WS-Intl-Month
+*>              move U-Date (1:2) to WS-Intl-Days
+*>              move WS-Date to U-Date
+*>     end-if.
+*>
+*> zz080-exit.
+*>     exit     section.
+*>
