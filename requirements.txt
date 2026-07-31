@@ -1,0 +1,43 @@
+# ACAS COBOL -> Python 3.12 posting-cycle migration
+# Flat, exactly-pinned dependency list for environments without a build backend.
+# Keep in lock-step with [project].dependencies / [project.optional-dependencies]
+# in pyproject.toml. NO version ranges are permitted (AAP 0.5.1).
+#
+# Interpreter: CPython 3.12 (see pyproject.toml requires-python = "==3.12.*")
+#
+# ---------------------------------------------------------------------------
+# Runtime
+# ---------------------------------------------------------------------------
+# Oracle's official MySQL driver - primary database path for acas_posting.dal.
+mysql-connector-python==26.7.0
+# SQLAlchemy is used at CORE LEVEL ONLY (text() on an explicit Connection).
+# An ORM entity layer is forbidden by the AAP (rule R-3 / 0.5.1).
+SQLAlchemy==2.0.51
+# Transitive dependencies of SQLAlchemy, pinned for reproducibility.
+greenlet==3.5.4
+typing_extensions==4.16.0
+# Parses harness/scenarios/*.yaml scenario definitions.
+PyYAML==6.0.3
+
+# ---------------------------------------------------------------------------
+# Test / verification toolchain
+# ---------------------------------------------------------------------------
+pytest==9.1.1
+pytest-cov==7.1.0
+# Transitive dependencies of pytest / pytest-cov, pinned for reproducibility.
+coverage==7.15.2
+pluggy==1.6.0
+iniconfig==2.3.0
+packaging==26.2
+Pygments==2.20.0
+
+# ---------------------------------------------------------------------------
+# DELIBERATELY EXCLUDED (AAP 0.5.1) - do not add:
+#   * any ORM entity layer                  (forbidden by rule R-3)
+#   * alembic / any schema-migration tool   (schema mysql/ACASDB.sql is frozen)
+#   * pandas, numpy                         (binary floating point - rule R-2)
+#   * any third-party date library          (common/maps04.cbl semantics must
+#                                            be reproduced, not improved)
+#   * asyncio helpers / thread pools /
+#     connection pools                      (execution is strictly sequential)
+# ---------------------------------------------------------------------------
