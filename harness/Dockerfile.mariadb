@@ -1,0 +1,453 @@
+# =============================================================================
+#  harness/Dockerfile.mariadb
+#  The MariaDB half of the compiled-COBOL ORACLE for the ACAS posting-cycle
+#  migration (COBOL -> Python 3.12).
+# =============================================================================
+#
+#  PURPOSE
+#  -------
+#  This image serves ONE database to BOTH sides of the parity comparison: the
+#  compiled COBOL cycle and the migrated Python cycle. It exists so that, for a
+#  given scenario, the ordering-normalised diff of the affected tables after a
+#  Python run versus a COBOL run against an identical seed is EMPTY.
+#
+#  Because both sides are served by this single, identically-configured image,
+#  a non-empty diff is always a real behavioural difference and never an
+#  artefact of the comparison. That property is the whole point of the image,
+#  and it is why this Dockerfile is deliberately, aggressively boring: it adds
+#  a server-level `autocommit=0` and applies the frozen schema. Nothing else.
+#
+#  POSITION IN THE TREE
+#  --------------------
+#  `harness/` is the compiled-COBOL oracle tree and is a SIBLING of
+#  `acas_posting/`, never a sub-package -- annotated in the plan as "the
+#  compiled oracle; NEVER on the package import path". There is no
+#  `harness/__init__.py` and nothing here is importable: `pyproject.toml`
+#  packages `acas_posting*` only and excludes `harness*`.
+#  That separation is the structural expression of R-1 (no COBOL at runtime) --
+#  the shipped Python artifact carries no COBOL, no `cobc` requirement and no
+#  linkage to the bridge's C interface object.
+#
+#  This image is the DATABASE half of the harness. The COBOL toolchain
+#  (GnuCOBOL, `presql2`, `cobmysqlapi.o`, the MySQL client libraries, ncurses)
+#  lives EXCLUSIVELY in the sibling `harness/Dockerfile.gnucobol`. Keeping the
+#  two images disjoint is R-1 enforced at the container layer: grep this file
+#  and you will find no COBOL toolchain component of any kind.
+#
+#  BUILD CONTEXT -- READ THIS BEFORE BUILDING
+#  ------------------------------------------
+#  The build context MUST be the REPOSITORY ROOT, not `harness/`, because the
+#  frozen schema is copied from `mysql/ACASDB.sql` -- a path that only resolves
+#  relative to the repository root. `harness/docker-compose.yml` declares
+#  `context: ..` with `dockerfile: harness/Dockerfile.mariadb` precisely so the
+#  copy resolves.
+#
+#      Preferred:  docker compose -f harness/docker-compose.yml build mariadb
+#      Equivalent: docker build -f harness/Dockerfile.mariadb \
+#                      -t acas-oracle-mariadb .        # <-- run from repo root
+#
+#  Building with `harness/` as the context FAILS at the COPY, by design. That
+#  failure is a feature: it makes the contract self-enforcing rather than a
+#  matter of documentation.
+#
+#  VERSION PROVENANCE -- REPOSITORY EVIDENCE, NOT A PREFERENCE
+#  ----------------------------------------------------------
+#  The server version is taken from the frozen schema dump's own header:
+#      [mysql/ACASDB.sql:L1] -- MariaDB dump 10.19  Distrib 10.11.7-MariaDB, ...
+#      [mysql/ACASDB.sql:L5] -- Server version   10.11.7-MariaDB
+#  and the database name likewise:
+#      [mysql/ACASDB.sql:L3] -- Host: localhost    Database: ACASDB
+#  The tag is therefore pinned EXACTLY to `10.11.7`. No `10.11`, no `10`, no
+#  `latest`, no floating tag: the oracle must be the system as the repository
+#  specifies it, and a drifting base image would silently change the arbiter.
+#
+#  THE ONLY DDL THIS IMAGE EVER EXECUTES (R-3)
+#  -------------------------------------------
+#  `mysql/ACASDB.sql`, applied BYTE-FOR-BYTE, unmodified. The file is COPYied
+#  into `/docker-entrypoint-initdb.d/` and handed to the vendor entrypoint
+#  unchanged. It is never piped through `sed`, `awk`, `tr`, `iconv` or any
+#  other filter; no modified copy is vendored into `harness/`; and no index,
+#  view, trigger, stored procedure, constraint, column or table is added.
+#  A build-time SHA-256 tripwire plus five structural invariants make that
+#  guarantee machine-checked rather than asserted -- see the verification step
+#  below. No migration tooling (Alembic or otherwise) is present or needed:
+#  the schema is frozen, so there is nothing legitimate for one to do.
+#
+#  Reviewers can confirm the copy independently:
+#      docker run --rm --entrypoint sha256sum <image> \
+#          /docker-entrypoint-initdb.d/10-ACASDB.sql
+#      sha256sum mysql/ACASDB.sql          # must print the identical digest
+#
+#  THE CHARSET CAVEAT IS PRESERVED, NOT FIXED (R-4)
+#  ------------------------------------------------
+#  The maintainer flags a charset concern in his own words at
+#  [mysql/ACASDB.sql:L9-L11]:
+#      "THERE IS NOT ANY DATA RECORDS PRESENT HERE"
+#      "YOU MAY NEED TO CHANGE the defined Character set in all tables"
+#      "TO MATCH ANY OF YOUR REQUIREMENTS IF THEY DIFFER"
+#  The dump is then internally inconsistent: its preamble sets
+#  `SET NAMES utf8mb4` [mysql/ACASDB.sql:L16] and each table is preceded by
+#  `SET character_set_client = utf8` [mysql/ACASDB.sql:L30], yet all 33 tables
+#  are created `DEFAULT CHARSET=utf8mb3 COLLATE=utf8mb3_general_ci`
+#  [mysql/ACASDB.sql:L37].
+#
+#  This image does NOT harmonise that. No `character-set-server`, no
+#  `collation-server`, no per-table override. A defect reproduced is correct;
+#  a defect fixed is a failure. The oracle must behave exactly as the
+#  maintainer's schema makes it behave, so `utf8mb3_general_ci` is asserted as
+#  an INVARIANT below rather than corrected.
+#
+#  DETERMINISM (R-6)
+#  -----------------
+#  Nothing time-, host- or build-dependent is baked into this image: no build
+#  date, no timestamp label, no VCS revision, no run identifier, and no server
+#  setting that could make one run differ from the next. The determinism suite
+#  requires two runs of the same scenario under the same pinned clock to
+#  produce byte-identical dumps, and `SYSTEM-REC` carries a diff-visible
+#  `Run-Date` column [copybooks/wssystem.cob:L67], so any clock leakage here
+#  would corrupt the evidence. The run date reaches the programs purely through
+#  linkage from the controlled clock, never from this container.
+#
+#  NO SEED DATA
+#  ------------
+#  The dump carries no rows -- [mysql/ACASDB.sql:L9] says so outright. All data
+#  arrives via `harness/seed.sh` driving the maintainer's own `common/*LD.cbl`
+#  loaders. That is precisely WHY autocommit-off is a property of this SERVER
+#  rather than of one script: every client session -- the COBOL loaders, the
+#  COBOL bridges via `cobmysqlapi.o`, the `mariadb` CLI used by `seed.sh` and
+#  `reset_db.sh`, and the Python driver used by `dump_tables.py` -- must
+#  inherit it identically, or the two sides of the diff are not comparable.
+#
+#  CREDENTIALS
+#  -----------
+#  NONE are hard-coded here, and no credential value appears anywhere in this
+#  file -- not in an ENV, not in an ARG, not in a comment. They arrive at run
+#  time from `harness/docker-compose.yml` as `MARIADB_ROOT_PASSWORD`,
+#  `MARIADB_USER` and `MARIADB_PASSWORD`.
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+#  Base image -- EXACT tag from [mysql/ACASDB.sql:L1] and [mysql/ACASDB.sql:L5]
+# -----------------------------------------------------------------------------
+FROM mariadb:10.11.7
+
+
+# -----------------------------------------------------------------------------
+#  Metadata. Descriptive only. Deliberately carries NO created/revision/
+#  timestamp label: those change on every build and would break the
+#  byte-identical-dump guarantee this tree exists to provide (R-6).
+# -----------------------------------------------------------------------------
+LABEL org.opencontainers.image.title="ACAS posting-cycle oracle - MariaDB" \
+      org.opencontainers.image.description="MariaDB 10.11.7 serving the frozen ACASDB schema with autocommit disabled, for COBOL-vs-Python posting-cycle parity comparison." \
+      org.opencontainers.image.base.name="docker.io/library/mariadb:10.11.7" \
+      org.opencontainers.image.licenses="GPL-3.0-or-later" \
+      acas.harness.role="oracle-database" \
+      acas.harness.schema.source="mysql/ACASDB.sql" \
+      acas.harness.schema.frozen="true" \
+      acas.harness.autocommit="0" \
+      acas.harness.cobol.toolchain="absent"
+
+
+# -----------------------------------------------------------------------------
+#  SERVER CONFIGURATION -- autocommit MUST be OFF
+#
+#  This is the single most important behavioural setting in the image.
+#
+#  The maintainer's own loader header, [common/glbatchLD.cbl:L9-L13], verbatim:
+#
+#      *>  This modules uses commit and rollback so *
+#      *>  you MUST ensure that autocommit is OFF   *
+#      *>   in the rdb settings. It is as default   *
+#      *>   set ON.                                 *
+#
+#  That header is NOT unique to `glbatchLD`. Verified by census over the 28
+#  `common/*LD.cbl` loaders: 17 of them carry this identical four-line banner
+#  (e.g. [common/analLD.cbl:L10-L13]), and ALL 28 reference autocommit
+#  somewhere. The remaining 11 omit only the banner, not the dependency -- each
+#  still drives COMMIT/ROLLBACK explicitly (5 to 6 call sites apiece, e.g.
+#  [common/nominalLD.cbl], [common/slpostingLD.cbl]). Autocommit-off is
+#  therefore a requirement of the whole loader family, not a quirk of one
+#  program. The maintainer corroborates the consequence in his own inline notes:
+#      [common/analLD.cbl:L377]  "otherwise as normally it is set to autocommit !!!!!"
+#      [common/analLD.cbl:L442]  "These do not work during testing with mariadb -
+#                                 Non transactional model or autocommit set ON"
+#      [common/finalLD.cbl:L361] "which can be ignored unless you thought
+#                                 autocommit was set up."
+#
+#  His "It is as default set ON" is accurate for this base image: it ships no
+#  autocommit setting anywhere under /etc/mysql, so the server default of 1
+#  applies. Hence this override is load-bearing, not decorative -- without it
+#  the loaders' COMMIT/ROLLBACK boundaries are meaningless and the seeded state
+#  the whole comparison rests on would be wrong.
+#
+#  Set at SERVER level, not per session, so that every client inherits it
+#  identically: the COBOL loaders, the COBOL bridges via `cobmysqlapi.o`, the
+#  `mariadb` CLI in `seed.sh` / `reset_db.sh`, and the Python driver in
+#  `dump_tables.py`. A per-session setting would let one side of the diff
+#  differ from the other and turn this image into the comparison artefact that
+#  R-6 forbids.
+#
+#  Written INTO the image rather than shipped as a separate `harness/my.cnf`:
+#  the harness folder inventory is exactly eleven files plus `scenarios/`, and
+#  a twelfth file is out of scope.
+#
+#  Placed in /etc/mysql/conf.d/ and named `99-` so it is read LAST and wins.
+#  /etc/mysql/my.cnf includes `mariadb.conf.d/` BEFORE `conf.d/`, and its own
+#  header states "If the same option is defined multiple times, the last one
+#  will apply." Nothing else in the image sets autocommit, so this is the sole
+#  definition; the `99-` prefix guarantees precedence even if that changes.
+#
+#  DELIBERATELY ABSENT from [mysqld], each for a specific reason:
+#    * `sql_mode`                      -- the dump sets `NO_AUTO_VALUE_ON_ZERO`
+#                                         itself, per session
+#                                         [mysql/ACASDB.sql:L21]
+#    * `character-set-server` /
+#      `collation-server`              -- would override the schema's own
+#                                         `utf8mb3` table defaults and thereby
+#                                         "fix" the charset caveat at
+#                                         [mysql/ACASDB.sql:L9-L11] (R-4)
+#    * `PAD_CHAR_TO_FULL_LENGTH`       -- would change how the 238 fixed-width
+#                                         `char` columns read back, and trailing
+#                                         -space canonicalisation is
+#                                         `normalize.py`'s job, not the server's
+#    * `innodb_flush_log_at_trx_commit`
+#      and every other durability knob  -- changing durability changes commit
+#                                         semantics, which is exactly what the
+#                                         loaders depend on
+#    * general / slow query log        -- writes timestamped output, i.e. a
+#                                         non-deterministic artefact (R-6)
+#    * `explicit_defaults_for_timestamp`
+#                                      -- unnecessary: the 22 in-scope tables
+#                                         contain zero TIMESTAMP columns
+#    * any parallelism or pooling knob -- execution is strictly sequential and
+#                                         there are no parallel scenario runs
+#                                         against the shared database
+#
+#  NOTE for downstream scripts: with autocommit=0, MariaDB still commits DDL
+#  implicitly, but every DML statement requires an explicit COMMIT. `seed.sh`
+#  and `reset_db.sh` are written knowing this.
+# -----------------------------------------------------------------------------
+RUN set -eu; \
+    printf '%s\n' \
+      '#' \
+      '# ACAS compiled-COBOL oracle -- server configuration.' \
+      '# Generated by harness/Dockerfile.mariadb. Do not edit in a running container.' \
+      '#' \
+      '# autocommit=0 is REQUIRED by the ACAS loader family. [common/glbatchLD.cbl:L9-L13]:' \
+      '#   "This modules uses commit and rollback so you MUST ensure that autocommit' \
+      '#    is OFF in the rdb settings. It is as default set ON."' \
+      '# 17 of the 28 common/*LD.cbl loaders carry that identical banner' \
+      '# (e.g. [common/analLD.cbl:L10-L13]) and all 28 reference autocommit; the' \
+      '# other 11 still drive COMMIT/ROLLBACK. It is a family-wide requirement.' \
+      '#' \
+      '# Set server-wide so every client -- COBOL loaders, COBOL bridges via' \
+      '# cobmysqlapi.o, the mariadb CLI, and the Python driver -- inherits it' \
+      '# identically. Both sides of the parity diff must see the same server.' \
+      '#' \
+      '# Nothing else is set here by design: no sql_mode (the dump sets' \
+      '# NO_AUTO_VALUE_ON_ZERO per session at [mysql/ACASDB.sql:L21]), no server' \
+      '# charset/collation (that would "fix" the charset caveat at' \
+      '# [mysql/ACASDB.sql:L9-L11], which must be preserved), no' \
+      '# PAD_CHAR_TO_FULL_LENGTH, no durability change, no query logging.' \
+      '#' \
+      '[mysqld]' \
+      'autocommit=0' \
+      > /etc/mysql/conf.d/99-acas-oracle.cnf; \
+    chmod 0644 /etc/mysql/conf.d/99-acas-oracle.cnf; \
+    grep -qx 'autocommit=0' /etc/mysql/conf.d/99-acas-oracle.cnf
+
+
+# -----------------------------------------------------------------------------
+#  TARGET DATABASE
+#
+#  `ACASDB`, from [mysql/ACASDB.sql:L3] ("Host: localhost    Database: ACASDB").
+#
+#  This default matters because the frozen dump contains 33 `CREATE TABLE`
+#  statements but ZERO `CREATE DATABASE` and ZERO `USE` -- verified by census.
+#  The target schema must therefore already exist AND be selected before the
+#  dump is replayed.
+#
+#  The vendor entrypoint does both when `MARIADB_DATABASE` is set: it issues
+#  `CREATE DATABASE IF NOT EXISTS` for it, and `docker_exec_client` prepends
+#  `--database="$MYSQL_DATABASE"` to every init-file invocation. (That
+#  `CREATE DATABASE` is the vendor's, and it creates only the database
+#  namespace the frozen dump requires -- no table, column or index -- so it is
+#  not schema evolution and it is unavoidable.)
+#
+#  Baked in as a default so the image is self-sufficient and correct even if
+#  invoked directly with `docker run`. `ACASDB` is repository evidence, not a
+#  credential. `harness/docker-compose.yml` supplies the same value; the two
+#  must agree, and compose may override but must never diverge.
+#
+#  Because the entrypoint selects the database for init scripts, NO separate
+#  `USE` init file is required, and none is added -- the frozen dump is handed
+#  over untouched and unwrapped.
+# -----------------------------------------------------------------------------
+ENV MARIADB_DATABASE=ACASDB
+
+
+# -----------------------------------------------------------------------------
+#  THE FROZEN SCHEMA -- copied verbatim, never transformed (R-3)
+#
+#  Source path resolves against the REPOSITORY ROOT build context (see header).
+#  Named `10-` so it sorts predictably within /docker-entrypoint-initdb.d/,
+#  which the vendor entrypoint replays in lexical order on first boot of an
+#  empty data directory.
+#
+#  This is a plain COPY. There is no pipe, no filter, no rewrite and no
+#  wrapper: the bytes in the image are the bytes in the repository.
+# -----------------------------------------------------------------------------
+COPY mysql/ACASDB.sql /docker-entrypoint-initdb.d/10-ACASDB.sql
+
+
+# -----------------------------------------------------------------------------
+#  VERBATIM GUARANTEE -- build-time tripwire for R-3 and R-4
+#
+#  R-3 forbids schema evolution of any kind and the AAP freezes
+#  `mysql/ACASDB.sql` outright: "any diff touching ... mysql/ACASDB.sql is a
+#  defect in the migration, regardless of how harmless it appears." Because the
+#  file is frozen, pinning its digest cannot go stale -- the check fails
+#  precisely, and only, when someone commits the violation the AAP forbids.
+#  That makes the "applied byte-for-byte" claim MACHINE-CHECKED at build time
+#  instead of merely asserted in a comment.
+#
+#  The digest below is of `mysql/ACASDB.sql` as committed: 1459 lines,
+#  51008 bytes. Exposed as an ARG purely so a reviewer can inspect or
+#  deliberately re-pin it; the empty value is rejected so it cannot be
+#  silently bypassed.
+#
+#  The five structural invariants that follow are READ-ONLY greps over the
+#  COPYied file. They perform no transformation; they exist so that a failure
+#  names the violated rule instead of only printing a digest mismatch. Each is
+#  a fact independently verified against the committed schema.
+#
+#  Written deliberately WITHOUT any shell pipeline. /bin/sh here is dash, which
+#  does not support `set -o pipefail`, so in a pipeline only the rightmost exit
+#  status would be observed -- and a tripwire that can pass vacuously is worse
+#  than no tripwire. The digest is therefore captured into a variable (so
+#  `set -e` observes sha256sum's own failure) and trimmed with POSIX parameter
+#  expansion, and the ALTER TABLE test uses a single anti-anchored pattern
+#  instead of `grep | grep -v`.
+#
+#  On the ALTER TABLE pattern: a naive `grep -c 'ALTER TABLE'` reports 66 on
+#  this dump, yet there is not one real ALTER TABLE in it -- every hit sits
+#  inside a mysqldump version guard, `/*!40000 ALTER TABLE `X` DISABLE KEYS */`
+#  [mysql/ACASDB.sql:L45]. `^[^/]*ALTER TABLE` matches only an occurrence with
+#  no `/` before it on the line, so the 66 guarded hits are excluded while a
+#  genuinely added statement -- at column 1 or indented -- is caught.
+#
+#  On the float test: it matches the bare TOKENS `float`, `double` and `real`
+#  anywhere in the file rather than only in column position. That is the
+#  stronger assertion -- the frozen schema contains zero occurrences of all
+#  three words, in DDL and in comments alike -- and it cannot be evaded by an
+#  unusual column declaration. `decimal` is unaffected, as it contains none of
+#  the three as a whole word.
+# -----------------------------------------------------------------------------
+ARG ACASDB_SCHEMA_SHA256=094e588226f650672c3781d1737d7bf8be30be048ce6a788df81800a19326ed0
+
+RUN set -eu; \
+    schema=/docker-entrypoint-initdb.d/10-ACASDB.sql; \
+    \
+    if [ -z "${ACASDB_SCHEMA_SHA256}" ]; then \
+        echo "FATAL: ACASDB_SCHEMA_SHA256 is empty; the R-3 verbatim tripwire cannot be bypassed." >&2; \
+        exit 1; \
+    fi; \
+    \
+    echo '[R-3] verifying the frozen schema was copied byte-for-byte ...'; \
+    actual_sha="$(sha256sum "${schema}")"; \
+    actual_sha="${actual_sha%% *}"; \
+    if [ "${actual_sha}" != "${ACASDB_SCHEMA_SHA256}" ]; then \
+        echo "FATAL: mysql/ACASDB.sql is NOT byte-identical to the frozen baseline." >&2; \
+        echo "       expected ${ACASDB_SCHEMA_SHA256}" >&2; \
+        echo "       actual   ${actual_sha}" >&2; \
+        echo "       The schema is frozen: any diff touching mysql/ACASDB.sql is a defect," >&2; \
+        echo "       regardless of how harmless it appears. Revert it, do not re-pin." >&2; \
+        exit 1; \
+    fi; \
+    \
+    echo '[R-3] 33 CREATE TABLE statements, unchanged (22 in scope + 11 out of scope) ...'; \
+    n_tables="$(grep -c '^CREATE TABLE ' "${schema}" || true)"; \
+    [ "${n_tables}" = '33' ] || { echo "FATAL: expected 33 CREATE TABLE, found ${n_tables}." >&2; exit 1; }; \
+    \
+    echo '[R-3] zero real ALTER TABLE statements ...'; \
+    n_alter="$(grep -cE '^[^/]*ALTER TABLE' "${schema}" || true)"; \
+    [ "${n_alter}" = '0' ] || { echo "FATAL: ${n_alter} real ALTER TABLE statement(s) present." >&2; exit 1; }; \
+    \
+    echo '[R-3] zero CREATE INDEX / VIEW / TRIGGER / PROCEDURE statements ...'; \
+    n_ddl="$(grep -ciE 'CREATE (INDEX|VIEW|TRIGGER|PROCEDURE|FUNCTION|DATABASE)' "${schema}" || true)"; \
+    [ "${n_ddl}" = '0' ] || { echo "FATAL: ${n_ddl} added DDL statement(s) present." >&2; exit 1; }; \
+    \
+    echo '[R-4] charset caveat preserved: all 33 tables still utf8mb3_general_ci ...'; \
+    n_cs="$(grep -c 'DEFAULT CHARSET=utf8mb3 COLLATE=utf8mb3_general_ci' "${schema}" || true)"; \
+    [ "${n_cs}" = '33' ] || { echo "FATAL: expected 33 utf8mb3_general_ci tables, found ${n_cs}; the charset caveat at [mysql/ACASDB.sql:L9-L11] must NOT be fixed." >&2; exit 1; }; \
+    \
+    echo '[R-2] zero FLOAT / DOUBLE / REAL tokens anywhere in the schema ...'; \
+    n_float="$(grep -ciwE 'float|double|real' "${schema}" || true)"; \
+    [ "${n_float}" = '0' ] || { echo "FATAL: ${n_float} line(s) carry a binary floating-point type; accounting values must never traverse a float." >&2; exit 1; }; \
+    \
+    echo 'OK: frozen schema verified verbatim -- 33 tables, 0 added DDL, utf8mb3 preserved, 0 float columns.'
+
+
+# -----------------------------------------------------------------------------
+#  NETWORK
+#
+#  Compose service name `mariadb`; the other harness members reach this server
+#  at hostname `mariadb` on port 3306 over TCP.
+#
+#  The client-side contract they use is:
+#      ACAS_DB_HOST=mariadb      ACAS_DB_PORT=3306      ACAS_DB_NAME=ACASDB
+#      ACAS_DB_USER / ACAS_DB_PASSWORD   (from compose; never defaulted here)
+#      ACAS_DB_SOCKET=""         (empty => TCP)
+#  Those `ACAS_DB_*` variables are consumed by the harness shell and Python
+#  tools, NOT by this server image, so they are documented here for agreement
+#  and deliberately not set: this image is configured through the `MARIADB_*`
+#  set alone, and defaulting `ACAS_DB_PASSWORD` to anything would put a
+#  credential in an image layer.
+#
+#  The data directory is the vendor default, /var/lib/mysql. `reset_db.sh`
+#  drops and re-applies the frozen schema rather than deleting the volume, so
+#  no special data-directory handling is required here.
+# -----------------------------------------------------------------------------
+EXPOSE 3306
+
+
+# -----------------------------------------------------------------------------
+#  READINESS
+#
+#  `seed.sh`, `reset_db.sh` and both scenario runners must wait for the server
+#  DETERMINISTICALLY -- a race here would corrupt the parity evidence.
+#
+#  Uses the vendor-supplied `healthcheck.sh`, which is strictly READ-ONLY: it
+#  writes nothing, creates nothing and touches no table. `--connect` runs
+#  `select 1` and `--innodb_initialized` reads engine status, needing only
+#  USAGE; `--su-mysql` runs them as the `mysql` unix user, so NO credential is
+#  required and none is embedded.
+#
+#  Critically, `--connect` probes over TCP while the entrypoint's temporary
+#  initialisation server runs with `--skip-networking`. The container therefore
+#  cannot report healthy until every /docker-entrypoint-initdb.d/ script has
+#  finished -- i.e. until the frozen schema is fully applied. "Healthy" means
+#  "schema ready", which is exactly the gate the harness needs.
+#
+#  `start-period` absorbs first-boot initialisation (creating the data
+#  directory and replaying the 33-table schema) without counting failures,
+#  and the retry budget then covers a slow host. All values are fixed
+#  constants -- nothing here varies between the COBOL run and the Python run.
+# -----------------------------------------------------------------------------
+HEALTHCHECK --interval=5s --timeout=10s --start-period=30s --retries=24 \
+    CMD healthcheck.sh --su-mysql --connect --innodb_initialized
+
+
+# -----------------------------------------------------------------------------
+#  ENTRYPOINT / CMD are INHERITED, never overridden.
+#
+#  The vendor entrypoint is what initialises the data directory, creates and
+#  selects `ACASDB`, replays /docker-entrypoint-initdb.d/ on first boot, drops
+#  privileges to the `mysql` user and then execs the server. Overriding it
+#  would bypass the schema application this image exists to perform.
+#
+#  On a restart with an existing data directory the entrypoint skips the init
+#  scripts, so the frozen schema is applied exactly once and restarts are
+#  idempotent.
+# -----------------------------------------------------------------------------
