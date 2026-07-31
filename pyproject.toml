@@ -1,0 +1,134 @@
+#
+# ACAS COBOL -> Python 3.12 posting-cycle migration
+#
+# This file configures ONLY the Python side of the repository. The COBOL tree
+# (common/ copybooks/ general/ sales/ purchase/ irs/ stock/), the generated
+# MySQL bridge (common/*MT.scb, common/*MT.cbl) and the schema
+# (mysql/ACASDB.sql) are frozen specification sources and are neither packaged
+# nor built from here.
+#
+# harness/ holds the compiled GnuCOBOL comparison oracle. It is a SIBLING of
+# acas_posting/ and is deliberately excluded from packaging so that the shipped
+# artifact carries no COBOL and requires no COBOL compiler or runtime
+# (AAP rule R-1).
+#
+
+[build-system]
+requires = ["setuptools>=80.0.0", "wheel>=0.45.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "acas-posting"
+version = "0.1.0"
+description = "Behaviourally exact Python 3.12 migration of the ACAS COBOL batch posting cycle"
+requires-python = "==3.12.*"
+
+# Exactly pinned - no ranges (AAP 0.5.1). Mirrored in requirements.txt.
+dependencies = [
+    "mysql-connector-python==26.7.0",
+    "SQLAlchemy==2.0.51",
+    "greenlet==3.5.4",
+    "typing_extensions==4.16.0",
+    "PyYAML==6.0.3",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest==9.1.1",
+    "pytest-cov==7.1.0",
+    "coverage==7.15.2",
+    "pluggy==1.6.0",
+    "iniconfig==2.3.0",
+    "packaging==26.2",
+    "Pygments==2.20.0",
+]
+
+# ---------------------------------------------------------------------------
+# Packaging: ship acas_posting* ONLY.
+# harness/, tests/, docs/, data_dictionary/ and every COBOL/legacy directory
+# are excluded so there is no import path from the shipped package to the
+# compiled oracle.
+# ---------------------------------------------------------------------------
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["acas_posting*"]
+exclude = [
+    "harness*",
+    "tests*",
+    "docs*",
+    "data_dictionary*",
+    "common*",
+    "copybooks*",
+    "general*",
+    "sales*",
+    "purchase*",
+    "irs*",
+    "stock*",
+    "payroll*",
+    "mysql*",
+    "Basic-Code*",
+    "ACAS-Manuals*",
+    "etc*",
+    "home*",
+    "blitzy*",
+]
+
+[tool.setuptools.package-data]
+acas_posting = ["py.typed"]
+
+# ---------------------------------------------------------------------------
+# Test runner
+#
+# testpaths is intentionally NOT set: until tests/ exists a `pytest` run must
+# report "no tests collected" (exit 5) rather than a usage error. Discovery
+# picks up tests/ automatically once the suite is created. norecursedirs keeps
+# collection away from the frozen COBOL and legacy-BASIC trees.
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "9.1"
+addopts = "-ra --strict-markers --strict-config"
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+norecursedirs = [
+    ".git",
+    ".venv",
+    "venv",
+    "common",
+    "copybooks",
+    "general",
+    "sales",
+    "purchase",
+    "irs",
+    "stock",
+    "payroll",
+    "Basic-Code",
+    "ACAS-Manuals",
+    "mysql",
+    "etc",
+    "home",
+    "blitzy",
+    "build",
+    "dist",
+    "*.egg-info",
+]
+markers = [
+    "arithmetic: COBOL-semantics parity test; pure Decimal/int, no database, no COBOL",
+    "scenario: end-to-end scenario test asserting an empty ordering-normalised table diff",
+    "determinism: two runs under the same pinned clock must be byte-identical",
+    "database: requires a live MariaDB 10.11.7 instance with mysql/ACASDB.sql applied",
+    "oracle: requires the compiled GnuCOBOL 3.2 oracle under harness/ to have been built",
+]
+
+# ---------------------------------------------------------------------------
+# Coverage - used as traceability evidence that every migrated module is
+# exercised (AAP rule R-5), not as a quality gate.
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+branch = true
+source = ["acas_posting"]
+omit = ["harness/*", "tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
