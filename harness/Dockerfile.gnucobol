@@ -1,0 +1,1287 @@
+# =============================================================================
+#  harness/Dockerfile.gnucobol
+#  The GnuCOBOL half of the compiled-COBOL ORACLE for the ACAS posting-cycle
+#  migration (COBOL -> Python 3.12).
+# =============================================================================
+#
+#  PURPOSE
+#  -------
+#  This image is the ARBITER. The migration has no pre-existing test suite:
+#  compiled COBOL execution IS the behavioural specification, defects included,
+#  and a defect reproduced is correct while a defect fixed is a failure. This
+#  image is therefore the one place in the project that contains `cobc`, and it
+#  exists so that a semantic question about the posting cycle can be settled by
+#  RUNNING the maintainer's own programs rather than by reasoning about them.
+#
+#  It carries two things:
+#    1. the maintainer's exact COBOL toolchain -- GnuCOBOL 3.2 final, the MySQL
+#       client libraries under /usr/local/mysql, the JC preSQL translator
+#       `presql2`, and the bridge's C interface object `cobmysqlapi.o`; and
+#    2. CPython 3.12 plus the repository's exactly pinned Python dependencies,
+#       so the Python side of every comparison runs on the same host, against
+#       the same database, in the same process family.
+#
+#  Because both cycles are driven from this single image against the single
+#  MariaDB served by the sibling `harness/Dockerfile.mariadb`, a non-empty
+#  ordering-normalised table diff is always a REAL behavioural difference and
+#  never an artefact of the comparison. That property is the whole point.
+#
+#  POSITION IN THE TREE
+#  --------------------
+#  `harness/` is the compiled-COBOL oracle tree and is a SIBLING of
+#  `acas_posting/`, never a sub-package -- the plan annotates it as "the
+#  compiled oracle; NEVER on the package import path". There is no
+#  `harness/__init__.py`, this image creates none, and nothing under `harness/`
+#  is importable: `pyproject.toml` packages `acas_posting*` only and excludes
+#  `harness*`. The harness Python tools (`dump_tables.py`, `normalize.py`,
+#  `diff_states.py`) are standalone scripts invoked BY PATH.
+#
+#  WHY THIS IMAGE ALSO CARRIES CPYTHON -- AND WHY THAT IS NOT AN R-1 VIOLATION
+#  --------------------------------------------------------------------------
+#  R-1 ("no COBOL at runtime") constrains the SHIPPED Python package's import
+#  path and the shipped artifact -- not a harness container. The plan specifies
+#  a TWO-service compose file ("MariaDB service at the version the schema was
+#  produced by, plus a GnuCOBOL builder service"), so `run_python_scenario.sh`,
+#  `dump_tables.py`, `normalize.py` and `diff_states.py` necessarily execute
+#  here as well. The prohibition R-1 protects is preserved structurally and is
+#  verifiable rather than promised:
+#    * `pyproject.toml` excludes `harness*` from packaging, so the built wheel
+#      carries no COBOL, no `cobc` requirement and no `cobmysqlapi.o` linkage;
+#    * nothing in this file creates a `harness` package or puts `harness/` on
+#      `PYTHONPATH`;
+#    * `acas_posting/` contains no subprocess call, no FFI bridge and no
+#      linkage to the bridge's C interface object -- the compiled oracle is
+#      reached only OUT OF PROCESS, from the scenario and determinism suites.
+#  The complementary half of the same separation is enforced in the sibling
+#  image: grep `harness/Dockerfile.mariadb` and you will find no COBOL
+#  toolchain component of any kind.
+#
+#  BUILD CONTEXT -- READ THIS BEFORE BUILDING
+#  ------------------------------------------
+#  The build context MUST be the REPOSITORY ROOT, not `harness/`, because this
+#  file copies three artifacts that only resolve relative to the repository
+#  root: `requirements.txt`, `presql2-latest.zip` and
+#  `mariadb-connector-c-3.3.4-src.zip`. `harness/docker-compose.yml` declares
+#  `context: ..` with `dockerfile: harness/Dockerfile.gnucobol` precisely so
+#  those copies resolve, and names the service `gnucobol`.
+#
+#      Preferred:  docker compose -f harness/docker-compose.yml build gnucobol
+#      Equivalent: docker build -f harness/Dockerfile.gnucobol \
+#                      -t acas-oracle-gnucobol .      # <-- run from repo root
+#
+#  Building with `harness/` as the context FAILS at the first COPY, by design.
+#  That failure is a feature: the contract enforces itself.
+#
+#  THE COMPILE RECIPE IS FROZEN -- R-4, AND THE MOST IMPORTANT RULE HERE
+#  --------------------------------------------------------------------
+#  The compiler must be invoked with DEFAULT ARITHMETIC, and this image must
+#  not alter that. A census of every `cobc` invocation reachable by the oracle
+#  build finds NO `-std=` dialect selection, NO `>>SET ARITHMETIC` directive in
+#  any source, and NO `binary-truncate` flag anywhere. The flags the frozen
+#  scripts actually use are exactly:
+#      -m  -x  -Wlinkage  -I ../copybooks  cobmysqlapi.o
+#      -L/usr/local/mysql/lib   [common/comp-common.sh:L26]
+#      -L /usr/local/mysql/lib  (space variant) [common/comp-common.sh:L32,L36]
+#      -lmysqlclient  -lz  -T <name>.prn        [common/comp-common.sh:L26,L51]
+#      -D_FORTIFY_SOURCE=1  -fdump=ws  -fmissing-statement=ok
+#                                               [general/comp-gl.sh:L2-L5]
+#      -lncursesw -A '-DHAVE_NCURSESW_NCURSES_H -DDECIMAL_RIGHT'
+#                                               [common/comp-common.sh:L18]
+#  Nothing in this image adds to, removes from or re-spells that list. In
+#  particular it does not enable `-g -d`, `-fdump=ALL` or `-ftraceall`, which
+#  appear only in the `*-diags*.sh` script variants the harness never runs.
+#
+#  TWO STALE-RECORD DEFECTS THAT ARE DELIBERATELY *NOT* FIXED
+#  ----------------------------------------------------------
+#  A defect reproduced is correct; a defect fixed is a failure. Both of the
+#  following are inconsistencies between the maintainer's changelog comments
+#  and his live code. Both are left exactly as they are:
+#
+#    1. [common/comp-common.sh:L8-L9] records that `-Wno-goto-section` was
+#       "added to remove the silly default warning in latest gnucobol v3.2",
+#       and [README.TXT:L204-L212] says the same. It was NOT added. A repo-wide
+#       search finds `-Wno-goto-section` in exactly three places, all of them
+#       changelog comments -- [common/comp-common.sh:L8],
+#       [common/comp-common2.sh:L8] and
+#       [common/comp-common-no-rdbms-diags.sh:L9] -- and in ZERO live `cobc`
+#       invocations. This image does not add it. Adding a flag alters the
+#       recipe, and the inter-section `GO TO` warnings it would suppress are
+#       diagnostics only: they change no computed value and no table state.
+#
+#    2. [common/comp-common.sh:L11] claims "Added to all comps -fdump=all", yet
+#       no live line in that file uses `-fdump` at all. (The General Ledger
+#       script does use `-fdump=ws` -- a different thing -- at
+#       [general/comp-gl.sh:L2-L5].) Left as found.
+#
+#  Two further asymmetries are noted here so that no one "harmonises" them:
+#  [common/comp-common.sh:L59] and [comp-all.sh:L44-L45] both end with an
+#  unconditional `exit 0`, so NEITHER script's exit status is a build-success
+#  signal -- `build_oracle.sh` must scan captured output instead, which is why
+#  this image neither wraps, colourises, filters nor reorders their output; and
+#  `sales/comp-sales.sh` alone omits `-fdump=ws`/`-fmissing-statement=ok` and
+#  has its `accept_numeric` lines commented out. All left as found.
+#
+#  THE CHECKOUT IS MOUNTED READ-ONLY -- NOTHING HERE WRITES TO IT
+#  --------------------------------------------------------------
+#  The frozen artifacts are read in place from `$ACAS_REPO` (/repo), mounted
+#  READ-ONLY, and `build_oracle.sh` copies them to the writable `$ACAS_BUILD`
+#  (/build) before compiling. This is not fastidiousness; running the frozen
+#  scripts in the checkout would damage it five separate ways:
+#    1. [common/comp-common.sh:L25] runs `presql2` over every `*MT.scb`, which
+#       OVERWRITES the committed, frozen generated bridges `common/*MT.cbl`;
+#    2. every compile passes `-T <name>.prn`, creating listing files;
+#    3. `cobmysqlapi.o` must sit in the CWD of every compile, so six copies
+#       would land in six frozen directories;
+#    4. `presql2.param` would appear as a new file in the CWD;
+#    5. `cobc -m` / `-x` outputs land in the source directories.
+#  Any diff touching the frozen tree is a defect in the migration regardless of
+#  how harmless it looks. Accordingly: this image contains no COPY and no RUN
+#  that writes anywhere under /repo, and its WORKDIR is /build, never /repo.
+#  It also embeds no copy of any `.cbl`, `.scb`, `.cob` or `.sql` file.
+#
+#  DIVISION OF LABOUR WITH build_oracle.sh -- FIXED, AND STATED IDENTICALLY
+#  -----------------------------------------------------------------------
+#  The oracle bootstrap has five steps. Steps 1-3 are performed HERE, at image
+#  build time, and their artifacts are published at documented paths:
+#      1. unpack the vendored `presql2-latest.zip`  -> /opt/presql2-package
+#      2. compile the bridge's C interface object   -> /usr/local/lib/acas/cobmysqlapi.o
+#      3. build and install the translator          -> /usr/local/bin/presql2
+#  Steps 4-5 belong to `harness/build_oracle.sh`, at run time, because they
+#  need a live database and a writable copy of the checkout:
+#      4. run `common/comp-common.sh` to translate and compile the bridges,
+#         handlers and loaders
+#      5. run `comp-all.sh`, which compiles the application directories in the
+#         maintainer's own order: common, general, irs, purchase, sales, stock
+#         [comp-all.sh:L15-L32]  (OE/payroll/epos are commented out there)
+#  `build_oracle.sh` re-runs steps 1-3 only if these artifacts are absent, and
+#  copies `cobmysqlapi.o` into each of those six directories because every
+#  frozen compile line links a BARE `cobmysqlapi.o` from the current directory.
+#
+#  DETERMINISM
+#  -----------
+#  `tests/determinism/test_two_runs_byte_identical.py` requires two runs of the
+#  same scenario under the same pinned clock to produce byte-identical dumps.
+#  Nothing here bakes in a wall-clock timestamp, a build date, a hostname, a
+#  VCS revision or a run identifier, and every version is pinned -- including
+#  the GnuCOBOL tarball, by SHA-256 -- so the oracle's verdict cannot drift
+#  between builds.
+#
+#  NO CREDENTIALS
+#  --------------
+#  No credential literal appears anywhere in this file, including in comments.
+#  `ACAS_DB_USER` and `ACAS_DB_PASSWORD` are deliberately NOT declared as ENV at
+#  all -- not even empty. BuildKit's `SecretsUsedInArgOrEnv` lint fires on a
+#  credential-shaped ENV name regardless of its value, and it is right to: an
+#  ENV entry is permanent image metadata that `docker inspect` exposes. The two
+#  names are documented instead, here and at the ENV block, so the contract
+#  stays greppable without entering a layer. `harness/docker-compose.yml`
+#  supplies both at run time, exactly as the sibling `harness/Dockerfile.mariadb`
+#  does for its own `MARIADB_*` set.
+#  The vendored `presql2-package/presql2.param` DOES carry example credential
+#  literals; this image neither copies it to a working directory nor reproduces
+#  its values -- only its six-card SHAPE is documented, in placeholder form.
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+#  BASE IMAGE
+#
+#  Pinned to the Ubuntu LTS release the plan records as the reference
+#  environment: Ubuntu 24.04 LTS, whose system CPython is 3.12.3 with a
+#  `decimal` module backed by the C libmpdec implementation rather than the
+#  pure-Python fallback. That is not a convenience -- every monetary and
+#  quantity operation in the migrated cycle passes through `decimal.Decimal`.
+#
+#  The tag is a concrete release, never `latest` and never `rolling`: an
+#  arbiter that changes underneath the comparison is not an arbiter.
+# -----------------------------------------------------------------------------
+FROM ubuntu:24.04
+
+LABEL org.opencontainers.image.title="ACAS posting-cycle oracle - GnuCOBOL" \
+      org.opencontainers.image.description="GnuCOBOL 3.2 final, MySQL client libraries under /usr/local/mysql, the JC preSQL translator and CPython 3.12, for compiling and driving the compiled-COBOL oracle of the ACAS posting-cycle migration." \
+      org.opencontainers.image.licenses="GPL-3.0-or-later" \
+      acas.harness.role="oracle-builder-and-runner" \
+      acas.harness.cobc="3.2" \
+      acas.harness.mysql.prefix="/usr/local/mysql" \
+      acas.harness.python="3.12"
+
+
+# -----------------------------------------------------------------------------
+#  BUILD-TIME PINS
+#
+#  Declared as ARGs so a reviewer can see every external input in one place and
+#  a maintainer can audit or mirror them. All are exact; none is a range, a
+#  branch or a "latest".
+# -----------------------------------------------------------------------------
+
+#  GnuCOBOL 3.2 FINAL. The version is repository evidence, not a preference:
+#  [common/comp-common.sh:L8-L9]  "... in latest gnucobol v3.2."
+#  [README.TXT:L53]  "... migrated over to using the GnuCobol compiler
+#                     (3.2 final) now some years back."
+#  [README.TXT:L168] "For development and testing I am now using v3.2 final
+#                     instead of playing with 3.3 A/Beta etc ..."
+#  Distribution packages are commonly 3.1.x or 4.x and are therefore NOT used;
+#  the release tarball is fetched from the GNU mirror and verified by digest.
+#  The digest below was confirmed byte-identical between ftp.gnu.org and the
+#  SourceForge release download, and the tree self-reports
+#  PACKAGE_STRING='GnuCOBOL 3.2' with NEWS headline "GnuCOBOL 3.2 (20230728)"
+#  -- i.e. FINAL, not 3.2rc1/rc2.
+ARG GNUCOBOL_VERSION=3.2
+ARG GNUCOBOL_TARBALL=gnucobol-3.2.tar.xz
+ARG GNUCOBOL_URL=https://ftp.gnu.org/gnu/gnucobol/gnucobol-3.2.tar.xz
+ARG GNUCOBOL_SHA256=3bb48af46ced4779facf41fdc2ee60e4ccb86eaa99d010b36685315df39c2ee2
+
+#  MariaDB Connector/C, vendored in the checkout as
+#  `mariadb-connector-c-3.3.4-src.zip`. See the CLIENT LIBRARY layer below for
+#  why this is the connector used and MySQL Connector/C 6.1.11 is not.
+ARG MARIADB_CONNECTOR_C_VERSION=3.3.4
+ARG MARIADB_CONNECTOR_C_ZIP=mariadb-connector-c-3.3.4-src.zip
+
+#  JC preSQL, vendored as `presql2-latest.zip` (61 entries). TWO version
+#  strings coexist in that package and BOTH are correct facts about it:
+#  [presql2-package/README.SVN:L22] "presql release (currently 1.14f)" and
+#  [presql2-package/presql2.cbl:L302]
+#      `03  ws-Prog-Version  pic x(6)  value " 2.22 ".`
+#  Recorded, not resolved -- reconciling them would be an invention.
+ARG PRESQL2_ZIP=presql2-latest.zip
+ARG PRESQL2_PACKAGE_VERSION=1.14f
+ARG PRESQL2_PROGRAM_VERSION=2.22
+
+#  Where the frozen scripts require the client library and headers to be. Not
+#  a choice: [common/comp-common.sh:L26] hard-codes `-L/usr/local/mysql/lib`
+#  and [presql2-package/cobmysqlapi38.sh] hard-codes
+#  `-I/usr/local/mysql/include`.
+ARG MYSQL_PREFIX=/usr/local/mysql
+
+#  Where GnuCOBOL is installed. Also not a free choice: lines 1 and 2 of the
+#  repository's own loader configuration are `/usr/local/lib/gnucobol` and
+#  `/usr/local/lib` [etc/ld.so.conf.d/gnucobol.conf], which are exactly where
+#  a source build with `--prefix=/usr/local` places libcob and the default
+#  module search directory. The frozen config is independent evidence that a
+#  source build into /usr/local is what this system expects.
+ARG GNUCOBOL_PREFIX=/usr/local
+
+#  Canonical publication path for the bridge's C interface object (step 2).
+ARG ACAS_LIB_DIR=/usr/local/lib/acas
+
+
+# -----------------------------------------------------------------------------
+#  NON-INTERACTIVE, PREDICTABLE ENVIRONMENT
+#
+#  `DEBIAN_FRONTEND` is an ARG rather than an ENV on purpose: it must suppress
+#  apt prompting during the BUILD without persisting into the running
+#  container, where it would degrade any interactive `apt` a maintainer runs
+#  while investigating an oracle result.
+#
+#  A UTF-8 locale is set because the compiled programs use curses screen
+#  sections and because the frozen schema's character-set behaviour must not
+#  vary with the ambient locale. C.UTF-8 is built into glibc, so it needs no
+#  locale generation and adds no variability.
+#
+#  `PYTHONDONTWRITEBYTECODE` keeps the harness Python tools from scattering
+#  `__pycache__` directories into a bind-mounted working copy, which also keeps
+#  the working tree clean; `PYTHONUNBUFFERED` makes their output interleave
+#  faithfully with the COBOL scripts' output in a captured log.
+# -----------------------------------------------------------------------------
+ARG DEBIAN_FRONTEND=noninteractive
+
+ENV LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+
+# -----------------------------------------------------------------------------
+#  SYSTEM PACKAGES
+#
+#  Grouped by the reason each is required. Versions are not pinned per package:
+#  the `ubuntu:24.04` tag pins the archive snapshot, and per-package pinning
+#  against a moving security pocket makes the build fail rather than drift --
+#  the wrong trade for an arbiter that must build reliably. The versions
+#  actually resolved are printed into the build log below, so a reviewer can
+#  see exactly what was installed.
+#
+#  BUILD TOOLCHAIN -- GnuCOBOL and the connector are both source builds, and
+#  the recovered C-interface rule [presql2-package/cobmysqlapi38.sh] invokes
+#  `gcc` directly:
+#      build-essential gcc make cmake autoconf automake libtool bison flex m4
+#      pkg-config
+#
+#  GnuCOBOL DEPENDENCIES:
+#      libgmp-dev      mandatory; the multiple-precision maths library
+#      libdb-dev       Berkeley DB, for INDEXED (ISAM) file I/O. CRITICAL --
+#                      see the GnuCOBOL layer; without it the compiled menus
+#                      divert into an interactive program and the harness hangs
+#      libncurses-dev  the WIDE-character ncurses headers. Required because
+#                      [common/comp-common.sh:L18] compiles
+#                        cobc -m accept_numeric.c -lncursesw \
+#                             -A '-DHAVE_NCURSESW_NCURSES_H -DDECIMAL_RIGHT'
+#                      NOTE: `libncursesw5-dev` and `libncurses5-dev` DO NOT
+#                      EXIST on Ubuntu 24.04; `libncurses-dev` is the package
+#                      that now ships ncursesw/ncurses.h. Verified by
+#                      apt-cache policy on this base image
+#      ncurses-term    the terminfo database, so a real terminal type exists at
+#                      run time for the curses screen sections
+#      libxml2-dev     XML GENERATE support (GnuCOBOL's default XML handler)
+#      libcjson-dev    JSON GENERATE support
+#
+#  LINK-TIME LIBRARIES the frozen recipe names:
+#      zlib1g-dev      every RDBMS-touching compile passes `-lz`
+#                      [common/comp-common.sh:L26]
+#      libssl-dev      required to build MariaDB Connector/C with TLS support
+#
+#  ARCHIVE HANDLING -- the vendored archives are unpacked INSIDE the container
+#  and never modified in the checkout. `unzip` is not present in the base
+#  image, so it is installed explicitly rather than assumed:
+#      unzip xz-utils tar ca-certificates curl wget
+#
+#  RUN-TIME REQUIREMENTS of the harness scripts:
+#      util-linux      provides `script`, so `run_cobol_scenario.sh` can
+#                      allocate a pty for the curses menus
+#      mariadb-client  `mariadb` / `mariadb-admin`, used by `reset_db.sh` and
+#                      `seed.sh` to apply the frozen schema and probe readiness
+#      python3         CPython 3.12.3 on this base image
+#      python3-pip     installs the exactly pinned dependency set
+#      python3-venv    the standard-library venv module, kept available for
+#                      ad-hoc isolation without changing the default python3
+#      locales         a UTF-8 locale for predictable curses behaviour
+# -----------------------------------------------------------------------------
+# hadolint ignore=DL3008
+RUN set -eu; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        autoconf \
+        automake \
+        bison \
+        build-essential \
+        ca-certificates \
+        cmake \
+        curl \
+        flex \
+        gcc \
+        libcjson-dev \
+        libdb-dev \
+        libgmp-dev \
+        libncurses-dev \
+        libssl-dev \
+        libtool \
+        libxml2-dev \
+        locales \
+        m4 \
+        make \
+        mariadb-client \
+        ncurses-term \
+        pkg-config \
+        python3 \
+        python3-pip \
+        python3-venv \
+        tar \
+        unzip \
+        util-linux \
+        wget \
+        xz-utils \
+        zlib1g-dev; \
+    rm -rf /var/lib/apt/lists/*; \
+    \
+    echo '--- resolved toolchain versions (build-log evidence) ---'; \
+    gcc --version; \
+    cmake --version; \
+    python3 --version; \
+    mariadb --version; \
+    \
+    echo '--- asserting the wide-character ncurses headers are present ---'; \
+    test -f /usr/include/ncursesw/ncurses.h \
+      || { echo 'FATAL: ncursesw/ncurses.h is absent; [common/comp-common.sh:L18] compiles accept_numeric.c with -DHAVE_NCURSESW_NCURSES_H and would fail.' >&2; exit 1; }; \
+    \
+    echo '--- asserting the Berkeley DB header is present (ISAM backend) ---'; \
+    test -f /usr/include/db.h \
+      || { echo 'FATAL: db.h is absent; GnuCOBOL would configure with the indexed file handler DISABLED and the compiled menus would divert into sys002 and hang.' >&2; exit 1; }; \
+    \
+    echo 'OK: system packages installed; ncursesw and Berkeley DB headers verified.'
+
+
+# -----------------------------------------------------------------------------
+#  THE MySQL CLIENT LIBRARY UNDER /usr/local/mysql -- MANDATORY, NOT OPTIONAL
+#
+#  Every RDBMS-touching compile in the frozen scripts hard-codes this prefix,
+#  and the scripts may not be edited, so the FILESYSTEM is made to match the
+#  SCRIPTS rather than the other way round:
+#
+#    [common/comp-common.sh:L26]  cobc -m $i cobmysqlapi.o -I ../copybooks \
+#                                  -Wlinkage -L/usr/local/mysql/lib \
+#                                  -lmysqlclient -lz -T $i.prn
+#    [common/comp-common.sh:L32]  ... -L /usr/local/mysql/lib ...   (space)
+#    [common/comp-common.sh:L34]  ... -L/usr/local/mysql/lib  ...
+#    [common/comp-common.sh:L51]  cobc -x $i cobmysqlapi.o ... (the *LD loaders)
+#    [general/comp-gl.sh:L2-L5]   ... -L/usr/local/mysql/lib -lmysqlclient -lz
+#    [presql2-package/cobmysqlapi38.sh]
+#                                 gcc -I/usr/local/mysql/include \
+#                                     -c cobmysqlapi38.c -o cobmysqlapi.o -fPIC
+#
+#  So this layer MUST deliver, at those exact paths:
+#      /usr/local/mysql/lib/libmysqlclient.so   (for `-lmysqlclient`)
+#      /usr/local/mysql/include/mysql.h         (cobmysqlapi38.c does
+#                                                `#include <mysql.h>`)
+#  Note the two spellings of `-L` above -- with and without a space. Both work
+#  unchanged; neither script is "normalised".
+#
+#  WHICH CONNECTOR, AND WHY -- MEASURED, NOT ASSUMED
+#  -------------------------------------------------
+#  Two vendored candidates exist and the exact-name match was tried FIRST.
+#
+#  REJECTED: MySQL Connector/C 6.1.11 (`mysql-connector-c-6.1.11-src.tar.gz`).
+#  This is the literal `-lmysqlclient` provider and would have been preferred.
+#  It was built in this exact base image and FAILS AT CMAKE CONFIGURE, before
+#  any compilation:
+#      -- LibMySQL 6.1.11
+#      -- Built from MySQL 5.7.16 sources
+#      CMake Error at cmake/install_macros.cmake:365 (ENDIF):
+#        Flow control statements are not properly nested.
+#      -- Configuring incomplete, errors occurred!
+#  The 2017-era CMake scripts are rejected by CMake 3.28 on Ubuntu 24.04.
+#  Making it build would mean PATCHING the vendored CMake scripts -- risk taken
+#  on the client library for no behavioural gain. The archive is therefore not
+#  even copied into the image; recording the failure here is more useful than
+#  carrying 3.4 MB of unusable source in a layer.
+#
+#  USED: MariaDB Connector/C 3.3.4 (`mariadb-connector-c-3.3.4-src.zip`). It
+#  builds cleanly here and is well matched to the server, which is MariaDB
+#  10.11.7 per the frozen schema dump header [mysql/ACASDB.sql:L1,L5].
+#
+#  This substitution is an accommodation of the BUILD HOST, never of the
+#  recipe: the compiler, the client libraries and the vendored translator
+#  remain exactly what the repository specifies, and no frozen script, flag or
+#  path is changed. `-lmysqlclient` and `-I/usr/local/mysql/include` continue
+#  to resolve verbatim [common/comp-common.sh:L26].
+#
+#  HOW THE MySQL-STYLE LAYOUT IS OBTAINED -- NO SYMLINK SHIM NEEDED
+#  ---------------------------------------------------------------
+#  MariaDB Connector/C's DEFAULT layout would install to `lib/mariadb` and
+#  `include/mariadb`, which the frozen `-L.../lib` and `-I.../include` would
+#  not find. Rather than paper over that with symlinks, the layout is set at
+#  configure time -- `cmake/install.cmake:L112-L135` of the vendored source
+#  makes INSTALL_LIBDIR, INSTALL_INCLUDEDIR, INSTALL_PLUGINDIR and
+#  INSTALL_PCDIR overridable cache variables:
+#      -DINSTALL_LIBDIR=lib  -DINSTALL_INCLUDEDIR=include
+#      -DINSTALL_PLUGINDIR=lib/plugin
+#  giving the flat, MySQL-style tree the frozen recipe expects, directly.
+#
+#      -DWITH_MYSQLCOMPAT=ON emits the compatibility names the frozen
+#      `-lmysqlclient` requires: libmysqlclient.so -> libmariadb.so.3,
+#      libmysqlclient.a -> libmariadbclient.a, plus the `_r` variants.
+#      -DWITH_EXTERNAL_ZLIB=ON uses the system zlib, matching the `-lz` the
+#      frozen recipe links [common/comp-common.sh:L26].
+#      -DWITH_UNIT_TESTS=OFF -- the connector's own test suite needs a live
+#      server and contributes nothing to the oracle.
+#
+#  The runtime SONAME remains `libmariadb.so.3`, which the loader resolves
+#  because `/usr/local/mysql/lib` is line 3 of the repository's own loader
+#  configuration [etc/ld.so.conf.d/gnucobol.conf], reproduced verbatim below.
+#
+#  `make -j` here parallelises a THIRD-PARTY SOURCE BUILD only. It touches no
+#  COBOL and cannot reach the compile recipe, so it does not engage the
+#  no-concurrency rule (R-3), which governs scenario execution against the
+#  shared database.
+# -----------------------------------------------------------------------------
+COPY ${MARIADB_CONNECTOR_C_ZIP} /tmp/vendored/
+
+# hadolint ignore=DL3003
+RUN set -eu; \
+    cd /tmp/vendored; \
+    unzip -q "${MARIADB_CONNECTOR_C_ZIP}"; \
+    src="mariadb-connector-c-${MARIADB_CONNECTOR_C_VERSION}-src"; \
+    test -d "${src}" \
+      || { echo "FATAL: expected ${src}/ inside ${MARIADB_CONNECTOR_C_ZIP}." >&2; exit 1; }; \
+    mkdir -p "${src}/build-acas"; \
+    cd "${src}/build-acas"; \
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+        -DCMAKE_INSTALL_PREFIX="${MYSQL_PREFIX}" \
+        -DINSTALL_LIBDIR=lib \
+        -DINSTALL_INCLUDEDIR=include \
+        -DINSTALL_PLUGINDIR=lib/plugin \
+        -DINSTALL_PCDIR=lib/pkgconfig \
+        -DWITH_MYSQLCOMPAT=ON \
+        -DWITH_EXTERNAL_ZLIB=ON \
+        -DWITH_UNIT_TESTS=OFF; \
+    make -j"$(nproc)"; \
+    make install; \
+    cd /; \
+    rm -rf /tmp/vendored; \
+    \
+    echo '--- asserting the frozen recipe resolves: -L/usr/local/mysql/lib -lmysqlclient ---'; \
+    test -e "${MYSQL_PREFIX}/lib/libmysqlclient.so" \
+      || { echo "FATAL: ${MYSQL_PREFIX}/lib/libmysqlclient.so is absent; every frozen compile line linking -lmysqlclient would fail. [common/comp-common.sh:L26]" >&2; exit 1; }; \
+    echo '--- asserting the recovered C-interface rule resolves: -I/usr/local/mysql/include ---'; \
+    test -f "${MYSQL_PREFIX}/include/mysql.h" \
+      || { echo "FATAL: ${MYSQL_PREFIX}/include/mysql.h is absent; cobmysqlapi38.c does #include <mysql.h> and would fail. [presql2-package/cobmysqlapi38.sh]" >&2; exit 1; }; \
+    \
+    echo '--- installed client library (build-log evidence) ---'; \
+    ls -l "${MYSQL_PREFIX}/lib"; \
+    "${MYSQL_PREFIX}/bin/mariadb_config" --version; \
+    echo 'OK: MySQL-compatible client library and headers in place under the frozen prefix.'
+
+
+
+# -----------------------------------------------------------------------------
+#  GnuCOBOL 3.2 FINAL -- BUILT FROM THE RELEASE TARBALL, NOT FROM APT
+#
+#  A distribution package is not acceptable here unless it can be PROVEN to be
+#  3.2 final, and distribution packages are commonly 3.1.x or 4.x. The release
+#  tarball is fetched from the GNU mirror and verified against the SHA-256 in
+#  the ARG block, so the arbiter's compiler is bit-reproducible.
+#
+#  `--prefix=/usr/local` is corroborated by the repository itself: lines 1-2 of
+#  [etc/ld.so.conf.d/gnucobol.conf] are `/usr/local/lib/gnucobol` and
+#  `/usr/local/lib`, which is precisely where a `--prefix=/usr/local` build
+#  places the default module search directory and libcob.
+#
+#  ############################################################################
+#  ##  CRITICAL: THE ISAM BACKEND. WITHOUT IT THE ORACLE HANGS.              ##
+#  ############################################################################
+#  The menus force COBOL INDEXED-FILE processing for the system parameter file
+#  regardless of whether the RDBMS is in use. [general/general.cbl:L385-L396]:
+#
+#      Open-System.
+#          move     zeros to File-System-Used
+#                            File-Duplicates-In-Use.
+#          move     "00" to  FA-RDBMS-Flat-Statuses.  *> Force Cobol proc.
+#          move     1 to File-Key-No.
+#          perform  System-Open-Input.
+#          if       fs-reply not = zero
+#                   move    "sys002" to ws-called
+#                   call    ws-called using ws-calling-data file-defs
+#                   perform System-Open
+#          end-if.
+#
+#  and the same pattern repeats at [general/general.cbl:L398-L417] for keys
+#  4, 2 and 1. If that indexed OPEN INPUT fails, control passes to `sys002`,
+#  which asks a human for the parameters -- so in a harness it blocks forever.
+#  A GnuCOBOL configured WITHOUT an indexed handler makes that failure certain.
+#
+#  Hence `--with-db`, documented by the tarball's own configure as
+#  "(GnuCOBOL) Use Berkeley DB >= 4.1 for ISAM I/O", and hence the assertion
+#  below that `cobc --info` reports a REAL handler rather than `disabled`.
+#  GnuCOBOL prints that line from `cobc/cobc.c:L2724-L2740`, where `WITH_DB`
+#  yields "BDB" and the fallback yields "disabled".
+#
+#  A SECOND interactive trap, noted here because avoiding it is the runner's
+#  and the scenarios' job rather than this image's:
+#  [general/general.cbl:L462-L463] `if scycle = zero  go to call-system-setup.`
+#  -- a zero accounting cycle also diverts into interactive setup, so every
+#  scenario must seed a non-zero cycle.
+#
+#  Other configure choices, each with its reason:
+#      --with-curses=ncursesw  the WIDE-character curses library, matching
+#                              [common/comp-common.sh:L18], which compiles
+#                              accept_numeric.c with -lncursesw and
+#                              -DHAVE_NCURSESW_NCURSES_H
+#      --with-math=gmp         GMP is mandatory for GnuCOBOL's decimal
+#                              arithmetic. This is the compiler's OWN
+#                              arithmetic support library; it is not a
+#                              directive and does not alter the DEFAULT
+#                              arithmetic the frozen recipe relies on (R-4)
+#      --with-json=cjson       JSON GENERATE support
+#      --with-xml2             XML GENERATE support (GnuCOBOL's default)
+#      --with-dl               the system dynamic loader, which is how
+#                              `cobc -m` modules are resolved at run time
+#
+#  Deliberately ABSENT: any `--enable-debug`, `--enable-cobc-internal-checks`,
+#  `--enable-debuglog` or `--enable-experimental`. The arbiter must be the
+#  maintainer's compiler, not a more talkative one.
+# -----------------------------------------------------------------------------
+# hadolint ignore=DL3003
+RUN set -eu; \
+    mkdir -p /tmp/gnucobol; \
+    cd /tmp/gnucobol; \
+    curl -fsSL -o "${GNUCOBOL_TARBALL}" "${GNUCOBOL_URL}"; \
+    echo "${GNUCOBOL_SHA256}  ${GNUCOBOL_TARBALL}" > SHA256SUMS; \
+    sha256sum -c SHA256SUMS \
+      || { echo "FATAL: ${GNUCOBOL_TARBALL} failed its SHA-256 check; refusing to build an unverified arbiter." >&2; exit 1; }; \
+    tar -xJf "${GNUCOBOL_TARBALL}"; \
+    cd "gnucobol-${GNUCOBOL_VERSION}"; \
+    grep -qx "PACKAGE_STRING='GnuCOBOL ${GNUCOBOL_VERSION}'" configure \
+      || { echo "FATAL: the tarball does not self-report GnuCOBOL ${GNUCOBOL_VERSION}; a release candidate or a different release was fetched." >&2; exit 1; }; \
+    ./configure \
+        --prefix="${GNUCOBOL_PREFIX}" \
+        --with-db \
+        --with-curses=ncursesw \
+        --with-math=gmp \
+        --with-json=cjson \
+        --with-xml2 \
+        --with-dl; \
+    make -j"$(nproc)"; \
+    make install; \
+    cd /; \
+    rm -rf /tmp/gnucobol; \
+    ldconfig; \
+    \
+    echo '--- cobc --version (build-log evidence; MUST be 3.2) ---'; \
+    cobc --version > /tmp/cobc-version.txt; \
+    cat /tmp/cobc-version.txt; \
+    head -n 1 /tmp/cobc-version.txt > /tmp/cobc-version-line.txt; \
+    grep -Eq "^cobc \\(GnuCOBOL\\) ${GNUCOBOL_VERSION}(\\.[0-9]+)*\$" /tmp/cobc-version-line.txt \
+      || { echo "FATAL: cobc does not report GnuCOBOL ${GNUCOBOL_VERSION}. The oracle MUST be the compiler the maintainer targets. [common/comp-common.sh:L8-L9] [README.TXT:L53] [README.TXT:L168]" >&2; exit 1; }; \
+    \
+    echo '--- cobc --info (build-log evidence) ---'; \
+    cobc --info > /tmp/cobc-info.txt 2>&1; \
+    cat /tmp/cobc-info.txt; \
+    grep -E 'indexed file handler' /tmp/cobc-info.txt > /tmp/cobc-isam.txt \
+      || { echo 'FATAL: cobc --info reports no indexed file handler line at all.' >&2; exit 1; }; \
+    grep -q 'BDB' /tmp/cobc-isam.txt \
+      || { echo 'FATAL: the indexed file handler is not BDB. A GnuCOBOL without ISAM makes the forced indexed OPEN at [general/general.cbl:L385-L396] fail, which CALLs the interactive sys002 and hangs the harness.' >&2; exit 1; }; \
+    grep -q 'GMP' /tmp/cobc-info.txt \
+      || { echo 'FATAL: cobc --info does not report GMP as the mathematical library; GnuCOBOL decimal arithmetic support is missing.' >&2; exit 1; }; \
+    rm -f /tmp/cobc-version-line.txt /tmp/cobc-isam.txt; \
+    echo "OK: GnuCOBOL ${GNUCOBOL_VERSION} final installed under ${GNUCOBOL_PREFIX} with the BDB indexed file handler."
+
+
+# -----------------------------------------------------------------------------
+#  RUNTIME LOADER PATHS -- THE REPOSITORY'S OWN CONFIGURATION, VERBATIM
+#
+#  [etc/ld.so.conf.d/gnucobol.conf] is the SOLE file under `etc/` in the
+#  checkout. It is exactly four lines, and they are reproduced here in the SAME
+#  ORDER, because search order is part of the configuration:
+#
+#      /usr/local/lib/gnucobol      <- GnuCOBOL's default module directory
+#      /usr/local/lib               <- libcob
+#      /usr/local/mysql/lib         <- the client library (libmariadb.so.3)
+#      /usr/lib                     <- the distribution's own libraries
+#
+#  The repository's copy is READ and left UNTOUCHED -- the plan is explicit
+#  that this file "is read by the harness image build and left untouched". It
+#  is therefore transcribed here rather than COPYed, so that no build step can
+#  ever write back to it, and so that this layer works even when /repo is not
+#  mounted. The assertion below proves the transcription is exact, four lines
+#  and in order.
+#
+#  `LD_LIBRARY_PATH` repeats the two /usr/local entries as belt and braces
+#  alongside ldconfig, which matters when a harness script runs a freshly
+#  linked module before any further ldconfig.
+# -----------------------------------------------------------------------------
+RUN set -eu; \
+    printf '%s\n' \
+        '/usr/local/lib/gnucobol' \
+        '/usr/local/lib' \
+        '/usr/local/mysql/lib' \
+        '/usr/lib' \
+        > /etc/ld.so.conf.d/gnucobol.conf; \
+    ldconfig; \
+    \
+    echo '--- /etc/ld.so.conf.d/gnucobol.conf (must match [etc/ld.so.conf.d/gnucobol.conf] exactly) ---'; \
+    cat -A /etc/ld.so.conf.d/gnucobol.conf; \
+    n_lines="$(wc -l < /etc/ld.so.conf.d/gnucobol.conf)"; \
+    [ "${n_lines}" = '4' ] \
+      || { echo "FATAL: expected exactly 4 loader path lines, found ${n_lines}. [etc/ld.so.conf.d/gnucobol.conf]" >&2; exit 1; }; \
+    n=0; \
+    for expected in /usr/local/lib/gnucobol /usr/local/lib /usr/local/mysql/lib /usr/lib; do \
+        n=$((n + 1)); \
+        actual="$(sed -n "${n}p" /etc/ld.so.conf.d/gnucobol.conf)"; \
+        [ "${actual}" = "${expected}" ] \
+          || { echo "FATAL: loader path line ${n} is '${actual}', expected '${expected}'. The search ORDER is part of the configuration. [etc/ld.so.conf.d/gnucobol.conf]" >&2; exit 1; }; \
+    done; \
+    \
+    echo '--- asserting libcob and the client library both resolve ---'; \
+    ldconfig -p > /tmp/ldconfig-p.txt; \
+    grep -q 'libcob\.so' /tmp/ldconfig-p.txt \
+      || { echo 'FATAL: libcob.so does not resolve through the loader cache.' >&2; exit 1; }; \
+    grep -q 'libmariadb\.so\.3' /tmp/ldconfig-p.txt \
+      || { echo 'FATAL: libmariadb.so.3 (the SONAME behind libmysqlclient.so) does not resolve through the loader cache.' >&2; exit 1; }; \
+    rm -f /tmp/ldconfig-p.txt; \
+    echo 'OK: loader paths reproduce [etc/ld.so.conf.d/gnucobol.conf] exactly, and both libraries resolve.'
+
+
+
+# -----------------------------------------------------------------------------
+#  ORACLE BOOTSTRAP STEPS 1-3 -- INCLUDING THE BUILD RULE THAT WAS MISSING
+#
+#  STEP 1: unpack the vendored JC preSQL package.
+#  The archive holds 61 entries -- the `presql2-package/` directory entry plus
+#  60 members, which is the count the assertion below prints -- and contains
+#  `cobmysqlapi38.c`, `cobmysqlapi38.sh`, `presql2.cbl`, `presql2.sh`,
+#  `bldcopy2.*`, `prtschema2.*`, `preo.cbl`, `prei.scb`, `test1.cbl`,
+#  `presql2.param`, the READMEs and PDFs, plus `ACAS/`, `Variations/` and
+#  `old-apis/`. It is unpacked INSIDE the container -- the plan requires the
+#  vendored archives to be "unpacked inside the container and never modified in
+#  the checkout" -- and published at /opt/presql2-package.
+#
+#  ##########################################################################
+#  ##  STEP 2: THE RECOVERED BUILD RULE FOR cobmysqlapi.o                  ##
+#  ##########################################################################
+#  Every bridge, handler and loader compile links an object file that provides
+#  the C interface between COBOL and the MySQL client library --
+#  [common/comp-common.sh:L26], [:L32], [:L34], [:L51] all pass a bare
+#  `cobmysqlapi.o`, and so does [general/comp-gl.sh:L2-L5]. That object is
+#  ABSENT from the checkout and NO RULE ANYWHERE IN THE REPOSITORY BUILDS IT.
+#  Following the maintainer's compile scripts alone, the oracle cannot be built
+#  at all: the build dies at link time with no obvious cause.
+#
+#  The rule was recovered from the vendored translator package and is used here
+#  verbatim -- [presql2-package/cobmysqlapi38.sh]:
+#
+#      gcc -I/usr/local/mysql/include -c cobmysqlapi38.c -o cobmysqlapi.o -fPIC
+#
+#  `cobmysqlapi38.c` does `#include <mysql.h>` and `#include <libcob.h>`, which
+#  is why this layer runs AFTER both the client library and GnuCOBOL: mysql.h
+#  comes from ${MYSQL_PREFIX}/include and libcob.h from
+#  ${GNUCOBOL_PREFIX}/include.
+#
+#  ONLY `cobmysqlapi38.c` IS USED. The package also ships two SUPERSEDED
+#  variants that must NOT be used, and their own build lines show why:
+#      [presql2-package/old-apis/cobmysqlapi.sh]
+#          gcc -I/usr/include/mysql -c cobmysqlapi.005.c
+#      [presql2-package/old-apis/cobmysqlapi3.sh]
+#          gcc -I/usr/include/mysql -c cobmysqlapi3.c -o cobmysqlapi.o
+#  Both use a DIFFERENT include path and both OMIT `-fPIC` -- which the frozen
+#  `cobc -m` (dynamically loadable module) builds require.
+#
+#  The object is published at ${ACAS_LIB_DIR}/cobmysqlapi.o. `build_oracle.sh`
+#  copies it into each of the six compile directories, because the frozen
+#  compile lines name a BARE `cobmysqlapi.o` resolved from the current working
+#  directory -- another reason those compiles cannot run inside the checkout.
+#
+#  STEP 3: build and install the translator, verbatim from
+#  [presql2-package/presql2.sh]:
+#
+#      cobc -x presql2.cbl cobmysqlapi.o -L/usr/local/mysql/lib \
+#           -lmysqlclient -lz
+#
+#  The sibling copybook utility is built too, from its own rule, so the
+#  toolchain is complete rather than minimal -- [presql2-package/bldcopy2.sh]:
+#
+#      cobc -x bldcopy2.cbl cobmysqlapi.o -L /usr/local/mysql/lib -lmysqlclient
+#
+#  (note the SPACE after `-L`, and no `-lz` -- the second of the two `-L`
+#  spellings that must both keep working, matching
+#  [common/comp-common.sh:L32] and [:L36]).
+#
+#  Both translator sources take their working storage and procedure text from
+#  the package's own copybooks, so all four are staged alongside them:
+#      [presql2-package/presql2.cbl:L467]   COPY MYSQL-VARIABLES.
+#      [presql2-package/presql2.cbl:L2685]  COPY MYSQL-PROCEDURES.
+#      [presql2-package/bldcopy2.cbl:L163]  copy "mysql-variables.cpy".
+#      [presql2-package/bldcopy2.cbl:L495]  copy mysql-procedures.
+#  The package ships BOTH cases -- `MYSQL-VARIABLES.CPY` / `MYSQL-PROCEDURES.CPY`
+#  and `mysql-variables.cpy` / `mysql-procedures.cpy` -- and they are NOT the
+#  same size, so they are not duplicates to be de-duplicated. All four are
+#  staged and `COBCPY` is pointed at the staging directory for this layer only.
+#
+#  `prtschema2` is NOT built here, and the reason is a fact about the package
+#  rather than a choice: [presql2-package/prtschema2.sh] is
+#
+#      presql2 prtschema2.scb prtschema2.cbl
+#      cobc -x prtschema2.cbl cobmysqlapi.o -L/usr/local/mysql/lib \
+#           -lmysqlclient -lz
+#      exit 0
+#
+#  and `prtschema2.cbl` DOES NOT SHIP -- the package contains only
+#  `prtschema2.scb`, `prtschema2.param` and `prtschema2.sh`. The `.cbl` has to
+#  be GENERATED by `presql2`, which reads a live `information_schema`, and no
+#  database is reachable during an image build. It is also not needed: it is a
+#  schema-printing utility, and no frozen compile script invokes it. The
+#  already-generated `Variations/prtschema2M.cbl` and
+#  `Variations/prtschema2o.cbl` are deliberately NOT substituted -- they are
+#  different variants, and swapping one in would be an invention.
+#
+#  ##########################################################################
+#  ##  presql2 REQUIRES A presql2.param FILE IN ITS WORKING DIRECTORY      ##
+#  ##########################################################################
+#  This is not documented in the compile scripts and will otherwise surprise
+#  whoever runs step 4. `read_params()` in
+#  [presql2-package/cobmysqlapi38.c:L114] builds "<progname>.param", fopen()s
+#  it, and on absence prints "Could not read file >...<, aborting..." and
+#  `exit(5)`. It then requires SIX cards, IN THIS ORDER, each prefix-validated
+#  with `exit(6)` on mismatch and each truncated to 32 characters:
+#
+#      DBHOST=<host>
+#      DBUSER=<user>
+#      DBPASSWD=<password>
+#      DBNAME=<schema>
+#      DBPORT=<port>
+#      DBSOCKET=<unix socket path, may be empty for TCP>
+#
+#  NO `.param` file exists anywhere in the checkout, and none is created here:
+#  baking one into an image layer would bake in a credential. The placeholders
+#  above are the SHAPE only. `harness/build_oracle.sh` materialises the file at
+#  run time from ACAS_DB_HOST / ACAS_DB_USER / ACAS_DB_PASSWORD / ACAS_DB_NAME
+#  / ACAS_DB_PORT / ACAS_DB_SOCKET, in the working directory where `presql2`
+#  runs, OUTSIDE the checkout. Because `presql2` opens a live connection, step 4
+#  of the bootstrap additionally requires the `mariadb` service to be healthy.
+#  The vendored `presql2-package/presql2.param` is left in place unread as
+#  package documentation; it carries example credential literals and must never
+#  be copied into a working directory.
+#
+#  Nothing in this layer is a `cobc` flag change: every command above is
+#  transcribed from a vendored `.sh` file (R-4).
+# -----------------------------------------------------------------------------
+COPY ${PRESQL2_ZIP} /tmp/presql2/
+
+# hadolint ignore=DL3003
+RUN set -eu; \
+    cd /tmp/presql2; \
+    unzip -q "${PRESQL2_ZIP}"; \
+    test -d presql2-package \
+      || { echo "FATAL: expected presql2-package/ inside ${PRESQL2_ZIP}." >&2; exit 1; }; \
+    mkdir -p /opt; \
+    mv presql2-package /opt/presql2-package; \
+    cd /; \
+    rm -rf /tmp/presql2; \
+    \
+    echo "--- JC preSQL package unpacked (package version ${PRESQL2_PACKAGE_VERSION}, program version ${PRESQL2_PROGRAM_VERSION}) ---"; \
+    find /opt/presql2-package -mindepth 1 > /tmp/presql2-entries.txt; \
+    n_entries="$(wc -l < /tmp/presql2-entries.txt)"; \
+    rm -f /tmp/presql2-entries.txt; \
+    echo "entries under /opt/presql2-package: ${n_entries}"; \
+    for required in cobmysqlapi38.c cobmysqlapi38.sh presql2.cbl presql2.sh \
+                    bldcopy2.cbl bldcopy2.sh \
+                    MYSQL-VARIABLES.CPY MYSQL-PROCEDURES.CPY \
+                    mysql-variables.cpy mysql-procedures.cpy; do \
+        test -f "/opt/presql2-package/${required}" \
+          || { echo "FATAL: /opt/presql2-package/${required} is missing from the vendored archive." >&2; exit 1; }; \
+    done; \
+    test -f /opt/presql2-package/old-apis/cobmysqlapi.005.c \
+      || { echo 'FATAL: the vendored archive layout is not as expected; old-apis/ should exist and be left unused.' >&2; exit 1; }; \
+    test -d /opt/presql2-package/ACAS \
+      || { echo 'FATAL: the vendored worked ACAS example is missing; the end-to-end toolchain smoke test depends on it.' >&2; exit 1; }; \
+    \
+    mkdir -p "${ACAS_LIB_DIR}"; \
+    build=/tmp/acas-bootstrap; \
+    mkdir -p "${build}"; \
+    cp -p /opt/presql2-package/cobmysqlapi38.c \
+          /opt/presql2-package/presql2.cbl \
+          /opt/presql2-package/bldcopy2.cbl \
+          /opt/presql2-package/MYSQL-VARIABLES.CPY \
+          /opt/presql2-package/MYSQL-PROCEDURES.CPY \
+          /opt/presql2-package/mysql-variables.cpy \
+          /opt/presql2-package/mysql-procedures.cpy \
+          "${build}/"; \
+    cd "${build}"; \
+    COBCPY="${build}"; export COBCPY; \
+    COB_COPY_DIR="${build}"; export COB_COPY_DIR; \
+    \
+    echo '--- STEP 2: the recovered rule, verbatim [presql2-package/cobmysqlapi38.sh] ---'; \
+    gcc -I/usr/local/mysql/include -c cobmysqlapi38.c -o cobmysqlapi.o -fPIC; \
+    install -m 0644 cobmysqlapi.o "${ACAS_LIB_DIR}/cobmysqlapi.o"; \
+    \
+    echo '--- STEP 3: the translator, verbatim [presql2-package/presql2.sh] ---'; \
+    cobc -x presql2.cbl cobmysqlapi.o -L/usr/local/mysql/lib -lmysqlclient -lz; \
+    install -m 0755 presql2 /usr/local/bin/presql2; \
+    \
+    echo '--- STEP 3 (sibling): [presql2-package/bldcopy2.sh] -- note the space after -L ---'; \
+    cobc -x bldcopy2.cbl cobmysqlapi.o -L /usr/local/mysql/lib -lmysqlclient; \
+    install -m 0755 bldcopy2 /usr/local/bin/bldcopy2; \
+    \
+    cd /; \
+    rm -rf "${build}"; \
+    \
+    echo '--- asserting the published bootstrap artifacts ---'; \
+    test -f "${ACAS_LIB_DIR}/cobmysqlapi.o" \
+      || { echo "FATAL: ${ACAS_LIB_DIR}/cobmysqlapi.o was not published; every frozen bridge, handler and loader compile links it. [common/comp-common.sh:L26]" >&2; exit 1; }; \
+    command -v presql2 > /dev/null \
+      || { echo 'FATAL: presql2 is not on the PATH; [common/comp-common.sh:L25] invokes it to translate every *MT.scb.' >&2; exit 1; }; \
+    command -v bldcopy2 > /dev/null \
+      || { echo 'FATAL: bldcopy2 is not on the PATH.' >&2; exit 1; }; \
+    \
+    echo '--- linkage evidence: presql2 resolves libcob and the client library ---'; \
+    ldd /usr/local/bin/presql2 > /tmp/presql2-ldd.txt; \
+    cat /tmp/presql2-ldd.txt; \
+    if grep -q 'not found' /tmp/presql2-ldd.txt; then \
+        echo 'FATAL: presql2 has unresolved shared-library dependencies.' >&2; exit 1; \
+    fi; \
+    rm -f /tmp/presql2-ldd.txt; \
+    echo "OK: bootstrap steps 1-3 complete -- /opt/presql2-package, ${ACAS_LIB_DIR}/cobmysqlapi.o, /usr/local/bin/{presql2,bldcopy2}."
+
+
+# -----------------------------------------------------------------------------
+#  END-TO-END TOOLCHAIN PROOF -- THE VENDORED WORKED ACAS EXAMPLE
+#
+#  This proves the WHOLE chain -- GnuCOBOL 3.2, the client library under the
+#  frozen prefix, and the recovered `cobmysqlapi.o` -- before the frozen tree is
+#  ever touched, and it does so by compiling a real generated ACAS bridge with
+#  the maintainer's own command line. [presql2-package/ACAS/comp-stockMT.sh]:
+#
+#      #presql2 stockMT.SCB stockMT.cbl        <- commented out in the package
+#      cobc -m stockMT.COB cobmysqlapi.o -L/usr/local/mysql/lib \
+#           -lmysqlclient -lz
+#
+#  Reproduced verbatim. A link error here is exactly the failure mode that the
+#  absent `cobmysqlapi.o` produces in the real build, where it appears with no
+#  obvious cause -- so a clean pass is high-value evidence and is worth a build
+#  layer of its own.
+#
+#  Two properties of this check matter:
+#    * it needs NO database. `cobc -m` compiles and links; it does not connect.
+#      (`presql2` would connect, which is why its line is commented out in the
+#      vendored script and is not run here either.)
+#    * it uses the VENDORED example, never the checkout. The frozen
+#      `common/*MT.cbl` are not compiled here, /repo is not read, and no
+#      artifact of this test survives the layer -- the scratch directory is
+#      removed, so nothing is baked into the image and nothing can perturb a
+#      later table dump.
+#
+#  An additional guard proves the ISAM backend WORKS rather than merely being
+#  configured, by compiling and running a throwaway program that creates,
+#  writes and reads an INDEXED file. This is the capability the forced indexed
+#  OPEN at [general/general.cbl:L385-L396] depends on; if it were absent the
+#  menus would CALL the interactive `sys002` and the harness would hang.
+# -----------------------------------------------------------------------------
+# hadolint ignore=DL3003
+RUN set -eu; \
+    smoke=/tmp/acas-smoke; \
+    rm -rf "${smoke}"; \
+    cp -a /opt/presql2-package/ACAS "${smoke}"; \
+    cd "${smoke}"; \
+    cp -p "${ACAS_LIB_DIR}/cobmysqlapi.o" ./cobmysqlapi.o; \
+    \
+    echo '--- reproducing [presql2-package/ACAS/comp-stockMT.sh] verbatim ---'; \
+    cobc -m stockMT.COB cobmysqlapi.o -L/usr/local/mysql/lib -lmysqlclient -lz; \
+    test -f stockMT.so \
+      || { echo 'FATAL: stockMT.so was not produced. The COBOL-to-MySQL toolchain is incomplete; every frozen bridge compile would fail the same way. [presql2-package/ACAS/comp-stockMT.sh]' >&2; exit 1; }; \
+    ldd stockMT.so > ./stockMT.ldd; \
+    cat ./stockMT.ldd; \
+    if grep -q 'not found' ./stockMT.ldd; then \
+        echo 'FATAL: stockMT.so has unresolved shared-library dependencies; -L/usr/local/mysql/lib -lmysqlclient did not resolve at run time.' >&2; exit 1; \
+    fi; \
+    echo 'OK: a real generated ACAS bridge compiles and links against the recovered cobmysqlapi.o.'; \
+    \
+    echo '--- proving the BDB indexed handler actually works, not just that it is configured ---'; \
+    printf '%s\n' \
+        '       identification division.' \
+        '       program-id. blitzyisamprobe.' \
+        '       environment division.' \
+        '       input-output section.' \
+        '       file-control.' \
+        '           select probe-file assign to "isam-probe"' \
+        '               organization indexed' \
+        '               access mode dynamic' \
+        '               record key probe-key' \
+        '               file status probe-status.' \
+        '       data division.' \
+        '       file section.' \
+        '       fd  probe-file.' \
+        '       01  probe-rec.' \
+        '           03  probe-key   pic x(4).' \
+        '           03  probe-data  pic x(8).' \
+        '       working-storage section.' \
+        '       01  probe-status    pic xx value spaces.' \
+        '       procedure division.' \
+        '           open output probe-file.' \
+        '           if probe-status not = "00"' \
+        '               display "ISAM-OPEN-OUTPUT-FAILED " probe-status' \
+        '               stop run returning 1' \
+        '           end-if.' \
+        '           move "K001" to probe-key.' \
+        '           move "PAYLOAD1" to probe-data.' \
+        '           write probe-rec.' \
+        '           if probe-status not = "00"' \
+        '               display "ISAM-WRITE-FAILED " probe-status' \
+        '               stop run returning 1' \
+        '           end-if.' \
+        '           close probe-file.' \
+        '           open input probe-file.' \
+        '           move "K001" to probe-key.' \
+        '           read probe-file key is probe-key.' \
+        '           if probe-status not = "00" or probe-data not = "PAYLOAD1"' \
+        '               display "ISAM-READ-FAILED " probe-status " " probe-data' \
+        '               stop run returning 1' \
+        '           end-if.' \
+        '           close probe-file.' \
+        '           display "ISAM-OK".' \
+        '           stop run returning 0.' \
+        > blitzyisamprobe.cbl; \
+    cobc -x blitzyisamprobe.cbl; \
+    ./blitzyisamprobe > ./isam.out 2>&1 \
+      || { echo 'FATAL: the indexed-file probe failed to run.' >&2; cat ./isam.out; exit 1; }; \
+    cat ./isam.out; \
+    grep -qx 'ISAM-OK' ./isam.out \
+      || { echo 'FATAL: INDEXED file I/O does not work. [general/general.cbl:L385-L396] forces COBOL indexed processing for the system parameter file and, on failure, CALLs the interactive sys002 -- which hangs a harness forever.' >&2; exit 1; }; \
+    \
+    cd /; \
+    rm -rf "${smoke}"; \
+    test ! -e /tmp/acas-smoke \
+      || { echo 'FATAL: the smoke-test scratch directory was not removed; no build artifact may persist into the image.' >&2; exit 1; }; \
+    echo 'OK: end-to-end toolchain proven, and INDEXED file I/O verified working.'
+
+
+
+# -----------------------------------------------------------------------------
+#  THE PYTHON SIDE -- EXACTLY THE REPOSITORY'S PINS, AND NOTHING ELSE
+#
+#  `requirements.txt` is copied from the build context (the repository root)
+#  and installed as-is. It carries twelve `name==version` lines and no ranges,
+#  no extras, no index URLs, no editable or VCS requirements, and no hashes --
+#  so `--require-hashes` is NOT used, because inventing hashes would break
+#  installation. The pins are the same ones `pyproject.toml` declares; a
+#  mismatch between the two manifests is a defect, so neither is edited here.
+#
+#  `--break-system-packages` is required because Ubuntu 24.04 marks its system
+#  Python PEP-668 externally-managed. Installing into the SYSTEM interpreter is
+#  deliberate rather than lazy: it keeps `python3` the Ubuntu-provided CPython
+#  3.12.3 that the plan names as the target runtime, with no venv indirection
+#  for the harness scripts to activate. The container is single-purpose and
+#  disposable, so there is no host environment to protect.
+#
+#  ##########################################################################
+#  ##  R-2 SELF-CHECK: ZERO BINARY FLOATING POINT                          ##
+#  ##########################################################################
+#  No accounting value may pass through a binary floating-point type at any
+#  point -- not in computation, not in storage, not in transport. The exclusion
+#  of `pandas` and `numpy` is ABSOLUTE and extends to the harness dump
+#  comparison, which uses ordered row sequences rather than dataframes. The
+#  assertions below prove BOTH are absent, so a transitive dependency cannot
+#  smuggle either in without failing this build.
+#
+#  The interpreter's `decimal` must be the C libmpdec implementation, not the
+#  pure-Python fallback -- every monetary and quantity operation in the
+#  migrated cycle passes through it, so this matters for correctness as well as
+#  speed. `import _decimal` succeeding is the check for that.
+#
+#  ALSO DELIBERATELY ABSENT, each for a stated reason:
+#      pytest-xdist and every other parallel plugin -- execution is strictly
+#          sequential, matching the single-threaded COBOL, and parallel
+#          scenario runs against one shared MariaDB would destroy the
+#          seed/run/dump/reset/run/dump/diff protocol
+#      jsonschema -- not in `requirements.txt`. Everything under `harness/`
+#          works with the standard library plus PyYAML plus the driver
+#      any ORM entity layer, alembic and every migration tool -- the schema is
+#          frozen and no DDL is ever emitted
+#      any asyncio / threading / connection-pool helper
+#      any third-party date library -- `acas_posting/dates.py` reproduces
+#          [common/maps04.cbl] exactly, defects included, and a general-purpose
+#          date library would be MORE CORRECT THAN THE SPECIFICATION
+#
+#  The `acas_posting` package is NOT installed into this image. Nothing here
+#  puts `harness/` on `PYTHONPATH` or makes it importable (R-1);
+#  `run_python_scenario.sh` runs `python -m acas_posting ...` against the
+#  repository working copy, and the harness tools are invoked by path.
+# -----------------------------------------------------------------------------
+COPY requirements.txt /opt/acas-harness/requirements.txt
+
+RUN set -eu; \
+    python3 -m pip install --no-cache-dir --break-system-packages \
+        -r /opt/acas-harness/requirements.txt; \
+    \
+    echo '--- interpreter identity (must be CPython 3.12.x) ---'; \
+    python3 --version; \
+    python3 -c 'import sys; assert sys.version_info[:2] == (3, 12), f"FATAL: expected CPython 3.12.x, found {sys.version.split()[0]}"'; \
+    \
+    echo '--- decimal must be the C libmpdec implementation ---'; \
+    python3 -c 'import decimal, _decimal; assert decimal.HAVE_THREADS is not None; print("decimal backed by:", _decimal.__name__)'; \
+    \
+    echo '--- truncation semantics: an un-ROUNDED COBOL store discards, it does not round ---'; \
+    python3 -c 'from decimal import Decimal, ROUND_DOWN; q = Decimal("1.239").quantize(Decimal("0.01"), rounding=ROUND_DOWN); assert q == Decimal("1.23"), q; print("ROUND_DOWN 1.239 ->", q)'; \
+    \
+    echo '--- the pinned set must import ---'; \
+    python3 -c 'import mysql.connector, sqlalchemy, yaml, pytest; print("mysql-connector-python", mysql.connector.__version__); print("SQLAlchemy", sqlalchemy.__version__); print("PyYAML", yaml.__version__); print("pytest", pytest.__version__)'; \
+    \
+    echo '--- R-2 self-check: pandas and numpy MUST be absent ---'; \
+    if python3 -c 'import pandas' > /dev/null 2>&1; then \
+        echo 'FATAL: pandas is installed. Zero binary floating point in accounting computation -- the exclusion is absolute and extends to the harness dump comparison.' >&2; exit 1; \
+    fi; \
+    if python3 -c 'import numpy' > /dev/null 2>&1; then \
+        echo 'FATAL: numpy is installed. Zero binary floating point in accounting computation -- the exclusion is absolute and extends to the harness dump comparison.' >&2; exit 1; \
+    fi; \
+    echo 'OK: pandas and numpy are both absent.'; \
+    \
+    echo '--- no-concurrency self-check: no parallel test plugin may be present ---'; \
+    if python3 -c 'import xdist' > /dev/null 2>&1; then \
+        echo 'FATAL: pytest-xdist is installed. Execution must be strictly sequential; parallel scenario runs against one shared database would break the seed/run/dump/reset/run/dump/diff protocol.' >&2; exit 1; \
+    fi; \
+    echo 'OK: no parallel test plugin present.'; \
+    \
+    echo '--- no schema-migration tool may be present ---'; \
+    if python3 -c 'import alembic' > /dev/null 2>&1; then \
+        echo 'FATAL: alembic is installed. mysql/ACASDB.sql is frozen and no DDL is ever emitted.' >&2; exit 1; \
+    fi; \
+    echo 'OK: no schema-migration tool present.'; \
+    \
+    echo '--- installed distributions (build-log evidence) ---'; \
+    python3 -m pip list --format=freeze; \
+    echo 'OK: the Python side is exactly the repository pin set.'
+
+
+
+# -----------------------------------------------------------------------------
+#  MOUNT POINTS -- THE READ-ONLY / WRITABLE SPLIT THE FROZEN TREE DEPENDS ON
+#
+#      /repo   the checkout, mounted READ-ONLY. The frozen COBOL, copybooks,
+#              bridges and `mysql/ACASDB.sql` are read in place from here.
+#      /build  a WRITABLE copy, made by `build_oracle.sh` before it runs the
+#              maintainer's compile scripts. Everything the scripts create --
+#              regenerated `*MT.cbl`, `.prn` listings, six copies of
+#              `cobmysqlapi.o`, `presql2.param`, `.so` modules and executables
+#              -- lands here and never in the checkout.
+#      /data   the ledger data directory: COBOL indexed files and the flat seed
+#              files the loaders read.
+#      /out    dumps, normalised dumps and diff evidence.
+#
+#  /build/bin exists so that ACAS_BIN resolves; see the environment block.
+# -----------------------------------------------------------------------------
+RUN set -eu; \
+    mkdir -p /repo /build /build/bin /data /out; \
+    chmod 0755 /repo /build /build/bin /data /out; \
+    echo 'OK: /repo (read-only mount point), /build, /build/bin, /data and /out created.'
+
+
+# -----------------------------------------------------------------------------
+#  ENVIRONMENT CONTRACT
+#
+#  DATABASE -- the client-side half of the contract stated in the sibling image
+#  `harness/Dockerfile.mariadb`, which serves the schema at compose service
+#  name `mariadb` on port 3306. The names must agree across both images and the
+#  compose file; the values for user and password come from compose.
+#
+#  ACAS_DB_USER and ACAS_DB_PASSWORD are deliberately NOT declared here, and
+#  the sibling image gives the reason in the same words: defaulting
+#  ACAS_DB_PASSWORD to anything would put a credential in an image layer. They
+#  are named in this comment so the contract is still greppable and complete;
+#  `harness/docker-compose.yml` supplies both at run time, and
+#  `build_oracle.sh` reads them from the environment when it materialises
+#  `presql2.param`. Declaring even an empty ENV for them is avoided because
+#  BuildKit's own `SecretsUsedInArgOrEnv` lint exists precisely to stop a
+#  credential-shaped variable being recorded in image metadata -- suppressing
+#  that warning rather than heeding it would be the wrong instinct here.
+#
+#  ACAS_DB_SOCKET *is* declared, and empty, which means "connect over TCP" --
+#  the harness reaches the server by hostname, so no unix socket exists to
+#  name. An empty socket path is a routing choice, not a secret.
+#
+#  COBOL RUNTIME
+#      COBCPY / COB_COPY_DIR   the copybook search path. [comp-all.sh:L9-L10]
+#                              exports these itself as the RELATIVE
+#                              `../copybooks`, which is correct while the
+#                              scripts are cd'd into a ledger directory. The
+#                              absolute default here is compatible with that
+#                              and additionally makes ad-hoc `cobc` use work
+#                              from any directory; the frozen scripts still win
+#                              inside their own run, because they export their
+#                              own value.
+#      COB_LIBRARY_PATH        where the GnuCOBOL runtime looks for `cobc -m`
+#                              modules. Seeded with the SIX compile directories
+#                              in the maintainer's own order
+#                              [comp-all.sh:L15-L32] -- common, general, irs,
+#                              purchase, sales, stock -- followed by GnuCOBOL's
+#                              own default module directory, which is line 1 of
+#                              [etc/ld.so.conf.d/gnucobol.conf].
+#                              `build_oracle.sh` and both runners extend it.
+#      COB_EXIT_WAIT=off       stops the runtime pausing for a keypress when a
+#                              screen program ends. This removes ONLY a
+#                              terminal pause: the plan's rule for the
+#                              presentation layer is that accept prompts whose
+#                              sole effect is to block a terminal are dropped
+#                              entirely, while any control transfer around them
+#                              is preserved. It changes no computed value and
+#                              no table state -- and without it every scenario
+#                              run would hang.
+#
+#      NOT SET: COB_SCREEN_EXCEPTIONS and COB_SCREEN_ESC. The programs set
+#      these themselves at [general/general.cbl:L369-L370] (and likewise
+#      [general/gl000.cbl:L172-L173]) via `set ENVIRONMENT ... to "Y"`, so
+#      presetting them here would be redundant, and leaving them alone keeps
+#      the runtime environment demonstrably the programs' own.
+#
+#  ACAS PATHS -- ACAS_LEDGERS AND ACAS_BIN ARE BOTH LOAD-BEARING
+#      A hard, INTERACTIVE gate depends on them.
+#      [copybooks/Proc-Get-Env-Set-Files.cob:L20-L28]:
+#
+#          accept   ACAS_LEDGERS from Environment "ACAS_LEDGERS".
+#          accept   ACAS_BIN     from Environment "ACAS_BIN".
+#          if       ACAS_LEDGERS (1:1) = spaces
+#                or ACAS_BIN (1:1) = spaces
+#                   display SY009   at 0505 with erase eos highlight
+#                   display SY008   at 1210 with ...
+#                   accept ws-reply at 1243
+#                   stop run
+#          end-if
+#
+#      If EITHER is blank the program displays a message, waits on an ACCEPT
+#      and stops -- the same class of harness hang as the sys002 trap, and it is
+#      reached early because [general/general.cbl:L372] performs
+#      `zz020-Get-Program-Args`, which performs that section first. Both are
+#      therefore set here.
+#
+#      ACAS_LEDGERS must be an ABSOLUTE path, because
+#      [copybooks/Proc-Get-Env-Set-Files.cob:L30-L31] derives the platform
+#      delimiter from its first character:
+#          if  ACAS_LEDGERS (1:1) = "\" or "/"
+#              move ACAS_LEDGERS (1:1) to OS-Delimiter
+#      and `zz020-Set-the-Paths` then prefixes every file name with
+#      ACAS_LEDGERS + OS-Delimiter, so the value carries NO trailing delimiter.
+#
+#      ACAS_BIN is where the menus look for a backup script:
+#      [general/general.cbl:L489-L503] strings ACAS_BIN, the delimiter and the
+#      script name, calls `CBL_CHECK_FILE_EXIST`, and on a non-zero return
+#      moves the literal "No BackUp Script in Bin" into a displayed field.
+#      A missing script is NON-FATAL -- only the display changes -- but setting
+#      the variable and creating the directory makes the behaviour
+#      deterministic instead of dependent on the ambient environment.
+#
+#  TERMINAL -- the compiled menus REFUSE to run on a small terminal.
+#  [general/general.cbl:L374-L383]:
+#
+#      accept   ws-env-lines   from lines.
+#      if       ws-env-lines < 24
+#               display SY010    at 0101 with erase eos
+#               accept  ws-reply at 0133
+#               goback.
+#      accept   ws-env-Columns from Columns.
+#      if       ws-Env-Columns < 80
+#               display SY013    at 0101 with erase eos
+#               accept  ws-reply at 0133
+#               goback.
+#
+#  So TERM, LINES and COLUMNS are given defaults that satisfy the 24x80 floor.
+#  `run_cobol_scenario.sh` still allocates a pty (hence `util-linux` above);
+#  these defaults make the container's behaviour predictable rather than
+#  dependent on how it was attached.
+#
+#  BOOTSTRAP ARTIFACT PATHS -- published so `build_oracle.sh` can find and
+#  reuse steps 1-3 instead of repeating them.
+# -----------------------------------------------------------------------------
+ENV ACAS_DB_HOST=mariadb \
+    ACAS_DB_PORT=3306 \
+    ACAS_DB_NAME=ACASDB \
+    ACAS_DB_SOCKET="" \
+    ACAS_REPO=/repo \
+    ACAS_BUILD=/build \
+    ACAS_DATA=/data \
+    ACAS_OUT=/out \
+    ACAS_BIN=/build/bin \
+    ACAS_LEDGERS=/data \
+    ACAS_PRESQL2_PACKAGE=/opt/presql2-package \
+    ACAS_COBMYSQLAPI_OBJ=/usr/local/lib/acas/cobmysqlapi.o \
+    ACAS_MYSQL_PREFIX=/usr/local/mysql \
+    COBCPY=/build/copybooks \
+    COB_COPY_DIR=/build/copybooks \
+    COB_LIBRARY_PATH=/build/common:/build/general:/build/irs:/build/purchase:/build/sales:/build/stock:/usr/local/lib/gnucobol \
+    COB_EXIT_WAIT=off \
+    LD_LIBRARY_PATH=/usr/local/lib:/usr/local/mysql/lib \
+    TERM=xterm \
+    LINES=24 \
+    COLUMNS=80
+
+
+# -----------------------------------------------------------------------------
+#  WORKING DIRECTORY AND DEFAULT COMMAND
+#
+#  WORKDIR is /build -- the WRITABLE copy -- and deliberately NEVER /repo.
+#  Defaulting to the read-only checkout would invite exactly the writes that
+#  would damage the frozen tree, and a `cobc` run there would scatter `.prn`
+#  listings and `.so` modules through it.
+#
+#  CMD is a plain shell because compose runs the harness scripts explicitly --
+#  `build_oracle.sh`, `seed.sh`, `reset_db.sh`, `run_cobol_scenario.sh`,
+#  `run_python_scenario.sh`, then `dump_tables.py`, `normalize.py` and
+#  `diff_states.py`. No ENTRYPOINT wrapper is used: a wrapper would sit between
+#  the scripts and their output, and because
+#  [common/comp-common.sh:L59] and [comp-all.sh:L44-L45] both end with an
+#  unconditional `exit 0`, `build_oracle.sh` must scan that output verbatim to
+#  detect failure. Nothing here may swallow, colourise, filter or reorder it.
+#
+#  No supervisor and no process manager is installed: a second concurrent
+#  scenario against the shared database would break the parity protocol.
+# -----------------------------------------------------------------------------
+WORKDIR /build
+
+CMD ["bash"]
+

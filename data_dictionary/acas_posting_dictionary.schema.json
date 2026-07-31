@@ -532,12 +532,13 @@
         },
         "name": {
           "type": "string",
-          "description": "The host-variable name exactly as declared, upper case, HV- prefixed. Recorded independently of both the copybook data-name and the column name because all three can differ: copybooks/irswspost.cob:L9 declares Post-Key, common/irspostingMT.cbl:L174 declares HV-KEY-4, and the column is KEY-4.",
-          "pattern": "^HV-[A-Z0-9][A-Z0-9-]*$",
+          "description": "The host-variable name exactly as declared, upper case, prefixed to match its group: HV- for a single-table bridge or the header table of a two-table bridge, and HV1- for the lines table of a two-table bridge, exactly as hv_group_suffix records. The prefix is part of the declared name and is never rewritten: common/slinvoiceMT.cbl and common/plinvoiceMT.cbl declare fourteen HV1- host variables each for their lines tables. Recorded independently of both the copybook data-name and the column name because all three can differ: copybooks/irswspost.cob:L9 declares Post-Key, common/irspostingMT.cbl:L174 declares HV-KEY-4, and the column is KEY-4.",
+          "pattern": "^HV[0-9]?-[A-Z0-9][A-Z0-9-]*$",
           "examples": [
             "HV-POST-RRN",
             "HV-SALES-AVERAGE",
-            "HV-POST4-DAY"
+            "HV-POST4-DAY",
+            "HV1-IL-LINE-KEY"
           ]
         },
         "picture": {
