@@ -1,43 +1,241 @@
-# ACAS COBOL -> Python 3.12 posting-cycle migration
-# Flat, exactly-pinned dependency list for environments without a build backend.
-# Keep in lock-step with [project].dependencies / [project.optional-dependencies]
-# in pyproject.toml. NO version ranges are permitted (AAP 0.5.1).
-#
-# Interpreter: CPython 3.12 (see pyproject.toml requires-python = "==3.12.*")
-#
 # ---------------------------------------------------------------------------
-# Runtime
+# ACAS - Applewood Computers Accounting System
+# COBOL -> Python 3.12 migration of the batch posting cycle
+#
+# requirements.txt - the flat, exactly pinned dependency list.
+#
+# WHAT THIS FILE IS
+#   The dependency set of the Python re-implementation of the ACAS batch
+#   posting cycle: transaction validation, the batch-control-total gate,
+#   posting to the General, Sales, Purchase and IRS ledgers, and the
+#   period-total and control-account updates.
+#
+#   It carries the SAME pins as pyproject.toml in flat form, for environments
+#   without a build backend:  pip install -r requirements.txt
+#
+#   pyproject.toml is the AUTHORITATIVE manifest - it declares the
+#   interpreter floor and ceiling, the packaging rules and the test-runner
+#   configuration. This file mirrors its pins and must never drift from them;
+#   a mismatch between the two manifests is a defect.
+#
+#   See README-python-migration.md for how to build the comparison oracle,
+#   seed a scenario, run both cycles and diff the resulting table state.
+#
+# WHAT THIS FILE IS NOT
+#   It is not a manifest for the COBOL system. The COBOL tree (common/,
+#   copybooks/, general/, sales/, purchase/, irs/, stock/), the generated
+#   MySQL bridge (common/*MT.scb, common/*MT.cbl) and the schema
+#   (mysql/ACASDB.sql) are FROZEN specification sources: read exhaustively,
+#   never modified. The compiled comparison oracle under harness/ needs a
+#   container toolchain - GnuCOBOL 3.2, MariaDB 10.11.7, MariaDB
+#   Connector/C 3.3.4, the JC preSQL translator - and those versions are
+#   declared in harness/Dockerfile.*. They must never appear here.
+#
+# TARGET RUNTIME
+#   CPython 3.12.3. Its decimal module is backed by the C libmpdec 2.5.1
+#   implementation rather than the pure-Python fallback, which matters for
+#   both correctness and speed, because every monetary and quantity
+#   operation in the migrated cycle passes through decimal.Decimal.
+#
+# HOW TO READ THE PIN LINES
+#   Every non-comment line is exactly  name==version . No ranges, no extras,
+#   no environment markers, no URLs, no hashes. The versions were resolved
+#   on the build host, not recalled. Do not upgrade, downgrade or "check for
+#   newer": a driver or runtime change can move a stored penny, and the only
+#   acceptable proof of equivalence is an empty scenario diff against the
+#   compiled COBOL oracle.
 # ---------------------------------------------------------------------------
-# Oracle's official MySQL driver - primary database path for acas_posting.dal.
+
+# ---------------------------------------------------------------------------
+# Interpreter - comment only, because a requirements file cannot pin the
+# interpreter it is installed into.
+#
+#     python==3.12.*
+#
+# Enforced by pyproject.toml:  requires-python = "==3.12.*" . Python 3.13 is
+# rejected by design; the migration is specified against 3.12 semantics.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Direct dependencies
+#
+# The first three are the runtime set, declared in [project].dependencies in
+# pyproject.toml alongside the two SQLAlchemy transitives pinned further
+# down. pytest and pytest-cov are the verification toolchain, declared in
+# [project.optional-dependencies].dev alongside its five transitives, with
+# [project.optional-dependencies].test defined by reference as
+# acas-posting[dev] so the two extras can never drift apart. This file is
+# deliberately not split into a separate requirements-dev.txt: one flat
+# file, one pin set, so that the two manifests cannot disagree.
+# ---------------------------------------------------------------------------
+
+# Oracle's official MySQL driver and the primary database path used by
+# acas_posting/dal/*. Ships a compiled C extension for CPython 3.12 and
+# materialises DECIMAL columns as decimal.Decimal and integer columns as
+# int - never as a binary float.
 mysql-connector-python==26.7.0
-# SQLAlchemy is used at CORE LEVEL ONLY (text() on an explicit Connection).
-# An ORM entity layer is forbidden by the AAP (rule R-3 / 0.5.1).
+
+# Connection abstraction and parameter binding, used at CORE LEVEL ONLY:
+# text() statements executed on an explicit Connection. acas_posting/
+# contains no ORM entity layer, no declarative metadata and no schema
+# generation of any kind.
 SQLAlchemy==2.0.51
-# Transitive dependencies of SQLAlchemy, pinned for reproducibility.
-greenlet==3.5.4
-typing_extensions==4.16.0
-# Parses harness/scenarios/*.yaml scenario definitions.
+
+# Parses the scenario definitions under harness/scenarios/*.yaml, which pin
+# the seed data, the run inputs and the affected-table list of each
+# scenario that the compiled oracle arbitrates.
 PyYAML==6.0.3
 
-# ---------------------------------------------------------------------------
-# Test / verification toolchain
-# ---------------------------------------------------------------------------
+# The test runner for the arithmetic-parity, scenario and determinism
+# suites under tests/.
 pytest==9.1.1
+
+# Coverage plugin. Coverage is EVIDENCE that every module named in
+# docs/migration/traceability.md is actually exercised: it is
+# a traceability support, not a quality gate. No threshold is enforced,
+# here or in the [tool.coverage.*] configuration of pyproject.toml.
 pytest-cov==7.1.0
-# Transitive dependencies of pytest / pytest-cov, pinned for reproducibility.
-coverage==7.15.2
-pluggy==1.6.0
-iniconfig==2.3.0
-packaging==26.2
-Pygments==2.20.0
 
 # ---------------------------------------------------------------------------
-# DELIBERATELY EXCLUDED (AAP 0.5.1) - do not add:
-#   * any ORM entity layer                  (forbidden by rule R-3)
-#   * alembic / any schema-migration tool   (schema mysql/ACASDB.sql is frozen)
-#   * pandas, numpy                         (binary floating point - rule R-2)
-#   * any third-party date library          (common/maps04.cbl semantics must
-#                                            be reproduced, not improved)
-#   * asyncio helpers / thread pools /
-#     connection pools                      (execution is strictly sequential)
+# Transitive dependencies
+#
+# Pinned so the resolved environment is identical on every host. Each one is
+# a declared requirement of a direct pin above and is named with its parent;
+# none is imported by acas_posting/ directly. The set below is the complete
+# closure of the direct pins on CPython 3.12 / x86_64 - installing this file
+# adds nothing that is not listed.
+# ---------------------------------------------------------------------------
+
+# via SQLAlchemy - a required dependency on x86_64 and the other machine
+# types listed in its metadata. PRESENT AS A PACKAGING ARTEFACT ONLY, and
+# not an adoption of concurrency. SQLAlchemy pulls the module in from
+# sqlalchemy.util.concurrency so that its asyncio bridge stays available,
+# but acas_posting never calls a SQLAlchemy asyncio API, so no greenlet is
+# ever spawned and no coroutine is ever awaited: verified on this host, Core
+# usage stays on the main greenlet and creates no others. Execution is
+# strictly sequential, matching the single-threaded COBOL.
+greenlet==3.5.4
+
+# via SQLAlchemy - a mandatory requirement, minimum typing-extensions
+# 4.6.0. Typing backport only; no runtime behaviour depends on it.
+typing_extensions==4.16.0
+
+# via pytest, and also required by pytest-cov.
+pluggy==1.6.0
+
+# via pytest.
+iniconfig==2.3.0
+
+# via pytest.
+packaging==26.2
+
+# via pytest - a mandatory requirement, minimum Pygments 2.7.2, used for
+# terminal output highlighting only.
+Pygments==2.20.0
+
+# via pytest-cov, which requires coverage with the toml extra. That extra
+# resolves to no additional package on 3.12, because tomllib is part of the
+# standard library.
+coverage==7.15.2
+
+# ---------------------------------------------------------------------------
+# DELIBERATELY EXCLUDED
+#
+# This block is a CONTRACT, not a note. Every package named below is absent
+# because a binding rule forbids it - not because it was overlooked. Adding
+# any of them breaks that rule, and the breakage would not announce itself
+# as a failing test: it would surface as a wrong figure in a posted ledger.
+#
+#   pandas, numpy, and any other array / dataframe / statistics package
+#       Zero binary floating point in accounting computation. No accounting
+#       value may pass through a binary float at any point - not in
+#       computation, not in storage, not in transport. The exclusion is
+#       ABSOLUTE and extends to the harness dump comparison, which uses
+#       ordered row sequences rather than dataframes. Corroboration from the
+#       frozen schema: mysql/ACASDB.sql declares ZERO FLOAT, DOUBLE and REAL
+#       columns - its numeric census is 167 DECIMAL, 151 INT, 116 TINYINT,
+#       23 MEDIUMINT, 22 SMALLINT and 3 BIGINT - so no binary float can
+#       enter from the database side either.
+#
+#   any ORM entity layer - the SQLAlchemy ORM, Django ORM, peewee, tortoise,
+#   pony, SQLModel and every equivalent
+#       Plain modules and dataclasses only; SQLAlchemy is permitted at Core
+#       level and no further. An ORM would want to own schema definition,
+#       which the schema freeze prohibits, and would impose identity-map and
+#       flush-ordering semantics the COBOL does not have, obscuring the exact
+#       statement ordering that the state diff is sensitive to.
+#
+#   alembic, and any other schema-migration tool - yoyo-migrations,
+#   sqlalchemy-migrate, django and every equivalent
+#       mysql/ACASDB.sql is frozen and no DDL is ever emitted: no tables, no
+#       columns, no indexes, no constraints, no views, no triggers. A
+#       migration tool has nothing legitimate to do here, and its presence
+#       would invite schema drift.
+#
+#   any asyncio, threading or connection-pool helper - aiomysql, asyncmy,
+#   anyio, trio, gevent, eventlet, the sqlalchemy asyncio extra, and every
+#   pool manager
+#       Execution is strictly sequential, matching the single-threaded
+#       COBOL. No threads, no asyncio, no multiprocessing, no connection
+#       pooling.
+#
+#   any third-party date library - python-dateutil, arrow, pendulum, babel
+#   and every equivalent
+#       acas_posting/dates.py reproduces common/maps04.cbl exactly: a
+#       1600-12-31 ordinal epoch, a six-part rejection test, and the defect
+#       that a rejected date leaves the caller's output field UNCHANGED
+#       rather than zeroed. A general-purpose date library would be MORE
+#       CORRECT THAN THE SPECIFICATION, which is the one outcome to avoid -
+#       a defect reproduced is correct, a defect fixed is a failure. The
+#       standard library alone is used.
+#
+#   any COBOL binding, FFI bridge or compiler wrapper - packages wrapping
+#   cobmysqlapi.o, anything requiring cobc or a GnuCOBOL runtime, and any
+#   ctypes/cffi shim onto the COBOL modules
+#       No COBOL at runtime. The COBOL is the specification for this
+#       migration, not a runtime dependency of its result: the shipped
+#       artifact must run on a host with no COBOL compiler and no COBOL
+#       runtime present. The compiled oracle lives under harness/, a SIBLING
+#       of acas_posting/ that is excluded from packaging and reachable only
+#       out-of-process, from the scenario and determinism suites.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Load-bearing standard-library modules
+#
+# Named because substituting any of them would change behaviour, and because
+# their sufficiency is the reason this dependency list is as short as it is:
+#
+#   decimal      every monetary and quantity computation, with the
+#                precision, scale, truncation direction and sign of the
+#                receiving PIC / COMP-3 field. Truncation toward zero is the
+#                default; half-up rounding occurs only at the five ROUNDED
+#                sites in the entire in-scope cycle.
+#   datetime     the ordinal conversions underpinning acas_posting/dates.py;
+#                the 1600-12-31 epoch of common/maps04.cbl round-trips
+#                exactly.
+#   dataclasses  the record layouts under acas_posting/records/, field for
+#                field from the copybooks with nothing added.
+#   argparse     the CLI batch entry points under acas_posting/cli/, which
+#                bind the same logical inputs the COBOL LINKAGE SECTIONs
+#                declare.
+#   pathlib      file location for the generated data dictionary and the
+#                harness table dumps.
+#   csv          tabular dump and normalisation output.
+#   json         data_dictionary/acas_posting_dictionary.json and its schema.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# No private or internal packages are required. Nothing in the target design
+# depends on an internal registry, so this file declares no --index-url, no
+# --extra-index-url, no --find-links, no editable (-e) requirement, and no
+# VCS (git+) or local-path (file:) requirement. Installation resolves
+# entirely from the default public index.
+#
+# No --hash entries either: hash pinning is not part of this workflow, and
+# adding it without a matching lock file would break installation.
+#
+# Those option names appear above as prose only. pip interprets nothing
+# inside a comment, so the only directives this file carries are the twelve
+# name==version lines.
 # ---------------------------------------------------------------------------
