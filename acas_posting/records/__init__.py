@@ -24,6 +24,42 @@ across several hundred fields (rule R-5). Most modules build those descriptors
 at module scope, which means the first record module imported triggers the
 loader's single cached read of the dictionary artifact.
 
+HOW A FIELD PUBLISHES ITS DICTIONARY KEY - AND THE ONE PLACE TO ASK
+===================================================================
+These modules do not agree on where a field's key is published, and the
+variety is real: 977 attributes across 141 dataclasses arrive by eighteen
+different routes. A key may be held in the field's own
+`dataclasses.field(metadata=...)` under `descriptor`, `cobol_field`,
+`dictionary_key`, `acas_posting.dictionary_key` or `twin_dictionary_key`; in a
+mapping or tuple bound at class scope or at module scope as `DESCRIPTORS`,
+`FIELD_DESCRIPTORS`, `DICTIONARY_KEYS`, `FIELDS` or `ALL_FIELDS`; in a class
+constant named after the attribute in upper case; by position in a `FIELDS`
+tuple running parallel to the dataclass, which is how an unnamed FILLER item
+is reached; or nowhere at all, for a group item whose own type carries its
+members' keys.
+
+Do not reimplement that ladder, and do not go looking for a hub here - this
+package still publishes no aggregate surface. Ask
+`acas_posting.dictionary.loader`, whose mandate is exactly this (Agent Action
+Plan section 0.4.1.6, "Runtime lookup so every record field cites its entry"):
+
+    loader.trace_record(GlBatchRecord)      every attribute, in declaration
+                                            order, with its key, the route
+                                            that carried it and its entry
+    loader.field_keys_for(GlBatchRecord)    attribute -> key, reading no file
+    loader.entry_for_field(rec, "bcycle")   the entry, or a loud failure
+    loader.cite_field(rec, "batch_status")  the three-locator citation
+
+A group item - `amounts`, say, which is the `03 Amounts comp-3.` group of
+[copybooks/wsbatch.cob:L40] - carries no key of its own, so its trace names the
+type to follow instead. That is a fact about the copybook, not a gap.
+
+`loader.RECORD_FIELD_ROUTES` lists the eighteen in the order they are tried.
+Those accessors changed nothing here: every route above keeps working exactly
+as its module wrote it, no name is deprecated and no metadata is rewritten
+(rules R-3 and R-4). They exist so a consumer need not know which of the 27
+modules it happens to be holding.
+
 Six numeric storage classes are modelled and none may be collapsed: `DISPLAY`,
 `COMP`, `COMP-3`, `DISPLAY` with `SIGN LEADING` [copybooks/wspost-irs.cob:L21]
 and its alternate spelling [copybooks/irswspost.cob:L14], and the

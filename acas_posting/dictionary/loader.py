@@ -281,13 +281,17 @@ the reproduced defects and the open questions respectively.
 # trees are the specification for this migration and are never modified,
 # reformatted, commented, relocated or built from here.
 
+import dataclasses
 import difflib
 import json
 import os
 import stat
+import sys
+from collections.abc import Mapping
 from importlib import resources
 from pathlib import Path
-from typing import Final
+from types import MappingProxyType
+from typing import ClassVar, Final, Protocol
 
 from acas_posting import (
     DATA_DICTIONARY_PATH,
@@ -491,7 +495,12 @@ class DictionaryKeyError(DictionaryError, KeyError):
 
 
 class DictionaryLookupError(DictionaryError, KeyError):
-    """No table, copybook record, copybook file, handler or bridge matches.
+    """Nothing matches a name that is not an entry key.
+
+    Raised for a table, copybook record, copybook file, handler or bridge the
+    document does not carry, and by the record-tracing accessors for an
+    attribute a record layout does not declare or one that carries no key at
+    all - a group item, whose members carry the keys instead.
 
     Distinct from `DictionaryKeyError` so that a caller resolving the
     entity-to-table spine can tell a misspelt table name from a misspelt
@@ -2081,6 +2090,579 @@ def cite(key: str, *, path: Path | None = None) -> str:
     )
 
 
+#  RECORD LAYOUT TRACING  (rule R-5)
+#
+#  Section 0.4.1.6 gives this module its mandate in one line - "Runtime lookup
+#  so every record field cites its entry" - and it names the 27
+#  `acas_posting/records/*.py` modules as a caller needing "per-record
+#  enumeration of fields in declaration order, and the key for each". Every
+#  accessor above answers that from the DOCUMENT side, addressed by table name
+#  or by copybook record name. The four below answer it from the PYTHON side,
+#  addressed by the record dataclass itself, and they exist because the record
+#  modules do not agree on how they publish the connection between the two.
+#
+#  EIGHTEEN ROUTES ARE IN USE ACROSS THE 27 MODULES, and none of them is
+#  wrong where it stands. A field's descriptor may arrive in its
+#  `dataclasses.field(metadata=...)` under any of five names, in a mapping or a
+#  tuple bound at class scope or at module scope under any of five more, in a
+#  class constant named after the attribute in upper case, by position in a
+#  tuple that runs parallel to the dataclass - which is how an unnamed FILLER
+#  item is reached - or, for a group item, nowhere at all, because the group's
+#  own type carries its members' keys. `RECORD_FIELD_ROUTES` lists them in the
+#  order they are tried, and a `FieldTrace` says which one carried the field,
+#  so a reader can always get from an attribute back to the convention that
+#  described it.
+#
+#  ⛔ NOTHING HERE REPLACES A CONVENTION. Every route keeps working exactly as
+#  it does today; no module's published surface changes, no name is deprecated
+#  and no metadata is rewritten (rule R-3). These accessors are additive: they
+#  spare a consumer from reimplementing the ladder, which is the only thing
+#  that was missing.
+#
+#  ⛔ AND NOTHING HERE ADJUDICATES. A trace reports the route and hands back
+#  the entry, whose three views, `drift` and `derivation` stay exactly as
+#  catalogued. This module names no winner between the copybook, the bridge
+#  host variable and the column (rule R-4).
+#
+#  The descriptor type is read STRUCTURALLY, by asking a candidate for its
+#  `dictionary_key`, and never by importing it: `acas_posting/cobol/field.py`
+#  imports THIS module, and section 0.4.3 grants `cobol/*.py` and `records/*.py`
+#  this module and almost nothing else, so naming either of them here would
+#  close an import cycle for all 34 modules on that narrow surface.
+
+#: Field metadata names whose value is a descriptor object - anything carrying
+#: a `dictionary_key`. Tried before the key names below, because a descriptor
+#: carries its own key and so needs no second lookup.
+_DESCRIPTOR_METADATA_KEYS: Final[tuple[str, ...]] = ("descriptor", "cobol_field")
+
+#: Field metadata names whose value is an entry key already, in the form
+#: `get_entry` takes. `twin_dictionary_key` is last: a record that carries both
+#: names carries the twin as the second of two catalogued columns, so the
+#: unqualified name is the one that describes the attribute itself.
+_KEY_METADATA_KEYS: Final[tuple[str, ...]] = (
+    "dictionary_key",
+    "acas_posting.dictionary_key",
+    "twin_dictionary_key",
+)
+
+#: Names a record module may bind - at class scope, then at module scope - to a
+#: mapping or a tuple of descriptors or of entry keys, tried in this order. A
+#: mapping is matched by its own key, either verbatim against the attribute
+#: name or through `_attribute_form`; a tuple is matched by each member's name.
+_NAMED_FIELD_MAPS: Final[tuple[str, ...]] = (
+    "DESCRIPTORS",
+    "FIELD_DESCRIPTORS",
+    "DICTIONARY_KEYS",
+    "FIELDS",
+    "ALL_FIELDS",
+)
+
+#: The route a class constant named `<ATTRIBUTE>.upper()` gives, used where a
+#: module publishes one descriptor per constant instead of a collection.
+_CLASS_CONSTANT_ROUTE: Final[str] = "class constant"
+
+#: The route a parallel `FIELDS` tuple gives, matched by position rather than
+#: by name. This is what reaches an item whose Python attribute was renamed
+#: away from its COBOL name - an unnamed FILLER, or a name that cannot be an
+#: identifier as it stands - so it is tried only after every name-based route.
+_POSITIONAL_ROUTE: Final[str] = "class FIELDS by position"
+
+#: The route a group item gives: none of its own. A group is a container whose
+#: members are catalogued individually, so its trace carries `group_type` and
+#: no key, and a caller follows the type.
+_GROUP_ROUTE: Final[str] = "group item"
+
+#: Every route a record field's key can arrive by, in the order they are
+#: tried. Derived from the constants above rather than restated, so the list
+#: and the search can never drift apart.
+RECORD_FIELD_ROUTES: Final[tuple[str, ...]] = (
+    *(f"metadata[{name}]" for name in _DESCRIPTOR_METADATA_KEYS),
+    *(f"metadata[{name}]" for name in _KEY_METADATA_KEYS),
+    _CLASS_CONSTANT_ROUTE,
+    *(f"class {name}" for name in _NAMED_FIELD_MAPS),
+    *(f"module {name}" for name in _NAMED_FIELD_MAPS),
+    _POSITIONAL_ROUTE,
+    _GROUP_ROUTE,
+)
+
+
+class RecordLayout(Protocol):
+    """A record dataclass, or an instance of one.
+
+    Structural rather than nominal because it has to be: every one of the 27
+    `acas_posting/records/*.py` modules imports this module, so this module
+    cannot import them back (Agent Action Plan section 0.4.3). The accessors
+    below therefore describe what they accept instead of naming it.
+    """
+
+    __dataclass_fields__: ClassVar[Mapping[str, object]]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class FieldTrace:
+    """One record attribute, the key it reaches, and how it reached it.
+
+    Attributes:
+        attribute: The Python attribute name, as the record module spells it.
+        dictionary_key: The entry key the attribute reaches, or None for a
+            group item and for an attribute no route describes.
+        route: Which member of `RECORD_FIELD_ROUTES` carried it, or None when
+            none did.
+        entry: The entry itself, when `trace_record` was asked to attach it
+            and the document carries the key. None otherwise - an absent
+            entry is reported, never fabricated (rule R-3).
+        group_type: For a group item, the record type whose own fields carry
+            the keys. None for every other attribute.
+
+    Frozen, so a trace cannot be edited into disagreement with the record it
+    describes, and comparable by value, so two traces of the same layout are
+    equal - which is what lets a determinism test compare them directly.
+    """
+
+    attribute: str
+    dictionary_key: str | None
+    route: str | None
+    entry: DictionaryEntry | None
+    group_type: type | None
+
+    @property
+    def is_group(self) -> bool:
+        """Whether this attribute is a group container rather than a field."""
+        return self.group_type is not None
+
+
+def _attribute_form(name: str) -> str:
+    """Return the Python attribute form of a COBOL or dotted name.
+
+    Args:
+        name: A descriptor name, a mapping key or a dotted path, optionally
+            carrying the `#<line>` suffix a repeated field name takes.
+
+    Returns:
+        The name reduced to the form a record module gives the attribute:
+        the last dotted segment, without the line suffix, split at a
+        lower-to-upper boundary, folded to lower case, with every run of
+        anything else collapsed to one underscore and the ends trimmed. So
+        `SALEDGER-REC.SALES-AVERAGE` and `sales_address.sales_addr1` reduce to
+        their own final segments, and `bDefault` reduces to `b_default`.
+
+    Written with string operations rather than a pattern so the transformation
+    is legible at the point of use. It renames nothing in any record module -
+    it only recognises a name a module already chose.
+    """
+    stem = name.split("#")[0].rpartition(".")[2]
+    spaced: list[str] = []
+    for position, character in enumerate(stem):
+        previous = stem[position - 1] if position else ""
+        if character.isupper() and (previous.islower() or previous.isdigit()):
+            spaced.append("_")
+        spaced.append(character)
+    collapsed: list[str] = []
+    for character in "".join(spaced).lower():
+        if character.isdigit() or "a" <= character <= "z":
+            collapsed.append(character)
+        elif collapsed and collapsed[-1] != "_":
+            collapsed.append("_")
+    return "".join(collapsed).strip("_")
+
+
+def _entry_key_of(candidate: object) -> str | None:
+    """Return the entry key a candidate carries, or None.
+
+    Args:
+        candidate: A value found on a record layout - a descriptor object, an
+            entry key, or something that is neither.
+
+    Returns:
+        The key, when the candidate is a string in entry-key form or an object
+        carrying a `dictionary_key` that is. None otherwise.
+
+    A bare string is admitted only if `ENTRY_KEY_PATTERN` matches it in full,
+    which is what keeps a field NAME from being mistaken for a key. That
+    distinction is the module docstring's `NEVER KEY BY FIELD NAME ALONE`
+    warning enforced structurally: `PSIRSPOST-REC` and `IRSPOSTING-REC` have
+    near-identical field names, and [copybooks/wspost-irs.cob:L6-L7] says
+    verbatim "This is NOT the same as the internal IRS posting file".
+    """
+    if isinstance(candidate, str):
+        return candidate if ENTRY_KEY_PATTERN.fullmatch(candidate) else None
+    carried = getattr(candidate, "dictionary_key", None)
+    if isinstance(carried, str) and ENTRY_KEY_PATTERN.fullmatch(carried):
+        return carried
+    return None
+
+
+def _named_bindings(
+    owner: object, scope: str
+) -> tuple[tuple[str, object], ...]:
+    """Return each recognised collection bound directly on one owner.
+
+    Args:
+        owner: A record class or the module that defines it.
+        scope: The route prefix - `class` or `module`.
+
+    Returns:
+        A `(route, value)` pair for every member of `_NAMED_FIELD_MAPS` bound
+        on the owner itself, in that tuple's order.
+
+    `vars` is deliberate for a class: it reports only the class's own
+    attributes, so a collection inherited from a base is not read as though
+    the subclass had published it.
+    """
+    bound = vars(owner)
+    return tuple(
+        (f"{scope} {name}", bound[name])
+        for name in _NAMED_FIELD_MAPS
+        if name in bound
+    )
+
+
+def _from_named_bindings(
+    owner: object, scope: str, attribute: str
+) -> tuple[object | None, str | None]:
+    """Return the candidate one owner's collections hold for an attribute.
+
+    Args:
+        owner: A record class or the module that defines it.
+        scope: The route prefix - `class` or `module`.
+        attribute: The Python attribute name being traced.
+
+    Returns:
+        The candidate and the route that found it, or `(None, None)`.
+
+    A mapping is matched by its own key, verbatim first and then through
+    `_attribute_form`, because one module keys by dotted path
+    (`sales_address.sales_addr1`) and another by the COBOL name. A sequence is
+    matched by each member's own `name`.
+    """
+    for route, value in _named_bindings(owner, scope):
+        if isinstance(value, Mapping):
+            for name, candidate in value.items():
+                text = str(name)
+                if text == attribute or _attribute_form(text) == attribute:
+                    return candidate, route
+        elif isinstance(value, (tuple, list)):
+            for candidate in value:
+                carried = getattr(candidate, "name", None)
+                text = carried if isinstance(carried, str) else str(candidate)
+                if _attribute_form(text) == attribute:
+                    return candidate, route
+    return None, None
+
+
+def _group_type(field: object) -> type | None:
+    """Return the record type a group item contains, or None.
+
+    Args:
+        field: One `dataclasses.Field` of a record layout.
+
+    Returns:
+        The nested record type, taken from the attribute's default or its
+        default factory, or None when the attribute is a plain field.
+
+    A dataclass cannot carry both a default and a default factory, so the two
+    tests cannot disagree.
+    """
+    default = getattr(field, "default", dataclasses.MISSING)
+    if dataclasses.is_dataclass(default) and not isinstance(default, type):
+        return type(default)
+    factory = getattr(field, "default_factory", dataclasses.MISSING)
+    if (
+        factory is not dataclasses.MISSING
+        and isinstance(factory, type)
+        and dataclasses.is_dataclass(factory)
+    ):
+        return factory
+    return None
+
+
+def _trace_field(
+    layout: type,
+    module: object | None,
+    layout_fields: tuple[object, ...],
+    field: object,
+    path: Path | None,
+    attach: bool,
+) -> FieldTrace:
+    """Return the trace for one attribute of one record layout.
+
+    Args:
+        layout: The record class.
+        module: The module that defines it, or None when it is not in
+            `sys.modules`.
+        layout_fields: Every field of the layout, in declaration order.
+        field: The field being traced.
+        path: An explicit artifact path, or None for the repository's own.
+        attach: Whether to look the entry up as well as the key.
+
+    Returns:
+        The trace, with `route` naming the first member of
+        `RECORD_FIELD_ROUTES` that described the attribute.
+
+    The order of the attempts is the order of `RECORD_FIELD_ROUTES`, and it is
+    not arbitrary: the field's own metadata is the most local statement a
+    module can make, a collection is the next most local, position is tried
+    only after every name-based route because it cannot be checked against a
+    name, and the group test is last because a group is the absence of a key
+    rather than a way of finding one.
+    """
+    attribute = str(getattr(field, "name", ""))
+    metadata = getattr(field, "metadata", None)
+    found: object | None = None
+    route: str | None = None
+
+    if isinstance(metadata, Mapping):
+        for name in (*_DESCRIPTOR_METADATA_KEYS, *_KEY_METADATA_KEYS):
+            if name in metadata:
+                found, route = metadata[name], f"metadata[{name}]"
+                break
+
+    if found is None:
+        constant = getattr(layout, attribute.upper(), None)
+        if not isinstance(constant, str) and _entry_key_of(constant) is not None:
+            found, route = constant, _CLASS_CONSTANT_ROUTE
+
+    if found is None:
+        found, route = _from_named_bindings(layout, "class", attribute)
+
+    if found is None and module is not None:
+        found, route = _from_named_bindings(module, "module", attribute)
+
+    if found is None:
+        parallel = vars(layout).get("FIELDS")
+        if (
+            isinstance(parallel, tuple)
+            and len(parallel) == len(layout_fields)
+            and all(_entry_key_of(member) is not None for member in parallel)
+        ):
+            for sibling, member in zip(layout_fields, parallel):
+                if getattr(sibling, "name", None) == attribute:
+                    found, route = member, _POSITIONAL_ROUTE
+                    break
+
+    if found is None:
+        group = _group_type(field)
+        if group is not None:
+            return FieldTrace(attribute, None, _GROUP_ROUTE, None, group)
+        return FieldTrace(attribute, None, None, None, None)
+
+    key = _entry_key_of(found)
+    entry = find_entry(key, path=path) if attach and key is not None else None
+    return FieldTrace(attribute, key, route, entry, None)
+
+
+def _traces(
+    record: RecordLayout | type[RecordLayout],
+    path: Path | None,
+    attach: bool,
+) -> tuple[FieldTrace, ...]:
+    """Return a trace for every attribute of one record layout.
+
+    Args:
+        record: A record dataclass or an instance of one.
+        path: An explicit artifact path, or None for the repository's own.
+        attach: Whether to look each entry up as well as its key.
+
+    Returns:
+        One trace per attribute, in the layout's declaration order - which is
+        the copybook's own order, so the sequence can be read beside the
+        frozen source (rule R-6).
+
+    Raises:
+        DictionaryLookupError: The argument is not a record dataclass.
+    """
+    layout = record if isinstance(record, type) else type(record)
+    if not dataclasses.is_dataclass(layout):
+        raise DictionaryLookupError(
+            f"{layout.__module__}.{layout.__qualname__} is not a record "
+            "dataclass, so it has no fields to trace.\n"
+            "Pass one of the dataclasses an acas_posting.records module "
+            "declares, or an instance of one."
+        )
+    layout_fields = tuple(dataclasses.fields(layout))
+    module = sys.modules.get(layout.__module__)
+    return tuple(
+        _trace_field(layout, module, layout_fields, field, path, attach)
+        for field in layout_fields
+    )
+
+
+def trace_record(
+    record: RecordLayout | type[RecordLayout], *, path: Path | None = None
+) -> tuple[FieldTrace, ...]:
+    """Return every attribute of a record layout with its dictionary entry.
+
+    Args:
+        record: A record dataclass, or an instance of one.
+        path: An explicit artifact path, or None for the repository's own.
+
+    Returns:
+        One `FieldTrace` per attribute, in declaration order, each carrying
+        the entry key, the route that found it and the entry itself. A group
+        item carries `group_type` and no key; an attribute no route describes
+        carries neither, and is reported rather than hidden.
+
+    Raises:
+        DictionaryLookupError: The argument is not a record dataclass.
+        DictionaryNotFoundError: Nothing readable is at that path.
+        DictionaryParseError: The bytes there are not a readable document.
+
+    This is the one accessor that spans every convention the record modules
+    use, so a consumer needing the key for an arbitrary attribute no longer
+    has to know which of the 27 modules it is looking at. It changes none of
+    those conventions (rule R-3) and adjudicates nothing (rule R-4): a missing
+    entry comes back as None rather than as an invented default, exactly as
+    `find_entry` reports one.
+    """
+    return _traces(record, path, True)
+
+
+def field_keys_for(
+    record: RecordLayout | type[RecordLayout],
+) -> Mapping[str, str | None]:
+    """Return each attribute of a record layout mapped to its entry key.
+
+    Args:
+        record: A record dataclass, or an instance of one.
+
+    Returns:
+        A read-only mapping from attribute name to entry key, in declaration
+        order, with None where an attribute is a group item or no route
+        describes it.
+
+    Raises:
+        DictionaryLookupError: The argument is not a record dataclass.
+
+    Reads no document at all, so it answers with the artifact absent - useful
+    to a caller checking a record's coverage before deciding to load, and
+    consistent with this module never reading a file on import.
+    """
+    return MappingProxyType(
+        {
+            trace.attribute: trace.dictionary_key
+            for trace in _traces(record, None, False)
+        }
+    )
+
+
+def entry_for_field(
+    record: RecordLayout | type[RecordLayout],
+    attribute: str,
+    *,
+    path: Path | None = None,
+) -> DictionaryEntry:
+    """Return the entry one attribute of a record layout cites.
+
+    Args:
+        record: A record dataclass, or an instance of one.
+        attribute: The Python attribute name.
+        path: An explicit artifact path, or None for the repository's own.
+
+    Returns:
+        The same entry `get_entry` returns for that attribute's key, from the
+        same cached document - the identical object, not a copy.
+
+    Raises:
+        DictionaryLookupError: The layout declares no such attribute, or the
+            attribute carries no key because it is a group item or because no
+            route describes it. The message names the nearest attributes.
+        DictionaryKeyError: The attribute names a key the document does not
+            carry.
+        DictionaryNotFoundError: Nothing readable is at that path.
+        DictionaryParseError: The bytes there are not a readable document.
+
+    The raising counterpart of reading `trace_record`, for a caller that knows
+    the attribute exists and wants the failure to be loud if it does not.
+    """
+    traces = _traces(record, None, False)
+    layout = record if isinstance(record, type) else type(record)
+    for trace in traces:
+        if trace.attribute != attribute:
+            continue
+        if trace.dictionary_key is not None:
+            return get_entry(trace.dictionary_key, path=path)
+        raise DictionaryLookupError(
+            f"{layout.__module__}.{layout.__qualname__}.{attribute} carries "
+            "no dictionary key: "
+            + (
+                f"it is a group item holding {trace.group_type.__name__}, "
+                "whose own fields carry the keys - trace that type instead."
+                if trace.group_type is not None
+                else "no route describes it. `RECORD_FIELD_ROUTES` lists "
+                "every convention that is searched."
+            )
+        )
+    raise _no_such_attribute(
+        layout, attribute, tuple(trace.attribute for trace in traces)
+    )
+
+
+def _no_such_attribute(
+    layout: type, attribute: str, candidates: tuple[str, ...]
+) -> DictionaryLookupError:
+    """Return the failure for an attribute a record layout does not declare.
+
+    Args:
+        layout: The record class.
+        attribute: The name that matched nothing, quoted back verbatim.
+        candidates: Every attribute the layout does declare, in declaration
+            order.
+
+    Returns:
+        The exception, for the caller to raise. Built here rather than raised
+        here so the caller's control flow stays visible at the call site.
+
+    The message teaches the same lesson `DictionaryKeyError` does one layer
+    down: the fix is to correct the name, never to hand-write the field's
+    metadata (rule R-5).
+    """
+    suggestions = _nearest(attribute, candidates)
+    nearest = (
+        f"Nearest attributes: {', '.join(suggestions)}\n"
+        if suggestions
+        else f"This layout declares {len(candidates)} attributes, none of "
+        "them close.\n"
+    )
+    return DictionaryLookupError(
+        f"{layout.__module__}.{layout.__qualname__} declares no attribute "
+        f"{attribute!r}.\n"
+        f"{nearest}"
+        "Attribute names are the record module's own, in the copybook's "
+        "declaration order; `trace_record` lists every one of them with the "
+        "route that carries its key."
+    )
+
+
+def cite_field(
+    record: RecordLayout | type[RecordLayout],
+    attribute: str,
+    *,
+    path: Path | None = None,
+) -> str:
+    """Return the one-line provenance citation for one record attribute.
+
+    Args:
+        record: A record dataclass, or an instance of one.
+        attribute: The Python attribute name.
+        path: An explicit artifact path, or None for the repository's own.
+
+    Returns:
+        Exactly what `cite` returns for that attribute's key.
+
+    Raises:
+        DictionaryLookupError: The layout declares no such attribute, or it
+            carries no key.
+        DictionaryKeyError: The attribute names a key the document does not
+            carry.
+        DictionaryNotFoundError: Nothing readable is at that path.
+        DictionaryParseError: The bytes there are not a readable document.
+
+    `cite` is rule R-5 made usable from a key; this is the same thing made
+    usable from a Python attribute, which is where a reader actually starts.
+    """
+    return cite(entry_for_field(record, attribute, path=path).key, path=path)
+
+
 #  PUBLIC SURFACE
 #  The failures first, then the accessors, each group in alphabetical order. A
 #  tuple rather than a list, so the surface cannot be reordered, extended or
@@ -2117,6 +2699,12 @@ __all__: Final[tuple[str, ...]] = (
     "TableRecord",
     "Usage",
     "UsageDeclaredAt",
+    # This module's own record-tracing surface. Not re-exports: a trace is a
+    # statement about a Python record layout, which the document knows nothing
+    # about, so these are defined here and belong here.
+    "FieldTrace",
+    "RECORD_FIELD_ROUTES",
+    "RecordLayout",
     # The failures.
     "DictionaryError",
     "DictionaryKeyError",
@@ -2128,6 +2716,7 @@ __all__: Final[tuple[str, ...]] = (
     # The accessors.
     "bridge_for",
     "cite",
+    "cite_field",
     "clear_cache",
     "column_for",
     "copybook_field_for",
@@ -2138,7 +2727,9 @@ __all__: Final[tuple[str, ...]] = (
     "entries_for_copybook_file",
     "entries_for_copybook_record",
     "entries_for_table",
+    "entry_for_field",
     "entry_keys",
+    "field_keys_for",
     "find_entry",
     "find_table",
     "get_entry",
@@ -2150,4 +2741,5 @@ __all__: Final[tuple[str, ...]] = (
     "table_names",
     "tables",
     "tables_for_handler",
+    "trace_record",
 )

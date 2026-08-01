@@ -89,6 +89,43 @@ columns - finds ``char`` 177, ``decimal`` 128, ``tinyint`` 99, ``int`` 65,
 or ``REAL`` anywhere in ``mysql/ACASDB.sql``. So the converter has exactly
 three families to serve and any appearance of a fourth is a fault, not a case.
 
+THE CONVERTER GUARDS THE WAY IN; THE WAY OUT IS THE CALLER'S (rules R-2, R-4)
+============================================================================
+Everything above is about values arriving. Values LEAVING are not this
+module's to quantize, and the asymmetry is a trap worth stating plainly here,
+because this is the file a handler author reads before writing an ``INSERT``.
+
+Hand the server a ``Decimal`` carrying more places than the column declares
+and the server stores it ROUNDED HALF AWAY FROM ZERO. Measured on this
+project's own MariaDB 10.11.7 against ``decimal(10,2)``:
+
+    value handed over     server stores      COBOL un-ROUNDED store
+    ------------------    -------------      ----------------------
+    1.005                 1.01               1.00
+    2.675                 2.68               2.67
+    -1.005                -1.01              -1.00
+    0.125                 0.13               0.12
+
+Every one of those four disagrees, and the disagreement is exactly COBOL's
+``ROUNDED`` semantics - ``decimal.ROUND_HALF_UP``, which
+``acas_posting.cobol.arithmetic`` reserves for the FIVE sites in the whole
+in-scope cycle that write the word (Agent Action Plan section 0.6.1:
+``[general/gl080.cbl:L328]``, ``[general/gl051.cbl:L791]``,
+``[general/gl051.cbl:L796]``, ``[irs/irs030.cbl:L1551]`` and
+``[irs/irs030.cbl:L1562]``). Every other store in the cycle TRUNCATES toward
+zero. So a handler that lets the server do the quantizing turns the exception
+into the default and silently rounds a figure the COBOL truncates - a defect
+FIXED, which rule R-4 counts as a failure, and one that surfaces as a single
+wrong penny in a state diff with the arithmetic layer demonstrably correct.
+
+The obligation therefore sits with the caller: every monetary and quantity
+value must already be at its column's declared scale, quantized through
+``acas_posting.cobol.arithmetic`` against the field's descriptor, BEFORE it is
+bound as a statement parameter. This module cannot enforce that - it never
+sees which field a parameter belongs to - so it is recorded here rather than
+left to be discovered. Nothing in this file rounds, truncates, pads or coerces
+an outbound value, by design.
+
 AUTOCOMMIT IS ON, PER STATEMENT, AND THERE IS NO TRANSACTION SCOPE
 ==================================================================
 This is counted from the frozen source, not assumed. A census over all twenty

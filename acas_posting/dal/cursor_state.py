@@ -52,9 +52,12 @@ applied, because a reader checking L118 would find nothing there.
 difference, each of which a merely-equivalent-SQL implementation would lose:
 
 * The two-stage COBOL shape - issue the statement, test the row count, then
-  fetch - is reproduced as issue, test ``rowcount``, then ``fetchone``, because
-  the COBOL branches DIFFERENTLY at each stage and returns a different
-  ``We-Error`` from each.
+  fetch - is reproduced as issue, STORE THE RESULT AND COUNT THE SNAPSHOT, then
+  fetch from it, because the COBOL branches DIFFERENTLY at each stage and
+  returns a different ``We-Error`` from each. The count NEVER comes from the
+  driver's own ``rowcount``; the paragraph above :func:`_column_names` records
+  the frozen sequence that settles it and the measurement that makes any other
+  reading a defect.
 * ``START`` positions but does NOT fetch [common/glpostingMT.cbl:L795-L800], so
   the first ``READ NEXT`` after it must return the row AT the position, not the
   one after it. Modelled by leaving the stored result's first record UNFETCHED -
@@ -559,16 +562,17 @@ class DatabaseCursor(Protocol):
     positioning logic testable with no database at all, which is what lets the
     parity tests run anywhere.
 
-    ``rowcount`` is required because it is the direct analogue of the bridge's
-    ``WS-MYSQL-Count-Rows``, which the COBOL tests SEPARATELY from the fetch at
-    [common/glpostingMT.cbl:L499], [:L767], [:L771] and [:L633]. A driver that
-    cannot report it returns ``-1``, and :func:`_count_rows` treats that as
-    "unknown" and defers to the fetch, which is the only safe reading.
+    ``rowcount`` IS DELIBERATELY NOT A MEMBER, although the bridge's
+    ``WS-MYSQL-Count-Rows`` looks like its analogue. The count the COBOL tests
+    separately from the fetch at [common/glpostingMT.cbl:L499], [:L767],
+    [:L771] and [:L633] is ``MySQL_num_rows`` over a STORED result, so this
+    module derives it from the snapshot it materialised - see the paragraph
+    above :func:`_column_names` for the frozen sequence and for the measurement
+    that removed the driver's ``rowcount`` from the fetch decision. Requiring a
+    member nothing reads would put a demand on ``connection.py``'s driver
+    choice for no benefit, so the protocol stays at the two verbs and the one
+    property the positioning logic actually uses.
     """
-
-    @property
-    def rowcount(self) -> int:
-        """Rows the last statement produced, or ``-1`` when unknown."""
 
     @property
     def description(self) -> Sequence[Sequence[object]] | None:
@@ -2459,40 +2463,43 @@ class CursorOutcome:
 
 #  INTERNAL HELPERS
 
-#: The driver's "row count unknown" sentinel. `WS-MYSQL-Count-Rows` in the
-#: bridge is always a real count because `mysql_store_result` has already run;
-#: an unbuffered Python cursor reports -1 instead, and the only safe reading of
-#: "unknown" is to skip the count test and let the fetch decide.
-#:
-#: The cursor WALK no longer needs this: `read_next` and `start` count the stored
-#: result they materialised, which is always known and is exactly what
-#: `mysql_num_rows` reports. It remains in force for `read_indexed`, whose
-#: exact-key fetch never stores a result.
-_ROWCOUNT_UNKNOWN: Final[int] = -1
-
-
-def _count_rows(cursor: DatabaseCursor) -> int | None:
-    """Return the row count the last statement produced, or ``None`` if unknown.
-
-    The analogue of ``WS-MYSQL-Count-Rows``, which the bridge tests SEPARATELY
-    from the fetch and branches on differently at each stage
-    [common/glpostingMT.cbl:L499, :L633, :L767, :L771]. Reproducing the two-stage
-    shape is what "emulated, not approximated" asks for; collapsing it would
-    merge two COBOL paths that return different ``We-Error`` values.
-
-    Args:
-        cursor: The cursor the statement was issued on.
-
-    Returns:
-        The count, or ``None`` when the driver cannot report one.
-    """
-    try:
-        count = cursor.rowcount
-    except AttributeError:  # pragma: no cover - protocol requires it
-        return None
-    if count is None or count == _ROWCOUNT_UNKNOWN:
-        return None
-    return int(count)
+# WHY `WS-MYSQL-Count-Rows` IS NEVER TAKEN FROM THE DRIVER'S `rowcount`
+#
+# ALL THREE VERBS COUNT THE STORED RESULT, and they must, for two independent
+# reasons - one from the frozen source, one measured on the pinned driver.
+#
+# 1. THE FROZEN SEQUENCE. Every statement-issuing path in the bridge performs
+#    `MYSQL-1210-COMMAND` and then, IMMEDIATELY, `MYSQL-1220-STORE-RESULT` -
+#    for the sequential read at [common/glpostingMT.cbl:L488-L489], for the
+#    START at [:L762-L763] and, no differently, for the indexed read at
+#    [:L628-L629]. `Mysql-1210-Command` does write `WS-Mysql-Count-Rows`, from
+#    `MySQL_affected_rows` [copybooks/mysql-procedures.cpy:L178], but
+#    `Mysql-1220-Store-Result` then OVERWRITES it from `MySQL_num_rows` over the
+#    materialised result [:L187-L192]. So the value every `if
+#    WS-MYSQL-Count-Rows` test reads is the size of the stored snapshot, and the
+#    affected-rows reading - the one a DB-API `rowcount` corresponds to - has
+#    already been discarded by the time any branch looks at it. An indexed read
+#    is not an exception to this: `ba050` stores its result like everything else
+#    and `ba998-Free` releases it [:L1023-L1033].
+#
+# 2. THE MEASUREMENT, which turns the point from tidiness into correctness. On
+#    the pinned driver (`mysql-connector-python` 26.7.0, C extension, and the
+#    UNBUFFERED cursor `connection.py` opens) `cursor.rowcount` is `0`
+#    immediately after `execute` of a `SELECT` and becomes the true count only
+#    AFTER the first fetch. An earlier revision of this module gated the fetch
+#    on that value in `read_indexed` alone, and the consequence was not a
+#    rounding error but a silent one: EVERY PRESENT ROW WAS REPORTED ABSENT,
+#    with a status triple byte-identical to a genuine miss, and the server's row
+#    was left unread on the connection - which then made the NEXT `read_next`
+#    return the clean-looking end of file of anomaly A11, so a posting walk
+#    would stop early and report success. Some drivers report `-1` for "not yet
+#    known" and some `0`; the sentinel is unusable either way, because the honest
+#    count only exists once the rows have been drained.
+#
+# The lesson encoded here: draining is not an optimisation to be avoided, it is
+# what the frozen `mysql_store_result` DOES, and it is also what leaves the
+# connection usable. Anything that re-introduces a `cursor.rowcount` test in
+# front of a fetch re-introduces both defects.
 
 
 def _column_names(cursor: DatabaseCursor) -> tuple[str, ...]:
@@ -3379,6 +3386,18 @@ def read_indexed(
     and nothing more [:L600-L611, :L623-L627]. The key is unique, so one row is the
     most that can qualify; either clause would be inventing statement text.
 
+    IT STORES THE RESULT LIKE EVERY OTHER VERB. The paragraph performs
+    ``MYSQL-1210-COMMAND`` and then ``MYSQL-1220-STORE-RESULT``
+    [common/glpostingMT.cbl:L628-L629], the same pair the sequential read
+    [:L488-L489] and the ``START`` [:L762-L763] perform, so the count it tests is
+    ``MySQL_num_rows`` over a materialised snapshot
+    [copybooks/mysql-procedures.cpy:L187-L192] and all three verbs share ONE
+    counting strategy. The count is never taken from the driver's ``rowcount``;
+    the paragraph above :func:`_column_names` records both the frozen sequence
+    and the measurement that makes any other reading a silent defect. Storing
+    also drains the result, so this verb leaves the connection usable on every
+    exit - the hit, the miss and the driver failure alike.
+
     IT ALWAYS CLEARS THE SEQUENTIAL CURSOR. Every exit is ``go to ba998-Free`` -
     not found [:L635], both fetch failures [:L674, :L681] and success [:L689] - and
     ``ba998-Free`` ends with ``set Cursor-Not-Active to true`` [:L1033]. So an
@@ -3510,8 +3529,25 @@ def read_indexed(
 
     try:
         cursor.execute(statement, parameters)
+        # `PERFORM MYSQL-1220-STORE-RESULT THRU MYSQL-1239-EXIT` follows the
+        # command IMMEDIATELY [common/glpostingMT.cbl:L628-L629], exactly as it
+        # does for the sequential read [:L488-L489] and the START [:L762-L763].
+        # So this verb materialises the WHOLE qualifying result and counts THAT
+        # with `MySQL_num_rows` [copybooks/mysql-procedures.cpy:L187-L192] -
+        # never the driver's own `rowcount`, for the two reasons recorded above
+        # :func:`_column_names`. Draining here is also what leaves the
+        # connection usable: a result left unread would make the caller's next
+        # statement fail and its next `read_next` report a false end of file.
+        count = state.store_result(_store_result(cursor))
     except Exception as error:  # any driver error takes this path - see below
         # ANOMALY A14: `(21, 911)` - 21 overwrites the 99, 911 survives.
+        # A FAILURE OF EITHER CALL LANDS HERE, and the frozen source is why:
+        # `Mysql-1100-Db-Error` is performed both from `Mysql-1210-Command` on a
+        # non-zero `MySQL_query` return [copybooks/mysql-procedures.cpy:L165-L177]
+        # and from `Mysql-1220-Store-Result` when the result pointer comes back
+        # null [:L188-L189]. Neither performs a `go to`, so in both cases the
+        # count is left at zero and `ba050`'s first guard's `move 21 to fs-Reply`
+        # [common/glpostingMT.cbl:L634] overwrites the 99 while the 911 survives.
         exception_name, category, detail = _driver_failure_fields(error)
         _LOG.warning(
             "fn-read-indexed on %s.%s failed at the driver; the frozen source "
@@ -3539,11 +3575,19 @@ def read_indexed(
             outcome.apply_to(file_access)
         return outcome
 
-    count = _count_rows(cursor)
-    row = None if count == 0 else _fetch_one_row(cursor)
+    # `if WS-MYSQL-Count-Rows = zero  move 21 to fs-Reply  go to ba998-Free`
+    # [common/glpostingMT.cbl:L633-L636] is the FIRST guard and, per anomaly A13
+    # in this function's docstring, the only reachable one - so the fetch is
+    # reached only when the snapshot holds a record. `MySQL_fetch_record` then
+    # takes that record
+    # [common/glpostingMT.cbl:L642-L658]; an equality test on a key of reference
+    # cannot qualify a second one, and the bridge fetches exactly once.
+    row = state.fetch_record() if count > 0 else None
 
     # Every exit below frees the cursor, because every exit in the paragraph is
-    # `go to ba998-Free` [common/glpostingMT.cbl:L635, :L674, :L681, :L689].
+    # `go to ba998-Free` [common/glpostingMT.cbl:L635, :L674, :L681, :L689]. The
+    # snapshot this verb just stored goes with it, which is what makes an indexed
+    # read taken mid-walk destroy the walk's position.
     state.free()
 
     if row is None:
