@@ -1,0 +1,2080 @@
+"""ACAS relational connection - the native reimplementation of the open path.
+
+WHAT THIS MODULE OWNS
+=====================
+This module is the single place in ``acas_posting`` that opens a connection to
+the frozen MySQL/MariaDB schema, and the single place that decides how a value
+coming back from that database is turned into a Python object. Nothing else in
+the package connects, and nothing else configures conversion.
+
+Agent Action Plan section 0.4.1.5 states the assignment, summarised here
+rather than transcribed: build the connection from the ``RDB-Data`` block -
+schema, user, password, host, socket and port, cited there as
+``copybooks/wsfnctn.cob`` L57-L64 and corrected below to L56 plus L57-L62;
+use per-statement autocommit exactly as the COBOL does; use NO connection
+pool; and pin the converter so that numeric columns arrive as ``Decimal`` or
+``int``. Each of the four is discharged in its own section below.
+
+WHAT IT REPRODUCES, PARAGRAPH BY PARAGRAPH  (RULE R-5)
+======================================================
+The COBOL reaches MySQL through a copybook of shared paragraphs that every
+generated bridge includes, ``copybooks/mysql-procedures.cpy``. Three of those
+paragraphs are the open/close path, and each has a function here named after
+it:
+
+===================================== ========================================
+COBOL paragraph                       Python function
+===================================== ========================================
+``Mysql-1000-Open`` [:L63-L85]        :func:`mysql_1000_open`
+``Mysql-1090-Exit`` [:L87-L88]        :func:`mysql_1090_exit`
+``Mysql-1980-Close`` [:L264-L265]     :func:`mysql_1980_close`
+``Mysql-1999-Exit`` [:L267-L268]      :func:`mysql_1999_exit`
+===================================== ========================================
+
+``Mysql-1100-Db-Error`` [:L96-L128] is NOT reproduced here. It is already
+owned by ``dal/status.py`` as :func:`~acas_posting.dal.status
+.mysql_1100_db_error`, and this module calls it rather than restating the
+mapping, so the ``(99, 911)`` status pair has exactly one implementation.
+
+RULE R-1 - NO COBOL AT RUNTIME
+==============================
+Rule R-1, verbatim:
+
+    "The Python implementation must not execute, embed, or shell out to the
+    COBOL programs. COBOL is the specification for the migration, not a
+    runtime dependency of the result. The shipped artifact must run on a host
+    with no COBOL compiler and no COBOL runtime present."
+
+``Mysql-1000-Open`` reaches the database through three foreign ``CALL``
+statements - ``"MySQL_init"`` [:L66], ``"MySQL_real_connect"`` [:L72] and
+``"MySQL_selectdb"`` [:L82] - which resolve into the hand-written C interface
+object that every bridge, handler and loader links. That object's file name is
+deliberately not written anywhere in this file, so that a scan of the shipped
+package for it returns nothing at all. The three calls are reimplemented
+natively with ``mysql-connector-python``: this module starts no process, loads
+no shared library of its own and links against no C interface.
+
+RULE R-2 - ZERO BINARY FLOATING POINT: THE PINNED CONVERTER
+===========================================================
+Rule R-2, verbatim:
+
+    "No accounting value may pass through a binary floating-point type at any
+    point - not in computation, not in storage, not in transport."
+
+and, naming THIS FILE by hand:
+
+    "`acas_posting/dal/connection.py` additionally pins the converter
+    explicitly rather than relying on the default."
+
+That is the reason :class:`AcasConverter` exists and is passed to every
+connection as ``converter_class``. Relying on the driver's default is the
+named failure mode: a default that returned a binary floating-point value for
+one ``DECIMAL`` column would corrupt every posted figure in the state diff
+while leaving the arithmetic layer, the record layer and the program layer all
+demonstrably correct - the hardest possible place to notice the fault.
+
+Two independent enforcement mechanisms are used, because one that can be
+silently disabled by a driver upgrade is not enforcement:
+
+1. **The converter itself.** :class:`AcasConverter` overrides every hook the
+   frozen schema can reach, and the two hooks it must never reach - the
+   ``FieldType.FLOAT`` and ``FieldType.DOUBLE`` hooks - raise
+   :class:`BinaryFloatingPointError` instead of returning a value.
+2. **A connect-time assertion.** :func:`mysql_1000_open` runs
+   :data:`CONVERTER_PROBE_STATEMENT` and verifies both the returned Python
+   types and the converter's own hook table, raising
+   :class:`ConverterPinningError` if either has drifted.
+
+The schema makes this tractable. A census of the 22 in-scope tables - 513
+columns - finds ``char`` 177, ``decimal`` 128, ``tinyint`` 99, ``int`` 65,
+``mediumint`` 21, ``smallint`` 20 and ``bigint`` 3, and ZERO ``FLOAT``,
+``DOUBLE`` or ``REAL`` columns anywhere in ``mysql/ACASDB.sql``. So the
+converter has exactly three families to serve, and any appearance of the
+fourth is a fault rather than a case to handle.
+
+AUTOCOMMIT IS ON, PER STATEMENT, AND THERE IS NO TRANSACTION SCOPE
+=================================================================
+This is proven from the frozen source, not assumed. A census over all twenty
+in-scope bridge programs - ``systemMT``, ``dfltMT``, ``finalMT``, ``sys4MT``,
+``nominalMT``, ``glpostingMT``, ``glbatchMT``, ``slpostingMT``, ``salesMT``,
+``valueMT``, ``analMT``, ``slinvoiceMT``, ``otm3MT``, ``purchMT``,
+``plinvoiceMT``, ``otm5MT``, ``irsnominalMT``, ``irsdfltMT``,
+``irspostingMT`` and ``irsfinalMT`` - counts ZERO occurrences of ``COMMIT``,
+``ROLLBACK`` or ``START TRANSACTION`` in every one of them. The corroboration
+comes from the other direction: the LOADERS do turn autocommit off, and
+``common/glbatchLD.cbl:L9-L12`` says so in its own header while recording that
+the server default is ON.
+
+So the bridges run under the server default and every statement is durable the
+moment it succeeds. This module therefore passes ``autocommit=True`` and
+publishes no way to start, end or abandon a transaction. That absence is
+load-bearing rather than incidental: it is exactly why Agent Action Plan
+section 0.6.5 can say of the file-abandoning rejection path, verbatim, "The
+partial state is therefore committed, not rolled back."
+
+THERE IS NO CONNECTION POOL
+===========================
+The plan forbids threads, event loops, process-level parallelism and any
+connection pool; execution is strictly sequential, matching the single-threaded
+COBOL. The frozen source agrees structurally: a bridge opens a connection when
+it is asked to open a file [common/glpostingMT.cbl:L389-L419] and closes it
+when it is asked to close one [common/glpostingMT.cbl:L433-L443]. There is no
+sharing, no reuse across programs and no borrow-and-return.
+
+WHERE THE CREDENTIALS COME FROM, AND WHY ONLY ONCE
+==================================================
+All six members of ``03 RDB-Data.`` are declared ``value spaces``
+[copybooks/wsfnctn.cob:L57-L62], so THERE IS NO CREDENTIAL IN THE FROZEN
+SOURCE. The values arrive from the ``SYSTEM-REC`` row, copied field by field
+by the file handler at [common/acas008.cbl:L558-L563] - and copied there
+inside a first-call-only guard, which is anomaly A-1 below.
+
+Consequently this module reads NOTHING from the process environment, no
+parameter file and no ambient source. Rule R-6 requires two runs of one
+scenario to be byte-identical, and an ambient fallback would let them differ.
+The only input is the ``SystemRecord`` the caller already holds.
+
+ANOMALIES REPRODUCED, NOT FIXED  (RULE R-4)
+===========================================
+A-1  **The credentials are loaded exactly once per run and never re-read.**
+     The six moves sit inside ``if A = zero`` [common/acas008.cbl:L526],
+     whose own comment reads "Test on very first call only  (So do NOT use
+     var A & B again)" [:L518] and, at the moves themselves, "Load up the DB
+     settings from the system record as its not passed on / hopefully once is
+     enough  :)" [:L555-L556]. ``A`` is assigned before the comparison, so
+     from the second call onward the whole block - record-length check AND
+     credential load - is skipped. A later change to the ``SYSTEM-REC`` row
+     therefore cannot affect the run that read it.
+     Reproduced by :func:`load_rdb_data_once`.
+
+A-2  **Every connect failure is reported as ``(FS-Reply 99, We-Error 911)``,
+     whichever step failed.** All three arms of ``Mysql-1000-Open`` funnel
+     into the same error paragraph, whose last two statements are unguarded:
+     ``move 99 to fs-Reply`` [copybooks/mysql-procedures.cpy:L127] and
+     ``move 911 to We-Error`` [:L128]. The step is distinguished ONLY by
+     ``ws-No-Paragraph``, which carries 101, 102 or 103. Reproduced by
+     :func:`mysql_1000_open` delegating to ``status.mysql_1100_db_error``.
+     Note that 911's documented meaning, "Rdb Error during initializing,
+     possibly can not connect to database" [common/glpostingMT.cbl:L143-L144],
+     is actually accurate on this path - unlike everywhere else it is used.
+
+A-3  **The user name travels in a variable named after something else.** The
+     ``MySQL_real_connect`` argument list is host, user, password, base, port,
+     socket, and its second argument is ``Ws-Mysql-Implementation``
+     [copybooks/mysql-procedures.cpy:L73], declared at
+     [copybooks/mysql-variables.cpy:L88]. The bridge loads ``DB-UName`` into
+     it [common/glpostingMT.cbl:L402-L404], so the variable holds the user
+     name and the name is simply wrong. Nothing in the COBOL is renamed; the
+     misnaming is recorded here so a reviewer diffing argument lists is not
+     misled.
+
+A-4  **A malformed port is not an error - it is a different port.** The C
+     interface converts the port characters with a bare ``atoi`` and passes
+     the result straight to ``mysql_real_connect``. ``atoi`` cannot fail: it
+     takes the leading digits and yields 0 if there are none. So a
+     ``DB-Port`` of ``"33o6"`` makes the compiled program connect to port 33,
+     and one of ``"abcde"`` makes it use the default port. NO PORT VALIDATION
+     IS PERFORMED HERE - adding one would be a new validation (rule R-3) and a
+     defect fixed (rule R-4). Reproduced by :func:`_atoi`.
+
+A-5  **No port above 9999 can be expressed.** ``DB-Port`` is ``pic x(5)``
+     [copybooks/wsfnctn.cob:L62] but the working-storage item the bridge
+     STRINGs it into is ``pic x(4)``
+     [copybooks/mysql-variables.cpy:L91], and ``STRING`` stops when its
+     receiver is full [common/glpostingMT.cbl:L410-L412]. A five-digit port
+     silently loses its last digit: ``"13306"`` becomes 1330. Reproduced by
+     :func:`connection_parameters`, which narrows before converting.
+
+A-6  **Three literal socket values mean "no socket at all".** Before calling
+     ``mysql_real_connect`` the C interface compares the socket item against
+     ``"0"``, ``"null"`` and ``"NULL"`` and substitutes a null pointer for any
+     of them, so those spellings behave exactly like a blank item rather than
+     naming a socket file. Reproduced via :data:`_SOCKET_MEANS_NONE`.
+
+A-7  **Multi-statement execution is off, so a stray second statement is a
+     syntax error rather than a silent extra execution.** The C interface
+     passes a LITERAL ZERO as ``mysql_real_connect``'s client-flag word, so
+     CLIENT_MULTI_STATEMENTS is never negotiated. ``mysql-connector-python``
+     enables it by default, which would diverge; :func:`mysql_1000_open`
+     unsets it. This is a case where the DRIVER, not the COBOL, carried the
+     surprise, and rule R-6 settles it in the compiled program's favour.
+
+DELIBERATE OMISSIONS, RECORDED AS OMISSIONS  (RULE R-5)
+=======================================================
+O-1  **The trailing ``x"00"`` on every parameter.** The copybook's own header
+     instructs, verbatim [copybooks/mysql-procedures.cpy:L58-L61]:
+
+         *>      The name of your data base followed by hex 00
+         *>        needs to be moved into ws-mysql-base-name
+         *>        before execution.  example:
+         *>          move "MYNAME" & x"00" to ws-mysql-base-name
+
+     and each bridge duly appends it [common/glpostingMT.cbl:L394-L416]. The
+     NUL is the C-string terminator required by the foreign interface. Python
+     strings carry their own length, and the driver builds the wire protocol
+     itself, so there is nothing for the terminator to do. It is dropped -
+     representation only, no observable effect. What the same statements do
+     carry that IS observable is the ``delimited by space`` clause, and that
+     is reproduced: see :func:`cobol_string_delimited_by_space`.
+
+O-2  **The reset of the two lock-ladder counters.** ``Mysql-1000-Open`` opens
+     by clearing ``WS-Mysql-Time-Step`` and ``WS-SQL-Retry``
+     [copybooks/mysql-procedures.cpy:L64-L65], and it is the only place either
+     is cleared. Both belong exclusively to ``Mysql-1300-DB-Error`` [:L209],
+     the backoff ladder that ``dal/status.py`` records as anomaly N1: dead
+     code, never performed by any in-scope bridge. Their own declaration says
+     as much - "NOT YET IN USE AS TESTING IS NEEDED"
+     [copybooks/mysql-variables.cpy:L99-L100]. Clearing a counter that nothing
+     reads has no observable effect, so no counter is modelled. The fact is
+     recorded here rather than left as a silent gap. For the same reason this
+     module adds NO retry of any kind - a retry would be anomaly N1 fixed by
+     another route, and rule R-4 makes a defect fixed a failure.
+
+O-3  **``Mysql-1110-Report-Problem``** [copybooks/mysql-procedures.cpy:L130-
+     L137] displays two messages and blocks on ``accept ws-reply``. Per Agent
+     Action Plan section 0.3.4 a display with no database effect becomes a log
+     record and an acknowledgement pause is dropped. ``dal/status.py`` already
+     emits that record; this module adds none of its own for the same event.
+
+O-4  **No SQLAlchemy Engine is exposed.** SQLAlchemy is pinned and permitted
+     at Core level, but an ``Engine`` owns a connection pool by construction,
+     and rule R-3 forbids one. Naming a pool class to suppress it would still
+     be naming a pool class. The connector is therefore the sole path, which
+     is also what Agent Action Plan section 0.5.1 calls "the primary database
+     path". Any future Core path must take its connection from
+     :func:`mysql_1000_open` so that the pinned converter still applies.
+
+LINE-NUMBER CORRECTIONS
+=======================
+Three citations in the inputs are off by a line or more against the checkout,
+and the verified spans are used throughout this file:
+
+============================================ ================= ==============
+Citation                                     As given          Verified
+============================================ ================= ==============
+``copybooks/wsfnctn.cob`` ``RDB-Data``        L57-L64           L56 + L57-L62
+``copybooks/mysql-procedures.cpy`` open       L62-L87           L63-L85
+``common/acas008.cbl`` credential moves       L557-L562         L558-L563
+============================================ ================= ==============
+
+``copybooks/wsfnctn.cob`` is 117 lines long; L63-L64 are comments, so the
+group header is L56 and its six elementary items are L57-L62.
+``Mysql-1000-Open`` is labelled at L63 and its last statement is at L85, with
+``Mysql-1090-Exit`` at L87. The six credential moves are L558-L563, closed by
+``end-if`` at L564.
+
+WHAT THIS MODULE MUST NOT DO
+============================
+* No DDL of any kind, and no schema-generating machinery - rule R-3. The
+  harness applies ``mysql/ACASDB.sql`` verbatim and nothing here alters it.
+* No ORM entity layer, no declarative schema metadata and no reflection - a
+  reflected model would make statement text depend on discovered information
+  and would give this layer a schema it must not own.
+* No session-shaping statement the COBOL does not issue. A census of the
+  twenty bridges finds none, so none is issued.
+* No clock read, no nondeterministic source, no sleep - rule R-6.
+* No work at import time. Importing this module opens no socket, reads no
+  file and configures no logger.
+"""
+
+from __future__ import annotations
+
+import decimal
+import logging
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass
+from types import MappingProxyType
+from typing import Any, Final, NoReturn
+
+import mysql.connector
+from mysql.connector import FieldType, conversion, errorcode
+from mysql.connector.abstracts import (
+    MySQLConnectionAbstract,
+    MySQLCursorAbstract,
+)
+from mysql.connector.constants import ClientFlag
+
+from acas_posting.dal.status import (
+    ConnectStep,
+    DbErrorStatus,
+    FsReply,
+    WeError,
+    mysql_1100_db_error,
+)
+from acas_posting.records.file_access import LoggingData, RdbData
+from acas_posting.records.system_record import SystemRecord
+
+__all__: Final[tuple[str, ...]] = (
+    # Ordered isort-style to match `dal/status.py`: the frozen tables and
+    # constants first, then the classes, then the behaviour, each group
+    # sorted. Neither this ordering nor `status.py`'s is observable.
+    "CONVERTER_PROBE_EXPECTED_DECIMAL_TEXT",
+    "CONVERTER_PROBE_STATEMENT",
+    "IDENTIFIER_QUOTE",
+    "PINNED_CONVERTER_HOOKS",
+    "REJECTED_CONVERTER_HOOKS",
+    "SCHEMA_MAX_DECIMAL_PRECISION",
+    "SCHEMA_MAX_DECIMAL_SCALE",
+    "SELECT_DB_ERRNOS",
+    "AcasConverter",
+    "BinaryFloatingPointError",
+    "ConverterPinningError",
+    "OpenOutcome",
+    "cobol_string_delimited_by_space",
+    "connection_parameters",
+    "execute_statement",
+    "load_rdb_data_once",
+    "mysql_1000_open",
+    "mysql_1090_exit",
+    "mysql_1980_close",
+    "mysql_1999_exit",
+    "quote_identifier",
+    "rdb_data_from_system_record",
+    "rdb_data_is_loaded",
+    "reset_rdb_data_cache",
+    "transport_decimal_context",
+)
+
+#: Module logger. A library module attaches no handler and configures no root
+#: logger; the application decides where diagnostics go. This mirrors
+#: `dal/status.py`, and it is why no logging configuration call appears here.
+_LOG: Final[logging.Logger] = logging.getLogger(__name__)
+
+
+# =============================================================================
+#  THE FROZEN SCHEMA, AS MEASURED  -  THE FACTS THE CONVERTER RESTS ON
+#
+#  Measured over the 22 in-scope tables of `mysql/ACASDB.sql`, whose header
+#  records the producing server as `MariaDB dump 10.19  Distrib
+#  10.11.7-MariaDB` [mysql/ACASDB.sql:L1] for database `ACASDB` [:L3].
+# =============================================================================
+
+#: Widest ``DECIMAL`` precision in any in-scope column. Measured, not chosen:
+#: the 128 in-scope ``decimal`` columns use exactly seven distinct forms -
+#: ``(4,2)``, ``(5,0)``, ``(5,2)``, ``(6,2)``, ``(9,2)``, ``(10,2)`` and
+#: ``(14,2)`` - so 14 significant digits holds any stored value exactly.
+#: e.g. `INPUT-GROSS` decimal(14,2) and `LEDGER-BALANCE` decimal(10,2).
+SCHEMA_MAX_DECIMAL_PRECISION: Final[int] = 14
+
+#: Widest ``DECIMAL`` scale in any in-scope column. Two, throughout - these
+#: are money and quantity fields in a pounds-and-pence accounting system, and
+#: the one zero-scale form ``(5,0)`` is narrower still.
+SCHEMA_MAX_DECIMAL_SCALE: Final[int] = 2
+
+#: The backtick. MySQL and MariaDB quote identifiers with it, and EVERY ACAS
+#: table and column name needs it - see :func:`quote_identifier`.
+IDENTIFIER_QUOTE: Final[str] = "`"
+
+#: The driver field types the frozen schema can produce, mapped to the
+#: converter hook that must be pinned for each. The hook names are not
+#: invented: ``conversion.MySQLConverter.to_python`` builds its dispatch table
+#: by lower-casing each ``FieldType`` name and wrapping it as
+#: ``_<name>_to_python``, so this table IS the driver's own naming rule made
+#: explicit.
+#:
+#: Coverage, against the census in the module docstring:
+#:
+#: * ``DECIMAL`` and ``NEWDECIMAL`` - the 128 ``decimal`` columns. MariaDB
+#:   sends ``NEWDECIMAL`` on the wire; ``DECIMAL`` is the pre-5.0 form and is
+#:   pinned too so that no server version can route around the guarantee.
+#: * ``TINY``, ``SHORT``, ``INT24``, ``LONG``, ``LONGLONG`` - the 99
+#:   ``tinyint``, 20 ``smallint``, 21 ``mediumint``, 65 ``int`` and 3
+#:   ``bigint`` columns, in that order.
+#: * ``STRING`` - the 177 ``char`` columns. ``VAR_STRING`` is pinned as well:
+#:   the schema holds zero ``varchar`` columns, but a ``CAST(... AS CHAR(n))``
+#:   expression reports ``VAR_STRING``, and the connect-time probe uses one.
+PINNED_CONVERTER_HOOKS: Final[Mapping[int, str]] = MappingProxyType(
+    {
+        FieldType.DECIMAL: "_decimal_to_python",
+        FieldType.NEWDECIMAL: "_newdecimal_to_python",
+        FieldType.TINY: "_tiny_to_python",
+        FieldType.SHORT: "_short_to_python",
+        FieldType.INT24: "_int24_to_python",
+        FieldType.LONG: "_long_to_python",
+        FieldType.LONGLONG: "_longlong_to_python",
+        FieldType.STRING: "_string_to_python",
+        FieldType.VAR_STRING: "_var_string_to_python",
+    }
+)
+
+#: The two field types that must never arrive, and the hooks that refuse them.
+#: ``mysql/ACASDB.sql`` contains zero ``FLOAT``, ``DOUBLE`` and ``REAL``
+#: columns, so either hook firing means the schema has drifted or a caller has
+#: written an expression that produces a binary floating-point value. Under
+#: rule R-2 neither is recoverable, so both hooks raise.
+REJECTED_CONVERTER_HOOKS: Final[Mapping[int, str]] = MappingProxyType(
+    {
+        FieldType.FLOAT: "_float_to_python",
+        FieldType.DOUBLE: "_double_to_python",
+    }
+)
+
+#: The connect-time probe. Three casts, chosen so the statement depends on no
+#: table and therefore cannot be affected by - or affect - any seeded state:
+#:
+#: * ``DECIMAL(10,2)`` is the commonest in-scope decimal form and reports
+#:   ``NEWDECIMAL``, the type the 128 money columns arrive as;
+#: * the signed integer cast reports ``LONG``, one of the five integer widths;
+#: * the character cast reports ``VAR_STRING`` and proves text arrives as
+#:   ``str`` rather than ``bytes``.
+#:
+#: The value ``'1.50'`` is deliberate: a driver that returned a binary
+#: floating-point value, or a ``Decimal`` normalised to ``1.5``, fails the
+#: scale check that :func:`_assert_converter_pinned` applies. The literal is
+#: quoted as text on both sides so no binary floating-point value is
+#: constructed anywhere along the path.
+CONVERTER_PROBE_STATEMENT: Final[str] = (
+    "SELECT CAST('1.50' AS DECIMAL(10,2)), "
+    "CAST(-42 AS SIGNED), "
+    "CAST('AB' AS CHAR(4))"
+)
+
+#: The exact text the decimal probe value must render as. ``'1.50'`` and not
+#: ``'1.5'``: a ``DECIMAL(10,2)`` carries its declared scale, and a converter
+#: that discarded the trailing zero would also discard the distinction between
+#: a value stored at two decimal places and one stored at one - which the
+#: state diff compares.
+CONVERTER_PROBE_EXPECTED_DECIMAL_TEXT: Final[str] = "1.50"
+
+#: Server error numbers that mean "connected, but the schema could not be
+#: selected" - the failure ``call "MySQL_selectdb"``
+#: [copybooks/mysql-procedures.cpy:L82] reports and that
+#: ``ConnectStep.SELECT_DB`` (103) identifies [:L84].
+#:
+#: ``mysql-connector-python`` performs the connect and the schema selection in
+#: ONE call, so the two COBOL steps have to be told apart from the error the
+#: single call raises. These two numbers are what a server returns when the
+#: connection itself succeeded and only the schema selection did not: 1049 is
+#: an unknown database and 1044 is a user without rights to it. See
+#: :func:`_connect_step_for` for the full attribution and for the ambiguity it
+#: records under rule R-6.
+SELECT_DB_ERRNOS: Final[frozenset[int]] = frozenset(
+    {
+        errorcode.ER_BAD_DB_ERROR,  # 1049 - Unknown database '<name>'
+        errorcode.ER_DBACCESS_DENIED_ERROR,  # 1044 - Access denied for db
+    }
+)
+
+#: Width of ``05  DB-Port     pic x(5)`` [copybooks/wsfnctn.cob:L62]. Held as
+#: a named constant because the widening from those five CHARACTERS to the
+#: integer the driver wants happens in this module and nowhere else - see
+#: :func:`connection_parameters`.
+_DB_PORT_WIDTH: Final[int] = 5
+
+#: Width of ``Ws-Mysql-Port-Number pic x(4)``
+#: [copybooks/mysql-variables.cpy:L91] - the working-storage item the bridge
+#: STRINGs ``DB-Port`` into [common/glpostingMT.cbl:L410-L412]. It is ONE
+#: CHARACTER NARROWER than ``DB-Port``, so a five-digit port loses its last
+#: digit on the way to the driver and no port above 9999 is expressible. That
+#: is a limitation of the frozen source, reproduced rather than repaired
+#: (rule R-4), and :func:`connection_parameters` applies it.
+_WS_MYSQL_PORT_WIDTH: Final[int] = 4
+
+#: The three literal values the C interface reads as "no socket", tested with
+#: ``strcmp`` after it has trimmed the item. A ``DB-Socket`` holding any of
+#: them behaves exactly like a blank one. Compared case-sensitively, because
+#: the C tests exactly these three spellings and not, for example, ``Null``.
+_SOCKET_MEANS_NONE: Final[frozenset[str]] = frozenset({"0", "null", "NULL"})
+
+
+# =============================================================================
+#  RULE R-2 ENFORCEMENT  -  THE TWO FAILURES THAT MUST NOT BE SURVIVABLE
+# =============================================================================
+
+
+class BinaryFloatingPointError(TypeError):
+    """A binary floating-point value reached the transport boundary.
+
+    Raised by :class:`AcasConverter` when a driver field type that produces a
+    binary floating-point value is encountered. Rule R-2 is absolute - "No
+    accounting value may pass through a binary floating-point type at any
+    point - not in computation, not in storage, not in transport" - so there
+    is no degraded mode to fall back to and no value worth returning.
+
+    A ``TypeError`` subclass on purpose. ``conversion.MySQLConverter
+    .to_python`` catches ``ValueError`` and ``TypeError`` and re-raises a plain
+    ``TypeError`` with the offending column name appended, so raising a
+    ``TypeError`` gets the column name into the message for free. The cost is
+    that the re-raised exception is a plain ``TypeError`` and this class
+    survives only as its ``__cause__``; a caller that needs to identify the
+    fault programmatically should test ``exc.__cause__``. That is why this
+    guard is defence in depth and :func:`_assert_converter_pinned` is the
+    primary enforcement: the probe raises out of this module's own code, where
+    nothing re-wraps it.
+    """
+
+
+class ConverterPinningError(RuntimeError):
+    """The pinned numeric converter is not in force on a live connection.
+
+    Raised by :func:`_assert_converter_pinned`, which runs on every successful
+    connect. It means one of:
+
+    * the connection is not using :class:`AcasConverter` at all - the
+      ``converter_class`` argument was dropped or overridden;
+    * a hook this module pins is no longer overridden, so the driver's default
+      would serve that field type;
+    * a probe value came back as the wrong Python type; or
+    * the decimal probe lost its declared scale.
+
+    Any of those breaks rule R-2 at the transport layer, which Agent Action
+    Plan section 0.7.2 singles this file out to prevent. The connection is
+    closed before the exception leaves :func:`mysql_1000_open`, so a caller
+    cannot accidentally keep using it.
+
+    A ``RuntimeError`` and not a ``TypeError``: nothing about the caller's
+    arguments is wrong. The environment has drifted from what the migration
+    requires, and the correct response is to stop.
+    """
+
+
+# =============================================================================
+#  THE PINNED CONVERTER  (RULE R-2  -  THIS FILE IS NAMED BY THE RULE)
+# =============================================================================
+
+
+class AcasConverter(conversion.MySQLConverter):
+    """The explicitly pinned type converter for every ACAS connection.
+
+    Rule R-2, of this file, verbatim: "`acas_posting/dal/connection.py`
+    additionally pins the converter explicitly rather than relying on the
+    default." This class is that pinning. It is passed as ``converter_class``
+    to every connection :func:`mysql_1000_open` opens, and it is honoured by
+    BOTH driver implementations: ``mysql-connector-python``'s C extension
+    detects a custom converter, stops converting in C, and routes every value
+    through this class instead, exactly as the pure-Python implementation
+    does. So the guarantee does not depend on which implementation is
+    installed, and ``use_pure`` is deliberately left unset.
+
+    Every override below returns the same Python type the driver's own default
+    returns today. That is the point: the behaviour is IDENTICAL and the
+    GUARANTEE is not. A default can change in a driver release, be affected by
+    a connection argument, or differ between the C and pure implementations;
+    an override cannot. :func:`_assert_converter_pinned` then checks at connect
+    time that the overrides are still the ones in force, so the guarantee is
+    verified rather than assumed.
+
+    Three families and nothing else, per the schema census:
+
+    ============ ================================= ======================
+    Family       In-scope columns                  Python type
+    ============ ================================= ======================
+    decimal      128 ``decimal(p,2)``/``(5,0)``    ``decimal.Decimal``
+    integer      99+20+21+65+3 = 208 columns       ``int``
+    character    177 ``char(n)``                   ``str``
+    ============ ================================= ======================
+
+    plus the two hooks that refuse to return anything at all. No date, time,
+    binary or JSON hook is touched: the frozen schema holds zero ``timestamp``,
+    ``datetime``, ``blob``, ``text`` and ``varchar`` columns, so overriding
+    those would be modelling a case that cannot arise.
+    """
+
+    # -- decimal -------------------------------------------------------------
+    #
+    # Serves the 128 in-scope `decimal` columns. MariaDB sends them as
+    # NEWDECIMAL; DECIMAL is the pre-5.0 wire type and is pinned to the same
+    # implementation so no server version can route around the guarantee.
+
+    def _decimal_to_python(
+        self,
+        value: bytes | bytearray | str,
+        desc: Any = None,
+    ) -> decimal.Decimal:
+        """Return a ``DECIMAL`` column as an exact ``decimal.Decimal``.
+
+        The server sends a decimal as its TEXT rendering, so the declared
+        scale is present in the bytes and survives if - and only if - the
+        ``Decimal`` is built from that text. ``DECIMAL(10,2)`` holding one
+        pound fifty arrives as ``b'1.50'`` and becomes ``Decimal("1.50")``,
+        whose ``as_tuple().exponent`` is ``-2``. Nothing in this method
+        normalises, rounds or re-scales the value.
+
+        The construction is from a ``str`` and never from a binary
+        floating-point value - rule R-2 - and there is no intermediate
+        numeric type between the wire bytes and the ``Decimal``.
+
+        Arithmetic policy is NOT set here. Precision, truncation direction and
+        the five ``ROUNDED`` sites belong to ``cobol/arithmetic.py``, which
+        this module does not import and must not (Agent Action Plan section
+        0.4.3 does not permit ``dal`` to depend on ``cobol``). This method's
+        only job is that the value arrives exact.
+
+        Args:
+            value: The column as the driver delivers it - ``bytes`` from the
+                wire, or ``str`` if a caller has already decoded it.
+            desc: The driver's column description tuple. Unused: the scale is
+                carried in the value's own text, so nothing needs to be read
+                from the description.
+
+        Returns:
+            The value as an exact ``decimal.Decimal`` at its declared scale.
+        """
+        del desc  # The text carries the scale; the description adds nothing.
+        text = (
+            value.decode(self.charset)
+            if isinstance(value, (bytes, bytearray))
+            else str(value)
+        )
+        return decimal.Decimal(text)
+
+    #: `NEWDECIMAL` is what MariaDB 10.11.7 actually sends for a `decimal`
+    #: column. Aliased to the same implementation exactly as the driver's own
+    #: base class aliases it, because overriding only one of the pair would
+    #: leave the other resolving to the base implementation - the very
+    #: "relying on the default" that rule R-2 forbids for this file.
+    _newdecimal_to_python = _decimal_to_python
+
+    # -- integer -------------------------------------------------------------
+    #
+    # Five widths, 208 in-scope columns, one behaviour. Declared as static
+    # methods because the driver's base class declares them so and the
+    # dispatch table binds whatever it finds; a plain method here would be
+    # called with the wrong argument count.
+    #
+    # `int` and not `Decimal`: these columns hold the COBOL binary family -
+    # `binary-long` statistics fields such as `SALES-AVERAGE`
+    # [copybooks/wssl.cob:L46-L52] - whose truncation on divide is INTEGER
+    # truncation. Widening them to `Decimal` here would quietly repair the
+    # double-truncation anomaly the migration is required to reproduce, and
+    # rule R-4 makes a defect fixed a failure.
+
+    @staticmethod
+    def _tiny_to_python(
+        value: bytes | bytearray | str | int,
+        desc: Any = None,
+    ) -> int:
+        """Return a ``TINYINT`` column as ``int`` (99 in-scope columns)."""
+        del desc
+        return int(value)
+
+    @staticmethod
+    def _short_to_python(
+        value: bytes | bytearray | str | int,
+        desc: Any = None,
+    ) -> int:
+        """Return a ``SMALLINT`` column as ``int`` (20 in-scope columns)."""
+        del desc
+        return int(value)
+
+    @staticmethod
+    def _int24_to_python(
+        value: bytes | bytearray | str | int,
+        desc: Any = None,
+    ) -> int:
+        """Return a ``MEDIUMINT`` column as ``int`` (21 in-scope columns)."""
+        del desc
+        return int(value)
+
+    @staticmethod
+    def _long_to_python(
+        value: bytes | bytearray | str | int,
+        desc: Any = None,
+    ) -> int:
+        """Return an ``INT`` column as ``int`` (65 in-scope columns)."""
+        del desc
+        return int(value)
+
+    @staticmethod
+    def _longlong_to_python(
+        value: bytes | bytearray | str | int,
+        desc: Any = None,
+    ) -> int:
+        """Return a ``BIGINT`` column as ``int`` (3 in-scope columns)."""
+        del desc
+        return int(value)
+
+    # -- character -----------------------------------------------------------
+    #
+    # Serves the 177 in-scope `char(n)` columns, which the driver reports as
+    # STRING. VAR_STRING is pinned alongside it: the schema holds zero
+    # `varchar` columns, but a `CAST(... AS CHAR(n))` expression reports
+    # VAR_STRING and the connect-time probe uses one.
+    #
+    # TRAILING SPACES ARE NOT STRIPPED. A `char(n)` column is fixed width and
+    # its padding is part of the stored value; canonicalising it is the
+    # dump normaliser's job, not the transport layer's, and doing it here
+    # would hide the copybook-to-column width drift the migration records.
+
+    def _string_to_python(
+        self,
+        value: bytes | bytearray | str,
+        dsc: Any = None,
+    ) -> str:
+        """Return a ``CHAR`` column as ``str``, padding intact.
+
+        Args:
+            value: The column as the driver delivers it.
+            dsc: The driver's column description tuple. Unused - the frozen
+                schema holds no SET column and no binary-charset column, the
+                two cases the driver's own implementation consults it for.
+
+        Returns:
+            The value decoded with the connection's character set.
+        """
+        del dsc
+        if isinstance(value, (bytes, bytearray)):
+            return value.decode(self.charset)
+        return str(value)
+
+    #: `VAR_STRING`, aliased to the same implementation. See the note above.
+    _var_string_to_python = _string_to_python
+
+    # -- the two hooks that must never return ---------------------------------
+
+    @staticmethod
+    def _float_to_python(value: Any, desc: Any = None) -> NoReturn:
+        """Refuse a ``FLOAT`` column - rule R-2.
+
+        ``mysql/ACASDB.sql`` declares zero ``FLOAT`` columns, so reaching this
+        method means either the schema has drifted from the frozen file or a
+        statement asked the server for a binary floating-point expression.
+
+        Raises:
+            BinaryFloatingPointError: Always.
+        """
+        del value, desc
+        raise BinaryFloatingPointError(
+            "rule R-2 violated at the transport layer: a FLOAT value reached "
+            "acas_posting.dal.connection. No accounting value may pass "
+            "through a binary floating-point type at any point - not in "
+            "computation, not in storage, not in transport. The frozen schema "
+            "mysql/ACASDB.sql declares zero FLOAT, DOUBLE and REAL columns, "
+            "so this value cannot have come from an in-scope column."
+        )
+
+    @staticmethod
+    def _double_to_python(value: Any, desc: Any = None) -> NoReturn:
+        """Refuse a ``DOUBLE`` column - rule R-2.
+
+        Raises:
+            BinaryFloatingPointError: Always. See
+                :meth:`_float_to_python` for the reasoning; ``DOUBLE`` is the
+                same fault with a wider mantissa.
+        """
+        del value, desc
+        raise BinaryFloatingPointError(
+            "rule R-2 violated at the transport layer: a DOUBLE value reached "
+            "acas_posting.dal.connection. No accounting value may pass "
+            "through a binary floating-point type at any point - not in "
+            "computation, not in storage, not in transport. The frozen schema "
+            "mysql/ACASDB.sql declares zero FLOAT, DOUBLE and REAL columns, "
+            "so this value cannot have come from an in-scope column."
+        )
+
+
+def transport_decimal_context() -> decimal.Context:
+    """Return the decimal context this transport layer is exact under.
+
+    A DELIBERATE context rather than an implicit one, but a narrow one: its
+    only job is to guarantee that no value read from - or written to - an
+    in-scope column can be rounded or lose a digit merely by being carried.
+    Precision is set to twice
+    :data:`SCHEMA_MAX_DECIMAL_PRECISION` so that the widest stored form,
+    ``decimal(14,2)``, has ample headroom, and every inexact condition is
+    trapped so that a silent loss becomes an exception instead.
+
+    ARITHMETIC POLICY DOES NOT LIVE HERE. Truncation on store, the ROUND_DOWN
+    default and the five ``ROUNDED`` sites of the in-scope cycle all belong to
+    ``cobol/arithmetic.py``. This module does not import it and must not: the
+    Agent Action Plan's per-directory import table permits ``dal`` modules to
+    reach ``dal.connection``, ``dal.status``, ``dal.cursor_state`` and one
+    ``records`` module, and does not permit ``dal`` to reach ``cobol``. A
+    caller performing arithmetic should adopt that module's context, not this
+    one.
+
+    The context is RETURNED and never installed. Installing a context is a
+    process-wide side effect, and this module does no work on import and
+    changes no global state.
+
+    Returns:
+        A fresh :class:`decimal.Context`, safe for the caller to mutate.
+
+        >>> ctx = transport_decimal_context()
+        >>> ctx.prec
+        28
+        >>> ctx.create_decimal("1.50") + ctx.create_decimal("0.25")
+        Decimal('1.75')
+    """
+    return decimal.Context(
+        prec=SCHEMA_MAX_DECIMAL_PRECISION * 2,
+        # No rounding mode is nominated as "the" mode, because this context
+        # must never round. Trapping Inexact and Rounded turns any loss into
+        # an exception rather than a quietly altered figure.
+        traps=[
+            decimal.Inexact,
+            decimal.Rounded,
+            decimal.InvalidOperation,
+            decimal.DivisionByZero,
+            decimal.Overflow,
+        ],
+    )
+
+
+# =============================================================================
+#  COBOL TEXT SEMANTICS AT THIS BOUNDARY
+#
+#  Two of them, and both are observable, so neither may be approximated.
+# =============================================================================
+
+
+def cobol_string_delimited_by_space(field: str) -> str:
+    """Return a fixed-width field as the COBOL ``STRING`` verb sends it.
+
+    Every bridge loads the driver's parameters out of ``RDB-Data`` with the
+    same six-statement idiom, e.g. [common/glpostingMT.cbl:L394-L396]::
+
+        string   DB-Schema      delimited by space
+                 X"00"          delimited by size
+                                  into WS-MYSQL-BASE-NAME
+        end-string.
+
+    ``delimited by space`` means the sending item contributes its characters UP
+    TO the first space and stops. Two consequences follow, and both are
+    reproduced here rather than approximated by a trailing-space strip:
+
+    * a field that is all spaces contributes NOTHING, so the driver receives an
+      empty string - which is how "unset" is expressed. That is what makes a
+      spaces-valued ``DB-Host`` or ``DB-Socket`` mean "use the default", and
+      :func:`connection_parameters` relies on it.
+    * a field with an EMBEDDED space is truncated at that space. A host name of
+      ``"db1 db2"`` reaches the driver as ``"db1"``. That is a latent trap in
+      the frozen source rather than a defect this migration may repair, so it
+      is preserved exactly; a plain right-strip would send ``"db1 db2"`` and
+      diverge from the compiled program.
+
+    The ``X"00"`` the same statements append is omission O-1 - a C string
+    terminator with no Python analogue. It is not reproduced, and the module
+    docstring records the omission.
+
+    Args:
+        field: The fixed-width, space-padded field value.
+
+    Returns:
+        The characters before the first space, or ``""`` if the field starts
+        with one.
+
+        >>> cobol_string_delimited_by_space("ACASDB      ")
+        'ACASDB'
+        >>> cobol_string_delimited_by_space("            ")
+        ''
+        >>> cobol_string_delimited_by_space("db1 db2     ")
+        'db1'
+        >>> cobol_string_delimited_by_space("")
+        ''
+    """
+    return field.partition(" ")[0]
+
+
+def quote_identifier(name: str) -> str:
+    """Return a table or column name wrapped in backticks, ready for SQL.
+
+    THE SINGLE QUOTING HELPER FOR THE WHOLE DATA-ACCESS LAYER. Every ACAS
+    table name and every ACAS column name contains a HYPHEN - the schema is
+    full of names like ``GLBATCH-REC``, ``BATCH-KEY`` and ``INPUT-GROSS`` -
+    and MySQL and MariaDB parse an unquoted hyphen as the subtraction
+    operator. So quoting is not a style preference: an unquoted ACAS
+    identifier is a SYNTAX ERROR. Centralising it here turns twenty-one
+    chances to get it wrong into one.
+
+    That is what the frozen source does too. The generated bridges wrap the
+    table name as a literal, ``"`GLPOSTING-REC`"``
+    [common/glpostingMT.cbl:L623-L624], and build a column reference by
+    stringing a backtick, the key name and a backtick
+    [common/glpostingMT.cbl:L602-L604]::
+
+        string   "`"                   delimited by size
+                 KeyName (KOR-x1)      delimited by space
+                 "`"                   delimited by size
+
+    Note the ``delimited by space`` on the name itself: a COBOL key name is a
+    fixed-width, space-padded item, so the bridge quotes only its significant
+    characters. This function applies the same rule via
+    :func:`cobol_string_delimited_by_space`, which means a caller may pass a
+    padded name from a record layout and get the same identifier the bridge
+    would emit.
+
+    An embedded backtick is ESCAPED by doubling it, which is MySQL's own rule
+    for a quoted identifier. No ACAS identifier contains one - the schema's
+    177 character columns and 22 table names are all upper case, digits and
+    hyphens - so the branch cannot fire on frozen data. It is implemented
+    rather than assumed away because this helper is the layer's only quoting
+    path and a silent mis-quote there would be an injection.
+
+    Args:
+        name: The identifier, optionally space-padded to a COBOL field width.
+
+    Returns:
+        The identifier enclosed in backticks.
+
+    Raises:
+        ValueError: If the identifier is empty once the ``delimited by space``
+            rule has been applied, or if it contains a NUL. MySQL permits
+            neither in an identifier, and both would otherwise produce a
+            statement whose meaning is not the caller's.
+
+        >>> quote_identifier("GLBATCH-REC")
+        '`GLBATCH-REC`'
+        >>> quote_identifier("BATCH-KEY   ")
+        '`BATCH-KEY`'
+        >>> quote_identifier("INPUT-GROSS")
+        '`INPUT-GROSS`'
+    """
+    significant = cobol_string_delimited_by_space(name)
+    if not significant:
+        raise ValueError(
+            "an ACAS identifier cannot be empty: every table and column name "
+            "in mysql/ACASDB.sql is a non-empty upper-case, hyphenated name "
+            f"(received {name!r})"
+        )
+    if "\x00" in significant:
+        raise ValueError(
+            "an ACAS identifier cannot contain a NUL: MySQL forbids it, and "
+            "no name in mysql/ACASDB.sql carries one "
+            f"(received {name!r})"
+        )
+    escaped = significant.replace(IDENTIFIER_QUOTE, IDENTIFIER_QUOTE * 2)
+    return f"{IDENTIFIER_QUOTE}{escaped}{IDENTIFIER_QUOTE}"
+
+
+# =============================================================================
+#  THE CREDENTIAL LOAD  -  `common/acas008.cbl:L558-L563`
+# =============================================================================
+
+
+def _pic_x(text: str, width: int) -> str:
+    """Fit a value to an alphanumeric picture of ``width`` characters.
+
+    COBOL ``MOVE`` into a ``pic x(n)`` item truncates on the right and pads on
+    the right with spaces. Reproduced locally, mirroring the same private
+    helper in ``dal/status.py``, because this module may not import
+    ``cobol/move.py``: the Agent Action Plan's import table does not permit a
+    ``dal`` module to reach the ``cobol`` package.
+
+    Args:
+        text: The sending value.
+        width: The receiving item's declared character count.
+
+    Returns:
+        Exactly ``width`` characters.
+    """
+    return text[:width].ljust(width)
+
+
+def rdb_data_from_system_record(system_record: SystemRecord) -> RdbData:
+    """Copy the connection parameters out of ``SYSTEM-REC`` into ``RDB-Data``.
+
+    Reproduces the six ``MOVE`` statements at [common/acas008.cbl:L558-L563],
+    IN THEIR SOURCE ORDER. That order is Schema, UName, UPass, **Port, Host,
+    Socket** - which is NOT the declaration order of ``RDB-Data``, where port
+    comes last [copybooks/wsfnctn.cob:L57-L62]. Rule R-6 makes statement
+    ordering part of behaviour, so the source order is what is reproduced::
+
+        move     RDBMS-DB-Name to DB-Schema        [common/acas008.cbl:L558]
+        move     RDBMS-User    to DB-UName         [:L559]
+        move     RDBMS-Passwd  to DB-UPass         [:L560]
+        move     RDBMS-Port    to DB-Port          [:L561]
+        move     RDBMS-Host    to DB-Host          [:L562]
+        move     RDBMS-Socket  to DB-Socket        [:L563]
+
+    All six receiving items are declared ``value spaces``
+    [copybooks/wsfnctn.cob:L57-L62], so THE FROZEN SOURCE CARRIES NO
+    CREDENTIAL and every value a connection ever uses originates in the
+    ``SYSTEM-REC`` row. Nothing is read from the process environment or from
+    any parameter file: rule R-6 requires two runs of one scenario to be
+    byte-identical, and an ambient source would let them differ.
+
+    Each value is fitted to its receiving picture - 12 characters for schema,
+    user and password, 32 for host, 64 for socket and 5 for port. The sending
+    items happen to be declared at the same widths in
+    ``copybooks/wssystem.cob`` (L137, L138, L139, L142, L143, L144), so no
+    truncation occurs on frozen data; the fit is applied anyway because a
+    ``MOVE`` truncates whatever it is given and a caller may hold a record
+    built by hand.
+
+    All six sending items are ``05`` items of ``03 System-Data-Block.``
+    [copybooks/wssystem.cob:L52], so they are reached through
+    ``system_record.system_data_block``. The frozen ``MOVE`` statements name
+    them unqualified because they are unique within the program; the group
+    path is spelled out here only because Python requires it.
+
+    Args:
+        system_record: The ``SYSTEM-REC`` row the caller already holds. Read
+            only; this function mutates nothing.
+
+    Returns:
+        A fresh :class:`~acas_posting.records.file_access.RdbData`. The class
+        is IMPORTED from the record layer and never redeclared here - one
+        record shape, one owner.
+    """
+    rdb_data = RdbData()
+
+    # All six sending items are `05` items of `03 System-Data-Block.`
+    # [copybooks/wssystem.cob:L52], so the record layer exposes them on
+    # `SystemRecord.system_data_block` rather than on the record itself. The
+    # frozen MOVEs name them UNQUALIFIED - `move RDBMS-DB-Name to DB-Schema` -
+    # because a COBOL data name needs qualifying only when it is ambiguous, and
+    # these six are unique within the program. Python has no such rule, so the
+    # group is named explicitly; the statements themselves are unchanged.
+    system_data_block = system_record.system_data_block
+
+    # The six moves, in the frozen source's own order. Each line is one COBOL
+    # statement, so a reviewer can diff this block against
+    # [common/acas008.cbl:L558-L563] line for line.
+    rdb_data.db_schema = _pic_x(system_data_block.rdbms_db_name, 12)
+    rdb_data.db_uname = _pic_x(system_data_block.rdbms_user, 12)
+    rdb_data.db_upass = _pic_x(system_data_block.rdbms_passwd, 12)
+    rdb_data.db_port = _pic_x(system_data_block.rdbms_port, _DB_PORT_WIDTH)
+    rdb_data.db_host = _pic_x(system_data_block.rdbms_host, 32)
+    rdb_data.db_socket = _pic_x(system_data_block.rdbms_socket, 64)
+
+    return rdb_data
+
+
+# -----------------------------------------------------------------------------
+#  ANOMALY A-1  -  THE FIRST-CALL-ONLY GUARD, REPRODUCED AND NOT FIXED
+# -----------------------------------------------------------------------------
+
+#: The loaded block, or ``None`` before the first load. This one module-level
+#: name IS the reproduction of the COBOL's `A` sentinel: `A` starts at zero and
+#: is assigned a length on the first call, so a later call finds it non-zero
+#: and skips the guarded block. Here `None` is the "not yet called" state and
+#: an `RdbData` instance is the "already called" state.
+#:
+#: NOT guarded by a lock, deliberately. Rule R-3 forbids concurrency outright -
+#: no threads, no event loop, no process-level parallelism - and a lock here
+#: would imply that concurrent callers exist. Execution is strictly sequential,
+#: matching the single-threaded COBOL.
+_LOADED_RDB_DATA: RdbData | None = None
+
+
+def load_rdb_data_once(system_record: SystemRecord) -> RdbData:
+    """Load the connection parameters on the first call and never again.
+
+    *** ANOMALY A-1 - REPRODUCED, NOT FIXED (rule R-4) ***
+
+    The credential load in the file handler is wrapped in a first-call-only
+    guard [common/acas008.cbl:L526]::
+
+        if       A = zero                        *> so it is being called first time
+
+    whose own comments say what it is for. At the head of the paragraph
+    [common/acas008.cbl:L518]::
+
+        *>     Test on very first call only  (So do NOT use var A & B again)
+
+    and immediately above the six moves [common/acas008.cbl:L555-L556]::
+
+        *>  Load up the DB settings from the system record as its not passed on
+        *>           hopefully once is enough  :)
+
+    ``A`` is assigned a record length inside the guarded block before any later
+    call can test it, and the ``end-if`` [common/acas008.cbl:L564] closes AFTER
+    the six moves, so from the second call onward the ENTIRE block - the
+    record-length check and the credential load together - is skipped for the
+    remainder of the run.
+
+    The observable consequence, which this function reproduces exactly: a
+    change to the ``SYSTEM-REC`` row part-way through a run cannot affect that
+    run. The second and later callers get the parameters the FIRST caller
+    supplied, whatever they now hold in their own ``SYSTEM-REC``. Re-reading
+    would be a defect fixed, and rule R-4 makes a defect fixed a failure.
+
+    Args:
+        system_record: The ``SYSTEM-REC`` row. CONSULTED ONLY ON THE FIRST
+            CALL; ignored on every later call, exactly as the guard ignores it.
+
+    Returns:
+        The one :class:`~acas_posting.records.file_access.RdbData` for this
+        run. The same object every time, so a caller cannot be handed a
+        different set of parameters than another caller in the same run.
+    """
+    global _LOADED_RDB_DATA  # noqa: PLW0603 - the `A = zero` sentinel
+
+    if _LOADED_RDB_DATA is None:
+        # `if A = zero` [common/acas008.cbl:L526] - the very first call.
+        _LOADED_RDB_DATA = rdb_data_from_system_record(system_record)
+        _LOG.debug(
+            "RDB-Data loaded from SYSTEM-REC "
+            "(common/acas008.cbl:L558-L563); "
+            "the first-call-only guard at L526 closes it for this run"
+        )
+    # `end-if` [common/acas008.cbl:L564]. No else branch exists in the frozen
+    # source and none is added: a later call simply proceeds with whatever the
+    # block already holds.
+    return _LOADED_RDB_DATA
+
+
+def rdb_data_is_loaded() -> bool:
+    """Report whether the first-call-only load has already happened.
+
+    The observable form of the COBOL's ``A`` sentinel, published so that a
+    test can assert anomaly A-1 rather than infer it.
+
+    Returns:
+        ``True`` once :func:`load_rdb_data_once` has run in this process,
+        ``False`` before that and after :func:`reset_rdb_data_cache`.
+    """
+    return _LOADED_RDB_DATA is not None
+
+
+def reset_rdb_data_cache() -> None:
+    """Clear the first-call-only load so the next call reloads.
+
+    THERE IS NO COBOL COUNTERPART, and that is stated plainly rather than
+    disguised: nothing in the frozen source clears ``A``. It does not need to,
+    because a COBOL run is a process and the sentinel dies with it.
+
+    In Python a test process outlives a "run", and
+    ``tests/determinism/test_two_runs_byte_identical.py`` has to perform two
+    runs of one scenario IN ONE PROCESS and get identical results. Without an
+    explicit reset the second run would inherit the first run's parameters and
+    the two runs would not be independent - so this function exists to make
+    the determinism test able to establish what it claims, not to soften
+    anomaly A-1.
+
+    Production callers have no reason to call it: one process is one run, and
+    a run loads its parameters once.
+    """
+    global _LOADED_RDB_DATA  # noqa: PLW0603 - the `A = zero` sentinel
+
+    _LOADED_RDB_DATA = None
+
+
+# =============================================================================
+#  THE DRIVER PARAMETER SET  -  `common/glpostingMT.cbl:L394-L416`
+# =============================================================================
+
+
+def _atoi(text: str) -> int:
+    """Convert leading digits to an ``int`` the way C's ``atoi`` does.
+
+    *** REPRODUCED, NOT REPAIRED (rules R-3 and R-4) ***
+
+    The C interface the bridges link converts the port with a bare
+    ``port = atoi(xport)`` and then hands the result straight to
+    ``mysql_real_connect``. ``atoi`` HAS NO FAILURE MODE: it skips leading
+    white space, takes an optional sign, consumes as many decimal digits as it
+    finds and stops at the first character that is not one, returning 0 if
+    there were none at all. So a malformed ``DB-Port`` does not make the
+    compiled program report an error - it makes it connect somewhere else, or
+    to the default port.
+
+    That is why this module performs NO port validation. Raising on a
+    non-numeric port would be a new validation, which rule R-3 forbids, and a
+    defect fixed, which rule R-4 makes a failure: a scenario whose
+    ``SYSTEM-REC`` held a malformed port would abort under Python and connect
+    under the compiled program, and the two runs would then disagree about
+    every row.
+
+    The observable consequences, all reproduced:
+
+    * ``"3306"`` -> 3306, the ordinary case.
+    * ``""`` -> 0. Zero is what the C then passes as the port argument, and
+      the client library reads a zero port as "use your default".
+    * ``"33o6"`` -> 33. The digits before the stray letter are kept and the
+      rest is discarded silently, so the program connects to port 33.
+    * ``"abcde"`` -> 0, i.e. the default port, NOT an error.
+    * ``"-330"`` -> -330. The C parameter is an ``unsigned int``, so a
+      negative value is reinterpreted as a very large one; either reading is
+      refused when the connection is attempted, so the step attribution is
+      the same under both.
+
+    Args:
+        text: The port characters, already reduced by the ``delimited by
+            space`` rule and narrowed to the working-storage item's width.
+
+    Returns:
+        The converted value, or 0 when no digits were found.
+
+        >>> _atoi("3306")
+        3306
+        >>> _atoi("")
+        0
+        >>> _atoi("33o6")
+        33
+        >>> _atoi("abcde")
+        0
+        >>> _atoi("-330")
+        -330
+        >>> _atoi("+80")
+        80
+    """
+    body = text.lstrip(" \t\n\r\v\f")
+    sign = 1
+    if body[:1] in {"+", "-"}:
+        if body[0] == "-":
+            sign = -1
+        body = body[1:]
+    digits = ""
+    for character in body:
+        if not character.isdigit() or not character.isascii():
+            break
+        digits += character
+    if not digits:
+        return 0
+    return sign * int(digits)
+
+
+def connection_parameters(rdb_data: RdbData) -> dict[str, Any]:
+    """Build the driver's keyword arguments from the ``RDB-Data`` block.
+
+    Reproduces the bridge's own parameter marshalling
+    [common/glpostingMT.cbl:L394-L416], which loads the six ``RDB-Data`` items
+    into the six working-storage items that ``MySQL_real_connect`` is called
+    with. The argument list of that call is host, USER, password, base, port,
+    socket [copybooks/mysql-procedures.cpy:L72-L77], and its second argument
+    is ``Ws-Mysql-Implementation`` - anomaly A-3, a variable whose name says
+    nothing about the user name it actually carries
+    [common/glpostingMT.cbl:L402-L404]. The mapping is therefore:
+
+    ============================= ================================ ==========
+    ``RDB-Data`` item             COBOL working-storage item       Driver
+    ============================= ================================ ==========
+    ``DB-Host``     x(32)  [:L60] ``Ws-Mysql-Host-Name``    x(64)  ``host``
+    ``DB-UName``    x(12)  [:L58] ``Ws-Mysql-Implementation`` x(64) ``user``
+    ``DB-UPass``    x(12)  [:L59] ``Ws-Mysql-Password``     x(64)  ``password``
+    ``DB-Schema``   x(12)  [:L57] ``Ws-Mysql-Base-Name``    x(64)  ``database``
+    ``DB-Port``     x(5)   [:L62] ``Ws-Mysql-Port-Number``  x(4)   ``port``
+    ``DB-Socket``   x(64)  [:L61] ``Ws-Mysql-Socket``       x(64)  ``unix_socket``
+    ============================= ================================ ==========
+
+    ``DB-Port`` IS A CHARACTER FIELD. It is declared ``pic x(5)``
+    [copybooks/wsfnctn.cob:L62] and the working-storage item it is strung into
+    is narrower still, ``pic x(4)`` [copybooks/mysql-variables.cpy:L91], so the
+    port travels through the whole COBOL side as text. Two consequences are
+    reproduced here:
+
+    * THE NARROWING IS OBSERVABLE. ``STRING`` stops when its receiving item is
+      full, so a five-digit port loses its fifth character on the way into
+      ``Ws-Mysql-Port-Number`` [common/glpostingMT.cbl:L410-L412] and no port
+      above 9999 can be expressed. ``"13306"`` reaches the client library as
+      1330. A limitation of the frozen source, not a defect to repair.
+    * THE CONVERSION CANNOT FAIL. The C interface converts with ``atoi`` and
+      passes the result straight on, so a malformed port silently becomes a
+      different port or the default one. See :func:`_atoi`, which reproduces
+      that exactly; NO PORT VALIDATION IS PERFORMED, because a new validation
+      is forbidden by rule R-3 and a defect fixed is a failure under R-4.
+
+    The widening from characters to the integer the driver wants happens HERE,
+    in Python, and nowhere else, because the C interface takes a numeric port
+    argument (``Ws-Mysql-Port-Number``, the fifth argument at
+    [copybooks/mysql-procedures.cpy:L76]) and the Python driver takes an
+    ``int``. ``port`` is therefore ALWAYS present in the returned mapping,
+    mirroring the C call, which always passes a port: a blank ``DB-Port``
+    yields 0, which is precisely the value the C passes and which the client
+    library reads as "use your default port".
+
+    A BLANK TEXT ITEM MEANS UNSET, and omitting its key is how that is
+    expressed. The ``delimited by space`` clause on each of the six STRING
+    statements makes an all-spaces item contribute nothing at all, so the C
+    interface receives an empty string, which its client library reads as "no
+    value supplied" and replaces with its own default. Two of the six items are
+    ``value spaces`` in the maintainer's own defaults - ``RDBMS-Host`` and
+    ``RDBMS-Socket`` [copybooks/wssystem.cob:L143-L144] - so this is the
+    ordinary case and not an edge one. An absent key is the faithful rendering
+    of a blank COBOL item; supplying an empty string instead would ask the
+    driver to connect to a host named "".
+
+    THREE SOCKET VALUES ALSO MEAN "NO SOCKET". Before it calls
+    ``mysql_real_connect`` the C interface compares the socket item against
+    ``"0"``, ``"null"`` and ``"NULL"`` and substitutes a null pointer for any
+    of them, so those three spellings behave exactly like a blank item. That
+    branch is reproduced via :data:`_SOCKET_MEANS_NONE`; without it a
+    ``DB-Socket`` of ``"0"`` would send the driver looking for a socket file
+    named ``0``.
+
+    Args:
+        rdb_data: The block :func:`load_rdb_data_once` produced.
+
+    Returns:
+        The driver keyword arguments: the four text items that are set, plus
+        ``port`` always. No pool argument and no session-shaping argument
+        appears here; ``autocommit``, ``converter_class`` and the client-flag
+        adjustment are added by :func:`mysql_1000_open`, which owns them.
+    """
+    # Each of the six values is extracted exactly as the bridge extracts it -
+    # up to the first space - so that a blank item yields "" and an item with
+    # an embedded space is truncated where the COBOL truncates it.
+    host = cobol_string_delimited_by_space(rdb_data.db_host)
+    user = cobol_string_delimited_by_space(rdb_data.db_uname)
+    password = cobol_string_delimited_by_space(rdb_data.db_upass)
+    database = cobol_string_delimited_by_space(rdb_data.db_schema)
+    port_text = cobol_string_delimited_by_space(rdb_data.db_port)
+    socket_path = cobol_string_delimited_by_space(rdb_data.db_socket)
+
+    parameters: dict[str, Any] = {}
+    if host:
+        parameters["host"] = host
+    if user:
+        parameters["user"] = user
+    if password:
+        parameters["password"] = password
+    if database:
+        parameters["database"] = database
+    if socket_path and socket_path not in _SOCKET_MEANS_NONE:
+        # The C interface substitutes a null pointer for "0", "null" and
+        # "NULL", so those three reach the client library as no socket at all.
+        parameters["unix_socket"] = socket_path
+
+    # `pic x(5)` -> `pic x(4)` -> int, in that order, because that is the order
+    # the frozen source performs it in: the STRING narrows, then `atoi`
+    # converts. Doing the conversion first and truncating afterwards would give
+    # 13306 where the compiled program gives 1330.
+    parameters["port"] = _atoi(port_text[:_WS_MYSQL_PORT_WIDTH])
+
+    return parameters
+
+
+# =============================================================================
+#  THE OPEN OUTCOME  -  WHAT `Mysql-1000-Open` LEAVES BEHIND
+# =============================================================================
+
+
+@dataclass(frozen=True, slots=True)
+class OpenOutcome:
+    """Everything ``Mysql-1000-Open`` leaves behind, success or failure.
+
+    Frozen, because an outcome is a fact about something that already
+    happened - the same reasoning ``dal/status.py`` gives for
+    :class:`~acas_posting.dal.status.DbErrorStatus`.
+
+    The COBOL has no return value: the paragraph writes its results into the
+    shared ``File-Access`` record and the caller reads them afterwards. This
+    dataclass carries the same set of results so that a Python caller can
+    apply them to the record it holds - see :meth:`apply_to_logging_data` -
+    without this module having to own the caller's record.
+    """
+
+    #: The live connection, or ``None`` if any step failed. The COBOL analogue
+    #: is ``Ws-Mysql-Cid``, the handle ``MySQL_init`` populates
+    #: [copybooks/mysql-procedures.cpy:L66], declared as a pointer at
+    #: [copybooks/mysql-variables.cpy:L65].
+    connection: MySQLConnectionAbstract | None
+
+    #: ``Fs-Reply`` [copybooks/wsfnctn.cob:L25]. ``FsReply.SUCCESS`` when all
+    #: three steps completed, and ``FsReply.ERROR`` (99) otherwise -
+    #: unconditionally, per anomaly A-2
+    #: [copybooks/mysql-procedures.cpy:L127].
+    fs_reply: FsReply
+
+    #: ``We-Error`` [copybooks/wsfnctn.cob:L23]. On failure this is
+    #: ``WeError.RDB_INIT_ERROR`` (911) [copybooks/mysql-procedures.cpy:L128],
+    #: whose documented meaning - "Rdb Error during initializing, possibly can
+    #: not connect to database" [common/glpostingMT.cbl:L143-L144] - is
+    #: accurate on this path. On success it is whatever the caller was already
+    #: carrying, because the paragraph writes it only on the error path.
+    we_error: int
+
+    #: ``ws-No-Paragraph`` [copybooks/wsfnctn.cob:L48]. On failure, the
+    #: :class:`~acas_posting.dal.status.ConnectStep` that failed - 101, 102 or
+    #: 103. On success, the value the CALLER was carrying, undisturbed: the
+    #: copybook's own changelog records that the three stamps were moved to sit
+    #: immediately before the error report precisely so that a successful open
+    #: "hides caller para lits if no errors"
+    #: [copybooks/mysql-procedures.cpy:L45-L47]. The bridge sets 1 before it
+    #: performs the paragraph [common/glpostingMT.cbl:L418], and that 1 is
+    #: what survives a clean open.
+    ws_no_paragraph: int
+
+    #: ``SQL-Err pic x(5)`` [copybooks/wsfnctn.cob:L49], already fitted to its
+    #: picture width by ``status.mysql_1100_db_error``.
+    sql_err: str
+
+    #: ``SQL-Msg pic x(512)`` [copybooks/wsfnctn.cob:L50], likewise fitted.
+    sql_msg: str
+
+    #: ``SQL-State pic x(5)`` [copybooks/wsfnctn.cob:L51], likewise fitted.
+    #: Written by the error paragraph at
+    #: [copybooks/mysql-procedures.cpy:L122-L123].
+    sql_state: str
+
+    @property
+    def opened(self) -> bool:
+        """Report whether the connection is usable.
+
+        Returns:
+            ``True`` only when a connection was produced AND the reply is
+            zero. Both are required: a caller must never treat a non-zero
+            ``Fs-Reply`` as usable just because an object is present.
+
+            >>> OpenOutcome(None, FsReply.ERROR, 911, 102, "", "", "").opened
+            False
+        """
+        return self.connection is not None and self.fs_reply == FsReply.SUCCESS
+
+    def apply_to_logging_data(self, logging_data: LoggingData) -> None:
+        """Write the diagnostics into the caller's ``Logging-Data`` block.
+
+        Reproduces what the COBOL leaves in the shared record: the three
+        diagnostic text fields plus ``ws-No-Paragraph``. ``Fs-Reply`` and
+        ``We-Error`` are NOT written here, because they live on ``File-Access``
+        itself rather than in this sub-block
+        [copybooks/wsfnctn.cob:L23-L25] - the caller sets those on the record
+        it already holds, exactly as ``DbErrorStatus.apply_to_logging_data``
+        leaves them.
+
+        Args:
+            logging_data: The block to update, owned by
+                ``records/file_access.py``. Mutated in place, as a COBOL
+                ``MOVE`` mutates a record.
+        """
+        logging_data.ws_no_paragraph = self.ws_no_paragraph
+        logging_data.sql_err = self.sql_err
+        logging_data.sql_msg = self.sql_msg
+        logging_data.sql_state = self.sql_state
+
+
+# =============================================================================
+#  STEP ATTRIBUTION  -  A RECORDED AMBIGUITY, ARBITRATED BY THE ORACLE (R-6)
+# =============================================================================
+
+
+def _connect_step_for(errno: int) -> ConnectStep:
+    """Decide which COBOL step a single driver failure is attributed to.
+
+    *** A RECORDED AMBIGUITY - for ``docs/migration/ambiguity-resolutions.md``
+    ***
+
+    THE QUESTION. ``Mysql-1000-Open`` performs THREE distinct operations and
+    can therefore report three distinct step codes: ``MySQL_init`` failing
+    gives 101 [copybooks/mysql-procedures.cpy:L66-L68],
+    ``MySQL_real_connect`` failing gives 102 [:L72-L79] and
+    ``MySQL_selectdb`` failing gives 103 [:L82-L84].
+    ``mysql-connector-python`` collapses all three into ONE call that
+    initialises, connects and selects the schema, and raises ONE exception. So
+    which step code does a Python failure carry?
+
+    THE RESOLUTION ADOPTED HERE, and why each arm is defensible:
+
+    * **103, ``SELECT_DB``** when the server's own error number says the
+      connection succeeded and only the schema selection did not - an unknown
+      database (1049) or a user without rights to the named one (1044), the
+      set :data:`SELECT_DB_ERRNOS`. These are precisely the errors
+      ``mysql_select_db`` produces, so attributing them to 102 would report a
+      connection failure for a connection that in fact succeeded.
+    * **101, ``INIT``** when there is no server error number at all. The
+      driver uses a sentinel rather than ``None``, so "no server error" means
+      a non-positive ``errno``: the configuration itself was refused and no
+      packet was ever sent. That is the Python analogue of ``MySQL_init``,
+      which in the C API allocates and prepares the handle and cannot fail for
+      any network reason.
+    * **102, ``REAL_CONNECT``** for everything else - unreachable host,
+      refused credentials, protocol failure. This is the residual case and the
+      commonest one.
+
+    WHY THIS IS AN AMBIGUITY AND NOT A DESIGN CHOICE. The attribution is
+    unobservable in the database and so cannot be settled by a state diff; it
+    shows up only in ``ws-No-Paragraph`` and in the file-handler log. Rule R-6
+    governs: "Where a semantic question is ambiguous, the compiled program's
+    observed behavior decides it, and each such resolution must be documented
+    rather than settled silently." The oracle arbitrates by being made to fail
+    each step in turn - an unreachable host, a wrong password, a valid
+    connection to a database that does not exist - and reporting what
+    ``ws-No-Paragraph`` then holds.
+
+    WHAT IS NOT AMBIGUOUS. The status PAIR is identical whichever step failed:
+    ``(FS-Reply 99, We-Error 911)``, because the two statements that set it are
+    unguarded [copybooks/mysql-procedures.cpy:L127-L128] - anomaly A-2. So no
+    posted figure and no table row can depend on the attribution, which is
+    exactly why the question is safe to resolve by documented reasoning while
+    the oracle confirms it.
+
+    Args:
+        errno: The driver's error number. Non-positive when the driver never
+            reached a server.
+
+    Returns:
+        The :class:`~acas_posting.dal.status.ConnectStep` to report.
+
+        >>> _connect_step_for(1049)
+        <ConnectStep.SELECT_DB: 103>
+        >>> _connect_step_for(-1)
+        <ConnectStep.INIT: 101>
+        >>> _connect_step_for(2003)
+        <ConnectStep.REAL_CONNECT: 102>
+    """
+    if errno in SELECT_DB_ERRNOS:
+        return ConnectStep.SELECT_DB
+    if errno <= 0:
+        return ConnectStep.INIT
+    return ConnectStep.REAL_CONNECT
+
+
+def _db_error_status(
+    *,
+    errno: int,
+    message: str,
+    sql_state: str,
+    we_error: int,
+) -> DbErrorStatus:
+    """Map one connect failure through ``Mysql-1100-Db-Error``.
+
+    Delegates to :func:`~acas_posting.dal.status.mysql_1100_db_error` rather
+    than restating the mapping, so ``(99, 911)`` has exactly one
+    implementation in the package.
+
+    ``command`` is passed as empty on purpose. That argument feeds ONLY the
+    duplicate-key test, which examines ``Ws-Mysql-Command (1:6)``
+    [copybooks/mysql-procedures.cpy:L100] and can fire only for error numbers
+    1062 and 1022 [:L99]. Neither can arise from opening a connection, and
+    ``Mysql-1000-Open`` never writes ``Ws-Mysql-Command`` at all, so the
+    duplicate branch is unreachable on this path and there is no statement text
+    to report.
+
+    Args:
+        errno: The driver's error number.
+        message: The driver's error message - the equivalent of
+            ``Ws-Mysql-Error-Message`` [copybooks/mysql-variables.cpy:L86].
+        sql_state: The driver's SQLSTATE - the equivalent of
+            ``WS-Mysql-SqlState`` [copybooks/mysql-variables.cpy:L85].
+        we_error: The value ``We-Error`` already held.
+
+    Returns:
+        The status the error paragraph would have left behind.
+    """
+    return mysql_1100_db_error(
+        # `call "MySQL_errno" using Ws-Mysql-Error-Number`
+        # [copybooks/mysql-procedures.cpy:L97]. Text, because
+        # `Ws-Mysql-Error-Number` is `pic x(5)`
+        # [copybooks/mysql-variables.cpy:L84] and the duplicate test compares
+        # it as characters.
+        errno=str(errno) if errno > 0 else "",
+        # `call "MySQL_error" using Ws-Mysql-Error-Message` [:L107]
+        message=message,
+        # `call "MySQL_sqlstate" using WS-MYSQL-SqlState` [:L122]
+        sql_state=sql_state,
+        command="",
+        we_error=we_error,
+    )
+
+
+# =============================================================================
+#  THE CONNECT-TIME ASSERTION  -  RULE R-2 MADE CHECKABLE
+# =============================================================================
+
+
+def _assert_converter_pinned(connection: MySQLConnectionAbstract) -> None:
+    """Verify the pinned converter is really in force on a live connection.
+
+    Rule R-2 names this file for pinning the converter "rather than relying on
+    the default". A pinning that is never checked is indistinguishable from a
+    default that happens to agree today, so this function turns the guarantee
+    into something that fails loudly the moment it stops holding - on a driver
+    upgrade, a changed connection argument, or a caller that replaces the
+    converter after connecting.
+
+    Three checks, cheapest first:
+
+    1. **The converter object is an** :class:`AcasConverter`. If the argument
+       was dropped, nothing else is worth testing.
+    2. **Every pinned hook is still an override.** For each field type the
+       schema can produce, the resolved attribute must NOT be the driver base
+       class's, and each rejected hook must not be either. This covers all
+       five integer widths, both decimal wire types and both string wire types
+       without needing a table to read from.
+    3. **A live value probe.** :data:`CONVERTER_PROBE_STATEMENT` is executed
+       and its three values are checked for exact type and, for the decimal,
+       for its declared scale.
+
+    Args:
+        connection: A connection that has just been opened.
+
+    Raises:
+        ConverterPinningError: On any drift. The caller closes the connection
+            before letting this leave :func:`mysql_1000_open`.
+    """
+    converter = getattr(connection, "converter", None)
+    if not isinstance(converter, AcasConverter):
+        raise ConverterPinningError(
+            "rule R-2: the ACAS numeric converter is not in force - the "
+            f"connection is using {type(converter).__name__!r}. Every "
+            "connection must be opened with converter_class=AcasConverter so "
+            "that no accounting value passes through a binary floating-point "
+            "type in transport."
+        )
+
+    base = conversion.MySQLConverter
+    for field_type, hook in (
+        *PINNED_CONVERTER_HOOKS.items(),
+        *REJECTED_CONVERTER_HOOKS.items(),
+    ):
+        if getattr(AcasConverter, hook) is getattr(base, hook):
+            raise ConverterPinningError(
+                f"rule R-2: converter hook {hook!r} for driver field type "
+                f"{FieldType.get_info(field_type)!r} resolves to the driver's "
+                "own implementation, so that type would be converted by the "
+                "default this file exists to replace."
+            )
+
+    with execute_statement(connection, CONVERTER_PROBE_STATEMENT) as cursor:
+        probe = cursor.fetchone()
+
+    if probe is None or len(probe) != 3:
+        raise ConverterPinningError(
+            "rule R-2: the converter probe returned no row, so the pinning "
+            f"could not be verified (statement: {CONVERTER_PROBE_STATEMENT})"
+        )
+
+    probed_decimal, probed_integer, probed_text = probe
+
+    if not isinstance(probed_decimal, decimal.Decimal):
+        raise ConverterPinningError(
+            "rule R-2: a DECIMAL(10,2) column arrived as "
+            f"{type(probed_decimal).__name__!r} instead of decimal.Decimal. "
+            "No accounting value may pass through a binary floating-point "
+            "type at any point - not in computation, not in storage, not in "
+            "transport - and the 128 in-scope decimal columns all take this "
+            "path."
+        )
+    if str(probed_decimal) != CONVERTER_PROBE_EXPECTED_DECIMAL_TEXT:
+        raise ConverterPinningError(
+            "rule R-2: a DECIMAL(10,2) column lost its declared scale - "
+            f"expected {CONVERTER_PROBE_EXPECTED_DECIMAL_TEXT!r}, got "
+            f"{str(probed_decimal)!r}. The scale is part of the stored value "
+            "and the state diff compares it."
+        )
+    # The same fact stated as an exponent rather than as text, because the
+    # widest in-scope scale is what a money column carries and a normalised
+    # value would silently report a different one.
+    if -probed_decimal.as_tuple().exponent != SCHEMA_MAX_DECIMAL_SCALE:
+        raise ConverterPinningError(
+            "rule R-2: a DECIMAL(10,2) column arrived at exponent "
+            f"{probed_decimal.as_tuple().exponent} rather than at the "
+            f"{SCHEMA_MAX_DECIMAL_SCALE} decimal places every in-scope money "
+            "column declares."
+        )
+    # `isinstance(x, int)` would accept a bool, which is an int subclass and
+    # is not a value any in-scope column can hold, so the type is checked
+    # exactly.
+    if type(probed_integer) is not int:
+        raise ConverterPinningError(
+            "rule R-2: a signed integer column arrived as "
+            f"{type(probed_integer).__name__!r} instead of int. The 208 "
+            "in-scope integer columns carry the COBOL binary family, whose "
+            "truncation on divide is integer truncation."
+        )
+    if type(probed_text) is not str:
+        raise ConverterPinningError(
+            "rule R-2 support: a character column arrived as "
+            f"{type(probed_text).__name__!r} instead of str, so the 177 "
+            "in-scope char columns would not compare as text in a state diff."
+        )
+
+
+# =============================================================================
+#  `Mysql-1000-Open`  -  [copybooks/mysql-procedures.cpy:L63-L85]
+# =============================================================================
+
+
+def mysql_1000_open(
+    system_record: SystemRecord,
+    *,
+    ws_no_paragraph: int = 0,
+    we_error: int = WeError.SUCCESS,
+) -> OpenOutcome:
+    """Open the connection, as ``Mysql-1000-Open`` does.
+
+    Reproduces [copybooks/mysql-procedures.cpy:L63-L85] natively. The frozen
+    paragraph is three foreign calls and three identical failure arms::
+
+        Mysql-1000-Open.                                              [:L63]
+            move     zero to WS-Mysql-Time-Step                       [:L64]
+                             WS-SQL-Retry.                            [:L65]
+            call     "MySQL_init" using Ws-Mysql-Cid.                 [:L66]
+            if       Return-Code not = zero                           [:L67]
+                     move     101  to Ws-No-Paragraph                 [:L68]
+                     perform Mysql-1100-Db-Error thru Mysql-1190-Exit [:L69]
+                     go to Mysql-1090-Exit.                           [:L70]
+            call     "MySQL_real_connect" using Ws-Mysql-Host-Name    [:L72]
+                                                Ws-Mysql-Implementation
+                                                Ws-Mysql-Password
+                                                Ws-Mysql-Base-Name
+                                                Ws-Mysql-Port-Number
+                                                Ws-Mysql-Socket.      [:L77]
+            if       Return-Code not = zero                           [:L78]
+                     move     102 to Ws-No-Paragraph                  [:L79]
+                     perform Mysql-1100-Db-Error thru Mysql-1190-Exit [:L80]
+                     go to Mysql-1090-Exit.                           [:L81]
+            call     "MySQL_selectdb" using Ws-Mysql-Base-Name.       [:L82]
+            if       Return-Code not = zero                           [:L83]
+                     move     103 to Ws-No-Paragraph                  [:L84]
+                     perform Mysql-1100-Db-Error thru Mysql-1190-Exit [:L85]
+
+    Four things about it survive the migration:
+
+    * The parameter marshalling, including ``Ws-Mysql-Implementation``
+      occupying the USER slot - anomaly A-3. See
+      :func:`connection_parameters`.
+    * The three step codes, imported from ``dal/status.py`` as
+      :class:`~acas_posting.dal.status.ConnectStep`. The driver raises one
+      exception for a call that does all three things, so the attribution is a
+      recorded ambiguity - see :func:`_connect_step_for`.
+    * The unconditional ``(FS-Reply 99, We-Error 911)`` on every failure -
+      anomaly A-2 - produced by delegating to
+      :func:`~acas_posting.dal.status.mysql_1100_db_error`.
+    * The untouched ``ws-No-Paragraph`` on success, so that a clean open
+      "hides caller para lits if no errors" [:L45-L47].
+
+    Two things do not, and both are recorded as omissions in the module
+    docstring: the ``x"00"`` terminator on each parameter (O-1) and the reset
+    of the two dead lock-ladder counters at [:L64-L65] (O-2).
+
+    Two properties are added because the migration requires them rather than
+    because the paragraph has them, and both are argued in the module
+    docstring: ``autocommit`` is enabled, matching the server default the
+    twenty bridges run under; and the pinned converter is installed and then
+    verified.
+
+    NOTHING IS RETRIED. ``dal/status.py`` records the backoff ladder as dead
+    code (its anomaly N1), so a failure here is final - adding a retry would
+    be that defect repaired by another route.
+
+    Args:
+        system_record: The ``SYSTEM-REC`` row carrying the connection
+            parameters. Consulted only on the first call of the run - anomaly
+            A-1, see :func:`load_rdb_data_once`.
+        ws_no_paragraph: The value the caller already has in
+            ``ws-No-Paragraph``. Returned unchanged on success, exactly as the
+            frozen paragraph leaves it; the bridge sets 1 before performing the
+            paragraph [common/glpostingMT.cbl:L418].
+        we_error: The value the caller already has in ``We-Error``. Returned
+            unchanged on success, because the paragraph writes that field only
+            on the error path.
+
+    Returns:
+        An :class:`OpenOutcome`. On success it carries the live connection and
+        ``FsReply.SUCCESS``; on failure it carries no connection, the
+        ``(99, 911)`` pair, the step code and the three diagnostic fields.
+
+    Raises:
+        ConverterPinningError: If the connection opened but the pinned
+            converter is not in force. This is NOT reported as a COBOL status,
+            because it is not a condition the frozen program can be in: it
+            means the migration's own transport guarantee has failed, and rule
+            R-2 leaves nothing to degrade to. The connection is closed first.
+    """
+    rdb_data = load_rdb_data_once(system_record)
+    parameters = connection_parameters(rdb_data)
+
+    try:
+        connection = mysql.connector.connect(
+            **parameters,
+            # AUTOCOMMIT IS ON, AND THE ABSENCE OF A TRANSACTION SCOPE IS
+            # DELIBERATE. A census over all twenty in-scope bridges finds zero
+            # occurrences of COMMIT, ROLLBACK and START TRANSACTION, so every
+            # statement they issue is durable the moment it succeeds. The
+            # loaders confirm it from the other side; `common/glbatchLD.cbl`
+            # L9-L12 reads, verbatim:
+            #
+            #     *>  This modules uses commit and rollback so *
+            #     *>  you MUST ensure that autocommit is OFF   *
+            #     *>   in the rdb settings. It is as default   *
+            #     *>   set ON.                                 *
+            #
+            # i.e. the LOADERS turn it off; the BRIDGES never do, so they run
+            # under the ON default. This module therefore publishes no begin,
+            # no commit, no rollback and no transactional context manager -
+            # adding any of them would change when rows become visible and so
+            # change the state diff. It is also precisely why Agent Action Plan
+            # section 0.6.5 can say of the file-abandoning rejection path,
+            # verbatim: "The partial state is therefore committed, not rolled
+            # back."
+            autocommit=True,
+            # RULE R-2, WHICH NAMES THIS FILE. The converter is pinned
+            # explicitly rather than left to the driver's default. Honoured by
+            # both driver implementations, so `use_pure` is deliberately not
+            # passed: the C extension detects a custom converter and hands
+            # every value to it instead of converting in C.
+            converter_class=AcasConverter,
+            # MULTI-STATEMENT EXECUTION IS TURNED OFF, because the compiled
+            # program does not have it. The C interface the bridges link calls
+            # `mysql_real_connect(&sql, host, user, passwd, db, port, socket,
+            # 0)` - the final argument is the client-flag word and it is a
+            # LITERAL ZERO, so CLIENT_MULTI_STATEMENTS is never negotiated and
+            # the server rejects a second statement in one query with a syntax
+            # error. `mysql-connector-python` sets that flag BY DEFAULT, which
+            # would let one `execute` call run two statements; the negative
+            # entry unsets it and restores the frozen behaviour. Rule R-6
+            # settles it - the compiled program is the specification - and it
+            # is what makes `execute_statement`'s one-statement-per-call
+            # guarantee structural rather than a convention.
+            client_flags=[-ClientFlag.MULTI_STATEMENTS],
+            # No pool argument of any kind appears here, and none may be added:
+            # rule R-3 forbids a connection pool, and the frozen bridges open
+            # one connection per file-open and close it on file-close
+            # [common/glpostingMT.cbl:L389-L419, L433-L443].
+        )
+    except mysql.connector.Error as error:
+        errno = error.errno if isinstance(error.errno, int) else 0
+        return _failed_open(
+            step=_connect_step_for(errno),
+            errno=errno,
+            message=error.msg or str(error),
+            sql_state=error.sqlstate or "",
+            we_error=we_error,
+        )
+
+    try:
+        _assert_converter_pinned(connection)
+    except BaseException:
+        # The connection is unusable under rule R-2, so it is closed rather
+        # than leaked. `Mysql-1980-Close` is used so the close path stays
+        # single-sourced. No COMMIT precedes it - see that function.
+        mysql_1980_close(connection)
+        raise
+
+    # A clean open: the paragraph wrote neither `Fs-Reply`, nor `We-Error`, nor
+    # `ws-No-Paragraph`, so the caller's own values are handed straight back.
+    return mysql_1090_exit(
+        OpenOutcome(
+            connection=connection,
+            fs_reply=FsReply.SUCCESS,
+            we_error=we_error,
+            ws_no_paragraph=ws_no_paragraph,
+            sql_err="",
+            sql_msg="",
+            sql_state="",
+        )
+    )
+
+
+def _failed_open(
+    *,
+    step: ConnectStep,
+    errno: int,
+    message: str,
+    sql_state: str,
+    we_error: int,
+) -> OpenOutcome:
+    """Assemble the outcome of a failed connect, as the three arms do.
+
+    The three failure arms of ``Mysql-1000-Open`` differ in ONE statement -
+    the step code they stamp into ``ws-No-Paragraph``
+    [copybooks/mysql-procedures.cpy:L68, :L79, :L84] - and are otherwise
+    identical: each performs the same error paragraph, and two of the three
+    then jump to the exit while the third simply runs out of statements. So one
+    function serves all three, parameterised by the step, and the shared tail
+    is written once.
+
+    Args:
+        step: Which of the three steps failed.
+        errno: The driver's error number, or 0 if the driver never reached a
+            server.
+        message: The driver's error message.
+        sql_state: The driver's SQLSTATE, or ``""`` if it reported none.
+        we_error: The value ``We-Error`` already held.
+
+    Returns:
+        The failure :class:`OpenOutcome`, carrying no connection.
+    """
+    status = _db_error_status(
+        errno=errno,
+        message=message,
+        sql_state=sql_state,
+        we_error=we_error,
+    )
+    _LOG.error(
+        "Mysql-1000-Open failed at step %d (%s): "
+        "FS-Reply=%d WE-Error=%d SQLSTATE=%r %s",
+        int(step),
+        step.name,
+        int(status.fs_reply),
+        int(status.we_error),
+        status.sql_state.strip(),
+        status.sql_msg.strip(),
+    )
+    return mysql_1090_exit(
+        OpenOutcome(
+            connection=None,
+            fs_reply=status.fs_reply,
+            we_error=status.we_error,
+            ws_no_paragraph=int(step),
+            sql_err=status.sql_err,
+            sql_msg=status.sql_msg,
+            sql_state=status.sql_state,
+        )
+    )
+
+
+def mysql_1090_exit(outcome: OpenOutcome) -> OpenOutcome:
+    """The single convergence point of the open paragraph.
+
+    ``Mysql-1090-Exit`` [copybooks/mysql-procedures.cpy:L87-L88] is a label
+    followed by ``exit.`` and nothing else. It exists because two of the three
+    failure arms transfer to it - ``go to Mysql-1090-Exit`` at [:L70] and
+    [:L81] - and because the caller performs the paragraph range
+    ``MYSQL-1000-OPEN THRU MYSQL-1090-EXIT``
+    [common/glpostingMT.cbl:L419], which needs a named end.
+
+    Both of those ``go to``s are class-3 transfers under the Agent Action
+    Plan's taxonomy - a jump to a section's trailing exit label becomes a
+    ``return`` - so in Python they are ``return mysql_1090_exit(...)``. Keeping
+    the paragraph as a named function preserves the paragraph-to-function
+    correspondence rule R-5 requires even where the transfer mechanism has
+    changed, and gives the traceability document a target to point at.
+
+    It transforms nothing, because the COBOL label transforms nothing.
+
+    Args:
+        outcome: The outcome the arriving arm assembled.
+
+    Returns:
+        That same outcome, unchanged.
+    """
+    return outcome
+
+
+# =============================================================================
+#  `Mysql-1980-Close`  -  [copybooks/mysql-procedures.cpy:L264-L265]
+# =============================================================================
+
+
+def mysql_1980_close(connection: MySQLConnectionAbstract | None) -> None:
+    """Close the connection, as ``Mysql-1980-Close`` does.
+
+    The frozen block is two lines [copybooks/mysql-procedures.cpy:L264-L265]::
+
+        Mysql-1980-Close.
+            call "MySQL_close".
+
+    and the bridge reaches it on a file-close request,
+    ``PERFORM MYSQL-1980-CLOSE THRU MYSQL-1999-EXIT``
+    [common/glpostingMT.cbl:L443].
+
+    NO COMMIT PRECEDES THE CLOSE, and none is added. Under autocommit there is
+    nothing outstanding to make durable, so a COMMIT here would be added
+    behaviour with an observable consequence - it would suppress the partial
+    state that Agent Action Plan section 0.6.5 requires the file-abandoning
+    rejection path to leave behind. Equally there is no ROLLBACK: the frozen
+    close discards nothing.
+
+    Closing is idempotent and tolerant, matching ``MySQL_close``, which takes
+    no argument and reports no status: the frozen paragraph cannot fail and
+    neither can this. A ``None`` connection - the shape a failed open returns -
+    is accepted and ignored, so a caller may close unconditionally.
+
+    Args:
+        connection: The connection to close, or ``None``.
+    """
+    if connection is None:
+        return
+    try:
+        connection.close()
+    except mysql.connector.Error as error:
+        # `call "MySQL_close"` returns no status and the frozen paragraph
+        # tests none, so a close failure cannot change control flow here
+        # either. It is logged and dropped: raising would invent an error path
+        # the specification does not have (rule R-3, nothing added).
+        _LOG.debug("Mysql-1980-Close: driver reported %s on close", error)
+    mysql_1999_exit()
+
+
+def mysql_1999_exit() -> None:
+    """The convergence point of the close block.
+
+    ``Mysql-1999-Exit`` [copybooks/mysql-procedures.cpy:L267-L268] is, like
+    ``Mysql-1090-Exit``, a label followed by ``exit.``. It is the named end of
+    the range the bridge performs [common/glpostingMT.cbl:L443], and it is
+    reproduced as a function for the same rule R-5 reason: every paragraph in
+    the migrated surface has a correspondingly named function, so the
+    traceability document can be generated rather than curated.
+
+    It does nothing, because the COBOL label does nothing.
+    """
+    return
+
+
+# =============================================================================
+#  STATEMENT EXECUTION  -  ONE STATEMENT, BOUND PARAMETERS, NO OPTIMISATION
+# =============================================================================
+
+
+@contextmanager
+def execute_statement(
+    connection: MySQLConnectionAbstract,
+    statement: str,
+    parameters: Sequence[Any] = (),
+) -> Iterator[MySQLCursorAbstract]:
+    """Execute exactly one statement and yield its cursor.
+
+    The shared execution path for every handler module, corresponding to the
+    frozen copybook's ``Mysql-1200-Select`` [copybooks/mysql-procedures.cpy:
+    L147-L150] and ``Mysql-1210-Command`` [:L164-L178], both of which issue a
+    single ``call "MySQL_query"`` and then test the return code. The caller
+    fetches from the yielded cursor, mirroring the way a bridge stores the
+    result and walks it row by row rather than being handed a materialised
+    list.
+
+    IDENTIFIERS MUST ALREADY BE QUOTED. This function binds VALUES and never
+    interpolates them, so ``statement`` arrives with its table and column names
+    already passed through :func:`quote_identifier` - exactly as a bridge
+    assembles ``"SELECT * FROM " "`GLPOSTING-REC`" " WHERE " ...``
+    [common/glpostingMT.cbl:L623-L625]. Values travel as ``%s`` placeholders
+    and are bound by the driver.
+
+    NO OPTIMISATION IS PERFORMED, AND NONE MAY BE ADDED. Prepared-statement
+    caching, multi-statement execution, batching and result prefetch are all
+    forbidden here, because the exact sequence of statements is what the
+    scenario state diff measures - Agent Action Plan section 0.3.3 objects to
+    an ORM on precisely that ground, that it "would obscure the exact statement
+    ordering that the state diff is sensitive to" - and section 0.8.4 settles
+    the wider question: "Any performance work is therefore out of scope by
+    construction, not merely unrequested." So each call creates one cursor,
+    issues one statement in the caller's order, and closes that cursor.
+    Multi-statement execution is not merely avoided here but DISABLED on the
+    connection, so passing two statements is refused by the server.
+
+    Args:
+        connection: A connection from :func:`mysql_1000_open`, so the pinned
+            converter applies to everything fetched through it.
+        statement: One SQL statement, identifiers already backtick-quoted and
+            values expressed as ``%s`` placeholders.
+        parameters: The values to bind, in the statement's own order. Empty by
+            default, for a statement that carries no placeholder.
+
+    Yields:
+        The cursor the statement was executed on, positioned before the first
+        row. Closed when the block ends, whether or not it raised.
+    """
+    cursor = connection.cursor()
+    try:
+        # One `execute` per call, so one statement per call. The guarantee is
+        # structural rather than a convention: `mysql_1000_open` unsets
+        # CLIENT_MULTI_STATEMENTS, matching the literal-zero client-flag word
+        # the C interface passes, so a second statement in this text is a
+        # SERVER-SIDE SYNTAX ERROR rather than a silent second execution.
+        # Parameters are bound by the driver and never formatted into the text.
+        cursor.execute(statement, tuple(parameters))
+        yield cursor
+    finally:
+        # The cursor is closed on every path. Any rows the caller chose not to
+        # fetch are discarded first, because the driver refuses to close a
+        # cursor whose result is unread and that refusal would otherwise
+        # replace the caller's own exception with a misleading one.
+        #
+        # THIS IS CLEANUP, NOT PREFETCH. It runs only after the caller has
+        # finished with the cursor, nothing read here is returned to anyone,
+        # and it changes neither which statements are issued nor their order -
+        # which is what the state diff measures. `consume_results` is the
+        # driver's own name for exactly this operation and is present on both
+        # implementations; it is resolved defensively because the abstract base
+        # class does not declare it.
+        discard_unread = getattr(connection, "consume_results", None)
+        if discard_unread is not None:
+            try:
+                discard_unread()
+            except mysql.connector.Error as error:
+                _LOG.debug(
+                    "execute_statement: discarding the unread result "
+                    "reported %s",
+                    error,
+                )
+        try:
+            cursor.close()
+        except mysql.connector.Error as error:
+            # A cursor that will not close is not a condition the frozen
+            # source has an error path for, and raising from a `finally` would
+            # hide the caller's own failure. It is recorded and dropped.
+            _LOG.debug("execute_statement: cursor close reported %s", error)
