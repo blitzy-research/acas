@@ -2,7 +2,7 @@
 
 WHAT THIS MODULE OWNS
 =====================
-This module is the sole owner of two things for the whole migrated cycle:
+Two things, for the whole migrated cycle:
 
 * the **status protocol** - the ``FS-Reply`` value set, the ``We-Error`` code
   set, the SQLSTATE vocabulary, and the mapping from a driver error to that
@@ -12,63 +12,48 @@ This module is the sole owner of two things for the whole migrated cycle:
 
 It is the deepest module of ``acas_posting.dal``: it imports nothing from
 ``dal`` and nothing from ``cobol``, so every other data-access module can
-depend on it without any possibility of a cycle.
+depend on it with no possibility of a cycle.
 
 WHY IT EXISTS AT ALL: THE TWO-WAY SPLIT OF ONE COPYBOOK
 =======================================================
 One COBOL copybook, ``copybooks/wsfnctn.cob``, mixes a record layout with an
-operation vocabulary. The Python layering separates them, so a single ``COPY``
-becomes two imports. Agent Action Plan section 0.5.3, verbatim:
-
-    "Every `COPY` of the function-code copybook becomes two imports - the
-    record classes from `records/file_access.py`, and the status and
-    vocabulary enumerations from `dal/status.py` - because the single COBOL
-    copybook mixes data layout with operation vocabulary and the Python
-    layering separates them."
-
-Agent Action Plan section 0.4.3 gives the resulting import contract verbatim::
+operation vocabulary, so a single ``COPY`` becomes two imports. Agent Action
+Plan section 0.4.3 gives the contract verbatim::
 
     FROM:  copy "wsfnctn.cob".
     TO:    from acas_posting.records.file_access import FileAccess, RdbData, LoggingData
            from acas_posting.dal.status import FsReply, FileFunction, AccessType
 
-So the division of labour is fixed and total:
-
-``records/file_access.py``
-    owns the record SHAPE - ``FileAccess``, ``LoggingData``, ``RdbData``,
-    ``FaRdbmsFlatStatuses``, ``CursParts``, ``Curs2Parts``. This module never
-    redeclares any of them.
-``cobol/condition_names.py``
-    owns the ``88``-level PREDICATES (``is_fn_open`` and its fourteen
-    siblings). This module never redeclares those either.
-**this module**
-    owns the VALUES those names stand for, and the behaviour that turns a
-    driver error into an ACAS status pair.
+So the division of labour is fixed and total: ``records/file_access.py`` owns
+the record SHAPE (``FileAccess``, ``LoggingData``, ``RdbData``,
+``FaRdbmsFlatStatuses``, ``CursParts``, ``Curs2Parts``),
+``cobol/condition_names.py`` owns the ``88``-level PREDICATES (``is_fn_open``
+and its fourteen siblings), and THIS module owns the VALUES those names stand
+for plus the behaviour that turns a driver error into an ACAS status pair.
+Neither of the other two is ever redeclared here.
 
 PROVENANCE, AND A CORRECTION TO THE CITED SPANS
 ===============================================
-Every locator below was verified against this checkout rather than copied
-forward, because rule R-5 makes a wrong locator a traceability defect.
+Every locator below is traced to this checkout rather than copied forward,
+because rule R-5 makes a wrong locator a traceability defect.
 
-* ``copybooks/wsfnctn.cob`` is **117 lines**. The Agent Action Plan cites the
-  spans ``L23-L38``, ``L57-L64`` and ``L88-L118``; all three are approximate
-  and the last runs one line past end of file. The verified spans are
-  ``L22-L26`` (the status fields), ``L44-L55`` (``Logging-Data``),
-  ``L56-L62`` (``RDB-Data``), ``L88-L105`` (``File-Function`` and its fifteen
-  ``88`` levels) and ``L107-L116`` (``Access-Type`` and its nine).
+* ``copybooks/wsfnctn.cob`` is **117 lines**. The Agent Action Plan cites
+  ``L23-L38``, ``L57-L64`` and ``L88-L118``; all three are approximate and the
+  last runs one line past end of file. The spans in this checkout are
+  ``L22-L26`` (status fields), ``L44-L55`` (``Logging-Data``), ``L56-L62``
+  (``RDB-Data``), ``L88-L105`` (``File-Function`` and its fifteen ``88``
+  levels) and ``L107-L116`` (``Access-Type`` and its nine).
 * The authoritative status table is the module-usage block of the generated
-  bridge, ``common/glpostingMT.cbl:L125-L158``. It is prose in a comment, not
-  code: neither ``Fs-Reply`` nor ``We-Error`` carries a single ``88``-level
-  condition name anywhere in the frozen source, so every symbolic name in
-  this module is OURS, derived from that prose. A reader must not go looking
-  for COBOL condition names for them, because there are none.
-* Two copybooks the Agent Action Plan does not cite are the real
-  specification for the error path: ``copybooks/mysql-procedures.cpy`` and
-  ``copybooks/mysql-variables.cpy``. Both are ``COPY``d by all twenty
-  in-scope bridges - verified bridge by bridge, twenty of twenty - and they
-  contain the code that actually sets the status pair. Their line numbers as
-  given in the briefing material run one to two lines out; the numbers used
-  below are the verified ones.
+  bridge, ``common/glpostingMT.cbl:L125-L158`` - prose in a comment, not code.
+  Neither ``Fs-Reply`` nor ``We-Error`` carries a single ``88``-level condition
+  name anywhere in the frozen source, so every symbolic name here is OURS,
+  derived from that prose; there are none to look up.
+* Two copybooks the Agent Action Plan does not cite are the real specification
+  for the error path: ``copybooks/mysql-procedures.cpy`` and
+  ``copybooks/mysql-variables.cpy``, ``COPY``d by twenty of the twenty
+  in-scope bridges and holding the code that actually sets the status pair.
+  Their line numbers in the briefing material run one to two lines out; the
+  numbers below are read from the checkout.
 
 A MISSING BUILD INPUT, RECORDED AND NOT INVENTED
 ================================================
@@ -78,14 +63,12 @@ A MISSING BUILD INPUT, RECORDED AND NOT INVENTED
 
 That copybook **does not exist anywhere in the checkout** - a search of the
 whole tree returns zero hits - so the twenty-two bridges that reference it
-cannot be compiled as they stand. It is a second missing build input
-alongside the bridge's C interface object, which the Agent Action Plan
-section 0.5.2 records as having no build rule in the repository.
-
-Whatever SQLSTATE-to-status detail that copybook holds is therefore
-**unavailable**, and none of it is invented here. This module reproduces only
-the SQLSTATE behaviour that is present in the frozen source: the duplicate
-tests of section "DUPLICATE KEY" below, and nothing else.
+cannot be compiled as they stand. It is a second missing build input alongside
+the bridge's C interface object, which Agent Action Plan section 0.5.2 records
+as having no build rule. Whatever SQLSTATE-to-status detail it holds is
+therefore **unavailable** and none of it is invented here: this module
+reproduces only the SQLSTATE behaviour present in the frozen source, namely
+the duplicate tests of section "DUPLICATE KEY" below.
 
 THE ANOMALIES REPRODUCED HERE (RULE R-4)
 ========================================
@@ -97,102 +80,67 @@ sentence:
     fixed is a failure."
 
 Six anomalies live in this module's remit. Each is reproduced, never
-corrected, and each carries an inline locator comment at the site that
-reproduces it, per Agent Action Plan section 0.7.4 conflict C-4. Every one of
-them also belongs in ``docs/migration/anomaly-log.md``.
+corrected, and each is stated IN FULL - with every locator - in a comment at
+the site that reproduces it, per Agent Action Plan section 0.7.4 conflict C-4.
+This is the index; the sites are authoritative. Every one is also destined for
+the migration anomaly log, which a later boundary creates.
 
-N1  The lock-retry backoff ladder is dead code. ``Mysql-1300-DB-Error`` is
-    written in full at ``copybooks/mysql-procedures.cpy:L209-L255``, and the
-    only ``perform`` of it in the entire repository is commented out at
-    ``copybooks/mysql-procedures.cpy:L167``. Consequences: ``We-Error 910``
-    is unreachable, no statement is ever retried, and a genuine table lock is
-    misreported as a connect/initialise error. See ``LOCK_RETRY_LADDER`` and
-    ``mysql_1300_db_error``.
-N2  ``FS-Reply 23`` is documented by every bridge and produced by only some
-    of them. ``glpostingMT`` returns 21 where its own prose promises 23
-    (``common/glpostingMT.cbl:L668`` and ``:L676``, each carrying the
-    maintainer's ``*> from 23``), while seven of the twenty in-scope bridges
-    still return 23. See ``FsReply.KEY_NOT_FOUND``.
-N3  ``We-Error 911`` is a catch-all. ``copybooks/mysql-procedures.cpy:L127``
-    and ``:L128`` set the pair ``(99, 911)`` unconditionally for every
-    non-duplicate error, although 911 is documented at
-    ``common/glpostingMT.cbl:L143`` as a connect/initialise failure only.
-    Callers narrow it afterwards. See ``mysql_1100_db_error``.
-N4  The documented SQLSTATE map was never implemented. The block at
-    ``copybooks/mysql-procedures.cpy:L109-L119`` ends in a commented-out test
-    at ``:L124``, and nothing in the error path ever reads the value stored
-    at ``:L123``. See ``DOCUMENTED_SQLSTATE_MAPPINGS``.
-N5  The ``Access-Type 9`` relation arm is unreachable. ``ba060-Process-Start``
-    rejects any access type outside 5 through 8 at
-    ``common/glpostingMT.cbl:L695``, yet the relation table that follows it
-    declares a ``when 9`` arm at ``:L724-L725``. See
-    ``START_RELATION_BY_ACCESS_TYPE``.
-N6  ``We-Error 992`` has no producer. An exhaustive search of ``common/`` and
-    ``copybooks/`` finds no statement anywhere that sets it; it exists only
-    in the prose table at ``common/glpostingMT.cbl:L140``. See
+N1  The lock-retry backoff ladder is dead code, so ``We-Error 910`` is
+    unreachable and a table lock is misreported. See ``LOCK_RETRY_LADDER``.
+N2  ``FS-Reply 23`` is documented by every bridge and produced by only seven
+    of the twenty. See ``FsReply.KEY_NOT_FOUND``.
+N3  ``We-Error 911`` is a catch-all, not the connect failure it is documented
+    as. See ``mysql_1100_db_error``.
+N4  The documented SQLSTATE map was never implemented. See
+    ``DOCUMENTED_SQLSTATE_MAPPINGS``.
+N5  The ``Access-Type 9`` relation arm is unreachable behind the START guard.
+    See ``START_RELATION_BY_ACCESS_TYPE``.
+N6  ``We-Error 992`` has no producer anywhere in the frozen tree. See
     ``DOCUMENTATION_ONLY_WE_ERRORS``.
 
 DELIBERATE OMISSIONS (RULE R-5)
 ===============================
-Rule R-5 requires omissions to be recorded as omissions rather than left to
-be discovered as gaps.
+Rule R-5 requires omissions to be recorded rather than discovered as gaps.
 
 1. **No import of ``acas_posting.cobol``.** ``cobol/condition_names.py``
-   offers ``values_for`` and ``specs_for_variable`` and invites this module
-   to build its enumerations from that catalogue instead of transcribing the
-   fifteen out-of-order function codes again. That invitation is declined:
-   the per-directory import table of Agent Action Plan section 0.4.3 grants
-   no ``dal`` to ``cobol`` edge - ``cobol/*.py`` may import
-   ``dictionary.loader`` only, and may not import ``dal`` - so taking it
-   would be a layering violation. The literal values are assigned here
-   instead, and the two modules are cross-checked by test rather than by
-   import.
+   offers ``values_for`` and ``specs_for_variable``, which would spare this
+   module transcribing the fifteen out-of-order function codes again.
+   Declined: the per-directory import table of Agent Action Plan section 0.4.3
+   grants no ``dal`` to ``cobol`` edge. The literal values are assigned here
+   and the two modules are cross-checked by test.
 2. **The interactive tail of ``Mysql-1110-Report-Problem`` is dropped.** That
    paragraph (``copybooks/mysql-procedures.cpy:L130-L137``) displays two
-   messages and then blocks on ``accept ws-reply`` at ``:L136``. Per Agent
-   Action Plan section 0.3.4 a diagnostic display with no database effect
-   becomes a log record, and an accept that merely pauses for
-   acknowledgement is dropped entirely. The display becomes one log record;
-   the pause is gone; control flow is untouched.
+   messages then blocks on ``accept ws-reply`` at ``:L136``. Per Agent Action
+   Plan section 0.3.4 the display becomes one log record and the pause - which
+   has no database effect - is dropped; control flow is untouched.
 3. **One maintainer note is paraphrased rather than quoted.** The bracketed
    note against SQLSTATE ``0200n`` at
-   ``copybooks/mysql-procedures.cpy:L112`` proposes deciding between 23 and
-   10 by an entropy source. It is paraphrased below rather than quoted,
-   because quoting it would put the name of that entropy source into a module
-   that rule R-6 requires to be free of one. It was never implemented in any
-   case, which is the point that matters.
+   ``copybooks/mysql-procedures.cpy:L112`` proposes deciding between 23 and 10
+   by an entropy source. Quoting it would name that entropy source inside a
+   module rule R-6 requires to be free of one, and it was never implemented.
 
-DETERMINISM (RULE R-6)
+RULES R-6, R-2 AND R-1
 ======================
-There is no clock read, no entropy source, no environment read and no host
-lookup anywhere below, and no sleep call of any kind - not even in the dead
-ladder of N1, whose rung durations are held as integer data rather than
-performed. Import is side-effect free: nothing below opens a file or a
-socket, and the one dependency on another package is a type-checking-only
-import. Every collection published is an immutable tuple, frozenset or
-mapping proxy, so member order is fixed and two runs observe it identically.
-
-EXACTNESS (RULE R-2)
-====================
-Every status code here is an ``int``. The rung durations of N1 are integer
-nanoseconds and integer seconds exactly as the COBOL writes them, never a
-fractional literal. No binary floating-point type appears in this module in
-any role.
-
-NO COBOL AT RUNTIME (RULE R-1)
-==============================
-The COBOL error path reaches its driver through foreign calls -
-``call "MySQL_errno"``, ``call "MySQL_error"``, ``call "MySQL_sqlstate"``.
-Those are **reimplemented natively** here from the information a Python
-driver exception already carries. None of them is invoked, nothing is
-executed out of process, and this module runs on a host with no COBOL
-compiler and no COBOL runtime present.
+No clock read, no entropy source, no environment read, no host lookup and no
+sleep call appears below - not even in the dead ladder of N1, whose rung
+durations are integer data rather than performed waits. Import is side-effect
+free and the one dependency on another package is type-checking-only. Every
+collection published is an immutable tuple, frozenset or mapping proxy, so
+member order is fixed and two runs observe it identically (R-6). Every status
+code is an ``int`` and the N1 rung durations are integer nanoseconds and
+seconds exactly as the COBOL writes them; no binary floating-point type
+appears in any role (R-2). The COBOL error path reaches its driver through
+``call "MySQL_errno"``, ``call "MySQL_error"`` and ``call "MySQL_sqlstate"``;
+those are reimplemented natively here from what a Python driver exception
+already carries, none is invoked, and this module runs on a host with no COBOL
+compiler and no COBOL runtime present (R-1).
 """
 
 from __future__ import annotations
 
 import enum
 import logging
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -215,7 +163,6 @@ __all__: Final[tuple[str, ...]] = (
     # `sorted()` order used by `records/file_access.py`; that module documents
     # its own choice at its `__all__`, and neither ordering is observable
     # behaviour.
-    #
     # The frozen tables derived from the frozen source.
     "DOCUMENTATION_ONLY_WE_ERRORS",
     "DOCUMENTED_SQLSTATE_MAPPINGS",
@@ -227,6 +174,10 @@ __all__: Final[tuple[str, ...]] = (
     "FILE_KEY_NO_GUARD_RANGE",
     "LOCK_ERRNOS",
     "LOCK_RETRY_LADDER",
+    "LOG_CATEGORY_UNCLASSIFIED",
+    "LOG_ELISION",
+    "LOG_FIELD_MAX_CHARS",
+    "LOG_REDACTION",
     "MISSING_SQLSTATE_COPYBOOK",
     "SQL_ERR_WIDTH",
     "SQL_MSG_WIDTH",
@@ -252,6 +203,7 @@ __all__: Final[tuple[str, ...]] = (
     "SqlStateMapping",
     "WeError",
     # The behaviour.
+    "db_error_log_category",
     "end_of_file_status",
     "implies_fs_reply_error",
     "is_duplicate_key_bridge_level",
@@ -262,6 +214,8 @@ __all__: Final[tuple[str, ...]] = (
     "mysql_1300_db_error",
     "override_we_error_for_operation",
     "raise_for_status",
+    "redact_for_log",
+    "sanitise_for_log",
     "start_access_type_is_valid",
     "start_relation_for",
 )
@@ -283,17 +237,13 @@ _LOG: Final[logging.Logger] = logging.getLogger(__name__)
 MISSING_SQLSTATE_COPYBOOK: Final[str] = "ACAS-SQLstate-error-list.cob"
 
 
-# =============================================================================
 #  FS-REPLY - THE FILE-HANDLER REPLY CODE
-#
 #  `03  Fs-Reply        pic 99.`              [copybooks/wsfnctn.cob:L25]
-#
 #  Two digits, unsigned, and carrying ZERO `88`-level condition names in the
 #  frozen source - `cobol/condition_names.py` independently reports a count of
 #  0 for this variable. Every name below is therefore OURS, derived from the
 #  prose table at [common/glpostingMT.cbl:L125-L131]. There is no COBOL
 #  condition name to look up.
-# =============================================================================
 
 
 class FsReply(enum.IntEnum):
@@ -353,40 +303,17 @@ class FsReply(enum.IntEnum):
     #: `is_duplicate_key_bridge_level`.
     DUPLICATE_KEY = 22
 
-    #: `23 = Key not found.     from read indexed`
-    #: [common/glpostingMT.cbl:L130]
-    #:
-    #: *** ANOMALY N2 - REPRODUCED, NOT FIXED (rule R-4) ***
-    #:
-    #: This member is retained precisely BECAUSE the reference bridge never
-    #: produces it. `glpostingMT` has zero `move 23 to fs-reply` sites; its
-    #: read-indexed path returns 21 instead, and the maintainer's own trailing
-    #: comment records the change at both sites:
-    #:
-    #:     L668   move 21 to fs-reply    *> from 23
-    #:     L669   move 990 to WE-Error
-    #:     L676   move 21   to fs-reply    *> from 23
-    #:     L677   move 989  to WE-Error
-    #:
-    #: [common/glpostingMT.cbl:L668-L669] and [common/glpostingMT.cbl:L676-L677]
-    #:
-    #: But the change was applied to only SOME bridges, and that - not the
-    #: mere existence of an unused code - is the anomaly. Census of the twenty
-    #: in-scope bridges, by count of `move 23` versus `move 21` sites:
-    #:
-    #:   returns 21 (7): nominalMT, glpostingMT, glbatchMT, slpostingMT,
-    #:                   analMT, irsnominalMT, irspostingMT      (0 x 23, 4 x 21)
-    #:   returns 23 (7): salesMT, valueMT, slinvoiceMT, otm3MT,
-    #:                   purchMT, plinvoiceMT, otm5MT            (2-4 x 23)
-    #:   no keyed read (6): systemMT, dfltMT, finalMT, sys4MT,
-    #:                      irsdfltMT, irsfinalMT                (0 x either)
-    #:
-    #: So one logical condition - "key not found" - answers 21 from a General
-    #: Ledger or IRS table and 23 from a Sales or Purchase table, while every
-    #: bridge's prose table still documents 23. A caller testing for a literal
-    #: value gets a different answer depending on which table it asked.
-    #: Normalising the two camps onto one value would be a defect fix, and
-    #: rule R-4 makes a defect fixed a failure. Both values stay.
+    #: `23 = Key not found.     from read indexed` [common/glpostingMT.cbl:L130] *** ANOMALY
+    #: N2 - REPRODUCED, NOT FIXED (rule R-4) *** Retained precisely BECAUSE the reference
+    #: bridge never produces it: `glpostingMT` has zero `move 23 to fs-reply` sites and
+    #: returns 21, the change recorded at both sites - `move 21 to fs-reply *> from 23` with
+    #: 990 [common/glpostingMT.cbl:L668-L669] and with 989 [:L676-L677]. The anomaly is that
+    #: it reached only SOME bridges. Census of the twenty in-scope bridges: seven return 21
+    #: (nominalMT, glpostingMT, glbatchMT, slpostingMT, analMT, irsnominalMT, irspostingMT),
+    #: seven return 23 (salesMT, valueMT, slinvoiceMT, otm3MT, purchMT, plinvoiceMT, otm5MT),
+    #: six have no keyed read (systemMT, dfltMT, finalMT, sys4MT, irsdfltMT, irsfinalMT). So
+    #: one condition answers 21 from a GL or IRS table and 23 from a Sales or Purchase one
+    #: while every prose table documents 23.
     KEY_NOT_FOUND = 23
 
     #: `99 = Indicates an error see WE-Error, SQL-ERR/MSG for more info`
@@ -423,28 +350,16 @@ def end_of_file_status() -> tuple[FsReply, int]:
     return FsReply.END_OF_FILE, END_OF_FILE_WE_ERROR
 
 
-# =============================================================================
-#  FILE-FUNCTION - THE OPERATION CODE
-#
-#  `03  File-Function   pic 99.`              [copybooks/wsfnctn.cob:L88]
-#  Fifteen `88`-level condition names             [copybooks/wsfnctn.cob:L89-L105]
-#
-#  Two digits. The values are NOT monotonic with declaration order: the block
-#  runs 1 through 9, then jumps to 15 BEFORE 13, then to 31 through 34. That
-#  ordering is the frozen source's own and is preserved exactly - the members
-#  below are in DECLARATION order, not value order.
-#
-#  The out-of-sequence pair has a documented cause. The changelog announces
-#  widening the wrong field on 07/12/16 and corrects itself on 22/12/16,
-#  verbatim [copybooks/wsfnctn.cob:L14-L15]:
-#
-#      *> 22/12/16 vbc - Oops, previous chg should have been for File-Function.
-#      *>                next-read-raw changed to 13.
-#
-#  so 15 was allocated first and 13 assigned afterwards. The numeric gaps -
-#  10, 11, 12, 14 and 16 through 30 - are unallocated in the frozen source and
-#  are NOT filled here.
-# =============================================================================
+#  FILE-FUNCTION - THE OPERATION CODE. `03  File-Function   pic 99.`
+#  [copybooks/wsfnctn.cob:L88] with fifteen `88`-level condition names [:L89-L105]. Two
+#  digits, and the values are NOT monotonic with declaration order: 1 through 9, then 15
+#  BEFORE 13, then 31 through 34. That ordering is the frozen source's own, so the members
+#  below are in DECLARATION order, not value order. The out-of-sequence pair has a documented
+#  cause - the changelog widens the wrong field on 07/12/16 and corrects itself on 22/12/16,
+#  verbatim `*> Oops, previous chg should have been for File-Function. / next-read-raw changed
+#  to 13.` [copybooks/wsfnctn.cob:L14-L15] - so 15 was allocated first and 13 assigned
+#  afterwards. The gaps 10, 11, 12, 14 and 16 through 30 are unallocated in the frozen source
+#  and are NOT filled here.
 
 
 class FileFunction(enum.IntEnum):
@@ -545,27 +460,15 @@ class FileFunction(enum.IntEnum):
     READ_NEXT_HEADER = 34
 
 
-
-# =============================================================================
-#  ACCESS-TYPE - THE OPEN MODE, AND (FOR START) THE RELATION
-#
-#  `03  Access-Type     pic 9.` [copybooks/wsfnctn.cob:L107]
-#  Nine `88`-level condition names       [copybooks/wsfnctn.cob:L108-L116]
-#
-#  ONE digit, not two. The changelog announces widening it and then withdraws
-#  the announcement, and the field was never in fact widened:
-#
-#      *>  7/12/16 vbc - Increased Access-Type to 99 from 9 for extra adhoc
-#      *>                functions such as select x ORDER BY etc.
-#      *>                Not used yet.                 [copybooks/wsfnctn.cob:L11-L13]
-#      *> 22/12/16 vbc - Oops, previous chg should have been for File-Function.
-#      *>                next-read-raw changed to 13.  [copybooks/wsfnctn.cob:L14-L15]
-#
-#  The `pic 9` at L107 is the state of the frozen source today, so one digit
-#  is what is modelled. Since the nine values are 1 through 9 the distinction
-#  never truncates a legal value - but it does mean there is no room for a
-#  tenth, which is the fact a future reader needs.
-# =============================================================================
+#  ACCESS-TYPE - THE OPEN MODE, AND (FOR START) THE RELATION. `03  Access-Type     pic 9.`
+#  [copybooks/wsfnctn.cob:L107] with nine `88`-level condition names [:L108-L116]. ONE digit,
+#  not two: the changelog announces widening it to 99 "for extra adhoc functions such as
+#  select x ORDER BY etc. / Not used yet." [copybooks/wsfnctn.cob:L11-L13] and then withdraws
+#  the announcement two entries later, `*> Oops, previous chg should have been for
+#  File-Function.` [:L14-L15], and the field was never in fact widened. The `pic 9` at L107 is
+#  the state of the frozen source, so one digit is modelled. Since the nine values are 1
+#  through 9 the distinction never truncates a legal value - but there is no room for a tenth,
+#  which is the fact a future reader needs.
 
 
 class AccessType(enum.IntEnum):
@@ -625,28 +528,18 @@ class AccessType(enum.IntEnum):
     NOT_GREATER_THAN = 9
 
 
-# -----------------------------------------------------------------------------
-#  ACCESS-TYPE 5-9 AS THE START RELATION
-#
-#  Why the caller's `Access-Type` survives into a START at all: every facade
-#  verb begins by clearing the field, EXCEPT the `-Start` verbs. The facade
-#  copybook's changelog states the exemption in as many words, verbatim
-#  [copybooks/Proc-ACAS-FH-Calls.cob:L18]:
-#
-#      *> 14/08/23 vbc - 1.08 - Remove 'move zero to access-type for Start,
-#      *>                       it is set !!!
-#
-#  and the general rule it is an exemption FROM is at
-#  [copybooks/Proc-ACAS-FH-Calls.cob:L15]: `move zero to Access-Type to keep
-#  logging clean.` Verified mechanically over the copybook: not one of the
-#  `-Start` paragraphs clears the field (`GL-Nominal-Start` :L330,
-#  `GL-Posting-Start` :L393, `GL-Batch-Start` :L456, `SPL-Posting-Start` :L519,
-#  `Sales-Start` :L680 and the rest), while every other verb does
-#  (`GL-Batch-Read-Next` :L461, `-Read-Indexed` :L466, `-Write` :L471,
-#  `-Rewrite` :L476). So on a START the caller's access type IS the relation.
-#  That single fact is what makes cursor emulation possible, and it is why
-#  this mapping lives here rather than in `cursor_state.py`.
-# -----------------------------------------------------------------------------
+#  ACCESS-TYPE 5-9 AS THE START RELATION. Why the caller's `Access-Type` survives into a START
+#  at all: every facade verb begins by clearing the field, EXCEPT the `-Start` verbs. The
+#  facade copybook's changelog states the exemption in as many words, verbatim `*> 14/08/23
+#  vbc - 1.08 - Remove 'move zero to access-type for Start, it is set !!!`
+#  [copybooks/Proc-ACAS-FH-Calls.cob:L18], and the general rule it is an exemption FROM is
+#  `move zero to Access-Type to keep logging clean.` [:L15]. Counted over the copybook: none
+#  of the twenty `-Start` paragraphs clears the field (`GL-Nominal-Start` :L330,
+#  `GL-Posting-Start` :L393, `GL-Batch-Start` :L456, `Sales-Start` :L680 and the rest), 146 of
+#  the other 215 do (`GL-Batch-Read-Next` :L461, `-Read-Indexed` :L466, `-Write` :L471,
+#  `-Rewrite` :L476), and the 69 that do not are the `-Open` family, which SETS the field to
+#  the open mode instead (:L194, :L201, :L208). So on a START the caller's access type IS the
+#  relation.
 
 #: Width of the `MOST-Relation` field the bridge stores a relation into:
 #: `05  MOST-Relation   pic xxx.                  *> valid are >=, <=, <, >, =`
@@ -654,37 +547,17 @@ class AccessType(enum.IntEnum):
 #: SPACE-PADDED to three on the way in.
 _MOST_RELATION_WIDTH: Final[int] = 3
 
-#: `Access-Type` -> the relation exactly as the bridge stores it, padded to
-#: the three characters of `MOST-Relation pic xxx`.
-#:
-#: Reproduces `evaluate Access-Type` [common/glpostingMT.cbl:L715-L726], whose
-#: five arms move these five literals - `"=  "`, `"<  "`, `">  "`, `">= "`,
-#: `"<= "` - the padding included, after `move spaces to MOST-Relation` at
-#: [common/glpostingMT.cbl:L713].
-#:
-#: *** ANOMALY N5 - REPRODUCED, NOT FIXED (rule R-4) ***
-#:
-#: The `when 9` arm is UNREACHABLE. `ba060-Process-Start` guards its parameters
-#: before it ever reaches the relation table:
-#:
-#:     L695   if       access-type < 5 or > 8      *> not using not < or not >
-#:     L696            move 99 to FS-Reply
-#:     L697            move 997 to WE-Error        *> Invalid calling parameter settings
-#:     L698            go to ba999-end
-#:
-#: [common/glpostingMT.cbl:L695-L698], and the guard's upper bound is 8. So an
-#: `Access-Type` of 9 is rejected with `(99, 997)` and the arm that would have
-#: given it `"<= "` is dead - the maintainer even labels it
-#: `*> [ not currently used in ACAS ]` at [common/glpostingMT.cbl:L724].
-#: Meanwhile [copybooks/wsfnctn.cob:L20] records the value as "Activated".
-#:
-#: The arm is kept in this table because the frozen `evaluate` declares it.
-#: The guard is kept as `START_ACCESS_TYPE_RANGE` because the frozen `if`
-#: declares that. Reconciling them - by widening the guard to 9, or by
-#: deleting the arm - would be a defect fix, and rule R-4 makes a defect fixed
-#: a failure. Callers must apply `start_access_type_is_valid()` FIRST and
-#: reach this table only for an access type that passes it; then the dead arm
-#: stays dead exactly as it is in COBOL.
+#: `Access-Type` -> the relation exactly as the bridge stores it, padded to the three
+#: characters of `MOST-Relation pic xxx`. Reproduces `evaluate Access-Type`
+#: [common/glpostingMT.cbl:L715-L726], whose five arms move `"=  "`, `"<  "`, `">  "`, `">= "`
+#: and `"<= "` - padding included - after `move spaces to MOST-Relation` at [:L713]. ***
+#: ANOMALY N5 - REPRODUCED, NOT FIXED (rule R-4) *** The `when 9` arm is UNREACHABLE:
+#: `ba060-Process-Start` guards with `if access-type < 5 or > 8` and answers `(99, 997)`
+#: [common/glpostingMT.cbl:L695-L698], so 9 never reaches the arm that would give it `"<= "` -
+#: labelled `*> [ not currently used in ACAS ]` at [:L724] while [copybooks/wsfnctn.cob:L20]
+#: records it "Activated". The arm stays because the frozen `evaluate` declares it and the
+#: guard stays as `START_ACCESS_TYPE_RANGE` because the frozen `if` does. Callers apply
+#: `start_access_type_is_valid()` first; then the dead arm stays dead as in COBOL.
 START_RELATION_BY_ACCESS_TYPE: Final[Mapping[AccessType, str]] = MappingProxyType(
     {
         # when  5   *> fn-equal-to [also in sub4]          [:L716-L717]
@@ -727,7 +600,6 @@ START_RELATION_TOKEN_BY_ACCESS_TYPE: Final[Mapping[AccessType, str]] = (
 #: anomaly-locking tests can assert on the discrepancy between this range and
 #: the five keys of `START_RELATION_BY_ACCESS_TYPE`.
 START_ACCESS_TYPE_RANGE: Final[tuple[int, int]] = (5, 8)
-
 
 
 def start_access_type_is_valid(access_type: int) -> bool:
@@ -802,26 +674,15 @@ def start_relation_for(access_type: int, *, padded: bool = False) -> str:
     return START_RELATION_TOKEN_BY_ACCESS_TYPE[key]
 
 
-# =============================================================================
-#  WE-ERROR - THE DETAIL CODE BEHIND FS-REPLY 99
-#
-#  `03  We-Error        pic 999.`             [copybooks/wsfnctn.cob:L23]
-#
-#  Three digits, widened from two by the maintainer while chasing a
-#  missing-data bug in the period-totals table [copybooks/wsfnctn.cob:L8-L9].
-#  Like `Fs-Reply` it carries no `88`-level condition names, so every name
-#  below is ours, derived from the prose table at
-#  [common/glpostingMT.cbl:L132-L155] plus the two handler-only codes.
-#
-#  The table's own footnote ties each code to `Fs-Reply`, verbatim
-#  [common/glpostingMT.cbl:L158]:
-#
-#      *>                                     * = FS-Reply = 99.
-#
-#  i.e. an asterisk against a code means that code arrives with FS-Reply 99.
-#  `implies_fs_reply_error()` implements the footnote; see the discrepancy
+#  WE-ERROR - THE DETAIL CODE BEHIND FS-REPLY 99. `03  We-Error        pic 999.`
+#  [copybooks/wsfnctn.cob:L23] - three digits, widened from two while chasing a missing-data
+#  bug in the period-totals table [copybooks/wsfnctn.cob:L8-L9]. Like `Fs-Reply` it carries no
+#  `88`-level condition names, so every name below is ours, derived from the prose table at
+#  [common/glpostingMT.cbl:L132-L155] plus the two handler-only codes. The table's own
+#  footnote ties each code to `Fs-Reply`, verbatim `*> * = FS-Reply = 99.`
+#  [common/glpostingMT.cbl:L158] - an asterisk against a code means that code arrives with
+#  FS-Reply 99. `implies_fs_reply_error()` implements the footnote; see the discrepancy
 #  recorded on `RECORD_SIZE_MISMATCH`.
-# =============================================================================
 
 
 class WeError(enum.IntEnum):
@@ -855,21 +716,14 @@ class WeError(enum.IntEnum):
     #: it does have producers, just not in the layer whose table documents it.
     NOT_USED = 999
 
-    #: `998* = File-Key-No Out Of Range not 1, 2 or 3.`
-    #: [common/glpostingMT.cbl:L135]
-    #:
-    #: THREE different wordings exist for this one code, and they disagree
-    #: about the permitted range:
-    #:
-    #:   [common/glpostingMT.cbl:L135]  "File-Key-No Out Of Range not 1, 2 or 3."
-    #:   [common/acas000.cbl:L336]      "file seeks key type out of range"
-    #:   [common/acas008.cbl:L166]      "File-Key-No Out Of Range not 1."
-    #:
-    #: and the code that actually enforces it permits FIVE values:
-    #: `if File-Key-No < 1 or > 5     *> Chg 14/10/25 to support PY`
-    #: [common/acas000.cbl:L335]. See `FILE_KEY_NO_DOCUMENTED_RANGE` and
-    #: `FILE_KEY_NO_GUARD_RANGE`, which publish the documentation and the
-    #: implementation side by side without reconciling them.
+    #: `998* = File-Key-No Out Of Range not 1, 2 or 3.` [common/glpostingMT.cbl:L135] THREE
+    #: different wordings exist for this one code and they disagree about the permitted range:
+    #: "File-Key-No Out Of Range not 1, 2 or 3." [common/glpostingMT.cbl:L135], "file seeks
+    #: key type out of range" [common/acas000.cbl:L336] and "File-Key-No Out Of Range not 1."
+    #: [common/acas008.cbl:L166]. The code that actually enforces it permits FIVE values - `if
+    #: File-Key-No < 1 or > 5     *> Chg 14/10/25 to support PY` [common/acas000.cbl:L335].
+    #: See `FILE_KEY_NO_DOCUMENTED_RANGE` and `FILE_KEY_NO_GUARD_RANGE`, which publish the
+    #: documentation and the implementation side by side without reconciling them.
     FILE_KEY_NO_OUT_OF_RANGE = 998
 
     #: `997* = Access-Type wrong (< 5 or > 8)` [common/glpostingMT.cbl:L136]
@@ -907,20 +761,14 @@ class WeError(enum.IntEnum):
     #: `ba090-Process-Rewrite`.
     REWRITE_SQLSTATE_NOT_00000 = 994
 
-    #: `992* = Invalid Function requested in File-Function`
-    #: [common/glpostingMT.cbl:L140]
-    #:
-    #: *** ANOMALY N6 - REPRODUCED, NOT FIXED (rule R-4) ***
-    #:
-    #: This code has NO PRODUCER. An exhaustive search of `common/` and
-    #: `copybooks/` finds not one statement that sets 992 - every occurrence
-    #: in the tree is inside a comment, in the prose table each bridge carries
-    #: a copy of. An invalid `File-Function` is in fact answered with 999 by
-    #: the handlers, never with 992.
-    #:
-    #: The member is retained because the authoritative table declares it, and
-    #: deleting an unproduced-but-documented code would hide the anomaly - the
-    #: same reasoning that keeps `FsReply.KEY_NOT_FOUND`. Listed in
+    #: `992* = Invalid Function requested in File-Function` [common/glpostingMT.cbl:L140] ***
+    #: ANOMALY N6 - REPRODUCED, NOT FIXED (rule R-4) *** This code has NO PRODUCER. An
+    #: exhaustive search of `common/` and `copybooks/` finds not one statement that sets 992 -
+    #: every occurrence in the tree is inside a comment, in the prose table each bridge
+    #: carries a copy of. An invalid `File-Function` is in fact answered with 999 by the
+    #: handlers, never with 992. The member is retained because the authoritative table
+    #: declares it, and deleting an unproduced-but-documented code would hide the anomaly -
+    #: the same reasoning that keeps `FsReply.KEY_NOT_FOUND`. Listed in
     #: `DOCUMENTATION_ONLY_WE_ERRORS`.
     INVALID_FUNCTION = 992
 
@@ -940,100 +788,64 @@ class WeError(enum.IntEnum):
     #: `move 989  to WE-Error` [common/glpostingMT.cbl:L676-L677]. Anomaly N2.
     READ_INDEXED_UNEXPECTED = 989
 
-    #: `988* = File Action wrong for file type.` [common/acas008.cbl:L173],
-    #: with the site's own wording being
-    #: `*> Action type wrong for file type (seq)   988`
-    #: [common/acas008.cbl:L304].
-    #:
-    #: A handler-only code: it appears in NO bridge's table, and the single
-    #: statement that sets it anywhere in the tree is
-    #: [common/acas008.cbl:L304], paired with `move 99 to fs-reply` at
-    #: [common/acas008.cbl:L305]. It is the rejection the sequential-file
-    #: handler applies to `fn-read-indexed`, `fn-re-write`, `fn-start` and
-    #: `fn-delete` unconditionally at entry
-    #: [common/acas008.cbl:L299-L307], which is why the facade's
+    #: `988* = File Action wrong for file type.` [common/acas008.cbl:L173], the site's own
+    #: wording being `*> Action type wrong for file type (seq)   988`
+    #: [common/acas008.cbl:L304]. A handler-only code: it appears in NO bridge's table, and
+    #: the single statement that sets it anywhere in the tree is [common/acas008.cbl:L304],
+    #: paired with `move 99 to fs-reply` at [:L305]. It is the rejection the sequential-file
+    #: handler applies to `fn-read-indexed`, `fn-re-write`, `fn-start` and `fn-delete`
+    #: unconditionally at entry [common/acas008.cbl:L299-L307], which is why the facade's
     #: `SPL-Posting-Rewrite` verb can never succeed.
     ACTION_TYPE_WRONG_FOR_SEQ = 988
 
-    #: `911* = Rdb Error during initializing, possibly can not connect to
-    #: database / Check connect data and see SQL-Err & SQL-MSG / Produced by
-    #: Mysql-1100-Db-Error in copy module mysql-procedure.`
-    #: [common/glpostingMT.cbl:L143-L148]
-    #:
-    #: *** ANOMALY N3 - REPRODUCED, NOT FIXED (rule R-4) ***
-    #:
-    #: The documentation says "during initializing". The code says "always".
-    #: The last two statements of `Mysql-1100-Db-Error` are unconditional:
-    #:
-    #:     L127   move     99 to fs-Reply.
-    #:     L128   move     911 to We-Error.
-    #:
-    #: [copybooks/mysql-procedures.cpy:L127-L128] - no `if` guards them, and
-    #: the only path that skips them is the duplicate-key early exit. So EVERY
-    #: non-duplicate failure of EVERY operation is reported as 911: a syntax
-    #: error, a missing table, a constraint violation, a lost connection, and
-    #: - because the retry ladder is dead - a table lock too. The third line
-    #: of its own prose, naming the paragraph that produces it, is the only
-    #: accurate part.
-    #:
-    #: Reproduced in `mysql_1100_db_error`, which returns 911 unconditionally.
-    #: Callers narrow it afterwards, as the bridges do for delete and rewrite.
+    #: `911* = Rdb Error during initializing, possibly can not connect to database / Check
+    #: connect data and see SQL-Err & SQL-MSG / Produced by Mysql-1100-Db-Error in copy module
+    #: mysql-procedure.` [common/glpostingMT.cbl:L143-L148] *** ANOMALY N3 - REPRODUCED, NOT
+    #: FIXED (rule R-4) *** The documentation says "during initializing"; the code says
+    #: "always". The last two statements of `Mysql-1100-Db-Error` are unconditional - `move 99
+    #: to fs-Reply.` then `move 911 to We-Error.` [copybooks/mysql-procedures.cpy:L127-L128] -
+    #: no `if` guards them, and the only path that skips them is the duplicate-key early exit.
+    #: So EVERY non-duplicate failure of EVERY operation is reported as 911: a syntax error, a
+    #: missing table, a constraint violation, a lost connection, and - because the retry
+    #: ladder is dead - a table lock too. Reproduced in `mysql_1100_db_error`, which returns
+    #: 911 unconditionally; callers narrow it afterwards, as the bridges do for delete and
+    #: rewrite.
     RDB_INIT_ERROR = 911
 
-    #: `910* = Table locked > 5 seconds` [common/glpostingMT.cbl:L149]
-    #:
-    #: *** ANOMALY N1 - REPRODUCED, NOT FIXED (rule R-4) ***
-    #:
-    #: UNREACHABLE AT RUNTIME. The only statement in the tree that sets 910 is
-    #: [copybooks/mysql-procedures.cpy:L245], inside `Mysql-1300-DB-Error`,
-    #: and the only `perform` of that paragraph is commented out at
-    #: [copybooks/mysql-procedures.cpy:L167]. No live path reaches it, so no
-    #: caller can ever observe this code. A locked table is reported as 911
-    #: instead.
-    #:
-    #: The prose is also arithmetically wrong about its own ladder: the four
-    #: rungs wait 1/4 + 1/2 + 1 + 5 seconds, so 910 would be raised after
-    #: 6.75 seconds of waiting, not 5. See `LOCK_RETRY_LADDER` and
-    #: `mysql_1300_db_error`.
+    #: `910* = Table locked > 5 seconds` [common/glpostingMT.cbl:L149] *** ANOMALY N1 -
+    #: REPRODUCED, NOT FIXED (rule R-4) *** UNREACHABLE AT RUNTIME. The only statement in the
+    #: tree that sets 910 is [copybooks/mysql-procedures.cpy:L245], inside
+    #: `Mysql-1300-DB-Error`, and the only `perform` of that paragraph is commented out at
+    #: [:L167]. No live path reaches it, so no caller can ever see this code; a locked table
+    #: is reported as 911 instead. The prose is also arithmetically wrong about its own ladder
+    #: - the four rungs wait 1/4 + 1/2 + 1 + 5 seconds, so 910 would be raised after 6.75
+    #: seconds, not 5. See `LOCK_RETRY_LADDER` and `mysql_1300_db_error`.
     TABLE_LOCKED = 910
 
-    #: `901  = File Def Record size not =< than ws record size / Module needs
-    #: ws definition changing to correct size / FATAL, Stop using system, fix
-    #: source code and recompile before using system again.`
-    #: [common/glpostingMT.cbl:L150-L153]
-    #:
-    #: FATAL, in the frozen source's own capitals: it means the compiled
-    #: record layout and the table row disagree in length, so the run cannot
-    #: continue. The handler displays, accepts and stops
-    #: [common/acas008.cbl:L537-L540].
-    #:
-    #: DISCREPANCY, recorded and not resolved: 901 is the one starred-worthy
-    #: code the table prints WITHOUT an asterisk [:L150], which by its own
-    #: footnote [:L158] would mean it does not arrive with FS-Reply 99. The
-    #: code disagrees - `move 901 to WE-Error` is immediately followed by
-    #: `move 99 to fs-reply` [common/acas008.cbl:L534-L535]. Both facts are
-    #: published: 901 IS in `WE_ERRORS_IMPLYING_FS_REPLY_ERROR` because that
-    #: is what executes, and the missing asterisk is recorded here because
-    #: that is what is written. Deciding which is "right" is not this
-    #: module's business.
+    #: `901  = File Def Record size not =< than ws record size / Module needs ws definition
+    #: changing to correct size / FATAL, Stop using system, fix source code and recompile
+    #: before using system again.` [common/glpostingMT.cbl:L150-L153] FATAL in the frozen
+    #: source's own capitals: the compiled record layout and the table row disagree in length,
+    #: so the run cannot continue - the handler displays, accepts and stops
+    #: [common/acas008.cbl:L537-L540]. DISCREPANCY, recorded and not resolved: 901 is the one
+    #: starred-worthy code the table prints WITHOUT an asterisk [:L150], which by its own
+    #: footnote [:L158] would mean it does not arrive with FS-Reply 99. The code disagrees -
+    #: `move 901 to WE-Error` is immediately followed by `move 99 to fs-reply`
+    #: [common/acas008.cbl:L534-L535]. Both facts are published: 901 IS in
+    #: `WE_ERRORS_IMPLYING_FS_REPLY_ERROR` because that is what executes, and the missing
+    #: asterisk is recorded because that is what is written.
     RECORD_SIZE_MISMATCH = 901
 
 
-
-#: The `We-Error` codes that arrive with `FsReply.ERROR`, i.e. the codes the
-#: authoritative table marks with an asterisk, per its own footnote
-#: `*> * = FS-Reply = 99.` [common/glpostingMT.cbl:L158].
-#:
-#: Starred in the table [:L135-L149]: 998, 997, 996, 995, 994, 992, 990, 989,
-#: 911, 910. Unstarred: 0 [:L132], 999 [:L134] and 901 [:L150].
-#:
-#: 901 is nonetheless INCLUDED, and 988 - which the table does not list at all
-#: - is included too, because both are paired with `move 99 to fs-reply` in
-#: handler code: [common/acas008.cbl:L534-L535] for 901 and
-#: [common/acas008.cbl:L304-L305] for 988. Where the prose and the executing
-#: code disagree, rule R-6 makes the code the tie-breaker; the disagreement
-#: itself is recorded on `WeError.RECORD_SIZE_MISMATCH` rather than smoothed
-#: over.
+#: The `We-Error` codes that arrive with `FsReply.ERROR`, i.e. the codes the authoritative
+#: table marks with an asterisk, per its own footnote `*> * = FS-Reply = 99.`
+#: [common/glpostingMT.cbl:L158]. Starred in the table [:L135-L149]: 998, 997, 996, 995, 994,
+#: 992, 990, 989, 911, 910. Unstarred: 0 [:L132], 999 [:L134] and 901 [:L150]. 901 is
+#: nonetheless INCLUDED, and 988 - which the table does not list at all - is included too,
+#: because both are paired with `move 99 to fs-reply` in handler code:
+#: [common/acas008.cbl:L534-L535] for 901 and [:L304-L305] for 988. Where the prose and the
+#: executing code disagree, rule R-6 makes the code the tie-breaker; the disagreement itself
+#: is recorded on `WeError.RECORD_SIZE_MISMATCH` rather than smoothed over.
 WE_ERRORS_IMPLYING_FS_REPLY_ERROR: Final[frozenset[WeError]] = frozenset(
     {
         WeError.FILE_KEY_NO_OUT_OF_RANGE,  # 998* [:L135]
@@ -1051,22 +863,16 @@ WE_ERRORS_IMPLYING_FS_REPLY_ERROR: Final[frozenset[WeError]] = frozenset(
     }
 )
 
-#: The `We-Error` codes with NO producer anywhere in the frozen tree - present
-#: in the authoritative prose table, set by no statement.
-#:
-#: * 992 - anomaly N6. Exhaustive search finds no assignment; an invalid
-#:   `File-Function` yields 999 instead. [common/glpostingMT.cbl:L140]
-#: * 910 - anomaly N1. Assigned only inside the dead paragraph, at
-#:   [copybooks/mysql-procedures.cpy:L245], whose sole `perform` is commented
-#:   out at [copybooks/mysql-procedures.cpy:L167].
-#:
-#: 999 is deliberately NOT here. Its prose says "Not used HERE - Yet"
-#: [:L134] and that is accurate: no bridge sets it, but every numbered handler
-#: does, so it has producers - just not in the layer that documents it.
-#:
-#: Published so the anomaly-locking tests can assert that these two codes
-#: remain unproduced, which is what makes a future well-meaning "activation"
-#: of either one fail the suite instead of passing unnoticed.
+#: The `We-Error` codes with NO producer anywhere in the frozen tree - present in the
+#: authoritative prose table, set by no statement. 992 is anomaly N6: exhaustive search finds
+#: no assignment and an invalid `File-Function` yields 999 instead
+#: [common/glpostingMT.cbl:L140]. 910 is anomaly N1: assigned only inside the dead paragraph
+#: at [copybooks/mysql-procedures.cpy:L245], whose sole `perform` is commented out at [:L167].
+#: 999 is deliberately NOT here - its prose says "Not used HERE - Yet"
+#: [common/glpostingMT.cbl:L134] and that is accurate: no bridge sets it, but every numbered
+#: handler does, so it has producers, just not in the layer that documents it. Published so
+#: the anomaly-locking tests can assert these two stay unproduced, which makes a future
+#: well-meaning activation of either fail rather than pass unnoticed.
 DOCUMENTATION_ONLY_WE_ERRORS: Final[frozenset[WeError]] = frozenset(
     {WeError.INVALID_FUNCTION, WeError.TABLE_LOCKED}
 )
@@ -1116,13 +922,10 @@ def implies_fs_reply_error(we_error: int) -> bool:
     return member in WE_ERRORS_IMPLYING_FS_REPLY_ERROR
 
 
-# -----------------------------------------------------------------------------
 #  FILE-KEY-NO - A DOCUMENTED RANGE THAT CONTRADICTS THE ENFORCED ONE
-#
 #  `05  File-Key-No     pic 9.` [copybooks/wsfnctn.cob:L46], selects which key
 #  of a table a keyed read uses. Two sources describe its legal values and
 #  they do not agree, so both are published and neither is resolved.
-# -----------------------------------------------------------------------------
 
 #: The range the copybook DOCUMENTS, immediately above the `Logging-Data`
 #: block, verbatim [copybooks/wsfnctn.cob:L42-L43]::
@@ -1135,35 +938,23 @@ def implies_fs_reply_error(we_error: int) -> bool:
 #: caller and never generalised.
 FILE_KEY_NO_DOCUMENTED_RANGE: Final[tuple[int, int]] = (1, 3)
 
-#: The range a handler actually ENFORCES, verbatim
-#: [common/acas000.cbl:L335]::
-#:
-#:     if     File-Key-No < 1 or > 5     *> Chg 14/10/25 to support PY
-#:
-#: with its own meanings for the values, and no mention of Stock
-#: [common/acas000.cbl:L328-L329]::
-#:
-#:     *>    1 = params rec, 2 = default rec,
-#:     *>    3 = final rec & 4 = system totals rec.
-#:
-#: Three separate disagreements with the copybook comment: the upper bound is
-#: 5 and not 3; the meanings are system-record types and not Stock keys; and
-#: value 5 is admitted by the guard while being given no meaning at all by
-#: either source - the trailing note says the widening was made "to support
-#: PY", the payroll subsystem, which this migration does not reach.
-#:
-#: Violating the guard yields `(99, 998)` [common/acas000.cbl:L336-L337].
-#: `dal/acas000_system.py` reproduces the guard; this module only records the
-#: contradiction. Rule R-4 forbids resolving it and rule R-3 forbids
+#: The range a handler actually ENFORCES, verbatim `if     File-Key-No < 1 or > 5     *> Chg
+#: 14/10/25 to support PY` [common/acas000.cbl:L335], with its own meanings for the values and
+#: no mention of Stock - `*>    1 = params rec, 2 = default rec, / *>    3 = final rec & 4 =
+#: system totals rec.` [common/acas000.cbl:L328-L329]. Three disagreements with the copybook
+#: comment: the upper bound is 5 and not 3; the meanings are system-record types and not Stock
+#: keys; and value 5 is admitted by the guard while given no meaning at all by either source -
+#: the trailing note says the widening was made "to support PY", the payroll subsystem, which
+#: this migration does not reach. Violating the guard yields `(99, 998)`
+#: [common/acas000.cbl:L336-L337]. The system handler module a later boundary adds will
+#: reproduce the guard; this module only records the contradiction. Rule R-4 forbids resolving
+#: it and rule R-3 forbids
 #: validating against either range here.
 FILE_KEY_NO_GUARD_RANGE: Final[tuple[int, int]] = (1, 5)
 
 
-# =============================================================================
 #  SQLSTATE - THE VOCABULARY, AND THE MAP THAT WAS NEVER WIRED UP
-#
 #  `05  SQL-State       pic x(5).` [copybooks/wsfnctn.cob:L51]
-# =============================================================================
 
 
 class SqlState(enum.StrEnum):
@@ -1191,19 +982,14 @@ class SqlState(enum.StrEnum):
         5
     """
 
-    #: `0200n  no data found one way or another`
-    #: [copybooks/mysql-procedures.cpy:L112]
-    #:
-    #: The frozen comment writes the value as `0200n` with a trailing
-    #: placeholder letter, i.e. a family rather than one code; `"02000"` is
-    #: the member of that family the commented-out test at
-    #: [copybooks/mysql-procedures.cpy:L124] names, and it is the value used
-    #: here. The rest of the family is not modelled because the frozen source
-    #: never names another member of it.
-    #:
-    #: The same line carries the maintainer's bracketed note on what to do
-    #: with it - a proposal to choose between 23 and 10 by an entropy source.
-    #: It is paraphrased rather than quoted; see "DELIBERATE OMISSIONS" item 3
+    #: `0200n  no data found one way or another` [copybooks/mysql-procedures.cpy:L112] The
+    #: frozen comment writes the value as `0200n` with a trailing placeholder letter, i.e. a
+    #: family rather than one code; `"02000"` is the member of that family the commented-out
+    #: test at [copybooks/mysql-procedures.cpy:L124] names, and it is the value used here. The
+    #: rest of the family is not modelled because the frozen source never names another member
+    #: of it. The same line carries the maintainer's bracketed note on what to do with it - a
+    #: proposal to choose between 23 and 10 by an entropy source. It is paraphrased rather
+    #: than quoted; see "DELIBERATE OMISSIONS" item 3
     #: in the module docstring. It was never implemented.
     NO_DATA = "02000"
 
@@ -1243,7 +1029,6 @@ class SqlState(enum.StrEnum):
     COULD_NOT_GENERATE_START = "99GNS"
 
 
-
 @dataclass(frozen=True, slots=True)
 class SqlStateMapping:
     """One line of the SQLSTATE dispositions block, with its wiring status.
@@ -1271,45 +1056,16 @@ class SqlStateMapping:
     implemented: bool
 
 
-#: The SQLSTATE dispositions block, entry by entry, with its wiring status.
-#:
-#: *** ANOMALY N4 - REPRODUCED, NOT FIXED (rule R-4) ***
-#:
-#: The whole block at [copybooks/mysql-procedures.cpy:L109-L119] is COMMENT.
-#: (The Agent Action Plan cites this as L108-L124. Verified against the
-#: checkout: the commented block is L109-L119, the live SQLSTATE fetch and
-#: store are L122-L123, and the commented-out test is L124. Every span in
-#: this module is the verified one - see PROVENANCE in the module
-#: docstring.)
-#: It opens by admitting it is unfinished, verbatim [:L109-L110]::
-#:
-#:     *> Next blk new, 30/12/16 and is under test- just have to work out any IF tests.
-#:     *> poss. tests ?
-#:
-#: and the "IF tests" were never worked out. What follows the block in live
-#: code is only this [:L122-L124]::
-#:
-#:     call     "MySQL_sqlstate" using WS-MYSQL-SqlState.
-#:     move     WS-MYSQL-SqlState      to SQL-State.
-#:  *>     if       SQL-State = "02000"                          *> No data
-#:
-#: - the value is fetched, it is stored, and the one test that would have read
-#: it is commented out. Nothing in the error path consults `SQL-State`
-#: thereafter: the unconditional `(99, 911)` at [:L127-L128] follows
-#: immediately. So all seven dispositions below are dead letters at the driver
-#: level.
-#:
-#: The single exception is `"23000"`, and it is live for a different reason: a
-#: BRIDGE tests it directly, outside this block, as one alternative in the
-#: write path's duplicate check [common/glpostingMT.cbl:L818-L820]. That is
-#: why its `implemented` flag is the only `True` here.
-#:
-#: This table is data, deliberately. Turning any `False` into live logic would
-#: implement behaviour the compiled program does not have, which rule R-4
-#: makes a failure - and rule R-3 independently forbids adding validation. The
-#: table exists so the anomaly log can cite it and the anomaly-locking tests
-#: can assert that six of the seven stay unimplemented.
-#:
+#: The SQLSTATE dispositions block, entry by entry, with its wiring status. *** ANOMALY N4 -
+#: REPRODUCED, NOT FIXED (rule R-4) *** The whole block at
+#: [copybooks/mysql-procedures.cpy:L109-L119] is COMMENT, opening by admitting it is
+#: unfinished - `*> Next blk new, 30/12/16 and is under test- just have to work out any IF
+#: tests.` [:L109] - and those tests never were. Live code only fetches and stores the value
+#: [:L122-L123]; the test that would read it is commented out at [:L124], and the
+#: unconditional `(99, 911)` at [:L127-L128] follows. So six of seven dispositions are dead
+#: letters; `"23000"` is live only because a BRIDGE tests it in the duplicate check
+#: [common/glpostingMT.cbl:L818-L820], the only `True` here. Turning any `False` into logic
+#: would add behaviour the compiled program lacks: R-4 forbids it and R-3 forbids it again.
 #: Order is the frozen block's own line order, and the tuple is immutable, so
 #: iteration is deterministic (rule R-6).
 DOCUMENTED_SQLSTATE_MAPPINGS: Final[tuple[SqlStateMapping, ...]] = (
@@ -1373,25 +1129,19 @@ DOCUMENTED_SQLSTATE_MAPPINGS: Final[tuple[SqlStateMapping, ...]] = (
 )
 
 
-# =============================================================================
 #  DUPLICATE KEY - TWO TESTS AT TWO LAYERS, DELIBERATELY NOT MERGED
-#
 #  The same condition is detected twice in one call chain, by two tests that
 #  do not agree. Both are reproduced, each named after the site it comes from,
 #  because merging them would change which failures are reported as duplicates.
-# =============================================================================
 
-#: The driver error numbers that mean "duplicate", as the driver-level test
-#: writes them, verbatim [copybooks/mysql-procedures.cpy:L99]::
-#:
-#:     if       Ws-Mysql-Error-Number = "1062" or = "1022"   *> Duplicate entry/Write dup key
-#:
-#: STRINGS, not integers, and deliberately so: `Ws-Mysql-Error-Number` is a
-#: character field, so COBOL compares text. The distinction is observable -
-#: text comparison makes `"1062"` and `" 1062"` and `"01062"` three different
-#: values, where integer comparison would make the first two equal. Converting
-#: to `int` here would be a silent semantic change, so the strings stay
-#: strings and callers hand over whatever text they have.
+#: The driver error numbers that mean "duplicate", as the driver-level test writes them,
+#: verbatim `if       Ws-Mysql-Error-Number = "1062" or = "1022"   *> Duplicate entry/Write
+#: dup key` [copybooks/mysql-procedures.cpy:L99]. STRINGS, not integers, and deliberately so:
+#: `Ws-Mysql-Error-Number` is a character field, so COBOL compares text. The distinction shows
+#: - text comparison makes `"1062"`, `" 1062"` and `"01062"` three different values where
+#: integer comparison would make the first two equal. Converting to `int` here would be a
+#: silent semantic change, so the strings stay strings and callers hand over whatever text
+#: they have.
 #:
 #: 1062 is MySQL's ER_DUP_ENTRY; 1022 is ER_DUP_KEY.
 DUPLICATE_KEY_ERRNOS: Final[frozenset[str]] = frozenset({"1062", "1022"})
@@ -1532,9 +1282,8 @@ def is_duplicate_key_bridge_level(sql_err: str, sql_state: str) -> bool:
 
     Note that the whole fragment sits inside two guards: ``if
     WS-MYSQL-COUNT-ROWS not = 1`` [:L810] and ``if WS-MYSQL-Error-Number (1:1)
-    not = "0"`` [:L814]. Those belong to the write path in
-    ``dal/acas006_gl_posting.py``, not here; this function is only the
-    innermost test.
+    not = "0"`` [:L814]. Those belong to the GL posting handler's write path,
+    which a later boundary adds; this function is only the innermost test.
 
     Args:
         sql_err: The ``SQL-Err`` field's contents. Only the first four
@@ -1566,35 +1315,17 @@ def is_duplicate_key_bridge_level(sql_err: str, sql_state: str) -> bool:
     return sql_state == DUPLICATE_KEY_SQLSTATE
 
 
-
-# =============================================================================
-#  THE DIAGNOSTIC FIELDS, AND A LOCAL PICTURE-CLAUSE HELPER
-#
-#  Three `Logging-Data` fields carry the driver's own account of a failure:
-#
-#      05  SQL-Err         pic x(5).            [copybooks/wsfnctn.cob:L49]
-#      05  SQL-Msg         pic x(512) value spaces.   [copybooks/wsfnctn.cob:L50]
-#      05  SQL-State       pic x(5).            [copybooks/wsfnctn.cob:L51]
-#
-#  and the authoritative table describes when they are meaningful
-#  [common/glpostingMT.cbl:L156-L157]:
-#
-#      *>  SQL-Err  = Error code from RDBMS is set if above 2 are non zero
-#      *>  SQL-Msg  = Non space providing more info if SQL-Err non '00000'
-#
-#  WHY THE TRUNCATE-AND-PAD IS IMPLEMENTED LOCALLY
-#  -----------------------------------------------
-#  `acas_posting/cobol/move.py` is the module that owns `MOVE` semantics, and
-#  delegating to it would be the obvious choice. It is NOT taken: the
-#  per-directory import table of Agent Action Plan section 0.4.3 grants no
-#  `dal` to `cobol` edge, so importing it would be a layering violation. The
-#  three fields needed here are all `pic x(n)` - the simplest case in the whole
-#  of `MOVE`, with no sign, no scale and no numeric editing - so the local
-#  helper below is complete for its stated domain rather than a partial
-#  reimplementation. Anything beyond alphanumeric fields must NOT be added
-#  here; it belongs in `cobol/move.py`, reached by a caller in a layer that is
-#  permitted to import it.
-# =============================================================================
+#  THE DIAGNOSTIC FIELDS, AND A LOCAL PICTURE-CLAUSE HELPER. Three `Logging-Data` fields carry
+#  the driver's own account of a failure - `SQL-Err pic x(5)` [copybooks/wsfnctn.cob:L49],
+#  `SQL-Msg pic x(512) value spaces` [:L50] and `SQL-State pic x(5)` [:L51] - and the
+#  authoritative table says when they are meaningful: `*>  SQL-Err  = Error code from RDBMS is
+#  set if above 2 are non zero / *>  SQL-Msg  = Non space providing more info if SQL-Err non
+#  '00000'` [common/glpostingMT.cbl:L156-L157]. The truncate-and-pad is implemented LOCALLY
+#  rather than delegated to the module that owns `MOVE`, because the per-directory import
+#  table of Agent Action Plan section 0.4.3 grants no `dal` to `cobol` edge. All three fields
+#  are `pic x(n)` - no sign, no scale, no numeric editing - so the local helper is complete
+#  for its stated domain. Anything beyond alphanumeric fields must NOT be added here; it
+#  belongs in the `MOVE` module, reached from a permitted layer.
 
 #: `pic x(5)` [copybooks/wsfnctn.cob:L49].
 SQL_ERR_WIDTH: Final[int] = 5
@@ -1619,6 +1350,266 @@ def _pic_x(text: str, width: int) -> str:
     above, and restricted to alphanumeric fields by design.
     """
     return text[:width].ljust(width)
+
+
+# =============================================================================
+#  LOG-SAFE DIAGNOSTIC TEXT  (CWE-117 log injection, CWE-532 secret exposure)
+# =============================================================================
+#  The three fields above carry the DRIVER'S OWN account of a failure, and two
+#  things are true of that text at once: it is the most useful thing an operator
+#  has, and it is the least trustworthy string in the process. It is assembled
+#  by the server and the client library out of material that includes the
+#  connection's user name, the host, the socket path, the schema name and, for a
+#  statement failure, key values taken from the data.
+#
+#  Two consequences, and one non-consequence.
+#
+#  * A log record built by interpolating that text can be FORGED. A message
+#    carrying a carriage return and a line feed writes what looks like a second
+#    log record, of the sender's choosing, into the same stream; one carrying an
+#    ANSI escape can rewrite what a terminal shows. So control characters are
+#    replaced by their own `\xNN` spelling before the text is logged - escaped
+#    rather than dropped, so the evidence that they were there survives.
+#  * The text LEAKS. "Access denied for user 'ACAS-User'@'localhost' (using
+#    password: YES)" names the account; "Can't connect to MySQL server on
+#    'db.internal:3306'" names the host. Neither belongs in a log file that is
+#    read, shipped or attached to a ticket by people with no business knowing
+#    either. So the quoted identity runs are replaced by a fixed marker.
+#  * NON-CONSEQUENCE, and the reason this is safe: none of it touches a STORED
+#    value. `SQL-Err`, `SQL-Msg` and `SQL-State` are linkage fields, and
+#    `DbErrorStatus` keeps carrying them exactly as the driver produced them,
+#    fitted only to their picture widths. FS-Reply, WE-Error and SQLSTATE are
+#    likewise untouched, and so is every branch that reads them. Redaction
+#    applies to the log RENDERING and nowhere else, so no compared value, no
+#    disposition and no table dump moves by a character (rules R-3, R-4).
+#
+#  The three functions are published because three modules need the identical
+#  treatment - this one, `dal/connection.py` and `dal/cursor_state.py` - and
+#  three copies of a redaction rule is three chances for one to be the weak one.
+# =============================================================================
+
+#: The fixed marker that stands in for a removed identity or secret. A constant
+#: rather than a literal at each site, so a log reader can grep for it and a
+#: reviewer can see at a glance that a field was removed rather than absent.
+LOG_REDACTION: Final[str] = "[redacted]"
+
+#: Appended when a diagnostic is cut short by :data:`LOG_FIELD_MAX_CHARS`.
+LOG_ELISION: Final[str] = "[...]"
+
+#: The rendered length one diagnostic field may occupy in a log record.
+#:
+#: `SQL-Msg` is `pic x(512)` [copybooks/wsfnctn.cob:L50] and the driver's own
+#: strings are unbounded before they are fitted to it, so an unbounded log line
+#: is a denial-of-service surface: a failure that repeats a thousand times fills
+#: a disk with padding. 200 characters is comfortably more than every driver
+#: message this cycle can provoke and still bounds the record. The STORED field
+#: is unaffected and stays at its full 512.
+LOG_FIELD_MAX_CHARS: Final[int] = 200
+
+#: The category reported for an error number this module does not recognise.
+LOG_CATEGORY_UNCLASSIFIED: Final[str] = "unclassified"
+
+#: Codepoints replaced by their own escape spelling before text is logged.
+#:
+#: The C0 range covers carriage return, line feed and ESC - the three that make
+#: forgery possible - and DELETE plus the C1 range cover the terminal-control
+#: codes some emulators still honour. U+2028 and U+2029 are included because
+#: they are line breaks to a reader that splits on Unicode line boundaries even
+#: though they are not C0.
+_CONTROL_CODEPOINTS: Final[tuple[int, ...]] = (
+    *range(0x00, 0x20),
+    0x7F,
+    *range(0x80, 0xA0),
+    0x2028,
+    0x2029,
+)
+
+
+def _control_character_escapes() -> Mapping[int, str]:
+    """Build the translation table :func:`sanitise_for_log` applies.
+
+    Returns:
+        A read-only mapping from each codepoint of :data:`_CONTROL_CODEPOINTS`
+        to the text `\\xNN` or `\\uNNNN`, so that the escape a reader sees is
+        the codepoint that was actually present.
+    """
+    escapes: dict[int, str] = {}
+    for codepoint in _CONTROL_CODEPOINTS:
+        if codepoint < 0x100:
+            escapes[codepoint] = "\\x%02x" % codepoint
+        else:
+            escapes[codepoint] = "\\u%04x" % codepoint
+    return MappingProxyType(escapes)
+
+
+_CONTROL_CHARACTER_ESCAPES: Final[Mapping[int, str]] = (
+    _control_character_escapes()
+)
+
+#: The identity and secret shapes removed from driver text, in application
+#: order. Each is keyed to a message the MySQL client library actually produces,
+#: and the surrounding words are KEPT: an operator needs to know that the
+#: failure was an access denial, and needs not to know which account it was.
+_REDACTION_RULES: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
+    # "Access denied for user 'ACAS-User'@'localhost' (using password: YES)"
+    (
+        re.compile(r"(?i)\bfor user\s+'[^']*'(?:@'[^']*')?"),
+        "for user " + LOG_REDACTION,
+    ),
+    # The bare 'user'@'host' pair, wherever else it appears.
+    (re.compile(r"'[^']*'@'[^']*'"), LOG_REDACTION),
+    # The driver's own report of whether a password was sent. Deliberately
+    # `[A-Za-z]+` rather than `\S+`: the driver writes YES or NO and the word is
+    # followed by a closing parenthesis that belongs to the message, not to the
+    # value, and swallowing it would leave the rendering unbalanced.
+    (
+        re.compile(r"(?i)\busing password:\s*[A-Za-z]+"),
+        "using password: " + LOG_REDACTION,
+    ),
+    # Any explicit password assignment, however spelled. Two exclusions keep it
+    # from damaging what the rules above have already produced: the value may not
+    # itself be the redaction marker, and it stops at a closing parenthesis,
+    # which belongs to the surrounding message rather than to the value.
+    (
+        re.compile(
+            r"(?i)\b(pass(?:wd|word|phrase))\s*[=:]\s*"
+            r"(?!" + re.escape(LOG_REDACTION) + r")[^\s)]+"
+        ),
+        "\\g<1>=" + LOG_REDACTION,
+    ),
+    # "Can't connect to MySQL server on 'db.internal:3306' (111)", "Can't
+    # connect to local MySQL server through socket '/run/mysqld/x.sock' (2)",
+    # "Unknown database 'ACASDB'".
+    (
+        re.compile(
+            r"(?i)\b(server|host|socket|database|schema)"
+            r"\s+(?:on\s+|through\s+)?'[^']*'"
+        ),
+        "\\g<1> " + LOG_REDACTION,
+    ),
+)
+
+#: Stable low-cardinality categories for the error numbers this cycle can meet.
+#:
+#: NOTHING BRANCHES ON THIS TABLE. It exists so that a log record carries a
+#: token an operator can grep and alert on without the redacted message text,
+#: and it must never be consulted by code that decides an FS-Reply, a WE-Error
+#: or a control transfer - those come from the frozen source alone, and adding a
+#: second opinion here would be behaviour the compiled program does not have.
+#: Growing the table changes no disposition; it only makes a log line more
+#: legible.
+_LOG_CATEGORY_BY_ERRNO: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "1044": "access-denied",
+        "1045": "access-denied",
+        "1698": "access-denied",
+        "1049": "unknown-database",
+        "1146": "unknown-table",
+        "2002": "connect-failed",
+        "2003": "connect-failed",
+        "2005": "connect-failed",
+        "2006": "connection-lost",
+        "2013": "connection-lost",
+        "2026": "tls-failed",
+        "2055": "connection-lost",
+    }
+)
+
+
+def sanitise_for_log(text: str, *, limit: int = LOG_FIELD_MAX_CHARS) -> str:
+    """Render ``text`` so that it cannot forge or distort a log record.
+
+    Control characters become their own escape spelling and the result is cut to
+    ``limit`` characters. Nothing else changes: this is a rendering, and the
+    caller's own copy of the text is untouched.
+
+    Args:
+        text: the text to render. Driver-supplied text is the expected case.
+        limit: the rendered length allowed before the tail is elided.
+
+    Returns:
+        A single-line rendering, at most ``limit`` characters plus
+        :data:`LOG_ELISION`.
+
+        >>> sanitise_for_log("first\\r\\nWARNING forged second")
+        'first\\\\x0d\\\\x0aWARNING forged second'
+        >>> sanitise_for_log("abcdef", limit=3)
+        'abc[...]'
+    """
+    escaped = text.translate(_CONTROL_CHARACTER_ESCAPES)
+    if len(escaped) <= limit:
+        return escaped
+    return escaped[:limit] + LOG_ELISION
+
+
+def redact_for_log(text: str, *, limit: int = LOG_FIELD_MAX_CHARS) -> str:
+    """Remove identities and secrets from ``text``, then render it log-safe.
+
+    The rules are applied in the order of :data:`_REDACTION_RULES` and the
+    result is passed through :func:`sanitise_for_log`, so one call is enough at
+    a log site. USE THIS, not :func:`sanitise_for_log`, for anything the
+    database driver produced.
+
+    Args:
+        text: the driver-supplied text.
+        limit: as :func:`sanitise_for_log`.
+
+    Returns:
+        The redacted, sanitised rendering.
+
+        >>> redact_for_log(
+        ...     "Access denied for user 'ACAS-User'@'localhost' "
+        ...     "(using password: YES)"
+        ... )
+        'Access denied for user [redacted] (using password: [redacted])'
+        >>> redact_for_log("Unknown database 'ACASDB'")
+        'Unknown database [redacted]'
+    """
+    redacted = text
+    for pattern, replacement in _REDACTION_RULES:
+        redacted = pattern.sub(replacement, redacted)
+    return sanitise_for_log(redacted, limit=limit)
+
+
+def db_error_log_category(errno: int | str, sql_state: str = "") -> str:
+    """Classify a driver failure into a stable token safe to log and alert on.
+
+    Derived from the error number and the SQLSTATE ONLY - never from the
+    message - so the result carries no host name, no account and no data value,
+    and is identical for every occurrence of the same fault. That stability is
+    the point: an operator can alert on ``access-denied`` without the redacted
+    message text being parseable at all.
+
+    NOT A DISPOSITION. The FS-Reply and WE-Error a failure produces come from
+    `mysql_1100_db_error` and `mysql_1300_db_error`, which read the frozen
+    source; this function is consulted by log sites and by nothing else.
+
+    Args:
+        errno: the driver's error number, as text or as an integer.
+        sql_state: the driver's SQLSTATE, used only for the duplicate-key case
+            the bridge itself recognises [copybooks/mysql-procedures.cpy:L99].
+
+    Returns:
+        One of the tokens of :data:`_LOG_CATEGORY_BY_ERRNO`, or
+        ``"duplicate-key"``, ``"lock"`` or :data:`LOG_CATEGORY_UNCLASSIFIED`.
+
+        >>> db_error_log_category(1045)
+        'access-denied'
+        >>> db_error_log_category("1062")
+        'duplicate-key'
+        >>> db_error_log_category("1036")
+        'lock'
+        >>> db_error_log_category(0)
+        'unclassified'
+    """
+    number = str(errno).strip()
+    if number in DUPLICATE_KEY_ERRNOS or sql_state.strip() == DUPLICATE_KEY_SQLSTATE:
+        return "duplicate-key"
+    if number in LOCK_ERRNOS:
+        return "lock"
+    return _LOG_CATEGORY_BY_ERRNO.get(number, LOG_CATEGORY_UNCLASSIFIED)
+
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -1664,19 +1655,15 @@ class DbErrorStatus:
     #: e.g. [common/glpostingMT.cbl:L813].
     sql_state: str
 
-    #: ``True`` if the duplicate-key early exit was taken, i.e. if
-    #: `go to Mysql-1190-Exit` [copybooks/mysql-procedures.cpy:L104] fired.
-    #:
-    #: Published because that jump skips real work, and a caller reproducing
-    #: the DRIVER PARAGRAPH in isolation needs to know it happened: the
-    #: statements at [:L107] (fetch message) and [:L122-L123] (fetch and store
-    #: SQLSTATE) are all bypassed, so the paragraph leaves `SQL-State`
-    #: untouched on this path. The values reported in the three text fields
-    #: above are what the BRIDGE-level write path leaves in the record, since
-    #: each bridge stores all three itself before testing
-    #: [common/glpostingMT.cbl:L813-L817]. A caller that must reproduce the
-    #: paragraph's skip exactly should test this flag and decline to apply the
-    #: text fields.
+    #: ``True`` if the duplicate-key early exit was taken, i.e. if `go to Mysql-1190-Exit`
+    #: [copybooks/mysql-procedures.cpy:L104] fired. Published because that jump skips real
+    #: work, and a caller reproducing the DRIVER PARAGRAPH in isolation needs to know it
+    #: happened: the statements at [:L107] (fetch message) and [:L122-L123] (fetch and store
+    #: SQLSTATE) are all bypassed, so the paragraph leaves `SQL-State` untouched on this path.
+    #: The values reported in the three text fields above are what the BRIDGE-level write path
+    #: leaves in the record, since each bridge stores all three itself before testing
+    #: [common/glpostingMT.cbl:L813-L817]. A caller that must reproduce the paragraph's skip
+    #: exactly should test this flag and decline to apply the text fields.
     duplicate_key: bool
 
     def apply_to_logging_data(self, logging_data: LoggingData) -> None:
@@ -1710,20 +1697,16 @@ def mysql_1100_db_error(
 ) -> DbErrorStatus:
     """Map a driver failure to a status pair, as ``Mysql-1100-Db-Error`` does.
 
-    Reproduces [copybooks/mysql-procedures.cpy:L96-L128], the paragraph every
-    one of the twenty in-scope bridges reaches for on any failed statement -
-    ``Mysql-1210-Command`` performs it at
-    [copybooks/mysql-procedures.cpy:L176], and ``Mysql-1200-Select``,
-    ``Mysql-1220-Store-Result``, ``Mysql-1240-Switch-Db`` and
-    ``Mysql-1000-Open`` all do the same.
-
-    The paragraph has exactly two outcomes, in this order.
+    Reproduces [copybooks/mysql-procedures.cpy:L96-L128], the paragraph every one
+    of the twenty in-scope bridges reaches for on any failed statement -
+    ``Mysql-1210-Command`` performs it at [:L176], and ``Mysql-1200-Select``,
+    ``Mysql-1220-Store-Result``, ``Mysql-1240-Switch-Db`` and ``Mysql-1000-Open``
+    all do the same. It has exactly two outcomes, in this order.
 
     **1. The duplicate-key early exit.** If :func:`is_duplicate_key_driver_level`
-    holds, ``move 22 to fs-Reply`` [:L103] and ``go to Mysql-1190-Exit``
-    [:L104]. ``We-Error`` is NOT touched, so it keeps whatever it held; the
-    jump also skips the message fetch at [:L107] and the SQLSTATE fetch and
-    store at [:L122-L123].
+    holds, ``move 22 to fs-Reply`` [:L103] and ``go to Mysql-1190-Exit`` [:L104].
+    ``We-Error`` is NOT touched, so it keeps whatever it held; the jump also skips
+    the message fetch at [:L107] and the SQLSTATE fetch and store at [:L122-L123].
 
     **2. Everything else.** ``(99, 911)``, unconditionally.
 
@@ -1734,32 +1717,24 @@ def mysql_1100_db_error(
         L127     move     99 to fs-Reply.
         L128     move     911 to We-Error.
 
-    [copybooks/mysql-procedures.cpy:L127-L128]. So every non-duplicate failure
-    of every operation is reported as ``We-Error 911``, a code the
-    authoritative table documents as
-    ``Rdb Error during initializing, possibly can not connect to database``
-    [common/glpostingMT.cbl:L143-L144]. A missing table, a syntax error, a
-    constraint violation, a dropped connection and - because the retry ladder
-    of anomaly N1 is dead - a locked table are all reported as a failure to
-    connect. Returning anything more accurate would be a defect fix, and rule
-    R-4 makes a defect fixed a failure.
-
-    Callers narrow the code AFTERWARDS, which is the second stage of the
-    behaviour and is the bridges' own idiom - see
+    [copybooks/mysql-procedures.cpy:L127-L128]. So a missing table, a syntax
+    error, a constraint violation, a dropped connection and - because the retry
+    ladder of anomaly N1 is dead - a locked table are ALL reported as
+    ``We-Error 911``, which the authoritative table documents as ``Rdb Error
+    during initializing, possibly can not connect to database``
+    [common/glpostingMT.cbl:L143-L144]. Returning anything more accurate would be
+    a defect fix, which rule R-4 makes a failure. Callers narrow the code
+    AFTERWARDS, the bridges' own idiom - see
     :data:`WE_ERROR_OVERRIDE_BY_FILE_FUNCTION` and
     :func:`override_we_error_for_operation`.
 
-    On the diagnostic side this reproduces the native equivalent of three
-    foreign calls - ``call "MySQL_errno"`` [:L97], ``call "MySQL_error"``
-    [:L107] and ``call "MySQL_sqlstate"`` [:L122] - by taking their results as
-    arguments. Nothing is called out of process (rule R-1); a caller holding a
-    driver exception passes its attributes straight in.
-
-    A log record is emitted for the generic outcome, standing in for
-    ``Mysql-1110-Report-Problem`` [:L130-L137], which displays two messages
-    and then blocks on ``accept ws-reply`` [:L136]. Per Agent Action Plan
-    section 0.3.4 the display becomes a log record and the pause is dropped.
-    The record changes no control flow and reaches no table.
+    On the diagnostic side this reproduces the native equivalent of three foreign
+    calls - ``call "MySQL_errno"`` [:L97], ``call "MySQL_error"`` [:L107] and
+    ``call "MySQL_sqlstate"`` [:L122] - by taking their results as arguments.
+    Nothing is called out of process (rule R-1). A log record stands in for
+    ``Mysql-1110-Report-Problem`` [:L130-L137], whose two displays become the
+    record and whose ``accept ws-reply`` [:L136] pause is dropped per Agent Action
+    Plan section 0.3.4; it changes no control flow and reaches no table.
 
     Args:
         errno: The driver's error number AS TEXT - see
@@ -1767,18 +1742,17 @@ def mysql_1100_db_error(
         message: The driver's error message, the equivalent of
             ``Ws-Mysql-Error-Message``. Truncated to 512 characters on the way
             into ``SQL-Msg``.
-        sql_state: The driver's SQLSTATE, the equivalent of
-            ``WS-MYSQL-SqlState``.
-        command: The statement text that failed. Consulted ONLY by the
-            duplicate test, and only its first six characters.
-        we_error: The value ``We-Error`` already holds. Returned unchanged on
-            the duplicate path, because the COBOL jump skips the statement
-            that would overwrite it. Defaults to ``WeError.SUCCESS``, which is
-            the value a handler starts an operation with.
+        sql_state: The driver's SQLSTATE, the equivalent of ``WS-MYSQL-SqlState``.
+        command: The statement text that failed. Consulted ONLY by the duplicate
+            test, and only its first six characters.
+        we_error: The value ``We-Error`` already holds. Returned unchanged on the
+            duplicate path, because the COBOL jump skips the statement that would
+            overwrite it. Defaults to ``WeError.SUCCESS``, the value a handler
+            starts an operation with.
 
     Returns:
-        A :class:`DbErrorStatus` with the fields already fitted to their
-        picture widths.
+        A :class:`DbErrorStatus` with the fields already fitted to their picture
+        widths.
 
         >>> status = mysql_1100_db_error(
         ...     errno="1062",
@@ -1835,7 +1809,6 @@ def mysql_1100_db_error(
     # test that would have read the value it describes is commented out at
     # [:L124]. So `SQL-State` is stored and then never consulted - anomaly N4.
     # Six of the seven entries of DOCUMENTED_SQLSTATE_MAPPINGS record that.
-    #
     # *** ANOMALY N3 *** - unconditional, for EVERY non-duplicate error:
     #     L127   move     99 to fs-Reply.
     #     L128   move     911 to We-Error.
@@ -1853,43 +1826,42 @@ def mysql_1100_db_error(
     # [copybooks/mysql-procedures.cpy:L130-L137]: two displays become one log
     # record and the blocking `accept` at [:L136] is dropped. Control flow is
     # untouched - this returns normally either way.
+    #
+    # The two ACAS status values are interpolated as themselves: they are
+    # integers drawn from this module's own enumerations, so neither can carry a
+    # control character or an identity. The driver's SQLSTATE, error number and
+    # message cannot make that claim, so each goes through the log-safety
+    # functions above, and the number is additionally reported as a stable
+    # category an operator can alert on (CWE-117, CWE-532). The status object
+    # returned below still carries all three driver fields exactly as the driver
+    # produced them, fitted only to their picture widths - the redaction is a
+    # property of this log record and of nothing else.
     _LOG.error(
-        "ACAS file handler: FS-Reply=%d WE-Error=%d SQLSTATE=%s errno=%s: %s "
+        "ACAS file handler: FS-Reply=%d WE-Error=%d SQLSTATE=%s errno=%s "
+        "category=%s: %s "
         "[reproduces the unconditional (99, 911) of "
         "copybooks/mysql-procedures.cpy:L127-L128 - WE-Error 911 is a "
         "catch-all here, not evidence of a connect failure]",
         int(status.fs_reply),
         int(status.we_error),
-        sql_state,
-        errno,
-        message,
+        sanitise_for_log(sql_state, limit=SQL_STATE_WIDTH),
+        sanitise_for_log(errno, limit=SQL_ERR_WIDTH),
+        db_error_log_category(errno, sql_state),
+        redact_for_log(message),
     )
     return status
 
 
-
-#: The per-operation narrowings of the 911 catch-all - the SECOND stage of
-#: anomaly N3.
-#:
-#: Two of the bridge's operations refuse to leave 911 in place. Each performs
-#: the generic paragraph, lets it set `(99, 911)`, and then overwrites the
-#: detail code with something specific to itself:
-#:
-#:     ba080-Process-Delete    move 99 to fs-reply / move 995 to WE-Error
-#:                             [common/glpostingMT.cbl:L874-L875]
-#:     ba090-Process-Rewrite   move 99 to fs-reply / move 994 to WE-Error
-#:                             [common/glpostingMT.cbl:L1001-L1002]
-#:
-#: Note that both re-state `move 99 to fs-reply` even though the generic
-#: paragraph has already set it - harmless, and preserved as written by
-#: `override_we_error_for_operation`, which likewise returns FS-Reply 99.
-#:
-#: The other operations do not narrow: the write path leaves `We-Error`
-#: entirely alone [common/glpostingMT.cbl:L818-L824], and the read-indexed
-#: path sets its own pair from scratch rather than overriding
-#: [common/glpostingMT.cbl:L668-L669] and [:L676-L677]. So this mapping has
-#: exactly two entries and must not grow: an entry for any other verb would
-#: be behaviour the compiled program does not have.
+#: The per-operation narrowings of the 911 catch-all - the SECOND stage of anomaly N3. Two of
+#: the bridge's operations refuse to leave 911 in place: each performs the generic paragraph,
+#: lets it set `(99, 911)`, then overwrites the detail code with something specific -
+#: `ba080-Process-Delete` moves 99 to fs-reply and 995 to WE-Error
+#: [common/glpostingMT.cbl:L874-L875], `ba090-Process-Rewrite` moves 99 and 994
+#: [:L1001-L1002]. Both re-state `move 99 to fs-reply` even though the generic paragraph has
+#: already set it - harmless, and preserved as written by `override_we_error_for_operation`,
+#: which likewise returns FS-Reply 99. The others do not narrow: the write path leaves
+#: `We-Error` entirely alone [:L818-L824] and read-indexed sets its own pair from scratch
+#: [:L668-L669], [:L676-L677]. So this mapping has exactly two entries and must not grow.
 WE_ERROR_OVERRIDE_BY_FILE_FUNCTION: Final[Mapping[FileFunction, WeError]] = (
     MappingProxyType(
         {
@@ -1965,90 +1937,27 @@ def override_we_error_for_operation(
     )
 
 
-# =============================================================================
-#  ANOMALY N1 - THE LOCK-RETRY BACKOFF LADDER THAT IS DEAD CODE
-#
-#  This is the highest-value thing in the module, and the easiest to break by
-#  improving it.
-#
-#  `Mysql-1300-DB-Error` [copybooks/mysql-procedures.cpy:L209-L255] is a
-#  complete, carefully commented, four-rung exponential backoff over three
-#  MySQL table-lock error numbers. It works. It is never called.
-#
-#  The ONLY `perform` of it in the entire repository is commented out, inside
-#  `Mysql-1210-Command` [copybooks/mysql-procedures.cpy:L164-L177]:
-#
-#      L164   Mysql-1210-Command.
-#      L165       call     "MySQL_query" using WS-Mysql-Command.
-#      L166       if       Return-Code not = zero
-#      L167  *>             perform Mysql-1300-DB-Error thru Mysql-1390-Exit
-#      L168  *>             if      WE-Error = 910
-#      L169  *>                     go to Mysql-1219-Exit
-#      L170  *>             end-if
-#      L171  *>             if      WS-SQL-Retry = 1
-#      L172  *>                     move zero to WS-SQL-Retry
-#      L173  *>                     go to Mysql-1210-Command
-#      L174  *>             end-if
-#      L175  *>              perform Mysql-1100-Db-Error-2 Thru Mysql-1190-Exit
-#      L176               perform Mysql-1100-Db-Error Thru Mysql-1190-Exit
-#      L177       end-if
-#
-#  Every consequence below was established by grep over the whole tree, not by
-#  reading and inferring:
-#
-#  * `WE-Error 910` is UNREACHABLE. The only statement that sets it is
-#    [copybooks/mysql-procedures.cpy:L245], inside the dead paragraph.
-#  * NOTHING IS EVER RETRIED. `WS-SQL-Retry`
-#    [copybooks/mysql-variables.cpy:L104, `pic 99 comp value zero`] is set to 1
-#    at exactly one place in the tree - [copybooks/mysql-procedures.cpy:L254],
-#    inside the dead paragraph - so it is permanently zero, and the retry test
-#    that would have read it is itself commented out at [:L171].
-#  * THE RATCHET NEVER MOVES. `WS-Mysql-Time-Step`
-#    [copybooks/mysql-variables.cpy:L105, `pic 99 comp value zero`] is
-#    advanced only inside the dead paragraph; every other site in the tree
-#    merely zeroes it, in `Mysql-1000-Open`
-#    [copybooks/mysql-procedures.cpy:L64-L65]. It stays at its declared zero
-#    for the life of the run.
-#  * A LOCK IS MISREPORTED. Errno 1027, 1036 or 1099 falls through
-#    `Mysql-1210-Command` to the LIVE `perform` at [:L176], which is the
-#    generic paragraph - so a locked table is reported as
-#    `(99, 911)`, i.e. as a failure to connect to the database. See
-#    `is_lock_errno`.
-#  * THE EXIT COMMENT IS NOW FALSE. `Mysql-1219-Exit.` still advises
-#    `*> on return test for WE-Error = 910` [:L180], a test no caller can ever
-#    satisfy.
-#  * ALL TWENTY in-scope bridges `COPY "mysql-procedures.cpy"` and so carry
-#    this paragraph, and not one of them can reach it. Verified bridge by
-#    bridge.
-#
-#  Also worth recording: the prose table promises `910* = Table locked > 5
-#  seconds` [common/glpostingMT.cbl:L149], but the ladder waits
-#  1/4 + 1/2 + 1 + 5 = 6.75 seconds across its four rungs before giving up. So
-#  even if it were wired up, the documented threshold would be wrong.
-#
-#  WHAT REPRODUCING THIS MEANS: the ladder is present as data and as a
-#  function, and it is NEVER CALLED. `mysql_1300_db_error` has zero call sites
-#  in `acas_posting/`, and it performs no wait even if a caller does invoke it.
-#  Wiring it up would make the Python cycle survive a lock that the COBOL
-#  cycle fails on, which is a behavioural difference - and rule R-4 makes a
-#  defect fixed a failure.
-# =============================================================================
+#  ANOMALY N1 - THE LOCK-RETRY BACKOFF LADDER THAT IS DEAD CODE. `Mysql-1300-DB-Error`
+#  [copybooks/mysql-procedures.cpy:L209-L255] is a working four-rung backoff over three lock
+#  errnos that is never called: its ONLY `perform` is commented out at [:L167], with the 910
+#  test at [:L168] and the retry test at [:L171-L174], while the live `perform` at [:L176]
+#  reaches the generic paragraph. Hence, each by grep: 910 unreachable (set only at [:L245]);
+#  nothing retried (`WS-SQL-Retry` [copybooks/mysql-variables.cpy:L104] set to 1 only at
+#  [:L254]); ratchet frozen (`WS-Mysql-Time-Step` [:L105] advanced only there, zeroed at
+#  [copybooks/mysql-procedures.cpy:L64-L65]); a lock misreported `(99, 911)`; the exit advice
+#  at [:L180] unsatisfiable; all twenty bridges carry it unreachable. The prose errs too - 910
+#  is documented as a 5-second lock [common/glpostingMT.cbl:L149] against rungs waiting 6.75s.
+#  It stays uncalled and waitless; wiring it up would add resilience the COBOL cycle lacks,
+#  which rule R-4 forbids.
 
-#: The three MySQL error numbers the dead ladder would have treated as
-#: recoverable locks, with the frozen source's own comments
-#: [copybooks/mysql-procedures.cpy:L218-L220]::
-#:
-#:     if       WS-Mysql-Error-Number not = "1027"  *> HY000  - Locked against change
-#:                                and not = "1036"  *> HY000  - Table Read Only
-#:                                and not = "1099"  *> HY000  - Locked with Read lock
-#:              go to Mysql-1390-Exit.      *> Not interested as it's not a LOCK problem.
-#:
-#: Strings for the same reason as `DUPLICATE_KEY_ERRNOS`: the COBOL field is
-#: alphanumeric and the comparison is textual.
-#:
-#: All three share SQLSTATE `HY000`, which is one more reason the SQLSTATE map
-#: of anomaly N4 could not have distinguished them even if it had been wired
-#: up.
+#: The three MySQL error numbers the dead ladder would have treated as recoverable locks, with
+#: the frozen source's own comments `not = "1027"  *> HY000 - Locked against change`, `not =
+#: "1036"  *> HY000 - Table Read Only`, `not = "1099"  *> HY000 - Locked with Read lock`,
+#: falling through to `go to Mysql-1390-Exit.  *> Not interested as it's not a LOCK problem.`
+#: [copybooks/mysql-procedures.cpy:L218-L220]. Strings for the same reason as
+#: `DUPLICATE_KEY_ERRNOS`: the COBOL field is alphanumeric and the comparison is textual. All
+#: three share SQLSTATE `HY000`, which is one more reason the SQLSTATE map of anomaly N4 could
+#: not have distinguished them even if it had been wired up.
 LOCK_ERRNOS: Final[frozenset[str]] = frozenset({"1027", "1036", "1099"})
 
 
@@ -2108,10 +2017,10 @@ class LockRetryRung:
 #: matches no rung, and falls into the ``else`` at [:L244-L248] which sets the
 #: unreachable ``(99, 910)``.
 #:
-#: Published as inspectable data precisely so that ``docs/migration/anomaly-log.md``
-#: and the anomaly-locking tests can assert on the ladder's shape WITHOUT
-#: calling :func:`mysql_1300_db_error` - because calling it is the one thing
-#: that must never happen.
+#: Published as inspectable data precisely so that the migration anomaly log
+#: and the anomaly-locking tests a later boundary adds can assert on the
+#: ladder's shape WITHOUT calling :func:`mysql_1300_db_error` - because
+#: calling it is the one thing that must never happen.
 LOCK_RETRY_LADDER: Final[tuple[LockRetryRung, ...]] = (
     # L223   if       WS-Mysql-Time-Step = zero
     # L224            move 1 to WS-Mysql-Time-Step
@@ -2176,8 +2085,10 @@ def is_lock_errno(errno: str) -> bool:
     other non-duplicate error, with no wait and no retry, because the ladder
     that would have handled it is unreachable.
 
-    That is the observed behaviour of the compiled program and it must be
-    preserved. Using this predicate to trigger a wait, a retry, or a
+    That follows from the frozen control flow - the ladder's only ``perform``
+    is commented out [copybooks/mysql-procedures.cpy:L167], so a lock reaches
+    ``Mysql-1100-Db-Error`` and nothing else - and it must be preserved.
+    Using this predicate to trigger a wait, a retry, or a
     ``We-Error`` of 910 would give the Python cycle a resilience the COBOL
     cycle does not have, and rule R-4 makes a defect fixed a failure.
 
@@ -2210,56 +2121,49 @@ def mysql_1300_db_error(
 ) -> tuple[int, LockRetryRung | None, tuple[FsReply, WeError] | None]:
     """DEAD CODE, reproduced unreachable: see [copybooks/mysql-procedures.cpy:L167].
 
-    This function reproduces ``Mysql-1300-DB-Error``
-    [copybooks/mysql-procedures.cpy:L209-L255]. **It must never be called.**
-    The only ``perform`` of that paragraph anywhere in the repository is
-    commented out, at [copybooks/mysql-procedures.cpy:L167], so no live COBOL
-    path reaches it - and reproducing this defect means keeping the Python
-    equivalent equally unreached. It has zero call sites in ``acas_posting``
-    and must keep zero. Wiring it up would give the migrated cycle a
-    lock-retry behaviour the compiled cycle does not have, which rule R-4
-    makes a failure rather than an improvement.
+    Reproduces ``Mysql-1300-DB-Error`` [copybooks/mysql-procedures.cpy:L209-L255].
+    **It must never be called.** The only ``perform`` of that paragraph anywhere in
+    the repository is commented out at [:L167], so no live COBOL path reaches it,
+    and reproducing this defect means keeping the Python equivalent equally
+    unreached: it has zero call sites in ``acas_posting`` and must keep zero.
+    Wiring it up would give the migrated cycle a lock-retry behaviour the compiled
+    cycle does not have, which rule R-4 makes a failure rather than an improvement.
 
     It exists at all for two reasons: rule R-5 asks that every paragraph
     reproduced keep a function named after it, so a reader following the COBOL
-    finds a Python counterpart; and the anomaly log needs something concrete
-    to point at when it claims the ladder was fully written before being
-    abandoned.
+    finds a counterpart; and the anomaly log needs something concrete to point at
+    when it claims the ladder was fully written before being abandoned.
 
     **It performs no wait.** Rule R-6 forbids this module any dependence on
-    wall-clock time, and a dead function that would have slept must not become
-    a live function that does. The rung it selects is RETURNED as data, and the
-    duration on that rung is an integer count of nanoseconds or seconds; the
-    two foreign sleep routines named at [:L225], [:L230], [:L236] and [:L242]
-    are recorded on the rung and never invoked, which rule R-1 requires in any
-    case.
+    wall-clock time, and a dead function that would have slept must not become a
+    live one that does. The rung it selects is RETURNED as data, its duration an
+    integer count of nanoseconds or seconds; the two foreign sleep routines named
+    at [:L225], [:L230], [:L236] and [:L242] are recorded on the rung and never
+    invoked, which rule R-1 requires in any case.
 
     The logic reproduced, faithfully:
 
-    1. ``move zero to WS-SQL-Retry`` [:L215] - the retry flag is cleared on
-       entry, which is why it can only ever be observed as zero anywhere else.
-    2. If the errno is not one of the three lock codes,
-       ``go to Mysql-1390-Exit`` [:L218-L221] - a non-lock error is not this
-       paragraph's business and it returns having changed nothing.
-    3. Otherwise walk the nested ``if`` chain [:L223-L242] for the rung
-       matching the current ``WS-Mysql-Time-Step``, ratchet the step, and
-       (in COBOL) wait.
-    4. If no rung matches - the step has already reached 8 - set the
-       unreachable pair ``(99, 910)`` [:L245-L246] and exit [:L248].
+    1. ``move zero to WS-SQL-Retry`` [:L215] - the retry flag is cleared on entry,
+       which is why it can only ever hold zero anywhere else.
+    2. If the errno is not one of the three lock codes, ``go to Mysql-1390-Exit``
+       [:L218-L221], having changed nothing.
+    3. Otherwise walk the nested ``if`` chain [:L223-L242] for the rung matching
+       the current ``WS-Mysql-Time-Step``, ratchet the step, and (in COBOL) wait.
+    4. If no rung matches - the step has already reached 8 - set the unreachable
+       pair ``(99, 910)`` [:L245-L246] and exit [:L248].
     5. On any rung that did match, ``move 1 to WS-SQL-Retry`` [:L254] and exit
        [:L255], asking the caller to retry the statement.
 
-    THE RATCHET IS NOT RESET HERE, deliberately. Step 1 clears the retry flag
-    but never the step, so the ladder climbs monotonically for the life of the
-    connection; only ``Mysql-1000-Open`` zeroes it
-    [copybooks/mysql-procedures.cpy:L64-L65]. A caller therefore has to thread
-    the step through successive calls, which is why it is a parameter and a
+    THE RATCHET IS NOT RESET HERE, deliberately: step 1 clears the retry flag but
+    never the step, so the ladder climbs monotonically for the life of the
+    connection and only ``Mysql-1000-Open`` zeroes it [:L64-L65]. A caller must
+    thread the step through successive calls, which is why it is a parameter and a
     return value rather than module state - module state would also break the
     determinism rule R-6 requires.
 
     Args:
-        errno: The driver's error number as text, standing in for the result
-            of ``call "MySQL_errno"`` at [:L217].
+        errno: The driver's error number as text, standing in for the result of
+            ``call "MySQL_errno"`` at [:L217].
         time_step: The current ``WS-Mysql-Time-Step``
             [copybooks/mysql-variables.cpy:L105]. Zero on a fresh connection.
 
@@ -2269,19 +2173,18 @@ def mysql_1300_db_error(
         * ``next_time_step`` - the ratcheted step to carry to the next call,
           unchanged when nothing matched;
         * ``rung`` - the :class:`LockRetryRung` that fired, or ``None``. A rung
-          means the COBOL would have waited and then set ``WS-SQL-Retry`` to 1
-          at [:L254], i.e. asked for a retry;
+          means the COBOL would have waited and then set ``WS-SQL-Retry`` to 1 at
+          [:L254], i.e. asked for a retry;
         * ``exhausted_status`` - ``(99, 910)`` when the ladder is exhausted
-          [:L245-L246], else ``None``. This pair is the unreachable
-          ``WeError.TABLE_LOCKED``, and no live path can produce it.
+          [:L245-L246], else ``None``. That pair is the unreachable
+          ``WeError.TABLE_LOCKED``, which no live path can produce.
 
     ILLUSTRATION, DELIBERATELY NOT A DOCTEST
-        The examples below are a non-executable literal block rather than
-        ``>>>`` examples, because a doctest is a call site: it would make this
-        paragraph run, and reproducing anomaly N1 means it never runs. The
-        assertable surface is :data:`LOCK_RETRY_LADDER`, which is plain data
-        and needs no call. Walking the ladder from a fresh connection would
-        give::
+        A non-executable literal block rather than ``>>>`` examples, because a
+        doctest is a call site: it would make this paragraph run, and reproducing
+        anomaly N1 means it never runs. The assertable surface is
+        :data:`LOCK_RETRY_LADDER`, which is plain data and needs no call. Walking
+        the ladder from a fresh connection would give::
 
             step = 0                     ->  (1, rung 250000000 ns, None)
             step = 1                     ->  (2, rung 500000000 ns, None)
@@ -2290,14 +2193,12 @@ def mysql_1300_db_error(
             step = 8   ladder exhausted  ->  (8, None, (99, 910))
             errno "1146", any step       ->  (step, None, None)
 
-        The fifth line is the pair no caller can observe in the compiled
-        program, and the sixth is `go to Mysql-1390-Exit` [:L218-L221] leaving
-        everything alone.
+        The fifth line is the pair no caller can reach in the frozen source, and
+        the sixth is `go to Mysql-1390-Exit` [:L218-L221] leaving everything alone.
     """
     # L215: `move zero to WS-SQL-Retry.` The flag is cleared on entry. Because
     # this paragraph is unreachable, that clearing is also the reason the flag
-    # is observed as zero everywhere else in the system.
-    #
+    # holds zero everywhere else in the system.
     # L217-L221: `call "MySQL_errno" ...` then, if the code is none of the
     # three locks, `go to Mysql-1390-Exit  *> Not interested as it's not a
     # LOCK problem.` Nothing is changed on the way out.
@@ -2313,7 +2214,6 @@ def mysql_1300_db_error(
             # and call the sleep routine named on the rung. Here: ratchet, and
             # return the rung so its duration and display can be inspected.
             # NO WAIT IS PERFORMED - see this function's docstring.
-            #
             # L254: `move 1 to WS-SQL-Retry.` - a matched rung means "retry
             # the statement", which the returned rung signals to the caller.
             # L255: `go to Mysql-1390-Exit.`
@@ -2323,7 +2223,6 @@ def mysql_1300_db_error(
     #     move 910 to WE-Error / move 99 to FS-Reply
     #     call "MySQL_error" using Ws-Mysql-Error-Message
     #     go to Mysql-1390-Exit.     *>  Test for, after exit
-    #
     # `WeError.TABLE_LOCKED` is produced HERE AND NOWHERE ELSE in the entire
     # frozen tree, which is exactly why no caller can ever see it. The step is
     # returned unchanged: the chain has no arm for a step of 8, so nothing
@@ -2331,20 +2230,15 @@ def mysql_1300_db_error(
     return time_step, None, (FsReply.ERROR, WeError.TABLE_LOCKED)
 
 
-
-# =============================================================================
 #  TESTING A STATUS
-#
 #  A caution that governs this whole section: THE COBOL DOES NOT RAISE. Every
 #  handler returns a status pair in the record and every caller tests it
 #  inline, then decides. There is no exception mechanism to reproduce, so a
 #  Python module that raised on a non-zero reply would be inventing control
 #  flow the compiled program does not have - and control flow is behaviour.
-#
 #  `is_ok` is therefore the normal way to test a reply, and
 #  `raise_for_status` is the exception, for the two places where the frozen
 #  source itself stops.
-# =============================================================================
 
 
 class AcasFileHandlerError(Exception):
@@ -2538,15 +2432,12 @@ def raise_for_status(
         )
 
 
-# =============================================================================
 #  LOGGING-DATA VOCABULARY
-#
 #  `03  Logging-Data.` [copybooks/wsfnctn.cob:L44-L55]. Two of its fields
 #  carry small closed vocabularies that are documented only in handler
 #  comments, so they are collected here rather than left to be rediscovered.
 #  The block's other fields are plain data and belong to
 #  `records/file_access.py`.
-# =============================================================================
 
 
 class LogSystem(enum.IntEnum):

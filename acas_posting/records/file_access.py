@@ -3,71 +3,56 @@
 `01 File-Access.` [copybooks/wsfnctn.cob:L22] is the third parameter of every
 handler call the migrated cycle makes, and the carrier of the file-status
 protocol between a program and the data-access layer. Agent Action Plan
-section 0.4.3 gives the call it rides on, verbatim:
+section 0.4.3 gives the call it rides on, verbatim::
 
     FROM:  call "acas007" using System-Record WS-Batch-Record File-Access
                                 File-Defs ACAS-DAL-Common-Data
     TO:    acas007_gl_batch.dispatch(system, batch, file_access, file_defs,
                                      dal_common)
 
-This module is plain dataclasses that mirror that block field for field with
-nothing added, per section 0.8.1 - "Plain modules and dataclasses; no ORM
-entity layer" - and rule R-3 - "The 27 record modules mirror their copybooks
-field for field with nothing added". The COBOL tree is frozen: it is read as
-the specification for this migration and never modified, reformatted,
-relocated or commented, and nothing here executes, embeds or shells out to a
-COBOL program (R-1).
+Plain dataclasses mirror that block field for field with nothing added (R-3).
+The COBOL tree is frozen: read as the specification, never modified, and
+nothing here executes, embeds or shells out to a COBOL program (R-1).
 
 THE TWO-WAY SPLIT - THE CENTRAL CONSTRAINT OF THIS MODULE
 =========================================================
 One COBOL copybook becomes TWO Python modules, because the copybook mixes a
 data layout with an operation vocabulary and the Python layering separates
-them. Section 0.5.3 states it verbatim:
-
-    "Every `COPY` of the function-code copybook becomes two imports - the
-    record classes from `records/file_access.py`, and the status and
-    vocabulary enumerations from `dal/status.py` - because the single COBOL
-    copybook mixes data layout with operation vocabulary and the Python
-    layering separates them."
-
-So the division of labour is fixed, and this module holds the LAYOUT half:
+them - section 0.5.3 makes that split binding for every `COPY` of this
+copybook. This module holds the LAYOUT half:
 
     THIS MODULE OWNS      the dataclasses and their attributes - every one of
                           the 35 elementary items the block declares,
                           including `File-Function` [:L88] and `Access-Type`
-                          [:L107], which are plain `int` storage attributes
-                          here because they are members of `01 File-Access`
-                          and R-3 requires the record carry them.
-
+                          [:L107], plain `int` storage attributes here
+                          because they are members of `01 File-Access` and
+                          R-3 requires the record carry them.
     `dal/status.py` OWNS  the vocabulary: all 30 `88` condition names and
                           every enumeration built from them, the `Fs-Reply`
-                          value set 0/10/21/22/23/99, the `We-Error` code
-                          set, the SQL-state mapping for duplicates and the
-                          lock-wait ladder, per section 0.4.1.5.
-
+                          set 0/10/21/22/23/99, the `We-Error` codes, the
+                          SQL-state mapping for duplicates and the lock-wait
+                          ladder, per section 0.4.1.5.
     `dal/connection.py`   populates the six `RDB-Data` items [:L57-L62] -
     OWNS                  `DB-Schema`, `DB-UName`, `DB-UPass`, `DB-Host`,
-                          `DB-Socket` and `DB-Port` - per section 0.4.1.5.
+                          `DB-Socket`, `DB-Port` - per section 0.4.1.5.
 
 Nothing below defines an enumeration, a predicate over a `88` level, a reply
 helper or a status table. The `88` levels are not lost: each travels on its
-field's dictionary entry, as `notes` and as `copybook.condition_names` with
-a per-name locator, so the vocabulary module derives them from the same
+field's dictionary entry, as `notes` and as `copybook.condition_names` with a
+per-name locator, so the vocabulary module derives them from the same
 generated artifact this module reads rather than from a second transcription
 (R-4 forbids two definitions of one vocabulary). Predicates over `88` levels
 belong to `cobol/condition_names.py`, per section 0.4.1.4.
 
-VERIFIED STRUCTURE, AND SEVEN AMENDMENTS TO THE PLAN'S CITATIONS
-================================================================
-`copybooks/wsfnctn.cob` is 117 lines and declares exactly ONE `01`-level
-item - `01 File-Access.` at L22. Everything from L23 to L116 is subordinate
-to it; L117 is a comment. Four spans quoted in the Agent Action Plan are
-approximate and one runs past end-of-file, so the verified spans are recorded
-here for `docs/migration/traceability.md` to pick up (R-5). Each was checked
-against the frozen file, whose working-tree copy is byte-identical to the
-committed blob:
+THE FROZEN STRUCTURE, AND SEVEN AMENDMENTS TO THE PLAN'S CITATIONS
+==================================================================
+`copybooks/wsfnctn.cob` is 117 lines and declares exactly ONE `01`-level item
+- `01 File-Access.` at L22. Everything from L23 to L116 is subordinate to it;
+L117 is a comment. Four spans quoted in the Agent Action Plan are approximate
+and one runs past end-of-file, so the frozen spans are recorded here for the
+traceability document a later boundary writes (R-5):
 
-    PLAN SAYS                     VERIFIED
+    PLAN SAYS                     FROZEN SOURCE
     File-Access L23-L38           `01 File-Access.` at L22; the group spans
                                   L22-L116; its elementary head is L23-L41
     Logging-Data L44-L56          header L44, children L45-L55, 11 fields.
@@ -80,83 +65,73 @@ committed blob:
                                   levels L89-L105; `Access-Type` L107 with
                                   its `88` levels L108-L116
 
-Three further amendments were found while verifying the above, and they are
-recorded rather than quietly applied, because a wrong locator in a
-traceability document is worse than none:
+Three further amendments were found while checking the above, recorded rather
+than quietly applied, because a wrong locator in a traceability document is
+worse than none:
 
     A-i   The plan describes a duplicated `88` indicator separated by a TAB
-          at L105, and calls it the only tab-containing line in the block.
-          IT IS NOT PRESENT in this frozen copy. L105 reads
-          `88  fn-Read-Next-Header value 34.` with a single indicator and
-          spaces only; the file contains ZERO tab characters on any of its
-          117 lines, and the committed blob agrees. The claim is recorded as
-          NOT REPRODUCED because there is nothing there to reproduce -
-          inventing the oddity would misreport the specification just as
-          surely as smoothing a real one away.
-    A-ii  The maintainer's "NOT YET USED" annotation sits at L64, not at
-          L68. It is a comment ABOVE the `Main-Record-Move-Flag` group and
-          annotates the whole flag mechanism; L68 carries no comment at all.
+          at L105, and calls it the only tab-containing line in the block. IT
+          IS NOT PRESENT in this frozen copy: L105 reads `88
+          fn-Read-Next-Header value 34.` with a single indicator and spaces
+          only, and the file contains ZERO tab characters on any of its 117
+          lines. Recorded as NOT REPRODUCED because there is nothing there to
+          reproduce - inventing the oddity would misreport the specification
+          just as surely as smoothing a real one away.
+    A-ii  The maintainer's "NOT YET USED" annotation sits at L64, not L68. It
+          is a comment ABOVE the `Main-Record-Move-Flag` group and annotates
+          the whole flag mechanism; L68 carries no comment at all.
     A-iii The block carries SEVENTEEN data-item VALUE clauses, not the ten
           the plan enumerates. Seven more live in `Logging-Data`: L45, L47,
-          L50, L52, L53, L54 and L55. Every one is honoured below, because
-          the governing directive is "defaults from the copybook's own VALUE
+          L50, L52, L53, L54, L55. Every one is honoured below, because the
+          governing directive is "defaults from the copybook's own VALUE
           clauses" and the enumeration accompanying it was partial.
 
 ODDITIES PRESERVED, NEVER SMOOTHED (RULE R-4)
 =============================================
-Rule R-4: "Defects present in the compiled behavior are part of the
-specification. A defect reproduced is a success; a defect fixed is a
-failure." Section 0.4.1.3 adds that an oddity in the source is preserved and
-never tidied away. None of the following carries an `A-` number in the anomaly
-register of section 0.6.7 and none is flagged by the generated artifact, so
-they are recorded here as module-local observations and are candidates for
-`docs/migration/anomaly-log.md`:
+None of the following carries an `A-` number in the anomaly register of
+section 0.6.7 and none is flagged by the generated artifact, so they are
+module-local observations and candidates for the migration's anomaly log:
 
     O-1  A LEVEL JUMP. `03 FA-RDBMS-Flat-Statuses.` [:L72] has `07`-level
          children at [:L73] and [:L82] - not `05`. COBOL permits any
-         increasing level number; the jump is carried verbatim and the
-         dictionary records the `07` too.
-    O-2  NON-MONOTONIC condition-name values on `File-Function` [:L88]. They
-         run 1 through 9 [:L89-L97], then 15 [:L99], then 13 [:L100], then
-         31 through 34 [:L102-L105] - a 9 -> 15 -> 13 -> 31 sequence with
-         10, 11, 12, 14 and 16 through 30 unused. The header comments explain
-         it: a widening was applied to the wrong item and reversed [:L11-L15],
-         and one value was changed after a later one had been added. Nobody
-         may sort this into order.
+         increasing level number; the jump is carried verbatim.
+    O-2  NON-MONOTONIC condition-name values on `File-Function` [:L88]: 1
+         through 9 [:L89-L97], then 15 [:L99], then 13 [:L100], then 31
+         through 34 [:L102-L105], leaving 10-12, 14 and 16-30 unused. The
+         header comments explain it - a widening was applied to the wrong
+         item and reversed [:L11-L15]. Nobody may sort this into order.
     O-3  FIVE CONDITION NAMES ARE COMMENTED OUT at [:L76-L80] - MySql,
-         Oracle, Postgres, DB2 and MS-SQL back-end selectors, inactive in the
-         frozen source, with only the two live ones at [:L74-L75] and a
-         `values 0 thru 1` range at [:L81] remaining. They are named in this
-         one sentence and modelled NOWHERE: not as an attribute, not as a
-         constant, not as commented-out code that a later reader might
+         Oracle, Postgres, DB2 and MS-SQL selectors - leaving the two live
+         ones at [:L74-L75] and a `values 0 thru 1` range at [:L81]. They are
+         named in this sentence and modelled NOWHERE: not as an attribute,
+         not as a constant, not as commented-out code a later reader might
          mistake for a specification.
     O-4  `Fs-Reply` [:L25] declares ZERO condition names of its own. Its
-         documented value set 0/10/21/22/23/99 is derived from the handler
-         programs, not from this copybook - which is precisely why the
-         vocabulary lives in a separate module rather than beside the field.
+         value set 0/10/21/22/23/99 comes from the handler programs, not this
+         copybook - precisely why the vocabulary lives in a separate module.
     O-5  `Cole` [:L30] is spelt with a trailing `e` while its sibling is
          `Lin` [:L29]; the second view spells the same pair `Lin2` [:L33] and
-         `Col2` [:L34]. Both spellings are carried exactly as declared.
+         `Col2` [:L34]. Both spellings are carried as declared.
     O-6  BOTH anonymous redefining groups are named `filler` [:L28] and
-         [:L32], so all four of `Lin`, `Cole`, `Lin2` and `Col2` report the
-         SAME parent group and the parent name alone cannot tell the two
-         views apart. The member names are what separate them, which is why
-         the two view classes below select their fields by name.
-    O-7  All six `RDB-Data` items ship as `value spaces` [:L57-L62], so
-         THERE IS NO CREDENTIAL ANYWHERE IN THE FROZEN SOURCE. Nothing is
+         [:L32], so all four of `Lin`, `Cole`, `Lin2`, `Col2` report the SAME
+         parent group and the parent name alone cannot tell the views apart.
+         The member names separate them, which is why the two view classes
+         below select their fields by name.
+    O-7  All six `RDB-Data` items ship as `value spaces` [:L57-L62], so THERE
+         IS NO CREDENTIAL ANYWHERE IN THE FROZEN SOURCE. Nothing is
          hard-coded here and nothing is read from the process environment;
          `dal/connection.py` fills the block (R-6).
     O-8  FIGURATIVE-CONSTANT SPELLINGS DISAGREE: `value space` singular at
          [:L45] against `value spaces` elsewhere, and `value zero` at [:L47]
-         and [:L66] against `value zeroes` at [:L54] and [:L55]. The spelling
-         is cosmetic in COBOL and is preserved in the comments regardless.
+         and [:L66] against `value zeroes` at [:L54] and [:L55]. Cosmetic in
+         COBOL, and preserved in the comments regardless.
     O-9  A COMMENT IS ORPHANED FROM ITS FIELD: [:L42-L43] documents the value
-         range of `File-Key-No`, which is declared four lines later at
-         [:L46], and sits above the `Logging-Data` group header instead.
+         range of `File-Key-No`, declared four lines later at [:L46], and
+         sits above the `Logging-Data` group header instead.
     O-10 `FA-File-Duplicates-In-Use` [:L82] is annotated "NO LONGER USED
-         other than for a '6' = rdb" by the maintainer, and
-         `Main-Record-Move-Flag` [:L66] is annotated "NOT YET USED" at
-         [:L64]. Both items are declared anyway, so both are carried anyway.
+         other than for a '6' = rdb", and `Main-Record-Move-Flag` [:L66] is
+         annotated "NOT YET USED" at [:L64]. Both are declared anyway, so
+         both are carried anyway.
 
 THIS RECORD IS AN OUT PARAMETER - NEVER FROZEN
 ==============================================
@@ -166,101 +141,64 @@ layer and read by the caller after the call returns; `File-Function` [:L88]
 and `Access-Type` [:L107] are written by the caller before it. So every class
 below is a mutable dataclass. `slots=True` is used - it costs nothing and
 makes a mistyped attribute name an immediate error rather than a silently
-ignored assignment, which suits a record that R-3 forbids extending -
-but `frozen=True` would break the parameter protocol outright and is used
-NOWHERE in this module.
+ignored assignment, which suits a record R-3 forbids extending - but
+`frozen=True` would break the parameter protocol outright and appears NOWHERE
+in this module.
 
-TYPE DISCIPLINE (RULE R-2)
-==========================
-Rule R-2: no accounting value may pass through a binary floating-point type
-at any point - not in computation, not in storage, not in transport. This
-block holds no monetary and no fractional item: the generated artifact
-reports every one of its 35 elementary fields as INT or STR, and NOT ONE as a
-scaled numeric, so the exact-arithmetic carrier the rest of the migration uses
-for money is not imported here, and no binary-fraction type is named anywhere
-below.
-
-    `pic 999`, `pic 99`, `pic 9`, `pic 9(4)`, `pic 9(5) comp`,
-    `pic 9(7)`                                                 -> `int`
-    `pic x`, `pic x(5)`, `pic x(12)`, `pic x(22)`, `pic x(32)`,
-    `pic x(64)`, `pic x(231)`, `pic x(512)`, `pic x(525)`      -> `str`
-
-`Rrn` [:L24] is the ONLY `COMP` item in the block - `pic 9(5) comp`, five
-digits, scale zero, unsigned, four bytes wide. Its usage is declared on the
-item itself, not inherited from a group, and reading it off the PICTURE line
-alone would type it as zoned DISPLAY and change its stored representation.
-This module never reads a PICTURE line: usage arrives from the dictionary.
+The block holds no monetary and no fractional item: the generated artifact
+reports every one of its 35 elementary fields as INT or STR and NOT ONE as a
+scaled numeric, so no exact-decimal carrier is imported and no binary-fraction
+type is named anywhere below (R-2). `Rrn` [:L24] is the ONLY `COMP` item -
+`pic 9(5) comp`, five digits, scale zero, unsigned, four bytes wide. Its usage
+is declared on the item itself, not inherited from a group, and reading it off
+the PICTURE line alone would type it as zoned DISPLAY and change its stored
+representation. This module never reads a PICTURE line: usage arrives from the
+dictionary.
 
 DESCRIPTOR PROVENANCE - LOOKED UP, NEVER TRANSCRIBED (RULE R-5)
 ===============================================================
-Section 0.8.1, verbatim: "Data dictionary first. The dictionary is generated
-from the bridge before record definitions are written, and every Python field
-definition cites its entry. This ordering is a directive, not a preference -
-it is what prevents fields being transcribed by eye." Section 0.3.3: "Field
-metadata is therefore derived, not transcribed, which eliminates an entire
-class of transcription error across several hundred fields."
+`File-Access` maps to NO table; it is file-status working storage and does not
+appear in the entity-to-table spine of section 0.2.1.1. The dictionary covers
+it all the same, and this was PROBED rather than assumed before a line of it
+was written: `entries_for_copybook_record("File-Access")` returns 41 entries -
+the `01` group, 5 subordinate groups and the 35 elementary items - each keyed
+`File-Access.<FIELD-NAME>` and each carrying a copybook view with picture,
+usage, digits, scale, character length, sign, level, redefines target and
+parent group. The nested group names are NOT record names and raise on lookup,
+which is the expected shape: a key names the `01` record, never a group inside
+it.
 
-`File-Access` maps to NO table. It is the file-status working-storage block
-and does not appear in the entity-to-table spine of section 0.2.1.1. The
-dictionary covers it all the same, and this was PROBED rather than assumed
-before a line of it was written: `entries_for_copybook_record("File-Access")`
-returns 41 entries - the `01` group, 5 subordinate groups and the 35
-elementary items - each keyed `File-Access.<FIELD-NAME>` and each carrying a
-copybook view with picture, usage, digits, scale, character length, sign,
-level, redefines target and parent group. The three nested group names are
-NOT record names and raise on lookup, which is the expected shape: a key
-names the `01` record, never a group inside it.
-
-Every descriptor below is therefore built by `from_dictionary_key`, the
-principal path, and NOT ONE component is typed in by hand - not a digit
-count, not a character width, not a usage class, not a redefines target.
-Even the 525-character space defaults are `" " * descriptor.character_length`
-rather than a literal, so a width can never drift from the frozen source. Key
-form, and never a bare field name:
-
-    <TABLE-NAME>.<COLUMN-NAME>      where a column backs the field
-    <COPYBOOK-RECORD>.<FIELD-NAME>  where the field is copybook-only
-
-The qualification matters even for a table-less block: keyed by name alone,
-`Curs`'s two anonymous redefining views would collide with each other, and
-the block's `SQL-State` would collide with any similarly named item
-elsewhere. The two views are keyed by DECLARATION LINE - `filler#28` and
-`filler#32` - which is the generated artifact's own convention for a repeated
-name inside one record.
-
-`FieldDescriptor.cite()` surfaces the loader's three-locator provenance
-string, and `citations()` below surfaces it for the whole block at once.
-Neither is reimplemented here.
+Every descriptor below is therefore built by `from_dictionary_key`, and NOT
+ONE component is typed in by hand - not a digit count, not a character width,
+not a usage class, not a redefines target. Even the 525-character space
+defaults are `" " * descriptor.character_length` rather than a literal, so a
+width can never drift from the frozen source. Qualification matters even for a
+table-less block: keyed by name alone, `Curs`'s two anonymous redefining views
+would collide with each other. They are keyed by DECLARATION LINE -
+`filler#28` and `filler#32` - the artifact's own convention for a repeated
+name inside one record. `acas_posting.dictionary.loader` documents both key
+forms; `FieldDescriptor.cite()` surfaces the three-locator provenance string
+and `citations()` below surfaces it for the whole block at once. Neither is
+reimplemented here.
 
 LAYERING - THIS IS A LEAF MODULE (SECTION 0.4.3)
 ================================================
-    MAY import       `acas_posting.cobol.field`, `acas_posting.dictionary
-                     .loader`, and the standard library
-    MUST NOT import  everything else - "this keeps the record layer a leaf"
+The temptation specific to this file is the status vocabulary: `dal/status.py`
+and `dal/connection.py` import THIS module, never the reverse, so an import of
+either would invert the dependency and close a cycle. They are pointed at in
+prose above and imported nowhere. Section 0.4.3 gives the reason - the
+arithmetic test tier "imports only `cobol` and `records` and touches no
+database, so it runs anywhere" - and one import reaching into `dal` would drag
+a database driver into that tier. Nothing here opens a connection, issues SQL
+or emits DDL (R-3).
 
-Forbidden, and absent below: `dal` in any form, `programs`, `cli`, `clock`,
-`dates`, `workfiles`, `cobol.arithmetic`, `cobol.move`, `cobol.picture`,
-`cobol.usage`, `cobol.condition_names`, `cobol.sortverb`,
-`dictionary.generate`, the compiled comparison tree, and any other module of
-this package. The temptation specific to this file is the status vocabulary:
-`dal/status.py` and `dal/connection.py` import THIS module, never the
-reverse, so an import of either would invert the dependency and close a
-cycle. They are pointed at in prose above and imported nowhere.
-
-The reason is stated in section 0.4.3: the arithmetic test tier "imports only
-`cobol` and `records` and touches no database, so it runs anywhere". One
-import reaching into `dal` would drag a database driver into that tier.
-Nothing here opens a database connection, issues SQL or emits any DDL (R-3).
-
-DETERMINISM (RULE R-6)
-======================
 Field order is the copybook's declaration order and is not chosen here; the
 whole-block descriptor tuple is ordered BY THE DICTIONARY rather than by a
 sequence retyped in this file. Every fixed collection is a tuple. There is no
-clock read, no entropy source, no process-environment read, no host lookup
-and no directory scan anywhere below. The only import-time input is the
-loader's lazy cached read of the generated artifact, which is immutable once
-read, so two runs of one scenario see identical metadata.
+clock read, no entropy source, no process-environment read, no host lookup and
+no directory scan anywhere below, so two runs of one scenario see identical
+metadata (R-6). See `acas_posting.records` for the conventions every record
+module shares.
 """
 
 from __future__ import annotations
@@ -289,9 +227,7 @@ __all__: Final[tuple[str, ...]] = (
 )
 
 
-# =============================================================================
 #  THE BLOCK AS THE GENERATED DICTIONARY HOLDS IT  (RULE R-5)
-# =============================================================================
 
 #: The `01`-level record name, spelt as `copybooks/wsfnctn.cob` spells it at
 #: L22. It is the first half of every dictionary key this module uses, and it
@@ -318,7 +254,7 @@ def citations() -> tuple[str, ...]:
     """Return the provenance citation for every field of the block.
 
     The rule R-5 surface for this module, and the line
-    `docs/migration/traceability.md` consumes. Each element is the loader's
+    the traceability document consumes. Each element is the loader's
     compact three-locator provenance string - copybook field, bridge host
     variable, database column - surfaced through
     `FieldDescriptor.cite` and reimplemented nowhere. Every field of this
@@ -404,61 +340,21 @@ def _spaces(descriptor: FieldDescriptor) -> str:
     return " " * (descriptor.character_length or 0)
 
 
-# =============================================================================
-#  WHERE THE DEFAULT VALUES COME FROM
-# =============================================================================
-#
-# From the copybook's own VALUE clauses, of which the block carries SEVENTEEN
-# on data items - amendment A-iii in the module docstring, the plan's
-# enumeration having listed ten:
-#
-#     value spaces  ACAS-Path [copybooks/wsfnctn.cob:L38], Path-Work [:L39],
-#                   FS-Action [:L41], SQL-Msg [:L50], WS-File-Key [:L52],
-#                   WS-Log-Where [:L53] and all six RDB-Data items [:L57-L62]
-#     value space   Accept-Reply [:L45]        (singular - observation O-8)
-#     value zero    ws-Log-System [:L47], Main-Record-Move-Flag [:L66]
-#     value zeroes  WS-Log-File-No [:L54], WS-Count-Rows [:L55]   (plural)
-#
-# EIGHTEEN items carry NO VALUE clause at all: We-Error [:L23], Rrn [:L24],
-# Fs-Reply [:L25], s1 [:L26], Curs [:L27], Lin [:L29], Cole [:L30],
-# Curs2 [:L31], Lin2 [:L33], Col2 [:L34], File-Key-No [:L46],
-# ws-No-Paragraph [:L48], SQL-Err [:L49], SQL-State [:L51],
-# FA-File-System-Used [:L73], FA-File-Duplicates-In-Use [:L82],
-# File-Function [:L88] and Access-Type [:L107]. In COBOL the initial content
-# of a WORKING-STORAGE item with no VALUE is not specified by the language;
-# what a compiled run actually shows depends on the compiler's default fill
-# byte, and no dialect flag or arithmetic directive is set anywhere in the
-# frozen build scripts. That is a question only the compiled COBOL can settle
-# (R-6), and it is logged for `docs/migration/ambiguity-resolutions.md`.
-#
-# ONE convention is applied to all eighteen, uniformly, so that no reader has
-# to guess which rule a given field followed:
-#
-#     an alphanumeric item -> spaces at its declared width, the same shape
-#                             `value spaces` produces for its siblings, so the
-#                             two groups of alphanumeric items are
-#                             indistinguishable at rest rather than differing
-#                             by an invisible convention
-#     a numeric item       -> 0, the only value an `int` carrier can hold that
-#                             is not a fabricated figure
-#
-# Nothing here depends on the choice in practice, and that is deliberate
-# rather than lucky: every one of the eighteen is written before it is read.
-# The caller sets File-Function and Access-Type before a call; the data-access
-# layer sets We-Error, Fs-Reply, SQL-Err and SQL-State during one; the screen
-# items are unused by the migrated headless cycle. So the convention settles
-# the shape of a freshly constructed record and never the value of a posted
-# figure.
-#
-# NO padding, truncation, coercion or check runs on assignment. There is no
-# initialisation hook on any class below: a record accepts what it is given,
-# exactly as a COBOL group accepts a MOVE, and `cobol/move.py` owns the store
-# semantics (R-3).
+#   WHERE THE DEFAULT VALUES COME FROM
+# From the copybook's own VALUE clauses, of which SEVENTEEN sit on data items - amendment A-iii,
+# the plan's enumeration having listed ten. Eleven take `value spaces`
+# [copybooks/wsfnctn.cob:L38-L39], [:L41], [:L50], [:L52-L53], [:L57-L62]; Accept-Reply [:L45]
+# takes the SINGULAR `value space` (observation O-8); two take `value zero` [:L47], [:L66]; two
+# take the PLURAL `value zeroes` [:L54-L55]. EIGHTEEN carry NO VALUE clause: [:L23-L27],
+# [:L29-L31], [:L33-L34], [:L46], [:L48-L49], [:L51], [:L73], [:L82], [:L88], [:L107].
+# COBOL leaves those eighteen unspecified and no dialect flag is set in the frozen build
+# scripts, so only the compiled program settles them (R-6). ONE convention covers all eighteen -
+# alphanumeric takes spaces at its declared width, numeric takes 0 - and nothing depends on the
+# choice, deliberately: each is written before it is read. This is initialisation and not a
+# store; see `AcasFileAccess`.
 
 
-# =============================================================================
 #  THE TWO REDEFINING VIEWS OVER THE CURSOR ITEMS
-# =============================================================================
 
 
 @dataclass(slots=True)
@@ -548,9 +444,7 @@ class Curs2Parts:
     col2: int = 0
 
 
-# =============================================================================
 #  THE LOGGING SUB-BLOCK
-# =============================================================================
 
 
 @dataclass(slots=True)
@@ -559,7 +453,7 @@ class LoggingData:
 
     Declared at [copybooks/wsfnctn.cob:L44] with ELEVEN members at L45
     through L55. The plan quotes the span as L44-L56; L56 is the sibling group
-    `RDB-Data`, so the verified span ends at L55 (docstring amendment table).
+    `RDB-Data`, so the frozen span ends at L55 (docstring amendment table).
 
     Four of its members are the data-access layer's report back to the caller
     after a call - `SQL-Err` [:L49], `SQL-Msg` [:L50], `SQL-State` [:L51] and
@@ -622,9 +516,7 @@ class LoggingData:
     ws_count_rows: int = 0
 
 
-# =============================================================================
 #  THE DATABASE CONNECTION SUB-BLOCK
-# =============================================================================
 
 
 @dataclass(slots=True)
@@ -632,7 +524,7 @@ class RdbData:
     """`03 RDB-Data.` - the relational connection parameter sub-block.
 
     Declared at [copybooks/wsfnctn.cob:L56] with SIX members at L57 through
-    L62. The plan quotes it as L57-L64; L63-L64 are comments, so the verified
+    L62. The plan quotes it as L57-L64; L63-L64 are comments, so the frozen
     span is the header at L56 and six fields at L57-L62 (docstring amendment
     table). The maintainer's own change history dates the block: `DB-UName`,
     `DB-UPass` and `DB-Schema` came first, `DB-Socket`, `DB-Host` and `DB-Port`
@@ -689,9 +581,7 @@ class RdbData:
     db_port: str = _spaces(_descriptor("DB-Port"))
 
 
-# =============================================================================
 #  THE FILE-SYSTEM SELECTION SUB-BLOCK  -  AND THE LEVEL JUMP
-# =============================================================================
 
 
 @dataclass(slots=True)
@@ -753,65 +643,54 @@ class FaRdbmsFlatStatuses:
     fa_file_duplicates_in_use: int = 0
 
 
-# =============================================================================
 #  THE RECORD ITSELF
-# =============================================================================
 
 
 @dataclass(slots=True)
 class FileAccess:
     """`01 File-Access.` - the file-status protocol block [:L22].
 
-    The third parameter of every handler call, and the one record both sides
-    of a call write. Its members are declared below in the copybook's own
-    order, L23 through L107, with each subordinate group appearing at the
-    point its header is declared:
+    The third parameter of every handler call, and the one record both sides of a
+    call write. Its members are declared below in the copybook's own order, L23
+    through L107, with each subordinate group appearing where its header is::
 
-        L23  We-Error                 L44  Logging-Data      (sub-record)
-        L24  Rrn                      L56  RDB-Data          (sub-record)
-        L25  Fs-Reply                 L66  Main-Record-Move-Flag
-        L26  s1                       L72  FA-RDBMS-Flat-Statuses (sub-record)
-        L27  Curs                     L88  File-Function
-        L28  filler redefines Curs    L107 Access-Type
-        L31  Curs2
-        L32  filler redefines Curs2
-        L38  ACAS-Path
-        L39  Path-Work
-        L41  FS-Action
+        L23  We-Error       L28  filler redefines Curs   L44  Logging-Data*
+        L24  Rrn            L31  Curs2                   L56  RDB-Data*
+        L25  Fs-Reply       L32  filler redefines Curs2  L66  Main-Record-Move-Flag
+        L26  s1             L38  ACAS-Path               L72  FA-RDBMS-Flat-Stats*
+        L27  Curs           L39  Path-Work               L88  File-Function
+                            L41  FS-Action               L107 Access-Type
+                                                         (* = sub-record)
 
-    That order is the record's byte layout and is preserved exactly (R-6).
-    Note the two gaps it contains: L35-L37 and L40 are comments, so nothing is
-    missing between `Col2` and `ACAS-Path`, or between `Path-Work` and
-    `FS-Action`.
+    That order is the record's byte layout and is preserved exactly (R-6). Note
+    the two gaps it contains: L35-L37 and L40 are comments, so nothing is missing
+    between `Col2` and `ACAS-Path`, or between `Path-Work` and `FS-Action`.
 
     AN OUT PARAMETER, SO NEVER FROZEN. The caller sets `File-Function` and
-    `Access-Type` before a call; the data-access layer sets `We-Error`,
-    `Fs-Reply` and the four items of `Logging-Data` that report an error
-    during one; the caller reads them after it returns. A frozen record would
-    make the protocol impossible to express, so this class is mutable, and so
-    is every sub-record it holds. `slots=True` is used because it makes a
-    mistyped attribute name fail immediately instead of silently adding a
-    field the copybook does not declare - which suits a record R-3 forbids
-    extending.
+    `Access-Type` before a call; the data-access layer sets `We-Error`, `Fs-Reply`
+    and the four items of `Logging-Data` that report an error during one; the
+    caller reads them after it returns. A frozen record would make the protocol
+    impossible to express, so this class is mutable, and so is every sub-record it
+    holds. `slots=True` makes a mistyped attribute name fail immediately instead of
+    silently adding a field the copybook does not declare - which suits a record
+    R-3 forbids extending.
 
-    WHAT THIS RECORD DOES NOT CARRY. No reply-code enumeration, no code table,
-    no predicate over a `88` level, no error-mapping helper and no method that
-    interprets `Fs-Reply` - the whole vocabulary belongs to `dal/status.py`
-    (section 0.5.3), and the `88` predicates to `cobol/condition_names.py`
-    (section 0.4.1.4). `Fs-Reply` [:L25] declares no `88` levels of its own in
-    any case (observation O-4): its documented value set is derived from the
-    handler programs, which is the reason the split exists.
+    WHAT THIS RECORD DOES NOT CARRY. No reply-code enumeration, no code table, no
+    predicate over a `88` level, no error-mapping helper and no method that
+    interprets `Fs-Reply` - the vocabulary belongs to `dal/status.py` (section
+    0.5.3) and the `88` predicates to `cobol/condition_names.py` (section
+    0.4.1.4). `Fs-Reply` [:L25] declares no `88` levels of its own in any case
+    (observation O-4): its value set is derived from the handler programs, which
+    is the reason the split exists.
 
-    Usage examples, both of which the migrated cycle relies on:
+    Usage, both shapes the migrated cycle relies on - construction, then the
+    caller stating an operation and reading the handler's reply back out:
 
         >>> access = FileAccess()
         >>> access.fs_reply, access.we_error
         (0, 0)
         >>> access.rdb_data.db_schema == " " * 12   # `value spaces` [:L57]
         True
-
-        >>> # The caller states the operation before a handler call, then
-        >>> # reads the handler's reply back out of the same record.
         >>> access.file_function = 3               # `fn-read-next` [:L91]
         >>> access.access_type = 1                 # `fn-input`     [:L108]
         >>> access.fs_reply = 10                   # set by the handler

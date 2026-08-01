@@ -3,37 +3,20 @@
 `WS-Calling-Data` is the seven-field block a menu shell fills in before it
 `CALL`s a posting program, and it is the first parameter of the General
 Ledger, Sales and Purchase linkage shapes. This module is a CREATE from
-`copybooks/wscall.cob` [copybooks/wscall.cob:L6-L14] - field for field, with
-nothing added, nothing renamed and nothing widened.
-
-The Agent Action Plan states this file's whole content in one line, at
-section 0.4.1.3:
-
-    "`acas_posting/records/calling_data.py` | CREATE | `copybooks/wscall.cob`
-    | Seven-field linkage block"
-
-and the folder's mandate immediately above it:
-
-    "Every module is a CREATE from its copybook, translating each 05/03 field
-    to a dataclass attribute whose descriptor is looked up in the generated
-    dictionary."
-
-That paragraph closes with a second sentence requiring every oddity in the
-frozen source to be preserved as it stands rather than tidied up. This module
-honours it by keeping `WS-Del-Link`'s spelling, `WS-CD-Args`'s abbreviation
-and `WS-Term-Code`'s two-digit width exactly as declared.
-
-Section 0.8.1 fixes the shape - "Plain modules and dataclasses; no ORM entity
-layer" - and rule R-3 fixes the count: "The 27 record modules mirror their
-copybooks field for field with nothing added."
+`copybooks/wscall.cob` - field for field, with nothing added, nothing renamed
+and nothing widened. The Agent Action Plan states its whole content in one
+line, at section 0.4.1.3: "`acas_posting/records/calling_data.py` | CREATE |
+`copybooks/wscall.cob` | Seven-field linkage block".
 
 Seven fields are declared here, and seven is the whole of it. This is the
 smallest record in the package and therefore the easiest place to be tempted
-into adding a convenience; nothing has been added.
+into a convenience; nothing has been added. `WS-Del-Link`'s spelling,
+`WS-CD-Args`'s abbreviation and `WS-Term-Code`'s two-digit width all stand
+exactly as declared.
 
 THE COPYBOOK, AS IT ACTUALLY READS
 ==================================
-Verified against the frozen source, which is 15 lines long::
+Traced to the frozen source, which is 15 lines long::
 
     L6      01  WS-Calling-Data.
     L7          03  WS-Called       pic x(8).
@@ -54,53 +37,41 @@ restates.
 A LOCATOR CORRECTION, RECORDED RATHER THAN QUIETLY APPLIED
 ==========================================================
 The Agent Action Plan cites this block as `[copybooks/wscall.cob:L6-L13]`.
-That span is one line short at the tail. Line L11 of the copybook is a
-COMMENT - `*> new 18/5/13`, marking when the two function fields were added -
-so the last three declarations sit one line lower than a reader counting
-fields would assume: `WS-Process-Func` is at L12, `WS-Sub-Function` at L13
-and `WS-CD-Args` at L14, and the block spans L6-L14.
+That span is one line short at the tail. Line L11 is a COMMENT - `*> new
+18/5/13`, marking when the two function fields were added - so the last three
+declarations sit one line lower than a reader counting fields would assume:
+`WS-Process-Func` at L12, `WS-Sub-Function` at L13, `WS-CD-Args` at L14, and
+the block spans L6-L14.
 
-Two independent derivations agree on that, and neither is a hand
-transcription: reading the frozen copybook directly, and the locators the
-generated data dictionary carries, which its generator parsed out of the same
-file. Every locator quoted in this module comes from the dictionary, so the
-correction needed no editing here - it simply never arose. That is precisely
-the failure mode the "data dictionary first" directive exists to prevent, and
-it is recorded here rather than silently absorbed, because a wrong locator in
-a traceability document is worse than no locator at all.
-
-The frozen source is never touched to make a citation true. The copybook is
-the authority; the plan's prose is not.
+Every locator quoted in this module comes from the generated dictionary, whose
+generator parsed the same copybook, so the correction needed no editing here -
+it simply never arose. That is the failure mode the "data dictionary first"
+directive exists to prevent, and it is recorded rather than silently absorbed,
+because a wrong locator in a traceability document is worse than none. The
+frozen source is never touched to make a citation true: the copybook is the
+authority, the plan's prose is not.
 
 WHY THIS BLOCK MATTERS
 ======================
 None of the in-scope posting programs is a main program. Every one is a
 `CALL`ed sub-program with a fixed parameter list, so its LINKAGE SECTION is
-its batch invocation contract, already written down. `general/gl071.cbl` -
-the batch sort, and the reason that program is one of this module's two
-source references - shows the four-parameter General Ledger shape::
+its batch invocation contract, already written down. `general/gl071.cbl` - the
+batch sort, and the reason that program is one of this module's two source
+references - shows the four-parameter General Ledger shape::
 
     linkage section.                            [general/gl071.cbl:L152]
     copy "wscall.cob".                          [general/gl071.cbl:L155]
-    copy "wssystem.cob".
-    copy "wsnames.cob".
-    01  to-day               pic x(10).
     procedure division using ws-calling-data    [general/gl071.cbl:L161-L164]
-    system-record
-    to-day
-    file-defs.
+    system-record  to-day  file-defs.
 
 Sales and Purchase use the same first parameter and add a fourth system
 record. The IRS posting program is the exception: it takes neither this block
 nor the run date, declaring `using IRS-System-Params, WS-System-Record,
 File-Defs` [irs/irs030.cbl:L552-L554]. That is why the migrated command line
 has three argument shapes rather than one, and why this record appears in two
-of the three.
-
-Binding argv to these seven fields belongs to `acas_posting/cli/args.py`,
-which section 0.4.1.1 describes as "a faithful binding rather than an
-invention" - the block was designed for unattended invocation, so there is
-nothing to invent. This module declares the data and stops there.
+of the three. Binding argv to these seven fields belongs to
+`acas_posting/cli/args.py`, which section 0.4.1.1 describes as "a faithful
+binding rather than an invention". This module declares the data and stops.
 
 WS-TERM-CODE CARRIES AN ABORT CHAIN ACROSS THREE PROGRAMS
 =========================================================
@@ -108,29 +79,17 @@ WS-TERM-CODE CARRIES AN ABORT CHAIN ACROSS THREE PROGRAMS
 is the return channel by which a called program stops the rest of a posting
 run, and section 0.6.4 traces the chain: a batch left open sets a status
 condition, `gl070` detects it and raises the terminate code, and the menu
-tests that code and returns to the menu rather than continuing. The whole
-gate is two lines of the menu's posting-cycle dispatch, verified in the
-frozen source::
-
-    load08.                                     [general/general.cbl:L805]
-    move     "gl070" to ws-called.
-    perform  load00.
-    if       ws-term-code = 5                   [general/general.cbl:L810]
-             go to display-menu.                [general/general.cbl:L811]
-    move     "gl071" to ws-called.
-    perform  load00.
-    move     "gl072" to ws-called.
-    go       to load00.                         [general/general.cbl:L815]
-
-The consequence, in the plan's own words:
-
-    "The effect is that `gl071` and `gl072` never run at all."
+tests that code and returns to the menu rather than continuing. The whole gate
+is the menu's posting-cycle dispatch at [general/general.cbl:L805-L815] -
+`load08.` calls `gl070`, then `if ws-term-code = 5 go to display-menu.` at
+L810-L811 short-circuits the two calls that follow. The consequence, in the
+plan's own words: "The effect is that `gl071` and `gl072` never run at all."
 
 So the observable database effect of that rejection is the ABSENCE of
 everything the later phases would have written. Section 0.4.1.1 requires the
 migrated command line to reproduce it as a hard gate between phases, not as a
-warning - and that gate lives in `acas_posting/cli/gl_post_cycle.py`. It is
-deliberately NOT here: this module declares a field, not a policy, and a
+warning - and that gate belongs to the GL posting-cycle CLI entry point. It
+is deliberately NOT here: this module declares a field, not a policy, and a
 predicate named for the gate would invite a caller to re-implement it at the
 wrong layer.
 
@@ -143,140 +102,63 @@ WS-CD-ARGS IS A POSITIONAL BLOB AND STAYS ONE
 =============================================
 The copybook's own header explains the field, and it is the only field in the
 block with a stated purpose [copybooks/wscall.cob:L1-L3]: it exists "for
-passing extra info to called process that will help in a cron call by time
-via menu program", and its contents are "picked by position within WS-Args".
+passing extra info to called process that will help in a cron call by time via
+menu program", and its contents are "picked by position within WS-Args".
 
 It is therefore 13 characters of caller-agreed positional text. This module
-does not parse it, split it, index it or give it a structure the copybook
-does not declare - there are no sub-fields at L14, so there are none here.
-Callers that need a position slice it themselves, which is what the COBOL
-programs do.
-
-DESCRIPTORS ARE LOOKED UP, NEVER TRANSCRIBED
-============================================
-Section 0.3.3 gives the reason in one sentence:
-
-    "Field metadata is therefore derived, not transcribed, which eliminates
-    an entire class of transcription error across several hundred fields."
-
-and section 0.8.1 makes the ordering binding:
-
-    "Data dictionary first. The dictionary is generated from the bridge
-    before record definitions are written, and every Python field definition
-    cites its entry. This ordering is a directive, not a preference - it is
-    what prevents fields being transcribed by eye."
-
-The generated dictionary is built from the maintainer's one-way
-COBOL-to-MySQL bridge, which the preserved user requirement at section 0.8.2
-designates as the record-layout-to-table mapping this migration must follow -
-"it is the data dictionary for this migration".
-
-Accordingly, not one digit count, character width, scale, sign position or
-storage class is typed out below. All seven descriptors come from
-`FieldDescriptor.from_dictionary_key`, the principal path, and even the
-space-padded defaults take their width from the descriptor rather than from a
-literal - see `_spaces`.
+does not parse it, split it, index it or give it a structure the copybook does
+not declare - there are no sub-fields at L14, so there are none here. Callers
+that need a position slice it themselves, as the COBOL programs do.
 
 THIS BLOCK MAPS TO NO MYSQL TABLE, AND THE DICTIONARY SAYS SO
 =============================================================
 `WS-Calling-Data` is pure linkage working storage. It is absent from the
 entity-to-table spine of section 0.2.1.1, and none of the 22 in-scope tables
-corresponds to it. The dictionary was probed rather than assumed, and it
-holds eight entries for the record - the `01` group plus the seven `03`
-fields - every one of them one-sided:
-
-    table       absent
-    bridge      absent
-    column      absent
-    presence    in_copybook=True, in_bridge=False, in_column=False
-
-`cite` therefore renders as, for the first field::
+corresponds to it. The dictionary was probed rather than assumed, and it holds
+eight entries for the record - the `01` group plus the seven `03` fields -
+every one of them one-sided, with `table`, `bridge` and `column` all absent
+and `in_copybook=True, in_bridge=False, in_column=False`. `cite` therefore
+renders, for the first field::
 
     WS-Calling-Data.WS-Called  copybook=copybooks/wscall.cob:L7
     bridge=absent  column=absent
 
-Because each entry has a single layer, it cannot disagree with itself: every
+Because each entry has a single layer it cannot disagree with itself: every
 `drift` aspect is False and no anomaly or ambiguity reference attaches to any
-of the seven. Contrast `Sales-Average`, which is signed in the copybook and
-unsigned at both the bridge and the column [copybooks/wssl.cob:L49]. Nothing
-of that kind arises here, and nothing has been invented to make it look as
-though it does - in particular, no `<TABLE-NAME>.<COLUMN-NAME>` key was
-fabricated for a record that has no table.
+of the seven. Contrast `Sales-Average`, signed in the copybook and unsigned at
+both bridge and column [copybooks/wssl.cob:L49]. Nothing of that kind arises
+here, and no `<TABLE-NAME>.<COLUMN-NAME>` key was fabricated for a record that
+has no table.
 
-THE KEY CONVENTION, AND THE TRAP IN IT
-======================================
-Entry keys take one of two forms, and never a bare field name::
+Keys are `<COPYBOOK-RECORD>.<FIELD-NAME>` in the source's own casing, so the
+key is `WS-Calling-Data.WS-Called` and NOT `WS-CALLING-DATA.WS-CALLED`; a
+probe for the upper-cased form returns nothing. The qualifier is in the key so
+that two similar layouts can never merge - `PSIRSPOST-REC` and
+`IRSPOSTING-REC` carry near-identical field names and are different records,
+as the copybook says verbatim [copybooks/wspost-irs.cob:L6-L7]: "This is NOT
+the same as the internal IRS posting file". `acas_posting.dictionary.loader`
+documents both key forms in full.
 
-    <TABLE-NAME>.<COLUMN-NAME>      column-mapped entries
-    <COPYBOOK-RECORD>.<FIELD-NAME>  copybook-only entries, as used here
+DELIBERATELY ABSENT (R-3), AND THE LAYERING
+===========================================
+No eighth attribute, and no property, method or module function a caller could
+mistake for a stored field. No post-initialisation hook, so no padding, no
+truncation and no check on any value: `MOVE` semantics belong to
+`acas_posting/cobol/move.py`. No schema definition, declarative metadata or
+ORM base; no concurrency primitive. Of the two imports `records/*.py` is
+granted, only `acas_posting.cobol.field` is taken - `FieldDescriptor.cite`
+already delegates to the loader's own primitive. Section 0.4.3 promises the
+arithmetic test tier "imports only `cobol` and `records` and touches no
+database, so it runs anywhere", and one import reaching into `dal` would drag
+a driver into that tier.
 
-Both halves are case-sensitive and carry the source's own casing, so the key
-is `WS-Calling-Data.WS-Called` and NOT `WS-CALLING-DATA.WS-CALLED`; the
-upper-cased form does not exist and a probe for it returns nothing.
-
-The qualifier is in the key so that two similar layouts can never merge.
-`PSIRSPOST-REC` and `IRSPOSTING-REC` carry near-identical field names and are
-different records - the copybook says so itself, verbatim
-[copybooks/wspost-irs.cob:L6-L7]: "This is NOT the same as the internal IRS
-posting file". Key by field name alone and the two collapse, silently.
-
-For a table-backed entry the right-hand side is the COLUMN name, which drifts
-from the copybook field name - `Post-Date` becomes `POST4-DAT`, `Post-Key`
-becomes `KEY-4`, `Vat-AC-Def` becomes `VAT-AC-DEF4`. A key is therefore
-looked up in the dictionary and never guessed from a field name.
-
-THIS MODULE IS A LEAF
-=====================
-The per-directory import contract of section 0.4.3 grants `records/*.py`
-exactly two imports - `acas_posting.cobol.field` and
-`acas_posting.dictionary.loader` - and forbids everything else, "this keeps
-the record layer a leaf". Only the first is taken: `FieldDescriptor.cite`
-already delegates to the loader's own primitive, so surfacing provenance
-needs no second import, and the fewest imports make the leaf property
-easiest to see. Nothing from `dal`, `programs`, `cli`, `clock`, `dates`,
-`workfiles`, the other `cobol` modules, the dictionary generator, the
-comparison oracle or any sibling record module is reachable from here.
-
-That is not bookkeeping. Section 0.4.3 promises the arithmetic test tier
-"imports only `cobol` and `records` and touches no database, so it runs
-anywhere", and one import reaching into `dal` would drag a database driver
-into that tier and break the promise for every test in it.
-
-WHAT IS DELIBERATELY ABSENT (R-3)
-=================================
-No eighth attribute. No property, method or module function that a caller
-could mistake for a stored field. No post-initialisation hook, and so no
-padding, no truncation and no check on any value: `MOVE` semantics - sending
-field to receiving field, with truncation and space padding - belong to
-`acas_posting/cobol/move.py`, which owns them for all 27 record modules.
-No schema definition of any kind, no declarative metadata and no ORM base,
-because an ORM "would want to own schema definition, which the schema freeze
-prohibits". No concurrency primitive: execution is strictly sequential,
-matching the single-threaded COBOL.
-
-DETERMINISM (R-6)
-=================
 Attribute order is copybook declaration order, so this module can be set
-beside its copybook and diffed by eye. Every fixed collection is a tuple or
-an immutable mapping view. No clock is consulted, no unpredictable value is
-drawn, the process environment is not inspected, and the only import-time
-work is the dictionary loader's own lazy, cached read of a committed,
-immutable artifact. Two imports in two processes produce identical state.
-
-TYPE DISCIPLINE (R-2)
-=====================
-`PIC X(n)` becomes `str`; the three unsigned `DISPLAY` items, all of scale
-zero, become `int`. There is no binary floating-point type anywhere in this
-module, and `decimal.Decimal` is not needed either - this block carries no
-monetary or quantity value at all, only names, codes and a text blob.
-
-RULE PROVENANCE
-===============
-The rule identifiers R-1 through R-6 cited above are the Agent Action Plan's
-own, from section 0.7.2. This project carries NO separate user rules
-document - `review_rules` reports that none was provided - so the plan is
-where their full text lives. Where the plan is silent, ordinary enterprise
-practice applies; no rule has been invented to fill a gap.
+beside its copybook and diffed by eye. No clock is consulted and no
+unpredictable value drawn, so two imports in two processes produce identical
+state (R-6). `PIC X(n)` becomes `str` and the three unsigned scale-zero
+`DISPLAY` items become `int`; this block carries no monetary or quantity value
+at all, so no `Decimal` is needed and no binary float appears (R-2). See
+`acas_posting.records` for the conventions every record module shares.
 """
 
 from __future__ import annotations
@@ -291,9 +173,7 @@ from acas_posting.cobol.field import FieldDescriptor
 __all__: Final[list[str]] = ["WsCallingData"]
 
 
-# =============================================================================
 #  THE BLOCK'S IDENTITY IN THE FROZEN SOURCE
-# =============================================================================
 
 #: The `01`-level name, with the copybook's own casing - the left half of
 #: every dictionary key below [copybooks/wscall.cob:L6].
@@ -313,21 +193,16 @@ RECORD_LOCATOR: Final[str] = "copybooks/wscall.cob:L6-L14"
 RECORD_KEY: Final[str] = "WS-Calling-Data.WS-Calling-Data"
 
 
-# =============================================================================
 #  ATTRIBUTE TO DICTIONARY KEY - THE ONE PLACE THE MAPPING IS WRITTEN
-# =============================================================================
-#
 # Python attribute name, then the dictionary key of the COBOL field it
 # carries, in copybook DECLARATION order. Order is behaviour here twice over:
 # it is the record's byte layout, and rule R-6 makes an observable ordering
 # part of what this migration must preserve. Above each row is the field's
 # COBOL declaration and locator, quoted verbatim from the frozen copybook.
-#
 # Attribute names are mechanical - the COBOL name lower-cased with hyphens
 # turned into underscores - so a reader can go from either name to the other
 # without a lookup table. `WS-Del-Link` keeps its own spelling and
 # `WS-CD-Args` keeps its abbreviation; neither is expanded (R-4).
-#
 # This tuple is the single source for the three surfaces below it, so the
 # seven keys are written once and cannot drift apart.
 _ATTRIBUTE_KEYS: Final[tuple[tuple[str, str], ...]] = (
@@ -348,9 +223,7 @@ _ATTRIBUTE_KEYS: Final[tuple[tuple[str, str], ...]] = (
 )
 
 
-# =============================================================================
 #  THE DESCRIPTORS  (rule R-5)
-# =============================================================================
 
 #: The `01` group as the dictionary describes it, carrying the record-level
 #: locator `copybooks/wscall.cob:L6`.
@@ -370,7 +243,7 @@ DESCRIPTORS: Final[Mapping[str, FieldDescriptor]] = MappingProxyType(
 )
 
 #: The seven dictionary keys, in declaration order - the machine-readable
-#: half of this module's entry in `docs/migration/traceability.md`.
+#: half of this module's traceability entry, which a later boundary writes.
 DICTIONARY_KEYS: Final[tuple[str, ...]] = tuple(key for _, key in _ATTRIBUTE_KEYS)
 
 #: The seven descriptors, in declaration order.
@@ -382,9 +255,7 @@ FIELDS: Final[tuple[FieldDescriptor, ...]] = tuple(DESCRIPTORS.values())
 RECORD_BYTE_LENGTH: Final[int] = sum(descriptor.byte_length for descriptor in FIELDS)
 
 
-# =============================================================================
 #  DEFAULTS, TAKEN FROM THE DECLARED WIDTH RATHER THAN TYPED
-# =============================================================================
 
 
 def _spaces(attribute: str) -> str:
@@ -420,9 +291,7 @@ def _spaces(attribute: str) -> str:
     return " " * (DESCRIPTORS[attribute].character_length or 0)
 
 
-# =============================================================================
 #  THE RECORD
-# =============================================================================
 
 
 @dataclass(slots=True)
@@ -430,66 +299,60 @@ class WsCallingData:
     """`01 WS-Calling-Data.` - the inter-program call block.
 
     A CREATE from `copybooks/wscall.cob` [copybooks/wscall.cob:L6-L14], seven
-    fields, in the copybook's own declaration order. The class name is the
-    COBOL `01`-name in PascalCase with the hyphens dropped, which makes the
-    consumer's import line mechanical - one symbol out of one module, exactly
-    as the import contract of section 0.4.3 has it::
+    fields, in the copybook's own declaration order. The class name is the COBOL
+    `01`-name in PascalCase with the hyphens dropped, which makes the consumer's
+    import line mechanical - one symbol out of one module, exactly as the import
+    contract of section 0.4.3 has it::
 
         >>> from acas_posting.records.calling_data import WsCallingData
 
-    (Written at the prompt so that a grep for this module's OWN imports
-    returns the single real one and is not muddied by an example.)
-
-    Each attribute name is likewise mechanical - the COBOL name lower-cased
-    with hyphens turned into underscores - and each carries its COBOL
-    declaration and locator in a comment, so this class and its copybook can
-    be read side by side. The storage metadata behind every attribute is in
-    `DESCRIPTORS`, keyed by attribute name, and `cite` prints where any one of
-    them comes from.
+    Each attribute name is likewise mechanical - the COBOL name lower-cased with
+    hyphens turned into underscores - and each carries its COBOL declaration and
+    locator in a comment, so this class and its copybook can be read side by side.
+    The storage metadata behind every attribute is in `DESCRIPTORS`, keyed by
+    attribute name, and `cite` prints where any one of them comes from.
 
     MUTABLE ON PURPOSE - NOT FROZEN
     -------------------------------
-    COBOL linkage is shared storage, not an argument copy: a called program
-    writes into the caller's own record. `WS-Term-Code` is the case that
-    matters, and it is load-bearing. `gl070` SETS it when it finds a batch
-    left open, the menu READS it and returns to the menu instead of
-    continuing [general/general.cbl:L810-L811], and the result is that `gl071`
-    and `gl072` never run at all (section 0.6.4).
+    COBOL linkage is shared storage, not an argument copy: a called program writes
+    into the caller's own record. `WS-Term-Code` is the case that matters, and it
+    is load-bearing. `gl070` SETS it when it finds a batch left open, the menu
+    READS it and returns to the menu instead of continuing
+    [general/general.cbl:L810-L811], and the result is that `gl071` and `gl072`
+    never run at all (section 0.6.4).
 
-    A frozen record could not express that at all - the callee would have to
-    hand back a new object, which is not what the COBOL does and would leave
-    the caller's copy stale. So this record is mutable, exactly as the storage
-    it models is.
+    A frozen record could not express that - the callee would have to hand back a
+    new object, which is not what the COBOL does and would leave the caller's copy
+    stale. So this record is mutable, exactly as the storage it models is.
 
-    `slots=True` is the counterweight: the seven attributes are the whole
-    record and an instance cannot grow an eighth at run time, which is the
-    right property for a fixed-length 41-byte layout and a structural
-    restatement of R-3's "nothing added".
+    `slots=True` is the counterweight: the seven attributes are the whole record
+    and an instance cannot grow an eighth at run time, which is the right property
+    for a fixed-length 41-byte layout and a structural restatement of R-3's
+    "nothing added".
 
     DEFAULTS
     --------
-    The four alphanumeric fields start as spaces at their declared width and
-    the three numeric fields start at zero, matching what the calling program
-    puts there: the General Ledger menu clears `ws-called` and `ws-del-link`
-    with SPACES [general/general.cbl:L513], and zeroes `ws-process-func` and
-    `ws-sub-function` [general/general.cbl:L505] and `ws-term-code`
-    [general/general.cbl:L514], immediately before each dispatch. `ws-caller`
-    then receives the calling program's own name [general/general.cbl:L512],
+    The four alphanumeric fields start as spaces at their declared width and the
+    three numeric fields start at zero, matching what the calling program puts
+    there: the General Ledger menu clears `ws-called` and `ws-del-link` with
+    SPACES [general/general.cbl:L513], and zeroes `ws-process-func` and
+    `ws-sub-function` [:L505] and `ws-term-code` [:L514], immediately before each
+    dispatch. `ws-caller` then receives the calling program's own name [:L512],
     and `ws-cd-args` is left as the invoker set it.
 
-    Widths come from the descriptors via `_spaces`, never from a literal.
-    Nothing reshapes, pads, truncates or checks an assigned value afterwards:
+    Widths come from the descriptors via `_spaces`, never from a literal. Nothing
+    reshapes, pads, truncates or checks an assigned value afterwards:
     sending-field-to-receiving-field semantics belong to
-    `acas_posting/cobol/move.py`, and added validation belongs to no layer of
-    this migration, because the COBOL performs none here and introducing any
-    would be a behaviour change (R-3).
+    `acas_posting/cobol/move.py`, and added validation belongs to no layer of this
+    migration, because the COBOL performs none here and introducing any would be a
+    behaviour change (R-3).
 
     NOT DECLARED HERE
     -----------------
-    There is no predicate for the terminate code and no helper of any kind.
-    The abort gate is `acas_posting/cli/gl_post_cycle.py`'s to reproduce, and
-    the copybook declares no 88-level condition name to draw a predicate from
-    in any case. This class declares data.
+    There is no predicate for the terminate code and no helper of any kind. The
+    abort gate is the GL posting-cycle CLI entry point's to reproduce, and the
+    copybook declares no 88-level condition name to draw a predicate from in any
+    case. This class declares data.
     """
 
     # 03  WS-Called       pic x(8).        [copybooks/wscall.cob:L7]
@@ -538,9 +401,7 @@ class WsCallingData:
     ws_cd_args: str = _spaces("ws_cd_args")
 
 
-# =============================================================================
 #  TRACEABILITY SURFACE  (rule R-5)
-# =============================================================================
 
 
 def descriptor_for(attribute: str) -> FieldDescriptor:

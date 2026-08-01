@@ -1,134 +1,198 @@
 """88-level condition names: the frozen value sets, and predicates over them.
 
-This module is the ONE place in the Python migration where the `88`-level value
-sets of the in-scope COBOL record layouts are written down. It carries each
-condition name under its original COBOL spelling, the value clause exactly as
+This module is the one place in the Python migration where the `88`-level value
+sets of the in-scope COBOL record layouts are written down. Each condition name
+is carried under its original COBOL spelling, with the value clause exactly as
 declared, the conditional variable that owns it, and the copybook line that
-declares it - and it publishes predicates that answer, for one value, whether
-that condition name holds.
+declares it. Predicates then answer, for one value, whether that condition name
+holds. Agent Action Plan sections 0.3.1 and 0.4.1.4 assign this file the function
+codes and access types, the batch status names and the IRS fan-out names;
+transformation rule 12 in section 0.1.2 asks for a predicate per `88`-level.
 
-Agent Action Plan section 0.3.1 fixes this file in one line, verbatim:
-
-    condition_names.py (88-level predicates: Status-Open, Waiting, GL-Batch,
-    IRS-Used, ...)
-
-Agent Action Plan section 0.4.1.4 gives the transformation row, verbatim:
-
-    | acas_posting/cobol/condition_names.py | CREATE |
-    | copybooks/wsfnctn.cob + copybooks/wsbatch.cob + copybooks/wssystem.cob |
-    | Predicates for the 88-levels the cycle tests: the function codes and
-    | access types [copybooks/wsfnctn.cob:L88-L118], the batch status names,
-    | and the IRS fan-out names [copybooks/wssystem.cob:L179-L181] |
-
-Agent Action Plan section 0.1.2, transformation rule 12, verbatim:
-
-    | 12 | `88`-level condition name | Predicate function over the record |
-    | e.g. `Status-Open`, `Waiting`, `GL-Batch`, `IRS-Used` |
-
-THIS MODULE DECIDES NOTHING
-===========================
-Agent Action Plan section 0.3.1, verbatim: "`cobol/` contains no business logic
-and `programs/` contains no numeric primitives." Section 0.1.2 says this
-package "contains no business logic whatsoever."
-
-So every function below answers exactly one question - does this value satisfy
-this condition name? - and no function decides what to do about the answer.
-There is no posting rule here, no routing table from a function code to an
-action, no run-ending gate, and no branch on an accounting outcome. Those
-belong to `acas_posting.programs` and `acas_posting.dal`. What this module
-supplies is the mechanism COBOL gave away for free: a name for a value set, and
-a test against it.
+This module decides nothing: section 0.3.1 keeps business logic out of `cobol/`,
+so every function here answers only "does this value satisfy this condition
+name?" There is no routing table from a function code to an action, no run-ending
+gate and no branch on an accounting outcome; those belong to
+`acas_posting.programs` and `acas_posting.dal`.
 
 THE COUNT, AND HOW IT IS COMPOSED  (rule R-5)
 =============================================
-`CONDITION_NAMES` holds 106 entries. Verified twice - once by reading the
-frozen copybooks (`grep -cE '^ +88 ' <file>`) and once against
-data_dictionary/acas_posting_dictionary.json, which records condition names
-per copybook file and agrees entry for entry:
+`CONDITION_NAMES` holds 159 entries - EVERY `88`-level declaration in the
+in-scope copybook closure, not a selection from it. Verified twice: once by
+reading the frozen copybooks and once against
+data_dictionary/acas_posting_dictionary.json, which records condition names per
+copybook file and agrees entry for entry:
 
-    copybooks/wsfnctn.cob    30    the operation vocabulary
-    copybooks/wsbatch.cob     8    the ledger, batch and cleared statuses
-    copybooks/wssystem.cob   60    the system record, IRS fan-out included
-    copybooks/wssl.cob        8    the sales ledger's own switches
-                            ---
-                            106
+    copybooks/wsfnctn.cob            30    the operation vocabulary
+    copybooks/wsbatch.cob             8    the ledger, batch and cleared statuses
+    copybooks/wssystem.cob           60    the system record, IRS fan-out included
+    copybooks/wssl.cob                8    the sales ledger's own switches
+    copybooks/wspl.cob                2    the purchase ledger's supplier status
+    copybooks/slwsinv.cob            12    sales invoice header and lines
+    copybooks/slwsinv2.cob           12    the second sales invoice layout
+    copybooks/slwsoi.cob              2    the sales open-item status
+    copybooks/plwspinv.cob           12    purchase invoice header and lines
+    copybooks/plwspinv2.cob           6    the second purchase invoice layout
+    copybooks/plwsoi.cob              3    the purchase open-item hold and status
+    copybooks/irswsnl.cob             2    the IRS nominal account type
+    copybooks/Test-Data-Flags.cob     2    the two DAL logging switches
+                                    ---
+                                    159
 
 `COUNTS_BY_COPYBOOK` publishes that breakdown as data, so the composition can
-be checked rather than taken on trust.
+be checked rather than taken on trust, and `cross_check_against_dictionary`
+corroborates all thirteen files against the independently generated artifact.
 
-TWO READINGS OF THE FROZEN SOURCE THAT DIFFER FROM THE PLAN'S CITATIONS
-=======================================================================
-Both were settled by reading the frozen file, which outranks any citation of
-it. Recorded here so that a later reader does not chase the plan's numbers.
+WHY ALL THIRTEEN, AND NOT THE FOUR THE PLAN NAMES
+=================================================
+Agent Action Plan section 0.4.1.4 names three copybooks for this module and
+section 0.3.1 lists the predicates it calls out by name; the plan is naming the
+`88`s it needs a predicate for, not bounding what the registry may contain. Rule
+R-5 asks that "every field" be findable, and a `88` that the migrated cycle
+tests but the registry omits is a traceability hole that surfaces as a
+`KeyError` inside a program module rather than as a review finding.
+
+Nineteen of the fifty-three declarations outside the original four ARE tested by
+in-scope source, so the hole was live rather than theoretical:
+
+    Testing-1       `if Testing-1` in every handler, e.g.
+                    [common/acas000.cbl:L495] and [common/acas000.cbl:L546]
+    Owner, Sub      [common/acasirsub1.cbl:L577], [common/acasirsub1.cbl:L616],
+                    [common/acasirsub1.cbl:L414], [common/acasirsub1.cbl:L506]
+    pending         [sales/sl055.cbl:L433]
+    applied         [sales/sl055.cbl:L427], [purchase/pl055.cbl:L365]
+    ih-analyised    [sales/sl055.cbl:L427], [sales/sl055.cbl:L440],
+                    [purchase/pl055.cbl:L365], [purchase/pl055.cbl:L370]
+    il-analyised    [sales/sl055.cbl:L373], [purchase/pl055.cbl:L314]
+    S-Closed        [sales/sl060.cbl:L668], [sales/sl060.cbl:L877],
+                    [sales/sl100.cbl:L350], [purchase/pl060.cbl:L594],
+                    [purchase/pl060.cbl:L799], [purchase/pl100.cbl:L342]
+    Supplier-dead   [purchase/pl060.cbl:L503]
+
+The remaining thirty-four are registered for the same reason the eighth
+`copybooks/wssl.cob` row is: transcribing part of a copybook would BE the hole.
+
+`S-Closed` is worth one further sentence, because only one of the four programs
+that test it copies its copybook directly. [purchase/pl060.cbl:L152] does;
+[sales/sl060.cbl:L279] and [sales/sl100.cbl:L219] copy
+[copybooks/slwsoi3.cob], which copies [copybooks/slwsoi.cob] under a REPLACING
+clause at [copybooks/slwsoi3.cob:L18]; and [purchase/pl100.cbl:L213] copies
+[copybooks/plwsoi5C.cob], which copies [copybooks/plwsoi.cob] the same way at
+[copybooks/plwsoi5C.cob:L19]. The nested COPY is why a grep for the copybook
+name in those three programs finds nothing. Two near-twins,
+[copybooks/slwssoi.cob:L49-L50] and [copybooks/plwssoi.cob:L52-L53], declare the
+same pair of conditions under the DIFFERENT names `si-s-open` and `si-s-closed`;
+neither file is among the thirteen the dictionary reports, so neither
+contributes a registry row and neither is reachable by these predicates.
+
+FOURTEEN NAMES ARE DECLARED MORE THAN ONCE, AND ARE NEVER COLLAPSED
+===================================================================
+Across the thirteen copybooks, fourteen COBOL names occur in more than one file
+- thirty-seven rows in all - and their value clauses genuinely DIFFER, so a
+registry keyed on the bare name would answer the wrong question:
+
+    pending    `values "P" "p"`  [copybooks/slwsinv.cob:L53]
+               `values "P" "p"`  [copybooks/plwspinv.cob:L41]
+               `values "p" "P"`  [copybooks/plwspinv2.cob:L41]  case order flipped
+               `value "P"`       [copybooks/slwsinv2.cob:L72]   ONE literal only
+
+`is_pending` cannot mean all four. So identity here is the DECLARATION, not the
+name: `locator` is unique across the registry, `(copybook, cobol_name)` is
+unique too - no name repeats inside one copybook - and every accessor takes an
+optional `copybook=` or `conditional_variable=` to say which declaration is
+meant. `BY_COBOL_NAME` publishes only the names declared exactly once;
+`SPECS_BY_COBOL_NAME` publishes every name against all of its declarations;
+`DUPLICATED_COBOL_NAMES` names the fourteen; and an unqualified `lookup` of an
+ambiguous name raises a `KeyError` listing the locators rather than guessing.
+This mirrors what the compiled code itself must do - anomaly A-21 records that
+field-name collisions across the posting copybooks force `gl070` to write
+QUALIFIED references, at [general/gl070.cbl:L510].
+
+EVERY DECLARATION HAS A PREDICATE
+=================================
+`PREDICATES` maps a unique predicate name to a one-argument callable for each of
+the 159 rows, derived mechanically: `is_<name>` where the folded name occurs
+once, `is_<name>_<copybook-stem>` where it does not, so `is_pending_slwsinv` and
+`is_pending_slwsinv2` are different predicates over different value sets.
+`predicate_for` builds one on demand. The named `is_*` functions below are the
+call-site conveniences for the vocabularies the plan calls out and for the
+nineteen live rows above; they are a readability surface over `evaluate`, not
+the coverage guarantee.
+
+THREE READINGS OF THE FROZEN SOURCE THAT DIFFER FROM THE PLAN'S CITATIONS
+Each was settled by reading the frozen file, which outranks any citation of it.
 
 1.  `copybooks/wsfnctn.cob` is 117 lines long, so the plan's
-    `[copybooks/wsfnctn.cob:L88-L118]` names a line one past end of file. The
-    operation vocabulary really spans L88-L116: `03 File-Function pic 99.` at
-    L88 with its fifteen condition names at L89-L105, then
-    `03 Access-Type pic 9.` at L107 with its nine at L108-L116. Every locator
-    in the registry below is the entry's own line, taken from the file.
+    `[copybooks/wsfnctn.cob:L88-L118]` names a line past end of file. The
+    vocabulary spans L88-L116: `03 File-Function pic 99.` at L88 with its
+    fifteen condition names at L89-L105, then `03 Access-Type pic 9.` at L107
+    with its nine at L108-L116.
+2.  Four File-Function locators sit one line later than the plan's working note
+    states, because L98, L101 and L106 are `*>` comment lines:
+    `fn-Read-By-Name` L102, `fn-Read-By-Batch` L103, `fn-Read-By-Cust` L104,
+    `fn-Read-Next-Header` L105.
+3.  The plan's note describes one `88` in `copybooks/wssl.cob`, at L67; the file
+    declares eight, at L26, L27, L29, L31, L33, L35, L37 and L67, and the
+    generated dictionary records eight there too. All eight are registered, on
+    the plan's own reasoning for including L67: each is a live `88` in an
+    in-scope record, and omitting any would open a traceability hole.
 
-2.  Four of the File-Function locators sit one line later than the plan's
-    working note states, because L98, L101 and L106 are `*>` comment lines:
-    `fn-Read-By-Name` is at L102 (not L101), `fn-Read-By-Batch` at L103,
-    `fn-Read-By-Cust` at L104 and `fn-Read-Next-Header` at L105.
-
-A third reading is a count rather than a line: the plan's note describes ONE
-`88` in `copybooks/wssl.cob`, at L67. The file declares EIGHT, at L26, L27,
-L29, L31, L33, L35, L37 and L67, and the generated dictionary records eight
-for that file too. All eight are registered. The plan's own justification for
-including L67 - that it is a live `88` in an in-scope record, and that leaving
-it out would open a traceability hole - applies word for word to the other
-seven, and registering one of eight from a single copybook would BE the hole.
-
-THE SIX SHAPES A VALUE CLAUSE TAKES
-===================================
-All six occur in the in-scope layouts, and `ConditionKind` names five of them
+THE SEVEN SHAPES A VALUE CLAUSE TAKES
+=====================================
+All seven occur in the in-scope layouts, and `ConditionKind` names six of them
 (a contiguous list and a gapped list are one shape mechanically, and are told
 apart by their values, never by being rewritten):
 
-    SINGLE        `88  G-L  value 1.`                 [wssystem.cob:L85]
-    FIGURATIVE    `88  No-OS  value zero.`            [wssystem.cob:L102]
-    VALUE_LIST    `88  valid-os-type  values 1 2 3 4 5 6.`
+    SINGLE            `88  G-L  value 1.`             [wssystem.cob:L85]
+    FIGURATIVE        `88  No-OS  value zero.`        [wssystem.cob:L102]
+    VALUE_LIST        `88  valid-os-type  values 1 2 3 4 5 6.`
                                                       [wssystem.cob:L101]
-    VALUE_LIST    `88  OS-Single  values 1 2 4.`      [wssystem.cob:L109]
-                  GAPPED. 3 is NOT a member. It must never become a range.
-    THRU_RANGE    `88  FS-Valid-Options  values 0 thru 1.`
+    VALUE_LIST        `88  OS-Single  values 1 2 4.`  [wssystem.cob:L109]
+                      GAPPED. 3 is NOT a member. It must never become a range.
+    THRU_RANGE        `88  FS-Valid-Options  values 0 thru 1.`
                                                       [wssystem.cob:L122]
-                  Inclusive on BOTH bounds.
-    ALPHANUMERIC  `88  Auto-Vat  value "Y".`          [wssystem.cob:L174]
+                      Inclusive on BOTH bounds.
+    ALPHANUMERIC      `88  Auto-Vat  value "Y".`      [wssystem.cob:L174]
+    ALPHANUMERIC_LIST `88  pending  values "P" "p".`  [slwsinv.cob:L53]
+                      TWO OR MORE quoted literals, tested by membership.
+
+`ALPHANUMERIC_LIST` is a separate member and not a flag on `ALPHANUMERIC`
+because the difference is load-bearing: twenty of the 159 declarations list
+several literals, and reading only the first would silently drop the rest -
+`pending` at [copybooks/slwsinv.cob:L53] would stop holding for a lower-case
+"p" even though the frozen line says it does, while `pending` at
+[copybooks/slwsinv2.cob:L72] genuinely holds for "P" alone. Three rows list
+four: `sih-Valid-Freqs` [copybooks/slwsinv.cob:L35], `ih-Valid-Freqs`
+[copybooks/slwsinv2.cob:L54] and `ih-Valid-Freqs`
+[copybooks/plwspinv.cob:L24], each `values "Y" "M" "Q" "D"`.
 
 A figurative `zero` reads as the number 0, so `No-OS` holds for 0 and for the
-text "0". An alphanumeric comparison is case-SENSITIVE and space-padded, which
-is what COBOL does; see `evaluate` for the question that records.
+text "0". An alphanumeric comparison is case-sensitive and space-padded, as
+COBOL does it; `evaluate` records that question.
 
 A NON-MATCHING VALUE IS False, NEVER AN ERROR  (rule R-3)
-=========================================================
-COBOL has no notion of an unknown value here. A `pic 9` field holding 7 simply
-fails every condition name declared on it, silently, and the program carries
-on. So `evaluate` returns False for such a value: it does not raise, does not
-warn, and offers no "unrecognised value" sentinel a caller could branch on.
-Handing a caller anything other than False would let a program module take a
-branch the compiled original never takes, which is the exact failure mode rules
-R-3 and R-4 exist to prevent. The compiled cycle makes the point itself: where
-`general/gl072.cbl` needs to know that a value is unusable it tests for that
-explicitly, at L291-L292 - `if post-batch not numeric / go to loop.` - rather
-than leaning on a comparison to tell it.
-
-Two failures are still raised, and neither is about a data value:
-
-    TypeError   a `float` or `complex` comparison operand. This is the rule R-2
-                type gate described below, not a validation of data.
-    KeyError    a condition name this registry does not declare. That is a
-                programmer naming a name that does not exist, which no input
-                can cause.
+A `pic 9` field holding 7 fails every condition name declared on it, silently,
+and the program carries on - so `evaluate` returns False, without raising,
+warning or offering a sentinel a caller could branch on. Anything else would let
+a program module take a branch the compiled original never takes. The frozen
+cycle makes the point itself: where `general/gl072.cbl` needs to know a value is
+unusable it tests for that explicitly, at L291-L292 - `if post-batch not numeric
+/ go to loop.` - rather than leaning on a comparison to tell it. Two failures
+are still raised, neither about a data value: `TypeError` for a `float` or
+`complex` operand (the rule R-2 type gate below), and `KeyError` for a condition
+name this registry does not declare.
 
 LAYERING  (Agent Action Plan section 0.4.3)
 ===========================================
-    MAY import       `acas_posting.cobol.field`, the `acas_posting.dictionary`
-                     public surface (`loader` and `model`), and the standard
-                     library.
-    MUST NOT import  `acas_posting.records`, `acas_posting.dal`,
+    MAY import       `acas_posting.cobol.field`, `acas_posting.dictionary.loader`
+                     - the one door section 0.4.3 opens from this layer onto the
+                     dictionary package, and the source of the object-model
+                     records this module reads through its re-exports - and the
+                     standard library.
+    MUST NOT import  `acas_posting.dictionary.model` (reached only through the
+                     loader, whose re-exports are bindings to the one
+                     definition rather than copies),
+                     `acas_posting.records`, `acas_posting.dal`,
                      `acas_posting.programs`, `acas_posting.cli`,
                      `acas_posting.clock`, `acas_posting.dates`,
                      `acas_posting.workfiles`, the sibling compiled-oracle
@@ -137,156 +201,97 @@ LAYERING  (Agent Action Plan section 0.4.3)
     No third-party import anywhere. Python is pinned to `==3.12.*`.
 
 CONFLICT 1 - "PREDICATE OVER THE RECORD", FROM A PACKAGE THAT CANNOT SEE ONE
-============================================================================
 Transformation rule 12 asks for a predicate over the record; section 0.4.3
-forbids this package from importing `acas_posting.records`. Both bind, so the
-tension is settled by where each half lives:
-
-    Here          the predicates are VALUE-level. `is_status_open(value)` takes
-                  the field's value, and optionally the `FieldDescriptor` that
-                  describes the field, and never a record object.
-    records/*.py  exposes them as record-level properties. `records/gl_batch.py`
-                  already imports `acas_posting.cobol.field`, so it defines a
-                  property returning `condition_names.is_status_open(
-                  self.batch_status)`.
-
-The predicate over the record therefore exists, at the layer that has the
-record, and this package stays a leaf. DO NOT "fix" this by importing the
-record layer here; that would create the cycle section 0.4.3 forbids.
+forbids importing `acas_posting.records` here. Both bind, so each half lives
+where it can: the predicates here are VALUE-level, taking the field's value and
+optionally its `FieldDescriptor`, never a record object, while `records/*.py`
+exposes them as record-level properties - `records/gl_batch.py` already imports
+`acas_posting.cobol.field`, so it defines a property returning
+`condition_names.is_status_open(self.batch_status)`. Do not "fix" this by
+importing the record layer here; that creates the cycle section 0.4.3 forbids.
 
 CONFLICT 2 - THIS FILE IS THE REGISTRY; `dal/status.py` PUBLISHES THE ENUMS
-===========================================================================
-Section 0.4.1.4 says this file supplies "the function codes and access types",
-while section 0.5.3 says, verbatim: "Every `COPY` of the function-code copybook
-becomes two imports - the record classes from `records/file_access.py`, and the
-status and vocabulary enumerations from `dal/status.py` - because the single
-COBOL copybook mixes data layout with operation vocabulary and the Python
-layering separates them." The split that satisfies both:
-
-    this module      the single declarative REGISTRY. The values are
-                     transcribed from the frozen copybook exactly once, here,
-                     each with its own locator, plus the predicates over them.
-    dal/status.py    the call-site ENUMERATIONS. It should BUILD its members
-                     from this registry - `values_for` and `specs_for_variable`
-                     exist for precisely that - rather than transcribing
-                     fifteen out-of-order function codes a second time. A
-                     second transcription is the class of error rule R-5 exists
-                     to prevent.
-
-The dependency runs one way, from the data-access layer toward this one, so no
-cycle appears. Accordingly this module does not import the data-access layer,
-and it deliberately defines no type under the names that layer uses for its
-three enumerations. Those names belong to `dal/status.py`; a duplicate here
-would collide with it at every call site that imports both.
-
-The vocabulary really is the facade's, which is why the registry is worth its
-weight: `SET fn-* TO TRUE` appears 302 times in
-`copybooks/Proc-ACAS-FH-Calls.cob` and 56 times in
+Section 0.4.1.4 gives this file the function codes and access types, while
+section 0.5.3 routes the status and vocabulary enumerations to `dal/status.py`,
+because the single COBOL copybook mixes data layout with operation vocabulary and
+the Python layering separates them. So this module is the declarative REGISTRY,
+transcribed once, each row with its own locator, plus the predicates over them;
+`dal/status.py` holds the call-site ENUMERATIONS and should BUILD its members
+from this registry - `values_for` and `specs_for_variable` exist for that -
+rather than transcribing fifteen out-of-order function codes a second time, which
+is the class of error rule R-5 exists to prevent. The dependency runs one way,
+from the data-access layer toward this one, so no cycle appears; accordingly this
+module defines no type under the names that layer uses for its three
+enumerations, since a duplicate would collide at every call site importing both.
+The vocabulary really is the facade's: `SET fn-* TO TRUE` appears 302 times in
+`copybooks/Proc-ACAS-FH-Calls.cob` and 56 in
 `copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob`.
 
-`Fs-Reply` HAS NO CONDITION NAMES, AND THAT IS A VERIFIED ZERO
-==============================================================
-`03 Fs-Reply pic 99.` at [copybooks/wsfnctn.cob:L25] declares no `88` at all -
-not one, anywhere in the frozen tree. Its value set, 0 / 10 / 21 / 22 / 23 /
-99, is described by Agent Action Plan section 0.4.1.5 as belonging entirely to
-`dal/status.py`, alongside the `We-Error` codes and the SQLSTATE mapping. The
-zero is recorded here so the absence reads as measured rather than overlooked.
-No condition name has been invented to fill it, and none may be: rule R-3
-forbids adding a condition name the frozen copybooks do not declare.
+`Fs-Reply` HAS NO CONDITION NAMES
+`03 Fs-Reply pic 99.` at [copybooks/wsfnctn.cob:L25] declares no `88` at all,
+anywhere in the frozen tree; section 0.4.1.5 assigns its value set -
+0 / 10 / 21 / 22 / 23 / 99 - entirely to `dal/status.py`, alongside the
+`We-Error` codes and the SQLSTATE mapping. The zero is recorded so the absence
+reads as read from the file rather than overlooked. Rule R-3 forbids inventing a
+condition name the frozen copybooks do not declare, so none has been.
 
 WHAT THE ANOMALIES REQUIRE OF THIS FILE  (rule R-4)
-===================================================
-Agent Action Plan section 0.8.2, preserved verbatim from the user's own
-requirements: "There is no test suite: compiled COBOL execution is the
-behavioral specification, defects included. A defect reproduced is correct; a
-defect fixed is a failure." Section 0.7.4 asks for a comment at each
-reproduction site citing the COBOL locator, and there is one.
+A defect reproduced is correct; a defect fixed is a failure (section 0.8.2), and
+section 0.7.4 asks for a comment at each reproduction site citing its locator.
 
 1.  THE FUNCTION CODES ARE DECLARED OUT OF NUMERIC ORDER, AND STAY THAT WAY.
-    `88 fn-Write-Raw value 15.` is declared at [copybooks/wsfnctn.cob:L99] and
-    `88 fn-Read-Next-Raw value 13.` at [copybooks/wsfnctn.cob:L100] - fifteen
-    BEFORE thirteen - so the declaration sequence runs
-    1 2 3 4 5 6 7 8 9 15 13 31 32 33 34. The maintainer's own file header
+    `88 fn-Write-Raw value 15.` at [copybooks/wsfnctn.cob:L99] precedes
+    `88 fn-Read-Next-Raw value 13.` at [copybooks/wsfnctn.cob:L100], so the
+    sequence runs 1 2 3 4 5 6 7 8 9 15 13 31 32 33 34. The maintainer's header
     explains it at [copybooks/wsfnctn.cob:L14-L15]: "Oops, previous chg should
-    have been for File-Function. / next-read-raw changed to 13." The registry
-    is in DECLARATION order, not value order, and `dal/status.py` builds its
-    members from that order - so tidying the sequence here would silently
-    reorder an enumeration there.
-
-2.  ONE CONDITION NAME IS DECLARED AND NEVER TESTED, AND IT IS KEPT.
-    `88 Date-Valid-Formats values 1 2 3.` at [copybooks/wssystem.cob:L132]
-    exists, and the date wrapper sections ignore it: they test the conditional
-    variable against a figurative constant instead, at
-    [general/gl070.cbl:L583-L584] - `if Date-Form = zero / move 1 to
-    Date-Form.` - and then test `Date-UK` at [general/gl070.cbl:L585] and
-    `Date-USA` at [general/gl070.cbl:L587]. Searching the four in-scope
-    programs `general/gl070.cbl`, `general/gl072.cbl`, `sales/sl060.cbl` and
-    `irs/irs030.cbl` for the name returns zero occurrences. The folder
-    requirement is verbatim: "Model the predicate for traceability, but do not
-    make the code use a test the COBOL ignores." So it is registered, its
-    predicate is published, and nothing in this package or above it calls it.
-    The same measurement shows `Date-Intl` at [copybooks/wssystem.cob:L131] is
-    never tested either - the wrapper falls through to the international form
-    without naming it - and it is registered on the same footing.
-
+    have been for File-Function. / next-read-raw changed to 13." The registry is
+    in DECLARATION order, and `dal/status.py` builds its members from that order,
+    so tidying the sequence here would silently reorder an enumeration there.
+2.  TWO CONDITION NAMES ARE DECLARED AND NEVER TESTED, AND BOTH ARE KEPT.
+    `88 Date-Valid-Formats values 1 2 3.` at [copybooks/wssystem.cob:L132] and
+    `88 Date-Intl value 3.` at [copybooks/wssystem.cob:L131] are named by no
+    in-scope program: the date wrapper sections test the conditional variable
+    against a figurative constant at [general/gl070.cbl:L583-L584] - `if
+    Date-Form = zero / move 1 to Date-Form.` - then test `Date-UK` at
+    [general/gl070.cbl:L585] and `Date-USA` at [general/gl070.cbl:L587], falling
+    through to the international form without naming it. Both are registered and
+    publish a predicate that nothing calls: the requirement is to model the
+    predicate, not to make the code use a test the COBOL ignores.
 3.  THE IRS FAN-OUT IS A THREE-STATE SWITCH, AND THE THIRD STATE HAS NO NAME.
         copybooks/wssystem.cob:L179       05  IRS-Instead     pic x.
         copybooks/wssystem.cob:L180           88  IRS-Used        value "Y".
         copybooks/wssystem.cob:L181           88  IRS-Both-Used   value "B".
-    The third state is space, and for space BOTH predicates are False. There is
-    no third condition name and inventing one would breach rule R-3. This
-    matters to database state, not presentation: Agent Action Plan section
-    0.6.4 records that the switch "is tested at three sites in each of the four
-    Sales and Purchase posting programs" and that "The scenario definitions
-    must therefore pin this switch explicitly, since leaving it at a default
-    would make the affected-table list ambiguous." Reading `sales/sl060.cbl`
-    finds the two names tested at seven sites in that one program - L1039,
-    L1046, L1126, L1144, L1172, L1175 and L1177 - of which the plan's three,
-    L1039, L1126 and L1175, are the `IRS-Used OR IRS-Both-Used` shape, L1046,
-    L1172 and L1177 are `IRS-Both-Used or G-L`, and L1144 tests
-    `IRS-Both-Used` alone.
-
+    The third state is space, and for space BOTH predicates are False; inventing
+    a third condition name would breach rule R-3. This matters to database
+    state: section 0.6.4 requires scenario definitions to pin the switch
+    explicitly, since a default would make the affected-table list ambiguous.
+    `sales/sl060.cbl` tests the two names at seven sites - L1039, L1046, L1126,
+    L1144, L1172, L1175 and L1177 - three in the `IRS-Used OR IRS-Both-Used`
+    shape, three as `IRS-Both-Used or G-L`, and L1144 alone.
 4.  TWO CONDITION NAMES SHARE ONE VALUE ON ONE FIELD.
     `88 FS-MySql-Used value 1.` at [copybooks/wssystem.cob:L114] and
     `88 FS-RDBMS-Used value 1.` at [copybooks/wssystem.cob:L116] are both
-    declared on `File-System-Used`, both with value 1, so each holds exactly
-    when the other does. Both are registered as declared.
-
+    declared on `File-System-Used` with value 1, so each holds exactly when the
+    other does. Both are registered as declared.
 5.  COMMENTED-OUT CONDITION NAMES ARE NOT REGISTERED.
     [copybooks/wsfnctn.cob:L76-L80] and [copybooks/wssystem.cob:L117-L121] each
     carry five `88` declarations behind a `*>`, for storage engines the
     maintainer marks "THESE NOT IN USE". A comment declares nothing, so none of
-    the ten appears here - and none has been deleted from the frozen file
-    either.
+    the ten appears here - and none has been deleted from the frozen file.
 
 ANOMALY A-15, RECORDED AND LEFT UNSETTLED  (rule R-4)
-=====================================================
-The batch record's declared length contradicts the sum of its fields. The
-maintainer says so himself, at [copybooks/wsbatch.cob:L7-L9], quoted verbatim:
+The batch record's declared length contradicts the sum of its fields, as the
+maintainer says at [copybooks/wsbatch.cob:L7-L9]. Section 0.6.8 lists it among
+the questions only the compiled program can settle, because which of the two
+governs the record actually read changes the alignment of the trailing fields.
+Nothing here settles it: the three batch groups are registered from the `88`
+lines themselves.
 
-    *> 96 bytes 26/03/09
-    *> 98 bytes 20/12/11 (no, dont understand as I count 96)
-    *>   but function length (Batch-record) says 98?
-
-Agent Action Plan section 0.6.8 lists it among the questions only the compiled
-program can settle, because which of the two governs the record actually read
-changes the alignment of the trailing fields. Nothing in this module settles
-it. The three batch groups are registered from the `88` lines themselves,
-which no reading of the record length moves.
-
-A NAMING TRAP WORTH READING BEFORE RUNNING ANY SEARCH
-=====================================================
-Four condition names in `copybooks/wssystem.cob` begin with `Stock`:
-
-    88  Stock                  value 1.    [copybooks/wssystem.cob:L91]
-    88  Stock-Audit-On         value "Y".  [copybooks/wssystem.cob:L244]
-    88  Stock-Control-Exists   value "Y".  [copybooks/wssystem.cob:L301]
-    88  Stock-Averaging        value 1.    [copybooks/wssystem.cob:L303]
-
-They are in-scope SYSTEM-REC condition names, and they are NOT the out-of-scope
-table and bridge identifiers Agent Action Plan section 0.2.2 excludes. A search
-for the substring "stock" will hit all four; a search for the excluded
-identifiers themselves will hit none of them. Match whole identifiers.
+A NAMING TRAP: four condition names in `copybooks/wssystem.cob` begin with
+`Stock` - `Stock` L91, `Stock-Audit-On` L244, `Stock-Control-Exists` L301,
+`Stock-Averaging` L303. They are in-scope SYSTEM-REC condition names, not the
+out-of-scope table and bridge identifiers section 0.2.2 excludes, so match whole
+identifiers rather than the substring "stock".
 
 ORDER IS OBSERVABLE, SO THERE IS NO `set` HERE  (rule R-6)
 ==========================================================
@@ -307,7 +312,7 @@ ZERO BINARY FLOATING POINT  (rule R-2, verbatim)
 
 Rule R-2 forces the whole of `acas_posting/cobol/*.py` into scope, this file
 included. Every value in the registry is carried as `str`, matching
-`model.ConditionName.value`, and read as an exact `decimal.Decimal` only at the
+`loader.ConditionName.value`, and read as an exact `decimal.Decimal` only at the
 moment of comparison. A `float` or `complex` operand is refused with a
 `TypeError` rather than compared, because 0.1 cannot be a COBOL `pic 9` value
 and rounding one into the nearest integer would invent an answer. That refusal
@@ -368,29 +373,39 @@ import dataclasses
 import decimal
 import enum
 import types
-from typing import TYPE_CHECKING, Callable, Final, Mapping
+from pathlib import Path
+from typing import Callable, Final, Mapping
 
 from acas_posting.cobol.field import FieldDescriptor
-from acas_posting.dictionary import loader, model
 
-if TYPE_CHECKING:  # pragma: no cover - import for type checking only
-    from pathlib import Path
+# Agent Action Plan section 0.4.3 lets `cobol/*.py` import `dictionary.loader`
+# and nothing else from the dictionary package. `loader.ConditionName` is a
+# BINDING to the one definition in `acas_posting.dictionary.model` rather than a
+# copy (see `loader.RE_EXPORTED_MODEL_NAMES`), so the cross-check below reads the
+# dictionary's own condition-name record through the single permitted door.
+from acas_posting.dictionary import loader
 
 
-# =============================================================================
 #  THE SHAPE OF A VALUE CLAUSE
-# =============================================================================
 
 
 class ConditionKind(enum.StrEnum):
     """The shape of the VALUE clause a condition name is declared with.
 
-    Five members, one per shape the in-scope layouts actually use. A contiguous
+    Six members, one per shape the in-scope layouts actually use. A contiguous
     list and a gapped list share `VALUE_LIST`, because mechanically they are the
     same construct - a run of literals - and telling them apart by collapsing
     the contiguous one into a range would lose the declaration. `OS-Single` at
     [copybooks/wssystem.cob:L109] is the reason that matters: its members are
     1, 2 and 4, and 3 is not one of them.
+
+    A single quoted literal and a list of them are, by contrast, KEPT APART, as
+    `ALPHANUMERIC` and `ALPHANUMERIC_LIST`. Collapsing those two would not lose a
+    declaration in the abstract - it would change twenty answers concretely,
+    because a reader of `values` that stopped at the first token would make
+    `pending` [copybooks/slwsinv.cob:L53] false for the lower-case "p" its own
+    line admits. `is_alphanumeric` is true for both, so a caller asking "is this
+    text?" needs neither member by name.
 
     A `StrEnum` so the member is its own text, which keeps a kind readable in a
     traceability table without a lookup, exactly as the dictionary object model
@@ -408,9 +423,14 @@ class ConditionKind(enum.StrEnum):
             [copybooks/wssystem.cob:L109]
         THRU_RANGE: A `thru` range, INCLUSIVE on both bounds. `88
             FS-Valid-Options values 0 thru 1.` [copybooks/wssystem.cob:L122]
-        ALPHANUMERIC: One quoted literal, its delimiters kept in the recorded
+        ALPHANUMERIC: ONE quoted literal, its delimiters kept in the recorded
             value so a one-character switch is unambiguous. `88 Auto-Vat value
             "Y".` [copybooks/wssystem.cob:L174]
+        ALPHANUMERIC_LIST: TWO OR MORE quoted literals, in declaration order,
+            tested by membership exactly as `VALUE_LIST` is on the numeric side.
+            `88 pending values "P" "p".` [copybooks/slwsinv.cob:L53] and
+            `88 sih-Valid-Freqs values "Y" "M" "Q" "D".`
+            [copybooks/slwsinv.cob:L35]
     """
 
     SINGLE = "SINGLE"
@@ -418,9 +438,10 @@ class ConditionKind(enum.StrEnum):
     VALUE_LIST = "VALUE_LIST"
     THRU_RANGE = "THRU_RANGE"
     ALPHANUMERIC = "ALPHANUMERIC"
+    ALPHANUMERIC_LIST = "ALPHANUMERIC_LIST"
 
 
-# Short private aliases, bound once. The registry below is 106 entries long and
+# Short private aliases, bound once. The registry below is 159 entries long and
 # reads as a table; spelling the enumeration out in full on every row would
 # push the locator off the line, and the locator is the point of the row.
 _SINGLE: Final[ConditionKind] = ConditionKind.SINGLE
@@ -428,21 +449,45 @@ _FIG: Final[ConditionKind] = ConditionKind.FIGURATIVE
 _LIST: Final[ConditionKind] = ConditionKind.VALUE_LIST
 _THRU: Final[ConditionKind] = ConditionKind.THRU_RANGE
 _ALNUM: Final[ConditionKind] = ConditionKind.ALPHANUMERIC
+_ALIST: Final[ConditionKind] = ConditionKind.ALPHANUMERIC_LIST
 
-# The four frozen copybooks the registry is transcribed from, as
+# The two alphanumeric shapes, as a tuple so `is_alphanumeric` and the two
+# `numeric_values` guards all read from one place and cannot drift apart. A
+# tuple and not a set: rule R-6 admits no unordered container in this module.
+_ALPHANUMERIC_KINDS: Final[tuple[ConditionKind, ...]] = (
+    ConditionKind.ALPHANUMERIC,
+    ConditionKind.ALPHANUMERIC_LIST,
+)
+
+# The thirteen frozen copybooks the registry is transcribed from, as
 # repository-relative paths spelled the way the generated dictionary spells
 # them, so a locator built here and one read from the dictionary compare
 # equal without either side being touched.
+#
+# The first four carry the operation, batch, system and sales-ledger
+# vocabularies. The nine below them carry the invoice, open-item, purchase
+# ledger, IRS nominal and DAL-logging `88`s that the migrated cycle also tests -
+# see the module docstring on why all thirteen are transcribed rather than four.
 _WSFNCTN: Final[str] = "copybooks/wsfnctn.cob"
 _WSBATCH: Final[str] = "copybooks/wsbatch.cob"
 _WSSYSTEM: Final[str] = "copybooks/wssystem.cob"
 _WSSL: Final[str] = "copybooks/wssl.cob"
+_WSPL: Final[str] = "copybooks/wspl.cob"
+_SLWSINV: Final[str] = "copybooks/slwsinv.cob"
+_SLWSINV2: Final[str] = "copybooks/slwsinv2.cob"
+_SLWSOI: Final[str] = "copybooks/slwsoi.cob"
+_PLWSPINV: Final[str] = "copybooks/plwspinv.cob"
+_PLWSPINV2: Final[str] = "copybooks/plwspinv2.cob"
+_PLWSOI: Final[str] = "copybooks/plwsoi.cob"
+_IRSWSNL: Final[str] = "copybooks/irswsnl.cob"
+_TESTFLAGS: Final[str] = "copybooks/Test-Data-Flags.cob"
 
 # The figurative constants a VALUE clause may use, mapped to the number each
-# one reads as. Only `zero` occurs in the in-scope layouts - in six places, at
+# one reads as. Only `zero` occurs in the in-scope layouts - in eight places, at
 # [copybooks/wsfnctn.cob:L74], [copybooks/wssystem.cob:L94],
 # [copybooks/wssystem.cob:L102], [copybooks/wssystem.cob:L113],
-# [copybooks/wssystem.cob:L134] and [copybooks/wssl.cob:L27] - and its three
+# [copybooks/wssystem.cob:L134], [copybooks/wssl.cob:L27],
+# [copybooks/slwsoi.cob:L48] and [copybooks/plwsoi.cob:L54] - and its three
 # spellings are the ones COBOL allows for the same constant. A read-only proxy,
 # so no caller can teach this module a constant the frozen source never used.
 _FIGURATIVE_NUMBERS: Final[Mapping[str, int]] = types.MappingProxyType(
@@ -460,9 +505,7 @@ _FIGURATIVE_NUMBERS: Final[Mapping[str, int]] = types.MappingProxyType(
 _LITERAL_DELIMITERS: Final[tuple[str, ...]] = ('"', "'")
 
 
-# =============================================================================
 #  ONE REGISTRY ENTRY
-# =============================================================================
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -476,9 +519,9 @@ class ConditionNameSpec:
     EVERY SPEC CARRIES ITS OWN LINE  (rule R-5)
     -------------------------------------------
     `locator` names the line that declares THIS condition name, not the line
-    that declares its group and not a span. docs/migration/traceability.md is
-    built from these, and a reader following a name back to the frozen source
-    must land on the declaration itself.
+    that declares its group and not a span, so a reader following a name back to
+    the frozen source lands on the declaration itself. The traceability document
+    the plan mandates is built from these.
 
     THE ORIGINAL SPELLING IS DATA  (rule R-5)
     -----------------------------------------
@@ -490,21 +533,40 @@ class ConditionNameSpec:
     [copybooks/wssystem.cob:L101]. Lookup by the COBOL name therefore works
     with the spelling a reader copied out of the copybook.
 
+    THE DECLARATION IS THE IDENTITY, NOT THE NAME
+    ---------------------------------------------
+    Fourteen COBOL names are declared in more than one copybook with DIFFERENT
+    value clauses, so a name alone does not identify a declaration. `locator` is
+    unique across the registry and `(copybook, cobol_name)` is unique too - no
+    name repeats inside one copybook. `qualified_cobol_name` renders the
+    qualified form COBOL itself falls back on for the same reason (anomaly A-21,
+    [general/gl070.cbl:L510]), and `predicate_name` is guaranteed unique across
+    all 159 rows even where `python_name` is not.
+
     Attributes:
         cobol_name: The condition name verbatim, its case preserved.
         python_name: The snake_case predicate name for it, DERIVED from
             `cobol_name` by lowercasing, turning each hyphen into an
             underscore and prefixing `is_`. Derived rather than transcribed so
-            that 106 rows offer no chance to mistype one, and so a name and its
-            predicate can never disagree. Every one of the 106 derives to a
-            valid Python identifier.
+            that 159 rows offer no chance to mistype one, and so a name and its
+            predicate can never disagree. Every one of the 159 derives to a
+            valid Python identifier. NOT unique: the fourteen names declared in
+            more than one copybook derive the same `python_name`, which is
+            precisely why `predicate_name` exists.
+        predicate_name: The row's UNIQUE published predicate name. Equal to
+            `python_name` where the folded COBOL name occurs exactly once in the
+            registry, and `python_name + "_" + <copybook stem>` where it does
+            not - `is_pending_slwsinv` against `is_pending_slwsinv2`. Derived by
+            walking the finished registry, so uniqueness is a measured property
+            and not a promise; `PREDICATES` is keyed on it.
         values: The literals of the VALUE clause, as separate tokens, in
             declaration order, each carried as `str` (rule R-2). An
             alphanumeric literal keeps its delimiters, so `Auto-Vat` holds
-            `('"Y"',)`; a figurative constant keeps its spelling, so `No-OS`
-            holds `('zero',)`; and a numeric literal keeps its digits, so
-            `Date-Valid-Formats` holds `('1', '2', '3')`. A `THRU_RANGE` holds
-            exactly two, the lower bound then the upper.
+            `('"Y"',)` and `pending` at [copybooks/slwsinv.cob:L53] holds
+            `('"P"', '"p"')`; a figurative constant keeps its spelling, so
+            `No-OS` holds `('zero',)`; and a numeric literal keeps its digits,
+            so `Date-Valid-Formats` holds `('1', '2', '3')`. A `THRU_RANGE`
+            holds exactly two, the lower bound then the upper.
         kind: The shape of the clause.
         conditional_variable: The COBOL name of the field the condition name is
             declared on - its conditional variable - taken from the generated
@@ -531,36 +593,63 @@ class ConditionNameSpec:
     locator: str
     declaration_index: int
     notes: str
+    predicate_name: str = ""
 
     @property
     def value_clause_text(self) -> str:
         """The VALUE clause text, rebuilt from `values` and `kind`.
 
         DERIVED, not stored, so it cannot drift from `values`. The rebuilt text
-        is byte-identical to `model.ConditionName.value` for all 106 entries,
+        is byte-identical to `loader.ConditionName.value` for all 159 entries,
         which is what lets `cross_check_against_dictionary` compare the two
         sources without either being touched:
 
-            SINGLE, FIGURATIVE, ALPHANUMERIC  the one token
-            VALUE_LIST                        the tokens joined by one space
-            THRU_RANGE                        `<lower> thru <upper>`
+            SINGLE, FIGURATIVE, ALPHANUMERIC   the one token
+            VALUE_LIST, ALPHANUMERIC_LIST      the tokens joined by one space
+            THRU_RANGE                         `<lower> thru <upper>`
 
         Returns:
-            The clause text, for example `"1 2 4"`, `"0 thru 1"`, `"zero"` or
-            `'"Y"'`.
+            The clause text, for example `"1 2 4"`, `"0 thru 1"`, `"zero"`,
+            `'"Y"'` or `'"P" "p"'`.
         """
         if self.kind is ConditionKind.THRU_RANGE:
             return self.values[0] + " thru " + self.values[1]
         return " ".join(self.values)
 
     @property
-    def is_alphanumeric(self) -> bool:
-        """Whether the clause is a quoted literal rather than a number.
+    def qualified_cobol_name(self) -> str:
+        """The name in COBOL's own qualified form, for an unambiguous citation.
+
+        Fourteen of the registry's names are declared in more than one copybook,
+        and the compiled cycle meets the same problem: anomaly A-21 records that
+        field-name collisions across the posting copybooks force `gl070` to
+        write qualified references, at [general/gl070.cbl:L510]. This renders the
+        same idea, extended with the file so that two declarations on
+        same-named carriers in different copybooks - `ih-status` in
+        `copybooks/slwsinv2.cob` and in `copybooks/plwspinv.cob` - still read
+        apart.
 
         Returns:
-            True for `ALPHANUMERIC`, False for every numeric shape.
+            `<name> of <conditional variable> in <copybook>`, for example
+            `pending of sih-status in copybooks/slwsinv.cob`.
         """
-        return self.kind is ConditionKind.ALPHANUMERIC
+        return (
+            self.cobol_name + " of " + self.conditional_variable
+            + " in " + self.copybook
+        )
+
+    @property
+    def is_alphanumeric(self) -> bool:
+        """Whether the clause is quoted literals rather than numbers.
+
+        True for BOTH alphanumeric shapes, so a caller asking "is this text?"
+        never has to know that a multi-literal clause is a separate member.
+
+        Returns:
+            True for `ALPHANUMERIC` and `ALPHANUMERIC_LIST`, False for every
+            numeric shape.
+        """
+        return self.kind in _ALPHANUMERIC_KINDS
 
     @property
     def declaration_text(self) -> str:
@@ -589,28 +678,49 @@ class ConditionNameSpec:
         return self.locator
 
     def literal_text(self) -> str:
-        """The characters inside an alphanumeric literal, delimiters removed.
+        """The characters inside the FIRST alphanumeric literal, undelimited.
 
         This reads the literal's content the way the compiler does when it
         compares a quoted literal with an alphanumeric item: the delimiters
         belong to the source text, not to the value. `'"Y"'` reads as `Y`.
 
-        Only meaningful for an `ALPHANUMERIC` spec. For any numeric shape the
-        token is returned unchanged, so a caller that asks anyway gets the
-        digits rather than an exception.
+        Only fully meaningful for an `ALPHANUMERIC` spec, which has exactly one
+        literal. For an `ALPHANUMERIC_LIST` this returns the first of several and
+        is therefore NOT the whole clause - use `literal_texts` for that, which
+        is what `evaluate` does. It is kept single-valued rather than widened
+        because a caller wanting the one literal of a one-literal declaration
+        should not have to unpack a tuple. For any numeric shape the token is
+        returned unchanged, so a caller that asks anyway gets the digits rather
+        than an exception.
 
         Returns:
-            The literal's characters.
+            The first literal's characters.
         """
-        token = self.values[0]
-        for delimiter in _LITERAL_DELIMITERS:
-            if (
-                len(token) >= 2
-                and token.startswith(delimiter)
-                and token.endswith(delimiter)
-            ):
-                return token[1:-1]
-        return token
+        return _undelimit(self.values[0])
+
+    def literal_texts(self) -> tuple[str, ...]:
+        """Every alphanumeric literal's characters, in declaration order.
+
+        The whole clause, which is what a comparison must test against: COBOL
+        tests an alphanumeric condition name by membership over ALL of its
+        literals, exactly as it does a numeric `VALUE_LIST`. Twenty of the 159
+        declarations list more than one, and three list four, so reading only
+        `literal_text` would give the wrong answer for a fifth of the text
+        clauses.
+
+        Case is preserved verbatim, including where two declarations of one name
+        list the same two characters in opposite order - `pending` is
+        `values "P" "p"` at [copybooks/plwspinv.cob:L41] and `values "p" "P"` at
+        [copybooks/plwspinv2.cob:L41]. Order does not change which values match,
+        but it is the frozen source's own order and rule R-4 keeps it.
+
+        For any numeric shape the tokens come back unchanged rather than raising,
+        matching `literal_text`.
+
+        Returns:
+            The literals' characters, delimiters removed, in declaration order.
+        """
+        return tuple(_undelimit(token) for token in self.values)
 
     def numeric_values(self) -> tuple[decimal.Decimal, ...]:
         """The clause's literals as exact decimals, in declaration order.
@@ -630,24 +740,25 @@ class ConditionNameSpec:
             The literals as decimals.
 
         Raises:
-            ValueError: The spec is alphanumeric, so its literal is text and
-                has no numeric reading. A programmer error - `kind` states the
-                shape - and never reachable from a data value.
+            ValueError: The spec is alphanumeric - of either alphanumeric shape -
+                so its literals are text and have no numeric reading. A
+                programmer error - `kind` states the shape - and never reachable
+                from a data value.
         """
-        if self.kind is ConditionKind.ALPHANUMERIC:
+        if self.is_alphanumeric:
             raise ValueError(
                 "Condition name " + repr(self.cobol_name) + " at " + self.locator
-                + " is declared with an alphanumeric literal, "
-                + repr(self.values[0])
+                + " is declared with "
+                + ("an alphanumeric literal, " if len(self.values) == 1
+                   else "alphanumeric literals, ")
+                + ", ".join(repr(token) for token in self.values)
                 + ", so it has no numeric reading. Compare it as text; "
                 + "`kind` and `is_alphanumeric` state the shape."
             )
         return tuple(_read_number(token) for token in self.values)
 
 
-# =============================================================================
 #  READING A RECORDED LITERAL
-# =============================================================================
 
 
 def _read_number(token: str) -> decimal.Decimal:
@@ -710,13 +821,43 @@ def _read_operand(value: int | str | decimal.Decimal) -> decimal.Decimal | None:
     return None if not read.is_finite() else read
 
 
+def _undelimit(token: str) -> str:
+    """Strip a quoted literal's delimiters, leaving its characters.
+
+    The delimiters belong to the source text, not to the value: the compiler
+    compares the CHARACTERS of a quoted literal against an alphanumeric item, so
+    `'"Y"'` reads as `Y`. A token that is not delimited comes back unchanged, so
+    calling this on a numeric or figurative token is harmless - which is what
+    lets `literal_text` and `literal_texts` answer for any shape rather than
+    raising.
+
+    Only a token delimited by the SAME character at both ends and at least two
+    characters long is unwrapped, so a value that legitimately contains a quote
+    is not damaged.
+
+    Args:
+        token: One value token as the copybook writes it.
+
+    Returns:
+        Its characters, without delimiters.
+    """
+    for delimiter in _LITERAL_DELIMITERS:
+        if (
+            len(token) >= 2
+            and token.startswith(delimiter)
+            and token.endswith(delimiter)
+        ):
+            return token[1:-1]
+    return token
+
+
 def _pad(text: str, width: int) -> str:
     """Space-pad text on the right to a width, the way COBOL compares.
 
     An alphanumeric comparison in COBOL treats the shorter operand as though it
     were padded on the right with spaces to the length of the longer. Every
     alphanumeric conditional variable in the in-scope layouts is `pic x`, one
-    character wide, so this is a no-op for all 24 of them - it is written
+    character wide, so this is a no-op for all of them - it is written
     faithfully anyway, because a caller may hold a wider field's value and
     getting the rule right costs nothing.
 
@@ -730,9 +871,7 @@ def _pad(text: str, width: int) -> str:
     return text if len(text) >= width else text + " " * (width - len(text))
 
 
-# =============================================================================
 #  BUILDING ONE REGISTRY ROW
-# =============================================================================
 
 
 def _spec(
@@ -747,8 +886,8 @@ def _spec(
 ) -> ConditionNameSpec:
     """Build one registry row, deriving the predicate name and the locator.
 
-    Two members are DERIVED here rather than written 106 times, which removes
-    106 chances to mistype one and makes it impossible for a name and its
+    Two members are DERIVED here rather than written 159 times, which removes
+    159 chances to mistype one and makes it impossible for a name and its
     locator to disagree with the row they sit on:
 
         python_name  `is_` + the COBOL name lowercased with hyphens turned into
@@ -756,6 +895,11 @@ def _spec(
                      `G-L` yields `is_g_l`; `Date-Valid-Formats` yields
                      `is_date_valid_formats`.
         locator      `<copybook>:L<line>`.
+
+    A third, `predicate_name`, cannot be derived here because uniqueness is a
+    property of the WHOLE registry rather than of one row. It is filled in by
+    `_with_predicate_names` once the rows are built, and is left empty by this
+    function; no row of `CONDITION_NAMES` carries an empty one.
 
     Args:
         cobol_name: The condition name verbatim, its case preserved.
@@ -784,30 +928,37 @@ def _spec(
     )
 
 
-# =============================================================================
 #  THE REGISTRY  (rule R-5: every row carries its own line)
 # =============================================================================
 #
-# 106 rows: 30 from copybooks/wsfnctn.cob, 8 from copybooks/wsbatch.cob, 60
-# from copybooks/wssystem.cob and 8 from copybooks/wssl.cob. Grouped by
-# conditional variable in FILE order, and within each group in DECLARATION
-# order - which for the function codes is not numeric order.
+# 159 rows - every `88`-level declaration in the in-scope copybook closure.
+# Thirteen copybooks, in the order the module docstring tabulates them: the four
+# vocabulary copybooks first (wsfnctn 30, wsbatch 8, wssystem 60, wssl 8), then
+# the nine record copybooks the migrated cycle also tests (wspl 2, slwsinv 12,
+# slwsinv2 12, slwsoi 2, plwspinv 12, plwspinv2 6, plwsoi 3, irswsnl 2,
+# Test-Data-Flags 2). Sales before Purchase as the plan orders the ledgers, IRS
+# after both, the shared DAL switches last.
+#
+# Within a copybook, grouped by conditional variable in FILE order, and within
+# each group in DECLARATION order - which for the function codes is not numeric
+# order.
 #
 # Row columns, in order:
 #     COBOL name | value tokens | shape | conditional variable | copybook |
 #     line | index within group | notes
-#
 # A tuple, not a list and not a set: an ordering here is behaviour, because
 # `dal/status.py` builds enumeration members from it (rule R-6).
+#
+# Named with a leading underscore because it is the registry BEFORE unique
+# predicate names are derived; `CONDITION_NAMES` below is the published tuple and
+# is what every accessor walks.
 
-CONDITION_NAMES: Final[tuple[ConditionNameSpec, ...]] = (
+_REGISTRY_ROWS: Final[tuple[ConditionNameSpec, ...]] = (
     # =========================================================================
     #  copybooks/wsfnctn.cob - 30 rows. The file is 117 lines long, so the
     #  plan's L88-L118 citation of the vocabulary names a line past its end;
     #  the vocabulary spans L88-L116.
-    # =========================================================================
-    #
-    # --- 03  Main-Record-Move-Flag pic 9 value zero.  [wsfnctn.cob:L66] ------
+    #  03  Main-Record-Move-Flag pic 9 value zero.  [copybooks/wsfnctn.cob:L66]
     # Which copy of the record the bridge is to take, the FD's or working
     # storage's. The maintainer's own note at [copybooks/wsfnctn.cob:L64] says
     # "NOT YET USED".
@@ -823,8 +974,7 @@ CONDITION_NAMES: Final[tuple[ConditionNameSpec, ...]] = (
         "Declared with the maintainer's note NOT YET USED at "
         "[copybooks/wsfnctn.cob:L64].",
     ),
-    #
-    # --- 07  FA-File-System-Used  pic 9.  [wsfnctn.cob:L73] -----------------
+    #  07  FA-File-System-Used  pic 9.  [copybooks/wsfnctn.cob:L73]
     # Reaches the handler from the system record. Five further condition names
     # for other storage engines sit behind a `*>` at
     # [copybooks/wsfnctn.cob:L76-L80] under the heading "THESE NOT IN USE" - a
@@ -850,8 +1000,7 @@ CONDITION_NAMES: Final[tuple[ConditionNameSpec, ...]] = (
         "options to two and the wider intent is recorded only in that "
         "comment.",
     ),
-    #
-    # --- 07  FA-File-Duplicates-In-Use  pic 9.  [wsfnctn.cob:L82] -----------
+    #  07  FA-File-Duplicates-In-Use  pic 9.  [copybooks/wsfnctn.cob:L82]
     _spec(
         "FA-FS-Duplicate-Processing", ("1",), _SINGLE,
         "FA-File-Duplicates-In-Use", _WSFNCTN, 83, 0,
@@ -859,8 +1008,7 @@ CONDITION_NAMES: Final[tuple[ConditionNameSpec, ...]] = (
         "\"NO LONGER USED other than for a '6' = rdb\" - and 6 is not one of "
         "the values any condition name on it declares.",
     ),
-    #
-    # --- 03  File-Function  pic 99.  [wsfnctn.cob:L88] ----------------------
+    #  03  File-Function  pic 99.  [copybooks/wsfnctn.cob:L88]
     # The fifteen operation codes the facade paragraphs SET before calling a
     # handler. `SET fn-* TO TRUE` appears 302 times in
     # [copybooks/Proc-ACAS-FH-Calls.cob] and 56 times in
@@ -878,27 +1026,17 @@ CONDITION_NAMES: Final[tuple[ConditionNameSpec, ...]] = (
     _spec("fn-re-write", ("7",), _SINGLE, "File-Function", _WSFNCTN, 95, 6),
     _spec("fn-delete", ("8",), _SINGLE, "File-Function", _WSFNCTN, 96, 7),
     _spec("fn-start", ("9",), _SINGLE, "File-Function", _WSFNCTN, 97, 8),
-    #
-    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    # !!  THE NEXT TWO ROWS ARE OUT OF NUMERIC ORDER, AND MUST STAY SO.    !!
-    # !!                                                                   !!
-    # !!  15 is declared BEFORE 13:                                        !!
-    # !!      88  fn-Write-Raw       value 15.   [copybooks/wsfnctn.cob:L99] !!
-    # !!      88  fn-Read-Next-Raw   value 13.   [copybooks/wsfnctn.cob:L100]!!
-    # !!                                                                   !!
-    # !!  so the group's declaration sequence is                           !!
-    # !!      1 2 3 4 5 6 7 8 9 15 13 31 32 33 34                          !!
-    # !!                                                                   !!
-    # !!  The maintainer explains it himself in the file header at          !!
-    # !!  [copybooks/wsfnctn.cob:L14-L15]: "Oops, previous chg should have  !!
-    # !!  been for File-Function. / next-read-raw changed to 13."           !!
-    # !!                                                                   !!
-    # !!  `dal/status.py` builds its enumeration members from this order,   !!
-    # !!  and an enumeration's member order is observable, so sorting these !!
-    # !!  two rows into numeric order would silently reorder that           !!
-    # !!  enumeration. A DEFECT REPRODUCED IS CORRECT; A DEFECT FIXED IS A  !!
-    # !!  FAILURE.                                        (rules R-4, R-6)  !!
-    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    #  THE NEXT TWO ROWS ARE OUT OF NUMERIC ORDER, AND MUST STAY SO. 15 is
+    #  declared before 13 - `88 fn-Write-Raw value 15.` at
+    #  [copybooks/wsfnctn.cob:L99], `88 fn-Read-Next-Raw value 13.` at
+    #  [copybooks/wsfnctn.cob:L100] - so the group's declaration sequence is
+    #  1 2 3 4 5 6 7 8 9 15 13 31 32 33 34. The maintainer explains it in the file
+    #  header at [copybooks/wsfnctn.cob:L14-L15]: "Oops, previous chg should have
+    #  been for File-Function. / next-read-raw changed to 13." `dal/status.py`
+    #  builds its enumeration members from this order and member order is
+    #  observable, so sorting these two rows into numeric order would silently
+    #  reorder that enumeration. A defect reproduced is correct; a defect fixed is
+    #  a failure (rules R-4, R-6).
     _spec(
         "fn-Write-Raw", ("15",), _SINGLE, "File-Function", _WSFNCTN, 99, 9,
         "OUT OF NUMERIC ORDER: value 15 is declared at "
@@ -917,7 +1055,6 @@ CONDITION_NAMES: Final[tuple[ConditionNameSpec, ...]] = (
         "[copybooks/wsfnctn.cob:L15] records the change: "
         '"next-read-raw changed to 13."',
     ),
-    #
     # A `*>` comment at [copybooks/wsfnctn.cob:L101] separates the raw pair
     # from the by-name reads, which is why the next four sit at L102-L105 and
     # not at L101-L104 as the plan's working note states.
@@ -936,8 +1073,7 @@ CONDITION_NAMES: Final[tuple[ConditionNameSpec, ...]] = (
         14,
         "The last row of the group, at L105 - so the group spans L89-L105.",
     ),
-    #
-    # --- 03  Access-Type  pic 9.  [wsfnctn.cob:L107] ------------------------
+    #  03  Access-Type  pic 9.  [copybooks/wsfnctn.cob:L107]
     # Nine access types at L108-L116, values 1 through 9 in numeric order. The
     # field's own comment reads "For rdbms 2 should cover all !!!", and the
     # file header at [copybooks/wsfnctn.cob:L11-L14] records that a widening of
@@ -961,23 +1097,16 @@ CONDITION_NAMES: Final[tuple[ConditionNameSpec, ...]] = (
         "The last condition name in the file. Activated 06/08/23 per the file "
         "header at [copybooks/wsfnctn.cob:L20].",
     ),
-    # =========================================================================
-    #  copybooks/wsbatch.cob - 8 rows. The three most load-bearing groups in
-    #  the whole cycle: they gate whether posting happens at all.
-    #
-    #  ANOMALY A-15 lives in this copybook's header and is left unsettled. The
-    #  maintainer's own words at [copybooks/wsbatch.cob:L7-L9], verbatim:
-    #      *> 96 bytes 26/03/09
-    #      *> 98 bytes 20/12/11 (no, dont understand as I count 96)
-    #      *>   but function length (Batch-record) says 98?
-    #  Agent Action Plan section 0.6.8 lists it among the questions only the
-    #  compiled program can settle. The rows below are transcribed from the
-    #  `88` lines, which no reading of the record length moves.
-    # =========================================================================
-    #
-    # --- 05  WS-Ledger  pic 9.  [wsbatch.cob:L15] ---------------------------
-    # Which ledger a batch belongs to. The first component of WS-Batch-Key,
-    # which [copybooks/wsbatch.cob:L20-L21] also redefines as WS-Batch-Key9.
+    #  copybooks/wsbatch.cob - 8 rows. The three most load-bearing groups in the
+    #  whole cycle: they gate whether posting happens at all. ANOMALY A-15 lives
+    #  in this copybook's header, in the maintainer's own words at
+    #  [copybooks/wsbatch.cob:L7-L9], and Agent Action Plan section 0.6.8 lists it
+    #  among the questions only the compiled program can settle. The rows below
+    #  are transcribed from the `88` lines, which no reading of the record length
+    #  moves.
+    #  05  WS-Ledger  pic 9.  [copybooks/wsbatch.cob:L15]
+    # Which ledger a batch belongs to. The first component of WS-Batch-Key, which
+    # [copybooks/wsbatch.cob:L20-L21] also redefines as WS-Batch-Key9.
     _spec(
         "GL-Batch", ("1",), _SINGLE, "WS-Ledger", _WSBATCH, 16, 0,
         "Named in the Agent Action Plan section 0.3.1 example list. Tested in "
@@ -987,8 +1116,7 @@ CONDITION_NAMES: Final[tuple[ConditionNameSpec, ...]] = (
     ),
     _spec("PL-Batch", ("2",), _SINGLE, "WS-Ledger", _WSBATCH, 17, 1),
     _spec("SL-Batch", ("3",), _SINGLE, "WS-Ledger", _WSBATCH, 18, 2),
-    #
-    # --- 03  Batch-Status  pic 9.  [wsbatch.cob:L25] ------------------------
+    #  03  Batch-Status  pic 9.  [copybooks/wsbatch.cob:L25]
     _spec(
         "Status-Open", ("0",), _SINGLE, "Batch-Status", _WSBATCH, 26, 0,
         "Named in the Agent Action Plan section 0.3.1 example list, and the "
@@ -1001,8 +1129,7 @@ CONDITION_NAMES: Final[tuple[ConditionNameSpec, ...]] = (
         "the condition; what to do about it belongs to the program modules.",
     ),
     _spec("Status-Closed", ("1",), _SINGLE, "Batch-Status", _WSBATCH, 27, 1),
-    #
-    # --- 03  Cleared-Status  pic 9.  [wsbatch.cob:L29] ----------------------
+    #  03  Cleared-Status  pic 9.  [copybooks/wsbatch.cob:L29]
     _spec(
         "Waiting", ("0",), _SINGLE, "Cleared-Status", _WSBATCH, 30, 0,
         "Named in the Agent Action Plan section 0.3.1 example list. Appears "
@@ -1021,10 +1148,11 @@ CONDITION_NAMES: Final[tuple[ConditionNameSpec, ...]] = (
         "rewrite at [general/gl072.cbl:L377].",
     ),
     _spec("Archived", ("2",), _SINGLE, "Cleared-Status", _WSBATCH, 32, 2),
-    # =========================================================================
     #  copybooks/wssystem.cob - 60 rows, in file order across L85 to L303.
     #  The 169-column system record. Carries the IRS fan-out switch, the
-    #  date-format group, and all six shapes a value clause takes.
+    #  date-format group, and six of the seven shapes a value clause takes -
+    #  every one except ALPHANUMERIC_LIST, which only the invoice and open-item
+    #  copybooks declare.
     # =========================================================================
     #
     # --- 05  Level.  [wssystem.cob:L83] -------------------------------------
@@ -1056,13 +1184,11 @@ CONDITION_NAMES: Final[tuple[ConditionNameSpec, ...]] = (
         'same field, spelled out rather than tested as `not IRS`.',
     ),
     _spec("Payroll", ("1",), _SINGLE, "Level-6", _WSSYSTEM, 96, 0),
-    #
-    # --- 05  Host  pic 9.  [wssystem.cob:L98] -------------------------------
+    #  05  Host  pic 9.  [copybooks/wssystem.cob:L98]
     _spec("Multi-User", ("1",), _SINGLE, "Host", _WSSYSTEM, 99, 0),
-    #
-    # --- 05  Op-System  pic 9.  [wssystem.cob:L100] -------------------------
+    #  05  Op-System  pic 9.  [copybooks/wssystem.cob:L100]
     # Nine condition names on one field, and the group that exhibits three of
-    # the six shapes: a contiguous list, a figurative constant, and a GAPPED
+    # the seven shapes: a contiguous list, a figurative constant, and a GAPPED
     # list. The two collective names bracket the six specific ones.
     _spec(
         "valid-os-type", ("1", "2", "3", "4", "5", "6"), _LIST,
@@ -1088,8 +1214,7 @@ CONDITION_NAMES: Final[tuple[ConditionNameSpec, ...]] = (
         "them. It must never be collapsed into a 1-to-4 range - that would "
         "admit Mac, which the declaration excludes (rule R-4).",
     ),
-    #
-    # --- 07  File-System-Used  pic 9.  [wssystem.cob:L112] ------------------
+    #  07  File-System-Used  pic 9.  [copybooks/wssystem.cob:L112]
     # The copybook's own counterpart to FA-File-System-Used in wsfnctn.cob.
     # Five further condition names for other storage engines sit behind a `*>`
     # at [copybooks/wssystem.cob:L117-L121]; a comment declares nothing, so
@@ -1120,16 +1245,14 @@ CONDITION_NAMES: Final[tuple[ConditionNameSpec, ...]] = (
         'The trailing comment reads "5. (not in use unless 1-5)", recording a '
         "wider intent the declaration does not carry.",
     ),
-    #
-    # --- 07  File-Duplicates-In-Use  pic 9.  [wssystem.cob:L123] ------------
+    #  07  File-Duplicates-In-Use  pic 9.  [copybooks/wssystem.cob:L123]
     _spec(
         "FS-Duplicate-Processing", ("1",), _SINGLE,
         "File-Duplicates-In-Use", _WSSYSTEM, 124, 0,
         'The field\'s comment reads "No longer in use" and this row\'s reads '
         '"Ditto".',
     ),
-    #
-    # --- 05  Date-Form  pic 9.  [wssystem.cob:L128] -------------------------
+    #  05  Date-Form  pic 9.  [copybooks/wssystem.cob:L128]
     # Three specific formats and one collective name. The collective name is
     # never tested, and neither is the third specific one; see the two rows
     # below and rule R-4.
@@ -1168,8 +1291,7 @@ CONDITION_NAMES: Final[tuple[ConditionNameSpec, ...]] = (
         "its predicate exist, and nothing in the migration calls the "
         "predicate. Declared at [copybooks/wssystem.cob:L132] (rule R-4).",
     ),
-    #
-    # --- 05  Data-Capture-Used  pic 9.  [wssystem.cob:L133] -----------------
+    #  05  Data-Capture-Used  pic 9.  [copybooks/wssystem.cob:L133]
     _spec(
         "DC-Cobol-Standard", ("zero",), _FIG,
         "Data-Capture-Used", _WSSYSTEM, 134, 0,
@@ -1177,69 +1299,53 @@ CONDITION_NAMES: Final[tuple[ConditionNameSpec, ...]] = (
     ),
     _spec("DC-GUI", ("1",), _SINGLE, "Data-Capture-Used", _WSSYSTEM, 135, 1),
     _spec("DC-Widget", ("2",), _SINGLE, "Data-Capture-Used", _WSSYSTEM, 136, 2),
-    #
-    # =========================================================================
-    #  03  General-Ledger-Block.  [wssystem.cob:L150]
+    #  03  General-Ledger-Block.  [copybooks/wssystem.cob:L150]
     #  From here to L272 every conditional variable is `pic x`, one character
     #  wide, and every condition name is a quoted literal. All 24 alphanumeric
     #  rows in the registry are one character, so the space-padding rule
     #  `evaluate` applies is a no-op for each of them.
-    # =========================================================================
-    #
-    # --- 05  P-C  pic x.  [wssystem.cob:L151] -------------------------------
+    #  05  P-C  pic x.  [copybooks/wssystem.cob:L151]
     _spec(
         "Profit-Centres", ('"P"',), _ALNUM, "P-C", _WSSYSTEM, 152, 0,
         "Quoted literal, delimiters kept in the recorded value so a "
         "one-character switch is unambiguous.",
     ),
     _spec("Branches", ('"B"',), _ALNUM, "P-C", _WSSYSTEM, 153, 1),
-    #
-    # --- 05  P-C-Grouped  pic x.  [wssystem.cob:L154] -----------------------
+    #  05  P-C-Grouped  pic x.  [copybooks/wssystem.cob:L154]
     _spec("Grouped", ('"Y"',), _ALNUM, "P-C-Grouped", _WSSYSTEM, 155, 0),
-    #
-    # --- 05  P-C-Level  pic x.  [wssystem.cob:L156] -------------------------
+    #  05  P-C-Level  pic x.  [copybooks/wssystem.cob:L156]
     _spec("Revenue-Only", ('"R"',), _ALNUM, "P-C-Level", _WSSYSTEM, 157, 0),
-    #
-    # --- 05  Comps  pic x.  [wssystem.cob:L158] -----------------------------
+    #  05  Comps  pic x.  [copybooks/wssystem.cob:L158]
     _spec("Comparatives", ('"Y"',), _ALNUM, "Comps", _WSSYSTEM, 159, 0),
-    #
-    # --- 05  Comps-Active  pic x.  [wssystem.cob:L160] ----------------------
+    #  05  Comps-Active  pic x.  [copybooks/wssystem.cob:L160]
     _spec(
         "Comparatives-Active", ('"Y"',), _ALNUM,
         "Comps-Active", _WSSYSTEM, 161, 0,
     ),
-    #
-    # --- 05  M-V  pic x.  [wssystem.cob:L162] -------------------------------
+    #  05  M-V  pic x.  [copybooks/wssystem.cob:L162]
     _spec("Minimum-Validation", ('"Y"',), _ALNUM, "M-V", _WSSYSTEM, 163, 0),
-    #
-    # --- 05  Arch  pic x.  [wssystem.cob:L164] ------------------------------
+    #  05  Arch  pic x.  [copybooks/wssystem.cob:L164]
     _spec("Archiving", ('"Y"',), _ALNUM, "Arch", _WSSYSTEM, 165, 0),
-    #
-    # --- 05  Trans-Print  pic x.  [wssystem.cob:L166] -----------------------
+    #  05  Trans-Print  pic x.  [copybooks/wssystem.cob:L166]
     _spec("Mandatory", ('"Y"',), _ALNUM, "Trans-Print", _WSSYSTEM, 167, 0),
-    #
-    # --- 05  Trans-Printed  pic x.  [wssystem.cob:L168] ---------------------
+    #  05  Trans-Printed  pic x.  [copybooks/wssystem.cob:L168]
     _spec("Trans-Done", ('"Y"',), _ALNUM, "Trans-Printed", _WSSYSTEM, 169, 0),
-    #
-    # --- 05  Vat  pic x.  [wssystem.cob:L173] -------------------------------
+    #  05  Vat  pic x.  [copybooks/wssystem.cob:L173]
     _spec(
         "Auto-Vat", ('"Y"',), _ALNUM, "Vat", _WSSYSTEM, 174, 0,
         "The alphanumeric exemplar the folder's own shape table cites. The "
         "comparison is case-SENSITIVE, so \"y\" does not hold; see the "
         "question `evaluate` records about that.",
     ),
-    #
-    # --- 05  Batch-Id  pic x.  [wssystem.cob:L175] --------------------------
+    #  05  Batch-Id  pic x.  [copybooks/wssystem.cob:L175]
     _spec("Preserve-Batch", ('"Y"',), _ALNUM, "Batch-Id", _WSSYSTEM, 176, 0),
-    #
-    # --- 05  Ledger-2nd-Index  pic x.  [wssystem.cob:L177] ------------------
+    #  05  Ledger-2nd-Index  pic x.  [copybooks/wssystem.cob:L177]
     _spec(
         "Index-2", ('"Y"',), _ALNUM, "Ledger-2nd-Index", _WSSYSTEM, 178, 0,
         "The field's own comment at [copybooks/wssystem.cob:L177] reads "
         '"But file uses SINGLE INDEX only & gl030 uses a table."',
     ),
-    #
-    # --- 05  IRS-Instead  pic x.  [wssystem.cob:L179] -----------------------
+    #  05  IRS-Instead  pic x.  [copybooks/wssystem.cob:L179]
     # THE IRS FAN-OUT: a THREE-state switch with only TWO condition names.
     # The third state is space, for which BOTH rows below are False. There is
     # no third condition name and none may be added (rule R-3).
@@ -1268,24 +1374,15 @@ CONDITION_NAMES: Final[tuple[ConditionNameSpec, ...]] = (
         "anomaly belongs to the program module; this row only records the "
         "value set.",
     ),
-    #
-    # =========================================================================
-    #  03  Purchase-Ledger-Block.  [wssystem.cob:L192]
-    # =========================================================================
-    #
-    # --- 05  Purchase-Ledger  pic x.  [wssystem.cob:L200] -------------------
+    #  03  Purchase-Ledger-Block.  [copybooks/wssystem.cob:L192]
+    #  05  Purchase-Ledger  pic x.  [copybooks/wssystem.cob:L200]
     _spec(
         "P-L-Exists", ('"Y"',), _ALNUM, "Purchase-Ledger", _WSSYSTEM, 201, 0,
     ),
-    #
-    # =========================================================================
-    #  03  Sales-Ledger-Block.  [wssystem.cob:L215]
-    # =========================================================================
-    #
-    # --- 05  Sales-Ledger  pic x.  [wssystem.cob:L216] ----------------------
+    #  03  Sales-Ledger-Block.  [copybooks/wssystem.cob:L215]
+    #  05  Sales-Ledger  pic x.  [copybooks/wssystem.cob:L216]
     _spec("S-L-Exists", ('"Y"',), _ALNUM, "Sales-Ledger", _WSSYSTEM, 217, 0),
-    #
-    # --- 05  invoicer  pic 9.  [wssystem.cob:L232] --------------------------
+    #  05  invoicer  pic 9.  [copybooks/wssystem.cob:L232]
     # Lower-case field name kept as declared. Four condition names whose
     # values are 0, 1, 2 and 9 - so 3 to 8 satisfy none of them, which the
     # trailing comment on the last row half-acknowledges.
@@ -1309,12 +1406,10 @@ CONDITION_NAMES: Final[tuple[ConditionNameSpec, ...]] = (
         'comment reads "show totals only (no net & vat) but not found yet nor '
         'level 3 (see sl900)".',
     ),
-    #
-    # --- 05  Extra-Type  pic x.  [wssystem.cob:L238] ------------------------
+    #  05  Extra-Type  pic x.  [copybooks/wssystem.cob:L238]
     _spec("Discount", ('"D"',), _ALNUM, "Extra-Type", _WSSYSTEM, 239, 0),
     _spec("Charge", ('"C"',), _ALNUM, "Extra-Type", _WSSYSTEM, 240, 1),
-    #
-    # --- 05  SL-Stock-Audit  pic x.  [wssystem.cob:L243] --------------------
+    #  05  SL-Stock-Audit  pic x.  [copybooks/wssystem.cob:L243]
     _spec(
         "Stock-Audit-On", ('"Y"',), _ALNUM,
         "SL-Stock-Audit", _WSSYSTEM, 244, 0,
@@ -1323,8 +1418,7 @@ CONDITION_NAMES: Final[tuple[ConditionNameSpec, ...]] = (
         'Trailing comment: "Invoicing will create an audit record '
         '(15/05/13)".',
     ),
-    #
-    # --- 05  SL-Comp-Head-*  pic x.  [wssystem.cob:L263-L270] ---------------
+    #  05  SL-Comp-Head-*  pic x.  [copybooks/wssystem.cob:L263-L270]
     _spec(
         "SL-Comp-Pick", ('"Y"',), _ALNUM,
         "SL-Comp-Head-Pick", _WSSYSTEM, 264, 0,
@@ -1343,27 +1437,21 @@ CONDITION_NAMES: Final[tuple[ConditionNameSpec, ...]] = (
         "SL-Comp-Lets", ('"Y"',), _ALNUM,
         "SL-Comp-Head-Lets", _WSSYSTEM, 270, 0,
     ),
-    #
-    # --- 05  SL-VAT-Printed  pic x.  [wssystem.cob:L271] --------------------
+    #  05  SL-VAT-Printed  pic x.  [copybooks/wssystem.cob:L271]
     _spec(
         "SL-VAT-Prints", ('"Y"',), _ALNUM, "SL-VAT-Printed", _WSSYSTEM, 272, 0,
     ),
-    #
-    # =========================================================================
-    #  03  Stock-Control-Block.  [wssystem.cob:L290]
+    #  03  Stock-Control-Block.  [copybooks/wssystem.cob:L290]
     #  The last two rows of this copybook. Both names begin with `Stock` and
     #  both are LEGITIMATE in-scope SYSTEM-REC condition names.
-    # =========================================================================
-    #
-    # --- 05  Stock-Control  pic x.  [wssystem.cob:L300] ---------------------
+    #  05  Stock-Control  pic x.  [copybooks/wssystem.cob:L300]
     _spec(
         "Stock-Control-Exists", ('"Y"',), _ALNUM,
         "Stock-Control", _WSSYSTEM, 301, 0,
         "A LEGITIMATE in-scope SYSTEM-REC condition name, not one of the "
         "out-of-scope identifiers Agent Action Plan section 0.2.2 excludes.",
     ),
-    #
-    # --- 05  Stk-Averaging  pic 9.  [wssystem.cob:L302] --------------------
+    #  05  Stk-Averaging  pic 9.  [copybooks/wssystem.cob:L302]
     _spec(
         "Stock-Averaging", ("1",), _SINGLE,
         "Stk-Averaging", _WSSYSTEM, 303, 0,
@@ -1371,27 +1459,17 @@ CONDITION_NAMES: Final[tuple[ConditionNameSpec, ...]] = (
         "out-of-scope identifiers Agent Action Plan section 0.2.2 excludes. "
         "Note the name says Stock while its conditional variable says Stk.",
     ),
-    # =========================================================================
-    #  copybooks/wssl.cob - 8 rows.
-    #
-    #  WHY THIS COPYBOOK IS HERE AT ALL. Agent Action Plan section 0.4.1.4
-    #  names three source copybooks for this file, and this is not one of
-    #  them. It is included because these are live `88` declarations on an
-    #  in-scope record - WS-Sales-Record, the SALEDGER-REC layout that
-    #  acas012/salesMT carries - and leaving them out would open a
-    #  traceability hole (rule R-5). Being dictionary-backed, they are also
-    #  the rows `cross_check_against_dictionary` can verify.
-    #
-    #  WHY EIGHT AND NOT ONE. The plan's working note describes a single `88`
-    #  in this copybook, at L67. The frozen file declares EIGHT, at L26, L27,
-    #  L29, L31, L33, L35, L37 and L67 - `grep -cE '^ +88 '` returns 8 - and
-    #  data_dictionary/acas_posting_dictionary.json records eight for the file
-    #  as well. The file governs. The justification for registering L67
-    #  applies word for word to the other seven, and registering one of eight
-    #  from a single copybook would itself be the hole it was meant to close.
-    # =========================================================================
-    #
-    # --- 03  Sales-Status  pic 9.  [wssl.cob:L25] ---------------------------
+    #  copybooks/wssl.cob - 8 rows. Agent Action Plan section 0.4.1.4 names three
+    #  source copybooks for this file and this is not one of them; it is included
+    #  because these are live `88` declarations on an in-scope record -
+    #  WS-Sales-Record, the SALEDGER-REC layout acas012/salesMT carries - and
+    #  leaving them out would open a traceability hole (rule R-5). WHY EIGHT AND
+    #  NOT ONE: the plan's working note describes a single `88` here, at L67, while
+    #  the frozen file declares eight, at L26, L27, L29, L31, L33, L35, L37 and
+    #  L67 - `grep -cE '^ +88 '` returns 8 - and the generated dictionary records
+    #  eight for the file too. The file governs, and the justification for
+    #  registering L67 applies word for word to the other seven.
+    #  03  Sales-Status  pic 9.  [copybooks/wssl.cob:L25]
     _spec("Customer-Live", ("1",), _SINGLE, "Sales-Status", _WSSL, 26, 0),
     _spec(
         "Customer-Dead", ("zero",), _FIG, "Sales-Status", _WSSL, 27, 1,
@@ -1400,33 +1478,27 @@ CONDITION_NAMES: Final[tuple[ConditionNameSpec, ...]] = (
         "idea: the two spellings behave identically and both stay recorded as "
         "written (rule R-4).",
     ),
-    #
-    # --- 03  Sales-Late  pic 9.  [wssl.cob:L28] -----------------------------
+    #  03  Sales-Late  pic 9.  [copybooks/wssl.cob:L28]
     _spec("Late-Charges", ("1",), _SINGLE, "Sales-Late", _WSSL, 29, 0),
-    #
-    # --- 03  Sales-Dunning  pic 9.  [wssl.cob:L30] --------------------------
+    #  03  Sales-Dunning  pic 9.  [copybooks/wssl.cob:L30]
     _spec(
         "Dunning-Letters", ("1",), _SINGLE, "Sales-Dunning", _WSSL, 31, 0,
         'The field\'s trailing comment reads "Reminder letters".',
     ),
-    #
-    # --- 03  Email-Invoice  pic 9.  [wssl.cob:L32] --------------------------
+    #  03  Email-Invoice  pic 9.  [copybooks/wssl.cob:L32]
     _spec("Email-Invoicing", ("1",), _SINGLE, "Email-Invoice", _WSSL, 33, 0),
-    #
-    # --- 03  Email-Statement  pic 9.  [wssl.cob:L34] ------------------------
+    #  03  Email-Statement  pic 9.  [copybooks/wssl.cob:L34]
     _spec(
         "Email-Statementing", ("1",), _SINGLE, "Email-Statement", _WSSL, 35, 0,
     ),
-    #
-    # --- 03  Email-Letters  pic 9.  [wssl.cob:L36] --------------------------
+    #  03  Email-Letters  pic 9.  [copybooks/wssl.cob:L36]
     _spec(
         "Email-Dunning", ("1",), _SINGLE, "Email-Letters", _WSSL, 37, 0,
         "The name and its conditional variable disagree about the subject - "
         "Email-Letters carries Email-Dunning - which is left as declared "
         "(rule R-4).",
     ),
-    #
-    # --- 03  Sales-Partial-Ship-Flag  pic x.  [wssl.cob:L65-L66] ------------
+    #  03  Sales-Partial-Ship-Flag  pic x.  [copybooks/wssl.cob:L65-L66]
     # A TWO-PHYSICAL-LINE declaration: the data name is on L65 and its `pic x`
     # continues on L66, with the `88` on L67.
     _spec(
@@ -1438,40 +1510,613 @@ CONDITION_NAMES: Final[tuple[ConditionNameSpec, ...]] = (
         "300-byte record size per [copybooks/wssl.cob:L9-L10]; trailing "
         'comment "added 17/03/24".',
     ),
+    # =========================================================================
+    #  copybooks/wspl.cob - 2 rows. The purchase ledger's supplier status, the
+    #  mirror of `copybooks/wssl.cob`'s Sales-Status pair. `Supplier-dead` is
+    #  LIVE: [purchase/pl060.cbl:L503] tests it.
+    # =========================================================================
+    #
+    # --- 03  Purch-Status  pic 9.  [wspl.cob:L18] ---------------------------
+    _spec("Supplier-live", ("1",), _SINGLE, "Purch-Status", _WSPL, 19, 0),
+    _spec(
+        "Supplier-dead", ("0",), _SINGLE, "Purch-Status", _WSPL, 20, 1,
+        "Written as the DIGIT 0, where the sales mirror `Customer-Dead` at "
+        "[copybooks/wssl.cob:L27] writes the figurative `zero` for the same "
+        "idea. The two behave identically and both stay recorded as written "
+        "(rule R-4). LIVE at [purchase/pl060.cbl:L503].",
+    ),
+    # =========================================================================
+    #  copybooks/slwsinv.cob - 12 rows. The sales invoice header and lines.
+    #  Two of its names diverge from the three sibling invoice copybooks and the
+    #  divergences are preserved, not normalised: the status flag is spelled
+    #  `sapplied` here and `applied` in the other three, and `sil-analyised`
+    #  lists ONE literal where its three counterparts list two.
+    # =========================================================================
+    #
+    # --- 05  sih-Freq  pic x.  [slwsinv.cob:L29] -----------------------------
+    # Inside `03 filler redefines sih-order.` at [copybooks/slwsinv.cob:L28],
+    # the autogen recurrence frequency.
+    _spec("Sih-Yearly", ('"Y"',), _ALNUM, "sih-Freq", _SLWSINV, 30, 0),
+    _spec("Sih-Monthly", ('"M"',), _ALNUM, "sih-Freq", _SLWSINV, 31, 1),
+    _spec("Sih-Quarterly", ('"Q"',), _ALNUM, "sih-Freq", _SLWSINV, 32, 2),
+    _spec(
+        "sih-Daily", ('"D"',), _ALNUM, "sih-Freq", _SLWSINV, 33, 3,
+        'SHARES the value "D" with `sih-Testing` on the next line, so both '
+        "hold for the same character and neither can be told from the other by "
+        "its value. The maintainer's own trailing comments say so: \"These two "
+        'are only for testing." and "So NOT documented and removed after '
+        'tests." Reproduced as declared (rule R-4). Note also the '
+        "capitalisation change mid-group - the first three names are `Sih-` "
+        "and this one is `sih-`.",
+    ),
+    _spec(
+        "sih-Testing", ('"D"',), _ALNUM, "sih-Freq", _SLWSINV, 34, 4,
+        'The second of the two "D" declarations; see `sih-Daily` above.',
+    ),
+    _spec(
+        "sih-Valid-Freqs", ('"Y"', '"M"', '"Q"', '"D"'), _ALIST,
+        "sih-Freq", _SLWSINV, 35, 5,
+        "The only four-literal shape in the registry, alongside its two "
+        "purchase and second-sales counterparts. It INCLUDES the testing-only "
+        '"D", which the maintainer\'s trailing comment flags: "Last one D, for '
+        'TESTING ONLY so remove after". So a frequency of "D" is both a '
+        "testing artefact and a valid frequency, and the registry keeps that "
+        "as it stands.",
+    ),
+    #
+    # --- 03  sih-status  pic x.  [slwsinv.cob:L52] ---------------------------
+    _spec(
+        "pending", ('"P"', '"p"'), _ALIST, "sih-status", _SLWSINV, 53, 0,
+        "One of FOUR declarations of this name. Upper case FIRST here and at "
+        "[copybooks/plwspinv.cob:L41]; lower case first at "
+        "[copybooks/plwspinv2.cob:L41]; and a SINGLE upper-case literal at "
+        "[copybooks/slwsinv2.cob:L72], which therefore does NOT hold for a "
+        "lower-case \"p\". The four are never collapsed - see "
+        "`DUPLICATED_COBOL_NAMES`. LIVE at [sales/sl055.cbl:L433].",
+    ),
+    _spec(
+        "invoiced", ('"I"', '"i"'), _ALIST, "sih-status", _SLWSINV, 54, 1,
+        "One of four declarations; the case order and the literal count differ "
+        "between them exactly as `pending`'s do.",
+    ),
+    _spec(
+        "sapplied", ('"Z"', '"z"'), _ALIST, "sih-status", _SLWSINV, 55, 2,
+        "Spelled `sapplied` HERE ALONE. The same status flag is `applied` in "
+        "[copybooks/slwsinv2.cob:L74], [copybooks/plwspinv.cob:L43] and "
+        "[copybooks/plwspinv2.cob:L43], and it is `applied` that "
+        "[sales/sl055.cbl:L427] tests. The leading `s` is left exactly as "
+        "declared (rule R-4), which means a caller reaching for `applied` in "
+        "this copybook will not find it - and should not, because the frozen "
+        "line does not declare it here.",
+    ),
+    #
+    # --- 03  sih-day-book-flag  pic x  value space.  [slwsinv.cob:L67] -------
+    _spec(
+        "day-booked", ('"B"', '"b"'), _ALIST,
+        "sih-day-book-flag", _SLWSINV, 68, 0,
+        "Its conditional variable is initialised to `space`, for which this "
+        "condition name is False - the flag's unset state has no name of its "
+        "own, exactly as the IRS fan-out's third state has none "
+        "[copybooks/wssystem.cob:L179-L181].",
+    ),
+    #
+    # --- 03  sih-update  pic x.  [slwsinv.cob:L69] ---------------------------
+    _spec(
+        "sih-analyised", ('"Z"', '"z"'), _ALIST, "sih-update", _SLWSINV, 70, 0,
+        "The maintainer's own spelling of \"analysed\", kept (rule R-5).",
+    ),
+    #
+    # --- 05  sil-update  pic x.  [slwsinv.cob:L95] ---------------------------
+    _spec(
+        "sil-analyised", ('"Z"',), _ALNUM, "sil-update", _SLWSINV, 96, 0,
+        "ONE literal, where the three sibling `il-analyised` declarations at "
+        "[copybooks/slwsinv2.cob:L105], [copybooks/plwspinv.cob:L83] and "
+        "[copybooks/plwspinv2.cob:L72] each list two. This one therefore does "
+        'NOT hold for a lower-case "z". Also spelled `sil-` here where the '
+        "other three are `il-`, so it is the one line-level analysis flag that "
+        "does not collide with its siblings.",
+    ),
+    # =========================================================================
+    #  copybooks/slwsinv2.cob - 12 rows. The second sales invoice layout. Its
+    #  names match the purchase copybooks' while its VALUES do not: every status
+    #  clause here is a SINGLE upper-case literal, so this layout is the strict
+    #  case-sensitive one. `il-analyised` is LIVE at [sales/sl055.cbl:L373];
+    #  `pending`, `applied` and `ih-analyised` are LIVE at
+    #  [sales/sl055.cbl:L427], [sales/sl055.cbl:L433] and
+    #  [sales/sl055.cbl:L440].
+    # =========================================================================
+    #
+    # --- 05  ih-Freq  pic x.  [slwsinv2.cob:L48] -----------------------------
+    # Inside `03 filler redefines ih-order.` at [copybooks/slwsinv2.cob:L47].
+    _spec("ih-Yearly", ('"Y"',), _ALNUM, "ih-Freq", _SLWSINV2, 49, 0),
+    _spec("ih-Monthly", ('"M"',), _ALNUM, "ih-Freq", _SLWSINV2, 50, 1),
+    _spec("ih-Quarterly", ('"Q"',), _ALNUM, "ih-Freq", _SLWSINV2, 51, 2),
+    _spec(
+        "ih-Daily", ('"D"',), _ALNUM, "ih-Freq", _SLWSINV2, 52, 3,
+        'SHARES the value "D" with `ih-Testing` on the next line, with the '
+        "maintainer's testing-only comments. The same pair recurs at "
+        "[copybooks/plwspinv.cob:L22-L23].",
+    ),
+    _spec(
+        "ih-Testing", ('"D"',), _ALNUM, "ih-Freq", _SLWSINV2, 53, 4,
+        'The second of the two "D" declarations; see `ih-Daily` above.',
+    ),
+    _spec(
+        "ih-Valid-Freqs", ('"Y"', '"M"', '"Q"', '"D"'), _ALIST,
+        "ih-Freq", _SLWSINV2, 54, 5,
+        'Includes the testing-only "D", per the maintainer\'s trailing '
+        'comment "Last one D, for TESTING ONLY so remove after".',
+    ),
+    #
+    # --- 03  ih-status  pic x.  [slwsinv2.cob:L71] ---------------------------
+    _spec(
+        "pending", ('"P"',), _ALNUM, "ih-status", _SLWSINV2, 72, 0,
+        "A SINGLE literal, where the three sibling `pending` declarations each "
+        'list two. This one is case-SENSITIVE: a lower-case "p" satisfies '
+        "[copybooks/slwsinv.cob:L53] and [copybooks/plwspinv.cob:L41] but NOT "
+        "this line. The difference is the frozen source's and is preserved "
+        "(rule R-4). LIVE at [sales/sl055.cbl:L433].",
+    ),
+    _spec(
+        "invoiced", ('"I"',), _ALNUM, "ih-status", _SLWSINV2, 73, 1,
+        "A single literal; see `pending` above for the divergence.",
+    ),
+    _spec(
+        "applied", ('"Z"',), _ALNUM, "ih-status", _SLWSINV2, 74, 2,
+        "A single literal. The sales mirror of this flag in "
+        "[copybooks/slwsinv.cob:L55] is spelled `sapplied` and lists two "
+        "literals, so the two sales invoice copybooks agree on neither the "
+        "name nor the value set. LIVE at [sales/sl055.cbl:L427].",
+    ),
+    #
+    # --- 03  ih-day-book-flag  pic x.  [slwsinv2.cob:L86] --------------------
+    _spec(
+        "day-booked", ('"B"',), _ALNUM,
+        "ih-day-book-flag", _SLWSINV2, 87, 0,
+        "A single literal, and its conditional variable carries NO `value "
+        "space` initialisation where [copybooks/slwsinv.cob:L67] and "
+        "[copybooks/plwspinv.cob:L51] both do.",
+    ),
+    #
+    # --- 03  ih-update  pic x.  [slwsinv2.cob:L88] ---------------------------
+    _spec(
+        "ih-analyised", ('"Z"',), _ALNUM, "ih-update", _SLWSINV2, 89, 0,
+        "A single literal. LIVE at [sales/sl055.cbl:L427] and "
+        "[sales/sl055.cbl:L440].",
+    ),
+    #
+    # --- 05  il-update  pic x.  [slwsinv2.cob:L104] --------------------------
+    _spec(
+        "il-analyised", ('"Z"',), _ALNUM, "il-update", _SLWSINV2, 105, 0,
+        "A single literal. LIVE at [sales/sl055.cbl:L373].",
+    ),
+    # =========================================================================
+    #  copybooks/slwsoi.cob - 2 rows. The sales open-item status. `S-Closed` is
+    #  LIVE at [sales/sl060.cbl:L668], [sales/sl060.cbl:L877] and
+    #  [sales/sl100.cbl:L350]. Neither program copies this copybook directly:
+    #  both copy [copybooks/slwsoi3.cob] - at [sales/sl060.cbl:L279] and
+    #  [sales/sl100.cbl:L219] - and that copybook itself copies this one under
+    #  a REPLACING clause at [copybooks/slwsoi3.cob:L18], so these two
+    #  declarations reach the programs transitively. [copybooks/slwssoi.cob],
+    #  also copied by [sales/sl060.cbl:L280], declares the SAME two conditions
+    #  under different names - `si-s-open` and `si-s-closed`
+    #  [copybooks/slwssoi.cob:L49-L50] - and is not one of the thirteen
+    #  copybooks the dictionary reports, so it contributes no registry row.
+    # =========================================================================
+    #
+    # --- 03  OI-Status  pic 9.  [slwsoi.cob:L47] -----------------------------
+    _spec(
+        "S-Open", ("zero",), _FIG, "OI-Status", _SLWSOI, 48, 0,
+        "Figurative constant; reads as 0. Declared identically at "
+        "[copybooks/plwsoi.cob:L54] on a same-named carrier, which is why the "
+        "two are told apart by locator rather than by name.",
+    ),
+    _spec(
+        "S-Closed", ("1",), _SINGLE, "OI-Status", _SLWSOI, 49, 1,
+        'Trailing comment "Paid". LIVE at [sales/sl060.cbl:L668], '
+        "[sales/sl060.cbl:L877] and [sales/sl100.cbl:L350], reached through "
+        "the nested COPY at [copybooks/slwsoi3.cob:L18]. Declared again at "
+        "[copybooks/plwsoi.cob:L55] with the same value, and that one is LIVE "
+        "in the purchase programs.",
+    ),
+    # =========================================================================
+    #  copybooks/plwspinv.cob - 12 rows. The purchase invoice header and lines.
+    #  Its NAMES match copybooks/slwsinv2.cob's and its VALUES match
+    #  copybooks/slwsinv.cob's - two literals per status clause, upper case
+    #  first, except `il-analyised`, which flips. Its `ih-Freq` sits inside a
+    #  plain GROUP, `05 ih-order.` at [copybooks/plwspinv.cob:L17], not a
+    #  `filler redefines` as both sales copybooks use. `applied`,
+    #  `ih-analyised` and `il-analyised` are LIVE at [purchase/pl055.cbl:L365],
+    #  [purchase/pl055.cbl:L370] and [purchase/pl055.cbl:L314].
+    # =========================================================================
+    #
+    # --- 07  ih-Freq  pic x.  [plwspinv.cob:L18] -----------------------------
+    _spec("ih-Yearly", ('"Y"',), _ALNUM, "ih-Freq", _PLWSPINV, 19, 0),
+    _spec("ih-Monthly", ('"M"',), _ALNUM, "ih-Freq", _PLWSPINV, 20, 1),
+    _spec("ih-Quarterly", ('"Q"',), _ALNUM, "ih-Freq", _PLWSPINV, 21, 2),
+    _spec(
+        "ih-Daily", ('"D"',), _ALNUM, "ih-Freq", _PLWSPINV, 22, 3,
+        'SHARES the value "D" with `ih-Testing` on the next line, with the '
+        "maintainer's testing-only comments, exactly as "
+        "[copybooks/slwsinv2.cob:L52-L53] does.",
+    ),
+    _spec(
+        "ih-Testing", ('"D"',), _ALNUM, "ih-Freq", _PLWSPINV, 23, 4,
+        'The second of the two "D" declarations; see `ih-Daily` above.',
+    ),
+    _spec(
+        "ih-Valid-Freqs", ('"Y"', '"M"', '"Q"', '"D"'), _ALIST,
+        "ih-Freq", _PLWSPINV, 24, 5,
+        'Includes the testing-only "D". The maintainer\'s trailing comment '
+        'here reads "LAst one for TESTING ONLY so remove after" - the '
+        "transposed capitals and the missing \"D,\" are his, and the comment "
+        "is not data, so only the value clause is transcribed.",
+    ),
+    #
+    # --- 05  ih-status  pic x.  [plwspinv.cob:L40] ---------------------------
+    _spec(
+        "pending", ('"P"', '"p"'), _ALIST, "ih-status", _PLWSPINV, 41, 0,
+        "Two literals, upper case first - the same clause as "
+        "[copybooks/slwsinv.cob:L53], and the reverse case order of "
+        "[copybooks/plwspinv2.cob:L41].",
+    ),
+    _spec(
+        "invoiced", ('"I"', '"i"'), _ALIST, "ih-status", _PLWSPINV, 42, 1,
+        "Two literals, upper case first.",
+    ),
+    _spec(
+        "applied", ('"Z"', '"z"'), _ALIST, "ih-status", _PLWSPINV, 43, 2,
+        "Two literals, upper case first. LIVE at [purchase/pl055.cbl:L365].",
+    ),
+    #
+    # --- 05  ih-day-book-flag  pic x  value space.  [plwspinv.cob:L50] -------
+    _spec(
+        "day-booked", ('"B"', '"b"'), _ALIST,
+        "ih-day-book-flag", _PLWSPINV, 51, 0,
+        "The frozen line carries a space before its full stop - "
+        '`values "B" "b" .` - which is whitespace to the compiler and is not '
+        "part of the clause, so the tokens are transcribed without it.",
+    ),
+    #
+    # --- 05  ih-update  pic x.  [plwspinv.cob:L52] ---------------------------
+    _spec(
+        "ih-analyised", ('"Z"', '"z"'), _ALIST,
+        "ih-update", _PLWSPINV, 53, 0,
+        "Two literals, upper case first. LIVE at [purchase/pl055.cbl:L365] "
+        "and [purchase/pl055.cbl:L370].",
+    ),
+    #
+    # --- 05  il-update  pic x.  [plwspinv.cob:L82] ---------------------------
+    _spec(
+        "il-analyised", ('"z"', '"Z"'), _ALIST,
+        "il-update", _PLWSPINV, 83, 0,
+        "LOWER case first, unlike every other clause in this copybook, with "
+        'the maintainer\'s own trailing comment "using Z hopefully" recording '
+        "his uncertainty about which case the data carries. Reproduced as "
+        "declared (rule R-4). LIVE at [purchase/pl055.cbl:L314].",
+    ),
+    # =========================================================================
+    #  copybooks/plwspinv2.cob - 6 rows. The second purchase invoice layout,
+    #  and the only copybook in which EVERY clause lists lower case first. It
+    #  declares no `ih-Freq` group at all, so its six rows are the status,
+    #  day-book and analysis flags only.
+    # =========================================================================
+    #
+    # --- 03  ih-status  pic x.  [plwspinv2.cob:L40] --------------------------
+    _spec(
+        "pending", ('"p"', '"P"'), _ALIST, "ih-status", _PLWSPINV2, 41, 0,
+        "LOWER case first, the reverse of [copybooks/plwspinv.cob:L41] and "
+        "[copybooks/slwsinv.cob:L53]. Which values match is unaffected; the "
+        "ORDER is the frozen source's and rule R-4 keeps it.",
+    ),
+    _spec(
+        "invoiced", ('"i"', '"I"'), _ALIST, "ih-status", _PLWSPINV2, 42, 1,
+        "Lower case first.",
+    ),
+    _spec(
+        "applied", ('"z"', '"Z"'), _ALIST, "ih-status", _PLWSPINV2, 43, 2,
+        "Lower case first.",
+    ),
+    #
+    # --- 03  ih-day-book-flag  pic x.  [plwspinv2.cob:L50] -------------------
+    _spec(
+        "day-booked", ('"b"', '"B"'), _ALIST,
+        "ih-day-book-flag", _PLWSPINV2, 51, 0,
+        "Lower case first, and no `value space` initialisation on the carrier.",
+    ),
+    #
+    # --- 03  ih-update  pic x.  [plwspinv2.cob:L52] --------------------------
+    _spec(
+        "ih-analyised", ('"z"', '"Z"'), _ALIST,
+        "ih-update", _PLWSPINV2, 53, 0, "Lower case first.",
+    ),
+    #
+    # --- 03  il-update  pic x.  [plwspinv2.cob:L71] --------------------------
+    _spec(
+        "il-analyised", ('"z"', '"Z"'), _ALIST,
+        "il-update", _PLWSPINV2, 72, 0,
+        "Lower case first - agreeing with [copybooks/plwspinv.cob:L83], which "
+        "is the one clause in THAT copybook to do so.",
+    ),
+    # =========================================================================
+    #  copybooks/plwsoi.cob - 3 rows. The purchase open-item hold flag and
+    #  status. `S-Closed` is LIVE at [purchase/pl060.cbl:L594],
+    #  [purchase/pl060.cbl:L799] and [purchase/pl100.cbl:L342].
+    #  [purchase/pl060.cbl:L152] copies this copybook directly;
+    #  [purchase/pl100.cbl:L213] copies [copybooks/plwsoi5C.cob], which copies
+    #  this one under a REPLACING clause at [copybooks/plwsoi5C.cob:L19], so
+    #  pl100 reaches these declarations transitively.
+    #  [copybooks/plwssoi.cob], copied at [purchase/pl060.cbl:L153], declares
+    #  the same two conditions as `si-s-open` and `si-s-closed`
+    #  [copybooks/plwssoi.cob:L52-L53]; it is not one of the thirteen copybooks
+    #  the dictionary reports, so it contributes no registry row.
+    #  [copybooks/plwsoi5B.cob], copied at [purchase/pl060.cbl:L147], declares
+    #  no condition names at all.
+    # =========================================================================
+    #
+    # --- 03  OI-hold-flag  pic x.  [plwsoi.cob:L38] --------------------------
+    _spec(
+        "payment-held", ('"H"',), _ALNUM, "OI-hold-flag", _PLWSOI, 39, 0,
+        "The purchase side's payment hold. It has no sales counterpart: "
+        "copybooks/slwsoi.cob declares no hold flag at all.",
+    ),
+    #
+    # --- 03  OI-Status  pic 9.  [plwsoi.cob:L53] -----------------------------
+    _spec(
+        "S-Open", ("zero",), _FIG, "OI-Status", _PLWSOI, 54, 0,
+        "Figurative constant; reads as 0. The same name, carrier and value as "
+        "[copybooks/slwsoi.cob:L48], which is why identity here is the "
+        "declaration rather than the name.",
+    ),
+    _spec(
+        "S-Closed", ("1",), _SINGLE, "OI-Status", _PLWSOI, 55, 1,
+        "LIVE at [purchase/pl060.cbl:L594], [purchase/pl060.cbl:L799] and "
+        "[purchase/pl100.cbl:L342] - the last reached through the nested COPY "
+        "at [copybooks/plwsoi5C.cob:L19]. Its sales twin at "
+        "[copybooks/slwsoi.cob:L49] carries the trailing comment \"Paid\"; "
+        "this line carries none.",
+    ),
+    # =========================================================================
+    #  copybooks/irswsnl.cob - 2 rows. The IRS nominal account type, and the
+    #  only two declarations in the registry written with the `value IS`
+    #  spelling. BOTH are LIVE: [common/acasirsub1.cbl:L577] and
+    #  [common/acasirsub1.cbl:L616] test `Owner`, and
+    #  [common/acasirsub1.cbl:L414] and [common/acasirsub1.cbl:L506] test `Sub`.
+    # =========================================================================
+    #
+    # --- 03  NL-Type  pic x.  [irswsnl.cob:L12] ------------------------------
+    _spec(
+        "Owner", ('"O"',), _ALNUM, "NL-Type", _IRSWSNL, 13, 0,
+        "Declared `value is \"O\"`. The optional `IS` is noise words to the "
+        "compiler and carries no meaning, so `value_clause_text` renders "
+        "`\"O\"` and matches the generated dictionary, which records the "
+        "clause the same way. LIVE at [common/acasirsub1.cbl:L577] and "
+        "[common/acasirsub1.cbl:L616].",
+    ),
+    _spec(
+        "Sub", ('"S"',), _ALNUM, "NL-Type", _IRSWSNL, 14, 1,
+        "Declared `value is \"S\"`. LIVE at [common/acasirsub1.cbl:L414] and "
+        "[common/acasirsub1.cbl:L506]. Its three-letter name is a substring of "
+        "many identifiers, `WS-Sub-Function` among them, so a search for it "
+        "needs word boundaries - which is why the liveness check that found "
+        "these call sites used them.",
+    ),
+    # =========================================================================
+    #  copybooks/Test-Data-Flags.cob - 2 rows. The two DAL logging switches,
+    #  present in every ACAS module per the copybook's own header. `Testing-1`
+    #  is the most widely tested condition name in the whole registry: every
+    #  file handler gates its logging on it, for example
+    #  [common/acas000.cbl:L495] and [common/acas000.cbl:L546].
+    # =========================================================================
+    #
+    # --- 03  SW-Testing  pic 9  value 1.  [Test-Data-Flags.cob:L10] ----------
+    _spec(
+        "Testing-1", ("1",), _SINGLE, "SW-Testing", _TESTFLAGS, 11, 0,
+        "Its conditional variable is initialised to 1 in the FROZEN copybook, "
+        "with the maintainer's own alternative `zero` sitting beside it as a "
+        "trailing comment, so file-handler logging is ON by default and cannot "
+        "be turned off without editing a frozen file. That is a reproduced "
+        "condition, not a defect to repair (rule R-4): the header at "
+        "[copybooks/Test-Data-Flags.cob:L3-L4] says to set it to zero when "
+        "testing is complete, and it was not. LIVE in every handler, e.g. "
+        "[common/acas000.cbl:L495] and [common/acas000.cbl:L546].",
+    ),
+    #
+    # --- 03  SW-Testing-2  pic 9  value zero.  [Test-Data-Flags.cob:L15] -----
+    _spec(
+        "Testing-2", ("1",), _SINGLE, "SW-Testing-2", _TESTFLAGS, 16, 0,
+        "The second switch, whose carrier IS initialised to zero, so this one "
+        "is off by default - the asymmetry with `SW-Testing` is the frozen "
+        "source's. The copybook's comment at "
+        "[copybooks/Test-Data-Flags.cob:L13] describes it as for displays of "
+        "`ws-where` and similar.",
+    ),
 )
 
 
 # =============================================================================
+#  DERIVING A UNIQUE PREDICATE NAME FOR EVERY DECLARATION
+# =============================================================================
+
+
+def _copybook_stem(copybook: str) -> str:
+    """The identifier-safe stem of a copybook path, for disambiguating a name.
+
+    `copybooks/slwsinv2.cob` yields `slwsinv2` and
+    `copybooks/Test-Data-Flags.cob` yields `test_data_flags`, so a predicate name
+    built from it is a valid Python identifier in lower case, matching the
+    `is_<name>` convention the rest of the module uses.
+
+    Args:
+        copybook: The copybook's repository-relative path.
+
+    Returns:
+        Its file stem, folded and with every non-alphanumeric character turned
+        into an underscore.
+    """
+    stem = copybook.rsplit("/", 1)[-1]
+    if stem.endswith(".cob"):
+        stem = stem[: -len(".cob")]
+    return "".join(
+        character if character.isalnum() else "_" for character in stem
+    ).casefold()
+
+
+def _with_predicate_names(
+    rows: tuple[ConditionNameSpec, ...],
+) -> tuple[ConditionNameSpec, ...]:
+    """Fill in each row's `predicate_name`, guaranteeing uniqueness.
+
+    Uniqueness is a property of the whole registry, so it cannot be settled row
+    by row inside `_spec`. This makes one pass to count how often each FOLDED
+    COBOL name occurs and a second to name the rows:
+
+        occurs once   `predicate_name` is `python_name` unchanged, so all of the
+                      established predicate names are exactly what they were.
+        occurs twice
+        or more       `python_name + "_" + <copybook stem>`, so
+                      `is_pending_slwsinv`, `is_pending_slwsinv2`,
+                      `is_pending_plwspinv` and `is_pending_plwspinv2` are four
+                      distinct predicates over four distinct value sets.
+
+    That suffix is sufficient because no condition name is declared twice within
+    one copybook - `BY_LOCATOR` and the module's own tests assert it - and it is
+    the right suffix because the copybook is what actually distinguishes the
+    declarations a reader is trying to tell apart.
+
+    Rows are returned in the SAME ORDER they came in (rule R-6), rebuilt with
+    `dataclasses.replace` so nothing is mutated in place.
+
+    Args:
+        rows: The registry rows, in registry order, with `predicate_name` empty.
+
+    Returns:
+        The same rows in the same order, each carrying a unique
+        `predicate_name`.
+    """
+    occurrences: dict[str, int] = dict()
+    for row in rows:
+        folded = row.cobol_name.casefold()
+        occurrences[folded] = occurrences.get(folded, 0) + 1
+    return tuple(
+        dataclasses.replace(
+            row,
+            predicate_name=(
+                row.python_name
+                if occurrences[row.cobol_name.casefold()] == 1
+                else row.python_name + "_" + _copybook_stem(row.copybook)
+            ),
+        )
+        for row in rows
+    )
+
+
+# The published registry: the rows above, each carrying a unique
+# `predicate_name`. Everything downstream walks THIS tuple.
+CONDITION_NAMES: Final[tuple[ConditionNameSpec, ...]] = _with_predicate_names(
+    _REGISTRY_ROWS
+)
+
+
 #  LOOKUP AND ORDERED ACCESS
-# =============================================================================
 
-# Keyed by the EXACT COBOL spelling, so a name copied out of a copybook finds
-# its row. A read-only proxy over an insertion-ordered dictionary: a caller can
-# read it and cannot reorder, extend or mutate it, and its order is
-# `CONDITION_NAMES`'s order (rule R-6).
+# Every declaration of a name, keyed by the EXACT COBOL spelling. THE PRIMARY
+# INDEX, because a name does not identify a declaration: fourteen names are
+# declared in more than one copybook with different value clauses, so the honest
+# answer to "what is `pending`?" is a tuple of four rows, not one of them chosen
+# silently. A read-only proxy over an insertion-ordered dictionary, and each
+# tuple is in registry order (rule R-6).
+SPECS_BY_COBOL_NAME: Final[Mapping[str, tuple[ConditionNameSpec, ...]]] = (
+    types.MappingProxyType(
+        {
+            name: tuple(
+                spec for spec in CONDITION_NAMES if spec.cobol_name == name
+            )
+            for name in dict.fromkeys(
+                spec.cobol_name for spec in CONDITION_NAMES
+            )
+        }
+    )
+)
+
+# The names declared MORE THAN ONCE, each against its declarations, in registry
+# order. Published rather than left implicit so that the collision is a
+# documented property of the frozen source a caller can enumerate, and so a test
+# can assert the count (rule R-5). Fourteen names, thirty-seven declarations.
+DUPLICATED_COBOL_NAMES: Final[Mapping[str, tuple[ConditionNameSpec, ...]]] = (
+    types.MappingProxyType(
+        {
+            name: specs
+            for name, specs in SPECS_BY_COBOL_NAME.items()
+            if len(specs) > 1
+        }
+    )
+)
+
+# Keyed by the EXACT COBOL spelling for the names declared EXACTLY ONCE, so a
+# name copied out of a copybook finds its row when - and only when - that row is
+# the unambiguous answer. Every one of the 122 unambiguous names is here,
+# including all of the operation, batch, system and sales-ledger vocabularies
+# the rest of the migration is written against; the fourteen ambiguous names are
+# deliberately ABSENT, because publishing one arbitrary declaration of `pending`
+# under that key is precisely the collapse this registry must not perform. Reach
+# them through `SPECS_BY_COBOL_NAME`, or through `lookup` with a `copybook=`.
 BY_COBOL_NAME: Final[Mapping[str, ConditionNameSpec]] = types.MappingProxyType(
-    {spec.cobol_name: spec for spec in CONDITION_NAMES}
+    {
+        name: specs[0]
+        for name, specs in SPECS_BY_COBOL_NAME.items()
+        if len(specs) == 1
+    }
 )
 
-# The same rows keyed by their derived predicate name, for a caller holding the
-# Python side of the mapping - `dal/status.py` generating member names, or
-# docs/migration/traceability.md rendering the two columns side by side.
+# The same unambiguous rows keyed by their derived predicate name, for a caller
+# holding the Python side of the mapping - `dal/status.py` generating member
+# names, or docs/migration/traceability.md rendering the two columns side by
+# side. For an unambiguous row `python_name` and `predicate_name` are equal, so
+# this index is keyed on either.
 BY_PYTHON_NAME: Final[Mapping[str, ConditionNameSpec]] = types.MappingProxyType(
-    {spec.python_name: spec for spec in CONDITION_NAMES}
+    {spec.python_name: spec for spec in BY_COBOL_NAME.values()}
 )
 
-# A case-insensitive index, private because the PUBLISHED key is the exact
-# spelling. COBOL is case-insensitive about names, so `lookup` accepts
-# `STATUS-OPEN` and `status-open` as well; but the registry must not appear to
-# have two spellings of one row, so this stays behind the accessor.
+# EVERY row keyed by its locator, which is unique across all 159 - one `88` per
+# line. The index that identifies a DECLARATION rather than a name, and the one
+# a traceability document walks.
+BY_LOCATOR: Final[Mapping[str, ConditionNameSpec]] = types.MappingProxyType(
+    {spec.locator: spec for spec in CONDITION_NAMES}
+)
+
+# A case-insensitive index over the unambiguous names, private because the
+# PUBLISHED key is the exact spelling. COBOL is case-insensitive about names, so
+# `lookup` accepts `STATUS-OPEN` and `status-open` as well; but the registry must
+# not appear to have two spellings of one row, so this stays behind the accessor.
 _BY_FOLDED_NAME: Final[Mapping[str, ConditionNameSpec]] = types.MappingProxyType(
-    {spec.cobol_name.casefold(): spec for spec in CONDITION_NAMES}
+    {
+        spec.cobol_name.casefold(): spec
+        for spec in BY_COBOL_NAME.values()
+    }
+)
+
+# Every declaration keyed by its FOLDED name, so a case-insensitive lookup of an
+# ambiguous name can report all of its locators rather than merely failing.
+_SPECS_BY_FOLDED_NAME: Final[Mapping[str, tuple[ConditionNameSpec, ...]]] = (
+    types.MappingProxyType(
+        {
+            folded: tuple(
+                spec
+                for spec in CONDITION_NAMES
+                if spec.cobol_name.casefold() == folded
+            )
+            for folded in dict.fromkeys(
+                spec.cobol_name.casefold() for spec in CONDITION_NAMES
+            )
+        }
+    )
 )
 
 # The per-copybook composition, published as data so the count can be checked
-# rather than trusted: 30 + 8 + 60 + 8 = 106. Built by walking
-# `CONDITION_NAMES` in order, so the copybooks appear in the order the registry
-# introduces them.
+# rather than trusted: 30 + 8 + 60 + 8 + 2 + 12 + 12 + 2 + 12 + 6 + 3 + 2 + 2
+# = 159. Built by walking `CONDITION_NAMES` in order, so the copybooks appear in
+# the order the registry introduces them.
 COUNTS_BY_COPYBOOK: Final[Mapping[str, int]] = types.MappingProxyType(
     {
         copybook: sum(
@@ -1481,63 +2126,188 @@ COUNTS_BY_COPYBOOK: Final[Mapping[str, int]] = types.MappingProxyType(
     }
 )
 
-# The number of condition names declared on `Fs-Reply`, measured rather than
-# assumed. `03 Fs-Reply pic 99.` at [copybooks/wsfnctn.cob:L25] carries no `88`
+# The number of condition names declared on `Fs-Reply`, read from the frozen
+# file. `03 Fs-Reply pic 99.` at [copybooks/wsfnctn.cob:L25] carries no `88`
 # anywhere in the frozen tree; its 0 / 10 / 21 / 22 / 23 / 99 value set belongs
 # to `dal/status.py` per Agent Action Plan section 0.4.1.5. Published so the
-# absence reads as verified rather than overlooked, and so a test can assert it
-# (rules R-3, R-5).
+# absence reads as deliberate rather than overlooked, and so a test can assert
+# it (rules R-3, R-5).
 FS_REPLY_CONDITION_NAME_COUNT: Final[int] = 0
 
 
-def lookup(cobol_name: str) -> ConditionNameSpec:
-    """Find one row by its COBOL condition name.
+def specs_for_name(
+    cobol_name: str,
+    *,
+    copybook: str | None = None,
+    conditional_variable: str | None = None,
+) -> tuple[ConditionNameSpec, ...]:
+    """Every declaration of one condition name, narrowed by copybook or carrier.
+
+    The honest primitive the rest of the lookup surface is built on: a name may
+    have several declarations with different value clauses, so this returns all
+    of the matches and lets the caller say which it meant.
+
+    Matching on the name is case-INSENSITIVE, because COBOL is: a caller reading
+    `status-open` out of [general/gl070.cbl:L314] finds `Status-Open` as declared
+    at [copybooks/wsbatch.cob:L26]. The two narrowing arguments match the same
+    way, so `conditional_variable="IH-STATUS"` finds `ih-status`.
+
+    Args:
+        cobol_name: The condition name, in any casing.
+        copybook: Optionally, the declaring copybook's repository-relative path,
+            in any casing - `"copybooks/slwsinv2.cob"`.
+        conditional_variable: Optionally, the owning field's COBOL name, in any
+            casing - `"sih-status"`.
+
+    Returns:
+        The matching declarations in registry order, or an empty tuple. Empty is
+        a real answer here, not an error - `find` and `is_declared` are built on
+        it.
+    """
+    probe = cobol_name.casefold()
+    matches = _SPECS_BY_FOLDED_NAME.get(probe, ())
+    if copybook is not None:
+        wanted_file = copybook.casefold()
+        matches = tuple(
+            spec for spec in matches if spec.copybook.casefold() == wanted_file
+        )
+    if conditional_variable is not None:
+        wanted_carrier = conditional_variable.casefold()
+        matches = tuple(
+            spec
+            for spec in matches
+            if spec.conditional_variable.casefold() == wanted_carrier
+        )
+    return matches
+
+
+def lookup(
+    cobol_name: str,
+    *,
+    copybook: str | None = None,
+    conditional_variable: str | None = None,
+) -> ConditionNameSpec:
+    """Find ONE row by its COBOL condition name, unambiguously.
 
     The exact spelling is tried first, then a case-insensitive match, because
     COBOL is case-insensitive about names and a caller reading
     [general/gl070.cbl:L314] finds `status-open` in lower case while
     [copybooks/wsbatch.cob:L26] declares `Status-Open`. Both reach the same row.
 
+    AN AMBIGUOUS NAME IS REFUSED, NOT GUESSED. Fourteen names are declared in
+    more than one copybook with different value clauses, so `lookup("pending")`
+    has four candidate answers and no basis for choosing between them. It raises,
+    listing the locators, and `copybook=` or `conditional_variable=` settles it:
+
+        lookup("pending", copybook="copybooks/slwsinv2.cob")
+
+    That refusal is the whole point of the identity design. Returning the first
+    declaration would make `is_pending` mean whichever copybook happens to be
+    transcribed earliest, and a program module testing a purchase invoice would
+    silently get a sales invoice's value set.
+
     Args:
         cobol_name: The condition name, in any casing.
+        copybook: Optionally, the declaring copybook's repository-relative path,
+            to pick between declarations of one name.
+        conditional_variable: Optionally, the owning field's COBOL name, for the
+            same purpose.
 
     Returns:
         Its row.
 
     Raises:
-        KeyError: No row of that name. This is a PROGRAMMER error - a name that
-            does not exist in the frozen copybooks - and no data value can
-            cause it. Contrast `evaluate`, which returns False for a value that
-            matches nothing (rule R-3).
+        KeyError: No row of that name, or several and no way to tell which was
+            meant. Both are PROGRAMMER errors - a name that does not exist in the
+            frozen copybooks, or a question that has more than one answer - and
+            no data value can cause either. Contrast `evaluate`, which returns
+            False for a value that matches nothing (rule R-3).
     """
-    found = BY_COBOL_NAME.get(cobol_name)
-    if found is not None:
-        return found
-    folded = _BY_FOLDED_NAME.get(cobol_name.casefold())
-    if folded is not None:
-        return folded
-    raise KeyError(_unknown_name_message(cobol_name))
+    if copybook is None and conditional_variable is None:
+        found = BY_COBOL_NAME.get(cobol_name)
+        if found is not None:
+            return found
+        folded = _BY_FOLDED_NAME.get(cobol_name.casefold())
+        if folded is not None:
+            return folded
+
+    matches = specs_for_name(
+        cobol_name,
+        copybook=copybook,
+        conditional_variable=conditional_variable,
+    )
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise KeyError(
+            _unknown_name_message(
+                cobol_name,
+                copybook=copybook,
+                conditional_variable=conditional_variable,
+            )
+        )
+    raise KeyError(_ambiguous_name_message(cobol_name, matches))
 
 
-def find(cobol_name: str) -> ConditionNameSpec | None:
+def find(
+    cobol_name: str,
+    *,
+    copybook: str | None = None,
+    conditional_variable: str | None = None,
+) -> ConditionNameSpec | None:
     """Find one row by its COBOL condition name, or None.
 
     The non-raising companion to `lookup`, for a caller probing whether a name
     is declared at all - a traceability report walking names harvested from
     program source, for instance.
 
+    An AMBIGUOUS name returns None rather than a guess, for the same reason
+    `lookup` raises: there is no single row to return. Use `specs_for_name` to
+    see all of them, or `is_declared` to ask only whether the name exists.
+
+    Args:
+        cobol_name: The condition name, in any casing.
+        copybook: Optionally, the declaring copybook's repository-relative path.
+        conditional_variable: Optionally, the owning field's COBOL name.
+
+    Returns:
+        Its row, or None when the registry declares no such name or declares
+        several and none was singled out.
+    """
+    if copybook is None and conditional_variable is None:
+        found = BY_COBOL_NAME.get(cobol_name)
+        if found is not None:
+            return found
+    matches = specs_for_name(
+        cobol_name,
+        copybook=copybook,
+        conditional_variable=conditional_variable,
+    )
+    return matches[0] if len(matches) == 1 else None
+
+
+def is_declared(cobol_name: str) -> bool:
+    """Whether the frozen copybooks declare a condition name of this name at all.
+
+    The pure existence probe, which `find` cannot serve because `find` returns
+    None for an ambiguous name that certainly does exist. A traceability report
+    harvesting names from program source wants this question, not `find`'s.
+
     Args:
         cobol_name: The condition name, in any casing.
 
     Returns:
-        Its row, or None when the registry declares no such name.
+        True when at least one declaration carries that name.
     """
-    return BY_COBOL_NAME.get(cobol_name) or _BY_FOLDED_NAME.get(
-        cobol_name.casefold()
-    )
+    return bool(_SPECS_BY_FOLDED_NAME.get(cobol_name.casefold(), ()))
 
 
-def _unknown_name_message(cobol_name: str) -> str:
+def _unknown_name_message(
+    cobol_name: str,
+    *,
+    copybook: str | None = None,
+    conditional_variable: str | None = None,
+) -> str:
     """Explain an unknown condition name and offer the nearest spellings.
 
     Near misses are found by a plain substring test rather than an edit
@@ -1549,6 +2319,10 @@ def _unknown_name_message(cobol_name: str) -> str:
 
     Args:
         cobol_name: The name that was not found.
+        copybook: The copybook the caller narrowed to, if any. Named in the
+            message, because a name that exists but not in THAT file is a
+            different mistake from a name that does not exist at all.
+        conditional_variable: The carrier the caller narrowed to, if any.
 
     Returns:
         A message naming what was asked for, how many rows exist, and any near
@@ -1561,24 +2335,89 @@ def _unknown_name_message(cobol_name: str) -> str:
         if probe in spec.cobol_name.casefold()
         or spec.cobol_name.casefold() in probe
     )
+    narrowed = ""
+    if copybook is not None or conditional_variable is not None:
+        elsewhere = _SPECS_BY_FOLDED_NAME.get(cobol_name.casefold(), ())
+        narrowed = (
+            " The search was narrowed to "
+            + (("copybook " + repr(copybook)) if copybook is not None else "")
+            + (
+                " and " if copybook is not None
+                and conditional_variable is not None else ""
+            )
+            + (
+                ("conditional variable " + repr(conditional_variable))
+                if conditional_variable is not None else ""
+            )
+            + "."
+        )
+        if elsewhere:
+            narrowed = narrowed + (
+                " The name IS declared, at "
+                + ", ".join(spec.locator for spec in elsewhere)
+                + "; `SPECS_BY_COBOL_NAME` lists every declaration."
+            )
     opening = (
         "No 88-level condition name " + repr(cobol_name) + " is declared in "
         "the frozen copybooks this registry transcribes. It holds "
         + str(len(CONDITION_NAMES))
         + " condition names from "
         + str(len(COUNTS_BY_COPYBOOK))
-        + " copybooks; `BY_COBOL_NAME` lists every one under its exact COBOL "
-        "spelling."
+        + " copybooks; `SPECS_BY_COBOL_NAME` lists every one under its exact "
+        "COBOL spelling."
     )
     if not near:
         return (
-            opening + " Nothing similar was found. Adding a condition name the "
+            opening + narrowed
+            + " Nothing similar was found. Adding a condition name the "
             "copybooks do not declare is forbidden by rule R-3."
         )
-    return opening + " Did you mean: " + ", ".join(near[:8]) + "?"
+    return opening + narrowed + " Did you mean: " + ", ".join(near[:8]) + "?"
 
 
-def values_for(cobol_name: str) -> tuple[str, ...]:
+def _ambiguous_name_message(
+    cobol_name: str, matches: tuple[ConditionNameSpec, ...]
+) -> str:
+    """Explain that a name has several declarations and how to pick one.
+
+    Every candidate is named with its locator, its value clause and its carrier,
+    because the value clauses are what differ and are therefore what the caller
+    has to choose between. Candidates are listed in registry order, so the
+    message is reproducible (rule R-6).
+
+    Args:
+        cobol_name: The ambiguous name as the caller spelled it.
+        matches: Its declarations, in registry order.
+
+    Returns:
+        A message naming every candidate and the two ways to disambiguate.
+    """
+    candidates = "; ".join(
+        spec.cobol_name + " " + spec.value_clause_text
+        + " on " + spec.conditional_variable + " [" + spec.locator + "]"
+        for spec in matches
+    )
+    return (
+        "The condition name " + repr(cobol_name) + " is declared "
+        + str(len(matches))
+        + " times in the frozen copybooks, with value clauses that differ, so "
+        "there is no single row to return: " + candidates + ". Say which by "
+        "passing copybook= or conditional_variable=, or take them all from "
+        "`SPECS_BY_COBOL_NAME`. Returning one of them silently would make the "
+        "name mean whichever copybook this registry happens to transcribe "
+        "first, which is the collapse rule R-4 forbids. COBOL meets the same "
+        "problem and answers it the same way - anomaly A-21 records that "
+        "field-name collisions force QUALIFIED references at "
+        "[general/gl070.cbl:L510]; `qualified_cobol_name` renders that form."
+    )
+
+
+def values_for(
+    cobol_name: str,
+    *,
+    copybook: str | None = None,
+    conditional_variable: str | None = None,
+) -> tuple[str, ...]:
     """The value tokens of one condition name, in declaration order.
 
     Published for `dal/status.py`, which builds its call-site enumerations from
@@ -1588,16 +2427,25 @@ def values_for(cobol_name: str) -> tuple[str, ...]:
 
     Args:
         cobol_name: The condition name, in any casing.
+        copybook: Optionally, the declaring copybook, to pick between
+            declarations of one name.
+        conditional_variable: Optionally, the owning field's COBOL name, for the
+            same purpose.
 
     Returns:
         Its tokens as `str`, in declaration order. `("1", "2", "4")` for
         `OS-Single`; `('"Y"',)` for `IRS-Used`; `("0", "1")` for the bounds of
-        `FS-Valid-Options`.
+        `FS-Valid-Options`; `('"P"', '"p"')` for `pending` in
+        `copybooks/slwsinv.cob`.
 
     Raises:
-        KeyError: No row of that name.
+        KeyError: No row of that name, or several and none singled out.
     """
-    return lookup(cobol_name).values
+    return lookup(
+        cobol_name,
+        copybook=copybook,
+        conditional_variable=conditional_variable,
+    ).values
 
 
 def specs_for_variable(cobol_variable_name: str) -> tuple[ConditionNameSpec, ...]:
@@ -1640,7 +2488,7 @@ def specs_for_copybook(copybook: str) -> tuple[ConditionNameSpec, ...]:
 
     Returns:
         Its condition names in file order, or an empty tuple when the registry
-        transcribes no such copybook. `COUNTS_BY_COPYBOOK` names the four it
+        transcribes no such copybook. `COUNTS_BY_COPYBOOK` names the thirteen it
         does.
     """
     return tuple(spec for spec in CONDITION_NAMES if spec.copybook == copybook)
@@ -1660,9 +2508,7 @@ def conditional_variables() -> tuple[str, ...]:
     )
 
 
-# =============================================================================
 #  THE ONE GENERIC PREDICATE
-# =============================================================================
 
 
 def evaluate(
@@ -1670,15 +2516,16 @@ def evaluate(
     value: int | str | decimal.Decimal,
     *,
     descriptor: FieldDescriptor | None = None,
+    copybook: str | None = None,
+    conditional_variable: str | None = None,
 ) -> bool:
     """Whether one value satisfies one 88-level condition name.
 
-    This is the whole of the module's behaviour; every named predicate below is
-    a thin wrapper over it. It answers a question and takes no decision - what
-    to do about a True or a False belongs to `acas_posting.programs`.
+    This is the whole of the module's behaviour; every named predicate below is a
+    thin wrapper over it. It answers a question and takes no decision - what to do
+    about a True or a False belongs to the program layer.
 
     HOW THE COMPARISON IS MADE
-    --------------------------
     The shape of the declaration chooses the comparison, so nothing here is a
     judgement call:
 
@@ -1691,9 +2538,14 @@ def evaluate(
                           staying recorded as written. `SINGLE`, `FIGURATIVE`
                           and `VALUE_LIST` test membership; `THRU_RANGE` tests
                           `lower <= value <= upper`, inclusive on BOTH bounds.
-        ALPHANUMERIC      Both sides are space-padded on the right to a common
+        text shapes       Both sides are space-padded on the right to a common
                           width and compared character for character. The
                           literal's delimiters are not part of its value.
+                          `ALPHANUMERIC` has one literal; `ALPHANUMERIC_LIST`
+                          tests membership over ALL of its literals, so
+                          `pending` [copybooks/slwsinv.cob:L53] holds for "P"
+                          and for "p" while `pending`
+                          [copybooks/slwsinv2.cob:L72] holds for "P" alone.
 
     A GAPPED list stays gapped. `OS-Single` [copybooks/wssystem.cob:L109] holds
     for 1, 2 and 4 and NOT for 3, because membership is tested against the
@@ -1739,8 +2591,14 @@ def evaluate(
             variable. Used only for an alphanumeric comparison, to supply the
             declared field width COBOL would pad to. Every alphanumeric
             conditional variable in the in-scope layouts is `pic x`, one
-            character wide, so passing it changes no answer for any of the 24 -
+            character wide, so passing it changes no answer for any of them -
             it is honoured so that a wider field would behave correctly too.
+        copybook: Optionally, the declaring copybook, used only when
+            `spec_or_name` is a NAME and that name has several declarations.
+            Ignored when a row was passed, because a row is already one
+            declaration.
+        conditional_variable: Optionally, the owning field's COBOL name, for the
+            same purpose.
 
     Returns:
         True when the condition name holds for that value, otherwise False.
@@ -1748,7 +2606,8 @@ def evaluate(
     Raises:
         TypeError: The value is a `float` or a `complex` (rule R-2), or is not
             a type a COBOL field can hold.
-        KeyError: `spec_or_name` is a name the registry does not declare.
+        KeyError: `spec_or_name` is a name the registry does not declare, or one
+            it declares several times and neither narrowing argument said which.
     """
     # Rule R-2 first, before anything reads the value: a binary float must not
     # reach a comparison even to be rejected by it.
@@ -1768,10 +2627,14 @@ def evaluate(
         )
 
     spec = spec_or_name if isinstance(spec_or_name, ConditionNameSpec) else (
-        lookup(spec_or_name)
+        lookup(
+            spec_or_name,
+            copybook=copybook,
+            conditional_variable=conditional_variable,
+        )
     )
 
-    if spec.kind is ConditionKind.ALPHANUMERIC:
+    if spec.is_alphanumeric:
         return _matches_literal(spec, value, descriptor)
     return _matches_number(spec, value)
 
@@ -1808,10 +2671,22 @@ def _matches_literal(
     value: int | str | decimal.Decimal,
     descriptor: FieldDescriptor | None,
 ) -> bool:
-    """Test an alphanumeric conditional variable's value against a quoted literal.
+    """Test a text conditional variable's value against the clause's literals.
+
+    MEMBERSHIP over every literal the clause declares, which is what COBOL does
+    for an alphanumeric condition name exactly as it does for a numeric
+    `VALUE_LIST`. A one-literal `ALPHANUMERIC` therefore behaves as it always
+    did - one candidate - while an `ALPHANUMERIC_LIST` tests all of them, so
+    `pending` at [copybooks/slwsinv.cob:L53] holds for "P" and for "p" because
+    its own line says `values "P" "p"`.
+
+    The width is computed against the LONGEST candidate as well as the value and
+    the declared field, so padding is the same for every comparison in one call
+    and a short candidate cannot match by being padded differently from a long
+    one.
 
     Args:
-        spec: The row, of shape `ALPHANUMERIC`.
+        spec: The row, of either alphanumeric shape.
         value: The value. A non-`str` is read through `str`, so a caller
             holding a one-character value as an int still gets an answer rather
             than an exception - and gets False, because a digit is not the
@@ -1820,45 +2695,44 @@ def _matches_literal(
             `character_length` supplies the declared field width to pad to.
 
     Returns:
-        True when the padded operands match character for character,
-        case-SENSITIVELY. Otherwise False.
+        True when the padded value matches any padded literal character for
+        character, case-SENSITIVELY. Otherwise False.
     """
-    literal = spec.literal_text()
+    literals = spec.literal_texts()
     text = value if isinstance(value, str) else str(value)
-    width = max(len(literal), len(text))
+    width = len(text)
+    for literal in literals:
+        width = max(width, len(literal))
     if descriptor is not None and descriptor.character_length:
         width = max(width, descriptor.character_length)
-    return _pad(text, width) == _pad(literal, width)
+    padded = _pad(text, width)
+    return any(padded == _pad(literal, width) for literal in literals)
 
 
-def predicate_for(cobol_name: str) -> Callable[[int | str | decimal.Decimal], bool]:
-    """A one-argument predicate for any of the registry's condition names.
+def _build_predicate(
+    spec: ConditionNameSpec,
+) -> Callable[[int | str | decimal.Decimal], bool]:
+    """Build the one-argument predicate for one registry row.
 
-    The reason this module does not carry 106 near-identical functions. The 38
-    condition names the Agent Action Plan calls out by name have their own
-    published predicates below, for readability at the call site; every other
-    row is reached through here or through `evaluate` directly.
+    Shared by `predicate_for` and by `PREDICATES`, so that a predicate obtained
+    either way is built the same way and carries the same name and docstring.
 
     Args:
-        cobol_name: The condition name, in any casing.
+        spec: The row.
 
     Returns:
-        A callable taking one value and returning whether the condition name
-        holds for it. It closes over the row, so it does no lookup per call and
-        keeps `evaluate`'s semantics exactly, including returning False rather
-        than raising for a value that matches nothing.
-
-    Raises:
-        KeyError: No row of that name.
+        A callable taking one value and returning whether that declaration holds
+        for it. It closes over the row, so it does no lookup per call and keeps
+        `evaluate`'s semantics exactly, including returning False rather than
+        raising for a value that matches nothing.
     """
-    spec = lookup(cobol_name)
 
     def _predicate(value: int | str | decimal.Decimal) -> bool:
         """Whether the closed-over condition name holds for one value."""
         return evaluate(spec, value)
 
-    _predicate.__name__ = spec.python_name
-    _predicate.__qualname__ = spec.python_name
+    _predicate.__name__ = spec.predicate_name
+    _predicate.__qualname__ = spec.predicate_name
     _predicate.__doc__ = (
         "Whether `" + spec.declaration_text + "` holds for one value. "
         "Declared at [" + spec.locator + "] on " + spec.conditional_variable
@@ -1867,19 +2741,94 @@ def predicate_for(cobol_name: str) -> Callable[[int | str | decimal.Decimal], bo
     return _predicate
 
 
+def predicate_for(
+    cobol_name: str,
+    *,
+    copybook: str | None = None,
+    conditional_variable: str | None = None,
+) -> Callable[[int | str | decimal.Decimal], bool]:
+    """A one-argument predicate for any of the registry's condition names.
+
+    The reason this module does not carry 159 near-identical functions. The
+    condition names the Agent Action Plan calls out, and the nineteen the
+    migrated cycle tests from the nine record copybooks, have their own published
+    predicates below for readability at the call site; every other row is reached
+    through here, through `PREDICATES`, or through `evaluate` directly.
+
+    Args:
+        cobol_name: The condition name, in any casing.
+        copybook: Optionally, the declaring copybook, to pick between
+            declarations of one name - a name declared four times has four
+            different predicates and this says which is wanted.
+        conditional_variable: Optionally, the owning field's COBOL name, for the
+            same purpose.
+
+    Returns:
+        A callable taking one value and returning whether the condition name
+        holds for it.
+
+    Raises:
+        KeyError: No row of that name, or several and none singled out. For an
+            ambiguous name the message lists every candidate with its value
+            clause, because the value clauses are what differ.
+    """
+    return _build_predicate(
+        lookup(
+            cobol_name,
+            copybook=copybook,
+            conditional_variable=conditional_variable,
+        )
+    )
+
+
+# A predicate for EVERY ONE of the 159 declarations, keyed by the row's unique
+# `predicate_name`. This is the coverage guarantee rule R-5 asks for: not one
+# condition name in the frozen closure is without a named, callable test, and a
+# name declared four times has four predicates over four value sets rather than
+# one predicate over whichever was transcribed first.
+#
+# Built by walking `CONDITION_NAMES`, so its order is the registry's (rule R-6),
+# and wrapped in a read-only proxy so a caller cannot add a predicate for a
+# condition name the copybooks do not declare (rule R-3).
+#
+# The named `is_*` functions below are a READABILITY surface over the same
+# `evaluate`, for the vocabularies the plan calls out and the rows the cycle
+# tests. They are not the coverage guarantee, and they do not duplicate logic -
+# each is one call into `evaluate` against a spec bound at import time.
+PREDICATES: Final[
+    Mapping[str, Callable[[int | str | decimal.Decimal], bool]]
+] = types.MappingProxyType(
+    {spec.predicate_name: _build_predicate(spec) for spec in CONDITION_NAMES}
+)
+
+
 # =============================================================================
 #  THE PUBLISHED PREDICATES
 # =============================================================================
 #
-# 38 named predicates: the 24-name operation vocabulary, plus the 14 condition
-# names the Agent Action Plan calls out by name in section 0.3.1's example list
-# and section 0.4.1.4's transformation row. Every other row of the 106 is
-# reached through `evaluate` or `predicate_for`, so this module does not become
-# 106 near-identical functions.
+# 57 named predicates, in two groups:
+#
+#   38  the 24-name operation vocabulary from copybooks/wsfnctn.cob, plus the 14
+#       condition names the Agent Action Plan calls out by name in section
+#       0.3.1's example list and section 0.4.1.4's transformation row.
+#   19  every declaration of the nine condition names that in-scope source
+#       ACTUALLY TESTS outside those four copybooks - the live rows listed in
+#       this module's docstring. All nineteen are named because a call site
+#       reading `is_pending_slwsinv2(...)` says which of the four `pending`
+#       declarations it means, whereas `evaluate(lookup("pending", ...), ...)`
+#       makes the reader reconstruct it.
+#
+# Every OTHER row of the 159 is reached through `PREDICATES`, `predicate_for` or
+# `evaluate`, so this module does not become 159 near-identical functions. The
+# coverage guarantee is `PREDICATES`, which holds all 159; the functions below
+# are the readability surface over the rows that are called for.
 #
 # Each row is bound to its spec HERE, at import time, so a mistyped condition
 # name raises immediately rather than at some later call site. The bindings
-# also read as a table of the published surface.
+# also read as a table of the published surface. Rows whose COBOL name is
+# declared in more than one copybook are bound by LOCATOR rather than by name,
+# because `BY_COBOL_NAME` deliberately holds only the unambiguous names and an
+# unqualified lookup of an ambiguous one raises.
 
 # copybooks/wsfnctn.cob - 03 File-Function pic 99. [L88], names at L89-L105.
 # BOUND IN DECLARATION ORDER, which is not numeric order: 15 at L99 precedes
@@ -1935,10 +2884,66 @@ _DATE_VALID_FORMATS: Final[ConditionNameSpec] = BY_COBOL_NAME[
     "Date-Valid-Formats"
 ]
 
+# The nineteen live rows outside those four copybooks. Unambiguous names are
+# bound by name; the rest by locator, since their COBOL name resolves to two,
+# three or four different value sets and `BY_COBOL_NAME` publishes none of them.
+_TESTING_1: Final[ConditionNameSpec] = BY_COBOL_NAME["Testing-1"]
+_OWNER: Final[ConditionNameSpec] = BY_COBOL_NAME["Owner"]
+_SUB: Final[ConditionNameSpec] = BY_COBOL_NAME["Sub"]
+_SUPPLIER_DEAD: Final[ConditionNameSpec] = BY_COBOL_NAME["Supplier-dead"]
 
-# -----------------------------------------------------------------------------
+_PENDING_SLWSINV: Final[ConditionNameSpec] = BY_LOCATOR[
+    "copybooks/slwsinv.cob:L53"
+]
+_PENDING_SLWSINV2: Final[ConditionNameSpec] = BY_LOCATOR[
+    "copybooks/slwsinv2.cob:L72"
+]
+_PENDING_PLWSPINV: Final[ConditionNameSpec] = BY_LOCATOR[
+    "copybooks/plwspinv.cob:L41"
+]
+_PENDING_PLWSPINV2: Final[ConditionNameSpec] = BY_LOCATOR[
+    "copybooks/plwspinv2.cob:L41"
+]
+
+_APPLIED_SLWSINV2: Final[ConditionNameSpec] = BY_LOCATOR[
+    "copybooks/slwsinv2.cob:L74"
+]
+_APPLIED_PLWSPINV: Final[ConditionNameSpec] = BY_LOCATOR[
+    "copybooks/plwspinv.cob:L43"
+]
+_APPLIED_PLWSPINV2: Final[ConditionNameSpec] = BY_LOCATOR[
+    "copybooks/plwspinv2.cob:L43"
+]
+
+_IH_ANALYISED_SLWSINV2: Final[ConditionNameSpec] = BY_LOCATOR[
+    "copybooks/slwsinv2.cob:L89"
+]
+_IH_ANALYISED_PLWSPINV: Final[ConditionNameSpec] = BY_LOCATOR[
+    "copybooks/plwspinv.cob:L53"
+]
+_IH_ANALYISED_PLWSPINV2: Final[ConditionNameSpec] = BY_LOCATOR[
+    "copybooks/plwspinv2.cob:L53"
+]
+
+_IL_ANALYISED_SLWSINV2: Final[ConditionNameSpec] = BY_LOCATOR[
+    "copybooks/slwsinv2.cob:L105"
+]
+_IL_ANALYISED_PLWSPINV: Final[ConditionNameSpec] = BY_LOCATOR[
+    "copybooks/plwspinv.cob:L83"
+]
+_IL_ANALYISED_PLWSPINV2: Final[ConditionNameSpec] = BY_LOCATOR[
+    "copybooks/plwspinv2.cob:L72"
+]
+
+_S_CLOSED_SLWSOI: Final[ConditionNameSpec] = BY_LOCATOR[
+    "copybooks/slwsoi.cob:L49"
+]
+_S_CLOSED_PLWSOI: Final[ConditionNameSpec] = BY_LOCATOR[
+    "copybooks/plwsoi.cob:L55"
+]
+
+
 #  File-Function - the fifteen operation codes  [copybooks/wsfnctn.cob:L89-L105]
-# -----------------------------------------------------------------------------
 
 
 def is_fn_open(value: int | str | decimal.Decimal) -> bool:
@@ -2157,9 +3162,7 @@ def is_fn_read_next_header(value: int | str | decimal.Decimal) -> bool:
     return evaluate(_FN_READ_NEXT_HEADER, value)
 
 
-# -----------------------------------------------------------------------------
 #  Access-Type - the nine access types  [copybooks/wsfnctn.cob:L108-L116]
-# -----------------------------------------------------------------------------
 
 
 def is_fn_input(value: int | str | decimal.Decimal) -> bool:
@@ -2292,9 +3295,7 @@ def is_fn_not_greater_than(value: int | str | decimal.Decimal) -> bool:
     return evaluate(_FN_NOT_GREATER_THAN, value)
 
 
-# -----------------------------------------------------------------------------
 #  WS-Ledger - which ledger a batch belongs to  [copybooks/wsbatch.cob:L16-L18]
-# -----------------------------------------------------------------------------
 
 
 def is_gl_batch(value: int | str | decimal.Decimal) -> bool:
@@ -2340,9 +3341,7 @@ def is_sl_batch(value: int | str | decimal.Decimal) -> bool:
     return evaluate(_SL_BATCH, value)
 
 
-# -----------------------------------------------------------------------------
 #  Batch-Status  [copybooks/wsbatch.cob:L26-L27]
-# -----------------------------------------------------------------------------
 
 
 def is_status_open(value: int | str | decimal.Decimal) -> bool:
@@ -2381,9 +3380,7 @@ def is_status_closed(value: int | str | decimal.Decimal) -> bool:
     return evaluate(_STATUS_CLOSED, value)
 
 
-# -----------------------------------------------------------------------------
 #  Cleared-Status  [copybooks/wsbatch.cob:L30-L32]
-# -----------------------------------------------------------------------------
 
 
 def is_waiting(value: int | str | decimal.Decimal) -> bool:
@@ -2433,14 +3430,11 @@ def is_archived(value: int | str | decimal.Decimal) -> bool:
     return evaluate(_ARCHIVED, value)
 
 
-# -----------------------------------------------------------------------------
 #  IRS-Instead - the three-state fan-out  [copybooks/wssystem.cob:L180-L181]
-#
 #  THREE states, TWO condition names. The third state is space, and for space
 #  BOTH predicates below are False. There is no third condition name, and
 #  adding one would breach rule R-3. The switch decides WHICH TABLES A RUN
 #  TOUCHES, so a scenario must pin it explicitly (Agent Action Plan 0.6.4).
-# -----------------------------------------------------------------------------
 
 
 def is_irs_used(value: int | str | decimal.Decimal) -> bool:
@@ -2475,9 +3469,7 @@ def is_irs_both_used(value: int | str | decimal.Decimal) -> bool:
     return evaluate(_IRS_BOTH_USED, value)
 
 
-# -----------------------------------------------------------------------------
 #  Date-Form  [copybooks/wssystem.cob:L129-L132]
-# -----------------------------------------------------------------------------
 
 
 def is_date_uk(value: int | str | decimal.Decimal) -> bool:
@@ -2553,16 +3545,383 @@ def is_date_valid_formats(value: int | str | decimal.Decimal) -> bool:
     return evaluate(_DATE_VALID_FORMATS, value)
 
 
+# -----------------------------------------------------------------------------
+#  THE NINETEEN LIVE ROWS OUTSIDE THE FOUR COPYBOOKS ABOVE
+#
+#  Nine COBOL names, nineteen declarations. Where a name is declared more than
+#  once the function name carries the copybook stem, exactly as `PREDICATES`
+#  derives it, so the two surfaces never disagree about which declaration a
+#  given predicate name means.
+#
+#  WHICH ONE A PROGRAM ACTUALLY SEES IS DECIDED BY ITS `COPY` STATEMENTS, and
+#  the answer is not always the obvious one - three of the four programs that
+#  test `S-Closed` reach its copybook through a nested `COPY ... REPLACING`
+#  rather than naming it. Each docstring below records the copy path it
+#  verified, so a call site can be checked against the frozen source rather
+#  than against an assumption.
+# -----------------------------------------------------------------------------
+
+
+def is_supplier_dead(value: int | str | decimal.Decimal) -> bool:
+    """Whether `Purch-Status` holds `Supplier-dead`, value 0.
+
+    Declared at [copybooks/wspl.cob:L20] and LIVE at
+    [purchase/pl060.cbl:L503], which copies the layout directly at
+    [purchase/pl060.cbl:L146].
+
+    The carrier is `pic 9`, so this is the numeric 0 and not the character
+    "0"; `is_supplier_live` is its complement over the two declared values,
+    but the carrier can hold any digit and for 2 through 9 BOTH are False.
+    Adding a third condition name to cover that would breach rule R-3.
+
+    Args:
+        value: The `Purch-Status` value.
+
+    Returns:
+        True when it is 0.
+    """
+    return evaluate(_SUPPLIER_DEAD, value)
+
+
+def is_pending_slwsinv(value: int | str | decimal.Decimal) -> bool:
+    """Whether `sih-status` holds `pending`, the literals "P" or "p".
+
+    Declared `values "P" "p".` at [copybooks/slwsinv.cob:L53] - TWO literals,
+    upper case first, tested by membership. This is the sales invoice layout
+    reached by [common/acas016.cbl]; the sibling declaration at
+    [copybooks/slwsinv2.cob:L72] admits "P" ALONE, so the two predicates are
+    not interchangeable and neither may be folded into the other (rule R-4).
+
+    Args:
+        value: The `sih-status` value, one character.
+
+    Returns:
+        True when it is "P" or "p".
+    """
+    return evaluate(_PENDING_SLWSINV, value)
+
+
+def is_pending_slwsinv2(value: int | str | decimal.Decimal) -> bool:
+    """Whether `ih-status` holds `pending`, the literal "P".
+
+    Declared `value "P".` at [copybooks/slwsinv2.cob:L72] - ONE literal, so
+    lower-case "p" is False here even though the three sibling declarations
+    of the same name accept it. LIVE at [sales/sl055.cbl:L433], which copies
+    this layout at [sales/sl055.cbl:L158].
+
+    The single-literal form is the divergence, not a transcription slip: it is
+    reproduced because rule R-4 makes the frozen declaration the specification.
+
+    Args:
+        value: The `ih-status` value, one character.
+
+    Returns:
+        True when it is "P".
+    """
+    return evaluate(_PENDING_SLWSINV2, value)
+
+
+def is_applied_slwsinv2(value: int | str | decimal.Decimal) -> bool:
+    """Whether `ih-status` holds `applied`, the literal "Z".
+
+    Declared `value "Z".` at [copybooks/slwsinv2.cob:L74] and LIVE at
+    [sales/sl055.cbl:L427]. One literal, so "z" is False.
+
+    [copybooks/slwsinv.cob:L55] declares the same idea under the DIFFERENT
+    name `sapplied`, with values "Z" and "z"; that spelling is registered as
+    its own row and is NOT reachable through this predicate.
+
+    Args:
+        value: The `ih-status` value, one character.
+
+    Returns:
+        True when it is "Z".
+    """
+    return evaluate(_APPLIED_SLWSINV2, value)
+
+
+def is_ih_analyised_slwsinv2(value: int | str | decimal.Decimal) -> bool:
+    """Whether `ih-update` holds `ih-analyised`, the literal "Z".
+
+    Declared `value "Z".` at [copybooks/slwsinv2.cob:L89] and LIVE at
+    [sales/sl055.cbl:L427] and [sales/sl055.cbl:L440] - the invoice-header
+    analysis flag the extract sets once a header has been analysed. One
+    literal, so "z" is False.
+
+    Args:
+        value: The `ih-update` value, one character.
+
+    Returns:
+        True when it is "Z".
+    """
+    return evaluate(_IH_ANALYISED_SLWSINV2, value)
+
+
+def is_il_analyised_slwsinv2(value: int | str | decimal.Decimal) -> bool:
+    """Whether `il-update` holds `il-analyised`, the literal "Z".
+
+    Declared `value "Z".` at [copybooks/slwsinv2.cob:L105] and LIVE at
+    [sales/sl055.cbl:L373] - the invoice-LINE analysis flag, the line-level
+    counterpart of `ih-analyised`. One literal, so "z" is False.
+
+    Args:
+        value: The `il-update` value, one character.
+
+    Returns:
+        True when it is "Z".
+    """
+    return evaluate(_IL_ANALYISED_SLWSINV2, value)
+
+
+def is_s_closed_slwsoi(value: int | str | decimal.Decimal) -> bool:
+    """Whether the sales `OI-Status` holds `S-Closed`, value 1.
+
+    Declared at [copybooks/slwsoi.cob:L49], where the maintainer's trailing
+    comment reads "Paid". LIVE at [sales/sl060.cbl:L668],
+    [sales/sl060.cbl:L877] and [sales/sl100.cbl:L350] - in every case a
+    `go to` that SKIPS the open-item record, so the predicate decides whether
+    a paid item is reprocessed.
+
+    Neither program names this copybook: both copy [copybooks/slwsoi3.cob],
+    at [sales/sl060.cbl:L279] and [sales/sl100.cbl:L219], and that copybook
+    copies this one under a REPLACING clause at [copybooks/slwsoi3.cob:L18].
+    [copybooks/slwssoi.cob:L50], also in scope of [sales/sl060.cbl:L280],
+    declares the same test as `si-s-closed`; that name is not among the
+    thirteen copybooks the dictionary reports and is not reachable here.
+
+    Args:
+        value: The `OI-Status` value.
+
+    Returns:
+        True when it is 1.
+    """
+    return evaluate(_S_CLOSED_SLWSOI, value)
+
+
+def is_pending_plwspinv(value: int | str | decimal.Decimal) -> bool:
+    """Whether `ih-status` holds `pending`, the literals "P" or "p".
+
+    Declared `values "P" "p".` at [copybooks/plwspinv.cob:L41] - two literals,
+    upper case first, matching [copybooks/slwsinv.cob:L53]'s VALUES while its
+    NAME matches [copybooks/slwsinv2.cob:L72]'s. The purchase invoice layout
+    reached by [common/acas026.cbl].
+
+    Args:
+        value: The `ih-status` value, one character.
+
+    Returns:
+        True when it is "P" or "p".
+    """
+    return evaluate(_PENDING_PLWSPINV, value)
+
+
+def is_applied_plwspinv(value: int | str | decimal.Decimal) -> bool:
+    """Whether `ih-status` holds `applied`, the literals "Z" or "z".
+
+    Declared `values "Z" "z".` at [copybooks/plwspinv.cob:L43] - two literals,
+    upper case first.
+
+    Args:
+        value: The `ih-status` value, one character.
+
+    Returns:
+        True when it is "Z" or "z".
+    """
+    return evaluate(_APPLIED_PLWSPINV, value)
+
+
+def is_ih_analyised_plwspinv(value: int | str | decimal.Decimal) -> bool:
+    """Whether `ih-update` holds `ih-analyised`, the literals "Z" or "z".
+
+    Declared `values "Z" "z".` at [copybooks/plwspinv.cob:L53] - two literals,
+    upper case first, like every other status clause in that copybook EXCEPT
+    `il-analyised` at [copybooks/plwspinv.cob:L83], which flips them.
+
+    Args:
+        value: The `ih-update` value, one character.
+
+    Returns:
+        True when it is "Z" or "z".
+    """
+    return evaluate(_IH_ANALYISED_PLWSPINV, value)
+
+
+def is_il_analyised_plwspinv(value: int | str | decimal.Decimal) -> bool:
+    """Whether `il-update` holds `il-analyised`, the literals "z" or "Z".
+
+    Declared `values "z" "Z".` at [copybooks/plwspinv.cob:L83] - LOWER case
+    first, the one clause in that copybook to do so. The membership test makes
+    the order immaterial to the ANSWER, but `value_clause_text` renders it
+    verbatim so the divergence stays visible rather than being tidied away
+    (rule R-4, anomaly-register discipline).
+
+    Args:
+        value: The `il-update` value, one character.
+
+    Returns:
+        True when it is "z" or "Z".
+    """
+    return evaluate(_IL_ANALYISED_PLWSPINV, value)
+
+
+def is_pending_plwspinv2(value: int | str | decimal.Decimal) -> bool:
+    """Whether `ih-status` holds `pending`, the literals "p" or "P".
+
+    Declared `values "p" "P".` at [copybooks/plwspinv2.cob:L41] - LOWER case
+    first, which is this copybook's convention throughout. The second purchase
+    invoice layout, copied by [purchase/pl055.cbl:L135].
+
+    Args:
+        value: The `ih-status` value, one character.
+
+    Returns:
+        True when it is "p" or "P".
+    """
+    return evaluate(_PENDING_PLWSPINV2, value)
+
+
+def is_applied_plwspinv2(value: int | str | decimal.Decimal) -> bool:
+    """Whether `ih-status` holds `applied`, the literals "z" or "Z".
+
+    Declared `values "z" "Z".` at [copybooks/plwspinv2.cob:L43] and LIVE at
+    [purchase/pl055.cbl:L365], which copies this layout at
+    [purchase/pl055.cbl:L135]. Lower case first.
+
+    Its sales counterpart at [copybooks/slwsinv2.cob:L74] admits "Z" alone,
+    so `is_applied_slwsinv2` and this predicate answer differently for "z".
+
+    Args:
+        value: The `ih-status` value, one character.
+
+    Returns:
+        True when it is "z" or "Z".
+    """
+    return evaluate(_APPLIED_PLWSPINV2, value)
+
+
+def is_ih_analyised_plwspinv2(value: int | str | decimal.Decimal) -> bool:
+    """Whether `ih-update` holds `ih-analyised`, the literals "z" or "Z".
+
+    Declared `values "z" "Z".` at [copybooks/plwspinv2.cob:L53] and LIVE at
+    [purchase/pl055.cbl:L365] and [purchase/pl055.cbl:L370] - the purchase
+    mirror of [sales/sl055.cbl:L427] and [sales/sl055.cbl:L440], but over two
+    literals rather than one.
+
+    Args:
+        value: The `ih-update` value, one character.
+
+    Returns:
+        True when it is "z" or "Z".
+    """
+    return evaluate(_IH_ANALYISED_PLWSPINV2, value)
+
+
+def is_il_analyised_plwspinv2(value: int | str | decimal.Decimal) -> bool:
+    """Whether `il-update` holds `il-analyised`, the literals "z" or "Z".
+
+    Declared `values "z" "Z".` at [copybooks/plwspinv2.cob:L72] and LIVE at
+    [purchase/pl055.cbl:L314] - the purchase mirror of
+    [sales/sl055.cbl:L373], again over two literals rather than one.
+
+    Args:
+        value: The `il-update` value, one character.
+
+    Returns:
+        True when it is "z" or "Z".
+    """
+    return evaluate(_IL_ANALYISED_PLWSPINV2, value)
+
+
+def is_s_closed_plwsoi(value: int | str | decimal.Decimal) -> bool:
+    """Whether the purchase `OI-Status` holds `S-Closed`, value 1.
+
+    Declared at [copybooks/plwsoi.cob:L55] - the same name, carrier and value
+    as [copybooks/slwsoi.cob:L49], without that line's "Paid" comment. LIVE at
+    [purchase/pl060.cbl:L594], [purchase/pl060.cbl:L799] and
+    [purchase/pl100.cbl:L342].
+
+    [purchase/pl060.cbl:L152] copies this copybook directly;
+    [purchase/pl100.cbl:L213] copies [copybooks/plwsoi5C.cob], which copies
+    this one under a REPLACING clause at [copybooks/plwsoi5C.cob:L19].
+    [copybooks/plwssoi.cob:L53] declares the same test as `si-s-closed` and is
+    outside the thirteen copybooks the dictionary reports.
+
+    Args:
+        value: The `OI-Status` value.
+
+    Returns:
+        True when it is 1.
+    """
+    return evaluate(_S_CLOSED_PLWSOI, value)
+
+
+def is_owner(value: int | str | decimal.Decimal) -> bool:
+    """Whether `NL-Type` holds `Owner`, the literal "O".
+
+    Declared `value is "O".` at [copybooks/irswsnl.cob:L13] - one of only two
+    declarations in the registry written with the optional `IS`, which is a
+    noise word and carries no meaning. LIVE at [common/acasirsub1.cbl:L577]
+    and [common/acasirsub1.cbl:L616], the IRS nominal-ledger handler.
+
+    Args:
+        value: The `NL-Type` value, one character.
+
+    Returns:
+        True when it is "O".
+    """
+    return evaluate(_OWNER, value)
+
+
+def is_sub(value: int | str | decimal.Decimal) -> bool:
+    """Whether `NL-Type` holds `Sub`, the literal "S".
+
+    Declared `value is "S".` at [copybooks/irswsnl.cob:L14] and LIVE at
+    [common/acasirsub1.cbl:L414] and [common/acasirsub1.cbl:L506]. The
+    sub-account type, the complement of `Owner` over the two declared values;
+    for any other character both are False.
+
+    Args:
+        value: The `NL-Type` value, one character.
+
+    Returns:
+        True when it is "S".
+    """
+    return evaluate(_SUB, value)
+
+
+def is_testing_1(value: int | str | decimal.Decimal) -> bool:
+    """Whether `SW-Testing` holds `Testing-1`, value 1.
+
+    Declared at [copybooks/Test-Data-Flags.cob:L11] and LIVE in every file
+    handler - for example [common/acas000.cbl:L495] and
+    [common/acas000.cbl:L546] - where `if Testing-1` gates the file-handler
+    log write.
+
+    THE FROZEN COPYBOOK INITIALISES THE CARRIER TO 1, so the switch is ON by
+    default and handler logging cannot be turned off without editing a frozen
+    file. That is anomaly territory, not a defect to fix: the setup log records
+    the resulting log file reaching 473 MB in three minutes. The predicate
+    reports the switch; it does not decide what to do about it.
+
+    Args:
+        value: The `SW-Testing` value.
+
+    Returns:
+        True when it is 1.
+    """
+    return evaluate(_TESTING_1, value)
+
+
 # =============================================================================
 #  THE OPTIONAL CROSS-CHECK AGAINST THE GENERATED DATA DICTIONARY  (rule R-5)
 #
 #  Rule R-5 wants field-level traceability to be MECHANICAL rather than
 #  hand-maintained, and this registry is a hand transcription - the one place in
-#  the migration where 106 values are typed out from a frozen copybook. The
-#  check below is how that transcription is held to account: it re-reads the
-#  same condition names from data_dictionary/acas_posting_dictionary.json, which
-#  the generator parses out of the copybooks independently, and reports every
-#  disagreement.
+#  the migration where 159 value clauses are typed out from thirteen frozen
+#  copybooks. The check below is how that transcription is held to account: it
+#  re-reads the same condition names from
+#  data_dictionary/acas_posting_dictionary.json, which the generator parses out
+#  of the copybooks independently, and reports every disagreement.
 #
 #  IT IS OPTIONAL, LAZY AND SILENT ABOUT ITS OWN FAILURE. Nothing calls it at
 #  import time and nothing here reads a file at import time, because rule R-1
@@ -2577,11 +3936,18 @@ def is_date_valid_formats(value: int | str | decimal.Decimal) -> bool:
 #  note for this file expected `copybooks/wsfnctn.cob` to be absent from the
 #  dictionary, on the ground that it is a working-storage block with no table.
 #  The GENERATED ARTIFACT CATALOGUES IT ANYWAY, keying its fields under a
-#  working-storage record name, so all four copybooks and all 106 condition
+#  working-storage record name, so all thirteen copybooks and all 159 condition
 #  names are verifiable and none has to be excused. That is the artifact
 #  speaking, and the artifact wins; if a future regeneration drops the block,
 #  the check reports it as a note naming the copybook rather than as 30
 #  mismatches.
+#
+#  THE CHECK IS WHAT MAKES DUPLICATE NAMES SAFE. Fourteen COBOL names are
+#  declared in more than one copybook, so a comparison keyed on the bare name
+#  would match the wrong rows and pass. Every row is therefore matched on
+#  `(copybook, cobol_name)`, which the registry guarantees is unique, and the
+#  per-conditional-variable declaration order is compared inside each copybook
+#  rather than across the registry.
 #
 #  ONE ORDERING DIFFERENCE IS EXPECTED AND IS NOT A DISAGREEMENT. The dictionary
 #  orders a copybook's entries by RECORD KEY, so `copybooks/wsbatch.cob` yields
@@ -2594,22 +3960,32 @@ def is_date_valid_formats(value: int | str | decimal.Decimal) -> bool:
 #  check tests it against the line numbers instead.
 # =============================================================================
 
-# The four copybooks the registry transcribes, in registry order. A tuple, not
-# an iteration over `COUNTS_BY_COPYBOOK`, so the reporting order is fixed in the
-# source where a reader can see it (rule R-6).
+# The thirteen copybooks the registry transcribes, in registry order. A tuple,
+# not an iteration over `COUNTS_BY_COPYBOOK`, so the reporting order is fixed in
+# the source where a reader can see it (rule R-6).
 _COPYBOOKS_IN_REGISTRY_ORDER: Final[tuple[str, ...]] = (
     _WSFNCTN,
     _WSBATCH,
     _WSSYSTEM,
     _WSSL,
+    _WSPL,
+    _SLWSINV,
+    _SLWSINV2,
+    _SLWSOI,
+    _PLWSPINV,
+    _PLWSPINV2,
+    _PLWSOI,
+    _IRSWSNL,
+    _TESTFLAGS,
 )
 
-# The fields of the dictionary's own condition-name record, read from the model
-# at import time. Named in the findings so a reader knows exactly which three
-# values were compared, and so a change to the dictionary's representation shows
-# up in the report rather than passing unnoticed.
+# The fields of the dictionary's own condition-name record, read at import time
+# from `loader.ConditionName` - the loader's binding to the one object-model
+# definition. Named in the findings so a reader knows exactly which three values
+# were compared, and so a change to the dictionary's representation shows up in
+# the report rather than passing unnoticed.
 _DICTIONARY_CONDITION_FIELDS: Final[tuple[str, ...]] = tuple(
-    field.name for field in dataclasses.fields(model.ConditionName)
+    field.name for field in dataclasses.fields(loader.ConditionName)
 )
 
 # Findings carry a prefix so a caller can tell a real disagreement from a
@@ -2939,34 +4315,40 @@ def _first_line(message: str) -> str:
     return "no explanation was given."
 
 
-# =============================================================================
 #  THE PUBLISHED SURFACE
-#
 #  `FsReply`, `FileFunction` and `AccessType` are DELIBERATELY ABSENT. This
 #  module is the registry those enumerations are built FROM, and it publishes
 #  `values_for` and `specs_for_variable` so that dal/status.py can build them
 #  without transcribing fifteen out-of-numeric-order function codes a second
 #  time. Naming them here would collide with the module that owns them
 #  (Agent Action Plan 0.5.3).
-# =============================================================================
 
 __all__ = [
     # The value sets, and the shape of a row.
     "CONDITION_NAMES",
     "ConditionKind",
     "ConditionNameSpec",
-    # The lookup surface.
+    # The lookup surface. `BY_COBOL_NAME` and `BY_PYTHON_NAME` publish only the
+    # names declared exactly once; `SPECS_BY_COBOL_NAME`, `BY_LOCATOR` and
+    # `DUPLICATED_COBOL_NAMES` are how the other fourteen names are reached.
     "BY_COBOL_NAME",
+    "BY_LOCATOR",
     "BY_PYTHON_NAME",
     "COUNTS_BY_COPYBOOK",
+    "DUPLICATED_COBOL_NAMES",
     "FS_REPLY_CONDITION_NAME_COUNT",
+    "SPECS_BY_COBOL_NAME",
     "conditional_variables",
     "find",
+    "is_declared",
     "lookup",
     "specs_for_copybook",
+    "specs_for_name",
     "specs_for_variable",
     "values_for",
-    # The one generic predicate, and a predicate for any row.
+    # The one generic predicate, a predicate for any row, and the mapping that
+    # holds one for EVERY row - the coverage guarantee behind rule R-5.
+    "PREDICATES",
     "evaluate",
     "predicate_for",
     # copybooks/wsfnctn.cob - File-Function, in DECLARATION order (15 before
@@ -3012,6 +4394,28 @@ __all__ = [
     "is_date_usa",
     "is_date_intl",
     "is_date_valid_formats",
+    # The nineteen live rows outside those four copybooks. Where a name is
+    # declared more than once the copybook stem disambiguates, exactly as
+    # `PREDICATES` derives it. Grouped by copybook, in registry order.
+    "is_supplier_dead",
+    "is_pending_slwsinv",
+    "is_pending_slwsinv2",
+    "is_applied_slwsinv2",
+    "is_ih_analyised_slwsinv2",
+    "is_il_analyised_slwsinv2",
+    "is_s_closed_slwsoi",
+    "is_pending_plwspinv",
+    "is_applied_plwspinv",
+    "is_ih_analyised_plwspinv",
+    "is_il_analyised_plwspinv",
+    "is_pending_plwspinv2",
+    "is_applied_plwspinv2",
+    "is_ih_analyised_plwspinv2",
+    "is_il_analyised_plwspinv2",
+    "is_s_closed_plwsoi",
+    "is_owner",
+    "is_sub",
+    "is_testing_1",
     # The rule R-5 corroboration.
     "cross_check_against_dictionary",
 ]

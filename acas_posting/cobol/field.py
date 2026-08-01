@@ -35,29 +35,57 @@ Traceability is therefore not decoration here. It is the reason the file
 exists, and it is enforced at construction time by `__post_init__` rather
 than requested in a comment.
 
-PROVENANCE IS MANDATORY - THE ONE PLACE THIS FILE DECIDES SOMETHING
-===================================================================
-Rule R-5 asks for "every instance traceable to a dictionary key". The
-dictionary covers the copybook / bridge-host-variable / MySQL-column triple
-for RECORD fields, exhaustively: 513 in-scope columns across 22 tables, with
-`loader.coverage()` reporting `in_scope_columns == columns_covered == 513`.
-It does NOT cover program-local WORKING-STORAGE, and the program layer needs
-descriptors for such items - `work-2 pic s9(14) comp-3`
-[sales/sl060.cbl:L206] with its zero scale, `work-a binary-long`
-[sales/sl100.cbl:L182], `l6-account pic 9999.99` [general/gl072.cbl:L233].
-Without them the legacy averaging defect, the 32-bit payment-days path and
-gl072's preserved scaling divides cannot be reproduced at all.
+PROVENANCE IS A DICTIONARY KEY - R-5 IS APPLIED, NOT REINTERPRETED
+==================================================================
+Rule R-5 asks for "every instance traceable to a dictionary key", and this
+file takes that literally. Every field a frozen source DECLARES is catalogued
+in the generated artifact, and its descriptor is built from that entry through
+`from_dictionary_key`. There is no second route for a declared field and no
+exception carved out for any population of them. The artifact covers 513
+columns, 513 bridge host variables, 1001 copybook fields and 46
+program-source work-file fields, and `loader.coverage()` reports every one of
+those figures.
 
-The rule this file applies, stated so that no reader thinks R-5 was bent:
+THAT INCLUDES THE RECORDS A PROGRAM DECLARES INLINE. The General Ledger work
+files `pretrans.tmp` and `postrans.tmp`, and the sort file that carries their
+records between phases, are declared in the FILE SECTIONs of
+`general/gl070.cbl`, `general/gl071.cbl` and `general/gl072.cbl` rather than
+in any copybook; `copybooks/wsnames.cob:L14-L17` names the two work files and
+annotates both as belonging to gl071. Their fields reach no table, so they
+have no bridge host variable and no column - and the generator catalogues
+them anyway, as PROGRAM-SOURCE entries whose three triple views are
+explicitly absent and whose `presence.in_program_source` is true. Their keys
+are the third form of the entry-key convention below, and
+`acas_posting/records/work_records.py` binds all 27 of its descriptors that
+way. An earlier draft of this file described those fields as program-local
+working storage beyond the dictionary's reach and bound them by locator
+alone. That weakened R-5's field-to-entry mapping to mere evidence, and it is
+gone: the fields were always catalogue-able, and now they are catalogued.
 
-    `FieldDescriptor` carries MANDATORY provenance that is EITHER a
-    `dictionary_key` (the principal path, for record fields) OR a
-    `source_locator` (for program-local working storage). A descriptor
-    constructed with NEITHER is a programmer error and construction must
-    fail with a clear message naming the field. R-5 is satisfied because
-    every descriptor is traceable to a frozen source location either way,
-    and R-5's "every field to a data-dictionary entry" scopes to RECORD
-    fields, which the dictionary covers exhaustively.
+THE ONE DESCRIPTOR THAT LEGITIMATELY CARRIES NO KEY is the PICTURE PARSER's
+product. `acas_posting/cobol/picture.py` reads a PICTURE clause it is handed
+and returns the descriptor that clause implies. It is describing text, not
+resolving a catalogued declaration, so it has no key to look up and carries a
+`<path>:L<n>` locator instead. A program-local WORKING-STORAGE item that no
+record layout declares - `work-2 pic s9(14) comp-3` [sales/sl060.cbl:L206]
+with its zero scale, `work-a binary-long` [sales/sl100.cbl:L182],
+`l6-account pic 9999.99` [general/gl072.cbl:L233] - is therefore described by
+handing its declaration to that parser, which is the module Agent Action Plan
+section 0.4.1.4 assigns the job to: "PIC clause parser -> FieldDescriptor".
+Nothing about the legacy averaging defect, the 32-bit payment-days path or
+gl072's preserved scaling divides becomes harder to reproduce; only the route
+to their descriptors is now the one the plan names.
+
+The rule this file applies:
+
+    `FieldDescriptor` carries MANDATORY provenance. For every field a frozen
+    source DECLARES, that provenance is a `dictionary_key`, because the
+    artifact catalogues every such field - copybook records, bridge-derived
+    columns and the inline work-file records alike. A `source_locator` alone
+    is accepted from ONE producer, the picture parser, whose product
+    describes a PICTURE clause rather than a catalogued declaration. A
+    descriptor constructed with NEITHER is a programmer error and
+    construction fails with a message naming the field.
 
 THIS FILE DOES NOT ADJUDICATE DRIFT - THE PROHIBITION THAT MATTERS MOST
 =======================================================================
@@ -73,7 +101,7 @@ is a failure. Agent Action Plan section 0.8.2 preserves the user's own words:
     specification, defects included. A defect reproduced is correct; a
     defect fixed is a failure."
 
-Concretely, and every one of these is measured rather than assumed:
+Concretely, each of these is traced to the frozen source:
 
   * SIGNEDNESS, anomaly A-11. `Sales-Average binary-long` is SIGNED
     [copybooks/wssl.cob:L49]; the host variable `HV-SALES-AVERAGE PIC 9(10)
@@ -107,11 +135,22 @@ THE ENTRY KEY CONVENTION - A PUBLIC CONTRACT
 ============================================
     <TABLE-NAME>.<COLUMN-NAME>      where a column backs the field
     <COPYBOOK-RECORD>.<FIELD-NAME>  where the field is copybook-only
+    <PROGRAM-RECORD>.<FIELD-NAME>   where a program declares the record inline
 
 Both halves are the names the frozen sources use themselves: hyphens are not
 turned into underscores and case is not folded, so lookup is exact and
 case-sensitive. Where one field name repeats inside one record the key
 carries a `#` and the declaration line, as in `WS-Ledger-Record.filler#16`.
+
+The third form is the work-file one, and its `#` segment is not optional
+padding - it is load-bearing. Two programs declare a record named
+`post-trans-record` and they do not agree: `general/gl071.cbl:L129-L130`
+declares the account and profit-centre fields flat at level 03, while
+`general/gl072.cbl:L115-L117` wraps the same eight bytes in a `post-ledger`
+group with the two fields at 05 beneath it. Both declarations are catalogued
+and neither is harmonised (rule R-4), so the key states which one is meant:
+`post-trans-record.post-ac#129` is gl071's and `post-trans-record.post-ac#116`
+is gl072's.
 
 NEVER key by field name alone. The table name is in the key precisely so
 that two different tables can never merge. `PSIRSPOST-REC` is the transfer
@@ -152,7 +191,7 @@ and never tidied. A misnaming is preserved as found: anomaly A-20 is that
 prefix, inside the PURCHASE group. Those names stay exactly as they are.
 
 USAGE MAY BE INHERITED FROM A GROUP - GET THIS WRONG AND EVERY VALUE IS WRONG
-============================================================================
+=============================================================================
 A group header that declares a USAGE passes it to every subordinate item
 that declares none. Three such headers govern the batch and period totals
 this cycle depends on:
@@ -188,10 +227,11 @@ float appears nowhere in this file, and neither does the `math` module.
 
 LAYERING (AGENT ACTION PLAN SECTION 0.4.3)
 ==========================================
-    MAY import       the standard library, the `acas_posting.dictionary`
-                     public surface, and `acas_posting.cobol.usage`
-    MUST NOT import  records, dal, programs, cli, clock, dates, workfiles,
-                     harness - and this folder's own `picture.py`
+    MAY import       the standard library, `acas_posting.dictionary.loader`,
+                     and `acas_posting.cobol.usage`
+    MUST NOT import  `acas_posting.dictionary.model`, records, dal, programs,
+                     cli, clock, dates, workfiles, harness - and this folder's
+                     own `picture.py`
 
 The picture parser reads a PICTURE clause INTO a descriptor, so it imports
 this module and the edge runs one way only. Nothing is lost by that: the
@@ -199,16 +239,20 @@ dictionary's copybook view already carries digits, integer digits, scale,
 signedness, sign position, usage, usage-declared-at and character length
 pre-parsed, so this file never handles raw picture text.
 
-On the enumerations: the section 0.4.3 row reads "dictionary.loader only".
-Read literally that would force this file to re-declare `Usage`,
-`SignPosition`, `UsageDeclaredAt` and `CobolPythonStorage`. Two competing
-definitions of one vocabulary is exactly the divergence R-4 exists to stop,
-and the loader's whole return surface is built from `model` dataclasses
-anyway, so importing them from the dictionary package's public surface is
-the SAME architectural edge. They are imported from `model` because the
-loader's `__all__` publishes only its errors and accessors and re-exports no
-enumeration. `SOURCE_LOCATOR_PATTERN` is imported for the same reason rather
-than retyped. No third-party package is imported at all.
+On the enumerations: the section 0.4.3 row reads "dictionary.loader only", and
+it is taken literally. `Usage`, `SignPosition`, `UsageDeclaredAt`,
+`CobolPythonStorage`, the three view records and `SOURCE_LOCATOR_PATTERN` all
+come from `acas_posting.dictionary.loader`, which re-exports them precisely so
+that this layer never has to reach past its one permitted door - see the
+loader's `RE_EXPORTED_MODEL_NAMES`. Each re-export is a BINDING to the single
+definition in the dictionary's object model, so `loader.Usage` and the
+model's `Usage` are the same object: there is one vocabulary, reached the
+sanctioned way. The two alternatives were both wrong. Re-declaring the
+enumerations here would create two competing definitions of one vocabulary,
+which is exactly the divergence R-4 exists to stop and the transcription error
+R-5 exists to prevent; importing the object model directly would breach the
+frozen section 0.4.3 row, and a local exception to a frozen plan is not this
+file's to grant. No third-party package is imported at all.
 
 DETERMINISM (RULE R-6)
 ======================
@@ -216,7 +260,7 @@ Two runs of one scenario must be byte-identical, so a descriptor is frozen,
 slotted and value-equal; every collection member is a tuple; and there is no
 clock, no entropy source and no environment read anywhere below. Decimal
 quanta are built without consulting the ambient decimal context - see
-`quantum`, where the reason is measured rather than asserted.
+`quantum`, where the reason is stated in full.
 
 WHAT THIS MODULE DOES NOT DO
 ============================
@@ -251,7 +295,20 @@ from typing import Final
 
 from acas_posting.cobol import usage as cobol_usage
 from acas_posting.dictionary import loader
-from acas_posting.dictionary.model import (
+
+# The object model reaches this layer through `dictionary.loader` and through
+# nothing else. Agent Action Plan section 0.4.3 grants `cobol/*.py` exactly
+# `dictionary.loader` from the package, so the loader re-exports the vocabulary
+# its own accessors return - see its `RE_EXPORTED_MODEL_NAMES` - and every name
+# below is a binding to the ONE definition in `acas_posting.dictionary.model`,
+# never a copy of it. A local copy would be a second source of truth for field
+# metadata, which is precisely what rule R-5 exists to prevent. The two
+# provenance patterns are named here for the same reason: the entry key and the
+# repository path a descriptor is admitted from are validated against the very
+# patterns the generated artifact was written with.
+from acas_posting.dictionary.loader import (
+    ENTRY_KEY_PATTERN,
+    REPO_PATH_PATTERN,
     SOURCE_LOCATOR_PATTERN,
     CobolPythonStorage,
     CopybookField,
@@ -271,14 +328,13 @@ __all__: Final[tuple[str, ...]] = (
     "FieldDescriptor",
     "FieldDescriptorError",
     "MissingProvenanceError",
+    "UntrustedEntryError",
     "descriptors_for_copybook_record",
     "descriptors_for_table",
 )
 
 
-# =============================================================================
 #  THE DEFAULT STORE DIRECTION  (Agent Action Plan section 0.6.1)
-# =============================================================================
 
 # COBOL truncates toward zero on store unless ROUNDED is written. Across the
 # whole in-scope cycle there are exactly FIVE ROUNDED sites - two VAT computes
@@ -292,9 +348,7 @@ __all__: Final[tuple[str, ...]] = (
 TRUNCATING_STORE: Final[str] = decimal.ROUND_DOWN
 
 
-# =============================================================================
 #  FAILURES
-# =============================================================================
 
 
 class FieldDescriptorError(ValueError):
@@ -314,23 +368,29 @@ class FieldDescriptorError(ValueError):
 class MissingProvenanceError(FieldDescriptorError):
     """A descriptor was built with neither a dictionary key nor a locator.
 
-    The invariant rule R-5 puts on this file: every instance must be
-    traceable back to a frozen source, either through its dictionary entry or
-    through the `<path>:L<n>` locator of its working-storage declaration. A
-    descriptor with neither is worse than useless - it is a field whose
-    behaviour nobody can audit against the frozen COBOL.
+    The invariant rule R-5 puts on this file. Every field a frozen source
+    declares must arrive through its `dictionary_key`, which is what makes the
+    field-to-entry mapping R-5 asks for real rather than nominal; the only
+    descriptor that may carry a bare `<path>:L<n>` locator instead is the
+    picture parser's, which describes a PICTURE clause it was handed rather
+    than a catalogued declaration. A descriptor with neither is worse than
+    useless - it is a field whose behaviour nobody can audit against the
+    frozen COBOL.
     """
 
 
 class BridgeOnlyFieldError(FieldDescriptorError):
-    """The entry has no copybook view, so it has no COBOL-side storage.
+    """The entry has no declaring COBOL view, so it has no COBOL-side storage.
 
-    Fourteen entries in the generated artifact are declared by the bridge or
-    the schema but by no copybook. The clearest are the three date components
+    "Declaring view" means the copybook view, or the program-source view for a
+    work-file field that no copybook declares; an entry with neither is one
+    that only the bridge and the schema know about. Fourteen entries in the
+    generated artifact are of that kind. The clearest are the three date
+    components
     of the internal IRS posting table, `POST4-DAY`, `POST4-MONTH` and
-    `POST4-YEAR`, which have no counterpart in any copybook and exist only
-    because the bridge derives them from a date string under a guard
-    [common/irspostingMT.cbl:L982-L987] - anomaly A-7.
+    `POST4-YEAR`, which have no counterpart in any COBOL declaration at all
+    and exist only because the bridge derives them from a date string under a
+    guard [common/irspostingMT.cbl:L982-L987] - anomaly A-7.
 
     A `FieldDescriptor` describes COBOL-side storage, and such a field has
     none: no COBOL program can name it, so `arithmetic.py` and `move.py` will
@@ -344,88 +404,114 @@ class BridgeOnlyFieldError(FieldDescriptorError):
     """
 
 
+class UntrustedEntryError(FieldDescriptorError):
+    """An entry offered as a descriptor's source does not carry dictionary provenance.
+
+    Every descriptor for a field a frozen source declares arrives through one
+    door, `from_dictionary_key`, because rule R-5 makes the dictionary the ONLY
+    sanctioned source of that field's picture, scale, signedness and carrier -
+    a hand-written descriptor for such a field is precisely the transcription
+    error the data-dictionary-first directive exists to prevent. The one
+    descriptor built without a key is the picture parser's, which describes a
+    PICTURE clause it was handed rather than a catalogued declaration.
+
+    This failure says an entry came through that door without being the kind of
+    thing the door admits: a key that is not a dictionary entry key, a citation
+    that is not a contained repository locator, a presence block that declares
+    no COBOL-side view for the view beside it, or a vocabulary member that is
+    not a member of its vocabulary. `loader` already refuses a DOCUMENT that does not hold
+    up; this refuses an ENTRY that never came from one. Both are needed, because
+    an entry can be constructed in Python without any document existing at all,
+    and a descriptor built from such an entry would look exactly as
+    authoritative as a real one while citing a source that says something else.
+
+    Always a programmer error, never a data value: an entry read from the
+    committed artifact cannot trip it, because the generator derives every one
+    of these members from the frozen sources and the loader has already checked
+    the document that carries them.
+    """
+
+
 # =============================================================================
 #  THE VALUE OBJECT
-# =============================================================================
 
 
 @dataclass(frozen=True, slots=True, eq=True, repr=False)
 class FieldDescriptor:
     """One COBOL data item's storage description, with its provenance.
 
-    Frozen, slotted and value-equal, so that two descriptors built from the
-    same source compare equal, neither can be mutated behind a holder's back,
-    and two runs behave identically (rule R-6).
+    Frozen, slotted and value-equal, so that two descriptors built from the same
+    source compare equal, neither can be mutated behind a holder's back, and two
+    runs behave identically (rule R-6).
 
-    Build one through a factory rather than by hand. `from_dictionary_key` is
-    the principal path and covers every record field; `for_working_storage`
-    covers a program-local declaration that has no dictionary entry. Direct
-    construction is supported, and checked, for the picture parser - which
-    reads a PICTURE clause into these components and must not be forced
-    through a dictionary lookup it has no key for.
-
-    The members below hold the COPYBOOK view for a dictionary-backed
-    descriptor. They are never blended with the bridge or column view, and
-    the disagreement between the three is offered untouched by `drift()`.
+    Build one through `from_dictionary_key` rather than by hand: that is the
+    ONLY factory, and it covers every field a frozen source declares - the
+    copybook record layouts, and the work-file records the General Ledger
+    programs declare inline in their own FILE SECTIONs. Direct construction is
+    supported and checked for the picture parser alone, which reads a PICTURE
+    clause into these components and has no key to look up, because it
+    describes text rather than resolving a catalogued declaration. The members
+    below hold the COPYBOOK view only - never blended with the bridge or column
+    view, whose disagreement `drift()` offers untouched.
 
     Attributes:
-        name: The COBOL field name, verbatim from the frozen source, with
-            case and hyphens preserved - `"Sales-Average"`,
-            `"WS-IRS-Post-Amount"`, `"sl4-spare3"`. Never rewritten.
-        usage: The storage class. Taken from the dictionary for a record
-            field; supplied by the picture parser otherwise.
-        usage_declared_at: Whether the USAGE clause sat on the item itself,
-            was inherited from a group header, or was absent so that the
-            language default governed. GROUP is the inheritance case that
-            silently retypes 85 fields if ignored.
-        usage_inherited_from: The group header's name when usage was
-            inherited, otherwise None.
-        picture: The PICTURE clause exactly as written, carried verbatim for
-            the same reason `sign_clause_text` is. None when the item has no
-            PICTURE at all, which is how the binary family is declared:
-            `05  Entered         binary-long.` [copybooks/wsbatch.cob:L36]
-            states a usage and no picture, so a None here is a fact about the
-            declaration rather than missing data. Never parsed by this module
-            - the pre-parsed components alongside it are what a store uses.
+        name: The COBOL field name, verbatim from the frozen source, with case
+            and hyphens preserved - `"Sales-Average"`, `"sl4-spare3"`.
+        usage: The storage class. Taken from the dictionary for a record field;
+            supplied by the picture parser otherwise.
+        usage_declared_at: Whether the USAGE clause sat on the item, was
+            inherited from a group header, or was absent so the language default
+            governed. GROUP silently retypes 85 fields if ignored.
+        usage_inherited_from: The group header's name when usage was inherited,
+            otherwise None.
+        picture: The PICTURE clause exactly as written, verbatim for the same
+            reason `sign_clause_text` is. None when the item has no PICTURE, as
+            the binary family is declared - `05  Entered binary-long.`
+            [copybooks/wsbatch.cob:L36] states a usage and no picture, so None is
+            a fact, not missing data. Never parsed here.
         signed: Whether the declaration carries a sign.
-        sign_position: Where the sign lives - overpunched on the trailing
-            digit by COBOL default, overpunched on the leading digit when a
-            SIGN clause says so, held separately, or implicit in a binary or
-            packed representation.
-        sign_clause_text: The SIGN clause exactly as written, so that
-            `"sign leading"` [copybooks/wspost-irs.cob:L21] and `"sign is
-            leading"` [copybooks/irswspost.cob:L14] stay distinguishable.
-            None when the item has no SIGN clause.
+        sign_position: Where the sign lives - overpunched on the trailing digit
+            by COBOL default, on the leading digit when a SIGN clause says so,
+            held separately, or implicit in a binary or packed representation.
+        sign_clause_text: The SIGN clause exactly as written, so `"sign leading"`
+            [copybooks/wspost-irs.cob:L21] and `"sign is leading"`
+            [copybooks/irswspost.cob:L14] stay distinguishable. None if absent.
         digits: Total digit count, `integer_digits + scale`. None for an
             alphanumeric item, a group, and a binary-family item whose range
-            comes from its width rather than a picture
-            [copybooks/wsbatch.cob:L36-L39].
+            comes from its width [copybooks/wsbatch.cob:L36-L39].
         integer_digits: Digit count before the implied decimal point.
         scale: Digit count after it. Zero and None both mean "no fractional
-            part"; the artifact writes None for an item that has no picture.
+            part"; the artifact writes None for an item with no picture.
         character_length: Character count for an alphanumeric item.
-        unsigned: Whether the declaration carries the explicit UNSIGNED
-            keyword on a binary item, as `Page-Lines binary-char unsigned`
-            does [copybooks/wssystem.cob:L65]. Distinct from `signed` being
-            false: an unsigned binary item has no sign bit at all, whereas
-            an unsigned packed item still carries a sign nibble.
+        unsigned: Whether the declaration carries the explicit UNSIGNED keyword
+            on a binary item, as `Page-Lines binary-char unsigned` does
+            [copybooks/wssystem.cob:L65]. Distinct from `signed` being false: an
+            unsigned binary item has no sign bit, an unsigned packed item still
+            carries a sign nibble.
         is_edited: Whether the picture is numeric-edited. Always false for a
-            record field - no in-scope copybook declares an edited picture -
-            and true only for program-local items such as `l6-account`
-            [general/gl072.cbl:L233] and `m pic z(7)9`
-            [sales/sl060.cbl:L213].
+            record field - no in-scope copybook declares an edited picture - and
+            true only for program-local items such as `l6-account`
+            [general/gl072.cbl:L233] and `m pic z(7)9` [sales/sl060.cbl:L213].
         occurs: The OCCURS count for a table item, otherwise None.
         redefines: The item this one redefines, otherwise None.
         is_filler: Whether the item is FILLER.
         is_group: Whether the item is a group rather than an elementary item.
         parent_group: The immediately containing group's name, otherwise None.
         python_storage: Which carrier holds the value - DECIMAL, INT, STR or
-            NONE. Taken from the entry for a record field, so that the choice
+            NONE. Taken from the entry for a record field, so the choice
             between `decimal.Decimal` and `int` is data-driven (rule R-2).
-        dictionary_key: The entry key, for a record field. None otherwise.
-        source_locator: A `<path>:L<n>` locator, mandatory for a
-            program-local item and also carried for a record field, where it
-            points at the copybook declaration.
+        dictionary_key: The entry key. Present for every field a frozen source
+            declares - a copybook record layout, a bridge-derived column, or
+            one of the work-file records a General Ledger program declares
+            inline in its own FILE SECTION. None only on the picture parser's
+            product, which describes a PICTURE clause it was handed rather
+            than a catalogued declaration.
+        source_locator: A `<path>:L<n>` locator, carried alongside the key for
+            a catalogued field, where it points at the declaration the descriptor
+            was built from - a copybook line, or a program's own
+            file-description line for a work-file field. It is the SOLE
+            provenance only on the picture parser's product, where it is
+            mandatory for exactly that reason.
     """
 
     name: str
@@ -452,7 +538,6 @@ class FieldDescriptor:
     source_locator: str | None = None
 
     # -- construction invariants ------------------------------------------
-    #
     # Every check below fires on a PROGRAMMER error and none can fire on a
     # data value (rule R-3). They exist because a descriptor is consumed by
     # 27 record modules and 14 parity tests, and a silently malformed one
@@ -467,8 +552,8 @@ class FieldDescriptor:
                 COBOL - the invariant rule R-5 puts on this file.
             FieldDescriptorError: The name is blank, the locator is malformed,
                 a count is negative, the digit members contradict one another,
-                or a program-local descriptor names a carrier that its own
-                usage and scale do not imply.
+                or a key-less descriptor names a carrier that its own usage
+                and scale do not imply.
         """
         if not self.name:
             raise FieldDescriptorError(
@@ -476,18 +561,25 @@ class FieldDescriptor:
                 "source declares, carried verbatim; got an empty name"
             )
 
-        # R-5, the invariant this file exists to keep. Either provenance will
-        # do, because either one leads a reader to a frozen source location;
-        # neither will not, because then nothing does.
+        # R-5, the invariant this file exists to keep. A field a frozen source
+        # declares must arrive by its dictionary key; a bare locator is the
+        # picture parser's provenance and nobody else's. Neither at all leads a
+        # reader nowhere, so neither at all is refused.
         if self.dictionary_key is None and self.source_locator is None:
             raise MissingProvenanceError(
-                f"{self.name!r} has no provenance: give it either a "
-                "dictionary_key, for a field the generated dictionary covers, "
-                "or a source_locator of the form <path>:L<n> naming its "
-                "working-storage declaration. Rule R-5 requires every "
-                "descriptor to be traceable to a frozen source, and a "
-                "descriptor with neither is a field whose behaviour cannot be "
-                "audited against the COBOL."
+                f"{self.name!r} has no provenance: give it a dictionary_key. "
+                "The generated artifact catalogues every field the frozen "
+                "sources declare - the copybook record layouts, the "
+                "bridge-derived columns, and the work-file records the "
+                "General Ledger programs declare inline in their own FILE "
+                "SECTIONs - so FieldDescriptor.from_dictionary_key is the "
+                "route for all of them. A bare source_locator of the form "
+                "<path>:L<n> is "
+                "provenance for the picture parser's product alone, which "
+                "describes a PICTURE clause rather than a catalogued "
+                "declaration. Rule R-5 requires every descriptor to be "
+                "traceable, and a descriptor with neither is a field whose "
+                "behaviour cannot be audited against the COBOL."
             )
 
         # The locator shape is the dictionary's own, imported rather than
@@ -532,12 +624,13 @@ class FieldDescriptor:
                 "the three cannot disagree"
             )
 
-        # A program-local descriptor must name the carrier its own usage and
-        # scale imply, because nothing else vouches for it. A dictionary-backed
-        # one is EXEMPT: there the generated artifact governs and this file
-        # must never second-guess what it holds (rule R-4). The two agree by
-        # construction anyway - `usage.python_storage_for` implements the very
-        # rule the artifact states at `meta.derivation_rules`.
+        # A key-less descriptor - the picture parser's - must name the carrier
+        # its own usage and scale imply, because nothing else vouches for it. A
+        # dictionary-backed one is EXEMPT: there the generated artifact governs
+        # and this file must never second-guess what it holds (rule R-4). The
+        # two agree by construction anyway - `usage.python_storage_for`
+        # implements the very rule the artifact states at
+        # `meta.derivation_rules`.
         if self.dictionary_key is None and self._carrier_is_derivable():
             implied = cobol_usage.python_storage_for(self.usage, self.scale)
             if implied is not self.python_storage:
@@ -545,8 +638,8 @@ class FieldDescriptor:
                     f"{self.name!r} at {self.source_locator} names the "
                     f"carrier {self.python_storage.value} but usage "
                     f"{self.usage.value} with scale {self.scale} implies "
-                    f"{implied.value}. Let for_working_storage derive it "
-                    "rather than passing it."
+                    f"{implied.value}. Derive it from the usage and the scale "
+                    "rather than passing it, as picture.py does."
                 )
 
     def _carrier_is_derivable(self) -> bool:
@@ -592,7 +685,6 @@ class FieldDescriptor:
         )
 
     # -- storage shape, delegated in full to acas_posting.cobol.usage -----
-    #
     # These are properties rather than methods because each is a pure
     # function of the members already held: no disk is touched and no
     # ordering is observable, so a caller may read one as often as it likes.
@@ -667,7 +759,7 @@ class FieldDescriptor:
         fractional part to quantize.
 
         BUILT WITHOUT CONSULTING THE AMBIENT DECIMAL CONTEXT, deliberately,
-        and the reason is measured rather than argued. The obvious spelling
+        and the reason is shown rather than asserted. The obvious spelling
         `Decimal(1).scaleb(-scale)` is context-sensitive: with a caller's
         context left at precision 1 and a minimum exponent of -2, it returns
         `0.00` for a four-place item instead of `0.0001`, silently, and every
@@ -729,7 +821,6 @@ class FieldDescriptor:
         return cobol_usage.is_zoned_display(self.usage)
 
     # -- provenance, the rule R-5 surface --------------------------------
-    #
     # These are methods and not properties because each may read the
     # generated artifact, and a property that touches a disk invites a caller
     # to read it in a loop. The pure shape members above are properties; these
@@ -745,10 +836,17 @@ class FieldDescriptor:
             bridge=common/salesMT.cbl:L308  column=mysql/ACASDB.sql:L969
 
         A bridge-only entry renders its copybook locator as `absent`, which is
-        how the three IRS date components declare themselves. For a
-        program-local descriptor there is no entry to cite, so the locator of
-        its working-storage declaration is returned instead. Never empty
-        either way, because `__post_init__` refuses a descriptor with no
+        how the three IRS date components declare themselves. A work-file field
+        renders a `program=` segment in the copybook segment's place, naming
+        the program's own file-description line, because that is the view
+        that declares it:
+
+            sort-trans-record.sort-amount  program=general/gl071.cbl:L143
+            bridge=absent  column=absent
+
+        For the picture parser's product there is no entry to cite, so the
+        locator of the declaration it parsed is returned instead. Never empty
+        in any case, because `__post_init__` refuses a descriptor with no
         provenance at all.
 
         Returns:
@@ -876,9 +974,11 @@ class FieldDescriptor:
     ) -> FieldDescriptor:
         """Build the descriptor the generated dictionary holds for one key.
 
-        The principal path, and the one every record module takes. The
-        entry's COPYBOOK view supplies the storage components, because a
-        descriptor describes COBOL-side storage; the entry's
+        The only factory, and the one every record module takes. The entry's
+        DECLARING COBOL view supplies the storage components - its copybook
+        view, or its program-source view for a work-file field that no copybook
+        declares - because a descriptor describes COBOL-side storage; the
+        entry's
         `cobol_python_storage` supplies the carrier, because that choice must
         be data-driven rather than typed by eye (rule R-2). Neither is blended
         with the bridge or column view, and the `unsigned` member is derived by
@@ -894,8 +994,11 @@ class FieldDescriptor:
         the first call, and the loader itself reads the document lazily.
 
         Args:
-            key: A qualified entry key - `<TABLE-NAME>.<COLUMN-NAME>` or
-                `<COPYBOOK-RECORD>.<FIELD-NAME>`, exact and case-sensitive.
+            key: A qualified entry key - `<TABLE-NAME>.<COLUMN-NAME>`,
+                `<COPYBOOK-RECORD>.<FIELD-NAME>` or
+                `<PROGRAM-RECORD>.<FIELD-NAME>`, exact and case-sensitive,
+                with the `#` declaration-line segment where the artifact
+                carries one.
                 Never a bare field name; see this module's docstring for why
                 the two IRS posting tables make that a trap.
             path: An explicit artifact path, or None for the repository's own.
@@ -908,155 +1011,151 @@ class FieldDescriptor:
                 propagate untouched because its message lists near misses and
                 restates the key convention, which is the intended developer
                 experience and better than anything this file could add.
-            BridgeOnlyFieldError: The entry has no copybook view, so the field
-                has no COBOL-side storage to describe.
+            BridgeOnlyFieldError: The entry has neither a copybook view nor a
+                program-source view, so the field has no COBOL-side storage to
+                describe.
         """
         return _memoised_descriptor(key, path)
 
-    @classmethod
-    def for_working_storage(
-        cls,
-        *,
-        name: str,
-        source_locator: str,
-        usage: Usage,
-        picture: str | None = None,
-        signed: bool = False,
-        sign_position: SignPosition = SignPosition.NONE,
-        sign_clause_text: str | None = None,
-        digits: int | None = None,
-        integer_digits: int | None = None,
-        scale: int | None = None,
-        character_length: int | None = None,
-        unsigned: bool = False,
-        is_edited: bool = False,
-        occurs: int | None = None,
-        redefines: str | None = None,
-        is_filler: bool = False,
-        is_group: bool = False,
-        parent_group: str | None = None,
-    ) -> FieldDescriptor:
-        """Build the descriptor for a program-local working-storage item.
 
-        For a field the dictionary does not cover, because it lives in a
-        program's own WORKING-STORAGE rather than in a record layout. These
-        items are not incidental: the whole in-scope cycle turns on several of
-        them.
+#  BUILDING ONE DESCRIPTOR FROM ONE ENTRY
+#
+#  There was a second factory above, `for_working_storage`, which minted a
+#  descriptor for a declared field from a `<path>:L<n>` locator with no
+#  dictionary key. It existed for one population only - the General Ledger
+#  work-file records, which no copybook declares - and it is gone, because
+#  those records are now catalogued as program-source entries and bound by key
+#  like every other declared field. Rule R-5 asks for a field-to-entry mapping
+#  and a locator is evidence, not a mapping. A program-local WORKING-STORAGE
+#  item that genuinely appears in no record layout is described by handing its
+#  declaration to `acas_posting.cobol.picture`, the module Agent Action Plan
+#  section 0.4.1.4 assigns that job to.
 
-            03  work-2          pic s9(14)    comp-3.
-                                            [sales/sl060.cbl:L206]
 
-        `work-2` has ZERO scale while the value added into it carries two
-        [sales/sl060.cbl:L218], so pence are discarded on every accumulation -
-        and the divide that follows discards the remainder too, because the
-        receiving field is an integer. Describe it with `scale=0` and the
-        defect reproduces; describe it with `scale=2` and it does not.
+def _require_dictionary_provenance(
+    entry: DictionaryEntry, declaring: CopybookField
+) -> None:
+    """Refuse an entry that does not carry the provenance a dictionary entry carries.
 
-            03  work-a          binary-long           value zero.
-                                            [sales/sl100.cbl:L182]
+    Args:
+        entry: The entry a descriptor is about to be composed from.
+        declaring: Its DECLARING COBOL view, already known to be present - the
+            copybook view where the entry has one, and the program-source view
+            otherwise. The two carry the same members, so one gate serves both.
 
-        `work-a` and `work-b` are BINARY-LONG in the cash posting step, so
-        that whole payment-days path is 32-bit integer arithmetic - while the
-        same two names are packed decimal in the invoice posting step
-        [sales/sl060.cbl:L207]. The divergence is per program and is preserved,
-        which is why these descriptors are built at their point of use with
-        their own locator rather than looked up by name.
+    Raises:
+        UntrustedEntryError: The entry's key, citation, presence block or one
+            of its vocabulary members is not what a dictionary-derived entry
+            carries.
 
-        `usage_declared_at` is always FIELD here: a caller stating a usage for
-        one item is stating it on the item. Where a program-local group header
-        carries the usage instead, as `03 total-group occurs 3 comp-3.` does
-        [sales/sl060.cbl:L219], pass the group's usage for each subordinate
-        item and name the group in `parent_group`.
+    WHAT THIS IS FOR. The descriptor built below is what 27 record modules and
+    14 parity tests treat as the authority on a field's storage, and its
+    `dictionary_key` and `source_locator` are the two things that make rule R-5's
+    traceability claim checkable. An entry that was not derived from the
+    committed artifact - constructed in Python, or read from a document that was
+    never checked - would produce a descriptor that is indistinguishable from a
+    real one at every point of use while citing a frozen source line that says
+    something different. Every check below is on the migration's own metadata,
+    not on an accounting value, so rule R-3's prohibition on new validation is
+    untouched: no posting, amount, account code or batch is examined, and an
+    entry from the committed artifact cannot trip any of them.
 
-        The carrier is DERIVED from `usage` and `scale` rather than accepted
-        from the caller, by the same rule the artifact states - so a
-        program-local descriptor and a dictionary-backed one can never disagree
-        about what holds a value.
-
-        Args:
-            name: The COBOL field name, verbatim from the program source.
-            source_locator: MANDATORY. `<path>:L<n>` naming the declaration,
-                as `"sales/sl060.cbl:L206"`, or a span for a run of related
-                declarations. This is what keeps rule R-5 satisfied for a
-                field that has no dictionary entry.
-            usage: The item's storage class.
-            picture: Its PICTURE clause verbatim, if it has one. Leave it None
-                for a binary item declared by usage alone, as
-                `work-a binary-long` is [sales/sl100.cbl:L182].
-            signed: Whether its declaration carries a sign.
-            sign_position: Where that sign lives.
-            sign_clause_text: A SIGN clause verbatim, if the item has one.
-            digits: Total digit count.
-            integer_digits: Digit count before the implied decimal point.
-            scale: Digit count after it. State it explicitly for a numeric
-                item; zero is a meaningful answer and the important one.
-            character_length: Character count for an alphanumeric item.
-            unsigned: Whether the explicit UNSIGNED keyword is present.
-            is_edited: Whether the picture is numeric-edited, as
-                `pic 9999.99 blank when zero` is [general/gl072.cbl:L233].
-                Pass the NUMERIC digits and scale for such an item - 6 and 2
-                for that one - so a store lands at the right precision.
-            occurs: The OCCURS count for a table item.
-            redefines: The item this one redefines.
-            is_filler: Whether the item is FILLER.
-            is_group: Whether the item is a group.
-            parent_group: The immediately containing group's name.
-
-        Returns:
-            The descriptor for that item, carrying its locator as provenance.
-
-        Raises:
-            FieldDescriptorError: The locator is missing or malformed, the name
-                is blank, or the components contradict one another.
-            ValueError: The usage class has no Python carrier, which only
-                POINTER lacks and no record layout declares.
-        """
-        return cls(
-            name=name,
-            usage=usage,
-            usage_declared_at=UsageDeclaredAt.FIELD,
-            usage_inherited_from=None,
-            picture=picture,
-            signed=signed,
-            sign_position=sign_position,
-            sign_clause_text=sign_clause_text,
-            digits=digits,
-            integer_digits=integer_digits,
-            scale=scale,
-            character_length=character_length,
-            unsigned=unsigned,
-            is_edited=is_edited,
-            occurs=occurs,
-            redefines=redefines,
-            is_filler=is_filler,
-            is_group=is_group,
-            parent_group=parent_group,
-            python_storage=cobol_usage.python_storage_for(usage, scale),
-            dictionary_key=None,
-            source_locator=source_locator,
+    The citation checks in particular are not decoration. A malformed or
+    escaping locator is a citation a reader cannot follow, and a citation nobody
+    can follow is the same as no traceability at all.
+    """
+    if ENTRY_KEY_PATTERN.match(entry.key) is None:
+        raise UntrustedEntryError(
+            f"{entry.key!r} is not a dictionary entry key: an entry key is "
+            "<TABLE-NAME>.<COLUMN-NAME> or <COPYBOOK-RECORD>.<FIELD-NAME>, "
+            "optionally with a #<n> tail where a field name repeats inside one "
+            "record. A descriptor is only dictionary-backed if the entry it "
+            "came from is one the generated artifact carries (rule R-5)."
         )
 
+    # The presence block is what every consumer tests before reading a view, so
+    # a flag that disagrees with the view beside it is the one inconsistency
+    # that reliably produces a confidently wrong answer rather than an error.
+    # EITHER declaring flag satisfies this: a copybook field carries
+    # `in_copybook`, and a work-file field a General Ledger program declares
+    # inline in its own FILE SECTION carries `in_program_source` and NOT
+    # `in_copybook`, because no copybook declares it.
+    if not (entry.presence.in_copybook or entry.presence.in_program_source):
+        raise UntrustedEntryError(
+            f"{entry.key!r} carries a declaring COBOL view while its presence "
+            "block says it has neither a copybook nor a program-source one. "
+            "The generator sets each flag from the view it belongs to, so "
+            "they cannot disagree in the committed artifact; an entry in which "
+            "they do was not derived from it."
+        )
 
-# =============================================================================
-#  BUILDING ONE DESCRIPTOR FROM ONE ENTRY
-# =============================================================================
+    if REPO_PATH_PATTERN.match(declaring.file) is None:
+        raise UntrustedEntryError(
+            f"{entry.key!r} cites the declaring file {declaring.file!r}, "
+            "which is not a contained repository-relative path. A citation "
+            "that could point outside the repository is one a reader cannot "
+            "check, "
+            "and checkable citations are the whole of rule R-5."
+        )
+
+    if SOURCE_LOCATOR_PATTERN.match(declaring.source) is None:
+        raise UntrustedEntryError(
+            f"{entry.key!r} cites {declaring.source!r}, which is not a "
+            "contained <path>:L<n> locator. Every descriptor must lead a "
+            "reader to the frozen line that declares the field (rule R-5)."
+        )
+
+    # A dataclass annotation is not a runtime guarantee: an entry built in
+    # Python can carry a bare string where a vocabulary member belongs, and
+    # `python_storage_for` and the sign handling downstream would then compare
+    # against members that never match.
+    for label, value, vocabulary in (
+        ("cobol_python_storage", entry.cobol_python_storage, CobolPythonStorage),
+        ("declaring.usage", declaring.usage, Usage),
+        ("declaring.usage_declared_at", declaring.usage_declared_at,
+         UsageDeclaredAt),
+        ("declaring.sign_position", declaring.sign_position, SignPosition),
+    ):
+        if not isinstance(value, vocabulary):
+            raise UntrustedEntryError(
+                f"{entry.key!r} carries {label}={value!r}, which is not a "
+                f"member of {vocabulary.__name__}. The artifact records only "
+                "members of these vocabularies, so an entry carrying anything "
+                "else was not derived from it."
+            )
 
 
 def _descriptor_from_entry(entry: DictionaryEntry) -> FieldDescriptor:
-    """Compose a descriptor from the copybook view of one entry.
+    """Compose a descriptor from the DECLARING COBOL view of one entry.
+
+    The declaring view is the copybook view where the entry has one, and the
+    program-source view otherwise - the work-file records the General Ledger
+    programs declare inline in their own FILE SECTIONs. The two carry the same
+    members, because a COBOL data declaration has one shape wherever it is
+    written, so one composition serves both and neither is special-cased. They
+    never coexist: an entry has one or the other, and an entry with neither has
+    no COBOL-side storage at all.
 
     Args:
-        entry: The entry to describe.
+        entry: The entry to describe. Admitted only if it carries the
+            provenance a dictionary-derived entry carries - see
+            `_require_dictionary_provenance` for what that means and why the
+            check belongs here rather than at the point of use.
 
     Returns:
-        The descriptor for its copybook view.
+        The descriptor for its declaring COBOL view.
 
     Raises:
-        BridgeOnlyFieldError: The entry has no copybook view.
+        BridgeOnlyFieldError: The entry has neither a copybook view nor a
+            program-source view, so nothing in COBOL declares it.
+        UntrustedEntryError: The entry does not carry dictionary provenance.
     """
-    copybook = entry.copybook
+    copybook = (
+        entry.copybook if entry.copybook is not None else entry.program_source
+    )
     if copybook is None:
         raise BridgeOnlyFieldError(_bridge_only_message(entry))
+    _require_dictionary_provenance(entry, copybook)
     return FieldDescriptor(
         name=copybook.name,
         usage=copybook.usage,
@@ -1071,9 +1170,10 @@ def _descriptor_from_entry(entry: DictionaryEntry) -> FieldDescriptor:
         scale=copybook.scale,
         character_length=copybook.character_length,
         unsigned=_declared_unsigned(copybook),
-        # No in-scope copybook declares a numeric-edited picture: a search for
-        # edit characters inside a `pic` clause across every one of them
-        # returns zero matches. Edited items are program-local, so a
+        # Neither an in-scope copybook nor an inline work-file record declares
+        # a numeric-edited picture: a search for edit characters inside a `pic`
+        # clause across every one of them returns zero matches. Edited items
+        # are print lines and program-local working storage, so a
         # dictionary-backed descriptor is never edited.
         is_edited=False,
         occurs=copybook.occurs,
@@ -1081,9 +1181,12 @@ def _descriptor_from_entry(entry: DictionaryEntry) -> FieldDescriptor:
         is_filler=copybook.is_filler,
         is_group=copybook.is_group,
         parent_group=copybook.parent_group,
-        # The artifact governs the carrier. It is NOT recomputed here, so that
-        # this file cannot quietly disagree with what the record layer holds
-        # (rule R-4).
+        # The artifact governs the carrier - for a work-file field exactly as
+        # for a column-backed one, because the generator applies one rule to
+        # the declaring view whichever view that is. It is NOT recomputed
+        # here, so
+        # that this file cannot quietly disagree with what the record layer
+        # holds (rule R-4).
         python_storage=entry.cobol_python_storage,
         dictionary_key=entry.key,
         source_locator=copybook.source,
@@ -1095,7 +1198,7 @@ def _declared_unsigned(copybook: CopybookField) -> bool:
 
     Derived BY COMPARISON, never from a list of known cases: a binary-family
     item declared without a sign is an item whose declaration said UNSIGNED,
-    because the family is signed by default. Measured across the generated
+    because the family is signed by default. Counted over the generated
     artifact this is true of five items, `Page-Lines binary-char unsigned`
     [copybooks/wssystem.cob:L65] among them - so a table of known cases
     written from the one example everybody cites would have missed four.
@@ -1117,10 +1220,10 @@ def _declared_unsigned(copybook: CopybookField) -> bool:
 
 
 def _bridge_only_message(entry: DictionaryEntry) -> str:
-    """Explain why an entry with no copybook view has no descriptor.
+    """Explain why an entry with no declaring COBOL view has no descriptor.
 
     Args:
-        entry: The entry that lacks a copybook view.
+        entry: The entry that lacks both a copybook and a program-source view.
 
     Returns:
         A message naming the entry, what does declare it, and where to look
@@ -1136,8 +1239,10 @@ def _bridge_only_message(entry: DictionaryEntry) -> str:
     # Built as a list of finished sentences, each parenthesised, so that no
     # fragment can join the wrong neighbour through implicit concatenation.
     opening = (
-        f"{entry.key!r} has no copybook view, so it has no COBOL-side "
-        f"storage for a FieldDescriptor to describe: it is declared by "
+        f"{entry.key!r} has no copybook view and no program-source view, so "
+        f"it has no COBOL-side storage for a FieldDescriptor to describe: "
+        f"it is "
+        f"declared by "
         f"{where} only, and the artifact holds its Python carrier as "
         f"{entry.cobol_python_storage.value}."
     )
@@ -1169,7 +1274,7 @@ def _memoised_descriptor(key: str, path: Path | None) -> FieldDescriptor:
 
     `functools.cache` is the modern spelling of `functools.lru_cache` with no
     size limit, and it is unbounded here on purpose: the key domain is bounded
-    by the artifact, which holds 1015 entries, so the cache cannot grow beyond
+    by the artifact, which holds 1061 entries, so the cache cannot grow beyond
     the dictionary itself. Safe to cache at all because a descriptor is frozen
     and value-equal and the artifact is immutable once read.
 
@@ -1186,9 +1291,7 @@ def _memoised_descriptor(key: str, path: Path | None) -> FieldDescriptor:
     return _descriptor_from_entry(loader.get_entry(key, path=path))
 
 
-# =============================================================================
 #  WHOLE-RECORD CONVENIENCES
-# =============================================================================
 
 
 def descriptors_for_table(

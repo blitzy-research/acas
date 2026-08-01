@@ -1,39 +1,22 @@
 """The COBOL arithmetic verbs: ADD, SUBTRACT, MULTIPLY, DIVIDE and COMPUTE.
 
 Agent Action Plan section 0.3.1 fixes this module in one line - "arithmetic.py
-(ADD/SUBTRACT/MULTIPLY/DIVIDE/COMPUTE; default truncate,
-ROUNDED=half-up)" - and
-its transformation row in section 0.4.1.4 states the substance:
-
-    Target File                        Transformation  Source File
-    acas_posting/cobol/arithmetic.py   CREATE          the arithmetic census in
-                                                       section 0.6.1
-    Key Changes: Extended-precision intermediates; quantize(ROUND_DOWN) on
-    un-ROUNDED store; quantize(ROUND_HALF_UP) at the five ROUNDED sites; int
-    arithmetic for the binary family.
-
-The two transformation rules it implements, from section 0.1.2:
-
-     9  COMPUTE/ADD/SUBTRACT/MULTIPLY/DIVIDE without ROUNDED
-        -> Decimal arithmetic then quantize(..., ROUND_DOWN)
-        -> Truncation is the default
-    10  The same verbs WITH ROUNDED
-        -> quantize(..., ROUND_HALF_UP)
-        -> Exactly five sites
+(ADD/SUBTRACT/MULTIPLY/DIVIDE/COMPUTE; default truncate, ROUNDED=half-up)" -
+and section 0.1.2 states the two transformation rules it implements: those
+verbs WITHOUT `ROUNDED` become `Decimal` arithmetic then
+`quantize(..., ROUND_DOWN)`, and WITH `ROUNDED` they become
+`quantize(..., ROUND_HALF_UP)` at exactly five sites. Intermediates carry
+extended precision; the binary family is `int`.
 
 TRUNCATION IS THE DEFAULT; ROUNDING IS THE ANNOTATED EXCEPTION
 ==============================================================
-Agent Action Plan section 0.1.1, verbatim:
+Agent Action Plan section 0.1.1, verbatim: "COBOL `COMPUTE` truncates toward
+zero on store unless `ROUNDED` is written. Across the entire in-scope cycle
+there are exactly five `ROUNDED` sites ... Every other store truncates.
+Getting this backwards would corrupt essentially every posted figure, so
+truncation is the default and rounding is the annotated exception."
 
-    "COBOL `COMPUTE` truncates toward zero on store unless `ROUNDED` is
-    written. Across the entire in-scope cycle there are exactly five `ROUNDED`
-    sites: [general/gl080.cbl:L328], [general/gl051.cbl:L791],
-    [general/gl051.cbl:L796], [irs/irs030.cbl:L1551] and
-    [irs/irs030.cbl:L1562]. Every other store truncates. Getting this
-    backwards would corrupt essentially every posted figure, so truncation is
-    the default and rounding is the annotated exception."
-
-Those five, read from the frozen source and reproduced verbatim:
+Those five, read from the frozen source:
 
     [general/gl051.cbl:L791]  in paragraph `net.` (L788)
         compute  vat-amount rounded = post-amount * ws-vat-rate / 100.
@@ -47,15 +30,15 @@ Those five, read from the frozen source and reproduced verbatim:
     [irs/irs030.cbl:L1562]  in `Gross section.` (L1556), ONE statement split
                             across two physical lines, L1562 and L1563
         compute  vat-amount rounded =
-                 post-amount - (post-amount / ( (WS-Vat-Current + 100) / 100)).
+                 post-amount - (post-amount / ((WS-Vat-Current + 100) / 100)).
 
-Counted per file, and independently re-verified against the frozen sources
-while writing this module: `gl051` two, `gl080` one, `irs030` two, and ZERO in
-`gl070`, `gl071`, `gl072`, `sl055`, `sl060`, `sl100`, `pl055`, `pl060` and
-`pl100`. So `rounded` is a per-CALL keyword argument that defaults to False,
-and there is deliberately no module-level, context-level or descriptor-level
-rounding mode anyone could switch on. THREE OF THE FIVE SITES ARE IMMEDIATELY
-FOLLOWED BY AN UN-ROUNDED STORE, which is the whole argument for that design:
+Counted per file against the frozen sources: `gl051` two, `gl080` one,
+`irs030` two, and ZERO in `gl070`, `gl071`, `gl072`, `sl055`, `sl060`,
+`sl100`, `pl055`, `pl060` and `pl100`. So `rounded` is a per-CALL keyword
+argument defaulting to False, and there is deliberately no module-level,
+context-level or descriptor-level rounding mode anyone could switch on. THREE
+OF THE FIVE SITES ARE IMMEDIATELY FOLLOWED BY AN UN-ROUNDED STORE, which is
+the whole argument for that design:
 
     [general/gl051.cbl:L797]  subtract vat-amount  from  post-amount.
     [general/gl080.cbl:L329]  multiply a  by  period  giving  y.
@@ -65,89 +48,67 @@ A mode would carry rounding across those boundaries and move a posted figure.
 
 Two commented-out predecessors of the IRS pair sit immediately above the live
 ones and name a differently spelled rate item, `vat` rather than
-`WS-Vat-Current` - anomaly A-19:
-
-    [irs/irs030.cbl:L1550]  *>  compute vat-amount rounded = post-amount *
-                                vat / 100.
-    [irs/irs030.cbl:L1561]  *>  compute vat-amount rounded = post-amount -
-                                (post-amount / ( (vat + 100) / 100)).
-
-They are comments, so they are not implemented. They are recorded here so that
-a reader diffing this module against the frozen program does not conclude a
-variant was lost.
+`WS-Vat-Current` - anomaly A-19, at [irs/irs030.cbl:L1550] and
+[irs/irs030.cbl:L1561]. They are comments, so they are not implemented; they
+are recorded so that a reader diffing this module against the frozen program
+does not conclude a variant was lost.
 
 WHY THE TWO PYTHON ROUNDING MODES ARE THE RIGHT ONES
 ====================================================
-`decimal.ROUND_DOWN` rounds TOWARD ZERO, not toward negative infinity. It
-therefore matches COBOL truncation for BOTH signs, which the sign flips
-scattered through the cycle make load-bearing:
+`decimal.ROUND_DOWN` rounds TOWARD ZERO, not toward negative infinity, so it
+matches COBOL truncation for BOTH signs, which the sign flips scattered
+through the cycle make load-bearing. `decimal.ROUND_HALF_UP` rounds ties AWAY
+FROM ZERO, which is what COBOL `ROUNDED` means and is NOT Python's built-in
+banker's rounding:
 
-    ROUND_DOWN:     1.999 -> 1.99      and    -1.999 -> -1.99
-    (floor would give                        -1.999 -> -2.00, which is wrong)
-
-`decimal.ROUND_HALF_UP` rounds ties AWAY FROM ZERO, which is what COBOL
-`ROUNDED` means - not Python's built-in banker's rounding:
-
-    ROUND_HALF_UP:  1.995 -> 2.00      and    -1.995 -> -2.00
-                    1.994 -> 1.99      and     2.50  -> 3  (into `pic 99`)
-
-Both were verified on this interpreter, whose `decimal` is the C `_decimal`
-implementation backed by libmpdec, and both are reasserted by the parity suite
-rather than trusted.
+    ROUND_DOWN      1.999 ->  1.99      -1.999 -> -1.99
+    (ROUND_FLOOR would give             -1.999 -> -2.00, which is wrong)
+    ROUND_HALF_UP   1.995 ->  2.00      -1.995 -> -2.00
+                    1.994 ->  1.99       2.50  ->  3   (into `pic 99`)
+    (the default ROUND_HALF_EVEN gives   2.50  ->  2, which is not COBOL)
 
 NO ON SIZE ERROR, NO REMAINDER - SO OVERFLOW IS SILENT
 ======================================================
 `ON SIZE ERROR` occurs ZERO times across the twelve in-scope programs, and so
 does `REMAINDER`. Both were counted directly. Two consequences, and neither is
-a matter of taste:
+a matter of taste. First, a store whose value does not fit its receiving field
+keeps the LOW-ORDER digits and discards the high-order ones, silently: nothing
+raises, nothing is clamped, no field is widened and no warning is emitted,
+because there is no error path anywhere in the specification to reproduce
+(rule R-3). So 12345.67 stored into a five-digit two-place item is 345.67, and
+-12345.67 into the signed form of the same item is -345.67. Second, there is
+no remainder surface - `DIVIDE ... REMAINDER ...` is not implemented because
+no in-scope statement writes it.
 
-  * A store whose value does not fit its receiving field keeps the LOW-ORDER
-    digits and discards the high-order ones, silently. Nothing raises, nothing
-    is clamped, no field is widened and no warning is emitted, because there is
-    no error path anywhere in the specification to reproduce (rule R-3). So
-    12345.67 stored into a five-digit two-place item is 345.67, and -12345.67
-    into the signed form of the same item is -345.67.
-  * There is no remainder surface. `DIVIDE ... REMAINDER ...` is not
-    implemented because no in-scope statement writes it.
+The absence of the clause does NOT mean the absence of behaviour, and the two
+outcomes it leaves undefined were measured to be DIFFERENT from each other. An
+overflowing store stores its low-order digits, as above. A ZERO DIVISOR stores
+nothing whatever - the receiving field keeps the value it already held and the
+run continues, with no diagnostic and exit status zero. That is question Q-7,
+and `SizeErrorNoStore` carries the experiment and the observation.
 
 THE STORE PATH AND THE INTERMEDIATE PATH ARE DIFFERENT
 ======================================================
 `store` quantizes to a receiving field. `intermediate` does not, and it exists
 because COBOL evaluates arithmetic inside a relation condition at intermediate
-precision with NO receiving field - so nothing truncates there. Six live sites,
-every one of them counted and read:
-
-    [general/gl051.cbl:L1060]   if  line-cnt > Page-Lines - 6
-    [general/gl051.cbl:L1111]   if  line-cnt > Page-Lines - 12
-    [sales/sl060.cbl:L621]      if  line-cnt > Page-Lines - 7
-    [sales/sl060.cbl:L691]      if  line-cnt > Page-Lines - 6 and
-    [purchase/pl060.cbl:L556]   if  line-cnt > Page-Lines - 7
-    [purchase/pl060.cbl:L619]   if  line-cnt > Page-Lines - 6 and
-
-Their operands happen to be integers - `line-cnt pic 99 comp`
-[sales/sl060.cbl:L223], `line-cnt binary-char` [sales/sl100.cbl:L173] and
-`Page-Lines binary-char unsigned` [copybooks/wssystem.cob:L65] - so no penny
-turns on these six. The PATH is published anyway, because the rule is what
-matters: a single all-purpose function that always quantized would silently
-truncate where COBOL does not, and a future reader must not conclude from this
-module's shape that intermediates truncate.
+precision with NO receiving field, so nothing truncates there. Six live sites,
+all of the form `if line-cnt > Page-Lines - n`: [general/gl051.cbl:L1060],
+[general/gl051.cbl:L1111], [sales/sl060.cbl:L621], [sales/sl060.cbl:L691],
+[purchase/pl060.cbl:L556] and [purchase/pl060.cbl:L619]. Their operands happen
+to be integers - `line-cnt pic 99 comp` [sales/sl060.cbl:L223], `line-cnt
+binary-char` [sales/sl100.cbl:L173] and `Page-Lines binary-char unsigned`
+[copybooks/wssystem.cob:L65] - so no penny turns on these six. The PATH is
+published anyway, because the rule is what matters: a single all-purpose
+function that always quantized would silently truncate where COBOL does not,
+and a future reader must not conclude from this module's shape that
+intermediates truncate.
 
 THE TWO DIVIDE OPERAND ORDERS ARE BOTH LIVE AND BOTH PUBLISHED
 ==============================================================
-`DIVIDE a BY b GIVING c` means c = a / b. Thirteen sites:
-
-    [general/gl051.cbl:L604]   [general/gl051.cbl:L607]
-    [general/gl051.cbl:L1035]  [general/gl051.cbl:L1037]
-    [general/gl051.cbl:L1044]  [general/gl072.cbl:L386]
-    [general/gl072.cbl:L413]   [general/gl080.cbl:L328]  (the ROUNDED one)
-    [sales/sl100.cbl:L511]     [purchase/pl100.cbl:L502]
-    [irs/irs030.cbl:L1074]     [irs/irs030.cbl:L1077]
-    [irs/irs030.cbl:L1333]
-
-`DIVIDE a INTO b GIVING c` means c = b / a. Four sites:
-
-    [sales/sl060.cbl:L827]     [sales/sl060.cbl:L843]
-    [purchase/pl060.cbl:L751]  [purchase/pl060.cbl:L766]
+`DIVIDE a BY b GIVING c` means c = a / b, at thirteen sites; `DIVIDE a INTO b
+GIVING c` means c = b / a, at four. Seventeen in all, every one of them with
+GIVING, and each is enumerated with its own locator at the function that
+reproduces it - `divide_by_giving` and `divide_into_giving`.
 
 Two of those compute the SAME quotient shape - an accumulator over a counter -
 written with the operands reversed, which is the substance of anomaly A-10:
@@ -157,28 +118,25 @@ written with the operands reversed, which is the substance of anomaly A-10:
     [sales/sl100.cbl:L511]  divide work-b by sales-pay-activety
                                    giving sales-pay-average.
 
-So `divide_by_giving` and `divide_into_giving` are published SEPARATELY, each
-naming its operands the way its own verb form does, so that a program module
-transcribes its own line literally instead of mentally swapping arguments. They
-are not one function behind a flag and neither forwards to the other with the
-arguments exchanged. Neither the no-GIVING forms of DIVIDE nor a REMAINDER
-phrase is published: the census found no in-scope statement using either.
+So the two are published SEPARATELY, each naming its operands the way its own
+verb form does, so that a program module transcribes its own line literally
+instead of mentally swapping arguments. They are not one function behind a
+flag and neither forwards to the other with the arguments exchanged. Neither
+the no-GIVING forms of DIVIDE nor a REMAINDER phrase is published: the census
+found no in-scope statement using either.
 
-INTEGER TRUNCATION IS NOT PYTHON'S `//`
-=======================================
-Python's `//` FLOORS; COBOL truncates TOWARD ZERO. They agree on every
-positive quotient and disagree on every negative one:
-
-    -7 // 2 == -4        but COBOL gives -3
-
-`//` therefore appears nowhere in this module's arithmetic. Every integer
-quotient goes through `usage.truncate_toward_zero`, which exists for exactly
-this reason, and a dedicated parity test asserts the negative case. It matters
+INTEGER TRUNCATION IS NOT PYTHON'S FLOOR DIVISION
+=================================================
+Python's floor division FLOORS; COBOL truncates TOWARD ZERO. They agree on
+every positive quotient and disagree on every negative one - -7 // 2 is -4
+where COBOL gives -3 - so floor division appears nowhere in this module's
+arithmetic and every integer quotient goes through
+`usage.truncate_toward_zero`, which exists for exactly this reason. It matters
 because whole paths of the cycle are integer arithmetic end to end: the seven
 sales statistics are picture-less `binary-long` [copybooks/wssl.cob:L46-L52],
 including `Sales-Average` at L49 and `Sales-Pay-Average` at L51, and the
 program's own working items are `binary-long` too - `work-a`
-[sales/sl100.cbl:L182] and `work-b` [sales/sl100.cbl:L183].
+[sales/sl100.cbl:L182], `work-b` [sales/sl100.cbl:L183].
 
 WHICH CARRIER A RESULT LANDS ON IS THE FIELD'S DECISION, NOT THIS MODULE'S
 ==========================================================================
@@ -191,14 +149,11 @@ A-8 are both expressible and NEITHER is the default:
 
 `work-2` has ZERO scale while the value added into it carries two, so
 `add work-goods to work-2` [sales/sl060.cbl:L826] discards the pence -
-truncation number one - and the divide that follows at
-[sales/sl060.cbl:L827] stores into a `binary-long`, discarding the remainder -
-truncation number two. Meanwhile
-
-    03  work-a      binary-long   value zero.    [sales/sl100.cbl:L182]
-
-makes the cash path 32-bit integer arithmetic instead: a DIFFERENT mechanism,
-in a different program, reached through the same `store`.
+truncation number one - and the divide that follows at [sales/sl060.cbl:L827]
+stores into a `binary-long`, discarding the remainder - truncation number two.
+Meanwhile `03  work-a  binary-long  value zero.` [sales/sl100.cbl:L182] makes
+the cash path 32-bit integer arithmetic instead: a DIFFERENT mechanism, in a
+different program, reached through the same `store`.
 
 NO AVERAGE HELPER IS PUBLISHED HERE, AND NONE MAY BE ADDED
 ==========================================================
@@ -209,7 +164,7 @@ mutually incompatible. Read from the frozen source:
       conditions (L819, L820), an ELSE that zeroes the accumulator (L823), the
       counter incremented BEFORE the divide (L825), and the INTO form (L827).
   (b) [sales/sl060.cbl:L832] `ba000-Credit-Comp section.` - the same two-part
-      guard (L835, L836), but NO counter increment anywhere, which silently
+      guard (L835, L836) but NO counter increment anywhere, which silently
       drops a customer's first credit note (anomaly A-9), PLUS an extra outer
       guard `if work-2 not = zero` (L841) wrapping both the add (L842) and the
       divide (L843).
@@ -217,7 +172,7 @@ mutually incompatible. Read from the frozen source:
       (L506) with no ELSE, the counter incremented AFTER the add (L510), and
       the BY form with the operands reversed (L511).
 
-The purchase mirrors are [purchase/pl060.cbl:L745] with
+The purchase mirrors pair [purchase/pl060.cbl:L745] with
 [purchase/pl060.cbl:L751], [purchase/pl060.cbl:L760] with
 [purchase/pl060.cbl:L766], and [purchase/pl100.cbl:L498] with
 [purchase/pl100.cbl:L502].
@@ -229,165 +184,134 @@ covering all three would need a flag per dimension, at which point it is not a
 helper. Agent Action Plan section 0.6.1, verbatim: "All three must be
 reproduced as they are. Normalising them into one helper would be the single
 easiest way to fail this migration." This module therefore publishes
-primitives, each program module writes its own guard, and no
-`moving_average`, `running_average` or `average` may ever be added here.
+primitives, each program module writes its own guard, and no `moving_average`,
+`running_average` or `average` may ever be added here.
 
 Nothing else is published either: no percentage, no VAT formula, no
-apportionment, no rounding-to-pence convenience, and no business constant.
-Agent Action Plan section 0.3.1 draws the line - "`cobol/` contains no business
-logic and `programs/` contains no numeric primitives ... any parity failure
-localises immediately to one layer or the other" - so no account number, no
-tax rate, no ledger balance, no batch status and no period index appears below.
-Where a numeric literal from the frozen source is quoted, it is quoted inside
+apportionment, no rounding-to-pence convenience and no business constant.
+Agent Action Plan section 0.3.1 draws the line - "`cobol/` contains no
+business logic and `programs/` contains no numeric primitives ... any parity
+failure localises immediately to one layer or the other" - so no account
+number, no tax rate, no ledger balance, no batch status and no period index
+appears below. A numeric literal from the frozen source is quoted only inside
 a locator-cited comment or docstring, never written as code.
 
 LAYERING  (Agent Action Plan section 0.4.3)
 ===========================================
-    MAY import       the standard library, `acas_posting.cobol.field` and
-                     `acas_posting.cobol.usage`, and the
-                     `acas_posting.dictionary` public surface
-    MUST NOT import  `acas_posting.records`, `acas_posting.dal`,
-                     `acas_posting.programs`, `acas_posting.cli`,
-                     `acas_posting.clock`, `acas_posting.dates`,
-                     `acas_posting.workfiles`, the compiled-oracle tree, and
-                     the sibling `picture`, `move`, `condition_names` and
-                     `sortverb` modules
-    No third-party import belongs here. The pinned dependency set holds
-    nothing this folder needs, and Python is `requires-python = "==3.12.*"`.
-
-`acas_posting.programs.*` imports THIS module; the edge runs one way only.
+MAY import the standard library, `acas_posting.cobol.field` and
+`acas_posting.cobol.usage`, and the `acas_posting.dictionary` public surface.
+MUST NOT import the records, data-access, program, CLI, clock, date or
+work-file layers, the compiled-oracle tree, or the sibling `picture`, `move`,
+`condition_names` and `sortverb` modules. No third-party import belongs here:
+the pinned dependency set holds nothing this folder needs. The program layer
+will import THIS module; the edge runs one way only.
 
 ZERO BINARY FLOATING POINT  (rule R-2, and this module is the primary site)
-==========================================================================
+===========================================================================
 Rule R-2, verbatim: "No accounting value may pass through a binary
 floating-point type at any point - not in computation, not in storage, not in
 transport." Agent Action Plan section 0.7.2 names this file directly:
 "`acas_posting/cobol/arithmetic.py` performs all computation on
-`decimal.Decimal` with explicit contexts: un-`ROUNDED` stores truncate, and the
-five `ROUNDED` sites identified in section 0.6.1 round half-away-from-zero.
-Binary integer fields are Python `int`, never float."
+`decimal.Decimal` with explicit contexts ... Binary integer fields are Python
+`int`, never float."
 
 So `float`, `complex`, `math`, `statistics`, `fractions`, the builtin `round`,
 `numpy` and `pandas` appear nowhere below, and a `float` or `complex` ARGUMENT
 IS REFUSED rather than converted. `decimal.Decimal(0.1)` is
 0.1000000000000000055511151231257827021181583404541015625, so accepting a
 float would launder a loss that happened before this module was reached. That
-refusal is the ONE check here that inspects an argument's type, it is a
-PROGRAMMER-error gate protecting rule R-2, and it is emphatically not a
-business validation of the kind rule R-3 forbids: it cannot fire on the
-magnitude or the sign of a value, only on its carrier. `int`, `decimal.Decimal`
-and a numeric `str` are accepted; nothing else is. A Python `bool` is an `int`
-by inheritance and is accepted as one - COBOL has no boolean numeric, and
-adding a special case would be exactly the sort of invention rule R-3 rules
-out.
+refusal is the ONE check here that inspects an argument's type; it is a
+PROGRAMMER-error gate protecting rule R-2, not a business validation of the
+kind rule R-3 forbids, because it cannot fire on the magnitude or the sign of
+a value, only on its carrier. `int`, `decimal.Decimal` and a numeric `str` are
+accepted, nothing else is, and a Python `bool` is an `int` by inheritance and
+accepted as one - COBOL has no boolean numeric, and a special case would be
+exactly the sort of invention rule R-3 rules out.
 
 EXPLICIT DECIMAL CONTEXTS, NEVER THE AMBIENT ONE  (rule R-6)
 ============================================================
 Every computation below runs inside
-`decimal.localcontext(INTERMEDIATE_CONTEXT)`
-and the interpreter's ambient global context is neither read nor written. A
-caller who set `getcontext().prec = 4` earlier therefore cannot move a posted
-figure - proved rather than asserted, by a parity test that deliberately
-sabotages the ambient context and asserts the result is unchanged.
-`decimal.localcontext` enters a COPY of the context handed to it, so no
-signal flag ever accumulates on the module-level object and two runs of one
-scenario cannot diverge through it.
+`decimal.localcontext(INTERMEDIATE_CONTEXT)` and the interpreter's ambient
+global context is neither read nor written, so a caller who set
+`getcontext().prec = 4` earlier cannot move a posted figure.
+`decimal.localcontext` enters a COPY of the context handed to it, so no signal
+flag ever accumulates on the module-level object and two runs of one scenario
+cannot diverge through it. Nothing here reads a clock, an environment variable
+or an entropy source, and no `set` or `dict` iteration is observable: the one
+published table is a `MappingProxyType` over two boolean keys.
 
-Nothing here reads a clock, an environment variable or an entropy source, and
-no `set` or `dict` iteration is observable: the one published table is a
-`MappingProxyType` over two boolean keys.
+ARBITRATED AGAINST COMPILED BEHAVIOUR  (rule R-6)
+=================================================
+Rule R-6 makes compiled behaviour the tie-breaker for an ambiguous semantic
+question and requires each resolution to be documented rather than settled
+silently. Four bear on this module and ALL FOUR ARE NOW MEASURED against
+GnuCOBOL 3.2.0 - the compiler [common/comp-common.sh:L9] names, invoked as the
+compile scripts invoke it, with no dialect flag and no arithmetic directive.
+Each experiment and its observed output are recorded at the site that uses the
+answer. THREE CONFIRMED THE PROVISIONAL BEHAVIOUR AND ONE OVERTURNED IT:
 
-OPEN QUESTIONS, RECORDED RATHER THAN SETTLED  (rule R-6)
-========================================================
-Rule R-6, verbatim: "Where a semantic question is ambiguous, the compiled
-program's observed behavior decides it, and each such resolution must be
-documented rather than settled silently." Four bear on this module. Each has a
-provisional behaviour implemented behind a named constant or a cited branch, so
-that one edit re-targets it once the oracle has spoken.
-`docs/migration/ambiguity-resolutions.md` carries the register, the experiment
-and its outcome.
+    Q-2  RESOLVED, CONFIRMED. DEFAULT INTERMEDIATE PRECISION. Agent Action
+         Plan section 0.6.8, verbatim: "With no dialect flag and no arithmetic
+         directive anywhere, the compiler's default intermediate precision
+         governs every multi-term expression ... which is the one place a
+         precision difference could change a stored penny." Measured: at least
+         THIRTY significant decimal digits are carried, and a result is
+         quantized ONCE AT THE STORE rather than once per term. See
+         `INTERMEDIATE_PRECISION`.
+    Q-3  RESOLVED, CONFIRMED. A SIGNED VALUE INTO AN UNSIGNED RECEIVING FIELD.
+         Already numbered in the register and CROSS-REFERENCED rather than
+         renumbered. Measured: the ABSOLUTE VALUE is stored and the sign is
+         dropped silently, at the COBOL level and at the bridge's own narrowing
+         alike. The unsigned receiving fields are real - `Input-Gross`,
+         `Input-Vat`, `Actual-Gross` and `Actual-Vat` are all `pic 9(9)v99`
+         under `03 Amounts comp-3.` [copybooks/wsbatch.cob:L40-L44], and `a`
+         and `y` are `pic 99` [general/gl080.cbl:L182-L183]. See `store`,
+         step 3; the bridge half is measured at `usage.coerce` and reproduced
+         by the data-access layer, which is where anomaly A-11 belongs.
+    Q-7  RESOLVED, AND THE PROVISIONAL ANSWER WAS WRONG. DIVISION BY ZERO. The
+         provisional behaviour propagated the divide-by-zero, on the reasoning
+         that a silent zero would mask a divergence. Measured behaviour is
+         neither: GnuCOBOL 3.2 raises the SIZE ERROR condition, PERFORMS NO
+         STORE - the receiving field keeps its previous value - and CONTINUES,
+         with no diagnostic and exit status zero. Encoded as
+         `SizeErrorNoStore`, raised only where the receiving field's previous
+         value was not supplied and the no-store outcome therefore cannot be
+         returned.
+    Q-8  RESOLVED, CONFIRMED. THE SIGN OF AN OVERFLOWING STORE. When the
+         low-order digits are kept, is the sign that of the value being
+         stored? Measured: yes. -12345.67 into a signed three-digit two-place
+         item is -345.67; the sign of the SENDING value survives and there is
+         no two's-complement wrap. See `store`, step 4.
 
-    Q-2  DEFAULT INTERMEDIATE PRECISION. Agent Action Plan section 0.6.8,
-         verbatim: "With no dialect flag and no arithmetic directive anywhere,
-         the compiler's default intermediate precision governs every
-         multi-term expression. The oracle establishes the exact intermediate
-         behavior for the five `ROUNDED` sites and for the compound VAT
-         expression, which is the one place a precision difference could
-         change a stored penny." Verified while writing this module: no
-         `-std=` dialect selection, no `>>SET ARITHMETIC` directive in any
-         frozen source, and no `binary-truncate` flag in any compile script.
-         PROVISIONAL: `INTERMEDIATE_PRECISION` significant digits, with a
-         SINGLE quantize at the store rather than one per term. The expression
-         to measure is [general/gl051.cbl:L796], whose parenthesised
-         sub-expressions nest two deep and whose twin is
-         [irs/irs030.cbl:L1562].
-    Q-3  A SIGNED VALUE INTO AN UNSIGNED RECEIVING FIELD. Already numbered in
-         the register and CROSS-REFERENCED rather than renumbered.
-         PROVISIONAL, and settled at the COBOL level: the absolute value is
-         stored, so a sign flip into an unsigned item silently loses its sign.
-         The unsigned receiving fields are real - `Input-Gross`, `Input-Vat`,
-         `Actual-Gross` and `Actual-Vat` are all `pic 9(9)v99` under
-         `03 Amounts comp-3.` [copybooks/wsbatch.cob:L40-L44], and `a` and `y`
-         are `pic 99` [general/gl080.cbl:L182-L183]. What Q-3 leaves open is a
-         DIFFERENT question, one layer out: what the generated bridge's C
-         interface stores when it narrows a signed copybook value into an
-         unsigned host variable [copybooks/wssl.cob:L49] ->
-         [common/salesMT.cbl:L308], which is anomaly A-11 and belongs to the
-         data-access layer, not here.
-    Q-7  DIVISION BY ZERO. Unmeasured. No in-scope site guards a divisor
-         inside the arithmetic; the guards are in the business logic, at
-         [sales/sl060.cbl:L819] and [sales/sl100.cbl:L506]. PROVISIONAL: a
-         genuine zero divisor PROPAGATES as `ZeroDivisionError` - either
-         `decimal.DivisionByZero`, which subclasses it, or the builtin from
-         `usage.truncate_toward_zero`. Yielding a silent zero instead would be
-         an added behaviour and would mask a real divergence from the oracle.
-    Q-8  THE SIGN OF AN OVERFLOWING STORE. When the low-order digits are kept,
-         is the sign that of the value being stored? PROVISIONAL: yes - COBOL
-         keeps the sign of the sending value rather than wrapping into a
-         two's-complement negative, so -12345.67 into a signed five-digit
-         two-place item is -345.67. `ON SIZE ERROR` occurs zero times, so
-         there is no handler in the specification that could say otherwise.
+Q-7 and Q-8 divide between them the two ways a store can go wrong, and the
+compiled answers DIFFER: an OVERFLOWING store truncates silently and stores,
+while a ZERO DIVISOR stores nothing at all. `ON SIZE ERROR` occurs zero times
+across the twelve in-scope programs, so neither outcome is ever handled by the
+specification - which is exactly why both had to be measured rather than
+reasoned about.
 
-Numbering audit, so neither register disturbs the other: at the time of
-writing, `Q-3`, `Q-4` and `Q-6` were in use in
-`data_dictionary/acas_posting_dictionary.json`, and `Q-5.1`, `Q-5.2` and
-`Q-5.3` are `acas_posting/cobol/usage.py`'s own sub-labels. `Q-2` is the second
-of the five questions Agent Action Plan section 0.6.8 lists, and that mapping
-is anchored twice - the generated dictionary emits `Q-3` for the sign
-narrowing, which is section 0.6.8's third question, and `Q-4` for the batch
-record length contradiction, which is its fourth. `Q-7` and `Q-8` are new here.
+Numbering audit, so neither register disturbs the other: `Q-3`, `Q-4` and
+`Q-6` are in use in `data_dictionary/acas_posting_dictionary.json` and `Q-5.1`
+to `Q-5.3` are `usage.py`'s own sub-labels. `Q-2` is the second of the five
+questions Agent Action Plan section 0.6.8 lists, a mapping anchored twice: the
+dictionary emits `Q-3` for the sign narrowing, that section's third question,
+and `Q-4` for the batch record length contradiction, its fourth. `Q-7` and
+`Q-8` originate here.
 
-THE FREEZE
-==========
+THE FREEZE, NO COBOL AT RUNTIME (R-1), AND SEQUENTIAL EXECUTION (R-3)
+=====================================================================
 Agent Action Plan section 0.8.1, verbatim: "Any diff touching `common/*.cbl`,
 `common/*.scb`, `copybooks/*.cob`, `general/*.cbl`, `sales/*.cbl`,
 `purchase/*.cbl`, `irs/*.cbl` or `mysql/ACASDB.sql` is a defect in the
 migration, regardless of how harmless it appears." Every COBOL line quoted
 above was read, never written.
 
-NO COBOL AT RUNTIME  (rule R-1)
-===============================
-Pure `decimal` and `int`. No subprocess, no foreign-function interface, no
-compiler and no runtime library: the shipped package runs on a host with
-neither `cobc` nor `cobcrun` present. The compiled oracle lives under the
-sibling harness tree and is driven out of process by the scenario and
-determinism suites only. Agent Action Plan section 0.4.3 promises that "the
-arithmetic test suite imports only `cobol` and `records` and touches no
-database, so it runs anywhere", and this module keeps that promise.
-
-SEQUENTIAL  (rule R-3)
-======================
-No thread, no event loop, no process pool, no connection pool. Every function
+The implementation is pure `decimal` and `int`: no subprocess, no
+foreign-function interface, no compiler and no runtime library, so the shipped
+package runs on a host with neither `cobc` nor `cobcrun` present. And no
+thread, no event loop, no process pool and no connection pool - every function
 below is a pure function of its arguments with no shared mutable state, which
 is what makes the single-threaded COBOL reproducible.
-
-FURTHER READING
-===============
-    docs/migration/traceability.md           maps each COBOL verb form to the
-                                             function named here
-    docs/migration/anomaly-log.md            A-8, A-9, A-10 and A-19, whose
-                                             mechanisms this module supplies
-    docs/migration/ambiguity-resolutions.md  Q-2, Q-3, Q-7 and Q-8
 """
 
 from __future__ import annotations
@@ -409,6 +333,7 @@ __all__: Final[tuple[str, ...]] = (
     "INTERMEDIATE_PRECISION",
     "ROUNDED_STORE",
     "ROUNDING_DIRECTIONS",
+    "SizeErrorNoStore",
     "add_giving",
     "add_to",
     "compare",
@@ -424,33 +349,18 @@ __all__: Final[tuple[str, ...]] = (
 )
 
 
-# =============================================================================
 #  THE TWO STORE DIRECTIONS
-#
-#  This is the whole "Rounding vocabulary" the brief asks for, and it has two
-#  members because COBOL has two store directions and no more.
-#
-#  THE SPELLING CHOSEN AT THE CALL SITE IS A KEYWORD-ONLY `rounded: bool`,
-#  DEFAULTING TO False, on every verb that performs a store. It was chosen over
-#  an enumeration for three reasons, all of them about how a program module
-#  reads:
-#
-#    1. `rounded=True` is the literal word the COBOL statement writes, so
-#          divide_by_giving(scycle, period, A, rounded=True)
-#       transcribes
-#          divide   scycle by period giving a rounded.
-#                                          [general/gl080.cbl:L328]
-#       character for character, and the 12 statements that do NOT write
-#       ROUNDED simply omit it.
-#    2. Being keyword-only, it can never be passed positionally and so can
-#       never be mistaken for a value operand.
-#    3. Omitting it yields TRUNCATION. The direction a caller gets for free is
-#       the one that cannot corrupt a figure by omission, which is the way
-#       round Agent Action Plan section 0.1.1 insists on.
-#
-#  One spelling only: there is deliberately no enumeration offering a second
-#  way to ask for the same thing.
-# =============================================================================
+#  The whole rounding vocabulary, with two members because COBOL has two store
+#  directions and no more. THE SPELLING AT THE CALL SITE IS A KEYWORD-ONLY
+#  `rounded: bool`, DEFAULTING TO False, on every verb that stores. It was
+#  chosen over an enumeration for three reasons, all about how a module reads:
+#  (1) `rounded=True` is the literal word the statement writes, so
+#      `divide_by_giving(scycle, period, A, rounded=True)` transcribes
+#      `divide scycle by period giving a rounded.` [general/gl080.cbl:L328]
+#      word for word, and the 12 statements without ROUNDED simply omit it;
+#  (2) being keyword-only it can never be mistaken for a value operand;
+#  (3) omitting it yields TRUNCATION, so the direction a caller gets for free
+#  cannot corrupt a figure - the way round AAP section 0.1.1 insists on.
 
 # COBOL ROUNDED means round half AWAY FROM ZERO - 1.995 to 2.00 and -1.995 to
 # -2.00 - which is `ROUND_HALF_UP` in Python's `decimal`, NOT the built-in
@@ -484,66 +394,81 @@ def _rounding(rounded: bool) -> str:
     return ROUNDING_DIRECTIONS[bool(rounded)]
 
 
-# =============================================================================
-#  THE INTERMEDIATE CONTEXT  (rule R-6, open question Q-2)
-# =============================================================================
+#  THE INTERMEDIATE CONTEXT  (Q-2: RESOLVED against the compiled oracle)
 
 # How many significant digits an intermediate result carries before the single
-# quantize at the store. PROVISIONAL, and the subject of open question Q-2: the
-# compile scripts select no dialect and no source carries an arithmetic
-# directive, so the compiler's own default intermediate precision governs and
-# only the oracle can measure it. One edit here re-targets every computation in
-# the migrated cycle.
+# quantize at the store. Q-2 asked two things and both were MEASURED against
+# GnuCOBOL 3.2.0: how many digits an intermediate carries, and whether the
+# quantize to the receiving field's scale happens once at the store or once per
+# operator. The width first, storing quotients into a very wide receiver -
 #
-# Sized with room to spare rather than to a guess. The widest declared item in
-# the whole in-scope set is 14 digits - `03 work-2 pic s9(14) comp-3.`
-# [sales/sl060.cbl:L206] - and the widest money item is the 11 digits of
-# `pic 9(9)v99` [copybooks/wsbatch.cob:L41], so a product of two of them needs
-# 28 and the deepest expression in the cycle [general/gl051.cbl:L796] needs far
-# fewer. At this precision an exactly representable result is exact, and a
-# non-terminating quotient carries enough digits that no rounding at the last
-# of them can reach the second decimal place a money store quantizes to.
+#       1 / 3 into pic  v9(30)            -> .333333333333333333333333333333
+#       2 / 3 into pic  v9(30)  ROUNDED   -> .666666666666666666666666666667
+#       1 / 7 into pic  v9(30)            -> .142857142857142857142857142857
+#     100 / 7 into pic 9v9(17)            -> 4.28571428571428571
+#
+# so AT LEAST THIRTY significant digits are carried: the receiver ran out of
+# room before the intermediate did, and the ROUNDED line is the proof rather
+# than a curiosity - 2/3 truncates to thirty 6s and rounds to a final 7, so the
+# intermediate still held a thirty-FIRST digit for the rounding to see. Then the
+# placement, which is the part that could have moved a penny -
+#
+#       2 / 3 + 2 / 3 + 2 / 3   into pic 9v99  ->  1.99   (not 1.98)
+#       10 / 3 * 3              into pic 9v99  ->  9.99
+#       100 / 7 * 7             into pic 9v99  -> 99.99
+#
+# 1.99 rather than 1.98 is decisive: had each term been truncated to two places
+# on the way, three truncated 0.66s would have summed to 1.98. So the quantize
+# happens ONCE, AT THE STORE, which is the model this module already implements
+# - one `store` at the end of every verb and no intermediate quantize anywhere.
+# The provisional answer was CORRECT on both counts, and the precision below is
+# generous rather than merely sufficient: it exceeds the measured 30 with room
+# over, so no expression in the cycle can reach it. The widest declared item in
+# scope is 14 digits - `03 work-2 pic s9(14) comp-3.` [sales/sl060.cbl:L206] -
+# and the widest money item is the 11 digits of `pic 9(9)v99`
+# [copybooks/wsbatch.cob:L41], so a product of two needs 28 and the deepest
+# expression [general/gl051.cbl:L796] needs far fewer. Here an exactly
+# representable result is exact, and a non-terminating quotient carries enough
+# digits that no rounding at the last can reach a money store's pence.
+#
+# ONE FURTHER MEASUREMENT, recorded because it is what makes the parity suite
+# able to tell the two models apart. The compound VAT shape at
+# [general/gl051.cbl:L796] and its twin [irs/irs030.cbl:L1562] agree to the
+# penny under both models for the rate and amount the frozen defaults carry -
+# 148.15 at 20 per cent gives 24.69 rounded and 24.69 truncated - while a
+# DIFFERENT amount separates them: 33.33 at 20 per cent gives 5.56 ROUNDED and
+# 5.55 truncated. So it is that amount, and not the default one, that must be
+# the fixture proving the five ROUNDED sites are genuinely rounding. The
+# precision stays a named constant rather than an inlined number so that one
+# edit re-targets every computation in the migrated cycle.
 INTERMEDIATE_PRECISION: Final[int] = 60
-
 # EVERY `decimal` operation in this module runs inside a copy of this context,
 # entered with `decimal.localcontext`. The interpreter's ambient global context
 # is never read and never written, so a caller who reconfigured `getcontext()`
-# earlier cannot move a posted figure (rule R-6).
-#
-# Every field is stated explicitly, including the ones whose value equals the
-# library default, because a context that inherits half its settings from
-# `DefaultContext` is a context whose behaviour depends on the interpreter's
-# state rather than on this file.
-#
-# `rounding` is the TRUNCATING direction, and that is deliberate even though it
-# governs only a result exceeding `INTERMEDIATE_PRECISION` significant digits -
-# which nothing in scope can produce. It is set this way so that the truncating
-# direction is what any operation performed inside this context takes by
-# default, matching the module's headline rule at every level rather than only
-# at the store. A caller's expression that quantized on its own would therefore
-# truncate, which is the safe way for that mistake to land.
-#
-# TRAP POLICY, stated once and in full:
-#   InvalidOperation  TRAPPED. A non-numeric operand or a NaN is a programmer
-#                     error; returning a quiet NaN would let it reach a
-#                     database column.
-#   DivisionByZero    TRAPPED. Open question Q-7: the behaviour is unmeasured,
-#                     so it propagates loudly rather than resolving to a
-#                     silent zero that would mask a divergence.
-#   Overflow          TRAPPED. Only reachable beyond an exponent of 999999,
-#                     which no COBOL field can express.
-#   FloatOperation    TRAPPED, and this one is a rule R-2 guard rather than a
-#                     numeric one. It makes `decimal.Decimal(<float>)` raise
-#                     anywhere inside this context, which catches a float that
-#                     a caller's own expression constructs - reach the explicit
-#                     type gate below cannot. (Mixing a float with a Decimal in
-#                     arithmetic is already a `TypeError` from the language
-#                     itself, and needs no help.)
-#   Inexact           NOT trapped. A non-terminating quotient such as the one
-#   Rounded           [general/gl051.cbl:L796] computes is ordinary and
-#   Subnormal         expected; trapping these would turn the specification's
-#   Underflow         own arithmetic into an exception.
-#   Clamped           NOT trapped, for the same reason.
+# earlier cannot move a posted figure (rule R-6). Every field is stated
+# explicitly, including those whose value equals the library default, because a
+# context inheriting half its settings from `DefaultContext` is one whose
+# behaviour depends on the interpreter's state rather than on this file.
+# `rounding` is the TRUNCATING direction even though it governs only a result
+# exceeding `INTERMEDIATE_PRECISION` significant digits, which nothing in scope
+# can produce: it is set this way so that the truncating direction is what any
+# operation inside this context takes by default, so a caller's expression that
+# quantized on its own would truncate - the safe way for that mistake to land.
+
+# TRAP POLICY, stated once and in full. TRAPPED: InvalidOperation, because
+# a non-numeric operand or a NaN is a programmer error and a quiet NaN could
+# reach a database column; DivisionByZero, so that a zero divisor can never
+# become a quiet Infinity that reaches a database column - the trap is the
+# MECHANISM, not the answer, every verb catching it and applying the MEASURED
+# Q-7 outcome, which is to store nothing at all (see `SizeErrorNoStore`);
+# Overflow, reachable only beyond an exponent of 999999, which no COBOL field
+# can express; and FloatOperation, a rule R-2 guard rather than a numeric one -
+# it makes `Decimal(<float>)` raise anywhere inside this context, catching a
+# float a caller's own expression builds, which the explicit type gate below
+# cannot reach. NOT TRAPPED: Inexact, Rounded, Subnormal, Underflow and
+# Clamped, because a non-terminating quotient such as [general/gl051.cbl:L796]
+# computes is ordinary; trapping it would make the specification's arithmetic
+# raise.
 INTERMEDIATE_CONTEXT: Final[decimal.Context] = decimal.Context(
     prec=INTERMEDIATE_PRECISION,
     rounding=TRUNCATING_STORE,
@@ -567,13 +492,148 @@ INTERMEDIATE_CONTEXT: Final[decimal.Context] = decimal.Context(
 
 
 # =============================================================================
-#  COERCION - THE RULE R-2 TYPE GATE
+#  THE SIZE ERROR CONDITION  (Q-7: RESOLVED against the compiled oracle)
 # =============================================================================
 
-# The message a refused carrier produces. Held as a constant so that the twelve
-# program modules and the parity suite all see one wording, and so that the
-# rule it protects is named at the point of failure rather than left for a
-# reader to look up.
+
+class SizeErrorNoStore(ZeroDivisionError):
+    """The compiled program stores NOTHING here and carries on.
+
+    Q-7  RESOLVED - what a division by zero does when no `ON SIZE ERROR`
+         clause is written, which is every arithmetic statement in the cycle.
+
+    THE QUESTION.  `ON SIZE ERROR` occurs ZERO times across the twelve
+    in-scope programs, so no in-scope statement handles the condition and the
+    ISO standard leaves the result undefined. Three outcomes were possible and
+    they are not alike: abort the run, store a zero, or store nothing.
+
+    THE EXPERIMENT.  A standalone GnuCOBOL 3.2.0 program, no dialect flag, in
+    which a receiving field is PRE-LOADED with a recognisable value and then
+    divided by a zero divisor with no `ON SIZE ERROR` clause, in every verb
+    form the cycle can reach, with the receiver displayed afterwards:
+
+        01  r    pic s9(5)v99  value +00077.77.
+        01  n    pic s9(5)v99  value +00100.00.
+        01  z    pic s9(5)v99  value  zero.
+        compute r = n / z
+        divide  n by z giving r
+        divide  n by z giving r remainder rem
+        compute r = 5 + (n / z) + 1
+        add 1 to ctr-comp / divide ctr-comp by z giving ctr-comp
+
+    THE MEASURED RESULT.  In EVERY form the receiving field kept the value it
+    held before the statement - `+00077.77`, and `+00011.11` where that was
+    the pre-load - the REMAINDER receiver was untouched as well, no message was
+    printed to either stream, the run continued to the next statement, and the
+    process exited with status ZERO. The same program with an `ON SIZE ERROR`
+    clause added DID fire that clause, which proves the condition raised really
+    is SIZE ERROR and not something else. An integer `comp` counter divided by
+    zero behaved identically.
+
+    THE RESOLUTION, and it OVERTURNS the provisional answer.  The provisional
+    behaviour propagated the divide-by-zero, on the reasoning that a silent
+    zero would mask a divergence. That reasoning was sound and the answer was
+    still wrong: the compiled program neither aborts nor stores a zero. It
+    stores NOTHING, and the receiving field's previous value survives.
+
+    HOW THAT IS ENCODED.  A verb whose receiving field is a GIVING destination
+    is not handed that field's previous value, so it cannot return it. Every
+    such verb therefore accepts an optional `receiver_value`:
+
+      * SUPPLIED - the verb returns it UNCHANGED, which reproduces the measured
+        outcome exactly and lets the caller assign unconditionally.
+      * OMITTED - this exception is raised, naming the operation. It is not an
+        invented answer and it is not a silent zero: it says that the compiled
+        program performs no store and that the information needed to reproduce
+        that was not passed in. A calling program module reproduces the
+        measurement by catching it and leaving its field alone.
+
+    Either way the caller's field ends up holding what it held before, which is
+    the whole of what was measured.
+
+    THIS IS NOT THE OVERFLOW PATH.  A store too wide for its receiving field
+    does NOT raise: it truncates the high-order digits silently and keeps the
+    sign of the sending value, which is Q-8, measured separately and
+    reproduced in `store`. The two conditions share the COBOL name SIZE ERROR
+    and behave differently, and conflating them would corrupt every posted
+    figure that overflows.
+
+    REACHABILITY.  No in-scope statement can reach this. Every site whose
+    divisor could be zero guards it in its own business logic -
+    [sales/sl060.cbl:L819], [sales/sl060.cbl:L835], [sales/sl100.cbl:L506] each
+    test their counter before dividing - and every other divisor in the cycle
+    is a literal. No guard is added here, because adding one would be an added
+    validation (rule R-3) and would hide a real divergence from the oracle.
+
+    docs/migration/ambiguity-resolutions.md carries the register entry; this
+    class is the resolution itself, recorded where the condition is raised.
+
+    Attributes:
+        operation: The verb form that met the zero divisor, as the COBOL
+            statement writes it, so a traceback names the transcription site.
+    """
+
+    def __init__(self, operation: str) -> None:
+        """Record which verb form met the zero divisor.
+
+        Args:
+            operation: The COBOL verb form, e.g. `DIVIDE ... BY ... GIVING`.
+        """
+        self.operation = operation
+        super().__init__(
+            f"{operation}: the divisor is zero. GnuCOBOL 3.2 raises the SIZE "
+            "ERROR condition, performs NO STORE and continues, so the "
+            "receiving field keeps its previous value (question Q-7, "
+            "measured). Pass receiver_value= to have that previous value "
+            "returned unchanged, or catch this and leave the field alone. "
+            "Storing a zero instead would be an invented answer."
+        )
+
+
+def _no_store(
+    operation: str,
+    receiver_value: decimal.Decimal | int | str | None,
+    receiving: FieldDescriptor,
+) -> decimal.Decimal | int:
+    """Apply the measured Q-7 outcome for a zero divisor: store nothing.
+
+    The single place the resolution recorded on `SizeErrorNoStore` is applied,
+    so that every verb form reaches it the same way and none can develop its
+    own.
+
+    Where the receiving field's previous value was supplied, it is handed back
+    UNCHANGED, which is what the compiled program leaves behind. It is routed
+    through `store` so that the carrier - `decimal.Decimal` or `int` - is the
+    one the field's storage class calls for, whichever carrier the caller
+    passed it on; for a value the field could actually have held that pass is
+    IDEMPOTENT and changes nothing, which is why it is safe to make.
+
+    Where it was not supplied, `SizeErrorNoStore` is raised rather than a value
+    being invented.
+
+    Args:
+        operation: The COBOL verb form, for the exception message.
+        receiver_value: What the receiving field held before the statement, or
+            None if the caller did not pass it.
+        receiving: The receiving field's descriptor.
+
+    Returns:
+        The receiving field's previous value, on the field's own carrier.
+
+    Raises:
+        SizeErrorNoStore: `receiver_value` was not supplied.
+    """
+    if receiver_value is None:
+        raise SizeErrorNoStore(operation)
+    return store(receiver_value, receiving)
+
+
+# =============================================================================
+#  COERCION - THE RULE R-2 TYPE GATE
+
+# The message a refused carrier produces. Held as a constant so that every
+# caller sees one wording, and so that the rule it protects is named at the
+# point of failure rather than left for a reader to look up.
 _INEXACT_CARRIER: Final[str] = (
     "rule R-2 forbids a binary floating-point accounting value: {kind} is not "
     "an exact carrier. Pass decimal.Decimal, int, or a numeric str. "
@@ -715,9 +775,7 @@ def _require_operands(
         raise ValueError(f"{verb} needs at least one operand; none was given")
 
 
-# =============================================================================
 #  THE STORE - THE ONE AUDITED CHOKEPOINT
-# =============================================================================
 
 
 def store(
@@ -738,64 +796,69 @@ def store(
       1. The value is coerced to an exact `decimal.Decimal`. A `float` or
          `complex` is REFUSED (rule R-2); see `_exact`.
       2. It is aligned to the receiving field's scale, TRUNCATING toward zero
-         unless `rounded` is passed. So 1.999 into a two-place item is 1.99 and
-         -1.999 is -1.99, while `rounded=True` gives 2.00 and -2.00 for 1.995
-         and -1.995.
+         unless `rounded` is passed: 1.999 into a two-place item gives 1.99
+         and -1.999 gives -1.99, where `rounded=True` gives 2.00 and -2.00
+         from 1.995 and -1.995.
       3. A negative value stored into an UNSIGNED field loses its sign - the
-         absolute value is stored, not an error. The unsigned receiving fields
-         are real: `pic 9(9)v99` under `03 Amounts comp-3.`
-         [copybooks/wsbatch.cob:L40-L44], and `pic 99`
-         [general/gl080.cbl:L182-L183]. Open question Q-3.
-      4. A value too wide for the field keeps its LOW-ORDER digits and loses
-         the high-order ones, SILENTLY - 12345.67 into a five-digit two-place
-         item is 345.67. Nothing raises, nothing is clamped and no warning is
-         emitted, because `ON SIZE ERROR` occurs zero times across the twelve
-         in-scope programs and there is therefore no error path in the
-         specification to reproduce (rule R-3). The sign of the value survives
-         the truncation; open question Q-8.
-      5. The result is handed back on the carrier the field's storage class
-         calls for: `decimal.Decimal` for anything scaled, `int` for the binary
-         family and for a zero-scale integer. That decision is DATA-DRIVEN and
-         is what makes both truncation mechanisms behind anomaly A-8
-         expressible with neither one privileged.
+         absolute value is stored, not an error. Such fields are real:
+         `pic 9(9)v99` under `03 Amounts comp-3.`
+         [copybooks/wsbatch.cob:L40-L44] and `pic 99`
+         [general/gl080.cbl:L182-L183]. QUESTION Q-3, RESOLVED and CONFIRMED
+         against the compiled oracle: `move -123.45` into `pic 9(3)v99` was
+         measured as the bytes `31 32 33 34 35`, the plain digits of 123.45
+         with no overpunch anywhere, and `move -123` into `pic 9(3)` as 123.
+         The bridge's own narrowing of a signed `binary-long` into an unsigned
+         `PIC 9(10) COMP` host variable [common/salesMT.cbl:L1228] was measured
+         separately and behaves identically - -5 becomes 0000000005 - so
+         anomaly A-11's sign loss is this same rule one layer out.
+      4. A value too wide keeps its LOW-ORDER digits and loses the high-order
+         ones, SILENTLY - 12345.67 into a five-digit two-place item gives
+         345.67. Nothing raises and nothing is clamped, because
+         `ON SIZE ERROR` occurs zero times across the twelve in-scope
+         programs, so the specification has no error path to reproduce
+         (rule R-3). QUESTION Q-8, RESOLVED and CONFIRMED: the SIGN OF THE
+         SENDING VALUE survives the truncation. Measured, storing into
+         `pic s9(3)v99` and `pic 9(3)`:
+
+             12345.67  ->  +345.67          -12345.67  ->  -345.67
+             12345     ->   345             1234.567   ->   234.56
+
+         so the low-order digits are kept with the original sign and there is
+         no two's-complement wrap. NOTE that this is the OTHER outcome from
+         Q-7's: an overflowing store stores, while a zero divisor stores
+         nothing at all. See `SizeErrorNoStore`.
+      5. The result comes back on the carrier the field's storage class calls
+         for: `decimal.Decimal` for anything scaled, `int` for the binary
+         family and for a zero-scale integer. Being DATA-DRIVEN is what makes
+         both truncation mechanisms behind anomaly A-8 expressible with
+         neither one privileged.
 
     Steps 2 to 5 are DELEGATED to `FieldDescriptor.store`, and so to
-    `usage.coerce`, rather than reimplemented. That is the point of the
-    delegation: those rules are already proved byte for byte by the storage
-    parity tests, and a second implementation here could drift from them
-    without either copy looking wrong.
-
-    A NUMERIC-EDITED receiving field is stored numerically and no edited string
-    is produced. `divide WS-Ledger-Nos by 100 giving l6-account`
-    [general/gl072.cbl:L386] receives into `l6-account pic 9999.99 blank when
-    zero` [general/gl072.cbl:L233], whose numeric shape is six digits and two
-    places; the printed form is report formatting, which is out of scope.
-
-    Zeroing a field is this same call with a zero value, which is how
-    `move zero to work-2` [sales/sl060.cbl:L823] and `move zero to work-b`
-    [sales/sl100.cbl:L504] are expressed. No separate helper exists for it.
+    `usage.coerce`: the storage module already owns those rules byte for byte,
+    and a second implementation here could drift without either looking wrong.
+    A NUMERIC-EDITED item is stored numerically and no edited string is
+    produced; see `divide_by_giving`. Zeroing a field is this same call with a
+    zero value - `move zero to work-2` [sales/sl060.cbl:L823].
 
     Args:
         value: The result to store, as `decimal.Decimal`, `int`, or a numeric
             `str`. Never a binary float (rule R-2).
         receiving: The receiving field's descriptor. Its digits, scale,
             signedness and storage class decide everything above.
-        rounded: True ONLY where the COBOL statement writes ROUNDED. There are
-            five such sites in the whole in-scope cycle and they are listed in
-            this module's docstring. Defaults to False, which truncates.
+        rounded: True ONLY where the COBOL statement writes ROUNDED. Five such
+            sites exist in the cycle, listed in this module's docstring.
+            Defaults to False, which truncates.
 
     Returns:
-        What the field now holds: `decimal.Decimal` for a scaled item, `int`
-        for the binary family and for a zero-scale integer.
+        The value the field holds after the store: `decimal.Decimal` for a
+        scaled item, `int` for the binary family and a zero-scale integer.
 
     Raises:
-        TypeError: The value arrived in an inexact carrier (rule R-2), or the
-            receiving field is not numeric - a group or an alphanumeric item
-            has no arithmetic store at all, and a store across data categories
-            is a MOVE, which is the sibling module's subject, not this one's.
+        TypeError: An inexact carrier (rule R-2), or a receiving field that is
+            not numeric - a store across data categories is a MOVE, which is
+            the sibling module's subject.
         ValueError: The value is non-finite, or the descriptor omits a
-            component its storage class needs. PROGRAMMER errors both; neither
-            can be provoked by the magnitude or the sign of a value.
+            component its storage class needs. PROGRAMMER errors both.
     """
     if not receiving.is_numeric:
         raise TypeError(
@@ -813,9 +876,7 @@ def store(
     return stored
 
 
-# =============================================================================
 #  THE INTERMEDIATE PATH - NO RECEIVING FIELD, SO NO TRUNCATION
-# =============================================================================
 
 
 def intermediate(
@@ -869,9 +930,7 @@ def intermediate(
     return _evaluated(expression)
 
 
-# =============================================================================
 #  COMPUTE  -  five live statements
-# =============================================================================
 
 
 def compute(
@@ -882,6 +941,7 @@ def compute(
     receiving: FieldDescriptor,
     *,
     rounded: bool = False,
+    receiver_value: decimal.Decimal | int | str | None = None,
 ) -> decimal.Decimal | int:
     """Reproduce a COBOL COMPUTE: evaluate an expression, then store it once.
 
@@ -921,23 +981,36 @@ def compute(
         receiving: The receiving field's descriptor.
         rounded: True ONLY where the statement writes ROUNDED - four of the
             five COMPUTE sites do. Defaults to False, which truncates.
+        receiver_value: What the receiving field holds BEFORE the statement.
+            Needed only to reproduce the measured outcome of a zero divisor,
+            which is that the field is left exactly as it was (question Q-7;
+            see `SizeErrorNoStore`). None of the five in-scope COMPUTE
+            statements can divide by zero - the two VAT forms divide by a rate
+            plus 100 and the third by a literal - so it is optional and
+            defaults to None.
 
     Returns:
-        What the receiving field now holds.
+        What the receiving field now holds. On a zero divisor with
+        `receiver_value` supplied, that is the previous value, unchanged.
 
     Raises:
         TypeError: An inexact carrier (rule R-2), or a non-numeric receiving
             field.
         ValueError: A non-finite value, or a descriptor missing a component.
-        ZeroDivisionError: The expression divided by zero. Propagated
-            deliberately; open question Q-7.
+        SizeErrorNoStore: The expression divided by zero and `receiver_value`
+            was not supplied, so the measured no-store outcome cannot be
+            returned. See that class for the experiment and its result.
     """
-    return store(_evaluated(expression), receiving, rounded=rounded)
+    try:
+        evaluated = _evaluated(expression)
+    except SizeErrorNoStore:
+        raise
+    except ZeroDivisionError:
+        return _no_store("COMPUTE", receiver_value, receiving)
+    return store(evaluated, receiving, rounded=rounded)
 
 
-# =============================================================================
 #  ADD  -  268 live occurrences, 32 of them with GIVING
-# =============================================================================
 
 
 def add_to(
@@ -967,39 +1040,36 @@ def add_to(
     That ORDER is the calling program module's business; this function supplies
     only the add, and `compare` only the test.
 
-    Other live sites this reproduces:
+    Other live sites this reproduces: `add ledger-balance to tot-cr.`
+    [general/gl072.cbl:L427], `add work-goods to work-2.`
+    [sales/sl060.cbl:L826], `add work-a to work-b.` [sales/sl100.cbl:L509],
+    `add 1 to sales-activety.` [sales/sl060.cbl:L825], `add 1 to
+    sales-pay-activety.` [sales/sl100.cbl:L510] and `add 1 to
+    current-quarter.` [general/gl080.cbl:L355].
 
-        add      ledger-balance  to  tot-cr.     [general/gl072.cbl:L427]
-        add      work-goods to work-2.           [sales/sl060.cbl:L826]
-        add      work-a to work-b.               [sales/sl100.cbl:L509]
-        add      1 to sales-activety.            [sales/sl060.cbl:L825]
-        add      1 to sales-pay-activety.        [sales/sl100.cbl:L510]
-        add      1  to  current-quarter.         [general/gl080.cbl:L355]
-
-    The first of those is truncation number one of anomaly A-8: `work-goods` is
-    `pic s9(7)v99 comp-3` [sales/sl060.cbl:L218] and `work-2` is
+    The work-goods site is truncation number one of anomaly A-8: `work-goods`
+    is `pic s9(7)v99 comp-3` [sales/sl060.cbl:L218] and `work-2` is
     `pic s9(14) comp-3` [sales/sl060.cbl:L206] with ZERO scale, so the pence
     are discarded here, before the divide that discards the remainder.
 
-    A STATEMENT WITH SEVERAL RECEIVERS BECOMES ONE CALL PER RECEIVER, in source
-    order. `add oi-paid to t-paid sl-payments` [sales/sl100.cbl:L404] and
-    `add il-net to va-v-this va-v-year` [purchase/pl055.cbl:L330] each add the
-    same source into two different fields, and each of those fields applies its
-    own scale, capacity and signedness - so they are two stores, not one.
-    Folding them into a single call taking a list of receivers would hide that.
+    A STATEMENT WITH SEVERAL RECEIVERS BECOMES ONE CALL PER RECEIVER, in
+    source order. `add oi-paid to t-paid sl-payments` [sales/sl100.cbl:L404]
+    and `add il-net to va-v-this va-v-year` [purchase/pl055.cbl:L330] each add
+    one source into two fields, and each field applies its own scale, capacity
+    and signedness - two stores, not one. A single call taking a list of
+    receivers would hide that.
 
     Args:
         *sources: The operands to add in, in the order the statement writes
             them. Variadic: `ADD a b TO c` is legal COBOL.
-        receiver_value: The receiving item's CURRENT value, which is also an
-            operand.
+        receiver_value: The receiving item's CURRENT value, itself an operand.
         receiving: The receiving field's descriptor.
         rounded: True only where the statement writes ROUNDED. No in-scope ADD
             does; the argument exists so the verb set is uniform and a future
             ROUNDED site cannot be mis-expressed. Defaults to False.
 
     Returns:
-        What the receiving field now holds.
+        The value the receiving field holds after the store.
 
     Raises:
         ValueError: No source operand was given, the value is non-finite, or
@@ -1040,9 +1110,8 @@ def add_giving(
     THE SOURCES ARE TOTALLED AT INTERMEDIATE PRECISION AND QUANTIZED ONCE, not
     pairwise. Five operands of four thousandths each total twenty thousandths,
     which lands as two hundredths in a two-place field; truncating each operand
-    first would land nothing at all. A parity test asserts the single-quantize
-    answer against the pairwise one so the difference is visible rather than
-    argued.
+    first would land nothing at all. The two answers differ, so the choice is
+    stated here rather than left for a reader to infer from the code.
 
     Args:
         *sources: The operands, in the order the statement writes them.
@@ -1051,7 +1120,7 @@ def add_giving(
             does. Defaults to False.
 
     Returns:
-        What the receiving field now holds.
+        The value the receiving field holds after the store.
 
     Raises:
         ValueError: No source operand was given, the value is non-finite, or
@@ -1063,9 +1132,7 @@ def add_giving(
     return store(_sum(sources), receiving, rounded=rounded)
 
 
-# =============================================================================
 #  SUBTRACT  -  82 live occurrences, 29 of them with GIVING
-# =============================================================================
 
 
 def subtract_from(
@@ -1104,7 +1171,7 @@ def subtract_from(
             SUBTRACT does. Defaults to False, which truncates.
 
     Returns:
-        What the receiving field now holds.
+        The value the receiving field holds after the store.
 
     Raises:
         ValueError: No source operand was given, the value is non-finite, or
@@ -1165,7 +1232,7 @@ def subtract_giving(
             SUBTRACT does. Defaults to False.
 
     Returns:
-        What the receiving field now holds.
+        The value the receiving field holds after the store.
 
     Raises:
         ValueError: No source operand was given, the value is non-finite, or
@@ -1179,29 +1246,18 @@ def subtract_giving(
     return store(difference, receiving, rounded=rounded)
 
 
-# =============================================================================
 #  MULTIPLY  -  50 live occurrences, 25 of them with GIVING
-#
-#  BOTH FORMS ARE LIVE AND BOTH ARE PUBLISHED, and the difference between them
-#  is which operand receives:
-#
+#  BOTH FORMS ARE LIVE AND BOTH ARE PUBLISHED; the difference is which
+#  operand receives:
 #      MULTIPLY a BY b            ->  b = a * b       (the SECOND receives)
 #      MULTIPLY a BY b GIVING c   ->  c = a * b
-#
-#  The sign-flip idiom that runs through the whole cycle is written BOTH ways,
-#  which is the reason neither form can be dropped:
-#
-#      multiply -1 by work-2.                 [sales/sl055.cbl:L446]
-#      multiply pre-amount  by  -1  giving  pre-amount.
-#                                             [general/gl070.cbl:L517]
-#
-#  NO `negate` HELPER IS PUBLISHED. It would map faithfully to NEITHER of those
-#  two forms, and a reader could no longer tell from the Python which of them
-#  the frozen program actually wrote - which is precisely the traceability rule
-#  R-5 asks for and the normalisation rule R-4 forbids.
-# =============================================================================
-
-
+#  The sign-flip idiom that runs through the cycle is written BOTH ways, which
+#  is why neither form can be dropped: `multiply -1 by work-2.`
+#  [sales/sl055.cbl:L446] against `multiply pre-amount by -1 giving
+#  pre-amount.` [general/gl070.cbl:L517].
+#  NO `negate` HELPER IS PUBLISHED. It would map faithfully to NEITHER form,
+#  and a reader could no longer tell which of them the frozen program wrote -
+#  what traceability rule R-5 asks for and normalisation rule R-4 forbids.
 def multiply_by(
     multiplier: decimal.Decimal | int | str,
     receiver_value: decimal.Decimal | int | str,
@@ -1238,8 +1294,8 @@ def multiply_by(
 
     A SIGN FLIP IS STILL A STORE. It truncates to the receiving field's scale
     like any other, and if the receiving field is UNSIGNED it silently loses
-    the sign it just applied - open question Q-3. Neither is an error
-    condition.
+    the sign it just applied - question Q-3, measured and recorded at `store`,
+    step 3. Neither is an error condition.
 
     Args:
         multiplier: The first operand - what the statement writes before BY.
@@ -1250,7 +1306,7 @@ def multiply_by(
             MULTIPLY does. Defaults to False, which truncates.
 
     Returns:
-        What the receiving field now holds.
+        The value the receiving field holds after the store.
 
     Raises:
         TypeError: An inexact carrier (rule R-2), or a non-numeric receiving
@@ -1272,77 +1328,45 @@ def multiply_by_giving(
     """Reproduce `MULTIPLY <multiplier> BY <multiplicand> GIVING <receiver>`.
 
     The GIVING form: the receiving item contributes nothing and is overwritten.
-    Twenty-five live sites, of three kinds.
+    Twenty-five live sites, of three kinds - 14 sign flips, 3 scalings and 8
+    companions of a divide.
 
-    The sign flips, written with the field first and the literal second - the
-    mirror image of the no-GIVING form above, and the reason both exist:
+    The sign flips are written with the field first and the literal second, the
+    mirror image of the no-GIVING form above, which is why both must exist:
 
-        multiply pre-amount  by  -1  giving  pre-amount.
-                                                [general/gl070.cbl:L517]
-        multiply  pre-amount  by  -1 giving pre-amount.
-                                                [general/gl070.cbl:L530]
-        multiply arc-amount  by  -1  giving  arc-amount.
-                                                [general/gl080.cbl:L493]
-        multiply  arc-amount  by  -1 giving arc-amount.
-                                                [general/gl080.cbl:L506]
+        multiply pre-amount by -1 giving pre-amount.
+            [general/gl070.cbl:L517], [general/gl070.cbl:L530]
+        multiply arc-amount by -1 giving arc-amount.
+            [general/gl080.cbl:L493], [general/gl080.cbl:L506]
         multiply -1 by sales-current giving work-1
-                                                [sales/sl100.cbl:L395]
-        multiply -1 by purch-current giving work-1
-                                                [purchase/pl100.cbl:L387]
-        multiply vat-amount by -1 giving  vat-amount.
-                                                [irs/irs030.cbl:L947]
+            [sales/sl100.cbl:L395], and its purchase twin
+            [purchase/pl100.cbl:L387]
         multiply post-amount by -1 giving post-amount.
-                                                [irs/irs030.cbl:L963]
-        multiply post-amount by -1 giving post-amount.
-                                                [irs/irs030.cbl:L1096]
-        multiply  post-amount  by  -1 giving  post-amount.
-                                                [irs/irs030.cbl:L1125]
-        multiply  vat-amount  by  -1 giving  vat-amount.
-                                                [irs/irs030.cbl:L1127]
-        multiply post-amount by -1 giving  post-amount.
-                                                [irs/irs030.cbl:L1139]
-        multiply vat-amount by -1 giving  vat-amount.
-                                                [irs/irs030.cbl:L1141]
-        multiply  ws-default by -1 giving ws-default
-                                                [irs/irs030.cbl:L1179]
+            [irs/irs030.cbl] at L947, L963, L1096, L1125, L1127, L1139, L1141
+            and L1179
 
-    The first two are the credit leg of the three-leg double-entry explosion.
+    The gl070 pair is the credit leg of the three-leg double-entry explosion.
     As with the no-GIVING form, a flip into an UNSIGNED receiving field
-    silently drops the sign (open question Q-3), and the store still truncates.
+    silently drops the sign - question Q-3, measured and recorded at `store`,
+    step 3 - and the store still truncates.
 
     The scaling multiplies, whose literal factor belongs to the calling program
-    module and not to this layer:
+    module and not to this layer, are `multiply account-in by 100 giving ...`
+    at [general/gl051.cbl:L654], [general/gl051.cbl:L657] and
+    [general/gl051.cbl:L803].
 
-        multiply account-in by 100 giving post-dr
-                                                [general/gl051.cbl:L654]
-        multiply account-in by 100 giving post-cr
-                                                [general/gl051.cbl:L657]
-        multiply account-in by 100 giving WS-Ledger-Nos.
-                                                [general/gl051.cbl:L803]
-
-    And the companions of two computations whose partner is a divide:
-
-        multiply a  by  period  giving  y.      [general/gl080.cbl:L329]
-        multiply ws-work1 by 4 giving ws-work2. [irs/irs030.cbl:L1334]
-        multiply sales-activety by sales-average giving work-2
-                                                [sales/sl060.cbl:L821]
-        multiply sales-activety by sales-average giving work-2
-                                                [sales/sl060.cbl:L837]
-        multiply sales-pay-activety by sales-pay-average giving work-b.
-                                                [sales/sl100.cbl:L507]
-        multiply purch-activety by purch-average giving work-2
-                                                [purchase/pl060.cbl:L745]
-        multiply purch-activety by purch-average giving work-2
-                                                [purchase/pl060.cbl:L760]
-        multiply purch-pay-activety by purch-pay-average giving work-b.
-                                                [purchase/pl100.cbl:L498]
+    The divide companions are `multiply a by period giving y.`
+    [general/gl080.cbl:L329], `multiply ws-work1 by 4 giving ws-work2.`
+    [irs/irs030.cbl:L1334], and six of the shape `multiply <counter> by
+    <average> giving <accumulator>` at [sales/sl060.cbl:L821],
+    [sales/sl060.cbl:L837], [sales/sl100.cbl:L507], [purchase/pl060.cbl:L745],
+    [purchase/pl060.cbl:L760] and [purchase/pl100.cbl:L498].
 
     [general/gl080.cbl:L329] is the UN-ROUNDED companion of the ROUNDED divide
-    on the line before it [general/gl080.cbl:L328]; the six that follow are the
-    first step of the three divergent moving-average idioms, which each program
-    module assembles with its own guard. This function supplies the multiply
-    and nothing more - see this module's docstring for why no helper bundles
-    them.
+    on the line before it [general/gl080.cbl:L328]; the six are the first step
+    of the three divergent moving-average idioms, which each program module
+    assembles with its own guard. This function supplies the multiply and
+    nothing more - see this module's docstring for why no helper bundles them.
 
     Args:
         multiplier: The first operand - what the statement writes before BY.
@@ -1352,7 +1376,7 @@ def multiply_by_giving(
             MULTIPLY does. Defaults to False, which truncates.
 
     Returns:
-        What the receiving field now holds.
+        The value the receiving field holds after the store.
 
     Raises:
         TypeError: An inexact carrier (rule R-2), or a non-numeric receiving
@@ -1364,41 +1388,22 @@ def multiply_by_giving(
     return store(product, receiving, rounded=rounded)
 
 
-# =============================================================================
 #  DIVIDE  -  17 live occurrences, EVERY one of them with GIVING
-#
 #  BOTH OPERAND ORDERS ARE LIVE, and they are opposites:
-#
 #      DIVIDE a BY   b GIVING c   ->  c = a / b     13 sites
 #      DIVIDE a INTO b GIVING c   ->  c = b / a      4 sites
-#
-#  Two of those sites compute the SAME quotient shape - an accumulator divided
-#  by its counter - and are written with the operands REVERSED:
-#
-#      divide   sales-activety into work-2 giving sales-average.
-#                                             [sales/sl060.cbl:L827]
-#      divide   work-b by sales-pay-activety giving sales-pay-average.
-#                                             [sales/sl100.cbl:L511]
-#
-#  That reversal is the substance of anomaly A-10, so the two verb forms are
-#  published as two separate, faithfully-named primitives with parameters named
-#  after their COBOL roles. A caller transcribes its own statement word for
-#  word and cannot express it in the other program's shape by accident.
-#
-#  NEITHER `REMAINDER` NOR A NO-GIVING FORM IS IMPLEMENTED. `REMAINDER` occurs
-#  zero times across the twelve in-scope programs, and so does `DIVIDE` without
-#  `GIVING`; implementing either would be adding a facility the specification
-#  does not contain.
-#
-#  NO ZERO-DIVISOR GUARD IS ADDED. Where the frozen programs care they guard in
-#  their own business logic - [sales/sl060.cbl:L819], [sales/sl060.cbl:L835],
-#  [sales/sl100.cbl:L506] each test the counter before dividing. Adding a guard
-#  here would be an added validation (rule R-3) and would mask a real
-#  divergence behind a silent zero. A genuine zero divisor therefore surfaces:
-#  see open question Q-7.
-# =============================================================================
-
-
+#  Two sites compute the SAME quotient shape with the operands REVERSED:
+#  [sales/sl060.cbl:L827] `divide sales-activety into work-2 giving
+#  sales-average.` against [sales/sl100.cbl:L511] `divide work-b by
+#  sales-pay-activety giving sales-pay-average.` That is anomaly A-10, so both
+#  are published separately, named after their COBOL roles. NEITHER `REMAINDER`
+#  NOR A NO-GIVING FORM IS IMPLEMENTED - both occur zero times. NO ZERO-DIVISOR
+#  GUARD IS ADDED: the frozen programs guard in their own logic
+#  [sales/sl060.cbl:L819], [sales/sl060.cbl:L835], [sales/sl100.cbl:L506], and
+#  adding one here would be an added validation (rule R-3) that masked a real
+#  divergence. A genuine zero divisor therefore takes the MEASURED path rather
+#  than a substituted value - GnuCOBOL 3.2 stores nothing at all and continues,
+#  which is question Q-7 and which `SizeErrorNoStore` records in full.
 def _as_whole(value: decimal.Decimal) -> int | None:
     """Return the exact integer equal to `value`, or None if it has a fraction.
 
@@ -1418,6 +1423,8 @@ def _quotient(
     receiving: FieldDescriptor,
     *,
     rounded: bool,
+    operation: str,
+    receiver_value: decimal.Decimal | int | str | None,
 ) -> decimal.Decimal | int:
     """Divide and store, by the exact integer route wherever COBOL's is exact.
 
@@ -1441,17 +1448,27 @@ def _quotient(
     in the cycle [general/gl080.cbl:L328] stores into `pic 99`
     [general/gl080.cbl:L183], an integer field, so this distinction is live and
     not theoretical.
+
+    A ZERO DIVISOR is not tested for in advance - the divisor is used, and the
+    two routes fail differently, `usage.truncate_toward_zero` with the builtin
+    `ZeroDivisionError` and the decimal route with `decimal.DivisionByZero`
+    under this module's trap policy. Both are caught here and both reach the
+    ONE measured outcome, `_no_store`, so neither route can develop its own
+    behaviour.
     """
-    if not rounded and receiving.is_int:
-        whole_dividend = _as_whole(dividend)
-        whole_divisor = _as_whole(divisor)
-        if whole_dividend is not None and whole_divisor is not None:
-            exact = cobol_usage.truncate_toward_zero(
-                whole_dividend, whole_divisor
-            )
-            return store(exact, receiving)
-    with decimal.localcontext(INTERMEDIATE_CONTEXT):
-        quotient = dividend / divisor
+    try:
+        if not rounded and receiving.is_int:
+            whole_dividend = _as_whole(dividend)
+            whole_divisor = _as_whole(divisor)
+            if whole_dividend is not None and whole_divisor is not None:
+                exact = cobol_usage.truncate_toward_zero(
+                    whole_dividend, whole_divisor
+                )
+                return store(exact, receiving)
+        with decimal.localcontext(INTERMEDIATE_CONTEXT):
+            quotient = dividend / divisor
+    except ZeroDivisionError:
+        return _no_store(operation, receiver_value, receiving)
     return store(quotient, receiving, rounded=rounded)
 
 
@@ -1461,55 +1478,47 @@ def divide_by_giving(
     receiving: FieldDescriptor,
     *,
     rounded: bool = False,
+    receiver_value: decimal.Decimal | int | str | None = None,
 ) -> decimal.Decimal | int:
     """Reproduce `DIVIDE <dividend> BY <divisor> GIVING <receiver>`: a / b.
 
     The operands appear in the order the statement writes them, so a call reads
-    the same way round as the COBOL. Thirteen live sites.
+    the same way round as the COBOL. Thirteen live sites, nine of them scalings
+    and four computations of substance.
 
     The scaling divides, whose literal divisor belongs to the calling program
-    module and not to this layer:
-
-        divide post-dr by 100 giving acc-ok     [general/gl051.cbl:L604]
-        divide post-cr by 100 giving acc-ok     [general/gl051.cbl:L607]
-        divide   post-dr  by  100  giving  l7-dr.
-                                                [general/gl051.cbl:L1035]
-        divide   post-cr  by  100  giving  l7-cr.
-                                                [general/gl051.cbl:L1037]
-        divide   vat-ac of WS-Posting-Record by 100 giving l7-vat-ac.
-                                                [general/gl051.cbl:L1044]
-        divide   WS-Ledger-Nos  by  100  giving  l6-account.
-                                                [general/gl072.cbl:L386]
-        divide   WS-Ledger-Nos  by  100  giving  l6-account.
-                                                [general/gl072.cbl:L413]
-        divide ws-nstrg by 100 giving amt-ok    [irs/irs030.cbl:L1074]
-        divide ws-nstrg by 10  giving amt-ok    [irs/irs030.cbl:L1077]
+    module and not to this layer, are `divide post-dr by 100 giving acc-ok`
+    [general/gl051.cbl:L604] and its post-cr twin [general/gl051.cbl:L607]; the
+    report pair `divide post-dr by 100 giving l7-dr.` [general/gl051.cbl:L1035]
+    and [general/gl051.cbl:L1037]; `divide vat-ac of WS-Posting-Record by 100
+    giving l7-vat-ac.` [general/gl051.cbl:L1044]; `divide WS-Ledger-Nos by 100
+    giving l6-account.` at [general/gl072.cbl:L386] and
+    [general/gl072.cbl:L413]; and `divide ws-nstrg by 100` / `by 10 giving
+    amt-ok` at [irs/irs030.cbl:L1074] and [irs/irs030.cbl:L1077].
 
     Three of those store into an EDITED receiving item -
     `l6-account pic 9999.99 blank when zero` [general/gl072.cbl:L233] and
     `l7-cr pic zzz9.99b` [general/gl051.cbl:L310]. Only the NUMERIC store
-    happens here: the digits and scale come from the edited picture, and no
-    edited string is ever produced, because rendering is deliberately outside
-    this package's surface.
+    happens here: digits and scale come from the edited picture, and no edited
+    string is produced - rendering is outside this package's surface.
 
-    The remaining four are computations of substance:
+    The four computations of substance:
 
-        divide   scycle by period giving a rounded.
-                                                [general/gl080.cbl:L328]
-        divide   u-year by 4 giving ws-work1.   [irs/irs030.cbl:L1333]
-        divide   work-b by sales-pay-activety giving sales-pay-average.
-                                                [sales/sl100.cbl:L511]
-        divide   work-b by purch-pay-activety giving purch-pay-average.
-                                                [purchase/pl100.cbl:L502]
+        divide scycle by period giving a rounded. [general/gl080.cbl:L328]
+        divide u-year by 4 giving ws-work1.       [irs/irs030.cbl:L1333]
+        divide work-b by sales-pay-activety giving sales-pay-average.
+                                                  [sales/sl100.cbl:L511]
+        divide work-b by purch-pay-activety giving purch-pay-average.
+                                                  [purchase/pl100.cbl:L502]
 
     The first is THE ONLY ROUNDED DIVIDE IN THE CYCLE, and the only site where
     this function is called with `rounded=True`; its un-ROUNDED companion sits
     on the very next line [general/gl080.cbl:L329]. The second is the leap-year
     test, paired with a multiply [irs/irs030.cbl:L1334]. The last two are the
-    third moving-average idiom [sales/sl100.cbl:L497] - the one written with
-    these operands and not the other way round (anomaly A-10) - whose operands
-    are both `binary-long` [sales/sl100.cbl:L182-L183], so the quotient is
-    truncated toward zero as an integer.
+    third moving-average idiom [sales/sl100.cbl:L497] - written with these
+    operands and not the other way round (anomaly A-10) - whose operands are
+    both `binary-long` [sales/sl100.cbl:L182-L183], so the quotient truncates
+    toward zero as an integer.
 
     Args:
         dividend: The operand written first - what is divided.
@@ -1518,20 +1527,33 @@ def divide_by_giving(
         rounded: True only where the statement writes ROUNDED. Exactly one
             in-scope site does, [general/gl080.cbl:L328]. Defaults to False,
             which truncates toward zero.
+        receiver_value: What the receiving field holds BEFORE the statement.
+            Needed only to reproduce the measured outcome of a zero divisor,
+            which is that the field is left exactly as it was (question Q-7;
+            see `SizeErrorNoStore`). Every in-scope divisor here is either a
+            literal or a counter its own program guards, so it is optional and
+            defaults to None.
 
     Returns:
-        What the receiving field now holds.
+        What the receiving field now holds. On a zero divisor with
+        `receiver_value` supplied, that is the previous value, unchanged.
 
     Raises:
-        ZeroDivisionError: The divisor is zero. `decimal.DivisionByZero` is a
-            subclass of it, so both internal routes raise the same thing. Open
-            question Q-7.
+        SizeErrorNoStore: The divisor is zero and `receiver_value` was not
+            supplied, so the measured no-store outcome cannot be returned. It
+            subclasses `ZeroDivisionError`, and both internal routes reach it,
+            so a caller may catch either name.
         TypeError: An inexact carrier (rule R-2), or a non-numeric receiving
             field.
         ValueError: A non-finite value, or a descriptor missing a component.
     """
     return _quotient(
-        _exact(dividend), _exact(divisor), receiving, rounded=rounded
+        _exact(dividend),
+        _exact(divisor),
+        receiving,
+        rounded=rounded,
+        operation="DIVIDE ... BY ... GIVING",
+        receiver_value=receiver_value,
     )
 
 
@@ -1541,6 +1563,7 @@ def divide_into_giving(
     receiving: FieldDescriptor,
     *,
     rounded: bool = False,
+    receiver_value: decimal.Decimal | int | str | None = None,
 ) -> decimal.Decimal | int:
     """Reproduce `DIVIDE <divisor> INTO <dividend> GIVING <receiver>`: b / a.
 
@@ -1587,25 +1610,37 @@ def divide_into_giving(
         receiving: The receiving field's descriptor.
         rounded: True only where the statement writes ROUNDED. No in-scope
             INTO site does. Defaults to False, which truncates toward zero.
+        receiver_value: What the receiving field holds BEFORE the statement.
+            Needed only to reproduce the measured outcome of a zero divisor,
+            which is that the field is left exactly as it was (question Q-7;
+            see `SizeErrorNoStore`). All four in-scope sites are moving-average
+            divides whose counter their own program tests first - and one of
+            them, anomaly A-9, never increments that counter at all - so it is
+            optional and defaults to None.
 
     Returns:
-        What the receiving field now holds.
+        What the receiving field now holds. On a zero divisor with
+        `receiver_value` supplied, that is the previous value, unchanged.
 
     Raises:
-        ZeroDivisionError: The divisor is zero. Every in-scope caller guards
-            its counter first, in its own business logic. Open question Q-7.
+        SizeErrorNoStore: The divisor is zero and `receiver_value` was not
+            supplied, so the measured no-store outcome cannot be returned. It
+            subclasses `ZeroDivisionError`, so a caller may catch either name.
         TypeError: An inexact carrier (rule R-2), or a non-numeric receiving
             field.
         ValueError: A non-finite value, or a descriptor missing a component.
     """
     return _quotient(
-        _exact(dividend), _exact(divisor), receiving, rounded=rounded
+        _exact(dividend),
+        _exact(divisor),
+        receiving,
+        rounded=rounded,
+        operation="DIVIDE ... INTO ... GIVING",
+        receiver_value=receiver_value,
     )
 
 
-# =============================================================================
 #  RELATION CONDITIONS  -  algebraic comparison, no receiving field
-# =============================================================================
 
 
 def compare(
@@ -1633,8 +1668,8 @@ def compare(
     gross".
     THE ADD, THE TEST'S CONSEQUENCES AND THE STATUS IT SETS
     [general/gl051.cbl:L1119], [general/gl051.cbl:L1121] ARE BUSINESS LOGIC AND
-    BELONG IN `programs/gl051_batch_control_check.py`. This function supplies
-    only the comparison.
+    BELONG IN THE `gl051` PROGRAM MODULE. This function supplies only the
+    comparison.
 
     It also serves the six relation conditions that compute an expression with
     no receiving field - pair it with `intermediate`, which does not quantize:

@@ -1,160 +1,94 @@
-"""IRS system parameters - the first argument of the IRS linkage shape.
+"""IRS system-parameter record - `copybooks/irswssystem.cob`, all 40 lines.
 
-Agent Action Plan section 0.4.1.3 gives this module its whole mandate in one
-row of the record-layout transformation table:
+Section 0.4.1.3 gives this module one row:
+"`acas_posting/records/irs_system.py` | CREATE | `copybooks/irswssystem.cob` |
+IRS system parameters - the first argument of the IRS linkage shape". Section
+0.8.1 requires "Plain modules and dataclasses; no ORM entity layer", and rule
+R-3 requires the record modules to "mirror their copybooks field for field
+with nothing added".
 
-    acas_posting/records/irs_system.py | CREATE | copybooks/irswssystem.cob |
-    "IRS system parameters - the first argument of the IRS linkage shape
-    [irs/irs030.cbl:L552-L554]"
+AAP directives are paraphrased below with their section number carrying the
+provenance, because rule R-4 bans the very words some of them use. Direct
+quotations are marked as such.
 
-and the folder's rule, from the same section: every module is a CREATE from
-its copybook, translating each 05/03 field to a dataclass attribute whose
-descriptor is looked up in the generated dictionary, and oddities in the
-source are preserved rather than put right.
-
-A note on how the AAP is cited below. COBOL source text is always quoted
-verbatim - that is the whole point of a record module. AAP directives, by
-contrast, are paraphrased with their section number carrying the provenance,
-because rule R-4 prohibits a short vocabulary of "the implementation knows
-better" words outright and some of those directives use the very words the
-rule bans. Paraphrasing keeps this file clear of the banned vocabulary
-without losing a syllable of the meaning.
-
-Its shape is fixed by section 0.8.1 - "Plain modules and dataclasses; no ORM
-entity layer" - and by rule R-3, under which the record modules "mirror their
-copybooks field for field with nothing added".
-
-This file is a record LAYOUT and nothing else. It binds no argv, opens no
-connection, computes no VAT, reads no clock, parses no date and validates
-nothing. Those responsibilities belong to acas_posting/cli/args.py,
-acas_posting/cli/irs_post.py, acas_posting/programs/irs030_posting.py,
-acas_posting/clock.py and acas_posting/dates.py, and not one of them is
-imported here - see LAYERING below.
+This module declares dataclasses and descriptors. It performs no arithmetic,
+no validation, no coercion, no date conversion and no I/O. Binding this block
+to argv belongs to the CLI layer; reading and incrementing its allocator
+belongs to the `irs030` program module; the pinned clock and every date
+conversion belong to `acas_posting/clock.py` and `acas_posting/dates.py`,
+neither of which is imported here.
 
 THIS RECORD IS WHY THE IRS ENTRY POINT HAS ITS OWN ARGUMENT SHAPE
 -----------------------------------------------------------------
-Section 0.1.1 observes that the command-line contract for this migration was
-written decades ago, in the LINKAGE SECTIONs:
+Section 0.1.1 states the reason in full:
 
-    "The CLI contract is already written, in the LINKAGE SECTIONs. ... there
-    are exactly three distinct shapes. The General Ledger family takes `using
-    ws-calling-data, system-record, to-day, file-defs`
-    [general/gl070.cbl:L245-L248]. The Sales and Purchase families add the
-    fourth system record [sales/sl060.cbl:L395-L399]. The IRS program is
-    materially different - it takes neither the calling-data block nor the run
-    date: `using IRS-System-Params, WS-System-Record, File-Defs`
-    [irs/irs030.cbl:L552-L554]. The Python CLI entry points must accept
-    exactly these logical inputs, which means three argument shapes, not one."
+    "None of the in-scope programs is a main program; every one is a `CALL`ed
+    sub-program with a fixed parameter list, and there are exactly three
+    distinct shapes. The General Ledger family takes `using ws-calling-data,
+    system-record, to-day, file-defs` [general/gl070.cbl:L245-L248]. The Sales
+    and Purchase families add the fourth system record
+    [sales/sl060.cbl:L395-L399]. The IRS program is materially different - it
+    takes neither the calling-data block nor the run date:
+    `using IRS-System-Params, WS-System-Record, File-Defs`
+    [irs/irs030.cbl:L552-L554]."
 
-Checked against the frozen source, and the plan's citation is exact:
+The frozen lines are:
 
     L552   procedure division using IRS-System-Params
     L553                            WS-System-Record
     L554                            File-Defs.
 
-`IrsSystemParams` is parameter #1 of that third shape. It is the reason
-acas_posting/cli/irs_post.py cannot share an argument binding with the other
-six entry points, and section 0.4.1.1 says so in as many words: that module
-uses "the third linkage shape - IRS-System-Params, WS-System-Record,
-File-Defs, with no calling-data block and no to-day".
+This record is parameter #1 - the argument that makes the IRS shape the third
+one rather than a variant of the other two.
 
 NO TABLE, NO BRIDGE, NO HANDLER - AND WHY THAT MATTERS HERE
 -----------------------------------------------------------
-The frozen schema declares 33 tables, five of them IRS-named -
-`IRSDFLT-REC` [mysql/ACASDB.sql:L189], `IRSFINAL-REC` [:L214], `IRSNL-REC`
-[:L238], `IRSPOSTING-REC` [:L274] and `PSIRSPOST-REC` [:L366] - and NONE of
-them is an IRS system table. The entity-to-table spine of section 0.2.1.1 has
-no row for copybooks/irswssystem.cob at all; its single `System` row maps
-`acas000` key 1 to `systemMT` to `SYSTEM-REC` to copybooks/wssystem.cob,
-which is a different copybook and a different record.
+The frozen schema holds 33 tables, five of them IRS-named: `IRSDFLT-REC`
+[mysql/ACASDB.sql:L189], `IRSFINAL-REC` [:L214], `IRSNL-REC` [:L238],
+`IRSPOSTING-REC` [:L274] and `PSIRSPOST-REC` [:L366]. None of them is this
+record. Section 0.2.1.1's entity-to-table spine has no row for
+`copybooks/irswssystem.cob`: no facade, no handler, no bridge, no table.
 
-So this is a copybook-only, LINKAGE-ONLY record. It reaches no table, passes
-through no generated bridge and is reached by no numbered handler. It joins
-the small set in this folder that has no MySQL counterpart, alongside
-records/calling_data.py, records/file_access.py, records/file_defs.py,
-records/maps03.py, records/test_data_flags.py and records/work_records.py.
+That places this module in the copybook-only, linkage-only set alongside
+`calling_data`, `file_access`, `file_defs`, `maps03`, `test_data_flags` and
+`work_records`. Section 0.8.2 makes the bridge the authoritative
+record-layout-to-table mapping, so a record with no bridge has no
+authoritative column view at all - its dictionary entries carry the copybook
+view and nothing else, and their keys take the
+`<COPYBOOK-RECORD>.<FIELD-NAME>` form rather than a table-qualified one. The
+per-member comments below carry the key convention and the guard it needs; the
+loader's table-keyed accessor is meaningless here and is called nowhere in
+this file.
 
-Two consequences follow, and both are load-bearing.
-
-First, the preserved user requirement of section 0.8.2 - that the maintainer's
-one-way COBOL-to-MySQL bridge is what defines the record-layout to table
-mapping, and is therefore the data dictionary for this migration - cannot be
-applied to this record in the ordinary way, because there is no bridge for it
-to define anything with. The copybook is necessarily its own authority here,
-and it is the only source the generated dictionary had for these 28 fields.
-That is stated
-rather than left implicit so that a reader does not go hunting for a
-`irswssystemMT.scb` that has never existed.
-
-Second, the dictionary keys for this record take the copybook-only form,
-`<COPYBOOK-RECORD>.<FIELD-NAME>`, and never the `<TABLE-NAME>.<COLUMN-NAME>`
-form. The loader's table-keyed accessor is meaningless for a record that has
-no table, and is not called anywhere in this module; the copybook-record
-accessor is what section 3.3 directs be used, and it is what was used.
-
-THE DICTIONARY PROBE, AND THE GUARD IT HAD TO PASS
---------------------------------------------------
-Rule R-5 and section 0.8.1's "Data dictionary first" directive require that
-every field here cite a generated entry rather than carry hand-typed
-metadata. Because the record name collides with the General Ledger system
-record (see THE 01-NAME IS LOWER CASE below), the lookup was PROBED before
-anything was written, and the probe result is recorded here as the provenance
-of every descriptor in this file:
-
-    loader.entries_for_copybook_record("system-record")
-        -> 28 entries
-        -> distinct copybook.file values: exactly one,
-           "copybooks/irswssystem.cob"
-        -> system-record.run-date resolves ALPHANUMERIC x(8)
-    loader.entries_for_copybook_record("IRS-System-Params")
-        -> DictionaryLookupError: no such copybook record
-    loader.entries_for_copybook_record("System-Record")
-        -> 199 entries, every one from copybooks/wssystem.cob
-
-The working key form is therefore `system-record.<FIELD-NAME>`: the record
-half in this copybook's own lower case, each field half in its own casing,
-and the two FILLERs disambiguated by the dictionary's own `#` convention as
-`filler#39` and `filler#40`. The caller-side `replacing` name
-`IRS-System-Params` is NOT a dictionary record name; it names a view that
-exists only inside irs030, so it appears in this file as a class name and in
-prose, never as a key.
-
-The mandatory guard - that no entry resolves to copybooks/wssystem.cob -
-passes, and it passes structurally rather than by luck: loader lookups are
-exact and fold no case, so the lower-case record half `system-record.` cannot
-reach the General Ledger record's mixed-case `System-Record` keys. The
-strongest single check is that `run-date` comes back ALPHANUMERIC x(8); had it
-come back `binary-long` this would have been the wrong record entirely
-[copybooks/wssystem.cob:L67].
-
-Every field of this record resolves, so the descriptor path is
-`FieldDescriptor.from_dictionary_key` for all 28 entries and
-`FieldDescriptor.for_working_storage` for none of them.
+The probe that settles it, and it answers three names for what COBOL folds
+into one identifier: `entries_for_copybook_record("system-record")` returns 28
+entries, all from `copybooks/irswssystem.cob`, all reporting presence
+`in_copybook=True, in_bridge=False, in_column=False`; `("IRS-System-Params")`
+raises `DictionaryLookupError`, the caller-side rename being no dictionary
+record at all; and `("System-Record")` returns a different 199 entries from
+`copybooks/wssystem.cob`. That three-way split IS the collision this record
+causes, registered below.
 
 DRIFT: THERE IS NONE TO REPORT, AND THAT IS ITSELF THE FINDING
 --------------------------------------------------------------
-`loader.drift_for` was called for this record's fields and returns, for every
-one of them, `Drift(signedness=False, usage=False, digits=False, scale=False,
-character_length=False, name=False, details=())`. The host-variable view and
-the column view are both `None`, so `loader.cite` renders every field as
-`bridge=absent  column=absent`, and `anomaly_refs` and `ambiguity_refs` are
-empty for all of them.
+`loader.drift_for` returns, for every field of this record,
+`Drift(signedness=False, usage=False, digits=False, scale=False,
+character_length=False, name=False, details=())`. The host-variable and column
+views are both `None`, so `loader.cite` renders every field as `bridge=absent
+column=absent`, and `anomaly_refs` and `ambiguity_refs` are empty throughout.
 
 That is not an omission - it is what a record with one layer looks like. A
-field can only drift between layers that both exist, and this record has no
-bridge and no column to disagree with its copybook. Contrast
+field can only drift between layers that both exist. Contrast
 `SALEDGER-REC.SALES-AVERAGE`, where the copybook says signed and both the
 bridge and the column say unsigned [copybooks/wssl.cob:L49],
 [common/salesMT.cbl:L308]. Nothing of that kind can arise here, and the
-absence is recorded so that a later reader does not mistake it for an
-unfinished check. Each descriptor still answers `cite()` and `drift()` - the
-loader's own primitives, surfaced through the descriptor rather than
-reimplemented.
+absence is recorded so a later reader does not mistake it for an unfinished
+check.
 
 THE COPYBOOK HEADER, VERBATIM - FOUR RECORD SIZES IN SEVEN YEARS
 ----------------------------------------------------------------
-copybooks/irswssystem.cob is 40 lines. Its header is quoted verbatim because
-the successive sizes are the evidence for the length contradiction below:
+Quoted verbatim because the successive sizes are the evidence for the length
+contradiction below:
 
     L3   "Working Storage for the System File"
     L4   "Incomplete Records System ONLY"
@@ -169,19 +103,19 @@ the successive sizes are the evidence for the length contradiction below:
 Only L9 is wrapped, and only because it is 85 characters long; its words are
 unaltered.
 
-L11 names the creator: irs/irs.cbl, the IRS menu shell, which section 0.2.2
+L11 names the creator: `irs/irs.cbl`, the IRS menu shell, which section 0.2.2
 places OUT of scope among the "Interactive data-entry, amendment and menu
 programs". The record's creation logic is therefore deliberately absent from
 the migrated tree, and this note exists so a reader does not go looking for
-it. irs/irs.cbl is named here and nowhere else in this file: it is not
-imported, not invoked and not reimplemented.
+it. `irs/irs.cbl` is named here and nowhere else in this file: not imported,
+not invoked, not reimplemented.
 
 THE RECORD, VERBATIM - L13 THROUGH L40
 --------------------------------------
-Reproduced exactly as the frozen copybook writes it, including the four
-missing byte-offset comments, the eight that are one byte short, the
-one-space indentation slip on L23, the capital-L typo on L38 and both
-trailing FILLERs. Nothing below has been altered in any way:
+Reproduced exactly as the frozen copybook writes it, including the missing
+byte-offset comments, the eight that are one byte short, the one-space
+indentation slip on L23, the capital-L typo on L38 and both trailing FILLERs.
+Nothing below has been altered in any way:
 
 L13  01  system-record.
 L14      03  run-date           pic x(8).
@@ -198,8 +132,8 @@ L24      03  pass-word          pic x(4).  *> 173
 L25      03  next-post          pic 9(5).  *> 178
 L26      03  vat-rates.
 L27          05  vat            pic 99v99. *> 182   *> Standard
-L28          05  vat2           pic 99v99. *> 186   *> reduced 1 [not yet used]
-L29          05  vat3           pic 99v99. *> 190   *> reduced 2 [not yet used]
+L28          05  vat2           pic 99v99. *> 186   *> reduced 1 [not used]
+L29          05  vat3           pic 99v99. *> 190   *> reduced 2 [not used]
 L30      03  vat-group redefines vat-rates.
 L31          05  vat-psent      pic 99v99    occurs 3.
 L32      03  pass-value         pic 9.
@@ -212,18 +146,21 @@ L38      03  First-Time-FLag    pic 9.     *> 248
 L39      03  filler             pic 9(7).  *> 255
 L40      03  filler             pic x.     *> 256
 
-Counted: one 01-level group, 23 items at 03 level (two of them groups, two of
-them FILLER) and four items at 05 level. That is 27 subordinate items, which
-is exactly the number of members this module declares, and 28 dictionary
-entries once the 01 group itself is counted.
+The two annotations on L28 and L29 read "reduced 1 [not yet used]" and
+"reduced 2 [not yet used]" in the source; only the bracketed words are
+shortened above, to fit, and they are quoted in full at their fields.
+
+One 01-level group, 23 items at 03 level - two of them groups, two of them
+FILLER - and four at 05 level: 27 subordinate items, 28 dictionary entries
+with the 01 group counted. `IrsSystemParams` carries the member-by-member
+reconciliation.
 
 BYTE OFFSETS - THE COPYBOOK'S OWN FIGURES BESIDE THIS MIGRATION'S
 -----------------------------------------------------------------
-Both columns are given, and NEITHER is presented as a correction of the
-other. The left column is what the frozen copybook writes; the right column
-is this migration's own arithmetic, computed by summing the declared field
-widths in declaration order and treating `vat-group redefines vat-rates` as
-occupying no additional bytes.
+Both columns are given and NEITHER is presented as a correction of the other.
+The left column is what the frozen copybook writes; the right is this
+migration's own arithmetic, summing the declared widths in declaration order
+and treating `vat-group redefines vat-rates` as occupying no additional bytes.
 
     line  field              pic     width  copybook  computed
     L14   run-date           x(8)        8   (none)          8
@@ -254,17 +191,26 @@ occupying no additional bytes.
     computed field-width sum   257
     header's claim (L7, L10)   256
 
+Seven lines in L14-L40 carry no offset comment. Four are genuine absences on
+storage-bearing items - `run-date` [:L14], `suser` [:L15], `address-2` [:L18]
+and `pass-value` [:L32]; the copybook's offsets simply do not begin until
+`client` [:L16]. The other three are not absences of the same kind:
+`vat-rates` [:L26] and `vat-group` [:L30] are group headers, which have no
+offset of their own to state, and `vat-psent` [:L31] is the subscripted item
+inside the redefining group, whose bytes the first group already accounts for.
+No comment is invented for any of the seven.
+
 ANOMALY - THE DECLARED LENGTH AND THE FIELD SUM DISAGREE BY ONE BYTE
 --------------------------------------------------------------------
 The widths sum to 257 while the header claims 256, twice - at L7 and again at
 L10, seven years apart and across two intervening size revisions.
 
-This is a NEW anomaly. It is not one of the twenty-two the plan registers in
-section 0.6.7, and it should be ADDED to docs/migration/anomaly-log.md with
-this module named as its recording site. It is a direct structural analogue of
-registered anomaly 15, "The batch record's declared length contradicts the sum
-of its fields" [copybooks/wsbatch.cob], and it inherits that anomaly's open
-question verbatim from section 0.6.8:
+This is a NEW anomaly, not one of the twenty-two section 0.6.7 registers, and
+it is to be added to the migration's anomaly log with this module named as its
+recording site. It is a direct structural analogue of registered anomaly 15,
+"The batch record's declared length contradicts the sum of its fields"
+[copybooks/wsbatch.cob], and it inherits that anomaly's open question verbatim
+from section 0.6.8:
 
     "Whether the declared length or the field sum governs the record actually
     read affects field alignment for the trailing fields, and only execution
@@ -272,90 +218,59 @@ question verbatim from section 0.6.8:
 
 The same question applies here, and to the same trailing fields - the eight
 from L33 to L40 whose offset comments are also the ones that disagree. It is
-recorded as an open question for docs/migration/ambiguity-resolutions.md and
-is settled NOWHERE in this file, because rule R-6 gives that decision to the
+an open question for the migration's ambiguity-resolutions document and is
+settled NOWHERE in this file, because rule R-6 gives that decision to the
 compiled program and to nothing else.
 
-What that means concretely for this module, and it is a short list of
-prohibitions:
-
-    * no RECORD_LENGTH, RECORD_SIZE or BYTE_LENGTH constant is declared, at
-      any scope. A constant would be an answer, and there is no answer yet;
-    * no padding byte is added to make the sum 256;
-    * neither FILLER is dropped to make the sum 256. Both are declared,
-      because dropping either would silently change the very length the open
-      question is about.
-
-Anyone needing a width can compute it from the dictionary's own descriptors
-rather than from a figure this file asserts. The recipe is exact: sum
-`byte_length` over the NON-GROUP members of `IrsSystemParams.FIELDS` - 21 of
-the 23, since a group item has no width of its own and raises if asked for one
-- then add the sum over `VatRates.FIELDS`, and add nothing at all for
-`VatGroup.FIELDS`, which redefines those same twelve bytes. That comes to 257,
-derived, attributed, and visibly this migration's arithmetic.
+Concretely, and it is a short list of prohibitions: no length or size constant
+is declared at any scope, because a constant would be an answer and there is
+no answer yet; no padding byte is added to make the sum 256; and neither
+FILLER is dropped to make it 256, since dropping either would silently change
+the very length the open question is about. `IrsSystemParams` gives the recipe
+for deriving a width from the descriptors instead.
 
 ANOMALY - EIGHT BYTE-OFFSET COMMENTS ARE EACH ONE BYTE SHORT
 ------------------------------------------------------------
 Every offset comment from L16 to L29 agrees with the computed running end
-offset. Every offset comment from L33 to L40 is exactly one lower: 191 for
-192, 209 for 210, 210 for 211, 215 for 216, 247 for 248, 248 for 249, 255 for
-256 and 256 for 257.
+offset. Every one from L33 to L40 is exactly one lower: 191 for 192, 209 for
+210, 210 for 211, 215 for 216, 247 for 248, 248 for 249, 255 for 256 and 256
+for 257.
 
-The cause is visible in the source. `pass-value pic 9.` was inserted at L32
-without a byte-offset comment of its own and without renumbering the eight
-comments below it, so its one byte is missing from every figure that follows.
-The `vat-group redefines vat-rates` at L30-L31 is not the cause: a REDEFINES
-occupies no additional storage, and the offsets on either side of it (190 at
-L29, and the run resuming at L33) are consistent with that.
+The cause is visible in the source, and is recorded at the field that causes
+it: `pass-value pic 9.` was inserted at L32 without an offset comment of its
+own and without renumbering the eight below it, so its one byte is missing
+from every figure that follows. The `vat-group redefines vat-rates` at L30-L31
+is not the cause - a REDEFINES occupies no additional storage, and the offsets
+on either side of it are consistent with that.
 
-Also a NEW anomaly, also for docs/migration/anomaly-log.md with this module as
-its recording site. Every one of the eight comments is reproduced verbatim at
-its field below, wrong figure included, because rule R-4 is explicit: "A
-defect reproduced is correct; a defect fixed is a failure." The computed
-figures live in the table above and in the labelled column of each field
-comment, never overwriting the copybook's own.
-
-ANOMALY - THE 01-NAME IS LOWER CASE, AND IT COLLIDES HEAD-ON
-------------------------------------------------------------
-The record is declared `01  system-record.` [copybooks/irswssystem.cob:L13],
-all lower case. copybooks/wssystem.cob declares `System-Record` in mixed
-case. COBOL folds case, so these are THE SAME IDENTIFIER, and any program
-copying both books has a genuine collision on its hands.
-
-The lower-case spelling is preserved verbatim in the descriptor's own `name`,
-which comes from the dictionary rather than from this file, and it is quoted
-verbatim here. It is not title-cased anywhere.
-
-irs030 resolves the collision at the point of copy
-[irs/irs030.cbl:L416-L417]:
-
-    L416   copy "irswssystem.cob"   *> IRS param record
-    L417                replacing system-record  by IRS-System-Params.
-           *> (01 level)
-
-The plan's citation for this copy needed correction: it is at L416-L417, not
-L415-L416. The class name `IrsSystemParams` comes from that caller-side
-`replacing` name, exactly as records/irs_nominal.py and records/irs_dflt.py
-take theirs from [irs/irs030.cbl:L286] and [irs/irs030.cbl:L287].
+Also a NEW anomaly, also for the anomaly log with this module as its recording
+site. All eight comments are reproduced verbatim at their fields, wrong figure
+included, because rule R-4 is explicit: "A defect reproduced is correct; a
+defect fixed is a failure." The computed figures live in the table above and
+in a labelled column of each field comment, never overwriting the copybook's
+own.
 
 THE 29-IDENTIFIER REPLACING CLAUSE - ANOMALY 21 AT ITS LARGEST
 --------------------------------------------------------------
-Registered anomaly 21 is "Field-name collisions across three posting
-copybooks force qualified references", cited at [general/gl070.cbl:L510].
-That citation also needed correction: L510 is `write pre-trans-record.`, which
-is unqualified. The real posting-copybook qualification sites are
+Registered anomaly 21 is "Field-name collisions across three posting copybooks
+force qualified references", which section 0.6.7 cites at
+[general/gl070.cbl:L510]. That line is `move post-cr to pre-ac.`, which is
+unqualified; the qualified posting-copybook references are at
 
     [general/gl070.cbl:L497]   move post-code in WS-Posting-Record to pre-code
     [general/gl070.cbl:L521]   if vat-ac of WS-Posting-Record = zero
     [general/gl070.cbl:L525]   move vat-ac of WS-Posting-Record to pre-ac
 
+one using IN and two using OF.
+
 But the largest collision in the whole in-scope set is the one THIS record
-causes. Immediately after copying this copybook, irs030 copies
-copybooks/wssystem.cob [irs/irs030.cbl:L419] under a `replacing` clause
-spanning [irs/irs030.cbl:L420-L448] that renames TWENTY-NINE identifiers -
-counted, one per line, L420 through L448. Reproduced in full so that
-docs/migration/traceability.md can lift it as the definitive collision
-register:
+causes, and `IrsSystemParams` explains why the resolution runs the direction
+it does. Immediately after copying this copybook at
+[irs/irs030.cbl:L416-L417], irs030 copies `copybooks/wssystem.cob`
+[irs/irs030.cbl:L419] under a `replacing` clause spanning
+[irs/irs030.cbl:L420-L448] that renames TWENTY-NINE identifiers, one per line.
+Reproduced in full so the migration's traceability document can lift it as the
+definitive collision register:
 
     L420   System-Record      -> WS-System-Record
     L421   Run-Date           -> ACAS-Run-Date      *> these 3 are in binary
@@ -387,47 +302,29 @@ register:
     L447   PL-Approp-AC       -> IRS-PL-Approp-AC
     L448   1st-Time-Flag      -> IRS-First-Time-Flag
 
-Two facts about that list are easy to miss and both are recorded.
+Note that L433 spells the verb `By` with a capital B where every other line
+spells it `by`; a case-sensitive search for the pairs finds only 28 of the 29.
 
-The DIRECTION of the rename is the reverse of what one would expect. It is
-the General Ledger record that gets renamed away, because THIS record was
-copied first, at L416, and so claimed the plain names. That single ordering
-fact explains why the General Ledger system record is called
-`WS-System-Record` inside irs030 while it is `System-Record` everywhere else
-in the codebase.
+The list is BROADER than the strict collision set. `Post-Code`, `OP-System`
+and `Vat1` are renamed even though this copybook declares no field of any of
+those names - they belong to `copybooks/wssystem.cob` alone, at L77, L100 and
+L313. That is defensive over-renaming, and evidence that the maintainer could
+not track the collisions precisely. The imprecision is itself the point of
+anomaly 21, so it is recorded rather than tidied.
 
-The list is also BROADER than the strict collision set. `Post-Code`,
-`OP-System` and `Vat1` are renamed even though this copybook declares no field
-of any of those names - defensive over-renaming, and evidence that the
-maintainer could not track the collisions precisely. That imprecision is
-itself the point of anomaly 21, so it is recorded rather than tidied.
-
-None of those renamed names appears as an attribute name in this module. The
-`ACAS-` and `IRS-` prefixes belong to the OTHER record's view inside irs030,
-and this module models this record's own names only. records/system_record.py
-is not imported here, not merged with this file and shares no descriptor with
-it.
+None of the renamed names appears as an attribute in this module; the `ACAS-`
+and `IRS-` prefixes belong to the other record's view inside irs030.
+`records/system_record.py` is not imported here.
 
 THREE DATES THAT ARE TEXT HERE AND BINARY IN THE GENERAL LEDGER RECORD
 ----------------------------------------------------------------------
-`run-date` [:L14], `start-date` [:L21] and `end-date` [:L22] are each
-`pic x(8)` - eight characters of TEXT. The General Ledger system record
-declares the same two concepts as binary: `Run-Date binary-long`
-[copybooks/wssystem.cob:L67] and `Start-Date binary-long`
-[copybooks/wssystem.cob:L68].
-
-The maintainer documents the mismatch himself, in the rename clause above
-[irs/irs030.cbl:L421-L423]:
-
-    "these 3 are in binary"       against the wssystem names
-    "IRS expects as x(8)"
-    " dd/mm/yy"
-
-So these three are `str` of width 8 holding DD/MM/YY two-digit-year text.
-They are not parsed, not converted, not validated and not widened to ten
-characters anywhere in this file. acas_posting/dates.py owns every date
-conversion in this migration and acas_posting/clock.py owns the pinned
-observables; neither is imported here.
+`run-date` [:L14], `start-date` [:L21] and `end-date` [:L22] are each `pic
+x(8)` - eight characters of TEXT - where the General Ledger record declares
+the same concepts as `binary-long` [copybooks/wssystem.cob:L67-L68]. The
+maintainer documents the mismatch himself in the rename clause above, at L421
+through L423; those three annotations are quoted at the fields, which also
+carry the DD/MM/YY form and the fact that nothing here parses, converts,
+validates or widens them.
 
 One point deserves stating outright, because it is the determinism gate this
 file turns on. Section 0.1.1 records that the controlled clock pins exactly
@@ -438,208 +335,120 @@ record's `run-date` is therefore NEITHER of the two pinned observables: it
 arrives inside the parameter block, from the caller, already set. Nothing in
 this module reads a clock to fill it, and nothing may.
 
-Section 0.6.6 also requires the harness dump-comparison step to bring "the
-two-digit versus four-digit date text forms that the schema stores side by
-side" into one shape before two dumps are compared. This record supplies three
-of the two-digit forms. That harness step owns the work; this file only
-records where the forms come from.
+Section 0.6.6 separately requires the harness dump-comparison step to bring
+"the two-digit versus four-digit date text forms that the schema stores side
+by side" into one shape before two dumps are compared. This record supplies
+three of the two-digit forms; that harness step owns the work.
 
-THE VAT RATES - THREE DISPLAY HERE, FIVE COMP IN THE OTHER RECORD
------------------------------------------------------------------
-`03 vat-rates.` [:L26] carries NO usage clause, so its three children `vat`,
-`vat2` and `vat3` [:L27-L29] are zoned DISPLAY: unsigned, four digits, scale
-two, and therefore `Decimal`.
+THE VAT RATES REACH THE ARITHMETIC BY A LONG ROUTE
+--------------------------------------------------
+`03 vat-rates.` [:L26] carries no usage clause, so its three children are
+zoned DISPLAY and therefore `Decimal`; `03 vat-group redefines vat-rates.`
+[:L30] gives the same twelve bytes a subscripted shape. `VatRates` and
+`VatGroup` carry the full comparison with the five-child COMP group in
+`copybooks/wssystem.cob`, the one-based subscript rule and the reason neither
+view is privileged. What belongs here is the route out of this record and the
+gate at the end of it.
 
-The comparison with copybooks/wssystem.cob is deliberate and must not be
-smoothed over. There, `05  Vat-Rates                    comp.`
-[copybooks/wssystem.cob:L55] puts the usage on the GROUP HEADER, so its five
-`07`-level children `Vat-Rate-1` through `Vat-Rate-5`
-[copybooks/wssystem.cob:L56-L60] - each also `pic 99v99` - INHERIT COMP. Two
-near-identical VAT rate groups, differing in arity (three against five) and
-in storage class (DISPLAY against COMP). The generated dictionary records the
-difference exactly, and it is visible in the descriptors:
+`VAT-Psent (b)` is copied into the program's own rate table `WS-Vat-Rate (b)`
+at [irs/irs030.cbl:L1471-L1473], a table whose declaration is annotated "taken
+from IRS system rec." [irs/irs030.cbl:L273-L274]. The operator's choice of
+rate lands in `WS-Vat-Current` at [irs/irs030.cbl:L721], and `WS-Vat-Current`
+is the multiplier in the two ROUNDED VAT computes at [irs/irs030.cbl:L1551]
+and [irs/irs030.cbl:L1562-L1563] - two of only five ROUNDED sites in the
+entire in-scope cycle.
 
-    system-record.vat        usage DISPLAY  usage_declared_at DEFAULT
-                             usage_inherited_from None
-    SYSTEM-REC.VAT-RATE-1    usage COMP     usage_declared_at GROUP
-                             usage_inherited_from Vat-Rates
+Worth being precise about: those two computes are performed only from
+[irs/irs030.cbl:L917] and [irs/irs030.cbl:L920], on the interactive entry
+path, which is OUTSIDE the in-scope section; the transfer records the in-scope
+section walks already carry their VAT amounts. The rates here are nonetheless
+the ultimate inputs to those figures, which is why a binary floating-point
+value in this record would corrupt exactly what the rounded-arithmetic parity
+test exists to lock.
 
-Nothing is harmonised. Getting that direction wrong in either module would
-change every stored VAT rate, which is why the metadata is looked up rather
-than typed.
-
-The maintainer's inline rate annotations are preserved verbatim at their
-fields: "Standard" on `vat` [:L27], "reduced 1 [not yet used]" on `vat2`
-[:L28] and "reduced 2 [not yet used]" on `vat3` [:L29]. The "not yet used"
-notes are recorded and NOT acted on - all three rates are declared, because
-the copybook declares all three.
-
-`03 vat-group redefines vat-rates.` [:L30] with `05 vat-psent pic 99v99
-occurs 3.` [:L31] is the ARRAY VIEW over the same twelve bytes. It is modelled
-as its own dataclass holding a fixed-length tuple of three `Decimal`s, the way
-the other REDEFINES array views in this folder are modelled. There is no
-`Union`, no tagged variant, no property that switches views and no "primary"
-designation, because the two views are simultaneous in COBOL and neither is
-privileged. COBOL `OCCURS` subscripts are ONE-BASED, so `vat-psent (1)` is
-`vat_psent[0]`; no accessor is provided that hides the offset, because hiding
-it would be a behaviour this migration invented.
-
-THREE MORE SOURCE ODDITIES, PRESERVED VERBATIM
-----------------------------------------------
-`03  system-ops` at [:L23] is indented ONE SPACE further than every other
-`03` in the record - six leading spaces against five - and its picture column
-sits one column earlier as a result. It is the only line in the copybook with
-that indentation. Cosmetic to the compiler, and a fact of the source, so it is
-recorded at the field rather than tidied away.
-
-`First-Time-FLag` at [:L38] carries the maintainer's capital-L typo: `FLag`,
-not `Flag`. It is preserved verbatim in the dictionary key
-`system-record.First-Time-FLag`, in the descriptor's `name` and in the field
-comment. FOUR spellings of this one concept coexist in the frozen tree, and
-none is harmonised:
-
-    First-Time-FLag        here                 [copybooks/irswssystem.cob:L38]
-    1st-Time-Flag          General Ledger       [copybooks/wssystem.cob:L326]
-    IRS-First-Time-Flag    the rename           [irs/irs030.cbl:L448]
-    First-Time-Flag        wssystem's own comment on L326, which reads "(was
-                           First-Time-Flag in IRS system file)" - and so
-                           mis-quotes this copybook's own spelling in the act
-                           of citing it
-
-FOUR storage-bearing fields carry no byte-offset comment at all, not two.
-The plan named `address-2` at [:L18] and `pass-value` at [:L32] as "the only
-two", and that needed correction: `run-date` at [:L14] and `suser` at [:L15]
-have none either - the copybook's offset comments simply do not begin until
-`client` at [:L16], which is the first one it writes. Counted from the source:
-
-    L14   run-date            no offset comment
-    L15   suser               no offset comment
-    L18   address-2           no offset comment
-    L32   pass-value          no offset comment
-
-Three further lines also carry none - `vat-rates` at [:L26], `vat-group` at
-[:L30] and `vat-psent` at [:L31] - but those are the two group headers and the
-array item that redefines the first group's bytes, so they are not omissions of
-the same kind: a group has no offset of its own to state. Seven lines in
-L14-L40 therefore lack a comment, of which four are genuine absences on
-storage-bearing items.
-
-The absence is recorded at each of the four fields, and no comment is invented
-for any of them.
+Note also, and reproduce nothing of it here, that superseded commented-out
+variants of both computes survive beside the live ones at
+[irs/irs030.cbl:L1550] and [irs/irs030.cbl:L1561], naming the bare `vat` -
+this record's L27 field - where the live code names `WS-Vat-Current`. That is
+registered anomaly 19, and it belongs to the `irs030` program module rather
+than to a record layout. No VAT arithmetic is implemented in this file.
 
 WHAT THE IN-SCOPE POSTING PATH ACTUALLY READS FROM THIS RECORD
 --------------------------------------------------------------
 Only the `Ledger-Postings-Add` section of irs030 is in scope
 [irs/irs030.cbl:L1569-L1733]; section 0.2.2 excludes the rest of that file.
-Within those lines this record is touched at exactly one place, and it is a
-read-modify-write of the posting-number allocator:
+Within those lines this record is touched at exactly one place - the
+read-modify-write of the posting-number allocator at [irs/irs030.cbl:L1670]
+and [irs/irs030.cbl:L1671], quoted at the `next-post` field.
 
-    [irs/irs030.cbl:L1670]   move     next-post to post-key.
-    [irs/irs030.cbl:L1671]   add      1 to next-post.
-
-The VAT rates reach the compiled program's arithmetic by a longer route, and
-the plan's shorter description of it is refined here after checking each hop.
-`VAT-Psent (b)` - this record's array view - is copied into the program's own
-rate table `WS-Vat-Rate (b)` at [irs/irs030.cbl:L1471-L1473], a table whose
-declaration is annotated "taken from IRS system rec."
-[irs/irs030.cbl:L273-L274]. The operator's choice of rate lands in
-`WS-Vat-Current` at [irs/irs030.cbl:L721], and `WS-Vat-Current` is the
-multiplier in the two ROUNDED VAT computes at [irs/irs030.cbl:L1551] and
-[irs/irs030.cbl:L1562-L1563] - two of only five ROUNDED sites in the entire
-in-scope cycle. Worth being precise about: those two computes are performed
-only from [irs/irs030.cbl:L917] and [irs/irs030.cbl:L920], on the interactive
-entry path, which is OUTSIDE the in-scope section; the transfer records the
-in-scope section walks already carry their VAT amounts. The rates in this
-record are nonetheless the ultimate inputs to those figures, which is why a
-binary floating-point value here would corrupt exactly what
-tests/arithmetic/test_compute_rounded_half_up.py exists to lock.
-
-Note also, and reproduce nothing of it here, that the superseded commented-out
-variants of both computes survive beside the live ones at
-[irs/irs030.cbl:L1550] and [irs/irs030.cbl:L1561], naming the bare `vat` -
-this record's L27 field - where the live code names `WS-Vat-Current`. That is
-registered anomaly 19, and it belongs to
-acas_posting/programs/irs030_posting.py rather than to a record layout. No VAT
-arithmetic is implemented in this file.
-
-Everything else this record carries is consumed outside the in-scope section:
+Everything else this record carries is consumed outside that section:
 `client`, `run-date`, `start-date` and `end-date` appear in irs030's SCREEN
 SECTION items [irs/irs030.cbl:L460-L492], which section 0.3.4 removes rather
 than reimplements, and `pass-word` survives only in a commented-out test
-[irs/irs030.cbl:L1529]. The fields are all declared regardless: R-3 requires
+[irs/irs030.cbl:L1529]. All the fields are declared regardless: R-3 requires
 the layout to mirror the copybook, not the subset one section happens to read.
 
 WHAT IS NOT IN THIS RECORD
 --------------------------
-There are NO `88`-level condition names anywhere in this copybook -
-`grep -c ' 88 '` returns 0 - so none is declared here. That absence is worth
-naming for two fields in particular: `system-ops` and `First-Time-FLag` are
-switches by nature, and the General Ledger record gives its analogous
-switches condition names [copybooks/wssystem.cob:L179-L181], but this copybook
-gives these two none. No predicate, no enum and no boolean property is
-invented for them.
+No 88-level condition names anywhere in the copybook, so none is declared
+here; `IrsSystemParams` records why that absence is worth naming for
+`system_ops` and `first_time_flag` in particular, whose General Ledger
+analogues do have them [copybooks/wssystem.cob:L179-L181].
 
-There is also no COMP, no COMP-3, no `binary-*` and no sign clause anywhere in
-this record: every item is zoned DISPLAY or alphanumeric. A precise grep for
-usage tokens across the file returns nothing. One caveat for whoever repeats
-the check: the naive `grep -ci 'comp\\|binary\\|sign'` returns 1, not 0, and
-the single match is the word "Incomplete" in the boxed header at L4 - a
-comment, not a declaration. That is a genuine contrast with the General Ledger
-system record, which is dense with COMP and `binary-*`.
+No COMP, no COMP-3, no binary usage and no sign clause either: every item is
+zoned DISPLAY or alphanumeric. One caveat for whoever repeats that check - a
+case-insensitive search for the three usage words joined as alternatives
+returns one hit, not zero, and it is the letters "comp" inside the word
+"Incomplete" in the boxed header at L4. A comment, not a declaration. That is
+a genuine contrast with the General Ledger system record, which is dense with
+COMP and binary usage.
 
 REGISTERS THIS MODULE FEEDS
 ---------------------------
-    docs/migration/anomaly-log.md
+    the migration's anomaly log
         two NEW entries, neither among the twenty-two of section 0.6.7, with
         this module as the recording site: the 256-against-257 declared-length
         contradiction, and the eight byte-offset comments left one byte short
         by the insertion of `pass-value`. Plus this module's share of
-        registered anomaly 21, the 29-identifier replacing clause, whose
-        collision register is reproduced above in full.
-    docs/migration/ambiguity-resolutions.md
-        one open question: whether the declared 256 bytes or the 257-byte
-        field sum governs the record actually read, and what that does to the
+        registered anomaly 21, whose collision register is reproduced above.
+    the migration's ambiguity-resolutions document
+        one open question: whether the declared 256 bytes or the 257-byte field
+        sum governs the record actually read, and what that does to the
         alignment of the eight trailing fields. Arbitrated by the compiled
         program under rule R-6, and by nothing in this file.
-    docs/migration/traceability.md
-        the 29-entry collision register, the copybook's own offsets beside
-        this migration's computed offsets, the three linkage shapes and the
-        four-size header history, all lifted from this docstring. Plus the
-        three corrections below, each found by checking a citation against
-        the frozen source rather than trusting it:
+    the migration's traceability document
+        the 29-entry collision register, the copybook's own offsets beside this
+        migration's computed offsets, the three linkage shapes and the
+        four-size header history, all lifted from this docstring. Plus two
+        citation discrepancies against the frozen source, recorded so a reader
+        checking either one is not left puzzled:
 
-            the copy of this copybook is at [irs/irs030.cbl:L416-L417],
-            not at L415-L416                                  (see above)
+            section 0.6.7 cites anomaly 21 at [general/gl070.cbl:L510], which
+            is the unqualified `move post-cr to pre-ac.`; the qualified
+            references are at L497 (IN), L521 and L525 (OF)
 
-            registered anomaly 21's cited site [general/gl070.cbl:L510] is
-            an unqualified `write pre-trans-record.`; the real qualified
-            posting-copybook references are at [general/gl070.cbl:L497],
-            [general/gl070.cbl:L521] and [general/gl070.cbl:L525]
-
-            the fields with no byte-offset comment are FOUR, not two:
-            [:L14], [:L15], [:L18] and [:L32]. The plan named only the last
-            two, and the first two are absences of exactly the same kind
+            the storage-bearing fields with no byte-offset comment are FOUR -
+            [:L14], [:L15], [:L18] and [:L32] - and the first two are absences
+            of exactly the same kind as the last two
 
 LAYERING - THIS IS A LEAF MODULE
 --------------------------------
-Section 0.4.3 grants records/*.py exactly two internal imports, for a stated
+Section 0.4.3 grants `records/*.py` exactly two internal imports, for a stated
 reason: "this keeps the record layer a leaf". This module needs only one of
 them, `acas_posting.cobol.field`, plus the standard library. Provenance is
 surfaced through `FieldDescriptor.cite()` and `FieldDescriptor.drift()`, which
 delegate to `acas_posting.dictionary.loader` rather than reimplementing it, so
-the loader is reached without a second import here and nothing is duplicated.
+the loader is reached without a second import and nothing is duplicated.
 
-Not imported, and each for a reason worth naming because several are live
-temptations: `programs` - irs030_posting.py takes this record as parameter #1,
-which makes it the caller, not a dependency; `cli` - irs_post.py and args.py
-bind this block to argv, and that is their job; `clock` - this record carries
-three date fields and must read no clock, which is the single most important
-gate in this file; `dates` - three `x(8)` date texts sit here that must not be
-parsed; and every other `records` module, above all records/system_record.py,
-for the collision reasons set out above. Also absent: `dal`, `workfiles`,
-`cobol.arithmetic`, `cobol.move`, `cobol.picture`, `cobol.usage`,
-`cobol.condition_names`, `cobol.sortverb`, `dictionary.generate` and the
-compiled oracle in its sibling tree.
+Not imported, and several are live temptations: `programs` - the `irs030`
+module takes this record as parameter #1, which makes it the caller, not a
+dependency; `cli` - binding this block to argv is its job; `clock` - this
+record carries three date fields and must read no clock, the single most
+important gate in this file; `dates` - three `x(8)` date texts sit here that
+must not be parsed; and every other `records` module, above all
+`records/system_record.py`, for the collision reasons above. Also absent:
+`dal`, `workfiles`, every other `cobol` module, `dictionary.generate` and the
+compiled oracle.
 
 Section 0.4.3 gives the consequence that makes this worth enforcing: "the
 arithmetic suite imports only cobol and records and touches no database, so it
@@ -648,11 +457,10 @@ runs anywhere".
 TYPE DISCIPLINE (R-2) AND DETERMINISM (R-6)
 -------------------------------------------
 Rule R-2 forbids binary floating point outright - "not in computation, not in
-storage, not in transport". The three VAT rates and the three-element array
-view are `decimal.Decimal` at scale 2, defaulting to `Decimal("0.00")` and
-never to a binary floating-point literal. Every other numeric item here is an
-unsigned zoned DISPLAY integer and is carried as `int`. No binary
-floating-point type, literal or conversion appears anywhere in this file.
+storage, not in transport". The VAT rates are `decimal.Decimal` and every
+other numeric item is an unsigned zoned DISPLAY integer carried as `int`; no
+binary floating-point type, literal or conversion appears anywhere in this
+file.
 
 Rule R-6 and section 0.1.1 - "Every one of the in-scope posting programs
 contains zero clock reads; the date arrives purely through linkage" - give
@@ -660,9 +468,8 @@ this file its determinism obligations. There is no wall-clock read, no import
 of any clock or date module, no non-deterministic value source, no unique-id
 generation, no environment, host or user inspection, and no date formatting or
 parsing. Member order is copybook declaration order. `FIELDS` and the array
-view are tuples rather than lists. Nothing is read when this module is
-imported beyond the dictionary loader's own lazy, cached read of the
-generated artifact.
+view are tuples rather than lists. Nothing is read at import beyond the
+dictionary loader's own lazy, cached read of the generated artifact.
 
 THE SHAPE OF THIS MODULE
 ------------------------
@@ -675,25 +482,14 @@ THE SHAPE OF THIS MODULE
     VatGroup                       03 vat-group redefines  [:L30]
     IrsSystemParams                01 system-record        [:L13]
 
-Each class exposes two class-level constants and neither is a dataclass field:
+Each class exposes two class-level constants, neither a dataclass field:
 `GROUP`, the descriptor of the class's own group item - which is where the
 REDEFINES relationship comes from, derived from the dictionary rather than
 asserted here - and `FIELDS`, its members' descriptors in declaration order.
-Between them the three classes cite all 28 dictionary entries.
-
-The two trailing FILLERs are named `filler_39` and `filler_40`. The scheme is
-the copybook line number, chosen because it is the dictionary's own
-disambiguator: the entries are keyed `system-record.filler#39` and
-`system-record.filler#40`, so the Python name follows the key mechanically
-rather than by invention. Their COBOL name is `filler` in both cases, and both
-descriptors report `is_filler` true. They are NOT the same type: L39 is
-`pic 9(7)` and numeric, L40 is `pic x` and alphanumeric.
-
-None of the three classes is frozen. The block is linkage: the caller fills it
-in before the CALL, so it has to be mutable. There is no post-initialisation
-hook, no validation and no padding, quantising or coercion of any kind - a
-record layout describes storage, and the store direction belongs to
-acas_posting/cobol/arithmetic.py and acas_posting/cobol/move.py.
+Between them the three classes cite all 28 dictionary entries. The two
+trailing FILLERs are named for their copybook line because that is the
+dictionary's own disambiguator; their fields record the scheme and the type
+difference between them.
 """
 
 from __future__ import annotations
@@ -715,28 +511,17 @@ __all__: Final[tuple[str, ...]] = (
 )
 
 
-# =============================================================================
 #  THE DICTIONARY KEYS  (rule R-5; section 0.8.1's "Data dictionary first")
-#
-#  The key form for this record was established by the probe recorded in the
-#  module docstring: <COPYBOOK-RECORD>.<FIELD-NAME>, with the record half in
-#  this copybook's own lower case and the two FILLERs disambiguated by the
-#  dictionary's own '#' convention. Lookups are exact and fold no case, which
-#  is what keeps `system-record.` from ever reaching the General Ledger
-#  record's mixed-case `System-Record.` keys - the guard this record needs
-#  because the two share an 01-name. The loader's table-keyed accessor has no
-#  meaning for a record with no table and is not called anywhere in this file.
-#
-#  `_desc` is `FieldDescriptor.from_dictionary_key`, the constructor the field
-#  module publishes for dictionary-backed descriptors, under a shorter local
-#  name: the same function, memoised on its key, not a
-#  reimplementation of it. It reads each entry's COPYBOOK view for digits,
-#  scale, sign and usage, and sets both `dictionary_key` and `source_locator`,
-#  so every descriptor below satisfies rule R-5's provenance invariant by
-#  construction and none of this metadata is transcribed by eye. Nothing is
-#  read until the first call, and the loader reads the generated artifact
-#  lazily and once.
-# =============================================================================
+#  The key form is <COPYBOOK-RECORD>.<FIELD-NAME> with the record half in this copybook's own
+# lower case - `system-record.run-date` and so on - and the two FILLERs disambiguated by the
+# dictionary's '#' convention as `filler#39` and `filler#40`. Lookups are exact and fold no
+# case, which is the guard this record needs: it shares its 01-name with the General Ledger
+# record, whose entries are table-qualified `SYSTEM-REC.*` because that record maps to a table
+# while this one maps to none. The loader's table-keyed accessor therefore has no meaning here
+# and is called nowhere in this file.
+#  `_desc` is `FieldDescriptor.from_dictionary_key` under a shorter local name - the same
+# function, memoised on its key. It reads each entry's COPYBOOK view for digits, scale, sign and
+# usage and sets both `dictionary_key` and `source_locator`.
 
 _desc: Final = FieldDescriptor.from_dictionary_key
 
@@ -773,9 +558,7 @@ _FILLER_39: Final = _desc("system-record.filler#39")               # L39
 _FILLER_40: Final = _desc("system-record.filler#40")               # L40
 
 
-# =============================================================================
 #  THE DEFAULT FOR AN ALPHANUMERIC MEMBER
-# =============================================================================
 
 
 def _spaces(descriptor: FieldDescriptor) -> str:
@@ -809,9 +592,7 @@ def _spaces(descriptor: FieldDescriptor) -> str:
     return " " * (descriptor.character_length or 0)
 
 
-# =============================================================================
 #  03  vat-rates.                                 [copybooks/irswssystem.cob]
-# =============================================================================
 
 
 @dataclass(slots=True)
@@ -847,7 +628,7 @@ class VatRates:
     [irs/irs030.cbl:L1562-L1563], reached by way of the program's own rate
     table [irs/irs030.cbl:L1471-L1473] and `WS-Vat-Current`
     [irs/irs030.cbl:L721]; those computes belong to
-    acas_posting/programs/irs030_posting.py.
+    the `irs030` program module.
     """
 
     #: The group item this class models, from the generated dictionary.
@@ -870,9 +651,7 @@ class VatRates:
     vat3: Decimal = Decimal("0.00")
 
 
-# =============================================================================
 #  03  vat-group redefines vat-rates.              [copybooks/irswssystem.cob]
-# =============================================================================
 
 
 @dataclass(slots=True)
@@ -918,10 +697,8 @@ class VatGroup:
     )
 
 
-# =============================================================================
 #  01  system-record.                              [copybooks/irswssystem.cob]
 #      renamed by the caller to IRS-System-Params  [irs/irs030.cbl:L416-L417]
-# =============================================================================
 
 
 @dataclass(slots=True)
@@ -936,21 +713,18 @@ class IrsSystemParams:
         `replacing system-record  by IRS-System-Params.`
                                         [irs/irs030.cbl:L416-L417]
 
-    The declaration is all LOWER CASE in the frozen copybook, and it is left
-    that way in the descriptor's `name`, which comes from the dictionary. It is
-    not title-cased. Because COBOL folds case, that name is the same
-    identifier as copybooks/wssystem.cob's mixed-case `System-Record`, so the
-    two records genuinely collide, and the class name follows the caller-side
-    `replacing` name to keep the two apart in Python.
-
-    The direction of that resolution is the reverse of what one would expect,
-    and it is worth carrying: irs030 copies THIS record first, at L416, so it
-    keeps the plain names, and it is the General Ledger record - copied second
-    at L419 - that gets renamed away, under a `replacing` clause of
-    twenty-nine identifiers at [irs/irs030.cbl:L420-L448]. That single
-    ordering fact is why the General Ledger system record is called
-    `WS-System-Record` inside irs030 and `System-Record` everywhere else. The
-    full collision register is in this module's docstring.
+    The declaration is all LOWER CASE in the frozen copybook and is left that
+    way in the descriptor's `name`, which comes from the dictionary. Because
+    COBOL folds case, that name is the same identifier as
+    copybooks/wssystem.cob's mixed-case `System-Record`, so the two records
+    genuinely collide, and the class name follows the caller-side `replacing`
+    name to keep them apart in Python. The resolution runs the reverse of what
+    one would expect: irs030 copies THIS record first, at L416, so it keeps the
+    plain names, and it is the General Ledger record - copied second at L419 -
+    that gets renamed away under a `replacing` clause of twenty-nine
+    identifiers [irs/irs030.cbl:L420-L448]. That ordering is why the General
+    Ledger system record is `WS-System-Record` inside irs030 and `System-Record`
+    everywhere else; the full collision register is in the module docstring.
 
     This class models the copybook's own names only. No `ACAS-` or `IRS-`
     prefixed name from that rename clause appears as an attribute here: those
@@ -963,28 +737,26 @@ class IrsSystemParams:
     trailing FILLERs. With `VatRates`'s 3 and `VatGroup`'s 1 that is 27 Python
     members for the copybook's 27 subordinate items, one for one, and the
     01-level group is this class itself - the 28th dictionary entry, cited as
-    `GROUP`. Nothing is added and nothing is dropped (rule R-3).
+    `GROUP`. Nothing is added and nothing is dropped (rule R-3). The order is
+    copybook declaration order, L14 through L40, so this class can be set
+    beside `cat -n copybooks/irswssystem.cob` and diffed by eye.
 
-    The order is copybook declaration order, L14 through L40, so this class
-    can be set beside `cat -n copybooks/irswssystem.cob` and diffed by eye.
-
-    NOT FROZEN, deliberately: this is a linkage parameter block that the caller
+    NOT FROZEN, deliberately: this is a linkage parameter block the caller
     fills in before the CALL. There is no post-initialisation hook, no
     validation and no padding, quantising or coercion - the store direction
-    belongs to acas_posting/cobol/arithmetic.py and
-    acas_posting/cobol/move.py, and adding a check here would be exactly the
-    added validation rule R-3 forbids.
+    belongs to acas_posting/cobol/arithmetic.py and acas_posting/cobol/move.py,
+    and adding a check here would be exactly the added validation R-3 forbids.
 
-    NO CONDITION NAMES, because the copybook declares none - `grep -c ' 88 '`
+    NO CONDITION NAMES, because the copybook declares none - a count of ` 88 `
     over it returns 0. That absence is deliberate for `system_ops` and
     `first_time_flag` in particular, which are switches by nature and whose
     General Ledger analogues do have condition names
     [copybooks/wssystem.cob:L179-L181]. None is invented for them here.
 
-    NO LENGTH CONSTANT. The copybook's header claims 256 bytes at L7 and L10
-    while its field widths sum to 257, and rule R-6 leaves that contradiction
-    for the compiled program to settle. A width can still be derived from the
-    dictionary's own descriptors - sum `byte_length` over the non-group members
+    NO LENGTH CONSTANT. The copybook's header claims 256 bytes at both L7 and
+    L10 while its field widths sum to 257, and rule R-6 leaves that
+    contradiction for the compiled program to settle. A width can still be
+    derived from the dictionary - sum `byte_length` over the non-group members
     of `FIELDS`, add the sum over `VatRates.FIELDS`, add nothing for
     `VatGroup.FIELDS` - and it comes to 257. This class asserts no figure of
     its own, declares no length constant, adds no padding byte and drops

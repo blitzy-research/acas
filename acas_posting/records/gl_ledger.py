@@ -1,16 +1,17 @@
-"""The General/Nominal Ledger account record: `WS-Ledger-Record`.
+"""The General/Nominal Ledger account record `01 WS-Ledger-Record`.
 
-A CREATE from `copybooks/wsledger.cob`, which the copybook's own header calls
-the "WS definition for the General/Nominal Ledger file"
-[copybooks/wsledger.cob:L3-L4]. This module declares the layout and nothing
-else. It stores; it does not post, read, sort, scale, concatenate or validate.
+A field-for-field CREATE from the frozen copybook `copybooks/wsledger.cob`,
+which is 37 lines long and is read as the specification for this module and
+never modified. One
+dataclass per COBOL group and per REDEFINES view, one attribute per elementary
+item, in the copybook's own declaration order, with every attribute's storage
+metadata looked up in the generated data dictionary rather than typed by eye.
 
-This is the account the whole General Ledger posting cycle writes into.
-Agent Action Plan section 0.4.1.2 assigns the writing elsewhere, verbatim:
+Agent Action Plan section 0.4.1.2 gives the record its job in one sentence:
 `gl072` "Posts to the nominal ledger by accumulating into the ledger balance."
-That accumulation lives in `acas_posting/programs/gl072_transaction_update.py`,
-so `Ledger-Balance` and the four quarters below are plain mutable attributes
-with no accumulator method attached (R-3).
+That accumulation lives in the `gl072` program module, so `Ledger-Balance` and
+the four quarters below are plain mutable attributes with no accumulator
+method attached (R-3).
 
 THE ENTITY-TO-TABLE SPINE  (Agent Action Plan section 0.2.1.1)
 ==============================================================
@@ -28,7 +29,7 @@ SELECT of every column ordered by LEDGER-KEY, with no tie-breaking logic -
 which is the comparison harness's business, not this module's.
 
 WHY THIS RECORD IS REACHED SEQUENTIALLY  -  READ THIS BEFORE TOUCHING ORDER
-==========================================================================
+===========================================================================
 Section 0.6.4's strongest finding concerns this very record, verbatim:
 
     "The sort feeds a sequential read. `gl072` locates the nominal-ledger
@@ -39,9 +40,9 @@ Section 0.6.4's strongest finding concerns this very record, verbatim:
     wrong balances."
 
 The plan cites that read at [general/gl072.cbl:L410-L412]. The actual sites
-are [general/gl072.cbl:L405] and [general/gl072.cbl:L407-L408]; the verified
-locators are recorded here and were confirmed independently by the author of
-`acas_posting/cobol/sortverb.py`. L405 is `move post-ledger to WS-Ledger-Key`,
+are [general/gl072.cbl:L405] and [general/gl072.cbl:L407-L408]; those frozen
+locators are recorded here, and `acas_posting/cobol/sortverb.py` cites the
+same two. L405 is `move post-ledger to WS-Ledger-Key`,
 where `post-ledger` is a GROUP in `gl072`'s own work record
 [general/gl072.cbl:L115] combining `post-ac pic 9(6)` and `post-pc pic 99`.
 A whole eight-digit group moves into `WS-Ledger-Key` in one statement, which
@@ -49,7 +50,7 @@ is why the group's shape below is load-bearing rather than cosmetic.
 
 None of that is implemented here. The ordering guarantee belongs to
 `gl071_batch_sort.py` and `cobol/sortverb.py`; the read belongs to
-`dal/acas005_gl_nominal.py`.
+the `acas005` handler module.
 
 ANOMALY A-12 IS REPRODUCED HERE  -  THIS MODULE IS ITS SITE  (R-4)
 ==================================================================
@@ -71,14 +72,13 @@ padding differs, and padding is visible in a table dump". The dictionary holds
 all three views plus an unadjudicated `drift` object, surfaced through
 `WsLedgerRecord.LEDGER_NAME.drift()` and tagged `A-12` by that same
 descriptor's `anomaly_refs()`, and this module settles none of it. The
-widening on write belongs to
-`dal/acas005_gl_nominal.py`, which reproduces the bridge boundary; the padding
-difference is absorbed by the harness dump comparison step. Both are named at
-the attribute itself so the register can cite this file.
-
-The bridge moves the value at [common/nominalMT.cbl:L965] and [:L993] and
-trims it with `FUNCTION TRIM (HV-LEDGER-NAME,TRAILING)` at [:L1067] and
-[:L1246]. No trimming or padding of a supplied value happens below.
+widening on write belongs to the `acas005` handler module, which reproduces
+the bridge boundary; the padding difference is absorbed by the harness dump
+comparison step. Both are named at the attribute itself so the register can
+cite this file. The bridge moves the value at [common/nominalMT.cbl:L965] and
+[:L993] and trims it with `FUNCTION TRIM (HV-LEDGER-NAME,TRAILING)` at
+[:L1067] and [:L1246]. No trimming or padding of a supplied value happens
+below.
 
 A SECOND, LESS ADVERTISED DRIFT ON THE SAME RECORD
 ==================================================
@@ -110,27 +110,18 @@ into the single column `LEDGER-KEY int(8) unsigned`.
 
 Nothing flattens them. The plan describes this as a "group-concatenation
 drift" and directs that the concatenation not be built here; the frozen bridge
-shows there is no concatenation to build anywhere. COBOL `REDEFINES` supplies
-a ready-made eight-digit numeric view over the same eight bytes, and the
-bridge simply moves that view:
+shows there is no concatenation to build anywhere, because COBOL `REDEFINES`
+supplies a ready-made eight-digit numeric view over the same eight bytes and
+the bridge simply moves that view. `WsLedgerKey9` below sets out the two-line
+declaration, the changelog entry that explains it and the load and unload
+moves.
 
-    load    `move     WS-Ledger-Key9  to HV-LEDGER-KEY.`
-                                        [common/nominalMT.cbl:L962]
-    unload  `move     HV-LEDGER-KEY         to WS-Ledger-Key9`
-                                        [common/nominalMT.cbl:L990]
-
-So `WS-Ledger-Key9` is the field backing `LEDGER-KEY`, confirmed by the
-generated dictionary independently: `loader.entries_for_table("GLLEDGER-REC")`
-returns `GLLEDGER-REC.LEDGER-KEY` with `copybook.name == "WS-Ledger-Key9"`.
-The copybook's own changelog says why the field was added at all - "07/01/17
-vbc - Added new field ledger-key9." [copybooks/wsledger.cob:L9] - one release
-after the layout was taken from `fdledger` [:L8].
-
-The GROUP view stays live alongside it: the bridge builds its ISAM key from
-the group, not the redefine, at [common/nominalMT.cbl:L743] and [:L795],
-`move WS-Ledger-Key to WS-File-Key.` Both views are therefore declared below,
-because both are used. Neither view is picked over the other and no key is
-assembled here; `dal/acas005_gl_nominal.py` owns the bridge boundary.
+The GROUP view stays live alongside it, which is the part no single class
+shows: the bridge builds its ISAM key from the group, not the redefine, at
+[common/nominalMT.cbl:L743] and [:L795], `move WS-Ledger-Key to WS-File-Key.`
+Both views are therefore declared below, because both are used. Neither view
+is picked over the other and no key is assembled here; the `acas005` handler
+module owns the bridge boundary.
 
 REDEFINES DOES NOT ALIAS IN PYTHON  -  A GAP STATED RATHER THAN PAPERED OVER
 ============================================================================
@@ -138,15 +129,15 @@ In COBOL a REDEFINES item occupies the SAME BYTES as the item it redefines, so
 storing through one view is immediately visible through the other. Separate
 Python attributes are separate storage and do NOT alias: assigning
 `ws_ledger_key9.ws_ledger_key9` leaves `ws_ledger_key.ws_ledger_nos`
-untouched, and the reverse.
+untouched, and the reverse. All three redefine views below point here for this
+paragraph rather than repeating it.
 
 That difference is recorded and not repaired. Reproducing byte aliasing would
 mean adding synchronising logic to this layer, which R-3 forbids outright and
-which would put a behavioural decision in a record layout. The three redefine
-views below are declared for traceability and for use by the layers that own
-the corresponding COBOL statements - whichever view a program names is that
-program's business, and the handler module reads `WS-Ledger-Key9` because the
-bridge does.
+which would put a behavioural decision in a record layout. The three views are
+declared for traceability and for use by the layers that own the corresponding
+COBOL statements - whichever view a program names is that program's business,
+and the handler module reads `WS-Ledger-Key9` because the bridge does.
 
 SIZE  -  THE HEADER NOTE AND THE FIELD SUM AGREE
 ================================================
@@ -170,26 +161,27 @@ bytes:
                                                      ---
                                                      126
 
-126 bytes, matching the note exactly. Stated because the sibling batch record
-does NOT agree with its own declared length - anomaly 15, "The batch record's
-declared length contradicts the sum of its fields" - and section 0.6.8 lists
-that contradiction among the questions only the compiled program can settle.
-This record raises no such question, so there is nothing here to leave open.
-The arithmetic is reproduced above so the claim is checkable rather than
-asserted; the widths themselves are read from the dictionary, never typed in.
+126 bytes, matching the note exactly, and reproduced above so the claim is
+checkable rather than asserted. Stated because the sibling batch record does
+NOT agree with its own declared length - anomaly 15 - which section 0.6.8
+lists among the questions only the compiled program can settle. This record
+raises no such question, so there is nothing here to leave open.
 
 TWO FURTHER PROPERTIES OF THIS COPYBOOK, BOTH UNUSUAL IN THIS FOLDER
 ====================================================================
 USAGE IS DECLARED ON THE FIELD, NOT ON A GROUP. Every one of the seven
-`comp-3` items carries its usage on its own line - [:L28], [:L29], [:L31],
-[:L32], [:L33], [:L34], [:L36] - and no group header in this copybook carries
-a usage clause at all. Their descriptors therefore report
-`usage_declared_at == FIELD` and `usage_inherited_from is None`. This is worth
-stating because most sibling record modules are the other way round: across
-the generated artifact 85 fields inherit usage from 12 group headers, among
-them `03 Amounts comp-3.` [copybooks/wsbatch.cob:L40], which silently makes
-`05 Input-Gross pic 9(9)v99.` packed decimal with nothing on its own line
-saying so. Nothing is inherited here, and a reader should not assume it is.
+`comp-3` declarations carries its usage on its own line - [:L28], [:L29],
+[:L31], [:L32], [:L33], [:L34], [:L36] - and no group header in this copybook
+carries a usage clause at all, so all seven descriptors report
+`usage_declared_at == FIELD` and `usage_inherited_from is None`. (Seven
+declarations, six of them storage-bearing: `Ledger-Q` at L36 is the OCCURS
+view of the same twenty-four bytes as L31-L34.) This is worth stating because
+most sibling record modules are the other way round: counted over the whole
+generated artifact, 85 fields inherit their usage from just nine distinct
+group headers, among them `03 Amounts comp-3.`
+[copybooks/wsbatch.cob:L40], which silently makes `05 Input-Gross pic
+9(9)v99.` packed decimal with nothing on its own line saying so. Nothing is
+inherited here, and a reader should not assume it is.
 
 NO CONDITION NAMES. This copybook declares no `88` level: `grep -c ' 88 '`
 over it returns 0. Unusual for this codebase - the batch and system records
@@ -203,7 +195,7 @@ FILLER IS MODELLED AS NAMED ATTRIBUTES  -  THE CHOICE AND THE REASON
 The two storage-bearing FILLER items, `pic x(5)` [:L26] and `pic x(50)`
 [:L37], are declared as the attributes `filler_l26` and `filler_l37`, each
 carrying a descriptor whose `is_filler` is True. They could have been left as
-descriptors with no attribute. They are not, for one measured reason: at 5 and
+descriptors with no attribute. They are not, for one counted reason: at 5 and
 50 bytes they are 55 of the record's 126 bytes, 43.7% of it, and R-3 requires
 these modules "mirror their copybooks field for field with nothing added" -
 which cuts both ways, since a mirror that drops 43.7% of the bytes is not a
@@ -219,49 +211,27 @@ carries its REDEFINES clause is surfaced on that class.
 DESCRIPTORS ARE LOOKED UP, NEVER TRANSCRIBED  (R-5)
 ===================================================
 No picture clause, digit count, scale, sign, storage class, character width or
-OCCURS count is typed in below. Every one is read from the generated data
-dictionary through `FieldDescriptor.from_dictionary_key`, whose keys were
-obtained by calling `loader.entries_for_table("GLLEDGER-REC")` and
-`loader.entries_for_copybook_record("WS-Ledger-Record")` and reading each
-entry's own `copybook.name` - never guessed from a field name. Section 0.8.1
-makes that ordering binding rather than tidy:
+OCCURS count is typed in below, and no width literal appears anywhere: every
+one is read from the generated dictionary through
+`FieldDescriptor.from_dictionary_key`, on keys obtained from
+`loader.entries_for_table("GLLEDGER-REC")` and
+`loader.entries_for_copybook_record("WS-Ledger-Record")` and each entry's own
+`copybook.name` - never guessed from a field name. `records/__init__.py` sets
+out this convention for the whole folder, and section 0.8.1 makes the ordering
+binding rather than tidy: "Data dictionary first ... it is what prevents
+fields being transcribed by eye."
 
-    "Data dictionary first. The dictionary is generated from the bridge before
-    record definitions are written, and every Python field definition cites
-    its entry. This ordering is a directive, not a preference - it is what
-    prevents fields being transcribed by eye."
-
-Defaults follow from the descriptors too: string widths come from
-`character_length` and the quarter table's length from `occurs`, so no width
-literal appears in this file and none can drift from the frozen source.
-
-Every class exposes `FIELDS`, its descriptors in copybook declaration order,
-and the group and redefine descriptors are exposed alongside them. All are
-`ClassVar` tuples, so they are not dataclass fields and add no attribute to
-any instance.
-
-THE LOADER IS REACHED THROUGH THE DESCRIPTOR, NOT IMPORTED DIRECTLY. The two
-provenance primitives this module owes its readers are both already published
-on `FieldDescriptor` as documented pass-throughs: `descriptor.cite()` returns
-`loader.cite(key)` verbatim and `descriptor.drift()` returns
-`loader.drift_for(key)` verbatim, neither reduced to a boolean nor summarised.
-Surfacing them through the descriptor is the sanctioned route rather than a
-reimplementation, and it keeps this module's import edges at one. A second,
-direct edge to the loader would be redundant - and an unused import, which is
-a defect in its own right.
-
-So the whole provenance surface is available from any descriptor here:
+The whole provenance surface is therefore available from any descriptor here,
+reached through the descriptor rather than by importing the loader a second
+time:
 
     WsLedgerRecord.LEDGER_NAME.cite()          the three locators
     WsLedgerRecord.LEDGER_NAME.drift()         the disagreement, unadjudicated
     WsLedgerRecord.LEDGER_NAME.anomaly_refs()  ('A-12',)
     WsLedgerRecord.LEDGER_NAME.dictionary_key  'GLLEDGER-REC.LEDGER-NAME'
 
-and the table-level and record-level listings, for a reader who wants to check
-this module against the artifact, come straight from the loader itself:
-`loader.entries_for_table("GLLEDGER-REC")` for the eleven column-mapped
-entries in column ordinal order, and
-`loader.entries_for_copybook_record("WS-Ledger-Record")` for all twenty-three.
+and the eleven column-mapped entries in column ordinal order, plus all
+twenty-three record entries, come straight from those two loader calls.
 
 TYPES  (R-2)
 ============
@@ -271,13 +241,11 @@ TYPES  (R-2)
 
 Signed, ten digits, scale two for all six money fields, and `Ledger-Balance`
 is the figure the entire General Ledger cycle accumulates into. A binary
-floating-point value here would corrupt every posted balance, so no such value
-appears in this file and none may be introduced. Spaces rather than the empty
-string are the string
-default because section 0.6.2 records that each bridge load paragraph "begins
-by initialising the host-variable group, so unset fields become zero or space
-rather than SQL NULL. This is why every column in the schema can be declared
-NOT NULL and why the Python layer must default rather than omit."
+floating-point value here would corrupt every posted balance, so none appears
+and none may be introduced. Spaces rather than the empty string are the string
+default for the reason `records/__init__.py` gives folder-wide: each bridge
+load paragraph initialises its host-variable group first, so an unset field
+reaches SQL as zero or space and never as NULL.
 
 WHAT THIS MODULE DOES NOT DO
 ============================
@@ -291,17 +259,12 @@ entropy, no environment read and no concurrency.
 
 LAYERING  (Agent Action Plan section 0.4.3)
 ===========================================
-    MAY import       `acas_posting.cobol.field`,
-                     `acas_posting.dictionary.loader`, and the standard library
-    MUST NOT import  anything else - "this keeps the record layer a leaf",
-                     including every other module of this package
-
-Section 0.4.3's promise is what the restriction protects: the arithmetic test
-tier "imports only `cobol` and `records` and touches no database, so it runs
-anywhere". One import reaching into `dal` would drag a database driver into
-that tier. `cobol.arithmetic` is the live temptation in a record full of
-accumulators and is not imported either: the programs accumulate, this record
-only stores.
+A leaf module on the terms `records/__init__.py` sets out for the whole folder:
+`acas_posting.cobol.field`, `acas_posting.dictionary.loader` and the standard
+library, and nothing else - "this keeps the record layer a leaf". Worth naming
+here: `cobol.arithmetic` is the live temptation in a record full of
+accumulators and is not imported either, because the programs accumulate and
+this record only stores.
 
 The rule identifiers R-1 through R-6 are the Agent Action Plan's own
 (section 0.7.2). This project carries no separate rules document - a
@@ -327,32 +290,16 @@ __all__: Final[tuple[str, ...]] = (
 )
 
 
-# =============================================================================
 #  THE DICTIONARY ENTRIES THIS RECORD IS BUILT FROM  (R-5)
-# =============================================================================
-#
-# One descriptor per copybook item, in declaration order, each naming its own
-# dictionary key. The key strings below were not invented: they were read back
-# from the generated artifact by calling
-#
-#     loader.entries_for_table("GLLEDGER-REC")            -> 11 column-mapped
-#     loader.entries_for_copybook_record("WS-Ledger-Record") -> 23 in total
-#
-# and taking each entry's own `key`. Both halves of a key are the names the
-# frozen sources use themselves - hyphens intact, case unfolded - so lookup is
-# exact. Where one name repeats inside one record the artifact appends `#` and
-# the declaration line, which is why the two FILLER data items and the two
-# anonymous FILLER groups are keyed `filler#16`, `filler#26`, `filler#35` and
-# `filler#37`.
-#
-# `from_dictionary_key` is memoised on the key, and the loader reads the
-# artifact lazily and caches it, so importing this module parses the dictionary
-# once and repeated lookups return the same frozen object.
-#
-# Nothing about a field is written out below - no picture, no digit count, no
-# scale, no sign, no storage class, no width, no OCCURS count. Every one of
-# those comes from the entry, which is what section 0.3.3 means by "derived,
-# not transcribed".
+# One descriptor per copybook item, in declaration order, each naming its own dictionary key.
+# The keys were read back from the generated artifact - `entries_for_table("GLLEDGER-REC")`
+# gives 11 column-mapped entries and `entries_for_copybook_record("WS-Ledger-Record")` gives 23
+# in total - and each entry's own `key` taken. Both halves are the names the frozen sources use,
+# hyphens intact and case unfolded, so lookup is exact. A name repeated inside one record gains
+# `#` and its declaration line, which is why the two FILLER data items and the two anonymous
+# FILLER groups key as `filler#16`, `filler#26`, `filler#35` and `filler#37`. Nothing about a
+# field is written out below - no picture, digits, scale, sign, storage class, width or OCCURS -
+# which is what section 0.3.3 means by "derived, not transcribed".
 
 # -- the 01 record itself -------------------------------------------------
 # 01  WS-Ledger-Record.                      [copybooks/wsledger.cob:L12]
@@ -402,18 +349,14 @@ _LEDGER_PC: Final[FieldDescriptor] = FieldDescriptor.from_dictionary_key(
 
 # 03  WS-Ledger-Key9 redefines WS-Ledger-Key                       [:L21-L22]
 #                       pic 9(8).
-# TWO PHYSICAL LINES, ONE DECLARATION. L21 carries the name and the REDEFINES
-# clause; the `pic 9(8).` that types the field is alone on L22. A line-by-line
-# read of the copybook misses the picture and mis-types the field, so the span
-# is cited as L21-L22 throughout.
-#
-# THIS IS THE FIELD BEHIND THE LEDGER-KEY COLUMN, which is why its key is
-# table-qualified while its three siblings above are record-qualified. The
-# bridge moves this redefine, not the group: `move WS-Ledger-Key9 to
-# HV-LEDGER-KEY.` [common/nominalMT.cbl:L962], and back at [:L990]. It drifts
-# in three aspects at once - DISPLAY -> COMP -> INT, 8 digits -> 10 -> 8, and
-# the name itself, WS-Ledger-Key9 -> LEDGER-KEY - all of it readable through
-# `WsLedgerKey9.WS_LEDGER_KEY9.drift()` and none of it settled here.
+# TWO PHYSICAL LINES, ONE DECLARATION. L21 carries the name and the REDEFINES clause; the `pic
+# 9(8).` that types the field is alone on L22, so a line-by-line read misses the picture and
+# mis-types the field. The span is cited as L21-L22 throughout.
+# THIS IS THE FIELD BEHIND THE LEDGER-KEY COLUMN, which is why its key is table-qualified while
+# its three siblings above are record-qualified. The bridge moves this redefine, not the group:
+# `move WS-Ledger-Key9 to HV-LEDGER-KEY.` [common/nominalMT.cbl:L962], and back at [:L990]. It
+# drifts in three aspects at once - DISPLAY -> COMP -> INT, 8 digits -> 10 -> 8, and the name
+# itself - all of it readable through `WsLedgerKey9.WS_LEDGER_KEY9.drift()`, none settled here.
 _WS_LEDGER_KEY9: Final[FieldDescriptor] = FieldDescriptor.from_dictionary_key(
     "GLLEDGER-REC.LEDGER-KEY"
 )
@@ -457,7 +400,6 @@ _LEDGER_NAME: Final[FieldDescriptor] = FieldDescriptor.from_dictionary_key(
 # line: signed, ten digits, scale two, packed into six bytes each. Nothing is
 # inherited from a group header, because no group header in this copybook
 # declares a usage at all - so all six report `usage_declared_at == FIELD`.
-#
 # Signedness, digits and scale agree across copybook, host variable and
 # column; only the storage class changes at the bridge, as it does for every
 # numeric field it carries. The drift in this record is the character field
@@ -466,9 +408,9 @@ _LEDGER_NAME: Final[FieldDescriptor] = FieldDescriptor.from_dictionary_key(
 
 # 03  Ledger-Balance    pic s9(8)v99   comp-3.                         [:L28]
 # THE ACCUMULATOR THE WHOLE GENERAL LEDGER CYCLE WRITES INTO. gl072 adds each
-# posting into it; `tests/arithmetic/test_ledger_balance_accumulation.py`
-# locks that behaviour. Decimal only - a binary floating-point value here would
-# corrupt every posted balance (R-2).
+# posting into it; the ledger-balance parity test locks that behaviour.
+# Decimal only - a binary floating-point value here would corrupt every
+# posted balance (R-2).
 _LEDGER_BALANCE: Final[FieldDescriptor] = FieldDescriptor.from_dictionary_key(
     "GLLEDGER-REC.LEDGER-BALANCE"
 )
@@ -524,9 +466,7 @@ _FILLER_L37: Final[FieldDescriptor] = FieldDescriptor.from_dictionary_key(
 )
 
 
-# =============================================================================
 #  THE KEY GROUP AND ITS TWO ALTERNATE VIEWS
-# =============================================================================
 
 
 @dataclass(slots=True)
@@ -661,9 +601,7 @@ class WsLedgerKey9:
     ws_ledger_key9: int = 0
 
 
-# =============================================================================
 #  THE FOUR QUARTERS, NAMED AND AS A TABLE
-# =============================================================================
 
 # The zero every money field starts at: signed, scale two, exact. Written once
 # so that all six carry the identical value, and written from a STRING literal
@@ -759,7 +697,7 @@ class LedgerQuartersTable:
     period silently indexes past the array" - the divide at
     [general/gl080.cbl:L328] and the unchecked use at [general/gl080.cbl:L345].
     That unbounded subscript is reproduced in
-    `acas_posting/programs/gl080_end_of_cycle.py`, which is where it belongs.
+    the `gl080` program module, which is where it belongs.
     A length or range check here would silently repair it, and R-4 is explicit
     that a defect fixed is a failure, not a success.
 
@@ -779,9 +717,7 @@ class LedgerQuartersTable:
     ledger_q: tuple[Decimal, ...] = _QUARTER_TABLE_ZERO
 
 
-# =============================================================================
 #  THE RECORD
-# =============================================================================
 
 
 @dataclass(slots=True)
@@ -901,25 +837,17 @@ class WsLedgerRecord:
     filler_l26: str = " " * (_FILLER_L26.character_length or 0)
 
     # 03  Ledger-Name       pic x(24).                                [:L27]
-    #
-    # ANOMALY A-12 - REPRODUCED HERE, NOT FIXED (R-4). The width disagrees
-    # across all three layers, and this attribute holds the COPYBOOK width:
-    #
-    #     copybook  pic x(24)                  [copybooks/wsledger.cob:L27]
-    #     host var  PIC X(32)                  [common/nominalMT.cbl:L299]
-    #     column    char(32) NOT NULL          [mysql/ACASDB.sql:L127]
-    #     moves/trims               [common/nominalMT.cbl:L965], [:L993],
-    #                               [:L1067], [:L1246]
-    #
-    # TWENTY-FOUR CHARACTERS, NEVER THIRTY-TWO. `LEDGER_NAME.character_length`
-    # is 24 and `LEDGER_NAME.anomaly_refs()` returns ('A-12',);
-    # `LEDGER_NAME.drift()` hands back the three-layer disagreement
-    # unadjudicated and this module settles none of it. The widening on write
-    # is reproduced by `acas_posting/dal/acas005_gl_nominal.py`, which owns the
-    # bridge boundary; the trailing-space difference the widening leaves in a
-    # table dump is absorbed by the harness dump comparison step. Neither is
-    # done here, and the width below is read from the descriptor so it cannot
-    # be widened by an edit.
+    # ANOMALY A-12 - REPRODUCED HERE, NOT FIXED (R-4). The width disagrees across all three
+    # layers, and this attribute holds the COPYBOOK width:
+    #     copybook  pic x(24)             [copybooks/wsledger.cob:L27]
+    #     host var  PIC X(32)             [common/nominalMT.cbl:L299]
+    #     column    char(32) NOT NULL     [mysql/ACASDB.sql:L127]
+    #     moves/trims  [common/nominalMT.cbl:L965], [:L993], [:L1067], [:L1246]
+    # TWENTY-FOUR CHARACTERS, NEVER THIRTY-TWO. `character_length` is 24 and `anomaly_refs()`
+    # returns ('A-12',); `drift()` hands back the three-layer disagreement unadjudicated. The
+    # widening on write belongs to the `acas005` handler module and the trailing-space
+    # difference to the harness dump comparison step; the width below is read from the
+    # descriptor, not written out.
     ledger_name: str = " " * (_LEDGER_NAME.character_length or 0)
 
     # 03  Ledger-Balance    pic s9(8)v99   comp-3.                    [:L28]

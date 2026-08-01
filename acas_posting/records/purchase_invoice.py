@@ -26,7 +26,7 @@ writes [purchase/pl055.cbl:L582], [purchase/pl055.cbl:L584],
 scale, sign or storage class in this file moves every posted purchase figure.
 
 THE COBOL RECORDS, AND THE SIXTEEN CLASSES THAT CARRY THEM
----------------------------------------------------------
+----------------------------------------------------------
 Class names are fixed by the migration plan. Where the plan's name does not
 mechanically follow the COBOL spelling, the COBOL spelling is what the
 descriptor's `name` carries - see PInvoiceBodies below::
@@ -54,8 +54,8 @@ descriptor's `name` carries - see PInvoiceBodies below::
 Two group names collide inside this module because the two copybooks declare
 the same idea twice with different casing. `IhSupplier` and `IhFig` are
 `copybooks/plwspinv.cob`'s; `IhSupplier2` and `IhFig2` are
-`copybooks/plwspinv2.cob`'s. The digit is a Python disambiguator and nothing
-more; neither COBOL name carries one.
+`copybooks/plwspinv2.cob`'s. The digit is a Python disambiguator; neither COBOL
+name carries one.
 
 FIELD ORDER FOLLOWS THE COPYBOOK, NOT THE COLUMN ORDINAL
 --------------------------------------------------------
@@ -65,13 +65,14 @@ eye. For this table the two orders genuinely differ, in two ways:
 
   * `ih-lines` is declared at [copybooks/plwspinv.cob:L44], immediately
     before `ih-deduct-days` at L45. The bridge declares `HV-IH-LINES` at
-    [common/plinvoiceMT.cbl:L418], after `HV-IH-CR` at L417, and the schema
-    puts `IH-LINES` at column ordinal 28, after `IH-CR` at 27.
-  * five columns have no copybook position at all - see the block below.
+    [common/plinvoiceMT.cbl:L418], after `HV-IH-CR` at L417 and before
+    `HV-IH-DAY-BOOK-FLAG` at L419, and the schema puts `IH-LINES` at column
+    ordinal 28, after `IH-CR` at 27.
+  * five columns have no copybook position at all - see below.
 
-So `loader.entries_for_table("PUINVOICE-REC")` and the copybook disagree
-about this record's field sequence. The copybook wins here, because a
-copybook's field order IS its byte layout.
+So `loader.entries_for_table("PUINVOICE-REC")` and the copybook disagree about
+this record's field sequence. The copybook wins here, because a copybook's
+field order IS its byte layout.
 
 WHAT THE THREE LAYERS AGREE AND DISAGREE ABOUT
 ----------------------------------------------
@@ -83,19 +84,24 @@ all three layers. `il-net`, `il-unit` and `il-vat` do the same through
 [common/plinvoiceMT.cbl:L437]. The unsigned money fields `ih-deduct-amt`,
 `ih-deduct-vat` and `il-discount` are unsigned at all three layers too.
 
-Six INTEGER fields do not pass through cleanly: they are signed in the
-copybook and unsigned in both the host variable and the column, so a negative
-value loses its sign at the bridge, before any SQL runs. Set against
-`VALUEANAL-REC`, where it is the money that loses its sign, this is what
-shows the drift to be specific rather than systemic - which is exactly why
-every descriptor in this file is fetched field by field from the generated
-dictionary rather than inferred from what kind of field it looks like.
+Six INTEGER fields do not pass through cleanly: they are signed in the copybook
+and unsigned in both the host variable and the column, so a negative value
+loses its sign at the bridge, before any SQL runs. Set against `VALUEANAL-REC`,
+where it is the money that loses its sign, that shows the drift to be specific
+rather than systemic - which is why every descriptor in this file is fetched
+field by field from the dictionary rather than inferred from a field's kind.
+
+Five more columns - `IH-STATUS-A`, `-C`, `-I`, `-L` and `-P` - have no copybook
+position at all: neither Purchase copybook declares them, and the dictionary
+reports no copybook side for any of the five. Sales carries the same five
+columns, but there they ARE declared, as `sih-status-P` through `sih-status-I`
+[copybooks/slwsinv.cob:L56-L60] - same columns, opposite provenance.
 
 A descriptor here reports the COPYBOOK view of its own field. It never blends
-a layer into another and never applies the bridge's conversion; the three
-views and their disagreement are offered untouched through
-`descriptor_for(...).drift()`. Reproducing the bridge's conversion belongs to
-`acas_posting/dal/acas026_pinvoice.py`, at the bridge boundary.
+one layer into another and never applies the bridge's conversion; all three
+views are offered untouched through `descriptor_for(...).drift()`. Reproducing
+that conversion belongs to the `acas026` handler module, at the bridge
+boundary.
 
 THE BRIDGE COPIES ONE COPYBOOK, NOT TWO
 ---------------------------------------
@@ -107,72 +113,71 @@ THE BRIDGE COPIES ONE COPYBOOK, NOT TWO
                                       ==il-==      by ==Un-Used-il-==.
 
 preceded at [common/plinvoiceMT.cbl:L452-L453] by "Using the first record but
-not the 2nd as it uses occurs 40 but to reduce Ram usage get rid of the
-occurs, hopefully." - the trailing ", hopefully." is the Purchase bridge's
-own; the Sales bridge's otherwise-identical comment does not carry it. The
-four-part clause textually DELETES `occurs 40.` and renames the copied bodies
-record's every member to `Un-Used-il-`, which is how the bridge neutralises a
-record it does not want. Note the lower-case renames, where the Sales bridge
-uses `WS-Sih-` and `Un-Used-Sil-`.
+not the 2nd as it uses occurs 40 but to reduce Ram usage get rid of the occurs,
+hopefully." - the trailing ", hopefully." is the Purchase bridge's own; the
+Sales bridge's otherwise-identical comment does not carry it. The four-part
+clause textually DELETES `occurs 40.` and renames the copied bodies record's
+every member to `Un-Used-il-`, neutralising a record it does not want. Note the
+lower-case renames, where the Sales bridge uses `WS-Sih-` and `Un-Used-Sil-`.
 
-There is no `copy "plwspinv2.cob"` anywhere in the bridge; its COPY census is
-`envdiv.cob` L256, `mysql-variables.cpy` L385, `wsfnctn.cob` L446,
-`Test-Data-Flags.cob` L450, `plwspinv.cob` L455 and `mysql-procedures.cpy`
-L1417. The migration plan names both copybooks as this module's sources while
-the bridge copies one of them; both are therefore carried here in full, and
-which layout governs the bytes on disk is left to the compiled program.
+There is no `copy "plwspinv2.cob"` anywhere in the bridge - the string does not
+occur in it at all. Matching `copy "` case-insensitively returns six
+statements: `envdiv.cob` L256, `wsfnctn.cob` L446, `Test-Data-Flags.cob` L450
+and `plwspinv.cob` L455, plus the two the preSQL translator emits in upper
+case, `mysql-variables.cpy` L385 and `mysql-procedures.cpy` L1417. The
+migration plan names both copybooks as this module's sources while the bridge
+copies one; both are carried here in full, and which layout governs the bytes
+on disk is left to the compiled program.
 
-The bridge also declares its OWN line record inline, flat at `03` level with
-no `occurs`, at [common/plinvoiceMT.cbl:L362-L379], ending
+The bridge also declares its OWN line record inline at
+[common/plinvoiceMT.cbl:L362-L379], its members at `03` level with one
+`03 WS-il-Key` group among them and no `occurs`, ending
 `88 WS-il-Analyised value "Z".` at L379 - a SINGLE case where
-[copybooks/plwspinv.cob:L83] declares two. The classes below are built from
-the copybooks, not from that inline block.
+[copybooks/plwspinv.cob:L83] declares two. The classes below come from the
+copybooks, not from that inline block.
 
 THE MAINTAINER'S OWN SIZE ANNOTATIONS, VERBATIM
 -----------------------------------------------
-    *> record size 100 bytes  06/05/17   26/03/09      [plwspinv.cob:L6]
-    *> 42 bytes  +1 06/05/17                           [plwspinv.cob:L9]
-    *> 58 bytes 06/05/17                               [plwspinv.cob:L30]
-    *> 40 bytes                                        [plwspinv.cob:L31]
+    *> record size 100 bytes  06/05/17   26/03/09      [copybooks/plwspinv.cob:L6]
+    *> 42 bytes  +1 06/05/17                           [copybooks/plwspinv.cob:L9]
+    *> 58 bytes 06/05/17                               [copybooks/plwspinv.cob:L30]
+    *> 40 bytes                                        [copybooks/plwspinv.cob:L31]
     *> 75 bytes each - 3000 bytes 02/11/10- line +1 & filler remd so same
-       size.                                          [plwspinv.cob:L63]
-    *> record size 129 bytes 22/12/11                  [plwspinv2.cob:L7]
+       size.                                          [copybooks/plwspinv.cob:L63]
+    *> record size 129 bytes 22/12/11                  [copybooks/plwspinv2.cob:L7]
     *>           = 100 less filler err. 06/05/17 item-nos > 99 from
-       bin-char                                       [plwspinv2.cob:L8]
-    *> was x(88).  now rec  100                        [plwspinv2.cob:L19]
-    *> 100 bytes                                       [plwspinv2.cob:L21]
-    *> 75 bytes 06/05/17, 74 bytes 22/12/11            [plwspinv2.cob:L56]
+       bin-char                                       [copybooks/plwspinv2.cob:L8]
+    *> was x(88).  now rec  100                        [copybooks/plwspinv2.cob:L19]
+    *> 100 bytes                                       [copybooks/plwspinv2.cob:L21]
+    *> 75 bytes 06/05/17, 74 bytes 22/12/11            [copybooks/plwspinv2.cob:L56]
 
 Summing the declared elementary items gives: PInvoice-Header 100, of which
-ih-prime 42 and ih-sub-prime 58 and ih-Fig 40; invoice-line 75 each and so
-3000 for the table of 40; WS-PInvoice-Record 100; the Invoice-Header redefine
-100; the Invoice-Line redefine 75. Every annotation in
-`copybooks/plwspinv.cob` therefore agrees with its own fields, which is
-unusual in this folder and worth knowing.
+ih-prime 42 and ih-sub-prime 58 and ih-Fig 40; invoice-line 75 each and so 3000
+for the table of 40; WS-PInvoice-Record 100; the Invoice-Header redefine 100;
+the Invoice-Line redefine 75. Every annotation in `copybooks/plwspinv.cob`
+therefore agrees with its own fields, down to the running subtotals at L29,
+L39, L45 and L76.
 
-Two disagreements survive that summing, and this file settles NEITHER of
-them. `copybooks/plwspinv2.cob:L7` records 129 bytes while L8 immediately
-qualifies it as "= 100 less filler err." and L19 records "now rec  100" - the
-copybook admits an error in its own recorded length, which makes the
-arithmetic more suspect rather than less. And the Invoice-Line redefine is
-annotated 75 bytes (74 in an earlier revision) while redefining a 100-byte
-base, leaving 25 bytes of that base outside the view. No length constant is
-declared anywhere in this module, by design: whether a declared length or a
-field sum governs the record actually read affects trailing-field alignment,
-and only running the compiled program shows which.
+Two disagreements survive that summing, both of them in the SECOND copybook,
+and this file settles NEITHER. `copybooks/plwspinv2.cob:L7` records 129 bytes
+while L8 qualifies it as "= 100 less filler err." and L19 records
+"now rec  100" - the copybook admits an error in its own recorded length. And
+the Invoice-Line redefine is annotated 75 bytes (74 in an earlier revision)
+while redefining a 100-byte base, leaving 25 bytes of that base outside the
+view. No length constant is declared anywhere in this module, by design:
+whether a declared length or a field sum governs the record actually read
+affects trailing-field alignment, and only the compiled program shows which.
 
 COBOL NAME COLLISIONS, RECORDED
 -------------------------------
-`pending`, `invoiced`, `applied`, `day-booked`, `ih-analyised`,
-`il-analyised` and every `ih-*` and `il-*` field name are declared in BOTH
-Purchase copybooks, and the `ih-*` and `il-*` names collide with
-`copybooks/slwsinv2.cob` as well. That is why `plinvoiceMT` has to rename
-them on copy, and it is the same pressure that forces qualified references in
-the General Ledger posting path [general/gl070.cbl:L497],
-[general/gl070.cbl:L521], [general/gl070.cbl:L525]. The Python module
-namespace removes the ambiguity for free, so the collision leaves no trace in
-the code - it is written down here instead, for
-`docs/migration/traceability.md`.
+`pending`, `invoiced`, `applied`, `day-booked`, `ih-analyised`, `il-analyised`
+and every `ih-*` and `il-*` field name are declared in BOTH Purchase
+copybooks, and the `ih-*` and `il-*` names collide with
+`copybooks/slwsinv2.cob` as well. That is why `plinvoiceMT` has to rename them
+on copy, and it is the same pressure that forces qualified references in the
+General Ledger posting path [general/gl070.cbl:L497], [general/gl070.cbl:L521],
+[general/gl070.cbl:L525]. The Python namespace removes the ambiguity for free,
+so the collision is written down here instead of showing up in the code.
 
 TYPE DISCIPLINE
 ---------------
@@ -187,49 +192,46 @@ The rule is about SCALE, not about storage class::
 
 "COMP means integer" is false: `ih-deduct-amt`, `ih-deduct-vat` and
 `il-discount` are COMP with scale 2 and are therefore Decimal. Bare
-`binary-char`, `binary-short` and `binary-long` are SIGNED - GnuCOBOL wants
-an explicit `unsigned` keyword otherwise, and the bridges do write it when
-they mean it - so their descriptors report `signed` true and their integer
-truncation on divide is integer truncation, which is the behaviour the
-posting programs depend on. There is no binary floating point in this module,
-in any form.
+`binary-char`, `binary-short` and `binary-long` are SIGNED - GnuCOBOL wants an
+explicit `unsigned` keyword otherwise, and this bridge writes that keyword five
+times when it means it - so their descriptors report `signed` true and their
+truncation on divide is integer truncation, which is what the posting programs
+depend on. There is no binary floating point in this module, in any form.
 
 WHAT THIS MODULE DELIBERATELY DOES NOT DO
 -----------------------------------------
-It declares no field the copybooks do not declare, and it drops none that
-they do - the autogen members and every live FILLER stay. It implements no
+It declares no field the copybooks do not declare and drops none that they do
+- the autogen members and every live FILLER stay. It implements no
 condition-name predicate: the 88-levels are published here as data and
-`acas_posting/cobol/condition_names.py` turns them into predicates. It adds
-no post-initialisation hook, no check, no derived attribute a caller could
-mistake for a stored field, no length constant, and no entity-mapping layer.
-It performs no I/O at import: an attribute carries only its dictionary KEY,
-and the descriptor behind that key is fetched on first ask. It reads no file,
-starts no process and loads no shared library, so it runs on a host with no
-COBOL compiler and no COBOL runtime present.
+`acas_posting/cobol/condition_names.py` turns them into predicates. It adds no
+post-initialisation hook, no check, no derived attribute a caller could
+mistake for a stored field, no length constant and no entity-mapping layer. It
+performs no I/O at import, reads no file, starts no process and loads no
+shared library, so it runs where no COBOL compiler or runtime is present.
 
-Nothing in this module is imported from any other `records` module, from
-`dal`, from `programs`, from `cli` or from the comparison oracle. The import
-contract of the migration plan, section 0.4.3, grants this layer
-`acas_posting.cobol.field` and `acas_posting.dictionary.loader` and nothing
-else, because the arithmetic test tier imports `cobol` and `records` only and
-must keep running with no infrastructure at all.
+Nothing here is imported from any other `records` module, from `dal`, from
+`programs`, from `cli` or from the comparison oracle. Section 0.4.3 of the
+migration plan grants this layer `acas_posting.cobol.field` and
+`acas_posting.dictionary.loader` and nothing else, because the arithmetic test
+tier imports `cobol` and `records` only and must run with no infrastructure.
 
 The sales invoice module is close enough in shape to look shareable and is
-not. Fourteen verified structural divergences separate the two: header length
-(137 versus 100), sub-group sizes (42+95 versus 42+58), line length (80 and
-3200 versus 75 and 3000), the customer versus the supplier group, how the
-10-byte order field is declared (a picture plus a redefining filler, versus a
-plain group here and a plain elementary item in the second copybook - three
-treatments of one idea), the five status flags, the `applied` condition name,
-88 value case ordering, line description width (32 versus 24), the two line
-fillers Purchase has and Sales does not, the back-order flag Sales has and
-Purchase has none of, header key nesting depth (03/05 versus 05/07), whether
-the second copybook keeps its intermediate groups, and the bodies record's own
-casing. Purchase has no REDEFINES at all in `copybooks/plwspinv.cob` where
-Sales has one, and Purchase has five bridge-only status columns where Sales
-has none. Divergence-preservation is the entire point of the exercise, so
-this module is built from the Purchase sources alone and shares no base
-class, mixin, helper, constant or type alias with any sibling.
+not. Fourteen structural divergences separate the two: header length (137
+versus 100); sub-group sizes (42+95 versus 42+58); line length (80 and 3200
+versus 75 and 3000); customer versus supplier group; how the 10-byte order
+field is declared, three ways for one idea (a picture plus a redefining
+filler, a plain group here, a plain elementary item in the second copybook);
+where the five status flags are declared; the `applied` condition name,
+`sapplied` [copybooks/slwsinv.cob:L55] against `applied`
+[copybooks/plwspinv.cob:L43]; 88 value case ordering; line description width
+(32 versus 24); the two line fillers Purchase has and Sales does not; the
+back-order flag Sales has and Purchase has not; header key nesting depth
+(03/05 versus 05/07); whether the second copybook keeps its intermediate
+groups; and the bodies record's own casing. Beyond those fourteen,
+`copybooks/plwspinv.cob` carries no REDEFINES where `copybooks/slwsinv.cob`
+carries one. Divergence-preservation is the point of the exercise, so this
+module shares no base class, mixin, helper, constant or type alias with any
+sibling.
 """
 
 from __future__ import annotations
@@ -246,10 +248,12 @@ from acas_posting.dictionary import loader
 # `ConditionName` is the generated dictionary's own carrier for an 88-level,
 # with exactly the three members this module needs - name, value and source.
 # The migration plan's section 0.4.3 grants this layer `cobol.field` and
-# `dictionary.loader`; the model module is reached for this one type because
-# `loader` does not re-export it and because declaring a competing copy of a
-# type the dictionary already publishes is worse than importing it.
-from acas_posting.dictionary.model import ConditionName
+# `dictionary.loader`, and the loader is where this type comes from: it
+# re-exports the object model's records for exactly this purpose (see its
+# `RE_EXPORTED_MODEL_NAMES`), as a BINDING to the one definition rather than a
+# copy. So the type the dictionary already publishes is named here directly,
+# through the one permitted door, and no competing copy is declared (rule R-5).
+from acas_posting.dictionary.loader import ConditionName
 
 __all__: Final[tuple[str, ...]] = (
     # The 88-level inventory and the four lookups, then the sixteen record
@@ -278,61 +282,18 @@ __all__: Final[tuple[str, ...]] = (
 )
 
 
-# =============================================================================
-#  FIVE COLUMNS THAT NO COPYBOOK DECLARES
-# =============================================================================
-#
-# The largest one-sided field group in this folder, and the reason the bridge
-# rather than the copybook is what this migration's record-to-table mapping is
-# taken from. The schema declares, in this order and each with a comment of
-# its own [mysql/ACASDB.sql:L562-L567]:
-#
-#     `IH-STATUS`   char(1) NOT NULL COMMENT 'STATUS-X not yet used',
-#     `IH-STATUS-A` char(1) NOT NULL COMMENT 'Applied',
-#     `IH-STATUS-C` char(1) NOT NULL COMMENT 'cleared',
-#     `IH-STATUS-I` char(1) NOT NULL COMMENT 'Invoiced',
-#     `IH-STATUS-L` char(1) NOT NULL COMMENT 'printed',
-#     `IH-STATUS-P` char(1) NOT NULL COMMENT 'Pending',
-#
-# and the bridge declares HV-IH-STATUS-A, HV-IH-STATUS-C, HV-IH-STATUS-I,
-# HV-IH-STATUS-L and HV-IH-STATUS-P at [common/plinvoiceMT.cbl:L408-L412].
-# Only `IH-STATUS` has a copybook field behind it, at
-# [copybooks/plwspinv.cob:L40] and [copybooks/plwspinv2.cob:L40]. The other
-# five have none:
-#
-#     grep -inc "ih-status-" copybooks/plwspinv.cob copybooks/plwspinv2.cob
-#         copybooks/plwspinv.cob:0
-#         copybooks/plwspinv2.cob:0
-#     grep -c  "status-"     copybooks/slwsinv.cob  copybooks/slwsinv2.cob
-#         copybooks/slwsinv.cob:5
-#         copybooks/slwsinv2.cob:5
-#
-# Zero on both Purchase copybooks; five on both Sales copybooks. Three
-# further facts make this a defect rather than a design. The five sit in
-# ALPHABETICAL order - A, C, I, L, P - where the Sales table's five sit in
-# copybook declaration order, P, L, C, A, I, and alphabetical order is what a
-# generator emits when it has no copybook to follow. Their comments are
-# capitalised inconsistently: 'Applied', 'cleared', 'Invoiced', 'printed',
-# 'Pending'. And `PUINVOICE-REC` is the only in-scope table in this folder
-# that carries any comment at all - `SAINVOICE-REC` carries none - the
-# seventh being `IH-UPDATE`'s 'jic, Invoice rec merged with OTM rec'
-# [mysql/ACASDB.sql:L575].
-#
-# THIS MODULE DECLARES NOTHING FOR THE FIVE. They are not copybook fields, so
-# no attribute here corresponds to them, and borrowing the five declarations
-# from the Sales copybooks - however obviously they look as though they belong
-# - would both add fields and invent a copybook provenance that does not
-# exist. `FieldDescriptor.from_dictionary_key` refuses each of the five with
-# `BridgeOnlyFieldError` for the same reason: such a field has no COBOL-side
-# storage to describe. The generated dictionary carries all five as entries
-# with a bridge view and a column view and no copybook view, records that the
-# bridge's load paragraph makes no move into any of them and never unloads
-# them, and leaves what the compiled program actually stores in five NOT NULL
-# columns as a question for the oracle. Populating them belongs to
-# `acas_posting/dal/acas026_pinvoice.py`, exactly as the three derived date
-# components of the internal IRS posting table belong to
-# `acas_posting/dal/acasirsub4_irs_posting.py`. The register of the whole set
-# is `docs/migration/anomaly-log.md`.
+# FIVE COLUMNS THAT NO COPYBOOK DECLARES. mysql/ACASDB.sql:L562-L567 declares six `IH-STATUS*`
+# columns - the bare `IH-STATUS` plus `-A`, `-C`, `-I`, `-L` and `-P`, each carrying its own
+# COMMENT - and common/plinvoiceMT.cbl:L408-L412 supplies a host variable for the five suffixed
+# ones. Only the bare `IH-STATUS` has a copybook field, at [copybooks/plwspinv.cob:L40] and
+# [copybooks/plwspinv2.cob:L40]; grepping either copybook for the five suffixed names returns 0
+# against the schema's 5.
+# Their ALPHABETICAL suffix order, against declaration order everywhere else, marks them as
+# generated at the schema rather than derived from a layout - and `PUINVOICE-REC` is the only
+# in-scope table whose columns carry comments at all, including `IH-UPDATE`'s 'jic, Invoice rec
+# merged with OTM rec' [mysql/ACASDB.sql:L575]. They are therefore NOT dataclass fields here:
+# this module publishes the copybook layout, and asking for one raises `BridgeOnlyFieldError`,
+# which names the bridge as the only place they exist.
 
 
 # The private metadata slot each attribute's dictionary key travels in. A key
@@ -344,8 +305,8 @@ _DICTIONARY_KEY: Final[str] = "dictionary_key"
 def _cited(key: str) -> Mapping[str, str]:
     """Return the field metadata that cites one generated-dictionary entry.
 
-    A formatting device and nothing else, so that 107 attribute declarations
-    below read as one line each. The string it is handed is the entry key the
+    A formatting device and nothing else, so that the 102 cited attribute
+    declarations below read as one line each. The string it is handed is the entry key the
     loader itself reports for that field - never a key built by upper-casing
     an attribute name, which would be wrong for `ih-Date` (column `IH-DAT`),
     for `ih-Supplier` (one `char(7)` column) and for `ih-Invoice` (widened
@@ -362,45 +323,16 @@ def _cited(key: str) -> Mapping[str, str]:
     return {_DICTIONARY_KEY: key}
 
 
-# =============================================================================
-#  THE 88-LEVELS, AS DATA
-# =============================================================================
-#
-# Eighteen condition names, twelve from `copybooks/plwspinv.cob` and six from
-# `copybooks/plwspinv2.cob`, keyed by the dictionary entry of the item each is
-# declared on and listed in copybook declaration order. `value` is the COBOL
-# literal list exactly as written, in the order written, so that a multi-value
-# form stays one condition name with several values.
-#
-# These are DATA. No predicate is built here: turning a name and its literals
-# into a test is `acas_posting/cobol/condition_names.py`'s job, and importing
-# that module from this layer would break the leaf contract of the migration
-# plan's section 0.4.3.
-#
-# Five oddities in this inventory are reproduced, not put right:
-#
-#   * `ih-Daily` and `ih-Testing` SHARE the value "D"
-#     [copybooks/plwspinv.cob:L22-L23], with the maintainer's own "These two
-#     are only for testing." and "So NOT documented and removed after tests."
-#     Both are carried; a lookup keyed by value would lose one of them.
-#   * `ih-Valid-Freqs` [copybooks/plwspinv.cob:L24] carries the typo "LAst one
-#     for TESTING ONLY so remove after", with a capital A in "LAst".
-#   * Case ordering INVERTS between the two copybooks, and inverts again on
-#     one line inside a single file. `copybooks/plwspinv.cob` is upper-first at
-#     L41, L42, L43, L51 and L53 - but lower-first at L83.
-#     `copybooks/plwspinv2.cob` is lower-first throughout, at L41, L42, L43,
-#     L51, L53 and L72. Every list stays exactly as declared; none is sorted.
-#   * `88 day-booked  values "B" "b" .` [copybooks/plwspinv.cob:L51] has a
-#     SPACE before its terminating period. Semantically nothing; source truth.
-#   * `88 il-analyised  values "z" "Z".  *> using Z hopefully.`
-#     [copybooks/plwspinv.cob:L83] - the maintainer does not know which case
-#     is actually written, which makes it a question for the compiled program.
-#
-# `analyised` is misspelled in the frozen source, at
-# [copybooks/plwspinv.cob:L53], [copybooks/plwspinv.cob:L83],
-# [copybooks/plwspinv2.cob:L53], [copybooks/plwspinv2.cob:L72] and, in the
-# bridge's inline line record, [common/plinvoiceMT.cbl:L379]. It stays
-# misspelled here.
+# THE 88-LEVELS, AS DATA. Eighteen condition names are carried - twelve over the header views
+# and six over the line view - and five oddities in them are reproduced rather than repaired
+# (R-4). `ih-Daily` and `ih-Testing` are given the SAME value "D"
+# [copybooks/plwspinv.cob:L22-L23], so the second can never be distinguished from the first; L24
+# mis-capitalises "LAst"; L51 puts a space before its terminating period; and the value-case
+# ORDERING inverts between the header names at L41, L42, L43, L51 and L53, which list upper case
+# first, and the line name at L83, which lists lower case first.
+# `ih-analyised` and `il-analyised` carry the frozen misspelling of "analysed", and it is kept
+# exactly as written so a reader grepping the COBOL finds the Python. Predicates are evaluated
+# by `cobol.condition_names`, never re-declared here.
 CONDITION_NAMES: Final[Mapping[str, tuple[ConditionName, ...]]] = MappingProxyType(
     {
         # -- copybooks/plwspinv.cob ---------------------------------------
@@ -539,9 +471,7 @@ CONDITION_NAMES: Final[Mapping[str, tuple[ConditionName, ...]]] = MappingProxyTy
 )
 
 
-# =============================================================================
 #  THE FOUR LOOKUPS
-# =============================================================================
 
 
 def dictionary_key_for(record: Any, attribute: str) -> str:
@@ -584,7 +514,7 @@ def descriptor_for(record: Any, attribute: str) -> FieldDescriptor:
     The storage metadata of every field in this module is fetched here rather
     than written down beside the attribute, which is what keeps a picture
     clause, a digit count, a scale, a sign position or a storage class from
-    being transcribed by eye across 107 fields.
+    being transcribed by eye across 102 cited fields.
 
     The descriptor reports the COPYBOOK view. It is not blended with the
     bridge or the column view, and it does not apply the narrowing that six of
@@ -649,20 +579,17 @@ def condition_names_for(key: str) -> tuple[ConditionName, ...]:
     Returns:
         The condition names in copybook declaration order, each with its
         literal list verbatim and its own locator. An empty tuple for an item
-        that declares none, which is 98 of this module's 107 attributes.
+        that declares none, which is 93 of this module's 102 cited
+        attributes; the other nine carry one or more.
     """
     return CONDITION_NAMES.get(key, ())
 
 
-# =============================================================================
 #  copybooks/plwspinv.cob - THE WORKING-STORAGE INVOICE HEADER AND BODIES
-# =============================================================================
-#
 # Field order below follows the copybook line for line, so that a reader can
 # set `cat -n copybooks/plwspinv.cob` beside this section and walk both
 # together. It is deliberately NOT column-ordinal order; see the module
 # docstring for where the two part company.
-#
 # Every class carries `COBOL_DICTIONARY_KEY`, the generated-dictionary entry
 # for the group item itself. It is a `ClassVar`, so it is not a dataclass
 # field and holds no record data - it is how a `01`-level record cites its own
@@ -683,12 +610,17 @@ class WsInvoiceKey:
     `PINVOICE-KEY char(10)`, while ALSO materialising both members separately
     as `IH-INVOICE` and `IH-TEST`. Neither copybook declares a field named
     `PINVOICE-KEY`; the group is what the column is built from. This dual
-    materialisation is the same shape the IRS nominal record shows for
-    `NL-Pointer`, and differs from the general ledger posting record, whose
-    bridge-only key is numeric rather than alphanumeric.
+    materialisation is exactly what the sales invoice record does, promoting
+    `WS-Invoice-Key` [copybooks/slwsinv.cob:L20] to `SINVOICE-KEY char(10)`
+    while also materialising both of its members. The IRS nominal and general
+    ledger posting records promote a group too - `NL-Key`
+    [copybooks/irswsnl.cob:L9] to `KEY-1`, `WS-Post-Key`
+    [copybooks/wspost.cob:L14] to `POST-KEY` - but both of those land numeric
+    rather than alphanumeric, and neither materialises the group's members as
+    separate columns.
 
     No `pinvoice_key` attribute is declared here. That name belongs to the
-    column side, and building its value is `acas_posting/dal/acas026_pinvoice`
+    column side, and building its value is the `acas026` handler module's
     work.
     """
 
@@ -780,11 +712,11 @@ class IhOrder:
 
 @dataclass(slots=True, kw_only=True)
 class IhPrime:
-    """`03  ih-prime.` [copybooks/plwspinv.cob:L9], annotated `*> 42 bytes  +1
-    06/05/17`.
+    """The first of the header's two halves, 42 bytes.
 
-    The first of the header's two halves. The sales copybook's equivalent pair
-    splits 42 and 95; this one splits 42 and 58.
+    `03  ih-prime.` [copybooks/plwspinv.cob:L9], annotated
+    `*> 42 bytes  +1 06/05/17`. The sales copybook's equivalent pair splits 42
+    and 95; this one splits 42 and 58.
     """
 
     COBOL_DICTIONARY_KEY: ClassVar[str] = "PInvoice-Header.ih-prime"
@@ -816,31 +748,32 @@ class IhPrime:
 
 @dataclass(slots=True, kw_only=True)
 class IhFig:
-    """`05  ih-Fig                          comp-3.   *> 40 bytes`
+    """The header's eight packed money fields.
+
+    `05  ih-Fig                          comp-3.   *> 40 bytes`
     [copybooks/plwspinv.cob:L31].
 
-    GROUP-USAGE INHERITANCE. The usage clause is written once, on the group,
-    and each of the eight children below carries only `pic s9(7)v99` with no
-    usage of its own [copybooks/plwspinv.cob:L32-L39]. All eight are therefore
-    packed decimal, and every descriptor reports `usage` COMP-3,
-    `usage_declared_at` GROUP and `usage_inherited_from` "ih-Fig". Reading
-    usage off the picture line alone would type all eight as zoned display and
-    put a different byte pattern in every money column of the table.
+    GROUP-USAGE INHERITANCE. The usage clause is written once, on the group, and
+    each of the eight children below carries only `pic s9(7)v99` with no usage of
+    its own [copybooks/plwspinv.cob:L32-L39]. All eight are therefore packed
+    decimal, and every descriptor reports `usage` COMP-3, `usage_declared_at` GROUP
+    and `usage_inherited_from` "ih-Fig". Reading usage off the picture line alone
+    would type all eight as zoned display and put a different byte pattern in every
+    money column of the table.
 
     The second copybook declares the same group as `ih-fig`, lower case
     [copybooks/plwspinv2.cob:L31]; `IhFig2` carries that spelling, verbatim.
 
-    Contrast with `IhSubPrime`, where `ih-deduct-amt` and `ih-deduct-vat`
-    write their usage on their own picture lines and so report
-    `usage_declared_at` FIELD with no inheritance.
+    Contrast with `IhSubPrime`, where `ih-deduct-amt` and `ih-deduct-vat` write
+    their usage on their own picture lines and so report `usage_declared_at` FIELD
+    with no inheritance.
 
-    Money passes through all three layers unchanged here: signed in the
-    copybook, `PIC S9(07)V9(02) COMP` in the bridge
-    [common/plinvoiceMT.cbl:L399-L406], `decimal(9,2)` in the column. That is
-    worth stating because the value analysis record loses the sign on its
-    money while this record loses it only on six integers - which is why field
-    metadata is asked for one field at a time rather than assumed from a
-    field's kind.
+    Money passes through all three layers unchanged here: signed in the copybook,
+    `PIC S9(07)V9(02) COMP` in the bridge [common/plinvoiceMT.cbl:L399-L406],
+    `decimal(9,2)` in the column. Worth stating because the value analysis record
+    loses the sign on its money while this record loses it only on six integers -
+    which is why field metadata is asked for one field at a time rather than
+    assumed from a field's kind.
     """
 
     COBOL_DICTIONARY_KEY: ClassVar[str] = "PInvoice-Header.ih-Fig"
@@ -872,20 +805,20 @@ class IhFig:
 
 @dataclass(slots=True, kw_only=True)
 class IhSubPrime:
-    """`03  ih-sub-prime.` [copybooks/plwspinv.cob:L30], annotated `*> 58 bytes
-    06/05/17`.
+    """The header's second half - money, status and the deduction terms.
 
-    The header's second half - money, status and the deduction terms.
+    `03  ih-sub-prime.` [copybooks/plwspinv.cob:L30], annotated
+    `*> 58 bytes 06/05/17`.
 
     ORDER NOTE. `ih-lines` is declared here at [copybooks/plwspinv.cob:L44],
-    immediately before `ih-deduct-days`. The bridge declares its host variable
-    LAST of the header's twenty-nine substantive fields, `HV-IH-LINES PIC 9(03)
-    COMP` at [common/plinvoiceMT.cbl:L418], after `HV-IH-CR` at L417, and the
-    table puts `IH-LINES` at column ordinal 28, after `IH-CR` at 27. The
-    attribute below sits where the copybook puts it. Asking the dictionary for
-    this table by column and by copybook record therefore returns two
-    different orders, and this field is one of the two reasons why; the other
-    is the five columns that have no copybook position at all.
+    immediately before `ih-deduct-days`. The bridge declares `HV-IH-LINES PIC
+    9(03) COMP` at [common/plinvoiceMT.cbl:L418], third from last of its thirty
+    header host variables - after `HV-IH-CR` at L417 and before
+    `HV-IH-DAY-BOOK-FLAG` at L419 - and the table puts `IH-LINES` at column
+    ordinal 28, after `IH-CR` at 27. The attribute below sits where the copybook
+    puts it. Asking the dictionary for this table by column and by copybook record
+    therefore returns two different orders, and this field is one of the two
+    reasons why; the other is the five columns with no copybook position at all.
     """
 
     COBOL_DICTIONARY_KEY: ClassVar[str] = "PInvoice-Header.ih-sub-prime"
@@ -969,8 +902,8 @@ class PInvoiceHeader:
     kept, in this module's class docstrings and in every descriptor's own
     `name`.
 
-    Two halves only, so this class has two attributes; the twenty-nine
-    substantive fields live inside them. Summing the declared fields gives 100
+    Two halves only, so this class has two attributes; the twenty-eight leaf
+    fields, one of them a live FILLER, live inside them. Summing the declared fields gives 100
     bytes, with `ih-prime` at 42 and `ih-sub-prime` at 58, which matches every
     annotation the copybook makes about itself. The second copybook's account
     of the same 100 bytes does not agree with its own opening line, and that
@@ -996,7 +929,7 @@ class IlKey:
     `IL-LINE-KEY char(10)`, while both members are ALSO materialised
     separately as `IL-INVOICE` and `IL-LINE`. As with the header key, no
     copybook declares a field of that name, so none is declared here; building
-    its value belongs to `acas_posting/dal/acas026_pinvoice`.
+    its value belongs to the `acas026` handler module.
     """
 
     COBOL_DICTIONARY_KEY: ClassVar[str] = "PUINV-LINES-REC.IL-LINE-KEY"
@@ -1012,28 +945,29 @@ class IlKey:
 
 @dataclass(slots=True, kw_only=True)
 class IlInvoiceLineBody:
-    """`03  invoice-line                   occurs 40.`
+    """One of the forty invoice lines the bodies record holds.
+
+    `03  invoice-line                   occurs 40.`
     [copybooks/plwspinv.cob:L66].
 
-    One element of the 40-element table `PInvoiceBodies` holds. The group's
-    descriptor reports `occurs` 40; the copybook heading above it reads `*> 75
-    bytes each - 3000 bytes 02/11/10- line +1 & filler remd so same size.`,
+    The group's descriptor reports `occurs` 40; the copybook heading above it reads
+    `*> 75 bytes each - 3000 bytes 02/11/10- line +1 & filler remd so same size.`,
     and summing the declared fields gives exactly 75, and so 3000 for forty.
 
-    The same line record appears three ways across the sources: with `occurs
-    40` here; without it in [copybooks/plwspinv2.cob:L56], where it redefines
-    a single buffer; and in the bridge, which copies this copybook and then
-    textually deletes the `occurs 40.` and renames every `il-` field to
-    `Un-Used-il-` [common/plinvoiceMT.cbl:L455-L458], declaring its own flat
-    line record inline instead [common/plinvoiceMT.cbl:L362-L379]. Each form
-    is carried in its own source's terms.
+    The same line record appears three ways across the sources: with `occurs 40`
+    here; without it in [copybooks/plwspinv2.cob:L56], where it redefines a single
+    buffer; and in the bridge, which copies this copybook and then textually deletes
+    the `occurs 40.` and renames every `il-` field to `Un-Used-il-`
+    [common/plinvoiceMT.cbl:L455-L458], declaring its own line record inline instead
+    [common/plinvoiceMT.cbl:L362-L379]. Each form is carried in its own source's
+    terms.
 
-    Its description is 24 characters wide. The sales copybook's is 32; that is
-    one of the fourteen divergences, not a transcription slip. Purchase also
-    carries two `filler pic xx` runs Sales has none of, and Sales carries a
-    back-order flag Purchase has none of - a grep for `back-ordered` across
-    both purchase copybooks and the purchase bridge returns nothing, so the
-    absence is recorded here rather than filled in.
+    Its description is 24 characters wide. The sales copybook's is 32; that is one
+    of the fourteen divergences, not a transcription slip. Purchase also carries two
+    `filler pic xx` runs Sales has none of, and Sales carries a back-order flag
+    Purchase has none of - a grep for `back-ordered` across both purchase copybooks
+    and the purchase bridge returns nothing, so the absence is recorded here rather
+    than filled in.
     """
 
     COBOL_DICTIONARY_KEY: ClassVar[str] = "Pinvoice-Bodies.invoice-line"
@@ -1128,33 +1062,15 @@ class PInvoiceBodies:
     )
 
 
-# =============================================================================
-#  copybooks/plwspinv2.cob - THREE VIEWS OVER ONE BUFFER
-# =============================================================================
-#
-# The second copybook opens with two lines about its own length:
-#
-#     *> record size 129 bytes 22/12/11
-#     *>           = 100 less filler err. 06/05/17 item-nos > 99 from bin-char
-#
-# - the second of which says outright that the first is wrong. Summing the
-# declared fields of `WS-PInvoice-Record` gives 100, which agrees with the
-# second line and with `*> was x(88).  now rec  100` at
-# [copybooks/plwspinv2.cob:L19], and disagrees with the first. Nothing here
-# picks between them and no length constant is declared; the record the
-# programs actually read is a matter for the compiled program to show.
-#
-# Three `01`-levels sit over the same storage: a base record and two
-# redefinitions of it. All three are declared below. None is treated as the
-# one that counts, none is folded into another, and the two views are not kept
-# in step with the base - the COBOL does not keep them in step either, and
-# adding logic that did would be adding logic.
-#
-# One structural difference from its sales twin is worth stating: the
-# redefining header here has NO intermediate groups at all. Its fields sit
-# directly at level 03 [copybooks/plwspinv2.cob:L21-L53], where the sales
-# copybook keeps a prime and a sub-prime group. Only `ih-supplier` and
-# `ih-fig` remain as groups, and both are carried below.
+# plwspinv2.cob: THREE VIEWS OVER ONE BUFFER. The copybook declares three 01-levels over the
+# same storage, the second and third as REDEFINES of the first, and its own length notes
+# contradict each other - L19 reads `*> was x(88).  now rec  100`, and the field bytes sum to
+# 100, so the 100 is the one to trust.
+# Unlike the header copybook, this one interposes NO intermediate group items between the 01 and
+# its elementary fields [copybooks/plwspinv2.cob:L21-L53], so every field sits at 03 level
+# directly under the record. The three views are published as three dataclasses over one
+# dictionary namespace; which one a given program writes is a question for the compiled program,
+# not a choice made here.
 
 
 @dataclass(slots=True, kw_only=True)
@@ -1248,17 +1164,19 @@ class IhSupplier2:
 
 @dataclass(slots=True, kw_only=True)
 class IhFig2:
-    """`03  ih-fig                          comp-3.`
+    """The second copybook's spelling of the same eight money fields.
+
+    `03  ih-fig                          comp-3.`
     [copybooks/plwspinv2.cob:L31].
 
-    GROUP-USAGE INHERITANCE again, and the same eight money fields, but the
-    group is spelled `ih-fig` in lower case where the first copybook writes
-    `ih-Fig` [copybooks/plwspinv.cob:L31]. Every descriptor below reports
-    `usage` COMP-3, `usage_declared_at` GROUP and `usage_inherited_from`
-    "ih-fig" - the casing its own source uses, not the other's.
+    GROUP-USAGE INHERITANCE again, and the same eight money fields, but the group
+    is spelled `ih-fig` in lower case where the first copybook writes `ih-Fig`
+    [copybooks/plwspinv.cob:L31]. Every descriptor below reports `usage` COMP-3,
+    `usage_declared_at` GROUP and `usage_inherited_from` "ih-fig" - the casing its
+    own source uses, not the other's.
 
-    Named apart from `IhFig` only because one module cannot hold both
-    spellings; this is the second copybook's group.
+    Named apart from `IhFig` only because one module cannot hold both spellings;
+    this is the second copybook's group.
     """
 
     COBOL_DICTIONARY_KEY: ClassVar[str] = "Invoice-Header.ih-fig#31"
@@ -1290,25 +1208,27 @@ class IhFig2:
 
 @dataclass(slots=True, kw_only=True)
 class IhInvoiceHeader:
-    """`01  Invoice-Header redefines WS-PInvoice-Record.   *> 100 bytes`
+    """The header view over the shared buffer.
+
+    `01  Invoice-Header redefines WS-PInvoice-Record.   *> 100 bytes`
     [copybooks/plwspinv2.cob:L21].
 
-    The first of the two redefinitions - the header read out of the shared
-    buffer. The record's own descriptor - the one behind
-    `COBOL_DICTIONARY_KEY` - carries `redefines` "WS-PInvoice-Record", which is
-    where the COBOL writes the clause; the members below carry none, because
-    the COBOL gives them none.
+    The first of the two redefinitions. The record's own descriptor - the one
+    behind `COBOL_DICTIONARY_KEY` - carries `redefines` "WS-PInvoice-Record", which
+    is where the COBOL writes the clause; the members below carry none, because the
+    COBOL gives them none.
 
-    Its fields sit at level 03 with no intermediate groups, so where
-    `PInvoiceHeader` reaches its twenty-nine fields through `ih-prime` and
-    `ih-sub-prime`, this class holds them directly. The sales copybook's
-    equivalent keeps its intermediate groups; that difference is one of the
-    fourteen, and it is why the two classes have different shapes rather than
-    different names for the same shape.
+    It has no `ih-prime`/`ih-sub-prime` halves, so where `PInvoiceHeader` reaches
+    its twenty-eight leaf fields through those two groups, this class reaches its
+    twenty-five directly. Two groups do survive at level 03, `ih-supplier`
+    [copybooks/plwspinv2.cob:L24] and `ih-fig` [copybooks/plwspinv2.cob:L31]. The
+    sales copybook's equivalent keeps its intermediate groups; that difference is
+    one of the fourteen, and it is why the two classes have different shapes rather
+    than different names for the same shape.
 
-    Its 88-levels put the lower-case letter first throughout - L41, L42, L43,
-    L51, L53 - where the first copybook puts the upper-case letter first. The
-    lists are carried in the order declared.
+    Its 88-levels put the lower-case letter first throughout - L41, L42, L43, L51,
+    L53 - where the first copybook puts the upper-case letter first. The lists are
+    carried in the order declared.
     """
 
     COBOL_DICTIONARY_KEY: ClassVar[str] = "Invoice-Header.Invoice-Header#21"
@@ -1392,21 +1312,23 @@ class IhInvoiceHeader:
 
 @dataclass(slots=True, kw_only=True)
 class IlInvoiceLine:
-    """`01  Invoice-Line  redefines WS-PInvoice-Record.     *> 75 bytes
-    06/05/17, 74 bytes 22/12/11` [copybooks/plwspinv2.cob:L56].
+    """The invoice-line view over the shared buffer.
 
-    The second redefinition - one invoice line read out of the shared buffer.
-    The record's own descriptor carries `redefines` "WS-PInvoice-Record", as
-    the COBOL writes it on the `01`-level and nowhere else.
+    `01  Invoice-Line  redefines WS-PInvoice-Record.     *> 75 bytes 06/05/17,
+    74 bytes 22/12/11` [copybooks/plwspinv2.cob:L56].
 
-    Summing its declared fields gives 75, which matches the first figure in
-    its own comment and not the second, and it redefines a buffer that sums to
-    100. What the compiled program finds past byte 75 of this view is not
-    something this module decides.
+    The second redefinition. The record's own descriptor carries `redefines`
+    "WS-PInvoice-Record", as the COBOL writes it on the `01`-level and nowhere
+    else.
 
-    Unlike `IlInvoiceLineBody` there is no `OCCURS` and no `il-Key` group: the
-    two key members sit flat at level 03. Both `filler pic xx` runs are here,
-    and the description is 24 characters, as in the other copybook.
+    Summing its declared fields gives 75, which matches the first figure in its own
+    comment and not the second, and it redefines a buffer that sums to 100. What
+    the compiled program finds past byte 75 of this view is not something this
+    module decides.
+
+    Unlike `IlInvoiceLineBody` there is no `OCCURS` and no `il-Key` group: the two
+    key members sit flat at level 03. Both `filler pic xx` runs are here, and the
+    description is 24 characters, as in the other copybook.
     """
 
     COBOL_DICTIONARY_KEY: ClassVar[str] = "Invoice-Line.Invoice-Line#56"

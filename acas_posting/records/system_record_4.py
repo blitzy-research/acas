@@ -3,25 +3,21 @@
 One module, one copybook, field for field. `SystemRecord4` and its two
 subordinate groups mirror the 32 lines of `copybooks/wssys4.cob` exactly:
 twenty scaled money items in two ledger blocks, then a 904-character
-FILLER that pads the layout to the 1024 bytes the copybook's own header
-states. Nothing is added, nothing is dropped, nothing is renamed, and no
-storage metadata is typed by hand - every field's description is looked
-up in the generated data dictionary (rule R-5).
-
-Agent Action Plan section 0.4.1.3 sets the mandate for this folder: every
-module is a CREATE from its copybook; each 03 and 05 item becomes a
-dataclass attribute whose descriptor is looked up in the generated
-dictionary; and an oddity in the frozen source is preserved rather than
-put right. Section 0.8.1 fixes the shape - "Plain modules and
-dataclasses; no ORM entity layer." Rule R-3 names this very copybook when
+FILLER padding the layout to the 1024 bytes the copybook's own header
+states [copybooks/wssys4.cob:L6]. Rule R-3 names this very copybook when
 it states the folder rule: "The 27 record modules mirror their copybooks
 field for field with nothing added, preserving even the misnamings - the
 two spare fields keep their Sales prefix inside the Purchase group
 [copybooks/wssys4.cob]."
 
-The frozen COBOL is read as the specification and never modified. This
-module executes, embeds and shells out to nothing: it runs on a host with
-no COBOL compiler and no COBOL runtime present (rule R-1).
+`acas_posting/records/__init__.py` sets out the conventions every record
+module follows - descriptors looked up in the generated dictionary rather
+than typed by hand (rule R-5), the six numeric storage classes, exact
+decimals under rule R-2, the two permitted imports, and condition names
+living in `acas_posting.cobol.condition_names`. The frozen COBOL is read
+as the specification and never modified, and this module executes, embeds
+and shells out to nothing (rule R-1). Only what is specific to this
+record is set out below.
 
 WHERE THIS RECORD SITS
 ----------------------
@@ -38,52 +34,46 @@ The entity-to-table spine of Agent Action Plan section 0.2.1.1::
 
 The bridge declares its table and host-variable group in an embedded
 directive, `BASE=ACASDB` with `TABLE=SYSTOT-REC,HV`
-[common/sys4MT.scb:L306-L309], materialises the group as `TD-SYSTOT-REC`,
-COPYs this copybook at [common/sys4MT.cbl:L346], loads the host variables
-from the record in `bb000-HV-Load` [common/sys4MT.cbl:L760-L790] and
-unloads them back in `bb100-UnloadHVs` [common/sys4MT.cbl:L794-L823].
-That bridge, not the copybook, defines the record-layout to table mapping
-for this migration - it is the data dictionary for this migration, as the
-generated artifact's own `meta().authority` line states.
+[common/sys4MT.scb:L306-L309], materialises the group as `TD-SYSTOT-REC`
+[common/sys4MT.cbl:L314-L335], COPYs this copybook at
+[common/sys4MT.cbl:L346], loads the host variables from the record in
+`bb000-HV-Load` [common/sys4MT.cbl:L760-L790] and unloads them back in
+`bb100-UnloadHVs` [common/sys4MT.cbl:L794-L823]. That bridge, not the
+copybook, is the data dictionary for this migration, as the generated
+artifact's own `meta().authority` line states.
 
 THE COPYBOOK, IN FULL
 ---------------------
-Every item, with its locator, in declaration order. The two `03` group
-headers each carry `comp-3`; not one of the twenty `05` children carries
-a USAGE clause of its own::
+Three `03` items, two of them group headers carrying `comp-3`::
 
     L8   01  System-Record-4.
     L9       03  Sales-Ledger-Data                       comp-3.
-    L10          05  sl-os-bal-last-month        pic s9(8)v99.
-    L11          05  sl-os-bal-this-month        pic s9(8)v99.
-    L12          05  sl-invoices-this-month      pic s9(8)v99.
-    L13          05  sl-credit-notes-this-month  pic s9(8)v99.
-    L14          05  sl-variance                 pic s9(8)v99.
-    L15          05  sl-credit-deductions        pic s9(8)v99.
-    L16          05  sl-cn-unappl-this-month     pic s9(8)v99.
-    L17          05  sl-payments                 pic s9(8)v99.
-    L18          05  sl4-spare1                  pic s9(8)v99.
-    L19          05  sl4-spare2                  pic s9(8)v99.
     L20      03  Purchase-Ledger-Data                    comp-3.
-    L21          05  pl-os-bal-last-month        pic s9(8)v99.
-    L22          05  pl-os-bal-this-month        pic s9(8)v99.
-    L23          05  pl-invoices-this-month      pic s9(8)v99.
-    L24          05  pl-credit-notes-this-month  pic s9(8)v99.
-    L25          05  pl-variance                 pic s9(8)v99.
-    L26          05  pl-credit-deductions        pic s9(8)v99.
-    L27          05  pl-cn-unappl-this-month     pic s9(8)v99.
-    L28          05  pl-payments                 pic s9(8)v99.
-    L29          05  sl4-spare3                  pic s9(8)v99.  <- A-20
-    L30          05  sl4-spare4                  pic s9(8)v99.  <- A-20
-    L31      03  filler                          pic x(904).
+    L31      03  filler                      pic x(904).
+
+Each group holds ten `05` children and every one is `pic s9(8)v99` with
+no USAGE clause of its own. Rows 1 to 8 are the `sl-` and `pl-` forms of
+one stem; rows 9 and 10 are where the naming breaks, and that break is
+anomaly A-20::
+
+    sales  purch   Sales group name            Purchase group name
+    L10    L21     sl-os-bal-last-month        pl-os-bal-last-month
+    L11    L22     sl-os-bal-this-month        pl-os-bal-this-month
+    L12    L23     sl-invoices-this-month      pl-invoices-this-month
+    L13    L24     sl-credit-notes-this-month  pl-credit-notes-this-month
+    L14    L25     sl-variance                 pl-variance
+    L15    L26     sl-credit-deductions        pl-credit-deductions
+    L16    L27     sl-cn-unappl-this-month     pl-cn-unappl-this-month
+    L17    L28     sl-payments                 pl-payments
+    L18    L29     sl4-spare1                  sl4-spare3    <- A-20
+    L19    L30     sl4-spare2                  sl4-spare4    <- A-20
 
 WHO WRITES THIS RECORD - THE NINE PERIOD-TOTAL SITES
 ----------------------------------------------------
 Agent Action Plan section 0.6.4: "Period totals are written at exactly
 nine sites, all inside the Sales and Purchase programs, and all in scope.
 They are the sole writers of the totals record, which makes the
-period-end-totals scenario verifiable by inspecting one table." A reader
-of this record needs to know exactly who moves its figures, so all nine
+period-end-totals scenario verifiable by inspecting one table." All nine
 are named here, each with the field it reaches::
 
     sl-invoices-this-month      add ws-inv-amt   [sales/sl055.cbl:L675]
@@ -96,13 +86,13 @@ are named here, each with the field it reaches::
     pl-cn-unappl-this-month     add work-b       [purchase/pl060.cbl:L628]
     pl-payments                 add oi-paid      [purchase/pl100.cbl:L396]
 
-Two of the nine are MULTI-TARGET adds - `add oi-paid to t-paid
-sl-payments` [sales/sl100.cbl:L404] and its purchase counterpart
+Two are MULTI-TARGET adds - `add oi-paid to t-paid sl-payments`
+[sales/sl100.cbl:L404] and its purchase counterpart
 [purchase/pl100.cbl:L396] feed a program-local total and the period total
-from one statement, so a migration that split them into two adds would
-still have to keep both receiving fields.
+from one statement, so splitting them into two adds would still have to
+keep both receiving fields.
 
-Nine sites reach nine distinct fields, which leaves ELEVEN of the twenty
+Nine sites reach nine distinct fields, leaving ELEVEN of the twenty
 untouched by the migrated cycle: both sales and both purchase
 outstanding-balance figures, both variances, `pl-credit-deductions`, and
 all four spares. Two consequences worth carrying:
@@ -115,31 +105,31 @@ all four spares. Two consequences worth carrying:
       these fields are accumulated and never cleared.
     * `sl-credit-deductions` is accumulated [sales/sl060.cbl:L641] while
       `pl-credit-deductions` never is - the purchase posting program has
-      no counterpart statement, and the only other mention of the field
-      in the purchase tree is commented out [purchase/pl120.cbl:L900].
-      The asymmetry is the specification; it is not evened up here.
+      no counterpart statement, and the field's only other mention in the
+      purchase tree is commented out [purchase/pl120.cbl:L900]. The
+      asymmetry is the specification; it is not evened up here.
 
-The period-end-totals scenario turns on this one table, so
-`tests/scenarios/test_period_end_totals_update.py` and its scenario
-definition under `harness/scenarios/` are what prove these nine sites
-land the same figures as the compiled programs.
+The period-end-totals scenario turns on this one table alone, so the
+scenario test and its definition, both written at a later boundary, are
+what will establish that these nine sites land the compiled programs'
+figures.
 
 HOW IT REACHES A PROGRAM
 ------------------------
 By LINKAGE, never by a file read of its own. The record is the third
 parameter of the Sales and Purchase posting shape - `procedure division
 using ws-calling-data system-record system-record-4 to-day file-defs`
-[sales/sl055.cbl:L269-L275] - which is the "fourth system record" that
-Agent Action Plan section 0.1.1 notes the Sales and Purchase families add
-to the General Ledger shape. Exactly six in-scope programs COPY the
-copybook and take that parameter: [sales/sl055.cbl:L269],
-[sales/sl060.cbl:L393], [sales/sl100.cbl:L267],
-[purchase/pl055.cbl:L234], [purchase/pl060.cbl:L335] and
-[purchase/pl100.cbl:L260].
+[sales/sl055.cbl:L271-L275] - the "fourth system record" that Agent
+Action Plan section 0.1.1 notes those two families add to the General
+Ledger shape. Exactly six in-scope programs COPY the copybook and take
+that parameter: [sales/sl055.cbl:L269], [sales/sl060.cbl:L393],
+[sales/sl100.cbl:L267], [purchase/pl055.cbl:L234],
+[purchase/pl060.cbl:L335] and [purchase/pl100.cbl:L260].
 
 A grep for `System-Record-4` also finds a one-character item of the same
-name in the four General Ledger programs, for instance
-[general/gl070.cbl:L135]. That is NOT this record: it is a `pic x` stub
+name in four General Ledger programs - [general/gl051.cbl:L139],
+[general/gl070.cbl:L135], [general/gl072.cbl:L138] and
+[general/gl080.cbl:L197]. That is NOT this record: each is a `pic x` stub
 inside `01 Dummies-4-Unused-ACAS-FH-Calls.`, the block declared purely so
 the linker resolves the facade copybook's full verb set, which Agent
 Action Plan section 0.4.3 maps to nothing. The six Sales and Purchase
@@ -153,42 +143,27 @@ GROUP-USAGE INHERITANCE - THE CORRECTNESS HINGE OF THIS LAYOUT
 ON THE GROUP HEADER. All twenty `05` children are written as
 `pic s9(8)v99` with no USAGE clause of their own, so all twenty INHERIT
 COMP-3 and are PACKED DECIMAL - six bytes each, sign in the low nibble.
-
 Reading a usage off the PICTURE line alone would class every one of them
-as zoned DISPLAY and every stored value would be wrong. The generated
-dictionary says so in each of the twenty entries' notes: "The item
-carries no USAGE clause of its own; it inherits COMP-3 from the group
-Sales-Ledger-Data declared at copybooks/wssys4.cob:L9. Reading usage from
-the picture line alone would class it as DISPLAY."
+as zoned DISPLAY and every stored value would be wrong.
 
 Because the descriptors are looked up rather than transcribed, that fact
-arrives as data: every one of the twenty reports `usage` COMP-3,
-`usage_declared_at` GROUP and `usage_inherited_from` naming its group
-header. Nothing in this module re-derives it.
+arrives as data: all twenty report `usage` COMP-3, `usage_declared_at`
+GROUP and `usage_inherited_from` naming their own group header, and each
+entry's notes spell out the trap - "Reading usage from the picture line
+alone would class it as DISPLAY." Nothing here re-derives it.
 
-All twenty are signed with two decimal places and ten digits, which the
-schema mirrors as `decimal(10,2) NOT NULL` [mysql/ACASDB.sql:L1378-L1397].
-Signedness is a clean pass-through here - the copybook signs them, the
-bridge host variable signs them and the column is not unsigned - unlike
-the narrowing the sales ledger record suffers at the bridge. Drift in
-this system is specific, not systemic, which is why it is read per field
-from the dictionary and never assumed either way.
+All twenty are signed with two decimal places and ten digits, mirrored by
+the schema as `decimal(10,2) NOT NULL` [mysql/ACASDB.sql:L1378-L1397].
+Signedness is a clean pass-through - the copybook signs them, the host
+variable signs them and the column is not unsigned - unlike the narrowing
+the sales ledger record suffers at the bridge. Drift here is specific,
+not systemic, which is why it is read per field and never assumed.
 
-TWENTY MONEY FIELDS, ALL EXACT DECIMALS (RULE R-2)
---------------------------------------------------
-Rule R-2: "No accounting value may pass through a binary floating-point
-type at any point - not in computation, not in storage, not in
-transport." Every attribute of the two ledger groups is money, so every
-one is a `decimal.Decimal` carried at the scale its copybook declares,
-defaulting to `Decimal("0.00")` - never a binary approximation, never an
-integer zero that would drop the scale. The carrier is not chosen by
-reading what a field "means": it is the `python_storage` the dictionary
-holds, so this module and the arithmetic layer cannot disagree about what
-holds a value.
-
-This is a period-totals record whose one table is the entire verification
-surface of a mandated scenario. A single inexact carrier here would
-corrupt exactly the figures that scenario compares.
+Every attribute of the two groups is money, so every one is a
+`decimal.Decimal` at the declared scale, defaulting to `Decimal("0.00")`
+- never an integer zero that would drop the scale (rule R-2). The carrier
+is the `python_storage` the dictionary holds, so this module and the
+arithmetic layer cannot disagree about what holds a value.
 
 ANOMALY A-20, REPRODUCED HERE AND NOT PUT RIGHT (RULE R-4)
 ----------------------------------------------------------
@@ -196,45 +171,35 @@ THIS MODULE IS THE REPRODUCING SITE FOR ANOMALY A-20, entry 20 of the
 register in Agent Action Plan section 0.6.7: "Two spare fields carry the
 Sales prefix inside the Purchase group" [copybooks/wssys4.cob].
 
-Concretely: `sl4-spare3` [copybooks/wssys4.cob:L29] and `sl4-spare4`
-[copybooks/wssys4.cob:L30] are declared INSIDE `03 Purchase-Ledger-Data`
-[copybooks/wssys4.cob:L20], among eight `pl-` siblings, while the Sales
-group's own spares are `sl4-spare1` [copybooks/wssys4.cob:L18] and
-`sl4-spare2` [copybooks/wssys4.cob:L19]. The maintainer's misnaming
-carries all the way through: the bridge host variable is `HV-SL4-SPARE3`
+As the table above shows, `sl4-spare3` and `sl4-spare4`
+[copybooks/wssys4.cob:L29-L30] sit INSIDE `03 Purchase-Ledger-Data`
+[copybooks/wssys4.cob:L20] among eight `pl-` siblings. The misnaming
+carries all the way through: the host variable is `HV-SL4-SPARE3`
 [common/sys4MT.cbl:L334] and the column is `SL4-SPARE3`
-[mysql/ACASDB.sql:L1396].
-
-So `PurchaseLedgerData` ends with `sl4_spare3` and `sl4_spare4`, keeping
-the Sales prefix, and their descriptors carry the verbatim COBOL names
-`sl4-spare3` and `sl4-spare4` with `parent_group` `Purchase-Ledger-Data`.
-Renaming them to a purchase prefix, or moving them into
-`SalesLedgerData` to make the names agree, would repair a defect that
-rule R-4 makes part of the specification: "A defect reproduced is
-correct; a defect fixed is a failure." The generated dictionary tags both
-entries `A-20` and tags no other entry of this table, so the artifact
-corroborates the ownership; `docs/migration/anomaly-log.md` cites this
-module.
-
-Recorded alongside it, from the copybook header: "Record size 1024 bytes
-to match system-record 07/11/10" [copybooks/wssys4.cob:L6]. The layout is
-padded to match a different record's size, and the 904-byte FILLER at
-[copybooks/wssys4.cob:L31] exists for no other reason.
+[mysql/ACASDB.sql:L1396]. So `PurchaseLedgerData` ends with `sl4_spare3`
+and `sl4_spare4`, their descriptors carrying the verbatim COBOL names with
+`parent_group` `Purchase-Ledger-Data`. Renaming them, or moving them into
+`SalesLedgerData` to make the names agree, would repair a defect that rule
+R-4 makes part of the specification: "A defect reproduced is correct; a
+defect fixed is a failure." The generated dictionary tags both entries
+`A-20` and tags no other entry of this table.
 
 THE FILLER, AND THE 1024 BYTES IT EXISTS TO REACH
 -------------------------------------------------
-The FILLER is modelled as a NAMED attribute, `SystemRecord4.filler`,
-defaulting to spaces at a width taken from its own descriptor. Two
-reasons for naming it rather than leaving it implicit: the copybook
-declares it as a real `03` data item, so a layout that dropped it would
-no longer be the record; and the byte arithmetic only closes with it
-present. Spaces rather than an empty string because spaces are what those
-904 bytes hold in the record, and because the width is then visible in
-the value as well as in the descriptor.
+The copybook header states "Record size 1024 bytes to match system-record
+07/11/10" [copybooks/wssys4.cob:L6]: the layout is padded to match a
+DIFFERENT record's size, and the 904-byte FILLER
+[copybooks/wssys4.cob:L31] exists for no other reason.
 
-It reaches no database column. The dictionary holds it as a copybook-only
-entry whose bridge and column views are both absent, and its descriptor
-reports `is_filler` true, so nothing about it appears in a table dump.
+It is modelled as a NAMED attribute, `SystemRecord4.filler`, defaulting
+to spaces at a width taken from its own descriptor - named rather than
+implicit because the copybook declares it as a real `03` data item, so a
+layout that dropped it would no longer be the record, and because the
+byte arithmetic only closes with it present. Spaces rather than an empty
+string because spaces are what those 904 bytes hold. It reaches no
+database column: the dictionary holds it as a copybook-only entry whose
+bridge and column views are both absent, and its descriptor reports
+`is_filler` true, so nothing about it appears in a table dump.
 
 THE COLUMN THE COPYBOOK DOES NOT DECLARE
 ----------------------------------------
@@ -243,19 +208,19 @@ difference is the primary key `LEDGER-TOTALS-REC-KEY`, and it is NOT a
 field of this record: the dictionary records it present in the bridge and
 in the schema and ABSENT FROM EVERY COPYBOOK, with its value produced at
 the bridge by `move 1 to HV-LEDGER-TOTALS-REC-KEY`
-[common/sys4MT.cbl:L769] - a hard-coded singleton key on a
-`tinyint(1) unsigned NOT NULL PRIMARY KEY` column
-[mysql/ACASDB.sql:L1377]. Its entry adds that the host variable is never
-moved back into the record after a read, so no value reaches a caller
-through it.
+[common/sys4MT.cbl:L769] - a hard-coded singleton on a
+`tinyint(1) unsigned NOT NULL` column [mysql/ACASDB.sql:L1377] that the
+table names as its PRIMARY KEY [mysql/ACASDB.sql:L1398]. Its entry adds
+that the host variable is never moved back into the record after a read,
+so no value reaches a caller through it.
 
 No attribute is created for it. Reproducing a bridge-derived column
-belongs at the bridge boundary, in `acas_posting/dal/acas000_system.py`,
-exactly as the three date components of the internal IRS posting table
-belong to `acas_posting/dal/acasirsub4_irs_posting.py`. Asking
-`FieldDescriptor.from_dictionary_key` for it raises
-`BridgeOnlyFieldError`, by design, because a bridge-only column has no
-COBOL-side storage for a descriptor to describe.
+belongs at the bridge boundary, in the `acas000` handler module a later
+boundary writes, exactly as the three date components of the internal IRS
+posting table belong to the `acasirsub4` handler module. Asking
+`FieldDescriptor.from_dictionary_key` for it raises `BridgeOnlyFieldError`
+by design, because a bridge-only column has no COBOL-side storage for a
+descriptor to describe::
 
     20 copybook fields  +  1 bridge-only key  =  the table's 21 columns
 
@@ -273,92 +238,62 @@ COPYBOOK view, because a record layout is what a COBOL program
 manipulates; the conversion the bridge performs on its way to SQL is
 reproduced at the bridge boundary by the handler module. Each
 descriptor's `drift()` offers all three views untouched, and rule R-4
-forbids picking a winner between them. There is deliberately no second,
-tidier view of any field in this module.
+forbids picking a winner between them.
 
 DESCRIPTOR LOOKUP AND ORDERING (RULES R-5 AND R-6)
 --------------------------------------------------
-Agent Action Plan section 0.8.1 is a directive rather than a preference:
-the dictionary is generated from the bridge BEFORE record definitions are
-written, and every Python field definition cites its entry. Section 0.3.3
-gives the reason - "Field metadata is therefore derived, not transcribed,
-which eliminates an entire class of transcription error across several
-hundred fields."
-
-So no key is guessed here. `_dictionary_keys` asks
+No key is guessed here. `_dictionary_keys` asks
 `loader.entries_for_table("SYSTOT-REC")` and
 `loader.entries_for_copybook_record("System-Record-4")` for this record's
 entries and reads each entry's own `copybook.name`, which is what makes
-the module immune to the name drift that appears elsewhere in this system
-- a key's left side is the TABLE name and its right side is the COLUMN
-name, and the two differ from the copybook field name often enough that
-composing a key by rule would be a trap. On this table the twenty column
-names happen to be the upper-case copybook names, and that is an
-observation from the artifact, not an assumption built into the code.
+the module immune to the name drift elsewhere in this system - a key's
+left side is the TABLE name and its right side is the COLUMN name, and
+the two differ from the copybook field name often enough that composing a
+key by rule would be a trap. On this table the twenty column names happen
+to be the upper-case copybook names, and that is read from the artifact
+rather than assumed by the code.
 
-Each class publishes two class-level views, both tuples or single values
-fixed at import so two runs agree (rule R-6):
+Each class publishes two class-level views, both fixed at import so two
+runs agree (rule R-6): `FIELDS`, the descriptors of the items THAT class
+declares in copybook declaration order, and `DESCRIPTOR`, the descriptor
+of the group or record item itself - so the two `comp-3` group headers at
+L9 and L20 cite their own entries too.
 
-    FIELDS      the descriptors of the items THIS class declares, in
-                copybook declaration order
-    DESCRIPTOR  the descriptor of the group or record item itself, so the
-                two `comp-3` group headers at L9 and L20 cite their own
-                entries too
-
-`FIELDS` order is DERIVED, not transcribed: the children of a group are
-ordered by the declaration line in each descriptor's `source_locator`.
-That is what `loader.entries_for_copybook_record` itself directs a caller
-to do - for a table-backed record it returns document order, which is
-column-ordinal order first and copybook-only fields after, and its
+`FIELDS` order is DERIVED, not transcribed: a group's children are
+ordered by the declaration line in each descriptor's `source_locator`,
+which is what `loader.entries_for_copybook_record` itself directs a caller
+to do - for a table-backed record it returns document order, and its
 docstring notes that "A caller that needs strict copybook declaration
 order has each entry's own `copybook.source` line to order by". Ordering
-that way reproduces the copybook line for line, L8 through L31, and it
-means `FIELDS` is an independent witness to the hand-written attribute
-order rather than a restatement of it.
+that way reproduces the copybook line for line, L8 through L31, so
+`FIELDS` is an independent witness to the hand-written attribute order
+rather than a restatement of it. For provenance, `descriptor.cite()`
+surfaces the loader's copybook/bridge/column locator string and is never
+reimplemented here; the full mapping is recorded in the traceability
+document a later boundary writes.
 
-For a field's provenance, `descriptor.cite()` surfaces the loader's
-compact three-locator string - copybook field, bridge host variable,
-MySQL column - and is never reimplemented here. The full mapping is
-recorded in `docs/migration/traceability.md`.
+LAYERING, DETERMINISM AND WHAT THIS MODULE DOES NOT DO
+------------------------------------------------------
+This is a leaf module under the import contract of Agent Action Plan
+section 0.4.3: `dal`, `programs`, `cli` and every other module of this
+package are forbidden - including `records/system_record.py`, despite the
+copybook header's mention of `system-record`. `cobol.arithmetic` is the
+live temptation in a module full of accumulators, and it is not imported:
+the nine posting sites accumulate, this record only stores. The arithmetic
+test tier "imports only `cobol` and `records` and touches no database", so
+a single reach into `dal` would drag a driver into that tier.
 
-LAYERING - THIS IS A LEAF MODULE
---------------------------------
-The per-directory import contract of Agent Action Plan section 0.4.3
-grants `records/*.py` two internal imports and forbids the rest, "this
-keeps the record layer a leaf":
-
-    permitted   acas_posting.cobol.field, acas_posting.dictionary.loader,
-                plus the standard library
-    forbidden   dal, programs, cli, clock, dates, workfiles,
-                cobol.arithmetic, cobol.move, cobol.picture, cobol.usage,
-                cobol.condition_names, cobol.sortverb,
-                dictionary.generate, the comparison oracle in its sibling
-                tree, and any other module of this package - including
-                `records/system_record.py`, despite the copybook header's
-                mention of `system-record`
-
-`cobol.arithmetic` is the live temptation in a module full of
-accumulators, and it is not imported: the nine posting sites accumulate,
-this record only stores. The arithmetic test tier "imports only `cobol`
-and `records` and touches no database, so it runs anywhere", and a single
-reach into `dal` would drag a database driver into that tier.
-
-DETERMINISM (RULE R-6)
-----------------------
 Field order is the copybook's declaration order, so this module can be
 set beside `copybooks/wssys4.cob` and diffed by eye. Fixed collections
 are tuples. Nothing here consults a clock, draws an unpredictable value
 or inspects the process environment, and the only import-time work is the
-data dictionary's own lazy cached read.
+dictionary's own lazy cached read (rule R-6). Note that although eight
+field names say "this month" or "last month", NO field derives a month
+from anything: the figures are accumulated by the posting programs and
+the period boundary comes from `SYSTEM-REC`. The roll-over that gives
+"last month" its meaning is the out-of-scope driver's move at
+[common/xl150.cbl:L1726].
 
-Note in particular that although eight field names say "this month" or
-"last month", NO field derives a month from anything: the figures are
-accumulated by the posting programs and the period boundary comes from
-`SYSTEM-REC`. The roll-over that gives "last month" its meaning is the
-out-of-scope driver's move at [common/xl150.cbl:L1726].
-
-WHAT THIS MODULE DELIBERATELY DOES NOT DO (RULE R-3)
-----------------------------------------------------
 Rule R-3: "The migration may not add validation logic, add fields, or
 alter the database schema, and must not introduce concurrent execution."
 Here that means exactly twenty money attributes plus the FILLER - no
@@ -366,11 +301,11 @@ more, no fewer - and:
 
     * no derived figure of any kind. `sl-variance` and `pl-variance` are
       STORED fields, written by nothing in the migrated cycle and rolled
-      by the out-of-scope driver; computing either one would invent
-      behaviour the compiled programs do not have.
+      by the out-of-scope driver; computing either would invent behaviour
+      the compiled programs do not have.
     * no accumulate, add-invoice or roll-up helper. That logic belongs to
-      the nine sites in `acas_posting/programs/sl055_*`, `sl060_*`,
-      `sl100_*`, `pl055_*`, `pl060_*` and `pl100_*`.
+      the nine sites above, in the six Sales and Purchase program modules
+      a later boundary writes.
     * no post-initialisation hook, no padding, no quantising and no
       checks on assignment. `acas_posting/cobol/move.py` and
       `acas_posting/cobol/arithmetic.py` own those semantics; a store
@@ -402,9 +337,7 @@ __all__: Final[tuple[str, ...]] = (
 )
 
 
-# =============================================================================
 #  THE NAMES THE FROZEN SOURCES GIVE THIS LAYOUT
-# =============================================================================
 
 # The copybook path, the 01-level record name, the table name and the two
 # group headers, each spelled the way its own source spells it. These are the
@@ -423,9 +356,7 @@ _SALES_GROUP: Final[str] = "Sales-Ledger-Data"
 _PURCHASE_GROUP: Final[str] = "Purchase-Ledger-Data"
 
 
-# =============================================================================
 #  KEYS LOOKED UP, NEVER GUESSED  (rule R-5)
-# =============================================================================
 
 
 def _dictionary_keys() -> dict[str, str]:
@@ -437,8 +368,8 @@ def _dictionary_keys() -> dict[str, str]:
     column name drifts from the copybook field name often enough
     elsewhere in this system that a composed key would be a trap. Here
     the twenty column names turn out to be the upper-case copybook
-    names - an observation read off the artifact rather than an
-    assumption built into this module.
+    names - read from the artifact rather than an assumption built into
+    this module.
 
     Two accessors are needed because the record spans two key spaces.
     `entries_for_table` yields the twenty column-mapped entries keyed
@@ -571,11 +502,9 @@ def _children_of(group: str) -> tuple[FieldDescriptor, ...]:
 # The FILLER at [copybooks/wssys4.cob:L31] and the width it pads the record
 # to. The width is DERIVED from the descriptor rather than written here, so
 # the value and the description cannot drift apart. The arithmetic it closes:
-#
 #     20 money items x 6 bytes each   = 120   (s9(8)v99 comp-3: ten digits
 #                                              pack into six bytes)
 #      1 FILLER      x 904 bytes      = 904
-#                                      -----
 #                                       1024   "Record size 1024 bytes to
 #                                               match system-record"
 #                                              [copybooks/wssys4.cob:L6]
@@ -583,9 +512,7 @@ _FILLER: Final[FieldDescriptor] = _describe("filler")
 _FILLER_SPACES: Final[str] = " " * _FILLER.byte_length
 
 
-# =============================================================================
 #  THE SALES HALF  [copybooks/wssys4.cob:L9-L19]
-# =============================================================================
 
 
 @dataclass(slots=True)
@@ -684,9 +611,7 @@ class SalesLedgerData:
     sl4_spare2: Decimal = Decimal("0.00")
 
 
-# =============================================================================
 #  THE PURCHASE HALF  [copybooks/wssys4.cob:L20-L30]  -  HOLDS ANOMALY A-20
-# =============================================================================
 
 
 @dataclass(slots=True)
@@ -775,29 +700,21 @@ class PurchaseLedgerData:
     #   pl-payments` [purchase/pl100.cbl:L396]
     pl_payments: Decimal = Decimal("0.00")
 
-    # sl4-spare3  pic s9(8)v99  comp-3 inherited from
-    # Purchase-Ledger-Data  [copybooks/wssys4.cob:L29]
-    #
-    #   ANOMALY A-20, REPRODUCED AND NOT PUT RIGHT. The maintainer
-    #   declared this spare with the SALES prefix `sl4-` inside the
-    #   PURCHASE group [copybooks/wssys4.cob:L20], among eight `pl-`
-    #   siblings, while the Sales group's own spares are `sl4-spare1`
-    #   [copybooks/wssys4.cob:L18] and `sl4-spare2`
-    #   [copybooks/wssys4.cob:L19]. The misnaming carries through the
-    #   whole chain: host variable `HV-SL4-SPARE3`
-    #   [common/sys4MT.cbl:L334] and column `SL4-SPARE3`
-    #   [mysql/ACASDB.sql:L1396]. Rule R-4 makes it part of the
-    #   specification - a defect reproduced is correct, a defect fixed is
-    #   a failure - so the name stays exactly as he wrote it, in this
-    #   group, and is never given a purchase prefix nor moved into
-    #   `SalesLedgerData` to make the names agree. The dictionary tags
-    #   this field `A-20` too; `docs/migration/anomaly-log.md` registers
-    #   it against this module.
+    # sl4-spare3  pic s9(8)v99  comp-3 inherited from Purchase-Ledger-Data
+    # [copybooks/wssys4.cob:L29]
+    # ANOMALY A-20, REPRODUCED AND NOT PUT RIGHT. The maintainer declared this spare with the
+    # SALES prefix `sl4-` inside the PURCHASE group [copybooks/wssys4.cob:L20], among eight
+    # `pl-` siblings, while the Sales group's own spares are `sl4-spare1` [:L18] and
+    # `sl4-spare2` [:L19]. The misnaming carries through the whole chain: host variable
+    # `HV-SL4-SPARE3` [common/sys4MT.cbl:L334] and column `SL4-SPARE3` [mysql/ACASDB.sql:L1396].
+    # Rule R-4 makes it part of the specification - a defect reproduced is correct, a defect
+    # fixed is a failure - so the name stays exactly as he wrote it, in this group, and is never
+    # given a purchase prefix nor moved into `SalesLedgerData` to make the names agree. The
+    # dictionary tags this field `A-20` too.
     sl4_spare3: Decimal = Decimal("0.00")
 
     # sl4-spare4  pic s9(8)v99  comp-3 inherited from
     # Purchase-Ledger-Data  [copybooks/wssys4.cob:L30]
-    #
     #   ANOMALY A-20, REPRODUCED AND NOT PUT RIGHT - the second of the
     #   pair, on the same terms as `sl4_spare3` above. Sales prefix,
     #   Purchase group, kept: host variable `HV-SL4-SPARE4`
@@ -806,9 +723,7 @@ class PurchaseLedgerData:
     sl4_spare4: Decimal = Decimal("0.00")
 
 
-# =============================================================================
 #  THE RECORD  [copybooks/wssys4.cob:L8-L31]
-# =============================================================================
 
 
 @dataclass(slots=True)

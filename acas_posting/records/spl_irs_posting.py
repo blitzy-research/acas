@@ -26,23 +26,17 @@ three can never collapse into one another.
 WHAT THIS FILE IS
 =================
 A CREATE from `copybooks/wspost-irs.cob`, a 26-line copybook, under the
-mandate the Agent Action Plan gives this folder in section 0.4.1.3, verbatim:
-
-    "Every module is a CREATE from its copybook, translating each 05/03 field
-    to a dataclass attribute whose descriptor is looked up in the generated
-    dictionary."
-
-- and, in the same sentence, the instruction that oddities in the source are
-preserved rather than repaired. Its binding shape, from section 0.8.1:
-
-    "Plain modules and dataclasses; no ORM entity layer."
-
-So: two plain dataclasses, ten attributes and two attributes, nothing added.
+mandate section 0.4.1.3 gives this folder - "translating each 05/03 field to
+a dataclass attribute whose descriptor is looked up in the generated
+dictionary", with oddities in the source preserved rather than repaired - and
+in the shape section 0.8.1 requires, "plain modules and dataclasses; no ORM
+entity layer". So: two plain dataclasses, ten attributes and two attributes,
+nothing added.
 
 THE COPYBOOK, ITEM BY ITEM
 ==========================
-Read and confirmed line by line against the frozen source; the locators below
-are this module's own verification, not a transcription of the plan's:
+Read line by line against the frozen source; the locators below are counted
+from it rather than transcribed from the plan:
 
     01  WS-IRS-Posting-Record.                                     L13
         03  WS-IRS-Post-Key.                                       L14
@@ -66,13 +60,9 @@ key group live on `WsIrsPostKey`, which carries TWO. Eleven elementary items
 in total, ten columns, twelve descriptors.
 
 There is no FILLER in this copybook and no `88`-level condition name -
-verified, zero of each. None is invented here. In particular
-`WS-IRS-Post-Vat-Side` is tested against the bare literals `"CR"` and `"DR"`
-[irs/irs030.cbl:L1686], [irs/irs030.cbl:L1690], [irs/irs030.cbl:L1694],
-[irs/irs030.cbl:L1698] with no condition name behind them, and
-`WS-IRS-Vat-AC-Def` against bare `zero`, `31` and `32`
-[irs/irs030.cbl:L1682], [irs/irs030.cbl:L1685], [irs/irs030.cbl:L1693]. The
-absence is recorded; predicates for the literals belong to
+counted, zero of each - and none is invented here. The programs compare the
+VAT side and the VAT selector against bare literals instead, at the locators
+recorded on those two attributes below; predicates for literals belong to
 `acas_posting/cobol/condition_names.py`, which is where the `88`-levels that
 DO exist are modelled.
 
@@ -96,44 +86,38 @@ set - `move Batch to WS-IRS-Batch` and the ten moves after it
 and clears it at end of job [irs/irs030.cbl:L1715-L1724].
 
 NONE of that behaviour is implemented here. The fan-out test, the walk and the
-clear belong to `programs/sl060_invoice_posting.py`,
-`programs/sl100_cash_posting.py`, `programs/pl060_order_posting.py`,
-`programs/pl100_payment_posting.py`, `programs/irs030_posting.py` and
-`dal/acas008_spl_posting.py`. This file is a layout and nothing else.
+clear belong to the `sl060`, `sl100`, `pl060`, `pl100` and `irs030` program
+modules and to the `acas008` handler module. This file is a layout and
+nothing else.
 
 THE ENTITY SPINE
 ================
     entity facade   SPL-Posting
     handler         acas008          [common/acas008.cbl]
     bridge          slpostingMT      [common/slpostingMT.scb], [common/slpostingMT.cbl]
-    MySQL table     PSIRSPOST-REC    10 columns, primary key IRS-POST-KEY
+    MySQL table     PSIRSPOST-REC    10 columns [mysql/ACASDB.sql:L366-L378],
+                                     primary key IRS-POST-KEY - the column at
+                                     [:L367], the clause at [:L377]
     copybook        copybooks/wspost-irs.cob
 
 The bridge declares that pairing itself: `BASE=ACASDB` and
 `TABLE=PSIRSPOST-REC,HV` [common/slpostingMT.scb:L257-L260].
 
-THE MODULE NAME AND THE CLASS NAME DIFFER ON PURPOSE
-====================================================
-The FILE is `spl_irs_posting.py`, after the entity facade SPL-Posting and the
-Agent Action Plan's own file plan, which names it in section 0.3.1 as
-`spl_irs_posting.py  (copybooks/wspost-irs.cob - SIGN LEADING fields)`. The
-CLASS is `WsIrsPostingRecord`, after the COBOL `01`-name
-[copybooks/wspost-irs.cob:L13]. Neither name is bent towards the other:
-tracing by table leads to the file, tracing by record leads to the class.
+The FILE is named `spl_irs_posting.py` after the entity facade and section
+0.3.1's own file plan; the CLASS is `WsIrsPostingRecord` after the COBOL
+`01`-name [copybooks/wspost-irs.cob:L13]. Neither name is bent towards the
+other: tracing by table leads to the file, tracing by record to the class.
 
 SIGN LEADING - THE REASON THIS MODULE EXISTS
 ============================================
-Section 0.1.1 of the plan calls it "the easily-missed `DISPLAY` with `SIGN
-LEADING` form", and section 0.6.1 lists it among the six numeric storage
-classes that "must be modelled, because collapsing any of them changes stored
-values". Both money items here carry it [copybooks/wspost-irs.cob:L21],
-[copybooks/wspost-irs.cob:L25].
-
-No `SEPARATE` keyword is written, so the sign is leading and INCLUDED: it is
-overpunched on the high-order digit rather than occupying a byte of its own.
-Nine digits, two of them fractional, NINE bytes on the wire - not ten. The
-descriptor the dictionary holds says exactly that, and this module asserts
-nothing of its own about it:
+Section 0.1.1 calls it "the easily-missed `DISPLAY` with `SIGN LEADING`
+form", and section 0.6.1 lists it among the six numeric storage classes that
+"must be modelled, because collapsing any of them changes stored values".
+Both money items here carry it [copybooks/wspost-irs.cob:L21], [:L25]. No
+`SEPARATE` keyword is written, so the sign is leading and INCLUDED -
+overpunched on the high-order digit rather than occupying a byte of its own,
+nine digits in nine bytes on the wire, not ten. The dictionary's descriptor
+says exactly that, and this module asserts nothing of its own about it:
 
     usage DISPLAY - sign_position LEADING_INCLUDED - signed
     sign_clause_text "sign leading" - digits 9, integer_digits 7, scale 2
@@ -144,15 +128,11 @@ TWO SPELLINGS, AND THEY STAY TWO
     "sign leading"      [copybooks/wspost-irs.cob:L21] and [:L25]  <- here
     "sign is leading"   [copybooks/irswspost.cob:L14]  and [:L18]
 
-Both mean the same thing to the compiler. The TEXT differs, and
-`sign_clause_text` records the text, so the two are distinguishable in the
-dictionary and stay distinguishable here. Neither is rewritten to match the
-other and neither is emitted for both.
-
-A note on those locators: the plan cites the sibling's second clause at L19.
-It is at L18 - `copybooks/irswspost.cob` is 19 lines and L19 is its closing
-comment line. Verified by reading the file; recorded here because a wrong
-locator in a traceability document is a defect in the document.
+Both mean the same to the compiler; the TEXT differs, `sign_clause_text`
+records the text, and so the two stay distinguishable here. Neither is
+rewritten to match the other. The plan's own citation of the sibling's second
+clause is one line late, and the correction is recorded on the attribute it
+belongs to below.
 
 A census across every copybook puts this vocabulary at six clauses in total:
 `sign leading` four times - twice here, twice in the matching file definition
@@ -172,13 +152,10 @@ this record's are `9(5)`. Three posting records, three sign treatments, three
 widths. All three are reproduced as found; none is brought into line with the
 others.
 
-EVERY ITEM HERE IS ZONED DISPLAY
-================================
-This copybook declares no `COMP`, no `COMP-3` and no `binary-*` item. The
-record is zoned decimal and alphanumeric throughout, and it becomes binary
-ONLY at the bridge [common/slpostingMT.cbl:L266-L275]. That is a fact about
-where the conversion happens, and it is the reason the conversion is not
-performed in this file.
+Nothing in this copybook is `COMP`, `COMP-3` or `binary-*`: the record is
+zoned decimal and alphanumeric throughout, and it becomes binary ONLY at the
+bridge [common/slpostingMT.cbl:L266-L275]. That is a fact about where the
+conversion happens, and the reason it is not performed in this file.
 
 TYPE DISCIPLINE (RULE R-2)
 ==========================
@@ -194,13 +171,11 @@ point - not in computation, not in storage, not in transport.
     WS-IRS-Post-Vat-Side                    -> str, at the declared width
     WS-IRS-Post-Key                         -> group; holds no value itself
 
-Money defaults are `Decimal("0.00")`, at the scale the copybook declares.
-Integer defaults are `0`. Character defaults are spaces at the declared
-width, taken from the dictionary rather than typed here - which is what the
-bridge would write for an unset item, because its load paragraph begins
-`initialize TD-PSIRSPOST-REC` [common/slpostingMT.cbl:L1000] and every column
-of the table is declared NOT NULL. The carrier for each attribute is the one
-the dictionary names, never a reading of what the field "means".
+Money defaults are `Decimal("0.00")` at the declared scale, integers `0`, and
+characters spaces at the declared width - each taken from the dictionary
+rather than typed here, for the reason set out at `_spaces` below. The carrier
+for each attribute is the one the dictionary names, never a reading of what
+the field "means".
 
 DESCRIPTORS ARE LOOKED UP, NEVER TYPED IN (RULE R-5)
 ====================================================
@@ -219,74 +194,62 @@ error across several hundred fields."
 
 Accordingly not one picture, digit count, scale, sign position or storage
 class is written by hand below. Each attribute's `FieldDescriptor` comes from
-`FieldDescriptor.from_dictionary_key`, the principal path, and every key is
-read out of the generated artifact by `_entry_keys_by_cobol_name` rather than
-assembled from a field name. That matters here specifically: the column that
-stores `WS-IRS-Post-Date` is spelt `IRS-POST-DAT`, so a key assembled by hand
-would miss.
-
-Provenance travels with each descriptor. `FIELDS[n].cite()` returns the
-compact three-locator citation the loader builds - copybook field, bridge host
-variable, MySQL column - and `FIELDS[n].drift()` returns the unsettled
-cross-view record. Both are the loader's primitives, surfaced rather than
-reimplemented. The wider mapping is `docs/migration/traceability.md`.
+`FieldDescriptor.from_dictionary_key`, and every key is read out of the
+generated artifact by `_entry_keys_by_cobol_name`, whose docstring sets out
+which accessor supplies which entry and why a key assembled from a field name
+would miss. Provenance travels with each descriptor: `FIELDS[n].cite()`
+returns the loader's compact three-locator citation and `FIELDS[n].drift()`
+the unsettled cross-view record, both surfaced rather than reimplemented. The
+wider mapping is the migration's traceability document.
 
 THE BRIDGE DISAGREES WITH THE COPYBOOK IN FOUR WAYS
 ===================================================
 The host-variable group is ten items [common/slpostingMT.cbl:L266-L275],
 loaded from this record field by field in `bb000-HV-Load`
 [common/slpostingMT.cbl:L992], [common/slpostingMT.cbl:L1001-L1010]. It is
-not a transparent pipe:
+not a transparent pipe, and each disagreement is documented on the attribute
+it acts on:
 
- 1. THE KEY IS FLATTENED, WIDENED, AND GAINS A SIGN. Two unsigned `9(5)`
-    children, ten digits between them, become
-    `HV-IRS-POST-KEY PIC S9(18) COMP` [common/slpostingMT.cbl:L266] and a
-    `bigint(11)` column. Ten digits to eighteen, and unsigned to SIGNED. Note
-    the direction: anomaly A-11 is the opposite case, where `Sales-Average`
-    is signed in the copybook [copybooks/wssl.cob:L49] and LOSES its sign to
-    an unsigned host variable [common/salesMT.cbl:L308]. One gains a sign,
-    the other loses one, which is section 0.6.2's point exactly - the drift
-    "is specific rather than systemic and must be handled field by field from
-    the dictionary".
- 2. BOTH MONEY ITEMS CHANGE STORAGE CLASS. `pic s9(7)v99 sign leading`, nine
-    zoned bytes with an overpunched leading sign, becomes
-    `PIC S9(07)V9(02) COMP` [common/slpostingMT.cbl:L271],
-    [common/slpostingMT.cbl:L275] and a `decimal(9,2)` column. Digits and
-    scale survive; the leading sign disappears into a binary item.
- 3. THREE ITEMS ARE WIDENED. `WS-IRS-Post-DR` and `WS-IRS-Post-CR` go `9(5)`
-    to `9(10) COMP` [common/slpostingMT.cbl:L269],
-    [common/slpostingMT.cbl:L270]; `WS-IRS-Vat-AC-Def` goes `99` to
-    `9(03) COMP` [common/slpostingMT.cbl:L273]. Their columns then come back
-    to the copybook's own widths - `int(5) unsigned` and `tinyint(2)
-    unsigned` - so the three views disagree three ways, not two.
- 4. ONE NAME IS TRUNCATED. `WS-IRS-Post-Date` is carried by
-    `HV-IRS-POST-DAT` [common/slpostingMT.cbl:L268] and stored in
-    `IRS-POST-DAT`. The name is cut, not merely upper-cased, and the column
-    follows the host variable rather than the copybook.
+    1  the key is FLATTENED, widened ten digits to eighteen, and gains a
+       SIGN - see `WsIrsPostKey`
+    2  both money items change STORAGE CLASS, zoned with a leading sign
+       becoming binary - see the two amount attributes
+    3  three items are WIDENED at the host variable and come back to the
+       copybook's own width at the column - see the DR, CR and VAT-selector
+       attributes
+    4  one NAME is truncated, `WS-IRS-Post-Date` to `HV-IRS-POST-DAT`, and
+       the column follows the host variable - see that attribute
+
+Kind 1 is worth one comparison the attributes cannot make. Its direction is
+the OPPOSITE of anomaly A-11, where `Sales-Average` is signed in the copybook
+[copybooks/wssl.cob:L49] and LOSES its sign to an unsigned host variable
+[common/salesMT.cbl:L308]. One gains a sign, the other loses one, which is
+section 0.6.2's point exactly - the drift "is specific rather than systemic
+and must be handled field by field from the dictionary".
 
 THIS MODULE APPLIES NONE OF IT. A descriptor reports the COPYBOOK view as its
 own digits, scale, sign and usage, and offers the disagreement unsettled
 through `drift()`. Nothing here blends layers, widens an item to a column
 width, flattens the key, or performs the bridge's conversions.
-`dal/acas008_spl_posting.py` owns the bridge boundary; the register of these
-sites is `docs/migration/anomaly-log.md`.
+The `acas008` handler module owns the bridge boundary; the register of these
+sites is the migration's anomaly log.
 
 AN OPEN QUESTION, LEFT OPEN (RULE R-6)
 ======================================
 Where a semantic question cannot be settled by reading the source, the
-compiled program's observed behaviour settles it, and the arbitration is
-written down in `docs/migration/ambiguity-resolutions.md`. Item 2 above is
-such a question. Section 0.6.8 poses the mirror-image case - "A negative
-binary value through an unsigned host variable into an unsigned column ...
-what the resulting stored value *is* depends on the conversion the bridge's C
+compiled program's behaviour settles it, and the arbitration is written down
+in the migration's ambiguity-resolutions document. Drift kind 2 is such a
+question. Section 0.6.8 poses the mirror-image case - "A negative binary
+value through an unsigned host variable into an unsigned column ... what the
+resulting stored value *is* depends on the conversion the bridge's C
 interface performs, which must be measured rather than assumed" - and the
 same reasoning applies to a leading-sign zoned value entering a signed binary
-host variable. What the compiled bridge actually stores for a negative
+host variable. What the compiled bridge stores for a negative
 `WS-IRS-Post-Amount` is to be measured against the oracle. It is recorded
 here and settled nowhere.
 
-WHAT THE HANDLER DOES - RECORDED HERE, IMPLEMENTED IN dal/
-==========================================================
+WHAT THE HANDLER DOES - RECORDED HERE, IMPLEMENTED IN THE HANDLER MODULE
+========================================================================
 `acas008` is this record's handler, and it has three behaviours worth naming
 so the anomaly log can cite this module beside the handler module. None is
 implemented here; this file defines no status value, no verb and no method.
@@ -320,26 +283,23 @@ From the preserved user requirement in section 0.8.2, verbatim:
     specification, defects included.
     A defect reproduced is correct; a defect fixed is a failure."
 
-What that means for a layout module is that every oddity above is carried
-with its locator and none is smoothed: the two sign-clause spellings stay
-two, the four kinds of drift stay unsettled, the truncated column name stays
-truncated, the eight-character date stays eight characters and stays text,
-the two-digit VAT selector stays two digits, and no condition name is
-invented for the bare literals the programs compare against. There is no
-"winner" view of any field in this system and none is introduced here.
+For a layout module that means every oddity above is carried with its locator
+and none is smoothed: the two sign-clause spellings stay two, the four kinds
+of drift stay unsettled, the truncated column name stays truncated, the
+eight-character date stays eight characters and stays text, the two-digit VAT
+selector stays two digits, and no condition name is invented for the bare
+literals the programs compare against. There is no "winner" view of any field
+in this system and none is introduced here.
 
 WHAT THIS MODULE DOES NOT DO
 ============================
-No date is parsed, converted or widened - `WS-IRS-Post-Date` is eight
-characters of text, one of the two-digit-year forms the dump comparison has
-to reconcile, and `acas_posting/dates.py` owns date conversion. No defaults
-table is consulted for `WS-IRS-Vat-AC-Def`. No value is validated, padded,
-quantized or truncated on assignment: there is no post-initialisation hook,
-`acas_posting/cobol/move.py` performs a MOVE and
-`acas_posting/cobol/arithmetic.py` performs the arithmetic. No SQL, no DDL,
-no schema metadata, no ORM base class. No COBOL is executed, embedded or
-shelled out to (rule R-1); nothing here needs a COBOL compiler or runtime
-present.
+No date is parsed, converted or widened - `acas_posting/dates.py` owns date
+conversion. No defaults table is consulted for `WS-IRS-Vat-AC-Def`. No value
+is validated, padded, quantized or truncated on assignment: there is no
+post-initialisation hook, `acas_posting/cobol/move.py` performs a MOVE and
+`acas_posting/cobol/arithmetic.py` the arithmetic. No SQL, no DDL, no schema
+metadata, no ORM base class. No COBOL is executed, embedded or shelled out to
+(rule R-1); nothing here needs a COBOL compiler or runtime present.
 
 LAYERING (SECTION 0.4.3)
 ========================
@@ -355,26 +315,10 @@ LAYERING (SECTION 0.4.3)
 The record layer is a leaf, and section 0.4.3 gives the reason: the
 arithmetic test tier "imports only `cobol` and `records` and touches no
 database, so it runs anywhere". A single reach into `dal` would drag a
-database driver into that tier.
-
-DETERMINISM (RULE R-6)
-======================
-Attribute order is copybook declaration order, so this file can be set beside
-its copybook and diffed by eye. Fixed collections are tuples. The only I/O at
-import is the dictionary loader's own lazy, cached read - no clock is
-consulted, no unpredictable value drawn, no process environment inspected -
-and execution is strictly sequential with no concurrency introduced. Two
-imports in two processes produce identical state.
-
-FURTHER READING
-===============
-    copybooks/wspost-irs.cob                 the layout this file mirrors
-    common/slpostingMT.cbl                   the bridge and its host variables
-    common/acas008.cbl                       the handler
-    mysql/ACASDB.sql                         PSIRSPOST-REC, frozen
-    docs/migration/traceability.md           program, paragraph and field maps
-    docs/migration/anomaly-log.md            the reproduced defects
-    docs/migration/ambiguity-resolutions.md  the questions the oracle settles
+database driver into that tier. Attribute order is copybook declaration
+order, fixed collections are tuples, and the only I/O at import is the
+loader's own lazy cached read, so two imports in two processes produce
+identical state (rule R-6).
 """
 
 # PROVENANCE
@@ -397,12 +341,9 @@ from acas_posting.dictionary import loader
 __all__ = ["WsIrsPostKey", "WsIrsPostingRecord"]
 
 
-# =============================================================================
 #  THE TWO NAMES THIS RECORD IS KEYED BY
-#
 #  Both are the frozen sources' own spellings, case and hyphens intact,
 #  because dictionary lookup is exact and case-sensitive.
-# =============================================================================
 
 # The MySQL table the bridge declares for this record:
 # `TABLE=PSIRSPOST-REC,HV` [common/slpostingMT.scb:L257-L260]. Ten columns,
@@ -414,9 +355,7 @@ _TABLE: Final[str] = "PSIRSPOST-REC"
 _COPYBOOK_RECORD: Final[str] = "WS-IRS-Posting-Record"
 
 
-# =============================================================================
 #  KEYS AND DESCRIPTORS, TAKEN FROM THE GENERATED DICTIONARY
-# =============================================================================
 
 
 def _entry_keys_by_cobol_name() -> dict[str, str]:
@@ -517,9 +456,7 @@ _POST_VAT_SIDE: Final[FieldDescriptor] = _describe("WS-IRS-Post-Vat-Side")
 _VAT_AMOUNT: Final[FieldDescriptor] = _describe("WS-IRS-Vat-Amount")
 
 
-# =============================================================================
 #  THE KEY GROUP
-# =============================================================================
 
 
 @dataclass(slots=True)
@@ -554,7 +491,7 @@ class WsIrsPostKey:
     Neither the flattening nor the widening nor the added sign happens here.
     The two children keep the five digits each that the copybook gives them,
     and the disagreement is offered unsettled by `FIELDS[n].drift()` and by
-    the loader's bridge view. `dal/acas008_spl_posting.py` reproduces the
+    the loader's bridge view. The `acas008` handler module reproduces the
     conversion at the boundary where the COBOL performs it.
 
     Attributes:
@@ -585,9 +522,7 @@ class WsIrsPostKey:
     FIELDS: ClassVar[tuple[FieldDescriptor, ...]] = (_BATCH, _POST_NUMBER)
 
 
-# =============================================================================
 #  THE RECORD
-# =============================================================================
 
 
 @dataclass(slots=True)
@@ -665,18 +600,15 @@ class WsIrsPostingRecord:
 
     # 03  WS-IRS-Post-Amount     pic s9(7)v99   sign leading.
     #   [copybooks/wspost-irs.cob:L21]
-    # The sign clause is written exactly so - "sign leading", lower case,
-    # without `is`. The sibling internal posting record spells the same
-    # meaning "sign is leading" [copybooks/irswspost.cob:L14]; both spellings
-    # are carried as written and neither is rewritten to match the other.
-    # No SEPARATE keyword, so the sign is leading and INCLUDED: overpunched
-    # on the high-order digit, nine bytes on the wire. Signed, nine digits,
-    # scale 2, zoned DISPLAY -> Decimal. It becomes
-    # `PIC S9(07)V9(02) COMP` only at the bridge
-    # [common/slpostingMT.cbl:L271], where the leading sign disappears into a
-    # binary item; what that conversion stores for a negative amount is a
-    # question for the compiled oracle, recorded in
-    # docs/migration/ambiguity-resolutions.md and settled nowhere here.
+    # The sign clause is written exactly so - "sign leading", lower case, without `is`. The
+    # sibling internal posting record spells the same meaning "sign is leading"
+    # [copybooks/irswspost.cob:L14]; both spellings are carried as written and neither is
+    # rewritten to match the other. No SEPARATE keyword, so the sign is leading and INCLUDED:
+    # overpunched on the high-order digit, nine bytes on the wire. Signed, nine digits, scale 2,
+    # zoned DISPLAY -> Decimal. It becomes `PIC S9(07)V9(02) COMP` only at the bridge
+    # [common/slpostingMT.cbl:L271], where the leading sign disappears into a binary item; what
+    # that conversion stores for a negative amount is an R-6 question for the compiled oracle,
+    # settled nowhere here.
     ws_irs_post_amount: Decimal = Decimal("0.00")
 
     # 03  WS-IRS-Post-Legend     pic x(32).   alphanumeric, 32 characters
@@ -685,21 +617,16 @@ class WsIrsPostingRecord:
 
     # 03  WS-IRS-Vat-AC-Def      pic 99.      unsigned zoned DISPLAY, scale 0
     #   [copybooks/wspost-irs.cob:L23]
-    # TWO digits, and a SELECTOR INTO THE IRS DEFAULTS TABLE - not an account
-    # number. The Sales steps set it to 32 [sales/sl060.cbl:L1138],
-    # [sales/sl100.cbl:L659] and the Purchase steps to 31
-    # [purchase/pl060.cbl:L993], [purchase/pl100.cbl:L640]; `irs030` tests it
-    # against zero, 31 and 32 to choose which VAT control account the amount
-    # accumulates into [irs/irs030.cbl:L1682-L1699]. No lookup is performed
-    # here and `records/irs_dflt.py`, which carries that table, is not
-    # imported. Worth noting that the move which sets it has a second
-    # receiver carrying the maintainer's own inline question mark -
-    # `move 32 to WS-IRS-vat-ac-def / Vat-PC  *> IS IT ???`
-    # [sales/sl060.cbl:L1138-L1139] - and that the two percentage items
-    # `DR-PC` and `CR-PC` are not carried into this record at all, which he
-    # also flags in place [sales/sl060.cbl:L1133], [sales/sl060.cbl:L1135].
-    # Widened to `9(03) COMP` at the bridge [common/slpostingMT.cbl:L273],
-    # stored in `tinyint(2) unsigned`.
+    # TWO digits, and a SELECTOR INTO THE IRS DEFAULTS TABLE - not an account number. The Sales
+    # steps set it to 32 [sales/sl060.cbl:L1138], [sales/sl100.cbl:L659] and the Purchase steps
+    # to 31 [purchase/pl060.cbl:L993], [purchase/pl100.cbl:L640]; `irs030` tests it against
+    # zero, 31 and 32 to choose which VAT control account the amount accumulates into
+    # [irs/irs030.cbl:L1682-L1699]. No lookup happens here and `records/irs_dflt.py`, which
+    # carries that table, is not imported. The move that sets it has a second receiver carrying
+    # the maintainer's own inline question mark - `move 32 to WS-IRS-vat-ac-def / Vat-PC  *> IS
+    # IT ???` [sales/sl060.cbl:L1138-L1139] - and `DR-PC` and `CR-PC` are not carried into this
+    # record at all, which he also flags at [:L1133] and [:L1135]. Widened to `9(03) COMP` at
+    # the bridge [common/slpostingMT.cbl:L273], stored in `tinyint(2) unsigned`.
     ws_irs_vat_ac_def: int = 0
 
     # 03  WS-IRS-Post-Vat-Side   pic xx.      alphanumeric, 2 characters

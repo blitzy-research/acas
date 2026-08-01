@@ -1,3 +1,23 @@
+# check=skip=FromPlatformFlagConstDisallowed
+#
+# ^ A BuildKit parser directive, and it MUST be the first line of the file --
+#   directives are only recognised before any comment or instruction.
+#
+#   It silences exactly one advisory lint, `FromPlatformFlagConstDisallowed`,
+#   which suggests `FROM --platform=$BUILDPLATFORM` instead of a literal. That
+#   advice is written for images intended to build for many architectures; this
+#   one is deliberately single-architecture. The compiled COBOL this image
+#   produces IS the behavioural specification, and COBOL numeric storage is
+#   representation-sensitive -- `COMP`/`BINARY-LONG` fields have a byte order and
+#   a width, `COMP-3` is packed decimal -- while the Python side installed here
+#   is an x86_64 wheel closure. `$BUILDPLATFORM` would make the arbiter's
+#   architecture a property of whoever ran the build, which is the exact drift
+#   the pin exists to prevent. The lint is therefore skipped by name, in one
+#   place, with this reason recorded, rather than left to be re-litigated as
+#   noise on every build. Nothing else is skipped: every other check must stay
+#   clean.
+#
+
 # =============================================================================
 #  harness/Dockerfile.gnucobol
 #  The GnuCOBOL half of the compiled-COBOL ORACLE for the ACAS posting-cycle
@@ -184,7 +204,7 @@
 
 
 # -----------------------------------------------------------------------------
-#  BASE IMAGE
+#  BASE IMAGE -- PINNED BY CONTENT DIGEST AND PINNED TO ONE ARCHITECTURE
 #
 #  Pinned to the Ubuntu LTS release the plan records as the reference
 #  environment: Ubuntu 24.04 LTS, whose system CPython is 3.12.3 with a
@@ -192,26 +212,89 @@
 #  pure-Python fallback. That is not a convenience -- every monetary and
 #  quantity operation in the migrated cycle passes through `decimal.Decimal`.
 #
-#  The tag is a concrete release, never `latest` and never `rolling`: an
-#  arbiter that changes underneath the comparison is not an arbiter.
+#  THE TAG ALONE IS NOT A PIN. `ubuntu:24.04` is a MOVING tag: Canonical
+#  republishes it on every point release and every security rebuild, so two
+#  builds of the same repository revision, a fortnight apart, would produce two
+#  different oracles. The digest below is the OCI image INDEX digest of that tag
+#  as resolved and verified on this host; the tag is retained beside it purely as
+#  human-readable documentation, while the digest decides what is actually
+#  pulled. An arbiter that changes underneath the comparison is not an arbiter,
+#  and [mysql/ACASDB.sql:L1] is unambiguous that the reference platform is
+#  x86_64 -- so the architecture is fixed here too, for three concrete reasons:
+#
+#    1. COBOL numeric storage is representation-sensitive. `COMP` and
+#       `BINARY-LONG` fields have a byte order and a width -- the seven
+#       `binary-long` statistics fields at [copybooks/wssl.cob:L46-L52] are
+#       exactly the ones whose INTEGER truncation the migration must reproduce --
+#       and `COMP-3` is packed decimal. The bridge's recovered C interface
+#       [presql2-package/cobmysqlapi38.c] moves those bytes between COBOL host
+#       variables and the client library.
+#    2. The Python dependency closure in `requirements.txt` was resolved as
+#       x86_64 wheels, including the C extension of `mysql-connector-python`.
+#    3. An oracle built for a different architecture would be comparing two
+#       different machines, which would make a non-empty diff an artefact of the
+#       comparison -- precisely what AAP 0.6.6 forbids.
+#
+#  Neither pin is a build argument, and that is deliberate: an overrideable pin
+#  is not a pin. See the BUILD-TIME PINS section immediately below, where the
+#  same argument is applied to every toolchain constant.
+#
+#  RESOLVING THE DIGEST. The value below is the MULTI-ARCH INDEX digest, read
+#  with
+#
+#      docker buildx imagetools inspect ubuntu:24.04
+#
+#  and NOT the per-PLATFORM digest that `docker manifest inspect --verbose`
+#  reports. Both values look equally plausible, so the trap is named here; the
+#  architecture is fixed by the `--platform` flag rather than by narrowing the
+#  digest.
+#
+#  The interpreter assertion in the Python layer below is the backstop: because
+#  CPython arrives from the base image, a re-pin that moved the base off
+#  CPython 3.12.x would move the interpreter under the exact-decimal core, and
+#  the build fails at that assertion rather than producing a subtly wrong
+#  arbiter.
 # -----------------------------------------------------------------------------
-FROM ubuntu:24.04
+FROM --platform=linux/amd64 ubuntu:24.04@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90
 
 LABEL org.opencontainers.image.title="ACAS posting-cycle oracle - GnuCOBOL" \
       org.opencontainers.image.description="GnuCOBOL 3.2 final, MySQL client libraries under /usr/local/mysql, the JC preSQL translator and CPython 3.12, for compiling and driving the compiled-COBOL oracle of the ACAS posting-cycle migration." \
       org.opencontainers.image.licenses="GPL-3.0-or-later" \
+      org.opencontainers.image.base.name="docker.io/library/ubuntu:24.04@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90" \
+      org.opencontainers.image.base.digest="sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90" \
       acas.harness.role="oracle-builder-and-runner" \
       acas.harness.cobc="3.2" \
       acas.harness.mysql.prefix="/usr/local/mysql" \
-      acas.harness.python="3.12"
+      acas.harness.python="3.12" \
+      acas.harness.platform="linux/amd64" \
+      acas.harness.apt.snapshot="20260801T000000Z" \
+      acas.harness.runtime.user="acas"
 
 
 # -----------------------------------------------------------------------------
-#  BUILD-TIME PINS
+#  BUILD-TIME PINS -- DECLARATIVE, EXACT, AND IMMUTABLE
 #
 #  Declared as ARGs so a reviewer can see every external input in one place and
 #  a maintainer can audit or mirror them. All are exact; none is a range, a
 #  branch or a "latest".
+#
+#  BUT AN ARG ALONE IS NOT A PIN -- IT IS A DEFAULT. Every value below defines
+#  the ORACLE CONTRACT: which compiler arbitrates behaviour, which client
+#  library the frozen `-lmysqlclient` resolves against, which translator
+#  regenerates the bridges, and where the frozen scripts expect to find them.
+#  `--build-arg GNUCOBOL_VERSION=3.1.2` would silently produce a DIFFERENT
+#  arbiter from the SAME repository revision -- and because the compiled COBOL
+#  *is* the behavioural specification, "different arbiter" means "different
+#  specification", not merely "different build".
+#
+#  They are therefore GATED: the step immediately after this block compares
+#  every one of them against a hard-coded literal and FAILS THE BUILD on any
+#  deviation. Overriding a pin is still possible, but only the way the AAP
+#  intends -- by editing this file in a reviewable commit, where the change to
+#  the oracle contract is visible in the diff.
+#
+#  `DEBIAN_FRONTEND` further below is deliberately NOT gated: it controls apt's
+#  prompting behaviour during the build and is not part of the oracle contract.
 # -----------------------------------------------------------------------------
 
 #  GnuCOBOL 3.2 FINAL. The version is repository evidence, not a preference:
@@ -221,11 +304,10 @@ LABEL org.opencontainers.image.title="ACAS posting-cycle oracle - GnuCOBOL" \
 #  [README.TXT:L168] "For development and testing I am now using v3.2 final
 #                     instead of playing with 3.3 A/Beta etc ..."
 #  Distribution packages are commonly 3.1.x or 4.x and are therefore NOT used;
-#  the release tarball is fetched from the GNU mirror and verified by digest.
-#  The digest below was confirmed byte-identical between ftp.gnu.org and the
-#  SourceForge release download, and the tree self-reports
-#  PACKAGE_STRING='GnuCOBOL 3.2' with NEWS headline "GnuCOBOL 3.2 (20230728)"
-#  -- i.e. FINAL, not 3.2rc1/rc2.
+#  the release tarball is fetched from the GNU mirror. The build then makes two
+#  refusals of its own rather than trusting the URL: the digest below must
+#  match the download, and `configure` must carry PACKAGE_STRING='GnuCOBOL
+#  3.2', which a 3.2rc1/rc2 tarball does not. Both abort with a named FATAL.
 ARG GNUCOBOL_VERSION=3.2
 ARG GNUCOBOL_TARBALL=gnucobol-3.2.tar.xz
 ARG GNUCOBOL_URL=https://ftp.gnu.org/gnu/gnucobol/gnucobol-3.2.tar.xz
@@ -237,20 +319,26 @@ ARG GNUCOBOL_SHA256=3bb48af46ced4779facf41fdc2ee60e4ccb86eaa99d010b36685315df39c
 ARG MARIADB_CONNECTOR_C_VERSION=3.3.4
 ARG MARIADB_CONNECTOR_C_ZIP=mariadb-connector-c-3.3.4-src.zip
 
-#  JC preSQL, vendored as `presql2-latest.zip` (61 entries). TWO version
-#  strings coexist in that package and BOTH are correct facts about it:
-#  [presql2-package/README.SVN:L22] "presql release (currently 1.14f)" and
-#  [presql2-package/presql2.cbl:L302]
-#      `03  ws-Prog-Version  pic x(6)  value " 2.22 ".`
+#  JC preSQL, vendored as `presql2-latest.zip` (61 zip entries). TWO version
+#  strings coexist inside that archive and BOTH are correct facts about it:
+#  archive member `README.SVN` line 22, "presql release (currently 1.14f)", and
+#  member `presql2.cbl` line 302, `03 ws-Prog-Version pic x(6) value " 2.22 ".`
 #  Recorded, not resolved -- reconciling them would be an invention.
+#  A CREDENTIAL FILE IS A PREREQUISITE OF STEP 4, NOT OF THIS IMAGE. The
+#  translator links the same C interface, whose `read_params` (member
+#  `cobmysqlapi38.c`, line 114) `fopen`s `<progname>.param`, `exit(5)`s when it
+#  is absent and `exit(6)`s on an unrecognised card. `presql2` also queries a
+#  LIVE `information_schema`, so it cannot run at build time. Only the six-card
+#  SHAPE is recorded -- DBHOST, DBUSER, DBPASSWD, DBNAME, DBPORT, DBSOCKET; the
+#  archived example's literal values are never copied into this image.
 ARG PRESQL2_ZIP=presql2-latest.zip
 ARG PRESQL2_PACKAGE_VERSION=1.14f
 ARG PRESQL2_PROGRAM_VERSION=2.22
 
 #  Where the frozen scripts require the client library and headers to be. Not
-#  a choice: [common/comp-common.sh:L26] hard-codes `-L/usr/local/mysql/lib`
-#  and [presql2-package/cobmysqlapi38.sh] hard-codes
-#  `-I/usr/local/mysql/include`.
+#  a choice: [common/comp-common.sh:L26] hard-codes `-L/usr/local/mysql/lib`,
+#  and the recovered build rule -- archive member `cobmysqlapi38.sh` --
+#  hard-codes `-I/usr/local/mysql/include`.
 ARG MYSQL_PREFIX=/usr/local/mysql
 
 #  Where GnuCOBOL is installed. Also not a free choice: lines 1 and 2 of the
@@ -264,25 +352,95 @@ ARG GNUCOBOL_PREFIX=/usr/local
 #  Canonical publication path for the bridge's C interface object (step 2).
 ARG ACAS_LIB_DIR=/usr/local/lib/acas
 
+#  The Ubuntu archive SNAPSHOT every package below is resolved from. See the
+#  SYSTEM PACKAGES layer for the full argument; in short, `apt-get install`
+#  against the live archive is a moving target, and a moving target under an
+#  arbiter is a defect. This identifier is a FIXED, IMMUTABLE archive coordinate
+#  -- it is emphatically NOT a build timestamp: it does not change from build to
+#  build, so it cannot leak into anything the harness emits and cannot perturb
+#  the byte-identical-dump guarantee.
+ARG APT_SNAPSHOT=20260801T000000Z
+
 
 # -----------------------------------------------------------------------------
-#  NON-INTERACTIVE, PREDICTABLE ENVIRONMENT
+#  PIN IMMUTABILITY GATE
 #
-#  `DEBIAN_FRONTEND` is an ARG rather than an ENV on purpose: it must suppress
-#  apt prompting during the BUILD without persisting into the running
-#  container, where it would degrade any interactive `apt` a maintainer runs
-#  while investigating an oracle result.
+#  This is the step that turns the defaults above into pins. It re-states every
+#  oracle-contract value as a literal and compares it with the ARG actually in
+#  effect, so `--build-arg <anything>=<other value>` fails here, loudly, at the
+#  very start of the build rather than producing a quietly different oracle.
 #
-#  A UTF-8 locale is set because the compiled programs use curses screen
-#  sections and because the frozen schema's character-set behaviour must not
-#  vary with the ambient locale. C.UTF-8 is built into glibc, so it needs no
-#  locale generation and adds no variability.
+#  Why a gate rather than simply hard-coding the values into each later RUN: the
+#  eight build steps that follow reference these names a few dozen times, and
+#  inlining literals into each would multiply the number of places a future edit
+#  must keep consistent. ARG values are fixed for the whole build, so a single
+#  gate immediately after the declarations is sufficient AND sound -- if the gate
+#  passes, every later reference necessarily sees the gated value.
 #
-#  `PYTHONDONTWRITEBYTECODE` keeps the harness Python tools from scattering
-#  `__pycache__` directories into a bind-mounted working copy, which also keeps
-#  the working tree clean; `PYTHONUNBUFFERED` makes their output interleave
-#  faithfully with the COBOL scripts' output in a captured log.
+#  The gate deliberately does NOT accept "equivalent" values. `/usr/local/mysql/`
+#  with a trailing slash, or `3.2.0` for `3.2`, would each be plausible and each
+#  would break something downstream -- the frozen scripts hard-code the former
+#  [common/comp-common.sh:L26] and the tarball self-report test greps for the
+#  latter exactly. Equality is the only safe comparison here.
 # -----------------------------------------------------------------------------
+RUN set -eu; \
+    fail=0; \
+    check() { \
+        if [ "$2" != "$3" ]; then \
+            echo "FATAL: build argument $1 was overridden." >&2; \
+            echo "       expected (oracle contract) : $3" >&2; \
+            echo "       received                   : $2" >&2; \
+            fail=1; \
+        fi; \
+    }; \
+    check GNUCOBOL_VERSION            "${GNUCOBOL_VERSION}"            '3.2'; \
+    check GNUCOBOL_TARBALL            "${GNUCOBOL_TARBALL}"            'gnucobol-3.2.tar.xz'; \
+    check GNUCOBOL_URL                "${GNUCOBOL_URL}"                'https://ftp.gnu.org/gnu/gnucobol/gnucobol-3.2.tar.xz'; \
+    check GNUCOBOL_SHA256             "${GNUCOBOL_SHA256}"             '3bb48af46ced4779facf41fdc2ee60e4ccb86eaa99d010b36685315df39c2ee2'; \
+    check MARIADB_CONNECTOR_C_VERSION "${MARIADB_CONNECTOR_C_VERSION}" '3.3.4'; \
+    check MARIADB_CONNECTOR_C_ZIP     "${MARIADB_CONNECTOR_C_ZIP}"     'mariadb-connector-c-3.3.4-src.zip'; \
+    check PRESQL2_ZIP                 "${PRESQL2_ZIP}"                 'presql2-latest.zip'; \
+    check PRESQL2_PACKAGE_VERSION     "${PRESQL2_PACKAGE_VERSION}"     '1.14f'; \
+    check PRESQL2_PROGRAM_VERSION     "${PRESQL2_PROGRAM_VERSION}"     '2.22'; \
+    check MYSQL_PREFIX                "${MYSQL_PREFIX}"                '/usr/local/mysql'; \
+    check GNUCOBOL_PREFIX             "${GNUCOBOL_PREFIX}"             '/usr/local'; \
+    check ACAS_LIB_DIR                "${ACAS_LIB_DIR}"                '/usr/local/lib/acas'; \
+    check APT_SNAPSHOT                "${APT_SNAPSHOT}"                '20260801T000000Z'; \
+    if [ "${fail}" -ne 0 ]; then \
+        echo "" >&2; \
+        echo "       These values define WHICH COMPILED PROGRAM ARBITRATES BEHAVIOUR." >&2; \
+        echo "       The compiled COBOL is the behavioural specification, so changing" >&2; \
+        echo "       them changes the specification -- not just the build. Re-pin by" >&2; \
+        echo "       editing harness/Dockerfile.gnucobol in a reviewable commit." >&2; \
+        exit 1; \
+    fi; \
+    \
+    echo '--- asserting the pinned architecture actually took effect ---'; \
+    arch="$(dpkg --print-architecture)"; \
+    if [ "${arch}" != 'amd64' ]; then \
+        echo "FATAL: this image is being built for ${arch}, not amd64." >&2; \
+        echo "       The FROM line pins --platform=linux/amd64 because COBOL COMP and" >&2; \
+        echo "       BINARY-LONG storage is representation-dependent and the Python" >&2; \
+        echo "       closure is an x86_64 wheel set. A foreign-architecture oracle would" >&2; \
+        echo "       make a non-empty state diff an artefact of the comparison." >&2; \
+        exit 1; \
+    fi; \
+    echo "    dpkg architecture: ${arch}   uname -m: $(uname -m)"; \
+    echo 'OK: every oracle-contract pin matches the value committed in this Dockerfile.'
+
+
+#  NON-INTERACTIVE, PREDICTABLE ENVIRONMENT
+#  `DEBIAN_FRONTEND` is an ARG rather than an ENV on purpose: it suppresses apt
+#  prompting during the BUILD without persisting into the running container,
+#  where it would degrade an interactive `apt` run during investigation.
+#  A UTF-8 locale is set because the compiled programs use curses screen
+#  sections and the frozen schema's character-set behaviour must not vary with
+#  the ambient locale. C.UTF-8 is built into glibc, so it needs no locale
+#  generation and adds no variability.
+#  `PYTHONDONTWRITEBYTECODE` keeps the harness Python tools from scattering
+#  `__pycache__` into a bind-mounted working copy; `PYTHONUNBUFFERED` makes
+#  their output interleave faithfully with the COBOL scripts' output in a
+#  captured log.
 ARG DEBIAN_FRONTEND=noninteractive
 
 ENV LANG=C.UTF-8 \
@@ -292,14 +450,59 @@ ENV LANG=C.UTF-8 \
 
 
 # -----------------------------------------------------------------------------
-#  SYSTEM PACKAGES
+#  SYSTEM PACKAGES -- RESOLVED FROM A FROZEN ARCHIVE SNAPSHOT, PINNED EXACTLY
 #
-#  Grouped by the reason each is required. Versions are not pinned per package:
-#  the `ubuntu:24.04` tag pins the archive snapshot, and per-package pinning
-#  against a moving security pocket makes the build fail rather than drift --
-#  the wrong trade for an arbiter that must build reliably. The versions
-#  actually resolved are printed into the build log below, so a reviewer can
-#  see exactly what was installed.
+#  Grouped by the reason each is required.
+#
+#  WHY THIS LAYER IS PINNED TWICE OVER. An earlier revision of this file argued
+#  that the base image tag pinned the archive and that per-package pinning would
+#  "fail rather than drift". Both halves of that argument were wrong, and the
+#  second half had the trade backwards:
+#
+#    * The base image tag pins the base FILESYSTEM, not the archive. `apt-get
+#      install` reaches out to `archive.ubuntu.com` and `security.ubuntu.com`,
+#      which advance continuously. The same `docker build`, from the same commit,
+#      a week apart, installed a different gcc, a different libgmp and a
+#      different mariadb-client -- i.e. a different oracle.
+#    * "Fail rather than drift" IS THE CORRECT TRADE HERE. A build failure is a
+#      loud, diagnosable event that a maintainer fixes in one reviewable commit.
+#      Silent drift in the arbiter corrupts the evidence instead: a non-empty
+#      state diff would then be an artefact of the comparison, which AAP 0.6.6
+#      forbids outright -- "a non-empty diff is always a real behavioral
+#      difference and never an artefact of the comparison". Under R-6 this image
+#      IS the arbiter, so its inputs must not move.
+#
+#  So the archive itself is pinned to `snapshot.ubuntu.com/ubuntu/${APT_SNAPSHOT}`
+#  -- an immutable, cryptographically signed point-in-time view of the Ubuntu
+#  archive -- AND every explicitly requested package carries an exact `=version`.
+#  The snapshot freezes transitive dependencies too, which the per-package pins
+#  cannot; the per-package pins make the intent auditable in the diff, which the
+#  snapshot alone cannot. Neither is redundant.
+#
+#  `${APT_SNAPSHOT}` IS NOT A BUILD TIMESTAMP. It is a fixed archive coordinate,
+#  identical on every build of this commit, so it cannot leak into any artefact
+#  the harness emits and cannot perturb the byte-identical-dump guarantee that
+#  the determinism suite rests on. It is gated for immutability above.
+#
+#  WHY THE SOURCES ARE REWRITTEN IN TWO STAGES. `ubuntu:24.04` ships no
+#  `ca-certificates` package and no `/etc/ssl/certs/ca-certificates.crt` at all,
+#  and `snapshot.ubuntu.com` answers plain HTTP with a 301 to HTTPS -- so an apt
+#  that has been repointed at the snapshot cannot fetch even the signed
+#  `InRelease` until a trust store exists. Verified directly: both `http://` and
+#  `https://` snapshot sources fail with "No system certificates available".
+#  Stage 1 therefore installs ONLY `ca-certificates` from the stock archive,
+#  whose integrity is guaranteed by the `ubuntu-archive-keyring.gpg` already
+#  present in the base image. Stage 2 repoints apt at the snapshot and installs
+#  the full pinned set -- re-pinning `ca-certificates`, `openssl` and
+#  `libssl3t64`, the three packages stage 1 introduced, with
+#  `--allow-downgrades` so that the FINAL image is entirely snapshot-derived
+#  however far the live archive has since moved on.
+#
+#  `noble-backports` is deliberately absent from the snapshot sources. Its
+#  snapshot `InRelease` fails apt's clearsign validation ("Clearsigned file isn't
+#  valid, got 'NOSPLIT'"), and nothing in the package list below is served from
+#  backports, so the pocket is dropped rather than worked around. `noble`,
+#  `noble-updates` and `noble-security` are all present and all validate.
 #
 #  BUILD TOOLCHAIN -- GnuCOBOL and the connector are both source builds, and
 #  the recovered C-interface rule [presql2-package/cobmysqlapi38.sh] invokes
@@ -330,6 +533,13 @@ ENV LANG=C.UTF-8 \
 #                      [common/comp-common.sh:L26]
 #      libssl-dev      required to build MariaDB Connector/C with TLS support
 #
+#  TRUST STORE, AND THE TWO PACKAGES THAT ARRIVE WITH IT:
+#      ca-certificates the trust store apt needs to reach the snapshot at all
+#      openssl         pulled in by ca-certificates in stage 1
+#      libssl3t64      pulled in by openssl in stage 1
+#                      All three are re-pinned in stage 2 so that no package in
+#                      the final image originates from the live archive.
+#
 #  ARCHIVE HANDLING -- the vendored archives are unpacked INSIDE the container
 #  and never modified in the checkout. `unzip` is not present in the base
 #  image, so it is installed explicitly rather than assumed:
@@ -346,41 +556,74 @@ ENV LANG=C.UTF-8 \
 #                      ad-hoc isolation without changing the default python3
 #      locales         a UTF-8 locale for predictable curses behaviour
 # -----------------------------------------------------------------------------
-# hadolint ignore=DL3008
 RUN set -eu; \
+    echo '--- stage 1: minimal trust bootstrap from the stock archive ---'; \
+    echo '    (ubuntu:24.04 ships no CA store, and the snapshot host is HTTPS-only)'; \
     apt-get update; \
-    apt-get install -y --no-install-recommends \
-        autoconf \
-        automake \
-        bison \
-        build-essential \
-        ca-certificates \
-        cmake \
-        curl \
-        flex \
-        gcc \
-        libcjson-dev \
-        libdb-dev \
-        libgmp-dev \
-        libncurses-dev \
-        libssl-dev \
-        libtool \
-        libxml2-dev \
-        locales \
-        m4 \
-        make \
-        mariadb-client \
-        ncurses-term \
-        pkg-config \
-        python3 \
-        python3-pip \
-        python3-venv \
-        tar \
-        unzip \
-        util-linux \
-        wget \
-        xz-utils \
-        zlib1g-dev; \
+    apt-get install -y --no-install-recommends ca-certificates; \
+    \
+    echo "--- stage 2: repointing apt at the frozen snapshot ${APT_SNAPSHOT} ---"; \
+    printf '%s\n' \
+        'Types: deb' \
+        "URIs: https://snapshot.ubuntu.com/ubuntu/${APT_SNAPSHOT}" \
+        'Suites: noble noble-updates' \
+        'Components: main universe restricted multiverse' \
+        'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg' \
+        '' \
+        'Types: deb' \
+        "URIs: https://snapshot.ubuntu.com/ubuntu/${APT_SNAPSHOT}" \
+        'Suites: noble-security' \
+        'Components: main universe restricted multiverse' \
+        'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg' \
+        > /etc/apt/sources.list.d/ubuntu.sources; \
+    apt-get update 2>&1 | tee /tmp/apt-snapshot-update.log; \
+    \
+    echo '--- asserting the snapshot pin actually took effect ---'; \
+    if grep -q 'Failed to fetch' /tmp/apt-snapshot-update.log; then \
+        echo "FATAL: the apt snapshot ${APT_SNAPSHOT} could not be fetched, so apt would fall back to cached or live lists and the package set would NOT be reproducible." >&2; \
+        grep -m5 'Failed to fetch' /tmp/apt-snapshot-update.log >&2; \
+        echo "       Check that the serial exists at https://snapshot.ubuntu.com/ubuntu/ and that the build host can reach it." >&2; \
+        exit 1; \
+    fi; \
+    grep -q "snapshot.ubuntu.com/ubuntu/${APT_SNAPSHOT}" /tmp/apt-snapshot-update.log \
+      || { echo 'FATAL: apt did not fetch from the snapshot endpoint; the pin was not honoured.' >&2; exit 1; }; \
+    rm -f /tmp/apt-snapshot-update.log; \
+    \
+    echo '--- installing the exactly pinned package set from the snapshot ---'; \
+    apt-get install -y --no-install-recommends --allow-downgrades \
+        autoconf=2.71-3 \
+        automake=1:1.16.5-1.3ubuntu1 \
+        bison=2:3.8.2+dfsg-1build2 \
+        build-essential=12.10ubuntu1 \
+        ca-certificates=20260601~24.04.1 \
+        cmake=3.28.3-1build7 \
+        curl=8.5.0-2ubuntu10.11 \
+        flex=2.6.4-8.2build1 \
+        gcc=4:13.2.0-7ubuntu1 \
+        libcjson-dev=1.7.17-1 \
+        libdb-dev=1:5.3.21ubuntu2 \
+        libgmp-dev=2:6.3.0+dfsg-2ubuntu6.1 \
+        libncurses-dev=6.4+20240113-1ubuntu2.1 \
+        libssl-dev=3.0.13-0ubuntu3.12 \
+        libssl3t64=3.0.13-0ubuntu3.12 \
+        libtool=2.4.7-7build1 \
+        libxml2-dev=2.9.14+dfsg-1.3ubuntu3.8 \
+        locales=2.39-0ubuntu8.8 \
+        m4=1.4.19-4build1 \
+        make=4.3-4.1build2 \
+        mariadb-client=1:10.11.14-0ubuntu0.24.04.1 \
+        ncurses-term=6.4+20240113-1ubuntu2.1 \
+        openssl=3.0.13-0ubuntu3.12 \
+        pkg-config=1.8.1-2build1 \
+        python3=3.12.3-0ubuntu2.1 \
+        python3-pip=24.0+dfsg-1ubuntu1.3 \
+        python3-venv=3.12.3-0ubuntu2.1 \
+        tar=1.35+dfsg-3ubuntu0.4 \
+        unzip=6.0-28ubuntu4.1 \
+        util-linux=2.39.3-9ubuntu6.5 \
+        wget=1.21.4-1ubuntu4.4 \
+        xz-utils=5.6.1+really5.4.5-1ubuntu0.3 \
+        zlib1g-dev=1:1.3.dfsg-3.1ubuntu2.1; \
     rm -rf /var/lib/apt/lists/*; \
     \
     echo '--- resolved toolchain versions (build-log evidence) ---'; \
@@ -388,6 +631,9 @@ RUN set -eu; \
     cmake --version; \
     python3 --version; \
     mariadb --version; \
+    \
+    echo '--- resolved package version set (build-log evidence for the snapshot pin) ---'; \
+    dpkg-query -W -f='${Package}=${Version}\n' | sort; \
     \
     echo '--- asserting the wide-character ncurses headers are present ---'; \
     test -f /usr/include/ncursesw/ncurses.h \
@@ -397,10 +643,9 @@ RUN set -eu; \
     test -f /usr/include/db.h \
       || { echo 'FATAL: db.h is absent; GnuCOBOL would configure with the indexed file handler DISABLED and the compiled menus would divert into sys002 and hang.' >&2; exit 1; }; \
     \
-    echo 'OK: system packages installed; ncursesw and Berkeley DB headers verified.'
+    echo "OK: system packages installed from snapshot ${APT_SNAPSHOT}; ncursesw and Berkeley DB headers verified."
 
 
-# -----------------------------------------------------------------------------
 #  THE MySQL CLIENT LIBRARY UNDER /usr/local/mysql -- MANDATORY, NOT OPTIONAL
 #
 #  Every RDBMS-touching compile in the frozen scripts hard-codes this prefix,
@@ -483,12 +728,70 @@ RUN set -eu; \
 #  no-concurrency rule (R-3), which governs scenario execution against the
 #  shared database.
 # -----------------------------------------------------------------------------
+#  SUPPLY-CHAIN INTEGRITY -- THE ARCHIVE IS VERIFIED BEFORE IT IS UNPACKED
+#  ----------------------------------------------------------------------
+#  The archive arrives through the build CONTEXT, so it is whatever bytes sat at
+#  that path when the build ran. That is a weaker guarantee than it looks:
+#  nothing about a COPY authenticates the file, the client library built here is
+#  linked into EVERY bridge, handler and loader of the oracle, and the oracle is
+#  the arbiter of correctness for the whole migration. A substituted archive
+#  would therefore compromise every answer the migration relies on, silently.
+#
+#  So the digest is checked FIRST and the build refuses to unpack on mismatch.
+#  This is also what makes the pinned version claim meaningful: without it,
+#  `MARIADB_CONNECTOR_C_VERSION=3.3.4` documents an intention rather than a fact.
+#
+#  A SAFE-MEMBER POLICY IS APPLIED TOO, and it is deliberately belt-and-braces:
+#  once the digest matches, the member list is known-good by construction. It is
+#  still enforced because the two controls fail independently -- the digest can
+#  only be re-pinned by a human editing this file, whereas the member policy
+#  catches the case where someone re-pins to a hostile archive. It rejects
+#  absolute paths, `..` traversal, symlinks and device nodes, any of which would
+#  let an archive write outside its extraction directory during unpacking.
+#
+#  This mirrors the identical control in `harness/build_oracle.sh`, so the two
+#  agree by construction rather than by convention.
+# -----------------------------------------------------------------------------
+ARG MARIADB_CONNECTOR_C_SHA256=599b29d55fc98ea6d8263eabdf4833248ea4a8d153be862ae86ad5d220d908b0
+
 COPY ${MARIADB_CONNECTOR_C_ZIP} /tmp/vendored/
 
 # hadolint ignore=DL3003
 RUN set -eu; \
     cd /tmp/vendored; \
+    if [ -z "${MARIADB_CONNECTOR_C_SHA256}" ]; then \
+        echo 'FATAL: MARIADB_CONNECTOR_C_SHA256 is empty; the supply-chain check cannot be bypassed.' >&2; \
+        exit 1; \
+    fi; \
+    echo "--- verifying ${MARIADB_CONNECTOR_C_ZIP} against its pinned SHA-256 ---"; \
+    echo "${MARIADB_CONNECTOR_C_SHA256}  ${MARIADB_CONNECTOR_C_ZIP}" > SHA256SUMS; \
+    sha256sum -c SHA256SUMS \
+      || { echo "FATAL: ${MARIADB_CONNECTOR_C_ZIP} failed its SHA-256 check; refusing to unpack an unverified archive." >&2; \
+           echo "       expected ${MARIADB_CONNECTOR_C_SHA256}" >&2; \
+           echo "       actual   $(sha256sum "${MARIADB_CONNECTOR_C_ZIP}" | cut -d" " -f1)" >&2; \
+           echo "       This library is linked into every bridge, handler and loader of the oracle." >&2; \
+           exit 1; }; \
+    rm -f SHA256SUMS; \
+    \
+    echo '--- safe-member policy: no absolute path, no .. escape, no symlink, no device node ---'; \
+    unzip -Z1 "${MARIADB_CONNECTOR_C_ZIP}" > /tmp/mcc-members.txt; \
+    if grep -qE '^/|^([A-Za-z]:)?[\\/]' /tmp/mcc-members.txt; then \
+        echo 'FATAL: the archive contains an absolute member path.' >&2; \
+        grep -m5 -E '^/|^([A-Za-z]:)?[\\/]' /tmp/mcc-members.txt >&2; exit 1; \
+    fi; \
+    if grep -qE '(^|/)\.\.(/|$)' /tmp/mcc-members.txt; then \
+        echo 'FATAL: the archive contains a parent-directory traversal member.' >&2; \
+        grep -m5 -E '(^|/)\.\.(/|$)' /tmp/mcc-members.txt >&2; exit 1; \
+    fi; \
+    rm -f /tmp/mcc-members.txt; \
+    \
     unzip -q "${MARIADB_CONNECTOR_C_ZIP}"; \
+    echo '--- post-extraction policy: no symlink or device node was materialised ---'; \
+    if [ -n "$(find . -type l -o -type b -o -type c -o -type p -o -type s | head -1)" ]; then \
+        echo 'FATAL: the archive materialised a symlink or device node; refusing to build from it.' >&2; \
+        find . -type l -o -type b -o -type c -o -type p -o -type s >&2; exit 1; \
+    fi; \
+    echo "OK: ${MARIADB_CONNECTOR_C_ZIP} verified and safely unpacked."; \
     src="mariadb-connector-c-${MARIADB_CONNECTOR_C_VERSION}-src"; \
     test -d "${src}" \
       || { echo "FATAL: expected ${src}/ inside ${MARIADB_CONNECTOR_C_ZIP}." >&2; exit 1; }; \
@@ -522,74 +825,17 @@ RUN set -eu; \
     echo 'OK: MySQL-compatible client library and headers in place under the frozen prefix.'
 
 
-
-# -----------------------------------------------------------------------------
 #  GnuCOBOL 3.2 FINAL -- BUILT FROM THE RELEASE TARBALL, NOT FROM APT
-#
-#  A distribution package is not acceptable here unless it can be PROVEN to be
-#  3.2 final, and distribution packages are commonly 3.1.x or 4.x. The release
-#  tarball is fetched from the GNU mirror and verified against the SHA-256 in
-#  the ARG block, so the arbiter's compiler is bit-reproducible.
-#
-#  `--prefix=/usr/local` is corroborated by the repository itself: lines 1-2 of
-#  [etc/ld.so.conf.d/gnucobol.conf] are `/usr/local/lib/gnucobol` and
-#  `/usr/local/lib`, which is precisely where a `--prefix=/usr/local` build
-#  places the default module search directory and libcob.
-#
-#  ############################################################################
-#  ##  CRITICAL: THE ISAM BACKEND. WITHOUT IT THE ORACLE HANGS.              ##
-#  ############################################################################
-#  The menus force COBOL INDEXED-FILE processing for the system parameter file
-#  regardless of whether the RDBMS is in use. [general/general.cbl:L385-L396]:
-#
-#      Open-System.
-#          move     zeros to File-System-Used
-#                            File-Duplicates-In-Use.
-#          move     "00" to  FA-RDBMS-Flat-Statuses.  *> Force Cobol proc.
-#          move     1 to File-Key-No.
-#          perform  System-Open-Input.
-#          if       fs-reply not = zero
-#                   move    "sys002" to ws-called
-#                   call    ws-called using ws-calling-data file-defs
-#                   perform System-Open
-#          end-if.
-#
-#  and the same pattern repeats at [general/general.cbl:L398-L417] for keys
-#  4, 2 and 1. If that indexed OPEN INPUT fails, control passes to `sys002`,
-#  which asks a human for the parameters -- so in a harness it blocks forever.
-#  A GnuCOBOL configured WITHOUT an indexed handler makes that failure certain.
-#
-#  Hence `--with-db`, documented by the tarball's own configure as
-#  "(GnuCOBOL) Use Berkeley DB >= 4.1 for ISAM I/O", and hence the assertion
-#  below that `cobc --info` reports a REAL handler rather than `disabled`.
-#  GnuCOBOL prints that line from `cobc/cobc.c:L2724-L2740`, where `WITH_DB`
-#  yields "BDB" and the fallback yields "disabled".
-#
-#  A SECOND interactive trap, noted here because avoiding it is the runner's
-#  and the scenarios' job rather than this image's:
-#  [general/general.cbl:L462-L463] `if scycle = zero  go to call-system-setup.`
-#  -- a zero accounting cycle also diverts into interactive setup, so every
-#  scenario must seed a non-zero cycle.
-#
-#  Other configure choices, each with its reason:
-#      --with-curses=ncursesw  the WIDE-character curses library, matching
-#                              [common/comp-common.sh:L18], which compiles
-#                              accept_numeric.c with -lncursesw and
-#                              -DHAVE_NCURSESW_NCURSES_H
-#      --with-math=gmp         GMP is mandatory for GnuCOBOL's decimal
-#                              arithmetic. This is the compiler's OWN
-#                              arithmetic support library; it is not a
-#                              directive and does not alter the DEFAULT
-#                              arithmetic the frozen recipe relies on (R-4)
-#      --with-json=cjson       JSON GENERATE support
-#      --with-xml2             XML GENERATE support (GnuCOBOL's default)
-#      --with-dl               the system dynamic loader, which is how
-#                              `cobc -m` modules are resolved at run time
-#
-#  Deliberately ABSENT: any `--enable-debug`, `--enable-cobc-internal-checks`,
-#  `--enable-debuglog` or `--enable-experimental`. The arbiter must be the
-#  maintainer's compiler, not a more talkative one.
-# -----------------------------------------------------------------------------
+#  Distribution packages are commonly 3.1.x or 4.x, so the release tarball is
+#  fetched and checked against the SHA-256 in the ARG block. Its
+#  `--prefix=/usr/local` is corroborated by lines 1-2 of the repository's own
+#  [etc/ld.so.conf.d/gnucobol.conf].
+#  CRITICAL: THE ISAM BACKEND -- WITHOUT IT THE ORACLE HANGS.
+#  [general/general.cbl:L385-L396] moves "00" to FA-RDBMS-Flat-Statuses to
+#  FORCE indexed processing of the system parameter file whatever the RDBMS
+#  setting, then on a non-zero fs-reply CALLs `sys002`, which asks a human --
+#  so in a harness it blocks forever. Keys 4, 2 and 1 repeat it at
+#  [:L398-L417]. Hence `--with-db`; [:L462-L463] diverts the same way.
 # hadolint ignore=DL3003
 RUN set -eu; \
     mkdir -p /tmp/gnucobol; \
@@ -636,29 +882,18 @@ RUN set -eu; \
     echo "OK: GnuCOBOL ${GNUCOBOL_VERSION} final installed under ${GNUCOBOL_PREFIX} with the BDB indexed file handler."
 
 
-# -----------------------------------------------------------------------------
 #  RUNTIME LOADER PATHS -- THE REPOSITORY'S OWN CONFIGURATION, VERBATIM
-#
-#  [etc/ld.so.conf.d/gnucobol.conf] is the SOLE file under `etc/` in the
-#  checkout. It is exactly four lines, and they are reproduced here in the SAME
-#  ORDER, because search order is part of the configuration:
-#
-#      /usr/local/lib/gnucobol      <- GnuCOBOL's default module directory
-#      /usr/local/lib               <- libcob
-#      /usr/local/mysql/lib         <- the client library (libmariadb.so.3)
-#      /usr/lib                     <- the distribution's own libraries
-#
-#  The repository's copy is READ and left UNTOUCHED -- the plan is explicit
-#  that this file "is read by the harness image build and left untouched". It
-#  is therefore transcribed here rather than COPYed, so that no build step can
-#  ever write back to it, and so that this layer works even when /repo is not
-#  mounted. The assertion below proves the transcription is exact, four lines
-#  and in order.
-#
-#  `LD_LIBRARY_PATH` repeats the two /usr/local entries as belt and braces
-#  alongside ldconfig, which matters when a harness script runs a freshly
-#  linked module before any further ldconfig.
-# -----------------------------------------------------------------------------
+#  [etc/ld.so.conf.d/gnucobol.conf] is the SOLE file under `etc/`. It is four
+#  lines exactly and they are reproduced below in the SAME ORDER, because
+#  search order is part of the configuration:
+#      /usr/local/lib/gnucobol   <- GnuCOBOL's default module directory
+#      /usr/local/lib            <- libcob
+#      /usr/local/mysql/lib      <- the client library (libmariadb.so.3)
+#      /usr/lib                  <- the distribution's own libraries
+#  The repository's copy is read and left UNTOUCHED, so it is transcribed here
+#  rather than COPYed: no build step can write back to it, and this layer works
+#  even when /repo is not mounted. `LD_LIBRARY_PATH` repeats the two /usr/local
+#  entries as belt and braces for a module linked before any later ldconfig.
 RUN set -eu; \
     printf '%s\n' \
         '/usr/local/lib/gnucobol' \
@@ -691,34 +926,15 @@ RUN set -eu; \
     echo 'OK: loader paths reproduce [etc/ld.so.conf.d/gnucobol.conf] exactly, and both libraries resolve.'
 
 
-
-# -----------------------------------------------------------------------------
 #  ORACLE BOOTSTRAP STEPS 1-3 -- INCLUDING THE BUILD RULE THAT WAS MISSING
-#
-#  STEP 1: unpack the vendored JC preSQL package.
-#  The archive holds 61 entries -- the `presql2-package/` directory entry plus
-#  60 members, which is the count the assertion below prints -- and contains
-#  `cobmysqlapi38.c`, `cobmysqlapi38.sh`, `presql2.cbl`, `presql2.sh`,
-#  `bldcopy2.*`, `prtschema2.*`, `preo.cbl`, `prei.scb`, `test1.cbl`,
-#  `presql2.param`, the READMEs and PDFs, plus `ACAS/`, `Variations/` and
-#  `old-apis/`. It is unpacked INSIDE the container -- the plan requires the
-#  vendored archives to be "unpacked inside the container and never modified in
-#  the checkout" -- and published at /opt/presql2-package.
-#
-#  ##########################################################################
-#  ##  STEP 2: THE RECOVERED BUILD RULE FOR cobmysqlapi.o                  ##
-#  ##########################################################################
-#  Every bridge, handler and loader compile links an object file that provides
-#  the C interface between COBOL and the MySQL client library --
-#  [common/comp-common.sh:L26], [:L32], [:L34], [:L51] all pass a bare
-#  `cobmysqlapi.o`, and so does [general/comp-gl.sh:L2-L5]. That object is
-#  ABSENT from the checkout and NO RULE ANYWHERE IN THE REPOSITORY BUILDS IT.
-#  Following the maintainer's compile scripts alone, the oracle cannot be built
-#  at all: the build dies at link time with no obvious cause.
-#
-#  The rule was recovered from the vendored translator package and is used here
-#  verbatim -- [presql2-package/cobmysqlapi38.sh]:
-#
+#  Steps 1-3 happen HERE and publish fixed paths: the vendored preSQL archive
+#  unpacked to /opt/presql2-package, `cobmysqlapi.o` at ${ACAS_LIB_DIR}, and
+#  `presql2` (plus `bldcopy2`) on the PATH. Steps 4-5 belong to
+#  `build_oracle.sh` at run time, needing a live database and a writable copy.
+#  STEP 2 IS THE RECOVERED RULE. Every bridge, handler and loader compile links
+#  a BARE `cobmysqlapi.o` that is ABSENT from the checkout and that NO RULE IN
+#  THE REPOSITORY BUILDS, so the frozen scripts alone die at link time with no
+#  obvious cause. The rule comes from the archive member `cobmysqlapi38.sh`:
 #      gcc -I/usr/local/mysql/include -c cobmysqlapi38.c -o cobmysqlapi.o -fPIC
 #
 #  `cobmysqlapi38.c` does `#include <mysql.h>` and `#include <libcob.h>`, which
@@ -814,12 +1030,72 @@ RUN set -eu; \
 #  Nothing in this layer is a `cobc` flag change: every command above is
 #  transcribed from a vendored `.sh` file (R-4).
 # -----------------------------------------------------------------------------
+#  SUPPLY-CHAIN INTEGRITY -- VERIFIED BEFORE UNPACKING, AND THE DIGEST IS SHARED
+#  ----------------------------------------------------------------------------
+#  This archive is the single most security-relevant input in the whole harness.
+#  It supplies BOTH the `presql2` translator that rewrites every `common/*MT.scb`
+#  into compilable COBOL AND `cobmysqlapi38.c`, the recovered C interface object
+#  that every bridge, handler and loader links. A substituted archive could
+#  therefore alter the generated bridges and the SQL the oracle actually issues
+#  -- which is to say it could change the answers the migration treats as
+#  ground truth, with no diff anywhere in the repository to reveal it.
+#
+#  ==> THE DIGEST BELOW MUST STAY EQUAL TO THE ONE IN harness/build_oracle.sh. <==
+#
+#  That is not a stylistic preference. `build_oracle.sh` verifies the same file
+#  with its own pinned digest and its diagnostics tell the operator that the two
+#  declarations must agree; if they diverged, that diagnostic would be a lie and
+#  an operator debugging a mismatch would be sent in the wrong direction. Change
+#  one only by changing both, in the same commit.
+#
+#  As with the connector archive, a safe-member policy is applied on top of the
+#  digest: absolute paths, `..` traversal, symlinks and device nodes are all
+#  rejected. The digest makes the member list known-good, but the two controls
+#  fail independently and the policy is what catches a re-pin to a hostile
+#  archive.
+# -----------------------------------------------------------------------------
+ARG PRESQL2_SHA256=638db9530d2fe008fbb46cf8600b9406f6f780c9fc59d0e0c94e868b4d615475
+
 COPY ${PRESQL2_ZIP} /tmp/presql2/
 
 # hadolint ignore=DL3003
 RUN set -eu; \
     cd /tmp/presql2; \
+    if [ -z "${PRESQL2_SHA256}" ]; then \
+        echo 'FATAL: PRESQL2_SHA256 is empty; the supply-chain check cannot be bypassed.' >&2; \
+        exit 1; \
+    fi; \
+    echo "--- verifying ${PRESQL2_ZIP} against its pinned SHA-256 ---"; \
+    echo "${PRESQL2_SHA256}  ${PRESQL2_ZIP}" > SHA256SUMS; \
+    sha256sum -c SHA256SUMS \
+      || { echo "FATAL: ${PRESQL2_ZIP} failed its SHA-256 check; refusing to unpack an unverified archive." >&2; \
+           echo "       expected ${PRESQL2_SHA256}" >&2; \
+           echo "       actual   $(sha256sum "${PRESQL2_ZIP}" | cut -d" " -f1)" >&2; \
+           echo "       This archive supplies presql2 (which rewrites every common/*MT.scb) and" >&2; \
+           echo "       cobmysqlapi38.c (which every bridge, handler and loader links)." >&2; \
+           echo "       The same digest is pinned in harness/build_oracle.sh; the two MUST agree." >&2; \
+           exit 1; }; \
+    rm -f SHA256SUMS; \
+    \
+    echo '--- safe-member policy: no absolute path, no .. escape, no symlink, no device node ---'; \
+    unzip -Z1 "${PRESQL2_ZIP}" > /tmp/presql2-members.txt; \
+    if grep -qE '^/|^([A-Za-z]:)?[\\/]' /tmp/presql2-members.txt; then \
+        echo 'FATAL: the archive contains an absolute member path.' >&2; \
+        grep -m5 -E '^/|^([A-Za-z]:)?[\\/]' /tmp/presql2-members.txt >&2; exit 1; \
+    fi; \
+    if grep -qE '(^|/)\.\.(/|$)' /tmp/presql2-members.txt; then \
+        echo 'FATAL: the archive contains a parent-directory traversal member.' >&2; \
+        grep -m5 -E '(^|/)\.\.(/|$)' /tmp/presql2-members.txt >&2; exit 1; \
+    fi; \
+    rm -f /tmp/presql2-members.txt; \
+    \
     unzip -q "${PRESQL2_ZIP}"; \
+    echo '--- post-extraction policy: no symlink or device node was materialised ---'; \
+    if [ -n "$(find . -type l -o -type b -o -type c -o -type p -o -type s | head -1)" ]; then \
+        echo 'FATAL: the archive materialised a symlink or device node; refusing to build from it.' >&2; \
+        find . -type l -o -type b -o -type c -o -type p -o -type s >&2; exit 1; \
+    fi; \
+    echo "OK: ${PRESQL2_ZIP} verified and safely unpacked."; \
     test -d presql2-package \
       || { echo "FATAL: expected presql2-package/ inside ${PRESQL2_ZIP}." >&2; exit 1; }; \
     mkdir -p /opt; \
@@ -892,39 +1168,17 @@ RUN set -eu; \
     echo "OK: bootstrap steps 1-3 complete -- /opt/presql2-package, ${ACAS_LIB_DIR}/cobmysqlapi.o, /usr/local/bin/{presql2,bldcopy2}."
 
 
-# -----------------------------------------------------------------------------
-#  END-TO-END TOOLCHAIN PROOF -- THE VENDORED WORKED ACAS EXAMPLE
-#
-#  This proves the WHOLE chain -- GnuCOBOL 3.2, the client library under the
-#  frozen prefix, and the recovered `cobmysqlapi.o` -- before the frozen tree is
-#  ever touched, and it does so by compiling a real generated ACAS bridge with
-#  the maintainer's own command line. [presql2-package/ACAS/comp-stockMT.sh]:
-#
-#      #presql2 stockMT.SCB stockMT.cbl        <- commented out in the package
-#      cobc -m stockMT.COB cobmysqlapi.o -L/usr/local/mysql/lib \
-#           -lmysqlclient -lz
-#
-#  Reproduced verbatim. A link error here is exactly the failure mode that the
-#  absent `cobmysqlapi.o` produces in the real build, where it appears with no
-#  obvious cause -- so a clean pass is high-value evidence and is worth a build
-#  layer of its own.
-#
-#  Two properties of this check matter:
-#    * it needs NO database. `cobc -m` compiles and links; it does not connect.
-#      (`presql2` would connect, which is why its line is commented out in the
-#      vendored script and is not run here either.)
-#    * it uses the VENDORED example, never the checkout. The frozen
-#      `common/*MT.cbl` are not compiled here, /repo is not read, and no
-#      artifact of this test survives the layer -- the scratch directory is
-#      removed, so nothing is baked into the image and nothing can perturb a
-#      later table dump.
-#
-#  An additional guard proves the ISAM backend WORKS rather than merely being
-#  configured, by compiling and running a throwaway program that creates,
-#  writes and reads an INDEXED file. This is the capability the forced indexed
-#  OPEN at [general/general.cbl:L385-L396] depends on; if it were absent the
-#  menus would CALL the interactive `sys002` and the harness would hang.
-# -----------------------------------------------------------------------------
+#  END-TO-END TOOLCHAIN SELF-CHECK -- THE VENDORED WORKED ACAS EXAMPLE
+#  This exercises the whole chain -- GnuCOBOL 3.2, the client library under the
+#  frozen prefix, and the recovered `cobmysqlapi.o` -- before the frozen tree
+#  is touched, by compiling a real generated ACAS bridge with the maintainer's
+#  own line, verbatim from archive member `comp-stockMT.sh`: `cobc -m
+#  stockMT.COB cobmysqlapi.o -L/usr/local/mysql/lib -lmysqlclient -lz`.
+#  Its `presql2` line is commented out in the package and is not run here
+#  either, so this needs NO database: `cobc -m` compiles and links only. It
+#  uses the VENDORED example, never the checkout -- the frozen `common/*MT.cbl`
+#  are not compiled and the scratch directory is removed. A second guard
+#  compiles and runs a throwaway INDEXED-file program; ISAM failure aborts.
 # hadolint ignore=DL3003
 RUN set -eu; \
     smoke=/tmp/acas-smoke; \
@@ -1003,8 +1257,6 @@ RUN set -eu; \
     echo 'OK: end-to-end toolchain proven, and INDEXED file I/O verified working.'
 
 
-
-# -----------------------------------------------------------------------------
 #  THE PYTHON SIDE -- EXACTLY THE REPOSITORY'S PINS, AND NOTHING ELSE
 #
 #  `requirements.txt` is copied from the build context (the repository root)
@@ -1055,11 +1307,52 @@ RUN set -eu; \
 #  `run_python_scenario.sh` runs `python -m acas_posting ...` against the
 #  repository working copy, and the harness tools are invoked by path.
 # -----------------------------------------------------------------------------
-COPY requirements.txt /opt/acas-harness/requirements.txt
+#  ALL THREE LOCK FILES, AND WHY
+#  ----------------------------
+#  The Python side is locked across THREE files, and this image needs every one
+#  of them:
+#
+#      requirements.txt          the SHIPPED runtime: the database driver,
+#                                SQLAlchemy (Core only) and their transitive
+#                                pins
+#      requirements-harness.txt  PyYAML -- read by nothing in `acas_posting`,
+#                                but required to parse harness/scenarios/*.yaml
+#      requirements-dev.txt      pytest and pytest-cov, which run the arithmetic,
+#                                scenario and determinism suites, plus their
+#                                transitive pins
+#
+#  Installing only the first would break this image outright: the assertions
+#  below import `yaml` and `pytest`, which live in the second and third files.
+#  The split exists so the SHIPPED artifact does not carry a test runner, and
+#  this image is where all three sets legitimately come together -- it is the
+#  one place that both runs the harness and executes the suites.
+#
+#  --require-hashes -- EVERY ARTIFACT IS AUTHENTICATED
+#  --------------------------------------------------
+#  A version pin (`name==1.2.3`) states WHICH release is wanted; it does not
+#  prove the bytes that arrive are that release. `--require-hashes` closes that
+#  gap: pip refuses to install any artifact whose SHA-256 is not declared in the
+#  lock file, so a compromised index, a poisoned cache or a hijacked mirror
+#  fails the build instead of silently substituting code into the arbiter.
+#
+#  It also makes the lock files self-enforcing in a way worth stating: under
+#  `--require-hashes` pip requires EVERY requirement, including every transitive
+#  one, to be pinned and hashed. An incomplete lock therefore cannot be
+#  installed at all rather than quietly resolving the gap at build time. The
+#  three files are complete and mutually disjoint, verified.
+#
+#  All three are passed to a SINGLE pip invocation so the resolver sees the
+#  union once and cannot satisfy one file's dependency with a different version
+#  than another's.
+# -----------------------------------------------------------------------------
+COPY requirements.txt requirements-harness.txt requirements-dev.txt /opt/acas-harness/
 
 RUN set -eu; \
-    python3 -m pip install --no-cache-dir --break-system-packages \
-        -r /opt/acas-harness/requirements.txt; \
+    echo '--- installing the locked Python set, every artifact hash-verified ---'; \
+    python3 -m pip install --no-cache-dir --break-system-packages --require-hashes \
+        -r /opt/acas-harness/requirements.txt \
+        -r /opt/acas-harness/requirements-harness.txt \
+        -r /opt/acas-harness/requirements-dev.txt; \
     \
     echo '--- interpreter identity (must be CPython 3.12.x) ---'; \
     python3 --version; \
@@ -1100,10 +1393,7 @@ RUN set -eu; \
     echo 'OK: the Python side is exactly the repository pin set.'
 
 
-
-# -----------------------------------------------------------------------------
 #  MOUNT POINTS -- THE READ-ONLY / WRITABLE SPLIT THE FROZEN TREE DEPENDS ON
-#
 #      /repo   the checkout, mounted READ-ONLY. The frozen COBOL, copybooks,
 #              bridges and `mysql/ACASDB.sql` are read in place from here.
 #      /build  a WRITABLE copy, made by `build_oracle.sh` before it runs the
@@ -1114,130 +1404,242 @@ RUN set -eu; \
 #      /data   the ledger data directory: COBOL indexed files and the flat seed
 #              files the loaders read.
 #      /out    dumps, normalised dumps and diff evidence.
-#
 #  /build/bin exists so that ACAS_BIN resolves; see the environment block.
+#
+#  THESE ARE EMPTY MOUNT POINTS, AND /build IS EMPTY UNTIL build_oracle.sh RUNS.
+#  This layer creates the four directories and nothing else. It deliberately does
+#  NOT pre-populate /build with a copy of the tree: the copy is made at run time
+#  from the read-only mount, so that what gets compiled is the checkout the
+#  operator actually mounted rather than whatever was baked into the image (R-6 --
+#  the arbiter must correspond to the commit under test, not to the build date).
+#
+#  ONE CONSEQUENCE MUST BE STATED HERE, BECAUSE IT IS EASY TO GET WRONG. WORKDIR
+#  is /build, so a RELATIVE invocation such as
+#      docker compose run --rm -T gnucobol harness/build_oracle.sh
+#  resolves to /build/harness/build_oracle.sh -- which does not exist on a fresh
+#  stack, nor after `docker compose down -v`, because /build is an empty named
+#  volume until the bootstrap copies the tree into it. The very first command of
+#  the protocol would fail with a file-not-found, before any script could explain
+#  why. EVERY harness script is therefore invoked BY ABSOLUTE PATH from the
+#  read-only mount, `/repo/harness/<script>`, and the canonical invocations in
+#  [harness/docker-compose.yml] are written that way. `build_oracle.sh` prescribes
+#  the same fix itself when its re-exec guard cannot recover: "Invoke
+#  $ACAS_REPO/harness/build_oracle.sh directly."
+#
+#  UNPRIVILEGED RUNTIME IDENTITY -- `acas`, uid 1001, gid 1001
+#
+#  This container is not a short-lived build step. The compose service idles and
+#  is exec'd into repeatedly: `build_oracle.sh`, then `seed.sh`, then a scenario
+#  run, then `dump_tables.py`, then `reset_db.sh`, then the Python side, then the
+#  diff -- a long-lived process, driving a compiled COBOL toolchain over data it
+#  did not author. Running all of that as root buys nothing and costs the usual:
+#  every write it makes lands root-owned in the `/data` and `/out` volumes the
+#  host shares, and any defect in the compiled programs -- which, per R-4, are
+#  reproduced WITH their defects and explicitly not hardened -- executes with
+#  full privilege.
+#
+#  So the image installs everything as root at BUILD time and drops to `acas`
+#  for RUN time. The split falls exactly where it should:
+#
+#      root-owned, world-readable, NOT writable by `acas`
+#          /usr/local/bin/{cobc,presql2,bldcopy2}   the toolchain
+#          /usr/local/lib/gnucobol, /usr/local/mysql the runtime libraries
+#          /usr/local/lib/acas/cobmysqlapi.o        read and copied, never rewritten
+#          /opt/presql2-package                     the unpacked vendored archive
+#          /repo                                    THE FROZEN CHECKOUT
+#
+#      acas-owned, writable
+#          /build      the writable copy the compile scripts work in
+#          /build/bin  so ACAS_BIN resolves
+#          /data       ledger data and the flat seed files
+#          /out        dumps, normalised dumps, diff evidence, build logs
+#          /home/acas  a real home, so relative-path artefacts have somewhere to
+#                      go and nothing falls back to /root
+#
+#  `/repo` STAYING ROOT-OWNED IS A FEATURE, NOT AN OVERSIGHT. It reinforces the
+#  read-only mount: even if the `:ro` flag were ever dropped from the compose
+#  file by accident, the runtime user still could not write the frozen tree.
+#  Defence in depth over exactly the guarantee this harness exists to protect.
+#
+#  THE NUMERIC IDS ARE FIXED DELIBERATELY. `/data` and `/out` are shared with the
+#  host, so file ownership must be predictable across rebuilds rather than
+#  whatever `useradd` happens to pick next. 1001:1001 is chosen because
+#  `ubuntu:24.04` already ships a `ubuntu` account at 1000:1000.
+#
+#  THE HARNESS SCRIPTS ALREADY ASSUME THIS. They were written not to require
+#  root and say so: `seed.sh` notes that "ldconfig needs privileges this script
+#  does not assume" and relies on LD_LIBRARY_PATH instead; `build_oracle.sh`
+#  treats a failed `ldconfig` as a warning rather than fatal; and its step 3
+#  install into /usr/local/bin is reached only when `presql2` is absent from the
+#  PATH -- which cannot happen in this image, because the build published it.
+#  Dropping privilege therefore changes no script and removes no capability.
+# -----------------------------------------------------------------------------
+#  OWNERSHIP -- the four writable paths are handed to the unprivileged runtime
+#  account created in the next layer, so the harness never needs root at run
+#  time. /repo stays root-owned: it is a READ-ONLY mount point and the runtime
+#  account must not be able to write to it even if the `:ro` flag were ever
+#  dropped by mistake. That is defence in depth for the frozen-artifact
+#  guarantee, and it costs nothing.
+# -----------------------------------------------------------------------------
+ARG ACAS_UID=1001
+ARG ACAS_GID=1001
+ARG ACAS_USER=acas
+
+RUN set -eu; \
+    echo '--- creating the unprivileged runtime identity acas (1001:1001) ---'; \
+    groupadd --gid 1001 acas; \
+    useradd --uid 1001 --gid 1001 --create-home --home-dir /home/acas \
+            --shell /bin/bash \
+            --comment 'ACAS posting-cycle oracle harness' acas; \
+    \
+    mkdir -p /repo /build /build/bin /data /out; \
+    chmod 0755 /repo /build /build/bin /data /out /home/acas; \
+    chown root:root /repo; \
+    chown -R acas:acas /build /data /out /home/acas; \
+    \
+    echo '--- asserting the ownership split ---'; \
+    for d in /build /build/bin /data /out /home/acas; do \
+        owner="$(stat -c '%U:%G' "$d")"; \
+        [ "${owner}" = 'acas:acas' ] \
+          || { echo "FATAL: ${d} is owned by ${owner}, not acas:acas; the unprivileged runtime could not write it." >&2; exit 1; }; \
+    done; \
+    repo_owner="$(stat -c '%U' /repo)"; \
+    [ "${repo_owner}" = 'root' ] \
+      || { echo "FATAL: /repo is owned by ${repo_owner}, not root; the frozen checkout must not be writable by the runtime user." >&2; exit 1; }; \
+    \
+    echo '--- asserting the acas user can actually write every writable path ---'; \
+    su -s /bin/sh -c 'set -eu; for d in /build /build/bin /data /out /home/acas; do probe="$d/.acas-write-probe"; : > "$probe"; rm -f "$probe"; done' acas \
+      || { echo 'FATAL: the acas user cannot write one of /build /build/bin /data /out /home/acas.' >&2; exit 1; }; \
+    \
+    echo '--- asserting the acas user CANNOT write the frozen mount point ---'; \
+    if su -s /bin/sh -c ': > /repo/.acas-write-probe' acas 2>/dev/null; then \
+        rm -f /repo/.acas-write-probe; \
+        echo 'FATAL: the acas user can write /repo. The frozen tree must be unwritable by the runtime user.' >&2; \
+        exit 1; \
+    fi; \
+    \
+    id acas; \
+    echo 'OK: /repo root-owned; /build, /build/bin, /data, /out and /home/acas owned by acas:acas.'
+
+
+# -----------------------------------------------------------------------------
+#  DROP ROOT -- THE CONTAINER RUNS AS AN UNPRIVILEGED ACCOUNT
+#
+#  Nothing this image does at RUN time needs root, and that is a MEASURED claim
+#  rather than an assumption. Everything that would have needed it is already
+#  done above, at BUILD time, and `harness/build_oracle.sh` detects and reuses
+#  the results instead of rebuilding them:
+#
+#    * `/usr/local/lib/acas/cobmysqlapi.o` is installed by the bootstrap layer,
+#      and step 2 of the build script takes the branch
+#      `if [[ -s "$published" ]]` -> "reusing the object
+#      harness/Dockerfile.gnucobol already built", skipping its own compile and
+#      its own write under /usr/local.
+#    * `/usr/local/bin/presql2` (and `bldcopy2`) are installed by the same
+#      layer, and step 3 takes the branch `if acas_have presql2` ->
+#      "presql2 is already on the PATH", skipping the `install ...
+#      /usr/local/bin/presql2` that would otherwise require root.
+#
+#  Verified by inspection of all four harness shell scripts: the only remaining
+#  runtime writes are to /build, /data, /out and /tmp, and there are ZERO
+#  `$HOME`-relative paths anywhere in them. The single privileged operation left
+#  is `ldconfig`, which `build_oracle.sh` ALREADY treats as optional -- it warns
+#  "ldconfig failed (root privileges are usually required)" and continues -- and
+#  which is unnecessary here because `LD_LIBRARY_PATH` is set below and the
+#  loader cache was refreshed at build time.
+#
+#  WHY THIS MATTERS FOR A FIXTURE IMAGE
+#  -----------------------------------
+#  The container mounts the repository at /repo. Running as root means the
+#  container's root IS host root for any bind mount, so a mistaken write escapes
+#  into the checkout with full privilege -- and the frozen-artifact guarantee is
+#  the single most important invariant of this migration. The `:ro` flag is the
+#  primary control; running unprivileged is the independent second one, and the
+#  two fail separately.
+#
+#  A FIXED, NON-ZERO UID IS USED DELIBERATELY
+#  -----------------------------------------
+#  The UID/GID are pinned as build arguments rather than left to `useradd`'s next
+#  free value, because they appear in the ownership of the named volumes
+#  (/build, /data, /out) and must therefore be STABLE across rebuilds -- an image
+#  rebuilt with a different UID would no longer own volumes created by the
+#  previous one. 1001 is chosen to sit outside the system range and clear of the
+#  base image's `ubuntu` account at 1000.
+#
+#  Override them if your host needs matching ownership on a bind mount:
+#      docker compose build --build-arg ACAS_UID=$(id -u) --build-arg ACAS_GID=$(id -g)
+#
+#  SET-USER-ID HELPERS ARE STRIPPED
+#  -------------------------------
+#  The base image inherits the distribution's usual set-user-ID binaries (`su`,
+#  `mount`, `passwd`, `newgrp`, `chsh`, `chfn`, `gpasswd`, `umount` and the
+#  shadow-group helpers). None is needed to compile COBOL or run a scenario, and
+#  each is a route by which a process could regain privilege. They are cleared
+#  here. This is defence in depth alongside `no-new-privileges:true` on the
+#  compose side, which already neuters the set-user-ID bit at the kernel level --
+#  both are kept because they fail independently.
 # -----------------------------------------------------------------------------
 RUN set -eu; \
-    mkdir -p /repo /build /build/bin /data /out; \
-    chmod 0755 /repo /build /build/bin /data /out; \
-    echo 'OK: /repo (read-only mount point), /build, /build/bin, /data and /out created.'
+    echo "--- creating the unprivileged runtime account ${ACAS_USER} (${ACAS_UID}:${ACAS_GID}) ---"; \
+    if [ "${ACAS_UID}" = '0' ] || [ "${ACAS_GID}" = '0' ]; then \
+        echo 'FATAL: ACAS_UID/ACAS_GID must not be 0; the point of this layer is to drop root.' >&2; \
+        exit 1; \
+    fi; \
+    groupadd --gid "${ACAS_GID}" "${ACAS_USER}"; \
+    useradd --uid "${ACAS_UID}" --gid "${ACAS_GID}" \
+            --home-dir "/home/${ACAS_USER}" --create-home \
+            --shell /bin/bash "${ACAS_USER}"; \
+    \
+    echo '--- handing the four writable paths to that account (/repo stays root-owned) ---'; \
+    chown -R "${ACAS_UID}:${ACAS_GID}" /build /data /out; \
+    chmod 0755 /build /build/bin /data /out; \
+    \
+    echo '--- clearing set-user-ID / set-group-ID bits ---'; \
+    find / -xdev -perm /6000 -type f -print -exec chmod -s {} + ; \
+    remaining="$(find / -xdev -perm /6000 -type f | wc -l)"; \
+    [ "${remaining}" = '0' ] \
+      || { echo "FATAL: ${remaining} set-user-ID/set-group-ID binaries remain." >&2; \
+           find / -xdev -perm /6000 -type f >&2; exit 1; }; \
+    \
+    echo '--- asserting the account can do everything the harness needs ---'; \
+    su -s /bin/bash -c 'test -w /build && test -w /build/bin && test -w /data && test -w /out' "${ACAS_USER}" \
+      || { echo 'FATAL: the runtime account cannot write to /build, /build/bin, /data or /out.' >&2; exit 1; }; \
+    su -s /bin/bash -c 'command -v cobc && command -v presql2 && command -v python3 && command -v mariadb && command -v script' "${ACAS_USER}" \
+      || { echo 'FATAL: the runtime account cannot reach cobc, presql2, python3, mariadb or script on its PATH.' >&2; exit 1; }; \
+    su -s /bin/bash -c 'test -s /usr/local/lib/acas/cobmysqlapi.o' "${ACAS_USER}" \
+      || { echo 'FATAL: the runtime account cannot read the published cobmysqlapi.o that step 2 of build_oracle.sh reuses.' >&2; exit 1; }; \
+    su -s /bin/bash -c 'cd /build && printf "%s\n" "       identification division." "       program-id. p." "       procedure division." "           display \"COBC-AS-USER-OK\"." "           stop run." > /build/.acas-user-probe.cbl && cobc -x -o /build/.acas-user-probe /build/.acas-user-probe.cbl && /build/.acas-user-probe' "${ACAS_USER}" \
+      || { echo 'FATAL: the unprivileged account cannot compile and run a COBOL program; the oracle build would fail at run time.' >&2; exit 1; }; \
+    rm -f /build/.acas-user-probe /build/.acas-user-probe.cbl; \
+    \
+    echo "OK: ${ACAS_USER} (${ACAS_UID}:${ACAS_GID}) owns /build, /data and /out, can compile COBOL, and set-*-ID helpers are cleared."
 
 
-# -----------------------------------------------------------------------------
 #  ENVIRONMENT CONTRACT
-#
-#  DATABASE -- the client-side half of the contract stated in the sibling image
-#  `harness/Dockerfile.mariadb`, which serves the schema at compose service
-#  name `mariadb` on port 3306. The names must agree across both images and the
-#  compose file; the values for user and password come from compose.
-#
-#  ACAS_DB_USER and ACAS_DB_PASSWORD are deliberately NOT declared here, and
-#  the sibling image gives the reason in the same words: defaulting
-#  ACAS_DB_PASSWORD to anything would put a credential in an image layer. They
-#  are named in this comment so the contract is still greppable and complete;
-#  `harness/docker-compose.yml` supplies both at run time, and
-#  `build_oracle.sh` reads them from the environment when it materialises
-#  `presql2.param`. Declaring even an empty ENV for them is avoided because
-#  BuildKit's own `SecretsUsedInArgOrEnv` lint exists precisely to stop a
-#  credential-shaped variable being recorded in image metadata -- suppressing
-#  that warning rather than heeding it would be the wrong instinct here.
-#
-#  ACAS_DB_SOCKET *is* declared, and empty, which means "connect over TCP" --
-#  the harness reaches the server by hostname, so no unix socket exists to
-#  name. An empty socket path is a routing choice, not a secret.
-#
-#  COBOL RUNTIME
-#      COBCPY / COB_COPY_DIR   the copybook search path. [comp-all.sh:L9-L10]
-#                              exports these itself as the RELATIVE
-#                              `../copybooks`, which is correct while the
-#                              scripts are cd'd into a ledger directory. The
-#                              absolute default here is compatible with that
-#                              and additionally makes ad-hoc `cobc` use work
-#                              from any directory; the frozen scripts still win
-#                              inside their own run, because they export their
-#                              own value.
-#      COB_LIBRARY_PATH        where the GnuCOBOL runtime looks for `cobc -m`
-#                              modules. Seeded with the SIX compile directories
-#                              in the maintainer's own order
-#                              [comp-all.sh:L15-L32] -- common, general, irs,
-#                              purchase, sales, stock -- followed by GnuCOBOL's
-#                              own default module directory, which is line 1 of
-#                              [etc/ld.so.conf.d/gnucobol.conf].
-#                              `build_oracle.sh` and both runners extend it.
-#      COB_EXIT_WAIT=off       stops the runtime pausing for a keypress when a
-#                              screen program ends. This removes ONLY a
-#                              terminal pause: the plan's rule for the
-#                              presentation layer is that accept prompts whose
-#                              sole effect is to block a terminal are dropped
-#                              entirely, while any control transfer around them
-#                              is preserved. It changes no computed value and
-#                              no table state -- and without it every scenario
-#                              run would hang.
-#
-#      NOT SET: COB_SCREEN_EXCEPTIONS and COB_SCREEN_ESC. The programs set
-#      these themselves at [general/general.cbl:L369-L370] (and likewise
-#      [general/gl000.cbl:L172-L173]) via `set ENVIRONMENT ... to "Y"`, so
-#      presetting them here would be redundant, and leaving them alone keeps
-#      the runtime environment demonstrably the programs' own.
-#
-#  ACAS PATHS -- ACAS_LEDGERS AND ACAS_BIN ARE BOTH LOAD-BEARING
-#      A hard, INTERACTIVE gate depends on them.
-#      [copybooks/Proc-Get-Env-Set-Files.cob:L20-L28]:
-#
-#          accept   ACAS_LEDGERS from Environment "ACAS_LEDGERS".
-#          accept   ACAS_BIN     from Environment "ACAS_BIN".
-#          if       ACAS_LEDGERS (1:1) = spaces
-#                or ACAS_BIN (1:1) = spaces
-#                   display SY009   at 0505 with erase eos highlight
-#                   display SY008   at 1210 with ...
-#                   accept ws-reply at 1243
-#                   stop run
-#          end-if
-#
-#      If EITHER is blank the program displays a message, waits on an ACCEPT
-#      and stops -- the same class of harness hang as the sys002 trap, and it is
-#      reached early because [general/general.cbl:L372] performs
-#      `zz020-Get-Program-Args`, which performs that section first. Both are
-#      therefore set here.
-#
-#      ACAS_LEDGERS must be an ABSOLUTE path, because
-#      [copybooks/Proc-Get-Env-Set-Files.cob:L30-L31] derives the platform
-#      delimiter from its first character:
-#          if  ACAS_LEDGERS (1:1) = "\" or "/"
-#              move ACAS_LEDGERS (1:1) to OS-Delimiter
-#      and `zz020-Set-the-Paths` then prefixes every file name with
-#      ACAS_LEDGERS + OS-Delimiter, so the value carries NO trailing delimiter.
-#
-#      ACAS_BIN is where the menus look for a backup script:
-#      [general/general.cbl:L489-L503] strings ACAS_BIN, the delimiter and the
-#      script name, calls `CBL_CHECK_FILE_EXIST`, and on a non-zero return
-#      moves the literal "No BackUp Script in Bin" into a displayed field.
-#      A missing script is NON-FATAL -- only the display changes -- but setting
-#      the variable and creating the directory makes the behaviour
-#      deterministic instead of dependent on the ambient environment.
-#
-#  TERMINAL -- the compiled menus REFUSE to run on a small terminal.
-#  [general/general.cbl:L374-L383]:
-#
-#      accept   ws-env-lines   from lines.
-#      if       ws-env-lines < 24
-#               display SY010    at 0101 with erase eos
-#               accept  ws-reply at 0133
-#               goback.
-#      accept   ws-env-Columns from Columns.
-#      if       ws-Env-Columns < 80
-#               display SY013    at 0101 with erase eos
-#               accept  ws-reply at 0133
-#               goback.
-#
-#  So TERM, LINES and COLUMNS are given defaults that satisfy the 24x80 floor.
-#  `run_cobol_scenario.sh` still allocates a pty (hence `util-linux` above);
-#  these defaults make the container's behaviour predictable rather than
-#  dependent on how it was attached.
-#
-#  BOOTSTRAP ARTIFACT PATHS -- published so `build_oracle.sh` can find and
-#  reuse steps 1-3 instead of repeating them.
-# -----------------------------------------------------------------------------
+#  DATABASE: the client half of the contract the sibling image states. The
+#  names must agree across both images and compose. `ACAS_DB_USER` and
+#  `ACAS_DB_PASSWORD` are deliberately NOT declared -- an ENV entry is
+#  permanent image metadata, which is why BuildKit's `SecretsUsedInArgOrEnv`
+#  lint exists; compose supplies both at run time. `ACAS_DB_SOCKET` IS declared
+#  empty, meaning TCP, which is a routing choice rather than a secret.
+#  COBOL RUNTIME: `COBCPY`/`COB_COPY_DIR` mirror the `../copybooks` that
+#  [comp-all.sh:L9-L10] exports; `COB_LIBRARY_PATH` is seeded with the six
+#  compile directories in the maintainer's order [comp-all.sh:L15-L32];
+#  `COB_EXIT_WAIT=off` removes only a terminal pause, without which every run
+#  hangs; `COB_SCREEN_*` are left to [general/general.cbl:L369-L370] itself.
+
+#  ACAS_LEDGERS AND ACAS_BIN ARE BOTH LOAD-BEARING -- AN INTERACTIVE GATE
+#  [copybooks/Proc-Get-Env-Set-Files.cob:L20-L28] accepts both from the
+#  environment and, if EITHER is blank, displays a message, waits on an ACCEPT
+#  and `stop run` -- the same class of hang as the `sys002` trap, reached early
+#  because [general/general.cbl:L372] performs `zz020-Get-Program-Args`.
+#  `ACAS_LEDGERS` must be ABSOLUTE and carry no trailing delimiter: [:L30-L31]
+#  derives the platform delimiter from its first character, and
+#  `zz020-Set-the-Paths` prefixes every file name with the pair. `ACAS_BIN` is
+#  where the menus look for a backup script [general/general.cbl:L489-L503]; a
+#  missing one is NON-FATAL, changing only a displayed field, but setting it
+#  makes the behaviour deterministic. TERMINAL: [:L374-L383] `goback`s below 24
+#  lines or 80 columns, so TERM, LINES and COLUMNS satisfy that 24x80 floor.
 ENV ACAS_DB_HOST=mariadb \
     ACAS_DB_PORT=3306 \
     ACAS_DB_NAME=ACASDB \
@@ -1261,13 +1663,19 @@ ENV ACAS_DB_HOST=mariadb \
     COLUMNS=80
 
 
-# -----------------------------------------------------------------------------
 #  WORKING DIRECTORY AND DEFAULT COMMAND
 #
 #  WORKDIR is /build -- the WRITABLE copy -- and deliberately NEVER /repo.
 #  Defaulting to the read-only checkout would invite exactly the writes that
 #  would damage the frozen tree, and a `cobc` run there would scatter `.prn`
 #  listings and `.so` modules through it.
+#
+#  BECAUSE /build STARTS EMPTY, NOTHING IS INVOKED RELATIVE TO IT. Every harness
+#  script is run by absolute path from the read-only mount --
+#  `/repo/harness/<script>` -- for the reason set out in full in the MOUNT POINTS
+#  block above. WORKDIR still matters: it is where the compile scripts do their
+#  work once the bootstrap has populated the tree, and it keeps any accidental
+#  relative write inside the writable volume rather than aimed at the checkout.
 #
 #  CMD is a plain shell because compose runs the harness scripts explicitly --
 #  `build_oracle.sh`, `seed.sh`, `reset_db.sh`, `run_cobol_scenario.sh`,
@@ -1280,8 +1688,37 @@ ENV ACAS_DB_HOST=mariadb \
 #
 #  No supervisor and no process manager is installed: a second concurrent
 #  scenario against the shared database would break the parity protocol.
+#
+#  USER is `acas`, and it is the LAST instruction that changes identity, so every
+#  layer above installed as root and everything below this line -- the idling
+#  service, every `docker compose exec`, every scenario run -- executes
+#  unprivileged. HOME is declared explicitly rather than left to be inherited:
+#  the base image's config carries `HOME=/root`, which the runtime user cannot
+#  write, and several artefacts the frozen programs create are named RELATIVELY
+#  -- `acas.param` [common/acas-get-params.cbl:L103] and `fh-logger.txt`
+#  [common/fhlogger.cbl:L111] are both plain relative assigns -- so an
+#  unwritable HOME is a real failure mode rather than a cosmetic one.
+#
+#  WORKDIR comes first so that it is created (if it were absent) as root and so
+#  the recorded working directory is unambiguous; /build is already acas-owned
+#  from the layer above.
+#
+#  Two consequences worth knowing when driving this image:
+#
+#    * `docker compose exec gnucobol bash` gives an UNPRIVILEGED shell. For a
+#      one-off diagnosis ask for root explicitly with `exec --user root`; the
+#      image does not grant it by default and installs no `sudo`.
+#    * `apt-get install` inside a running container will fail, and that is
+#      intended: the package set is snapshot-pinned and exactly versioned at
+#      build time, so an ad-hoc install would make the running arbiter differ
+#      from the one that was built.
 # -----------------------------------------------------------------------------
+USER ${ACAS_UID}:${ACAS_GID}
+
 WORKDIR /build
 
-CMD ["bash"]
+ENV HOME=/home/acas
 
+USER acas
+
+CMD ["bash"]

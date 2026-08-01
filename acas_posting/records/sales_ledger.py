@@ -10,13 +10,15 @@ added, nothing is renamed and nothing is put right.
     handler         acas012          [common/acas012.cbl]
     bridge          salesMT          [common/salesMT.cbl]
     MySQL table     SALEDGER-REC     37 columns, every one NOT NULL
+                                     [mysql/ACASDB.sql:L945-L984]
+    primary key     SALES-KEY        [mysql/ACASDB.sql:L983]
     copybook        copybooks/wssl.cob
     record          01  WS-Sales-Record.            [copybooks/wssl.cob:L12]
 
-This module holds no accounting logic. It declares no arithmetic, no
-predicate, no accessor and no check. It supplies field TYPES - and for this
-one record the field types are load-bearing to a degree no other record in
-the folder matches, which the next two sections explain before anything else.
+This module holds no accounting logic - no arithmetic, no predicate, no
+accessor, no check. It supplies field TYPES, and for this one record those
+types are load-bearing to a degree no other record in the folder matches,
+which the next two sections explain first.
 
 THE TWO-DIRECTION TYPING RULE (RULE R-2)
 ========================================
@@ -28,76 +30,63 @@ This record contains BOTH directions of the rule that follows from it, which
 is why the rule has to be stated as two clauses rather than one:
 
     a binary-family item carries NO `V`, so its scale is zero
-                                    -> `int`      nine fields, L43-L53
+                        -> `int`      ELEVEN items, L43-L53
     a `comp` or `comp-3` item WITH a `V` has a fractional part
-                                    -> `Decimal`  eight fields, L42 and
-                                                  L54-L63
+                        -> `Decimal`  NINE items, L42 and L54-L63
 
-"binary -> `int`" therefore holds ONLY at scale zero. Getting either clause
-backwards changes every stored value in the direction it is wrong:
+The eleven are `Sales-Late-Min` and `Sales-Late-Max` (`binary-short`,
+L43-L44) plus the nine `binary-long` at L45-L53, which are the group the Agent
+Action Plan names. The nine `Decimal` items are `Sales-Discount` [L42],
+`Sales-Current` and `Sales-Last` [L54-L55], `Turnover-Q1` through
+`Turnover-Q4` [L57-L60], the `STurnover-Q` redefines view [L62] and
+`Sales-Unapplied` [L63].
 
-    typing any of the nine `binary-short`/`binary-long` items as `Decimal`
-    carries a remainder the compiled program discards, silently repairing
-    anomalies A-8, A-9 and A-10 - see the next section;
-
-    typing `Sales-Discount pic 99v99 comp` [copybooks/wssl.cob:L42] as `int`
-    discards its pence, corrupting every discount. It is `comp`, but it has
-    a `V`, so it is `Decimal` at scale 2.
-
-The nine `int` items are `Sales-Late-Min` and `Sales-Late-Max`
-(`binary-short`, L43-L44) and `Sales-Limit`, `Sales-Activety`,
-`Sales-Last-Inv`, `Sales-Last-Pay`, `Sales-Average`, `Sales-Pay-Activety`,
-`Sales-Pay-Average`, `Sales-Pay-Worst`, `Sales-Create-Date` (`binary-long`,
-L45-L53). That is eleven items in two `binary` families; nine of them are the
-`binary-long` group the Agent Action Plan names. No binary floating-point
-value appears anywhere below.
+"binary -> `int`" therefore holds ONLY at scale zero, and getting either clause
+backwards changes every stored value in the direction it is wrong: typing any
+of the eleven binary items as `Decimal` carries a remainder the compiled
+program discards, silently repairing anomalies A-8, A-9 and A-10 - see the next
+section - while typing `Sales-Discount pic 99v99 comp`
+[copybooks/wssl.cob:L42] as `int` discards its pence, corrupting every
+discount. It is `comp`, but it has a `V`, so it is `Decimal` at scale 2.
 
 WHY THESE TYPES MAKE THREE DEFECTS REPRODUCIBLE (RULE R-4)
 ==========================================================
 Agent Action Plan section 0.6.1 calls the averaging defect "The highest-value
-finding" of the whole analysis, and states the consequence for this file
+finding" of the whole analysis and states the consequence for this file
 directly: because the statistics fields "are declared `binary-long`
-[copybooks/wssl.cob:L46-L52]", the truncation they take when a quotient is
-stored back into one of them is integer truncation - and that, in the plan's
-own words, "is exactly what makes the moving-average defect reproducible."
-
-Three registered anomalies depend on the types declared here. This module
-does not reproduce them - it makes them reproducible, and the program modules
-named beside each one do the reproducing:
+[copybooks/wssl.cob:L46-L52]", the truncation a stored quotient takes is
+integer truncation - and that, in the plan's own words, "is exactly what makes
+the moving-average defect reproducible." Three registered anomalies therefore
+depend on the types declared here. This module does not reproduce them; it
+makes them reproducible, and the modules named beside each do the reproducing:
 
     A-8   Double truncation of the running average. The accumulator
-          `03 work-2 pic s9(14) comp-3.` [sales/sl060.cbl:L206] has
-          FOURTEEN digits and scale ZERO, while the value added into it,
+          `03 work-2 pic s9(14) comp-3.` [sales/sl060.cbl:L206] has FOURTEEN
+          digits and scale ZERO, while the value added into it,
           `03 work-goods pic s9(7)v99 comp-3.` [sales/sl060.cbl:L218],
           carries two. Pence are therefore discarded on every accumulation
           [sales/sl060.cbl:L826], and the quotient that follows
           [sales/sl060.cbl:L827] discards its remainder as well, because the
           receiving field `Sales-Average` is an integer
-          [copybooks/wssl.cob:L49].
-          Reproduced by `programs/sl060_invoice_posting.py`.
+          [copybooks/wssl.cob:L49].  Reproduced by the `sl060` module.
     A-9   The credit-note path never steps its `Sales-Activety` counter, so
           the first credit note for a customer is dropped in silence
-          [sales/sl060.cbl:L832-L843].
-          Reproduced by `programs/sl060_invoice_posting.py`.
+          [sales/sl060.cbl:L832-L843].  Reproduced by the `sl060` module.
     A-10  Three mutually inconsistent guards on one averaging idiom
           [sales/sl060.cbl:L819], [sales/sl060.cbl:L835],
-          [sales/sl100.cbl:L506].
-          Reproduced by `programs/sl060_invoice_posting.py` and
-          `programs/sl100_cash_posting.py`.
+          [sales/sl100.cbl:L506].  Reproduced by `sl060` and `sl100`.
 
 Agent Action Plan section 0.6.1 closes the point: "Normalising them into one
 helper would be the single easiest way to fail this migration." Nothing below
-merges the three idioms, and nothing below computes an average at all. The
-truncation itself belongs to `acas_posting.cobol.arithmetic`, invoked from the
-program layer; this module never imports it (see LAYERING).
+merges the three idioms or computes an average at all; the truncation itself
+belongs to `acas_posting.cobol.arithmetic`, invoked from the program layer and
+never imported here (see LAYERING).
 
-THE THREE AVERAGING SITES - LOCATORS ONLY, ALL RE-READ FROM SOURCE
-=================================================================
-Recorded here so that `docs/migration/anomaly-log.md` and
-`docs/migration/traceability.md` can lift verified locators rather than
-approximate ones. Every line number below was read from the frozen source
-during this module's construction; where it disagreed with a secondary
-account, the source won (rule R-6).
+THE THREE AVERAGING SITES - LOCATORS ONLY, READ FROM THE FROZEN SOURCE
+======================================================================
+Recorded here so that the migration's anomaly log and traceability document
+can lift checked locators rather than approximate ones; rule R-6 puts the
+tie-breaker in the frozen source.
 
     ba000-Sales-Comp, a SECTION       [sales/sl060.cbl:L816]
         guard on TWO conditions           L819-L820
@@ -126,48 +115,41 @@ account, the source won (rule R-6).
         worst-days watermark              L513-L514
         `csp-exit.` L516, `exit.` L517
 
-CITATIONS CHECKED AND LEFT AS THE PLAN HAS THEM. A secondary account of this
-work proposed moving three `sl100` citations - the guard to L508, the product
-to L509 and the quotient to L513. Read directly, `sales/sl100.cbl` puts the
-guard at L506, the product at L507 and the quotient at L511, so the Agent
-Action Plan's own L506, L507 and L511 are exact and the proposed replacements
-are each two lines late. The plan's numbers stand; the proposal does not.
+The `sl100` guard is at L506, the product at L507 and the quotient at L511,
+which is what the Agent Action Plan cites; the three-line-later readings that
+place them at L508, L509 and L513 do not match the file.
 
 FOUR FURTHER DIVERGENCES BETWEEN THE "SAME" IDIOM
 =================================================
 Beyond the guard count, the missing counter step and the operand order, four
-more differences were measured. They are recorded because a migrator who
-smoothed any of them away would change a stored figure:
+more differences were counted, recorded because a migrator who smoothed any of
+them away would change a stored figure:
 
-    1. STORAGE CLASS AND CAPACITY, not scale. `sl060`'s accumulator is
-       packed decimal, `03 work-2 pic s9(14) comp-3.`
-       [sales/sl060.cbl:L206]. `sl100`'s accumulators are BINARY,
-       `03 work-a binary-long value zero.` and
-       `03 work-b binary-long value zero.` [sales/sl100.cbl:L182-L183].
-       BOTH are scale ZERO, so the guess that the cash path truncates once
-       where the invoice path truncates twice does not survive contact with
-       the source. What actually differs is the representation and the range
-       it can hold - fourteen decimal digits against a 32-bit signed integer.
-       Note that `sl060` ALSO declares `work-a` and `work-b`, and there they
-       are `pic s9(7)v99 comp-3` at scale 2 [sales/sl060.cbl:L207-L208]: the
-       same two names mean different storage in the two programs.
-    2. WHAT ENTERS THE ACCUMULATOR. In `sl060` a scale-2 money value enters
-       a scale-0 accumulator, which is where the pence go (A-8). In `sl100`
-       what enters is a day count [sales/sl100.cbl:L503], already integral,
-       so there are no pence to lose at that step - yet the quotient at
-       [sales/sl100.cbl:L511] still truncates.
+    1. STORAGE CLASS AND CAPACITY, not scale. `sl060`'s accumulator is packed
+       decimal, `03 work-2 pic s9(14) comp-3.` [sales/sl060.cbl:L206];
+       `sl100`'s are BINARY, `03 work-a binary-long value zero.` and
+       `03 work-b binary-long value zero.` [sales/sl100.cbl:L182-L183]. BOTH
+       are scale ZERO, so the guess that the cash path truncates once where
+       the invoice path truncates twice does not hold; what differs is range,
+       fourteen decimal digits against a 32-bit signed integer. `sl060` ALSO
+       declares `work-a` and `work-b`, at `pic s9(7)v99 comp-3` scale 2
+       [sales/sl060.cbl:L207-L208]: the same two names, different storage.
+    2. WHAT ENTERS THE ACCUMULATOR. In `sl060` a scale-2 money value enters a
+       scale-0 accumulator, which is where the pence go (A-8). In `sl100` what
+       enters is a day count [sales/sl100.cbl:L503], already integral, so no
+       pence are lost at that step - yet the quotient at [:L511] still
+       truncates.
     3. CONTROL-FLOW SHAPE. The two `sl060` sites are SECTIONS using `end-if`
-       [sales/sl060.cbl:L824], [sales/sl060.cbl:L840]; the `sl100` site is a
-       PARAGRAPH using period termination and a `go to csp-exit` early exit
+       [sales/sl060.cbl:L824], [:L840]; the `sl100` site is a PARAGRAPH using
+       period termination and a `go to csp-exit` early exit
        [sales/sl100.cbl:L500-L501].
     4. THE OPERAND ORDER DIVERGES IN SPELLING ONLY - do not over-read it.
        `sl060` writes the `INTO` form and `sl100` the `BY` form, so the two
-       statements are written in opposite orders. The quotient is
-       nevertheless the same in both: `INTO` names the divisor first and
-       `BY` names it second, and each site ends up taking accumulator over
-       counter. A migrator who reproduced "the opposite order" as an
-       inverted quotient would INTRODUCE a defect rather than preserve one.
-       Preserve the spelling at each site; do not invert the result.
+       statements read in opposite orders, but the quotient is the same in
+       both: `INTO` names the divisor first and `BY` names it second, so each
+       site takes accumulator over counter. A migrator who reproduced "the
+       opposite order" as an inverted quotient would INTRODUCE a defect rather
+       than preserve one. Preserve the spelling; do not invert the result.
 
 DRIFT AT THE BRIDGE BOUNDARY - FIVE KINDS, ALL LEFT UNSETTLED
 =============================================================
@@ -175,31 +157,20 @@ The bridge is not a transparent pipe. For several fields the copybook, the
 bridge host variable and the MySQL column disagree, and the disagreement
 changes values BEFORE any SQL executes. The host-variable group is
 `01 TD-SALEDGER-REC.` [common/salesMT.cbl:L284] with thirty-seven host
-variables at [common/salesMT.cbl:L285-L321], loaded by
-`bb000-HV-Load Section.` [common/salesMT.cbl:L1196].
+variables at [:L285-L321], loaded by `bb000-HV-Load Section.` [:L1196]. Every
+descriptor below reports the COPYBOOK view and only that; the disagreement is
+offered exactly as the dictionary records it, through `loader.drift_for(key)`
+and `FieldDescriptor.drift()`, and is settled nowhere in this file. Applying a
+bridge conversion belongs to the `acas012` handler module.
 
-Every descriptor below reports the COPYBOOK view and only the copybook view.
-The disagreement is offered exactly as the dictionary records it, through
-`loader.drift_for(key)` and `FieldDescriptor.drift()`, and it is settled
-nowhere in this file. Applying a bridge conversion belongs to
-`dal/acas012_sales.py`, at the boundary that performs it.
-
-KIND 1 - SIGNEDNESS LOSS. Registered as anomaly A-11, whose textbook case
-is this record's `Sales-Average`:
-
-    layer            declaration                              range
-    ---------------  ---------------------------------------  --------
-    copybook         `Sales-Average binary-long`              SIGNED
-                     [copybooks/wssl.cob:L49]
-    host variable    `HV-SALES-AVERAGE PIC  9(10) COMP`       unsigned
-                     [common/salesMT.cbl:L308]
-    MySQL column     `SALES-AVERAGE int(8) unsigned NOT NULL` unsigned
-                     [mysql/ACASDB.sql:L969]
-
+KIND 1 - SIGNEDNESS LOSS. Registered as anomaly A-11, whose textbook case is
+this record's `Sales-Average` - SIGNED as `binary-long`, unsigned as
+`HV-SALES-AVERAGE PIC  9(10) COMP` and unsigned again as `SALES-AVERAGE
+int(8) unsigned`, with all three locators set out on the attribute itself.
 Agent Action Plan section 0.6.2 states the consequence, verbatim: "a negative
 value computed in COBOL loses its sign at the bridge, not at the database - so
-the Python data-access layer must reproduce the bridge's conversion, not
-merely write the computed value and let MySQL complain."
+the Python data-access layer must reproduce the bridge's conversion, not merely
+write the computed value and let MySQL complain."
 
 THE NARROWING BLOCK IS ELEVEN HOST VARIABLES WIDE, NOT EIGHT. The Agent
 Action Plan cites [common/salesMT.cbl:L305-L312]. Read directly, the block of
@@ -217,80 +188,61 @@ field carries neither. The full map, copybook line to host-variable line:
     Sales-Last-Inv      L47 -> L306
     Sales-Last-Pay      L48 -> L307        Sales-Average       L49 -> L308
 
-KIND 2 - GROUP CONCATENATION, alphanumeric. `03 Sales-Address.`
-[copybooks/wssl.cob:L18] is a GROUP of two 48-character children
-[copybooks/wssl.cob:L19-L20]. The bridge declares ONE
-`HV-SALES-ADDRESS PIC X(96)` [common/salesMT.cbl:L287] and moves the group
-whole - `move Sales-ADDRESS to HV-SALES-ADDRESS` [common/salesMT.cbl:L1207],
-the bridge's own upper-case spelling of the name - and the column is a single
-`SALES-ADDRESS char(96)` [mysql/ACASDB.sql:L948]. So `Sales-Addr1` and
-`Sales-Addr2` have NO columns of their own. Both are declared here regardless,
-because rule R-3 forbids removing what the copybook declares.
+KIND 2 - GROUP CONCATENATION, alphanumeric. `SalesAddress`'s own docstring
+carries this in full. One note on where to look for it, since it is easy to
+look in the wrong place: `loader.drift_for("SALEDGER-REC.SALES-ADDRESS")`
+reports NO flags and no details, which is correct rather than a gap - a GROUP
+has no width of its own to compare against a column. The concatenation shows
+in the KEY LAYOUT instead, the parent owning the column-backed key while both
+children are copybook-only keys under `WS-Sales-Record.`.
 
-    A NOTE ON HOW THIS KIND SHOWS UP, since it is easy to look for it in the
-    wrong place: `loader.drift_for("SALEDGER-REC.SALES-ADDRESS")` reports NO
-    flags and no details. That is correct rather than a gap - a GROUP has no
-    width of its own to compare against a column, so there is nothing for a
-    field-by-field comparison to disagree about. The concatenation is visible
-    instead in the KEY LAYOUT: the parent group owns the column-backed key
-    `SALEDGER-REC.SALES-ADDRESS`, while both children are copybook-only keys
-    under `WS-Sales-Record.`. See DICTIONARY_KEYS below.
-
-KIND 3 - NAME TRUNCATION. `Sales-Create-Date` [copybooks/wssl.cob:L53]
-becomes `HV-SALES-CREATE-DAT` [common/salesMT.cbl:L312] and column
-`SALES-CREATE-DAT` [mysql/ACASDB.sql:L973] - the trailing `E` is dropped. The
-bridge's own move says so: `move Sales-CREATE-DATE to HV-SALES-CREATE-DAT`
-[common/salesMT.cbl:L1232]. This is precisely why keys are obtained from the
-dictionary and never assembled from an attribute name.
+KIND 3 - NAME TRUNCATION. `Sales-Create-Date` [copybooks/wssl.cob:L53] becomes
+`HV-SALES-CREATE-DAT` [common/salesMT.cbl:L312] and column `SALES-CREATE-DAT`
+[mysql/ACASDB.sql:L973] - the trailing `E` dropped, the bridge's own move
+saying so at [common/salesMT.cbl:L1232]. This is precisely why keys come from
+the dictionary and are never assembled from an attribute name.
 
 KIND 4 - TYPE-CLASS DRIFT, NUMERIC TO CHARACTER. `Sales-Stats-Date` is
 declared `pic 9(4)` [copybooks/wssl.cob:L64] - NUMERIC, zoned DISPLAY, four
 digits, scale 0 - yet the bridge declares `HV-SALES-STATS-DATE PIC X(4)`
 [common/salesMT.cbl:L320] and the column is `SALES-STATS-DATE char(4)`
-[mysql/ACASDB.sql:L981]. A numeric copybook field becomes an alphanumeric
-host variable and an alphanumeric column. No other record in this folder
-carries this kind. Its descriptor reports the COPYBOOK view and its attribute
-is therefore `int`, NOT `str`; the column's character view is reached through
-`loader.column_for` by the handler that writes it.
+[mysql/ACASDB.sql:L981]. No other record in this folder carries this kind. The
+descriptor reports the COPYBOOK view, so the attribute is `int` NOT `str`, and
+the column's character view is reached through `loader.column_for`.
 
 KIND 5 - DIGIT WIDENING. The `binary-short` pair widens to `9(05)`, the
-`binary-long` group to `9(10)`, and each single-digit zoned flag widens to
+`binary-long` group to `9(10)`, and each single-digit zoned flag to
 `9(03) COMP` - `Sales-Status pic 9.` [copybooks/wssl.cob:L25] becomes
 `HV-SALES-STATUS PIC  9(03) COMP` [common/salesMT.cbl:L292] and column
-`SALES-STATUS tinyint(1) unsigned` [mysql/ACASDB.sql:L953]. The value is
-unharmed; only the declared room for it changes.
+`SALES-STATUS tinyint(1) unsigned` [mysql/ACASDB.sql:L953]. Only the declared
+room changes; the value is unharmed.
 
 A CLEAN PASS-THROUGH, WHICH IS THE POINT OF A-11. Agent Action Plan section
 0.6.2 records that the drift is "specific rather than systemic", and the money
 fields prove it: `Sales-Current` and `Sales-Last pic s9(8)v99 comp-3`
 [copybooks/wssl.cob:L54-L55] become `PIC S9(08)V9(02) COMP`
 [common/salesMT.cbl:L313-L314] and `decimal(10,2)`
-[mysql/ACASDB.sql:L974-L975] - SIGNED at all three layers. The same holds for
-`Turnover-Q1` through `Turnover-Q4` [common/salesMT.cbl:L315-L318] and
-`Sales-Unapplied` [common/salesMT.cbl:L319]. Money keeps its sign; statistics
-lose theirs. That contrast is the whole of A-11.
-
-TRAILING SPACES ARE NOT THIS FILE'S BUSINESS. The bridge trims on the way out
-- `STRING FUNCTION TRIM (HV-SALES-ADDRESS,TRAILING)`
-[common/salesMT.cbl:L1332] - and the harness's dump-comparison step owns
-padding differences. Nothing here trims anything.
+[mysql/ACASDB.sql:L974-L975] - SIGNED at all three layers, as do the four
+turnovers [common/salesMT.cbl:L315-L318] and `Sales-Unapplied` [:L319]. Money
+keeps its sign; statistics lose theirs. That contrast is the whole of A-11.
+Padding is not this file's business either: the bridge trims on the way out,
+`STRING FUNCTION TRIM (HV-SALES-ADDRESS,TRAILING)` [:L1332], and the harness's
+dump-comparison step owns the difference.
 
 WHY EVERY COLUMN IS NOT NULL, AND WHY NO DEFAULT IS `None`
 ==========================================================
 The load paragraph opens with `initialize TD-SALEDGER-REC.`
-[common/salesMT.cbl:L1204], so a field the caller never set reaches SQL as
-zero or space and never as NULL. Agent Action Plan section 0.6.2, verbatim:
-"This is why every column in the schema can be declared NOT NULL and why the
-Python layer must default rather than omit." All 37 columns are `NOT NULL` and
-none carries a column default. Accordingly no attribute below defaults to
-`None`: numeric items default to `0` or `Decimal("0.00")`, and alphanumeric
-items default to SPACES at the declared width, which is what COBOL's own
-`INITIALIZE` stores.
+[common/salesMT.cbl:L1204], so a field the caller never set reaches SQL as zero
+or space, never as NULL. Agent Action Plan section 0.6.2, verbatim: "This is why
+every column in the schema can be declared NOT NULL and why the Python layer
+must default rather than omit." All 37 columns are `NOT NULL` with no column
+default, so no attribute below defaults to `None`: numeric items default to `0`
+or `Decimal("0.00")`, alphanumeric items to SPACES at the declared width.
 
 THE 37 COLUMNS, AND THE ARITHMETIC THAT REACHES 37
 ==================================================
-The copybook declares 40 elementary items once the `STurnover-Q` redefines
-view is set aside. From there:
+The copybook declares 41 elementary items; set the `STurnover-Q` redefines
+view aside and 40 remain. From there:
 
     40  elementary items in declaration order
    - 2  FILLER items, L40 and L68, which no column carries
@@ -298,26 +250,24 @@ view is set aside. From there:
    ----
     37  columns, matching the count in Agent Action Plan section 0.6.6
 
-Two further facts were measured rather than assumed. Those 40 items' byte
-lengths sum to exactly 300, matching the copybook header's own
-"rec size 300 bytes" [copybooks/wssl.cob:L7] - so unlike the batch record,
-whose declared length contradicts its field sum (A-15), THIS record's header
-and layout agree, and no such contradiction should be looked for here. And
-the redefines area balances exactly: `STurnover-Q` is 6 bytes occurring 4
-times, against `Turnover-Q1` through `Turnover-Q4` at 6 bytes each.
+Those 40 items' byte lengths sum to exactly 300, matching the copybook
+header's own "rec size 300 bytes" [copybooks/wssl.cob:L7] - so unlike the
+batch record, whose declared length contradicts its field sum (A-15), THIS
+record's header and layout agree and no such contradiction should be looked for
+here. The redefines area balances exactly, as `QuartersView` sets out.
 
 THE DEAD DECLARATION AT L14-L16 IS NOT MODELLED
 ===============================================
 `copybooks/wssl.cob` carries a commented-out redefinition of the key, three
 lines each prefixed `*>` [copybooks/wssl.cob:L14-L16]: a `filler redefines
 WS-Sales-Key` group with a six-occurrence `Array-K` character item and a
-`Check-Digit` numeric item. It is COMMENTED OUT, so GnuCOBOL never sees it and
-neither does this module. No attribute, no view and no key decomposition is
-declared for it, and no check digit is verified anywhere - rule R-3 permits
-nothing that the live copybook does not declare. Its presence is recorded
-here and nowhere else. `records/purchase_ledger.py` carries the identical dead
-block at [copybooks/wspl.cob:L15-L17]; neither is modelled, and the two
-modules share no code (see LAYERING).
+`Check-Digit` numeric item. Being COMMENTED OUT, GnuCOBOL never sees it and
+neither does this module - no attribute, no view, no key decomposition, and no
+check digit verified anywhere, rule R-3 permitting nothing the live copybook
+does not declare. Its presence is recorded here and nowhere else.
+`records/purchase_ledger.py` carries the identical dead block at
+[copybooks/wspl.cob:L15-L17], spelt `Array-k` with a lower-case k; neither is
+modelled and the two modules share no code (see LAYERING).
 
 DECLARATION BEATS COMMENT, ELEVEN TIMES
 =======================================
@@ -327,48 +277,39 @@ their comments read `*> 9999 comp` [copybooks/wssl.cob:L43-L44]. The nine
 `binary-long` items read `*> 9(8) comp` [copybooks/wssl.cob:L45-L53].
 
 THE DECLARATION GOVERNS. `binary-short` is a signed 16-bit integer at scale
-zero; `binary-long` is a signed 32-bit integer at scale zero. Neither digits
-nor scale nor signedness is taken from a comment, and `9999` and `9(8)` are
-not digit counts for any descriptor here - the dictionary supplies those from
-the declaration. Each stale comment is reproduced verbatim beside its
-attribute, with the locator, and labelled stale. It is not put right, because
-rule R-4 makes the source's oddities part of the specification.
+zero, `binary-long` a signed 32-bit one. Neither digits nor scale nor
+signedness is taken from a comment, and `9999` and `9(8)` are not digit counts
+for any descriptor here - the dictionary supplies those from the declaration.
+Each stale comment is reproduced verbatim beside its attribute, with the
+locator, labelled stale and not put right, because rule R-4 makes the source's
+oddities part of the specification.
 
 THE MISSPELLINGS TRAVEL ALL THE WAY TO THE COLUMN NAME
 ======================================================
-`Sales-Activety` [copybooks/wssl.cob:L46] and `Sales-Pay-Activety`
-[copybooks/wssl.cob:L50] are misspelled in the copybook, and the misspelling
-is carried through by the bridge - `HV-SALES-ACTIVETY`
-[common/salesMT.cbl:L305], `HV-SALES-PAY-ACTIVETY` [common/salesMT.cbl:L309] -
-and by the schema - `SALES-ACTIVETY` [mysql/ACASDB.sql:L966],
-`SALES-PAY-ACTIVETY` [mysql/ACASDB.sql:L970]. The spelling is therefore part
-of the dictionary key and of the SQL, not a typographical slip to be tidied:
-respelling it would break the lookup and the statement together. It is
-preserved exactly, everywhere, in every spelling this module writes.
+`Sales-Activety` [copybooks/wssl.cob:L46] and `Sales-Pay-Activety` [:L50] keep
+their misspelling through the bridge and into the schema, so it is part of the
+dictionary key and of the SQL rather than a slip to be tidied - respelling
+either would break the lookup and the statement together. Both attributes
+carry the full three-layer locator set.
 
 OTHER ODDITIES PRESERVED, WITH LOCATORS
 =======================================
     * `03 filler pic xxx.` [copybooks/wssl.cob:L40] spells its width as
       three `x` characters rather than `x(3)`. Recorded as written.
-    * `03 Sales-Partial-Ship-Flag` [copybooks/wssl.cob:L65] and its
-      `pic x.` [copybooks/wssl.cob:L66] occupy TWO physical lines. A
-      line-oriented reader takes L65 for a group and loses the picture.
-    * Three separate dated stamps mark the record's growth:
-      `*> added 15/01/18.` [copybooks/wssl.cob:L64],
-      `*> added 06/02/24` [copybooks/wssl.cob:L66] and
-      `*> added 17/03/24` [copybooks/wssl.cob:L67]. All three verbatim.
-    * The header explains why the trailing FILLER shrank instead of the
-      record growing: "06/02/24 Added Partial ship flag into the filler no
-      rec size / change. This to support Back Ordering etc, may be."
-      [copybooks/wssl.cob:L9-L10]. The maintainer's own "may be" is his, and
-      is kept.
-    * The record header also records its origin: "Record Definition For The
-      Sales Ledger" / "Taken from fdsel" [copybooks/wssl.cob:L3-L4], and
-      "rec size 300 bytes ** 02/11/10 plus cleanup"
-      [copybooks/wssl.cob:L7].
-    * `03 filler redefines Quarters.` [copybooks/wssl.cob:L61] is an
-      UNNAMED group. `QuartersView` below is a Python name for something
-      the copybook does not name at all.
+    * `03 Sales-Partial-Ship-Flag` [copybooks/wssl.cob:L65] and its `pic x.`
+      [copybooks/wssl.cob:L66] occupy TWO physical lines. A line-oriented
+      reader takes L65 for a group and loses the picture.
+    * Three dated stamps mark the record's growth, all verbatim:
+      `*> added 15/01/18.` [copybooks/wssl.cob:L64], `*> added 06/02/24`
+      [:L66] and `*> added 17/03/24` [:L67].
+    * The header explains why the trailing FILLER shrank instead of the record
+      growing - "06/02/24 Added Partial ship flag into the filler no rec size
+      / change. This to support Back Ordering etc, may be." [:L9-L10], the
+      maintainer's own "may be" kept - and records its origin, "Record
+      Definition For The Sales Ledger" / "Taken from fdsel" [:L3-L4] and "rec
+      size 300 bytes ** 02/11/10 plus cleanup" [:L7].
+    * `03 filler redefines Quarters.` [copybooks/wssl.cob:L61] is an UNNAMED
+      group; `QuartersView` names what the copybook does not name at all.
 
 CONDITION NAMES ARE CARRIED AS DATA HERE, EVALUATED ELSEWHERE
 =============================================================
@@ -381,63 +322,55 @@ Eight `88`-level condition names are declared on seven fields:
 
 Agent Action Plan section 0.4.1.4 assigns the PREDICATE to
 `acas_posting/cobol/condition_names.py`: "88-level condition name ->
-Predicate function over the record." This module therefore publishes the
-names and their value-clause text as data, through `CONDITION_NAMES`, and
-declares no predicate, no accessor and no enumeration of its own. The type is
-the dictionary's own `ConditionName`; a second definition of it here would be
-exactly the divergence rule R-4 exists to prevent.
-
-Each value is TEXT, never a number, and each is the value clause as written -
-so `Customer-Live` reads `1` while `Customer-Dead` reads `zero`
-[copybooks/wssl.cob:L26-L27], two spellings of one idea, both kept; and
-`Sales-BO-Set` keeps its quote characters, `"Y"`, so a one-character switch
-cannot be mistaken for a bare name.
+Predicate function over the record." This module therefore publishes the names
+and their value-clause text as data, through `CONDITION_NAMES`, and declares
+no predicate, accessor or enumeration of its own. Each value is TEXT, never a
+number, and is the clause as written - `Customer-Live` reads `1` while
+`Customer-Dead` reads `zero` [copybooks/wssl.cob:L26-L27], two spellings of
+one idea both kept, and `Sales-BO-Set` keeps its quotes, `"Y"`.
 
 THE OPEN ORACLE QUESTION - Q-3, SETTLED NOWHERE (RULE R-6)
 ==========================================================
 Rule R-6, verbatim: "Where a semantic question is ambiguous, the compiled
-program's observed behavior decides it, and each such resolution must be
-documented rather than settled silently."
+program's behaviour settles it, and each such resolution must be documented
+rather than settled silently."
 
 One such question is about this record, and the generated dictionary tags all
 eleven narrowed fields with it as ambiguity reference Q-3. Agent Action Plan
 section 0.6.8, verbatim: "A negative binary value through an unsigned host
 variable into an unsigned column. Section 0.6.2 establishes that the sign is
-lost; what the resulting stored value IS depends on the conversion the
-bridge's C interface performs, which must be measured rather than assumed."
+lost; what the resulting stored value IS depends on the conversion the bridge's
+C interface performs, which must be measured rather than assumed."
 
-Nothing below answers it. No two's-complement reinterpretation, no absolute
-value, no bit mask and no saturation is stored, implied or hinted at here.
-The descriptors report the signed copybook view; the measurement and its
-outcome belong to `docs/migration/ambiguity-resolutions.md`, and the
-conversion that follows from it belongs to `dal/acas012_sales.py`.
+Nothing below answers it. No two's-complement reinterpretation, absolute
+value, bit mask or saturation is stored, implied or hinted at. The descriptors
+report the signed copybook view; the measurement belongs to the migration's
+ambiguity-resolutions document and the conversion to the `acas012` handler.
 
 TRACEABILITY (RULE R-5)
 =======================
 Agent Action Plan section 0.8.1, verbatim: "Data dictionary first. The
-dictionary is generated from the bridge before record definitions are
-written, and every Python field definition cites its entry. This ordering is a
+dictionary is generated from the bridge before record definitions are written,
+and every Python field definition cites its entry. This ordering is a
 directive, not a preference - it is what prevents fields being transcribed by
-eye." And section 0.3.3: "Field metadata is therefore derived, not
-transcribed, which eliminates an entire class of transcription error across
-several hundred fields."
+eye."
 
 No picture clause, digit count, scale, sign position or storage class is typed
-by hand below. `DICTIONARY_KEYS` holds every key once, in copybook
-declaration order, and `FIELD_DESCRIPTORS` is built from it by lookup. A key
-is never assembled from an attribute name - two of them could not be, since
-`Sales-Create-Date` keys on `SALES-CREATE-DAT` and the two address children
-key on the copybook record rather than on any column. A mistyped key raises at
-import, because `FieldDescriptor.from_dictionary_key` refuses an unknown one.
+by hand below. `DICTIONARY_KEYS` holds 44 keys, one per declared field, in
+copybook declaration order, and `FIELD_DESCRIPTORS` is built from it by lookup.
+A key is never assembled from an attribute name - two could not be, since
+`Sales-Create-Date` keys on `SALES-CREATE-DAT` and the two address children key
+on the copybook record rather than any column - and a mistyped key raises at
+import, `FieldDescriptor.from_dictionary_key` refusing an unknown one.
 
-All 45 items of this record have dictionary entries - the 37 column-mapped
-ones plus eight copybook-only ones - so every descriptor here is built by
-`from_dictionary_key` and NONE needs `for_working_storage`. That factory is
-reserved for `work_records.py`, whose layouts belong to no copybook.
-
-`loader.cite(key)` returns the three-locator provenance string and is
-surfaced, never reimplemented. For this record it yields the worked example
-rule R-5 itself uses:
+The dictionary holds 45 entries for this copybook: 37 column-mapped and eight
+copybook-only. Forty-four of them are the fields keyed above; the
+forty-fifth is the `01` record's own entry, which no attribute keys on. Every
+descriptor here is therefore built by `from_dictionary_key`, and none states
+its metadata by hand - there is no factory for that, not even for the work-file
+layouts that belong to no copybook. `loader.cite(key)`
+returns the three-locator provenance string and is surfaced, never
+reimplemented. For this record it yields the worked example rule R-5 uses:
 
     SALEDGER-REC.SALES-AVERAGE  copybook=copybooks/wssl.cob:L49
     bridge=common/salesMT.cbl:L308  column=mysql/ACASDB.sql:L969
@@ -452,13 +385,13 @@ Forbidden, and each for a reason worth naming because each is a live
 temptation in exactly this file:
 
     `acas_posting.cobol.arithmetic`   the strongest one. The truncation that
-        makes A-8 visible lives there and is invoked from the program layer.
-        Importing it here would put accounting behaviour in a record layout.
-    `acas_posting.dal.acas012_sales`  owns the bridge's signedness loss. The
+        makes A-8 visible lives there and is invoked from the program layer;
+        importing it here would put accounting behaviour in a record layout.
+    the `acas012` handler module      owns the bridge's signedness loss - the
         drift above is described here and applied there.
-    `acas_posting.programs.*`         `sl055`, `sl060` and `sl100` own the
-        averages and mutate instances of this record.
-    `records/purchase_ledger.py`      a near-mirror layout, and the sharpest
+    the `sl055`, `sl060` and `sl100` program modules own the averages and
+        mutate instances of this record.
+    `records/purchase_ledger.py`      a near-mirror layout and the sharpest
         invitation to share code. Record modules never import one another.
     also `cli`, `clock`, `dates`, `workfiles`, `cobol.move`,
         `cobol.picture`, `cobol.usage`, `cobol.condition_names`,
@@ -470,49 +403,48 @@ being bookkeeping: "the arithmetic suite imports only `cobol` and `records`
 and touches no database, so it runs anywhere." One import reaching into `dal`
 would drag a database driver into that tier.
 
-`ConditionName` is imported from `acas_posting.dictionary.model`, the
-dictionary package's own object model, on the precedent
-`acas_posting/cobol/field.py` sets and documents for the same edge: the
-loader's whole return surface is built from those dataclasses, so importing
-one is the SAME architectural edge as importing the loader, whereas
-re-declaring it would create two competing definitions of one vocabulary.
-Nothing from `acas_posting.cobol.condition_names` is imported.
+`ConditionName` is imported from `acas_posting.dictionary.loader`, the one door
+section 0.4.3 opens onto the dictionary package. The loader's whole return
+surface is built from the object model's dataclasses and it re-exports them
+alongside its accessors, as bindings to the single definition rather than
+copies, so this module names the one type in the migration without reaching
+past the loader - whereas re-declaring it would create two competing
+definitions of one vocabulary. `acas_posting.dictionary.model` is therefore
+never imported here, and nothing from `acas_posting.cobol.condition_names` is
+imported either.
 
 DETERMINISM (RULE R-6)
 ======================
 Dataclass field order follows copybook declaration order, so a reader can set
-this module beside `copybooks/wssl.cob` and compare the two by eye. Every
-published collection is a tuple or a read-only mapping, never a list. There is
-no clock, no entropy source, no environment read and no process inspection
-anywhere below - note that `Sales-Last-Inv`, `Sales-Last-Pay`,
-`Sales-Create-Date` and `Sales-Stats-Date` are all date-bearing fields and not
-one of them consults one. The only import-time work is the dictionary
-loader's own lazy cached read, which every record module performs while its
-classes are being defined.
+this module beside `copybooks/wssl.cob` and compare by eye. Every published
+collection is a tuple or a read-only mapping, never a list. There is no clock,
+no entropy source, no environment read and no process inspection anywhere
+below - `Sales-Last-Inv`, `Sales-Last-Pay`, `Sales-Create-Date` and
+`Sales-Stats-Date` are all date-bearing and not one consults one. The only
+import-time work is the dictionary loader's own lazy cached read.
 
 NOT FROZEN, AND THAT IS DELIBERATE
 ==================================
 `WS-Sales-Record` is read, changed and rewritten in place by the posting
-steps, so these dataclasses are mutable. Not one of them is a frozen
-dataclass, and freezing them would do more than inconvenience a caller: a
-record that had to be copied to be changed invites a snapshot-and-rewrite
-shape, and that shape is what makes a lost-update defect AVOIDABLE, which is
-precisely the defect the IRS path already commits. Rule R-4 requires such
-defects stay reproducible. `slots=True` is used instead - it closes each class
-at its declared fields, so an attribute the copybook does not declare cannot
-be attached by accident, which is rule R-3 enforced by the language.
+steps, so these dataclasses are mutable. Not one is frozen, and freezing them
+would do more than inconvenience a caller: a record that had to be copied to
+be changed invites a snapshot-and-rewrite shape, and that shape is what makes
+a lost-update defect AVOIDABLE - precisely the defect the IRS path already
+commits, which rule R-4 requires stay reproducible. `slots=True` is used
+instead, closing each class at its declared fields so an attribute the
+copybook does not declare cannot be attached by accident (rule R-3 enforced by
+the language).
 
 RULE PROVENANCE
 ===============
 This project carries NO separate user rules document - `review_rules` reports
-that none was provided. The identifiers R-1 through R-6 cited above are the
-Agent Action Plan's own (section 0.7.2), and the plan is where their full text
+that none was provided - so the identifiers R-1 through R-6 cited above are the
+Agent Action Plan's own (section 0.7.2) and the plan is where their full text
 lives. Anomaly references A-n and ambiguity references Q-n are the generated
-dictionary's own, and are reachable from any descriptor through
-`anomaly_refs()` and `ambiguity_refs()`. The registers are
-`docs/migration/anomaly-log.md` and
-`docs/migration/ambiguity-resolutions.md`; the mapping this module feeds is
-`docs/migration/traceability.md`.
+dictionary's own, reachable from any descriptor through `anomaly_refs()` and
+`ambiguity_refs()`; their registers are the migration's anomaly log and
+ambiguity-resolutions document, and the mapping this module feeds is its
+traceability document.
 """
 
 from __future__ import annotations
@@ -526,14 +458,15 @@ from typing import Final
 from acas_posting.cobol.field import FieldDescriptor
 from acas_posting.dictionary import loader
 
-# The dictionary package's own object model. Imported for `ConditionName`
-# alone, on the precedent `acas_posting/cobol/field.py` sets and documents for
-# this edge (Agent Action Plan section 0.4.3): the loader's entire return
-# surface is built from these dataclasses, so importing one of them is the
-# same architectural edge as importing the loader itself. Re-declaring it here
-# would create a second, competing definition of one vocabulary, which is the
-# divergence rule R-4 exists to prevent.
-from acas_posting.dictionary.model import ConditionName
+# `ConditionName` alone, taken from the loader - the one door Agent Action Plan
+# section 0.4.3 opens from this layer onto the dictionary package. The loader's
+# entire return surface is built from the object model's dataclasses, and it
+# re-exports them alongside its accessors for exactly this reason (see its
+# `RE_EXPORTED_MODEL_NAMES`); each re-export is a BINDING to the single
+# definition, never a copy. Re-declaring the type here would create a second,
+# competing definition of one vocabulary, which is the divergence rule R-4 exists
+# to prevent.
+from acas_posting.dictionary.loader import ConditionName
 
 # Ordered by plain string comparison, so `tuple(__all__) == tuple(sorted(...))`
 # holds and a test can assert it in one line. That is a deliberate choice, not
@@ -559,9 +492,7 @@ __all__: Final[tuple[str, ...]] = (
 )
 
 
-# =============================================================================
 #  PROVENANCE - THE ENTITY SPINE, AS AGENT ACTION PLAN SECTION 0.2.1.1 GIVES IT
-# =============================================================================
 
 ENTITY_FACADE: Final[str] = "Sales"
 """The entity facade name in `copybooks/Proc-ACAS-FH-Calls.cob`.
@@ -575,7 +506,7 @@ module calls none of them and never reaches the data-access layer.
 FILE_HANDLER: Final[str] = "acas012"
 """The numbered handler program the posting steps CALL for this entity.
 
-Reproduced by `dal/acas012_sales.py` [common/acas012.cbl].
+Reproduced by the `acas012` handler module [common/acas012.cbl].
 """
 
 BRIDGE_PROGRAM: Final[str] = "salesMT"
@@ -616,34 +547,18 @@ because the `01` level is the class, not one of its attributes.
 """
 
 
-# =============================================================================
-#  THE KEY TABLE - EVERY DICTIONARY KEY, ONCE, IN DECLARATION ORDER
-# =============================================================================
-#
-# This tuple is the traceability table `docs/migration/traceability.md` lifts,
-# and it is the ONLY place in this module where a key appears. Left half: the
-# dotted attribute path, rooted at `WsSalesRecord`. Right half: the key,
-# obtained by looking the record up through
-# `loader.entries_for_copybook_record` and reading each entry's own
-# `copybook.name` - never by transforming an attribute name. Two of these keys
-# could not be derived from an attribute name at any rate:
-#
-#   * `Sales-Create-Date` keys on `SALEDGER-REC.SALES-CREATE-DAT`, the bridge
-#     having dropped the trailing `E` [common/salesMT.cbl:L312].
-#   * `Sales-Addr1` and `Sales-Addr2` key on the COPYBOOK RECORD, not on any
-#     column, because their parent group owns the only column between them
-#     [common/salesMT.cbl:L287].
-#
-# Order is the copybook's own, L13 through L68. It is NOT the loader's order:
-# `entries_for_copybook_record` returns the 37 column-mapped entries in column
-# ordinal order and appends the eight copybook-only ones, so declaration order
-# has to be stated here. Rule R-6 makes an observable order part of behaviour,
-# and for this record the order is also the byte layout - the 40 elementary
-# items sum to the 300 bytes the header declares [copybooks/wssl.cob:L7].
-#
-# A key that does not exist raises `loader.DictionaryKeyError` at import, from
-# inside `FieldDescriptor.from_dictionary_key`, so a typo cannot survive to
-# run time.
+#   THE KEY TABLE - EVERY DICTIONARY KEY, ONCE, IN DECLARATION ORDER
+# The traceability table the migration's own document lifts, and the ONLY place here a key
+# appears. Left half: the dotted attribute path rooted at `WsSalesRecord`. Right half: the key,
+# read from each entry's own `copybook.name` via `loader.entries_for_copybook_record` - never by
+# transforming an attribute name. Two could not be derived that way at any rate:
+# `Sales-Create-Date` keys on `SALEDGER-REC.SALES-CREATE-DAT`, the bridge having dropped the
+# trailing E [common/salesMT.cbl:L312]; `Sales-Addr1`/`Sales-Addr2` key on the copybook record
+# because their parent group owns the only column between them [common/salesMT.cbl:L287].
+# Order is the copybook's own, L13-L68, NOT the loader's, which returns the 37 column-mapped
+# entries in column-ordinal order then appends the eight copybook-only ones. Under R-6 that
+# order is part of behaviour, and here it is also the byte layout - 40 elementary items summing
+# to the header's 300 bytes [copybooks/wssl.cob:L7].
 
 _FIELD_KEYS: Final[tuple[tuple[str, str], ...]] = (
     # -- L13 .. L17 ------------------------------------------------------
@@ -732,8 +647,8 @@ Every descriptor reports the COPYBOOK view of its field - usage, digits,
 scale, signedness, sign position and Python carrier - and none is blended
 with the bridge or column view. Built entirely by
 `FieldDescriptor.from_dictionary_key`: all 45 items of this record have
-dictionary entries, so `for_working_storage` is needed for none of them and
-appears nowhere in this module.
+dictionary entries, so not one of them is described by hand anywhere in this
+module.
 
 The disagreement between the three layers is reached from a descriptor by
 `drift()`, and its registered references by `anomaly_refs()` and
@@ -808,25 +723,17 @@ enumeration for these eight names.
 """
 
 
-# =============================================================================
-#  DEFAULTS - WHAT `INITIALIZE` WOULD STORE, AND NOTHING CLEVERER
-# =============================================================================
-#
+#   DEFAULTS - WHAT `INITIALIZE` WOULD STORE, AND NOTHING CLEVERER
 # The bridge's load paragraph opens with `initialize TD-SALEDGER-REC.`
-# [common/salesMT.cbl:L1204], so an unset field reaches SQL as zero or space
-# and never as NULL, and every one of the 37 columns is NOT NULL with no
-# column default [mysql/ACASDB.sql:L945-L984]. Defaults below follow that:
-# never `None`, and never a sentinel of any kind.
-#
-# Alphanumeric items default to SPACES at the width the copybook declares,
-# taken from the field's own descriptor so that no width is retyped here. The
-# alternative, an empty string, was rejected for a stated reason: the record's
-# 40 elementary items sum to exactly the 300 bytes its header declares
-# [copybooks/wssl.cob:L7], and a space-filled default is the only one that
-# holds that true for a freshly built instance. Nothing pads, trims or
-# validates afterwards - this module declares no post-initialisation hook of
-# any kind, and storing a value at its declared width belongs instead to
-# `acas_posting.cobol.move`.
+# [common/salesMT.cbl:L1204], so an unset field reaches SQL as zero or space and never as NULL,
+# and all 37 columns are NOT NULL with no column default [mysql/ACASDB.sql:L945-L984]. Defaults
+# below follow that: never `None`, never a sentinel.
+# Alphanumeric items default to SPACES at the copybook's declared width, taken from the field's
+# own descriptor so no width is retyped. An empty string was rejected for a stated reason: the
+# 40 elementary items sum to exactly the header's 300 bytes [copybooks/wssl.cob:L7], and only a
+# space-filled default holds that true for a freshly built instance. Nothing pads, trims or
+# validates afterwards - no post-initialisation hook exists here, and storing a value at its
+# declared width belongs to `acas_posting.cobol.move`.
 
 _ZERO_MONEY: Final[Decimal] = Decimal("0.00")
 """Zero at scale 2, the scale every `comp-3` money field here declares.
@@ -869,9 +776,7 @@ def _spaces(path: str) -> str:
     return " " * width if width is not None else ""
 
 
-# =============================================================================
 #  THE SUBORDINATE GROUPS
-# =============================================================================
 
 
 @dataclass(slots=True)
@@ -983,54 +888,34 @@ class QuartersView:
     sturnover_q: tuple[Decimal, Decimal, Decimal, Decimal] = _QUARTER_ZEROS
 
 
-# =============================================================================
 #  THE RECORD
-# =============================================================================
 
 
 @dataclass(slots=True)
 class WsSalesRecord:
     """`01  WS-Sales-Record.` [copybooks/wssl.cob:L12] - a customer account.
 
-    The Sales Ledger account record: 37 attributes in copybook declaration
-    order, L13 through L68, backed by the 37 columns of `SALEDGER-REC`
-    [mysql/ACASDB.sql:L945-L984] through handler `acas012` and bridge
-    `salesMT`. Read, changed and rewritten in place by `sl055`, `sl060` and
-    `sl100`.
-
-    Set this class beside `copybooks/wssl.cob` and the two compare line for
-    line. Each attribute carries a comment holding its COBOL name verbatim,
-    its PICTURE or USAGE as written, any inline comment the maintainer left,
-    and its locator. Where a comment is marked STALE it contradicts the
-    declaration beside it and the DECLARATION governs - see this module's
-    docstring, which names all eleven such items.
-
-    THE TYPES ARE THE POINT. Nine of these attributes are `int` because their
-    items are `binary-short` or `binary-long` and therefore carry no
-    fractional part, and that integer truncation is what makes anomalies A-8,
-    A-9 and A-10 reproducible in the program modules. `sales_discount` is
-    `Decimal` because its item is `comp` WITH a `V`. Both directions of that
-    one rule live in this record; this module's docstring states them.
-
-    Mutable by design, and never a frozen dataclass: the posting steps change
-    an account in place, and a shape that forced a copy would make a
-    lost-update defect avoidable where rule R-4 requires it stay reproducible.
-    `slots=True` closes the class at these 37 fields, so an attribute the
-    copybook does not declare cannot be attached by accident (rule R-3).
-
-    No attribute defaults to `None`, because the bridge initialises its
-    host-variable group before loading [common/salesMT.cbl:L1204] and every
-    column is NOT NULL. There is no validation, no padding and no rounding on
-    construction.
+    37 attributes in copybook declaration order, L13 through L68, backed by the
+    37 columns of `SALEDGER-REC` [mysql/ACASDB.sql:L945-L984] through handler
+    `acas012` and bridge `salesMT`, and rewritten in place by `sl055`, `sl060`
+    and `sl100`. Set the class beside `copybooks/wssl.cob` and the two compare
+    line for line, each attribute carrying its COBOL declaration verbatim and
+    its locator. Where a comment is marked STALE it contradicts the declaration
+    beside it and the DECLARATION governs - this module's docstring names all
+    eleven such items. THE TYPES ARE THE POINT: eleven attributes are `int`
+    because their items are `binary-short` (two, L43-L44) or `binary-long` (nine,
+    L45-L53), and that integer truncation makes anomalies A-8, A-9 and A-10
+    reproducible, while `sales_discount` is `Decimal` because its item is `comp`
+    WITH a `V` - this module's docstring states both directions of that rule.
+    Mutable and never frozen: the posting steps change an account in place, and a
+    copy-forcing shape would make a lost-update defect avoidable, which R-4
+    forbids. No attribute defaults to `None`: the bridge initialises its
+    host-variable group [common/salesMT.cbl:L1204] and no column is nullable.
 
     Attributes:
-        ws_sales_key: `pic x(7)` - the account key and the table's primary
-            key. The copybook's commented-out redefinition of it
-            [copybooks/wssl.cob:L14-L16] is NOT modelled and no check digit
-            is verified here.
+        ws_sales_key: `pic x(7)` - account key and the table's primary key.
         sales_name: `pic x(30)` - the customer name.
-        sales_address: The two-line address group, whose two children share
-            ONE 96-character column.
+        sales_address: Two-line group; both children share ONE 96-char column.
         sales_phone: `pic x(13)`.
         sales_ext: `pic x(4)` - telephone extension.
         sales_email: `pic x(30)`.
@@ -1041,42 +926,36 @@ class WsSalesRecord:
         email_invoice: `pic 9` - e-mail the invoice.
         email_statement: `pic 9` - e-mail the statement.
         email_letters: `pic 9` - e-mail the reminder letters.
-        delivery_tag: `pic 9`. Column `DELIVERY-TAG`
-            [mysql/ACASDB.sql:L959] - a field of THIS table, not to be
-            confused with the out-of-scope delivery table.
+        delivery_tag: `pic 9` - a field of THIS table, not the delivery table.
         notes_tag: `pic 9`.
         filler_l40: FILLER, three characters, no column.
         sales_credit: `pic 99` - credit period in days.
-        sales_discount: `pic 99v99 comp` - `Decimal` at scale 2, unsigned.
+        sales_discount: `pic 99v99 comp` - `Decimal`, scale 2, unsigned.
         sales_late_min: `binary-short` - `int`, signed 16-bit.
         sales_late_max: `binary-short` - `int`, signed 16-bit.
         sales_limit: `binary-long` - `int`, signed 32-bit.
-        sales_activety: `binary-long` - `int`. Misspelt in the copybook, the
-            bridge and the column alike; the spelling is part of the key.
+        sales_activety: `binary-long` - `int`. Misspelt everywhere; A-9.
         sales_last_inv: `binary-long` - `int`, a day number.
         sales_last_pay: `binary-long` - `int`, a day number.
-        sales_average: `binary-long` - `int`. The textbook case of anomaly
-            A-11 and the field whose integer truncation makes A-8 visible.
+        sales_average: `binary-long` - `int`. A-11, and A-8's truncation.
         sales_pay_activety: `binary-long` - `int`. Misspelt as above.
         sales_pay_average: `binary-long` - `int`.
         sales_pay_worst: `binary-long` - `int`, a watermark.
-        sales_create_date: `binary-long` - `int`. Its column drops the
-            trailing `E`: `SALES-CREATE-DAT`.
+        sales_create_date: `binary-long` - `int`. Column drops the trailing `E`.
         sales_current: `pic s9(8)v99 comp-3` - `Decimal`, signed, scale 2.
         sales_last: `pic s9(8)v99 comp-3` - `Decimal`, signed, scale 2.
         quarters: The four named quarterly turnovers.
         quarters_view: The same 24 bytes as a four-element table.
         sales_unapplied: `pic s9(8)v99 comp-3` - `Decimal`, signed, scale 2.
-        sales_stats_date: `pic 9(4)` - NUMERIC in the copybook, `int` here,
-            though its column is `char(4)`.
-        sales_partial_ship_flag: `pic x` - back-order switch, declared across
-            two physical lines.
+        sales_stats_date: `pic 9(4)` - NUMERIC declared, `int` here, `char(4)`.
+        sales_partial_ship_flag: `pic x` - back-order switch, two lines.
         filler_l68: FILLER, five characters, no column.
     """
 
     # -- L13 ---------------------------------------------------------------
     # `03  WS-Sales-Key       pic x(7).`                                  L13
-    # Primary key `SALES-KEY char(7)` [mysql/ACASDB.sql:L946].
+    # Primary key `SALES-KEY char(7)` [mysql/ACASDB.sql:L946]; the
+    # `PRIMARY KEY (SALES-KEY)` clause is at [mysql/ACASDB.sql:L983].
     # L14-L16 commented-out redefinition NOT modelled - see module docstring.
     ws_sales_key: str = _spaces("ws_sales_key")
 
@@ -1159,7 +1038,6 @@ class WsSalesRecord:
     # declaration; the comment is reproduced verbatim and marked STALE, and
     # the DECLARATION governs. No digits, scale or signedness is taken from
     # any of them. All are `int`: no `V`, so no fractional part.
-    #
     # `03  Sales-Late-Min     binary-short. *> 9999 comp`                 L43
     # STALE comment: `binary-short` is a signed 16-bit integer, not `9999`.
     sales_late_min: int = 0
@@ -1258,7 +1136,7 @@ class WsSalesRecord:
     # `SALES-STATS-DATE char(4)` [mysql/ACASDB.sql:L981].
     # `int` here because a descriptor reports the COPYBOOK view. It is NOT
     # retyped `str` to agree with the column, and the two views are not
-    # reconciled: the conversion belongs to `dal/acas012_sales.py`, and the
+    # reconciled: the conversion belongs to the `acas012` handler module, and the
     # column's own view is reached through `loader.column_for`.
     sales_stats_date: int = 0
 

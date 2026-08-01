@@ -1,43 +1,32 @@
 """The COBOL PICTURE and data-description-entry parser.
 
-Agent Action Plan section 0.3.1 fixes this file in one line -
-`picture.py (PIC clause parser -> FieldDescriptor)` - and section 0.4.1.4
-states the transformation row in full, quoted verbatim:
+Agent Action Plan section 0.3.1 fixes this file as the PIC clause parser that
+yields a `FieldDescriptor`, and section 0.4.1.4 widens it to "all in-scope
+picture clauses ... and their redefines".
 
-    | `acas_posting/cobol/picture.py` | CREATE | `copybooks/*.cob` (all
-    in-scope picture clauses) | Parses `PIC 9(n)`, `9(n)V9(m)`,
-    `S9(n)V9(m)`, `X(n)`, `99` and their redefines into descriptors |
+AN ENTRY PARSER, NOT A STRING PARSER
+A REDEFINES clause is not part of a picture; it is a sibling clause on the
+same data-description entry. So this module reads a whole ENTRY - level, name,
+`REDEFINES`, `PIC`, usage, `SIGN`, `UNSIGNED`, `OCCURS` with its key and index
+phrases, `VALUE`, `BLANK WHEN ZERO` - and yields an
+`acas_posting.cobol.field.FieldDescriptor`. Two declarations show why nothing
+less would do:
 
-"AND THEIR REDEFINES" IS WHY THIS IS AN ENTRY PARSER, NOT A STRING PARSER
-=========================================================================
-A REDEFINES clause is not part of a picture: it is a sibling clause on the
-same data-description entry. So this module reads a whole ENTRY - its level
-number, its name, `REDEFINES`, `PIC`, the usage clause, the `SIGN` clause,
-`UNSIGNED`, `OCCURS` with its optional key and index phrases, `VALUE` and
-`BLANK WHEN ZERO` - and turns it into an
-`acas_posting.cobol.field.FieldDescriptor`. Four real declarations show why
-nothing less would do:
-
-    03  WS-Batch-Key9 redefines WS-Batch-Key
-                            pic 9(6).              [copybooks/wsbatch.cob:L20-L21]
-    05  Ledger-Q      pic s9(8)v99   comp-3   occurs  4.
-                                               [copybooks/wsledger.cob:L36]
     05  Vat-Rate redefines Vat-Rates pic 99v99 comp occurs 5.
                                                [copybooks/wssystem.cob:L61]
     03  CoA-Table   occurs 500
                      ascending key CoA-Desc
-                     indexed       CoA-Index.    [irs/irs030.cbl:L379-L381]
+                     indexed       CoA-Index.  [irs/irs030.cbl:L379-L381]
 
-The last one is the only in-scope site to write the OCCURS key and index
-phrases, and it omits the optional `BY`. Neither phrase changes storage - a key
-is a sort order, an index a subscript name - so both are RECORDED on
-`ParsedEntry` and acted on nowhere; this module implements no SEARCH.
+The second is the only in-scope site writing the OCCURS key and index phrases,
+and it omits the optional `BY`. Neither changes storage - a key is a sort order,
+an index a subscript name - so both are RECORDED on `ParsedEntry` and acted on
+nowhere; this module implements no SEARCH.
 
-WHAT THIS MODULE IS FOR
-=======================
-Every RECORD field already has its storage components pre-parsed in the
-generated dictionary, and `field.py` reads them from there through
-`FieldDescriptor.from_dictionary_key`. This module exists for the fields the
+WHY THIS MODULE EXISTS
+Every RECORD field already has its storage pre-parsed in the generated
+dictionary, which `field.py` reads through
+`FieldDescriptor.from_dictionary_key`. This module serves the fields the
 dictionary does NOT cover: PROGRAM-LOCAL WORKING STORAGE, which the in-scope
 cycle turns on.
 
@@ -62,18 +51,25 @@ That is sound rather than merely conventional: the dictionary's
 `sign_position`, `usage` and `character_length` pre-parsed, so `field.py` has
 no parsing to do and no reason to reach back here.
 
-Agent Action Plan section 0.4.3 gives the layer its whole permission set:
+Agent Action Plan section 0.4.3 gives the layer its whole permission set,
+quoted as the frozen plan writes it:
 
-    | Module group | MAY import                              | MUST NOT import |
-    |--------------|-----------------------------------------|-----------------|
-    | `cobol/*.py` | `dictionary.loader`, `dictionary.model` | `records`, `dal`|
-    |              | enums and dataclasses, plus the         | `programs`,     |
-    |              | standard library                        | `cli`, `harness`|
+    | Module group | MAY import            | MUST NOT import              |
+    |--------------|-----------------------|------------------------------|
+    | `cobol/*.py` | `dictionary.loader`   | `records`, `dal`, `programs` |
 
-For this file that resolves to the standard library, `dictionary.model`'s
-vocabularies, `cobol.field` and `cobol.usage`. Nothing else, and no
-third-party package at all: the pinned dependency set holds nothing this
-folder could use.
+For this file that resolves to the standard library, `dictionary.loader`,
+`cobol.field` and `cobol.usage`. Nothing else, and no third-party package at
+all: the pinned dependency set holds nothing this folder could use.
+
+The vocabularies this module is keyed on - `Usage`, `SignPosition`,
+`UsageDeclaredAt` and the locator pattern - are the dictionary object model's,
+and they arrive through `dictionary.loader`, which re-exports them for exactly
+this reason (see its `RE_EXPORTED_MODEL_NAMES`). Each re-export is a binding to
+the single definition rather than a copy, so there is one vocabulary in the
+migration and it is reached through the one door section 0.4.3 opens. Reaching
+the object model directly would breach that row; re-declaring the enumerations
+here would create the second source of truth rule R-5 exists to prevent.
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!  PARSE EVERYTHING. RENDER NOTHING.                                       !!
@@ -99,68 +95,48 @@ THE GRAMMAR IS CLOSED, SMALL AND MEASURED
 Every form below was counted across the 29 in-scope copybooks and the twelve
 in-scope programs rather than assumed.
 
-PLAIN PICTURES.  `x(n)` and repeated `x` runs [copybooks/wspost.cob:L24],
-[copybooks/wspost.cob:L17], [copybooks/wsfnctn.cob:L26],
-[copybooks/wsfnctn.cob:L38]; repeated `9` runs `9`, `99`, `999`, `9999`
-[copybooks/wsfnctn.cob:L23], [copybooks/wsbatch.cob:L23]; `9(n)`
-[copybooks/wspost.cob:L13], [copybooks/wsledger.cob:L14]; `9(n)v9(m)` and the
-mixed repeat forms [copybooks/wsbatch.cob:L41], [copybooks/wssl.cob:L42],
-[general/gl051.cbl:L178]; `s9(n)` [sales/sl060.cbl:L206]; `s9(n)v9(m)`
-[copybooks/wspost.cob:L23], [copybooks/wspost-irs.cob:L21]. Case is
-irrelevant - the copybooks write `pic s9(8)v99` in lower case while the
-generated bridges write `PIC S9(08)V9(02) COMP` in upper case with zero-padded
-repeat counts - so both are accepted.
+PLAIN PICTURES are the `x`, `9`, `v` and `s` forms in both repeat spellings,
+each cited at its own compiled pattern below. Case is irrelevant - the copybooks
+write `pic s9(8)v99` lower-case while the generated bridges write
+`PIC S9(08)V9(02) COMP` upper-case with zero-padded repeat counts - so both are
+accepted. `v99`, A LEADING `V` WITH NO INTEGER DIGITS, is real and implemented:
+twelve occurrences, e.g. [general/gl051.cbl:L189], yielding `digits=2,
+integer_digits=0, scale=2`.
 
-`v99` - A LEADING `V` WITH NO INTEGER DIGITS - IS REAL AND IS IMPLEMENTED.
-Twelve occurrences: [general/gl051.cbl:L189], [general/gl051.cbl:L193] and
-[general/gl051.cbl:L261]. It yields `digits=2, integer_digits=0, scale=2`.
+USAGE CLAUSES cover `comp-3`, bare `comp`, the `binary-char`/`-short`/`-long`
+family and the optional `unsigned` modifier; `COMPUTATIONAL`, `COMPUTATIONAL-3`
+and `COMP-5` round out the vocabulary, `COMP-5` being declared in bridge working
+storage [common/glpostingMT.scb:L256] and by no in-scope copybook field. Two
+facts a naive parser gets wrong:
+  * `COMP` MAY CARRY A SCALE - `pic 99v99 comp` [copybooks/wssl.cob:L42] is a
+    two-place binary item. `COMP` does not imply integer.
+  * A BINARY-FAMILY ITEM MAY HAVE NO PICTURE AT ALL - eleven such at
+    [copybooks/wssl.cob:L43-L53] and the run-date group at
+    [copybooks/wssystem.cob:L62-L69]. Such an item parses with `picture=None`
+    and `digits=None`, and its domain comes from `usage.value_domain`, which
+    reads the declared WIDTH.
 
-USAGE CLAUSES.  `comp-3` [copybooks/wsledger.cob:L28], bare `comp`
-[copybooks/wsfnctn.cob:L24], `binary-char` [copybooks/wssystem.cob:L62],
-`binary-short` [copybooks/wssl.cob:L43], `binary-long`
-[copybooks/wsbatch.cob:L36], and the optional `unsigned` modifier
-[copybooks/wssystem.cob:L65]. `COMPUTATIONAL`, `COMPUTATIONAL-3` and `COMP-5`
-are recognised for completeness of the vocabulary; `COMP-5` is declared in
-bridge working storage [common/glpostingMT.scb:L256] and by no in-scope
-copybook field.
+SIGN CLAUSES. Exactly two spellings occur and they are NOT unified:
+`sign leading` [copybooks/wspost-irs.cob:L21] and `sign is leading`
+[copybooks/irswspost.cob:L14]. Both map to `SignPosition.LEADING_INCLUDED` and
+both survive verbatim in `sign_clause_text` (rule R-4). The recognised set is
+imported from `usage.SIGN_LEADING_SPELLINGS` rather than retyped.
 
-TWO USAGE FACTS THAT A NAIVE PARSER GETS WRONG:
-  * `COMP` MAY CARRY A SCALE. `pic 99v99          comp`
-    [copybooks/wssl.cob:L42] and `pic 99v99 comp occurs 5`
-    [copybooks/wssystem.cob:L61] are two-place binary items. `COMP` does not
-    imply integer.
-  * A BINARY-FAMILY ITEM MAY HAVE NO PICTURE AT ALL. Four in one group at
-    [copybooks/wsbatch.cob:L36-L39], eleven at [copybooks/wssl.cob:L43-L53],
-    the run-date group at [copybooks/wssystem.cob:L62-L69], one at
-    [copybooks/wssystem.cob:L127], and two program-local ones at
-    [sales/sl100.cbl:L182-L183]. Such an item parses with `picture=None` and
-    `digits=None`, and its domain comes from `usage.value_domain`, which reads
-    the declared WIDTH.
+EDIT SYMBOLS. `Z`, `9`, an ACTUAL `.`, `B`, `CR`, `-`, plus `(n)` repetition
+and `BLANK WHEN ZERO`. The load-bearing edited picture is
+`pic 9999.99 blank when zero` [general/gl072.cbl:L233] and the widest is
+`z(9)9.99bb` [general/gl051.cbl:L331]. `BLANK WHEN ZERO` occurs 21 times in the
+programs and zero times in the copybooks.
 
-SIGN CLAUSES.  Exactly two spellings occur and they are NOT unified:
-`sign leading` [copybooks/wspost-irs.cob:L21], [copybooks/wspost-irs.cob:L25]
-and `sign is leading` [copybooks/irswspost.cob:L14],
-[copybooks/irswspost.cob:L18]. Both map to `SignPosition.LEADING_INCLUDED`
-and both survive verbatim in `sign_clause_text` (rule R-4). The recognised set
-is imported from `usage.SIGN_LEADING_SPELLINGS` rather than retyped, so the
-two files cannot drift apart.
-
-EDIT SYMBOLS.  Exactly `Z`, `9`, an ACTUAL `.`, `B`, `CR`, `-`, plus `(n)`
-repetition and the `BLANK WHEN ZERO` clause. Thirty distinct edited pictures
-occur across the twelve programs; the load-bearing one is
-`pic 9999.99 blank when zero` [general/gl072.cbl:L233], and the widest is
-`z(9)9.99bb` [general/gl051.cbl:L331]. `BLANK WHEN ZERO` occurs 21 times in
-the programs and ZERO times in the copybooks.
-
-CLAUSES AND FORMS MEASURED AT ZERO OCCURRENCES - NOT IMPLEMENTED, AND NOT
-SILENTLY ACCEPTED EITHER.  `P` scaling, `*` cheque protection, `$` and any
-currency sign, `,` as a thousands separator, `DB`, `+`, `/`, `0` insertion,
-`binary-double`, `sign trailing`, `SEPARATE`, `JUSTIFIED`, `SYNCHRONIZED`,
-`RENAMES`, `EXTERNAL`, `GLOBAL`, `INDEXED BY`, `DEPENDING ON`, and level
-numbers `66` and `78`. A picture carrying one of them comes back as a
-`PictureSpec` whose `is_recognised` is false and whose `unrecognised_reason`
-names the input verbatim, so the omission is visible in a result rather than
-buried in a guess.
+FORMS OCCURRING ZERO TIMES - NOT IMPLEMENTED, NOR SILENTLY ACCEPTED.
+`P` scaling, `*` cheque protection, `$` and any currency sign, `,` as a
+thousands separator, `DB`, `+`, `/`, `0` insertion, `binary-double`,
+`sign trailing`,
+`SEPARATE`, `JUSTIFIED`, `SYNCHRONIZED`, `RENAMES`, `EXTERNAL`, `GLOBAL`,
+`INDEXED BY`, `DEPENDING ON`, and levels `66` and `78`. A picture carrying one
+comes back as a `PictureSpec` whose `is_recognised` is false and whose
+`unrecognised_reason` names the input verbatim, so the omission shows up in a
+result rather than in a guess.
 
 `pic a` - THE ONE DEPARTURE FROM THAT LIST, STATED OPENLY
 ========================================================
@@ -176,175 +152,101 @@ lost update of anomaly A-5.
 
 So `A` IS recognised here, because a parser that refused it could not describe
 the very record the migrated section reads. What is NOT done is invent a
-vocabulary member for it: `dictionary.model.Usage` has no ALPHABETIC member
+vocabulary member for it: the `Usage` vocabulary has no ALPHABETIC member
 and rule R-3 forbids adding one, so such an item records the vocabulary's text
-class, `Usage.ALPHANUMERIC`, while `PictureSpec.is_alphabetic` and the
-verbatim `FieldDescriptor.picture` keep the distinction intact. Nothing about
-the frozen source is smoothed away and nothing is settled silently (rule R-6).
+class while `PictureSpec.is_alphabetic` and the verbatim
+`FieldDescriptor.picture` keep the distinction (rule R-6).
 
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!  GROUP-LEVEL USAGE INHERITANCE - THE HIGHEST-RISK DETAIL IN THE GRAMMAR  !!
-!!                                                                          !!
-!!  A USAGE clause may sit on a GROUP and be inherited by every             !!
-!!  subordinate item that declares none of its own. The four in-scope       !!
-!!  cases, with the group that carries the class and one of the fields      !!
-!!  that takes it:                                                          !!
-!!                                                                          !!
-!!  03  Amounts                comp-3.  [copybooks/wsbatch.cob:L40]         !!
-!!      05  Input-Gross  pic 9(9)v99.   [copybooks/wsbatch.cob:L41]         !!
-!!  03  Sales-Ledger-Data      comp-3.  [copybooks/wssys4.cob:L9]           !!
-!!      05  sl-payments  pic s9(8)v99.  [copybooks/wssys4.cob:L17]          !!
-!!  03  Purchase-Ledger-Data   comp-3.  [copybooks/wssys4.cob:L20]          !!
-!!      05  pl-payments  pic s9(8)v99.  [copybooks/wssys4.cob:L28]          !!
-!!  05  Vat-Rates              comp.    [copybooks/wssystem.cob:L55]        !!
-!!      07  Vat-Rate-1   pic 99v99.     [copybooks/wssystem.cob:L56]        !!
-!!  03  total-group  occurs 3  comp-3.  [sales/sl060.cbl:L219]              !!
-!!      05  total-net    pic s9(7)v99.  [sales/sl060.cbl:L220]              !!
-!!                                                                          !!
-!!  NOT ONE of those picture lines carries a usage clause. A parser         !!
-!!  that read usage from the picture line alone would class all four        !!
-!!  batch amounts and all twenty period totals as zoned DISPLAY, and        !!
-!!  EVERY STORED VALUE WOULD BE WRONG. Eighty-five fields of the            !!
-!!  generated dictionary inherit their storage this way, every one of       !!
-!!  them marked `UsageDeclaredAt.GROUP`; the last of the four cases         !!
-!!  carries an OCCURS as well, so the two clauses must not be confused      !!
-!!  for one another.                                                        !!
-!!                                                                          !!
-!!  `parse_entries` therefore maintains a LEVEL STACK and propagates        !!
-!!  group usage downward. `parse_entry`, which sees one entry in            !!
-!!  isolation, takes `inherited_usage` explicitly and NEVER defaults an     !!
-!!  unstated usage to DISPLAY when the caller has said a group usage        !!
-!!  applies.                                                                !!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+GROUP-LEVEL USAGE INHERITANCE - THE HIGHEST-RISK DETAIL IN THE GRAMMAR
+A USAGE clause may sit on a GROUP and be inherited by every subordinate item
+declaring none of its own. Four in-scope cases, each shown as carrier then
+inheritor:
+
+    03  Amounts              comp-3.  [copybooks/wsbatch.cob:L40]
+        05  Input-Gross  pic 9(9)v99. [copybooks/wsbatch.cob:L41]
+    03  total-group occurs 3 comp-3.  [sales/sl060.cbl:L219]
+        05  total-net   pic s9(7)v99. [sales/sl060.cbl:L220]
+
+The other two carriers are the period-total groups [copybooks/wssys4.cob:L9],
+[copybooks/wssys4.cob:L20] and the VAT rates [copybooks/wssystem.cob:L55]. NOT
+ONE of the inheriting picture lines carries a usage clause, so a parser reading
+usage from the picture line alone would class the batch amounts and the period
+totals as zoned DISPLAY and EVERY STORED VALUE WOULD BE WRONG. Eighty-five
+fields of the generated dictionary inherit storage this way, each marked
+`UsageDeclaredAt.GROUP`; the second case carries an OCCURS as well, so the two
+clauses must not be confused. `parse_entries` owns the two-pass level stack that
+gets this right and documents it; `parse_entry`, which sees one entry in
+isolation, takes `inherited_usage` explicitly and never defaults an unstated
+usage to DISPLAY when the caller has said a group usage applies.
 
 A DECLARATION IS NOT A LINE, AND A PERIOD IS NOT ALWAYS A TERMINATOR
-====================================================================
-Four in-scope entries put their picture on a continuation line, one of them
-splitting merely the name from the picture:
+Four in-scope entries put their picture on a continuation line, one splitting
+merely the name from the picture [copybooks/wsbatch.cob:L20-L21],
+[copybooks/wsledger.cob:L21-L22], [copybooks/wssl.cob:L65-L66],
+[copybooks/slwsinv.cob:L97-L98]; and a `VALUE` literal may continue across
+lines with `&`, as the 120-character heading at [general/gl072.cbl:L224-L226]
+does. So
+`join_continuations` accumulates physical lines until the terminating period.
 
-    03  WS-Batch-Key9 redefines WS-Batch-Key
-                            pic 9(6).       [copybooks/wsbatch.cob:L20-L21]
-    03  WS-Ledger-Key9 redefines WS-Ledger-Key
-                          pic 9(8).        [copybooks/wsledger.cob:L21-L22]
-    03  Sales-Partial-Ship-Flag
-                           pic x.          [copybooks/wssl.cob:L65-L66]
-    05  sil-Back-Ordered
-                           pic x.          [copybooks/slwsinv.cob:L97-L98]
+FINDING THAT PERIOD IS THE SUBTLE PART. COBOL's own rule is used: A PERIOD ENDS
+AN ENTRY ONLY WHEN IT IS OUTSIDE A LITERAL AND IS FOLLOWED BY WHITESPACE OR THE
+END OF THE TEXT. Split on the first period instead and
+`pic 9999.99 blank when zero.` [general/gl072.cbl:L233] loses its picture to
+`9999.`, while `value "."` [general/gl051.cbl:L188] and
+`value "gl071 (3.3.00)"` [general/gl071.cbl:L149] lose their entries entirely.
 
-and a `VALUE` literal may continue across lines with `&`, as the 120-character
-heading at [general/gl072.cbl:L224-L226] does. So `join_continuations`
-accumulates physical lines until the entry's terminating period.
-
-FINDING THAT PERIOD IS THE SUBTLE PART, and getting it wrong is catastrophic
-rather than merely wrong. COBOL's own rule is used: A PERIOD ENDS AN ENTRY
-ONLY WHEN IT IS OUTSIDE A LITERAL AND IS FOLLOWED BY WHITESPACE OR THE END OF
-THE TEXT. Four declarations prove each half of it:
-
-    03  l6-account      pic 9999.99 blank when zero.
-                                          [general/gl072.cbl:L233]
-    03  display-vat     pic z9.99.        [general/gl051.cbl:L165]
-    03  ws-period1      pic x     value ".".
-                                          [general/gl051.cbl:L188]
-    77  prog-name       pic x(15)       value "gl071 (3.3.00)".
-                                          [general/gl071.cbl:L149]
-
-Split on the first period and the first two lose their pictures to `9999.` and
-`z9.`, and the last two lose their entries entirely.
-
-A LITERAL NEED NOT BE PRECEDED BY A SPACE, either. One in-scope declaration
-writes its opening quote hard against the keyword:
-
-    03  filler   pic x(65)   value" Old Balance    New Balance    Payment
-                             Deduction   Apportioned".
-                                          [purchase/pl100.cbl:L234]
-
-The compiler reads it, so this grammar reads it (rule R-6): a literal always
-begins and ends a token of its own, whatever abuts it.
-
-A `>>` COMPILER DIRECTIVE CARRIES NO PERIOD AT ALL - `>>source free` is line 1
-of [copybooks/wsmaps03.cob:L1] and of every one of the twelve in-scope
-programs - so a directive line is emitted as a unit of its own. Without that,
-the joiner swallows the rest of the file.
+A LITERAL NEED NOT BE PRECEDED BY A SPACE either - one declaration writes its
+opening quote hard against the keyword [purchase/pl100.cbl:L234]. The compiler
+reads it, so this grammar reads it (rule R-6): a literal always begins and ends
+a token of its own, whatever abuts it. And a `>>` COMPILER DIRECTIVE CARRIES NO
+PERIOD AT ALL - `>>source free` is line 1 of [copybooks/wsmaps03.cob:L1] and of
+every one of the twelve programs - so a directive line is emitted as a unit of
+its own. Without that, the joiner swallows the rest of the file.
 
 COMMENTS ARE STRIPPED BEFORE PARSING, AND NEVER LEARNED FROM
-============================================================
-Rule R-4 in one sentence: the maintainer's comments state digit counts that
-contradict his own declarations, and the declaration wins.
-
-    03  Sales-Late-Min     binary-short. *> 9999 comp  [copybooks/wssl.cob:L43]
-    03  Sales-Limit        binary-long. *> 9(8) comp  [copybooks/wssl.cob:L45]
-    05  Page-Lines      binary-char  unsigned. *> 999.  [copybooks/wssystem.cob:L65]
-
-Sixteen bits are not four digits, thirty-two are not eight, and an unsigned
-byte spans 0 to 255 rather than 0 to 999. The ruling is to trust the
-declaration and resolve nothing, so this module never sees those comments:
-`strip_comments` removes them first, and no digit count is ever derived from
-one. Stripping is QUOTE-AWARE, because `*>` also follows a literal on the
-same line - `copy "file00.cob".    *> "system"`
-[copybooks/wsnames.cob:L17].
+Rule R-4 in one sentence: three of the maintainer's comments state digit counts
+that contradict his own declarations [copybooks/wssl.cob:L43],
+[copybooks/wssl.cob:L45], [copybooks/wssystem.cob:L65], and the declaration
+wins. So the parser is never shown a comment: `strip_comments` removes them
+first, quote-aware because `*>` also follows a literal on the same line
+[copybooks/wsnames.cob:L17]. That function states the three contradictions and
+the quote rule in full.
 
 `88`-LEVEL CONDITION NAMES ARE NOT FIELDS
-=========================================
-They are part of the data description and they get no descriptor. All six
-in-scope shapes are recognised and handed on for
-`acas_posting/cobol/condition_names.py` to turn into predicates:
+They are part of the data description and get no descriptor. Every in-scope
+value shape is recognised and handed on to `condition_names.py`: a numeric
+value [copybooks/wsfnctn.cob:L89], a figurative [copybooks/wssl.cob:L27], a
+`values` list [copybooks/wssystem.cob:L101], a `thru` range
+[copybooks/wssystem.cob:L122], a quoted literal [copybooks/wssystem.cob:L180]
+and the `value is` spelling [copybooks/irswsnl.cob:L13]. Every value is carried
+as `str`, matching `model.ConditionName.value`, and a QUOTED LITERAL KEEPS ITS
+QUOTES, so `'"Y"'` is unambiguous next to `"zero"`.
 
-    88  fn-open            value 1.            [copybooks/wsfnctn.cob:L89]
-    88  Customer-Dead      value zero.         [copybooks/wssl.cob:L27]
-    88  valid-os-type      values 1 2 3 4 5 6. [copybooks/wssystem.cob:L101]
-    88  OS-Single          values 1 2 4.       [copybooks/wssystem.cob:L109]
-    88  FS-Valid-Options   values 0 thru 1.    [copybooks/wssystem.cob:L122]
-    88  IRS-Used           value "Y".          [copybooks/wssystem.cob:L180]
-    88  Owner              value is "O".       [copybooks/irswsnl.cob:L13]
+PROVENANCE IS MANDATORY (rule R-5)
+`FieldDescriptor` requires either a `dictionary_key` or a `source_locator`.
+Every descriptor built here is for a field the dictionary does not cover, so it
+can only ever have the second; `source_locator` is therefore a REQUIRED keyword
+argument on every public entry point producing one, and `parse_entries` derives
+each entry's locator from the source path and the line the entry begins on.
+Beyond that, every grammar rule and branch below cites at least one exemplar
+`[path:Lnnn]` from the census, so a reader can check the rule against the frozen
+source that motivated it.
 
-Every value is carried as `str`, matching `model.ConditionName.value`, and a
-QUOTED LITERAL KEEPS ITS QUOTES, so `'"Y"'` is unambiguous next to `"zero"`.
-
-PROVENANCE IS MANDATORY  (rule R-5)
-===================================
-`FieldDescriptor` enforces an invariant: an instance must carry either a
-`dictionary_key` or a `source_locator` matching
-`model.SOURCE_LOCATOR_PATTERN`. Every descriptor this module builds is for a
-field the dictionary does NOT cover, so it can only ever have the second.
-`source_locator` is therefore a REQUIRED keyword argument on every public
-entry point that produces one, and `parse_entries` derives each entry's
-locator from the source path and the line the entry begins on. A parse
-function able to produce a provenance-less descriptor would be a bug.
-
-Beyond that, every grammar rule, every compiled pattern and every branch below
-cites at least one exemplar `[path:Lnnn]` locator from the census, so that a
-reader can check the rule against the frozen source that motivated it.
-
-DETERMINISM  (rule R-6)
-=======================
-Parsing is a pure function of its argument. No clock, no environment, no
-randomness, no process identity, and no file is read - a `COPY` statement is
-RECORDED rather than expanded, which is what keeps `parse_entries` pure. Every
-pattern is compiled once at module level as a `Final` constant. Every table a
-caller can iterate is a `tuple` or a `MappingProxyType` over a fixed-order
-mapping, never a `set`, so iteration order cannot vary between runs.
-
-EXACTNESS  (rule R-2)
-=====================
-Every quantity this module produces is an `int` count of digits, characters or
-table entries, and `level` is carried as `str` to match
-`model.CopybookField.level`, because a level number is a two-character COBOL
-token and not an arithmetic quantity. A numeric `VALUE` literal is parsed to
-`decimal.Decimal`, never through `float`. The words `float` and `complex` occur
-in this module ONLY inside prohibitions such as this one - there is no call to
-either, no `math`, no `round`, and no third-party numeric library.
-
-NO ADDED VALIDATION  (rule R-3)
-===============================
-Nothing here rejects an unusual but legal declaration, and nothing repairs a
-contradictory one. Out-of-grammar input comes back as a structured result -
-`EntryKind.UNRECOGNISED` for an entry, `is_recognised is False` for a picture -
-carrying the offending text verbatim so it can be added to the grammar
-deliberately. The two exceptions raise `PictureError`, and both are programmer
-errors about the SHAPE OF A CALL rather than about a declaration: a missing
-`source_locator`, and a locator that does not match the dictionary's pattern.
-No branch below can fire on an accounting value, because no value ever reaches
-this module.
+DETERMINISM (rule R-6), EXACTNESS (rule R-2), NO ADDED VALIDATION (rule R-3)
+Parsing is a pure function of its argument: no clock, no environment, no
+randomness and no file read - a `COPY` statement is RECORDED rather than
+expanded, which is what keeps `parse_entries` pure. Every table a caller can
+iterate is a `tuple` or a `MappingProxyType`, never a `set`, so iteration order
+cannot vary between runs. Every quantity produced is an `int` count, `level` is
+`str` to match `model.CopybookField.level` because a level number is a token
+rather than an arithmetic quantity, and a numeric `VALUE` literal is parsed to
+`decimal.Decimal`, never through `float`. Nothing here rejects an unusual but
+legal declaration and nothing repairs a contradictory one: out-of-grammar input
+comes back as `EntryKind.UNRECOGNISED`, or as a picture whose `is_recognised` is
+false, carrying the offending text verbatim. The two `PictureError` raises are
+programmer errors about the SHAPE OF A CALL - a missing `source_locator`, and a
+locator not matching the dictionary's pattern - so no branch below can fire on
+an accounting value.
 """
 
 from __future__ import annotations
@@ -359,7 +261,15 @@ from typing import Final
 
 from acas_posting.cobol import usage as cobol_usage
 from acas_posting.cobol.field import FieldDescriptor
-from acas_posting.dictionary.model import (
+
+# Agent Action Plan section 0.4.3 lets `cobol/*.py` import `dictionary.loader`
+# and nothing else from the dictionary package, so the four object-model names
+# this grammar is keyed on arrive through the loader, which re-exports them for
+# exactly this purpose (`loader.RE_EXPORTED_MODEL_NAMES`). Each is a binding to
+# the ONE definition in `acas_posting.dictionary.model` - `loader.Usage` and the
+# object model's `Usage` are the same object - so there is a single vocabulary
+# in the migration (rule R-5) reached through a single door.
+from acas_posting.dictionary.loader import (
     SOURCE_LOCATOR_PATTERN,
     SignPosition,
     Usage,
@@ -384,9 +294,7 @@ __all__: Final[tuple[str, ...]] = (
 )
 
 
-# =============================================================================
 #  THE ONE FAILURE  (rule R-3)
-# =============================================================================
 
 
 class PictureError(ValueError):
@@ -411,16 +319,14 @@ class PictureError(ValueError):
     """
 
 
-# =============================================================================
 #  WHAT ONE PARSED UNIT IS
-# =============================================================================
 
 
 class EntryKind(StrEnum):
     """What a line of a COBOL data description turned out to be.
 
     A data description is not made of field declarations alone, and the four
-    non-field kinds below are not hypothetical - they are measured. Naming each
+    non-field kinds below all occur in the frozen sources. Naming each
     one is what lets a caller walk a whole copybook and get ZERO unrecognised
     units, without the alternative of quietly dropping whatever did not look
     like a field.
@@ -444,9 +350,9 @@ class EntryKind(StrEnum):
 
     COPY = "COPY"
     """A `COPY` statement. RECORDED AND NOT EXPANDED - no file is read, which
-    is what keeps parsing a pure function of its argument (rule R-6). Thirty-
-    four occur in one copybook alone [copybooks/wsnames.cob:L17], and one
-    spans two physical lines with pseudo-text delimiters
+    is what keeps parsing a pure function of its argument (rule R-6). Thirty-two
+    occur in one copybook alone [copybooks/wsnames.cob:L17], and one spans two
+    physical lines with pseudo-text delimiters
     [copybooks/slwsoi3.cob:L18-L19]."""
 
     DIRECTIVE = "DIRECTIVE"
@@ -462,9 +368,7 @@ class EntryKind(StrEnum):
     the 29 in-scope copybooks parses with zero units of this kind."""
 
 
-# =============================================================================
 #  COMMENT STRIPPING - AND WHY IT MUST HAPPEN FIRST  (rule R-4)
-# =============================================================================
 
 # The free-form inline comment marker. Everything from it to the end of the
 # physical line is commentary, and every comment in all 29 in-scope copybooks
@@ -566,9 +470,7 @@ def _strip_one_line(line: str) -> str:
     return line.rstrip()
 
 
-# =============================================================================
 #  JOINING PHYSICAL LINES INTO ENTRIES
-#
 #  A DECLARATION IS NOT A LINE. Four in-scope entries put their picture on a
 #  continuation line - [copybooks/wsbatch.cob:L20-L21],
 #  [copybooks/wsledger.cob:L21-L22], [copybooks/wssl.cob:L65-L66] and
@@ -576,7 +478,6 @@ def _strip_one_line(line: str) -> str:
 #  with `&` [general/gl072.cbl:L224-L226]. So the unit of parsing is the ENTRY,
 #  which ends at its terminating period, and physical lines are accumulated
 #  until one is found.
-# =============================================================================
 
 
 @dataclass(frozen=True, slots=True)
@@ -612,9 +513,9 @@ def join_continuations(
 
     THE PERIOD RULE, which is COBOL's own and is the load-bearing part of this
     function: A PERIOD ENDS AN ENTRY ONLY WHEN IT IS OUTSIDE A LITERAL AND IS
-    FOLLOWED BY WHITESPACE OR BY THE END OF THE TEXT. Four declarations prove
-    each half, and each would be destroyed by a naive split on the first
-    period:
+    FOLLOWED BY WHITESPACE OR BY THE END OF THE TEXT. Four declarations
+    exercise each half, and each would be destroyed by a naive split on the
+    first period:
 
         03  l6-account      pic 9999.99 blank when zero.
                                             [general/gl072.cbl:L233]
@@ -649,12 +550,13 @@ def join_continuations(
             with `first_line=35`.
 
     Returns:
-        The entries in source order, as a `tuple` because order is observable
-        (rule R-6). Blank lines and lines that were entirely commentary
+        The entries in source order, as a `tuple` because that order is part of
+        the result and must not vary between runs (rule R-6). Blank lines and
+        lines that were entirely commentary
         contribute nothing and produce no entry.
     """
     entries: list[JoinedEntry] = []
-    # Parts of the entry currently being accumulated, and the line it began on.
+    # Parts of the entry being accumulated, and the line it began on.
     pending: list[str] = []
     pending_first: int = first_line
 
@@ -758,36 +660,19 @@ def _period_terminates(text: str, index: int) -> bool:
     return text[following].isspace()
 
 
-# =============================================================================
-#  THE PICTURE CHARACTER SET - CLOSED, AND MEASURED
-# =============================================================================
+#  THE PICTURE CHARACTER SET - CLOSED
 
-# Every symbol below was found in a real declaration; nothing is here on
-# suspicion. The value is the number of CHARACTER POSITIONS one occurrence
-# occupies in the item, which is what the rendered width is built from and is
-# ZERO for the two symbols that describe the value rather than occupy a
-# position.
-#
-#   S   the sign, overpunched or implicit, occupying no position of its own
-#         `pic s9(8)v99`            [copybooks/wspost.cob:L23]
-#   V   the IMPLIED decimal point, likewise occupying nothing
-#         `pic 9(9)v99`             [copybooks/wsbatch.cob:L41]
-#   9   a digit position
-#         `pic 9(5)`                [copybooks/wspost.cob:L13]
-#   X   an alphanumeric position
-#         `pic x(32)`               [copybooks/wspost.cob:L24]
-#   A   an alphabetic position - see the module docstring for the two sites
-#         `pic a`                   [irs/irs030.cbl:L352]
-#   Z   a zero-suppressed digit position, and an EDIT symbol
-#         `pic z(7)9.99cr`          [general/gl072.cbl:L237]
-#   B   a space insertion, an edit symbol, and NOT a digit position
-#         `pic bbbz9`               [general/gl072.cbl:L238]
-#   .   the ACTUAL decimal point, an edit symbol occupying a position
-#         `pic 9999.99`             [general/gl072.cbl:L233]
-#   -   a sign insertion, an edit symbol occupying a position
-#         `pic 9(8).99-`            [general/gl051.cbl:L182]
-#   CR  the credit symbol, an edit symbol occupying TWO positions
-#         `pic z(6)9.99cr`          [sales/sl060.cbl:L354]
+# Every symbol below occurs in a real declaration; nothing is here on suspicion.
+# The value is the CHARACTER POSITIONS one occurrence occupies, and is ZERO for
+# the two symbols that describe the value rather than occupy a position: S, the
+# sign, overpunched or implicit, and V, the IMPLIED decimal point
+# [copybooks/wspost.cob:L23]. 9 is a digit position [copybooks/wspost.cob:L13],
+# X alphanumeric [copybooks/wspost.cob:L24] and A alphabetic, at the two sites
+# named in the module docstring [irs/irs030.cbl:L352]. The five EDIT symbols are
+# Z, a zero-suppressed digit [general/gl072.cbl:L237]; B, a space insertion that
+# is NOT a digit position [general/gl072.cbl:L238]; the ACTUAL decimal point
+# [general/gl072.cbl:L233]; the sign insertion - [general/gl051.cbl:L182]; and
+# CR, which occupies TWO positions [sales/sl060.cbl:L354].
 PICTURE_SYMBOL_WIDTHS: Final[Mapping[str, int]] = MappingProxyType(
     {
         "S": 0,
@@ -817,9 +702,9 @@ DIGIT_POSITION_SYMBOLS: Final[tuple[str, ...]] = ("9", "Z")
 DECIMAL_POINT_SYMBOLS: Final[tuple[str, ...]] = ("V", ".")
 
 # The symbols whose presence makes a picture numeric-EDITED. `Z`, `B`, `CR`,
-# `-` and an actual `.`, exactly as the thirty distinct edited pictures across
-# the twelve in-scope programs use them - and no others: `*`, `$`, `,`, `DB`,
-# `+`, `/` and `0` insertion were measured at ZERO occurrences and are not
+# `-` and an actual `.`, exactly as the 32 distinct edited pictures across the
+# twelve in-scope programs use them - and no others: `*`, `$`, `,`, `DB`, `+`,
+# `/` and `0` insertion occur zero times in the frozen sources and are not
 # implemented.
 EDIT_SYMBOLS: Final[tuple[str, ...]] = ("Z", "B", ".", "-", "CR")
 
@@ -848,9 +733,7 @@ PICTURE_SYMBOL_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 
-# =============================================================================
 #  WHAT A PICTURE SAYS
-# =============================================================================
 
 
 @dataclass(frozen=True, slots=True)
@@ -918,8 +801,8 @@ class PictureSpec:
             case - `("9", "9", "9", "9", "9", "9")` for `pic 9999.99` and
             `("Z", "Z", "Z", "Z", "Z", "Z", "Z", "9", "9", "9")` for
             `pic z(7)9.99`. It shows WHICH positions are zero-suppressed, which
-            no single count can, and it is a `tuple` because its order is
-            observable (rule R-6). Empty for a picture that holds text.
+            no single count can, and it is a `tuple` because its order is part
+            of the result (rule R-6). Empty for a picture that holds text.
         unrecognised_reason: Why the closed grammar could not read the picture,
             or None when it could. Names the input verbatim so the form can be
             added deliberately rather than guessed at.
@@ -944,8 +827,8 @@ class PictureSpec:
         """Whether the closed grammar read this picture.
 
         The one flag a caller has to test before trusting the counts. False
-        means the picture used a form measured at zero occurrences across the
-        frozen sources, and `unrecognised_reason` says which.
+        means the picture used a form that occurs zero times in the frozen
+        sources, and `unrecognised_reason` says which.
         """
         return self.unrecognised_reason is None
 
@@ -994,8 +877,8 @@ def parse_picture(text: str) -> PictureSpec:
         Its `PictureSpec`. Out-of-grammar input comes back with
         `is_recognised` false and the reason naming the input, NEVER as an
         exception (rule R-3): `P` scaling, `*`, `$`, `,`, `DB`, `+`, `/` and
-        `0` insertion were all measured at zero occurrences, so meeting one
-        means the grammar needs extending deliberately.
+        `0` insertion all occur zero times in the frozen sources, so meeting
+        one means the grammar needs extending deliberately.
     """
     stated = text.strip()
     body = PICTURE_KEYWORD_RE.sub("", stated).strip()
@@ -1169,19 +1052,16 @@ def _classify_picture(
     )
 
 
-# =============================================================================
-#  THE CLAUSE VOCABULARY - ALSO CLOSED, ALSO MEASURED
-# =============================================================================
+#  THE CLAUSE VOCABULARY - ALSO CLOSED
 
 # Every usage spelling this grammar reads, mapped to the dictionary's own
 # vocabulary so that nothing downstream has to know COBOL spelling. The counts
 # beside each are occurrences across the 29 in-scope copybooks.
-#
 # The long `COMPUTATIONAL` spellings occur ZERO times and cost one entry each;
 # admitting them is cheaper than a validation the compiler does not perform
-# (rule R-3). `BINARY-DOUBLE`, `COMP-1`, `COMP-2`, `COMP-4` and `COMP-6` were
-# each measured at zero occurrences and are deliberately absent, so meeting one
-# is reported rather than guessed at.
+# (rule R-3). `BINARY-DOUBLE`, `COMP-1`, `COMP-2`, `COMP-4` and `COMP-6` each
+# occur zero times in the frozen sources and are deliberately absent, so
+# meeting one is reported rather than guessed at.
 USAGE_TOKENS: Final[Mapping[str, Usage]] = MappingProxyType(
     {
         # 36 occurrences. `pic 9(5) comp` [copybooks/wsfnctn.cob:L24], and note
@@ -1209,7 +1089,7 @@ USAGE_TOKENS: Final[Mapping[str, Usage]] = MappingProxyType(
 
 # The clause keywords this grammar reads, published so a caller can see the
 # closed set without reading the scanner. Order is the scanner's own dispatch
-# order and is observable, so it is a tuple (rule R-6).
+# order and is part of the published result, so it is a tuple (rule R-6).
 CLAUSE_KEYWORDS: Final[tuple[str, ...]] = (
     "PIC",
     "PICTURE",
@@ -1231,7 +1111,8 @@ CLAUSE_KEYWORDS: Final[tuple[str, ...]] = (
 #                      ascending key CoA-Desc
 #                      indexed       CoA-Index.
 #                                       [irs/irs030.cbl:L379-L381]
-# The simpler form is `pic x occurs 26 indexed by q` [copybooks/glwspc.cob:L11].
+# The simpler form is `pic x occurs 99 indexed by pc`
+# [copybooks/glwspc.cob:L11].
 # Neither phrase changes the item's storage - a key is a sort order and an index
 # is a subscript name - so they are RECORDED rather than acted on, which keeps
 # them out of the unrecognised bucket without pretending to implement SEARCH.
@@ -1242,15 +1123,15 @@ OCCURS_PHRASE_KEYWORDS: Final[tuple[str, ...]] = (
 )
 
 # The noise words a clause may carry between its keyword and its operand.
-# `value is 0` [copybooks/irswsnl.cob:L13] writes one; `value 1`
+# `value is "O"` [copybooks/irswsnl.cob:L13] writes one; `value 1`
 # [copybooks/wsfnctn.cob:L89] does not.
 CLAUSE_NOISE_WORDS: Final[tuple[str, ...]] = ("IS", "ARE", "TIMES", "CHARACTER")
 
-# The figurative constants that occur, and the only ones. Measured across the
+# The figurative constants that occur, and the only ones. Counted over the
 # twelve in-scope programs and the 29 in-scope copybooks: `HIGH-VALUES`,
 # `LOW-VALUES`, `QUOTES` and `NULL` occur ZERO times.
 #   `value zero`   [copybooks/wsfnctn.cob:L74], [sales/sl060.cbl:L214]
-#   `value spaces` [copybooks/wsfnctn.cob:L36]
+#   `value spaces` [copybooks/wsfnctn.cob:L38]
 FIGURATIVE_CONSTANTS: Final[tuple[str, ...]] = (
     "ZERO",
     "ZEROS",
@@ -1268,21 +1149,21 @@ RANGE_WORDS: Final[tuple[str, ...]] = ("THRU", "THROUGH")
 CONDITION_NAME_LEVEL: Final[str] = "88"
 
 # The name that means "no name" - an unnamed area, which still occupies its
-# bytes and so still needs a descriptor. 54 occurrences in the copybooks,
-# including `03  filler redefines Quarters.` [copybooks/wsledger.cob:L35] and
-# the upper-case `03  FILLER  pic x(20).` [copybooks/wssystem.cob:L81].
+# bytes and so still needs a descriptor. 86 declarations across the in-scope
+# copybooks, including `03  filler redefines Quarters.`
+# [copybooks/wsledger.cob:L35] and the upper-case `05  FILLER  pic x(20).`
+# [copybooks/wssystem.cob:L81].
 FILLER_NAME: Final[str] = "FILLER"
 
-# A leading level number. Levels measured across the frozen sources: 01, 02
+# A leading level number. The levels the frozen sources write: 01, 02
 # [copybooks/wsnames.cob:L14], 03, 05, 07, 77 [general/gl071.cbl:L149] and 88.
 # One or two digits, so `1` is read as readily as `01`; 66 and 78 occur zero
 # times but a two-digit match admits them without a special case.
 LEVEL_RE: Final[re.Pattern[str]] = re.compile(r"^(\d{1,2})(?=\s|$)")
 
-# `COPY "wsnames.cob".` and its friends - 34 occurrences across the copybooks,
-# e.g. [copybooks/wsnames.cob:L17]. RECORDED, NEVER EXPANDED: expanding one
-# would mean reading a file, and this module is a pure function of its argument
-# (rule R-6).
+# `COPY "file00.cob".` and its friends - 32 of them in one copybook alone, e.g.
+# [copybooks/wsnames.cob:L17]. RECORDED, NEVER EXPANDED: expanding one would mean
+# reading a file, and this module is a pure function of its argument (rule R-6).
 COPY_RE: Final[re.Pattern[str]] = re.compile(r"^copy(?=\s|$)", re.IGNORECASE)
 
 # `BLANK WHEN ZERO`, and the legal short form `BLANK ZERO`. 21 occurrences
@@ -1398,7 +1279,7 @@ def _scan_clauses(tokens: tuple[str, ...]) -> _ClauseScan:
     A token outside the vocabulary is COLLECTED, not raised on, so that a
     caller walking a whole copybook keeps going and the omission is visible
     (rule R-3). `JUSTIFIED`, `SYNCHRONIZED`, `EXTERNAL`, `GLOBAL` and `RENAMES`
-    were each measured at zero occurrences and are deliberately not in the
+    each occur zero times in the frozen sources and are deliberately not in the
     vocabulary, so meeting one lands here and says so.
     """
     scan = _ClauseScan()
@@ -1495,7 +1376,7 @@ def _scan_clauses(tokens: tuple[str, ...]) -> _ClauseScan:
 def _skip_noise(tokens: tuple[str, ...], index: int) -> int:
     """Step past the optional noise words a clause may carry.
 
-    `value is 0` [copybooks/irswsnl.cob:L13] writes one where `value 1`
+    `value is "O"` [copybooks/irswsnl.cob:L13] writes one where `value 1`
     [copybooks/wsfnctn.cob:L89] writes none.
     """
     while index < len(tokens) and tokens[index].upper() in CLAUSE_NOISE_WORDS:
@@ -1516,8 +1397,8 @@ def _scan_sign_clause(
     smoothing it away would destroy it.
 
     `SEPARATE` and `TRAILING` are read for completeness - `SignPosition`
-    publishes all four placements - and were each measured at ZERO occurrences
-    across the frozen sources.
+    publishes all four placements - and each occur ZERO times in the frozen
+    sources.
     """
     consumed = [tokens[index]]
     index += 1
@@ -1548,7 +1429,7 @@ def _scan_occurs_phrase(
 
     `ascending key CoA-Desc` and `indexed CoA-Index`
     [irs/irs030.cbl:L379-L381] - note the second omits the optional `BY`, which
-    is why `BY` is accepted rather than required. `indexed by q`
+    is why `BY` is accepted rather than required. `indexed by pc`
     [copybooks/glwspc.cob:L11] writes it.
 
     A name list runs until the next clause keyword, usage word or sibling
@@ -1623,9 +1504,7 @@ def _match_blank_when_zero(tokens: tuple[str, ...], index: int) -> int:
     return len(match.group(0).split())
 
 
-# =============================================================================
 #  WHAT A WHOLE DATA-DESCRIPTION ENTRY SAYS
-# =============================================================================
 
 
 @dataclass(frozen=True, slots=True)
@@ -1653,8 +1532,8 @@ class ParsedEntry:
             joining, whitespace collapsed to single spaces.
         first_line: The physical line the entry starts on.
         last_line: The physical line its terminating period is on. Different
-            from `first_line` for the four verified multi-line entries, e.g.
-            [copybooks/wsbatch.cob:L20-L21].
+            from `first_line` for the four multi-line entries in the census,
+            e.g. [copybooks/wsbatch.cob:L20-L21].
         picture: The `PictureSpec`, or None for an item with no PICTURE - which
             is normal, not exceptional: `05  Entered  binary-long.`
             [copybooks/wsbatch.cob:L36] and every group item have none.
@@ -1853,7 +1732,7 @@ def parse_entry(
 ) -> ParsedEntry:
     """Read one complete data-description entry.
 
-    The entry may span physical lines - four verified declarations do, and the
+    The entry may span physical lines - four in-scope declarations do, and the
     parser must not care - so newlines are collapsed before the clause scan.
     Comments are stripped here as well as by `join_continuations`, because
     stripping is idempotent and a caller parsing a single declaration by hand
@@ -1925,8 +1804,8 @@ def parse_entry(
         )
 
     if COPY_RE.match(body):
-        # `copy "wsnames.cob".` [copybooks/wsnames.cob:L17], including the
-        # REPLACING form that spans two lines [copybooks/slwsoi3.cob:L19-L20].
+        # `copy "wsnames.cob".` [general/gl071.cbl:L157], including the
+        # REPLACING form that spans two lines [copybooks/slwsoi3.cob:L18-L19].
         # RECORDED, NEVER EXPANDED: expanding it would mean reading a file, and
         # this module is a pure function of its argument (rule R-6).
         return _plain_entry(EntryKind.COPY, collapsed, locator, begins, ends)
@@ -2385,7 +2264,7 @@ def _storage_counts(
 
 
 # A whole-number VALUE literal. `value 1` [copybooks/wsfnctn.cob:L89],
-# `value 31` [irs/irs030.cbl:L1602].
+# `value 31` [copybooks/wsfnctn.cob:L102].
 VALUE_INTEGER_RE: Final[re.Pattern[str]] = re.compile(r"^[+-]?[0-9]+$")
 
 # A VALUE literal with a decimal point. None of the in-scope declarations writes
@@ -2446,9 +2325,7 @@ def _entry_reason(picture: PictureSpec | None, scan: _ClauseScan) -> str | None:
     return "; ".join(problems) if problems else None
 
 
-# =============================================================================
 #  A WHOLE RECORD, WITH THE LEVEL STACK THAT MAKES GROUP USAGE REACH ITS FIELDS
-# =============================================================================
 
 # The levels that never nest: an independent working-storage item, a RENAMES and
 # a constant. `77  prog-name  pic x(15)  value "gl071 (3.3.00)".`
@@ -2456,7 +2333,7 @@ def _entry_reason(picture: PictureSpec | None, scan: _ClauseScan) -> str | None:
 # [general/gl071.cbl:L150] are both elementary by definition, so a 77 can
 # neither be a group nor be subordinate to one - which matters, because a naive
 # "is the next level higher?" test would make an 01 above a 77 look like a group.
-# 66 and 78 were each measured at zero occurrences and cost nothing to admit.
+# 66 and 78 each occur zero times in the frozen sources and cost nothing to admit.
 SPECIAL_LEVELS: Final[tuple[str, ...]] = ("66", "77", "78")
 
 # The record level. An 01 always restarts the hierarchy, so it clears the stack.
@@ -2520,10 +2397,11 @@ def parse_entries(
     follows it.
 
     A `COPY` statement is RECORDED, NEVER EXPANDED, and does not break the
-    hierarchy either side of it - 34 of them occur, e.g.
-    [copybooks/wsnames.cob:L17] and the REPLACING form at
-    [copybooks/slwsoi3.cob:L19-L20]. Expanding one would mean reading a file,
-    and this function is a pure function of its argument (rule R-6).
+    hierarchy either side of it - 32 of them occur in one copybook alone, e.g.
+    [copybooks/wsnames.cob:L17], and the REPLACING form at
+    [copybooks/slwsoi3.cob:L18-L19] spans two lines. Expanding one would mean
+    reading a file, and this function is a pure function of its argument
+    (rule R-6).
 
     Args:
         text: The source of the record or group, comments and all.
@@ -2534,8 +2412,8 @@ def parse_entries(
             [copybooks/wsbatch.cob:L35-L44].
 
     Returns:
-        The entries in SOURCE ORDER, as a `tuple` because that order is
-        observable and must not vary between runs (rule R-6). Every field entry
+        The entries in SOURCE ORDER, as a `tuple` because that order is part of
+        the result and must not vary between runs (rule R-6). Every field entry
         carries a `FieldDescriptor`; condition names, COPY statements and
         directives carry none.
     """
@@ -2636,8 +2514,8 @@ def _groupness(entries: tuple[ParsedEntry, ...]) -> tuple[bool, ...]:
     """Decide, for each entry, whether it has subordinate items.
 
     An entry is a group when it states NO picture of its own and the next field
-    entry sits at a HIGHER level number. Three refinements, each from a measured
-    declaration:
+    entry sits at a HIGHER level number. Three refinements, each from a
+    declaration in the census:
 
       * An entry that states a picture is never a group
         [copybooks/slwsoi3.cob:L9].
@@ -2677,9 +2555,7 @@ def _groupness(entries: tuple[ParsedEntry, ...]) -> tuple[bool, ...]:
     return tuple(flags)
 
 
-# =============================================================================
 #  ONE DECLARATION, ONE DESCRIPTOR
-# =============================================================================
 
 
 def descriptor_for(

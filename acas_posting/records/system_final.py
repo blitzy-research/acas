@@ -1,4 +1,4 @@
-r"""The system final-accounts record: `01 Final-Record.` [copybooks/wsfinal.cob:L10].
+"""The system final-accounts record: `01 Final-Record.` [copybooks/wsfinal.cob:L10].
 
 Twelve lines of frozen copybook, two of which are the whole record - a table of
 26 sixteen-character slots and a 608-character FILLER. This module is their
@@ -34,21 +34,15 @@ the scenario diff needs no tie-breaking logic for it.
 
 THE SIZE CONTRADICTION - RECORDED HERE, SETTLED ELSEWHERE (R-4, R-6)
 --------------------------------------------------------------------
-The copybook's own header states the contradiction, verbatim
-[copybooks/wsfinal.cob:L6]:
-
-    416 bytes 02/03/09 but written as 1024 (system-record size) 07/11/10
-
-and [copybooks/wsfinal.cob:L8]:
-
-    included filler 15/10/25 now = 1024 as created by sys002
-
-The arithmetic is shown at each member below: 26 slots x 16 characters = 416
-data bytes, and 416 + 608 filler characters = 1024. So the 608-byte FILLER is
-precisely what makes the written size 1024 while the record's data occupies
-416. That is the same CLASS of contradiction as the batch record's declared
-length against the sum of its fields, which section 0.6.8 lists as an OPEN
-question for the compiled oracle:
+The copybook's own header states the contradiction, verbatim - "416 bytes
+02/03/09 but written as 1024 (system-record size) 07/11/10"
+[copybooks/wsfinal.cob:L6] and "included filler 15/10/25 now = 1024 as created
+by sys002" [:L8]. The arithmetic is shown at each member below: 26 slots x 16
+characters = 416 data bytes, and 416 + 608 filler characters = 1024. So the
+608-byte FILLER is precisely what makes the written size 1024 while the
+record's data occupies 416. That is the same CLASS of contradiction as the
+batch record's declared length against the sum of its fields, which section
+0.6.8 lists as an OPEN question for the compiled oracle:
 
     "Whether the declared length or the field sum governs the record actually
     read affects field alignment for the trailing fields, and only execution
@@ -56,12 +50,10 @@ question for the compiled oracle:
 
 This module's obligation is therefore to RECORD the contradiction, not to
 settle it. No side is taken here: the FILLER is kept as a member, and no
-computed length is published. The arbitration belongs to the comparison oracle
-and is written down in `docs/migration/ambiguity-resolutions.md` (R-6).
-
-`sys002` is named only because the header names it. `common/sys002.cbl` is out
-of scope per section 0.2.2, nothing here calls it, and no COBOL program is
-executed, embedded or shelled out to from this package at all (R-1).
+computed length is published. `sys002` is named only because the header names
+it. `common/sys002.cbl` is out of scope per section 0.2.2, nothing here calls
+it, and no COBOL program is executed, embedded or shelled out to from this
+package at all (R-1).
 
 `01 Final-Record.` IS DECLARED TWICE IN THE FROZEN TREE (R-4)
 -------------------------------------------------------------
@@ -100,24 +92,25 @@ posting copybooks force qualified references in the COBOL [general/gl070.cbl].
 Python's module namespace answers it for free, but the collision is still
 RECORDED here so that a reader understands why the COBOL qualifies at all.
 
-The dictionary makes the hazard measurable rather than theoretical. Asking it
-for the copybook record `Final-Record` returns 63 entries spanning BOTH files,
-and the copybook-keyed entries stay distinct only because the key carries the
+The dictionary makes the hazard concrete rather than theoretical. Asking it for
+the copybook record `Final-Record` returns 63 entries spanning BOTH files, and
+the copybook-keyed entries stay distinct only because the key carries the
 declaration line: `Final-Record.filler#12` is this file's FILLER while
 `Final-Record.filler#35` and `Final-Record.filler#65` are the IRS layout's two
-redefining groups. Every lookup below therefore pins
-`copybooks/wsfinal.cob` explicitly and never keys by field name alone.
+redefining groups. Every lookup below therefore pins `copybooks/wsfinal.cob`
+explicitly and never keys by field name alone.
 
 HOW THE BRIDGE CARRIES 26 SLOTS INTO A 2-COLUMN TABLE
 -----------------------------------------------------
 A 26-element table against a 2-column table looks like a mismatch and is not.
 The bridge transposes: one ROW PER OCCURRENCE, keyed by the subscript
 [common/finalMT.cbl:L608-L616], which loads its host variables by inline moves
-because `finalMT` has NO `bb000-HV-Load` paragraph - one of the four bridges
-that work that way, and a fact both dictionary entries carry as a note. Read
-back, `HV-AR1` returns to `AR1 (HV-FINAL-ACC-REC-KEY)` under the maintainer's
-own comment `KEY = table position` [common/finalMT.cbl:L588], guarded by a
-subscript range test [common/finalMT.cbl:L560].
+because `finalMT` performs NO `bb000-HV-Load` paragraph - one of exactly four
+in-scope bridges that work that way, alongside `dfltMT`, `irsdfltMT` and
+`irsfinalMT`, and a fact both dictionary entries carry as a note. Read back,
+`HV-AR1` returns to `AR1 (HV-FINAL-ACC-REC-KEY)` under the maintainer's own
+comment `KEY = table position` [:L588], guarded by a subscript range test
+[:L560-L561].
 
 Three consequences are recorded rather than compensated for:
 
@@ -128,16 +121,15 @@ Three consequences are recorded rather than compensated for:
     offset would be added machinery (R-3) and would hide the one place the DAL
     must apply it deliberately.
   * The column has no copybook counterpart at all: the dictionary reports it
-    absent from every copybook and derived at the bridge by
-    `move A to HV-FINAL-ACC-REC-KEY` [common/finalMT.cbl:L613]. So no member
-    for it is declared here, exactly as the three bridge-derived IRS posting
-    date components are owned by `dal/acasirsub4_irs_posting.py` rather than by
-    a record module. This one belongs to `dal/acas000_system.py`.
-  * A slot holding spaces is SKIPPED, under the maintainer's own comment
-    `dont write out blank data` [common/finalMT.cbl:L609], so the table may
-    hold fewer than 26 rows for a record that has 26 slots. That asymmetry is
-    the bridge's behaviour to reproduce at the bridge boundary, not something
-    for this module to even out.
+    absent from every copybook and derived at the bridge by `move A to
+    HV-FINAL-ACC-REC-KEY` [common/finalMT.cbl:L613]. So no member for it is
+    declared here, exactly as the three bridge-derived IRS posting date
+    components are owned by a handler module rather than by a record module.
+    This one belongs to the `acas000` handler module.
+  * A slot holding spaces is SKIPPED, under the maintainer's own comment `dont
+    write out blank data` [:L609], so the table may hold fewer than 26 rows for
+    a record that has 26 slots. That asymmetry is the bridge's behaviour to
+    reproduce at the bridge boundary, not something for this module to even out.
 
 Of the table's 2 columns, exactly ONE is backed by a copybook field, so this
 module publishes exactly ONE column-mapped descriptor - `SYSFINAL-REC.AR1`
@@ -146,13 +138,13 @@ which reaches no host variable and no column whatsoever. No member is added or
 dropped to make the two counts agree.
 
 THE FILLER IS A MEMBER, AND THAT IS A DECISION
------------------------------------------------
+----------------------------------------------
 The FILLER is modelled as a NAMED ATTRIBUTE carrying its own descriptor, rather
-than as a descriptor alone with no attribute. Both were open; this one was
-taken for two reasons. First, the FILLER is the entire substance of the
-416-against-1024 contradiction, and a record that did not carry it would have
-quietly disposed of an anomaly that R-4 requires be reproduced. Second, it is
-the record's trailing 608 characters, so a reader setting this file beside its
+than as a descriptor alone with no attribute. Both were open; this one was taken
+for two reasons. First, the FILLER is the entire substance of the 416-against-
+1024 contradiction, and a record that did not carry it would have quietly
+disposed of an anomaly that R-4 requires be reproduced. Second, it is the
+record's trailing 608 characters, so a reader setting this file beside its
 copybook sees the same two members in the same order and can diff them by eye.
 Its descriptor still reports `is_filler` as true, because that is what the
 copybook declares and the dictionary holds.
@@ -160,21 +152,13 @@ copybook declares and the dictionary holds.
 DESCRIPTORS ARE LOOKED UP, NEVER TRANSCRIBED (R-5)
 --------------------------------------------------
 Not one picture clause, digit count, scale, sign position, storage class,
-character width or occurrence count is typed by hand below. Each is obtained
-from the generated data dictionary, which is built from the maintainer's
-one-way COBOL-to-MySQL bridge - the mapping that governs this migration, and in
-the user's own preserved words "it is the data dictionary for this migration".
-Section 0.8.1 makes the ordering binding rather than stylistic: the dictionary
-is generated from the bridge BEFORE record definitions are written, and every
-Python field definition cites its entry, which "is what prevents fields being
-transcribed by eye".
-
-Two keys back this record, and both are looked up rather than spelled:
+character width or occurrence count is typed by hand below. Two keys back this
+record, and both are looked up rather than spelled:
 
     SYSFINAL-REC.AR1        found by asking the dictionary for the entries of
                             table SYSFINAL-REC and reading each entry's
-                            copybook field name - the table name on the left
-                            of the key is exactly what keeps SYSFINAL-REC and
+                            copybook field name - the table name on the left of
+                            the key is exactly what keeps SYSFINAL-REC and
                             IRSFINAL-REC from merging
     Final-Record.filler#12  found by asking the dictionary for the entries
                             declared in copybooks/wsfinal.cob and matching the
@@ -187,8 +171,7 @@ used here; it refuses to build a descriptor with no provenance at all, so the
 traceability claim is enforced at construction rather than asserted in a
 comment. `loader.cite(key)` renders the compact three-locator provenance
 string, surfaced through each descriptor's own `cite()` and never
-reimplemented. The whole mapping is recorded in
-`docs/migration/traceability.md`.
+reimplemented.
 
 Where the copybook, the bridge host variable and the column disagree, the
 dictionary keeps all three views side by side plus an unsettled `drift` object,
@@ -201,31 +184,24 @@ carry in source.
 
 LAYERING, TYPES AND DETERMINISM
 -------------------------------
-This module is a LEAF. Section 0.4.3 grants `records/*.py` exactly two internal
-imports - `acas_posting.cobol.field` and `acas_posting.dictionary.loader` - and
-forbids everything else, including any other module of this package, and
-including `records/irs_final.py` despite the shared COBOL name. The promise
-that depends on it: the arithmetic test tier "imports only `cobol` and
-`records` and touches no database, so it runs anywhere".
+This module is a LEAF, and the edge that matters is `records/irs_final.py`:
+despite the shared COBOL name it is not imported, nor is any other module of
+this package. The promise that depends on it - section 0.4.3 - is that the
+arithmetic test tier "imports only `cobol` and `records` and touches no
+database, so it runs anywhere".
 
 The record is ENTIRELY alphanumeric - 26 slots of `pic x(16)` and one
 `pic x(608)`. It declares no numeric member of any kind, so no numeric carrier
 is imported and no character is ever read as a number. "Final accounts" sounds
-numeric; the copybook says characters, and adding an interpretation the
-copybook does not declare is forbidden outright (R-2, R-3). Binary floating
-point appears nowhere in this package, ever.
+numeric; the copybook says characters, and adding an interpretation the copybook
+does not declare is forbidden outright (R-2, R-3).
 
 Construction is deterministic: the 26 slots are built in index order, fixed
 collections are tuples, member order is declaration order, and nothing here
-consults a clock, draws an unpredictable value, inspects the process
-environment or walks the file system. The only read at import is the loader's
-own lazily cached read of the generated dictionary.
-
-This project carries no separate user rules document - `review_rules` reports
-that none was provided - so the rule identifiers R-1 through R-6 cited above
-are the Agent Action Plan's own, section 0.7.2, and the plan is where their
-full text lives. Where the plan is silent, enterprise-standard practice
-applies; no rule has been invented to fill a gap.
+consults a clock, draws an unpredictable value, inspects the process environment
+or walks the file system. The only read at import is the loader's own lazily
+cached read of the generated dictionary. See `acas_posting.records` for the
+conventions every record module shares.
 """
 
 from __future__ import annotations
@@ -245,9 +221,7 @@ from acas_posting.dictionary import loader
 __all__: list[str] = ["SysFinalRecord"]
 
 
-# =============================================================================
 #  THE FROZEN SOURCES THIS MODULE MIRRORS
-# =============================================================================
 
 #: The copybook this module is a CREATE from. Every lookup below pins it,
 #: because `01 Final-Record.` is declared twice in the frozen tree - here and
@@ -273,11 +247,8 @@ TABLE: Final[str] = "SYSFINAL-REC"
 _FILLER_DECLARED_AT: Final[str] = "copybooks/wsfinal.cob:L12"
 
 
-# =============================================================================
 #  FINDING THE TWO DICTIONARY KEYS, AND THE SHAPE THEY CARRY
 #  (R-5 - looked up, never guessed)
-# =============================================================================
-#
 # All three helpers below fail loudly when the dictionary does not hold what
 # this module needs, and none substitutes a default. That is not added
 # validation of record data - no accounting value is examined and nothing is
@@ -382,9 +353,7 @@ def _from_dictionary(value: int | None, *, key: str, member: str) -> int:
     return value
 
 
-# =============================================================================
 #  THE TWO DESCRIPTORS, IN COPYBOOK DECLARATION ORDER
-# =============================================================================
 
 #: `03  ar1  pic x(16)  occurs 26.` [copybooks/wsfinal.cob:L11], backed by the
 #: char(16) column AR1 [mysql/ACASDB.sql:L1165] through the host variable HV-AR1
@@ -413,16 +382,11 @@ _FILLER: Final[FieldDescriptor] = FieldDescriptor.from_dictionary_key(_FILLER_KE
 FIELDS: Final[tuple[FieldDescriptor, ...]] = (_AR1, _FILLER)
 
 
-# =============================================================================
 #  THE UNSET STATE, DERIVED FROM THE DESCRIPTORS
-# =============================================================================
-#
 # Sizes come from the dictionary, never from this file. The arithmetic the
 # copybook header turns on:
-#
 #     _AR1_OCCURS x _AR1_WIDTH  =  26 x 16   =  416 data bytes
 #     416 + _FILLER_WIDTH       =  416 + 608 = 1024 bytes as written
-#
 # which is exactly the contradiction stated at [copybooks/wsfinal.cob:L6] -
 # "416 bytes 02/03/09 but written as 1024" - and it is recorded, not settled.
 
@@ -452,9 +416,7 @@ _AR1_UNSET: Final[tuple[str, ...]] = tuple(" " * _AR1_WIDTH for _ in range(_AR1_
 _FILLER_UNSET: Final[str] = " " * _FILLER_WIDTH
 
 
-# =============================================================================
 #  THE RECORD
-# =============================================================================
 
 
 @dataclass(slots=True)
@@ -489,24 +451,20 @@ class SysFinalRecord:
     Nothing else. There is no member for FINAL-ACC-REC-KEY: no copybook
     declares that column, the bridge derives it from the OCCURS subscript
     [common/finalMT.cbl:L613], and reproducing that derivation belongs to
-    `acas_posting/dal/acas000_system.py` at the bridge boundary.
+    the `acas000` handler module at the bridge boundary.
     """
 
     # ar1  pic x(16)  occurs 26      [copybooks/wsfinal.cob:L11]
-    #   26 slots x 16 characters = 416 data bytes. Sixteen-character slots with
-    #   no per-slot names: the copybook gives the individual entries no
-    #   semantics whatever, and none is invented here (R-3, R-4).
-    #
-    #   COBOL `OCCURS` SUBSCRIPTS ARE 1-BASED; PYTHON INDICES ARE 0-BASED. The
-    #   offset is a whole position: `ar1 (1)` in COBOL is `ar1[0]` here, and
-    #   `ar1 (26)` is `ar1[25]`. It is not merely a language nicety either - the
-    #   bridge stores that very subscript as the table's primary key, one row per
-    #   occurrence [common/finalMT.cbl:L608-L616], reading it back with the
-    #   maintainer's own comment `KEY = table position`
-    #   [common/finalMT.cbl:L588]. So `ar1[0]` here is FINAL-ACC-REC-KEY = 1
-    #   there. No 1-based accessor is provided: the offset is applied
-    #   deliberately at the bridge boundary and hiding it here would be added
-    #   machinery (R-3).
+    # 26 slots x 16 characters = 416 data bytes. Sixteen-character slots with no per-slot names:
+    # the copybook gives the individual entries no semantics whatever, and none is invented here
+    # (R-3, R-4).
+    # COBOL `OCCURS` SUBSCRIPTS ARE 1-BASED; PYTHON INDICES ARE 0-BASED, so `ar1 (1)` in COBOL
+    # is `ar1[0]` here and `ar1 (26)` is `ar1[25]`. It is not merely a language nicety either -
+    # the bridge stores that very subscript as the table's primary key, one row per occurrence
+    # [common/finalMT.cbl:L608-L616], reading it back with the maintainer's own comment `KEY =
+    # table position` [:L588]. No 1-based accessor is provided: the offset is applied
+    # deliberately at the bridge boundary and hiding it here would be added machinery (R-3). The
+    # module docstring covers the offset.
     ar1: tuple[str, ...] = field(default_factory=lambda: _AR1_UNSET)
 
     # filler  pic x(608)             [copybooks/wsfinal.cob:L12]

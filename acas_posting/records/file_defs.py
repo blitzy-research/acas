@@ -1,71 +1,47 @@
 """The `File-Defs` record: the file names the ACAS cycle is handed.
 
 This module declares NAMES. It reaches no file system, holds no handle and
-creates nothing on disk. `File-Defs` is a block of 58 fixed-width name
-fields, a 58-element table redefining them, a declared element count and a
-one-character delimiter - and every one of those is an item of WORKING
-STORAGE that a calling program fills in and passes along.
+creates nothing on disk. `File-Defs` is a block of 58 fixed-width name fields,
+a 58-element table redefining them, a declared element count and a
+one-character delimiter - every one an item of WORKING STORAGE that a calling
+program fills in and passes along.
 
 WHY THIS RECORD MATTERS
 =======================
-`File-Defs` is present in EVERY in-scope linkage. It is the fourth
-parameter of the General / Sales / Purchase shape:
-
-    procedure division using ws-calling-data
-                             system-record
-                             to-day
-                             file-defs.        [general/gl071.cbl:L161-L164]
-
-and the third of the IRS shape, which takes neither the calling-data block
-nor the run date:
-
-    procedure division using IRS-System-Params
-                             WS-System-Record
-                             File-Defs.            [irs/irs030.cbl:L552-L554]
-
-It is likewise the fourth argument of every file-handler call, which the
-Agent Action Plan section 0.4.3 states as a transformation pair:
+`File-Defs` is present in EVERY in-scope linkage: the fourth parameter of the
+General / Sales / Purchase shape [general/gl071.cbl:L161-L164], the third of
+the IRS shape, which takes neither the calling-data block nor the run date
+[irs/irs030.cbl:L552-L554], and the fourth argument of every file-handler
+call, which section 0.4.3 states as a transformation pair::
 
     call "acas007" using System-Record WS-Batch-Record File-Access
                          File-Defs ACAS-DAL-Common-Data
     ->  acas007_gl_batch.dispatch(system, batch, file_access, file_defs,
                                   dal_common)
 
-AUTHORITY
-=========
-Agent Action Plan section 0.4.1.3 names this file's source and content,
-verbatim:
-
-    `acas_posting/records/file_defs.py` | CREATE | `copybooks/wsnames.cob` |
-    File names plus the two work-file names
-
-and states the folder's mandate: every module is a CREATE from its
-copybook, translating each `05`/`03` field to a dataclass attribute whose
-descriptor is looked up in the generated dictionary, and oddities in the
-source are preserved rather than fixed. That last clause is restated here
-rather than quoted word for word, because the plan's own wording uses one
-of the very terms rule R-4 bans from this codebase - see the anomaly
-section below, where the ban is set out.
-
-Section 0.8.1 fixes the shape - "Plain modules and dataclasses; no ORM
-entity layer" - and rule R-3 fixes the content: "The 27 record modules
-mirror their copybooks field for field with nothing added."
+Section 0.4.1.3 names this file's source and content verbatim -
+"`acas_posting/records/file_defs.py` | CREATE | `copybooks/wsnames.cob` | File
+names plus the two work-file names" - and its folder mandate requires each
+`05`/`03` field to become an attribute whose descriptor is looked up in the
+generated dictionary, with oddities in the source preserved rather than fixed.
+That last clause is restated rather than quoted, because the plan's own
+wording uses one of the very terms rule R-4 bans from this codebase.
 
 WHERE THE COPYBOOK ACTUALLY LIVES - THIRTY-THREE FILES, NOT ONE
 ===============================================================
-Two line-citation facts have to be stated plainly, because a reader
-following the plan's own locators will otherwise look in the wrong place.
+Two line-citation facts have to be stated plainly, because a reader following
+the plan's own locators will otherwise look in the wrong place.
 
 FIRST, A CITATION CORRECTION. Sections 0.3.1 and 0.4.1.3 both cite the two
-work-file names as `[copybooks/wsnames.cob:L14-L17]`. Read against the
-frozen source, the span is `L13-L16`: the `01` group head is at L13, the
-`02 file-defs-a` group at L14, and the two work-file names at L15 and L16.
-L17 is not a declaration at all - it is the first `copy` statement. The
-verified span is used throughout this module and is recorded here so that
-`docs/migration/traceability.md` picks up the real one.
+work-file names as `[copybooks/wsnames.cob:L14-L17]`. Read against the frozen
+source the span is `L13-L16`: the `01` group head is at L13, the `02
+file-defs-a` group at L14, and the two work-file names at L15 and L16. L17 is
+not a declaration at all - it is the first `copy` statement. The corrected
+span is used throughout this module and is recorded here so that the
+traceability document a later boundary writes picks up the real one.
 
-SECOND, ONLY 26 OF THE 58 ELEMENTS ARE DECLARED IN `wsnames.cob` AT ALL.
-The copybook pulls 32 of them in one per file:
+SECOND, ONLY 26 OF THE 58 ELEMENTS ARE DECLARED IN `wsnames.cob` AT ALL. The
+copybook pulls the other 32 in one per file::
 
     L15   03  pre-trans-name   pic x(532)  value "pretrans.tmp". *> gl071
     L16   03  post-trans-name  pic x(532)  value "postrans.tmp". *> gl071
@@ -82,20 +58,20 @@ The copybook pulls 32 of them in one per file:
     L82   02  File-Defs-Count         binary-short value 58.
     L83   02  File-Defs-os-Delimiter  pic x.
 
-Each `copybooks/fileNN.cob` is a ONE-LINE file holding the whole
-declaration, so the true locator of those 32 elements is
-`copybooks/fileNN.cob:L1` and the `wsnames.cob` line is the INCLUSION
-site. Both are carried in the comment beside every such attribute, because
-a reader diffing this module against `wsnames.cob` alone would find 32 of
-its 58 attributes unaccounted for. The generated dictionary already models
-this correctly and the loader says so itself: a record name may be
-declared by more than one copybook, "`File-Defs` by thirty-three of them".
+Each `copybooks/fileNN.cob` is a ONE-LINE file holding the whole declaration,
+so the true locator of those 32 elements is `copybooks/fileNN.cob:L1` and the
+`wsnames.cob` line is the INCLUSION site. Both are carried in the comment
+beside every such attribute, because a reader diffing this module against
+`wsnames.cob` alone would find 32 of its 58 attributes unaccounted for. The
+generated dictionary already models this correctly and the loader says so
+itself: a record name may be declared by more than one copybook, "`File-Defs`
+by thirty-three of them".
 
-One consequence for anyone extending this module: because the record spans
-33 copybooks, `loader.entries_for_copybook_record("File-Defs")` returns its
-64 entries GROUPED BY FILE rather than in declaration order. Declaration
-order is stated here, by the order of the attributes themselves, and is
-never taken from that accessor.
+One consequence for anyone extending this module: because the record spans 33
+copybooks, `loader.entries_for_copybook_record("File-Defs")` returns its 64
+entries GROUPED BY FILE rather than in declaration order. Declaration order is
+stated here, by the order of the attributes themselves, and is never taken
+from that accessor.
 
 FIFTY-EIGHT ELEMENTS, AND WHY THE COUNT IS LOAD-BEARING
 =======================================================
@@ -105,193 +81,140 @@ FIFTY-EIGHT ELEMENTS, AND WHY THE COUNT IS LOAD-BEARING
  +  5   file-34 .. file-38                    inline at L51-L55
  + 19   file-39 .. file-57                    inline at L58-L78
  ----
-   58   =  `occurs 58`               [copybooks/wsnames.cob:L81]
-         =  `File-Defs-Count binary-short value 58`  [:L82]
+   58   =  `occurs 58` [copybooks/wsnames.cob:L81]
+         =  `File-Defs-Count binary-short value 58` [:L82]
 
-The count is not bookkeeping. The redefining table addresses the same
-storage as the 58 named elements, so an element added, dropped or
-renumbered would silently shift every subscript after it. The two numbers
-in the copybook and the 58 attributes below must agree, and the
-maintainer's own comment on L82 says as much: "MUST be the same as above
-occurs".
+The count is not bookkeeping. The redefining table addresses the same storage
+as the 58 named elements, so an element added, dropped or renumbered would
+silently shift every subscript after it. The two numbers in the copybook and
+the 58 attributes below must agree, and the maintainer's own comment on L82
+says as much: "MUST be the same as above occurs".
 
 THE REDEFINES - THE CENTRAL DESIGN DECISION
 ===========================================
     02  filler         redefines file-defs-a.               [:L80]
         03  System-File-Names   pic x(532) occurs 58.       [:L81]
 
-This is not decoration: it is how the file handlers address the block, and
-the two work-file names are elements 1 and 2 of that table.
+This is not decoration: it is how the file handlers address the block, and the
+two work-file names are elements 1 and 2 of that table.
 
-Python has NO STORAGE ALIASING. There is therefore no way to make one
-object be both views at once, and no attempt is made to fake it. The
-relationship is recorded as METADATA ON DESCRIPTORS - `occurs` on the
-table item, `redefines` on the group that carries it - and nowhere else.
-Specifically, and by deliberate omission: there is no third merged
-representation, no accessor projecting the named elements into the table
-or the table back into them, no subscript helper, and no
+Python has NO STORAGE ALIASING. There is therefore no way to make one object
+be both views at once, and no attempt is made to fake it. The relationship is
+recorded as METADATA ON DESCRIPTORS - `occurs` on the table item, `redefines`
+on the group that carries it - and nowhere else. Specifically, and by
+deliberate omission: no third merged representation, no accessor projecting
+the named elements into the table or back, no subscript helper, and no
 post-initialisation hook keeping the two in step. `SystemFileNamesView` is
-this module's name for the group, which is FILLER in the copybook and so
-has no name of its own; the generated dictionary keys it `File-Defs.filler`
-and this module follows that spelling for the attribute.
+this module's name for the group, which is FILLER in the copybook and so has
+no name of its own; the dictionary keys it `File-Defs.filler` and this module
+follows that spelling.
 
-The REDEFINES and the OCCURS sit at DIFFERENT LEVELS, and the pair is
-recorded at the levels the copybook declares them rather than fused onto
-one descriptor. `SystemFileNamesView.GROUP` is the `02` group and reports
+The REDEFINES and the OCCURS sit at DIFFERENT LEVELS, and the pair is recorded
+at the levels the copybook declares them rather than fused onto one
+descriptor. `SystemFileNamesView.GROUP` is the `02` group and reports
 `redefines == "file-defs-a"`; `SystemFileNamesView.FIELDS[0]` is the `03`
-table item and reports `occurs == 58`. Fusing them would contradict the
-frozen source and would mean writing metadata by hand instead of looking
-it up, which is exactly what rule R-5 exists to prevent.
+table item and reports `occurs == 58`. Fusing them would contradict the frozen
+source and would mean writing metadata by hand instead of looking it up, which
+is exactly what rule R-5 exists to prevent.
 
-COBOL `OCCURS` IS 1-BASED; PYTHON INDEXING IS 0-BASED. `System-File-Names
-(1)` is `pre-trans-name` and `System-File-Names (2)` is
-`post-trans-name`, so those two are `system_file_names[0]` and
-`system_file_names[1]` here. The offset is stated rather than hidden: no
-1-based wrapper is provided, because a wrapper would be one more thing
+COBOL `OCCURS` IS 1-BASED; PYTHON INDEXING IS 0-BASED. `System-File-Names (1)`
+is `pre-trans-name` and `(2)` is `post-trans-name`, so those two are
+`system_file_names[0]` and `[1]` here. The offset is stated rather than hidden:
+no 1-based wrapper is provided, because a wrapper would be one more thing
 between a reader and the frozen source.
 
 WHAT THIS MODULE DOES NOT DO (RULE R-1)
 =======================================
-Rule R-1, verbatim: "The Python implementation must not execute, embed, or
-shell out to the COBOL programs. COBOL is the specification for the
-migration, not a runtime dependency of the result. The shipped artifact
-must run on a host with no COBOL compiler and no COBOL runtime present."
-
-For this module the rule reaches further than COBOL, because the temptation
-here is not a compiler - it is the file system. `pretrans.tmp` and
-`postrans.tmp` are STRINGS. They are not created, not looked for, not
-deleted and not turned into paths. Agent Action Plan section 0.3.1 is
-explicit about what becomes of them: "Work files are in-process sequences,
-not tables and not temporary files", modelled as ordered sequences in
-`acas_posting/workfiles.py`. Nothing below touches a file, a directory, a
-temporary area, an external process or a foreign function; the imports are
-the standard library plus one module of this package.
+For this module R-1 reaches further than COBOL, because the temptation here is
+not a compiler - it is the file system. `pretrans.tmp` and `postrans.tmp` are
+STRINGS. They are not created, not looked for, not deleted and not turned into
+paths. Section 0.3.1 is explicit about what becomes of them: "Work files are
+in-process sequences, not tables and not temporary files", modelled as ordered
+sequences in `acas_posting/workfiles.py`. Nothing below touches a file, a
+directory, a temporary area, an external process or a foreign function; the
+imports are the standard library plus one module of this package.
 
 DESCRIPTOR PROVENANCE - LOOKED UP, NEVER TRANSCRIBED (RULE R-5)
 ===============================================================
-Agent Action Plan section 0.8.1, verbatim: "Data dictionary first. The
-dictionary is generated from the bridge before record definitions are
-written, and every Python field definition cites its entry. This ordering
-is a directive, not a preference - it is what prevents fields being
-transcribed by eye." Section 0.3.3: "Field metadata is therefore derived,
-not transcribed."
-
-Every descriptor here comes from `FieldDescriptor.from_dictionary_key`,
-the principal path - all 64 of this record's entries are in the generated
-artifact, so `for_working_storage` is neither needed nor used and not one
-width, level or storage class is typed by hand. Keys follow the published
-convention `<COPYBOOK-RECORD>.<FIELD-NAME>`, with both halves spelled as
-the frozen source spells them: `File-Defs.pre-trans-name`,
-`File-Defs.System-File-Names`, `File-Defs.File-Defs-os-Delimiter`. Case is
-not folded and hyphens are not turned into underscores, so a key built by
-upper-casing - `FILE-DEFS.PRE-TRANS-NAME` - matches nothing. Never a bare
-field name.
+Every descriptor here comes from `FieldDescriptor.from_dictionary_key`, the
+only path there is - all 64 of this record's entries are in the generated
+artifact, so not one width, level or storage class is typed by hand. Keys follow `<COPYBOOK-RECORD>.<FIELD-NAME>`
+with both halves spelled as the frozen source spells them:
+`File-Defs.pre-trans-name`, `File-Defs.System-File-Names`,
+`File-Defs.File-Defs-os-Delimiter`. Case is not folded and hyphens are not
+turned into underscores, so a key built by upper-casing -
+`FILE-DEFS.PRE-TRANS-NAME` - matches nothing. Never a bare field name.
 
 Each descriptor carries `dictionary_key` and `source_locator`, and
-`FieldDescriptor.cite()` returns the compact three-locator provenance line
-for it. `cite()` is already a pass-through of the loader's own `cite`, so
-this module surfaces that primitive through the descriptor and reimplements
-nothing - which is also why the loader itself is not imported here.
-
-`FIELDS` on each class is a tuple in declaration order, and `GROUP` is the
-descriptor of the group item that the class stands for.
+`FieldDescriptor.cite()` returns the compact three-locator provenance line.
+`cite()` is already a pass-through of the loader's own `cite`, so this module
+surfaces that primitive through the descriptor and reimplements nothing -
+which is also why the loader itself is not imported here. `FIELDS` on each
+class is a tuple in declaration order, and `GROUP` is the descriptor of the
+group item the class stands for.
 
 ANOMALIES REPRODUCED HERE, NEVER FIXED (RULE R-4)
 =================================================
-Rule R-4, verbatim: "Defects present in the compiled behavior are part of
-the specification. A defect reproduced is a success; a defect fixed is a
-failure." Section 0.8.2 preserves the user's own words: "There is no test
-suite: compiled COBOL execution is the behavioral specification, defects
-included. A defect reproduced is correct; a defect fixed is a failure."
+Six oddities of this copybook are carried below, each with its locator at the
+site that reproduces it:
 
-Six oddities of this copybook are carried below, each with its locator at
-the site that reproduces it:
-
-  * THE NUMBERING GAPS. There is no `file-1` and no `file-25`. The
-    sequence runs file-0, file-2 .. file-24, then jumps to file-26. The
-    copybook says so in its own words - "No file 1"
-    [copybooks/wsnames.cob:L18] and "No file 25" [:L42]. Nothing is
-    renumbered and no placeholder is inserted to close the gaps.
-  * `file-24` IS SPACES, NOT A FILENAME [copybooks/file24.cob:L1]. It
-    still occupies element 26 of the table, and the maintainer's note on
-    its inclusion line calls it a "dummy to build file-02" [:L41].
-  * THE UNIFORM 532-CHARACTER WIDTH. Every element is `pic x(532)`,
-    however short its name - `pay.dat` is eight characters in a field of
-    532.
+  * THE NUMBERING GAPS. There is no `file-1` and no `file-25`. The sequence
+    runs file-0, file-2 .. file-24, then jumps to file-26. The copybook says
+    so in its own words - "No file 1" [copybooks/wsnames.cob:L18] and "No file
+    25" [:L42]. Nothing is renumbered and no placeholder closes the gaps.
+  * `file-24` IS SPACES, NOT A FILENAME [copybooks/file24.cob:L1]. It still
+    occupies element 26 of the table, and the maintainer's note on its
+    inclusion line calls it a "dummy to build file-02" [:L41].
+  * THE UNIFORM 532-CHARACTER WIDTH. Every element is `pic x(532)`, however
+    short its name - `pay.dat` is eight characters in a field of 532.
   * THE `*> gl071` ANNOTATIONS on both work-file names [:L15-L16], kept
     verbatim. They are the maintainer telling a reader which program owns
     those two files, and section 0.3.1 relies on them.
-  * OUT-OF-SCOPE SUBSYSTEM FILENAMES IN AN IN-SCOPE COPYBOOK. The sales
-    and purchase autogen names, the stock names, the two payment names and
-    the nineteen payroll names belong to subsystems section 0.2.2 excludes.
-    They are declared all the same, because the record must mirror the
-    copybook field for field and because `occurs 58` counts them. No
-    in-scope code path reads them; they are here for layout fidelity.
-  * A STALE COMMENT ON THE OCCURS LINE. L81 carries "39 chg for sales BO
-    file plus py" beside `occurs 58`, and the copybook's own change log
-    stops counting at 39 [:L8-L9] while the count is 58. The comment is
-    left as found.
+  * OUT-OF-SCOPE SUBSYSTEM FILENAMES IN AN IN-SCOPE COPYBOOK. The sales and
+    purchase autogen names, the stock names, the two payment names and the
+    nineteen payroll names belong to subsystems section 0.2.2 excludes. They
+    are declared all the same, because the record must mirror the copybook
+    field for field and because `occurs 58` counts them. No in-scope code path
+    reads them; they are here for layout fidelity.
+  * A STALE COMMENT ON THE OCCURS LINE. L81 carries "39 chg for sales BO file
+    plus py" beside `occurs 58`, and the copybook's own change log stops
+    counting at 39 [:L8-L9] while the count is 58. Left as found.
 
 There is deliberately no "settled", merged or preferential view of any of
 this, and none may be introduced. Where the copybook looks wrong it is
-reproduced; the register of every such site is
-`docs/migration/anomaly-log.md`.
+reproduced; the register of every such site is the migration's anomaly log.
 
-TYPE DISCIPLINE (RULE R-2)
-==========================
-Rule R-2, verbatim: "No accounting value may pass through a binary
-floating-point type at any point - not in computation, not in storage, not
-in transport."
-
+TYPE DISCIPLINE (R-2), LAYERING (SECTION 0.4.3) AND DETERMINISM (R-6)
+=====================================================================
     every `pic x(532)` element        ->  `str`, declared width 532
     `System-File-Names ... occurs 58` ->  a 58-element tuple of `str`
     `File-Defs-Count binary-short`    ->  `int`, signed 16 bits, scale 0
     `File-Defs-os-Delimiter pic x`    ->  `str`, declared width 1
 
-No binary floating-point type appears here, and neither does a scaled
-numeric carrier: this record holds no money and no quantity. The one
-number in it is a declared element count, and `binary-short` makes it an
-`int` - the storage class decides, never a reading of what the field
-"means".
+No binary floating-point type appears here and neither does a scaled numeric
+carrier: this record holds no money and no quantity. The one number in it is a
+declared element count, and `binary-short` makes it an `int` - the storage
+class decides, never a reading of what the field "means".
 
-LAYERING - THIS IS A LEAF MODULE (SECTION 0.4.3)
-================================================
-    MAY import       `acas_posting.cobol.field`,
-                     `acas_posting.dictionary.loader`, and the standard
-                     library
-    MUST NOT import  anything else - "this keeps the record layer a leaf"
+Of the two imports a record module is granted, only `acas_posting.cobol.field`
+is needed, so only it is taken. The live temptation is `records/work_records
+.py`, and the edge runs ONE WAY: the work files named at L15-L16 are read by
+`acas_posting/workfiles.py`, which imports its layouts from that module, so
+the dependency is workfiles -> records and never the reverse. An import the
+other way would close a cycle and drag the work-file machinery into the
+arithmetic test tier, which section 0.4.3 promises "imports only `cobol` and
+`records` and touches no database, so it runs anywhere".
 
-Only the first is actually needed, so only the first is imported. Also
-forbidden and absent: the data-access layer, the program modules, the CLI,
-the clock, the date module, `acas_posting.workfiles`, the rest of
-`acas_posting.cobol`, the dictionary generator, the comparison oracle in
-its sibling tree, and every other module of this package - including
-`records/work_records.py`, however closely related the two look.
-
-That last edge is the live temptation and it runs ONE WAY. The General
-Ledger work files named at L15-L16 are read by
-`acas_posting/workfiles.py`, which also imports its layouts from
-`records/work_records.py`; the dependency is workfiles -> records, never
-the reverse. An import in the other direction would put a cycle in the
-package and, worse, would drag the work-file machinery into the
-arithmetic test tier, which section 0.4.3 promises "imports only `cobol`
-and `records` and touches no database, so it runs anywhere".
-
-DETERMINISM (RULE R-6)
-======================
-Attribute order is copybook declaration order throughout, so this module
-can be set beside its copybooks and diffed by eye. Fixed collections are
-tuples. Nothing here consults a clock, draws an unpredictable value or
-inspects the process environment, and - the one that matters for this
-record - `File-Defs-os-Delimiter` is NOT derived from the host operating
-system. It is a declared field whose value the calling program sets, and
-its default is the state the copybook's own comment describes as not yet
-set.
-
-The only work done at import is the descriptor lookup, which reads the
-committed dictionary once through the loader's lazy cache. The artifact is
-immutable and the lookup is memoised, so two imports in two processes
-produce identical state.
+Attribute order is copybook declaration order throughout, so this module can
+be set beside its copybooks and diffed by eye; fixed collections are tuples.
+Nothing consults a clock, draws an unpredictable value or inspects the process
+environment, and - the one that matters for this record -
+`File-Defs-os-Delimiter` is NOT derived from the host operating system. It is a
+declared field whose value the calling program sets, and its default is the
+state the copybook's own comment describes as not yet set. The only import-time
+work is the descriptor lookup, which reads the committed dictionary once
+through the loader's lazy cache, so two imports in two processes produce
+identical state. See `acas_posting.records` for the shared conventions.
 """
 
 from __future__ import annotations
@@ -360,7 +283,6 @@ class FileDefsA:
     FIELDS: ClassVar[tuple[FieldDescriptor, ...]]
 
     # -- the two General Ledger work files -------------------------------
-    #
     # Declared inline, and the only two elements the plan cites directly.
     # The `*> gl071` on each is the maintainer's own annotation, kept
     # verbatim: it records which program owns the file. These are NAMES,
@@ -376,7 +298,6 @@ class FileDefsA:
     post_trans_name: str = "postrans.tmp"
 
     # -- the 32 elements pulled in one per copybook -----------------------
-    #
     # `wsnames.cob` L17-L50 are `copy` statements, not declarations. Each
     # named file below holds its whole `03` line and nothing else.
 
@@ -487,19 +408,13 @@ class FileDefsA:
 
     # element 26. 03  file-24  pic x(532)  value spaces.
     #             [copybooks/file24.cob:L1]  incl. [copybooks/wsnames.cob:L41]
-    #
-    # THE ONE ELEMENT WITH NO FILENAME (rule R-4). Its `VALUE` is the
-    # figurative constant `spaces`, and the maintainer's note on the
-    # inclusion line calls it a "dummy to build file-02" [:L41]. It is
-    # kept, because dropping it would shift every later subscript and
-    # break the count of 58 that `occurs 58` and `File-Defs-Count` both
-    # declare.
-    #
-    # The default is spaces AT THE DECLARED WIDTH, not the empty string.
-    # That is the difference between the two kinds of `VALUE` this
-    # copybook uses: an alphanumeric literal carries its own length and is
-    # stored left-justified, while the figurative constant `spaces` has no
-    # length of its own and takes the receiving item's - all 532 of them.
+    # THE ONE ELEMENT WITH NO FILENAME (rule R-4). Its `VALUE` is the figurative constant
+    # `spaces`, and the maintainer's inclusion-line note calls it a "dummy to build file-02"
+    # [:L41]. Kept, because dropping it would shift every later subscript and break the count of
+    # 58 that `occurs 58` and `File-Defs-Count` both declare.
+    # The default is spaces AT THE DECLARED WIDTH, not the empty string - the difference between
+    # this copybook's two kinds of `VALUE`: an alphanumeric literal carries its own length and
+    # is stored left-justified, while `spaces` has none and takes the receiving item's, all 532.
     file_24: str = " " * _ELEMENT_WIDTH
 
     # THE SECOND NUMBERING GAP. There is no `file-25`, and again the
@@ -545,7 +460,6 @@ class FileDefsA:
     file_33: str = "cheque.dat"
 
     # -- the five IRS files, declared inline ------------------------------
-    #
     # The maintainer's note on the first of them: "IRS ex file 1  These 4
     # added 19/10/16 for IRS integration" [copybooks/wsnames.cob:L51], and
     # on the second: "all name have 'irs' prefix." [:L52]. Four were added
@@ -574,7 +488,6 @@ class FileDefsA:
     file_38: str = "postsort.dat"
 
     # -- the nineteen payroll files, declared inline ----------------------
-    #
     # The whole payroll subsystem is out of scope per section 0.2.2, and no
     # in-scope code path reads any of these. All nineteen are declared
     # because the record mirrors the copybook field for field and because
@@ -664,7 +577,6 @@ class FileDefsA:
 
     # element 58. 03  file-57  pic x(532)  value "pycal.dat".
     #             *> PY  ??? calm,s,h etc        [copybooks/wsnames.cob:L78]
-    #
     # THE LAST ELEMENT, and the copybook is unsure of it: "Not sure about
     # these two up/down" [:L77]. Its `03` also sits two columns further in
     # than every other element in the group [:L78]. The indentation is
@@ -673,22 +585,16 @@ class FileDefsA:
     file_57: str = "pycal.dat"
 
 
-# -----------------------------------------------------------------------
-#  THE DESCRIPTORS FOR THE 58 ELEMENTS  (rule R-5)
-# -----------------------------------------------------------------------
-#
-# Assigned here rather than in the class body because both are DERIVED
-# FROM THE CLASS'S OWN DECLARED FIELDS, which do not exist until the class
-# does. Deriving them is the point: with 58 elements, a hand-kept parallel
-# list of keys would be one transcription slip away from describing the
-# wrong field, and section 0.3.3 asks for metadata "derived, not
-# transcribed" precisely to close that class of error. Every element of
-# this group is spelled in lower case with hyphens in the copybook, so
-# turning the underscores of an attribute name back into hyphens
-# reproduces the COBOL name exactly - `file_0` gives `file-0` and
-# `pre_trans_name` gives `pre-trans-name`. The transform is stated for
-# this group only; the six items that are not elements of it carry mixed
-# case, so their keys are written out in full further down.
+#   THE DESCRIPTORS FOR THE 58 ELEMENTS  (rule R-5)
+# Assigned here rather than in the class body because both are DERIVED FROM THE CLASS'S OWN
+# DECLARED FIELDS, which do not exist until the class does. Deriving them is the point: with 58
+# elements a hand-kept parallel list of keys would be one transcription slip away from
+# describing the wrong field, and section 0.3.3 asks for metadata "derived, not transcribed"
+# precisely to close that.
+# Every element of this group is lower case with hyphens in the copybook, so turning an
+# attribute name's underscores back into hyphens reproduces the COBOL name exactly - `file_0`
+# gives `file-0`. The transform covers this group only; the six items outside it carry mixed
+# case and are written out in full below.
 FileDefsA.GROUP = FieldDescriptor.from_dictionary_key(
     f"{_DICTIONARY_RECORD}.file-defs-a"
 )
@@ -702,14 +608,12 @@ FileDefsA.FIELDS = tuple(
 
 # The content the redefining table holds, in `OCCURS` order, taken from the
 # declared fields above.
-#
 # COBOL FORBIDS A `VALUE` CLAUSE ON A REDEFINING ITEM, so
 # `System-File-Names` has none: the storage it addresses is initialised by
 # the `VALUE` clauses of the group it redefines. Sourcing this from those
 # same declarations reproduces that fact instead of inventing a second
 # one - blanking the table would state something the compiled program
 # never does.
-#
 # This is a constant computed ONCE, at import. It is not an accessor, and
 # no accessor exists: Python has no storage aliasing, so after a
 # `SystemFileNamesView` is constructed its tuple and a `FileDefsA`'s
@@ -773,7 +677,6 @@ class SystemFileNamesView:
 
     # 03  System-File-Names   pic x(532) occurs 58.
     #     *> 39 chg for sales BO file plus py     [copybooks/wsnames.cob:L81]
-    #
     # A tuple rather than a list: the table has a fixed 58 elements and a
     # fixed order, and a fixed collection is a tuple throughout this
     # package (rule R-6). The maintainer's trailing comment on the line
@@ -829,7 +732,6 @@ class FileDefs:
     file_defs_a: FileDefsA = dataclasses.field(default_factory=FileDefsA)
 
     # 02  filler         redefines file-defs-a.   [copybooks/wsnames.cob:L80]
-    #
     # The COBOL name of the anonymous group, as the dictionary keys it
     # (`File-Defs.filler`). Its own storage is the storage of
     # `file_defs_a`; Python cannot express that, so the two are separate
@@ -841,34 +743,24 @@ class FileDefs:
 
     # 02  File-Defs-Count         binary-short value 58.
     #     *> MUST be the same as above occurs     [copybooks/wsnames.cob:L82]
-    #
-    # `binary-short` - a signed 16-bit integer, domain -32768 .. 32767,
-    # scale 0 - so the carrier is `int`. The default is the copybook's own
-    # `VALUE` clause.
-    #
-    # DELIBERATELY THE LITERAL 58 AND NOT A COUNT OF THE ELEMENTS. The
-    # copybook declares the number and separately declares 58 elements,
-    # and the maintainer's comment shows he knows the two can drift apart.
-    # Computing it here would make them agree by construction and so hide
-    # any future disagreement - the same shape of defect as the batch
-    # record's declared length contradicting the sum of its fields
-    # [copybooks/wsbatch.cob:L7-L9]. The declared value is reproduced; the
-    # agreement is asserted in the test suite, never enforced here.
+    # `binary-short` - a signed 16-bit integer, domain -32768 .. 32767, scale 0 - so the carrier
+    # is `int`, defaulting to the copybook's own `VALUE`.
+    # DELIBERATELY THE LITERAL 58 AND NOT A COUNT OF THE ELEMENTS. The copybook declares the
+    # number and separately declares 58 elements, and the maintainer's comment shows he knows
+    # the two can drift. Computing it here would make them agree by construction and so hide any
+    # future disagreement - the same shape of defect as the batch record's declared length
+    # contradicting the sum of its fields [copybooks/wsbatch.cob:L7-L9]. The declared value is
+    # reproduced; the agreement is asserted in the test suite, never enforced here.
     file_defs_count: int = 58
 
     # 02  File-Defs-os-Delimiter  pic x.          [copybooks/wsnames.cob:L83]
-    #
-    # One character, and THE ONLY ITEM IN THIS RECORD WITH NO `VALUE`
-    # CLAUSE. The default is a single space, and the copybook's own comment
-    # on the line says why that is the right one: it reads, of this field,
-    # "if = [reverse solidus] or / then paths have been set". A space is
-    # therefore neither of the two set states - it is the not-yet-set
-    # state, which is where a freshly initialised block starts, and it
-    # matches how the runtime space-fills an alphanumeric working-storage
-    # item that declares no value.
-    #
-    # NOT taken from the host operating system. There is no separator
-    # lookup here and no inspection of the running system: this is a
-    # declared field that the calling program sets, and deriving it would
-    # make two runs on two hosts differ (rule R-6).
+    # One character, and THE ONLY ITEM IN THIS RECORD WITH NO `VALUE` CLAUSE. The default is a
+    # single space, and the copybook's own comment on the line says why: it reads, of this
+    # field, "if = [reverse solidus] or / then paths have been set". A space is neither set
+    # state - it is the not-yet-set state, where a freshly initialised block starts, and it
+    # matches how the runtime space-fills an alphanumeric working-storage item declaring no
+    # value.
+    # NOT taken from the host operating system. There is no separator lookup here and no
+    # inspection of the running system: this is a declared field the calling program sets, and
+    # deriving it would make two runs on two hosts differ (rule R-6).
     file_defs_os_delimiter: str = " "

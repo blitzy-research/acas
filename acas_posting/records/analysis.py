@@ -14,20 +14,15 @@ perform. Every rule that governs the 300-byte sales record governs this one.
 
 WHERE THIS RECORD SITS
 ======================
-Its row of the entity spine, from Agent Action Plan section 0.2.1.1:
-
-    entity facade   Analysis
-    handler         acas015           [common/acas015.cbl]
-    bridge          analMT            [common/analMT.cbl]
-    table           ANALYSIS-REC      [mysql/ACASDB.sql:L31]
-    copybook        copybooks/wsanal.cob
-
-Section 0.6.6 tabulates the table at four columns with the single-column
-primary key `PA-CODE` and zero secondary indexes, which is what lets the
-harness dump be `SELECT * FROM <table> ORDER BY <primary key>` with no
-tie-breaking logic at all. Ordering therefore belongs to
-`harness/dump_tables.py`, and this module supplies none - see "WHAT THIS
-MODULE DELIBERATELY DOES NOT DECLARE" at the foot of this docstring.
+Entity facade `Analysis`, handler `acas015` [common/acas015.cbl], bridge
+`analMT` [common/analMT.cbl], table `ANALYSIS-REC` [mysql/ACASDB.sql:L31] -
+the spine row Agent Action Plan section 0.2.1.1 gives, restated on
+`WsAnalysisRecord` below. Section 0.6.6 tabulates that table at four columns
+with the single-column primary key `PA-CODE` and zero secondary indexes, which
+is what lets the harness dump be `SELECT * FROM <table> ORDER BY <primary
+key>` with no tie-breaking logic. Ordering therefore belongs to
+`harness/dump_tables.py` and this module supplies none - see "WHAT THIS MODULE
+DELIBERATELY DOES NOT DECLARE" below.
 
 THE COPYBOOK, WHOLE
 ===================
@@ -51,27 +46,20 @@ The file's own header, verbatim::
     *> 36 bytes 25/3/09                                L6
     *> 24/07/16 vbc - Taken from fdanal.cob            L7
 
-The identifiers are MIXED CASE in this copybook - `WS-Pa-Code`, `Pa-System`,
-`Pa-Group`, `Pa-First`, `Pa-Second`, `Pa-Gl`, `Pa-Desc`, `Pa-Print` - and are
-carried below exactly as written, neither lower-cased nor raised to the
-column's upper case. Every descriptor `name` is the copybook's spelling
-because that is the spelling a reader diffing this module against the frozen
-source will be looking for.
+The identifiers are MIXED CASE - `WS-Pa-Code`, `Pa-System`, `Pa-Group`,
+`Pa-First`, `Pa-Second`, `Pa-Gl`, `Pa-Desc`, `Pa-Print` - and are carried
+below exactly as written, neither lower-cased nor raised to the column's upper
+case. Every descriptor `name` is the copybook's spelling, because that is the
+spelling a reader diffing this module against the frozen source looks for.
 
-THREE NAMES DENOTE THIS ONE LAYOUT
-==================================
-    `WS-Analysis-Record`   the copybook 01     [copybooks/wsanal.cob:L9]
-    `Analysis-Rec`         the bridge's own 01 [common/analMT.cbl:L315]
-    `ANALYSIS-REC`         the MySQL table     [mysql/ACASDB.sql:L31]
-
-The bridge does not `COPY` the copybook. It declares its own record inline,
-under its own name, beneath a comment recording that the buffer was generated
-from a source set rather than from the copybook [common/analMT.cbl:L310-L313].
-Its load paragraph's call site names that inline record too - "move
-Analysis-Rec fields to HV fields" [common/analMT.cbl:L774].
-
-AND THE BRIDGE'S INLINE RECORD IS NOT THE SAME SHAPE. Measured against
-[copybooks/wsanal.cob:L9-L17] and [common/analMT.cbl:L315-L319], not assumed::
+THE BRIDGE'S INLINE RECORD IS NOT THE SAME SHAPE
+================================================
+The bridge does not `COPY` this copybook. It declares its own record inline,
+under its own name `Analysis-Rec` [common/analMT.cbl:L315], beneath a comment
+recording that the buffer was generated from a source set rather than from the
+copybook [common/analMT.cbl:L310-L313]; its load paragraph's call site names
+that inline record too [common/analMT.cbl:L774]. Counted from
+[copybooks/wsanal.cob:L9-L17] and [common/analMT.cbl:L315-L319]::
 
     the copybook                           the bridge's own inline record
     -------------------------------------  -----------------------------
@@ -85,101 +73,68 @@ AND THE BRIDGE'S INLINE RECORD IS NOT THE SAME SHAPE. Measured against
          03  Pa-Desc           pic x(24).       03  Pa-Desc   pic x(24).
          03  Pa-Print          pic xxx.         03  Pa-Print  pic xxx.
 
-Four differences, each recorded and none repaired: the 01 is renamed; the
+Four differences, none of them repaired: the 01 is renamed; the
 four-declaration key group is FLATTENED to one elementary item; that item is
-also renamed, losing the `WS-` prefix; and the 05 and 07 levels disappear
-entirely. Eight declarations become four. The two layouts still occupy the
-same 36 bytes, so they are byte-compatible while being structurally different,
-which is precisely the kind of divergence a byte-count check cannot catch.
-`Pa-Gl`, `Pa-Desc` and `Pa-Print` are identical in name, level, picture and
-casing across both.
+also renamed, losing the `WS-` prefix; and the 05 and 07 levels disappear.
+Eight declarations become four, in the same 36 bytes - byte-compatible while
+structurally different, which is precisely the divergence a byte-count check
+cannot catch. `Pa-Gl`, `Pa-Desc` and `Pa-Print` are identical throughout.
 
-THIS MODULE IS BUILT FROM THE COPYBOOK, and the reason is structural rather
-than a matter of taste: the copybook is what the posting programs `COPY`, so
-the copybook is the field structure those programs manipulate. Agent Action
-Plan section 0.8.2 preserves the user's own words about the other half of the
-question - the maintainer's one-way COBOL-to-MySQL bridge DEFINES the
+THIS MODULE FOLLOWS THE COPYBOOK, for a structural reason: the copybook is
+what the posting programs `COPY`, so it is the field structure they
+manipulate. Section 0.8.2 preserves the user's own words on the other half -
+the maintainer's one-way COBOL-to-MySQL bridge DEFINES the
 record-layout-to-table mapping, and "it is the data dictionary for this
-migration". Both hold at once, and the split is exact: the bridge governs
-which field reaches which column, the copybook governs what the fields ARE.
-Neither name is adopted here as an alias for the other.
-
-THE `WS-` PREFIX VANISHES BETWEEN THE COPYBOOK AND THE COLUMN
-=============================================================
-    copybook group     `WS-Pa-Code`   [copybooks/wsanal.cob:L10]
-    bridge host var    `HV-PA-CODE`   [common/analMT.cbl:L283]
-    column             `PA-CODE`      [mysql/ACASDB.sql:L32]
-
-This is the single clearest demonstration in the whole records package of why
-a dictionary key is obtained by LOOKUP and never by transforming an attribute
-name. Raising `ws_pa_code` to upper case and swapping underscores for hyphens
-yields `WS-PA-CODE`, which is not a column, is not a key, and does not exist
-anywhere in the frozen schema. The lookup below reads each entry's
-`copybook.name` and takes the entry's own `key` - see "DESCRIPTORS ARE LOOKED
-UP" below.
+migration". Both hold at once: the bridge governs which field reaches which
+column, the copybook governs what the fields ARE. Neither name is adopted here
+as an alias for the other.
 
 THE FOUR-LEVEL KEY GROUP BECOMES ONE COLUMN
 ===========================================
-`WS-Pa-Code` nests four levels deep - `01` to `03 WS-Pa-Code` to
-`05 Pa-System` and `05 Pa-Group` to `07 Pa-First` and `07 Pa-Second` - and the
-level numbering JUMPS FROM 05 STRAIGHT TO 07 [copybooks/wsanal.cob:L12-L14].
-The whole three-byte group collapses into ONE `char(3)` column, so
-`Pa-System`, `Pa-Group`, `Pa-First` and `Pa-Second` have no columns of their
-own. The dictionary records that as a `GROUP_CONCATENATION` derivation whose
-expression is the bridge's own move [common/analMT.cbl:L943].
-
-All four are declared below regardless. Rule R-3 forbids removing what the
-copybook declares just as firmly as it forbids adding what the copybook does
-not, and the COBOL programs address these children by name.
+`WS-Pa-Code` nests four levels deep, the level numbering JUMPING FROM 05
+STRAIGHT TO 07 [copybooks/wsanal.cob:L12-L14], and the whole three-byte group
+collapses into ONE `char(3)` column - recorded as a `GROUP_CONCATENATION`
+derivation whose expression is the bridge's own move [common/analMT.cbl:L943].
+`Pa-System`, `Pa-Group`, `Pa-First` and `Pa-Second` therefore have no columns
+of their own, and are declared below regardless: R-3 forbids removing what the
+copybook declares as firmly as adding what it does not, and the COBOL
+addresses them by name. `WsPaCode` and `PaGroup` below carry the detail.
 
 The column arithmetic, which is how the collapse is checked rather than
-assumed: counting `WS-Pa-Code` ONCE gives `WS-Pa-Code` + `Pa-Gl` + `Pa-Desc` +
-`Pa-Print` = 4, matching section 0.6.6 and the four columns the schema
-declares. Counting its children individually instead gives 6, which matches
-nothing.
+assumed: counting `WS-Pa-Code` ONCE gives four, matching section 0.6.6 and the
+schema. Counting its children individually gives six, which matches nothing.
 
 WHAT DRIFTS HERE, AND WHAT NOTABLY DOES NOT
 ===========================================
-Three kinds of drift cross the bridge boundary in this record. Every one is
-recorded unadjudicated: the dictionary holds all three layer views side by
-side plus an unsettled `drift` object, and the descriptors below report the
-COPYBOOK view only.
+Three kinds cross the bridge boundary here, each recorded unadjudicated: the
+dictionary holds all three layer views side by side plus an unsettled `drift`
+object, and `loader.drift_for` names them exactly.
 
 1. GROUP CONCATENATION AND PREFIX STRIP, on the key. Four declarations and
    three bytes become one `HV-PA-CODE PIC X(3)` [common/analMT.cbl:L283] and
-   one `PA-CODE char(3)` [mysql/ACASDB.sql:L32]. `loader.drift_for` reports
-   `name=True` for it and nothing else.
+   one `PA-CODE char(3)` [mysql/ACASDB.sql:L32]. `name=True`, nothing else.
+2. STORAGE CLASS AND DIGIT WIDTH, on `Pa-Gl`: `pic 9(6)` zoned DISPLAY in the
+   copybook, `PIC  9(08) COMP` binary and eight digits at the host variable,
+   `mediumint(6) unsigned` back down to six at the column. `usage=True` and
+   `digits=True`. The comment above `_PA_GL` below carries the locators, the
+   round trip and the open question it raises.
+3. THE SAME THREE BYTES SPELLED THREE WAYS, on `Pa-Print`. Carried through
+   verbatim as `xxx` and never rewritten `x(3)`; the comment above `_PA_PRINT`
+   below has the three spellings and their locators.
 
-2. STORAGE CLASS AND DIGIT WIDTH, on `Pa-Gl`. The copybook declares
-   `pic 9(6)` - zoned DISPLAY, six digits [copybooks/wsanal.cob:L15]. The host
-   variable declares `PIC  9(08) COMP` - binary, EIGHT digits
-   [common/analMT.cbl:L284]. The column is `mediumint(6) unsigned`, back down
-   to six [mysql/ACASDB.sql:L33]. The bridge's own moves make the round trip
-   visible: `move PA-GL to HV-PA-GL` [common/analMT.cbl:L944] on the way out
-   and `move HV-PA-GL to PA-GL` [common/analMT.cbl:L966] on the way back.
-   `loader.drift_for` reports `usage=True` and `digits=True`.
-
-   THE DESCRIPTOR FOR `Pa-Gl` REPORTS DISPLAY AND SIX DIGITS. Not COMP, not
-   eight. A descriptor describes COBOL-side storage, and widening it to the
-   host variable's width would blend two layers into a view of the field that
-   exists in neither. Converting between them is the bridge boundary's work
-   and belongs to `acas_posting/dal/acas015_analysis.py`, which is the module
-   that stands where the bridge stands. That module is also, for exactly that
-   reason, the live temptation this file must not reach for - see "LAYERING".
-
-3. THE SAME THREE BYTES SPELLED THREE WAYS. `Pa-Print` is `pic xxx` in the
-   copybook [copybooks/wsanal.cob:L17], `PIC X(3)` at the host variable
-   [common/analMT.cbl:L286] and `char(3)` at the column
-   [mysql/ACASDB.sql:L35]. The `xxx` spelling is carried through verbatim and
-   is not rewritten as `x(3)`; the dictionary holds it as `xxx` and the
-   descriptor reports it that way.
+THE DESCRIPTORS REPORT THE COPYBOOK VIEW AND NOTHING ELSE - DISPLAY and six
+digits for `Pa-Gl`, not COMP and not eight. Widening one to a host variable's
+width would blend two layers into a view of the field that exists in neither.
+Converting between them belongs to the `acas015` handler module, which is
+also, for exactly that reason, a live temptation this file must not reach for
+- see "LAYERING".
 
 SIGNEDNESS DOES NOT DRIFT ANYWHERE IN THIS RECORD, and that is worth stating
 outright. `Pa-Gl` is unsigned in the copybook - `pic 9(6)` carries no `S` -
 unsigned at the host variable, and `unsigned` at the column;
 `loader.drift_for` reports `signedness=False` on all four columns. Section
 0.6.2 argues that drift in this system is "specific rather than systemic", and
-this record is the measurement that makes the argument checkable:
+this record is the count that makes the argument checkable:
 `records/sales_ledger.py` loses eleven signs at the bridge,
 `records/purchase_ledger.py` twelve and `records/value_analysis.py` three
 money signs - and this record loses none.
@@ -188,20 +143,19 @@ Trailing-space handling is likewise not this module's business. The bridge
 trims trailing spaces as it builds its statement text
 [common/analMT.cbl:L991], [common/analMT.cbl:L1012],
 [common/analMT.cbl:L1021], [common/analMT.cbl:L1053], and renders the numeric
-field through an edited picture [common/analMT.cbl:L1000],
+field via an edited picture [common/analMT.cbl:L1000],
 [common/analMT.cbl:L1062]. Bringing two table dumps into a comparable form is
-a step of the oracle harness, listed in its own file inventory at section
-0.3.1, and it happens after both runs have finished. Nothing is trimmed, padded
-or reshaped here.
+a harness step, listed in its own file inventory at section 0.3.1, and happens
+after both runs finish. Nothing is trimmed, padded or reshaped here.
 
 Note on wording: this file names none of the harness's comparison step, the
-adjudication vocabulary, or section 0.4.1.3's own verb for what must not happen
-to an oddity. All three belong to the family of words R-4 bans outright, so
-each is described rather than spelled. The requirements they carry are
-unchanged - see "ODDITIES ARE PRESERVED" below.
+adjudication vocabulary, or section 0.4.1.3's own verb for what must not
+happen to an oddity. All three belong to the family of words R-4 bans
+outright, so each is described rather than spelled, with the requirements they
+carry unchanged - see "ODDITIES ARE PRESERVED" below.
 
-THE DECLARED SIZE AGREES WITH THE FIELD SUM - UNIQUELY IN THIS FOLDER
-=====================================================================
+THE DECLARED SIZE AGREES WITH THE FIELD SUM
+===========================================
     WS-Pa-Code   3   =  Pa-System 1 + Pa-Group ( Pa-First 1 + Pa-Second 1 )
     Pa-Gl        6      pic 9(6)
     Pa-Desc     24      pic x(24)
@@ -216,29 +170,30 @@ byte count is a plain character sum with no storage-class arithmetic in it.
 Four greps confirm the absences, all returning zero: no FILLER, no REDEFINES,
 no 88-level condition name, and none of the computational usages.
 
-That agreement is informative because its siblings disagree.
+Agreement is not unique to this record - summing the descriptors closes
+against the declared header for several of these layouts. What is worth
+stating is the contrast with the three that carry a DISPUTED number:
 `records/gl_batch.py` carries anomaly 15, the batch record's 96-versus-98
 contradiction [copybooks/wsbatch.cob:L7-L9]; `records/irs_system.py` carries a
-256-versus-257 contradiction; `records/value_analysis.py` carries an open
-question about its declared 66 bytes. Here the arithmetic simply closes, which
-is what makes those three demonstrably specific rather than a systemic habit
-of the codebase.
-
-NO length, size or byte-count constant is declared below all the same. R-3
-forbids adding what the copybook does not declare, and a constant here would
-invite one in the three records where the number is disputed - which is
+256-versus-257 contradiction; `records/value_analysis.py` records an open
+question raised by its own header. Those three are specific rather than a
+systemic habit of the codebase, and this record is one of the counts that
+shows it. NO length, size or byte-count constant is declared below all the
+same: R-3 forbids adding what the copybook does not declare, and a constant
+here would invite one in the three records where the number is disputed -
 exactly where a single number cannot honestly be written down.
 
 R-2 IS SATISFIED HERE BY AN ABSENCE
 ===================================
 Rule R-2 admits no binary floating point into an accounting value, in
-computation, in storage or in transport. This record contains no monetary and
-no fractional field at all: one unsigned integer and five alphanumeric items.
-So the exact-decimal carrier that the money-bearing records use is NOT
-imported here, and its absence is the point rather than an oversight - an
-unused import is noise, and R-2 is met by there being nothing fractional to
-carry. `records/system_final.py` and `records/irs_final.py` are the other
-record modules in this position.
+computation, in storage or in transport. This record has no monetary and no
+fractional field at all: one unsigned integer and five alphanumeric items. So
+the exact-decimal carrier the money-bearing records use is NOT imported here,
+and its absence is the point rather than an oversight - an unused import is
+noise, and R-2 is met by there being nothing fractional to carry. Counted over
+the dictionary, four in-scope tables carry no fractional column, so
+`records/irs_dflt.py`, `records/irs_final.py` and `records/system_final.py`
+are the other record modules in this position.
 
     Pa-System, Pa-First, Pa-Second, Pa-Desc, Pa-Print   ->  str
     Pa-Gl                                              ->  int
@@ -251,50 +206,43 @@ integer truncation is what a store into it does.
 
 DESCRIPTORS ARE LOOKED UP, NEVER TRANSCRIBED (R-5)
 ==================================================
-Agent Action Plan section 0.8.1 makes the ordering a directive rather than a
-preference - the dictionary is generated from the bridge BEFORE record
-definitions are written, and every Python field definition cites its entry,
-because that "is what prevents fields being transcribed by eye". Section 0.3.3
-states the payoff: field metadata is "derived, not transcribed, which
-eliminates an entire class of transcription error".
+Section 0.8.1 makes the ordering a directive rather than a preference - the
+dictionary is generated from the bridge BEFORE record definitions are written,
+and every Python field definition cites its entry, because that "is what
+prevents fields being transcribed by eye". Section 0.3.3 states the payoff:
+field metadata is "derived, not transcribed, which eliminates an entire class
+transcription error". So no picture clause, digit count, scale, sign position,
+storage class or character width is written by hand below; `_dictionary_keys`
+and `_descriptor` carry the mechanism. Two key conventions appear, both out of
+the lookup rather than out of a rule about naming::
 
-No picture clause, digit count, scale, sign position, storage class or
-character width is written by hand below. `_dictionary_keys` reads the entries
-the artifact holds for this record, keys them by each entry's own
-`copybook.name`, and hands the entry's own `key` to
-`FieldDescriptor.from_dictionary_key`. Two key conventions appear, and both
-come out of the lookup rather than out of a rule about naming::
+    <TABLE-NAME>.<COLUMN-NAME>       the four column-mapped fields, e.g.
+                                     ANALYSIS-REC.PA-CODE, ANALYSIS-REC.PA-GL
+    <COPYBOOK-RECORD>.<FIELD-NAME>   the five column-less ones, e.g.
+                                     WS-Analysis-Record.Pa-System
 
-    ANALYSIS-REC.PA-CODE            <TABLE-NAME>.<COLUMN-NAME>
-    ANALYSIS-REC.PA-GL
-    ANALYSIS-REC.PA-DESC
-    ANALYSIS-REC.PA-PRINT
-    WS-Analysis-Record.Pa-System    <COPYBOOK-RECORD>.<FIELD-NAME>
-    WS-Analysis-Record.Pa-Group
-    WS-Analysis-Record.Pa-First
-    WS-Analysis-Record.Pa-Second
+That the group's key is `PA-CODE` and not `WS-PA-CODE` is the clearest
+demonstration in the whole records package of why a dictionary key is obtained
+by LOOKUP and never by transforming an attribute name: raising `ws_pa_code` to
+upper case and swapping underscores for hyphens yields a name that is not a
+column, is not a key, and exists nowhere in the frozen schema.
 
-THE SPLIT IS EIGHT AND ZERO: all eight members take
-`FieldDescriptor.from_dictionary_key`, and none takes
-`FieldDescriptor.for_working_storage`. That is a finding of the lookup and not
-an assumption. It would be easy to reason that `Pa-System`, `Pa-First` and
-`Pa-Second` need the working-storage constructor because they have no columns
-- and it would be wrong. The generated artifact covers all nine declarations
-of this copybook, the four column-mapped ones under the table key and the
-five column-less ones under the copybook-record key, so there is an entry to
-cite for every member. The package contract in `records/__init__.py` scopes
-`for_working_storage` to `work_records.py` alone, whose layouts belong to no
-copybook and to no table. Using it here would mean hand-typing metadata the
-artifact already holds, which is the transcription error class R-5 exists to
-close.
+EIGHT LOOKED UP AND NONE HAND-BUILT: all eight members take
+`FieldDescriptor.from_dictionary_key`, which is the only path there is - a
+finding of the lookup, not an assumption. It would be easy to reason that the
+three column-less members need their metadata typed in, and it would be wrong:
+the artifact covers all nine declarations, so every member has an entry to cite.
+There is no locator-only factory to fall back on either - even the General
+Ledger work-file records, the one population that ever had one, are catalogued
+as program-source entries and bound by key. Hand-typing metadata the artifact
+already holds is the transcription error class R-5 exists to close. The
+ninth entry is the record's own 01, keyed
+`WS-Analysis-Record.WS-Analysis-Record` [copybooks/wsanal.cob:L9]; it is a
+member of nothing, so no descriptor is built for it, and it is named here so
+the migration's traceability document can carry all nine.
 
-The record's own 01 has an entry too, keyed
-`WS-Analysis-Record.WS-Analysis-Record` [copybooks/wsanal.cob:L9]. It is not
-a member of anything, so no descriptor is built for it; it is named here so
-that `docs/migration/traceability.md` can carry all nine.
-
-`loader.cite(key)` returns the compact three-locator provenance string for any
-key. It is surfaced through `FieldDescriptor.cite()` and never reimplemented::
+`loader.cite(key)` returns the compact three-locator provenance string,
+surfaced through `FieldDescriptor.cite()` and never reimplemented::
 
     ANALYSIS-REC.PA-GL  copybook=copybooks/wsanal.cob:L15
     bridge=common/analMT.cbl:L284  column=mysql/ACASDB.sql:L33
@@ -307,9 +255,9 @@ THE NEAR-DUPLICATE TWIN IS A TRAP (anomaly 21's class)
 ======================================================
 `copybooks/wsval.cob`, which `records/value_analysis.py` is built from,
 declares structurally the same four fields - a three-byte four-level key
-group, a `pic 9(6)` general-ledger account, a `pic x(24)` description and a
-`pic xxx` print flag - and then adds six numeric fields this record does not
-have. Eight divergences separate the twins, every one measured::
+group, a
+print flag - then adds six numeric fields this record does not have. Eight
+divergences separate the twins, every one counted::
 
                         this record            the twin
                         copybooks/wsanal.cob   copybooks/wsval.cob
@@ -318,40 +266,41 @@ have. Eight divergences separate the twins, every one measured::
                         WS- prefixed           bare
     field prefix        Pa-                    va-
     casing              mixed case             lower case
-    07 indentation      two spaces L13-L14     one space L13-L14
+    gap after `07`      two spaces L13-L14     one space L13-L14
     extra fields        none                   six, L18-L23
     trailing *>         absent, ends at L17    present at L24
-    declared bytes      36, and the sum agrees 66, an open question
+    declared bytes      36                     66
+
+Both files indent their 07 items by the same thirteen columns; what differs is
+the gap between the level number and the field name, which is why the row
+above names the gap rather than the indentation.
 
 Section 0.6.7 entry 21 records field-name collisions across near-identical
 posting copybooks as an anomaly in its own right, because in COBOL they force
-qualified references. Here the consequence for Python is sharper: the two
-layouts are similar enough to invite a shared base class, a shared descriptor
-table, a mixin, or a copy-and-rename - and every one of those would couple two
-records that the frozen source keeps apart, in a package whose layering
-contract forbids one record module from importing another at all. NOTHING is
-shared with `records/value_analysis.py`. The lookup below additionally guards
-against having reached the wrong record: it admits an entry only if its
-copybook file is this copybook, and refuses any field name carrying the twin's
-`va-` prefix.
+qualified references. For Python the consequence is sharper: the two layouts
+are similar enough to invite a shared base class, a shared descriptor table, a
+mixin or a copy-and-rename, and every one would couple two records the frozen
+source keeps apart, in a package whose layering contract forbids one record
+module from importing another. NOTHING is shared with
+`records/value_analysis.py`; `_admit` below is the pair of checks a machine can
+apply against having reached the wrong record.
 
 ODDITIES ARE PRESERVED, NEVER REPAIRED (R-4)
 ============================================
-Agent Action Plan section 0.8.2 preserves the user's own words:
+Section 0.8.2 preserves the user's own words:
 
     "There is no test suite: compiled COBOL execution is the behavioral
     specification, defects included.
     A defect reproduced is correct; a defect fixed is a failure."
 
 Section 0.4.1.3 says the same of this folder - oddities in the source are
-preserved, never [repaired]. The bracket marks a substituted word: that
-sentence's own verb belongs to the vocabulary of adjudication that this system
-bans outright, and the requirement is unchanged by the substitution. There is
-deliberately no winner view, no widest picture, no settled reading and no
-"sensible" alternative anywhere below, and none may be introduced.
+preserved, never [repaired], the bracket marking a substituted word as the
+note above explains. There is deliberately no winner view, no widest picture,
+no settled reading and no "sensible" alternative below, and none may be
+introduced.
 
-What this module records, each with its locator at the point of use, and none
-of it altered. The register lives in `docs/migration/anomaly-log.md`:
+What this module records, each with its locator at the point of use and none
+of it altered. The register lives in the migration's anomaly log:
 
   * Three names for one layout, and the bridge's inline record flattens and
     renames the key while keeping the other three fields identical
@@ -365,8 +314,8 @@ of it altered. The register lives in `docs/migration/anomaly-log.md`:
     back at the column [common/analMT.cbl:L284], [mysql/ACASDB.sql:L33].
   * Four declarations map to one column; three of the four map to nothing
     [common/analMT.cbl:L943].
-  * The level numbering jumps 05 to 07, and indents the 07 items with two
-    spaces where the twin uses one [copybooks/wsanal.cob:L12-L14].
+  * The level numbering jumps 05 to 07, and sets the field name two spaces
+    after that level number where the twin uses one
   * `pic xxx` is spelled out rather than written `x(3)`
     [copybooks/wsanal.cob:L17].
   * The header stamps a single-digit month, `25/3/09`, where sibling copybooks
@@ -374,33 +323,29 @@ of it altered. The register lives in `docs/migration/anomaly-log.md`:
     [copybooks/wsanal.cob:L6-L7].
   * The file ends at its last field with no trailing comment line, where the
     twin has one [copybooks/wsanal.cob:L17], [copybooks/wsval.cob:L24].
-  * The near-duplicate twin, under divergent names, prefix, casing and
-    indentation [copybooks/wsval.cob:L9-L17].
-  * Signedness does not drift and the declared size agrees with the field sum
-    - the two contrast measurements above, which is why they are stated rather
-    than left implied.
+  * The near-duplicate twin, under divergent names, prefix, casing and level
+    spacing [copybooks/wsval.cob:L9-L17].
+  * Signedness does not drift and the declared size agrees with the field sum -
+    the two contrast counts above, which is why both are stated rather than
+    left implied.
 
 The artifact reports `anomaly_refs` and `ambiguity_refs` as empty for all four
 of this table's entries, so none of the above is tagged in the generated
-document; the register above and the question below are where they are
-written down.
+document; the register above and the question below are where they are written
+down.
 
 AN OPEN QUESTION FOR THE COMPILED ORACLE (R-6)
 ==============================================
-Rule R-6 makes the compiled program the tie-breaker for any question that
-reading the frozen source cannot settle, and requires the arbitration be
-written down. One question bears on this record, and it is recorded in
-`docs/migration/ambiguity-resolutions.md`:
-
-    `Pa-Gl` holds six digits [copybooks/wsanal.cob:L15]; the host variable it
-    is moved into holds eight [common/analMT.cbl:L284]; the column it lands in
-    is back down to six [mysql/ACASDB.sql:L33]. What does the round trip
-    [common/analMT.cbl:L944] then [common/analMT.cbl:L966] do to a value that
-    does not fit six digits - and what does the narrowing at the column then
-    do to it? The digits are rendered through an edited picture and sliced to
-    eight characters on the way into the statement text
-    [common/analMT.cbl:L1000], which is a third place the answer could be
-    decided.
+Rule R-6 makes the compiled program the tie-breaker for any question reading
+the frozen source cannot settle, and requires the arbitration be written down.
+One question bears on this record, recorded in the migration's
+ambiguity-resolutions document: `Pa-Gl` holds six digits, the host variable it
+is moved into holds eight, the column is back down to six - so what does the
+round trip do to a value that does not fit six digits, and what does the
+column's narrowing then do to it? A third place the answer could be decided is
+the statement text, where the digits are rendered through an edited picture
+and sliced to eight characters [common/analMT.cbl:L1000]. The comment above
+`_PA_GL` carries the remaining locators.
 
 MEASURE IT AGAINST THE COMPILED ORACLE. No clamp, no wrap, no width check and
 no guard against it is stored in this module, because storing one would settle
@@ -415,65 +360,50 @@ else, for a stated reason: "this keeps the record layer a leaf".
     permitted   acas_posting.cobol.field         the FieldDescriptor type
                 acas_posting.dictionary.loader   the descriptor lookup
 
-    forbidden   any `dal` module, `programs`, `cli`, `clock`, `dates`,
-                `workfiles`, `cobol.arithmetic`, `cobol.move`,
-                `cobol.picture`, `cobol.usage`, `cobol.condition_names`,
-                `cobol.sortverb`, `dictionary.generate`, the compiled
-                comparison oracle in its sibling tree, and any other module of
-                this package - `records/value_analysis.py` above all.
+Forbidden is everything else: any handler module, `programs`, `cli`, `clock`,
+`dates`, `workfiles`, every other `cobol` module, `dictionary.generate`, the
+compiled comparison oracle in its sibling tree, and any other module of this
+package - `records/value_analysis.py` above all. Two are live temptations than
+theoretical. The `acas015` handler module owns the DISPLAY-to-binary
+conversion this record's one numeric field undergoes, and reaching for it
+would drag a database driver into the tier section 0.4.3 promises "imports
+only `cobol` and `records` and touches no database, so it runs anywhere".
+`records/value_analysis.py` owns a near-identical layout, and reaching for it
+would couple two records the frozen source keeps separate. Neither is
+imported.
 
-Two of those are live temptations rather than theoretical ones.
-`dal/acas015_analysis.py` owns the DISPLAY-to-binary conversion this record's
-one numeric field undergoes, and reaching for it would drag a database driver
-into the tier that section 0.4.3 promises "imports only `cobol` and `records`
-and touches no database, so it runs anywhere". `records/value_analysis.py`
-owns a near-identical layout, and reaching for it would couple two records the
-frozen source keeps separate. Neither is imported.
-
-R-1 holds here trivially and is stated so the reader need not check: nothing
-below runs, embeds or shells out to a COBOL program, and no COBOL toolchain,
-no foreign-function bridge and no database driver is reachable from this
-module. The COBOL is read as the specification and cited by locator; it is
-never a runtime dependency.
+R-1 holds trivially and is stated so the reader need not check: nothing below
+runs, embeds or shells out to a COBOL program, and no COBOL toolchain, no
+foreign-function bridge and no database driver is reachable from here. The
+COBOL is read as the specification and cited by locator, never as a
+dependency.
 
 WHAT THIS MODULE DELIBERATELY DOES NOT DECLARE
 ==============================================
 R-3 admits no added field, no added validation and no added surface. Absent by
-decision, not by omission:
-
-  * No key-composition helper, no text conversion that concatenates the three
-    key bytes, no comparison or ordering method, and no sort support.
-    `harness/dump_tables.py` orders rows by the primary key the schema
-    declares.
-  * No length, size or byte-count constant.
-  * No alias, subclass or second name for the bridge's inline record.
-  * No condition-name predicate and no enumeration: this copybook declares no
-    88-level, and a grep confirms it.
-  * No FILLER and no REDEFINES member: this copybook declares neither.
-  * No initialiser hook, no width padding, no analysis-code check and no
-    general-ledger account range check. The COBOL performs none of those on
-    this record, so neither does this module.
-  * No exact-decimal import, for the reason given under R-2 above.
-  * Nothing frozen. The dataclasses below are mutable because
-    `sales/sl055.cbl` and `purchase/pl055.cbl` read and update these records
-    as they build analysis totals, and because an immutable or snapshotting
-    record could make a lost-update defect impossible to reproduce - which R-4
-    requires stay reproducible.
+decision, not by omission: no key-composition helper and no text conversion
+that concatenates the three key bytes; no comparison, ordering or sort
+support, `harness/dump_tables.py` ordering rows by the primary key the schema
+declares; no length, size or byte-count constant; no alias, subclass or second
+name for the bridge's inline record; no condition-name predicate and no
+enumeration, this copybook declaring no 88-level; no FILLER and no REDEFINES
+member, it declaring neither; no initialiser hook, no width padding, no
+analysis-code check and no general-ledger account range check, the COBOL
+performing none of those here; and no exact-decimal import, for the reason
+given under R-2. Nor is anything frozen - the comment above the class
+definitions gives that reason, which is an R-4 one rather than a matter of
+style.
 
 DETERMINISM (R-6)
 =================
 Member order follows copybook declaration order, so this module and its
-copybook diff by eye. `FIELDS` is a tuple on every class, never a list, and
-its order is the declaration order. Nothing below consults a clock, draws an
-unpredictable value, inspects the process environment or reads the filesystem
-beyond the loader's own lazy cached read of the generated document, and
-execution is strictly sequential with no concurrency introduced. Two imports
-in two processes produce identical state.
-
-The class definitions ascend the copybook's level numbers - the 07 group
-first, then the 03 group, then the 01 record - because a nested default must
-name a class that already exists. MEMBER order inside each class is the
-copybook's own and is unaffected by that.
+copybook diff by eye, and `FIELDS` is a tuple on every class, never a list.
+Nothing below consults a clock, draws an unpredictable value, inspects the
+process environment or reads the filesystem beyond the loader's own lazy
+cached read of the generated document, and execution is strictly sequential
+with no concurrency introduced. Two imports in two processes produce identical
+state. The class definitions ascend the copybook's level numbers for the
+reason the comment above them gives.
 """
 
 from __future__ import annotations
@@ -487,10 +417,7 @@ from acas_posting.dictionary import loader
 __all__ = ["PaGroup", "WsAnalysisRecord", "WsPaCode"]
 
 
-# =============================================================================
 #  THE THREE FROZEN NAMES THIS MODULE IS KEYED AGAINST
-# =============================================================================
-#
 # One constant each, so that the table name appears exactly once in executable
 # code and a reader can see at a glance which of the three names denoting this
 # layout is used for what. The bridge's own inline record name is deliberately
@@ -673,10 +600,7 @@ def _spaces(descriptor: FieldDescriptor) -> str:
     return " " * (descriptor.character_length or 0)
 
 
-# =============================================================================
 #  THE EIGHT DESCRIPTORS, IN COPYBOOK DECLARATION ORDER
-# =============================================================================
-#
 # One per member declared in copybooks/wsanal.cob, L10 through L17, obtained by
 # lookup and never transcribed. Four carry a column key and four a
 # copybook-record key; the split is a result of the lookup, not a rule applied
@@ -700,9 +624,10 @@ _PA_SYSTEM: Final[FieldDescriptor] = _descriptor("Pa-System")
 _PA_GROUP: Final[FieldDescriptor] = _descriptor("Pa-Group")
 
 # 07          Pa-First  pic x.             [copybooks/wsanal.cob:L13]
-# The level numbering jumps 05 to 07 here, and the two 07 items are indented
-# with two spaces where the near-duplicate twin uses one
-# [copybooks/wsval.cob:L13-L14]. Both preserved as evidence.
+# The level numbering jumps 05 to 07 here, and the field name is set two spaces
+# after that level number where the near-duplicate twin uses one space
+# [copybooks/wsval.cob:L13-L14]. Both files indent these items by the same
+# thirteen columns; only the gap differs. Both preserved as evidence.
 _PA_FIRST: Final[FieldDescriptor] = _descriptor("Pa-First")
 
 # 07          Pa-Second pic x.             [copybooks/wsanal.cob:L14]
@@ -714,10 +639,10 @@ _PA_SECOND: Final[FieldDescriptor] = _descriptor("Pa-Second")
 # `PIC  9(08) COMP` - binary, eight digits [common/analMT.cbl:L284] - and the
 # column narrows back to `mediumint(6) unsigned` [mysql/ACASDB.sql:L33]. That
 # disagreement is surfaced by `drift()` and settled nowhere; converting across
-# it is the bridge boundary's work, in dal/acas015_analysis.py. What the round
+# it is the bridge boundary's work, in the `acas015` handler module. What the round
 # trip [common/analMT.cbl:L944] then [common/analMT.cbl:L966] does to a value
 # too wide for six digits is an open question for the compiled oracle, recorded
-# in docs/migration/ambiguity-resolutions.md and answered here by nothing.
+# in the migration's ambiguity-resolutions document, and answered here by nothing.
 _PA_GL: Final[FieldDescriptor] = _descriptor("Pa-Gl")
 
 # 03  Pa-Desc           pic x(24).         [copybooks/wsanal.cob:L16]
@@ -733,15 +658,11 @@ _PA_DESC: Final[FieldDescriptor] = _descriptor("Pa-Desc")
 _PA_PRINT: Final[FieldDescriptor] = _descriptor("Pa-Print")
 
 
-# =============================================================================
 #  THE RECORD, INNERMOST GROUP FIRST
-# =============================================================================
-#
 # Definition order ascends the copybook's level numbers - 07 group, 03 group,
 # 01 record - because a nested member's starting value must name a class that
 # already exists. MEMBER order inside each class is the copybook's own, so each
 # class body reads top to bottom against copybooks/wsanal.cob.
-#
 # None of the three is frozen. sales/sl055.cbl and purchase/pl055.cbl read and
 # update analysis records as they build their analysis totals, and an immutable
 # or snapshotting record could make a lost-update defect impossible to
@@ -754,8 +675,9 @@ class PaGroup:
 
     The second and third bytes of the record's key. Its two members are
     declared at level 07 [copybooks/wsanal.cob:L13-L14], the level numbering
-    jumping straight past 06 - preserved, along with the two-space indentation
-    the near-duplicate twin writes with one [copybooks/wsval.cob:L13-L14].
+    jumping straight past 06 - preserved, along with the two-space gap after
+    that level number where the near-duplicate twin leaves one
+    [copybooks/wsval.cob:L13-L14]; the indentation itself is identical.
 
     Neither member has a column of its own. The whole of `WS-Pa-Code`, this
     group included, reaches MySQL as the single `PA-CODE char(3)`
@@ -824,7 +746,8 @@ class WsAnalysisRecord:
     cycle. Reached through entity facade `Analysis` and handler `acas015`
     [common/acas015.cbl], carried to MySQL by bridge `analMT`
     [common/analMT.cbl], and stored in table `ANALYSIS-REC`
-    [mysql/ACASDB.sql:L31] whose primary key is the concatenated `PA-CODE`.
+    [mysql/ACASDB.sql:L31] whose primary key is the concatenated `PA-CODE`
+    [mysql/ACASDB.sql:L36].
 
     THREE NAMES DENOTE THIS LAYOUT, and this class takes the copybook's:
 
@@ -841,11 +764,10 @@ class WsAnalysisRecord:
     therefore what they manipulate. No alias for the bridge's name is offered.
 
     The declared size and the field sum AGREE here - 3 + 6 + 24 + 3 = 36
-    against the header's 36 [copybooks/wsanal.cob:L6] - uniquely among the
-    records in this package, and signedness drifts on none of the four columns.
-    Both measurements are set out in this module's docstring, where they serve
-    as the contrast cases for the records whose sizes are disputed and whose
-    signs are lost at the bridge.
+    against the header's 36 [copybooks/wsanal.cob:L6] - and signedness drifts
+    on none of the four columns. Both counts are set out in this module's
+    docstring, where they serve as the contrast cases for the records whose
+    sizes are disputed and whose signs are lost at the bridge.
 
     Every member is always present and never None. The bridge initialises its
     host-variable group before loading it [common/analMT.cbl:L942], which is

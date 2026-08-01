@@ -8,27 +8,37 @@ generated data dictionary rather than typed by eye.
 
 Nothing here decides anything. There is no batch-status predicate, no
 control-total comparison, no date conversion and no account scaling below: this
-module holds the twenty-one storage-bearing items the copybook declares and
-stops. Where the batch record's own sources disagree with one another, the
-disagreement is registered and left standing.
+module holds the twenty-three elementary items the copybook declares -
+twenty-one of which reach a column - and stops. Where the batch record's own
+sources disagree with one another, the disagreement is registered and left
+standing.
 
 WHY THIS RECORD MATTERS
 =======================
 It is the record the whole General Ledger posting cycle turns on. Agent Action
 Plan section 0.6.4 sets out an abort chain four links long: a batch left open
-sets a status condition; `gl070` detects it and raises the terminate code
-[general/gl070.cbl:L288], [general/gl070.cbl:L312-L313]; the menu tests that
-code and returns to the menu rather than continuing
-[general/general.cbl:L800-L814]. The effect is that `gl071` and `gl072` never
-run at all. The status condition in link one is `Batch-Status` below, and the
-value that starts the chain is zero.
+sets a status condition; `gl070` detects it [general/gl070.cbl:L314-L315] and
+raises the terminate code [general/gl070.cbl:L289]; the menu tests that code
+and returns to the menu rather than continuing [general/general.cbl:L800-L814].
+The effect is that `gl071` and `gl072` never run at all. The status condition
+in link one is `Batch-Status` below, and the value that starts the chain is
+zero.
 
-The entity spine, from Agent Action Plan section 0.2.1.1:
+Two of those locators are corrected against the frozen source rather than
+taken from the plan, which cites L288 and L312-L313 in sections 0.4.1.2 and
+0.6.4. L288 is `perform gl060a` and L312-L313 is the accounting-cycle filter;
+the detection is `if status-open / move 1 to a.` at L314-L315 and the raise is
+`move 5 to ws-term-code` at L289 - the only line in that program matching
+`term-code` at all.
+
+The entity spine, from the generated dictionary rather than restated by hand -
+`loader.table_for("GLBATCH-REC")` returns all of it:
 
     entity facade   GL-Batch
     handler         acas007
     bridge          glbatchMT
     MySQL table     GLBATCH-REC, 21 columns, primary key BATCH-KEY
+                    [mysql/ACASDB.sql:L102]
     copybook        copybooks/wsbatch.cob
 
 The consumer's import line is fixed by Agent Action Plan section 0.4.3, and it
@@ -40,12 +50,13 @@ mechanical `WsBatchRecord` that `01  WS-Batch-Record.`
     TO:    from acas_posting.records.gl_batch import GlBatchRecord
 
 ANOMALY A-15 - THE DECLARED LENGTH CONTRADICTION, THIS MODULE'S HEADLINE
-=======================================================================
+========================================================================
 This module is the reproducing site for anomaly A-15 of the register in
-`docs/migration/anomaly-log.md`, described by Agent Action Plan section 0.6.7
+the migration's anomaly log, described by Agent Action Plan section 0.6.7
 entry 15 as "The batch record's declared length contradicts the sum of its
-fields". The dictionary agrees: every entry of this record carries the
-reference `A-15`.
+fields". The dictionary agrees: all 28 entries of this record carry the
+reference `A-15`. `GlBatchRecord` below points here for the detail, so it is
+set out once, in full, at this level.
 
 The contradiction is the maintainer's own, written in his own words in three
 consecutive header comments [copybooks/wsbatch.cob:L7-L9], quoted verbatim:
@@ -55,12 +66,12 @@ consecutive header comments [copybooks/wsbatch.cob:L7-L9], quoted verbatim:
     *>   but function length (Batch-record) says 98?
 
 It is ALSO an open question for the compiled oracle - one of the five in Agent
-Action Plan section 0.6.8, carried by the dictionary as `Q-4` and to be
-written up in `docs/migration/ambiguity-resolutions.md`. Section 0.6.8 states
-the stake exactly: "Whether the declared length or the field sum governs the
-record actually read affects field alignment for the trailing fields, and only
-execution shows which." The trailing items most at risk of misalignment are
-therefore the `posting-data` group [copybooks/wsbatch.cob:L47-L53] and
+Action Plan section 0.6.8, carried by all 28 entries as `Q-4` and to be
+written up in the migration's ambiguity-resolutions document. Section 0.6.8
+states the stake exactly: "Whether the declared length or the field sum governs
+the record actually read affects field alignment for the trailing fields, and
+only execution shows which." The trailing items most at risk of misalignment
+are therefore the `posting-data` group [copybooks/wsbatch.cob:L47-L53] and
 `Batch-Start` [copybooks/wsbatch.cob:L54], because they sit last in the layout
 and a two-byte disagreement anywhere ahead of them shifts both.
 
@@ -72,29 +83,22 @@ section 0.4.1.3 is explicit that the contradiction is to be recorded and not
 settled. The arbiter is the compiled program, not this file (rule R-6).
 
 For the reader's benefit only, here is what the fields themselves add up to,
-each width taken from the dictionary rather than counted by hand. This is an
-OBSERVATION of the sum, not a finding about which number is right:
+each width taken from the dictionary rather than counted by hand. This is a
+COUNT of the sum, not a finding about which number is right:
 
     WS-Batch-Key9   redefines WS-Batch-Key ...........   6  running   6
                     (the redefined group's WS-Ledger 1 plus
                      WS-Batch-Nos 5 cover the very same six bytes)
-    Items ............................................   2  running   8
-    Batch-Status .....................................   1  running   9
-    Cleared-Status ...................................   1  running  10
-    Bcycle ...........................................   2  running  12
+    Items 2, Batch-Status 1, Cleared-Status 1, Bcycle 2   6  running  12
     Entered, Proofed, Posted, Stored - 4 x binary-long  16  running  28
     Input-Gross .. Actual-Vat - 4 x comp-3, 11 digits   24  running  52
     Description ......................................  24  running  76
-    bDefault .........................................   2  running  78
-    Convention .......................................   2  running  80
-    Batch-Def-AC .....................................   6  running  86
-    Batch-Def-PC .....................................   2  running  88
-    Batch-Def-Code ...................................   2  running  90
-    Batch-Def-Vat ....................................   1  running  91
+    bDefault 2, Convention 2, Batch-Def-AC 6 ..........  10  running  86
+    Batch-Def-PC 2, Batch-Def-Code 2, Batch-Def-Vat 1 .   5  running  91
     Batch-Start ......................................   5  running  96
 
 The sum is 96, which is the figure the maintainer says he counts. His note
-records a length of 98 from a different measurement. Both statements stand;
+records a length of 98. The two disagree, and both statements stand;
 this module picks neither.
 
 One fact bears directly on that gap and must not be tidied away: the copybook
@@ -106,62 +110,34 @@ THE REDEFINITION IS THE ONLY ROUTE TO THE DATABASE
 ==================================================
 `03  WS-Batch-Key9 redefines WS-Batch-Key` is ONE declaration spread over TWO
 physical lines, its PICTURE sitting alone on the second
-[copybooks/wsbatch.cob:L20-L21]:
-
-    03  WS-Batch-Key9 redefines WS-Batch-Key
-                            pic 9(6).
-
-A line-by-line reading of the copybook misses `pic 9(6).` entirely and types
-the field wrongly. Worse, it would treat the redefinition as decorative, and
-it is not. The bridge loads the REDEFINITION, not the group's two elementary
-children, in its host-variable load paragraph
-[common/glbatchMT.cbl:L1069]:
-
-    move     WS-BATCH-KEY9      to HV-BATCH-KEY.
-
-So `WS-Batch-Key9` is the sole path by which the batch key reaches
-`GLBATCH-REC.BATCH-KEY`, and `WS-Ledger` and `WS-Batch-Nos` have no column of
-their own at all. The dictionary reports this as a name disagreement across
-the three views: the copybook calls the field `WS-Batch-Key9`, while the host
-variable and the column both call it `BATCH-KEY`.
-
-In COBOL a REDEFINES is an alternate reading of the SAME six bytes, so the two
-views cannot disagree. Two Python attributes can. That divergence is left
-exactly as it is: no property, no synchronising assignment and no derived
-accessor appears below, because adding one would be adding logic the copybook
-does not declare (rule R-3). Keeping the two views in step at the moment a row
-is written or read is the business of the handler module that reproduces the
-bridge boundary, `acas_posting/dal/acas007_gl_batch.py`.
+[copybooks/wsbatch.cob:L20-L21] - so a line-by-line reading misses `pic 9(6).`
+and types the field wrongly. It is also the ONLY path by which the batch key
+reaches `GLBATCH-REC.BATCH-KEY`: the bridge moves the redefinition, not the
+group's two elementary children [common/glbatchMT.cbl:L1069], and unloads back
+to it [common/glbatchMT.cbl:L1107]. `WS-Ledger` and `WS-Batch-Nos` have no
+column of their own at all - a case-insensitive search of the whole bridge for
+any of the three names returns only those two lines. `WsBatchKey9` below sets
+out the declaration, the move, the resulting name disagreement and why nothing
+reconciles the two Python views.
 
 GROUP USAGE IS INHERITED - GET IT WRONG AND EVERY BATCH TOTAL IS WRONG
 ======================================================================
-`03  Amounts                         comp-3.`
-[copybooks/wsbatch.cob:L40] carries the usage clause. Its four children carry
-none of their own [copybooks/wsbatch.cob:L41-L44]:
-
-    03  Amounts                         comp-3.
-        05  Input-Gross     pic 9(9)v99.
-        05  Input-Vat       pic 9(9)v99.
-        05  Actual-Gross    pic 9(9)v99.
-        05  Actual-Vat      pic 9(9)v99.
-
-All four are therefore PACKED DECIMAL, inherited from the group header, and
-nothing on their own lines says so. Reading usage off the PICTURE line alone
-would call all four zoned DISPLAY and every stored batch total would be wrong,
-invisibly, until a state diff. Usage is taken from the dictionary here for
-exactly that reason, and each descriptor carries `usage_declared_at` and
-`usage_inherited_from` so the inheritance is visible at the point of use.
-
-All four are also UNSIGNED: the picture is `9(9)v99`, not `s9(9)v99`. In this
-layout a batch's gross and VAT totals cannot go negative.
+`03  Amounts  comp-3.` [copybooks/wsbatch.cob:L40] carries the usage clause and
+its four children [copybooks/wsbatch.cob:L41-L44] carry none, so all four are
+PACKED DECIMAL by inheritance with nothing on their own lines saying so.
+Reading usage off the PICTURE line alone would call all four zoned DISPLAY and
+every stored batch total would be wrong, invisibly, until a state diff. Usage
+comes from the dictionary here for exactly that reason, and each descriptor
+carries `usage_declared_at` and `usage_inherited_from` so the inheritance is
+visible at the point of use rather than only in `BatchAmounts` below.
 
 THE FOUR DATE ITEMS CARRY NO PICTURE AT ALL
 ===========================================
 `Entered`, `Proofed`, `Posted` and `Stored` are declared `binary-long.` with no
 PICTURE clause [copybooks/wsbatch.cob:L36-L39]. They are signed 32-bit
 integers holding day numbers, so their Python carrier is `int` and never
-`Decimal`. `gl072` stamps `Posted` when it clears a batch
-[general/gl072.cbl:L373-L377].
+`Decimal`. `gl072` stamps `Posted` from the run date as it clears a batch
+[general/gl072.cbl:L375-L377].
 
 Being dates, they are the most tempting place in this record to reach for a
 clock. There is none, and there must be none (rule R-6): they start at zero and
@@ -169,129 +145,97 @@ are set by the posting programs from the run date injected at the command-line
 boundary by `acas_posting/clock.py`. Converting a day number to or from text is
 `acas_posting/dates.py`'s job, not this module's.
 
-TWO DISAGREEMENTS BETWEEN THE THREE LAYERS, BOTH LEFT STANDING
-==============================================================
+THE THREE LAYERS DISAGREE WIDELY, AND EVERY DISAGREEMENT IS LEFT STANDING
+=========================================================================
 The dictionary holds the copybook view, the bridge host-variable view and the
 MySQL column view side by side, and detects their disagreements by comparing
-them rather than from any list of known cases. Two bear on this record, and
-`DRIFT_REGISTER` below surfaces both verbatim through
-`acas_posting.dictionary.loader.drift_for`, unadjudicated.
+them rather than from any list of known cases. `DRIFT_REGISTER` below carries
+what that comparison finds: 35 entries over 17 of the 23 elementary items, in
+four kinds - storage class (all 17), digit count (13), signedness (4) and name
+(1) - each surfaced verbatim through
+`acas_posting.dictionary.loader.drift_for`, unadjudicated. Two carry
+consequences spelled out on the classes that hold the fields:
 
-FIRST, SIGNEDNESS ON THE FOUR DATE ITEMS. This one is NOT in the Agent Action
-Plan's register, and it is the same shape as its entry 11 - "Signed value
-narrowed to an unsigned host variable and an unsigned column, losing the sign
-before SQL executes" - which section 0.6.7 documents only for
-`SALEDGER-REC.SALES-AVERAGE`. It occurs in `GLBATCH-REC` too. All three layers,
-each measured:
+* SIGNEDNESS on the four date items, in `BatchDates`. Signed in the copybook,
+  unsigned in the host variable and unsigned in the column, so a negative day
+  number loses its sign AT THE BRIDGE before any SQL executes. This is NOT in
+  the Agent Action Plan's register: it is the shape of its entry 11 - "Signed
+  value narrowed to an unsigned host variable and an unsigned column, losing
+  the sign before SQL executes" - which section 0.6.7 documents only for
+  `SALEDGER-REC.SALES-AVERAGE`. It occurs in `GLBATCH-REC` too, and the
+  migration's anomaly log should pick this record up as an entry-11-class
+  occurrence the plan's own register does not name.
+* DIGIT COUNT on the four amounts, in `BatchAmounts`. Unsigned at all three
+  layers, so no sign is lost; eleven digits become fourteen at the host
+  variable and stay fourteen in the `decimal(14,2)` column.
 
-    copybook   05  Entered  binary-long.        SIGNED
-                                    [copybooks/wsbatch.cob:L36-L39]
-    bridge     05  HV-ENTERED  PIC 9(10) COMP.  UNSIGNED
-                                    [common/glbatchMT.cbl:L287-L290]
-    column     `ENTERED` int(8) unsigned                 unsigned
-                                    [mysql/ACASDB.sql]
+Elsewhere the host variable is wider than BOTH its neighbours, so the drift is
+not even monotonic: `WS-Batch-Key9` goes `9(6)` -> `9(08) COMP` ->
+`mediumint(6) unsigned`, and `Batch-Start` goes `9(5)` -> `9(08) COMP` ->
+`mediumint(5) unsigned`.
 
-A negative day number therefore loses its sign AT THE BRIDGE, before any SQL
-executes. `docs/migration/anomaly-log.md` should pick this record up as an
-entry-11-class occurrence that the plan's own register does not name.
-
-SECOND, DIGIT COUNT ON THE FOUR AMOUNTS. These are unsigned at all three
-layers, so no sign is lost; what changes is width:
-
-    copybook   05  Input-Gross  pic 9(9)v99.              11 digits
-                                    [copybooks/wsbatch.cob:L41-L44]
-    bridge     05  HV-INPUT-GROSS  PIC 9(12)V9(02) COMP.  14 digits
-                                    [common/glbatchMT.cbl:L291-L294]
-    column     `INPUT-GROSS` decimal(14,2) unsigned       14 digits
-                                    [mysql/ACASDB.sql]
-
-Neither disagreement is acted on below. A descriptor reports the COPYBOOK view
+No disagreement is acted on below. A descriptor reports the COPYBOOK view
 of its field - that is the COBOL-side storage the arithmetic and MOVE layers
 operate on - and never blends layers, never widens a field to a column width
 and never applies the bridge's loss of sign. Reproducing the bridge's
-conversion belongs to `acas_posting/dal/acas007_gl_batch.py`, at the boundary
+conversion belongs to the `acas007` handler module, at the boundary
 where it actually happens. There is no winning view, no widest picture and no
 sensible reading anywhere in this file, by rule R-4.
 
 Not every field drifts, which is what makes the drift worth registering rather
-than assuming: `GLBATCH-REC.DESCRIPTION` agrees across all three layers
-exactly, with no disagreement of any kind.
+than assuming: the four alphanumerics - `DESCRIPTION`, `CONVENTION`,
+`BATCH-DEF-CODE` and `BATCH-DEF-VAT` - agree across all three layers exactly,
+with no disagreement of any kind.
 
 CONDITION NAMES ARE DECLARED HERE, EVALUATED ELSEWHERE
-=====================================================
-The record carries eight `88` condition names over three fields, and each is
-listed verbatim with its value and locator on the attribute it belongs to.
-This module declares only the STORAGE those names test. The predicates
-themselves live in `acas_posting/cobol/condition_names.py`, which Agent Action
-Plan section 0.4.1.4 gives "Predicates for the 88-levels the cycle tests: ...
+======================================================
+The record carries eight `88` condition names over three fields - `WS-Ledger`
+[copybooks/wsbatch.cob:L16-L18], `Batch-Status` [copybooks/wsbatch.cob:L26-L27]
+and `Cleared-Status` [copybooks/wsbatch.cob:L30-L32] - and each is listed
+verbatim with its value and locator on the attribute it belongs to. This
+module declares only the STORAGE those names test. The predicates themselves
+live in `acas_posting/cobol/condition_names.py`, which Agent Action Plan
+section 0.4.1.4 gives "Predicates for the 88-levels the cycle tests: ...
 the batch status names ...". No predicate function, no enumerated type and no
 named constant for any of the eight appears below, and this module does not
 import that sibling: the record layer is a leaf.
 
 WHAT THIS MODULE DELIBERATELY DOES NOT DO (RULE R-3)
 ====================================================
-No control-total check of any kind. The batch gate belongs to
-`acas_posting/programs/gl051_batch_control_check.py`, together with its order
-of operations, which matters: Agent Action Plan section 0.6.4 records that the
-gate "adds actual VAT into actual gross and only then tests equality against
-the entered gross" [general/gl051.cbl:L1109-L1118], because the entered figure
-is VAT-inclusive. Reversing those two steps would reject every batch carrying
-VAT. Restating any part of that here, however harmlessly, would put business
-logic in the record layer and duplicate the gate.
+No control-total check of any kind - the gate belongs to the `gl051` program
+module, and `BatchAmounts` below records both that boundary and the order of
+operations that makes it matter. No account scaling either: `gl072` and `gl051`
+scale account numbers by multiplying and dividing by one hundred
+[general/gl072.cbl:L386], [general/gl072.cbl:L413], [general/gl051.cbl:L604],
+[general/gl051.cbl:L607], [general/gl051.cbl:L654], [general/gl051.cbl:L657],
+[general/gl051.cbl:L803], while `Batch-Def-AC pic 9(6)` below stores what the
+copybook declares and is scaled nowhere in this file. And no validation:
+nothing below rejects a value, coerces one on assignment or runs after
+construction, because the frozen sources have no error path here to reproduce
+and inventing one would change behaviour.
 
-No account scaling either. `gl072` and `gl051` scale account numbers by
-multiplying and dividing by one hundred [general/gl072.cbl:L386],
-[general/gl072.cbl:L413], [general/gl051.cbl:L604], [general/gl051.cbl:L607],
-[general/gl051.cbl:L654], [general/gl051.cbl:L657], [general/gl051.cbl:L803].
-`Batch-Def-AC pic 9(6)` below stores what the copybook declares and is scaled
-nowhere in this file.
-
-And no validation. Nothing below rejects a value, coerces one on assignment or
-runs after construction. The frozen sources have no error path here to
-reproduce, and inventing one would change behaviour.
-
-LAYERING - THIS IS A LEAF MODULE (AGENT ACTION PLAN SECTION 0.4.3)
-==================================================================
-    MAY import       acas_posting.cobol.field, acas_posting.dictionary.loader,
-                     and the standard library
-    MUST NOT import  dal, programs, cli, clock, dates, workfiles,
-                     cobol.arithmetic, cobol.move, cobol.picture, cobol.usage,
-                     cobol.condition_names, cobol.sortverb,
-                     dictionary.generate, the comparison oracle in its sibling
-                     tree, and any other module of this package
-
-Section 0.4.3 gives the reason: "this keeps the record layer a leaf", so that
+LAYERING AND THE BINDING RULES
+==============================
+A leaf module on the terms `records/__init__.py` sets out for the whole folder
+and Agent Action Plan section 0.4.3 fixes: `acas_posting.cobol.field`,
+`acas_posting.dictionary.loader` and the standard library, and nothing else.
+Section 0.4.3 gives the reason - "this keeps the record layer a leaf" - so that
 the arithmetic test tier "imports only cobol and records and touches no
-database, so it runs anywhere". A single import reaching into the data-access
-layer would drag a database driver into that tier.
+database, so it runs anywhere".
 
-THE BINDING RULES, AS THEY APPLY HERE
-=====================================
-This project carries NO separate rules document - `review_rules` reports that
-none was provided. The six binding rules R-1 to R-6 are the Agent Action
-Plan's own, section 0.7.2, and that is where their full text lives.
-
-    R-1  No COBOL at runtime. Nothing below spawns a process, loads a shared
-         library, opens a socket or reaches for a database driver. The standard
-         library and the two permitted siblings, and nothing else.
-    R-2  Zero binary floating point. The four amounts are `Decimal` at scale
-         two; the four date items and every scale-zero DISPLAY item are `int`;
-         alphanumerics are `str`. `Input-Gross` and `Actual-Gross` are the
-         operands of the control-total comparison, so an inexact carrier here
-         would break the one comparison the control-total scenario exists to
-         verify.
-    R-3  Nothing added. Twenty-one storage-bearing items, seven group and
-         redefinition views, and not one member more.
-    R-4  Anomalies reproduced, never repaired. A-15 above, plus the two layer
-         disagreements, the two-line redefinition, the inherited group usage
-         and the camel-case field name, each with its locator.
-    R-5  Full traceability. Every attribute's metadata comes from the
-         generated dictionary, whose keys are obtained from the loader and
-         never guessed; `FieldDescriptor.cite` gives the three-locator
-         provenance line for any of them.
-    R-6  The compiled program arbitrates. Declaration order is the copybook's,
-         fixed collections are tuples, and there is no clock, no entropy
-         source and no environment read below.
+The six binding rules R-1 to R-6 are the Agent Action Plan's own, section
+0.7.2, and that is where their full text lives; this project carries no
+separate rules document. As they bear on this file: nothing here spawns a
+process or reaches for a driver (R-1); the four amounts are `Decimal` at scale
+two while the four date items and every scale-zero DISPLAY item are `int`,
+which matters most for the two control-total operands (R-2); twenty-three
+elementary items in six dataclasses and not one member more (R-3); A-15, the
+drift register, the two-line redefinition, the inherited group usage and the
+camel-case field name are reproduced with their locators rather than repaired
+(R-4); every attribute's metadata comes from the generated dictionary through
+keys obtained from the loader (R-5); and declaration order is the copybook's,
+fixed collections are tuples, and there is no clock, no entropy source and no
+environment read anywhere (R-6).
 
 The maintainer's one-way COBOL-to-MySQL bridge defines the record-layout to
 table mapping and is the data dictionary for this migration - which is why the
@@ -323,9 +267,7 @@ __all__: Final[tuple[str, ...]] = (
 )
 
 
-# =============================================================================
 #  THE FROZEN SOURCES THIS MODULE IS DERIVED FROM
-# =============================================================================
 
 # Named once, used for every lookup below, so that no string literal naming a
 # frozen source is repeated and drifts out of step with its neighbours.
@@ -334,9 +276,7 @@ _RECORD: Final[str] = "WS-Batch-Record"
 _TABLE: Final[str] = "GLBATCH-REC"
 
 
-# =============================================================================
 #  DICTIONARY KEYS - OBTAINED FROM THE LOADER, NEVER GUESSED  (RULE R-5)
-# =============================================================================
 
 
 def _dictionary_keys_by_cobol_name() -> dict[str, str]:
@@ -403,11 +343,11 @@ _KEYS: Final[dict[str, str]] = _dictionary_keys_by_cobol_name()
 def _describe(cobol_name: str) -> FieldDescriptor:
     """Return the descriptor the generated dictionary holds for one field.
 
-    The single lookup every attribute below goes through. `for_working_storage`
-    is not used anywhere in this module and does not need to be: every one of
-    the twenty-eight items this record declares has a dictionary entry, the
-    twenty-one column-backed ones keyed by table and column and the other seven
-    keyed by copybook record and field name.
+    The single lookup every attribute below goes through, and nothing in this
+    module is assembled by hand: every one of the twenty-eight items this
+    record declares has a dictionary entry, the twenty-one column-backed ones
+    keyed by table and column and the other seven keyed by copybook record and
+    field name.
 
     Args:
         cobol_name: The COBOL field name as `copybooks/wsbatch.cob` spells it,
@@ -451,9 +391,7 @@ def _spaces(descriptor: FieldDescriptor) -> str:
     return str(descriptor.store(""))
 
 
-# =============================================================================
 #  03  WS-Batch-Key.                          [copybooks/wsbatch.cob:L14]
-# =============================================================================
 
 _WS_BATCH_KEY: Final[FieldDescriptor] = _describe("WS-Batch-Key")
 _WS_LEDGER: Final[FieldDescriptor] = _describe("WS-Ledger")
@@ -502,9 +440,7 @@ class WsBatchKey:
     ws_batch_nos: int = 0
 
 
-# =============================================================================
 #  03  WS-Batch-Key9 redefines WS-Batch-Key   [copybooks/wsbatch.cob:L20-L21]
-# =============================================================================
 
 _WS_BATCH_KEY9: Final[FieldDescriptor] = _describe("WS-Batch-Key9")
 
@@ -544,7 +480,7 @@ class WsBatchKey9:
     synchronising write, no derived accessor - because that would be logic the
     copybook does not declare (rule R-3). Keeping the two readings in step
     at the moment a row is written or read is the business of the handler
-    module at the bridge boundary, `acas_posting/dal/acas007_gl_batch.py`.
+    module at the bridge boundary, the `acas007` handler module.
     """
 
     FIELDS: ClassVar[tuple[FieldDescriptor, ...]] = (_WS_BATCH_KEY9,)
@@ -555,9 +491,7 @@ class WsBatchKey9:
     ws_batch_key9: int = 0
 
 
-# =============================================================================
 #  03  Dates.                                 [copybooks/wsbatch.cob:L35]
-# =============================================================================
 
 _DATES: Final[FieldDescriptor] = _describe("Dates")
 _ENTERED: Final[FieldDescriptor] = _describe("Entered")
@@ -574,7 +508,7 @@ class BatchDates:
     is named `BatchDates` because a bare `Dates` reads poorly beside the other
     record types in this package and says nothing about what it belongs to; the
     COBOL original is recorded here so the mapping into
-    `docs/migration/traceability.md` stays mechanical.
+    the migration's traceability document stays mechanical.
 
     All four children are declared `binary-long.` with NO PICTURE CLAUSE AT ALL
     [copybooks/wsbatch.cob:L36-L39]. They are signed 32-bit integers, so their
@@ -587,7 +521,7 @@ class BatchDates:
     a clock, and rule R-6 forbids it. They start at zero and are set by the
     posting programs from the run date injected at the command-line boundary by
     `acas_posting/clock.py`. `gl072` stamps `Posted` when it clears a batch
-    [general/gl072.cbl:L373-L377].
+    [general/gl072.cbl:L375-L377].
 
     A DISAGREEMENT ACROSS THE THREE LAYERS, LEFT STANDING. All four are SIGNED
     in the copybook, UNSIGNED in the bridge host variable
@@ -595,10 +529,10 @@ class BatchDates:
     day number loses its sign at the bridge before any SQL executes. This is
     the shape of the Agent Action Plan's register entry 11, which section 0.6.7
     documents only for `SALEDGER-REC.SALES-AVERAGE`; it is not named there for
-    this record, and `docs/migration/anomaly-log.md` should pick it up.
+    this record, and the migration's anomaly log should pick it up.
     `DRIFT_REGISTER` surfaces it verbatim. The descriptors below report the
     copybook view - signed - and the bridge's conversion is reproduced where it
-    happens, in `acas_posting/dal/acas007_gl_batch.py`.
+    happens, in the `acas007` handler module.
 
     Not frozen. `Posted` is written during posting.
     """
@@ -629,7 +563,7 @@ class BatchDates:
     #                                          [copybooks/wsbatch.cob:L38]
     # Same three-layer disagreement: unsigned at [common/glbatchMT.cbl:L289]
     # and unsigned in column `POSTED int(8) unsigned`. Stamped by gl072 at
-    # [general/gl072.cbl:L373-L377].
+    # [general/gl072.cbl:L375-L377].
     posted: int = 0
 
     # Stored binary-long, no picture (signed 32-bit, scale 0)
@@ -639,14 +573,11 @@ class BatchDates:
     stored: int = 0
 
 
-# =============================================================================
 #  03  Amounts                         comp-3. [copybooks/wsbatch.cob:L40]
-#
 #  THE GROUP HEADER CARRIES THE USAGE AND ITS FOUR CHILDREN CARRY NONE. All
 #  four are packed decimal by inheritance. Typing them from their PICTURE lines
 #  alone would make every one of them zoned DISPLAY and every stored batch
 #  total wrong - silently, until a state diff. Usage comes from the dictionary.
-# =============================================================================
 
 _AMOUNTS: Final[FieldDescriptor] = _describe("Amounts")
 _INPUT_GROSS: Final[FieldDescriptor] = _describe("Input-Gross")
@@ -688,7 +619,7 @@ class BatchAmounts:
     actual VAT into actual gross BEFORE testing equality against the entered
     gross, because the entered figure is VAT-inclusive
     [general/gl051.cbl:L1109-L1118] - belongs to
-    `acas_posting/programs/gl051_batch_control_check.py`. This class stores
+    the `gl051` program module. This class stores
     four amounts and compares nothing.
 
     Not frozen. `Actual-Gross` and `Actual-Vat` are accumulated during the
@@ -729,9 +660,7 @@ class BatchAmounts:
     actual_vat: Decimal = Decimal("0.00")
 
 
-# =============================================================================
 #  03  posting-data.                          [copybooks/wsbatch.cob:L47]
-# =============================================================================
 
 _POSTING_DATA: Final[FieldDescriptor] = _describe("posting-data")
 _B_DEFAULT: Final[FieldDescriptor] = _describe("bDefault")
@@ -804,9 +733,7 @@ class PostingData:
     batch_def_vat: str = _spaces(_BATCH_DEF_VAT)
 
 
-# =============================================================================
 #  01  WS-Batch-Record.                       [copybooks/wsbatch.cob:L13]
-# =============================================================================
 
 _WS_BATCH_RECORD: Final[FieldDescriptor] = _describe("WS-Batch-Record")
 _ITEMS: Final[FieldDescriptor] = _describe("Items")
@@ -842,20 +769,20 @@ class GlBatchRecord:
 
     Deliberately NOT frozen. The posting cycle writes this record: `gl051`'s
     control-total gate sets `Batch-Status`, and `gl072` stamps `Cleared-Status`
-    and `Posted` when it clears a batch [general/gl072.cbl:L373-L377].
+    and `Posted` when it clears a batch [general/gl072.cbl:L375-L377].
 
     THIS MODULE IS THE REPRODUCING SITE FOR ANOMALY A-15, the declared-length
     contradiction the maintainer records in his own words
     [copybooks/wsbatch.cob:L7-L9] and which the dictionary references from
     every entry of this record. It is also open question Q-4 for the
     compiled oracle. Nothing here settles either; see this module's docstring
-    for both, for the observed field-byte sum, and for the trailing items a
+    for both, for the counted field-byte sum, and for the trailing items a
     misalignment would move.
     """
 
     # The 01-level record's own dictionary entry. A group, so no width of its
     # own - see the module docstring for what its children add up to and why
-    # that sum is an observation rather than a finding.
+    # that sum is a count rather than a finding.
     GROUP: ClassVar[FieldDescriptor] = _WS_BATCH_RECORD
 
     # The elementary items declared directly at this level, in declaration
@@ -885,18 +812,14 @@ class GlBatchRecord:
     # Items pic 99 (display, unsigned, scale 0) [copybooks/wsbatch.cob:L23]
     items: int = 0
 
-    # Batch-Status pic 9 (display, unsigned, scale 0)
-    #                                          [copybooks/wsbatch.cob:L25]
-    # Two 88-level condition names, verbatim with their values:
-    #     88  Status-Open    value 0.          [copybooks/wsbatch.cob:L26]
-    #     88  Status-Closed  value 1.          [copybooks/wsbatch.cob:L27]
-    # `Status-Open` - the value ZERO - is behaviourally load-bearing: it is
-    # link one of the four-link abort chain in Agent Action Plan section 0.6.4.
-    # An open batch makes gl070 raise the terminate code
-    # [general/gl070.cbl:L288], [general/gl070.cbl:L312-L313], the menu tests
-    # that code and returns [general/general.cbl:L800-L814], and gl071 and
-    # gl072 then never run at all. The value is declared here and tested
-    # nowhere in this module: the predicates belong to
+    # Batch-Status  pic 9   DISPLAY, unsigned, scale 0   [copybooks/wsbatch.cob:L25]
+    #     88  Status-Open    value 0.                    [copybooks/wsbatch.cob:L26]
+    #     88  Status-Closed  value 1.                    [copybooks/wsbatch.cob:L27]
+    # `Status-Open` - the value ZERO - is link one of the four-link abort chain in Agent Action
+    # Plan section 0.6.4. An open batch is detected at [general/gl070.cbl:L314-L315], which
+    # raises the terminate code at [general/gl070.cbl:L289]; the menu tests it and returns
+    # [general/general.cbl:L800-L814], so gl071 and gl072 never run at all.
+    # Declared here and tested nowhere in this module: the predicates belong to
     # acas_posting/cobol/condition_names.py.
     batch_status: int = 0
 
@@ -906,15 +829,15 @@ class GlBatchRecord:
     #     88  Waiting    value 0.              [copybooks/wsbatch.cob:L30]
     #     88  Processed  value 1.              [copybooks/wsbatch.cob:L31]
     #     88  Archived   value 2.              [copybooks/wsbatch.cob:L32]
-    # Stamped by gl072 at [general/gl072.cbl:L373-L377]. Predicates live in
+    # Stamped by gl072 at [general/gl072.cbl:L375-L377]. Predicates live in
     # acas_posting/cobol/condition_names.py.
     cleared_status: int = 0
 
     # Bcycle pic 99 (display, unsigned, scale 0)
     #                                          [copybooks/wsbatch.cob:L34]
     # The accounting cycle. gl070 filters both of its passes over the batch
-    # file on this field [general/gl070.cbl:L309-L310],
-    # [general/gl070.cbl:L452-L453]; the filtering is gl070's, not this
+    # file on this field [general/gl070.cbl:L312-L313] and
+    # [general/gl070.cbl:L457-L458]; the filtering is gl070's, not this
     # module's.
     bcycle: int = 0
 
@@ -948,9 +871,7 @@ class GlBatchRecord:
     batch_start: int = 0
 
 
-# =============================================================================
 #  THE THREE-LAYER DISAGREEMENTS, REGISTERED AND LEFT STANDING  (RULE R-4)
-# =============================================================================
 
 
 def _drift_register() -> tuple[str, ...]:
@@ -989,7 +910,7 @@ def _drift_register() -> tuple[str, ...]:
 #: Every three-layer disagreement this record carries, in the dictionary's own
 #: words and in copybook declaration order. Published so that a reader of the
 #: record layer sees the disagreements without having to query the dictionary,
-#: and so that `docs/migration/anomaly-log.md` can cite this module for the
+#: and so that the migration's anomaly log can cite this module for the
 #: entry-11-class signedness narrowing that the Agent Action Plan's register
 #: does not list. A tuple, so it cannot be edited in place and its order is
 #: fixed (rule R-6).

@@ -1,4 +1,4 @@
-r"""The six COBOL numeric storage classes, modelled as storage behaviour.
+"""The six COBOL numeric storage classes, modelled as storage behaviour.
 
 This module answers three questions about a COBOL data item and nothing else:
 how many bytes it occupies, what values it can hold, and what happens to a
@@ -9,68 +9,62 @@ storage terms. Accounting behaviour lives in `acas_posting.programs`; there is
 none here, and there must never be: no account number, no VAT rate, no ledger
 balance and no batch status appears below.
 
-It is deliberately NOT a name vocabulary. The vocabulary already exists in
-`acas_posting.dictionary.model`, whose `Usage` and `SignPosition` enumerations
-mirror the generated artifact member for member, so every public entry point
-below is keyed by those members instead of re-declaring them. Two competing
-definitions of one vocabulary is precisely the divergence rule R-4 exists to
-stop. A caller holding raw text out of the dictionary rather than an imported
-member is not forced to import the enumeration either: every entry point takes
-the member OR its recorded string.
+It is deliberately NOT a name vocabulary. The vocabulary already exists in the
+dictionary object model, whose `Usage` and `SignPosition` enumerations mirror
+the generated artifact member for member, and it is reached here through
+`acas_posting.dictionary.loader` - the only door Agent Action Plan section
+0.4.3 opens from `cobol/*.py` onto the dictionary package. The loader
+re-exports those members for exactly this reason, as a BINDING to the single
+definition rather than a copy (see `loader.RE_EXPORTED_MODEL_NAMES`), so every
+public entry point below is keyed by the one vocabulary in the migration
+instead of re-declaring it. Two competing definitions of one vocabulary is
+precisely the divergence rule R-4 exists to stop, and reaching past the loader
+would breach a frozen plan. A caller holding raw text out of the dictionary
+rather than an imported member is not forced to import the enumeration either:
+every entry point takes the member OR its recorded string.
 
 SIX CLASSES, NEVER COLLAPSED
 ============================
-Agent Action Plan section 0.6.1, verbatim:
-
-    "Six numeric storage classes must be modelled, because collapsing any of
-    them changes stored values."
-
-The six, with an exemplar apiece:
+Agent Action Plan section 0.6.1, verbatim: "Six numeric storage classes must be
+modelled, because collapsing any of them changes stored values." The six, with
+an exemplar apiece:
 
     1. DISPLAY, zoned decimal, sign overpunched on the LAST digit when the
        picture is signed and no SIGN clause is written - `pic s9(8)v99`
-       [copybooks/wspost.cob:L23], and unsigned as `pic 9(5)`
+       [copybooks/wspost.cob:L23]; unsigned as `pic 9(5)`
        [copybooks/wspost.cob:L13].
-
     2. DISPLAY with a LEADING sign, the easily-missed form: the same zoned
-       decimal with the sign overpunched on the FIRST digit -
-       `pic s9(7)v99   sign leading` [copybooks/wspost-irs.cob:L21] and
-       `pic s9(7)v99  sign is leading` [copybooks/irswspost.cob:L14].
-
-    3. COMP, binary bounded by the digit count the picture declares, and it
-       MAY carry a scale - `pic 99v99          comp` [copybooks/wssl.cob:L42],
-       `pic 9(5)   comp` [copybooks/wsfnctn.cob:L24].
-
+       decimal, sign overpunched on the FIRST digit - `sign leading`
+       [copybooks/wspost-irs.cob:L21], `sign is leading`
+       [copybooks/irswspost.cob:L14].
+    3. COMP, binary bounded by the declared digit count, and it MAY carry a
+       scale - `pic 99v99 comp` [copybooks/wssl.cob:L42], `pic 9(5) comp`
+       [copybooks/wsfnctn.cob:L24].
     4. COMP-3, packed decimal, two digits to the byte plus a low-order sign
-       nibble - `pic s9(8)v99   comp-3` [copybooks/wsledger.cob:L28].
+       nibble - `pic s9(8)v99 comp-3` [copybooks/wsledger.cob:L28].
+    5. BINARY-CHAR / BINARY-SHORT / BINARY-LONG: true 8-, 16- and 32-bit
+       integers, signed unless UNSIGNED is written, frequently carrying NO
+       PICTURE AT ALL - [copybooks/wssl.cob:L43], [copybooks/wssl.cob:L45] and
+       the four picture-less batch date stamps [copybooks/wsbatch.cob:L36-L39].
+    6. COMP-5, native binary, carried for completeness because the generated
+       bridges declare it - [common/glpostingMT.scb:L256] - while no in-scope
+       copybook field uses it.
 
-    5. The BINARY-CHAR / BINARY-SHORT / BINARY-LONG family: true 8-, 16- and
-       32-bit integers, signed unless UNSIGNED is written, and frequently
-       carrying NO PICTURE AT ALL - [copybooks/wssl.cob:L43],
-       [copybooks/wssl.cob:L45] and the four picture-less batch date stamps at
-       [copybooks/wsbatch.cob:L36-L39].
+ALPHANUMERIC `pic x(32)` [copybooks/wspost.cob:L24] and GROUP ride along
+because a caller walking a record meets them; a group's width is the sum of its
+children's and so is not this module's to state.
 
-    6. COMP-5, native binary, carried for completeness of the vocabulary
-       because the generated bridges declare it - `01 subscripts usage comp-5`
-       [common/glpostingMT.scb:L256] - while no in-scope copybook field uses
-       it.
-
-Two non-numeric cases ride along because a caller walking a record meets them:
-ALPHANUMERIC, `pic x(32)` [copybooks/wspost.cob:L24], and GROUP, an item with
-subordinates and no picture of its own, whose byte length is the sum of its
-children's and therefore not this module's to state.
-
-THE CLOSED SET, AND THE METHOD THAT MEASURED IT
-===============================================
+THE CLOSED SET, AND HOW IT WAS COUNTED
+======================================
 The point of a census is that the set is CLOSED: anything outside it is
-speculative surface area, and speculative surface area is where behaviour
-drift hides. Counted over the 187 files matching `copybooks/*.cob`, as raw
-token occurrences and again with every `*>` comment stripped, so that a reader
-can tell a declaration from a remark about one:
+speculative surface area, and that is where behaviour drift hides. Counted over
+the 187 files matching `copybooks/*.cob`, as raw token occurrences and again
+with every `*>` comment stripped, so a declaration is distinguishable from a
+remark about one:
 
     token              raw   code-only
     comp-3             182     177
-    bare comp          214     144      (`comp` not followed by `-`)
+    bare comp          214     144      (`comp` not followed by a hyphen)
     binary-long        166     128
     binary-short        31      30
     binary-char         84      59
@@ -80,220 +74,163 @@ can tell a declaration from a remark about one:
     redefines           60      53
     unsigned            31      20
 
-Two notes on that table, because a figure without its method invites a later
-disagreement. First, the "bare comp" line counts only the standalone usage
-token: all `\\bcomp\\b` matches number 413, but 182 of those are the `comp` of
-`comp-3` and 17 more belong to identifiers such as `comp-head` and
-`comp-time`, which are names rather than usage clauses. Second, the raw and
-code-only columns differ because the maintainer annotates declarations with
-the storage he might have used instead - see THE DECLARATION WINS below - and
-those annotations are evidence, not declarations.
+Two notes, because a figure without its method invites a later disagreement.
+The "bare comp" line counts only the standalone usage token: 413 occurrences
+exist in all, of which 182 are the `comp` of `comp-3` and 17 more belong to
+identifiers such as `comp-head` and `comp-time`. The two columns differ because
+the maintainer annotates declarations with the storage he might have used
+instead - see THE DECLARATION WINS below - and an annotation is not a
+declaration.
 
 ZERO occurrences in `copybooks/*.cob`, therefore NOT implemented here:
 `binary-double`, `comp-5` as a copybook field, `sign trailing`, `separate`,
 `justified`, `blank when zero`, `PIC A`, a trailing `V` with no following `9`,
-and `P` scaling. `binary-double` does occur eight times in the tree, all of
-them in bridge working storage that no in-scope record layout includes -
-`binary-double unsigned` [copybooks/mysql-variables.cpy:L73] - and the `Usage`
-vocabulary has no member for it, so an attempt to use one is reported as the
-programmer error it is rather than guessed at.
+and `P` scaling. `binary-double` does occur eight times in the tree, all in
+bridge working storage no in-scope record layout includes -
+[copybooks/mysql-variables.cpy:L73] - and `Usage` has no member for it, so an
+attempt to use one is reported as the programmer error it is.
 
-The generated dictionary corroborates the closed set from the other end.
-Across its 1001 copybook views the usage counts are ALPHANUMERIC 386, DISPLAY
-202, GROUP 134, COMP-3 114, BINARY-LONG 69, BINARY-CHAR 30, BINARY-SHORT 20
-and COMP 46 - no COMP-5 and no POINTER among them - and the sign positions
-are NONE 767, IMPLICIT_BINARY 228, LEADING_INCLUDED 4 and TRAILING_INCLUDED
-2, with ZERO of either SEPARATE form. The SEPARATE branches below are
-therefore written for completeness and are unexercised by this migration, and
-they are commented as such where they appear.
+The generated dictionary corroborates the closed set from the other end. Across
+its 1001 copybook views: ALPHANUMERIC 386, DISPLAY 202, GROUP 134, COMP-3 114,
+BINARY-LONG 69, COMP 46, BINARY-CHAR 30, BINARY-SHORT 20 - no COMP-5 and no
+POINTER - and sign positions NONE 767, IMPLICIT_BINARY 228, LEADING_INCLUDED 4,
+TRAILING_INCLUDED 2, with ZERO of either SEPARATE form. The SEPARATE branches
+below are written for completeness, are unexercised by this migration, and are
+commented as such where they appear.
 
 WHERE THE BYTE WIDTHS COME FROM
 ===============================
-The width rules are not taken on trust from a manual. Each one is confirmed by
-reconstructing a whole record from its fields and comparing the total against
-the record length the maintainer himself declares, which is the one number in
-the frozen source that can falsify all of the rules at once. With DISPLAY at
-one byte per digit, COMP at the size policy below, BINARY-SHORT at two bytes,
-BINARY-LONG at four and COMP-3 at `ceil((digits + 1) / 2)`:
-
-    copybooks/wssl.cob      300 bytes, matching "rec size 300 bytes"
-                            [copybooks/wssl.cob:L7]. This is the decisive one:
-                            the record mixes DISPLAY, a scaled COMP
-                            [copybooks/wssl.cob:L42], BINARY-SHORT
-                            [copybooks/wssl.cob:L43-L44], nine BINARY-LONG
-                            [copybooks/wssl.cob:L45-L53] and eight COMP-3
-                            [copybooks/wssl.cob:L54-L63], so every rule is
-                            exercised at once and any one of them being wrong
-                            moves the total.
-
-    copybooks/wsledger.cob  126 bytes, matching "Resized to 126 bytes"
-                            [copybooks/wsledger.cob:L10].
-
-    copybooks/wssys4.cob    1024 bytes - twenty COMP-3 items at six bytes plus
-                            a 904-byte filler - matching "Record size 1024
-                            bytes" [copybooks/wssys4.cob:L6].
-
-    copybooks/wsbatch.cob   96 bytes, matching the maintainer's own count at
-                            [copybooks/wsbatch.cob:L8], where the header
-                            records the contradiction rather than settling it:
-                            "98 bytes 20/12/11 (no, dont understand as I count
-                            96) but function length (Batch-record) says 98?".
+`byte_length` states each width rule with the evidence for it. The rules are
+not taken on trust from a manual: each is checked by reconstructing a whole
+record from its fields and comparing the total against the record length the
+maintainer himself declares, the one number in the frozen source that can
+falsify all of them at once. `wssl` reaches 300 [copybooks/wssl.cob:L7] and is
+the decisive case, mixing DISPLAY, scaled COMP, BINARY-SHORT, nine BINARY-LONG
+and eight COMP-3 so that every rule is exercised at once; `wsledger` reaches
+126 [copybooks/wsledger.cob:L10]; `wssys4` reaches 1024, twenty COMP-3 at six
+bytes plus a 904-byte filler [copybooks/wssys4.cob:L6]; and `wsbatch` reaches
+96 [copybooks/wsbatch.cob:L8], whose header records the 96-versus-98
+contradiction rather than settling it.
 
 GROUP-LEVEL USAGE IS INHERITED - THE HIGHEST-RISK DETAIL IN THE MODEL
 =====================================================================
-This module is handed the usage of an item as the dictionary records it, and
+This module is handed the usage of an item as the dictionary records it and
 does not re-derive it; deriving usage is the generator's job. The warning
 belongs here anyway, because a reader who assumes a storage class can be read
 off a PICTURE line will mis-type whole records.
 
-COBOL lets a GROUP declare usage that every subordinate item without one
-inherits. `03  Amounts                         comp-3.`
-[copybooks/wsbatch.cob:L40] governs the four batch amount fields at
-[copybooks/wsbatch.cob:L41-L44], whose own lines read only
+A GROUP may declare usage that every subordinate without one inherits.
+`03  Amounts  comp-3.` [copybooks/wsbatch.cob:L40] governs the four batch
+amounts [copybooks/wsbatch.cob:L41-L44], whose own lines read only
 `pic 9(9)v99` - eleven digits, UNSIGNED, six packed bytes each. The two
-period-total groups [copybooks/wssys4.cob:L9] and
-[copybooks/wssys4.cob:L20] do the same for twenty more at
-[copybooks/wssys4.cob:L10-L19] and [copybooks/wssys4.cob:L21-L30]. That is 24
-fields in the three groups this module's own sources declare, and 85 distinct
-copybook fields once the whole generated dictionary is counted. COMP inherits
-the same way: `05  Vat-Rates                    comp.`
-[copybooks/wssystem.cob:L55] governs five `pic 99v99` items at
-[copybooks/wssystem.cob:L56-L60], and the item that redefines the group
-restates the usage on its own line [copybooks/wssystem.cob:L61].
+period-total groups [copybooks/wssys4.cob:L9], [copybooks/wssys4.cob:L20] do
+the same for twenty more, and `05  Vat-Rates  comp.`
+[copybooks/wssystem.cob:L55] for five `pic 99v99` items, the redefining item
+restating the usage on its own line [copybooks/wssystem.cob:L61]. That is 24
+fields in those three groups and 85 across the whole generated dictionary.
 
 Read usage from the picture line alone and every batch total and every period
-total becomes zoned decimal - so every stored value would be wrong.
-
-One consequence deserves stating because it constrains callers rather than
-this module: the four batch amounts are UNSIGNED packed decimal, and
-`add      actual-vat   to  actual-gross.` [general/gl051.cbl:L1109] adds into
-one of them, so a negative intermediate has no representation at that field at
-all.
+total becomes zoned decimal, so every stored value would be wrong. One
+consequence constrains callers rather than this module: the four batch amounts
+are UNSIGNED packed decimal, and `add actual-vat to actual-gross.`
+[general/gl051.cbl:L1109] adds into one of them, so a negative intermediate has
+no representation at that field at all.
 
 THE DECLARATION WINS OVER THE MAINTAINER'S COMMENT  (rule R-4)
 ==============================================================
-Three declarations in the sources sit beside a comment that describes
-something else:
-
-    03  Sales-Late-Min     binary-short. *> 9999 comp
-                                        [copybooks/wssl.cob:L43]
-    03  Sales-Limit        binary-long. *> 9(8) comp
-                                        [copybooks/wssl.cob:L45]
-    05  Page-Lines      binary-char  unsigned. *> 999. Portrait / default
-                                        [copybooks/wssystem.cob:L65]
-
-BINARY-SHORT is a 16-bit signed integer, not a four-digit one. BINARY-LONG is
-a 32-bit signed integer, not an eight-digit one. BINARY-CHAR UNSIGNED is an
-8-bit unsigned integer whose maximum is 255, not 999. This module models the
-declarations - 16-bit, 32-bit and 8-bit-unsigned - records the comments here,
-and changes nothing about either. A defect reproduced is correct; a defect
-fixed is a failure.
+Three declarations sit beside a comment describing something else:
+`binary-short. *> 9999 comp` [copybooks/wssl.cob:L43], `binary-long. *> 9(8)
+comp` [copybooks/wssl.cob:L45] and `binary-char unsigned. *> 999.`
+[copybooks/wssystem.cob:L65]. BINARY-SHORT is a 16-bit signed integer, not a
+four-digit one; BINARY-LONG is 32-bit signed, not eight-digit; BINARY-CHAR
+UNSIGNED tops out at 255, not 999. This module models the declarations, records
+the comments here, and changes neither. A defect reproduced is correct; a
+defect fixed is a failure.
 
 The same maintainer writes the width correctly elsewhere, which is what makes
-these three comments evidence of a slip rather than of a different intent:
-`05  PL-Next-Rec     binary-short unsigned.            *> 2 bytes 0 - 65k`
-[copybooks/wssystem.cob:L210] states the hardware width outright. Others
-repeat the slip - `*> 9(4) comp` beside a BINARY-CHAR
-[copybooks/wssystem.cob:L199], `*> 9999 comp.` beside two more
-[copybooks/wssystem.cob:L306-L307] - and are equally left alone.
-
-The two spellings of the leading-sign clause are treated the same way. The
-copybooks write `sign leading` [copybooks/wspost-irs.cob:L21],
-[copybooks/wspost-irs.cob:L25] and `sign is leading`
-[copybooks/irswspost.cob:L14], [copybooks/irswspost.cob:L18]; both are
-recognised verbatim and neither is rewritten into the other. `SIGN_LEADING_
-SPELLINGS` publishes exactly those two texts, in that order, and matching is
-case-insensitive with runs of whitespace collapsed because the source writes
-the clause after a run of spaces. Nothing in this module alters the text a
-caller passes: the dictionary keeps it verbatim in `sign_clause_text`, and
-that record is the point.
-
-Note on one locator: Agent Action Plan section 0.4.1.3 cites
-`[copybooks/irswspost.cob:L19]` for the second leading-sign field. L19 is the
-closing `*>` of that copybook; the field is at L18, and L18 is what this
-module cites.
+these a slip rather than a different intent: `binary-short unsigned. *> 2 bytes
+0 - 65k` [copybooks/wssystem.cob:L210] states the hardware width outright.
+Others repeat the slip [copybooks/wssystem.cob:L199],
+[copybooks/wssystem.cob:L306-L307] and are equally left alone. The two
+spellings of the leading-sign clause get the same treatment: both are
+recognised verbatim, neither is rewritten into the other, `SIGN_LEADING_
+SPELLINGS` publishes exactly those two texts in that order, and the dictionary
+keeps the source text verbatim in `sign_clause_text`. Note on one locator:
+Agent Action Plan section 0.4.1.3 cites `[copybooks/irswspost.cob:L19]` for the
+second leading-sign field. L19 is the closing `*>` of that copybook; the field
+is at L18, and L18 is what this module cites.
 
 NUMERIC POLICY  (rule R-2: zero binary floating point)
 ======================================================
-No accounting value may pass through a binary floating-point type at any
-point - not in computation, not in storage, not in transport. In this module
-that resolves to four concrete commitments:
-
-    * Scaled and packed and zoned values are `decimal.Decimal`, carrying the
-      scale of the field that receives them.
-    * The binary integer family is native Python `int`. This is load-bearing
-      rather than tidy: Agent Action Plan section 0.6.1, verbatim - "their
-      truncation on divide is integer truncation, which is exactly what makes
-      the moving-average defect reproducible" - and the field it is talking
-      about is `Sales-Average      binary-long` [copybooks/wssl.cob:L49].
-    * Text is `str` and raw storage is `bytes`. Nothing else is returned.
-    * Every `decimal` operation runs inside `decimal.localcontext()` with a
-      context this module constructs, never the ambient global one, so a
-      result cannot depend on what a caller did earlier. No binary
-      floating-point type, and no library that computes in one, appears
-      anywhere below.
-
-`truncate_toward_zero` exists for the same reason. COBOL integer division
-truncates toward zero, while Python's `//` floors toward negative infinity;
-they disagree on every negative dividend, and a caller reaching for `//` would
-silently move posted figures.
+No accounting value may pass through a binary floating-point type at any point.
+Scaled, packed and zoned values are `decimal.Decimal` carrying the scale of the
+receiving field; the binary integer family is native Python `int`; text is
+`str` and raw storage is `bytes`; nothing else is returned. Every `decimal`
+operation runs inside `decimal.localcontext()` with a context this module
+constructs, never the ambient global one, so a result cannot depend on what a
+caller did earlier. `int` for the binary family is load-bearing rather than
+tidy. Agent Action Plan
+section 0.6.1, verbatim - "their truncation on divide is integer truncation,
+which is exactly what makes the moving-average defect reproducible" - and the
+field it names is `Sales-Average binary-long` [copybooks/wssl.cob:L49].
+`truncate_toward_zero` exists for the same reason: COBOL integer division
+truncates toward zero while Python's floor division floors toward negative
+infinity, so they disagree on every negative dividend.
 
 NO ADDED VALIDATION, AND SILENCE IS A FEATURE  (rule R-3)
 =========================================================
-A COBOL store that overflows its receiving field discards high-order digits
-and carries on. There is no error path to reproduce: `ON SIZE ERROR` occurs
-zero times across the twelve in-scope programs, and so does `REMAINDER`. So
-`coerce` discards high-order digits silently. It does not raise, does not
-clamp to the maximum, does not widen the field and does not warn.
+A COBOL store that overflows its receiving field discards high-order digits and
+carries on. There is no error path to reproduce: `ON SIZE ERROR` occurs zero
+times across the twelve in-scope programs, and so does `REMAINDER`. So `coerce`
+discards high-order digits silently - it does not raise, clamp, widen or warn.
 
-Every `raise` below reports a PROGRAMMER error - an unknown usage token, a
+Every `raise` below reports a PROGRAMMER error: an unknown usage token, a
 negative digit count, a component the class requires and the caller omitted, a
-non-elementary item asked for an elementary answer, or a buffer whose length
-is not the field's. None reports a DATA condition. Decoding is tolerant for
-the same reason: a zoned field is read a nibble at a time, so a space-filled
-field - the state COBOL leaves an uninitialised display item in - reads as
-zero instead of failing.
+non-elementary item asked for an elementary answer, or a buffer of the wrong
+length. None reports a DATA condition. Decoding is tolerant for the same
+reason: a zoned field is read a nibble at a time, so a space-filled field, the
+state COBOL leaves an uninitialised display item in, reads as zero rather than
+failing.
 
 LAYERING  (Agent Action Plan section 0.4.3)
 ===========================================
 This module may import the standard library and the `acas_posting.dictionary`
-public surface, and nothing else. It must not import `records`, `dal`,
-`programs`, `cli`, `clock`, `dates`, `workfiles` or the compiled-oracle tree,
-and no third-party package belongs here.
+public surface, and nothing else. It must not import the sibling
+field-descriptor module: that module imports THIS one and the edge runs one way
+only, which is why every signature below takes primitive components - digits,
+scale, character length, signedness, sign position - and never a descriptor.
 
-It must not import the sibling field-descriptor module either. That module
-imports THIS one, and the edge runs one way only. Which is why every signature
-below takes primitive components - digits, scale, character length, signedness
-and sign position - and never a descriptor object.
+ARBITRATED AGAINST COMPILED BEHAVIOUR  (rule R-6)
+=================================================
+Rule R-6 makes the compiled program the tie-breaker for any semantic question
+the source alone cannot settle, and requires each resolution to be documented
+rather than settled silently. Three land here, and ALL THREE ARE NOW MEASURED
+against GnuCOBOL 3.2.0, the compiler [common/comp-common.sh:L9] names: Q-5.1,
+the default `binary-size` and `binary-truncate` policy governing COMP width and
+store truncation, measured as 1-2-4-8 with truncation to the declared digit
+count and a hardware-domain reduction for the picture-less BINARY-* family, at
+`DEFAULT_BINARY_SIZE_THRESHOLDS` and `BINARY_TRUNCATE`; Q-5.2, the byte length
+of a leading-sign display field, measured at nine bytes for `pic s9(7)v99 sign
+leading` - the overpunch reading, which also settles the contradiction in
+[copybooks/wspost.cob:L6-L7] - at `byte_length`; and Q-5.3, the exact zoned
+overpunch byte values, measured as zone 0x30 positive and 0x70 negative, on the
+last digit for a trailing sign and the first for a leading one, at
+`ZONED_POSITIVE_ZONE` and `ZONED_NEGATIVE_ZONE`. Every provisional answer proved
+CORRECT, so no constant below changed value; what changed is that each is now an
+observation rather than an assumption, with the experiment and its output
+recorded at the site that uses the answer.
 
-OPEN QUESTIONS, RECORDED RATHER THAN SETTLED  (rule R-6)
-========================================================
-Where compiled behaviour is the tie-breaker and it has not yet been measured,
-the question is marked, the provisional behaviour is implemented behind a
-named constant so one edit re-targets it, and the marker says so at the site.
-Three land in this module:
-
-    Q-5.1  The GnuCOBOL default `binary-size` and `binary-truncate` policy
-           that governs COMP storage width and store truncation. See
-           `DEFAULT_BINARY_SIZE_THRESHOLDS` and `BINARY_TRUNCATE`.
-    Q-5.2  The byte length of a leading-sign display field, where the frozen
-           evidence does not reconcile. See `byte_length`.
-    Q-5.3  The exact zoned overpunch byte values. See `ZONED_POSITIVE_ZONE`
-           and `ZONED_NEGATIVE_ZONE`.
-
-A fourth question already carries a number in the register, `Q-3`, and is
+A fourth question already carries a register number, `Q-3`, and is
 cross-referenced rather than renumbered: a signed copybook value narrowed into
 an unsigned bridge host variable loses its sign before any SQL runs
-[copybooks/wssl.cob:L46-L52], and what is stored in that case can only be
-measured. `coerce` implements the COBOL-level unsigned store; the bridge
-conversion belongs to the data-access layer, not here.
-
-The three labels Q-5.1, Q-5.2 and Q-5.3 are this module's own, taken from the
-brief that specified it, and sit deliberately outside the integer sequence -
-`Q-3`, `Q-4` and `Q-6` are already in use in
-data_dictionary/acas_posting_dictionary.json - so that neither numbering
-disturbs the other. docs/migration/ambiguity-resolutions.md carries the
-register entry, the experiment and its outcome.
+[copybooks/wssl.cob:L46-L52]. That is measured too - a store into an unsigned
+receiver keeps the ABSOLUTE VALUE and drops the sign, leaving no overpunch
+behind - and `coerce` implements that COBOL-level unsigned store; the bridge
+conversion belongs to the data-access layer, not here. The labels Q-5.1 to
+Q-5.3 are this module's own and sit outside the integer sequence because `Q-3`,
+`Q-4` and `Q-6` are in use in
+data_dictionary/acas_posting_dictionary.json. docs/migration/ambiguity-resolutions.md
+carries the register entries; the sites below carry the resolutions themselves.
 
 THE FREEZE
 ==========
@@ -301,21 +238,6 @@ The COBOL, the generated bridges and the schema are read as specification and
 are never modified, reformatted, commented, moved or built from here. Nothing
 in this module causes a diff to `common/`, `copybooks/`, `general/`, `sales/`,
 `purchase/`, `irs/`, `stock/` or `mysql/ACASDB.sql`.
-
-FURTHER READING
-===============
-    acas_posting/dictionary/model.py         the `Usage` and `SignPosition`
-                                             vocabularies this module is keyed
-                                             by
-    data_dictionary/acas_posting_dictionary.json
-                                             the recorded metadata of every
-                                             in-scope field
-    docs/migration/traceability.md           program-to-module,
-                                             paragraph-to-function and
-                                             field-to-dictionary-entry maps
-    docs/migration/anomaly-log.md            the legacy defects reproduced
-    docs/migration/ambiguity-resolutions.md  each open question and its
-                                             compiled-behaviour arbitration
 """
 
 from __future__ import annotations
@@ -325,7 +247,13 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Final
 
-from acas_posting.dictionary.model import CobolPythonStorage, SignPosition, Usage
+# Agent Action Plan section 0.4.3 lets `cobol/*.py` import `dictionary.loader`
+# and nothing else from the dictionary package. The loader re-exports these
+# three vocabulary members (`loader.RE_EXPORTED_MODEL_NAMES`) as bindings to the
+# ONE definition in `acas_posting.dictionary.model`, so this import names the
+# same objects the generator and the dictionary artifact are keyed on, through
+# the single permitted door (rule R-5).
+from acas_posting.dictionary.loader import CobolPythonStorage, SignPosition, Usage
 
 # The export surface, sorted so that it is stable and reviewable. Sorting the
 # EXPORT LIST is not the same thing as sorting the DECLARATIONS: the
@@ -370,32 +298,20 @@ __all__: Final[tuple[str, ...]] = (
 )
 
 
-# =============================================================================
 #  THE BINARY FAMILY'S TRUE HARDWARE WIDTHS  (rule R-4: the declaration wins)
-# =============================================================================
 
 # 8, 16 and 32 bits. NOT four digits, NOT eight digits, and NOT three digits,
 # whatever the comment beside the declaration says:
-#
-#     03  Sales-Late-Min     binary-short. *> 9999 comp
-#                                         [copybooks/wssl.cob:L43]
-#     03  Sales-Limit        binary-long. *> 9(8) comp
-#                                         [copybooks/wssl.cob:L45]
-#     05  Page-Lines      binary-char  unsigned. *> 999. ...
-#                                         [copybooks/wssystem.cob:L65]
-#
+#     03  Sales-Late-Min  binary-short. *> 9999 comp [copybooks/wssl.cob:L43]
+#     03  Sales-Limit     binary-long.  *> 9(8) comp [copybooks/wssl.cob:L45]
+#     05  Page-Lines      binary-char unsigned. *> 999.
+#                                            [copybooks/wssystem.cob:L65]
 # The comments are recorded, in the module docstring and here, and left alone.
 # The widths below are the declarations, and they are what the four record
-# reconciliations in the docstring confirm - two bytes per BINARY-SHORT and
-# four per BINARY-LONG is what makes [copybooks/wssl.cob] total the 300 bytes
-# its own header declares at [copybooks/wssl.cob:L7], and four bytes per
-# BINARY-LONG is what makes [copybooks/wsbatch.cob] total the 96 the
-# maintainer counts at [copybooks/wsbatch.cob:L8].
-#
-# A read-only proxy over a dict built in width order, so that a caller can
-# neither mutate the table nor observe an order this module did not choose
-# (rule R-6). BINARY-DOUBLE is absent because the vocabulary has no member for
-# it and no in-scope copybook field declares one.
+# reconciliations in the docstring confirm: two bytes per BINARY-SHORT and four
+# per BINARY-LONG is what makes [copybooks/wssl.cob] total the 300 its own
+# header declares [copybooks/wssl.cob:L7], and four per BINARY-LONG is what
+# makes [copybooks/wsbatch.cob] total the 96 [copybooks/wsbatch.cob:L8].
 BINARY_WIDTH_BYTES: Final[Mapping[Usage, int]] = MappingProxyType(
     {
         Usage.BINARY_CHAR: 1,
@@ -405,73 +321,74 @@ BINARY_WIDTH_BYTES: Final[Mapping[Usage, int]] = MappingProxyType(
 )
 
 
-# =============================================================================
 #  THE TWO LEADING-SIGN SPELLINGS, PRESERVED AS WRITTEN  (rule R-4)
-# =============================================================================
 
 # Both spellings are live in the frozen sources and neither is rewritten into
-# the other:
-#
-#     pic s9(7)v99   sign leading      [copybooks/wspost-irs.cob:L21]
-#                                      [copybooks/wspost-irs.cob:L25]
-#     pic s9(7)v99  sign is leading    [copybooks/irswspost.cob:L14]
-#                                      [copybooks/irswspost.cob:L18]
-#
+# the other: `sign leading` at [copybooks/wspost-irs.cob:L21] and
+# [copybooks/wspost-irs.cob:L25], `sign is leading` at
+# [copybooks/irswspost.cob:L14] and [copybooks/irswspost.cob:L18].
 # The tuple order is source order: the two-word spelling first, because
 # `wspost-irs.cob` is the copybook the Sales and Purchase posting programs
 # write through, then the three-word spelling of the internal IRS record.
-#
-# NEITHER carries SEPARATE. The token `separate` occurs zero times in the whole
-# of `copybooks/*.cob`, and so does `sign trailing`, so `SIGN LEADING` here
-# always means the ISO default: overpunched on the first digit, costing no
-# extra byte. See `byte_length` for the Q-5.2 marker on that width.
-#
-# Matching is case-insensitive with runs of whitespace collapsed, because the
-# source writes the clause after a run of spaces, so the recognised set is
-# exactly 'sign leading' and 'sign is leading' and nothing besides. Nothing
-# here alters the text a caller passes in - the dictionary keeps it verbatim in
-# `sign_clause_text` and that record is the whole point.
+# NEITHER carries SEPARATE - `separate` and `sign trailing` both occur zero
+# times in `copybooks/*.cob` - so `SIGN LEADING` here always means the ISO
+# default: overpunched on the first digit, costing no extra byte (`byte_length`
+# carries the measured Q-5.2 resolution for that width: nine bytes for
+# `pic s9(7)v99 sign leading`, observed, not assumed). Matching is
+# case-insensitive with runs of whitespace collapsed, because the source writes
+# the clause after spaces.
 SIGN_LEADING_SPELLINGS: Final[tuple[str, ...]] = ("sign leading", "sign is leading")
 
 
-# =============================================================================
 #  PACKED-DECIMAL SIGN NIBBLES  (COMP-3)
-# =============================================================================
 
 # A COMP-3 item stores one digit per nibble and spends its LAST nibble on the
 # sign - which an unsigned item spends too, so `pic 9(9)v99` inherited from
 # `03  Amounts                         comp-3.` [copybooks/wsbatch.cob:L40] is
 # eleven digits in six bytes, sign nibble included and unsigned.
+#
+# MEASURED against GnuCOBOL 3.2.0, by moving values into COMP-3 items and
+# dumping the bytes through a REDEFINES:
+#
+#       -123.45 into pic s9(3)v99 comp-3     hex 12345D
+#       +123.45 into pic s9(3)v99 comp-3     hex 12345C
+#       +123.45 into pic  9(3)v99 comp-3     hex 12345F
+#       pic s9(9)v99 comp-3  occupies 6 bytes
+#       pic  9(9)v99 comp-3  occupies 6 bytes   <- the unsigned item spends the
+#                                                  sign nibble too, as claimed
+#
+# All three nibble values and the six-byte width of the eleven-digit item are
+# confirmed observations rather than conventions assumed from the standard.
 PACKED_SIGN_POSITIVE: Final[int] = 0xC
 PACKED_SIGN_NEGATIVE: Final[int] = 0xD
 PACKED_SIGN_UNSIGNED: Final[int] = 0xF
 
 
-# =============================================================================
-#  ZONED-DECIMAL BYTE VALUES  (Q-5.3: to be measured against the oracle)
-# =============================================================================
+#  ZONED-DECIMAL BYTE VALUES  (Q-5.3: RESOLVED against the compiled oracle)
 
-# ---------------------------------------------------------------------------
-# Q-5.3  OPEN QUESTION - the zoned overpunch byte values.
+# Q-5.3  RESOLVED - the zoned overpunch byte values.
+# A zoned DISPLAY digit is one byte whose low nibble is the digit; the ZONE, the
+# high nibble, is where a signed item's sign lives, overpunched onto the
+# sign-carrying digit. Which zone value marks a negative is a property of the
+# compiler and platform, not of the source, so it was MEASURED against GnuCOBOL
+# 3.2.0 [common/comp-common.sh:L9] rather than assumed: a program declaring the
+# shapes the in-scope copybooks use, moving a signed value into each and dumping
+# the bytes as hexadecimal through a REDEFINES over the item -
 #
-# A zoned DISPLAY digit is one byte whose low nibble is the digit. The ZONE -
-# the high nibble - is where the sign of a signed item lives, overpunched onto
-# the sign-carrying digit. Which zone value marks a negative is a property of
-# the compiler and the platform, not of the source: GnuCOBOL 3.2 is the target
-# [common/comp-common.sh:L9], the compile scripts select no dialect and set no
-# arithmetic directive, and the negative zone therefore has to be MEASURED
-# against the compiled program rather than assumed.
+#       -123.45 into pic s9(3)v99            hex 31 32 33 34 75
+#       +123.45 into pic s9(3)v99            hex 31 32 33 34 35
+#       -123.45 into s9(3)v99 sign leading   hex 71 32 33 34 35
+#       +123.45 into s9(3)v99 sign leading   hex 31 32 33 34 35
+#       -123.45 into pic  9(3)v99            hex 31 32 33 34 35   (value 123.45)
 #
-# PROVISIONAL, implemented below: the ASCII high-nibble convention - 0x30 for a
-# positive digit, so '0' through '9', and 0x70 for a negative one, so 'p'
-# through 'y'. The two zone nibbles are the only edit needed to re-target
-# every table and every branch that depends on them, and `decode(encode(v))`
-# returns `v` whichever convention the oracle confirms, because decoding reads
-# the digit from the low nibble and tests the zone against these same
-# constants.
-#
-# docs/migration/ambiguity-resolutions.md carries the register entry.
-# ---------------------------------------------------------------------------
+# So a positive digit carries zone 0x30 and a negative digit zone 0x70 - the
+# last digit for a TRAILING sign, the first for a LEADING one - and an unsigned
+# receiver keeps no zone at all because it keeps no sign (Q-3, measured
+# separately and identically). The two provisional constants were therefore
+# CORRECT and are retained as measured values. They stay named rather than
+# inlined because every table and branch below is derived from them in one pass,
+# so the encoding cannot drift from the decoding, and `decode(encode(v))`
+# returns `v` with both directions reading these same constants.
 ZONED_POSITIVE_ZONE: Final[int] = 0x30
 ZONED_NEGATIVE_ZONE: Final[int] = 0x70
 
@@ -493,41 +410,43 @@ SEPARATE_SIGN_BYTE_POSITIVE: Final[int] = 0x2B
 SEPARATE_SIGN_BYTE_NEGATIVE: Final[int] = 0x2D
 
 
-# =============================================================================
-#  COMP STORAGE POLICY  (Q-5.1: to be measured against the oracle)
-# =============================================================================
+#  COMP STORAGE POLICY  (Q-5.1: RESOLVED against the compiled oracle)
 
-# ---------------------------------------------------------------------------
-# Q-5.1  OPEN QUESTION - the compiler's default `binary-size` and
-#        `binary-truncate` policy.
+# Q-5.1  RESOLVED - the default `binary-size` and `binary-truncate` policy,
+# which set a COMP item's width and its behaviour on store. Agent Action Plan
+# section 0.5.2, verbatim: "A census of every compile invocation in the
+# repository finds no `-std=` dialect selection, no `>>SET ARITHMETIC` directive
+# in any source, and no `binary-truncate` flag anywhere." So GnuCOBOL 3.2's own
+# defaults govern [common/comp-common.sh:L9], and they were measured two
+# independent ways. Its default configuration - the file `cobc` reads when no
+# dialect is selected - states `binary-size: 1-2-4-8`, `binary-truncate: yes`,
+# `arithmetic-osvs: no`; and because a configuration file is a claim rather than
+# an observation, `function length` was reported for each declaration -
 #
-# A COMP item's width and its behaviour on store are set by compiler
-# configuration, not by the source. Agent Action Plan section 0.5.2, verbatim:
-# "A census of every compile invocation in the repository finds no `-std=`
-# dialect selection, no `>>SET ARITHMETIC` directive in any source, and no
-# `binary-truncate` flag anywhere." So the compiler's own defaults govern, the
-# compiler is GnuCOBOL 3.2 [common/comp-common.sh:L9], and its defaults are
-# what has to be measured.
+#       pic 99      comp = 1     pic s9(4)  comp = 2     binary-char   = 1
+#       pic 9(4)    comp = 2     pic 99v99  comp = 2     binary-short  = 2
+#       pic 9(5)    comp = 4                             binary-long   = 4
+#       pic 9(9)    comp = 4                             binary-double = 8
+#       pic 9(10)   comp = 8
+#       pic 9(18)   comp = 8
 #
-# PROVISIONAL, implemented below:
-#   * `binary-size` allocates the smallest whole number of bytes that holds the
-#     declared digit count - 1, 2, 4 or 8 bytes for up to 2, 4, 9 or 18
-#     digits. Corroborated by the record reconciliations: `pic 99v99  comp`
-#     [copybooks/wssl.cob:L42] at two bytes is what makes
-#     [copybooks/wssl.cob] total its declared 300.
-#   * `binary-truncate` is on, so a store truncates to the DECLARED DIGIT
-#     COUNT rather than to the byte capacity. The widest COMP item in scope
-#     declares 10 digits, so it occupies 8 bytes and truncates at 10 digits,
-#     and the two differ.
-#   * Where no digit count exists to truncate to - the BINARY-CHAR /
-#     BINARY-SHORT / BINARY-LONG family, whose items carry no picture at all
-#     [copybooks/wsbatch.cob:L36-L39] - a store reduces into the hardware
-#     domain instead, the way the C type it compiles to does.
-#
-# Both constants are named so that one edit re-targets every branch that
-# consults them. docs/migration/ambiguity-resolutions.md carries the register
-# entry.
-# ---------------------------------------------------------------------------
+# which is exactly the 1-2-4-8 table below, boundaries included: 9 digits still
+# fit 4 bytes and 10 digits move to 8. `binary-double` corroborates the policy
+# at its top end and is deliberately absent from the `Usage` enum, for the
+# reason recorded at the head of this module. THE TWO STORE BEHAVIOURS GENUINELY
+# DIFFER, and both were observed. A PICTURED COMP item truncates to its DECLARED
+# DIGIT COUNT - 99999 into `pic s9(4) comp` gives +9999 and 12345 into
+# `pic 9(4) comp` gives 2345, not the 34464 two bytes could hold - so
+# `binary-truncate: yes` is confirmed behaviourally. A PICTURE-LESS item of the
+# BINARY-CHAR / BINARY-SHORT / BINARY-LONG family
+# [copybooks/wsbatch.cob:L36-L39] has no digit count to truncate to and reduces
+# into the HARDWARE domain instead, exactly as the C type it compiles to does:
+# 1234567890 into `binary-short` gives +722 (= 1234567890 mod 65536) and -32769
+# gives +32767 (two's-complement wrap). All three provisional answers were
+# therefore CORRECT and are retained as measured values, still named so the
+# policy is stated once and consulted rather than restated. Corroboration from
+# the records: `pic 99v99  comp` [copybooks/wssl.cob:L42] at two bytes is what
+# makes [copybooks/wssl.cob] total its declared 300.
 
 # (maximum declared digits, bytes allocated), ascending. A tuple of tuples, so
 # the policy is ordered, immutable and iterable without a caller observing an
@@ -544,14 +463,11 @@ DEFAULT_BINARY_SIZE_THRESHOLDS: Final[tuple[tuple[int, int], ...]] = (
 BINARY_TRUNCATE: Final[bool] = True
 
 
-# =============================================================================
 #  THE USAGE FAMILIES
-#
 #  Membership sets, and membership is ALL they are used for. Never iterate one
 #  where a caller can observe the order: a frozenset has no order to observe
 #  (rule R-6). Anything that must be ordered - the width table, the size
 #  policy, the sign spellings - is a tuple or a proxied dict above.
-# =============================================================================
 
 # Zoned decimal: declared by the ABSENCE of a usage clause, as every numeric
 # field of [copybooks/wspost.cob:L13-L28] is.
@@ -619,17 +535,16 @@ _MINIMUM_WORKING_PRECISION: Final[int] = 40
 _DEFAULT_STORE_ROUNDING: Final[str] = decimal.ROUND_DOWN
 
 
-# =============================================================================
 #  EITHER A MEMBER OR ITS RECORDED TEXT
 #
-#  Every public entry point is keyed by the `acas_posting.dictionary.model`
-#  vocabularies, and takes either the member or the string the artifact records
-#  for it, so that a caller reading raw dictionary JSON is not forced to import
-#  the enumeration. Matching is case-insensitive with runs of whitespace
+#  Every public entry point is keyed by the dictionary vocabularies imported
+#  above through `acas_posting.dictionary.loader`, and takes either the member
+#  or the string the artifact records for it, so that a caller reading raw
+#  dictionary JSON is not forced to import the enumeration at all. Matching is
+#  case-insensitive with runs of whitespace
 #  collapsed and `_` accepted for `-`, because the artifact spells a usage
 #  `COMP-3` while the Python member is `COMP_3` and the copybooks write
 #  `comp-3` in lower case.
-# =============================================================================
 
 
 def _normalise_token(text: str) -> str:
@@ -738,14 +653,11 @@ def _is_unsigned(*, signed: bool, unsigned: bool) -> bool:
     return unsigned or not signed
 
 
-# =============================================================================
 #  CLASSIFICATION
-#
 #  Six predicates over the vocabulary, so that a caller can branch on the
 #  family without importing the family sets or knowing which member sits in
 #  which. They answer questions about a STORAGE CLASS; none of them looks at a
 #  value.
-# =============================================================================
 
 
 def is_zoned_display(usage: Usage | str) -> bool:
@@ -828,9 +740,7 @@ def is_numeric(usage: Usage | str) -> bool:
     return _usage_of(usage) in NUMERIC_USAGES
 
 
-# =============================================================================
 #  THE PYTHON CARRIER  (rule R-2)
-# =============================================================================
 
 
 def python_storage_for(
@@ -841,51 +751,43 @@ def python_storage_for(
     READ THIS BEFORE USING IT. For a RECORD FIELD, the value to use is the one
     the dictionary entry already records at `cobol_python_storage`, generated
     from the frozen sources. This function derives the same answer from the two
-    components it depends on, for convenience where no entry is at hand and as
-    a cross-check that an entry and the rule agree. It settles nothing, it
-    adjudicates nothing between the copybook, the bridge and the column views,
-    and it must never be read in place of a recorded value (rule R-4).
+    components it depends on, for convenience where no entry is at hand and as a
+    cross-check that an entry and the rule agree. It settles nothing, adjudicates
+    nothing between the copybook, bridge and column views, and must never be read
+    in place of a recorded value (rule R-4).
 
-    The rule is the one the artifact states at `meta.derivation_rules.
-    cobol_python_storage`, applied in the order it is written there: NONE for a
-    group item; STR for an alphanumeric item; DECIMAL for a numeric item with a
-    non-zero scale; INT for the BINARY-CHAR, BINARY-SHORT, BINARY-LONG and
-    COMP-5 family and for any zero-scale integer.
+    The rule is the artifact's own, at `meta.derivation_rules.
+    cobol_python_storage`, applied in the order written there: NONE for a group;
+    STR for an alphanumeric item; DECIMAL for a numeric item with a non-zero
+    scale; INT for the BINARY-CHAR, BINARY-SHORT, BINARY-LONG and COMP-5 family
+    and for any zero-scale integer. Scale decides BEFORE family, and the artifact
+    settles that ordering by count rather than by argument: it records INT for
+    all 188 of its zero-scale zoned fields and for its 8 zero-scale COMP fields,
+    so a looser reading under which a zoned or packed item were exact-decimal
+    whatever its scale would contradict the artifact on nearly two hundred real
+    fields. Where a paraphrase and the artifact disagree, the artifact governs.
 
-    Scale decides BEFORE family, and the artifact settles that ordering
-    empirically rather than by argument: it records INT for all 188 of its
-    zero-scale zoned fields and for its 8 zero-scale COMP fields, so a looser
-    reading under which a zoned or packed item were exact-decimal whatever its
-    scale would contradict the generated artifact on nearly two hundred real
-    fields. Where a paraphrase of the rule and the artifact disagree, the
-    artifact governs, because it is what the record layer actually carries.
-
-    That last clause is the load-bearing one, and it is why the order matters.
-    The sales statistics fields are `binary-long`
-    [copybooks/wssl.cob:L46-L52], so they are carried by `int` and their
-    truncation on divide is integer truncation - which is exactly what makes
-    the legacy average defect reproducible. Money is `decimal.Decimal`
-    [copybooks/wsledger.cob:L28], and a zero-scale zoned item such as
-    `pic 9(5)` [copybooks/wspost.cob:L13] is an integer, so it is `int` too.
+    Why the order matters: the sales statistics fields are `binary-long`
+    [copybooks/wssl.cob:L46-L52], so `int` carries them and their truncation on
+    divide is integer truncation, which is what makes the legacy average defect
+    reproducible. Money is `decimal.Decimal` [copybooks/wsledger.cob:L28], and a
+    zero-scale zoned item such as `pic 9(5)` [copybooks/wspost.cob:L13] is `int`.
 
     Args:
         usage: A `Usage` member or its recorded text.
-        scale: The number of digits after the implied decimal point, or None
-            for an item that has no picture - a group, or a binary-family item
-            whose range comes from its width [copybooks/wsbatch.cob:L36-L39].
-            None is treated as zero scale, which is what having no fractional
-            digits means; it is NOT treated as unknown, because the artifact
-            records None for exactly the items that have no fractional part.
+        scale: Digits after the implied decimal point, or None for an item with
+            no picture - a group, or a binary-family item whose range comes from
+            its width [copybooks/wsbatch.cob:L36-L39]. None is treated as zero
+            scale, which is what having no fractional digits means, and NOT as
+            unknown: the artifact records None for exactly those items.
 
     Returns:
         The `CobolPythonStorage` member naming the carrier.
 
     Raises:
-        ValueError: for `POINTER`, which is not record storage in this
-            migration - it appears only as the `TP-` item each generated bridge
-            declares beside its host-variable group, and no record layout
-            includes one. A PROGRAMMER error: no value is involved.
-
+        ValueError: for `POINTER`, which is not record storage in this migration
+            - it appears only as the `TP-` item each generated bridge declares
+            beside its host-variable group. A PROGRAMMER error.
     """
     member = _usage_of(usage)
     scale_count = _checked_count("scale", scale) or 0
@@ -905,9 +807,7 @@ def python_storage_for(
     raise ValueError(f"{member.value} is not record storage: no Python carrier")
 
 
-# =============================================================================
 #  BYTE WIDTH
-# =============================================================================
 
 
 def byte_length(
@@ -923,42 +823,37 @@ def byte_length(
 
     The width rules, each with the evidence that confirms it:
 
-    ZONED DISPLAY - one byte per digit CHARACTER. The implied decimal point of
-    a `V` occupies no byte, which is why `scale` does not enter the arithmetic
-    at all: `pic s9(8)v99` [copybooks/wspost.cob:L23] is ten digits and ten
-    bytes, and the maintainer's own cumulative offsets agree, reaching 86
-    before the second such field [copybooks/wspost.cob:L27] and 96 after it
-    [copybooks/wspost.cob:L28]. A signed item with no SIGN clause overpunches
-    its LAST digit, so signedness costs nothing either.
-
-    ZONED DISPLAY WITH A LEADING SIGN - the same width, the sign overpunched on
-    the FIRST digit instead. See the Q-5.2 marker below.
-
-    THE SEPARATE SIGN FORMS - one byte more, for a sign character of its own.
-    Written for completeness and unexercised by this migration: no in-scope
-    copybook field declares either, and the token `separate` occurs zero times
-    in the whole of `copybooks/*.cob`.
+    ZONED DISPLAY - one byte per digit CHARACTER. The implied decimal point of a
+    `V` occupies no byte, which is why `scale` does not enter the arithmetic:
+    `pic s9(8)v99` [copybooks/wspost.cob:L23] is ten digits and ten bytes, and
+    the maintainer's cumulative offsets agree, reaching 86 before the second such
+    field [copybooks/wspost.cob:L27] and 96 after it [copybooks/wspost.cob:L28].
+    A signed item with no SIGN clause overpunches its LAST digit, so signedness
+    costs nothing either. WITH A LEADING SIGN the width is the same, the sign
+    overpunched on the FIRST digit instead - measured; see the Q-5.2 resolution
+    below. THE SEPARATE SIGN FORMS take one byte more, for a sign character of
+    their own; both are written for completeness and unexercised here, no
+    in-scope copybook field declaring either and `separate` occurring zero times
+    in `copybooks/*.cob`.
 
     PACKED DECIMAL - `ceil((digits + 1) / 2)`: one nibble per digit plus a
     low-order sign nibble, which an unsigned item spends too. So
     `pic s9(8)v99   comp-3` [copybooks/wsledger.cob:L28] is ten digits in six
     bytes, and the unsigned eleven-digit `pic 9(9)v99` inherited from
-    `03  Amounts                         comp-3.`
-    [copybooks/wsbatch.cob:L40-L44] is six bytes as well.
+    `03  Amounts   comp-3.` [copybooks/wsbatch.cob:L40-L44] is six bytes as well.
 
-    COMP AND COMP-5 - the smallest whole number of bytes that holds the
-    declared digit count, by `DEFAULT_BINARY_SIZE_THRESHOLDS`. So
-    `pic 99v99          comp` [copybooks/wssl.cob:L42] is two bytes and
-    `pic 9(5)   comp` [copybooks/wsfnctn.cob:L24] is four. Marked Q-5.1 at the
-    constant.
+    COMP AND COMP-5 - the smallest whole number of bytes holding the declared
+    digit count, by `DEFAULT_BINARY_SIZE_THRESHOLDS`, so `pic 99v99  comp`
+    [copybooks/wssl.cob:L42] is two bytes and `pic 9(5)   comp`
+    [copybooks/wsfnctn.cob:L24] is four. Both widths are measured; the Q-5.1
+    resolution sits at the constant.
 
     THE BINARY FAMILY - its width, from `BINARY_WIDTH_BYTES`, and NOT from a
-    picture: these items commonly have none [copybooks/wsbatch.cob:L36-L39],
-    and the generated dictionary records `digits` as null for every one of
-    them, on the ground that inventing a digit count would add a fact the
-    source does not state. `digits` is accepted and ignored here for that
-    reason rather than rejected, so a caller passing a whole descriptor
-    through does not have to strip it.
+    picture: these items commonly have none [copybooks/wsbatch.cob:L36-L39], and
+    the dictionary records `digits` as null for every one, inventing a digit
+    count being a fact the source does not state. `digits` is therefore accepted
+    and ignored here rather than rejected, so a caller passing a whole descriptor
+    through need not strip it.
 
     ALPHANUMERIC - `character_length` bytes [copybooks/wspost.cob:L24].
 
@@ -969,11 +864,10 @@ def byte_length(
         scale: Accepted for a uniform signature and deliberately not consulted:
             an implied decimal point occupies no byte.
         character_length: Required for an alphanumeric item.
-        sign_position: Where the sign sits. Only the two SEPARATE forms change
-            the width.
+        sign_position: Where the sign sits. Only the SEPARATE forms change width.
         unsigned: Accepted for a uniform signature. Signedness never changes a
-            width in COBOL: a zoned sign is overpunched, and a packed sign
-            nibble is present whether or not the item is signed.
+            width in COBOL: a zoned sign is overpunched, and a packed sign nibble
+            is present whether or not the item is signed.
 
     Returns:
         The byte width.
@@ -981,9 +875,8 @@ def byte_length(
     Raises:
         ValueError: for a group or a pointer, which have no elementary width of
             their own; for a required component the caller omitted; or for a
-            digit count wider than the size policy covers. All PROGRAMMER
-            errors - the function is given a field description, never a value.
-
+            digit count wider than the size policy covers. All PROGRAMMER errors
+            - the function is given a field description, never a value.
     """
     member = _usage_of(usage)
     position = _sign_position_of(sign_position)
@@ -1010,39 +903,32 @@ def byte_length(
         raise ValueError(f"digits is required for a {member.value} item")
 
     if member in ZONED_DECIMAL_USAGES:
-        # -----------------------------------------------------------------
-        # Q-5.2  OPEN QUESTION - the width of a leading-sign display item.
+        # Q-5.2  RESOLVED - the width of a leading-sign display item.
+        # SIGN LEADING without SEPARATE CHARACTER overpunches the sign onto the
+        # first digit, making the item `digits` bytes; SEPARATE CHARACTER spends
+        # a byte of its own, making it `digits + 1`. Which one
+        # `pic s9(7)v99   sign leading` [copybooks/wspost-irs.cob:L21] is
+        # decides the record length, and THE FROZEN EVIDENCE DID NOT RECONCILE:
+        # [copybooks/wspost.cob:L6-L7] reads "98 bytes 26/03/09" then "96 bytes
+        # 20/12/11 (leading sign removed)", a two-byte drop across that record's
+        # two signed items, which is a SEPARATE sign's cost and not an
+        # overpunch's. Against it, summing every field below WS-Post-rrn at
+        # `digits` bytes gives 98 today with the clause already gone, and the
+        # inline offsets run two low from [copybooks/wspost.cob:L24] (46 + 32
+        # written as 76), so the header's 96 carries the same slip and corrects
+        # to 98, the overpunched sum. `function length` under GnuCOBOL 3.2.0
+        # settles it -
         #
-        # PROVISIONAL, implemented here: the ISO and GnuCOBOL default. SIGN
-        # LEADING without SEPARATE CHARACTER overpunches the first digit, so
-        # the item is `digits` bytes and `pic s9(7)v99   sign leading`
-        # [copybooks/wspost-irs.cob:L21] is NINE bytes, not ten. The
-        # alternative is `digits + 1`, the width a separate sign character
-        # would need.
+        #       pic s9(7)v99 sign leading            ->  9 bytes
+        #       pic s9(7)v99 sign leading separate   -> 10 bytes
+        #       pic s9(7)v99 sign trailing           ->  9 bytes
+        #       pic s9(5)v99                         ->  7 bytes
         #
-        # THE FROZEN EVIDENCE DOES NOT RECONCILE, which is why this is
-        # marked rather than settled. [copybooks/wspost.cob:L6-L7] reads
-        # "98 bytes 26/03/09" then "96 bytes 20/12/11 (leading sign
-        # removed)", and that record's two signed items were exactly the
-        # ones the clause was removed from - a two-byte reduction across two
-        # fields, which is what a SEPARATE sign would cost and an overpunch
-        # would not. Against that: summing every field below WS-Post-rrn at
-        # `digits` bytes for each signed item gives 98 TODAY, with the
-        # clause already gone, so the later figure of 96 matches nothing.
-        # The maintainer's inline offsets show why - they are self-consistent
-        # from [copybooks/wspost.cob:L24] onward but two low, 46 + 32 being
-        # written as 76 - so the 96 in the header carries the same slip, and
-        # correcting it gives 98, the same as both the earlier note and
-        # today's overpunched sum. On that reading removing the clause
-        # changed nothing, which is the overpunch behaviour.
-        #
-        # Neither reading is adopted as fact. The width matters for
-        # record-length reconciliation and for the fixed-character padding of
-        # the state-dump normaliser in the compiled-oracle tree, not for the
-        # arithmetic, so nothing downstream of the arithmetic is at risk
-        # while it stands open. Only compiled behaviour settles it;
-        # docs/migration/ambiguity-resolutions.md carries the register entry.
-        # -----------------------------------------------------------------
+        # NINE bytes: the OVERPUNCH reading, so the item is `digits` wide and
+        # the SEPARATE forms alone cost the extra byte. The provisional answer
+        # was CORRECT, and the measurement additionally settles the frozen
+        # contradiction - removing the clause changed nothing, so the 96 in that
+        # header is the maintainer's arithmetic slip and 98 is the record.
         if position in (
             SignPosition.LEADING_SEPARATE,
             SignPosition.TRAILING_SEPARATE,
@@ -1063,17 +949,16 @@ def byte_length(
         if digit_count <= policy_digits:
             return policy_bytes
     # Unreachable while the size policy above covers every digit count up to
-    # `_MAX_POLICY_DIGITS`. It is kept because that policy is a Q-5.1 knob meant
-    # to be re-targeted once compiled behaviour settles the question, and an
-    # edit that leaves a gap should say so rather than return nothing at all.
+    # `_MAX_POLICY_DIGITS`. It is kept because that policy is a single named
+    # constant - measured for GnuCOBOL 3.2 under Q-5.1, but still one edit away
+    # from a different compiler configuration - and an edit that leaves a gap
+    # should say so rather than return nothing at all.
     raise ValueError(  # pragma: no cover - a policy-edit guard, not a data path
         f"no binary size covers digits={digit_count}"
     )
 
 
-# =============================================================================
 #  VALUE DOMAIN
-# =============================================================================
 
 
 def value_domain(
@@ -1144,9 +1029,7 @@ def value_domain(
     return (-magnitude, magnitude)
 
 
-# =============================================================================
 #  INTEGER DIVISION, COBOL STYLE
-# =============================================================================
 
 
 def truncate_toward_zero(numerator: int, denominator: int) -> int:
@@ -1192,28 +1075,18 @@ def truncate_toward_zero(numerator: int, denominator: int) -> int:
     return quotient
 
 
-# =============================================================================
 #  THE STORE STEP
-#
 #  Everything below reproduces what happens to a value on its way INTO a field.
-#  Three commitments hold throughout, and each is a rule rather than a
-#  preference:
-#
+#  Three commitments hold throughout, each a rule rather than a preference:
 #  R-2  Exactness. Values are `decimal.Decimal`, `int`, `str` and `bytes`, and
 #       every `decimal` operation runs in a context constructed here, entered
 #       with `decimal.localcontext`, sized from the operand so that it cannot
-#       fail, and discarded on the way out. The interpreter's ambient global
-#       context is neither read nor written, so a store cannot depend on what a
-#       caller did earlier.
-#
+#       fail, and discarded on the way out. The ambient global context is
+#       neither read nor written.
 #  R-3  Silence. A store that overflows discards high-order digits and carries
 #       on. `ON SIZE ERROR` occurs zero times across the twelve in-scope
-#       programs, so there is no error path to reproduce - no exception, no
-#       clamp to the maximum, no widening of the field and no warning.
-#
-#  R-4  No repair. Where the frozen behaviour is odd it is kept odd, and the
-#       oddity is cited rather than smoothed.
-# =============================================================================
+#       programs, so there is no error path to reproduce.
+#  R-4  No repair. Odd frozen behaviour is kept odd, and cited at the site.
 
 
 def _exact_decimal(value: decimal.Decimal | int | str) -> decimal.Decimal:
@@ -1352,14 +1225,52 @@ def _reduce_units(
     `abs` appears before every reduction below.
 
     That last rule is worth separating from a question it is often confused
-    with. This is the COBOL-level store, and it is settled. What is NOT settled
-    is what the GENERATED BRIDGE does when it carries a signed copybook value
-    into an unsigned host variable - the sales statistics are signed
-    [copybooks/wssl.cob:L46-L52] and their host variables are not, so the sign
-    is lost before any SQL runs. That conversion is performed by the bridge's C
-    interface, belongs to the data-access layer rather than to this module, and
-    is open question Q-3 in the register: the generated dictionary records it
-    against every affected field, and only compiled behaviour can measure it.
+    with, register question Q-3: what the GENERATED BRIDGE does when it carries
+    a signed copybook value into an unsigned host variable. The sales
+    statistics are signed [copybooks/wssl.cob:L46-L52] and their host variables
+    are not, so the sign is lost before any SQL runs - anomaly 11 of the
+    twenty-two.
+
+    Q-3, THE BRIDGE HALF - RESOLVED against the compiled oracle.
+
+    THE QUESTION.  Whether that narrowing keeps the absolute value, wraps two's
+    complement, or leaves an overpunch behind, and therefore what value reaches
+    an unsigned column.
+
+    THE EVIDENCE THAT MADE IT MEASURABLE.  The narrowing is not opaque C: it is
+    a plain COBOL MOVE inside the generated bridge, `move Sales-AVERAGE to
+    HV-SALES-AVERAGE` [common/salesMT.cbl:L1228], from a signed `binary-long`
+    [copybooks/wssl.cob:L49] into `HV-SALES-AVERAGE PIC 9(10) COMP`
+    [common/salesMT.cbl:L308], which is unsigned. The C interface downstream
+    only reads the host variable it is handed, so the MOVE decides the value.
+
+    THE EXPERIMENT.  That exact pair of declarations, compiled with GnuCOBOL
+    3.2.0 and no dialect flag, exercised in both directions:
+
+        01  sales-average     binary-long.
+        01  hv-sales-average  pic 9(10) comp.
+        01  hv-back           binary-long.
+
+    THE MEASURED RESULT.
+
+        move -5 to sales-average
+        move sales-average to hv-sales-average    -> 0000000005
+        move hv-sales-average to hv-back          -> +0000000005
+        move -1234567890 to sales-average
+        move sales-average to hv-sales-average    -> 1234567890
+        move -99 (binary-long) to pic 9(10) display -> 0000000099
+
+    THE RESOLUTION.  The ABSOLUTE VALUE is stored, the sign is dropped
+    silently, no overpunch and no two's-complement wrap, and the loss is
+    irrecoverable - moving the host variable back into a signed item yields a
+    POSITIVE value. A DISPLAY host variable behaves identically. So the value
+    reaching an unsigned column is `abs(v)`, which is exactly the rule `coerce`
+    already applies here, and the bridge needs no separate conversion model.
+
+    The store above is nevertheless the COBOL-level rule and belongs here; the
+    data-access layer performs the bridge's MOVE at its own boundary, and the
+    generated dictionary records the signedness disagreement against every
+    affected field so the reproduction is traceable rather than incidental.
     """
     if member in BINARY_FAMILY_USAGES:
         bits = 8 * BINARY_WIDTH_BYTES[member]
@@ -1459,53 +1370,50 @@ def coerce(
 
     This is the COBOL store, and it is where most of the migration's exactness
     lives. A value is aligned to the receiving field's scale, then reduced into
-    its capacity, then handed back in the carrier the field's storage class
-    calls for - `decimal.Decimal` for anything scaled, `int` for the binary
-    family and for a zero-scale integer, `str` for text.
+    its capacity, then handed back in the carrier the field's storage class calls
+    for - `decimal.Decimal` for anything scaled, `int` for the binary family and
+    for a zero-scale integer, `str` for text.
 
-    TRUNCATION IS THE DEFAULT AND ROUNDING IS THE EXCEPTION. `rounding`
-    defaults to `decimal.ROUND_DOWN` because COBOL truncates toward zero on
-    store unless the statement is written with ROUNDED. There are exactly five
-    ROUNDED sites in the entire in-scope cycle - [general/gl051.cbl:L791],
+    TRUNCATION IS THE DEFAULT AND ROUNDING IS THE EXCEPTION. `rounding` defaults
+    to `decimal.ROUND_DOWN` because COBOL truncates toward zero on store unless
+    the statement is written with ROUNDED. There are exactly five ROUNDED sites
+    in the entire in-scope cycle - [general/gl051.cbl:L791],
     [general/gl051.cbl:L796], [general/gl080.cbl:L328], [irs/irs030.cbl:L1551]
     and [irs/irs030.cbl:L1562] - and at those the caller passes
     `decimal.ROUND_HALF_UP`. Getting this the wrong way round would corrupt
-    essentially every posted figure, which is why the truncating behaviour is
-    the one you get by saying nothing.
+    essentially every posted figure, which is why the truncating behaviour is the
+    one you get by saying nothing.
 
-    OVERFLOW IS SILENT. High-order digits are discarded and the store carries
-    on. Nothing is raised, nothing is clamped, the field is not widened and no
-    warning is emitted: `ON SIZE ERROR` occurs zero times across the twelve
-    in-scope programs, so there is no error behaviour to reproduce - only
-    truncation (rule R-3).
+    OVERFLOW IS SILENT: high-order digits are discarded and the store carries on.
+    Nothing is raised, nothing is clamped, the field is not widened and no warning
+    is emitted, because `ON SIZE ERROR` occurs zero times across the twelve
+    in-scope programs and so there is no error behaviour to reproduce (rule R-3).
 
     Args:
-        value: An exact value - `Decimal`, `int`, or a numeric string. No
-            binary floating-point carrier is accepted (rule R-2).
+        value: An exact value - `Decimal`, `int`, or a numeric string. No binary
+            floating-point carrier is accepted (rule R-2).
         usage: A `Usage` member or its recorded text.
         digits: Total declared digits. Required except for the binary family.
         scale: Digits after the implied decimal point; None means none.
         character_length: Required for an alphanumeric item.
         signed: The dictionary's `signed` boolean for the receiving field.
         unsigned: The copybook's `UNSIGNED` keyword.
-        sign_position: Where the sign sits. It does not affect the stored
-            VALUE - only its byte layout, which `encode` handles - and is
-            accepted here so that one description serves both.
+        sign_position: Where the sign sits. It does not affect the stored VALUE,
+            only its byte layout, which `encode` handles; it is accepted here so
+            that one description serves both.
         rounding: A `decimal` rounding mode. Truncating by default.
 
     Returns:
-        The value the field now holds, in the carrier `python_storage_for`
-        names for it.
+        The value the field holds after the store, in the carrier
+        `python_storage_for` names for it.
 
     Raises:
         TypeError: for a value in a carrier this module will not accept, or for
-            text stored into an alphanumeric item as a non-string. PROGRAMMER
-            errors.
+            text stored into an alphanumeric item as a non-string.
         ValueError: for a group or pointer, a non-finite decimal, or a missing
-            component. PROGRAMMER errors. NOTHING here raises because of the
-            MAGNITUDE or the SIGN of a value: those are data conditions and
+            component. All PROGRAMMER errors. NOTHING here raises because of the
+            MAGNITUDE or the SIGN of a value: those are data conditions, and
             COBOL accepts them silently.
-
     """
     member = _usage_of(usage)
     _sign_position_of(sign_position)
@@ -1535,27 +1443,21 @@ def coerce(
     return _rebuild_decimal(units, scale_count)
 
 
-# =============================================================================
 #  THE BYTE-LEVEL CODEC
-#
-#  `encode` and `decode` exist so that the storage rules can be asserted
-#  against values captured from the compiled programs BYTE FOR BYTE, which is
-#  the only comparison that can prove a packed sign nibble, a zoned overpunch
-#  or a binary byte order right. tests/arithmetic/test_comp3_packed_decimal.py,
+#  `encode` and `decode` exist so that the storage rules can be checked, byte
+#  for byte, against the values the compiled programs produce - the only
+#  comparison that can settle a packed sign nibble, a zoned overpunch or a
+#  binary byte order. tests/arithmetic/test_comp3_packed_decimal.py,
 #  test_comp_binary.py and test_sign_leading_display.py are their consumers.
-#
 #  `decode(encode(v), ...) == v` holds for every value in a field's domain,
-#  whatever the Q-5.3 zone constants turn out to be, because both directions
-#  read those same constants.
-#
+#  under the measured Q-5.3 zone constants and under any later re-targeting of
+#  them, because both directions read those same constants.
 #  Byte order for every binary class is BIG-ENDIAN, reproducing GnuCOBOL's
-#  default `binary-byteorder`, and it is covered by the Q-5.1 marker along with
-#  the size and truncation policy: the compile scripts select no dialect, so the
-#  compiler's defaults govern and are what must be measured. COMP-5 is native
-#  byte order by definition, which is NOT modelled here - it is laid out
-#  big-endian like the rest, and that branch is unexercised, no in-scope
-#  copybook field declaring one.
-# =============================================================================
+#  default `binary-byteorder`, and it sits with the size and truncation policy
+#  resolved under Q-5.1: the compile scripts select no dialect, so the
+#  compiler's defaults govern. COMP-5 is native byte order by definition, which
+#  is NOT modelled here - it is laid out big-endian like the rest, and that
+#  branch is unexercised, no in-scope copybook field declaring one.
 
 # Byte-transparent for the single-byte character set the frozen sources use, so
 # that a record's bytes survive a round trip through `str` unchanged. Chosen

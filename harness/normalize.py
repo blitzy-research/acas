@@ -9,9 +9,9 @@ transformation map, section 0.4.1.7: "Canonicalises fixed-char trailing
 spaces, decimal scale rendering, and the two-digit versus four-digit date
 text forms".
 
-    [harness/docker-compose.yml:L44-L51]  the eight stages, in order
-    [harness/docker-compose.yml:L269]     stage 4, the COBOL-side pass
-    [harness/docker-compose.yml:L273]     stage 8's input, the Python pass
+    [harness/docker-compose.yml:L46-L53]  the eight stages, in order
+    [harness/docker-compose.yml:L352]     stage 4, the COBOL-side pass
+    [harness/docker-compose.yml:L356]     stage 8's input, the Python pass
 
     stage 1  seed        harness/seed.sh          (COBOL *LD loaders)
     stage 2  run  COBOL  harness/run_cobol_scenario.sh
@@ -23,20 +23,21 @@ text forms".
     stage 4' normalize   THIS MODULE              -> ....../python.norm
     stage 8  diff        harness/diff_states.py   -> MUST be EMPTY
 
+The eight stages in order are at [harness/docker-compose.yml:L16-L26], and
+the two passes this module performs at [harness/docker-compose.yml:L147]
+and [harness/docker-compose.yml:L153].
+
 It reads one directory of `<TABLE>.json` files, as `dump_tables.py` wrote
-them, and writes one directory of `<TABLE>.json` files with the same
-shape and only the VALUES canonicalised. It opens no database link, needs
-no driver, invokes no COBOL and imports nothing from the shipped Python
+them, and writes one directory of `<TABLE>.json` files with the same shape
+and only the VALUES canonicalised. It opens no database link, needs no
+driver, invokes no COBOL and imports nothing from the shipped Python
 package.
 
 THE ONE SENTENCE THAT DEFINES THIS MODULE - AND ITS HARD LIMIT
 ==============================================================
-Agent Action Plan section 0.6.6, verbatim:
-
-    "a non-empty diff is always a real behavioral difference and never an
-    artefact of the comparison."
-
-That sentence cuts BOTH ways, and the second direction is the trap.
+Agent Action Plan section 0.6.6, verbatim: "a non-empty diff is always a
+real behavioral difference and never an artefact of the comparison." That
+sentence cuts BOTH ways, and the second direction is the trap.
 
   FORWARD.  Representation artefacts - driver formatting, character
   padding, decimal scale rendering - must be canonicalised away, or a
@@ -44,34 +45,29 @@ That sentence cuts BOTH ways, and the second direction is the trap.
 
   BACKWARD, AND EQUALLY BINDING.  This module must NEVER make two
   genuinely different stored values compare equal. A normaliser that
-  "helpfully" folded `21/09/20` and `21/09/2025` into one token, or
-  rounded `1234.5600` to `1234.56` because the column declares two
-  places, or trimmed a value one side stored padded and the other stored
-  short, would hide a REAL behavioural difference and silently defeat the
-  whole engagement.
+  "helpfully" folded `21/09/20` and `21/09/2025` into one token, or rounded
+  `1234.5600` to `1234.56` because the column declares two places, or
+  trimmed a value one side stored padded and the other stored short, would
+  hide a REAL behavioural difference and silently defeat the whole
+  engagement.
 
-Every transformation here is therefore:
-
-  1. ALLOW-LISTED BY COLUMN or driven by the column's DECLARED TYPE -
-     never by a heuristic and never by what a value happens to look like.
-  2. DERIVED FROM THE FROZEN SCHEMA `mysql/ACASDB.sql`, which is the
-     specification rather than a view of it.
-  3. IDEMPOTENT - normalising a normalised dump changes nothing.
-  4. CITED, so a reader can go to the finding that motivates it (R-5).
-  5. EXACTLY ONE OF THE THREE JOBS BELOW. There are THREE and there is no
-     fourth. Not case folding, not whitespace collapsing inside a value,
-     not NULL coalescing, not row re-ordering, not key remapping, not
-     sign normalisation. Any fourth transformation is one more place a
-     real difference could hide.
+Every transformation here is therefore ALLOW-LISTED BY COLUMN or driven by
+the column's DECLARED TYPE, never by a heuristic and never by what a value
+happens to look like; DERIVED FROM THE FROZEN SCHEMA `mysql/ACASDB.sql`,
+which is the specification rather than a view of it; IDEMPOTENT, so
+normalising a normalised dump changes nothing; CITED, so a reader can go to
+the finding that motivates it (R-5); and EXACTLY ONE OF THE THREE JOBS
+BELOW. There are THREE and there is no fourth - not case folding, not
+whitespace collapsing inside a value, not NULL coalescing, not row
+re-ordering, not key remapping, not sign normalisation. Any fourth
+transformation is one more place a real difference could hide.
 
 JOB 1 - TRAILING SPACES IN FIXED-WIDTH CHARACTER COLUMNS
 ========================================================
 Applied to every column the frozen schema declares `char(n)`, for all n
-including 1: the trailing ASCII space `U+0020` is removed and nothing
-else is.
-
-THE FINDING.  Agent Action Plan section 0.6.2's width drift, verified end
-to end in this checkout:
+including 1: the trailing ASCII space `U+0020` is removed and nothing else
+is. Agent Action Plan section 0.6.2's width drift, traced end to end in
+this checkout:
 
     [copybooks/wsledger.cob:L27]  03  Ledger-Name pic x(24).        24
     [common/nominalMT.cbl:L299]   05  HV-LEDGER-NAME PIC X(32).     32
@@ -82,24 +78,16 @@ differs, and padding is visible in a table dump - which is why the dump
 normaliser must canonicalise fixed-character trailing spaces rather than
 compare raw bytes."
 
-THE FINDING BEYOND THE PLAN, and the reason this job is mandatory rather
+And the finding beyond the plan, which is why this job is mandatory rather
 than decorative: THE BRIDGE TRIMS TRAILING SPACES as it builds the SQL
-text, so the COBOL side stores character columns TRIMMED while a Python
-data-access layer writing the padded record field could store them
-PADDED.
-
-    [common/nominalMT.cbl:L1065-L1067]
-        STRING '`LEDGER-NAME`="' INTO WS-MYSQL-COMMAND ...
-        STRING FUNCTION TRIM (HV-LEDGER-NAME,TRAILING) ...
-
-That is not one stray call. Measured in this checkout: 23 `FUNCTION TRIM`
-sites in `common/nominalMT.cbl`, 29 in `common/glpostingMT.cbl`, 27 in
-`common/irspostingMT.cbl`, 75 in `common/salesMT.cbl` and 339 in
-`common/systemMT.cbl`. The bridge trims system-wide. Whether the
+text [common/nominalMT.cbl:L1065-L1067], so the COBOL side stores
+character columns TRIMMED while a Python data-access layer writing the
+padded record field could store them PADDED. It is not one stray call -
+the per-bridge `FUNCTION TRIM` counts are at the job 1 implementation site
+below, and run to 339 in `common/systemMT.cbl` alone. Whether the
 difference is even observable then depends on the server's
 `PAD_CHAR_TO_FULL_LENGTH` mode, which `harness/Dockerfile.mariadb`
-deliberately leaves unset for exactly this reason. Without job 1 that
-purely representational difference would fail every scenario.
+deliberately leaves unset for exactly this reason.
 
 TRAILING ONLY, NEVER LEADING.  A COBOL alphanumeric `MOVE` is
 left-justified with RIGHT padding, so a leading space is CONTENT, not
@@ -108,49 +96,44 @@ ASCII space is removed - never a tab, a NUL, a carriage return, a newline
 or any other Unicode whitespace, because any of those in a `char` column
 is real content or a genuine defect worth seeing.
 
-Scale of the job, measured: the schema declares 238 `char(...)` columns
-and ZERO `varchar(...)`; 177 of the 238 are in scope.
+Scale of the job: the schema declares 238 `char(...)` columns and ZERO
+`varchar(...)`; 177 of the 238 are in scope.
 
 JOB 2 - DECIMAL SCALE RENDERING
 ===============================
 Applied to every column the frozen schema declares `decimal(p,s)`: the
 value is parsed as an exact `decimal.Decimal` FROM ITS STRING and
-re-rendered at exactly the column's declared scale `s`.
+re-rendered at exactly the column's declared scale `s`. Agent Action Plan
+section 0.6.6: "canonicalise decimal scale rendering so that a value
+stored at two decimal places compares equal regardless of driver
+formatting."
 
-THE FINDING.  Agent Action Plan section 0.6.6: "canonicalise decimal
-scale rendering so that a value stored at two decimal places compares
-equal regardless of driver formatting."
-
-THE SCALE IS NOT UNIFORMLY 2.  Measured over the frozen schema: 68 x
+THE SCALE IS NOT UNIFORMLY 2.  Counted over the frozen schema: 68 x
 decimal(9,2), 57 x decimal(10,2), 17 x decimal(4,2), 12 x decimal(5,2),
 4 x decimal(14,2), 2 x decimal(2,0), 2 x decimal(14,4) and one each of
-decimal(6,2), decimal(5,0), decimal(11,4), decimal(11,2) and
-decimal(10,4). In scope: 55 x decimal(10,2), 44 x decimal(9,2), 15 x
-decimal(4,2), 8 x decimal(5,2), 4 x decimal(14,2), 1 x decimal(6,2) and
-1 x decimal(5,0) - so a ZERO scale is in scope even though a `,4` scale
-is not. The declared scale is always read from the schema; two places are
-never assumed.
+decimal(6,2), decimal(5,0), decimal(11,4), decimal(11,2), decimal(10,4).
+In scope: 55 x decimal(10,2), 44 x decimal(9,2), 15 x decimal(4,2), 8 x
+decimal(5,2), 4 x decimal(14,2), 1 x decimal(6,2), 1 x decimal(5,0) - so a
+ZERO scale is in scope even though a `,4` scale is not. The declared scale
+is always read from the schema; two places are never assumed.
 
 THE INFORMATION-LOSS GUARD.  If a value's own exponent implies MORE
-decimal digits than the column declares, that is not a rendering
-artefact - it means one side stored something the column cannot hold,
-which is a REAL finding. `DecimalScaleError` is raised rather than
-quantising it away, because quantising would be exactly the "make two
-different values compare equal" failure the hard limit above forbids.
-A value read back from a `DECIMAL(p,s)` column always has exponent `-s`,
-so the guard should never fire - which is why its firing is worth an
-error rather than a warning.
+decimal digits than the column declares, that is not a rendering artefact
+- it means one side stored something the column cannot hold, which is a
+REAL finding. `DecimalScaleError` is raised rather than quantising it
+away, because quantising would be exactly the "make two different values
+compare equal" failure the hard limit above forbids. A value read back
+from a `DECIMAL(p,s)` column always has exponent `-s`, so the guard should
+never fire - which is why its firing is worth an error, not a warning.
 
 JOB 3 - THE TWO-DIGIT VERSUS FOUR-DIGIT DATE TEXT FORMS
 =======================================================
-Applied to FIVE allow-listed columns and to nothing else. It validates
-the value against the canonical shape and re-renders it from its parsed
+Applied to FIVE allow-listed columns and to nothing else. It validates the
+value against the canonical shape and re-renders it from its parsed
 components; anything that does not match the shape is passed through
-UNCHANGED and REPORTED.
-
-THE FINDING.  Agent Action Plan section 0.6.6: "canonicalise the
-two-digit versus four-digit date text forms that the schema stores side
-by side."
+UNCHANGED and REPORTED. Agent Action Plan section 0.6.6: "canonicalise the
+two-digit versus four-digit date text forms that the schema stores side by
+side."
 
     [mysql/ACASDB.sql:L158]   `POST-DAT` char(8)            date text
     [mysql/ACASDB.sql:L277]   `POST4-DAT` char(8)           date text
@@ -161,63 +144,52 @@ by side."
 `char(8)` DOES NOT MEAN "DATE", and that is precisely why this job is an
 explicit column allow-list and never a width or content heuristic. The
 schema declares six `char(8)` columns; `PUITM5-REC`.`OI5-BATCH` and
-`SAITM3-REC`.`OI3-BATCH` are BATCH REFERENCES, proven by the copybook -
+`SAITM3-REC`.`OI3-BATCH` are BATCH REFERENCES, as the copybook shows -
 [copybooks/slwsoi.cob:L16-L18] declares `03 OI-Batch comp.` over
 `05 OI-B-Nos pic 9(5).` and `05 OI-B-Item pic 999.`, five digits plus
 three - and the schema itself labels their component columns
-`COMMENT 'Batch content'` [mysql/ACASDB.sql:L902-L903]. `char(4)` does
-not mean "period" either: `PURCH-EXT`, `SALES-EXT` and `PASS-WORD` are
-char(4) and are not periods. Every deliberate exclusion is listed in
+`COMMENT 'Batch content'` [mysql/ACASDB.sql:L902-L903]. `char(4)` does not
+mean "period" either: `PURCH-EXT`, `SALES-EXT` and `PASS-WORD` are char(4)
+and are not periods. Every deliberate exclusion is listed in
 `DATE_TEXT_EXCLUSIONS` below with its reason and locator (R-5).
 
-ALMOST EVERY OTHER IN-SCOPE DATE IS A BINARY DAY-NUMBER INTEGER, not
-text, and job 3 must not go near it: `SYSTEM-REC`.`RUN-DAT`,
-`START-DAT`, `END-DAT`, `S-END-CYCLE-DAT`, `BL-END-CYCLE-DAT`,
-`GLBATCH-REC`.`ENTERED` / `PROOFED` / `POSTED` / `STORED`, both
-`IH-DAT`, `OI3-DAT`, `OI3-DATE-CLEARED`, `OI5-DAT`,
-`OI5-DATE-CLEARED`, `SALES-CREATE-DAT` and `PURCH-CREATE-DAT`. They are
-exact integers with nothing to canonicalise. `RUN-DAT`
-[mysql/ACASDB.sql:L1199] is the `Run-Date binary-long` of
-[copybooks/wssystem.cob:L67] - the pinned-clock observable, and
-genuinely diff-visible.
+ALMOST EVERY OTHER IN-SCOPE DATE IS A BINARY DAY-NUMBER INTEGER, not text,
+and job 3 must not go near it: `SYSTEM-REC`.`RUN-DAT`, `START-DAT`,
+`END-DAT`, `S-END-CYCLE-DAT`, `BL-END-CYCLE-DAT`, `GLBATCH-REC`.`ENTERED`
+/ `PROOFED` / `POSTED` / `STORED`, both `IH-DAT`, `OI3-DAT`,
+`OI3-DATE-CLEARED`, `OI5-DAT`, `OI5-DATE-CLEARED`, `SALES-CREATE-DAT` and
+`PURCH-CREATE-DAT`. They are exact integers with nothing to canonicalise.
+`RUN-DAT` [mysql/ACASDB.sql:L1199] is the `Run-Date binary-long` of
+[copybooks/wssystem.cob:L67] - the pinned-clock observable, and genuinely
+diff-visible.
 
-THE EIGHT-CHARACTER LAYOUT, verified:
-
-    [copybooks/wspost.cob:L18]  03  Post-Date pic x(8).
-
-    [common/irspostingMT.cbl:L982-L987], with the maintainer's own
-    comment at L978-L980 ("... and yes they all should be numeric as a
-    date is present but JIC (just in case)."):
-        if       Post-Date (1:2) numeric
-                 move     Post-Date (1:2) to HV-POST4-DAY.
-        if       Post-Date (4:2) numeric
-                 move     Post-Date (4:2) to HV-POST4-MONTH.
-        if       Post-Date (7:2) numeric
-                 move     Post-Date (7:2) to HV-POST4-YEAR.
-
-Slices at (1:2), (4:2) and (7:2) of an eight-character field put the
-separators at 3 and 6: the layout is `NN/NN/NN`.
+THE EIGHT-CHARACTER LAYOUT is `NN/NN/NN`, and the bridge is what fixes it.
+`03 Post-Date pic x(8).` [copybooks/wspost.cob:L18] is sliced at (1:2),
+(4:2) and (7:2) into the day, month and year components
+[common/irspostingMT.cbl:L982-L987] - each move guarded by a `numeric`
+test, under the maintainer's own comment at L978-L980 ("... and yes they
+all should be numeric as a date is present but JIC (just in case)."). Three
+slices at those offsets in an eight-character field put the separators at
+3 and 6.
 
 AN AMBIGUITY THIS MODULE DOES NOT RESOLVE - AND DOES NOT NEED TO.
 The linkage date is `to-day pic x(10)` in DD/MM/CCYY form. A COBOL
-alphanumeric `MOVE` from `x(10)` to `x(8)` is left-justified and
-truncated on the right, which would yield DD/MM/CC - making (7:2) the
-CENTURY. Two in-scope programs instead build the field with two partial
-moves,
+alphanumeric `MOVE` from `x(10)` to `x(8)` is left-justified and truncated
+on the right, which would yield DD/MM/CC - making (7:2) the CENTURY. Two
+in-scope programs instead build the field with two partial moves,
 
     [sales/sl060.cbl:L1071-L1072]  and  [purchase/pl060.cbl:L937-L938]
         move     u-date (1:6) to post-date (1:6).
         move     u-date (9:2) to post-date (7:2).
 
 which takes `DD/MM/` verbatim and the LAST TWO digits of CCYY, making
-(7:2) the YEAR. Rule R-6 governs: the question is arbitrated by running
-the compiled oracle and the answer is recorded in
-`docs/migration/ambiguity-resolutions.md`. NOTHING HERE DEPENDS ON THE
-ANSWER, because job 3 never expands a two-digit component to four and
-never contracts four to two. It canonicalises RENDERING and reports
-everything else.
+(7:2) the YEAR. Rule R-6 governs: the question is to be arbitrated by
+running the compiled oracle, and the answer belongs in the migration
+ambiguity register. NOTHING HERE DEPENDS ON THE ANSWER, because job 3
+never expands a two-digit component to four and never contracts four to
+two. It canonicalises RENDERING and reports everything else.
 
-The evidence does settle one thing that matters here: `/` is the only
+The frozen source does settle one thing that matters here: `/` is the only
 separator the in-scope write paths can produce, since `u-date (1:6)` is
 copied verbatim. So `/` is the canonical separator, and a value carrying
 `-`, `.` or `,` instead is REAL information - reported, never rewritten.
@@ -234,10 +206,10 @@ exactly four ASCII digits.
 
 Because both canonical shapes are EXACT, re-rendering a canonical value
 reproduces it byte for byte. That fixed point is deliberate: any looser
-recogniser would risk equating values that genuinely differ. Job 3's
-real product is the REPORT it emits for everything that does not match,
-so an operator takes the question to the oracle rather than to a
-normaliser tweak.
+recogniser would risk equating values that genuinely differ. Job 3's real
+product is the REPORT it emits for everything that does not match, so an
+operator takes the question to the oracle rather than to a normaliser
+tweak.
 
 WHAT JOB 3 MUST NOT DO - THE CHARSET CAVEAT STAYS
 =================================================
@@ -255,40 +227,39 @@ Unicode-normalised or case-folded to "fix" it (R-4).
 THE RULES CITED BELOW BY NUMBER
 ===============================
 This project ships NO separate rules document - `review_rules` reports
-"No user rules provided.", confirmed by a full read. The six binding
-rules R-1 to R-6 are the Agent Action Plan's own, section 0.7.2, and each
-section below names the one it satisfies. Where the plan is silent,
-ordinary enterprise practice applies; nothing here is invented.
+"No user rules provided.". The six binding rules R-1 to R-6 are the Agent
+Action Plan's own, section 0.7.2, and each section below names the one it
+satisfies. Where the plan is silent, ordinary enterprise practice applies;
+nothing here is invented.
 
 NUMERIC POLICY  (rule R-2)
 ==========================
 No accounting value may pass through a binary floating-point type at any
-point - not in computation, not in storage, not in transport. Agent
-Action Plan section 0.5.1 extends the prohibition to this exact file,
-naming the two dataframe and array libraries it excludes outright and
-adding, verbatim: "This exclusion is absolute, including for the harness
-dump comparison, which uses ordered row sequences rather than
-dataframes." Neither library is imported here, for any reason, and
-neither is in `requirements.txt`.
+point - not in computation, not in storage, not in transport. Agent Action
+Plan section 0.5.1 extends the prohibition to this exact file, naming the
+two dataframe and array libraries it excludes outright and adding,
+verbatim: "This exclusion is absolute, including for the harness dump
+comparison, which uses ordered row sequences rather than dataframes."
+Neither library is imported here, for any reason, and neither is in
+`requirements.txt`.
 
-  * `Decimal` is only ever built FROM A STRING, so no value passes
-    through a binary approximation on the way in.
-  * A decimal value ARRIVES as a JSON string and LEAVES as a JSON
-    string. JSON numbers are IEEE-754 doubles in every consumer, so
-    writing a decimal as a JSON number would reintroduce binary floating
-    point at the file boundary. Integers stay JSON integers, exact for
-    every integer width the schema uses.
+  * `Decimal` is only ever built FROM A STRING, so no value passes through
+    a binary approximation on the way in.
+  * A decimal value ARRIVES as a JSON string and LEAVES as a JSON string.
+    JSON numbers are IEEE-754 doubles in every consumer, so writing a
+    decimal as a JSON number would reintroduce binary floating point at
+    the file boundary. Integers stay JSON integers, exact for every
+    integer width the schema uses.
   * THE ACTIVE GUARD. A binary value for a `decimal` column raises
-    `NumericPolicyError` naming the table, the column and the value. It
-    is never coerced: a value like that means `dump_tables.py` was
-    misconfigured, and quietly repairing it here would hide that bug.
-    The same guard covers every other column class, so the policy is
+    `NumericPolicyError` naming the table, the column and the value. It is
+    never coerced: a value like that means `dump_tables.py` was
+    misconfigured, and quietly repairing it here would hide that bug. The
+    same guard covers every other column class, so the policy is
     structural rather than incidental.
-  * Only exact operations are used - `quantize` with an explicit
-    rounding mode and an explicit `Context`, and `format(value, "f")`
-    for rendering so exponent notation can never appear. There is no
-    binary conversion, no `%` formatting of a binary number and no
-    reliance on the caller's ambient decimal context.
+  * Only exact operations are used - `quantize` with an explicit rounding
+    mode and an explicit `Context`, and `format(value, "f")` for rendering
+    so exponent notation can never appear. There is no binary conversion
+    and no reliance on the caller's ambient decimal context.
 
 The schema supports all of this: it declares ZERO `float`, `double` and
 `real` columns. Its numeric census is 167 `decimal`, 151 `int`, 116
@@ -297,27 +268,25 @@ The schema supports all of this: it declares ZERO `float`, `double` and
 `bigint`. 177 character columns plus 128 decimal plus 208 integer is the
 513 in-scope columns exactly.
 
-NO COBOL AT RUNTIME, AND NO COUPLING TO THE SHIPPED PACKAGE  (rule R-1)
-=======================================================================
+NO COBOL AT RUNTIME, NO COUPLING TO THE SHIPPED PACKAGE  (rule R-1)
+===================================================================
 `harness/` is the compiled-COBOL oracle tree and a SIBLING of the shipped
-Python package. Agent Action Plan section 0.3.1 annotates it "the
-compiled oracle; NEVER on the package import path" and states the
-guarantee that there is no import path from the shipped package to
-`harness`. `pyproject.toml` makes that structural by excluding
-`harness*` from the packaged distribution.
+Python package. Agent Action Plan section 0.3.1 annotates it "the compiled
+oracle; NEVER on the package import path" and states the guarantee that
+there is no import path from the shipped package to `harness`.
+`pyproject.toml` makes that structural by excluding `harness*` from the
+packaged distribution.
 
-  * THERE IS NO `harness/__init__.py` AND THERE MUST NEVER BE ONE. This
-    is a plain module invoked BY PATH, and it is on `sys.path` only for
-    the duration of its own run.
+  * THERE IS NO `harness/__init__.py` AND THERE MUST NEVER BE ONE. This is
+    a plain module invoked BY PATH, on `sys.path` only for its own run.
   * The shipped package is NOT imported here, in any form - not its
-    data-access layer, not its record layouts, not its dictionary
-    loader - and neither is the generated data-dictionary JSON.
-    Deriving field metadata from the migrated package would make the
-    oracle depend on the very thing it exists to arbitrate, a
-    circularity that destroys the comparison's independence. The frozen
-    `mysql/ACASDB.sql` is parsed instead, which additionally means this
-    module runs offline, in unit tests, with the Compose stack down and
-    with the package not installed at all.
+    data-access layer, not its record layouts, not its dictionary loader -
+    and neither is the generated data-dictionary JSON. Deriving field
+    metadata from the migrated package would make the oracle depend on the
+    very thing it exists to arbitrate, a circularity that destroys the
+    comparison's independence. The frozen `mysql/ACASDB.sql` is parsed
+    instead, which additionally means this module runs offline, in unit
+    tests, with the Compose stack down and the package not installed.
   * No COBOL is invoked, no `cobc` is shelled out to, no compiled module
     is loaded and no child process is started.
   * Imports are confined to the standard library, which is inside the
@@ -334,79 +303,69 @@ concurrency of every kind - threads, event loops, subprocess pools and
 pooled database links are each named there - requiring instead that
 execution be strictly sequential.
 
-  * This module issues NO SQL AT ALL and opens no database link. It
-    reads JSON files and the frozen schema text, and writes JSON files.
+  * This module issues NO SQL AT ALL and opens no database link. It reads
+    JSON files and the frozen schema text, and writes JSON files.
   * ONE table at a time, in a plain loop. There is no thread, no event
-    loop, no process pool and no synchronisation primitive anywhere in
-    this file.
+    loop, no process pool and no synchronisation primitive in this file.
   * It writes nothing under `$ACAS_REPO`, which the Compose file mounts
-    read-only [harness/docker-compose.yml:L591] to keep the frozen
+    read-only [harness/docker-compose.yml:L792] to keep the frozen
     artifact guarantee of section 0.8.1 structural. The frozen schema is
     READ here, never written.
-  * It adds no validation of the DATA. The structural assertions check
-    the DUMP SHAPE and the SCHEMA - keys, order, counts, types - never a
-    row's business content.
+  * It adds no validation of the DATA. The structural assertions check the
+    DUMP SHAPE and the SCHEMA - keys, order, counts, types - never a row's
+    business content.
 
 ANOMALIES ARE REPRODUCED, NEVER REPAIRED  (rule R-4)
 ====================================================
-Agent Action Plan section 0.8.2, preserving the user's own requirement:
-"A defect reproduced is correct; a defect fixed is a failure."
+Agent Action Plan section 0.8.2, preserving the user's own requirement: "A
+defect reproduced is correct; a defect fixed is a failure."
 
 The clearest case is the plan's anomaly 7. `IRSPOSTING-REC` carries three
 columns that exist in NO copybook - `POST4-DAY`, `POST4-MONTH` and
 `POST4-YEAR` - because the bridge derives them from two-character slices
 of a date string under a guard [common/irspostingMT.cbl:L982-L987]. When
-the guard does not hold the slices are simply not moved, so the
-components keep the zero left by the group `INITIALIZE` while
-`POST4-DAT` still holds the raw date text. The row is internally
-inconsistent, and that is the specification: nothing here derives,
-back-fills, cross-checks or repairs those three columns, and a
-`POST4-DAT` of `21/09/25` beside three zero components survives
-normalisation untouched.
-
-Nor is any sign flipped, any leading zero in a numeric removed, any
-charset harmonised, or any display-width quirk tidied - the
-`int(1) unsigned` declaration of `BL-END-CYCLE-DAT`
-[mysql/ACASDB.sql:L1270] is left exactly as the schema writes it.
+the guard does not hold the slices are simply not moved, so the components
+keep the zero left by the group `INITIALIZE` while `POST4-DAT` still holds
+the raw date text. The row is internally inconsistent, and that is the
+specification: nothing here derives, back-fills, cross-checks or repairs
+those three columns, and a `POST4-DAT` of `21/09/25` beside three zero
+components survives normalisation untouched. Nor is any sign flipped, any
+leading zero in a numeric removed, any charset harmonised, or any
+display-width quirk tidied - the `int(1) unsigned` declaration of
+`BL-END-CYCLE-DAT` [mysql/ACASDB.sql:L1270] is left exactly as the schema
+writes it.
 
 DETERMINISM IS THE PRODUCT  (rule R-6)
 ======================================
 Agent Action Plan section 0.8.5: "Two runs of the same scenario under the
 same pinned clock produce byte-identical dumps, proven by
-`tests/determinism/test_two_runs_byte_identical.py`."
+`tests/determinism/test_two_runs_byte_identical.py`." That determinism
+suite is written at a later boundary; the property it will assert is the
+one this module is built to preserve.
 
-NOT ONE BYTE OF NON-REPRODUCIBLE CONTENT MAY APPEAR IN A NORMALISED
-FILE. There is no wall-clock reading, no host name, no process
-identifier, no run identifier, no elapsed time, no absolute path, no
-schema-file modification time and no tool version in the output; this
-module reads no clock and no entropy source, and the only directory it
-lists is sorted before use.
+NOT ONE BYTE OF NON-REPRODUCIBLE CONTENT MAY APPEAR IN A NORMALISED FILE.
+There is no wall-clock reading, no host name, no process identifier, no
+run identifier, no elapsed time, no absolute path, no schema-file
+modification time and no tool version in the output; this module reads no
+clock and no entropy source, and the only directory it lists is sorted
+before use. `normalize_dump` is a PURE function of `(dump, schema)`: it
+reads no environment variable, opens no file, touches no global and
+depends on no ambient decimal context.
 
-`normalize_dump` is a PURE function of `(dump, schema)`: it reads no
-environment variable, opens no file, touches no global and depends on no
-ambient decimal context, so it is deterministic and safely reusable.
-
-Serialisation is pinned rather than left to a default, and matches
-`dump_tables.py` byte for byte: `indent=2`, `ensure_ascii=True`,
-`sort_keys=False`, `separators=(",", ": ")`, LF newlines, UTF-8, exactly
-one trailing newline, and the five keys always in the same insertion
-order. `ensure_ascii=True` is deliberate - it makes the bytes independent
-of any locale or filesystem-encoding difference between the two runs, so
-do not "improve" it. Each file is written to a temporary name in its own
-directory and moved into place with `os.replace`, so
-`harness/diff_states.py` can never read a partial file.
-
-Only `<TABLE>.json` files are written into the destination directory - no
-manifest, no log, no marker - because `dump_tables.py` records that
-constraint for this module explicitly. Progress goes to stderr, and the
-job 3 findings report goes OUTSIDE the compared trees.
+Serialisation matches `dump_tables.py` byte for byte and is pinned rather
+than defaulted; the parameters and the atomic-rename argument are at the
+JSON boundary below. Only `<TABLE>.json` files are written into the
+destination directory - no manifest, no log, no marker - because
+`dump_tables.py` records that constraint for this module explicitly.
+Progress goes to stderr, and the job 3 findings report goes OUTSIDE the
+compared trees.
 
 THE PUBLIC API
 ==============
 `tests/conftest.py` is specified to provide "the seed/dump/normalize/diff
 helpers so that no test reimplements the comparison protocol" (Agent
-Action Plan section 0.4.3), which means it imports this module and calls
-these functions directly. They are a library first and a command second.
+Action Plan section 0.4.3), so it will import this module and call these
+functions directly. They are a library first and a command second.
 
     load_schema              the column-type map, parsed from the frozen
                              `mysql/ACASDB.sql`
@@ -423,38 +382,43 @@ these functions directly. They are a library first and a command second.
     build_parser / main      the command line; `main` RETURNS a code
 
 `main` returns an exit status and never calls `sys.exit`, so a caller can
-drive it in-process. The module guard raises `SystemExit(main())`.
-
-COMMAND LINE
-============
-Two flag spellings are accepted for the source and destination, because
-this repository documents two and neither is a guess. The committed
-Compose file publishes, verbatim:
-
-    harness/normalize.py --in /out/cobol  --out /out/cobol.norm
-    harness/normalize.py --in /out/python --out /out/python.norm
-
-while the file specification for this module names `--src` and `--dst`
-with a `.normalized` default suffix and the composed
-`<out-dir>/<scenario>/<side>/` layout. `--in` and `--src` are the same
-option; so are `--out` and `--dst`. Abbreviation is disabled, so `--out`
-can never be confused with `--out-dir`.
+drive it in-process. The module guard raises `SystemExit(main())`. Two flag
+spellings are accepted for the source and the destination - `--in`/`--src`
+and `--out`/`--dst` - because this repository documents two and neither is
+a guess; both, and the composed `<out-dir>/<scenario>/<side>/` layout, are
+set out at the command-line site below.
 
 EXIT CODES
 ==========
 Deliberately the same 80+ band the sibling harness tools use, so an
-operator reading a pipeline log sees one family.
+operator reading a pipeline log sees one family. 82 is database, and is
+deliberately never returned: this module opens no database link.
 
-    0   every requested table was normalised and written
+    0   every requested table was normalised and the set published
     80  usage - bad or contradictory command line
-    81  precondition - a missing directory, or an unreadable schema
+    81  precondition - a missing directory, an unreadable schema, or a
+        source tree that does not declare itself complete
     83  scope - an out-of-scope or unknown table was present
     84  drift - a structural assertion against the frozen schema failed
     85  numeric - the R-2 value guard tripped, or a NULL was present
-    86  write - an output file could not be written
+    86  write - an output file could not be written, or the destination
+        overlaps the read-only checkout in either direction
 
 82 is database, and is deliberately never returned: this module opens no
 database link.
+
+THE SET IS THE UNIT OF WORK
+===========================
+A dump is not one file, it is a SET, and the comparison is made against
+the set. So the source must carry `_manifest.json` - written LAST by the
+stage that published it - and a tree without one is refused, because
+normalising a partial capture carries it into a comparison that can pass.
+The destination is published the same way: staged beside it, stale dumps
+purged, the new files renamed in, the manifest renamed in last. The
+manifest's scenario, side and selector are INHERITED from the source's, so
+the two stages of one run cannot claim different identities.
+`--allow-unmanifested` waives the incoming check for a hand-assembled tree
+and forfeits the claim that the result is evidence (rule R-6).
 
 FURTHER READING
 ===============
@@ -463,16 +427,17 @@ FURTHER READING
     harness/dump_tables.py       the dump contract this module consumes
     harness/diff_states.py       the comparison; empty is the pass
     harness/docker-compose.yml   the eight stages and the environment
-    harness/reset_db.sh          the same invariants from the database
-                                 side
+    harness/reset_db.sh          the same invariants, database side
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 from collections.abc import Mapping, MutableSequence, Sequence
 from dataclasses import dataclass
@@ -480,13 +445,11 @@ from decimal import Context, Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Final
 
-# ---------------------------------------------------------------------------
 #  THE FROZEN-SCHEMA INVENTORY  (rule R-5)
-#
 #  One entry per in-scope table: its single-column primary key, its declared
 #  column count and the `CREATE TABLE` line of mysql/ACASDB.sql it was read
 #  from. The same twenty-two triples appear independently at
-#  [harness/dump_tables.py:L479-L502] and [harness/reset_db.sh:L248-L271];
+#  [harness/dump_tables.py:L483-L506] and [harness/reset_db.sh:L267-L290];
 #  all three were verified against the schema, and `load_schema` re-checks
 #  every count on every run so the map cannot silently drift.
 # ---------------------------------------------------------------------------
@@ -542,8 +505,8 @@ IN_SCOPE: Final[Mapping[str, TableSpec]] = {
 # Agent Action Plan section 0.2.2 enumerates them as "Eleven out-of-scope
 # tables, all present in the frozen schema but never touched by the
 # cycle". 22 + 11 = 33, the schema's full CREATE TABLE count. The same
-# list is at [harness/dump_tables.py:L510-L525] and
-# [harness/reset_db.sh:L276-L288].
+# list is at [harness/dump_tables.py:L514-L529] and
+# [harness/reset_db.sh:L295-L307].
 OUT_OF_SCOPE: Final[frozenset[str]] = frozenset(
     {
         "DELIVERY-REC",
@@ -565,9 +528,9 @@ OUT_OF_SCOPE: Final[frozenset[str]] = frozenset(
 # rows - rows keep the primary-key order SQL returned them in (rule R-6).
 IN_SCOPE_TABLES: Final[tuple[str, ...]] = tuple(sorted(IN_SCOPE))
 
-# 513, verified by summing the twenty-two declared column counts and again
-# by counting them in mysql/ACASDB.sql. Exposed so a test can assert the
-# whole inventory in one line.
+# 513, the sum of the twenty-two declared column counts above, which is also
+# the number of in-scope columns mysql/ACASDB.sql declares. Exposed so a
+# test can assert the whole inventory in one line.
 EXPECTED_TOTAL_COLUMNS: Final[int] = sum(
     spec.column_count for spec in IN_SCOPE.values()
 )
@@ -583,7 +546,7 @@ EXPECTED_SCHEMA_TABLES: Final[int] = 33
 SIDES: Final[tuple[str, ...]] = ("cobol", "python")
 
 # The dump object's key order, identical to
-# [harness/dump_tables.py:L544-L550]. Asserted on input AND on output: the
+# [harness/dump_tables.py:L548-L554]. Asserted on input AND on output: the
 # key order is part of the byte-identical guarantee (rule R-6).
 DUMP_KEYS: Final[tuple[str, ...]] = (
     "table",
@@ -594,15 +557,12 @@ DUMP_KEYS: Final[tuple[str, ...]] = (
 )
 
 
-# ---------------------------------------------------------------------------
 #  JOB 3's COLUMN ALLOW-LIST  (rule R-5)
-#
 #  FIVE columns, named explicitly. `char(8)` does not mean "date" and
 #  `char(4)` does not mean "period", so this can never be a width or content
 #  heuristic. Every deliberate exclusion is recorded below it with its
 #  reason and locator, because an unexplained absence from an allow-list is
 #  indistinguishable from an oversight.
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True, slots=True)
@@ -692,7 +652,7 @@ DATE_TEXT_EXCLUSIONS: Final[Mapping[tuple[str, str], str]] = {
         "char(4) [mysql/ACASDB.sql:L1219] but the system password "
         "[copybooks/wssystem.cob:L97] `05 Pass-Word pic x(4).`, not a "
         "period. It also carries the schema's ONLY column-level DEFAULT, "
-        "recorded at [harness/dump_tables.py:L568-L570]."
+        "recorded at [harness/dump_tables.py:L572-L574]."
     ),
     ("DELIVERY-REC", "DELIV-KEY"): (
         "char(8) [mysql/ACASDB.sql:L57] and the sixth char(8) column of "
@@ -727,13 +687,10 @@ _FORM_DATE: Final[str] = "date"
 _FORM_PERIOD: Final[str] = "period"
 
 
-# ---------------------------------------------------------------------------
 #  COLUMN CLASSES
-#
 #  Three, and they partition the frozen schema exactly: 238 `char`, 167
 #  `decimal` and 315 integer-family columns, 720 in total, with zero
 #  `varchar`, `float`, `double`, `real` or temporal columns anywhere.
-# ---------------------------------------------------------------------------
 
 KIND_CHAR: Final[str] = "char"
 KIND_DECIMAL: Final[str] = "decimal"
@@ -747,9 +704,9 @@ _INTEGER_TYPES: Final[frozenset[str]] = frozenset(
 )
 
 # Declared types that would break either the numeric policy of rule R-2 or
-# the determinism argument of Agent Action Plan section 0.6.6. Verified
-# absent from all 33 tables; asserted rather than trusted, because their
-# appearance would mean the frozen schema had been modified.
+# the determinism argument of Agent Action Plan section 0.6.6.
+# mysql/ACASDB.sql declares none of them in any of its 33 tables; asserted
+# rather than trusted, because one appearing would mean it was modified.
 _REFUSED_TYPES: Final[frozenset[str]] = frozenset(
     {
         "float",
@@ -774,14 +731,11 @@ _REFUSED_TYPES: Final[frozenset[str]] = frozenset(
 )
 
 
-# ---------------------------------------------------------------------------
 #  EXIT CODES
-#
 #  The same 80+ band the sibling harness tools use
-#  [harness/dump_tables.py:L598-L606], so one pipeline log reads as one
+#  [harness/dump_tables.py:L602-L610], so one pipeline log reads as one
 #  family. 82 - database - is deliberately absent: this module opens no
 #  database link.
-# ---------------------------------------------------------------------------
 
 EX_OK: Final[int] = 0
 EX_USAGE: Final[int] = 80
@@ -792,7 +746,7 @@ EX_NUMERIC: Final[int] = 85
 EX_WRITE: Final[int] = 86
 
 # The environment variables this module consults, both defined by the
-# Compose service [harness/docker-compose.yml:L686-L689]. Neither is read
+# Compose service [harness/docker-compose.yml:L893-L896]. Neither is read
 # by `normalize_dump`, which is pure.
 _ENV_REPO: Final[str] = "ACAS_REPO"
 _ENV_OUT: Final[str] = "ACAS_OUT"
@@ -803,18 +757,18 @@ _SCHEMA_RELPATH: Final[str] = "mysql/ACASDB.sql"
 
 # The destination suffix the file specification for this module defines.
 # The committed Compose recipe passes `--out .../cobol.norm` explicitly
-# [harness/docker-compose.yml:L269], so this default only applies when no
+# [harness/docker-compose.yml:L352], so this default only applies when no
 # destination is given at all.
 _NORMALIZED_SUFFIX: Final[str] = ".normalized"
 
 # Where a defaulted findings report goes: alongside `$ACAS_OUT/reset/`,
-# which [harness/reset_db.sh:L150-L151] documents as never being part of a
+# which [harness/reset_db.sh:L169-L170] documents as never being part of a
 # comparison. NEVER inside `$ACAS_OUT/<scenario>/`.
 _REPORT_SUBDIR: Final[str] = "normalize"
 _REPORT_FILENAME: Final[str] = "date-text-findings.txt"
 
 # The defaulted report file is named for the source directory - so the
-# recipe's two invocations [harness/docker-compose.yml:L269] and [L273]
+# recipe's two invocations [harness/docker-compose.yml:L352] and [L273]
 # produce `cobol-date-text-findings.txt` and
 # `python-date-text-findings.txt` rather than one overwriting the other,
 # and both sides' questions reach the oracle. Runs of alphanumerics only,
@@ -824,13 +778,175 @@ _REPORT_LABEL_RE: Final[re.Pattern[str]] = re.compile(r"[0-9A-Za-z]+")
 _REPORT_DEFAULT_LABEL: Final[str] = "dump"
 
 # JSON serialisation, pinned to `dump_tables.py`'s parameters exactly
-# [harness/dump_tables.py:L1663-L1673] so a normalised file differs from
+# [harness/dump_tables.py:L1668-L1678] so a normalised file differs from
 # its input in VALUES only.
 _JSON_INDENT: Final[int] = 2
 _JSON_SEPARATORS: Final[tuple[str, str]] = (",", ": ")
 _DUMP_SUFFIX: Final[str] = ".json"
 _TEMP_PREFIX: Final[str] = "."
 _TEMP_SUFFIX: Final[str] = ".json.tmp"
+
+# The findings report is text, not JSON, so it stages under its own suffix.
+# Distinct from `_TEMP_SUFFIX` so a half-written report can never be mistaken
+# for a half-written dump by anything scanning the directory.
+_REPORT_TEMP_SUFFIX: Final[str] = ".txt.tmp"
+
+# ---------------------------------------------------------------------------
+#  SECURE OUTPUT  (CWE-59 symlink following, CWE-367 TOCTOU, CWE-312
+#  cleartext storage, CWE-732 over-permissive files)
+#
+#  A normalised dump holds exactly what the raw dump held - every value of
+#  every row of the accounting tables - with only the RENDERING canonicalised.
+#  It is therefore just as sensitive as its input and gets the same treatment,
+#  and for the same reasons, set out at length above
+#  `_write_text_securely` in [harness/dump_tables.py:L1879-L1929]:
+#
+#  * 0600 at creation AND re-applied with `fchmod`, so a permissive process
+#    umask cannot widen it.
+#  * `O_EXCL | O_NOFOLLOW` on the staging name, because `Path.open("w")`
+#    follows a symlink and truncates its target - and this directory is a
+#    shared bind mount in the Compose recipe
+#    [harness/docker-compose.yml:L689].
+#  * A stale staging file removed first, so `O_EXCL` cannot turn a previous
+#    crash into a permanent failure.
+#
+#  The BYTES are untouched: the same `json.dumps` arguments, the same single
+#  trailing newline, the same `os.replace`. A normalised file written before
+#  and after this change compares identical, which rule R-6 requires because
+#  `harness/diff_states.py` compares these files exactly.
+#
+#  Duplicated rather than imported. The three harness utilities are
+#  deliberately self-contained - each carries its own copy of the frozen table
+#  inventory - and Agent Action Plan section 0.3.1 enumerates the harness's
+#  files with no shared helper module among them. Importing from
+#  `acas_posting` is separately forbidden: section 0.4.3 permits `harness/*`
+#  to reach only the command line, never a module like
+#  `acas_posting.dal.status`.
+# ---------------------------------------------------------------------------
+
+#: Mode every normalised dump and report is created with and left at.
+_OUTPUT_FILE_MODE: Final[int] = 0o600
+
+#: Mode a directory this module creates is created with.
+_OUTPUT_DIR_MODE: Final[int] = 0o700
+
+#: The umask `main` installs, so nothing this process creates is readable by
+#: group or other.
+_OUTPUT_UMASK: Final[int] = 0o077
+
+#: `O_NOFOLLOW` where the platform has it; 0 leaves the flag word unchanged
+#: rather than making the module unimportable where it is absent.
+_O_NOFOLLOW: Final[int] = getattr(os, "O_NOFOLLOW", 0)
+
+
+def _write_text_securely(text: str, target: Path, staging: Path) -> None:
+    """Write `text` to `target` atomically, privately, and without following.
+
+    Args:
+        text: The exact bytes-to-be, already assembled. Written in one call,
+            so no reader observes a partial file.
+        target: The final path. Replaced atomically. `os.replace` does not
+            follow a symlink at this name either: a symlinked destination is
+            REPLACED, so its target cannot be written through.
+        staging: The temporary name, which MUST share `target`'s directory
+            for the replace to be atomic.
+
+    Raises:
+        OSError: The staging file could not be created, written or moved.
+            Nothing is left behind - the staging file is removed on every
+            failure path - and the caller wraps this in its own error type.
+    """
+    staging.unlink(missing_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_NOFOLLOW
+    descriptor = os.open(staging, flags, _OUTPUT_FILE_MODE)
+    try:
+        # Re-applied explicitly, because the mode passed to `os.open` is
+        # masked by the process umask. `fchmod` on the open descriptor
+        # cannot be redirected to another file.
+        os.fchmod(descriptor, _OUTPUT_FILE_MODE)
+        with os.fdopen(
+            descriptor, "w", encoding="utf-8", newline="\n"
+        ) as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except BaseException:
+        try:
+            os.close(descriptor)
+        except OSError:
+            # Already closed by the context manager. Swallowed so the real
+            # failure, re-raised below, is the one the caller sees.
+            pass
+        staging.unlink(missing_ok=True)
+        raise
+    os.replace(staging, target)
+
+
+def _make_output_directory(directory: Path) -> None:
+    """Create `directory` and its parents, private to their owner.
+
+    Args:
+        directory: The directory to create. An existing directory's mode is
+            left exactly as it is, because an output root is frequently a
+            bind mount whose permissions belong to whoever created it.
+
+    Raises:
+        OSError: The directory could not be created.
+    """
+    directory.mkdir(parents=True, exist_ok=True, mode=_OUTPUT_DIR_MODE)
+
+# ---------------------------------------------------------------------------
+#  THE COMPLETENESS MANIFEST
+#
+#  Mirrored from [harness/dump_tables.py] rather than imported, following
+#  the convention every constant this module shares with its sibling
+#  already follows - `DUMP_KEYS`, `IN_SCOPE_TABLES`, `SIDES`, the JSON
+#  parameters above. Each harness utility stays a standalone script that
+#  the Compose recipe can invoke by path with no package on sys.path, and a
+#  disagreement between the two spellings is caught at once because the
+#  manifest a tree carries is READ and CHECKED, not assumed.
+#
+#  WHY THIS MODULE BOTH REQUIRES AND PRODUCES ONE. A dump is a SET of
+#  files and the comparison is made against the set, so an incomplete set
+#  must be refusable. Requiring the source's manifest means this stage
+#  cannot normalise a tree whose dump stage failed part way through;
+#  producing its own means the comparison stage cannot compare a tree whose
+#  normalisation failed part way through. Without the pair, a stage that
+#  died on table seventeen leaves a directory of individually well-formed
+#  files that the next stage happily processes - and the verdict is then
+#  arithmetic performed across two different runs, which can pass.
+#
+#  IT CARRIES NO WALL-CLOCK VALUE - no timestamp, host name, process id or
+#  absolute path - so two runs of one scenario produce a byte-identical
+#  manifest, which is what
+#  tests/determinism/test_two_runs_byte_identical.py compares (rule R-6).
+# ---------------------------------------------------------------------------
+MANIFEST_FILENAME: Final[str] = "_manifest.json"
+MANIFEST_VERSION: Final[int] = 1
+MANIFEST_KEYS: Final[tuple[str, ...]] = (
+    "manifest_version",
+    "producer",
+    "stage",
+    "scenario",
+    "side",
+    "selector",
+    "table_count",
+    "tables",
+)
+MANIFEST_STAGE_RAW: Final[str] = "raw"
+MANIFEST_STAGE_NORMALIZED: Final[str] = "normalized"
+SELECTOR_INHERITED: Final[str] = "inherited"
+_PRODUCER: Final[str] = "harness/normalize.py"
+
+# The reserved file-name namespace inside a published tree. No table of the
+# frozen schema begins with an underscore - all 22 are upper case and
+# hyphenated - so a discovery scan can exclude `_*` outright and never
+# mistake the manifest, or anything added beside it later, for a dump.
+_RESERVED_PREFIX: Final[str] = "_"
+
+# The staging directory's suffix, and the digest block size.
+_STAGING_SUFFIX: Final[str] = ".staging"
+_DIGEST_BLOCK: Final[int] = 1 << 16
 
 # An explicit arithmetic context for job 2, so a `quantize` here can never
 # depend on the caller's ambient decimal settings. Purity and determinism
@@ -846,13 +962,10 @@ _DECIMAL_CONTEXT: Final[Context] = Context(prec=60)
 _PAD_CHARACTER: Final[str] = " "
 
 
-# ---------------------------------------------------------------------------
 #  PROGRESS
-#
 #  stderr only, and never a byte of it inside a normalised file (rule R-6).
 #  `normalize_dump` never calls this: it is pure, and a pure function does
 #  not write to a stream.
-# ---------------------------------------------------------------------------
 
 _QUIET: bool = False
 
@@ -867,14 +980,11 @@ def _progress(message: str) -> None:
         print(message, file=sys.stderr)
 
 
-# ---------------------------------------------------------------------------
 #  ERRORS
-#
 #  One class per failure mode, each mapped to exactly one exit code, so a
 #  caller driving `main` in process and a caller catching an exception see
 #  the same taxonomy. Every message names the table, the column and the
 #  value where it can, and cites the locator a reader would need.
-# ---------------------------------------------------------------------------
 
 
 class NormalizeError(Exception):
@@ -945,30 +1055,36 @@ class DumpWriteError(NormalizeError, OSError):
     """A normalised file could not be written or moved. Exit code 86."""
 
 
+class ManifestError(NormalizeError, ValueError):
+    """A tree's completeness manifest is missing, unreadable or disagrees.
+
+    Distinct from `DumpReadError`: "the directory is not there" is an
+    operator mistake, whereas "the directory is there but does not declare
+    itself complete" means an upstream stage did not finish, and the only
+    safe response is to refuse rather than to normalise a partial set.
+    """
+
+
+class OutputPathError(NormalizeError, ValueError):
+    """The destination is not somewhere this tool may write."""
+
+
 class ReportPathError(NormalizeError, ValueError):
     """The findings report would land inside a compared tree. Code 80."""
 
 
-# ---------------------------------------------------------------------------
 #  THE COLUMN TYPE MAP, PARSED FROM THE FROZEN SCHEMA  (rules R-1, R-5)
-#
 #  `mysql/ACASDB.sql` is the source of truth, for three reasons that all
-#  matter:
-#
-#    * NO DATABASE IS NEEDED, so this module runs offline, in unit tests,
-#      with the Compose stack down.
-#    * NO DEPENDENCE ON THE SHIPPED PACKAGE or on the generated
-#      data-dictionary JSON, which preserves the oracle's independence from
-#      the thing it exists to arbitrate (rule R-1).
-#    * IT IS THE FROZEN ARTIFACT ITSELF, so the declared types are the
-#      specification rather than a derived view of it.
-#
+#  matter: NO DATABASE IS NEEDED, so this module runs offline, in unit
+#  tests, with the Compose stack down; NO DEPENDENCE ON THE SHIPPED
+#  PACKAGE or on the generated data-dictionary JSON, which preserves the
+#  oracle's independence from the thing it exists to arbitrate (rule R-1);
+#  and IT IS THE FROZEN ARTIFACT ITSELF, so the declared types are the
+#  specification rather than a derived view of them.
 #  The parser is strict and asserts its own results: exactly 33 tables, and
 #  the declared column count of every one of the 22 in-scope tables. A
 #  mismatch means the frozen schema was modified, which Agent Action Plan
-#  section 0.8.1 calls "a defect in the migration, regardless of how
-#  harmless it appears" - so it aborts and says so rather than adapting.
-# ---------------------------------------------------------------------------
+#  section 0.8.1 calls "a defect in the migration" - so it aborts and says so.
 
 
 @dataclass(frozen=True, slots=True)
@@ -1024,14 +1140,14 @@ _COLUMN_RE: Final[re.Pattern[str]] = re.compile(
 # The type at the head of a declaration, with its optional arguments and an
 # optional `unsigned`. Anything after that - `NOT NULL`, `DEFAULT ''`
 # [mysql/ACASDB.sql:L1219], `COMMENT '...'` - is deliberately ignored.
-#
 # NOTE ON COMMENTS: the file specification for this module states the
 # `COMMENT` suffix is "verified present on exactly one column". The frozen
-# artifact disagrees, and the frozen artifact wins: there are FOURTEEN
-# column-level COMMENTs - [mysql/ACASDB.sql:L155] `POST-RRN`,
-# L562-L567 and L575 on `SAINVOICE-REC`, L597, L602, L603 and L610 on
-# `PUITM5-REC`, L902, L903 and L909 on `SAITM3-REC` - plus one TABLE-level
-# COMMENT at L195. All fifteen are handled, none is a special case.
+# artifact disagrees, and the frozen artifact wins: there are FIFTEEN
+# column-level COMMENTs - [mysql/ACASDB.sql:L155] `POST-RRN` on
+# `GLPOSTING-REC`, L562-L567 and L575 on `PUINVOICE-REC`, L597, L602, L603
+# and L610 on `PUITM5-REC`, L902, L903 and L909 on `SAITM3-REC` - plus one
+# TABLE-level COMMENT at L195 on `IRSDFLT-REC`. All sixteen are handled by
+# the same ignored tail; none is a special case.
 _TYPE_RE: Final[re.Pattern[str]] = re.compile(
     r"\A(?P<type>[A-Za-z]+)"
     r"(?:\s*\((?P<arguments>[^)]*)\))?"
@@ -1045,9 +1161,9 @@ _PRIMARY_KEY_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 # Clauses inside a table body that are constraints rather than columns.
-# Skipped by name. Measured over the frozen file: 33 `PRIMARY KEY`, 1
-# `UNIQUE KEY`, 3 `KEY` and 1 `CONSTRAINT`, and every one of the five
-# non-primary clauses belongs to an OUT-OF-SCOPE table.
+# Skipped by name. The frozen file carries 33 `PRIMARY KEY`, 1 `UNIQUE KEY`,
+# 3 `KEY` and 1 `CONSTRAINT`, and every one of the five non-primary clauses
+# belongs to an OUT-OF-SCOPE table.
 _CONSTRAINT_RE: Final[re.Pattern[str]] = re.compile(
     r"\A\s+(PRIMARY\s+KEY|UNIQUE\s+KEY|FULLTEXT\s+KEY|SPATIAL\s+KEY"
     r"|FOREIGN\s+KEY|CONSTRAINT|KEY|INDEX|CHECK)\b",
@@ -1061,8 +1177,8 @@ def default_schema_path(env: Mapping[str, str] | None = None) -> Path:
     Args:
         env: The environment to read `ACAS_REPO` from; `os.environ` when
             omitted. The Compose service sets it to `/repo`
-            [harness/docker-compose.yml:L686], mounted read-only
-            [harness/docker-compose.yml:L591].
+            [harness/docker-compose.yml:L893], mounted read-only
+            [harness/docker-compose.yml:L792].
 
     Returns:
         `$ACAS_REPO/mysql/ACASDB.sql` when `ACAS_REPO` is set and
@@ -1293,7 +1409,7 @@ def load_schema(
             f"could not read the frozen schema at {path}: {exc}. It is "
             f"read-only input; set {_ENV_REPO} or pass --schema. The "
             f"Compose service mounts the checkout at /repo "
-            f"[harness/docker-compose.yml:L591]."
+            f"[harness/docker-compose.yml:L792]."
         ) from exc
 
     schema: dict[str, dict[str, ColumnType]] = {}
@@ -1423,8 +1539,8 @@ def _assert_schema_inventory(
                 f"schema declares {specification.column_count}. The "
                 f"twenty-two counts sum to "
                 f"{EXPECTED_TOTAL_COLUMNS} and are asserted "
-                f"independently at [harness/dump_tables.py:L479-L502] and "
-                f"[harness/reset_db.sh:L248-L271]."
+                f"independently at [harness/dump_tables.py:L483-L506] and "
+                f"[harness/reset_db.sh:L267-L290]."
             )
         parsed_key = list(primary_keys.get(table, ()))
         if parsed_key != [specification.primary_key]:
@@ -1531,28 +1647,18 @@ def column_type(
     return declared
 
 
-# ---------------------------------------------------------------------------
 #  JOB 1 - TRAILING SPACES IN FIXED-WIDTH CHARACTER COLUMNS
-#
-#  The finding, verified end to end in this checkout:
-#
+#  The width drift, traced end to end in this checkout:
 #      [copybooks/wsledger.cob:L27]  03  Ledger-Name pic x(24).       24
 #      [common/nominalMT.cbl:L299]   05  HV-LEDGER-NAME PIC X(32).    32
 #      [mysql/ACASDB.sql:L127]       `LEDGER-NAME` char(32) NOT NULL, 32
-#
 #  and, decisively, THE BRIDGE TRIMS as it builds the SQL text:
-#
 #      [common/nominalMT.cbl:L1065-L1067]
-#          STRING '`LEDGER-NAME`="' INTO WS-MYSQL-COMMAND ...
 #          STRING FUNCTION TRIM (HV-LEDGER-NAME,TRAILING) ...
-#
-#  23 such sites in `common/nominalMT.cbl`, 29 in `common/glpostingMT.cbl`,
-#  27 in `common/irspostingMT.cbl`, 75 in `common/salesMT.cbl`, 339 in
-#  `common/systemMT.cbl`. So the COBOL side stores character columns
-#  trimmed while a Python data-access layer writing the padded record field
-#  could store them padded, and without this job that purely
-#  representational difference would fail every scenario.
-# ---------------------------------------------------------------------------
+#  23 such sites in nominalMT, 29 in glpostingMT, 27 in irspostingMT, 75 in
+#  salesMT and 339 in systemMT (all under common/). So the COBOL side
+#  stores character columns trimmed where a Python data-access layer could
+#  store them padded, and that difference would fail every scenario.
 
 
 def canonicalise_char(
@@ -1603,7 +1709,7 @@ def canonicalise_char(
             f"`{table}`.`{column}` is declared {declared.sql_type} "
             f"[{_SCHEMA_RELPATH}:L{declared.line}] but the dump carries "
             f"{type(value).__name__} ({value!r}). "
-            f"[harness/dump_tables.py:L1460-L1461] renders character data "
+            f"[harness/dump_tables.py:L1464-L1465] renders character data "
             f"as a JSON string exactly as the driver returned it, so "
             f"anything else means the dump is not one this module can "
             f"compare."
@@ -1611,20 +1717,16 @@ def canonicalise_char(
     return value.rstrip(_PAD_CHARACTER)
 
 
-# ---------------------------------------------------------------------------
 #  JOB 2 - DECIMAL SCALE RENDERING
-#
 #  Agent Action Plan section 0.6.6: "canonicalise decimal scale rendering
 #  so that a value stored at two decimal places compares equal regardless
 #  of driver formatting."
-#
-#  THE SCALE IS NEVER ASSUMED. Measured over the frozen schema: 68 x
+#  THE SCALE IS NEVER ASSUMED. Counted over the frozen schema: 68 x
 #  decimal(9,2), 57 x decimal(10,2), 17 x decimal(4,2), 12 x decimal(5,2),
 #  4 x decimal(14,2), 2 x decimal(2,0), 2 x decimal(14,4) and one each of
 #  decimal(6,2), decimal(5,0), decimal(11,4), decimal(11,2) and
 #  decimal(10,4). In scope a ZERO scale occurs - `decimal(5,0)` - even
 #  though a `,4` scale does not.
-# ---------------------------------------------------------------------------
 
 # A decimal literal, anchored. It accepts what `format(Decimal, "f")`
 # produces and what a driver or a hand-written fixture might legitimately
@@ -1674,7 +1776,7 @@ def canonicalise_decimal(
 
     Args:
         value: The dumped value. Must be a `str`, because
-            [harness/dump_tables.py:L1446-L1458] renders every `DECIMAL`
+            [harness/dump_tables.py:L1450-L1462] renders every `DECIMAL`
             as a JSON string.
         table: The table it came from, for the error messages.
         column: The column it came from, for the error messages.
@@ -1719,7 +1821,7 @@ def canonicalise_decimal(
             f"No accounting value may pass through binary floating point "
             f"at any point (rule R-2), and a JSON number IS an IEEE-754 "
             f"double in every consumer. "
-            f"[harness/dump_tables.py:L1446-L1458] renders every DECIMAL "
+            f"[harness/dump_tables.py:L1450-L1462] renders every DECIMAL "
             f"as a JSON string for exactly this reason, so this dump is "
             f"broken. It is refused, not converted."
         )
@@ -1793,9 +1895,7 @@ def canonicalise_decimal(
     return format(canonical, "f")
 
 
-# ---------------------------------------------------------------------------
 #  JOB 3 - THE TWO-DIGIT VERSUS FOUR-DIGIT DATE TEXT FORMS
-#
 #  FIVE allow-listed columns, and nothing else. RENDERING ONLY: a value
 #  that matches the canonical shape is re-rendered from its parsed
 #  components, and a value that does not is passed through UNCHANGED and
@@ -1803,12 +1903,10 @@ def canonicalise_decimal(
 #  never contracted to two, because either would invent or destroy
 #  information and could make a genuine divergence between the two sides
 #  compare equal.
-#
 #  The DD/MM/CC-versus-DD/MM/YY question the eight-character form raises is
-#  arbitrated by the compiled oracle under rule R-6 and recorded in
-#  `docs/migration/ambiguity-resolutions.md`. Nothing here depends on the
-#  answer - see the module docstring's job 3 section.
-# ---------------------------------------------------------------------------
+#  to be arbitrated by the compiled oracle under rule R-6, with the answer
+#  belonging in the migration ambiguity register. Nothing here depends on
+#  the answer - see the module docstring's job 3 section.
 
 
 @dataclass(frozen=True, slots=True)
@@ -2008,13 +2106,10 @@ def _period_text_reason(value: str) -> str:
     )
 
 
-# ---------------------------------------------------------------------------
 #  THE STRUCTURAL ASSERTIONS
-#
 #  Cheap, and they protect every diff. They validate the DUMP SHAPE and the
 #  SCHEMA - never a row's business content, which rule R-3 forbids adding
 #  validation to. Each one has a specific failure it catches:
-#
 #    * a stale dump, taken before the schema was re-applied
 #    * a dump of an out-of-scope table, which would widen the comparison
 #      beyond Agent Action Plan section 0.2.2's boundary
@@ -2022,7 +2117,6 @@ def _period_text_reason(value: str) -> str:
 #      numbers, reintroducing binary floating point (rule R-2)
 #    * a JSON null, which a schema declaring every column NOT NULL cannot
 #      legitimately produce
-# ---------------------------------------------------------------------------
 
 
 def _assert_dump_keys(dump: Mapping[str, Any], where: str) -> None:
@@ -2043,7 +2137,7 @@ def _assert_dump_keys(dump: Mapping[str, Any], where: str) -> None:
             f"order is part of the byte-identical guarantee (rule R-6), "
             f"and no other key may appear - not a timestamp, a server "
             f"version, a scenario name or a side. The layout is fixed at "
-            f"[harness/dump_tables.py:L544-L550]."
+            f"[harness/dump_tables.py:L548-L554]."
         )
 
 
@@ -2233,7 +2327,7 @@ def _canonicalise_integer(
     """Return an integer value unchanged, having refused anything else.
 
     THIS IS NOT A FOURTH JOB. An exact integer has no rendering to
-    canonicalise: `[harness/dump_tables.py:L1443-L1444]` writes it as a
+    canonicalise: `[harness/dump_tables.py:L1447-L1448]` writes it as a
     JSON integer and a JSON integer is exact for every width the schema
     uses, the widest in scope being `bigint(11)`. The binary day-number
     dates in particular - `RUN-DAT` [mysql/ACASDB.sql:L1199],
@@ -2282,7 +2376,7 @@ def _canonicalise_integer(
             f"`{table}`.`{column}` is declared {declared.sql_type} "
             f"[{_SCHEMA_RELPATH}:L{declared.line}] but the dump carries "
             f"{type(value).__name__} ({value!r}). "
-            f"[harness/dump_tables.py:L1443-L1444] writes every integer "
+            f"[harness/dump_tables.py:L1447-L1448] writes every integer "
             f"width as a JSON integer."
         )
     return value
@@ -2510,25 +2604,18 @@ def normalize_dump(
     return normalized
 
 
-# ---------------------------------------------------------------------------
 #  THE JSON BOUNDARY
-#
 #  Deterministic and atomic, with `harness/dump_tables.py`'s serialisation
 #  parameters pinned rather than defaulted, so a normalised file differs
 #  from its input in VALUES ONLY:
-#
 #      indent=2, ensure_ascii=True, sort_keys=False,
 #      separators=(",", ": "), LF newlines, UTF-8, one trailing newline
-#
 #  `ensure_ascii=True` is deliberate: it makes the bytes independent of any
 #  locale or filesystem-encoding difference between the two runs, which is
-#  what `tests/determinism/test_two_runs_byte_identical.py` rests on. Do not
-#  "improve" it to False.
-#
+#  what the byte-identical guarantee rests on. Do not "improve" it to False.
 #  Each file is written under a temporary name IN ITS OWN DIRECTORY and
 #  moved into place with `os.replace`, which is what makes the move atomic,
 #  so `harness/diff_states.py` can never read a partial file.
-# ---------------------------------------------------------------------------
 
 
 def dump_filename(table: str) -> str:
@@ -2540,7 +2627,7 @@ def dump_filename(table: str) -> str:
 
     Returns:
         `<TABLE>.json`, matching
-        [harness/dump_tables.py:L1667] exactly.
+        [harness/dump_tables.py:L1672] exactly.
     """
     return f"{table}{_DUMP_SUFFIX}"
 
@@ -2587,9 +2674,16 @@ def read_dump(path: Path | str) -> dict[str, Any]:
 def write_dump(dump: Mapping[str, Any], path: Path | str) -> Path:
     """Serialise one dump object, deterministically and atomically.
 
+    The file is created mode 0600 through a descriptor opened `O_EXCL` and
+    `O_NOFOLLOW`, because a normalised dump carries every value of every row
+    of the accounting tables. See the SECURE OUTPUT commentary above
+    `_write_text_securely`. The bytes are unchanged by that treatment, so a
+    normalised file written before and after compares identical - which
+    matters because `harness/diff_states.py` compares these files exactly.
+
     Args:
         dump: A normalised dump object, as `normalize_dump` returns.
-        path: Where to write it. Parent directories are created.
+        path: Where to write it. Parent directories are created, mode 0700.
 
     Returns:
         The path written.
@@ -2608,36 +2702,32 @@ def write_dump(dump: Mapping[str, Any], path: Path | str) -> Path:
 
     target = Path(path)
     try:
-        target.parent.mkdir(parents=True, exist_ok=True)
+        _make_output_directory(target.parent)
     except OSError as exc:
         raise DumpWriteError(
             f"could not create the output directory {target.parent}: "
             f"{exc}"
         ) from exc
 
+    # Serialised in full before the file is opened, so the descriptor is held
+    # briefly and a serialisation failure cannot leave a staging file behind
+    # at all. The arguments are exactly those used before, and exactly those
+    # `harness/dump_tables.py` uses: the bytes are what rule R-6 pins.
+    text = json.dumps(
+        dump,
+        indent=_JSON_INDENT,
+        ensure_ascii=True,
+        sort_keys=False,
+        separators=_JSON_SEPARATORS,
+    )
+    # `json.dumps` produces no trailing newline. Exactly one is added, so
+    # every file ends the same way.
+    text += "\n"
+
     temporary = target.parent / f"{_TEMP_PREFIX}{target.stem}{_TEMP_SUFFIX}"
     try:
-        with temporary.open("w", encoding="utf-8", newline="\n") as handle:
-            json.dump(
-                dump,
-                handle,
-                indent=_JSON_INDENT,
-                ensure_ascii=True,
-                sort_keys=False,
-                separators=_JSON_SEPARATORS,
-            )
-            # `json.dump` writes no trailing newline. Exactly one is
-            # added, so every file ends the same way.
-            handle.write("\n")
-        os.replace(temporary, target)
+        _write_text_securely(text, target, temporary)
     except OSError as exc:
-        # Leave nothing half-written behind for diff_states.py to read.
-        try:
-            temporary.unlink(missing_ok=True)
-        except OSError:
-            # Best effort only; the real failure is re-raised below and
-            # must not be masked by a cleanup failure.
-            pass
         raise DumpWriteError(
             f"could not write the normalised dump for table "
             f"{dump['table']!r} to {target}: {exc}"
@@ -2646,18 +2736,211 @@ def write_dump(dump: Mapping[str, Any], path: Path | str) -> Path:
     return target
 
 
-# ---------------------------------------------------------------------------
 #  ONE DIRECTORY TO ANOTHER, SEQUENTIALLY  (rule R-3)
-#
 #  One table at a time, in a plain loop, in ascending table-name order.
 #  There is no thread, no event loop, no process pool and no
 #  synchronisation primitive anywhere in this file.
 #
-#  ONLY `<TABLE>.json` FILES ARE WRITTEN into the destination - no
-#  manifest, no log, no marker - because `harness/dump_tables.py` records
-#  that constraint for this module explicitly: normalize.py "reads a
-#  directory", so anything else left there would be taken for a dump.
+#  ONLY `<TABLE>.json` FILES AND THE COMPLETENESS MANIFEST are written into
+#  the destination - no log, no findings report, no marker of any other
+#  kind. The constraint `harness/dump_tables.py` records for this module is
+#  that normalize.py "reads a directory", so anything left there that could
+#  be taken for a dump would corrupt the next stage's view of the set. The
+#  manifest cannot be taken for one: it is `_manifest.json`, and the
+#  reserved `_*` namespace is excluded from every table scan on both sides
+#  (see `_scan_dump_names`) because not one of the 22 in-scope tables begins
+#  with an underscore. The findings report still goes OUTSIDE both trees.
 # ---------------------------------------------------------------------------
+
+
+def file_digest(path: Path | str) -> str:
+    """Return the lower-case hex SHA-256 of a file's bytes.
+
+    Args:
+        path: The file to digest.
+
+    Returns:
+        The digest, 64 hexadecimal characters.
+
+    Raises:
+        DumpReadError: The file could not be read.
+    """
+    digest = hashlib.sha256()
+    try:
+        with open(path, "rb") as handle:
+            for block in iter(lambda: handle.read(_DIGEST_BLOCK), b""):
+                digest.update(block)
+    except OSError as exc:
+        raise DumpReadError(
+            f"could not read {path} to check its digest: {exc}"
+        ) from exc
+    return digest.hexdigest()
+
+
+def read_manifest(directory: Path | str) -> dict[str, Any] | None:
+    """Read a tree's completeness manifest, if it has one.
+
+    Args:
+        directory: The published tree.
+
+    Returns:
+        The manifest object, or None when the tree carries none - which
+        means the stage that wrote it did not finish.
+
+    Raises:
+        ManifestError: The manifest is present but unreadable, is not
+            valid JSON, is not a mapping, or declares a version this
+            module does not understand. A manifest half-understood is
+            worse than none, so an unknown version is refused rather than
+            guessed at.
+    """
+    path = Path(directory) / MANIFEST_FILENAME
+    if not path.is_file():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ManifestError(
+            f"could not read the completeness manifest {path}: {exc}"
+        ) from exc
+    try:
+        document = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ManifestError(
+            f"the completeness manifest {path} is not valid JSON: {exc}"
+        ) from exc
+    if not isinstance(document, dict):
+        raise ManifestError(
+            f"the completeness manifest {path} must be a JSON object; got "
+            f"{type(document).__name__}."
+        )
+    version = document.get("manifest_version")
+    if version != MANIFEST_VERSION:
+        raise ManifestError(
+            f"the completeness manifest {path} declares "
+            f"manifest_version {version!r}, and this tool understands "
+            f"{MANIFEST_VERSION}. Refusing rather than guessing: a "
+            f"manifest half-understood would let an incomplete tree pass "
+            f"for a complete one."
+        )
+    return document
+
+
+def assert_tree_complete(
+    directory: Path | str, *, description: str = "the source tree"
+) -> dict[str, Any]:
+    """Assert a tree declares itself complete and matches its declaration.
+
+    Args:
+        directory: The published tree to check.
+        description: How to refer to it in a message.
+
+    Returns:
+        The verified manifest.
+
+    Raises:
+        ManifestError: The tree carries no manifest, names a table whose
+            file is absent, records a digest that does not match the file
+            on disk, or holds a `<TABLE>.json` the manifest does not name.
+
+    All four checks matter, and each catches a different way a tree can be
+    a lie: no manifest means the producing stage never committed; a missing
+    file means the manifest over-declares; a digest mismatch means a file
+    was replaced after the commit; and an undeclared extra file means the
+    tree carries a table from an earlier run whose purge did not happen.
+    """
+    source = Path(directory)
+    manifest = read_manifest(source)
+    if manifest is None:
+        raise ManifestError(
+            f"{description} {source} carries no {MANIFEST_FILENAME}, so it "
+            f"does not declare itself complete. The manifest is written "
+            f"LAST by the stage that publishes a tree, so its absence "
+            f"means that stage did not finish - the set may be missing "
+            f"tables, and normalising it would carry a partial capture "
+            f"into the comparison, where it could pass. Re-run the "
+            f"producing stage. If the tree was assembled by hand, pass "
+            f"--allow-unmanifested to proceed without this check and be "
+            f"aware that the result is not protocol evidence (rule R-6)."
+        )
+
+    declared = manifest.get("tables")
+    if not isinstance(declared, list):
+        raise ManifestError(
+            f"the manifest in {source} has no usable `tables` list."
+        )
+    named: list[str] = []
+    for entry in declared:
+        if not isinstance(entry, dict) or not isinstance(
+            entry.get("table"), str
+        ):
+            raise ManifestError(
+                f"the manifest in {source} has a malformed entry in its "
+                f"`tables` list: {entry!r}."
+            )
+        table = entry["table"]
+        named.append(table)
+        member = source / dump_filename(table)
+        if not member.is_file():
+            raise ManifestError(
+                f"the manifest in {source} names table {table!r} but "
+                f"{member.name} is not there. The tree is incomplete."
+            )
+        recorded = entry.get("sha256")
+        if isinstance(recorded, str) and recorded:
+            actual = file_digest(member)
+            if actual != recorded:
+                raise ManifestError(
+                    f"{member} does not match the digest its manifest "
+                    f"records ({actual} rather than {recorded}), so the "
+                    f"file changed after the tree was published. The "
+                    f"comparison must be made against one capture, not a "
+                    f"patched one."
+                )
+
+    present = set(_scan_dump_names(source))
+    undeclared = sorted(present - set(named))
+    if undeclared:
+        raise ManifestError(
+            f"{source} holds dump(s) its manifest does not name: "
+            f"{', '.join(undeclared)}. A published tree is purged of stale "
+            f"files before the new set is moved in, so an undeclared dump "
+            f"is a table left over from an earlier run - comparing it "
+            f"would mix two captures."
+        )
+    return manifest
+
+
+def _scan_dump_names(source: Path) -> tuple[str, ...]:
+    """Return the table names a directory holds `<TABLE>.json` files for.
+
+    Args:
+        source: The directory to scan.
+
+    Returns:
+        The names, ascending.
+
+    The single place the file-name filter lives, so `discover_tables` and
+    `assert_tree_complete` cannot disagree about what counts as a dump.
+    """
+    names: list[str] = []
+    for entry in source.iterdir():
+        name = entry.name
+        # Skip the temporary files a failed write may have left behind -
+        # they end `.json.tmp`, not `.json` - and any other hidden file.
+        if name.startswith(_TEMP_PREFIX):
+            continue
+        # Skip the reserved `_*` namespace, which is where the completeness
+        # manifest lives. No table of the frozen schema starts with an
+        # underscore, so nothing real is excluded by this.
+        if name.startswith(_RESERVED_PREFIX):
+            continue
+        if not name.endswith(_DUMP_SUFFIX):
+            continue
+        if not entry.is_file():
+            continue
+        names.append(name[: -len(_DUMP_SUFFIX)])
+    return tuple(sorted(names))
 
 
 def discover_tables(src_dir: Path | str) -> tuple[str, ...]:
@@ -2681,20 +2964,113 @@ def discover_tables(src_dir: Path | str) -> tuple[str, ...]:
             f"harness/dump_tables.py wrote its <TABLE>.json files into, "
             f"for example $ACAS_OUT/<scenario>/cobol."
         )
-    names: list[str] = []
-    for entry in source.iterdir():
-        name = entry.name
-        # Skip the temporary files write_dump may have left behind after a
-        # failure - they end `.json.tmp`, not `.json` - and skip any other
-        # hidden file, which pathlib's glob would otherwise match.
-        if name.startswith(_TEMP_PREFIX):
-            continue
-        if not name.endswith(_DUMP_SUFFIX):
-            continue
-        if not entry.is_file():
-            continue
-        names.append(name[: -len(_DUMP_SUFFIX)])
-    return tuple(sorted(names))
+    return _scan_dump_names(source)
+
+
+def write_manifest(manifest: Mapping[str, Any], path: Path | str) -> Path:
+    """Serialise a manifest with the same byte discipline as a dump.
+
+    Args:
+        manifest: The manifest object.
+        path: Where to write it.
+
+    Returns:
+        The path written.
+
+    Raises:
+        DumpShapeError: The keys are not exactly `MANIFEST_KEYS` in order.
+        DumpWriteError: The file could not be written or moved.
+    """
+    keys = tuple(manifest.keys())
+    if keys != MANIFEST_KEYS:
+        raise DumpShapeError(
+            f"a manifest must carry exactly the keys "
+            f"{list(MANIFEST_KEYS)} in that order; got {list(keys)}."
+        )
+
+    target = Path(path)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise DumpWriteError(
+            f"could not create the directory for the completeness "
+            f"manifest {target}: {exc}"
+        ) from exc
+
+    temporary = target.parent / f"{_TEMP_PREFIX}{target.stem}{_TEMP_SUFFIX}"
+    try:
+        with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+            json.dump(
+                manifest,
+                handle,
+                indent=_JSON_INDENT,
+                ensure_ascii=True,
+                sort_keys=False,
+                separators=_JSON_SEPARATORS,
+            )
+            handle.write("\n")
+        os.replace(temporary, target)
+    except OSError as exc:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            # Best effort only; the real failure is re-raised below.
+            pass
+        raise DumpWriteError(
+            f"could not write the completeness manifest {target}: {exc}"
+        ) from exc
+
+    return target
+
+
+def build_manifest(
+    entries: Sequence[tuple[str, int, str]],
+    *,
+    scenario: str | None = None,
+    side: str | None = None,
+    selector: str = SELECTOR_INHERITED,
+) -> dict[str, Any]:
+    """Assemble this stage's completeness manifest.
+
+    Args:
+        entries: One `(table, row_count, digest)` triple per file written.
+            Sorted here, so the manifest never depends on processing order.
+        scenario: The scenario, INHERITED from the source tree's manifest
+            so the two stages of one run cannot claim different identities.
+        side: `cobol` or `python`, likewise inherited.
+        selector: How the table list was originally chosen, likewise
+            inherited - which is what lets the comparison stage report the
+            scope the evidence actually has.
+
+    Returns:
+        The manifest object, keys in `MANIFEST_KEYS` order.
+
+    Raises:
+        DumpShapeError: A table appears twice.
+    """
+    ordered = sorted(entries, key=lambda entry: entry[0])
+    seen: set[str] = set()
+    tables: list[dict[str, Any]] = []
+    for table, row_count, digest in ordered:
+        if table in seen:
+            raise DumpShapeError(
+                f"table {table!r} appears twice in a manifest; each table "
+                f"is written to exactly one file."
+            )
+        seen.add(table)
+        tables.append(
+            {"table": table, "row_count": int(row_count), "sha256": digest}
+        )
+    return {
+        "manifest_version": MANIFEST_VERSION,
+        "producer": _PRODUCER,
+        "stage": MANIFEST_STAGE_NORMALIZED,
+        "scenario": scenario,
+        "side": side,
+        "selector": selector,
+        "table_count": len(tables),
+        "tables": tables,
+    }
 
 
 def _is_same_directory(left: Path, right: Path) -> bool:
@@ -2721,8 +3097,9 @@ def normalize_tree(
     *,
     tables: Sequence[str] | None = None,
     findings: MutableSequence[DateTextFinding] | None = None,
+    require_manifest: bool = True,
 ) -> list[str]:
-    """Normalise every dump in one directory into another.
+    """Normalise every dump in one directory into another, as a set.
 
     Args:
         src_dir: The directory of `<TABLE>.json` dumps to read.
@@ -2732,11 +3109,26 @@ def normalize_tree(
         tables: An optional explicit table list; every entry must have a
             dump in `src_dir`. `None` normalises every dump present.
         findings: An optional collector for job 3's findings.
+        require_manifest: Whether the source must declare itself complete.
+            True is the protocol. False is the hand-assembled-tree escape
+            hatch, and a tree normalised that way is not evidence.
 
     Returns:
         The table names normalised, in the order processed - ascending.
 
+    THE DESTINATION IS PUBLISHED AS A SET, NOT FILE BY FILE. Every file is
+    written into a fresh staging directory beside the destination; only when
+    all of them are there is the destination's own manifest deleted, its
+    stale dumps purged, the new files renamed in, and the new manifest
+    renamed in LAST. A failure at any point therefore leaves the
+    destination either exactly as it was or carrying no manifest - never a
+    mixture of this run's tables and the previous run's, which is
+    individually well-formed, silently wrong, and able to pass.
+
     Raises:
+        ManifestError: `require_manifest` and the source does not declare
+            itself complete, or its declaration does not match its
+            contents.
         DumpReadError: The source is missing, a requested dump is absent,
             or a file could not be read.
         DumpShapeError: A dump does not have the expected shape, or its
@@ -2762,6 +3154,20 @@ def normalize_tree(
             f"both the raw dump and the normalised one."
         )
 
+    # THE SOURCE MUST DECLARE ITSELF COMPLETE before a byte of it is
+    # normalised. Checked here rather than in `main` so that
+    # tests/conftest.py, which calls this function directly, gets the same
+    # guarantee as the command line.
+    source_manifest: Mapping[str, Any] | None = None
+    if require_manifest:
+        source_manifest = assert_tree_complete(source)
+    else:
+        _progress(
+            f"harness/normalize.py: --allow-unmanifested - {source} is "
+            f"being normalised without checking that it declares itself "
+            f"complete. The result is NOT protocol evidence (rule R-6)."
+        )
+
     available = discover_tables(source)
 
     if tables is None:
@@ -2778,43 +3184,228 @@ def normalize_tree(
                 + (f": {', '.join(available)}." if available else ".")
             )
 
-    normalized: list[str] = []
-    for table in selected:
-        source_path = source / dump_filename(table)
-        dump = read_dump(source_path)
-        named = dump.get("table")
-        if named != table:
-            raise DumpShapeError(
-                f"{source_path} is named for table {table!r} but its "
-                f"`table` key says {named!r}. The file name and the key "
-                f"must agree, or a dump would be normalised - and later "
-                f"compared - under the wrong schema."
+    if not selected:
+        return []
+
+    staging = destination.parent / (
+        f"{_TEMP_PREFIX}{destination.name}{_STAGING_SUFFIX}"
+    )
+    _reset_staging(staging)
+    try:
+        normalized: list[str] = []
+        entries: list[tuple[str, int, str]] = []
+        staged: list[Path] = []
+        for table in selected:
+            source_path = source / dump_filename(table)
+            dump = read_dump(source_path)
+            named = dump.get("table")
+            if named != table:
+                raise DumpShapeError(
+                    f"{source_path} is named for table {table!r} but its "
+                    f"`table` key says {named!r}. The file name and the "
+                    f"key must agree, or a dump would be normalised - and "
+                    f"later compared - under the wrong schema."
+                )
+            canonical = normalize_dump(dump, schema, findings=findings)
+            staged_path = write_dump(
+                canonical, staging / dump_filename(table)
             )
-        canonical = normalize_dump(dump, schema, findings=findings)
-        target = write_dump(canonical, destination / dump_filename(table))
-        normalized.append(table)
-        _progress(
-            f"  {table:<24} {canonical['row_count']:>7} row(s)  "
-            f"{len(canonical['columns']):>3} column(s)  -> {target}"
+            staged.append(staged_path)
+            entries.append(
+                (
+                    table,
+                    int(canonical["row_count"]),
+                    file_digest(staged_path),
+                )
+            )
+            normalized.append(table)
+            _progress(
+                f"  {table:<24} {canonical['row_count']:>7} row(s)  "
+                f"{len(canonical['columns']):>3} column(s)  canonicalised"
+            )
+
+        # Identity is INHERITED from the source's manifest, never invented
+        # here: the raw tree and the normalised tree are two stages of ONE
+        # run, and the comparison stage checks that the two sides agree
+        # about which scenario they belong to. A stage that made up its own
+        # answer could not support that check.
+        manifest = build_manifest(
+            entries,
+            scenario=_inherit(source_manifest, "scenario"),
+            side=_inherit(source_manifest, "side"),
+            selector=_inherit(source_manifest, "selector")
+            or SELECTOR_INHERITED,
         )
+        staged_manifest = write_manifest(
+            manifest, staging / MANIFEST_FILENAME
+        )
+        _publish_staged(destination, staged, staged_manifest)
+        return normalized
+    finally:
+        # Whatever happened, no staging directory survives: a published
+        # tree no longer needs it, and an unpublished one is exactly what
+        # must not be left where a later run could adopt it.
+        _remove_tree(staging)
 
-    return normalized
+
+def _inherit(manifest: Mapping[str, Any] | None, key: str) -> str | None:
+    """Return one identity field from a source manifest.
+
+    Args:
+        manifest: The source tree's manifest, or None when the check was
+            waived with --allow-unmanifested.
+        key: The field to read.
+
+    Returns:
+        The value when it is a non-empty string, otherwise None - so a
+        malformed or absent field becomes an honest "unknown" rather than
+        a fabricated identity.
+    """
+    if manifest is None:
+        return None
+    value = manifest.get(key)
+    return value if isinstance(value, str) and value else None
 
 
-# ---------------------------------------------------------------------------
+def _reset_staging(staging: Path) -> None:
+    """Create an empty staging directory, removing any predecessor.
+
+    Args:
+        staging: The staging directory.
+
+    Raises:
+        DumpWriteError: It could not be removed or created.
+    """
+    _remove_tree(staging, fatal=True)
+    try:
+        staging.mkdir(parents=True)
+    except OSError as exc:
+        raise DumpWriteError(
+            f"could not create the staging directory {staging}: {exc}"
+        ) from exc
+
+
+def _remove_tree(path: Path, *, fatal: bool = False) -> None:
+    """Remove a directory tree.
+
+    Args:
+        path: The directory to remove.
+        fatal: Whether a failure is an error. False for the tidy-up in a
+            `finally`, where a failure must not mask the real one.
+
+    Raises:
+        DumpWriteError: `fatal` and the tree could not be removed.
+    """
+    try:
+        shutil.rmtree(path)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        if fatal:
+            raise DumpWriteError(
+                f"a previous run left the staging directory {path} behind "
+                f"and it could not be removed: {exc}. Remove it by hand: a "
+                f"stale staging directory must never be published."
+            ) from exc
+
+
+def _publish_staged(
+    destination: Path,
+    staged: Sequence[Path],
+    staged_manifest: Path,
+) -> tuple[Path, ...]:
+    """Move a staged set into its destination, manifest last.
+
+    Args:
+        destination: Where the set is published.
+        staged: The staged `<TABLE>.json` paths, already complete. The
+            staging directory itself is not passed: it is the caller's to
+            create and to remove, and this function only moves out of it.
+        staged_manifest: The staged manifest path.
+
+    Returns:
+        The published paths, the manifest last.
+
+    Raises:
+        DumpWriteError: The destination could not be prepared, or a move
+            failed.
+    """
+    try:
+        destination.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise DumpWriteError(
+            f"could not create the output directory {destination}: {exc}"
+        ) from exc
+
+    # ORDER MATTERS AND IS THE WHOLE MECHANISM. The manifest goes first, so
+    # from this instant the destination describes itself as incomplete;
+    # only then is anything else touched.
+    existing_manifest = destination / MANIFEST_FILENAME
+    try:
+        existing_manifest.unlink(missing_ok=True)
+    except OSError as exc:
+        raise DumpWriteError(
+            f"could not remove the previous completeness manifest "
+            f"{existing_manifest} before republishing: {exc}. It is deleted "
+            f"first on purpose, so an interrupted publish leaves a tree "
+            f"that declares itself unfinished rather than one mixing two "
+            f"runs."
+        ) from exc
+
+    for entry in sorted(destination.iterdir(), key=lambda item: item.name):
+        if not entry.is_file():
+            continue
+        if not (
+            entry.name.endswith(_DUMP_SUFFIX)
+            or entry.name.endswith(_TEMP_SUFFIX)
+        ):
+            continue
+        try:
+            entry.unlink()
+        except OSError as exc:
+            raise DumpWriteError(
+                f"could not remove the stale file {entry} from the output "
+                f"directory: {exc}"
+            ) from exc
+
+    published: list[Path] = []
+    for source_path in staged:
+        target = destination / source_path.name
+        try:
+            os.replace(source_path, target)
+        except OSError as exc:
+            raise DumpWriteError(
+                f"could not publish {source_path.name} into "
+                f"{destination}: {exc}. The tree now carries no manifest, "
+                f"so the comparison stage will refuse it rather than "
+                f"compare a partial set."
+            ) from exc
+        published.append(target)
+
+    manifest_target = destination / MANIFEST_FILENAME
+    try:
+        os.replace(staged_manifest, manifest_target)
+    except OSError as exc:
+        raise DumpWriteError(
+            f"could not publish the completeness manifest into "
+            f"{destination}: {exc}. The set is present but unmarked, so it "
+            f"will be refused - re-run this stage."
+        ) from exc
+    published.append(manifest_target)
+    return tuple(published)
+
+
 #  THE JOB 3 FINDINGS REPORT  (rule R-6)
-#
 #  Loud, deterministic, and OUTSIDE the compared trees. It never lands in
 #  the destination directory and never under `$ACAS_OUT/<scenario>/`,
 #  following the convention `harness/reset_db.sh` states at
-#  [harness/reset_db.sh:L150-L151]: its run log goes to `$ACAS_OUT/reset/`,
+#  [harness/reset_db.sh:L169-L170]: its run log goes to `$ACAS_OUT/reset/`,
 #  "which is never part of a comparison".
 #
 #  Its purpose is to send an operator to the ORACLE. A date-text form this
 #  module does not recognise is a question about what the compiled
 #  program actually stores, and rule R-6 says the compiled program answers
 #  it - not a tweak to this normaliser.
-# ---------------------------------------------------------------------------
 
 _REPORT_HEADER: Final[str] = """\
 harness/normalize.py - job 3 date-text findings
@@ -2913,14 +3504,12 @@ def render_report(
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
 #  THE COMMAND LINE
-#
 #  Two flag spellings for the source and the destination, because this
 #  repository documents two and neither is a guess:
 #
 #    * the committed Compose recipe, verbatim
-#      [harness/docker-compose.yml:L269] and [L273]:
+#      [harness/docker-compose.yml:L352] and [L273]:
 #          harness/normalize.py --in /out/cobol  --out /out/cobol.norm
 #          harness/normalize.py --in /out/python --out /out/python.norm
 #    * the file specification for this module, which names `--src` and
@@ -2938,7 +3527,7 @@ layouts
       reads DIR/<TABLE>.json, writes DIR.normalized/<TABLE>.json unless
       --dst is given. The committed eight-stage recipe passes both:
       `--in /out/cobol --out /out/cobol.norm`
-      [harness/docker-compose.yml:L269]
+      [harness/docker-compose.yml:L352]
   --scenario NAME --side {cobol|python} [--out-dir DIR]
       reads  <DIR>/<NAME>/<side>/<TABLE>.json
       writes <DIR>/<NAME>/<side>.normalized/<TABLE>.json
@@ -2957,16 +3546,34 @@ the three canonicalisation jobs, and there is no fourth
      contracted to two; anything that does not match its canonical shape
      is passed through unchanged and REPORTED for the oracle to settle.
 
+the set is the unit, not the file
+  the source must carry _manifest.json, written last by the stage that
+  published it; a tree without one did not finish and is REFUSED, because
+  normalising a partial capture carries it into a comparison that can
+  pass. --allow-unmanifested waives the check for a hand-assembled tree
+  and forfeits the claim that the result is evidence.
+  the destination is published the same way: staged beside it, stale
+  dumps purged, files renamed in, _manifest.json renamed in LAST. So it
+  holds either this run's complete set or no manifest - never a mixture.
+  the manifest's scenario, side and selector are INHERITED from the
+  source's, so the two stages of one run cannot claim different
+  identities.
+
 environment
   ACAS_REPO supplies the default --schema, $ACAS_REPO/mysql/ACASDB.sql.
+            It is also the tree the destination may neither lie inside
+            nor contain: publishing purges its destination, so a
+            destination containing the checkout would delete out of it.
   ACAS_OUT  supplies the default --out-dir and the default --report
             directory, $ACAS_OUT/normalize/. Nothing is ever written
             under ACAS_REPO: it is mounted read-only
-            [harness/docker-compose.yml:L591].
+            [harness/docker-compose.yml:L792].
 
 exit codes
   0 normalised   80 usage        81 precondition   83 scope
   84 drift       85 numeric      86 write
+  81 also covers a source tree that does not declare itself complete.
+  86 also covers a destination overlapping the read-only checkout.
   82 is database and is never returned: no database link is opened.
 
 this tool reads and writes JSON files only. It issues no SQL, needs no
@@ -3005,7 +3612,7 @@ def build_parser() -> argparse.ArgumentParser:
             "the directory of <TABLE>.json dumps to read, as "
             "harness/dump_tables.py wrote them. --in is the same option, "
             "and is the spelling the committed Compose recipe uses "
-            "[harness/docker-compose.yml:L269]."
+            "[harness/docker-compose.yml:L352]."
         ),
     )
     parser.add_argument(
@@ -3081,6 +3688,19 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--allow-unmanifested",
+        action="store_true",
+        help=(
+            "normalise a source tree that carries no "
+            + MANIFEST_FILENAME
+            + ". NOT THE PROTOCOL: the manifest is written last by the "
+            "stage that publishes a tree, so its absence means that stage "
+            "did not finish and the set may be missing tables. Use this "
+            "only for a tree assembled by hand, and do not present the "
+            "result as scenario evidence (rule R-6)."
+        ),
+    )
+    parser.add_argument(
         "--quiet",
         action="store_true",
         help="suppress the per-table progress notes on stderr.",
@@ -3124,7 +3744,7 @@ def _resolve_directories(
                 f"--src/--in names the source directory outright, so it "
                 f"cannot be combined with {' or '.join(conflicting)}. Use "
                 f"either `--src DIR [--dst DIR]` "
-                f"[harness/docker-compose.yml:L269] or `--scenario NAME "
+                f"[harness/docker-compose.yml:L352] or `--scenario NAME "
                 f"--side SIDE [--out-dir DIR]`."
             )
         source = Path(arguments.src)
@@ -3167,7 +3787,7 @@ def _resolve_directories(
         raise ValueError(
             f"neither --out-dir nor {_ENV_OUT} is set, so the output root "
             f"is unknown. The Compose service sets {_ENV_OUT}: /out "
-            f"[harness/docker-compose.yml:L689]."
+            f"[harness/docker-compose.yml:L896]."
         )
     if arguments.dst is not None:
         raise ValueError(
@@ -3237,7 +3857,7 @@ def _report_label(source: Path) -> str:
     Runs of ASCII alphanumerics from the directory's own name, joined with
     a hyphen: `/out/cobol` gives `cobol` and `/out/clean_batch_gl/python`
     gives `python`, so the recipe's two invocations
-    [harness/docker-compose.yml:L269], [harness/docker-compose.yml:L273]
+    [harness/docker-compose.yml:L352], [harness/docker-compose.yml:L356]
     write two reports rather than one overwriting the other.
 
     Args:
@@ -3252,6 +3872,68 @@ def _report_label(source: Path) -> str:
     if not parts:
         return _REPORT_DEFAULT_LABEL
     return "-".join(parts)
+
+
+def _assert_output_writable(
+    destination: Path, env: Mapping[str, str]
+) -> None:
+    """Assert the normalised tree may be written where it was asked to go.
+
+    Args:
+        destination: The directory the normalised dumps land in.
+        env: The environment, for `$ACAS_REPO`.
+
+    Raises:
+        OutputPathError: The destination overlaps the read-only checkout in
+            either direction.
+
+    TWO DIRECTIONS ARE CHECKED, AND BOTH MATTER.
+
+    Inside-out - the destination lies at or under the checkout - is the
+    obvious one: the checkout holds the frozen COBOL, the twenty bridge
+    pairs and mysql/ACASDB.sql, it is mounted read-only, and Agent Action
+    Plan section 0.8.1 calls any diff touching those paths "a defect in the
+    migration, regardless of how harmless it appears". This module also
+    READS mysql/ACASDB.sql from that tree, which makes writing into it
+    doubly wrong.
+
+    Outside-in - the destination is an ANCESTOR of the checkout - is the one
+    a textual prefix test misses, and publishing makes it the more
+    dangerous of the two: `_publish_staged` DELETES every `.json` in the
+    destination before moving the new set in, so a destination that
+    contains the checkout would delete files out of it.
+
+    Both are decided on RESOLVED paths, so `..` segments and symbolic links
+    are followed rather than compared as text.
+    """
+    repository = env.get(_ENV_REPO)
+    if not repository:
+        return
+    root = Path(repository).resolve()
+    resolved = destination.resolve()
+
+    if resolved == root or root in resolved.parents:
+        raise OutputPathError(
+            f"the normalised tree {destination} resolves to {resolved}, "
+            f"which is inside the read-only checkout {root} "
+            f"(${_ENV_REPO}). Nothing may be written there: it holds the "
+            f"frozen COBOL, the bridges and mysql/ACASDB.sql - which this "
+            f"tool READS from that tree - and Agent Action Plan section "
+            f"0.8.1 calls any diff touching those paths \"a defect in the "
+            f"migration, regardless of how harmless it appears\". Write "
+            f"under ${_ENV_OUT} instead."
+        )
+
+    if resolved in root.parents:
+        raise OutputPathError(
+            f"the normalised tree {destination} resolves to {resolved}, "
+            f"which CONTAINS the read-only checkout {root} (${_ENV_REPO}). "
+            f"Publishing a tree removes every stale *.json from its "
+            f"destination first, so a destination that contains the "
+            f"checkout would delete files out of it. Name the leaf "
+            f"directory the normalised dumps belong in, for example "
+            f"${_ENV_OUT}/<scenario>/cobol{_NORMALIZED_SUFFIX}."
+        )
 
 
 def _assert_report_outside(
@@ -3281,10 +3963,10 @@ def _assert_report_outside(
                 f"the findings report {candidate} would land inside "
                 f"{description} ({directory}). Only <TABLE>.json files "
                 f"may appear there - harness/normalize.py is invoked on a "
-                f"DIRECTORY [harness/docker-compose.yml:L269], so any "
+                f"DIRECTORY [harness/docker-compose.yml:L352], so any "
                 f"other file there would be taken for a dump. Put the "
                 f"report outside, as harness/reset_db.sh puts its log in "
-                f"$ACAS_OUT/reset/ [harness/reset_db.sh:L150-L151]."
+                f"$ACAS_OUT/reset/ [harness/reset_db.sh:L169-L170]."
             )
     if scenario is not None:
         scenario_directory = destination.parent.resolve()
@@ -3366,9 +4048,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     global _QUIET
 
     parser = build_parser()
-    arguments = parser.parse_args(argv)
+    try:
+        arguments = parser.parse_args(argv)
+    except SystemExit as exc:
+        # argparse exits 0 for --help and 2 for a usage error. Both are
+        # RETURNED, not propagated, so that this module's documented exit
+        # code for a usage error - 80, the code the epilogue and the sibling
+        # harness scripts advertise - is the code an operator actually sees.
+        # Left to argparse it would be 2, which means nothing in this family.
+        code = exc.code
+        if code is None or code == 0:
+            return EX_OK
+        return EX_USAGE
+
     _QUIET = bool(arguments.quiet)
     env: Mapping[str, str] = os.environ
+
+    # Tightened HERE and not at import time. A normalised dump carries live
+    # accounting data (CWE-312) and the output root is a shared bind mount
+    # in the Compose recipe, so nothing this process creates should be group-
+    # or world-readable. At import time it would change the umask of any
+    # in-process caller that merely imported the module, which is a side
+    # effect a library has no business having.
+    os.umask(_OUTPUT_UMASK)
 
     try:
         source, destination, scenario = _resolve_directories(
@@ -3377,6 +4079,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ValueError as exc:
         print(f"harness/normalize.py: {exc}", file=sys.stderr)
         return EX_USAGE
+
+    # Refuse to write anywhere overlapping the frozen checkout, before the
+    # schema is parsed and before a single dump is read.
+    try:
+        _assert_output_writable(destination, env)
+    except OutputPathError as exc:
+        print(f"harness/normalize.py: {exc}", file=sys.stderr)
+        return EX_WRITE
 
     try:
         report_path = _resolve_report_path(
@@ -3420,7 +4130,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             schema,
             tables=selection,
             findings=findings,
+            require_manifest=not arguments.allow_unmanifested,
         )
+    except ManifestError as exc:
+        print(f"harness/normalize.py: {exc}", file=sys.stderr)
+        return EX_PRECONDITION
     except (TableNotInScopeError, UnknownTableError) as exc:
         print(f"harness/normalize.py: {exc}", file=sys.stderr)
         return EX_SCOPE
@@ -3466,11 +4180,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(report, file=sys.stderr)
     if report_path is not None:
         try:
-            report_path.parent.mkdir(parents=True, exist_ok=True)
-            with report_path.open(
-                "w", encoding="utf-8", newline="\n"
-            ) as handle:
-                handle.write(report)
+            # Written through the same secure primitive as a normalised
+            # dump. A findings report quotes the values it could not
+            # classify - a date text this module does not recognise is
+            # quoted verbatim so the operator can take it to the oracle -
+            # so it carries accounting data too and gets 0600, staged
+            # `O_EXCL | O_NOFOLLOW`, and an atomic replace. Before this it
+            # was a plain `open("w")`: no staging, so a reader could see a
+            # half-written report, and no mode control at all.
+            _make_output_directory(report_path.parent)
+            staging = (
+                report_path.parent
+                / f"{_TEMP_PREFIX}{report_path.stem}{_REPORT_TEMP_SUFFIX}"
+            )
+            _write_text_securely(report, report_path, staging)
         except OSError as exc:
             print(
                 f"harness/normalize.py: could not write the findings "

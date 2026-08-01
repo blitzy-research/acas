@@ -9,16 +9,16 @@ enumeration carries exactly the schema's member set. A record that added a
 member would produce documents the schema rejects, because every object in it
 is closed.
 
-Agent Action Plan section 0.4.1.6 gives this module its whole mandate in one
-line, quoted verbatim:
+Agent Action Plan section 0.4.1.6 gives this module its whole mandate,
+verbatim:
 
     "The dictionary schema: copybook field (name, picture, usage, sign,
     scale), bridge host variable, MySQL column (name, type) - plus derivation
     notes for bridge-only columns"
 
-The module DESCRIBES fields. It parses nothing - `generate.py` does the parsing
-and writes the artifact, `loader.py` reads it back at run time - and it holds
-no accounting value of any kind. What travels through these records is picture
+The module DESCRIBES fields. It parses nothing - `generate.py` parses and
+writes the artifact, `loader.py` reads it back at run time - and it holds no
+accounting value of any kind. What travels through these records is picture
 text, place counts, scales, SQL type names, source citations and prose.
 
 WHAT AN ENTRY IS
@@ -48,18 +48,16 @@ The obvious place to look for field metadata is the copybooks, and they are
 not sufficient. IRSPOSTING-REC carries three columns - POST4-DAY, POST4-MONTH
 and POST4-YEAR - that appear in NO copybook whatsoever. They are declared only
 in the bridge, each `PIC 9(03) COMP`, at [common/irspostingMT.cbl:L177-L179],
-and they exist because the bridge derives them from two-character slices of a
-date string under a guard [common/irspostingMT.cbl:L982-L987]. In the frozen
-schema they are `tinyint(2) unsigned NOT NULL` at ordinals 4, 5 and 6 of that
-table [mysql/ACASDB.sql:L278-L280] - INTERLEAVED before POST4-DR, not appended
-after the copybook's own columns. Agent Action Plan section 0.1.1 draws the
-conclusion: "A migration driven from the copybooks alone would silently omit
-three columns of a posting table."
-
-Two consequences are structural here, not advisory. `DictionaryEntry.copybook`
-is nullable, so a bridge-derived column is representable at all; and no view
-is required, so nothing in this module can force a correct dictionary to be
-unwritable.
+because the bridge derives them from two-character slices of a date string
+under a guard [common/irspostingMT.cbl:L982-L987]. In the frozen schema they
+are `tinyint(2) unsigned NOT NULL` at ordinals 4, 5 and 6
+[mysql/ACASDB.sql:L278-L280] - INTERLEAVED before POST4-DR, not appended after
+the copybook's own columns. Section 0.1.1 draws the conclusion: "A migration
+driven from the copybooks alone would silently omit three columns of a posting
+table." Two consequences are structural, not advisory:
+`DictionaryEntry.copybook` is nullable, so a bridge-derived column is
+representable at all; and no view is required, so nothing here can force a
+correct dictionary to be unwritable.
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!  THE THREE VIEWS ARE SIBLINGS. THEY ARE NEVER RECONCILED.  (rule R-4)   !!
@@ -73,9 +71,9 @@ unwritable.
 !!  A DEFECT REPRODUCED IS CORRECT; A DEFECT FIXED IS A FAILURE.            !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-That last line is the user's own requirement, which Agent Action Plan section
-0.8.2 preserves verbatim - reproduced here in full so it can be cited exactly
-rather than read through a gutter:
+That last line is the user's own requirement, which section 0.8.2 preserves
+verbatim - reproduced in full so it can be cited exactly rather than read
+through a gutter:
 
     "There is no test suite: compiled COBOL execution is the behavioral
     specification, defects included. A defect reproduced is correct; a defect
@@ -85,11 +83,11 @@ The prohibition is not a matter of taste. The disagreements between the views
 are LOAD-BEARING BEHAVIOUR:
 
   * `Sales-Average binary-long` is signed [copybooks/wssl.cob:L49]; the host
-    variable that receives it is `PIC 9(10) COMP`, unsigned
+    variable receiving it is `PIC 9(10) COMP`, unsigned
     [common/salesMT.cbl:L308]; the column is `int(8) unsigned`. The sign is
-    therefore lost AT THE BRIDGE, before any SQL runs, and the data-access
-    layer has to reproduce that conversion rather than write the computed
-    value and let the database object.
+    lost AT THE BRIDGE, before any SQL runs, and the data-access layer has to
+    reproduce that conversion rather than write the computed value and let the
+    database object.
   * `Ledger-Name pic x(24)` [copybooks/wsledger.cob:L27] becomes
     `HV-LEDGER-NAME PIC X(32)` [common/nominalMT.cbl:L299] and
     `LEDGER-NAME char(32)` [mysql/ACASDB.sql:L127]. The value survives; the
@@ -101,49 +99,41 @@ every one of those facts leaves the record. The one derived scalar this module
 does carry, `DictionaryEntry.cobol_python_storage`, is documented at its
 definition site as describing the COBOL side ALONE and settling nothing.
 
-The register of the twenty-two legacy defects this migration reproduces is
-docs/migration/anomaly-log.md, which `DictionaryEntry.anomaly_refs` points
-into; the register of questions only the compiled program can settle is
-docs/migration/ambiguity-resolutions.md, which `ambiguity_refs` points into.
+`DictionaryEntry.anomaly_refs` points into the register of the twenty-two
+legacy defects this migration reproduces, and `ambiguity_refs` into the
+register of questions only the compiled program can settle. Both registers -
+docs/migration/anomaly-log.md and docs/migration/ambiguity-resolutions.md -
+are to be written at a later boundary; the identifiers are recorded here now
+so that no entry has to be revisited when they are.
 
 WHAT THIS MODULE DOES NOT DO  (rule R-3)
 ========================================
 It adds no check of any kind. No record here runs code of its own after being
-constructed, none rejects a member, none supplies a default for a member that
-is missing, and the compiled patterns published below are exported FOR
-`generate.py` AND THE TEST SUITE TO USE - this module never applies them.
-Agent Action Plan section 0.7.4 settles the apparent tension for the whole
-package, verbatim: "R-3 constrains the
+constructed, none rejects a member, none supplies a default for a missing one,
+and the compiled patterns published below are exported FOR `generate.py` AND
+THE TEST SUITE TO USE - this module never applies them. Section 0.7.4 settles
+the apparent tension for the whole package, verbatim: "R-3 constrains the
 database, not the repository. Describing a schema in a committed artifact is
 orthogonal to altering it." So the column view describes the frozen schema
 exhaustively and offers no way to express a data definition statement, a
-suggested width or a corrected type: `mysql/ACASDB.sql` is frozen, and there
-is no member in which a change to it could be written down.
+suggested width or a corrected type.
 
-Five agreements that the schema's conservative keyword subset cannot express
-belong to `generate.py` and are checked by the dictionary test, NOT here: that
-`key` is unique across entries; that each `Presence` flag equals whether its
-view is non-null; that at least one view is non-null; that `one_sided` is the
-negation of the conjunction of the three flags; and that a `derivation` is
-present whenever a column exists with no copybook view.
+Five agreements the schema's conservative keyword subset cannot express belong
+to `generate.py` and are checked by the dictionary test, NOT here: that `key`
+is unique across entries; that each `Presence` flag equals whether its view is
+non-null; that at least one view is non-null; that `one_sided` is the negation
+of the conjunction of the three flags; and that a `derivation` is present
+whenever a column exists with no copybook view.
 
 DETERMINISM  (rule R-6)
 =======================
 The dictionary is committed, so regenerating it must reproduce it byte for
-byte. Two properties of this module deliver that and are worth naming because
-they look like style choices and are not:
+byte. Two properties deliver that, both argued at `_JsonRecord.to_json_obj`:
+field declaration order IS the serialisation order, and every collection
+member is a tuple in a frozen record.
 
-  * FIELD DECLARATION ORDER IS THE SERIALISATION ORDER. `to_json_obj` walks
-    `dataclasses.fields()`, which yields declaration order, and every record
-    below declares its members in the order the JSON Schema declares them. So
-    a model-driven dump is ordered by construction and `sort_keys=True` is
-    never needed - and never permitted, since it would produce a valid but
-    different file.
-  * EVERY COLLECTION MEMBER IS A TUPLE and every record is frozen, so an
-    instance cannot be mutated into a different order after it is built.
-
-Nothing here consults a clock, an entropy source, the process environment,
-the host it runs on or installed distribution metadata, so two imports in two
+Nothing here consults a clock, an entropy source, the process environment, the
+host it runs on or installed distribution metadata, so two imports in two
 processes produce identical state. `Meta` is closed against a generation date,
 a host name, a user name, an absolute path and a revision identifier by the
 simple fact that it declares no such member.
@@ -153,25 +143,22 @@ NUMERIC POLICY  (rule R-2)
 No accounting value may pass through a binary floating-point type at any
 point. This module states that structurally rather than promising it:
 
-  * The token that names Python's binary approximation of a real number
-    appears nowhere in this file - not as an annotation, not as a cast, not as
-    a default - and `JsonValue` has no member for it either, in or out.
-  * `digits`, `integer_digits`, `scale`, `character_length`, `occurs`,
-    `ordinal`, `display_width`, `offset`, `length`, `column_count` and every
-    `Coverage` tally are `int`, because each is a dimensionless count.
-  * `picture`, `sql_type`, `sign_clause_text`, `level`, every condition-name
-    value and every declared record length are `str`, so no declaration can
-    lose precision in transport.
+  * The token naming Python's binary approximation of a real number appears
+    nowhere in this file - not as an annotation, not as a cast, not as a
+    default - and `JsonValue` has no member for it either, in or out.
+  * Every count is `int` and every declaration is `str`, each argued at its
+    own member: a count because it is dimensionless, a declaration so it
+    cannot lose precision in transport.
   * `SqlBaseType` omits the three binary floating-point SQL types outright.
     The frozen dump declares none of them across all 720 of its columns, so
     they are made unrepresentable rather than merely discouraged.
 
 The point of recording `usage` and `scale` faithfully is that
-`acas_posting/cobol/field.py` selects the exact-decimal type or `int` FROM
-THE DICTIONARY rather than from hand-written per-field code. It matters
+`acas_posting/cobol/field.py` selects the exact-decimal type or `int` FROM THE
+DICTIONARY rather than from hand-written per-field code. It matters
 concretely: the sales statistics fields are `binary-long`
 [copybooks/wssl.cob:L45-L53], so their truncation on divide is integer
-truncation, and that is exactly what makes the legacy moving-average defect
+truncation, which is exactly what makes the legacy moving-average defect
 reproducible.
 
 NO COBOL AT RUNTIME  (rule R-1)
@@ -186,44 +173,56 @@ set, which is the second reason the schema check lives in a test.
 
 TRACEABILITY  (rule R-5)
 ========================
-Every view carries a REQUIRED `source` locator of the form
-`<repository-relative-path>:L<n>` or `<path>:L<n>-L<m>`, so a reader can jump
-from any member of the artifact straight to the COBOL or SQL line that
-establishes it. Every entry carries a stable `key`, cited verbatim by
-`acas_posting/cobol/field.py` and by all twenty-seven modules under
-`acas_posting/records/`. `Presence` plus `one_sided` make "declared in one
-source, absent from another" a recorded fact, so nothing discovered in any
-source is ever dropped. The wider mapping - program to module, paragraph to
-function, field to dictionary entry - is docs/migration/traceability.md.
+Every view carries a REQUIRED `source` locator, whose form `SourceLocator`
+defines, so a reader can jump from any member of the artifact straight to the
+COBOL or SQL line that establishes it. Every entry carries a stable `key`,
+cited verbatim by `acas_posting/cobol/field.py` and by all twenty-seven
+modules under `acas_posting/records/`. `Presence` plus `one_sided` make
+"declared in one source, absent from another" a recorded fact, so nothing
+discovered in any source is ever dropped. The wider mapping - program to
+module, paragraph to function, field to dictionary entry - belongs to the
+traceability document a later boundary writes.
 
 THE FREEZE
 ==========
 The COBOL under common/ and copybooks/ and the schema dump under mysql/ are
-read here only as citations in prose. Agent Action Plan section 0.8.1,
-verbatim: "Any diff touching `common/*.cbl`, `common/*.scb`,
-`copybooks/*.cob`, `general/*.cbl`, `sales/*.cbl`, `purchase/*.cbl`,
-`irs/*.cbl` or `mysql/ACASDB.sql` is a defect in the migration, regardless of
-how harmless it appears."
+read here only as citations in prose. Section 0.8.1, verbatim: "Any diff
+touching `common/*.cbl`, `common/*.scb`, `copybooks/*.cob`, `general/*.cbl`,
+`sales/*.cbl`, `purchase/*.cbl`, `irs/*.cbl` or `mysql/ACASDB.sql` is a defect
+in the migration, regardless of how harmless it appears."
 """
 
 # PROVENANCE
-# Every member below is derived from one of three frozen inputs: the
+# Every member below is derived from one of four frozen inputs: the
 # maintainer's one-way COBOL-to-MySQL bridge pairs (common/*MT.scb and
-# common/*MT.cbl), the record copybooks under copybooks/, and the schema dump
-# mysql/ACASDB.sql. Those files are this module's specification and are never
-# modified by it. No licence grant is stated here: the COBOL carries the
+# common/*MT.cbl), the record copybooks under copybooks/, the schema dump
+# mysql/ACASDB.sql, and the inline FILE SECTION record declarations of
+# the General Ledger posting programs (general/gl070.cbl, general/gl071.cbl and
+# general/gl072.cbl), which are the only declaration of the work files those
+# phases pass data through. Those files are this module's specification and are
+# never modified by it. No licence grant is stated here: the COBOL carries the
 # maintainer's own notice, which is his to make and not this migration's to
 # copy or replace.
 
+import hashlib
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields
 from enum import Enum, StrEnum
-from typing import Any, Final, Self, cast
+from functools import cache
+from types import UnionType
+from typing import (
+    Any,
+    Final,
+    Self,
+    TypeAliasType,
+    cast,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
-# =============================================================================
 #  THE JSON VALUE DOMAIN
-#
 #  The plain-tree form of the artifact, written out as a type so that the
 #  numeric policy of rule R-2 is visible in the type system rather than only
 #  in prose: the union below admits strings, dimensionless integers, booleans,
@@ -231,10 +230,8 @@ from typing import Any, Final, Self, cast
 #  for a binary approximation of a real number, in either direction of the
 #  conversion, so a value that could lose precision cannot be carried by a
 #  document this module builds or reads.
-#
 #  Written with the PEP 695 `type` statement because the alias is recursive
 #  and lazy evaluation is what lets it refer to itself.
-# =============================================================================
 
 type JsonValue = str | int | bool | None | list[JsonValue] | dict[str, JsonValue]
 """One value of the artifact in plain-tree form. No binary-approximation member."""
@@ -249,17 +246,29 @@ default (rule R-3).
 """
 
 
-# =============================================================================
 #  STRING DOMAINS AND THEIR PATTERNS
-#
 #  The schema constrains several string members by pattern. Each pattern is
 #  published here as a compiled constant so that `generate.py` and the
 #  dictionary test can hold themselves to the schema without re-reading it,
 #  and so that a reader of a record can see what shape a member takes.
 #
-#  THIS MODULE NEVER APPLIES THEM. No record checks a member against a
-#  pattern, on construction or afterwards; adding such a check would be a new
-#  validation this migration is not permitted to introduce (rule R-3).
+#  WHERE THESE PATTERNS ARE APPLIED, AND WHY THAT IS NOT A NEW VALIDATION.
+#  `from_json_obj` on the root record - and only there - walks the decoded
+#  document once and holds every member to the pattern, member set and value
+#  domain recorded here, raising `DictionaryIntegrityError` on the first
+#  departure. See THE INTEGRITY PASS below for the full argument; in short,
+#  rule R-3 forbids new validation of the *accounting data* the migrated cycle
+#  posts, while rule R-5 requires that every Python field cite a dictionary
+#  entry. A citation is worth nothing if the cited document is not the document
+#  the generator produced from the frozen sources, so checking the artifact's
+#  own integrity is what makes R-5 mean something rather than a new rule
+#  imposed on the ledger. No accounting value is examined, no posting decision
+#  consults it, and a repository whose artifact is intact sees identical
+#  behaviour with the pass present and absent.
+#
+#  Individual records still never check their own members: construction stays a
+#  plain field-by-field mapping so that `generate.py` can build a record from
+#  values it has just derived without paying for a check it does not need.
 # =============================================================================
 
 type RepoPath = str
@@ -280,18 +289,51 @@ type BridgeName = str
 type HandlerName = str
 """A file-handler program name - `acas000` through `acas029`, or `acasirsubN`."""
 
+_PATH_SEGMENT: Final[str] = r"[A-Za-z0-9_][A-Za-z0-9_.-]*"
+"""One segment of a repository-relative path, used to build the two path
+patterns below. Written as a segment rather than as a flat character class for
+one reason: a segment must BEGIN with a letter, a digit or an underscore, so
+`..` and `.` are not segments at all. That single restriction is what makes a
+path member containable.
+
+The consequences are worth spelling out, because each of them is a way a path
+member could otherwise name a file outside the repository or name the same file
+two different ways:
+
+* `copybooks/../../etc/passwd` is rejected - a dot-dot segment cannot be built;
+* `common/./salesMT.cbl` is rejected - nor can a bare-dot segment;
+* `/etc/passwd` is rejected - the first character may not be a separator;
+* `copybooks//wssl.cob` is rejected - an empty segment cannot be built;
+* `copybooks/` is rejected - a trailing separator would leave a final segment
+  empty.
+
+Every path in the frozen sources is an ordinary relative path, so nothing the
+generator legitimately records is affected: all 106 distinct path members and
+all 3290 distinct citations in the artifact satisfy this shape."""
+
 REPO_PATH_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"^[A-Za-z0-9_][A-Za-z0-9_./-]*$"
+    r"^%s(/%s)*$" % (_PATH_SEGMENT, _PATH_SEGMENT)
 )
-"""Shape of every path member. An absolute path would encode the machine that
-wrote the artifact and is forbidden content, so the leading character may not
-be a separator."""
+"""Shape of every path member: one or more segments joined by single forward
+slashes, relative to the repository root and CONTAINED WITHIN IT.
+
+An absolute path would encode the machine that wrote the artifact and is
+forbidden content (rule R-6), so the leading character may not be a separator.
+A path that climbs out of the repository would let a member of this document
+cite a file the frozen sources do not contain - and a consumer that resolved
+such a citation against the repository root would read outside it - so no
+segment may be `..` or `.`. See `_PATH_SEGMENT` for the full list of forms this
+excludes."""
 
 SOURCE_LOCATOR_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"^[A-Za-z0-9_][A-Za-z0-9_./-]*:L[0-9]+(-L[0-9]+)?$"
+    r"^%s(/%s)*:L[0-9]+(-L[0-9]+)?$" % (_PATH_SEGMENT, _PATH_SEGMENT)
 )
 """Shape of every `source` member: a repository-relative path, a colon, then a
-single line as `L<n>` or an inclusive span as `L<n>-L<m>`."""
+single line as `L<n>` or an inclusive span as `L<n>-L<m>`.
+
+The path half is exactly `REPO_PATH_PATTERN`, and is contained for the same
+reason: a citation is the mechanism rule R-5 rests on, and a citation that can
+point outside the repository is one a reader cannot check."""
 
 ENTRY_KEY_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9-]*\.[A-Za-z0-9][A-Za-z0-9-]*(#[0-9]+)?$"
@@ -353,15 +395,23 @@ CONTENT and carries no relation to elapsed time."""
 BINDING_RULE_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^R-[1-6]$")
 """Shape of `BindingRule.id` - the six rules that govern this migration."""
 
+SHA256_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{64}$")
+"""Shape of a SHA-256 digest as this document records it: sixty-four lower-case
+hexadecimal characters, no prefix and no separator.
 
-# =============================================================================
+Used by `SourceDigest.sha256` and by `Meta.source_inputs_sha256`, the two
+members that bind this artifact to the exact bytes of the frozen inputs it was
+derived from. The lower-case restriction is not cosmetic: it makes the recorded
+digest comparable to a recomputed one by simple equality, with no case folding
+step that could be forgotten at one of the two comparison sites.
+"""
+
+
 #  THE FIXED VALUES THE SCHEMA PINS WITH `const`
-#
 #  Each of these is a value the schema allows to be one thing only. They are
 #  published so that `generate.py` writes them from one place and the test
 #  compares against one place, which is the whole reason a `const` is worth
 #  mirroring in code at all.
-# =============================================================================
 
 DICTIONARY_NAME: Final[str] = "acas_posting_dictionary"
 """`Meta.dictionary_name` - the stem shared by the artifact and its schema."""
@@ -403,16 +453,13 @@ DETERMINISM_BYTE_ORDER_MARK: Final[bool] = False
 changing the content."""
 
 
-# =============================================================================
 #  ENUMERATED VOCABULARIES
-#
 #  Each one mirrors an `enum` in the schema, member for member and value for
 #  value. They are `StrEnum`, so a member IS its recorded string: a consumer
 #  may compare a member against the text in the artifact directly, and
 #  `Usage("COMP-3")` maps the recorded text back to its member. Nothing here
 #  admits a value the frozen sources do not use, which is how a vocabulary
 #  becomes a structural guarantee rather than a comment.
-# =============================================================================
 
 
 class Usage(StrEnum):
@@ -530,7 +577,7 @@ class UsageDeclaredAt(StrEnum):
     on their own picture lines, and the two period-total groups
     [copybooks/wssys4.cob:L9] and [copybooks/wssys4.cob:L20] govern twenty
     more at [copybooks/wssys4.cob:L10-L19] and
-    [copybooks/wssys4.cob:L21-L30]. Twenty-four measured fields inherit their
+    [copybooks/wssys4.cob:L21-L30]. Twenty-four money fields inherit their
     storage class, and a generator that read usage only from the picture line
     would class every batch amount and every period total as zoned decimal -
     so every stored value would be wrong.
@@ -722,9 +769,7 @@ class EntityFacade(StrEnum):
     """The IRS final-accounts record."""
 
 
-# =============================================================================
 #  SERIALISATION - THE DETERMINISM CONTRACT IN CODE  (rule R-6)
-#
 #  `_JsonRecord` gives every record below one shared way out to the plain-tree
 #  form, and that one way is driven by `dataclasses.fields()`, which yields
 #  members in DECLARATION ORDER. Because every record declares its members in
@@ -732,11 +777,9 @@ class EntityFacade(StrEnum):
 #  schema's order by construction. Nothing sorts, and `sort_keys=True` is
 #  never needed - passing it would produce a valid but byte-different file and
 #  break the reproducibility the committed artifact depends on.
-#
 #  The base carries no members of its own and an empty `__slots__`, so a
 #  subclass declared with `slots=True` gains no instance dictionary from it.
 #  It is behaviour, not data: it cannot appear in the artifact.
-# =============================================================================
 
 
 class _JsonRecord:
@@ -796,9 +839,7 @@ def _json_value(value: object) -> JsonValue:
     return cast(JsonValue, value)
 
 
-# =============================================================================
 #  THE COPYBOOK VIEW - the first of the three siblings
-# =============================================================================
 
 
 @dataclass(frozen=True, slots=True)
@@ -860,10 +901,20 @@ class CopybookField(_JsonRecord):
     column the bridge derives with no copybook counterpart - which is why this
     view is a separate record rather than a set of members on the entry.
 
+    THIS RECORD SERVES A SECOND MEMBER TOO. `DictionaryEntry.program_source`
+    carries the same type, because a COBOL data declaration has one shape
+    wherever it is written and a work-file record declared inline in a program's
+    FILE SECTION has exactly the members below. The type is REUSED
+    rather than cloned so the two cannot drift apart in either direction; which
+    member a given record is reached through is told by `presence`, and the
+    record itself says so as well, since `file` names the declaring source and a
+    program is not a copybook. Nothing here treats the two differently.
+
     Attributes:
-        file: The copybook that declares the field, for example
-            `copybooks/wsledger.cob`.
-        source: The line or span in that copybook where it is declared.
+        file: The source that declares the field. A copybook for the copybook
+            view, for example `copybooks/wsledger.cob`; a program for the
+            program-source view, for example `general/gl071.cbl`.
+        source: The line or span in that file where it is declared.
         name: The data-name exactly as declared, mixed case preserved.
             `filler` is recorded under its own name with `is_filler` true
             rather than dropped, because it consumes record positions.
@@ -1023,9 +1074,7 @@ class CopybookField(_JsonRecord):
         )
 
 
-# =============================================================================
 #  THE BRIDGE VIEW - the second sibling, and the authoritative one
-# =============================================================================
 
 
 @dataclass(frozen=True, slots=True)
@@ -1153,9 +1202,7 @@ class BridgeHostVariable(_JsonRecord):
         )
 
 
-# =============================================================================
 #  THE COLUMN VIEW - the third sibling
-# =============================================================================
 
 
 @dataclass(frozen=True, slots=True)
@@ -1191,7 +1238,7 @@ class MysqlColumn(_JsonRecord):
             fixed-width text type; null only where the dump declares no width.
             On the integer types this is a rendering hint and not a range
             constraint, which is precisely why the dictionary records it as
-            observed and derives nothing from it.
+            declared and derives nothing from it.
         scale: The second parenthesised argument of an exact-decimal type - the
             digits kept to the right of the point - or null for any other type.
             Zero occurs and is meaningful, so a null scale and a zero scale are
@@ -1266,39 +1313,59 @@ class MysqlColumn(_JsonRecord):
         )
 
 
-# =============================================================================
 #  WHAT THE THREE VIEWS SAY TOGETHER - presence, drift and derivation
-# =============================================================================
 
 
 @dataclass(frozen=True, slots=True)
 class Presence(_JsonRecord):
-    """Which of the three sources a field was found in.
+    """Which of the four sources a field was found in.
 
     This is where the one-sided rule lives: a field discovered in any source is
     never dropped from the dictionary, so a field that exists in only one place
-    is recorded with the other two views null and its ABSENCE STATED rather
+    is recorded with the other views null and its ABSENCE STATED rather
     than implied (rule R-5).
 
     Two agreements bind these flags and are the generator's to keep - each flag
     equals whether its view is non-null, and at least one view is non-null,
-    since an entry with all three null would describe no field in any layer.
+    since an entry with all four null would describe no field in any layer.
     Neither is enforced here (rule R-3).
+
+    THREE OF THE FOUR ARE THE AUTHORITATIVE TRIPLE; the fourth is a declaration
+    site the triple cannot reach. `in_copybook`, `in_bridge` and `in_column` are
+    the copybook / bridge / column views, and `one_sided` is computed from those
+    three alone, because they are the three layers a stored value passes
+    through. `in_program_source` marks a field COBOL declares inline in a
+    program's FILE SECTION instead of in a copybook - a work-file record
+    that never reaches a table, and therefore never reaches a bridge or a
+    column either. Such a field is one-sided by construction.
 
     Attributes:
         in_copybook: True when a copybook declares the field. False for a
             column the bridge derives with no copybook counterpart, of which
-            IRSPOSTING-REC has three [common/irspostingMT.cbl:L177-L179].
+            IRSPOSTING-REC has three [common/irspostingMT.cbl:L177-L179], and
+            false for a program-source field, which no copybook declares.
         in_bridge: True when a bridge declares a host variable for it. False for
             a copybook-only field such as a filler, a redefines alternative, or
             a subordinate item the bridge carries only as part of its parent
             group.
         in_column: True when the frozen schema declares a column for it.
+        in_program_source: True when a program's own FILE SECTION
+            declares the field - the General Ledger work files `pretrans.tmp`
+            and `postrans.tmp` and the sort file that carries them between
+            phases, declared inline in [general/gl070.cbl], [general/gl071.cbl]
+            and [general/gl072.cbl] and named as work files at
+            [copybooks/wsnames.cob:L14-L17]. These records are transient
+            scratch storage, so nothing about them is in the schema and nothing
+            about them appears in a table dump - but every one of their fields
+            still has a picture clause, a usage and a width that the migrated
+            code must reproduce exactly, which is why they are catalogued here
+            rather than typed by hand at the point of use (rule R-5).
     """
 
     in_copybook: bool
     in_bridge: bool
     in_column: bool
+    in_program_source: bool
 
     @classmethod
     def from_json_obj(cls, obj: JsonObject) -> Self:
@@ -1307,6 +1374,7 @@ class Presence(_JsonRecord):
             in_copybook=obj["in_copybook"],
             in_bridge=obj["in_bridge"],
             in_column=obj["in_column"],
+            in_program_source=obj["in_program_source"],
         )
 
 
@@ -1453,9 +1521,7 @@ class Derivation(_JsonRecord):
         )
 
 
-# =============================================================================
 #  THE ENTRY - one authoritative triple
-# =============================================================================
 
 
 @dataclass(frozen=True, slots=True)
@@ -1473,6 +1539,21 @@ class DictionaryEntry(_JsonRecord):
     failure rule R-4 exists to prevent. Where the views disagree the entry
     records all three, sets the matching flags in `drift`, and explains the
     disagreement in `drift.details` and in `notes`.
+
+    A FOURTH VIEW EXISTS FOR ONE POPULATION AND ONLY THAT POPULATION.
+    `program_source` carries a field COBOL declares inline in a program's FILE
+    SECTION rather than in a copybook. It is not a fourth member of the
+    triple and it never coexists with any of the three: an entry either has
+    the triple's views, or it has this one. The population is the General
+    Ledger work files - `pretrans.tmp`, `postrans.tmp` and the sort file that
+    carries their records between phases - which are transient scratch storage
+    that reaches no table, so no bridge maps them and no column stores them.
+    They are catalogued because their pictures, usages and widths are
+    load-bearing anyway: [general/gl072.cbl:L410-L412] locates a nominal-ledger
+    account by SEQUENTIAL read and therefore depends on the sort order
+    [general/gl071.cbl] emits, so a work-record field whose width or storage
+    class was mistyped would misposts silently (anomaly A-14). Rule R-5 admits
+    no field bound by eye, and these are fields.
 
     Attributes:
         key: The stable identifier this entry is cited by from
@@ -1513,16 +1594,31 @@ class DictionaryEntry(_JsonRecord):
             field-level report is self-contained.
         entity_facade: The facade the posting programs address the table
             through, or null when the entry belongs to none.
-        presence: Which of the three sources declare the field. A false here is
+        presence: Which of the four sources declare the field. A false here is
             what makes a one-sided field visible instead of absent.
-        one_sided: True when the field is not present in all three sources -
-            the negation of `in_copybook` and `in_bridge` and `in_column`.
-            Redundant with `presence` by design, so that a report can select
-            the interesting entries without recomputing the conjunction.
+        one_sided: True when the field is not present in all three layers of the
+            authoritative triple - the negation of `in_copybook` and
+            `in_bridge` and `in_column`. Redundant with `presence` by design, so
+            that a report can select the interesting entries without recomputing
+            the conjunction. `in_program_source` is not a term of it: a
+            program-source field has all three of those false, so it is
+            one-sided by construction rather than by comparison.
         copybook: THE COPYBOOK VIEW, or null when no copybook declares the
             field. Null is expected, not exceptional: the three IRS posting date
             components have no copybook counterpart anywhere, and requiring this
             view would make the correct dictionary unwritable.
+        program_source: THE PROGRAM-SOURCE VIEW, or null - which it is for every
+            entry except the work-file fields described above. It carries the
+            SAME record type as `copybook`, `CopybookField`, because a COBOL
+            data declaration has the same shape wherever it is written: one
+            level, one name, one picture, one usage, one sign, one parent group.
+            Reusing the type rather than cloning its twenty-two members keeps
+            the two from drifting apart, and the two are told apart without
+            ambiguity by `presence.in_program_source` and by this view's own
+            `file` member, which names a program rather than a copybook -
+            `general/gl070.cbl` rather than `copybooks/wspost.cob`. The
+            declaring section, FD or SD, is recorded once per record in
+            `Sources.program_sources` rather than repeated on every field.
         bridge_host_variable: THE BRIDGE VIEW - the authoritative one - or null
             when no bridge carries the field. This is where a signedness or
             width conversion actually happens, so it has to be read rather than
@@ -1536,23 +1632,25 @@ class DictionaryEntry(_JsonRecord):
         derivation: How the value comes to exist when the mapping is not a plain
             field-for-field move, or null when it is.
         cobol_python_storage: The Python type for the COBOL-side value, derived
-            only from the copybook view's `usage` and `scale`, so that the
-            choice between the exact-decimal type and `int` is data-driven
-            (rule R-2). `NONE` when there is no copybook view. NOT a settlement
-            of any drift - see `CobolPythonStorage`.
+            only from the declaring view's `usage` and `scale` - the copybook
+            view where there is one, the program-source view otherwise - so that
+            the choice between the exact-decimal type and `int` is data-driven
+            (rule R-2). `NONE` when the entry has neither declaring view, which
+            is the bridge-derived case. NOT a settlement of any drift - see
+            `CobolPythonStorage`.
         notes: Observations about this field, one per element, may be empty.
             This is where a fact with no dedicated member is recorded rather
             than lost: a host variable declared but never loaded, a maintainer's
             comment that disagrees with the declaration it sits beside, a spare
             field carrying the wrong ledger's prefix. A note may state that a
             value is inconsistent; it never proposes correcting it (rule R-4).
-        anomaly_refs: Identifiers of the entries in
-            docs/migration/anomaly-log.md that this field participates in, may
-            be empty. That log is the register of legacy defects this migration
-            REPRODUCES rather than fixes, each entry naming the module that
-            reproduces it.
-        ambiguity_refs: Identifiers of the entries in
-            docs/migration/ambiguity-resolutions.md that bear on this field, may
+        anomaly_refs: Identifiers of the entries this field participates in
+            within the migration's anomaly log, may be empty. That log - a
+            later boundary writes it - is the register of legacy defects this
+            migration REPRODUCES rather than fixes, each entry naming the
+            module that reproduces it.
+        ambiguity_refs: Identifiers of the entries in the migration's
+            ambiguity-resolutions log that bear on this field, may
             be empty. An ambiguity is a question reading the source cannot
             settle and only running the compiled program can, which is what
             rule R-6 is about. Two of the five land here: what value a negative
@@ -1569,6 +1667,7 @@ class DictionaryEntry(_JsonRecord):
     presence: Presence
     one_sided: bool
     copybook: CopybookField | None
+    program_source: CopybookField | None
     bridge_host_variable: BridgeHostVariable | None
     column: MysqlColumn | None
     drift: Drift
@@ -1582,7 +1681,7 @@ class DictionaryEntry(_JsonRecord):
     def from_json_obj(cls, obj: JsonObject) -> Self:
         """Build one entry from its recorded object.
 
-        Each of the four nullable object members is read once and mapped only
+        Each of the five nullable object members is read once and mapped only
         when it is present, so a null view stays a null view: nothing here
         substitutes an empty record for an absent one, which would turn "no
         copybook declares this field" into "a copybook declares nothing about
@@ -1590,6 +1689,7 @@ class DictionaryEntry(_JsonRecord):
         """
         entity_facade = obj["entity_facade"]
         copybook = obj["copybook"]
+        program_source = obj["program_source"]
         bridge_host_variable = obj["bridge_host_variable"]
         column = obj["column"]
         derivation = obj["derivation"]
@@ -1605,6 +1705,11 @@ class DictionaryEntry(_JsonRecord):
             one_sided=obj["one_sided"],
             copybook=(
                 None if copybook is None else CopybookField.from_json_obj(copybook)
+            ),
+            program_source=(
+                None
+                if program_source is None
+                else CopybookField.from_json_obj(program_source)
             ),
             bridge_host_variable=(
                 None
@@ -1623,9 +1728,7 @@ class DictionaryEntry(_JsonRecord):
         )
 
 
-# =============================================================================
 #  THE FROZEN INPUTS - recorded so every entry can be re-derived, not trusted
-# =============================================================================
 
 
 @dataclass(frozen=True, slots=True)
@@ -1682,7 +1785,7 @@ class BridgeKey(_JsonRecord):
             spells it, with the declaration's trailing padding removed.
         offset: The key's one-based starting position within the working-storage
             record, taken from the FIRST FOUR digits of that literal. A
-            position, not a measured quantity (rule R-2).
+            position, not a magnitude (rule R-2).
         length: The key's length in record positions, taken from the LAST FOUR
             digits of the same literal.
         type: The three-character key-type literal. Two occur across the
@@ -1850,6 +1953,79 @@ class CopybookSource(_JsonRecord):
 
 
 @dataclass(frozen=True, slots=True)
+class ProgramSourceRecord(_JsonRecord):
+    """One record a PROGRAM declares inline, in its own FILE SECTION.
+
+    The fourth frozen input family, and the smallest: the General Ledger work
+    files. `copybooks/wsnames.cob:L14-L17` names `pretrans.tmp` and
+    `postrans.tmp` and annotates both as belonging to `gl071`, but no copybook
+    declares their LAYOUT - each program that touches them writes the `01`
+    record out inline instead, which is why these records need a source family
+    of their own rather than a row among the copybooks.
+
+    WHY THEY ARE CATALOGUED AT ALL, given that they reach no table. Because
+    their field widths and storage classes are load-bearing:
+    [general/gl072.cbl:L410-L412] finds the nominal-ledger account for a posting
+    by SEQUENTIAL read rather than by key, so it lands on the right account only
+    because [general/gl071.cbl] has already sorted the stream into nominal
+    order. Perturb a key field's width or its usage and the program posts to the
+    wrong account with no error and no diagnostic - anomaly A-14. Rule R-5
+    admits no field bound by eye, so these are derived from the frozen programs
+    like every other field in this document.
+
+    THE SAME LOGICAL RECORD IS DECLARED MORE THAN ONCE, AND THE DECLARATIONS DO
+    NOT ALL AGREE. `pre-trans-record` is declared in both `gl070` and `gl071`,
+    identically. `post-trans-record` is declared in both `gl071` and `gl072` and
+    the two differ: `gl071` declares the account and profit-centre fields FLAT
+    at level 03, while `gl072` wraps the same eight bytes in a `03 post-ledger.`
+    group with the two fields at 05 beneath it, because it needs the composite.
+    Both declarations are recorded, neither is harmonised, and the divergence is
+    left visible (rule R-4). It is also why an entry key for one of the repeated
+    field names carries its declaration line.
+
+    Attributes:
+        path: The program that declares the record, for example
+            `general/gl071.cbl`.
+        record_name: The 01-level record it declares, case preserved as the
+            program writes it - which for these records is lower case
+            throughout, unlike most copybook records.
+        section: `FD` for a file description or `SD` for a sort description.
+            Recorded because the distinction is real: `sd sort-trans`
+            [general/gl071.cbl:L134] is the sort work file the SORT verb owns,
+            and the two `fd` records are the sequential work files it reads and
+            writes.
+        declared_lengths: Every record length the program states about the
+            record, as digit strings, in the order it states them - EMPTY for
+            all of these records, because the programs state none. Kept as an
+            array for the same reason `CopybookSource.declared_lengths` is one:
+            so that a contradiction could be recorded rather than resolved
+            (rule R-4).
+        notes: Observations about the record as a whole rather than about any
+            single field, may be empty: that a second program declares the same
+            record differently, that the record is transient scratch storage
+            reaching no table, or that a downstream sequential read depends on
+            the order its fields are sorted in.
+    """
+
+    path: RepoPath
+    record_name: str
+    section: str
+    declared_lengths: tuple[str, ...]
+    notes: tuple[str, ...]
+
+    @classmethod
+    def from_json_obj(cls, obj: JsonObject) -> Self:
+        """Build one program-source record from its recorded object."""
+        return cls(
+            path=obj["path"],
+            record_name=obj["record_name"],
+            section=obj["section"],
+            declared_lengths=tuple(obj["declared_lengths"]),
+            notes=tuple(obj["notes"]),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class NumericTypeCensus(_JsonRecord):
     """How many columns of each base type the frozen schema declares.
 
@@ -1977,8 +2153,61 @@ class SchemaSource(_JsonRecord):
 
 
 @dataclass(frozen=True, slots=True)
+class SourceDigest(_JsonRecord):
+    """One frozen input file, bound to the exact bytes the generator read.
+
+    The three source sets above name WHICH files every entry was derived from.
+    They do not, by themselves, say anything about the CONTENT of those files,
+    so a document could claim a derivation from `common/salesMT.cbl` that the
+    file on disk does not support - whether because the file legitimately
+    changed, or because the document was edited by hand, or because it was
+    substituted wholesale. This record closes that gap: it pins the digest and
+    the byte length of every file the generator actually opened, so the claim
+    "this dictionary was derived from these inputs" becomes checkable rather
+    than asserted.
+
+    Checking is what `--check` does. It re-derives the whole document from the
+    working tree, which recomputes every digest here from the files as they
+    stand; a mismatch therefore surfaces as a difference in the regenerated
+    document rather than needing a separate comparison step. The manifest is
+    also bound as a whole by `Meta.source_inputs_sha256`, so editing one digest
+    is not enough to make a forged document self-consistent.
+
+    A digest is not a signature and this manifest does not claim to be one: it
+    binds the artifact to the repository it was generated from, which is exactly
+    the property the frozen-source rule needs, since the repository itself is
+    the authority.
+
+    Attributes:
+        path: The input's path relative to the repository root, forward slashes,
+            never absolute - so the manifest is identical whichever checkout it
+            was produced in (rule R-6 forbids an absolute path in this
+            document).
+        sha256: Lower-case hexadecimal SHA-256 of the file's bytes, exactly as
+            they sit on disk. Computed over the raw bytes, not over the decoded
+            or line-normalised text, so a line-ending change is a change.
+        byte_length: The file's size in bytes. Redundant against the digest and
+            deliberately so: it makes an accidental truncation legible at a
+            glance rather than only detectable by recomputation.
+    """
+
+    path: RepoPath
+    sha256: str
+    byte_length: int
+
+    @classmethod
+    def from_json_obj(cls, obj: JsonObject) -> Self:
+        """Build one input digest from its recorded object."""
+        return cls(
+            path=obj["path"],
+            sha256=obj["sha256"],
+            byte_length=obj["byte_length"],
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class Sources(_JsonRecord):
-    """The three frozen input sets the dictionary is derived from.
+    """The four frozen input sets the dictionary is derived from, and their digests.
 
     Recorded so that every entry can be RE-DERIVED from the repository rather
     than trusted. Field metadata in this dictionary is derived and not
@@ -1993,11 +2222,23 @@ class Sources(_JsonRecord):
             `Determinism.array_order`.
         copybooks: The copybooks whose record layouts the dictionary reads,
             sorted by path.
+        input_digests: Every file the generator opened, with its digest and byte
+            length, sorted by path. This is the authenticated binding between
+            the artifact and the exact frozen bytes behind it; see
+            `SourceDigest`.
+        program_sources: The records the posting programs declare inline in
+            their own FILE SECTIONs - the General Ledger work files -
+            sorted by path and then by the record's declaration line, since one
+            program declares three of them. The smallest of the four families
+            and the only one whose fields reach no table; see
+            `ProgramSourceRecord` for why they are catalogued regardless.
     """
 
     schema: SchemaSource
     bridges: tuple[BridgeSource, ...]
     copybooks: tuple[CopybookSource, ...]
+    input_digests: tuple[SourceDigest, ...]
+    program_sources: tuple[ProgramSourceRecord, ...]
 
     @classmethod
     def from_json_obj(cls, obj: JsonObject) -> Self:
@@ -2010,12 +2251,17 @@ class Sources(_JsonRecord):
             copybooks=tuple(
                 CopybookSource.from_json_obj(item) for item in obj["copybooks"]
             ),
+            input_digests=tuple(
+                SourceDigest.from_json_obj(item) for item in obj["input_digests"]
+            ),
+            program_sources=tuple(
+                ProgramSourceRecord.from_json_obj(item)
+                for item in obj["program_sources"]
+            ),
         )
 
 
-# =============================================================================
 #  THE TABLE SPINE - which COBOL machinery reaches which table
-# =============================================================================
 
 
 @dataclass(frozen=True, slots=True)
@@ -2082,9 +2328,7 @@ class TableRecord(_JsonRecord):
         )
 
 
-# =============================================================================
 #  THE DETERMINISM CONTRACT - two regenerations must not differ by one byte
-# =============================================================================
 
 
 @dataclass(frozen=True, slots=True)
@@ -2109,12 +2353,16 @@ class ArrayOrder(_JsonRecord):
             order.
         bridges: How the bridges array under sources is ordered.
         copybooks: How the copybooks array under sources is ordered.
+        program_sources: How the program_sources array under sources is ordered.
+            Two keys are needed rather than one, because a single program
+            declares three of these records.
     """
 
     tables: str
     entries: str
     bridges: str
     copybooks: str
+    program_sources: str
 
     @classmethod
     def from_json_obj(cls, obj: JsonObject) -> Self:
@@ -2124,6 +2372,7 @@ class ArrayOrder(_JsonRecord):
             entries=obj["entries"],
             bridges=obj["bridges"],
             copybooks=obj["copybooks"],
+            program_sources=obj["program_sources"],
         )
 
 
@@ -2229,10 +2478,14 @@ class DerivationRules(_JsonRecord):
             found for it - which is the case that discovers a column existing in
             the bridge and the database but in no copybook.
         cobol_python_storage: How the exact-decimal-versus-integer-versus-text
-            choice is made FROM THE COPYBOOK VIEW ALONE. Restating what
+            choice is made FROM THE DECLARING VIEW ALONE. Restating what
             `CobolPythonStorage` says, because it is the one derived scalar in
             the whole document and must not be mistaken for a settlement of
             drift.
+        program_source_entries: How a record declared inline in a program's FILE
+            SECTION is found, which line span is read for it, and why
+            its bridge and column views are recorded as absent rather than
+            searched for.
     """
 
     entry_key: str
@@ -2243,6 +2496,7 @@ class DerivationRules(_JsonRecord):
     usage_inheritance: str
     bridge_derived_columns: str
     cobol_python_storage: str
+    program_source_entries: str
 
     @classmethod
     def from_json_obj(cls, obj: JsonObject) -> Self:
@@ -2256,6 +2510,7 @@ class DerivationRules(_JsonRecord):
             usage_inheritance=obj["usage_inheritance"],
             bridge_derived_columns=obj["bridge_derived_columns"],
             cobol_python_storage=obj["cobol_python_storage"],
+            program_source_entries=obj["program_source_entries"],
         )
 
 
@@ -2322,6 +2577,16 @@ class Meta(_JsonRecord):
         derivation_rules: How every derived member was arrived at.
         binding_rules: The six rules that govern this migration and therefore
             this dictionary, in identifier order.
+        source_inputs_sha256: The digest of `sources.input_digests` taken as a
+            whole - one lower-case hexadecimal SHA-256 over the canonical
+            rendering `"<path>:<sha256>:<byte_length>\\n"` of every manifest
+            entry, joined in the manifest's own order. It binds the manifest
+            itself, so a document whose per-file digests have been edited to
+            match a substituted input is still detectably inconsistent here.
+            This member records a property of frozen inputs, not of the machine
+            that ran the generator, so it does not weaken the prohibition above:
+            two regenerations from an unchanged repository produce the same
+            value.
     """
 
     dictionary_name: str
@@ -2332,6 +2597,7 @@ class Meta(_JsonRecord):
     determinism: Determinism
     derivation_rules: DerivationRules
     binding_rules: tuple[BindingRule, ...]
+    source_inputs_sha256: str
 
     @classmethod
     def from_json_obj(cls, obj: JsonObject) -> Self:
@@ -2349,12 +2615,11 @@ class Meta(_JsonRecord):
             binding_rules=tuple(
                 BindingRule.from_json_obj(item) for item in obj["binding_rules"]
             ),
+            source_inputs_sha256=obj["source_inputs_sha256"],
         )
 
 
-# =============================================================================
 #  COVERAGE - the completeness claim, made auditable by counting
-# =============================================================================
 
 
 @dataclass(frozen=True, slots=True)
@@ -2390,6 +2655,12 @@ class Coverage(_JsonRecord):
             so the claim is a comparison rather than an assertion.
         host_variables_covered: How many bridge host variables have an entry.
         copybook_fields_covered: How many copybook fields have an entry.
+        program_source_fields_covered: How many fields declared inline in a
+            program's FILE SECTION have an entry - the General Ledger
+            work-file records. Counted separately from the copybook fields
+            rather than folded into them, because they come from a different
+            source family and no copybook declares them; adding the two
+            together would misreport both.
         one_sided_entry_keys: The key of every entry whose one-sided flag is
             true, gathered in one place. This is the review list for
             cross-source disagreement: a field present in one source and absent
@@ -2408,6 +2679,7 @@ class Coverage(_JsonRecord):
     columns_covered: int
     host_variables_covered: int
     copybook_fields_covered: int
+    program_source_fields_covered: int
     one_sided_entry_keys: tuple[EntryKey, ...]
 
     @classmethod
@@ -2424,13 +2696,12 @@ class Coverage(_JsonRecord):
             columns_covered=obj["columns_covered"],
             host_variables_covered=obj["host_variables_covered"],
             copybook_fields_covered=obj["copybook_fields_covered"],
+            program_source_fields_covered=obj["program_source_fields_covered"],
             one_sided_entry_keys=tuple(obj["one_sided_entry_keys"]),
         )
 
 
-# =============================================================================
 #  THE DOCUMENT ROOT
-# =============================================================================
 
 
 @dataclass(frozen=True, slots=True)
@@ -2464,9 +2735,10 @@ class DataDictionary(_JsonRecord):
             in table-name order.
         entries: The field-level triples, grouped by table and then by column
             ordinal, with copybook-only fields following their record's
-            column-mapped fields. One entry per column, per host variable and
-            per copybook field, including every field that exists in only one of
-            the three sources.
+            column-mapped fields and the program-source work-file fields last of
+            all. One entry per column, per host variable, per copybook field and
+            per program-source field, including every field that exists in only
+            one source.
         coverage: The tallies that make the completeness claim checkable.
     """
 
@@ -2506,14 +2778,617 @@ class DataDictionary(_JsonRecord):
 
 
 # =============================================================================
-#  THE TWO DOORS - the whole document in, the whole document out
+#  THE INTEGRITY PASS - the artifact's own trust boundary
 #
+#  Rule R-5 requires that every Python field cite a dictionary entry, and every
+#  record module does. A citation is only worth what the cited document is
+#  worth, so the document itself is where the whole traceability claim can be
+#  attacked: substitute the artifact, or edit one member of it by hand, and
+#  several hundred fields silently acquire a picture, a scale, a signedness or a
+#  storage class that no frozen source supports. Nothing downstream would
+#  notice, because everything downstream trusts the dictionary by design.
+#
+#  This pass closes that. It runs once, on the way IN, in the door below, and
+#  holds the decoded document to everything this module already states about it:
+#  the exact member set of every record, the exact value domain of every member,
+#  the patterns declared above, the values the schema pins to one literal each,
+#  the uniqueness of every identifier, the agreement between the presence flags
+#  and the views they describe, the coverage tallies against the entries
+#  actually present, and the digest that binds the source manifest to itself.
+#  The first document that departs from any of it raises
+#  `DictionaryIntegrityError` and no record is built from it.
+#
+#  WHY THIS IS NOT A NEW VALIDATION (rule R-3). R-3 forbids adding validation
+#  to the migrated accounting cycle: no new check on a posting, an amount, an
+#  account code or a batch, because the compiled program is the specification
+#  and a check it does not perform is a behaviour change. Nothing here examines
+#  an accounting value. This pass examines the migration's own metadata artifact
+#  - the document that says what shape a field has - and it examines it for
+#  self-consistency against facts stated in this module, not against any
+#  judgement about what the frozen sources ought to contain. A repository whose
+#  artifact is the one its generator produced sees byte-identical behaviour with
+#  this pass present and absent; the pass changes what happens only when the
+#  document is already not the document it claims to be. That is provenance
+#  control, which R-5 requires, not ledger validation, which R-3 forbids.
+#
+#  WHAT IT DELIBERATELY DOES NOT DO. It does not read a frozen COBOL or SQL
+#  source, so it cannot and does not confirm that a recorded digest matches the
+#  bytes on disk - `generate.py --check` is what does that, by re-deriving the
+#  whole document. It does not repair, default, coerce or warn: there is one
+#  outcome for a document that does not hold up, and it is a raise. And it does
+#  not consult the clock, the environment, the filesystem or the network, so it
+#  cannot make two runs differ (rule R-6).
+# =============================================================================
+
+
+class DictionaryIntegrityError(ValueError):
+    """A dictionary document does not hold up as the document it claims to be.
+
+    Raised by the `from_json_obj` door, before any record is built, when the
+    decoded document departs from the structure, domains, patterns, pinned
+    values, identifier uniqueness, internal agreement or manifest binding this
+    module declares. The message names every departure found, one per line, in
+    the order the walk found them, so a single raise diagnoses the whole
+    document rather than only its first fault.
+
+    A `ValueError` subclass because that is what a caller who does not care
+    about the distinction already catches, and because the fault is always in
+    the value handed in - never in the caller's use of the interface.
+    """
+
+
+#: Every string member the schema constrains by pattern, keyed
+#: `"<record class>.<member>"`. A member absent from this map is checked for
+#: being text and nothing more; a member present is additionally held to its
+#: pattern, and so is every element when the member is an array of text. The map
+#: is the single place the pattern-to-member correspondence is written down,
+#: which is what keeps it from drifting away from the schema it mirrors.
+_PATTERN_BY_MEMBER: Final[Mapping[str, re.Pattern[str]]] = {
+    "BindingRule.id": BINDING_RULE_ID_PATTERN,
+    "BridgeHostVariable.file": REPO_PATH_PATTERN,
+    "BridgeHostVariable.hv_group_name": HV_GROUP_NAME_PATTERN,
+    "BridgeHostVariable.hv_group_suffix": HV_GROUP_SUFFIX_PATTERN,
+    "BridgeHostVariable.load_source": SOURCE_LOCATOR_PATTERN,
+    "BridgeHostVariable.name": HV_NAME_PATTERN,
+    "BridgeHostVariable.source": SOURCE_LOCATOR_PATTERN,
+    "BridgeHostVariable.unload_source": SOURCE_LOCATOR_PATTERN,
+    "BridgeKey.source": SOURCE_LOCATOR_PATTERN,
+    "BridgeKey.type": BRIDGE_KEY_TYPE_PATTERN,
+    "BridgeSource.cbl_path": REPO_PATH_PATTERN,
+    "BridgeSource.directive_source": SOURCE_LOCATOR_PATTERN,
+    "BridgeSource.load_paragraph_source": SOURCE_LOCATOR_PATTERN,
+    "BridgeSource.scb_path": REPO_PATH_PATTERN,
+    "BridgeSource.unload_paragraph_source": SOURCE_LOCATOR_PATTERN,
+    "BridgeTableRef.hv_group_name": HV_GROUP_NAME_PATTERN,
+    "BridgeTableRef.hv_group_suffix": HV_GROUP_SUFFIX_PATTERN,
+    "BridgeTableRef.name": TABLE_NAME_PATTERN,
+    "ConditionName.source": SOURCE_LOCATOR_PATTERN,
+    "CopybookField.file": REPO_PATH_PATTERN,
+    "CopybookField.level": COPYBOOK_LEVEL_PATTERN,
+    "CopybookField.source": SOURCE_LOCATOR_PATTERN,
+    "CopybookField.usage_group_source": SOURCE_LOCATOR_PATTERN,
+    "CopybookSource.declared_lengths": DECLARED_LENGTH_PATTERN,
+    "CopybookSource.path": REPO_PATH_PATTERN,
+    "Coverage.one_sided_entry_keys": ENTRY_KEY_PATTERN,
+    "Derivation.source": SOURCE_LOCATOR_PATTERN,
+    "DictionaryEntry.ambiguity_refs": AMBIGUITY_REF_PATTERN,
+    "DictionaryEntry.anomaly_refs": ANOMALY_REF_PATTERN,
+    "DictionaryEntry.bridge": BRIDGE_NAME_PATTERN,
+    "DictionaryEntry.handler": HANDLER_NAME_PATTERN,
+    "DictionaryEntry.key": ENTRY_KEY_PATTERN,
+    "DictionaryEntry.table": TABLE_NAME_PATTERN,
+    "Meta.dictionary_version": DICTIONARY_VERSION_PATTERN,
+    "Meta.source_inputs_sha256": SHA256_PATTERN,
+    "MysqlColumn.file": REPO_PATH_PATTERN,
+    "MysqlColumn.name": COLUMN_NAME_PATTERN,
+    "MysqlColumn.source": SOURCE_LOCATOR_PATTERN,
+    "SchemaSource.path": REPO_PATH_PATTERN,
+    "SchemaSource.server_version_source": SOURCE_LOCATOR_PATTERN,
+    "SourceDigest.path": REPO_PATH_PATTERN,
+    "SourceDigest.sha256": SHA256_PATTERN,
+    "TableRecord.bridge": BRIDGE_NAME_PATTERN,
+    "TableRecord.copybooks": REPO_PATH_PATTERN,
+    "TableRecord.handler": HANDLER_NAME_PATTERN,
+    "TableRecord.name": TABLE_NAME_PATTERN,
+    "TableRecord.ordinal_source": SOURCE_LOCATOR_PATTERN,
+}
+
+#: The members the schema pins to exactly one literal, keyed the same way. A
+#: document that names a different generator, a different schema, a different
+#: authority statement or a different serialisation contract is not this
+#: dictionary, whatever else it may be, and saying so here is cheaper and more
+#: exact than any amount of downstream suspicion.
+_PINNED_BY_MEMBER: Final[Mapping[str, str | int | bool]] = {
+    "Determinism.byte_order_mark": DETERMINISM_BYTE_ORDER_MARK,
+    "Determinism.encoding": DETERMINISM_ENCODING,
+    "Determinism.indent": DETERMINISM_INDENT,
+    "Determinism.newline": DETERMINISM_NEWLINE,
+    "Determinism.trailing_newline": DETERMINISM_TRAILING_NEWLINE,
+    "Meta.authority": DICTIONARY_AUTHORITY,
+    "Meta.dictionary_name": DICTIONARY_NAME,
+    "Meta.generated_by": DICTIONARY_GENERATED_BY,
+    "Meta.schema_ref": DICTIONARY_SCHEMA_REF,
+}
+
+#: How many departures one raise reports in full. A document that has gone
+#: badly wrong can fail in thousands of places at once and an unbounded message
+#: would bury the useful part; the count is always reported in full, so nothing
+#: is hidden, only elided.
+_MAX_REPORTED_PROBLEMS: Final[int] = 25
+
+
+def source_inputs_digest_material(digests: Sequence[SourceDigest]) -> str:
+    """Render a source manifest to the exact text its roll-up digest is taken over.
+
+    Args:
+        digests: The manifest, in the order it appears in the document. Order is
+            part of the material, so a reordered manifest is a different
+            manifest - which is what stops two documents with the same set of
+            inputs but different array order from sharing a digest.
+
+    Returns:
+        One line per entry, `"<path>:<sha256>:<byte_length>"`, each terminated
+        by a single line feed. Deliberately plain: it can be reproduced by hand
+        from the artifact with a text editor and a shell, so the binding is
+        auditable without running this module.
+
+    Written once here and used by both ends - `generate.py` to compute
+    `Meta.source_inputs_sha256` and this module's integrity pass to recompute
+    it - because two implementations of a digest input are two chances to
+    disagree, and a disagreement would make every artifact look forged.
+    """
+    return "".join(
+        "%s:%s:%d\n" % (digest.path, digest.sha256, digest.byte_length)
+        for digest in digests
+    )
+
+
+def source_inputs_digest(digests: Sequence[SourceDigest]) -> str:
+    """Compute the roll-up digest that binds a source manifest as a whole.
+
+    Args:
+        digests: The manifest, in document order.
+
+    Returns:
+        Lower-case hexadecimal SHA-256 of `source_inputs_digest_material`,
+        which is the value `Meta.source_inputs_sha256` carries.
+
+    The per-file digests bind each input to its bytes; this binds the list of
+    them to itself. Without it, a forged document could swap one input's digest
+    for the digest of a file it substituted and remain internally consistent.
+    With it, that edit has to be made in two places that are computed from each
+    other, and the second one is over the whole manifest.
+    """
+    return hashlib.sha256(
+        source_inputs_digest_material(digests).encode(DETERMINISM_ENCODING)
+    ).hexdigest()
+
+
+@cache
+def _resolved_hints(record: type) -> Mapping[str, Any]:
+    """Resolve one record class's annotations to real objects, once per class.
+
+    `from __future__ import annotations` is not in force here, but the string
+    domains are PEP 695 aliases and the records refer to one another, so
+    resolution still has to go through `get_type_hints` rather than reading
+    `__annotations__` directly. Cached because the walk asks the same twenty-odd
+    classes the same question several thousand times for a document of this
+    size, and resolution is the expensive half.
+    """
+    return get_type_hints(record)
+
+
+def _unwrap_alias(hint: Any) -> Any:
+    """Reduce a PEP 695 alias to the type it stands for.
+
+    Every string domain above - `RepoPath`, `EntryKey`, `TableName` and the
+    rest - is an alias for `str`, declared separately so that a reader of a
+    record sees which domain a member belongs to. The walk cares only about the
+    underlying shape, so the alias is unwrapped here; the domain it named is
+    still enforced, through `_PATTERN_BY_MEMBER`.
+    """
+    while isinstance(hint, TypeAliasType):
+        hint = hint.__value__
+    return hint
+
+
+def _check_member(
+    hint: Any,
+    value: object,
+    where: str,
+    pattern: re.Pattern[str] | None,
+    pinned: str | int | bool | None,
+    problems: list[str],
+) -> None:
+    """Hold one decoded member to the type its record declares for it.
+
+    Args:
+        hint: The resolved annotation, possibly an alias, an optional or an
+            array of one of those.
+        value: The decoded member.
+        where: Its path in the document, for the message.
+        pattern: The pattern its record declares for it, if any. An array
+            member's pattern applies to every element.
+        pinned: The single literal the schema pins it to, if any.
+        problems: Where a departure is appended. Nothing raises here, so one
+            walk reports the whole document.
+    """
+    hint = _unwrap_alias(hint)
+
+    # `X | None` - absence is admitted, and the arm is checked when present.
+    # Every union in this module is exactly one type or nothing; anything else
+    # would be a shape the schema cannot express, so it is reported rather than
+    # guessed at.
+    if isinstance(hint, UnionType):
+        arms = [arm for arm in get_args(hint) if arm is not type(None)]
+        if value is None:
+            return
+        if len(arms) != 1:
+            problems.append("%s: cannot check a %d-arm union" % (where, len(arms)))
+            return
+        _check_member(arms[0], value, where, pattern, pinned, problems)
+        return
+
+    # `tuple[X, ...]` - JSON carries it as an array; every element is checked
+    # against the same element type and the same pattern.
+    if get_origin(hint) is tuple:
+        if not isinstance(value, list):
+            problems.append(
+                "%s: expected an array, found %s" % (where, type(value).__name__)
+            )
+            return
+        element = get_args(hint)[0]
+        for index, item in enumerate(value):
+            _check_member(
+                element, item, "%s[%d]" % (where, index), pattern, None, problems
+            )
+        return
+
+    if isinstance(hint, type) and issubclass(hint, Enum):
+        admitted = {member.value for member in hint}
+        if not isinstance(value, str) or value not in admitted:
+            problems.append(
+                "%s: %r is not one of the %d values %s admits"
+                % (where, value, len(admitted), hint.__name__)
+            )
+        return
+
+    if isinstance(hint, type) and issubclass(hint, _JsonRecord):
+        _check_record(hint, value, where, problems)
+        return
+
+    # A flag before a whole number, because `bool` is a subclass of `int` and
+    # the two are not interchangeable in this document: a member declared as a
+    # flag that arrives as 0 or 1 is a document written by something other than
+    # this module's writer.
+    if hint is bool:
+        if not isinstance(value, bool):
+            problems.append("%s: expected a flag, found %r" % (where, value))
+        elif pinned is not None and value != pinned:
+            problems.append("%s: expected the pinned %r, found %r"
+                            % (where, pinned, value))
+        return
+
+    if hint is int:
+        if isinstance(value, bool) or not isinstance(value, int):
+            problems.append(
+                "%s: expected a whole number, found %r" % (where, value)
+            )
+        elif pinned is not None and value != pinned:
+            problems.append("%s: expected the pinned %r, found %r"
+                            % (where, pinned, value))
+        return
+
+    if hint is str:
+        if not isinstance(value, str):
+            problems.append("%s: expected text, found %r" % (where, value))
+            return
+        if pinned is not None and value != pinned:
+            problems.append("%s: does not carry the pinned value" % where)
+            return
+        if pattern is not None and pattern.match(value) is None:
+            problems.append(
+                "%s: %r does not match %s" % (where, value, pattern.pattern)
+            )
+        return
+
+    problems.append("%s: no rule for declared type %r" % (where, hint))
+
+
+def _check_record(
+    record: type, obj: object, where: str, problems: list[str]
+) -> None:
+    """Hold one decoded object to the record class that will be built from it.
+
+    The member set is checked in both directions: a member the record declares
+    and the document omits is a document that cannot be read without inventing
+    a default, which rule R-3 forbids; a member the document carries and the
+    record does not declare is content this module cannot account for, and
+    accepting it silently is how a forged addition would survive a round trip.
+    """
+    if not isinstance(obj, Mapping):
+        problems.append(
+            "%s: expected an object, found %s" % (where, type(obj).__name__)
+        )
+        return
+
+    hints = _resolved_hints(record)
+    declared = [member.name for member in fields(record)]
+
+    for unknown in sorted(set(obj) - set(declared)):
+        problems.append("%s: %s declares no member %r"
+                        % (where, record.__name__, unknown))
+
+    for name in declared:
+        if name not in obj:
+            problems.append("%s: missing member %r" % (where, name))
+            continue
+        qualified = "%s.%s" % (record.__name__, name)
+        _check_member(
+            hints[name],
+            obj[name],
+            "%s.%s" % (where, name),
+            _PATTERN_BY_MEMBER.get(qualified),
+            _PINNED_BY_MEMBER.get(qualified),
+            problems,
+        )
+
+
+def _check_identifiers(obj: JsonObject, problems: list[str]) -> None:
+    """Refuse a document that names any one thing twice.
+
+    Every identifier in this document is meant to be unique, and every consumer
+    relies on that: `loader.py` indexes entries by key so a repeated key would
+    silently shadow a field's real metadata with another field's, and the same
+    argument holds for a table named twice, an input digested twice or a binding
+    rule stated twice. Uniqueness is not checkable after the fact, because a
+    mapping keeps only the last of a repeated identity - so it is checked here,
+    while the arrays are still arrays.
+    """
+    def report_repeats(where: str, label: str, identities: Sequence[str]) -> None:
+        """Append one departure per identity that appears more than once."""
+        counts: dict[str, int] = {}
+        for identity in identities:
+            counts[identity] = counts.get(identity, 0) + 1
+        for identity in sorted(
+            name for name, count in counts.items() if count > 1
+        ):
+            problems.append(
+                "%s: %s %r appears %d times"
+                % (where, label, identity, counts[identity])
+            )
+
+    def member_of_each(items: object, member: str) -> tuple[str, ...]:
+        """Collect one text member from every object of an array."""
+        return tuple(
+            cast(str, item[member])
+            for item in cast(Sequence[JsonObject], items)
+        )
+
+    sources = cast(JsonObject, obj["sources"])
+    meta = cast(JsonObject, obj["meta"])
+    coverage = cast(JsonObject, obj["coverage"])
+
+    report_repeats(
+        "$.entries", "entry key", member_of_each(obj["entries"], "key")
+    )
+    report_repeats(
+        "$.tables", "table name", member_of_each(obj["tables"], "name")
+    )
+    report_repeats(
+        "$.sources.input_digests",
+        "source-manifest path",
+        member_of_each(sources["input_digests"], "path"),
+    )
+    report_repeats(
+        "$.meta.binding_rules",
+        "binding rule",
+        member_of_each(meta["binding_rules"], "id"),
+    )
+    report_repeats(
+        "$.coverage.one_sided_entry_keys",
+        "entry key",
+        tuple(cast(Sequence[str], coverage["one_sided_entry_keys"])),
+    )
+
+
+def _check_internal_agreement(obj: JsonObject, problems: list[str]) -> None:
+    """Refuse a document whose own parts disagree with each other.
+
+    Three kinds of agreement are checked, all of them arithmetic or set
+    comparison over the document itself and none of them a judgement about what
+    the frozen sources ought to say:
+
+    * a presence flag against the view it describes, and `one_sided` against all
+      three flags together - the flags are what a consumer tests before reading
+      a view, so a flag that disagrees with its view is the one inconsistency
+      that reliably produces a wrong answer downstream rather than an error;
+    * the coverage tallies against the entries actually present - these are the
+      mechanical proof of the completeness claim rule R-5 rests on, and a tally
+      that is merely asserted proves nothing;
+    * each table's declared column count against the column entries recorded
+      for it.
+    """
+    entries = cast(Sequence[JsonObject], obj["entries"])
+    coverage = cast(JsonObject, obj["coverage"])
+    sources = cast(JsonObject, obj["sources"])
+    tables = cast(Sequence[JsonObject], obj["tables"])
+
+    with_column = 0
+    with_host_variable = 0
+    with_copybook = 0
+    flagged_one_sided: set[str] = set()
+    columns_per_table: dict[str, int] = {}
+
+    for entry in entries:
+        key = cast(str, entry["key"])
+        presence = cast(JsonObject, entry["presence"])
+        views = (
+            ("in_copybook", "copybook"),
+            ("in_bridge", "bridge_host_variable"),
+            ("in_column", "column"),
+        )
+        for flag, view in views:
+            if bool(presence[flag]) != (entry[view] is not None):
+                problems.append(
+                    "$.entries[%r]: presence.%s says %r but %s is %s"
+                    % (key, flag, presence[flag], view,
+                       "absent" if entry[view] is None else "present")
+                )
+        if bool(entry["one_sided"]) != (
+            not all(bool(presence[flag]) for flag, _ in views)
+        ):
+            problems.append(
+                "$.entries[%r]: one_sided disagrees with its presence flags" % key
+            )
+
+        if entry["column"] is not None:
+            with_column += 1
+            table = cast(str, entry["table"])
+            columns_per_table[table] = columns_per_table.get(table, 0) + 1
+        if entry["bridge_host_variable"] is not None:
+            with_host_variable += 1
+        if entry["copybook"] is not None:
+            with_copybook += 1
+        if bool(entry["one_sided"]):
+            flagged_one_sided.add(key)
+
+    for member, actual, described in (
+        ("entry_count", len(entries), "entries recorded"),
+        ("columns_covered", with_column, "entries carrying a column view"),
+        ("host_variables_covered", with_host_variable,
+         "entries carrying a host-variable view"),
+        ("copybook_fields_covered", with_copybook,
+         "entries carrying a copybook view"),
+        ("in_scope_tables", len(tables), "table records"),
+        ("in_scope_bridges", len(cast(Sequence[object], sources["bridges"])),
+         "bridge records"),
+    ):
+        if coverage[member] != actual:
+            problems.append(
+                "$.coverage.%s claims %r against %d %s"
+                % (member, coverage[member], actual, described)
+            )
+
+    if coverage["columns_covered"] != coverage["in_scope_columns"]:
+        problems.append(
+            "$.coverage: %r columns covered of %r in scope - rule R-5 requires "
+            "every in-scope column to have an entry"
+            % (coverage["columns_covered"], coverage["in_scope_columns"])
+        )
+
+    if cast(int, coverage["in_scope_tables"]) + cast(
+        int, coverage["out_of_scope_tables"]
+    ) != coverage["schema_tables_total"]:
+        problems.append(
+            "$.coverage: in-scope and out-of-scope tables do not sum to the total"
+        )
+
+    schema_tables = cast(JsonObject, sources["schema"])["create_table_count"]
+    if coverage["schema_tables_total"] != schema_tables:
+        problems.append(
+            "$.coverage.schema_tables_total claims %r against the %r tables the "
+            "frozen dump declares"
+            % (coverage["schema_tables_total"], schema_tables)
+        )
+
+    recorded_one_sided = set(
+        cast(Sequence[str], coverage["one_sided_entry_keys"])
+    )
+    for key in sorted(recorded_one_sided - flagged_one_sided):
+        problems.append(
+            "$.coverage.one_sided_entry_keys: %r is listed but no entry is "
+            "flagged one-sided" % key
+        )
+    for key in sorted(flagged_one_sided - recorded_one_sided):
+        problems.append(
+            "$.entries[%r]: flagged one-sided but absent from "
+            "coverage.one_sided_entry_keys" % key
+        )
+
+    for table in tables:
+        name = cast(str, table["name"])
+        if columns_per_table.get(name, 0) != table["column_count"]:
+            problems.append(
+                "$.tables[%r]: column_count %r against %d column entries"
+                % (name, table["column_count"], columns_per_table.get(name, 0))
+            )
+
+
+def _check_manifest_binding(obj: JsonObject, problems: list[str]) -> None:
+    """Refuse a document whose source manifest does not bind to itself.
+
+    `Meta.source_inputs_sha256` is computed over the whole manifest, so editing
+    one recorded digest - to make a substituted input look accounted for -
+    leaves this value disagreeing with the list it summarises. Recomputing it
+    here costs one pass over a few dozen short strings and is the only part of
+    the manifest that can be checked without reading the frozen sources
+    themselves; confirming the digests against the bytes on disk is
+    `generate.py --check`, which re-derives the entire document.
+    """
+    sources = cast(JsonObject, obj["sources"])
+    meta = cast(JsonObject, obj["meta"])
+    manifest = tuple(
+        SourceDigest.from_json_obj(item)
+        for item in cast(Sequence[JsonObject], sources["input_digests"])
+    )
+    recomputed = source_inputs_digest(manifest)
+    if meta["source_inputs_sha256"] != recomputed:
+        problems.append(
+            "$.meta.source_inputs_sha256 does not bind the %d-entry source "
+            "manifest it summarises" % len(manifest)
+        )
+
+
+def check_integrity(obj: JsonObject) -> None:
+    """Hold a decoded dictionary document to everything this module declares, or raise.
+
+    Args:
+        obj: The parsed document, exactly as the standard-library JSON module
+            produced it with `parse_float=str`.
+
+    Raises:
+        DictionaryIntegrityError: The document departs from the structure, value
+            domains, patterns, pinned values, identifier uniqueness, internal
+            agreement or manifest binding declared above. The message names
+            every departure found, up to a bound, and always states the total.
+
+    The structural walk runs first and alone: when a document's shape is wrong,
+    the checks that read members by name and compare them arithmetically would
+    report a second, larger and entirely derivative set of failures, which
+    obscures the one fault that matters. Only a document that is structurally
+    sound is asked whether it agrees with itself.
+    """
+    problems: list[str] = []
+    _check_record(DataDictionary, obj, "$", problems)
+
+    if not problems:
+        _check_identifiers(obj, problems)
+        _check_internal_agreement(obj, problems)
+        _check_manifest_binding(obj, problems)
+
+    if not problems:
+        return
+
+    shown = problems[:_MAX_REPORTED_PROBLEMS]
+    elided = len(problems) - len(shown)
+    report = "\n".join("  - %s" % problem for problem in shown)
+    if elided:
+        report += "\n  - ... and %d further departures" % elided
+    raise DictionaryIntegrityError(
+        "the data dictionary document does not hold up (%d departures):\n%s"
+        % (len(problems), report)
+    )
+
+
+
+# =============================================================================
+#  THE TWO DOORS - the whole document in, the whole document out
 #  `generate.py` builds a `DataDictionary` and hands it to `to_json_obj`; the
 #  standard-library JSON module writes the result under the settings named in
 #  `Determinism`. `loader.py` parses the written file and hands the plain tree
 #  to `from_json_obj`. Nothing else is needed in either direction, and nothing
 #  else is offered: no partial read, no merge, no upgrade path, no repair.
-# =============================================================================
 
 
 def to_json_obj(dictionary: DataDictionary) -> dict[str, JsonValue]:
@@ -2549,6 +3424,15 @@ def from_json_obj(obj: JsonObject) -> DataDictionary:
     Returns:
         The document as an immutable tree of records.
 
+    Raises:
+        DictionaryIntegrityError: The document does not hold up as the document
+            it claims to be. `check_integrity` runs FIRST, before a single
+            record is built, so a document that has been substituted or edited
+            never becomes an object any consumer could mistake for the real
+            dictionary. See THE INTEGRITY PASS above for why holding the
+            migration's own metadata artifact to its declared shape is required
+            by rule R-5 rather than forbidden by rule R-3.
+
     The read adds nothing and forgives nothing: every member is fetched by
     name, no member has a fallback, and no value is coerced or widened. A
     document missing a member the schema requires fails here, loudly, rather
@@ -2556,23 +3440,22 @@ def from_json_obj(obj: JsonObject) -> DataDictionary:
     (rule R-3). Reading back what this module wrote and writing it again
     reproduces the same bytes.
     """
+    check_integrity(obj)
     return DataDictionary.from_json_obj(obj)
 
 
-# =============================================================================
 #  PUBLIC SURFACE
-#
 #  Constants first, then the string domains, then the records, then the two
 #  doors - each group in alphabetical order. Everything else in this module is
 #  private conversion machinery and is deliberately absent: `_JsonRecord`,
 #  `_record_to_json_obj` and `_json_value` are how the determinism rule is
 #  written once, not part of what this module offers.
-# =============================================================================
 
 __all__: Final[tuple[str, ...]] = (
-    # Patterns published for the generator and the test suites to check with.
-    # This module never applies them itself: it records what the frozen sources
-    # say and rejects nothing (rule R-3).
+    # Patterns published for the generator and the test suites to check with,
+    # and applied by this module's own integrity pass on the way in - see THE
+    # INTEGRITY PASS for why that is provenance control under rule R-5 and not
+    # new validation under rule R-3.
     "AMBIGUITY_REF_PATTERN",
     "ANOMALY_REF_PATTERN",
     "BINDING_RULE_ID_PATTERN",
@@ -2588,6 +3471,7 @@ __all__: Final[tuple[str, ...]] = (
     "HV_GROUP_SUFFIX_PATTERN",
     "HV_NAME_PATTERN",
     "REPO_PATH_PATTERN",
+    "SHA256_PATTERN",
     "SOURCE_LOCATOR_PATTERN",
     "TABLE_NAME_PATTERN",
     # The fixed values the schema pins to one literal each.
@@ -2617,8 +3501,9 @@ __all__: Final[tuple[str, ...]] = (
     "SqlBaseType",
     "Usage",
     "UsageDeclaredAt",
-    # The records: the three views, the cross-view facts, the entry, the frozen
-    # inputs, the contracts, the tallies and the root.
+    # The records: the three views of the authoritative triple plus the
+    # program-source view, the cross-view facts, the entry, the frozen inputs,
+    # the contracts, the tallies and the root.
     "ArrayOrder",
     "BindingRule",
     "BridgeHostVariable",
@@ -2639,9 +3524,19 @@ __all__: Final[tuple[str, ...]] = (
     "MysqlColumn",
     "NumericTypeCensus",
     "Presence",
+    "ProgramSourceRecord",
     "SchemaSource",
+    "SourceDigest",
     "Sources",
     "TableRecord",
+    # The integrity pass: the failure it raises, the check the door performs,
+    # and the two functions that define what the source-manifest digest is
+    # taken over - published so `generate.py` computes the value the reader
+    # recomputes, from one implementation rather than two.
+    "DictionaryIntegrityError",
+    "check_integrity",
+    "source_inputs_digest",
+    "source_inputs_digest_material",
     # The two doors.
     "from_json_obj",
     "to_json_obj",

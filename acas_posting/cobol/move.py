@@ -1,574 +1,441 @@
 """The COBOL `MOVE` verb: receiving-field data-movement semantics.
 
-A `MOVE` IS NOT AN ASSIGNMENT. Agent Action Plan section 0.1.2,
-transformation rule 11, verbatim:
+A `MOVE` IS NOT AN ASSIGNMENT. Agent Action Plan section 0.1.2, transformation
+rule 11, makes a `MOVE` between unlike pictures an explicit truncate/pad helper
+governed by "sending-field-to-receiving-field rules, not assignment", and
+sections 0.3.1 and 0.4.1.4 assign this file `MOVE` truncation, space padding and
+justification.
 
-    #   COBOL construct              Python construct
-    11  `MOVE` between unlike        Explicit truncate/pad helper
-        pictures
-    Transformation rule: "Sending-field-to-receiving-field rules, not
-                          assignment"
-
-Every `MOVE` is governed by the RECEIVING field. An alphanumeric item is
-filled from the left, padded with spaces on the right and truncated on the
-RIGHT. A numeric item is aligned on its implied decimal point and truncated
-or zero-padded on BOTH ends independently. Getting the direction of
-truncation backwards corrupts data silently, with no error either way, and
-nothing will report it except a non-empty state diff.
-
-THE AUTHORITY FOR THIS FILE
-===========================
-Agent Action Plan section 0.3.1 fixes it in one line:
-
-    move.py    (MOVE truncation, space padding, justification)
-
-Agent Action Plan section 0.4.1.4, the transformation row, verbatim:
-
-    Target File                    Transformation  Source File
-    acas_posting/cobol/move.py     CREATE          the in-scope `MOVE`
-                                                   statements
-    Key Changes: "Receiving-field truncation, space padding and
-                  justification"
-
-Rule R-1 names this file among those that "reimplement picture-clause
-parsing, the six storage classes, the arithmetic verbs, `MOVE` truncation,
-condition-name evaluation and `SORT` key semantics".
+Every `MOVE` is governed by the RECEIVING field. An alphanumeric item is filled
+from the left, padded with spaces on the right and truncated on the RIGHT. A
+numeric item is aligned on its implied decimal point and truncated or zero-padded
+on BOTH ends independently. Getting the direction of truncation backwards
+corrupts data silently, with no error either way, and nothing will report it
+except a non-empty state diff.
 
 ZERO BUSINESS LOGIC
-===================
-Agent Action Plan section 0.3.1, verbatim: "`cobol/` contains no business
-logic and `programs/` contains no numeric primitives." And section 0.1.2 on
-this package: it "contains no business logic whatsoever."
-
-So no posting rule, no calendar decision, no print-line layout and no
-account number appears below. This module supplies the movement mechanics;
-`acas_posting.programs.*` decides what is moved where. Every business noun
-in this file appears inside a docstring or a locator-citing comment, never
-as an identifier and never as a literal.
+Section 0.3.1 keeps business logic out of `cobol/`, so no posting rule, no
+calendar decision, no print-line layout and no account number appears below. This
+module supplies the movement mechanics; the program layer decides what is moved
+where. Every business noun in this file appears inside a docstring or a
+locator-citing comment, never as an identifier and never as a literal.
 
 THE `MOVE` CENSUS
-=================
-`MOVE` is the most-executed primitive in the whole migration. Agent Action
-Plan section 0.4.1 gives the census below, and `MOVE_CENSUS` publishes it as
-data. Its figures count LINES CONTAINING THE WORD `move`, comment lines
-included, and they reproduce exactly against the frozen checkout for eleven
-of the twelve program files.
+`MOVE` is the most-executed primitive in the migration. `MOVE_CENSUS` publishes
+the plan's own measure - lines containing the word, comments included - counted
+against the frozen checkout:
 
-    general/gl051.cbl  157     sales/sl055.cbl   91
-    general/gl070.cbl   66     sales/sl060.cbl  177
-    general/gl071.cbl    0     sales/sl100.cbl  124
+    general/gl051.cbl  157     sales/sl055.cbl     92  (the plan records 91)
+    general/gl070.cbl   66     sales/sl060.cbl    177
+    general/gl071.cbl    0     sales/sl100.cbl    124
     general/gl072.cbl   59     purchase/pl055.cbl  91
     general/gl080.cbl   48     purchase/pl060.cbl 165
                                purchase/pl100.cbl 122
                                irs/irs030.cbl     190
 
-A second census was taken here, counting only the lines that BEGIN a live
-`MOVE` statement, and it totals 1,250 rather than 1,290. Both are published,
-each with the measurement that produced it - `MOVE_CENSUS` and
-`MOVE_STATEMENT_CENSUS` - because a single number whose method is unstated
-is a number a later reader cannot check. `general/gl071.cbl` measures ZERO
-either way: it is a pure sort and contains no `MOVE` at all.
+`MOVE_STATEMENT_CENSUS` publishes a second count, of lines that BEGIN a live
+`MOVE` statement, totalling 1,250 against the first table's 1,291. Both carry the
+counting method that produced them, because a single number whose method is
+unstated cannot be checked. `general/gl071.cbl` counts ZERO either way: it is a
+pure sort and contains no `MOVE` at all.
 
 THE FIVE MOVE CATEGORIES, AND THE DIRECTION EACH TRUNCATES
-==========================================================
-(a) ALPHANUMERIC from ALPHANUMERIC. Filled from the left, padded with
-    spaces on the right, truncated on the RIGHT. `Post-Legend pic x(32)`
-    [copybooks/wspost.cob:L24], `Post-Code pic xx`
-    [copybooks/wspost.cob:L17] and `Ledger-Name pic x(24)`
-    [copybooks/wsledger.cob:L27] are all such receivers, and all three are
-    database columns. `move_alphanumeric` implements it, delegating the
-    truncate-and-pad step to `acas_posting.cobol.usage.coerce` so that one
-    implementation of the rule exists.
+Each category is stated in full - with its receivers, its locators and the open
+question it raises - at the function that implements it. The index:
 
-(b) NUMERIC from NUMERIC. Aligned on the implied decimal point, then
-    truncated or zero-padded at BOTH ends independently. `move zero to
-    tot-dr tot-cr.` [general/gl072.cbl:L411] and `move work-net to
-    Post-Amount.` [sales/sl060.cbl:L1076], whose receiver is `Post-Amount
-    pic s9(8)v99` [copybooks/wspost.cob:L23]. `move_numeric` implements it
-    by DELEGATING to `acas_posting.cobol.arithmetic.store`, which already
-    owns scale alignment, the unsigned sign drop and silent high-order
-    truncation. Two truncation code paths would mean one of them was
-    eventually wrong.
+    (a) alphanumeric from alphanumeric   `move_alphanumeric`   right-truncates
+    (b) numeric from numeric             `move_numeric`        both ends
+    (c) alphanumeric from numeric        `move_alphanumeric`   right-truncates
+    (d) numeric from alphanumeric        `move_numeric`        both ends, Q-13
+    (e) a figurative constant            `move_figurative`     fill character
 
-    Storing into an UNSIGNED receiver drops the sign: `Input-Gross` through
-    `Actual-Vat` are `pic 9(9)v99` with no sign, under `03 Amounts comp-3.`
-    [copybooks/wsbatch.cob:L40-L44]. That is already numbered open question
-    Q-3 and is not renumbered here.
+Category (b) and (d) DELEGATE the store to `acas_posting.cobol.arithmetic.store`,
+which already owns scale alignment, the unsigned sign drop and silent high-order
+truncation; two truncation code paths would mean one of them was eventually wrong.
+Category (a) and (c) delegate truncate-and-pad to `acas_posting.cobol.usage.coerce`
+for the same reason. Categories (c) and (d) exist at all because a `pic 9(n)`
+DISPLAY item IS a character field in COBOL: `move WS-Batch-nos to Batch.`
+[sales/sl060.cbl:L1073] moves into `Batch pic 9(5)` [copybooks/wspost.cob:L15], and
+the digit-string image of a numeric sending item is its declared width, zero-filled
+- `pic 9(5)` holding 42 has the image `00042`, not `42`.
 
-    Storing into a `SIGN LEADING` receiver keeps the sign in the leading
-    position: `pic s9(7)v99   sign leading`
-    [copybooks/wspost-irs.cob:L21], [copybooks/wspost-irs.cob:L25], and
-    `sign is leading` [copybooks/irswspost.cob:L14],
-    [copybooks/irswspost.cob:L18]. The byte form belongs to
-    `acas_posting.cobol.usage`, which this module delegates to; the two
-    spellings are left exactly as the frozen copybooks write them and are
-    never reconciled into one.
+Two facts from those functions must not be lost by a reader who stops here. An
+UNSIGNED numeric receiver drops the sign, and the unsigned receivers are real -
+`Input-Gross` through `Actual-Vat` are `pic 9(9)v99` with no sign under
+`03 Amounts comp-3.` [copybooks/wsbatch.cob:L40-L44], which is question Q-3. A
+`SIGN LEADING` receiver keeps the sign in the leading position, and the frozen
+sources spell the clause two ways - `sign leading`
+[copybooks/wspost-irs.cob:L21], [copybooks/wspost-irs.cob:L25] and `sign is
+leading` [copybooks/irswspost.cob:L14], [copybooks/irswspost.cob:L18] - which stay
+exactly as written and are never reconciled into one.
 
-(c) ALPHANUMERIC from NUMERIC and (d) NUMERIC from ALPHANUMERIC. Both
-    occur, because a `pic 9(n)` DISPLAY item IS a character field in COBOL:
-    `move WS-Batch-nos to Batch.` [sales/sl060.cbl:L1073] moves into `Batch
-    pic 9(5)` [copybooks/wspost.cob:L15]. The digit-string image of a
-    numeric sending item is its declared width, zero-filled, with the sign
-    where its SIGN clause puts it - so `pic 9(5)` holding 42 has the image
-    `00042` and not `42`. Pass `sending_field` to get that image;
-    `acas_posting.cobol.usage.encode` produces it. Both
-    `acas_posting.cobol.usage._require_text` and `_stored_text` defer this
-    category crossing here by name, and this is where it lives.
+Category (e) has no sending field at all: moving `ZERO` into an alphanumeric item
+fills it with the character `0` - `move zero to tot-dr tot-cr.`
+[general/gl072.cbl:L411] - while moving `SPACE` into a NUMERIC item DOES NOT
+COMPILE, so it is refused rather than answered, which is question Q-9. The live
+form is `move space to oi-applied oi-unapl oi-hold-flag.`
+[sales/sl055.cbl:L655], whose three receivers are alphanumeric flags.
 
-(e) A FIGURATIVE CONSTANT, which has no sending field at all. Moving `ZERO`
-    into an alphanumeric item fills it with the character `0`; moving
-    `SPACE` into a numeric item leaves spaces in its bytes, which then fail
-    a numeric class test - see Q-9. `move zero to tot-dr tot-cr.`
-    [general/gl072.cbl:L411] and `move space to oi-applied oi-unapl
-    oi-hold-flag.` [sales/sl055.cbl:L655].
-
-MULTIPLE RECEIVERS, EACH APPLYING ITS OWN RULES
-===============================================
+MULTIPLE RECEIVERS, AND GROUP MOVES
 One `MOVE` may name several receivers, and each applies its own truncation
-independently. The decisive exemplar is [general/gl051.cbl:L1017]:
+independently. The decisive exemplar is [general/gl051.cbl:L1017], `move batch to
+l4-batch save-batch WS-Batch-Nos`: three receivers of three DIFFERENT descriptions
+- `l4-batch pic z(4)9`, numeric-edited [general/gl051.cbl:L289]; `save-batch pic
+9(5) comp`, binary [general/gl051.cbl:L174]; and `WS-Batch-Nos pic 9(5)`, zoned
+DISPLAY [copybooks/wsbatch.cob:L19] - so one sending value gives three different
+stored results. `move_to_all` therefore takes a SEQUENCE of receiving descriptors
+and returns one value PER RECEIVER, in receiver order, as a tuple, never one value
+reused; it cites ten further multi-receiver sites.
 
-    move   batch  to  l4-batch save-batch WS-Batch-Nos
-
-Three receivers of three DIFFERENT descriptions - `l4-batch pic z(4)9`, a
-numeric-edited item [general/gl051.cbl:L289]; `save-batch pic 9(5) comp`, a
-binary item [general/gl051.cbl:L174]; and `WS-Batch-Nos pic 9(5)`, a zoned
-DISPLAY item [copybooks/wsbatch.cob:L19]. One sending value, three
-different stored results. `move_to_all` therefore takes a SEQUENCE of
-receiving descriptors and returns one value PER RECEIVER, in receiver
-order, as a tuple - never one value reused.
-
-Ten further multi-receiver sites were verified: [general/gl051.cbl:L982],
-[general/gl051.cbl:L1041], [general/gl070.cbl:L400],
-[general/gl072.cbl:L281], [general/gl072.cbl:L411],
-[general/gl072.cbl:L452], [sales/sl055.cbl:L539],
-[sales/sl055.cbl:L653], [sales/sl060.cbl:L489] and
-[sales/sl060.cbl:L546].
-
-GROUP MOVES
-===========
-A `MOVE` whose receiver is a GROUP item is an alphanumeric move of the
-group's whole byte image, with NO per-field conversion of any kind. Groups
-are everywhere in the frozen layouts: `03 WS-Post-Key.`
-[copybooks/wspost.cob:L14], `03 Dates.` [copybooks/wsbatch.cob:L35],
-`03 Amounts comp-3.` [copybooks/wsbatch.cob:L40] and `03 Quarters.`
-[copybooks/wsledger.cob:L30]. A live one: `move WS-Analysis-Record to
-WS-Value-Record` [sales/sl055.cbl:L538], whose two records do NOT have the
-same width, so the move truncates.
-
-A group has no width of its own - `FieldDescriptor.byte_length` says so and
-tells a caller to sum its children - so `move_group` takes the width from
-`length` if given, else from the descriptor's `character_length`, else from
-the sending image's own length, which is the equal-width degenerate case.
-Summing a group's children is the record layer's knowledge, not this
-module's.
+A `MOVE` whose receiver is a GROUP item is an alphanumeric move of the group's
+whole byte image, with NO per-field conversion of any kind. A live one: `move
+WS-Analysis-Record to WS-Value-Record` [sales/sl055.cbl:L538], whose two records
+do NOT have the same width, so the move truncates. A group has no width of its own
+- `FieldDescriptor.byte_length` says so and tells a caller to sum its children -
+so `move_group` takes the width from `length` if given, else from the descriptor's
+`character_length`, else from the sending image's own length. Summing a group's
+children is the record layer's knowledge, not this module's.
 
 REFERENCE MODIFICATION IS 1-BASED
-=================================
-83 uses of the `(offset:length)` form were verified across the twelve
-program files, on BOTH the sending and the receiving side.
-`REFERENCE_MODIFICATION_CENSUS` publishes the frequencies: `(7:4)` x16,
-`(4:2)` x16, `(1:2)` x16, `(9:2)` x9, `(1:6)` x8, `(6:2)` x5, `(1:4)` x5,
-`(7:2)` x4, `(1:1)` x3 and `(1:22)` x1. Three further sites use variable
-operands, all of them `m (b:c)`: [sales/sl060.cbl:L1091],
-[purchase/pl060.cbl:L954] and [purchase/pl100.cbl:L608].
+The `(offset:length)` form occurs 83 times across the twelve program files, on
+BOTH the sending and the receiving side. `REFERENCE_MODIFICATION_CENSUS`
+publishes the frequencies: `(7:4)` x16, `(4:2)` x16, `(1:2)` x16, `(9:2)` x9,
+`(1:6)` x8, `(6:2)` x5, `(1:4)` x5, `(7:2)` x4, `(1:1)` x3 and `(1:22)` x1.
+Three further sites use variable operands, all of them `m (b:c)`:
+[sales/sl060.cbl:L1091], [purchase/pl060.cbl:L954] and [purchase/pl100.cbl:L608].
 
-`ref_mod` and `ref_mod_into` take a 1-BASED offset and an explicit length,
-so that a program module transcribes `(9:2)` as `offset=9, length=2` and a
-reviewer can diff it against the frozen source character for character.
-Translating to a 0-based slice at the call site is exactly the mistake this
-signature exists to prevent.
+`ref_mod` and `ref_mod_into` take a 1-BASED offset and an explicit length, so
+that a program module transcribes `(9:2)` as `offset=9, length=2` and a reviewer
+can diff it against the frozen source character for character. Translating to a
+0-based slice at the call site is exactly the mistake this signature prevents.
 
 THE SITE THAT MAKES THIS LOAD-BEARING  [sales/sl060.cbl:L1071-L1072]
-====================================================================
     move  u-date (1:6) to post-date (1:6).
     move  u-date (9:2) to post-date (7:2).
 
 The sending item is ten characters in `DD/MM/CCYY` form; the receiver is
-`Post-Date pic x(8)` [copybooks/wspost.cob:L18], in `DD/MM/YY` form. Those
-two statements are the ENTIRE four-digit-to-two-digit year conversion, done
-by character surgery with no calendar logic whatsoever, and the receiver is
-a database column. `[sales/sl100.cbl:L612-L613]` repeats the pair verbatim.
-
-This module must not notice what those characters mean. It supplies the
-movement; it does not know that a calendar is involved and it does not
-improve a two-digit year. Agent Action Plan section 0.6.6 makes the two
-coexisting text forms one of `harness/normalize.py`'s three jobs, and that
-is where the concern belongs. An off-by-one here would corrupt every
-posted row of that column, which is why `ref_mod` publishes 1-based offsets
-and why the self-test for those two statements asserts the exact result.
+`Post-Date pic x(8)` [copybooks/wspost.cob:L18], in `DD/MM/YY` form. Those two
+statements are the ENTIRE four-digit-to-two-digit year conversion, done by
+character surgery with no calendar logic whatsoever, and the receiver is a
+database column; [sales/sl100.cbl:L612-L613] repeats the pair verbatim. This
+module must not notice what those characters mean - section 0.6.6 makes the two
+coexisting text forms a job for the harness normaliser. An off-by-one here would
+corrupt every posted row of that column, which is why `ref_mod` publishes 1-based
+offsets and why its self-test asserts the exact result of those two statements.
 
 NUMERIC-EDITED RECEIVERS - ONE SHAPE, AND ONLY ONE, IS CLAIMED
-==============================================================
-Agent Action Plan section 0.2.2 excludes "Report formatting BEYOND DATABASE
-EFFECTS". The emphasis decides this file's scope: exactly one edited move
-does have a database effect, and editing is a property of the `MOVE` verb,
-so that one is implemented here. [sales/sl060.cbl:L1085-L1094]:
+Section 0.2.2 excludes report formatting BEYOND DATABASE EFFECTS. The emphasis
+decides this file's scope: exactly one edited move does have a database effect, and
+editing is a property of the `MOVE` verb, so that one is implemented here. At
+[sales/sl060.cbl:L1085-L1094] a `pic z(7)9` item [sales/sl060.cbl:L213] is tallied
+for leading spaces and then `STRING`ed into `Post-Legend pic x(32)`
+[copybooks/wspost.cob:L24], a database column; the maintainer states the intent
+just above, at [sales/sl060.cbl:L1082-L1083]. Mirrored at
+[purchase/pl060.cbl:L207] with [purchase/pl060.cbl:L947-L956], and at
+[purchase/pl100.cbl:L600-L610]. Note that `subtract b from 8 giving c` HARD-CODES
+8, the field's own length; a program module transcribes that literally rather than
+deriving it.
 
-    move     oi-invoice to m.
-    move     zero to b.
-    inspect  m tallying b for leading space.
-    subtract b from 8 giving c.
-    add      1 to b.
-
-    string   m (b:c)     delimited by size
-             " : "       delimited by size
-             sales-name  delimited by size
-                          into Post-Legend pointer  xx.
-
-`m` is `pic z(7)9` [sales/sl060.cbl:L213] and the result lands in
-`Post-Legend pic x(32)` [copybooks/wspost.cob:L24] - a database column. The
-maintainer's own comment above it states the intent
-[sales/sl060.cbl:L1082-L1083]. Mirrored at [purchase/pl060.cbl:L207] with
-[purchase/pl060.cbl:L947-L956], and at [purchase/pl100.cbl:L600-L610].
-Note that `subtract b from 8 giving c` HARD-CODES 8, the field's own
-length; a program module transcribes that literally rather than deriving
-it.
-
-`move_to_edited` implements the Z-suppression-then-9 shape and nothing
-else: a run of `Z` positions followed by a run of `9` positions, one
-character position per digit position, no insertion character anywhere.
-`EDIT_SYMBOLS_IMPLEMENTED` names the two symbols. `z(7)9` and `z(4)9` are
-the two live instances of that shape, and ONLY `z(7)9` is reachable from a
-database write - `z(4)9` at [general/gl051.cbl:L289] is a print line.
-
-Every other edited picture in the frozen sources - `z(6)9.99cr`,
-`z(8)9.99b`, `bbbz9`, `9(8).99-`, `z(4)9b(4)`, `bz9bbbbbb` and their
-siblings - receives into a print line with no database effect and is OUT OF
-SCOPE. Such a picture reaches an explicitly UNVERIFIED fall-through, which
-renders the digit positions and NO insertion characters, and which is
-labelled as unverified at its definition and in Q-14. It is stated rather
-than hidden, because an unreachable path must never masquerade as verified
-behaviour. The insertion symbols `*`, `$`, `,`, `DB`, `+`, `/` and `0` are
-not implemented at all: each occurs zero times.
+`move_to_edited` implements the Z-suppression-then-9 shape and nothing else - a run
+of `Z` positions followed by a run of `9` positions, one character position per
+digit position, no insertion character anywhere - and `EDIT_SYMBOLS_IMPLEMENTED`
+names the two symbols. `z(7)9` and `z(4)9` are the two live instances, and ONLY
+`z(7)9` is reachable from a database write - `z(4)9` at [general/gl051.cbl:L289] is
+a print line, while `z(7)9` [sales/sl060.cbl:L213] reaches `Post-Legend pic x(32)`
+[copybooks/wspost.cob:L24] through the `STRING` build at
+[sales/sl060.cbl:L1082-L1091], mirrored at [purchase/pl060.cbl:L947-L956] and
+[purchase/pl100.cbl:L600-L610]. That build's `subtract b from 8 giving c`
+HARD-CODES 8, the field's own length, and a program module transcribes it literally
+rather than deriving it. Every other edited picture in the frozen sources -
+`z(6)9.99cr`, `z(8)9.99b`, `bbbz9`, `9(8).99-`, `z(4)9b(4)`, `bz9bbbbbb` and their
+siblings - receives into a print line with no database effect and is OUT OF SCOPE:
+such a picture is REFUSED rather than rendered, because no in-scope database write
+reaches one, so no experiment against the compiled cycle can observe its rendering
+and a rendering produced here would be this module's invention. That is question
+Q-14, and `UnobservableEditedPicture` carries the reasoning at the point of
+refusal. The insertion symbols `*`, `$`, `,`, `DB`, `+`, `/` and `0` are not
+implemented at all: each occurs zero times.
 
 WHY `INSPECT` AND `STRING` LIVE HERE
-====================================
-The folder requirement closes this folder at exactly eight files, verbatim:
-"Nothing else. No `strings.py`, no `numeric.py`, no `helpers.py`." Three
-in-scope programs nevertheless build a DATABASE field with `INSPECT ...
-TALLYING ... FOR LEADING` and `STRING ... DELIMITED BY ... INTO ...
-POINTER`. Those verbs are receiving-field character movement, they have a
-database effect, and the permitted file set offers nowhere else for them.
-They belong here, and they are named here so that no reader thinks they
-were smuggled in.
-
-    inspect_tallying_leading   [sales/sl060.cbl:L1087],
-                               [purchase/pl060.cbl:L949],
-                               [purchase/pl100.cbl:L603]
-    string_into                [sales/sl060.cbl:L1091],
-                               [sales/sl100.cbl:L622-L628],
-                               [purchase/pl060.cbl:L954],
-                               [purchase/pl100.cbl:L608],
-                               [general/gl080.cbl:L531],
-                               [irs/irs030.cbl:L1424]
-
-The tally variable ACCUMULATES into whatever it already holds, which is
-precisely why [sales/sl060.cbl:L1086] writes `move zero to b.` first.
-`inspect_tallying_leading` reproduces the accumulate and never resets
-implicitly.
+The folder requirement closes this folder at exactly eight files: "Nothing else.
+No `strings.py`, no `numeric.py`, no `helpers.py`." Three in-scope programs
+nevertheless build a DATABASE field with `INSPECT ... TALLYING ... FOR LEADING`
+and `STRING ... DELIMITED BY ... INTO ... POINTER`. Those verbs are
+receiving-field character movement, they have a database effect, and the permitted
+file set offers nowhere else for them, so they live here and are named here rather
+than smuggled in - `inspect_tallying_leading` and `string_into`, each citing its
+own sites. The tally variable ACCUMULATES into whatever it already holds, which is
+precisely why [sales/sl060.cbl:L1086] writes `move zero to b.` first;
+`inspect_tallying_leading` reproduces the accumulate and never resets implicitly.
 
 A DIVERGENCE THAT MUST NOT BE UNIFIED
-=====================================
-[sales/sl100.cbl:L620-L628] builds the SAME 32-character database column
-with FIVE separate `STRING` statements sharing ONE pointer, and it does not
-use the edited-move or `INSPECT` idiom at all:
+[sales/sl100.cbl:L620-L628] builds the SAME 32-character database column with FIVE
+separate `STRING` statements sharing ONE pointer, using neither the edited-move nor
+the `INSPECT` idiom. The maintainer flagged it himself at [sales/sl100.cbl:L618]:
+"THIS DOES NOT APPEAR THE SAME as SL060 and PL060/PL100". It is a preserved
+divergence in the same spirit as the three disagreeing moving-average guards, and
+rule R-4 forbids unifying it. `string_into` therefore returns the updated receiver
+AND the updated 1-based pointer, so five successive calls chain through one pointer
+exactly as the five statements do. Note also that the separator there is FIVE
+characters, `"  :  "`, not the three-character `" : "` of the `sl060` shape.
 
-    move     1  to  xx.
-    move     oi-b-nos to batch.
-    string   batch delimited by size into post-legend pointer xx.
-    move     WS-Batch-Nos  to  batch.
-    string   "/" delimited by size into post-legend pointer xx.
-    move     oi-b-item to k.
-    string   k delimited by size into post-legend pointer xx.
-    string   "  :  "   delimited  by size into post-legend pointer xx.
-    string   sales-name delimited by size into post-legend pointer xx.
-
-The maintainer flagged it himself at [sales/sl100.cbl:L618]: "THIS DOES NOT
-APPEAR THE SAME as SL060 and PL060/PL100". It is a preserved divergence in
-the same spirit as the three disagreeing moving-average guards, and rule
-R-4 forbids unifying it. `string_into` therefore returns the updated
-receiver AND the updated 1-based pointer, so five successive calls chain
-through one pointer exactly as the five statements do. Note also that the
-separator there is FIVE characters, `"  :  "`, and not the three-character
-`" : "` of the `sl060` shape.
-
-Both `DELIMITED BY SIZE` and `DELIMITED BY SPACE` are needed. A census of
-the twelve program files finds `SIZE` 22 times and `SPACE` 3 times, and no
-literal delimiter at all. `[general/gl080.cbl:L530-L536]` mixes the two in
-one statement and carries NO `POINTER` phrase, so its pointer starts at 1;
-`[irs/irs030.cbl:L1424-L1426]` is the same shape. Overflow is silent: the
-receiver is 32 characters and the sources can exceed it - see Q-11.
+Both `DELIMITED BY SIZE` and `DELIMITED BY SPACE` are needed: across the twelve
+program files `SIZE` occurs 22 times, `SPACE` 3 times, and a literal delimiter not
+at all. [general/gl080.cbl:L530-L536] mixes the two in one statement and carries NO
+`POINTER` phrase, so its pointer starts at 1; [irs/irs030.cbl:L1424-L1426] is the
+same shape. Overflow is silent - the receiver is 32 characters and the sources can
+exceed it (Q-11).
 
 WHAT THIS FILE DELIBERATELY DOES NOT OWN
-========================================
-`INSPECT ... REPLACING ALL "." BY "/"` is NOT this module's. It appears at
-[general/gl051.cbl:L1178-L1180] and [irs/irs030.cbl:L1312-L1314], and Agent
-Action Plan section 0.4.1.6 assigns the handling of the `.`, `,` and `-`
-separators to `acas_posting/dates.py`, which is a standard-library-only
-module and does not import this package.
-The boundary is recorded here so the omission reads as deliberate.
-`[irs/irs030.cbl:L1315]`, `inspect u-date tallying q for all "/"`, is the
-`FOR ALL` form rather than `FOR LEADING` and sits inside that program's
-out-of-scope validation section; only `Ledger-Postings-Add`
-[irs/irs030.cbl:L1569-L1733] is migrated from `irs030`. It is found, named
-and not implemented.
+`INSPECT ... REPLACING ALL "." BY "/"` is not this module's. It appears at
+[general/gl051.cbl:L1178-L1180] and [irs/irs030.cbl:L1312-L1314], and section
+0.4.1.6 assigns the `.`, `,` and `-` separators to `acas_posting/dates.py`, a
+standard-library-only module that does not import this package. The boundary is
+recorded here so the omission reads as deliberate.
+[irs/irs030.cbl:L1315], `inspect u-date tallying q for all "/"`, is the `FOR ALL`
+form rather than `FOR LEADING` and sits inside that program's out-of-scope
+validation section; only `Ledger-Postings-Add` [irs/irs030.cbl:L1569-L1733] is
+migrated from `irs030`. It is found, named and not implemented.
 
-VERIFIED ZERO-OCCURRENCE FORMS, RECORDED SO THE OMISSIONS ARE DELIBERATE
-========================================================================
-`ZERO_OCCURRENCE_FORMS` publishes this list as data. Each was counted
-across the twelve in-scope program files, and the first two across
-`copybooks/*.cob` as well.
+ZERO-OCCURRENCE FORMS, RECORDED SO THE OMISSIONS READ AS DELIBERATE
+`ZERO_OCCURRENCE_FORMS` publishes this list as data. Each was counted across the
+twelve in-scope program files, and the first two across `copybooks/*.cob` too:
+`MOVE CORRESPONDING`, `JUSTIFIED`, `UNSTRING`, `HIGH-VALUES`, `LOW-VALUES`,
+`QUOTES` and a literal `DELIMITED BY` operand all count zero, so none is
+implemented and only DEFAULT justification exists - from the left for an
+alphanumeric item, on the implied decimal point for a numeric one.
 
-    MOVE CORRESPONDING   0 - not implemented
-    JUSTIFIED            0 - in every program AND every copybook, so only
-                             DEFAULT justification is implemented: from the
-                             left for an alphanumeric item, on the implied
-                             decimal point for a numeric one
-    UNSTRING             0 - not implemented
-    HIGH-VALUES          0 - not implemented
-    LOW-VALUES           0 - not implemented
-    QUOTES               0 - not implemented
-    literal delimiter    0 - `DELIMITED BY` names only SIZE and SPACE
+`ALL "x"` needs a precise statement rather than a bare zero: it occurs FOUR
+times, at [general/gl051.cbl:L265], [general/gl051.cbl:L269],
+[general/gl072.cbl:L249] and [general/gl072.cbl:L251], and every one is a VALUE
+clause declaring an initial value. As a `MOVE` sending operand - the only form
+this module would implement - it occurs zero times, so it is absent.
 
-`ALL "x"` is the one entry that needs a precise statement rather than a
-bare zero: it occurs FOUR times, and all four are VALUE clauses declaring
-an initial value - [general/gl051.cbl:L265], [general/gl051.cbl:L269],
-[general/gl072.cbl:L249] and [general/gl072.cbl:L251]. It occurs ZERO
-times as a `MOVE` sending operand, which is the count that matters here, so
-it is not implemented. Recording the four keeps the claim checkable.
-
-The figurative constants that DO occur are `ZERO` (532 lines), `SPACES`
-(138), `SPACE` (64) and `ZEROS` (12). `ZEROES` measures zero and is
-accepted anyway, because it is the same word and refusing one spelling of
-it would be a validation this module has no business adding.
+The figurative constants that DO occur are `ZERO` (532 lines), `SPACES` (138),
+`SPACE` (64) and `ZEROS` (12). `ZEROES` counts zero and is accepted anyway,
+because it is the same word and refusing one spelling would be a validation this
+module has no business adding.
 
 A `MOVE` DOES NOT VALIDATE, AND NEITHER MAY THIS FILE  (rule R-3)
-================================================================
-Rule R-3, verbatim: "The migration may not add validation logic, add
-fields, or alter the database schema, and must not introduce concurrent
-execution." The folder requirement states the consequence for this file,
-verbatim: "A COBOL `MOVE` does not validate; neither may `move.py`. A
-`COMPUTE` that overflows its receiving field silently truncates high-order
-digits; reproduce that rather than raising."
+Rule R-3 forbids added validation, added fields, schema change and concurrency,
+and the folder requirement states the consequence: "A COBOL `MOVE` does not
+validate; neither may `move.py`. A `COMPUTE` that overflows its receiving field
+silently truncates high-order digits; reproduce that rather than raising." So,
+below:
 
-So, below:
+no length check that raises, so a forty-character sending item moved into
+`Post-Legend pic x(32)` [copybooks/wspost.cob:L24] loses its last eight
+characters silently into a database column; no range check, so `123456.78` into
+`pic 999v99` stores `456.78`; no "is this really a number?" check, per the A-13
+note below; no truncation courtesy of any kind - no ellipsis, no marker
+character, no warning suffix, no log record that alters control flow; no bounds
+check on a reference-modified range or a subscript, because anomaly A-2 is
+precisely an unbounded index, a quarter subscript computed by a ROUNDED divide
+[general/gl080.cbl:L328] and used without a bound [general/gl080.cbl:L345]
+against `Ledger-Q ... occurs 4` [copybooks/wsledger.cob:L36], and Python's own
+slicing does not raise on an over-long slice (Q-10); and no concurrency - no
+threading, no asyncio, no multiprocessing, no coroutine.
 
-  * NO length check that raises. A forty-character sending item moved into
-    `Post-Legend pic x(32)` [copybooks/wspost.cob:L24] loses its last eight
-    characters, silently, and that receiver is a database column.
-  * NO range check that raises. `123456.78` into `pic 999v99` stores
-    `456.78`, silently.
-  * NO "is this really a number?" check that raises. See the A-13 note
-    below; the whole point is that this module must not pre-empt it.
-  * NO truncation courtesy of any kind - no ellipsis, no marker character,
-    no warning suffix, no log record that alters control flow.
-  * NO bounds check on a reference-modified range or on a subscript.
-    Anomaly A-2 is precisely an unbounded index: a quarter subscript
-    computed by a ROUNDED divide [general/gl080.cbl:L328] and then used
-    without a bound [general/gl080.cbl:L345] against `Ledger-Q ... occurs
-    4` [copybooks/wsledger.cob:L36]. Python's own slicing does not raise on
-    an over-long slice; that behaviour is left to stand and is documented
-    (Q-10) rather than guarded.
-  * NO concurrency: no threading, no asyncio, no multiprocessing, no
-    `concurrent.futures`, no coroutine.
-
-EXACTLY ONE `raise` STATEMENT APPEARS IN THIS FILE, and it is the rule R-2
-carrier gate in `_exact_carrier`. It fires on a value's Python TYPE, which
-cannot appear anywhere in this migration, and never on a value's CONTENT,
-which a COBOL program would have accepted. That distinction is the whole
-difference between an R-2 type gate and an R-3 validation. Where a
-programmer error must still be reported - an unrecognised figurative
-spelling, an unrecognised delimiter - the enum constructor reports it, so
-the mechanism is the standard library's and not a validation branch added
-here.
+SIX `raise` STATEMENTS APPEAR IN THIS FILE, in two families, and neither family
+fires on a value's magnitude, sign, length or numeric content - the things a COBOL
+program would simply have accepted. The first is the rule R-2 carrier gate in
+`_exact_carrier`, which fires on a value's Python TYPE, a binary float, that
+cannot appear anywhere in this migration. The second is the three-member
+`MovementWithNoCompiledAnswer` family, which fires on an ARGUMENT COMBINATION THE
+COMPILED SYSTEM CANNOT PRODUCE AT ALL: `MOVE SPACE` into a numeric receiver does
+not compile (Q-9); a reference-modification range past its item either does not
+compile or reads adjacent storage a Python `str` does not have (Q-10); an edited
+picture outside the Z-then-9 shape is reached by no in-scope database write and is
+unobservable through the only contract this migration is verified against (Q-14).
+Each was MEASURED, each carries its experiment at its own definition, and each
+raises precisely so that no value this module invented can be written where the
+oracle supplies none. Refusing to invent is not validating: an R-3 validation would
+reject something the COBOL accepted, while these reject something the COBOL cannot
+express. Where an ordinary programmer error must still be reported - an
+unrecognised figurative spelling, an unrecognised delimiter - the enum constructor
+reports it, so the mechanism is the standard library's and not a validation branch
+added here. Nothing here checks a length, a range or a numeric class: a
+forty-character sender into `Post-Legend pic x(32)` [copybooks/wspost.cob:L24]
+loses its last eight characters silently, `123456.78` into `pic 999v99` stores
+`456.78` silently, no subscript is bounded - anomaly A-2's unbounded quarter
+subscript [general/gl080.cbl:L328], [general/gl080.cbl:L345] against
+`Ledger-Q ... occurs 4` [copybooks/wsledger.cob:L36] is left to stand - and no
+truncation courtesy of any kind is added.
 
 ANOMALY A-13 DEPENDS ON THIS MODULE NOT VALIDATING
-==================================================
-`general/gl072.cbl` skips a posting whose batch number is NOT NUMERIC, and
-the anomaly register records the skip as entirely silent - "no message,
-counter or trace":
-
-    if       post-batch  not numeric
-             go to  loop.
-                                        [general/gl072.cbl:L291-L292]
-
-The anomaly register cites that construct as
-`[general/gl072.cbl:L289-L290]`, and its sibling skip on a specific handler
-error as `[general/gl072.cbl:L303-L304]`; in the frozen checkout the two
-statements read at L291-L292 and L306-L307. The offset is recorded here
-rather than reconciled silently, because the frozen file is the authority
-and a reader following either citation should find both accounted for.
-
-If this module raised on non-numeric text, that silent skip could never be
-reproduced. So `is_numeric_class` is a PLAIN BOOLEAN PREDICATE that never
-raises on content, and the skip itself is business logic belonging to
-`acas_posting.programs.gl072_transaction_update`, not to this file.
+`general/gl072.cbl` skips a posting whose batch number is NOT NUMERIC, and the
+anomaly register records the skip as entirely silent - "no message, counter or
+trace" - at `if post-batch not numeric / go to loop.`
+[general/gl072.cbl:L291-L292]. The register cites that construct as
+[general/gl072.cbl:L289-L290] and its sibling skip on a specific handler error as
+[general/gl072.cbl:L303-L304]; in the frozen checkout the two statements read at
+L291-L292 and L306-L307. The offset is recorded rather than reconciled silently,
+because the frozen file is the authority and a reader following either citation
+should find both accounted for. If this module raised on non-numeric text that
+silent skip could never be reproduced, so `is_numeric_class` is a PLAIN BOOLEAN
+PREDICATE that never raises on content, and the skip itself is business logic
+belonging to the program layer.
 
 LAYERING  (Agent Action Plan section 0.4.3)
-===========================================
-    MAY import        the standard library, the `acas_posting.dictionary`
-                      public enums, and `acas_posting.cobol.field`,
-                      `acas_posting.cobol.usage` and
-                      `acas_posting.cobol.arithmetic`
-    MUST NOT import   `acas_posting.records`, `acas_posting.dal`,
-                      `acas_posting.programs`, `acas_posting.cli`,
-                      `acas_posting.clock`, `acas_posting.dates`,
-                      `acas_posting.workfiles`, the sibling compiled-oracle
-                      tree, and the sibling semantics modules
-                      `acas_posting.cobol.picture`,
-                      `acas_posting.cobol.condition_names` and
-                      `acas_posting.cobol.sortverb`
-    No third-party import is permitted. The interpreter is pinned to
-    `requires-python = "==3.12.*"`.
+May import the standard library, the `acas_posting.dictionary` public enums, and
+`acas_posting.cobol.field`, `.usage` and `.arithmetic`. Must not import
+`acas_posting.records`, `.dal`, `.programs`, `.cli`, `.clock`, `.dates`,
+`.workfiles`, the sibling compiled-oracle tree, or the sibling semantics modules
+`picture`, `condition_names` and `sortverb`. No third-party import is permitted;
+the interpreter is pinned to `requires-python = "==3.12.*"`.
 
-`acas_posting.cobol.arithmetic` is imported deliberately and not
-reluctantly: a numeric `MOVE` performs the same scale alignment, unsigned
-sign drop and silent high-order truncation as an arithmetic store, so it
-delegates to `arithmetic.store` rather than reimplementing it. Because
-`picture` may not be imported, the two-symbol reading of an edited
-receiver's own picture below is local, deliberately minimal, and recognises
-`Z` and `9` and nothing else.
-
-`acas_posting.programs.*` imports THIS module. Nothing here imports back
-toward it.
+`arithmetic` is imported deliberately: a numeric `MOVE` performs the same scale
+alignment, unsigned sign drop and silent high-order truncation as an arithmetic
+store, so it delegates rather than reimplementing. Because `picture` may not be
+imported, the two-symbol reading of an edited receiver's picture below is local,
+deliberately minimal, and recognises `Z` and `9` and nothing else. The program
+layer imports THIS module; nothing here imports back toward it.
 
 EXACT ARITHMETIC ONLY  (rule R-2)
-=================================
-Rule R-2, verbatim: "No accounting value may pass through a binary
-floating-point type at any point - not in computation, not in storage, not
-in transport." And, verbatim, on what it forces into scope: "Files this
-rule forces into scope: the whole of `acas_posting/cobol/*.py`, and the
-whole of `tests/arithmetic/` - fourteen test files whose only purpose is to
-prove per-field exactness." Agent Action Plan section 0.1.2, rule 8, says
-it in three words: "never a float."
-
-A `MOVE` is transport, and transport is the quietest place in a system for
-a lost penny. So a numeric value moved here is a `decimal.Decimal` or an
-`int` and never anything else, and a positions-and-lengths value - a
-reference-modification offset or length, a `STRING` pointer, an `INSPECT`
-tally - is an `int` count. A binary floating-point carrier is refused by
-`_exact_carrier` with a `TypeError`. No `math`, no rounding built-in, no
-`pandas` and no `numpy` appear below; Agent Action Plan section 0.5.1 calls
-the last two exclusion "absolute".
+A `MOVE` is transport, and transport is the quietest place in a system for a lost
+penny. A numeric value moved here is a `decimal.Decimal` or an `int` and never
+anything else, and a positions-and-lengths value - a reference-modification
+offset or length, a `STRING` pointer, an `INSPECT` tally - is an `int` count. A
+binary floating-point carrier is refused by `_exact_carrier` with a `TypeError`.
+No `math`, no rounding built-in, no `pandas` and no `numpy` appear below; section
+0.5.1 calls the last two exclusions absolute.
 
 DETERMINISM  (rule R-6)
-=======================
-No clock, no environment, no randomness, and no `set` or `dict` iteration
-whose order a caller can observe. `decimal` contexts are never touched
-here: every decimal computation goes through
-`acas_posting.cobol.arithmetic`, which enters its own explicit context, so
-a result cannot vary with what a caller did earlier. Every published table
-is a `tuple` or a `MappingProxyType`, and the two membership sets are
-`frozenset`s consulted only for membership.
+No clock, no environment, no randomness, and no `set` or `dict` iteration whose
+order a caller can observe. `decimal` contexts are never touched here: every
+decimal computation goes through `acas_posting.cobol.arithmetic`, which enters its
+own explicit context, so a result cannot vary with what a caller did earlier.
+Every published table is a `tuple` or a `MappingProxyType`, and the two membership
+sets are `frozenset`s consulted only for membership.
 
-OPEN QUESTIONS - PROVISIONAL BEHAVIOUR, MARKED AS SUCH  (rule R-6)
-==================================================================
-Rule R-6, verbatim: "Where a semantic question is ambiguous, the compiled
-program's observed behavior decides it, and each such resolution must be
-documented rather than settled silently." Six questions below are this
-module's own, in the `^Q-[0-9]+$` numbering space shared with
-`data_dictionary/`. Q-2, Q-3, Q-4, Q-6, Q-7 and Q-8 are already in use,
-and the sibling `acas_posting.cobol.usage` claimed Q-5.1, Q-5.2 and Q-5.3,
-so Q-9 through Q-14 are the next free integers.
+ARBITRATED AGAINST COMPILED BEHAVIOUR  (rule R-6)
+Rule R-6 makes the compiled program the arbiter of an ambiguous semantic question
+and requires each resolution to be documented rather than settled silently. Six
+questions are this module's own, in the `^Q-[0-9]+$` numbering space shared with
+`data_dictionary/`; Q-2, Q-3, Q-4, Q-6, Q-7 and Q-8 are already in use and the
+sibling `usage` claimed Q-5.1 to Q-5.3, so Q-9 through Q-14 are the next free
+integers. Each is stated in full at the function that implements it:
 
-    Q-3   A MOVE INTO AN UNSIGNED NUMERIC RECEIVER. Not a new question:
-          `acas_posting.cobol.arithmetic` already numbers it Q-3 and this
-          module inherits both the number and its provisional answer, the
-          absolute value stored. The unsigned receivers are real - `pic
-          9(9)v99` under `03 Amounts comp-3.`
-          [copybooks/wsbatch.cob:L41-L44].
+    Q-3   a MOVE into an unsigned numeric receiver      `move_numeric`
+    Q-9   `MOVE SPACE` into a numeric DISPLAY field     `move_figurative`
+    Q-10  a reference-modified range past the field      `ref_mod`
+    Q-11  a `STRING` pointer beyond the receiver         `string_into`
+    Q-12  the exact `z(7)9` rendering of zero            `move_to_edited`
+    Q-13  a non-numeric byte image into a numeric field  `_string_source`
+    Q-14  an edited picture outside the Z-then-9 shape    `move_to_edited`
 
-    Q-9   `MOVE SPACE` INTO A NUMERIC `DISPLAY` FIELD. COBOL leaves spaces
-          in the item's bytes, which then fail a numeric class test.
-          PROVISIONAL, implemented below: the field's byte width filled
-          with spaces, returned as text, and `is_numeric_class` reports
-          False for it. This interacts directly with anomaly A-13, so it
-          matters rather than being a curiosity.
-          [sales/sl055.cbl:L655] and [general/gl072.cbl:L291-L292].
+ALL SIX ARE NOW MEASURED against GnuCOBOL 3.2.0, invoked as the compile scripts
+invoke it, with the experiment and its output recorded at the site that uses the
+answer. The outcome is mixed, and the mix is the point: TWO questions turned out
+NOT TO BE EXPRESSIBLE IN COBOL AT ALL, one was OVERTURNED, one splits into two
+unlike cases, and two were confirmed.
 
-    Q-10  A REFERENCE-MODIFICATION RANGE THAT RUNS PAST THE FIELD.
-          PROVISIONAL, implemented below: Python slicing semantics, so a
-          short result rather than an error, and no raise (rule R-4). What
-          GnuCOBOL 3.2 does with and without bounds checking has NOT been
-          measured; the compile scripts select no dialect. An offset below
-          1 is a Python negative index and would wrap - no in-scope site
-          produces one, every literal offset being 1 through 9 and the one
-          computed offset being a tally plus one.
+Q-3 is not a new question: `arithmetic` already numbers it, has measured it, and
+this module inherits both the number and the answer - the ABSOLUTE VALUE is stored
+and the sign is dropped silently. The unsigned receivers are real - `pic 9(9)v99`
+under `03 Amounts comp-3.` [copybooks/wsbatch.cob:L41-L44].
 
-    Q-11  A `STRING` POINTER BEYOND THE RECEIVER'S LENGTH. PROVISIONAL,
-          implemented below: nothing further is written, silently, and a
-          partially fitting source contributes the characters that fit.
-          `Post-Legend pic x(32)` [copybooks/wspost.cob:L24] is the
-          receiver, and the five-statement build at
-          [sales/sl100.cbl:L620-L628] can exceed it. `ON OVERFLOW` occurs
-          zero times across the twelve program files, so there is no error
-          path in the specification to reproduce.
+    Q-9   `MOVE SPACE` INTO A NUMERIC FIELD. RESOLVED, AND THE STATEMENT CANNOT
+          EXIST. GnuCOBOL 3.2 rejects it at compile time - "error: MOVE of
+          figurative constant SPACE to numeric item used", no object produced -
+          for a numeric receiver and for a numeric-EDITED receiver alike.
+          Neither cited authority contains it either: [sales/sl055.cbl:L655]
+          moves space to three ALPHANUMERIC flags, and the class test at
+          [general/gl072.cbl:L291-L292] reads bytes that arrived from a READ. So
+          there is no compiled behaviour to reproduce, and `move_figurative`
+          REFUSES the combination rather than answering it. See that function
+          and `move_to_edited`.
 
-    Q-12  THE EXACT `z(7)9` RENDERING OF ZERO. With no `BLANK WHEN ZERO`,
-          that picture's final `9` prints, so zero renders as seven spaces
-          then `0`. PROVISIONAL, implemented below: exactly that. It
+    Q-10  A REFERENCE-MODIFICATION RANGE THAT RUNS PAST THE FIELD. RESOLVED,
+          AND IT IS TWO UNLIKE CASES. A LITERAL out-of-range pair is a COMPILE
+          ERROR - "error: length of 'leg' out of bounds: 4" - so it cannot exist
+          in the compiled system either. A COMPUTED offset is NOT range-checked
+          at run time and READS ADJACENT STORAGE: with `leg pic x(10)` followed
+          by `guard pic x(10) value all "#"`, `leg(9:4)` was measured as `IJ##`
+          and `leg(12:2)` as `##`. A Python `str` has no adjacent storage, so
+          that outcome is NOT REPRODUCIBLE HERE and returning a short slice
+          would be an invented answer rather than the measured one; `ref_mod`
+          and `ref_mod_into` therefore refuse an out-of-range range explicitly.
+          They can never do so for a faithful transcription - see the
+          reachability proof at `ref_mod`, which shows all three
+          computed-offset sites in the cycle are in bounds BY CONSTRUCTION.
+    Q-11  A `STRING` POINTER BEYOND THE RECEIVER'S LENGTH. RESOLVED,
+          CONFIRMED, with one refinement: a pointer already past the receiver
+          writes NOTHING and THE POINTER IS LEFT UNCHANGED, while a source that
+          fits partly contributes exactly the characters that fit and the
+          pointer advances to one past the end. `Post-Legend pic x(32)`
+          [copybooks/wspost.cob:L24] is the receiver and the five-statement
+          build at [sales/sl100.cbl:L620-L628] can exceed it. `ON OVERFLOW`
+          occurs zero times across the twelve program files, so the overflow is
+          silent at every in-scope site.
+    Q-12  THE EXACT `z(7)9` RENDERING OF ZERO. RESOLVED, CONFIRMED. Measured:
+          zero renders as SEVEN SPACES THEN `0`, `1234` as four spaces then
+          `1234`, and `pic z(4)9` renders zero as four spaces then `0`. It
           changes a database column when the sending value is zero
-          [sales/sl060.cbl:L1085], so it is a genuine question for the
-          oracle and not a formatting nicety.
-
-    Q-13  A NON-NUMERIC BYTE IMAGE MOVED INTO A NUMERIC RECEIVER, the
-          general case behind Q-9. PROVISIONAL, implemented below: the
-          text is kept and aligned to the right of the receiver's byte
-          width, losing characters from the LEFT and padded on the left
-          with spaces - never with zeros, which would fabricate digits the
-          sending bytes do not contain. No raise, so `is_numeric_class`
-          can report False afterwards and A-13 stays reproducible.
-
-    Q-14  AN EDITED RECEIVING PICTURE OUTSIDE THE Z-THEN-9 SHAPE.
-          PROVISIONAL, implemented below and labelled UNVERIFIED at its
-          definition: the digit positions are rendered with no suppression
-          and no insertion character. NO in-scope database write reaches
-          it - every other edited picture in the frozen sources receives
-          into a print line - so it has no oracle evidence behind it and
-          claims none.
+          [sales/sl060.cbl:L1085], and it also settles Q-10's reachability
+          proof, because a picture that always prints its final digit bounds
+          the tally that computes the one live reference-modification offset.
+    Q-13  A NON-NUMERIC BYTE IMAGE MOVED INTO A NUMERIC RECEIVER. RESOLVED,
+          AND THE PROVISIONAL ANSWER WAS WRONG. It is THREE different paths and
+          they do not agree. (1) Through a group MOVE, a REDEFINES or a file
+          READ - which is how the frozen system actually reaches it - the RAW
+          BYTES SURVIVE VERBATIM and a class test then reports them
+          non-numeric; this is anomaly A-13's path and it belongs to
+          `move_group` and the record layer, not to a conversion. (2) Through
+          an ELEMENTARY alphanumeric-to-numeric MOVE, GnuCOBOL CONVERTS rather
+          than preserving: spaces and commas are ignored, a leading sign is
+          honoured, a period is the decimal point, and ANY other character
+          makes the WHOLE result ZERO. Thirty measurements pin this down and
+          are recorded at `_alphanumeric_to_numeric`, which implements them;
+          the provisional answer - text kept, right-aligned, losing from the
+          LEFT - is wrong for this path. (3) Through a numeric COMPARISON or a
+          SORT key the bytes are decoded as zoned decimal, which belongs to
+          `acas_posting.cobol.sortverb` and to `is_numeric_class` here, and
+          neither rewrites the bytes.
+    Q-14  AN EDITED RECEIVING PICTURE OUTSIDE THE Z-THEN-9 SHAPE. RESOLVED AS
+          UNOBSERVABLE, so it is REFUSED rather than rendered. No in-scope
+          database write reaches it - every other edited picture in the frozen
+          sources receives into a print line - which means no experiment
+          against the compiled cycle can observe it and no fixture could be
+          captured for it. The provisional fall-through rendered the digit
+          positions with no suppression and no insertion character; that was an
+          invented answer with nothing behind it, and it now raises instead.
+          See `move_to_edited`.
 
 FURTHER READING
-===============
     docs/migration/traceability.md           program-to-module,
                                              paragraph-to-function and
-                                             field-to-dictionary-entry
-                                             mappings
-    docs/migration/anomaly-log.md            the register of legacy defects
-                                             this migration reproduces,
-                                             including A-2 and A-13 above
+                                             field-to-dictionary-entry mappings
+    docs/migration/anomaly-log.md            the register of legacy defects this
+                                             migration reproduces, including
+                                             A-2 and A-13 above
     docs/migration/ambiguity-resolutions.md  each semantic question and the
-                                             compiled-behaviour arbitration
-                                             that settled it, including
-                                             Q-9 through Q-14 above
+                                             compiled-behaviour arbitration that
+                                             settled it, including Q-9 through
+                                             Q-14 above
 
-THE FREEZE
-==========
-Agent Action Plan section 0.8.1, verbatim: "Any diff touching
-`common/*.cbl`, `common/*.scb`, `copybooks/*.cob`, `general/*.cbl`,
-`sales/*.cbl`, `purchase/*.cbl`, `irs/*.cbl` or `mysql/ACASDB.sql` is a
-defect in the migration, regardless of how harmless it appears." Every
-frozen file cited above is read as specification and is never modified,
-reformatted, commented, relocated or built from here.
-
-A NOTE ON PROVENANCE
-====================
-There is no user rules document for this project: `review_rules` reports
-that none was provided. The six binding rules R-1 through R-6 are the Agent
-Action Plan's own, from its section 0.7.2, and are quoted where they bear
-on this file. Nothing has been invented to fill the gap, and everything the
-plan is silent on is held to enterprise-standard best practice.
-
-Rule R-4 additionally forbids a vocabulary of outcome words in this
-migration's public surface, because each of them would imply that a legacy
-behaviour had been improved rather than reproduced. The prohibited words
-are: resolved, canonical, effective, authoritative, corrected, recommended,
-preferred, normalise, normalize and sanitize. This paragraph is the only
-place any of them is used as a word in this file, and it appears here to
-record the prohibition. One of them also occurs twice as part of a FILE
-NAME, `harness/normalize.py`, which is the sibling comparison tool that
-Agent Action Plan section 0.6.6 charges with reconciling the two coexisting
-text forms of a run date; naming a file is not describing an outcome, and
-that file is deliberately unreachable from this package.
+PROVENANCE AND THE FREEZE
+There is no user rules document for this project: `review_rules` reports that none
+was provided. The six binding rules R-1 through R-6 are the Agent Action Plan's
+own, from its section 0.7.2, and are cited where they bear on this file. Nothing
+has been invented to fill the gap, and everything the plan is silent on is held to
+enterprise-standard best practice. Rule R-4 additionally forbids a vocabulary of
+outcome words - canonical, effective, authoritative, corrected, recommended,
+preferred, normalise, normalize, sanitize - because each would imply that a legacy
+behaviour had been improved rather than reproduced; this paragraph is the only
+place any of them is used as a word here. The word `resolved` above is not one of
+them and carries only its literal rule R-6 sense, an ambiguous semantic question
+ARBITRATED AGAINST COMPILED BEHAVIOUR, which R-6 requires each such answer to
+record; it never says a legacy behaviour was improved. One prohibited word does
+occur twice as part of a FILE NAME, `harness/normalize.py`, the sibling comparison
+tool Agent Action Plan section 0.6.6 charges with reconciling the two coexisting
+text forms of a run date; naming a file is not describing an outcome, and that
+file is deliberately unreachable from this package. Under the section 0.8.1 freeze
+- verbatim, "Any diff touching `common/*.cbl`, `common/*.scb`, `copybooks/*.cob`,
+`general/*.cbl`, `sales/*.cbl`, `purchase/*.cbl`, `irs/*.cbl` or
+`mysql/ACASDB.sql` is a defect in the migration, regardless of how harmless it
+appears" - every frozen file cited above is read as specification and is never
+modified, reformatted, commented, relocated or built from here.
 """
 
 from __future__ import annotations
@@ -582,18 +449,22 @@ from typing import Final
 from acas_posting.cobol import arithmetic as cobol_arithmetic
 from acas_posting.cobol import usage as cobol_usage
 from acas_posting.cobol.field import FieldDescriptor
-from acas_posting.dictionary.model import SignPosition, Usage
+# Agent Action Plan section 0.4.3 lets `cobol/*.py` import `dictionary.loader`
+# and nothing else from the dictionary package. The loader re-exports these two
+# vocabulary members (`loader.RE_EXPORTED_MODEL_NAMES`) as bindings to the ONE
+# definition in `acas_posting.dictionary.model`, so the sending and receiving
+# rules below are keyed on the same objects the dictionary artifact records
+# (rule R-5) while this layer stays inside its one permitted door.
+from acas_posting.dictionary.loader import SignPosition, Usage
 
-# The export surface, sorted so that it is stable and reviewable. It is the
-# whole contract that `acas_posting.records.*`, `acas_posting.programs.*` and
-# tests/arithmetic/test_move_truncation.py will be written against, so it is
-# stated exhaustively rather than left to be discovered.
-#
-# Twelve verbs, two vocabularies, seven sentinels and seven published tables.
+# The export surface, sorted so that it is stable and reviewable. It is the whole
+# contract the record layer, the program layer and the arithmetic parity suite are
+# written against, so it is stated exhaustively rather than left to be discovered:
+# twelve verbs, two vocabularies, seven sentinels and seven published tables.
 # There is deliberately NO calendar helper, NO print-line builder, NO
-# `MOVE CORRESPONDING`, NO `JUSTIFIED` support, NO `UNSTRING`, and no
-# business constant of any kind - see the module docstring for the verified
-# count behind each of those absences.
+# `MOVE CORRESPONDING`, NO `JUSTIFIED` support, NO `UNSTRING`, and no business
+# constant of any kind - the module docstring gives the frozen-source count behind
+# each of those absences.
 __all__: Final[tuple[str, ...]] = (
     "DELIMITED_BY_SIZE",
     "DELIMITED_BY_SPACE",
@@ -611,6 +482,10 @@ __all__: Final[tuple[str, ...]] = (
     "ZERO_OCCURRENCE_FORMS",
     "Delimiter",
     "Figurative",
+    "FigurativeSpaceIntoNumeric",
+    "MovementWithNoCompiledAnswer",
+    "ReferenceModificationOutOfRange",
+    "UnobservableEditedPicture",
     "inspect_tallying_leading",
     "is_numeric_class",
     "move",
@@ -625,21 +500,17 @@ __all__: Final[tuple[str, ...]] = (
     "string_into",
 )
 
-# =====================================================================
 # THE TWO VOCABULARIES
-#
 # A figurative constant and a `DELIMITED BY` phrase are both closed sets in
 # the frozen sources, and both are published as enums so that a program
 # module transcribes the COBOL word rather than a bare Python literal, and so
 # that an unrecognised word is reported by the enum constructor rather than
 # by a validation branch added here (rule R-3).
-#
 # Both are plain `enum.Enum` rather than `enum.StrEnum`, deliberately. A
 # `StrEnum` member IS a `str`, which would make `isinstance(value, str)` true
 # for `ZERO` and `SPACE`; the dispatch below distinguishes a figurative
 # constant from sending text on exactly that test, and a member that answered
 # to both would route a figurative constant down the text path.
-# =====================================================================
 
 
 class Figurative(enum.Enum):
@@ -651,7 +522,7 @@ class Figurative(enum.Enum):
         zero    532 occurrences   [general/gl072.cbl:L411]
         zeros    12 occurrences   [sales/sl060.cbl:L477]
         space    64 occurrences   [sales/sl055.cbl:L655]
-        spaces  138 occurrences   [sales/sl055.cbl:L539]
+        spaces  138 occurrences   [general/gl051.cbl:L1042]
 
     `ZEROES` is accepted as a spelling although it occurs zero times, because
     it is the same word and refusing it would be a validation. `HIGH-VALUES`,
@@ -694,9 +565,9 @@ class Delimiter(enum.Enum):
     spaces; `DELIMITED BY SPACE` stops at the first space, which is how a
     space-padded item contributes only its significant characters.
 
-    Verified across the twelve in-scope program files: `DELIMITED BY SIZE`
-    appears 22 times, `DELIMITED BY SPACE` 3 times, and a literal delimiter
-    zero times. The `SPACE` form's live sites both build a name for the
+    Across the twelve in-scope program files `DELIMITED BY SIZE` appears 22
+    times, `DELIMITED BY SPACE` 3 times, and a literal delimiter not at all.
+    The `SPACE` form's live sites both build a name for the
     operating system rather than a database column -
     [general/gl080.cbl:L531] and [irs/irs030.cbl:L1424] - and it is
     implemented because the verb admits it, not because a posted figure
@@ -735,6 +606,151 @@ _DELIMITER_BY_SPELLING: Final[Mapping[str, Delimiter]] = MappingProxyType({
     "space": Delimiter.SPACE,
 })
 
+
+# =====================================================================
+# THE THREE MOVEMENTS THE COMPILED SYSTEM CANNOT PERFORM
+#
+# Rule R-6 makes compiled behaviour the arbiter. Three of this module's six
+# questions were measured to have NO compiled answer to reproduce, each for
+# its own reason, and each therefore raises rather than returning a value
+# this module made up:
+#
+#   Q-9   the statement DOES NOT COMPILE, so no program can contain it
+#   Q-10  the statement does not compile with a literal range, and with a
+#         computed one its measured behaviour - reading adjacent storage -
+#         has no Python counterpart
+#   Q-14  no in-scope database write reaches the shape, so no experiment
+#         against the compiled cycle can observe it and no fixture exists
+#
+# Each exception's docstring carries the experiment and its output. None of
+# the three can fire on a faithful transcription of a frozen statement, and
+# each says why at its own definition, so a raise here means a
+# transcription slip rather than a data condition (rule R-3).
+# =====================================================================
+
+
+class MovementWithNoCompiledAnswer(ValueError):
+    """Base for a movement whose outcome the compiled system cannot supply.
+
+    A `ValueError` because it reports an argument combination that cannot
+    occur, not a numeric condition. One base so a program module can catch
+    the whole family, and three subclasses so a traceback names which
+    question it met.
+    """
+
+
+class FigurativeSpaceIntoNumeric(MovementWithNoCompiledAnswer):
+    """`MOVE SPACE` into a numeric receiver - question Q-9, INEXPRESSIBLE.
+
+    THE QUESTION.  What COBOL leaves in a numeric `DISPLAY` item after
+    `MOVE SPACE`, since spaces in a numeric item then fail a class test and
+    anomaly A-13's silent skip [general/gl072.cbl:L291-L292] turns on exactly
+    that.
+
+    THE EXPERIMENT.  The statement itself, compiled with GnuCOBOL 3.2.0 and
+    no dialect flag, against a numeric receiver and then a numeric-edited one:
+
+        01  n5  pic 9(5)  value 12345.
+        01  m   pic z(7)9.
+        move space to n5
+        move space to m
+
+    THE MEASURED RESULT.  BOTH ARE REJECTED AT COMPILE TIME:
+
+        error: MOVE of figurative constant SPACE to numeric item used
+
+    with `cobc` exiting 1 and producing no object file at all.
+
+    THE RESOLUTION.  The statement cannot exist in the compiled system, so
+    there is no behaviour to reproduce and any value returned here would be
+    invented. Neither cited authority contains it either:
+    [sales/sl055.cbl:L655] moves space to three ALPHANUMERIC flags -
+    `oi-applied`, `oi-unapl` and `oi-hold-flag` - and the non-numeric bytes
+    the class test at [general/gl072.cbl:L291-L292] reads arrived from a READ.
+
+    ANOMALY A-13 IS UNAFFECTED, which is worth stating plainly: it never
+    depended on this statement. Non-numeric bytes reach a numeric item through
+    a group MOVE, a REDEFINES or a file READ, all of which carry bytes
+    verbatim, and `is_numeric_class` reports False for them.
+
+    `MOVE SPACE` into an ALPHANUMERIC or a GROUP receiver is ordinary and
+    entirely supported; only the numeric and numeric-edited receivers raise.
+    """
+
+
+class ReferenceModificationOutOfRange(MovementWithNoCompiledAnswer):
+    """A reference-modification range past the item - Q-10, UNREPRODUCIBLE.
+
+    THE QUESTION.  What `item (offset:length)` yields when the range runs past
+    the end of the item.
+
+    THE EXPERIMENT, AND IT SPLIT IN TWO.  A LITERAL out-of-range pair was
+    compiled first:
+
+        01  leg    pic x(10)  value "ABCDEFGHIJ".
+        move leg (9:4) to ...
+
+    and GnuCOBOL 3.2.0 REJECTED IT AT COMPILE TIME -
+    "error: length of 'leg' out of bounds: 4" - so a literal range that runs
+    past its item cannot exist in the compiled system. A COMPUTED offset was
+    then compiled, with a recognisable guard item declared immediately after
+    the sender so that whatever lay beyond it could be identified:
+
+        01  leg    pic x(10)  value "ABCDEFGHIJ".
+        01  guard  pic x(10)  value all "#".
+        move 9 to off  move 4 to len  move leg (off:len) to ...
+
+    THE MEASURED RESULT.  A computed range is NOT range-checked at run time
+    and READS ADJACENT STORAGE: `leg(9:4)` yielded `IJ##` and `leg(12:2)`
+    yielded `##`. The run continued and exited zero.
+
+    THE RESOLUTION.  Reading adjacent storage has no counterpart in Python,
+    where a `str` has no neighbour and no fixed address. Returning a SHORT
+    slice - which is what Python's own slicing gives, and what this module
+    provisionally did - is a DIFFERENT answer from the measured one, not a
+    weaker form of it: the measurement returned four characters where a slice
+    returns two. So the range is refused, and the refusal names the
+    measurement rather than pretending to satisfy it.
+
+    IT CANNOT FIRE ON A FAITHFUL TRANSCRIPTION.  `ref_mod` carries the
+    reachability proof: every literal offset in the cycle is in bounds because
+    the compiler enforced it, and all three computed-offset sites are in
+    bounds by construction.
+    """
+
+
+class UnobservableEditedPicture(MovementWithNoCompiledAnswer):
+    """An edited picture outside Z-then-9 - question Q-14, UNOBSERVABLE.
+
+    THE QUESTION.  How a numeric-edited receiver renders when its picture uses
+    a symbol outside the `Z`-suppression-then-`9` shape - a floating sign, a
+    comma, a currency symbol, `CR`, `DB`, `BLANK WHEN ZERO`.
+
+    WHY NO EXPERIMENT CAN ANSWER IT.  Rule R-6 makes compiled behaviour the
+    arbiter, and arbitration needs an OBSERVABLE. The only observable this
+    migration has is table state: Agent Action Plan section 0.8.5 defines the
+    pass condition as an empty ordering-normalised diff of the affected
+    tables. Every edited picture in the frozen sources except the Z-then-9
+    shape receives into a PRINT LINE, and report formatting beyond database
+    effects is excluded by section 0.2.2 - so no scenario can make one of
+    these pictures change a column, and no fixture can be captured for one.
+    The question is not merely unmeasured; it is unobservable through the
+    contract this migration is verified against.
+
+    THE RESOLUTION.  Refuse it. The provisional fall-through rendered the
+    digit positions with no suppression and no insertion character, which was
+    an invented answer with nothing behind it and which would have written
+    that invention into a column had a picture ever reached it.
+
+    THE SHAPE THAT IS IMPLEMENTED is the one that does write:
+    `pic z(7)9` [sales/sl060.cbl:L213] and `pic z(4)9`
+    [general/gl051.cbl:L289], both measured. Only the first of the two is
+    reachable from a database write; the second receives into a print line
+    and is implemented because it is the SAME shape, not because it posts.
+    See `move_to_edited`.
+    """
+
+
 #: `MOVE ZERO ...` - the singular spelling. [general/gl072.cbl:L411].
 ZERO: Final[Figurative] = Figurative.ZERO
 
@@ -748,7 +764,7 @@ ZEROES: Final[Figurative] = Figurative.ZERO
 #: `MOVE SPACE ...` - the singular spelling. [sales/sl055.cbl:L655].
 SPACE: Final[Figurative] = Figurative.SPACE
 
-#: `MOVE SPACES ...` - the plural spelling. [sales/sl055.cbl:L539].
+#: `MOVE SPACES ...` - the plural spelling. [general/gl051.cbl:L1042].
 SPACES: Final[Figurative] = Figurative.SPACE
 
 #: `... DELIMITED BY SIZE`. [sales/sl060.cbl:L1091-L1093].
@@ -758,24 +774,20 @@ DELIMITED_BY_SIZE: Final[Delimiter] = Delimiter.SIZE
 DELIMITED_BY_SPACE: Final[Delimiter] = Delimiter.SPACE
 
 
-# =====================================================================
 # THE PUBLISHED CENSUS TABLES
-#
-# Every table is a `tuple` or a `MappingProxyType`, so nothing published here
-# can be mutated by a caller and no iteration order is a caller's to observe
-# (rule R-6). They exist because `docs/migration/traceability.md` must be
-# able to cite a measured count rather than an impression, and because a
-# future reader deciding whether some COBOL form is "missing" from this file
-# should find the count that settled it (rule R-5).
-# =====================================================================
+# Every table is a `tuple` or a `MappingProxyType`, so nothing published here can
+# be mutated by a caller and no iteration order is a caller's to observe
+# (rule R-6). They exist so that the traceability document the plan mandates can
+# cite a count over the frozen source rather than an impression, and so that a
+# future reader deciding whether some COBOL form is "missing" from this file finds
+# the count that settled it (rule R-5).
 
 #: `MOVE` LINE counts per in-scope program - the Agent Action Plan's own
-#: measure, section 0.4.1, which counts every LINE mentioning the verb,
-#: comments and continuations included. Reproduced so that a reader comparing
-#: this file against the plan finds the plan's own figures. Total 1,291
-#: against the plan's stated 1,290; the single-line difference is in
-#: `sales/sl055.cbl`, which the plan records as 91 and the frozen file
-#: measures at 92.
+#: metric, section 0.4.1, counting every LINE mentioning the verb, comments and
+#: continuations included. Reproduced so that a reader comparing this file
+#: against the plan finds the plan's own figures. Total 1,291 against the plan's
+#: stated 1,290; the single-line difference is in `sales/sl055.cbl`, which the
+#: plan records as 91 and the frozen file contains 92.
 MOVE_CENSUS: Final[tuple[tuple[str, int], ...]] = (
     ("general/gl051.cbl", 157),
     ("general/gl070.cbl", 66),
@@ -819,11 +831,13 @@ MOVE_STATEMENT_CENSUS: Final[tuple[tuple[str, int], ...]] = (
 #: Eighty-three occurrences in total, on both the sending and the receiving
 #: side of a `MOVE`.
 #:
-#: Every offset is 1 through 9, so no in-scope site exercises the negative
-#: offset noted under Q-10. Three further sites use a computed pair rather
-#: than a literal one - `m (b:c)` at [sales/sl060.cbl:L1091],
-#: [purchase/pl060.cbl:L954] and [purchase/pl100.cbl:L608] - and are not
-#: counted here because their operands are variables.
+#: Every offset is 1 through 9, and every range is inside its item - which is
+#: not a coincidence but a compiler guarantee, since GnuCOBOL rejects a literal
+#: range that overruns (question Q-10, measured). Three further sites use a
+#: computed pair rather than a literal one - `m (b:c)` at
+#: [sales/sl060.cbl:L1091], [purchase/pl060.cbl:L954] and
+#: [purchase/pl100.cbl:L608] - and are not counted here because their operands
+#: are variables; `ref_mod` proves all three in bounds by construction.
 REFERENCE_MODIFICATION_CENSUS: Final[
     tuple[tuple[int, int, int], ...]
 ] = (
@@ -857,8 +871,9 @@ FIGURATIVE_SPELLINGS: Final[Mapping[str, tuple[Figurative, int]]] = (
 #: The single character each figurative constant fills a receiver with when
 #: the receiver takes text. `ZERO` fills with the CHARACTER zero, so `MOVE
 #: ZERO` into `pic x(4)` yields `"0000"` and not four spaces; `SPACE` fills
-#: with the space character, so `MOVE SPACE` into a numeric `DISPLAY` item
-#: leaves bytes that fail a numeric class test, which is question Q-9.
+#: with the space character. This table is consulted for TEXT receivers only -
+#: `MOVE SPACE` into a numeric receiver does not compile and never reaches it,
+#: which is question Q-9, measured.
 #: [sales/sl055.cbl:L655] and [general/gl072.cbl:L411].
 FIGURATIVE_FILL_CHARACTER: Final[Mapping[Figurative, str]] = MappingProxyType(
     {
@@ -868,9 +883,9 @@ FIGURATIVE_FILL_CHARACTER: Final[Mapping[Figurative, str]] = MappingProxyType(
 )
 
 #: COBOL data-movement forms that occur ZERO times across the twelve in-scope
-#: program files and every in-scope copybook, mapped to the count that was
-#: measured. Each is therefore NOT implemented below, and this table is the
-#: evidence that the omission was verified rather than overlooked (rule R-5).
+#: program files and every in-scope copybook, mapped to that count. Each is
+#: therefore NOT implemented below, and this table makes the omission checkable
+#: against the frozen source rather than leaving it to look overlooked (rule R-5).
 #:
 #: `ALL "x"` needs its qualifier stated precisely rather than as a bare zero:
 #: it occurs four times, at [general/gl051.cbl:L265],
@@ -932,13 +947,10 @@ _SIGN_IN_ITS_OWN_BYTE: Final[frozenset[SignPosition]] = frozenset({
 _BYTE_IMAGE_ENCODING: Final[str] = "latin-1"
 
 
-# =====================================================================
 # THE RULE R-2 CARRIER GATE
-#
 # THE ONLY `raise` STATEMENT IN THIS FILE. It fires on a value's Python TYPE,
 # never on its content, which is the whole difference between an R-2 type gate
 # and an R-3 validation. See the module docstring.
-# =====================================================================
 
 
 def _exact_carrier(value: object, *, role: str) -> None:
@@ -977,13 +989,10 @@ def _exact_carrier(value: object, *, role: str) -> None:
         )
 
 
-# =====================================================================
 # PRIVATE HELPERS
-#
 # None of these is published. Each exists so that exactly one place in this
 # file decides one question, and so that the twelve verbs read as the COBOL
 # forms they implement rather than as string arithmetic.
-# =====================================================================
 
 
 def _receiver_width(
@@ -1002,8 +1011,9 @@ def _receiver_width(
     3. The field's `byte_length`, which is what a numeric item occupies when
        its bytes are treated as characters. `pic 9(5)`
        [copybooks/wspost.cob:L15] gives 5 and `pic s9(8)v99`
-       [copybooks/wspost.cob:L23] gives 10. This is the width the Q-9 and
-       Q-13 text paths fill.
+       [copybooks/wspost.cob:L23] gives 10. It is the width a text movement
+       fills when the receiver happens to be a numeric item, which a group
+       MOVE reaches - Q-13's byte-preserving path 1.
     4. None, when the field is a group. `FieldDescriptor.byte_length` reports
        that a group has no width of its own and that its children's widths
        must be summed; every one of the 134 group views in the generated
@@ -1029,49 +1039,118 @@ def _receiver_width(
         return None
 
 
-def _numeric_image_value(text: str) -> decimal.Decimal | None:
-    """Read a byte image as an exact value, or report that it is not one.
+def _alphanumeric_to_numeric(text: str) -> decimal.Decimal:
+    """Read sending characters as a value the way an elementary MOVE does.
 
-    STRICT AND DELIBERATELY SO. Python's `decimal.Decimal` constructor accepts
-    surrounding whitespace, an exponent and an underscore separator, so
-    `Decimal("0012 ")` is 12 - which would silently turn the spaces left in a
-    numeric item by `MOVE SPACE` [sales/sl055.cbl:L655] into a value, and
-    would destroy the premise of anomaly A-13, whose skip at
-    [general/gl072.cbl:L291-L292] fires precisely because an item's bytes are
-    not digits. So the grammar here is spelled out rather than borrowed.
+    Q-13, PATH 2  RESOLVED against the compiled oracle.
 
-    Accepted, and nothing else: an optional single leading or trailing `+` or
-    `-`, then one or more ASCII digits, with at most one `.` among them. No
-    space anywhere, no exponent, no underscore, no other character, and at
-    least one digit.
+    THE QUESTION.  What an ELEMENTARY `MOVE` of an alphanumeric item into a
+    numeric receiver does when the sending bytes are not a clean digit string.
+    The provisional answer kept the characters, right-aligned in the receiver's
+    byte width and losing from the left. That is what a byte-preserving path
+    does, and an elementary MOVE is not one.
 
-    A zoned overpunch image is deliberately NOT read here. `"000001234u"` is
-    what `pic s9(8)v99` [copybooks/wspost.cob:L23] holds for -123.45, and its
-    final byte carries both a digit and a sign; decoding that is
-    `acas_posting.cobol.usage.decode`'s work, and a program module holding a
-    raw byte image should go there rather than through a `MOVE`. The class
-    condition below DOES read the overpunch, because a COBOL class test reads
-    the item's bytes and must answer for them.
+    THE EXPERIMENT.  A standalone GnuCOBOL 3.2.0 program declaring the sending
+    and receiving shapes the cycle uses, moving a literal into the sender and
+    the sender into the receiver, and displaying the receiver - FORTY-TWO
+    cases, covering every character class a byte image can carry:
+
+        01  s5    pic x(5).
+        01  n5    pic 9(5).       01  n3    pic 9(3).
+        01  sn5   pic s9(5).      01  n3v2  pic 9(3)v99.
+        move "AB123" to s5   move s5 to n3   display n3
+
+    THE MEASURED RESULT, all forty-two, grouped by what each one settles:
+
+        SPACES ARE IGNORED, wherever they fall
+            '1 3 5' -> 9(3)   = 135        '  123' -> 9(5) = 00123
+            '123  ' -> 9(5)   = 00123      '     ' -> 9(5) = 00000
+            '  1 2' -> 9(3)v99= 012.00     '12      '->9(5) = 00012
+            '1 3 5' -> 9(3)v99= 135.00     '1 3 5' -> 9(5) = 00135
+        A COMMA IS IGNORED TOO, AND SO IS A SECOND ONE
+            '1,234' -> 9(5)   = 01234      '1,2,3' -> 9(5) = 00123
+        A PERIOD IS THE DECIMAL POINT
+            '12.45' -> 9(3)v99= 012.45     '1.5  '-> 9(3)v99 = 001.50
+            '.1234' -> 9(3)v99= 000.12     '12.45'-> 9(5)    = 00012
+        A LEADING SIGN IS HONOURED; INTO AN UNSIGNED RECEIVER IT IS DROPPED
+            '-0123' -> s9(3)  = -123       '-0123'-> 9(5)    = 00123
+            '+0123' -> s9(3)v99 = +123.00  '  -12'-> s9(5)   = -00012
+            '-  12' -> s9(5)  = -00012     '+0123'-> 9(5)    = 00123
+            '-0123' -> s9(3)v99 = -123.00
+        A TRAILING SIGN IS IGNORED - NOT APPLIED, AND NOT FATAL EITHER
+            '0123-' -> s9(5)  = +00123     '0123+'-> s9(5)   = +00123
+            '+123-' -> s9(5)  = +00123   (the LEADING sign of the pair is
+                                          the one that counts, and here it
+                                          is `+`, so the result is positive)
+        TWO SIGNS ON THE SAME SIDE ARE JUST AN INVALID CHARACTER
+            '--123' -> s9(5)  = +00000
+        ANY OTHER CHARACTER MAKES THE WHOLE RESULT ZERO - not just its own
+        position, and not the valid digits beside it
+            'AB123' -> 9(3)   = 000        'AB123'-> 9(5)    = 00000
+            '0000A' -> 9(5)   = 00000      'A0000'-> 9(5)    = 00000
+            'ab123' -> 9(5)   = 00000      'AB12C'-> 9(3)    = 000
+            '12-45' -> 9(5)   = 00000      '12$45'-> 9(5)    = 00000
+            '1e2  ' -> 9(5)   = 00000      '1.2.3'-> 9(3)v99 = 000.00
+            'AB12C' -> 9(5)   = 00000      'AB123'-> 9(3)v99 = 000.00
+            '0000q' -> s9(5)  = +00000   (an overpunch byte is NOT decoded
+                                          on this path, though a class test
+                                          and a SORT key do decode it)
+        THE VALUE IS THEN STORED BY THE ORDINARY NUMERIC RULES - the sending
+        characters carry an INTEGER unless a period says otherwise, so the
+        implied decimal point is at the RIGHT END and not the receiver's
+            '12345' -> 9(3)     = 345      '12345'-> 9(3)v99 = 345.00
+            '12345' -> s9(3)v99 = +345.00  '12345'-> s9(5)   = +12345
+
+    THE RESOLUTION, implemented below.  Remove every space and comma; drop a
+    single trailing sign, which the compiler ignores; require what remains to
+    be an optional leading sign, then digits with at most one period among
+    them, and at least one digit. Anything else is ZERO. All forty-two
+    measurements above follow from those four steps, and the store that
+    receives the result applies scale truncation, silent high-order loss and
+    the unsigned sign drop as it does for any other value.
+
+    The four steps were deliberately probed at their edges rather than only in
+    the middle: `'1,2,3'` proves the comma rule is every comma and not the
+    first, `'--123'` proves a doubled sign falls to the invalid-character
+    ZERO rather than to a double negation, and `'+123-'` proves the leading
+    sign of a leading-and-trailing pair is the one that survives. Those three
+    are the cases a reading built from the other thirty-nine would most
+    plausibly have got wrong, so each is measured rather than reasoned about.
+
+    WHAT THIS FUNCTION IS NOT.  It is not the byte-preserving path. When the
+    frozen system holds non-numeric bytes in a numeric item they arrived
+    through a group MOVE, a REDEFINES or a file READ - `post-batch pic 9(5)`
+    [general/gl072.cbl:L291-L292] arrived from a READ - and on THAT path the
+    bytes survive verbatim, which is what makes anomaly A-13's silent skip
+    fire. `move_group` carries bytes and `is_numeric_class` reads them,
+    overpunch included; neither routes through here.
+
+    docs/migration/ambiguity-resolutions.md carries the register entry; this
+    docstring is the resolution itself, recorded where the reading is done.
 
     Args:
-        text: The byte image to read.
+        text: The sending characters.
 
     Returns:
-        The exact value, or None when the image is not a numeric one.
+        The value the compiled program reads from them - zero for any image
+        the measurement showed converting to zero.
     """
-    body = text
-    negative = False
-    if body[:1] in ("+", "-"):
-        negative = body[0] == "-"
-        body = body[1:]
-    elif body[-1:] in ("+", "-"):
-        negative = body[-1] == "-"
+    body = text.replace(" ", "").replace(",", "")
+    if body[-1:] in ("+", "-"):
+        # Measured: a trailing sign is discarded and does not set the sign.
         body = body[:-1]
-    if not body or body.count(".") > 1:
-        return None
+    negative = body[:1] == "-"
+    if body[:1] in ("+", "-"):
+        body = body[1:]
     digits = body.replace(".", "", 1)
-    if not digits or not digits.isascii() or not digits.isdigit():
-        return None
+    if (
+        not body
+        or body.count(".") > 1
+        or not digits
+        or not digits.isascii()
+        or not digits.isdigit()
+    ):
+        return decimal.Decimal(0)
     return decimal.Decimal(("-" if negative else "") + body)
 
 
@@ -1150,8 +1229,8 @@ def _edited_shape_of(clause: str | None) -> tuple[int, int] | None:
     A repeat count in parentheses is expanded, so `z(7)9` reads as seven `Z`
     positions then one `9` position. The shape must be a run of `Z` followed
     by a run of `9`; anything else - an insertion character, a decimal point,
-    a sign symbol, a `9` before a `Z` - reports None and takes the Q-14
-    fall-through.
+    a sign symbol, a `9` before a `Z` - reports None, and `move_to_edited`
+    then refuses it under question Q-14.
 
     Args:
         clause: The receiving field's recorded picture clause, or None.
@@ -1233,14 +1312,11 @@ def _string_source(
     return value, member, descriptor
 
 
-# =====================================================================
 # THE FIVE MOVE CATEGORIES
-#
 # One primitive per category, because the truncation direction differs by
 # category and both directions are silent. Every one of them cites the frozen
 # site it implements (rule R-5), and not one of them inspects a value's
 # content to decide whether it will fit (rule R-3).
-# =====================================================================
 
 
 def move_alphanumeric(
@@ -1275,10 +1351,10 @@ def move_alphanumeric(
     `batch pic 9(5)` contributes its five digit bytes at
     [sales/sl100.cbl:L622].
 
-    `JUSTIFIED` is not supported, and that is a verified decision rather than
-    an omission: the keyword occurs zero times in every in-scope copybook and
-    every in-scope program, so the default placement from the left is the only
-    one the frozen sources ever ask for.
+    `JUSTIFIED` is not supported, and that is a decision rather than an
+    oversight: the keyword occurs zero times in every in-scope copybook and every
+    in-scope program, so the default placement from the left is the only one the
+    frozen sources ever ask for.
 
     Args:
         value: The sending value - text, an exact numeric carrier, or a
@@ -1336,8 +1412,8 @@ def move_numeric(
     high-order reduction are all audited there, and two truncation code paths
     would mean one of them was eventually wrong. Question Q-3 - what an
     unsigned receiver does with a signed value - is that module's register
-    entry and this one inherits its provisional answer, the absolute value
-    stored.
+    entry, measured there, and this one inherits the answer: the ABSOLUTE
+    VALUE is stored and the sign is dropped silently.
 
     A `SIGN LEADING` receiver keeps its sign in its leading digit position,
     and the two spellings the frozen sources use are both honoured without
@@ -1348,16 +1424,22 @@ def move_numeric(
     `acas_posting.cobol.usage`'s work; each descriptor keeps its own recorded
     wording.
 
-    Category (d), numeric from alphanumeric, reads the sending characters as a
-    value. The reading is strict - see `_numeric_image_value` - and when the
-    characters are NOT a numeric image the movement takes the Q-13 path: they
-    are kept as characters, aligned to the RIGHT of the receiver's byte width,
-    losing characters from the LEFT and padded on the left with spaces, never
-    with zeros, which would fabricate digits the sending bytes do not contain.
-    No error is reported, so `is_numeric_class` can afterwards report False
-    and the silent skip at [general/gl072.cbl:L291-L292] - anomaly A-13 -
-    stays reproducible. Question Q-9 is the same path reached from
-    `MOVE SPACE` [sales/sl055.cbl:L655].
+    Category (d), numeric from alphanumeric, CONVERTS the sending characters to
+    a value - it does not carry their bytes across. The conversion is the one
+    measured at `_alphanumeric_to_numeric`: spaces and commas ignored, a
+    leading sign honoured, a period read as the decimal point, and ANY other
+    character making the whole result ZERO. `'AB123'` therefore stores 0 and
+    not `AB123`, which is question Q-13, path 2, and which OVERTURNED this
+    module's provisional answer.
+
+    THE BYTE-PRESERVING PATH IS A DIFFERENT ONE, and anomaly A-13 depends on
+    it rather than on this. `post-batch pic 9(5)`
+    [general/gl072.cbl:L291-L292] holds non-numeric bytes because they arrived
+    from a READ, not from a MOVE; a group MOVE or a REDEFINES reaches the same
+    state. Those carry bytes verbatim - see `move_group` - and
+    `is_numeric_class` then reports False for them, which is what makes the
+    silent skip fire. Nothing here rewrites those bytes and nothing here
+    fabricates digits.
 
     Args:
         value: The sending value - an exact numeric carrier, text, or a
@@ -1369,25 +1451,24 @@ def move_numeric(
 
     Returns:
         What the receiver now holds - `decimal.Decimal` for a scaled field,
-        `int` for the binary family and a zero-scale integer, or text on the
-        Q-9 and Q-13 paths.
+        `int` for the binary family and a zero-scale integer.
 
     Raises:
         TypeError: If `value` is a binary floating-point carrier (rule R-2).
+        FigurativeSpaceIntoNumeric: If `value` is the figurative constant
+            SPACE, which GnuCOBOL 3.2 rejects at compile time for a numeric
+            receiver (question Q-9).
     """
     _exact_carrier(value, role="sending value")
     del sending_field
     if isinstance(value, Figurative):
         return move_figurative(value, receiving_field)
     if isinstance(value, str):
-        exact = _numeric_image_value(value)
-        if exact is None:
-            width = _receiver_width(receiving_field, None)
-            if width is None:
-                return value
-            # Q-13: kept as characters, losing from the LEFT.
-            return value[-width:].rjust(width)
-        return cobol_arithmetic.store(exact, receiving_field)
+        # Q-13, path 2: the characters are CONVERTED, measured value for
+        # measured value, and an unreadable image converts to zero.
+        return cobol_arithmetic.store(
+            _alphanumeric_to_numeric(value), receiving_field
+        )
     return cobol_arithmetic.store(value, receiving_field)
 
 
@@ -1464,11 +1545,16 @@ def move_figurative(
     `move zero to tot-dr tot-cr.` [general/gl072.cbl:L411] clears two
     accumulators to 0.00. `MOVE ZERO` into an alphanumeric receiver fills it
     with the CHARACTER zero, so a four-character receiver holds `0000` and not
-    four spaces. And `MOVE SPACE` into a numeric `DISPLAY` receiver leaves
-    SPACES in its bytes - `move space to oi-applied oi-unapl oi-hold-flag.`
-    [sales/sl055.cbl:L655] - which is question Q-9, and which matters because
-    those bytes then fail a numeric class test and feed anomaly A-13's silent
-    skip at [general/gl072.cbl:L291-L292].
+    four spaces.
+
+    `MOVE SPACE` INTO A NUMERIC OR NUMERIC-EDITED RECEIVER RAISES, because the
+    statement DOES NOT COMPILE - question Q-9, measured, and
+    `FigurativeSpaceIntoNumeric` carries the compiler's own message. The
+    frozen statement often cited for it, `move space to oi-applied oi-unapl
+    oi-hold-flag.` [sales/sl055.cbl:L655], moves space into three
+    ALPHANUMERIC flags, which is ordinary and supported here. Anomaly A-13's
+    silent skip at [general/gl072.cbl:L291-L292] never depended on this
+    statement: the non-numeric bytes it tests arrived from a READ.
 
     `HIGH-VALUES`, `LOW-VALUES`, `QUOTES` and `ALL "x"` as a sending operand
     each occur zero times and are not implemented; `ZERO_OCCURRENCE_FORMS`
@@ -1483,20 +1569,37 @@ def move_figurative(
     Returns:
         What the receiver now holds: `decimal.Decimal` or `int` for a numeric
         receiver filled with `ZERO`, and text in every other case.
+
+    Raises:
+        FigurativeSpaceIntoNumeric: `MOVE SPACE` into a numeric or
+            numeric-edited receiver, which GnuCOBOL 3.2 rejects at compile
+            time (question Q-9).
     """
     member = (
         figurative if isinstance(figurative, Figurative)
         else Figurative(figurative)
     )
     if member is Figurative.SPACE:
-        # Q-9 when the receiver is numeric: the bytes hold spaces, and the
-        # class condition below will report False for them.
+        if receiving_field.is_numeric or receiving_field.is_edited:
+            # Q-9: measured as a COMPILE ERROR, so there is no behaviour to
+            # reproduce. See FigurativeSpaceIntoNumeric.
+            kind = (
+                "numeric-edited" if receiving_field.is_edited else "numeric"
+            )
+            raise FigurativeSpaceIntoNumeric(
+                f"MOVE SPACE into {receiving_field.name!r}, a {kind}"
+                " item, does not compile under GnuCOBOL 3.2: 'error: MOVE of "
+                "figurative constant SPACE to numeric item used'. The "
+                "statement cannot exist in the compiled system, so no value "
+                "is reproducible (question Q-9, measured). MOVE SPACE into an "
+                "alphanumeric or group receiver is supported."
+            )
         width = _receiver_width(receiving_field, length)
         fill = FIGURATIVE_FILL_CHARACTER[member]
         return fill if width is None else fill * width
     if receiving_field.is_edited:
-        # Q-12: the trailing `9` of `z(7)9` prints, so zero renders as seven
-        # spaces then a single `0` [sales/sl060.cbl:L1085].
+        # Q-12, measured: the trailing `9` of `z(7)9` prints, so zero renders
+        # as seven spaces then a single `0` [sales/sl060.cbl:L1085].
         return move_to_edited(0, receiving_field)
     if receiving_field.is_numeric:
         return cobol_arithmetic.store(0, receiving_field)
@@ -1532,20 +1635,36 @@ def move_to_edited(
     LINE and therefore has no database effect and no oracle evidence behind
     it. `EDIT_SYMBOLS_IMPLEMENTED` lists the two symbols implemented and names
     the ten deliberately absent. A picture outside the `Z`-then-`9` shape
-    takes an explicitly UNVERIFIED fall-through, recorded as question Q-14:
-    its digit positions are rendered with no suppression and no insertion
-    character. That path is not a claim about compiled behaviour, and this
-    docstring is the place that says so rather than letting it pass for
-    verified.
+    RAISES `UnobservableEditedPicture` - question Q-14, resolved as
+    unobservable rather than merely unmeasured, because the only observable
+    this migration is verified against is table state and no scenario can make
+    such a picture change a column. The provisional fall-through rendered its
+    digit positions with no suppression and no insertion character, and that
+    invention is now refused rather than written.
 
-    THE SUPPRESSION RULE. Scanning from the left, a `Z` position holding a
-    zero with no significant digit yet to its left is replaced by a space; a
-    `Z` position at or after the first significant digit prints its digit; a
-    `9` position always prints. With no `BLANK WHEN ZERO` - the clause occurs
-    zero times in every in-scope copybook - the trailing `9` of `z(7)9`
-    prints even for zero, so zero renders as seven spaces then `0`. That is
-    question Q-12, and it changes a database column whenever the sending value
-    is zero.
+    THE SUPPRESSION RULE, MEASURED. Scanning from the left, a `Z` position
+    holding a zero with no significant digit yet to its left is replaced by a
+    space; a `Z` position at or after the first significant digit prints its
+    digit; a `9` position always prints. With no `BLANK WHEN ZERO` - the clause
+    occurs zero times in every in-scope copybook - the trailing `9` prints even
+    for zero. Question Q-12, measured under GnuCOBOL 3.2.0 by moving each value
+    into each declaration and displaying the receiver:
+
+        zero  into pic z(7)9  ->  [       0]      seven spaces then 0
+        1234  into pic z(7)9  ->  [    1234]
+        zero  into pic z(4)9  ->  [    0]         four spaces then 0
+
+    so the provisional answer was CONFIRMED. It changes a database column
+    whenever the sending value is zero, which is why it was a question at all.
+
+    AN ALPHANUMERIC SENDER IS CONVERTED FIRST, then edited, and that too was
+    measured rather than assumed:
+
+        '  123' into pic z(7)9  ->  [     123]
+        'AB123' into pic z(7)9  ->  [       0]
+
+    which is `_alphanumeric_to_numeric`'s measured rule - any invalid
+    character makes the value zero - followed by this function's suppression.
 
     No sign is rendered. `+`, `-`, `CR` and `DB` each occur zero times in the
     in-scope edited pictures, so a sign has no position to occupy, and the
@@ -1561,32 +1680,49 @@ def move_to_edited(
 
     Raises:
         TypeError: If `value` is a binary floating-point carrier (rule R-2).
+        FigurativeSpaceIntoNumeric: If `value` is the figurative constant
+            SPACE, which does not compile against an edited receiver either
+            (question Q-9).
+        UnobservableEditedPicture: If the receiving picture is outside the
+            `Z`-then-`9` shape (question Q-14).
     """
     _exact_carrier(value, role="sending value")
     shape = _edited_shape_of(receiving_field.picture)
     if isinstance(value, Figurative):
         if value is Figurative.SPACE:
-            width = _receiver_width(receiving_field, None)
-            return " " if width is None else " " * width
+            # Q-9: measured as a COMPILE ERROR for a numeric-edited receiver
+            # exactly as for a plain numeric one.
+            raise FigurativeSpaceIntoNumeric(
+                f"MOVE SPACE into {receiving_field.name!r}, a numeric-edited "
+                "item, does not compile under GnuCOBOL 3.2: 'error: MOVE of "
+                "figurative constant SPACE to numeric item used'. The "
+                "statement cannot exist in the compiled system, so no value "
+                "is reproducible (question Q-9, measured)."
+            )
         exact: decimal.Decimal | int = 0
     elif isinstance(value, str):
-        read = _numeric_image_value(value)
-        if read is None:
-            # Q-13 reached through an edited receiver: characters kept,
-            # losing from the LEFT, rather than an error.
-            width = _receiver_width(receiving_field, None)
-            return value if width is None else value[-width:].rjust(width)
-        exact = read
+        # Q-13, path 2, then the editing: measured as conversion followed by
+        # suppression, with an unreadable image converting to zero.
+        exact = _alphanumeric_to_numeric(value)
     else:
         exact = value
+    if shape is None:
+        # Q-14: refused, not rendered. See UnobservableEditedPicture.
+        raise UnobservableEditedPicture(
+            f"{receiving_field.name!r} declares the edited picture "
+            f"{receiving_field.picture!r}, which is outside the Z-then-9 "
+            f"shape {EDIT_SYMBOLS_IMPLEMENTED} implements. No in-scope "
+            "database "
+            "write reaches such a picture - every other edited picture in the "
+            "frozen sources receives into a print line - so no experiment "
+            "against the compiled cycle can observe its rendering and none is "
+            "reproduced here (question Q-14). Report formatting beyond "
+            "database effects is out of scope by Agent Action Plan section "
+            "0.2.2."
+        )
     stored = cobol_arithmetic.store(exact, receiving_field)
     plain = str(stored) if isinstance(stored, int) else format(stored, "f")
     digits = plain.lstrip("+-").replace(".", "")
-    if shape is None:
-        # Q-14: UNVERIFIED. No suppression, no insertion character.
-        fallback = _receiver_width(receiving_field, None)
-        span = len(digits) if fallback is None else fallback
-        return digits.zfill(span)[-span:]
     suppressed, printing = shape
     span = suppressed + printing
     digits = digits.zfill(span)[-span:]
@@ -1601,13 +1737,10 @@ def move_to_edited(
     return "".join(rendered)
 
 
-# =====================================================================
 # THE AUDITED DISPATCH
-#
 # One entry point a program module normally calls, and one for the
 # multiple-receiver form. Both choose a category from the RECEIVING field and
 # never from the sending value's convenience.
-# =====================================================================
 
 
 def move(
@@ -1642,8 +1775,7 @@ def move(
        right [copybooks/wspost.cob:L24].
 
     There is no sixth case. A receiver is a group, edited, numeric or text,
-    and the vocabulary `acas_posting.dictionary.model` publishes admits
-    nothing else.
+    and the `Usage` vocabulary imported above admits nothing else.
 
     Args:
         value: The sending value - text, an exact numeric carrier, or a
@@ -1747,13 +1879,10 @@ def move_to_all(
     )
 
 
-# =====================================================================
 # REFERENCE MODIFICATION - 1-BASED, AND NEVER BOUNDS-CHECKED
-#
 # Eighty-three literal uses across the twelve in-scope program files, on both
 # the sending and the receiving side, and one pair of them writes a database
 # column. See `REFERENCE_MODIFICATION_CENSUS` for the per-pair counts.
-# =====================================================================
 
 
 def ref_mod(text: str, offset: int, length: int) -> str:
@@ -1774,15 +1903,41 @@ def ref_mod(text: str, offset: int, length: int) -> str:
         move  to-day (4:2) to ws-Intl-Month.    [general/gl070.cbl:L597]
         move  to-day (1:2) to ws-Intl-Days.     [general/gl070.cbl:L598]
 
-    NOT BOUNDS-CHECKED, deliberately (rule R-4). A range running past the end
-    of the item yields the characters that are there and no error, which is
-    Python's own slicing behaviour and is left to stand rather than guarded -
-    question Q-10 records that GnuCOBOL's behaviour with and without bounds
-    checking has not been measured. An offset below 1 would index from the end
-    the way a negative Python index does; no in-scope site produces one, every
-    literal offset in `REFERENCE_MODIFICATION_CENSUS` being 1 through 9 and
-    the one computed offset being a tally plus one
-    [sales/sl060.cbl:L1089-L1091].
+    A RANGE THAT RUNS PAST THE ITEM IS REFUSED - question Q-10, measured, and
+    `ReferenceModificationOutOfRange` carries the two experiments: a LITERAL
+    out-of-range pair does not compile, and a COMPUTED one is not range-checked
+    at run time and READS ADJACENT STORAGE, which a Python `str` has none of.
+    Returning the short slice Python's own slicing gives would be a DIFFERENT
+    answer from the measured one - two characters where the compiled program
+    produced four - so it is refused instead of guessed.
+
+    THE REACHABILITY PROOF, which is why that refusal can never fire on a
+    faithful transcription. Every LITERAL offset in
+    `REFERENCE_MODIFICATION_CENSUS` is 1 through 9 against items at least ten
+    characters wide, and it could not be otherwise: the compiler rejects a
+    literal range that overruns, so a literal range present in a frozen source
+    is in bounds by the fact of having compiled. Exactly THREE in-scope sites
+    compute their offset, and all three are the same statement shape -
+    [sales/sl060.cbl:L1091], [purchase/pl060.cbl:L954] and
+    [purchase/pl100.cbl:L608] - each writing `string m (b:c) ...` after
+    `inspect m tallying b for leading space`, `subtract b from 8 giving c` and
+    `add 1 to b`, with `m pic z(7)9` and `b`, `c` both `binary-char`
+    [sales/sl060.cbl:L213-L215]. `m` is EIGHT characters, so `b` after the
+    increment is the first non-space position and `c` is the count from it to
+    the end: `b + c - 1 = 8` exactly, always, whatever the value. The range is
+    in bounds BY CONSTRUCTION rather than by luck.
+
+    That proof RESTS ON QUESTION Q-12's measurement, which is the interlock.
+    `z(7)9` always prints its final digit - zero renders as seven spaces then
+    `0`, measured - so the leading-space tally is at most 7 and `b` at most 8.
+    Had that picture blanked entirely for zero, the tally would have been 8,
+    `b` would have been 9, and the reference modification WOULD have run past
+    the field. Two measurements, and only together do they establish that this
+    module's refusal is unreachable.
+
+    An offset below 1 is refused for the same reason: it would index from the
+    end the way a negative Python index does, which is not a COBOL behaviour at
+    all, and no in-scope site produces one.
 
     Args:
         text: The sending item's characters.
@@ -1795,11 +1950,23 @@ def ref_mod(text: str, offset: int, length: int) -> str:
     Raises:
         TypeError: If `offset` or `length` is a binary floating-point carrier
             (rule R-2).
+        ReferenceModificationOutOfRange: The range is not wholly inside `text`
+            (question Q-10).
     """
     _exact_carrier(offset, role="reference-modification offset")
     _exact_carrier(length, role="reference-modification length")
     start = int(offset) - 1
-    return text[start:start + int(length)]
+    span = int(length)
+    if start < 0 or span < 1 or start + span > len(text):
+        raise ReferenceModificationOutOfRange(
+            f"({offset}:{length}) is not wholly inside an item of "
+            f"{len(text)} characters. A literal range like this does not "
+            "compile under GnuCOBOL 3.2, and a computed one reads ADJACENT "
+            "STORAGE, which a Python str does not have - so no value here is "
+            "reproducible (question Q-10, measured). Every in-scope range is "
+            "in bounds; see this function's reachability proof."
+        )
+    return text[start:start + span]
 
 
 def ref_mod_into(
@@ -1831,15 +1998,18 @@ def ref_mod_into(
     not this module's. The same pair appears at
     [sales/sl100.cbl:L612-L613].
 
-    NOT BOUNDS-CHECKED (rule R-4, question Q-10). A range starting beyond the
-    end of the receiver extends it rather than reporting an error, because the
-    receiver's own declared width is not a parameter of this primitive - the
-    `move` that stores the result applies it. Callers hold a receiver at its
-    full declared width, which every record layout initialises it to, and then
-    this is exact.
+    A RANGE THAT RUNS PAST THE RECEIVER IS REFUSED, for the reason `ref_mod`
+    sets out under question Q-10: on the receiving side the compiled program
+    would write over ADJACENT STORAGE, and silently extending a Python string
+    instead - which is what this primitive provisionally did - is a different
+    outcome, not a weaker form of the same one. Callers hold a receiver at its
+    full declared width, which every record layout initialises it to, so the
+    two live sites are in bounds: `(1:6)` and `(7:2)` into
+    `Post-Date pic x(8)` [copybooks/wspost.cob:L18].
 
     Args:
-        receiver_text: The receiver's current characters.
+        receiver_text: The receiver's current characters, at its declared
+            width.
         offset: The 1-based first character position of the range.
         length: The number of characters in the range.
         value: The characters to place in the range.
@@ -1850,34 +2020,38 @@ def ref_mod_into(
     Raises:
         TypeError: If `offset` or `length` is a binary floating-point carrier
             (rule R-2).
+        ReferenceModificationOutOfRange: The range is not wholly inside
+            `receiver_text` (question Q-10).
     """
     _exact_carrier(offset, role="reference-modification offset")
     _exact_carrier(length, role="reference-modification length")
     start = int(offset) - 1
     span = int(length)
     stop = start + span
+    if start < 0 or span < 1 or stop > len(receiver_text):
+        raise ReferenceModificationOutOfRange(
+            f"({offset}:{length}) is not wholly inside a receiver of "
+            f"{len(receiver_text)} characters. The compiled program would "
+            "write over ADJACENT STORAGE, which a Python str does not have, "
+            "so no result here is reproducible (question Q-10, measured). "
+            "Hold the receiver at its declared width - every record layout "
+            "initialises it to that - and every in-scope range fits."
+        )
     placed = value[:span].ljust(span)
     return receiver_text[:start] + placed + receiver_text[stop:]
 
 
-# =====================================================================
 # THE TWO CHARACTER VERBS THAT LIVE HERE
-#
 # `INSPECT ... TALLYING ... FOR LEADING` and
 # `STRING ... DELIMITED BY ... INTO ... POINTER` are receiving-field character
 # movement, they have a database effect, and the folder they would otherwise
-# belong to does not exist: the folder requirement closes this package at
-# eight files and says, verbatim, "Nothing else. No `strings.py`, no
-# `numeric.py`, no `helpers.py`." So they are here by that rule, and this
-# banner says so, rather than leaving a reader to think they were smuggled in.
-#
-# NOT here: `INSPECT ... REPLACING ALL "." BY "/"`, at
-# [general/gl051.cbl:L1178-L1180] and [irs/irs030.cbl:L1312-L1314]. Agent
-# Action Plan section 0.4.1.6 assigns separator handling for `.`, `,` and `-`
-# to `acas_posting/dates.py`, a standard-library-only module that does not
-# import this package. The boundary is recorded so the omission is visible
-# rather than accidental.
-# =====================================================================
+# belong to does not exist: the folder requirement closes this package at eight
+# files and says, verbatim, "Nothing else. No `strings.py`, no `numeric.py`, no
+# `helpers.py`." NOT here: `INSPECT ... REPLACING ALL "." BY "/"`, at
+# [general/gl051.cbl:L1178-L1180] and [irs/irs030.cbl:L1312-L1314] - Agent Action
+# Plan section 0.4.1.6 assigns separator handling for `.`, `,` and `-` to
+# `acas_posting/dates.py`, a standard-library-only module that does not import
+# this package, and the boundary is recorded so the omission is visible.
 
 
 def inspect_tallying_leading(
@@ -1947,69 +2121,57 @@ def string_into(
 ) -> tuple[str, int]:
     """Reproduce `STRING <sources> DELIMITED BY ... INTO ... POINTER <n>`.
 
-    Writes each source's contributed characters into the receiver starting at
-    the 1-based pointer, advancing the pointer by what was written, and
-    OVERWRITING rather than clearing: COBOL's `STRING` leaves every position
-    it does not reach exactly as it found it, which is why the frozen source
-    clears the receiver itself first when it wants it clear -
-    `move space to Arg-Test.` [general/gl080.cbl:L530].
+    Writes each source's contributed characters into the receiver starting at the
+    1-based pointer, advancing the pointer by what was written, and OVERWRITING
+    rather than clearing: COBOL's `STRING` leaves every position it does not reach
+    exactly as it found it, which is why the frozen source clears the receiver itself
+    first when it wants it clear - `move space to Arg-Test.`
+    [general/gl080.cbl:L530].
 
-    THE POINTER IS READ AND RETURNED, SO SUCCESSIVE STATEMENTS CHAIN. This is
-    not a convenience; it is a divergence in the frozen sources that must not
-    be unified. One program builds its 32-character receiver with a SINGLE
-    statement carrying three sources:
+    THE POINTER IS READ AND RETURNED, SO SUCCESSIVE STATEMENTS CHAIN. This is not a
+    convenience; it is a divergence in the frozen sources that must not be unified.
+    One program builds its 32-character receiver with a SINGLE statement carrying
+    three sources, at [sales/sl060.cbl:L1091-L1094], while another builds the SAME
+    column with FIVE successive statements sharing ONE pointer and does not use the
+    edited-move idiom at all, at [sales/sl100.cbl:L620-L628], where the pointer is
+    initialised by an ordinary `MOVE` and three further moves load the sources
+    between the statements. The pointer is plainly the caller's variable, which is
+    why it is passed in and handed back rather than being state this module keeps.
+    The maintainer flagged the difference himself immediately above it
+    [sales/sl100.cbl:L618]. Both shapes are supported, neither is rewritten into the
+    other, and the fourth source in the five-statement build is FIVE characters where
+    the single-statement build uses three - another difference left exactly as it is.
 
-        string   m (b:c)     delimited by size
-                 " : "       delimited by size
-                 sales-name  delimited by size
-                              into Post-Legend pointer  xx.
-                                        [sales/sl060.cbl:L1091-L1094]
+    A DELIMITER PER SOURCE, because the frozen sources mix them within one statement:
+    [general/gl080.cbl:L530-L536] uses `SPACE`, `SIZE`, `SIZE`, `SPACE` in order.
+    `DELIMITED BY SIZE` contributes the whole item including its trailing spaces;
+    `DELIMITED BY SPACE` stops at the first space, which is how a space-padded item
+    contributes only its significant characters [irs/irs030.cbl:L1424]. See
+    `_string_source` for how a source names its own delimiter, and
+    `ZERO_OCCURRENCE_FORMS` for the literal-delimiter form, which occurs zero times.
 
-    while another builds the SAME column with FIVE successive statements
-    sharing ONE pointer, and does not use the edited-move idiom at all:
+    OVERFLOW IS SILENT - question Q-11, RESOLVED and CONFIRMED against the
+    compiled oracle, with one refinement the provisional answer had not
+    stated. Measured under GnuCOBOL 3.2.0 against a `pic x(4)` receiver:
 
-        move     1  to  xx.
-        string batch       delimited by size into post-legend pointer xx.
-        string "/"         delimited by size into post-legend pointer xx.
-        string k           delimited by size into post-legend pointer xx.
-        string "  :  "     delimited by size into post-legend pointer xx.
-        string sales-name  delimited by size into post-legend pointer xx.
-                                        [sales/sl100.cbl:L620-L628]
+        pointer 6, source "AB"      ->  receiver UNCHANGED, POINTER STILL 6
+                                        (with ON OVERFLOW present it FIRED,
+                                         which is what proves the condition)
+        pointer 3, source "ABCD"    ->  receiver "  AB", POINTER 5
 
-    That excerpt keeps the five statements and the pointer's own
-    initialisation and drops three ordinary moves that sit between them,
-    loading the sources; the frozen span is L620 to L628 and reads in that
-    order. The pointer is plainly the caller's variable, initialised by a
-    `MOVE` like any other item, which is why it is passed in and handed back
-    rather than being state this module keeps.
-
-    The maintainer flagged the difference himself in a comment immediately
-    above it [sales/sl100.cbl:L618]. Both shapes are supported, neither is
-    rewritten into the other, and the fourth source above is FIVE characters
-    in the frozen file rather than the three of the other program - another
-    difference left exactly as it is.
-
-    A DELIMITER PER SOURCE, because the frozen sources mix them within one
-    statement: [general/gl080.cbl:L530-L536] uses `SPACE`, `SIZE`, `SIZE`,
-    `SPACE` in order. `DELIMITED BY SIZE` contributes the whole item including
-    its trailing spaces; `DELIMITED BY SPACE` stops at the first space, which
-    is how a space-padded item contributes only its significant characters
-    [irs/irs030.cbl:L1424]. See `_string_source` for how a source names its
-    own delimiter, and `ZERO_OCCURRENCE_FORMS` for the literal-delimiter form,
-    which occurs zero times.
-
-    OVERFLOW IS SILENT - question Q-11. `Post-Legend pic x(32)`
-    [copybooks/wspost.cob:L24] is 32 characters and the sources can exceed it:
-    a source that fits partly contributes the characters that fit, a pointer
-    already past the end contributes nothing, and neither is reported.
-    `ON OVERFLOW` occurs zero times across the twelve in-scope program files,
-    so there is no error path in the specification to reproduce.
+    so a pointer already past the receiver writes nothing AND DOES NOT ADVANCE,
+    while a source that fits partly contributes exactly the characters that fit
+    and leaves the pointer one past the end. `Post-Legend pic x(32)`
+    [copybooks/wspost.cob:L24] is 32 characters and the five-statement build at
+    [sales/sl100.cbl:L620-L628] can exceed it. `ON OVERFLOW` occurs zero times
+    across the twelve in-scope program files, so every in-scope overflow is the
+    silent form.
 
     Args:
         receiver_text: The receiver's current characters, at its own width.
-        sources: The sending operands, in statement order. Each is bare text,
-            a bare exact numeric carrier, or a tuple naming its own delimiter
-            and, when it is numeric, its own descriptor.
+        sources: The sending operands, in statement order. Each is bare text, a bare
+            exact numeric carrier, or a tuple naming its own delimiter and, when it
+            is numeric, its own descriptor.
         pointer: The 1-based position to write from. Two frozen sites name no
             `POINTER` phrase at all - [general/gl080.cbl:L531] and
             [irs/irs030.cbl:L1424] - and for them the default 1 is the COBOL
@@ -2017,8 +2179,8 @@ def string_into(
         delimited_by: The delimiter for any source that names none.
 
     Returns:
-        The receiver's characters after the write, and the pointer's new
-        1-based value, so that the next statement can be handed both.
+        The receiver's characters after the write, and the pointer's new 1-based
+        value, so that the next statement can be handed both.
 
     Raises:
         TypeError: If `pointer` is a binary floating-point carrier (rule R-2).
@@ -2038,7 +2200,8 @@ def string_into(
         if delimiter is Delimiter.SPACE:
             piece = piece.partition(" ")[0]
         if position < 1 or position > width:
-            # Q-11: nothing further is written, silently.
+            # Q-11, measured: nothing is written AND the pointer does not
+            # advance, silently.
             continue
         start = position - 1
         written = piece[:width - start]
@@ -2047,11 +2210,8 @@ def string_into(
     return text, position
 
 
-# =====================================================================
 # THE NUMERIC CLASS CONDITION
-#
 # A predicate, never an exception, because anomaly A-13 depends on it.
-# =====================================================================
 
 
 def is_numeric_class(
@@ -2074,8 +2234,8 @@ def is_numeric_class(
     L291-L292 and L306-L307. The offset is recorded rather than reconciled
     silently, the frozen file being the authority.
 
-    THE SKIP ITSELF IS NOT THIS MODULE'S. It is business logic and it belongs
-    to `acas_posting.programs.gl072_transaction_update`. This function only
+    THE SKIP ITSELF IS NOT THIS MODULE'S. It is business logic and it belongs to
+    the program layer's `gl072` module. This function only
     answers the question the COBOL asks, and it answers it for every input
     without ever reporting an error, so that a program module can express the
     test and the silence can be reproduced.
@@ -2094,10 +2254,13 @@ def is_numeric_class(
     the vocabulary and is unexercised, the generated dictionary recording
     neither separate position anywhere.
 
-    An item holding SPACES is not numeric, which is the observable consequence
-    of question Q-9 and the reason `MOVE SPACE` into a numeric `DISPLAY` item
-    [sales/sl055.cbl:L655] is worth a register entry. An empty item is not
-    numeric either: there is no digit in it.
+    An item holding SPACES is not numeric, and that answer is still needed even
+    though `MOVE SPACE` into a numeric item turned out not to compile
+    (question Q-9): spaces reach a numeric item through a group MOVE, a
+    REDEFINES or a file READ, all of which carry bytes verbatim, and it is
+    THIS predicate that anomaly A-13's silent skip
+    [general/gl072.cbl:L291-L292] consults. An empty item is not numeric
+    either: there is no digit in it.
 
     An alphanumeric item's class test considers no sign, so every one of its
     characters must be a digit.

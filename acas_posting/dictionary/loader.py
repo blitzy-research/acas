@@ -1,10 +1,8 @@
 """Runtime lookup into the generated ACAS posting data dictionary.
 
 This module is how field-level traceability reaches run time. Agent Action
-Plan section 0.4.1.6 states its entire mandate in one line - "Runtime lookup
-so every record field cites its entry" - and rule R-5 names it directly:
-"`acas_posting/dictionary/loader.py` lets every record field cite its
-dictionary key at runtime."
+Plan section 0.4.1.6 states its whole mandate in one line - "Runtime lookup
+so every record field cites its entry" - and rule R-5 names it directly.
 
 It reads exactly one file, `data_dictionary/acas_posting_dictionary.json`,
 read-only and lazily, and hands back the immutable record tree that
@@ -13,61 +11,45 @@ nothing and repairs nothing.
 
 WHY A LOOKUP MODULE EXISTS AT ALL
 =================================
-Agent Action Plan section 0.3.3 names the pattern it serves - "Dictionary as
-single source of truth ... Field metadata is therefore derived, not
-transcribed, which eliminates an entire class of transcription error across
-several hundred fields" - and section 0.8.1 makes the ordering a directive
-rather than a preference:
-
-    "Data dictionary first. The dictionary is generated from the bridge
-    before record definitions are written, and every Python field definition
-    cites its entry. This ordering is a directive, not a preference - it is
-    what prevents fields being transcribed by eye."
-
-The authority the dictionary carries is not the copybooks'. It is the
-maintainer's one-way COBOL-to-MySQL bridge, and that is the user's own
-requirement, preserved verbatim in Agent Action Plan section 0.8.2:
+Section 0.3.3 names the pattern - field metadata "derived, not transcribed" -
+and section 0.8.1 makes the ordering a directive: the dictionary is generated
+from the bridge BEFORE record definitions are written. The authority is not
+the copybooks' but the maintainer's one-way bridge, preserved in section
+0.8.2 as the user's own requirement:
 
     "The maintainer's one-way COBOL-to-MySQL bridge defines the
     authoritative record-layout <-> table mapping - it is the data
     dictionary for this migration."
 
-So a record module that needs to know a field's places, scale, signedness,
-usage or sign position asks here, by key, and gets the answer the frozen
-bridge itself gives. It does not read a picture clause by eye. The
-difference is not stylistic: the statistics fields of the sales ledger are
-declared `binary-long` [copybooks/wssl.cob:L46-L52], so their truncation on
-divide is INTEGER truncation, and that is exactly what makes the
-moving-average defect of [sales/sl060.cbl:L826-L827] reproducible. An
-integer-versus-decimal choice taken from this module is reproducible; the
-same choice taken by eye is not.
+So a record module needing a field's places, scale, signedness, usage or sign
+position asks here, by key, rather than reading a picture clause by eye. That
+is not stylistic: the sales-ledger statistics fields are declared
+`binary-long` [copybooks/wssl.cob:L46-L52], so truncation on divide is
+INTEGER truncation - exactly what makes the moving-average defect of
+[sales/sl060.cbl:L826-L827] reproducible.
 
 THE KEY CONVENTION - AND WHY IT IS ALWAYS QUALIFIED
-==================================================
+===================================================
 An entry is addressed by one key, in one of two forms:
 
-    <TABLE-NAME>.<COLUMN-NAME>      where a column backs the field, for
-                                    example IRSPOSTING-REC.POST4-DAY
-    <COPYBOOK-RECORD>.<FIELD-NAME>  where the field is copybook-only, for
-                                    example File-Access.Fs-Reply
+    <TABLE-NAME>.<COLUMN-NAME>      a column backs the field, for example
+                                    IRSPOSTING-REC.POST4-DAY
+    <COPYBOOK-RECORD>.<FIELD-NAME>  copybook-only, for example
+                                    File-Access.Fs-Reply
 
-Both halves are the names the frozen sources use themselves, unaltered:
-hyphens are not turned into underscores and case is not folded, so a key can
-be searched for in the COBOL and in the schema exactly as it stands. Lookup
-here is therefore exact and case-sensitive.
+Both halves are the names the frozen sources use, unaltered: hyphens stay
+hyphens and case is not folded, so a key can be searched for in the COBOL and
+in the schema exactly as it stands. Lookup is exact and case-sensitive.
 
-NEVER KEY BY FIELD NAME ALONE. The qualification is what keeps two tables
-apart that would otherwise merge: PSIRSPOST-REC is the transfer file the
-Sales and Purchase programs write, reached through `acas008` and the
-`slpostingMT` bridge with ten columns, while IRSPOSTING-REC is the internal
-IRS posting file, reached through `acasirsub4` and the `irspostingMT` bridge
-with thirteen. Their field names are near-identical and
-[copybooks/wspost-irs.cob:L6-L7] says so in as many words: "This is NOT the
-same as the internal IRS posting file". Because the key embeds the table or
-record name, no two entries can be conflated by field name.
-
-Where one field name repeats inside one record - `filler` occurs four times
-in copybooks/wsledger.cob - the key carries a `#` and the declaration line.
+NEVER KEY BY FIELD NAME ALONE. Qualification keeps apart two tables that
+would otherwise merge: PSIRSPOST-REC is the transfer file the Sales and
+Purchase programs write, through `acas008` and `slpostingMT`, ten columns;
+IRSPOSTING-REC is the internal IRS posting file, through `acasirsub4` and
+`irspostingMT`, thirteen. Their field names are near-identical and
+[copybooks/wspost-irs.cob:L6-L7] says so: "This is NOT the same as the
+internal IRS posting file". Where one field name repeats inside one record -
+`filler` occurs four times in copybooks/wsledger.cob - the key carries a `#`
+and the declaration line.
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!  THIS MODULE RESOLVES NOTHING  (rule R-4)                            !!
@@ -75,182 +57,193 @@ in copybooks/wsledger.cob - the key carries a `#` and the declaration line.
 !!  A DEFECT REPRODUCED IS CORRECT; A DEFECT FIXED IS A FAILURE.        !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-That line is the user's own requirement, which Agent Action Plan section
-0.8.2 preserves verbatim: "There is no test suite: compiled COBOL execution
-is the behavioral specification, defects included. A defect reproduced is
-correct; a defect fixed is a failure."
-
 An entry records the copybook field, the bridge host variable and the column
-as three independent sibling views, plus the drift between them, and it
-stops there. This module hands those views over as they stand. There is
-deliberately no accessor - and none may be added - that names one winning
-type across the views: no resolved, canonical, effective, corrected,
-recommended or preferred type is offered here, because a caller handed one
-would use it and the disagreement would leave the system. A caller that
-wants "the type" must say which of the three layers it means. Those six
-words appear nowhere else in this file, and the one further word of that
-family that does - "authoritative", in the preserved user requirement quoted
-above - describes WHICH SOURCE the dictionary is built from, never a type
-this module hands back.
+as three independent sibling views, plus the drift between them, and stops
+there. There is deliberately no accessor - and none may be added - naming one
+winning type across the views: no resolved, canonical, effective, corrected,
+recommended or preferred type, because a caller handed one would use it and
+the disagreement would leave the system. A caller wanting "the type" must say
+which layer it means. The disagreements are load-bearing behaviour:
 
-The disagreements are load-bearing behaviour, not noise:
+  * `Sales-Average` is signed `binary-long` [copybooks/wssl.cob:L49], becomes
+    the unsigned `HV-SALES-AVERAGE PIC 9(10) COMP` [common/salesMT.cbl:L308]
+    and lands in an unsigned column, so a negative value LOSES ITS SIGN AT
+    THE BRIDGE, not at the database - section 0.6.2 requires the data-access
+    layer to reproduce that conversion field by field.
+    `SALEDGER-REC.SALES-CURRENT` proves the drift specific rather than
+    systemic: signed at all three layers, no drift at all.
+  * `Ledger-Name` is 24 characters in the copybook and 32 in both the host
+    variable [common/nominalMT.cbl:L299] and the column
+    [mysql/ACASDB.sql:L127], so a table dump's padding is not the copybook's.
+  * POST4-DAY, POST4-MONTH and POST4-YEAR have NO copybook view at all. The
+    bridge derives them from two-character slices of a date string under a
+    guard [common/irspostingMT.cbl:L982-L987]; when a guard does not hold the
+    move is simply not made, so the component keeps the zero left by the
+    group INITIALIZE while the raw date text is stored anyway.
+  * `HV-POST-RRN` is declared [common/glpostingMT.cbl:L282] and never loaded
+    from the record, so `loaded_from_record` is false and `notes` says why.
 
-  * `Sales-Average` is declared signed `binary-long`
-    [copybooks/wssl.cob:L49], becomes the unsigned host variable
-    `HV-SALES-AVERAGE PIC 9(10) COMP` [common/salesMT.cbl:L308] and lands
-    in an unsigned column, so a negative value LOSES ITS SIGN AT THE BRIDGE
-    and not at the database. Agent Action Plan section 0.6.2: "the Python
-    data-access layer must reproduce the bridge's conversion, not merely
-    write the computed value and let MySQL complain ... the drift is
-    specific rather than systemic and must be handled field by field from
-    the dictionary". `SALEDGER-REC.SALES-CURRENT` proves the "specific"
-    half: signed at all three layers, no drift at all.
-  * `Ledger-Name` is 24 characters wide in the copybook and 32 in both the
-    host variable [common/nominalMT.cbl:L299] and the column
-    [mysql/ACASDB.sql:L127], so the padding a table dump shows is not the
-    copybook's padding.
-  * POST4-DAY, POST4-MONTH and POST4-YEAR have NO copybook view at all.
-    They exist because the bridge derives them from two-character slices of
-    a date string under a guard [common/irspostingMT.cbl:L982-L987]; when a
-    guard does not hold the move is simply not made, so the component keeps
-    the zero left by the group INITIALIZE while the raw date text is stored
-    anyway. `derivation.guard` and `derivation.guard_failure_behaviour`
-    carry that fact to the data-access layer, which reproduces it.
-  * `HV-POST-RRN` is declared [common/glpostingMT.cbl:L282] and never
-    loaded from the record, so `loaded_from_record` is false and `notes`
-    says why.
+`notes`, `anomaly_refs`, `ambiguity_refs`, `drift` and `derivation` are DATA
+THIS MODULE RETURNS, never a reason to complain: a loader logging "signedness
+drift" would invite exactly the correction rule R-4 forbids. `ambiguity_refs`
+keeps an unsettled question visible - the batch-record length contradiction
+[copybooks/wsbatch.cob:L7-L9] is one of the five in section 0.6.8.
 
-None of that is a warning. `notes`, `anomaly_refs`, `ambiguity_refs`,
-`drift` and `derivation` are DATA THIS MODULE RETURNS, never a reason to
-complain: a loader that logged "signedness drift" would invite exactly the
-correction rule R-4 forbids. `ambiguity_refs` in particular keeps an
-unsettled question visible - Agent Action Plan section 0.6.8 lists five,
-and the batch-record length contradiction [copybooks/wsbatch.cob:L7-L9] and
-the negative binary value through an unsigned host variable both surface
-through entries served here.
+WHERE THE ARTIFACT LIVES, AND WHICH COPY IS READ
+================================================
+There are two spellings of one artifact, and this module is where the choice
+between them is made - because making it means asking the filesystem which
+one is there, and `acas_posting/__init__.py` deliberately touches no file.
 
-WHERE THE ARTIFACT LIVES, AND THE WHEEL-ABSENCE CAVEAT
-======================================================
-The dictionary is a top-level repository SIBLING of `acas_posting` and
-deliberately not package data: pyproject.toml includes "acas_posting*" in
-package discovery and names "data_dictionary*" in its exclude list. One
-consequence is stated plainly rather than discovered later - THE ARTIFACT IS
-NOT PRESENT INSIDE AN INSTALLED WHEEL. That is intended. The dictionary is
-repository data, consumed from a source checkout, which is how the oracle
-scripts and the test suites run.
+  1. THE PACKAGED COPY, `acas_posting/data_dictionary/…`, reached through
+     `importlib.resources`. pyproject.toml maps the committed directory into
+     the distribution as package data, so an INSTALLED distribution carries
+     it. This copy is preferred, and it has to exist, because twenty-five
+     record modules and two of the COBOL semantics modules resolve their
+     field metadata AT IMPORT TIME: without it, `import
+     acas_posting.records.gl_posting` would fail inside a wheel long before
+     any caller could reach the `path=` override below.
+  2. THE REPOSITORY COPY, `data_dictionary/…` beside the package, which is
+     what `DATA_DICTIONARY_PATH` names. It is the committed original - the
+     one `acas_posting.dictionary.generate` writes and the one the oracle
+     scripts and the test suites read - and it is the copy present in a
+     SOURCE CHECKOUT, where the build-time mapping has not run.
 
-`acas_posting/__init__.py` derives the path once and hands the absence case
-to this module by name. So this module reuses `DATA_DICTIONARY_PATH` rather
-than walking up the tree a second time - two derivations of one fact drift
-apart eventually - and owns the two behaviours that follow:
+The two are the same bytes by construction: the build copies the committed
+file rather than regenerating it, so there is exactly one source of truth and
+no way for the two to disagree. Both paths come from `acas_posting/__init__`
+by name rather than being re-derived here, because two derivations of one
+fact drift apart eventually.
+
+On top of that ordered lookup this module owns two behaviours:
 
   * every accessor takes an explicit `path` override, which is the
     sanctioned escape hatch for a test or a relocated deployment;
-  * absence raises `DictionaryNotFoundError` naming the expected absolute
-    path, the reason it may be missing and both remedies. It does NOT fall
-    back to an empty dictionary, and it does NOT regenerate the artifact.
+  * absence of BOTH copies raises `DictionaryNotFoundError` naming each
+    candidate that was looked at and the remedies. It does NOT fall back to
+    an empty dictionary, and it does NOT regenerate the artifact.
+
+With the artifact shipped, an absence now means a damaged installation, a
+checkout the generator has never been run in, or an explicit `path` naming
+somewhere wrong - not the ordinary consequence of installing the package.
 
 LAYERING - THE NARROWEST IMPORT SURFACE IN THE PACKAGE
 ======================================================
-Agent Action Plan section 0.4.3 fixes the layering, and two whole layers
-reach their field metadata through this module and through nothing else:
-`cobol/*.py` may import `dictionary.loader` ONLY, and `records/*.py` may
-import `cobol.field` and `dictionary.loader` only, "this keeps the record
-layer a leaf". Seven semantics modules and twenty-seven record modules sit
-on that path.
+Section 0.4.3 fixes the layering, and two whole layers reach their field
+metadata through this module and nothing else: `cobol/*.py` may import
+`dictionary.loader` ONLY, and `records/*.py` may import `cobol.field` and
+`dictionary.loader` only, "this keeps the record layer a leaf". Seven
+semantics modules and twenty-seven record modules sit on that path. So this
+module imports, from the whole of `acas_posting`, exactly two things: the
+path constants from the package marker, and `dictionary.model`. Above all NOT
+`dictionary.generate` - a build-time tool parsing the frozen COBOL tree and
+schema, whose import here would put those parsers on the import path of every
+record module and break section 0.4.3's promise that the arithmetic tier
+"imports only `cobol` and `records` and touches no database, so it runs
+anywhere". Any further import becomes a cycle the moment `cobol/field.py`
+imports this module.
 
-So this module imports, from the whole of `acas_posting`, exactly two
-things: the path constants from the package marker, and
-`acas_posting.dictionary.model`. Nothing else - not `cobol`, `records`,
-`dal`, `programs`, `cli`, `clock`, `dates`, `workfiles`, not the sibling
-oracle tree, and above all not `acas_posting.dictionary.generate`. The
-generator is a build-time tool that parses the frozen COBOL tree and the
-frozen schema; importing it here would put those parsers on the import path
-of every record module and would break Agent Action Plan section 0.4.3's
-promise that the arithmetic test tier "imports only `cobol` and `records`
-and touches no database, so it runs anywhere". Any further import becomes a
-cycle the moment `cobol/field.py` imports this module.
+THIS MODULE IS THE ONLY DOOR ONTO THE OBJECT MODEL
+==================================================
+Because section 0.4.3 grants `cobol/*.py` and `records/*.py` this module and
+NOT `dictionary.model`, and because every value those two layers receive from
+an accessor here IS an instance of a `model` dataclass or enumeration, a
+caller cannot annotate what it holds without naming those types. This module
+therefore RE-EXPORTS them, under `RE-EXPORTED OBJECT MODEL` below, and they
+are published in `__all__` alongside the accessors.
+
+    CORRECT, from a `cobol/*.py` or `records/*.py` module:
+
+        from acas_posting.dictionary.loader import ConditionName, Usage
+
+    FORBIDDEN above this module: naming `dictionary.model` in an import at all.
+    Section 0.4.3 does not list it for either layer, so reaching it there is a
+    layering violation however narrow the need looks - and after the re-export
+    below there is no need left.
+
+Three properties make the re-export the right shape rather than a workaround:
+
+  * It is a BINDING, not a copy. `loader.Usage is model.Usage` holds for every
+    re-exported name, so there is exactly one definition of each vocabulary in
+    the migration and no second source of truth for field metadata can appear
+    (rule R-5). Re-declaring a competing enumeration in a consumer would be
+    precisely the transcription error the dictionary exists to prevent.
+  * It costs nothing at import time. `model` imports only the standard library,
+    so it is already on this module's import path; naming its types here adds
+    no file read, no dependency and no cycle.
+  * It closes the layering hole structurally. With the types reachable from the
+    sanctioned module, no consumer needs a local exception to section 0.4.3,
+    and a reviewer can enforce the rule with one grep for
+    `dictionary.model` outside `acas_posting/dictionary/`.
+
+What is re-exported is exactly what the two layers annotate with: the three
+view records, the cross-view records, the entry, the four enumerations, and
+the locator pattern that `cobol/field.py` and `cobol/picture.py` validate a
+`source_locator` against. Nothing that only the generator needs is re-exported
+- no parser input record, no `to_json_obj` - because a runtime consumer has no
+use for it and publishing it would widen this surface for nothing.
 
 NO IMPORT-TIME WORK, ONE READ PER PROCESS
 =========================================
 Importing this module reads no file, opens no connection and cannot fail for
-an environmental reason: it binds names and nothing else. Loading is lazy
-and explicit, and the parsed document is memoised per absolute path, so
-twenty-seven record modules importing at start-up cost ONE read between
-them and share one immutable tree. Sharing is safe because every record in
-`model` is a frozen dataclass whose collections are tuples.
+an environmental reason: it binds names and nothing else. Loading is lazy and
+explicit, and the parsed document is memoised per absolute path, so
+twenty-seven record modules importing at start-up cost ONE read between them
+and share one immutable tree - safe because every record in `model` is a
+frozen dataclass whose collections are tuples.
 
 DOCUMENT ORDER IS THE ORDER  (rule R-6)
 =======================================
 Every sequence returned here is in the order the document records it, and
 nothing here re-sorts: the document's own ordering IS the determinism
-contract, and re-sorting would silently discard it. The artifact states the
-contract in `meta.determinism.array_order`, and for entries it reads:
-tables by name ascending, within a table by the column ordinal the frozen
-dump fixes, then that table's copybook-only fields in copybook declaration
-order, then the copybook-only fields that correspond to no table at all.
+contract, stated in `meta.determinism.array_order` - tables by name
+ascending, within a table by the column ordinal the frozen dump fixes, then
+that table's copybook-only fields in copybook declaration order, then the
+copybook-only fields corresponding to no table at all. So
+`entries_for_table` returns IRSPOSTING-REC with POST4-DAY, POST4-MONTH and
+POST4-YEAR at positions 4, 5 and 6 - INTERLEAVED between POST4-DAT and
+POST4-DR, as the frozen dump has them, not appended after the copybook's own
+columns - and `entries_for_copybook_record` uses that same order, so a caller
+needing strict copybook declaration order must sort by each field's own
+`copybook.source` line itself.
 
-Two consequences worth knowing before reading an accessor:
-
-  * `entries_for_table` returns a table's column-mapped entries in column
-    ordinal order. IRSPOSTING-REC therefore comes back with POST4-DAY,
-    POST4-MONTH and POST4-YEAR at positions 4, 5 and 6 - INTERLEAVED
-    between POST4-DAT and POST4-DR, as the frozen dump has them, not
-    appended after the copybook's own columns.
-  * `entries_for_copybook_record` returns a record's entries in that same
-    document order, which for a record backed by a table means column
-    ordinal order first and the record's copybook-only fields after. Where
-    a caller needs strict copybook declaration order it has each field's
-    own `copybook.source` line to order by; this module will not reorder
-    the document on its behalf.
-
-Every accessor is otherwise a pure function of the document: the same
-document yields the same answer, in the same order, in every process.
-Nothing here consults a clock, an entropy source, the process environment,
-installed distribution metadata or the version-control checkout, and no
-directory is listed anywhere.
+Every accessor is otherwise a pure function of the document. Nothing here
+consults a clock, an entropy source, the environment, distribution metadata
+or the checkout, and no directory is listed anywhere.
 
 NUMERIC POLICY  (rule R-2)
 ==========================
-No accounting value may pass through a binary floating-point type at any
-point. This module holds no value at all - it describes precision, it never
-carries it - so it constructs no arithmetic type and imports no arithmetic
-module. Places, scales, character lengths, ordinals, display widths and
-every coverage count come back as `int`; pictures, SQL type names and sign
-clause text come back as `str`.
-
-Two guards make that structural rather than incidental. The parse is asked
-to hand any real-number literal back as its own text rather than as a
-binary approximation of it, and the parsed tree is then walked against an
-ALLOW-LIST of the four scalar shapes `model.JsonValue` admits - text, a
-dimensionless whole number, a flag and absence. Anything else fails
-immediately with `DictionaryNumericPolicyError`, which is how a binary
-approximation is rejected without this module ever having to name that type.
+This module holds no value at all - it describes precision, it never carries
+it - so it constructs no arithmetic type and imports no arithmetic module.
+Places, scales, lengths, ordinals, widths and coverage counts come back as
+`int`; pictures, SQL type names and sign clause text as `str`. Two guards
+make that structural: the parse hands any real-number literal back as its own
+text rather than a binary approximation, and the tree is then walked against
+an ALLOW-LIST of the four scalar shapes `model.JsonValue` admits - text, a
+dimensionless whole number, a flag and absence. Anything else fails with
+`DictionaryNumericPolicyError`.
 
 NO NEW VALIDATION, NO CONCURRENCY  (rule R-3)
 =============================================
 This module adds no member the document does not carry and synthesises no
-default for one it lacks: `model.from_json_obj` fetches every member by
-name with no fallback, and that failure is allowed to surface exactly as it
-is raised. Nor is the document checked against its JSON Schema here - that
-check belongs to a test, which is where a check that is allowed to fail
-belongs, and no schema-checking library is in the pinned dependency set.
-No data definition statement is emitted and no index or constraint is
-proposed. No returned string is tidied.
-
-Execution is strictly sequential, matching the single-threaded COBOL: the
-memo below is a plain mapping, and there is no thread, event loop, process
-pool, connection pool or synchronisation primitive anywhere in this module.
+default for one it lacks: `model.from_json_obj` fetches every member by name
+with no fallback, and that failure surfaces exactly as raised. Nor is the
+document checked against its JSON Schema here - that belongs to a test, and
+no schema-checking library is in the pinned dependency set. No data
+definition statement is emitted, no index or constraint proposed, no returned
+string tidied. Execution is strictly sequential, matching the single-threaded
+COBOL: the memo below is a plain mapping, with no thread, event loop, process
+pool, connection pool or synchronisation primitive.
 
 NO COBOL AT RUNTIME  (rule R-1)
 ===============================
 This module is the proof of that rule, because it sits on the import path of
-thirty-four others. It reads ONE JSON file. It parses no COBOL text, opens
-no bridge, copybook or schema source, launches no child process, loads no
+thirty-four others. It reads ONE JSON file: it parses no COBOL text, opens no
+bridge, copybook or schema source, launches no child process, loads no
 foreign library, looks for no compiler and reaches no part of the sibling
-oracle tree. It imports cleanly on a host with no COBOL toolchain and no
-database. The COBOL locators throughout this file are citations for a
-reader, which is what rule R-5 asks for; nothing here opens one.
+oracle tree, so it imports cleanly on a host with no COBOL toolchain and no
+database. The COBOL locators throughout this file are citations for a reader,
+which is what rule R-5 asks for; nothing here opens one.
 
 THE ACCESSORS
 =============
@@ -275,9 +268,10 @@ FURTHER READING
 ===============
     data_dictionary/acas_posting_dictionary.json   the artifact read here
     acas_posting/dictionary/model.py               the records returned
-    docs/migration/traceability.md                 the wider mapping
-    docs/migration/anomaly-log.md                  the reproduced defects
-    docs/migration/ambiguity-resolutions.md        the open questions
+
+The migration's traceability, anomaly and ambiguity documents are to be
+written at a later boundary; when they exist they carry the wider mapping,
+the reproduced defects and the open questions respectively.
 """
 
 # PROVENANCE
@@ -289,19 +283,32 @@ FURTHER READING
 
 import difflib
 import json
+import os
+import stat
+from importlib import resources
 from pathlib import Path
 from typing import Final
 
-from acas_posting import DATA_DICTIONARY_PATH
+from acas_posting import (
+    DATA_DICTIONARY_PATH,
+    DATA_DICTIONARY_SEARCH_PATH,
+    PACKAGE_DATA_DICTIONARY_DIR,
+)
 from acas_posting.dictionary.model import (
+    ENTRY_KEY_PATTERN,
+    REPO_PATH_PATTERN,
+    SOURCE_LOCATOR_PATTERN,
     BridgeHostVariable,
     BridgeName,
     BridgeSource,
+    CobolPythonStorage,
+    ConditionName,
     CopybookField,
     Coverage,
     DataDictionary,
     Derivation,
     DictionaryEntry,
+    DictionaryIntegrityError,
     Drift,
     EntryKey,
     HandlerName,
@@ -309,27 +316,80 @@ from acas_posting.dictionary.model import (
     Meta,
     MysqlColumn,
     RepoPath,
+    SignPosition,
     Sources,
     TableName,
     TableRecord,
+    Usage,
+    UsageDeclaredAt,
     from_json_obj,
 )
 
 # =============================================================================
-#  FAILURES
+#  RE-EXPORTED OBJECT MODEL  (Agent Action Plan section 0.4.3, rule R-5)
 #
+#  Agent Action Plan section 0.4.3 grants `cobol/*.py` this module and nothing
+#  else from the package, and `records/*.py` this module plus `cobol.field`.
+#  Every value the accessors below hand those layers is an instance of one of
+#  the types imported above, so they are re-exported here and published in
+#  `__all__`: this module is the sanctioned door onto the object model, and a
+#  consumer above it must never import `acas_posting.dictionary.model`.
+#
+#  These are BINDINGS to the one definition, not copies - `loader.Usage is
+#  model.Usage` - so no second source of truth for field metadata can appear
+#  (rule R-5). The names are listed once, in the import above, and nowhere
+#  re-declared; the tuple below exists only so that a reader, and a test, can
+#  see which part of the object model the runtime layers are entitled to and
+#  can assert the identity.
+#
+#  `SOURCE_LOCATOR_PATTERN` is included because `cobol/field.py` and
+#  `cobol/picture.py` validate a caller-supplied `source_locator` against the
+#  same pattern the generated artifact was written with; a second copy of that
+#  pattern would be able to drift from the artifact. `ENTRY_KEY_PATTERN` and
+#  `REPO_PATH_PATTERN` are included for the same reason: `cobol/field.py`
+#  refuses to build a descriptor from an entry whose key or copybook path does
+#  not match the shape the artifact was generated with, and that check has to
+#  use the artifact's own patterns rather than a local restatement of them.
+# =============================================================================
+
+RE_EXPORTED_MODEL_NAMES: Final[tuple[str, ...]] = (
+    # The locator pattern the artifact's own `source` strings are shaped by,
+    # and the two provenance patterns an admitted entry is checked against.
+    "ENTRY_KEY_PATTERN",
+    "REPO_PATH_PATTERN",
+    "SOURCE_LOCATOR_PATTERN",
+    # The enumerations the two runtime layers key their behaviour on.
+    "CobolPythonStorage",
+    "SignPosition",
+    "Usage",
+    "UsageDeclaredAt",
+    # The records an accessor returns, or returns a member of.
+    "BridgeHostVariable",
+    "ConditionName",
+    "CopybookField",
+    "Coverage",
+    "DataDictionary",
+    "Derivation",
+    "DictionaryEntry",
+    "Drift",
+    "Meta",
+    "MysqlColumn",
+    "Sources",
+    "TableRecord",
+)
+
+# =============================================================================
+#  FAILURES
 #  Six classes, each with one job, and each one a subclass of a built-in the
 #  caller would already be catching: absence is also a `FileNotFoundError`, an
 #  unreadable document is also a `ValueError`, and a miss is also a `KeyError`
 #  because rule R-5's own instruction for the primary accessor is to raise a
 #  `KeyError` subclass.
-#
 #  `DictionaryError` carries the message plainly. That matters for the two
 #  `KeyError` subclasses in particular: `KeyError` renders as the REPR of its
 #  argument, which would wrap a multi-line teaching message in quotes and
 #  escape every newline in it, and the whole point of that message is to be
 #  read.
-# =============================================================================
 
 
 class DictionaryError(Exception):
@@ -346,7 +406,7 @@ class DictionaryError(Exception):
             message: The complete failure text, ready to be read as it
                 stands. It is never assembled from the environment: no path
                 appears in it that the caller did not supply or that
-                `acas_posting.__init__` did not derive.
+                `acas_posting.DATA_DICTIONARY_PATH` did not supply.
         """
         super().__init__(message)
         self.message: str = message
@@ -359,10 +419,12 @@ class DictionaryError(Exception):
 class DictionaryNotFoundError(DictionaryError, FileNotFoundError):
     """The dictionary artifact is not present at the path asked for.
 
-    Almost always the wheel-absence caveat in this module's docstring: the
-    artifact is a repository sibling of the package and pyproject.toml keeps
-    it out of the installed distribution deliberately. The message names the
-    expected absolute path and both remedies.
+    The artifact is committed as a repository sibling of the package AND
+    installed as package data, so this means one of three things: the
+    installation is damaged, the generator has never been run in this
+    checkout, or an explicit `path` names somewhere wrong. The message
+    names the absolute path that was looked at, both locations
+    `acas_posting/__init__.py` resolves between, and the remedies.
 
     This is never answered with an empty dictionary and never answered by
     regenerating the artifact.
@@ -390,6 +452,32 @@ class DictionaryNumericPolicyError(DictionaryParseError):
     """
 
 
+class DictionaryUntrustedError(DictionaryParseError):
+    """The document parsed, but it is not the dictionary it claims to be.
+
+    Raised when `model.check_integrity` rejects the document: a member the
+    records do not declare, a member missing, a value outside its domain, a
+    string that does not match its pattern, a pinned value replaced, an
+    identifier repeated, a presence flag disagreeing with the view it
+    describes, a coverage tally that does not match the entries actually
+    present, or a source manifest that does not bind to itself.
+
+    This is a distinct failure from `DictionaryParseError` because the two ask
+    a caller to do different things. Unparseable bytes are a damaged file. A
+    document that parses but does not hold up is a file that has been changed
+    - by hand, by a partial regeneration, or by substitution - and the fix is
+    to regenerate it from the frozen sources with
+    `python -m acas_posting.dictionary.generate`, never to adjust it until it
+    is accepted.
+
+    Rule R-5 is why this stops the read rather than warning. Every record
+    module cites this document for its field metadata; a document that is not
+    the one the generator produced silently rewrites the picture, scale,
+    signedness and storage class of several hundred fields, and no consumer
+    downstream is in a position to notice.
+    """
+
+
 class DictionaryKeyError(DictionaryError, KeyError):
     """No entry in the dictionary carries the key asked for.
 
@@ -412,9 +500,7 @@ class DictionaryLookupError(DictionaryError, KeyError):
     """
 
 
-# =============================================================================
 #  THE PARSE BOUNDARY  (rules R-2 and R-3)
-# =============================================================================
 
 #: The scalar shapes `model.JsonValue` admits, as an ALLOW-LIST. Stated this
 #: way round on purpose: an allow-list rejects a binary approximation of a
@@ -441,27 +527,124 @@ _SUGGESTION_LIMIT: Final[int] = 5
 _ABSENT_VIEW: Final[str] = "absent"
 
 
+#: The artifact's file name, taken from the repository constant so that the
+#: packaged candidate and the repository candidate can never name different
+#: files.
+_DOCUMENT_NAME: Final[str] = DATA_DICTIONARY_PATH.name
+
+
+def _packaged_document_dir() -> Path | None:
+    """This distribution's own copy of the dictionary directory, or None.
+
+    Returns:
+        The absolute directory holding the PACKAGED copy of the artifact, or
+        None when this distribution is not one that keeps its data on a real
+        filesystem.
+
+    Asked of `importlib.resources` rather than assembled from `__file__`,
+    because the packaged copy's location is a property of how the distribution
+    was installed and `importlib.resources` is the interface that knows it.
+    `resources.files()` returns a Traversable rooted at the package; for every
+    ordinary installation - a wheel unpacked into site-packages, an editable
+    install, a source checkout - that Traversable IS a `pathlib.Path`, so the
+    packaged directory is one join away.
+
+    A distribution imported from inside a zip archive would hand back a
+    `zipfile.Path` instead. This function returns None for that case rather
+    than adapting it, and the reason is worth stating instead of hiding: every
+    path this module memoises, compares and prints is a real filesystem path,
+    and widening that to an arbitrary Traversable would change the memo key,
+    the `resolve()` call below and every error message for the sake of a
+    deployment shape the Agent Action Plan does not describe. Returning None
+    degrades to the repository candidate and, failing that, to a
+    `DictionaryNotFoundError` that names where it looked - which is a truthful
+    outcome rather than a silent one. `PACKAGE_DATA_DICTIONARY_DIR` is the
+    fallback when the lookup itself is unavailable, so the answer never depends
+    on import machinery being cooperative.
+    """
+    try:
+        root = resources.files("acas_posting")
+    # Exotic import machinery only - excluded from coverage because no
+    # ordinary installation reaches it.
+    except (ImportError, TypeError):  # pragma: no cover
+        return PACKAGE_DATA_DICTIONARY_DIR
+    if isinstance(root, Path):
+        return root / PACKAGE_DATA_DICTIONARY_DIR.name
+    return None
+
+
+def _default_document_candidates() -> tuple[Path, ...]:
+    """The absolute paths the DEFAULT document may occupy, in the order to try.
+
+    Returns:
+        One entry per legitimate location, packaged copy first and repository
+        sibling second, each absolute and symlink-free. Never empty: the
+        repository sibling is always a candidate, so a caller always has a
+        path to name when reporting an absence.
+
+    The order comes from `acas_posting.DATA_DICTIONARY_SEARCH_PATH` and is not
+    re-decided here. An installed wheel holds only the packaged copy, a source
+    checkout only the repository sibling, and an editable install can hold
+    both - where the packaged copy is the one the distribution declares, which
+    is why it is tried first.
+    """
+    packaged = _packaged_document_dir()
+    out: list[Path] = []
+    for directory in DATA_DICTIONARY_SEARCH_PATH:
+        if directory == PACKAGE_DATA_DICTIONARY_DIR:
+            if packaged is None:
+                continue
+            directory = packaged
+        candidate = (directory / _DOCUMENT_NAME).resolve()
+        if candidate not in out:
+            out.append(candidate)
+    return tuple(out)
+
+
 def _absolute_document_path(path: Path | None) -> Path:
     """Return the absolute, symlink-free path of the document to read.
 
     Args:
-        path: An explicit artifact path, or None for the repository's own
-            `data_dictionary/acas_posting_dictionary.json` as
-            `acas_posting.__init__` derives it. The override is the
-            sanctioned escape hatch for a test or a relocated deployment.
+        path: An explicit artifact path, or None for this distribution's own
+            default. The override is the sanctioned escape hatch for a test, a
+            regeneration workflow or a relocated deployment, and it is taken
+            exactly as given - no search, no fallback, no second guess.
 
     Returns:
-        The same location expressed absolutely, so that two spellings of one
-        file - a relative path, a path through a symbolic link - share a
-        single memo entry and therefore a single read.
+        The location to read, expressed absolutely, so that two spellings of
+        one file - a relative path, a path through a symbolic link - share a
+        single memo entry and therefore a single read. For the default, the
+        first candidate that is actually a file; when none is, the LAST
+        candidate, which is the repository sibling and therefore the most
+        useful path to name in the absence message.
 
+    THE DEFAULT LOOKUP IS ORDERED AND HAS EXACTLY TWO CANDIDATES, in this
+    order: the packaged copy, which is the only one an installed distribution
+    carries, then the repository copy, which is the only one a source
+    checkout carries. Exactly one of the two exists in each of those two
+    situations, so the order is a tie-break that never has to fire - but it
+    is fixed rather than left to chance, because a lookup whose result could
+    depend on which copy happened to be found first would put rule R-6's
+    determinism in the hands of the deployment layout.
+
+    When NEITHER exists, the repository path is returned so that the reader
+    below reports a real, nameable location; `_absence_message` then names
+    both candidates. Returning a path is not a claim that it is there:
     `Path.resolve()` asks the operating system to make the path absolute and
     symlink-free. It opens nothing, reads no content and - defaulting to
     non-strict - cannot raise for a path that is not there, so absence is
     reported by the reader below with a message that can explain itself,
-    never by this helper.
+    never by this helper. The `is_file()` probe on the default is a SELECTION
+    between two declared locations, not a validation: it cannot raise, and
+    when it finds nothing it still returns a path rather than an error.
     """
-    return (DATA_DICTIONARY_PATH if path is None else Path(path)).resolve()
+    if path is not None:
+        return Path(path).resolve()
+    candidates = _default_document_candidates()
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return candidates[-1]
 
 
 def _admit_json_value(value: object, trail: str, path: Path) -> None:
@@ -510,8 +693,118 @@ def _admit_json_value(value: object, trail: str, path: Path) -> None:
     )
 
 
+class _RepeatedMember(Exception):
+    """One JSON object carried the same member name twice.
+
+    Private and deliberately narrow: it exists only to carry the offending
+    name out of the object hook and into `_read_document`, which is the only
+    place that knows which file is being read and can therefore say so.
+    """
+
+    def __init__(self, name: str) -> None:
+        """Record the repeated member name."""
+        super().__init__(name)
+        self.name: str = name
+
+
+def _object_from_pairs(
+    pairs: list[tuple[str, object]],
+) -> dict[str, object]:
+    """Build one JSON object from its member pairs, refusing any repeated name.
+
+    Args:
+        pairs: The members of one object, in the order the document wrote
+            them, as the JSON reader hands them over.
+
+    Returns:
+        The object as a mapping, identical to what the reader would have built
+        on its own for a document with no repeated member.
+
+    Raises:
+        _RepeatedMember: A member name occurs more than once.
+
+    WHY THIS HOOK EXISTS. JSON permits a repeated member name and the standard
+    reader resolves it by keeping the LAST occurrence silently. That makes a
+    forged document trivial to hide inside a real one: append a second
+    `"picture"` to an entry's copybook view, or a second `"scale"`, and the
+    document still parses, still satisfies every later check - because by then
+    the first value is simply gone - and quietly redefines a field. The
+    duplicate is only visible while the members are still a list of pairs,
+    which is here.
+
+    The rest of the document's integrity is checked by
+    `model.check_integrity`; a repetition is the one departure that cannot be
+    detected after parsing, so it is the one this hook has to catch.
+    """
+    obj: dict[str, object] = {}
+    for name, value in pairs:
+        if name in obj:
+            raise _RepeatedMember(name)
+        obj[name] = value
+    return obj
+
+
+def _read_text_without_following_links(path: Path) -> str:
+    """Read one file's text, refusing a symbolic link or anything but a plain file.
+
+    Args:
+        path: The absolute path of the artifact to read.
+
+    Returns:
+        The file's contents decoded as UTF-8.
+
+    Raises:
+        DictionaryNotFoundError: Nothing is at `path`, or what is there is not
+            a plain file.
+        OSError: The file exists and is plain but cannot be read.
+
+    `Path.resolve()` has already followed every symbolic link in the path, so
+    what remains is the window between that resolution and the open: a link
+    substituted for the final component in that window would redirect this read
+    to a file of the substituter's choosing, and the document read from it would
+    be handed to every record module as authoritative field metadata (CWE-59,
+    CWE-367). `O_NOFOLLOW` closes the window by refusing to open a final
+    component that is a link at the moment of opening.
+
+    The descriptor is then checked to be a regular file before a byte is read.
+    A named pipe at the path would otherwise block the process indefinitely, and
+    a character device would return contents that have nothing to do with a
+    dictionary; both are absence as far as this module is concerned, and both
+    are reported with the message that explains where the artifact should be.
+    """
+    try:
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except FileNotFoundError:
+        raise DictionaryNotFoundError(_absence_message(path)) from None
+    except OSError as error:
+        # ELOOP from O_NOFOLLOW, ENOTDIR from a path component that is not a
+        # directory, EACCES from an unreadable file: none of them is a readable
+        # artifact, and each is reported the same way so a caller has one thing
+        # to handle.
+        raise DictionaryNotFoundError(
+            f"{_absence_message(path)}\n"
+            f"The attempt to open it failed with: {error}"
+        ) from error
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise DictionaryNotFoundError(
+                f"{_absence_message(path)}\n"
+                "Something is at that path, but it is not a plain file, so it "
+                "is not the committed artifact."
+            )
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(descriptor, 1 << 20)
+            if not chunk:
+                break
+            chunks.append(chunk)
+    finally:
+        os.close(descriptor)
+    return b"".join(chunks).decode("utf-8")
+
+
 def _read_document(path: Path) -> DataDictionary:
-    """Read, parse and map one dictionary document. No memo, no fallback.
+    """Read, parse, check and map one dictionary document. No memo, no fallback.
 
     Args:
         path: The absolute path of the artifact to read.
@@ -520,11 +813,15 @@ def _read_document(path: Path) -> DataDictionary:
         The document as the immutable record tree `model` defines.
 
     Raises:
-        DictionaryNotFoundError: Nothing readable is at `path`.
-        DictionaryParseError: The text is not parseable JSON, or its top
-            level is not an object.
+        DictionaryNotFoundError: Nothing readable is at `path`, or what is
+            there is not a plain file.
+        DictionaryParseError: The text is not parseable JSON, an object
+            carries the same member name twice, or the top level is not an
+            object.
         DictionaryNumericPolicyError: A parsed value is outside the shapes
             the model admits (rule R-2).
+        DictionaryUntrustedError: The document parses but does not hold up as
+            the dictionary it claims to be.
 
     `parse_float=str` is the numeric guard's first half: a real-number
     literal comes back as its own text rather than as a binary approximation
@@ -536,12 +833,19 @@ def _read_document(path: Path) -> DataDictionary:
     A member the document does not carry is NOT defaulted here. That failure
     belongs to `model.from_json_obj`, which fetches every member by name with
     no fallback, and it is allowed to surface exactly as raised (rule R-3).
+
+    The order of the four steps is the point of this function. Nothing is read
+    until the path is proved to be a plain file that is not a link; nothing is
+    parsed until it is read; nothing is mapped to a record until the parsed
+    tree has been proved to be the document the generator produced; and no
+    caller - and no cache - is ever handed a partially trusted document.
     """
     if not path.is_file():
         raise DictionaryNotFoundError(_absence_message(path))
-    text = path.read_text(encoding="utf-8")
+    text = _read_text_without_following_links(path)
     try:
-        tree = json.loads(text, parse_float=str)
+        tree = json.loads(text, parse_float=str,
+                          object_pairs_hook=_object_from_pairs)
     except json.JSONDecodeError as error:
         raise DictionaryParseError(
             f"The data dictionary at {path} could not be parsed as JSON: "
@@ -553,6 +857,20 @@ def _read_document(path: Path) -> DataDictionary:
             "repaired or guessed here: correct the file, or pass the path of "
             "an intact copy."
         ) from error
+    except _RepeatedMember as error:
+        raise DictionaryParseError(
+            f"The data dictionary at {path} carries the member "
+            f"{error.name!r} twice inside one object.\n"
+            "A JSON reader resolves a repeated member by keeping the last "
+            "occurrence and discarding the first without complaint, which is "
+            "how an edit to this document could redefine a field's picture, "
+            "scale, signedness or storage class while leaving a file that "
+            "still parses and still passes every later check. The read stops "
+            "here instead.\n"
+            "The generator never emits a repeated member: regenerate the "
+            "artifact with "
+            "python -m acas_posting.dictionary.generate."
+        ) from error
     _admit_json_value(tree, "<document>", path)
     if not isinstance(tree, dict):
         raise DictionaryParseError(
@@ -562,7 +880,21 @@ def _read_document(path: Path) -> DataDictionary:
             "tables, entries and coverage."
         )
     document: JsonObject = tree
-    return from_json_obj(document)
+    try:
+        return from_json_obj(document)
+    except DictionaryIntegrityError as error:
+        raise DictionaryUntrustedError(
+            f"The data dictionary at {path} parsed, but it is not the "
+            f"document it claims to be.\n{error}\n"
+            "Every record module cites this document for the picture, scale, "
+            "signedness and storage class of its fields (rule R-5), so a "
+            "document that is not the one the generator produced would "
+            "silently redefine several hundred fields. Regenerate it from "
+            "the frozen sources with "
+            "python -m acas_posting.dictionary.generate, and use "
+            "--check to see exactly how the file on disk differs from a "
+            "fresh parse."
+        ) from error
 
 
 def _absence_message(path: Path) -> str:
@@ -572,34 +904,73 @@ def _absence_message(path: Path) -> str:
         path: The absolute path that was looked at.
 
     Returns:
-        A message naming that path, explaining why it can legitimately be
-        missing, and giving both remedies - and no third, since this module
-        neither empties nor regenerates.
+        A message naming that path and every other candidate the default
+        lookup considered, explaining why each can legitimately be missing,
+        and giving the remedies - and no more, since this module neither
+        empties nor regenerates.
     """
+    candidates = _default_document_candidates()
+    if path in candidates:
+        # The default was used, so every legitimate location was tried and the
+        # message can say so and name them.
+        looked_in = "\n".join(f"    {candidate}" for candidate in candidates)
+        preamble = (
+            "Two locations are legitimate and both were looked at, in this "
+            "order:\n"
+            f"{looked_in}\n"
+            "\n"
+            "The first is the copy carried inside an installed distribution, "
+            "put there by the package-dir mapping in pyproject.toml that "
+            "makes the repository's data_dictionary/ tree the acas_posting "
+            "package's data directory. The second is the repository artifact "
+            "itself, where Agent Action Plan sections 0.3.1 and 0.4.1.6 place "
+            "it. A source checkout normally has only the second, an installed "
+            "wheel only the first, so one of them being absent is ordinary; "
+            "BOTH being absent is what produced this error.\n"
+        )
+    else:
+        # An explicit path= was given. It is honoured exactly as passed and no
+        # search happened, so claiming otherwise would misdirect the reader.
+        preamble = (
+            "That path was given explicitly, through the path= argument, so "
+            "it was used exactly as passed and no default location was "
+            "consulted. Omitting path= searches the two locations this "
+            "distribution considers legitimate: the copy inside an installed "
+            "distribution first, then the repository's own "
+            "data_dictionary/acas_posting_dictionary.json.\n"
+        )
     return (
         f"The ACAS posting data dictionary was not found at {path}\n"
         "\n"
-        "That file is a repository artifact rather than package data, and "
-        "pyproject.toml keeps it out of the installed distribution "
-        "deliberately: package discovery includes acas_posting* and names "
-        "data_dictionary* in its exclude list. So it is present in a source "
-        "checkout - which is how the oracle scripts and the test suites run "
-        "- and absent from an installed wheel.\n"
+        f"{preamble}"
         "\n"
-        "Two remedies, and no third:\n"
+        "The artifact is not optional: rule R-5 binds every field of every "
+        "record module to a dictionary entry, and those modules read it while "
+        "they are being imported. So this is a damaged installation, a "
+        "checkout the generator has never been run in, or a path= override "
+        "naming somewhere wrong.\n"
+        "\n"
+        "Four remedies, and no fifth:\n"
         "  1. run from a source checkout of the repository, where "
         "data_dictionary/acas_posting_dictionary.json sits beside the "
         "acas_posting package; or\n"
-        "  2. pass an explicit path - load_dictionary(Path(...)), or the "
+        "  2. regenerate the artifact - python -m "
+        "acas_posting.dictionary.generate - which rebuilds it from the frozen "
+        "bridge, the copybooks and the schema, and writes the repository "
+        "location; or\n"
+        "  3. reinstall a distribution built from that checkout, so the "
+        "packaged copy is carried into acas_posting/data_dictionary/; or\n"
+        "  4. pass an explicit path - load_dictionary(Path(...)), or the "
         "path= keyword of any accessor in this module - naming an intact "
         "copy of the artifact.\n"
         "\n"
         "This module does not fall back to an empty dictionary, because a "
         "record module would then bind field metadata that no frozen source "
-        "supports. Nor does it regenerate the artifact: that is the job of "
-        "the build-time generator beside this module, whose COBOL and schema "
-        "parsers must never reach the import path of the record layer "
-        "(Agent Action Plan section 0.4.3)."
+        "supports. Nor does it regenerate the artifact itself: that is the "
+        "job of the generator beside this module, whose COBOL and schema "
+        "parsers must never reach the import path of the record layer (Agent "
+        "Action Plan section 0.4.3), which is why remedy 2 is a command to "
+        "run and not something attempted from here."
     )
 
 
@@ -612,11 +983,13 @@ class _DocumentIndex:
     `meta.determinism.array_order` is the contract, and re-ordering it here
     would discard exactly the guarantee rule R-6 rests on.
 
-    The mapping from key to entry takes the document as it stands. The
-    artifact's keys are unique by construction, and this module does not
-    police that: a duplicate would be the generator's defect to report, and
-    checking for one here would be a validation this migration may not add
-    (rule R-3).
+    The mapping from key to entry takes the document as it stands, and it can
+    afford to: by the time a document reaches this class, `check_integrity` has
+    already refused any document that repeats an entry key, a table name, a
+    manifest path or a binding-rule identifier. Uniqueness is therefore an
+    established fact here rather than an assumption, which is exactly what a
+    key-to-entry mapping needs - a repeated key would otherwise shadow one
+    field's metadata with another's, silently and with no error anywhere.
     """
 
     __slots__ = (
@@ -719,21 +1092,17 @@ class _DocumentIndex:
         self.bridges_by_name: dict[BridgeName, BridgeSource] = bridges_by_name
 
 
-# =============================================================================
 #  THE MEMO
-#
 #  A plain mapping from absolute path to the document read from it, and a
 #  second from the same path to that document's index. Both are private, both
 #  are keyed by a path made absolute first, and neither is touched at import
 #  time - importing this module reads nothing.
-#
 #  This is a cache and not a lock: execution is strictly sequential, matching
 #  the single-threaded COBOL, so there is no synchronisation primitive here
 #  and none is needed (rule R-3). Two reads of one path in one process would
 #  be harmless anyway - the document is immutable - but twenty-seven record
 #  modules importing at start-up should cost one read between them, not
 #  twenty-seven.
-# =============================================================================
 
 _DOCUMENTS: dict[Path, DataDictionary] = {}
 _INDEXES: dict[Path, _DocumentIndex] = {}
@@ -743,11 +1112,12 @@ def load_dictionary(path: Path | None = None) -> DataDictionary:
     """Return the whole data dictionary, reading it at most once per path.
 
     Args:
-        path: An explicit artifact path, or None for the repository's own
-            `data_dictionary/acas_posting_dictionary.json`. The override is
-            the sanctioned escape hatch for a test, or for a deployment that
-            keeps the artifact somewhere else - see the wheel-absence caveat
-            in this module's docstring.
+        path: An explicit artifact path, or None for the location
+            `acas_posting/__init__.py` resolved - the installed package data
+            at `acas_posting/data_dictionary/`, or the repository sibling
+            `data_dictionary/` when this is an uninstalled checkout. The
+            override is the sanctioned escape hatch for a test, or for a
+            deployment that keeps the artifact somewhere else.
 
     Returns:
         The document as an immutable tree of `model` records: `meta`,
@@ -813,16 +1183,13 @@ def _index(path: Path | None) -> _DocumentIndex:
     return index
 
 
-# =============================================================================
 #  FAILURE MESSAGES THAT TEACH  (rule R-5)
-#
 #  A record module reaches this module because rule R-5 requires every field
 #  to cite a dictionary entry. When a key does not match, the wrong outcome is
 #  for its author to give up and hand-write the metadata instead - that is the
 #  transcription error the data-dictionary-first directive exists to prevent.
 #  So a miss states the convention, shows the nearest keys the document really
 #  carries, and says outright not to hand-code the field.
-# =============================================================================
 
 
 def _nearest(name: str, candidates: tuple[str, ...]) -> tuple[str, ...]:
@@ -959,9 +1326,7 @@ def _unknown_name_message(
     )
 
 
-# =============================================================================
 #  THE DOCUMENT'S OWN THREE HEADERS
-# =============================================================================
 
 
 def meta(*, path: Path | None = None) -> Meta:
@@ -1027,9 +1392,7 @@ def coverage(*, path: Path | None = None) -> Coverage:
     return load_dictionary(path).coverage
 
 
-# =============================================================================
 #  ENTRIES
-# =============================================================================
 
 
 def entries(*, path: Path | None = None) -> tuple[DictionaryEntry, ...]:
@@ -1274,9 +1637,7 @@ def entries_for_copybook_file(
     return entries_of_file
 
 
-# =============================================================================
 #  THE THREE VIEWS, HANDED OVER SEPARATELY  (rule R-4)
-#
 #  Three accessors, one per layer, and no fourth that merges them. Each may
 #  answer None, and None is a RECORDED FACT rather than a failure: a
 #  copybook-only working-storage field has no host variable and no column, and
@@ -1284,7 +1645,6 @@ def entries_for_copybook_file(
 #  [common/irspostingMT.cbl:L982-L987] have no copybook at all. A caller must
 #  say which layer it means, because the layers disagree and the disagreement
 #  is behaviour that has to be reproduced.
-# =============================================================================
 
 
 def copybook_field_for(
@@ -1454,15 +1814,12 @@ def derivation_for(
     return get_entry(key, path=path).derivation
 
 
-# =============================================================================
 #  THE ENTITY - HANDLER - BRIDGE - TABLE SPINE
-#
 #  What the data-access layer resolves a call through. The correspondence is
 #  not one-to-one in either direction: seventeen handlers reach twenty-two
 #  tables through twenty bridges, `acas000` dispatches to four tables by
 #  file-key number, and `acas016` and `acas026` each own a header table and a
 #  lines table - so the spine is looked up, never inferred from a name.
-# =============================================================================
 
 
 def tables(*, path: Path | None = None) -> tuple[TableRecord, ...]:
@@ -1638,9 +1995,7 @@ def bridge_for(
     return bridge_source
 
 
-# =============================================================================
 #  CITATION  (rule R-5 made usable)
-# =============================================================================
 
 
 def _view_locator(
@@ -1679,6 +2034,15 @@ def cite(key: str, *, path: Path | None = None) -> str:
             IRSPOSTING-REC.POST4-DAY  copybook=absent
             bridge=common/irspostingMT.cbl:L177  column=mysql/ACASDB.sql:L278
 
+        A work-file field - one of the records a General Ledger program
+        declares inline in its own FILE SECTION - has no copybook view by
+        nature, so its first segment is spelt `program=` and names the
+        program's own declaration line. The two never coexist, so the segment
+        count does not change:
+
+            sort-trans-record.sort-amount  program=general/gl071.cbl:L143
+            bridge=absent  column=absent
+
     Raises:
         DictionaryKeyError: No entry carries that key.
         DictionaryNotFoundError: Nothing readable is at that path.
@@ -1697,31 +2061,62 @@ def cite(key: str, *, path: Path | None = None) -> str:
     and no accessor here prints or logs a value of any field.
     """
     entry = get_entry(key, path=path)
+    # The copybook and program-source views never coexist: a record is declared
+    # by a copybook or inline by a program, never both. So the first segment
+    # names whichever declares this field, and `copybook=absent` is reserved
+    # for a field no COBOL declaration carries at all - a bridge-derived
+    # column.
+    declaring = (
+        f"program={_view_locator(entry.program_source)}"
+        if entry.program_source is not None
+        else f"copybook={_view_locator(entry.copybook)}"
+    )
     return "  ".join(
         (
             entry.key,
-            f"copybook={_view_locator(entry.copybook)}",
+            declaring,
             f"bridge={_view_locator(entry.bridge_host_variable)}",
             f"column={_view_locator(entry.column)}",
         )
     )
 
 
-# =============================================================================
 #  PUBLIC SURFACE
-#
 #  The failures first, then the accessors, each group in alphabetical order. A
 #  tuple rather than a list, so the surface cannot be reordered, extended or
 #  mutated in place at run time, and alphabetical so the order is a mechanical
 #  consequence of the names instead of an editorial choice - both small
 #  determinism guarantees in the spirit of rule R-6.
-#
 #  Everything else here is private: the index, the memo, the parse boundary
 #  and the message builders. A caller gets accessors, never a mapping it
 #  could mutate.
-# =============================================================================
 
 __all__: Final[tuple[str, ...]] = (
+    # The re-exported object model. Agent Action Plan section 0.4.3 grants
+    # `cobol/*.py` and `records/*.py` this module and not `dictionary.model`,
+    # and every value an accessor below returns is an instance of one of these,
+    # so they are published here. Bindings to the one definition, never copies
+    # (rule R-5); `RE_EXPORTED_MODEL_NAMES` lists the same set as data.
+    "ENTRY_KEY_PATTERN",
+    "REPO_PATH_PATTERN",
+    "SOURCE_LOCATOR_PATTERN",
+    "BridgeHostVariable",
+    "CobolPythonStorage",
+    "ConditionName",
+    "CopybookField",
+    "Coverage",
+    "DataDictionary",
+    "Derivation",
+    "DictionaryEntry",
+    "Drift",
+    "Meta",
+    "MysqlColumn",
+    "RE_EXPORTED_MODEL_NAMES",
+    "SignPosition",
+    "Sources",
+    "TableRecord",
+    "Usage",
+    "UsageDeclaredAt",
     # The failures.
     "DictionaryError",
     "DictionaryKeyError",
@@ -1729,6 +2124,7 @@ __all__: Final[tuple[str, ...]] = (
     "DictionaryNotFoundError",
     "DictionaryNumericPolicyError",
     "DictionaryParseError",
+    "DictionaryUntrustedError",
     # The accessors.
     "bridge_for",
     "cite",

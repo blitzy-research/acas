@@ -1,30 +1,43 @@
 """The `01 System-Record.` layout: the widest record in the migration.
 
-`SYSTEM-REC` is the ACAS system record - 1024 bytes in six blocks, 169 MySQL
-columns, declared across 330 lines of `copybooks/wssystem.cob`. This module
-mirrors it field for field as plain dataclasses and does nothing else. It
-holds no accounting logic, no predicate over a condition name, no date
-conversion, no database access and no clock read. It says what the record IS,
-not what any value in it MEANS.
+`SYSTEM-REC` is the ACAS system record - 1024 bytes in six blocks, 169
+MySQL columns, declared across 330 lines of `copybooks/wssystem.cob`. This
+module mirrors it field for field as plain dataclasses and does nothing
+else. It holds no accounting logic, no predicate over a condition name, no
+date conversion, no database access and no clock read. It says what the
+record IS, not what any value in it MEANS.
 
 Entity-to-table spine, from Agent Action Plan section 0.2.1.1:
 
     entity facade  System
     handler        acas000, file-key number 1
     bridge         systemMT
-    MySQL table    SYSTEM-REC          (169 columns, primary key
-                                        SYSTEM-REC-KEY, no secondary index,
-                                        no TIMESTAMP, no AUTO_INCREMENT and
-                                        no column-level DEFAULT)
+    MySQL table    SYSTEM-REC   (169 columns, primary key SYSTEM-REC-KEY,
+                                 no secondary index, no TIMESTAMP and no
+                                 AUTO_INCREMENT)
     copybook       copybooks/wssystem.cob
+
+One correction to plan section 0.6.6, which describes the in-scope tables
+as having no column-level DEFAULT: `PASS-WORD char(4) NOT NULL DEFAULT ''`
+[mysql/ACASDB.sql:L1219], from `Pass-Word pic x(4)`
+[copybooks/wssystem.cob:L97], carries the only one in the whole 33-table
+frozen schema. It changes nothing here, since the default is reachable
+only by a writer that omits the column and every bridge load paragraph
+initialises its host-variable group first.
+
+`acas_posting/records/__init__.py` sets out the conventions every record
+module follows: descriptors looked up rather than typed by hand (rule
+R-5), the six numeric storage classes, exact decimals (R-2), the two
+permitted imports, and condition names living in
+`acas_posting.cobol.condition_names`.
 
 WHY THIS RECORD MATTERS MORE THAN ITS SIZE SUGGESTS
 ===================================================
 Three reasons, each load-bearing.
 
-1.  It is the SECOND parameter of every in-scope linkage shape, and the FIRST
-    argument of every file-handler call. The General Ledger family takes
-    `using ws-calling-data, system-record, to-day, file-defs`
+1.  It is the SECOND parameter of every in-scope linkage shape, and the
+    FIRST argument of every file-handler call. The General Ledger family
+    takes `using ws-calling-data, system-record, to-day, file-defs`
     [general/gl071.cbl:L161-L164]; the Sales and Purchase families add a
     fourth system record; and irs030 takes a third, materially different
     shape with neither the calling-data block nor the run date -
@@ -40,171 +53,152 @@ Three reasons, each load-bearing.
     [copybooks/wssystem.cob:L67] - and inject them at the CLI boundary."
 
 3.  It carries the IRS fan-out switch `IRS-Instead`
-    [copybooks/wssystem.cob:L179], which decides WHICH TABLES A RUN TOUCHES.
-    Plan section 0.6.4 records that it is tested at three sites in each of
-    the four Sales and Purchase posting programs - for this record's own
-    source references, [sales/sl060.cbl:L1039], [sales/sl060.cbl:L1126] and
-    [sales/sl060.cbl:L1175].
+    [copybooks/wssystem.cob:L179], which decides WHICH TABLES A RUN
+    TOUCHES. Plan section 0.6.4 records that it is tested at three sites
+    in each of the four Sales and Purchase posting programs - for this
+    record's own source references, [sales/sl060.cbl:L1039],
+    [sales/sl060.cbl:L1126] and [sales/sl060.cbl:L1175].
 
-WHAT THIS MODULE MAY IMPORT - IT IS A LEAF
-==========================================
-Plan section 0.4.3 fixes the record layer's import contract in one line:
-`records/*.py` may import `cobol.field` and `dictionary.loader`, and must not
-import "anything else - this keeps the record layer a leaf". So exactly two
-package imports appear below, plus the standard library.
+THE LEAF CONTRACT, AND THE ONE IMPORT MOST TEMPTING HERE
+========================================================
+Plan section 0.4.3 grants `records/*.py` only `cobol.field`,
+`dictionary.loader` and the standard library, forbidding "anything else -
+this keeps the record layer a leaf". So `dal`, `programs`, `cli`, `dates`,
+`workfiles`, the rest of `cobol`, `dictionary.generate`, the oracle tree
+and every other module of this package are absent - `irs_system.py`
+included, despite the rename note below.
 
-Forbidden here, and absent: `dal`, `programs`, `cli`, `dates`, `workfiles`,
-`cobol.arithmetic`, `cobol.move`, `cobol.picture`, `cobol.usage`,
-`cobol.condition_names`, `cobol.sortverb`, `dictionary.generate`, the oracle
-tree, and every other module in this package - `irs_system.py` included,
-despite the rename note below. And `acas_posting.clock` above all, which is
-a live temptation precisely because this record carries `Run-Date`: the clock
-pins the value and the CLI injects it, so the dependency runs clock and cli
-INTO records and never the other way. A cycle there would break the
-arithmetic suite, which plan section 0.4.3 requires to import "only `cobol`
-and `records`" and to touch no database at all.
+`acas_posting.clock` above all, a live temptation precisely because this
+record carries `Run-Date`: the clock pins the value and the CLI injects
+it, so the dependency runs clock and cli INTO records and never the other
+way. A cycle there would break the arithmetic suite, which section 0.4.3
+requires to import "only `cobol` and `records`" and touch no database.
 
 WHERE THE FIELD METADATA COMES FROM - NOT FROM THIS FILE
 ========================================================
-Plan section 0.8.1, verbatim: "Data dictionary first. The dictionary is
-generated from the bridge before record definitions are written, and every
-Python field definition cites its entry. This ordering is a directive, not a
-preference - it is what prevents fields being transcribed by eye."
-
-And the preserved user requirement, plan section 0.8.2, states it plainly:
-the maintainer's one-way COBOL-to-MySQL bridge is what fixes the mapping
-between a record layout and its table, and the bridge - not the copybook - is
-therefore the data dictionary for this migration. The word that section uses
-for the bridge's standing is deliberately not repeated here, because R-4
-reserves that vocabulary and this module adjudicates nothing.
-
-With 169 columns this is the module where transcription by eye would be both
-most likely and most damaging, so no digit count, scale, sign, usage or
-column name is written here. `_descriptor` below looks every item up in
-`data_dictionary/acas_posting_dictionary.json` through
-`acas_posting.dictionary.loader`, keyed by the item's verbatim COBOL name and
-its declaration line, and hands the entry key to
-`FieldDescriptor.from_dictionary_key`. Every one of the 199 items this record
-declares has an entry, so `FieldDescriptor.for_working_storage` is called
-nowhere in this file - consistent with this package's own marker, which
-reserves that constructor for `work_records.py` alone. The per-attribute
-comments quote the copybook declaration and the column, but they are
-COMMENTS: the descriptors, not the comments, are what any consumer reads.
-
-Each `FieldDescriptor` surfaces `cite()`, which delegates to `loader.cite()`
-and returns the compact three-locator provenance string - copybook line,
-bridge host-variable line, column line. Nothing here reimplements it.
+Plan section 0.8.1 makes the dictionary-first ordering a directive rather
+than a preference, precisely to stop fields being transcribed by eye.
+With 169 columns this is where transcription by eye would be both most
+likely and most damaging, so no digit count, scale, sign, usage or column
+name is written here. `_descriptor` looks every item up through
+`acas_posting.dictionary.loader`, keyed by the item's verbatim COBOL name
+and declaration line, and hands the key to
+`FieldDescriptor.from_dictionary_key`. All 199 items have an entry, so no
+item's metadata is stated by hand here - and there is no way to state it,
+`from_dictionary_key` being the one factory `FieldDescriptor` offers. The
+per-attribute comments quote the copybook declaration and the column, but
+they are COMMENTS: the descriptors are what a consumer reads. Each
+descriptor's `cite()` delegates to `loader.cite()` for the compact
+copybook/bridge/column provenance string; nothing here reimplements it.
 
 HOW THE COBOL DECLARATIONS BECOME PYTHON
 ========================================
 Six conventions, each applied without exception across all 198 attributes.
 
 FILLER items are real named attributes, `filler_<declaration line>`.
-    Nine FILLER items are declared - L81, L211, L252, L278, L299, L308, L323,
-    L324 and L327 - and the suffix mirrors the way the generated dictionary
-    itself disambiguates repeated names, as `FILLER#81`. They are modelled as
-    attributes rather than as metadata-only descriptors because the record's
-    byte layout INCLUDES their bytes: summing the elementary items of each
-    block reproduces the declared block sizes only when the FILLER bytes are
-    counted, so dropping them would make the dataclass an unfaithful layout
-    of a record whose own header reads `*> File size 1024 with fillers`
-    [copybooks/wssystem.cob:L7]. Their descriptors carry `is_filler=True`,
-    taken from the dictionary rather than asserted here. `FILLER-Dummy4`
+    Nine are declared - L81, L211, L252, L278, L299, L308, L323, L324 and
+    L327 - and the suffix mirrors how the generated dictionary itself
+    disambiguates repeated names, as `FILLER#81`. They are attributes
+    rather than metadata-only descriptors because the record's byte layout
+    INCLUDES their bytes: summing a block's elementary items reproduces
+    the declared block size only when the FILLER bytes are counted, and
+    the record's own header reads `*> File size 1024 with fillers`
+    [copybooks/wssystem.cob:L7]. Their descriptors carry `is_filler=True`
+    from the dictionary rather than asserted here. `FILLER-Dummy4`
     [copybooks/wssystem.cob:L329] is deliberately NOT among the nine: its
-    COBOL name is a name, not the FILLER keyword, and the dictionary does not
-    flag it.
+    COBOL name is a name, not the FILLER keyword.
 
 Text items default to spaces of the declared width.
-    `str` items default to `" " * n` for a `pic x(n)`; a `pic x` defaults to
-    a single space. The reason is the bridge's own behaviour, recorded in
-    plan section 0.6.2: every bridge load paragraph initialises its
-    host-variable group before a write, so an unset text item reaches MySQL
-    as spaces and never as SQL NULL, which is why every column in the frozen
-    schema can be declared NOT NULL. Spaces are therefore the value the
-    frozen system actually stores, not a convenience. It also means the three
-    `value spaces` clauses the copybook declares - L140, L143 and L144 - and
-    the three `value space` clauses - L209, L274 and L276 - need no second
-    convention: they already agree with it.
+    `str` items default to `" " * n` for a `pic x(n)`; a `pic x` defaults
+    to a single space. The reason is the bridge's own behaviour, recorded
+    in plan section 0.6.2: every load paragraph initialises its
+    host-variable group before a write, so an unset text item reaches
+    MySQL as spaces and never as SQL NULL - which is why every column in
+    the frozen schema can be NOT NULL. Spaces are the value the frozen
+    system stores, not a convenience, and the copybook's three `value
+    spaces` clauses (L140, L143, L144) and three `value space` clauses
+    (L209, L274, L276) already agree with it.
 
 Numeric items default to zero at their declared scale.
-    `int` items default to `0`. `Decimal` items default to
-    `decimal.Decimal("0.00")`; all thirteen scaled items in this record are
-    scale 2, so a single quantum covers every one of them. No binary
-    approximation appears anywhere in this file - see R-2 below.
+    `int` items default to `0`; `Decimal` items to `decimal.Decimal("0.00")`
+    - all thirteen scaled items in this record are scale 2, so one quantum
+    covers every one. No binary approximation appears anywhere in this file.
 
 Group items become nested dataclasses, built with `default_factory`.
-    Fifteen subordinate groups are declared, and each becomes its own class
-    named as the PascalCase of its COBOL group name with the hyphens dropped:
-    `Vat-Rates` -> `VatRates`, `RDBMS-Flat-Statuses` -> `RdbmsFlatStatuses`,
-    and so on. One group has no name to carry over - see the next convention.
+    Fifteen subordinate groups are declared, each becoming its own class
+    named as the PascalCase of its COBOL group name with the hyphens
+    dropped: `Vat-Rates` -> `VatRates`, `RDBMS-Flat-Statuses` ->
+    `RdbmsFlatStatuses`. One group has no name to carry over - see next.
 
 The one ANONYMOUS group is named for what it redefines.
     `05 FILLER redefines PL-Approp-AC6.` [copybooks/wssystem.cob:L323] is a
     FILLER group, so it has no COBOL name. This module calls it
     `PlAppropAc6Parts`, and its class docstring states both the chosen name
     and the anonymous original with its locator, so the mapping is recorded
-    rather than silent. Its own attribute on the containing block keeps the
+    rather than silent. Its attribute on the containing block keeps the
     FILLER convention and is therefore `filler_323`.
 
 REDEFINES views are declared, never applied.
-    Five REDEFINES appear: `Vat-Rate` over `Vat-Rates` [L61], `Scycle` over
-    `cyclea` [L63], `Vat-Group` over `Vat-Rates2` [L316], the anonymous group
-    over `PL-Approp-AC6` [L323], and `IRS-Data-Block` over `IRS-Entry-Block`
-    [L328]. A REDEFINES is an alternate view of bytes already declared, not
-    additional storage. Group redefines become classes; elementary redefines
-    stay attributes, with an `OCCURS` becoming a `list` because
-    `move x to Vat-Rate(2)` is legal COBOL and the element must be
-    assignable. Making the two views share storage is the business of the
-    data-access and MOVE layers at the storage boundary, not of a layout
-    module, and each redefining attribute's comment says so.
+    Five appear: `Vat-Rate` over `Vat-Rates` [L61], `Scycle` over
+    `cyclea` [L63], `Vat-Group` over `Vat-Rates2` [L316], the anonymous
+    group over `PL-Approp-AC6` [L323], and `IRS-Data-Block` over
+    `IRS-Entry-Block` [L328]. A REDEFINES is an alternate view of bytes
+    already declared, not additional storage. Group redefines become
+    classes; elementary redefines stay attributes, with an `OCCURS`
+    becoming a `list` because `move x to Vat-Rate(2)` is legal COBOL and
+    the element must be assignable. Making the two views share storage
+    belongs to the data-access and MOVE layers, not to a layout module,
+    and each redefining attribute's comment says so.
 
 Fixed metadata collections are tuples; data collections are lists.
     Every class publishes `FIELDS`, a `ClassVar` tuple of `FieldDescriptor`
-    in copybook declaration order. Tuples because R-6 wants fixed
-    collections immutable and ordering stable; `ClassVar` so the tuple is
-    class metadata and not one more dataclass field.
+    in copybook declaration order - a tuple because R-6 wants fixed
+    collections immutable and ordering stable, a `ClassVar` so it is class
+    metadata rather than one more dataclass field.
 
 ITEM CENSUS
-    199 items are declared, sixteen of them group headers - and one of those
-    sixteen is the `01` record itself, which is an attribute of nothing. That
-    leaves 198 attributes across the sixteen classes below: 95 carried as
-    `int`, 75 as `str`, 13 as `decimal.Decimal` and 15 as a nested block.
-    168 of the 199 items reach a MySQL column; the other 31 are the group
-    headers, the REDEFINES views, the FILLER runs and the seven elementary
-    items the bridge simply does not map. The table has 169 columns because
-    its primary key `SYSTEM-REC-KEY` is declared in no copybook at all.
+    199 items are declared, sixteen of them group headers - one being the
+    `01` record itself, an attribute of nothing. That leaves 198
+    attributes across the sixteen classes below: 95 `int`, 75 `str`, 13
+    `decimal.Decimal` and 15 a nested block. 168 of the 199 reach a MySQL
+    column; the other 31 are the group headers, the REDEFINES views, the
+    FILLER runs and seven elementary items the bridge does not map -
+    `Usera` [L71], `Phone-No` [L80], `Maps-Ser-xx` [L126], `Maps-Ser-nn`
+    [L127], `SL-BO-Default` [L277], `Vat-Psent` [L317] and `FILLER-Dummy4`
+    [L329]. The table has 169 columns because its primary key
+    `SYSTEM-REC-KEY` is declared in no copybook at all.
 
 THE RECORD IS MUTABLE WORKING STORAGE - NEVER FROZEN
 ====================================================
 Every class is `@dataclass(slots=True)` and none is frozen, because the
 posting cycle writes into this record while it runs: the CLI injects
-`Run-Date` [L67] at the boundary; `Next-Invoice` [L66], `Next-Batch` [L185],
-`Next-Folio` [L193] and `Next-Post` [L311] are incremented as documents are
-posted; and `Current-Quarter` [L110] is rewritten by the end-of-cycle step.
-`slots=True` keeps the instances compact and stops a typo silently creating a
-170th attribute.
+`Run-Date` [L67] at the boundary; `Next-Invoice` [L66], `Next-Batch`
+[L185], `Next-Folio` [L193] and `Next-Post` [L311] are incremented as
+documents are posted; and `Current-Quarter` [L110] is rewritten by the
+end-of-cycle step. `slots=True` keeps instances compact and stops a typo
+silently creating a 170th attribute.
 
 THE ATTRIBUTE THAT COULD NOT KEEP ITS COBOL NAME
 ================================================
-One rename was unavoidable, and it is recorded here so
-`docs/migration/traceability.md` picks it up:
+One rename was unavoidable, recorded here so the traceability document a
+later boundary writes picks it up:
 
     COBOL item      1st-Time-Flag        [copybooks/wssystem.cob:L326]
     dictionary key  SYSTEM-REC.1ST-TIME-FLAG
     column          1ST-TIME-FLAG
     attribute       IrsEntryBlock.first_time_flag
 
-The COBOL name begins with a DIGIT, which no Python identifier may do, so
-the attribute had to differ. The spelling is not this module's invention:
-the maintainer's own comment on that line reads "(was First-Time-Flag in IRS
-system file)", and irs030 renames the very same item `IRS-First-Time-Flag`
-[irs/irs030.cbl:L448]. The descriptor keeps the verbatim COBOL name
-`1st-Time-Flag`, so nothing downstream has to know about the rename.
+The COBOL name begins with a DIGIT, which no Python identifier may do. The
+spelling is not this module's invention: the maintainer's own comment on
+that line reads "(was First-Time-Flag in IRS system file)", and irs030
+renames the same item `IRS-First-Time-Flag` [irs/irs030.cbl:L448]. The
+descriptor keeps the verbatim COBOL name `1st-Time-Flag`, so nothing
+downstream has to know about the rename.
 
 WHAT irs030 DOES TO THIS COPYBOOK, AND WHY IT CHANGES NOTHING HERE
 ==================================================================
 `irs030` copies this record and renames 28 of its items in a single
-`replacing` clause [irs/irs030.cbl:L419-L448], among them:
+`replacing` clause [irs/irs030.cbl:L419-L448], among them::
 
     System-Record  by WS-System-Record
     Run-Date       by ACAS-Run-Date      *> these 3 are in binary
@@ -213,106 +207,103 @@ WHAT irs030 DOES TO THIS COPYBOOK, AND WHY IT CHANGES NOTHING HERE
     1st-Time-Flag  by IRS-First-Time-Flag
 
 It has to. The program also copies `copybooks/irswssystem.cob`, itself
-renamed `system-record by IRS-System-Params` [irs/irs030.cbl:L416-L417], and
-that record declares its own `run-date pic x(8)` and `start-date pic x(8)` -
-TEXT where this record declares BINARY. Two records with colliding item
-names in one program is direct evidence for anomaly A-21, field-name
-collisions forcing qualified references.
+renamed `system-record by IRS-System-Params` [irs/irs030.cbl:L416-L417],
+and that record declares its own `run-date pic x(8)`
+[copybooks/irswssystem.cob:L14] and `start-date pic x(8)`
+[copybooks/irswssystem.cob:L21] - TEXT where this record declares BINARY.
+Two records with colliding item names in one program is direct evidence
+for anomaly A-21, field-name collisions forcing qualified references.
 
-This module records the renames and acts on none of them. There is no
-`acas_run_date` alias, no `x(8)` text view of a binary item, and nothing
-merged in from `irs_system.py`, which models `irswssystem.cob` separately.
-The two records are distinct in the frozen source and stay distinct here.
+This module records the renames and acts on none. There is no
+`acas_run_date` alias, no `x(8)` view of a binary item, and nothing merged
+in from `irs_system.py`, which models `irswssystem.cob` separately.
 
 CONDITION NAMES ARE STORAGE HERE, PREDICATES ELSEWHERE
 ======================================================
-This record declares exactly sixty `88` condition names, spread over
-thirty-seven items - the largest concentration in the migration. Plan
-section 0.4.1.4 assigns the predicates over them to
-`acas_posting/cobol/condition_names.py`, naming the IRS fan-out
-names at [copybooks/wssystem.cob:L179-L181] explicitly. So every `88` name
-below appears verbatim in a comment, with its value and its locator, and not
-one predicate, property or symbolic constant set is defined for any of them
-(R-3). That module is not imported here either, because the leaf contract
-above does not permit it.
+This record declares exactly sixty `88` condition names over thirty-seven
+items - the largest concentration in the migration. Plan section 0.4.1.4
+assigns the predicates over them to
+`acas_posting/cobol/condition_names.py`, naming the IRS fan-out names at
+[copybooks/wssystem.cob:L179-L181] explicitly. So every `88` name below
+appears verbatim in a comment with its value and locator, and not one
+predicate, property or constant set is defined for any (R-3). That module
+is not imported here either.
 
 THE ANOMALIES THIS MODULE REPRODUCES
 ====================================
-Rule R-4 is unambiguous: "A defect reproduced is a success; a defect fixed is
-a failure." Plan section 0.7.4 C-4 asks for a comment at each reproduction
-site citing the COBOL locator, and every site below carries one.
+Rule R-4 is unambiguous: "A defect reproduced is a success; a defect fixed
+is a failure." Plan section 0.7.4 C-4 asks for a comment at each
+reproduction site citing the COBOL locator, and every site below carries
+one.
 
     Group usage on `Vat-Rates comp.` [L55] makes its five children BINARY
     although their own PICTURE lines carry no usage clause, while
-    `Vat-Rates2` [L312] leaves its three children ZONED. Two near-identical
-    VAT-rate groups in one record, one COMP and one DISPLAY, never
-    harmonised. Deriving usage from a PICTURE line alone would type the five
-    at L56-L60 DISPLAY and silently corrupt every stored rate.
+    `Vat-Rates2` [L312] leaves its three children ZONED - two
+    near-identical VAT-rate groups in one record, one COMP and one
+    DISPLAY, never harmonised. Deriving usage from a PICTURE line alone
+    would type the five at L56-L60 DISPLAY and corrupt every stored rate.
 
     The declaration beats the comment. `Page-Lines binary-char unsigned`
     [L65] is annotated `*> 999.` but holds 0..255. Sibling copybooks share
     the habit - `binary-short. *> 9999 comp` [copybooks/wssl.cob:L43],
-    `binary-long. *> 9(8) comp` [copybooks/wssl.cob:L45] - so it is a house
-    habit, not a slip. `Stk-Page-Lines` [L306] and `Stk-Audit-No` [L307] are
-    annotated `*> 9999 comp.` and are likewise binary-char unsigned. The
-    comments are recorded; the declarations govern.
+    `binary-long. *> 9(8) comp` [copybooks/wssl.cob:L45] - so it is a
+    house habit, not a slip, and `Stk-Page-Lines` [L306] and
+    `Stk-Audit-No` [L307] are annotated `*> 9999 comp.` while likewise
+    binary-char unsigned. The comments are recorded; declarations govern.
 
-    `88 Date-Valid-Formats values 1 2 3` [L132] is declared and never tested
-    anywhere in the in-scope cycle. Kept, and not newly tested either.
+    `88 Date-Valid-Formats values 1 2 3` [L132] is declared and never
+    tested anywhere in the in-scope cycle. Kept, and not newly tested.
 
     `88 FS-MySql-Used` [L114] and `88 FS-RDBMS-Used` [L116] carry the same
     value 1 - two names for one state.
 
-    `88 OS-Single values 1 2 4` [L109] is a non-contiguous value list.
-
+    `88 OS-Single values 1 2 4` [L109] is a non-contiguous value list, and
     `88 FS-Valid-Options values 0 thru 1` [L122] is the only THRU range in
     this copybook.
 
-    Literal database credentials sit in the frozen source at L137-L139 with
-    the port at L142, each annotated `*> change in setup`. They are carried
-    as the declared defaults, never read from the process environment and
-    never read from a configuration file. See the note below.
+    Literal database credentials at L137-L139 with the port at L142, each
+    annotated `*> change in setup` - see the dedicated note below.
 
     Six `GL-*` control accounts [L280-L285] name General-Ledger and
-    Purchase-Ledger accounts yet are declared inside the Sales Ledger block,
-    under the maintainer's own `*> GL overflow` heading [L279]. They stay
-    where the copybook puts them.
+    Purchase-Ledger accounts yet are declared inside the Sales Ledger
+    block, under the maintainer's own `*> GL overflow` heading [L279]. They
+    stay where the copybook puts them.
 
     `IRS-Instead` [L179] is a THREE-state switch with only TWO condition
-    names; the third state is a space and is unnamed. No name is invented
-    for it here.
+    names; the third state is a space and is unnamed. No name is invented.
 
     Column-name and signedness drift at the bridge, recorded per attribute
-    and reconciled nowhere: `Run-Date` -> `RUN-DAT`, `Start-Date` ->
-    `START-DAT`, `End-Date` -> `END-DAT`, `BL-End-Cycle-Date` ->
-    `BL-END-CYCLE-DAT`, `S-End-Cycle-Date` -> `S-END-CYCLE-DAT`, and
-    `System-Record-Version-Secondary` truncated to 30 characters as
-    `SYSTEM-RECORD-VERSION-SECONDAR`. Forty-one items are signed in the
-    copybook and unsigned at both the bridge and the column, which is anomaly
-    A-11 and open question Q-3 - a negative value loses its sign BEFORE any
-    SQL runs. `SL-Next-Rec` [L275] is the forty-second signedness drift and
-    runs the other way, unsigned in the copybook and signed at the bridge.
-    The dictionary carries the drift for every item; this module carries none
-    of the adjudication, which belongs to the data-access layer measuring
-    against the compiled program.
+    and reconciled nowhere. Six items are renamed: `Run-Date` ->
+    `RUN-DAT`, `Start-Date` -> `START-DAT`, `End-Date` -> `END-DAT`,
+    `BL-End-Cycle-Date` -> `BL-END-CYCLE-DAT`, `S-End-Cycle-Date` ->
+    `S-END-CYCLE-DAT`, and `System-Record-Version-Secondary` truncated to
+    30 characters as `SYSTEM-RECORD-VERSION-SECONDAR`. Forty-one items are
+    signed in the copybook and unsigned at both the bridge and the column,
+    which is anomaly A-11 and open question Q-3 - a negative value loses
+    its sign BEFORE any SQL runs. `SL-Next-Rec` [L275] is the forty-second
+    signedness drift and runs the other way, unsigned in the copybook and
+    signed at the bridge. The dictionary carries the drift for every item;
+    this module carries none of the adjudication, which belongs to the
+    data-access layer and has to be measured against the compiled program.
 
     Bridge-only and group-level columns. `SYSTEM-REC-KEY` is the table's
-    primary key and NO copybook declares it, which is exactly why the bridge
-    rather than the copybook is the mapping of record to table. `Suser` [L70]
-    and `Maps-Ser` [L125] are mapped as GROUP columns while their children
-    are not mapped at all - and `Maps-Ser` is a char(6) column over two
-    children totalling four bytes. Recorded, reconciled nowhere.
+    primary key and NO copybook declares it, which is exactly why the
+    bridge rather than the copybook is the mapping of record to table.
+    `Suser` [L70] and `Maps-Ser` [L125] are mapped as GROUP columns while
+    their children are not mapped at all - and `Maps-Ser` is a `char(6)`
+    column over two children, `pic xx` [L126] and `binary-short` [L127],
+    totalling four bytes. Recorded, reconciled nowhere.
 
 ON THE CREDENTIALS IN THE FROZEN SOURCE
 =======================================
-`RDBMS-DB-Name`, `RDBMS-User`, `RDBMS-Passwd` and `RDBMS-Port` are declared
-with literal VALUE clauses in the frozen copybook, each carrying the
-maintainer's own `*> change in setup` annotation. They are placeholders, not
-live secrets: they already sit in this repository at
+`RDBMS-DB-Name`, `RDBMS-User`, `RDBMS-Passwd` and `RDBMS-Port` are
+declared with literal VALUE clauses in the frozen copybook, each carrying
+the maintainer's own `*> change in setup` annotation. They are
+placeholders, not live secrets: they already sit in this repository at
 `copybooks/wssystem.cob:L137-L142`, they match no credential format any
-scanner recognises, and the running system's actual parameters live outside
-the checkout entirely. Carrying them verbatim is what R-3 and R-4 require -
-they are the copybook's own declared defaults, and inventing different ones
+scanner recognises, and the running system's actual parameters live
+outside the checkout. Carrying them verbatim is what R-3 and R-4 require -
+they are the copybook's declared defaults, and inventing different ones
 would be adding behaviour. This module only DECLARES them; reaching a
 database is `acas_posting/dal/connection.py`'s business (plan section
 0.4.1.5), and no MySQL driver is imported here.
@@ -329,65 +320,46 @@ BYTE LAYOUT
                                   1024
 
 512 + 80 + 88 + 128 + 88 + 128 = 1024, matching `*> File size 1024 with
-fillers` [copybooks/wssystem.cob:L7]. `IRS-Data-Block` [L328] adds nothing:
-it redefines the 128 bytes of `IRS-Entry-Block`. Each block's own docstring
-repeats its size against the line that declares it.
+fillers` [copybooks/wssystem.cob:L7]. `IRS-Data-Block` [L328] adds nothing
+- it redefines the 128 bytes of `IRS-Entry-Block`. Each block's own
+docstring repeats its size against its declaring line.
 
 THE STOCK BLOCK IS IN SCOPE
 ===========================
 Plan section 0.2.2 puts the `stock/` SUBSYSTEM and the stock tables out of
 scope. It does not remove `Stock-Control-Block` [L290] from `SYSTEM-REC`,
-whose 169 columns include that block's. Every item there is declared, and the
-`88` names `Stock` [L91], `Stock-Audit-On` [L244], `Stock-Control-Exists`
-[L301] and `Stock-Averaging` [L303] are legitimate in-scope `SYSTEM-REC`
-condition names. No out-of-scope table or bridge is named anywhere in this
-file.
+whose 169 columns include that block's. Every item there is declared, and
+the `88` names `Stock` [L91], `Stock-Audit-On` [L244],
+`Stock-Control-Exists` [L301] and `Stock-Averaging` [L303] are legitimate
+in-scope `SYSTEM-REC` condition names. No out-of-scope table or bridge is
+named in this file.
 
-THE SIX BINDING RULES, AS THEY APPLY HERE
+THE TWO RULES THAT NEED SAYING AGAIN HERE
 =========================================
-R-1, no COBOL at runtime. Nothing below shells out, loads a foreign library
-or imports the oracle tree, and no database driver appears - not even though
-this record declares the connection parameters. The standard library and two
-package modules are the whole import list.
+R-1 is covered by the leaf contract above, R-3 by the item census, R-4 by
+the anomaly list and R-5 by the per-attribute comments and `FIELDS`. Two
+rules bear directly on how the 198 attributes are typed and ordered.
 
 R-2, zero binary approximation. All thirteen scaled items are
 `decimal.Decimal` at scale 2 - the five inherited-COMP rates [L56-L60] and
 the five-element view over them [L61], the three declared-COMP rates
-[L245-L247], the three zoned IRS rates [L313-L315] and the three-element view
-over them [L317]. Every `binary-char`, `binary-short` and `binary-long` item
-and every scale-0 zoned item is `int`. `Run-Date` [L67] is an `int` because
-it is a binary day number; typing it otherwise would misrepresent its storage
-and could mask integer truncation elsewhere in the cycle. The token for the
-inexact numeric type appears nowhere in this file.
-
-R-3, nothing added. 198 attributes, one for every item the copybook declares
-below the `01` level, and not one more. No predicate over a condition name, no
-symbolic constant set, no date conversion helper, no credential accessor, no
-connection-string builder, no quarter-rotation helper, no post-initialisation
-hook, no value checking, and no padding or truncation on assignment - storing
-into a field is the MOVE layer's business. No object-relational mapping, no
-declarative metadata, no table or column construction, and no DDL. No
-concurrent execution of any kind and no connection reuse layer.
-
-R-4, anomalies reproduced. Listed above, each with its locator at the site.
-
-R-5, full traceability. Every attribute carries its verbatim COBOL name, its
-declaration and its locator in a comment, and its `FieldDescriptor` in the
-class's `FIELDS` tuple carries the dictionary key from which the metadata was
-taken. The `1st-Time-Flag` rename is recorded above, at the attribute and in
-the descriptor's own name.
+[L245-L247], the three zoned IRS rates [L313-L315] and the three-element
+view over them [L317]. Every `binary-char`, `binary-short` and
+`binary-long` item and every scale-0 zoned item is `int`. `Run-Date` [L67]
+is an `int` because it is a binary day number; typing it otherwise would
+misrepresent its storage and could mask integer truncation elsewhere in
+the cycle. The token for the inexact numeric type appears nowhere here.
 
 R-6, compiled behaviour decides, and runs are byte-identical. No clock is
-read here, and that is the single most damaging determinism failure this
-module could contain: plan section 0.1.1 records that every in-scope posting
-program performs ZERO clock reads and takes the date purely through linkage,
-so `Run-Date` defaults to 0 and `acas_posting/cli/args.py` injects it from
-`acas_posting/clock.py`. Nothing below reads the process environment, a host
-name, a user name, an installed-version table or a directory listing, and no
-pseudo-arbitrary number source is used. Attribute order is copybook
+read here, the single most damaging determinism failure this module could
+contain: plan section 0.1.1 records that every in-scope posting program
+performs ZERO clock reads and takes the date purely through linkage, so
+`Run-Date` defaults to 0 and `acas_posting/cli/args.py` injects it from
+`acas_posting/clock.py`. Nothing below reads the process environment, a
+host name, a user name, an installed-version table or a directory listing,
+and no pseudo-arbitrary number source is used. Attribute order is copybook
 declaration order throughout; fixed collections are tuples; and the only
-input performed at import time is the loader's own lazily cached read of the
-generated dictionary.
+import-time input is the loader's own cached dictionary read.
 """
 
 from __future__ import annotations
@@ -400,6 +372,10 @@ from acas_posting.cobol.field import FieldDescriptor
 from acas_posting.dictionary import loader
 
 __all__: Final[tuple[str, ...]] = (
+    "FROZEN_PLACEHOLDER_RDBMS_DB_NAME",
+    "FROZEN_PLACEHOLDER_RDBMS_PASSWD",
+    "FROZEN_PLACEHOLDER_RDBMS_PORT",
+    "FROZEN_PLACEHOLDER_RDBMS_USER",
     "GeneralLedgerBlock",
     "IrsDataBlock",
     "IrsEntryBlock",
@@ -416,13 +392,12 @@ __all__: Final[tuple[str, ...]] = (
     "VatGroup",
     "VatRates",
     "VatRates2",
+    "carries_frozen_placeholder_rdbms_credentials",
 )
 
 
-# =============================================================================
 #  DICTIONARY LOOKUP  (rule R-5, and plan section 0.8.1 "data dictionary
 #  first")
-# =============================================================================
 
 # The `01` record name the copybook declares, and the MySQL table the bridge
 # maps it to. Both are needed because the dictionary is indexed by whichever
@@ -490,8 +465,8 @@ def _descriptor(cobol_name: str, line: int) -> FieldDescriptor:
     The lookup is deliberately total: an item named or numbered wrongly
     fails the index lookup at import time with a `KeyError` naming the pair,
     rather than producing a descriptor that quietly describes the wrong
-    storage. Every item of this record has a dictionary entry, so
-    `FieldDescriptor.for_working_storage` is never needed here.
+    storage. Every item of this record has a dictionary entry, so no
+    descriptor here is assembled by hand.
     """
     return FieldDescriptor.from_dictionary_key(_KEY_INDEX[(cobol_name, line)])
 
@@ -505,9 +480,7 @@ _COLUMN_KEYS: Final[tuple[str, ...]] = tuple(
 )
 
 
-# =============================================================================
 #  SUBORDINATE GROUPS OF System-Data-Block
-# =============================================================================
 
 
 @dataclass(slots=True)
@@ -659,18 +632,13 @@ class RdbmsFlatStatuses:
         _descriptor("File-Duplicates-In-Use", 123),
     )
 
-    # 07 File-System-Used pic 9
-    # int, digits 1, scale 0   [copybooks/wssystem.cob:L112]
-    # column SYSTEM-REC.FILE-SYSTEM-USED tinyint(1) unsigned
-    # 88 condition names, verbatim - predicates belong to
-    # acas_posting/cobol/condition_names.py (plan section 0.4.1.4):
-    #   88 FS-Cobol-Files-Used value zero  [copybooks/wssystem.cob:L113]
-    #   88 FS-MySql-Used value 1  [copybooks/wssystem.cob:L114]
-    #   88 FS-RDBMS-Used value 1  [copybooks/wssystem.cob:L116]
-    #   88 FS-Valid-Options value 0 thru 1  [copybooks/wssystem.cob:L122]
-    # Two oddities, both left as they are. `88 FS-MySql-Used` (L114) and `88
-    # FS-RDBMS-Used` (L116) BOTH carry value 1 - two names for one state.
-    # And `88 FS-Valid-Options values 0 thru 1` (L122) is the only THRU
+    # 07 File-System-Used pic 9  ->  int, digits 1, scale 0
+    # [copybooks/wssystem.cob:L112]; column FILE-SYSTEM-USED tinyint(1) unsigned
+    # 88 condition names, verbatim - predicates belong to acas_posting/cobol/condition_names.py
+    # (plan section 0.4.1.4): `FS-Cobol-Files-Used value zero` [:L113], `FS-MySql-Used value 1`
+    # [:L114], `FS-RDBMS-Used value 1` [:L116], `FS-Valid-Options values 0 thru 1` [:L122].
+    # Two oddities, both left as they are. FS-MySql-Used (L114) and FS-RDBMS-Used (L116) BOTH
+    # carry value 1 - two names for one state. And FS-Valid-Options (L122) is the only THRU
     # range in this copybook.
     file_system_used: int = 0
 
@@ -708,9 +676,7 @@ class MapsSer:
     maps_ser_nn: int = 0
 
 
-# =============================================================================
 # BLOCK 1 OF 6 - System-Data-Block, 512 bytes [copybooks/wssystem.cob:L52]
-# =============================================================================
 
 
 @dataclass(slots=True)
@@ -849,23 +815,18 @@ class SystemDataBlock:
     # working storage and is never frozen.
     next_invoice: int = 0
 
-    # 05 Run-Date binary-long
-    # int, signed   [copybooks/wssystem.cob:L67]
+    # 05 Run-Date binary-long  ->  int, signed  [copybooks/wssystem.cob:L67]
     # column SYSTEM-REC.RUN-DAT int(8) unsigned
-    # THE CONTROLLED-CLOCK OBSERVABLE. Plan section 0.1.1: the clock pins
-    # exactly two observables - the text date `to-day pic x(10)` and this
-    # binary run date - and injects them at the CLI boundary. It defaults to
-    # 0 here and is set by acas_posting/cli/args.py from
-    # acas_posting/clock.py. This module reads NO clock: the dependency runs
-    # clock and cli into records, never the reverse, and every in-scope
-    # posting program takes the date purely through linkage. It is an `int`
-    # - a binary day number - never a scaled or binary floating-point value.
-    # Column name drift: RUN-DAT, not RUN-DATE. Anomaly A-11 and open
-    # question Q-3 apply: signed here, unsigned in the bridge host variable
-    # and unsigned in the column, so a negative value loses its sign AT THE
-    # BRIDGE, before any SQL runs. What is stored in that case is measured
-    # against the compiled program, not guessed. Renamed ACAS-Run-Date where
-    # irs030 copies this record [irs/irs030.cbl:L421].
+    # THE CONTROLLED-CLOCK OBSERVABLE. Plan section 0.1.1: the clock pins exactly two
+    # observables - the text date `to-day pic x(10)` and this binary run date - and injects them
+    # at the CLI boundary. It defaults to 0 here and is set by acas_posting/cli/args.py from
+    # acas_posting/clock.py. This module reads NO clock: the dependency runs clock and cli into
+    # records, never the reverse. It is an `int` - a binary day number - never a scaled or
+    # binary floating-point value.
+    # Column name drift: RUN-DAT, not RUN-DATE. Anomaly A-11 and open question Q-3 apply: signed
+    # here, unsigned in both host variable and column, so a negative value loses its sign AT THE
+    # BRIDGE, before any SQL runs; what is stored then has to be measured against the compiled
+    # program. Renamed ACAS-Run-Date where irs030 copies this record [irs/irs030.cbl:L421].
     run_date: int = 0
 
     # 05 Start-Date binary-long
@@ -965,22 +926,14 @@ class SystemDataBlock:
     #   88 Multi-User value 1  [copybooks/wssystem.cob:L99]
     host: int = 0
 
-    # 05 Op-System pic 9
-    # int, digits 1, scale 0   [copybooks/wssystem.cob:L100]
+    # 05 Op-System pic 9  ->  int, digits 1, scale 0  [copybooks/wssystem.cob:L100]
     # column SYSTEM-REC.OP-SYSTEM tinyint(1) unsigned
-    # 88 condition names, verbatim - predicates belong to
-    # acas_posting/cobol/condition_names.py (plan section 0.4.1.4):
-    #   88 valid-os-type value 1 2 3 4 5 6  [copybooks/wssystem.cob:L101]
-    #   88 No-OS value zero  [copybooks/wssystem.cob:L102]
-    #   88 Dos value 1  [copybooks/wssystem.cob:L103]
-    #   88 Windows value 2  [copybooks/wssystem.cob:L104]
-    #   88 Mac value 3  [copybooks/wssystem.cob:L105]
-    #   88 Os2 value 4  [copybooks/wssystem.cob:L106]
-    #   88 Unix value 5  [copybooks/wssystem.cob:L107]
-    #   88 Linux value 6  [copybooks/wssystem.cob:L108]
-    #   88 OS-Single value 1 2 4  [copybooks/wssystem.cob:L109]
-    # Note `88 OS-Single values 1 2 4` at L109 - a NON-CONTIGUOUS value
-    # list, left exactly as declared.
+    # 88 condition names, verbatim - predicates belong to acas_posting/cobol/condition_names.py
+    # (plan section 0.4.1.4), declared in this order at [copybooks/wssystem.cob:L101-L109]:
+    # `valid-os-type values 1 2 3 4 5 6` (L101), `No-OS value zero` (L102), `Dos value 1`
+    # (L103), `Windows value 2` (L104), `Mac value 3` (L105), `Os2 value 4` (L106), `Unix value
+    # 5` (L107), `Linux value 6` (L108), `OS-Single values 1 2 4` (L109).
+    # Note OS-Single at L109 - a NON-CONTIGUOUS value list, left exactly as declared.
     op_system: int = 0
 
     # 05 Current-Quarter pic 9
@@ -1002,19 +955,14 @@ class SystemDataBlock:
     # Recorded, not reconciled.
     maps_ser: MapsSer = field(default_factory=MapsSer)
 
-    # 05 Date-Form pic 9
-    # int, digits 1, scale 0   [copybooks/wssystem.cob:L128]
+    # 05 Date-Form pic 9  ->  int, digits 1, scale 0  [copybooks/wssystem.cob:L128]
     # column SYSTEM-REC.DATE-FORM tinyint(1) unsigned
-    # 88 condition names, verbatim - predicates belong to
-    # acas_posting/cobol/condition_names.py (plan section 0.4.1.4):
-    #   88 Date-UK value 1  [copybooks/wssystem.cob:L129]
-    #   88 Date-USA value 2  [copybooks/wssystem.cob:L130]
-    #   88 Date-Intl value 3  [copybooks/wssystem.cob:L131]
-    #   88 Date-Valid-Formats value 1 2 3  [copybooks/wssystem.cob:L132]
-    # `88 Date-Valid-Formats values 1 2 3` (L132) is DECLARED BUT NEVER
-    # TESTED anywhere in the in-scope cycle. Recorded as found; not deleted,
-    # and not newly tested either - R-3 forbids adding a validation the
-    # frozen source does not perform.
+    # 88 condition names, verbatim - predicates belong to acas_posting/cobol/condition_names.py
+    # (plan section 0.4.1.4): `Date-UK value 1` [:L129], `Date-USA value 2` [:L130], `Date-Intl
+    # value 3` [:L131], `Date-Valid-Formats values 1 2 3` [:L132].
+    # Date-Valid-Formats (L132) is DECLARED BUT NEVER TESTED anywhere in the in-scope cycle.
+    # Recorded as found; not deleted, and not newly tested either - R-3 forbids adding a
+    # validation the frozen source does not perform.
     date_form: int = 0
 
     # 05 Data-Capture-Used pic 9
@@ -1091,8 +1039,122 @@ class SystemDataBlock:
 
 
 # =============================================================================
-# BLOCK 2 OF 6 - General-Ledger-Block, 80 bytes [copybooks/wssystem.cob:L150]
+#  THE FROZEN PLACEHOLDER RDBMS CREDENTIALS  (declared above, published here)
 # =============================================================================
+#  The four items at [copybooks/wssystem.cob:L137-L139] and L142 are the only
+#  place in the whole migrated cycle where a user name, a password, a schema
+#  name and a port arrive from a SOURCE LITERAL rather than from a stored row,
+#  and the maintainer annotated every one of the four lines `*> change in
+#  setup`. They are shipped placeholders: an installer is expected to replace
+#  them before the system ever reaches a real server.
+#
+#  This module DECLARES them and must keep declaring them byte-for-byte, for
+#  two reasons that are both hard constraints. `SYSTEM-REC` is one of the 22
+#  tables the scenario comparison dumps, so its 169 declared defaults are
+#  diff-visible and changing one would move a compared value (rule R-4). And
+#  reading a credential from the process environment, a dotenv file or a
+#  parameter file would introduce an ambient input the frozen source does not
+#  have, which rule R-6 (determinism) and rule R-3 (nothing added) both forbid.
+#
+#  What this section adds is therefore NOT a change of behaviour but a way to
+#  ASK a question: "is this record still carrying the shipped placeholders?"
+#  `acas_posting/dal/connection.py` is the one module that reaches a real
+#  server, and it fails closed on a yes unless its caller explicitly opts in
+#  for a disposable local oracle. Publishing the four values here - read out of
+#  this module's own declared defaults, never transcribed a second time - is
+#  what lets that module do so without owning a copy of the literals.
+#
+#  Nothing below is applied by this module: constructing a `SystemDataBlock` or
+#  a `SystemRecord` behaves exactly as it did before, and the predicate is a
+#  pure query over a record the caller already holds.
+
+
+def _declared_system_data_block() -> SystemDataBlock:
+    """Return a fresh `System-Data-Block` holding only its declared defaults.
+
+    A brand-new instance per call, so this module holds no shared mutable state
+    at module scope and no later mutation of a real record can reach the
+    constants derived below. Pure in-memory work - no file, no connection and
+    nothing read from the surroundings - so it is safe at import time.
+
+    Returns:
+        A `SystemDataBlock` whose items carry exactly what the frozen copybook
+        declares.
+    """
+    return SystemDataBlock()
+
+
+#  `05 RDBMS-DB-Name pic x(12) value "ACASDB"` [copybooks/wssystem.cob:L137],
+#  space-filled to its declared width, as a `MOVE` of the literal into the item
+#  leaves it.
+FROZEN_PLACEHOLDER_RDBMS_DB_NAME: Final[str] = (
+    _declared_system_data_block().rdbms_db_name
+)
+
+#  `05 RDBMS-User pic x(12) value "ACAS-User"` [copybooks/wssystem.cob:L138].
+FROZEN_PLACEHOLDER_RDBMS_USER: Final[str] = (
+    _declared_system_data_block().rdbms_user
+)
+
+#  `05 RDBMS-Passwd pic x(12) value "PaSsWoRd"` [copybooks/wssystem.cob:L139] -
+#  a password in plain source text. Reproduced exactly as declared, and never
+#  used to reach a real server without an explicit opt-in; see the module named
+#  above.
+FROZEN_PLACEHOLDER_RDBMS_PASSWD: Final[str] = (
+    _declared_system_data_block().rdbms_passwd
+)
+
+#  `05 RDBMS-Port pic x(5) value "3306"` [copybooks/wssystem.cob:L142]. Not a
+#  credential; published for completeness because it is the fourth of the four
+#  `*> change in setup` items and a caller reporting on the set wants all four.
+FROZEN_PLACEHOLDER_RDBMS_PORT: Final[str] = (
+    _declared_system_data_block().rdbms_port
+)
+
+
+def carries_frozen_placeholder_rdbms_credentials(
+    system_record: SystemRecord,
+) -> bool:
+    """Report whether `SYSTEM-REC` still carries the shipped credentials.
+
+    A pure query. Nothing is validated, nothing is rejected and nothing is
+    mutated: the caller decides what a `True` means, and only
+    `acas_posting/dal/connection.py` acts on it.
+
+    The test is an OR rather than an AND, and that is deliberately the weaker
+    condition to satisfy: a deployment that replaced the user but left the
+    maintainer's password - or the reverse - is still reaching a server with a
+    value published in the frozen source and in this file, which is exactly the
+    exposure being guarded. The schema name and the port take no part; neither
+    is a credential.
+
+    Trailing spaces are ignored on both sides, which is COBOL's own comparison
+    semantics rather than a convenience: `if RDBMS-User = "ACAS-User"` pads the
+    literal to the item's `PIC X(12)` width before comparing, so a caller who
+    assigned an unpadded `"ACAS-User"` is carrying the placeholder just as
+    surely as one who padded it. Case is significant, again as COBOL compares.
+
+    Args:
+        system_record: the record a caller is about to open a connection from.
+            Read only; never mutated.
+
+    Returns:
+        `True` when the user name or the password still equals its declared
+        placeholder, `False` when both have been replaced.
+    """
+    block = system_record.system_data_block
+    user_is_placeholder = (
+        block.rdbms_user.rstrip() == FROZEN_PLACEHOLDER_RDBMS_USER.rstrip()
+    )
+    passwd_is_placeholder = (
+        block.rdbms_passwd.rstrip() == FROZEN_PLACEHOLDER_RDBMS_PASSWD.rstrip()
+    )
+    return user_is_placeholder or passwd_is_placeholder
+
+
+
+# =============================================================================
+# BLOCK 2 OF 6 - General-Ledger-Block, 80 bytes [copybooks/wssystem.cob:L150]
 
 
 @dataclass(slots=True)
@@ -1245,22 +1307,16 @@ class GeneralLedgerBlock:
     #   88 Index-2 value "Y"  [copybooks/wssystem.cob:L178]
     ledger_2nd_index: str = " "
 
-    # 05 IRS-Instead pic x
-    # str, 1 chars   [copybooks/wssystem.cob:L179]
+    # 05 IRS-Instead pic x  ->  str, 1 chars  [copybooks/wssystem.cob:L179]
     # column SYSTEM-REC.IRS-INSTEAD char(1)
-    # 88 condition names, verbatim - predicates belong to
-    # acas_posting/cobol/condition_names.py (plan section 0.4.1.4):
-    #   88 IRS-Used value "Y"  [copybooks/wssystem.cob:L180]
-    #   88 IRS-Both-Used value "B"  [copybooks/wssystem.cob:L181]
-    # THE IRS FAN-OUT SWITCH - a THREE-state field with only TWO condition
-    # names. 'Y' (L180) and 'B' (L181) are named; the third state is a SPACE
-    # and is UNNAMED in the frozen source, so no name is invented for it
-    # here. Which tables a run touches depends on it, and it is tested at
-    # three sites in each of the four Sales and Purchase posting programs -
-    # [sales/sl060.cbl:L1039], [sales/sl060.cbl:L1126] and
-    # [sales/sl060.cbl:L1175]. Plan section 0.6.4 therefore requires every
-    # scenario definition to pin it explicitly rather than leave it at a
-    # default.
+    # 88 condition names, verbatim - predicates belong to acas_posting/cobol/condition_names.py
+    # (plan section 0.4.1.4): `IRS-Used value "Y"` [:L180], `IRS-Both-Used value "B"` [:L181].
+    # THE IRS FAN-OUT SWITCH - a THREE-state field with only TWO condition names. 'Y' (L180) and
+    # 'B' (L181) are named; the third state is a SPACE and is UNNAMED in the frozen source, so
+    # no name is invented for it here. Which tables a run touches depends on it, and it is
+    # tested at three sites in each of the four Sales and Purchase posting programs -
+    # [sales/sl060.cbl:L1039], [:L1126] and [:L1175]. Plan section 0.6.4 therefore requires
+    # every scenario definition to pin it explicitly rather than leave it at a default.
     irs_instead: str = " "
 
     # 05 Ledger-Sec binary-short
@@ -1300,9 +1356,7 @@ class GeneralLedgerBlock:
     print_spool_name2: str = " " * 48
 
 
-# =============================================================================
 # BLOCK 3 OF 6 - Purchase-Ledger-Block, 88 bytes [copybooks/wssystem.cob:L192]
-# =============================================================================
 
 
 @dataclass(slots=True)
@@ -1432,9 +1486,7 @@ class PurchaseLedgerBlock:
     filler_211: str = " " * 7
 
 
-# =============================================================================
 # BLOCK 4 OF 6 - Sales-Ledger-Block, 128 bytes [copybooks/wssystem.cob:L215]
-# =============================================================================
 
 
 @dataclass(slots=True)
@@ -1838,9 +1890,7 @@ class SalesLedgerBlock:
     gl_sl_sales_ac: int = 0
 
 
-# =============================================================================
 # BLOCK 5 OF 6 - Stock-Control-Block, 88 bytes [copybooks/wssystem.cob:L290]
-# =============================================================================
 
 
 @dataclass(slots=True)
@@ -1964,9 +2014,7 @@ class StockControlBlock:
     filler_308: str = " " * 68
 
 
-# =============================================================================
 # SUBORDINATE GROUPS AND VIEWS OF IRS-Entry-Block
-# =============================================================================
 
 
 @dataclass(slots=True)
@@ -2051,10 +2099,8 @@ class PlAppropAc6Parts:
     pl_approp_ac: int = 0
 
 
-# =============================================================================
 # BLOCK 6 OF 6 - IRS-Entry-Block, 128 bytes, AND THE VIEW OVER IT
 #  [copybooks/wssystem.cob:L309]
-# =============================================================================
 
 
 @dataclass(slots=True)
@@ -2155,7 +2201,7 @@ class IrsEntryBlock:
     # maintainer's own comment on this line reads `(was First-Time-Flag in
     # IRS system file)`, and [irs/irs030.cbl:L448] renames the item
     # `IRS-First-Time-Flag`. The rename is also listed in this module's
-    # docstring so that docs/migration/traceability.md picks it up.
+    # docstring so that the traceability document picks it up.
     first_time_flag: int = 0
 
     # 05 FILLER pic x(59)
@@ -2183,10 +2229,8 @@ class IrsDataBlock:
     filler_dummy4: str = " " * 128
 
 
-# =============================================================================
 # THE RECORD - 512 + 80 + 88 + 128 + 88 + 128 = 1024 bytes
 #  [copybooks/wssystem.cob:L48]
-# =============================================================================
 
 
 @dataclass(slots=True)

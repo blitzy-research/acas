@@ -1,12 +1,11 @@
-r"""Purchase Open-Item (OTM5) record layout - ``PUITM5-REC``.
+"""Purchase Open-Item (OTM5) record layout - ``PUITM5-REC``.
 
 The purchase ledger's unpaid-item register. ``pl060`` writes and applies these
 rows; ``pl100`` clears them and reads ``OI-Date`` against ``OI-Date-Cleared``
 to drive the payment-days average at ``[purchase/pl100.cbl:L498]`` and
-``[purchase/pl100.cbl:L502]``. Both of those fields are ``binary-long``, so
-that average is INTEGER arithmetic - see "TYPE DISCIPLINE" below, because
-typing either of them as a scaled quantity would change the average and
-silently repair three registered anomalies.
+``[purchase/pl100.cbl:L502]``. Both are ``binary-long``, so that average is
+INTEGER arithmetic - see "TYPE DISCIPLINE" below, because typing either as a
+scaled quantity would silently repair three registered anomalies.
 
 This module declares data layout and nothing else. It performs no arithmetic,
 opens no connection, reads no file at import, and holds no business logic.
@@ -14,86 +13,78 @@ opens no connection, reads no file at import, and holds no business logic.
 THE FIVE FROZEN SOURCES
 -----------------------
 Every one is READ-ONLY specification. Nothing here modifies, reformats,
-relocates or regenerates any of them, and nothing here executes any of them.
+relocates, regenerates or executes any of them.
 
-  ``copybooks/plwsoi5B.cob``   21 lines. The key-only view. Declares the
-                               113-byte buffer and a short view over it, and
-                               its ``COPY`` of the body is COMMENTED OUT.
+  ``copybooks/plwsoi5B.cob``   21 lines. The key-only view: the 113-byte
+                               buffer and a short view over it, its ``COPY``
+                               of the body COMMENTED OUT.
   ``copybooks/plwsoi5C.cob``   21 lines. The same file with that ``COPY``
-                               ACTIVE, so it carries the full field set too.
+                               ACTIVE, so it carries the full field set.
   ``copybooks/plwsoi.cob``     63 lines. The body - the 29-field layout.
-  ``common/otm5MT.cbl``        2219 lines. The one-way bridge. The Agent
-                               Action Plan designates the bridge as the data
-                               dictionary for this migration, which is why
-                               field metadata here is looked up from the
-                               generated artifact rather than transcribed.
+  ``common/otm5MT.cbl``        2219 lines. The one-way bridge, which the Agent
+                               Action Plan designates the data dictionary for
+                               this migration - which is why field metadata is
+                               looked up here rather than transcribed.
   ``mysql/ACASDB.sql``         The frozen schema. ``PUITM5-REC`` is declared
                                at ``[mysql/ACASDB.sql:L596]`` with 29 columns
-                               at ``L597-L625``, all ``NOT NULL``, primary key
-                               ``OI5-KEY char(15)`` at ``L626``, and
-                               ``ENGINE=InnoDB DEFAULT CHARSET=utf8mb3
-                               COLLATE=utf8mb3_general_ci`` at ``L627``.
+                               at ``L597-L625``, all ``NOT NULL``, and primary
+                               key ``OI5-KEY char(15)`` at ``L626``.
 
 Entity facade OTM5, handler ``acas029``, bridge ``otm5MT``, table
 ``PUITM5-REC`` - the spine row from Agent Action Plan section 0.2.1.1.
 
 WHY THE PLAN NAMES TWO COPYBOOKS, AND WHY BOTH ARE PUBLISHED HERE
 -----------------------------------------------------------------
-``plwsoi5B.cob`` and ``plwsoi5C.cob`` are 21-line near-twins that differ in
-exactly two ways, and ``diff`` shows both:
+``plwsoi5B.cob`` and ``plwsoi5C.cob`` are 21-line near-twins differing in
+exactly two ways, both of which ``diff`` shows:
 
-  (i)  One space of indentation on L12. ``plwsoi5B.cob:L12`` writes
+  (i)  One space of indentation on L12 - ``plwsoi5B.cob:L12`` writes
        ``01  Open-Item-Record-5   redefines WS-OTM5-Record.`` with THREE
-       spaces; ``plwsoi5C.cob:L12`` writes the same line with FOUR.
+       spaces, ``plwsoi5C.cob:L12`` the same line with FOUR.
 
-  (ii) The two-line ``COPY`` at L19-L20 is commented out in 5B and live in
-       5C - and 5B's commented form is malformed. Verbatim,
+  (ii) The two-line ``COPY`` at L19-L20 is commented out in 5B and live in 5C,
+       and 5B's commented form is malformed. Verbatim,
        ``[copybooks/plwsoi5B.cob:L19-L20]``::
 
            *> copy "    plwsoi.cob" replacing ==OI-Header==
            *>                     by ==OI-Header redefines WS-OTM5-Record==.
 
-       FOUR SPACES sit inside the quoted filename, so the statement would
-       name a file that does not exist if it were ever made live again.
-       ``[copybooks/plwsoi5C.cob:L19-L20]`` carries the same statement with a
-       clean filename and no comment marker.
+       FOUR SPACES sit inside the quoted filename, so the statement would name
+       a file that does not exist if it were made live again;
+       ``[copybooks/plwsoi5C.cob:L19-L20]`` carries it with a clean filename
+       and no comment marker.
 
-So 5B is a strict subset of 5C, reached by commenting out two lines. They are
+So 5B is a strict subset of 5C, reached by commenting out two lines; they are
 not alternatives in any semantic sense. Both are live in the frozen tree:
 ``[purchase/pl060.cbl:L147]`` copies 5B, so ``pl060`` cannot name a single
-``OI-*`` field, while ``[purchase/pl100.cbl:L213]`` copies 5C and therefore
-sees the whole body. Fourteen programs copy one or the other. Neither variant
-may be dropped, and this module publishes both shapes: ``WsOtm5Record`` plus
-``OpenItemRecord5`` for the 5B/5C short view, and ``OiHeader`` for the body.
+``OI-*`` field, while ``[purchase/pl100.cbl:L213]`` copies 5C and sees the
+whole body. Fourteen programs copy one or the other - six 5B, eight 5C - so
+neither may be dropped, and this module publishes both shapes: ``WsOtm5Record``
+plus ``OpenItemRecord5`` for the short view, ``OiHeader`` for the body.
 
 WHERE THE ``OI5-`` COLUMN PREFIX COMES FROM
 -------------------------------------------
-Every column and every host variable is prefixed ``OI5-``, while every field
-in ``plwsoi.cob`` is prefixed ``OI-``. The prefix is NOT invented by the
-bridge - ``grep -n "plwsoi5" common/otm5MT.cbl`` returns nothing, so the
-bridge never sees those files. The prefix comes from the two plan-named
-copybooks, which declare ``03 oi5-key.`` ``[copybooks/plwsoi5B.cob:L13]``,
-``05 oi5-supplier pic x(7).`` ``[:L14]``, ``05 oi5-invoice PIC 9(8).``
-``[:L15]`` and ``03 oi5-date binary-long.`` ``[:L16]``.
+Every column and host variable is prefixed ``OI5-`` while every field in
+``plwsoi.cob`` is prefixed ``OI-``. The prefix is NOT invented by the bridge -
+``grep -n "plwsoi5" common/otm5MT.cbl`` returns nothing, so the bridge never
+sees those files. It comes from the two plan-named copybooks, which declare
+``03 oi5-key.`` ``[copybooks/plwsoi5B.cob:L13]``, ``05 oi5-supplier pic
+x(7).`` ``[:L14]``, ``05 oi5-invoice PIC 9(8).`` ``[:L15]`` and ``03 oi5-date
+binary-long.`` ``[:L16]``.
 
 That is why the column is ``OI5-SUPPLIER`` and not ``OI5-CUSTOMER``, and why
-``oi5-date`` lands as ``OI5-DAT``. The generated dictionary carries the split
-provenance untouched and it is visible per key: the copybook side of
-``PUITM5-REC.OI5-KEY`` is ``copybooks/plwsoi5B.cob:L13`` while the copybook
-side of ``PUITM5-REC.OI5-SUPPLIER`` is ``copybooks/plwsoi.cob:L15``. One
-table, two copybook files feeding it.
-
-PRACTICAL CONSEQUENCE, AND THE ONE MISTAKE NOT TO MAKE HERE: a dictionary key
-is never built by upper-casing a copybook field name. Upper-casing ``OI-Net``
-yields ``OI-NET``, which does not exist. The entry is ``PUITM5-REC.OI5-NET``.
-Every key used below was obtained by walking ``loader.entries_for_table`` and
-``loader.entries_for_copybook_file`` and reading each entry's copybook name.
+``oi5-date`` lands as ``OI5-DAT``. The dictionary carries the split provenance
+per key: the copybook side of ``PUITM5-REC.OI5-KEY`` is
+``copybooks/plwsoi5B.cob:L13`` while that of ``PUITM5-REC.OI5-SUPPLIER`` is
+``copybooks/plwsoi.cob:L15``. One table, two copybook files feeding it - which
+is also why a key is never built by upper-casing a copybook field name:
+upper-casing ``OI-Net`` yields ``OI-NET``, which does not exist, the entry
+being ``PUITM5-REC.OI5-NET``.
 
 ``WS-OTM5-Record`` MEANS TWO INCOMPATIBLE THINGS
------------------------------------------------
+------------------------------------------------
 The plan-named copybooks and the bridge use one identifier for two different
 data items, and the difference is the ``replacing`` form each writes.
-
 ``[copybooks/plwsoi5C.cob:L19-L20]`` KEEPS the name and ADDS a redefines::
 
      copy "plwsoi.cob" replacing ==OI-Header==
@@ -104,15 +95,14 @@ data items, and the difference is the ``replacing`` form each writes.
      copy "plwsoi.cob" replacing OI-Header
                    by WS-OTM5-Record.
 
-Therefore ``WS-OTM5-Record`` is an ELEMENTARY ``pic x(113)`` in
-``[copybooks/plwsoi5B.cob:L10]`` and ``[copybooks/plwsoi5C.cob:L10]``, and is
-the FULL 29-FIELD GROUP inside the bridge after L349. Both files feed this
-module. Neither meaning is folded into the other: ``WsOtm5Record`` models the
-elementary buffer as declared, and ``OiHeader`` models the field set.
+So ``WS-OTM5-Record`` is an ELEMENTARY ``pic x(113)`` in
+``[copybooks/plwsoi5B.cob:L10]`` and ``[copybooks/plwsoi5C.cob:L10]``, and the
+FULL 29-FIELD GROUP inside the bridge after L349. Neither meaning is folded
+into the other: ``WsOtm5Record`` models the buffer, ``OiHeader`` the field set.
 
 THE ``OI-Type`` DOMAIN BLOCK - DOCUMENTATION, NEVER A CHECK
 -----------------------------------------------------------
-``[copybooks/plwsoi.cob:L25-L35]`` documents the type domain, verbatim::
+``[copybooks/plwsoi.cob:L25-L34]`` documents the type domain, verbatim::
 
     *>                              ***********************************
     *>                              * 1  =  Receipt                   *
@@ -126,21 +116,18 @@ THE ``OI-Type`` DOMAIN BLOCK - DOCUMENTATION, NEVER A CHECK
     *>                              ***********************************
 
 The block SKIPS 8 - it lists 1 to 7 and then 9. The COBOL declares no
-condition name at all on ``OI-Type``, so this stays prose: no enum, no lookup
-table, no membership test, no predicate. R-3 forbids adding a check the
-frozen source does not declare, and R-4 forbids tidying the gap at 8.
+condition name on ``OI-Type``, so this stays prose: no enum, no lookup, no
+membership test, no predicate. R-3 forbids adding a check the frozen source
+does not declare, and R-4 forbids tidying the gap at 8.
 
 BYTE ARITHMETIC - REPORTED, NOT SETTLED
 ---------------------------------------
 The plan-named copybooks declare 113 bytes at ``[copybooks/plwsoi5B.cob:L4]``
-(``*>       Rec size 113 Bytes.                *``) and their own short view
-sums to exactly that: 7 + 8 + 4 + 94 = 113. ``plwsoi.cob``'s header records
-the change at ``[copybooks/plwsoi.cob:L6-L9]`` - ``109 bytes 26/03/09``, then
-``24/04/17 VBC changed size to 113 from 109 after changing Inv from L-bin to
-9(8)``.
-
-Summing the body's own storage widths, taken from each field's dictionary
-entry rather than from its digit count, gives:
+and their short view sums to exactly that: 7 + 8 + 4 + 94 = 113.
+``plwsoi.cob``'s header records the change at ``[copybooks/plwsoi.cob:L6-L9]``
+- ``109 bytes 26/03/09``, then ``24/04/17 VBC changed size to 113 from 109
+after changing Inv from L-bin to 9(8)``. Summing the body's storage widths,
+taken from each field's dictionary entry rather than its digit count, gives:
 
     6 + 1 + 8            = 15   OI-Nos, OI-Check, OI-Invoice   (OI-Key)
     + 4                  = 19   OI-Date            binary-long
@@ -157,101 +144,92 @@ entry rather than from its digit count, gives:
     + 1                  = 109  OI-Applied
     + 4                  = 113  OI-Date-Cleared    binary-long
 
-``OI-Approp`` REDEFINES ``OI-Net`` and so contributes zero. ``OI-Customer``
-and ``OI-Supplier`` span the same seven bytes. The field sum is 113 and the
+``OI-Approp`` REDEFINES ``OI-Net`` and so contributes zero; ``OI-Customer``
+and ``OI-Supplier`` span the same seven bytes. The field sum is 113, the
 declaration says 113, and the running total at ``OI-Applied`` is 109 - which
-arithmetically corroborates the maintainer's own 109-to-113 note, since the
-invoice field's move from a four-byte binary to an eight-digit zoned item is
-exactly the missing four bytes.
-
-Those figures are reported and nothing is inferred from them. No record-length
-constant is declared here, in line with the precedent set by the 96-versus-98
-batch-record contradiction, which Agent Action Plan section 0.6.8 makes a
-question for the compiled program rather than a question for a reader.
+corroborates the 109-to-113 note, the invoice field's move from a four-byte
+binary to an eight-digit zoned item being exactly the missing four bytes.
+Those figures are reported and nothing is inferred from them; no record-length
+constant is declared here, following the precedent of the 96-versus-98
+batch-record contradiction that Agent Action Plan section 0.6.8 makes a
+question for the compiled program.
 
 TYPE DISCIPLINE (R-2) - THE TWO-DIRECTION RULE
 ----------------------------------------------
-Three carriers only, and no binary floating-point type anywhere, in
-computation, in storage or in transport:
+Three carriers only, and no binary floating-point type anywhere - not in
+computation, storage or transport:
 
-    ``Decimal``   a numeric item whose scale is greater than zero. The nine
-                  ``pic s9(7)v99`` money fields under the COMP-3 group
-                  header, plus ``OI-Deduct-Amt`` and ``OI-Deduct-Vat``.
-    ``int``       a numeric item whose scale is zero. The whole binary family
-                  - ``OI-Date``, ``OI-Deduct-Days``, ``OI-Days``, ``OI-CR``,
-                  ``OI-Date-Cleared`` - plus the zoned ``Pic 9(n)`` items and
-                  both children of the COMP group header.
+    ``Decimal``   a numeric item whose scale is greater than zero. Twelve
+                  items: the ten ``pic s9(7)v99`` items under the COMP-3
+                  group header - the nine money fields plus the
+                  ``OI-Approp`` redefines view - and ``OI-Deduct-Amt`` and
+                  ``OI-Deduct-Vat``.
+    ``int``       a numeric item whose scale is zero. Thirteen items: the
+                  binary family ``OI-Date``, ``OI-Deduct-Days``, ``OI-Days``,
+                  ``OI-CR``, ``OI-Date-Cleared`` and ``oi5-date``, the zoned
+                  ``Pic 9(n)`` items, and both children of the COMP header.
     ``str``       every ``pic x(n)`` item, and the elementary 113-byte buffer.
 
 The rule runs in BOTH directions and "COMP means int" is false. ``OI-B-Nos``
-is ``COMP`` and is ``int`` because its scale is zero; ``OI-Deduct-Amt`` is
-also ``COMP`` and is ``Decimal`` because its scale is two. Getting either
-direction wrong corrupts every stored value in that field.
+is ``COMP`` and ``int`` because its scale is zero; ``OI-Deduct-Amt`` is also
+``COMP`` and ``Decimal`` because its scale is two. Getting either direction
+wrong corrupts every stored value in that field.
 
-The integer direction is load-bearing beyond storage. Agent Action Plan
+The integer direction is load-bearing beyond storage: Agent Action Plan
 section 0.6.1 records that for binary-family fields "truncation on divide is
 integer truncation, which is exactly what makes the moving-average defect
-reproducible". ``OI-Date`` and ``OI-Date-Cleared`` are exactly such fields and
-their difference feeds the purchase payment-days average at
-``[purchase/pl100.cbl:L498]`` and ``[purchase/pl100.cbl:L502]``.
+reproducible", and ``OI-Date`` and ``OI-Date-Cleared`` are such fields.
 
 GROUP-USAGE INHERITANCE - TWELVE FIELDS, TWO GROUP HEADERS
 ----------------------------------------------------------
-``[copybooks/plwsoi.cob:L20]`` writes ``03  OI-Batch  Comp.`` and its two
-children at L21-L22 carry no usage clause of their own.
-``[copybooks/plwsoi.cob:L41]`` writes ``03  filler  comp-3.`` - an UNNAMED
-group - and its ten children at L42-L52 likewise carry none.
-
-Twelve fields therefore take their storage class from a group header. Reading
-usage off the PICTURE line alone would type all twelve as zoned display and
-every stored value would be wrong. Each of the twelve reports
-``usage_declared_at == UsageDeclaredAt.GROUP`` with ``usage_inherited_from``
-naming ``"OI-Batch"`` or ``"filler"`` - and the second of those names a
-FILLER, which is carried as declared rather than replaced with an invented
-name.
+``[copybooks/plwsoi.cob:L20]`` writes ``03  OI-Batch  Comp.`` over two
+children at L21-L22; ``[:L41]`` writes ``03  filler  comp-3.`` - an UNNAMED
+group - over ten at L42-L52. Neither set carries a usage clause of its own, so
+twelve fields of this copybook take their storage class from a group header,
+eleven column-backed and ``OI-Approp`` not. Reading usage off the PICTURE line
+alone would type all twelve zoned display and every stored value would be
+wrong. ``OiBatch`` and ``Filler1`` below carry the per-group detail.
 
 THE OPPOSITE CASE, in this same layout: ``OI-Deduct-Amt`` and
 ``OI-Deduct-Vat`` at ``[copybooks/plwsoi.cob:L57-L58]`` write ``comp`` on
 their own PICTURE line, so they report ``usage_declared_at ==
 UsageDeclaredAt.FIELD`` and ``usage_inherited_from is None``.
 
-Note the spelling drift while reading those lines: the group headers write
-``Comp.`` with a capital C at L20 but ``comp-3.`` in lower case at L41, and
-the two deduction fields write lower-case ``comp``. Same usage, three
-spellings, all preserved.
-
 SIGNEDNESS DRIFT IS PER-BRIDGE, NOT PER-TYPE
 --------------------------------------------
-This table is direct evidence for Agent Action Plan section 0.6.2, which
-states that "the drift is specific rather than systemic and must be handled
-field by field from the dictionary". Three fields KEEP their sign here from
-declarations that lose it in the two invoice bridges, and four LOSE it here:
+This layout is direct evidence for Agent Action Plan section 0.6.2: "the drift
+is specific rather than systemic and must be handled field by field from the
+dictionary". Twelve fields keep their sign at all three layers, four lose it:
 
     SIGN KEPT at all three layers
-      OI-CR           ``binary-long``    -> ``S9(10) COMP``       -> ``int(8)``
-                      ``[copybooks/plwsoi.cob:L60]``, ``[common/otm5MT.cbl:L330]``
-      OI-Deduct-Amt   ``s999v99 comp``   -> ``S9(03)V9(02) COMP`` -> ``decimal(5,2)``
-      OI-Deduct-Vat   ``s999v99 comp``   -> ``S9(03)V9(02) COMP`` -> ``decimal(5,2)``
-      plus all nine COMP-3 money fields -> ``S9(07)V9(02) COMP``  -> ``decimal(9,2)``
+      OI-CR            ``binary-long``  -> ``S9(10) COMP``   -> ``int(8)``
+      OI-Deduct-Amt    ``s999v99 comp`` -> ``S9(03)V9(02)``  -> ``decimal(5,2)``
+      OI-Deduct-Vat    ``s999v99 comp`` -> ``S9(03)V9(02)``  -> ``decimal(5,2)``
+      the nine COMP-3 money fields     -> ``S9(07)V9(02)``  -> ``decimal(9,2)``
 
     SIGN LOST at the bridge - four sites, all binary family
-      OI-Date         ``Binary-long``    -> ``9(10) COMP``  -> ``int(8) unsigned``
-      OI-Deduct-Days  ``binary-char``    -> ``9(03) COMP``  -> ``tinyint(3) unsigned``
-      OI-Days         ``binary-char``    -> ``9(03) COMP``  -> ``tinyint(3) unsigned``
-      OI-Date-Cleared ``binary-long``    -> ``9(10) COMP``  -> ``int(8) unsigned``
+      OI-Date          ``Binary-long``  -> ``9(10) COMP``    -> ``int(8) uns.``
+      OI-Deduct-Days   ``binary-char``  -> ``9(03) COMP``    -> ``tinyint(3) uns.``
+      OI-Days          ``binary-char``  -> ``9(03) COMP``    -> ``tinyint(3) uns.``
+      OI-Date-Cleared  ``binary-long``  -> ``9(10) COMP``    -> ``int(8) uns.``
 
-The identically-declared ``ih-cr binary-long`` becomes an UNSIGNED host
-variable and an unsigned column in the invoice bridges. So no rule of the form
-"binary-long always loses its sign" exists, and none is applied here.
+``OI-CR`` is what makes the drift per-bridge rather than per-type: an
+identically-declared ``ih-cr binary-long``
+``[copybooks/plwspinv.cob:L49]`` becomes an UNSIGNED host variable
+``[common/plinvoiceMT.cbl:L417]`` and an unsigned column, where ``OI-CR``
+keeps its sign throughout. So no rule of the form "binary-long always loses
+its sign" exists, and none is applied here. The two deduction fields diverge
+from their invoice counterparts one layer earlier instead - those are declared
+``pic 999v99`` UNSIGNED in the copybook itself
+``[copybooks/plwspinv.cob:L46-L47]``, so nothing is lost at their bridge.
 
 Section 0.6.2 also records that "a negative value computed in COBOL loses its
 sign AT THE BRIDGE, not at the database - so the Python data-access layer must
-reproduce the bridge's conversion". Reproducing it is
-``acas_posting/dal/acas029_otm5.py``'s job, never this module's. Every
-descriptor below reports the COPYBOOK view - signed where the copybook says
-signed - and offers the three-layer disagreement untouched through
-``loader.drift_for(key)``. No descriptor here blends layers, widens a field to
-a column width, or retypes a numeric item as character to match a column.
+reproduce the bridge's conversion". That is the `acas029` handler module's job,
+never this module's. Every descriptor below reports the COPYBOOK view and
+offers the three-layer disagreement untouched through
+``loader.drift_for(key)``; none blends layers, widens a field to a column
+width, or retypes a numeric item to match a column.
 
 TYPE-CLASS DRIFT NUMERIC TO CHARACTER - FOUR SITES
 --------------------------------------------------
@@ -261,80 +239,14 @@ TYPE-CLASS DRIFT NUMERIC TO CHARACTER - FOUR SITES
     OI-B-Item  ``Pic 999``  under COMP        -> ``X(3)`` -> ``char(3)``
 
 All four are declared ``int`` below, because the copybook view is numeric.
-``OI-Status`` is the sharpest of them: it is ``pic 9`` carrying two condition
-names with NUMERIC values yet lands in a ``char(1)`` column.
-
-Two further drifts of the same family: ``OI-Invoice`` is ``Pic 9(8)`` zoned
-display with eight digits ``[copybooks/plwsoi.cob:L18]`` and becomes a
-ten-digit binary host variable ``[common/otm5MT.cbl:L306]``; the descriptor
-reports eight digits and zoned display. And ``oi5-date`` / ``OI-Date`` becomes
-``OI5-DAT`` - the trailing E dropped ``[common/otm5MT.cbl:L307]`` - while
-``OI-Date-Cleared`` keeps its full name ``[common/otm5MT.cbl:L332]``, so the
-truncation is a one-off and not a general rule.
-
-``OI-Customer`` HAS NO HOST VARIABLE AND NO COLUMN
---------------------------------------------------
-``[copybooks/plwsoi.cob:L14]`` declares ``05  OI-Customer.`` wrapping
-``07  OI-Supplier.`` at L15, which wraps the two 09-level children. The outer
-and inner groups span IDENTICAL bytes - 6 + 1 = 7 - so the nesting is
-redundant, four levels deep for a seven-byte item.
-
-The bridge loads its host variable from the INNER group.
-``[common/otm5MT.cbl:L1350-L1351]``, verbatim::
-
-         move     OI-Supplier to HV-OI5-SUPPLIER
-                                 WS-Temp-Ed-Supplier.
-
-``OI-Customer`` is moved nowhere and has no column. Its two grandchildren
-``OI-Nos`` and ``OI-Check`` have no columns either, for the same reason - the
-bridge takes the seven-byte group whole. All three are declared here anyway.
-R-3 cuts both ways: nothing added AND nothing removed.
-
-``OI-Approp`` SURVIVES ONLY AS A COLUMN COMMENT
------------------------------------------------
-``grep -inc "approp" common/otm5MT.cbl`` returns 0. The field exists in the
-copybook, across two physical lines forming one declaration,
-``[copybooks/plwsoi.cob:L44-L45]``::
-
-         05  OI-Approp redefines OI-Net
-                         pic s9(7)v99.
-
-and the schema records the relationship only as prose on the base field's
-column: ``OI5-NET decimal(9,2) NOT NULL COMMENT 'Also called Approp'`` at
-``[mysql/ACASDB.sql:L610]``. It is declared below as a redefine view over
-``oi_net``, with ``redefines == "OI-Net"`` verbatim.
-
-TRIPLE MATERIALISATION OF ``OI-Batch``
---------------------------------------
-``[copybooks/plwsoi.cob:L20-L22]`` declares one group and two children. The
-bridge produces THREE host variables ``[common/otm5MT.cbl:L308-L310]`` and the
-schema THREE columns - the group gets a column of its own alongside both of
-its children, and all three become CHARACTER although the children are
-numeric under an inherited COMP:
-
-    ``OI5-BATCH char(8)``
-    ``OI5-BATCH-NOS char(5) COMMENT 'Batch content'``     ``[mysql/ACASDB.sql:L602]``
-    ``OI5-BATCH-ITEM char(3) COMMENT 'Batch content'``    ``[mysql/ACASDB.sql:L603]``
-
-The group's column is DERIVED rather than moved. ``[common/otm5MT.cbl:L1354-
-L1358]`` sends each child to its own host variable and to a bridge-internal
-edit field, then sends the eight-digit redefines view of that edit group to
-``HV-OI5-BATCH`` - the edit group being declared at
-``[common/otm5MT.cbl:L238-L242]``, where a ``pic 9(8)`` redefines supplies the
-numeric rendering that a ``char(8)`` column receives.
-
-Those bridge-internal edit fields are NOT modelled here; reproducing the
-derivation belongs to ``acas_posting/dal/acas029_otm5.py``. The descriptors
-below report the copybook view - the group with its own usage, and the two
-children as numeric with their inheritance recorded.
-
-The composite key is materialised the same way, twice over rather than three
-times: ``oi5-key`` becomes ``OI5-KEY char(15) COMMENT 'Supplier, Invoice'``
-``[mysql/ACASDB.sql:L597]`` while both members also become columns of their
-own. Its host variable is likewise derived through a bridge-internal edit
-group ``[common/otm5MT.cbl:L233-L236]``, which itself replicates the
-copybook's redundant one-child nesting and drifts in casing within four lines.
-Also bridge-internal, also not modelled here.
+``OI-Status`` is the sharpest: ``pic 9`` carrying two condition names with
+NUMERIC values, landing in a ``char(1)`` column. Two further drifts of the
+same family: ``OI-Invoice`` is ``Pic 9(8)`` zoned display
+``[copybooks/plwsoi.cob:L18]`` and becomes a ten-digit binary host variable
+``[common/otm5MT.cbl:L306]``, the descriptor reporting eight digits and zoned
+display; and ``oi5-date`` / ``OI-Date`` becomes ``OI5-DAT`` - the trailing E
+dropped ``[common/otm5MT.cbl:L307]`` - while ``OI-Date-Cleared`` keeps its
+full name ``[:L332]``, so the truncation is a one-off.
 
 TWO WRITE-ONLY HOST VARIABLES
 -----------------------------
@@ -345,104 +257,74 @@ The unload paragraph ``[common/otm5MT.cbl:L1387-L1425]`` opens with
 mechanically, 27 moves naming 27 distinct host variables. ``HV-OI5-KEY`` and
 ``HV-OI5-BATCH`` are moved nowhere.
 
-Both are therefore write-only: loaded on a write, never unloaded on a read. If
-the stored ``OI5-KEY`` or ``OI5-BATCH`` ever diverged from the member columns
-they are built from, the divergence would be invisible on read-back. This is
-the inverse of the never-LOADED ``HV-POST-RRN`` at
-``[common/glpostingMT.cbl:L282]`` - here a never-UNLOADED pair.
+Both are therefore write-only: loaded on a write, never unloaded on a read, so
+a divergence between either column and the member columns it is built from
+would be invisible on read-back - the inverse of the never-LOADED
+``HV-POST-RRN`` at ``[common/glpostingMT.cbl:L282]``.
 
-Two related oddities in the same two paragraphs. The unload order differs from
-the load order: the load runs INVOICE, SUPPLIER, KEY, BATCH-NOS, BATCH-ITEM,
-BATCH, DAT, TYPE, while the unload runs INVOICE, SUPPLIER, DAT, BATCH-NOS,
-BATCH-ITEM, TYPE. And because ``initialize WS-OTM5-Record`` clears the whole
-renamed group, ``OI-Approp`` is populated IMPLICITLY by the move into
-``OI-Net``, the two sharing storage.
-
-A COMMENT DESCRIBING A SITUATION THAT DOES NOT EXIST
-----------------------------------------------------
-Immediately above the bridge's ``COPY``, ``[common/otm5MT.cbl:L345-L346]``
-reads, verbatim::
-
-    *>  Using the first record but not the 2nd as it uses occurs 40 but
-    *>   to reduce Ram usage get rid of the occurs, hopefully.
-
-``grep -in "occurs" copybooks/plwsoi.cob`` returns nothing, and the bridge's
-``replacing`` clause strips nothing. The comment is residue copy-pasted from
-the invoice bridge at ``[common/plinvoiceMT.cbl:L452-L453]``. There is no
-``OCCURS`` anywhere in this layout and none is introduced below.
+Two related oddities in the same paragraphs. The unload order differs from the
+load order - load INVOICE, SUPPLIER, KEY, BATCH-NOS, BATCH-ITEM, BATCH, DAT,
+TYPE; unload INVOICE, SUPPLIER, DAT, BATCH-NOS, BATCH-ITEM, TYPE - and because
+``initialize WS-OTM5-Record`` clears the whole renamed group, ``OI-Approp`` is
+populated IMPLICITLY by the move into ``OI-Net``.
 
 FIELD-NAME COLLISIONS ACROSS THE TWO OPEN-ITEM COPYBOOKS
 --------------------------------------------------------
 Registered anomaly 21 is the field-name collision that forces the general
 ledger posting path to write qualified references at
 ``[general/gl070.cbl:L497]``, ``[:L521]`` and ``[:L525]``. This layout
-contributes a severe case: EVERY ``OI-*`` name in ``copybooks/plwsoi.cob``
-also appears in the sales open-item copybook ``copybooks/slwsoi.cob`` -
-``OI-Header``, ``OI-Key``, ``OI-Customer``, ``OI-Nos``, ``OI-Check``,
-``OI-Invoice``, ``OI-Date``, ``OI-Batch``, ``OI-B-Nos``, ``OI-B-Item``,
-``OI-Type``, ``OI-hold-flag``, ``OI-unapl``, all ten money fields,
-``OI-Status``, ``S-Open``, ``S-Closed``, ``OI-Deduct-Days``,
-``OI-Deduct-Amt``, ``OI-Deduct-Vat``, ``OI-Days``, ``OI-CR``, ``OI-Applied``
-and ``OI-Date-Cleared``. Any program copying both would collide on all of
-them.
+contributes a severe case: every ``OI-*`` name in ``copybooks/plwsoi.cob``
+EXCEPT ``OI-ref``, ``OI-order`` and ``OI-Supplier`` also appears in the sales
+open-item copybook ``copybooks/slwsoi.cob`` - ``OI-Header``, ``OI-Key``,
+``OI-Customer``, ``OI-Nos``, ``OI-Check``, ``OI-Invoice``, ``OI-Date``,
+``OI-Batch``, ``OI-B-Nos``, ``OI-B-Item``, ``OI-Type``, ``OI-hold-flag``,
+``OI-unapl``, all ten money fields, ``OI-Status``, ``S-Open``, ``S-Closed``,
+the three deduction fields, ``OI-Days``, ``OI-CR``, ``OI-Applied`` and
+``OI-Date-Cleared``. Sales adds ``OI-Description`` of its own. Any program
+copying both would collide on every shared name, four matching only
+case-insensitively.
 
-The Python module namespace removes the collision for free, but the collision
-is recorded rather than left implicit, because it has a mechanical consequence
-for anyone looking a field up here. ``loader.entries_for_copybook_record
-("OI-Header")`` returns 69 entries - 35 from ``copybooks/plwsoi.cob`` and 34
-from ``copybooks/slwsoi.cob`` - because BOTH copybooks declare an
-``01 OI-Header``. The generated artifact separates them by appending the
-declaration line, giving ``OI-Header#12`` here against ``OI-Header#8`` for
-sales, ``OI-Approp#44`` against ``#38``, ``OI-Nos#16`` against ``#11``,
-``OI-Check#17`` against ``#12`` and ``filler#41`` against ``filler#14`` and
-``filler#35`` - and it separates ``OI-Key`` here from ``OI-key`` for sales BY
-CASE ALONE. Every key used below is therefore written out in full rather than
-looked up by record name.
+The Python module namespace removes the collision for free, but it is recorded
+because it has a mechanical consequence for anyone looking a field up here.
+``loader.entries_for_copybook_record("OI-Header")`` returns 69 entries - 35
+from ``copybooks/plwsoi.cob`` and 34 from ``copybooks/slwsoi.cob`` - because
+BOTH copybooks declare an ``01 OI-Header``. The artifact separates them by
+appending the declaration line, giving ``OI-Header#12`` here against
+``OI-Header#8`` for sales, ``OI-Approp#44`` against ``#38``, ``OI-Nos#16``
+against ``#11``, ``OI-Check#17`` against ``#12`` and ``filler#41`` against
+``filler#14`` and ``filler#35`` - and it separates ``OI-Key`` here from
+``OI-key`` for sales BY CASE ALONE. Every key used below is therefore written
+out in full rather than looked up by record name.
 
 SALES AND PURCHASE ARE GENUINELY DIFFERENT SHAPES
 -------------------------------------------------
-The sales open-item layout is not a template for this one and nothing here is
-shared with it, imported from it, aliased to it or derived from it. Eight
-divergences were checked in the frozen source and every one must survive
-independently:
+The sales layout is not a template for this one and nothing here is shared
+with it, imported from it, aliased to it or derived from it. Eight divergences,
+each of which must survive independently:
 
-  1. Sales declares ``03 OI-Description pic x(25).`` and has no reference or
-     order field. This layout has NO such field and declares
+  1. Sales declares ``03 OI-Description pic x(25).`` and no reference or order
+     field; this layout has no description and declares
      ``03 OI-ref pic x(10).`` ``[copybooks/plwsoi.cob:L36]`` and
-     ``03 OI-order pic x(10).`` ``[:L37]`` instead.
-  2. The sales key nests three levels; this one nests four, through the
-     redundant ``OI-Customer`` / ``OI-Supplier`` pair.
+     ``03 OI-order pic x(10).`` ``[:L37]``.
+  2. The sales key nests three levels; this one four, through the redundant
+     ``OI-Customer`` / ``OI-Supplier`` pair.
   3. Sales declares no condition name on its hold flag; this one declares
      ``88 payment-held value "H".`` ``[copybooks/plwsoi.cob:L39]``.
-  4. Sales writes ``OI-Cr`` in mixed case; this one writes ``OI-CR`` in upper
-     case ``[copybooks/plwsoi.cob:L60]``.
-  5. Sales puts its date field inside an unnamed ``02 filler.`` group; here
-     ``OI-Date`` sits at ``03`` level directly under ``OI-Header``
-     ``[copybooks/plwsoi.cob:L19]`` and there is no outer filler group at all.
-  6. The sales record is 118 bytes; this one is 113.
-  7. Sales writes its batch group header as ``comp.`` in lower case; this one
-     writes ``Comp.`` with a capital C ``[copybooks/plwsoi.cob:L20]``.
-  8. The type domain prose differs - sales writes ``2 = Account`` and
-     ``4 = Proforma (Not used)`` where this one writes ``2 = Account
-     Invoice`` and ``4 = Proforma``.
+  4. Sales writes ``OI-Cr`` in mixed case; this one ``OI-CR`` upper
+     ``[copybooks/plwsoi.cob:L60]``.
+  5. Sales puts its date inside an unnamed ``02 filler.`` group; here
+     ``OI-Date`` sits at ``03`` directly under ``OI-Header``
+     ``[copybooks/plwsoi.cob:L19]``, with no outer filler group at all.
+  6. The sales record is 118 bytes; this one 113.
+  7. Sales writes its batch group header ``comp.`` lower case; this one
+     ``Comp.`` with a capital C ``[copybooks/plwsoi.cob:L20]``.
+  8. The type domain prose differs - sales ``2 = Account`` and
+     ``4 = Proforma (Not used)`` against ``2 = Account Invoice`` and
+     ``4 = Proforma`` here.
 
-The two tables differ too: 29 columns here against 28 for the sales open item,
-with ``OI5-REF``, ``OI5-ORDER`` and ``OI5-SUPPLIER`` present only here and the
-customer and item-text columns present only there.
-
-CONDITION NAMES ARE PUBLISHED AS DATA
--------------------------------------
-Exactly three ``88`` levels exist in this layout, and ``condition_names()``
-publishes all three in declaration order with their declared values and
-locators. Their values are carried as STRINGS in the form the COBOL writes
-them - the figurative constant at ``[copybooks/plwsoi.cob:L54]`` stays the
-word it is written as and is never turned into a digit, and the alphanumeric
-literal at ``[copybooks/plwsoi.cob:L39]`` keeps the quotation marks that are
-part of its declared form.
-
-No predicate is built here. Agent Action Plan section 0.4.1.4 assigns
-predicate construction to ``acas_posting/cobol/condition_names.py``, and
-importing that module from here would be a layering violation.
+The tables differ too: 29 columns here against 28 for the sales open item,
+``OI5-REF``, ``OI5-ORDER`` and ``OI5-SUPPLIER`` present only here and
+``OI3-CUSTOMER`` and ``OI3-DESCRIPTION`` only there.
 
 NO DEFAULT VALUES ARE SUPPLIED
 ------------------------------
@@ -453,71 +335,38 @@ the frozen source does not declare, which R-3 forbids.
 
 The ``initialize`` statements that do exist are the BRIDGE's, on the BRIDGE's
 own data - ``initialize TD-PUITM5-REC.`` at ``[common/otm5MT.cbl:L1346]`` and
-``initialize WS-OTM5-Record.`` at ``[common/otm5MT.cbl:L1393]``. Agent Action
+``initialize WS-OTM5-Record.`` at ``[common/otm5MT.cbl:L1392]``. Agent Action
 Plan section 0.6.2 explains what they buy: "each load paragraph begins by
 initialising the host-variable group, so unset fields become zero or space
 rather than SQL NULL", which is why every column in this table is declared
 ``NOT NULL``. Reproducing that is the handler module's job at the bridge
-boundary. A caller that needs those values can obtain each one from the
-field's own descriptor - ``descriptor.store(0)`` yields a zero at the declared
-scale and ``descriptor.store("")`` yields spaces at the declared width - so
-even there nothing has to be typed by hand.
+boundary; a caller needing those values gets each from the field's own
+descriptor, ``store(0)`` yielding a zero at the declared scale and
+``store("")`` spaces at the declared width.
 
 HOW TO READ A FIELD'S METADATA
 ------------------------------
-No picture clause, digit count, scale, sign position or storage class is
-written by hand anywhere in this module. Each dataclass field carries its
-dictionary key, and ``descriptors_of`` turns the keys of one class into
-descriptors. Taking ``descriptors_of`` and ``OiHeader`` from this module::
-
-    for attribute, d in descriptors_of(OiHeader).items():
-        print(attribute, d.name, d.usage, d.python_storage, d.cite())
-
-Where only one field is wanted the key alone is enough - lift it out of the
-field's metadata and hand it to ``FieldDescriptor.from_dictionary_key``, which
-``acas_posting.cobol.field`` publishes::
-
-    keys = {f.name: f.metadata["dictionary_key"]
-            for f in dataclasses.fields(OiHeader)}
-    d = FieldDescriptor.from_dictionary_key(keys["oi_cr"])
-
-``FieldDescriptor.from_dictionary_key`` is memoised and reads the generated
-artifact lazily, so importing this module performs no I/O of any kind: nothing
-is read at import, no clock is consulted, no environment is inspected and no
-directory is walked. ``d.cite()`` produces the three-locator provenance line
-that R-5 rests on - for example, for the credit field::
-
-    PUITM5-REC.OI5-CR  copybook=copybooks/plwsoi.cob:L60
-                       bridge=common/otm5MT.cbl:L330
-                       column=mysql/ACASDB.sql:L623
-
-and for a field the bridge never sees::
-
-    OI-Header.OI-Approp#44  copybook=copybooks/plwsoi.cob:L44
-                            bridge=absent  column=absent
-
-``cite()`` is surfaced, never reimplemented. Whole-record access is available
-through ``FieldDescriptor``'s own module-level helpers,
-``descriptors_for_table("PUITM5-REC")`` and
-``descriptors_for_copybook_record``, and the three-layer disagreement for any
-key through ``loader.drift_for(key)``.
-
-Each field's metadata also carries ``cobol_name`` - the declared identifier
-verbatim, case and hyphens intact. That is a name, not storage metadata, and
-it is recorded because the collision described above makes names the thing a
-reader most needs to see beside each attribute.
+Nothing about a field is written by hand here. Each attribute carries its
+dictionary key and ``descriptors_of(cls)`` turns one class's keys into
+descriptors; that function's docstring gives the two key spaces, the
+memoisation and the copybook-view-only guarantee. A descriptor answers
+picture, usage, digits, scale, sign position and byte length, and ``d.cite()``
+produces the three-locator provenance line R-5 rests on. Importing this module
+performs no I/O of any kind - nothing read, no clock consulted, no environment
+inspected, no directory walked - the artifact being loaded lazily on first use.
 
 LAYERING - THIS IS A LEAF MODULE
 --------------------------------
 Agent Action Plan section 0.4.3 permits ``records/*.py`` to import
 ``cobol.field`` and ``dictionary.loader`` and nothing else, which "keeps the
-record layer a leaf". The third import below, ``dictionary.model``, supplies
-the ``ConditionName`` type that the generated artifact's own entries are
-instances of; taking it from there rather than declaring a competing copy is
-the same architectural edge ``acas_posting/cobol/field.py`` documents for
-itself.
+record layer a leaf". That is taken literally: the ``ConditionName`` type the
+generated artifact's own entries are instances of comes through
+``dictionary.loader``, which re-exports it as a binding to the single definition
+rather than a copy, so this module names the one type in the migration without
+reaching past its one permitted door.
 
-Not imported, and none of it may be: ``acas_posting.dal`` in any part,
+Not imported, and none of it may be: ``acas_posting.dictionary.model`` reached
+directly rather than through the loader, ``acas_posting.dal`` in any part,
 ``acas_posting.programs``, ``acas_posting.cli``, ``acas_posting.clock``,
 ``acas_posting.dates``, ``acas_posting.workfiles``, the remaining
 ``acas_posting.cobol`` modules including ``condition_names``,
@@ -531,40 +380,45 @@ THE ANOMALY REGISTER FOR THIS LAYOUT
 ------------------------------------
 Every item below is REPRODUCED, never fixed. A defect reproduced is correct; a
 defect fixed is a failure. Each has a locator comment at its site in the code,
-and the register of all of them is ``docs/migration/anomaly-log.md``.
+and the register of all of them is the migration's anomaly log. Items 2 to 8
+are set out in full in the sections and classes named against them.
 
    1. The two plan-named copybooks are 21-line near-twins differing only by a
       commented-out ``COPY`` whose quoted filename contains four spaces, and
       by one space of indentation. ``[copybooks/plwsoi5B.cob:L12,L19-L20]``
       against ``[copybooks/plwsoi5C.cob:L12,L19-L20]``.
-   2. ``HV-OI5-KEY`` and ``HV-OI5-BATCH`` are write-only host variables -
-      loaded at ``[common/otm5MT.cbl:L1352]`` and ``[:L1358]``, never unloaded
+   2. ``HV-OI5-KEY`` and ``HV-OI5-BATCH`` are write-only - loaded at
+      ``[common/otm5MT.cbl:L1352]`` and ``[:L1358]``, never unloaded
       ``[:L1387-L1425]``.
-   3. A copy-pasted comment describes an ``occurs 40`` that does not exist.
-      ``[common/otm5MT.cbl:L345-L346]``.
-   4. ``OI-Customer`` has no host variable and no column, proven from the load
-      paragraph. ``[copybooks/plwsoi.cob:L14]`` against
-      ``[common/otm5MT.cbl:L1350-L1351]``. Its two grandchildren ``OI-Nos``
-      and ``OI-Check`` have none either.
+   3. A comment copy-pasted from the invoice bridge describes an ``occurs 40``
+      that does not exist - ``*>  Using the first record but not the 2nd as it
+      uses occurs 40 but`` / ``*>   to reduce Ram usage get rid of the occurs,
+      hopefully.`` ``[common/otm5MT.cbl:L345-L346]`` against
+      ``[common/plinvoiceMT.cbl:L452-L453]``. ``plwsoi.cob`` contains no
+      ``OCCURS`` at all and none is introduced below.
+   4. ``OI-Customer`` has no host variable and no column, nor do its two
+      grandchildren. ``[copybooks/plwsoi.cob:L14]`` against
+      ``[common/otm5MT.cbl:L1350-L1351]``.
    5. ``WS-OTM5-Record`` names two incompatible items - an elementary
       ``pic x(113)`` at ``[copybooks/plwsoi5C.cob:L10]`` and the full
       29-field group after ``[common/otm5MT.cbl:L348-L349]``.
-   6. ``OI-Approp`` has no host variable; its existence survives only as a
-      column comment. ``[copybooks/plwsoi.cob:L44-L45]``,
-      ``[mysql/ACASDB.sql:L610]``.
-   7. Triple materialisation of ``OI-Batch`` with numeric-to-character drift
-      on all three, the group column derived through a bridge-internal
-      redefines. ``[copybooks/plwsoi.cob:L20-L22]``,
-      ``[common/otm5MT.cbl:L308-L310]``, ``[:L238-L242]``, ``[:L1354-L1358]``.
+   6. ``OI-Approp`` has no host variable - ``grep -inc "approp"
+      common/otm5MT.cbl`` returns 0 - and survives only as prose on the base
+      field's column, ``OI5-NET ... COMMENT 'Also called Approp'``.
+      ``[copybooks/plwsoi.cob:L44-L45]``, ``[mysql/ACASDB.sql:L610]``.
+   7. Triple materialisation of ``OI-Batch``, all three columns CHARACTER, the
+      group's derived through a bridge-internal redefines.
+      ``[copybooks/plwsoi.cob:L20-L22]``, ``[common/otm5MT.cbl:L308-L310]``,
+      ``[:L238-L242]``, ``[:L1354-L1358]``.
    8. Signedness drift is per-bridge, not per-type - ``OI-CR`` keeps its sign
-      here while an identically-declared field loses it in the invoice
-      bridges. ``[common/otm5MT.cbl:L330]``.
+      ``[common/otm5MT.cbl:L330]`` where an identically-declared field loses
+      it ``[common/plinvoiceMT.cbl:L417]``.
    9. Four signedness narrowings, surfaced untouched: ``OI-Date``,
       ``OI-Deduct-Days``, ``OI-Days``, ``OI-Date-Cleared``.
   10. Four numeric-to-character drifts: ``OI-Type``, ``OI-Status``,
       ``OI-B-Nos``, ``OI-B-Item``.
-  11. Name truncation ``oi5-date`` and ``OI-Date`` to ``OI5-DAT``
-      ``[common/otm5MT.cbl:L307]`` while ``OI-Date-Cleared`` is not truncated
+  11. Name truncation of ``oi5-date`` / ``OI-Date`` to ``OI5-DAT``
+      ``[common/otm5MT.cbl:L307]`` while ``OI-Date-Cleared`` is untruncated
       ``[:L332]``.
   12. The systematic ``OI-*`` to ``OI5-*`` prefix rename across all 29
       columns, sourced from the plan-named copybooks' own ``oi5-*`` names.
@@ -574,59 +428,58 @@ and the register of all of them is ``docs/migration/anomaly-log.md``.
   14. Four-level key nesting with a redundant one-child group
       ``[copybooks/plwsoi.cob:L13-L17]``, replicated inside the bridge's own
       edit group ``[common/otm5MT.cbl:L233-L236]``.
-  15. ``88 payment-held value "H".`` exists here and not in the sales layout
+  15. ``88 payment-held value "H".`` exists here and not in sales
       ``[copybooks/plwsoi.cob:L39]``.
-  16. ``OI-CR`` in upper case ``[copybooks/plwsoi.cob:L60]``; ``OI-ref``,
-      ``OI-order``, ``OI-hold-flag`` and ``OI-unapl`` in lower case
-      ``[:L36-L40]`` beside ``OI-Deduct-Days``, ``OI-Applied`` and
-      ``OI-Date-Cleared`` capitalised.
-  17. Mixed-case picture keywords within one file - ``Pic``, ``Binary-long``
-      and ``Comp.`` at ``[copybooks/plwsoi.cob:L16-L22]`` beside ``pic``,
+  16. ``OI-CR`` upper case ``[copybooks/plwsoi.cob:L60]``; ``OI-ref``,
+      ``OI-order``, ``OI-hold-flag``, ``OI-unapl`` lower ``[:L36-L40]``;
+      ``OI-Deduct-Days``, ``OI-Applied``, ``OI-Date-Cleared`` capitalised.
+  17. Mixed-case picture keywords in one file - ``Pic``, ``Binary-long`` and
+      ``Comp.`` at ``[copybooks/plwsoi.cob:L16-L22]`` beside ``pic``,
       ``comp-3``, ``binary-char`` and ``comp`` from L23 down.
   18. Upper-case ``PIC`` amid lower-case ``pic``
       ``[copybooks/plwsoi5C.cob:L15]``.
-  19. Declaration beats comment on the invoice field: it is declared
-      ``Pic 9(8)`` at ``[copybooks/plwsoi.cob:L18]`` with the trailing note
-      ``*> Was Binary-long.  *> and inv was outside the key``, and
-      ``PIC 9(8). *> Was binary-long.`` at
+  19. Declaration beats comment on the invoice field: declared ``Pic 9(8)`` at
+      ``[copybooks/plwsoi.cob:L18]`` under the note ``*> Was Binary-long.  *>
+      and inv was outside the key``, and ``PIC 9(8). *> Was binary-long.`` at
       ``[copybooks/plwsoi5C.cob:L15]``. Eight-digit zoned display, scale zero.
   20. The type domain comment block, which skips 8
       ``[copybooks/plwsoi.cob:L25-L35]`` - prose, never a check.
   21. ``88 S-Open value zero.`` beside ``88 S-Closed value 1.`` - figurative
-      constant next to literal ``[copybooks/plwsoi.cob:L54-L55]``.
-  22. Dual materialisation of the composite key - the group and both members
-      each get a column, the key column carrying ``COMMENT 'Supplier,
-      Invoice'`` that the sales key column lacks ``[mysql/ACASDB.sql:L597]``.
-  23. Two different ``replacing`` forms for the same ``COPY`` - the copybook
-      adds a redefines, the bridge renames
-      ``[copybooks/plwsoi5C.cob:L19-L20]`` against
-      ``[common/otm5MT.cbl:L348-L349]``.
+      constant next to literal ``[copybooks/plwsoi.cob:L54-L55]``. With
+      ``payment-held`` at ``[:L39]`` these are the layout's only three ``88``
+      levels, and ``condition_names()`` publishes all three as data.
+  22. Dual materialisation of the composite key - group and both members each
+      get a column, the key column carrying ``COMMENT 'Supplier, Invoice'``
+      that the sales key column lacks ``[mysql/ACASDB.sql:L597]`` against
+      ``[:L897]``.
+  23. Two different ``replacing`` forms for one ``COPY`` - the copybook adds a
+      redefines, the bridge renames ``[copybooks/plwsoi5C.cob:L19-L20]``
+      against ``[common/otm5MT.cbl:L348-L349]``.
   24. ``*> TESING data`` - a typo for TESTING - at
-      ``[common/otm5MT.cbl:L229]``, above the bridge's edit work fields, whose
-      own casing drifts within four lines ``[:L233-L235]``.
+      ``[common/otm5MT.cbl:L229]``, above edit work fields whose own casing
+      drifts within four lines ``[:L233-L235]``.
   25. The unload order differs from the load order, and ``OI-Approp`` is
       populated implicitly through shared storage
       ``[common/otm5MT.cbl:L1338-L1425]``.
 
-Three further oddities found while reading, recorded for completeness: the two
-plan-named copybooks use CRLF line endings while the body copybook uses LF
-only; ``[copybooks/plwsoi.cob:L7]`` writes the maintainer's initials in lower
-case while ``[:L8]`` writes them in upper case, in the same file; and the
-bridge's load paragraph writes ``OI-Ref``, ``OI-Order``, ``OI-Hold-Flag`` and
-``OI-Unapl`` capitalised where the copybook declares them lower case.
+Three further oddities, recorded for completeness: the two plan-named
+copybooks use CRLF line endings while the body copybook uses LF only;
+``[copybooks/plwsoi.cob:L7]`` writes the maintainer's initials in lower case
+while ``[:L8]`` writes them in upper case, in one file; and the bridge's load
+paragraph writes ``OI-Ref``, ``OI-Order``, ``OI-Hold-Flag`` and ``OI-Unapl``
+capitalised where the copybook declares them lower case.
 
 QUESTIONS FOR THE COMPILED PROGRAM (R-6)
 ----------------------------------------
-None of these can be settled by reading the frozen source, so none is settled
-here. Each is written up in ``docs/migration/ambiguity-resolutions.md``.
+None can be settled by reading the frozen source, so none is settled here.
+Each is written up in the migration's ambiguity-resolutions document.
 
   1. Which of the two plan-named copybooks governs the bytes on disk, given
      that they are not interchangeable and that ``pl060`` copies the
      key-only variant while ``pl100`` copies the full one.
   2. What is actually stored in ``OI5-KEY`` and ``OI5-BATCH`` on a write, and
      what a read observes, both host variables being write-only and both
-     derived through bridge-internal edit fields, one of them through a
-     redefines.
+     derived through bridge-internal edit fields, one through a redefines.
   3. What is stored in ``OI5-BATCH-NOS`` and ``OI5-BATCH-ITEM`` - numeric
      under an inherited COMP in the copybook, character in the table.
   4. What is stored in ``OI5-STATUS`` and ``OI5-TYPE``, both ``pic 9`` in the
@@ -648,9 +501,8 @@ This project carries no separate rules document; R-1 to R-6 are the Agent
 Action Plan's own, section 0.7.2, and that is where their full text lives.
 
   R-1  No COBOL at runtime. This module reads no file, spawns no process,
-       loads no shared library and links no compiled extension. All five
-       frozen sources were read while authoring it and are never touched at
-       runtime.
+       loads no shared library and links no compiled extension; all five
+       frozen sources are specification only.
   R-2  Zero binary floating-point arithmetic. Three carriers only, per the
        two-direction rule above.
   R-3  Nothing added and nothing removed. No check, no enum, no lookup, no
@@ -659,8 +511,8 @@ Action Plan's own, section 0.7.2, and that is where their full text lives.
        concurrency.
   R-4  Legacy anomalies reproduced, never fixed - the 25-item register above,
        each with a locator comment at its site.
-  R-5  Full traceability. Every field carries a dictionary key; every class
-       states its COBOL identifier verbatim with a locator; ``cite()`` is
+  R-5  Full traceability. Every field carries a dictionary key, every class
+       states its COBOL identifier verbatim with a locator, and ``cite()`` is
        surfaced rather than reimplemented.
   R-6  The compiled program is the tie-breaker. Field order follows copybook
        declaration order; fixed collections are tuples; the eight questions
@@ -679,7 +531,15 @@ from typing import Any, Final
 
 from acas_posting.cobol.field import FieldDescriptor
 from acas_posting.dictionary import loader
-from acas_posting.dictionary.model import ConditionName
+
+# ``ConditionName`` names the type the generated artifact's own condition-name
+# entries are instances of. It arrives through ``dictionary.loader``, the only
+# door Agent Action Plan section 0.4.3 opens from this layer onto the dictionary
+# package; the loader re-exports it as a BINDING to the one definition in
+# ``acas_posting.dictionary.model`` rather than a copy (see its
+# ``RE_EXPORTED_MODEL_NAMES``), so there is one type in the migration and rule
+# R-5's single source of truth for field metadata is preserved.
+from acas_posting.dictionary.loader import ConditionName
 
 __all__: Final[tuple[str, ...]] = (
     # Deterministically sorted (R-6). Nine layout classes - one per group item
@@ -699,23 +559,16 @@ __all__: Final[tuple[str, ...]] = (
 )
 
 
-# =============================================================================
-#  FIELD BINDING
-#
-#  Every dataclass field below is bound to two facts and no others: the COBOL
-#  identifier exactly as the frozen source writes it, and the key of its entry
-#  in the generated data dictionary. Storage metadata - picture, usage, digits,
-#  scale, sign, width - is never written here; it is obtained by passing the
-#  key to `FieldDescriptor.from_dictionary_key`, which reads the artifact
-#  lazily and memoises the result. That keeps this module free of transcription
-#  (R-5) and free of import-time I/O (R-6).
-#
-#  `field()` is called WITHOUT a default and WITHOUT a default_factory, so
-#  every attribute stays required. See "NO DEFAULT VALUES ARE SUPPLIED" in the
-#  module docstring: not one of the 29 fields carries a VALUE clause in either
-#  copybook, so there is no declared initial content to publish, and inventing
-#  one would add state the frozen source does not declare (R-3).
-# =============================================================================
+# FIELD BINDING. Every dataclass field below is bound to two facts and no others: the COBOL
+# identifier exactly as the frozen source writes it, and the key of its entry in the generated
+# data dictionary. Storage metadata - picture, usage, digits, scale, sign, width - is never
+# written here; it is obtained by passing the key to `FieldDescriptor.from_dictionary_key`,
+# which reads the artifact lazily and memoises the result. That keeps this module free of
+# transcription (R-5) and free of import-time I/O (R-6).
+# `field()` is called WITHOUT a default and WITHOUT a default_factory, so every attribute stays
+# required. See "NO DEFAULT VALUES ARE SUPPLIED" in the module docstring: not one of the 29
+# fields carries a VALUE clause in either copybook, so there is no declared initial content to
+# publish, and inventing one would add state the frozen source does not declare (R-3).
 
 
 def _declared(cobol_name: str, dictionary_key: str) -> Any:
@@ -774,7 +627,7 @@ def descriptors_of(
     are never blended with the bridge or column view; the three-layer
     disagreement is available untouched from ``loader.drift_for(key)``, and
     reproducing the bridge's conversions belongs to
-    ``acas_posting/dal/acas029_otm5.py``. Each descriptor's ``cite()`` gives
+    the `acas029` handler module. Each descriptor's ``cite()`` gives
     the three-locator provenance line, and ``cite()`` is surfaced here rather
     than reimplemented.
 
@@ -814,9 +667,7 @@ def descriptors_of(
     )
 
 
-# =============================================================================
 #  CONDITION NAMES - PUBLISHED AS DATA, NEVER AS BEHAVIOUR
-# =============================================================================
 
 #  The two elementary items in this layout that carry an 88 level, in copybook
 #  declaration order. The hold flag is declared at [copybooks/plwsoi.cob:L38]
@@ -877,14 +728,11 @@ def condition_names(*, path: Path | None = None) -> tuple[ConditionName, ...]:
     )
 
 
-# =============================================================================
 #  THE 5B / 5C SHORT VIEW - copybooks/plwsoi5B.cob, copybooks/plwsoi5C.cob
-#
 #  Both plan-named copybooks declare these three items identically; they differ
 #  only in the two ways the module docstring sets out. The generated artifact
 #  sources them from plwsoi5B.cob, and the composite key additionally appears
 #  under plwsoi5C.cob - so both files are cited where both declare an item.
-# =============================================================================
 
 
 @dataclass(slots=True)
@@ -1016,15 +864,12 @@ class OpenItemRecord5:
     filler_1: str = _declared("filler", "Open-Item-Record-5.filler")
 
 
-# =============================================================================
 #  THE BODY - copybooks/plwsoi.cob, the 29-field layout
-#
 #  Field order within every class below follows copybook declaration order,
 #  L12 to L62, so a reader can set this file beside `cat -n copybooks/
 #  plwsoi.cob` and diff the two by eye (R-6). Class DEFINITION order is
 #  innermost first, purely so each name exists before it is annotated; it is
 #  the field order, not the class order, that carries the layout.
-# =============================================================================
 
 
 @dataclass(slots=True)
@@ -1143,7 +988,7 @@ class OiBatch:
     eight-digit redefines view of that edit group to the host variable
     ``[common/otm5MT.cbl:L238-L242]``, ``[:L1354-L1358]``. None of those edit
     fields is modelled here - reproducing the derivation belongs to
-    ``acas_posting/dal/acas029_otm5.py``.
+    the `acas029` handler module.
 
     R-4 site 2: the group's host variable is one of the two that are loaded and
     never unloaded ``[common/otm5MT.cbl:L1358]`` against ``[:L1387-L1425]``, so
@@ -1216,19 +1061,16 @@ class Filler1:
     # [mysql/ACASDB.sql:L610].
     oi_net: Decimal = _declared("OI-Net", "PUITM5-REC.OI5-NET")
     # 05  OI-Approp redefines OI-Net
-    #                 pic s9(7)v99.
-    #                                     [copybooks/plwsoi.cob:L44-L45]
-    # R-4 site 6: TWO PHYSICAL LINES forming one declaration, and the field has
-    # no host variable at all - `grep -inc "approp" common/otm5MT.cbl` returns
-    # 0. Its existence survives in the schema only as the column comment
-    # quoted above. Declared here as a redefine view over `oi_net`; its
-    # descriptor reports `redefines == "OI-Net"` verbatim and, being a
-    # redefine, it contributes zero bytes to the record.
-    # R-4 site 25: on a read the bridge populates it IMPLICITLY, because
-    # `initialize WS-OTM5-Record` [common/otm5MT.cbl:L1393] clears the whole
-    # renamed group and the move into OI-Net then lands in shared storage.
-    # Base and view are deliberately NOT kept in step here: the COBOL does not,
-    # and adding logic that did would breach R-3. Which name a given program
+    #                 pic s9(7)v99.        [copybooks/plwsoi.cob:L44-L45]
+    # R-4 site 6: TWO PHYSICAL LINES forming one declaration, and the field has no host variable
+    # at all - `approp` occurs zero times in common/otm5MT.cbl. Its existence survives in the
+    # schema only as the column comment quoted above. Declared here as a redefine view over
+    # `oi_net`; its descriptor reports `redefines == "OI-Net"` verbatim and, being a redefine,
+    # it contributes zero bytes to the record.
+    # R-4 site 25: on a read the bridge populates it IMPLICITLY, because `initialize
+    # WS-OTM5-Record` [common/otm5MT.cbl:L1392] clears the whole renamed group and the move into
+    # OI-Net then lands in shared storage. Base and view are deliberately NOT kept in step: the
+    # COBOL does not, and adding logic that did would breach R-3. Which name a given program
     # writes, and in what order, is question 5 for the compiled program.
     oi_approp: Decimal = _declared("OI-Approp", "OI-Header.OI-Approp#44")
     # 05  OI-Extra    pic s9(7)v99.                [copybooks/plwsoi.cob:L46]
@@ -1288,18 +1130,16 @@ class OiHeader:
     # 03  OI-Key.                                  [copybooks/plwsoi.cob:L13]
     oi_key: OiKey = _declared("OI-Key", "OI-Header.OI-Key")
     # 03  OI-Date         Binary-long.             [copybooks/plwsoi.cob:L19]
-    # R-4 site 13 (contrast): at 03 level DIRECTLY under the record. The sales
-    # open-item copybook wraps its date in an unnamed `02 filler.` group; this
-    # layout has no such wrapper and none is invented.
-    # R-4 site 9: signed here, unsigned host variable [common/otm5MT.cbl:L307]
-    # and `OI5-DAT int(8) unsigned` [mysql/ACASDB.sql:L600] - the sign is lost
-    # AT THE BRIDGE. The descriptor reports the copybook view, signed, and the
-    # disagreement is offered untouched by loader.drift_for; reproducing the
-    # conversion is acas_posting/dal/acas029_otm5.py's job. What a negative
-    # value actually stores is question 6 for the compiled program.
-    # R-4 site 11: renamed to OI5-DAT, the trailing E dropped.
-    # Binary family, scale zero, so int - and this is one of the two fields the
-    # purchase payment-days average consumes (R-2).
+    # R-4 site 13 (contrast): at 03 level DIRECTLY under the record. The sales open-item
+    # copybook wraps its date in an unnamed `02 filler.` group; this layout has no such wrapper
+    # and none is invented.
+    # R-4 site 9: signed here, unsigned host variable [common/otm5MT.cbl:L307] and `OI5-DAT
+    # int(8) unsigned` [mysql/ACASDB.sql:L600] - the sign is lost AT THE BRIDGE. The descriptor
+    # reports the copybook view, signed, `loader.drift_for` offers the disagreement untouched,
+    # and reproducing the conversion is the `acas029` handler module's job. What a negative
+    # value actually stores is question 6 for the compiled program. R-4 site 11: renamed to
+    # OI5-DAT, the trailing E dropped. Binary family, scale zero, so int - and one of the two
+    # fields the purchase payment-days average consumes (R-2).
     oi_date: int = _declared("OI-Date", "PUITM5-REC.OI5-DAT")
     # 03  OI-Batch                        Comp.    [copybooks/plwsoi.cob:L20]
     oi_batch: OiBatch = _declared("OI-Batch", "PUITM5-REC.OI5-BATCH")

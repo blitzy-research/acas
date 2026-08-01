@@ -1,67 +1,25 @@
 """The COBOL `SORT` verb: COBOL key semantics with guaranteed stability.
 
 This module orders a sequence of records on an ordered list of keys, the way
-the compiled `SORT` verb orders one, and it guarantees that records whose keys
-all compare equal come out in the order they went in. That is the whole of its
-job. It holds no key tuple, no record layout, no work-file identity and no
+the compiled `SORT` verb orders one, and guarantees that records whose keys all
+compare equal come out in the order they went in. That is the whole of its job.
+It holds no key tuple, no record layout, no work-file identity and no
 accounting decision: a caller names the keys, and this module supplies the
 comparison and the stability.
 
-WHY THIS FILE EXISTS - STABILITY IS CORRECTNESS, NOT TIDINESS
-=============================================================
-Agent Action Plan section 0.6.4 opens its ordering findings with this one, and
-it is the strongest of them. Quoted in full:
-
-    "`gl072` locates the nominal-ledger account for each posting with a
-    sequential read-next rather than an indexed read
-    [general/gl072.cbl:L410-L412]. It finds the right account only because
-    `gl071` has already emitted the stream in nominal-key order. Any change in
-    sort stability or key composition produces silent misposting - no error, no
-    diagnostic, wrong balances. This single dependency is why `sortverb.py`
-    guarantees stability and why a dedicated test asserts `gl071`'s output
-    ordering."
-
-Agent Action Plan section 0.1.1, Goal 2, states the same fact as a goal:
-
-    "In this codebase the dependency is load-bearing rather than incidental:
-    `gl072` locates the nominal-ledger row for a posting with a *sequential*
-    read rather than an indexed one, so it finds the correct account only
-    because `gl071` has already emitted the transaction stream in nominal-key
-    order. Perturb the sort and the program silently posts to the wrong
-    account."
-
-There is no error path to reproduce when this goes wrong, because the compiled
-program raises none. A perturbed ordering posts real money to the wrong
-nominal account and reports success. That is why the ordering contract below
-is spelled out rather than assumed, why stability cannot be switched off, and
-why `is_sorted` exists so a test can assert the ordering directly.
-
-THE AUTHORITY FOR THIS FILE
-===========================
-Agent Action Plan section 0.3.1 fixes it in one line:
-
-    sortverb.py    (SORT with COBOL key semantics and guaranteed stability)
-
-Agent Action Plan section 0.4.1.4, the transformation row, verbatim:
-
-    Target File                        Transformation  Source File
-    acas_posting/cobol/sortverb.py     CREATE          general/gl071.cbl
-    Key Changes: "Stable sort with COBOL key semantics; stability is required
-                  because a downstream program reads sequentially"
-
-Agent Action Plan section 0.1.2, transformation rule 13, verbatim:
-
-    COBOL construct     Python construct                Transformation rule
-    `SORT` on work file  Stable sort on the identical    "Stability matters
-                         key tuple                       because `gl072` reads
-                                                         sequentially"
-
-And section 0.4.1.2 on the program this file serves: "The `SORT` verbs become
-stable sorts on the identical key tuples. Contains no arithmetic at all. The
-output ordering is a hard contract consumed by `gl072`."
+WHY THIS FILE EXISTS - STABILITY IS CORRECTNESS, NOT TIDINESS Section 0.6.4
+opens its ordering findings with this one, and section 0.1.2 rule 13 and
+section 0.1.1 Goal 2 restate it: `gl072` locates the nominal-ledger row for a
+posting with a SEQUENTIAL read rather than an indexed one, so it finds the
+correct account only because `gl071` has already emitted the stream in
+nominal-key order. Perturb the sort and the program silently posts to the wrong
+account. There is no error path to reproduce when this goes wrong, because the
+compiled program raises none - a perturbed ordering posts real money to the
+wrong nominal account and reports success. That is why the ordering contract is
+spelled out rather than assumed, why stability cannot be switched off, and why
+`is_sorted` exists so a test can assert the ordering directly.
 
 THE ONE IN-SCOPE `SORT`, VERBATIM  [general/gl071.cbl:L172-L178]
-================================================================
      sort     sort-trans
               on ascending key sort-batch
                                sort-ac
@@ -71,24 +29,22 @@ THE ONE IN-SCOPE `SORT`, VERBATIM  [general/gl071.cbl:L172-L178]
               giving post-trans.
 
 Four keys, ALL ASCENDING, in the order batch, account, profit centre, posting.
-`USING` / `GIVING` form: no INPUT PROCEDURE and no OUTPUT PROCEDURE, so the
-primitive below needs only the whole-sequence shape - an ordered sequence in,
-an ordered sequence out. There is deliberately no `RELEASE` / `RETURN`
-streaming API, because a census of the twelve in-scope program files finds
-`RELEASE` and `RETURN` ZERO times.
+`USING`/`GIVING` form: no INPUT or OUTPUT PROCEDURE, so the primitive below
+needs only the whole-sequence shape - an ordered sequence in, an ordered
+sequence out. There is deliberately no `RELEASE`/`RETURN` streaming API,
+because `RELEASE`, `RETURN` and `MERGE` occur ZERO times across the twelve
+in-scope programs.
 
-`gl071` is astonishingly small, and that minimalism is itself specification.
-Its whole procedure division is `main.` [general/gl071.cbl:L167], one screen
+`gl071` is astonishingly small, and that minimalism is itself specification:
+its whole procedure division is `main.` [general/gl071.cbl:L167], one screen
 display [general/gl071.cbl:L170], the `SORT` above, then `main-exit.`
-[general/gl071.cbl:L180] and `goback.` [general/gl071.cbl:L181]. The program
-contains ZERO arithmetic statements and ZERO `MOVE` statements. Nothing else
-may creep in on either side of this boundary: the display is a diagnostic with
-no database effect, and turning it into a log record belongs to
-`acas_posting.programs.gl071_batch_sort`, not here.
+[general/gl071.cbl:L180] and `goback.` [general/gl071.cbl:L181], with ZERO
+arithmetic and ZERO `MOVE` statements. The display is a diagnostic with no
+database effect, and turning it into a log record belongs to the program
+layer's `gl071`, not here.
 
 THE KEY ORDER IS NOT THE RECORD'S DECLARATION ORDER
-===================================================
-The sort description record, verbatim [general/gl071.cbl:L136-L144]:
+The sort description record [general/gl071.cbl:L136-L144]:
 
     Locator                       Field        Picture      In record  In key
     [general/gl071.cbl:L137]      sort-batch   pic 9(5)         1st      1st
@@ -100,27 +56,18 @@ The sort description record, verbatim [general/gl071.cbl:L136-L144]:
     [general/gl071.cbl:L143]      sort-amount  pic s9(8)v99     7th        -
     [general/gl071.cbl:L144]      sort-legend  pic x(32)        8th        -
 
-`sort-post` sits SECOND in the record and FOURTH in the key list.
-`sort-ac` sits FIFTH in the record and SECOND in the key list.
-
-A primitive that derived the key order from the record layout - or a caller
-that assumed it could - would produce a different ordering with no error at
-all, and the downstream sequential read would then post to the wrong accounts.
-So `sort_records` takes the key list as an EXPLICIT ORDERED PARAMETER and
-never infers it, never reorders it, never extends it and never drops a key.
-
-The record is 70 characters wide (5 + 5 + 2 + 8 + 6 + 2 + 10 + 32), and the
-input and output layouts [general/gl071.cbl:L112-L120] and
-[general/gl071.cbl:L124-L132] are field-identical to the sort description, so
-nothing is converted across the sort. That layout belongs to
-`acas_posting.workfiles`, and is recorded here only to show that this module
-changes no value - it changes only the order of the records it is handed.
+`sort-post` sits SECOND in the record and FOURTH in the key list; `sort-ac`
+sits FIFTH and SECOND. A primitive that derived the key order from the record
+layout - or a caller that assumed it could - would produce a different ordering
+with no error at all, and the downstream sequential read would then post to the
+wrong accounts. So `sort_records` takes the key list as an EXPLICIT ORDERED
+PARAMETER and never infers it, reorders it, extends it or drops a key. The
+record is 70 characters wide (5+5+2+8+6+2+10+32) and the input and output
+layouts [general/gl071.cbl:L112-L120], [general/gl071.cbl:L124-L132] are
+field-identical to it, so nothing is converted across the sort; that layout
+belongs to `acas_posting.workfiles`.
 
 WHAT THE SECOND AND THIRD KEYS ACTUALLY ARE
-===========================================
-This is the mechanical reason key composition matters, and it is worth naming
-precisely rather than leaving as "nominal-key order".
-
 The consuming program declares its input record with the account and profit
 centre grouped together [general/gl072.cbl:L115-L117]:
 
@@ -132,155 +79,102 @@ That eight-character group is byte-for-byte the nominal ledger's own key -
 `WS-Ledger-Key` [copybooks/wsledger.cob:L13] over `WS-Ledger-Nos pic 9(6)`
 [copybooks/wsledger.cob:L14] and `Ledger-PC pic 9(2)`
 [copybooks/wsledger.cob:L20], redefined whole as `pic 9(8)`
-[copybooks/wsledger.cob:L21-L22]. So the sort's second and third keys, taken
-together, ARE the ledger key the consumer walks; the first key groups by batch
-and the fourth orders postings within one account. Drop the third key, or swap
-the second and third, and the stream is no longer in ledger-key order even
-though every individual key is still ascending.
+[copybooks/wsledger.cob:L21-L22]. So keys two and three together ARE the ledger
+key the consumer walks; the first groups by batch and the fourth orders
+postings within one account. Drop the third, or swap the second and third, and
+the stream is no longer in ledger-key order even though every key is still
+ascending.
 
-ANOMALY A-14, AND THE PARAGRAPH THAT PROVES IT
-==============================================
-The anomaly register entry this module reproduces, verbatim:
-
-    A-14  "The nominal account is located by sequential read, so correctness
-          depends entirely on upstream sort order - [general/gl072.cbl:L410-
-          L412]."
-
-The reproducing modules are `acas_posting.programs.gl071_batch_sort` (which
-emits the ordering by calling `sort_records` below) and
-`acas_posting.programs.gl072_transaction_update` (which consumes it with a
-sequential read). A dedicated test asserts `gl071`'s output ordering directly
-rather than waiting for a state diff to catch it - Agent Action Plan section
-0.6.9, verbatim: "`gl071`'s output ordering is asserted directly by a test
-rather than left to be caught indirectly by a state diff."
-
-Here is the paragraph, verbatim [general/gl072.cbl:L402-L413]:
-
+ANOMALY A-14, IN ONE PARAGRAPH  [general/gl072.cbl:L402-L413]
      new-account.
          move     post-ledger  to  WS-Ledger-Key.
          if       read-ledger not = "R"
-                  perform  GL-Nominal-Read-Next.   *> read ledger-file record.
+                  perform  GL-Nominal-Read-Next.
          if       read-ledger not = "R"
                   move  zero   to  tot-dr  tot-cr.
          divide   WS-Ledger-Nos  by  100  giving  l6-account.
 
-Read it closely. The key is moved into `WS-Ledger-Key` and then a READ NEXT is
-performed anyway. The key move is INERT for a sequential read: it positions
-nothing and it selects nothing. The program relies entirely on the stream
-already being in ledger-key order. That is anomaly A-14 in one paragraph, and
-it is why this module's ordering contract is a correctness requirement rather
-than a convenience.
+The key is moved into `WS-Ledger-Key` and then a READ NEXT is performed anyway.
+The key move is INERT for a sequential read: it positions nothing and selects
+nothing. The program relies entirely on the stream already being in ledger-key
+order. The reproducing modules are the program layer's `gl071`, which emits the
+ordering by calling `sort_records`, and its `gl072`, which consumes it
+sequentially; section 0.6.9 requires `gl071`'s output ordering to be asserted
+directly by a test rather than left to a state diff.
 
 CITATION CORRECTIONS - THE FROZEN FILES ARE THE AUTHORITY
-=========================================================
-Three citations in this area do not match the frozen sources. They are stated
-here so the wrong spans are not propagated by anyone reading this module.
+Three citations in this area do not match the frozen sources, and are stated so
+the wrong spans are not propagated by anyone reading this module.
 
-  * THE SEQUENTIAL READ. The Agent Action Plan cites it as
-    [general/gl072.cbl:L410-L412]. The verified lines are the key move at
-    [general/gl072.cbl:L405] and the read itself at
-    [general/gl072.cbl:L407-L408]. L410 and L411 hold the second
+  * THE SEQUENTIAL READ. The plan cites L410-L412. The frozen lines are the key
+    move at [general/gl072.cbl:L405] and the read at
+    [general/gl072.cbl:L407-L408]; L410-L411 hold the second
     `if read-ledger not = "R"` and its `move zero to tot-dr tot-cr`, and L413
-    holds the `divide` the plan cites correctly elsewhere. The sibling module
-    `acas_posting.cobol` records the same correction in its inventory.
-  * THE PARAGRAPH `main.` IN `gl071`. Both the Agent Action Plan and the brief
-    for this file place it at L169. The frozen file puts it at
-    [general/gl071.cbl:L167]; L168 and L169 are the paragraph's underline
-    comment and a blank comment line.
-  * THE WORK-FILE NAMES. The Agent Action Plan cites
-    [copybooks/wsnames.cob:L14-L17]. The verified span is
-    [copybooks/wsnames.cob:L13-L16] - `01 File-Defs.` at L13,
-    `02 file-defs-a.` at L14, then the two names at L15 and L16.
+    the `divide` the plan cites correctly elsewhere.
+  * `main.` IN `gl071`. The plan and this file's brief place it at L169; the
+    frozen file puts it at [general/gl071.cbl:L167], L168-L169 being the
+    paragraph's underline comment and a blank comment line.
+  * THE WORK-FILE NAMES. The plan cites L14-L17 of the names copybook; the
+    frozen span is [copybooks/wsnames.cob:L13-L16] - `01 File-Defs.` at L13,
+    `02 file-defs-a.` at L14, the two names at L15 and L16.
 
-Two further spans are quoted with their verified lines below rather than the
-plan's: the two silent skips of anomaly A-13 are at
-[general/gl072.cbl:L291-L292] and [general/gl072.cbl:L306-L307], where the
-plan cites L289-L290 and L303-L304.
+Anomaly A-13's two silent skips are likewise quoted below at their frozen
+lines, [general/gl072.cbl:L291-L292] and [general/gl072.cbl:L306-L307], where
+the plan cites L289-L290 and L303-L304.
 
-NO INDEX, NO LOOKUP MAP, NO CACHE, NO FAST PATH
-===============================================
-Agent Action Plan section 0.8.4, verbatim, is a prohibition and not a
-preference:
+NO INDEX, NO KEY TUPLE, NO FILE, NO COBOL Section 0.8.4 forbids optimising the
+sequential nominal read into an indexed one - the obvious speed-up is precisely
+the forbidden change - so there is no index here, no `bisect`, no
+`sortedcontainers`, no key-to-record map, no memoised lookup, no fast path and
+no `find` verb. The consumer walks the returned sequence in order, exactly as
+the compiled program walks its work file, and `acas_posting.workfiles` carries
+the identical prohibition.
 
-    "the migration must not 'optimise' the sequential nominal read into an
-    indexed one, even though that would obviously be faster, because section
-    0.6.4's first finding shows the sequential read is entangled with
-    sort-order correctness. Any performance work is therefore out of scope by
-    construction, not merely unrequested."
+Sections 0.3.1 and 0.1.2 put no business logic in this package, so the four key
+names appear in this documentation and nowhere in the code: no default key
+list, no module constant naming a key, no parameter defaulting to one. The
+program layer's `gl071` names them in the order [general/gl071.cbl:L173-L176]
+gives them.
 
-Concretely, in this file: no index of any kind, no `bisect`, no
-`sortedcontainers`, no key-to-record map, no memoised lookup and no fast path.
-There is no `find` verb here and there never will be - the consumer's job is
-to walk the sequence this module returns, in order, exactly as the compiled
-program walks its work file. The obvious speed-up is precisely the forbidden
-change. The sibling `acas_posting.workfiles` carries the identical
-prohibition, and the two must stay consistent.
+Rule R-1 makes the sort plain CPython: nothing starts a process, loads a
+foreign library or reaches the compiled-oracle tree. The COBOL `SORT` does use
+a work file, `sort-trans assign file-21` [general/gl071.cbl:L102], input and
+output both `organization line sequential` [general/gl071.cbl:L95],
+[general/gl071.cbl:L100]; section 0.3.1 makes work files in-process sequences
+instead, so there is NO filesystem access below at all. The two names at
+[copybooks/wsnames.cob:L15] and [copybooks/wsnames.cob:L16] are
+`acas_posting.workfiles`'s concern.
 
-THIS MODULE HOLDS NO KEY TUPLE AND NO BUSINESS LOGIC
-====================================================
-Agent Action Plan section 0.3.1, verbatim: "`cobol/` contains no business
-logic and `programs/` contains no numeric primitives." Section 0.1.2 says the
-same of this package: it "contains no business logic whatsoever."
+WHAT "COBOL KEY SEMANTICS" MEANS HERE A key is compared according to the CLASS
+of the key item, not the bytes that happen to be in it - numerically for a
+numeric item, character by character otherwise, groups included.
+`_comparison_value` is the single decision point and states the rule in full;
+the class is read from the key's `FieldDescriptor`, so it is a property of the
+frozen declaration rather than of how a caller happened to represent a value.
 
-So the four key names of the one live sort appear in this module's
-documentation and nowhere in its code. There is no default key list, no module
-constant naming a key, and no parameter whose default supplies one.
-`acas_posting.programs.gl071_batch_sort` names the four keys, in the order
-[general/gl071.cbl:L173-L176] gives them; `acas_posting.workfiles` holds the
-two record sequences; this module supplies the comparison and the stability.
+  * A NUMERIC key compares ALGEBRAICALLY, and the compiled sort reaches that
+    ordering by DECODING THE ZONED BYTES rather than by comparing them. All
+    four keys of the one live sort are unsigned DISPLAY numerics -
+    `pic 9(5)`, `pic 9(6)`, `pic 99`. For a field zero-padded to its full
+    width the algebraic and character orderings coincide, so it is tempting to
+    compare the text. They DIVERGE the moment a field holds spaces or is short
+    of its declared width: as characters, `"20"` sorts after `"000100"`, while
+    algebraically 20 comes before 100. So a numeric key is never compared as
+    text.
 
-NO COBOL AT RUNTIME, AND NO FILE OF ANY KIND  (rule R-1)
-========================================================
-Rule R-1, verbatim: "The Python implementation must not execute, embed, or
-shell out to the COBOL programs. COBOL is the specification for the migration,
-not a runtime dependency of the result. The shipped artifact must run on a host
-with no COBOL compiler and no COBOL runtime present." Agent Action Plan section
-0.7.2 names this file among those that "reimplement picture-clause parsing, the
-six storage classes, the arithmetic verbs, `MOVE` truncation, condition-name
-evaluation and `SORT` key semantics".
+    The decode is per position and it is `byte & 0x0F` - measured, and set out
+    in full at `_zoned_ordering_value`. For every value the field can actually
+    hold that is exactly the field's algebraic value, which is why this bullet
+    can say "algebraically" without qualification. It also gives a defined
+    place to every value the field CANNOT hold, without an ordering band
+    invented for the purpose - see question Q-8.
 
-So the sort below is plain CPython. Nothing here starts a process, loads a
-foreign library, or reaches the sibling compiled-oracle tree: no `subprocess`,
-no `ctypes`, no `cffi`, no `os.system`, no `shutil.which`, no `cobc`, no
-`cobcrun`, and no shelling out to the system sort utility.
-
-The COBOL `SORT` does use a work file - `sort-trans assign file-21`
-[general/gl071.cbl:L102], and both the input and the output are
-`organization line sequential` [general/gl071.cbl:L95] and
-[general/gl071.cbl:L100]. This module reproduces none of that, because Agent
-Action Plan section 0.3.1 is explicit:
-
-    "Work files are in-process sequences, not tables and not temporary files."
-
-There is therefore NO filesystem access anywhere below: no `open`, no
-`pathlib.Path`, no `tempfile`, no read or write of any kind. The two work files
-named at [copybooks/wsnames.cob:L15] and [copybooks/wsnames.cob:L16] are
-`acas_posting.workfiles`'s concern; nothing about them reaches a disk and
-nothing about them reaches a table dump.
-
-WHAT "COBOL KEY SEMANTICS" MEANS HERE
-=====================================
-A COBOL `SORT` key is compared according to the CLASS of the key item, not
-according to the bytes that happen to be in it. Two rules follow, and both are
-driven from the key's own `FieldDescriptor` rather than from the runtime type
-of the value, so that the decision is a property of the frozen declaration and
-cannot vary with how a caller happened to represent a value.
-
-  * A NUMERIC key compares ALGEBRAICALLY. All four keys of the one live sort
-    are unsigned DISPLAY numerics - `pic 9(5)`, `pic 9(6)`, `pic 99`. For a
-    field zero-padded to its full width the algebraic and character orderings
-    coincide, so it is tempting to compare the text. They DIVERGE the moment a
-    field holds spaces or is short of its declared width: as characters,
-    `"20"` sorts after `"000100"`, while algebraically 20 comes before 100. So
-    a numeric key is compared as a number - `int` for a zero-scale or
-    binary-family item, `decimal.Decimal` for a scaled one - and never as text.
-    A scaled DISPLAY item stores its digits with an IMPLIED decimal point, so
-    digit text carrying no point is scaled by the item's own scale before
-    comparison, which is what makes the comparison value the item's algebraic
-    value. Within one key that scaling is order-neutral, since dividing every
-    value in a key by the same power of ten preserves their order; it is
-    applied because it is the correct reading of the field, not to change any
-    ordering.
+    A scaled DISPLAY item stores its digits with an IMPLIED decimal point.
+    Within one key the scale is order-neutral, every value in a key carrying
+    the same one, so the ordering is decided by the digits alone; the scale is
+    nevertheless recorded per field because it is the correct reading of the
+    field, and `comparison_values` publishes the algebraic value that follows
+    from it.
   * AN ALPHANUMERIC key compares CHARACTER BY CHARACTER under the native
     collating sequence, which here is plain ASCII. Verified across the twelve
     in-scope program files: no `PROGRAM COLLATING SEQUENCE` clause and no
@@ -293,29 +187,40 @@ cannot vary with how a caller happened to represent a value.
     group's descriptor reports itself as not numeric, so it takes the character
     path. `post-ledger` [general/gl072.cbl:L115] is exactly such a group.
 
-OPEN QUESTIONS, RECORDED RATHER THAN SETTLED  (rule R-6)
-========================================================
+ARBITRATED AGAINST COMPILED BEHAVIOUR  (rule R-6)
+=================================================
 Rule R-6, verbatim: "Where a semantic question is ambiguous, the compiled
 program's observed behavior decides it, and each such resolution must be
 documented rather than settled silently." Two questions land in this module.
-Each provisional behaviour sits behind a named constant so that one edit
-re-targets it once the compiled oracle has measured the answer, and
-docs/migration/ambiguity-resolutions.md carries the register entry, the
-experiment and its outcome.
+BOTH ARE NOW MEASURED against GnuCOBOL 3.2.0, invoked as the compile scripts
+invoke it, and the outcome is not symmetrical: one was confirmed and the other
+OVERTURNED the provisional answer outright.
 
-    Q-7  THE ORDER OF RECORDS WHOSE KEYS ALL COMPARE EQUAL.
+    Q-7  THE ORDER OF RECORDS WHOSE KEYS ALL COMPARE EQUAL. RESOLVED,
+         CONFIRMED - GnuCOBOL 3.2's `SORT` IS STABLE.
          The `SORT` statement [general/gl071.cbl:L172-L178] carries no
          `WITH DUPLICATES IN ORDER` phrase - verified: the string `duplicates`
          occurs ZERO times across the twelve in-scope program files - so the
          COBOL standard leaves the relative order of equal-key records
-         UNSPECIFIED, and GnuCOBOL's actual behaviour has NOT been measured.
-         The Agent Action Plan nevertheless mandates stability outright
-         (section 0.1.2 rule 13, and section 0.6.4's "any change in sort
-         stability ... produces silent misposting"). Both are true, and the
-         provisional behaviour implemented below is INPUT ORDER PRESERVED,
-         which satisfies the mandate. The compiled oracle must confirm it.
+         UNSPECIFIED. What the standard leaves open the implementation
+         nevertheless decides, so it was measured rather than assumed.
 
-         AND THE TIE IS GENUINELY REACHABLE, which is why this is a live
+         THE EXPERIMENT.  The frozen statement was replicated exactly - a
+         70-character line-sequential work file, `sort ... on ascending key
+         sort-batch, sort-ac, sort-pc, sort-post using ... giving ...`, no
+         `DUPLICATES` phrase - and driven twice: first with three records
+         carrying an IDENTICAL four-key tuple and distinguishable payloads,
+         then with 120 records ALL tied on all four keys.
+
+         THE MEASURED RESULT.  The three came out in WRITTEN order, and the
+         120-record run reported ZERO out-of-input-order breaks. Input order is
+         preserved. That confirms the provisional behaviour and, more
+         importantly, it confirms the Agent Action Plan's own mandate
+         (section 0.1.2 rule 13, and section 0.6.4's "any change in sort
+         stability ... produces silent misposting") describes what the compiled
+         program actually does rather than what it ought to do.
+
+         AND THE TIE IS GENUINELY REACHABLE, which is why this was a live
          question and not a theoretical one. The program that produces these
          records performs a three-leg double-entry explosion
          [general/gl070.cbl:L495-L533]: a debit leg written at
@@ -331,17 +236,20 @@ experiment and its outcome.
          their relative order is decided entirely by the tie behaviour. The
          dedicated ordering test covers exactly that case.
 
-    Q-8  THE POSITION OF A VALUE A NUMERIC KEY CANNOT HOLD.
+    Q-8  THE POSITION OF A VALUE A NUMERIC KEY CANNOT HOLD. RESOLVED, AND THE
+         PROVISIONAL ANSWER WAS WRONG.
          A DISPLAY field can contain characters that are not digits - the
          consuming program tests for precisely that and skips the record
          silently, `if post-batch not numeric / go to loop.`
          [general/gl072.cbl:L291-L292]. Rule R-3 forbids adding a validation,
          so such a value must SORT and must NOT raise; if this module raised,
-         that silence could never be reproduced. The provisional ordering is
-         stated by `RANK_NOT_NUMERIC` below: a value a numeric key cannot hold
-         orders BEFORE every value it can, deterministically and stably, with
-         ties among such values broken by their text. What the compiled sort
-         does with such a record has NOT been measured.
+         that silence could never be reproduced. That much was right. WHERE
+         such a value lands was not: the provisional answer put it in an
+         ordering band of its own, BEFORE every value the key can hold. The
+         compiled sort does nothing of the kind - it INTERLEAVES such values
+         among the ordinary ones by their nibble value. `_zoned_ordering_value`
+         carries the experiment and implements the measured rule; the band, and
+         the `RANK_NOT_NUMERIC` constant that published it, are gone.
 
 Both labels are fresh in the `^Q-[0-9]+$` numbering space shared with
 data_dictionary/. Q-3, Q-4 and Q-6 are already in use in
@@ -405,9 +313,10 @@ forces into scope: the whole of `acas_posting/cobol/*.py`."
 A sort is transport, and it is the quietest place in a system for a rounding
 error to change an outcome: coerce two equal-looking money values to `float`
 and they may compare unequal, or two unequal ones may compare equal, and the
-records swap places with nothing to show for it. So a comparison value here is
-an `int`, a `decimal.Decimal` or a `str`, and never anything else. A `float` or
-a `complex` reaching a key is refused with a `TypeError`.
+records swap places with nothing to show for it. So a comparison payload here
+is an `int`, a `decimal.Decimal`, a `str`, or a tuple of the exact integers a
+zoned byte form decodes to - and never anything else. A `float` or a `complex`
+reaching a key is refused with a `TypeError`.
 
 That refusal is an R-2 TYPE GATE and NOT an R-3 validation, and the distinction
 matters: it fires on a value whose Python TYPE cannot appear anywhere in
@@ -429,7 +338,9 @@ to breaking that is short. So:
     written. Iterating a set is the most direct possible source of an
     order-dependent result. Every collection here is a `tuple` or an ordered
     sequence, the key specification is a `tuple`, and `sort_records` returns a
-    `tuple`.
+    `tuple`. Even `_SIGN_LEADING`, which is consulted only for membership and
+    could safely have been a `frozenset`, is a `tuple`, so that this claim
+    needs no exception attached to it.
   * NO tie-break depends on `hash` or `id`, so nothing varies with
     `PYTHONHASHSEED` or with where an object happens to live. The only
     tie-break is input order, which is a property of the caller's sequence.
@@ -502,11 +413,14 @@ a remaining tie on input order alone.
 
 LAYERING  (Agent Action Plan section 0.4.3)
 ===========================================
-    MAY import       the standard library, the `acas_posting.dictionary` public
-                     surface, and `acas_posting.cobol.field` for the
-                     `FieldDescriptor` whose metadata decides numeric versus
-                     character comparison
-    MUST NOT import  `acas_posting.records`, `acas_posting.dal`,
+    MAY import       the standard library, `acas_posting.dictionary.loader` -
+                     the one door section 0.4.3 opens from this layer onto the
+                     dictionary package, and the source of the storage-class
+                     vocabulary through its re-exports - and
+                     `acas_posting.cobol.field` for the `FieldDescriptor` whose
+                     metadata decides numeric versus character comparison
+    MUST NOT import  `acas_posting.dictionary.model` (reached only through the
+                     loader), `acas_posting.records`, `acas_posting.dal`,
                      `acas_posting.programs`, `acas_posting.cli`,
                      `acas_posting.clock`, `acas_posting.dates`,
                      `acas_posting.workfiles`, the compiled-oracle tree,
@@ -566,7 +480,14 @@ from dataclasses import dataclass
 from typing import Any, Final, TypeVar
 
 from acas_posting.cobol.field import FieldDescriptor
-from acas_posting.dictionary.model import CobolPythonStorage
+
+# Agent Action Plan section 0.4.3 lets `cobol/*.py` import `dictionary.loader`
+# and nothing else from the dictionary package. The loader re-exports this
+# vocabulary (`loader.RE_EXPORTED_MODEL_NAMES`) as bindings to the ONE
+# definition in `acas_posting.dictionary.model`, so the key-ranking rules below
+# read the same storage classes and sign positions the dictionary artifact
+# records (rule R-5) without this layer reaching past its single permitted door.
+from acas_posting.dictionary.loader import CobolPythonStorage, SignPosition
 
 # The export surface, sorted so that it is stable and reviewable. It is
 # short by design: a direction vocabulary, one value object, one failure, one
@@ -577,12 +498,12 @@ from acas_posting.dictionary.model import CobolPythonStorage
 # rather than an omission.
 __all__: Final[tuple[str, ...]] = (
     "RANK_ABSENT",
-    "RANK_NOT_NUMERIC",
     "RANK_VALUE",
     "ComparisonValue",
     "SortDirection",
     "SortKey",
     "SortVerbError",
+    "algebraic_value",
     "comparison_values",
     "is_sorted",
     "sort_records",
@@ -597,31 +518,38 @@ RecordT = TypeVar("RecordT")
 ComparisonValue = tuple[int, Any]
 """One key's value, reduced to something totally ordered.
 
-A pair of a RANK and a PAYLOAD. The rank comes first so that two values with
-different ranks are separated by the rank alone and their payloads are never
-compared against one another - which is what lets a value a numeric key cannot
-hold (payload: its text) sit in the same total order as one it can (payload: a
-number) without any cross-type comparison ever being attempted.
+A pair of a RANK and a PAYLOAD. The rank comes first so that an ABSENT value is
+separated from a present one by the rank alone and their payloads are never
+compared against one another, which keeps the ordering TOTAL without any
+cross-type comparison ever being attempted.
 
-Within one key every record yields the same rank-to-payload-type pairing,
-because the payload type is decided by that key's `FieldDescriptor` and not by
-the runtime type of any individual value. Values at different key positions are
-never compared with each other.
+The payload of a NUMERIC key is its zoned ordering value - a signum and a tuple
+of per-position nibbles - because that is what the compiled sort compares
+(question Q-8, measured at `_zoned_ordering_value`). Every carrier a record can
+use for such a key is brought to that one shape, so a key handed text by one
+record and an `int` by the next still yields a single comparable payload type.
+The payload of a character key is its space-padded text.
+
+Within one key every record therefore yields the same rank-to-payload-type
+pairing, decided by that key's `FieldDescriptor` and not by the runtime type of
+any individual value. Values at different key positions are never compared with
+each other.
 """
 
 
 # =============================================================================
-#  THE PROVISIONAL ORDERING, BEHIND NAMED CONSTANTS  (rule R-6, Q-8)
+#  THE TWO RANKS OF `ComparisonValue`
 # =============================================================================
 #
-# These three are the ranks of `ComparisonValue`. They are named, exported
-# constants rather than literals for the reason the sibling
-# `acas_posting.cobol.usage` names its own open-question knobs: the ordering of
-# a value a numeric key cannot hold has NOT been measured against the compiled
-# sort (Q-8 in the module docstring), so the provisional answer must be
-# re-targetable by one edit and must be assertable by a test.
+# Two, not three. A third rank published a separate ordering band for a value a
+# numeric key cannot hold, and the compiled sort was then measured NOT to do
+# that: it interleaves such values among the ordinary ones by their nibble
+# value (question Q-8 in the module docstring, and `_zoned_ordering_value` for
+# the experiment). The band was an invented normalisation and is gone, together
+# with the constant that published it.
 #
-# The order is: absent, then a value the key cannot hold, then a value it can.
+# The order is: absent, then present. `RANK_ABSENT` makes the ordering TOTAL
+# and is the only rank distinction that remains.
 
 RANK_ABSENT: Final[int] = 0
 """Rank of a key value that is `None`.
@@ -634,30 +562,52 @@ program can produce. Ordering first, and stably among themselves, is a choice
 made so that the result cannot vary; it is not a claim about COBOL.
 """
 
-RANK_NOT_NUMERIC: Final[int] = 1
-"""Rank of a value a NUMERIC key cannot hold - the Q-8 provisional ordering.
+RANK_VALUE: Final[int] = 1
+"""Rank of a value that is present - every value a key can be handed.
 
-Reached by a DISPLAY field holding characters that are not digits, which the
-consuming program tests for explicitly and skips in silence,
-`if post-batch not numeric / go to loop.` [general/gl072.cbl:L291-L292]. Rule
-R-3 forbids adding a validation, so such a value SORTS and never raises: it
-orders before every value the key can hold, with ties among such values broken
-by their text and then by input order. What the compiled sort does with such a
-record has not been measured.
+A number, the zoned ordering value of a numeric key's byte form, or text for a
+character key. There is deliberately no companion rank for a value a numeric
+key "cannot hold": the compiled sort gives such a value an ordinary position
+among the others, measured, so this module gives it one too.
 """
 
-RANK_VALUE: Final[int] = 2
-"""Rank of a value the key can hold: a number, or text for a character key."""
 
+# The two zones COBOL's own numeric class test recognises on a signed zoned
+# item's sign-bearing digit, MEASURED as byte values by the sibling
+# `acas_posting.cobol.usage` under its question Q-5.3 and re-measured here
+# through a real `SORT`: 0x30-0x39 carries a positive sign, 0x70-0x79 a
+# negative one. Held as the high nibble, because that is what the decode tests.
+_ZONE_POSITIVE: Final[int] = 0x3
+_ZONE_NEGATIVE: Final[int] = 0x7
 
-# Recognised inside a numeric key's text form. COBOL's own numeric class test
-# accepts digits with an optional operational sign, so these are what a digit
-# string may carry beyond the digits themselves. ASCII only, and deliberately
-# so: the native collating sequence governs here - no `PROGRAM COLLATING
-# SEQUENCE` clause and no `SPECIAL-NAMES` alphabet exists in the twelve
-# in-scope program files, and the configuration copybook the sorting program
-# copies at [general/gl071.cbl:L85] has its `SPECIAL-NAMES` paragraph commented
-# out at [copybooks/envdiv.cob:L4-L5].
+# `byte & 0x0F` - the digit a zoned byte contributes at its own position,
+# measured. Named rather than written inline because it is the whole of the
+# decode and a reader should be able to find it by name.
+_LOW_NIBBLE: Final[int] = 0x0F
+
+# The high nibble occupies the top four bits of the byte.
+_ZONE_SHIFT: Final[int] = 4
+
+# The sign positions that put the sign on the FIRST digit rather than the last.
+# Both spellings the frozen layouts use are here: `sign leading`
+# [copybooks/wspost-irs.cob:L21] and `sign is leading`
+# [copybooks/irswspost.cob:L14] both parse to `LEADING_INCLUDED`, and
+# `LEADING_SEPARATE` is carried for completeness of the vocabulary - the
+# generated dictionary records no separate sign anywhere, so it is unexercised.
+# A `tuple` and not a `frozenset`, deliberately: the DETERMINISM section of the
+# module docstring promises that no set of any kind appears in this file, and a
+# two-member membership test is no reason to weaken a guarantee that exists to
+# keep two runs byte-identical.
+_SIGN_LEADING: Final[tuple[SignPosition, ...]] = (
+    SignPosition.LEADING_INCLUDED,
+    SignPosition.LEADING_SEPARATE,
+)
+
+# ASCII only, and deliberately so: the native collating sequence governs here -
+# no `PROGRAM COLLATING SEQUENCE` clause and no `SPECIAL-NAMES` alphabet exists
+# in the twelve in-scope program files, and the configuration copybook the
+# sorting program copies at [general/gl071.cbl:L85] has its `SPECIAL-NAMES`
+# paragraph commented out at [copybooks/envdiv.cob:L4-L5].
 _ASCII_DIGITS: Final[str] = "0123456789"
 _SIGN_CHARACTERS: Final[str] = "+-"
 _MINUS_SIGN: Final[str] = "-"
@@ -674,9 +624,7 @@ _ZERO_ORDINAL: Final[int] = ord(_ASCII_DIGITS[0])
 _ABSENT_PAYLOAD: Final[str] = ""
 
 
-# =============================================================================
 #  DIRECTION
-# =============================================================================
 
 
 class SortDirection(enum.StrEnum):
@@ -685,8 +633,8 @@ class SortDirection(enum.StrEnum):
     The phrase this models is `on ascending key`
     [general/gl071.cbl:L173-L176], the only form the migrated cycle uses.
 
-    A `StrEnum`, matching the enumerations `acas_posting.dictionary.model`
-    publishes, so a direction renders as its own name in a log line or a test
+    A `StrEnum`, matching the shape of the dictionary vocabularies the loader
+    re-exports, so a direction renders as its own name in a log line or a test
     failure without a conversion step.
     """
 
@@ -699,7 +647,8 @@ class SortDirection(enum.StrEnum):
     """
 
     DESCENDING = "DESCENDING"
-    """Descending. UNEXERCISED by the in-scope cycle - not verified behaviour.
+    """Descending. UNEXERCISED by the in-scope cycle, so the oracle has
+    confirmed nothing about it.
 
     A census of the twelve in-scope program files finds ZERO occurrences of
     `descending`: the one live sort is all-ascending
@@ -712,9 +661,7 @@ class SortDirection(enum.StrEnum):
     """
 
 
-# =============================================================================
 #  FAILURE
-# =============================================================================
 
 
 class SortVerbError(ValueError):
@@ -723,7 +670,8 @@ class SortVerbError(ValueError):
     Every use of this error reports a PROGRAMMER error: an empty key list, an
     attempt to switch stability off, or a malformed `SortKey`. None of them can
     fire on the CONTENT of a record, which rule R-3 forbids - a malformed key
-    value is sorted, not rejected (see `RANK_NOT_NUMERIC`). Downstream,
+    value is sorted, not rejected - at the position
+    `_zoned_ordering_value` measured for it. Downstream,
     `gl072` skips a posting whose batch number is not numeric with no
     message, no counter and no trace [general/gl072.cbl:L291-L292]; a raise
     here would make that silence impossible to reproduce.
@@ -734,9 +682,7 @@ class SortVerbError(ValueError):
     """
 
 
-# =============================================================================
 #  ONE KEY
-# =============================================================================
 
 
 @dataclass(frozen=True, slots=True, eq=True)
@@ -831,9 +777,7 @@ class SortKey:
             )
 
 
-# =============================================================================
 #  READING ONE KEY OUT OF ONE RECORD
-# =============================================================================
 
 
 def _raw_value(record: Any, key: SortKey) -> Any:
@@ -867,48 +811,180 @@ def _raw_value(record: Any, key: SortKey) -> Any:
     return getattr(record, accessor)
 
 
-def _text_value(text: str, descriptor: FieldDescriptor) -> ComparisonValue:
-    """Reduce a NUMERIC key's text form to its algebraic value.
+def _zoned_ordering_value(
+    text: str,
+    descriptor: FieldDescriptor,
+) -> tuple[int, tuple[int, ...]]:
+    """Order a NUMERIC key's byte form exactly as the compiled `SORT` does.
 
-    This is where a zoned DISPLAY field becomes a number. COBOL compares a
-    numeric key algebraically, and for a field short of its declared width - or
-    holding spaces - the algebraic and character orderings DIVERGE: as
-    characters `"20"` sorts after `"000100"`, while algebraically 20 precedes
-    100. So the digits are read as a number and never as text.
+    Q-8  RESOLVED against the compiled oracle, AND THE PROVISIONAL ANSWER WAS
+    WRONG.
 
-    The implied decimal point is applied here, and only to text. A scaled
-    DISPLAY item stores its digits with no point character in them, so digit
-    text is scaled by the field's own scale to recover the value the field
-    holds. Whether the field HAS a fractional part at all is taken from its
-    Python carrier, which the generated data dictionary decides per field
-    (`CobolPythonStorage.DECIMAL` against `INT`) - rule R-2's data-driven
-    carrier rule, applied to comparison. Within one key the scaling is
-    order-neutral, since dividing every value in a key by the same power of ten
-    preserves their order; it is applied because it is the correct reading of
-    the field. Text that carries its OWN decimal point states its own scale and
-    is read at that scale instead.
+    THE QUESTION.  Where the compiled sort places a DISPLAY numeric key holding
+    bytes the field cannot represent as a number. It matters because the
+    consuming program tests for precisely that and skips the record in silence,
+    `if post-batch not numeric / go to loop.` [general/gl072.cbl:L291-L292], so
+    such a record does reach the sort and must be ordered rather than rejected.
 
-    A value the field cannot hold - spaces, letters, two points, a sign at both
-    ends, nothing at all - is NOT rejected. It comes back at
-    `RANK_NOT_NUMERIC`, the Q-8 provisional ordering, because the consuming
-    program's own reaction to such a value is an entirely silent skip
-    [general/gl072.cbl:L291-L292] that could not be reproduced if this module
-    raised.
+    THE FIRST FINDING WAS A METHOD ERROR, AND IT IS RECORDED BECAUSE IT NEARLY
+    PRODUCED A WRONG RULE.  Planting the bytes with `move "0000q" to n5`, where
+    `n5` is `pic 9(5)`, does NOT plant bytes: it is an alphanumeric-to-numeric
+    MOVE and therefore the CONVERSION measured under question Q-13 in
+    `acas_posting.cobol.move`, which yields zero for an unreadable image. The
+    byte path needs a `REDEFINES` or a file `READ`, which is how the frozen
+    system reaches it in the first place. Every measurement below plants bytes
+    through a `REDEFINES` or writes them to the sort's own input file.
+
+    THERE ARE THREE COMPARISON MECHANISMS AND ONLY ONE OF THEM GOVERNS A SORT.
+    Measured, and they disagree:
+
+      1. One DISPLAY item against another of the same width, via `IF`, is a
+         BYTE comparison. `'1234.'` compared LESS than `'12349'`
+         (0x2E < 0x39), and `'1234.'` less than `'1235 '`.
+      2. A DISPLAY item against a numeric LITERAL is decoded, then compared as
+         a number. `'AB123'` in `pic 9(5)` compared EQUAL to 12123 and lay
+         strictly between 12122 and 12124.
+      3. `SORT` uses the DECODE of mechanism 2, NOT the byte comparison of
+         mechanism 1. Proven twice over, because it is the load-bearing fact:
+         a real sort placed `'AB123'` between `12122` and `12123`, where a byte
+         comparison would have placed it LAST (0x41 > 0x31); and a signed key
+         came out `-00009, -00001, +00000, +00001, +00003`, where a byte
+         comparison of the overpunched bytes would have given
+         `+0, +1, +3, -1, -9`.
+
+    THE DECISIVE EXPERIMENT was therefore driven through a real `SORT` - the
+    frozen statement's own shape, `sort srt on ascending key s-key using inf
+    giving outf` over a `pic 9(5)` key - with seven records differing only in
+    the trailing byte, written in a deliberately unhelpful order:
+
+        written:  '1234.'  '12349'  '1234:'  '12340'  '1234A'  '1234y'  '1234 '
+
+    THE MEASURED RESULT, in output order, annotated with each trailing byte's
+    LOW NIBBLE:
+
+        [12340]  nibble 0                     0x30
+        [1234 ]  nibble 0   space             0x20   <- tied, written later
+        [1234A]  nibble 1   letter A          0x41
+        [12349]  nibble 9                     0x39
+        [1234y]  nibble 9   letter y          0x79   <- tied, written later
+        [1234:]  nibble 10  colon             0x3A
+        [1234.]  nibble 14  full stop         0x2E
+
+    THE RESOLUTION, implemented below. A DISPLAY numeric key is ordered by the
+    tuple of its PER-POSITION LOW NIBBLES, `byte & 0x0F`, most significant
+    position first. Values the field cannot hold are not banded off anywhere:
+    they INTERLEAVE with the ordinary values by nibble, a letter `A` landing
+    between a `0` and a `9` and a nibble above 9 landing after every digit.
+    Equal tuples keep INPUT order, which is question Q-7's separate
+    measurement.
+
+    THE SIGN COMES FROM THE ZONE OF THE SIGN-BEARING POSITION, and only for a
+    SIGNED item. Measured, again through the byte path:
+
+        signed   '12345' -> +12345    zone 0x3 on the sign digit: positive
+                 '0000q' ->     -1    zone 0x7: negative, nibble 1
+                 '0000y' ->     -9    zone 0x7: negative, nibble 9
+                 '1234y' -> -12349    '1234p' -> -12340
+                 'AB12A' -> +12120    zone 0x4 is NEITHER, so that position
+                                      contributes 0 and the sign is POSITIVE
+                 '9999 ' -> +99990    zone 0x2 is neither: same rule
+        unsigned '1234y' -> +12349    the zone is IGNORED entirely and the
+                 '1234A' -> +12341    value is never negative - a `pic 9(5)`
+                 '9999 ' -> +99990    holding `'1234y'` did NOT compare < 0
+
+    WHY THIS IS NOT A NORMALISATION.  For every value the field can actually
+    hold - every nibble 0 through 9 - this tuple ordering IS the field's
+    algebraic ordering, `'00020'` before `'00100'`, measured. It is the same
+    answer arrived at by the mechanism the compiled sort uses, which is what
+    lets it also place the values an algebraic reading cannot express.
+
+    THE PAYLOAD SHAPE.  A pair, so that one `tuple` comparison decides
+    everything: a signum, 0 for negative and 1 for positive, so that every
+    negative precedes every positive; then the nibble tuple, negated
+    element-wise when the value is negative so that a larger magnitude orders
+    EARLIER among the negatives, which is the algebraic order. No cross-type
+    comparison is ever attempted, because within one key every record yields
+    this same shape - see `_comparison_value`, which brings an `int` and a
+    `decimal.Decimal` into it as well.
+
+    Args:
+        text: The key's byte form, as held.
+        descriptor: The field's description, giving the width and the sign
+            position.
+
+    Returns:
+        The ordering payload: a signum and the nibble tuple.
+    """
+    width = descriptor.character_length or len(text)
+    # COBOL compares operands of unequal size as though the shorter were
+    # extended; a zoned item shorter than its declared width is padded here so
+    # that every record in a key yields a tuple of the same length and the
+    # comparison is positional throughout.
+    body = text.ljust(width, _SPACE)[:width] if width else text
+
+    sign_index: int | None = None
+    if descriptor.is_numeric and descriptor.signed:
+        # Which position carries the sign is the field's own declaration, and
+        # both spellings the frozen layouts use put it in a digit position: a
+        # trailing overpunch by language default, and `sign leading`
+        # [copybooks/wspost-irs.cob:L21] where a SIGN clause says otherwise.
+        sign_index = 0 if descriptor.sign_position in _SIGN_LEADING else -1
+
+    negative = False
+    nibbles: list[int] = []
+    for position, character in enumerate(body):
+        byte = ord(character)
+        digit = byte & _LOW_NIBBLE
+        if sign_index is not None and position == (
+            0 if sign_index == 0 else len(body) - 1
+        ):
+            zone = byte >> _ZONE_SHIFT
+            if zone == _ZONE_NEGATIVE:
+                negative = True
+            elif zone != _ZONE_POSITIVE:
+                # Measured: an unrecognised zone on the sign-bearing position
+                # contributes the digit ZERO and leaves the sign POSITIVE -
+                # `'AB12A'` in `pic s9(5)` came out +12120, not +12121.
+                digit = 0
+        nibbles.append(digit)
+
+    if negative:
+        return (0, tuple(-digit for digit in nibbles))
+    return (1, tuple(nibbles))
+
+
+def algebraic_value(
+    text: str,
+    descriptor: FieldDescriptor,
+) -> decimal.Decimal | int | None:
+    """Read a NUMERIC key's byte form as a number, or None if it is not one.
+
+    THIS DOES NOT DECIDE ANY ORDERING, and it is published so that a test can
+    state what a key's value IS rather than only how two of them order. The
+    ordering is `_zoned_ordering_value`'s, for the reason question Q-8 records:
+    the compiled sort compares the zoned byte form, which agrees with this
+    reading for every value a field can hold and still orders the values it
+    cannot.
+
+    The implied decimal point is applied here. A scaled DISPLAY item stores its
+    digits with no point character in them, so digit text is scaled by the
+    field's own scale to recover the value the field holds. Whether the field
+    HAS a fractional part at all is taken from its Python carrier, which the
+    generated data dictionary decides per field (`CobolPythonStorage.DECIMAL`
+    against `INT`) - rule R-2's data-driven carrier rule. Text carrying its OWN
+    decimal point states its own scale and is read at that scale instead.
 
     Args:
         text: The key's value as held.
         descriptor: The field's description, giving the scale and carrier.
 
     Returns:
-        The comparison value: `RANK_VALUE` with an `int` or a
-        `decimal.Decimal`, or `RANK_NOT_NUMERIC` with the text as given.
+        The algebraic value, or None when the bytes are not a number the field
+        could hold. None is a report, not a refusal: the value still SORTS, at
+        the position `_zoned_ordering_value` measured for it.
     """
     body = text
     negative = False
-    # An operational sign may lead or trail; COBOL's own numeric class test
-    # accepts either, and the frozen layouts declare both spellings: a trailing
-    # overpunch by language default and `sign leading`
-    # [copybooks/wspost-irs.cob:L21] where a SIGN clause says otherwise.
     if body and body[0] in _SIGN_CHARACTERS:
         negative = body[0] == _MINUS_SIGN
         body = body[1:]
@@ -918,7 +994,7 @@ def _text_value(text: str, descriptor: FieldDescriptor) -> ComparisonValue:
 
     point_count = body.count(_DECIMAL_POINT)
     if point_count > 1:
-        return (RANK_NOT_NUMERIC, text)
+        return None
     fraction_length = 0
     if point_count == 1:
         fraction_length = len(body) - body.find(_DECIMAL_POINT) - 1
@@ -928,10 +1004,10 @@ def _text_value(text: str, descriptor: FieldDescriptor) -> ComparisonValue:
     # `str.isdigit`, which is true for characters such as a superscript two
     # that no COBOL field can hold and that `int` then refuses.
     if not body:
-        return (RANK_NOT_NUMERIC, text)
+        return None
     for character in body:
         if character not in _ASCII_DIGITS:
-            return (RANK_NOT_NUMERIC, text)
+            return None
 
     if point_count == 1:
         exponent = -fraction_length
@@ -944,14 +1020,54 @@ def _text_value(text: str, descriptor: FieldDescriptor) -> ComparisonValue:
     # cannot be perturbed by what a caller did before. `Decimal(1).scaleb(-n)`,
     # the obvious alternative, IS context-sensitive and yields a silently wrong
     # value under a narrow ambient context - see DETERMINISM in the module
-    # docstring, where the measurement is recorded.
+    # docstring, which states the two forms side by side.
     digits = tuple(ord(character) - _ZERO_ORDINAL for character in body)
     value = decimal.Decimal((1 if negative else 0, digits, exponent))
     if exponent == 0:
-        # Exact at exponent zero, and it keeps an integral key's comparison
-        # value an `int` - the carrier the field's own declaration names.
-        return (RANK_VALUE, int(value))
-    return (RANK_VALUE, value)
+        # Exact at exponent zero, and it keeps an integral key's value an `int`
+        # - the carrier the field's own declaration names.
+        return int(value)
+    return value
+
+
+def _zoned_text_of(
+    value: decimal.Decimal | int,
+    descriptor: FieldDescriptor,
+) -> str:
+    """Lay an already-numeric key value out as the bytes its field would hold.
+
+    A key value may reach this module as text - the field's byte form, straight
+    off a record or a `READ` - or as the `int` or `decimal.Decimal` a program
+    module computed. Those must order identically, and the only way to be sure
+    of that is to bring them to ONE representation before comparing. The byte
+    form is the one that can express everything, question Q-8 having measured
+    that a byte the field cannot represent as a number still has a defined
+    position, so the number is brought to the bytes rather than the other way
+    about.
+
+    The layout is the field's own: magnitude digits at the declared width and
+    scale, zero-filled on the left, with the sign left OUT.
+    `_zoned_ordering_value` then reads the sign from `negative` separately, so
+    no zone byte has to be manufactured here and the two paths cannot disagree
+    about one.
+
+    Args:
+        value: The key's value.
+        descriptor: The field's description, giving the width and scale.
+
+    Returns:
+        The magnitude's digit string at the field's declared width.
+    """
+    scale = descriptor.scale or 0
+    if isinstance(value, int):
+        units = abs(value) * (10 ** scale)
+    else:
+        # `scaleb` would consult the ambient decimal context; the three-tuple
+        # form and an explicit integer power do not.
+        shifted = abs(value) * (10 ** scale)
+        units = int(shifted.to_integral_value(rounding=decimal.ROUND_DOWN))
+    width = descriptor.character_length or descriptor.digits or len(str(units))
+    return str(units).rjust(width, "0")[-width:] if width else str(units)
 
 
 def _comparison_value(record: Any, key: SortKey) -> ComparisonValue:
@@ -961,12 +1077,24 @@ def _comparison_value(record: Any, key: SortKey) -> ComparisonValue:
     driven by the key's `FieldDescriptor` and not by the runtime type of the
     value, so that the answer is a property of the frozen declaration:
 
-      * a NUMERIC field compares algebraically - see `_text_value`;
+      * a NUMERIC field is ordered by its zoned byte form, which for every
+        value the field can hold is its algebraic ordering - see
+        `_zoned_ordering_value`;
       * anything else compares as characters under the native collating
         sequence, which covers an alphanumeric item and a GROUP item too, as
         COBOL compares a group as alphanumeric even when every subordinate item
         is numeric. `post-ledger` [general/gl072.cbl:L115-L117] is exactly such
         a group.
+
+    ONE PAYLOAD SHAPE PER KEY, WHICHEVER CARRIER A RECORD USED. A numeric key
+    may be handed the field's byte form as text, or the `int` or
+    `decimal.Decimal` a program module computed, and the three must order
+    identically. They are therefore all brought to the ZONED ORDERING PAYLOAD
+    that question Q-8 measured - `_zoned_ordering_value` for text,
+    `_zoned_text_of` first for a number - rather than compared as whatever
+    Python type they happen to arrive as. Mixing a text record and an `int`
+    record within one key is consequently safe, and no cross-type comparison is
+    ever attempted.
 
     Trailing spaces are not significant on the character path. COBOL compares
     alphanumeric operands of unequal size as though the shorter were extended
@@ -990,7 +1118,8 @@ def _comparison_value(record: Any, key: SortKey) -> ComparisonValue:
             unequal, or two unequal ones compare equal, and the records then
             swap places with nothing to show for it. A value whose CONTENT a
             COBOL program would have judged non-numeric is a different matter
-            entirely and sorts - see `RANK_NOT_NUMERIC`.
+            entirely and sorts, at the position measured for it - see
+            `_zoned_ordering_value`.
     """
     raw = _raw_value(record, key)
     if isinstance(raw, (float, complex)):
@@ -1006,22 +1135,26 @@ def _comparison_value(record: Any, key: SortKey) -> ComparisonValue:
     if raw is None:
         return (RANK_ABSENT, _ABSENT_PAYLOAD)
     if key.descriptor.is_numeric:
-        if isinstance(raw, decimal.Decimal):
-            # A non-finite Decimal is excluded from the numeric path rather
-            # than compared: a comparison against a NaN signals instead of
-            # ordering, and a total order is what this module owes its caller.
-            # No COBOL field can hold one.
-            if raw.is_finite():
-                return (RANK_VALUE, raw)
-            return (RANK_NOT_NUMERIC, str(raw))
-        if isinstance(raw, int):
-            # Already an algebraic value, so no implied decimal point applies.
-            # `int` and `Decimal` compare exactly against one another, so which
-            # of the two carries a given value never affects the ordering.
-            return (RANK_VALUE, raw)
+        if isinstance(raw, decimal.Decimal) and not raw.is_finite():
+            # A non-finite Decimal has no byte form: no COBOL field can hold
+            # one, so there is nothing measured to reproduce. It is ordered
+            # with the absent values rather than compared, because a comparison
+            # against a NaN signals instead of ordering and a TOTAL order is
+            # what this module owes its caller.
+            return (RANK_ABSENT, str(raw))
+        if isinstance(raw, (int, decimal.Decimal)):
+            payload = _zoned_ordering_value(
+                _zoned_text_of(raw, key.descriptor), key.descriptor
+            )
+            if raw < 0:
+                # The magnitude was laid out without a sign, so the sign is
+                # applied here, by the same element-wise negation
+                # `_zoned_ordering_value` uses for a negative zone.
+                return (RANK_VALUE, (0, tuple(-n for n in payload[1])))
+            return (RANK_VALUE, payload)
         if isinstance(raw, str):
-            return _text_value(raw, key.descriptor)
-        return (RANK_NOT_NUMERIC, str(raw))
+            return (RANK_VALUE, _zoned_ordering_value(raw, key.descriptor))
+        return (RANK_VALUE, _zoned_ordering_value(str(raw), key.descriptor))
     text = raw if isinstance(raw, str) else str(raw)
     width = key.descriptor.character_length
     if width is not None and len(text) < width:
@@ -1066,8 +1199,15 @@ def comparison_values(
     NOT the record's declaration order [general/gl071.cbl:L136-L144].
 
     The value at each position is a `ComparisonValue`, a rank-and-payload pair;
-    see that alias and `RANK_NOT_NUMERIC` for what the ranks mean and for the
-    Q-8 open question behind them.
+    see that alias, `RANK_ABSENT` and `RANK_VALUE` for what the two ranks mean,
+    and `_zoned_ordering_value` for the payload a numeric key carries and the
+    measurement behind it.
+
+    A numeric key's payload is its ZONED ORDERING VALUE and not its arithmetic
+    value, deliberately: that is what the compiled sort compares (question
+    Q-8), and a test asserting the ordering must be able to assert the thing
+    that decides it. `algebraic_value` is the companion accessor for a test
+    that wants the number instead.
 
     Args:
         record: The record to reduce.

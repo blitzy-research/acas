@@ -1,35 +1,49 @@
-"""The ACAS posting-cycle data dictionary: model, generator and runtime loader.
+"""The machine-readable data dictionary: model, generator and runtime loader.
 
-`acas_posting.dictionary` carries the field-level authority of this migration.
-It holds the three modules that define, produce and read the mandated
-machine-readable data dictionary, and it holds nothing else:
+The dictionary is the field-level authority for this migration. Every entry is
+built from an authoritative triple - the copybook field declaration, the bridge
+host-variable declaration, and the `CREATE TABLE` column definition - so that
+field metadata is derived rather than transcribed by eye (rule R-5).
 
-    data_dictionary/acas_posting_dictionary.json
-        the generated artifact - one entry per field of every in-scope record,
-        committed to the repository rather than built on demand
-    data_dictionary/acas_posting_dictionary.schema.json
-        the JSON Schema that artifact is validated against
+Modules
+    model       the entry schema: the copybook/host-variable/column triple,
+                the drift and presence descriptions, and the derivation notes
+                for columns that exist only in the bridge
+    generate    parses copybooks/*.cob, common/*MT.scb, common/*MT.cbl and
+                mysql/ACASDB.sql and emits the JSON artifact, flagging any
+                field present in one source and absent from another
+    loader      runtime access, so any record field can cite its entry
 
-MODULE INVENTORY
-================
-Agent Action Plan section 0.4.1.6 states each module's role in a single line,
-quoted here verbatim so that this marker cannot drift from the plan:
+The artifact and its JSON Schema live in the sibling `data_dictionary/` tree,
+which is excluded from packaging; their paths are published by
+`acas_posting.__init__`.
 
-    model.py     "The dictionary schema: copybook field (name, picture,
-                 usage, sign, scale), bridge host variable, MySQL column
-                 (name, type) - plus derivation notes for bridge-only
-                 columns"
+Why the bridge and not the copybooks. The user's requirement, preserved in
+Agent Action Plan section 0.8.2, designates the maintainer's one-way
+COBOL-to-MySQL bridge as the authoritative record-layout to table mapping.
+`IRSPOSTING-REC` shows why that is not a stylistic choice: `POST4-DAY`,
+`POST4-MONTH` and `POST4-YEAR` appear in no copybook and exist only because
+the bridge derives them from a date string under a guarded substring rule
+[common/irspostingMT.cbl:L982-L987]. When the guard fails the three components
+stay zero while the raw date text is still stored, so the row is internally
+inconsistent - and both the derivation and its failure mode are recorded as
+dictionary facts rather than discovered later.
 
-    generate.py  "Parses all three sources and emits the JSON dictionary;
-                 flags any field present in one source and absent from
-                 another"
+Drift is recorded, never reconciled. A field may be signed in the copybook and
+unsigned in both the host variable and the column [common/salesMT.cbl:L305-L312],
+or 24 characters wide in the copybook and 32 in the host variable and the
+column [common/nominalMT.cbl:L299]. The dictionary states all three
+declarations so the data-access layer can reproduce the bridge's conversion,
+which happens before any SQL executes.
 
-    loader.py    "Runtime lookup so every record field cites its entry"
+Every bridge load paragraph initialises its host-variable group first, so an
+unset field reaches SQL as zero or space rather than `NULL`. That is why every
+column in the frozen schema can be declared `NOT NULL`, and why the Python
+layer defaults rather than omits.
 
-The package is closed at those three modules and this marker, and it has no
-subpackage. In particular there is no validation module here: the artifact is
-checked against its JSON Schema by a test under tests/, which is where a check
-that is allowed to fail belongs.
+The frozen sources are read as specification and never modified. The COBOL
+carries the maintainer's own notice, which is his to make and not this
+migration's to restate.
 
 THE AUTHORITATIVE SOURCE IS THE BRIDGE, NOT THE COPYBOOK
 ========================================================
@@ -160,26 +174,34 @@ exactly as it stands. The artifact's root members are `meta`, `sources`,
 The wider mapping - program to module, paragraph to function, field to
 dictionary entry - is recorded in docs/migration/traceability.md.
 
-WHERE THE ARTIFACT LIVES, AND THE PACKAGING CAVEAT
-==================================================
-The dictionary is a top-level repository SIBLING of `acas_posting`, and
-deliberately not package data. Agent Action Plan section 0.3.1 places
-data_dictionary/ beside the package rather than inside it, and pyproject.toml
-enforces that: package discovery includes "acas_posting*" and names
-"data_dictionary*" - together with "tests*", "docs*" and the compiled oracle's
-own tree - in its exclude list.
+WHERE THE ARTIFACT LIVES
+========================
+The dictionary's SOURCE OF TRUTH is a top-level repository SIBLING of
+`acas_posting`: Agent Action Plan sections 0.3.1 and 0.4.1.6 place
+data_dictionary/ beside the package rather than inside it, and nothing here
+relocates it. That is the file the generator writes and its `--check` mode
+compares against.
 
-One consequence follows, and is stated plainly here rather than discovered
-later: the artifact is NOT present inside an installed wheel. That is
-intended. The dictionary is repository data, consumed from a source checkout,
-which is how the oracle scripts and the test suites run.
+It is nonetheless SHIPPED, and it has to be: every record module builds its
+field descriptors from the dictionary during a normal import, so a distribution
+that could not reach it would fail on `import acas_posting.records.gl_posting`
+rather than merely lack a convenience. pyproject.toml carries a copy into the
+built distribution through a `package-dir` mapping that makes the repository's
+data_dictionary/ tree the acas_posting package's data directory, so a wheel
+holds the two JSON files at acas_posting/data_dictionary/ while the source of
+truth stays exactly where the plan puts it. tests/, docs/ and the compiled
+oracle's own tree remain unshipped, and no COBOL source, copybook or schema
+file enters a distribution in any form.
 
-Nothing here relocates, copies, vendors or symlinks it into the package, and
-nothing here re-derives its location. The path constants PACKAGE_ROOT,
-REPOSITORY_ROOT, DATA_DICTIONARY_DIR, DATA_DICTIONARY_PATH and
-DATA_DICTIONARY_SCHEMA_PATH belong to the parent package and are exported by
-it; `loader.py` reuses them and owns the absence case. A second walk up the
-tree here would be a second source of truth for one fact.
+Nothing here re-derives either location. The path constants PACKAGE_ROOT,
+REPOSITORY_ROOT, DATA_DICTIONARY_DIR and its explicit spelling
+REPOSITORY_DATA_DICTIONARY_DIR, PACKAGE_DATA_DICTIONARY_DIR and its explicit
+spelling PACKAGED_DATA_DICTIONARY_DIR with the two artifacts inside it,
+DATA_DICTIONARY_PATH, DATA_DICTIONARY_SCHEMA_PATH and the ordered
+DATA_DICTIONARY_SEARCH_PATH belong to the parent package and are exported by
+it; `loader.py` walks that order, prefers the packaged copy, and owns the case
+where neither is there. A second walk up the tree here would be a second
+source of truth for one fact.
 
 DETERMINISM OF THE GENERATED ARTIFACT  (rule R-6)
 =================================================
@@ -292,31 +314,16 @@ FURTHER READING
                                              state
 """
 
-# PROVENANCE
-# Every fact this package publishes is derived from the maintainer's own
-# one-way COBOL-to-MySQL bridge (common/*MT.scb and common/*MT.cbl), the record
-# copybooks under copybooks/, and the frozen schema mysql/ACASDB.sql. Those
-# files are the specification for this package and are never modified by it.
-# No licence grant is stated here: the COBOL carries the maintainer's own
-# notice, which is his to make and not this migration's to copy or replace.
+# Provenance. Every fact this package publishes is derived from the
+# maintainer's one-way COBOL-to-MySQL bridge (common/*MT.scb, common/*MT.cbl),
+# the record copybooks under copybooks/, and the frozen schema
+# mysql/ACASDB.sql. Those files are the specification and are never modified.
 
-# The public surface of this marker is EMPTY, and the empty tuple is the whole
-# statement. Agent Action Plan section 0.4.1.6 gives this file exactly one job,
-# "Package marker", and a marker that exports something has quietly taken on a
-# second one.
-#
-# WHY EMPTY, RATHER THAN AN INVENTORY OF THE THREE MODULE NAMES
-# Naming the submodules here would not be a harmless convenience. When a
-# package's `__all__` names its submodules, the star-import machinery is
-# documented to IMPORT them - so one `from ... import *` would pull in
-# `generate.py`, the parser of the frozen COBOL tree and the frozen schema, and
-# reintroduce by that route the very cost this marker exists to keep away from
-# `cobol/field.py` and all twenty-seven record modules. An empty surface closes
-# the star-import route as well as the plain-import one, and the three modules
-# are still named for a reader in MODULE INVENTORY above, as prose, which
-# informs without binding anything.
-#
-# A tuple rather than a list, so the surface cannot be extended or mutated in
-# place at run time; trivially sorted, because it is empty. Both are small
-# determinism guarantees in the spirit of rule R-6.
+# The public surface is deliberately empty: this file is a package marker, and
+# a marker that exports something has taken on a second job. Naming the three
+# submodules here would be worse than redundant - when a package's `__all__`
+# names its submodules the star-import machinery imports them, which would
+# pull in `generate`, the parser of the whole frozen tree, for anyone writing
+# `from ... import *`. An empty surface closes that route as well as the plain
+# one, and the module docstring still names the three for a reader.
 __all__: tuple[str, ...] = ()

@@ -2,44 +2,45 @@
 
 One module, two frozen copybooks, three MySQL-facing shapes. This file mirrors
 `copybooks/slwsinv.cob` and `copybooks/slwsinv2.cob` field for field and adds
-nothing. It declares nineteen plain dataclasses and no behaviour: no
-arithmetic, no SQL, no I/O, no predicate over a condition name. The Sales
-extract step `sl055` and the Sales posting step `sl060` read and mutate these
-layouts; what they do with them lives in `acas_posting/programs/`, not here.
+nothing. It declares nineteen plain dataclasses and no behaviour: no arithmetic,
+no SQL, no I/O, no predicate over a condition name. The Sales extract step
+`sl055` and the Sales posting step `sl060` read and mutate these layouts; what
+they do with them lives in `acas_posting/programs/`, not here.
 
 WHY TWO COPYBOOKS PAIR INTO ONE MODULE - THE LOAD-BEARING FACT
-=============================================================
-The Agent Action Plan's transformation row for this file, section 0.4.1.3,
-names both copybooks as its source and summarises the change as "Header and
-lines, matching the two-table split". That pairing is structural rather than
-editorial, and the reason is visible only when all four naming layers are set
-side by side:
+==============================================================
+The Agent Action Plan's transformation row for this file, section 0.4.1.3, names
+both copybooks as its source and summarises the change as "Header and lines,
+matching the two-table split". That pairing is structural rather than editorial,
+and the reason is visible only when all four naming layers are set side by side:
 
-    layer                                    header       lines
-    ---------------------------------------  -----------  -------------
-    copybooks/slwsinv.cob     the layout     sih-         sil-
-                                             [slwsinv.cob:L21]  [:L83]
-    copybooks/slwsinv2.cob    the second     ih-          il-
-                              view set       [slwsinv2.cob:L40] [:L92]
-    bridge working storage    after the      WS-Sih-      WS-Sil-
-                              REPLACING      [slinvoiceMT.cbl:L457] [:L362]
-    bridge host variables ->  the columns    HV-IH- -> IH-  HV1-IL- -> IL-
-                              MySQL          [slinvoiceMT.cbl:L392] [:L428]
+    layer                     role          header        lines
+    ------------------------  ------------  ------------  ------------
+    copybooks/slwsinv.cob     the layout    sih-  [L21]   sil-  [L83]
+    copybooks/slwsinv2.cob    2nd view set  ih-   [L40]   il-   [L92]
+    bridge working storage    post-REPLACE  WS-Sih- [457]  WS-Sil- [362]
+    bridge host variables     the columns   HV-IH-  [392]  HV1-IL- [428]
 
-The bridge copies `slwsinv.cob` and never `slwsinv2.cob` - `grep -n 'copy "'`
-over `common/slinvoiceMT.cbl` returns `envdiv.cob` L255, `wsfnctn.cob` L447,
-`Test-Data-Flags.cob` L451 and `slwsinv.cob` L456, and nothing else. Yet every
-column is spelt with `slwsinv2.cob`'s `ih-` / `il-` prefix. So one copybook
-supplies the bytes and the other supplies the names, and a reader who consults
-only the first cannot explain a single column name in either table.
+Line numbers are in each row's own copybook for the first two rows and in
+`common/slinvoiceMT.cbl` for the last two. The host-variable prefixes shed
+their `HV`/`HV1` on the way to the column names, becoming `IH-` and `IL-`.
+
+The bridge copies `slwsinv.cob` and never `slwsinv2.cob`. Matching `copy "`
+case-insensitively over `common/slinvoiceMT.cbl` returns six statements -
+`envdiv.cob` L255, `wsfnctn.cob` L447, `Test-Data-Flags.cob` L451 and
+`slwsinv.cob` L456, plus the two the preSQL translator emits in upper case,
+`mysql-variables.cpy` L385 and `mysql-procedures.cpy` L1420. `slwsinv2.cob` is
+not among them. Yet every column is spelt with `slwsinv2.cob`'s `ih-` / `il-`
+prefix, so one copybook supplies the bytes and the other supplies the names, and
+a reader who consults only the first cannot explain a single column name.
 
 The practical consequence governs every line below: the entry for `sih-net`
 [copybooks/slwsinv.cob:L45] is keyed `SAINVOICE-REC.IH-NET`, never
-`SAINVOICE-REC.SIH-NET`. Upper-casing a field name to build a key produces a
-key that does not exist. Every key in this module was obtained by reading the
-generated dictionary and matching each entry's `copybook.name` to its field -
-never by transforming a name - and the keys are written out here so that a
-reviewer can check each one against the artifact.
+`SAINVOICE-REC.SIH-NET`, so upper-casing a field name to build a key produces a
+key that does not exist. Every key here was obtained by reading the generated
+dictionary and matching each entry's `copybook.name` to its field, never by
+transforming a name, and the keys are written out so a reviewer can check each
+one against the artifact.
 
 THE ENTITY THIS RECORD BELONGS TO
 =================================
@@ -50,15 +51,15 @@ THE ENTITY THIS RECORD BELONGS TO
                    SAINV-LINES-REC      14 columns, PK IL-LINE-KEY char(10)
 
 Invoice is one of only two in-scope entities owning two tables - the other is
-PInvoice through `acas026` and `plinvoiceMT` - which is part of why Agent
-Action Plan section 0.3.1 mirrors the handler boundary rather than the table
-boundary in the data-access layer. Both tables are `NOT NULL` throughout with
-a single-column primary key and no secondary index, which is what makes the
+PInvoice through `acas026` and `plinvoiceMT` - which is part of why Agent Action
+Plan section 0.3.1 mirrors the handler boundary rather than the table boundary
+in the data-access layer. Both tables are `NOT NULL` throughout with a
+single-column primary key and no secondary index, which is what makes the
 scenario state dump a plain ordered `SELECT`.
 
 THE BRIDGE IS A TRANSFORMATION, NOT A PIPE - ITS OWN WORDS
 ==========================================================
-Two declarations in the bridge prove it, and both are quoted verbatim because
+Two declarations in the bridge settle it, and both are quoted verbatim because
 paraphrase loses the force. First the four-part REPLACING clause
 [common/slinvoiceMT.cbl:L456-L459]:
 
@@ -72,104 +73,93 @@ preceded by the maintainer's explanation [common/slinvoiceMT.cbl:L452-L454]:
     "Using the first record but not the 2nd as it uses occurs 40 but
      to reduce Ram usage get rid of the occurs."
 
-Four transformations in one clause: the `01` name is renamed, every header
-field gains a prefix, `occurs 40.` is textually DELETED, and every `sil-` line
-field is renamed `Un-Used-Sil-` - deliberately neutralised. Second, the bridge
-then declares its own line record inline [common/slinvoiceMT.cbl:L361-L377],
-flat at `03` level, one level shallower than the copybook's `05`/`07` nesting,
-with no OCCURS, and closing on `03 filler pic x.` [L377] whose comment reads
-"size 80 to here -1 26/7/23 2 match slwsinv".
+Four transformations in one clause: the `01` name is renamed, every header field
+gains a prefix, `occurs 40.` is textually DELETED, and every `sil-` line field
+is renamed `Un-Used-Sil-` - deliberately neutralised. Second, the bridge then
+declares its own line record inline [common/slinvoiceMT.cbl:L361-L377], flat at
+`03` level, one level shallower than the copybook's `05`/`07` nesting, with no
+OCCURS, closing on `03 filler pic x.` [L377] commented "size 80 to here -1
+26/7/23 2 match slwsinv". The dataclasses below are built from the COPYBOOKS,
+not from that inline block; the inline block matters here only as evidence, and
+for one anomaly it alone explains - see `sil-Back-Ordered` under ANOMALIES.
 
-The dataclasses below are built from the COPYBOOKS, not from that inline
-block. The inline block matters here only as evidence, and for one anomaly it
-alone explains - see `sil-Back-Ordered` under ANOMALIES.
-
-One further bridge fact worth recording: the `/MYSQL VAR\\` directive declares
-TWO tables with TWO host-variable prefixes [common/slinvoiceMT.cbl:L381-L384],
-which no other in-scope bridge does:
-
-    *> /MYSQL VAR\\
-    *>       ACASDB
-    *>       TABLE=SAINVOICE-REC,HV
-    *>       TABLE=SAINV-LINES-REC,HV1
+One further bridge fact worth recording: the preSQL directive block
+[common/slinvoiceMT.cbl:L381-L384] names the schema `ACASDB` and then declares
+TWO tables with TWO host-variable prefixes, `TABLE=SAINVOICE-REC,HV` followed by
+`TABLE=SAINV-LINES-REC,HV1`. Counted strictly between the directive's opening
+and closing markers, eighteen of the twenty in-scope bridges declare a single
+table and only two declare a pair - this one and `plinvoiceMT`, the same
+Invoice-shaped exception seen from the Purchase side.
 
 THE THREE VIEWS OF slwsinv2.cob
 ===============================
 `slwsinv2.cob` declares three `01` levels over one buffer, two of them
-REDEFINES:
+REDEFINES [copybooks/slwsinv2.cob:L27], [:L38], [:L91]:
 
-    01  Invoice-Record.                              [slwsinv2.cob:L27]  137
-    01  Invoice-Header redefines Invoice-Record.      [slwsinv2.cob:L38]  137
-    01  Invoice-Line   redefines Invoice-Record.      [slwsinv2.cob:L91]   80
+    01  Invoice-Record.                            137 bytes
+    01  Invoice-Header redefines Invoice-Record.    137 bytes
+    01  Invoice-Line   redefines Invoice-Record.     80 bytes
 
 All three are modelled, as `InvoiceRecord`, `IhInvoiceHeader` and
-`IlInvoiceLine`. None is collapsed into another, none is treated as the real
-one, and the fact that the third is documented at 80 bytes while redefining a
-137-byte buffer is recorded and left open - it is an oracle question, not a
-question this file may settle. The base view is structurally different from
-its own redefine, too: it declares a flat `Invoice-Customer pic x(7)`
-[slwsinv2.cob:L31] where the redefine nests `ih-nos` and `ih-check`
-[slwsinv2.cob:L43-L44], and `Invoice-Line` starts its members at level 05
-directly under the `01`, with no `03` level at all.
+`IlInvoiceLine`, each with its own class docstring; none is collapsed into
+another and none is treated as the real one. The base view is structurally
+different from its own redefine, too: it declares a flat `Invoice-Customer pic
+x(7)` [:L31] where the redefine nests `ih-nos` and `ih-check` [:L43-L44], and
+`Invoice-Line` starts its members at level 05 directly under the `01`.
 
 BYTE ARITHMETIC - COMPUTED, REPORTED, NOT SETTLED
 =================================================
 Every subtotal was computed from the declared fields, taking each field's
 width from its dictionary entry rather than by counting characters by eye:
 
-    sih-prime            [slwsinv.cob:L19]  declares "42 bytes"
-                         8+2+6+1+4+10+1+10                        =  42  agrees
-    Sih-Sub-Prime        [slwsinv.cob:L41]  declares "95 bytes"
-                         32 + 8x5 + 1 + 5 + 1+1+4+4+1+4+1+1       =  95  agrees
-    SInvoice-Header      [slwsinv.cob:L18]  declares "137 bytes"
-                         42 + 95                                  = 137  agrees
-    Invoice-Line, one    [slwsinv.cob:L74]  "80 bytes each = 3200 bytes"
-    occurrence           8+2+13+2+2+1+32+5+5+2+5+1+1+1            =  80  agrees
-    filler redefines     overlays sih-order pic x(10)
-    sih-order            1+2+3+4                                  =  10  agrees
-    Invoice-Record       [slwsinv2.cob:L27] declares "137"
-                         8+2+7+4+10+1+10+95                       = 137  agrees
-    Invoice-Header       [slwsinv2.cob:L38] declares "137 bytes"  = 137  agrees
-    Invoice-Line         [slwsinv2.cob:L91] declares "80"         =  80  see below
+    sih-prime         [copybooks/slwsinv.cob:L19]  "42 bytes"
+                      8+2+6+1+4+10+1+10                       =  42  agrees
+    Sih-Sub-Prime     [:L41]                       "95 bytes"
+                      32 + 8x5 + 1 + 5 + 1+1+4+4+1+4+1+1      =  95  agrees
+    SInvoice-Header   [:L18]                       "137 bytes"
+                      42 + 95                                 = 137  agrees
+    Invoice-Line,     [:L77]   "80 bytes each = 3200 bytes"
+      one occurrence  8+2+13+2+2+1+32+5+5+2+5+1+1+1           =  80  agrees
+    filler redefines  overlays sih-order pic x(10)
+      sih-order       1+2+3+4                                 =  10  agrees
+    Invoice-Record    [copybooks/slwsinv2.cob:L27]  "137"
+                      8+2+7+4+10+1+10+95                      = 137  agrees
+    Invoice-Header    [copybooks/slwsinv2.cob:L38]  "137 bytes" = 137  agrees
+    Invoice-Line      [copybooks/slwsinv2.cob:L91]  "80"       =  80  see below
 
-The packed fields count 5 bytes each - nine digits plus a sign nibble - and
-the two `999v99 comp` fields count 4 while `99v99 comp` counts 2. The running
-comments the maintainer left inside the line record corroborate the third
-figure independently: "25" after `sil-pa`, "2 - 27" after `sil-qty`, "28"
-after `sil-type`, "60" after `sil-description` and "18 - 77" after `sil-vat`,
-which reaches 80 across the final three one-byte items.
+The packed fields count 5 bytes each - nine digits plus a sign nibble - and the
+two `999v99 comp` fields count 4 while `99v99 comp` counts 2. The running byte
+comments the maintainer left inside the line record corroborate the 80-byte
+figure independently, and are quoted where that record is declared.
 
-So every declared subtotal in both copybooks agrees with the sum of its
-fields. That is worth stating plainly because it is not the general case in
-this folder: the batch record's declared length contradicts its field sum, and
-so do the IRS system parameters. One item here does stay open, and it is a
-span rather than a sum - `Invoice-Line` [slwsinv2.cob:L91] describes 80 bytes
-of a 137-byte buffer, leaving 57 bytes unreachable through that view. COBOL
-permits a shorter REDEFINES, so this is legal rather than broken; what the
-compiled program actually reads past byte 80 is measured, not deduced.
+Every declared subtotal in both copybooks therefore agrees with its field sum,
+which is worth stating because it is not the general case in this folder: the
+batch record's declared length contradicts its field sum, and so do the IRS
+system parameters. One item does stay open, and it is a span rather than a sum
+- `Invoice-Line` [copybooks/slwsinv2.cob:L91] describes 80 bytes of a 137-byte
+buffer, leaving 57 unreachable through that view. COBOL permits a shorter
+REDEFINES, so this is legal rather than broken; what the compiled program reads
+past byte 80 has to be measured, not deduced.
 
-No record-length constant is declared anywhere in this module. The figures
-above appear in this docstring and in comments and nowhere else, deliberately,
-following the precedent that a declared-length-versus-field-sum disagreement
-is arbitrated by running the compiled program.
-
-Two open maintainer questions sit directly on this arithmetic and are quoted
-rather than answered - "42 ??? bytes" [slwsinv2.cob:L39], "95 ??? bytes"
-[slwsinv2.cob:L60], and, on its own line, "NEED TO DO A SIZING CHECK for all
-INVOICE copybooks." [slwsinv2.cob:L25].
+No record-length constant is declared anywhere in this module: the figures
+above live in this docstring and in comments only, following the precedent that
+a declared-length-versus-field-sum disagreement is arbitrated by running the
+compiled program. Two maintainer questions sit directly on this arithmetic and
+are quoted rather than answered - "42 ??? bytes"
+[copybooks/slwsinv2.cob:L39], "95 ??? bytes" [:L60], and "NEED TO DO A SIZING
+CHECK for all INVOICE copybooks." [:L25].
 
 FIELD-NAME COLLISIONS ACROSS THE TWO COPYBOOKS (ANOMALY A-21)
 =============================================================
 `pending`, `invoiced`, `day-booked` and `Invoice-Line` are each declared in
 BOTH copybooks, and `Invoice-Line` names two structurally different things: an
-`occurs 40` group subordinate to `SInvoice-Bodies` [slwsinv.cob:L81], and an
-`01`-level REDEFINES of a single buffer [slwsinv2.cob:L91]. In COBOL such
-collisions force qualified references, which is why the General Ledger posting
-path has to write `post-code in WS-Posting-Record` and `vat-ac of
-WS-Posting-Record` [general/gl070.cbl:L497], [:L521], [:L525]. The Python
-module namespace separates them for free through the class-name prefixes
-`Sih`/`Sil` for `slwsinv.cob` and `Ih`/`Il` for `slwsinv2.cob`, but the
-collision is recorded here because `docs/migration/traceability.md` has to
+`occurs 40` group under `SInvoice-Bodies` [copybooks/slwsinv.cob:L81], and an
+`01`-level REDEFINES of a single buffer [copybooks/slwsinv2.cob:L91]. In COBOL
+such collisions force qualified references, which is why the General Ledger
+posting path writes `post-code in WS-Posting-Record` and `vat-ac of
+WS-Posting-Record` [general/gl070.cbl:L497], [:L521], [:L525]. The class-name
+prefixes `Sih`/`Sil` and `Ih`/`Il` separate them here for free, but the
+collision is recorded because the migration's traceability document has to
 explain why the COBOL is qualified and this module is not.
 
 TYPE DISCIPLINE (R-2) - AND IT RUNS IN BOTH DIRECTIONS
@@ -183,44 +173,36 @@ TYPE DISCIPLINE (R-2) - AND IT RUNS IN BOTH DIRECTIONS
 
 The rule is scale, not usage: scale 0 gives `int`, scale above 0 gives
 `Decimal`, whichever usage is declared. "COMP means integer" is false here -
-`sih-deduct-amt pic 999v99 comp` [slwsinv.cob:L63] and `sil-discount pic 99v99
-comp` [:L92] are COMP and are `Decimal`, because they carry two decimal
-places. Getting that backwards in either direction changes stored values: a
-`Decimal` where the copybook declares a binary integer would carry a remainder
-the compiled program discards on divide, and an `int` where the copybook
-declares two decimal places would discard pence the compiled program keeps.
+`sih-deduct-amt pic 999v99 comp` [copybooks/slwsinv.cob:L63] and `sil-discount
+pic 99v99 comp` [:L92] are COMP and are `Decimal`, because they carry two
+decimal places. Getting that backwards changes stored values in either
+direction: a `Decimal` over a binary integer carries a remainder the compiled
+program discards on divide, and an `int` over two decimal places discards pence
+it keeps. There is no binary floating-point type anywhere in this module - not
+in computation, not in storage, not in transport.
 
-There is no binary floating-point type anywhere in this module, in any
-direction - not in computation, not in storage, not in transport.
+GROUP-USAGE INHERITANCE - SIXTEEN FIELDS WHOSE PICTURE LINE MISLEADS
+====================================================================
+    03  sih-fig                          comp-3.   [copybooks/slwsinv.cob:L43]
+    03  ih-fig                           comp-3.   [copybooks/slwsinv2.cob:L62]
 
-GROUP-USAGE INHERITANCE - SIXTEEN FIELDS WHOSE OWN PICTURE LINE LIES
-===================================================================
-    03  sih-fig                          comp-3.   [slwsinv.cob:L43]
-    03  ih-fig                           comp-3.   [slwsinv2.cob:L62]
-
-Each carries eight children [slwsinv.cob:L44-L51], [slwsinv2.cob:L63-L70]
-declared `pic s9(7)v99` with NO usage clause of their own. All sixteen are
-packed decimal by inheritance from the group header. Reading usage off the
-PICTURE line alone would type every one of them as zoned DISPLAY and every
-stored figure would be wrong, invisibly, until a state diff. Their descriptors
-therefore report `usage == COMP-3`, `usage_declared_at == GROUP` and
-`usage_inherited_from == "sih-fig"` / `"ih-fig"`, taken from the dictionary and
-never typed here.
-
-The opposite case is in this same module and is the reason the direction
-matters: `sih-deduct-amt` and `sih-deduct-vat` [slwsinv.cob:L63-L64], and
-`sil-net`, `sil-unit`, `sil-discount` and `sil-vat` [:L90-L93], each write
-their usage on their own PICTURE line, so those report `usage_declared_at ==
-FIELD` with `usage_inherited_from is None`.
+Each carries eight children [copybooks/slwsinv.cob:L44-L51],
+[copybooks/slwsinv2.cob:L63-L70] declared `pic s9(7)v99` with NO usage clause
+of their own, so all sixteen are packed decimal by inheritance from the group
+header. Reading usage off a child's own PICTURE line would type every one as
+zoned DISPLAY, and nothing would fail - every stored figure would simply be
+wrong until a scenario state diff showed it. Usage, scale and signedness are
+therefore read from the dictionary for all sixteen and never typed here. The
+`SihFig` and `IhFig` class docstrings carry the rule in full.
 
 DRIFT IS SURFACED, NEVER SETTLED
 ================================
 Where the copybook, the bridge host variable and the MySQL column disagree,
 this module reports the COPYBOOK view - because a record layout describes
 COBOL-side storage - and offers the disagreement untouched through
-`descriptor_for(...).drift()`. It never blends layers, never widens a field to
-a column width and never applies the bridge's signedness loss. Reproducing the
-bridge's conversion belongs to `acas_posting/dal/acas016_invoice.py`.
+`descriptor_for(...).drift()`. It never blends layers, never widens a field to a
+column width and never applies the bridge's signedness loss: reproducing that
+conversion belongs to the `acas016` handler module.
 
 Six fields lose their sign at the bridge, all of them integers:
 
@@ -239,9 +221,9 @@ those six are signed and their descriptors say so.
 
 Set against that, the money passes through cleanly: all sixteen `sih-fig` /
 `ih-fig` children are signed at copybook, host variable and column alike, as
-are `sil-net`, `sil-unit` and `sil-vat`. Money clean and integers narrowed, in
-one record - which is why field metadata is taken from the dictionary field by
-field and never inferred from what kind of thing a field is.
+are `sil-net`, `sil-unit` and `sil-vat`. Money clean and integers narrowed in
+one record is why field metadata is taken from the dictionary field by field
+and never inferred from what kind of thing a field is.
 
 ANOMALIES REPRODUCED HERE, NOT PUT RIGHT (R-4)
 ==============================================
@@ -251,125 +233,106 @@ From the preserved user requirement, Agent Action Plan section 0.8.2:
     specification, defects included.
     A defect reproduced is correct; a defect fixed is a failure."
 
-Each site below carries its own locator comment at the point of
-reproduction. The register is `docs/migration/anomaly-log.md`.
+Each site carries its own locator comment at the point of reproduction; the
+register is the migration's anomaly log.
 
- 1. `sil-Back-Ordered` [slwsinv.cob:L97-L98] and `il-Back-Ordered`
-    [slwsinv2.cob:L106] have NO bridge host variable and NO column -
+ 1. `sil-Back-Ordered` [copybooks/slwsinv.cob:L97-L98] and `il-Back-Ordered`
+    [copybooks/slwsinv2.cob:L106] have NO bridge host variable and NO column -
     `grep -inc "back-ordered" common/slinvoiceMT.cbl` returns 0, and
     SAINV-LINES-REC ends at IL-UPDATE with 14 columns. The cause is dated: the
-    bridge still models that byte as `03 filler pic x.` with the comment "size
-    80 to here -1 26/7/23 2 match slwsinv" [common/slinvoiceMT.cbl:L377],
-    while both copybooks replaced the filler with the named field on 03/03/24
-    [slwsinv.cob:L14-L15], [slwsinv2.cob:L20-L21]. Both fields are declared
-    here anyway. R-3 cuts both ways: nothing added AND nothing removed.
- 2. The `filler redefines sih-order` / `ih-order` autogen members - `sih-Freq`,
-    `sih-Repeat`, an inner `filler pic xxx` and `sih-Last-Date`
-    [slwsinv.cob:L28-L38] with their `ih-` twins [slwsinv2.cob:L47-L57] - have
-    no host variables and no columns either. Only the base view `IH-ORDER
-    char(10)` exists. This is consistent with the Sales autogen tables being
-    out of scope per Agent Action Plan section 0.2.2, and with the maintainer's
-    own open question "Redefines of il-Order for recurring support. Needed ??"
-    [slwsinv2.cob:L22]. All of them are declared here.
- 3. Two condition names share the value "D": `88 sih-Daily value "D"` and
-    `88 sih-Testing value "D"` [slwsinv.cob:L33-L34], mirrored at
-    [slwsinv2.cob:L52-L53], with the maintainer's "These two are only for
-    testing." / "So NOT documented and removed after tests." Both are carried.
-    A lookup keyed by value would collapse them.
+    bridge still models that byte as `03 filler pic x.` commented "size 80 to
+    here -1 26/7/23 2 match slwsinv" [common/slinvoiceMT.cbl:L377], while both
+    copybooks replaced the filler with the named field on 03/03/24
+    [copybooks/slwsinv.cob:L14-L15], [copybooks/slwsinv2.cob:L20-L21]. Both are
+    declared here anyway: R-3 cuts both ways, nothing added AND nothing removed.
+ 2. The autogen overlay members - `sih-Freq`, `sih-Repeat`, an inner `filler
+    pic xxx` and `sih-Last-Date` [copybooks/slwsinv.cob:L28-L38] with their
+    `ih-` twins [copybooks/slwsinv2.cob:L47-L57] - likewise have no host
+    variables and no columns; only the base `IH-ORDER char(10)` exists. All are
+    declared. The two overlay class docstrings carry the evidence.
+ 3. Two condition names share the value "D": `88 sih-Daily` and `88 sih-Testing`
+    [copybooks/slwsinv.cob:L33-L34], mirrored at
+    [copybooks/slwsinv2.cob:L52-L53]. Both are carried; a lookup keyed by value
+    would collapse them.
  4. The `88` value lists differ between the twins and the reason is written
     down. `slwsinv.cob` is dual case - `values "P" "p"` L53, `values "I" "i"`
     L54, `values "Z" "z"` L55, `values "B" "b"` L68, `values "Z" "z"` L70.
     `slwsinv2.cob` is upper case only - L72, L73, L74, L87, L89. Its own
     header says why: "Removed lowercase values so just using UC"
-    [slwsinv2.cob:L14]. Both lists are carried exactly as declared.
- 5. The condition name itself diverges: `88 sapplied` [slwsinv.cob:L55]
-    against `88 applied` [slwsinv2.cob:L74]. Both spellings are carried.
+    [copybooks/slwsinv2.cob:L14]. Both lists are carried exactly as declared.
+ 5. The condition name itself diverges: `88 sapplied`
+    [copybooks/slwsinv.cob:L55] against `88 applied`
+    [copybooks/slwsinv2.cob:L74]. Both spellings are carried.
  6. Within one file the header `88`s are dual case but the line `88` is single
-    case - `88 sil-analyised value "Z"` [slwsinv.cob:L96]. The asymmetry
-    stands.
+    case - `88 sil-analyised value "Z"` [copybooks/slwsinv.cob:L96]. The
+    asymmetry stands.
  7. `analyised` is a misspelling and it stays, at all four copybook sites
-    [slwsinv.cob:L70], [:L96], [slwsinv2.cob:L89], [:L105], and in the
-    bridge's own `WS-Sil-Analyised` [common/slinvoiceMT.cbl:L376].
+    [copybooks/slwsinv.cob:L70], [:L96], [copybooks/slwsinv2.cob:L89], [:L105],
+    and in the bridge's own `WS-Sil-Analyised` [common/slinvoiceMT.cbl:L376].
  8. Column reordering. `sih-lines` is declared immediately before
-    `sih-deduct-days` [slwsinv.cob:L61]; the bridge declares `HV-IH-LINES`
-    after `HV-IH-CR` [common/slinvoiceMT.cbl:L419] and the column sits at
-    ordinal 29, after `IH-CR` at 28. Dataclass field order below follows the
-    COPYBOOK, so the two orders differ by design.
+    `sih-deduct-days` [copybooks/slwsinv.cob:L61]; the bridge declares
+    `HV-IH-LINES` after `HV-IH-CR` [common/slinvoiceMT.cbl:L419] and the column
+    sits at ordinal 29, after `IH-CR` at 28. Dataclass field order below
+    follows the COPYBOOK, so the two orders differ by design.
  9. Bridge-only primary keys with dual materialisation. `HV-SINVOICE-KEY X(10)`
     [common/slinvoiceMT.cbl:L391] and `HV1-IL-LINE-KEY X(10)` [:L427] have no
-    copybook field of those names; each is the concatenation of a two-member
-    group, `move WS-Invoice-Key to HV-SINVOICE-KEY` [:L1455] and `move
-    WS-Sil-Key to HV1-IL-LINE-KEY` [:L2789]. The members are ALSO carried
-    separately, so each key group reaches the table twice - once concatenated
-    as an alphanumeric key, once split into its numeric parts. The group and
-    both children are declared, exactly as the copybook has them; no
-    concatenated attribute is invented, because that name exists only on the
-    column side and belongs to the handler module.
+    copybook field of those names; each concatenates a two-member group, whose
+    members are ALSO carried separately, so each key reaches the table twice.
+    No concatenated attribute is invented here. The `WsInvoiceKey` and `SilKey`
+    class docstrings carry the moves and the column names.
 10. Name truncation: `sih-date` / `ih-date` becomes `HV-IH-DAT`
     [common/slinvoiceMT.cbl:L395] and column `IH-DAT` - the trailing E is
-    dropped. The attribute keeps the copybook name; only the entry carries the
-    column name.
+    dropped. The attribute keeps the copybook name.
 11. Alphanumeric group concatenation: `sih-customer` / `ih-customer`, a group
     of `x(6)` plus `9`, becomes one `HV-IH-CUSTOMER X(7)`
-    [common/slinvoiceMT.cbl:L394] through `move WS-Sih-Customer to
-    HV-IH-CUSTOMER` [:L1459]. Group and both children are declared.
+    [common/slinvoiceMT.cbl:L394]. Group and both children are declared.
 12. Declaration beats comment, four times: `sih-test pic 99 value zero.  *>
-    WAS binary-char` [slwsinv.cob:L22], `sil-line pic 99.  *> was
-    binary-char.` [:L84], `ih-test` [slwsinv2.cob:L41] and `il-line` [:L93].
-    These are zoned DISPLAY at scale 0 and therefore `int`. The comment records
-    history; the declaration governs.
-13. Capital-F `Filler` [slwsinv2.cob:L33] sits beside lower-case `filler` at
-    L35 and L36. The casing is preserved in the descriptor's own name.
-14. Group-name casing diverges: `Sih-Sub-Prime` mixed case [slwsinv.cob:L41]
-    against `ih-sub-prime` lower case [slwsinv2.cob:L60], while `sih-prime`
-    L19 and `ih-prime` L39 are both lower case.
-15. `sih-day-book-flag pic x value space.` [slwsinv.cob:L67] carries a VALUE
-    clause; its twin `ih-day-book-flag pic x.` [slwsinv2.cob:L86] does not.
-    Preserved: one has a default, the other has none.
-16. The same divergence again, and it is not in the register yet:
-    `sih-test pic 99 value zero.` [slwsinv.cob:L22] carries a VALUE clause
-    while its twin `ih-test pic 99.` [slwsinv2.cob:L41] does not. Preserved
-    the same way.
-17. Two commented-out `filler`s [slwsinv.cob:L99], [slwsinv2.cob:L107], both
-    reading "was pic xx.", are dead source. Their existence is recorded here;
-    nothing is declared for them.
+    WAS binary-char` [copybooks/slwsinv.cob:L22], `sil-line pic 99.  *> was
+    binary-char.` [:L84], `ih-test` [copybooks/slwsinv2.cob:L41] and `il-line`
+    [:L93]. These are zoned DISPLAY at scale 0 and therefore `int`. The comment
+    records history; the declaration governs.
+13. Capital-F `Filler` [copybooks/slwsinv2.cob:L33] sits beside lower-case
+    `filler` at L35 and L36. The casing is preserved in the descriptor's name.
+14. Group-name casing diverges: `Sih-Sub-Prime` mixed case
+    [copybooks/slwsinv.cob:L41] against `ih-sub-prime` lower case
+    [copybooks/slwsinv2.cob:L60], while `sih-prime` L19 and `ih-prime` L39 are
+    both lower case - so the divergence is confined to that one group.
+15. `sih-day-book-flag pic x value space.` [copybooks/slwsinv.cob:L67] carries
+    a VALUE clause; its twin `ih-day-book-flag pic x.`
+    [copybooks/slwsinv2.cob:L86] does not. One has a default, the other none.
+16. The same divergence on a second field: `sih-test pic 99 value zero.`
+    [copybooks/slwsinv.cob:L22] carries a VALUE clause while its twin `ih-test
+    pic 99.` [copybooks/slwsinv2.cob:L41] does not. Preserved the same way.
+17. Two commented-out `filler`s [copybooks/slwsinv.cob:L99],
+    [copybooks/slwsinv2.cob:L107], both reading "was pic xx.", are dead source.
+    Their existence is recorded; nothing is declared for them.
 18. `pic xxx` and `pic xx` forms stand beside `pic x(n)` - the inner filler at
-    [slwsinv.cob:L37], `sil-pa` [:L86], `il-pa` [slwsinv2.cob:L95]. Their
-    entries carry the literal picture text and character lengths 3 and 2.
-19. OCCURS is treated three different ways for one concept: `occurs 40` on
-    `Invoice-Line` [slwsinv.cob:L81], no OCCURS on the `slwsinv2.cob`
-    `Invoice-Line` redefine [slwsinv2.cob:L91], and textual deletion of
-    `occurs 40.` in the bridge [common/slinvoiceMT.cbl:L458]. Each is
-    preserved in its own source's terms.
+    [copybooks/slwsinv.cob:L37], `sil-pa` [:L86], `il-pa`
+    [copybooks/slwsinv2.cob:L95], carrying character lengths 3 and 2.
+19. OCCURS is treated three ways for one concept: `occurs 40` on `Invoice-Line`
+    [copybooks/slwsinv.cob:L81], no OCCURS on the `slwsinv2.cob` redefine
+    [copybooks/slwsinv2.cob:L91], and textual deletion in the bridge
+    [common/slinvoiceMT.cbl:L458]. Each is preserved in its source's terms.
 20. Both copybooks carry the same standing warning, "WARNING UPDATE all
-    layouts for 5 byte increase (extra statuses)" [slwsinv.cob:L12],
-    [slwsinv2.cob:L11], and `slwsinv.cob` records the 2024 change with the
-    maintainer's own typo intact: "Addded lowercase values for some values -
-    JIC." [slwsinv.cob:L16].
+    layouts for 5 byte increase (extra statuses)" [copybooks/slwsinv.cob:L12],
+    [copybooks/slwsinv2.cob:L11], and `slwsinv.cob` records the 2024 change
+    with the typo intact: "Addded lowercase values for some values - JIC."
+    [copybooks/slwsinv.cob:L16].
 21. The size histories differ between the twins. Both record 129 -> 134 -> 137
-    bytes, on different dates: 09/03/09, 24/03/12, 18/01/17 [slwsinv.cob:L9-L11]
-    against 09/03/09, 17/05/13, 25/01/17 [slwsinv2.cob:L7-L9]. The lines are
-    documented "80 bytes each = 3200 bytes (17/05/13)" and "still valid
-    18/01/17" [slwsinv.cob:L77-L78].
-22. Signedness is narrowed at the bridge on six integer fields, which is the
-    Agent Action Plan's own anomaly 11 and is tagged A-11 in the dictionary.
-    `sih-date` [slwsinv.cob:L26], `sih-lines` [:L61], `sih-deduct-days`
-    [:L62], `sih-days` [:L65] and `sih-cr` [:L66], plus `sil-qty` [:L87], are
-    each declared as a bare member of the binary family and are therefore
-    SIGNED; every one becomes an unsigned host variable and an unsigned
-    column - `HV-IH-DAT PIC 9(10) COMP` [common/slinvoiceMT.cbl:L395],
-    `HV-IH-LINES PIC 9(03) COMP` [:L419], `HV-IH-DEDUCT-DAYS` [:L414],
-    `HV-IH-DAYS` [:L417], `HV-IH-CR` [:L418] and `HV1-IL-QTY PIC 9(05) COMP`
-    [:L432]. That the bare form is signed is settled by the bridge itself,
-    which writes the keyword explicitly where it wants unsigned:
-    `ws-98-lines binary-char unsigned value zero` [common/slinvoiceMT.cbl:L355]
-    and `ws-99-lines` [:L356]. The sign is therefore lost AT THE BRIDGE, before
-    any SQL runs. Each descriptor here reports the copybook view, signed, and
-    the drift is surfaced but left open through `loader.drift_for`; the
-    conversion itself belongs to `acas_posting/dal/acas016_invoice.py` and is
-    not performed in this module. The per-field notes sit with the fields
-    themselves. What a negative value actually stores is an open question for
-    the compiled program, below, where the dictionary marks it Q-3.
+    bytes, on different dates: 09/03/09, 24/03/12, 18/01/17
+    [copybooks/slwsinv.cob:L9-L11] against 09/03/09, 17/05/13, 25/01/17
+    [copybooks/slwsinv2.cob:L7-L9].
+22. Signedness is narrowed at the bridge on six integer fields, the Agent
+    Action Plan's own anomaly 11, tagged A-11 in the dictionary. `sih-date`
+    [copybooks/slwsinv.cob:L26], `sih-lines` [:L61], `sih-deduct-days` [:L62],
+    `sih-days` [:L65] and `sih-cr` [:L66], plus `sil-qty` [:L87], are each a
+    bare member of the binary family and therefore SIGNED; every one becomes an
+    unsigned host variable and an unsigned column - `HV-IH-DAT PIC 9(10) COMP`
+    [common/slinvoiceMT.cbl:L395], `HV-IH-LINES PIC 9(03) COMP` [:L419],
+    `HV-IH-DEDUCT-DAYS` [:L414], `HV-IH-DAYS` [:L417], `HV-IH-CR` [:L418] and
+    `HV1-IL-QTY PIC 9(05) COMP` [:L432]. The sign is lost AT THE BRIDGE, before
+    any SQL runs; the conversion belongs to the `acas016` handler module. What a
+    negative value actually stores is an open question, below, marked Q-3.
 
 There is deliberately no settled, single-winner or put-right type, view, value
 or picture anywhere below, and none may be introduced. Where two sources
@@ -377,29 +340,30 @@ disagree, both are carried and both are cited.
 
 OPEN QUESTIONS FOR THE COMPILED PROGRAM (R-6)
 =============================================
-Recorded in `docs/migration/ambiguity-resolutions.md`; none is settled here:
+Recorded in the migration's ambiguity-resolutions document, none settled here:
 
-  * `Invoice-Line` [slwsinv2.cob:L91] describes 80 bytes of a 137-byte
-    buffer. What does the compiled program read past byte 80 through that
-    view?
+  * `Invoice-Line` [copybooks/slwsinv2.cob:L91] describes 80 bytes of a
+    137-byte buffer. What does the compiled program read past byte 80 through
+    that view?
   * What value is stored when a negative `binary-char`, `binary-short` or
     `binary-long` passes through an unsigned host variable into an unsigned
     column? Six sites here; the dictionary marks them Q-3.
-  * Does anything read `sil-Back-Ordered` or `il-Back-Ordered` back, given
-    that neither the bridge nor the table carries the byte? A value written
-    and re-read inside one run survives in memory and never in the database.
-  * The same question for `sih-Freq`, `sih-Repeat` and `sih-Last-Date`.
-  * The Agent Action Plan names both copybooks as this record's layout
-    sources; the bridge copies only the first. Which layout governs the bytes
-    on disk?
+  * Does anything read `sil-Back-Ordered` or `il-Back-Ordered` back, given that
+    neither the bridge nor the table carries the byte? A value written and
+    re-read inside one run survives in memory, never in the database. The same
+    question for `sih-Freq`, `sih-Repeat` and `sih-Last-Date`.
+  * The Agent Action Plan names both copybooks as this record's layout sources;
+    the bridge copies only the first. Which governs the bytes on disk?
 
 LAYERING AND IMPORT-TIME COST
 =============================
 Agent Action Plan section 0.4.3 grants `records/*.py` two imports and forbids
 the rest, so that the arithmetic test tier "imports only `cobol` and `records`
 and touches no database, so it runs anywhere". This module imports
-`acas_posting.cobol.field`, `acas_posting.dictionary.loader` and one type from
-`acas_posting.dictionary.model`, and nothing else from the package - not
+`acas_posting.cobol.field` and `acas_posting.dictionary.loader` - the two the
+plan grants - and nothing else from the package. The object-model types it names
+in return annotations come through the loader's re-exports, so
+`acas_posting.dictionary.model` is never reached directly: not
 `dal`, not `programs`, not `cli`, not `cobol.condition_names`, and no other
 record module. In particular `records/purchase_invoice.py` is the Purchase
 mirror of this file and is deliberately NOT shared with: the two must be free
@@ -409,9 +373,9 @@ an outcome and never a mechanism.
 Nothing is read at import. Each dataclass field carries its dictionary key as
 field metadata - a plain string - and the descriptor is fetched on demand
 through `descriptor_for`, which delegates to the memoised
-`FieldDescriptor.from_dictionary_key`. Importing this module therefore parses
-no artifact, opens no file, consults no clock and inspects no environment, and
-two imports in two processes produce identical state.
+`FieldDescriptor.from_dictionary_key`. Importing this module therefore parses no
+artifact, opens no file, consults no clock and inspects no environment, so two
+imports in two processes produce identical state.
 """
 
 from __future__ import annotations
@@ -427,24 +391,21 @@ from acas_posting.dictionary import loader
 # a substitute. `ConditionName` is the dictionary's own record for an 88-level -
 # exactly the (name, value, source) triple this module hands back - and `Drift`
 # is what `loader.drift_for` returns. Agent Action Plan section 0.4.3 lists
-# `dictionary.loader` for this folder; the loader's `__all__` publishes
-# accessors and errors but re-exports no model type, so the type has to come
-# from the same package's other public module. That is the same architectural
-# edge, and `acas_posting/cobol/field.py` already crosses it for the model
-# enumerations on the same reasoning. Declaring local copies instead would
-# create exactly the duplicate, drifting definitions that R-4's
-# divergence-preservation discipline exists to prevent.
-from acas_posting.dictionary.model import ConditionName, Drift
+# `dictionary.loader` for this folder, and that is where both come from: the
+# loader re-exports the object model's records alongside its accessors (see its
+# `RE_EXPORTED_MODEL_NAMES`), each re-export being a BINDING to the single
+# definition rather than a copy, so `loader.Drift` IS the class `loader.drift_for`
+# returns. Declaring local copies instead would create exactly the duplicate,
+# drifting definitions that R-4's divergence-preservation discipline exists to
+# prevent, and reaching past the loader would breach a frozen plan.
+from acas_posting.dictionary.loader import ConditionName, Drift
 
 
-# ---------------------------------------------------------------------------
 # The frozen spine this record sits on
-#
 # Named once, here, so that every citation below is a locator rather than a
 # repeated string literal. Each value is copied from the source it names and
 # from nowhere else; `loader.table_for("SAINVOICE-REC")` reports the same
 # bridge, handler, entity facade and copybook pair independently.
-# ---------------------------------------------------------------------------
 
 #: The layout source. The bridge copies this one [common/slinvoiceMT.cbl:L456].
 COPYBOOK_SLWSINV: Final[str] = "copybooks/slwsinv.cob"
@@ -521,7 +482,7 @@ def dictionary_keys_for(record: Any) -> tuple[tuple[str, str], ...]:
 
     Declaration order here is COBOL declaration order, because that is the
     order the dataclasses are written in. This is the pairing that
-    ``docs/migration/traceability.md`` tabulates, and the one an ad-hoc census
+    the migration's traceability document tabulates, and the one a census
     diffs against ``cat -n`` of the copybook.
     """
     return tuple(
@@ -567,7 +528,7 @@ def drift_for(record: Any, attribute: str) -> Drift:
 
     Surfaced and left as it stands. Reproducing the bridge's conversions -
     notably the signedness loss on the six integer fields listed in the module
-    docstring - is `acas_posting/dal/acas016_invoice.py`'s work, not this
+    docstring - is the `acas016` handler module's work, not this
     module's, and doing it here would put a second, disagreeing answer in the
     codebase.
     """
@@ -664,30 +625,18 @@ def condition_names_for(record: Any, attribute: str) -> tuple[ConditionName, ...
     return tuple(sorted(entry.copybook.condition_names, key=_condition_source_line))
 
 
-
-# ===========================================================================
-# copybooks/slwsinv.cob - the layout the bridge copies
-#
-# Every class below is a plain mutable dataclass, because `sl055` and `sl060`
-# read a record, change fields on it and write it back. All fields are
-# keyword-only. That is not decoration: `Sih-Sub-Prime` declares
-# `sih-day-book-flag`, which carries `value space` [copybooks/slwsinv.cob:L67],
-# BEFORE `sih-update`, which carries no VALUE clause [:L69]. Positional
-# dataclass fields would reject that order and force either a reordering or an
-# invented default, and both are forbidden - the first by R-6's copybook
-# ordering, the second by R-3.
-#
-# FIELD order inside each class is COBOL declaration order, line by line, so a
-# class diffs against `cat -n copybooks/slwsinv.cob`. CLASS definitions run
-# innermost-first, so that every annotation names a class already defined.
-#
-# For this record the copybook order and the column order genuinely differ.
-# `sih-lines` is declared immediately before `sih-deduct-days`
-# [copybooks/slwsinv.cob:L61], while the bridge declares `HV-IH-LINES` after
-# `HV-IH-CR` [common/slinvoiceMT.cbl:L419] and the column stands at ordinal 29.
-# The copybook order governs here; column ordinal order is what
-# `loader.entries_for_table` reports, and it belongs to the state dump.
-# ===========================================================================
+#  copybooks/slwsinv.cob - the layout the bridge copies
+# Plain mutable dataclasses, because `sl055` and `sl060` read a record, change fields and write
+# it back. Fields are keyword-only, and that is not decoration: `Sih-Sub-Prime` declares
+# `sih-day-book-flag` carrying `value space` [copybooks/slwsinv.cob:L67] BEFORE `sih-update`,
+# which carries none [:L69]. Positional fields would reject that order and force a reordering or
+# an invented default - forbidden by R-6 and R-3 respectively.
+# FIELD order is COBOL declaration order, so a class diffs against `cat -n` of the copybook;
+# CLASS definitions run innermost-first. Copybook and column order genuinely differ here:
+# `sih-lines` is declared immediately before `sih-deduct-days` [copybooks/slwsinv.cob:L61],
+# while the bridge declares `HV-IH-LINES` after `HV-IH-CR` [common/slinvoiceMT.cbl:L419] and the
+# column stands at ordinal 29. Copybook order governs here; column-ordinal order is what
+# `loader.entries_for_table` reports.
 
 
 @dataclass(kw_only=True, slots=True)
@@ -703,7 +652,7 @@ class WsInvoiceKey:
     separately as `IH-INVOICE` and `IH-TEST`, so the key reaches the table
     twice - once joined, once split. No joined attribute is declared here: that
     name exists only on the column side, and building it is
-    `acas_posting/dal/acas016_invoice.py`'s work.
+    the `acas016` handler module's work.
 
     The dictionary records one more fact about that host variable worth knowing
     before reading a value back: it is never moved into the record after a
@@ -772,9 +721,10 @@ class SihOrderView:
     = 10 bytes, exactly the field they overlay.
 
     R-4, copybook-only: not one of the four has a bridge host variable or a
-    column. Only the base view `IH-ORDER char(10)` exists - `grep -in
-    "freq\\|repeat\\|last-date" common/slinvoiceMT.cbl` returns eight hits and
-    every one is unrelated "Repeat Group" metadata commentary. That is
+    column. Only the base view `IH-ORDER char(10)` exists - searching
+    `common/slinvoiceMT.cbl` case-insensitively for any of `freq`, `repeat` or
+    `last-date` returns eight hits, every one of them unrelated "Repeat Group"
+    metadata commentary. That is
     consistent with the Sales autogen tables (`SAAUTOGEN-REC` and its lines)
     being out of scope per Agent Action Plan section 0.2.2. All four are
     declared regardless: R-3 forbids removing a field as firmly as adding one.
@@ -1172,26 +1122,18 @@ class SilInvoiceLine:
     # whose header condition names are dual case. R-4: the asymmetry stands.
     sil_update: str = field(metadata=_entry("SAINV-LINES-REC.IL-UPDATE"))
 
-    # 05  sil-Back-Ordered                           [copybooks/slwsinv.cob:L97]
-    #                     pic x.       *> value space, or B for a BO item.
-    #                                                [copybooks/slwsinv.cob:L98]
-    # R-4, BRAND-NEW ANOMALY, and the cause is datable. This field has NO bridge
-    # host variable and NO column: `grep -inc "back-ordered"
-    # common/slinvoiceMT.cbl` returns 0, and `SAINV-LINES-REC` ends at
-    # `IL-UPDATE` with 14 columns. The bridge still models the byte as `03
-    # filler pic x.` [common/slinvoiceMT.cbl:L377], whose comment "size 80 to
-    # here -1 26/7/23 2 match slwsinv" dates it to 26/7/23, while both
-    # copybooks replaced that filler with this named field on 03/03/24
-    # [copybooks/slwsinv.cob:L14-L15], [copybooks/slwsinv2.cob:L20-L21]. The
-    # bridge and the table were never brought forward.
-    #
-    # Declared anyway. R-3 cuts both ways: nothing added AND nothing removed.
-    # Whether any program writes the byte and reads it back within a run - when
-    # it would live in memory and never in the database - is an open question
-    # for the compiled program.
-    #
-    # Also note the declaration spans two physical lines, L97 and L98. Read the
-    # file, not one line of it.
+    #  05  sil-Back-Ordered   pic x.    [copybooks/slwsinv.cob:L97-L98]
+    #       *> value space, or B for a BO item.   (the declaration spans both lines)
+    # R-4, A NEW ANOMALY, and the cause is datable. This field has NO bridge host variable and
+    # NO column: a case-insensitive count of "back-ordered" in common/slinvoiceMT.cbl returns 0,
+    # and `SAINV-LINES-REC` ends at `IL-UPDATE` with 14 columns. The bridge still models the
+    # byte as `03 filler pic x.` [common/slinvoiceMT.cbl:L377], whose comment "size 80 to here
+    # -1 26/7/23 2 match slwsinv" dates it to 26/7/23, while both copybooks replaced that filler
+    # with this named field on 03/03/24 [copybooks/slwsinv.cob:L14-L15],
+    # [copybooks/slwsinv2.cob:L20-L21]. Neither bridge nor table was brought forward.
+    # Declared anyway - R-3 cuts both ways: nothing added AND nothing removed. Whether any
+    # program writes the byte and reads it back within a run, when it would live in memory and
+    # never in the database, is an open question for the compiled program.
     sil_back_ordered: str = field(
         metadata=_entry("SInvoice-Bodies.sil-Back-Ordered")
     )
@@ -1205,8 +1147,8 @@ class SilInvoiceLine:
 class SInvoiceBodies:
     """``01  SInvoice-Bodies.`` [copybooks/slwsinv.cob:L80] - the 40-line table.
 
-    "Working Storage For The Invoice Lines" [:L72], "80 bytes each = 3200 bytes
-    (17/05/13)" [:L74], "still valid 18/01/17" [:L78].
+    "Working Storage For The Invoice Lines" [:L74], "80 bytes each = 3200 bytes
+    (17/05/13)" [:L77], "still valid 18/01/17" [:L78].
 
     A tuple, not a list, because R-6 requires a deterministic shape and a fixed
     COBOL table is fixed. The OCCURS 40 count lives on the single member's
@@ -1232,35 +1174,18 @@ class SInvoiceBodies:
     )
 
 
-
-# ===========================================================================
-# copybooks/slwsinv2.cob - the second view set, and the source of the names
-#
-# "WS replacement of (File Definition) For The Invoice File"
-# [copybooks/slwsinv2.cob:L3], taken from the Sales copy and prefixed:
-# "26/01/17 - Taken from the SL copy in that src dir and prefixed by 'sl'."
-# [:L13], "Removed lowercase values so just using UC" [:L14], "Removed all
-# references to invoice-letter as redundant." [:L15]. It reached its present
-# shape via "04/02/17 Taken from fdinv2.cob with FD removed." [:L19].
-#
-# THREE 01-LEVELS OVER ONE 137-BYTE BUFFER, two of them REDEFINES:
-#   01  Invoice-Record.                        [:L27]  the base view
-#   01  Invoice-Header redefines Invoice-Record. [:L38]  the header view
-#   01  Invoice-Line   redefines Invoice-Record. [:L91]  the line view
-# All three are modelled. None is collapsed into another and none is treated
-# as the one that counts.
-#
-# The bridge does NOT copy this file - `grep -n 'copy "'
-# common/slinvoiceMT.cbl` lists `envdiv.cob`, `wsfnctn.cob`,
-# `Test-Data-Flags.cob` and `slwsinv.cob`, and no more. Yet every MySQL column
-# in both tables is spelt with the `ih-` and `il-` prefixes declared here. That
-# is the whole reason the Agent Action Plan pairs the two copybooks into one
-# module, and it is why no key below could have been produced by transforming a
-# field name.
-#
-# The maintainer's standing sizing question sits at the top of the file and is
-# left standing: "NEED TO DO A SIZING CHECK for all INVOICE copybooks." [:L25].
-# ===========================================================================
+#  copybooks/slwsinv2.cob - the second view set, and the source of the names
+# "WS replacement of (File Definition) For The Invoice File" [:L3], taken from the Sales copy
+# and prefixed [:L13], with lowercase values [:L14] and invoice-letter references [:L15]
+# removed, reaching its present shape "from fdinv2.cob with FD removed" [:L19]. The sizing
+# question at [:L25] is left standing.
+# THREE 01-LEVELS OVER ONE 137-BYTE BUFFER, two of them REDEFINES: the base
+# `Invoice-Record.` [:L27], then `Invoice-Header` [:L38] and `Invoice-Line`
+# [:L91], each redefining it. All three are modelled, none collapsed.
+# The bridge does NOT copy this file - its active copy list is `envdiv.cob`, `wsfnctn.cob`,
+# `Test-Data-Flags.cob` and `slwsinv.cob` - yet every MySQL column in both tables is spelt with
+# the `ih-` and `il-` prefixes declared here. That is why the plan pairs the two copybooks into
+# one module, and why no key below could have come from transforming a field name.
 
 
 @dataclass(kw_only=True, slots=True)
@@ -1301,7 +1226,7 @@ class InvoiceRecord:
     and `slwsinv.cob` nests `sih-nos` and `sih-check`
     [copybooks/slwsinv.cob:L24-L25]. Interestingly the flat form is the one the
     bridge ends up with - a single `HV-IH-CUSTOMER X(7)`
-    [common/slinvoiceMT.cbl:L394] - but that is an observation about the bridge,
+    [common/slinvoiceMT.cbl:L394] - but that is a fact about the bridge,
     not a reason to prefer one view here. All three shapes are carried.
 
     R-4, filler casing: `Filler` at [:L33] is capital-F and sits between
@@ -1375,8 +1300,8 @@ class IhOrderView:
 
     R-4, copybook-only, same as its twin: none of the four members has a bridge
     host variable or a column, only the base `IH-ORDER char(10)`. Declared in
-    full regardless. The maintainer's question about the whole overlay sits four
-    lines from the top of the file and is quoted rather than answered:
+    full regardless. The maintainer's question about the whole overlay sits in
+    the 03/03/24 header note [:L20-L23] and is quoted rather than answered:
     "Redefines of il-Order for recurring support. Needed ??" [:L22].
 
     Its six condition names are upper case only where the twin's are dual case -
@@ -1645,8 +1570,8 @@ class IlInvoiceLine:
     yet redefines a 137-byte record, leaving 57 bytes unreachable through it.
     COBOL permits a shorter REDEFINES, so the declaration is legal rather than
     broken, and the declared members do sum to 80. What the compiled program
-    reads past byte 80 through this view is measured, not deduced, and is
-    recorded in `docs/migration/ambiguity-resolutions.md`.
+    reads past byte 80 through this view has to be measured, not deduced, and
+    is recorded in the migration's ambiguity-resolutions document.
     """
 
     COBOL_NAME: ClassVar[str] = "Invoice-Line"
@@ -1707,7 +1632,7 @@ class IlInvoiceLine:
 
     # 05  il-Back-Ordered    pic x.  *> value space, or B for a BO item.
     #                                           [copybooks/slwsinv2.cob:L106]
-    # R-4, the same brand-new anomaly as its twin `sil-Back-Ordered`
+    # R-4, the same new anomaly as its twin `sil-Back-Ordered`
     # [copybooks/slwsinv.cob:L97-L98]: NO bridge host variable and NO column.
     # `grep -inc "back-ordered" common/slinvoiceMT.cbl` returns 0, and
     # `SAINV-LINES-REC` ends at `IL-UPDATE` with 14 columns, because the bridge

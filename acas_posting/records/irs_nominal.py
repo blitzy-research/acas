@@ -7,58 +7,41 @@ dictionary rather than typing it in by hand, because "field metadata is
 therefore derived, not transcribed, which eliminates an entire class of
 transcription error across several hundred fields" (section 0.3.3).
 
-THE TWO COBOL IDENTIFIERS
--------------------------
-The record carries two names in the frozen sources, and both are recorded
-here so that a reader arriving from either side lands in the right place:
-
-    ``NL-Record``           the copybook's own 01-level name
-                            [copybooks/irswsnl.cob:L8]
-
-    ``WS-IRSNL-Record``     the name the caller substitutes
-                            [irs/irs030.cbl:L286]
-
-        copy "irswsnl.cob"   replacing NL-Record by WS-IRSNL-Record.
-
-The Python class follows the caller-side substitution and is named
-``WsIrsnlRecord``, because that is the disambiguated identifier the COBOL
-itself supplies and the one the bridge program uses for its own copy of
-the layout [common/irsnominalMT.cbl:L224]. The generated dictionary keys
-the record under the copybook name instead - ``NL-Record`` - so a lookup
-by ``WS-IRSNL-Record`` finds nothing. Both facts matter, and neither is
-a mistake to be tidied away.
-
-THE ENTITY SPINE
-----------------
-From the entity-to-table spine of section 0.2.1.1:
+THE ENTITY SPINE, AND THE RECORD'S TWO NAMES
+--------------------------------------------
+From the entity-to-table spine of section 0.2.1.1::
 
     entity facade     IRS nominal
     handler           ``acasirsub1``      [common/acasirsub1.cbl]
     bridge            ``irsnominalMT``    [common/irsnominalMT.cbl]
     table             ``IRSNL-REC``       15 columns, primary key KEY-1
+                                          [mysql/ACASDB.sql:L239] declares
+                                          the column, [:L254] the clause
     record copybook   ``copybooks/irswsnl.cob``
+
+The record carries two names in the frozen sources - the copybook's own
+``NL-Record`` and the caller's substitution ``WS-IRSNL-Record`` - and the
+class named for the second is documented at its own definition below. The
+consequence to know here is that the generated dictionary keys the record
+under the COPYBOOK name, so a lookup by ``WS-IRSNL-Record`` finds nothing.
 
 THE BRIDGE DECLARES ITS RECORD INLINE
 -------------------------------------
 ``irsnominalMT`` is one of four bridges - with ``valueMT``, ``analMT``
 and ``purchMT`` - that declare their working-storage record INLINE rather
 than by ``COPY``. It writes out ``01 WS-IRSNL-Record.`` itself at
-[common/irsnominalMT.cbl:L224] and copies ``irswsnl.cob`` nowhere. This
-module is therefore built from the COPYBOOK, and the bridge is read only
-for its host-variable group [common/irsnominalMT.cbl:L194-L209] and its
-table directive, ``TABLE=IRSNL-REC,HV`` [common/irsnominalMT.scb:L187].
+[common/irsnominalMT.cbl:L224] and never names ``irswsnl.cob`` at all.
+This module is therefore built from the COPYBOOK, and the bridge is read
+only for its host-variable group [common/irsnominalMT.cbl:L194-L209] and
+its directive block [common/irsnominalMT.scb:L186-L189], whose table line
+is ``TABLE=IRSNL-REC,HV`` [common/irsnominalMT.scb:L188].
 
 THE COPYBOOK, VERBATIM
 ----------------------
-Twenty-four lines in full, the maintainer's own header included::
+Twenty-four lines. The first five are the maintainer's asterisk box
+titled "Working Storage for the Nominal Ledger", the sixth his note
+``*> Chgd 16/01/09 money to 99M``, and the seventh a bare ``*>``::
 
-    *>*******************************************
-    *>                                          *
-    *>  Working Storage for the Nominal Ledger  *
-    *>                                          *
-    *>*******************************************
-    *> Chgd 16/01/09 money to 99M
-    *>
      01  NL-Record.                                          L8
          03  NL-Key.                                         L9
              05  NL-Owning      pic 9(5).                    L10
@@ -76,40 +59,48 @@ Twenty-four lines in full, the maintainer's own header included::
          03  filler  redefines  NL-Data.                     L22
              05  NL-Pointer     pic 9(5).                    L23
 
-FIFTEEN LEAF ITEMS, FIFTEEN COLUMNS
------------------------------------
-The two counts agree, but not for the reason a glance suggests, and the
-arithmetic is worth writing down because it is the only way to be sure
-nothing was dropped::
+SIXTEEN ELEMENTARY ITEMS, FIFTEEN COLUMNS
+-----------------------------------------
+The counts differ by exactly one, and the arithmetic is written down
+because it is the only way to be sure nothing was dropped. Counting the
+two OCCURS clauses as the four items each that the table expands them
+into::
 
-    2   NL-Owning + NL-Sub-Nominal
-    1   NL-Type
-    1   NL-Name
-    2   NL-DR + NL-CR
-    4   NL-DR-Last, expanded from OCCURS 4
-    4   NL-CR-Last, expanded from OCCURS 4
-    1   NL-AC
-    1   NL-Pointer
+    2   NL-Owning + NL-Sub-Nominal              L10, L11
+    1   NL-Type                                 L12
+    1   NL-Name                                 L16
+    2   NL-DR + NL-CR                           L17, L18
+    4   NL-DR-Last, expanded from OCCURS 4      L19
+    4   NL-CR-Last, expanded from OCCURS 4      L20
+    1   NL-AC                                   L21
+    1   NL-Pointer                              L23
     --
-    15  leaf items
+    16  elementary items
 
     15  columns in the table
 
-They coincide because two adjustments cancel. The two key parts
-CONCATENATE into the single column ``KEY-1``, which costs one; and the
-redefining view still earns a column of its own, ``REC-POINTER``, which
-returns one. A layout that dropped either would still total fifteen
-somewhere and be wrong in two places at once.
+ONE adjustment accounts for the difference, not two cancelling ones. The
+two key parts CONCATENATE into the single column ``KEY-1``, which is
+owned by their parent GROUP ``NL-Key`` rather than by either part, so two
+items become one column and the totals part company by one. The
+redefining view does NOT add a column back: ``NL-Pointer`` is already
+one of the sixteen. A layout that dropped a member would still reach
+fifteen columns somewhere and be wrong in two places at once.
+
+Counted over the artifact, the same shape appears as four GROUP entries -
+``NL-Key``, ``NL-Data``, ``filler`` and the ``NL-Record`` group itself -
+and sixteen elementary ones, twenty in all.
 
 THE DICTIONARY KEYS
 -------------------
 Every key below was read out of the artifact - through
 ``loader.entries_for_table("IRSNL-REC")`` and
 ``loader.entries_for_copybook_record("NL-Record")`` - and none was
-guessed from the field name. On this table guessing does not survive
-contact with the source, twice over. Thirteen fields are keyed by TABLE
-and COLUMN; the two key parts have no column at all, because their parent
-group owns it, so they are keyed by COPYBOOK RECORD and FIELD::
+guessed from the field name. FIFTEEN entries are keyed by TABLE and
+COLUMN: fourteen elementary items plus the ``NL-Key`` group, which owns
+the concatenated primary key. The remaining FIVE are keyed by COPYBOOK
+RECORD and FIELD, having no column of their own - the two key parts,
+whose parent group owns theirs, and the three groups::
 
     copybook field      dictionary key                  column
     --------------      --------------                  ------
@@ -131,51 +122,37 @@ group owns it, so they are keyed by COPYBOOK RECORD and FIELD::
 
 THE COLUMN NAMES DROP THE PREFIX - EXCEPT ONCE
 ----------------------------------------------
-The bridge strips the ``NL-`` prefix from five names and keeps it on the
-sixth. There is no rule behind it::
+Nine copybook names bear a column. The bridge strips the ``NL-`` prefix
+from EIGHT of them and keeps it on ONE, ``NL-Name -> NL-NAME``. Two of
+the eight are renamed as well as stripped, ``NL-Type -> TIPE`` and
+``NL-Pointer -> REC-POINTER``, and ``NL-Key -> KEY-1`` loses the prefix
+along with both its parts' identities. ``loader.drift_for`` reports a
+name difference on all eight and none on ``NL-NAME``, which is exactly
+the asymmetry. The per-field list is at the descriptor table below; this
+is the clearest argument in the record folder for looking a key up
+rather than deriving it from the field name by rule.
 
-    NL-Type      ->  TIPE          stripped, and spelled phonetically,
-                                   presumably to dodge a reserved word
-    NL-DR        ->  DR            stripped
-    NL-CR        ->  CR            stripped
-    NL-AC        ->  AC            stripped
-    NL-Pointer   ->  REC-POINTER   stripped, and renamed
-    NL-Name      ->  NL-NAME       KEPT
-
-``loader.drift_for`` reports a name difference on every one of those
-except ``NL-NAME``, which is exactly the asymmetry. This is the clearest
-argument in the whole record folder for looking a key up instead of
-deriving it from the field name by rule.
-
-OCCURS 4 IS ONE-BASED, AND THE BRIDGE INTERLEAVES THE TWO ARRAYS
-----------------------------------------------------------------
-The copybook declares the two arrays CONSECUTIVELY, so in COBOL storage
-all four DR entries precede all four CR entries. The bridge host variables
-[common/irsnominalMT.cbl:L200-L207] and the table columns pair them off by
-quarter instead::
-
-    copybook storage order      bridge and column order
-    ----------------------      -----------------------
-    NL-DR-Last(1..4)            DR-LAST-01,  CR-LAST-01,
-    NL-CR-Last(1..4)            DR-LAST-02,  CR-LAST-02,
-                                DR-LAST-03,  CR-LAST-03,
-                                DR-LAST-04,  CR-LAST-04
-
-COBOL subscripts count from one, so ``NL-DR-Last(1)`` is ``DR-LAST-01``
-and ``NL-DR-Last(4)`` is ``DR-LAST-04``; the Python tuples index from
-zero, and no accessor is provided here to paper over the difference.
-This module models the COPYBOOK order - two separate members, each a
-fixed four-element tuple. Interleaving them is the flattening that
-``dal/acasirsub1_irs_nominal.py`` performs at the bridge boundary, and it
-is not performed here.
+THE TWO ARRAYS ARE ONE-BASED, AND INTERLEAVED AT THE BRIDGE
+-----------------------------------------------------------
+The copybook declares the arrays CONSECUTIVELY, so in COBOL storage all
+four DR entries precede all four CR entries, while the host variables
+[common/irsnominalMT.cbl:L200-L207] and the columns pair them off by
+quarter - ``DR-LAST-01``, ``CR-LAST-01``, ``DR-LAST-02`` and so on. This
+module models the COPYBOOK order: two separate members, each a fixed
+four-element tuple. COBOL subscripts from one and Python from zero, and
+no accessor is offered to hide that. Both the interleaving and the
+concatenated key are the `acasirsub1` handler module's work at the
+bridge boundary, not this file's.
 
 COMP WITH A V IS DECIMAL, NOT INT
 ---------------------------------
 ``NL-DR``, ``NL-CR``, ``NL-DR-Last`` and ``NL-CR-Last`` are declared
 ``pic 9(8)v99 comp`` - binary storage carrying an implied two-place
 decimal scale - which is ten fields once the two arrays expand. The
-dictionary gives all ten ``python_storage = DECIMAL``, ``scale = 2`` and
-``quantum = 0.01``, so they are ``decimal.Decimal`` here.
+dictionary gives all ten ``scale = 2`` and ``cobol_python_storage =
+DECIMAL``, and the descriptor derives ``quantum = Decimal("0.01")`` from
+that scale [acas_posting/cobol/field.py], so they are ``decimal.Decimal``
+here.
 
 The shortcut "binary means int" is right only at scale zero. The seven
 statistics fields at [copybooks/wssl.cob:L46-L52] are ``binary-long``
@@ -197,15 +174,13 @@ THE ACCUMULATORS CARRY NO SIGN
 ------------------------------
 No ``S`` appears in ``pic 9(8)v99``, and the columns agree:
 ``decimal(10,2) unsigned``. The descriptors report ``signed = False``
-with ``sign_position = NONE``, and their value domain runs from zero to
-9999999999 - there is no negative range at all.
-
-``NL-DR`` and ``NL-CR`` are nonetheless the ACCUMULATORS that the IRS
-posting step adds into [irs/irs030.cbl:L1685-L1699]. An unsigned
-accumulator has no defined behaviour for a result below zero, and that
-question is left open here on purpose - see the open questions below. No
-guard, no ceiling, no absolute value and no widening to a signed field
-is applied, because any of those would be a repair.
+with ``sign_position = NONE`` and a ``value_domain`` of
+``(0, 9999999999)`` - no negative range at all. ``NL-DR`` and ``NL-CR``
+are nonetheless the accumulators the IRS posting step adds into
+[irs/irs030.cbl:L1685-L1699]; what an unsigned accumulator does with a
+result below zero is open question (a) below, and no guard, ceiling,
+absolute value or widening to a signed field is applied here, because
+any of those would be a repair.
 
 A second point of vocabulary: the descriptors report
 ``unsigned = False`` even so. That member flags the explicit UNSIGNED
@@ -242,70 +217,44 @@ The bridge materialises BOTH regardless. ``HV-REC-POINTER PIC 9(08)
 COMP`` [common/irsnominalMT.cbl:L209] becomes the column ``REC-POINTER
 mediumint(5) unsigned``, so one row carries ``NL-NAME``, ``DR``, ``CR``,
 the eight quarter columns, ``AC`` AND ``REC-POINTER`` - fifteen columns
-of which the last is a different reading of eleven of the others.
+of which the last is a different reading of eleven of the others. The
+two views are modelled as two dataclasses, ``NlData`` and
+``NlPointerView``, documented at their own definitions; neither is
+primary, neither is omitted, and no discriminator says which is live.
+What the pointer column holds while the data view is populated is open
+question (b) below.
 
-The two views are modelled as two separate dataclasses, ``NlData`` and
-``NlPointerView``. Neither is treated as the primary one, neither is
-omitted, no discriminator says which is live, and no union or switching
-accessor is offered. What the pointer column holds while the data view is
-populated is an open question below, not a decision for this file.
-
-The redefining group's COBOL name is ``filler`` - it is unnamed, and the
-dictionary keys it as ``NL-Record.filler`` with ``is_filler`` true and
-``redefines`` naming ``NL-Data``. The REDEFINES clause sits on that 03
-group, not on the 05 item inside it. Naming the Python class after the
-field it contains keeps it readable; this paragraph keeps the traceability
-that the rename would otherwise cost. Unnamed redefinitions are the house
-style across the frozen copybooks - ``redefines`` appears 60 times, among
-them [copybooks/wsledger.cob:L16] and [:L35], [copybooks/wssl.cob:L61],
-[copybooks/wspl.cob:L50] and [copybooks/wsval.cob].
-
-THE 88 CONDITION NAMES ARE RECORDED HERE AND DECLARED ELSEWHERE
----------------------------------------------------------------
-``NL-Type`` carries two condition names, spelled with the optional
-``is``, which the sibling copybooks omit - compare
-[copybooks/wsbatch.cob:L16-L18]::
-
-    88  Owner   value is "O".       [copybooks/irswsnl.cob:L13]
-    88  Sub     value is "S".       [copybooks/irswsnl.cob:L14]
-
-Their values are the strings ``"O"`` and ``"S"``; the dictionary model
-holds a condition name's value as a string always, even where it looks
-numeric. No predicate, enumeration, literal type, class constant or
-``is``-style method appears in this module: section 0.4.1.4 assigns the
-88-levels to ``acas_posting/cobol/condition_names.py``, and a second
-declaration here would be a second place to keep in step.
+Unnamed redefinitions are the house style across the frozen copybooks:
+``redefines`` appears 60 times over 33 of them, among them
+[copybooks/wsledger.cob:L16] and [:L35], [copybooks/wssl.cob:L61] and
+[copybooks/wspl.cob:L50].
 
 BRIDGE DRIFT: FOUR KINDS, ALL LEFT STANDING
 -------------------------------------------
 The copybook field, the bridge host variable and the table column
 disagree in four distinct ways on this record::
 
-    1  group concatenation and digit widening
-       NL-Key, two unsigned 9(5) making ten digits
-         ->  HV-KEY-1 PIC 9(18) COMP        widened to 18
-         ->  KEY-1 bigint(10) unsigned      back down to 10
+    1  group concatenation and digit widening on the key
+         NL-Key, two unsigned 9(5) making ten digits
+           ->  HV-KEY-1 PIC 9(18) COMP        widened to 18
+           ->  KEY-1 bigint(10) unsigned      back down to 10
 
-    2  the prefix inconsistency described above, five names changed and
-       one left alone
+    2  the prefix inconsistency above, eight names changed, one kept
 
-    3  the array interleaving described above
+    3  the array interleaving above
 
-    4  digit widening on the pointer
-       NL-Pointer pic 9(5)
-         ->  HV-REC-POINTER PIC 9(08) COMP  widened to 8, and retyped
-         ->  REC-POINTER mediumint(5)       back down to 5
+    4  digit widening and retyping on the pointer
+         NL-Pointer pic 9(5)
+           ->  HV-REC-POINTER PIC 9(08) COMP  widened to 8, retyped
+           ->  REC-POINTER mediumint(5)       back down to 5
 
 Kind 4 is not even monotonic: the host variable is wider than both the
-copybook that feeds it and the column it feeds.
-
-Each descriptor in this module reports the COPYBOOK view as its own
-digits, scale, sign and usage, and offers the disagreement through
-``descriptor.drift()``, which is a pass-through of ``loader.drift_for``.
-Nothing here blends the three layers into one figure, widens a field,
-renames an attribute to its column, or reorders the members into column
-order. Reproducing the bridge's conversions is the handler module's work,
-at the bridge boundary: ``dal/acasirsub1_irs_nominal.py``.
+copybook that feeds it and the column it feeds. Each descriptor here
+reports the COPYBOOK view as its own digits, scale, sign and usage, and
+offers the disagreement unsettled through ``descriptor.drift()``, a
+pass-through of ``loader.drift_for``. Nothing here blends the three
+layers, widens a field, renames an attribute to its column, or reorders
+the members into column order.
 
 WHY EVERY DEFAULT IS A VALUE AND NEVER NONE
 -------------------------------------------
@@ -313,44 +262,34 @@ All fifteen columns are declared ``NOT NULL``, and section 0.6.2 explains
 why they can be: "each load paragraph begins by initialising the
 host-variable group, so unset fields become zero or space rather than SQL
 NULL. This is why every column in the schema can be declared NOT NULL and
-why the Python layer must default rather than omit." On this bridge that
-initialisation is ``initialize WS-IRSNL-Record with filler``
-[common/irsnominalMT.cbl:L524].
-
-So the defaults are ``0`` for the zoned integers, ``Decimal("0.00")`` for
-the ten money fields, and spaces at the declared width for the three
-alphanumerics - taken from each field's own descriptor rather than
-written out as a number here. Never ``None``.
+why the Python layer must default rather than omit." The defaults are
+therefore ``0`` for the zoned integers, ``Decimal("0.00")`` for the ten
+money fields and spaces at the declared width for the three
+alphanumerics, each taken from its own descriptor rather than written out
+as a literal. Never ``None``. The bridge statement that establishes that
+starting state is quoted at the defaults block below.
 
 TWO ANOMALIES OPERATE ON THIS RECORD
 ------------------------------------
-Both are reproduced in ``programs/irs030_posting.py``, which owns the
+Both are reproduced in the `irs030` program module, which owns the
 posting logic; they are recorded here because this is the layout they act
-on, so that ``docs/migration/anomaly-log.md`` can cite it.
+on, so that the migration's anomaly log can cite it.
 
     Anomaly 4, the half-posted double entry. "the debit is rewritten
     before the credit account is looked up, so a missing credit leaves an
     unbalanced debit and no posting record"
     [irs/irs030.cbl:L1635-L1652].
 
-    Anomaly 5, the lost update on the two VAT control accounts. Two
-    accounts are read into snapshots before the loop
-    [irs/irs030.cbl:L1602] and [:L1612] and written back from those
-    snapshots at end of job [irs/irs030.cbl:L1704-L1708], so any
-    in-loop rewrite of the same two accounts is discarded. Section 0.6.5
-    calls it "a classic lost update".
-
-This module supplies NO snapshot, clone, copy, replace, rewrite or
-change-detection facility, and its dataclasses are not immutable. That is
-deliberate to the point of being the main design constraint on the file: a
-snapshot mechanism in the record layer would make anomaly 5 avoidable, and
-rule R-4 requires that it stay reproducible. A defect reproduced is
-correct; a defect fixed is a failure.
+    Anomaly 5, the lost update on the two VAT control accounts, which
+    section 0.6.5 calls "a classic lost update". Its four locators and
+    the reason this module offers no snapshot, clone, copy, replace or
+    rewrite facility - rule R-4 requires the anomaly stay reproducible -
+    are set out at ``WsIrsnlRecord`` below.
 
 THREE OPEN QUESTIONS FOR THE COMPILED ORACLE
 --------------------------------------------
 Recorded, not settled. Each belongs in
-``docs/migration/ambiguity-resolutions.md`` with the experiment that
+the migration's ambiguity-resolutions document with the experiment that
 decides it, per rule R-6.
 
     a.  What an unsigned ``9(8)v99 comp`` accumulator actually stores
@@ -367,27 +306,14 @@ decides it, per rule R-6.
         dump at all, or whether it is invisible once rows are ordered by
         primary key.
 
-WHAT THIS MODULE DOES NOT DO
-----------------------------
-It holds no posting, accumulation, snapshot or rewrite logic; those are
-``programs/irs030_posting.py``. It holds no SQL, no key concatenation, no
-column renaming, no array flattening and no host-variable conversion;
-those are ``dal/acasirsub1_irs_nominal.py``. It performs no padding,
-truncation, quantising or arithmetic; those are ``cobol/move.py`` and
-``cobol/arithmetic.py``. It adds no field, alias or check of its own
-(R-3), and it emits no DDL - the schema is frozen.
-
 LAYERING - THIS IS A LEAF
 -------------------------
 Section 0.4.3 grants ``records/*.py`` exactly two internal imports and
 forbids the rest, "this keeps the record layer a leaf". Only
 ``acas_posting.cobol.field`` is imported below, plus the standard
 library; the loader is reached through the descriptors rather than
-directly, so nothing here imports a module it does not use. Nothing in
-this file runs, embeds or shells out to a COBOL program (R-1), no value
-passes through binary floating-point storage (R-2), and nothing is read
-at import time beyond the loader's own lazily cached read of the
-generated artifact (R-6).
+directly. Rules R-1, R-2 and R-6 hold here as they do folder-wide, and
+the folder-level contract is stated once in ``records/__init__.py``.
 """
 
 from __future__ import annotations
@@ -402,29 +328,19 @@ from acas_posting.cobol.field import FieldDescriptor
 __all__ = ["NlData", "NlKey", "NlPointerView", "WsIrsnlRecord"]
 
 
-# =============================================================================
 #  THE FIELD DESCRIPTORS  (rule R-5 - looked up, never transcribed)
-# =============================================================================
-#
 # Each key below was read out of the generated artifact, by listing
 # ``loader.entries_for_table("IRSNL-REC")`` and
-# ``loader.entries_for_copybook_record("NL-Record")`` and reading each
-# entry's copybook name, rather than being built from the field name by
-# rule. On this record that distinction is load-bearing: the column names
-# drop the ``NL-`` prefix five times and keep it once, ``NL-Type`` is
-# spelled ``TIPE``, and the two key parts carry no column at all because
-# their parent group carries it. Every entry here was confirmed to come
-# from ``copybooks/irswsnl.cob`` - two IRS copybooks collide on
-# ``Default-Record`` and ``Final-Record`` elsewhere in this folder, so the
-# file is checked and not assumed.
-#
-# The lookups run while the classes below are being defined, which is this
-# package's own convention. ``from_dictionary_key`` is memoised and the
-# loader reads the artifact lazily and caches it, so this costs one read
-# per process and none at all until the first record module is imported.
+# ``loader.entries_for_copybook_record("NL-Record")`` and taking each entry's copybook name,
+# rather than being built from the field name by rule. On this record that distinction is
+# load-bearing: five columns are the copybook name with ``NL-`` simply removed - DR, CR,
+# DR-LAST, CR-LAST and AC - while ``NL-Name`` alone keeps the prefix, ``NL-Type`` is spelled
+# ``TIPE``, ``NL-Key`` becomes ``KEY-1``, ``NL-Pointer`` becomes ``REC-POINTER``, and the two
+# key parts carry no column at all because their parent group carries it. Every entry was
+# checked to come from ``copybooks/irswsnl.cob``, because ``Default-Record`` and
+# ``Final-Record`` each name two different records across this folder.
 
 # -- 03  NL-Key.  [copybooks/irswsnl.cob:L9] ---------------------------------
-#
 # The GROUP carries the column: its two 9(5) children concatenate into the
 # single ``KEY-1``, which is drift kind 1 and is applied at the bridge
 # boundary, not here.
@@ -437,7 +353,6 @@ _NL_SUB_NOMINAL: Final = FieldDescriptor.from_dictionary_key(
 )
 
 # -- 03  NL-Type  pic x.  [copybooks/irswsnl.cob:L12] ------------------------
-#
 # Two condition names hang off this field, ``88 Owner value is "O"`` and
 # ``88 Sub value is "S"`` [copybooks/irswsnl.cob:L13-L14]. They are
 # recorded in the module docstring and declared in
@@ -445,7 +360,6 @@ _NL_SUB_NOMINAL: Final = FieldDescriptor.from_dictionary_key(
 _NL_TYPE: Final = FieldDescriptor.from_dictionary_key("IRSNL-REC.TIPE")
 
 # -- 03  NL-Data.  [copybooks/irswsnl.cob:L15] -------------------------------
-#
 # The group header carries NO usage clause, so each numeric child below
 # declares ``comp`` itself and every descriptor reports
 # ``usage_declared_at = FIELD``. Most sibling copybooks put the usage on
@@ -484,7 +398,6 @@ _NL_CR_LAST: Final[tuple[FieldDescriptor, ...]] = (
 _NL_AC: Final = FieldDescriptor.from_dictionary_key("IRSNL-REC.AC")
 
 # -- 03  filler  redefines  NL-Data.  [copybooks/irswsnl.cob:L22] -----------
-#
 # The REDEFINES clause sits on this 03 group, which the copybook leaves
 # unnamed, so the artifact keys it ``NL-Record.filler`` with ``is_filler``
 # true and ``redefines`` naming ``NL-Data``. Its single 05 child gets a
@@ -497,10 +410,7 @@ _NL_POINTER: Final = FieldDescriptor.from_dictionary_key(
 )
 
 
-# =============================================================================
 #  THE DEFAULTS  (a value always, never None - see the module docstring)
-# =============================================================================
-#
 # ``initialize WS-IRSNL-Record with filler``
 # [common/irsnominalMT.cbl:L524] leaves an unset numeric field at zero and
 # an unset alphanumeric field at spaces before any row is written, which is
@@ -520,9 +430,7 @@ _NL_TYPE_SPACES: Final = " " * _NL_TYPE.byte_length
 _NL_AC_SPACES: Final = " " * _NL_AC.byte_length
 
 
-# =============================================================================
 #  THE RECORD  (four dataclasses, in copybook declaration order)
-# =============================================================================
 
 
 @dataclass(slots=True)
@@ -539,7 +447,7 @@ class NlKey:
     ``HV-KEY-1 PIC 9(18) COMP`` [common/irsnominalMT.cbl:L195] - ten
     declared digits widened to eighteen at the host variable and narrowed
     to ten again at the column. That concatenation is drift kind 1 and
-    belongs to ``dal/acasirsub1_irs_nominal.py``; no combined key value is
+    belongs to the `acasirsub1` handler module; no combined key value is
     formed here.
 
     Because they map to no column, these two are the only fields of the
@@ -597,7 +505,6 @@ class NlData:
     )
 
     # NL-Name  pic x(24)  [copybooks/irswsnl.cob:L16]
-    #
     # 24 characters in the copybook, 24 in the host variable and 24 in the
     # column - the one name on this record the bridge leaves alone, and
     # the only one ``drift_for`` reports no name difference on. Contrast
@@ -606,18 +513,15 @@ class NlData:
     nl_name: str = _NL_NAME_SPACES
 
     # NL-DR  pic 9(8)v99 comp  [copybooks/irswsnl.cob:L17]
-    #
     # Debit accumulator. COMP with a V: 10 digits, 8 before the implied
     # point and 2 after, unsigned. Column ``DR decimal(10,2) unsigned``.
     nl_dr: Decimal = _ZERO_MONEY
 
     # NL-CR  pic 9(8)v99 comp  [copybooks/irswsnl.cob:L18]
-    #
     # Credit accumulator, declared identically. Column ``CR``.
     nl_cr: Decimal = _ZERO_MONEY
 
     # NL-DR-Last  pic 9(8)v99 comp  occurs 4  [copybooks/irswsnl.cob:L19]
-    #
     # The four previous quarters' debit totals, in the copybook's own
     # order. A fixed four-element tuple, not a list, so the shape cannot
     # drift between two runs (R-6). COBOL indexes it from one, Python from
@@ -636,7 +540,6 @@ class NlData:
     )
 
     # NL-CR-Last  pic 9(8)v99 comp  occurs 4  [copybooks/irswsnl.cob:L20]
-    #
     # The four previous quarters' credit totals. Declared immediately
     # after the debit array, so in COBOL storage all four debit entries
     # precede all four credit entries - while the host variables and the
@@ -655,7 +558,6 @@ class NlData:
     )
 
     # NL-AC  pic x  [copybooks/irswsnl.cob:L21]
-    #
     # Column ``AC char(1)``; the ``NL-`` prefix is dropped.
     nl_ac: str = _NL_AC_SPACES
 
@@ -684,7 +586,6 @@ class NlPointerView:
     FIELDS: ClassVar[tuple[FieldDescriptor, ...]] = (_NL_POINTER,)
 
     # NL-Pointer  pic 9(5)  DISPLAY  [copybooks/irswsnl.cob:L23]
-    #
     # Drift kind 4, and the only non-monotonic one on this record: 5
     # digits in the copybook, widened to 8 and retyped to COMP at
     # ``HV-REC-POINTER PIC 9(08) COMP``
@@ -718,13 +619,12 @@ class WsIrsnlRecord:
     replace or rewrite facility and is not immutable, because anomaly 5 -
     the lost update on the two VAT control accounts
     [irs/irs030.cbl:L1602], [:L1612], [:L1704-L1708] - has to stay
-    reproducible in ``programs/irs030_posting.py``, and a snapshot
+    reproducible in the `irs030` program module, and a snapshot
     mechanism here would let a caller avoid it.
 
     This is a layout only. Posting, accumulation and rewriting are
-    ``programs/irs030_posting.py``; SQL, key concatenation, column
-    renaming and array flattening are
-    ``dal/acasirsub1_irs_nominal.py``.
+    the `irs030` program module; SQL, key concatenation, column
+    renaming and array flattening are the `acasirsub1` handler module's.
     """
 
     FIELDS: ClassVar[tuple[FieldDescriptor, ...]] = (
@@ -738,7 +638,6 @@ class WsIrsnlRecord:
     nl_key: NlKey = dataclasses.field(default_factory=NlKey)
 
     # NL-Type  pic x  [copybooks/irswsnl.cob:L12] -> column TIPE
-    #
     # The column name is the phonetic ``TIPE``, presumably dodging a
     # reserved word. Two condition names are declared on this field,
     # ``88 Owner value is "O"`` and ``88 Sub value is "S"``

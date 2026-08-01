@@ -8,184 +8,119 @@ copybook declares - `PurchAddress`, `Quarters` and `QuartersView`.
     entity facade   Purch
     handler         acas022                 [common/acas022.cbl]
     bridge          purchMT                 [common/purchMT.cbl]
-    table           PULEDGER-REC, 29 columns, primary key PURCH-KEY
-                                            [mysql/ACASDB.sql:L646]
+    table           PULEDGER-REC, 29 columns
+                                            [mysql/ACASDB.sql:L646-L677]
+    primary key     PURCH-KEY               [mysql/ACASDB.sql:L676]
     copybook        copybooks/wspl.cob, 55 lines, 01 level at L13
 
-Agent Action Plan section 0.4.1.3 states this folder's mandate. Its first
-sentence, verbatim:
-
-    "Every module is a CREATE from its copybook, translating each 05/03 field
-    to a dataclass attribute whose descriptor is looked up in the generated
-    dictionary."
-
-Its second sentence, which the plan itself emphasises, says that oddities in the
-source are preserved and never amended. That is restated here rather than quoted
-because the plan's own wording uses a word this module is required to keep out of
-its text; the requirement is unchanged and absolute.
-
-Its binding shape, from section 0.8.1: "Plain modules and dataclasses; no ORM
-entity layer." And from rule R-3: "The 27 record modules mirror their copybooks
-field for field with nothing added."
-
-The rule identifiers R-1 through R-6 cited throughout are the Agent Action
-Plan's own (section 0.7.2). This project carries no separate rules document -
-`review_rules` reports that none was provided - so the plan is where their full
-text lives, and enterprise-standard best practice governs wherever it is
-silent.
+Agent Action Plan section 0.4.1.3 sets this folder's mandate, verbatim: "Every
+module is a CREATE from its copybook, translating each 05/03 field to a
+dataclass attribute whose descriptor is looked up in the generated dictionary."
+Its second sentence, restated rather than quoted because the plan's wording uses
+a word this module must keep out of its text, requires that oddities in the
+source be preserved and never amended. Section 0.8.1 fixes the shape - "Plain
+modules and dataclasses; no ORM entity layer" - and R-3 the content: "The 27
+record modules mirror their copybooks field for field with nothing added."
+R-1 through R-6 are the plan's own identifiers (section 0.7.2); this project
+carries no separate rules document, so the plan is where their full text lives.
 
 THIS MODULE COMPUTES NOTHING
 ============================
-It declares storage and provenance. It performs no arithmetic, no padding, no
-truncation and no store, and it tests no condition name. Those belong
-elsewhere by design:
-
-    acas_posting/cobol/arithmetic.py    the arithmetic verbs and truncation
-    acas_posting/cobol/move.py          receiving-field truncation and padding
-    acas_posting/cobol/condition_names.py   88-level predicates
-    acas_posting/dal/acas022_purch.py   the bridge boundary and its SQL
-    acas_posting/programs/pl055_order_proof_extract.py
-    acas_posting/programs/pl060_order_posting.py
-    acas_posting/programs/pl100_payment_posting.py
+It declares storage and provenance: no arithmetic, no padding, no truncation,
+no store, and no condition-name test. Those belong to `cobol/arithmetic.py`,
+`cobol/move.py` and `cobol/condition_names.py`, to the `acas022` handler module
+at the bridge boundary, and to the `pl055`, `pl060` and `pl100` program modules.
 
 WHY THE TYPES HERE DECIDE WHETHER THREE LEGACY DEFECTS SURVIVE
 ==============================================================
-Three of the anomaly register's entries - A-8 double truncation, A-9 the
-skipped counter increment, and A-10 three disagreeing guards - have a Purchase
-instance, and every one of them turns on the storage class of the statistics
-fields declared at [copybooks/wspl.cob:L35-L42].
+Three anomaly-register entries - A-8 double truncation, A-9 the skipped counter
+increment, A-10 three disagreeing guards - have a Purchase instance, and every
+one turns on the storage class of the five statistics fields at
+[copybooks/wspl.cob:L35-L42]: `binary-long`, signed 32-bit integers with no
+PICTURE clause and so no fractional positions, making the running figures the
+posting programs keep in them integer quotients that discard their remainder.
+Agent Action Plan section 0.6.1 states the consequence - that truncation "is
+integer truncation, which is exactly what makes the moving-average defect
+reproducible." Carry any one as a `Decimal` and the remainder survives, the
+defect disappears, and under R-4 that is a failure: "A defect reproduced is
+correct; a defect fixed is a failure." They are `int`; the dependent sites are:
 
-`Purch-Activety`, `Purch-Average`, `Purch-Pay-Activety`, `Purch-Pay-Average`
-and `Purch-Pay-Worst` are `binary-long`: signed 32-bit integers carrying no
-PICTURE clause and therefore no fractional positions at all. The running
-figures the posting programs keep in them are integer quotients that discard
-their remainder. Agent Action Plan section 0.6.1 puts the consequence plainly -
-for the statistics fields, truncation on the division "is integer truncation,
-which is exactly what makes the moving-average defect reproducible."
+    purchase/pl060.cbl  purch-comp section L740
+        L743-L744 two-condition guard; L745 product; L746-L747 else zero;
+        L749 "add 1 to purch-activety." BEFORE the quotient; L750 accumulate;
+        L751 "divide purch-activety into work-2 giving purch-average."
 
-Carry any one of those five as a `Decimal` and the remainder survives, the
-defect silently disappears, and under R-4 that is a failure rather than an
-improvement: "A defect reproduced is correct; a defect fixed is a failure."
-They are `int`, and the three sites that depend on it are, verbatim from the
-frozen source:
+    purchase/pl060.cbl  credit-comp section L755
+        L758-L759 the SAME two-condition guard; L760 product; the counter is
+        NEVER incremented here (A-9); L764 an extra "if work-2 not = zero";
+        L765 accumulate; L766 the quotient, into the SAME two fields.
 
-    purchase/pl060.cbl:L740   purch-comp section
-        L743-L744  a two-condition guard
-        L745       the product statement
-        L746-L747  else, zero into the accumulator
-        L749       "add 1 to purch-activety." - BEFORE the quotient statement
-        L750       the accumulation
-        L751       the quotient statement - purch-activety INTO work-2, giving
-                   purch-average
+    purchase/pl100.cbl  compute-purch-pay region
+        L494 "subtract oi-date from oi-date-cleared giving work-a."; L495 zero
+        into the accumulator; L497 a ONE-condition guard - a third variant
+        (A-10); L498 product; L500 accumulate; L501 "add 1 to
+        purch-pay-activety."; L502 "divide work-b by purch-pay-activety giving
+        purch-pay-average." - the REVERSED operand order, `by` where pl060
+        writes `into`; L504-L505 the worst-payment-days watermark.
 
-    purchase/pl060.cbl:L755   credit-comp section
-        L758-L759  the same two-condition guard
-        L760       the product statement
-        (nothing)  the counter is NEVER incremented here - anomaly A-9
-        L764       an extra guard, "if work-2 not = zero"
-        L765       the accumulation
-        L766       the quotient statement, into the SAME two fields
-
-    purchase/pl100.cbl:L494   the compute-purch-pay region
-        L494       "subtract oi-date from oi-date-cleared giving work-a."
-        L495       zero into the accumulator
-        L497       a ONE-condition guard - a third variant, anomaly A-10
-        L498       the product statement
-        L500       the accumulation
-        L501       "add 1 to purch-pay-activety."
-        L502       the quotient statement - work-b BY purch-pay-activety,
-                   giving purch-pay-average: the REVERSED operand order, `by`
-                   where pl060 writes `into`
-        L504-L505  the worst-payment-days watermark
-
-All eight of those locators were checked line by line against the frozen source
-and every one is exact. Two nuances are recorded rather than smoothed over.
-First, `credit-comp` reuses `purch-activety` and `purch-average` - the very
-fields `purch-comp` maintains - rather than a separate pair of credit fields.
-Second, the reversal at pl100:L502 is TEXTUAL: `into` and `by` exchange the
-roles of their operands, so both sites happen to form accumulator over
-counter. The reversal is preserved exactly as written, and the program modules
-own it; nothing here folds the three variants together. Agent Action Plan
-section 0.6.1 gives the reason in one sentence: "Normalising them into one
-helper would be the single easiest way to fail this migration."
+Two nuances are recorded rather than smoothed over. `credit-comp` reuses
+`purch-activety` and `purch-average` - the very fields `purch-comp` maintains -
+rather than a separate credit pair. And the reversal at pl100:L502 is TEXTUAL:
+`into` and `by` exchange the roles of their operands, so both sites happen to
+form accumulator over counter. It is preserved as written, the program modules
+own it, and nothing here folds the three variants together. Agent Action Plan
+section 0.6.1 gives the reason: "Normalising them into one helper would be the
+single easiest way to fail this migration."
 
 THE TWO-DIRECTION TYPE RULE - AND THIS RECORD CONTAINS BOTH DIRECTIONS
-=====================================================================
-"Binary means integer" is true only at scale zero, and this one record proves
-why the qualifier matters, because it carries an example of each direction:
+======================================================================
+"Binary means integer" holds only at scale zero, and this one record carries an
+example of each direction:
 
-    DIRECTION 1  a binary usage with NO picture, so no fractional positions
-                 -> int
-                 `Purch-Credit binary-char` [copybooks/wspl.cob:L31] and the
-                 eleven `binary-long` items at L32-L42. Twelve fields.
+    DIRECTION 1  binary usage, NO picture, no fractional positions -> int.
+                 `Purch-Credit binary-char` [copybooks/wspl.cob:L31] plus the
+                 eleven `binary-long` items at L32-L42: twelve fields.
+    DIRECTION 2  COMP WITH a V, two fractional positions -> Decimal.
+                 `Purch-Discount pic 99v99 comp` [copybooks/wspl.cob:L30], four
+                 digits, scale 2, UNSIGNED - Decimal despite its own comment.
 
-    DIRECTION 2  COMP WITH a V in the picture, so two fractional positions
-                 -> Decimal
-                 `Purch-Discount pic 99v99 comp` [copybooks/wspl.cob:L30].
-                 Four digits, scale 2, UNSIGNED - and a Decimal despite its
-                 own inline comment claiming otherwise.
-
-Get either direction wrong and every stored value changes. `records/
-irs_nominal.py` carries the same warning for `pic 9(8)v99 comp`. Nothing here
-is typed by eye: every storage decision is read from the generated dictionary,
-whose `cobol_python_storage` was derived from the frozen sources.
+Get either direction wrong and every stored value changes; `records/
+irs_nominal.py` carries the same warning for `pic 9(8)v99 comp`.
 
 DECLARATION BEATS COMMENT - THREE TIMES IN THIS COPYBOOK
-=======================================================
-Three inline comments describe something other than what their own line
-declares. In each case the DECLARATION governs and the comment is history:
-
-    L30  `pic 99v99 comp.  *> RDB comp-3`
-         The comment says packed; the declaration says COMP. COMP wins, and
-         the dictionary agrees: usage COMP, digits 4, scale 2, unsigned.
-         The bridge supplies the missing history, at [common/purchMT.cbl:L343]:
-         "11/07/23 was comp-3 now matches wspl.cob". So the copybook comment is
-         a leftover from before the bridge was changed to agree with the
-         copybook - which settles the question rather than leaving it open.
-         Its Sales counterpart `Sales-Discount pic 99v99 comp`
-         [copybooks/wssl.cob:L42] carries no such comment: the two records
-         agree on the declaration and disagree on the commentary.
-
-    L31  `binary-char.  *> were pic 99`
-         A note about what the field USED to be. `binary-char` is a signed
-         8-bit integer at scale zero.
-
-    L32  `binary-long.  *> all these were pic 9(8) comp`
-         One comment covering the whole L32-L42 run. `binary-long` is a signed
-         32-bit integer at scale zero.
-
-No digit count, scale or sign anywhere below is taken from a comment. `99` and
-`9(8)` inside those comments are historical text, not declarations.
+========================================================
+Three inline comments describe something other than what their own line declares
+- L30 `*> RDB comp-3` on a COMP item, L31 `*> were pic 99` on a `binary-char`,
+and L32 `*> all these were pic 9(8) comp` covering the whole L32-L42 run. In each
+case the DECLARATION governs and the comment is history; each field's own
+attribute comment below carries the detail, including the bridge's dated
+explanation "11/07/23 was comp-3 now matches wspl.cob"
+[common/purchMT.cbl:L343], which settles the L30 question rather than leaving it
+open, and the fact that its Sales counterpart [copybooks/wssl.cob:L42] carries no
+such comment. No digit count, scale or sign below is taken from a comment: the
+`99` and `9(8)` inside them are historical text, not declarations.
 
 NAMES ARE CARRIED VERBATIM, MISSPELLINGS AND CASING INCLUDED
-===========================================================
-Every COBOL name below is quoted exactly as `copybooks/wspl.cob` spells it, and
-each attribute comment carries that spelling with its locator.
+============================================================
+Every COBOL name below is quoted exactly as `copybooks/wspl.cob` spells it, with
+its locator on the attribute's own comment.
 
-    Purch-Activety      L35    the source misspells the word, and the
-    Purch-Pay-Activety  L40    misspelling travels all the way through:
-                               HV-PURCH-ACTIVETY [common/purchMT.cbl:L299] and
-                               the column PURCH-ACTIVETY. Amend the spelling and
-                               the dictionary key stops matching. The
-                               correctly-spelled form appears nowhere in this
-                               module, deliberately.
-
-    Purch-Last-inv      L36    lower-case tail segments where every neighbour
-    Purch-Last-pay      L37    is capitalised - yet the columns are
-                               PURCH-LAST-INV and PURCH-LAST-PAY.
-
-    Turnover-q1..q4     L46-49 lower-case q, where the Sales twin writes an
-    PTurnover-q         L51    upper-case Q - yet the columns are TURNOVER-Q1
-                               through TURNOVER-Q4.
-
-    Supplier-live       L19    lower-case condition names, and `value 0` where
-    Supplier-dead       L20    the Sales twin writes `value zero`
-                               [copybooks/wssl.cob:L27] for the same idea.
+    Purch-Activety [L35] and Purch-Pay-Activety [L40] misspell the word, and the
+    misspelling travels the whole way through - HV-PURCH-ACTIVETY
+    [common/purchMT.cbl:L299] and column PURCH-ACTIVETY - so the correctly
+    spelled form appears nowhere here. Purch-Last-inv [L36] and Purch-Last-pay
+    [L37] carry lower-case tail segments where every neighbour is capitalised,
+    yet their columns are PURCH-LAST-INV and PURCH-LAST-PAY. Turnover-q1..q4
+    [L46-L49] and PTurnover-q [L51] use lower-case q where the Sales twin writes
+    upper-case Q, yet the columns are TURNOVER-Q1 through TURNOVER-Q4. And
+    Supplier-live [L19] / Supplier-dead [L20] are lower-case condition names
+    carrying `value 0` where the Sales twin writes `value zero`
+    [copybooks/wssl.cob:L27] for the same idea.
 
 Because the COBOL name, the host-variable name and the column name drift apart,
-no key below is built by mechanical transformation of an attribute name. Each
-one is looked up by the copybook name and declaration line the artifact records
-- see `_index_copybook` and `_descriptor`.
+no key below is built by mechanical transformation of an attribute name; each is
+looked up by copybook name and declaration line - see `_index_copybook` and
+`_descriptor`.
 
 THE HEADER'S OWN HISTORY, VERBATIM
 ==================================
@@ -197,221 +132,144 @@ THE HEADER'S OWN HISTORY, VERBATIM
     L10    "taken from fdpl.cob 23/07/16"
     L11    "15/01/18 Added Purch-Stats-Date with filler space."
 
-Three successive declared sizes, 299 then 300 then 302, the last of them
-carrying an external verification note - COBSTRUCT, the PRIMA tool - that has
-no counterpart in `copybooks/wssl.cob`, whose header records a single size of
-300. The 302 figure includes `Purch-Stats-Date`, which is why the field stays
-declared below even though it reaches no column.
+Three successive declared sizes, 299 then 300 then 302, the last carrying an
+external verification note - COBSTRUCT, the PRIMA tool - with no counterpart in
+`copybooks/wssl.cob`, whose header records a single size of 300 [:L7]. The 302
+includes `Purch-Stats-Date`, which is why that field stays declared below.
 
-A NEW ANOMALY THIS MODULE IS THE RECORDING SITE FOR
-===================================================
+A NEW ANOMALY RAISED BY THIS MODULE
+===================================
 `Purch-Stats-Date pic 9(4).  *> added 15/01/18.` [copybooks/wspl.cob:L53]
 reaches NO host variable and NO column. It is not among the Agent Action Plan's
-twenty-two section 0.6.7 entries, so it is raised here as a new register entry
-for `docs/migration/anomaly-log.md`, with this module named as the recording
-site.
+twenty-two section 0.6.7 entries, so it is raised here as a new entry for the
+migration's anomaly log. The field's own attribute comment below carries the
+four-part evidence - declared, no host variable, skipped by `bb000-HV-Load`
+[common/purchMT.cbl:L1203], no column - and the generated entry is one-sided,
+`loader.cite` reporting "bridge=absent column=absent". One nuance, because a
+coarser check would mislead: the STRING "stats" DOES occur in
+`common/purchMT.cbl`, at L364, but as part of the bridge's own inline buffer `01
+Purch-Rec.` (see THE FOURTH LAYER below), never as a host variable. So the field
+is declared TWICE on the COBOL side and mapped ZERO times.
 
-The evidence, stated in the precise form the frozen sources support:
-
-    the field is declared        [copybooks/wspl.cob:L53]
-    no host variable exists     `HV-PURCH-STATS` does not occur anywhere in
-                                common/purchMT.cbl
-    the load paragraph skips it  bb000-HV-Load [common/purchMT.cbl:L1203] maps
-                                twenty-nine fields and not this one
-    no column exists            `PURCH-STATS` does not occur anywhere in
-                                mysql/ACASDB.sql
-    the dictionary agrees       the generated entry is one-sided:
-                                in_copybook true, in_bridge false,
-                                in_column false, and `loader.cite` for it
-                                reports "bridge=absent column=absent"
-
-One nuance must be stated because a coarser check would mislead a reader: the
-STRING "stats" DOES occur in `common/purchMT.cbl`, at L364. That occurrence is
-not a host variable - it belongs to the bridge's own inline record buffer
-`01 Purch-Rec.` (see THE FOURTH LAYER below), which copies the copybook's
-declaration and is then never mapped. So the field is declared TWICE on the
-COBOL side and mapped ZERO times.
-
-AND THE ASYMMETRY IS THE PROOF IT IS AN ACCIDENT
+AND THE ASYMMETRY IS THE EVIDENCE OF ACCIDENT
     The Sales copybook added the identical field on the identical date with the
     identical comment - `Sales-Stats-Date pic 9(4). *> added 15/01/18.`
-    [copybooks/wssl.cob:L64] - and there the bridge DID gain a host variable,
-    `HV-SALES-STATS-DATE PIC X(4).` [common/salesMT.cbl:L320], and the schema
-    DID gain a column, `SALES-STATS-DATE char(4) NOT NULL`
-    [mysql/ACASDB.sql:L981]. All three exist on the Sales side; none of the
-    latter two exist here. The Purchase side of that 15/01/18 change was simply
-    never carried through.
+    [copybooks/wssl.cob:L64] - and there the bridge DID gain
+    `HV-SALES-STATS-DATE PIC X(4).` [common/salesMT.cbl:L320] and the schema DID
+    gain `SALES-STATS-DATE char(4) NOT NULL` [mysql/ACASDB.sql:L981]. Neither of
+    the latter two exists here: the Purchase side of that change was never carried
+    through. R-3 forbids removal as firmly as addition, so the field is declared
+    regardless at its copybook view - DISPLAY, 4 digits, scale 0, unsigned, int -
+    with no stub column, no stub host variable and no reconciliation with Sales.
 
-WHAT THIS MODULE THEREFORE DOES, AND DOES NOT DO
-    declares the field anyway      R-3 forbids removal exactly as firmly as it
-                                   forbids addition; the field is part of the
-                                   302 declared bytes.
-    reports the copybook view      DISPLAY, 4 digits, scale 0, unsigned, int.
-    adds no column, no host        no stub of either, in this module or
-      variable, no reconciliation  anywhere else.
-      with the Sales side
-
-THE SIBLING AND MIRROR CASES
-    `ar3 pic x(5)` [copybooks/irswsfinal.cob:L68] is the same shape - a
-    copybook field with no host variable and no column - and is recorded in
-    `records/irs_final.py`. The generated dictionary lists it among its
-    one-sided keys as `Final-Record.ar3`, alongside this record's eight.
-
-    `records/irs_posting.py` carries the exact MIRROR: three COLUMNS -
-    POST4-DAY, POST4-MONTH and POST4-YEAR - that exist with no copybook field
-    at all, derived by the bridge under a guard
-    [common/irspostingMT.cbl:L982-L987].
-
-A CLAIM ABOUT UNIQUENESS, STATED ONLY AS FAR AS THE EVIDENCE GOES
-    A sweep of all 1015 generated entries shows this SHAPE is not unique:
-    `IRSFINAL-REC` drops `ar3` and the `ar1-1..ar1-26` / `ar2-1..ar2-26` runs,
-    and `SYSTEM-REC` drops `Phone-No` [copybooks/wssystem.cob:L80],
-    `SL-BO-Default` [:L277] and `FILLER-Dummy4` [:L329] among others. So the
-    column count of PULEDGER-REC is NOT the only in-scope count that requires
-    subtracting a real, non-filler, non-redefines field.
-
-    What IS particular to this record is narrower and sharper, and it is the
-    part worth carrying into the anomaly log: `Purch-Stats-Date` is the only
-    dropped standalone field in `copybooks/wspl.cob`; its parent is the 01
-    record directly rather than an array or a nested group; and its Sales twin,
-    added the same day under the same comment, was carried through in full.
-    That asymmetry, not the shape, is the evidence of accident.
+THE SHAPE IS NOT UNIQUE; THE ASYMMETRY IS
+    A sweep of all 1015 generated entries shows the SHAPE recurs: `IRSFINAL-REC`
+    drops `ar3 pic x(5)` [copybooks/irswsfinal.cob:L68] and the `ar1-1..ar1-26`
+    and `ar2-1..ar2-26` runs, and `SYSTEM-REC` drops `Phone-No`
+    [copybooks/wssystem.cob:L80], `SL-BO-Default` [:L277] and `FILLER-Dummy4`
+    [:L329]. `records/irs_posting.py` carries the exact MIRROR: three COLUMNS with
+    no copybook field at all, derived by the bridge under a guard
+    [common/irspostingMT.cbl:L982-L987]. What IS particular here is narrower -
+    this is the only dropped standalone field in `copybooks/wspl.cob`, its parent
+    is the 01 record directly rather than an array or nested group, and its Sales
+    twin was carried through in full.
 
 AN OPEN QUESTION FOR THE COMPILED ORACLE (R-6, question 2 of 2)
-    Because the field reaches no column, any value written to it is invisible
-    in every table dump, so the state-diff protocol cannot observe it at all.
-    Whether anything in the posting cycle ever reads it back is therefore
-    undecidable from the source and must be measured against the compiled
-    program. Recorded for `docs/migration/ambiguity-resolutions.md`. Nothing
-    here presumes an answer.
+    Because the field reaches no column, any value written to it is invisible in
+    every table dump, so the state-diff protocol cannot observe it at all. Whether
+    anything in the posting cycle ever reads it back is undecidable from the
+    source and must be measured against the compiled program. Recorded for the
+    migration's ambiguity-resolutions document; nothing here presumes an answer.
 
 DRIFT AT THE BRIDGE BOUNDARY - FIVE KINDS, ALL LEFT UNSETTLED HERE
 ==================================================================
 The bridge is not a transparent pipe. For several fields the copybook
 declaration, the bridge host variable and the MySQL column disagree, and some
-of those disagreements change a value BEFORE any SQL executes. The descriptors
-below report the COPYBOOK view and nothing else; `dal/acas022_purch.py` owns
-the conversions, and `loader.drift_for` is the way to see the disagreement.
-
-Host-variable group `01 TD-PULEDGER-REC.` [common/purchMT.cbl:L284], twenty-nine
-host variables at L285-L313, loaded by `bb000-HV-Load Section.` [:L1203], which
-is performed from `ba070-Process-Write` [:L884] and `ba090-Process-Rewrite`
-[:L967].
+disagreements change a value BEFORE any SQL executes. The descriptors below
+report the COPYBOOK view and nothing else; the `acas022` handler module owns the
+conversions, and `loader.drift_for` shows the disagreement. The host-variable
+group is `01 TD-PULEDGER-REC.` [common/purchMT.cbl:L284], twenty-nine variables
+at L285-L313, loaded by `bb000-HV-Load Section.` [:L1203] from
+`ba070-Process-Write` [:L884] and `ba090-Process-Rewrite` [:L967].
 
 KIND 1 - SIGNEDNESS LOSS. Anomaly A-11's Purchase instance, twelve fields wide.
-    Twelve signed copybook fields narrow to twelve unsigned host variables and
-    twelve unsigned columns:
-
-        Purch-Credit        L31  ->  HV-PURCH-CREDIT       [:L295]  ->  unsigned
-        Purch-SortCode      L32  ->  HV-PURCH-SORTCODE     [:L296]  ->  unsigned
-        Purch-Accountno     L33  ->  HV-PURCH-ACCOUNTNO    [:L297]  ->  unsigned
-        Purch-Limit         L34  ->  HV-PURCH-LIMIT        [:L298]  ->  unsigned
-        Purch-Activety      L35  ->  HV-PURCH-ACTIVETY     [:L299]  ->  unsigned
-        Purch-Last-inv      L36  ->  HV-PURCH-LAST-INV     [:L300]  ->  unsigned
-        Purch-Last-pay      L37  ->  HV-PURCH-LAST-PAY     [:L301]  ->  unsigned
-        Purch-Average       L38  ->  HV-PURCH-AVERAGE      [:L302]  ->  unsigned
-        Purch-Create-Date   L39  ->  HV-PURCH-CREATE-DAT   [:L303]  ->  unsigned
-        Purch-Pay-Activety  L40  ->  HV-PURCH-PAY-ACTIVETY [:L304]  ->  unsigned
-        Purch-Pay-Average   L41  ->  HV-PURCH-PAY-AVERAGE  [:L305]  ->  unsigned
-        Purch-Pay-Worst     L42  ->  HV-PURCH-PAY-WORST    [:L306]  ->  unsigned
-
-    Agent Action Plan section 0.6.2 states the consequence, verbatim: "a
-    negative value computed in COBOL loses its sign at the bridge, not at the
-    database - so the Python data-access layer must reproduce the bridge's
-    conversion, not merely write the computed value and let MySQL complain."
-    The plan's section 0.6.7 entry 11 names only the Sales case; this instance
-    is wider, and it includes a `binary-char`, which the Sales side does not.
+    The twelve signed copybook items at L31-L42 - `Purch-Credit` and the eleven
+    `binary-long` - narrow to twelve unsigned host variables at
+    [common/purchMT.cbl:L295-L306], in declaration order, and to twelve unsigned
+    columns at [mysql/ACASDB.sql:L657-L668]. Agent Action Plan section 0.6.2
+    states the consequence, verbatim: "a negative value computed in COBOL loses
+    its sign at the bridge, not at the database - so the Python data-access layer
+    must reproduce the bridge's conversion, not merely write the computed value
+    and let MySQL complain." Section 0.6.7 entry 11 names only the Sales case;
+    this instance is wider and adds a `binary-char`, which Sales never declares.
 
 KIND 2 - A THREE-WAY WIDTH DISAGREEMENT, in two different directions.
-    Two fields disagree at all three layers at once:
+    `Purch-Credit`  binary-char 8-bit signed -> `PIC  9(08) COMP`, a WIDENING
+                    [common/purchMT.cbl:L295] -> `mediumint(2)`, a NARROWING.
+    `Purch-SortCode` binary-long 32-bit signed -> `PIC  9(08) COMP` [:L296] ->
+                    `mediumint(6)`, NARROWER THAN BOTH. A UK sort code is six
+                    digits, so that column is semantically apt and structurally
+                    the tightest of its three layers.
+    Neither chain is widened or narrowed here.
 
-        Purch-Credit    copybook  binary-char        8-bit signed
-                        bridge    PIC  9(08) COMP    8 digits - a WIDENING
-                        column    mediumint(2)       a NARROWING
+KIND 3 - GROUP CONCATENATION, alphanumeric. `PurchAddress`'s own docstring carries
+    this in full: the L23 group's two x(48) children reach one `HV-PURCH-ADDRESS
+    PIC X(96)` [common/purchMT.cbl:L289] and one `PURCH-ADDRESS char(96)`, derived
+    as GROUP_CONCATENATION at [:L1216]. Both children are declared below
+    regardless. SALES-ADDRESS is the same shape, as is `WS-Post-Key` numerically.
 
-        Purch-SortCode  copybook  binary-long        32-bit signed
-                        bridge    PIC  9(08) COMP    8 digits
-                        column    mediumint(6)       NARROWER THAN BOTH
+KIND 4 - NAME TRUNCATION. `Purch-Create-Date` [copybooks/wspl.cob:L39] becomes
+    `HV-PURCH-CREATE-DAT` [common/purchMT.cbl:L303] and column
+    `PURCH-CREATE-DAT`, the trailing E dropped, and the bridge records why at
+    [:L352] - "chg name 4 SQL Mig." `Post-Date` -> `POST4-DAT` in
+    `records/irs_posting.py` is the same shape, as is SALES-CREATE-DAT.
 
-    A UK sort code is six digits, so the second column is semantically apt and
-    structurally the tightest of its three layers. Neither chain is widened or
-    narrowed here.
+KIND 5 - COPYBOOK ONLY: no host variable, no column. `Purch-Stats-Date`
+    [copybooks/wspl.cob:L53]; see the new-anomaly section above. This is the one
+    field for which the bridge is NOT the record-layout source, because it never
+    maps it - so here, and only here, the copybook is the only source there is.
+    Saying so explicitly matters: left implicit it would misrepresent the
+    preserved user requirement that the bridge "defines the ... record-layout <->
+    table mapping - it is the data dictionary for this migration."
 
-KIND 3 - GROUP CONCATENATION, alphanumeric.
-    `Purch-Address` [copybooks/wspl.cob:L23] is a GROUP of `Purch-Addr1 x(48)`
-    and `Purch-Addr2 x(48)`. The bridge declares one `HV-PURCH-ADDRESS PIC
-    X(96)` [common/purchMT.cbl:L289] and the schema one `PURCH-ADDRESS
-    char(96)`. The two children have NO columns of their own - the generated
-    dictionary records them as one-sided copybook entries and records the
-    parent's derivation as a GROUP_CONCATENATION, expression "move
-    PURCH-ADDRESS to HV-PURCH-ADDRESS", at [common/purchMT.cbl:L1216]. Both
-    children are declared below regardless. The same shape appears as
-    SALES-ADDRESS on the Sales side and, numerically, as `WS-Post-Key` in
-    `records/gl_posting.py`.
-
-KIND 4 - NAME TRUNCATION.
-    `Purch-Create-Date` [copybooks/wspl.cob:L39] becomes
-    `HV-PURCH-CREATE-DAT` [common/purchMT.cbl:L303] and the column
-    `PURCH-CREATE-DAT`: the trailing E is dropped. The bridge records why, in
-    its own inline copy at [common/purchMT.cbl:L352] - "chg name 4 SQL Mig." -
-    so this is a deliberate migration-era rename rather than a typing slip.
-    `Post-Date` -> `POST4-DAT` in `records/irs_posting.py` is the same shape,
-    as is the Sales side's own SALES-CREATE-DAT.
-
-KIND 5 - COPYBOOK ONLY: no host variable, no column.
-    `Purch-Stats-Date` [copybooks/wspl.cob:L53]. See the new-anomaly section
-    above. This is the one field for which the bridge is NOT the record-layout
-    source at all, because the bridge never maps it - so for this field, and
-    only this field, the copybook is the only source there is. Saying that
-    explicitly is the point; leaving it implicit would misrepresent the
-    preserved user requirement that the bridge "defines the ... record-layout
-    <-> table mapping - it is the data dictionary for this migration."
-
-TWO KINDS THE BRIEFING DID NOT ANTICIPATE, FOUND BY QUERYING THE DICTIONARY
+TWO FURTHER KINDS, COUNTED FROM THE DICTIONARY RATHER THAN THE BRIEFING
     KIND 2b - DIGIT WIDENING ON THE TWO ZONED FLAGS. `Purch-Status` [L18] and
-    `Purch-Notes-Tag` [L21] are `pic 9` - ONE digit - yet their host variables
-    are `PIC  9(03) COMP` [common/purchMT.cbl:L286-L287] and their columns are
-    `tinyint(1) unsigned`. `loader.drift_for` flags both `usage` and `digits`
-    for each: the copybook has 1 digit, the bridge host variable has 3. The
-    storage class changes as well, DISPLAY -> COMP -> TINYINT.
+    `Purch-Notes-Tag` [L21] are `pic 9` - ONE digit - yet their host variables are
+    `PIC  9(03) COMP` [common/purchMT.cbl:L286-L287] and their columns
+    `tinyint(1) unsigned`: DISPLAY -> COMP -> TINYINT. KIND 2c - STORAGE CLASS
+    ONLY, on every money field: the seven `comp-3` fields are COMP-3, then COMP,
+    then DECIMAL, with sign, digits and scale agreeing throughout.
 
-    KIND 2c - STORAGE-CLASS CHANGE ON EVERY MONEY FIELD, with nothing else
-    changing. The seven `comp-3` money fields carry a `usage` drift flag and no
-    other: COMP-3 in the copybook, COMP at the host variable, DECIMAL at the
-    column. Sign, digits and scale agree at all three layers.
+    THE FULL CENSUS: 22 of the 29 table-backed entries carry at least one drift
+    flag - `PURCH-KEY` carries `name`, the two zoned flags `usage` and `digits`,
+    the twelve binary fields `signedness` and `usage` (with `PURCH-CREATE-DAT`
+    additionally `name`), and the seven money fields `usage`. The seven UNFLAGGED
+    entries are the five alphanumerics, the `PURCH-ADDRESS` group and
+    `PURCH-DISCOUNT` - making PURCH-DISCOUNT the only NUMERIC field here that
+    agrees perfectly across all three layers, a pointed contrast with the stale
+    comment on its own declaration line.
 
-    The full census: 22 of the 29 table-backed entries carry at least one drift
-    flag. `PURCH-KEY` carries `name`. The two zoned flags carry `usage` and
-    `digits`. The twelve binary fields carry `signedness` and `usage`, and
-    `PURCH-CREATE-DAT` additionally carries `name`. The seven money fields
-    carry `usage`. `PURCH-ADDRESS` carries none. And `PURCH-DISCOUNT` carries
-    NONE AT ALL - it is the one field in this record that agrees perfectly
-    across all three layers, which is a pointed contrast with the stale comment
-    sitting on its own declaration line.
+THE CLEAN PASS-THROUGH, stated because the drift is specific rather than
+    systemic: `Purch-Current` and `Purch-Last` `pic s9(8)v99 comp-3` [L43-L44]
+    become `PIC S9(08)V9(02) COMP` [common/purchMT.cbl:L307-L308] and
+    `decimal(10,2)`, as do `Turnover-q1..q4` [:L309-L312] and `Purch-Unapplied`
+    [:L313]. Money keeps its sign; statistics do not.
 
-THE CLEAN PASS-THROUGH - stated explicitly, because the drift is specific
-    rather than systemic. The money fields are signed at all three layers:
-    `Purch-Current` and `Purch-Last` `pic s9(8)v99 comp-3` [L43-L44] become
-    `PIC S9(08)V9(02) COMP` [common/purchMT.cbl:L307-L308] and `decimal(10,2)`;
-    likewise `Turnover-q1..q4` [:L309-L312] and `Purch-Unapplied` [:L313].
-    Money keeps its sign. Statistics do not.
-
-TRAILING SPACES AND SUBSTRING TRIMS BELONG TO THE HARNESS, NOT HERE.
-    The bridge trims on the way out - `STRING FUNCTION TRIM (HV-PURCH-ADDRESS,
-    TRAILING)` at [common/purchMT.cbl:L1351], and likewise HV-PURCH-KEY
-    [:L1309], HV-PURCH-NAME [:L1342], HV-PURCH-PHONE [:L1360], HV-PURCH-EXT
-    [:L1369], HV-PURCH-FAX [:L1378], HV-PURCH-EMAIL [:L1387] - and takes
-    numeric substrings of an edit field at [:L1320], [:L1332], [:L1398],
-    [:L1415], [:L1427] and [:L1439] onward. The harness step that makes two
-    table dumps comparable owns the padding of stored values (Agent Action Plan
-    section 0.3.1 names it under `harness/`). Nothing is trimmed here.
+TRAILING SPACES AND SUBSTRING TRIMS BELONG TO THE HARNESS, NOT HERE. The bridge
+    trims on the way out - `STRING FUNCTION TRIM (HV-PURCH-ADDRESS, TRAILING)`
+    [common/purchMT.cbl:L1351], likewise HV-PURCH-KEY, -NAME, -PHONE, -EXT, -FAX
+    and -EMAIL at [:L1309], [:L1342], [:L1360], [:L1369], [:L1378], [:L1387] - and
+    takes numeric substrings of an edit field at [:L1320], [:L1332], [:L1398],
+    [:L1415], [:L1427], [:L1439] onward. The harness owns stored-value padding.
 
 THE FOURTH LAYER - A STALE INLINE RECORD INSIDE THE BRIDGE ITSELF
-================================================================
-The drift is not three-layered but FOUR-layered, and the fourth layer had not
-been recorded before. `common/purchMT.cbl` does not `copy "wspl.cob"` - the
-string does not occur in it. Instead it declares its own record inline in the
-LINKAGE SECTION [:L316], as `01 Purch-Rec.` at [:L331], under this header:
+=================================================================
+The drift is four-layered, not three. `common/purchMT.cbl` has no `copy
+"wspl.cob"` statement - its only four copies are mysql-variables.cpy [:L279],
+wsfnctn.cob [:L320], Test-Data-Flags.cob [:L324] and mysql-procedures.cpy
+[:L1178], and the string `wspl.cob` appears only inside two comments, at [:L110]
+and [:L343]. Instead the bridge declares its own record inline in the LINKAGE
+SECTION [:L316], as `01 Purch-Rec.` at [:L331], under this header:
 
     [:L326]  "Generated by MOSTGEN from the COPY Book... The record buffer"
     [:L327]  "This data buffer was derived from the ...PULEDGER.CBF" - the
@@ -423,111 +281,89 @@ That buffer is operative, not decorative: it is the third parameter of the
 bridge's own entry point, `PROCEDURE DIVISION using File-Access /
 ACAS-DAL-Common-data / Purch-Rec.  *> Ws record` at [:L385-L387], is indexed as
 `Purch-Rec (K:L)` at [:L872] and is cleared by `initialize Purch-Rec with
-filler` at [:L1149].
+filler` at [:L1149]. AND IT HAS DRIFTED FROM THE FROZEN COPYBOOK IN TWELVE WAYS:
 
-AND IT HAS DRIFTED FROM THE FROZEN COPYBOOK IN TWELVE WAYS:
+Each row reads "inline buffer vs frozen copybook".
 
-    record name         Purch-Rec [:L331]        vs  WS-Purch-Record [L13]
-    key name            Purch-Key [:L332]        vs  WS-Purch-Key [L14]
-    condition names     Supplier-Live/-Dead      vs  Supplier-live/-dead
-                        [:L334-L335], mixed case     [L19-L20], lower case
-    address             FLAT `pic x(96)` [:L338]  vs  a GROUP of two x(48)
-                                                     [L23-L25]
-    credit              `pic 99 comp` [:L344]    vs  `binary-char` [L31]
-    sortcode spelling   Purch-Sortcode [:L345]   vs  Purch-SortCode [L32]
-    last-inv / -pay     Purch-Last-Inv / -Pay    vs  Purch-Last-inv / -pay
-                        [:L349-L350], mixed          [L36-L37], lower
-    create-date         Purch-Create-Dat [:L352] vs  Purch-Create-Date [L39]
-    MONEY WIDTH         `pic s9(9)v99` - ELEVEN  vs  `pic s9(8)v99` - TEN
-                        digits [:L356-L363]          digits [L43-L52]
-    quarter casing      Turnover-Q1..Q4, upper   vs  Turnover-q1..q4, lower
-                        [:L359-L362]                 [L46-L49]
-    the redefines view  ABSENT ENTIRELY          vs  `filler redefines
-                                                     Quarters` + `PTurnover-q
-                                                     ... occurs 4` [L50-L51]
-    stats-date          present [:L364] but      vs  present [L53]
-                        never mapped
+    record name       Purch-Rec [:L331] vs WS-Purch-Record [L13]
+    key name          Purch-Key [:L332] vs WS-Purch-Key [L14]
+    condition names   Supplier-Live/-Dead, mixed case [:L334-L335] vs
+                      Supplier-live/-dead, lower case [L19-L20]
+    address           FLAT `pic x(96)` [:L338] vs a GROUP of two x(48) [L23-L25]
+    credit            `pic 99 comp` [:L344] vs `binary-char` [L31]
+    sortcode spelling Purch-Sortcode [:L345] vs Purch-SortCode [L32]
+    last-inv / -pay   Purch-Last-Inv / -Pay, mixed [:L349-L350] vs
+                      Purch-Last-inv / -pay, lower [L36-L37]
+    create-date       Purch-Create-Dat [:L352] vs Purch-Create-Date [L39]
+    MONEY WIDTH       `pic s9(9)v99`, ELEVEN digits [:L356-L363] vs
+                      `pic s9(8)v99`, TEN digits [L43-L52]
+    quarter casing    Turnover-Q1..Q4, upper [:L359-L362] vs Turnover-q1..q4,
+                      lower [L46-L49]
+    the redefines view  ABSENT ENTIRELY vs `filler redefines Quarters` plus
+                      `PTurnover-q ... occurs 4` [L50-L51]
+    stats-date        present [:L364] but never mapped vs present [L53]
 
-The decisive observation: the HOST VARIABLES agree with the frozen COPYBOOK -
-ten digits, `PIC S9(08)V9(02) COMP` at [:L307-L313] - and NOT with the stale
-inline buffer's eleven. So this module is built from `copybooks/wspl.cob`, and
-the inline buffer is recorded as a fourth, divergent layer rather than treated
-as a source. It is offered as a further register entry for
-`docs/migration/anomaly-log.md`.
-
-Two of its comments earn their keep by explaining copybook oddities:
-[:L343] "11/07/23 was comp-3 now matches wspl.cob" explains the stale
-`*> RDB comp-3` at [copybooks/wspl.cob:L30], and [:L352] "chg name 4 SQL Mig."
-explains the dropped trailing E on PURCH-CREATE-DAT. Both confirm that the
-declaration governs.
-
-One briefing claim is restated here rather than repeated, because the frozen
-source does not support it as given: the comment at [common/purchMT.cbl:L884]
-does NOT name a record that appears nowhere. `01 Purch-Rec.` IS declared, at
-[:L331], in the LINKAGE SECTION, and IS a PROCEDURE DIVISION parameter. The
-only genuine oddity is casing - the comment writes `Purch-REC` where the
-declaration writes `Purch-Rec`. Recorded as casing, not as a phantom.
+The decisive point: the HOST VARIABLES agree with the frozen COPYBOOK - ten
+digits, `PIC S9(08)V9(02) COMP` at [:L307-L313] - and NOT with the inline
+buffer's eleven. So this module is built from `copybooks/wspl.cob`, and the
+buffer is recorded as a fourth, divergent layer rather than treated as a source,
+and offered as a further entry for the migration's anomaly log. Two of its
+comments earn their keep by explaining copybook oddities - [:L343] the stale
+`*> RDB comp-3` at [copybooks/wspl.cob:L30], and [:L352] the dropped trailing E
+on PURCH-CREATE-DAT - both confirming that the declaration governs. One briefing
+claim is corrected rather than repeated: the comment at [:L884] does NOT name a
+record appearing nowhere, since `01 Purch-Rec.` IS declared at [:L331] and IS a
+PROCEDURE DIVISION parameter. The only genuine oddity is casing, the comment
+writing `Purch-REC` against the declaration's `Purch-Rec`.
 
 "THE PURCHASE MIRROR" IS THE MOST DANGEROUS PHRASE IN THIS BRIEF
-===============================================================
-`records/sales_ledger.py` models a genuinely similar record, and that
-similarity is a trap. This module IMPORTS NOTHING FROM IT, shares no base
-class, no mixin, no helper, no descriptor table and no naming shortcut with it,
-and is not a copy of it with the prefixes exchanged. It was built from
-`copybooks/wspl.cob` alone. The two copybooks were compared line by line, and
-they differ structurally in fourteen ways - nine of them named in the briefing
-and five more found in the comparison. Every one survives here; none is
-harmonised. The register, for `docs/migration/traceability.md`:
+================================================================
+`records/sales_ledger.py` models a genuinely similar record, and that similarity
+is a trap. This module IMPORTS NOTHING FROM IT, shares no base class, mixin,
+helper, descriptor table or naming shortcut with it, and is not a copy of it with
+the prefixes exchanged; it was built from `copybooks/wspl.cob` alone. The two
+copybooks differ structurally in fourteen counted ways - nine named in the
+briefing, five more found by comparing them - and every one survives here
+unharmonised. The register, for the migration's traceability document:
 
-     #  divergence            Purchase (wspl.cob)      Sales (wssl.cob)
-     1  stats-date column     ABSENT - no host var,    SALES-STATS-DATE
-                              no column [L53]          char(4) present [L64]
-     2  field order           Purch-Status [L18] and   Sales-Name first [L17];
-                              Purch-Notes-Tag [L21]    Sales-Status later [L25]
-                              BEFORE Purch-Name [L22]
-     3  fax / e-mail order    Purch-Fax [L28] BEFORE   Sales-Email [L23]
-                              Purch-Email [L29]        BEFORE Sales-Fax [L24]
-     4  the flag block        ABSENT ENTIRELY - no     six flags with 88s:
-                              late-charge, no          Sales-Late [L28-29],
-                              reminder, no e-mail      Sales-Dunning [L30-31],
-                              switches                 Email-Invoice [L32-33],
-                                                       Email-Statement [L34-35],
-                                                       Email-Letters [L36-37],
-                                                       Delivery-Tag [L38]
-     5  bank details          Purch-SortCode [L32] +   ABSENT
-                              Purch-Accountno [L33]
-     6  binary run ORDER      Purch-Create-Date at     Sales-Create-Date LAST
-                              position 8 [L39],        [L53], AFTER the Pay-*
-                              BEFORE the Pay-* trio    trio
-     7  credit field type     binary-char [L31]        pic 99 [L41] - zoned
-                                                       DISPLAY, "*> In days"
-     8  partial-ship flag     ABSENT                   Sales-Partial-Ship-Flag
-                                                       [L65-66] + 88
-                                                       Sales-BO-Set value "Y"
-                                                       [L67]
-     9  FILLER shape          one, pic x(12) [L54]     two: pic xxx [L40] and
-                                                       pic x(5) [L68]
-    10  binary-short          NONE declared at all     Sales-Late-Min and
-                                                       Sales-Late-Max
-                                                       binary-short [L43-44]
-    11  redefines view name   PTurnover-q, P prefix,   STurnover-Q, S prefix,
-                              lower q [L51]            upper Q [L62]
-    12  header end date       last entry 15/01/18      last entry 06/02/24, the
-                              [L11]                    back-order flag [L9-10]
-    13  header wording        "WS Definition For The   "Record Definition For
-                              Purchase Ledger Record." The Sales Ledger /
-                                                       Taken from fdsel"
-    14  declared size         302 bytes, three         300 bytes, one revision,
-                              revisions, plus the      no external note [L7]
-                              COBSTRUCT note [L6-L8]
+Each row reads "Purchase (wspl.cob) / Sales (wssl.cob)".
 
-And the casing and spelling divergences, on top of those fourteen:
-Supplier-live / Supplier-dead with `value 0` here, against Customer-Live /
-Customer-Dead with `value zero` there [copybooks/wssl.cob:L26-L27]; the
-prefixed `Purch-Notes-Tag` [L21] against the bare `Notes-Tag`
-[copybooks/wssl.cob:L39]; `Turnover-q1` against `Turnover-Q1`;
-`Purch-Last-inv` / `-pay` against `Sales-Last-Inv` / `-Pay`; and `Array-k`
-against `Array-K` - even the dead, commented-out declarations diverge.
+     1  stats-date column  absent, no host var, no column [L53] /
+        SALES-STATS-DATE char(4) present [L64]
+     2  field order  Purch-Status [L18] and Purch-Notes-Tag [L21] BEFORE
+        Purch-Name [L22] / Sales-Name first [L17], Sales-Status later [L25]
+     3  fax / e-mail order  Purch-Fax [L28] before Purch-Email [L29] /
+        Sales-Email [L23] before Sales-Fax [L24]
+     4  the flag block  ABSENT ENTIRELY, no late-charge, reminder or e-mail
+        switches / six flags, FIVE of them with 88s - Sales-Late [L28-29],
+        Sales-Dunning [L30-31], Email-Invoice [L32-33], Email-Statement
+        [L34-35], Email-Letters [L36-37], and Delivery-Tag [L38] with no 88
+     5  bank details  Purch-SortCode [L32] + Purch-Accountno [L33] / ABSENT
+     6  binary run ORDER  Purch-Create-Date at position 8 [L39], BEFORE the
+        Pay-* trio / Sales-Create-Date LAST [L53], AFTER that trio
+     7  credit field type  binary-char [L31] / pic 99 [L41], zoned DISPLAY,
+        "*> In days"
+     8  partial-ship flag  ABSENT / Sales-Partial-Ship-Flag [L65-66] plus
+        88 Sales-BO-Set value "Y" [L67]
+     9  FILLER shape  one, pic x(12) [L54] / two, pic xxx [L40] and x(5) [L68]
+    10  binary-short  NONE declared at all / Sales-Late-Min and Sales-Late-Max
+        [L43-44]
+    11  redefines view name  PTurnover-q, P prefix, lower q [L51] /
+        STurnover-Q, S prefix, upper Q [L62]
+    12  header end date  last entry 15/01/18 [L11] / last entry 06/02/24, the
+        back-order flag [L9-10]
+    13  header wording  "WS Definition For The Purchase Ledger Record." /
+        "Record Definition For The Sales Ledger / Taken from fdsel"
+    14  declared size  302 bytes, three revisions, plus the COBSTRUCT note
+        [L6-L8] / 300 bytes, one revision, no external note [L7]
+
+And the casing and spelling divergences on top of those fourteen:
+Supplier-live / Supplier-dead with `value 0` here against Customer-Live /
+Customer-Dead with
+`value zero` there [copybooks/wssl.cob:L26-L27]; the prefixed `Purch-Notes-Tag`
+[L21] against the bare `Notes-Tag` [copybooks/wssl.cob:L39]; `Turnover-q1`
+against `Turnover-Q1`; `Purch-Last-inv` / `-pay` against `Sales-Last-Inv` /
+`-Pay`; and `Array-k` against `Array-K` - even the dead declarations diverge.
 
 THE DEAD DECLARATION AT L15-L17 IS RECORDED AND NOT MODELLED
 ============================================================
@@ -536,15 +372,14 @@ THE DEAD DECLARATION AT L15-L17 IS RECORDED AND NOT MODELLED
     *>         05  Check-Digit     pic 9.            [copybooks/wspl.cob:L17]
 
 All three lines are COMMENTED OUT in the frozen copybook, so the key-character
-array and the check digit are not part of the record. No attribute, no nested
-class and no key-decomposition view for them appears below, and the generated
-dictionary contains no entry for either name. Its presence is recorded because
-its casing diverges from the Sales twin's `Array-K` [copybooks/wssl.cob:L15] -
-noted at register row 11's neighbourhood above - and because a reader diffing
-the two files should know the omission is deliberate.
+array and the check digit are not part of the record: no attribute, nested class
+or key-decomposition view for them appears below, and the dictionary carries no
+entry for either name. Their presence is recorded because the casing diverges
+from the Sales twin's `Array-K` [copybooks/wssl.cob:L15], and because a reader
+diffing the two files should know the omission is deliberate.
 
 WHY THE TABLE HAS TWENTY-NINE COLUMNS - THE ARITHMETIC, SHOWN
-============================================================
+=============================================================
 `copybooks/wspl.cob` declares 33 leaf (non-group) data items: L14, L18, L21,
 L22, L24, L25, L26, L27, L28, L29, L30, L31, the eleven at L32-L42, L43, L44,
 the four at L46-L49, L51, L52, L53 and L54. Its groups are L23 Purch-Address,
@@ -562,115 +397,100 @@ L45 Quarters and L50 the unnamed `filler redefines`, under the L13 01 record.
     ---
     29  columns
 
-Twenty-nine, matching the frozen DDL at [mysql/ACASDB.sql:L646] and Agent
+Twenty-nine, matching the frozen DDL at [mysql/ACASDB.sql:L646-L677] and Agent
 Action Plan section 0.6.6 exactly. Every one of the 29 columns is NOT NULL,
-there are no column-level defaults, no TIMESTAMP, no AUTO_INCREMENT and - as
-R-2 requires across the whole schema - no FLOAT, DOUBLE or REAL anywhere.
+there are no column-level defaults, no TIMESTAMP, no AUTO_INCREMENT and - as R-2
+requires across the whole schema - no FLOAT, DOUBLE or REAL anywhere.
 
 That NOT NULL property is why NO attribute below is ever None. Agent Action Plan
 section 0.6.2 gives the mechanism: the bridge `initialize`s its host-variable
-group before loading, "so unset fields become zero or space rather than SQL
-NULL. This is why every column in the schema can be declared NOT NULL and why
-the Python layer must default rather than omit." Defaults follow that exactly -
-zero for a numeric field, and SPACES AT THE DECLARED WIDTH for an alphanumeric
-one rather than an empty string, because a `char(n)` column holding an
-initialised COBOL field holds n spaces. The widths are read from each
-descriptor's `character_length`, never typed in.
+group before loading, "so unset fields become zero or space rather than SQL NULL.
+This is why every column in the schema can be declared NOT NULL and why the
+Python layer must default rather than omit." Defaults follow exactly - zero for a
+numeric field, SPACES AT THE DECLARED WIDTH for an alphanumeric one rather than an
+empty string, because a `char(n)` column holding an initialised COBOL field holds
+n spaces - with the widths read from each descriptor, never typed in.
 
 PROVENANCE: EVERY DESCRIPTOR IS LOOKED UP, NONE IS TRANSCRIBED
 ==============================================================
-Agent Action Plan section 0.8.1 makes the ordering a directive rather than a
-preference: "Data dictionary first. The dictionary is generated from the bridge
-before record definitions are written, and every Python field definition cites
-its entry ... it is what prevents fields being transcribed by eye." Section
-0.3.3 states the consequence: "Field metadata is therefore derived, not
-transcribed, which eliminates an entire class of transcription error across
-several hundred fields."
+Agent Action Plan section 0.8.1 makes the ordering a directive: "Data dictionary
+first. The dictionary is generated from the bridge before record definitions are
+written, and every Python field definition cites its entry ... it is what
+prevents fields being transcribed by eye." So every attribute below carries a
+`FieldDescriptor` in its `dataclasses.field` metadata via
+`FieldDescriptor.from_dictionary_key`, every key found by asking the dictionary
+which entry sits at a given copybook field name and declaration line - see
+`_index_copybook` and `_descriptor`. No key is assembled by upper-casing or
+hyphenating an attribute name, which would be wrong for five fields here alone:
 
-So every attribute below carries a `FieldDescriptor` in its `dataclasses.field`
-metadata, obtained through `FieldDescriptor.from_dictionary_key`, and every key
-is found by asking the dictionary which entry sits at a given copybook field
-name and declaration line - see `_index_copybook` and `_descriptor`. No key is
-assembled by upper-casing or hyphenating an attribute name, which would be wrong
-for at least five fields in this record alone:
+    Purch-Create-Date -> PULEDGER-REC.PURCH-CREATE-DAT   trailing E dropped
+    Purch-Address     -> PULEDGER-REC.PURCH-ADDRESS      one column, two children
+    Purch-Last-inv    -> PULEDGER-REC.PURCH-LAST-INV     casing changes
+    Turnover-q1       -> PULEDGER-REC.TURNOVER-Q1        casing changes
+    Purch-Stats-Date  -> WS-Purch-Record.Purch-Stats-Date   a different namespace
+                                                         entirely, no column to
+                                                         key on
 
-    Purch-Create-Date  ->  PULEDGER-REC.PURCH-CREATE-DAT   the E is dropped
-    Purch-Address      ->  PULEDGER-REC.PURCH-ADDRESS      one column, two
-                                                           children
-    Purch-Last-inv     ->  PULEDGER-REC.PURCH-LAST-INV     casing changes
-    Turnover-q1        ->  PULEDGER-REC.TURNOVER-Q1        casing changes
-    Purch-Stats-Date   ->  WS-Purch-Record.Purch-Stats-Date
-                                                           a different table
-                                                           namespace entirely,
-                                                           because there is no
-                                                           column to key on
+THE DESCRIPTOR SPLIT, COUNTED: 37 LOOKED UP, 0 HAND-BUILT.
+    Metadata typed in by hand is not needed for the FILLERs, the
+    PTurnover-q view, the address children or Purch-Stats-Date, none of which has
+    a column: `loader.entries_for_copybook_file("copybooks/wspl.cob")` returns 37
+    entries - the 29 table-backed plus 8 one-sided (the 01 record, Purch-Addr1,
+    Purch-Addr2, Quarters, filler#50, PTurnover-q, Purch-Stats-Date, filler#54).
+    EVERY field here has a generated entry, so the four dataclasses between them
+    carry 37 DISTINCT dictionary keys - 36 on fields plus four class-level, three
+    of which repeat a field key - and state NO metadata by hand at all, so
+    R-5's "derived, not transcribed" holds without exception. One-sided keys use
+    the `<COPYBOOK-RECORD>.<FIELD-NAME>` form, the fillers disambiguated by line.
 
-THE DESCRIPTOR SPLIT IS BETTER THAN EXPECTED: 37 LOOKED UP, 0 HAND-BUILT.
-    The briefing anticipated needing `FieldDescriptor.for_working_storage` for
-    the FILLER, the PTurnover-q view, the two address children and
-    Purch-Stats-Date, because none of them has a column to key on. Querying the
-    generated dictionary shows that is unnecessary: `loader.
-    entries_for_copybook_file("copybooks/wspl.cob")` returns 37 entries - the
-    29 table-backed ones plus 8 marked one-sided, namely the 01 record itself,
-    Purch-Addr1, Purch-Addr2, Quarters, filler#50, PTurnover-q,
-    Purch-Stats-Date and filler#54. So EVERY field in this copybook, including
-    all five the briefing expected to be hand-built, has a generated entry, and
-    this module calls `from_dictionary_key` 37 times and `for_working_storage`
-    ZERO times. That is the stronger outcome: not one descriptor in this record
-    was assembled by hand, so R-5's "derived, not transcribed" holds without
-    exception. The one-sided keys use the `<COPYBOOK-RECORD>.<FIELD-NAME>`
-    form, and the two fillers are disambiguated by declaration line exactly as
-    the artifact spells them - `filler#50` and `filler#54`.
-
-ONE DISCREPANCY AGAINST THE BRIEFING'S EXPECTED VALUES, REPORTED NOT PATCHED.
-    The briefing's checklist expects `scale == 0` for the twelve binary fields.
-    The generated dictionary records `scale is None` for them, and `digits is
-    None` too, because `binary-char` and `binary-long` carry no PICTURE clause
-    at all - None here means ABSENT, not zero. That is the dictionary's
-    considered representation of a picture-less binary item, and it is left
-    alone. The load-bearing fact is untouched and is what the tests assert:
-    `python_storage` is INT, `is_int` is true, `quantum` is None, and therefore
-    the integer truncation that A-8, A-9 and A-10 depend on is reproducible.
+ONE DISCREPANCY AGAINST THE BRIEFING, REPORTED NOT PATCHED. The briefing expects
+    `scale == 0` for the twelve binary fields; the dictionary records `scale is
+    None` and `digits is None` too, because `binary-char` and `binary-long` carry
+    no PICTURE clause at all - None here means ABSENT, not zero. That is the
+    dictionary's representation of a picture-less binary item and is left alone.
+    The load-bearing fact is untouched: `python_storage` is INT, `is_int` is true,
+    and the integer truncation A-8, A-9 and A-10 depend on is reproducible.
 
 AN OPEN QUESTION FOR THE COMPILED ORACLE (R-6, question 1 of 2)
     Agent Action Plan section 0.6.8, verbatim: "A negative binary value through
-    an unsigned host variable into an unsigned column. Section 0.6.2
-    establishes that the sign is lost; what the resulting stored value IS
-    depends on the conversion the bridge's C interface performs, which must be
-    measured rather than assumed."
+    an unsigned host variable into an unsigned column. Section 0.6.2 establishes
+    that the sign is lost; what the resulting stored value IS depends on the
+    conversion the bridge's C interface performs, which must be measured rather
+    than assumed."
 
-    That question is about the twelve fields in KIND 1. It is SHARPER here than
-    on the Sales side because of KIND 2: `Purch-SortCode`'s column is narrower
-    than both its field and its host variable, so overflow behaviour must be
-    measured as well as sign behaviour. This module therefore stores no assumed
-    bit pattern, no magnitude and no modulus - it reports the signed copybook
-    view, and `dal/acas022_purch.py` will carry whatever the oracle shows.
-    Recorded for `docs/migration/ambiguity-resolutions.md`.
+    That question is about the twelve fields in KIND 1, and it is SHARPER here
+    than on the Sales side because of KIND 2: `Purch-SortCode`'s column is
+    narrower than both its field and its host variable, so overflow behaviour
+    must be measured as well as sign behaviour. This module therefore stores no
+    assumed bit pattern, no magnitude and no modulus - it reports the signed
+    copybook view, and the `acas022` handler module will carry whatever the
+    oracle shows. Recorded for the migration's ambiguity-resolutions document.
 
 DETERMINISM (R-6)
 =================
 Attribute order is the copybook's declaration order, L14 through L54, which is
-NOT the Sales order - see register rows 2, 3 and 6. `PTurnover-q ... occurs 4`
-is a fixed four-element tuple, never a list. Four attributes are date-like -
+NOT the Sales order - see register rows 2, 3 and 6. `PTurnover-q ... occurs 4` is
+a fixed four-element tuple, never a list. Four attributes are date-like -
 Purch-Last-inv, Purch-Last-pay, Purch-Create-Date and Purch-Stats-Date - and
-none of them touches a clock: no wall-clock reads, no environment reads, no
-identity reads, no directory scans anywhere in this module. The only I/O is the
+none touches a clock: no wall-clock reads, no environment reads, no identity
+reads and no directory scans anywhere in this module. The only I/O is the
 dictionary loader's own lazily cached read of the committed JSON artifact.
 
-R-1 (no COBOL at runtime) holds trivially: standard library plus two
-first-party modules, no process spawning, no foreign-function interface, no
-database driver, no compiler or translator invocation. R-3 holds by
-construction: exactly the fields the copybook declares, in its order, with no
-checks, no coercion, no hook after construction and no schema-owning metadata;
-no threads and no event loop.
+R-1 holds trivially - standard library plus two first-party modules, no process
+spawning, no foreign-function interface, no driver, no translator invocation -
+and R-3 by construction: exactly the fields the copybook declares, in its order,
+with no checks, no coercion, no post-construction hook and no schema-owning
+metadata; no threads and no event loop.
 
 THE LEAF RULE (Agent Action Plan section 0.4.3)
 ==============================================
 `records/*.py` may import `cobol.field` and `dictionary.loader` and nothing
-else, "which keeps the record layer a leaf". `ConditionName` is taken from
-`dictionary.model` as a type only, following the precedent `cobol/field.py`
-itself sets by importing its own enumerations from there rather than declaring
-competing copies. Not imported, deliberately: any `dal` module, any `programs`
+else, "which keeps the record layer a leaf". That is taken literally:
+`ConditionName` and `DictionaryEntry` come through `dictionary.loader`, which
+re-exports the object model's records as bindings to the single definition
+rather than copies - the same door `cobol/field.py` uses for its own
+enumerations. Not imported, deliberately: `dictionary.model` reached directly
+rather than through the loader, any `dal` module, any `programs`
 module, `cli`, `clock`, `dates`, `workfiles`, `cobol.arithmetic`, `cobol.move`,
 `cobol.picture`, `cobol.usage`, `cobol.condition_names`, `cobol.sortverb`,
 `dictionary.generate`, `harness`, and any other `records` module - above all
@@ -688,11 +508,14 @@ from typing import ClassVar, Final
 from acas_posting.cobol.field import FieldDescriptor
 from acas_posting.dictionary import loader
 
-# Type-only imports. `cobol/field.py` sets this precedent by taking its own
-# enumerations from `dictionary.model` rather than declaring competing copies;
-# Agent Action Plan section 0.4.3 permits it for annotations. `ConditionName`
-# additionally carries real data here - see PURCH_STATUS_CONDITION_NAMES.
-from acas_posting.dictionary.model import ConditionName, DictionaryEntry
+# Two dictionary types, reached through the loader - the one door Agent Action
+# Plan section 0.4.3 opens from this layer onto the dictionary package. The
+# loader re-exports the object model's records for exactly this purpose (see its
+# `RE_EXPORTED_MODEL_NAMES`), each re-export being a BINDING to the single
+# definition rather than a copy, so no competing copy is declared here (rule
+# R-5). `DictionaryEntry` is an annotation only; `ConditionName` additionally
+# carries real data here - see PURCH_STATUS_CONDITION_NAMES.
+from acas_posting.dictionary.loader import ConditionName, DictionaryEntry
 
 __all__ = (
     # Sorted the way the sibling modules sort theirs - the spine constants and the
@@ -709,15 +532,14 @@ __all__ = (
     "WsPurchRecord",
 )
 
-# ---------------------------------------------------------------------------
 # The entity spine, from Agent Action Plan section 0.2.1.1
-# ---------------------------------------------------------------------------
 
 COPYBOOK: Final[str] = "copybooks/wspl.cob"
 """The frozen record layout this module mirrors. Read-only, never modified."""
 
 TABLE: Final[str] = "PULEDGER-REC"
-"""The MySQL table, 29 columns, primary key PURCH-KEY [mysql/ACASDB.sql:L646]."""
+"""The MySQL table, 29 columns [mysql/ACASDB.sql:L646-L677]; its
+`PRIMARY KEY (PURCH-KEY)` clause is at [mysql/ACASDB.sql:L676]."""
 
 HANDLER: Final[str] = "acas022"
 """The COBOL file handler the posting programs CALL [common/acas022.cbl]."""
@@ -725,9 +547,7 @@ HANDLER: Final[str] = "acas022"
 BRIDGE: Final[str] = "purchMT"
 """The generated bridge program [common/purchMT.cbl]."""
 
-# ---------------------------------------------------------------------------
 # Provenance: descriptors are looked up, never transcribed (R-5)
-# ---------------------------------------------------------------------------
 
 
 def _locator(line: int) -> str:
@@ -781,15 +601,13 @@ def _metadata(descriptor: FieldDescriptor) -> dict[str, FieldDescriptor]:
     """Attach a descriptor to an attribute so the field literally cites its entry.
 
     `dataclasses` exposes this through `fields(cls)[i].metadata["descriptor"]`
-    and wraps it immutably, which is how `tests/arithmetic/*` reach the storage
-    metadata without this module publishing an accessor of its own.
+    and wraps it immutably, which is how the arithmetic parity suite reaches the
+    storage metadata without this module publishing an accessor of its own.
     """
     return {"descriptor": descriptor}
 
 
-# ---------------------------------------------------------------------------
 # Defaults: derived from each descriptor, and never None
-# ---------------------------------------------------------------------------
 # Every one of the 29 columns is NOT NULL because the bridge `initialize`s its
 # host-variable group before loading, so an unset COBOL field arrives as zero or
 # as spaces (Agent Action Plan section 0.6.2). Both zeroes below are therefore
@@ -867,9 +685,7 @@ def _pturnover_zeroes() -> tuple[Decimal, Decimal, Decimal, Decimal]:
     return (zero, zero, zero, zero)
 
 
-# ---------------------------------------------------------------------------
 # Condition names: carried as data, evaluated elsewhere
-# ---------------------------------------------------------------------------
 # Agent Action Plan section 0.4.1.4 assigns 88-level evaluation to
 # `cobol/condition_names.py` - "88-level condition name -> Predicate function
 # over the record". So the two names this record declares are surfaced here as
@@ -893,9 +709,7 @@ against its `value zero`; both spellings stand as their copybooks write them.
 """
 
 
-# ---------------------------------------------------------------------------
 # The subordinate groups
-# ---------------------------------------------------------------------------
 
 @dataclass(slots=True)
 class PurchAddress:
@@ -995,9 +809,7 @@ class QuartersView:
     )
 
 
-# ---------------------------------------------------------------------------
 # The record
-# ---------------------------------------------------------------------------
 
 @dataclass(slots=True)
 class WsPurchRecord:
@@ -1041,7 +853,6 @@ class WsPurchRecord:
     # 03  WS-Purch-Key        pic x(7).                   [copybooks/wspl.cob:L14]
     # The primary key. Its only drift is `name`: the column is PURCH-KEY, so the
     # WS- prefix is dropped at the bridge.
-    #
     # L15-L17 declare `filler redefines WS-Purch-Key` with `Array-k pic x
     # occurs 6` and `Check-Digit pic 9` - ALL THREE LINES COMMENTED OUT in the
     # frozen copybook. Neither name is modelled here and neither has a
@@ -1093,7 +904,6 @@ class WsPurchRecord:
     #                                                     [copybooks/wspl.cob:L30]
     # DECIMAL, not int: this is the second direction of the two-direction rule -
     # a COMP usage WITH a V in its picture, so four digits at scale 2, unsigned.
-    #
     # THE DECLARATION GOVERNS AND THE COMMENT IS STALE. The inline `*> RDB
     # comp-3` claims packed decimal; the line declares COMP. The bridge records
     # why, at [common/purchMT.cbl:L343]: "11/07/23 was comp-3 now matches
@@ -1109,24 +919,21 @@ class WsPurchRecord:
     # The `*> were pic 99` is history, not a type - the `99` in it is not a digit
     # count. The Sales twin really is `pic 99` [copybooks/wssl.cob:L41], a zoned
     # DISPLAY field - divergence register row 7.
-    #
     # DRIFT KIND 2, a three-way width disagreement in two directions: 8-bit
     # signed here, 8 digits unsigned at [common/purchMT.cbl:L295] - a widening -
     # and a `mediumint(2) unsigned` column - a narrowing. Reported unsettled;
-    # `dal/acas022_purch.py` owns the conversion.
+    # the `acas022` handler module owns the conversion.
     purch_credit: int = field(**_int_spec("Purch-Credit", _locator(31)))
 
     # 03  Purch-SortCode      binary-long. *> all these were pic 9(8) comp
     #                                                     [copybooks/wspl.cob:L32]
     # int: SIGNED 32-BIT, no picture, scale 0. The inline comment covers the
     # whole L32-L42 run and is history; the `9(8)` in it is not a digit count.
-    #
     # DRIFT KIND 2 again, and the sharper case: 32-bit signed here, 8 digits at
     # [common/purchMT.cbl:L296], and a `mediumint(6) unsigned` column that is
     # NARROWER THAN BOTH. A UK sort code is six digits, so the column is apt and
     # is the tightest of the three layers - which is why the oracle question in
     # the module docstring has to measure overflow as well as sign.
-    #
     # Absent from the Sales record entirely - divergence register row 5.
     purch_sortcode: int = field(**_int_spec("Purch-SortCode", _locator(32)))
 
@@ -1145,7 +952,6 @@ class WsPurchRecord:
     # MISSPELLED IN THE SOURCE and carried verbatim - the host variable is
     # HV-PURCH-ACTIVETY [common/purchMT.cbl:L299] and the column is
     # PURCH-ACTIVETY, so amending the spelling would break the dictionary key.
-    #
     # int, NOT Decimal. This is the counter that `purch-comp` steps at
     # [purchase/pl060.cbl:L749] before forming the running figure, and that
     # `credit-comp` NEVER steps [purchase/pl060.cbl:L755-L766] - anomalies A-8
@@ -1176,7 +982,6 @@ class WsPurchRecord:
     # POSITION 8 of the eleven `binary-long` items - BEFORE the Pay-* trio -
     # where the Sales record declares its create date LAST, after them
     # [copybooks/wssl.cob:L53]. Divergence register row 6.
-    #
     # DRIFT KIND 4, name truncation: HV-PURCH-CREATE-DAT
     # [common/purchMT.cbl:L303] and the column PURCH-CREATE-DAT both drop the
     # trailing E. The bridge's inline buffer records the reason at
@@ -1235,49 +1040,24 @@ class WsPurchRecord:
     # the last of the twenty-nine.
     purch_unapplied: Decimal = field(**_dec_spec("Purch-Unapplied", _locator(52)))
 
-    # 03  Purch-Stats-Date    pic 9(4).             *> added 15/01/18.
-    #                                                     [copybooks/wspl.cob:L53]
-    # ===================================================================
-    # THE NEW ANOMALY. This field reaches NO host variable and NO column.
-    # ===================================================================
-    #   declared            [copybooks/wspl.cob:L53], per header note L11
-    #   no host variable    HV-PURCH-STATS does not occur in common/purchMT.cbl
-    #   never mapped        bb000-HV-Load [common/purchMT.cbl:L1203] loads the
-    #                       other twenty-nine fields and not this one
-    #   no column           PURCH-STATS does not occur in mysql/ACASDB.sql
-    #   dictionary agrees   the entry is one-sided; `loader.cite` for its key
-    #                       reports "bridge=absent column=absent"
-    #
-    # It IS declared a second time on the COBOL side - in the bridge's own stale
-    # inline buffer at [common/purchMT.cbl:L364] - and mapped from neither.
-    #
-    # THE ASYMMETRY IS THE EVIDENCE OF ACCIDENT: the Sales copybook added the
-    # identical field on the identical date with the identical comment
-    # [copybooks/wssl.cob:L64], and there it DID gain a host variable
-    # [common/salesMT.cbl:L320] and a column [mysql/ACASDB.sql:L981].
-    #
-    # Declared here regardless, because R-3 forbids removing a field as firmly
-    # as adding one, and because the header's 302-byte size counts it. Keyed on
-    # the copybook-record namespace, `WS-Purch-Record.Purch-Stats-Date`, since
-    # there is no column to key on. This is the one field for which the bridge
-    # is not the layout source, because the bridge never maps it.
-    #
-    # Not among the Agent Action Plan's twenty-two section 0.6.7 entries: raised
-    # as a new entry for `docs/migration/anomaly-log.md` with this module as the
-    # recording site, cross-referenced to `ar3` in `records/irs_final.py`. And
-    # raised for `docs/migration/ambiguity-resolutions.md`, because a value
-    # written here is invisible in every table dump, so only the compiled program
-    # can show whether anything reads it back.
-    #
-    # Zoned DISPLAY, four digits, scale 0, unsigned - the copybook view, which is
-    # the only view there is. Date-like, and it touches no clock.
+    # 03  Purch-Stats-Date  pic 9(4).  *> added 15/01/18.  [copybooks/wspl.cob:L53]
+    # A NEW ANOMALY: this field reaches NO host variable and NO column. Neither HV-PURCH-STATS
+    # nor PURCH-STATS occurs in common/purchMT.cbl or mysql/ACASDB.sql, bb000-HV-Load
+    # [common/purchMT.cbl:L1203] loads twenty-nine fields and not this one, and the dictionary
+    # entry is one-sided. It IS declared again in the bridge's stale inline buffer
+    # [common/purchMT.cbl:L364], and mapped from neither.
+    # THE ASYMMETRY IS THE EVIDENCE OF ACCIDENT: the Sales copybook added the identical field on
+    # the identical date with the identical comment [copybooks/wssl.cob:L64], and there it DID
+    # gain a host variable [common/salesMT.cbl:L320] and a column [mysql/ACASDB.sql:L981].
+    # Declared here regardless (R-3), keyed on `WS-Purch-Record.Purch-Stats-Date`. Raised as a
+    # new anomaly-log entry, and as an open question because a value written here is invisible
+    # in every table dump. Zoned DISPLAY, four digits, scale 0, unsigned.
     purch_stats_date: int = field(**_int_spec("Purch-Stats-Date", _locator(53)))
 
     # 03  filler              pic x(12).                  [copybooks/wspl.cob:L54]
     # The trailing FILLER, declared rather than skipped: it is part of the 302
     # declared bytes and R-3 forbids dropping it. It reaches no column, which is
     # one of the three subtractions in the 29-column arithmetic.
-    #
     # NAMING SCHEME: `filler_l<line>`. The COBOL name is simply `filler`, which
     # `copybooks/wspl.cob` uses twice - at L50 for the redefining group, modelled
     # as QuartersView, and here at L54 - so the declaration line is what

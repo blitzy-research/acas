@@ -62,7 +62,9 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import hashlib
 import json
+import os
 import re
 import sys
 from collections import Counter
@@ -72,9 +74,7 @@ from typing import Final
 from acas_posting import DATA_DICTIONARY_PATH, REPOSITORY_ROOT
 from acas_posting.dictionary import model
 
-# =============================================================================
 #  FROZEN FACTS - the spine, the scope counts and the paths
-# =============================================================================
 
 #: The entity-to-table spine of the posting cycle, in the order the plan states it
 #: (section 0.2.1.1). Each row is (entity facade, handler, bridge, tables, copybooks).
@@ -146,6 +146,51 @@ _INFRASTRUCTURE_COPYBOOKS: Final[frozenset[str]] = frozenset(
     ("acas-sqlstate-error-list.cob", "envdiv.cob", "wsfnctn.cob", "test-data-flags.cob")
 )
 
+#: The records the posting programs declare INLINE, in their own FILE and SORT
+#: SECTIONs, rather than by COPY: the General Ledger work files. Each row is
+#: (program, 01-level record name, FD or SD, the record's line, its last field's line).
+#:
+#: `copybooks/wsnames.cob:L14-L17` names `pretrans.tmp` and `postrans.tmp` and
+#: annotates both as belonging to `gl071`, but no copybook declares their LAYOUT -
+#: every program that touches them writes the 01 record out inline instead, which is
+#: why these records need a source family of their own rather than a row among the
+#: copybooks. They are catalogued although they reach no table because their widths and
+#: storage classes are load-bearing anyway: `general/gl072.cbl:L410-L412` finds the
+#: nominal-ledger account for a posting by SEQUENTIAL read rather than by key, so it
+#: lands on the right account only because `general/gl071.cbl` has already sorted the
+#: stream into nominal order, and a mistyped width or usage would post to the wrong
+#: account with no error and no diagnostic (anomaly A-14). Rule R-5 admits no field
+#: bound by eye, so `acas_posting/records/work_records.py` binds every one of these
+#: fields through its dictionary entry and this table is what makes that possible.
+#:
+#: The spans are STATED rather than searched for, so that no FILE SECTION of any other
+#: program can be drawn in by a pattern that happens to match; `_parse_program_source`
+#: checks each span against the frozen text before it trusts the parse. Two of these
+#: records disagree with each other and both are kept, unharmonised (R-4): `gl071`
+#: declares post-trans-record with the account and profit-centre fields flat at level
+#: 03, while `gl072` wraps the same eight bytes in a `03 post-ledger` group with the
+#: two fields at 05 beneath it.
+_PROGRAM_SOURCE_RECORDS: Final[tuple[tuple[str, str, str, int, int], ...]] = (
+    ("general/gl070.cbl", "pre-trans-record", "FD", 108, 116),
+    ("general/gl071.cbl", "pre-trans-record", "FD", 112, 120),
+    ("general/gl071.cbl", "post-trans-record", "FD", 124, 132),
+    ("general/gl071.cbl", "sort-trans-record", "SD", 136, 144),
+    ("general/gl072.cbl", "post-trans-record", "FD", 110, 119),
+)
+
+#: The sequential read that turns the sort order of these records into a correctness
+#: requirement, quoted as a locator wherever the notes explain why a transient work
+#: file is in a data dictionary at all.
+_SEQUENTIAL_READ_LOCATOR: Final[str] = "general/gl072.cbl:L410-L412"
+
+#: The records whose field order the sorted stream depends on, and which therefore
+#: carry anomaly A-14. `pre-trans-record` is deliberately absent: it is the SORT's
+#: INPUT, so its order is what the sort replaces rather than something the posting
+#: depends on.
+_ORDERING_CRITICAL_RECORDS: Final[frozenset[str]] = frozenset(
+    ("post-trans-record", "sort-trans-record")
+)
+
 _SCHEMA_REL: Final[str] = "mysql/ACASDB.sql"
 _DICTIONARY_VERSION: Final[str] = "1.0.0"
 
@@ -160,9 +205,10 @@ _DETERMINISM_MEMBER_ORDER: Final[str] = (
     "Object members are emitted in the order the JSON Schema declares them in each properties "
     "block, never sorted alphabetically, so the document reads top-down in the same shape as "
     "the frozen sources it describes: identity before sources, sources before tables, tables "
-    "before entries, and inside an entry the three views in layer order - copybook first, "
-    "then bridge host variable, then column. Sorting members would produce a valid but "
-    "different file and break the byte-for-byte guarantee."
+    "before entries, and inside an entry the views in layer order - copybook first, then the "
+    "program-source view that stands in its place for a work-file field, then bridge host "
+    "variable, then column. Sorting members would produce a valid but different file and "
+    "break the byte-for-byte guarantee."
 )
 
 _ARRAY_ORDER_TABLES: Final[str] = "By table name, ASCII ascending."
@@ -173,12 +219,20 @@ _ARRAY_ORDER_ENTRIES: Final[str] = (
     "column-mapped entries in copybook declaration order, and the copybook-only fields of the "
     "in-scope copybooks that correspond to no table at all come last, by path. Where one "
     "copybook serves two tables its leftover fields belong to the first of them, ASCII "
-    "ascending, so their position is decided by the data and never by traversal order."
+    "ascending, so their position is decided by the data and never by traversal order. The "
+    "program-source entries - the fields of the General Ledger work-file records, which "
+    "belong to no table because they reach none - come last of all, by program path ASCII "
+    "ascending and then by declaration line ascending."
 )
 
 _ARRAY_ORDER_BRIDGES: Final[str] = "By .scb filename, ASCII ascending."
 
 _ARRAY_ORDER_COPYBOOKS: Final[str] = "By path, ASCII ascending."
+
+_ARRAY_ORDER_PROGRAM_SOURCES: Final[str] = (
+    "By program path ASCII ascending, then by the record's declaration line ascending. Two "
+    "keys rather than one, because general/gl071.cbl declares three of these records."
+)
 
 _FORBIDDEN_CONTENT: Final[tuple[str, ...]] = (
     (
@@ -235,15 +289,24 @@ _RULE_ENTRY_KEY: Final[str] = (
     "copybook's occurrence was already consumed by a column in the first pass, the surviving "
     "copybook-only citation is the later copybook's - copybooks/plwsoi5C.cob:L13 carries "
     "Open-Item-Record-5.oi5-key for exactly this reason, because copybooks/plwsoi5B.cob:L13 "
-    "is cited by PUITM5-REC.OI5-KEY."
+    "is cited by PUITM5-REC.OI5-KEY. A third and final pass emits the fields of the records "
+    "the posting programs declare inline in their own FILE SECTIONs, keyed on the "
+    "same record-name-and-field-name form; they take no part in the second pass's election, "
+    "because two programs declaring a work-file record are two physical sources and not two "
+    "spellings of one, so both declarations are emitted and the # line segment keeps them "
+    "apart."
 )
 
 _RULE_PRESENCE_AND_ONE_SIDED: Final[str] = (
-    "in_copybook, in_bridge and in_column are set from what the generator actually found: "
-    "each is true exactly when the corresponding view object is non-null. one_sided is the "
-    "negation of the conjunction of the three, so it is true for any field that one source "
-    "declares and another does not. No field is ever dropped for being absent from a source; "
-    "absence is recorded as a false and the field still gets an entry. Notes are composed "
+    "in_copybook, in_bridge, in_column and in_program_source are set from what the generator "
+    "actually found: each is true exactly when the corresponding view object is non-null. "
+    "one_sided is the negation of the conjunction of the first three, so it is true for any "
+    "field that one layer of the authoritative triple declares and another does not; "
+    "in_program_source is not a term of it, because a field a program declares inline in its "
+    "own FILE SECTION reaches no table and so has all three of those false and is "
+    "one-sided by construction rather than by comparison. No field is ever dropped for being "
+    "absent from a source; absence is recorded as a false and the field still gets an "
+    "entry. Notes are composed "
     "mechanically from the same facts and never editorially. On a copybook record: every "
     "header comment line the copybook states about its own record length or byte count, or "
     "shouts as a warning in capitals, quoted verbatim in the order stated with the comment "
@@ -331,8 +394,10 @@ _RULE_BRIDGE_DERIVED_COLUMNS: Final[str] = (
 )
 
 _RULE_COBOL_PYTHON_STORAGE: Final[str] = (
-    "Chosen from the copybook view alone: NONE for a group item or for an entry with no "
-    "copybook view; STR for an alphanumeric item; DECIMAL for a numeric item with a non-zero "
+    "Chosen from the declaring COBOL view alone - the copybook view, or the program-source "
+    "view for a work-file field that no copybook declares: NONE for a group item or for an "
+    "entry with neither of those views; STR for an alphanumeric item; DECIMAL for a "
+    "numeric item with a non-zero "
     "scale; INT for the BINARY-CHAR, BINARY-SHORT, BINARY-LONG and COMP-5 family and for any "
     "zero-scale integer. This member exists only so that the choice between decimal.Deci"
     "mal and int is data-driven rather than hand-coded per field (R-2); getting the binary "
@@ -340,6 +405,29 @@ _RULE_COBOL_PYTHON_STORAGE: Final[str] = (
     "reproducible. It is emphatically NOT a settlement of any drift: it describes the COBOL "
     "side alone, and anything that needs to know what the bridge or the database does must "
     "read those views instead."
+)
+
+_RULE_PROGRAM_SOURCE_ENTRIES: Final[str] = (
+    "A record a posting program declares INLINE, in its own FILE SECTION rather than "
+    "by COPY, is read from a stated line span and never from a search: the generator holds "
+    "the program path, the 01-level record name, whether an FD or an SD introduces it, and "
+    "the first and last physical lines of the declaration, and it refuses to parse a span "
+    "whose first line does not declare the named record or whose nearest preceding FD or SD "
+    "does not match. Five such records exist, all of them General Ledger work files - "
+    "pre-trans-record in general/gl070.cbl and general/gl071.cbl, post-trans-record in "
+    "general/gl071.cbl and general/gl072.cbl, and sort-trans-record in general/gl071.cbl. "
+    "The declarations are parsed by the same code that parses a copybook, because a COBOL "
+    "data declaration has one shape wherever it is written, so digits, scale, signedness, "
+    "sign position and storage class are derived for these fields exactly as they are for "
+    "every other field and none of them is hand-bound (R-5). Their bridge and column views "
+    "are recorded as ABSENT rather than searched for: copybooks/wsnames.cob:L14-L17 names "
+    "pretrans.tmp and postrans.tmp as transient work files, no bridge COPYs these records "
+    "and the frozen dump declares no table for them, so presence.in_program_source is true "
+    "with in_copybook, in_bridge and in_column all false, one_sided is true by construction, "
+    "and derivation is null because there is no column to derive. They are in the dictionary "
+    "because their widths and their order are load-bearing anyway: general/gl072.cbl:"
+    "L410-L412 locates a nominal-ledger account by sequential read and therefore depends on "
+    "the order general/gl071.cbl sorted the stream into, which is anomaly A-14."
 )
 
 _BINDING_RULE_SUMMARIES: Final[tuple[str, ...]] = (
@@ -445,37 +533,217 @@ _SCHEMA_NOTE_TEMPLATES: Final[tuple[str, ...]] = (
 )
 
 # =============================================================================
-#  READING THE FROZEN SOURCES - read-only, line-exact, encoding-tolerant
+#  READING THE FROZEN SOURCES - read-only, contained, line-exact, digested
+#
+#  Every byte this generator turns into dictionary content arrives through
+#  `_read_lines`, and `_read_lines` is the only place in the module that opens a
+#  file for reading. That is deliberate and it is what makes two guarantees
+#  cheap to state and impossible to bypass:
+#
+#  CONTAINMENT. A path handed to `_read_lines` is a repository-relative path and
+#  must resolve to a file INSIDE the repository root. The generator's inputs are
+#  named partly by the frozen sources themselves - a copybook says which further
+#  copybooks it COPYs, in a quoted literal - so a path this program opens is not
+#  wholly under this program's control. Left unchecked, a literal such as
+#  `"../../etc/passwd"` would be turned into a path, opened, parsed and quoted
+#  back into the artifact's own citations. Every literal is therefore held to a
+#  single bare file name, and every resolved target is proved to sit inside the
+#  root, with the final component opened without following a symbolic link so
+#  that the proof cannot be invalidated between the check and the open.
+#
+#  PROVENANCE. Each file's SHA-256 and byte length are recorded as it is read,
+#  and the resulting manifest is emitted in the artifact. That is what turns
+#  "this dictionary was derived from these inputs" from an assertion into
+#  something a reader can check with a shell one-liner per file.
 # =============================================================================
+
+#: `O_NOFOLLOW` refuses to open the final path component if it is a symbolic
+#: link, which closes the window between proving a target is contained and
+#: actually opening it (CWE-367). Defined by every POSIX operating system; where
+#: it is not defined the containment proof below stands alone.
+_O_NOFOLLOW: Final[int] = getattr(os, "O_NOFOLLOW", 0)
+
+#: The shape a `COPY "..."` literal must take before it is turned into a path: a
+#: single file name, no directory part, no dot-dot, no leading dot. All seventy
+#: distinct literals in the frozen closure satisfy it, so this rejects only what
+#: the frozen sources never contain.
+_COPY_TARGET_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
+
+#: The directory every copybook literal is resolved against, and the only one.
+_COPYBOOK_ROOT: Final[str] = "copybooks"
+
+
+class SourceContainmentError(ValueError):
+    """A path the generator was asked to read is not a contained frozen source.
+
+    Raised rather than skipped. A quoted literal that names something outside the
+    repository is not a file this generator failed to find - it is a statement
+    that the frozen sources are not what this program assumes they are, and
+    continuing would emit a document whose citations cannot be checked. Since the
+    frozen archive contains no such literal, this exception is a guarantee about
+    what cannot happen rather than a case the caller must handle.
+    """
+
 
 #: Line caches keyed by (root, repository-relative path) so a second `--repo-root`
 #: can never see the first one's text. Nothing here is order-dependent, so caching
 #: does not affect the emitted bytes.
 _LINE_CACHE: dict[tuple[str, str], list[str]] = {}
+
+#: The SHA-256 and byte length of every frozen source actually opened, keyed
+#: exactly as `_LINE_CACHE` is. This IS the provenance manifest: it cannot drift
+#: from the set of files the run really read, because the same statement that
+#: caches a file's lines records its digest.
+_INPUT_DIGESTS: dict[tuple[str, str], tuple[str, int]] = {}
+
+#: Roots whose manifest has been taken. Reading a file that was not already
+#: cached under a sealed root would produce a document claiming a set of inputs
+#: it was not derived from, so it raises instead - see `_input_digest_manifest`.
+_SEALED_ROOTS: set[str] = set()
 _COPYBOOK_CACHE: dict[tuple[str, str], list["_CopybookItem"]] = {}
+_PROGRAM_SOURCE_CACHE: dict[tuple[str, str, str], list["_CopybookItem"]] = {}
 _LINEAGE_CACHE: dict[tuple[str, str], dict[tuple[int, str], bool]] = {}
 _ODD_PREFIX_CACHE: dict[tuple[str, str], frozenset[tuple[int, str]]] = {}
 
 _WHITESPACE_RUN: Final[re.Pattern[str]] = re.compile(r"\s+")
 
 
+def _contained_path(root: Path, rel: str) -> Path:
+    """Resolve a repository-relative path and prove it stays inside the repository.
+
+    Args:
+        root: The repository root, as given on the command line or defaulted.
+        rel: The path to read, relative to that root.
+
+    Returns:
+        The fully resolved absolute path of the file to open.
+
+    Raises:
+        SourceContainmentError: `rel` is not a contained repository-relative path,
+            or it resolves outside the root - whether by dot-dot segments or by
+            following a symbolic link out of the tree.
+        FileNotFoundError: Neither the root nor the target exists. Resolution is
+            strict deliberately: a path that cannot be resolved cannot be proved
+            contained, and guessing is exactly what this function exists to
+            prevent.
+
+    The shape test comes first because it is the cheap one and it rejects the
+    whole class outright: `model.REPO_PATH_PATTERN` admits only segments that
+    begin with a letter, a digit or an underscore, so `..`, `.`, a leading
+    separator and an empty segment are all unrepresentable. The resolution test
+    then catches what a shape cannot see - a symbolic link whose target sits
+    outside the tree.
+    """
+    if model.REPO_PATH_PATTERN.match(rel) is None:
+        raise SourceContainmentError(
+            "%r is not a contained repository-relative path" % rel)
+    anchor = root.resolve(strict=True)
+    target = (anchor / rel).resolve(strict=True)
+    if target == anchor or not target.is_relative_to(anchor):
+        raise SourceContainmentError(
+            "%r resolves outside the repository root %s" % (rel, anchor))
+    return target
+
+
+def _copy_target(literal: str) -> str:
+    """Turn a `COPY "..."` literal into the contained copybook path it names.
+
+    Args:
+        literal: The quoted name exactly as the frozen source writes it.
+
+    Returns:
+        The repository-relative path of the copybook, under `copybooks/`.
+
+    Raises:
+        SourceContainmentError: The literal is not a single bare file name, so
+            joining it to the copybook directory would not stay inside that
+            directory.
+
+    This is the one place a value taken FROM a frozen source becomes a path this
+    program opens, so it is the one place that has to be suspicious. Both callers
+    - the copybook COPY scan and the bridge COPY scan - route through it, because
+    a check applied at one of two identical sites is not a check.
+    """
+    if _COPY_TARGET_PATTERN.match(literal) is None:
+        raise SourceContainmentError(
+            "COPY %r does not name a single contained copybook file" % literal)
+    return "%s/%s" % (_COPYBOOK_ROOT, literal)
+
+
 def _read_lines(root: Path, rel: str) -> list[str]:
     """Return the physical lines of a frozen source, 1-based when indexed from zero+1.
 
-    Opened in text read mode only - the freeze forbids any write to these paths. A
-    carriage return is stripped because `copybooks/file24.cob` alone uses CRLF and its
-    line content must compare equal to its siblings'. `surrogateescape` keeps a stray
-    non-UTF-8 byte round-trippable instead of raising on a decade-old source file.
+    Opened read-only and never for writing - the freeze forbids any write to these
+    paths - and only after `_contained_path` has proved the target sits inside the
+    repository. The bytes are read as bytes and decoded here rather than through a
+    text-mode handle, for one reason beyond the digest: the digest must be taken
+    over what is actually on disk, and a decoded string is not that. With newline
+    translation disabled the two forms are identical, which is verified across all
+    245 frozen sources the closure reaches.
+
+    A carriage return is stripped because `copybooks/file24.cob` alone uses CRLF and
+    its line content must compare equal to its siblings'. `surrogateescape` keeps a
+    stray non-UTF-8 byte round-trippable instead of raising on a decade-old source
+    file.
+
+    Raises:
+        SourceContainmentError: The path is not a contained frozen source.
+        RuntimeError: The provenance manifest for this root has already been
+            taken and this file was not part of it. Emitting a manifest that
+            omits an input the document was derived from would defeat the point
+            of having one, so the run stops instead.
     """
     key = (str(root), rel)
     cached = _LINE_CACHE.get(key)
     if cached is None:
-        with open(root / rel, "r", encoding="utf-8", errors="surrogateescape",
-                  newline="") as handle:
-            text = handle.read()
+        if key[0] in _SEALED_ROOTS:
+            raise RuntimeError(
+                "%s was read after the provenance manifest for %s was taken"
+                % (rel, key[0]))
+        target = _contained_path(root, rel)
+        descriptor = os.open(target, os.O_RDONLY | _O_NOFOLLOW)
+        try:
+            chunks: list[bytes] = []
+            while True:
+                chunk = os.read(descriptor, 1 << 20)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+        finally:
+            os.close(descriptor)
+        raw = b"".join(chunks)
+        _INPUT_DIGESTS[key] = (hashlib.sha256(raw).hexdigest(), len(raw))
+        text = raw.decode("utf-8", errors="surrogateescape")
         cached = [line.rstrip("\r") for line in text.split("\n")]
         _LINE_CACHE[key] = cached
     return cached
+
+
+def _input_digest_manifest(root: Path) -> tuple[model.SourceDigest, ...]:
+    """The provenance manifest for one root: every file read, with digest and length.
+
+    Args:
+        root: The repository root whose reads are being summarised.
+
+    Returns:
+        One `SourceDigest` per frozen source this run opened under that root,
+        sorted by path so the manifest does not depend on the order the stages
+        happened to read them in (rule R-6).
+
+    Taking the manifest SEALS the root: a later read of a file that was not
+    already cached raises, because the document would then claim a set of inputs
+    it was not wholly derived from. That is why `build_dictionary` binds every
+    other piece of the document to a name before it calls this - the seal has to
+    fall after the last read and before the document is assembled.
+    """
+    _SEALED_ROOTS.add(str(root))
+    anchor = str(root)
+    return tuple(
+        model.SourceDigest(path=rel, sha256=digest, byte_length=length)
+        for (cached_root, rel), (digest, length) in sorted(_INPUT_DIGESTS.items())
+        if cached_root == anchor
+    )
 
 
 def _strip_comment(line: str) -> tuple[str, str]:
@@ -504,9 +772,7 @@ def _collapse(text: str) -> str:
     return _WHITESPACE_RUN.sub(" ", text).strip()
 
 
-# =============================================================================
 #  STAGE 1 - the frozen schema, mysql/ACASDB.sql
-# =============================================================================
 
 _CREATE_TABLE_RE: Final[re.Pattern[str]] = re.compile(r"^CREATE TABLE `([^`]+)` \($")
 _COLUMN_RE: Final[re.Pattern[str]] = re.compile(r"^  `([^`]+)` (.+?),?$")
@@ -523,7 +789,7 @@ _INDEX_RE: Final[re.Pattern[str]] = re.compile(r"^CREATE\s+(?:UNIQUE\s+)?INDEX\b
 #: The three binary real types SQL can declare. The alternation is assembled from
 #: fragments on purpose: rule R-2 is checked by scanning this source, so the file
 #: carries no whole token naming the prohibited type. The frozen dump declares none
-#: of the three and the generator measures that rather than assuming it.
+#: of the three and the generator counts that rather than assuming it.
 _BINARY_REAL_RE: Final[re.Pattern[str]] = re.compile(
     r"\b(?:" + "flo" + "at|dou" + "ble|real)\b", re.IGNORECASE)
 
@@ -661,12 +927,15 @@ def _column_view(lineno: int, name: str, declaration: str, primary_key: str | No
     )
 
 
-# =============================================================================
 #  STAGE 2 - the copybook record layouts, copybooks/*.cob
-# =============================================================================
 
 _LEVEL_RE: Final[re.Pattern[str]] = re.compile(r"^(0[1-9]|[1-4][0-9]|66|77|88)$")
 _COPY_RE: Final[re.Pattern[str]] = re.compile(r'^\s*copy\s+"([^"]+)"', re.IGNORECASE)
+
+#: A FILE-CONTROL entry: `select <internal file name> assign <target>`. Used only to
+#: quote back which file a program-source record is the layout of.
+_SELECT_ASSIGN_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?i)^select\s+([A-Za-z][A-Za-z0-9-]*)\s+assign\b")
 #: A quoted literal, a pseudo-text delimiter pair, or a run of non-blanks. Quoted
 #: forms come first so a literal containing blanks stays one token.
 _TOKEN_RE: Final[re.Pattern[str]] = re.compile(r'"[^"]*"|\'[^\']*\'|==[^=]*==|[^\s]+')
@@ -836,14 +1105,41 @@ def _parse_copybook(root: Path, rel: str) -> list["_CopybookItem"]:
     cached = _COPYBOOK_CACHE.get(key)
     if cached is not None:
         return cached
+    items = _items_from_declarations(rel, _declarations_in(_read_lines(root, rel)))
+    _COPYBOOK_CACHE[key] = items
+    return items
 
+
+def _declarations_in(lines: list[str]) -> list[tuple[int, list[str]]]:
+    """Every data declaration in the given source lines, as (first line, tokens).
+
+    The line number is one-based within the list that was passed, which is the whole
+    file for a copybook and a single record's span for a program-source record; the
+    caller of the span form adds the span's offset back on so the locator stays
+    absolute.
+    """
     declarations: list[tuple[int, list[str]]] = []
-    for start, code in _logical_statements(_read_lines(root, rel)):
+    for start, code in _logical_statements(lines):
         tokens = _TOKEN_RE.findall(code)
         if not tokens or not _LEVEL_RE.match(tokens[0]):
             continue
         declarations.append((start, tokens))
+    return declarations
 
+
+def _items_from_declarations(rel: str,
+                             declarations: list[tuple[int, list[str]]],
+                             ) -> list["_CopybookItem"]:
+    """Turn a run of COBOL data declarations into items, in declaration order.
+
+    Shared verbatim by the copybook parse and by the program-source parse, because a
+    COBOL data declaration has one shape wherever it is written: the same level
+    numbers, the same PICTURE, USAGE, SIGN, OCCURS, REDEFINES and VALUE clauses, the
+    same 88-level condition names, and the same group-level USAGE inheritance.
+    Reimplementing any of it for the second caller would let the two drift apart -
+    which is precisely the divergence rule R-4 exists to prevent - and it would leave
+    the work-file widths hand-bound rather than derived, which R-5 forbids.
+    """
     items: list[_CopybookItem] = []
     stack: list[_CopybookItem] = []
     record: str | None = None
@@ -897,7 +1193,121 @@ def _parse_copybook(root: Path, rel: str) -> list["_CopybookItem"]:
         items.append(item)
         stack.append(item)
 
-    _COPYBOOK_CACHE[key] = items
+    return items
+
+
+def _program_source_span(rel: str, record: str) -> tuple[str, int, int]:
+    """The declaring section and the line span the frozen table states for one record.
+
+    Raises `KeyError` rather than guessing: a record this generator was not told about
+    is not a record it may invent a span for.
+    """
+    for path, name, section, first, last in _PROGRAM_SOURCE_RECORDS:
+        if path == rel and name == record:
+            return section, first, last
+    raise KeyError("%s declares no catalogued record named %s" % (rel, record))
+
+
+def _program_source_siblings(rel: str, record: str) -> list[str]:
+    """The other programs the table records as declaring a record of the same name."""
+    return sorted(path for path, name, _s, _f, _l in _PROGRAM_SOURCE_RECORDS
+                  if name == record and path != rel)
+
+
+def _program_source_introducer(root: Path, rel: str,
+                               first: int) -> tuple[int, str, str]:
+    """The FD or SD immediately above a record declaration.
+
+    Returns (physical line, the keyword as declared, the file name it names). The file
+    name is the internal name the FILE-CONTROL SELECT assigns, which is what links the
+    record layout to the file it is the layout of.
+    """
+    lines = _read_lines(root, rel)
+    for number in range(first - 1, 0, -1):
+        code, _comment = _strip_comment(lines[number - 1])
+        tokens = _TOKEN_RE.findall(code)
+        if not tokens:
+            continue
+        return (number, tokens[0].rstrip(".").upper(),
+                tokens[1].rstrip(".") if len(tokens) > 1 else "")
+    return 0, "", ""
+
+
+def _program_source_select(root: Path, rel: str, file_name: str) -> tuple[int, str]:
+    """The FILE-CONTROL SELECT statement that assigns the named file, and its line.
+
+    The whole logical statement is returned, not just its first line: `gl070` spreads
+    one SELECT across four physical lines and the ACCESS, STATUS and ORGANIZATION
+    clauses are part of what the record is the layout of.
+    """
+    for number, code in _logical_statements(_read_lines(root, rel)):
+        text = _collapse(code)
+        match = _SELECT_ASSIGN_RE.match(text)
+        if match and match.group(1).lower() == file_name.lower():
+            return number, text
+    return 0, ""
+
+
+def _program_source_declared_lengths(root: Path, rel: str, first: int,
+                                     last: int) -> tuple[str, ...]:
+    """Every record length the program states in comments inside the record's span.
+
+    Derived rather than asserted empty: these programs happen to state none, but a
+    stated length is exactly the kind of contradiction the dictionary must be able to
+    record rather than resolve (R-4), so the span is read for one either way.
+    """
+    found: list[str] = []
+    for number in range(first, last + 1):
+        _code, comment = _strip_comment(_read_lines(root, rel)[number - 1])
+        for digits in _BYTES_RE.findall(comment):
+            if digits not in found:
+                found.append(digits)
+    return tuple(found)
+
+
+def _parse_program_source(root: Path, rel: str, record: str) -> list["_CopybookItem"]:
+    """Parse one record a posting program declares inline, from its stated span.
+
+    The span comes from `_PROGRAM_SOURCE_RECORDS` rather than from a search, so no FILE
+    SECTION of any other program can be drawn in by a pattern that happens to match,
+    and the parse is checked against the frozen text before it is trusted: the first
+    declaration in the span must be the named 01-level record, and the nearest FD or SD
+    above it must be the section the table states. A mismatch raises rather than
+    warning - a silently mis-parsed width or a silently mis-attributed record would
+    post to the wrong account with no error and no diagnostic (anomaly A-14).
+    """
+    key = (str(root), rel, record)
+    cached = _PROGRAM_SOURCE_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    section, first, last = _program_source_span(rel, record)
+    lines = _read_lines(root, rel)
+    declarations = [(first - 1 + start, tokens)
+                    for start, tokens in _declarations_in(lines[first - 1:last])]
+    if not declarations:
+        raise ValueError("%s:L%d-L%d declares no data item" % (rel, first, last))
+    head_line, head_tokens = declarations[0]
+    if head_line != first or head_tokens[0] != "01" or len(head_tokens) < 2 \
+            or head_tokens[1].lower() != record.lower():
+        raise ValueError("%s:L%d does not declare 01 %s" % (rel, first, record))
+
+    declared = None
+    for number in range(first - 1, 0, -1):
+        code, _comment = _strip_comment(lines[number - 1])
+        tokens = _TOKEN_RE.findall(code)
+        if not tokens:
+            continue
+        keyword = tokens[0].rstrip(".").upper()
+        if keyword in ("FD", "SD"):
+            declared = keyword
+        break
+    if declared != section:
+        raise ValueError("%s:L%d is introduced by %s, not the %s the table states"
+                         % (rel, first, declared, section))
+
+    items = _items_from_declarations(rel, declarations)
+    _PROGRAM_SOURCE_CACHE[key] = items
     return items
 
 
@@ -1053,7 +1463,7 @@ def _copybook_copies(root: Path, rel: str) -> list[str]:
         code, _ = _strip_comment(raw)
         found = _COPY_RE.match(code)
         if found and found.group(1).lower().endswith(".cob"):
-            out.append("copybooks/" + found.group(1))
+            out.append(_copy_target(found.group(1)))
     return out
 
 
@@ -1085,7 +1495,7 @@ def _copybook_closure(root: Path) -> list[str]:
     roots: set[str] = set(_EXTRA_COPYBOOK_ROOTS)
     for bridge in sorted(_BY_BRIDGE):
         for _number, name in _bridge_copies(root, bridge):
-            roots.add("copybooks/" + name)
+            roots.add(_copy_target(name))
     for _entity, _handler, _bridge, _tables, copybooks in _SPINE:
         roots.update(copybooks)
 
@@ -1137,9 +1547,7 @@ def _resolve_record_names(root: Path, order: list[str]) -> dict[str, str | None]
     return own
 
 
-# =============================================================================
 #  STAGE 3 - the bridge sources, common/*MT.scb
-# =============================================================================
 
 #: Words that open a division, a section or end a statement and therefore look like a
 #: paragraph header without being one.
@@ -1182,8 +1590,40 @@ _MOVE_INTO_HV_RE: Final[re.Pattern[str]] = re.compile(
 _MOVE_OUT_OF_HV_RE: Final[re.Pattern[str]] = re.compile(
     r"(?i)\bmove\s+(HV[0-9]?-[A-Za-z0-9-]+)(\s*\([^)]*\))?\s+to\s+(.+?)\s*\.?\s*$"
 )
+#: The `INITIALIZE` of a host-variable group that precedes its load, in EITHER
+#: SPELLING. The maintainer writes the verb both ways, and here the difference is
+#: not cosmetic: this statement is what makes an unset host variable reach MySQL
+#: as zero or space rather than carrying a stale value over from the previous row,
+#: which in turn is why every column in the frozen dump can be declared NOT NULL.
+#:
+#: A census of the twenty in-scope bridges finds exactly NINETEEN statements that
+#: name a `TD-` group - one per in-scope table except the three named below -
+#: EIGHTEEN spelled `initialize` and exactly ONE spelled the British way:
+#: `initialise TD-IRSDFLT-REC.` [common/irsdfltMT.cbl:L625], inside that bridge's
+#: `ba070-Process-Write` load paragraph. A pattern accepting only the American
+#: spelling therefore reported the IRSDFLT host-variable group as never
+#: initialised, which the frozen bridge flatly contradicts.
+#:
+#: WIDENING THE SPELLING WIDENS NOTHING ELSE, because three independent filters
+#: stand between a match and a `true`: the `TD-` prefix in the capture, the
+#: membership test against the bridge's own declared group names at both use
+#: sites, and the load-paragraph span test. The British spelling also appears in
+#: `slinvoiceMT` and `plinvoiceMT` - `initialise WS-Invoice-Record`
+#: [common/slinvoiceMT.cbl:L730], [common/slinvoiceMT.cbl:L2452],
+#: [common/slinvoiceMT.cbl:L2501] and the same three in `plinvoiceMT` - but those
+#: name the COBOL RECORD, not the host-variable group, so the prefix alone already
+#: refuses them; both bridges initialise their `TD-` groups with the American
+#: spelling [common/slinvoiceMT.cbl:L1453], [common/slinvoiceMT.cbl:L2787].
+#:
+#: `dfltMT`, `finalMT` and `irsfinalMT` each declare a `TD-` group and genuinely
+#: issue NO such statement for it, initialising their COBOL record with filler
+#: instead [common/dfltMT.cbl:L530], [common/finalMT.cbl:L531],
+#: [common/irsfinalMT.cbl:L395]. Their `false` is CORRECT and must stay false.
+#: `_verify` pins BOTH directions - the one group that must read true and the
+#: three that must stay false - so neither a missed spelling nor an over-eager
+#: match can regress in silence, whichever of the three filters is loosened.
 _INITIALIZE_RE: Final[re.Pattern[str]] = re.compile(
-    r"(?i)^\s*initialize\s+(TD-[A-Z0-9-]+)\s*\.?\s*$"
+    r"(?i)^\s*initiali[sz]e\s+(TD-[A-Z0-9-]+)\s*\.?\s*$"
 )
 
 
@@ -1221,12 +1661,12 @@ def _owning_paragraph(paragraphs: list[tuple[int, str]],
 
 def _parse_scb(root: Path, bridge: str) -> tuple[str, str, list[dict[str, str]],
                                                  list[model.BridgeKey], str]:
-    """Read a bridge source: its base, its tables, its key metadata and the locators.
+    r"""Read a bridge source: its base, its tables, its key metadata and the locators.
 
-    The directive block is anchored on a column-1 `/MYSQL VAR\\` that CONTAINS a
+    The directive block is anchored on a column-1 `/MYSQL VAR\` that CONTAINS a
     `BASE=` line, and a table line must carry the `,HV` or `,HV1` suffix. That
     precision is necessary rather than fussy: `common/glpostingMT.scb` writes
-    `/MYSQL-END\\` many times and a bare `TABLE=<NAME>` ten further times inside its
+    `/MYSQL-END\` many times and a bare `TABLE=<NAME>` ten further times inside its
     procedure-division SQL directives, so anchoring on either would pick up the wrong
     block. A bridge that owns a header table and a lines table emits two `TABLE=` lines
     inside the one block - `common/slinvoiceMT.scb:L381-L385` is the shape.
@@ -1478,9 +1918,7 @@ def _parse_host_variables(root: Path, bridge: str, tables: list[dict[str, str]],
     return out
 
 
-# =============================================================================
 #  STAGE 4 - joining the three views
-# =============================================================================
 
 #: Figurative constants a load move may name instead of a record field. They carry no
 #: field, so they are never a binding candidate.
@@ -1503,7 +1941,7 @@ def _table_copybooks(root: Path, table: str) -> list[str]:
     bridge, _handler, _entity, spine_copybooks = _BY_TABLE[table]
     out = set(spine_copybooks)
     for _number, name in _bridge_record_copies(root, bridge):
-        out.add("copybooks/" + name)
+        out.add(_copy_target(name))
     return sorted(out)
 
 
@@ -1627,19 +2065,24 @@ def _column_arithmetic(column: model.MysqlColumn | None) -> tuple[
     return signed, None, None, None, None
 
 
-def _storage_of(copybook: model.CopybookField | None) -> model.CobolPythonStorage:
-    """Choose the Python storage class from the COPYBOOK view alone.
+def _storage_of(view: model.CopybookField | None) -> model.CobolPythonStorage:
+    """Choose the Python storage class from the DECLARING COBOL view alone.
+
+    The declaring view is the copybook view where there is one, and the program-source
+    view for a work-file field that no copybook declares; the two carry the same
+    members because a COBOL data declaration has one shape wherever it is written, so
+    one rule serves both and neither is special-cased.
 
     This is emphatically not a settlement of any drift; it exists only so that the
     choice between an exact-decimal type and `int` is data-driven rather than
     hand-coded per field (R-2). Getting the binary family right is what makes the
     integer truncation in the legacy moving averages reproducible.
     """
-    if copybook is None or copybook.usage is model.Usage.GROUP:
+    if view is None or view.usage is model.Usage.GROUP:
         return model.CobolPythonStorage.NONE
-    if copybook.usage is model.Usage.ALPHANUMERIC:
+    if view.usage is model.Usage.ALPHANUMERIC:
         return model.CobolPythonStorage.STR
-    if copybook.scale:
+    if view.scale:
         return model.CobolPythonStorage.DECIMAL
     return model.CobolPythonStorage.INT
 
@@ -1756,9 +2199,7 @@ def _drift_of(copybook: model.CopybookField | None,
                        details=tuple(details))
 
 
-# =============================================================================
 #  STAGE 4a - how the bridge derives a column that no field simply carries
-# =============================================================================
 
 _IF_RE: Final[re.Pattern[str]] = re.compile(r"(?i)^if\b")
 _CONDITION_CONTINUATION_RE: Final[re.Pattern[str]] = re.compile(r"(?i)^(and|or)\b")
@@ -1943,14 +2384,11 @@ def _derivation_of(root: Path, table: str, copybook: model.CopybookField | None,
                            source="%s:L%d-L%d" % (host.view.file, guard_line, line))
 
 
-# =============================================================================
 #  STAGE 4b - notes, anomaly references and ambiguity references
-#
 #  Notes are composed mechanically from the facts already gathered and never
 #  editorially.  Every disagreement between the three views is recorded, with the
 #  anomaly it corresponds to, and none of them is repaired: a defect reproduced is
 #  correct and a defect fixed is a failure (R-4).
-# =============================================================================
 
 _WARNING_RE: Final[re.Pattern[str]] = re.compile(r"(?i)\bwarning\b")
 
@@ -2030,12 +2468,32 @@ _NOTE_GUARD_COMMENT: Final[str] = (
 _NOTE_FRAGMENT: Final[str] = (
     "%s is a single-declaration COPY fragment that %s textually includes into its %s record."
 )
+_NOTE_PROGRAM_SOURCE: Final[str] = (
+    "Program-source field: declared inline in %s, in the program's own FILE SECTION "
+    "under an %s entry rather than in any copybook. The record is a transient General "
+    "Ledger work file, so no bridge host variable carries this field and no column "
+    "stores it - the absence is "
+    "recorded rather than searched for. It is catalogued anyway because %s locates a "
+    "nominal-ledger account by sequential read and therefore depends on the widths and the "
+    "order these records fix."
+)
+_NOTE_PROGRAM_SOURCE_REPEAT: Final[str] = (
+    "%s declares a record named %s at %s as well. The two are separate physical "
+    "declarations rather than two spellings of one, so both are recorded and this entry's "
+    "key carries its own declaration line to keep them apart."
+)
+_NOTE_PROGRAM_SOURCE_GROUP: Final[str] = (
+    "This group exists in this declaration alone: %s declares the same record without it "
+    "and carries the subordinate items flat at the group's own level instead. Both shapes "
+    "are recorded and neither is harmonised against the other (R-4)."
+)
 
 #: Notes are emitted in this fixed order so the document is byte-reproducible (R-6).
 _NOTE_ORDER: Final[tuple[str, ...]] = (
-    "COPYONLY", "NO_COPYBOOK", "SIGN_LOST", "SIGN_REVERSED", "NOT_LOADED", "NOT_UNLOADED",
-    "NOT_INITIALISED", "DDL_COMMENT", "COLUMN_DEFAULT", "GUARD_COMMENT", "SCB_DOUBT",
-    "OCCURS", "CONDITION_NAMES", "USAGE_INHERITED", "SIGN_CLAUSE", "VARIANT", "FRAGMENT",
+    "PROGRAM_SOURCE", "COPYONLY", "NO_COPYBOOK", "SIGN_LOST", "SIGN_REVERSED",
+    "NOT_LOADED", "NOT_UNLOADED", "NOT_INITIALISED", "DDL_COMMENT", "COLUMN_DEFAULT",
+    "GUARD_COMMENT", "SCB_DOUBT", "OCCURS", "CONDITION_NAMES", "USAGE_INHERITED",
+    "SIGN_CLAUSE", "VARIANT", "FRAGMENT",
 )
 
 
@@ -2048,9 +2506,9 @@ class _EntryDraft:
     """
 
     __slots__ = ("key", "table", "bridge", "handler", "entity_facade", "presence",
-                 "one_sided", "copybook", "host", "column", "drift", "derivation",
-                 "storage", "notes", "anomaly_refs", "ambiguity_refs", "item",
-                 "occurrence", "signature", "copybook_notes")
+                 "one_sided", "copybook", "program_source", "host", "column", "drift",
+                 "derivation", "storage", "notes", "anomaly_refs", "ambiguity_refs",
+                 "item", "occurrence", "signature", "copybook_notes")
 
     def __init__(self, **members: object) -> None:
         for name in self.__slots__:
@@ -2068,6 +2526,7 @@ class _EntryDraft:
             presence=self.presence,
             one_sided=bool(self.one_sided),
             copybook=self.copybook,
+            program_source=self.program_source,
             bridge_host_variable=None if self.host is None else self.host.view,
             column=self.column,
             drift=self.drift,
@@ -2199,7 +2658,27 @@ def _notes_and_refs(root: Path, draft: _EntryDraft,
     def add(kind: str, text: str) -> None:
         bucket.setdefault(kind, []).append(text)
 
-    if column is None:
+    if draft.program_source is not None:
+        # A work-file field: no copybook, no bridge and no column, so none of the
+        # comparisons below has anything to compare and every note is stated from the
+        # declaration itself.
+        source = draft.program_source
+        record = item.record
+        section = _program_source_span(source.file, record)[0]
+        add("PROGRAM_SOURCE", _NOTE_PROGRAM_SOURCE % (source.file, section,
+                                                      _SEQUENTIAL_READ_LOCATOR))
+        siblings = _program_source_siblings(source.file, record)
+        for other in siblings:
+            add("PROGRAM_SOURCE", _NOTE_PROGRAM_SOURCE_REPEAT % (
+                other, record, "%s:L%d" % (other, _program_source_span(other, record)[1])))
+        if source.is_group and source.level != "01":
+            for other in siblings:
+                if all(peer.name.lower() != source.name.lower()
+                       for peer in _parse_program_source(root, other, record)):
+                    add("PROGRAM_SOURCE", _NOTE_PROGRAM_SOURCE_GROUP % other)
+        if record in _ORDERING_CRITICAL_RECORDS:
+            anomalies.append("A-14")
+    elif column is None:
         if copybook.is_filler:
             add("COPYONLY", _NOTE_COPYONLY_FILLER)
         elif (copybook.redefines is not None
@@ -2287,9 +2766,7 @@ def _notes_and_refs(root: Path, draft: _EntryDraft,
                                   key=lambda ref: int(ref.split("-")[1]))
 
 
-# =============================================================================
 #  STAGE 4c - the copybook source records
-# =============================================================================
 
 _BYTES_RE: Final[re.Pattern[str]] = re.compile(r"(\d+)\s*bytes\b", re.IGNORECASE)
 _SHOUTED_NOT_RE: Final[re.Pattern[str]] = re.compile(r"(?<![A-Za-z])NOT(?![A-Za-z])")
@@ -2309,6 +2786,33 @@ _CBNOTE_BRIDGE_COPY: Final[str] = (
 _CBNOTE_FRAGMENT: Final[str] = (
     "A single-declaration COPY fragment that %s textually includes into its %s record."
 )
+_PSNOTE_INTRODUCER: Final[str] = (
+    "%s %s at %s introduces the record, and the FILE-CONTROL entry that assigns that file "
+    'reads "%s" at %s.'
+)
+_PSNOTE_TRANSIENT: Final[str] = (
+    "Transient scratch storage: no bridge COPYs this record and the frozen dump declares no "
+    "table for it, so every field of it is recorded with its bridge and column views absent "
+    "rather than searched for. copybooks/wsnames.cob:L14-L17 names the two General Ledger "
+    "work files pretrans.tmp and postrans.tmp and annotates both as belonging to gl071."
+)
+_PSNOTE_ALSO_DECLARED: Final[str] = (
+    "%s declares a record of the same name at %s. The two are separate physical "
+    "declarations, both are recorded in full, and neither is harmonised against the other "
+    "(R-4)."
+)
+_PSNOTE_SHAPE_DIFFERS: Final[str] = (
+    "The two declarations do not agree: %s additionally declares %s, which this one does "
+    "not. Both shapes are kept exactly as written."
+)
+_PSNOTE_ORDER_CRITICAL: Final[str] = (
+    "The order of these records is load-bearing rather than incidental: %s locates the "
+    "nominal-ledger account for each posting by SEQUENTIAL read rather than by key, so it "
+    "finds the right account only because general/gl071.cbl has already sorted the stream "
+    "into nominal-key order. A change of sort key or of sort stability posts to the wrong "
+    "account with no error and no diagnostic - anomaly A-14."
+)
+
 _CBNOTE_SIGN_CLAUSE: Final[str] = (
     'The copybook writes its leading-sign clause as "%s"; the spelling is kept exactly '
     "as written and is never normalised to one form."
@@ -2377,7 +2881,7 @@ def _bridge_copy_sites(root: Path, wanted: list[str]) -> dict[str, list[tuple[st
     for bridge in sorted(_BY_BRIDGE):
         rel = "common/%s.cbl" % bridge
         for number, name in _bridge_copies(root, bridge):
-            target = "copybooks/" + name
+            target = _copy_target(name)
             if target in want:
                 sites.setdefault(target, []).append((bridge, "%s:L%d" % (rel, number)))
     return sites
@@ -2439,16 +2943,52 @@ def _build_copybook_sources(
     return tuple(built), notes_by_path, fragment_parents
 
 
-# =============================================================================
+def _program_source_sources(root: Path) -> tuple[model.ProgramSourceRecord, ...]:
+    """The record inventory of the fourth source family, in the stated array order.
+
+    Every member is derived from the frozen program text: the FD or SD that introduces
+    the record and the FILE-CONTROL entry that assigns its file are read out and quoted
+    with their locators, the second declaration of the same record is named with its
+    line, and where the two declarations differ the extra items are listed. Nothing is
+    reconciled - `gl071` and `gl072` disagree about whether the account and
+    profit-centre fields sit inside a group, and both shapes are kept (R-4).
+    """
+    built: list[model.ProgramSourceRecord] = []
+    for rel, record, section, first, last in sorted(
+            _PROGRAM_SOURCE_RECORDS, key=lambda row: (row[0], row[3])):
+        items = _parse_program_source(root, rel, record)
+        line, keyword, file_name = _program_source_introducer(root, rel, first)
+        select_line, select_text = _program_source_select(root, rel, file_name)
+        notes = [_PSNOTE_INTRODUCER % (keyword, file_name, "%s:L%d" % (rel, line),
+                                       select_text, "%s:L%d" % (rel, select_line)),
+                 _PSNOTE_TRANSIENT]
+        own = {item.name.lower() for item in items}
+        for other in _program_source_siblings(rel, record):
+            other_first = _program_source_span(other, record)[1]
+            notes.append(_PSNOTE_ALSO_DECLARED % (other, "%s:L%d" % (other, other_first)))
+            extra = [item.name for item in _parse_program_source(root, other, record)
+                     if item.name.lower() not in own]
+            if extra:
+                notes.append(_PSNOTE_SHAPE_DIFFERS % (other, ", ".join(extra)))
+        if record in _ORDERING_CRITICAL_RECORDS:
+            notes.append(_PSNOTE_ORDER_CRITICAL % _SEQUENTIAL_READ_LOCATOR)
+        built.append(model.ProgramSourceRecord(
+            path=rel,
+            record_name=record,
+            section=section,
+            declared_lengths=_program_source_declared_lengths(root, rel, first, last),
+            notes=tuple(notes),
+        ))
+    return tuple(built)
+
+
 #  STAGE 5 - assemble the entries
-#
 #  Entries are built in two passes and the order matters for reproducing the
 #  committed artifact exactly. The first pass walks the 22 tables in name order and,
 #  for each column in the ordinal the frozen dump declares it at, emits the
 #  column-mapped entry and marks the copybook field it resolved to as consumed. The
 #  second pass walks the copybooks in path order and emits every field the first pass
 #  did not consume.
-# =============================================================================
 
 
 def _signature(item: "_CopybookItem") -> tuple[object, ...]:
@@ -2503,7 +3043,7 @@ def _build_entries(root: Path, schema: _SchemaFacts,
                 key="%s.%s" % (table, name), table=table, bridge=bridge, handler=handler,
                 entity_facade=entity,
                 presence=model.Presence(in_copybook=copybook is not None, in_bridge=True,
-                                        in_column=True),
+                                        in_column=True, in_program_source=False),
                 one_sided=copybook is None, copybook=copybook, host=host, column=column,
                 drift=_drift_of(copybook, host.view, column),
                 storage=_storage_of(copybook), item=item, occurrence=occurrence,
@@ -2547,7 +3087,8 @@ def _build_entries(root: Path, schema: _SchemaFacts,
             copybook = item.view()
             rows.append(_EntryDraft(
                 key="%s.%s" % (item.record, item.name), presence=model.Presence(
-                    in_copybook=True, in_bridge=False, in_column=False),
+                    in_copybook=True, in_bridge=False, in_column=False,
+                    in_program_source=False),
                 one_sided=True, copybook=copybook, host=None, column=None,
                 drift=_NO_DRIFT, derivation=None, storage=_storage_of(copybook),
                 item=item, occurrence=None, signature=_signature(item),
@@ -2569,6 +3110,25 @@ def _build_entries(root: Path, schema: _SchemaFacts,
         if rel not in owner:
             drafts.extend(leftovers[rel])
 
+    # Pass 3: the records the posting programs declare inline in their own FILE
+    # SECTIONs. They take no part in pass 2's election, because two programs declaring a
+    # work-file record are two physical sources and not two spellings of one, so both
+    # declarations are emitted in full and the # line segment keeps their keys apart.
+    # They come last because they belong to no table.
+    for rel, record, _section, _first, _last in sorted(
+            _PROGRAM_SOURCE_RECORDS, key=lambda row: (row[0], row[3])):
+        for item in _parse_program_source(root, rel, record):
+            view = item.view()
+            drafts.append(_EntryDraft(
+                key="%s.%s" % (item.record, item.name), presence=model.Presence(
+                    in_copybook=False, in_bridge=False, in_column=False,
+                    in_program_source=True),
+                one_sided=True, copybook=None, program_source=view, host=None,
+                column=None, drift=_NO_DRIFT, derivation=None, storage=_storage_of(view),
+                item=item, occurrence=None, signature=_signature(item),
+                copybook_notes=[],
+            ))
+
     warnings: dict[tuple[str, str], list[tuple[str, str]]] = {}
     for bridge in sorted(_BY_BRIDGE):
         columns = {table: [draft.column.name for draft in by_table[table]]
@@ -2587,9 +3147,7 @@ def _build_entries(root: Path, schema: _SchemaFacts,
     return drafts
 
 
-# =============================================================================
 #  STAGE 6 - the source records, the table records, the identity block and coverage
-# =============================================================================
 
 _VARCHAR_PREFIX: Final[str] = "varchar"
 
@@ -2605,7 +3163,7 @@ def _default_phrase(text: str) -> str:
 
 def _schema_source(root: Path, facts: _SchemaFacts,
                    columns: list[model.MysqlColumn]) -> model.SchemaSource:
-    """The schema source record: the dump's own facts, measured rather than assumed.
+    """The schema source record: the dump's own facts, counted rather than assumed.
 
     Two populations are reported and each note says which it covers. The type census
     counts every column the dump declares, in scope or not, because it is a statement
@@ -2756,13 +3314,21 @@ def _table_records(root: Path, facts: _SchemaFacts) -> tuple[model.TableRecord, 
     return tuple(records)
 
 
-def _meta() -> model.Meta:
+def _meta(source_inputs_sha256: str) -> model.Meta:
     """The identity block, including the determinism and derivation contracts.
+
+    Args:
+        source_inputs_sha256: The roll-up digest of the provenance manifest, from
+            `model.source_inputs_digest`. Passed in rather than computed here
+            because it can only be taken once every frozen source has been read,
+            which is a fact about the caller's sequencing and not about identity.
 
     Nothing here is derived from the environment: rule R-6 forbids a timestamp, a
     hostname, a username, an absolute path, a git revision or an environment-derived
     tool version, so the only version recorded anywhere is the database server version
-    the frozen dump states in its own header.
+    the frozen dump states in its own header. The digest is not an exception to that:
+    it summarises the CONTENT of frozen files, so two runs over an unchanged checkout
+    produce the same value, which is the property the rule protects.
     """
     return model.Meta(
         dictionary_name=model.DICTIONARY_NAME,
@@ -2781,7 +3347,8 @@ def _meta() -> model.Meta:
                 tables=_ARRAY_ORDER_TABLES,
                 entries=_ARRAY_ORDER_ENTRIES,
                 bridges=_ARRAY_ORDER_BRIDGES,
-                copybooks=_ARRAY_ORDER_COPYBOOKS),
+                copybooks=_ARRAY_ORDER_COPYBOOKS,
+                program_sources=_ARRAY_ORDER_PROGRAM_SOURCES),
             forbidden_content=_FORBIDDEN_CONTENT,
         ),
         derivation_rules=model.DerivationRules(
@@ -2793,10 +3360,12 @@ def _meta() -> model.Meta:
             usage_inheritance=_RULE_USAGE_INHERITANCE,
             bridge_derived_columns=_RULE_BRIDGE_DERIVED_COLUMNS,
             cobol_python_storage=_RULE_COBOL_PYTHON_STORAGE,
+            program_source_entries=_RULE_PROGRAM_SOURCE_ENTRIES,
         ),
         binding_rules=tuple(
             model.BindingRule(id="R-%d" % (index + 1), summary=summary)
             for index, summary in enumerate(_BINDING_RULE_SUMMARIES)),
+        source_inputs_sha256=source_inputs_sha256,
     )
 
 
@@ -2818,13 +3387,13 @@ def _coverage(entries: tuple[model.DictionaryEntry, ...]) -> model.Coverage:
         host_variables_covered=sum(1 for entry in entries
                                    if entry.bridge_host_variable is not None),
         copybook_fields_covered=sum(1 for entry in entries if entry.copybook is not None),
+        program_source_fields_covered=sum(1 for entry in entries
+                                          if entry.program_source is not None),
         one_sided_entry_keys=tuple(entry.key for entry in entries if entry.one_sided),
     )
 
 
-# =============================================================================
 #  STAGE 7 - build, verify, serialise
-# =============================================================================
 
 #: Tables the posting cycle never touches, and the bridges that serve them. They are
 #: listed here for one purpose only: to assert that not one of their names reaches the
@@ -2855,6 +3424,32 @@ _REQUIRED_ENTRY_KEYS: Final[tuple[str, ...]] = (
     "SALEDGER-REC.SALES-AVERAGE", "GLBATCH-REC.ENTERED",
 )
 
+#: The work-file fields `acas_posting/records/work_records.py` binds through this
+#: dictionary rather than by hand. Every one must hold a key: rule R-5 admits no
+#: descriptor bound by eye, and a width mistyped here would post to the wrong account
+#: with no error and no diagnostic (anomaly A-14). The # line segment is part of the
+#: key because two programs declare a record of the same name, so the declaration each
+#: work record follows is identified by its line and by nothing else - the eight
+#: pre-trans fields from `general/gl070.cbl`, the eight post-trans and eight sort-trans
+#: fields from `general/gl071.cbl`, and the three items `general/gl072.cbl` alone
+#: declares, its `post-ledger` group and the two fields inside it.
+_REQUIRED_PROGRAM_SOURCE_KEYS: Final[tuple[str, ...]] = (
+    "pre-trans-record.pre-batch#109", "pre-trans-record.pre-post#110",
+    "pre-trans-record.pre-code#111", "pre-trans-record.pre-date#112",
+    "pre-trans-record.pre-ac#113", "pre-trans-record.pre-pc#114",
+    "pre-trans-record.pre-amount#115", "pre-trans-record.pre-legend#116",
+    "post-trans-record.post-batch#125", "post-trans-record.post-post#126",
+    "post-trans-record.post-code#127", "post-trans-record.post-date#128",
+    "post-trans-record.post-ac#129", "post-trans-record.post-pc#130",
+    "post-trans-record.post-amount#131", "post-trans-record.post-legend#132",
+    "sort-trans-record.sort-batch", "sort-trans-record.sort-post",
+    "sort-trans-record.sort-code", "sort-trans-record.sort-date",
+    "sort-trans-record.sort-ac", "sort-trans-record.sort-pc",
+    "sort-trans-record.sort-amount", "sort-trans-record.sort-legend",
+    "post-trans-record.post-ledger", "post-trans-record.post-ac#116",
+    "post-trans-record.post-pc#117",
+)
+
 
 def build_dictionary(root: Path) -> model.DataDictionary:
     """Parse the four frozen source families and build the whole dictionary.
@@ -2862,6 +3457,14 @@ def build_dictionary(root: Path) -> model.DataDictionary:
     The stages run sequentially in a fixed order - schema, copybooks, bridges, join -
     with no concurrency of any kind (R-3), and every collection is sorted before it is
     iterated so nothing about the result depends on filesystem traversal (R-6).
+
+    A fifth step follows the four: once every frozen source has been read, the
+    provenance manifest is taken and rolled up into `meta.source_inputs_sha256`.
+    That ordering is the reason every other piece of the document is bound to a
+    name below instead of being built inline in the constructor call - argument
+    evaluation would otherwise interleave the last reads with the manifest, and a
+    manifest that misses an input is worse than none at all because it looks
+    authoritative.
     """
     facts = _parse_schema(root)
     order = _copybook_closure(root)
@@ -2883,13 +3486,25 @@ def build_dictionary(root: Path) -> model.DataDictionary:
                             fragment_parents)
     entries = tuple(draft.entry() for draft in drafts)
     columns = [entry.column for entry in entries if entry.column is not None]
+    schema_source = _schema_source(root, facts, columns)
+    table_records = _table_records(root, facts)
+    coverage = _coverage(entries)
+
+    # The last frozen source has now been read. Seal the root and take the
+    # manifest; from here on, opening a file this run has not already read is an
+    # error rather than a silently unrecorded input.
+    input_digests = _input_digest_manifest(root)
+
     return model.DataDictionary(
-        meta=_meta(),
-        sources=model.Sources(schema=_schema_source(root, facts, columns),
-                              bridges=tuple(bridges), copybooks=copybooks),
-        tables=_table_records(root, facts),
+        meta=_meta(model.source_inputs_digest(input_digests)),
+        sources=model.Sources(schema=schema_source,
+                              bridges=tuple(bridges),
+                              copybooks=copybooks,
+                              input_digests=input_digests,
+                              program_sources=_program_source_sources(root)),
+        tables=table_records,
         entries=entries,
-        coverage=_coverage(entries),
+        coverage=coverage,
     )
 
 
@@ -2983,6 +3598,38 @@ def _verify(dictionary: model.DataDictionary, text: str) -> None:
     if len(present) != len(dictionary.entries):
         problems.append("entry keys are not unique")
 
+    for entry in dictionary.entries:
+        presence = entry.presence
+        if (presence.in_copybook != (entry.copybook is not None)
+                or presence.in_bridge != (entry.bridge_host_variable is not None)
+                or presence.in_column != (entry.column is not None)
+                or presence.in_program_source != (entry.program_source is not None)):
+            problems.append("%s: presence disagrees with the views it describes" % entry.key)
+        if entry.one_sided != (not (presence.in_copybook and presence.in_bridge
+                                    and presence.in_column)):
+            problems.append("%s: one_sided disagrees with presence" % entry.key)
+
+    program_source = [entry for entry in dictionary.entries
+                      if entry.program_source is not None]
+    if len(program_source) != coverage.program_source_fields_covered:
+        problems.append("%d program-source entries for a tally of %d"
+                        % (len(program_source), coverage.program_source_fields_covered))
+    if len(dictionary.sources.program_sources) != len(_PROGRAM_SOURCE_RECORDS):
+        problems.append("%d program-source records for the %d the generator was told of"
+                        % (len(dictionary.sources.program_sources),
+                           len(_PROGRAM_SOURCE_RECORDS)))
+    for entry in program_source:
+        if (entry.table is not None or entry.bridge is not None
+                or entry.handler is not None or entry.entity_facade is not None
+                or entry.copybook is not None or entry.bridge_host_variable is not None
+                or entry.column is not None or entry.derivation is not None):
+            problems.append("%s is a work-file field and reaches no table, so its table, "
+                            "bridge, handler, facade, copybook, host-variable, column and "
+                            "derivation members must all be null" % entry.key)
+    missing_work = [key for key in _REQUIRED_PROGRAM_SOURCE_KEYS if key not in present]
+    if missing_work:
+        problems.append("missing work-record entries: %s" % ", ".join(missing_work))
+
     by_key = {entry.key: entry for entry in dictionary.entries}
     for key in ("IRSPOSTING-REC.POST4-DAY", "IRSPOSTING-REC.POST4-MONTH",
                 "IRSPOSTING-REC.POST4-YEAR"):
@@ -3015,6 +3662,45 @@ def _verify(dictionary: model.DataDictionary, text: str) -> None:
                             "pass through signed, which is what makes the narrowing "
                             "specific rather than systemic" % key)
 
+    # The British spelling of INITIALIZE, asserted in BOTH directions.
+    # `initialise TD-IRSDFLT-REC.` [common/irsdfltMT.cbl:L625] is the only
+    # `TD-`-group initialisation among the twenty in-scope bridges that is not
+    # spelled the American way, and a pattern that missed it reported all four
+    # IRSDFLT host variables as never initialised - the opposite of what the frozen
+    # bridge says. Asserting the positive alone would let an over-broad pattern
+    # pass unnoticed, so the three bridges that genuinely issue no such statement
+    # are asserted to stay false. See `_INITIALIZE_RE` for the full census.
+    for key in ("IRSDFLT-REC.DEF-REC-KEY", "IRSDFLT-REC.DEF-ACS",
+                "IRSDFLT-REC.DEF-CODES", "IRSDFLT-REC.DEF-VAT"):
+        entry = by_key.get(key)
+        if entry is None:
+            problems.append("%s is missing: IRSDFLT-REC carries four columns" % key)
+            continue
+        view = entry.bridge_host_variable
+        if view is None or not view.group_initialised_before_load:
+            problems.append("%s must record its host-variable group as initialised "
+                            "before the load: irsdfltMT spells the verb the British "
+                            "way at common/irsdfltMT.cbl:L625" % key)
+    for key in ("SYSDEFLT-REC.DEF-REC-KEY", "SYSFINAL-REC.FINAL-ACC-REC-KEY",
+                "IRSFINAL-REC.IRS-FINAL-ACC-REC-KEY"):
+        entry = by_key.get(key)
+        if entry is None:
+            continue
+        view = entry.bridge_host_variable
+        if view is not None and view.group_initialised_before_load:
+            problems.append("%s must NOT record its host-variable group as "
+                            "initialised: its bridge initialises the COBOL record "
+                            "with filler and names no TD- group" % key)
+    group_initialised = {source.cbl_path: source.group_initialised_before_load
+                         for source in dictionary.sources.bridges}
+    if group_initialised.get("common/irsdfltMT.cbl") is not True:
+        problems.append("common/irsdfltMT.cbl must record group_initialised_before_load "
+                        "true from its British-spelled INITIALISE at L625")
+    for path in ("common/dfltMT.cbl", "common/finalMT.cbl", "common/irsfinalMT.cbl"):
+        if group_initialised.get(path) is True:
+            problems.append("%s must record group_initialised_before_load false: it "
+                            "issues no INITIALIZE naming its TD- group" % path)
+
     lowered = text.lower()
     for name in _OUT_OF_SCOPE_NAMES:
         if name.lower() in lowered:
@@ -3033,23 +3719,137 @@ def render(dictionary: model.DataDictionary) -> str:
     """
     payload = model.to_json_obj(dictionary)
     _assert_no_binary_reals(payload, "$")
-    return json.dumps(payload, ensure_ascii=False,
+    text = json.dumps(payload, ensure_ascii=False,
                       indent=model.DETERMINISM_INDENT) + "\n"
+
+    # Read the rendered bytes back through the reader's own gate before anyone is
+    # offered them. `model.from_json_obj` runs the integrity pass first, so this
+    # proves the emitted document satisfies every structural, pattern, pinned,
+    # uniqueness, agreement and manifest-binding condition the loader will hold
+    # it to - at generation time, where the fault is cheap to find, rather than at
+    # the first import of a record module. It also proves the round trip: what
+    # comes back must equal what went out.
+    reloaded = model.from_json_obj(json.loads(text, parse_float=str))
+    if reloaded != dictionary:
+        raise ValueError(
+            "the rendered document does not read back as the dictionary it was "
+            "rendered from")
+    return text
+
+
+#: The suffix the document is rendered under before it replaces the target. Same
+#: directory as the target, so `os.replace` is a rename within one filesystem and
+#: therefore atomic; the process id keeps two concurrent generations from
+#: colliding over the temporary name even though nothing here runs concurrently.
+_TEMP_SUFFIX: Final[str] = ".tmp"
 
 
 def _write(path: Path, text: str) -> None:
-    """Write the document, pinning the newline so nothing can translate it."""
+    """Write the document to a fresh private file and move it into place atomically.
+
+    Three separate weaknesses in the obvious one-line form are closed here, and
+    each of them is a way the artifact - the document every record module cites
+    under rule R-5 - could be corrupted or diverted by something other than this
+    generator:
+
+    * TRUNCATE-IN-PLACE. Writing straight to the destination leaves a window in
+      which the artifact on disk is half a document. A reader in that window sees
+      a parse failure at best; a run interrupted in that window leaves the
+      repository holding a truncated artifact that looks like a real one. The
+      document is therefore rendered into a sibling temporary file and moved onto
+      the destination with `os.replace`, which is atomic within a directory: a
+      reader sees either the whole old document or the whole new one.
+    * SYMLINK DIVERSION. `open(path, "w")` follows a symbolic link, so a link
+      planted at the destination redirects the write anywhere the running account
+      can reach (CWE-59). The temporary file is created with `O_CREAT | O_EXCL |
+      O_NOFOLLOW`, which refuses both an existing file and a link, so the write
+      lands where this function intends or nowhere at all.
+    * READABLE WHILE INCOMPLETE. The staging file is created 0600 and the mode is
+      set explicitly after creation as well, because `os.open` applies the
+      process umask to its mode argument. So an incomplete document is never
+      readable by anything but the account writing it.
+
+    The final mode is then set deliberately rather than left at 0600. This
+    artifact is committed public metadata, not a secret: locking it to the
+    generating account would make it unreadable to a second account on the same
+    machine for no security gain, and git records nothing but the executable bit
+    anyway. An existing destination therefore keeps exactly the mode it already
+    had - a rewrite never widens or narrows access - and a new one is created
+    0644, which is what a repository data file conventionally carries and is a
+    fixed value rather than a umask reading, so two runs agree.
+
+    The staging file is a sibling of the destination rather than a file in the
+    system temporary directory, for two reasons: `os.replace` is only atomic
+    within one filesystem, and a sibling inherits the destination directory's own
+    protection rather than that of a shared world-writable directory.
+
+    Both halves of the durability step are needed: `flush` moves the bytes out of
+    Python's buffer into the operating system, `fsync` moves them from there onto
+    the device. Without the second, a crash after the rename could leave a
+    correctly named file with no contents - and this document is the committed
+    field-level authority twenty-five record modules and two COBOL semantics
+    modules read at import time.
+
+    Args:
+        path: The document to write.
+        text: The rendered document, newline-pinned by the caller.
+
+    Raises:
+        OSError: The directory could not be created, or the document could not be
+            rendered, synced or moved into place. Nothing is left behind - the
+            staging file is removed on every failure path - and `main` maps it to
+            the documented write-failure status rather than letting it escape.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8", newline="\n") as handle:
-        handle.write(text)
+    try:
+        final_mode = path.stat().st_mode & 0o7777
+    except FileNotFoundError:
+        final_mode = 0o644
+
+    # A staging file left behind by an interrupted run would otherwise make every
+    # later run fail on `O_EXCL`. Unlinking removes the NAME, and never follows a
+    # symbolic link to whatever it points at, so clearing it cannot itself be
+    # turned into a way of deleting another file. `O_EXCL` still holds afterwards:
+    # if anything recreates the name in the interval, the open fails and the run
+    # stops - which is the safe outcome, because a diverted write never happens.
+    staging = path.with_name(path.name + ".partial")
+    staging.unlink(missing_ok=True)
+    descriptor = os.open(
+        staging,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_NOFOLLOW,
+        0o600,
+    )
+    try:
+        os.fchmod(descriptor, 0o600)
+        with open(descriptor, "w", encoding="utf-8", newline="\n",
+                  closefd=False) as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(descriptor)
+        os.fchmod(descriptor, final_mode)
+    finally:
+        os.close(descriptor)
+    try:
+        os.replace(staging, path)
+    except BaseException:
+        # A failed move must not leave a stray partial document beside the real
+        # one, where a later reader could mistake it for an artifact.
+        staging.unlink(missing_ok=True)
+        raise
 
 
 def main(argv: list[str] | None = None) -> int:
     """Generate the data dictionary, or check the committed one against a fresh parse.
 
     Returns 0 on success, 1 when `--check` finds a difference, 2 on a parse or coverage
-    failure and 3 when the file to compare against cannot be read. Nothing calls
-    `sys.exit` from inside a parser; a status is returned from here instead.
+    failure, 3 when the file to compare against cannot be read and 4 when the document
+    could not be written. Nothing calls `sys.exit` from inside a parser; a status is
+    returned from here instead.
+
+    The three MODES are mutually exclusive rather than merely documented as such:
+    writing the file, checking the committed copy against a fresh parse, and rendering
+    to standard output are three different jobs, and accepting two of them at once
+    could only mean silently performing one and ignoring the other.
     """
     parser = argparse.ArgumentParser(
         prog="python -m acas_posting.dictionary.generate",
@@ -3062,11 +3862,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, default=DATA_DICTIONARY_PATH,
                         help="where to write the dictionary "
                              "(default: data_dictionary/acas_posting_dictionary.json)")
-    parser.add_argument("--check", action="store_true",
-                        help="do not write: compare a fresh parse against the file at "
-                             "--output and report a unified diff of any difference")
-    parser.add_argument("--stdout", action="store_true",
-                        help="write the document to standard output instead of a file")
+    # One mode at a time. argparse refuses the combination itself, with its own
+    # usage message and its own exit status, rather than this function having to
+    # decide which of two requested jobs to perform.
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--check", action="store_true",
+                       help="do not write: compare a fresh parse against the file at "
+                            "--output and report a unified diff of any difference. "
+                            "Cannot be combined with --stdout")
+    modes.add_argument("--stdout", action="store_true",
+                       help="write the document to standard output instead of a file. "
+                            "Cannot be combined with --check")
     args = parser.parse_args(argv)
 
     try:
@@ -3078,11 +3884,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     coverage = dictionary.coverage
-    summary = ("%d entries covering %d columns, %d host variables and %d copybook "
-               "fields across %d tables and %d bridges"
+    summary = ("%d entries covering %d columns, %d host variables, %d copybook fields "
+               "and %d program-source work-file fields across %d tables and %d bridges"
                % (coverage.entry_count, coverage.columns_covered,
                   coverage.host_variables_covered, coverage.copybook_fields_covered,
-                  coverage.in_scope_tables, coverage.in_scope_bridges))
+                  coverage.program_source_fields_covered, coverage.in_scope_tables,
+                  coverage.in_scope_bridges))
 
     if args.check:
         try:
@@ -3104,7 +3911,17 @@ def main(argv: list[str] | None = None) -> int:
         print("acas_posting.dictionary.generate: %s" % summary, file=sys.stderr)
         return 0
 
-    _write(args.output, text)
+    # A write failure is CLASSIFIED, not allowed to escape as a traceback: the
+    # target is the migration's committed field-level authority, so a caller has
+    # to be able to tell "could not write it" (4) from "parsed wrongly" (2) and
+    # from "the committed copy differs" (1). `_write` has already made sure the
+    # target is either untouched or completely replaced.
+    try:
+        _write(args.output, text)
+    except OSError as error:
+        print("acas_posting.dictionary.generate: could not write %s: %s"
+              % (args.output, error), file=sys.stderr)
+        return 4
     print("acas_posting.dictionary.generate: wrote %s - %s" % (args.output.name, summary),
           file=sys.stderr)
     return 0

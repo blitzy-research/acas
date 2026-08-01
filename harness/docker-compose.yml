@@ -1,13 +1,7 @@
 ---
 
-# =============================================================================
-#  harness/docker-compose.yml
-#  The TWO-SERVICE compiled-COBOL ORACLE stack for the ACAS posting-cycle
-#  migration (COBOL -> Python 3.12).
-# =============================================================================
-#
-#  PURPOSE
-#  -------
+#  harness/docker-compose.yml -- the TWO-SERVICE compiled-COBOL ORACLE stack
+#  for the ACAS posting-cycle migration (COBOL -> Python 3.12).
 #  This stack stands up the ARBITER. The migration has no pre-existing test
 #  suite: compiled COBOL execution IS the behavioural specification, defects
 #  included -- a defect reproduced is correct, a defect fixed is a failure.
@@ -18,7 +12,9 @@
 #  Two services, and only two:
 #
 #      mariadb    the frozen ACASDB schema, served at the exact server version
-#                 the schema dump was produced by, with autocommit disabled.
+#                 the schema dump was produced by, with autocommit ON -- the
+#                 only mode in which the frozen COBOL, which never reaches a
+#                 COMMIT, writes durable rows.
 #                 Built from harness/Dockerfile.mariadb.
 #
 #      gnucobol   the maintainer's exact COBOL toolchain (GnuCOBOL 3.2 final,
@@ -35,11 +31,8 @@
 #  comparison. That property is the whole point of the stack.
 #
 #  THE EIGHT-STAGE PROTOCOL THIS STACK EXISTS TO SERVE
-#  ---------------------------------------------------
-#  Deterministic orchestration with explicit validation stages is what makes a
-#  migration of this kind verifiable, so the stage ordering is rigid and is
-#  never collapsed or reordered:
-#
+#  Deterministic staged orchestration is what makes a migration of this kind
+#  checkable, so the ordering is rigid and is never collapsed or reordered:
 #      1. seed              harness/seed.sh              (COBOL *LD loaders)
 #      2. run  (COBOL)      harness/run_cobol_scenario.sh
 #      3. dump              harness/dump_tables.py
@@ -48,21 +41,14 @@
 #      6. run  (Python)     harness/run_python_scenario.sh
 #      7. dump              harness/dump_tables.py
 #      8. diff              harness/diff_states.py       -> MUST be EMPTY
-#
-#  Stages 2 and 6 run SEQUENTIALLY against the one database in stage 5's
-#  identical seed state. They are never run concurrently -- see "STRICTLY
-#  SEQUENTIAL" below.
-#
+#  Stages 2 and 6 run SEQUENTIALLY against stage 5's identical seed state.
+
 #  POSITION IN THE TREE -- harness/ IS A SIBLING, NEVER A SUB-PACKAGE
-#  -----------------------------------------------------------------
-#  `harness/` is the compiled-COBOL oracle tree and is a SIBLING of
-#  `acas_posting/`: "the compiled oracle; NEVER on the package import path".
-#  There is no package-initialiser module anywhere under `harness/`, this file
-#  neither creates nor names one, and nothing here puts `harness/` on
-#  PYTHONPATH -- `pyproject.toml` packages `acas_posting*` only and excludes
-#  `harness*`. The harness Python tools are standalone scripts invoked BY PATH,
-#  never imported.
-#
+#  `harness/` is a SIBLING of `acas_posting/`: "the compiled oracle; NEVER on
+#  the package import path". There is no package-initialiser module anywhere
+#  under it, this file neither creates nor names one, and nothing here puts it
+#  on PYTHONPATH -- `pyproject.toml` packages `acas_posting*` only. The harness
+#  Python tools are standalone scripts invoked BY PATH, never imported.
 #  That separation is the structural expression of "no COBOL at runtime": the
 #  shipped Python artifact carries no COBOL, no `cobc` requirement and no
 #  linkage to the bridge's C interface object, and this compose stack is the
@@ -77,10 +63,21 @@
 #  current `docker compose` emits a warning when it is present. The top-level
 #  keys used are `services` and `volumes`, and nothing else.
 #
-#  No `networks:` block is declared either. Compose creates the project's
-#  default bridge network, on which `gnucobol` reaches the server by its
-#  service name `mariadb`. Keeping the implicit network means the database is
-#  reachable ONLY from inside the project network -- see "NO PUBLISHED PORT".
+#  A `networks:` block IS declared, with a single INTERNAL network. Relying on
+#  compose's implicit default bridge would already keep the database unreachable
+#  from outside the project (see "NO PUBLISHED PORT"), but the default bridge
+#  still permits OUTBOUND traffic from both containers to anywhere the host can
+#  reach. `internal: true` removes that: the two services can reach each other
+#  by service name and nothing else, in either direction.
+#
+#  That is a real property for this stack rather than ceremony. The harness is
+#  entirely self-contained at RUN time -- every archive is unpacked, every
+#  package installed and every binary built during the IMAGE BUILD, which is
+#  unaffected by this setting. So nothing legitimate needs egress, and denying
+#  it means a compromised dependency inside either container has no path off the
+#  host. Two visible consequences, both intended: an ad-hoc `pip install` or
+#  `apt-get install` inside a running container will fail, which is consistent
+#  with the snapshot-pinned, hash-verified package sets both images enforce.
 #
 #  No top-level `name:` key is set, so the project name defaults to the compose
 #  file's own directory, `harness`. If you need two isolated stacks on one host
@@ -88,57 +85,23 @@
 #  rather than editing this file:
 #
 #      docker compose -p acas-harness-<id> -f harness/docker-compose.yml up -d
-#
-#  BUILD CONTEXT -- BOTH SERVICES BUILD FROM THE REPOSITORY ROOT
-#  ------------------------------------------------------------
-#  Both services declare `context: ..`, i.e. the REPOSITORY ROOT, and name
-#  their Dockerfile with a `harness/` prefix. This is mandatory, not stylistic:
-#
-#      harness/Dockerfile.mariadb  copies  mysql/ACASDB.sql
-#      harness/Dockerfile.gnucobol copies  requirements.txt,
-#                                          presql2-latest.zip and
-#                                          mariadb-connector-c-3.3.4-src.zip
-#
-#  Every one of those paths resolves only relative to the repository root. A
-#  `harness/` context would fail at the first COPY in each image -- by design,
-#  so the contract enforces itself instead of relying on documentation.
-#
-#  Relative paths in this file (the `..` contexts and the `../:/repo` mount)
-#  resolve against the PROJECT DIRECTORY, which defaults to the directory
-#  holding this file. Invoke it as `-f harness/docker-compose.yml` from the
-#  repository root and do not override `--project-directory`.
-#
+#  Relative paths here resolve against the PROJECT DIRECTORY; invoke as
+#  `-f harness/docker-compose.yml` from the root and never set another.
+
 #  THE FROZEN-ARTIFACT GUARANTEE -- WHY /repo IS MOUNTED READ-ONLY
-#  --------------------------------------------------------------
-#  Any diff touching the frozen artifacts is a defect in the migration,
-#  regardless of how harmless it appears. The frozen set is all COBOL source
-#  under common/, general/, sales/, purchase/, irs/ and stock/, all copybooks/,
-#  all bridge programs common/*MT.scb and common/*MT.cbl, and the schema
-#  mysql/ACASDB.sql. The vendored source archives are harness build inputs,
-#  unpacked inside the container and never modified in the checkout.
-#
-#  Running the maintainer's own compile scripts inside the checkout would
-#  damage it five separate ways:
-#
-#    1. [common/comp-common.sh:L25] regenerates the frozen generated bridges:
-#           for i in `ls *MT.scb`; do presql2 $i; ... done
-#       run in the checkout this OVERWRITES the committed common/*MT.cbl;
-#    2. every compile passes `-T <name>.prn` [common/comp-common.sh:L26], so
-#       listing files appear in the frozen directories;
-#    3. `cobmysqlapi.o` must sit in the CWD of every compile -- the frozen
-#       lines link a BARE `cobmysqlapi.o` [common/comp-common.sh:L26] -- so six
-#       copies would land in common/, general/, irs/, purchase/, sales/, stock/;
-#    4. `presql2.param` would be created in the CWD;
-#    5. `cobc -m` / `-x` outputs land in the source directories.
-#
-#  Therefore /repo is mounted `:ro` and the writable copy is /build. The
-#  read-only flag is the MECHANICAL enforcement of the guarantee: an accidental
-#  write fails loudly at the first attempt instead of silently corrupting the
-#  specification. `harness/build_oracle.sh` copies /repo to /build and compiles
-#  there; `working_dir` is /build for the same reason, never /repo.
-#
+#  Any diff touching the frozen artifacts is a defect however harmless it
+#  looks. The frozen set is all COBOL under common/, general/, sales/,
+#  purchase/, irs/ and stock/, all copybooks/, the bridge programs
+#  common/*MT.scb and common/*MT.cbl, and mysql/ACASDB.sql.
+#  RUNNING THE MAINTAINER'S COMPILE SCRIPTS IN THE CHECKOUT DAMAGES IT FIVE
+#  WAYS: [common/comp-common.sh:L25] runs `presql2` over every `*MT.scb`, so it
+#  OVERWRITES the committed common/*MT.cbl; every compile passes
+#  `-T <name>.prn` and links a BARE `cobmysqlapi.o` [:L26], so listings and
+#  six object copies land in the six compile directories; `presql2.param`
+#  appears in the CWD; and `cobc -m`/`-x` outputs land beside their sources.
+#  Hence `:ro` on /repo and a writable /build -- MECHANICAL enforcement.
+
 #  EXACTLY TWO SERVICES, STRICTLY SEQUENTIAL
-#  -----------------------------------------
 #  Execution is strictly sequential, matching the single-threaded COBOL: no
 #  threads, no asyncio, no multiprocessing, no connection pooling -- and NO
 #  PARALLEL SCENARIO RUNS against the shared database. Accordingly this file
@@ -160,7 +123,7 @@
 #  No new tables, columns, indexes, constraints, views, triggers or DDL
 #  statements of any kind, and no migration tooling. The ONLY DDL in the whole
 #  harness is `mysql/ACASDB.sql`, baked into the database image verbatim by
-#  [harness/Dockerfile.mariadb:L301] and replayed by the vendor entrypoint.
+#  [harness/Dockerfile.mariadb:L441] and replayed by the vendor entrypoint.
 #  This file therefore mounts no init-SQL file and issues no schema command: a
 #  second path to the schema would be a second source of truth and would risk
 #  a non-verbatim application.
@@ -179,8 +142,8 @@
 #  service may be bolted on: a service is a choice of IMAGE, and an image is
 #  where a float-bearing library would enter. Both images this stack builds
 #  enforce the rule at BUILD time rather than trusting review --
-#  [harness/Dockerfile.gnucobol:L1077-L1084] fails the build outright if either
-#  excluded library is importable, and [harness/Dockerfile.mariadb:L385-L387]
+#  [harness/Dockerfile.gnucobol:L1294-L1301] fails the build outright if either
+#  excluded library is importable, and [harness/Dockerfile.mariadb:L557-L559]
 #  fails the build if the frozen schema carries a single FLOAT, DOUBLE or REAL
 #  token (it carries none). So the guarantee is INHERITED, not merely asserted:
 #  a third service built from some other image would step outside both
@@ -188,7 +151,6 @@
 #
 
 #  DETERMINISM
-#  -----------
 #  Two runs of the same scenario under the same pinned clock must produce
 #  byte-identical dumps. `SYSTEM-REC` carries a diff-visible `Run-Date` column
 #  [copybooks/wssystem.cob:L67], and the run date reaches the programs purely
@@ -198,31 +160,46 @@
 #  hostname injection, and no randomised credential. Every version is pinned
 #  through the two Dockerfiles, and readiness is gated on a health condition
 #  rather than on a sleep.
-#
+
 #  CREDENTIALS -- READ BEFORE USE
 #  ------------------------------
-#  The interpolation defaults below are OBVIOUS THROWAWAY PLACEHOLDERS for an
-#  ephemeral LOCAL TEST CONTAINER. They are not secrets, they are not used
-#  anywhere else, and no real credential value appears in this file, in either
-#  Dockerfile, or in any comment. The database is not published to the host by
-#  default, so it is reachable only from inside the project network.
+#  THERE ARE NO DEFAULTS. Every credential is a REQUIRED runtime variable,
+#  declared with the `${VAR:?message}` form, so compose REFUSES TO RENDER when
+#  one is unset or empty and prints the message instead of starting anything:
 #
-#  Override them by exporting the variables before invoking compose -- no .env
-#  file is created and none is required (and `.env` is git-ignored anyway):
-#
-#      export ACAS_DB_USER=... ACAS_DB_PASSWORD=... MARIADB_ROOT_PASSWORD=...
+#      export CLONE_INDEX=002
+#      export ACAS_DB_USER=acas ACAS_DB_PASSWORD=... MARIADB_ROOT_PASSWORD=...
 #      docker compose -f harness/docker-compose.yml up -d mariadb
 #
+#  WHY NO FALLBACK VALUE, NOT EVEN AN "OBVIOUSLY THROWAWAY" ONE. A fallback is
+#  what makes a misconfiguration silent: the stack starts, the database accepts
+#  the predictable account, and the operator learns nothing until a diff is
+#  already wrong. Worse, on a shared multi-clone host a predictable account is a
+#  predictable account -- every clone would provision the same one, and any
+#  process able to reach the project network could use it. `${VAR:?}` converts
+#  both failure modes into one loud, immediate, unmissable error before a single
+#  container is created. No credential literal of any kind now appears in this
+#  file, in either Dockerfile, or in any comment.
+#
+#  This deliberately DIVERGES from the local-convenience suggestion of starting
+#  "out of the box" with throwaway `${VAR:-...}` defaults. Convenience is not
+#  worth a silently mis-provisioned oracle: under R-6 this stack is the ARBITER
+#  of behaviour, so a stack that starts wrongly is more dangerous than a stack
+#  that refuses to start. No `.env` file is created and none is required (and
+#  `.env` is git-ignored anyway).
+#
+#  The database is not published to the host, so it is reachable only from
+#  inside the project network -- which is itself namespaced per clone (see
+#  CLONE ISOLATION below).
+#
 #  Both services interpolate THE SAME TWO VARIABLES for the application
-#  account, so the server side (`MARIADB_USER` / `MARIADB_PASSWORD`) and the
-#  client side (`ACAS_DB_USER` / `ACAS_DB_PASSWORD`) cannot drift apart. That
-#  matters because a server/client credential mismatch is the likeliest cause
-#  of an otherwise mysterious `harness/seed.sh` failure.
-#
-#  A HARD WIDTH LIMIT APPLIES TO WHATEVER VALUES YOU CHOOSE. The COBOL side
-#  reads its connection details from the `RDB-Data` block, whose fields are
-#  fixed-width [copybooks/wsfnctn.cob:L56-L62]:
-#
+#  account, so the server side (`MARIADB_USER`/`MARIADB_PASSWORD`) and the
+#  client side (`ACAS_DB_USER`/`ACAS_DB_PASSWORD`) cannot drift apart -- a
+#  mismatch is the likeliest cause of an otherwise mysterious seed failure.
+
+#  A HARD WIDTH LIMIT APPLIES TO WHATEVER VALUES YOU CHOOSE
+#  The COBOL side reads its connection details from the fixed-width
+#  `RDB-Data` block [copybooks/wsfnctn.cob:L56-L62]:
 #      03  RDB-Data.
 #          05  DB-Schema   pic x(12)      <- "ACASDB"   (6)
 #          05  DB-UName    pic x(12)      <- ACAS_DB_USER     MAX 12 CHARS
@@ -233,12 +210,72 @@
 #
 #  A user name or password longer than 12 characters is silently TRUNCATED into
 #  those fields and the COBOL side then fails to authenticate while the Python
-#  side succeeds -- a divergence that has nothing to do with posting logic. The
-#  defaults below are 4 and 12 characters respectively.
+#  side succeeds -- a divergence that has nothing to do with posting logic.
+#  Because there are no defaults, THE OPERATOR owns that limit: keep
+#  ACAS_DB_USER and ACAS_DB_PASSWORD to 12 characters or fewer.
+#  `harness/reset_db.sh` enforces the same 12-character ceiling on the admin
+#  account it is given, so the two agree.
+#
+#  CLONE ISOLATION -- CLONE_INDEX IS REQUIRED
+#  ------------------------------------------
+#  This host runs several checkouts of this repository side by side. Compose
+#  derives its project name from the directory name by default, and every
+#  network and named volume is then prefixed with it -- so two clones whose
+#  parent directory is `harness` would resolve to THE SAME network and THE SAME
+#  four named volumes. Two oracles sharing one `/build` volume and one database
+#  is not a slow harness, it is a WRONG one: whichever clone seeded last decides
+#  what the other clone's diff compares against, and the failure looks like a
+#  behavioural difference in the migrated code.
+#
+#  Therefore `CLONE_INDEX` is REQUIRED, exactly as it is for every other
+#  host-global resource in this workspace, and it namespaces all four kinds of
+#  name at once:
+#
+#      project   acas-harness-${CLONE_INDEX}          (top-level `name:`)
+#      network   acas-harness-${CLONE_INDEX}-net      (`networks.default.name`)
+#      volumes   acas-harness-${CLONE_INDEX}-{mariadb-data,build,data,out}
+#      container acas-harness-${CLONE_INDEX}-<service>-N  (from the project name)
+#
+#  The top-level `name:` is what makes this unforgettable: it applies to `up`,
+#  `run`, `exec`, `down` and `config` alike, whether or not the operator
+#  remembers `-p`. Each volume also carries an explicit `name:` so that the
+#  volume identity does not depend on the project name being honoured. Both are
+#  written with `${CLONE_INDEX:?...}`, so an unset value fails the render rather
+#  than silently collapsing every clone onto one shared set of resources.
 #
 #  CANONICAL INVOCATIONS
 #  ---------------------
-#  Run every command from the repository root.
+#  Run every command from the repository root, with CLONE_INDEX and the
+#  credentials exported (see CREDENTIALS and CLONE ISOLATION above).
+#
+#  ==> EVERY HARNESS SCRIPT IS INVOKED BY ABSOLUTE PATH FROM /repo. <==
+#  Not `harness/build_oracle.sh`, but `/repo/harness/build_oracle.sh`.
+#
+#  This is not a style preference, it is the only form that works. The service
+#  declares `working_dir: /build`, and `/build` is a NAMED VOLUME that starts
+#  EMPTY: the image creates the mount point but puts nothing in it, and the tree
+#  only arrives when `build_oracle.sh` copies `/repo` there. A relative
+#  `harness/build_oracle.sh` therefore resolves to `/build/harness/...`, which
+#  does not exist on a fresh stack -- or after `docker compose down -v` -- so the
+#  very first documented command of the whole protocol would fail with a
+#  file-not-found before any script could report anything useful.
+#
+#  `build_oracle.sh` says so itself. Its re-exec guard exists precisely because
+#  the relative form points into the build tree, and when it cannot recover it
+#  prescribes this exact fix [harness/build_oracle.sh:L271-L275]:
+#      "Invoke $ACAS_REPO/harness/build_oracle.sh directly."
+#  The guard can only fire once a copy already exists under `/build`; the
+#  absolute form needs no recovery because it never enters that state.
+#
+#  The same form is used for EVERY stage, not just the bootstrap, for three
+#  reasons: it works identically before and after the copy exists; `/repo` is
+#  the specification, so running its copy makes two runs of the same commit
+#  identical (R-6, the same reasoning the re-exec guard gives at
+#  [harness/build_oracle.sh:L243-L245]); and it keeps one rule to remember
+#  instead of "relative after the bootstrap, absolute before it". Running the
+#  Python tools from a read-only mount is safe because the image sets
+#  `PYTHONDONTWRITEBYTECODE=1` [harness/Dockerfile.gnucobol:L433], so no
+#  `__pycache__` write is ever attempted against `/repo`.
 #
 #  ==> USE `run --rm -T` FOR ANY NON-INTERACTIVE STAGE. <==
 #  `gnucobol` declares `tty: true` and `stdin_open: true` because the compiled
@@ -250,46 +287,97 @@
 #  Omit `-T` only when you actually want a terminal -- an interactive shell, or
 #  driving a COBOL menu by hand.
 #
+#      # the two required exports (compose refuses to render without them)
+#      export CLONE_INDEX=002
+#      export ACAS_DB_USER=acas ACAS_DB_PASSWORD=... MARIADB_ROOT_PASSWORD=...
+#
 #      # build both images
 #      docker compose -f harness/docker-compose.yml build
-#
-#      # bring the database up and wait for the schema to be applied
 #      docker compose -f harness/docker-compose.yml up -d mariadb
 #
 #      # bootstrap the oracle (steps 4-5; needs a live database)
 #      docker compose -f harness/docker-compose.yml \
-#          run --rm -T gnucobol harness/build_oracle.sh
+#          run --rm -T gnucobol /repo/harness/build_oracle.sh
 #
 #      # one full eight-stage parity cycle for a single scenario
+#      #
+#      # EVERY STAGE CARRIES THE SAME SCENARIO IDENTITY. That is the protocol,
+#      # not a convenience: a comparison is evidence only if it is bounded by
+#      # the affected-table list the scenario declares (AAP 0.8.5). Two of these
+#      # tools now REFUSE to run unbounded rather than quietly comparing
+#      # whatever happens to be on disk -- `dump_tables.py' exits 80 and
+#      # `diff_states.py' exits 2 unless a selector is given -- because an
+#      # unbounded diff has a false-pass mode that is invisible in its output:
+#      # a table absent from BOTH trees is not compared, not reported, and the
+#      # run passes with an empty diff that proves nothing (R-6).
+#      #
+#      # $N and $S are one identity in two forms: $N is the scenario NAME, which
+#      # composes the output paths, and $S is the scenario FILE, which supplies
+#      # the table list. $N must equal $S's basename without its extension --
+#      # that is what harness/run_cobol_scenario.sh derives when it is given
+#      # only the file, so a mismatch would send the dumps somewhere the diff
+#      # does not look.
 #      C="docker compose -f harness/docker-compose.yml run --rm -T gnucobol"
-#      S=harness/scenarios/clean_batch_gl.yaml
-#      $C harness/seed.sh                "$S"
-#      $C harness/run_cobol_scenario.sh  "$S"
-#      $C harness/dump_tables.py         --out /out/cobol
-#      $C harness/normalize.py           --in /out/cobol  --out /out/cobol.norm
-#      $C harness/reset_db.sh            "$S"
-#      $C harness/run_python_scenario.sh "$S"
-#      $C harness/dump_tables.py         --out /out/python
-#      $C harness/normalize.py           --in /out/python --out /out/python.norm
-#      $C harness/diff_states.py         /out/cobol.norm  /out/python.norm
+#      # The scenario definitions under harness/scenarios/ are a planned
+#      # deliverable too (AAP 0.4.1.7, eight files). Until they land, point $S at
+#      # any file carrying the keys this stage reads -- `run_cobol_scenario.sh
+#      # --help' lists them, and `affected_tables' is the one that bounds the
+#      # comparison. The eight names the protocol expects are, per AAP 0.8.5:
+#      #   clean_batch_gl  clean_batch_sl  clean_batch_pl  clean_batch_irs
+#      #   mixed_accepted_rejected  period_end_totals
+#      #   control_total_mismatch   empty_batch
+#      S=/repo/harness/scenarios/clean_batch_gl.yaml
+#      N=clean_batch_gl
+#      $C /repo/harness/seed.sh                "$S"
+#      $C /repo/harness/run_cobol_scenario.sh  "$S"
+#      $C /repo/harness/dump_tables.py  --scenario "$N" --side cobol  --scenario-file "$S"
+#      $C /repo/harness/normalize.py    --scenario "$N" --side cobol
+#      $C /repo/harness/reset_db.sh            "$S"
+#      # NOT YET IN THE TREE. `harness/run_python_scenario.sh' is a planned
+#      # deliverable (AAP 0.4.1.7) that arrives with the Python cycle it drives;
+#      # every other stage above exists and runs today. Stage 6 will fail with a
+#      # "no such file" until then, which is why it is called out here rather
+#      # than left to be discovered half way through a cycle.
+#      $C /repo/harness/run_python_scenario.sh "$S"
+#      $C /repo/harness/dump_tables.py  --scenario "$N" --side python --scenario-file "$S"
+#      $C /repo/harness/normalize.py    --scenario "$N" --side python
+#      $C /repo/harness/diff_states.py  --scenario "$N" --scenario-file "$S"
+#
+#      # THE EMPTY DIFF FROM THAT LAST COMMAND IS THE PASS CONDITION.
+#      # It is the only one. A stage that exits non-zero has not produced weaker
+#      # evidence, it has produced none: re-run from `seed.sh' rather than
+#      # carrying a partial capture forward.
+#      #
+#      # The `--scenario'/`--side' form above composes the canonical layout
+#      #     /out/<scenario>/cobol/            raw dump
+#      #     /out/<scenario>/cobol.normalized/ normalised dump
+#      # and the same for `python', which is why `normalize.py' and
+#      # `diff_states.py' need no path arguments at all -- they derive both
+#      # trees from the scenario name. Each publishing stage writes a
+#      # `_manifest.json' LAST, recording the run identity and the table list it
+#      # completed; the next stage requires it. That is what makes a truncated
+#      # capture a hard failure instead of a smaller diff. `normalize.py' and
+#      # `diff_states.py' accept `--allow-unmanifested' to override this, and
+#      # `dump_tables.py --all-in-scope' / `diff_states.py --all-tables' widen
+#      # the selection: all three are debugging aids and none of them produces
+#      # protocol evidence.
+#      #
+#      # Directory-per-side spellings (`--out /out/cobol',
+#      # `--in ... --out ...', and two positional trees for the diff) remain
+#      # accepted for ad-hoc work, but they do not carry a scenario identity, so
+#      # a selector still has to be supplied explicitly.
 #
 #      # a long-lived container for repeated stages, and an interactive shell
 #      docker compose -f harness/docker-compose.yml up -d gnucobol
 #      docker compose -f harness/docker-compose.yml exec gnucobol bash
-#
-#      # tear down; add -v to discard the named volumes as well
-#      docker compose -f harness/docker-compose.yml down
-#
+#      docker compose -f harness/docker-compose.yml down     # -v: volumes too
+
 #  OPERATOR NOTES -- FOUR TRAPS THAT LOOK LIKE A HUNG HARNESS
-#  ---------------------------------------------------------
-#  All four are properties of the frozen COBOL and are reproduced, not fixed.
-#  They are recorded here because each one presents as an unexplained hang.
-#
+#  All four are properties of the frozen COBOL, reproduced and not fixed.
 #    1. `system.dat` must already exist in $ACAS_DATA before any COBOL menu
-#       runs. [general/general.cbl:L385-L396] forces COBOL indexed processing
-#       for the system parameter file (`move "00" to FA-RDBMS-Flat-Statuses.
-#       *> Force Cobol proc.`) and, if the open fails, CALLs `sys002`, which is
-#       interactive. Seed it before driving a scenario.
+#       runs: [general/general.cbl:L385-L396] forces indexed processing of
+#       the system parameter file (`move "00" to FA-RDBMS-Flat-Statuses.
+#       *> Force Cobol proc.`) and on a failed open CALLs `sys002`.
 #    2. The accounting cycle must be non-zero. [general/general.cbl:L462-L463]
 #       is `if scycle = zero  go to call-system-setup.`, another interactive
 #       path -- so every scenario must seed a non-zero cycle.
@@ -300,78 +388,126 @@
 #    4. File-handler logging cannot be switched off. The frozen
 #       [copybooks/Test-Data-Flags.cob:L10] hardcodes `SW-Testing pic 9 value
 #       1`, so the logger writes on every DAL call and its log grows without
-#       bound during a scenario. Truncate or rotate it between runs; it lives
-#       under the writable /data volume, never in the checkout.
+#       bound during a scenario -- measured at 473 MB in about three minutes.
+#       That file is not modified (R-4), so the harness manages the log instead
+#       of the switch, and both halves are AUTOMATIC -- nothing to remember:
+#
+#         * ROTATION IS THE DEFAULT. `harness/run_cobol_scenario.sh' MOVES
+#           /data/fh-logger.txt aside before each run, to
+#           /out/run-logs/<scenario>/fh-logger.<operation>.txt.NNN -- numbered,
+#           never overwritten, so no log is ever lost, and on the /out volume
+#           rather than /data, so repeated runs do not grow the data volume.
+#           It is a move and never a truncation. `--no-rotate-fh-log' appends to
+#           the existing log instead, for one continuous log across several runs.
+#         * CAPACITY IS CHECKED FIRST. The same script refuses to start, with
+#           exit 79, unless the filesystem holding /data has ACAS_FH_LOG_BUDGET_MB
+#           free (default 1024). The check runs BEFORE the database is contacted
+#           and before a menu is spawned, because a volume that fills MID-CYCLE
+#           leaves the database half-posted and reports a write error rather than
+#           the capacity problem that caused it -- and a half-posted database is
+#           the one state this protocol cannot diff its way out of.
+#
+#       Neither the log nor its rotated copies ever enter a compared tree, so
+#       they cannot perturb a diff.
 #
 #  Two further cautions:
 #
 #    * `common/masterLD.sh` is NEVER invoked from this stack. Its own header
-#      says "THIS SCRIPT HAS NOT YET BEEN TESTED"
-#      [common/masterLD.sh:L4-L5] and it cannot execute at all -- its 24 loader
-#      lines [common/masterLD.sh:L93-L116] are written
+#      says "THIS SCRIPT HAS NOT YET BEEN TESTED" [common/masterLD.sh:L4-L5]
+#      and it cannot execute at all -- its 24 loader lines [:L93-L116] read
 #      `if [ -e X.dat ]; then YLD fi` with no `;` or newline before `fi`, so
-#      `bash -n` rejects the file outright. It is frozen and must NOT be fixed;
-#      `harness/seed.sh` reproduces its CONTRACT instead -- run the loaders from
-#      the ACAS data directory [common/masterLD.sh:L27-L28,L45] and honour the
-#      documented exit codes, 128 params unset / 64 RDB off / 16 write error,
-#      aborting on anything above 63 [common/masterLD.sh:L37-L41].
-#    * Container output must reach the operator UNALTERED. Both
-#      [common/comp-common.sh:L59] and [comp-all.sh:L44-L45] end with an
-#      unconditional `exit 0`, so neither script's exit status is a
-#      build-success signal and `harness/build_oracle.sh` must scan their
-#      captured output instead. Nothing here wraps, filters, colourises or
-#      reorders that output, and no log driver is configured.
-#
+#      `bash -n` rejects the file. It is frozen and must NOT be fixed;
+#      `harness/seed.sh` reproduces its CONTRACT instead -- run the loaders
+#      from the ACAS data directory [:L27-L28,L45] and honour the documented
+#      exit codes, 128 params unset / 64 RDB off / 16 write error, aborting on
+#      anything above 63 [:L37-L41].
+#    * Container output must reach the operator UNALTERED -- see the `gnucobol`
+#      DEFAULT COMMAND block for why, and what that forbids.
+
 #  THE GENERAL LEDGER RISK
-#  -----------------------
-#  [README.TXT:L51-L56] records the maintainer's own statement that he has not
-#  worked with General since it was migrated to the GnuCOBOL compiler ("3.2
-#  final", [README.TXT:L53]). General contributes the majority of the in-scope
-#  programs, so expected values for GL scenarios come ONLY from this oracle --
-#  never from the documentation and never from reasoning about intended
-#  behaviour. If the compiled GL cycle behaves surprisingly, the surprise is
-#  the specification.
+#  [README.TXT:L51-L54] records the maintainer's own statement that he has not
+#  worked with General since it was migrated to the GnuCobol compiler ("3.2
+#  final" appearing at [README.TXT:L53-L54]). General contributes the majority
+#  of the in-scope programs, so expected values for GL scenarios come ONLY from
+#  this oracle -- never from the documentation and never from reasoning about
+#  intended behaviour. If the compiled GL cycle behaves surprisingly, the
+#  surprise is the specification.
+
+
 # =============================================================================
+#  PROJECT NAME -- REQUIRED, AND DERIVED FROM CLONE_INDEX
+#
+#  Compose's default project name is the base name of the project directory. On
+#  this host that is the same string for every checkout of this repository, so
+#  every clone would resolve to one shared network, one shared `/build`, one
+#  shared `/data`, one shared `/out` and one shared database volume. That does
+#  not merely slow a run down -- it silently corrupts the arbitration this stack
+#  exists to perform, because whichever clone seeded last determines what the
+#  other clone's diff is compared against, and the result presents as a
+#  behavioural difference in the migrated code (AAP 0.6.6: "a non-empty diff is
+#  always a real behavioral difference and never an artefact of the comparison"
+#  -- an assertion that is only true if the comparison is isolated).
+#
+#  `${CLONE_INDEX:?...}` makes the value MANDATORY: `docker compose config`,
+#  `up`, `run`, `exec` and `down` all refuse to proceed without it rather than
+#  quietly falling back to a shared name. Declaring it here rather than relying
+#  on `-p` or COMPOSE_PROJECT_NAME is deliberate -- a flag can be forgotten on
+#  the one invocation that matters, and `down` without the same flag would then
+#  tear down a different project than the one that was started.
+#
+#  This is a fourth top-level key alongside `services`, `volumes` and
+#  `networks`; it is a Compose v2 specification key, it introduces no service,
+#  no replica and no parallelism, and it is not wall-clock or host dependent --
+#  the same CLONE_INDEX always yields the same names, which is what R-6
+#  determinism requires.
+# =============================================================================
+name: acas-harness-${CLONE_INDEX:?set CLONE_INDEX to this clone's index (e.g. 002) so the project, network and volumes are namespaced and sibling clones cannot share this oracle's state}
+
 
 services:
 
-  # ===========================================================================
   #  mariadb -- the frozen ACASDB schema, served to BOTH sides of every diff
-  # ===========================================================================
   #  One database, shared sequentially by the compiled COBOL cycle and the
   #  migrated Python cycle. Identically configured for both, which is what
   #  makes a non-empty diff a real behavioural difference rather than an
   #  artefact of the comparison.
-  # ---------------------------------------------------------------------------
   mariadb:
 
-    # -----------------------------------------------------------------------
     #  BUILD -- context is the REPOSITORY ROOT, and must be
     #
-    #  [harness/Dockerfile.mariadb:L301] is
+    #  [harness/Dockerfile.mariadb:L441] is
     #      COPY mysql/ACASDB.sql /docker-entrypoint-initdb.d/10-ACASDB.sql
-    #  which resolves only from the repository root. A `harness/` context
-    #  would fail at that COPY -- deliberately, so the contract is
-    #  self-enforcing.
-    #
+    #  which resolves only from the root, so a `harness/` context would fail
     #  The server VERSION is not chosen here: it is pinned inside the image to
-    #  `mariadb:10.11.7` [harness/Dockerfile.mariadb:L133], taken from the
-    #  frozen schema dump's own header -- [mysql/ACASDB.sql:L1] "MariaDB dump
-    #  10.19  Distrib 10.11.7-MariaDB" and [mysql/ACASDB.sql:L5] "Server
-    #  version 10.11.7-MariaDB". An arbiter that drifts is not an arbiter, so
-    #  there is no floating tag and no `image:` override here.
+    #  `mariadb:10.11.7`, taken from the frozen schema dump's own header --
+    #  [mysql/ACASDB.sql:L1] "MariaDB dump 10.19  Distrib 10.11.7-MariaDB" and
+    #  [mysql/ACASDB.sql:L5] "Server version 10.11.7-MariaDB". The image pins
+    #  that tag by CONTENT DIGEST as well, so a republished tag cannot silently
+    #  change the arbiter. An arbiter that drifts is not an arbiter, so there is
+    #  no floating tag and no `image:` override here.
     #
-    #  No `args:` are passed. The image's only build argument is the SHA-256
-    #  tripwire over the frozen schema [harness/Dockerfile.mariadb:L347];
-    #  overriding it from here would defeat the check it exists to perform.
+    #  No `args:` are passed, and there is nothing to pass: the image declares NO
+    #  build arguments at all. Its frozen-schema SHA-256 tripwire is an immutable
+    #  constant inside the RUN body rather than an `ARG`, precisely so that a
+    #  modified `mysql/ACASDB.sql` cannot be waved through with a matching
+    #  `--build-arg`. Do not reintroduce one here.
+    #
+    #  PLATFORM IS PINNED. The comparison diffs table state produced by compiled
+    #  COBOL, whose `COMP`/`BINARY-LONG` fields have an architecture-dependent
+    #  representation, and the Python closure in `requirements.txt` was resolved
+    #  as x86_64 wheels. The frozen dump's own header records the producing
+    #  server as "for Linux (x86_64)" [mysql/ACASDB.sql:L1]. Both Dockerfiles
+    #  additionally pin `FROM --platform=linux/amd64` themselves, so even a build
+    #  driven outside compose cannot produce a foreign-architecture oracle; this
+    #  key makes the run-time platform agree with the build-time one.
     # -----------------------------------------------------------------------
+    platform: linux/amd64
+
     build:
       context: ..
       dockerfile: harness/Dockerfile.mariadb
 
-    # -----------------------------------------------------------------------
     #  ENVIRONMENT
-    #
     #  MARIADB_DATABASE is NOT interpolated. `ACASDB` is repository evidence
     #  [mysql/ACASDB.sql:L3] ("Host: localhost    Database: ACASDB"), not an
     #  operator preference, and it is load-bearing: the frozen dump contains
@@ -379,48 +515,172 @@ services:
     #  The target schema must therefore already exist AND be selected before
     #  the dump is replayed, which the vendor entrypoint does only when this
     #  variable is set. It matches the image default
-    #  [harness/Dockerfile.mariadb:L287] exactly -- the two must never diverge.
+    #  [harness/Dockerfile.mariadb:L427] exactly -- the two must never diverge.
     #
-    #  The three credential values ARE interpolated, with obvious throwaway
-    #  placeholders for an ephemeral local test container; see the CREDENTIALS
-    #  section in the file header. MARIADB_USER and MARIADB_PASSWORD read the
-    #  SAME variables the `gnucobol` service reads for ACAS_DB_USER and
+    #  The three credential values are REQUIRED runtime variables, written with
+    #  `${VAR:?message}`: unset or empty and compose refuses to render, naming
+    #  the variable it wants. There is NO fallback -- see the CREDENTIALS
+    #  section in the file header for why a convenient default is the wrong
+    #  trade for an arbiter. MARIADB_USER and MARIADB_PASSWORD read the SAME two
+    #  variables the `gnucobol` service reads for ACAS_DB_USER and
     #  ACAS_DB_PASSWORD, so the server-side and client-side halves of the
     #  account cannot drift apart.
     #
     #  Width limits from [copybooks/wsfnctn.cob:L56-L62] apply to the
-    #  application account only: DB-UName and DB-UPass are `pic x(12)`, so the
-    #  defaults are 4 and 12 characters. MARIADB_ROOT_PASSWORD is exempt from
-    #  that limit because the root account never enters the COBOL `RDB-Data`
-    #  block -- it is used only by the harness shell tooling (for the DROP and
-    #  re-apply that `harness/reset_db.sh` performs).
+    #  application account only: DB-UName and DB-UPass are `pic x(12)`, so
+    #  ACAS_DB_USER and ACAS_DB_PASSWORD must be 12 characters or fewer.
+    #  MARIADB_ROOT_PASSWORD is exempt from that limit because the root account
+    #  never enters the COBOL `RDB-Data` block -- it is used only by the harness
+    #  shell tooling (for the DROP and re-apply that `harness/reset_db.sh`
+    #  performs).
     #
-    #  An EXPLICIT root password is set, rather than asking the image to
-    #  generate one or permitting an empty one. A generated value would differ
-    #  between runs, and nothing about this stack may vary from one run to the
-    #  next; an empty one would leave the account unprotected the moment
-    #  someone adds a port mapping.
+    #  A root password is REQUIRED rather than generated by the image or left
+    #  empty. A generated value would differ between runs, and nothing about
+    #  this stack may vary from one run to the next; an empty one would leave
+    #  the account unprotected the moment someone adds a port mapping. Demanding
+    #  it also means the operator, not this file, chooses it -- which is why no
+    #  literal remains here to be copied into a real deployment.
+    #
+    #  WHY NOT EVEN AN "OBVIOUSLY THROWAWAY" DEFAULT. Three reasons an "it is
+    #  only a local fixture" argument does not answer:
+    #
+    #    1. A committed default IS a credential in version control. Anyone who
+    #       reads the repository knows it, and the value survives in git history
+    #       even after it is changed.
+    #    2. A default is silently INHERITED. The moment someone adds a port
+    #       mapping -- which the NO PUBLISHED PORT block below explains how to do
+    #       -- a known-password database is exposed, and the protection then
+    #       rests on a second, unrelated decision rather than on this file.
+    #    3. It trains the wrong habit: a fixture that needs no credential
+    #       management is the fixture people copy into something that matters.
+    #
+    #  Failing closed costs one export each:
+    #
+    #      export MARIADB_ROOT_PASSWORD="$(openssl rand -base64 24)"
+    #      export ACAS_DB_USER=acas                   # the account the loaders expect
+    #      export ACAS_DB_PASSWORD=AcasPass1          # MAX 12 CHARS, see above
+    #      docker compose -f harness/docker-compose.yml up -d mariadb
+    #
+    #  AND WHY THE 12-CHARACTER CEILING IS NOT COSMETIC. A longer application
+    #  password is silently TRUNCATED into `DB-UPass`, after which the COBOL side
+    #  fails to authenticate while the Python side succeeds -- a divergence with
+    #  nothing to do with posting logic, and one that would be diagnosed as a
+    #  parity defect.
     #
     #  AUTOCOMMIT IS DELIBERATELY ABSENT HERE. It is configured server-wide
-    #  inside the image, at /etc/mysql/conf.d/99-acas-oracle.cnf
-    #  [harness/Dockerfile.mariadb:L231-L258], because the loader family
-    #  requires it -- [common/glbatchLD.cbl:L9-L13], verbatim: "This modules
-    #  uses commit and rollback so you MUST ensure that autocommit is OFF in
-    #  the rdb settings. It is as default set ON." It is NOT restated here as
-    #  a `command:` flag: one authority only. `harness/seed.sh` asserts the
-    #  setting before it loads anything, so a silent regression is caught.
+    #  inside the image, at /etc/mysql/conf.d/99-acas-oracle.cnf, which pins
+    #  `autocommit=1`. That is not a convenience: the frozen COBOL never
+    #  reaches a COMMIT -- in the 28 load programs every
+    #  `perform aa020-Rollback` is commented out and `aa030-Commit` has no
+    #  perform site at all, and the twenty in-scope bridges contain no
+    #  COMMIT / ROLLBACK / START TRANSACTION -- so with autocommit off every
+    #  COBOL write would be discarded at session close while the Python side,
+    #  which commits, kept its rows. The maintainer reaches the same conclusion
+    #  at [common/analLD.cbl:L442]: "These do not work during testing with
+    #  mariadb - Non transactional model or autocommit set ON." The setting is
+    #  NOT restated here as a `command:` flag: one authority only.
+    #  `harness/seed.sh`, `harness/reset_db.sh` and
+    #  `harness/run_cobol_scenario.sh` each ASSERT it before doing work, so a
+    #  silent regression is caught.
     # -----------------------------------------------------------------------
+    #  CREDENTIALS ARE REQUIRED, NOT DEFAULTED.
+    #
+    #  Both passwords use the `:?' form, so Compose REFUSES to render this file
+    #  when either is unset and prints the message after the `?'. There is no
+    #  fallback value, deliberately:
+    #
+    #    * A literal fallback is a real credential the moment anyone publishes a
+    #      port or attaches another container to this network -- and it is a
+    #      credential that is committed, identical on every machine, and easy to
+    #      forget is in force, because the stack comes up without complaint.
+    #    * Failing to render is the safe direction. An operator who has not set
+    #      the variables gets an actionable message before anything starts; an
+    #      operator who has set them is unaffected.
+    #
+    #  Generate a run-local pair once per shell -- note the 12-character limit on
+    #  the APPLICATION account, which is not arbitrary:
+    #  [copybooks/wsfnctn.cob:L57-L64] declares DB-UName and DB-UPass as
+    #  PIC X(12), so a longer secret is silently TRUNCATED by the COBOL side
+    #  while the Python side sends it whole, and the two cycles then
+    #  authenticate differently. MARIADB_ROOT_PASSWORD is exempt, for the reason
+    #  given in the block above -- root never enters the `RDB-Data' group:
+    #
+    #      export MARIADB_ROOT_PASSWORD="$(openssl rand -base64 24)"
+    #      export ACAS_DB_PASSWORD="$(openssl rand -base64 12 | tr -dc 'A-Za-z0-9' | cut -c1-12)"
+    #      export ACAS_DB_USER=acas
+    #
+    #  ACAS_DB_USER uses the `:?' form as well, even though it is not a secret.
+    #  `acas' is the account name the frozen `common/*LD' loaders and the seeded
+    #  `~/ACAS/acas.param' expect, so a silent default would hide the one
+    #  mistake that matters here -- a stack provisioned under one account name
+    #  while the loaders authenticate as another -- behind a stack that came up
+    #  without complaint. It still has to fit the same X(12) field, and the
+    #  message after the `?' names the value to export.
     environment:
       MARIADB_DATABASE: ACASDB
-      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-root-not-a-secret}
-      MARIADB_USER: ${ACAS_DB_USER:-acas}
-      MARIADB_PASSWORD: ${ACAS_DB_PASSWORD:-not-a-secret}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?export MARIADB_ROOT_PASSWORD before starting the stack; the harness will not provision a predictable administrative account, because a committed fallback becomes a real credential as soon as a port is published. Example - export MARIADB_ROOT_PASSWORD="$(openssl rand -base64 24)"}
+      MARIADB_USER: ${ACAS_DB_USER:?export ACAS_DB_USER before starting the stack - use `acas`, the account the frozen `common/*LD` loaders and `~/ACAS/acas.param` expect; 12 characters or fewer, per DB-UName pic x(12) at copybooks/wsfnctn.cob. The gnucobol service reads the SAME variable, so one value serves both halves of the account and they cannot drift apart}
+      MARIADB_PASSWORD: ${ACAS_DB_PASSWORD:?export ACAS_DB_PASSWORD before starting the stack; 12 characters or fewer, per DB-UPass pic x(12) at [copybooks/wsfnctn.cob:L57-L64] - a longer value is silently truncated by the COBOL side while the Python side sends it whole, so the two cycles would authenticate differently. See the CREDENTIALS block above for a one-line generator}
 
     # -----------------------------------------------------------------------
-    #  READINESS -- the gate the whole protocol depends on
+    #  PRIVILEGE RESTRICTION
     #
+    #  There is deliberately NO `user:` key. The vendor entrypoint performs its
+    #  OWN privilege drop -- it starts as root, fixes the data directory if
+    #  needed, then re-executes under the unprivileged `mysql` account. Forcing
+    #  `user: mysql` pre-empts that and breaks first boot on any data directory
+    #  the container does not already own. The server therefore ends up
+    #  unprivileged either way; what is constrained here is what the BRIEFLY
+    #  root entrypoint is permitted to do.
+    #
+    #  The capability set is MEASURED, not guessed. Probed against a fresh
+    #  named volume on this stack:
+    #
+    #      SETGID + SETUID only ............. healthy
+    #      + CHOWN, DAC_OVERRIDE, FOWNER .... healthy
+    #      ALL dropped, nothing added ....... FAILS, and says exactly why:
+    #          "Switching to dedicated user 'mysql'"
+    #          "error: failed switching to \"mysql\": operation not permitted"
+    #
+    #  SETGID and SETUID are the irreducible pair -- the privilege drop itself
+    #  consumes them. CHOWN, DAC_OVERRIDE and FOWNER are kept on top because the
+    #  entrypoint chowns the data directory when it does not already own it: a
+    #  fresh NAMED volume inherits ownership from the image and does not need
+    #  them, but a host bind mount does, and failing there would be a fixture
+    #  trap rather than a security gain.
+    #
+    #  Everything else the default set grants is dropped and nothing else is
+    #  added back -- notably NET_RAW, NET_BIND_SERVICE, NET_ADMIN, MKNOD,
+    #  SYS_CHROOT, KILL and AUDIT_WRITE. After the entrypoint's drop the server
+    #  process holds `CapEff: 0000000000000000`, verified in the same probe.
+    #
+    #  `no-new-privileges:true` prevents any set-user-ID binary from raising
+    #  privilege, independently of the capability set.
+    #  [harness/Dockerfile.mariadb] additionally clears the set-user-ID bits at
+    #  build time; the two controls fail separately, so both are kept.
+    #
+    #  `read_only: true` is NOT set. MariaDB writes its data directory, socket,
+    #  pid file and temporary files, and reproducing all of those as tmpfs
+    #  mounts would add fixture complexity for no benefit here, where the data
+    #  directory must be writable by definition.
+    # -----------------------------------------------------------------------
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
+      - FOWNER
+    security_opt:
+      - no-new-privileges:true
+
+    networks:
+      - acas_oracle
+
+    #  READINESS -- the gate the whole protocol depends on
     #  The command is BYTE-IDENTICAL to the image's own probe at
-    #  [harness/Dockerfile.mariadb:L438-L439], restated here for two reasons:
+    #  [harness/Dockerfile.mariadb:L610-L611], restated here for two reasons:
     #  so that a reader of this file alone can see that the
     #  `condition: service_healthy` gate below is backed by a real probe, and
     #  so the start period can be widened for a first boot that replays a
@@ -428,20 +688,11 @@ services:
     #  test itself must never diverge from the image's.
     #
     #  The probe is strictly READ-ONLY: the vendor `healthcheck.sh` writes
-    #  nothing and touches no table. `--connect` runs `select 1` and
-    #  `--innodb_initialized` reads engine status; `--su-mysql` runs both as
-    #  the `mysql` unix user, so NO credential is required and none is
-    #  embedded.
-    #
-    #  It is also a genuine schema gate, not merely a liveness check:
-    #  `--connect` probes over TCP while the entrypoint's temporary
-    #  initialisation server runs with `--skip-networking`, so the container
-    #  cannot report healthy until every /docker-entrypoint-initdb.d/ script
-    #  has finished. "Healthy" therefore means "the frozen schema is applied".
-    #
-    #  All values are fixed constants -- nothing here varies between the COBOL
-    #  run and the Python run.
-    # -----------------------------------------------------------------------
+    #  nothing. `--connect` runs `select 1`, `--innodb_initialized` reads
+    #  engine status, `--su-mysql` runs both as the `mysql` unix user, so NO
+    #  credential is needed or embedded. It is also a genuine SCHEMA gate:
+    #  `--connect` probes over TCP while the entrypoint's init server runs
+    #  `--skip-networking`, so "healthy" means "the frozen schema is applied".
     healthcheck:
       #  Block sequence rather than a flow sequence purely so the line stays
       #  within a conventional width; the argument vector is byte-for-byte the
@@ -458,84 +709,96 @@ services:
       start_period: 60s
       retries: 24
 
-    # -----------------------------------------------------------------------
     #  STORAGE -- a NAMED volume for the vendor data directory
-    #
     #  /var/lib/mysql is the vendor default and is not relocated. A named
     #  volume, never a host bind mount, so nothing leaks into the checkout and
-    #  so the two reset mechanisms stay distinct:
-    #
-    #      harness/reset_db.sh          per-scenario reset -- DROP, re-apply
-    #                                   the frozen schema, re-seed. The volume
-    #                                   survives, so the image's init scripts
-    #                                   are not re-run.
-    #      docker compose down -v       clean slate -- discards the volume, so
-    #                                   the next `up` re-applies the schema
-    #                                   from the image.
-    #
+    #  the two reset mechanisms stay distinct -- see NAMED VOLUMES at the foot
+    #  of this file for the full contrast between `harness/reset_db.sh` and
+    #  `docker compose down -v`.
     #  Deliberately NO init-SQL mount. The schema is baked into the image
-    #  verbatim by [harness/Dockerfile.mariadb:L301]; a second path to it
+    #  verbatim by [harness/Dockerfile.mariadb:L441]; a second path to it
     #  would be a second source of truth and would risk a non-verbatim
     #  application.
     # -----------------------------------------------------------------------
     volumes:
       - acas_mariadb_data:/var/lib/mysql
 
-    # -----------------------------------------------------------------------
     #  NO PUBLISHED PORT
-    #
     #  The server listens on 3306 inside the project network -- the image
-    #  declares `EXPOSE 3306` [harness/Dockerfile.mariadb:L412] -- and
+    #  declares `EXPOSE 3306` [harness/Dockerfile.mariadb:L584] -- and
     #  `gnucobol` reaches it at hostname `mariadb`. Nothing is published to
     #  the host: it is unnecessary, and binding 3306 would clash with any
     #  MariaDB already running there. Keeping it unpublished also means this
     #  throwaway-credentialled server is not reachable from outside the
     #  project network.
-    #
     #  If you genuinely need host access for ad-hoc inspection, add a compose
     #  OVERRIDE file with a non-default host port rather than editing this
     #  file:
     #      docker compose -f harness/docker-compose.yml -f my-ports.yml up -d
-    # -----------------------------------------------------------------------
 
-    # -----------------------------------------------------------------------
     #  LIFECYCLE
-    #
     #  `restart: "no"` -- quoted, because a bare `no` is a YAML boolean. This
     #  is a test fixture: a silent restart would mask a failure the parity
     #  evidence depends on seeing, and would re-enter the entrypoint's
     #  initialisation path. Restarts are idempotent by design
-    #  [harness/Dockerfile.mariadb:L450-L452] -- with an existing data
+    #  [harness/Dockerfile.mariadb:L622-L624] -- with an existing data
     #  directory the init scripts are skipped -- but a fixture that restarts
     #  itself is a fixture that hides evidence.
-    #
     #  ENTRYPOINT and CMD are inherited, never overridden: the vendor
     #  entrypoint is what creates and selects ACASDB and replays the frozen
-    #  schema [harness/Dockerfile.mariadb:L442-L453].
+    #  schema [harness/Dockerfile.mariadb:L614-L625].
     # -----------------------------------------------------------------------
     restart: "no"
 
+    # -----------------------------------------------------------------------
+    #  RESOURCE BOUNDS -- a fixture must not be able to destabilise the host
+    #
+    #  This host runs several clones of this repository at once, so an unbounded
+    #  fixture is not only a local hazard: exhausting memory or CPU here makes
+    #  ANOTHER clone's oracle run slowly, time out, or be OOM-killed midway
+    #  through a scenario, and a half-written database is exactly the state that
+    #  produces a diff which looks behavioural but is not.
+    #
+    #  Non-swarm keys are used deliberately. `deploy.resources` is a swarm-mode
+    #  construct, and `deploy` is the same block that carries `replicas` -- which
+    #  R-3 forbids outright ("Execution is strictly sequential"). `cpus`,
+    #  `mem_limit`, `mem_reservation` and `pids_limit` are honoured directly by
+    #  `docker compose up` on this cgroup v2 host, and none of them can express
+    #  parallelism.
+    #
+    #  The values are FIXED CONSTANTS, not derived from the host's core count or
+    #  memory: a bound that varied per machine would make the arbiter's execution
+    #  environment a property of the machine, and R-6 requires the opposite.
+    #  MariaDB 10.11's default InnoDB buffer pool is 128 MiB, so 2 GiB is
+    #  generous for a 33-table schema whose scenarios are measured in rows rather
+    #  than gigabytes; 512 MiB is reserved so the server is not the first process
+    #  reclaimed under pressure. `pids_limit` bounds a thread-per-connection
+    #  server that this stack gives at most a handful of sequential clients.
+    #
+    #  Raise them by editing this file in a reviewable commit -- deliberately not
+    #  interpolated, so that two clones cannot be given different bounds and then
+    #  compared.
+    # -----------------------------------------------------------------------
+    cpus: 2.0
+    mem_limit: 2g
+    mem_reservation: 512m
+    pids_limit: 512
+
   # ===========================================================================
   #  gnucobol -- the builder and the runner for BOTH cycles
-  # ===========================================================================
   #  Carries the maintainer's exact COBOL toolchain and CPython 3.12 with the
   #  repository's exactly pinned dependencies, so `build_oracle.sh`, `seed.sh`,
   #  `reset_db.sh`, both scenario runners, `dump_tables.py`, `normalize.py` and
   #  `diff_states.py` all execute in one place against one database.
-  #
   #  This is the second and LAST service. Nothing else is added: the Python
   #  side runs here, which is why the plan specifies two services, not three.
-  # ---------------------------------------------------------------------------
   gnucobol:
 
-    # -----------------------------------------------------------------------
     #  BUILD -- context is the REPOSITORY ROOT, and must be
-    #
     #  [harness/Dockerfile.gnucobol] copies three artifacts that resolve only
-    #  from the repository root: `requirements.txt` [L1058],
-    #  `presql2-latest.zip` [L817] and `mariadb-connector-c-3.3.4-src.zip`
-    #  [L486]. A `harness/` context would fail at the first COPY.
-    #
+    #  from the repository root: `requirements.txt` [:L540],
+    #  `presql2-latest.zip` [:L361] and `mariadb-connector-c-3.3.4-src.zip`
+    #  [:L209]. A `harness/` context would fail at the first COPY.
     #  Versions are pinned inside the image, not chosen here: GnuCOBOL 3.2
     #  final (the compiler the maintainer targets, [common/comp-common.sh:L9]
     #  and [README.TXT:L53]) with a SHA-256 pinned tarball, MariaDB
@@ -543,49 +806,63 @@ services:
     #  archives. No `args:` are overridden from here -- re-pinning a version
     #  would change the arbiter.
     #
+    #  AND OVERRIDING THEM FROM HERE WOULD NOT WORK EVEN IF SOMEONE TRIED. The
+    #  image declares its pins as ARGs for readability but GATES every one of
+    #  them against a hard-coded literal in its first RUN step, so a
+    #  `--build-arg` or an `args:` block that changed the compiler version, the
+    #  tarball digest, the connector, the translator, the `/usr/local/mysql`
+    #  prefix or the apt snapshot fails the build with a message naming the
+    #  offending pin. The base image is pinned by content digest, and every apt
+    #  package is resolved from an immutable archive snapshot at an exact
+    #  version, so the same repository revision yields the same oracle.
+    #
+    #  PLATFORM IS PINNED, for the reasons given in full on the `mariadb`
+    #  service above: COBOL `COMP`/`BINARY-LONG` representation is
+    #  architecture-dependent, and the Python closure is x86_64. The Dockerfile
+    #  pins `FROM --platform=linux/amd64` independently.
+    #
     #  The image performs bootstrap steps 1-3 at build time (unpack presql2,
     #  compile `cobmysqlapi.o`, install the translator). Steps 4-5 belong to
     #  `harness/build_oracle.sh` at run time, because they need a live
     #  database and a writable copy of the checkout.
     # -----------------------------------------------------------------------
+    platform: linux/amd64
+
     build:
       context: ..
       dockerfile: harness/Dockerfile.gnucobol
 
-    # -----------------------------------------------------------------------
     #  MOUNTS -- THE MOST IMPORTANT FOUR LINES IN THIS FILE
-    #
-    #  /repo   THE CHECKOUT, MOUNTED READ-ONLY. This is not defensive styling;
-    #          it is the mechanical enforcement of the frozen-artifact
-    #          guarantee. The header lists the five ways a build run inside the
-    #          checkout would dirty it -- foremost
-    #          [common/comp-common.sh:L25], which runs `presql2` over every
-    #          `*MT.scb` and so OVERWRITES the committed, frozen
-    #          `common/*MT.cbl`. With `:ro` the first such write fails loudly
-    #          instead of silently corrupting the specification.
-    #
-    #  /build  a WRITABLE, container-local copy of the tree.
-    #          `harness/build_oracle.sh` copies /repo here and compiles here,
-    #          so the regenerated `*MT.cbl`, the `.prn` listings, the six
-    #          copies of `cobmysqlapi.o`, `presql2.param`, the `.so` modules
-    #          and the menu executables all land here and never in the
-    #          checkout.
-    #
-    #  /data   the ACAS data directory: the COBOL indexed files, the flat seed
-    #          files the `*LD` loaders read, and the file-handler log. This is
-    #          the container's analogue of the `cd ~/ACAS` the maintainer's own
-    #          seeding script performs [common/masterLD.sh:L45], which his
-    #          header makes a hard requirement -- "This script MUST be run from
-    #          the ACAS data directory" [common/masterLD.sh:L27-L28].
-    #
+    #  /repo   THE CHECKOUT, READ-ONLY. Mechanical enforcement of the
+    #          frozen-artifact guarantee, not defensive styling: the header
+    #          lists the five ways a build run inside the checkout would dirty
+    #          it, foremost [common/comp-common.sh:L25], which runs `presql2`
+    #          over every `*MT.scb` and OVERWRITES the frozen `common/*MT.cbl`.
+    #  /build  a WRITABLE container-local copy; `build_oracle.sh` copies /repo
+    #          here and compiles here, so every generated artifact lands here.
+    #  /data   the ACAS data directory -- indexed files, the flat seed files
+    #          the `*LD` loaders read, and the file-handler log. It mirrors
+    #          of the `cd ~/ACAS` at [common/masterLD.sh:L45], which his header
+    #          makes a hard requirement [:L27-L28].
+
     #  /out    dumps, normalised dumps and diff evidence (stages 3, 4, 7, 8).
-    #
     #  /build, /data and /out are NAMED VOLUMES, never host bind mounts: the
     #  container-local tree cannot leak back onto the host, and
     #  `docker compose down -v` gives a genuine clean slate. All four mount
     #  points already exist in the image
-    #  [harness/Dockerfile.gnucobol:L1120-L1123], so nothing is created by
+    #  [harness/Dockerfile.gnucobol:L1405-L1439], so nothing is created by
     #  side effect at first mount.
+    #
+    #  THAT PRE-EXISTENCE IS LOAD-BEARING, NOT TIDINESS. The image runs as the
+    #  unprivileged `acas` account (1001:1001) and owns /build, /data and /out
+    #  to it. Docker populates a fresh named volume FROM the image path it is
+    #  mounted over, ownership included, so each volume comes up acas-owned and
+    #  the runtime can write it on the first boot -- no `user:` override, no
+    #  entrypoint chown, no privileged step. Had the image left these paths
+    #  root-owned, the volumes would inherit root and every write by the
+    #  unprivileged runtime would fail. `/repo` is deliberately the opposite:
+    #  root-owned in the image and mounted `:ro` here, so the frozen checkout is
+    #  unwritable twice over.
     # -----------------------------------------------------------------------
     volumes:
       - ../:/repo:ro
@@ -593,14 +870,12 @@ services:
       - acas_data:/data
       - acas_out:/out
 
-    # -----------------------------------------------------------------------
     #  ENVIRONMENT -- the canonical ACAS_* contract
-    #
     #  Every harness script reads this one contract. What compose declares is
     #  what COMPOSE OWNS: the mount topology, the database endpoint, the
-    #  credentials, and the terminal geometry. The values are restated here
+    #  credentials and the terminal geometry. The values are restated here
     #  IDENTICALLY to the image's own ENV block
-    #  [harness/Dockerfile.gnucobol:L1241-L1261] so that `docker run` and
+    #  [harness/Dockerfile.gnucobol:L1557-L1577] so that `docker run` and
     #  `docker compose` behave the same; any change must be made in both
     #  places.
     #
@@ -620,11 +895,17 @@ services:
     #  which means "connect over TCP"; it is quoted rather than left blank
     #  because a bare key in compose means "inherit from the operator's shell",
     #  which would make the routing depend on the ambient environment.
-    #  ACAS_DB_USER and ACAS_DB_PASSWORD are the same two interpolated
-    #  variables the `mariadb` service uses for MARIADB_USER and
-    #  MARIADB_PASSWORD, so the two halves of the account cannot drift apart.
-    #  Both stay within `DB-UName`/`DB-UPass` `pic x(12)`
-    #  [copybooks/wsfnctn.cob:L56-L62].
+    #  ACAS_DB_USER and ACAS_DB_PASSWORD are the same two REQUIRED variables the
+    #  `mariadb` service uses for MARIADB_USER and MARIADB_PASSWORD, so the two
+    #  halves of the account cannot drift apart. Both use the `${VAR:?message}`
+    #  form: there is no fallback, and an unset or empty value fails the render
+    #  rather than provisioning a predictable account. The operator must keep
+    #  each within `DB-UName`/`DB-UPass` `pic x(12)`
+    #  [copybooks/wsfnctn.cob:L56-L62]; anything longer is silently truncated
+    #  into those fields and the COBOL side then fails to authenticate while the
+    #  Python side succeeds. The PASSWORD reaches the COBOL programs the same way
+    #  it reaches the Python side -- through the environment, never through argv
+    #  -- which is why it is declared here and nowhere else.
     #
     #  PATHS. ACAS_REPO / ACAS_BUILD / ACAS_DATA / ACAS_OUT name the four
     #  mounts above. ACAS_BIN is where the menus look for a backup script:
@@ -639,24 +920,20 @@ services:
     #  ACAS_BIN from the environment and, if EITHER is blank, displays a
     #  message, waits on an ACCEPT and stops -- which in a harness presents as
     #  a hang. It must also be ABSOLUTE with no trailing delimiter, because
-    #  [copybooks/Proc-Get-Env-Set-Files.cob:L30-L31] derives the platform
-    #  delimiter from its first character and then prefixes every file name
-    #  with ACAS_LEDGERS + that delimiter. It is set to the ACAS data
-    #  directory, /data, which is exactly the directory the loaders require.
-    #
-    #  COBOL COMPILE/RUN PATHS. COBCPY and COB_COPY_DIR mirror
-    #  [comp-all.sh:L9-L10], which exports them itself as the RELATIVE
-    #  `../copybooks` -- correct while the frozen scripts are cd'd into a
-    #  ledger directory. The absolute value here is compatible with that and
-    #  additionally makes ad-hoc `cobc` use work from any directory; the frozen
-    #  scripts still win inside their own run because they export their own
-    #  value. COB_LIBRARY_PATH lists the SIX compile directories in the
-    #  maintainer's own order [comp-all.sh:L15-L32] -- common, general, irs,
-    #  purchase, sales, stock -- so that `cobc -m` modules resolve at run time,
-    #  followed by GnuCOBOL's own module directory, which is line 1 of
-    #  [etc/ld.so.conf.d/gnucobol.conf]. `build_oracle.sh` and both runners
-    #  extend it rather than replacing it.
-    #
+    #  [:L30-L31] derives the platform delimiter from its first character and
+    #  then prefixes every file name with ACAS_LEDGERS plus that delimiter. It
+    #  is /data, which is exactly the directory the loaders require.
+    #  COBOL PATHS. COBCPY and COB_COPY_DIR mirror [comp-all.sh:L9-L10], which
+    #  exports them itself as the RELATIVE `../copybooks`; the absolute value
+    #  here is compatible and additionally makes ad-hoc `cobc` work from any
+    #  directory, while the frozen scripts still win inside their own run.
+
+    #  COB_LIBRARY_PATH lists the SIX compile directories in the maintainer's
+    #  own order [comp-all.sh:L15-L32] -- common, general, irs, purchase,
+    #  sales, stock -- so `cobc -m` modules resolve at run time, followed by
+    #  GnuCOBOL's own module directory, line 1 of
+    #  [etc/ld.so.conf.d/gnucobol.conf].
+    #  `build_oracle.sh` and both runners extend it rather than replacing it.
     #  TERMINAL GEOMETRY IS A HARD GATE, NOT A NICETY.
     #  [general/general.cbl:L374-L383] refuses to run on a small terminal:
     #
@@ -676,13 +953,74 @@ services:
     #  24x80, because curses reads the real window size in preference to these
     #  values.
     # -----------------------------------------------------------------------
+    #  THE FOUR HARNESS SCRIPTS FAIL CLOSED, SO THIS BLOCK MUST OPT THEM IN
+    #  -------------------------------------------------------------------
+    #  `build_oracle.sh`, `seed.sh`, `reset_db.sh` and `run_cobol_scenario.sh`
+    #  all refuse unsafe operations by default. Three of those refusals apply to
+    #  this stack, so the corresponding declarations are made here explicitly --
+    #  each one a deliberate, documented statement about THIS environment rather
+    #  than a blanket suppression:
+    #
+    #    ACAS_DB_ALLOW_PLAINTEXT
+    #        All four scripts require verified-CA, hostname-checked TLS for any
+    #        NON-LOCAL TCP target. `mariadb` is a container hostname, not
+    #        loopback, so without this declaration every one of them refuses the
+    #        connection -- correctly, because it cannot tell an isolated fixture
+    #        network apart from a real remote database.
+    #
+    #        The declaration is honest HERE and would not be elsewhere: this
+    #        server has no TLS material, is NOT published to the host (see NO
+    #        PUBLISHED PORT), and is reachable only on the project-internal
+    #        network declared below. The traffic never leaves the Docker bridge.
+    #        If you ever publish the port or point the harness at a real server,
+    #        REMOVE this line and supply ACAS_DB_TLS_CA instead -- the scripts
+    #        will then verify the certificate chain and the hostname.
+    #
+    #    ACAS_DB_ADMIN_USER / ACAS_DB_ADMIN_PASSWORD
+    #        `reset_db.sh` GATE 1 requires a DISTINCT administrative account for
+    #        the destructive drop-and-re-apply, and refuses outright if it equals
+    #        ACAS_DB_USER -- there is no fallback. The root account is the right
+    #        one and is what that script's own usage text contemplates for
+    #        exactly this operation. It is exempt from the 12-character limit
+    #        because it never enters the COBOL `RDB-Data` block.
+    #
+    #        Privilege separation is the point: the application account that
+    #        seeds and posts does NOT hold the rights to drop the schema, so a
+    #        defect in a posting path cannot destroy the comparison baseline.
+    #
+    #    ACAS_RESET_CONSENT
+    #        `reset_db.sh` GATE 2 requires a target-scoped consent token equal to
+    #        exactly `DESTROY <schema>@<host>:<port>`. It is set here because
+    #        destroying and rebuilding this throwaway schema IS the documented
+    #        stage 5 of the eight-stage protocol. Because the token embeds the
+    #        target, it cannot be copied to another host or schema and still
+    #        match -- which is what makes granting it here safe.
+    #
+    #  ACAS_DB_ALLOWED_SCHEMAS is NOT set: `ACASDB` is already on the scripts'
+    #  default disposable-schema allow-list.
+    # -----------------------------------------------------------------------
     environment:
       ACAS_DB_HOST: mariadb
       ACAS_DB_PORT: "3306"
       ACAS_DB_NAME: ACASDB
-      ACAS_DB_USER: ${ACAS_DB_USER:-acas}
-      ACAS_DB_PASSWORD: ${ACAS_DB_PASSWORD:-not-a-secret}
+      #  Both are the SAME required variables the mariadb service reads, so the
+      #  server-side and client-side halves of the account can never drift
+      #  apart: one value, referenced twice. Neither has a fallback -- see the
+      #  CREDENTIALS block on the mariadb service for why, and for the
+      #  generator.
+      ACAS_DB_USER: ${ACAS_DB_USER:?export ACAS_DB_USER before starting the stack - use `acas`, the account the frozen `common/*LD` loaders and `~/ACAS/acas.param` expect; 12 characters or fewer, per DB-UName pic x(12) at copybooks/wsfnctn.cob}
+      ACAS_DB_PASSWORD: ${ACAS_DB_PASSWORD:?export ACAS_DB_PASSWORD before starting the stack; 12 characters or fewer, per DB-UPass pic x(12) at copybooks/wsfnctn.cob - a longer value is silently truncated. This is the same value the mariadb service provisions}
       ACAS_DB_SOCKET: ""
+      #  Privilege separation for reset_db.sh GATE 1 -- MUST differ from
+      #  ACAS_DB_USER, and the script refuses to run if it does not.
+      ACAS_DB_ADMIN_USER: root
+      ACAS_DB_ADMIN_PASSWORD: ${MARIADB_ROOT_PASSWORD:?set MARIADB_ROOT_PASSWORD before invoking compose - reset_db.sh GATE 1 requires an administrative account distinct from ACAS_DB_USER}
+      #  reset_db.sh GATE 2 -- the token is target-scoped, so it cannot be
+      #  reused against a different schema, host or port.
+      ACAS_RESET_CONSENT: DESTROY ACASDB@mariadb:3306
+      #  Isolated-fixture transport declaration; see the block above before
+      #  copying this line anywhere else.
+      ACAS_DB_ALLOW_PLAINTEXT: "1"
       ACAS_REPO: /repo
       ACAS_BUILD: /build
       ACAS_DATA: /data
@@ -692,98 +1030,104 @@ services:
       COBCPY: /build/copybooks
       COB_COPY_DIR: /build/copybooks
       #  The next line is IRREDUCIBLY long and is deliberately not wrapped: a
-      #  colon-delimited search path cannot be split in YAML, because both plain
-      #  and folded multi-line scalars rejoin their lines with a SPACE, which
+      #  colon-delimited search path cannot be split in YAML: both plain and
+      #  folded multi-line scalars rejoin their lines with a SPACE, which
       #  would corrupt every path after the break. All six compile directories
       #  are required for `cobc -m` modules to resolve at run time, so nothing
       #  here is droppable either. `yamllint` under its default 80-column rule
       #  reports this one line; 80 columns is not this project's norm (the two
-      #  sibling Dockerfiles carry 66 and 25 longer lines, and the frozen
-      #  common/comp-common.sh carries 15), and the value is left intact rather
-      #  than mangled to satisfy a limit the repository does not observe.
+      #  sibling Dockerfiles carry 63 and 23 longer lines, and the frozen
+      #  common/comp-common.sh carries 15), so the value is left intact rather
+      #  than mangled to satisfy a limit the repository does not keep.
       COB_LIBRARY_PATH: /build/common:/build/general:/build/irs:/build/purchase:/build/sales:/build/stock:/usr/local/lib/gnucobol
       TERM: xterm
       LINES: "24"
       COLUMNS: "80"
 
-    # -----------------------------------------------------------------------
     #  ORDERING -- a HEALTH CONDITION, not a bare dependency
-    #
-    #  `condition: service_healthy` is required, not stylistic. A bare
-    #  `depends_on: [mariadb]` would only wait for the container to START, and
-    #  the frozen schema is applied AFTER that; every stage below would then
-    #  race the initialisation.
-    #
-    #  Two independent reasons the database must be genuinely ready:
-    #
-    #    * Bootstrap step 4 runs `common/comp-common.sh`, whose L25 executes
-    #      `presql2` over each `*MT.scb`. `presql2` links `cobmysqlapi.o`,
-    #      whose `read_params()` [presql2-package/cobmysqlapi38.c:L114] reads a
-    #      `presql2.param` file -- aborting with exit 5 if it is absent, and
-    #      exit 6 if any of its six mandatory cards (DBHOST=, DBUSER=,
-    #      DBPASSWD=, DBNAME=, DBPORT=, DBSOCKET=) is missing or out of order
-    #      -- and then opens a LIVE connection. No `.param` file exists
-    #      anywhere in the checkout, and none is added to it:
-    #      `harness/build_oracle.sh` materialises one at run time from the
-    #      ACAS_DB_* variables above, inside /build, outside the checkout.
-    #      (`presql2.param` is git-ignored precisely because it holds a user
-    #      name and password.)
-    #    * Seeding (stage 1) and both scenario runs (stages 2 and 6) obviously
-    #      require a live server, as do the dumps (stages 3 and 7).
-    #
-    #  Gating on health rather than on a sleep is also what makes startup
-    #  deterministic: the stack is either provably ready or it fails, and
-    #  neither outcome depends on timing.
-    # -----------------------------------------------------------------------
+    #  `condition: service_healthy` is required, not stylistic: a bare
+    #  `depends_on: [mariadb]` waits only for the container to START, while the
+    #  frozen schema is applied AFTER that, so every stage would race the
+    #  initialisation. Gating on health rather than a sleep is also what makes
+    #  startup deterministic -- provably ready, or a failure, never timing.
+    #  Bootstrap step 4 runs `common/comp-common.sh`, whose L25 executes
+    #  `presql2` over each `*MT.scb`. `presql2` links `cobmysqlapi.o`, whose
+    #  `read_params` (archive member `cobmysqlapi38.c`, line 114) reads a
+    #  `presql2.param` file -- exit 5 if absent, exit 6 if any of its six
+    #  mandatory cards is missing -- and then opens a LIVE connection. No
+    #  `.param` file exists in the checkout; `build_oracle.sh` writes one.
     depends_on:
       mariadb:
         condition: service_healthy
 
-    # -----------------------------------------------------------------------
     #  TERMINAL
-    #
     #  The compiled menus are curses programs that set COB_SCREEN_EXCEPTIONS
     #  and COB_SCREEN_ESC themselves [general/general.cbl:L369-L370] and refuse
-    #  to run below 24x80 [general/general.cbl:L374-L383]. Allocating a tty and
-    #  keeping stdin open makes an interactive `docker compose run` or
-    #  `docker compose exec` usable, and makes the container's behaviour
-    #  predictable rather than dependent on how it was attached.
-    #  `harness/run_cobol_scenario.sh` additionally allocates a pty of its own.
-    #
-    #  A tty is also what lets `command:` below keep an idle container alive
-    #  for `exec`, without any supervisor or process manager -- none is
-    #  installed, because a second concurrent scenario against the shared
-    #  database would break the parity protocol.
-    #
-    #  THE PRICE, AND HOW TO PAY IT: because these two are declared here,
-    #  `docker compose run` allocates a pseudo-terminal and keeps stdin
-    #  attached by default. A NON-INTERACTIVE stage whose output is piped or
-    #  redirected then appears to hang after printing everything it was going
-    #  to print. Verified on this stack. So every scripted stage must be
-    #  invoked as `run --rm -T`, and `-T` is used throughout the CANONICAL
-    #  INVOCATIONS block in the file header. Interactive use omits it.
-    #
-    #  They are declared here rather than left to the invocation because the
-    #  24x80 gate above is a HARD refusal: a container attached without a
-    #  terminal, and without these defaults, would fail that gate instead of
-    #  running the program under test.
-    # -----------------------------------------------------------------------
+    #  run below 24x80 [general/general.cbl:L374-L383]. Allocating a tty and
+    #  keeping stdin open makes interactive `run`/`exec` usable and the
+    #  container's behaviour independent of how it was attached. A tty is also
+    #  what lets `command:` below hold an idle container open for `exec` with
+    #  no supervisor -- a second concurrent scenario against the shared
+    #  database being exactly what the protocol forbids.
+    #  THE PRICE: `run` then allocates a pseudo-terminal by default, so a
+    #  NON-INTERACTIVE piped stage appears to hang. Every scripted stage is
+    #  therefore `run --rm -T`, as in CANONICAL INVOCATIONS in the header.
     tty: true
     stdin_open: true
 
     # -----------------------------------------------------------------------
+    #  PRIVILEGE RESTRICTION
+    #
+    #  There is no `user:` key here either, but for the opposite reason to the
+    #  database service: the image already declares an unprivileged `USER`
+    #  [harness/Dockerfile.gnucobol], so this container runs as a non-root
+    #  account by default and nothing needs to be restated. Pinning the UID here
+    #  as well would create a second place to keep in step with the volume
+    #  ownership baked into the image.
+    #
+    #  Running unprivileged matters more for THIS service than for any other
+    #  part of the stack, because it is the one that mounts the repository. The
+    #  frozen-artifact guarantee -- no diff may ever touch the COBOL, the
+    #  copybooks, the bridges or `mysql/ACASDB.sql` -- is the single most
+    #  important invariant of the migration, and container root IS host root for
+    #  a bind mount. The `:ro` flag on `../:/repo` is the primary control and an
+    #  unprivileged user is the independent second one; they fail separately, so
+    #  both are kept.
+    #
+    #  ALL capabilities are dropped and NONE is added back. Verified against
+    #  what this service actually does: compile COBOL and C, run compiled
+    #  modules, open an outbound TCP connection to `mariadb`, allocate a pty via
+    #  `script`, and read and write /build, /data, /out and /tmp. Not one of
+    #  those needs a capability -- outbound TCP to port 3306 needs neither
+    #  NET_RAW nor NET_BIND_SERVICE, and the image pre-built everything that
+    #  previously wanted root (`cobmysqlapi.o` and `presql2` are installed at
+    #  build time and `build_oracle.sh` detects and reuses both).
+    #
+    #  `read_only: true` is NOT set: `build_oracle.sh` copies the whole
+    #  repository into /build and compiles there, and the compilers need /tmp.
+    #  Those paths are volumes and a tmpfs would either lose the build tree
+    #  between stages or have to be sized for it. The writable surface is
+    #  instead CONTAINED -- three named volumes plus /tmp, with the checkout
+    #  itself read-only, which is the property that actually matters.
+    # -----------------------------------------------------------------------
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    networks:
+      - acas_oracle
+
+    # -----------------------------------------------------------------------
     #  WORKING DIRECTORY -- /build, and NEVER /repo
     #
-    #  Matches the image [harness/Dockerfile.gnucobol:L1284]. Defaulting to
+    #  Matches the image [harness/Dockerfile.gnucobol:L1621]. Defaulting to
     #  the read-only checkout would invite exactly the writes the `:ro` flag
     #  exists to refuse, and a stray `cobc` run there would scatter `.prn`
     #  listings and `.so` modules through the frozen tree.
-    # -----------------------------------------------------------------------
     working_dir: /build
 
-    # -----------------------------------------------------------------------
     #  DEFAULT COMMAND -- benign and idle, by design
-    #
     #  This service NEVER auto-builds and NEVER auto-runs a scenario: the
     #  harness scripts are the documented entry points and are invoked
     #  explicitly, in the fixed eight-stage order given in the header. An
@@ -794,7 +1138,7 @@ services:
     #  `docker compose up -d gnucobol` followed by `docker compose exec` works
     #  for repeated stages. Both other styles override it and are unaffected
     #  (note the `-T` on the scripted one -- see the TERMINAL block above):
-    #      docker compose ... run --rm -T gnucobol harness/build_oracle.sh
+    #      docker compose ... run --rm -T gnucobol /repo/harness/build_oracle.sh
     #      docker compose ... run --rm    gnucobol bash   # interactive: no -T
     #
     #  No ENTRYPOINT wrapper is introduced and no logging driver is
@@ -806,49 +1150,88 @@ services:
     # -----------------------------------------------------------------------
     command: ["sleep", "infinity"]
 
-    # -----------------------------------------------------------------------
     #  LIFECYCLE -- quoted "no"; a bare `no` is a YAML boolean.
-    #
     #  A restarting builder would re-enter a scenario stage out of order and
     #  silently invalidate the parity evidence. Failures must stay visible.
-    # -----------------------------------------------------------------------
     restart: "no"
 
+    # -----------------------------------------------------------------------
+    #  RESOURCE BOUNDS -- see the same block on `mariadb` for the reasoning
+    #
+    #  This service is the heavier of the two: `build_oracle.sh` copies the whole
+    #  checkout into `/build` and then runs the maintainer's own compile scripts,
+    #  which fan out roughly 157 `cobc` invocations, each forking a compiler,
+    #  assembler and linker of its own. Bounding it is what stops one clone's
+    #  bootstrap from starving every sibling clone on this host.
+    #
+    #  `cpus: 2.0` bounds that fan-out WITHOUT introducing parallelism: it is a
+    #  ceiling on CPU time, not a directive to run anything concurrently, and
+    #  nothing here parallelises `comp-all.sh`, whose fixed directory order --
+    #  common, general, irs, purchase, sales, stock -- is preserved exactly.
+    #  `pids_limit: 1024` is sized for the compiler/assembler/linker chains with
+    #  a wide margin; too low a value would present as a mysterious compile
+    #  failure, which is why it is not tighter.
+    #
+    #  ON THE UNBOUNDED LEGACY LOG, honestly stated: the file-handler logger
+    #  cannot be switched off, because frozen
+    #  [copybooks/Test-Data-Flags.cob:L10] hardcodes `SW-Testing pic 9 value 1`
+    #  and R-4 forbids "fixing" it. `fh-logger.txt` therefore grows for as long
+    #  as a run lasts -- observed at hundreds of megabytes within minutes. That
+    #  is DISK, not memory or CPU, so no key in this block bounds it. What bounds
+    #  it is where it lives: the `acas_data` named volume, never the checkout,
+    #  with truncation between runs (see the volume's own comment). No logging
+    #  driver is configured here either, and that is deliberate for a separate
+    #  reason given in the DEFAULT COMMAND block above -- both
+    #  [common/comp-common.sh:L59] and [comp-all.sh:L44-L45] end with an
+    #  unconditional `exit 0`, so `build_oracle.sh` has to scan captured output
+    #  to detect failure, and a rotating driver could discard the very lines that
+    #  prove the build broke.
+    # -----------------------------------------------------------------------
+    cpus: 2.0
+    mem_limit: 4g
+    mem_reservation: 1g
+    pids_limit: 1024
 
-# =============================================================================
+
 #  NAMED VOLUMES
-# =============================================================================
 #  Four named volumes, no host bind mounts. The only host path this stack
-#  touches is the repository itself, and that is mounted READ-ONLY as /repo on
-#  the `gnucobol` service.
-#
-#  TWO DIFFERENT RESET OPERATIONS -- both are needed, and they are NOT
-#  interchangeable:
-#
-#      harness/reset_db.sh        THE PER-SCENARIO RESET, and stage 5 of the
-#                                 eight-stage protocol. Drops the schema,
-#                                 re-applies the frozen `mysql/ACASDB.sql` and
-#                                 re-seeds, so that the Python cycle starts
-#                                 from byte-for-byte the same state the COBOL
-#                                 cycle did. The volumes SURVIVE, so the
-#                                 database image's init scripts are not re-run
-#                                 and the built oracle in `acas_build` is not
-#                                 thrown away.
-#
+#  touches is the repository itself, mounted READ-ONLY as /repo on `gnucobol`.
+#  TWO DIFFERENT RESET OPERATIONS, NOT INTERCHANGEABLE:
+#      harness/reset_db.sh        THE PER-SCENARIO RESET, stage 5. Drops the
+#                                 schema, re-applies the frozen
+#                                 `mysql/ACASDB.sql` and re-seeds, so the
+#                                 Python cycle starts from byte-for-byte the
+#                                 state the COBOL cycle did. The volumes
+#                                 SURVIVE, so the image's init scripts are not
+#                                 re-run and the built oracle in `acas_build`
+#                                 is not thrown away.
+
 #      docker compose ... down -v THE CLEAN SLATE. Discards all four volumes,
 #                                 so the next `up` re-applies the schema from
 #                                 the image and the next `build_oracle.sh`
-#                                 rebuilds the oracle from scratch. Use it when
-#                                 the environment itself is suspect -- never as
-#                                 a substitute for stage 5, which must run
+#                                 rebuilds from scratch. Use it when the
+#                                 environment itself is suspect -- never as a
+#                                 substitute for stage 5, which must run
 #                                 between the two cycles of every scenario.
-# =============================================================================
 volumes:
+
+  # EVERY VOLUME CARRIES AN EXPLICIT, CLONE-NAMESPACED `name:`.
+  #
+  # Without it, Compose derives the real volume name by prefixing the project
+  # name, and two clones of this repository would then share one set of volumes
+  # -- one `/build`, one `/data`, one `/out`, one database directory. The
+  # top-level `name:` already namespaces the project, so the prefix alone would
+  # usually suffice; these explicit names make the isolation independent of the
+  # project name being honoured, which matters because `-p` and
+  # COMPOSE_PROJECT_NAME can both override it. `${CLONE_INDEX:?...}` repeats the
+  # requirement here so that no path exists by which an unnamespaced volume can
+  # be created.
 
   # MariaDB's vendor data directory, /var/lib/mysql. Named rather than bind
   # mounted so `harness/reset_db.sh` -- DROP plus re-apply of the frozen schema
   # -- is the reset mechanism, not volume deletion.
   acas_mariadb_data:
+    name: acas-harness-${CLONE_INDEX:?set CLONE_INDEX to this clone's index (e.g. 002) so this volume cannot be shared with a sibling clone}-mariadb-data
 
   # The WRITABLE copy of the checkout, /build. Everything the maintainer's
   # frozen compile scripts create lands here instead of in the read-only
@@ -856,16 +1239,85 @@ volumes:
   # `-T <name>.prn` listings, the six per-directory copies of `cobmysqlapi.o`,
   # `presql2.param`, and the `cobc -m` / `-x` outputs.
   acas_build:
+    name: acas-harness-${CLONE_INDEX:?set CLONE_INDEX to this clone's index (e.g. 002) so this volume cannot be shared with a sibling clone}-build
 
   # The ACAS data directory, /data -- the COBOL indexed files, the flat seed
   # files the `*LD` loaders read, and the file-handler log. The loaders must run
   # from here [common/masterLD.sh:L27-L28,L45]. Logging cannot be switched off
   # (the frozen [copybooks/Test-Data-Flags.cob:L10] hardcodes `SW-Testing pic 9
-  # value 1`), so the log grows during a scenario and is truncated or rotated
-  # between runs -- inside this volume, never in the checkout.
+  # value 1`), so the log grows during every scenario.
+  #
+  # It does NOT accumulate here across runs: `harness/run_cobol_scenario.sh'
+  # rotates it by default, MOVING it to /out/run-logs/<scenario>/ on the
+  # `acas_out' volume below. Two consequences worth stating, because both are
+  # deliberate rather than incidental: this volume stays roughly constant in size
+  # however many scenarios are run, and the growth that does accumulate lands on
+  # the volume holding the evidence, where `docker compose down -v' discards it
+  # together with the dumps it belongs to. The pre-run capacity gate
+  # (ACAS_FH_LOG_BUDGET_MB, default 1024 MiB) is measured against THIS
+  # filesystem, since it is where the log is written before being moved.
   acas_data:
+    name: acas-harness-${CLONE_INDEX:?set CLONE_INDEX to this clone's index (e.g. 002) so this volume cannot be shared with a sibling clone}-data
 
   # Dumps, normalised dumps and diff evidence, /out -- stages 3, 4, 7 and 8.
   # Kept out of the checkout so the parity evidence can never be mistaken for,
   # or committed as, a change to the frozen tree.
   acas_out:
+    name: acas-harness-${CLONE_INDEX:?set CLONE_INDEX to this clone's index (e.g. 002) so this volume cannot be shared with a sibling clone}-out
+
+
+# =============================================================================
+#  NETWORKS -- ONE, NAMESPACED PER CLONE, AND ISOLATED IN BOTH DIRECTIONS
+#
+#  Both services attach to this one network and nothing else is declared: no
+#  second network, no external network, no published port. A network per service
+#  would let a stage reach a sibling clone's database, which is the precise
+#  failure the namespacing exists to prevent.
+#
+#  THE NAME IS EXPLICIT so that it carries CLONE_INDEX. Left implicit, compose
+#  derives it from the project name; naming it here means `docker network ls`
+#  shows which clone owns which network, which is what makes a stray stack
+#  identifiable on a shared host.
+#
+#  `internal: true` is why this is declared rather than inherited. Both the
+#  default bridge and this one give the same INBOUND property -- the database is
+#  unreachable from outside the project, reinforced by there being no published
+#  port. Only `internal: true` also denies OUTBOUND traffic. Nothing in the
+#  harness needs egress at RUN time: every archive is unpacked, every package
+#  installed and every binary built during the IMAGE BUILD, which this setting
+#  does not affect.
+#
+#  Two intended consequences, restated because each presents as a puzzling
+#  failure rather than as a security control:
+#
+#    * `pip install` and `apt-get install` inside a RUNNING container fail. That
+#      is consistent with both images pinning their package sets exactly -- an
+#      ad-hoc install would make the running arbiter differ from the one that
+#      was built and verified.
+#    * A scenario cannot reach any database other than this `mariadb` service,
+#      which is exactly the confinement the parity protocol wants: both cycles
+#      must observe the one server holding the one seeded state.
+#
+#  To lift the restriction for a diagnosis, do it in an OVERRIDE file rather
+#  than by editing this one, so the default stays closed:
+#
+#      # my-egress.yml
+#      networks:
+#        acas_oracle:
+#          internal: false
+#
+#      docker compose -f harness/docker-compose.yml -f my-egress.yml up -d
+#
+#  The default bridge driver is used; no subnet, gateway or IP address is
+#  pinned. Compose assigns the subnet and nothing in the stack refers to a
+#  container by address -- `gnucobol` reaches the server by the service name
+#  `mariadb`, resolved by Docker's embedded DNS, which works normally on an
+#  internal network. Hard-coding addresses would add a host-dependent variable
+#  to a stack whose determinism guarantee (R-6) depends on having none.
+# =============================================================================
+networks:
+
+  acas_oracle:
+    name: acas-harness-${CLONE_INDEX:?set CLONE_INDEX to this clone's index (e.g. 002) so this network cannot be shared with a sibling clone}-net
+    driver: bridge
+    internal: true

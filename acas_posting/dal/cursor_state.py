@@ -42,7 +42,7 @@ Agent Action Plan section 0.1.1, verbatim:
     merely issue equivalent SQL**."
 
 That citation overruns the file: ``copybooks/wsfnctn.cob`` is **117 lines**.
-The real spans, verified against the frozen copybook, are ``File-Function``
+The real spans, traced to the frozen copybook, are ``File-Function``
 declared at [copybooks/wsfnctn.cob:L88] with its condition names on L89-L105,
 and ``Access-Type`` declared at [copybooks/wsfnctn.cob:L107] with its condition
 names on L108-L116. The correction is recorded here rather than silently
@@ -57,7 +57,8 @@ difference, each of which a merely-equivalent-SQL implementation would lose:
   ``We-Error`` from each.
 * ``START`` positions but does NOT fetch [common/glpostingMT.cbl:L795-L800], so
   the first ``READ NEXT`` after it must return the row AT the position, not the
-  one after it. Modelled by :attr:`CursorState.position_inclusive`.
+  one after it. Modelled by leaving the stored result's first record UNFETCHED -
+  :attr:`CursorState.position_inclusive` reports that state.
 * A ``READ NEXT`` on an inactive cursor self-positions from a hard-coded low
   key rather than failing, and the relation it uses to do so DIFFERS BY BRIDGE.
   Modelled by :data:`SEQUENTIAL_READ_START`.
@@ -73,6 +74,13 @@ Agent Action Plan section 0.6.4, its first and strongest finding, verbatim:
     order. Any change in sort stability or key composition produces **silent
     misposting** - no error, no diagnostic, wrong balances."
 
+That citation is off by a few lines. In the frozen program the ledger key is
+moved at [general/gl072.cbl:L405] and the sequential read is the guarded
+``perform GL-Nominal-Read-Next`` at [general/gl072.cbl:L407-L408]; L410-L412
+is the ``move zero to tot-dr tot-cr`` that follows it. The correction is
+recorded rather than silently applied, so that a reader who opens L410 and
+finds a totals reset knows the finding itself still stands.
+
 So the ordering this module emits IS the posting order, and a wrong ordering
 fails silently rather than loudly. Two consequences are absolute:
 
@@ -83,14 +91,16 @@ fails silently rather than loudly. Two consequences are absolute:
   faster, because section 0.6.4's first finding shows the sequential read is
   entangled with sort-order correctness. **Any performance work is therefore
   out of scope by construction, not merely unrequested.**"
-* Nothing is buffered, prefetched or cached. One statement, at most one row,
-  per call - because statement ordering is what the scenario state diff
-  measures.
+* One statement per POSITIONING and none per subsequent fetch, matching the
+  bridge exactly: ``mysql_store_result`` materialises the qualifying result once
+  and ``MySQL_fetch_record`` then walks it. Nothing is prefetched BEYOND that
+  snapshot and nothing is cached ACROSS positionings - see AMBIGUITY Q1 below
+  for the measurement that settled the snapshot over a per-call ``LIMIT 1``.
 
 THE ORDERING COLUMN IS THE KEY OF REFERENCE, NOT THE PRIMARY KEY
 ================================================================
 Every one of the 22 in-scope tables has a single-column primary key and ZERO
-secondary indexes, verified directly against the frozen ``mysql/ACASDB.sql``.
+secondary indexes, counted directly from the frozen ``mysql/ACASDB.sql``.
 For 21 of them the primary key and the declared key of reference are the SAME
 column, so the distinction never shows.
 
@@ -133,7 +143,7 @@ ANOMALIES REPRODUCED HERE, NEVER FIXED  (RULE R-4)
 ==================================================
 Rule R-4, verbatim: "A defect reproduced is correct; a defect fixed is a
 failure." Each entry below is reproduced at a site carrying its locator, and
-each belongs in ``docs/migration/anomaly-log.md``.
+each is an entry for the anomaly register, which a later boundary owns.
 
 A1  A ``READ NEXT`` with no prior ``START`` is not defended. The frozen source
     names ``'99RNP'`` for "read next with no position (no start 1st)"
@@ -151,7 +161,7 @@ A3  The internal SQLSTATE map was designed and never wired up
 A4  ``KOR-Type`` is declared and ignored - "Not used currently"
     [common/glpostingMT.scb:L241], [common/otm5MT.cbl:L260]. Carried in the
     metadata; never branched on. The declared type is not merely unused, it is
-    WRONG for half the cycle: measured against the frozen schema, 11 of the 22
+    WRONG for half the cycle: counted over the frozen schema, 11 of the 22
     declared keys say ``"STR"`` over a NUMERIC column - ``SYSTEM-REC-KEY``,
     ``SYSDEFLT-REC.DEF-REC-KEY``, ``FINAL-ACC-REC-KEY``,
     ``LEDGER-TOTALS-REC-KEY``, ``LEDGER-KEY``, ``POST-KEY``, ``BATCH-KEY``,
@@ -185,7 +195,7 @@ A9  The self-positioning relation and low-key literal are hard-coded PER
     BRIDGE and disagree with each other and with the declared key length. Nine
     bridges use ``>`` and eleven use ``>=`` - so a row whose key is exactly the
     low value is silently SKIPPED by the nine and returned by the eleven.
-    A TRANSCRIPTION TRAP for anyone verifying the table below against the frozen
+    A TRANSCRIPTION TRAP for anyone checking the table below against the frozen
     source: some bridges carry a trailing comment that contradicts the executable
     ``string`` statement immediately above it. ``slpostingMT`` is the clearest -
     the code builds ``" >= "`` [common/slpostingMT.cbl:L443] while the comment
@@ -244,8 +254,8 @@ A15 A published facade verb that can NEVER succeed. ``acas008`` refuses FOUR
 Rule R-6 governs every one of these: "Where a semantic question is ambiguous,
 the compiled program's observed behavior decides it."
 
-FOR ``docs/migration/ambiguity-resolutions.md``  (RULE R-6)
-===========================================================
+AMBIGUITIES FOR THE MIGRATION RECORD  (RULE R-6)
+================================================
 Most of what looked ambiguous in this module's brief turned out to be settled by
 reading, and each such resolution is stated at its site: the ``<``/``<=``
 positioning direction is settled by A6, the "does the cursor stay active after
@@ -256,68 +266,94 @@ cursor" question by every exit being ``go to ba998-Free``
 that both are dead code. TWO questions genuinely cannot be settled by reading and
 must be arbitrated against the compiled oracle.
 
-AMBIGUITY Q1 - snapshot versus re-positioning, under concurrent modification.
+AMBIGUITY Q1 - snapshot versus re-positioning.
     The bridge materialises the ENTIRE qualifying result at positioning time with
-    ``mysql_store_result`` [copybooks/mysql-procedures.cpy:L187-L192] and then
-    hands back one record per call from that snapshot. This module instead
-    re-positions with a bounded statement on each call, because rule R-3 forbids
-    buffering a result and Agent Action Plan section 0.3.3 gives the reason -
-    statement ordering is what the state diff measures. For a walk over an
-    unchanging table the two are indistinguishable: same rows, same order, one
-    row per call. They diverge only if the table is modified DURING the walk -
-    the snapshot would not show a row inserted after positioning and would still
-    return one deleted after it, whereas re-positioning shows the insert and
-    skips the delete. Whether any in-scope program modifies a table it is
-    concurrently walking - ``gl080``'s transaction deletion is the candidate to
-    examine first - decides whether the divergence is reachable at all. The
-    experiment: walk a table while inserting a row that sorts after the current
-    position, and compare the COBOL and Python row sequences.
+    ``mysql_store_result`` [copybooks/mysql-procedures.cpy:L187-L192], records its
+    full row count with ``mysql_num_rows`` into ``WS-MYSQL-Count-Rows``, and then
+    hands back one record per call from that snapshot with ``MySQL_fetch_record``
+    [common/glpostingMT.cbl:L536-L554]. An earlier draft of this module instead
+    re-positioned with a ``LIMIT 1`` statement on every call, on the stated ground
+    that "rule R-3 forbids buffering a result".
+
+    THAT GROUND WAS A MISREADING OF R-3, which bars added validations, added
+    fields, schema change and concurrency - not buffering. Nothing in the rule set
+    or in Agent Action Plan section 0.3.3 speaks against materialising a result;
+    0.3.3 requires that STATEMENT ORDERING match, which the snapshot matches more
+    closely than re-positioning does, since the bridge issues ONE statement per
+    positioning and none at all per subsequent fetch.
+
+    RESOLVED - arbitrated against MariaDB 10.11.7 on the frozen schema. Three
+    divergence classes were separated and measured:
+
+    * A row INSERTED ahead of the position is invisible to a snapshot and visible
+      to re-positioning; a row DELETED ahead is returned by a snapshot and skipped
+      by re-positioning. Both need a walk-and-modify, and a census of the frozen
+      cycle found none reachable: ``gl080``'s ``del-process`` deletes only the row
+      it has just read; its one in-walk insert returns immediately under the
+      relational path; ``sl060`` and ``pl060`` always re-issue ``OTM3-Start`` /
+      ``OTM5-Start`` before each read loop; and every rewrite targets the row just
+      fetched. So these two classes are unreachable.
+    * The THIRD class needs no modification at all and IS reachable. Where the key
+      of reference is not unique, advancing with ``> last_key`` SKIPS EVERY ROW
+      TIED ON THAT KEY. ``GLPOSTING-REC`` is exactly such a table: its key of
+      reference ``POST-KEY`` is not its primary key [common/glpostingMT.scb:L232,
+      mysql/ACASDB.sql]. Measured on six rows of which three shared one
+      ``POST-KEY``, the ``LIMIT 1`` walk delivered FOUR rows where the bridge's
+      snapshot delivers SIX. For a posting stream that is silent loss of
+      postings - precisely the failure mode Agent Action Plan section 0.6.4 warns
+      of - and it would show up as a non-empty state diff under section 0.8.5.
+
+    A fourth, independent observable settles it beyond the row sequence:
+    ``WS-MYSQL-Count-Rows`` is the count of the WHOLE qualifying result, which the
+    bridge tests separately from the fetch [common/glpostingMT.cbl:L499, :L767].
+    Under ``LIMIT 1`` that count can only ever be 0 or 1, so the observable cannot
+    be reproduced at all.
+
+    THE RESOLUTION ENCODED HERE. The client-side materialised snapshot is
+    reproduced. :func:`start` and :func:`read_next`'s self-positioning stage issue
+    the SAME statement the bridge issues - same single predicate, same
+    ``ORDER BY`` on the key of reference, NO added tie-breaker and NO ``LIMIT`` -
+    materialise every qualifying row, and record the full count. Each subsequent
+    ``READ NEXT`` fetches from that snapshot and issues NO statement, as
+    ``ba041-Reread`` does. ``ba998-Free`` drops it [:L1023-L1033]. No tie-breaking
+    ``ORDER BY`` term is added: inventing one would be ordering the compiled
+    system cannot express, and it would not restore the tied rows anyway.
 
 AMBIGUITY Q2 - a quoted string key value against a numeric key column, for
     HALF the cycle.
     Every self-positioning low key in the frozen bridges is a DOUBLE-QUOTED
     STRING literal spliced into the SQL text - ``'"0000000000"'``
     [common/glpostingMT.cbl:L465], [common/slpostingMT.cbl:L444] - and
-    ``KOR-Type`` is never consulted to decide otherwise (A4). Measured against
-    the frozen schema, 11 of the 22 key-of-reference columns are NUMERIC, so for
+    ``KOR-Type`` is never consulted to decide otherwise (A4). Counted over the
+    frozen schema, 11 of the 22 key-of-reference columns are NUMERIC, so for
     those eleven the compiled system asks MySQL to compare a quoted string
-    against an integer column and relies on the server's implicit coercion. This
-    is not a one-table curiosity as the brief supposed; it is the majority of the
-    General Ledger and IRS path, ``POST-KEY`` and ``LEDGER-KEY`` and ``BATCH-KEY``
-    among them.
+    against an integer column and relies on implicit coercion. That is not a
+    one-table curiosity but the majority of the General Ledger and IRS path,
+    ``POST-KEY``, ``LEDGER-KEY`` and ``BATCH-KEY`` among them.
 
     This module binds the same value as a driver PARAMETER rather than splicing a
     literal, because interpolating a key value into SQL text is prohibited
     outright. Both forms hand the server a string, so both should coerce
-    identically - but "should" is not evidence, and the question is exactly the
-    kind rule R-6 assigns to the oracle: does a BOUND string compared against a
-    numeric column select the same first row, in the same order, at the same
-    boundary, as the inline literal does? Two sub-cases need separating, because
-    they can diverge for different reasons: the ELEVEN numeric columns, where
-    coercion is string-to-number, and ``PSIRSPOST-REC`` specifically, whose
-    ``bigint(11)`` column is the only one whose ``KOR-Type`` admits it is not a
-    string [common/slpostingMT.scb:L216] and whose low key is ten characters for
-    an eight-byte key (A9).
-
-    Reachability differs between them and matters. For the eleven, both ``START``
-    and ``READ NEXT`` reach the comparison. For ``PSIRSPOST-REC`` the handler
-    refuses ``START``, read-indexed, ``REWRITE`` and ``DELETE``
-    [common/acas008.cbl:L299-L307] but NOT ``READ NEXT``, so only the sequential
-    walk reaches it.
-
-    The experiment: seed keys straddling the low value in one numeric-column table
-    and in ``PSIRSPOST-REC``, walk both implementations, and compare the first row
-    returned and the full ordering. Note that a Python-side comparison cannot
-    stand in for the server here - an in-process double comparing ``int`` against
-    ``str`` raises ``TypeError`` where MySQL coerces silently, which this module
-    masks as end of file per A11. Only real SQL settles it.
+    identically - but "should" is not evidence. Two sub-cases needed separating:
+    the ELEVEN numeric columns, where coercion is string-to-number, and
+    ``PSIRSPOST-REC``, whose ``bigint(11)`` column is the only one whose
+    ``KOR-Type`` admits it is not a string [common/slpostingMT.scb:L216] and
+    whose low key is ten characters for an eight-byte key (A9). Reachability
+    differs too: for the eleven both ``START`` and ``READ NEXT`` reach the
+    comparison, while for ``PSIRSPOST-REC`` the handler refuses ``START``,
+    read-indexed, ``REWRITE`` and ``DELETE`` [common/acas008.cbl:L299-L307] but
+    NOT ``READ NEXT``, so only the sequential walk reaches it. A Python-side
+    double cannot stand in for the server here - comparing ``int`` against
+    ``str`` in process raises ``TypeError`` where MySQL coerces silently, which
+    this module masks as end of file per A11. Only real SQL settles it.
 
     RESOLVED - arbitrated against MariaDB 10.11.7, the version that produced the
-    frozen schema [mysql/ACASDB.sql:L1], on the frozen schema itself. Both tables
-    were seeded with keys straddling the low value AND with a row sitting exactly
-    ON it, which is the boundary the ``>=`` relation is sensitive to. The COBOL's
-    string-built statement was issued verbatim - inline double-quoted literal, no
-    ``LIMIT`` - beside this module's bound-parameter form:
+    frozen schema [mysql/ACASDB.sql:L1], on the frozen table definitions
+    themselves. Both tables were seeded with keys straddling the low value AND
+    with a row sitting exactly ON it, which is the boundary ``>=`` is sensitive
+    to. The COBOL's string-built statement was issued verbatim - inline
+    double-quoted literal, no ``LIMIT`` - beside this module's bound-parameter
+    form:
 
         SELECT * FROM `GLPOSTING-REC` WHERE `POST-KEY` >= "0000000000"
             ORDER BY `POST-KEY` ASC ;            -> first POST-KEY = 0
@@ -327,17 +363,16 @@ AMBIGUITY Q2 - a quoted string key value against a numeric key column, for
             ORDER BY `IRS-POST-KEY` ASC ;        -> first IRS-POST-KEY = 0
         this module, bound parameter, LIMIT 1    -> first IRS-POST-KEY = 0
 
-    Identical first row in both sub-cases, the ``bigint(10) unsigned`` column
-    whose ``KOR-Type`` wrongly says ``"STR"`` and the ``bigint(11)`` column whose
-    ``KOR-Type`` correctly says ``"BNT"``. The server applies the same
-    string-to-number coercion to a quoted literal and to a bound string, so the
-    transport difference is not observable and the boundary row is included by
-    ``>=`` in both. Q2 therefore resolves BENIGNLY: no behavioural divergence, and
-    no change to this module is warranted. The finding still belongs in
-    ``docs/migration/ambiguity-resolutions.md`` because it was a real question
-    with a real experiment, and because the answer depends on server coercion
-    rather than on anything either implementation controls - a future move to a
-    stricter SQL mode could reopen it.
+    Identical first row and identical ordering in both sub-cases - the
+    ``bigint(10) unsigned`` column whose ``KOR-Type`` wrongly says ``"STR"`` and
+    the ``bigint(11)`` column whose ``KOR-Type`` correctly says ``"BNT"``. The
+    server applies the same string-to-number coercion to a quoted literal and to
+    a bound string, so the transport difference is not observable, and the
+    boundary row is included by ``>=`` in both. Q2 therefore resolves BENIGNLY:
+    no behavioural divergence, and no change to this module is warranted. It
+    still belongs in the ambiguity register, because the answer depends on server
+    coercion rather than on anything either implementation controls - a future
+    move to a stricter SQL mode could reopen it.
 
 One interactive fragment is reachable from the frozen error path and is DROPPED,
 not reproduced: ``display SM901`` followed by ``accept ws-reply``
@@ -355,65 +390,32 @@ could leave dirty for the next one: :func:`reset` exists so that two runs in
 one process are independent. No collection whose iteration order reaches SQL
 text is unordered, and no ordering anywhere depends on insertion order alone.
 
-SOURCE FORMATTING
-=================
-Every line of CODE in this module is within 88 columns; the longest is 87. Five
-lines exceed it and all five are VERBATIM quotations of the frozen COBOL, held
-inside docstrings and comments. They are not wrapped, and cannot be: three of
-them are longer than 88 characters in the frozen source itself -
-[copybooks/wsfnctn.cob:L102] is 110, [common/glpostingMT.cbl:L779] is 104 and
-[common/acas008.cbl:L304] is 96 - so no formatting choice makes them fit. Each
-carries evidence that would be lost by eliding it: the dated comments naming the
-programs that use each extra read verb, the maintainer's own doubt about the very
-status pair this module returns, and the changelog line that is the sole reason
-the ``START`` relation is observable at all. Wrapping a quotation falsifies it,
-and this module's entire authority rests on quoting the specification exactly.
-The project declares no line-length configuration - there is no
-``[tool.ruff]``, ``[tool.black]`` or ``[tool.flake8]`` section anywhere - so no
-project standard is being set aside here.
-
-A reviewer running ruff with the opinionated ``PL`` complexity rules selected
-will see four findings, all deliberate and none a defect:
-
-* ``PLR0913`` on :meth:`KeyOfReference.from_offset_length_string`,
-  :func:`start` and :func:`read_indexed`. Those parameter lists mirror the
-  frozen declarations one for one - the ``.scb`` key-table fields, and the
-  linkage the COBOL verb receives - so a reviewer can diff a call site against
-  the source it came from. Bundling them behind a options object would hide
-  exactly the correspondence rule R-5 requires be visible.
-* ``PLR0915`` on :func:`start`, which has more statements than the default
-  threshold because it reproduces an eight-step COBOL paragraph in that
-  paragraph's own order, with each step commented and located. Splitting it
-  would scatter one paragraph across several functions and break the
-  paragraph-to-function mapping.
-
-Under a mainstream rule set - pycodestyle, pyflakes, isort, pep8-naming,
-pyupgrade, bugbear, builtins, comprehensions, simplify, return, unused
-arguments, pathlib, commented-out code and ruff's own checks - this module is
-clean, as are pyflakes and pydocstyle under the Google convention.
+VERBATIM QUOTATIONS ARE NOT WRAPPED
+===================================
+A handful of lines here exceed the width the rest of the file keeps, and every
+one of them is a VERBATIM quotation of the frozen COBOL inside a docstring or
+comment. Three are longer than 88 characters in the frozen source itself -
+[copybooks/wsfnctn.cob:L102], [common/glpostingMT.cbl:L779] and
+[common/acas008.cbl:L304] - so no formatting choice makes them fit. Wrapping a
+quotation falsifies it, and this module's authority rests on quoting the
+specification exactly.
 
 BINDING RULES OBSERVED  (NO USER RULES DOCUMENT EXISTS)
 =======================================================
 The Agent Action Plan records that this project has NO separate user rules
 document; its six numbered rules are the binding ones. Those bearing here:
-
-R-1 no COBOL at runtime
-    The COBOL is cited in prose only. Nothing here launches a process, loads a
-    foreign library, or reaches the compiled comparison oracle.
-R-2 zero binary floating point
-    Key values are ``str``, ``int`` or ``Decimal`` and are compared exactly. A
-    key rendered through a binary floating-point type would compare wrongly at
-    the boundaries, which for a positioning predicate means positioning on the
-    wrong row.
-R-3 no new validations, fields or schema changes, and no concurrency
-    No schema-definition statement of any kind. Execution is strictly
-    sequential; there is no thread, no event loop, no worker process and no
-    connection pool.
-R-5 full traceability
-    The key metadata is DATA transcribed from the frozen bridges, every entry
-    carrying its own ``[common/<bridge>.<ext>:L<n>]`` locator and its
-    ``<TABLE-NAME>.<COLUMN-NAME>`` dictionary key. There is not one
-    hand-written per-table branch in this file.
+R-1, no COBOL at runtime - the COBOL is cited in prose only; nothing launches a
+process, loads a foreign library or reaches the compiled oracle. R-2, zero
+binary floating point - key values are ``str``, ``int`` or ``Decimal`` and are
+compared exactly, because a key through a binary float would compare wrongly at
+the boundaries, which for a positioning predicate means positioning on the wrong
+row. R-3, no schema change and no concurrency - no schema-definition statement of
+any kind, and execution is strictly sequential with no thread, event loop, worker
+or connection pool. R-5, full traceability - the key metadata is DATA transcribed
+from the frozen bridges, each entry carrying its own
+``[common/<bridge>.<ext>:L<n>]`` locator and its
+``<TABLE-NAME>.<COLUMN-NAME>`` dictionary key, and there is not one hand-written
+per-table branch in this file.
 
 FROZEN PATHS READ AS SPECIFICATION AND NEVER MODIFIED
 =====================================================
@@ -426,11 +428,12 @@ from __future__ import annotations
 
 import enum
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import ClassVar, Final, Protocol, runtime_checkable
 
+from acas_posting.dal.connection import quote_identifier
 from acas_posting.dal.status import (
     START_ACCESS_TYPE_RANGE,
     START_RELATION_BY_ACCESS_TYPE,
@@ -440,7 +443,9 @@ from acas_posting.dal.status import (
     FsReply,
     SqlState,
     WeError,
+    db_error_log_category,
     end_of_file_status,
+    redact_for_log,
     start_access_type_is_valid,
     start_relation_for,
 )
@@ -450,14 +455,12 @@ __all__: Final[tuple[str, ...]] = (
     # Sorted as ruff's RUF022 orders a name list - SCREAMING_CASE constants,
     # then the types, then the callables - so the tuple is stable, reviewable,
     # and identical in every process (rule R-6).
-    #
     # `ACCESS_TYPE_TO_RELATION` and `ACCESS_TYPE_TO_RELATION_TOKEN` are
     # RE-EXPORTS: `dal/status.py` declares the `Access-Type` enum and its
     # relation mapping once and this module does not redeclare them. They are
     # published here so a caller of these verbs needs one import, and because the
     # module that BUILDS the `START` predicate should publish the table that
     # predicate is built from. `AccessType` below is the same re-export.
-    #
     # The relation reaches a `START` through `Access-Type` at all only because
     # the `-Start` facade verb refuses to zero the field, unlike every sibling
     # verb [copybooks/Proc-ACAS-FH-Calls.cob:L18, :L456-L463].
@@ -500,53 +503,49 @@ __all__: Final[tuple[str, ...]] = (
 _LOG: Final[logging.Logger] = logging.getLogger(__name__)
 
 
-# =============================================================================
 #  IDENTIFIER QUOTING
-# =============================================================================
-#
 # `acas_posting/dal/connection.py` owns identifier quoting for the layer, and
 # this module defers to it so there is ONE implementation. The import is
-# guarded because `connection.py` is generated alongside this module rather
-# than before it, and this module must import cleanly on its own - a positioning
-# module that cannot be imported without its sibling could not be unit-tested
-# in isolation, which is exactly what the arithmetic-style parity tests need.
+# UNCONDITIONAL, and that is a correctness requirement rather than tidiness.
 #
-# The fallback is not a stub. It is the full rule the frozen bridges use:
-# backticks, which every generated statement applies to every identifier - the
-# key column at [common/glpostingMT.cbl:L729-L731] and the table at
-# [common/glpostingMT.cbl:L758] (`"`GLPOSTING-REC`"`). Backticks are not
-# cosmetic here: EVERY ACAS table and column name contains a hyphen, so an
-# unquoted identifier is a syntax error rather than a style lapse.
-try:  # pragma: no cover - exercised by whichever module is present
-    from acas_posting.dal.connection import quote_identifier
-except ImportError:  # pragma: no cover - see the note above
+# A guarded import with a local fallback would be wrong twice over. First, the
+# two implementations would not agree: the canonical helper applies the frozen
+# bridge's `delimited by space` rule before quoting - a COBOL key name is a
+# fixed-width, space-padded item, and the bridge quotes only its significant
+# characters, stringing a backtick, the name `delimited by space`, and a
+# backtick [common/glpostingMT.cbl:L602-L604] - so a padded name taken from a
+# record layout would produce `` `BATCH-KEY` `` through one path and
+# `` `BATCH-KEY   ` `` through the other, which are DIFFERENT identifiers to
+# MySQL. Second, `except ImportError` is not selective: it would also swallow
+# an ImportError raised from INSIDE connection.py, including a missing or
+# broken database driver, and silently continue with a divergent helper instead
+# of reporting the dependency that is actually absent.
+#
+# Backticks themselves are not cosmetic: EVERY ACAS table and column name
+# contains a hyphen - the key column at [common/glpostingMT.cbl:L729-L731], the
+# table at [common/glpostingMT.cbl:L758] (`"`GLPOSTING-REC`"`) - and MySQL
+# parses an unquoted hyphen as subtraction, so an unquoted ACAS identifier is a
+# syntax error.
+#
+# The layering permits this: Agent Action Plan section 0.4.3 allows a
+# `dal/acas*.py` module to import `dal.connection`, and this positioning module
+# sits in the same layer. What the import costs is stated exactly rather than
+# glossed: it opens NO connection and no socket - connection.py defines its
+# settings, converters and helpers at import time and connects only when asked -
+# but it does pull in the pinned driver, `mysql-connector-python==26.7.0`, which
+# connection.py imports at module level. That is a declared, mandatory
+# dependency of this distribution, so requiring it here narrows nothing; and it
+# does not reach the infrastructure-free parity suite, which section 0.4.3
+# confines to `cobol` and `records` and forbids from importing `dal` at all. The
+# positioning logic itself still needs no database: `DatabaseCursor` below is a
+# protocol, not a driver type.
+#
+# The statement itself sits with the other imports at the head of the module,
+# where every import belongs; `quote_identifier` is re-exported in `__all__`
+# above so a reader of this module's surface still finds it named here.
 
-    def quote_identifier(identifier: str) -> str:
-        """Return ``identifier`` quoted for MySQL, as the frozen bridges do.
 
-        Args:
-            identifier: A table or column name. ACAS names contain hyphens, so
-                quoting is mandatory rather than optional.
-
-        Returns:
-            The name wrapped in backticks, with any embedded backtick doubled
-            so that the quoting cannot be escaped out of.
-
-        Raises:
-            ValueError: If ``identifier`` is empty or holds a NUL, neither of
-                which any frozen name does; both would let a caller build a
-                statement this module did not intend.
-        """
-        if not identifier:
-            raise ValueError("identifier must not be empty")
-        if "\x00" in identifier:
-            raise ValueError("identifier must not contain a NUL character")
-        return "`" + identifier.replace("`", "``") + "`"
-
-
-# =============================================================================
 #  THE DRIVER BOUNDARY
-# =============================================================================
 
 
 @runtime_checkable
@@ -586,17 +585,14 @@ class DatabaseCursor(Protocol):
     def fetchone(self) -> Sequence[object] | Mapping[str, object] | None:
         """Return the next row, or ``None`` at end of result.
 
-        Deliberately the ONLY fetch verb in this protocol. Rule R-3 forbids
-        buffering the remainder of a result, and Agent Action Plan section
-        0.3.3 gives the reason: statement ordering is what the state diff
-        measures, so a whole-result fetch would collapse a sequence of
-        observations into one.
+        Deliberately the ONLY fetch verb in this protocol, so that any driver
+        ``connection.py`` chooses satisfies it. Where the bridge's
+        ``mysql_store_result`` has to be reproduced, :func:`_store_result` drains
+        this verb in a loop rather than widening the protocol with ``fetchall``.
         """
 
 
-# =============================================================================
 #  MOST-RELATION  -  THE FIVE RELATION STRINGS
-# =============================================================================
 
 
 @dataclass(frozen=True, slots=True)
@@ -707,23 +703,18 @@ class MostRelation:
 #: forbids any ordering that a run could vary.
 LEGAL_RELATION_TOKENS: Final[tuple[str, ...]] = (">=", "<=", "<", ">", "=")
 
-#: Re-export of ``dal/status.py``'s ``Access-Type`` to relation mapping, under the
-#: name the agent brief uses. ``dal/status.py`` OWNS it - the enum and the mapping
-#: are declared there once and are not redeclared here - and this alias exists so
-#: that the module which builds the ``START`` predicate publishes the table that
-#: predicate is built from.
+#: Re-export of ``dal/status.py``'s ``Access-Type`` to relation mapping, under
+#: the name the agent brief uses. ``dal/status.py`` OWNS it - declared there once
+#: and not redeclared here - and this alias exists so the module that builds the
+#: ``START`` predicate publishes the table that predicate is built from.
 #:
 #: The five entries are 5 to ``=``, 6 to ``<``, 7 to ``>``, 8 to ``>=`` and 9 to
 #: ``<=``, matching ``fn-equal-to`` through ``fn-not-greater-than``
-#: [copybooks/wsfnctn.cob:L112-L116]. ``fn-not-less-than`` is ``>=`` and
-#: ``fn-not-greater-than`` is ``<=`` - the COBOL ``START`` relational operators
-#: ``NOT LESS THAN`` and ``NOT GREATER THAN``, not their inverses.
-#:
-#: Entry 9 is present and UNUSABLE: :func:`start`'s guard rejects it, per anomaly
-#: A5 [common/glpostingMT.cbl:L695]. The entry stays because the frozen source
-#: declares both the relation [copybooks/wsfnctn.cob:L116] and an arm for it
-#: [common/glpostingMT.cbl:L724-L725]; removing it would hide the contradiction
-#: rather than record it.
+#: [copybooks/wsfnctn.cob:L112-L116]. ``NOT LESS THAN`` is ``>=`` and ``NOT
+#: GREATER THAN`` is ``<=`` - not their inverses. Entry 9 is present and
+#: UNUSABLE: :func:`start`'s guard rejects it (anomaly A5
+#: [common/glpostingMT.cbl:L695]), but it stays because the frozen source
+#: declares both the relation and an arm for it - removing it would hide that.
 ACCESS_TYPE_TO_RELATION: Final[Mapping[int, str]] = START_RELATION_BY_ACCESS_TYPE
 
 #: The same mapping with the relation TRIMMED to its token, for direct use in
@@ -739,9 +730,7 @@ LEGAL_RELATIONS: Final[tuple[MostRelation, ...]] = tuple(
 )
 
 
-# =============================================================================
 #  CURSOR SLOTS  -  ONE PER READ ORDER, NOT ONE PER TABLE
-# =============================================================================
 
 
 class CursorSlot(enum.IntEnum):
@@ -789,9 +778,7 @@ POSITIONING_FUNCTIONS: Final[tuple[FileFunction, ...]] = (
 )
 
 
-# =============================================================================
 #  KEY OF REFERENCE  -  THE DECLARED METADATA AS A VALUE OBJECT
-# =============================================================================
 
 #: Width of the packed offset/length string, `pic x(8)`
 #: [common/glpostingMT.scb:L233]. Two `9(4)` subfields redefined over it
@@ -878,7 +865,7 @@ class KeyOfReference:
     #: `*> In SAINV-LINES-REC` [common/slinvoiceMT.scb:L297, :L301].
     table_name: str
 
-    #: The MySQL column the key name resolves to. Verified against the frozen
+    #: The MySQL column the key name resolves to. Traced to the frozen
     #: `mysql/ACASDB.sql`: every one of the twenty-two key names IS a real
     #: column of its table.
     column_name: str
@@ -1063,9 +1050,7 @@ class KeyOfReference:
         )
 
 
-# =============================================================================
 #  ORDERING AND SELF-POSITIONING METADATA
-# =============================================================================
 
 
 class OrderQuoting(enum.StrEnum):
@@ -1226,31 +1211,18 @@ class ExtraReadOrder:
     note: str = ""
 
 
-# =============================================================================
 #  TABLE-OF-KEYNAMES  -  THE DECLARED METADATA, AS DATA  (RULE R-5)
-# =============================================================================
-#
-# Transcribed from the `Table-Of-Keynames` block of all TWENTY in-scope bridges.
-# Every value below appears in a frozen `.scb` at the cited line; not one is
-# inferred, and there is not one per-table branch anywhere in this module.
-#
-# DECLARATION ORDER IS HANDLER NUMBER, and it is deliberate rather than tidy:
-# `acas000` keys 1-4, then acas005, 006, 007, 008, 012, 013, 015, 016, 019, 022,
-# 026, 029, then acasirsub1, 3, 4, 5. Rule R-6 forbids an ordering a run could
-# vary, so `list(TABLE_OF_KEYNAMES)` is reproducible across processes, and it is
-# NOT sorted alphabetically - sorting would divorce it from the handler sequence
-# the traceability document maps.
-#
-# THE COUNT: eighteen bridges declare `occurs 1` and two declare `occurs 2`
-# (`slinvoiceMT` [common/slinvoiceMT.scb:L305], `plinvoiceMT`
-# [common/plinvoiceMT.scb:L306]), giving 18 + 4 = 22 keys of reference across
-# exactly 22 in-scope tables - one key per table.
-#
-# NO BRIDGE LACKS A KEY TABLE. `slpostingMT` in particular DOES declare one
-# [common/slpostingMT.scb:L213-L219]; what makes `START` unreachable for
-# `PSIRSPOST-REC` is its HANDLER, not missing metadata, and that guard is
-# recorded separately in `HANDLER_REJECTED_FUNCTIONS` below. Fabricating an
-# empty entry for it would misdescribe the frozen source.
+# Transcribed from the `Table-Of-Keynames` block of all TWENTY in-scope bridges;
+# every value appears in a frozen `.scb` at the cited line, and there is not one
+# per-table branch in this module.
+# DECLARATION ORDER IS HANDLER NUMBER, deliberately rather than tidily:
+# `acas000` keys 1-4, then acas005 to acas029, then acasirsub1, 3, 4, 5. Rule
+# R-6 forbids an ordering a run could vary, so `list(TABLE_OF_KEYNAMES)` is
+# reproducible; it is NOT alphabetical, which would divorce it from the handler
+# sequence traceability maps. THE COUNT: eighteen bridges declare `occurs 1` and
+# two declare `occurs 2` [common/slinvoiceMT.scb:L305],
+# [common/plinvoiceMT.scb:L306], giving 18 + 4 = 22 keys across exactly 22
+# tables. `slpostingMT` DOES declare one [common/slpostingMT.scb:L213-L219].
 TABLE_OF_KEYNAMES: Final[Mapping[str, tuple[KeyOfReference, ...]]] = (
     MappingProxyType(
         {
@@ -1521,14 +1493,10 @@ TABLE_OF_KEYNAMES: Final[Mapping[str, tuple[KeyOfReference, ...]]] = (
 )
 
 
-# =============================================================================
 #  PRIMARY KEYS  -  RECORDED SO THE ONE DIVERGENCE IS VISIBLE
-# =============================================================================
-#
 # Read from the frozen `mysql/ACASDB.sql`, whose twenty-two in-scope tables each
 # declare a SINGLE-COLUMN primary key and ZERO secondary indexes. Held here for
 # two reasons and used for neither ordering nor positioning:
-#
 #  1. It makes the `GLPOSTING-REC` divergence checkable rather than asserted.
 #     For twenty-one tables this map agrees with the key of reference; for that
 #     one it does not, and an anomaly-locking test can compare the two maps and
@@ -1536,7 +1504,6 @@ TABLE_OF_KEYNAMES: Final[Mapping[str, tuple[KeyOfReference, ...]]] = (
 #  2. It documents that there IS no alternative ordering available - with one
 #     key column and no secondary index, `ORDER BY <key of reference>` is both
 #     sufficient and the only thing the compiled oracle can corroborate.
-#
 # Declared in the same handler order as `TABLE_OF_KEYNAMES` so the two zip.
 TABLE_PRIMARY_KEYS: Final[Mapping[str, str]] = MappingProxyType(
     {
@@ -1568,27 +1535,18 @@ TABLE_PRIMARY_KEYS: Final[Mapping[str, str]] = MappingProxyType(
 )
 
 
-# =============================================================================
 #  SELF-POSITIONING  -  ANOMALIES A1 AND A9, AS DATA
-# =============================================================================
-#
 # One entry per bridge, transcribed from its `ba040-Process-Read-Next`. The
-# relation and the low key are what that paragraph hard-codes for the
+# relation and low key are what that paragraph hard-codes for the
 # `Cursor-Not-Active` branch; see :class:`SequentialReadStart` for why both are
-# anomalies rather than settings.
-#
-# The tally, so the split is on the record: `>` in nine bridges - systemMT,
-# dfltMT, finalMT, sys4MT, nominalMT, analMT, irsnominalMT, irsdfltMT,
-# irsfinalMT - and `>=` in eleven - glpostingMT, glbatchMT, slpostingMT,
-# salesMT, valueMT, slinvoiceMT, otm3MT, purchMT, plinvoiceMT, otm5MT,
-# irspostingMT.
-#
-# THE TWO LINES TABLES ARE DELIBERATELY ABSENT, and their absence is the point
-# (rule R-5: deliberate omissions are recorded as omissions). `SAINV-LINES-REC`
-# and `PUINV-LINES-REC` have no `ba040` of their own: they are reached through
-# their header bridge's SECOND cursor slot with `set KOR-x1 to 2`
-# [common/slinvoiceMT.cbl:L2731], so the bridge declares no separate low key for
-# them. Inventing one would be fabrication.
+# anomalies rather than settings. The tally, so the split is on the record: `>`
+# in nine bridges - systemMT, dfltMT, finalMT, sys4MT, nominalMT, analMT,
+# irsnominalMT, irsdfltMT, irsfinalMT - and `>=` in eleven - glpostingMT,
+# glbatchMT, slpostingMT, salesMT, valueMT, slinvoiceMT, otm3MT, purchMT,
+# plinvoiceMT, otm5MT, irspostingMT.
+# THE TWO LINES TABLES ARE DELIBERATELY ABSENT (rule R-5 records omissions as
+# omissions): they have no `ba040`, being reached through their header bridge's
+# SECOND slot with `set KOR-x1 to 2` [common/slinvoiceMT.cbl:L2731].
 SEQUENTIAL_READ_START: Final[Mapping[str, SequentialReadStart]] = MappingProxyType(
     {
         "SYSTEM-REC": SequentialReadStart(
@@ -1735,61 +1693,34 @@ SEQUENTIAL_READ_START: Final[Mapping[str, SequentialReadStart]] = MappingProxyTy
 )
 
 
-# =============================================================================
 #  HANDLER-LEVEL VERB GUARDS
-# =============================================================================
-#
 # Some tables cannot be positioned at all, and the refusal lives in the HANDLER
-# rather than in the bridge - which is why the bridge still declares perfectly
-# good key metadata for them. `acas008` rejects four verbs unconditionally at
-# entry, before any key is consulted [common/acas008.cbl:L299-L307]::
-#
-#      evaluate File-Function
-#               when  4   *> fn-read-indexed
-#               when  7   *> fn-re-write
-#               when  9   *> fn-start
-#               when  8   *> fn-delete
-#                        move 988 to WE-Error       *> Action type wrong for file type (seq)   988
-#                        move 99 to fs-reply
-#                        go   to aa999-main-exit
-#      end-evaluate.
-#
-# The underlying store is sequential, so `START` and `READ-INDEXED` return
+# rather than the bridge - which is why the bridge still declares perfectly good
+# key metadata for them. `acas008` rejects four verbs unconditionally at entry,
+# before any key is consulted, its `evaluate` listing `when 4` read-indexed,
+# `when 7` re-write, `when 9` start and `when 8` delete into one body that moves
+# 988 to `WE-Error` and 99 to `fs-reply` [common/acas008.cbl:L299-L307]. The
+# underlying store is sequential, so `START` and `READ-INDEXED` return
 # `(99, 988)` and never touch the table. `fn-read-next` is NOT in the list, so
-# sequential reading of `PSIRSPOST-REC` works normally.
-#
-# Only the two verbs this module implements are listed; rewrite and delete
-# belong to the handler modules that own those verbs.
+# sequential reading of `PSIRSPOST-REC` works normally. Only the two verbs this
+# module implements are listed; rewrite and delete belong to the handler modules
+# that own those verbs.
 HANDLER_REJECTED_FUNCTIONS: Final[
     Mapping[str, Mapping[FileFunction, tuple[FsReply, WeError, str]]]
 ] = MappingProxyType(
     {
-        # `acas008` guards FOUR verbs, in the order its `evaluate` lists them -
-        # `when 4` read-indexed, `when 7` re-write, `when 8` delete, `when 9`
-        # start - all four falling into one body
-        # [common/acas008.cbl:L299-L307]:
-        #
-        #      evaluate File-Function
-        #               when  4   *> fn-read-indexed
-        #               when  7   *> fn-re-write
-        #               when  9   *> fn-start
-        #               when  8   *> fn-delete
-        #                        move 988 to WE-Error
-        #                        move 99 to fs-reply
-        #                        go   to aa999-main-exit
-        #      end-evaluate.
-        #
+        # `acas008` guards FOUR verbs in one body, in the order its `evaluate`
+        # lists them - `when 4` read-indexed, `when 7` re-write, `when 9` start,
+        # `when 8` delete - moving 988 to `WE-Error` and 99 to `fs-reply`
+        # [common/acas008.cbl:L299-L307]; the transcription is above.
         # ANOMALY A15 - REPRODUCED, NOT FIXED. The facade nonetheless PUBLISHES
         # `SPL-Posting-Rewrite` over this handler, so a caller can invoke a verb
         # that CANNOT succeed - it fails at the handler's first act, before any
-        # statement exists. Re-write and delete are recorded here even though
-        # this module implements neither, because the guard is the handler's
-        # property rather than any one verb's, and rule R-5 requires declared
-        # metadata to be transcribed rather than filtered down to what the
-        # current caller happens to need. The two positioning verbs consult this
-        # table; `read_next` is deliberately ABSENT from it, which is why the
-        # sequential walk of this table is live and why ambiguity Q2 is
-        # reachable.
+        # statement exists. Re-write and delete are recorded even though this
+        # module implements neither, because the guard is the handler's property
+        # rather than any one verb's (rule R-5). `read_next` is deliberately
+        # ABSENT from it, which is why the sequential walk of this table is live
+        # and why ambiguity Q2 is reachable.
         "PSIRSPOST-REC": MappingProxyType(
             {
                 FileFunction.READ_INDEXED: (
@@ -1818,27 +1749,18 @@ HANDLER_REJECTED_FUNCTIONS: Final[
 )
 
 
-# =============================================================================
 #  THE FOUR EXTRA READ VERBS  -  POSITIONING SUPPORT, AS DATA
-# =============================================================================
-#
 # Keyed by table, then by `File-Function`. Only the handlers named in each entry
 # may use the verb, because only their facade publishes it - `acas012`/`acas022`
-# publish by-name, `acas019`/`acas029` by-batch and by-customer, and
-# `acas016`/`acas026` read-next-header.
-#
+# by-name, `acas019`/`acas029` by-batch and by-customer, `acas016`/`acas026`
+# read-next-header.
 # NONE of these order by a key of reference: they order by NON-key columns, and
 # the frozen schema declares no index on any of them. That absence IS the
-# compiled system's behaviour. Adding an index to make them efficient is
-# forbidden twice over - by rule R-3, which permits no schema change, and by
-# Agent Action Plan section 0.8.4, which puts performance work out of scope by
-# construction.
-#
+# compiled system's behaviour, and adding an index is forbidden twice over - by
+# rule R-3 and by Agent Action Plan section 0.8.4.
 # NOT ON THE POSTING PATH. Verbs 31/32/33 serve report programs the migration
-# excludes - sl160 for by-name, sl095/pl095 for by-batch, sl110/sl120/sl190 for
-# by-customer [copybooks/wsfnctn.cob:L102-L104]. They are declared here so the
-# handler modules that publish them have the metadata, and so the anomaly below
-# is on the record; the in-scope cycle never reaches them.
+# excludes [copybooks/wsfnctn.cob:L102-L104]. They are declared so the handler
+# modules that publish them have the metadata and the anomaly below is recorded.
 EXTRA_READ_ORDERS: Final[Mapping[str, Mapping[FileFunction, ExtraReadOrder]]] = (
     MappingProxyType(
         {
@@ -1893,31 +1815,18 @@ EXTRA_READ_ORDERS: Final[Mapping[str, Mapping[FileFunction, ExtraReadOrder]]] = 
                     ),
                 }
             ),
-            # -- acas019 -> otm3MT, fn 32 and 33 -----------------------------
-            #
-            # ANOMALY A8 - REPRODUCED, NOT FIXED.  Two independent defects:
-            #
+            # -- acas019 -> otm3MT, fn 32 and 33 --------------------------
+            # ANOMALY A8 - REPRODUCED, NOT FIXED. Two independent defects:
             #  (a) The ordering terms are SINGLE-quoted
-            #      [common/otm3MT.cbl:L1005-L1008]. In MySQL a single-quoted
-            #      name is a string CONSTANT, not an identifier, so the clause
-            #      sorts every row by the same value and orders nothing. Every
-            #      term below therefore carries
-            #      `OrderQuoting.STRING_CONSTANT`, and `OrderTerm.to_sql`
-            #      renders it single-quoted, because rendering it as an
-            #      identifier would fix the defect.
-            #  (b) `ws-Where` is built with the ORDER BY text ALONE and no
-            #      predicate, while the statement still concatenates `" WHERE "`
-            #      [common/otm3MT.cbl:L1022-L1026]. The emitted text is
-            #      therefore `SELECT * FROM `SAITM3-REC` WHERE  ORDER BY ...`,
-            #      which MySQL rejects outright; the driver error then reaches
-            #      `Mysql-1100-Db-Error` and returns `(99, 911)`
-            #      [copybooks/mysql-procedures.cpy:L127-L128]. Hence
-            #      `predicate_present=False`.
-            #
-            # The declared column order also disagrees with the paragraph's own
-            # comment, which says `*> order by B-Nos B-Item ASC, Type DES, Date
-            # Invoice ASC` [common/otm3MT.cbl:L491-L492] while the code lists
-            # invoice and date first. The CODE is transcribed, not the comment.
+            #      [common/otm3MT.cbl:L1005-L1008], so in MySQL each is a string
+            #      CONSTANT rather than an identifier and the clause orders
+            #      nothing. Every term carries `OrderQuoting.STRING_CONSTANT`,
+            #      which `OrderTerm.to_sql` renders single-quoted, because
+            #      rendering it as an identifier would fix the defect.
+            #  (b) `ws-Where` holds the ORDER BY text ALONE with no predicate
+            #      while the statement still concatenates `" WHERE "`
+            #      [common/otm3MT.cbl:L1022-L1026], so MySQL rejects the text
+            #      and `(99, 911)` results. Hence `predicate_present=False`.
             "SAITM3-REC": MappingProxyType(
                 {
                     FileFunction.READ_BY_BATCH: ExtraReadOrder(
@@ -2080,7 +1989,6 @@ EXTRA_READ_ORDERS: Final[Mapping[str, Mapping[FileFunction, ExtraReadOrder]]] = 
                 }
             ),
             # -- acas016 -> slinvoiceMT, fn 34 -------------------------------
-            #
             # `fn-Read-Next-Header` (34) shares ONE `evaluate` body with
             # `fn-read-next` (3): the two `when` arms are consecutive and fall
             # into the same `go to ba040-Process-Read-Next`
@@ -2089,7 +1997,6 @@ EXTRA_READ_ORDERS: Final[Mapping[str, Mapping[FileFunction, ExtraReadOrder]]] = 
             # EXACTLY as 3 - same cursor slot, same ordering on the key of
             # reference, same low key. Any header-versus-lines distinction lives
             # in the handler `acas016`, not here.
-            #
             # It therefore declares NO ordering of its own, and `order_terms` is
             # empty rather than invented: an empty tuple means "orders by the key
             # of reference, as the primary sequential read does".
@@ -2131,9 +2038,7 @@ EXTRA_READ_ORDERS: Final[Mapping[str, Mapping[FileFunction, ExtraReadOrder]]] = 
 )
 
 
-# =============================================================================
 #  THE CURSOR  -  01 DAL-Data, REPRODUCED
-# =============================================================================
 
 #: `05  Most-Cursor-Set pic 9    value zero.` and `88  Cursor-Not-Active value
 #: zero.` [common/glpostingMT.scb:L249-L250].
@@ -2164,15 +2069,16 @@ class CursorState:
     ``most_cursor_set`` starts at zero exactly as ``value zero`` declares, so a
     fresh cursor is not active and the first ``READ NEXT`` self-positions.
 
-    The two fields BEYOND the COBOL block - :attr:`positioned_key` and
-    :attr:`position_inclusive` - carry what the compiled bridge keeps in the
-    MySQL result set rather than in working storage. The bridge issues one
-    statement and then walks the stored result with ``MySQL_fetch_record``
-    [common/glpostingMT.cbl:L536-L554]; this module re-positions with a bounded
-    single-row statement per call, because rule R-3 forbids buffering a result.
-    The observable sequence is the same, so these two fields are the position
-    the stored result would have held. That difference is recorded on
-    :func:`read_next` for ``docs/migration/ambiguity-resolutions.md``.
+    The state BEYOND the COBOL block is what the compiled bridge keeps in the
+    MySQL result set rather than in working storage: the STORED RESULT itself.
+    ``mysql_store_result`` materialises every qualifying row at positioning time
+    and ``MySQL_fetch_record`` then walks it one record per call
+    [common/glpostingMT.cbl:L536-L554]. That snapshot is reproduced here by
+    :meth:`store_result` and :meth:`fetch_record`, with :attr:`positioned_key`
+    carrying the key last delivered - the value ``WS-File-Key`` receives
+    [common/glpostingMT.cbl:L586] - for diagnostics. See AMBIGUITY Q1 in the
+    module docstring for the measurement that settled snapshot over
+    re-positioning.
     """
 
     #: The table this cursor walks.
@@ -2199,22 +2105,100 @@ class CursorState:
     #: cursor and not merely that it is active.
     key_of_reference: KeyOfReference | None = None
 
-    #: ``True`` when the next ``READ NEXT`` must return the row AT
-    #: :attr:`positioned_key`, ``False`` when it must return the row after it.
-    #:
-    #: This is how "START positions but does not fetch" is honoured. The bridge
-    #: comments the design change itself
-    #: [common/glpostingMT.cbl:L795-L800]::
-    #:
-    #:     *> Here we need FETCH as SELECT has been issued & cursor active
-    #:      *>    go to ba041-Reread.
-    #:     *> Changed to do start then read next
-    #:     *>   As per irsub4 operations
-    #:
-    #: so a START leaves the position INCLUSIVE and the first following READ
-    #: NEXT returns the row the START found. Each successful read then makes it
-    #: exclusive, so the walk advances exactly once per call.
-    position_inclusive: bool = False
+    #: The stored result - every row ``mysql_store_result`` materialised at
+    #: positioning time [copybooks/mysql-procedures.cpy:L187-L192], in the order
+    #: the single ``ORDER BY`` term returned them. Empty before any positioning.
+    stored_rows: tuple[Mapping[str, object], ...] = ()
+
+    #: How many records of :attr:`stored_rows` ``MySQL_fetch_record`` has already
+    #: handed back. The bridge holds this inside the result set; here it is
+    #: explicit so that "START positions but does not fetch" is expressible as
+    #: "the snapshot exists and nothing has been fetched from it".
+    fetched_count: int = 0
+
+    @property
+    def count_rows(self) -> int:
+        """``WS-MYSQL-Count-Rows`` - the FULL row count of the stored result.
+
+        The count ``mysql_num_rows`` reports, which the bridge tests separately
+        from the fetch and branches on differently at each stage
+        [common/glpostingMT.cbl:L499, :L767]. It is the count of the WHOLE
+        qualifying result and does not shrink as records are fetched.
+
+        >>> CursorState("GLPOSTING-REC", CursorSlot.PRIMARY).count_rows
+        0
+        """
+        return len(self.stored_rows)
+
+    @property
+    def position_inclusive(self) -> bool:
+        """``True`` while the stored result's first record is still unfetched.
+
+        This is how "START positions but does not fetch" is honoured. The bridge
+        comments the design change itself [common/glpostingMT.cbl:L795-L800]::
+
+            *> Here we need FETCH as SELECT has been issued & cursor active
+             *>    go to ba041-Reread.
+            *> Changed to do start then read next
+            *>   As per irsub4 operations
+
+        so a ``START`` stores the result and consumes nothing from it, and the
+        first following ``READ NEXT`` returns the row the ``START`` found. Derived
+        from the snapshot rather than tracked separately, so there is one source
+        of truth for the position.
+
+        >>> CursorState("GLPOSTING-REC", CursorSlot.PRIMARY).position_inclusive
+        False
+        """
+        return bool(self.stored_rows) and self.fetched_count == 0
+
+    def store_result(self, rows: Iterable[Mapping[str, object]]) -> int:
+        """Reproduce ``Mysql-1220-Store-Result`` then ``MySQL_num_rows``.
+
+        ``mysql_store_result`` materialises the ENTIRE qualifying result on the
+        client [copybooks/mysql-procedures.cpy:L187-L192] and ``mysql_num_rows``
+        then reports its size. Storing a fresh result REPLACES any previous one,
+        exactly as re-issuing a statement does in the bridge.
+
+        Args:
+            rows: Every qualifying row, in the order the statement returned them.
+
+        Returns:
+            The full row count - the value ``WS-MYSQL-Count-Rows`` receives.
+        """
+        self.stored_rows = tuple(rows)
+        self.fetched_count = 0
+        return len(self.stored_rows)
+
+    def fetch_record(self) -> Mapping[str, object] | None:
+        """Reproduce ``MySQL_fetch_record`` [common/glpostingMT.cbl:L536-L554].
+
+        Hands back the next record of the stored result and advances. Issues no
+        statement: the bridge's ``ba041-Reread`` walks the snapshot the earlier
+        positioning already materialised.
+
+        Returns:
+            The next record, or ``None`` once the snapshot is exhausted - the
+            ``return-code = -1`` the bridge tests for
+            [common/glpostingMT.cbl:L556-L557].
+        """
+        if self.fetched_count >= len(self.stored_rows):
+            return None
+        row = self.stored_rows[self.fetched_count]
+        self.fetched_count += 1
+        return row
+
+    def free_result(self) -> None:
+        """Reproduce ``CALL "MySQL_free_result"`` [common/glpostingMT.cbl:L1032].
+
+        Releases the stored result. Called ONLY from :meth:`free`, because
+        ``ba998-Free`` is the only paragraph that frees it - the end-of-file sites
+        merely ``set Cursor-Not-Active to true`` and leave the result allocated.
+        That leak is the frozen behaviour and is reproduced: the next
+        self-positioning ``READ NEXT`` simply overwrites the snapshot.
+        """
+        self.stored_rows = ()
+        self.fetched_count = 0
 
     def cursor_not_active(self) -> bool:
         """`88  Cursor-Not-Active    value zero.` [common/glpostingMT.scb:L250].
@@ -2258,26 +2242,27 @@ class CursorState:
                 CALL "MySQL_free_result" USING WS-MYSQL-RESULT end-call
                 set      Cursor-Not-Active to true.
 
-        There being no stored result to release here, the observable effect is
-        the flag plus the loss of position. Both are reproduced: leaving the
-        position behind would let a later ``READ NEXT`` resume a cursor the
-        COBOL had discarded.
+        The stored result is released by :meth:`free_result` - this is the ONE
+        paragraph that frees it - and the flag and the position go with it.
+        Leaving the snapshot behind would let a later ``READ NEXT`` resume a
+        cursor the COBOL had discarded.
         """
+        self.free_result()
         self.set_cursor_not_active()
         self.positioned_key = None
-        self.position_inclusive = False
 
-    def position_at(self, key_value: object, *, inclusive: bool) -> None:
-        """Record a position and mark the cursor active.
+    def position_at(self, key_value: object) -> None:
+        """Record the key just positioned on and mark the cursor active.
+
+        Whether the next ``READ NEXT`` returns the row AT this key or the one
+        after it is NOT recorded here: it follows from how much of the stored
+        result has been fetched, which :attr:`position_inclusive` reports.
 
         Args:
             key_value: The key of the row positioned on, exactly as the driver
                 returned it - not re-parsed, not re-formatted.
-            inclusive: ``True`` after a ``START``, whose position the next read
-                must return; ``False`` after a read, which must advance past it.
         """
         self.positioned_key = key_value
-        self.position_inclusive = inclusive
         self.set_cursor_active()
 
 
@@ -2286,9 +2271,9 @@ class CursorStateTable:
 
     Explicit and resettable by design. In COBOL each bridge is a separate
     program with its own ``01 DAL-Data`` in working storage, so cursors are
-    naturally isolated per table; here they share a process, and
-    ``tests/determinism/test_two_runs_byte_identical.py`` needs two runs in ONE
-    process to be independent. :meth:`reset` is what makes that true.
+    naturally isolated per table; here they share a process, and the
+    determinism requirement needs two runs in ONE process to be independent.
+    :meth:`reset` is what makes that true.
 
     Not thread-safe, and deliberately so: rule R-3 requires strictly sequential
     execution matching the single-threaded COBOL, so a lock here would imply a
@@ -2373,9 +2358,7 @@ class CursorStateTable:
 _DEFAULT_STATES: Final[CursorStateTable] = CursorStateTable()
 
 
-# =============================================================================
 #  THE OUTCOME  -  THE STATUS PAIR THE BRIDGE WOULD HAVE LEFT
-# =============================================================================
 
 
 @dataclass(frozen=True, slots=True)
@@ -2474,14 +2457,17 @@ class CursorOutcome:
         file_access.logging_data.ws_log_where = self.statement
 
 
-# =============================================================================
 #  INTERNAL HELPERS
-# =============================================================================
 
 #: The driver's "row count unknown" sentinel. `WS-MYSQL-Count-Rows` in the
 #: bridge is always a real count because `mysql_store_result` has already run;
 #: an unbuffered Python cursor reports -1 instead, and the only safe reading of
 #: "unknown" is to skip the count test and let the fetch decide.
+#:
+#: The cursor WALK no longer needs this: `read_next` and `start` count the stored
+#: result they materialised, which is always known and is exactly what
+#: `mysql_num_rows` reports. It remains in force for `read_indexed`, whose
+#: exact-key fetch never stores a result.
 _ROWCOUNT_UNKNOWN: Final[int] = -1
 
 
@@ -2528,10 +2514,6 @@ def _column_names(cursor: DatabaseCursor) -> tuple[str, ...]:
 def _fetch_one_row(cursor: DatabaseCursor) -> Mapping[str, object] | None:
     """Fetch at most ONE row and return it keyed by column name.
 
-    The only fetch this module performs. Rule R-3 forbids buffering the
-    remainder of a result and Agent Action Plan section 0.3.3 gives the reason,
-    so there is no whole-result fetch here and none may be added.
-
     Accepts either row shape a driver may hand back - a sequence, or a mapping
     when the driver was configured to produce one - because
     ``connection.py`` owns that choice and this module must not constrain it.
@@ -2553,6 +2535,141 @@ def _fetch_one_row(cursor: DatabaseCursor) -> Mapping[str, object] | None:
         # honest about that and still let a caller reach the values.
         return MappingProxyType({str(index): value for index, value in enumerate(row)})
     return MappingProxyType(dict(zip(names, row, strict=False)))
+
+
+def _store_result(cursor: DatabaseCursor) -> tuple[Mapping[str, object], ...]:
+    """Materialise the ENTIRE result, reproducing ``mysql_store_result``.
+
+    ``Mysql-1220-Store-Result`` pulls every qualifying row to the client
+    [copybooks/mysql-procedures.cpy:L187-L192] before ``MySQL_num_rows`` counts it
+    and ``MySQL_fetch_record`` walks it. Rule R-3 does not bar this: it bars added
+    validations, added fields, schema change and concurrency. AMBIGUITY Q1 in the
+    module docstring records the measurement that requires it.
+
+    Drains with repeated :func:`_fetch_one_row` rather than ``fetchall`` so that
+    the :class:`DatabaseCursor` protocol needs no widening and any driver
+    ``connection.py`` chooses will work.
+
+    Args:
+        cursor: The cursor the statement was issued on.
+
+    Returns:
+        Every row, keyed by column name, in the order the statement returned them.
+    """
+    rows: list[Mapping[str, object]] = []
+    while True:
+        row = _fetch_one_row(cursor)
+        if row is None:
+            return tuple(rows)
+        rows.append(row)
+
+
+def _deliver_from_stored_result(
+    state: CursorState,
+    key: KeyOfReference,
+    *,
+    empty_tag: str,
+    incoming_fs_reply: FsReply,
+    incoming_we_error: int,
+    file_access: FileAccess | None,
+    statement: str = "",
+    parameters: tuple[object, ...] = (),
+) -> CursorOutcome:
+    """Reproduce ``ba041-Reread`` [common/glpostingMT.cbl:L523-L589].
+
+    The paragraph ``ba040`` falls into, and the one a ``READ NEXT`` on an already
+    active cursor enters directly. It issues NO statement: it advances the stored
+    result and applies the two tests that follow the fetch.
+
+    Args:
+        state: The cursor whose stored result is being walked.
+        key: The key of reference in force, whose column names the delivered key.
+        empty_tag: The ``WS-File-Key`` tag for exhaustion - ``"EOF"`` when entered
+            directly [common/glpostingMT.cbl:L558], ``"No Data"`` when reached
+            through ``ba040``'s self-positioning [:L510].
+        incoming_fs_reply: The caller's ``FS-Reply`` on entry, which anomaly A10
+            tests AFTER the fetch.
+        incoming_we_error: The caller's ``We-Error`` on entry, preserved unchanged
+            on the A10 path where no status is written.
+        file_access: Applied to before returning when given.
+        statement: The statement that materialised the snapshot, for the outcome.
+            Empty when this paragraph was entered directly, as the bridge issues
+            none there.
+        parameters: That statement's bound parameters, for the same reason.
+
+    Returns:
+        The outcome - a delivered row, exhaustion, or an A10 discard.
+    """
+    row = state.fetch_record()
+
+    if row is None:
+        # Exhausted. `if return-code = -1  move 10 to fs-Reply WE-Error`
+        # [common/glpostingMT.cbl:L556-L557], where ONE statement writes BOTH
+        # fields, so the pair is `(10, 10)` and `We-Error` is NOT left at zero.
+        # The cursor is deactivated by a bare `set Cursor-Not-Active to true`
+        # [:L559] and NOT by `ba998-Free`, so the stored result stays allocated -
+        # the leak the frozen source has, reproduced.
+        state.set_cursor_not_active()
+        end_fs_reply, end_we_error = end_of_file_status()
+        outcome = CursorOutcome(
+            fs_reply=end_fs_reply,
+            we_error=end_we_error,
+            row=None,
+            statement=statement,
+            parameters=parameters,
+            file_key=empty_tag,
+        )
+        if file_access is not None:
+            outcome.apply_to(file_access)
+        return outcome
+
+    if incoming_fs_reply == FsReply.END_OF_FILE:
+        # ANOMALY A10: the row was fetched and is now THROWN AWAY, because the
+        # caller's `FS-Reply` still holds 10 from a previous end of file
+        # [common/glpostingMT.cbl:L580-L583]. No status is written - the stale
+        # pair simply persists - and the cursor is deactivated, so the next call
+        # self-positions and discards a row all over again. The record IS consumed
+        # from the stored result first, exactly as the bridge consumes it.
+        state.set_cursor_not_active()
+        _LOG.warning(
+            "fn-read-next on %s discarded a fetched row because the caller's "
+            "FS-Reply is still 10 [common/glpostingMT.cbl:L580-L583]; end of "
+            "file is sticky until some other operation resets the shared field",
+            state.table_name,
+        )
+        outcome = CursorOutcome(
+            fs_reply=incoming_fs_reply,
+            we_error=incoming_we_error,
+            row=None,
+            statement=statement,
+            parameters=parameters,
+            status_written=False,
+            file_key="EOF3",
+        )
+        if file_access is not None:
+            outcome.apply_to(file_access)
+        return outcome
+
+    # Delivered. `perform bb100-UnloadHVs` then
+    # `move HV-POST-KEY to WS-File-Key` and `move zero to fs-reply WE-Error`
+    # [common/glpostingMT.cbl:L585-L588]. The snapshot has advanced by one record,
+    # so `position_inclusive` now reports False and the next call fetches the
+    # following record - including any row TIED on this key, which is what the
+    # AMBIGUITY Q1 measurement showed a `LIMIT 1` walk lost.
+    positioned = row[key.column_name]
+    state.key_of_reference = key
+    state.position_at(positioned)
+    outcome = CursorOutcome(
+        fs_reply=FsReply.SUCCESS,
+        we_error=int(WeError.SUCCESS),
+        row=row,
+        statement=statement,
+        parameters=parameters,
+        file_key=str(positioned),
+    )
+    if file_access is not None:
+        outcome.apply_to(file_access)
+    return outcome
 
 
 def keys_for(table_name: str) -> tuple[KeyOfReference, ...]:
@@ -2647,6 +2764,43 @@ def _incoming_status(file_access: FileAccess | None) -> tuple[FsReply, int]:
     return (fs_reply, int(file_access.we_error))
 
 
+def _driver_failure_fields(error: BaseException) -> tuple[str, str, str]:
+    """Render one driver exception as three fields that are safe to log.
+
+    Three of the positioning verbs catch a driver failure and report it, and each
+    of the three used to interpolate ``str(error)`` directly. That text is built
+    by the server and the client library out of material that can include the
+    connection's account, the host and key values from the data, and it can carry
+    a carriage return and a line feed - so interpolating it raw both leaks and
+    lets the failure forge a second log record (CWE-532, CWE-117). This helper is
+    the one place the three sites share, so none can be the weak one.
+
+    NOTHING BRANCHES ON THE RESULT. The status pair each caller then reports is
+    the one the frozen source dictates - ``(21, 0)`` for `fn-start`, end of file
+    for `fn-read-next` (anomaly A11) and ``(21, 911)`` for `fn-read-indexed`
+    (anomaly A14) - and it is chosen by the exception being caught at all, never
+    by what the exception said. Rules R-3 and R-4 are therefore untouched: the
+    only thing that changes is the rendering of a log line.
+
+    Args:
+        error: the exception the driver raised. Any exception type, because each
+            call site catches ``Exception`` in order to reproduce the bridge's
+            own "any error takes this path" behaviour.
+
+    Returns:
+        ``(exception type name, stable category, redacted detail)``. The type
+        name is a Python class name and so carries nothing sensitive; the
+        category comes from the error number alone; the detail is the driver's
+        message with identities removed and control characters escaped.
+    """
+    return (
+        type(error).__name__,
+        db_error_log_category(getattr(error, "errno", "") or ""),
+        redact_for_log(str(error)),
+    )
+
+
+
 def _guarded_by_handler(
     table_name: str, file_function: FileFunction
 ) -> tuple[FsReply, WeError, str] | None:
@@ -2663,9 +2817,7 @@ def _guarded_by_handler(
     return rejected.get(file_function)
 
 
-def _select_statement(
-    key: KeyOfReference, relation: str, *, limit_one: bool
-) -> str:
+def _select_statement(key: KeyOfReference, relation: str) -> str:
     """Build the ONE-predicate positioning statement the bridge builds.
 
     Reproduces [common/glpostingMT.cbl:L729-L743] and the SELECT that consumes it
@@ -2689,26 +2841,25 @@ def _select_statement(
     is transport, and a bound parameter yields the same logical predicate while
     removing an injection route the frozen source left open.
 
+    There is NO ``LIMIT``, exactly as the bridge has none: ``mysql_store_result``
+    materialises every qualifying row and ``ba041-Reread`` then walks the snapshot
+    one record per call. Bounding the statement to a single row was measured to
+    lose rows tied on a non-unique key of reference - see AMBIGUITY Q1 in the
+    module docstring - and to make ``WS-MYSQL-Count-Rows`` unreproducible.
+
     Args:
         key: The key of reference to position on.
         relation: The trimmed relation token.
-        limit_one: Append ``LIMIT 1``. The bridge has no ``LIMIT`` because
-            ``mysql_store_result`` materialises every qualifying row; bounding the
-            statement is how this module positions WITHOUT buffering, which rule
-            R-3 requires.
 
     Returns:
         The statement text, with one ``%s`` placeholder.
     """
     column = quote_identifier(key.column_name)
-    statement = (
+    return (
         f"SELECT * FROM {quote_identifier(key.table_name)} "
         f"WHERE {column} {relation} %s "
         f"ORDER BY {column} ASC"
     )
-    if limit_one:
-        statement += " LIMIT 1"
-    return statement
 
 
 def start(
@@ -2724,62 +2875,53 @@ def start(
 ) -> CursorOutcome:
     """``fn-start`` (``File-Function`` 9) - position the cursor, fetch nothing.
 
-    Reproduces ``ba060-Process-Start`` [common/glpostingMT.cbl:L691-L793] step
-    for step, in the order that paragraph performs them.
+    Reproduces ``ba060-Process-Start`` [common/glpostingMT.cbl:L691-L793] step for
+    step, in the order that paragraph performs them.
 
-    THE RELATION ARRIVES THROUGH ``Access-Type``, AND ONLY BY DESIGN.  Every
-    facade verb clears the field before dispatching - ``move zero to
-    Access-Type`` - EXCEPT ``-Start``, which deliberately does not.
-    ``GL-Batch-Start`` is two statements with no clear
-    [copybooks/Proc-ACAS-FH-Calls.cob:L456-L458] while ``GL-Batch-Read-Next``
-    right below it clears [copybooks/Proc-ACAS-FH-Calls.cob:L460-L463], and the
-    maintainer records the change in the copybook's own changelog
-    [copybooks/Proc-ACAS-FH-Calls.cob:L18]::
+    THE RELATION ARRIVES THROUGH ``Access-Type``, AND ONLY BY DESIGN. Every facade
+    verb clears the field before dispatching - ``move zero to Access-Type`` -
+    EXCEPT ``-Start``: ``GL-Batch-Start`` is two statements with no clear
+    [copybooks/Proc-ACAS-FH-Calls.cob:L456-L458] while ``GL-Batch-Read-Next`` right
+    below it clears [:L460-L463], and the maintainer records the change in the
+    copybook's own changelog [:L18]::
 
         *> 14/08/23 vbc - 1.08 - Remove 'move zero to access-type for Start, it is set !!!
 
-    So on a START the caller's access type IS the relation. Without that one
-    line this verb would have nowhere to get a relation from.
+    So on a START the caller's access type IS the relation. Without that one line
+    this verb would have nowhere to get a relation from.
 
-    ANOMALY A5 - REPRODUCED, NOT FIXED.  The guard is
-    ``if access-type < 5 or > 8`` [common/glpostingMT.cbl:L695], carrying the
-    maintainer's comment ``*> not using not < or not >``. Its upper bound is 8,
-    so ``fn-not-greater-than value 9`` is REJECTED with ``(99, 997)`` even though
-    [copybooks/wsfnctn.cob:L116] declares it, [copybooks/wsfnctn.cob:L20] records
-    it as "Activated", and [common/glpostingMT.cbl:L724-L725] gives it a relation
-    arm labelled ``*> [ not currently used in ACAS ]``. The prose at
-    [common/glpostingMT.cbl:L136] agrees with the guard, "Access-Type wrong (< 5
-    or > 8)". The arm therefore stays declared in ``dal/status.py`` and stays
-    dead here, because widening the guard to admit 9 would fix a defect and rule
-    R-4 makes a defect fixed a failure.
+    ANOMALY A5 - REPRODUCED, NOT FIXED. The guard is ``if access-type < 5 or > 8``
+    [common/glpostingMT.cbl:L695], carrying the comment ``*> not using not < or not
+    >``. Its upper bound is 8, so ``fn-not-greater-than value 9`` is REJECTED with
+    ``(99, 997)`` even though [copybooks/wsfnctn.cob:L116] declares it, [:L20]
+    records it "Activated", and [common/glpostingMT.cbl:L724-L725] gives it a
+    relation arm labelled ``*> [ not currently used in ACAS ]``; the prose at
+    [:L136] agrees with the guard. The arm stays declared in ``dal/status.py`` and
+    stays dead here, because widening the guard would fix a defect and rule R-4
+    makes a defect fixed a failure.
 
-    ANOMALY A7 - REPRODUCED, NOT FIXED.  When the statement matches no row the
-    bridge writes NEITHER status field. Only a driver-reported error sets a
-    status, and it sets ``21`` paired with ``We-Error`` ZERO
+    ANOMALY A7 - REPRODUCED, NOT FIXED. When the statement matches no row the
+    bridge writes NEITHER status field. Only a driver-reported error sets a status,
+    and it sets ``21`` paired with ``We-Error`` ZERO
     [common/glpostingMT.cbl:L771-L781]::
 
         if       WS-MYSQL-Count-Rows = zero
-                 ...
                  if    WS-MYSQL-Error-Number (1:1) not = "0"
-                       ...
-                       move 21 to fs-reply                  *> this may need changing for val in WE-Error!!
+                       move 21 to fs-reply    *> this may need changing ...
                        move zero to we-error
-                 end-if
-        else
-                 move  zero to FS-Reply WE-Error
+        else     move  zero to FS-Reply WE-Error
 
     So a START that finds nothing leaves whatever the caller had - typically the
-    zero of a previous success - and therefore LOOKS like success while the
-    cursor stays inactive. The returned :attr:`CursorOutcome.status_written` is
-    ``False`` on that path and :meth:`CursorOutcome.apply_to` writes nothing,
-    which is the only faithful reading.
+    zero of a previous success - and LOOKS like success while the cursor stays
+    inactive. :attr:`CursorOutcome.status_written` is ``False`` on that path and
+    :meth:`CursorOutcome.apply_to` writes nothing, the only faithful reading.
 
     Args:
         cursor: A DB-API cursor from ``connection.py``.
         table_name: The in-scope table to position on.
-        key_value: The key to compare against, as ``str``, ``int`` or
-            ``Decimal``. Never a binary floating-point value (rule R-2): an
-            inexact comparison positions on the wrong row without complaint.
+        key_value: The key to compare against, as ``str``, ``int`` or ``Decimal``.
+            Never a binary floating-point value (rule R-2): an inexact comparison
+            positions on the wrong row without complaint.
         access_type: The caller's ``Access-Type``, which on a START is the
             relation. 5 ``=``, 6 ``<``, 7 ``>``, 8 ``>=``; 9 ``<=`` is declared
             and rejected by the guard above.
@@ -2883,7 +3025,7 @@ def start(
     state.key_of_reference = key
 
     # --- Step 5: one predicate, one column, ORDER BY the key of reference ASC.
-    statement = _select_statement(key, relation.token, limit_one=True)
+    statement = _select_statement(key, relation.token)
     parameters = (key_value,)
 
     # --- Step 6: issue it. A driver error is the bridge's
@@ -2892,16 +3034,14 @@ def start(
     try:
         cursor.execute(statement, parameters)
     except Exception as error:  # any driver error takes this path - see below
-        # A failed statement reaches `(21, 0)` by being OVERWRITTEN, not by being
-        # classified, and the two steps are both in the frozen source:
-        #
-        #   1. `Mysql-1210-Command` calls `MySQL_query`, and on a non-zero
-        #      return performs `Mysql-1100-Db-Error`
-        #      [copybooks/mysql-procedures.cpy:L165-L177] which sets `(99, 911)`
+        # A failed statement reaches `(21, 0)` by being OVERWRITTEN, not by
+        # being classified, and both steps are in the frozen source:
+        #   1. `Mysql-1210-Command` calls `MySQL_query` and on a non-zero return
+        #      performs `Mysql-1100-Db-Error`
+        #      [copybooks/mysql-procedures.cpy:L165-L177], which sets `(99, 911)`
         #      [copybooks/mysql-procedures.cpy:L127-L128]. There is NO `go to`
-        #      after it, so execution continues into `MySQL_affected_rows` and
-        #      then `Mysql-1220-Store-Result`, leaving `WS-MYSQL-Count-Rows` at
-        #      zero.
+        #      after it, so execution continues and leaves `WS-MYSQL-Count-Rows`
+        #      at zero.
         #   2. Back in `ba060`, `if WS-MYSQL-Count-Rows = zero` is therefore
         #      true, errno is non-zero, and `move 21 to fs-reply` /
         #      `move zero to we-error` [common/glpostingMT.cbl:L779-L780]
@@ -2912,11 +3052,14 @@ def start(
         # cursor is untouched on this path: `if ... not zero set Cursor-Active`
         # [common/glpostingMT.cbl:L767-L769] simply does not fire, and step 3
         # above has already left it inactive.
+        exception_name, category, detail = _driver_failure_fields(error)
         _LOG.warning(
-            "fn-start on %s.%s failed at the driver: %s",
+            "fn-start on %s.%s failed at the driver: %s category=%s: %s",
             key.table_name,
             key.column_name,
-            error,
+            exception_name,
+            category,
+            detail,
         )
         outcome = CursorOutcome(
             fs_reply=FsReply.INVALID_KEY_ON_START,
@@ -2930,11 +3073,16 @@ def start(
             outcome.apply_to(file_access)
         return outcome
 
-    # --- Step 7: the count test, then the fetch - the bridge's two stages.
+    # --- Step 7: store the result, then test its count - the bridge's two
+    # stages. `Mysql-1220-Store-Result` materialises every qualifying row and
+    # `MySQL_num_rows` counts it, then
     # `if WS-MYSQL-Count-Rows not zero  set Cursor-Active to true`
-    # [common/glpostingMT.cbl:L767-L769]
-    count = _count_rows(cursor)
-    row = None if count == 0 else _fetch_one_row(cursor)
+    # [common/glpostingMT.cbl:L767-L769]. The snapshot is what the following
+    # `READ NEXT` walks; see AMBIGUITY Q1 in the module docstring.
+    count = state.store_result(_store_result(cursor))
+    # NOTHING is fetched from the snapshot here - see step 8. The first row is
+    # only PEEKED at, to read the key the START positioned on.
+    row = None if count == 0 else state.stored_rows[0]
 
     if row is None:
         # ANOMALY A7: no row, no driver error -> NEITHER status field written.
@@ -2961,7 +3109,6 @@ def start(
     # --- Step 8: positioned. `set Cursor-Active to true`
     # [common/glpostingMT.cbl:L769] and `move zero to FS-Reply WE-Error`
     # [common/glpostingMT.cbl:L783].
-    #
     # The position is INCLUSIVE and the row is DELIBERATELY NOT RETURNED. The
     # bridge unloads a record into the caller's record area only in
     # `ba041-Reread` [common/glpostingMT.cbl:L523-L589], and the jump that would
@@ -2974,9 +3121,12 @@ def start(
     # So a START positions and delivers nothing; the caller must follow with
     # `read_next`, which is what every in-scope program does. Handing the row
     # back here would let a caller consume it AND have `read_next` return it
-    # again from the inclusive position - the same posting twice. The positioned
-    # key remains readable from the cursor for diagnostics.
-    state.position_at(row[key.column_name], inclusive=True)
+    # again from the stored result - the same posting twice. The positioned key
+    # remains readable from the cursor for diagnostics.
+    #
+    # `fetched_count` stays at zero, so `position_inclusive` reports True and the
+    # first following `READ NEXT` fetches THIS row from the snapshot.
+    state.position_at(row[key.column_name])
     outcome = CursorOutcome(
         fs_reply=FsReply.SUCCESS,
         we_error=int(WeError.SUCCESS),
@@ -2999,135 +3149,75 @@ def read_next(
 ) -> CursorOutcome:
     """``fn-read-next`` (``File-Function`` 3) - return the next row, one row.
 
-    Reproduces ``ba040-Process-Read-Next``
-    [common/glpostingMT.cbl:L448-L521] and the paragraph it falls into,
-    ``ba041-Reread`` [common/glpostingMT.cbl:L523-L589]. The two paragraphs are
-    stages of one verb: ``ba040`` positions when there is no position, and
+    Reproduces ``ba040-Process-Read-Next`` [common/glpostingMT.cbl:L448-L521] and
+    ``ba041-Reread`` [common/glpostingMT.cbl:L523-L589], which it falls into. The
+    two are stages of one verb: ``ba040`` positions when there is no position,
     ``ba041`` delivers a row.
 
-    THIS IS THE VERB THE POSTING CYCLE'S CORRECTNESS RESTS ON.  ``gl072`` finds
-    the nominal-ledger account for each posting by reading SEQUENTIALLY rather
-    than by key [general/gl072.cbl:L410-L412], so it lands on the right account
-    only because ``gl071`` emitted the stream in nominal-key order first. The
-    ordering below is therefore not a detail: Agent Action Plan section 0.6.4
-    records that changing it produces "silent misposting - no error, no
-    diagnostic, wrong balances".
+    THIS IS THE VERB THE POSTING CYCLE'S CORRECTNESS RESTS ON. ``gl072`` finds the
+    nominal-ledger account for each posting SEQUENTIALLY rather than by key
+    [general/gl072.cbl:L407-L408], so it lands on the right account only because
+    ``gl071`` emitted the stream in nominal-key order first; Agent Action Plan
+    0.6.4 records that changing that ordering gives "silent misposting - no error,
+    no diagnostic, wrong balances". Hence ``ORDER BY`` is the key of reference,
+    ascending, ONE term, no tie-breaker, matching ``keyname (KOR-x1) ... ' ASC '``
+    [common/glpostingMT.cbl:L466-L470] - for ``GLPOSTING-REC`` that column is
+    ``POST-KEY``, NOT the primary key [common/glpostingMT.scb:L232].
 
-    Hence ``ORDER BY`` is the KEY OF REFERENCE, ascending, ONE term, no
-    tie-breaker - matching ``keyname (KOR-x1) ... ' ASC '``
-    [common/glpostingMT.cbl:L466-L470]. For ``GLPOSTING-REC`` that column is
-    ``POST-KEY``, which is NOT the table's primary key
-    [common/glpostingMT.scb:L232, mysql/ACASDB.sql]; ordering by the primary key
-    instead would silently reorder the posting stream. No second term may be
-    added: every in-scope table has one primary key column and no secondary
-    index, so a tie-breaker would be ordering the compiled system cannot express
-    and the oracle cannot corroborate.
+    AMBIGUITIES Q1 and Q2 both land here, stated in full in the module docstring.
 
-    ONE ROW PER CALL.  The bridge materialises the whole result at positioning
-    time with ``mysql_store_result``
-    [copybooks/mysql-procedures.cpy:L187-L193] and then fetches one record per
-    call. This module positions with a bounded statement instead, because rule
-    R-3 forbids buffering a result and Agent Action Plan section 0.3.3 gives the
-    reason - statement ordering is what the state diff measures. The observable
-    sequence and ordering are identical for an unchanging table; the one case
-    where they could differ is AMBIGUITY Q1 in the module docstring, for
-    ``docs/migration/ambiguity-resolutions.md``.
+    ONE ROW PER CALL, FROM A SNAPSHOT.  The bridge materialises the whole result
+    at positioning time with ``mysql_store_result``
+    [copybooks/mysql-procedures.cpy:L187-L193], records its full count, and then
+    fetches ONE RECORD PER CALL from it - issuing no further statement. That is
+    reproduced exactly: the self-positioning stage below issues the statement with
+    no ``LIMIT`` and stores every qualifying row; each later call fetches from the
+    stored result and executes nothing. AMBIGUITY Q1 in the module docstring
+    records the measurement that settled this - a ``LIMIT 1`` walk was measured to
+    deliver FOUR rows where the bridge delivers SIX, because advancing with
+    ``> last_key`` skips every row tied on a non-unique key of reference, and
+    ``POST-KEY`` is not this table's primary key.
 
-    AMBIGUITY Q2 also lands here: ``PSIRSPOST-REC`` is the one table whose key is
-    a bigint rather than a string [common/slpostingMT.scb:L216], its low key is
-    nonetheless a string literal, and its sequential walk IS reachable because
-    the handler refuses four verbs but not this one
-    [common/acas008.cbl:L299-L307]. See the module docstring.
+    FIVE ANOMALIES ARE REPRODUCED, NOT FIXED; none may be tidied away:
 
-    ANOMALY A1 - REPRODUCED, NOT FIXED.  A ``READ NEXT`` with no prior ``START``
-    is NOT diagnosed. The frozen source names ``'99RNP'``, "read next with no
-    position (no start 1st)" [copybooks/mysql-procedures.cpy:L118], and never
-    tests for it; ``if Cursor-Not-Active`` [common/glpostingMT.cbl:L454] instead
-    self-positions from a hard-coded low key. Raising a helpful error here would
-    be a defect fixed, which rule R-4 makes a failure.
-
-    ANOMALY A9 - REPRODUCED, NOT FIXED.  The self-positioning relation and low
-    key are hard-coded PER BRIDGE and disagree - nine use ``>`` and eleven use
-    ``>=``, so with an all-zeros low key the nine SKIP a row whose key is exactly
-    that value. Driven from :data:`SEQUENTIAL_READ_START` so the disagreement
-    survives as data. See that mapping for the per-bridge locators.
-
-    ANOMALY A11 - REPRODUCED, NOT FIXED.  A FAILED STATEMENT IS REPORTED AS END
-    OF FILE.  In the self-positioning stage the two status moves sit INSIDE the
-    zero-rows test but OUTSIDE the errno test
-    [common/glpostingMT.cbl:L499-L511]::
-
-              if       WS-MYSQL-Count-Rows = zero
-                       ...
-                       if    WS-MYSQL-Error-Number (1:1) not = "0"
-                             move WS-MYSQL-Error-Number to SQL-Err
-                             ...
-                       end-if
-                       move 10 to fs-reply
-                       move 10 to WE-Error
-
-    A broken statement leaves ``(99, 911)`` from ``Mysql-1100-Db-Error``
-    [copybooks/mysql-procedures.cpy:L127-L128], and those two moves then
-    OVERWRITE it with end-of-file. So the caller's read loop terminates cleanly,
-    posts nothing, and reports success. The distinction survives only in the log
-    tag, ``"No Data"`` [common/glpostingMT.cbl:L510] versus ``"EOF"``
-    [common/glpostingMT.cbl:L558], which is why
-    :attr:`CursorOutcome.file_key` is carried.
-
-    ANOMALY A12 - REPRODUCED, NOT FIXED.  The self-positioning stage hard-codes
-    ``set KOR-x1 to 1``, annotated ``*> 1 = Primary``
-    [common/glpostingMT.cbl:L455] - verified identical in all twenty bridges - so
-    it always walks key of reference 1 whatever the caller wanted. Consequently
-    the two-table bridges have NO sequential read for their lines table at all:
-    ``slinvoiceMT``'s only ``ba040`` selects from ``SAINVOICE-REC``
-    [common/slinvoiceMT.cbl:L646-L688] and ``plinvoiceMT``'s from
-    ``PUINVOICE-REC``, and :data:`SEQUENTIAL_READ_START` records both lines
-    tables as absent rather than inventing an entry for them.
-
-    ANOMALY A10 - REPRODUCED, NOT FIXED.  END OF FILE IS STICKY.  After the row
-    has been fetched, ``ba041`` re-tests the CALLER's own ``FS-Reply``
-    [common/glpostingMT.cbl:L580-L583]::
-
-         if       fs-reply = 10
-                  set Cursor-Not-Active to true
-                  move    "EOF3" to WS-File-Key
-                  go to ba999-End
-         end-if.
-
-    The fetched row is DISCARDED, unread, and nothing writes a status. Nothing in
-    either paragraph clears the field, and neither does ``ba020-Process-Open`` -
-    it only TESTS it, ``if fs-reply not = zero go to ba999-end``
-    [common/glpostingMT.cbl:L420-L421] - nor ``Mysql-1000-Open``, which writes
-    ``FS-Reply`` only on failure
-    [copybooks/mysql-procedures.cpy:L63-L86]. So once a pass has ended, every
-    further ``READ NEXT`` on that shared ``File-Access`` block self-positions,
-    finds rows, throws the first one away and reports the stale 10 again. A
-    second sequential pass in one run returns nothing until some other
-    successful operation on ANY table happens to reset the shared field. That
-    ordering dependence is the behaviour, and it is reproduced.
+    * A1 - a ``READ NEXT`` with no prior ``START`` is NOT diagnosed. The frozen
+      source names ``'99RNP'`` [copybooks/mysql-procedures.cpy:L118] and never
+      tests for it; ``if Cursor-Not-Active`` [common/glpostingMT.cbl:L454]
+      self-positions from a hard-coded low key instead.
+    * A9 - that self-positioning relation and low key are hard-coded PER BRIDGE
+      and disagree, nine using ``>`` and eleven ``>=``. Driven from
+      :data:`SEQUENTIAL_READ_START` so the disagreement survives as data.
+    * A11 - A FAILED STATEMENT IS REPORTED AS END OF FILE: the status moves sit
+      inside the zero-rows test but outside the errno test
+      [common/glpostingMT.cbl:L499-L511], overwriting ``(99, 911)``
+      [copybooks/mysql-procedures.cpy:L127-L128] with ``(10, 10)``. Only the log
+      tag differs, ``"No Data"`` [:L510] versus ``"EOF"`` [:L558] - which is why
+      :attr:`CursorOutcome.file_key` is carried.
+    * A12 - ``set KOR-x1 to 1`` is hard-coded [common/glpostingMT.cbl:L455], so
+      the walk always uses key of reference 1 whatever the caller asked for, and
+      the two-table bridges have no sequential read for their lines table at all.
+    * A10 - END OF FILE IS STICKY. After fetching, ``ba041`` re-tests the CALLER's
+      own ``FS-Reply`` and, if it still holds 10, DISCARDS the row unread
+      [common/glpostingMT.cbl:L580-L583]. Nothing clears that field.
 
     Args:
         cursor: A DB-API cursor from ``connection.py``.
         table_name: The in-scope table to read.
-        slot: Which ``Most-Cursor-Set`` flag to drive. The multi-slot bridges
-            keep one per read order [common/otm3MT.cbl:L265-L270].
+        slot: Which ``Most-Cursor-Set`` flag to drive; the multi-slot bridges keep
+            one per read order [common/otm3MT.cbl:L265-L270].
         states: The cursors to use; the module-level set when ``None``.
-        file_access: When given, the outcome is applied to it before returning,
-            AND its incoming ``FS-Reply`` participates in the anomaly A10 test -
-            as it must, since that test reads the caller's field. Omitting the
-            block therefore disables A10, which is correct: with no caller block
-            there is no stale status to inherit.
+        file_access: When given, the outcome is applied to it before returning and
+            its incoming ``FS-Reply`` participates in the A10 test, as it must.
+            Omitting it disables A10 - correct: no caller block, no stale status.
 
     Returns:
         The outcome. On success :attr:`CursorOutcome.row` holds the row keyed by
-        column name; at end of file the pair is ``(10, 10)`` and the row is
-        ``None``.
+        column name; at end of file the pair is ``(10, 10)`` and row is ``None``.
 
     Raises:
         KeyError: If the table declares no key of reference.
         LookupError: If the table has no sequential read in the frozen bridges -
-            the two lines tables of anomaly A12. Unreachable from COBOL, where no
-            facade publishes the verb for them.
+            the two lines tables of anomaly A12, unreachable from COBOL.
     """
     table = states if states is not None else _DEFAULT_STATES
     # Anomaly A10 reads the caller's own field, so snapshot before anything runs.
@@ -3135,7 +3225,7 @@ def read_next(
 
     # The handler entry guard, data-driven. `fn-read-next` is NOT among the four
     # verbs the sequential handler refuses [common/acas008.cbl:L299-L307], so
-    # this returns `None` for every in-scope table today; it is consulted anyway
+    # this returns `None` for every in-scope table; it is consulted anyway
     # so that a second such handler needs a table entry and no code change.
     refusal = _guarded_by_handler(table_name, FileFunction.READ_NEXT)
     if refusal is not None:
@@ -3156,40 +3246,45 @@ def read_next(
 
     state = table.state_for(table_name, slot)
 
-    if state.cursor_not_active():
-        # --- STAGE A: `ba040`'s self-positioning branch
-        # [common/glpostingMT.cbl:L454-L473]. `set KOR-x1 to 1` - key 1 always,
-        # per anomaly A12 - and the bridge's own hard-coded relation and low key,
-        # per anomaly A9.
-        key = key_of_reference(table_name, 1)
-        low = SEQUENTIAL_READ_START.get(table_name)
-        if low is None:
-            raise LookupError(
-                f"{table_name} has no ba040-Process-Read-Next in the frozen "
-                f"bridges, so the compiled system cannot read it sequentially; "
-                f"see anomaly A12. Reach it through its header bridge's second "
-                f"key of reference instead."
-            )
-        relation = low.relation
-        key_value: object = low.low_key
-        # `"No Data"` is the log tag `ba040` writes when this stage yields
-        # nothing [common/glpostingMT.cbl:L510]; anomaly A11 makes it the ONLY
-        # way to tell a broken statement from an empty table.
-        empty_tag = "No Data"
-    else:
+    if not state.cursor_not_active():
         # --- STAGE B: `ba041`'s fetch [common/glpostingMT.cbl:L523-L555], which
-        # advances the stored result. Here the position is carried explicitly:
-        # inclusive right after a `START`, whose row the START did not consume
-        # [common/glpostingMT.cbl:L795-L800], exclusive after a previous read.
+        # advances the STORED RESULT an earlier positioning materialised. NO
+        # STATEMENT IS ISSUED HERE - that is the whole of what `ba041` does, and
+        # AMBIGUITY Q1 in the module docstring records the measurement that
+        # required reproducing it this way rather than re-positioning.
         key = state.key_of_reference or key_of_reference(table_name, 1)
-        relation = (
-            MostRelation.of(">=") if state.position_inclusive else MostRelation.of(">")
-        )
-        key_value = state.positioned_key
         # `move "EOF" to WS-File-Key` [common/glpostingMT.cbl:L558].
-        empty_tag = "EOF"
+        return _deliver_from_stored_result(
+            state,
+            key,
+            empty_tag="EOF",
+            incoming_fs_reply=incoming_fs_reply,
+            incoming_we_error=incoming_we_error,
+            file_access=file_access,
+        )
 
-    statement = _select_statement(key, relation.token, limit_one=True)
+    # --- STAGE A: `ba040`'s self-positioning branch
+    # [common/glpostingMT.cbl:L454-L473]. `set KOR-x1 to 1` - key 1 always, per
+    # anomaly A12 - and the bridge's own hard-coded relation and low key, per
+    # anomaly A9. This stage issues the statement and stores the result, then
+    # falls THROUGH into `ba041` to deliver the first record.
+    key = key_of_reference(table_name, 1)
+    low = SEQUENTIAL_READ_START.get(table_name)
+    if low is None:
+        raise LookupError(
+            f"{table_name} has no ba040-Process-Read-Next in the frozen "
+            f"bridges, so the compiled system cannot read it sequentially; "
+            f"see anomaly A12. Reach it through its header bridge's second "
+            f"key of reference instead."
+        )
+    relation = low.relation
+    key_value: object = low.low_key
+    # `"No Data"` is the log tag `ba040` writes when this stage yields nothing
+    # [common/glpostingMT.cbl:L510]; anomaly A11 makes it the ONLY way to tell a
+    # broken statement from an empty table.
+    empty_tag = "No Data"
+
+    statement = _select_statement(key, relation.token)
     parameters = (key_value,)
 
     try:
@@ -3199,12 +3294,15 @@ def read_next(
         # unconditional moves overwrite `Mysql-1100-Db-Error`'s `(99, 911)`
         # [common/glpostingMT.cbl:L508-L509]. Logged at warning level so the
         # masking is at least visible to an operator, which changes no status.
+        exception_name, category, detail = _driver_failure_fields(error)
         _LOG.warning(
             "fn-read-next on %s.%s failed at the driver and is reported as end "
-            "of file per [common/glpostingMT.cbl:L508-L509]: %s",
+            "of file per [common/glpostingMT.cbl:L508-L509]: %s category=%s: %s",
             key.table_name,
             key.column_name,
-            error,
+            exception_name,
+            category,
+            detail,
         )
         state.set_cursor_not_active()
         end_fs_reply, end_we_error = end_of_file_status()
@@ -3221,19 +3319,15 @@ def read_next(
             outcome.apply_to(file_access)
         return outcome
 
-    count = _count_rows(cursor)
-    row = None if count == 0 else _fetch_one_row(cursor)
+    # `Mysql-1220-Store-Result` then `MySQL_num_rows`: the WHOLE qualifying
+    # result, and its full count into `WS-MYSQL-Count-Rows`.
+    count = state.store_result(_store_result(cursor))
 
-    if row is None:
-        # Exhausted. Stage A reaches this through
+    if count == 0:
         # `if WS-MYSQL-Count-Rows = zero ... move 10 to fs-reply / move 10 to
-        # WE-Error` [common/glpostingMT.cbl:L499-L509]; stage B through
-        # `if return-code = -1  move 10 to fs-Reply WE-Error`
-        # [common/glpostingMT.cbl:L556-L557], where ONE statement writes BOTH
-        # fields. Either way the pair is `(10, 10)` - `We-Error` is NOT left at
-        # zero - and either way the cursor is deactivated by a bare
-        # `set Cursor-Not-Active to true` [common/glpostingMT.cbl:L511 path,
-        # :L559] rather than by `ba998-Free`.
+        # WE-Error` [common/glpostingMT.cbl:L499-L509]. The pair is `(10, 10)` -
+        # `We-Error` is NOT left at zero - and the cursor is deactivated by a bare
+        # `set Cursor-Not-Active to true` [:L511] rather than by `ba998-Free`.
         state.set_cursor_not_active()
         end_fs_reply, end_we_error = end_of_file_status()
         outcome = CursorOutcome(
@@ -3248,51 +3342,23 @@ def read_next(
             outcome.apply_to(file_access)
         return outcome
 
-    if incoming_fs_reply == FsReply.END_OF_FILE:
-        # ANOMALY A10: the row was fetched and is now THROWN AWAY, because the
-        # caller's `FS-Reply` still holds 10 from a previous end of file
-        # [common/glpostingMT.cbl:L580-L583]. No status is written - the stale
-        # pair simply persists - and the cursor is deactivated, so the next call
-        # self-positions and discards a row all over again.
-        state.set_cursor_not_active()
-        _LOG.warning(
-            "fn-read-next on %s discarded a fetched row because the caller's "
-            "FS-Reply is still 10 [common/glpostingMT.cbl:L580-L583]; end of "
-            "file is sticky until some other operation resets the shared field",
-            table_name,
-        )
-        outcome = CursorOutcome(
-            fs_reply=incoming_fs_reply,
-            we_error=incoming_we_error,
-            row=None,
-            statement=statement,
-            parameters=parameters,
-            status_written=False,
-            file_key="EOF3",
-        )
-        if file_access is not None:
-            outcome.apply_to(file_access)
-        return outcome
-
-    # Delivered. `perform bb100-UnloadHVs` then
-    # `move HV-POST-KEY to WS-File-Key` and `move zero to fs-reply WE-Error`
-    # [common/glpostingMT.cbl:L585-L588]. The position becomes EXCLUSIVE: this
-    # row has been consumed, so the next call must advance past it.
-    positioned = row[key.column_name]
+    # Positioned: `set Cursor-Active to true` [common/glpostingMT.cbl:L472], then
+    # FALL THROUGH into `ba041-Reread`, which delivers the first record of the
+    # snapshot. The fall-through is the paragraph order itself - `ba041` follows
+    # `ba040` with no `go to` between them.
     state.key_of_reference = key
     state.most_relation = relation
-    state.position_at(positioned, inclusive=False)
-    outcome = CursorOutcome(
-        fs_reply=FsReply.SUCCESS,
-        we_error=int(WeError.SUCCESS),
-        row=row,
+    state.set_cursor_active()
+    return _deliver_from_stored_result(
+        state,
+        key,
+        empty_tag=empty_tag,
+        incoming_fs_reply=incoming_fs_reply,
+        incoming_we_error=incoming_we_error,
+        file_access=file_access,
         statement=statement,
         parameters=parameters,
-        file_key=str(positioned),
     )
-    if file_access is not None:
-        outcome.apply_to(file_access)
-    return outcome
 
 
 def read_indexed(
@@ -3307,68 +3373,54 @@ def read_indexed(
 ) -> CursorOutcome:
     """``fn-read-indexed`` (``File-Function`` 4) - fetch one row by exact key.
 
-    Reproduces ``ba050-Process-Read-Indexed``
-    [common/glpostingMT.cbl:L591-L689]. An equality fetch on the key of
-    reference, with NO ``ORDER BY`` and NO ``LIMIT`` - matching the statement the
-    bridge builds, which is `` `KeyName`="value" `` and nothing more
-    [common/glpostingMT.cbl:L600-L611, :L623-L627]. The key is unique, so one row
-    is the most that can qualify and ordering would be meaningless; adding either
-    clause would be inventing statement text.
+    Reproduces ``ba050-Process-Read-Indexed`` [common/glpostingMT.cbl:L591-L689]:
+    an equality fetch on the key of reference with NO ``ORDER BY`` and NO
+    ``LIMIT``, matching the statement the bridge builds, `` `KeyName`="value" ``
+    and nothing more [:L600-L611, :L623-L627]. The key is unique, so one row is the
+    most that can qualify; either clause would be inventing statement text.
 
-    IT ALWAYS CLEARS THE SEQUENTIAL CURSOR.  Every exit from the paragraph is
-    ``go to ba998-Free`` - the not-found exit [common/glpostingMT.cbl:L635], both
-    fetch-failure exits [common/glpostingMT.cbl:L674, :L681] and the success exit
-    [common/glpostingMT.cbl:L689] - and ``ba998-Free`` ends with
-    ``set Cursor-Not-Active to true`` [common/glpostingMT.cbl:L1033]. So an
-    indexed read taken in the middle of a sequential walk DESTROYS the walk's
-    position, on success as much as on failure, and the next ``READ NEXT``
-    restarts from the bridge's hard-coded low key. That is load-bearing for any
-    program that interleaves the two verbs, and it is reproduced rather than
-    softened.
+    IT ALWAYS CLEARS THE SEQUENTIAL CURSOR. Every exit is ``go to ba998-Free`` -
+    not found [:L635], both fetch failures [:L674, :L681] and success [:L689] - and
+    ``ba998-Free`` ends with ``set Cursor-Not-Active to true`` [:L1033]. So an
+    indexed read taken mid-walk DESTROYS the walk's position, on success as much as
+    on failure, and the next ``READ NEXT`` restarts from the hard-coded low key.
 
-    ANOMALY A2 - REPRODUCED, NOT FIXED.  ``FS-Reply`` 23 is documented as "Key
-    not found. from read indexed" [common/glpostingMT.cbl:L129] and is NEVER
-    returned. The paragraph returns 21 and says so in its own comments -
-    ``move 21 to fs-Reply  *> could also be 23 or 14``
-    [common/glpostingMT.cbl:L634], and twice more ``move 21 to fs-reply
-    *> from 23`` [common/glpostingMT.cbl:L668, :L676]. So 21 it is.
+    ANOMALY A2 - REPRODUCED, NOT FIXED. ``FS-Reply`` 23 is documented as "Key not
+    found. from read indexed" [common/glpostingMT.cbl:L129] and is NEVER returned.
+    The paragraph returns 21 and says so in its own comments - ``move 21 to
+    fs-Reply  *> could also be 23 or 14`` [common/glpostingMT.cbl:L634], and twice
+    more ``move 21 to fs-reply  *> from 23`` [:L668, :L676]. So 21 it is.
 
-    ANOMALY A13 - REPRODUCED, NOT FIXED.  The two ``We-Error`` values 990 and 989
+    ANOMALY A13 - REPRODUCED, NOT FIXED. The two ``We-Error`` values 990 and 989
     ARE UNREACHABLE, and the reachable not-found path writes NO ``We-Error`` at
     all. The first guard filters every zero-row case
     [common/glpostingMT.cbl:L633-L636]::
 
          if     WS-MYSQL-Count-Rows = zero
-                move 21  to fs-Reply             *> could also be 23 or 14
+                move 21  to fs-Reply       *> could also be 23 or 14
                 go to ba998-Free
-         end-if
 
-    - note that it writes ``FS-Reply`` only, leaving the caller's ``We-Error``
-    untouched. The second guard is then ``if WS-MYSQL-Count-Rows not > zero``
-    [common/glpostingMT.cbl:L663], and the count cannot have changed in between:
-    it is written only by ``MySQL_affected_rows`` and ``MySQL_num_rows``
-    [copybooks/mysql-procedures.cpy:L178, :L191-L192], and the fetch call does
-    not pass it [common/glpostingMT.cbl:L642-L658]. A count that is not zero is
-    therefore greater than zero, so the second guard can never be true and its
-    ``990`` branch [common/glpostingMT.cbl:L668-L669] and ``989`` branch
-    [common/glpostingMT.cbl:L676-L677] are dead code. Both values stay declared
-    in ``dal/status.py`` and stay unreachable here.
+    - it writes ``FS-Reply`` only, leaving ``We-Error`` untouched. The second guard
+    is ``if WS-MYSQL-Count-Rows not > zero`` [:L663], and the count cannot have
+    changed in between: it is written only by ``MySQL_affected_rows`` and
+    ``MySQL_num_rows`` [copybooks/mysql-procedures.cpy:L178, :L191-L192], and the
+    fetch call does not pass it [common/glpostingMT.cbl:L642-L658]. Not zero
+    therefore means greater than zero, so the second guard can never be true and
+    its ``990`` [:L668-L669] and ``989`` [:L676-L677] branches are dead code. Both
+    stay declared in ``dal/status.py`` and stay unreachable here.
 
-    ANOMALY A14 - REPRODUCED, NOT FIXED.  A BROKEN STATEMENT RETURNS THE
-    MISMATCHED PAIR ``(21, 911)``.  ``Mysql-1100-Db-Error`` sets ``(99, 911)``
-    [copybooks/mysql-procedures.cpy:L127-L128] and returns without jumping, so
-    the count is then zero and the first guard's ``move 21 to fs-Reply``
-    [common/glpostingMT.cbl:L634] overwrites the 99 while the 911 SURVIVES in
-    ``We-Error``. The caller therefore sees "invalid key on START" paired with
-    "RDB init error" for what was really a failed statement.
+    ANOMALY A14 - REPRODUCED, NOT FIXED. A BROKEN STATEMENT RETURNS THE MISMATCHED
+    PAIR ``(21, 911)``. ``Mysql-1100-Db-Error`` sets ``(99, 911)``
+    [copybooks/mysql-procedures.cpy:L127-L128] and returns without jumping, so the
+    count is then zero and the first guard's ``move 21 to fs-Reply`` [:L634]
+    overwrites the 99 while the 911 SURVIVES. The caller sees "invalid key on
+    START" paired with "RDB init error" for what was a failed statement.
 
-    The interactive pause that error path also performs -
-    ``display SM901`` then ``accept ws-reply``
-    [copybooks/mysql-procedures.cpy:L134-L137] - is dropped, not reproduced.
-    Agent Action Plan section 0.3.4 rules that an accept whose only effect is to
-    block a terminal after an error display is dropped while its control transfer
-    is preserved, and this one falls straight through to the exit, so no control
-    flow is lost.
+    That path's interactive pause, ``display SM901`` then ``accept ws-reply``
+    [copybooks/mysql-procedures.cpy:L134-L137], is dropped: Agent Action Plan 0.3.4
+    rules that an accept whose only effect is to block a terminal after an error
+    display is dropped while its control transfer is preserved, and this one falls
+    straight through to the exit.
 
     Args:
         cursor: A DB-API cursor from ``connection.py``.
@@ -3376,12 +3428,11 @@ def read_indexed(
         key_value: The exact key, as ``str``, ``int`` or ``Decimal`` - never a
             binary floating-point value, which rule R-2 forbids and which would
             make an equality test unreliable.
-        key_number: The ``KOR-x1`` value. The paragraph hard-codes
-            ``set KOR-x1 to 1``, annotated ``*> 1 = only key``
-            [common/glpostingMT.cbl:L596]; the two-table bridges reach their lines
-            table with ``set KOR-x1 to 2``, annotated ``*> 2 = Lines``
-            [common/slinvoiceMT.cbl:L2731], which this module expresses as a
-            separate table entry instead.
+        key_number: The ``KOR-x1`` value. The paragraph hard-codes ``set KOR-x1 to
+            1``, annotated ``*> 1 = only key`` [common/glpostingMT.cbl:L596]; the
+            two-table bridges reach their lines table with ``set KOR-x1 to 2``,
+            annotated ``*> 2 = Lines`` [common/slinvoiceMT.cbl:L2731], which this
+            module expresses as a separate table entry instead.
         slot: Which ``Most-Cursor-Set`` flag is cleared.
         states: The cursors to use; the module-level set when ``None``.
         file_access: When given, the outcome is applied to it before returning.
@@ -3461,14 +3512,17 @@ def read_indexed(
         cursor.execute(statement, parameters)
     except Exception as error:  # any driver error takes this path - see below
         # ANOMALY A14: `(21, 911)` - 21 overwrites the 99, 911 survives.
+        exception_name, category, detail = _driver_failure_fields(error)
         _LOG.warning(
             "fn-read-indexed on %s.%s failed at the driver; the frozen source "
             "reports this as (21, 911) per "
             "[common/glpostingMT.cbl:L634] over "
-            "[copybooks/mysql-procedures.cpy:L127-L128]: %s",
+            "[copybooks/mysql-procedures.cpy:L127-L128]: %s category=%s: %s",
             key.table_name,
             key.column_name,
-            error,
+            exception_name,
+            category,
+            detail,
         )
         # `go to ba998-Free` -> `set Cursor-Not-Active to true`
         # [common/glpostingMT.cbl:L635, :L1033].
@@ -3538,8 +3592,8 @@ def reset(table_name: str | None = None) -> None:
     isolated by construction and a fresh run starts from ``value zero``. Here
     they share a process, so that reset has to be explicit.
 
-    ``tests/determinism/test_two_runs_byte_identical.py`` is the reason this is
-    part of the public surface: two runs of one scenario in ONE process must be
+    The determinism requirement is the reason this is part of the public
+    surface: two runs of one scenario in ONE process must be
     independent, and a cursor surviving between them would let the second run
     resume a position the first left behind. Rule R-6 requires the two runs to be
     byte-identical, which they cannot be if state leaks.
