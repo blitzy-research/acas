@@ -1392,9 +1392,42 @@ acas_assert_safe_build_path() {
     "ACAS_BUILD must be an absolute path; got '$path'."
   [[ "$path_real" != '/' ]] || acas_die "$EX_BUILDTREE" \
     'ACAS_BUILD must not be the filesystem root.'
-  [[ "$path_real" == /*/* ]] || acas_die "$EX_BUILDTREE" \
-    "ACAS_BUILD must be at least two components deep; got '$path_real'." \
-    'This script clears it, and a top-level directory is never a safe target.'
+  # A one-component path is normally refused, because clearing something like
+  # /usr or /home would be catastrophic. The Compose stack, however, hands this
+  # script exactly such a path on purpose: harness/docker-compose.yml mounts the
+  # named volume `acas_build' at /build and both that file and
+  # harness/Dockerfile.gnucobol export ACAS_BUILD=/build. This function's own
+  # caller assumes it too -- acas_prepare_build_tree deletes only the CHILDREN
+  # of $ACAS_BUILD precisely "because the directory is a mount point in the
+  # Compose stack". Refusing /build outright therefore made the script
+  # unrunnable in the only topology it ships with (exit 67 at the first
+  # precondition), so a top-level path is accepted under two conditions that
+  # together make it as safe as a deeper one:
+  #   1. it is a DEDICATED MOUNT POINT -- its device differs from its parent's,
+  #      i.e. a volume was mounted there, so clearing it cannot reach the image
+  #      filesystem; and
+  #   2. it is not one of the distribution's own top-level directories.
+  # Every other guard in this function still applies unchanged.
+  if [[ "$path_real" != /*/* ]]; then
+    local forbidden
+    for forbidden in /bin /boot /dev /etc /home /lib /lib32 /lib64 /libx32 \
+                     /media /mnt /opt /proc /root /run /sbin /srv /sys /tmp \
+                     /usr /var; do
+      [[ "$path_real" != "$forbidden" ]] || acas_die "$EX_BUILDTREE" \
+        "ACAS_BUILD ($path_real) is a distribution top-level directory." \
+        'This script clears it, and such a directory is never a safe target.'
+    done
+
+    local path_dev parent_dev
+    path_dev="$(stat -c '%d' "$path_real" 2>/dev/null || printf 'x')"
+    parent_dev="$(stat -c '%d' "$(dirname "$path_real")" 2>/dev/null || printf 'y')"
+    [[ "$path_dev" != "$parent_dev" ]] || acas_die "$EX_BUILDTREE" \
+      "ACAS_BUILD ($path_real) is one component deep and is NOT a mount point." \
+      'This script clears it, so a top-level directory is only acceptable when a' \
+      'dedicated volume is mounted there, as harness/docker-compose.yml does for' \
+      '/build. Either mount a volume at that path or use a deeper one.'
+    acas_log "accepted top-level ACAS_BUILD ($path_real): dedicated mount point"
+  fi
   [[ "$path_real" != "$repo_real" ]] || acas_die "$EX_BUILDTREE" \
     'ACAS_BUILD and ACAS_REPO resolve to the same directory.' \
     'The build must happen in a copy, never in the frozen checkout.'
