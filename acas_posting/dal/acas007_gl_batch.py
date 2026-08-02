@@ -613,6 +613,7 @@ from acas_posting.dal import cursor_state
 from acas_posting.dal.connection import (
     OpenOutcome,
     TransportSecurity,
+    acquire_cursor,
     execute_statement,
     load_rdb_data_once,
     mysql_1000_open,
@@ -2796,6 +2797,14 @@ def _bridge_cursor() -> Any:
     ``CursorState`` for the same reason. So a read-next that delivers from the
     snapshot issues no statement and needs no cursor at all.
 
+    A SESSION ANOTHER BRIDGE HAS CLOSED IS NOT THIS CASE, and does not raise.
+    ``Ws-Mysql-Cid`` still being null is a caller error the frozen source never
+    reaches; a live ``Cid`` whose connection another bridge closed is anomaly
+    A-8, which every bridge CAN reach and which the frozen source reports from
+    its statement [copybooks/mysql-procedures.cpy:L165-L166].
+    ``acquire_cursor`` keeps the two apart by carrying the second to the
+    ``execute`` ``cursor_state`` issues.
+
     Raises:
         BridgeNotOpenError: If ``fn-Open`` has not been performed.
     """
@@ -2805,7 +2814,7 @@ def _bridge_cursor() -> Any:
             f"perform fn-Open (File-Function 1) through "
             f"{HANDLER}.dispatch first"
         )
-    return _BRIDGE_WS.connection.cursor()
+    return acquire_cursor(_BRIDGE_WS.connection)  # type: ignore[arg-type]
 
 
 def mt_ba_acas_dal_process(

@@ -483,6 +483,7 @@ from typing import Any, Final, cast
 from acas_posting.dal.connection import (
     OpenOutcome,
     TransportSecurity,
+    acquire_cursor,
     execute_statement,
     load_rdb_data_once,
     mysql_1000_open,
@@ -1214,9 +1215,14 @@ connection`.
 
     Yields:
         A cursor satisfying
-        :class:`~acas_posting.dal.cursor_state.DatabaseCursor`.
+        :class:`~acas_posting.dal.cursor_state.DatabaseCursor`. When another
+        bridge has closed the one process handle - anomaly A-8 - this is the
+        stand-in whose ``execute`` reports the driver's failure, because the
+        frozen bridge reports a dead session from its statement
+        [copybooks/mysql-procedures.cpy:L165-L166] and has no acquisition step
+        to raise from.
     """
-    cursor = connection.cursor()
+    cursor = acquire_cursor(connection)
     try:
         yield cursor
     finally:

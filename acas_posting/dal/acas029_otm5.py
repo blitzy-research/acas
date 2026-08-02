@@ -58,10 +58,10 @@ A POSITIVE FINDING, recorded because it is a finding
     digits and two decimal places at all three layers with no width drift.
     Verify, do not extrapolate.
 
-EIGHT CORRECTIONS TO THE WORKING SPECIFICATION, each settled against the
+NINE CORRECTIONS TO THE WORKING SPECIFICATION, each settled against the
 frozen source, because rule R-6 makes compiled behaviour the tie-breaker.
-Three are set out here in full; the remaining five are recorded at the point
-they bite, and all eight are listed in the traceability footer:
+Three are set out here in full; the remaining six are recorded at the point
+they bite, and all nine are listed in the traceability footer:
     C4  the SQL-diagnostic clearing is never reached on this path - see
         :func:`record_size_gate`
     C5  the handler's flat verbs ``aa020``..``aa100`` are never reached on this
@@ -72,6 +72,9 @@ they bite, and all eight are listed in the traceability footer:
         :func:`start`
     C8  the function-code vocabulary is cited past the end of its file - see
         :func:`start`
+    C9  a ``move`` into one of the four logging fields must be fitted to the
+        width the COPYBOOK declares, not to the length the field's current
+        value happens to have - see :data:`WS_FILE_KEY_WIDTH`
     C1  The working note's line numbers for [common/acas029.cbl] drift by one
         to two lines in several places. Every locator in this file was read
         from the frozen source rather than copied, so the numbers here are the
@@ -88,18 +91,50 @@ they bite, and all eight are listed in the traceability footer:
         relation map, ``when 9 move "<= " to MOST-Relation``
         [common/otm5MT.cbl:L794], and is reproduced as unreachable rather than
         deleted.
-    C3  The working note asserted that function codes 32 and 33 are dead
-        vocabulary "dispatched by no handler". That is true of the HANDLER -
-        ``acas029`` contains no ``when 3x`` anywhere
-        [common/acas029.cbl:L277-L295] - but NOT of the bridge, which
-        dispatches ``when 32 go to ba140-Process-Read-Next`` and ``when 33 go
-        to ba150-Process-Read-Next`` [common/otm5MT.cbl:L425-L428]. Because
-        this module reproduces the pair as the handler drives it, and the
-        handler can never present 32 or 33, no verb is published for either
-        and both fall to the bridge's bad-function code. The divergence is
-        stated rather than smoothed: ``fn-Read-By-Batch`` is documented as
-        existing "for OTM3/5 (sl095/pl095)" [copybooks/wsfnctn.cob:L103] and
-        the OTM5 handler is precisely the one that never presents it.
+    C3  ⭐ THE WORKING NOTE ASSERTED THAT FUNCTION CODES 32 AND 33 ARE DEAD
+        VOCABULARY "dispatched by no handler", AND THIS DOCSTRING ONCE AGREED
+        WITH IT. BOTH WERE WRONG, and the mistake is worth spelling out because
+        it is the exact trap the frozen source sets. ``acas029`` really does
+        contain no ``when 3x`` [common/acas029.cbl:L277-L296] - but THAT
+        ``evaluate`` IS THE FLAT-FILE ONE. The RDB branch stands seven lines
+        earlier::
+
+            if       not FS-Cobol-Files-Used         [common/acas029.cbl:L257]
+                     move RDBMS-Flat-Statuses to FA-RDBMS-Flat-Statuses
+                     perform ba-Process-RDBMS        [common/acas029.cbl:L259]
+                     go to AA-Main-Exit              [common/acas029.cbl:L260]
+            end-if.
+
+        so on the RDB path the flat ``evaluate`` is NEVER REACHED and the
+        function code passes to the bridge untouched. The bridge then dispatches
+        both - ``when 32 go to ba140-Process-Read-Next`` and ``when 33 go to
+        ba150-Process-Read-Next`` [common/otm5MT.cbl:L425-L428] - and the frozen
+        FACADE presents them to this very handler::
+
+            OTM5-Read-Next-Sorted-By-Batch.   [copybooks/Proc-ACAS-FH-Calls.cob:L1300]
+                move     zero to Access-Type.
+                set      fn-Read-By-Batch to true.
+                perform  acas029.             [copybooks/Proc-ACAS-FH-Calls.cob:L1303]
+            OTM5-Read-Next-Sorted-By-Cust.    [copybooks/Proc-ACAS-FH-Calls.cob:L1305-L1308]
+
+        Three further facts settle it beyond doubt. ``acas019`` has the SAME
+        shape - no ``when 3x`` in the handler, both codes dispatched by its
+        bridge - and its module implements them. ``cursor_state.EXTRA_READ_ORDERS``
+        carries an entry for each of this table's two sorted reads with
+        ``owning_handlers=("acas029",)``. And the two codes are the ONLY members
+        of the extended vocabulary whose declaration names this entity:
+        ``fn-Read-By-Batch`` is documented "for OTM3/5 (sl095/pl095)"
+        [copybooks/wsfnctn.cob:L103].
+
+        Both verbs are therefore PUBLISHED - :func:`read_next_sorted_by_batch`
+        and :func:`read_next_sorted_by_cust` - and :func:`dispatch` routes 32
+        and 33 to them in the frozen ``when`` order. That the only COBOL callers
+        of the pair, ``sl095`` and ``pl095``, are out of scope [Agent Action
+        Plan section 0.2.2] does not make the verbs omissible: the facade this
+        module serves publishes them, so refusing them would answer ``(99, 990)``
+        where the compiled chain answers ``(10, 10)``. Which it does, and for a
+        reason that is itself a defect - see anomaly
+        N-sorted-order-is-a-syntax-error on :func:`_sorted_read_next`.
 
 THE HEADLINE ANOMALY - TWO WRITE-ONLY COLUMNS
     ``bb000-HV-Load`` loads all 29 host variables. ``bb100-UnloadHVs`` moves
@@ -156,8 +191,14 @@ DELIBERATE OMISSIONS, recorded as omissions per Agent Action Plan 0.5.3
         presentation that has no database effect - but the CONTROL TRANSFER it
         guards, ``go to ba-rdbms-exit`` [common/acas029.cbl:L580], is
         preserved: :func:`record_size_gate` skips the bridge call.
-    O8  Function codes 32 (``fn-Read-By-Batch``) and 33 (``fn-Read-By-Cust``).
-        No verb is published for either - see C3.
+    O8  WITHDRAWN. It read "Function codes 32 (``fn-Read-By-Batch``) and 33
+        (``fn-Read-By-Cust``). No verb is published for either - see C3." That
+        is no longer an omission: both ARE published, as
+        :func:`read_next_sorted_by_batch` and :func:`read_next_sorted_by_cust`,
+        and :func:`dispatch` routes to them. The entry is kept, withdrawn, so
+        that a reader arriving from an earlier revision of the traceability
+        document finds the retraction rather than a silent renumbering of the
+        list. See correction C3 for the four proofs.
     O9  ``aa045-Eval-Keys`` [common/acas029.cbl:L391-L407] and
         ``aa041-Move-Inv-Data`` [common/acas029.cbl:L384-L387] exist purely to
         compose ``WS-File-Key`` for the logger on the flat-file path. The
@@ -263,6 +304,7 @@ from typing import Any, Final
 from acas_posting.dal.connection import (
     MySQLConnectionAbstract,
     TransportSecurity,
+    acquire_cursor,
     execute_statement,
     mysql_1000_open,
     mysql_1090_exit,
@@ -271,10 +313,12 @@ from acas_posting.dal.connection import (
     quote_identifier,
 )
 from acas_posting.dal.cursor_state import (
+    EXTRA_READ_ORDERS,
     CursorSlot,
     CursorStateTable,
     DatabaseCursor,
     KeyOfReference,
+    OrderQuoting,
     key_of_reference,
     read_indexed as _cursor_read_indexed,
     read_next as _cursor_read_next,
@@ -286,9 +330,12 @@ from acas_posting.dal.status import (
     FileFunction,
     FsReply,
     LogSystem,
-    SqlState,
+    SQL_ERR_WIDTH,
+    SQL_MSG_WIDTH,
+    SQL_STATE_WIDTH,
     WeError,
     db_error_log_category,
+    end_of_file_status,
     is_duplicate_key_bridge_level,
     mysql_1100_db_error,
     redact_for_log,
@@ -636,6 +683,34 @@ OPEN_EXTEND_WE_ERROR: Final[int] = int(WeError.ACCESS_TYPE_WRONG)
 #: WE-Error for the record-size mismatch [common/acas029.cbl:L563].
 RECORD_SIZE_WE_ERROR: Final[int] = int(WeError.RECORD_SIZE_MISMATCH)
 
+# THE DECLARED WIDTHS OF THE FOUR LOGGING FIELDS THIS MODULE WRITES
+#
+# CORRECTION C9 - every ``move`` into one of these fields must fit the width
+# the COPYBOOK declares, not the width the field's CURRENT VALUE happens to
+# have. A COBOL alphanumeric ``MOVE`` space-pads a short sending field and
+# truncates a long one against the RECEIVING FIELD'S OWN PICTURE, and that
+# picture never changes at run time. Sizing a move from ``len()`` of the
+# incoming value instead lets the field shrink permanently the first time a
+# caller assigns an unpadded Python string to it, after which every later
+# ``move`` is clipped to the shrunken length. Measured on the RDB path: the
+# bridge's close tag ``"CLOSE PL OTM5"`` [common/otm5MT.cbl:L482] came back
+# as ``"CLOSE P"`` and the sorted reads' ``"No Data"``
+# [common/otm5MT.cbl:L1054, :L1209] came back as ``"No D"``. The
+# widths below are the frozen declarations, so the reconstruction is stable
+# whatever state a caller leaves the block in. Sibling handlers already size
+# their moves this way [see ``acas019_otm3.WS_FILE_KEY_WIDTH`` and
+# ``acas012_sales.WS_FILE_KEY_WIDTH``]; this module was the outlier.
+
+#: ``05  WS-File-Key     pic x(64)  value spaces.``
+#: [copybooks/wsfnctn.cob:L52]. Every log tag this module writes is fitted to
+#: this width, exactly as a ``MOVE`` into the field would fit it.
+WS_FILE_KEY_WIDTH: Final[int] = 64
+
+#: ``05  WS-Log-Where    pic x(231) value spaces.``
+#: [copybooks/wsfnctn.cob:L53] - the predicate copy the positioning verbs
+#: write for test logging [common/otm5MT.cbl:L1019, :L1174].
+WS_LOG_WHERE_WIDTH: Final[int] = 231
+
 #: ``move 995 to WE-Error`` when a DELETE does not affect exactly one row
 #: [common/otm5MT.cbl:L941].
 DELETE_ROWCOUNT_WE_ERROR: Final[int] = int(WeError.DELETE_SQLSTATE_NOT_00000)
@@ -703,27 +778,151 @@ HANDLER_CLOSE_FILE_KEY: Final[str] = "CLOSE SL OTM5 File"
 # ANOMALY A9 - THREE cursors are declared for a single-key table with no
 # repeating group: ``Most-Cursor-Set``, ``Most-Cursor-Set-2`` annotated "RG 1
 # or special" and ``Most-Cursor-Set-3`` annotated "RG 2 or special"
-# [common/otm5MT.cbl:L262-L272]. Only the first is ever meaningful on the path
-# the handler drives, so ONE logical cursor is used here and the
-# over-provision is recorded rather than reproduced as three.
+# [common/otm5MT.cbl:L262-L272]. The annotations are the anomaly: NEITHER extra
+# cursor drives a repeating group, because this table has none. The second
+# belongs to ``ba140`` [common/otm5MT.cbl:L1002, L1057] and the third to
+# ``ba150`` [common/otm5MT.cbl:L1159, L1212], both of them SORTED reads rather
+# than "RG 1" or "RG 2" of anything - so the frozen comments misdescribe their
+# own fields. All THREE are therefore modelled, each as its own slot, and the
+# misdescription is recorded rather than acted on.
 #
-# ANOMALY A10 - and the frozen reset is asymmetric: the read-next exhaustion
-# paths in ``ba141`` deactivate the cursor they were reading
-# [common/otm5MT.cbl:L618, L635, L640] while ``ba998-Free`` resets cursor ONE
-# unconditionally, whatever was active [common/otm5MT.cbl:L1326]. With one
-# logical cursor the asymmetry collapses to an unconditional reset, which is
-# what ``cursor_state.CursorState.free`` performs.
-#: The single cursor slot this handler's path uses.
+# ANOMALY A10 - and the frozen reset is asymmetric. The read-next exhaustion
+# paths deactivate the cursor they were reading - ``ba041`` cursor THREE
+# [common/otm5MT.cbl:L618, L635, L640], ``ba141`` cursor TWO
+# [common/otm5MT.cbl:L1117, L1134, L1139], ``ba151`` cursor THREE
+# [common/otm5MT.cbl:L1289, L1294] - while ``ba998-Free`` resets cursor ONE
+# unconditionally, whatever was active [common/otm5MT.cbl:L1326].
+# ⭐ ``ba041`` DEACTIVATING CURSOR THREE IS THE SHARPEST EDGE OF A10: the
+# primary sequential read activates cursor ONE [common/otm5MT.cbl:L556] and
+# then, at end of file, clears cursor THREE - which is ``ba150``'s. So in the
+# compiled program an exhausted plain read-next resets the BY-CUSTOMER sorted
+# walk and leaves its own cursor active. That is a cross-verb interference
+# defect, not a typo, and rule R-4 forbids repairing it; see
+# :func:`read_next`, which reproduces it.
+#: The cursor slot the PLAIN read-next and the positioning verbs use -
+#: ``Most-Cursor-Set`` [common/otm5MT.cbl:L265].
 CURSOR_SLOT: Final[CursorSlot] = CursorSlot.PRIMARY
 
-#: The slots the frozen bridge declares but the handler's path never reaches -
-#: ``ba140`` uses the second and ``ba150`` the third, and both are only
-#: reachable through function codes 32 and 33, which the handler cannot
-#: present (correction C3, omission O8).
-UNREACHED_CURSOR_SLOTS: Final[tuple[CursorSlot, ...]] = (
-    CursorSlot.SECONDARY,  # [common/otm5MT.cbl:L267]
-    CursorSlot.TERTIARY,   # [common/otm5MT.cbl:L270]
-)
+#: The slots the two SORTED reads use. ``Most-Cursor-Set-2`` is ``ba140``'s
+#: [common/otm5MT.cbl:L267] and ``Most-Cursor-Set-3`` is ``ba150``'s
+#: [common/otm5MT.cbl:L270]. Both are REACHED - see correction C3 - so this
+#: mapping records which verb owns which slot and no longer records an omission.
+SORTED_CURSOR_SLOTS: Final[Mapping[FileFunction, CursorSlot]] = {
+    FileFunction.READ_BY_BATCH: CursorSlot.SECONDARY,  # [common/otm5MT.cbl:L1002]
+    FileFunction.READ_BY_CUST: CursorSlot.TERTIARY,    # [common/otm5MT.cbl:L1159]
+}
+
+#: Nothing. Every slot the frozen bridge declares is now driven by the verb
+#: that declares it, which is what correction C3 changed. The name is retained
+#: so a reader coming from the traceability document finds the concept and its
+#: resolution rather than a dangling reference.
+UNREACHED_CURSOR_SLOTS: Final[tuple[CursorSlot, ...]] = ()
+
+# ---------------------------------------------------------------------------
+#  THE TWO SORTED READS - FUNCTION CODES 32 AND 33
+# ---------------------------------------------------------------------------
+# ``copybooks/wsfnctn.cob`` declares two extended function codes for this
+# entity [copybooks/wsfnctn.cob:L103-L104]:
+#
+#     88  fn-Read-By-Batch   value 32.       *> 08/02/17 for OTM3/5 (sl095/pl095)
+#     88  fn-Read-By-Cust    value 33.       *> 09/02/17 for OTM3 (sl110, 120, 190)
+#
+# and the frozen facade publishes a verb for each, against THIS handler:
+#
+#     OTM5-Read-Next-Sorted-By-Batch.       [copybooks/Proc-ACAS-FH-Calls.cob:L1300]
+#         move     zero to Access-Type.     [:L1301]
+#         set      fn-Read-By-Batch to true. [:L1302]
+#         perform  acas029.                 [:L1303]
+#     OTM5-Read-Next-Sorted-By-Cust.        [:L1305-L1308]
+#
+# The shared positioning layer agrees: ``cursor_state.EXTRA_READ_ORDERS``
+# carries both entries for this table with ``owning_handlers=("acas029",)``.
+# See correction C3 for why an earlier reading of the same source concluded the
+# opposite, and :func:`_sorted_read_next` for the three compounded defects that
+# make the resulting statement a syntax error.
+#: The shared table's record of both verbs - slot, ordering terms, the fact
+#: that NO predicate is built, and the declaring locator. Held so that this
+#: module and the positioning layer cannot drift apart on the metadata.
+_EXTRA_READS: Final = EXTRA_READ_ORDERS[TABLE]
+
+#: How the frozen bridge quotes its ordering terms, recorded against the shared
+#: vocabulary so the intent is unambiguous rather than implied by the text
+#: below: SINGLE quotes, i.e. string constants, which order nothing at all.
+_SORTED_ORDER_BY_QUOTING: Final[OrderQuoting] = OrderQuoting.STRING_CONSTANT
+
+#: The two ``ORDER BY`` clauses, transcribed CHARACTER FOR CHARACTER from the
+#: frozen ``STRING`` literals rather than rebuilt from :data:`_EXTRA_READS`.
+#: Two reasons, both fidelity:
+#:
+#: * The COBOL attaches ``ASC``/``DESC`` to only SOME terms and lets the rest
+#:   inherit. Rebuilding term by term would emit a keyword on every term and
+#:   change the text.
+#: * The text IS the defect. The statement it lands in is a syntax error, and a
+#:   syntax error is only reproducible if the text is reproduced exactly.
+_SORTED_ORDER_BY_TEXT: Final[Mapping[FileFunction, str]] = {
+    # [common/otm5MT.cbl:L1009-L1013]. The prose comment above the paragraph
+    # lists the terms in very nearly the REVERSE of this order - "order by
+    # B-Nos B-Item ASC, Type DES, Date Invoice ASC"
+    # [common/otm5MT.cbl:L996-L997] - while the code orders invoice and date
+    # first. A false comment, recorded; the CODE's order is what is reproduced.
+    FileFunction.READ_BY_BATCH: (
+        " ORDER BY "
+        "'OI5-INVOICE', 'OI5-DAT' ASC, "
+        "'OI5-TYPE' DESC, "
+        "'OI5-BATCH-ITEM', 'OI5-BATCH-NOS' ASC "
+    ),
+    # [common/otm5MT.cbl:L1166-L1168]. The prose comment here names the terms
+    # with an ``s-`` prefix - "s-customer / s-date / s-invoice / s-type"
+    # [common/otm5MT.cbl:L1151-L1154] - which is the SALES spelling of columns
+    # this PURCHASE table names ``OI5-SUPPLIER`` and so on: the fifth
+    # sales-terminology leak in the chain, after the four A23 records.
+    FileFunction.READ_BY_CUST: (
+        " ORDER BY "
+        "'OI5-SUPPLIER', 'OI5-DAT', "
+        "'OI5-INVOICE', 'OI5-TYPE' ASC "
+    ),
+}
+
+#: ``move "Sorted" to WS-File-Key`` - written by BOTH sorted reads while their
+#: SELECT is in flight [common/otm5MT.cbl:L1036, L1191], so the log tag cannot
+#: tell the by-batch read from the by-customer one. Note the frozen
+#: indentation differs by one space between the two sites; the value does not.
+SORTED_FILE_KEY: Final[str] = "Sorted"
+
+#: The tail of the success message both sorted reads compose,
+#: ``string "> 0 got cnt=" WS-Temp-ED-Row " recs in sorted order"``
+#: [common/otm5MT.cbl:L1061, L1216]. Identical in both, so this is
+#: a THIRD thing that cannot distinguish them - after the shared ``"Sorted"``
+#: tag and the shared ``ws-No-Paragraph`` 21/22 pair. Deliberately NOT
+#: ``ba040``'s ``" recs for INVOICE-RECORD Table"`` [common/otm5MT.cbl:L561].
+SORTED_FILE_KEY_SUFFIX: Final[str] = " recs in sorted order"
+
+#: ``01 WS-Temp-ED-Row pic 9(7).`` [common/otm5MT.cbl:L231]. The row count is
+#: MOVEd into it and then STRINGed ``delimited by size``
+#: [common/otm5MT.cbl:L1058-L1060], so all SEVEN character positions reach the
+#: tag and a count of three renders ``0000003``, not ``3``.
+_TEMP_ED_ROW_DIGITS: Final[int] = 7
+
+# The shared positioning table and this module must agree on which slot each
+# sorted read drives, because the table's ``owning_handlers`` names this handler
+# and a silent disagreement would leave one of the two walks writing into the
+# other's cursor. Asserted at import rather than trusted, following the same
+# guard ``acas012_sales`` applies to its own extended read.
+for _sorted_function, _sorted_slot in SORTED_CURSOR_SLOTS.items():
+    if _EXTRA_READS[_sorted_function].cursor_slot is not _sorted_slot:
+        raise ValueError(
+            f"{BRIDGE} {_sorted_function.name} drives "
+            f"{_EXTRA_READS[_sorted_function].cursor_slot} in cursor_state but "
+            f"{_sorted_slot} here "
+            f"{_EXTRA_READS[_sorted_function].source_locator}"
+        )
+    if HANDLER not in _EXTRA_READS[_sorted_function].owning_handlers:
+        raise ValueError(
+            f"{HANDLER} is not recorded as an owner of "
+            f"{_sorted_function.name} "
+            f"{_EXTRA_READS[_sorted_function].source_locator}"
+        )
+del _sorted_function, _sorted_slot
 
 #: A status pair, as the frozen pair reports one: ``(FS-Reply, WE-Error)``.
 #: Every verb returns this and every verb also writes it into ``File-Access``,
@@ -1829,15 +2028,17 @@ def _bridge_initialise(file_access: FileAccess) -> None:
     # L389: move zero to SQL-State.  MOVE ZERO to a PIC X(5) fills it with the
     # figurative constant's character form, not spaces - the two blanked
     # fields below are the ones that become spaces.
-    logging_data.sql_state = "0" * len(logging_data.sql_state)
+    logging_data.sql_state = "0" * SQL_STATE_WIDTH
     # L393-L399: move spaces to WS-MYSQL-Error-Message, WS-MYSQL-Error-Number,
     # WS-Log-Where, WS-File-Key, SQL-Msg, SQL-Err.  The first two are the
     # bridge's own working storage and have no linkage counterpart; the four
-    # that do are cleared here.
-    logging_data.ws_log_where = " " * len(logging_data.ws_log_where)
-    logging_data.ws_file_key = " " * len(logging_data.ws_file_key)
-    logging_data.sql_msg = " " * len(logging_data.sql_msg)
-    logging_data.sql_err = " " * len(logging_data.sql_err)
+    # that do are cleared here.  Each is refilled to its DECLARED width, so a
+    # field a caller left short is restored rather than kept short - see
+    # correction C9.
+    logging_data.ws_log_where = " " * WS_LOG_WHERE_WIDTH
+    logging_data.ws_file_key = " " * WS_FILE_KEY_WIDTH
+    logging_data.sql_msg = " " * SQL_MSG_WIDTH
+    logging_data.sql_err = " " * SQL_ERR_WIDTH
     # L390-L391 - the zeroing of We-Error and Fs-Reply is COMMENTED OUT and is
     # therefore NOT performed here. Anomaly A36.
 
@@ -1849,23 +2050,36 @@ def _set_file_key(file_access: FileAccess, value: str) -> None:
     value is space-padded and a longer one truncated, exactly as a COBOL
     ``MOVE`` to an alphanumeric field does.
 
+    The width comes from :data:`WS_FILE_KEY_WIDTH`, the copybook's own
+    declaration, and NOT from the length of whatever the field currently
+    holds - correction C9. The distinction matters because the shared
+    positioning layer assigns this field unpadded, so the incoming value can
+    be shorter than 64 characters, and sizing the move from it would clip
+    every later tag to that length.
+
     Args:
         file_access: the linkage block holding ``Logging-Data``.
         value: the key or literal to record.
     """
-    width = len(file_access.logging_data.ws_file_key)
-    file_access.logging_data.ws_file_key = value.ljust(width)[:width]
+    file_access.logging_data.ws_file_key = value.ljust(WS_FILE_KEY_WIDTH)[
+        :WS_FILE_KEY_WIDTH
+    ]
 
 
 def _set_log_where(file_access: FileAccess, value: str) -> None:
     """Store the predicate text, reproducing ``move WS-Where (1:J)``.
 
+    ``WS-Log-Where`` is ``pic x(231)`` [copybooks/wsfnctn.cob:L53], and the
+    width is taken from that declaration rather than from the field's current
+    contents - correction C9, as for :func:`_set_file_key`.
+
     Args:
         file_access: the linkage block holding ``Logging-Data``.
         value: the ``WHERE`` text the verb built.
     """
-    width = len(file_access.logging_data.ws_log_where)
-    file_access.logging_data.ws_log_where = value.ljust(width)[:width]
+    file_access.logging_data.ws_log_where = value.ljust(WS_LOG_WHERE_WIDTH)[
+        :WS_LOG_WHERE_WIDTH
+    ]
 
 
 def _trace(file_access: FileAccess, number: int) -> None:
@@ -2212,9 +2426,13 @@ def _cursor(connection: MySQLConnectionAbstract) -> Iterator[DatabaseCursor]:
 
     Yields:
         A cursor satisfying the ``DatabaseCursor`` protocol - ``execute``,
-        ``fetchone`` and ``description``.
+        ``fetchone`` and ``description``. When another bridge has closed the one
+        process handle - anomaly A-8 - this is the stand-in whose ``execute``
+        reports the driver's failure, because the frozen bridge reports a dead
+        session from its statement [copybooks/mysql-procedures.cpy:L165-L166] and
+        has no separate acquisition step to fail at.
     """
-    cursor = connection.cursor()
+    cursor = acquire_cursor(connection)
     try:
         yield cursor
     finally:
@@ -2287,18 +2505,19 @@ def _apply_driver_failure(
         command=command,
     )
     logging_data = file_access.logging_data
-    # L880-L881: move WS-MYSQL-SqlState to SQL-State - always.
-    logging_data.sql_state = str(status.sql_state).ljust(
-        len(logging_data.sql_state)
-    )[: len(logging_data.sql_state)]
+    # L880-L881: move WS-MYSQL-SqlState to SQL-State - always.  Fitted to the
+    # copybook's declared width, not the field's current length - see C9.
+    logging_data.sql_state = str(status.sql_state).ljust(SQL_STATE_WIDTH)[
+        :SQL_STATE_WIDTH
+    ]
     # L882-L885: the number and the message only when the number is not "0  ".
     if errno and errno != "0":
-        logging_data.sql_err = str(status.sql_err).ljust(
-            len(logging_data.sql_err)
-        )[: len(logging_data.sql_err)]
-        logging_data.sql_msg = str(status.sql_msg).ljust(
-            len(logging_data.sql_msg)
-        )[: len(logging_data.sql_msg)]
+        logging_data.sql_err = str(status.sql_err).ljust(SQL_ERR_WIDTH)[
+            :SQL_ERR_WIDTH
+        ]
+        logging_data.sql_msg = str(status.sql_msg).ljust(SQL_MSG_WIDTH)[
+            :SQL_MSG_WIDTH
+        ]
     return (str(status.sql_err), str(status.sql_state))
 
 
@@ -2315,8 +2534,8 @@ def _clear_sql_diagnostics(file_access: FileAccess) -> None:
         file_access: the linkage block to clear.
     """
     logging_data = file_access.logging_data
-    logging_data.sql_msg = " " * len(logging_data.sql_msg)
-    logging_data.sql_err = "0" * len(logging_data.sql_err)
+    logging_data.sql_msg = " " * SQL_MSG_WIDTH
+    logging_data.sql_err = "0" * SQL_ERR_WIDTH
 
 
 def _require_connection(operation: str) -> MySQLConnectionAbstract:
@@ -2468,15 +2687,15 @@ def open_(
     # Steps 1 and 3 - the six strings and MYSQL-1000-OPEN THRU MYSQL-1090-EXIT.
     outcome = mysql_1090_exit(mysql_1000_open(system, transport=transport))
     logging_data = file_access.logging_data
-    logging_data.sql_err = str(outcome.sql_err).ljust(
-        len(logging_data.sql_err)
-    )[: len(logging_data.sql_err)]
-    logging_data.sql_msg = str(outcome.sql_msg).ljust(
-        len(logging_data.sql_msg)
-    )[: len(logging_data.sql_msg)]
-    logging_data.sql_state = str(outcome.sql_state).ljust(
-        len(logging_data.sql_state)
-    )[: len(logging_data.sql_state)]
+    logging_data.sql_err = str(outcome.sql_err).ljust(SQL_ERR_WIDTH)[
+        :SQL_ERR_WIDTH
+    ]
+    logging_data.sql_msg = str(outcome.sql_msg).ljust(SQL_MSG_WIDTH)[
+        :SQL_MSG_WIDTH
+    ]
+    logging_data.sql_state = str(outcome.sql_state).ljust(SQL_STATE_WIDTH)[
+        :SQL_STATE_WIDTH
+    ]
     if int(outcome.fs_reply) != int(FsReply.SUCCESS):
         # Step 4 - L464-L465: no file key, no cursor change, straight out.
         _LOG.error(
@@ -2549,8 +2768,10 @@ def close(file_access: FileAccess) -> StatusPair:
     """
     global _CONNECTION
     # Step 1 - L478-L479, and ANOMALY A10: ba998-Free resets cursor ONE
-    # unconditionally [common/otm5MT.cbl:L1326] even though the read-next EOF
-    # path sets cursor THREE inactive - see UNREACHED_CURSOR_SLOTS.
+    # unconditionally [common/otm5MT.cbl:L1326] even though ba041's EOF path
+    # sets cursor THREE inactive [common/otm5MT.cbl:L618] - which is
+    # ba150's slot, per SORTED_CURSOR_SLOTS. So closing the file leaves any
+    # sorted cursor exactly as it was; reproduced, not tidied.
     state = _STATES.state_for(TABLE, CURSOR_SLOT)
     if state.cursor_active():
         _trace(file_access, BRIDGE_TRACE_NUMBERS["ba998-Free"][0])
@@ -2619,9 +2840,10 @@ def start(
 
     ANOMALY A9 - the bridge declares THREE cursors for this single-key,
     no-repeating-group table [common/otm5MT.cbl:L264-L272], the second and
-    third annotated "RG 1 or special" and "RG 2 or special". Only one is ever
-    meaningful, so one logical cursor is used; see :data:`CURSOR_SLOT` and
-    :data:`UNREACHED_CURSOR_SLOTS`.
+    third annotated "RG 1 or special" and "RG 2 or special" for repeating
+    groups this table does not have. Those two belong to the SORTED reads
+    instead, not to any repeating group; this verb uses the first. See
+    :data:`CURSOR_SLOT` and :data:`SORTED_CURSOR_SLOTS`.
 
     CORRECTION C7, measured against the frozen source: the specification cites
     ``MOST-Relation`` at L264 and the cursor block as L263-L273. Both are off by
@@ -2949,7 +3171,7 @@ def write(otm5: OiHeader, file_access: FileAccess) -> StatusPair:
     # Step 3 - L870-L874.
     _status(file_access, FsReply.SUCCESS, int(WeError.SUCCESS))
     logging_data = file_access.logging_data
-    logging_data.sql_state = "0" * len(logging_data.sql_state)
+    logging_data.sql_state = "0" * SQL_STATE_WIDTH
     _clear_sql_diagnostics(file_access)
     # Step 4 - L875.
     _trace(file_access, BRIDGE_TRACE_NUMBERS["ba070-Process-Write"][0])
@@ -3168,6 +3390,514 @@ def delete_all(file_access: FileAccess) -> StatusPair:
         BRIDGE,
     )
     return bad_function(file_access)
+
+
+def _sorted_where_1_to_j(function: FileFunction) -> str:
+    """Return ``WS-Where (1:J)`` for one of the two sorted reads.
+
+    Both paragraphs build their ``WS-Where`` the same way
+    [common/otm5MT.cbl:L1007-L1017, L1164-L1172]::
+
+        move     spaces to WS-Where
+        move     1   to J
+        string   " ORDER BY " <terms> into ws-Where  with pointer J
+        end-string
+
+    ⭐ THE POINTER OVERRUNS BY ONE, AND THAT ONE CHARACTER IS OBSERVABLE.
+    ``J`` starts at 1 and ``STRING ... WITH POINTER`` leaves it one PAST the
+    last character written, so every later reference to ``ws-Where (1:J)``
+    - the log move [common/otm5MT.cbl:L1019, L1174] and the statement
+    [common/otm5MT.cbl:L1030, L1185] - includes one trailing character from the
+    field, which ``move spaces to WS-Where`` has just made a SPACE. So the
+    assembled statement carries a trailing space before its semicolon. Harmless
+    to MySQL, but reproduced because the text is what the log records.
+
+    ⭐ AND THE WHOLE OF ``WS-Where`` IS THE ``ORDER BY`` - THERE IS NO
+    PREDICATE. That is defect 1 of the three compounded in
+    :func:`_sorted_read_next`, and the shared table records the same fact
+    independently as ``predicate_present=False``, which is asserted here so the
+    two cannot drift apart.
+
+    Args:
+        function: :attr:`~acas_posting.dal.status.FileFunction.READ_BY_BATCH`
+            (32) or :attr:`~acas_posting.dal.status.FileFunction.READ_BY_CUST`
+            (33).
+
+    Returns:
+        The transcribed ``ORDER BY`` text plus the one space the pointer
+        overran - exactly what ``ws-Where (1:J)`` holds.
+
+    Raises:
+        ValueError: If the transcribed text and the shared table's declared
+            ordering disagree, which would mean one of the two had been
+            misread. Checked rather than assumed, because the text is the
+            defect and a silent divergence would repair it.
+    """
+    text = _SORTED_ORDER_BY_TEXT[function]
+    declared = _EXTRA_READS[function]
+    if declared.predicate_present:
+        raise ValueError(
+            f"{BRIDGE} declares a predicate for {function.name}, but "
+            f"{declared.source_locator} builds ORDER BY only"
+        )
+    missing = tuple(
+        term.column_name
+        for term in declared.order_terms
+        if f"'{term.column_name}'" not in text
+    )
+    if missing:
+        raise ValueError(
+            f"{BRIDGE} ORDER BY text for {function.name} omits "
+            f"{', '.join(missing)} {declared.source_locator}"
+        )
+    # `move 1 to J` then `with pointer J` - the overrun, spelled out.
+    return f"{text} "
+
+
+def _sorted_select_statement(where_1_to_j: str) -> str:
+    """Assemble the sorted read's ``SELECT``, malformed exactly as frozen.
+
+    [common/otm5MT.cbl:L1026-L1031], character for character at
+    [common/otm5MT.cbl:L1181-L1186]::
+
+        INITIALIZE WS-MYSQL-COMMAND
+        STRING "SELECT * FROM "
+          "`PUITM5-REC`"
+          " WHERE "
+          ws-Where (1:J)
+         ";"  X"00" INTO WS-MYSQL-COMMAND
+
+    ``" WHERE "`` is UNCONDITIONAL while ``ws-Where`` holds no predicate, so
+    the statement reads ``SELECT * FROM `PUITM5-REC` WHERE  ORDER BY ...;``
+    with the keyword followed immediately by ``ORDER``. No SQL parser accepts
+    it. ``X"00"`` is the C string terminator the interface needs and has no
+    counterpart here; the driver takes a Python string.
+
+    Args:
+        where_1_to_j: The slice from :func:`_sorted_where_1_to_j`.
+
+    Returns:
+        The statement text, malformed. NOT corrected - rule R-4, and Agent
+        Action Plan section 0.8.2 states the standard it is measured against:
+        "A defect reproduced is correct; a defect fixed is a failure."
+    """
+    return f"SELECT * FROM {quote_identifier(TABLE)} WHERE {where_1_to_j};"
+
+
+def _sorted_store_result(cursor: DatabaseCursor) -> tuple[Mapping[str, Any], ...]:
+    """Materialise the whole result, reproducing ``MYSQL-1220-STORE-RESULT``.
+
+    ``Mysql-1220-Store-Result`` pulls every qualifying row to the client
+    [copybooks/mysql-procedures.cpy:L187-L192] and ``MySQL_num_rows`` then
+    counts it [:L191-L192], before ``MySQL_fetch_record`` walks it one row at a
+    time. So the count the zero-rows guard tests is the count of an ALREADY
+    MATERIALISED result, not a server-side estimate.
+
+    Drained with repeated ``fetchone`` rather than ``fetchall`` so the
+    ``DatabaseCursor`` protocol needs no widening - the same choice
+    ``cursor_state`` makes for the verbs it owns. Its helpers are private to
+    that module, so this is a local reimplementation rather than an import;
+    reaching across for a private name is not a dependency this module is
+    permitted to take.
+
+    Args:
+        cursor: The cursor the ``SELECT`` was issued on.
+
+    Returns:
+        Every row keyed by column name, in the order the statement returned
+        them - which for ``SELECT *`` is the frozen table's declared column
+        order.
+    """
+    description = cursor.description
+    names = tuple(str(column[0]) for column in description) if description else ()
+    rows: list[Mapping[str, Any]] = []
+    while True:
+        row = cursor.fetchone()
+        if row is None:
+            return tuple(rows)
+        if isinstance(row, Mapping):
+            rows.append(row)
+        elif names:
+            rows.append(dict(zip(names, row, strict=False)))
+        else:
+            # No column metadata means no name can be honestly supplied.
+            # Positional keys say so and still let a caller reach the values.
+            rows.append({str(index): value for index, value in enumerate(row)})
+
+
+def _sorted_reread(
+    otm5: OiHeader,
+    file_access: FileAccess,
+    *,
+    function: FileFunction,
+    paragraph: str,
+) -> StatusPair:
+    """The body ``ba141-Reread`` and ``ba151-Reread`` share.
+
+    ``ba141`` [common/otm5MT.cbl:L1067-L1147] and ``ba151``
+    [common/otm5MT.cbl:L1222-L1302] are one paragraph written twice, differing
+    only in the cursor flag they clear - ``Most-Cursor-Set-2`` against
+    ``Most-Cursor-Set-3``. Both stamp ``ws-No-Paragraph`` 22
+    [common/otm5MT.cbl:L1072, L1227], both blank ``WS-Log-Where``
+    [common/otm5MT.cbl:L1071, L1226], and both issue NO statement: they advance
+    the result the ``SELECT`` half already stored.
+
+    Three exhaustion arms, ALL of them ``(10, 10)``, each stamping its own
+    marker - the same anomaly A11 that ``ba041`` carries, here duplicated twice
+    more:
+
+    * ``"EOF"`` when the fetch reports no more data
+      [common/otm5MT.cbl:L1114-L1118, L1269-L1273].
+    * ``"EOF2"`` when the stored count is zero AND the driver reports an error
+      number. ⭐ BOTH THE MARKER AND ``initialize WS-OTM5-Record with filler``
+      SIT INSIDE THAT INNER TEST [common/otm5MT.cbl:L1125-L1131,
+      L1280-L1286], so a zero count with error number ``"0  "`` returns
+      ``(10, 10)`` while leaving the file key AND the record buffer alone. The
+      arm is unreachable in this model and the reason is recorded on
+      :func:`_sorted_read_next`.
+    * ``"EOF3"`` when ``fs-reply`` was ALREADY 10 on entry
+      [common/otm5MT.cbl:L1138-L1142, L1293-L1297]. ⭐ THE ROW IS FETCHED AND
+      THEN THROWN AWAY, and no status is written - the caller's stale pair
+      simply persists - so a sticky end-of-file silently consumes one row per
+      call. Reproduced, including the discard.
+
+    On success: ``perform bb100-UnloadHVs``, then ``move HV-OI5-KEY to
+    WS-File-Key``, then ``move zero to fs-reply WE-Error``
+    [common/otm5MT.cbl:L1144-L1146, L1299-L1301].
+
+    Args:
+        otm5: The linkage record, filled in place on a successful fetch.
+        file_access: The ``File-Access`` linkage block.
+        function: Which sorted read is walking, selecting the cursor slot.
+        paragraph: The reread's frozen paragraph name, for the trace number.
+
+    Returns:
+        ``(0, 0)`` with ``otm5`` filled, ``(10, 10)`` at exhaustion, or the
+        caller's own untouched pair on the ``"EOF3"`` discard.
+    """
+    state = _STATES.state_for(TABLE, SORTED_CURSOR_SLOTS[function])
+    # L1071 / L1226: move spaces to WS-Log-Where - the reread clears it, so a
+    # caller inspecting the log after a fetch sees no predicate at all.
+    _set_log_where(file_access, "")
+    # L1072 / L1227: move 22 to ws-No-Paragraph. Both rereads stamp 22, as does
+    # `ba041`, so the stamp cannot tell the three walks apart.
+    _trace(file_access, BRIDGE_TRACE_NUMBERS[paragraph][1])
+    # The caller's pair, read LIVE rather than snapshotted, because the frozen
+    # source tests the shared field after the fetch and nothing between entry
+    # and the test writes it - `ba010-Initialise` does not reset the pair
+    # (anomaly A36) and neither the SELECT half's success path nor this
+    # paragraph's own moves touch it.
+    incoming_fs_reply = int(file_access.fs_reply)
+    row = state.fetch_record()
+    if row is None:
+        # L1114-L1118 / L1269-L1273: `if return-code = -1 / move 10 to fs-Reply
+        # WE-Error` - ONE statement writing BOTH fields, so We-Error is 10 and
+        # not zero. The cursor is cleared by a bare `set Cursor-Not-Active-N to
+        # true` and NOT by `ba998-Free`, so the stored result stays allocated -
+        # the frozen leak, reproduced rather than tidied.
+        state.set_cursor_not_active()
+        _set_file_key(file_access, EOF_FILE_KEYS[0])
+        end_fs_reply, end_we_error = end_of_file_status()
+        return _status(file_access, int(end_fs_reply), end_we_error)
+    if incoming_fs_reply == int(FsReply.END_OF_FILE):
+        # L1138-L1142 / L1293-L1297. The row has ALREADY been consumed from the
+        # stored result above, exactly as the frozen fetch consumes it, and is
+        # now discarded. No status is assigned, so the stale pair stands.
+        state.set_cursor_not_active()
+        _LOG.warning(
+            "%s: %s discarded a fetched row because the caller's FS-Reply is "
+            "still 10 [common/otm5MT.cbl:L1138-L1142]; end of file is sticky "
+            "until another operation resets the shared field",
+            BRIDGE,
+            paragraph,
+        )
+        _set_file_key(file_access, EOF_FILE_KEYS[2])
+        return (
+            FsReply.END_OF_FILE,
+            int(file_access.we_error),
+        )
+    # L1144: perform bb100-UnloadHVs.
+    unload_host_variables(row, otm5)
+    # L1145 / L1300: move HV-OI5-KEY to WS-File-Key. ANOMALY A1 - this is the
+    # ONLY place a retrieved host variable is observed after the unload, and it
+    # is used as a LOG key rather than moved into the record.
+    _set_file_key(file_access, _column_text(row, PRIMARY_KEY))
+    # L1146 / L1301: move zero to fs-reply WE-Error.
+    return _status(file_access, FsReply.SUCCESS, int(WeError.SUCCESS))
+
+
+def _sorted_read_next(
+    otm5: OiHeader,
+    file_access: FileAccess,
+    *,
+    function: FileFunction,
+    paragraph: str,
+    reread_paragraph: str,
+) -> StatusPair:
+    """The body ``ba140`` and ``ba150`` share, statement for statement.
+
+    ``ba140-Process-Read-Next`` [common/otm5MT.cbl:L994-L1065] and
+    ``ba150-Process-Read-Next`` [common/otm5MT.cbl:L1149-L1220] are one
+    paragraph written twice. They differ in FOUR things and nothing else: the
+    cursor flag they test and set, the ``ORDER BY`` literal, the reread they
+    fall through into, and - not at all, as it turns out - their success tag,
+    which is identical. Even ``ws-No-Paragraph`` 21 is stamped by both.
+
+    ::
+
+        if       Cursor-Not-Active-N                       [:L1002 / :L1159]
+                 set      KOR-x1 to 1                      [:L1003 / :L1160]
+                 move     KOR-offset (KOR-x1) to K         [:L1004 / :L1161]
+                 move     KOR-length (KOR-x1) to L         [:L1005 / :L1162]
+                 move     spaces to WS-Where / 1 to J      [:L1007 / :L1164]
+                 string   " ORDER BY " <quoted terms>      [:L1009 / :L1166]
+                 move     ws-Where (1:J) to WS-Log-Where   [:L1019 / :L1174]
+                 move     21 to ws-No-Paragraph            [:L1020 / :L1175]
+                 <SELECT * FROM `PUITM5-REC` WHERE <slice>;>  [:L1026 / :L1181]
+                 move    "Sorted" to WS-File-Key           [:L1036 / :L1191]
+                 if WS-MYSQL-Count-Rows = zero ...         [:L1043 / :L1198]
+                          -> (10,10) "No Data" -> ba999-End
+                 set      Cursor-Active-N to true          [:L1057 / :L1212]
+                 move     WS-MYSQL-Count-Rows to WS-Temp-Ed-Row [:L1058/:L1213]
+                 string   "> 0 got cnt=" ... " recs in sorted order" [:L1059]
+                 perform ba999-End                         [:L1064 / :L1219]
+        end-if.
+        <falls through into the paragraph's own reread>
+
+    ⭐⭐ ANOMALY N-sorted-order-is-a-syntax-error. THREE INDEPENDENT DEFECTS
+    COMPOUND HERE, and the third hides the first two:
+
+    1. ``WS-Where`` receives ONLY the ``ORDER BY`` clause while the ``SELECT``
+       template emits ``" WHERE "`` unconditionally
+       [common/otm5MT.cbl:L1029, L1184]. The statement is therefore
+       ``SELECT * FROM `PUITM5-REC` WHERE  ORDER BY ...;`` - a syntax error,
+       MariaDB 1064 / SQLSTATE 42000.
+    2. Every ordering term is SINGLE-quoted, making it a string CONSTANT rather
+       than a column reference. ``ORDER BY 'OI5-INVOICE'`` orders by a fixed
+       string, i.e. orders nothing - so even with the ``WHERE`` repaired, the
+       sort would not happen. The shared table records the same fact as
+       :attr:`~acas_posting.dal.cursor_state.OrderQuoting.STRING_CONSTANT`;
+       see :data:`_SORTED_ORDER_BY_QUOTING`.
+    3. ``K`` and ``L`` are computed from the key metadata
+       [common/otm5MT.cbl:L1004-L1005, L1161-L1162] and used by NOTHING, this
+       paragraph having no predicate to put them in - the same dead pair
+       ``ba040`` computes and does use.
+
+    ⭐ AND THE FAILURE IS MASKED AS AN EMPTY TABLE. ``MYSQL-1210-COMMAND``
+    turns the syntax error into ``(99, 911)``
+    [copybooks/mysql-procedures.cpy:L127-L128], and the ``= zero`` guard
+    immediately OVERWRITES that with ``(10, 10)`` and ``"No Data"``
+    [common/otm5MT.cbl:L1052-L1055, L1207-L1210]. So a caller asking for a
+    sorted read is told the table is empty. That is why the defect has survived
+    unnoticed, and it is why the observable contract of both verbs is
+    ``(10, 10)`` - identical to ``acas019``'s pair for the same two functions
+    over ``SAITM3-REC``.
+
+    ⭐ CONSEQUENCE FOR THE CURSOR, AND FOR THE REREAD. Because the statement
+    always fails, ``Cursor-Active-N`` is never set, so the fall-through reread
+    always self-positions and the ``"EOF2"`` arm inside it is unreachable while
+    the defect stands. The reread is nonetheless implemented in full - rule R-5
+    requires every paragraph to map to a function, and repairing the statement
+    to reach the arm is exactly what rule R-4 forbids.
+
+    ⭐ ``WS-MYSQL-Count-Rows`` IS ONE SHARED FIELD IN THE FROZEN BRIDGE, so a
+    later ``SELECT`` returning no rows would zero it while a sorted cursor
+    stayed active, and the next reread would then take the ``"EOF2"`` arm.
+    ``cursor_state`` models the count PER CURSOR, and this module follows it so
+    that all three of its walks agree; the frozen sharing is recorded here
+    rather than reproduced, and it is unobservable while defect 1 stands
+    because no sorted cursor ever becomes active.
+
+    ⭐ ``perform ba999-End`` [common/otm5MT.cbl:L1064, L1219] IS A ``PERFORM``,
+    not a ``GO TO``, so control RETURNS and falls through into the reread -
+    Class 4 in the taxonomy, exactly as ``ba040`` does. The logging that
+    ``ba999-end`` performs belongs to :func:`dispatch`, which calls
+    :func:`_process_logs` last for every verb.
+
+    Args:
+        otm5: The linkage record, filled in place on a successful fetch.
+        file_access: The ``File-Access`` linkage block.
+        function: Which sorted read this is - 32 or 33.
+        paragraph: The frozen paragraph name of the ``SELECT`` half.
+        reread_paragraph: The frozen paragraph name of the reread it falls into.
+
+    Returns:
+        ``(10, 10)`` while the frozen statement stays malformed, which is
+        always; ``(0, 0)`` with ``otm5`` filled would require the defect to be
+        repaired.
+
+    Raises:
+        AcasFileHandlerError: If no connection is open, which the frozen bridge
+            has no status code for.
+    """
+    connection = _require_connection(f"fn-{function.name.lower().replace('_', '-')}")
+    state = _STATES.state_for(TABLE, SORTED_CURSOR_SLOTS[function])
+    if not state.cursor_not_active():
+        # The `end-if` at [:L1065] / [:L1220] falls straight through.
+        return _sorted_reread(
+            otm5, file_access, function=function, paragraph=reread_paragraph
+        )
+    # L1003-L1005 / L1160-L1162: the key metadata is read into K and L, and
+    # then used by nothing at all - defect 3 above.
+    _LOG.debug(
+        "%s: %s read KOR offset/length %d/%d and uses neither "
+        "[common/otm5MT.cbl:L1004-L1005]",
+        BRIDGE,
+        paragraph,
+        KEY_OFFSET,
+        KEY_LENGTH,
+    )
+    where_1_to_j = _sorted_where_1_to_j(function)
+    # L1019 / L1174: the log records `ws-Where (1:J)` - the ORDER BY text
+    # ALONE, not the statement, so the malformed `WHERE` never appears in it.
+    _set_log_where(file_access, where_1_to_j)
+    # L1020 / L1175: move 21 to ws-No-Paragraph, set BEFORE the statement.
+    _trace(file_access, BRIDGE_TRACE_NUMBERS[paragraph][0])
+    statement = _sorted_select_statement(where_1_to_j)
+    # L1037-L1039 / L1192-L1194: `if Testing-2 display Display-Message-1` is a
+    # diagnostic with no database effect, so Agent Action Plan section 0.3.4
+    # makes it a log record. It is emitted unconditionally at DEBUG rather than
+    # gated on the flag, because a logger level is the Python equivalent of the
+    # switch and `dal_common` is not a parameter of any verb in this module.
+    _LOG.debug("%s: %s issuing %s", BRIDGE, paragraph, sanitise_for_log(statement))
+    try:
+        with execute_statement(connection, statement, ()) as cursor:
+            rows = _sorted_store_result(cursor)
+    except Exception as error:  # any driver error takes this path
+        # L1044-L1051 / L1199-L1206: errno, SQLSTATE and message are fetched
+        # and stored - SQL-State always, the number and text only when the
+        # number is not "0  ". This is the path defect 1 guarantees, every
+        # time, with MariaDB reporting 1064 / 42000 for the empty `WHERE`.
+        _apply_driver_failure(file_access, error, command="SELECT")
+        count_rows = 0
+    else:
+        count_rows = len(rows)
+    # L1036 / L1191: move "Sorted" to WS-File-Key - written AFTER the statement
+    # and BEFORE the zero-rows test, so it survives only on the success path.
+    # Both paragraphs write the same literal, so the tag cannot tell the
+    # by-batch walk from the by-customer one.
+    _set_file_key(file_access, SORTED_FILE_KEY)
+    if count_rows == 0:
+        # L1052-L1055 / L1207-L1210. THE OVERWRITE THAT HIDES THE DEFECT: the
+        # `(99, 911)` the failed statement produced is replaced here by end of
+        # file, and the caller sees an empty table.
+        #
+        # On the unreachable arm where the statement SUCCEEDS and returns no
+        # rows, the driver's error number is "0" and its SQLSTATE is the
+        # success value; `_bridge_initialise` has already written `SQL-State`
+        # as "00000" [common/otm5MT.cbl:L389], which is that value, so nothing
+        # is assigned here and no SQLSTATE is invented - rule R-6.
+        _set_file_key(file_access, NO_DATA_FILE_KEY)
+        end_fs_reply, end_we_error = end_of_file_status()
+        return _status(file_access, int(end_fs_reply), end_we_error)
+    # L1057 / L1212: set Cursor-Active-N to true, and the stored result becomes
+    # the snapshot the reread walks.
+    state.store_result(rows)
+    state.set_cursor_active()
+    # L1058-L1063 / L1213-L1218: `WS-Temp-ED-Row pic 9(7)`
+    # [common/otm5MT.cbl:L231] receives the count, so it renders as SEVEN
+    # zero-padded digits, and `delimited by size` puts all seven in the tag.
+    _set_file_key(
+        file_access,
+        f"> 0 got cnt={count_rows:0{_TEMP_ED_ROW_DIGITS}d}{SORTED_FILE_KEY_SUFFIX}",
+    )
+    # L1064 / L1219: `perform ba999-End` returns, then the `end-if` falls
+    # through into this paragraph's own reread - Class 4.
+    return _sorted_reread(
+        otm5, file_access, function=function, paragraph=reread_paragraph
+    )
+
+
+def read_next_sorted_by_batch(otm5: OiHeader, file_access: FileAccess) -> StatusPair:
+    """Reproduce ``ba140-Process-Read-Next`` plus ``ba141-Reread``. Function 32.
+
+    ``fn-Read-By-Batch``, declared "for OTM3/5 (sl095/pl095)"
+    [copybooks/wsfnctn.cob:L103] and published against THIS handler by the
+    frozen facade [copybooks/Proc-ACAS-FH-Calls.cob:L1300-L1303]::
+
+        OTM5-Read-Next-Sorted-By-Batch.
+            move     zero to Access-Type.
+            set      fn-Read-By-Batch to true.
+            perform  acas029.
+
+    See CORRECTION C3 in the module docstring for why an earlier reading
+    concluded this verb was unreachable, and :func:`_sorted_read_next` for the
+    three compounded defects that make its statement a syntax error and its
+    observable answer ``(10, 10)``.
+
+    It drives ``Most-Cursor-Set-2`` [common/otm5MT.cbl:L1002, L1057], so a
+    by-batch walk and a by-key walk can be open at once - and ``ba998-Free``
+    clears only the first, which is part of anomaly A10.
+
+    ⭐ THE PROSE COMMENT ABOVE THE PARAGRAPH LISTS THE TERMS IN VERY NEARLY THE
+    REVERSE OF THE CODE'S ORDER - "order by B-Nos B-Item ASC, Type DES, Date
+    Invoice ASC" [common/otm5MT.cbl:L996-L997] against code that orders invoice
+    and date first [common/otm5MT.cbl:L1010-L1013]. A false comment of the same
+    family as A48; the CODE's order is what :data:`_SORTED_ORDER_BY_TEXT`
+    carries.
+
+    Args:
+        otm5: The linkage record, filled in place on a successful fetch.
+        file_access: The ``File-Access`` linkage block.
+
+    Returns:
+        ``(10, 10)`` with the file key ``"No Data"``.
+
+    Raises:
+        AcasFileHandlerError: If no connection is open.
+    """
+    return _sorted_read_next(
+        otm5,
+        file_access,
+        function=FileFunction.READ_BY_BATCH,
+        paragraph="ba140-Process-Read-Next",
+        reread_paragraph="ba141-Reread",
+    )
+
+
+def read_next_sorted_by_cust(otm5: OiHeader, file_access: FileAccess) -> StatusPair:
+    """Reproduce ``ba150-Process-Read-Next`` plus ``ba151-Reread``. Function 33.
+
+    ``fn-Read-By-Cust``, declared "for OTM3 (sl110, 120, 190)"
+    [copybooks/wsfnctn.cob:L104] - three SALES report programs, and the note
+    does not mention OTM5 at all, yet the frozen facade publishes the verb for
+    this purchase entity too [copybooks/Proc-ACAS-FH-Calls.cob:L1305-L1308] and
+    the bridge dispatches it [common/otm5MT.cbl:L427-L428]. All three of those
+    report programs are out of scope [Agent Action Plan section 0.2.2], so
+    nothing in the migrated cycle issues this function; it is implemented
+    because the bridge implements it and the facade publishes it.
+
+    It drives ``Most-Cursor-Set-3`` [common/otm5MT.cbl:L1159, L1212] - the same
+    slot ``ba041`` clears at end of file [common/otm5MT.cbl:L618, L635, L640],
+    which is the cross-verb edge of anomaly A10.
+
+    ⭐ ITS ``ORDER BY`` IS THE SHORTER OF THE TWO and carries ``ASC`` on the
+    last term only, letting the first three inherit
+    [common/otm5MT.cbl:L1166-L1168]. Every term is single-quoted, so it orders
+    nothing - the same three compounded defects as function 32.
+
+    ⭐ AND ITS PROSE COMMENT NAMES SALES COLUMNS - "s-customer / s-date /
+    s-invoice / s-type ASC" [common/otm5MT.cbl:L1151-L1154] - for columns this
+    table spells ``OI5-SUPPLIER`` and so on. The same sales-terminology leak as
+    anomaly A23.
+
+    Args:
+        otm5: The linkage record, filled in place on a successful fetch.
+        file_access: The ``File-Access`` linkage block.
+
+    Returns:
+        ``(10, 10)`` with the file key ``"No Data"``.
+
+    Raises:
+        AcasFileHandlerError: If no connection is open.
+    """
+    return _sorted_read_next(
+        otm5,
+        file_access,
+        function=FileFunction.READ_BY_CUST,
+        paragraph="ba150-Process-Read-Next",
+        reread_paragraph="ba151-Reread",
+    )
 
 
 def bad_function(file_access: FileAccess) -> StatusPair:
@@ -3597,23 +4327,38 @@ def dispatch(
         # [common/otm5MT.cbl:L765-L769] - correction C2 - which is a genuine
         # RDB-path guard, unlike the flat one at [common/acas029.cbl:L441].
         status = start(otm5, file_access, AccessType(int(file_access.access_type)))
+    elif function == int(FileFunction.READ_BY_BATCH):
+        # [common/otm5MT.cbl:L425-L426] when 32 -> ba140-Process-Read-Next
+        # *> Sorted-By-Batch (nos,item,type,date,inv). The frozen `when` order
+        # puts 32 and 33 AFTER 9 and BEFORE `when other`, which is why these
+        # two arms sit here rather than at the head of the chain.
+        status = read_next_sorted_by_batch(otm5, file_access)
+    elif function == int(FileFunction.READ_BY_CUST):
+        # [common/otm5MT.cbl:L427-L428] when 33 -> ba150-Process-Read-Next
+        # *> Sorted-By-Cust (cust,date,inv,type).
+        status = read_next_sorted_by_cust(otm5, file_access)
     else:
         # [common/otm5MT.cbl:L429-L430] when other *> 6 is spare / unused.
         #
-        # ANOMALY A34, refined by correction C3. ``fn-Delete-All`` (6) is
-        # "spare / unused" in the frozen comment, and the two extended codes
-        # are NOT published by this module: ``fn-Read-By-Batch`` (32) and
-        # ``fn-Read-By-Cust`` (33) are declared in
-        # [copybooks/wsfnctn.cob:L103-L104] as existing "for OTM3/5
-        # (sl095/pl095)" and "for OTM3 (sl110, 120, 190)", and the HANDLER
-        # dispatches neither - ``acas029`` contains no ``when 3x`` at all
-        # [common/acas029.cbl:L277-L296]. The bridge does route them, to
-        # ba140 and ba150 [common/otm5MT.cbl:L425-L428], so correction C3
-        # records that the vocabulary is dead in the handler rather than in
-        # the whole chain. They stay unpublished here because their only
-        # callers, the ``sl095``/``pl095`` report programs, are explicitly out
-        # of scope per Agent Action Plan section 0.2.2, so no in-scope program
-        # can issue them; the omission is recorded rather than silent.
+        # ANOMALY A34, AS CORRECTED BY C3 - AND THE CORRECTION CHANGED WHAT
+        # THIS ARM CATCHES. ``fn-Delete-All`` (6) is "spare / unused" in the
+        # frozen comment [common/acas029.cbl:L294] and lands here, which is
+        # what :func:`delete_all` reports. The two EXTENDED codes do NOT land
+        # here: ``fn-Read-By-Batch`` (32) and ``fn-Read-By-Cust`` (33) are
+        # declared at [copybooks/wsfnctn.cob:L103-L104], published against this
+        # handler by the frozen facade
+        # [copybooks/Proc-ACAS-FH-Calls.cob:L1300-L1308] and dispatched by the
+        # bridge [common/otm5MT.cbl:L425-L428], so they are routed by the two
+        # arms above.
+        #
+        # The earlier reading that sent them here rested on the HANDLER's
+        # dispatch containing no ``when 3x`` [common/acas029.cbl:L277-L296].
+        # That evaluate is the FLAT-FILE one: the RDB branch at
+        # [common/acas029.cbl:L257-L261] performs ``ba-Process-RDBMS`` and
+        # leaves through ``AA-Main-Exit`` BEFORE it, so on the RDB path the
+        # function code reaches the bridge untouched - the same shape
+        # ``acas019`` has, which also lacks a ``when 3x`` while its bridge
+        # dispatches both. See correction C3.
         #
         # ANOMALY A12: the code returned is the BRIDGE's 990
         # [common/otm5MT.cbl:L1308], not the handler's unreachable 999
@@ -3722,10 +4467,20 @@ def dispatch(
 #   L867  ba070-Process-Write.            -> write                     (A44)
 #   L895  ba080-Process-Delete.           -> delete                    (A36)
 #   L949  ba090-Process-Rewrite.          -> rewrite
-#   L994  ba140-Process-Read-Next.        -> NOT PUBLISHED, fn 32      (A34)
-#  L1067  ba141-Reread.                   -> NOT PUBLISHED, fn 32
-#  L1149  ba150-Process-Read-Next.        -> NOT PUBLISHED, fn 33      (A34)
-#  L1222  ba151-Reread.                   -> NOT PUBLISHED, fn 33
+#   L994  ba140-Process-Read-Next.        -> read_next_sorted_by_batch, the
+#                                             SELECT half, via
+#                                             _sorted_read_next  (fn 32; C3,
+#                                             N-sorted-order-is-a-syntax-error)
+#  L1067  ba141-Reread.                   -> read_next_sorted_by_batch, the
+#                                             FETCH half, via _sorted_reread
+#                                             (A10, A11)
+#  L1149  ba150-Process-Read-Next.        -> read_next_sorted_by_cust, the
+#                                             SELECT half, via
+#                                             _sorted_read_next  (fn 33; C3,
+#                                             N-sorted-order-is-a-syntax-error)
+#  L1222  ba151-Reread.                   -> read_next_sorted_by_cust, the
+#                                             FETCH half, via _sorted_reread
+#                                             (A10, A11)
 #  L1304  ba100-Bad-Function.             -> bad_function              (A12)
 #  L1316  ba998-Free.                     -> the cursor reset inside close,
 #                                             read_next and read_indexed (A10)
@@ -3892,10 +4647,15 @@ def dispatch(
 #   A6  binary -> char, twice ............... load_host_variables
 #   A7  OI-Customer, group of one ........... section 5 above, blank_record
 #   A8  OI-Approp redefines OI-Net .......... unload_host_variables
-#   A9  three cursors, one key .............. CURSOR_SLOT,
-#                                             UNREACHED_CURSOR_SLOTS
-#   A10 cursor reset asymmetry .............. close, read_next, read_indexed
-#   A11 EOF / EOF2 / EOF3 ................... EOF_FILE_KEYS, read_next
+#   A9  three cursors, and the two extra ones
+#       MISDESCRIBED as repeating groups on a
+#       table that has none ................. CURSOR_SLOT,
+#                                             SORTED_CURSOR_SLOTS
+#   A10 cursor reset asymmetry, including
+#       ba041 clearing ba150's cursor ....... close, read_next, read_indexed,
+#                                             _sorted_reread
+#   A11 EOF / EOF2 / EOF3, three times over . EOF_FILE_KEYS, read_next,
+#                                             _sorted_reread
 #   A12 handler 999 vs bridge 990 ........... bad_function, dispatch
 #   A13 FS-Reply 35 ......................... FS_REPLY_OPEN_INPUT_FAILED
 #   A14 fn-extend returns 997 ............... OPEN_EXTEND_WE_ERROR, open_extend
@@ -3933,7 +4693,11 @@ def dispatch(
 #   A31 live stop "Cobol File EOF" .......... the C5 omission block
 #   A32 credentials latched once, order drift  record_size_gate, dispatch
 #   A33 the 901 record-size fatal ........... record_size_gate
-#   A34 codes 32 / 33 unpublished ........... dispatch's else branch
+#   A34 WITHDRAWN. It read "codes 32 / 33
+#       unpublished". They ARE published and
+#       dispatched; the entry that replaces
+#       it is N-sorted-order-is-a-syntax-error
+#       below .............................. correction C3, dispatch
 #   A35 every numeric renders as MAGNITUDE .. mysql_edit and the renderers
 #   A36 the status pair is NOT reset ........ _bridge_initialise, close,
 #                                             delete
@@ -3964,13 +4728,34 @@ def dispatch(
 #       [common/otm5MT.cbl:L794-L795] is
 #       unreachable, guarded out at [:L765],
 #       while [:L263] still advertises `<=`.. start
+#   N-sorted-order-is-a-syntax-error
+#       THREE defects compound in ba140 and
+#       ba150: the SELECT emits " WHERE "
+#       [common/otm5MT.cbl:L1029, L1184] with
+#       NO predicate to put after it, every
+#       ORDER BY term is single-quoted so it
+#       orders a string constant rather than
+#       a column [:L1010-L1013, L1166-L1168],
+#       and K/L are computed then unused
+#       [:L1004-L1005, L1161-L1162]. The
+#       resulting 1064 is masked as an empty
+#       table by the `= zero` guard, so both
+#       verbs answer (10, 10) ............... _sorted_read_next,
+#                                             _sorted_where_1_to_j,
+#                                             _sorted_select_statement,
+#                                             _SORTED_ORDER_BY_TEXT
+#       The same anomaly is carried by
+#       otm3MT for `SAITM3-REC`, where
+#       ``acas019`` records it under the same
+#       name - so it is ONE defect in a
+#       template copied twice, not two.
 #
 # ---------------------------------------------------------------------------
 # 7. CORRECTION INDEX - the working specification versus the frozen source
 # ---------------------------------------------------------------------------
 # Rule R-6 makes compiled behaviour the tie-breaker, so where the working
 # specification and the frozen source disagree, the source wins and the
-# disagreement is recorded rather than silently resolved. Eight such
+# disagreement is recorded rather than silently resolved. Nine such
 # disagreements were measured while writing this module:
 #
 #   C1  [common/acas029.cbl] line numbers drift by one to two lines in the
@@ -3981,10 +4766,17 @@ def dispatch(
 #       its own on the RDB path [common/otm5MT.cbl:L765-L769], returning
 #       (99, 997) - a different pair from the handler's 998
 #       [common/acas029.cbl:L441-L442].           -> start, A17, A50
-#   C3  function codes 32 and 33 are dead in the HANDLER
-#       [common/acas029.cbl:L277-L295] but LIVE in the bridge, which
-#       dispatches both [common/otm5MT.cbl:L425-L428].
-#                                                 -> dispatch, A34
+#   C3  function codes 32 and 33 are LIVE, and this module's own earlier
+#       reading of them was wrong. The handler's ``evaluate`` that omits them
+#       [common/acas029.cbl:L277-L296] is the FLAT-FILE one, unreachable on the
+#       RDB path because the branch at [common/acas029.cbl:L257-L261] leaves
+#       first; the bridge dispatches both [common/otm5MT.cbl:L425-L428] and the
+#       frozen facade presents both to this handler
+#       [copybooks/Proc-ACAS-FH-Calls.cob:L1300-L1308]. Both verbs are
+#       published, and A34 is withdrawn.
+#                                                 -> read_next_sorted_by_batch,
+#                                                    read_next_sorted_by_cust,
+#                                                    dispatch, A34 withdrawn
 #   C4  the three-field SQL-diagnostic clearing [common/acas029.cbl:L275] is
 #       never reached on this path; ba010-Initialise covers six fields plus
 #       SQL-State [common/otm5MT.cbl:L387].       -> record_size_gate, A36
@@ -4002,4 +4794,26 @@ def dispatch(
 #       [copybooks/wsfnctn.cob] is 117 lines, so L118 does not exist.
 #       File-Function is [:L88-L105], Access-Type [:L107-L116].
 #                                                 -> start
+#   C9  every ``move`` into WS-File-Key, WS-Log-Where, SQL-Msg, SQL-Err or
+#       SQL-State must be fitted to the width the COPYBOOK declares
+#       [copybooks/wsfnctn.cob:L49-L53] - 64, 231, 512, 5 and 5 - and NOT to
+#       the length of whatever the field currently holds. A COBOL alphanumeric
+#       MOVE pads and truncates against the RECEIVING field's picture, which
+#       never changes at run time; sizing from the incoming value let the
+#       field shrink the first time the shared positioning layer assigned it
+#       an unpadded string, after which every later move was clipped to the
+#       shrunken length. Measured on the RDB path: the bridge's "CLOSE PL
+#       OTM5" [common/otm5MT.cbl:L482] came back as "CLOSE P" and the
+#       sorted reads' "No Data" [common/otm5MT.cbl:L1054, :L1209] as
+#       "No D". NOTE the tag is the BRIDGE's, not the handler's "CLOSE SL
+#       OTM5 File" [common/acas029.cbl:L346] - that one belongs to the flat
+#       verbs correction C5 shows are unreachable here. Sibling handlers size
+#       their moves from the declaration; this module was the outlier.
+#                                                 -> WS_FILE_KEY_WIDTH,
+#                                                    WS_LOG_WHERE_WIDTH,
+#                                                    _set_file_key,
+#                                                    _set_log_where,
+#                                                    _bridge_initialise,
+#                                                    _apply_driver_failure,
+#                                                    _clear_sql_diagnostics
 # ===========================================================================

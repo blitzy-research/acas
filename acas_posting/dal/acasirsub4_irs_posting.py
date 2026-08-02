@@ -274,6 +274,7 @@ from types import MappingProxyType
 from typing import Any, Final, Iterator, Mapping
 
 from acas_posting.dal.connection import (
+    acquire_cursor,
     execute_statement,
     mysql_1000_open,
     mysql_1090_exit,
@@ -1734,9 +1735,16 @@ def _positioning_cursor(connection: Any) -> Iterator[Any]:
     statement it issues itself, and this for handing a cursor to the component that
     issues its own.
 
+    A SESSION ANOTHER BRIDGE HAS CLOSED DOES NOT RAISE HERE. Anomaly A-8 means
+    any bridge's ``Mysql-1980-Close`` closes the one process handle
+    [presql2-package/cobmysqlapi38.c:L230-L234]; the frozen bridge reports that
+    from its ``call "MySQL_query"`` [copybooks/mysql-procedures.cpy:L165-L166],
+    so ``acquire_cursor`` carries the failure to the ``execute`` that
+    ``cursor_state`` issues rather than raising out of this generator.
+
     The cursor is closed on every path, including when the caller raises.
     """
-    cursor = connection.cursor()
+    cursor = acquire_cursor(connection)
     try:
         yield cursor
     finally:

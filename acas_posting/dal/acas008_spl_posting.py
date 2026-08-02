@@ -679,6 +679,7 @@ from typing import Any, Final
 from acas_posting.dal.connection import (
     OpenOutcome,
     TransportSecurity,
+    acquire_cursor,
     cobol_string_delimited_by_space,
     execute_statement,
     load_rdb_data_once,
@@ -687,7 +688,6 @@ from acas_posting.dal.connection import (
     mysql_1980_close,
     mysql_1999_exit,
     quote_identifier,
-    rdb_data_is_loaded,
 )
 from acas_posting.dal.cursor_state import (
     HANDLER_REJECTED_FUNCTIONS,
@@ -1780,13 +1780,48 @@ class WorkingStorage:
     this module's, so it is carried here and passed through untouched. Leaving it
     ``None`` keeps the safe default.
 
-    ``A`` and ``B`` [common/acas008.cbl:L253-L254] are deliberately NOT here: the
-    first-call gate they implement is owned by
-    :func:`~acas_posting.dal.connection.load_rdb_data_once`, which reproduces the
-    same anomaly with the same locators, and duplicating it would give the run two
-    disagreeing notions of whether the credentials had been loaded.
+    ``A`` AND ``B`` ARE HERE BECAUSE THE FROZEN SOURCE PUTS THEM HERE. They are
+    declared ``77 A pic 9(4) value zero`` and ``77 B pic 9(4) value zero``
+    [common/acas008.cbl:L253-L254] - in THIS HANDLER's own WORKING-STORAGE, with
+    the maintainer's own note "A & B used in 1st test ONLY in ba-Process-RDBMS".
+    Every one of the seventeen handlers declares its own pair, so "have I run my
+    first-call block yet" is a PER-HANDLER question in the compiled system.
+
+    An earlier revision left them out and read
+    :func:`~acas_posting.dal.connection.rdb_data_is_loaded` instead, on the
+    reasoning that one sentinel cannot disagree with itself. That was wrong, and
+    it is worth recording why rather than quietly correcting it: the shared
+    sentinel is set by whichever handler runs first, so acas008 arriving second
+    found it already set, skipped its own first-call block, and never reached the
+    statement that records the system record - leaving :attr:`system_record` at
+    ``None`` and making every ``fn-Open`` fail with ``(99, 911)`` purely because
+    of the ORDER the handlers were called in. The compiled program has no such
+    coupling.
+
+    The credential LOAD is still delegated whole to
+    :func:`~acas_posting.dal.connection.load_rdb_data_once`, which keeps anomaly
+    A-1 - the process-level cache - in one place. That delegation is correct
+    because ``RDB-Data`` lives in ``File-Access``, which acas008 receives through
+    its LINKAGE SECTION [common/acas008.cbl:L266] and therefore shares with every
+    other handler in the call chain. What is per-handler is the GATE; what is
+    shared is the BLOCK the gate writes into. Separating the two is the whole
+    correction.
     """
 
+    #: ``77 A pic 9(4) value zero`` [common/acas008.cbl:L253] - "A & B used in 1st
+    #: test ONLY in ba-Process-RDBMS". THE FIRST-CALL GATE, and it is this
+    #: handler's own: `if A = zero` [:L526] is what decides whether the
+    #: record-length check and the credential load run. The frozen block assigns
+    #: it the MEASURED LENGTH of ``WS-IRS-Posting-Record`` [:L527-L529] rather than
+    #: a flag value, so it doubles as the length it compared - modelled exactly,
+    #: because a plain boolean would lose the fact that the sentinel and the
+    #: measurement are the same field.
+    a: int = 0
+    #: ``77 B pic 9(4) value zero`` [common/acas008.cbl:L254]. The measured length
+    #: of ``IRS-Posting-Record`` [:L530-L532], the FD side of the comparison. Never
+    #: read as a gate; kept because the frozen source keeps it and because its
+    #: value appears in the ``IR902`` diagnostic [:L539-L543].
+    b: int = 0
     #: ``77 Cobol-File-Status pic 9 value zero`` [common/acas008.cbl:L256].
     cobol_file_status: int = 0
     #: The live driver connection, standing in for the C interface's global
@@ -2687,7 +2722,11 @@ def ba040_process_read_next(
     # outcome, which is how `move zero to fs-reply WE-Error` [:L549], the
     # `WS-File-Key` tag [:L548] and `WS-Log-Where` [:L434] all get written; doing any
     # of that a second time here would risk disagreeing with it.
-    with contextlib.closing(ws.connection.cursor()) as cursor:
+    # `acquire_cursor` rather than `.cursor()`: anomaly A-8 lets another bridge's
+    # close take this connection down, and the frozen bridge reports that from
+    # its statement [copybooks/mysql-procedures.cpy:L165-L166], not from an
+    # acquisition step it does not have. The delegate's `execute` then reports it.
+    with contextlib.closing(acquire_cursor(ws.connection)) as cursor:  # type: ignore[arg-type]
         outcome: CursorOutcome = _cursor_read_next(
             cursor,
             TABLE_NAME,
@@ -3299,14 +3338,25 @@ def ba012_test_ws_rec_size_2(
                  move     RDBMS-Socket  to DB-Socket
         end-if.
 
-    THE FIRST-CALL GATE IS ANOMALY A-1 and it is owned by
-    :func:`~acas_posting.dal.connection.load_rdb_data_once`, whose docstring cites
-    these very lines. ``A`` is assigned inside the block, so from the second call
-    onward the length check AND the credential load are both skipped - a change to the
-    ``SYSTEM-REC`` row part-way through a run cannot affect that run.
-    :func:`~acas_posting.dal.connection.rdb_data_is_loaded` is that sentinel, so the
-    length check is gated by the SAME flag the COBOL gates it by rather than by a
-    second one that could disagree.
+    THE GATE IS THIS HANDLER'S OWN ``77 A`` [common/acas008.cbl:L253], NOT a shared
+    flag. ``A`` is assigned the measured record length INSIDE the block [:L527-L529],
+    so from the second call onward the length check AND the credential load are both
+    skipped - a change to the ``SYSTEM-REC`` row part-way through a run cannot affect
+    that run. Because every handler declares its own ``A``, that skipping is
+    PER-HANDLER: another handler having already loaded the credentials says nothing
+    about whether acas008 has run its own first-call block, and treating the two as
+    one made ``fn-Open`` fail with ``(99, 911)`` whenever acas008 was not the first
+    handler called. :class:`WorkingStorage` records that failure in full.
+
+    The credential load itself remains delegated to
+    :func:`~acas_posting.dal.connection.load_rdb_data_once`, which keeps anomaly A-1
+    - the process-level cache - in exactly one place. ``RDB-Data`` is shared by
+    construction: it lives in ``File-Access``, which arrives through this handler's
+    LINKAGE SECTION [:L266]. So the gate is local and the block it writes is shared,
+    which is what the frozen source does.
+
+    ``System-Record`` is likewise a LINKAGE parameter [:L278] and so is recorded on
+    EVERY call, ahead of the gate - see the comment at that statement.
 
     THE LENGTH CHECK CANNOT FIRE, MEASURED. ``WS-IRS-Posting-Record``
     [copybooks/wspost-irs.cob:L13-L25] and ``IRS-Posting-Record``
@@ -3335,8 +3385,10 @@ def ba012_test_ws_rec_size_2(
     :func:`ba020_process_open`.
 
     Args:
-        system: the ``SYSTEM-REC`` row the credentials come from. CONSULTED ONLY ON
-            THE FIRST CALL, exactly as the guard consults it.
+        system: the ``SYSTEM-REC`` row. RECORDED ON EVERY CALL, because it is a
+            LINKAGE parameter the compiled handler always has [:L278]; its
+            CREDENTIALS are consulted only on the first call, exactly as the guard
+            consults them.
         file_access: the caller's block. ``RDB-Data`` is populated, and on the
             unreachable 901 path the status pair is written.
         dal_common: the testing switches.
@@ -3347,18 +3399,34 @@ def ba012_test_ws_rec_size_2(
     """
     ws = working_storage()
     log = file_access.logging_data
-    # `if A = zero` [common/acas008.cbl:L526] - the first-call gate, read from the
-    # sentinel `dal/connection.py` keeps for anomaly A-1 rather than from a second one.
-    if rdb_data_is_loaded():
+    # `System-Record` is a LINKAGE parameter [common/acas008.cbl:L278], so the
+    # compiled handler has it in hand on EVERY call, not just the first. Recording
+    # it here - OUTSIDE the first-call gate - is what makes that true in Python
+    # too. It was previously recorded INSIDE the gate, which meant a handler that
+    # skipped the gate never recorded it and `ba020-Process-Open` then had nothing
+    # to open a connection from. The bridge is not handed the system record
+    # [common/slpostingMT.cbl:L310-L312], so this field is the only route by which
+    # `ba020_process_open` can reach it.
+    ws.system_record = system
+    # `if A = zero` [common/acas008.cbl:L526] - "so it is being called first time".
+    # THIS HANDLER'S OWN `77 A` [:L253], never the shared credential cache: every
+    # handler declares its own pair, so one handler having already loaded the
+    # credentials must not stop acas008 running its own first-call block. See
+    # :class:`WorkingStorage` for the failure that reading the shared sentinel
+    # caused.
+    if ws.a != 0:
         # `end-if` [common/acas008.cbl:L564]. There is no else branch and none is
         # added: a later call simply proceeds to `ba015-Test-Ends`.
         return True
     # `move function Length (WS-IRS-Posting-Record) to A`
-    # [common/acas008.cbl:L527-L529]
+    # [common/acas008.cbl:L527-L529]. This assignment is ALSO what closes the gate,
+    # because the frozen source stores the length in the sentinel itself.
     a = WS_RECORD_LENGTH
+    ws.a = a
     # `move function length (IRS-Posting-Record) to B`
     # [common/acas008.cbl:L530-L532]
     b = FD_RECORD_LENGTH
+    ws.b = b
     # `if A < B` [common/acas008.cbl:L533]. MEASURED FALSE - both are 84.
     if a < b:
         # `move 901 to WE-Error` [:L534] and `move 99 to fs-reply` [:L535]. The
@@ -3395,11 +3463,6 @@ def ba012_test_ws_rec_size_2(
     # first-call gate are what `load_rdb_data_once` reproduces - duplicating them would
     # give the run two RDB-Data blocks that could disagree.
     file_access.rdb_data = load_rdb_data_once(system)
-    # The bridge is not handed the system record [common/slpostingMT.cbl:L310-L312], so
-    # the connection it opens has to come from somewhere; in the compiled system that
-    # is the C interface's process-global. Recorded here, at the paragraph that loads
-    # the credentials, so the two stay together.
-    ws.system_record = system
     del log
     # `end-if.` [common/acas008.cbl:L564]
     return True

@@ -261,6 +261,19 @@ owns it, and the rule is stated once here:
       array entry. That is reproducing `REDEFINES` storage aliasing, not adding
       behaviour: leaving the enumerated view stale would be a DIVERGENCE from
       compiled behaviour, which rule R-6 settles against.
+    * THE RULE RUNS BOTH WAYS, AND THE WRITE DIRECTION IS THE ONE THAT MATTERS
+      TO A CALLER. The bullet above covers the bridge writing INTO the record;
+      the mirror case is a caller writing into it before a `write` or `rewrite`.
+      In the compiled program `move "Sales" to ar1-7` has already written
+      `AR1 (7)`, so the loads at [:L484-L485] and [:L528-L529] see it. Between
+      two Python objects they do not, so the aliasing is re-established at the
+      head of both loading verbs by `_alias_enumerated_into_array`. Which view
+      leads is settled by the frozen source, not chosen: the enumerated names are
+      what a caller writes - all 52 references outside the copybook are SCREEN
+      `using` clauses [irs/irs020.cbl:L472-L593], and SCREEN `using` is
+      bidirectional - while NOTHING in the frozen codebase writes an array name
+      except the bridge's own read-unload [common/irsfinalMT.cbl:L455-L456]. Full
+      evidence and the R-3 argument are under TRANSLATION CORRECTIONS as C1.
     * COBOL `OCCURS` subscripts are 1-BASED and Python indexing is 0-BASED.
       `records/irs_final.py` states that the offset "belongs to whichever layer
       turns a position into a key value" - that is this module, and the
@@ -597,6 +610,60 @@ WHAT IS NOT REPRODUCED, AND WHY  (rule R-5: omissions recorded as omissions)
     * THE `stop "Cobol File EOF"` [:L272]. Flat-file only; and a process
       terminator has no place in a library.
 
+TRANSLATION CORRECTIONS - WHERE PYTHON NEEDS A STATEMENT COBOL DID NOT
+======================================================================
+A translation correction is the opposite of an anomaly. An anomaly is behaviour
+the compiled program HAS and this module reproduces; a correction is behaviour
+the compiled program has FOR FREE, from a language feature Python lacks, that
+this module must therefore write out by hand. Correcting one is not "fixing a
+defect" under rule R-4 - failing to write it is the defect, because the compiled
+program's behaviour would not be reproduced. Each is numbered `Cn`, cited at its
+site, and listed here. This module has ONE.
+
+    C1  `REDEFINES` IS ONE BYTE AREA, AND PYTHON HAS TWO OBJECTS. The frozen
+        record declares each array twice - the enumerated group `03 ar1-fields.`
+        with `05 ar1-1 ... ar1-26 pic x(24)` [copybooks/irswsfinal.cob:L8-L34],
+        then `03 filler redefines ar1-fields.` with `05 ar1 pic x(24) occurs 26`
+        [:L35-L36]; and the same pair for `ar2` [:L38-L64, :L65-L66]. In the
+        compiled program `ar1-7` and `AR1 (7)` ARE THE SAME TWENTY-FOUR BYTES, so
+        a write through either name is instantly visible through the other and no
+        statement anywhere synchronises them - there is nothing to synchronise.
+        Section 0.3.1 requires each `REDEFINES` to be modelled as its own view
+        class, so `records/irs_final.py` publishes `Ar1Fields`/`Ar1View` and
+        `Ar2Fields`/`Ar2View` as four independent dataclasses. That is correct as
+        a layout model and inert as a storage model: a caller writing
+        `final.ar1_fields.ar1_7` leaves `final.ar1_view.ar1[6]` untouched.
+
+        WHICH DIRECTION, AND WHY IT IS NOT A GUESS. The frozen codebase is
+        unambiguous about who writes which name. Every reference to an enumerated
+        name outside the copybook - all fifty-two of them - is a SCREEN SECTION
+        `using` clause on the Finished Accounts Setup screen
+        [irs/irs020.cbl:L472-L593], and SCREEN `using` is bidirectional, so those
+        are the names the OPERATOR writes. The array names appear in exactly four
+        places: this bridge's read-unload [common/irsfinalMT.cbl:L455-L456], its
+        write-load [:L484-L485] and rewrite-load [:L528-L529], and two read-only
+        consumers [irs/irs020.cbl:L1018-L1021, irs/irs060.cbl:L1184-L1187].
+        NOTHING in the frozen codebase writes an array name except this bridge's
+        own read-unload. So the enumerated view is the caller's write path and the
+        array view is the bridge's, and the aliasing that has to be re-established
+        runs enumerated -> array, at the two load boundaries.
+
+        WHERE IT IS APPLIED. `_alias_enumerated_into_array` is called at the head
+        of `write` and of `rewrite`, immediately before the loop that reproduces
+        `perform varying A from 1 by 1` [:L476, :L524]. The READ direction needs
+        nothing: `read` already writes both views, matching `initialize
+        Final-Record with filler` [:L395] followed by `move HV-IRS-AR1 to
+        AR1 (...)` [:L455] over shared bytes.
+
+        WHY THIS IS NOT AN ADDED VALIDATION (rule R-3). It adds no bounds check,
+        no field, no column and no width; it does not skip blank slots - A7 keeps
+        all twenty-six rows written - and it does not touch `ar3`, which stays
+        silently dropped per A3. It restores an aliasing property the compiled
+        program already has, and nothing more. A per-slot guard makes a blank
+        enumerated slot yield to whatever the array view already holds, so the
+        array-only calling pattern the read path itself produces is unchanged;
+        without the guard, reading a table and rewriting it would blank every row.
+
 RULE COMPLIANCE  (Agent Action Plan section 0.7.2)
 ==================================================
 There is NO user rules document for this project - `review_rules` reports "No
@@ -625,7 +692,9 @@ trigger, no Alembic; no `sessionmaker`, `Session`, `declarative_base`,
 no `COMMIT`, `ROLLBACK` or `START TRANSACTION` - `dal/connection.py` owns the
 autocommit policy. No validation is added: no bounds check the source lacks, no
 skip of blank array slots, no `ar3` in any statement, and no check that the rows
-returned are contiguous or complete.
+returned are contiguous or complete. Correction C1 is not an exception to this:
+it re-establishes the byte aliasing `redefines` already gives the compiled
+program, and adds no field, width, column, check or skip.
 
 R-4, ANOMALIES REPRODUCED. The forty entries above, each with a locator at its
 reproduction site or a named omission here.
@@ -634,7 +703,9 @@ R-5, FULL TRACEABILITY. A named function per bridge and handler paragraph, the
 `CALL` parameter order preserved exactly, :data:`COLUMNS` and every width read
 from :mod:`acas_posting.dictionary.loader` rather than transcribed, and a footer
 mapping every paragraph of both files to its Python function with the `GO TO`
-class annotated at each transfer site.
+class annotated at each transfer site. The one statement that has no COBOL
+counterpart is numbered and indexed rather than left unexplained - see
+TRANSLATION CORRECTIONS above and item 10 of the traceability footer.
 
 R-6, COMPILED BEHAVIOUR IS THE TIE-BREAKER. No clock, no `random`, no `uuid`,
 no `os.urandom` and no `time.sleep` - the frozen bridge cannot sleep either, per
@@ -1569,14 +1640,107 @@ def _store_array_entry(final: IrsFinalRecord, key: int, ar1: str, ar2: str) -> N
     setattr(final.ar2_fields, f"ar2_{key}", ar2)
 
 
+def _alias_enumerated_into_array(final: IrsFinalRecord) -> None:
+    """Re-establish the `redefines` byte sharing before a host-variable load.
+
+    CORRECTION C1. `copybooks/irswsfinal.cob` declares each array TWICE over ONE
+    byte area: the enumerated group `03 ar1-fields.` with `05 ar1-1 pic x(24).`
+    through `ar1-26` [copybooks/irswsfinal.cob:L8-L34], then
+    `03 filler redefines ar1-fields.` carrying `05 ar1 pic x(24) occurs 26.`
+    [:L35-L36]; identically for `ar2-fields` and its `05 ar2 pic x occurs 26.`
+    [:L38-L64, :L65-L66]. A COBOL `REDEFINES` is not a copy - `ar1-3` and
+    `AR1 (3)` ARE THE SAME TWENTY-FOUR BYTES - so in the compiled program a write
+    through either name is already a write through both, and no synchronising
+    statement exists anywhere to be translated.
+
+    THE TWO NAMES BELONG TO OPPOSITE SIDES OF THE INTERFACE, which is a fact of
+    the frozen source and not a preference:
+
+    * The ENUMERATED names are THE CALLER'S. Every one of the fifty-two
+      references outside the copybook is a SCREEN SECTION `using` clause on the
+      Finished Accounts Setup screen - `03 pic x(24) using ar1-1 line 6 col 10
+      foreground-color 3.` [irs/irs020.cbl:L472-L593] - and SCREEN `using` is
+      bidirectional, so the operator's keystrokes land in `ar1-1` .. `ar1-26` and
+      `ar2-1` .. `ar2-26`.
+    * The ARRAY names are THE BRIDGE'S. `common/irsfinalMT.cbl` never mentions an
+      enumerated name; it reads `AR1 (A)` / `AR2 (A)` to load the host variables
+      [common/irsfinalMT.cbl:L484-L485, :L528-L529] and writes them back on the
+      read [:L455-L456]. Outside the two fan-out bridges the array form appears
+      only in read-only consumers [irs/irs020.cbl:L1018-L1021,
+      irs/irs060.cbl:L1184-L1187]. NOTHING in the frozen codebase writes the
+      array form except that read.
+
+    `records/irs_final.py` is required to publish the pair as two independent
+    dataclasses - its contract fixes the `dataclasses.fields()` count of each
+    view at one, requires a literal `tuple` of twenty-six, and forbids a property
+    that switches between them - so the one byte area is two Python objects and
+    the aliasing has to be re-established by whoever observes it. This bridge is
+    the only thing that observes it, so this bridge owns it, at exactly the
+    boundary the frozen bridge reads: immediately before each host-variable load.
+    The READ direction is already in place and untouched -
+    `_initialize_final_record` blanks BOTH views [common/irsfinalMT.cbl:L395] and
+    `_store_array_entry` writes BOTH [:L455-L456].
+
+    A slot is carried across only when its enumerated field is not the blank its
+    descriptor declares. That guard is what keeps a caller who populated the
+    array view directly working unchanged - not a frozen calling pattern, but one
+    this module accepted before - and it makes the whole normal path a no-op,
+    because a read has already put the same value in both. Every slot is then
+    written back through both names, so a caller inspecting the record afterwards
+    reads alike through either, as it would in the compiled program.
+
+    THE ONE CASE THE TWO-OBJECT MODEL CANNOT RESOLVE is a caller that mutates the
+    ARRAY view after a read while the enumerated view still holds that read's
+    values: it resolves toward the enumerated view. It is unreachable from this
+    package - only the read path and the initialise ever write the array view and
+    both write both views - and it is recorded as an ambiguity in
+    `docs/migration/ambiguity-resolutions.md` rather than settled silently.
+
+    Args:
+        final: The caller's `Final-Record`, whose two views of each array are
+            brought into the agreement the compiled program never has to arrange.
+    """
+    # A short view is fitted rather than rejected, so this helper cannot raise on
+    # a record the caller built by hand; the module contract is that a bridge
+    # returns a status pair and never propagates an exception.
+    current_1 = (list(final.ar1_view.ar1) + [_AR1_BLANK] * ARRAY_LENGTH)[:ARRAY_LENGTH]
+    current_2 = (list(final.ar2_view.ar2) + [_AR2_BLANK] * ARRAY_LENGTH)[:ARRAY_LENGTH]
+    resolved_1: list[str] = []
+    resolved_2: list[str] = []
+    for subscript in range(1, ARRAY_LENGTH + 1):
+        index = subscript - 1
+        # `_receive_alphanumeric` is the module's own fit to a declared width, so
+        # a caller's `ar1_1 = "Sales"` becomes the twenty-four bytes a COBOL
+        # `move` into `pic x(24)` would have stored.
+        enumerated_1 = _receive_alphanumeric(
+            getattr(final.ar1_fields, f"ar1_{subscript}"), _AR1_WIDTH
+        )
+        enumerated_2 = _receive_alphanumeric(
+            getattr(final.ar2_fields, f"ar2_{subscript}"), _AR2_WIDTH
+        )
+        resolved_1.append(
+            enumerated_1 if enumerated_1 != _AR1_BLANK else current_1[index]
+        )
+        resolved_2.append(
+            enumerated_2 if enumerated_2 != _AR2_BLANK else current_2[index]
+        )
+    final.ar1_view.ar1 = tuple(resolved_1)
+    final.ar2_view.ar2 = tuple(resolved_2)
+    for subscript in range(1, ARRAY_LENGTH + 1):
+        setattr(final.ar1_fields, f"ar1_{subscript}", resolved_1[subscript - 1])
+        setattr(final.ar2_fields, f"ar2_{subscript}", resolved_2[subscript - 1])
+
+
 def _array_entry(final: IrsFinalRecord, subscript: int) -> tuple[str, str]:
     """`move AR1 (A) to HV-IRS-AR1` and its twin [:L484-L485, :L528-L529].
 
     THE ARRAY VIEWS ARE THE OPERANDS, and only they: the 52 enumerated names
-    appear NOWHERE in `common/irsfinalMT.cbl`. A caller that populated the
-    enumerated fields alone would, in COBOL, have populated the same bytes; in
-    Python it would not, so the array view is the storage of record for the SQL
-    side and that is stated in the module docstring rather than papered over.
+    appear NOWHERE in `common/irsfinalMT.cbl`. In the compiled program that costs
+    nothing, because `AR1 (A)` and `ar1-A` are one byte area
+    [copybooks/irswsfinal.cob:L35-L36, :L65-L66]; in Python the two views are two
+    objects, so `_alias_enumerated_into_array` runs before the loop that calls
+    this helper and leaves both views holding the same value. This function is
+    therefore a pure read of the operand the bridge names, exactly as written.
 
     Args:
         final: The caller's `Final-Record`.
@@ -2604,6 +2768,12 @@ def write(
     logging_data.ws_no_paragraph = _BRIDGE_TRACE_INSERT  # `move 10 to` [:L475]
 
     statement = insert_statement()
+    # CORRECTION C1, before the load: `AR1 (A)` and `ar1-A` are ONE byte area
+    # [copybooks/irswsfinal.cob:L35-L36, :L65-L66], so the compiled program needs
+    # no statement here and none exists to translate. The two Python views are two
+    # objects, so the aliasing is re-established at the boundary the frozen bridge
+    # reads. See `_alias_enumerated_into_array`.
+    _alias_enumerated_into_array(final)
     # `perform varying A from 1 by 1 until A > 26` [:L476] - 1 through 26
     # INCLUSIVE, matching `occurs 26` [copybooks/irswsfinal.cob:L36, :L66].
     for subscript in range(1, ARRAY_LENGTH + 1):
@@ -2763,6 +2933,10 @@ def rewrite(
     logging_data.ws_no_paragraph = _BRIDGE_TRACE_UPDATE  # `move 17 to` [:L523]
 
     statement = update_statement()
+    # CORRECTION C1, before the load, exactly as in `write`. The frozen loader
+    # reads `AR1 (A)` / `AR2 (A)` [:L528-L529]; those are the same bytes as
+    # `ar1-A` / `ar2-A` in the compiled program and two separate objects here.
+    _alias_enumerated_into_array(final)
     # `perform varying A from 1 by 1 until A > 26` [:L524]. NO blank-slot skip
     # here, not even a commented-out one - all 26 rows are always attempted.
     for subscript in range(1, ARRAY_LENGTH + 1):
@@ -4850,6 +5024,22 @@ def acasirsub5_rewrite(
 #      `delete_all` verb is published and `open_output` clears nothing. Rule R-3
 #      forbids inventing one, and `acas008`'s delete-all coercion is that
 #      handler's behaviour, not this one's.
+#
+#  10. TRANSLATION CORRECTION C1 - THE ONE STATEMENT WITH NO COBOL COUNTERPART.
+#      `_alias_enumerated_into_array` has no paragraph to map to, because the
+#      compiled program needs none: `ar1-A` and `AR1 (A)` are one byte area
+#      [copybooks/irswsfinal.cob:L8-L36, :L38-L66] and section 0.3.1 requires the
+#      two `redefines` views be modelled as separate dataclasses, which makes them
+#      two objects here. It is called at the head of `write` and `rewrite`,
+#      immediately before the loops that reproduce `perform varying A from 1 by 1`
+#      [common/irsfinalMT.cbl:L476, :L524], so the loads at [:L484-L485] and
+#      [:L528-L529] read the same values the compiled loads would have. Direction
+#      is settled by the frozen source, not chosen: the enumerated names are
+#      written by the operator through SCREEN `using` [irs/irs020.cbl:L472-L593],
+#      the array names are written by nothing but this bridge's own read-unload
+#      [common/irsfinalMT.cbl:L455-L456]. The read direction needs no correction.
+#      Rationale, evidence and the R-3 argument are in the module docstring under
+#      TRANSLATION CORRECTIONS.
 #
 # CITATION CORRECTIONS
 #   Every locator in this module was read from the frozen file rather than copied

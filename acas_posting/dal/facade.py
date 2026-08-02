@@ -134,7 +134,13 @@ code is authoritative; the comments are stale.
 THE FUNCTION-CODE DISPATCH MATRIX
 =================================
 Censused from every ``when <n>`` in all seventeen handler programs, not from a
-sample. This is what a verb actually reaches::
+sample. ⭐ AND THE CENSUS IS OF THE HANDLERS' FLAT-FILE ``evaluate``, WHICH IS
+NOT WHAT AN RDB VERB REACHES. Every handler branches to its RDB path first -
+``if not FS-Cobol-Files-Used / perform ba-Process-RDBMS / go to AA-Main-Exit``,
+for example [common/acas029.cbl:L257-L261] - and leaves BEFORE the ``evaluate``
+below. So on the RDB path a handler's own dispatch decides nothing, the code
+passes to the bridge, and the BRIDGE's ``evaluate`` is the one that matters.
+Consequence 2 below is where that distinction bites::
 
     acas000      1 2 3 4 5 7            no 8, no 9 - six codes only
     acas005      1 2 3 4 5 7 8 9        the baseline eight
@@ -166,9 +172,23 @@ Three consequences this module encodes rather than smooths over:
    paragraphs nevertheless publish a ``-Delete-All`` verb, so those twelve are
    published and permanently unsatisfiable.
 2. Codes 32 and 33 are declared for OTM3 and OTM5 at
-   [copybooks/wsfnctn.cob:L103-L104] and dispatched by nobody - including
-   ``acas019`` and ``acas029``, the very handlers named. Four entity paragraphs
-   publish them, so they too are published and permanently unsatisfiable.
+   [copybooks/wsfnctn.cob:L103-L104] and appear in NEITHER handler's
+   ``evaluate`` - but they ARE dispatched, by both BRIDGES:
+   [common/otm3MT.cbl:L420-L427] and [common/otm5MT.cbl:L425-L428] each route
+   them to ``ba140-Process-Read-Next`` and ``ba150-Process-Read-Next``. Since
+   the RDB path never reaches a handler's ``evaluate``, the four entity
+   paragraphs that publish these verbs are SATISFIABLE, and
+   ``dal/acas019_otm3.py`` and ``dal/acas029_otm5.py`` implement all four
+   paragraphs.
+
+   They are nevertheless incapable of returning a row, for a reason that is a
+   defect rather than a design: both bridges assemble
+   ``SELECT * FROM <table> WHERE  ORDER BY '<column>' ...;`` - the ``WHERE``
+   unconditional with no predicate to follow it, and every ordering term
+   single-quoted into a string constant - and then mask the resulting syntax
+   error as an empty table. The observable answer is ``(10, 10)``, not
+   ``(99, 990)``. Anomaly N-sorted-order-is-a-syntax-error, reproduced under
+   rule R-4 and recorded in both handler modules.
 3. Code 31 is live in exactly two handlers, ``acas012`` and ``acas022``, and
    code 34 in exactly two, ``acas016`` and ``acas026``.
 
@@ -4181,9 +4201,20 @@ def otm3_read_next_sorted_by_batch(ctx: FacadeContext) -> StatusPair:
     """``OTM3-Read-Next-Sorted-By-Batch`` [copybooks/Proc-ACAS-FH-Calls.cob:L1052-L1055].
 
     Sets function code 32, declared for OTM3 and OTM5 at
-    [copybooks/wsfnctn.cob:L103-L104] and dispatched by NOBODY - including
-    ``acas019`` and ``acas029``, the two handlers it was declared for.
-    Published and permanently unsatisfiable.
+    [copybooks/wsfnctn.cob:L103-L104] and dispatched by the BRIDGE of each of
+    the two handlers it was declared for - ``otm3MT`` routes it to
+    ``ba140-Process-Read-Next`` [common/otm3MT.cbl:L420-L423] and ``otm5MT``
+    likewise [common/otm5MT.cbl:L425-L426]. Neither HANDLER carries a ``when
+    32``, which is why an earlier reading of this verb called it
+    unsatisfiable; on the RDB path the handler's flat-file ``evaluate`` is
+    never reached [common/acas019.cbl:L257-L261,
+    common/acas029.cbl:L257-L261], so the code passes through untouched.
+
+    Satisfiable, therefore, but never SUCCESSFUL: the frozen ``SELECT`` both
+    bridges assemble is a syntax error, and the zero-rows guard masks it as end
+    of file, so the observable answer is ``(10, 10)``. See anomaly
+    N-sorted-order-is-a-syntax-error in ``dal/acas019_otm3.py`` and
+    ``dal/acas029_otm5.py``.
     """
     return _perform(ctx, _E_OTM3_READ_NEXT_SORTED_BY_BATCH)
 
@@ -4202,10 +4233,16 @@ _E_OTM3_READ_NEXT_SORTED_BY_CUST: Final[_Plan] = _Plan(
 def otm3_read_next_sorted_by_cust(ctx: FacadeContext) -> StatusPair:
     """``OTM3-Read-Next-Sorted-By-Cust`` [copybooks/Proc-ACAS-FH-Calls.cob:L1057-L1060].
 
-    Sets function code 33, declared for OTM3 and OTM5 at
-    [copybooks/wsfnctn.cob:L103-L104] and dispatched by NOBODY - including
-    ``acas019`` and ``acas029``, the two handlers it was declared for.
-    Published and permanently unsatisfiable.
+    Sets function code 33, whose declaration names OTM3 alone - "for OTM3
+    (sl110, 120, 190)" [copybooks/wsfnctn.cob:L104] - even though this facade
+    publishes the verb for OTM5 as well and both bridges dispatch it,
+    ``otm3MT`` to ``ba150-Process-Read-Next`` [common/otm3MT.cbl:L424-L427] and
+    ``otm5MT`` to its own [common/otm5MT.cbl:L427-L428]. Reached on the RDB
+    path only, for the reason given on
+    :func:`otm3_read_next_sorted_by_batch`.
+
+    Satisfiable but never successful: the same three compounded defects yield
+    ``(10, 10)``. See anomaly N-sorted-order-is-a-syntax-error.
     """
     return _perform(ctx, _E_OTM3_READ_NEXT_SORTED_BY_CUST)
 
@@ -5042,10 +5079,26 @@ _E_OTM5_READ_NEXT_SORTED_BY_BATCH: Final[_Plan] = _Plan(
 def otm5_read_next_sorted_by_batch(ctx: FacadeContext) -> StatusPair:
     """``OTM5-Read-Next-Sorted-By-Batch`` [copybooks/Proc-ACAS-FH-Calls.cob:L1300-L1303].
 
-    Sets function code 32, declared for OTM3 and OTM5 at
-    [copybooks/wsfnctn.cob:L103-L104] and dispatched by NOBODY - including
-    ``acas019`` and ``acas029``, the two handlers it was declared for.
-    Published and permanently unsatisfiable.
+    Sets function code 32 and performs ``acas029``, exactly as the frozen
+    paragraph does::
+
+        OTM5-Read-Next-Sorted-By-Batch.
+            move     zero to Access-Type.
+            set      fn-Read-By-Batch to true.
+            perform  acas029.
+
+    ``otm5MT`` routes the code to ``ba140-Process-Read-Next``
+    [common/otm5MT.cbl:L425-L426], which ``dal/acas029_otm5.py`` publishes as
+    ``read_next_sorted_by_batch``. The handler's own ``evaluate`` has no ``when
+    32`` [common/acas029.cbl:L277-L296], but that evaluate is the FLAT-FILE one
+    and the RDB branch leaves before it [common/acas029.cbl:L257-L261] - which
+    is why an earlier reading of this verb called it unsatisfiable.
+
+    Satisfiable, but it can never report success: the ``SELECT`` the bridge
+    assembles emits ``WHERE`` with no predicate and orders by single-quoted
+    string constants, and the zero-rows guard masks the resulting syntax error
+    as end of file. The observable answer is ``(10, 10)`` - see anomaly
+    N-sorted-order-is-a-syntax-error in ``dal/acas029_otm5.py``.
     """
     return _perform(ctx, _E_OTM5_READ_NEXT_SORTED_BY_BATCH)
 
@@ -5064,10 +5117,18 @@ _E_OTM5_READ_NEXT_SORTED_BY_CUST: Final[_Plan] = _Plan(
 def otm5_read_next_sorted_by_cust(ctx: FacadeContext) -> StatusPair:
     """``OTM5-Read-Next-Sorted-By-Cust`` [copybooks/Proc-ACAS-FH-Calls.cob:L1305-L1308].
 
-    Sets function code 33, declared for OTM3 and OTM5 at
-    [copybooks/wsfnctn.cob:L103-L104] and dispatched by NOBODY - including
-    ``acas019`` and ``acas029``, the two handlers it was declared for.
-    Published and permanently unsatisfiable.
+    Sets function code 33 and performs ``acas029``. ⭐ THE DECLARATION OF THE
+    CODE NAMES OTM3 ALONE - "for OTM3 (sl110, 120, 190)"
+    [copybooks/wsfnctn.cob:L104] - yet this facade publishes it for the PURCHASE
+    open-item entity too, and ``otm5MT`` dispatches it to
+    ``ba150-Process-Read-Next`` [common/otm5MT.cbl:L427-L428], whose own prose
+    comment names sales columns [common/otm5MT.cbl:L1151-L1154]. The whole
+    sorted-read pair is a sales template copied into a purchase bridge.
+
+    ``dal/acas029_otm5.py`` publishes it as ``read_next_sorted_by_cust``.
+    Reached on the RDB path only, for the reason given on
+    :func:`otm5_read_next_sorted_by_batch`, and answering ``(10, 10)`` for the
+    same reason - anomaly N-sorted-order-is-a-syntax-error.
     """
     return _perform(ctx, _E_OTM5_READ_NEXT_SORTED_BY_CUST)
 

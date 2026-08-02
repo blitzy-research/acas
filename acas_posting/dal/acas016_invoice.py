@@ -355,6 +355,9 @@ Recorded as omissions, never added:
 * ``sih-Freq``, ``sih-Repeat``, the ``filler xxx`` and ``sih-Last-Date`` - the
   whole ``filler redefines sih-order`` autogen view
   ``[copybooks/slwsinv.cob:L28-L38]``; only the raw 10 bytes reach ``IH-ORDER``.
+  No COLUMN is added for any of the four - but note that they ARE those ten
+  bytes, so what a caller writes through them still has to reach ``IH-ORDER``.
+  See correction C1 below.
 * ``sil-Back-Ordered`` ``[copybooks/slwsinv.cob:L97-L98]`` and its twin
   ``il-Back-Ordered`` ``[copybooks/slwsinv2.cob:L106]`` - added 03/03/24, with
   **no host variable and no column**. See N-back-ordered-dropped.
@@ -547,6 +550,51 @@ AMBIGUITIES FOR THE ORACLE (rule R-6, AAP section 0.6.8)
   frozen archive and blocks the bridge build.
 * **N-recsize** above is itself an oracle question, alongside AAP anomaly #15
   (``wsbatch.cob``'s 96-versus-98).
+* **Q-order-overlay-blank-state** - what ``sih-Repeat`` and ``sih-Last-Date`` read
+  as once ``sih-order`` has been blanked. ``initialize WS-Invoice-Record.``
+  [:L1496] blanks the ten bytes, so ``sih-Repeat pic 99``
+  [copybooks/slwsinv.cob:L36] holds two SPACE characters in a zoned field and
+  ``sih-Last-Date binary-long`` [:L38] holds ``0x20202020``. Neither has an
+  ``int`` form, and the record contract types both as ``int``. Both are modelled
+  as zero - see :func:`_blank_order_overlay` for why the alternative is worse -
+  and what the compiled program reports for a zoned field full of spaces is an
+  oracle question rather than a decision made here. It is unobservable through
+  this bridge either way: the overlay has no host variable and no column.
+* **Q-order-overlay-nonascii** - what a ``utf8mb3 char(10)`` column stores when
+  the projected ``sih-Last-Date`` bytes are not printable ASCII. The frozen bridge
+  sends the same ten bytes through a quoted SQL literal, so the question is the
+  transport's and not this module's; it can only arise for a header written
+  through the overlay, which no in-scope program does.
+
+TRANSLATION CORRECTIONS - WHERE PYTHON NEEDS A STATEMENT COBOL DID NOT
+======================================================================
+A translation correction is the inverse of an anomaly. An anomaly is behaviour
+the compiled program HAS and this module reproduces (R-4); a correction is
+behaviour the compiled program gets FOR FREE from a language feature Python
+lacks, which this module must therefore write out. Omitting one is the defect.
+This module has ONE.
+
+* **C1, ``REDEFINES`` IS ONE BYTE AREA AND PYTHON HAS TWO OBJECTS.**
+  ``03 sih-order pic x(10).`` [copybooks/slwsinv.cob:L27] is redefined by
+  ``03 filler redefines sih-order.`` [:L28], whose four members - ``sih-Freq``
+  [:L29], ``sih-Repeat`` [:L36], a ``filler xxx`` [:L37] and ``sih-Last-Date``
+  [:L38] - tile the same ten bytes. In the compiled program a write through
+  either name is a write through both, so
+  ``move WS-Sih-Order to HV-IH-ORDER`` [:L1461] carries it either way and no
+  synchronising statement exists to translate. Section 0.3.1 requires each
+  ``REDEFINES`` to be its own view class and ``records/sales_invoice.py`` states
+  outright that it declines to keep the pair in step, so the aliasing belongs to
+  whoever observes it - this bridge. :func:`_project_order_overlay_into_base`
+  runs immediately before the move and only when the overlay carries something,
+  and :func:`_blank_order_overlay` reproduces the blanking the initialise of
+  ``sih-order`` performs over the shared bytes. The reverse direction is
+  deliberately omitted, with its reason, at the unload site. Direction is settled
+  by the frozen source: the overlay's only writers are the out-of-scope autogen
+  series [sales/sl810.cbl:L1636, :L1648, sales/sl830.cbl:L534, :L615], the base
+  is what every in-scope reader reads [sales/sl055.cbl:L641,
+  purchase/pl055.cbl:L554], and the autogen author cleared the overlay by
+  blanking the base [sales/sl830.cbl:L540] under his own note at [:L505]. Nothing
+  is added that R-3 forbids: no field, no column, no width, no validation.
 
 WHAT THIS MODULE DELIBERATELY DOES NOT DO
 =========================================
@@ -2437,6 +2485,184 @@ class BridgeState:
 
 
 # ---------------------------------------------------------------------------
+# TRANSLATION CORRECTION C1 - the `filler redefines sih-order` byte area
+# ---------------------------------------------------------------------------
+# `03 sih-order pic x(10).` [copybooks/slwsinv.cob:L27] is immediately redefined
+# by `03 filler redefines sih-order.` [:L28] carrying four members that sum to
+# the same ten bytes: `05 sih-Freq pic x.` [:L29], `05 sih-Repeat pic 99.`
+# [:L36], `05 filler pic xxx.` [:L37] and `05 sih-Last-Date binary-long.` [:L38],
+# whose own comment reads "4 bytes date an invoice was generated/posted".
+#
+# In the compiled program those are ONE byte area, so `move "M" to sih-Freq` has
+# already written the first of `sih-order`'s ten bytes and
+# `move WS-Sih-Order to HV-IH-ORDER` [common/slinvoiceMT.cbl:L1461] carries it to
+# the column. Section 0.3.1 requires each `REDEFINES` to be modelled as its own
+# view class, and `records/sales_invoice.py` is explicit that it declines to keep
+# the pair in step - so the two are separate Python objects and whoever observes
+# the aliasing owns re-establishing it. This bridge is that observer.
+#
+# Widths come from the dictionary rather than being transcribed (R-5). Only
+# `sih-Last-Date`'s comes from the copybook's own annotation, because a
+# `binary-long` declares no PICTURE for the dictionary to report a character
+# length for; the import-time sum guard below is what proves the number.
+_SIH_ORDER_WIDTH: Final[int] = int(
+    loader.copybook_field_for("SAINVOICE-REC.IH-ORDER").character_length or 0
+)
+_SIH_FREQ_WIDTH: Final[int] = int(
+    loader.copybook_field_for("SInvoice-Header.sih-Freq").character_length or 0
+)
+_SIH_REPEAT_DIGITS: Final[int] = int(
+    loader.copybook_field_for("SInvoice-Header.sih-Repeat").digits or 0
+)
+_SIH_FILLER_37_WIDTH: Final[int] = int(
+    loader.copybook_field_for("SInvoice-Header.filler#37").character_length or 0
+)
+#: `binary-long`, and the copybook says so in words [copybooks/slwsinv.cob:L38].
+_SIH_LAST_DATE_BYTES: Final[int] = 4
+#: The four bytes a `binary-long` actually is - see `_project_order_overlay_into_base`.
+_SIH_LAST_DATE_MASK: Final[int] = (1 << (8 * _SIH_LAST_DATE_BYTES)) - 1
+
+# The four members must tile the field they redefine exactly. `records/
+# sales_invoice.py` records the same arithmetic in prose - "Its four members sum
+# to 1 + 2 + 3 + 4 = 10 bytes, exactly the field they overlay" - and this is that
+# claim enforced at import time, so a dictionary regeneration that changed any of
+# the four widths would fail loudly here instead of silently mis-encoding.
+if (
+    _SIH_FREQ_WIDTH + _SIH_REPEAT_DIGITS + _SIH_FILLER_37_WIDTH + _SIH_LAST_DATE_BYTES
+) != _SIH_ORDER_WIDTH:
+    _MSG: Final[str] = (
+        "filler redefines sih-order [copybooks/slwsinv.cob:L28-L38] must tile "
+        f"sih-order [:L27] exactly: {_SIH_FREQ_WIDTH} + {_SIH_REPEAT_DIGITS} + "
+        f"{_SIH_FILLER_37_WIDTH} + {_SIH_LAST_DATE_BYTES} != {_SIH_ORDER_WIDTH}"
+    )
+    raise loader.DictionaryLookupError(_MSG)
+
+
+def _order_overlay_is_blank(view: SihOrderView) -> bool:
+    """Is the autogen overlay still at the state ``INITIALIZE`` leaves it in?
+
+    ``initialize WS-Invoice-Record.`` [common/slinvoiceMT.cbl:L1496] blanks the
+    ten bytes of ``sih-order`` [copybooks/slwsinv.cob:L27], and the overlay IS
+    those ten bytes, so after an initialise the overlay reads blank.  Both
+    :func:`_new_header_record` and :func:`_initialize_header_record` put it there.
+
+    The test is what makes correction C1 safe rather than sweeping.  A header the
+    caller never touched the overlay of must reach ``HV-IH-ORDER`` with the
+    caller's own ``sih_order``, not with an encoding of four blank members - so
+    the projection fires only when the overlay carries something.
+    """
+    return (
+        view.sih_freq == " " * _SIH_FREQ_WIDTH
+        and view.sih_repeat == 0
+        and view.filler_37 == " " * _SIH_FILLER_37_WIDTH
+        and view.sih_last_date == 0
+    )
+
+
+def _blank_order_overlay(view: SihOrderView) -> None:
+    """Blank the overlay, because blanking ``sih-order`` blanks it in COBOL.
+
+    ``initialize WS-Invoice-Record.`` [common/slinvoiceMT.cbl:L1496] is the PLAIN
+    form, which does not descend into a FILLER item - but it does name
+    ``sih-order`` [copybooks/slwsinv.cob:L27], and the unnamed
+    ``filler redefines sih-order`` [:L28] occupies exactly those bytes, so the
+    compiled program blanks the overlay whether ``INITIALIZE`` walked into it or
+    not.  Reproducing that here is what stops a stale overlay from surviving a
+    read and then being projected over the row value the read just delivered.
+
+    ⭐ THE BYTE STATE IS NOT EXACTLY REPRESENTABLE, and the difference is marked
+    rather than papered over.  Ten blanks make ``sih-Repeat pic 99`` [:L36] read
+    as two SPACE characters in a zoned field and ``sih-Last-Date binary-long``
+    [:L38] read as ``0x20202020``; ``sih_repeat`` and ``sih_last_date`` are
+    ``int`` per the record contract's scale rule and neither value has an ``int``
+    form.  Both are set to zero, which is what the one construction site declares
+    and what keeps :func:`_order_overlay_is_blank` true after an initialise.  The
+    alternative - storing 538976288 for the date - would make the projection fire
+    on every initialised header and overwrite every caller's ``sih_order``.  See
+    Q-order-overlay-blank-state in the module docstring.
+    """
+    view.sih_freq = " " * _SIH_FREQ_WIDTH
+    view.sih_repeat = 0
+    view.filler_37 = " " * _SIH_FILLER_37_WIDTH
+    view.sih_last_date = 0
+
+
+def _project_order_overlay_into_base(prime: SihPrime) -> None:
+    """CORRECTION C1 - make the overlay's bytes visible through ``sih-order``.
+
+    The four members are laid down in declaration order, each at its declared
+    width, exactly as the compiled program's storage already holds them:
+
+    * ``sih-Freq pic x`` [copybooks/slwsinv.cob:L29] - one character.
+    * ``sih-Repeat pic 99`` [:L36] - two ZONED digits, so the integer is rendered
+      zero-padded; a ``DISPLAY`` field stores its digits as characters.
+    * ``filler pic xxx`` [:L37] - three characters, carried rather than dropped,
+      because a FILLER occupies bytes.
+    * ``sih-Last-Date binary-long`` [:L38] - four bytes, big-endian and signed.
+      Big-endian is GnuCOBOL's default ``binary-byteorder`` and no compile line in
+      the repository sets one: neither ``comp-all.sh`` nor
+      ``common/comp-common.sh`` passes ``-fbinary-byteorder``, ``-fbinary-size``
+      or ``-fbinary-truncate``.  Signed because the copybook declares
+      ``binary-long`` without ``UNSIGNED``.
+
+    Nothing is written when the overlay is blank, so the ordinary posting path -
+    where a caller sets ``sih_order`` and never touches the overlay - is byte for
+    byte unchanged.
+
+    ⭐ WHY THE DIRECTION IS overlay -> base AND NOT THE REVERSE, from the frozen
+    source rather than from preference.  The overlay's only writers anywhere are
+    ``accept sih-Repeat`` [sales/sl810.cbl:L1636], ``accept Sih-Freq`` [:L1648],
+    ``subtract 1 from sih-Repeat`` [sales/sl830.cbl:L534] and
+    ``move Sih-Date to Sih-Last-Date`` [:L615], plus the purchase twins - all in
+    the autogen series, which AAP section 0.2.2 puts out of scope, and all of
+    which reach this bridge only by having written the shared bytes.  The base is
+    what every in-scope reader reads: ``move ih-order to oi-description``
+    [sales/sl055.cbl:L641] and ``move ih-order to oi-order``
+    [purchase/pl055.cbl:L554], neither of which writes it.  And the autogen
+    author relied on the sharing knowingly - ``move spaces to ih-Order``
+    [sales/sl830.cbl:L540] is how he clears the overlay, under his own note
+    "Remember to NOT include content of sih-Order but space fill the invoice
+    sih-order" [:L505].
+
+    THE REVERSE DIRECTION IS DELIBERATELY NOT IMPLEMENTED (R-5, recorded as an
+    omission).  Decoding ``sih-order`` back into the overlay after every read
+    would leave the overlay non-blank, so the very next write would project those
+    stale members over a caller's fresh ``sih_order`` - a new defect in place of
+    the one being fixed.  No in-scope program reads the overlay, and
+    :func:`_blank_order_overlay` keeps the read path from leaving a stale one.
+
+    Args:
+        prime: ``02 sih-prime.`` [copybooks/slwsinv.cob:L19], mutated in place -
+            ``sih_order`` is rewritten from ``filler_28`` when the latter carries
+            anything.
+    """
+    view = prime.filler_28
+    if _order_overlay_is_blank(view):
+        return
+    # A COBOL alphanumeric MOVE truncates on the right and pads with spaces; the
+    # overlay members are already at their widths, and fitting them again makes
+    # this correct for a record a caller built by hand.
+    freq = view.sih_freq.ljust(_SIH_FREQ_WIDTH)[:_SIH_FREQ_WIDTH]
+    # `pic 99` is DISPLAY: the digits ARE the bytes.  A value wider than the
+    # field truncates on the LEFT for a numeric receiving item, which is what the
+    # negative slice reproduces.
+    repeat = f"{int(view.sih_repeat):0{_SIH_REPEAT_DIGITS}d}"[-_SIH_REPEAT_DIGITS:]
+    filler = view.filler_37.ljust(_SIH_FILLER_37_WIDTH)[:_SIH_FILLER_37_WIDTH]
+    # A `binary-long` field IS four bytes, so a value outside its range keeps
+    # only the low four bytes rather than raising - `to_bytes` alone would raise
+    # `OverflowError`, and this module's contract is that a verb returns a status
+    # pair and never propagates an exception.  The mask is the two's-complement
+    # truth of the storage; a COBOL field could not have held the wider value at
+    # all.  latin-1 is a byte-for-byte codec, so what follows is those four bytes
+    # and not a re-encoding of them.
+    stored = int(view.sih_last_date) & _SIH_LAST_DATE_MASK
+    last_date = stored.to_bytes(_SIH_LAST_DATE_BYTES, "big", signed=False).decode(
+        "latin-1"
+    )
+    prime.sih_order = f"{freq}{repeat}{filler}{last_date}"[:_SIH_ORDER_WIDTH]
+
+
+# ---------------------------------------------------------------------------
 # bb000-HV-Load  /  bb100-UnloadHVs   -  the HEADER table
 # ---------------------------------------------------------------------------
 def bb000_hv_load(state: BridgeState, buffer: InvoiceBuffer) -> None:
@@ -2503,6 +2729,14 @@ def bb000_hv_load(state: BridgeState, buffer: InvoiceBuffer) -> None:
     #        The autogen redefinition's sub-fields - sih-Freq, sih-Repeat, the
     #        filler xxx and sih-Last-Date [copybooks/slwsinv.cob:L28-L38] - have
     #        no columns; only the raw ten bytes are stored.
+    #
+    #        CORRECTION C1.  Those four sub-fields ARE those ten bytes
+    #        [copybooks/slwsinv.cob:L28], so in the compiled program this single
+    #        move already carries whatever was written through either name.  The
+    #        two views are separate objects here, so the aliasing is
+    #        re-established immediately before the move and nowhere else - the
+    #        operand of the move itself is untouched and still `WS-Sih-Order`.
+    _project_order_overlay_into_base(prime)
     group.move_in("IH-ORDER", prime.sih_order)
     # L1462  move WS-Sih-Type to HV-IH-TYPE
     group.move_in("IH-TYPE", prime.sih_type)
@@ -2603,6 +2837,20 @@ def bb100_unload_hvs(state: BridgeState, buffer: InvoiceBuffer) -> None:
     prime.sih_customer.sih_check = _digit_or_zero(customer_text[6:7])
     # L1501-L1505
     prime.sih_date = int(group["IH-DAT"])
+    # L1502  move HV-IH-ORDER to WS-Sih-Order
+    #
+    # CORRECTION C1, THE DIRECTION DELIBERATELY NOT IMPLEMENTED (R-5, recorded as
+    # an omission).  In the compiled program this move also rewrites the overlay,
+    # because the overlay is these ten bytes [copybooks/slwsinv.cob:L28].  It is
+    # NOT decoded back into `filler_28` here, and the reason is that doing so
+    # would leave the overlay non-blank after every read, so the very next
+    # `bb000-HV-Load` would project those members over a caller's fresh
+    # `sih_order` - trading the defect being fixed for a worse one.  Nothing in
+    # scope reads the overlay: its only frozen readers are the autogen series
+    # [sales/sl830.cbl:L571, :L574, :L581, sales/sl810.cbl:L1649], which AAP
+    # section 0.2.2 excludes.  `_initialize_header_record` above has already
+    # blanked the overlay, so a read leaves it in the state an `INITIALIZE`
+    # leaves it in rather than in a stale one.
     prime.sih_order = str(group["IH-ORDER"])
     prime.sih_type = int(group["IH-TYPE"])
     prime.sih_ref = str(group["IH-REF"])
@@ -2667,6 +2915,13 @@ def _initialize_header_record(header: SInvoiceHeader) -> None:
     Plain ``INITIALIZE`` - numerics to zero, alphanumerics to spaces, and NOT the
     ``with filler`` form used at [:L804].  The field widths come from the frozen
     copybook through the generated dictionary, so nothing here is transcribed.
+
+    CORRECTION C1 reaches here too.  Plain ``INITIALIZE`` does not descend into a
+    FILLER item, so it never names ``filler redefines sih-order``
+    [copybooks/slwsinv.cob:L28] - but it DOES name ``sih-order`` [:L27], and the
+    overlay is those same ten bytes, so the compiled program blanks the overlay
+    regardless.  Reproducing that is what keeps a stale overlay from surviving a
+    read and being projected over the row value the read just delivered.
     """
     prime = header.sih_prime
     prime.ws_invoice_key.sih_invoice = 0
@@ -2675,6 +2930,8 @@ def _initialize_header_record(header: SInvoiceHeader) -> None:
     prime.sih_customer.sih_check = 0
     prime.sih_date = 0
     prime.sih_order = " " * 10
+    # The ten bytes just blanked are the overlay's ten bytes - CORRECTION C1.
+    _blank_order_overlay(prime.filler_28)
     prime.sih_type = 0
     prime.sih_ref = " " * 10
     sub = header.sih_sub_prime

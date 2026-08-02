@@ -477,6 +477,7 @@ from typing import Any, Final, Union, cast
 from acas_posting.dal.connection import (
     OpenOutcome,
     TransportSecurity,
+    acquire_cursor,
     cobol_string_delimited_by_space,
     execute_statement,
     load_rdb_data_once,
@@ -3971,7 +3972,13 @@ def _read_one_row(bridge: BridgeProfile) -> CursorOutcome:
             f"{bridge.program}: no connection is open. The caller must issue "
             "the System-Open verb first [common/systemMT.cbl:L592-L594]."
         )
-    cursor = connection.cursor()
+    # A dead session - which anomaly A-8 makes reachable, since any bridge's
+    # close takes the one process handle down - must arrive as a status pair and
+    # not as a raise, because the frozen bridge has no cursor-acquisition step
+    # to fail at: its one `call "MySQL_query"` is what reports
+    # [copybooks/mysql-procedures.cpy:L165-L166]. `acquire_cursor` defers the
+    # failure to the `execute` inside `read_next`, where it is already handled.
+    cursor = acquire_cursor(connection)
     try:
         outcome = read_next(
             cursor,

@@ -500,6 +500,21 @@ From the bridge [common/analMT.cbl]:
   N-indexed-frees  Every exit from the indexed read frees the cursor, success
                    included [:L623, :L652, :L659, :L665], so an indexed read
                    taken mid-walk destroys the walk's position.
+  N-indexed-clears-weerror  The indexed read's zero-rows guard writes BOTH
+                   halves of the pair - `move 21 to fs-Reply` [:L621] AND
+                   `move zero to WE-Error` [:L622] - which DIVERGES from
+                   `glpostingMT` [common/glpostingMT.cbl:L633-L636] and
+                   `glbatchMT` [common/glbatchMT.cbl:L649-L651], both of which
+                   write `FS-Reply` only and let the caller's `WE-Error` survive.
+                   `dal/cursor_state.py` implements the `glpostingMT` form for its
+                   nineteen callers, so `ba050_process_read_indexed` applies the
+                   second statement locally - the same treatment `acas005` gives
+                   `nominalMT`'s identical divergence [common/nominalMT.cbl:L635].
+                   Consequence of the divergence, which is what makes it worth
+                   recording: with `WE-Error` cleared, `FS-Reply` alone
+                   distinguishes a missing row from a successful read, exactly as
+                   in `valueMT`'s 23 form - see the comment the frozen source puts
+                   beside the value, "could also be 23 or 14" [:L621].
   N-paragraph-gaps  The bridge's own trace numbers are 1, 2, 3, 4, 5, 6, 8,
                    10, 13, 17 and 20; seven values in that span are unused.
   N-write-no-weerror  The write's failure arm sets `FS-Reply` to 22 or 99
@@ -619,6 +634,7 @@ from typing import Final, NamedTuple
 from acas_posting.dal.connection import (
     OpenOutcome,
     TransportSecurity,
+    acquire_cursor,
     execute_statement,
     load_rdb_data_once,
     mysql_1000_open,
@@ -2327,9 +2343,14 @@ def _bridge_cursor(connection: object) -> Iterator[object]:
         connection: The connection `mysql_1000_open` returned.
 
     Yields:
-        A DB-API cursor over that connection.
+        A DB-API cursor over that connection, or - when another bridge has closed
+        the one process handle, anomaly A-8 - the stand-in that reports the
+        driver's failure from ``execute``. The frozen bridge reports a dead
+        session from its ``call "MySQL_query"``
+        [copybooks/mysql-procedures.cpy:L165-L166], having no acquisition step of
+        its own, so the failure must reach the statement rather than raise here.
     """
-    cursor = connection.cursor()
+    cursor = acquire_cursor(connection)  # type: ignore[arg-type]
     try:
         yield cursor
     finally:
@@ -3289,6 +3310,34 @@ def ba050_process_read_indexed(
     [common/analMT.cbl:L651, :L658], and the comments at both arms record that
     the reply was changed "from 23".
 
+    ⭐ THE ZERO-ROWS ARM WRITES **BOTH** HALVES OF THE PAIR, AND THE SECOND HALF
+    IS APPLIED HERE RATHER THAN BY THE SHARED DELEGATE. `move 21 to fs-Reply`
+    [common/analMT.cbl:L621] is followed by `move zero to WE-Error`
+    [common/analMT.cbl:L622]; `glpostingMT`'s equivalent guard
+    [common/glpostingMT.cbl:L633-L636] writes only the first, and `glbatchMT`
+    [common/glbatchMT.cbl:L649-L651] agrees with `glpostingMT`.
+    :func:`acas_posting.dal.cursor_state.read_indexed` implements the
+    `glpostingMT` form, preserving the caller's incoming `We-Error`, so this
+    paragraph adds the missing statement ITSELF instead of changing a module its
+    other callers were written against - the same local treatment `acas005`
+    gives `nominalMT`'s identical divergence [common/nominalMT.cbl:L635].
+
+    Without it a plain missing row inherited whatever `We-Error` the caller
+    happened to be carrying. A preceding end of file leaves 10 - the bridge's own
+    read-next writes `move 10 to fs-reply` and `move 10 to WE-Error`
+    [common/analMT.cbl:L515-L516] - so a subsequent read miss reported
+    `(21, 10)`, which is `analMT`'s end-of-file pair with a 21 in front of it,
+    rather than the `(21, 0)` its own guard writes.
+
+    THE LOG TAG IS NOT AFFECTED EITHER WAY, and it is worth saying why rather
+    than leaving it to be re-derived. The zero-rows arm [common/analMT.cbl:L620-
+    L624] writes no `WS-File-Key`, while both count-not-greater arms blank it
+    explicitly [:L651, :L658] - but `ba010-Initialise` has already blanked the
+    field at the head of every call [common/analMT.cbl:L364-L365], so the two
+    conventions are indistinguishable from outside and only the status pair is
+    observable. The arm-specific clearing below still keys off `We-Error`, so
+    the statement is applied BEFORE it, in the frozen order.
+
     Args:
         file_access: The caller's `File-Access`, written in place.
         dal_common: The testing switches.
@@ -3340,6 +3389,55 @@ def ba050_process_read_indexed(
     outcome.apply_to(file_access)
 
     if not outcome.is_ok() or not isinstance(outcome.row, Mapping):
+        if outcome.fs_reply == FsReply.INVALID_KEY_ON_START:
+            # `move zero to WE-Error` [common/analMT.cbl:L622], the statement that
+            # sits between `move 21 to fs-Reply` [:L621] and `go to ba998-Free`
+            # [:L623]. It is confirmed in the pre-translation source too, which
+            # carries the identical pair before the translator expanded the
+            # `/MYSQL SELECT\` directive [common/analMT.scb:L575-L576], so there
+            # is no ambiguity about it.
+            #
+            # THIS IS A DIVERGENCE FROM `glpostingMT`, whose equivalent guard
+            # [common/glpostingMT.cbl:L633-L636] writes `FS-Reply` ONLY and lets
+            # the caller's `We-Error` survive. `cursor_state.read_indexed`
+            # implements the `glpostingMT` form - it snapshots the incoming
+            # `We-Error` [dal/cursor_state.py] and returns it unchanged on the
+            # not-found path - because nineteen sibling callers were written
+            # against that form and `glbatchMT` [common/glbatchMT.cbl:L649-L651]
+            # shares it. So the extra statement is applied HERE, locally, exactly
+            # as `acas005` does for `nominalMT`'s identical divergence
+            # [common/nominalMT.cbl:L635]. The shared module is deliberately left
+            # alone; changing it would silently give two other bridges a
+            # behaviour their own frozen sources do not have.
+            #
+            # IT RUNS BEFORE THE ARM-SPECIFIC CLEARING BELOW, which is the frozen
+            # order: [:L622] precedes [:L651] and [:L658], and that clearing keys
+            # off `We-Error` to tell the three arms apart. Its observable effect,
+            # measured rather than assumed, is the STATUS PAIR ONLY: the zero-rows
+            # arm [:L620-L624] writes no `WS-File-Key` while both
+            # count-not-greater arms blank one [:L651, :L658], but
+            # `ba010-Initialise` has already blanked that field at the head of
+            # every call [common/analMT.cbl:L364-L365], so the difference cannot
+            # be seen from outside the bridge.
+            #
+            # THE TEST IS DELIBERATELY NOT NARROWED to exclude a driver failure,
+            # for the reason established at the sibling site in
+            # `acas005_gl_nominal.py`: `cursor_state.read_indexed` also reports a
+            # driver failure as `FS-Reply` 21 (its anomaly A14), so this arm
+            # catches that too and zeroes a `We-Error` of 911. The frozen program
+            # never reaches [:L620] on that path - `ba050` performs
+            # `MYSQL-1220-STORE-RESULT` [:L616], whose
+            # `call "MySQL_num_rows" using Ws-Mysql-Result Ws-Mysql-Count-Rows`
+            # [copybooks/mysql-procedures.cpy:L191-L192] is UNCONDITIONAL, and on
+            # a failed statement `Ws-Mysql-Result` is null (the COBOL tests for
+            # exactly that one line earlier [:L189-L190]). The C then dereferences
+            # it, `*rows = mysql_num_rows(*result)`
+            # [presql2-package/cobmysqlapi38.c:L484], so the compiled program
+            # faults inside the client library before any status is written. There
+            # is therefore no frozen pair for that path to disagree with, and
+            # narrowing the test would be an unrequested behaviour change on an
+            # oracle-unreachable path.
+            file_access.we_error = int(WeError.SUCCESS)
         # [common/analMT.cbl:L620-L624] and [:L641-L660]. The `(21, 990)` arm
         # keeps the driver's diagnostics; the `(21, 989)` arm zeroes the number
         # and blanks the message; both blank the key. The delegate distinguishes

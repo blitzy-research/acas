@@ -374,7 +374,9 @@ from typing import Any, Final
 from acas_posting.dal import cursor_state
 from acas_posting.dal.connection import (
     TransportSecurity,
+    acquire_cursor,
     cobol_string_delimited_by_space,
+    cursor_is_unavailable,
     execute_statement,
     load_rdb_data_once,
     mysql_1000_open,
@@ -2678,7 +2680,20 @@ def _require_cursor(state: BridgeSession) -> DatabaseCursor:
             table=TABLE_NAME,
         )
     if state.cursor is None:
-        state.cursor = state.connection.cursor()  # type: ignore[attr-defined]
+        # A dead session is reachable without this bridge doing anything wrong:
+        # anomaly A-8 means ANY other bridge's `Mysql-1980-Close` takes the one
+        # process handle down [presql2-package/cobmysqlapi38.c:L230-L234]. The
+        # frozen bridge reports that from its `call "MySQL_query"`
+        # [copybooks/mysql-procedures.cpy:L165-L166] and never from a separate
+        # acquisition step, so the failure is carried to the statement instead of
+        # raised here.
+        cursor = acquire_cursor(state.connection)  # type: ignore[arg-type]
+        if cursor_is_unavailable(cursor):
+            # NOT cached. Caching it would keep failing after another bridge's
+            # `Mysql-1000-Open` had revived the handle in place [:L433], which
+            # the frozen source cannot do - see :func:`cursor_is_unavailable`.
+            return cursor  # type: ignore[return-value]
+        state.cursor = cursor  # type: ignore[assignment]
     return state.cursor
 
 
@@ -2917,9 +2932,29 @@ def ba050_process_read_indexed(
         bb100_unload_hvs(state.host_variables, ledger)
         _set_file_key(file_access, str(state.host_variables.hv_ledger_key))
     elif outcome.fs_reply == FsReply.INVALID_KEY_ON_START:
-        # `move zero to WE-Error` [:L636]. THE DIVERGENCE FROM glpostingMT, applied
+        # `move zero to WE-Error` [:L635]. THE DIVERGENCE FROM glpostingMT, applied
         # locally so the shared cursor_state module keeps the glpostingMT form that
         # its other callers were written against.
+        #
+        # THIS TEST IS DELIBERATELY NOT NARROWED, and the frozen source is why.
+        # `cursor_state.read_indexed` also reports a DRIVER FAILURE as FS-Reply 21
+        # (its anomaly A14), so this arm catches that too and zeroes a `We-Error`
+        # of 911. That looks like it should be split, because the frozen
+        # `move zero to WE-Error` sits inside the `if WS-MYSQL-Count-Rows = zero`
+        # guard [:L633-L637] which a failed statement does not satisfy. It is not
+        # split, because the frozen program never arrives at that guard at all:
+        # `ba050` performs `MYSQL-1220-STORE-RESULT` [:L629], whose
+        # `call "MySQL_num_rows" using Ws-Mysql-Result Ws-Mysql-Count-Rows`
+        # [copybooks/mysql-procedures.cpy:L191-L192] is UNCONDITIONAL, and on a
+        # failed statement `Ws-Mysql-Result` is null - the COBOL tests for exactly
+        # that one line earlier [:L189-L190]. The C then dereferences it,
+        # `*rows = mysql_num_rows(*result)`
+        # [presql2-package/cobmysqlapi38.c:L484], so the compiled program faults
+        # inside the client library before reaching [:L633]. There is therefore NO
+        # frozen status pair for a driver failure here, nothing this arm can
+        # disagree with, and no scenario in which the choice is observable.
+        # Narrowing it would be an unrequested behaviour change on an
+        # oracle-unreachable path.
         file_access.we_error = WeError.SUCCESS
     # ANOMALY N-NOTFOUND-DEAD - REPRODUCTION SITE. The frozen paragraph's
     # `WS-MYSQL-Count-Rows not > zero` branch [common/nominalMT.cbl:L661-L681], with

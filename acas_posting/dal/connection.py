@@ -150,13 +150,83 @@ load-bearing rather than incidental: it is exactly why Agent Action Plan
 section 0.6.5 can say of the file-abandoning rejection path, verbatim, "The
 partial state is therefore committed, not rolled back."
 
-THERE IS NO CONNECTION POOL
-===========================
+THERE IS NO CONNECTION POOL - THERE IS EXACTLY ONE HANDLE
+=========================================================
 The plan forbids threads, event loops, process-level parallelism and any
 connection pool; execution is strictly sequential, matching the single-threaded
 COBOL. The frozen source agrees structurally: a bridge opens a connection when
 asked to open a file [common/glpostingMT.cbl:L389-L419] and closes it when
-asked to close one [:L433-L443]. No sharing, no reuse, no borrow-and-return.
+asked to close one [:L433-L443].
+
+That is NOT the same thing as a connection per bridge, and the difference is
+load-bearing. Read on, because the frozen C interface settles it.
+
+ONE PROCESS-GLOBAL HANDLE, SHARED BY EVERY BRIDGE
+=================================================
+``Mysql-1000-Open`` reaches the server through three foreign ``CALL``s and
+``Mysql-1980-Close`` through a fourth. All four land in the hand-written C
+interface object that every bridge, handler and loader links, whose source is
+vendored in this checkout as ``presql2-package/cobmysqlapi38.c`` inside
+``presql2-latest.zip``. Its second declaration is the whole story
+[presql2-package/cobmysqlapi38.c:L71]::
+
+    MYSQL            sql, *mysql=&sql;
+
+ONE ``MYSQL`` struct at C file scope, and one pointer that always aims at it.
+Every entry point in that file then operates on that one struct and on nothing
+else:
+
+=========================================== =================================
+C entry point                               What it operates on
+=========================================== =================================
+``MySQL_init(MYSQL **cid, ...)``    [:L420] ``*cid = mysql``          [:L431]
+                                            ``mysql_init(&sql)``      [:L433]
+``MySQL_real_connect(host, ...)``   [:L500] ``mysql_real_connect(&sql, ...)``
+                                                                      [:L527]
+``MySQL_selectdb(dbname)``          [:L534] ``mysql_select_db(mysql,`` [:L539]
+``MySQL_close(void)``               [:L230] ``mysql_close(mysql)``     [:L232]
+``MySQL_errno`` / ``MySQL_error``   [:L237] ``mysql_errno(mysql)``     [:L240]
+=========================================== =================================
+
+Three consequences follow, and each one is an observable this module has to
+reproduce:
+
+1. **A bridge does not own a connection.** ``Ws-Mysql-Cid`` is declared
+   ``pointer`` [copybooks/mysql-variables.cpy:L65] and ``MySQL_init`` fills it
+   with the address of the one struct [:L431], so every bridge's handle holds
+   the SAME address. Nothing in the C file ever reads a handle back - not
+   ``real_connect``, not ``selectdb``, not ``query``, not ``close`` - so
+   ``Ws-Mysql-Cid`` is written and never used. Twenty bridges, one connection.
+
+2. **``Mysql-1980-Close`` closes it for everybody.** The frozen paragraph is
+   two lines and takes no argument at all
+   [copybooks/mysql-procedures.cpy:L264-L265]::
+
+       Mysql-1980-Close.
+           call "MySQL_close".
+
+   so when ``ba030-Process-Close`` in ANY bridge performs it
+   [common/glpostingMT.cbl:L443], the connection every other open bridge would
+   next use is gone. Their next statement fails, and under anomaly N3 it fails
+   as ``(FS-Reply 99, We-Error 911)`` whatever went wrong.
+
+3. **Re-opening revives it for everybody**, because the struct is a static
+   that outlives each close: a later ``MySQL_init`` + ``MySQL_real_connect``
+   re-establishes a session in that same struct, and every bridge's stale
+   handle is aiming at it again.
+
+So this module keeps ONE connection object for the life of the process - see
+:data:`_PROCESS_CONNECTION` - and ``mysql_1000_open`` re-establishes the
+session ON THAT OBJECT rather than building a second one. Object identity is
+the Python analogue of ``&sql``: because every handler ends up holding the same
+object, a close by one is a close for all, exactly as above, with no
+cooperation required from the twenty-one modules above this one.
+
+THIS IS NOT A POOL, and the distinction is not a quibble. A pool hands out
+DIFFERENT connections and takes them back; this hands out THE SAME one and
+never reclaims it. There is no borrow, no return, no sizing, no eviction, no
+liveness probing and no second connection to hand anybody - which is precisely
+why it satisfies rule R-3 while a pool would not.
 
 WHERE THE CREDENTIALS COME FROM, AND WHY ONLY ONCE
 ==================================================
@@ -230,6 +300,37 @@ A-7  **Multi-statement execution is off, so a stray second statement is a
      enables it by default, which would diverge, so :func:`mysql_1000_open`
      unsets it. Here the DRIVER, not the COBOL, carried the surprise, and rule
      R-6 settles it in the compiled program's favour.
+
+A-8  **Closing ONE logical file closes the connection every other open file is
+     using.** ``MySQL_close`` takes no argument and closes the single
+     file-scope handle [presql2-package/cobmysqlapi38.c:L230-L234], so the
+     ``PERFORM MYSQL-1980-CLOSE`` in one bridge's ``ba030-Process-Close``
+     [common/glpostingMT.cbl:L443] pulls the connection out from under every
+     other bridge in the run. A posting program that holds the batch, posting
+     and nominal files open together and closes any one of them leaves the
+     other two unusable until something re-opens - and because the failure
+     funnels through ``Mysql-1100-Db-Error`` it is reported as the same
+     ``(99, 911)`` a genuine connect failure gives, with nothing to
+     distinguish the two. Symmetrically, ``Mysql-1000-Open`` re-initialises
+     and re-connects THE SAME struct [:L431, :L433, :L527], so opening a
+     second file abandons the session the first was using and continues on a
+     new one; the switch is invisible because the bridges buffer their result
+     sets client-side with ``MySQL_store_result``
+     [copybooks/mysql-procedures.cpy:L188]. Reproduced by keeping exactly one
+     connection object per process - :data:`_PROCESS_CONNECTION` - and NOT
+     fixed: giving each handler its own connection would make a close local,
+     which rule R-4 counts as a failure.
+
+     ONE CONSEQUENCE NEEDED HANDLING RATHER THAN REPRODUCING, because it is an
+     artefact of this language and not of the frozen one. A bridge can now hold
+     a connection another bridge has closed, and ``mysql-connector-python``
+     refuses a cursor on it - raising where the frozen bridge, which has no
+     acquisition step at all, reports from its ``call "MySQL_query"``
+     [copybooks/mysql-procedures.cpy:L165-L166] and so always yields a status
+     pair. :func:`acquire_cursor` keeps the two the same by carrying that
+     failure to the statement, where every handler already guards it. The
+     anomaly is untouched; only the exception that the driver's two-step API
+     would have leaked is.
 
 DELIBERATE OMISSIONS, RECORDED AS OMISSIONS  (RULE R-5)
 =======================================================
@@ -357,17 +458,21 @@ __all__: Final[tuple[str, ...]] = (
     "InsecureTransportError",
     "OpenOutcome",
     "TransportSecurity",
+    "acquire_cursor",
     "cobol_string_delimited_by_space",
     "connection_parameters",
+    "cursor_is_unavailable",
     "execute_statement",
     "load_rdb_data_once",
     "mysql_1000_open",
     "mysql_1090_exit",
     "mysql_1980_close",
     "mysql_1999_exit",
+    "process_connection",
     "quote_identifier",
     "rdb_data_from_system_record",
     "rdb_data_is_loaded",
+    "reset_process_connection",
     "reset_rdb_data_cache",
     "transport_decimal_context",
 )
@@ -2001,6 +2106,113 @@ def _assert_converter_pinned(connection: MySQLConnectionAbstract) -> None:
         )
 
 
+#  ANOMALY A-8  -  THE ONE PROCESS-GLOBAL HANDLE, REPRODUCED AND NOT FIXED
+
+#: The one connection this process ever has, or ``None`` before the first open.
+#: This single module-level name IS the reproduction of the C interface's own
+#: single declaration [presql2-package/cobmysqlapi38.c:L71]::
+#:
+#:     MYSQL            sql, *mysql=&sql;
+#:
+#: ``sql`` is a file-scope struct, so it exists for the life of the process and
+#: survives every close; ``mysql`` always aims at it, so every entry point in
+#: that file - ``mysql_init(&sql)`` [:L433], ``mysql_real_connect(&sql, ...)``
+#: [:L527], ``mysql_select_db(mysql, ...)`` [:L539], ``mysql_close(mysql)``
+#: [:L232], ``mysql_errno(mysql)`` [:L240] - reaches the same connection. The
+#: twenty bridges have no way to hold a second one: ``MySQL_init`` copies the
+#: address of this struct into whichever ``Ws-Mysql-Cid`` asked
+#: [copybooks/mysql-variables.cpy:L65], and no entry point ever reads a handle
+#: back, so the pointer a bridge holds is a formality.
+#:
+#: The Python analogue of "the address of ``sql``" is OBJECT IDENTITY, which is
+#: why the object here is reused rather than rebuilt: every handler that has
+#: opened holds this exact object, so :func:`mysql_1980_close` closing it is
+#: observable to all of them without any of them having to know that.
+#:
+#: THIS IS NOT A CONNECTION POOL and must never grow into one. A pool holds
+#: several connections, hands a caller one it is not otherwise using, and takes
+#: it back. This holds exactly one, hands every caller the same one, and takes
+#: nothing back. Rule R-3 forbids the former; the frozen C interface requires
+#: the latter.
+#:
+#: NOT guarded by a lock, deliberately, for the reason given at
+#: :data:`_LOADED_RDB_DATA`: rule R-3 forbids concurrency outright, so a lock
+#: would imply that concurrent callers exist.
+_PROCESS_CONNECTION: MySQLConnectionAbstract | None = None
+
+
+def process_connection() -> MySQLConnectionAbstract | None:
+    """Report the one connection this process holds, without touching it.
+
+    The observable form of the C interface's file-scope ``sql`` struct
+    [presql2-package/cobmysqlapi38.c:L71], published so that a test can assert
+    anomaly A-8 - that twenty bridges share one connection - rather than infer
+    it from behaviour.
+
+    Sends nothing to the server and changes nothing: it neither opens, closes,
+    reconnects nor pings. A caller wanting the connection to USE must go
+    through :func:`mysql_1000_open`, exactly as a bridge must perform
+    ``Mysql-1000-Open`` before it can issue a statement.
+
+    Returns:
+        The one connection object, live or closed, or ``None`` before the first
+        :func:`mysql_1000_open` of the process and after
+        :func:`reset_process_connection`.
+    """
+    return _PROCESS_CONNECTION
+
+
+def reset_process_connection() -> None:
+    """Close the one connection and forget it, so the next open starts clean.
+
+    THERE IS NO COBOL COUNTERPART, and that is stated plainly rather than
+    disguised - the same position :func:`reset_rdb_data_cache` is in. Nothing in
+    the frozen source discards the ``sql`` struct, because it does not need to:
+    a COBOL run is a process, and the struct dies with it.
+
+    In Python a test process outlives a "run". The determinism requirement
+    (rule R-6) is that two runs of one scenario IN ONE PROCESS produce identical
+    results, and a run that inherited the previous run's live session - possibly
+    mid-cursor, possibly already closed by the previous run's last file-close -
+    would not be independent of it. So this exists to let a harness or test
+    establish a clean starting state, NOT to soften anomaly A-8.
+
+    Production callers have no reason to call it: one process is one run.
+    """
+    global _PROCESS_CONNECTION  # noqa: PLW0603 - the `MYSQL sql` file-scope struct
+
+    if _PROCESS_CONNECTION is not None:
+        _close_quietly(_PROCESS_CONNECTION)
+    _PROCESS_CONNECTION = None
+
+
+def _close_quietly(connection: MySQLConnectionAbstract) -> None:
+    """Close one connection the way ``MySQL_close`` closes: without reporting.
+
+    ``MySQL_close`` is declared ``void`` and returns nothing
+    [presql2-package/cobmysqlapi38.c:L230-L234], and the frozen paragraph that
+    calls it tests nothing afterwards
+    [copybooks/mysql-procedures.cpy:L264-L265]. So a close failure cannot
+    change control flow in the compiled program, and it must not change it
+    here: raising would invent an error path the specification does not have
+    (rule R-3, nothing added).
+
+    Args:
+        connection: The connection to close. Already-closed is fine - the
+            driver tolerates it, and so does ``mysql_close`` on a struct whose
+            session has gone.
+    """
+    try:
+        connection.close()
+    except Exception as error:  # noqa: BLE001 - `void MySQL_close` reports nothing
+        # Redacted for the same reason `_failed_open` redacts: this text is the
+        # driver's, so it can name the account and can carry a line feed.
+        _LOG.debug(
+            "Mysql-1980-Close: driver reported %s on close",
+            redact_for_log(str(error)),
+        )
+
+
 #  `Mysql-1000-Open`  -  [copybooks/mysql-procedures.cpy:L63-L85]
 
 
@@ -2026,8 +2238,16 @@ def mysql_1000_open(
 
     Only the third arm omits the ``go to``, because it is already last.
 
-    Four things about it survive the migration:
+    Five things about it survive the migration:
 
+    * **The one handle.** ``MySQL_init`` does not create a connection - it
+      re-points the caller's ``Ws-Mysql-Cid`` at the single file-scope struct
+      and re-initialises THAT struct [presql2-package/cobmysqlapi38.c:L431,
+      :L433], and ``MySQL_real_connect`` then connects the same struct [:L527].
+      So the first open of a process brings :data:`_PROCESS_CONNECTION` into
+      being and every later open re-establishes the session IN THAT SAME
+      OBJECT, abandoning whatever session it held. Every handler that has
+      opened therefore holds one and the same connection - anomaly A-8.
     * The parameter marshalling, including ``Ws-Mysql-Implementation`` in
       the USER slot - anomaly A-3. See :func:`connection_parameters`.
     * The three step codes, imported as
@@ -2076,9 +2296,10 @@ def mysql_1000_open(
             disposable. The default REFUSES.
 
     Returns:
-        An :class:`OpenOutcome`. On success it carries the live connection
-        and ``FsReply.SUCCESS``; on failure no connection, the ``(99, 911)``
-        pair, the step code and the three diagnostic fields.
+        An :class:`OpenOutcome`. On success it carries the live connection -
+        THE one process connection, the same object every other caller in this
+        process is handed - and ``FsReply.SUCCESS``; on failure no connection,
+        the ``(99, 911)`` pair, the step code and the three diagnostic fields.
 
     Raises:
         FrozenPlaceholderCredentialsError: The row still carries a shipped
@@ -2094,6 +2315,8 @@ def mysql_1000_open(
             migration's own transport guarantee has failed and rule R-2
             leaves nothing to degrade to. The connection is closed first.
     """
+    global _PROCESS_CONNECTION  # noqa: PLW0603 - the `MYSQL sql` file-scope struct
+
     declared_transport = (
         TransportSecurity() if transport is None else transport
     )
@@ -2103,6 +2326,10 @@ def mysql_1000_open(
 
     # BEFORE the connect call, so that a refused connection is never attempted
     # and no credential ever leaves the process. Raises; never returns a status.
+    # Evaluated on EVERY call, including the calls that re-use the one process
+    # connection: the policy is this caller's declaration about this call, so a
+    # caller that declared nothing must be refused even when an earlier caller
+    # that declared properly has already opened.
     _require_permitted_connection(
         system_record,
         parameters,
@@ -2112,60 +2339,92 @@ def mysql_1000_open(
         ),
     )
 
+    # THE FULL ARGUMENT SET, ASSEMBLED ONCE AND USED ON EVERY OPEN, because that
+    # is what the frozen source does: `ba020-Process-Open` re-STRINGs all six
+    # `RDB-Data` items into working storage on every single open
+    # [common/glpostingMT.cbl:L394-L416] and `Mysql-1000-Open` hands all six to
+    # `MySQL_real_connect` again [copybooks/mysql-procedures.cpy:L72-L77]. So a
+    # re-open is re-parameterised, never "resumed with whatever it had".
+    driver_arguments: dict[str, Any] = {
+        **parameters,
+        # AUTOCOMMIT IS ON, AND THE ABSENCE OF A TRANSACTION SCOPE IS
+        # DELIBERATE. A census over all twenty in-scope bridges finds zero
+        # occurrences of COMMIT, ROLLBACK and START TRANSACTION, so every
+        # statement they issue is durable the moment it succeeds. The
+        # loaders confirm it from the other side; `common/glbatchLD.cbl`
+        # L9-L12 reads, verbatim:
+        #
+        #     *>  This modules uses commit and rollback so *
+        #     *>  you MUST ensure that autocommit is OFF   *
+        #     *>   in the rdb settings. It is as default   *
+        #     *>   set ON.                                 *
+        #
+        # i.e. the LOADERS ask for it to be off; the BRIDGES never do, so
+        # they run under the ON default. Even the loaders never act on that
+        # header - their `perform aa020-Rollback` lines are all commented
+        # out and `aa030-Commit` is never performed at all - so the whole
+        # frozen tree runs without a reachable COMMIT and the harness
+        # database is served with autocommit ON to match
+        # [harness/Dockerfile.mariadb]. This module therefore publishes no
+        # begin, no commit, no rollback and no transactional context manager -
+        # adding any of them would change when rows become visible and so
+        # change the state diff. It is also precisely why Agent Action Plan
+        # section 0.6.5 can say of the file-abandoning rejection path,
+        # verbatim: "The partial state is therefore committed, not rolled
+        # back."
+        "autocommit": True,
+        # RULE R-2, WHICH NAMES THIS FILE. The converter is pinned
+        # explicitly rather than left to the driver's default. Honoured by
+        # both driver implementations, so `use_pure` is deliberately not
+        # passed: the C extension detects a custom converter and hands
+        # every value to it instead of converting in C.
+        "converter_class": AcasConverter,
+        # MULTI-STATEMENT EXECUTION IS TURNED OFF, because the compiled
+        # program does not have it. The C interface the bridges link calls
+        # `mysql_real_connect(&sql, host, user, passwd, db, port, socket,
+        # 0)` - the final argument is the client-flag word and it is a
+        # LITERAL ZERO [presql2-package/cobmysqlapi38.c:L527], so
+        # CLIENT_MULTI_STATEMENTS is never negotiated and the server rejects
+        # a second statement in one query with a syntax error.
+        # `mysql-connector-python` sets that flag BY DEFAULT, which would let
+        # one `execute` call run two statements; the negative entry unsets it
+        # and restores the frozen behaviour. Rule R-6 settles it - the
+        # compiled program is the specification - and it is what makes
+        # `execute_statement`'s one-statement-per-call guarantee structural
+        # rather than a convention.
+        "client_flags": [-ClientFlag.MULTI_STATEMENTS],
+        # No pool argument of any kind appears here, and none may be added:
+        # rule R-3 forbids a connection pool, and the frozen bridges reach one
+        # process-global handle rather than borrowing from a set
+        # [presql2-package/cobmysqlapi38.c:L71].
+    }
+
+    # ANOMALY A-8. `MySQL_init` does not create a connection - it re-points the
+    # caller's handle at the ONE file-scope struct and re-initialises THAT
+    # struct [presql2-package/cobmysqlapi38.c:L431, :L433]::
+    #
+    #     *cid = mysql;
+    #     rc = mysql_init(&sql) != NULL ? 0 : 1;
+    #
+    # and `MySQL_real_connect` then connects that same struct [:L527]. So the
+    # first open of the process brings the struct into being and every later
+    # open RE-ESTABLISHES THE SESSION IN IT, abandoning whatever session it
+    # held. `MySQLConnectionAbstract.connect` is the exact analogue: it
+    # re-configures and re-connects the object it is called on, in place, so
+    # the object's identity - the Python stand-in for `&sql` - is preserved and
+    # every handler that has ever opened is still holding the live connection.
+    established = _PROCESS_CONNECTION
     try:
-        connection = mysql.connector.connect(
-            **parameters,
-            # AUTOCOMMIT IS ON, AND THE ABSENCE OF A TRANSACTION SCOPE IS
-            # DELIBERATE. A census over all twenty in-scope bridges finds zero
-            # occurrences of COMMIT, ROLLBACK and START TRANSACTION, so every
-            # statement they issue is durable the moment it succeeds. The
-            # loaders confirm it from the other side; `common/glbatchLD.cbl`
-            # L9-L12 reads, verbatim:
-            #
-            #     *>  This modules uses commit and rollback so *
-            #     *>  you MUST ensure that autocommit is OFF   *
-            #     *>   in the rdb settings. It is as default   *
-            #     *>   set ON.                                 *
-            #
-            # i.e. the LOADERS ask for it to be off; the BRIDGES never do, so
-            # they run under the ON default. Even the loaders never act on that
-            # header - their `perform aa020-Rollback` lines are all commented
-            # out and `aa030-Commit` is never performed at all - so the whole
-            # frozen tree runs without a reachable COMMIT and the harness
-            # database is served with autocommit ON to match
-            # [harness/Dockerfile.mariadb]. This module therefore publishes no begin,
-            # no commit, no rollback and no transactional context manager -
-            # adding any of them would change when rows become visible and so
-            # change the state diff. It is also precisely why Agent Action Plan
-            # section 0.6.5 can say of the file-abandoning rejection path,
-            # verbatim: "The partial state is therefore committed, not rolled
-            # back."
-            autocommit=True,
-            # RULE R-2, WHICH NAMES THIS FILE. The converter is pinned
-            # explicitly rather than left to the driver's default. Honoured by
-            # both driver implementations, so `use_pure` is deliberately not
-            # passed: the C extension detects a custom converter and hands
-            # every value to it instead of converting in C.
-            converter_class=AcasConverter,
-            # MULTI-STATEMENT EXECUTION IS TURNED OFF, because the compiled
-            # program does not have it. The C interface the bridges link calls
-            # `mysql_real_connect(&sql, host, user, passwd, db, port, socket,
-            # 0)` - the final argument is the client-flag word and it is a
-            # LITERAL ZERO, so CLIENT_MULTI_STATEMENTS is never negotiated and
-            # the server rejects a second statement in one query with a syntax
-            # error. `mysql-connector-python` sets that flag BY DEFAULT, which
-            # would let one `execute` call run two statements; the negative
-            # entry unsets it and restores the frozen behaviour. Rule R-6
-            # settles it - the compiled program is the specification - and it
-            # is what makes `execute_statement`'s one-statement-per-call
-            # guarantee structural rather than a convention.
-            client_flags=[-ClientFlag.MULTI_STATEMENTS],
-            # No pool argument of any kind appears here, and none may be added:
-            # rule R-3 forbids a connection pool, and the frozen bridges open
-            # one connection per file-open and close it on file-close
-            # [common/glpostingMT.cbl:L389-L419, L433-L443].
-        )
+        if established is None:
+            connection = mysql.connector.connect(**driver_arguments)
+        else:
+            established.connect(**driver_arguments)
+            connection = established
     except mysql.connector.Error as error:
+        # A failed re-connect leaves the object in the slot, disconnected -
+        # which is what `mysql_init(&sql)` followed by a failing
+        # `mysql_real_connect(&sql, ...)` leaves behind: the struct still
+        # exists, it simply has no session.
         errno = error.errno if isinstance(error.errno, int) else 0
         return _failed_open(
             step=_connect_step_for(errno),
@@ -2175,6 +2434,21 @@ def mysql_1000_open(
             we_error=we_error,
         )
 
+    # THE STRUCT IS NOW THE LIVE CONNECTION, and it is installed before anything
+    # else looks at it because that is the order the C interface establishes:
+    # `mysql_init(&sql)` [presql2-package/cobmysqlapi38.c:L433] and
+    # `mysql_real_connect(&sql, ...)` [:L527] have already made the one
+    # file-scope struct current by the time `Mysql-1000-Open` reaches its next
+    # statement. Every handler that opens from here on receives this same
+    # object, which is what makes a close by any one of them observable to all
+    # of them (anomaly A-8).
+    _PROCESS_CONNECTION = connection
+
+    # Checked on EVERY open, exactly as before this slot existed, so the number
+    # of probe statements a run issues does not move: each open probed once
+    # then and each open probes once now. Rule R-2 admits no conditional
+    # enforcement, and the re-open path passes the identical `converter_class`
+    # argument, so there is nothing here that would only need checking once.
     try:
         _assert_converter_pinned(connection)
     except BaseException:
@@ -2323,24 +2597,57 @@ def mysql_1980_close(connection: MySQLConnectionAbstract | None) -> None:
     neither can this. A ``None`` connection - the shape a failed open returns -
     is accepted and ignored, so a caller may close unconditionally.
 
+    *** ANOMALY A-8 - REPRODUCED, NOT FIXED (rule R-4) ***
+
+    ``call "MySQL_close"`` PASSES NOTHING
+    [copybooks/mysql-procedures.cpy:L264-L265], and the C entry point it
+    reaches takes nothing [presql2-package/cobmysqlapi38.c:L230-L234]::
+
+        void MySQL_close(void)
+        {
+            mysql_close(mysql);
+            return;
+        }
+
+    so a bridge cannot nominate WHICH connection to close: there is only the
+    one file-scope handle [:L71] and closing is closing THAT. This function
+    therefore closes :data:`_PROCESS_CONNECTION` and not the argument, and the
+    consequence is the anomaly: a posting program holding several files open
+    and closing any one of them leaves the rest unusable until something
+    re-opens. Honouring the argument instead would make each handler's close
+    local, and a defect fixed is a failure.
+
+    The argument is still accepted, and is still the right thing to pass, for
+    two reasons. It keeps every call site a faithful transcription of the
+    frozen ``PERFORM MYSQL-1980-CLOSE THRU MYSQL-1999-EXIT`` at the point where
+    the bridge issues it, and it lets the one caller that is NOT a bridge -
+    :func:`mysql_1000_open` discarding a connection whose converter would not
+    verify - name the object it means. When the argument is some other object
+    than the one in the slot, BOTH are closed, because leaking the argument
+    would be worse than closing it and the frozen source has no such case to
+    diverge from.
+
+    The object stays in the slot after closing, deliberately: ``sql`` is a
+    static struct, so a close empties it without destroying it and a later
+    ``mysql_init(&sql)`` [:L433] revives the very same struct. Keeping the
+    object is how a later :func:`mysql_1000_open` can re-connect it in place
+    and so hand every handler that is still holding it a live connection again.
+
     Args:
-        connection: The connection to close, or ``None``.
+        connection: The connection the calling paragraph believes it is
+            closing, or ``None``. Not used to decide WHAT is closed - see
+            above.
     """
-    if connection is None:
-        return
-    try:
-        connection.close()
-    except mysql.connector.Error as error:
-        # `call "MySQL_close"` returns no status and the frozen paragraph
-        # tests none, so a close failure cannot change control flow here
-        # either. It is logged and dropped: raising would invent an error path
-        # the specification does not have (rule R-3, nothing added).
-        # Redacted for the same reason `_failed_open` redacts: this text is the
-        # driver's, so it can name the account and can carry a line feed.
-        _LOG.debug(
-            "Mysql-1980-Close: driver reported %s on close",
-            redact_for_log(str(error)),
-        )
+    global _PROCESS_CONNECTION  # noqa: PLW0603 - the `MYSQL sql` file-scope struct
+
+    # `mysql_close(mysql)` - the one handle, whatever the caller named.
+    if _PROCESS_CONNECTION is not None:
+        _close_quietly(_PROCESS_CONNECTION)
+    if connection is not None and connection is not _PROCESS_CONNECTION:
+        # Not the process handle. No frozen counterpart exists, because no
+        # bridge can hold a second connection; closing it is the only
+        # non-leaking thing to do and it changes nothing a bridge can observe.
+        _close_quietly(connection)
     mysql_1999_exit()
 
 
@@ -2357,6 +2664,177 @@ def mysql_1999_exit() -> None:
     It does nothing, because the COBOL label does nothing.
     """
     return
+
+
+#  CURSOR ACQUISITION  -  KEEPING A DEAD SESSION ON THE STATEMENT'S ERROR PATH
+
+
+class _UnavailableCursor:
+    """A cursor-shaped stand-in that reports the failure when a statement runs.
+
+    WHY THIS EXISTS, AND WHY IT IS NOT AN INVENTION.
+
+    The frozen bridges issue a statement with ONE foreign call - ``call
+    "MySQL_query" using Ws-Mysql-Command`` [copybooks/mysql-procedures.cpy:L148,
+    :L165] - and test ONE return code immediately afterwards [:L149, :L166].
+    There is no separate "obtain a cursor" step to fail at, so every failure a
+    bridge can see, including a session that another bridge has closed
+    (anomaly A-8), is reported BY THE STATEMENT and lands on
+    ``Mysql-1100-Db-Error``.
+
+    ``mysql-connector-python`` splits that one call in two - ``cursor()`` then
+    ``execute()`` - and the split moves the failure: on a closed connection it
+    is ``cursor()`` that raises, before any statement text is offered. Every
+    handler guards the statement, because that is where the frozen source puts
+    the test; none guards cursor acquisition, because the frozen source has
+    nothing there to guard. The result would be a Python exception escaping the
+    data-access layer on a path where the compiled program reports a status -
+    a difference introduced purely by the decomposition.
+
+    This class removes the difference by carrying the driver's own error forward
+    to the point the frozen source tests: :meth:`execute` raises exactly the
+    exception ``cursor()`` raised, so the handler's existing statement guard
+    sees it and maps it through the bridge's own failure arm. Nothing decides
+    WHICH status results - that is the handler's and
+    ``dal/cursor_state.py``'s already-settled mapping, unchanged.
+
+    It is deliberately inert in every other respect: no statement is issued, no
+    row is produced, and closing does nothing.
+    """
+
+    __slots__ = ("_error",)
+
+    #: A closed connection has no result set, so there is no row description to
+    #: report. Present because callers read it defensively before fetching.
+    description: Final[None] = None
+
+    #: ``MySQL_affected_rows`` on a failed statement reports "unknown" rather
+    #: than a count [copybooks/mysql-procedures.cpy:L178]; nothing here is ever
+    #: read, because :meth:`execute` raises first, and zero is the value the
+    #: handlers' own ``getattr(cursor, "rowcount", 0)`` defaults to.
+    rowcount: Final[int] = 0
+
+    def __init__(self, error: BaseException) -> None:
+        """Capture the failure to re-raise when a statement is attempted.
+
+        Args:
+            error: The exception ``connection.cursor()`` raised.
+        """
+        self._error = error
+
+    def execute(
+        self, operation: str, params: Sequence[Any] | None = None
+    ) -> NoReturn:
+        """Report the captured failure, as ``MySQL_query`` reports its own.
+
+        Args:
+            operation: The statement the caller meant to issue. Accepted so
+                that the signature matches a real cursor's; never sent.
+            params: The parameters the caller meant to bind. Likewise never
+                sent.
+
+        Raises:
+            BaseException: The error ``connection.cursor()`` raised, unchanged,
+                so the caller's own error mapping sees the driver's own errno,
+                SQLSTATE and message rather than a substitute.
+        """
+        raise self._error
+
+    def fetchone(self) -> NoReturn:
+        """Report the captured failure.
+
+        Unreachable through any handler, because :meth:`execute` raises first.
+        Present so that a caller which fetches without executing cannot silently
+        read ``None`` from a dead session and take it for an empty result.
+
+        Raises:
+            BaseException: The error ``connection.cursor()`` raised.
+        """
+        raise self._error
+
+    def fetchall(self) -> NoReturn:
+        """Report the captured failure, for the reason :meth:`fetchone` gives.
+
+        Raises:
+            BaseException: The error ``connection.cursor()`` raised.
+        """
+        raise self._error
+
+    def close(self) -> None:
+        """Do nothing, because nothing was opened.
+
+        Every caller closes its cursor in a ``finally``, so this must not
+        raise - a raise from a ``finally`` would replace the caller's own
+        status with a misleading exception, which is the same reasoning
+        :func:`execute_statement` gives for swallowing a cursor-close failure.
+        """
+        return
+
+
+def acquire_cursor(connection: MySQLConnectionAbstract) -> Any:
+    """Obtain a cursor, or a stand-in that fails when the statement runs.
+
+    The single cursor-acquisition point for the handler modules that issue
+    their statement themselves rather than through :func:`execute_statement` -
+    the positioning verbs, which need the cursor and the statement in the
+    caller's hands. Those handlers guard the statement, exactly where the
+    frozen source tests ``Return-Code`` [copybooks/mysql-procedures.cpy:L149,
+    :L166], and this function makes sure the guard is reached even when the
+    session has already gone.
+
+    That case is real rather than theoretical: anomaly A-8 means any bridge's
+    ``Mysql-1980-Close`` closes the one process handle
+    [presql2-package/cobmysqlapi38.c:L230-L234], so a handler still holding it
+    can be asked to read on a connection the driver will refuse a cursor for.
+    The compiled program reports that as a failed statement; so does this.
+
+    Nothing is retried and nothing reconnects here. ``dal/status.py`` records
+    the lock-retry ladder as dead code, and a silent reconnect would hide
+    anomaly A-8 - a defect fixed, which rule R-4 counts as a failure. Reviving
+    the connection is ``Mysql-1000-Open``'s job and the caller's decision.
+
+    Args:
+        connection: The connection :func:`mysql_1000_open` returned, live or
+            not.
+
+    Returns:
+        The driver's cursor when one can be obtained; otherwise an inert
+        stand-in whose ``execute`` raises the driver's own error, so the
+        caller's existing failure arm produces the status.
+    """
+    try:
+        return connection.cursor()
+    except Exception as error:  # noqa: BLE001 - the bridge tests a code, not a type
+        _LOG.debug(
+            "cursor acquisition refused (%s); the failure is carried to the "
+            "statement, where the frozen source tests it "
+            "[copybooks/mysql-procedures.cpy:L149, :L166]",
+            redact_for_log(str(error)),
+        )
+        return _UnavailableCursor(error)
+
+
+def cursor_is_unavailable(cursor: object) -> bool:
+    """Report whether :func:`acquire_cursor` returned the stand-in.
+
+    Only one caller needs this, and only because it caches: ``acas005``'s
+    ``_require_cursor`` keeps one cursor for the life of the open, modelling the
+    single result pointer ``TP-GLLEDGER-REC USAGE POINTER``
+    [common/nominalMT.cbl:L293]. Caching a stand-in there would make a dead
+    session STICK: the failure would outlive the close that caused it and
+    survive a later ``Mysql-1000-Open``, whereas the frozen handle is revived in
+    place by ``mysql_init(&sql)`` [presql2-package/cobmysqlapi38.c:L433] and
+    every holder of it can read again. Anomaly A-8 is symmetric, and this keeps
+    the second half of it intact.
+
+    Args:
+        cursor: Whatever :func:`acquire_cursor` returned.
+
+    Returns:
+        ``True`` when it is the stand-in, so the caller must use it once and
+        discard it rather than retain it.
+    """
+    return isinstance(cursor, _UnavailableCursor)
 
 
 #  STATEMENT EXECUTION  -  ONE STATEMENT, BOUND PARAMETERS, NO OPTIMISATION

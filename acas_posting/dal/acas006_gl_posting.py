@@ -607,6 +607,7 @@ from acas_posting.dal.connection import (
     BinaryFloatingPointError,
     OpenOutcome,
     TransportSecurity,
+    acquire_cursor,
     execute_statement,
     load_rdb_data_once,
     mysql_1000_open,
@@ -2585,8 +2586,16 @@ def _positioning_cursor(connection: object) -> object:
     :func:`acas_posting.dal.connection.execute_statement` yields. One cursor per
     call, closed by the caller's ``finally`` - the same one-statement-per-cursor
     discipline ``execute_statement`` documents, and no prefetch or reuse.
+
+    A CONNECTION ANOTHER BRIDGE HAS CLOSED DOES NOT RAISE HERE. Anomaly A-8
+    means any bridge's ``Mysql-1980-Close`` closes the one process handle
+    [presql2-package/cobmysqlapi38.c:L230-L234], and the frozen bridge reports
+    that from its statement [copybooks/mysql-procedures.cpy:L165-L166], having no
+    acquisition step of its own to fail at. ``acquire_cursor`` therefore carries
+    the failure to the ``execute`` that ``cursor_state`` issues, where this
+    module's existing failure arm maps it.
     """
-    return connection.cursor()
+    return acquire_cursor(connection)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
