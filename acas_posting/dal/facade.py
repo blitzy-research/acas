@@ -6269,6 +6269,37 @@ def acasirsub3_rewrite(ctx: FacadeContext) -> StatusPair:
     return _perform(ctx, _H_ACASIRSUB3_REWRITE)
 
 
+def acasirsub3(ctx: FacadeContext) -> StatusPair:
+    """``acasirsub3`` [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L57-L64].
+
+    THE BARE DISPATCH PARAGRAPH, published because a caller performs it
+    directly. The six IRS dispatch paragraphs are otherwise an internal layer
+    reached only through a verb paragraph, which is why the other five stay
+    private; this one is public because ``irs/irs030.cbl:L1585-L1586`` sets the
+    function code by hand and then performs the dispatch paragraph itself::
+
+        move     3  to  file-function.
+        perform  acasirsub3.    *> call-irsub3.
+
+    and that site is inside ``Ledger-Postings-Add`` [irs/irs030.cbl:L1569-L1733],
+    the one in-scope section of that program. It is the ONLY bare dispatch
+    performed from in-scope code: the other four bare performs in the file
+    [irs/irs030.cbl:L1147, :L1433, :L1537, :L1539] all sit outside that section.
+
+    The bare form is NOT the same operation as ``acasirsub3-Read-Next``, and the
+    difference is load-bearing rather than cosmetic. The verb paragraph moves
+    ``zero to Access-Type`` before it dispatches
+    [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L240-L243]; the bare paragraph
+    performs no such move, so whatever ``Access-Type`` the previous operation
+    left behind is carried into this call. Only the key number is pinned. That
+    is exactly the two statements of L57-L64, in the source's order, and nothing
+    else - so this is a strict alias of the dispatch paragraph and adds no
+    behaviour of its own.
+    """
+    _dispatch_acasirsub3(ctx)
+    return StatusPair(ctx.file_access.fs_reply, ctx.file_access.we_error)
+
+
 # --------------------------------------------------------------------------
 # acasirsub4
 # --------------------------------------------------------------------------
@@ -6780,6 +6811,7 @@ __all__ = (
     "acasirsub1_rewrite",
     "acasirsub1_start",
     "acasirsub1_write",
+    "acasirsub3",
     "acasirsub3_close",
     "acasirsub3_open",
     "acasirsub3_open_input",
@@ -7384,6 +7416,11 @@ __all__ = (
 #   acasirsub3_read_next     acasirsub3-Read-Next     L240-L243  -
 #   acasirsub3_write         acasirsub3-Write         L245-L248  -
 #   acasirsub3_rewrite       acasirsub3-ReWrite       L250-L253  -
+#   acasirsub3               acasirsub3               L57-L64    -
+#     ^ the DISPATCH paragraph, not a verb paragraph. Published because
+#       [irs/irs030.cbl:L1585-L1586] sets file-function by hand and performs it
+#       bare, inside the in-scope Ledger-Postings-Add section. The other five
+#       dispatch paragraphs stay private: no in-scope caller performs them bare.
 #
 # acasirsub4 - 6 verbs; NO error check paragraph exists for it at all
 #   acasirsub4_open          acasirsub4-Open          L256-L259  -
