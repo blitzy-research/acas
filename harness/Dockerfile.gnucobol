@@ -1579,16 +1579,44 @@ RUN set -eu; \
 #  compose side, which already neuters the set-user-ID bit at the kernel level --
 #  both are kept because they fail independently.
 # -----------------------------------------------------------------------------
+#  IDEMPOTENT IDENTITY CREATION -- why this layer tests before it creates.
+#  The layer above already materialises the fixed 1001:1001 `acas` identity (it
+#  needs an account in place to assert the /repo-versus-/build ownership split).
+#  This layer is the ARG-parameterised one, so that
+#      docker compose build --build-arg ACAS_UID=$(id -u) --build-arg ACAS_GID=$(id -g)
+#  still works on a host whose bind-mount ownership differs. With a plain
+#  `groupadd`/`useradd` under `set -eu` the two layers collide on a default
+#  build: groupadd exits 9 with "group 'acas' already exists" and the image
+#  cannot be built at all. Creating only when absent -- and reconciling the ids
+#  with groupmod/usermod when they differ -- keeps BOTH layers' guarantees: the
+#  ownership assertions above still hold, and a non-default ACAS_UID/ACAS_GID is
+#  still honoured. Nothing else in this layer changes; every assertion below
+#  still runs, and none of them is relaxed.
 RUN set -eu; \
     echo "--- creating the unprivileged runtime account ${ACAS_USER} (${ACAS_UID}:${ACAS_GID}) ---"; \
     if [ "${ACAS_UID}" = '0' ] || [ "${ACAS_GID}" = '0' ]; then \
         echo 'FATAL: ACAS_UID/ACAS_GID must not be 0; the point of this layer is to drop root.' >&2; \
         exit 1; \
     fi; \
-    groupadd --gid "${ACAS_GID}" "${ACAS_USER}"; \
-    useradd --uid "${ACAS_UID}" --gid "${ACAS_GID}" \
-            --home-dir "/home/${ACAS_USER}" --create-home \
-            --shell /bin/bash "${ACAS_USER}"; \
+    if getent group "${ACAS_USER}" > /dev/null; then \
+        echo "    group ${ACAS_USER} already exists (gid $(getent group "${ACAS_USER}" | cut -d: -f3)); reconciling to ${ACAS_GID}"; \
+        [ "$(getent group "${ACAS_USER}" | cut -d: -f3)" = "${ACAS_GID}" ] \
+          || groupmod --gid "${ACAS_GID}" "${ACAS_USER}"; \
+    else \
+        groupadd --gid "${ACAS_GID}" "${ACAS_USER}"; \
+    fi; \
+    if getent passwd "${ACAS_USER}" > /dev/null; then \
+        echo "    account ${ACAS_USER} already exists (uid $(id -u "${ACAS_USER}")); reconciling to ${ACAS_UID}:${ACAS_GID}"; \
+        [ "$(id -u "${ACAS_USER}")" = "${ACAS_UID}" ] \
+          || usermod --uid "${ACAS_UID}" "${ACAS_USER}"; \
+        usermod --gid "${ACAS_GID}" --home "/home/${ACAS_USER}" --shell /bin/bash "${ACAS_USER}"; \
+        mkdir -p "/home/${ACAS_USER}"; \
+        chown "${ACAS_UID}:${ACAS_GID}" "/home/${ACAS_USER}"; \
+    else \
+        useradd --uid "${ACAS_UID}" --gid "${ACAS_GID}" \
+                --home-dir "/home/${ACAS_USER}" --create-home \
+                --shell /bin/bash "${ACAS_USER}"; \
+    fi; \
     \
     echo '--- handing the four writable paths to that account (/repo stays root-owned) ---'; \
     chown -R "${ACAS_UID}:${ACAS_GID}" /build /data /out; \
