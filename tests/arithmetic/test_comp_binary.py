@@ -88,6 +88,7 @@ file (section 0.8.4).
 from __future__ import annotations
 
 import decimal
+import subprocess
 import sys
 from decimal import Decimal
 
@@ -2035,13 +2036,23 @@ def test_binary_family_domains_come_from_the_class_and_not_from_a_digit_count() 
 
 
 def test_this_tier_imports_no_database_no_cobol_and_no_oracle() -> None:
-    """Nothing forbidden is in `sys.modules` by the time this tier runs.
+    """Importing this tier's surface loads nothing forbidden.
 
     The prohibited names are checked as module PREFIXES, so a submodule cannot
     slip past a top-level check. The list is the one section 0.4.3 gives for
     `tests/arithmetic/*`: the data-access layer, the entry points, the program
     modules, either database driver, the scenario definition parser and the
     oracle harness.
+
+    The measurement is taken in a FRESH interpreter rather than over this
+    session's live `sys.modules`, because the claim belongs to the tier and not
+    to the process. Live residency cannot establish it: the scenario and
+    determinism tiers legitimately load `harness/*` and PyYAML - section 0.4.3
+    puts both on the harness side - so whenever one of them runs first in the
+    same process, an absolute check fails for a reason that has nothing to do
+    with this tier. A subprocess measures only what this tier's own imports
+    pull in, is immune to run order, and is the only measurement that actually
+    demonstrates the "runs on a bare host" property this group asserts.
     """
     forbidden_prefixes = (
         "acas_posting.dal",
@@ -2056,7 +2067,24 @@ def test_this_tier_imports_no_database_no_cobol_and_no_oracle() -> None:
         "pandas",
     )
 
-    loaded = tuple(sys.modules)
+    # Exactly this module's own module-scope import surface, re-imported clean.
+    probe = (
+        "import sys\n"
+        "from acas_posting.cobol import arithmetic\n"
+        "from acas_posting.cobol import field as cobol_field\n"
+        "from acas_posting.cobol import usage as cobol_usage\n"
+        "from acas_posting.dictionary import loader, model\n"
+        "print(chr(10).join(sorted(sys.modules)))\n"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    loaded = tuple(completed.stdout.split("\n"))
+
     offenders = tuple(
         name
         for name in loaded
@@ -2066,15 +2094,22 @@ def test_this_tier_imports_no_database_no_cobol_and_no_oracle() -> None:
 
     assert offenders == (), (
         f"the arithmetic tier must reach neither a database nor the compiled "
-        f"oracle (R-1), but these modules are loaded: {offenders}"
+        f"oracle (R-1), but importing its surface loads: {offenders}"
     )
 
     # Named individually as well, because these two are the ones a reader of the
     # brief will look for.
-    assert "mysql.connector" not in sys.modules
-    assert "acas_posting.dal" not in sys.modules
+    assert "mysql.connector" not in loaded
+    assert "acas_posting.dal" not in loaded
 
     # What this tier DOES reach, so the guard cannot pass by importing nothing.
+    assert "acas_posting.cobol.usage" in loaded
+    assert "acas_posting.cobol.field" in loaded
+    assert "acas_posting.cobol.arithmetic" in loaded
+    assert "acas_posting.dictionary.loader" in loaded
+
+    # And the same four are live in THIS process, so the tier is genuinely
+    # exercising the modules whose isolation it just proved.
     assert "acas_posting.cobol.usage" in sys.modules
     assert "acas_posting.cobol.field" in sys.modules
     assert "acas_posting.cobol.arithmetic" in sys.modules

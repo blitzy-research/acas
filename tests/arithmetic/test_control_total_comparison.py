@@ -1873,12 +1873,28 @@ def test_the_shipped_gate_leaves_no_driver_loaded() -> None:
     forbidden is resident by the time a later test in the tier inspects
     `sys.modules`.
     """
+    before = frozenset(n for n in sys.modules if _is_tier_isolated_name(n))
+
     with _shipped_gl051() as gl051:
         assert gl051.__name__ == _GL051_MODULE
         assert callable(gl051._end_batch)
 
-    resident = tuple(sorted(n for n in sys.modules if _is_tier_isolated_name(n)))
-    assert resident == (), resident
+    # Measured as the DELTA this guard's own action is responsible for, rather than
+    # as absolute residency. The loader's contract - the one this docstring states -
+    # is that it purges every tier-isolation-prefixed name IT added. Absolute
+    # residency asserts something stronger that this tier does not own: another tier
+    # in the same session legitimately loads the harness and its scenario parser
+    # (Agent Action Plan section 0.4.3 puts PyYAML and harness/ on the harness side),
+    # and that is not this loader leaking. The delta still fails loudly the moment
+    # the loader leaves a name behind, in any run order.
+    leaked = tuple(
+        sorted(
+            n
+            for n in sys.modules
+            if _is_tier_isolated_name(n) and n not in before
+        )
+    )
+    assert leaked == (), leaked
     assert _is_tier_isolated_name("acas_posting.dal") is True
     assert _is_tier_isolated_name("mysql.connector") is True
     assert _is_tier_isolated_name("acas_posting.database") is False

@@ -2036,12 +2036,28 @@ def test_the_shipped_gross_paragraph_leaves_no_driver_loaded() -> None:
     `sys.modules`. Stated at the point of use rather than left to whichever file
     happens to sort last.
     """
+    before = frozenset(n for n in sys.modules if is_tier_isolated_name(n))
+
     with shipped_irs030() as irs030:
         assert irs030.__name__ == IRS030_MODULE
         assert callable(irs030._gross_section)
 
-    resident = tuple(sorted(n for n in sys.modules if is_tier_isolated_name(n)))
-    assert resident == (), resident
+    # Measured as the DELTA this guard's own action is responsible for, rather than
+    # as absolute residency. The loader's contract - the one this docstring states -
+    # is that it purges every tier-isolation-prefixed name IT added. Absolute
+    # residency asserts something stronger that this tier does not own: another tier
+    # in the same session legitimately loads the harness and its scenario parser
+    # (Agent Action Plan section 0.4.3 puts PyYAML and harness/ on the harness side),
+    # and that is not this loader leaking. The delta still fails loudly the moment
+    # the loader leaves a name behind, in any run order.
+    leaked = tuple(
+        sorted(
+            n
+            for n in sys.modules
+            if is_tier_isolated_name(n) and n not in before
+        )
+    )
+    assert leaked == (), leaked
     # The prefix test recognises what it must and does not over-match.
     assert is_tier_isolated_name("acas_posting.dal") is True
     assert is_tier_isolated_name("acas_posting.programs.irs030_posting") is True
