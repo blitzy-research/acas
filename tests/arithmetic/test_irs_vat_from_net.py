@@ -172,8 +172,15 @@ nothing else. Run it from the repository root.
 
 from __future__ import annotations
 
+import contextlib
+import dataclasses
 import decimal
+import dis
+import sys
+import types
+from collections.abc import Iterator
 from decimal import Decimal
+from typing import Final
 
 import pytest
 
@@ -1248,4 +1255,386 @@ def test_an_overflow_is_silent_and_keeps_the_low_order_digits() -> None:
     )
     # The amount is still untouched, overflow or no overflow: `Net` writes VAT only.
     assert wide_amount == Decimal("50000000.00")
+
+
+# ---------------------------------------------------------------------------
+#  SECTION 3  -  THE SHIPPED PARAGRAPH ITSELF
+#
+#  Everything above proves the POST-CONDITION about a transcription of
+#  [irs/irs030.cbl:L1544-L1553] written inside this file. That is necessary and it
+#  is not sufficient: a transcription cannot notice a second statement appearing in
+#  `acas_posting/programs/irs030_posting.py::_net_section`, which is the code that
+#  actually runs a posting. This section closes that gap by driving the SHIPPED
+#  paragraph.
+#
+#  WHY THE IMPORT IS DEFERRED, AND WHAT THAT PRESERVES (rule R-1).
+#  Agent Action Plan section 0.4.3 gives this tier `cobol` and `records` to import
+#  and forbids `dal` and any database; R-1 states it as "tests/arithmetic/* touch
+#  neither COBOL nor a database". `acas_posting.programs.irs030_posting` imports
+#  `acas_posting.dal.facade` at module scope, and that pulls the MySQL driver in
+#  transitively - so importing it at module scope here would leave
+#  `acas_posting.dal.*` and `mysql.*` resident in `sys.modules` and would break the
+#  three tier-isolation assertions this suite already carries
+#  (`tests/arithmetic/test_comp3_packed_decimal.py:L1536`,
+#  `tests/arithmetic/test_comp_binary.py:L2036`,
+#  `tests/arithmetic/test_pic_field_descriptors.py:L2134`), two of which read LIVE
+#  `sys.modules`.
+#
+#  So the module is imported INSIDE the test body through
+#  `_shipped_irs030_posting()`, which
+#    * uses `pytest.importorskip`, so a host with no driver installed SKIPS this
+#      section and the rest of the tier still runs on a bare machine, which is the
+#      property those three assertions exist to protect;
+#    * memoises the module object, so the import happens at most once per session;
+#    * removes, in `finally`, exactly the newly-added `sys.modules` names that match
+#      the tier-isolation prefixes, so nothing forbidden is left resident and all
+#      three assertions keep passing UNCHANGED and unweakened.
+#  The pattern is the one `tests/conftest.py:L423-L483` already uses for the harness
+#  modules: load the real thing, keep the forbidden name out of `sys.modules`.
+#
+#  NO DATABASE IS TOUCHED. `_net_section(posting_record, ws_vat_current)` takes a
+#  `PostingRecord` dataclass and a `Decimal`; it opens no connection, reads no
+#  socket and needs no MariaDB, no Docker and no GnuCOBOL.
+#
+#  THE GENERAL LEDGER TWIN STAYS AT THE TRANSCRIPTION LEVEL, deliberately.
+#  `general/gl051.cbl`'s `net.` and `gross.` paragraphs [general/gl051.cbl:L788-L797]
+#  sit in the out-of-scope interactive amendment path - Agent Action Plan section
+#  0.4.1.2 migrates only the control-total gate at [general/gl051.cbl:L1096-L1133] -
+#  so `acas_posting/programs/gl051_batch_control_check.py` HAS no net or gross
+#  paragraph to drive, and inventing one would be new behaviour (rule R-3).
+#  `test_the_gl_net_paragraph_also_leaves_post_amount_byte_identical` above remains
+#  the GL lock.
+# ---------------------------------------------------------------------------
+
+
+#: The module-name prefixes the tier's own isolation assertions forbid. Kept in one
+#: place so the loader below and the guard test agree by construction.
+_TIER_ISOLATION_PREFIXES: Final[tuple[str, ...]] = (
+    "acas_posting.cli",
+    "acas_posting.dal",
+    "acas_posting.programs",
+    "harness",
+    "mysql",
+    "numpy",
+    "pandas",
+    "sqlalchemy",
+    "yaml",
+)
+
+#: The shipped module, once imported. A plain dict rather than `functools.lru_cache`
+#: so the cache is inspectable and a failed import is never memoised.
+_SHIPPED_MODULE_CACHE: dict[str, types.ModuleType] = {}
+
+_IRS030_MODULE: Final[str] = "acas_posting.programs.irs030_posting"
+
+
+def _is_tier_isolated_name(name: str) -> bool:
+    """Does `name` fall under one of the prefixes the tier must not leave loaded?
+
+    Matched as a package prefix - exact name or name plus a dot - so a submodule
+    cannot slip past and a same-prefixed unrelated name cannot be caught by accident.
+    """
+    return any(
+        name == prefix or name.startswith(f"{prefix}.")
+        for prefix in _TIER_ISOLATION_PREFIXES
+    )
+
+
+@contextlib.contextmanager
+def _shipped_module(dotted_name: str) -> Iterator[types.ModuleType]:
+    """Import a shipped module for the duration of one test, leaving no trace.
+
+    Args:
+        dotted_name: The importable name, e.g. `acas_posting.programs.irs030_posting`.
+
+    Yields:
+        The imported module.
+
+    Raises:
+        Skipped: Via `pytest.importorskip`, when the module cannot be imported
+            because a dependency is absent - which on a bare host means the MySQL
+            driver. Skipping rather than failing is what keeps the tier runnable
+            with nothing installed but pytest.
+    """
+    cached = _SHIPPED_MODULE_CACHE.get(dotted_name)
+    if cached is not None:
+        # Already imported and already purged from `sys.modules`; the module object
+        # is still live because this cache holds it, so nothing needs re-importing.
+        yield cached
+        return
+
+    before = frozenset(sys.modules)
+    try:
+        module = pytest.importorskip(
+            dotted_name,
+            reason=(
+                f"{dotted_name} could not be imported - on a host without the "
+                f"pinned MySQL driver this section is skipped and the rest of the "
+                f"arithmetic tier still runs (rule R-1)"
+            ),
+        )
+        _SHIPPED_MODULE_CACHE[dotted_name] = module
+        yield module
+    finally:
+        # Deepest names first, so a package is unregistered after its submodules.
+        for name in sorted(set(sys.modules) - before, reverse=True):
+            if _is_tier_isolated_name(name):
+                del sys.modules[name]
+
+
+def _shipped_irs030_posting() -> contextlib.AbstractContextManager[types.ModuleType]:
+    """`acas_posting/programs/irs030_posting.py`, the module that owns `Net`."""
+    return _shipped_module(_IRS030_MODULE)
+
+
+def _stores_performed_by(function: object) -> tuple[tuple[str, str], ...]:
+    """Every store this function's bytecode performs, its own and its lambdas'.
+
+    Walks the function's code object and every code object nested inside it - the
+    `compute` lambda is one - and reports the attribute and local stores in
+    execution order. This is how "the paragraph writes `vat-amount` and nothing
+    else" becomes a property of the SHIPPED CODE rather than of the inputs a test
+    happened to choose: a second statement cannot be added to the paragraph without
+    adding a store, and a store cannot be added without appearing here.
+
+    Args:
+        function: A function object.
+
+    Returns:
+        A tuple of `(opname, target)` pairs.
+    """
+    code = function.__code__  # type: ignore[attr-defined]
+
+    def _walk(target: types.CodeType) -> Iterator[types.CodeType]:
+        yield target
+        for constant in target.co_consts:
+            if isinstance(constant, types.CodeType):
+                yield from _walk(constant)
+
+    return tuple(
+        (instruction.opname, str(instruction.argval))
+        for block in _walk(code)
+        for instruction in dis.get_instructions(block)
+        if instruction.opname in ("STORE_ATTR", "STORE_GLOBAL", "STORE_DEREF")
+    )
+
+
+#: A distinctive value for each of the ten `Posting-Record` fields
+#: [copybooks/irswspost.cob:L8-L18], so that "nothing else moved" is asserted over
+#: the WHOLE record and not just over the two money items. The strings are declared
+#: at their frozen widths - `pic xx`, `pic x(8)`, `pic x(32)` - because a store that
+#: re-padded one would be a change this test must catch.
+_SENTINEL_RECORD_FIELDS: Final[dict[str, object]] = {
+    "post_key": 12345,
+    "post_code": "SL",
+    "post_date": "21/09/25",
+    "post_dr": 54321,
+    "post_cr": 11111,
+    "post_legend": "sentinel legend, thirty-two wide ."[:32],
+    "vat_ac_def": 31,
+    "post_vat_side": "DR",
+}
+
+#: The same six (amount, rate) pairs `test_net_leaves_post_amount_byte_identical`
+#: uses, so the shipped paragraph is exercised over exactly the inputs the
+#: transcription is exercised over and the two can be compared pair for pair.
+_SHIPPED_NET_CASES: Final[tuple[tuple[Decimal, Decimal], ...]] = (
+    (Decimal("100.00"), Decimal("20.00")),
+    (Decimal("12.15"), Decimal("17.50")),
+    (Decimal("-12.15"), Decimal("17.50")),
+    (Decimal("1.50"), Decimal("17.00")),
+    (Decimal("9999999.99"), Decimal("99.99")),
+    (Decimal("250.00"), Decimal("0.00")),
+)
+
+
+def test_the_shipped_net_paragraph_stores_vat_amount_and_only_vat_amount() -> None:
+    """`_net_section` performs EXACTLY ONE store, and its target is `vat_amount`.
+
+    This is the structural half of the post-condition, asserted against the shipped
+    bytecode rather than against a transcription. Reproduces the absence at
+    [irs/irs030.cbl:L1551-L1553]: one `compute`, then `Main-Exita.`, and nothing in
+    between. The destructive statement is [irs/irs030.cbl:L1564] and belongs to
+    `Gross` alone.
+
+    Adding a second statement to `Net` - a subtract from `post-amount`, say - cannot
+    avoid adding a store, so it cannot avoid failing here. That is the point: the
+    assertion is on the code, so it holds for every input and not only for the six
+    pairs the sibling test runs.
+    """
+    with _shipped_irs030_posting() as irs030:
+        stores = _stores_performed_by(irs030._net_section)
+
+        assert stores == (("STORE_ATTR", "vat_amount"),)
+        # Stated separately as well, because this is the sentence a reader is looking
+        # for: no store anywhere in the paragraph targets the amount.
+        assert ("STORE_ATTR", "post_amount") not in stores
+
+        # And no subtract verb is reachable from the paragraph at all - not from its
+        # own body and not from the `compute` lambda nested inside it.
+        reachable_names = {
+            name
+            for block in (
+                irs030._net_section.__code__,
+                *(
+                    constant
+                    for constant in irs030._net_section.__code__.co_consts
+                    if isinstance(constant, types.CodeType)
+                ),
+            )
+            for name in block.co_names
+        }
+        for subtract_verb in ("subtract_from", "subtract_giving"):
+            assert subtract_verb not in reachable_names
+            # Named in the public surface, so a typo above would go unnoticed.
+            assert subtract_verb in arithmetic.__all__
+
+        # The two receiving descriptors the module carries are the very entries this
+        # file mints from the generated dictionary (rule R-5), so the numbers below
+        # and the numbers above are computed through the same field metadata.
+        assert irs030._VAT_AMOUNT == _IRS_VAT_AMOUNT
+        assert irs030._POST_AMOUNT == _IRS_POST_AMOUNT
+
+
+@pytest.mark.parametrize(("amount", "rate"), _SHIPPED_NET_CASES)
+def test_the_shipped_net_paragraph_leaves_the_whole_posting_record_alone(
+    amount: Decimal, rate: Decimal
+) -> None:
+    """Drive the real `Net` paragraph: VAT moves, and the other nine fields do not.
+
+    The behavioural half of the post-condition. `_net_section` is handed a real
+    `Posting-Record` [copybooks/irswspost.cob:L8-L18] whose ten fields all carry
+    distinctive values, and afterwards every field except `vat_amount` is asserted
+    unchanged - `post_amount` four ways over, by value, by `as_tuple()`, by encoded
+    bytes and by object identity, because a change of scale, of sign placement, of
+    representation or of binding would each escape a bare equality.
+    """
+    with _shipped_irs030_posting() as irs030:
+        from acas_posting.records.irs_posting import PostingRecord
+
+        record = PostingRecord(**_SENTINEL_RECORD_FIELDS)  # type: ignore[arg-type]
+        record.post_amount = arithmetic.store(amount, _IRS_POST_AMOUNT)
+        record.vat_amount = arithmetic.store(Decimal("0.00"), _IRS_VAT_AMOUNT)
+        current_rate = arithmetic.store(rate, _VAT_RATE)
+        assert isinstance(record.post_amount, Decimal)
+        assert isinstance(current_rate, Decimal)
+
+        before_value = record.post_amount
+        before_tuple = before_value.as_tuple()
+        before_bytes = _encoded(before_value, _IRS_POST_AMOUNT)
+
+        irs030._net_section(record, current_rate)
+
+        # 1551 compute vat-amount rounded = post-amount * WS-Vat-Current / 100.
+        assert record.vat_amount == arithmetic.store(
+            arithmetic.intermediate(lambda: before_value * current_rate / 100),
+            _IRS_VAT_AMOUNT,
+            rounded=True,
+        )
+
+        # 1553 Main-Exita.  <- nothing between them, so nothing else can have moved.
+        assert record.post_amount == before_value
+        assert record.post_amount.as_tuple() == before_tuple
+        assert _encoded(record.post_amount, _IRS_POST_AMOUNT) == before_bytes
+        # `Decimal` is immutable, so an untouched attribute must still be the very
+        # object that was put there: the paragraph rebinds it not at all.
+        assert record.post_amount is before_value
+
+        # The remaining eight fields, each still exactly as the record was built.
+        for name, sentinel in _SENTINEL_RECORD_FIELDS.items():
+            assert getattr(record, name) == sentinel, name
+        # Asserted over the dataclass's own field list too, so a field added to the
+        # record later cannot quietly escape this check.
+        checked = {*_SENTINEL_RECORD_FIELDS, "post_amount", "vat_amount"}
+        assert {
+            field.name for field in dataclasses.fields(record)
+        } == checked, "a Posting-Record field is not covered by this assertion"
+
+
+@pytest.mark.parametrize(("amount", "rate"), _SHIPPED_NET_CASES)
+def test_the_shipped_net_paragraph_agrees_with_this_files_transcription(
+    amount: Decimal, rate: Decimal
+) -> None:
+    """`_irs_net_vat` and `_net_section` produce the same penny, pair for pair.
+
+    The transcription above exists so the formula can be reasoned about without a
+    program module in the way; this test is what stops the two drifting apart. If the
+    shipped paragraph ever computes something else - a different rounding direction, a
+    quantize per sub-expression, a different receiving field - the two stop agreeing
+    here, and the reader is told which of the two moved rather than being left to
+    guess.
+    """
+    with _shipped_irs030_posting() as irs030:
+        from acas_posting.records.irs_posting import PostingRecord
+
+        post_amount = arithmetic.store(amount, _IRS_POST_AMOUNT)
+        current_rate = arithmetic.store(rate, _VAT_RATE)
+        assert isinstance(post_amount, Decimal)
+        assert isinstance(current_rate, Decimal)
+
+        record = PostingRecord()
+        record.post_amount = post_amount
+        irs030._net_section(record, current_rate)
+
+        transcribed = _irs_net_vat(post_amount, current_rate, _IRS_VAT_AMOUNT)
+        assert record.vat_amount == transcribed
+        assert isinstance(record.vat_amount, Decimal)
+        assert isinstance(transcribed, Decimal)
+        assert record.vat_amount.as_tuple() == transcribed.as_tuple()
+
+
+def test_the_shipped_gross_paragraph_is_the_one_that_reduces_post_amount() -> None:
+    """The asymmetry is a property of the shipped module, not of this file's prose.
+
+    Verbatim, the two sections' stores:
+
+        1551      compute  vat-amount rounded =  post-amount * WS-Vat-Current / 100.
+        1553  Main-Exita.
+
+        1562      compute  vat-amount rounded =
+        1563          post-amount - (post-amount / ((WS-Vat-Current + 100) / 100)).
+        1564      subtract vat-amount  from  post-amount.
+        1566  Main-Exitb.
+
+    So `Gross` stores twice - the VAT first, then the amount - and `Net` stores once.
+    Asserted here over both paragraphs at once, in one place, so that REMOVING the
+    subtract from `Gross` fails just as loudly as ADDING one to `Net`. The
+    behavioural lock on the subtract itself lives in the sibling file
+    `tests/arithmetic/test_irs_vat_from_gross.py`; what is established here is only
+    that the two paragraphs differ in the way the frozen source says they differ.
+    """
+    with _shipped_irs030_posting() as irs030:
+        assert _stores_performed_by(irs030._net_section) == (
+            ("STORE_ATTR", "vat_amount"),
+        )
+        # In this order: L1562 stores the VAT, then L1564 stores the amount. A
+        # reproduction that folded the subtract into the compute would show one store.
+        assert _stores_performed_by(irs030._gross_section) == (
+            ("STORE_ATTR", "vat_amount"),
+            ("STORE_ATTR", "post_amount"),
+        )
+
+
+def test_the_shipped_net_paragraph_is_driven_without_leaving_a_driver_loaded() -> None:
+    """Rule R-1 holds even though this section reaches a program module.
+
+    The loader purges every tier-isolation-prefixed name it added, so by the time any
+    later test in the tier inspects `sys.modules` there is nothing forbidden in it.
+    This test says so at the point of use, rather than leaving the property to be
+    discovered by whichever file happens to sort last.
+    """
+    with _shipped_irs030_posting() as irs030:
+        assert irs030.__name__ == _IRS030_MODULE
+        # While the context manager is open the module object is live and usable.
+        assert callable(irs030._net_section)
+
+    resident = tuple(sorted(name for name in sys.modules if _is_tier_isolated_name(name)))
+    assert resident == (), resident
+    # The prefix test is a real test and not a tautology: it recognises the names it
+    # is meant to recognise, and does not over-match a merely similar one.
+    assert _is_tier_isolated_name("acas_posting.dal") is True
+    assert _is_tier_isolated_name("acas_posting.dal.acas006_gl_posting") is True
+    assert _is_tier_isolated_name("mysql.connector") is True
+    assert _is_tier_isolated_name("acas_posting.database") is False
+    assert _is_tier_isolated_name("acas_posting.cobol.arithmetic") is False
 

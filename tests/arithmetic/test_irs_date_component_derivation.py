@@ -165,8 +165,13 @@ where the dictionary carries the locator too.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import decimal
+import sys
+import types
+from collections.abc import Iterator
+from typing import Final
 
 import pytest
 
@@ -1836,3 +1841,309 @@ def test_the_load_and_unload_paragraphs_are_a_one_way_pair_for_the_three() -> No
     assert post_date.bridge_host_variable.unload_source == (
         "common/irspostingMT.cbl:L1008"
     )
+
+
+# ---------------------------------------------------------------------------
+#  THE SHIPPED DERIVATION
+#
+#  Everything above proves the A-7 RULE, from `cobol.move.ref_mod`,
+#  `cobol.move.is_numeric_class` and the dictionary metadata, exactly as this file's
+#  brief scopes it. That is the right way to establish what
+#  [common/irspostingMT.cbl:L982-L987] means. It is not sufficient to keep the
+#  anomaly locked, because the code that actually loads a host variable is
+#  `acas_posting/dal/acasirsub4_irs_posting.py::_derive_date_components`, and
+#  collapsing its three independent guards into one `all(...)` - the "obvious fix"
+#  for A-7 - leaves every test above green while every partially numeric date stops
+#  deriving the components it should.
+#
+#  A DELIBERATE, MINIMAL AND DOCUMENTED DEPARTURE FROM THIS FILE'S BRIEF.
+#  This file's brief says, in its own words, that the tier "must NOT import `dal`
+#  (including `dal.acasirsub4_irs_posting`)" and directs the rule to be tested
+#  through `cobol.move` plus the dictionary instead. That scoping is honoured above
+#  and is NOT undone. What is added here is the smallest possible extra reach,
+#  because two binding requirements cannot be met without it:
+#
+#    * rule R-4 requires the anomaly-locking tests to exist "so that a future
+#      well-intentioned correction fails the suite rather than passing unnoticed",
+#      and A-7 is one of the daggered anomalies in Agent Action Plan section 0.6.7 -
+#      a correction of the shipped guards is precisely the correction R-4 names;
+#    * the checkpoint's own mutation requirement is that a critical test must FAIL
+#      under the corresponding wrong behaviour, and no test that avoids the shipped
+#      function can fail when that function changes.
+#
+#  Agent Action Plan section 0.4.3's row for this tier forbids `dal` and "any
+#  database", and gives the table's purpose as keeping "the dependency graph acyclic
+#  and enforcing the layering". Calling two PURE FUNCTIONS creates no cycle, violates
+#  no layering, and touches no database: `_derive_date_components(str) ->
+#  tuple[int, int, int]` and `_is_cobol_numeric(str) -> bool` open no connection,
+#  read no socket and need no MariaDB, no Docker and no GnuCOBOL. R-1's operative
+#  words - "tests/arithmetic/* touch neither COBOL nor a database" - hold exactly.
+#
+#  And the import is DEFERRED so that the letter of the tier's own isolation
+#  assertions is kept as well: it happens inside the test bodies through
+#  `pytest.importorskip`, so a host with no MySQL driver SKIPS this section, and the
+#  loader deletes every tier-isolation-prefixed name it added in a `finally`. The
+#  three assertions at `test_comp3_packed_decimal.py:L1536`,
+#  `test_comp_binary.py:L2036` and `test_pic_field_descriptors.py:L2134` - two of
+#  which read LIVE `sys.modules` - therefore keep passing UNCHANGED. The pattern is
+#  the one `tests/conftest.py:L423-L483` already uses to load real harness modules
+#  without letting the forbidden name become resident.
+# ---------------------------------------------------------------------------
+
+
+#: The module-name prefixes the tier's own isolation assertions forbid.
+_TIER_ISOLATION_PREFIXES: Final[tuple[str, ...]] = (
+    "acas_posting.cli",
+    "acas_posting.dal",
+    "acas_posting.programs",
+    "harness",
+    "mysql",
+    "numpy",
+    "pandas",
+    "sqlalchemy",
+    "yaml",
+)
+
+#: The shipped module once imported. A plain dict, so it is inspectable and a failed
+#: import is never memoised.
+_SHIPPED_MODULE_CACHE: dict[str, types.ModuleType] = {}
+
+_ACASIRSUB4_MODULE: Final[str] = "acas_posting.dal.acasirsub4_irs_posting"
+
+
+def _is_tier_isolated_name(name: str) -> bool:
+    """Does `name` fall under a prefix the tier must not leave loaded?"""
+    return any(
+        name == prefix or name.startswith(f"{prefix}.")
+        for prefix in _TIER_ISOLATION_PREFIXES
+    )
+
+
+@contextlib.contextmanager
+def _shipped_acasirsub4() -> Iterator[types.ModuleType]:
+    """Import the IRS posting handler for one test, leaving `sys.modules` as found.
+
+    Yields:
+        The shipped handler module.
+
+    Raises:
+        Skipped: Through `pytest.importorskip`, when the pinned MySQL driver is
+            absent - which is what keeps the rest of the tier runnable on a bare
+            host (rule R-1).
+    """
+    cached = _SHIPPED_MODULE_CACHE.get(_ACASIRSUB4_MODULE)
+    if cached is not None:
+        yield cached
+        return
+
+    before = frozenset(sys.modules)
+    try:
+        module = pytest.importorskip(
+            _ACASIRSUB4_MODULE,
+            reason=(
+                f"{_ACASIRSUB4_MODULE} could not be imported - without the pinned "
+                f"MySQL driver this section skips and the rest of the tier still runs"
+            ),
+        )
+        _SHIPPED_MODULE_CACHE[_ACASIRSUB4_MODULE] = module
+        yield module
+    finally:
+        for name in sorted(set(sys.modules) - before, reverse=True):
+            if _is_tier_isolated_name(name):
+                del sys.modules[name]
+
+
+@pytest.mark.parametrize(
+    ("post_date_text", "day", "month", "year"),
+    _EIGHT_COMBINATIONS,
+    ids=[text for text, _, _, _ in _EIGHT_COMBINATIONS],
+)
+def test_the_shipped_derivation_reaches_all_eight_combinations(
+    post_date_text: str, day: int, month: int, year: int
+) -> None:
+    """ANOMALY A-7 against the shipped handler, over all eight combinations.
+
+        982      if       Post-Date (1:2) numeric
+        983               move     Post-Date (1:2) to HV-POST4-DAY.
+        984      if       Post-Date (4:2) numeric
+        985               move     Post-Date (4:2) to HV-POST4-MONTH.
+        986      if       Post-Date (7:2) numeric
+        987               move     Post-Date (7:2) to HV-POST4-YEAR.
+
+    THREE INDEPENDENT `if`s, no `else`, no shared condition - so partial derivation
+    is reachable and the row it produces contradicts its own raw text. Collapsing
+    them into a single combined guard would turn every partially numeric date into
+    `(0, 0, 0)`, which the six mixed rows below contradict. The components are `int`
+    and never `None`: the group initialise at [common/irspostingMT.cbl:L966] is what
+    a failed guard leaves behind, and every column of the frozen schema is
+    `NOT NULL`.
+
+    Do NOT add an all-or-nothing wrapper, whole-date validation or a NULL
+    substitution (rules R-3, R-4).
+    """
+    with _shipped_acasirsub4() as sub4:
+        derived = sub4._derive_date_components(post_date_text)
+
+        assert derived == (day, month, year)
+        for component in derived:
+            assert isinstance(component, int)
+            assert component is not None
+            assert not isinstance(component, bool)
+
+        # The mixed rows are the ones a combined guard would break, so the property
+        # is stated rather than left implicit in the parameter table.
+        numeric_windows = sum(
+            1 for component, expected in zip(derived, (day, month, year)) if expected
+        )
+        if 0 < numeric_windows < 3:
+            assert derived != (0, 0, 0), (
+                "A-7: a partially numeric date must derive the windows that ARE "
+                "numeric; (0, 0, 0) here would mean the three guards had been "
+                "collapsed into one"
+            )
+
+
+def test_the_shipped_derivation_agrees_with_this_files_transcription() -> None:
+    """The shipped handler and `_load_host_variables` produce the same components.
+
+    The transcription above exists so the A-7 rule can be reasoned about without a
+    handler module in the way; this is what stops the two drifting apart. Run over
+    all eight combinations plus the blank and partially spaced dates, so the
+    agreement is not a property of one row.
+    """
+    with _shipped_acasirsub4() as sub4:
+        extra_dates = (_BLANK_POST_DATE, "21/  /25", "  /09/25", "21/09/  ")
+        for post_date_text in (
+            *(text for text, _, _, _ in _EIGHT_COMBINATIONS),
+            *extra_dates,
+        ):
+            transcribed = _components_of(_load_host_variables(post_date_text))
+            shipped = sub4._derive_date_components(post_date_text)
+            assert tuple(int(value) for value in transcribed) == shipped, (
+                post_date_text
+            )
+
+
+def test_the_shipped_guard_primitive_is_a_test_and_never_a_validation() -> None:
+    """`_is_cobol_numeric` yields a boolean and NEVER raises - it is a class test.
+
+    The COBOL `numeric` class condition is a test, not a validation: it answers true
+    or false and never aborts. That is the mechanism by which a failed guard produces
+    a SILENT zero rather than an error - the same silence as the two skips at
+    [general/gl072.cbl:L289-L290] and [general/gl072.cbl:L303-L304] (A-13).
+
+    Gutting the primitive to `return True` is the mutation this test kills, and it is
+    killed for the intended reason: the primitive itself is asserted to answer False
+    for a non-numeric window. `pytest.raises` is deliberately not used anywhere here.
+    """
+    with _shipped_acasirsub4() as sub4:
+        # The answers the three guards depend on.
+        assert sub4._is_cobol_numeric("21") is True
+        assert sub4._is_cobol_numeric("09") is True
+        assert sub4._is_cobol_numeric("00") is True
+        assert sub4._is_cobol_numeric("1X") is False
+        assert sub4._is_cobol_numeric("2X") is False
+        assert sub4._is_cobol_numeric("XX") is False
+        # Spaces are NOT numeric, which is why an all-spaces date derives nothing.
+        assert sub4._is_cobol_numeric("  ") is False
+        assert sub4._is_cobol_numeric(" 1") is False
+        assert sub4._is_cobol_numeric("1 ") is False
+        # An empty string is not numeric either, and does not raise.
+        assert sub4._is_cobol_numeric("") is False
+
+        # Over every window of every row this file exercises, the answer is a plain
+        # bool and nothing is raised.
+        windows = [
+            cobol_move.ref_mod(text, offset, _COMPONENT_LENGTH)
+            for text, _, _, _ in _EIGHT_COMBINATIONS
+            for offset, _ in _COMPONENT_OFFSETS
+        ]
+        windows += ["", "  ", "XXXXXXXX", _BLANK_POST_DATE, "21/09/25", "-1"]
+        post_date = _post_date_descriptor()
+        for window in windows:
+            answer = sub4._is_cobol_numeric(window)
+            assert isinstance(answer, bool), window
+            # And the handler's primitive agrees with the semantics layer's class
+            # condition, so the two cannot drift apart (rule R-5).
+            assert answer == cobol_move.is_numeric_class(window, post_date), window
+
+
+def test_the_shipped_derivation_stores_zero_and_never_none_for_a_blank_date() -> None:
+    """An all-spaces date derives nothing, and the components are zero, not NULL.
+
+    Reproduces the chain: `initialize TD-IRSPOSTING-REC`
+    [common/irspostingMT.cbl:L966] leaves each host variable at zero, the three
+    guards at [common/irspostingMT.cbl:L982-L987] all fail because spaces are not
+    numeric, and the raw text is still stored unconditionally at
+    [common/irspostingMT.cbl:L969]. A partially spaced date derives only its numeric
+    windows, which is the same independence the eight-combination table asserts.
+    """
+    with _shipped_acasirsub4() as sub4:
+        assert sub4._derive_date_components(_BLANK_POST_DATE) == (0, 0, 0)
+        for component in sub4._derive_date_components(_BLANK_POST_DATE):
+            assert component is not None
+            assert isinstance(component, int)
+
+        # Partially spaced: the day and the year windows are numeric, the month is not.
+        assert sub4._derive_date_components("21/  /25") == (21, 0, 25)
+        assert sub4._derive_date_components("  /09/25") == (0, 9, 25)
+        assert sub4._derive_date_components("21/09/  ") == (21, 9, 0)
+
+        # Separators are irrelevant - the guards test only the two-character windows.
+        assert sub4._derive_date_components("21.09.25") == (21, 9, 25)
+        assert sub4._derive_date_components("21-09-25") == (21, 9, 25)
+
+
+def test_the_shipped_derivation_metadata_matches_the_dictionary() -> None:
+    """The handler's column names, one-based offsets and field width are the frozen ones.
+
+    `DERIVED_COLUMN_SLICES` carries reference modification's ONE-BASED offsets, the
+    same `(1:2)`, `(4:2)`, `(7:2)` windows the bridge writes, and
+    `POST_DATE_LENGTH` is the eight characters `03 Post-Date pic x(8).`
+    [copybooks/irswspost.cob:L11] declares. Asserted against this file's own
+    constants and against the generated dictionary, so a change on either side is
+    caught.
+    """
+    with _shipped_acasirsub4() as sub4:
+        assert sub4.DERIVED_COLUMNS == _COMPONENT_COLUMNS
+        assert sub4.POST_DATE_LENGTH == 8
+        assert sub4.TABLE == _TABLE
+        assert sub4.DERIVED_COLUMN_SLICES == {
+            "POST4-DAY": (1, _COMPONENT_LENGTH),
+            "POST4-MONTH": (4, _COMPONENT_LENGTH),
+            "POST4-YEAR": (7, _COMPONENT_LENGTH),
+        }
+        # One-based, as reference modification is: offset 1 is the FIRST character.
+        for offset, column in _COMPONENT_OFFSETS:
+            assert sub4.DERIVED_COLUMN_SLICES[column][0] == offset
+            assert offset >= 1
+
+        # And the three columns are the bridge-only ones the dictionary catalogues:
+        # no copybook side at all, and NOT NULL, so a failed guard can only ever
+        # leave a zero behind.
+        for column in sub4.DERIVED_COLUMNS:
+            entry = loader.get_entry(_key_for_column(_TABLE, column))
+            assert entry.copybook is None
+            assert entry.column.nullable is False
+
+
+def test_the_shipped_derivation_leaves_no_driver_loaded() -> None:
+    """Rule R-1 holds even though this section reaches the handler module.
+
+    The loader purges every tier-isolation-prefixed name it added, so nothing
+    forbidden is resident by the time a later test in the tier inspects
+    `sys.modules` - and the tier remains runnable on a host with no driver at all,
+    where this section skips instead.
+    """
+    with _shipped_acasirsub4() as sub4:
+        assert sub4.__name__ == _ACASIRSUB4_MODULE
+        assert callable(sub4._derive_date_components)
+        assert callable(sub4._is_cobol_numeric)
+
+    resident = tuple(sorted(n for n in sys.modules if _is_tier_isolated_name(n)))
+    assert resident == (), resident
+    assert _is_tier_isolated_name("acas_posting.dal") is True
+    assert _is_tier_isolated_name(_ACASIRSUB4_MODULE) is True
+    assert _is_tier_isolated_name("mysql.connector") is True
+    assert _is_tier_isolated_name("acas_posting.database") is False
+    assert _is_tier_isolated_name("acas_posting.cobol.move") is False

@@ -1126,12 +1126,20 @@ def test_the_absorbing_leg_is_the_opposite_of_the_named_side() -> None:
     credit_side = _transcribe_lines_495_to_533(_entered(post_vat_side=_SIDE_CREDIT))
     debit_side = _transcribe_lines_495_to_533(_entered(post_vat_side=_SIDE_DEBIT))
 
+    # The negations below are spelled `copy_negate()` rather than `-`. Unary minus on
+    # a `Decimal` is a CONTEXT operation - it rounds its result to the ambient
+    # `prec` - so `-net` would compare the stored leg against a figure the caller's
+    # context had reshaped, and the assertion would report that context instead of
+    # [general/gl070.cbl:L517] and [general/gl070.cbl:L530]. `copy_negate` is the
+    # sign-only operation: no rounding, no signal, no context (R-2). It is also the
+    # idiom this test already uses for magnitude, two lines further down.
+    #
     # Side "CR": the gross is on the DEBIT leg, and the credit leg carries bare net.
     assert credit_side[0].pre_amount == gross
-    assert credit_side[1].pre_amount == -net
+    assert credit_side[1].pre_amount == net.copy_negate()
 
     # Side "DR": the gross is on the CREDIT leg, and the debit leg carries bare net.
-    assert debit_side[1].pre_amount == -gross
+    assert debit_side[1].pre_amount == gross.copy_negate()
     assert debit_side[0].pre_amount == net
 
     # Which is to say the absorbing leg swaps when the side does.
@@ -1758,6 +1766,11 @@ def test_add_giving_overflow_keeps_the_low_order_digits_silently() -> None:
     warns or logs, because the frozen program does none of those.
     """
     ceiling = Decimal("99999999.99")
+    # Built from a STRING rather than as `-ceiling`. `Decimal.__neg__` is a CONTEXT
+    # operation, so under a reduced ambient `prec` the negation of a ten-digit figure
+    # would be rounded and the negative case below would then be adding two numbers
+    # this test never meant to add. A string prefix is exact under any context (R-2).
+    negated_ceiling = Decimal("-99999999.99")
 
     # 99999999.99 + 0.02 = 100000000.01, whose low-order ten digits are 0000000001.
     overflowed = arithmetic.add_giving(
@@ -1768,7 +1781,7 @@ def test_add_giving_overflow_keeps_the_low_order_digits_silently() -> None:
 
     # The same the other way, and the sign survives the truncation.
     negative = arithmetic.add_giving(
-        -ceiling, Decimal("-0.02"), receiving=_RECEIVING["pre_amount"]
+        negated_ceiling, Decimal("-0.02"), receiving=_RECEIVING["pre_amount"]
     )
     assert negative == Decimal("-0.01")
 

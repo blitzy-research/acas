@@ -135,6 +135,8 @@ from __future__ import annotations
 
 import dataclasses
 import decimal
+import inspect
+import sys
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Final
@@ -2460,3 +2462,274 @@ def test_a13_silent_skips_are_noted_here_and_locked_elsewhere() -> None:
     # only distinction [general/gl072.cbl:L291] draws.
     assert cobol_move.is_numeric_class("00042", batch_number) is True
     assert cobol_move.is_numeric_class("     ", batch_number) is False
+
+
+#  GROUP H  -  THE PRODUCTION KEY TUPLE, AND THE PRODUCTION SORT
+#
+#  `GL071_KEYS` above is built by `sort_keys(...)` INSIDE this file, on purpose: it
+#  lets a wrong key order be constructed deliberately and shown to misorder. What it
+#  cannot do is notice that the tuple `acas_posting/workfiles.py` actually hands to
+#  `sortverb` has changed. That tuple is the one `gl071` runs with, and anomaly A-14
+#  makes a wrong one SILENT MISPOSTING - Agent Action Plan section 0.6.4's words -
+#  because `gl072` locates the nominal-ledger row with a SEQUENTIAL read
+#  [general/gl072.cbl:L410-L412] and is correct only while the stream arrives in
+#  nominal-key order. There is no error, no diagnostic and no counter; the balances
+#  are simply wrong. So the production tuple is asserted here directly.
+#
+#  NO DEFERRED IMPORT IS NEEDED. `acas_posting.workfiles` is DRIVER-FREE: importing
+#  it loads no `acas_posting.dal` module, no MySQL driver, no SQLAlchemy and no
+#  harness module, and creates no file on disk - the work files are in-process
+#  sequences (Agent Action Plan section 0.3.1, "Work files are in-process sequences,
+#  not tables and not temporary files"). It is also deliberately ABSENT from the
+#  tier's own forbidden-prefix list at
+#  `tests/arithmetic/test_comp3_packed_decimal.py:L144-L152`. The import is still
+#  written inside the test bodies, and the claim is ASSERTED rather than stated, by
+#  checking `sys.modules` afterwards.
+
+
+#: The module-name prefixes the tier's own isolation assertions forbid. `workfiles`
+#: is not among them, which is the point of the assertion below.
+_TIER_ISOLATION_PREFIXES: Final[tuple[str, ...]] = (
+    "acas_posting.cli",
+    "acas_posting.dal",
+    "acas_posting.programs",
+    "harness",
+    "mysql",
+    "numpy",
+    "pandas",
+    "sqlalchemy",
+    "yaml",
+)
+
+
+def _is_tier_isolated_name(name: str) -> bool:
+    """Does `name` fall under a prefix the tier must not leave loaded?"""
+    return any(
+        name == prefix or name.startswith(f"{prefix}.")
+        for prefix in _TIER_ISOLATION_PREFIXES
+    )
+
+
+def test_a14_the_production_key_tuple_is_batch_account_profit_centre_posting() -> None:
+    """`workfiles.SORT_TRANS_ASCENDING_KEYS` is the key tuple gl071 declares.
+
+        173      ascending key sort-batch
+        174                    sort-ac
+        175                    sort-pc
+        176                    sort-post
+
+    Batch, then ACCOUNT, then profit centre, then POSTING NUMBER - which is NOT the
+    record's declaration order, where `sort-post` is the second field and `sort-ac`
+    the fifth [general/gl071.cbl:L136-L144]. Four keys, all ASCENDING.
+
+    Asserted accessor by accessor and descriptor by descriptor rather than by object
+    equality against `GL071_KEYS`, because the two tuples are minted independently -
+    this file's from the dictionary, the production one from the work-record
+    declarations - and a field-by-field assertion says WHICH of the two moved when
+    they disagree.
+    """
+    from acas_posting import workfiles
+
+    production = workfiles.SORT_TRANS_ASCENDING_KEYS
+
+    assert len(production) == 4
+    assert tuple(key.accessor for key in production) == (
+        "sort_batch",
+        "sort_ac",
+        "sort_pc",
+        "sort_post",
+    )
+    # Every key ascending, and no key repeated - a repeated key would mean one of
+    # the four declared keys had been lost.
+    assert all(
+        key.direction is sortverb.SortDirection.ASCENDING for key in production
+    )
+    assert len({key.accessor for key in production}) == 4
+
+    # The same accessors, in the same order, as this file's own transcription of
+    # [general/gl071.cbl:L173-L176].
+    assert tuple(key.accessor for key in production) == tuple(
+        key.accessor for key in GL071_KEYS
+    )
+    # And emphatically NOT the record's declaration order, which is the mis-key.
+    assert tuple(key.accessor for key in production) != tuple(
+        key.accessor for key in DECLARATION_ORDER_KEYS
+    )
+
+    # Each key carries the field's own descriptor, and each descriptor agrees with
+    # the one this file mints for the same field.
+    for key in production:
+        expected = SORT_DESCRIPTORS[key.accessor]
+        assert key.descriptor.name == expected.name, key.accessor
+        assert key.descriptor.digits == expected.digits, key.accessor
+        assert key.descriptor.usage is expected.usage, key.accessor
+        assert key.descriptor.python_storage is expected.python_storage, key.accessor
+        # Every key field is an unsigned integer picture, so the ordering is by
+        # magnitude and never by character - which is what the numeric-key test
+        # above establishes for the transcribed tuple.
+        assert key.descriptor.is_int, key.accessor
+        assert key.descriptor.scale in (None, 0), key.accessor
+
+
+def test_a14_sort_using_giving_defaults_to_the_production_key_tuple() -> None:
+    """The default argument IS the production tuple, not a copy of it.
+
+    `sort_using_giving` is what `gl071_batch_sort` calls, and it takes the key tuple
+    as a keyword-only argument DEFAULTING to `SORT_TRANS_ASCENDING_KEYS`. Asserted
+    by identity, so that redefining the constant cannot leave the default pointing
+    at the old tuple - and so that a caller who passes nothing provably gets the
+    frozen key order.
+    """
+    from acas_posting import workfiles
+
+    signature = inspect.signature(workfiles.sort_using_giving)
+    default = signature.parameters["on_ascending_key"].default
+
+    assert default is workfiles.SORT_TRANS_ASCENDING_KEYS
+    assert signature.parameters["on_ascending_key"].kind is (
+        inspect.Parameter.KEYWORD_ONLY
+    )
+    # `using` and `giving` are keyword-only too, because `SORT ... USING ... GIVING`
+    # names its files and a positional call would let the two be swapped.
+    for name in ("using", "giving"):
+        assert signature.parameters[name].kind is inspect.Parameter.KEYWORD_ONLY
+
+
+def test_a14_the_production_sort_orders_and_ties_stably_end_to_end() -> None:
+    """Drive the real work files through the real sort, with no infrastructure.
+
+    Four records deliberately out of order, two of them carrying an IDENTICAL key,
+    written to a real `LineSequentialWorkFile`, sorted by `sort_using_giving` with
+    its default key tuple, and read back:
+
+        in : (1, 200, 0, 1, 'a') (1, 100, 0, 3, 'b') (1, 100, 0, 7, 'c')
+             (1, 100, 0, 3, 'd')
+        out: (1, 100, 0, 3, 'b') (1, 100, 0, 3, 'd') (1, 100, 0, 7, 'c')
+             (1, 200, 0, 1, 'a')
+
+    Two properties, and both matter:
+
+      * ACCOUNT OUTRANKS POSTING NUMBER, and the data is chosen so that the two
+        rankings DISAGREE. Record 'a' has the HIGHEST account and the LOWEST posting
+        number, so it sorts LAST on the frozen key order and would sort FIRST on any
+        order that put `sort-post` before `sort-ac`. A test whose records happen to
+        rank the same way under both orders proves nothing, which is why the posting
+        numbers here are deliberately inverted against the accounts.
+      * THE TIE IS STABLE. 'b' and 'd' share a complete key and keep their input
+        order, which is the guarantee `gl072`'s sequential read depends on. The
+        compiled tie order is a separate, unarbitrated question - Q-SORT-TIE-ORDER
+        above - and this test asserts OUR stability, not the compiler's.
+
+    Nothing is written to disk: the work files are in-process sequences, so the test
+    leaves no artifact behind.
+    """
+    from acas_posting import workfiles
+
+    rows = (
+        ("a", 200, 1),
+        ("b", 100, 3),
+        ("c", 100, 7),
+        ("d", 100, 3),
+    )
+    source = workfiles.LineSequentialWorkFile(
+        "gl071-in.tmp", work_records.SortTransRecord
+    )
+    destination = workfiles.LineSequentialWorkFile(
+        "gl071-out.tmp", work_records.SortTransRecord
+    )
+    scratch = workfiles.LineSequentialWorkFile(
+        workfiles.SORT_TRANS_NAME, work_records.SortTransRecord
+    )
+
+    source.open_output()
+    for legend, account, posting in rows:
+        source.write(
+            sort_record(
+                batch=1,
+                post=posting,
+                account=account,
+                profit_centre=0,
+                legend=legend,
+            )
+        )
+    source.close()
+
+    workfiles.sort_using_giving(scratch, using=source, giving=destination)
+
+    destination.open_input()
+    ordered: list[tuple[int, int, int, int, str]] = []
+    while True:
+        record = destination.read_next()
+        if record is None:
+            break
+        ordered.append(
+            (
+                record.sort_batch,
+                record.sort_ac,
+                record.sort_pc,
+                record.sort_post,
+                record.sort_legend.rstrip(),
+            )
+        )
+    destination.close()
+
+    assert ordered == [
+        (1, 100, 0, 3, "b"),
+        (1, 100, 0, 3, "d"),
+        (1, 100, 0, 7, "c"),
+        (1, 200, 0, 1, "a"),
+    ]
+    # The sort read to the end cleanly.
+    assert destination.fs_reply == workfiles.FS_REPLY_OK
+    # Nothing was lost or duplicated.
+    assert len(ordered) == len(rows)
+    assert sorted(legend for *_, legend in ordered) == ["a", "b", "c", "d"]
+    # The discriminating pair, stated on its own: the lower ACCOUNT wins even
+    # though its posting number is HIGHER, and the record with the lowest posting
+    # number of all sorts LAST because its account is the highest.
+    assert ordered.index((1, 100, 0, 7, "c")) < ordered.index((1, 200, 0, 1, "a"))
+    assert ordered[-1][-1] == "a"
+    # Sorting the same four records on the record's DECLARATION order instead -
+    # posting number before account, the mis-key - produces a DIFFERENT sequence,
+    # which is what makes the assertion above discriminating rather than incidental.
+    mis_keyed = sortverb.sort_records(
+        [
+            sort_record(
+                batch=1, post=posting, account=account, profit_centre=0, legend=legend
+            )
+            for legend, account, posting in rows
+        ],
+        DECLARATION_ORDER_KEYS,
+    )
+    assert [record.sort_legend.rstrip() for record in mis_keyed] != [
+        legend for *_, legend in ordered
+    ]
+    # And the tie kept its input order.
+    assert ordered.index((1, 100, 0, 3, "b")) < ordered.index((1, 100, 0, 3, "d"))
+    # The work files are in-process sequences (Agent Action Plan section 0.3.1), so
+    # no file was created for any of the three names.
+    import pathlib
+
+    for name in ("gl071-in.tmp", "gl071-out.tmp", workfiles.SORT_TRANS_NAME):
+        assert not pathlib.Path(name).exists(), name
+
+
+def test_a14_reaching_the_production_sort_loads_no_database_and_no_driver() -> None:
+    """`acas_posting.workfiles` is driver-free, asserted rather than assumed.
+
+    Rule R-1 keeps this tier off any database. `workfiles` reaches none: it imports
+    no `acas_posting.dal` module, no driver, no SQL toolkit and no harness module. The
+    check is over live `sys.modules` immediately after the import, which is the same
+    evidence the tier's three isolation assertions use.
+    """
+    from acas_posting import workfiles
+
+    assert workfiles.__name__ == "acas_posting.workfiles"
+    resident = tuple(sorted(n for n in sys.modules if _is_tier_isolated_name(n)))
+    assert resident == (), resident
+    # The prefix test recognises what it must and does not over-match; `workfiles`
+    # itself is deliberately not on the list.
+    assert _is_tier_isolated_name("acas_posting.dal") is True
+    assert _is_tier_isolated_name("mysql.connector") is True
+    assert _is_tier_isolated_name("acas_posting.workfiles") is False
+    assert _is_tier_isolated_name("acas_posting.cobol.sortverb") is False

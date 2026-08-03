@@ -407,12 +407,33 @@ _B: int = 0
 _EDIT_WIDTH: Final[int] = 30
 _EDIT_INTEGER_DIGITS: Final[int] = 19
 _EDIT_FRACTION_DIGITS: Final[int] = 9
-_EDIT_FRACTION_QUANTUM: Final[decimal.Decimal] = decimal.Decimal(1).scaleb(
-    -_EDIT_FRACTION_DIGITS
+
+_EDIT_CONTEXT: Final[decimal.Context] = decimal.Context(
+    prec=_EDIT_INTEGER_DIGITS + _EDIT_FRACTION_DIGITS + 2,
+    rounding=decimal.ROUND_DOWN,
 )
-_EDIT_TEN_POWER_FRACTION: Final[decimal.Decimal] = decimal.Decimal(10) ** (
-    _EDIT_FRACTION_DIGITS
-)
+"""An exact-decimal context wide enough for the whole edit field.
+
+Precision covers every digit position the field can hold, so no rendering can lose a
+digit to the context.
+
+Every ``decimal`` operation in this rendering path runs inside a copy of this context -
+the two derived constants immediately below, and the whole body of :func:`mysql_edit` -
+rather than in whatever context the importing application happens to be carrying.
+``quantize``, ``scaleb``, ``**``, ``*`` and unary minus are all CONTEXT operations, so
+without this the thirty-character image would be a property of the caller's ambient
+precision instead of the picture at [common/otm5MT.cbl:L227], and two processes would
+not agree on it (rule R-2). The sibling handler states the identical policy at
+``acas_posting/dal/acasirsub4_irs_posting.py:L387``.
+"""
+
+with decimal.localcontext(_EDIT_CONTEXT):
+    _EDIT_FRACTION_QUANTUM: Final[decimal.Decimal] = decimal.Decimal(1).scaleb(
+        -_EDIT_FRACTION_DIGITS
+    )
+    _EDIT_TEN_POWER_FRACTION: Final[decimal.Decimal] = decimal.Decimal(10) ** (
+        _EDIT_FRACTION_DIGITS
+    )
 
 _WINDOW_INTEGER_10: Final[slice] = slice(10, 20)
 _WINDOW_INTEGER_07: Final[slice] = slice(13, 20)
@@ -435,18 +456,26 @@ def mysql_edit(value: decimal.Decimal | int) -> str:
     Returns:
         The thirty-character edited image, sign in position one.
     """
-    quantised = decimal.Decimal(value).quantize(
-        _EDIT_FRACTION_QUANTUM, rounding=decimal.ROUND_DOWN
-    )
-    negative = quantised < 0
-    # Unary minus rather than the absolute-value builtin: rule R-2 bars that builtin on
-    # a monetary value, and unary minus on a ``Decimal`` is exact.
-    magnitude = -quantised if negative else quantised
-    scaled = int(
-        (magnitude * _EDIT_TEN_POWER_FRACTION).to_integral_value(
-            rounding=decimal.ROUND_DOWN
+    # `_EDIT_CONTEXT`, not the ambient context. `quantize` in particular does not merely
+    # round under a narrowed precision - it REFUSES, raising `InvalidOperation`, when the
+    # result would need more digits than `prec` allows. Measured: with the ambient
+    # precision at nine digits this function raised rather than rendering
+    # `decimal(9,2)`. The sibling handler wraps its own renderer the same way at
+    # `acas_posting/dal/acasirsub4_irs_posting.py:L411`.
+    with decimal.localcontext(_EDIT_CONTEXT):
+        quantised = decimal.Decimal(value).quantize(
+            _EDIT_FRACTION_QUANTUM, rounding=decimal.ROUND_DOWN
         )
-    )
+        negative = quantised < 0
+        # Unary minus rather than the absolute-value builtin: rule R-2 bars that builtin
+        # on a monetary value, and unary minus on a ``Decimal`` is exact inside a context
+        # wide enough to hold the operand, which `_EDIT_CONTEXT` is by construction.
+        magnitude = -quantised if negative else quantised
+        scaled = int(
+            (magnitude * _EDIT_TEN_POWER_FRACTION).to_integral_value(
+                rounding=decimal.ROUND_DOWN
+            )
+        )
     digits = str(scaled).rjust(_EDIT_INTEGER_DIGITS + _EDIT_FRACTION_DIGITS, "0")
     # A value wider than the picture loses its high-order digits, which is what a COBOL
     # store does and what rule R-3 requires be preserved.

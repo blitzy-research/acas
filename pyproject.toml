@@ -180,7 +180,7 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 markers = [
-    "arithmetic: unit-level COBOL-semantics parity test. Imports only acas_posting.cobol and acas_posting.records; needs NO database, NO COBOL and NO Docker, so it runs anywhere.",
+    "arithmetic: unit-level COBOL-semantics parity test. Imports acas_posting.cobol, acas_posting.records, acas_posting.dictionary and acas_posting.workfiles at module scope. A minority of tests additionally drive one shipped paragraph of acas_posting.programs or one pure function of acas_posting.dal, so that the anomalies rule R-4 requires be LOCKED (A-7, A-8, A-9, A-10, the gl051 control-total gate and the gl071 sort order) are asserted against the code that ships rather than against a re-transcription of it. Those imports happen INSIDE the test body, behind pytest.importorskip, and the module is purged from sys.modules afterwards, so the tier still imports and collects with no MySQL driver installed and the three import-isolation guards keep passing unchanged. Needs NO database, NO COBOL and NO Docker, so it runs anywhere.",
     "scenario: end-to-end state-parity test asserting an ordering-normalised empty table diff. REQUIRES the harness/ Docker Compose stack (MariaDB 10.11.7 plus the built GnuCOBOL 3.2 oracle) and a seeded database.",
     "determinism: two runs of one scenario under the same pinned clock must produce byte-identical dumps. REQUIRES the harness/ Docker Compose stack.",
     "database: REQUIRES a live MariaDB 10.11.7 instance with mysql/ACASDB.sql applied verbatim.",

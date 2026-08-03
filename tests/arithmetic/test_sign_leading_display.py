@@ -1040,12 +1040,17 @@ def test_zoned_encoding_round_trips_exactly(key: str, magnitude: str) -> None:
     `pic s9(8)v99` [copybooks/wspost.cob:L23] is two digits wider, so the same set fits
     it too.
 
-    Every value is built from a `Decimal` string. There is no float in this path at any
-    point (R-2), and the ambient decimal context is neither read nor mutated: the scale
-    comes from the descriptor and the rounding direction is passed explicitly.
+    Every value is built from a `Decimal` STRING, positive and negative alike, and that
+    is deliberate rather than incidental: `Decimal.__neg__` is a CONTEXT operation, so
+    `-Decimal("9999999.99")` is rounded to the ambient precision and at a reduced
+    `prec` would hand this test a different number than the one it means to encode.
+    Prefixing the string instead makes the operand exact whatever the ambient context
+    holds. Nothing here reads or mutates that context: the scale comes from the
+    descriptor and the rounding direction is passed explicitly, and there is no float in
+    this path at any point (R-2).
     """
     descriptor = _descriptor(key)
-    for value in (Decimal(magnitude), -Decimal(magnitude)):
+    for value in (Decimal(magnitude), Decimal("-" + magnitude)):
         raw = _encode(descriptor, value)
         decoded = _decode(descriptor, raw)
 
@@ -1053,7 +1058,13 @@ def test_zoned_encoding_round_trips_exactly(key: str, magnitude: str) -> None:
         # Exact, not merely numerically equal: the decoded value carries the field's own
         # scale, so a two-place money field never comes back as an integer.
         assert decoded.as_tuple().exponent == -descriptor.scale
-        assert decoded.quantize(descriptor.quantum) == decoded
+        # The same property against the descriptor's own quantum, compared by EXPONENT
+        # rather than by `decoded.quantize(descriptor.quantum)`. `Decimal.quantize` is a
+        # context operation and raises `InvalidOperation` when the result needs more
+        # digits than the ambient `prec` allows, so the quantize form asserts nothing
+        # about this layer under a narrowed context - it only reports the context. An
+        # exponent comparison is a property of the two values alone (R-2).
+        assert decoded.as_tuple().exponent == descriptor.quantum.as_tuple().exponent
 
 
 @pytest.mark.parametrize(
@@ -1078,10 +1089,16 @@ def test_zoned_width_is_constant_across_every_value_of_a_field(key: str) -> None
     """
     descriptor = _descriptor(key)
 
+    # Both signs are formed with `copy_negate()` rather than by multiplying by -1 or
+    # by writing `-value`. Multiplication and unary minus are both CONTEXT operations
+    # and round to the ambient `prec`, so either form would hand the encoder a
+    # narrowed magnitude and the widths measured below would be the caller's
+    # context's, not the field's. `copy_negate` touches the sign and nothing else: no
+    # rounding, no signal, no context (R-2).
     widths = {
-        len(_encode(descriptor, sign * Decimal(magnitude)))
+        len(_encode(descriptor, value))
         for magnitude in ZONED_ROUND_TRIP_MAGNITUDES
-        for sign in (1, -1)
+        for value in (Decimal(magnitude), Decimal(magnitude).copy_negate())
     }
 
     assert len(widths) == 1
@@ -1122,8 +1139,12 @@ def test_exactly_one_byte_moves_and_it_is_the_declared_sign_position(
     assert descriptor.sign_position is expected_position
 
     for magnitude in SIGNED_MAGNITUDES:
+        # Both operands are built from strings. `Decimal.__neg__` is a context
+        # operation, so negating a nine-digit magnitude under a reduced ambient `prec`
+        # would silently round it and this test would then be comparing the encodings
+        # of two DIFFERENT numbers. A string prefix is exact under any context.
         positive = _encode(descriptor, Decimal(magnitude))
-        negative = _encode(descriptor, -Decimal(magnitude))
+        negative = _encode(descriptor, Decimal("-" + magnitude))
 
         assert len(positive) == len(negative)
         moved = tuple(
@@ -1138,7 +1159,12 @@ def test_exactly_one_byte_moves_and_it_is_the_declared_sign_position(
         # other byte is untouched, and both decode back to the value that produced them.
         assert _decode(descriptor, negative) < 0
         assert _decode(descriptor, positive) > 0
-        assert _decode(descriptor, negative) == -_decode(descriptor, positive)
+        # Compared against the string-built negative rather than against
+        # `-_decode(...)`, for the same reason: the unary minus would be evaluated in
+        # the ambient context. The two are the same assertion when the context is
+        # wide, and only this one is true when it is not.
+        assert _decode(descriptor, negative) == Decimal("-" + magnitude)
+        assert _decode(descriptor, positive) == Decimal(magnitude)
 
 
 @pytest.mark.parametrize(

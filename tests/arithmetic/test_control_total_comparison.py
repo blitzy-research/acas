@@ -169,8 +169,13 @@ each test below transcribes the frozen lines itself.
 
 from __future__ import annotations
 
+import contextlib
 import decimal
+import sys
+import types
+from collections.abc import Iterator
 from decimal import Decimal
+from typing import Final
 
 import pytest
 
@@ -1572,4 +1577,310 @@ def test_every_field_the_gate_touches_carries_dictionary_provenance() -> None:
     assert L9_AMOUNT.drift() is None
     assert L9_AMOUNT.anomaly_refs() == ()
     assert L9_AMOUNT.ambiguity_refs() == ()
+
+
+# ---------------------------------------------------------------------------
+#  THE SHIPPED GATE
+#
+#  Every test above builds the gate out of `arithmetic` calls written in this file.
+#  That establishes what [general/gl051.cbl:L1096-L1133] MEANS, and it is the reason
+#  `test_the_vat_enters_the_gross_before_the_comparison` can show the two orders
+#  disagreeing. What it cannot establish is that
+#  `acas_posting/programs/gl051_batch_control_check.py::_end_batch` still runs them
+#  in that order. Hoisting the comparison above [general/gl051.cbl:L1109] inside the
+#  shipped paragraph would leave every test above green while - in the Agent Action
+#  Plan's own words, section 0.6.4 - the cycle "would reject every batch that
+#  carries VAT". This section drives the shipped paragraph and closes that gap.
+#
+#  WHY THE IMPORT IS DEFERRED (rule R-1). Agent Action Plan section 0.4.3 gives this
+#  tier `cobol` and `records` and forbids `dal` and any database.
+#  `acas_posting.programs.gl051_batch_control_check` imports `acas_posting.dal.facade`,
+#  which pulls the MySQL driver in transitively, so a module-scope import would
+#  leave `acas_posting.dal.*` and `mysql.*` resident and break the three
+#  tier-isolation assertions this suite carries
+#  (`test_comp3_packed_decimal.py:L1536`, `test_comp_binary.py:L2036`,
+#  `test_pic_field_descriptors.py:L2134`), two of which read LIVE `sys.modules`. So
+#  the import happens INSIDE the test bodies, behind `pytest.importorskip` so a
+#  driver-free host SKIPS this section rather than failing, and the loader deletes
+#  every tier-isolation-prefixed name it added in a `finally`. The pattern is the one
+#  `tests/conftest.py:L423-L483` already uses for the harness modules.
+#
+#  NO DATABASE IS TOUCHED. `_end_batch(storage, linkage)` reads and writes seven
+#  in-memory record dataclasses; it opens no connection and issues no verb. The
+#  page-break branch at [general/gl051.cbl:L1111] does fire with the default
+#  `page-lines`, so `_headings` runs - and that is faithful, since headings are a
+#  print-line concern with no database effect.
+# ---------------------------------------------------------------------------
+
+
+#: The module-name prefixes the tier's own isolation assertions forbid.
+_TIER_ISOLATION_PREFIXES: Final[tuple[str, ...]] = (
+    "acas_posting.cli",
+    "acas_posting.dal",
+    "acas_posting.programs",
+    "harness",
+    "mysql",
+    "numpy",
+    "pandas",
+    "sqlalchemy",
+    "yaml",
+)
+
+#: The shipped module once imported. A plain dict, so it is inspectable and a failed
+#: import is never memoised.
+_SHIPPED_MODULE_CACHE: dict[str, types.ModuleType] = {}
+
+_GL051_MODULE: Final[str] = "acas_posting.programs.gl051_batch_control_check"
+
+
+def _is_tier_isolated_name(name: str) -> bool:
+    """Does `name` fall under a prefix the tier must not leave loaded?"""
+    return any(
+        name == prefix or name.startswith(f"{prefix}.")
+        for prefix in _TIER_ISOLATION_PREFIXES
+    )
+
+
+@contextlib.contextmanager
+def _shipped_gl051() -> Iterator[types.ModuleType]:
+    """Import `gl051_batch_control_check` for one test, leaving no trace.
+
+    Yields:
+        The shipped module.
+
+    Raises:
+        Skipped: Through `pytest.importorskip`, when the pinned MySQL driver is
+            absent - which is what keeps the rest of the tier runnable on a bare
+            host (rule R-1).
+    """
+    cached = _SHIPPED_MODULE_CACHE.get(_GL051_MODULE)
+    if cached is not None:
+        yield cached
+        return
+
+    before = frozenset(sys.modules)
+    try:
+        module = pytest.importorskip(
+            _GL051_MODULE,
+            reason=(
+                f"{_GL051_MODULE} could not be imported - without the pinned MySQL "
+                f"driver this section skips and the rest of the tier still runs"
+            ),
+        )
+        _SHIPPED_MODULE_CACHE[_GL051_MODULE] = module
+        yield module
+    finally:
+        for name in sorted(set(sys.modules) - before, reverse=True):
+            if _is_tier_isolated_name(name):
+                del sys.modules[name]
+
+
+def _shipped_linkage(gl051: types.ModuleType) -> object:
+    """A `_HandlerLinkage` whose seven records are all at their declared defaults.
+
+    The batch amounts a test cares about are set by the test itself, so this carries
+    no control total of its own. Built from the record modules `gl051` itself uses,
+    which is what makes it the production linkage rather than a stand-in.
+    """
+    from acas_posting.records.file_access import FileAccess
+    from acas_posting.records.file_defs import FileDefs
+    from acas_posting.records.gl_batch import GlBatchRecord
+    from acas_posting.records.gl_ledger import WsLedgerRecord
+    from acas_posting.records.gl_posting import WsPostingRecord
+    from acas_posting.records.system_record import SystemRecord
+    from acas_posting.records.test_data_flags import AcasDalCommonData
+
+    return gl051._HandlerLinkage(
+        system_record=SystemRecord(),
+        posting=WsPostingRecord(),
+        batch=GlBatchRecord(),
+        ledger=WsLedgerRecord(),
+        file_access=FileAccess(),
+        file_defs=FileDefs(),
+        dal_common=AcasDalCommonData(),
+    )
+
+
+def test_the_shipped_gate_accepts_a_vat_bearing_batch_as_written() -> None:
+    """THE MUTATION THIS TEST EXISTS TO KILL: comparing before adding the VAT.
+
+    Driven against the shipped `_end_batch`. The figures are the ones
+    `test_the_vat_enters_the_gross_before_the_comparison` uses, because they are the
+    ones on which the two orders disagree: entered gross 1200.00 with entered VAT
+    200.00, against an accumulated VAT-EXCLUSIVE gross of 1000.00 and an accumulated
+    VAT of 200.00.
+
+        1109      add      actual-vat   to  actual-gross.
+        1117      if       input-gross  =   actual-gross
+        1118        and    input-vat    =   actual-vat
+
+    As written the batch is ACCEPTED and `actual-gross` is left holding 1200.00 -
+    the mutation at L1109 is permanent and visible to every later reader of the
+    batch record. Evaluate the two-part equality before L1109 and the same batch is
+    REJECTED, which Agent Action Plan section 0.6.4 describes as rejecting "every
+    batch that carries VAT".
+    """
+    with _shipped_gl051() as gl051:
+        storage = gl051._WorkingStorage()
+        linkage = _shipped_linkage(gl051)
+        amounts = linkage.batch.amounts
+        amounts.input_gross = arithmetic.store(Decimal("1200.00"), INPUT_GROSS)
+        amounts.input_vat = arithmetic.store(Decimal("200.00"), INPUT_VAT)
+        amounts.actual_gross = arithmetic.store(Decimal("1000.00"), ACTUAL_GROSS)
+        amounts.actual_vat = arithmetic.store(Decimal("200.00"), ACTUAL_VAT)
+        linkage.batch.batch_status = INCOMING_BATCH_STATUS
+
+        # The two guards the paragraph tests first are at their pass-through values,
+        # so the gate is actually reached: `z` is not the all-batches marker
+        # [general/gl051.cbl:L1098] and `trutht` is set [general/gl051.cbl:L1101].
+        assert storage.z != gl051._Z_ALL_BATCHES
+        assert storage.trutht == gl051._TRUET_VALUE
+        # The batch carries VAT - a VAT-free batch would make the two orders agree
+        # and the defect invisible.
+        assert arithmetic.compare(amounts.actual_vat, 0) != 0
+
+        gl051._end_batch(storage, linkage)
+
+        assert linkage.batch.batch_status == ACCEPTED
+        assert condition_names.is_status_closed(linkage.batch.batch_status) is True
+        # L1109's mutation happened, in place, and by exactly the ACTUAL VAT.
+        assert amounts.actual_gross == Decimal("1200.00")
+        assert arithmetic.intermediate(
+            lambda: amounts.actual_gross - Decimal("1000.00")
+        ) == amounts.actual_vat
+        # THE COUNTERFACTUAL, stated as a value rather than as prose: the gross the
+        # accumulation left, 1000.00, does NOT equal the entered gross - so a gate
+        # that read it before L1109 would have rejected this batch.
+        assert arithmetic.compare(amounts.input_gross, Decimal("1000.00")) != 0
+
+
+def test_the_shipped_gate_rejects_a_vat_mismatch_and_still_mutates_the_gross() -> None:
+    """A VAT disagreement rejects, and L1109 has already run when it does.
+
+    [general/gl051.cbl:L1117-L1118] is a CONJUNCTION, so the gross agreeing is not
+    enough. Here the entered VAT is 150.00 against an accumulated 200.00: the gross
+    matches after L1109 and the VAT does not, so the batch is left OPEN - which is
+    the state `gl070`'s Phase 1 looks for [general/gl070.cbl:L312-L313].
+
+    The gross is asserted to be 1200.00 even on the rejecting path, because L1109
+    runs before the comparison and is not undone. A reproduction that rolled the
+    mutation back on rejection would be new behaviour (rules R-3, R-4).
+    """
+    with _shipped_gl051() as gl051:
+        storage = gl051._WorkingStorage()
+        linkage = _shipped_linkage(gl051)
+        amounts = linkage.batch.amounts
+        amounts.input_gross = arithmetic.store(Decimal("1200.00"), INPUT_GROSS)
+        amounts.input_vat = arithmetic.store(Decimal("150.00"), INPUT_VAT)
+        amounts.actual_gross = arithmetic.store(Decimal("1000.00"), ACTUAL_GROSS)
+        amounts.actual_vat = arithmetic.store(Decimal("200.00"), ACTUAL_VAT)
+        linkage.batch.batch_status = INCOMING_BATCH_STATUS
+
+        gl051._end_batch(storage, linkage)
+
+        assert linkage.batch.batch_status == REJECTED
+        assert condition_names.is_status_open(linkage.batch.batch_status) is True
+        # The gross half of the conjunction DID agree once L1109 had run, so the
+        # rejection is attributable to the VAT half alone.
+        assert amounts.actual_gross == Decimal("1200.00")
+        assert arithmetic.compare(amounts.input_gross, amounts.actual_gross) == 0
+        assert arithmetic.compare(amounts.input_vat, amounts.actual_vat) != 0
+
+
+def test_the_shipped_gate_rejects_a_gross_mismatch() -> None:
+    """The other half of the conjunction, so neither equality is redundant.
+
+    Entered gross 1300.00 against 1000.00 accumulated plus 200.00 VAT: after L1109
+    the gross is 1200.00 and still disagrees, while the VAT halves match exactly.
+    """
+    with _shipped_gl051() as gl051:
+        storage = gl051._WorkingStorage()
+        linkage = _shipped_linkage(gl051)
+        amounts = linkage.batch.amounts
+        amounts.input_gross = arithmetic.store(Decimal("1300.00"), INPUT_GROSS)
+        amounts.input_vat = arithmetic.store(Decimal("200.00"), INPUT_VAT)
+        amounts.actual_gross = arithmetic.store(Decimal("1000.00"), ACTUAL_GROSS)
+        amounts.actual_vat = arithmetic.store(Decimal("200.00"), ACTUAL_VAT)
+        linkage.batch.batch_status = INCOMING_BATCH_STATUS
+
+        gl051._end_batch(storage, linkage)
+
+        assert linkage.batch.batch_status == REJECTED
+        assert amounts.actual_gross == Decimal("1200.00")
+        assert arithmetic.compare(amounts.input_vat, amounts.actual_vat) == 0
+        assert arithmetic.compare(amounts.input_gross, amounts.actual_gross) != 0
+
+
+def test_the_shipped_gate_keeps_its_two_early_dispositions() -> None:
+    """The all-batches marker and the `not truet` path, driven for real.
+
+    First disposition [general/gl051.cbl:L1098]: `z = 99` returns without assigning
+    any status at all, so a status already on the record survives untouched AND
+    L1109 never runs - the gross is left exactly as the accumulation left it.
+
+    Second disposition [general/gl051.cbl:L1101-L1103]: `not truet` sets the status
+    OPEN and returns, again before L1109. The figures used here AGREE perfectly, so
+    the assertion is not merely that the batch is rejected but that a batch whose
+    totals balance is still rejected - and that its gross was never mutated. That
+    byte-level non-mutation is what a refactor hoisting L1109 above the `truet` test
+    would break.
+    """
+    with _shipped_gl051() as gl051:
+        # First disposition.
+        storage = gl051._WorkingStorage()
+        storage.z = gl051._Z_ALL_BATCHES
+        linkage = _shipped_linkage(gl051)
+        amounts = linkage.batch.amounts
+        amounts.input_gross = arithmetic.store(Decimal("1200.00"), INPUT_GROSS)
+        amounts.input_vat = arithmetic.store(Decimal("200.00"), INPUT_VAT)
+        amounts.actual_gross = arithmetic.store(Decimal("1000.00"), ACTUAL_GROSS)
+        amounts.actual_vat = arithmetic.store(Decimal("200.00"), ACTUAL_VAT)
+        linkage.batch.batch_status = INCOMING_BATCH_STATUS
+
+        gl051._end_batch(storage, linkage)
+
+        assert linkage.batch.batch_status == INCOMING_BATCH_STATUS
+        assert linkage.batch.batch_status not in (ACCEPTED, REJECTED)
+        assert amounts.actual_gross == Decimal("1000.00")
+
+        # Second disposition, with figures that balance.
+        storage = gl051._WorkingStorage()
+        storage.trutht = 0
+        linkage = _shipped_linkage(gl051)
+        amounts = linkage.batch.amounts
+        amounts.input_gross = arithmetic.store(Decimal("1200.00"), INPUT_GROSS)
+        amounts.input_vat = arithmetic.store(Decimal("200.00"), INPUT_VAT)
+        amounts.actual_gross = arithmetic.store(Decimal("1200.00"), ACTUAL_GROSS)
+        amounts.actual_vat = arithmetic.store(Decimal("200.00"), ACTUAL_VAT)
+        linkage.batch.batch_status = INCOMING_BATCH_STATUS
+
+        assert storage.trutht != gl051._TRUET_VALUE
+        gl051._end_batch(storage, linkage)
+
+        assert linkage.batch.batch_status == REJECTED
+        # Balanced, and rejected anyway - and the gross was NOT mutated.
+        assert amounts.actual_gross == Decimal("1200.00")
+        assert (
+            encoded(amounts.actual_gross, ACTUAL_GROSS)
+            == encoded(Decimal("1200.00"), ACTUAL_GROSS)
+        )
+
+
+def test_the_shipped_gate_leaves_no_driver_loaded() -> None:
+    """Rule R-1 holds even though this section reaches a program module.
+
+    The loader purges every tier-isolation-prefixed name it added, so nothing
+    forbidden is resident by the time a later test in the tier inspects
+    `sys.modules`.
+    """
+    with _shipped_gl051() as gl051:
+        assert gl051.__name__ == _GL051_MODULE
+        assert callable(gl051._end_batch)
+
+    resident = tuple(sorted(n for n in sys.modules if _is_tier_isolated_name(n)))
+    assert resident == (), resident
+    assert _is_tier_isolated_name("acas_posting.dal") is True
+    assert _is_tier_isolated_name("mysql.connector") is True
+    assert _is_tier_isolated_name("acas_posting.database") is False
+    assert _is_tier_isolated_name("acas_posting.cobol.condition_names") is False
 

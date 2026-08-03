@@ -23,7 +23,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
-from decimal import ROUND_DOWN, Decimal
+from decimal import ROUND_DOWN, Decimal, localcontext
 from types import MappingProxyType
 from typing import Any, Final, cast
 
@@ -38,6 +38,7 @@ from acas_posting.dal.connection import (
     mysql_1980_close,
     mysql_1999_exit,
     quote_identifier,
+    transport_decimal_context,
 )
 from acas_posting.dal import cursor_state as _cursor_state
 from acas_posting.dal.cursor_state import (
@@ -3696,7 +3697,16 @@ def _space_filled_value(column: str) -> Decimal | int | str:
         return " " * digits
 
     if scale:
-        return Decimal(unscaled).scaleb(-scale)
+        # `scaleb` is a CONTEXT operation: it rounds its result to the ambient context's
+        # precision, and signals `Inexact`/`Rounded` when it does. `SPACE_FILLED_RECORD`
+        # below is documented as a constant "two processes agree on byte for byte", which
+        # it cannot be if the shift answers to whatever precision the importing
+        # application happens to have installed. Performing it inside the transport
+        # layer's own exact context makes the constant a property of the field's
+        # dictionary entry alone; that context traps `Inexact` and `Rounded`, so a value
+        # too wide to shift exactly raises instead of being quietly narrowed (R-2).
+        with localcontext(transport_decimal_context()):
+            return Decimal(unscaled).scaleb(-scale)
     return unscaled
 
 

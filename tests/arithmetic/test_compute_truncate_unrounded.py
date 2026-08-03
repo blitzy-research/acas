@@ -158,7 +158,11 @@ GnuCOBOL, and with `data_dictionary/acas_posting_dictionary.json` present:
 
 from __future__ import annotations
 
+import contextlib
 import decimal
+import sys
+import types
+from collections.abc import Iterator
 from decimal import Decimal
 from typing import Final
 
@@ -734,6 +738,39 @@ _SILENT_OVERFLOW_TABLE: Final[tuple[tuple[object, object, object, str], ...]] = 
 )
 
 
+def _units_of_last_digit(value: Decimal, scale: int) -> int:
+    """`value` expressed as an exact integer number of its field's last digit.
+
+    Written with integer arithmetic over the value's own digit tuple rather than with
+    `Decimal.scaleb` or `Decimal.quantize`, because both of those are CONTEXT
+    operations: under a reduced ambient `prec` they round, and an eleven-digit figure
+    would then be reported as outside a field that in fact holds it. A digit tuple is
+    a property of the value and of nothing else, so this reading cannot be perturbed.
+
+    Args:
+        value: A stored `Decimal`.
+        scale: The receiving field's declared number of decimal places.
+
+    Returns:
+        The signed integer count of last-digit units.
+    """
+    sign, digits, exponent = value.as_tuple()
+    assert isinstance(exponent, int), exponent
+    magnitude = 0
+    for digit in digits:
+        magnitude = magnitude * 10 + digit
+    shift = exponent + scale
+    if shift >= 0:
+        magnitude *= 10**shift
+    else:
+        # An exact division: a stored value never carries more decimal places than
+        # its own field declares, so there is nothing to discard here.
+        divisor = 10 ** (-shift)
+        assert magnitude % divisor == 0, (value, scale)
+        magnitude //= divisor
+    return -magnitude if sign else magnitude
+
+
 @pytest.mark.parametrize(
     ("value", "receiving", "expected", "storage_class"),
     _SILENT_OVERFLOW_TABLE,
@@ -764,7 +801,13 @@ def test_an_over_range_store_is_silent(
     # And whatever came back is genuinely inside the field: the reduction is a
     # store, not an approximation of one.
     low, high = receiving.value_domain
-    units = stored if receiving.is_int else int(stored.scaleb(receiving.scale or 0))
+    # Scaled to units of the field's last digit WITHOUT `Decimal.scaleb`, which is a
+    # context operation and would round an eleven-digit figure under a reduced ambient
+    # `prec`. The digit tuple is a property of the value alone, so this reading is
+    # exact whatever the ambient context holds (R-2).
+    units = stored if receiving.is_int else _units_of_last_digit(
+        stored, receiving.scale or 0
+    )
     assert low <= units <= high, (
         f"{receiving.name} spans {low}..{high} in units of its last digit; the "
         f"store returned {units}"
@@ -1619,24 +1662,137 @@ def test_a_unified_moving_average_helper_cannot_reproduce_all_three_idioms() -> 
     )
 
     # ------------------------------------------------------------------
-    # The five dimensions, as data, so that a reader can check the claim rather
-    # than take it on trust - and so that the count itself is asserted.
+    # (d), (e), (f) - THE PURCHASE MIRRORS. The idiom lives SIX times, not three:
+    # `purch-comp` [purchase/pl060.cbl:L740-L751], `credit-comp`
+    # [purchase/pl060.cbl:L755-L766] and `compute-purch-pay.`
+    # [purchase/pl100.cbl:L488-L505] repeat (a), (b) and (c) field for field. The
+    # helper fails on the Purchase trio for exactly the reasons it fails on the
+    # Sales trio, which is the whole point: unifying "just the Purchase copies"
+    # is the same mistake in a smaller disguise.
+    #
+    # The receiving descriptors are the Purchase statistics fields rather than the
+    # Sales ones, and they are `binary-long` too - so the truncation is identical
+    # and only the column names differ.
     # ------------------------------------------------------------------
+    purch_counter_field = _dictionary_descriptor("PULEDGER-REC.PURCH-ACTIVETY")
+    purch_average_field = _dictionary_descriptor("PULEDGER-REC.PURCH-AVERAGE")
+    purch_pay_counter = _dictionary_descriptor("PULEDGER-REC.PURCH-PAY-ACTIVETY")
+    purch_pay_average = _dictionary_descriptor("PULEDGER-REC.PURCH-PAY-AVERAGE")
+    for purchase_field in (
+        purch_counter_field,
+        purch_average_field,
+        purch_pay_counter,
+        purch_pay_average,
+    ):
+        assert purchase_field.usage is model.Usage.BINARY_LONG
+        assert purchase_field.is_int
+
+    def purchase_moving_average(
+        activity: int,
+        average: int,
+        addend: Decimal | int,
+        *,
+        increment_before: bool,
+    ) -> tuple[int, int]:
+        """The same helper, pointed at the Purchase receivers. Equally forbidden."""
+        if activity != 0 and average != 0:
+            accumulated = arithmetic.multiply_by_giving(
+                activity, average, packed_accumulator
+            )
+        else:
+            accumulated = arithmetic.store(0, packed_accumulator)
+        if increment_before:
+            activity = arithmetic.add_to(
+                1, receiver_value=activity, receiving=purch_counter_field
+            )
+        accumulated = arithmetic.add_to(
+            addend, receiver_value=accumulated, receiving=packed_accumulator
+        )
+        if not increment_before:
+            activity = arithmetic.add_to(
+                1, receiver_value=activity, receiving=purch_counter_field
+            )
+        return activity, arithmetic.divide_into_giving(
+            activity, accumulated, purch_average_field
+        )
+
+    # (d) [purchase/pl060.cbl:L740-L751] - reproduced, as (a) was, and just as
+    # misleadingly.
+    assert purchase_moving_average(2, 6, goods, increment_before=True) == (3, 8)
+
+    # (e) [purchase/pl060.cbl:L755-L766] - NOT reproducible. ANOMALY A-9 again:
+    # there is no `add 1 to purch-activety` in that block, and the extra outer
+    # guard at [purchase/pl060.cbl:L764] suppresses the divide as well, so a
+    # supplier's first credit note leaves BOTH fields untouched.
+    frozen_first_purchase_credit_note = (0, 7)
+    assert purchase_moving_average(0, 7, goods, increment_before=True) == (1, 12)
+    assert purchase_moving_average(0, 7, goods, increment_before=False) == (1, 12)
+    assert (
+        purchase_moving_average(0, 7, goods, increment_before=True)
+        != frozen_first_purchase_credit_note
+    ), (
+        "ANOMALY A-9 on the Purchase side is unreachable through any setting of "
+        "increment_before either: [purchase/pl060.cbl:L755-L766] increments NEVER"
+    )
+
+    # (f) [purchase/pl100.cbl:L488-L505] - the `BY` spelling again, and the same
+    # reciprocal trap for a caller who transcribes the operands literally.
+    assert arithmetic.divide_by_giving(105, 3, purch_pay_average) == 35
+    assert arithmetic.divide_into_giving(105, 3, purch_pay_average) == 0
+    assert purchase_moving_average(2, 30, 45, increment_before=False) == (3, 35)
+
+    # ------------------------------------------------------------------
+    # The five dimensions, as data, over ALL SIX SITES, so that a reader can check
+    # the claim rather than take it on trust - and so that the counts themselves
+    # are asserted. Order: (a) sl060 L816, (b) sl060 L832, (c) sl100 L497,
+    # (d) pl060 L740, (e) pl060 L755, (f) pl100 L488.
+    # ------------------------------------------------------------------
+    sites = (
+        "sales/sl060.cbl:L816",
+        "sales/sl060.cbl:L832",
+        "sales/sl100.cbl:L497",
+        "purchase/pl060.cbl:L740",
+        "purchase/pl060.cbl:L755",
+        "purchase/pl100.cbl:L488",
+    )
     dimensions = {
-        "guard conditions": (2, 2 + 1, 1),
-        "ELSE present": (True, True, False),
-        "counter increment": ("before", "absent", "after"),
-        "divide spelling": ("INTO", "INTO", "BY"),
-        "accumulator class": ("COMP-3", "COMP-3", "BINARY-LONG"),
+        "guard conditions": (2, 2 + 1, 1, 2, 2 + 1, 1),
+        "ELSE present": (True, True, False, True, True, False),
+        "counter increment": (
+            "before",
+            "absent",
+            "after",
+            "before",
+            "absent",
+            "after",
+        ),
+        "divide spelling": ("INTO", "INTO", "BY", "INTO", "INTO", "BY"),
+        "accumulator class": (
+            "COMP-3",
+            "COMP-3",
+            "BINARY-LONG",
+            "COMP-3",
+            "COMP-3",
+            "BINARY-LONG",
+        ),
     }
     assert len(dimensions) == 5
+    assert len(sites) == 6
+    assert all(len(values) == len(sites) for values in dimensions.values())
     differing = [name for name, values in dimensions.items() if len(set(values)) > 1]
     assert len(differing) == 5, (
-        "all five dimensions must differ across the three idioms; if one ever "
+        "all five dimensions must differ across the six sites; if one ever "
         f"agrees, re-derive it from the frozen source. Differing: {differing}"
     )
     assert dimensions["accumulator class"][2] == binary_accumulator.usage.value
     assert dimensions["accumulator class"][0] == packed_accumulator.usage.value
+    # The Purchase trio repeats the Sales trio exactly, dimension for dimension -
+    # which is why "just unify the mirrors" is the same error.
+    for values in dimensions.values():
+        assert values[:3] == values[3:], (
+            "the Purchase mirrors must agree with their Sales originals on every "
+            "dimension; a divergence here means one side was re-derived wrongly"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -2129,3 +2285,1172 @@ def test_the_defensive_key_resolver_reports_a_key_it_cannot_resolve() -> None:
         _dictionary_descriptor("NO-SUCH-TABLE.ANY-COLUMN")
     with pytest.raises(KeyError):
         _dictionary_descriptor("unqualified")
+
+
+# ---------------------------------------------------------------------------
+# 4.9  THE SIX SHIPPED PARAGRAPHS
+#
+#      Everything above pins the idioms against sequences of `arithmetic` calls
+#      spelled out in this file. That proves what the frozen COBOL MEANS. It cannot
+#      prove that the six paragraphs which actually run a posting still do it -
+#      adding the missing `add 1 to purch-activety` to `pl060._credit_comp`, or
+#      giving `work-2` two decimal places, would leave every test above green while
+#      every supplier average moved. This section drives all six.
+#
+#      THE SIX SITES AND THEIR PYTHON HOMES:
+#        (a) [sales/sl060.cbl:L816-L827]   sl060_invoice_posting._ba000_sales_comp
+#        (b) [sales/sl060.cbl:L832-L843]   sl060_invoice_posting._ba000_credit_comp
+#        (c) [sales/sl100.cbl:L497-L514]   sl100_cash_posting._compute_sales_pay
+#        (d) [purchase/pl060.cbl:L740-L751] pl060_order_posting._purch_comp
+#        (e) [purchase/pl060.cbl:L755-L766] pl060_order_posting._credit_comp
+#        (f) [purchase/pl100.cbl:L488-L505] pl100_payment_posting._init01__compute_purch_pay
+#
+#      SIX TEST FUNCTIONS, NO SHARED IDIOM SETUP. This file's brief is explicit that
+#      "sharing a fixture across the three would itself be the normalisation the
+#      specification forbids", so each test below constructs its own state and
+#      spells out its own inputs. The duplication is DELIBERATE. What is shared is
+#      only the import mechanism - `_shipped_module` - which carries no accounting
+#      value and no idiom.
+#
+#      WHY THE IMPORT IS DEFERRED (rule R-1). Agent Action Plan section 0.4.3 gives
+#      this tier `cobol` and `records` and forbids `dal` and any database. The four
+#      program modules import `acas_posting.dal.facade`, which pulls the MySQL
+#      driver in transitively, so importing them at module scope would leave
+#      `acas_posting.dal.*` and `mysql.*` resident and would break the three
+#      tier-isolation assertions this suite carries
+#      (`test_comp3_packed_decimal.py:L1536`, `test_comp_binary.py:L2036`,
+#      `test_pic_field_descriptors.py:L2134`), two of which read LIVE `sys.modules`.
+#      So the import happens INSIDE each test body, through `pytest.importorskip` so
+#      that a host with no driver SKIPS this section instead of failing, and the
+#      loader removes every tier-isolation-prefixed name it added in a `finally`.
+#      The pattern is `tests/conftest.py:L423-L483`'s. NO DATABASE IS TOUCHED: all
+#      six paragraphs operate on dataclasses in memory.
+# ---------------------------------------------------------------------------
+
+
+#: The module-name prefixes the tier's own isolation assertions forbid.
+_TIER_ISOLATION_PREFIXES: Final[tuple[str, ...]] = (
+    "acas_posting.cli",
+    "acas_posting.dal",
+    "acas_posting.programs",
+    "harness",
+    "mysql",
+    "numpy",
+    "pandas",
+    "sqlalchemy",
+    "yaml",
+)
+
+#: Shipped modules once imported. A plain dict, so it is inspectable and a failed
+#: import is never memoised.
+_SHIPPED_MODULE_CACHE: dict[str, types.ModuleType] = {}
+
+
+def _is_tier_isolated_name(name: str) -> bool:
+    """Does `name` fall under a prefix the tier must not leave loaded?"""
+    return any(
+        name == prefix or name.startswith(f"{prefix}.")
+        for prefix in _TIER_ISOLATION_PREFIXES
+    )
+
+
+@contextlib.contextmanager
+def _shipped_module(dotted_name: str) -> Iterator[types.ModuleType]:
+    """Import a shipped module for one test and leave `sys.modules` as found.
+
+    Args:
+        dotted_name: The importable name.
+
+    Yields:
+        The imported module.
+
+    Raises:
+        Skipped: Through `pytest.importorskip`, when a dependency is absent - on a
+            bare host, the pinned MySQL driver.
+    """
+    cached = _SHIPPED_MODULE_CACHE.get(dotted_name)
+    if cached is not None:
+        yield cached
+        return
+
+    before = frozenset(sys.modules)
+    try:
+        module = pytest.importorskip(
+            dotted_name,
+            reason=(
+                f"{dotted_name} could not be imported - without the pinned MySQL "
+                f"driver this section skips and the rest of the tier still runs"
+            ),
+        )
+        _SHIPPED_MODULE_CACHE[dotted_name] = module
+        yield module
+    finally:
+        for name in sorted(set(sys.modules) - before, reverse=True):
+            if _is_tier_isolated_name(name):
+                del sys.modules[name]
+
+
+def _pl060_working_storage(pl060: types.ModuleType) -> object:
+    """A `pl060` WORKING-STORAGE container with every field at its declared default.
+
+    Built exactly as `pl060_order_posting.run` builds it at its `_Ws(...)` call, so
+    the container is the production one and not a stand-in. It carries NO idiom
+    values: the activity counter, the average and the goods figure are set by each
+    test, individually, which is what keeps the two `pl060` idioms unshared.
+    """
+    from acas_posting import workfiles
+    from acas_posting.dates import WsDateFormats
+    from acas_posting.records.calling_data import WsCallingData
+    from acas_posting.records.file_access import FileAccess
+    from acas_posting.records.file_defs import FileDefs
+    from acas_posting.records.gl_batch import GlBatchRecord
+    from acas_posting.records.gl_posting import WsPostingRecord
+    from acas_posting.records.maps03 import Maps03Ws
+    from acas_posting.records.otm5 import OiHeader
+    from acas_posting.records.purchase_ledger import WsPurchRecord
+    from acas_posting.records.spl_irs_posting import WsIrsPostingRecord
+    from acas_posting.records.system_record import SystemRecord
+    from acas_posting.records.system_record_4 import SystemRecord4
+    from acas_posting.records.test_data_flags import AcasDalCommonData
+
+    return pl060._Ws(
+        ws_calling_data=WsCallingData(),
+        system_record=SystemRecord(),
+        system_record_4=SystemRecord4(),
+        to_day="21/09/2025",
+        file_defs=FileDefs(),
+        file_access=FileAccess(),
+        dal_common=AcasDalCommonData(),
+        purch=WsPurchRecord(),
+        otm5=pl060._new_oi_header(),
+        oi_header=pl060._new_oi_header(),
+        si_header=pl060._new_oi_header(),
+        batch=GlBatchRecord(),
+        posting=WsPostingRecord(),
+        irs_posting=WsIrsPostingRecord(),
+        otm4=workfiles.open_item_work_file("otm4-in-memory", OiHeader),
+        maps03_ws=Maps03Ws(),
+        date_ws=WsDateFormats(),
+    )
+
+
+def test_shipped_a_sl060_sales_comp_truncates_twice_and_counts_before() -> None:
+    """(a) `ba000-Sales-Comp` [sales/sl060.cbl:L816-L827], driven for real.
+
+    ANOMALY A-8, end to end in the shipped code. With two prior invoices averaging
+    12 and a new one worth 24.99:
+
+        L821  multiply 2 by 12 giving work-2        ->  24
+        L825  add 1 to sales-activety              ->   3   (BEFORE the divide)
+        L826  add work-goods to work-2             ->  48    <- the pence are GONE
+        L827  divide sales-activety into work-2    ->  16    <- and the remainder too
+
+    24 + 24.99 is 48.99, and `work-2` is `pic s9(14) comp-3` with SCALE 0
+    [sales/sl060.cbl:L206], so the ninety-nine pence are discarded on the way in.
+    A full-precision accumulator would hold 48.99 and divide to 16.33, and the
+    counterfactual below asserts that the two differ - which is what makes the
+    reproduction a reproduction rather than a coincidence. No pence figure is
+    invented: every value here is exact integer arithmetic over the declared
+    widths.
+    """
+    with _shipped_module("acas_posting.programs.sl060_invoice_posting") as sl060:
+        from acas_posting import workfiles
+        from acas_posting.records.calling_data import WsCallingData
+        from acas_posting.records.file_defs import FileDefs
+        from acas_posting.records.otm3 import OiHeader
+        from acas_posting.records.system_record import SystemRecord
+        from acas_posting.records.system_record_4 import SystemRecord4
+
+        state = sl060._new_state(
+            WsCallingData(),
+            SystemRecord(),
+            SystemRecord4(),
+            "21/09/2025",
+            FileDefs(),
+            workfiles.open_item_work_file("otm2-in-memory", OiHeader),
+        )
+        state.ws_sales_record.sales_activety = 2
+        state.ws_sales_record.sales_average = 12
+        state.work_goods = Decimal("24.99")
+
+        sl060._ba000_sales_comp(state)
+
+        # Truncation #1: the accumulator has scale 0, so 48.99 became 48.
+        assert state.work_2 == 48
+        assert isinstance(state.work_2, int) and not isinstance(state.work_2, bool)
+        # The counter was incremented BEFORE the divide, so the divisor is 3.
+        assert state.ws_sales_record.sales_activety == 3
+        # Truncation #2: 48 / 3 is exact here, so the loss is entirely truncation #1.
+        assert state.ws_sales_record.sales_average == 16
+        assert isinstance(state.ws_sales_record.sales_average, int)
+
+        # THE COUNTERFACTUAL. A two-decimal accumulator - the "obvious fix" - would
+        # hold 48.99 and yield 16 as well after the integer store, so the average
+        # alone cannot distinguish the two. The accumulator can, which is why it is
+        # asserted above as an integer and not merely as a number.
+        assert state.work_2 != Decimal("48.99")
+        assert arithmetic.intermediate(
+            lambda: Decimal("24") + Decimal("24.99")
+        ) == Decimal("48.99")
+        # And the declared descriptor the paragraph stores through is scale-0
+        # fourteen-digit packed decimal, not a money field.
+        assert sl060._WORK_2.scale == 0
+        assert sl060._WORK_2.digits == 14
+        assert sl060._WORK_2.usage is model.Usage.COMP_3
+        assert sl060._WORK_2.python_storage is model.CobolPythonStorage.INT
+        assert sl060._WORK_2.source_locator == "sales/sl060.cbl:L206"
+
+
+def test_shipped_b_sl060_credit_comp_never_increments_its_counter() -> None:
+    """(b) `ba000-Credit-Comp` [sales/sl060.cbl:L832-L843], driven for real.
+
+    ANOMALY A-9 in the shipped code. There is NO `add 1 to sales-activety` anywhere
+    in the section, and there is an EXTRA outer guard at L841. So:
+
+      * a customer's FIRST credit note (activity 0) fails the L835-L836 guard, gets
+        `work-2` zeroed at L839, fails the L841 outer guard, and leaves BOTH the
+        counter and the average exactly as they were - the note is silently dropped;
+      * a LATER credit note updates the average but divides by the UN-incremented
+        counter, so 128 / 4 is 32 where a repaired path would divide by 5 and give
+        25.
+
+    The 32-versus-25 difference is what kills the repair: adding the missing
+    increment changes a posted average. No pence are involved - every figure is
+    exact integer arithmetic. Do NOT add the increment (rules R-3, R-4).
+    """
+    with _shipped_module("acas_posting.programs.sl060_invoice_posting") as sl060:
+        from acas_posting import workfiles
+        from acas_posting.records.calling_data import WsCallingData
+        from acas_posting.records.file_defs import FileDefs
+        from acas_posting.records.otm3 import OiHeader
+        from acas_posting.records.system_record import SystemRecord
+        from acas_posting.records.system_record_4 import SystemRecord4
+
+        def fresh() -> object:
+            # Constructed inside this test, and not shared with the sibling idiom's
+            # test: sharing the setup is the normalisation the brief forbids.
+            return sl060._new_state(
+                WsCallingData(),
+                SystemRecord(),
+                SystemRecord4(),
+                "21/09/2025",
+                FileDefs(),
+                workfiles.open_item_work_file("otm2-in-memory", OiHeader),
+            )
+
+        # The first credit note for a customer.
+        state = fresh()
+        state.ws_sales_record.sales_activety = 0
+        state.ws_sales_record.sales_average = 7
+        state.work_goods = Decimal("10.00")
+
+        sl060._ba000_credit_comp(state)
+
+        assert state.work_2 == 0
+        # A-9: the counter is NOT incremented. A repaired path would read 1.
+        assert state.ws_sales_record.sales_activety == 0
+        # And the outer guard suppressed the divide, so the average is untouched.
+        assert state.ws_sales_record.sales_average == 7
+
+        # A later credit note, where the guards pass.
+        state = fresh()
+        state.ws_sales_record.sales_activety = 4
+        state.ws_sales_record.sales_average = 30
+        state.work_goods = Decimal("8.00")
+
+        sl060._ba000_credit_comp(state)
+
+        assert state.work_2 == 128
+        # A-9 again: still not incremented, so the divisor is 4 and not 5.
+        assert state.ws_sales_record.sales_activety == 4
+        assert state.ws_sales_record.sales_average == 32
+        # THE COUNTERFACTUAL: with the missing increment restored the divisor would
+        # be 5 and the stored average 25, so the repair is observable in the ledger.
+        assert arithmetic.divide_into_giving(
+            5, 128, _dictionary_descriptor("SALEDGER-REC.SALES-AVERAGE")
+        ) == 25
+        assert state.ws_sales_record.sales_average != 25
+
+
+def test_shipped_c_sl100_compute_sales_pay_counts_after_and_divides_by() -> None:
+    """(c) `compute-sales-pay.` [sales/sl100.cbl:L497-L514], driven for real.
+
+    ANOMALY A-10 in the shipped code. One guard, no ELSE, the counter incremented
+    AFTER the accumulation, and the REVERSED divide:
+
+        L503  subtract oi-date from oi-date-cleared giving work-a  ->  45
+        L504  move zero to work-b                                 ->   0
+        L506  if sales-pay-activety not = zero  (no ELSE)
+        L507  multiply 2 by 30 giving work-b                       ->  60
+        L509  add work-a to work-b                                 -> 105
+        L510  add 1 to sales-pay-activety                          ->   3  (AFTER)
+        L511  divide work-b by sales-pay-activety giving average   ->  35  (BY)
+        L513  if work-a > sales-pay-worst  (STRICT)                -> no move
+
+    The watermark is left at 45 because the comparison is strict and `work-a` is
+    exactly 45. Note that `compute-sales-pay.` is a PARAGRAPH NAME, not a `COMPUTE`
+    verb. Every figure is exact integer arithmetic over day counts.
+    """
+    with _shipped_module("acas_posting.programs.sl100_cash_posting") as sl100:
+        from acas_posting.records.calling_data import WsCallingData
+        from acas_posting.records.file_defs import FileDefs
+        from acas_posting.records.system_record import SystemRecord
+        from acas_posting.records.system_record_4 import SystemRecord4
+
+        state = sl100._new_state(
+            WsCallingData(),
+            SystemRecord(),
+            SystemRecord4(),
+            "21/09/2025",
+            FileDefs(),
+            ok_to_post=True,
+        )
+        state.oi.filler_1.oi_date = 100
+        state.oi.filler_1.oi_date_cleared = 145
+        state.sales.sales_pay_activety = 2
+        state.sales.sales_pay_average = 30
+        state.sales.sales_pay_worst = 45
+
+        sl100._compute_sales_pay(state)
+
+        # `subtract a from b giving c` is `c = b - a`; asymmetric operands, so a
+        # reversal would show up as -45.
+        assert state.work_a == 45
+        assert state.work_b == 105
+        # The counter moved AFTER the accumulate, so the divisor is 3.
+        assert state.sales.sales_pay_activety == 3
+        # The `BY` form: work_b / activety. The `INTO` form would give 0.
+        assert state.sales.sales_pay_average == 35
+        assert (
+            arithmetic.divide_into_giving(
+                105, 3, _dictionary_descriptor("SALEDGER-REC.SALES-PAY-AVERAGE")
+            )
+            == 0
+        )
+        # The watermark comparison is STRICT, so an equal value does not update it.
+        assert state.sales.sales_pay_worst == 45
+
+
+def test_shipped_d_pl060_purch_comp_truncates_twice_and_counts_before() -> None:
+    """(d) `purch-comp` [purchase/pl060.cbl:L740-L751], driven for real.
+
+    The Purchase mirror of (a), and the reason a missing Purchase-specific test was
+    a real gap rather than a formality: this is a DIFFERENT paragraph, with its own
+    `work-2` descriptor at [purchase/pl060.cbl:L200] and its own receiving fields,
+    so nothing asserted about `sl060` constrains it.
+
+        L745  multiply 2 by 12 giving work-2      ->  24
+        L749  add 1 to purch-activety            ->   3   (BEFORE the divide)
+        L750  add work-goods to work-2           ->  48    <- the pence are GONE
+        L751  divide purch-activety into work-2  ->  16
+
+    Its state is constructed here rather than in a shared helper, deliberately.
+    """
+    with _shipped_module("acas_posting.programs.pl060_order_posting") as pl060:
+        ws = _pl060_working_storage(pl060)
+        ws.purch.purch_activety = 2
+        ws.purch.purch_average = 12
+        ws.work_goods = Decimal("24.99")
+
+        pl060._purch_comp(ws)
+
+        assert ws.work_2 == 48
+        assert isinstance(ws.work_2, int) and not isinstance(ws.work_2, bool)
+        assert ws.purch.purch_activety == 3
+        assert ws.purch.purch_average == 16
+        assert isinstance(ws.purch.purch_average, int)
+
+        # THE COUNTERFACTUAL for the "obvious fix" of giving `work-2` two decimal
+        # places: the accumulator would hold 48.99. The stored average would still
+        # read 16, so only the accumulator distinguishes the two.
+        assert ws.work_2 != Decimal("48.99")
+        assert pl060._D_WORK_2.scale == 0
+        assert pl060._D_WORK_2.digits == 14
+        assert pl060._D_WORK_2.usage is model.Usage.COMP_3
+        assert pl060._D_WORK_2.python_storage is model.CobolPythonStorage.INT
+        assert pl060._D_WORK_2.source_locator == "purchase/pl060.cbl:L200"
+
+
+def test_shipped_e_pl060_credit_comp_never_increments_its_counter() -> None:
+    """(e) `credit-comp` [purchase/pl060.cbl:L755-L766], driven for real.
+
+    ANOMALY A-9 on the Purchase side, in the shipped code: no `add 1 to
+    purch-activety` anywhere in the block, plus the extra outer guard at
+    [purchase/pl060.cbl:L764]. So a supplier's first credit note is silently
+    dropped, and a later one divides by the un-incremented counter - 128 / 4 = 32,
+    where the repair would give 128 / 5 = 25.
+
+    This is the mutation a shared moving-average helper would introduce, which is
+    why it is asserted against the real paragraph and not against a transcription.
+    Do NOT add the increment (rules R-3, R-4).
+    """
+    with _shipped_module("acas_posting.programs.pl060_order_posting") as pl060:
+        # The first credit note for a supplier.
+        ws = _pl060_working_storage(pl060)
+        ws.purch.purch_activety = 0
+        ws.purch.purch_average = 7
+        ws.work_goods = Decimal("10.00")
+
+        pl060._credit_comp(ws)
+
+        assert ws.work_2 == 0
+        assert ws.purch.purch_activety == 0
+        assert ws.purch.purch_average == 7
+
+        # A later credit note.
+        ws = _pl060_working_storage(pl060)
+        ws.purch.purch_activety = 4
+        ws.purch.purch_average = 30
+        ws.work_goods = Decimal("8.00")
+
+        pl060._credit_comp(ws)
+
+        assert ws.work_2 == 128
+        assert ws.purch.purch_activety == 4
+        assert ws.purch.purch_average == 32
+        assert (
+            arithmetic.divide_into_giving(
+                5, 128, _dictionary_descriptor("PULEDGER-REC.PURCH-AVERAGE")
+            )
+            == 25
+        )
+        assert ws.purch.purch_average != 25
+
+
+def test_shipped_f_pl100_compute_purch_pay_counts_after_and_divides_by() -> None:
+    """(f) `compute-purch-pay.` [purchase/pl100.cbl:L488-L505], driven for real.
+
+    The Purchase mirror of (c), whose coverage was prose only until now:
+
+        L497  subtract oi-date from oi-date-cleared giving work-a  ->  45
+        L498  move zero to work-b                                 ->   0
+        L499  if purch-pay-activety not = zero  (no ELSE)
+        L500  multiply 2 by 30 giving work-b                       ->  60
+        L500  add work-a to work-b                                 -> 105
+        L501  add 1 to purch-pay-activety                          ->   3  (AFTER)
+        L502  divide work-b by purch-pay-activety giving average   ->  35  (BY)
+        L504  if work-a > purch-pay-worst  (STRICT)                -> no move
+
+    `compute-purch-pay.` is a PARAGRAPH NAME and not a `COMPUTE` verb - the same
+    trap the divide census notes for its Sales twin.
+    """
+    with _shipped_module("acas_posting.programs.pl100_payment_posting") as pl100:
+        from acas_posting.records.calling_data import WsCallingData
+        from acas_posting.records.file_defs import FileDefs
+        from acas_posting.records.system_record import SystemRecord
+        from acas_posting.records.system_record_4 import SystemRecord4
+
+        state = pl100._Pl100State(
+            ws_calling_data=WsCallingData(),
+            system_record=SystemRecord(),
+            system_record_4=SystemRecord4(),
+            to_day="21/09/2025",
+            file_defs=FileDefs(),
+            ok_to_post=True,
+        )
+        state.otm5.oi_date = 100
+        state.otm5.oi_date_cleared = 145
+        state.purch.purch_pay_activety = 2
+        state.purch.purch_pay_average = 30
+        state.purch.purch_pay_worst = 45
+
+        pl100._init01__compute_purch_pay(state)
+
+        assert state.work_a == 45
+        assert state.work_b == 105
+        assert state.purch.purch_pay_activety == 3
+        assert state.purch.purch_pay_average == 35
+        assert (
+            arithmetic.divide_into_giving(
+                105, 3, _dictionary_descriptor("PULEDGER-REC.PURCH-PAY-AVERAGE")
+            )
+            == 0
+        )
+        assert state.purch.purch_pay_worst == 45
+
+        # The early return at [purchase/pl100.cbl:L495]: an uncleared item does
+        # nothing at all, so neither counter nor average nor watermark moves.
+        untouched = pl100._Pl100State(
+            ws_calling_data=WsCallingData(),
+            system_record=SystemRecord(),
+            system_record_4=SystemRecord4(),
+            to_day="21/09/2025",
+            file_defs=FileDefs(),
+            ok_to_post=True,
+        )
+        untouched.otm5.oi_date = 100
+        untouched.otm5.oi_date_cleared = 0
+        untouched.purch.purch_pay_activety = 2
+        untouched.purch.purch_pay_average = 30
+
+        pl100._init01__compute_purch_pay(untouched)
+
+        assert untouched.purch.purch_pay_activety == 2
+        assert untouched.purch.purch_pay_average == 30
+
+
+def test_the_six_shipped_paragraphs_leave_no_driver_loaded() -> None:
+    """Rule R-1 holds even though this section reaches four program modules.
+
+    The loader purges every tier-isolation-prefixed name it added, so nothing
+    forbidden is resident by the time a later test in the tier inspects
+    `sys.modules`.
+    """
+    for dotted in (
+        "acas_posting.programs.sl060_invoice_posting",
+        "acas_posting.programs.sl100_cash_posting",
+        "acas_posting.programs.pl060_order_posting",
+        "acas_posting.programs.pl100_payment_posting",
+    ):
+        with _shipped_module(dotted) as module:
+            assert module.__name__ == dotted
+
+    resident = tuple(sorted(n for n in sys.modules if _is_tier_isolated_name(n)))
+    assert resident == (), resident
+    assert _is_tier_isolated_name("acas_posting.dal") is True
+    assert _is_tier_isolated_name("acas_posting.programs.pl060_order_posting") is True
+    assert _is_tier_isolated_name("mysql.connector") is True
+    assert _is_tier_isolated_name("acas_posting.database") is False
+    assert _is_tier_isolated_name("acas_posting.cobol.arithmetic") is False
+
+
+# ===========================================================================
+#  SECTION 4.11  THE AMBIENT DECIMAL CONTEXT IS NOT AN INPUT      (rule R-2)
+# ===========================================================================
+#
+# Every function in `acas_posting.cobol.arithmetic` enters a copy of
+# `INTERMEDIATE_CONTEXT` before it touches a `Decimal` - the policy the module states
+# at `acas_posting/cobol/arithmetic.py:L98-L99` and pins at L102. This section is what
+# turns that stated policy into a checked one.
+#
+# The reason it needs checking is that almost every `Decimal` method is a CONTEXT
+# operation, and the context is process-global mutable state that this migration does
+# not own. `+`, `-`, `*`, `/`, unary minus, `scaleb`, `**` and `quantize` all consult
+# `decimal.getcontext()`; the first seven round their result to its `prec`, and
+# `quantize` does something worse - it REFUSES, raising `InvalidOperation`, when the
+# result would need more digits than `prec` allows. So an embedding application, a
+# `sitecustomize`, or a library that calls `decimal.setcontext` at import can change
+# what an unguarded expression computes, silently and everywhere at once. A migration
+# whose whole acceptance criterion is an empty table diff (section 0.8.5) cannot have a
+# posted figure that depends on that.
+#
+# Only three kinds of `Decimal` operation are context-FREE, and they are the ones this
+# tier is built on: construction from a `str` or `int`, the sign-and-copy family
+# (`copy_negate`, `copy_abs`, `copy_sign`), and `as_tuple`.
+#
+# The contexts below are deliberately absurd - one significant digit, rounding away
+# from the layer's own direction, and in one case every signal trapped so that any
+# leak raises instead of quietly rounding. None of them is a context a real deployment
+# would install. That is the point: if the layer is indifferent to THESE, it is
+# indifferent to whatever a real caller carries.
+
+_HOSTILE_CONTEXTS: Final[tuple[tuple[str, decimal.Context], ...]] = (
+    (
+        # One significant digit. Any leaked binary operator collapses a money value to
+        # a single digit, so this is the sharpest detector of the set.
+        "prec-1",
+        decimal.Context(prec=1),
+    ),
+    (
+        # Rounding CEILING, the opposite direction to the layer's own truncating store
+        # (`TRUNCATING_STORE`, `acas_posting/cobol/arithmetic.py:L104`), so a leak
+        # shows up as a value that moved the wrong way rather than merely a short one.
+        "prec-4-ceiling",
+        decimal.Context(prec=4, rounding=decimal.ROUND_CEILING),
+    ),
+    (
+        # Every signal trapped, including `Inexact` and `Rounded`, which the layer's own
+        # context deliberately leaves untrapped at
+        # `acas_posting/cobol/arithmetic.py:L112` and L116 because COBOL truncation IS
+        # inexact by design. A leak therefore RAISES here rather than returning a
+        # wrong number.
+        "prec-2-all-trapped",
+        decimal.Context(
+            prec=2,
+            traps={
+                decimal.Clamped: True,
+                decimal.DivisionByZero: True,
+                decimal.Inexact: True,
+                decimal.InvalidOperation: True,
+                decimal.Overflow: True,
+                decimal.Rounded: True,
+                decimal.Subnormal: True,
+                decimal.Underflow: True,
+                decimal.FloatOperation: True,
+            },
+        ),
+    ),
+    (
+        # The mirror image: NOTHING trapped, so a leaked invalid operation returns a
+        # quiet `NaN` instead of raising. This is the nastiest of the four, because a
+        # `NaN` compares unequal to everything and a weaker assertion would not notice.
+        "prec-3-nothing-trapped",
+        decimal.Context(
+            prec=3,
+            rounding=decimal.ROUND_FLOOR,
+            traps={
+                decimal.Clamped: False,
+                decimal.DivisionByZero: False,
+                decimal.Inexact: False,
+                decimal.InvalidOperation: False,
+                decimal.Overflow: False,
+                decimal.Rounded: False,
+                decimal.Subnormal: False,
+                decimal.Underflow: False,
+                decimal.FloatOperation: False,
+            },
+        ),
+    ),
+)
+
+
+def _observation(label: str, produce: object) -> tuple[str, str, object]:
+    """Reduce one layer result to data that carries no context of its own.
+
+    A `Decimal` is recorded as its `as_tuple()` - sign, digit tuple and exponent - and
+    NOT as the object, so the comparison downstream is over plain `int`s and cannot
+    itself consult a context. `as_tuple` is one of the three context-free `Decimal`
+    operations, alongside construction and the copy family.
+
+    Recording the tuple rather than the value is what makes this byte-identity rather
+    than numeric equality: `Decimal("1.5")` and `Decimal("1.50")` are `==` but their
+    tuples differ, and it is the second that a `decimal(9,2)` column stores.
+
+    Args:
+        label: The call being recorded, used only to make a failure legible.
+        produce: A zero-argument callable holding the layer call.
+
+    Returns:
+        `(label, carrier, payload)`. `carrier` is the result's type name, so an `int`
+            receiver that started returning a `Decimal` is caught even when the two
+            compare equal. A raise is recorded as the exception's type name, because
+            WHICH size error the layer reports is as much a part of its behaviour as
+            what it returns.
+    """
+    try:
+        value = produce()  # type: ignore[operator]
+    except Exception as exc:  # noqa: BLE001 - the exception type IS the observation
+        return (label, "raised", type(exc).__name__)
+    if isinstance(value, Decimal):
+        return (label, "Decimal", value.as_tuple())
+    return (label, type(value).__name__, value)
+
+
+def _layer_observations() -> tuple[tuple[str, str, object], ...]:
+    """Drive one representative call of every public entry point of the layer.
+
+    Coverage is by RECEIVER SHAPE as well as by verb, because the store is where the
+    context would bite: `DISPLAY` and `COMP-3` and the binary family, signed and
+    unsigned, scale two and scale zero, in range and over range. The values are the
+    ones the sibling tables in this file already measure, so nothing here invents a
+    figure - it re-drives figures the tier has already arbitrated.
+
+    Returns:
+        The observations, in a fixed order so two runs are comparable positionally.
+    """
+    return (
+        # -- store: the truncating default, both signs, four storage classes ---------
+        _observation(
+            "store display signed",
+            lambda: arithmetic.store(Decimal("1234.567"), _POST_AMOUNT),
+        ),
+        _observation(
+            "store display signed negative",
+            lambda: arithmetic.store(Decimal("-1234.567"), _POST_AMOUNT),
+        ),
+        _observation(
+            "store comp-3 unsigned full width",
+            lambda: arithmetic.store(Decimal("999999999.99"), _INPUT_GROSS),
+        ),
+        _observation(
+            "store comp-3 signed negative",
+            lambda: arithmetic.store(Decimal("-45.678"), _LEDGER_BALANCE),
+        ),
+        _observation(
+            "store comp unsigned",
+            lambda: arithmetic.store(Decimal("123.456"), _IH_DEDUCT_AMT),
+        ),
+        _observation(
+            "store binary-char int carrier",
+            lambda: arithmetic.store(127, _PAGE_LINES),
+        ),
+        _observation(
+            "store binary-long signed int carrier",
+            lambda: arithmetic.store(-2147483648, _SALES_LIMIT),
+        ),
+        # -- store: the silent over-range paths, where a leak would change the digits
+        #    that survive rather than merely their count ------------------------------
+        _observation(
+            "store scale-0 over range",
+            lambda: arithmetic.store(Decimal("104"), _QUARTER_SUBSCRIPT),
+        ),
+        _observation(
+            "store display over range",
+            lambda: arithmetic.store(Decimal("123456789012.34"), _POST_AMOUNT),
+        ),
+        # -- store: ROUNDED, the five annotated sites of the cycle -------------------
+        _observation(
+            "store rounded half away from zero",
+            lambda: arithmetic.store(Decimal("16.665"), _WORK_NET, rounded=True),
+        ),
+        _observation(
+            "store rounded negative half",
+            lambda: arithmetic.store(Decimal("-16.665"), _WORK_NET, rounded=True),
+        ),
+        # -- compute: the expression form, unrounded then rounded --------------------
+        _observation(
+            "compute unrounded",
+            lambda: arithmetic.compute(
+                lambda: Decimal("99.99") - Decimal("99.99") / Decimal("1.20"),
+                _WORK_NET,
+            ),
+        ),
+        _observation(
+            "compute rounded",
+            lambda: arithmetic.compute(
+                lambda: Decimal("99.99") - Decimal("99.99") / Decimal("1.20"),
+                _WORK_NET,
+                rounded=True,
+            ),
+        ),
+        # -- the five arithmetic verbs, both the GIVING and the in-place shapes ------
+        _observation(
+            "add_giving",
+            lambda: arithmetic.add_giving(
+                Decimal("1200.00"), Decimal("240.00"), receiving=_PRE_AMOUNT
+            ),
+        ),
+        _observation(
+            "add_to",
+            lambda: arithmetic.add_to(
+                Decimal("12.99"), receiver_value=Decimal("25.98"), receiving=_WORK_NET
+            ),
+        ),
+        _observation(
+            "subtract_giving",
+            lambda: arithmetic.subtract_giving(
+                Decimal("16.67"), minuend=Decimal("-99.99"), receiving=_POST_AMOUNT
+            ),
+        ),
+        _observation(
+            "subtract_from",
+            lambda: arithmetic.subtract_from(
+                Decimal("16.67"),
+                receiver_value=Decimal("99.99"),
+                receiving=_POST_AMOUNT,
+            ),
+        ),
+        _observation(
+            "multiply_by",
+            lambda: arithmetic.multiply_by(
+                -1, receiver_value=Decimal("1200.00"), receiving=_PRE_AMOUNT
+            ),
+        ),
+        _observation(
+            "multiply_by_giving",
+            lambda: arithmetic.multiply_by_giving(
+                Decimal("1.20"), Decimal("99.99"), _WORK_NET
+            ),
+        ),
+        _observation(
+            "divide_by_giving",
+            lambda: arithmetic.divide_by_giving(
+                Decimal("99.99"), Decimal("1.20"), _WORK_NET
+            ),
+        ),
+        _observation(
+            "divide_into_giving",
+            lambda: arithmetic.divide_into_giving(
+                Decimal("1.20"), Decimal("99.99"), _WORK_NET
+            ),
+        ),
+        # -- the two receiver-less forms: no store, so nothing truncates -------------
+        _observation(
+            "intermediate",
+            lambda: arithmetic.intermediate(
+                lambda: Decimal("99.99") / Decimal("1.20")
+            ),
+        ),
+        _observation(
+            "compare equal after alignment",
+            lambda: arithmetic.compare(Decimal("1.50"), Decimal("1.5")),
+        ),
+        _observation(
+            "compare unequal",
+            lambda: arithmetic.compare(Decimal("1.50"), Decimal("1.51")),
+        ),
+    )
+
+
+@contextlib.contextmanager
+def _ambient_context(context: decimal.Context) -> Iterator[None]:
+    """Install `context` process-wide, and put the caller's back afterwards.
+
+    `decimal.localcontext` is deliberately NOT used: it is the very mechanism under
+    test, so borrowing it here would make the test agree with the layer by
+    construction. `setcontext` with an explicit restore reproduces what a hostile
+    caller actually does - it replaces the thread's context outright.
+
+    The restore is in a `finally`, so a failing assertion inside the block cannot
+    leave the reduced precision installed for the rest of the session.
+
+    Args:
+        context: The context to install.
+
+    Yields:
+        Nothing; the block runs with `context` current.
+    """
+    previous = decimal.getcontext()
+    decimal.setcontext(context.copy())
+    try:
+        yield
+    finally:
+        decimal.setcontext(previous)
+
+
+@pytest.mark.parametrize(
+    ("label", "hostile"),
+    _HOSTILE_CONTEXTS,
+    ids=[label for label, _ in _HOSTILE_CONTEXTS],
+)
+def test_every_layer_call_is_byte_identical_under_a_hostile_ambient_context(
+    label: str, hostile: decimal.Context
+) -> None:
+    """The layer's answers do not move when the caller's context does (R-2).
+
+    Every public entry point and every receiver storage class, driven once under
+    whatever context this session is running in and again under `label`. The two runs
+    must agree on the SIGN, the DIGIT TUPLE, the EXPONENT and the CARRIER of every
+    result - and on which exception is raised where one is - not merely on numeric
+    value.
+
+    This is the property that makes a posted figure reproducible: two processes
+    running the same scenario must write the same bytes, and one of them cannot be
+    allowed to differ because it happened to import a library that narrowed the
+    ambient precision. Section 0.8.5's determinism criterion depends on it.
+    """
+    baseline = _layer_observations()
+
+    with _ambient_context(hostile):
+        under_hostile = _layer_observations()
+
+    # Every label distinct, so a call quietly dropped from the table cannot hide
+    # behind a shorter comparison, and the two runs the same length. The COVERAGE of
+    # the table - that it reaches all twelve entry points - is asserted separately by
+    # `test_the_hostile_context_table_reaches_every_public_entry_point`, which is a
+    # statement about the layer's surface rather than about a count.
+    labels = tuple(label for label, _, _ in baseline)
+    assert len(labels) == len(set(labels)), labels
+    assert len(under_hostile) == len(baseline)
+    assert under_hostile == baseline, [
+        (b, h) for b, h in zip(baseline, under_hostile, strict=True) if b != h
+    ]
+
+    # No result silently became a NaN, which is the failure mode of the context that
+    # traps nothing: a NaN would compare unequal above, but only if the tuples were
+    # reached - and a NaN's `as_tuple()` exponent is the string "n", so it is named
+    # here explicitly rather than left to inference.
+    assert all(
+        payload[2] != "n"
+        for _, carrier, payload in under_hostile
+        if carrier == "Decimal"
+    )
+
+
+@pytest.mark.parametrize(
+    ("label", "hostile"),
+    _HOSTILE_CONTEXTS,
+    ids=[label for label, _ in _HOSTILE_CONTEXTS],
+)
+def test_each_hostile_context_really_is_hostile(
+    label: str, hostile: decimal.Context
+) -> None:
+    """The detector detects: each context above genuinely corrupts naive arithmetic.
+
+    A test that pins a context which turns out to be harmless proves nothing, and the
+    sibling test above would pass just as happily against `decimal.Context()`. So each
+    context is required to change - or refuse - the SAME expression when it is written
+    the naive way, outside the layer.
+
+    The expression is `1234.56 + 1234.56`, whose exact answer needs SIX significant
+    digits - more than the widest context above carries - so every one of them is too
+    narrow for it. Three return a shortened figure, each in its own rounding
+    direction, and the all-trapped one raises `Inexact` outright. Both outcomes count
+    as hostile; agreement with 2469.12 does not.
+    """
+    exact = Decimal("2469.12")
+
+    with _ambient_context(hostile):
+        try:
+            naive = Decimal("1234.56") + Decimal("1234.56")
+        except decimal.DecimalException:
+            naive = None
+
+    # Either it refused, or it answered - but it must not have answered correctly,
+    # because a context that computes this correctly is not narrow enough to detect a
+    # leak in the layer.
+    assert naive is None or naive != exact, (label, naive)
+
+
+def test_the_layer_leaves_the_callers_context_exactly_as_it_found_it() -> None:
+    """`localcontext` is entered and exited, so the caller's context is not collateral.
+
+    The complement of the two tests above. Those establish that the caller cannot
+    change the layer; this one establishes that the layer does not change the caller -
+    neither its precision and rounding, nor, less obviously, its accumulated signal
+    FLAGS. A layer that truncated inside the caller's context would raise `Inexact`
+    and `Rounded` in the caller's flags, and an application that inspects those flags
+    to decide whether ITS OWN computation was exact would then be misled by a
+    completely unrelated ledger posting.
+    """
+    caller = decimal.Context(prec=5, rounding=decimal.ROUND_UP)
+    caller.clear_flags()
+
+    previous = decimal.getcontext()
+    decimal.setcontext(caller)
+    try:
+        current = decimal.getcontext()
+        flags_before = dict(current.flags)
+
+        _layer_observations()
+
+        assert current.prec == 5
+        assert current.rounding == decimal.ROUND_UP
+        assert dict(current.flags) == flags_before
+        # Specifically: the truncating stores above are inexact by design, and not one
+        # of them reported that fact into the caller's flags.
+        assert current.flags[decimal.Inexact] is False
+        assert current.flags[decimal.Rounded] is False
+        assert decimal.getcontext() is current
+    finally:
+        decimal.setcontext(previous)
+
+
+# The twelve public callables of `acas_posting.cobol.arithmetic`, named so that the
+# table above is measured against the layer's surface rather than against a count. Any
+# verb added to the layer later fails the test below until it is exercised under a
+# hostile context too, which is the point of writing the set down.
+_LAYER_ENTRY_POINTS_COVERED: Final[frozenset[str]] = frozenset(
+    {
+        "add_giving",
+        "add_to",
+        "compare",
+        "compute",
+        "divide_by_giving",
+        "divide_into_giving",
+        "intermediate",
+        "multiply_by",
+        "multiply_by_giving",
+        "store",
+        "subtract_from",
+        "subtract_giving",
+    }
+)
+
+
+def test_the_hostile_context_table_reaches_every_public_entry_point() -> None:
+    """No verb of the arithmetic layer escapes the ambient-context check.
+
+    Derived from `arithmetic.__all__` rather than from a hand-kept list, so the day a
+    thirteenth verb is exported this fails and the table above has to grow with it.
+    The upper-case exports are excluded because they are the layer's constants and its
+    exception class, not entry points: `INTERMEDIATE_CONTEXT`,
+    `INTERMEDIATE_PRECISION`, `ROUNDED_STORE`, `ROUNDING_DIRECTIONS` and
+    `SizeErrorNoStore`.
+    """
+    exported_callables = frozenset(
+        name
+        for name in arithmetic.__all__
+        if not name[0].isupper() and callable(getattr(arithmetic, name))
+    )
+    assert exported_callables == _LAYER_ENTRY_POINTS_COVERED
+
+    # And each of the twelve is actually named by the driven table, matched on the
+    # first word of the label so the mapping is legible in a failure message.
+    driven = tuple(label for label, _, _ in _layer_observations())
+    for entry_point in sorted(_LAYER_ENTRY_POINTS_COVERED):
+        assert any(
+            label == entry_point or label.startswith(entry_point + " ")
+            for label in driven
+        ), (entry_point, driven)
+
+
+# The migration's own layers whose modules must be re-executed, not reused, to observe
+# a constant they fold at import time. Third-party names are deliberately absent: a C
+# extension does not need re-importing to be measured, and repeatedly evicting one is
+# needless risk.
+_MIGRATION_LAYER_PREFIXES: Final[tuple[str, ...]] = (
+    "acas_posting.cli",
+    "acas_posting.dal",
+    "acas_posting.programs",
+)
+
+
+@contextlib.contextmanager
+def _freshly_imported(dotted_name: str) -> Iterator[types.ModuleType]:
+    """Import `dotted_name` so that its top-level code RUNS inside the block.
+
+    Distinct from `_shipped_module` above, which memoises deliberately. Memoisation is
+    wrong here: the two constants this section measures are folded once at import, so a
+    cached module would answer with the context of whenever it was first imported and
+    the test would be vacuous.
+
+    On the way in, the migration's own lower layers are evicted from `sys.modules` so
+    the import really re-executes. On the way out, every tier-isolated name the import
+    added is removed, so rule R-1's guards - which read LIVE `sys.modules` in two later
+    files - are unaffected. Nothing is written into `_SHIPPED_MODULE_CACHE`.
+
+    Args:
+        dotted_name: The importable name.
+
+    Yields:
+        The freshly executed module.
+
+    Raises:
+        Skipped: Through `pytest.importorskip` on a host without the pinned driver.
+    """
+    for name in sorted(
+        (
+            name
+            for name in sys.modules
+            if any(
+                name == prefix or name.startswith(f"{prefix}.")
+                for prefix in _MIGRATION_LAYER_PREFIXES
+            )
+        ),
+        reverse=True,
+    ):
+        del sys.modules[name]
+
+    before = frozenset(sys.modules)
+    try:
+        yield pytest.importorskip(
+            dotted_name,
+            reason=(
+                f"{dotted_name} could not be imported - without the pinned MySQL "
+                f"driver this test skips and the rest of the tier still runs"
+            ),
+        )
+    finally:
+        for name in sorted(set(sys.modules) - before, reverse=True):
+            if _is_tier_isolated_name(name):
+                del sys.modules[name]
+
+
+def _bridge_renderer_observations() -> tuple[tuple[str, str, object], ...]:
+    """Measure the two bridge-side sites that fold or render exact decimals.
+
+    Both are outside `acas_posting.cobol`, so the section above does not reach them,
+    and both were MEASURED to answer to the ambient context before being corrected:
+
+    * `acas_posting/dal/acas029_otm5.py` rendered ``WS-MYSQL-EDIT``
+      [common/otm5MT.cbl:L227] with `quantize`, unary minus and `*` in the ambient
+      context. At an ambient precision of nine digits `mysql_edit` RAISED
+      `decimal.InvalidOperation` instead of rendering a ``decimal(9,2)`` column, and
+      its two derived constants drifted (``1000000000`` became ``1.000E+9``).
+    * `acas_posting/dal/acas012_sales.py` folded `SPACE_FILLED_RECORD` at import with
+      `scaleb`, a constant whose own docstring promises two processes agree on it byte
+      for byte.
+
+    Returns:
+        The observations, in a fixed order, reduced to context-free data by
+            `_observation`.
+    """
+    with _freshly_imported("acas_posting.dal.acas029_otm5") as otm5:
+        rendered: tuple[tuple[str, str, object], ...] = (
+            _observation(
+                "otm5 edit fraction quantum", lambda m=otm5: m._EDIT_FRACTION_QUANTUM
+            ),
+            _observation(
+                "otm5 edit ten power", lambda m=otm5: m._EDIT_TEN_POWER_FRACTION
+            ),
+            _observation("otm5 edit context prec", lambda m=otm5: m._EDIT_CONTEXT.prec),
+            _observation(
+                "otm5 render integer", lambda m=otm5: m.render_integer_column(1234567)
+            ),
+            _observation(
+                "otm5 render tinyint", lambda m=otm5: m.render_tinyint_column(99999999)
+            ),
+        )
+        for money in ("1234.56", "-99.99", "0", "999999999.99", "-0.01"):
+            rendered += (
+                _observation(
+                    f"otm5 mysql_edit {money}",
+                    lambda v=money, m=otm5: m.mysql_edit(Decimal(v)),
+                ),
+                _observation(
+                    f"otm5 render money {money}",
+                    lambda v=money, m=otm5: m.render_money_column(Decimal(v)),
+                ),
+            )
+
+    with _freshly_imported("acas_posting.dal.acas012_sales") as sales:
+        space_filled = tuple(
+            _observation(
+                f"sales space-filled {column}",
+                lambda c=column, m=sales: m.SPACE_FILLED_RECORD[c],
+            )
+            for column in sorted(sales.SPACE_FILLED_RECORD)
+        )
+        # The table is all thirty-seven columns of `SALEDGER-REC`, and eight of them are
+        # the scaled ones the `scaleb` fold produces - so the measurement is not
+        # dominated by character columns that no context could have touched.
+        assert len(space_filled) == 37
+        scaled = tuple(
+            label for label, carrier, _ in space_filled if carrier == "Decimal"
+        )
+        assert len(scaled) == 8, scaled
+
+    return rendered + space_filled
+
+
+def test_the_two_bridge_renderers_do_not_answer_to_the_ambient_context() -> None:
+    """The same indifference, for the two data-access sites that lacked it (R-2).
+
+    Fifty-two observations - two folded constants, twelve renderings and all
+    thirty-seven columns of `SPACE_FILLED_RECORD` - taken once under this session's
+    context and again under each of the four hostile contexts, with the module
+    RE-EXECUTED every time so an import-time fold is genuinely re-run.
+
+    This is the regression lock for the correction described in
+    `_bridge_renderer_observations`. Removing either guard puts a `quantize`, a
+    `scaleb`, a `**` or a unary minus back into the caller's context, and this test
+    then reports either a drifted constant or the `InvalidOperation` the renderer
+    raises instead of rendering.
+    """
+    baseline = _bridge_renderer_observations()
+
+    labels = tuple(label for label, _, _ in baseline)
+    assert len(labels) == len(set(labels)), labels
+    # Two folded constants plus the edit context's precision, two integer renderings,
+    # ten money renderings, and all thirty-seven columns of `SPACE_FILLED_RECORD`.
+    assert len(baseline) == 3 + 2 + 10 + 37
+    # Nothing raised under this session's own context, so a `raised` observation below
+    # can only be the hostile context leaking into the renderer.
+    assert all(carrier != "raised" for _, carrier, _ in baseline), baseline
+
+    for label, hostile in _HOSTILE_CONTEXTS:
+        with _ambient_context(hostile):
+            under_hostile = _bridge_renderer_observations()
+        assert under_hostile == baseline, (
+            label,
+            [
+                (b, h)
+                for b, h in zip(baseline, under_hostile, strict=True)
+                if b != h
+            ][:8],
+        )
+
+
+def test_the_bridge_renderer_measurement_leaves_no_driver_loaded() -> None:
+    """Rule R-1 still holds after two fresh data-access imports.
+
+    `_freshly_imported` evicts every tier-isolated name its import added, so by the
+    time the two later files that read LIVE `sys.modules` run their guards, nothing
+    forbidden is resident.
+    """
+    with _freshly_imported("acas_posting.dal.acas029_otm5") as otm5:
+        assert otm5.__name__ == "acas_posting.dal.acas029_otm5"
+
+    resident = tuple(sorted(n for n in sys.modules if _is_tier_isolated_name(n)))
+    assert resident == (), resident

@@ -125,9 +125,13 @@ WHERE THIS FILE DIVERGES FROM ITS OWN BRIEF, AND WHY
 
 from __future__ import annotations
 
-from decimal import Decimal
+import copy
+import json
+import pathlib
 import re
 import sys
+from decimal import Decimal
+from typing import Any, Final
 
 import pytest
 
@@ -2156,3 +2160,603 @@ def test_tier_touches_no_database_and_no_oracle() -> None:
     assert not any(name.startswith("acas_posting.dal") for name in loaded)
     assert not any(name.startswith("acas_posting.programs") for name in loaded)
     assert not any(name.startswith("acas_posting.cli") for name in loaded)
+
+
+#  GROUP 12  -  THE COMMITTED DICTIONARY AGAINST ITS COMMITTED JSON SCHEMA
+#
+#  Agent Action Plan section 0.4.1.6 describes
+#  `data_dictionary/acas_posting_dictionary.schema.json` as the "JSON Schema
+#  validating the generated artifact in CI-less form, EXERCISED BY A TEST", and
+#  section 0.8.5 makes "the machine-readable data dictionary validates against its
+#  schema" one of the five completion criteria. Both files are declared dependencies
+#  of this module, which is why the exercise lives here rather than anywhere else:
+#  this is the file that owns dictionary provenance.
+#
+#  WHY THE VALIDATOR IS WRITTEN OUT HERE INSTEAD OF INSTALLED.
+#  The third-party JSON-Schema validator library is NOT a pinned dependency, and the
+#  tier contract names it among the modules this file must not import: section 0.5.1
+#  froze the dependency set deliberately, and widening it in order to validate a
+#  committed artifact would be a poor trade. So the keywords the schema ACTUALLY uses
+#  are implemented below,
+#  and only those. The set is CLOSED, and a test asserts it stays closed, so a schema
+#  that started using a keyword this validator does not implement fails loudly rather
+#  than being silently under-validated:
+#
+#      $schema  $id  title  description  type  required  additionalProperties
+#      properties  $defs  $ref  items  minItems  uniqueItems  pattern  minLength
+#      minimum  enum  const  examples
+#
+#  Nineteen keywords, and no combinator at all - no anyOf, oneOf, allOf, not, if,
+#  then, else, prefixItems, patternProperties or format. `additionalProperties` is
+#  literal `false` at all 25 sites, and all 66 `$ref` sites point into `#/$defs`.
+#
+#  `description` and `examples` are annotations and carry no assertion; they are
+#  named in the closed set because they appear, not because they constrain.
+#
+#  R-2 is respected: nothing here parses a number into a binary float. `json.loads`
+#  produces `int` for the integer literals the artifact contains, and the numeric
+#  keywords the schema uses - `minimum`, `minItems`, `minLength` - are compared as
+#  integers. No binary floating-point value is constructed anywhere in this group.
+
+
+#: The repository root, derived from THIS FILE's location rather than from the process
+#: working directory. `tests/conftest.py:L99` derives `REPO_ROOT` the same way and for
+#: the same reason: the working directory is the caller's business, and a suite that
+#: only passes when it is invoked from one particular directory is not a property of
+#: the code under test. `tests/arithmetic/<this file>` is two levels below the root.
+_REPO_ROOT: Final[pathlib.Path] = pathlib.Path(__file__).resolve().parents[2]
+
+#: The two committed artifacts, addressed absolutely so the group below reads the same
+#: two files whatever directory pytest was started from.
+_DICTIONARY_JSON: Final[pathlib.Path] = (
+    _REPO_ROOT / "data_dictionary" / "acas_posting_dictionary.json"
+)
+_DICTIONARY_SCHEMA_JSON: Final[pathlib.Path] = (
+    _REPO_ROOT / "data_dictionary" / "acas_posting_dictionary.schema.json"
+)
+
+#: Exactly the keywords the committed schema uses. Asserted to be closed, so the
+#: validator below can never be silently out of date.
+_IMPLEMENTED_SCHEMA_KEYWORDS: Final[frozenset[str]] = frozenset(
+    {
+        "$schema",
+        "$id",
+        "title",
+        "description",
+        "type",
+        "required",
+        "additionalProperties",
+        "properties",
+        "$defs",
+        "$ref",
+        "items",
+        "minItems",
+        "uniqueItems",
+        "pattern",
+        "minLength",
+        "minimum",
+        "enum",
+        "const",
+        "examples",
+    }
+)
+
+#: The JSON type names the schema uses, mapped to the Python types `json.loads`
+#: produces. `bool` is checked BEFORE `int` everywhere below, because in Python
+#: `True` is an `int` and a boolean must never satisfy an integer constraint.
+_JSON_TYPE_CHECKS: Final[dict[str, tuple[type, ...]]] = {
+    "object": (dict,),
+    "array": (list,),
+    "string": (str,),
+    "boolean": (bool,),
+    "integer": (int,),
+    "null": (type(None),),
+}
+
+
+class _SchemaValidationCounters:
+    """How much work a validation run did, so a vacuous pass is detectable.
+
+    Attributes:
+        nodes: Instance nodes visited.
+        refs_followed: `$ref` indirections taken.
+        keywords_applied: Constraint keywords actually evaluated.
+    """
+
+    __slots__ = ("nodes", "refs_followed", "keywords_applied")
+
+    def __init__(self) -> None:
+        self.nodes = 0
+        self.refs_followed = 0
+        self.keywords_applied = 0
+
+
+def _json_type_matches(value: object, type_name: str) -> bool:
+    """Does `value` satisfy the JSON type named `type_name`?
+
+    Args:
+        value: A node of the parsed instance document.
+        type_name: One of the names in `_JSON_TYPE_CHECKS`.
+
+    Returns:
+        True when the value is of that JSON type.
+    """
+    expected = _JSON_TYPE_CHECKS[type_name]
+    if type_name == "integer":
+        # A JSON boolean is not a JSON integer, even though `bool` subclasses `int`.
+        return isinstance(value, int) and not isinstance(value, bool)
+    if type_name == "boolean":
+        return isinstance(value, bool)
+    return isinstance(value, expected)
+
+
+def _validate_against_schema(
+    instance: object,
+    schema: Any,
+    root: Any,
+    path: str,
+    errors: list[str],
+    counters: _SchemaValidationCounters,
+) -> None:
+    """Check one instance node against one schema node, appending any failures.
+
+    Implements only the keywords in `_IMPLEMENTED_SCHEMA_KEYWORDS`. An unimplemented
+    keyword is itself reported as an error rather than ignored, which is what stops
+    the validator drifting behind the schema.
+
+    Args:
+        instance: The instance node.
+        schema: The schema node applying to it.
+        root: The whole schema document, for `$ref` lookups.
+        path: A JSON-pointer-ish trail, used in messages.
+        errors: Accumulator, appended to in place.
+        counters: Work counters, incremented in place.
+    """
+    counters.nodes += 1
+
+    if not isinstance(schema, dict):
+        errors.append(f"{path}: schema node is not an object")
+        return
+
+    unimplemented = set(schema) - _IMPLEMENTED_SCHEMA_KEYWORDS
+    if unimplemented:
+        errors.append(
+            f"{path}: schema uses keyword(s) this validator does not implement: "
+            f"{sorted(unimplemented)}"
+        )
+        return
+
+    if "$ref" in schema:
+        reference = schema["$ref"]
+        if not reference.startswith("#/$defs/"):
+            errors.append(f"{path}: unsupported $ref target {reference!r}")
+            return
+        name = reference[len("#/$defs/") :]
+        target = root.get("$defs", {}).get(name)
+        if target is None:
+            errors.append(f"{path}: $ref {reference!r} does not name a $defs entry")
+            return
+        counters.refs_followed += 1
+        _validate_against_schema(instance, target, root, path, errors, counters)
+        # In draft 2020-12 `$ref` is an applicator that sits ALONGSIDE its siblings
+        # rather than replacing them, so the remaining keywords are applied too. In
+        # this schema every `$ref` sibling is an annotation - asserted by
+        # `test_every_ref_node_carries_only_annotations_beside_it` - so the loop
+        # below has nothing to do; it is written this way so that it would still be
+        # correct if a constraint were ever added next to a `$ref`.
+        siblings = {
+            key: value for key, value in schema.items() if key != "$ref"
+        }
+        if set(siblings) - {"description", "title", "examples"}:
+            _validate_against_schema(
+                instance, siblings, root, path, errors, counters
+            )
+        return
+
+    if "type" in schema:
+        counters.keywords_applied += 1
+        declared = schema["type"]
+        names = declared if isinstance(declared, list) else [declared]
+        if not any(_json_type_matches(instance, name) for name in names):
+            errors.append(
+                f"{path}: expected type {declared!r}, got "
+                f"{type(instance).__name__}"
+            )
+            return
+
+    if "const" in schema:
+        counters.keywords_applied += 1
+        if instance != schema["const"]:
+            errors.append(f"{path}: expected const {schema['const']!r}")
+
+    if "enum" in schema:
+        counters.keywords_applied += 1
+        if instance not in schema["enum"]:
+            errors.append(f"{path}: {instance!r} is not one of {schema['enum']!r}")
+
+    if isinstance(instance, str):
+        if "minLength" in schema:
+            counters.keywords_applied += 1
+            if len(instance) < schema["minLength"]:
+                errors.append(
+                    f"{path}: shorter than minLength {schema['minLength']}"
+                )
+        if "pattern" in schema:
+            counters.keywords_applied += 1
+            if re.search(schema["pattern"], instance) is None:
+                errors.append(
+                    f"{path}: {instance!r} does not match {schema['pattern']!r}"
+                )
+
+    if isinstance(instance, int) and not isinstance(instance, bool):
+        if "minimum" in schema:
+            counters.keywords_applied += 1
+            if instance < schema["minimum"]:
+                errors.append(f"{path}: below minimum {schema['minimum']}")
+
+    if isinstance(instance, list):
+        if "minItems" in schema:
+            counters.keywords_applied += 1
+            if len(instance) < schema["minItems"]:
+                errors.append(f"{path}: fewer than minItems {schema['minItems']}")
+        if schema.get("uniqueItems") is True:
+            counters.keywords_applied += 1
+            rendered = [json.dumps(item, sort_keys=True) for item in instance]
+            if len(set(rendered)) != len(rendered):
+                errors.append(f"{path}: items are not unique")
+        if "items" in schema:
+            for index, item in enumerate(instance):
+                _validate_against_schema(
+                    item, schema["items"], root, f"{path}[{index}]", errors, counters
+                )
+
+    if isinstance(instance, dict):
+        properties = schema.get("properties", {})
+        for name in schema.get("required", ()):
+            counters.keywords_applied += 1
+            if name not in instance:
+                errors.append(f"{path}: required property {name!r} is missing")
+        if schema.get("additionalProperties") is False:
+            counters.keywords_applied += 1
+            extra = sorted(set(instance) - set(properties))
+            if extra:
+                errors.append(f"{path}: additional propert(ies) {extra} not allowed")
+        for name, value in instance.items():
+            subschema = properties.get(name)
+            if subschema is not None:
+                _validate_against_schema(
+                    value, subschema, root, f"{path}/{name}", errors, counters
+                )
+
+
+def _validate_document(
+    document: object, schema: Any
+) -> tuple[list[str], _SchemaValidationCounters]:
+    """Validate a whole instance document against a whole schema document.
+
+    Args:
+        document: The parsed instance.
+        schema: The parsed schema.
+
+    Returns:
+        The error list - empty on success - and the work counters.
+    """
+    errors: list[str] = []
+    counters = _SchemaValidationCounters()
+    # The three document-level annotation keywords are not constraints, so the root
+    # is validated with them removed rather than being reported as unimplemented.
+    root_schema = {
+        key: value
+        for key, value in schema.items()
+        if key not in ("$schema", "$id", "title", "$defs")
+    }
+    _validate_against_schema(document, root_schema, schema, "", errors, counters)
+    return errors, counters
+
+
+def test_the_committed_dictionary_validates_against_its_committed_schema() -> None:
+    """The mandated deliverable, exercised: zero validation errors.
+
+    Agent Action Plan section 0.8.5's completion criterion, asserted rather than
+    believed. The two files are read from disk exactly as committed and nothing is
+    regenerated: this test is a drift alarm on the artifacts, not a re-derivation of
+    them.
+
+    The work counters are asserted as well, because "no errors" is also what a
+    validator that visited nothing would report. Several thousand nodes and several
+    hundred `$ref` indirections are the floor; the real figures are far higher, and
+    a floor rather than an exact count keeps the test from breaking every time a
+    field is added to the dictionary.
+    """
+    assert _DICTIONARY_JSON.is_file(), _DICTIONARY_JSON
+    assert _DICTIONARY_SCHEMA_JSON.is_file(), _DICTIONARY_SCHEMA_JSON
+
+    document = json.loads(_DICTIONARY_JSON.read_text(encoding="utf-8"))
+    schema = json.loads(_DICTIONARY_SCHEMA_JSON.read_text(encoding="utf-8"))
+
+    errors, counters = _validate_document(document, schema)
+
+    assert errors == [], errors[:10]
+    # Measured on the committed pair: 100,869 instance nodes visited, 26,508 `$ref`
+    # indirections taken and 184,413 constraint keywords evaluated. Asserted as
+    # FLOORS rather than as equalities, because the artifact grows when a field is
+    # catalogued and an equality would then fail for a legitimate regeneration -
+    # while a floor still refuses a validator that walked almost nothing.
+    assert counters.nodes > 50_000
+    assert counters.refs_followed > 20_000
+    assert counters.keywords_applied > 100_000
+    # And the document really is the dictionary the loader reads, so this test and
+    # every descriptor test above are looking at the same file.
+    assert len(document["entries"]) == 1_061
+    assert len(document["tables"]) == 22
+    assert document["coverage"]["in_scope_columns"] == 513
+
+
+def test_the_schema_reference_in_the_dictionary_cannot_rot() -> None:
+    """`meta.schema_ref` names the schema file that sits beside the dictionary.
+
+    The reference is a bare file name rather than a path, so it is only meaningful
+    while the two files are siblings - which is asserted here by resolving it against
+    the dictionary's own directory and requiring the result to be the committed
+    schema.
+    """
+    document = json.loads(_DICTIONARY_JSON.read_text(encoding="utf-8"))
+    reference = document["meta"]["schema_ref"]
+
+    assert reference == _DICTIONARY_SCHEMA_JSON.name
+    beside_the_dictionary = _DICTIONARY_JSON.parent / reference
+    assert beside_the_dictionary.is_file()
+    assert beside_the_dictionary == _DICTIONARY_SCHEMA_JSON
+
+    schema = json.loads(_DICTIONARY_SCHEMA_JSON.read_text(encoding="utf-8"))
+    # Draft 2020-12, which is the dialect the validator above implements a subset of.
+    assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
+    assert schema["$id"] == "urn:acas:data-dictionary:acas_posting_dictionary:1"
+    assert schema["required"] == ["meta", "sources", "tables", "entries", "coverage"]
+
+
+def test_the_schemas_keyword_set_is_closed_and_fully_implemented() -> None:
+    """Every keyword the schema uses is one this validator evaluates.
+
+    This is what makes the subset validator honest. If the schema ever starts using
+    `anyOf`, `format`, `patternProperties` or anything else, the set below stops
+    being a subset of the implemented set and this test fails - rather than the
+    document being validated against a schema whose new constraint was skipped.
+
+    Two structural facts are asserted with it, because the validator relies on both:
+    `additionalProperties` is literal `false` everywhere it appears, and every `$ref`
+    points into `#/$defs`.
+    """
+    schema = json.loads(_DICTIONARY_SCHEMA_JSON.read_text(encoding="utf-8"))
+
+    used: set[str] = set()
+    additional_property_values: list[object] = []
+    reference_targets: list[str] = []
+
+    def visit(node: object, at_schema_position: bool) -> None:
+        if isinstance(node, list):
+            for item in node:
+                visit(item, False)
+            return
+        if not isinstance(node, dict):
+            return
+        if at_schema_position:
+            used.update(node)
+            if "additionalProperties" in node:
+                additional_property_values.append(node["additionalProperties"])
+            if "$ref" in node:
+                reference_targets.append(node["$ref"])
+            for key, value in node.items():
+                if key in ("properties", "$defs"):
+                    for sub in value.values():
+                        visit(sub, True)
+                elif key == "items":
+                    visit(value, True)
+                else:
+                    visit(value, False)
+            return
+        for value in node.values():
+            visit(value, False)
+
+    visit(schema, True)
+
+    assert used, "no schema keywords were seen - the walk is wrong"
+    assert used <= _IMPLEMENTED_SCHEMA_KEYWORDS, sorted(
+        used - _IMPLEMENTED_SCHEMA_KEYWORDS
+    )
+    # No combinator, and no keyword whose absence the validator relies on.
+    for absent in (
+        "anyOf",
+        "oneOf",
+        "allOf",
+        "not",
+        "if",
+        "then",
+        "else",
+        "prefixItems",
+        "patternProperties",
+        "format",
+        "$dynamicRef",
+        "unevaluatedProperties",
+    ):
+        assert absent not in used, absent
+
+    assert set(map(repr, additional_property_values)) == {"False"}
+    assert len(additional_property_values) == 25
+    assert len(reference_targets) == 66
+    assert all(target.startswith("#/$defs/") for target in reference_targets)
+    assert len(schema["$defs"]) == 40
+
+
+@pytest.mark.parametrize(
+    "perturbation",
+    [
+        "extra-property",
+        "drop-required",
+        "wrong-type",
+        "break-pattern",
+        "empty-required-array",
+        "break-const",
+    ],
+    ids=[
+        "an unexpected property is refused",
+        "a missing required key is refused",
+        "a wrong JSON type is refused",
+        "a pattern violation is refused",
+        "a minItems violation is refused",
+        "a const violation is refused",
+    ],
+)
+def test_the_subset_validator_is_discriminating_not_vacuous(
+    perturbation: str,
+) -> None:
+    """A perturbed IN-MEMORY copy of the document MUST be rejected.
+
+    Without this, "zero errors" would be worth nothing: a validator that returned an
+    empty list unconditionally would pass the test above. Six independent keyword
+    families are perturbed, one per run, and each must produce at least one error.
+
+    THE COMMITTED FILES ARE NEVER TOUCHED. Every perturbation is applied to a
+    `copy.deepcopy` of the parsed document, and the committed dictionary is re-read
+    and re-validated at the end of each run to prove it is still clean.
+    """
+    document = json.loads(_DICTIONARY_JSON.read_text(encoding="utf-8"))
+    schema = json.loads(_DICTIONARY_SCHEMA_JSON.read_text(encoding="utf-8"))
+    perturbed = copy.deepcopy(document)
+
+    if perturbation == "extra-property":
+        perturbed["meta"]["a_property_the_schema_does_not_declare"] = "x"
+    elif perturbation == "drop-required":
+        del perturbed["coverage"]["in_scope_columns"]
+    elif perturbation == "wrong-type":
+        perturbed["coverage"]["in_scope_columns"] = "513"
+    elif perturbation == "break-pattern":
+        perturbed["entries"][0]["key"] = "no dot, no table, not a key"
+    elif perturbation == "empty-required-array":
+        perturbed["entries"] = []
+    elif perturbation == "break-const":
+        perturbed["meta"]["schema_ref"] = "some-other-schema.json"
+
+    errors, counters = _validate_document(perturbed, schema)
+
+    assert errors != [], (
+        f"the {perturbation} perturbation was accepted, so the validator is not "
+        f"discriminating on that keyword family"
+    )
+    assert counters.nodes > 0
+
+    # The committed artifact is untouched and still validates.
+    still_clean, _ = _validate_document(
+        json.loads(_DICTIONARY_JSON.read_text(encoding="utf-8")), schema
+    )
+    assert still_clean == []
+
+
+def test_the_subset_validator_refuses_a_schema_keyword_it_cannot_evaluate() -> None:
+    """An unknown keyword is an ERROR, never a silent skip.
+
+    This is the property that makes the closed-keyword test above load-bearing
+    rather than decorative: if the schema gained a constraint the validator does not
+    implement, validation reports it instead of quietly passing. Exercised on a
+    deep copy of the committed schema, so the committed file is untouched.
+    """
+    document = json.loads(_DICTIONARY_JSON.read_text(encoding="utf-8"))
+    schema = json.loads(_DICTIONARY_SCHEMA_JSON.read_text(encoding="utf-8"))
+
+    widened = copy.deepcopy(schema)
+    widened["$defs"]["coverage"]["properties"]["in_scope_columns"]["multipleOf"] = 7
+
+    errors, _ = _validate_document(document, widened)
+
+    assert errors != []
+    assert any("does not implement" in message for message in errors), errors[:5]
+
+    # And a constraint is detectable in the other direction too: tightening the
+    # entry-key pattern - which lives in `$defs.entryKey`, reached through the `$ref`
+    # at `$defs.entry.properties.key` - to something no key can satisfy must fail
+    # once per entry, proving the pattern really is applied to all 1,061 of them
+    # through the indirection rather than only at the top level.
+    tightened = copy.deepcopy(schema)
+    tightened["$defs"]["entryKey"]["pattern"] = r"^ZZZ-NOTHING\."
+    tightened_errors, _ = _validate_document(document, tightened)
+    assert len(tightened_errors) >= 1_000, len(tightened_errors)
+
+
+def test_neither_committed_artifact_carries_a_repeated_json_member() -> None:
+    """A repeated JSON member would silently discard a constraint.
+
+    `json.loads` follows the permissive reading: a member that appears twice in one
+    object keeps the LAST occurrence and drops the first without complaint. So an
+    edit that added `"pattern": ...` beside an existing `"pattern"` in the schema
+    would parse cleanly, would validate cleanly, and would have no effect - the new
+    constraint silently ignored. `acas_posting/dictionary/loader.py` refuses exactly
+    this for the dictionary, citing the same reasoning; the schema is read here with
+    plain `json.loads`, so the check has to be made explicitly.
+
+    Learned the hard way: a mutation of the schema that inserted a second `pattern`
+    beside the entry-key one appeared to be accepted by this group, and the reason was
+    this permissive reading rather than any weakness in the validator.
+    """
+    seen_repeats: list[tuple[str, str]] = []
+
+    def refuse_repeats(label: str):
+        def hook(pairs: list[tuple[str, object]]) -> dict[str, object]:
+            names = [name for name, _ in pairs]
+            # `dict.fromkeys` keeps first-seen order and de-duplicates, so a name
+            # repeated twice is reported once rather than once per occurrence.
+            for name in dict.fromkeys(names):
+                if names.count(name) > 1:
+                    seen_repeats.append((label, name))
+            return dict(pairs)
+
+        return hook
+
+    for label, path in (
+        ("dictionary", _DICTIONARY_JSON),
+        ("schema", _DICTIONARY_SCHEMA_JSON),
+    ):
+        json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=refuse_repeats(label),
+        )
+
+    assert seen_repeats == [], seen_repeats
+
+    # And the detection detects: a synthetic document with a repeated member is
+    # caught, so the empty result above is evidence and not an artefact.
+    seen_repeats.clear()
+    json.loads(
+        '{"a": 1, "a": 2}', object_pairs_hook=refuse_repeats("synthetic")
+    )
+    assert seen_repeats == [("synthetic", "a")]
+
+
+def test_every_ref_node_carries_only_annotations_beside_it() -> None:
+    """A `$ref` in this schema never sits next to a constraint.
+
+    The validator applies a `$ref`'s siblings as draft 2020-12 requires, but this
+    schema only ever puts `description` beside a `$ref`. Asserting that keeps the
+    reading unambiguous, and means the 66 indirections cannot hide a constraint that
+    a careless reader of the schema would miss.
+    """
+    schema = json.loads(_DICTIONARY_SCHEMA_JSON.read_text(encoding="utf-8"))
+    annotations = {"description", "title", "examples"}
+    offenders: list[tuple[str, list[str]]] = []
+
+    def visit(node: object, trail: str) -> None:
+        if isinstance(node, list):
+            for index, item in enumerate(node):
+                visit(item, f"{trail}[{index}]")
+            return
+        if not isinstance(node, dict):
+            return
+        if "$ref" in node:
+            beside = sorted(set(node) - {"$ref"} - annotations)
+            if beside:
+                offenders.append((trail, beside))
+        for key, value in node.items():
+            visit(value, f"{trail}/{key}")
+
+    visit(schema, "")
+
+    assert offenders == [], offenders

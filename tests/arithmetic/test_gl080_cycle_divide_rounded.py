@@ -1969,9 +1969,21 @@ def test_silent_overflow_at_l328_changes_the_phase_disposition() -> None:
     #  THE COUNTERFACTUAL. Same operands, no receiving field, so no truncation:
     #  the quotient is 127 and the product comes back to 127, which equals
     #  `Scycle`. So the gate would have passed but for the two-digit receiver.
+    #  Both counterfactual products are formed INSIDE `arithmetic.intermediate`. A
+    #  bare `*` between two `Decimal`s is a CONTEXT operation and rounds its product
+    #  to the ambient `prec`, so writing it outside the call would hand `compare` an
+    #  operand the caller's context had already reshaped - and the assertion would
+    #  then be about that context rather than about the receiver's width, which is
+    #  the whole subject of this test. `intermediate` evaluates the expression at the
+    #  layer's own precision and returns it exact (R-2).
     unquantized = arithmetic.intermediate(lambda: Decimal(127) / Decimal(1))
     assert unquantized == Decimal(127)
-    assert arithmetic.compare(127, unquantized * Decimal(1)) == 0
+    assert (
+        arithmetic.compare(
+            127, arithmetic.intermediate(lambda: unquantized * Decimal(1))
+        )
+        == 0
+    )
 
     overflowing_product = _end_of_period(
         incoming_a=_A_NOT_ARMED, scycle=100, period=2
@@ -1979,7 +1991,12 @@ def test_silent_overflow_at_l328_changes_the_phase_disposition() -> None:
     assert overflowing_product.a == 50
     assert overflowing_product.y == 0
     assert overflowing_product.gate_passed is False
-    assert arithmetic.compare(100, Decimal(50) * Decimal(2)) == 0
+    assert (
+        arithmetic.compare(
+            100, arithmetic.intermediate(lambda: Decimal(50) * Decimal(2))
+        )
+        == 0
+    )
 
     #  The two stores on their own, so the modulo is stated rather than implied.
     assert arithmetic.store(127, _A) == 127 % 100

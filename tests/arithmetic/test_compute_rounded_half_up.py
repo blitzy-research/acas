@@ -1726,9 +1726,15 @@ def test_site_2_quantizes_exactly_once_at_the_store() -> None:
     assert step_3 == Decimal("100.47")
     assert per_sub_expression == Decimal("17.08")
 
-    # The observable difference, which is the point of the test.
+    # The observable difference, which is the point of the test. Subtracted through
+    # `arithmetic.intermediate` rather than with a bare `-`: `Decimal.__sub__` is a
+    # CONTEXT operation and would round this difference to whatever precision the
+    # ambient context happens to carry, so a bare `-` here would assert a property of
+    # the caller's context rather than of the two measured figures. `intermediate` is
+    # the layer's own escape hatch for an expression with no receiving field
+    # (acas_posting/cobol/arithmetic.py:L359) and evaluates it exactly (R-2).
     assert once != per_sub_expression
-    assert once - per_sub_expression == Decimal("0.43")
+    assert arithmetic.intermediate(lambda: once - per_sub_expression) == Decimal("0.43")
 
     # Site 5 is the same expression on the IRS receiver, and it behaves the same way,
     # so the discipline is a property of the arithmetic layer and not of one field.

@@ -103,7 +103,7 @@ duplicates them.
 from __future__ import annotations
 
 import sys
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from pathlib import Path
 from types import ModuleType
 from typing import Final
@@ -378,8 +378,11 @@ INPUT_GROSS_BYTES_UNSIGNED: Final[bytes] = bytes(
 )
 
 # The one value every byte string above encodes, kept as a name so the three cannot
-# drift apart from each other.
+# drift apart from each other, with its negation built from a STRING alongside it.
+# `Decimal.__neg__` is a context operation, so `-BYTE_LITERAL_VALUE` would be rounded
+# to the ambient precision; a string prefix is exact under any context (R-2).
 BYTE_LITERAL_VALUE: Final[Decimal] = Decimal("1234.56")
+BYTE_LITERAL_VALUE_NEGATED: Final[Decimal] = Decimal("-1234.56")
 
 
 #  ROUND-TRIP VALUE SELECTION  (rule R-2: exact, and built without a context)
@@ -785,7 +788,7 @@ def test_signed_negative_packed_value_carries_the_d_sign_nibble() -> None:
     round-trip and would still be wrong on the wire.
     """
     descriptor = _descriptor_for("GLLEDGER-REC", "LEDGER-BALANCE")
-    raw = _encode(descriptor, -BYTE_LITERAL_VALUE)
+    raw = _encode(descriptor, BYTE_LITERAL_VALUE_NEGATED)
 
     assert len(raw) == 6
     assert raw[-1] & 0x0F == cobol_usage.PACKED_SIGN_NEGATIVE
@@ -799,7 +802,7 @@ def test_signed_negative_packed_value_carries_the_d_sign_nibble() -> None:
     assert raw[-1] >> 4 == LEDGER_BALANCE_BYTES_POSITIVE[-1] >> 4
 
     recovered = _decode(descriptor, raw)
-    assert recovered == -BYTE_LITERAL_VALUE
+    assert recovered == BYTE_LITERAL_VALUE_NEGATED
     assert recovered == Decimal("-1234.56")
     assert isinstance(recovered, Decimal)
     assert recovered.as_tuple().exponent == -2
@@ -1238,6 +1241,40 @@ def test_a8_truncation_one_zero_scale_packed_accumulator_discards_the_pence() ->
     )
 
 
+# The precision the migrated arithmetic layer evaluates its own intermediates at,
+# `INTERMEDIATE_PRECISION` at `acas_posting/cobol/arithmetic.py:L97`. Repeated as a
+# literal rather than imported, so that this file's import contract - asserted exactly
+# by `_ACAS_MODULES_THIS_FILE_IMPORTS` - stays the five modules the tier allows.
+_INTERMEDIATE_PRECISION_MIRRORED_FROM_THE_ARITHMETIC_LAYER: Final[int] = 60
+
+
+def _added_exactly(*values: Decimal) -> Decimal:
+    """Add `values` at a precision wide enough that no addend is ever rounded.
+
+    `Decimal.__add__` is a CONTEXT operation: it rounds its result to the ambient
+    context's `prec`, which a caller - a `sitecustomize`, an embedding application, a
+    sibling test - is free to have narrowed. This file's subject is the RECEIVING
+    FIELD's store, so an operand the ambient context had already rounded would make
+    the assertions below report the caller's context instead of this layer, which is
+    the one thing they must never do.
+
+    Every sum built here is therefore evaluated inside a local context at the same
+    precision the migrated arithmetic layer uses for its own intermediates - see
+    `_INTERMEDIATE_PRECISION_MIRRORED_FROM_THE_ARITHMETIC_LAYER` above - which is
+    exact for every value in this file. The store then sees exactly the operand the
+    COBOL `add` statement would have handed it, and never a pre-rounded one (R-2).
+
+    The context is restored on the way out by `localcontext`, including when an
+    assertion inside the block raises.
+    """
+    with localcontext() as ctx:
+        ctx.prec = _INTERMEDIATE_PRECISION_MIRRORED_FROM_THE_ARITHMETIC_LAYER
+        total = Decimal(0)
+        for value in values:
+            total = total + value
+        return total
+
+
 def test_a8_truncation_one_compounds_across_a_running_accumulation() -> None:
     """A-8 #1: the pence are lost on EVERY add, so the loss compounds.
 
@@ -1265,14 +1302,14 @@ def test_a8_truncation_one_compounds_across_a_running_accumulation() -> None:
     # assumed - a `Decimal` carrier here would mean the pence had survived.
     through_the_receiver = Decimal(0)
     for _ in range(3):
-        stored = work_2.store(through_the_receiver + invoice_goods)
+        stored = work_2.store(_added_exactly(through_the_receiver, invoice_goods))
         assert isinstance(stored, int)
         through_the_receiver = Decimal(stored)
     assert through_the_receiver == Decimal(36)
 
     # The same three values summed at full scale and stored once. This is what an
     # implementation that "cleaned up" the accumulator would produce.
-    full_scale_total = invoice_goods + invoice_goods + invoice_goods
+    full_scale_total = _added_exactly(invoice_goods, invoice_goods, invoice_goods)
     assert full_scale_total == Decimal("38.97")
     stored_once = work_2.store(full_scale_total)
     assert stored_once == Decimal(38)
