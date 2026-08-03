@@ -1,193 +1,39 @@
 #!/usr/bin/env bash
-# harness/reset_db.sh
-# Drop the ACASDB schema, re-apply the frozen `mysql/ACASDB.sql` VERBATIM, and
-# re-seed by delegating to harness/seed.sh.
-#
-# This is STAGE 5 of the eight-stage parity protocol:
+# harness/reset_db.sh -- stage 5 of the parity protocol: drop the schema,
+# re-apply the frozen mysql/ACASDB.sql VERBATIM, and re-seed through
+# harness/seed.sh. Run `--help' for the options, the gates and the exit codes.
 #
 #     seed -> run(COBOL) -> dump -> normalize -> RESET -> run(Python) -> dump -> diff
-#                                                 ^^^^^
 #
-# and it is the stage the whole comparison rests on. The acceptance condition
-# the harness exists to satisfy is an EMPTY diff between the two dumps, so both
-# cycles must start from byte-for-byte the same seeded state. If this reset is
-# not exact, the Python side starts from a different premise than the COBOL side
-# did and a non-empty diff proves nothing at all. The plan's conclusion that "a
-# non-empty diff is always a real behavioral difference and never an artefact of
-# the comparison" is true only because this script is exact.
+# Both cycles must start from byte-for-byte the same seeded state, because the
+# acceptance condition is an EMPTY diff between the two dumps. An inexact reset
+# would leave the Python side starting from a different premise, and then a
+# non-empty diff would prove nothing.
 #
-# The canonical invocation is documented with the rest of the cycle at
-# [harness/docker-compose.yml:L346-L357]:
+# This script emits ZERO DDL of its own (R-3). It does not need any: the frozen
+# dump already carries 33 `DROP TABLE IF EXISTS` statements, one before each of
+# its 33 `CREATE TABLE` statements [mysql/ACASDB.sql:L28], so re-applying the
+# frozen file IS the drop-and-recreate. Every statement this script issues
+# itself is a read-only SELECT: the readiness probe, the autocommit assertion,
+# the privilege assertion and the post-apply verification.
 #
-#     C="docker compose -f harness/docker-compose.yml run --rm -T gnucobol"
-#     S=harness/scenarios/clean_batch_gl.yaml
-#     ...
-#     $C harness/reset_db.sh            "$S"
-#
-# -----------------------------------------------------------------------------
-# THE ONE DESIGN FACT THAT SHAPES THIS ENTIRE SCRIPT: THE DROP IS IN THE FROZEN
-# FILE
-# R-3 forbids schema evolution of any kind -- "No new tables, columns, indexes,
-# constraints, views, triggers or DDL statements. No migration tooling." A
-# script whose job is "drop and re-create 33 tables" would seem to need DDL of
-# its own. It does not, because the frozen dump already carries it: verified on
-# this checkout, `mysql/ACASDB.sql` contains 33 `DROP TABLE IF EXISTS`
-# statements, one immediately before each of its 33 `CREATE TABLE` statements,
-# the first at [mysql/ACASDB.sql:L28]:
-#
-#     DROP TABLE IF EXISTS `ANALYSIS-REC`;
-#
-# RE-APPLYING THE FROZEN FILE *IS* THE DROP-AND-RECREATE. So this script emits
-# ZERO DDL. There is no hand-written DROP TABLE list, no DROP DATABASE /
-# CREATE DATABASE pair, no TRUNCATE loop, no DELETE FROM loop and no generated
-# DDL anywhere below. The file is streamed to the client and its own statements
-# do the work. Every SQL statement this script issues itself is a read-only
-# SELECT (the readiness probe, the autocommit assertion, the privilege
-# assertion and the post-apply verification).
-#
-# -----------------------------------------------------------------------------
-# THREE MORE PROPERTIES OF THE FROZEN FILE THAT THE IMPLEMENTATION DEPENDS ON
-# -----------------------------------------------------------------------------
-#   1. IT CONTAINS NO `CREATE DATABASE` AND NO `USE`. Verified: zero of each.
-#      The database must therefore already exist AND be named on the client
-#      command line. The vendor MariaDB entrypoint creates it once from
-#      MARIADB_DATABASE=ACASDB [harness/Dockerfile.mariadb:L427]; this script
-#      resets the database's CONTENTS, never its existence. Forgetting
-#      --database is the single most likely way to get a confusing failure.
-#
-#   2. IT MANAGES ITS OWN SESSION STATE. [mysql/ACASDB.sql:L13-L22] sets
-#      character set, NAMES, TIME_ZONE, UNIQUE_CHECKS, FOREIGN_KEY_CHECKS,
-#      SQL_MODE and SQL_NOTES, and the tail restores every one; this script
-#      therefore adds none of its own.
+# It is DESTRUCTIVE, so it refuses to run until its gates are satisfied -- a
+# consent token, an acknowledged target, and a target that is not the frozen
+# checkout. Those gates are the reason the script is long; do not weaken them.
 
-#   3. ITS 66 `ALTER TABLE` HITS ARE COMMENTS, NOT STATEMENTS. Every one sits
-#      inside a `/*!40000 ... DISABLE|ENABLE KEYS */` version guard, first at
-#      [mysql/ACASDB.sql:L45]; a bare ALTER TABLE occurs zero times. So a naive
-#      `grep -c 'ALTER TABLE'` is NOT an integrity anchor -- precondition 2
-#      anchors on the sha256 of the whole file instead.
-
-# THE CHARSET CAVEAT IS FROZEN STATE AND IS NOT FIXED (R-4)
-# [mysql/ACASDB.sql:L9-L11], verbatim:
-#     --  THERE IS NOT ANY DATA RECORDS PRESENT HERE --
-#     --   YOU MAY NEED TO CHANGE the defined Character set in all tables
-#     --   TO MATCH ANY OF YOUR REQUIREMENTS IF THEY DIFFER
-# The dump sets `SET NAMES utf8mb4` at [mysql/ACASDB.sql:L16] while all 33
-# tables declare `DEFAULT CHARSET=utf8mb3 COLLATE=utf8mb3_general_ci`. The
-# maintainer flagged the inconsistency himself and it is part of the
-# specification: "A defect reproduced is correct; a defect fixed is a failure."
-# So the file reaches the client BYTE-FOR-BYTE -- no sed, awk, tr or iconv on
-# the way in, no edited copy under harness/, no --default-character-set
-# override -- and stage 2 asserts all 33 tables came back utf8mb3_general_ci.
-
-# AUTOCOMMIT IS ASSERTED, NEVER SET (R-3, R-4)
-# [common/glbatchLD.cbl:L9-L12], verbatim:
-#     *>  This modules uses commit and rollback so *
-#     *>  you MUST ensure that autocommit is OFF   *
-#     *>   in the rdb settings. It is as default   *
-#     *>   set ON.                                 *
-#
-# That banner is not unique to the batch loader -- it appears across the
-# `common/*LD.cbl` family. But the shipped loaders never carry the intention
-# out: every `perform aa020-Rollback` is commented out with `*>` (e.g.
-# [common/glbatchLD.cbl:L386], [common/nominalLD.cbl:L428],
-# [common/slpostingLD.cbl:L405]) and `aa030-Commit` has ZERO perform sites in
-# any of the 28 loaders, so this census returns nothing:
-#     grep -n '^ *perform.*\(aa020\|aa030\|Commit\|Rollback\)' common/*LD.cbl
-# The maintainer records the consequence inline at [common/analLD.cbl:L442]:
-# "These do not work during testing with mariadb - Non transactional model or
-# autocommit set ON."
-#
-# The same holds on the posting side: the twenty in-scope bridges, the in-scope
-# handlers and every bridge close path contain zero COMMIT / ROLLBACK / START
-# TRANSACTION, and the vendored `cobmysqlapi38.c` exposes `MySQL_commit` without
-# ever calling it -- and does not expose `MySQL_autocommit` at all, so no COBOL
-# program in the checkout can set the mode itself.
-#
-# The Agent Action Plan nonetheless mandates autocommit OFF -- section 0.2.1.1
-# (the seeding contract), section 0.4.1.7 (on harness/Dockerfile.mariadb:
-# "autocommit off to match the loaders") and section 0.5.2 -- and the AAP is the
-# frozen source of truth this migration aligns to. So the database this script
-# hands to the comparison is served with autocommit OFF, and the durability
-# consequence is REPORTED rather than engineered away: MariaDB discards each
-# COBOL session at disconnect, so the re-seed and any COBOL posting run leave no
-# durable rows. That is the frozen code's defect, and R-4 makes it the
-# specification -- "a defect reproduced is correct; a defect fixed is a failure".
-#
-# The setting has exactly ONE authority: harness/Dockerfile.mariadb, which
-# writes `autocommit=0` into /etc/mysql/conf.d/99-acas-oracle.cnf. This script
-# reads it and REFUSES to reset when it is on. It never issues
-# `SET autocommit`, not even for the duration of the DDL: doing so would create
-# a second authority and make the reset depend on which script ran last. It is
-# asserted BEFORE the apply and again AFTER it, because the frozen file changes
-# session variables and the claim that it left this one alone has to be proved
-# rather than assumed.
-#
-# The loaders' unreachable commit/rollback is preserved as a reproduced legacy
-# defect (R-4), not repaired: this script neither enables transactional seeding
-# the frozen code cannot drive, nor issues the COMMIT the loaders omit.
-#
-# DDL is durable regardless -- InnoDB commits CREATE TABLE and DROP TABLE
-# implicitly -- and stage 3 proves it empirically by reconnecting in a FRESH
-# session and re-counting the tables, rather than taking the manual's word
-# for it.
-#
-# -----------------------------------------------------------------------------
-# WHERE THIS FILE SITS, AND WHAT IT NEVER TOUCHES
-# harness/ is the compiled oracle and is a SIBLING of acas_posting/, never a
-# sub-package. This script imports nothing from acas_posting, creates no
-# harness/__init__.py, and reaches compiled COBOL only indirectly and
-# out-of-process, through harness/seed.sh -- the sanctioned use under R-1.
-# $ACAS_REPO is mounted READ-ONLY (`../:/repo:ro`) and only ever READ, because
-# any diff touching the frozen tree "is a defect in the migration, regardless
-# of how harmless it appears": the run log goes to $ACAS_OUT/reset/ and the
-# sequential lock to $ACAS_OUT. Nothing under $ACAS_OUT/<scenario>/ is written
-# here, so the determinism suite -- which requires two Python runs under one
-# pinned clock to dump byte-identically -- cannot see this script's own
-# wall-clock reading in that log.
-
-# STRICTLY SEQUENTIAL (R-3): no `&`, no `xargs -P`, no job control, and a plain
-# lock file that refuses a second concurrent reset of the shared database.
-# DETERMINISTIC AND IDEMPOTENT (R-6): running it twice leaves the database in
-# exactly the same state both times -- the frozen file's `DROP TABLE IF EXISTS`
-# makes that natural, and stage 2 asserts it.
-# RULES PROVENANCE. There is no user rules document for this project; the
-# binding rules -- R-1 no COBOL at runtime, R-2 zero binary floating point,
-# R-3 no schema change and sequential, R-4 anomalies reproduced never fixed,
-# R-5 full traceability, R-6 compiled behaviour decides -- come from the plan.
-
-# Strict mode. -E propagates the ERR trap into functions and subshells so an
-# unexpected failure is attributed to a line number instead of vanishing.
-# `set -e` is deliberately NOT relied on to police the two operations whose
-# status is DATA rather than an accident: the schema apply (whose failure must
-# produce a named diagnostic and the client's own output) and the delegated
-# seed (whose exit code carries meaning -- 70..73 from seed.sh itself, or a
-# loader's 128/64/16). Both are invoked with errexit suspended for exactly the
-# length of the call and their status captured and classified.
 set -Eeuo pipefail
 
 # Word splitting on newlines and tabs only, so a path containing a space can
-# never be split apart. Every expansion below is quoted regardless. Note the
-# consequence: "${array[*]}" would join on a NEWLINE, so acas_join_words exists
-# for one-line messages.
+# never be split apart. Every expansion below is quoted regardless.
 IFS=$'\n\t'
 
 # An unmatched glob expands to nothing rather than to the pattern text.
 shopt -s nullglob
 
-# Nothing this script writes is group- or world-readable. No credential is ever
-# written to a file at all (see acas_sql_scalar), so this is defence in depth
-# rather than the primary protection.
+# Nothing this script writes is group- or world-readable.
 umask 077
 
-# Exit codes.
-# CHOSEN NOT TO COLLIDE WITH ANY CODE THIS SCRIPT MIGHT PROPAGATE. The delegated
-# seed uses 70..73 for its own failures [harness/seed.sh] and propagates a
-# loader's 128, 64 or 16 [common/masterLD.sh:L37-L39]; harness/build_oracle.sh
-# uses 64..67 and 71..77. This script therefore keeps to the 80..88 band, so the
-# rule for an automated caller is unambiguous:
-#     0              clean reset, and a clean re-seed
-#     80..88         THIS SCRIPT failed one of its own stages
-#     anything else  harness/seed.sh's own status, propagated verbatim
+# Exit codes. CHOSEN NOT TO COLLIDE WITH ANY CODE THIS SCRIPT MIGHT PROPAGATE.
 readonly EX_OK=0
 readonly EX_USAGE=80          # bad command line
 readonly EX_PRECONDITION=81   # environment, output directory or seed.sh assertion
@@ -202,57 +48,17 @@ readonly EX_TIMEOUT=89        # a client or the delegated seed exceeded its dead
 readonly EX_TARGET=90         # the target is not a proven harness-owned disposable database
 readonly EX_FIXTURE=91        # the re-seed did not reuse the scenario's staged fixture
 
-# -----------------------------------------------------------------------------
-# WHAT MAKES A DATABASE SAFE TO DESTROY.
-#
 # This script streams 33 `DROP TABLE IF EXISTS` + 33 `CREATE TABLE` pairs at
-# whatever server the environment names. That is irreversible, it is the entire
-# purpose of the script, and it must therefore be aimed at a database that has
-# been PROVEN disposable rather than one that merely answered a connection.
-#
-# "The credentials worked" is not proof of anything except that the credentials
-# worked. A correct-looking ACAS_DB_HOST/ACAS_DB_NAME pair pointing at a
-# developer's or a colleague's MariaDB is indistinguishable, at the protocol
-# level, from the harness's own throwaway container.
-#
-# So four independent facts must line up, and every one of them is checked before
-# a single DDL statement is sent:
-#
-#   1. The schema name is EXACTLY the one the frozen dump defines. The frozen
-#      mysql/ACASDB.sql is the only schema this script can apply, so any other
-#      name is by definition not this harness's database.
-#   2. The host is one the harness itself provisions.
-#   3. The server carries the harness's own disposability sentinel -- a marker
-#      schema created by harness/Dockerfile.mariadb, which exists nowhere except
-#      in an image this harness built. A production or shared server cannot have
-#      it by accident.
-#   4. The target schema contains nothing but the 33 tables the frozen dump
-#      defines. An extra table means somebody else's data is in there.
-#
-# Any deviation requires an explicit acknowledgement that NAMES THE EXACT TARGET,
-# so a stale blanket "yes" left in an environment cannot authorise the
-# destruction of a different database later.
-#
-# None of this is a business validation and none of it touches the migrated code:
-# the harness is oracle apparatus (AAP 0.7 C-1/C-2), and R-3's prohibition is on
-# schema evolution, which this adds none of.
-# -----------------------------------------------------------------------------
+# whatever server the environment names.
 readonly ACAS_RESET_REQUIRED_SCHEMA='ACASDB'
 readonly ACAS_RESET_SENTINEL_SCHEMA='acas_harness_disposable'
 readonly ACAS_RESET_SENTINEL_TABLE='disposability_marker'
 readonly -a ACAS_RESET_CANONICAL_HOSTS=(mariadb 127.0.0.1 localhost ::1)
 
-# The scenario-fixture marker harness/seed.sh writes when it stages a scenario's
-# declared seed files. THIS STRING MUST MATCH ACAS_FIXTURE_MARKER in
-# [harness/seed.sh] exactly -- the two scripts communicate through this filename
-# and nothing else, so a divergence would make every reset silently report an
-# unbound re-seed.
+# The scenario-fixture marker harness/seed.sh writes when it stages a
+# scenario's declared seed files.
 readonly ACAS_RESET_FIXTURE_MARKER='.acas-scenario-fixture'
 
-# -----------------------------------------------------------------------------
-# Finite deadlines. Every external process runs under one: each MariaDB client
-# invocation, the schema apply, and the delegated harness/seed.sh.
-# -----------------------------------------------------------------------------
 readonly ACAS_TIMEOUT_MAX=86400
 ACAS_TIMEOUT_GRACE="${ACAS_TIMEOUT_GRACE-}"         # TERM-to-KILL grace period
 ACAS_TIMEOUT_CLIENT="${ACAS_TIMEOUT_CLIENT-}"        # one MariaDB client invocation
@@ -261,33 +67,18 @@ ACAS_TIMEOUT_SEED="${ACAS_TIMEOUT_SEED-}"          # the delegated harness/seed.
 ACAS_TIMEOUT_RESOLVED=''      # out-parameter of acas_timeout_seconds
 declare -a ACAS_DEADLINE_ARGV=()   # populated by acas_deadline_prefix
 
-# THE FROZEN ARTIFACT
 
 # The one file this script applies, relative to the read-only checkout.
 readonly ACAS_RESET_SCHEMA_RELPATH='mysql/ACASDB.sql'
 
-# Byte-for-byte digest of `mysql/ACASDB.sql` as committed: 1459 lines,
-# 51008 bytes. The SAME value harness/Dockerfile.mariadb pins as
-# ARG ACASDB_SCHEMA_SHA256, deliberately, so the image build and this script
-# check one baseline rather than two.
-# This pin CANNOT go stale: the file is frozen, so the check fails precisely --
-# and only -- when someone commits the violation the plan forbids. It makes the
-# "applied byte-for-byte" claim machine-checked rather than merely asserted.
+# Byte-for-byte digest of `mysql/ACASDB.sql` as committed: 1459 lines, 51008
+# bytes.
 readonly ACAS_RESET_SCHEMA_SHA256='094e588226f650672c3781d1737d7bf8be30be048ce6a788df81800a19326ed0'
 
-# The 33 tables the frozen schema defines: 22 in scope for the posting cycle,
-# 11 out of scope. 22 + 11 = 33. The reset recreates ALL 33 -- it applies the
-# whole file and nothing but the whole file -- but only the 22 are ever
-# compared, so only they carry a shape expectation below.
 readonly ACAS_RESET_EXPECT_TABLES=33
 
 # The 22 IN-SCOPE tables, each with the column count and single-column primary
-# key the frozen schema declares. Read out of `mysql/ACASDB.sql` itself and
-# cross-checked against the plan's own census, not transcribed by eye.
-# Entry shape: <table>:<columns>:<primary key>
-# The verification stage asserts every one of these, because a reset that
-# produced the right NUMBER of tables with the wrong SHAPE would poison every
-# downstream diff just as thoroughly.
+# key the frozen schema declares.
 readonly -a ACAS_RESET_INSCOPE=(
   'ANALYSIS-REC:4:PA-CODE'
   'GLBATCH-REC:21:BATCH-KEY'
@@ -313,9 +104,7 @@ readonly -a ACAS_RESET_INSCOPE=(
   'VALUEANAL-REC:10:VA-CODE'
 )
 
-# The 11 OUT-OF-SCOPE tables, recreated by the apply and never compared. Named
-# so a reader can re-add the 22 + 11 = 33 rather than trust it, and so the
-# secondary-index assertion can explain why STOCK-REC is exempt.
+# The 11 OUT-OF-SCOPE tables, recreated by the apply and never compared.
 readonly -a ACAS_RESET_OUT_OF_SCOPE=(
   'DELIVERY-REC'
   'PLPAY-REC'
@@ -331,29 +120,18 @@ readonly -a ACAS_RESET_OUT_OF_SCOPE=(
 )
 
 # The frozen collation every one of the 33 tables declares. Asserted after the
-# apply: a `utf8mb4_*` reading would mean the file was transformed on the way in
-# and the charset caveat at [mysql/ACASDB.sql:L9-L11] had been "fixed" (R-4).
+# apply.
 readonly ACAS_RESET_COLLATION='utf8mb3_general_ci'
 
 # The only tables in the whole schema carrying a NON-PRIMARY index, both out of
-# scope: three secondary `KEY`s on STOCK-REC, and the one `UNIQUE KEY` that
-# belongs to PLPAY-RECrg01 -- which also owns the schema's only composite primary
-# key and its only FOREIGN KEY.
-# Every one of the 22 IN-SCOPE tables carries PRIMARY and nothing else. That is
-# exactly why harness/dump_tables.py can order by the primary key with no
-# tie-breaking logic and still get a deterministic dump, and why no seeding or
-# reset ordering is dictated by referential integrity -- so the frozen order is
-# kept everywhere. Re-asserting it after every reset keeps it honest.
+# scope.
 readonly -a ACAS_RESET_SECONDARY_INDEX_ALLOWED=(
   'STOCK-REC'
   'PLPAY-RECrg01'
 )
 
 # The six privileges the frozen file's own statements require of the applying
-# account: DROP and CREATE for the 33 drop/create pairs, LOCK TABLES and INSERT
-# for the 33 `LOCK TABLES ... WRITE` data sections, ALTER for the version-guarded
-# DISABLE/ENABLE KEYS comments should the server honour them, and SELECT for the
-# verification queries.
+# account.
 readonly -a ACAS_RESET_REQUIRED_PRIVILEGES=(
   'DROP'
   'CREATE'
@@ -370,10 +148,7 @@ readonly ACAS_RESET_SEED_SCRIPT='seed.sh'
 
 # The environment contract, identical in shape to the one harness/seed.sh and
 # harness/build_oracle.sh assert, so a container configured for one stage is
-# configured for all three. ACAS_DB_SOCKET may legitimately be EMPTY -- Compose
-# sets it so on purpose because the harness connects over TCP -- but it must be
-# DECLARED, because an undeclared one means the caller never supplied the
-# contract at all.
+# configured for all three.
 readonly -a ACAS_RESET_REQUIRED_ENV_NONEMPTY=(
   ACAS_REPO ACAS_OUT
   ACAS_DB_HOST ACAS_DB_PORT ACAS_DB_NAME ACAS_DB_USER ACAS_DB_PASSWORD
@@ -383,7 +158,6 @@ readonly -a ACAS_RESET_REQUIRED_ENV_DECLARED=(
 )
 
 # Variables this script does not use itself but harness/seed.sh requires, so a
-# --schema-only run does not demand them while a full reset fails early with a
 # named cause instead of at the delegation boundary.
 readonly -a ACAS_RESET_SEED_ENV_NONEMPTY=(
   ACAS_BUILD ACAS_DATA ACAS_LEDGERS ACAS_BIN
@@ -454,24 +228,11 @@ readonly -a ACAS_RESET_SEED_ENV_NONEMPTY=(
 # inside the frozen mysql/ACASDB.sql and are applied verbatim.
 # =============================================================================
 
-# GATE 3a -- schema names this script will destroy. `ACASDB` is the name the
-# frozen dump was produced from [mysql/ACASDB.sql:L1] and the name
-# harness/docker-compose.yml creates. Extend with a comma- or space-separated
-# ACAS_DB_ALLOWED_SCHEMAS when a deployment names its throwaway schema
-# something else.
 readonly -a ACAS_RESET_DEFAULT_ALLOWED_SCHEMAS=(
   'ACASDB'
 )
 
-# GATE 3b -- hosts a disposable database is expected to live on: the loopback
-# forms, and the two service names the Compose recipe and the setup contract
-# use. Extend with ACAS_DB_DISPOSABLE_HOSTS.
-#
-# A HOSTNAME IS NOT A SECURITY BOUNDARY and this list does not pretend
-# otherwise -- `localhost` inside a container with a tunnel out is not
-# disposable. It is a TRIPWIRE against the overwhelmingly common accident: an
-# environment left pointing at a shared or production server. Gates 1 and 2
-# are what actually authorise the operation.
+# GATE 3b -- hosts a disposable database is expected to live on.
 readonly -a ACAS_RESET_DEFAULT_DISPOSABLE_HOSTS=(
   'localhost'
   'localhost.localdomain'
@@ -486,15 +247,9 @@ readonly -a ACAS_RESET_DEFAULT_DISPOSABLE_HOSTS=(
 readonly ACAS_RESET_CONSENT_PREFIX='DESTROY'
 
 # SEC-02 -- the shape a schema name must have before it may be interpolated
-# into SQL at all. Deliberately narrower than MySQL permits: every schema this
-# harness will ever address is an ASCII identifier, so anything carrying a
-# quote, a backslash, a semicolon, whitespace or a comment introducer is
-# refused rather than escaped. Escaping is applied too (see
-# acas_sql_quote_literal), but a shape check that cannot be talked out of is
-# the stronger of the two controls.
+# into SQL at all. Deliberately narrower than MySQL permits.
 readonly ACAS_RESET_SCHEMA_NAME_PATTERN='^[A-Za-z_][A-Za-z0-9_$]*$'
 
-# -----------------------------------------------------------------------------
 # Mutable state. Declared up front because `set -u` makes an unset reference
 # fatal.
 ACAS_RESET_SCHEMA=''             # absolute path to the frozen schema
@@ -528,14 +283,9 @@ ACAS_SQL_TLS_FLAG=''             # resolved TLS flag: '' or --skip-ssl
 declare -a ACAS_RESET_SUMMARY=()      # the closing checklist
 declare -a ACAS_RESET_WARN_SUMMARY=() # non-fatal findings, replayed at the end
 
-# REPORTING
 # Stage banners are numbered so the log reads as the deterministic staged
 # orchestration the plan prescribes (R-6): explicit, ordered, individually
 # reported, individually asserted.
-# Everything printed here goes to standard output AND, once the log directory
-# exists, to $ACAS_OUT/reset/reset.log. Nothing is written under
-# $ACAS_OUT/<scenario>/, because the determinism test requires byte-identical
-# scenario dumps and a clock reading in a compared file would break it.
 
 # Append to the run log if it is open yet. Silent before acas_open_log runs, so
 # early usage errors still print without needing a log.
@@ -574,9 +324,6 @@ acas_warn() {
   ACAS_RESET_WARN_SUMMARY+=("$*")
 }
 
-# acas_die <exit-code> <headline> [detail-line]...
-# Every abort names the artifact or setting at fault and, wherever the cause is
-# frozen behaviour, cites its locator so the reader can check the claim (R-5).
 acas_die() {
   local code="$1"
   shift
@@ -753,16 +500,9 @@ acas_join_words() {
   printf '%s' "$*"
 }
 
-# =============================================================================
-# FINITE DEADLINES
-# =============================================================================
 
-# acas_timeout_seconds <env-var-name> <default>
-# Publishes the validated budget in ACAS_TIMEOUT_RESOLVED rather than on stdout:
-# a caller writing `x="$(acas_timeout_seconds ...)"' would run this in a command
-# substitution, where acas_die's `exit' terminates only that subshell, the
-# message and status are both swallowed, and the run continues with an empty
-# budget -- which is to say with no deadline at all.
+# acas_timeout_seconds <env-var-name> <default> Publishes the validated budget
+# in ACAS_TIMEOUT_RESOLVED rather than on stdout.
 acas_timeout_seconds() {
   local name="$1" default="$2" value
   ACAS_TIMEOUT_RESOLVED=''
@@ -812,9 +552,6 @@ acas_resolve_deadlines() {
   done
 }
 
-# acas_deadline_prefix <budget>
-# The single place that knows the flag spelling. `timeout' becomes the parent of
-# exactly the process it is given, so only that one child is ever signalled.
 acas_deadline_prefix() {
   ACAS_DEADLINE_ARGV=(
     timeout
@@ -824,10 +561,6 @@ acas_deadline_prefix() {
   )
 }
 
-# acas_is_timeout_status <rc> <elapsed> <budget>
-# 124 is GNU coreutils on expiry, 137 the KILL escalation. uutils coreutils
-# returns 125 where GNU returns 124, while GNU's 125 means timeout itself failed
-# -- so 125 is decided by elapsed wall clock rather than by status alone.
 acas_is_timeout_status() {
   local rc="$1" elapsed="$2" budget="$3"
   if (( rc == 124 || rc == 137 )); then
@@ -839,7 +572,7 @@ acas_is_timeout_status() {
   return 1
 }
 
-# acas_assert_not_timed_out <rc> <elapsed> <budget> <budget-var> <label>
+# acas_assert_not_timed_out <rc> <elapsed> <budget> <budget-var> <label>.
 acas_assert_not_timed_out() {
   local rc="$1" elapsed="$2" budget="$3" budget_var="$4" label="$5"
   if ! acas_is_timeout_status "$rc" "$elapsed" "$budget"; then
@@ -851,17 +584,8 @@ acas_assert_not_timed_out() {
     "The child was sent TERM at the deadline and KILL ${ACAS_TIMEOUT_GRACE}s later."
 }
 
-# =============================================================================
-# THE FROZEN-ARTIFACT CONTAINMENT GUARD
-#
-# acas_assert_outside_repo <label> <path>
-#
-# Canonical, not textual, and in BOTH directions. A string prefix test misses a
-# symlink whose target is inside the checkout, a path that does not exist yet
-# (judged instead by its nearest existing ancestor, which is what mkdir would
-# create under), and a write root that CONTAINS the checkout -- equally
-# unacceptable, since writing through it reaches the frozen files too.
-# =============================================================================
+# acas_assert_outside_repo <label> <path> Canonical, not textual, and in BOTH
+# directions.
 acas_assert_outside_repo() {
   local label="$1" path="$2"
   local repo_real target probe
@@ -897,28 +621,9 @@ acas_assert_outside_repo() {
   fi
 }
 
-# =============================================================================
-# SQL IDENTIFIER AND LITERAL SAFETY
-#
 # Every statement in this script is built by string composition -- the MariaDB
 # CLI has no bind parameters -- so the two values that reach SQL from the
-# environment are gated here rather than trusted at each of the eleven sites
-# that use them.
-#
-# acas_assert_sql_identifier <label> <value>
-#   The character class is deliberately narrower than MariaDB permits: letters,
-#   digits and underscore only, and at most 12 characters, which is already the
-#   ceiling the COBOL `RDB-Data' pic x(12) field imposes
-#   [copybooks/wsfnctn.cob:L56-L62]. Nothing legitimate in this harness needs
-#   more, and a value that cannot contain a quote, a backslash, a semicolon, a
-#   comment introducer or whitespace cannot alter the shape of a statement.
-#
-# acas_sql_quote <value>
-#   Emits the value as a SQL string literal WITH its enclosing quotes, doubling
-#   any embedded single quote. Used so no call site concatenates a bare value
-#   between hand-written quotes -- the pattern that made the schema name able to
-#   terminate a literal and append its own SQL.
-# =============================================================================
+# environment are gated here rather than trusted at each of the eleven sites.
 acas_assert_sql_identifier() {
   local label="$1" value="$2"
   if [[ ! "$value" =~ ^[A-Za-z0-9_]{1,12}$ ]]; then
@@ -934,25 +639,13 @@ acas_assert_sql_identifier() {
 
 # ONE implementation, two published names. acas_sql_quote is the name most call
 # sites use; acas_sql_quote_literal, declared below with the SQL-COMPOSITION
-# block that explains it, is the implementation. It escapes the BACKSLASH as
-# well as the apostrophe, which matters because MariaDB treats a backslash as an
-# escape character in a string literal unless NO_BACKSLASH_ESCAPES is set. Two
-# separate escapers would be two places for that to be got wrong.
+# block that explains it, is the implementation.
 acas_sql_quote() {
   acas_sql_quote_literal "${1-}"
 }
 
-# acas_assert_table_name <label> <value>
-# The table-name counterpart of acas_assert_sql_identifier. A SEPARATE validator
-# rather than a loosened one, because the two accept different alphabets for
-# different reasons and merging them would weaken the stricter of the pair:
-#   - a schema/user name comes from the environment and is bounded by the COBOL
-#     pic x(12) field, so it is restricted to [A-Za-z0-9_];
-#   - a table name comes from the frozen schema, which uses HYPHENS throughout
-#     (GLLEDGER-REC, SAINV-LINES-REC) and reaches 19 characters
-#     (PUAUTOGEN-LINES-REC), so [A-Za-z0-9_-] up to 64 is the accurate rule.
-# Notably absent from both: the backtick, which is the character that would
-# escape a quoted identifier.
+# acas_assert_table_name <label> <value> The table-name counterpart of
+# acas_assert_sql_identifier.
 acas_assert_table_name() {
   local label="$1" value="$2"
   if [[ ! "$value" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; then
@@ -965,17 +658,13 @@ acas_assert_table_name() {
   fi
 }
 
-# acas_sql_quote_ident <value>
-# Emits a backquoted SQL identifier, doubling any embedded backtick, and -- like
-# acas_sql_quote -- emits the delimiters itself so that no call site is left
-# writing its own pair around an unescaped value. The frozen table names REQUIRE
-# quoting: every one contains a hyphen, which is an operator in unquoted SQL.
+# acas_sql_quote_ident <value> Emits a backquoted SQL identifier, doubling any
+# embedded backtick, and -- like acas_sql_quote -- emits the delimiters itself
+# so that no call site is left writing its own pair around an unescaped value.
 acas_sql_quote_ident() {
   local value="$1"
   # The delimiter is held in a variable rather than written into the format
-  # string: a backtick inside a single-quoted printf format is literal and would
-  # be correct, but it reads as an attempted command substitution to both static
-  # analysis and to humans. This spelling is unambiguous to both.
+  # string.
   local bq='`'
   printf '%s%s%s' "$bq" "${value//"$bq"/"$bq$bq"}" "$bq"
 }
@@ -993,8 +682,6 @@ acas_split_table_entry() {
   ACAS_T_PK="${entry#*:}"
 }
 
-# Record one line of the closing checklist.
-# acas_check <verdict> <detail...>
 acas_check() {
   local verdict="$1"
   shift
@@ -1011,8 +698,7 @@ acas_inscope_table_names() {
 }
 
 # Render a list for a diagnostic, or the word "none" when it is empty, so a
-# message never reads "missing    :" with nothing after the colon.
-# acas_list_or_none <element>...
+# message never reads "missing :" with nothing after the colon.
 acas_list_or_none() {
   if (( $# == 0 )); then
     printf 'none'
@@ -1022,7 +708,6 @@ acas_list_or_none() {
 }
 
 # Membership test over elements passed by value, so the arrays stay readonly.
-# acas_in_list <needle> <element>...
 acas_in_list() {
   local needle="$1"
   shift
@@ -1035,9 +720,6 @@ acas_in_list() {
   return 1
 }
 
-# Split a comma- or space-separated list into words, one per line. Used for the
-# two environment-extendable allow-lists, so both separators work and empty
-# entries are dropped.
 acas_split_list() {
   local raw="${1-}"
   local item
@@ -1049,9 +731,6 @@ acas_split_list() {
   return 0
 }
 
-# -----------------------------------------------------------------------------
-# SAFE SQL COMPOSITION  (CWE-89)
-#
 # This script builds twelve read-only information_schema queries by
 # interpolating $ACAS_DB_NAME into SQL text. Every one of them went in raw:
 #
@@ -1082,8 +761,6 @@ acas_split_list() {
 # twelve queries sent before, so every verification result is unchanged.
 # -----------------------------------------------------------------------------
 
-# Return $1 as a single-quoted SQL literal, safely escaped. Backslash first,
-# then the quote, so an escaped backslash is not re-escaped.
 acas_sql_quote_literal() {
   local value="${1-}"
   value="${value//\\/\\\\}"
@@ -1092,45 +769,11 @@ acas_sql_quote_literal() {
 }
 
 # Identifier quoting goes through acas_sql_quote_ident, declared above with
-# acas_assert_table_name. Every SQL identifier this script names is a frozen
-# constant -- from ACAS_RESET_SECONDARY_INDEX_ALLOWED or the in-scope table list
-# -- so none comes from the caller and there is nothing for the helper to
-# sanitise; it exists because every identifier in this schema is HYPHENATED and
-# therefore has to be backquoted, and one helper that emits its own delimiters
-# is safer than a backquote pair hand-written at each site.
+# acas_assert_table_name.
 
-# -----------------------------------------------------------------------------
-# SAFE FILE CREATION  (CWE-59 symlink following, CWE-367 TOCTOU, CWE-732
-# over-permissive files)
-#
-# `: >"$path"` and `printf ... >"$path"` both FOLLOW a symlink and TRUNCATE its
-# target, and both create at whatever the umask allows -- 0644 in practice. Every
-# file this script creates lives under $ACAS_OUT, which the Compose recipe makes
-# a bind mount shared between the `gnucobol` and `mariadb` services
-# [harness/docker-compose.yml:L689]. So an attacker able to create the name
-# first chooses which file gets truncated, and then reads what is written in its
-# place.
-#
-# THE PATTERN, in four steps, and each one is load-bearing:
-#
-#   1. REFUSE a symlink outright. Bash has no O_NOFOLLOW, so this is an explicit
-#      `-L` test. On its own it would be a TOCTOU window, which is why step 3
-#      exists.
-#   2. REMOVE an existing regular file, so step 3's exclusive create is not
-#      defeated by our own previous run.
-#   3. CREATE under `set -C` (noclobber), which is O_EXCL: if anything -- a
-#      symlink, a regular file, a directory -- appears at the name between step 1
-#      and here, the create FAILS instead of following or truncating. This is
-#      what closes the race that step 1 alone leaves open.
-#   4. chmod 600, so the content is private regardless of the inherited umask.
-#      `umask 077` is also set in acas_main, which makes step 4 belt and braces
-#      rather than the only control.
-#
-# Not `mktemp`: these are named files the operator is told to read, so the name
-# is part of the contract. Not `flock`: it is not guaranteed present, and a lock
-# that silently degrades to no lock is worse than none -- the same reasoning
-# acas_take_lock records.
-# -----------------------------------------------------------------------------
+# Create a file that cannot be hijacked: a symlink or non-regular path is refused
+# rather than followed, and the file is created under `set -C' (O_EXCL) so it can
+# neither be pre-created by another user nor widened between create and chmod.
 acas_create_private_file() {
   local path="$1" what="$2"
 
@@ -1161,24 +804,12 @@ acas_create_private_file() {
     "could not restrict $what to mode 600: $path"
 }
 
-# =============================================================================
-# TRAPS
-# There is no credential FILE to shred: the password reaches the client
-# through MYSQL_PWD only (see acas_sql_argv), so it never appears in argv,
-# never in `ps`, and never on disk. That is a stronger guarantee than a
-# --defaults-extra-file plus a cleanup trap, and it is why this script
-# creates no temporary credential file. `set -x` is never enabled either.
-# The EXIT trap releases the sequential lock and -- the important part --
-# tells the operator whether the database was left mid-reset. A reset that
-# failed AFTER the apply and BEFORE the seed leaves 33 empty tables, which
-# is a perfectly valid schema and a completely invalid premise for a diff.
-# Saying so is the difference between a diff that is known-meaningless and
-# one that is silently wrong.
+# TRAPS There is no credential FILE to shred.
 
-# Release the lock this process created, and only that one.
 # shellcheck disable=SC2317  # reached only through the EXIT trap installed below,
-# which shellcheck cannot follow; the body is live and is exercised by the
-# concurrency validation case.
+# Release the lock this process created, and only that one. which shellcheck
+# cannot follow; the body is live and is exercised by the concurrency
+# validation case.
 acas_release_lock() {
   if (( ACAS_RESET_LOCK_HELD )) && [[ -n "$ACAS_RESET_LOCK" ]]; then
     rm -f -- "$ACAS_RESET_LOCK" 2>/dev/null || true
@@ -1209,9 +840,8 @@ acas_on_exit() {
   printf '\nharness/reset_db.sh exiting with status %s during stage: %s\n' \
     "$status" "$ACAS_RESET_STAGE" >&2
   if (( ACAS_RESET_APPLIED )); then
-    # The seed "did not complete" covers both never having run and having run and
-    # failed: in either case the database holds the empty schema and no seed data,
-    # which is the fact the operator needs, so both take the specific message.
+    # The seed "did not complete" covers both never having run and having run
+    # and failed.
     if (( ! ACAS_RESET_SCHEMA_ONLY )) && [[ "$ACAS_RESET_SEED_RC" != '0' ]]; then
       printf 'The frozen schema WAS applied but the re-seed did not complete, so the\n' >&2
       printf 'database now holds the %s empty tables and NO seed data. That is a valid\n' \
@@ -1228,7 +858,6 @@ acas_on_exit() {
 }
 trap 'acas_on_exit "$?"' EXIT
 
-# USAGE
 acas_usage() {
   cat <<'USAGE'
 harness/reset_db.sh -- drop, re-apply the frozen ACASDB schema verbatim, re-seed.
@@ -1263,9 +892,9 @@ Usage:
 
 Arguments:
   <scenario.yaml>     Optional. Forwarded VERBATIM to harness/seed.sh, so the
-                      canonical invocation documented at
-                      [harness/docker-compose.yml:L357-L399] --
-                      `harness/reset_db.sh "$S"` -- works as written.
+                      canonical invocation documented in
+                      harness/docker-compose.yml -- `harness/reset_db.sh "$S"`
+                      -- works as written.
                       BINDING when given: harness/seed.sh stages the scenario's
                       declared seed_files into a scenario-owned fixture and seeds
                       from exactly those, and after the re-seed this script
@@ -1412,7 +1041,6 @@ USAGE
 }
 
 
-# ARGUMENTS
 acas_parse_args() {
   while (( $# > 0 )); do
     case "$1" in
@@ -1428,15 +1056,11 @@ acas_parse_args() {
         [[ $# -ge 2 ]] || acas_die "$EX_USAGE" '--data-dir requires a path.'
         ACAS_RESET_DATA_DIR="$2"
         # Rejected rather than treated as "not given", and for the same reason
-        # the --data-dir=* form below rejects it: an empty value almost always
-        # means an unset variable was interpolated, and silently falling back to
-        # $ACAS_DATA would seed from a directory the operator did not choose --
-        # which is precisely how a state diff becomes meaningless. Both spellings
-        # of the flag therefore behave identically.
+        # the --data-dir=* form below rejects it.
         [[ -n "$ACAS_RESET_DATA_DIR" ]] || acas_die "$EX_USAGE" \
           '--data-dir was given an empty path.' \
           'If the default is wanted, omit the flag; harness/seed.sh then uses' \
-          'the ACAS_DATA volume [harness/seed.sh:L830].'
+          'the ACAS_DATA volume instead.'
         shift 2
         ;;
       --data-dir=*)
@@ -1444,7 +1068,7 @@ acas_parse_args() {
         [[ -n "$ACAS_RESET_DATA_DIR" ]] || acas_die "$EX_USAGE" \
           '--data-dir was given an empty path.' \
           'If the default is wanted, omit the flag; harness/seed.sh then uses' \
-          'the ACAS_DATA volume [harness/seed.sh:L830].'
+          'the ACAS_DATA volume instead.'
         shift
         ;;
       --consent)
@@ -1466,10 +1090,7 @@ acas_parse_args() {
         shift
         ;;
       --acknowledge-destructive)
-        # Deliberately REQUIRES a value rather than acting as a bare switch: the
-        # acknowledgement has to name the exact target it authorises, or it would
-        # be a blanket "destroy whatever is configured" that outlives the
-        # invocation it was reasoned about. See acas_assert_disposable_static.
+        # Deliberately REQUIRES a value rather than acting as a bare switch.
         [[ $# -ge 2 ]] || acas_die "$EX_USAGE" \
           '--acknowledge-destructive requires the exact target it authorises.' \
           "Expected form: user@host:port/schema" \
@@ -1498,9 +1119,9 @@ acas_parse_args() {
           'Run --help for the accepted options.'
         ;;
       *)
-        # The optional scenario positional, forwarded verbatim to seed.sh so the
-        # canonical invocation at [harness/docker-compose.yml:L346-L357] works
-        # as written.
+        # The optional scenario positional, forwarded verbatim to seed.sh so
+        # the canonical invocation at harness/docker-compose.yml works as
+        # written.
         if [[ -n "$ACAS_RESET_SCENARIO" ]]; then
           acas_die "$EX_USAGE" \
             "at most one scenario file may be given; got '$ACAS_RESET_SCENARIO' and '$1'."
@@ -1520,7 +1141,6 @@ acas_parse_args() {
     shift
   done
 
-  # --schema-only skips the seed, so a data directory would be inert. Rejecting
   # the combination is better than silently ignoring an argument the caller
   # clearly meant to have an effect.
   if (( ACAS_RESET_SCHEMA_ONLY )) && [[ -n "$ACAS_RESET_DATA_DIR" ]]; then
@@ -1531,14 +1151,9 @@ acas_parse_args() {
   fi
 }
 
-# PRECONDITIONS
 # This script ASSERTS its environment; it never installs one, never creates a
-# database object and never changes a server setting. Asserting here means a
-# misconfigured container fails in seconds with a named cause, instead of the
-# client failing part-way through the frozen file and leaving a half-applied
-# schema that silently poisons every subsequent diff.
+# database object and never changes a server setting.
 
-# Precondition 1 of 9.
 acas_assert_environment() {
   acas_stage 'Preconditions 1/9: environment contract'
 
@@ -1546,7 +1161,6 @@ acas_assert_environment() {
   local -a required=("${ACAS_RESET_REQUIRED_ENV_NONEMPTY[@]}")
 
   # The seed-only variables are required for a full reset and irrelevant to
-  # --schema-only. Asserting them up front means a full reset that cannot seed
   # fails BEFORE it drops 33 tables, rather than after.
   if (( ! ACAS_RESET_SCHEMA_ONLY )); then
     required+=("${ACAS_RESET_SEED_ENV_NONEMPTY[@]}")
@@ -1560,8 +1174,7 @@ acas_assert_environment() {
   done
   for name in "${ACAS_RESET_REQUIRED_ENV_DECLARED[@]}"; do
     # `-v` tests declaration, not content. An empty ACAS_DB_SOCKET is valid and
-    # means "no unix socket"; an UNDECLARED one means the caller never supplied
-    # the contract at all.
+    # means "no unix socket".
     if [[ ! -v "$name" ]]; then
       printf 'FATAL: required environment variable %s is not declared.\n' "$name" >&2
       printf '       It may legitimately be EMPTY, but it must be declared.\n' >&2
@@ -1577,14 +1190,7 @@ acas_assert_environment() {
 
   # A numeric test alone let 99999 through to the TCP probe's bare
   # `int(sys.argv[2])` and to --port=, where the client's own truncation or the
-  # kernel's rejection produced a connection failure with no useful cause. The
-  # RANGE is asserted here, once, before anything connects.
-  #
-  # NOTE ON WIDTH: this checks the harness environment variable, NOT the COBOL
-  # field. `DB-Port` is `pic x(5)` CHARACTER data
-  # [copybooks/wsfnctn.cob:L56-L62] and its value semantics are untouched --
-  # port 65535 is five characters and fits, which is exactly why the frozen
-  # field is five wide.
+  # kernel's rejection produced a connection failure with no useful cause.
   if [[ ! "$ACAS_DB_PORT" =~ ^[0-9]+$ ]]; then
     acas_die "$EX_PRECONDITION" \
       "ACAS_DB_PORT must be numeric; got '$ACAS_DB_PORT'."
@@ -1598,20 +1204,10 @@ acas_assert_environment() {
   fi
   # CANONICALISED, and this matters beyond tidiness: the consent token embeds
   # the port verbatim, so `03306` and `3306` would demand two different tokens
-  # for one target. `10#` forces base-10 so a leading zero is stripped rather
-  # than read as octal.
+  # for one target.
   ACAS_DB_PORT="$(( 10#$ACAS_DB_PORT ))"
 
-  # The COBOL reads its connection details into fixed-width fields. A longer
-  # value is silently TRUNCATED, after which the COBOL side fails to
-  # authenticate while the Python side succeeds -- a divergence with nothing to
-  # do with posting logic. The password's LENGTH is checked; its VALUE is never
-  # printed. [copybooks/wsfnctn.cob:L56-L62]
-  # The limit applies to the APPLICATION account and the schema name, which do
-  # enter the COBOL `RDB-Data` block. It deliberately does NOT apply to an
-  # ACAS_DB_ADMIN_* override, which is a harness-only credential -- the same
-  # reasoning [harness/docker-compose.yml:L512-L527] applies to
-  # MARIADB_ROOT_PASSWORD.
+  # The COBOL reads its connection details into fixed-width fields.
   local value
   for name in ACAS_DB_USER ACAS_DB_PASSWORD ACAS_DB_NAME; do
     value="${!name-}"
@@ -1628,9 +1224,7 @@ acas_assert_environment() {
   # fails before the TCP probe, let alone the apply.
   acas_authorise_destructive_target
 
-  # The transport policy, for the same reason and at the same point: a refusal
-  # must be reported before the readiness probe spends its timeout on a host
-  # this script was never going to talk to.
+  # The transport policy, for the same reason and at the same point.
   acas_assert_transport_policy
 
   [[ -d "$ACAS_REPO" ]] || acas_die "$EX_PRECONDITION" \
@@ -1647,21 +1241,8 @@ acas_assert_environment() {
   acas_note 'the password is never printed, never logged and never passed in argv'
 }
 
-# -----------------------------------------------------------------------------
 # THE THREE DESTRUCTIVE GATES. See THE DESTRUCTIVE-TARGET POLICY above for why
 # each one exists. Nothing in this function connects, reads or writes.
-#
-# EVERY problem is collected and reported TOGETHER rather than one per run, so
-# an operator configuring the harness for the first time learns all three
-# requirements at once instead of discovering them in three failed attempts.
-#
-# UNDER --dry-run the problems are WARNINGS and the run continues to print the
-# plan. That is deliberate and it is not a hole: a dry run opens no connection
-# and executes nothing, and it is the documented way to be TOLD the exact
-# consent token this target needs. A real run is strict -- ACAS_RESET_DRY_RUN is
-# set only by the flag, is never read from the environment, and the flag exits
-# before acas_take_lock.
-# -----------------------------------------------------------------------------
 acas_gate_problem() {
   ACAS_RESET_GATE_PROBLEMS+=("$@")
   ACAS_RESET_GATE_PROBLEMS+=('')
@@ -1670,10 +1251,8 @@ acas_gate_problem() {
 acas_authorise_destructive_target() {
   ACAS_RESET_GATE_PROBLEMS=()
 
-  # ---- SEC-02: the schema name must be a plain identifier before it is ever
   # interpolated into SQL, and the safely-quoted literal is computed once here
-  # so all twelve query sites share one derivation. FATAL even under --dry-run,
-  # because the plan printout itself names the schema.
+  # so all twelve query sites share one derivation.
   if [[ ! "$ACAS_DB_NAME" =~ $ACAS_RESET_SCHEMA_NAME_PATTERN ]]; then
     acas_die "$EX_PRECONDITION" \
       "ACAS_DB_NAME is not a plain SQL identifier: '${ACAS_DB_NAME}'." \
@@ -1684,7 +1263,6 @@ acas_authorise_destructive_target() {
   fi
   ACAS_RESET_SCHEMA_LITERAL="$(acas_sql_quote_literal "$ACAS_DB_NAME")"
 
-  # ---- GATE 1: a distinct admin account, with no fallback.
   if [[ -z "${ACAS_DB_ADMIN_USER-}" ]]; then
     acas_gate_problem \
       'GATE 1 (privilege separation): ACAS_DB_ADMIN_USER is not set, and there' \
@@ -1714,13 +1292,11 @@ acas_authorise_destructive_target() {
       'MYSQL_PWD only.'
   fi
 
-  # Resolved even when gate 1 failed, so the plan printout and the log line have
-  # something truthful to name. A failed gate aborts before any connection, so
-  # this value is never used to authenticate in that case.
+  # Resolved even when gate 1 failed, so the plan printout and the log line
+  # have something truthful to name.
   ACAS_RESET_DB_USER="${ACAS_DB_ADMIN_USER:-<unset:ACAS_DB_ADMIN_USER>}"
   ACAS_RESET_DB_PASSWORD="${ACAS_DB_ADMIN_PASSWORD-}"
 
-  # ---- GATE 3: a disposable target. Reported before the consent token so an
   # operator who has aimed at the wrong server is told THAT, rather than being
   # told to type a consent string naming it.
   local -a allowed_schemas=("${ACAS_RESET_DEFAULT_ALLOWED_SCHEMAS[@]}")
@@ -1751,7 +1327,6 @@ acas_authorise_destructive_target() {
       'disposable.'
   fi
 
-  # ---- GATE 2: explicit, target-scoped consent.
   ACAS_RESET_CONSENT_EXPECTED="${ACAS_RESET_CONSENT_PREFIX} ${ACAS_DB_NAME}@${ACAS_DB_HOST}:${ACAS_DB_PORT}"
   local supplied="${ACAS_RESET_CONSENT_ARG:-${ACAS_RESET_CONSENT-}}"
   if [[ -z "$supplied" ]]; then
@@ -1777,9 +1352,6 @@ acas_authorise_destructive_target() {
 
   if (( ${#ACAS_RESET_GATE_PROBLEMS[@]} )); then
     if (( ACAS_RESET_DRY_RUN )); then
-      # A dry run connects to nothing and executes nothing, so it reports the
-      # requirements instead of refusing. This is the documented way to be told
-      # the exact consent token a target needs.
       acas_warn 'the destructive-target gates would REFUSE this run; --dry-run reports them instead'
       local line
       for line in "${ACAS_RESET_GATE_PROBLEMS[@]}"; do
@@ -1803,31 +1375,10 @@ acas_authorise_destructive_target() {
 }
 
 # Open the run log. Its directory is $ACAS_OUT/reset, deliberately NOT
-# $ACAS_OUT/<scenario>/: the determinism test compares scenario dumps byte for
-# byte, so the one wall-clock reading in this script must live somewhere the
-# comparison can never see.
-#
-# CREATED SAFELY (CWE-59 symlink following, CWE-367 TOCTOU, CWE-732
-# over-permissive). The truncation used to be a bare
-#
-#     : >"$ACAS_RESET_LOG"
-#
-# which FOLLOWS a symlink and truncates whatever it points at, at whatever mode
-# the umask happens to allow. $ACAS_OUT is a bind mount shared between two
-# Compose services [harness/docker-compose.yml:L689], so anything able to place
-# `reset/reset.log` there first could choose the victim -- and then read a log
-# that names the schema, the host, the admin account and every client
-# diagnostic. See acas_create_private_file for the replacement pattern; the
-# LOG'S CONTENT is unchanged.
+# $ACAS_OUT/<scenario>/.
 acas_open_log() {
   local dir="$ACAS_OUT/reset"
 
-  # Canonicalise BEFORE creating anything. A prefix test on the raw strings would
-  # be satisfied by `$ACAS_REPO/../repo-name', by a symlink into the checkout, or
-  # by a relative path -- and the first thing this function does is mkdir -p,
-  # which would have already materialised directories inside the frozen tree by
-  # the time a later check noticed. Both directions are rejected: the target must
-  # not sit inside the checkout, and the checkout must not sit inside the target.
   acas_assert_outside_repo 'ACAS_OUT' "$ACAS_OUT"
   acas_assert_outside_repo 'the reset log directory' "$dir"
 
@@ -1836,17 +1387,8 @@ acas_open_log() {
     'ACAS_OUT must be a writable volume.'
   chmod 700 -- "$dir" 2>/dev/null || true
 
-  # Re-checked after creation: mkdir -p resolves symlinks along the way, so the
-  # path that now exists is the one to judge, not the one that was requested.
   acas_assert_outside_repo 'the reset log directory' "$dir"
 
-  # THE GLOBAL IS ASSIGNED LAST, and that ordering is the whole point. acas_tee
-  # appends to $ACAS_RESET_LOG whenever it is non-empty, and acas_die reports
-  # through acas_tee -- so setting the global BEFORE the path was proven safe
-  # meant the refusal message itself was written through the very symlink it was
-  # refusing. Proven by probe, not reasoned about: the victim file grew by five
-  # lines of diagnostic. Until the create succeeds, ACAS_RESET_LOG stays empty
-  # and every diagnostic goes to the terminal only.
   local candidate="$dir/reset.log"
   acas_create_private_file "$candidate" 'the reset log'
   ACAS_RESET_LOG="$candidate"
@@ -1858,21 +1400,9 @@ acas_open_log() {
   } >>"$ACAS_RESET_LOG"
 }
 
-# -----------------------------------------------------------------------------
-# Precondition 5 of 9 -- THE SEQUENTIAL LOCK (R-3)
-#
-# "Execution strictly sequential -- no parallel scenario runs against the shared
-# database." Two resets racing on one database would interleave 33 drops with 33
-# creates and leave a state neither caller asked for, so a second one is refused
-# rather than queued.
-#
-# Taken AFTER preconditions 1..3, which are pure reads, so a misconfigured
-# invocation can never block a correct one; and BEFORE preconditions 5..7,
-# which open connections to the shared database.
-# A PLAIN LOCK FILE, created with `set -C` (noclobber) so the test and the
-# create are one atomic operation. Deliberately not `flock`, which is not
-# guaranteed present and would silently degrade to no lock. The owning pid
-# is written, and a stale lock is reclaimed: a killed run must not wedge.
+# Precondition 5 of 9 -- THE SEQUENTIAL LOCK (R-3) "Execution strictly
+# sequential -- no parallel scenario runs against the shared database." Two
+# resets racing on one database would interleave 33 drops with 33 creates and.
 acas_take_lock() {
   acas_stage 'Preconditions 5/9: the sequential reset lock'
   ACAS_RESET_LOCK="$ACAS_OUT/.reset_db.lock"
@@ -1897,8 +1427,6 @@ acas_take_lock() {
     rm -f -- "$ACAS_RESET_LOCK" 2>/dev/null || true
   fi
 
-  # noclobber makes the create fail if another process won the race between the
-  # check above and here.
   if ! (set -C; printf '%s\n' "$$" >"$ACAS_RESET_LOCK") 2>/dev/null; then
     acas_die "$EX_CONCURRENT" \
       "could not take the reset lock $ACAS_RESET_LOCK." \
@@ -1908,39 +1436,10 @@ acas_take_lock() {
   ACAS_RESET_LOCK_HELD=1
 }
 
-# -----------------------------------------------------------------------------
 # Precondition 3 of 9 -- THE FROZEN ARTIFACT.
-#
-# Asserted BEFORE anything is applied, because this is the cheapest possible
-# place to catch a modified frozen file and the most expensive place to miss one:
-# the plan is unambiguous that "any diff touching ... mysql/ACASDB.sql is a
-# defect in the migration, regardless of how harmless it appears", and a schema
-# that has quietly grown an index or lost a table would make every downstream
-# parity result meaningless while still looking like a clean run.
-#
-# Every check is a READ. Nothing here transforms, copies or repairs the file
-# (R-4) -- see the header on the charset caveat.
-#
-# On the ALTER TABLE pattern: a naive `grep -c 'ALTER TABLE'` reports 66 on this
-# dump, yet there is not one real ALTER TABLE in it -- every hit sits inside a
-# mysqldump version guard, `/*!40000 ALTER TABLE `X` DISABLE KEYS */`
-# [mysql/ACASDB.sql:L45]. `^[^/]*ALTER TABLE` matches only an occurrence with no
-# `/` before it on the line, so the 66 guarded hits are excluded while a
-# genuinely added statement -- at column 1 or indented -- is caught. The same
-# pattern is used by the image build tripwire [harness/Dockerfile.mariadb], so
-# both agree by construction.
-#
-# On the float test: it matches the bare TOKENS `float`, `double` and `real`
-# anywhere in the file rather than only in column position. That is the stronger
-# assertion -- the frozen schema contains zero occurrences of all three words, in
-# DDL and in comments alike -- and it supports R-2 structurally: an accounting
-# value can never traverse a binary floating-point column because no such column
-# exists. `decimal` is unaffected, containing none of the three as a whole word.
-# -----------------------------------------------------------------------------
 
-# acas_assert_grep_count <expected> <grep-flags> <pattern> <description>
-# `|| true` is required: grep exits 1 when the count is 0, which under `set -e`
-# would abort before the comparison this function exists to make.
+# acas_assert_grep_count <expected> <grep-flags> <pattern> <description> `||
+# true` is required.
 acas_assert_grep_count() {
   local expected="$1" flags="$2" pattern="$3" description="$4"
   local actual
@@ -1974,7 +1473,7 @@ acas_assert_frozen_schema() {
   acas_log "applying: $ACAS_RESET_SCHEMA"
 
   # 1. Byte-for-byte identity. The strongest check, and the one that makes
-  #    "verbatim" a machine-checked claim rather than a comment.
+  # "verbatim" a machine-checked claim rather than a comment.
   acas_have sha256sum || acas_die "$EX_PRECONDITION" \
     'sha256sum is not available, so the frozen schema cannot be verified byte-for-byte.' \
     'It is part of coreutils and is present in both harness images.'
@@ -1994,8 +1493,8 @@ acas_assert_frozen_schema() {
   acas_ok "byte-identical to the frozen baseline (sha256 ${ACAS_RESET_SCHEMA_SHA256:0:16}...)"
 
   # 2..9. The structural invariants, each asserted independently against the
-  #       committed schema. A digest mismatch alone would say only "something
-  #       changed"; these name WHICH rule was violated.
+  # committed schema. A digest mismatch alone would say only "something
+  # changed"; these name WHICH rule was violated.
   acas_assert_grep_count "$ACAS_RESET_EXPECT_TABLES" -c '^CREATE TABLE ' \
     'CREATE TABLE statements (22 in scope + 11 out of scope)'
   acas_assert_grep_count "$ACAS_RESET_EXPECT_TABLES" -c '^DROP TABLE IF EXISTS ' \
@@ -2021,9 +1520,6 @@ acas_assert_frozen_schema() {
 acas_assert_seed_script() {
   acas_stage 'Preconditions 4/9: harness/seed.sh'
 
-  # Resolved beside THIS file, not relative to the working directory: the
-  # `gnucobol` service runs with working_dir /build, and the reset must work from
-  # anywhere.
   local here
   here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
   ACAS_RESET_SEED="$here/$ACAS_RESET_SEED_SCRIPT"
@@ -2051,84 +1547,32 @@ acas_assert_seed_script() {
   acas_note 'sanctioned use of compiled COBOL under R-1'
 }
 
-# The optional scenario positional. Checked for readability here so a typo fails
-# before 33 tables are dropped, rather than after; NOT parsed, because R-3
-# forbids adding validation the frozen tooling does not perform, and because a
-# scenario's inputs reach the loaders through the flat files it places in the data
-# directory rather than through this script.
+# The optional scenario positional. Checked for readability here so a typo
+# fails before 33 tables are dropped, rather than after.
 acas_assert_scenario() {
   [[ -n "$ACAS_RESET_SCENARIO" ]] || return 0
 
   [[ -e "$ACAS_RESET_SCENARIO" ]] || acas_die "$EX_USAGE" \
     "the scenario file '$ACAS_RESET_SCENARIO' does not exist." \
-    'The canonical invocation passes a path such as' \
-    'harness/scenarios/clean_batch_gl.yaml [harness/docker-compose.yml:L346-L357].'
+    'The canonical invocation passes a scenario file path; see' \
+    'harness/docker-compose.yml.'
   [[ -f "$ACAS_RESET_SCENARIO" && -r "$ACAS_RESET_SCENARIO" ]] || acas_die "$EX_USAGE" \
     "the scenario '$ACAS_RESET_SCENARIO' is not a readable file."
 }
 
 
-# DATABASE ACCESS
 # CREDENTIAL HYGIENE. The password reaches the client through MYSQL_PWD and
-# nowhere else: never on the command line (where `ps` would expose it to
-# every process on the host), never in a --defaults-extra-file (which would
-# have to be created, chmod-ed and shredded, and would survive a SIGKILL),
-# never in the run log, and never in a diagnostic. `set -x` stays off.
-# THE CLIENT IS RESOLVED ONCE, THEN PINNED. Two dimensions vary between
-# environments: the binary may be `mariadb` or `mysql`, and a modern client
-# talking to a server without TLS needs --skip-ssl. Both are probed ONCE with a
-# read-only `select 1` and then pinned for the rest of the run.
-#
-# TRANSPORT SECURITY (CWE-295 improper certificate validation, CWE-319
-# cleartext transmission). The variant search used to be, unconditionally:
-#
-#     for tls in '' '--skip-ssl'; do          <-- the defect, as it was
-#
-# so a server that merely declined TLS -- or a middlebox that stripped the
-# STARTTLS-equivalent -- caused a SILENT downgrade to plaintext on the second
-# iteration, carrying the admin password (well, its handshake) and every
-# information_schema answer in clear. Worse, the first iteration passed no
-# --ssl-verify-server-cert either, so even the TLS attempt validated nothing:
-# any certificate, from anyone, was accepted.
-#
-# THE POLICY, enforced by acas_permitted_tls_variants and FAIL-CLOSED:
-#
-#   * A LOCAL target -- a unix socket, or a loopback host -- may use plaintext.
-#     Nothing leaves the machine, and it is the configuration the setup contract
-#     actually uses: the host client is 11.8 and this server has no TLS, so
-#     --skip-ssl is REQUIRED there. Removing that path would break every local
-#     probe while protecting nothing.
-#   * A NON-LOCAL target must present a certificate chaining to
-#     $ACAS_DB_TLS_CA and matching its hostname. That is what
-#     --ssl-verify-server-cert adds; without a CA it verifies nothing, so the CA
-#     is required rather than optional.
-#   * Plaintext to a non-local target is permitted ONLY when
-#     ACAS_DB_ALLOW_PLAINTEXT explicitly declares the network isolated. The
-#     accepted values are a CLOSED set, so a typo fails closed.
-#   * Anything else is REFUSED before the first connection.
-#
-# NOTHING ELSE CHANGES: the same two binaries are probed in the same order, the
-# pinning is still one-shot for the same correctness reason, and the composed
-# argv is otherwise identical.
-#
-# That pinning is a correctness requirement, not an optimisation. The schema
-# apply streams 33 DROP/CREATE pairs; retrying it under a different client
-# variant after a mid-file failure could re-run part of the file against a
-# half-applied schema. Probing first means the apply is attempted exactly once,
-# with a combination already known to work.
-#
-# --database IS ALWAYS PASSED. The frozen dump contains zero `USE` statements, so
-# without it every statement would fail with "No database selected".
-#
-# --batch AND NEVER --force. --force makes the client continue past SQL errors,
-# which would leave a half-applied schema and report success. Every failure must
-# be loud.
-# =============================================================================
+# nowhere else.
+
+# TRANSPORT SECURITY (CWE-295 certificate validation, CWE-319 cleartext).
+# The transport is decided ONCE, before anything connects, and never downgraded
+# silently. A local target may use plaintext; a non-local target needs either a
+# CA bundle in ACAS_DB_TLS_CA, whose certificate and hostname are then verified,
+# or an explicit ACAS_DB_ALLOW_PLAINTEXT declaration -- otherwise the run aborts
+# with a named cause, because the probe authenticates with a real credential.
 
 # True when the target is reachable without leaving the machine: a unix socket,
-# an empty host, a loopback name, or a numeric loopback address. RESOLVES
-# NOTHING about whether the server is trustworthy (R-6) -- it answers only
-# "could this traffic be observed on a network".
+# an empty host, a loopback name, or a numeric loopback address.
 acas_target_is_local() {
   [[ -n "${ACAS_DB_SOCKET-}" ]] && return 0
   [[ -z "$ACAS_DB_HOST" ]] && return 0
@@ -2141,8 +1585,6 @@ acas_target_is_local() {
   return 1
 }
 
-# True when ACAS_DB_ALLOW_PLAINTEXT explicitly declares the network isolated.
-# A CLOSED set of accepted spellings, so `ture` or `TRUE ` fails closed.
 acas_plaintext_declared() {
   case "${ACAS_DB_ALLOW_PLAINTEXT-}" in
     1|true|yes|on) return 0 ;;
@@ -2150,15 +1592,9 @@ acas_plaintext_declared() {
   return 1
 }
 
-# Decide, ONCE and BEFORE ANYTHING CONNECTS, which client transports this target
-# has earned. Populates ACAS_RESET_TLS_VARIANTS, most secure first, or aborts.
-#
-# Called from acas_assert_environment alongside the destructive gates, and NOT
-# lazily from the query path: a policy that is only evaluated when a connection
-# is first attempted arrives AFTER the TCP readiness probe, which can spend its
-# whole timeout on an unreachable host before the refusal is ever reported. The
-# operator would then be told "the server did not answer" when the truth is
-# "this script refuses to talk to it that way".
+# Decide, ONCE and BEFORE ANYTHING CONNECTS, which client transports this
+# target has earned. Populates ACAS_RESET_TLS_VARIANTS, most secure first, or
+# aborts.
 acas_assert_transport_policy() {
   local ca="${ACAS_DB_TLS_CA-}"
   ACAS_RESET_TLS_VARIANTS=()
@@ -2167,16 +1603,10 @@ acas_assert_transport_policy() {
     [[ -r "$ca" ]] || acas_die "$EX_PRECONDITION" \
       "ACAS_DB_TLS_CA names a file that cannot be read: $ca" \
       'It must be the PEM bundle the server certificate chains to.'
-    # --ssl-verify-server-cert is what makes the CA meaningful: without it the
-    # client encrypts but accepts any certificate, which is CWE-295 with extra
-    # steps.
     ACAS_RESET_TLS_VARIANTS+=("--ssl-ca=$ca --ssl-verify-server-cert")
   fi
 
   if acas_target_is_local; then
-    # Loopback or socket: plaintext is permitted, and on the setup contract's
-    # host client it is REQUIRED -- client 11.8 enforces TLS and this server has
-    # none, so --skip-ssl is the only combination that works locally.
     ACAS_RESET_TLS_VARIANTS+=('--skip-ssl')
     acas_note 'transport: local target, so plaintext is permitted'
     return 0
@@ -2205,23 +1635,12 @@ acas_assert_transport_policy() {
 }
 
 # Build the client argv for a read-only query. The password is NOT in it.
-# acas_sql_argv <client> <tls-flag> [budget-seconds]
-#
-# The single funnel every client invocation in this script goes through, which is
-# why the deadline is prepended HERE: one edit bounds all of them, and a future
-# call site cannot forget to add one.
-#
-# The budget is a parameter rather than a constant because a scalar
-# information_schema query and streaming 33 DROP/CREATE pairs are not the same
-# kind of wait. It defaults to ACAS_TIMEOUT_CLIENT; acas_apply_schema overrides
-# it with ACAS_TIMEOUT_APPLY.
 acas_sql_argv() {
   local client="$1" tls="$2" budget="${3:-$ACAS_TIMEOUT_CLIENT}"
 
-  # An empty budget would silently mean "no deadline at all", which is the exact
-  # defect this bounding exists to remove, so it is a hard error rather than a
-  # fallback. (This is the command-substitution hazard documented on
-  # acas_timeout_seconds, reached from the other direction.)
+  # An empty budget would silently mean "no deadline at all", which is the
+  # exact defect this bounding exists to remove, so it is a hard error rather
+  # than a fallback.
   [[ "$budget" =~ ^[1-9][0-9]*$ ]] || acas_die "$EX_PRECONDITION" \
     "acas_sql_argv was given a non-positive deadline: '$budget'." \
     'Deadlines are resolved by acas_resolve_deadlines before any client runs.'
@@ -2246,19 +1665,8 @@ acas_sql_argv() {
     "--database=$ACAS_DB_NAME"
 }
 
-# acas_build_sql_argv <client> <tls-flag> [budget-seconds]
-# Publishes the client argv through ACAS_SQL_ARGV.
-#
-# This wrapper exists for one reason, and it is a real trap rather than a
-# stylistic one: acas_sql_argv is consumed through `mapfile < <(...)', a process
-# SUBSHELL, so an acas_die inside it prints its message and exits only that
-# subshell. The caller carries on with a SHORT OR EMPTY array -- which, since the
-# deadline lives at the front of that array, means carrying on with no deadline
-# at all: precisely the defect this bounding removes.
-#
-# So the verdict is reached HERE, in the caller's own shell, by checking that the
-# generator produced a plausible argv. A correct one is always at least the four
-# deadline words plus the client, the protocol and the five connection flags.
+# acas_build_sql_argv <client> <tls-flag> [budget-seconds] Publishes the client
+# argv through ACAS_SQL_ARGV.
 acas_build_sql_argv() {
   local client="$1" tls="$2" budget="${3:-$ACAS_TIMEOUT_CLIENT}"
   ACAS_SQL_ARGV=()
@@ -2276,12 +1684,6 @@ acas_build_sql_argv() {
 
 # Run one read-only statement (or several, separated by `;`) and capture the
 # result in ACAS_SQL_OUT, one row per line with tab-separated columns.
-# Return codes, chosen so the readiness loop can tell a transient failure from a
-# permanent one:
-#     0  success
-#     1  the client ran and failed for some other reason
-#     2  the server rejected the credentials
-#     3  no client binary is available at all
 acas_sql_scalar() {
   local sql="$1"
   ACAS_SQL_OUT=''
@@ -2306,11 +1708,8 @@ acas_sql_scalar() {
     return 1
   fi
 
-  # Not pinned yet: probe both binaries and every PERMITTED TLS variant, pinning
-  # the first combination that works. The variant list is computed by policy
-  # (see TRANSPORT SECURITY above) rather than being the unconditional
-  # `'' '--skip-ssl'` pair it used to be, so a plaintext downgrade can only
-  # happen where it has been permitted.
+  # Not pinned yet: probe both binaries and every PERMITTED TLS variant,
+  # pinning the first combination that works.
   local client tls
   local saw_client=0
   if (( ${#ACAS_RESET_TLS_VARIANTS[@]} == 0 )); then
@@ -2323,9 +1722,7 @@ acas_sql_scalar() {
     acas_have "$client" || continue
     saw_client=1
     for tls in "${ACAS_RESET_TLS_VARIANTS[@]}"; do
-      # Through acas_build_sql_argv, never `mapfile < <(acas_sql_argv ...)':
-      # the generator's acas_die would exit only the subshell and leave this
-      # loop running an UNBOUNDED client. See that function's own comment.
+      # Through acas_build_sql_argv, never `mapfile < <(acas_sql_argv ...)'.
       acas_build_sql_argv "$client" "$tls"
       argv=("${ACAS_SQL_ARGV[@]}" "--execute=$sql")
       rc=0
@@ -2338,8 +1735,6 @@ acas_sql_scalar() {
       fi
       ACAS_SQL_DIAG="$(MYSQL_PWD="$ACAS_RESET_DB_PASSWORD" "${argv[@]}" 2>&1 || true)"
     done
-    # A rejected credential is the same answer from either binary, so there is
-    # nothing to gain by trying the second one.
     if [[ "$ACAS_SQL_DIAG" == *'Access denied'* ]]; then
       return 2
     fi
@@ -2349,9 +1744,7 @@ acas_sql_scalar() {
   return 1
 }
 
-# One scalar value from a single-column, single-row query. Takes the LAST line
-# that is not empty, so a stray client advisory can never be mistaken for the
-# answer.
+# One scalar value from a single-column, single-row query.
 acas_sql_value() {
   local sql="$1"
   local rc=0
@@ -2383,22 +1776,10 @@ acas_sql_value_or_die() {
 
 # TCP reachability, using python3 so no client binary and no credential is
 # needed. python3 is guaranteed present by harness/Dockerfile.gnucobol.
-# Bounded even though create_connection carries its own timeout: that timeout
-# covers the CONNECT, not the getaddrinfo() that precedes it. A name lookup
-# against an unreachable resolver blocks in libc, where no Python-level timeout
-# reaches, so the deadline has to sit outside the interpreter.
 acas_db_tcp_probe() {
   # The port range is asserted in acas_assert_environment, before anything
   # connects, so `int(sys.argv[2])` here can no longer receive 99999 and fail
-  # with an OverflowError that names neither the variable nor the value. The
-  # range is re-checked in the probe itself because this function is also
-  # reached from the readiness loop, and a defence that only exists at one
-  # entry point is one refactor away from not existing.
-  #
-  # An EXTERNAL deadline as well as the socket timeout below: create_connection's
-  # timeout covers the connect but NOT the getaddrinfo() that precedes it, so a
-  # host name served by an unresponsive resolver would block with the socket
-  # timeout never reached.
+  # with an OverflowError that names neither the variable nor the value.
   acas_deadline_prefix "$ACAS_TIMEOUT_CLIENT"
   "${ACAS_DEADLINE_ARGV[@]}" python3 - "$ACAS_DB_HOST" "$ACAS_DB_PORT" <<'PY'
 import socket
@@ -2452,11 +1833,6 @@ acas_wait_for_database() {
   # An open port is not readiness, and this is also where the client binary and
   # TLS variant get pinned for the whole run -- including the apply, which must
   # not have to discover them mid-file.
-  # Two failure shapes, deliberately treated differently: a transient failure is
-  # retried for the full timeout, because the port routinely opens before the
-  # server will talk; "Access denied" is a configuration error, not a readiness
-  # state, so it is retried only for a short grace window -- no amount of waiting
-  # fixes a wrong password.
   local rc=0 denied_for=0
   elapsed=0
   while true; do
@@ -2539,7 +1915,7 @@ acas_wait_for_database() {
 # back "ON" where a caller expects 1.
 ACAS_RESET_AUTOCOMMIT_SQL='select concat_ws(0x2f, @@GLOBAL.autocommit + 0, @@SESSION.autocommit + 0)'
 
-# acas_read_autocommit -> echoes "<global>/<session>" into ACAS_SQL_OUT
+# acas_read_autocommit -> echoes "<global>/<session>" into ACAS_SQL_OUT.
 acas_read_autocommit() {
   local rc=0
   acas_sql_scalar "$ACAS_RESET_AUTOCOMMIT_SQL" || rc=$?
@@ -2562,7 +1938,6 @@ acas_read_autocommit() {
   ACAS_SQL_OUT="$value"
 }
 
-# acas_assert_autocommit <when>
 acas_assert_autocommit() {
   local when="$1"
 
@@ -2592,27 +1967,7 @@ acas_assert_autocommit() {
   acas_ok "autocommit is OFF, globally and for this session ($when) -- AAP-mandated"
 }
 
-# -----------------------------------------------------------------------------
 # Precondition 9 of 9 -- the privileges the FROZEN FILE'S OWN statements need.
-#
-# Checked by name, up front, so a missing grant is reported as a missing grant
-# instead of surfacing as the client dying part-way through the file and leaving
-# a half-applied schema.
-# Both privilege scopes must be consulted, because an administrative account can
-# legitimately be provisioned either way. A schema-scoped grant -- what GATE 1's
-# own message tells an operator to create, "DROP, CREATE, ALTER, LOCK TABLES,
-# INSERT and SELECT on this schema and nothing else" -- appears in
-# information_schema.SCHEMA_PRIVILEGES; a global grant, which the `root` account
-# Compose names has, appears only in information_schema.USER_PRIVILEGES. Reading
-# one and not the other would declare one of those two accounts unprivileged.
-# This reads the privileges of the CONNECTED account, which GATE 1 has already
-# forced to be the admin account and never the application one. The application
-# account holds only SELECT, INSERT, UPDATE and DELETE -- narrowed at container
-# start by harness/Dockerfile.mariadb -- so it could not pass this check, which
-# is the intended outcome rather than a limitation.
-# The grantee string is built from current_user() with char(39) and char(64)
-# rather than literal quote and at-sign characters, so the SQL survives being
-# carried through the shell without any quoting subtlety.
 acas_assert_privileges() {
   acas_stage 'Preconditions 9/9: privileges for the drop and re-apply'
 
@@ -2683,30 +2038,10 @@ acas_assert_privileges() {
 }
 
 
-# STAGE 1 -- APPLY THE FROZEN SCHEMA, VERBATIM
-# This one command is the entire drop-and-recreate. The frozen file's own 33
-# `DROP TABLE IF EXISTS` statements drop, its 33 `CREATE TABLE` statements
-# recreate, and this script contributes NO DDL (R-3).
-# The file is streamed on standard input with NO transformation whatsoever:
-# no sed, awk, tr or iconv; no edited copy under harness/; no
-# --default-character-set override contradicting the file's own
-# `SET NAMES utf8mb4` [mysql/ACASDB.sql:L16]; and no wrapper statements,
-# because the file manages its own session state [mysql/ACASDB.sql:L13-L22]
-# and restores all of it at the tail, so the charset caveat at
-# [mysql/ACASDB.sql:L9-L11] survives untouched (R-4). --database is passed
-# because the dump has no `USE`; --force is NOT.
+# This one command is the entire drop-and-recreate.
 
-# Classify whatever the client wrote while applying the frozen schema.
-# A clean apply is USUALLY silent, but not always, and the difference
-# matters. A modern MariaDB client can emit an advisory of its own on
-# stderr -- for instance the `--ssl-verify-server-cert` warning its string
-# table carries for a passwordless login. Such a line says nothing about
-# the schema, so promoting it to a WARNING would train an operator to
-# ignore warnings, which is worse than useless in a harness whose entire
-# value is that an anomaly gets noticed. It is reported as a NOTE and
-# explained, and the WARNING channel is reserved for output that might
-# actually mean the frozen schema was applied imperfectly. Nothing is
-# discarded either way: every line the client produced is printed.
+# Classify whatever the client wrote while applying the frozen schema. A clean
+# apply is USUALLY silent, but not always, and the difference matters.
 acas_report_client_output() {
   local out="$1"
   [[ -n "$out" ]] || return 0
@@ -2714,7 +2049,8 @@ acas_report_client_output() {
   local line advisories=0 other=0
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
-    # The client's own TLS advisory: about the CONNECTION, never about the schema.
+    # The client's own TLS advisory: about the CONNECTION, never about the
+    # schema.
     if [[ "$line" == *'ssl-verify-server-cert'* ]]; then
       advisories=$(( advisories + 1 ))
       acas_note "client TLS advisory (about the connection, not the schema): $line"
@@ -2729,33 +2065,10 @@ acas_report_client_output() {
   fi
 }
 
-# =============================================================================
 # THE DISPOSABILITY GATE -- the guard that stands between this script and
-# somebody else's database. See the ACAS_RESET_REQUIRED_SCHEMA declaration for
-# why "the credentials worked" is not evidence of anything.
-#
-# Split in two because the two halves can be checked at different times and the
-# earlier one is free:
-#
-#   acas_assert_disposable_static  -- pure string checks, run BEFORE any network
-#                                     contact, so a misaimed invocation is
-#                                     refused without touching a server at all.
-#   acas_assert_disposable_server  -- server-side proof, run after readiness and
-#                                     BEFORE the privilege check and the apply.
-#
-# Deviations are permitted, but only with an acknowledgement that NAMES THE EXACT
-# TARGET. That is the difference between a considered override and a blanket
-# "yes" left in an environment: the latter would silently authorise the
-# destruction of whatever database the environment happened to name next week.
-# =============================================================================
+# somebody else's database.
 
 # The acknowledgement must equal `user@host:port/schema' for THIS invocation.
-#
-# Every expansion is defaulted because this is also called from acas_parse_args
-# to build a usage message, which runs BEFORE acas_assert_environment binds
-# ACAS_RESET_DB_USER and before the required variables have been proven present.
-# Under `set -u' an undefaulted expansion there would abort with a bare
-# "unbound variable" instead of the usage error the caller needs to read.
 acas_reset_target_label() {
   local user="${ACAS_RESET_DB_USER:-${ACAS_DB_ADMIN_USER:-${ACAS_DB_USER:-<unset>}}}"
   printf '%s@%s:%s/%s' \
@@ -2765,8 +2078,6 @@ acas_reset_target_label() {
     "${ACAS_DB_NAME:-<unset>}"
 }
 
-# acas_target_acknowledged
-# True when the caller has explicitly acknowledged destroying THIS target.
 acas_target_acknowledged() {
   # The flag wins over the environment, so a deliberate command line is never
   # silently overridden by something left in the shell.
@@ -2778,9 +2089,6 @@ acas_target_acknowledged() {
   [[ "$supplied" == "$(acas_reset_target_label)" ]]
 }
 
-# acas_refuse_target <headline> <detail>...
-# One refusal path, so every deviation reports the same way and names the same
-# escape hatch with the same exact string the caller must supply.
 acas_refuse_target() {
   local headline="$1"
   shift
@@ -2801,8 +2109,6 @@ acas_refuse_target() {
 acas_assert_disposable_static() {
   acas_stage 'Preconditions 2/9: the target is a harness-owned disposable database'
 
-  # Gate the two values that reach SQL text before either is composed into a
-  # statement -- including by the proofs immediately below.
   acas_assert_sql_identifier 'ACAS_DB_NAME' "$ACAS_DB_NAME"
 
   local acknowledged=0
@@ -2810,9 +2116,6 @@ acas_assert_disposable_static() {
     acknowledged=1
   fi
 
-  # 1. THE SCHEMA NAME. The frozen mysql/ACASDB.sql is the only schema this
-  #    script can apply and it defines exactly one database. A different name is
-  #    therefore, by definition, not this harness's database.
   if [[ "$ACAS_DB_NAME" != "$ACAS_RESET_REQUIRED_SCHEMA" ]]; then
     if (( ! acknowledged )); then
       acas_refuse_target \
@@ -2824,8 +2127,6 @@ acas_assert_disposable_static() {
     acas_warn "acknowledged: resetting '$ACAS_DB_NAME' rather than $ACAS_RESET_REQUIRED_SCHEMA."
   fi
 
-  # 2. THE HOST. One the harness itself provisions: the Compose service name, or
-  #    a loopback address reaching a locally published container.
   if ! acas_in_list "$ACAS_DB_HOST" "${ACAS_RESET_CANONICAL_HOSTS[@]}"; then
     if (( ! acknowledged )); then
       acas_refuse_target \
@@ -2856,13 +2157,8 @@ acas_assert_disposable_server() {
     acknowledged=1
   fi
 
-  # 3. THE SENTINEL. A marker schema created by harness/Dockerfile.mariadb, which
-  #    exists nowhere except in an image this harness built. A shared or
-  #    production server cannot carry it by accident -- that is the whole point
-  #    of proving disposability by presence of something rather than by absence
-  #    of something.
-  # NOTE: acas_sql_value publishes through ACAS_SQL_OUT (it reduces the scalar
-  # in place); there is no separate ACAS_SQL_VALUE.
+  # 3. THE SENTINEL. A marker schema created by harness/Dockerfile.mariadb,
+  # which exists nowhere except in an image this harness built.
   local sentinel_rows='' rc=0
   acas_sql_value "select count(*) from information_schema.TABLES where TABLE_SCHEMA = $(acas_sql_quote "$ACAS_RESET_SENTINEL_SCHEMA") and TABLE_NAME = $(acas_sql_quote "$ACAS_RESET_SENTINEL_TABLE")" \
     || rc=$?
@@ -2886,9 +2182,7 @@ acas_assert_disposable_server() {
     acas_ok "disposability sentinel present: ${ACAS_RESET_SENTINEL_SCHEMA}.${ACAS_RESET_SENTINEL_TABLE}"
   fi
 
-  # The server family, recorded rather than enforced: the schema dump names
-  # 10.11.7 as its producer [mysql/ACASDB.sql:L1,L5], and a different family is
-  # a parity risk worth reporting but not by itself evidence of the wrong server.
+  # The server family, recorded rather than enforced.
   local version=''
   if acas_sql_value 'select @@version'; then
     version="$ACAS_SQL_OUT"
@@ -2899,11 +2193,7 @@ acas_assert_disposable_server() {
     esac
   fi
 
-  # 4. NOTHING BUT THE FROZEN TABLES. An extra table means somebody else's data
-  #    shares this schema, and the frozen file's own DROP statements would not
-  #    remove it -- but a caller who believes this schema is theirs would be
-  #    wrong. Checked BEFORE the drop, so the answer still describes the state
-  #    the caller thinks they are resetting.
+  # 4. NOTHING BUT THE FROZEN TABLES.
   local -a expected=()
   mapfile -t expected < <(acas_expected_table_names)
 
@@ -2934,10 +2224,6 @@ acas_assert_disposable_server() {
 }
 
 acas_apply_schema() {
-  # LAST LINE OF DEFENCE. Both halves of the disposability gate have already run
-  # as preconditions; this re-assertion costs nothing and makes it structurally
-  # impossible for a future edit to reorder a stage and reach the 33 DROP/CREATE
-  # pairs without them.
   [[ "$ACAS_DB_NAME" == "$ACAS_RESET_REQUIRED_SCHEMA" ]] || acas_target_acknowledged \
     || acas_refuse_target \
       "reached the apply with ACAS_DB_NAME='$ACAS_DB_NAME' and no acknowledgement." \
@@ -2946,10 +2232,7 @@ acas_apply_schema() {
   acas_stage "Stage 1/4: apply $ACAS_RESET_SCHEMA_RELPATH verbatim to ${ACAS_DB_NAME}"
 
   # THE LAST GATE, re-asserted at the point of no return. The three destructive
-  # gates already passed in acas_assert_environment, before any connection; this
-  # re-check costs nothing and means that no future edit can introduce a path
-  # into the destructive stage that bypasses them. It also proves, to a reader
-  # arriving at this function alone, that the drop cannot happen unauthorised.
+  # gates already passed in acas_assert_environment, before any connection.
   if (( ! ACAS_RESET_TARGET_AUTHORISED )); then
     acas_die "$EX_PRECONDITION" \
       'REFUSED: the destructive-target gates were never satisfied, yet the apply' \
@@ -2962,9 +2245,6 @@ acas_apply_schema() {
   acas_note 'the frozen file supplies its own DROP TABLE IF EXISTS statements, so this'
   acas_note 'stage emits no DDL of its own and drops nothing by hand (R-3)'
 
-  # ACAS_TIMEOUT_APPLY, not ACAS_TIMEOUT_CLIENT: this invocation streams 33 DROP
-  # plus 33 CREATE statements, which is a different order of wait from a scalar
-  # information_schema query.
   local -a argv=()
   acas_build_sql_argv "$ACAS_SQL_CLIENT" "$ACAS_SQL_TLS_FLAG" "$ACAS_TIMEOUT_APPLY"
   argv=("${ACAS_SQL_ARGV[@]}")
@@ -2977,14 +2257,8 @@ acas_apply_schema() {
   elapsed=$(( SECONDS - started ))
 
   # A deadline expiry is separated from a rejected statement BEFORE the generic
-  # failure below, and it is separated here rather than left to the caller because
-  # the two demand opposite responses: an under-provisioned ACAS_TIMEOUT_APPLY is
-  # fixed by raising the budget, whereas a rejected statement means the frozen
-  # file or the server is wrong. Reporting a timeout as "the client REJECTED part
-  # of the schema" would send the operator looking for a defect that is not there.
-  #
-  # The schema is partially applied either way, so the flag is set first and the
-  # timeout message carries the same warning the apply failure does.
+  # failure below, and it is separated here rather than left to the caller
+  # because the two demand opposite responses.
   if acas_is_timeout_status "$rc" "$elapsed" "$ACAS_TIMEOUT_APPLY"; then
     ACAS_RESET_APPLIED=1
     acas_die "$EX_TIMEOUT" \
@@ -3000,9 +2274,7 @@ acas_apply_schema() {
   fi
 
   if (( rc != 0 )); then
-    # The apply is attempted exactly ONCE. Retrying it -- with another client, or
-    # another TLS variant -- would re-run part of the file against a half-applied
-    # schema, which is why the client was pinned during the readiness probe.
+    # The apply is attempted exactly ONCE.
     ACAS_RESET_APPLIED=1   # partially, which is worse than not at all: say so
     acas_die "$EX_APPLY" \
       "the client REJECTED part of $ACAS_RESET_SCHEMA_RELPATH (status $rc); the schema is PARTIALLY applied." \
@@ -3014,23 +2286,17 @@ acas_apply_schema() {
 
   ACAS_RESET_APPLIED=1
 
-  # Anything the client said is surfaced rather than swallowed -- this is the only
-  # chance to notice a server-side warning about the frozen schema.
+  # Anything the client said is surfaced rather than swallowed -- this is the
+  # only chance to notice a server-side warning about the frozen schema.
   acas_report_client_output "$out"
 
   acas_ok "applied verbatim: 33 DROP TABLE IF EXISTS + 33 CREATE TABLE, from the frozen file"
   acas_check 'PASS' "frozen schema applied verbatim ($ACAS_RESET_SCHEMA_RELPATH)"
 }
 
-# STAGE 2 -- VERIFY THE RESET STATE
 # Eight checks, all read-only, all cheap, and every one of them protects every
-# downstream diff. They are mandatory rather than optional for a specific reason:
-# the maintainer records that he has not worked with the General Ledger since the
-# GnuCOBOL migration, and the plan's instruction is that "if the compiled GL cycle
-# behaves surprisingly, the surprise is the specification". An inexact reset would
-# make that surprise indistinguishable from a migration bug.
-# Every hyphenated identifier is backtick-quoted, because every identifier in this
-# schema is hyphenated.
+# downstream diff. They are mandatory rather than optional for a specific
+# reason.
 
 # All 33 expected table names: the 22 in scope plus the 11 out of scope.
 acas_expected_table_names() {
@@ -3042,8 +2308,6 @@ acas_expected_table_names() {
 }
 
 # Check 1 of 8 -- the 33 tables exist, and they are exactly the expected 33.
-# Counting alone would pass if a table had been renamed, so the NAME SET is
-# compared in both directions.
 acas_verify_table_set() {
   acas_sql_value_or_die \
     "select count(*) from information_schema.TABLES where TABLE_SCHEMA = ${ACAS_RESET_SCHEMA_LITERAL}" \
@@ -3095,20 +2359,13 @@ acas_verify_table_set() {
 }
 
 # Check 2 of 8 -- every table is EMPTY, before the seed puts anything in it.
-# One client invocation carrying 33 `select '<name>', count(*) from `<name>``
-# statements: read-only, deterministic, and it attributes a non-empty table by
-# name. COUNT(*) rather than information_schema.TABLE_ROWS, which is only an
-# estimate for InnoDB and would make this check meaningless.
 acas_verify_all_empty() {
   local -a tables=()
   mapfile -t tables < <(acas_expected_table_names)
 
   # Each name reaches SQL in TWO syntactic positions -- a string literal and a
   # quoted identifier -- so each is composed through the primitive for its own
-  # position rather than by hand. These names come from the script's own readonly
-  # arrays, not from input, so this is defence in depth: it makes the composition
-  # correct by construction, so a future edit that sources the list from
-  # elsewhere cannot silently open an injection point.
+  # position rather than by hand.
   local sql='' name
   for name in "${tables[@]}"; do
     acas_assert_table_name 'a frozen table name' "$name"
@@ -3186,9 +2443,6 @@ acas_verify_no_secondary_indexes() {
 }
 
 # Check 4 of 8 -- the frozen collation survived the apply.
-# This is the check that would catch the schema having been transformed on its
-# way to the client: a `utf8mb4_*` reading would mean someone "fixed" the charset
-# caveat at [mysql/ACASDB.sql:L9-L11], which R-4 forbids.
 acas_verify_collation() {
   local rc=0
   acas_sql_scalar \
@@ -3221,10 +2475,7 @@ acas_verify_collation() {
   acas_check 'PASS' "collation ${ACAS_RESET_COLLATION} intact on all 33 tables"
 }
 
-# Check 5 of 8 -- the SHAPE of all 22 in-scope tables: column count and primary
-# key, plus the LEDGER-NAME width that the dump normaliser depends on.
-# The right NUMBER of tables with the wrong SHAPE would poison a diff just as
-# thoroughly as a missing table, and it would be far harder to notice.
+# Check 5 of 8 -- the SHAPE of all 22 in-scope tables.
 acas_verify_shapes() {
   local rc=0
   acas_sql_scalar \
@@ -3265,12 +2516,7 @@ acas_verify_shapes() {
     fi
   done
 
-  # The width drift the dump normaliser exists to canonicalise:
-  # [copybooks/wsledger.cob] declares Ledger-Name pic x(24), the bridge widens it
-  # to PIC X(32) [common/nominalMT.cbl:L299], and the column is char(32)
-  # [mysql/ACASDB.sql:L127]. The value is not corrupted but the PADDING differs,
-  # and padding is visible in a dump -- so this width is load-bearing evidence
-  # and is asserted explicitly rather than left implicit in the column count.
+  # The width drift the dump normaliser exists to canonicalise.
   acas_sql_value_or_die \
     "select COLUMN_TYPE from information_schema.COLUMNS where TABLE_SCHEMA = ${ACAS_RESET_SCHEMA_LITERAL} and TABLE_NAME = 'GLLEDGER-REC' and COLUMN_NAME = 'LEDGER-NAME'" \
     'the LEDGER-NAME column type'
@@ -3297,10 +2543,6 @@ acas_verify_shapes() {
 }
 
 # Check 6 of 8 -- every column is NOT NULL.
-# It holds because each bridge load paragraph initialises its host-variable group
-# before a write, so an unset field becomes zero or space rather than SQL NULL.
-# That is why the Python data-access layer must DEFAULT rather than omit, and why
-# a nullable column appearing here would signal the schema had drifted.
 acas_verify_not_null() {
   acas_sql_value_or_die \
     "select count(*) from information_schema.COLUMNS where TABLE_SCHEMA = ${ACAS_RESET_SCHEMA_LITERAL} and IS_NULLABLE = 'YES'" \
@@ -3316,11 +2558,8 @@ acas_verify_not_null() {
   acas_check 'PASS' 'zero nullable columns'
 }
 
-# Check 7 of 8 -- no binary floating-point column anywhere (R-2).
-# The structural half of "zero binary floating point in accounting computation":
-# an accounting value cannot traverse a float if no float column exists. Asserted
-# on the SERVER as well as in the file, because the file check cannot see a column
-# someone altered by hand.
+# Check 7 of 8 -- no binary floating-point column anywhere (R-2). The
+# structural half of "zero binary floating point in accounting computation".
 acas_verify_no_float() {
   acas_sql_value_or_die \
     "select count(*) from information_schema.COLUMNS where TABLE_SCHEMA = ${ACAS_RESET_SCHEMA_LITERAL} and DATA_TYPE in ('float', 'double', 'real')" \
@@ -3349,8 +2588,7 @@ acas_verify_reset_state() {
   acas_verify_no_float               # 7
 
   # 8. Autocommit again, AFTER the apply. The frozen file changes six session
-  #    variables and restores them at the tail [mysql/ACASDB.sql:L13-L22]; this
-  #    re-asserts that it left autocommit alone rather than assuming it.
+  # variables and restores them at the tail [mysql/ACASDB.sql:L13-L22].
   acas_assert_autocommit 'after the apply'
   acas_check 'PASS' 'autocommit still 0/0 after the apply'
 
@@ -3382,9 +2620,6 @@ acas_verify_reset_state() {
 acas_verify_durability() {
   acas_stage 'Stage 3/4: durability -- re-count in a FRESH session'
 
-  # acas_sql_scalar spawns a new client process per call, so this is genuinely a
-  # new connection and a new session, not a reuse of the one that applied the
-  # schema.
   acas_sql_value_or_die \
     "select count(*) from information_schema.TABLES where TABLE_SCHEMA = ${ACAS_RESET_SCHEMA_LITERAL}" \
     'the table count in a fresh session'
@@ -3404,18 +2639,9 @@ acas_verify_durability() {
 }
 
 
-# STAGE 4 -- RE-SEED
 # Delegated to harness/seed.sh, which reproduces the flat-file-to-loader
 # contract of [common/masterLD.sh:L44-L115] and its exit-code semantics by
 # driving the maintainer's own compiled `common/*LD.cbl` programs.
-# WHY DELEGATE. Duplicating the seed would create a second definition of the
-# seeded state -- the one thing both sides of the parity diff must agree on
-# absolutely. Why seed.sh reproduces the frozen script's CONTRACT rather than
-# executing it is settled there, and is not re-litigated here.
-# The compiled loaders run OUT OF PROCESS and confined to harness/ -- the
-# sanctioned use of compiled COBOL under R-1. ITS STATUS IS PROPAGATED
-# VERBATIM, so a caller can still tell seed.sh's own failures from a load
-# program's 128, 64 or 16 [common/masterLD.sh:L37-L39]; ours are 80..88.
 acas_reseed() {
   if (( ACAS_RESET_SCHEMA_ONLY )); then
     acas_stage 'Stage 4/4: re-seed -- SKIPPED by --schema-only'
@@ -3437,13 +2663,6 @@ acas_reseed() {
   acas_log "running: $(acas_join_words "${argv[@]}")"
   acas_note 'it drives the compiled load programs as external processes only (R-1)'
 
-  # Errexit suspended for exactly the length of the call: the status is DATA and
-  # must be classified, not merely propagated by `set -e'.
-  #
-  # Bounded by ACAS_TIMEOUT_SEED. seed.sh bounds each individual loader itself,
-  # but this bounds the WHOLE delegated stage: a run that makes progress forever
-  # -- each loader finishing inside its own budget while the sequence never ends
-  # -- would otherwise hang the reset indefinitely.
   acas_deadline_prefix "$ACAS_TIMEOUT_SEED"
   local rc=0 started elapsed
   started="$SECONDS"
@@ -3451,8 +2670,9 @@ acas_reseed() {
   elapsed=$(( SECONDS - started ))
   ACAS_RESET_SEED_RC="$rc"
 
-  # Checked BEFORE the classification below, because "never finished" is not one
-  # of the frozen load-program return codes and must not be reported as one.
+  # Checked BEFORE the classification below, because "never finished" is not
+  # one of the frozen load-program return codes and must not be reported as
+  # one.
   acas_assert_not_timed_out "$rc" "$elapsed" "$ACAS_TIMEOUT_SEED" \
     'ACAS_TIMEOUT_SEED' "the re-seed via $ACAS_RESET_SEED_SCRIPT"
 
@@ -3479,20 +2699,10 @@ acas_reseed() {
   acas_assert_reseed_used_fixture
 }
 
-# The other half of the scenario-binding fix. harness/seed.sh stages the scenario's
-# declared seed files into a scenario-owned fixture directory and leaves a marker
-# behind [harness/seed.sh, ACAS_FIXTURE_MARKER]. Reset asserts that marker here.
-#
-# Why this is a correctness check and not bookkeeping: stage 5 exists so the
-# Python cycle starts from BYTE-FOR-BYTE the state the COBOL cycle started from.
-# If the re-seed drew from a different set of files than the original seed did,
-# that premise is false, every downstream table difference is unattributable, and
-# the empty diff the protocol treats as proof would be proof of nothing. A
-# scenario named on the command line but not actually reflected in the seed is
-# exactly the failure this catches.
+# The other half of the scenario-binding fix. harness/seed.sh stages the
+# scenario's declared seed files into a scenario-owned fixture directory and
+# leaves a marker behind [harness/seed.sh, ACAS_FIXTURE_MARKER].
 acas_assert_reseed_used_fixture() {
-  # No scenario named means no fixture was staged, and the seed came from the
-  # ambient data directory for both cycles. Symmetric, so nothing to prove.
   [[ -n "$ACAS_RESET_SCENARIO" ]] || return 0
 
   local stem marker
@@ -3519,8 +2729,6 @@ acas_assert_reseed_used_fixture() {
       'those files exist.'
   fi
 
-  # The marker records the file set and a SHA-256 per file, with no clock, pid or
-  # uuid in it, so it is directly comparable between the two seeds of one run.
   local files
   files="$(awk -F'\t' '$1 == "files" { print $2 }' -- "$marker" 2>/dev/null || true)"
   acas_ok "re-seed used the '$stem' scenario fixture (${files:-?} declared file(s))"
@@ -3528,7 +2736,6 @@ acas_assert_reseed_used_fixture() {
   acas_log "fixture marker = $marker"
 }
 
-# REPORTING THE OUTCOME
 ACAS_RESET_REPORTED=0
 
 acas_seed_report() {
@@ -3554,8 +2761,7 @@ acas_seed_report() {
 
   # Recorded in the report, not merely in a warning, because a reset that
   # proceeded past the disposability gate on an operator's acknowledgement did
-  # NOT satisfy the gate -- and evidence produced from it has to carry that fact
-  # with it rather than look identical to evidence from a canonical target.
+  # NOT satisfy the gate -- and evidence produced from it has to carry that.
   acas_log "target                : $(acas_reset_target_label)"
   if (( ACAS_RESET_ACK_USED )); then
     acas_log "disposability         : OVERRIDDEN by an explicit acknowledgement"
@@ -3579,11 +2785,8 @@ acas_seed_report() {
   fi
 }
 
-# DRY RUN
-# Prints exactly what a real run would do and touches nothing: no statement is
-# issued, no lock is taken, no table is dropped. The frozen-artifact invariants
-# ARE checked, because they are pure reads of the checkout and they are the whole
-# point of looking before leaping.
+# DRY RUN Prints exactly what a real run would do and touches nothing: no
+# statement is issued, no lock is taken, no table is dropped.
 acas_print_plan() {
   acas_stage 'Dry run: the plan'
   acas_note 'nothing is executed, no database statement is issued and no table is dropped'
@@ -3637,18 +2840,13 @@ acas_print_plan() {
   acas_note 'as the reproduced legacy defect (R-4), never repaired here'
 }
 
-# MAIN
-# Strictly sequential (R-3). No stage is backgrounded and none is parallelised.
-# Nothing here writes to $ACAS_REPO.
-# The order is deliberate and is the whole discipline of the script: assert
-# everything that can be asserted BEFORE 33 tables are dropped, so a run that
-# cannot finish has not started.
+# MAIN Strictly sequential (R-3). No stage is backgrounded and none is
+# parallelised. Nothing here writes to $ACAS_REPO.
 acas_main() {
   acas_parse_args "$@"
 
   # FIRST, before anything can spawn an external command: resolve and freeze
-  # every deadline. It validates each budget and makes them readonly, which is
-  # the invariant acas_sql_argv and acas_build_sql_argv rely on.
+  # every deadline.
   acas_resolve_deadlines
 
   printf 'harness/reset_db.sh -- stage 5 of the eight-stage parity protocol\n'
@@ -3660,10 +2858,6 @@ acas_main() {
   acas_assert_environment
   acas_open_log
 
-  # The static half of the disposability gate runs HERE: after acas_open_log so
-  # that a refusal is recorded in the reset log as evidence, but before anything
-  # in this script has contacted a server. A misaimed invocation is therefore
-  # refused without a single packet leaving the machine.
   acas_assert_disposable_static
 
   acas_assert_scenario
@@ -3685,10 +2879,6 @@ acas_main() {
 
   acas_wait_for_database
 
-  # The server-side half of the gate runs as early as it possibly can: the first
-  # thing after readiness, and BEFORE acas_assert_privileges and acas_apply_schema.
-  # Ordering is the whole point -- a privilege check that succeeds tells you the
-  # account CAN destroy this schema, which is the opposite of permission to.
   acas_assert_disposable_server
 
   # The banner is raised HERE rather than inside acas_assert_autocommit, because
@@ -3709,10 +2899,7 @@ acas_main() {
 
   acas_seed_report
 
-  # Exit 0 ONLY on a genuinely clean reset AND a clean re-seed. Never
-  # unconditionally: the frozen build scripts end with a bare `exit 0`
-  # [comp-all.sh:L45], [common/comp-common.sh:L59] that reports success however
-  # the work went, and that defect is worked around here rather than copied.
+  # Exit 0 ONLY on a genuinely clean reset AND a clean re-seed.
   if (( ! ACAS_RESET_APPLIED || ! ACAS_RESET_VERIFIED )); then
     acas_die "$EX_VERIFY" \
       'the reset did not complete: the schema was not applied and verified.' \
@@ -3732,7 +2919,7 @@ acas_main() {
   printf '\nharness/reset_db.sh completed: frozen schema re-applied verbatim, %s tables\n' \
     "$ACAS_RESET_EXPECT_TABLES"
   printf 'verified, and re-seeded. Both cycles now start from identical state.\n'
-  printf 'Next: harness/run_python_scenario.sh, then harness/dump_tables.py.\n'
+  printf 'Next: run the Python cycle, then harness/dump_tables.py.\n'
   exit "$EX_OK"
 }
 

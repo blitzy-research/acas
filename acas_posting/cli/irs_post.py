@@ -1,20 +1,24 @@
-"""IRS nominal-ledger posting - the THIRD linkage shape, three parameters.
+"""IRS nominal-ledger posting - the third linkage shape, three parameters.
 
-`python -m acas_posting.cli.irs_post` reproduces the option `"4"` branch of
-irs/irs.cbl `Main-Loop.` [irs/irs.cbl:L637], whose whole body is one `CALL`
-[irs/irs.cbl:L666-L672]::
+Reproduces the option `"4"` branch of `irs/irs.cbl` `Main-Loop.`, whose whole
+body is one `CALL` [irs/irs.cbl:L666-L672], and dispatches irs030's
+`Ledger-Postings-Add` section [irs/irs030.cbl:L1569-L1733] - 165 lines of a
+1,733-line file, the rest of which is interactive and out of scope.
 
-    L666       if       Menu-Reply = "4"
-    L667             or Cob-Crt-Status = Cob-Scr-F4
-    L668                call   "irs030" using IRS-System-Params
-    L669                                      WS-System-Record   *> ACAS system rec.
-    L670                                      file-defs
-    L671                end-call
-    L672                go to main-loop.
+The linkage is three parameters: `IRS-System-Params`, `WS-System-Record`,
+`File-Defs` [irs/irs030.cbl:L552-L554]. There is no `ws-calling-data` block and
+no `to-day`, unlike the General Ledger's four [general/gl070.cbl:L245-L248] and
+the Sales/Purchase five [sales/sl060.cbl:L395-L399]. There is also no term-code
+gate on this route, because the IRS menu tests none - that absence is reproduced
+rather than filled in.
 
-THREE PARAMETERS. NO `WS-CALLING-DATA`. NO `to-day`.
-The callee's own header agrees, and it is the whole of its
-`PROCEDURE DIVISION USING` list [irs/irs030.cbl:L552-L554]::
+`--clear-posting-file` carries the end-of-job question
+[irs/irs030.cbl:L1715-L1724], and its answer TRUNCATES A TABLE: answering yes
+performs an open-output on the transfer file, which the handler implements as
+deleting every row [common/acas008.cbl:L313-L319]. The frozen default is [Y]
+[irs/irs030.cbl:L1716], so the flag is destructive AND on by default; it is
+preserved that way and published in both spellings so a caller can refuse it
+explicitly.
 
     L552  procedure division using IRS-System-Params
     L553                           WS-System-Record
@@ -214,11 +218,7 @@ __all__: Final[tuple[str, ...]] = ("main", "main_loop_option_4")
 
 _LOG: Final[logging.Logger] = logging.getLogger(__name__)
 
-#  The `CALL` literal at [irs/irs.cbl:L668]. Recorded as a constant because it
-#  is the program-id the traceability document maps to this route, and because
-#  it is what the diagnostic records name. It is NOT moved into a `WS-Called`
-#  field: Shape 3 has no calling-data block to hold one, and irs/irs.cbl names
-#  its callee as a `CALL` literal rather than through the field.
+# The `CALL` literal at [irs/irs.cbl:L668].
 _PROGRAM_ID: Final[str] = "irs030"
 
 #  THE END-OF-JOB QUESTION HAS NO DEFAULT, AND THE `[Y]` IS DISPLAY TEXT ONLY.
@@ -277,8 +277,8 @@ _CLEAR_POSTING_FILE_OPTION: Final[str] = "--clear-posting-file"
 #  runs identical, which is the cheapest possible reinforcement of rule R-6.
 #  Nothing in this module reads a clock; that format could not, either.
 
-#  The `--help` prose, pre-wrapped so that no COBOL locator is split across
-#  lines by a re-flow. See `_build_parser` for why the raw formatter is used.
+# The `--help` prose, pre-wrapped so that no COBOL locator is split across lines by a
+# re-flow. See `_build_parser` for why the raw formatter is used.
 _DESCRIPTION: Final[str] = (
     "Post the SL/PL transfer file to the IRS nominal ledger.\n"
     "\n"
@@ -319,36 +319,14 @@ _EPILOG: Final[str] = (
 def _build_parser() -> argparse.ArgumentParser:
     """Build the parser for Shape 3: `--run-date`, and the one promoted answer.
 
-    Two contributions and no third. `args.add_irs_linkage_arguments` supplies
-    everything the LINKAGE SECTION implies, which on this shape is the single
-    required `--run-date`; this function then adds the one `ACCEPT` that gates a
-    database write. Deliberately NOT composed:
-
-      * `args.add_calling_data_arguments` - Shape 3 has no calling-data block
-        [irs/irs030.cbl:L552-L554], so there is no `WS-Caller`, no
-        `WS-Del-Link`, no `WS-Process-Func`, no `WS-Sub-Function`, no
-        `WS-CD-Args` and no `WS-Term-Code` to bind;
-      * `args.add_gl_linkage_arguments` and `args.add_slpl_linkage_arguments` -
-        those build Shapes 1 and 2, which this route is not;
-      * `--irs-instead`, the fan-out switch [copybooks/wssystem.cob:L179-L181].
-        It selects whether the SALES and PURCHASE programs also post to IRS and
-        is read at three sites in each of those four programs; `irs030` never
-        reads it, because `irs030` IS the IRS posting program. Offering it here
-        would imply a control this route does not have.
-
-    WHY THE CLEAR-TRANSFER-FILE SWITCH IS DECLARED HERE AND NOT IN `args`.
-    `acas_posting/cli/args.py` records the division in its own footer: the five
-    promoted callee parameters - gl080's run-confirm, disk-change and
-    archive-path, gl051's control-total inputs, sl100's post-confirm, pl100's
-    run-confirm and irs030's clear-transfer-file decision - are each "an
-    `ACCEPT` that gates a database write" and each "becomes an option on its OWN
-    entry point, because each belongs to one route only. None is a linkage
-    parameter and none is bound here." This is that option, declared exactly
-    once, on the only route that has it.
+    Two contributions and no third. `args.add_irs_linkage_arguments` supplies everything
+    the LINKAGE SECTION implies, which on this shape is the single required `--run-
+    date`; this function then adds the one `ACCEPT` that gates a database write.
+    Deliberately NOT composed.
 
     Returns:
-        The parser. Built fresh per call, so nothing is constructed at import
-        time and two callers cannot share mutable parser state.
+        The parser. Built fresh per call, so nothing is constructed at import time and
+            two callers cannot share mutable parser state.
     """
     parser = argparse.ArgumentParser(
         prog="python -m acas_posting.cli.irs_post",
@@ -362,9 +340,7 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
-    #  Shape 3's linkage options: the required `--run-date`, and nothing else.
-    #  `args` owns the option's spelling, its `required=True` and its help text,
-    #  so the three routes cannot disagree about what a run date is.
+    # Shape 3's linkage options: the required `--run-date`, and nothing else.
     args.add_irs_linkage_arguments(parser)
     #  THE TRANSPORT DECLARATION - one contract, published on every route
     #  (`args.add_transport_security_arguments`). No COBOL counterpart: the frozen
@@ -376,25 +352,6 @@ def _build_parser() -> argparse.ArgumentParser:
     #  it cannot make two runs of one scenario differ (R-6).
     args.add_transport_security_arguments(parser)
 
-    #  The one promoted `ACCEPT` [irs/irs030.cbl:L1715-L1724].
-    #
-    #  ⭐ `args.ExplicitBooleanOptionalAction`, NOT `argparse.BooleanOptionalAction`.
-    #  The two behave identically in every respect a caller can observe - both
-    #  publish `--clear-posting-file` and `--no-clear-posting-file` from this one
-    #  declaration, both store the same value, and the `default` below is
-    #  untouched, so `--help` still shows the COBOL's own answer and
-    #  `irs030_posting.run` still declares it too (rule R-4). The only difference
-    #  is that the explicit action RECORDS THE FACT that the operator typed the
-    #  option, which `main` then requires through `args.require_stated`.
-    #
-    #  Why the fact and not the value: the value cannot answer the question. `Y`
-    #  is the frozen default [irs/irs030.cbl:L1716], so a namespace holding
-    #  `clear_posting_file=True` is indistinguishable between "the operator asked
-    #  to delete every row of PSIRSPOST-REC" and "the operator was never asked".
-    #  In the frozen program those two are never confusable, because a HUMAN read
-    #  the question off the screen before pressing Return; a batch entry point has
-    #  no such human, so treating an omitted option as that operator's affirmative
-    #  answer is the wrapper inventing an authorization nobody gave (CWE-284).
     parser.add_argument(
         _CLEAR_POSTING_FILE_OPTION,
         action=argparse.BooleanOptionalAction,
@@ -435,34 +392,17 @@ def main_loop_option_4(
 ) -> None:
     """`Main-Loop.` option `"4"` - the whole dispatch, reproduced.
 
-    Named after the paragraph it reproduces, as rule R-5 requires: irs/irs.cbl
-    `Main-Loop.` [irs/irs.cbl:L637], option `"4"` branch
-    [irs/irs.cbl:L666-L672]. That branch is four statements long and this
-    function is its Python counterpart statement for statement.
-
-    L666-L667 - THE MENU TEST, NOT REPRODUCED. `if Menu-Reply = "4" or
-    Cob-Crt-Status = Cob-Scr-F4` selects the option from a keystroke or a
-    function key. It is screen input with no database effect, dropped under
-    Agent Action Plan section 0.3.4; invoking this entry point IS the selection.
-
-    L668-L671 - THE `CALL`, REPRODUCED EXACTLY. Three positional arguments in
-    the frozen parameter order, and nothing else positional. `args.IrsLinkage`
-    holds them in that order, and they are spelled out by name here rather than
-    unpacked with a star, so the argument list diffs against L668-L670 term for
-    term.
-
-    L672 - `go to main-loop.` The menu loops back to redraw and accept again.
+    Named after the paragraph it reproduces, as rule R-5 requires: irs/irs.cbl `Main-
+    Loop.` [irs/irs.cbl:L637], option `"4"` branch [irs/irs.cbl:L666-L672]. That branch
+    is four statements long and this function is its Python counterpart statement for
+    statement.
 
     Args:
         linkage: the three bound linkage records, in COBOL parameter order
             [irs/irs.cbl:L668-L671] - `IRS-System-Params`
             [copybooks/irswssystem.cob:L13], `WS-System-Record`
-            [copybooks/wssystem.cob], `File-Defs` [copybooks/wsnames.cob:L13].
-            Build it with `args.bind_irs_linkage`; nothing here constructs or
-            modifies a record. Note that the callee MUTATES the first of the
-            three - the posting-key allocator `next-post` advances once per
-            posting written [irs/irs030.cbl:L1670-L1671] - exactly as COBOL
-            writes into the caller's own storage.
+            [copybooks/wssystem.cob], `File-Defs` [copybooks/wsnames.cob:L13]. Build it
+            with `args.bind_irs_linkage`.
         clear_posting_file: the answer to the end-of-job question
             [irs/irs030.cbl:L1715-L1724]. KEYWORD-ONLY and REQUIRED, with no
             default anywhere on the path from argv to here - THE FROZEN PROMPT HAS
@@ -471,12 +411,9 @@ def main_loop_option_4(
             [common/acas008.cbl:L313-L319].
 
     Returns:
-        Nothing. `irs030` communicates entirely through the database, through
-        its `File-Access` status block and through the advanced key allocator on
-        `IRS-System-Params`; every disposition it has - clean skip,
-        commit-and-stop, abort-with-nothing - is a normal return in the frozen
-        program too, which raises no condition and signals no failure to the
-        menu.
+        Nothing. `irs030` communicates entirely through the database, through its `File-
+            Access` status block and through the advanced key allocator on `IRS-System-
+            Params`.
     """
     #  R-4 REPRODUCTION - NO GATE, AND NO DISPATCH WRAPPER
     #  [irs/irs.cbl:L666-L672]. The IRS route has neither of the two things the
@@ -540,30 +477,15 @@ def main_loop_option_4(
         dal_options=dal_options,
     )
 
-    #  `EOJ.` [irs/irs.cbl:L755-L775] IS NOT PERFORMED HERE. The frozen menu
-    #  reaches it from `Main-Loop.` only when the operator ends the session, not
-    #  once per dispatch [irs/irs.cbl:L672 vs :L754], so performing it here would
-    #  re-read and rewrite `SYSTEM-REC` after every posting run rather than once
-    #  at end of job. `main` performs it, through
-    #  `args.eoj_persist_irs_system_data`, which reproduces the whole paragraph -
-    #  the re-read of key 1, `zz095-Restore-IRS-System-Data` over the row just
-    #  read, then the rewrite of key 1 alone.
-
-    #  GO TO class 1 (loop-back): irs/irs.cbl:L672 "go to main-loop" - the menu
-    #  loops; a single CLI invocation is one iteration.
     return
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Entry point: bind Shape 3, dispatch `irs030`, report a status.
 
-    Four steps and no fifth: configure diagnostics, parse, bind, dispatch.
-
     Args:
         argv: the argument vector WITHOUT the program name, as
-            `argparse.ArgumentParser.parse_args` takes it. `None` - the normal
-            case - reads `sys.argv[1:]` inside argparse, so this module never
-            touches `sys.argv` itself.
+            `argparse.ArgumentParser.parse_args` takes it.
 
     Returns:
         `0`, on both of its two paths - completion, and the facade copybook's
@@ -790,21 +712,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     #  copy-back and the rewrite beyond the reach of the handler that ends the
     #  run unit.
 
-    #  AMBIGUITY Q-CLI-EXITSTATUS: the IRS linkage shape carries no WS-Term-Code
-    #  (irs/irs030.cbl:L552-L554), so the process exit status has no COBOL
-    #  counterpart on this route; 0 on completion is a migration convention, not
-    #  reproduced behaviour. Arbitrate against the compiled oracle; record in
-    #  docs/migration/ambiguity-resolutions.md.
-    #
-    #  For the record, and so that this marker is not read as contradicting its
-    #  sibling in `args.py`: `args.exit_status_for` settles the GENERAL question
-    #  by establishing that there is no oracle observable to arbitrate against -
-    #  `RETURN-CODE`, the one register GnuCOBOL surfaces as a process status, is
-    #  READ and never WRITTEN in any of the five menus or the twelve posting
-    #  programs, and each menu ends with a bare `goback`. On THIS route the
-    #  question is narrower still, because there is no `WS-Term-Code` to map: the
-    #  identity mapping has no input, so `exit_status_for` is deliberately NOT
-    #  called and there is nothing to encode but completion.
     return 0
 
 

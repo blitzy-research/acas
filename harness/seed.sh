@@ -1,130 +1,36 @@
 #!/usr/bin/env bash
-# harness/seed.sh
-# Seed the frozen ACASDB schema from the ACAS Cobol flat files by running the
-# compiled `common/*LD.cbl' load programs, in the maintainer's own order, and
-# CHECKING their return codes. This is stage 1 of the eight-stage parity
-# protocol, and it is also stage 5's tail by way of harness/reset_db.sh:
-#   seed -> run(COBOL) -> dump -> normalize
-#     -> reset -> run(Python) -> dump -> diff
-# Both sides of that diff must start from IDENTICAL seeded state or the diff
-# means nothing, so this script is deterministic and repeatable by design
-# (R-6). Run it with the canonical invocation documented at
-# [harness/docker-compose.yml:L346-L357].
+# harness/seed.sh -- stage 1 of the parity protocol: load the Cobol flat files
+# into ACASDB through the frozen common/*LD.cbl loader programs, so that both
+# cycles start from identical state. Run `--help' for the options, the loader
+# list and the exit codes.
 #
-# -----------------------------------------------------------------------------
-# WHY THIS SCRIPT REPRODUCES common/masterLD.sh RATHER THAN INVOKING IT
-# Two independent reasons; the second is decisive.
-#   1. THE AUTHOR MARKS IT UNTESTED. [common/masterLD.sh:L4-L5] reads
-#      "THIS SCRIPT HAS NOT YET BEEN TESTED", and [Changelog:L21-L22]
-#      corroborates it: "so far only tested masterUNL."
-#   2. IT CANNOT EXECUTE AT ALL. All 24 of its loader lines
-#      [common/masterLD.sh:L93-L116] are `if [ -e X.dat ];  then YLD fi'
-#      with no `;' or newline before `fi', so `bash -n' rejects the file at
-#      line 124 with "syntax error: unexpected end of file", status 2.
-# THE FROZEN FILE IS NOT FIXED (R-3, R-4): never executed, never sourced,
-# never copied-and-repaired, never sed-ed, and the missing semicolons are
-# never added. Its CONTRACT is reproduced here instead, in valid shell.
+# WHY IT REPRODUCES common/masterLD.sh RATHER THAN INVOKING IT. Two reasons, the
+# second decisive: its author marks it untested ([common/masterLD.sh:L4-L5]), and
+# it cannot execute at all -- all 24 loader lines [common/masterLD.sh:L93-L116]
+# are `if [ -e X.dat ];  then YLD fi' with no `;' or newline before `fi', so
+# `bash -n' rejects the file. The frozen file is NOT repaired, sed-ed, copied or
+# sourced (R-3, R-4); its per-file CONTRACT is reproduced here in valid shell.
+#
+# Two invariants that decide whether a seed is comparable:
+#   * loader ORDER is the frozen order, and the system block runs systemLD then
+#     sys4LD, finalLD, dfltLD -- a later loader reads what an earlier one wrote.
+#   * loader exit codes above 63 ABORT the load rather than being logged, with
+#     distinct codes for unset RDBMS parameters, an unset database flag and a
+#     write error, and autocommit must be OFF because the batch loader turns it
+#     off explicitly [common/glbatchLD.cbl:L9-L13].
 
-# THE SEVEN DELIBERATE DEVIATIONS FROM THE FROZEN SCRIPT
-# Each is enumerated, cited and justified, so none is accidental (R-5).
-#   D1  VALID SHELL. The 24 loader lines are reproduced as working `if'
-#       statements -- reason 2 above -- with the frozen text quoted verbatim
-#       beside each mapping [common/masterLD.sh:L93-L116].
-#   D2  $ACAS_DATA INSTEAD OF ~/ACAS. `cd ~/ACAS'
-#       [common/masterLD.sh:L45,L27-L28] has no meaning in a container. The
-#       `cd' itself is preserved; see `--help' for the override.
-#   D3  ACAS ENVIRONMENT VARIABLES ARE USED, against
-#       [common/masterLD.sh:L30-L31]. All 28 `common/*LD.cbl' copy
-#       [copybooks/Proc-Get-Env-Set-Files.cob], whose `zz020-Set-the-Paths'
-#       prefixes every file name with ACAS_LEDGERS [:L118,L125-L136].
-
-#   D4  THE RETURN CODES ARE TRAPPED FOR EVERY LOADER. The author's own
-#       admission [common/masterLD.sh:L41-L42] is "MUST GET round to
-#       trapping these param errors (>63) / but it is a lot of typing :)".
-#       He traps them for the four system loaders and for none of the 24
-#       mappings [common/masterLD.sh:L56,L65,L74,L83]; this script traps all.
-#   D5  A PARTIAL SEED IS REFUSED AFTER THE FROZEN CONTRACT HAS RUN, NOT
-#       INSTEAD OF IT. 16 is "error writing data to rdb"
-#       [common/masterLD.sh:L39], [common/glbatchLD.cbl:L445]; not > 63, so the
-#       frozen `-gt 63' tolerance [common/masterLD.sh:L41] carries on with a
-#       PARTIALLY loaded table -- and that is the DEFAULT here: the code is
-#       recorded in the summary row, warned about, carried in
-#       ACAS_SEED_WORST_RC, and the frozen sequence runs to its end. An earlier
-#       draft aborted on 16 by default and offered ACAS_SEED_STRICT=0 as the way
-#       back; an opt-out does not make the DEFAULT reproduce the loader
-#       exit-code semantics, and the extra abort was an added validation (R-3)
-#       over the one contract this file exists to reproduce (R-6). It is gone.
-#       The safety concern it served is met by a POST-SEED gate instead: once
-#       the frozen sequence has finished and `acas_seed_report' has printed its
-#       exact outcome, `acas_main' declines to hand a partial seed on to a state
-#       diff, propagating the loader's own code verbatim. ACAS_SEED_STRICT=1
-#       remains an OPT-IN for bisecting a seed; nothing in the harness sets it.
-#       The `dfltLD' asymmetry noted below is frozen behaviour and is governed
-#       by neither.
-#   D6  NO INTERACTIVE PAGER, replacing the blocking `less SYS-DISPLAY.log'
-#       at [common/masterLD.sh:L119-L123]; the log is `cat'-ed instead.
-#   D7  IN-SCOPE LOADERS ONLY: 8 of the 24 mappings are skipped, and LOGGED.
-
-# NOT A DEVIATION, and preserved exactly: the `dfltLD' return-code test is
-# `!= 0' [common/masterLD.sh:L83] while the other three system loaders use
-# `-gt 63' [common/masterLD.sh:L56,L65,L74]. That asymmetry is in the frozen
-# source. It is reproduced, not harmonised (R-4).
-# A transcription note, for anyone diffing this file against a summary of
-# the frozen script: all FOUR system-block abort messages are byte-identical
-# -- "Problem with data in system.dat - Aborting"
-# [common/masterLD.sh:L58,L67,L76,L85]. The frozen file is the arbiter (R-6).
-# WHERE THIS FILE SITS. harness/ is the compiled oracle and a SIBLING of
-# acas_posting/, never a sub-package: this script imports nothing from
-# acas_posting, there is no harness/__init__.py, and the compiled loaders
-# run only as external processes -- the sanctioned use of COBOL under R-1.
-
-# THE FROZEN-ARTIFACT GUARANTEE. This script READS $ACAS_REPO and never
-# writes to it. The flat files live in the data directory, the loaders under
-# $ACAS_BUILD, the logs under $ACAS_OUT/seed.
-# NO SCHEMA CHANGE, NO ADDED VALIDATION, STRICTLY SEQUENTIAL (R-3). No DDL
-# is emitted; the only SQL issued is the read-only autocommit assertion
-# below. The flat files are tested for EXISTENCE and nothing else, exactly
-# as the frozen script tests them. The loaders run one at a time, in the
-# frozen order: no `&', no `xargs -P', no job control.
-# RULES PROVENANCE. There is no user rules document for this project; the
-# binding rules -- R-1 no COBOL at runtime, R-2 zero binary floating point,
-# R-3 no schema change and sequential, R-4 anomalies reproduced never fixed,
-# R-5 full traceability, R-6 compiled behaviour decides -- come from the plan.
-
-# Strict mode. -E propagates the ERR trap into functions and subshells so an
-# unexpected failure is attributed to a line number instead of being ignored.
-# READ THIS BEFORE CHANGING THE ERROR HANDLING: `set -e' is NOT sufficient here
-# and must not be relied on to police the loaders. A loader's non-zero status is
-# DATA -- 128, 64 and 16 each mean something specific -- and this script has to
-# CLASSIFY it, not merely propagate it. Every loader is therefore invoked with
-# errexit suspended for exactly the length of the call, its status captured, and
-# the classification applied by acas_abort_on_rc. See acas_invoke_loader.
 set -Eeuo pipefail
 
 # Word splitting on newlines and tabs only, so a path containing a space can
-# never be split apart. Every expansion below is quoted regardless. Note the
-# consequence: "${array[*]}" would join on a NEWLINE, so acas_join_words exists
-# for one-line messages.
+# never be split apart. Every expansion below is quoted regardless.
 IFS=$'\n\t'
 
 # An unmatched glob expands to nothing rather than to the pattern text.
 shopt -s nullglob
 
-# Nothing this script writes is group- or world-readable. No credential is ever
-# written to a file at all (see acas_sql_scalar), so this is defence in depth
-# rather than the primary protection.
+# Nothing this script writes is group- or world-readable.
 umask 077
 
-# Exit codes.
-# DELIBERATELY CHOSEN NOT TO COLLIDE WITH A LOADER RETURN CODE. The loaders
-# return 128, 64 and 16 [common/masterLD.sh:L37-L39], so this script's own
-# failures use the 70-79 band and nothing else. The rule for an automated
-# caller is therefore unambiguous:
-#     0        clean seed
-#     70..73   THIS SCRIPT failed a precondition of its own
-#     anything else  a LOADER's own return code, propagated verbatim exactly as
-#                    the frozen script propagates it with `exit $rc'
-#                    [common/masterLD.sh:L59,L68,L77,L86]
 readonly EX_OK=0
 readonly EX_USAGE=70          # bad command line
 readonly EX_PRECONDITION=71   # environment, directory or loader assertion
@@ -133,21 +39,8 @@ readonly EX_AUTOCOMMIT=73     # autocommit is not OFF -- see acas_assert_autocom
 readonly EX_TIMEOUT=74        # a load program or client exceeded its deadline
 readonly EX_FIXTURE=75        # the scenario's declared seed files are not staged
 
-# -----------------------------------------------------------------------------
-# Finite deadlines.
-#
-# Every external process this script spawns runs under one: the 20 compiled load
-# programs and every MariaDB client invocation. An unbounded wait here is
-# particularly damaging because a load program blocks on a TERMINAL rather than
-# failing -- [common/masterLD.sh] drives programs whose frozen ancestors prompt,
-# and the file-handler logger cannot be switched off
-# ([copybooks/Test-Data-Flags.cob:L10] hardcodes `SW-Testing pic 9 value 1'), so
-# a stalled loader keeps writing while nothing progresses.
-#
-# Budgets are wall-clock seconds, overridable per host, validated as integers
-# >= 1, and named in the failure message together with the variable that raises
-# them. Only the exact spawned child is ever signalled.
-# -----------------------------------------------------------------------------
+# Finite deadlines. Every external process this script spawns runs under one:
+# the 20 compiled load programs and every MariaDB client invocation.
 readonly ACAS_TIMEOUT_MAX=86400
 ACAS_TIMEOUT_GRACE="${ACAS_TIMEOUT_GRACE-}"         # TERM-to-KILL grace period
 ACAS_TIMEOUT_LOADER="${ACAS_TIMEOUT_LOADER-}"        # one compiled load program
@@ -155,13 +48,8 @@ ACAS_TIMEOUT_CLIENT="${ACAS_TIMEOUT_CLIENT-}"        # one MariaDB client invoca
 ACAS_TIMEOUT_RESOLVED=''      # out-parameter of acas_timeout_seconds
 declare -a ACAS_DEADLINE_ARGV=()   # populated by acas_deadline_prefix
 
-# THE SYSTEM-FILE BLOCK -- [common/masterLD.sh:L50-L88]
-# Frozen order, and the reason for it, [common/masterLD.sh:L47-L48] verbatim:
-# "First, process the five different records in the system file that are used to
-# create five RDBMS tables holding only one record each."
-# Each entry: <loader>:<frozen test>:<locator>:<target table>
-# The frozen test is `gt63' or `ne0' and is transcribed from the frozen line
-# named in the locator. dfltLD's `ne0' is the asymmetry preserved under R-4.
+# THE SYSTEM-FILE BLOCK -- [common/masterLD.sh:L50-L88] Frozen order, and the
+# reason for it, [common/masterLD.sh:L47-L48] verbatim.
 readonly -a ACAS_SEED_SYSTEM_BLOCK=(
   'systemLD:gt63:L52,L56:SYSTEM-REC'
   'sys4LD:gt63:L61,L65:SYSTOT-REC'
@@ -169,29 +57,19 @@ readonly -a ACAS_SEED_SYSTEM_BLOCK=(
   'dfltLD:ne0:L79,L83:SYSDEFLT-REC'
 )
 
-# The one flat file the whole system block is guarded on, [common/masterLD.sh:L51].
+# The one flat file the whole system block is guarded on,
+# [common/masterLD.sh:L51].
 readonly ACAS_SEED_SYSTEM_FLAT_FILE='system.dat'
 
-# The abort message the maintainer prints on a system-block failure, byte-exact
-# from [common/masterLD.sh:L58,L67,L76,L85].
 readonly ACAS_SEED_SYSTEM_ABORT_MSG='Problem with data in system.dat - Aborting'
 
 # The two frozen return-code tests, quoted for the diagnostics so a reader can
-# match a message straight back to the frozen line. Written with double quotes
-# and an escaped dollar so the text is literal while remaining lint-clean.
+# match a message straight back to the frozen line.
 readonly ACAS_SEED_TEST_TEXT_GT63="if [ \$rc -gt 63 ]"
 readonly ACAS_SEED_TEST_TEXT_NE0="if [ \$rc != 0 ]"
 
-# THE 16 IN-SCOPE MAPPINGS -- [common/masterLD.sh:L93-L116]
-# FROZEN ORDER PRESERVED. The frozen list is alphabetical by flat-file name and
-# is NOT reordered here to "seed parents before children": the frozen schema
-# contains exactly one FOREIGN KEY, on the out-of-scope PLPAY-RECrg01, so
-# nothing requires reordering, and reordering would change the order in which
-# the loaders' statements land and therefore the seeded state.
-#
-# Each entry: <flat file>:<loader>:<frozen locator>:<target table(s)>
-# All 16 use the `gt63' test -- the threshold the author names at
-# [common/masterLD.sh:L41] but never wrote for these lines (D4).
+# THE 16 IN-SCOPE MAPPINGS -- [common/masterLD.sh:L93-L116] FROZEN ORDER
+# PRESERVED.
 readonly -a ACAS_SEED_MAPPINGS=(
   'analysis.dat:analLD:L93:ANALYSIS-REC'
   'batch.dat:glbatchLD:L94:GLBATCH-REC'
@@ -211,11 +89,6 @@ readonly -a ACAS_SEED_MAPPINGS=(
   'value.dat:valueLD:L116:VALUEANAL-REC'
 )
 
-# THE 8 OUT-OF-SCOPE MAPPINGS -- NEVER INVOKED (D7)
-# Same triple shape, plus the out-of-scope table each loader writes. The table
-# names were read from the bridge each loader feeds -- the `TABLE=' directive in
-# common/<bridge>MT.scb -- not guessed. Together they are exactly the 11
-# out-of-scope tables of the 33 in the frozen schema.
 readonly -a ACAS_SEED_OUT_OF_SCOPE=(
   'delfolio.dat:delfolioLD:L95:PUDELINV-REC'
   'delinvno.dat:sldelinvnosLD:L96:SADELINV-REC'
@@ -227,12 +100,11 @@ readonly -a ACAS_SEED_OUT_OF_SCOPE=(
   'stockctl.dat:stockLD:L115:STOCK-REC'
 )
 
-# The interactive tail this script does NOT reproduce, [common/masterLD.sh:L119].
+# The interactive tail this script does NOT reproduce,
+# [common/masterLD.sh:L119].
 readonly ACAS_SEED_SYSOUT_LOG='SYS-DISPLAY.log'
 readonly ACAS_SEED_COMPLETE_MSG='All loads complete but check SYS-DISPLAY.log'
 
-# The four runtime loader paths, in the order the repository declares them.
-# [etc/ld.so.conf.d/gnucobol.conf]
 readonly -a ACAS_SEED_LOADER_PATHS=(
   /usr/local/lib/gnucobol
   /usr/local/lib
@@ -242,9 +114,7 @@ readonly -a ACAS_SEED_LOADER_PATHS=(
 
 # The environment contract, identical in shape to the one
 # harness/build_oracle.sh asserts, so a container configured for one stage is
-# configured for both. ACAS_DB_SOCKET may legitimately be EMPTY -- Compose sets
-# it so on purpose because the harness connects over TCP -- but it must be
-# DECLARED.
+# configured for both.
 readonly -a ACAS_SEED_REQUIRED_ENV_NONEMPTY=(
   ACAS_REPO ACAS_BUILD ACAS_DATA ACAS_OUT
   ACAS_DB_HOST ACAS_DB_PORT ACAS_DB_NAME ACAS_DB_USER ACAS_DB_PASSWORD
@@ -254,8 +124,6 @@ readonly -a ACAS_SEED_REQUIRED_ENV_DECLARED=(
   ACAS_DB_SOCKET
 )
 
-# Mutable state. Declared up front because `set -u' makes an unset array a
-# fatal reference.
 ACAS_SEED_DATA_DIR=''          # --data-dir, defaults to $ACAS_DATA
 ACAS_SEED_SCENARIO=''          # optional positional scenario file
 ACAS_SEED_DRY_RUN=0            # --dry-run
@@ -272,19 +140,11 @@ ACAS_SEED_FIXTURE_DIR=''       # scenario fixture staged by acas_stage_scenario_
 declare -a ACAS_SEED_ONLY=()         # --only, validated loader names
 declare -a ACAS_SEED_SUMMARY=()      # the final table, one row per loader
 declare -a ACAS_SEED_WARN_SUMMARY=() # non-fatal findings, replayed at the end
-# The client transports this target has earned, most secure first. Decided ONCE
-# by acas_assert_transport_policy, before anything connects, and consumed
-# read-only by acas_sql_scalar -- see the TRANSPORT SECURITY section.
 declare -a ACAS_SEED_TLS_VARIANTS=()
 
-# REPORTING
 # Stage banners are numbered so the log reads as the deterministic staged
 # orchestration the plan prescribes (R-6): explicit, ordered, individually
 # reported, individually asserted.
-# Everything printed here goes to standard output AND, once the log directory
-# exists, to $ACAS_OUT/seed/seed.log. Nothing is written under
-# $ACAS_OUT/<scenario>/, because the determinism test requires byte-identical
-# scenario dumps and a clock reading in a compared file would break it.
 
 # Append to the run log if it is open yet. Silent before acas_open_log runs, so
 # early usage errors still print without needing a log.
@@ -316,9 +176,6 @@ acas_warn() {
   ACAS_SEED_WARN_SUMMARY+=("$*")
 }
 
-# acas_die <exit-code> <headline> [detail-line]...
-# Every abort names the artifact or setting at fault and, wherever the cause is
-# frozen behaviour, cites its locator so the reader can check the claim (R-5).
 acas_die() {
   local code="$1"
   shift
@@ -495,18 +352,9 @@ acas_join_words() {
   printf '%s' "$*"
 }
 
-# =============================================================================
-# FINITE DEADLINES
-#
-# One definition, used by every call site that spawns an external process.
-# =============================================================================
 
-# acas_timeout_seconds <env-var-name> <default>
-# Publishes the validated budget in ACAS_TIMEOUT_RESOLVED. It is NOT written to
-# stdout, because a caller writing `x="$(acas_timeout_seconds ...)"' would run
-# this in a command substitution where acas_die's `exit' terminates only that
-# subshell -- the message and the status would both be swallowed and the run
-# would continue with an empty budget, which is to say with no deadline at all.
+# acas_timeout_seconds <env-var-name> <default> Publishes the validated budget
+# in ACAS_TIMEOUT_RESOLVED.
 acas_timeout_seconds() {
   local name="$1" default="$2" value
   ACAS_TIMEOUT_RESOLVED=''
@@ -554,10 +402,6 @@ acas_resolve_deadlines() {
   done
 }
 
-# acas_deadline_prefix <budget>
-# The single place that knows the flag spelling. `timeout' becomes the parent of
-# exactly the process it is given, so only that one child is ever signalled --
-# nothing here matches on a process name or signals a process group.
 acas_deadline_prefix() {
   ACAS_DEADLINE_ARGV=(
     timeout
@@ -567,11 +411,8 @@ acas_deadline_prefix() {
   )
 }
 
-# acas_is_timeout_status <rc> <elapsed> <budget>
-# True when <rc> means "the deadline expired" rather than "it ran and failed".
-# 124 is GNU coreutils on expiry and 137 is the KILL escalation; uutils
-# coreutils returns 125 where GNU returns 124, while GNU's 125 means timeout
-# itself failed -- so 125 is decided by elapsed wall clock, not by status.
+# acas_is_timeout_status <rc> <elapsed> <budget> True when <rc> means "the
+# deadline expired" rather than "it ran and failed".
 acas_is_timeout_status() {
   local rc="$1" elapsed="$2" budget="$3"
   if (( rc == 124 || rc == 137 )); then
@@ -583,9 +424,6 @@ acas_is_timeout_status() {
   return 1
 }
 
-# acas_assert_not_timed_out <rc> <elapsed> <budget> <budget-var> <label>
-# Aborts with EX_TIMEOUT on expiry; returns quietly for any other status, whose
-# reporting belongs to the caller.
 acas_assert_not_timed_out() {
   local rc="$1" elapsed="$2" budget="$3" budget_var="$4" label="$5"
   if ! acas_is_timeout_status "$rc" "$elapsed" "$budget"; then
@@ -599,24 +437,8 @@ acas_assert_not_timed_out() {
     "The child was sent TERM at the deadline and KILL ${ACAS_TIMEOUT_GRACE}s later."
 }
 
-# =============================================================================
-# THE FROZEN-ARTIFACT CONTAINMENT GUARD
-#
-# acas_assert_outside_repo <label> <path>
-#
-# Nothing this script writes may land inside $ACAS_REPO: the checkout holds the
-# frozen COBOL, the frozen bridges and the frozen schema, and "any diff touching
-# a frozen path is a defect in the migration, regardless of how harmless it
-# appears" (AAP 0.8.1).
-#
-# Canonical, not textual. Three properties a string comparison misses:
-#   * a symlink whose TARGET is inside the checkout -- resolved with readlink -f
-#   * a path that does not exist yet -- its nearest existing ancestor is
-#     resolved instead, because that is what mkdir would create under
-#   * containment in the OTHER direction -- a write root that CONTAINS the
-#     checkout is just as unacceptable, since clearing or writing through it
-#     reaches the frozen files too
-# =============================================================================
+# acas_assert_outside_repo <label> <path> Nothing this script writes may land
+# inside $ACAS_REPO.
 acas_assert_outside_repo() {
   local label="$1" path="$2"
   local repo_real target probe
@@ -655,9 +477,8 @@ acas_assert_outside_repo() {
 }
 
 # Split a `<flat file>:<loader>:<locator>:<table>' entry into four globals.
-# Done with parameter expansion rather than `read -r -d' because the final field
-# may itself contain spaces (e.g. "SAINVOICE-REC + SAINV-LINES-REC") and must
-# survive intact.
+# Done with parameter expansion rather than `read -r -d' because the final
+# field may itself contain spaces.
 ACAS_E_FLAT=''
 ACAS_E_LOADER=''
 ACAS_E_LOCATOR=''
@@ -672,8 +493,6 @@ acas_split_entry() {
   ACAS_E_TABLE="${entry#*:}"
 }
 
-# Split a `<loader>:<test>:<locator>:<table>' system-block entry. Same shape,
-# different first field, kept separate so neither reader has to guess.
 ACAS_S_LOADER=''
 ACAS_S_TEST=''
 ACAS_S_LOCATOR=''
@@ -688,14 +507,11 @@ acas_split_system_entry() {
   ACAS_S_TABLE="${entry#*:}"
 }
 
-# Record one row of the closing summary table.
-# acas_summary_row <loader> <flat file> <present> <rc> <decision>
 acas_summary_row() {
   ACAS_SEED_SUMMARY+=("$(printf '%-14s %-17s %-8s %-5s %s' "$1" "$2" "$3" "$4" "$5")")
 }
 
 # Membership test over an array passed by name, so the arrays stay readonly.
-# acas_in_list <needle> <element>...
 acas_in_list() {
   local needle="$1"
   shift
@@ -708,40 +524,9 @@ acas_in_list() {
   return 1
 }
 
-# -----------------------------------------------------------------------------
-# SAFE FILE CREATION  (CWE-59 symlink following, CWE-367 TOCTOU, CWE-732
-# over-permissive files)
-#
-# `: >"$path"' FOLLOWS a symlink and TRUNCATES its target, and creates at
-# whatever the umask allows. The one file this script creates -- the run log --
-# lives under $ACAS_OUT, which the Compose recipe makes a bind mount shared
-# between the `gnucobol' and `mariadb' services. So anything able to place
-# `seed/seed.log' there first chooses which file gets truncated, and then reads
-# a log that names the schema, the host, the seeding account and every client
-# diagnostic.
-#
-# THE PATTERN, in four steps, each one load-bearing and identical to the one
-# harness/reset_db.sh uses (deliberately duplicated rather than sourced: the two
-# scripts are independent entry points and neither may fail because the other is
-# absent, the same reasoning that keeps the harness Python utilities from
-# importing each other):
-#
-#   1. REFUSE a symlink outright. Bash has no O_NOFOLLOW, so this is an explicit
-#      `-L' test. On its own it would be a TOCTOU window, which is why step 3
-#      exists.
-#   2. REMOVE an existing regular file, so step 3's exclusive create is not
-#      defeated by our own previous run. The log is truncated at the start of
-#      every run by contract, so removing it is exactly the old behaviour.
-#   3. CREATE under `set -C' (noclobber), which is O_EXCL: if anything -- a
-#      symlink, a regular file, a directory -- appears at the name between step 1
-#      and here, the create FAILS instead of following or truncating.
-#   4. chmod 600, so the content is private regardless of the inherited umask.
-#      `umask 077' is set at the top of this script, which makes step 4 belt and
-#      braces rather than the only control.
-#
-# Not `mktemp': this is a named file the operator is told to read, so the name is
-# part of the contract.
-# -----------------------------------------------------------------------------
+# Create a file that cannot be hijacked: a symlink or non-regular path is refused
+# rather than followed, and the file is created under `set -C' (O_EXCL) so it can
+# neither be pre-created by another user nor widened between create and chmod.
 acas_create_private_file() {
   local path="$1" what="$2"
 
@@ -772,14 +557,7 @@ acas_create_private_file() {
     "could not restrict $what to mode 600: $path"
 }
 
-# =============================================================================
-# TRAPS
-# There is no credential FILE to shred: the password reaches the client through
-# MYSQL_PWD only (see acas_sql_scalar), so it never appears in argv, never in
-# `ps', and never on disk. That is a stronger guarantee than a
-# --defaults-extra-file plus a cleanup trap, and it is why no temporary file is
-# created anywhere in this script. `set -x' is never enabled, for the same
-# reason.
+# TRAPS There is no credential FILE to shred.
 ACAS_SEED_CURRENT_LOADER=''
 
 # shellcheck disable=SC2317  # reached only through the ERR trap installed below,
@@ -803,9 +581,7 @@ acas_on_exit() {
   if (( status == 0 )); then
     return 0
   fi
-  # The partial-seed warning is only true once a loader has actually run. A
-  # precondition failure leaves the database exactly as it was, and saying
-  # otherwise would send the operator to reset_db.sh for no reason.
+  # The partial-seed warning is only true once a loader has actually run.
   if (( ACAS_SEED_RAN > 0 )); then
     printf '\nharness/seed.sh exiting with status %s after running %s load program(s).\n' \
       "$status" "$ACAS_SEED_RAN" >&2
@@ -820,7 +596,6 @@ acas_on_exit() {
 }
 trap 'acas_on_exit "$?"' EXIT
 
-# USAGE
 acas_usage() {
   cat <<'USAGE'
 harness/seed.sh -- seed the frozen ACASDB schema from the ACAS Cobol flat files.
@@ -837,8 +612,8 @@ Usage:
 
 Arguments:
   <scenario.yaml>     Optional, and BINDING when given. The canonical eight-stage
-                      invocation documented at
-                      [harness/docker-compose.yml:L357-L399] works verbatim. The scenario's declared
+                      invocation documented in harness/docker-compose.yml
+                      works verbatim. The scenario's declared
                       `seed_files' (with optional `seed_dir', defaulting to a
                       directory beside the scenario named after it) are staged
                       into a FRESH scenario-owned fixture directory under the
@@ -950,7 +725,6 @@ USAGE
 }
 
 
-# ARGUMENTS
 
 # Every loader this script is allowed to invoke, for validating --only. Built
 # from the two in-scope tables so the list cannot drift away from them.
@@ -974,9 +748,7 @@ acas_out_of_scope_loader_names() {
   done
 }
 
-# Validate one --only name. Deliberately NOT a value-returning helper:
-# `acas_die' calls `exit', and inside a command substitution that would
-# terminate only the subshell, leaving the caller running with an empty value.
+# Validate one --only name. Deliberately NOT a value-returning helper.
 acas_assert_only_name() {
   local name="$1"
   local -a allowed=() forbidden=()
@@ -1039,8 +811,6 @@ acas_parse_args() {
           'Run --help for the accepted options.'
         ;;
       *)
-        # The optional scenario positional. Accepted for compatibility with the
-        # canonical invocation at [harness/docker-compose.yml:L346-L357].
         if [[ -n "$ACAS_SEED_SCENARIO" ]]; then
           acas_die "$EX_USAGE" \
             "at most one scenario file may be given; got '$ACAS_SEED_SCENARIO' and '$1'."
@@ -1060,20 +830,13 @@ acas_parse_args() {
     shift
   done
 
-  # Note the test is on `only_given', NOT on `only_raw' being non-empty: an
-  # explicit `--only ""' names nothing at all and must be rejected as a usage
-  # error rather than silently degrading into "seed every loader".
+  # Note the test is on `only_given', NOT on `only_raw' being non-empty.
   if (( only_given )); then
     local name
     local -a only_allowed=()
     # Split a comma-separated list without disturbing the global IFS, which is
     # deliberately $'\n\t' (see the strict-mode block), so unquoted word
     # splitting on spaces is not available here.
-    # `printf "%s\n"' -- NOT `printf "%s"' -- terminates the final field, and
-    # the `|| [[ -n "$name" ]]' guard admits it even if the terminator were
-    # ever lost. Both are required: `read' returns non-zero on an unterminated
-    # final field, and with neither safeguard the loop body is skipped and the
-    # last name in the list is SILENTLY DROPPED. Do not "simplify" either away.
     while IFS= read -r name || [[ -n "$name" ]]; do
       [[ -n "$name" ]] || continue
       acas_assert_only_name "$name"
@@ -1096,13 +859,9 @@ acas_loader_selected() {
   acas_in_list "$1" "${ACAS_SEED_ONLY[@]}"
 }
 
-# PRECONDITIONS
-# This script ASSERTS its environment; it never installs one and never creates a
-# database object. Asserting here means a misconfigured container fails in
-# seconds with a named cause, instead of a loader returning a bare 128 whose
-# real reason -- a data directory the loader was never told about -- is invisible.
+# This script ASSERTS its environment; it never installs one and never creates
+# a database object.
 
-# Precondition 1 of 8.
 acas_assert_environment() {
   acas_stage 'Preconditions 1/8: environment contract'
 
@@ -1114,9 +873,7 @@ acas_assert_environment() {
     fi
   done
   for name in "${ACAS_SEED_REQUIRED_ENV_DECLARED[@]}"; do
-    # `-v' tests declaration, not content. An empty ACAS_DB_SOCKET is valid and
-    # means "no unix socket"; an UNDECLARED one means the caller never supplied
-    # the contract at all.
+    # `-v' tests declaration, not content.
     if [[ ! -v "$name" ]]; then
       printf 'FATAL: required environment variable %s is not declared.\n' "$name" >&2
       printf '       It may legitimately be EMPTY, but it must be declared.\n' >&2
@@ -1130,16 +887,7 @@ acas_assert_environment() {
       'outside Compose, export them yourself before invoking this script.'
   fi
 
-  # THE RANGE, not merely the character class. A numeric-only test admitted
-  # 99999 and 0, both of which reached the python TCP probe as an out-of-range
-  # port and produced a connection failure whose cause named neither the
-  # variable nor the value. Asserted here, once, before anything connects.
-  #
-  # NOTE ON WIDTH: this checks the harness environment variable, NOT the COBOL
-  # field. `DB-Port' is `pic x(5)' CHARACTER data
-  # [copybooks/wsfnctn.cob:L56-L62] and its value semantics are untouched --
-  # port 65535 is five characters and fits, which is exactly why the frozen
-  # field is five wide.
+  # THE RANGE, not merely the character class.
   if [[ ! "$ACAS_DB_PORT" =~ ^[0-9]+$ ]]; then
     acas_die "$EX_PRECONDITION" \
       "ACAS_DB_PORT must be numeric; got '$ACAS_DB_PORT'."
@@ -1152,15 +900,11 @@ acas_assert_environment() {
       'variable nor the value.'
   fi
   # Canonicalised so the port this script reports, probes and passes to the
-  # client is one value rather than three spellings of it. `10#' forces base-10
-  # so a leading zero is stripped rather than read as octal.
+  # client is one value rather than three spellings of it.
   ACAS_DB_PORT="$(( 10#$ACAS_DB_PORT ))"
 
-  # ACAS_LEDGERS and ACAS_BIN are tested by the COBOL as `(1:1) = spaces' --
   # only the FIRST CHARACTER -- so a value that merely BEGINS with a space
-  # triggers the interactive block just as an empty one does. Reproduce that
-  # sensitivity exactly rather than approximating it with a non-empty test.
-  # [copybooks/Proc-Get-Env-Set-Files.cob:L20-L28]
+  # triggers the interactive block just as an empty one does.
   for name in ACAS_LEDGERS ACAS_BIN; do
     if [[ "${!name-}" == ' '* ]]; then
       acas_die "$EX_PRECONDITION" \
@@ -1172,15 +916,11 @@ acas_assert_environment() {
         'Every one of the 28 load programs copies that paragraph, so the seed' \
         'would hang with no diagnostic.' \
         '[copybooks/Proc-Get-Env-Set-Files.cob:L20-L28]' \
-        '[common/glbatchLD.cbl:L188-L189] [harness/docker-compose.yml:L379-L382]'
+        '[common/glbatchLD.cbl:L188-L189]'
     fi
   done
 
-  # The COBOL reads its connection details into fixed-width fields. A longer
-  # value is silently TRUNCATED, after which the COBOL side fails to
-  # authenticate while the Python side succeeds -- a divergence with nothing to
-  # do with posting logic. The password's LENGTH is checked; its VALUE is never
-  # printed. [copybooks/wsfnctn.cob:L56-L62] [harness/docker-compose.yml:L241-L257]
+  # The COBOL reads its connection details into fixed-width fields.
   local value
   for name in ACAS_DB_USER ACAS_DB_PASSWORD ACAS_DB_NAME; do
     value="${!name-}"
@@ -1193,8 +933,8 @@ acas_assert_environment() {
     fi
   done
 
-  # Decided HERE, before the readiness probe, and not lazily on first use -- see
-  # acas_assert_transport_policy for why the ordering matters.
+  # Decided HERE, before the readiness probe, and not lazily on first use --
+  # see acas_assert_transport_policy for why the ordering matters.
   acas_assert_transport_policy
 
   acas_log "ACAS_REPO   = $ACAS_REPO (read-only checkout; the specification)"
@@ -1212,13 +952,7 @@ acas_assert_data_dir() {
 
   [[ -n "$ACAS_SEED_DATA_DIR" ]] || ACAS_SEED_DATA_DIR="$ACAS_DATA"
 
-  # An absolute path is REQUIRED, not merely tidy. zz020-Set-the-Paths builds
-  # every file name as ACAS_LEDGERS + OS-Delimiter + name, and OS-Delimiter
-  # defaults to "/" (`77 OS-Delimiter pic x value "/"',
-  # [common/glbatchLD.cbl:L141]). A relative ACAS_LEDGERS would be joined onto
-  # the working directory -- which this script sets to the data directory --
-  # producing <data>/<data>/system.dat.
-  # [copybooks/Proc-Get-Env-Set-Files.cob:L125-L136]
+  # An absolute path is REQUIRED, not merely tidy.
   [[ "$ACAS_SEED_DATA_DIR" == /* ]] || acas_die "$EX_PRECONDITION" \
     "the data directory must be an absolute path; got '$ACAS_SEED_DATA_DIR'." \
     'The loaders prefix every file name with ACAS_LEDGERS and the OS delimiter,' \
@@ -1227,7 +961,6 @@ acas_assert_data_dir() {
 
   # A path containing a space is silently TRUNCATED at the first space, because
   # the STRING statement takes ACAS_LEDGERS `delimited by space'.
-  # [copybooks/Proc-Get-Env-Set-Files.cob:L131,L142]
   case "$ACAS_SEED_DATA_DIR" in
     *' '*)
       acas_die "$EX_PRECONDITION" \
@@ -1243,29 +976,21 @@ acas_assert_data_dir() {
     'It must hold the ACAS Cobol flat files the load programs read.' \
     '[common/masterLD.sh:L27-L28]'
 
-  # Writable because the loaders append their own diagnostics to SYS-DISPLAY.log
-  # in this directory, and because the file-handler logger writes here too --
-  # [copybooks/Test-Data-Flags.cob:L10] hardcodes `SW-Testing pic 9 value 1' and
-  # cannot be switched off, so the log grows on every DAL call.
+  # Writable because the loaders append their own diagnostics to
+  # SYS-DISPLAY.log [copybooks/Test-Data-Flags.cob:L10] hardcodes `SW-Testing
+  # pic 9 value 1' and cannot be switched off, so the log grows on every DAL.
   [[ -w "$ACAS_SEED_DATA_DIR" ]] || acas_die "$EX_PRECONDITION" \
     "the data directory ($ACAS_SEED_DATA_DIR) is not writable." \
     'The load programs write SYS-DISPLAY.log there, and the frozen file-handler' \
     'logger cannot be disabled [copybooks/Test-Data-Flags.cob:L10].'
 
   # THE FROZEN-ARTIFACT GUARANTEE. The data directory must not be inside the
-  # checkout: seeding writes SYS-DISPLAY.log and the handler log, and a diff
-  # touching a frozen path is a defect in the migration however harmless it
-  # looks. The canonical guard also rejects the reverse containment -- a data
-  # directory that CONTAINS the checkout -- and resolves symlinks on both sides.
+  # checkout.
   acas_assert_outside_repo 'the data directory' "$ACAS_SEED_DATA_DIR"
 
   local data_real
   data_real="$(readlink -f "$ACAS_SEED_DATA_DIR" 2>/dev/null || printf '%s' "$ACAS_SEED_DATA_DIR")"
 
-  # D3: ACAS_LEDGERS -- not the working directory -- is what the loaders
-  # actually resolve file names against, so it must agree with the directory
-  # this script tested for `-e system.dat'. Exporting it is what makes
-  # --data-dir mean anything at all.
   local ledgers_real
   ledgers_real="$(readlink -f "${ACAS_LEDGERS}" 2>/dev/null || printf '%s' "${ACAS_LEDGERS}")"
   if [[ "$ledgers_real" != "$data_real" ]]; then
@@ -1274,8 +999,7 @@ acas_assert_data_dir() {
   export ACAS_LEDGERS="$ACAS_SEED_DATA_DIR"
 
   # Reproduce [common/masterLD.sh:L45] `cd ~/ACAS' with the harness data
-  # directory (D2). Preserved because it is the frozen contract and because the
-  # loaders write SYS-DISPLAY.log relative to the working directory.
+  # directory (D2).
   cd "$ACAS_SEED_DATA_DIR" || acas_die "$EX_PRECONDITION" \
     "could not change directory to $ACAS_SEED_DATA_DIR."
   acas_log "working directory = $PWD  (reproduces [common/masterLD.sh:L45])"
@@ -1283,29 +1007,11 @@ acas_assert_data_dir() {
 }
 
 
-# Open the run log. Fixed file name, truncated at the start of every run, so the
-# set of files this script produces is deterministic and two runs leave the tree
-# in the same shape. It lives under $ACAS_OUT/seed and NEVER under
-# $ACAS_OUT/<scenario>/, which the determinism test compares byte for byte.
-#
-# CREATED SAFELY (CWE-59 symlink following, CWE-367 TOCTOU, CWE-732
-# over-permissive). The truncation used to be a bare
-#
-#     : >"$ACAS_SEED_LOG"
-#
-# which FOLLOWS a symlink and truncates whatever it points at, at whatever mode
-# the umask happens to allow. $ACAS_OUT is a bind mount shared between two
-# Compose services, so anything able to place `seed/seed.log' there first could
-# choose the victim -- and then read a log that carries every loader's combined
-# output verbatim (acas_invoke_loader tees it here), the schema, the host and the
-# seeding account. See acas_create_private_file for the replacement pattern; the
-# LOG'S CONTENT is unchanged.
 acas_open_log() {
   local dir="$ACAS_OUT/seed"
   # Canonical containment BEFORE mkdir: the guard must decide where a directory
   # would be created, not discover afterwards that it was created in the
-  # checkout. Both ACAS_OUT and the log directory are checked, because a
-  # symlinked ACAS_OUT and a symlinked subdirectory are different escapes.
+  # checkout.
   acas_assert_outside_repo 'ACAS_OUT' "$ACAS_OUT"
   acas_assert_outside_repo 'the seed log directory' "$dir"
   mkdir -p "$dir" 2>/dev/null || acas_die "$EX_PRECONDITION" \
@@ -1313,23 +1019,12 @@ acas_open_log() {
     'ACAS_OUT must be a writable volume.'
   chmod 700 -- "$dir" 2>/dev/null || true
 
-  # Re-checked after creation: mkdir -p resolves symlinks along the way, so the
-  # path that now exists is the one to judge, not the one that was requested.
   acas_assert_outside_repo 'the seed log directory' "$dir"
 
-  # THE GLOBAL IS ASSIGNED LAST, and that ordering is the whole point. acas_tee
-  # appends to $ACAS_SEED_LOG whenever it is non-empty, and acas_die reports
-  # through acas_tee -- so setting the global BEFORE the path was proven safe
-  # would write the refusal message itself through the very symlink it was
-  # refusing. Until the create succeeds, ACAS_SEED_LOG stays empty and every
-  # diagnostic goes to the terminal only.
+  # THE GLOBAL IS ASSIGNED LAST, and that ordering is the whole point.
   local candidate="$dir/seed.log"
   acas_create_private_file "$candidate" 'the seed log'
   ACAS_SEED_LOG="$candidate"
-  # The ONE wall-clock reading in this script. Permitted here because
-  # $ACAS_OUT/seed/ is never part of a comparison; it is deliberately kept out
-  # of standard output and out of every path the dump tree reaches, so
-  # tests/determinism cannot see it.
   {
     printf 'harness/seed.sh run log\n'
     printf 'started (UTC): %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -1353,9 +1048,7 @@ acas_assert_system_dat() {
     acas_note 'affected-table list of a scenario ambiguous.'
     # A zero accounting cycle is the second interactive trap. Enforced by the
     # scenario definitions, not here, because this script does not parse the
-    # flat files (R-3: no added validation) -- but recorded so the operator
-    # recognises the symptom. [general/general.cbl:L462-L463] is
-    # `if scycle = zero  go to call-system-setup.'
+    # flat files.
     acas_note 'the scenario must also seed a NON-ZERO accounting cycle:'
     acas_note '[general/general.cbl:L462-L463] diverts a zero cycle to an interactive path.'
     return 0
@@ -1378,7 +1071,7 @@ acas_assert_system_dat() {
     '     that open fails, CALLs sys002 -- which is INTERACTIVE. A subsequent' \
     '     harness/run_cobol_scenario.sh would then block for ever on a terminal' \
     '     read instead of failing, and the run would look hung rather than' \
-    '     broken. [harness/docker-compose.yml:L371-L375]' \
+    '     broken.' \
     '' \
     "Seed $ACAS_SEED_SYSTEM_FLAT_FILE into $PWD from the scenario definition" \
     'before invoking this script.'
@@ -1388,11 +1081,6 @@ acas_assert_system_dat() {
 acas_assert_loaders() {
   acas_stage 'Preconditions 5/8: the compiled load programs'
 
-  # harness/build_oracle.sh builds all 28 *LD.cbl as executables
-  # [common/comp-common.sh:L51] and asserts these 20 by name in
-  # $ACAS_BUILD/common. Putting that directory on PATH is part of D3: the frozen
-  # script assumes the loaders are already installed on the operator's PATH,
-  # which is not true of a container built from harness/Dockerfile.gnucobol.
   local loader_dir="$ACAS_BUILD/common"
   [[ -d "$loader_dir" ]] || acas_die "$EX_PRECONDITION" \
     "$loader_dir does not exist, so the compiled load programs cannot be found." \
@@ -1403,8 +1091,7 @@ acas_assert_loaders() {
 
   # COB_LIBRARY_PATH must resolve the bridge modules each loader CALLs -- a
   # loader is an executable, but glbatchMT and friends are dynamically loadable
-  # modules. build_oracle.sh publishes the same value; this re-asserts it so the
-  # script also works when invoked outside Compose.
+  # modules.
   if [[ -z "${COB_LIBRARY_PATH-}" ]]; then
     export COB_LIBRARY_PATH="$loader_dir"
     acas_note "COB_LIBRARY_PATH was unset; set to $loader_dir so the *MT bridge modules resolve"
@@ -1414,10 +1101,6 @@ acas_assert_loaders() {
   fi
   acas_log "COB_LIBRARY_PATH = $COB_LIBRARY_PATH"
 
-  # The 20 in-scope loaders, asserted by name and by executability BEFORE
-  # anything is seeded. A missing one means build_oracle.sh did not complete,
-  # and saying so here is far better than a bare "command not found" halfway
-  # through a partial seed.
   local -a wanted=() missing=()
   mapfile -t wanted < <(acas_inscope_loader_names)
   local name resolved
@@ -1452,10 +1135,7 @@ acas_assert_library_paths() {
   acas_stage 'Preconditions 6/8: runtime library paths'
 
   # The loaders link libcob and libmysqlclient, and the repository declares its
-  # own loader path order in [etc/ld.so.conf.d/gnucobol.conf]. That file is
-  # normally installed into the image and covered by ldconfig; LD_LIBRARY_PATH
-  # is set here as well so the loaders resolve even when the cache has not been
-  # refreshed (ldconfig needs privileges this script does not assume).
+  # own loader path order in [etc/ld.so.conf.d/gnucobol.conf].
   local dir added=0
   for dir in "${ACAS_SEED_LOADER_PATHS[@]}"; do
     [[ -d "$dir" ]] || continue
@@ -1474,53 +1154,22 @@ acas_assert_library_paths() {
 
   # Not fatal on its own -- the library may be resolved through the ldconfig
   # cache instead -- but worth naming, because an unresolved libmysqlclient
-  # presents as a loader that dies before it can return one of the documented
-  # codes. [common/comp-common.sh:L26] links -L/usr/local/mysql/lib.
+  # presents as a loader that dies before it can return one of the documented.
   if [[ ! -e /usr/local/mysql/lib/libmysqlclient.so ]]; then
     acas_warn 'libmysqlclient.so was not found under /usr/local/mysql/lib, the prefix every frozen compile line hard-codes [common/comp-common.sh:L26]; a loader that cannot resolve it will fail before it can return 128, 64 or 16.'
   fi
 }
 
-# DATABASE PRECONDITIONS
 
-# -----------------------------------------------------------------------------
-# TRANSPORT SECURITY (CWE-295 improper certificate validation, CWE-319
-# cleartext transmission). The variant search used to be, unconditionally:
-#
-#     for variant in '' '--skip-ssl'; do          <-- the defect, as it was
-#
-# so a server that merely declined TLS -- or a middlebox that stripped it --
-# caused a SILENT downgrade to plaintext on the second iteration, carrying the
-# seeding credential's handshake and every answer in clear. Worse, the first
-# iteration passed no --ssl-verify-server-cert either, so even the TLS attempt
-# validated nothing: any certificate, from anyone, was accepted.
-#
-# THE POLICY, enforced by acas_assert_transport_policy and FAIL-CLOSED:
-#
-#   * A LOCAL target -- a unix socket, an empty host, or a loopback host -- may
-#     use plaintext. Nothing leaves the machine, and it is the configuration the
-#     harness actually uses: a current client enforces TLS while this server has
-#     none, so --skip-ssl is REQUIRED there. Removing that path would break every
-#     local probe while protecting nothing.
-#   * A NON-LOCAL target must present a certificate chaining to $ACAS_DB_TLS_CA
-#     and matching its hostname. That is what --ssl-verify-server-cert adds;
-#     without a CA it verifies nothing, so the CA is required rather than
-#     optional.
-#   * Plaintext to a non-local target is permitted ONLY when
-#     ACAS_DB_ALLOW_PLAINTEXT explicitly declares the network isolated. The
-#     accepted values are a CLOSED set, so a typo fails closed.
-#   * Anything else is REFUSED before the first connection.
-#
-# NOTHING ELSE CHANGES: the same two binaries are probed in the same order, the
-# same three return codes are reported, and the composed argv is otherwise
-# identical. In particular this script still passes NO --force, so a client error
-# is never continued past.
-# -----------------------------------------------------------------------------
+# TRANSPORT SECURITY (CWE-295 certificate validation, CWE-319 cleartext).
+# The transport is decided ONCE, before anything connects, and never downgraded
+# silently. A local target may use plaintext; a non-local target needs either a
+# CA bundle in ACAS_DB_TLS_CA, whose certificate and hostname are then verified,
+# or an explicit ACAS_DB_ALLOW_PLAINTEXT declaration -- otherwise the run aborts
+# with a named cause, because the probe authenticates with a real credential.
 
 # True when the target is reachable without leaving the machine: a unix socket,
-# an empty host, a loopback name, or a numeric loopback address. RESOLVES NOTHING
-# about whether the server is trustworthy (R-6) -- it answers only "could this
-# traffic be observed on a network".
+# an empty host, a loopback name, or a numeric loopback address.
 acas_target_is_local() {
   [[ -n "${ACAS_DB_SOCKET-}" ]] && return 0
   [[ -z "$ACAS_DB_HOST" ]] && return 0
@@ -1533,8 +1182,6 @@ acas_target_is_local() {
   return 1
 }
 
-# True when ACAS_DB_ALLOW_PLAINTEXT explicitly declares the network isolated.
-# A CLOSED set of accepted spellings, so `ture' or `TRUE ' fails closed.
 acas_plaintext_declared() {
   case "${ACAS_DB_ALLOW_PLAINTEXT-}" in
     1|true|yes|on) return 0 ;;
@@ -1542,15 +1189,9 @@ acas_plaintext_declared() {
   return 1
 }
 
-# Decide, ONCE and BEFORE ANYTHING CONNECTS, which client transports this target
-# has earned. Populates ACAS_SEED_TLS_VARIANTS, most secure first, or aborts.
-#
-# Called from acas_assert_environment, and NOT lazily from the query path: a
-# policy that is only evaluated when a connection is first attempted arrives
-# AFTER the TCP readiness probe, which can spend its whole ACAS_DB_WAIT_TIMEOUT
-# on an unreachable host before the refusal is ever reported. The operator would
-# then be told "MariaDB did not accept a TCP connection" when the truth is "this
-# script refuses to talk to it that way".
+# Decide, ONCE and BEFORE ANYTHING CONNECTS, which client transports this
+# target has earned. Populates ACAS_SEED_TLS_VARIANTS, most secure first, or
+# aborts.
 acas_assert_transport_policy() {
   local ca="${ACAS_DB_TLS_CA-}"
   ACAS_SEED_TLS_VARIANTS=()
@@ -1559,9 +1200,6 @@ acas_assert_transport_policy() {
     [[ -r "$ca" ]] || acas_die "$EX_PRECONDITION" \
       "ACAS_DB_TLS_CA names a file that cannot be read: $ca" \
       'It must be the PEM bundle the server certificate chains to.'
-    # --ssl-verify-server-cert is what makes the CA meaningful: without it the
-    # client encrypts but accepts any certificate, which is CWE-295 with extra
-    # steps.
     ACAS_SEED_TLS_VARIANTS+=("--ssl-ca=$ca --ssl-verify-server-cert")
   fi
 
@@ -1594,19 +1232,6 @@ acas_assert_transport_policy() {
 }
 
 # A single scalar query, credential-safe.
-# The password reaches the client through MYSQL_PWD, so it never appears in
-# argv and never in `ps'. No --defaults-extra-file is written, so there is no
-# credential on disk to leak and none to clean up.
-#
-# The transports attempted are exactly those acas_assert_transport_policy
-# permitted for this target -- never an unconditional plaintext fallback.
-# Standard error is discarded while capturing the VALUE, because a permissive
-# client emits a TLS advisory there that would otherwise be parsed as data; on
-# failure the attempt is repeated with standard error merged so the diagnostic is
-# never lost.
-#
-# Returns: 0 with the value in ACAS_SQL_OUT; 1 the query failed (diagnostic in
-# ACAS_SQL_DIAG); 2 credentials rejected; 3 no client binary available.
 acas_sql_scalar() {
   local sql="$1"
   ACAS_SQL_OUT=''
@@ -1614,20 +1239,13 @@ acas_sql_scalar() {
 
   local client variant flag out rc started elapsed
 
-  # Every client invocation carries ACAS_TIMEOUT_CLIENT. A server that neither
-  # accepts nor refuses -- a dropped packet filter is the usual cause -- would
-  # otherwise block the readiness gate for ever. A timed-out attempt is reported
-  # as the transient failure it is (return 1) because acas_wait_for_database owns
-  # the overall bound and retries.
+  # Every client invocation carries ACAS_TIMEOUT_CLIENT.
   local -a deadline=()
   acas_deadline_prefix "$ACAS_TIMEOUT_CLIENT"
   deadline=("${ACAS_DEADLINE_ARGV[@]}")
 
   # Unreachable unless acas_assert_transport_policy was skipped or changed: it
   # either records at least one permitted variant or aborts with a named cause.
-  # Asserted rather than assumed, because an empty list would otherwise fall
-  # straight through the loop and report a bare "the query failed" with no
-  # diagnostic at all -- the least informative failure this script could produce.
   if (( ${#ACAS_SEED_TLS_VARIANTS[@]} == 0 )); then
     acas_die "$EX_PRECONDITION" \
       'no permitted client transport for this target.' \
@@ -1639,9 +1257,9 @@ acas_sql_scalar() {
     for variant in "${ACAS_SEED_TLS_VARIANTS[@]}"; do
       local -a argv=("${deadline[@]}" "$client" '--protocol=TCP')
       if [[ -n "$variant" ]]; then
-        # A variant may carry two words (--ssl-ca=... --ssl-verify-server-cert),
-        # so it is split deliberately here -- each flag must be its own argv
-        # element.
+        # A variant may carry two words (--ssl-ca=...
+        # --ssl-verify-server-cert), so it is split deliberately here -- each
+        # flag must be its own argv element.
         for flag in $variant; do
           argv+=("$flag")
         done
@@ -1672,20 +1290,10 @@ acas_sql_scalar() {
   return 3
 }
 
-# TCP reachability, using python3 so no client binary and no credential is
-# needed. python3 is guaranteed present by harness/Dockerfile.gnucobol.
 acas_db_tcp_probe() {
   # The port range is asserted in acas_assert_environment, before anything
   # connects, so `int(sys.argv[2])' here can no longer receive 99999 and fail
-  # with an OverflowError that names neither the variable nor the value. The
-  # range is re-checked in the probe itself because this function is also reached
-  # from the readiness loop, and a defence that only exists at one entry point is
-  # one refactor away from not existing.
-  #
-  # An EXTERNAL deadline as well as the socket timeout below: create_connection's
-  # timeout bounds the connect but NOT the getaddrinfo() that precedes it, so a
-  # host name served by an unresponsive resolver would block in name resolution
-  # with the socket timeout never reached.
+  # with an OverflowError that names neither the variable nor the value.
   acas_deadline_prefix "$ACAS_TIMEOUT_CLIENT"
   "${ACAS_DEADLINE_ARGV[@]}" python3 - "$ACAS_DB_HOST" "$ACAS_DB_PORT" <<'PY'
 import socket
@@ -1737,15 +1345,7 @@ acas_wait_for_database() {
   done
   acas_log "TCP reachable after ${elapsed}s"
 
-  # An open port is not readiness. The loaders authenticate with exactly these
-  # credentials, so a wrong user or password must be caught here rather than
-  # surfacing as a return code of 64 whose stated meaning ("RDB not set up")
-  # would send the operator looking in the wrong place.
-  # Two failure shapes, deliberately treated differently: a transient failure is
-  # retried for the full timeout, because the port routinely opens before the
-  # server will talk; "Access denied" is a configuration error, not a readiness
-  # state, so it is retried only for a short grace window -- no amount of
-  # waiting fixes a wrong password.
+  # An open port is not readiness.
   local rc=0 denied_for=0
   elapsed=0
   while true; do
@@ -1926,18 +1526,7 @@ acas_assert_autocommit() {
 }
 
 
-# LOADER INVOCATION AND RETURN-CODE CLASSIFICATION
-# THE DOCUMENTED RETURN CODES -- [common/masterLD.sh:L37-L39] verbatim:
-#     # If params are not set up, they will exit with 128
-#     # if  RDB not set up will exit with 64
-#     #   if error writing data to rdb with 16
-# Each traces to a site in common/glbatchLD.cbl: 128 at L223+L224 (`open input
-# System-File' failed) and L233+L234 (read of record 1 failed, "Not set up ?"),
-# 64 at L290+L291 (RDBMS-DB-Name = spaces, or Cobol files only), 16 at L445
-# ("rdb problem?", falling to `go to aa999-Finish'). A bare `goback', return
-# code 0, sits at L248, L253, L258, L317, L330, L345 and L516. BOTH 128 sites
-# are the loader failing to open or read the system file, resolved through
-# ACAS_LEDGERS, so a 128 usually means the wrong directory, not bad data.
+# THE DOCUMENTED RETURN CODES -- [common/masterLD.sh:L37-L39] verbatim.
 ACAS_SEED_LAST_RC=0
 ACAS_SEED_WORST_RC=0
 
@@ -1961,31 +1550,15 @@ acas_rc_meaning() {
   esac
 }
 
-# acas_invoke_loader <loader>
-# Runs one load program, sequentially, in the foreground (R-3): no `&', no
-# `xargs -P', no job control anywhere in this script.
-# WHY THE LOADER RUNS AS AN `if' CONDITION -- DO NOT "SIMPLIFY" THIS AWAY.
-# A loader's non-zero status is DATA to be classified, not an error to
-# propagate: 128, 64 and 16 each lead to a different message, and under plain
-# `set -e' the script would die on the loader's own documented failure path
-# before it could say why. `set +e' alone is not enough either, because
-# suspending errexit does not suspend the ERR trap: bash exempts a command from
-# BOTH only when it is "part of the test following the if or elif reserved
-# words". PIPESTATUS[0] rather than $? is read -- the status wanted is the
-# loader's, not tee's -- and is left in ACAS_SEED_LAST_RC.
+# acas_invoke_loader <loader> Runs one load program, sequentially, in the
+# foreground (R-3): no `&', no `xargs -P', no job control anywhere in this
+# script.
 acas_invoke_loader() {
   local loader="$1"
   ACAS_SEED_CURRENT_LOADER="$loader"
   ACAS_SEED_LAST_RC=0
 
   # UNDER A DEADLINE, and stdin detached.
-  #
-  # Both matter. A compiled ACAS load program that reaches a prompt waits on a
-  # terminal for ever, and this harness is headless: `</dev/null' makes such a
-  # read fail immediately instead of hanging, and the deadline bounds every other
-  # way it could stall. The deadline prefix is used directly rather than
-  # acas_run_deadline because the output must reach the log through `tee', and
-  # the verdict has to be reached in THIS shell for acas_die to abort the script.
   local started elapsed
   acas_deadline_prefix "$ACAS_TIMEOUT_LOADER"
   started="$SECONDS"
@@ -1996,10 +1569,7 @@ acas_invoke_loader() {
   fi
   elapsed=$(( SECONDS - started ))
 
-  # A timeout is fatal, unlike an ordinary non-zero return code: the load
-  # programs' own codes are DATA that acas_abort_on_rc classifies against the
-  # frozen thresholds [common/masterLD.sh:L37-L41], but "never finished" is not
-  # one of those codes and no frozen rule covers it.
+  # A timeout is fatal, unlike an ordinary non-zero return code.
   acas_assert_not_timed_out "$ACAS_SEED_LAST_RC" "$elapsed" "$ACAS_TIMEOUT_LOADER" \
     ACAS_TIMEOUT_LOADER "the load program $loader"
 
@@ -2012,23 +1582,7 @@ acas_invoke_loader() {
 }
 
 # acas_abort_on_rc <rc> <loader> <flat file> <test kind> <locator> <scope>
-#
-# Applies the FROZEN test, and by default nothing else: `ACAS_SEED_STRICT=1' opts
-# in to aborting on a code the frozen test tolerates, is unset by default and is
-# set by nothing in the harness, so a default run reproduces
-# [common/masterLD.sh] exactly. A tolerated code is still carried out of here in
-# ACAS_SEED_WORST_RC, for the post-seed gate in `acas_main' (D5).
-#
-#   test kind `gt63'  -- `if [ $rc -gt 63 ]', the test the frozen script writes
-#                        for systemLD, sys4LD and finalLD
-#                        [common/masterLD.sh:L56,L65,L74] and the threshold it
-#                        names for everything else [common/masterLD.sh:L41].
-#   test kind `ne0'   -- `if [ $rc != 0 ]', the STRICTER test the frozen script
-#                        writes for dfltLD ALONE [common/masterLD.sh:L83].
-# THE ASYMMETRY BETWEEN THOSE TWO TESTS IS IN THE FROZEN SOURCE AND IS
-# REPRODUCED, NOT HARMONISED (R-4). A return code of 1 from dfltLD aborts the
-# seed; the same code from systemLD does not. That is what the maintainer wrote,
-# so that is what happens here, and ACAS_SEED_STRICT does not change it.
+# Applies the FROZEN test, and by default nothing else.
 acas_abort_on_rc() {
   local rc="$1" loader="$2" flat="$3" kind="$4" locator="$5" scope="$6"
   local meaning
@@ -2060,9 +1614,6 @@ acas_abort_on_rc() {
   if (( frozen_aborts )); then
     acas_summary_row "$loader" "$flat" 'yes' "$rc" 'ABORTED'
     if [[ "$scope" == 'system' ]]; then
-      # The maintainer's own message text, byte-exact from
-      # [common/masterLD.sh:L58,L67,L76,L85], followed by `exit $rc' exactly as
-      # [common/masterLD.sh:L59,L68,L77,L86].
       printf '%s\n' "$ACAS_SEED_SYSTEM_ABORT_MSG"
       acas_tee "$ACAS_SEED_SYSTEM_ABORT_MSG"
       printf 'FATAL: %s returned %s: %s\n' "$loader" "$rc" "$meaning" >&2
@@ -2089,18 +1640,15 @@ acas_abort_on_rc() {
   fi
 
   # The frozen test TOLERATES this code, and so does this script by default:
-  # the seed contract is reproduced, not tightened (R-3, R-6). The code is
-  # recorded in the summary row, warned about, and left in ACAS_SEED_WORST_RC so
-  # that the post-seed gate in `acas_main' can refuse to hand a partial seed to a
-  # state diff once the whole frozen sequence has run (deviation D5).
+  # the seed contract is reproduced, not tightened (R-3, R-6).
   if [[ "${ACAS_SEED_STRICT:-0}" != '1' ]]; then
     acas_summary_row "$loader" "$flat" 'yes' "$rc" 'ran (tolerated)'
     acas_warn "$loader returned $rc: $meaning. The frozen >63-only tolerance applies [common/masterLD.sh:L41], so seeding continues -- the seeded state may be PARTIAL and any state diff taken from it is untrustworthy. harness/seed.sh exits $rc at the end rather than aborting here (deviation D5)."
     return 0
   fi
 
-  # ACAS_SEED_STRICT=1 -- an explicit OPT-IN to failing fast on a code the frozen
-  # test tolerates. Nothing in the harness sets it; a default run never gets here.
+  # ACAS_SEED_STRICT=1 -- an explicit OPT-IN to failing fast on a code the
+  # frozen test tolerates. Nothing in the harness sets it.
   acas_summary_row "$loader" "$flat" 'yes' "$rc" 'ABORTED (opt-in strict)'
   printf 'FATAL: %s returned %s: %s\n' "$loader" "$rc" "$meaning" >&2
   acas_tee "FATAL: $loader returned $rc: $meaning"
@@ -2116,32 +1664,16 @@ acas_abort_on_rc() {
   exit "$rc"
 }
 
-# STAGE 1 -- THE SYSTEM-FILE BLOCK  [common/masterLD.sh:L50-L88]
-# Frozen verbatim, in shape and in order:
-#     JOBSTATUS=0
-#     if [ -e system.dat ]; then
-#         systemLD          ; rc=$? ; JOBSTATUS=$rc ; if [ $rc -gt 63 ] ...
-#         sys4LD            ; rc=$? ; JOBSTATUS=$rc ; if [ $rc -gt 63 ] ...
-#         finalLD           ; rc=$? ; JOBSTATUS=$rc ; if [ $rc -gt 63 ] ...
-#         dfltLD            ; rc=$? ; JOBSTATUS=$rc ; if [ $rc != 0 ]  ...
-#     fi
-# and the reason the four run together, [common/masterLD.sh:L47-L48] verbatim:
-# "First, process the five different records in the system file that are used to
-# create five RDBMS tables holding only one record each."
 acas_seed_system_block() {
   acas_stage 'Stage 1/2: the system file  [common/masterLD.sh:L50-L88]'
 
-  # JOBSTATUS=0  [common/masterLD.sh:L50]
   ACAS_SEED_JOBSTATUS=0
 
-  # if [ -e system.dat ]; then  [common/masterLD.sh:L51]
-  # Existence, and nothing else. The frozen script performs no other check on a
-  # flat file and neither does this one (R-3: no added validation).
+  # if [ -e system.dat ]; then [common/masterLD.sh:L51] Existence, and nothing
+  # else.
   if [[ ! -e "$ACAS_SEED_SYSTEM_FLAT_FILE" ]]; then
-    # Unreachable in practice, because acas_assert_system_dat already refused to
-    # continue. Kept because the frozen guard is part of the contract being
-    # reproduced, and because --data-dir could in principle be changed between
-    # the assertion and here by a future edit.
+    # Unreachable in practice, because acas_assert_system_dat already refused
+    # to continue.
     acas_warn "$ACAS_SEED_SYSTEM_FLAT_FILE is absent; the whole system-file block is skipped, as [common/masterLD.sh:L51] would skip it."
     local entry
     for entry in "${ACAS_SEED_SYSTEM_BLOCK[@]}"; do
@@ -2166,10 +1698,7 @@ acas_seed_system_block() {
 
     # rc=$? ; JOBSTATUS=$rc -- assigned after EVERY loader, including a
     # successful one, exactly as the frozen script does at
-    # [common/masterLD.sh:L54-L55,L63-L64,L72-L73,L81-L82]. So JOBSTATUS holds
-    # the LAST loader's code, not the worst one; ACAS_SEED_WORST_RC is tracked
-    # separately for the closing report, because the frozen variable on its own
-    # would hide an earlier tolerated failure.
+    # [common/masterLD.sh:L54-L55,L63-L64,L72-L73,L81-L82].
     ACAS_SEED_JOBSTATUS="$ACAS_SEED_LAST_RC"
 
     acas_abort_on_rc "$ACAS_SEED_LAST_RC" "$ACAS_S_LOADER" \
@@ -2177,11 +1706,8 @@ acas_seed_system_block() {
   done
 }
 
-# STAGE 2 -- THE FLAT-FILE MAPPINGS  [common/masterLD.sh:L93-L116]
-# [common/masterLD.sh:L90-L91] verbatim: "Now for all the ACAS data files
-# checking if each one exists before running the load program (for each)."
-# The 16 in-scope mappings run in the frozen order. The 8 out-of-scope mappings
-# are reported and never invoked (D7).
+# STAGE 2 -- THE FLAT-FILE MAPPINGS [common/masterLD.sh:L93-L116]
+# [common/masterLD.sh:L90-L91] verbatim.
 acas_seed_mappings() {
   acas_stage 'Stage 2/2: the flat-file mappings  [common/masterLD.sh:L93-L116]'
 
@@ -2189,10 +1715,7 @@ acas_seed_mappings() {
   for entry in "${ACAS_SEED_MAPPINGS[@]}"; do
     acas_split_entry "$entry"
 
-    # The frozen line, reproduced in valid shell (D1). The frozen text is, for
-    # example, `if [ -e analysis.dat ];  then analLD fi' at
-    # [common/masterLD.sh:L93] -- note the missing `;' before `fi', which is why
-    # the frozen file cannot run and why it is not repaired.
+    # The frozen line, reproduced in valid shell (D1).
     if [[ ! -e "$ACAS_E_FLAT" ]]; then
       acas_log "$ACAS_E_FLAT absent -> $ACAS_E_LOADER not run  [common/masterLD.sh:$ACAS_E_LOCATOR]"
       acas_summary_row "$ACAS_E_LOADER" "$ACAS_E_FLAT" 'no' '-' 'skipped-absent'
@@ -2213,12 +1736,6 @@ acas_seed_mappings() {
   done
 }
 
-# The 8 out-of-scope mappings. Never invoked; a present flat file is reported as
-# a DELIBERATE skip, naming the table, so it is visible rather than silently
-# ignored. Those tables are 8 of the 11 the frozen schema carries that the
-# posting cycle never touches: STOCK-REC, STOCKAUDIT-REC, DELIVERY-REC,
-# PUDELINV-REC, SADELINV-REC, SAAUTOGEN-REC, SAAUTOGEN-LINES-REC,
-# PUAUTOGEN-REC, PUAUTOGEN-LINES-REC, PLPAY-REC and PLPAY-RECrg01.
 acas_report_out_of_scope() {
   acas_stage 'Out-of-scope mappings: never invoked (deviation D7)'
 
@@ -2242,7 +1759,6 @@ acas_report_out_of_scope() {
 }
 
 
-# COMPLETION
 
 # The frozen tail, [common/masterLD.sh:L119-L123] verbatim:
 #     if [ -e SYS-DISPLAY.log ]; then
@@ -2309,8 +1825,6 @@ acas_report_sysout_log() {
     return 0
   fi
 
-  # The maintainer's own completion message, byte-exact from
-  # [common/masterLD.sh:L120].
   printf '%s\n' "$ACAS_SEED_COMPLETE_MSG"
   acas_tee "$ACAS_SEED_COMPLETE_MSG"
 
@@ -2340,9 +1854,8 @@ acas_report_sysout_log() {
   acas_note 'collected container log. Open the file above for the detail (deviation D6).'
 }
 
-# The closing report: the summary table, JOBSTATUS, and every non-fatal finding.
-# Called on the success path and on every abort path, so a failed seed is just as
-# fully accounted for as a clean one.
+# The closing report: the summary table, JOBSTATUS, and every non-fatal
+# finding.
 ACAS_SEED_REPORTED=0
 acas_seed_report() {
   if (( ACAS_SEED_REPORTED )); then
@@ -2365,8 +1878,6 @@ acas_seed_report() {
 
   acas_log ''
   acas_log "load programs run          : $ACAS_SEED_RAN"
-  # JOBSTATUS as the frozen script maintains it: the return code of the LAST
-  # loader invoked. [common/masterLD.sh:L50,L55,L64,L73,L82]
   acas_log "JOBSTATUS (last loader rc) : $ACAS_SEED_JOBSTATUS   [common/masterLD.sh:L50,L55,L64,L73,L82]"
   acas_log "worst return code seen     : $ACAS_SEED_WORST_RC"
   if [[ -n "$ACAS_SEED_SCENARIO" ]]; then
@@ -2386,7 +1897,6 @@ acas_seed_report() {
   fi
 }
 
-# DRY RUN
 acas_print_plan() {
   acas_stage 'Dry run: the plan, in the frozen order'
   acas_note 'nothing is executed and no database statement is issued'
@@ -2451,66 +1961,19 @@ acas_print_plan() {
   acas_note 'mode -- the reproduced legacy defect (R-4), never repaired here'
 }
 
-# THE OPTIONAL SCENARIO POSITIONAL
-# Accepted so the canonical eight-stage invocation at
-# [harness/docker-compose.yml:L346-L357] works verbatim -- that file documents
-# `harness/seed.sh "$S"' with S=harness/scenarios/<name>.yaml, alongside
-# `harness/reset_db.sh "$S"'.
-#
-# It is NOT parsed. Two reasons, both deliberate. First, R-3 forbids adding
-# validation the frozen script does not perform, and interpreting a scenario's
-# declared contents against the flat files would be exactly that. Second, a
-# scenario's inputs reach the loaders through the flat files it places in the
-# data directory -- including the two SYSTEM-REC settings that are visible in
-# every dump, Run-Date [copybooks/wssystem.cob:L67] and the three-state IRS
-# fan-out switch [copybooks/wssystem.cob:L179-L181] -- so the scenario owns
-# them through system.dat and this script has nothing to add.
 acas_assert_scenario() {
   [[ -n "$ACAS_SEED_SCENARIO" ]] || return 0
 
   [[ -e "$ACAS_SEED_SCENARIO" ]] || acas_die "$EX_USAGE" \
     "the scenario file '$ACAS_SEED_SCENARIO' does not exist." \
-    'The canonical invocation passes a path such as' \
-    'harness/scenarios/clean_batch_gl.yaml [harness/docker-compose.yml:L346-L357].'
+    'The canonical invocation passes a scenario file path; see' \
+    'harness/docker-compose.yml.'
   [[ -f "$ACAS_SEED_SCENARIO" && -r "$ACAS_SEED_SCENARIO" ]] || acas_die "$EX_USAGE" \
     "the scenario '$ACAS_SEED_SCENARIO' is not a readable file."
 }
 
-# =============================================================================
-# THE SCENARIO FIXTURE -- what makes a named scenario mean something
-#
-# A scenario file that is merely READ and logged is a trace, not a binding. The
-# harness would then seed from whatever flat files happened to be in the data
-# directory, and the resulting dump would be attributed to a scenario it was
-# never derived from -- exactly the kind of untruthful evidence the empty-diff
-# protocol cannot tolerate (R-6, AAP 0.8.5).
-#
-# So when a scenario is named, its declared seed files become the seed:
-#
-#   1. Parse `seed_files' (or `seed-files') and the optional `seed_dir' /
-#      `seed-dir' out of the YAML. PyYAML is used, matching the practice already
-#      established in harness/dump_tables.py, and it is installed by
-#      harness/Dockerfile.gnucobol.
-#   2. Require system.dat among them. [common/masterLD.sh:L50-L88] seeds the
-#      system block first and unconditionally, and every later loader depends on
-#      it, so a scenario without it cannot produce a seedable state.
-#   3. Stage those files -- and ONLY those -- into a FRESH scenario-owned
-#      directory. Fresh because a leftover flat file from a previous scenario
-#      would be picked up by the loaders and silently attributed to this one.
-#   4. Write an identity marker naming the scenario, the staged files and their
-#      digests. Deterministic: no timestamp, no pid, no uuid, so two runs of the
-#      same scenario produce the same marker byte for byte and the determinism
-#      test stays meaningful.
-#   5. Point the data directory at that staging tree.
-#
-# harness/reset_db.sh asserts this same marker after its re-seed, which is how
-# stage 5 of the protocol demonstrably re-seeds from the SAME fixture stage 1
-# used rather than from an ambient directory.
-#
-# With no scenario named, nothing is staged and the ambient data directory is
-# used exactly as before: there is no scenario to bind, so there is nothing to
-# enforce.
-# =============================================================================
+# THE SCENARIO FIXTURE -- what makes a named scenario mean something A scenario
+# file that is merely READ and logged is a trace, not a binding.
 readonly ACAS_FIXTURE_MARKER='.acas-scenario-fixture'
 
 acas_stage_scenario_seed() {
@@ -2659,16 +2122,12 @@ PY
     'Create it holding the flat files the scenario declares, or set seed_dir in' \
     'the scenario to where they live.'
 
-  # system.dat is not optional: [common/masterLD.sh:L50-L88] seeds the system
-  # block first and unconditionally, and every later loader depends on it.
   acas_in_list 'system.dat' "${wanted[@]}" || acas_die "$EX_FIXTURE" \
     "the scenario does not declare system.dat among its seed files." \
     "  scenario: $scenario_real" \
     'The frozen order seeds the system block first and unconditionally' \
     '[common/masterLD.sh:L50-L88]; every later loader depends on it.'
 
-  # Completeness BEFORE anything is staged, so an incomplete scenario fails
-  # without leaving a half-populated fixture behind.
   local absent=0
   for name in "${wanted[@]}"; do
     if [[ ! -f "$seed_dir/$name" || ! -r "$seed_dir/$name" ]]; then
@@ -2686,8 +2145,8 @@ PY
       'successful seed.'
   fi
 
-  # A FRESH scenario-owned directory. Fresh matters: a flat file left by another
-  # scenario would be read by the loaders and attributed to this one.
+  # A FRESH scenario-owned directory. Fresh matters: a flat file left by
+  # another scenario would be read by the loaders and attributed to this one.
   local staging="$ACAS_SEED_DATA_DIR/$stem"
   acas_assert_outside_repo "the scenario fixture directory" "$staging"
 
@@ -2701,8 +2160,6 @@ PY
       "could not stage $name into $staging."
   done
 
-  # The identity marker. Deterministic by construction -- sorted names, digests,
-  # no clock, no pid -- so two runs of one scenario write identical bytes.
   local marker="$staging/$ACAS_FIXTURE_MARKER"
   {
     printf 'scenario\t%s\n' "$stem"
@@ -2726,8 +2183,8 @@ PY
   done
 }
 
-# SHA-256 of one file. sha256sum when present, python3 hashlib otherwise --
-# python3 is already required, so the marker can never silently lose its digests.
+# python3 is already required, so the marker can never silently lose its
+# digests.
 acas_file_sha256() {
   local path="$1" digest=''
   acas_deadline_prefix "$ACAS_TIMEOUT_CLIENT"
@@ -2748,10 +2205,8 @@ sys.stdout.write(digest.hexdigest())
 PY
 }
 
-# =============================================================================
-# MAIN
-# Strictly sequential (R-3). No stage is backgrounded and none is parallelised.
-# Nothing here writes to $ACAS_REPO.
+# MAIN Strictly sequential (R-3). No stage is backgrounded and none is
+# parallelised. Nothing here writes to $ACAS_REPO.
 acas_main() {
   acas_parse_args "$@"
 
@@ -2761,8 +2216,8 @@ acas_main() {
   printf '[common/masterLD.sh:L4-L5] and it is not valid shell (bash -n rejects it at\n'
   printf 'line 124). It is frozen and is not fixed.\n'
 
-  # Before ANY external process is spawned: a malformed budget must be a startup
-  # usage error rather than something discovered mid-seed.
+  # Before ANY external process is spawned: a malformed budget must be a
+  # startup usage error rather than something discovered mid-seed.
   acas_resolve_deadlines
 
   acas_assert_environment
@@ -2774,8 +2229,7 @@ acas_main() {
   acas_assert_data_dir
   # After acas_assert_data_dir, which resolves and validates the data root, and
   # BEFORE acas_assert_system_dat, which tests for system.dat in whatever
-  # directory the loaders will actually read. Staging redirects that directory,
-  # so the order is load-bearing: check the fixture, not the ambient tree.
+  # directory the loaders will actually read.
   acas_stage_scenario_seed
   if [[ -n "$ACAS_SEED_FIXTURE_DIR" ]]; then
     export ACAS_LEDGERS="$ACAS_SEED_DATA_DIR"
@@ -2809,23 +2263,9 @@ acas_main() {
   acas_report_sysout_log
   acas_seed_report
 
-  # DEVIATION D5 -- THE POST-SEED PARTIAL-SEED GATE.
-  #
   # This is the ONE place this script is stricter than the frozen one about a
   # return code the frozen test tolerates, and it deliberately sits HERE rather
-  # than inside `acas_abort_on_rc': the frozen sequence has already run to
-  # completion, every loader has had the frozen treatment and nothing else, and
-  # `acas_seed_report' immediately above has already printed the exact frozen
-  # outcome -- JOBSTATUS as the frozen script maintains it, the worst code seen,
-  # and a decision row per loader. Only after all of that does the harness
-  # decline to pass the result to a state diff.
-  #
-  # Exit 0 ONLY on a genuinely clean seed. The frozen script exits 0
-  # unconditionally when SYS-DISPLAY.log exists [common/masterLD.sh:L122] and
-  # falls off the end with an accidental status when it does not; neither is
-  # reproduced. The loader's own code is propagated verbatim, exactly as the
-  # frozen script does with `exit $rc'
-  # [common/masterLD.sh:L59,L68,L77,L86].
+  # than inside `acas_abort_on_rc'.
   if (( ACAS_SEED_WORST_RC != 0 )); then
     printf '\nharness/seed.sh completed with a non-zero load-program return code (%s).\n' \
       "$ACAS_SEED_WORST_RC" >&2

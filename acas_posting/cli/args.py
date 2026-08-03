@@ -1,39 +1,36 @@
 """argv to `WS-Calling-Data`: the one place the CLI binds the COBOL linkage.
 
-`acas_posting.cli.args` owns exactly two things and nothing else:
+This module owns two things: the binding of command-line arguments to
+`01 WS-Calling-Data` [copybooks/wscall.cob:L6-L14] and to the system records the
+three linkage shapes carry, and the reading of the termination code afterwards.
+It runs no program, opens no file and touches no database.
 
-  1. the binding of command-line arguments to `01 WS-Calling-Data`
-     [copybooks/wscall.cob:L6-L14] and to the system records that the three
-     COBOL call shapes pass alongside it; and
-  2. the controlled-clock injection point - the one boundary at which a run date
-     enters the migrated cycle (rule R-6).
+Three linkage shapes, published as three dataclasses and three argparse
+fragments:
 
-Agent Action Plan section 0.4.1.1 gives this module its whole mandate: bind argv
-to the seven fields of `WS-Calling-Data` "plus `to-day` and the system records;
-the block was designed for unattended invocation, so this is a faithful binding
-rather than an invention." That closing clause is the point - `WS-CD-Args`
-carries the maintainer's own explanation at [copybooks/wscall.cob:L1-L3], that
-it exists "for passing extra info to called process that will help in a cron
-call by time via menu program", so the unattended-invocation contract is already
-written into the copybook and nothing here invents a CLI. Every sibling entry
-point of this package is intended to import these definitions rather than
-re-implement them, so the binding has one spelling.
+    GlLinkage     four parameters - ws-calling-data, system-record, to-day,
+                  file-defs [general/gl070.cbl:L245-L248]
+    SlPlLinkage   five - the same four plus WS-System-Record-4
+                  [sales/sl060.cbl:L395-L399]
+    IrsLinkage    three - IRS-System-Params, WS-System-Record, File-Defs, with
+                  no calling-data block at all [irs/irs030.cbl:L552-L554]
 
-THE SOURCE LAYOUT
-`copybooks/wscall.cob` is 15 lines long. Its whole record is:
+The run date is an argument and never a clock reading (R-6). `--run-date` has no
+default, no environment fallback and no test hook, and binding pins both
+observables from it: the text `to-day pic x(10)` and the binary `Run-Date`
+[copybooks/wssystem.cob:L67]. None of the twelve migrated posting programs reads
+a clock - each receives the date through linkage - so pinning here is enough to
+make two runs of one scenario byte-identical.
 
-    L6      01  WS-Calling-Data.
-    L7          03  WS-Called       pic x(8).
-    L8          03  WS-Caller       pic x(8).
-    L9          03  WS-Del-Link     pic x(8).
-    L10         03  WS-Term-Code    pic 99.
-    L11     *>                                 new 18/5/13
-    L12         03  WS-Process-Func pic 9.
-    L13         03  WS-Sub-Function pic 9.
-    L14         03  WS-CD-Args      pic x(13).    *> Changed / Added 14/03/18
+Receiving-field semantics are applied rather than skipped: a bound value is
+truncated and space-padded exactly as a `MOVE` into the declared picture would
+be, so a too-long `--ws-caller` loses its tail here as it would in COBOL.
 
-Seven fields, 41 bytes. `acas_posting.records.calling_data.WsCallingData` models
-them; this module only fills it.
+Term codes read back out: `GL_ABORT_TERM_CODE` 5 is the General Ledger abort
+[general/general.cbl:L810-L811], `EXTRACT_MISSING_FILE_TERM_CODE` 8 is a missing
+extract file [sales/sl055.cbl:L344-L345], and `is_serious_error` is the menus'
+own `> 7` test [common/ACAS.cbl:L578]. `exit_status_for` is the identity, so a
+caller reads the code the cycle produced rather than a re-encoding of it.
 
 `WS-Term-Code` IS `pic 99` - AN UNSIGNED TWO-DIGIT INTEGER
 [copybooks/wscall.cob:L10], widened from `pic 9` by the maintainer's own change
@@ -137,146 +134,6 @@ question Q-CLI-IRS-RUNDATE. Without `--run-date` this module would have to read
 a live clock (R-6) or leave both fields unpinned (R-3, R-4).
 
 WHAT THIS MODULE MAY AND MAY NOT IMPORT
-=======================================
-MAY, and does: the standard library, `acas_posting.clock`, its sibling
-`acas_posting.cli.rdbms_params`, the record modules whose dataclasses the three
-shapes are built from, the `MOVE` implementation `acas_posting.cobol.move`, and
-- see the next section - the data-access FACADE `acas_posting.dal.facade` with
-its status vocabulary, plus `acas_posting.dal.connection` for the one
-process-level connection policy. Together with that sibling this is the ONLY part
-of `acas_posting/cli/` permitted to import the record layer, precisely because
-section 0.4.1.1 assigns it the job of binding "the system records"; the seven
-entry-point modules of this package construct their linkage through here.
-
-The sibling import is intra-package and acyclic: `rdbms_params` imports one
-record module and nothing else of this package, and `acas_posting/cli/__init__.py`
-imports no submodule at all, so there is no cycle to create.
-
-`acas_posting.cobol.move` belongs on that list, and an earlier draft of this file
-put it on the other one. The import table of section 0.4.3 bars
-`acas_posting/cli/` from the data-access handlers - "Must not import:
-`dal.acas*`" - and from nothing else in the semantics package, while section
-0.1.2, transformation rule 11, requires a `MOVE` between unlike pictures to go
-through "Sending-field-to-receiving-field rules, not assignment". argv is the one
-place in the migrated cycle where a string of arbitrary length meets a `PIC X(8)`
-receiving field, so this is precisely where rule 11 has to be applied. The edge
-is acyclic: `acas_posting.cobol.move` reaches only `cobol.arithmetic`,
-`cobol.usage`, `cobol.field` and `dictionary.model`, and none of those reaches
-`acas_posting.cli`.
-
-MAY NOT, and does not: the program layer, the data-access HANDLERS
-`acas_posting.dal.acas*`, the dictionary package and the work-file module. The
-import table of section 0.4.3 names exactly one prohibition for this layer -
-"Must not import: `dal.acas*` directly" - and the facade exists precisely so
-that a caller reaches a handler THROUGH it, which is what
-`aa010_get_system_recs` and `overrewrite` below do. One consequence worth
-stating because it looks like an omission:
-
-  * `MOVE` receiving-field semantics ARE applied to the seven `WS-Calling-Data`
-    fields, through `acas_posting/cobol/move.py`, because argv is the one place
-    in the migrated cycle where a string of arbitrary length meets a `PIC X(8)`
-    receiving field. What is deliberately NOT re-plumbed is named in the footer.
-    `rdbms_params` pads each connection value to its receiving `pic x(n)` width
-    with a local helper instead - the same accommodation
-    `acas_posting/dal/connection.py` already makes, and for the same layering
-    reason.
-  * the system records are BOUND here and LOADED elsewhere. This module fills
-    the three pinnable fields and the six connection fields; the other 160
-    columns of `SYSTEM-REC`, the whole of `SYSTOT-REC` and the whole of
-    `IRS-System-Params` come from the store, read by
-    `aa010_get_system_recs` below - the migrated menu boundary - and handed to
-    the three binders as keyword arguments. Recorded as Q-CLI-SYSREC-LOAD, and
-    settled there; a binder called WITHOUT them still builds declared-default
-    records, which is what a caller inspecting a linkage shape without a database
-    wants.
-
-THE SIX CONNECTION FIELDS ARE THE ONE EXCEPTION TO "DECLARED DEFAULTS"
-=====================================================================
-`RDBMS-DB-Name`, `RDBMS-User`, `RDBMS-Passwd`, `RDBMS-Port`, `RDBMS-Host` and
-`RDBMS-Socket` [copybooks/wssystem.cob:L137-L144] are filled from the deployment
-contract by `acas_posting/cli/rdbms_params.py`, which reproduces the frozen
-`common/acas-get-params.cbl` and the six `MOVE` statements every load program
-performs after calling it [common/glbatchLD.cbl:L262-L267].
-
-They cannot be left at their declared defaults, because those defaults are the
-copybook's own placeholders - the literal user `"ACAS-User"` and the literal
-password `"PaSsWoRd"` - and `SYSTEM-REC` is the ONLY carrier by which a
-connection parameter reaches the data-access layer
-[common/acas008.cbl:L558-L563]. A run built purely at declared defaults would
-therefore not reach the database the operator provisioned.
-
-No CLI option is added for any of the six: the frozen counterpart takes its
-values from a source outside the command line, so this one does too. The closed
-list of two settable `SYSTEM-REC` options stays closed, and a password never
-appears in argv.
-
-RECEIVING-FIELD SEMANTICS ARE APPLIED, NOT SKIPPED
-==================================================
-Every write into `01 WS-Calling-Data` [copybooks/wscall.cob:L6-L14] is a `MOVE`
-through `acas_posting.cobol.move.move`, carrying the RECEIVING FIELD'S OWN
-descriptor. The descriptor is fetched by attribute name from
-`acas_posting.records.calling_data.descriptor_for`, imported here under the
-local alias `calling_data_record`, so the picture comes from the generated data
-dictionary and is never transcribed in this file (rule R-5, and the "data
-dictionary first" directive of section 0.8.1). The call sites need know nothing
-about field categories, because `move` dispatches on the receiver.
-
-What that buys is the behaviour the frozen copybook declares rather than
-Python's assignment: `move "gl070" to ws-called` leaves EIGHT characters in a
-`PIC X(8)` field, not five; an over-long `--ws-cd-args` loses its tail at
-thirteen instead of widening the field; and a value moved into
-`WS-Term-Code pic 99` or `WS-Process-Func pic 9` lands at the declared digit
-count. Nothing is checked and nothing is reported on the way in (rule R-3): a
-`MOVE` pads and truncates silently, and that silence is the whole of what the
-COBOL does.
-
-NO IMPORT-TIME SIDE EFFECTS
-Importing this module binds names and evaluates a handful of pure in-memory
-dataclass constructions, and has no other observable effect. It builds no
-parser, configures no logging, opens no file, connection or directory, reads
-nothing from its surroundings, starts nothing, and cannot fail for an
-environmental reason. That is a hard requirement rather than a preference: the
-scenario test suites import this package, and a module that did work at import
-would make their arithmetic tier's "runs anywhere" promise untrue.
-
-Stated precisely, because the connection binding above could be read as
-contradicting it: the ENVIRONMENT IS READ ONLY WHEN A BINDER IS CALLED, never at
-import. `bind_rdbms_connection` is imported here but not invoked here, and it
-accepts an explicit `env` mapping, so a test can drive every binder without
-touching the real environment. The three public binders CAN therefore now fail
-for an environmental reason - deliberately, because a run that cannot reach the
-provisioned database must stop before it writes - while importing this module
-still cannot.
-
-THE RULES THAT BIND THIS FILE
-=============================
-`review_rules` reports NO user rules document for this project, so the binding
-constraints are the Agent Action Plan's own six (section 0.7.2):
-
-R-1 No COBOL at run time. Nothing here spawns a child process, loads a foreign
-    library or reaches the GnuCOBOL toolchain, and there is no import path from
-    this package to the compiled comparison oracle. No option selects, invokes
-    or compares against that oracle either - the oracle's own scripts drive
-    these entry points from outside, never the reverse.
-R-2 Zero binary floating point. `WS-Term-Code` is an `int` (from `pic 99`),
-    `to-day` is a `str`, `Run-Date` is an `int` and the IRS `run-date` is a
-    `str`. No binary-radix numeric type appears anywhere in this module, in a
-    signature, an option type or a computation.
-R-3 No added validation, no added field, no schema change, no concurrency.
-    Nothing here judges a run date, extends a record or reaches a database, and
-    execution is strictly sequential - there is no worker, pool or event loop
-    to configure and no option that would create one. The six connection fields
-    the binders fill already exist in [copybooks/wssystem.cob:L137-L144], so no
-    field is added; the width and blank checks that guard them live in
-    `rdbms_params` and apply to DEPLOYMENT CONFIGURATION rather than to any
-    accounting value, which that module argues at length.
-R-4 Legacy behaviour is reproduced, never corrected. Agent Action Plan section
-    0.8.2, verbatim: "A defect reproduced is correct; a defect fixed is a
-    failure." Each reproduction below carries its COBOL locator in a comment,
-    as section 0.7.4 C-4 requires.
-R-5 Full traceability - see the mandatory footer.
-R-6 Compiled behaviour is the tie-breaker, so the clock is injected and the
-    three genuinely open questions are marked in place rather than guessed.
 """
 
 from __future__ import annotations
@@ -341,9 +198,7 @@ from acas_posting.records.system_record_4 import SystemRecord4
 from acas_posting.records.test_data_flags import AcasDalCommonData
 
 __all__: Final[tuple[str, ...]] = (
-    # ---- the documented argument form -------------------------------------
     "RUN_DATE_FORMAT",
-    #  The COBOL defaults, one per menu shell.
     "WS_CALLER_GENERAL",
     "WS_CALLER_SALES",
     "WS_CALLER_PURCHASE",
@@ -353,7 +208,6 @@ __all__: Final[tuple[str, ...]] = (
     "WS_SUB_FUNCTION_DEFAULT",
     "WS_CD_ARGS_DEFAULT",
     "WS_TERM_CODE_DEFAULT",
-    # ---- behavioural constants the seven entry points share ---------------
     "GL_ABORT_TERM_CODE",
     "EXTRACT_MISSING_FILE_TERM_CODE",
     "SERIOUS_ERROR_THRESHOLD",
@@ -424,7 +278,6 @@ __all__: Final[tuple[str, ...]] = (
     #  which the per-directory import table of Agent Action Plan section 0.4.3
     #  forbids it to do. See `_bind_system_record` for what the answer means.
     "carries_frozen_placeholder_rdbms_credentials",
-    # ---- faithful one-statement helpers -----------------------------------
     "reset_term_code",
     "set_called",
     "is_serious_error",
@@ -457,43 +310,25 @@ __all__: Final[tuple[str, ...]] = (
 )
 
 
-#  DEFAULTS THAT ARE READ FROM THE RECORD LAYER, NEVER TRANSCRIBED BY EYE
-#  Agent Action Plan section 0.8.1 makes "data dictionary first" a directive
-#  rather than a preference: "every Python field definition cites its entry.
-#  This ordering is a directive, not a preference - it is what prevents fields
-#  being transcribed by eye." A hand-typed `" " * 8` would be exactly that
-#  transcription, and it would silently rot if a picture clause ever moved.
-#  So the space-filled and zero defaults below are READ OUT of the record
-#  layer's own declared defaults, which the record modules in turn derive from
-#  the generated data dictionary. The helpers construct a throwaway record and
-#  read one attribute from it: pure in-memory work, no file, no connection, no
-#  environment, so importing this module stays free of side effects.
+# Agent Action Plan section 0.8.1 makes "data dictionary first" a directive rather than
+# a preference: "every Python field definition cites its entry.
 
 
 def _declared_calling_data() -> WsCallingData:
     """Return a fresh `WS-Calling-Data` holding only its declared defaults.
 
-    A fresh instance each call, so nothing in this module holds shared
-    mutable state at module scope and no later mutation can reach the constants
-    derived below. Attribute access on the result is typed by the record's own
-    annotations, which is why the constants need no cast.
+    A fresh instance each call, so nothing in this module holds shared mutable state at
+    module scope and no later mutation can reach the constants derived below.
 
     Returns:
         A `WsCallingData` whose seven fields carry exactly what the record layer
-        declares: space-filled at each alphanumeric field's own `PIC X(n)` width
-        and zero for the three numeric ones - which is precisely the state the
-        menu shells establish before a dispatch.
+            declares.
     """
     return WsCallingData()
 
 
 def _declared_system_record() -> SystemRecord:
     """Return a fresh `SYSTEM-REC` holding only its declared defaults.
-
-    Same reasoning as `_declared_calling_data`. Constructing the 169-column
-    record is pure in-memory work - a nest of dataclass default factories, no
-    file, no connection and nothing read from the surroundings - so it is safe
-    to do at import and costs nothing worth optimising.
 
     Returns:
         A `SystemRecord` at its declared defaults. Nothing is loaded from the
@@ -526,86 +361,35 @@ _LOG: Final[logging.Logger] = logging.getLogger(__name__)
 #  only accepted one.
 RUN_DATE_FORMAT: Final[str] = "DD/MM/CCYY"
 
-#  `WS-Caller` - the dispatching menu's own identity. One constant per menu
-#  shell, each the literal the shell moves into the field.
-WS_CALLER_GENERAL: Final[str] = "general"  # general/general.cbl:L512
-WS_CALLER_SALES: Final[str] = "sales"  # sales/sales.cbl:L481, also L465
-WS_CALLER_PURCHASE: Final[str] = "purchase"  # purchase/purchase.cbl:L475, also L459
-#  The top-level system-selection menu, which dispatches the four ledger menus
-#  rather than any posting program. Published because the package's own router
-#  mirrors that menu (Agent Action Plan section 0.4.1.1), and deliberately NOT
-#  mapped to by `_menu_caller_for` below: no in-scope posting program is ever
-#  called with this caller.
-WS_CALLER_ACAS: Final[str] = "ACAS"  # common/ACAS.cbl:L431
+WS_CALLER_GENERAL: Final[str] = "general"
+WS_CALLER_SALES: Final[str] = "sales"
+WS_CALLER_PURCHASE: Final[str] = "purchase"
+# The top-level system-selection menu, which dispatches the four ledger menus rather
+# than any posting program.
+WS_CALLER_ACAS: Final[str] = "ACAS"
 
-#  `WS-Del-Link pic x(8)` [copybooks/wscall.cob:L9] - spaces. Every menu shell
-#  clears it in the same statement that clears `WS-Called`:
-#  `move spaces to ws-called ws-del-link menu-reply` at
-#  [general/general.cbl:L513], [sales/sales.cbl:L482],
-#  [purchase/purchase.cbl:L476] and [common/ACAS.cbl:L432]; and the Sales and
-#  Purchase pre-run blocks clear it on its own at [sales/sales.cbl:L467] and
-#  [purchase/purchase.cbl:L461].
 WS_DEL_LINK_DEFAULT: Final[str] = _declared_calling_data().ws_del_link
 
-#  `WS-Process-Func pic 9` [copybooks/wscall.cob:L12] and
-#  `WS-Sub-Function pic 9` [copybooks/wscall.cob:L13] - both zero, cleared
-#  together in one statement immediately before the menu is drawn:
-#  `move zeros to ws-Process-Func ws-Sub-Function` at
-#  [general/general.cbl:L505], [sales/sales.cbl:L474] and
-#  [purchase/purchase.cbl:L468]; and set individually in the pre-run blocks at
-#  [sales/sales.cbl:L468-L469] and [purchase/purchase.cbl:L462-L463].
 WS_PROCESS_FUNC_DEFAULT: Final[int] = _declared_calling_data().ws_process_func
 WS_SUB_FUNCTION_DEFAULT: Final[int] = _declared_calling_data().ws_sub_function
 
-#  ANOMALY, REPRODUCED  (rule R-4)
-#  `WS-CD-Args pic x(13)` [copybooks/wscall.cob:L14] - spaces, because NO menu
-#  shell ever assigns it. A census of all four ledger menus and the top-level
-#  menu finds only READS of the field, never a write: the Sales and Purchase
-#  shells test `WS-CD-Args (1:5) = "xl150"` to decide whether to run the
-#  end-of-cycle driver before the menu appears [sales/sales.cbl:L463],
-#  [purchase/purchase.cbl:L457]. So the maintainer designed the field for a
-#  cron caller to fill in [copybooks/wscall.cob:L1-L3] and then left every
-#  in-repository caller passing spaces, which means the pre-run branch is dead
-#  code under menu dispatch. Spaces is faithful; inventing a value or deriving
-#  one would not be.
+# ANOMALY, REPRODUCED (rule R-4) `WS-CD-Args pic x(13)` [copybooks/wscall.cob:L14] -
+# spaces, because NO menu shell ever assigns it.
 WS_CD_ARGS_DEFAULT: Final[str] = _declared_calling_data().ws_cd_args
 
-#  REPRODUCED  (rule R-4)
-#  `WS-Term-Code pic 99` [copybooks/wscall.cob:L10] - zero, and RESET
-#  IMMEDIATELY BEFORE EVERY `CALL`, not once per run:
-#  [general/general.cbl:L714] and [general/general.cbl:L730],
-#  [sales/sales.cbl:L680] and [sales/sales.cbl:L701],
-#  [purchase/purchase.cbl:L673] and [purchase/purchase.cbl:L694],
-#  [common/ACAS.cbl:L576]. `reset_term_code` is the helper that reproduces it.
+# REPRODUCED (rule R-4) `WS-Term-Code pic 99` [copybooks/wscall.cob:L10] - zero, and
+# RESET IMMEDIATELY BEFORE EVERY `CALL`, not once per run.
 WS_TERM_CODE_DEFAULT: Final[int] = _declared_calling_data().ws_term_code
 
-#  The General Ledger abort code. `gl070` raises it when Phase 1 finds a batch
-#  left open - the conditional is [general/gl070.cbl:L287-L290] and the raise
-#  itself is `move 5 to ws-term-code` at [general/gl070.cbl:L289] - and the
-#  menu tests it at [general/general.cbl:L810-L811], returning to the menu
-#  instead of continuing. The effect is that `gl071` and `gl072` NEVER RUN AT
-#  ALL, so the posting-cycle entry point must treat this as a HARD GATE between
-#  phases and never as a warning (Agent Action Plan section 0.6.4).
-#  See CORRECTION 2 in the footer: the raise is at L289, not L288.
 GL_ABORT_TERM_CODE: Final[int] = 5
 
-#  Raised by the two extract programs when a file they need is missing, each
-#  followed immediately by `goback`: [sales/sl055.cbl:L344-L345] and
-#  [purchase/pl055.cbl:L286-L287]. Being 8 it is `> 7`, so it is also a serious
-#  error by the predicate below - which is exactly why the Sales `load000.`
-#  path performs `overrewrite` and then `goback` [sales/sales.cbl:L710-L712]
-#  rather than merely returning to the menu.
+# Raised by the two extract programs when a file they need is missing, each followed
+# immediately by `goback`: [sales/sl055.cbl:L344-L345] and
+# [purchase/pl055.cbl:L286-L287].
 EXTRACT_MISSING_FILE_TERM_CODE: Final[int] = 8
 
-#  REPRODUCED  (rule R-4)
-#  The `> 7` boundary - "Got a serious (reported) error", in the maintainer's
-#  own words at [sales/sales.cbl:L691]. Tested at [general/general.cbl:L720],
-#  [general/general.cbl:L735], [sales/sales.cbl:L691] and
-#  [sales/sales.cbl:L710], [purchase/purchase.cbl:L684] and
-#  [purchase/purchase.cbl:L703], and [common/ACAS.cbl:L578].
-#  Expressed as the threshold rather than as `>= 8` so that the source reads
-#  the way the COBOL does; because `WS-Term-Code` is `pic 99` the two are the
-#  same predicate over the whole domain.
+# REPRODUCED (rule R-4) The `> 7` boundary - "Got a serious (reported) error", in the
+# maintainer's own words at [sales/sales.cbl:L691].
 SERIOUS_ERROR_THRESHOLD: Final[int] = 7
 
 #  THE `acas000` KEY NUMBERS, as the menu shells write them.
@@ -703,50 +487,7 @@ _DATE_FORM_CHOICES: Final[tuple[int, ...]] = _PIC_9_CHOICES
 #  into 1 [general/gl070.cbl:L580-L581].
 _DATE_FORM_DEFAULT: Final[int] = _declared_system_record().system_data_block.date_form
 
-#  The IRS fan-out switch: `05 IRS-Instead pic x.`
-#  [copybooks/wssystem.cob:L179] with EXACTLY TWO condition names,
-#  `88 IRS-Used value "Y"` [copybooks/wssystem.cob:L180] and
-#  `88 IRS-Both-Used value "B"` [copybooks/wssystem.cob:L181] - "IRS instead
-#  of" and "IRS as well as".
-#
-#  THERE IS NO THIRD VALUE, and in particular no "N". The field is `pic x`, one
-#  character, and the off state is simply any character that satisfies neither
-#  condition name. What that character actually is was read off the frozen
-#  parameter-maintenance program rather than assumed:
-#
-#      L1725  move  function upper-case (IRS-Instead) to IRS-Instead.
-#      L1726  if    IRS-Used            ... set IRS to true
-#      L1730    if  IRS-Both-Used       ... set IRS to true
-#      L1733    else                    ... set IRS-No to true
-#                                       [common/sys002.cbl:L1725-L1736]
-#
-#  Two things follow, and both matter here. First, the byte is upper-cased IN
-#  PLACE by the program that WRITES the record, so a "y" typed at that screen is
-#  stored as "Y" - but sys002 is an interactive parameter-maintenance program and
-#  is out of scope (Agent Action Plan section 0.2.2), while the in-scope posting
-#  programs only READ this field. Upper-casing here would therefore add a
-#  transformation the read path does not have, and would MASK a state the store
-#  can hold: a row seeded by `common/systemLD.cbl` rather than typed at sys002
-#  can carry a lower-case "y", which the condition names do not match and which
-#  the posting cycle must see as off.
-#
-#  Second, the else branch at L1733 sets only the internal `IRS-No` switch. It
-#  does NOT write the field - unlike the two fields immediately above it, where
-#  the else branch does `move space to arch` [common/sys002.cbl:L1715] and
-#  `move space to vat` [common/sys002.cbl:L1722]. So an operator who typed "X"
-#  leaves "X" stored, and it reads as off.
-#
-#  Consequently there is no `choices` tuple for this option: any single
-#  character is a value the field can hold, and refusing one would invent a
-#  validation (rule R-3). The sibling harness pins the same domain - `""` or
-#  `" "` for General Ledger only, `"Y"`, `"B"`
-#  [harness/run_cobol_scenario.sh:L1247-L1253] - and before this the two
-#  disagreed: argparse rejected the very empty value the harness writes.
-#
-#  The record's OWN declared default, read rather than typed. It is a single
-#  space, which is the off state, and it is used only to DOCUMENT the fallback -
-#  the option defaults to None and an omitted option leaves the field exactly as
-#  the record layer declared it. See `_bind_system_record`.
+# The IRS fan-out switch.
 _IRS_INSTEAD_DEFAULT: Final[str] = (
     _declared_system_record().general_ledger_block.irs_instead
 )
@@ -828,20 +569,15 @@ _IRS_INSTEAD_FIELD: Final[FieldDescriptor] = _field_named(
 class GlLinkage(NamedTuple):
     """Shape 1 - the General Ledger call shape, FOUR parameters.
 
-    `procedure division using ws-calling-data, system-record, to-day,
-    file-defs` [general/gl070.cbl:L245-L248], dispatched by
-    general/general.cbl `load00.` L711-L723 whose `CALL` parameter list is
-    L715-L718. Serves `gl070`, `gl071`, `gl072` and `gl080`.
-
     Attributes:
-        calling_data: `01 WS-Calling-Data` [copybooks/wscall.cob:L6-L14].
-            MUTABLE ON PURPOSE - the callee writes `WS-Term-Code` back into it.
-        system_record: `SYSTEM-REC`, the 169-column system record, carrying the
-            pinned `Run-Date` [copybooks/wssystem.cob:L67].
-        to_day: `to-day pic x(10)` in DD/MM/CCYY form - the THIRD argument, and
-            a linkage parameter rather than a column.
-        file_defs: `01 File-Defs.` [copybooks/wsnames.cob:L13], the file-name
-            buffers, including the two `gl071` work-file names at
+        calling_data: `01 WS-Calling-Data` [copybooks/wscall.cob:L6-L14]. MUTABLE ON
+            PURPOSE - the callee writes `WS-Term-Code` back into it.
+        system_record: `SYSTEM-REC`, the 169-column system record, carrying the pinned
+            `Run-Date` [copybooks/wssystem.cob:L67].
+        to_day: `to-day pic x(10)` in DD/MM/CCYY form - the THIRD argument, and a
+            linkage parameter rather than a column.
+        file_defs: `01 File-Defs.` [copybooks/wsnames.cob:L13], the file-name buffers,
+            including the two `gl071` work-file names at
             [copybooks/wsnames.cob:L15-L16].
     """
 
@@ -854,26 +590,12 @@ class GlLinkage(NamedTuple):
 class SlPlLinkage(NamedTuple):
     """Shape 2 - the Sales and Purchase call shape, FIVE parameters.
 
-    `procedure division using ws-calling-data, system-record, system-record-4,
-    to-day, file-defs` [sales/sl060.cbl:L395-L399], dispatched by
-    sales/sales.cbl `load000.` (`CALL` at L702-L707) and purchase/purchase.cbl
-    `load000.` (`CALL` at L695-L700). Serves `sl055`, `sl060`, `sl100`,
-    `pl055`, `pl060` and `pl100`.
-
-    FIVE, not four. What this shape adds to Shape 1 is exactly the fourth
-    system record, `WS-System-Record-4` - the period-totals record that the
-    nine period-total writes of the Sales and Purchase programs are the sole
-    writers of. See CORRECTION 3 in the footer.
-
     Attributes:
-        calling_data: as `GlLinkage.calling_data`, and mutable for the same
-            reason.
+        calling_data: as `GlLinkage.calling_data`, and mutable for the same reason.
         system_record: `SYSTEM-REC`, as `GlLinkage.system_record`.
-        system_record_4: `SYSTOT-REC` [copybooks/wssys4.cob] - the period
-            totals. The caller spells it `WS-System-Record-4`; the callee spells
-            its own parameter `system-record-4` [sales/sl060.cbl:L397]. Same
-            record, two spellings, and both spellings are preserved in the
-            traceability document rather than reconciled.
+        system_record_4: `SYSTOT-REC` [copybooks/wssys4.cob] - the period totals. The
+            caller spells it `WS-System-Record-4`; the callee spells its own parameter
+            `system-record-4` [sales/sl060.cbl:L397].
         to_day: `to-day pic x(10)` - the FOURTH argument in this shape.
         file_defs: as `GlLinkage.file_defs`.
     """
@@ -888,26 +610,15 @@ class SlPlLinkage(NamedTuple):
 class IrsLinkage(NamedTuple):
     """Shape 3 - the IRS call shape, THREE parameters.
 
-    `procedure division using IRS-System-Params, WS-System-Record, File-Defs`
-    [irs/irs030.cbl:L552-L554], dispatched inline from irs/irs.cbl `Main-Loop.`
-    at L668-L671. Serves `irs030` alone.
-
-    Materially different from the other two shapes, and the difference is not
-    cosmetic: there is NO calling-data block and NO `to-day`. Two consequences
-    follow, and both are honoured rather than smoothed away:
-
-      * there is no `WS-Term-Code` on this route, so the abort gate and the
-        serious-error test simply do not apply to it - `irs030` reports through
-        its own screen paths, which are out of scope; and
-      * the run date reaches the program only inside the two system records,
-        never as text, so this carrier has no `to_day` member at all.
+    Materially different from the other two shapes, and the difference is not cosmetic:
+    there is NO calling-data block and NO `to-day`. Two consequences follow, and both
+    are honoured rather than smoothed away.
 
     Attributes:
-        irs_system_params: `01 system-record.`
-            [copybooks/irswssystem.cob:L13], renamed to `IRS-System-Params` by
-            the `COPY ... REPLACING` at [irs/irs.cbl:L392]. Its
-            `03 run-date pic x(8)` [copybooks/irswssystem.cob:L14] is the
-            eight-character form `irs_run_date_x8` produces.
+        irs_system_params: `01 system-record.` [copybooks/irswssystem.cob:L13], renamed
+            to `IRS-System-Params` by the `COPY ... REPLACING` at [irs/irs.cbl:L392].
+            Its `03 run-date pic x(8)` [copybooks/irswssystem.cob:L14] is the eight-
+            character form `irs_run_date_x8` produces.
         ws_system_record: `SYSTEM-REC` - the ACAS system record, carrying the
             maintainer's own comment `*> ACAS system rec.` at the call site
             [irs/irs.cbl:L669]. Carries the pinned binary `Run-Date`.
@@ -1039,15 +750,8 @@ class IrsSystemSnapshot(NamedTuple):
 def _add_run_date_argument(parser: argparse.ArgumentParser) -> None:
     """Add the REQUIRED `--run-date` option - the controlled clock's only input.
 
-    `required=True` is the whole point and is not negotiable (rule R-6). There
-    is no default, no fallback to the current day, no environment lookup and no
-    test hook: the run date is an explicit argument on every route that needs
-    one, because that is what makes two runs of one scenario byte-identical
-    (Agent Action Plan section 0.8.5). Omitting the option is an argparse usage
-    error and exits non-zero, which is the mechanically checkable proof that no
-    ambient default exists.
-
-    The text is NOT validated here (rules R-3 and R-4) - see `resolve_clock`.
+    `required=True` is the whole point and is not negotiable (rule R-6). There is no
+    default, no fallback to the current day, no environment lookup and no test hook.
 
     Args:
         parser: the parser to add the option to. Mutated in place.
@@ -1074,10 +778,9 @@ def _add_run_date_argument(parser: argparse.ArgumentParser) -> None:
 def _add_system_record_arguments(parser: argparse.ArgumentParser) -> None:
     """Add the two pinnable `SYSTEM-REC` options, and no others.
 
-    Only two fields of the 169-column system record are settable from the
-    command line, and the list is closed: extending it would add a field-level
-    input the COBOL menus do not offer, which R-3 forbids. The third pinned
-    field, `Run-Date`, comes from the clock and never from argv.
+    Only two fields of the 169-column system record are settable from the command line,
+    and the list is closed: extending it would add a field-level input the COBOL menus
+    do not offer, which R-3 forbids.
 
     Args:
         parser: the parser to add the options to. Mutated in place.
@@ -1127,30 +830,13 @@ def add_calling_data_arguments(
 ) -> None:
     """Add the `WS-Calling-Data` option group - five of the seven fields.
 
-    The five that a caller may legitimately set. The other two are deliberately
-    absent, and their absence is part of the specification:
-
-      * `--ws-called` is NOT offered, because `WS-Called` is set per dispatch to
-        the callee's own program-id: `move "gl070" to ws-called`
-        [general/general.cbl:L808], then `move "gl071" to ws-called`
-        [general/general.cbl:L812], and so on down the chain. It is the
-        dispatch vehicle, not an operator input, so `set_called` fills it.
-      * `--ws-term-code` is NOT offered, because `WS-Term-Code` is an OUTPUT.
-        Every menu resets it to zero immediately before every `CALL`
-        [general/general.cbl:L714] and reads it immediately after
-        [general/general.cbl:L720-L721]. Letting argv seed it would invent an
-        input the COBOL does not have.
-
-    Not added to the IRS route: Shape 3 carries no calling-data block at all
-    [irs/irs030.cbl:L552-L554].
+    The five that a caller may legitimately set. The other two are deliberately absent,
+    and their absence is part of the specification.
 
     Args:
         parser: the parser to add the options to. Mutated in place.
-        default_caller: the dispatching menu's own identity, to default
-            `--ws-caller` to. Pass `WS_CALLER_GENERAL` for the General Ledger
-            routes, `WS_CALLER_SALES` for the Sales routes and
-            `WS_CALLER_PURCHASE` for the Purchase routes - the literals the
-            menus themselves move into the field.
+        default_caller: the dispatching menu's own identity, to default `--ws-caller`
+            to.
     """
     parser.add_argument(
         "--ws-caller",
@@ -1218,11 +904,9 @@ def add_calling_data_arguments(
 def add_gl_linkage_arguments(parser: argparse.ArgumentParser) -> None:
     """Add the options Shape 1 needs: the required `--run-date`, plus `SYSTEM-REC`.
 
-    Composed with `add_calling_data_arguments` by every General Ledger route,
-    which is why the calling-data group is not repeated here. `file-defs` needs
-    no options at all: `01 File-Defs.` is entirely `VALUE`-initialised in the
-    copybook [copybooks/wsnames.cob:L13-L16 and on], so the record layer's
-    declared defaults already are the COBOL state.
+    Composed with `add_calling_data_arguments` by every General Ledger route, which is
+    why the calling-data group is not repeated here. `file-defs` needs no options at
+    all.
 
     Args:
         parser: the parser to add the options to. Mutated in place.
@@ -1234,15 +918,8 @@ def add_gl_linkage_arguments(parser: argparse.ArgumentParser) -> None:
 def add_slpl_linkage_arguments(parser: argparse.ArgumentParser) -> None:
     """Add the options Shape 2 needs: the required `--run-date`, plus `SYSTEM-REC`.
 
-    The same option set as Shape 1, and deliberately a SEPARATE function rather
-    than an alias: the router composes per route with no conditionals, and the
-    two names document which shape a route is building even where the options
-    coincide. Should the shapes ever be read differently, the divergence has a
-    place to live.
-
-    What Shape 2 adds over Shape 1 is the `WS-System-Record-4` instance, and
-    that needs NO extra options: `SYSTOT-REC` is a period-totals accumulator
-    that the Sales and Purchase programs write, never an operator input.
+    The same option set as Shape 1, and deliberately a SEPARATE function rather than an
+    alias.
 
     Args:
         parser: the parser to add the options to. Mutated in place.
@@ -1316,27 +993,10 @@ def add_log_level_argument(parser: argparse.ArgumentParser) -> None:
 def add_irs_linkage_arguments(parser: argparse.ArgumentParser) -> None:
     """Add the options Shape 3 needs: the required `--run-date`, and nothing else.
 
-    NONE of the calling-data options are added - not `--ws-caller`, not
-    `--ws-del-link`, not `--ws-process-func`, not `--ws-sub-function` and not
-    `--ws-cd-args` - because Shape 3 carries no calling-data block
-    [irs/irs030.cbl:L552-L554], and the IRS entry point passes exactly three
-    arguments.
-
-    The two `SYSTEM-REC` presentation and fan-out options are not added either.
-    `Date-Form` governs presentation, which this route has none of; and the
-    fan-out switch selects whether the SALES and PURCHASE programs also post to
-    IRS - it is read at three sites in each of those four programs, and never by
-    `irs030`, which IS the IRS posting program. `bind_irs_linkage` still honours
-    both if a composing parser happens to supply them, and otherwise leaves them
-    at the record's declared defaults.
-
-    `--run-date` IS added, and is required. Shape 3 has no `to-day` parameter,
-    but two fields still need the pinned clock: the binary
-    `WS-System-Record.Run-Date` [copybooks/wssystem.cob:L67], which is
-    unambiguous because the ACAS system record is the second linkage argument
-    [irs/irs.cbl:L669]; and the eight-character `IRS-System-Params.Run-Date`
-    [copybooks/irswssystem.cob:L14], which irs/irs.cbl always populates through
-    `zz090-Proc-Run-Date.` [irs/irs.cbl:L972-L978]. See the module docstring.
+    NONE of the calling-data options are added - not `--ws-caller`, not `--ws-del-link`,
+    not `--ws-process-func`, not `--ws-sub-function` and not `--ws-cd-args` - because
+    Shape 3 carries no calling-data block [irs/irs030.cbl:L552-L554], and the IRS entry
+    point passes exactly three arguments.
 
     Args:
         parser: the parser to add the option to. Mutated in place.
@@ -1350,91 +1010,44 @@ def add_irs_linkage_arguments(parser: argparse.ArgumentParser) -> None:
 def resolve_clock(run_date_text: str) -> clock.PinnedRunDate:
     """Pin both date observables from the `--run-date` text. One delegation.
 
-    The whole of the clock contract in one call. `acas_posting.clock` reproduces
-    [copybooks/Proc-ACAS-Mapser-RDB.cob:L73-L80] - the caller pre-zero at L78,
-    the `maps04` call at L79 and the store at L80 - so there is deliberately no
-    date arithmetic, no separator handling, no calendar test and no parsing of
-    any kind in this module.
-
-    THE TEXT IS NOT VALIDATED (rules R-3 and R-4). A date the legacy module
-    rejects comes back with `run_date` 0 and NO exception, which reproduces
-    `maps04` falling through without touching its output field
-    [common/maps04.cbl:L146], [common/maps04.cbl:L154] together with the caller
-    pre-zero that turns "untouched" into zero
-    [copybooks/Proc-ACAS-Mapser-RDB.cob:L78]. That is anomaly 16 of the
-    register. Raising instead would both add a validation and correct a defect,
-    and the migration is required to do neither.
+    The whole of the clock contract in one call.
 
     Args:
-        run_date_text: the date text as supplied on the command line,
-            canonically DD/MM/CCYY. Whatever a caller typed, verbatim: shorter
-            text is space-padded and longer text truncated to the declared
-            `PIC X(10)` width by the clock module, and separator normalisation
-            happens inside `maps04`, after the text form has already been
-            captured.
+        run_date_text: the date text as supplied on the command line, canonically
+            DD/MM/CCYY. Whatever a caller typed, verbatim.
 
     Returns:
-        The pinned pair. `to_day` is the text as supplied at the declared width -
-        NOT a normalised form, because L77 copies it before L79 converts it -
-        and `run_date` is the binary day number counted from 1600-12-31, or 0 if
-        the date was rejected.
-
-    Example:
-        >>> resolve_clock("21/09/2025")
-        PinnedRunDate(to_day='21/09/2025', run_date=155127)
-        >>> resolve_clock("31/02/2025").run_date
-        0
+        The pinned pair.
     """
     return clock.pin_from_to_day(run_date_text)
 
 
-#  BINDERS
-#  A binder turns a parsed namespace into one linkage shape. Two conventions run
-#  through all four:
-#  1. START FROM THE RECORD'S DECLARED DEFAULTS, THEN OVERWRITE. Constructing
-#     `WsCallingData()` already reproduces the state each menu establishes before
-#     a dispatch - `move spaces to ws-called ws-del-link`
-#     [general/general.cbl:L513], `move zeros to ws-Process-Func ws-Sub-Function`
-#     [general/general.cbl:L505], `move zero to ws-term-code`
-#     [general/general.cbl:L714], and `WS-CD-Args` never assigned at all.
-#  2. READ THE NAMESPACE TOLERANTLY, EXCEPT FOR THE RUN DATE, which has no
-#     defensible default and so is read directly: a missing one must surface as
-#     an error rather than be invented, and no ambient date can enter here.
+# BINDERS A binder turns a parsed namespace into one linkage shape. Two conventions run
+# through all four: 1. START FROM THE RECORD'S DECLARED DEFAULTS, THEN OVERWRITE.
 
 
 def _menu_caller_for(program_id: str) -> str:
     """Return the menu identity that dispatches one posting program.
 
-    Which menu shell owns which program is a fact of the frozen source, not a
-    choice: general/general.cbl dispatches the `gl` programs, sales/sales.cbl
-    the `sl` programs and purchase/purchase.cbl the `pl` programs. So the caller
-    is derivable from the callee, which is what lets `bind_slpl_linkage` serve
-    both the Sales and the Purchase routes from one signature.
-
-    Used only as the FALLBACK behind `--ws-caller`; an explicit option always
-    wins, exactly as the Sales pre-run block overrides the caller for a
-    different callee at [sales/sales.cbl:L464-L465].
+    Which menu shell owns which program is a fact of the frozen source, not a choice:
+    general/general.cbl dispatches the `gl` programs, sales/sales.cbl the `sl` programs
+    and purchase/purchase.cbl the `pl` programs.
 
     Args:
         program_id: the callee's program-id, as `"gl070"` or `"pl100"`.
 
     Returns:
-        The dispatching menu's literal identity, or `WS-Caller`'s own declared
-        default - spaces at its `PIC X(8)` width [copybooks/wscall.cob:L8] - for
-        a program-id that no in-scope menu dispatches. Spaces rather than an
-        exception, because "not assigned" is a state the field genuinely has and
-        rejecting the name would be a validation this migration may not add
-        (rule R-3). `WS_CALLER_ACAS` is deliberately unreachable from here: the
-        top-level menu dispatches the four ledger menus, never a posting
-        program.
+        The dispatching menu's literal identity, or `WS-Caller`'s own declared default -
+            spaces at its `PIC X(8)` width [copybooks/wscall.cob:L8] - for a program-id
+            that no in-scope menu dispatches.
     """
     prefix = program_id.strip().lower()[:2]
     if prefix == "gl":
-        return WS_CALLER_GENERAL  # general/general.cbl:L512
+        return WS_CALLER_GENERAL
     if prefix == "sl":
-        return WS_CALLER_SALES  # sales/sales.cbl:L481
+        return WS_CALLER_SALES
     if prefix == "pl":
-        return WS_CALLER_PURCHASE  # purchase/purchase.cbl:L475
+        return WS_CALLER_PURCHASE
     return _declared_calling_data().ws_caller
 
 
@@ -1478,33 +1091,11 @@ def _menu_caller_for(program_id: str) -> str:
 #      `perform overrewrite` reproduced below.
 # =============================================================================
 
-#: `move 1 to File-Key-No.` - the SYSTEM-REC arm of the five-way dispatcher
-#: [common/acas000.cbl:L574-L600]. The caller owns the key: `acas000.` is the one
-#: dispatch paragraph in the 1,449-line facade with no `move 1 to File-Key-No`
-#: [copybooks/Proc-ACAS-FH-Calls.cob:L20-L25].
-SYSTEM_FILE_KEY_PARAMS: Final[int] = 1
-
-#: `move 2 to File-Key-No.` - SYSDEFLT-REC. Read by the General Ledger menu only
-#: [general/general.cbl:L406-L408]; Sales, Purchase and IRS never touch it.
-SYSTEM_FILE_KEY_DEFAULTS: Final[int] = 2
-
-#: `move 4 to File-Key-No.` - SYSTOT-REC, the period totals
-#: [general/general.cbl:L402-L404], [sales/sales.cbl:L356-L357],
-#: [purchase/purchase.cbl:L350-L352].
-SYSTEM_FILE_KEY_TOTALS: Final[int] = 4
-
 #: `88  FS-MySql-Used  value 1.` [copybooks/wssystem.cob:L114] - the value
 #: `File-System-Used` [copybooks/wssystem.cob:L112] must hold for a handler to
 #: take its relational leg. Every handler tests the same thing, e.g. `int(...
 #: file_system_used) == 0` selects the unmigrated indexed leg.
 FS_MYSQL_USED: Final[int] = 1
-
-#: The two digits of `move "66" to FA-RDBMS-Flat-Statuses`
-#: [sales/sales.cbl:L629], the group `acas000` compares against to choose its
-#: relational leg. 6 is a value neither `88` covers - the maintainer flagged it
-#: himself [copybooks/wsfnctn.cob:L70-L71] - and it is reproduced as the literal
-#: it is rather than named after a condition that does not exist.
-RDBMS_STORE_SELECTOR_DIGIT: Final[int] = 6
 
 
 #  THE MENU SHELL PARAGRAPHS THIS MODULE REPRODUCES LIVE FURTHER DOWN, beside
@@ -3038,54 +2629,40 @@ def bind_calling_data(
 ) -> WsCallingData:
     """Bind argv to `01 WS-Calling-Data` [copybooks/wscall.cob:L6-L14].
 
-    Reproduces, in order, the state a menu shell establishes immediately before
-    a dispatch. The returned record is MUTABLE by design: the callee writes
-    `WS-Term-Code` back into it [general/gl070.cbl:L289] and the entry point
-    reads it afterwards [general/general.cbl:L720-L721].
-
-    FIELD WIDTHS ARE APPLIED. Every assignment below is a `MOVE` through
-    `acas_posting.cobol.move.move` carrying the receiving field's own
-    descriptor, so each `PIC X(8)` field ends up holding eight characters
-    whatever argv supplied - space-filled on the right when the value is
-    shorter, truncated on the right when it is longer - and the three numeric
-    fields land at their declared digit counts. The descriptors are fetched
-    from the record layer's `calling_data.descriptor_for`, so every picture is
-    the generated dictionary's and none is written here.
+    Reproduces, in order, the state a menu shell establishes immediately before a
+    dispatch. The returned record is MUTABLE by design: the callee writes `WS-Term-Code`
+    back into it [general/gl070.cbl:L289] and the entry point reads it afterwards
+    [general/general.cbl:L720-L721].
 
     Args:
-        ns: the parsed namespace. All five calling-data attributes are read
-            tolerantly, each falling back to the COBOL default that
-            `add_calling_data_arguments` would have supplied.
-        called: the callee's program-id, for `WS-Called`. Set per dispatch, as
-            `move "gl070" to ws-called` [general/general.cbl:L808].
-        caller: the dispatching menu's identity, used for `WS-Caller` only when
-            the namespace carries no `--ws-caller`. An explicitly supplied
-            option always wins.
+        ns: the parsed namespace. All five calling-data attributes are read tolerantly,
+            each falling back to the COBOL default that `add_calling_data_arguments`
+            would have supplied.
+        called: the callee's program-id, for `WS-Called`. Set per dispatch, as `move
+            "gl070" to ws-called` [general/general.cbl:L808].
+        caller: the dispatching menu's identity, used for `WS-Caller` only when the
+            namespace carries no `--ws-caller`. An explicitly supplied option always
+            wins.
 
     Returns:
         The bound record, with `WS-Term-Code` at zero ready for the dispatch.
     """
     calling_data = _declared_calling_data()
 
-    #  [general/general.cbl:L808] `move "gl070" to ws-called` - per dispatch.
     set_called(calling_data, called)
 
-    #  [general/general.cbl:L512] `move "general" to ws-caller`. `is None`
-    #  rather than a truth test, because a deliberately space-filled caller is a
-    #  legitimate value and must not be mistaken for "absent".
+    # [general/general.cbl:L512] `move "general" to ws-caller`.
     supplied_caller = getattr(ns, "ws_caller", None)
     calling_data.ws_caller = cobol_move.move(
         caller if supplied_caller is None else supplied_caller,
         calling_data_record.descriptor_for("ws_caller"),
     )
 
-    #  [general/general.cbl:L513] `move spaces to ws-called ws-del-link ...`
     calling_data.ws_del_link = cobol_move.move(
         getattr(ns, "ws_del_link", WS_DEL_LINK_DEFAULT),
         calling_data_record.descriptor_for("ws_del_link"),
     )
 
-    #  [general/general.cbl:L505] `move zeros to ws-Process-Func ws-Sub-Function`
     calling_data.ws_process_func = cobol_move.move(
         getattr(ns, "ws_process_func", WS_PROCESS_FUNC_DEFAULT),
         calling_data_record.descriptor_for("ws_process_func"),
@@ -3095,19 +2672,12 @@ def bind_calling_data(
         calling_data_record.descriptor_for("ws_sub_function"),
     )
 
-    #  ANOMALY, REPRODUCED (rule R-4): no menu shell ever assigns `WS-CD-Args`
-    #  [copybooks/wscall.cob:L14] - the shells only read it, at
-    #  [sales/sales.cbl:L463] and [purchase/purchase.cbl:L457] - so its default
-    #  is spaces and the pre-run branch those reads guard is dead under menu
-    #  dispatch. The option exists because the maintainer designed the field for
-    #  exactly this unattended case [copybooks/wscall.cob:L1-L3].
+    # ANOMALY, REPRODUCED (rule R-4).
     calling_data.ws_cd_args = cobol_move.move(
         getattr(ns, "ws_cd_args", WS_CD_ARGS_DEFAULT),
         calling_data_record.descriptor_for("ws_cd_args"),
     )
 
-    #  [general/general.cbl:L714] `move zero to ws-term-code` - LAST, immediately
-    #  before the dispatch, exactly where the COBOL puts it.
     reset_term_code(calling_data)
 
     return calling_data
@@ -3148,8 +2718,8 @@ def bind_gl_linkage(
             and finding CLI-02.
 
     Returns:
-        The four arguments in COBOL parameter order
-        [general/gl070.cbl:L245-L248], ready to splat into the program's `run`.
+        The four arguments in COBOL parameter order [general/gl070.cbl:L245-L248], ready
+            to splat into the program's `run`.
 
     Raises:
         AttributeError: the namespace carries no `run_date`, meaning the route
@@ -3213,15 +2783,11 @@ def bind_slpl_linkage(
 ) -> SlPlLinkage:
     """Bind Shape 2 - the five-parameter Sales and Purchase shape.
 
-    Serves both ledgers from one signature: the dispatching menu is derived from
-    the callee's program-id, so `"sl060"` binds a Sales caller and `"pl060"` a
-    Purchase one, and `--ws-caller` overrides either.
-
     Args:
-        ns: the parsed namespace of a route that composed
-            `add_calling_data_arguments` and `add_slpl_linkage_arguments`.
-        called: the callee's program-id - `"sl055"`, `"sl060"`, `"sl100"`,
-            `"pl055"`, `"pl060"` or `"pl100"`.
+        ns: the parsed namespace of a route that composed `add_calling_data_arguments`
+            and `add_slpl_linkage_arguments`.
+        called: the callee's program-id - `"sl055"`, `"sl060"`, `"sl100"`, `"pl055"`,
+            `"pl060"` or `"pl100"`.
         env: as `bind_gl_linkage`.
         system_record: as `bind_gl_linkage`. The Sales and Purchase shells read it
             under file-key 1 [sales/sales.cbl:L359-L360],
@@ -3314,9 +2880,8 @@ def bind_irs_linkage(
     """Bind Shape 3 - the three-parameter IRS shape.
 
     No `called` keyword, because there is no `WS-Called` to fill: Shape 3 has no
-    calling-data block [irs/irs030.cbl:L552-L554], and irs/irs.cbl names its
-    callee as a `CALL` literal rather than through the field
-    [irs/irs.cbl:L668].
+    calling-data block [irs/irs030.cbl:L552-L554], and irs/irs.cbl names its callee as a
+    `CALL` literal rather than through the field [irs/irs.cbl:L668].
 
     Args:
         ns: the parsed namespace of a route that composed
@@ -3332,6 +2897,18 @@ def bind_irs_linkage(
             second argument - the maintainer's own `*> ACAS system rec.` at
             [irs/irs.cbl:L669] - so the connection fields reach the IRS route by
             exactly the same carrier as the other two shapes.
+        system_record: as `bind_gl_linkage`. The IRS shell reads it under file-key
+            1 and reads NOTHING ELSE - `move 1 to File-Key-No. perform
+            acas000-Read-Indexed.` [irs/irs.cbl:L511-L512] - which is the third of
+            the three divergent `aa010` shapes.
+        irs_system_params: the `IRS-System-Params` the caller has already built by
+            `zz090-Set-Up-IRS-System-Data` [irs/irs.cbl:L907-L997] out of that
+            loaded record, through `acas_posting.cli.menu_state`. `None` builds one
+            at its declared defaults, which carries `Next-Post` zero and would
+            allocate posting keys from zero - see finding CLI-04. Either way the
+            eight-character run date below is written into it here, because that is
+            what `zz090-Proc-Run-Date.` [irs/irs.cbl:L972-L978] does and the pinned
+            clock is this layer's business.
 
     BOTH RECORDS ARE BUILT HERE, NOT PASSED IN. `WS-System-Record` is the ACAS
     system record the IRS shell reads under file-key 1 and NOTHING ELSE - `move 1
@@ -3358,6 +2935,19 @@ def bind_irs_linkage(
     `irs_menu_state()` block and is therefore key 1 alone, and by
     `zz090_set_up_irs_system_data`.  A caller that passes no `menu_state` gets
     neither. A caller that binds Shape 3 and dispatches without
+    them allocates posting keys from zero and collides with the seed.
+
+    ⭐ BINDING IS NOT THE WHOLE OF SHAPE 3, AND MUST NOT BE MISTAKEN FOR IT.
+    What this function returns is the three records at their DECLARED DEFAULTS
+    plus whatever argv supplies - which leaves `IRS-System-Params.Next-Post`, the
+    POSTING-KEY ALLOCATOR `irs030` numbers each posting from, at ZERO. The frozen
+    menu never calls `irs030` with the record in that state: between the bind and
+    the dispatch it performs `aa010-Get-System-Recs` [irs/irs.cbl:L507-L551] to
+    load the seeded `SYSTEM-REC` row and then `zz090-Set-Up-IRS-System-Data`
+    [irs/irs.cbl:L556] to copy the allocator and seventeen other fields across.
+    Both are the ROUTE's work, not argv binding's, so they live in
+    `aa010_get_system_recs_irs` and `zz090_set_up_irs_system_data` and are called
+    from `cli/irs_post.main`. A caller that binds Shape 3 and dispatches without
     them allocates posting keys from zero and collides with the seed.
 
     Returns:
@@ -3445,6 +3035,29 @@ def bind_irs_linkage(
     #  the clock pinned (rule R-6).
     irs_system_params.run_date = irs_run_date_x8(pinned.to_day)
 
+    ws_system_record = _bind_system_record(ns, pinned, env=env)
+    file_defs = FileDefs()
+
+    #  [irs/irs.cbl:L494-L519] `aa005-Open-System.` then
+    #  `aa010-Get-System-Recs.` - KEY 1 ONLY on this route, so `menu_state`
+    #  carries no totals record and no defaults record and `aa010_get_system_recs`
+    #  reads neither.
+    #
+    #  [irs/irs.cbl:L556] `perform zz090-Set-Up-IRS-System-Data.` - performed
+    #  here rather than left to the caller because it is unconditional in the
+    #  frozen menu and because it OVERWRITES `IRS-System-Params.Run-Date` from the
+    #  loaded row. The value it writes equals the line above: `_apply_cli_pins`
+    #  has already re-pinned the binary `Run-Date` from `--run-date`, and
+    #  `zz090-Proc-Run-Date` converts that same binary through the same
+    #  `irs_run_date_x8`. The two agree by construction rather than by luck, which
+    #  is why both are kept - the pre-load line still serves a caller that
+    #  supplies no `menu_state`.
+    if menu_state is not None:
+        aa010_get_system_recs(
+            ws_system_record, menu_state, file_defs, ns, pinned, env=env
+        )
+        zz090_set_up_irs_system_data(irs_system_params, ws_system_record)
+
     return IrsLinkage(
         irs_system_params=irs_system_params,
         #  The binary Run-Date on this route is NOT ambiguous: the ACAS system
@@ -3455,39 +3068,18 @@ def bind_irs_linkage(
     )
 
 
-#  FAITHFUL HELPERS  (section 8.6 of this module's brief)
-#  Each of the five reproduces ONE COBOL statement or ONE COBOL predicate, and
-#  nothing more. They are named functions rather than inline expressions for two
-#  reasons that both matter: the traceability document maps each one to its
-#  COBOL statement (rule R-5), and the seven entry points then share one
-#  implementation instead of seven copies that could drift apart.
+# FAITHFUL HELPERS (section 8.6 of this module's brief) Each of the five reproduces ONE
+# COBOL statement or ONE COBOL predicate, and nothing more.
 
 
 def reset_term_code(calling_data: WsCallingData) -> None:
     """`move zero to ws-term-code.` - reproduced exactly.
 
-    CALL THIS IMMEDIATELY BEFORE EVERY DISPATCH, not once per run. That is where
-    the COBOL puts it, and it puts it there once per `CALL` site:
-    [general/general.cbl:L714] and [general/general.cbl:L730],
-    [sales/sales.cbl:L680] and [sales/sales.cbl:L701],
-    [purchase/purchase.cbl:L673] and [purchase/purchase.cbl:L694], and
-    [common/ACAS.cbl:L576].
-
-    The placement is load-bearing rather than tidy. `WS-Term-Code` is shared
-    linkage storage, so a code a previous callee left behind would still be
-    there for the next test of it - and in the posting cycle that test decides
-    whether the remaining phases run at all [general/general.cbl:L810-L811].
-    Clearing it per dispatch is what makes each phase's verdict its own.
-
-    The clearing value is `WS_TERM_CODE_DEFAULT`, which is the record layer's
-    own declared zero read from the record rather than a typed literal, and it
-    reaches the field through the same `MOVE` every other assignment here uses,
-    so it lands at the two declared digits of `pic 99`
-    [copybooks/wscall.cob:L10].
+    The placement is load-bearing rather than tidy.
 
     Args:
-        calling_data: the record to clear. Mutated in place, exactly as COBOL
-            writes into the caller's own storage.
+        calling_data: the record to clear. Mutated in place, exactly as COBOL writes
+            into the caller's own storage.
     """
     calling_data.ws_term_code = cobol_move.move(
         WS_TERM_CODE_DEFAULT, calling_data_record.descriptor_for("ws_term_code")
@@ -3497,39 +3089,15 @@ def reset_term_code(calling_data: WsCallingData) -> None:
 def set_called(calling_data: WsCallingData, program_id: str) -> None:
     """`move "<prog>" to ws-called.` - reproduced exactly.
 
-    The menus set the field once per dispatch and then transfer to the shared
-    dispatch paragraph: `move "gl070" to ws-called`
-    [general/general.cbl:L808], `move "gl071" to ws-called`
-    [general/general.cbl:L812], `move "gl072" to ws-called`
-    [general/general.cbl:L814], `move "gl080" to ws-called`
-    [general/general.cbl:L820]. In the COBOL the field is also the CALL TARGET -
-    `call ws-called using ...` [general/general.cbl:L715] is a dynamic call by
-    name - whereas here the entry point invokes the migrated module directly and
-    the field is carried for traceability and for any callee that reads it.
-
     RECEIVING-FIELD WIDTH IS APPLIED. `WS-Called` is `PIC X(8)`
-    [copybooks/wscall.cob:L7], so the `MOVE` of a five-character program-id
-    leaves eight characters - "gl070" followed by three spaces - and a
-    nine-character sender would lose its last character. The frozen menu writes
-    exactly that `MOVE` at each of the four General Ledger dispatch sites
-    [general/general.cbl:L808], [general/general.cbl:L812],
-    [general/general.cbl:L814] and [general/general.cbl:L820], and section
-    0.1.2's transformation rule 11 requires the receiving-field rules rather
-    than an assignment. The descriptor is fetched from the record layer's
-    `calling_data.descriptor_for`, so the picture is the generated dictionary's.
+    [copybooks/wscall.cob:L7], so the `MOVE` of a five-character program-id leaves eight
+    characters - "gl070" followed by three spaces - and a nine-character sender would
+    lose its last character.
 
     Args:
         calling_data: the record to write into. Mutated in place.
-        program_id: the callee's program-id, as `"gl070"`. Space-filled or
-            truncated to the field's eight characters; nothing is checked and
-            nothing is reported, exactly as a `MOVE` behaves (rule R-3).
-
-    Example:
-        >>> from acas_posting.records.calling_data import WsCallingData
-        >>> record = WsCallingData()
-        >>> set_called(record, "gl070")
-        >>> record.ws_called
-        'gl070   '
+        program_id: the callee's program-id, as `"gl070"`. Space-filled or truncated to
+            the field's eight characters.
     """
     calling_data.ws_called = cobol_move.move(
         program_id, calling_data_record.descriptor_for("ws_called")
@@ -3539,24 +3107,8 @@ def set_called(calling_data: WsCallingData, program_id: str) -> None:
 def is_serious_error(term_code: int) -> bool:
     """`if ws-term-code > 7` - the serious-error predicate.
 
-    "Got a serious (reported) error", in the maintainer's own words at
-    [sales/sales.cbl:L691]. Tested at [general/general.cbl:L720] and
-    [general/general.cbl:L735], [sales/sales.cbl:L691] and
-    [sales/sales.cbl:L710], [purchase/purchase.cbl:L684] and
-    [purchase/purchase.cbl:L703], and [common/ACAS.cbl:L578].
-
-    A TOTAL predicate, and its complement needs no second helper: `WS-Term-Code`
-    is `pic 99` [copybooks/wscall.cob:L10] so its domain is 0 through 99, over
-    which the COBOL's own two tests - `> 7` and the `< 8` at
-    [sales/sales.cbl:L686] and [sales/sales.cbl:L708] - are exhaustive and
-    mutually exclusive. `not is_serious_error(code)` IS `ws-term-code < 8`.
-
-    Note what this predicate does NOT single out. `GL_ABORT_TERM_CODE` is 5,
-    which is `< 8`, so a General Ledger abort is NOT a serious error by this
-    test: the menu handles it with its own equality test
-    [general/general.cbl:L810-L811] and returns to the menu, leaving the later
-    phases unrun. `EXTRACT_MISSING_FILE_TERM_CODE` is 8 and therefore IS one.
-    Both facts are reproduced, not reconciled (rule R-4).
+    Note what this predicate does NOT single out. `GL_ABORT_TERM_CODE` is 5, which is `<
+    8`, so a General Ledger abort is NOT a serious error by this test.
 
     Args:
         term_code: the value of `WS-Term-Code` after a dispatch.
@@ -3570,23 +3122,7 @@ def is_serious_error(term_code: int) -> bool:
 def exit_status_for(term_code: int) -> int:
     """Map `WS-Term-Code` to a process exit status.
 
-    The identity, and the identity is total: `WS-Term-Code` is `pic 99`
-    [copybooks/wscall.cob:L10] so every value it can hold is 0 through 99, well
-    inside the 0-255 range a POSIX wait status carries. Zero therefore maps to
-    zero, which is success, and every non-zero code is surfaced unchanged so
-    that a caller of the migrated cycle sees the code the COBOL produced rather
-    than a lossy re-encoding of it.
-
-    Where the COBOL keeps this information, for reference: it never exits with
-    it. Each menu tests the code and transfers control within itself -
-    `if ws-term-code > 7 / go to overrewrite` [general/general.cbl:L720-L721],
-    [common/ACAS.cbl:L578-L579], [purchase/purchase.cbl:L703-L704], or
-    `perform overrewrite / goback` on the Sales path
-    [sales/sales.cbl:L710-L712] - and the transfers that do end the program end
-    it with a bare `goback` carrying nothing: [general/general.cbl:L694],
-    [sales/sales.cbl:L660], [purchase/purchase.cbl:L653],
-    [common/ACAS.cbl:L545]. There is no process-status equivalent in the
-    original because the original is an interactive menu.
+    Where the COBOL keeps this information, for reference: it never exits with it.
 
     Args:
         term_code: the value of `WS-Term-Code` after the last dispatch.
@@ -3594,49 +3130,8 @@ def exit_status_for(term_code: int) -> int:
     Returns:
         The exit status to leave the process with.
     """
-    #  Q-CLI-EXITSTATUS, SETTLED - AND SETTLED BY ESTABLISHING THAT THERE IS NO
-    #  ORACLE OBSERVABLE, which rule R-6 can only be applied to once that is
-    #  proved rather than asserted.
-    #
-    #  THE QUESTION was what process exit status each band of the `pic 99` domain
-    #  should produce - 0, 1..7 and 8..99.
-    #
-    #  WHY THE COMPILED PROGRAM CANNOT ANSWER IT. GnuCOBOL surfaces a program's
-    #  process exit status through the special register `RETURN-CODE`, so the
-    #  question would be answerable if any menu or any in-scope program moved
-    #  `WS-Term-Code` into it. A census of every one of them - the five menus and
-    #  all twelve posting programs - finds `RETURN-CODE` READ and never WRITTEN:
-    #  every occurrence is the shell-out test `if Return-Code not = zero`
-    #  [general/general.cbl:L496], [sales/sales.cbl:L440],
-    #  [purchase/purchase.cbl:L434], [irs/irs.cbl:L596], which inspects what a
-    #  `call "SYSTEM"` left behind and has nothing to do with `WS-Term-Code`.
-    #  Nothing anywhere assigns the register, and the program ends with a bare
-    #  `goback` as the docstring records. The compiled cycle therefore emits no
-    #  exit status derived from `WS-Term-Code` at all, in any band. There is no
-    #  experiment to run, and running one would measure only GnuCOBOL's default
-    #  of zero, which is a property of the runtime rather than of ACAS.
-    #
-    #  THE DECISION, AND IT IS A BOUNDARY DECISION, NOT A TRANSCRIPTION. The
-    #  process boundary is new in the migration: the original had a menu where
-    #  this has a command. So this is one of the places Agent Action Plan section
-    #  0.3.4 governs - an interactive construct with no database effect becomes a
-    #  headless equivalent - and the choice is made on the only ground available,
-    #  which is losing nothing:
-    #
-    #    * the identity is TOTAL and LOSSLESS. `WS-Term-Code` is `pic 99`
-    #      [copybooks/wscall.cob:L10], domain 0..99, entirely inside the 0..255 a
-    #      POSIX wait status carries, so every value the COBOL can produce
-    #      survives the boundary and a caller reads the code the cycle produced;
-    #    * the two vocabularies already agree at the value that matters: zero is
-    #      success in both;
-    #    * banding - 0/1/2, say - would DISCARD the distinctions the COBOL makes.
-    #      `GL_ABORT_TERM_CODE` 5 and `EXTRACT_MISSING_FILE_TERM_CODE` 8 are
-    #      different events with different consequences, and `is_serious_error`
-    #      above shows the COBOL's own two tests are `> 7` and `< 8`; collapsing
-    #      either side into one status would make the migrated cycle report LESS
-    #      than the original, which no reading of rule R-6 supports.
-    #
-    #  Nothing downstream of this may re-encode the value. It is the code itself.
+    # ORACLE OBSERVABLE, which rule R-6 can only be applied to once that is proved
+    # rather than asserted.
     return term_code
 
 
@@ -3714,45 +3209,15 @@ def report_configuration_failure(
 def irs_run_date_x8(to_day: str) -> str:
     """`zz090-Proc-Run-Date.` [irs/irs.cbl:L972-L978] - reproduced exactly.
 
-    The statement being reproduced, verbatim from the frozen source::
-
-        L972  zz090-Proc-Run-Date.
-        L973      move     ACAS-Run-Date to u-bin.
-        L974      perform  maps04.  *> now have x(10) & dd/mm/ccyy
-        L975      string   u-date (1:6)  delimited by size
-        L976               u-date (9:2)  delimited by size  *> Only grab YY and not CC
-        L977                      into Run-Date             *> As IRS uses dd/mm/yy
-        L978      end-string.
-
-    The maintainer's own comments at [irs/irs.cbl:L968-L971] explain the intent:
-    "convert the binary run, start & end date from binary days to x(8) by
-    ignoring the cc subfield (century) as not used in IRS".
-
-    L973 and L974 are already done by the time this function is called - the
-    pinned pair carries the `x(10)` text - so what remains is the `STRING` of
-    L975-L977, which is pure text assembly. COBOL reference modification is
-    one-based and `(start:length)`, so `u-date (1:6)` is characters 1 to 6 and
-    `u-date (9:2)` is characters 9 to 10, giving `to_day[0:6] + to_day[8:10]`:
-    "dd/mm/" followed by "yy". No date module, no calendar and no arithmetic of
-    any kind is involved, and none is used here.
-
     Args:
-        to_day: the pinned `to-day`, DD/MM/CCYY. In the COBOL `u-date` is
-            `PIC X(10)` and therefore always exactly ten characters, so both
-            slices are always in range; `resolve_clock` guarantees the same
-            width here, which is why no length check is needed - and adding one
-            would be a validation the COBOL does not perform (rule R-3).
+        to_day: the pinned `to-day`, DD/MM/CCYY. In the COBOL `u-date` is `PIC X(10)`
+            and therefore always exactly ten characters, so both slices are always in
+            range.
 
     Returns:
-        The eight-character `dd/mm/yy` form that
-        `IRS-System-Params.Run-Date pic x(8)`
-        [copybooks/irswssystem.cob:L14] holds.
-
-    Example:
-        >>> irs_run_date_x8("21/09/2025")
-        '21/09/25'
+        The eight-character `dd/mm/yy` form that `IRS-System-Params.Run-Date pic x(8)`
+            [copybooks/irswssystem.cob:L14] holds.
     """
-    #  [L975] u-date (1:6)  ->  "dd/mm/"      [L976] u-date (9:2)  ->  "yy"
     return to_day[0:6] + to_day[8:10]
 
 

@@ -1,35 +1,23 @@
 """Purchase payment posting - the `pl100` batch entry point.
 
-WHAT THIS MODULE IS
-The headless equivalent of one menu letter. `purchase/purchase.cbl` draws
-`"(L)  Payment Post"` at [purchase/purchase.cbl:L544] - the twelfth letter, so
-the twelfth route - and its dispatch paragraph is `load12.`::
+The headless equivalent of one menu letter: `"(L)  Payment Post"`
+[purchase/purchase.cbl:L544], dispatched by `load12.` L786-L790 through
+`load000.`, which carries the linkage and the `> 7` disposition
+[purchase/purchase.cbl:L684].
 
-    L786  load12.
-    L787 *>------
-    L788 *>
-    L789       move     "pl100" to ws-called.
-    L790       go       to load000.
+The linkage is five parameters - ws-calling-data, system-record,
+system-record-4, to-day, file-defs [purchase/pl100.cbl:L265-L269].
 
-Two statements. That is the whole route, and the two facts about it that decide
-this module's shape are both easy to get wrong:
+`--ok-to-post` / `--no-ok-to-post` carries the run confirmation "OK to post
+payment transactions (YES/NO) ?" [purchase/pl100.cbl:L302-L311], promoted to a
+parameter because that answer gates every database write the program makes
+(Agent Action Plan section 0.3.4).
 
-  * `pl100` IS DISPATCHED THROUGH `load000.`, NOT `load00.` `load000.`
-    [purchase/purchase.cbl:L691-L704] passes FIVE arguments; `load00.`
-    [purchase/purchase.cbl:L670-L685] passes four, omitting the period-totals
-    record. The trap is that `load00`'s own whitelist at
-    [purchase/purchase.cbl:L679-L682] NAMES `"pl100"`, so reading that list as
-    a routing table sends you to the wrong paragraph and the wrong linkage
-    shape. That entry is dead code, and it is recorded as an anomaly in the
-    footer rather than tidied away (rule R-4).
-  * `load12` HAS NO GATE. It does not test `WS-Term-Code` before or after the
-    dispatch, and it dispatches exactly one program. Sales `load11.`
-    [sales/sales.cbl:L792-L796] (`sl100`) and General Ledger `load09.`
-    [general/general.cbl:L817-L821] (`gl080`) are likewise ungated, whereas
-    General Ledger `load08.` [general/general.cbl:L805-L815] tests
-    `ws-term-code = 5` between phases and Sales `load07.`
-    [sales/sales.cbl:L756-L768] tests `not = zero`. The difference is
-    deliberate and is NOT harmonised (rule R-4).
+pl100 maintains the payment-days average with the Purchase variant of the
+cycle's average idiom [purchase/pl100.cbl:L498], [purchase/pl100.cbl:L502]. Its
+`divide ... by` and the Sales `divide ... into` at
+[sales/sl060.cbl:L827] compute the same accumulator-over-activity quotient; the
+guards around them differ, and that difference is what is reproduced.
 
 THE LINKAGE SHAPE: FIVE PARAMETERS
 `pl100` declares::
@@ -154,24 +142,12 @@ from acas_posting.programs import pl100_payment_posting
 
 __all__: Final[tuple[str, ...]] = ("main", "load000", "load12")
 
-#  Module-level logger only. `logging.basicConfig` is not called in this module
-#  at all - the package has one call to it, in
-#  `acas_posting.__main__.configure_logging`, which only a process boundary
-#  reaches - so importing this module configures nothing, emits nothing and
-#  touches no stream: `tests/scenarios/*` import the package, and an import that
-#  reconfigured logging would change what an unrelated test observes. Calling
-#  `main` as a library is equally inert unless it is handed `--log-level`, which
-#  sets the level through that one configurator and installs nothing.
 _LOG: Final = logging.getLogger(__name__)
 
-#  THE CALLEE'S PROGRAM-ID, and the literal the COBOL moves into `WS-Called`:
-#  `move "pl100" to ws-called.` [purchase/purchase.cbl:L789]. Five characters
-#  into a `PIC X(8)` field [copybooks/wscall.cob:L7], so `args.set_called`
-#  space-fills it to eight - a receiving-field `MOVE`, not an assignment.
 _PROGRAM_ID: Final[str] = "pl100"
 
-#  The two frozen sources this module is derived from, quoted in log records so
-#  that a run's output cites the specification it reproduces.
+# The two frozen sources this module is derived from, quoted in log records so that a
+# run's output cites the specification it reproduces.
 _MENU_SOURCE: Final[str] = "purchase/purchase.cbl"
 _PROGRAM_SOURCE: Final[str] = "purchase/pl100.cbl"
 
@@ -218,36 +194,9 @@ def _add_run_confirmation_argument(parser: argparse.ArgumentParser) -> None:
     the program under one name.
 
     Args:
-        parser: the parser to add the pair to. Mutated in place, which is the
-            argparse idiom the sibling fragments in `args` also follow.
+        parser: the parser to add the pair to. Mutated in place, which is the argparse
+            idiom the sibling fragments in `args` also follow.
     """
-    # AMBIGUITY Q-CLI-OKTOPOST: RESOLVED, and resolved without guessing.
-    # [purchase/pl100.cbl:L305] moves spaces into `wx-reply` and L310-L311 send
-    # anything that is neither literal back to `acpt-xrply.`, so THE COBOL HAS NO
-    # DEFAULTABLE ANSWER - only "YES" proceeds and only "NO" declines. The answer
-    # is therefore REQUIRED on the command line: `required=True` and no `default`.
-    #
-    # WHY THE PREVIOUS DEFAULT OF `True` WAS WRONG (finding CLI-06). Agent Action
-    # Plan section 0.8.1 promotes a write-gating prompt to a CLI parameter "with
-    # the COBOL default preserved"; where the COBOL has NO default there is
-    # nothing to preserve, so supplying one is invention rather than
-    # preservation. The old help text said so itself - "the original has no
-    # defaultable answer to preserve" - and then defaulted anyway, to the one
-    # answer that silently ENABLES EVERY DATABASE WRITE on this route (rule R-3).
-    # An unanswered prompt in the frozen program produces neither a post nor a
-    # no-op; it produces a re-prompt, and a usage error is that outcome's only
-    # headless analogue.
-    #
-    # WHY NOT SETTLE IT ON THE ORACLE (rule R-6). The oracle cannot currently be
-    # built: the frozen archive is missing
-    # copybooks/ACAS-SQLstate-error-list.cob, which 44 frozen files COPY, so 22
-    # of the 29 bridges do not compile, and fabricating it would breach R-3 and
-    # R-4. With no compiled arbiter, REQUIRING the input is the one disposition
-    # that pre-judges neither answer.
-    #
-    # NOT A VALIDATION ADDED TO THE CYCLE (rule R-3): nothing is checked that the
-    # frozen source does not check, and what the frozen source does with an
-    # unanswered prompt is refuse to proceed.
     parser.add_argument(
         _OK_TO_POST_OPTION,
         action=argparse.BooleanOptionalAction,
@@ -272,32 +221,19 @@ def _add_run_confirmation_argument(parser: argparse.ArgumentParser) -> None:
 def _build_parser() -> argparse.ArgumentParser:
     """Compose this route's parser from the shared fragments plus one local pair.
 
-    Three calls, no conditionals, and no option defined here that `args` already
-    owns: the `WS-Calling-Data` binding is NOT redefined, so `--ws-caller`,
-    `--ws-del-link`, `--ws-process-func`, `--ws-sub-function` and `--ws-cd-args`
-    all come from one implementation shared by every entry point. Only the
-    run-confirmation pair is local, and only because it is `pl100`'s alone.
-
-    `--ws-caller` defaults to `args.WS_CALLER_PURCHASE`, the literal the frozen
-    menu itself moves into the field [purchase/purchase.cbl:L475], because
-    purchase/purchase.cbl is the shell that dispatches this route.
-
-    `args.add_slpl_linkage_arguments` supplies the REQUIRED `--run-date` - the
-    controlled clock's only input, with no default and no ambient fallback
-    (rule R-6) - together with `--date-form` and the `--irs-instead` fan-out
-    switch [copybooks/wssystem.cob:L179-L181]. Section 0.6.4 requires that
-    switch be pinned explicitly for every scenario, since its state changes
-    which tables a run touches and leaving it out makes the affected-table list
-    ambiguous.
+    Three calls, no conditionals, and no option defined here that `args` already owns:
+    the `WS-Calling-Data` binding is NOT redefined, so `--ws-caller`, `--ws-del-link`,
+    `--ws-process-func`, `--ws-sub-function` and `--ws-cd-args` all come from one
+    implementation shared by every entry point.
 
     Returns:
-        A parser that has not parsed anything. Built on demand inside `main()`
-        rather than at module scope, so importing this module does no work.
+        A parser that has not parsed anything. Built on demand inside `main()` rather
+            than at module scope, so importing this module does no work.
     """
     parser = argparse.ArgumentParser(
         prog="python -m acas_posting.cli.pl_payment_post",
-        #  HAND-WRAPPED, because RawDescriptionHelpFormatter (chosen for the
-        #  epilog's verbatim COBOL, below) leaves the description unwrapped too.
+        # HAND-WRAPPED, because RawDescriptionHelpFormatter (chosen for the epilog's
+        # verbatim COBOL, below) leaves the description unwrapped too.
         description=(
             "Purchase payment posting - pl100.\n"
             "\n"
@@ -309,9 +245,9 @@ def _build_parser() -> argparse.ArgumentParser:
             "and the open-item file, and\n"
             f"writes period total PL-Payments ({_PROGRAM_SOURCE}:L396)."
         ),
-        #  The COBOL is quoted verbatim in the epilog, so `--help` carries the
-        #  specification it reproduces. RawDescriptionHelpFormatter keeps the
-        #  quotation's own line breaks; argparse would otherwise reflow it.
+        # The COBOL is quoted verbatim in the epilog, so `--help` carries the
+        # specification it reproduces. RawDescriptionHelpFormatter keeps the quotation's
+        # own line breaks.
         epilog=(
             "The dispatch route, verbatim from the frozen source:\n"
             "\n"
@@ -357,12 +293,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-#  THE DISPATCH PARAGRAPHS
-#  Two functions, two paragraphs, in the COBOL's own source order: the shared
-#  dispatch helper `load000.` first, as purchase/purchase.cbl declares it
-#  (L691), then the route paragraph `load12.` that transfers to it (L786). Both
-#  are named after their paragraph, which is what rule R-5 requires and what
-#  makes the traceability footer mechanical rather than editorial.
+# Two functions, two paragraphs, in the COBOL's own source order.
 
 
 def load000(
@@ -374,42 +305,8 @@ def load000(
 ) -> int:
     """``load000.``  [purchase/purchase.cbl:L691-L704] - the five-parameter dispatch.
 
-    The paragraph, verbatim from the frozen source::
-
-        L691  load000.
-        L692 *>------
-        L693 *>
-        L694       move     zero to ws-term-code.
-        L695       call     ws-called using ws-calling-data
-        L696                                system-record
-        L697                                WS-system-record-4
-        L698                                to-day
-        L699                                file-defs
-        L700       end-call
-        L701       if       ws-term-code < 8  *> for pl055 & 060, xl150
-        L702                perform overrewrite.
-        L703       if       ws-term-code > 7      *> Got a serious (reported) error
-        L704                go to overrewrite.
-
-    THIS MODULE'S OWN COPY, ON PURPOSE. `acas_posting.cli.pl_order_post` carries
-    a copy of the same paragraph for `pl055` and `pl060`, and the two are NOT
-    shared. The duplication mirrors the COBOL, where every menu program carries
-    its own `load000` - purchase/purchase.cbl at L691-L704, sales/sales.cbl at
-    L698-L712 - and the two copies already differ in a way a shared helper would
-    have to erase (see the mechanism note below). Each entry point therefore
-    reimplements the paragraph against its own locators.
-
-    Consequently this copy dispatches ONE callee, `pl100`. The COBOL's
-    `call ws-called` [purchase/purchase.cbl:L695] is a dynamic call by name and
-    so serves `pl055`, `pl060` and `pl100` from one paragraph; here the callee is
-    named at the import, because `acas_posting.programs` publishes no dispatch
-    table, no registry and no `run` re-export - a caller cannot reach into a
-    program any more than a COBOL `CALL` can (section 0.3.3).
-
-    `WS-Term-Code` IS THE RETURN VALUE, and it is read from the linkage record
-    rather than tracked separately: `WS-Calling-Data` is passed BY REFERENCE, so
-    a callee that sets the field writes into the caller's own storage, and the
-    two tests at L701 and L703 read exactly what the callee left there.
+    THIS MODULE'S OWN COPY, ON PURPOSE. `acas_posting.cli.pl_order_post` carries a copy
+    of the same paragraph for `pl055` and `pl060`, and the two are NOT shared.
 
     Args:
         linkage: the five bound arguments in COBOL parameter order
@@ -424,29 +321,17 @@ def load000(
 
     Returns:
         `WS-Term-Code` after the dispatch, as the callee left it. `pic 99`
-        [copybooks/wscall.cob:L10], so 0 through 99.
+            [copybooks/wscall.cob:L10], so 0 through 99.
     """
     calling_data = linkage.calling_data
 
-    # [purchase/purchase.cbl:L694]  move zero to ws-term-code.
-    # R-4, and the PLACEMENT is the reproduction: the clear happens once per
-    # dispatch, immediately before the CALL, not once per run. `WS-Term-Code` is
-    # shared linkage storage, so a code left behind by a previous callee would
-    # still be there for the next test of it.
+    # [purchase/purchase.cbl:L694] move zero to ws-term-code. R-4, and the PLACEMENT is
+    # the reproduction: the clear happens once per dispatch, immediately before the
+    # CALL, not once per run.
     args.reset_term_code(calling_data)
 
-    # [purchase/purchase.cbl:L789]  move "pl100" to ws-called.
-    # ISSUED BY `load12`, APPLIED HERE, and the two orderings are equivalent.
-    # In the COBOL the MOVE runs in load12 (L789) and the clear above runs in
-    # load000 (L694), so the frozen order is L789 then L694 while this function
-    # writes the fields the other way round. Per-site proof: the two statements
-    # write DISJOINT fields of `WS-Calling-Data` - `WS-Called`
-    # [copybooks/wscall.cob:L7] and `WS-Term-Code` [copybooks/wscall.cob:L10] -
-    # and no statement between them reads either, the next reader being the CALL
-    # itself at L695. Neither field's value depends on the other, so their
-    # relative order is unobservable. The MOVE is placed here so that the field
-    # provably holds the callee's program-id at the dispatch, which is the
-    # property L695 depends on.
+    # [purchase/purchase.cbl:L789] move "pl100" to ws-called. ISSUED BY `load12`,
+    # APPLIED HERE, and the two orderings are equivalent.
     args.set_called(calling_data, _PROGRAM_ID)
 
     _LOG.info(
@@ -495,25 +380,6 @@ def load000(
 
     term_code = calling_data.ws_term_code
 
-    # [purchase/purchase.cbl:L701-L702]
-    #     if ws-term-code < 8  *> for pl055 & 060, xl150
-    #              perform overrewrite.
-    # R-4 [purchase/purchase.cbl:L701-L702]. THE TWO TESTS ARE EXHAUSTIVE:
-    # `WS-Term-Code` is `pic 99` [copybooks/wscall.cob:L10], domain 0 through 99,
-    # over which `< 8` and `> 7` partition every possible value - so `load000`
-    # ALWAYS reaches `overrewrite`, by one branch or the other. The maintainer's
-    # own comment names pl055, pl060 and xl150, none of which is the callee on
-    # this route; the test is reproduced as written regardless.
-    #
-    # Q-CLI-OVERREWRITE, SETTLED BY REPRODUCTION. `overrewrite.`
-    # [purchase/purchase.cbl:L621-L636] persists the mutated `System-Record`
-    # (File-Key-No 1) and `WS-System-Record-4` (File-Key-No 4) to the relational
-    # store, and `args.overrewrite` is that paragraph. It matters on this route
-    # because `pl100` writes one of the nine period totals
-    # [purchase/pl100.cbl:L396] into the linkage record and this paragraph is its
-    # only writer to the store. Only the Cobol-file arm
-    # [purchase/purchase.cbl:L637-L649] has no counterpart, the migration having a
-    # single store - see `args.RDBMS_STORE_SELECTOR_DIGIT`.
     if not args.is_serious_error(term_code):
         _LOG.info(
             "%s returned ws-term-code=%d (< %d): `perform overrewrite.` "
@@ -526,44 +392,9 @@ def load000(
         args.overrewrite(linkage.system_record, menu_state, linkage.file_defs)
         return term_code
 
-    # [purchase/purchase.cbl:L703-L704]
-    #     if ws-term-code > 7      *> Got a serious (reported) error
-    #              go to overrewrite.
-    # GO TO class 4 (sibling re-dispatch) -> `overrewrite.`
+    # [purchase/purchase.cbl:L703-L704] if ws-term-code > 7 *> Got a serious (reported)
+    # error go to overrewrite. GO TO class 4 (sibling re-dispatch) -> `overrewrite.`
     # [purchase/purchase.cbl:L621].
-    #
-    # PER-SITE PROOF OF EQUIVALENCE, as class 4 requires.
-    #   COBOL:  `go to overrewrite` enters a paragraph that does work (it
-    #           persists both system records, L621-L650) and then TRANSFERS
-    #           CONTROL ITSELF - it falls through into `overclose.` at L652,
-    #           whose single statement is `goback.` at L653. The run unit ends
-    #           there. Control never returns to L704, `load000-exit.` at L706 is
-    #           never reached, and the `go to display-menu.` at L708 never runs,
-    #           so no further program is invoked.
-    #   Python: return the serious-error disposition to the caller, which
-    #           returns it unchanged through `load12`; `main()` then ends the
-    #           process with `args.exit_status_for(term_code)`. No further
-    #           program is invoked on this path either, because `load12`
-    #           dispatches exactly one.
-    #   Proof:  both paths (a) invoke no further program, (b) persist the two
-    #           system records on the way out through `args.overrewrite`, and
-    #           (c) end the run unit. Nothing observable differs.
-    #
-    # R-4, MECHANISM DIVERGENCE FROM SALES - PRESERVED, NOT HARMONISED. Purchase
-    # writes `go to overrewrite` [purchase/purchase.cbl:L703-L704]; Sales writes
-    # `perform overrewrite` then `goback` [sales/sales.cbl:L710-L712]. The net
-    # effect is the same - persist, then end the run unit - but the mechanism
-    # genuinely differs, and it is one reason each entry point carries its own
-    # copy of this paragraph rather than sharing one.
-    #
-    # UNREACHABLE IN PRACTICE ON THIS ROUTE, AND IMPLEMENTED ANYWAY. `pl100`
-    # never assigns `WS-Term-Code`: only three of the twelve in-scope programs
-    # do - `gl070` sets 5 [general/gl070.cbl:L289], `sl055` sets 8
-    # [sales/sl055.cbl:L344] and `pl055` sets 8 [purchase/pl055.cbl:L286] - so
-    # after this dispatch the field still holds the zero L694 put there. The
-    # branch is written because the frozen paragraph writes it, and dropping a
-    # statement on the grounds that the current callee cannot trigger it would
-    # be an omission rather than a migration.
     _LOG.error(
         "%s returned ws-term-code=%d (> %d): serious error, `go to overrewrite.` "
         "[%s:L703-L704] rewrites SYSTEM-REC and SYSTOT-REC -> `overclose.` "
@@ -586,32 +417,11 @@ def load12(
 ) -> int:
     """``load12.``  [purchase/purchase.cbl:L786-L790] - the Purchase payment-post route.
 
-    The paragraph, verbatim from the frozen source::
-
-        L786  load12.
-        L787 *>------
-        L788 *>
-        L789       move     "pl100" to ws-called.
-        L790       go       to load000.
-
-    NO GATE, AND NOTHING AFTER THE DISPATCH. Two statements: name the callee,
-    transfer to the shared dispatch paragraph. There is no test of
-    `WS-Term-Code` before or after, and the transfer at L790 is a `go to` rather
-    than a `perform`, so control never comes back - `load000` runs to its own
-    exit and reaches `display-menu` (L708) or `overrewrite` (L704) on its own
-    account. Nothing may follow the dispatch here, and nothing does.
-
-    R-4: the absence of a gate is reproduced as an absence. Sales `load11.`
-    [sales/sales.cbl:L792-L796] and General Ledger `load09.`
-    [general/general.cbl:L817-L821] are equally ungated, while General Ledger
-    `load08.` [general/general.cbl:L805-L815] tests `ws-term-code = 5` between
-    its phases and Sales `load07.` [sales/sales.cbl:L756-L768] tests
-    `not = zero` twice. Four sibling routes, three different gate policies; the
-    difference is deliberate and is not smoothed away.
+    NO GATE, AND NOTHING AFTER THE DISPATCH. Two statements: name the callee, transfer
+    to the shared dispatch paragraph.
 
     Args:
-        linkage: as `load000` - the five bound arguments, mutated by the
-            dispatch.
+        linkage: as `load000` - the five bound arguments, mutated by the dispatch.
         ok_to_post: the run confirmation, forwarded unchanged and explicitly.
 
     Returns:
@@ -671,15 +481,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     not got (rule R-3) and would hide a misconfiguration behind an exit code.
 
     Args:
-        argv: the argument vector WITHOUT the program name. `None` - the normal
-            case - lets argparse read `sys.argv[1:]` itself. A sequence is
-            accepted so that a caller can drive this route in-process, which is
-            how the scenario suites invoke it.
+        argv: the argument vector WITHOUT the program name. `None` - the normal case -
+            lets argparse read `sys.argv[1:]` itself.
 
     Returns:
-        The process exit status: `WS-Term-Code` after the dispatch, unmapped. 0
-        when `pl100` reported nothing, which is every run of this route in
-        practice - `pl100` never assigns the field.
+        The process exit status: `WS-Term-Code` after the dispatch, unmapped.
 
     Raises:
         SystemExit: raised by argparse for a usage error or for `--help`. Not
@@ -717,6 +523,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     #  clock is read on any route (rule R-6). All this module does is pass on a
     #  `--log-level` the operator actually supplied; see the block below.
 
+    #  L346  aa005-Open-System.   L360  aa010-Get-System-Recs.
+    #  THE RECORDS `pl100` MUST SEE, READ BEFORE THE DISPATCH. The Purchase shell
+    #  reads file-key 4 into `WS-System-Record-4` and file-key 1 into
+    #  `System-Record` [purchase/purchase.cbl:L346-L398] - TWO keys, where the
+    #  General Ledger shell reads three. `pl100` ACCUMULATES into the period totals
+    #  [purchase/pl100.cbl:L396] rather than initialising them, so binding declared
+    #  defaults discarded every prior period's figures (finding CLI-02).
+    #
+    #  THE EXACT TYPE IS CAUGHT, NOT `ValueError` (finding CLI-09).
     #  Step 3. Bind the five-parameter shape. `called=` fills `WS-Called` from
     #  the callee's program-id and, through it, selects the Purchase menu as the
     #  caller; `--ws-caller` still overrides that. The run date is pinned here
@@ -763,15 +578,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         linkage, menu_state=menu_state, ok_to_post=parsed.ok_to_post
     )
 
-    #  Step 5. `Q-CLI-EXITSTATUS` was settled in `args.exit_status_for`, which
-    #  establishes that the compiled cycle emits NO exit status derived from
-    #  `WS-Term-Code` at all - every occurrence of `RETURN-CODE` in the five
-    #  menus and all twelve posting programs is a READ of what a
-    #  `call "SYSTEM"` left behind, e.g. [purchase/purchase.cbl:L434], and the
-    #  menus end with a bare `goback` [purchase/purchase.cbl:L653]. The process
-    #  boundary is therefore new in the migration and the identity is adopted
-    #  because it loses nothing. This route re-uses that decision and does not
-    #  re-encode the value.
     return args.exit_status_for(term_code)
 
 

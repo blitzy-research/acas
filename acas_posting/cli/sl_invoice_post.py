@@ -1,19 +1,26 @@
 """Sales transaction posting: `sl055`, then the `not = zero` gate, then `sl060`.
 
-The batch entry point for the Sales invoice posting route. It reproduces one
-paragraph of the Sales menu shell - `load07.` [sales/sales.cbl:L756-L768] - and
-its dispatch helper `load000.` [sales/sales.cbl:L698-L712], with no screen output
-of any kind.
+The batch entry point for `sales/sales.cbl` `load07.` L756-L768 and its dispatch
+helper `load000.` L698-L712, with no screen output. The maintainer's own inline
+comment on the label line reads "Sales trans posting"; `load08.` L770-L774 is a
+different route (sl080, Payment Input) and is out of scope.
 
-THE PARAGRAPH IS `load07`, AND IT IS NOT `load08`
-=================================================
-Two planning documents label this route `load08`, and both are wrong. The frozen
-source settles it four times over, so this correction is stated here, at the top
-of the file, rather than buried in the footer:
+The gate here differs from the General Ledger's and both are preserved. Sales
+tests `if ws-term-code not = zero go to display-menu` after each leg
+[sales/sales.cbl:L761-L766], where General tests `= 5`
+[general/general.cbl:L810-L811], and Purchase tests nothing at all - its
+equivalent lines are commented out [purchase/purchase.cbl:L755-L758]. Unifying
+the three would be a behaviour change.
 
-  1. THE MAINTAINER'S OWN INLINE COMMENT SITS ON THE LABEL LINE::
+The linkage is five parameters - ws-calling-data, system-record,
+system-record-4, to-day, file-defs [sales/sl060.cbl:L395-L399] - passed through
+`load000.`, which also carries the `< 8` / `> 7` disposition
+[sales/sales.cbl:L691]. The IRS fan-out switch [copybooks/wssystem.cob:L179-L181]
+decides which tables a run touches, so `--irs-instead` publishes it rather than
+leaving it implicit.
 
-         L756  load07.             *> Sales trans posting
+The run date is an argument and never a clock reading (R-6): neither sl055 nor
+sl060 reads a clock, both receive the date through linkage.
 
      Nothing else in sales/sales.cbl is annotated "Sales trans posting".
   2. `load08.` DISPATCHES A DIFFERENT AND OUT-OF-SCOPE PROGRAM::
@@ -45,250 +52,6 @@ script - `'sl_invoice_post:sales:G:load07:sales/sales.cbl:L756-L768'`
 [harness/run_cobol_scenario.sh:L251].
 
 THE ROUTE, VERBATIM FROM THE FROZEN SOURCE
-==========================================
-::
-
-    L756  load07.             *> Sales trans posting
-    L759       move     "sl830" to WS-Called.   *> In case autogen is use
-    L760       perform  load00.
-    L761       if       ws-term-code not = zero
-    L762                go to display-menu.
-    L763       move     "sl055" to ws-called.
-    L764       perform  load000.
-    L765       if       ws-term-code not = zero
-    L766                go to display-menu.
-    L767       move     "sl060" to ws-called.
-    L768       go       to load000.
-
-Three properties of that paragraph are load-bearing and are preserved exactly:
-
-  * `perform load000` at L764 RETURNS, so the gate at L765-L766 is reachable;
-    `go to load000` at L768 does NOT return, so NO CODE MAY FOLLOW the final
-    dispatch. `load07` therefore ends with its second dispatch and nothing else.
-  * the two dispatches share ONE `WS-Calling-Data` and ONE pair of system
-    records - only `WS-Called` changes between them - because COBOL passes group
-    items by reference. One `SlPlLinkage` instance serves both, which is what
-    lets `sl055`'s period-total writes reach `sl060`.
-  * `sl830` is out of scope, so this route dispatches `sl055` -> gate ->
-    `sl060` and the `load00` head of the chain (L759-L762) is not migrated. It is
-    recorded as an omission in the footer rather than silently dropped, and the
-    oracle driver script documents the same asymmetry under "THE sl830
-    ASYMMETRY" [harness/run_cobol_scenario.sh:L332-L336].
-
-THE DISPATCH HELPER, AND ITS FIVE PARAMETERS
-============================================
-Both in-scope dispatches go through `load000.`, the FIVE-parameter shape::
-
-    L698  load000.
-    L701       move     zero to ws-term-code.
-    L702       call     ws-called using ws-calling-data
-    L703                                System-Record
-    L704                                WS-System-Record-4
-    L705                                to-day
-    L706                                file-defs
-    L707       end-call
-    L708       if       ws-term-code < 8  *> for sl055 & 060, xl150
-    L709                perform overrewrite.
-    L710       if       ws-term-code > 7      *> Got a serious (reported) error
-    L711                perform overrewrite
-    L712                goback.
-
-FIVE, not four. The callee declares the same five, in the same order:
-`procedure division using ws-calling-data / system-record / system-record-4 /
-to-day / file-defs` [sales/sl060.cbl:L395-L399] and identically at
-[sales/sl055.cbl:L271-L275]. What Shape 2 adds to the General Ledger's Shape 1
-is exactly `WS-System-Record-4` - `SYSTOT-REC` [copybooks/wssys4.cob], the
-period-totals record that this route's two programs write. Agent Action Plan
-section 0.4.1.1 calls this "the four-parameter SL/PL linkage shape"; that is a
-slip, recorded as CORRECTION 2 in the footer, and section 0.1.1 has it right -
-"The Sales and Purchase families add the fourth system record".
-
-The maintainer's own comment at L708 names the beneficiaries of this paragraph:
-`*> for sl055 & 060, xl150`.
-
-`< 8` AND `> 7` ARE EXHAUSTIVE, so `load000` ALWAYS performs `overrewrite`:
-`WS-Term-Code` is `pic 99` [copybooks/wscall.cob:L10], domain 0 through 99, over
-which the two tests are complementary. The `> 7` case additionally `goback`s,
-which ends the RUN UNIT - the menu program itself stops.
-
-FOUR GATE FORMS, DELIBERATELY NOT HARMONISED  (rule R-4)
-========================================================
-The predicate here is `not = zero`, and it is not the predicate its siblings use.
-The four forms the frozen source actually contains:
-
-  Sales     `if ws-term-code not = zero / go to display-menu`
-            [sales/sales.cbl:L765-L766] - ANY non-zero code stops the chain.
-  General   `if ws-term-code = 5 / go to display-menu`
-            [general/general.cbl:L810-L811] - an EQUALITY test against the one
-            abort code `gl070` raises [general/gl070.cbl:L289].
-  Purchase  NO PARAGRAPH-LEVEL GATE AT ALL. `load08.`
-            [purchase/purchase.cbl:L752-L762] runs `pl055` through `load000` and
-            falls straight into `pl060` with nothing tested in between.
-  load000   `if ws-term-code > 7 / perform overrewrite / goback`
-            [sales/sales.cbl:L710-L712] - a THRESHOLD test that ends the run unit
-            instead of returning to the menu.
-
-Harmonising any of them would be a behaviour change, and under rule R-4 a
-behaviour change is a failure: "A defect reproduced is correct; a defect fixed is
-a failure." Each form is reproduced where the source puts it.
-
-THE FOURTH DIVERGENCE: THE GATE IS LIVE ONLY FOR CODES 1 THROUGH 7
-==================================================================
-`sl055` sets `WS-Term-Code` to EIGHT, and only ever to eight. Its one raise site
-is the branch taken when the GnuCOBOL file-existence built-in it calls at
-[sales/sl055.cbl:L336-L337] reports the analysis extract missing::
-
-    sales/sl055.cbl
-    L338       if    return-code not = zero
-    L339             display  SL125  at 2301
-    L340             display  SL002  at 2401
-    L341             if     WS-Caller not = "xl150"
-    L342                    accept WS-Reply at 2435
-    L343             end-if
-    L344             move 8 to WS-Term-Code
-    L345             goback
-
-Trace eight through `load000`: it is not `< 8`, and it IS `> 7`, so control takes
-L710-L712 - `perform overrewrite`, then `goback` - and the menu PROGRAM ENDS.
-The `not = zero` gate at L765-L766 is therefore NEVER REACHED for code eight. It
-is reachable only for codes 1 through 7, which `sl055` never raises. A census of
-every `move ... to ws-term-code` in the in-scope programs finds exactly three
-raises: 5 at [general/gl070.cbl:L289], 8 at [sales/sl055.cbl:L344] and 8 at
-[purchase/pl055.cbl:L286].
-
-Three consequences, all encoded rather than reasoned away:
-
-  * BOTH STOPS ARE IMPLEMENTED. The `> 7` stop belongs to `load000` and ends the
-    run unit; the `not = zero` gate belongs to `load07` and returns to the menu.
-    They are different dispositions in the source and both are written here.
-  * THE GATE IS NOT SIMPLIFIED TO "if 8". The COBOL predicate is `not = zero`,
-    so a code of 3 stops this chain exactly as a code of 8 does.
-  * THE SALES-VERSUS-PURCHASE DIVERGENCE LIVES ENTIRELY IN THE 1..7 BAND. Sales
-    returns to the menu for any non-zero code at or below seven; Purchase, having
-    no gate, would proceed to `pl060`. Because `sl055` and `pl055` only ever raise
-    eight the difference is currently unobservable - but it is reproduced anyway,
-    because any other code in that band would diverge.
-
-THE CLOCK CONTRACT  (rule R-6)
-==============================
-The run date enters this route ONCE, as the REQUIRED `--run-date` option, and
-reaches the two programs only through the linkage. Nothing here reads a system
-clock, an elapsed-time counter, an environment variable or an entropy source, and
-neither do the twelve in-scope posting programs. The frozen call chain holds
-FOURTEEN ambient date and time reads across six files - six `FUNCTION
-CURRENT-DATE` [common/ACAS.cbl:L353], [general/general.cbl:L371],
-[sales/sales.cbl:L323], [purchase/purchase.cbl:L318], [irs/irs.cbl:L480],
-[copybooks/Proc-ACAS-Mapser-RDB.cob:L72], four `accept ... from time` and four
-`accept ... from date` - and EVERY ONE of them is in an out-of-scope menu shell or
-in the date-service copybook those shells COPY, as the census in
-`acas_posting/clock.py` records. The one that matters to a posting run is
-[copybooks/Proc-ACAS-Mapser-RDB.cob:L72-L80], which builds `to-day` at L77 and
-stores the binary `run-date` at L80 - and even that runs only on the FIRST-TIME
-capture path `ba010-Capture-Data`; a normal Sales run takes `to-day` from the
-STORED `Run-Date` - `move run-date to u-bin` / `call "maps04"` / `move u-date to
-to-day` [sales/sales.cbl:L409-L411]. Both observables are pinned by
-`acas_posting.clock` through `acas_posting.cli.args.resolve_clock`, so two runs of
-one scenario are byte-identical (Agent Action Plan section 0.8.5).
-
-PIN `--irs-instead` EXPLICITLY ON THIS ROUTE
-============================================
-`SYSTEM-REC IRS-Instead pic x` [copybooks/wssystem.cob:L179] with its two
-condition names, `88 IRS-Used value "Y"` at L180 and `88 IRS-Both-Used value "B"`
-at L181, decides WHICH TABLES the run touches: `sl060` reads it at three sites -
-[sales/sl060.cbl:L1039], [sales/sl060.cbl:L1126] and [sales/sl060.cbl:L1175] -
-to choose between the General Ledger posting tables, the IRS posting table, or
-both. Agent Action Plan section 0.6.4 therefore requires every scenario to pin it
-explicitly, "since leaving it out makes the affected-table list ambiguous". The
-option comes from `args.add_slpl_linkage_arguments` and is not redefined here.
-
-WHAT THIS MODULE MAY AND MAY NOT IMPORT
-=======================================
-MAY, and does: `argparse`, `enum`, `logging`, `collections.abc`, `typing`;
-`acas_posting.cli.args`; and the two program modules this route dispatches. The
-per-directory import table of Agent Action Plan section 0.4.3 allows `cli/*.py`
-exactly `programs`, `clock` and `cli.args`.
-
-MAY NOT, and does not: the data-access layer including its facade, the record
-layer, the COBOL-semantics package, the dictionary package, the work-file module,
-and the compiled comparison oracle's own tree. (The forbidden names are given in
-prose here on purpose: this module states its constraints without spelling any
-banned import, so that the mechanical greps a reviewer runs over it come back
-empty rather than needing to be read.) Two consequences are visible in the code
-rather than merely promised:
-
-  * `acas_posting.clock` is PERMITTED but NOT IMPORTED, because it is already
-    reached through `args.bind_slpl_linkage` -> `args.resolve_clock`. An import
-    this module did not use would be dead weight, and the clock contract is not
-    weakened by routing through the one module whose job is binding.
-  * the private dispatch protocol types its five record parameters as `Any`. The
-    record classes would name those types exactly, but the record layer is
-    outside this layer's whitelist, and `args` deliberately does not re-export
-    them. The five parameter NAMES carry the shape instead, and the real types are
-    enforced where they belong - in `args.SlPlLinkage`, whose members this module
-    splats without touching.
-
-NO IMPORT-TIME SIDE EFFECTS
-===========================
-Importing this module binds names and creates one logger. It builds no parser,
-configures no logging, opens no file or connection, reads nothing from its
-surroundings and cannot fail for an environmental reason. `logging.basicConfig`
-is not called here AT ALL - the whole package has one call to it, in
-`acas_posting.__main__.configure_logging`, reached only from a process boundary -
-so neither importing this module nor calling `main` as a library reconfigures a
-host application's logging. That is a hard requirement: the scenario test suites
-import this package.
-
-CALLEE FAILURE IS NOT TRANSLATED; THE CONFIGURATION CONTRACT IS
-===============================================================
-  * `sl055` raises `CobolFileSystemPathUnavailable` when
-    `FS-Cobol-Files-Used` is true, having first set `WS-Term-Code` to eight per
-    [sales/sl055.cbl:L344]. It raises because the three sub-outcomes of the
-    file-existence block [sales/sl055.cbl:L336-L346] cannot be told apart
-    without running COBOL, which rule R-1 forbids. Catching it here and returning
-    eight would PICK one of those three outcomes - a behaviour change dressed as
-    a migration - so it is NOT caught. It is not a COBOL disposition, so it is not
-    mapped onto a `WS-Term-Code` either; it ends the process loudly and before any
-    posting, which is the only faithful outcome available.
-  * `RdbmsParamError` - the deployment contract for the six connection parameters
-    being absent or unusable - IS caught, in `main`, and only that exact type
-    (finding CLI-09). `args.report_configuration_failure` turns it into the one
-    documented status the whole package shares: 8 when the contract is absent, 1
-    when it is present but unusable. This is not a softening of the previous
-    "stop before it writes anything" contract, it is that contract made uniform
-    and diagnosable - the failure is raised while the six parameters are being
-    resolved, BEFORE the system store is opened, so nothing has been written when
-    it surfaces. What is deliberately NOT caught is `ValueError` at large: a
-    genuine defect must keep its traceback.
-
-THE RULES THAT BIND THIS FILE
-=============================
-`review_rules` reports NO user rules document for this project, so the binding
-constraints are the Agent Action Plan's own six (section 0.7.2), and enterprise
-best practice applies wherever they are silent. The per-rule verdict is in the
-footer; in outline:
-
-R-1 No COBOL at run time. Nothing here spawns a child process, loads a foreign
-    library or reaches the GnuCOBOL toolchain; there is no import path from this
-    package to the compiled oracle's tree, and no option selects, invokes or
-    diffs against that oracle - the oracle's own scripts drive this entry point
-    from outside, never the reverse.
-R-2 Zero binary floating point. `WS-Term-Code` is an `int` (`pic 99`), `to-day`
-    is a `str`, and no binary-radix numeric type appears anywhere - in a
-    signature, an option type or an expression. No arithmetic is performed here.
-R-3 No added validation, no added field, no schema change, no concurrency. In
-    particular there is NO "does the extract file exist?" pre-check here: that
-    test lives inside `sl055` [sales/sl055.cbl:L336-L346] and duplicating it
-    would be a validation this migration may not add. There is no worker, pool
-    or event loop to configure and no option that would create one, so the two
-    programs run one at a time with the gate between them.
-R-4 Legacy behaviour is reproduced, never corrected - see the four gate forms
-    above. Each reproduction below carries its COBOL locator in a comment, as
-    section 0.7.4 C-4 requires.
-R-5 Full traceability: paragraph-named functions, a `GO TO` class at every
-    transfer site, and the mandatory footer.
-R-6 Compiled behaviour is the tie-breaker, so the clock is injected, the run date
-    is a required argument, and the three open questions are marked in place
-    rather than guessed.
 """
 
 from __future__ import annotations
@@ -304,50 +67,33 @@ from acas_posting.programs import sl055_invoice_extract_analysis, sl060_invoice_
 
 __all__: Final[tuple[str, ...]] = ("main", "load000", "load07")
 
-#  Diagnostics only. Agent Action Plan section 0.3.4 turns a display with no
-#  database effect into "a log record at a severity matching the original's
-#  intent" that "must not alter control flow and must not appear in any table
-#  dump". Every call below obeys both halves of that: nothing branches on a log
-#  record, and nothing logged reaches a column. `print` is never used.
+# Diagnostics only.
 _LOG: Final[logging.Logger] = logging.getLogger(__name__)
 
 
-#  THE TWO PROGRAM-IDS THIS ROUTE MOVES INTO `WS-Called`
-#  Named constants rather than inline literals so that the `move` each one
-#  reproduces has one spelling and one locator. Both are five characters, which
-#  `args.set_called` space-fills to the eight of `WS-Called pic x(8)`
-#  [copybooks/wscall.cob:L7].
-_PROGRAM_SL055: Final[str] = "sl055"  # sales/sales.cbl:L763
-_PROGRAM_SL060: Final[str] = "sl060"  # sales/sales.cbl:L767
+# Named constants rather than inline literals so that the `move` each one reproduces has
+# one spelling and one locator.
+_PROGRAM_SL055: Final[str] = "sl055"
+_PROGRAM_SL060: Final[str] = "sl060"
 
-#  R-4 [sales/sales.cbl:L765] - the figurative constant ZERO of
-#  `if ws-term-code not = zero`. Read out of the record layer's own declared
-#  default through `args`, never typed as a literal, so the comparison value
-#  cannot drift from `WS-Term-Code pic 99` [copybooks/wscall.cob:L10]. It is an
-#  `int`, never a binary-radix numeric type (rule R-2).
+# R-4 [sales/sales.cbl:L765] - the figurative constant ZERO of `if ws-term-code not =
+# zero`.
 _WS_TERM_CODE_ZERO: Final[int] = args.WS_TERM_CODE_DEFAULT
 
 
 class _Stop(enum.Enum):
     """The two DIFFERENT dispositions that stop this route, named.
 
-    The source contains both and they are not the same event, so each has a name
-    here rather than living only in a comment (rule R-5). What they share is the
-    observable outcome at a headless boundary - the operation ends, no further
-    program is dispatched, and the process leaves with the term code - and what
-    they do not share is where the stop is decided and what the COBOL then does
-    with the terminal.
+    The source contains both and they are not the same event, so each has a name here
+    rather than living only in a comment (rule R-5).
 
     Attributes:
         RUN_UNIT_ENDED: `if ws-term-code > 7 / perform overrewrite / goback`
-            [sales/sales.cbl:L710-L712], decided INSIDE `load000`. `goback` from
-            the menu's own paragraph ends the RUN UNIT: the menu program stops
-            and no further selection is possible. This is the disposition
-            `sl055`'s term code of eight actually takes.
+            [sales/sales.cbl:L710-L712], decided INSIDE `load000`. `goback` from the
+            menu's own paragraph ends the RUN UNIT.
         RETURNED_TO_MENU: `if ws-term-code not = zero / go to display-menu`
-            [sales/sales.cbl:L765-L766], decided in `load07`. The menu is redrawn
-            and awaits the next selection; the program does NOT end. Live only
-            for codes 1 through 7 - see the module docstring.
+            [sales/sales.cbl:L765-L766], decided in `load07`. The menu is redrawn and
+            awaits the next selection.
     """
 
     RUN_UNIT_ENDED = "run unit ended (perform overrewrite / goback)"
@@ -357,25 +103,11 @@ class _Stop(enum.Enum):
 class _SlPlPostingProgram(Protocol):
     """What `call ws-called` dispatches: a program module exposing `run`.
 
-    `call ws-called using ...` [sales/sales.cbl:L702-L707] is a DYNAMIC call by
-    name - the callee is whatever program-id the field holds. The migrated
-    equivalent passes the program MODULE itself, and `load000` reads `run` off it
-    at dispatch time, which keeps two properties of the original:
-
-      * the dispatch is late-bound, exactly as a dynamic `CALL` is; and
-      * a caller cannot reach into a program's internals, because a program
-        module publishes `run` and nothing else - `__all__ = ("run",)` in both
-        [acas_posting/programs/sl055_invoice_extract_analysis.py] and
-        [acas_posting/programs/sl060_invoice_posting.py]. Agent Action Plan
-        section 0.3.3: "Callers cannot reach into a program's internals, exactly
-        as a COBOL `CALL` cannot."
-
-    The five record parameters are typed `Any` because the record layer is
-    outside this layer's import whitelist (Agent Action Plan section 0.4.3) and
-    `args` does not re-export the classes. Their NAMES carry the shape, and the
-    real types are enforced by `args.SlPlLinkage`, whose five members this module
-    splats without inspecting. `to_day` keeps its `str` type, which needs no
-    record import and is the observable rule R-2 cares about.
+    * the dispatch is late-bound, exactly as a dynamic `CALL` is; and * a caller cannot
+    reach into a program's internals, because a program module publishes `run` and
+    nothing else - `__all__ = ("run",)` in both
+    [acas_posting/programs/sl055_invoice_extract_analysis.py] and
+    [acas_posting/programs/sl060_invoice_posting.py].
     """
 
     def run(
@@ -500,8 +232,6 @@ def _perform_overrewrite(
             entity-named `System-*` verbs carry no error check
             [copybooks/Proc-ACAS-FH-Calls.cob:L190-L230].
     """
-    #  DEBUG, not INFO: it is housekeeping around a dispatch, and section 0.3.4
-    #  forbids a diagnostic from altering control flow. It alters none.
     _LOG.debug(
         "overrewrite after %s (WS-Term-Code %d): persisting SYSTEM-REC and "
         "SYSTOT-REC [sales/sales.cbl:L628-L658]",
@@ -514,20 +244,16 @@ def _perform_overrewrite(
 def _log_stop(stop: _Stop, *, program_id: str, term_code: int) -> None:
     """Report which of the two stops fired, at a severity matching its intent.
 
-    `WARNING` rather than `ERROR`: neither stop is an error of this module's
-    making, and the callee has already reported whatever went wrong - `sl055`
-    logs its own `SL125` before raising, for instance. The record names the
-    COBOL disposition so that a reader of the run log can tell the run-unit end
-    from the menu return, which is the whole reason `_Stop` exists.
+    `WARNING` rather than `ERROR`: neither stop is an error of this module's making, and
+    the callee has already reported whatever went wrong - `sl055` logs its own `SL125`
+    before raising, for instance.
 
     Args:
         stop: which disposition the source takes at this site.
         program_id: the program-id whose term code caused the stop.
         term_code: the deciding `WS-Term-Code`.
     """
-    #  "no further program is dispatched" rather than "sl060 is not dispatched":
-    #  either stop can occur after EITHER dispatch, and naming the wrong callee
-    #  would be a diagnostic that misreports the run.
+    # "no further program is dispatched" rather than "sl060 is not dispatched".
     _LOG.warning(
         "%s left WS-Term-Code %d: %s; no further program is dispatched",
         program_id.strip(),
@@ -546,27 +272,9 @@ def load000(
 ) -> int:
     """`load000.` [sales/sales.cbl:L698-L712] - the five-parameter dispatch.
 
-    Reproduces the paragraph statement for statement::
-
-        L698  load000.
-        L701       move     zero to ws-term-code.
-        L702       call     ws-called using ws-calling-data
-        L703                                System-Record
-        L704                                WS-System-Record-4
-        L705                                to-day
-        L706                                file-defs
-        L707       end-call
-        L708       if       ws-term-code < 8  *> for sl055 & 060, xl150
-        L709                perform overrewrite.
-        L710       if       ws-term-code > 7      *> Got a serious (reported) error
-        L711                perform overrewrite
-        L712                goback.
-
-    The `< 8` and `> 7` tests are written as the source writes them - two
-    separate statements, not a two-armed conditional - because that is what they
-    are, and because `WS-Term-Code pic 99` [copybooks/wscall.cob:L10] makes them
-    exhaustive over 0..99: `overrewrite` is therefore performed on EVERY path
-    through this paragraph, once for a clean run and once for a serious error.
+    The `< 8` and `> 7` tests are written as the source writes them - two separate
+    statements, not a two-armed conditional - because that is what they are, and because
+    `WS-Term-Code pic 99` [copybooks/wscall.cob:L10] makes them exhaustive over 0..99.
 
     Args:
         linkage: the five arguments in COBOL parameter order
@@ -586,35 +294,23 @@ def load000(
 
     Returns:
         `WS-Term-Code` as the callee left it, which is also readable from
-        `linkage.calling_data.ws_term_code`. The caller MUST NOT dispatch
-        anything further when `args.is_serious_error` is true of it: that is the
-        `goback` of L712, whose only faithful expression across a function
-        boundary is a return the caller honours.
+            `linkage.calling_data.ws_term_code`. The caller MUST NOT dispatch anything
+            further when `args.is_serious_error` is true of it.
 
     Raises:
-        Nothing of its own. Whatever the callee raises propagates unchanged -
-        `sl055` can raise `CobolFileSystemPathUnavailable` after setting
-        `WS-Term-Code` to eight [sales/sl055.cbl:L344] - because mapping either
-        exception onto a term code would invent a disposition the COBOL does not
-        have. See the module docstring.
+        Nothing of its own.
     """
     calling_data = linkage.calling_data
 
-    #  R-4 [sales/sales.cbl:L701] `move zero to ws-term-code.`
-    #  PER DISPATCH, not once per run. The placement is load-bearing rather than
-    #  tidy: `WS-Term-Code` is shared linkage storage, so a code the previous
-    #  callee left behind would still be there for the next test of it - and on
-    #  this route that test decides whether `sl060` runs at all.
+    # R-4 [sales/sales.cbl:L701] `move zero to ws-term-code.` PER DISPATCH, not once per
+    # run. The placement is load-bearing rather than tidy.
     args.reset_term_code(calling_data)
 
-    #  R-4 [sales/sales.cbl:L763] and [sales/sales.cbl:L767]
-    #  `move "sl055" to ws-called.` / `move "sl060" to ws-called.`
-    #  HOISTED from the two call sites into this function, which is where the
-    #  program-id arrives, because this function IS `call ws-called` - the
-    #  dispatch takes the program-id as an argument where the COBOL reads it back
-    #  out of the field. The order relative to the reset above is immaterial: the
-    #  two statements write DIFFERENT fields of the group and nothing reads
-    #  either between them.
+    # R-4 [sales/sales.cbl:L763] and [sales/sales.cbl:L767] `move "sl055" to ws-called.`
+    # / `move "sl060" to ws-called.` HOISTED from the two call sites into this function,
+    # which is where the program-id arrives, because this function IS `call ws-called` -
+    # the dispatch takes the program-id as an argument where the COBOL reads it back out
+    # of the field.
     args.set_called(calling_data, program_id)
 
     _LOG.info(
@@ -689,38 +385,14 @@ def load000(
         )
         _log_stop(_Stop.RUN_UNIT_ENDED, program_id=program_id, term_code=term_code)
 
-    #  L714-L716 `load000-exit.` / `go to display-menu.` - the fall-through exit,
-    #  reached whenever L712 did not `goback`. The menu redraw has no database
-    #  effect and is omitted (Agent Action Plan section 0.3.4); returning to the
-    #  caller is what remains of it.
     return term_code
 
 
 def load07(linkage: args.SlPlLinkage, *, menu_state: args.MenuState) -> int:
     """`load07.` [sales/sales.cbl:L756-L768] - Sales transaction posting.
 
-    The maintainer's own label comment is the evidence for that locator:
-    `load07.             *> Sales trans posting` [sales/sales.cbl:L756]. See the
-    module docstring for the three further confirmations and for why `load08` -
-    which dispatches the out-of-scope `sl080` - is not this paragraph.
-
-    Reproduces the paragraph in SOURCE ORDER, minus the omitted `sl830` head::
-
-        L759       move     "sl830" to WS-Called.      <- OMITTED, out of scope
-        L760       perform  load00.                    <- OMITTED with it
-        L761       if       ws-term-code not = zero    <- OMITTED with it
-        L762                go to display-menu.
-        L763       move     "sl055" to ws-called.
-        L764       perform  load000.
-        L765       if       ws-term-code not = zero
-        L766                go to display-menu.
-        L767       move     "sl060" to ws-called.
-        L768       go       to load000.
-
-    Nothing follows the second dispatch, because L768 is `go to load000` rather
-    than `perform load000`: control never comes back to this paragraph, so any
-    statement written after it would be unreachable in the source and invented
-    here.
+    The maintainer's own label comment is the evidence for that locator: `load07. *>
+    Sales trans posting` [sales/sales.cbl:L756].
 
     Args:
         linkage: the five arguments in COBOL parameter order, as
@@ -734,19 +406,12 @@ def load07(linkage: args.SlPlLinkage, *, menu_state: args.MenuState) -> int:
             just accumulated.
 
     Returns:
-        `WS-Term-Code` after the last dispatch that ran: `sl055`'s if the chain
-        stopped there, otherwise `sl060`'s. Zero means the route completed.
+        `WS-Term-Code` after the last dispatch that ran: `sl055`'s if the chain stopped
+            there, otherwise `sl060`'s. Zero means the route completed.
 
     Raises:
         Nothing of its own - see `load000`.
     """
-    #  OMITTED [sales/sales.cbl:L759-L762]: `move "sl830" to WS-Called` /
-    #  `perform load00` and its own `not = zero` gate. The sales autogen series
-    #  sl800..sl830 is excluded by Agent Action Plan section 0.2.2, and section
-    #  0.4.1.1 has this entry point dispatch sl055 then sl060 only. `load00.`
-    #  [sales/sales.cbl:L677-L692] - the FOUR-parameter shape - is therefore not
-    #  implemented at all: this route has no caller for it. Recorded in the
-    #  footer, where the oracle-side asymmetry is recorded too.
 
     #  [sales/sales.cbl:L763-L764] `move "sl055" to ws-called.` /
     #  `perform load000.`  A `perform` RETURNS, which is why the gate below is
@@ -763,45 +428,11 @@ def load07(linkage: args.SlPlLinkage, *, menu_state: args.MenuState) -> int:
         channel=channel,
     )
 
-    #  THE RETURN LEG OF L712, NOT A SECOND GATE. `load000` has already taken its
-    #  own `> 7` disposition and logged it; in the COBOL that disposition was a
-    #  `goback` out of the whole menu program, so control never arrived here. A
-    #  Python function cannot end its caller, so the caller honours it instead.
-    #  This is NOT a substitute for the gate below and does NOT narrow it: the
-    #  gate keeps its own `not = zero` predicate, unaltered, and is what stops the
-    #  chain for codes 1 through 7. The Purchase route needs the same return leg,
-    #  because purchase/purchase.cbl `load000.` gobacks on `> 7` as well
-    #  [purchase/purchase.cbl:L703-L704]; what Purchase does NOT have is the
-    #  paragraph-level gate below.
+    # THE RETURN LEG OF L712, NOT A SECOND GATE. `load000` has already taken its own `>
+    # 7` disposition and logged it.
     if args.is_serious_error(term_code):
         return term_code
 
-    #  R-4 [sales/sales.cbl:L765-L766] `if ws-term-code not = zero /
-    #  go to display-menu.`
-    #
-    #  THE PREDICATE IS `not = zero`. It is NOT the General Ledger's `= 5`
-    #  [general/general.cbl:L810-L811] and it is NOT `= 8`; Purchase has no
-    #  gate here at all [purchase/purchase.cbl:L752-L762]. Three ledgers, three
-    #  forms, deliberately not harmonised: harmonising would be a behaviour
-    #  change and therefore, under rule R-4, a failure.
-    #
-    #  GO TO class 4 (sibling re-dispatch), per-site proof:
-    #    COBOL:  `go to display-menu` redraws the menu and awaits the next
-    #            selection; `sl060` is never reached.
-    #    Python: the operation ends immediately and `sl060` is never invoked.
-    #    Proof:  identical set of invoked programs and identical database effect.
-    #            The menu redraw is the only difference and it has no database
-    #            effect (Agent Action Plan section 0.3.4), while the awaiting of a
-    #            next selection has no headless equivalent - a command performs
-    #            one operation and returns.
-    #
-    # AMBIGUITY Q-CLI-TERMCODE-1-7: the 1..7 band is unreachable from sl055
-    # today - a census of the in-scope programs finds only 5 at
-    # [general/gl070.cbl:L289], 8 at [sales/sl055.cbl:L344] and 8 at
-    # [purchase/pl055.cbl:L286] - so this gate and Purchase's absence of one
-    # cannot currently be told apart by any run. Confirm against the compiled
-    # oracle that no other program on either route sets a code in that band, and
-    # record the resolution in docs/migration/ambiguity-resolutions.md (rule R-6).
     if term_code != _WS_TERM_CODE_ZERO:
         _log_stop(
             _Stop.RETURNED_TO_MENU,
@@ -824,25 +455,9 @@ def load07(linkage: args.SlPlLinkage, *, menu_state: args.MenuState) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     """Compose this route's parser from the shared option fragments.
 
-    Composed, never re-declared: `acas_posting.cli.args` owns the binding of argv
-    to `01 WS-Calling-Data` [copybooks/wscall.cob:L6-L14] and to the system
-    records, and every entry point of this package imports those definitions
-    rather than writing its own. Two fragments make Shape 2's option set:
-
-      * `add_calling_data_arguments(..., default_caller=WS_CALLER_SALES)` - the
-        five settable calling-data fields, defaulted to the literal this menu
-        moves into `WS-Caller`, `move "sales" to ws-caller`
-        [sales/sales.cbl:L481]. `WS-Called` gets no option because it is the
-        dispatch vehicle, and `WS-Term-Code` gets none because it is an output.
-      * `add_slpl_linkage_arguments(...)` - the REQUIRED `--run-date`, plus
-        `--date-form` and the fan-out switch `--irs-instead`.
-
-    No option of this module's own is added. In particular there is no option that
-    would create a worker, a pool or an event loop (rule R-3: execution is
-    strictly sequential), none that selects or diffs against the compiled oracle
-    (rule R-1), and no control-total option - Agent Action Plan section 0.6.4
-    records that Sales batches "balance by construction", so the control-total
-    mismatch scenario is General-Ledger-specific.
+    Composed, never re-declared: `acas_posting.cli.args` owns the binding of argv to `01
+    WS-Calling-Data` [copybooks/wscall.cob:L6-L14] and to the system records, and every
+    entry point of this package imports those definitions rather than writing its own.
 
     Returns:
         The parser. Built on call, never at import.
@@ -886,19 +501,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     """The CLI boundary: bind argv to the linkage, run `load07`, report the code.
 
     Args:
-        argv: the argument vector WITHOUT the program name. `None` means take it
-            from the command line, which is argparse's own behaviour and the only
-            way this module ever looks outside its arguments for one. Tests pass
-            an explicit sequence.
+        argv: the argument vector WITHOUT the program name.
 
     Returns:
-        The process exit status, which is `WS-Term-Code` itself:
-        `args.exit_status_for` is the identity, total and lossless over the
-        `pic 99` domain 0..99 [copybooks/wscall.cob:L10]. Zero means the route
-        completed; 8 is the code `sl055` raises when the analysis extract is
-        missing [sales/sl055.cbl:L344]. Q-CLI-EXITSTATUS, settled in `args`: the
-        COBOL menus never exit with the code at all, so the boundary is new in
-        the migration and the identity is the mapping that discards nothing.
+        The process exit status, which is `WS-Term-Code` itself: `args.exit_status_for`
+            is the identity, total and lossless over the `pic 99` domain 0..99
+            [copybooks/wscall.cob:L10].
 
     Raises:
         SystemExit: from argparse, for `--help` or a usage error - including the

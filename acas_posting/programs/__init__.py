@@ -26,14 +26,12 @@ layer and a database driver. Import the module you need directly.
     irs030_posting                  irs/irs030.cbl - `Ledger-Postings-Add`
                                     only [irs/irs030.cbl:L1569-L1733]
 
-Two programs are migrated only in part, and the boundaries are narrow: both
-files are otherwise dominated by interactive code that is out of scope, so
-working from the file rather than from the stated boundary would migrate
-several hundred lines that must not be migrated.
+Two of the twelve are migrated only in part, and their boundaries are narrow
+because both files are otherwise interactive: working from the file rather than
+from the stated boundary would migrate several hundred lines that must not be.
 
-Order is the target-tree order of the plan - not alphabetical, not grouped by
-ledger, not execution order. Phase numbering is the programs' own and is not
-sequential with execution: deletion is labelled phase 3 but runs after phase 4.
+Phase numbering is the programs' own and is not the execution order: deletion is
+labelled phase 3 and runs after phase 4.
 
 A program module may import `records`, `dal.facade`, the `cobol` semantics
 primitives, `dates` and `workfiles`. It may not import `cli`, a `dal.acas*`
@@ -42,9 +40,6 @@ handler directly, or the compiled comparison oracle.
 
 from typing import Final
 
-#: The twelve migrated program modules, in Agent Action Plan section 0.3.1
-#: target-tree order - not alphabetical, not grouped by ledger, not execution
-#: order. All twelve are present; naming one here still does not import it.
 __all__: Final[tuple[str, ...]] = (
     "gl051_batch_control_check",
     "gl070_transaction_pre_process",

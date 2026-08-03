@@ -1,22 +1,17 @@
 """Data access for the migrated ACAS posting cycle.
 
-In COBOL a posting program reaches a table through four hops: a facade
-paragraph supplied by a shared copybook, a numbered handler program
-(`common/acas0NN.cbl` and `common/acasirsubN.cbl`, both patterns rather than
-literal paths), a generated bridge program, and finally SQL. Here that
-collapses to two layers - a facade publishing the verb vocabulary, and one
-module per handler owning the SQL for its tables.
+The COBOL reaches a table through four hops - a facade paragraph from a shared
+copybook, a numbered handler program, a generated bridge program, then literal
+SQL. Here that becomes two: `facade` publishes the verb vocabulary, and one
+module per handler owns the SQL for its tables.
 
-Present in this package
-    connection      the engine and connection, credentials from the `RDB-Data`
-                    block [copybooks/wsfnctn.cob:L57-L64]; per-statement
-                    autocommit as the COBOL does, no pooling; identifier
-                    quoting, because every ACAS table and column name contains
-                    a hyphen
-    status          the `FS-Reply` value set 0/10/21/22/23/99, the `We-Error`
-                    codes, the SQLSTATE mapping and the retry ladder
-    cursor_state    ISAM `START` / `READ NEXT` emulation driven by each
-                    bridge's declared key table and relation directive
+    facade          the single doorway, publishing both COBOL naming conventions
+    connection      the open path and the connection the handlers share
+    status          the `FS-Reply` protocol and the operation vocabulary
+    cursor_state    ISAM `START` / `READ NEXT` positioning
+    acas000_system  four tables, dispatched by key number
+    acas005 … acas029, acasirsub1 … acasirsub5
+                    one module per handler, named after the handler it reproduces
 
     facade          the verb vocabulary, published under BOTH the entity-named
                     and the handler-named conventions over one implementation

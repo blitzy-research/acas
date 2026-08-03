@@ -1,195 +1,90 @@
-#  ACAS - Python 3.12 migration of the COBOL batch posting cycle
-#  Packaging and tooling manifest for the `acas_posting` distribution.
-#  WHAT THIS FILE IS
-#  The single manifest for the Python side of this repository. It pins the
-#  interpreter, pins every dependency exactly, decides what is shipped, and
-#  configures the test runner and coverage reporting.
-#  It is PURELY ADDITIVE. The COBOL system is the behavioural specification
-#  for this migration and is frozen: nothing under common/*.cbl, common/*.scb,
-#  copybooks/*.cob, general/*.cbl, sales/*.cbl, purchase/*.cbl, irs/*.cbl,
-#  stock/*.cbl or mysql/ACASDB.sql is modified, reformatted, relocated or
-#  built from here. Any diff touching those paths is a defect in the
-#  migration, however harmless it may look.
-
-#  No pre-existing configuration or build file is modified either - not
-#  comp-all.sh, not common/comp-common.sh, not etc/ld.so.conf.d/gnucobol.conf,
-#  not README.TXT, not Changelog. The maintainer's own build recipe keeps
-#  working unchanged; this manifest sits beside it and knows nothing about it.
-#  THE TWO SOURCES THIS MANIFEST IS DERIVED FROM
-#  1. mysql/ACASDB.sql - the frozen schema. Its header records the producing
-#     server as 10.11.7-MariaDB (L1 dump banner, L5 server version). It
-#     declares 33 CREATE TABLE, 0 CREATE INDEX and no schema-altering DDL: all
-#     66 `ALTER TABLE` occurrences are mysqldump
-#     `/*!40000 ... DISABLE|ENABLE KEYS */` wrappers, two per table. Its
-#     numeric census is 167 DECIMAL, 151 INT, 116 TINYINT, 23 MEDIUMINT,
-#     22 SMALLINT, 3 BIGINT - and ZERO FLOAT/DOUBLE/REAL columns (see R-2).
-
-#  2. common/comp-common.sh - the COBOL build recipe. L9 refers to the
-#     compiler as gnucobol v3.2; its compile lines translate every *MT.scb
-#     with presql2 and link `cobmysqlapi.o` against -L/usr/local/mysql/lib
-#     -lmysqlclient -lz. That toolchain belongs to the compiled comparison
-#     oracle in the sibling harness/ tree. It is deliberately ABSENT from this
-#     manifest, and its absence is the whole point (see R-1).
-#  THE RULES THIS FILE ENFORCES  (Agent Action Plan section 0.7.2, summarised)
-#  R-1  No COBOL at runtime. This manifest is the structural enforcement
-#       point: it packages `acas_posting*` and nothing else, so there is no
-#       import path from the shipped package to harness/. The shipped artifact
-#       runs on a host with no COBOL compiler and no COBOL runtime, and
-#       carries no compiled extension, no build hook and no cobc requirement.
-
-#  R-2  Zero binary floating point in accounting computation - no pandas, no
-#       numpy, ever, including for the harness dump comparison. The database
-#       holds none either, so none may enter from that side.
-#  R-3  No schema change and no concurrency - no ORM entity layer, no
-#       migration tool, no async/thread/connection-pool library, no parallel
-#       test plugin.
-#  R-5  Full traceability - coverage is configured as evidence that every
-#       migrated module is exercised, never as a quality gate.
-#  R-6  Compiled behaviour is the tie-breaker - the oracle-dependent test
-#       suites are registered as markers so they can be selected or excluded.
+#  ACAS -- packaging and tooling manifest for the Python 3.12 migration of the
+#  COBOL batch posting cycle.
 #
-#  WHERE TO READ MORE
-#  ------------------
-#  README-python-migration.md  how to build the oracle, seed it, run both
-#                              cycles and diff the resulting table state.
-#  docs/migration/             the four mandated deliverables: traceability.md,
-#                              anomaly-log.md, ambiguity-resolutions.md and
-#                              scenario-diff-evidence.md.
+#  Purely additive. The COBOL system is the behavioural specification and is
+#  frozen: nothing under common/, copybooks/, general/, sales/, purchase/, irs/,
+#  stock/ or mysql/ACASDB.sql is built, modified or read from here, and no
+#  pre-existing script or configuration file is touched. Any diff touching those
+#  paths is a defect in the migration, however harmless it looks.
 #
-#  Three install routes, identical pins, one hashed lock file each:
-#      pip install -e "."                                  # shipped runtime
-#      pip install --require-hashes -r requirements.txt     # shipped runtime
-#      pip install --require-hashes -r requirements-harness.txt   # + harness
-#      pip install --require-hashes -r requirements-dev.txt       # verification
-# =============================================================================
+#  What this file decides, and the rule behind each decision:
+#    R-1  what is SHIPPED: `acas_posting*` and nothing else, so there is no
+#         import path from the distribution to the compiled oracle in harness/.
+#    R-2  what may NOT be depended on: pandas, numpy, or anything else computing
+#         in binary floating point.
+#    R-3  no ORM entity layer, no migration tool, no async/thread/pool library.
+#    R-6  determinism: every dependency pinned exactly, interpreter pinned to
+#         the 3.12 series.
+#
+#  Install routes, all with identical pins:
+#      pip install -e "."                                          shipped runtime
+#      pip install --require-hashes -r requirements.txt             shipped runtime
+#      pip install --require-hashes -r requirements-harness.txt     + oracle harness
+#      pip install --require-hashes -r requirements-dev.txt         verification
 
 [build-system]
-# setuptools only. No build hook, no C/Cython/cffi extension, no cobc, no
-# linkage to the bridge's cobmysqlapi.o - R-1 must hold for the build itself,
-# not only for the finished wheel. `wheel` is deliberately not required:
-# setuptools has built wheels natively since 70.1.
-#
-# EXACTLY PINNED, NOT A FLOOR. A range here would let two isolated builds of the
-# same commit resolve different backend releases and so emit different artifacts.
-# That is the one property this repository cannot trade away: Agent Action Plan
-# section 0.5.1 pins every dependency exactly, section 0.4.1.7 requires "exact
-# pinned versions, no ranges", and section 0.6.6's entire verification protocol
-# rests on comparisons that are byte-identical by construction. The build
-# backend belongs to that surface even though it never runs inside the migrated
-# cycle - it decides what the shipped wheel contains, and R-1 is enforced by
-# wheel contents. Every other requirement in this manifest already uses `==`;
-# this one is now consistent with them rather than the sole exception.
-#
-# 83.0.0 was resolved and verified on the build host, not recalled: it is the
-# release installed here, it publishes a pure-Python `py3-none-any` wheel so no
-# compiler is drawn into the build - itself an R-1 guarantee - its own
-# Requires-Python floor is the 3.10 series and so admits every interpreter this
-# project's own pin allows, and it is not yanked. It was verified by building
-# this manifest with it and asserting the resulting wheel and sdist contents.
-# Do not widen this to a range and do not bump it casually:
-# re-verify a replacement the same way, rebuild, and re-assert that the wheel
-# carries no `harness/` path and no `.cbl`, `.scb`, `.cob`, `.o` or `.sql` file.
-#
-# The backend is also the one component that executes arbitrary code during a
-# build, so it would otherwise be the single unpinned link in an otherwise
-# fully pinned graph - and not merely in theory: setuptools is not present in
-# the project virtual environment, so a build genuinely reaches the network to
-# obtain it. `requirements-dev.txt` carries the matching hashed entry, so the
-# backend can be installed under hash verification and the wheel then built
-# with `--no-build-isolation`.
+# setuptools only: no build hook, no C extension, no cobc, no linkage to the
+# bridge's cobmysqlapi.o -- R-1 must hold for the build itself, not merely for
+# the finished wheel. Pinned exactly rather than as a floor, because the backend
+# decides what the wheel contains and is the one component that executes
+# arbitrary code during a build. It is absent from [project].dependencies because
+# the cycle never imports it; requirements-dev.txt carries its hashed entry.
 requires = ["setuptools==83.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "acas-posting"                        # import name is `acas_posting`
-# 0.1.0 is the version of THIS migration package. It deliberately does not
-# impersonate the COBOL system's own release, which is v3.3 pre-final
-# (README.TXT, entry dated 2025-09-21; Changelog, 2025-09-20 "3.3.00 Version
-# update and builds reset."). Both of those files are the maintainer's record
-# and are not modified by this migration.
+# The version of THIS migration package. It deliberately does not impersonate
+# the COBOL system's own release, which is the maintainer's record in README.TXT
+# and Changelog and is not modified here.
 version = "0.1.0"
 description = "Behaviourally exact Python 3.12 migration of the ACAS COBOL batch posting cycle"
-# The package readme is the migration's own document. README.TXT documents the
-# COBOL system, is the maintainer's record, and is never edited or repurposed.
+# The migration's own document. README.TXT documents the COBOL system and is
+# never edited or repurposed.
 readme = "README-python-migration.md"
-# Pinned to the 3.12 series, floor and ceiling in one specifier. This is
-# correctness, not conservatism: every monetary and quantity value in the
-# migrated cycle passes through decimal.Decimal, so the interpreter must be one
-# whose `decimal` module is the C _decimal (libmpdec) extension rather than the
-# pure-Python _pydecimal fallback, and whose ROUND_DOWN store truncates toward
-# zero as an un-ROUNDED COBOL store does. Agent Action Plan section 0.5.1
-# records CPython 3.12.3, which reports decimal.__libmpdec_version__ ==
-# "2.5.1"; later 3.12 patch releases bundle a newer libmpdec (3.12.13 reports
-# "4.0.0"), still the C extension. The requirement is the C implementation and
-# the 3.12 language level, not one particular libmpdec version. 3.13 and newer
-# fall outside the range this migration is specified against.
+# Floor and ceiling in one specifier, and correctness rather than conservatism:
+# every monetary value passes through decimal.Decimal, so the interpreter must be
+# one whose `decimal` is the C _decimal extension and whose ROUND_DOWN store
+# truncates toward zero as an un-ROUNDED COBOL store does. 3.13 and newer fall
+# outside the range this migration has parity evidence for.
 requires-python = "==3.12.*"
 
-# Runtime dependencies. Every specifier is an exact `==` pin - no ranges, no
-# `latest`, no compatible-release operators (Agent Action Plan section 0.5.1).
-#
-# SET SEPARATION: this manifest declares THREE pairwise-disjoint dependency
-# sets, so that installing the shipped package pulls the minimum it actually
-# needs and nothing more:
-#
-#   [project].dependencies                     shipped runtime  -> requirements.txt
-#   [project.optional-dependencies].harness    oracle harness   -> requirements-harness.txt
-#   [project.optional-dependencies].dev        verification     -> requirements-dev.txt
-#
-# The split is derived mechanically, not by taste: an AST import census over
-# every .py file in the repository records that acas_posting/ imports exactly
-# one third-party top-level module (`mysql`, in acas_posting/dal/connection.py),
-# while `yaml` is imported only by harness/dump_tables.py and
-# harness/diff_states.py - and in both cases lazily, inside the function that
-# reads a scenario file. PyYAML therefore belongs to the harness set, not to
-# the shipped runtime set. No version in the Agent Action Plan section 0.5.1
-# inventory is changed and no package is dropped; only the grouping changes.
-#
-# PIN-PARITY CONTRACT: each set above is the same set, name for name and
-# version for version, as its lock file. The lock files add `--hash=sha256`
-# entries for every CPython 3.12-compatible artifact of each pinned version, so
-# an install can be performed under `--require-hashes`. A version that differs
-# between this manifest and a lock file is a defect in the migration.
+# Three PAIRWISE DISJOINT dependency sets, each mirrored by one hashed lock file:
+#   [project].dependencies                    -> requirements.txt
+#   [project.optional-dependencies].harness    -> requirements-harness.txt
+#   [project.optional-dependencies].dev        -> requirements-dev.txt
+# The split is mechanical, not a matter of taste: an AST import census over the
+# repository records that acas_posting/ imports exactly one third-party top-level
+# module, `mysql`, while `yaml` is imported only by the harness scripts and only
+# inside the function that reads a scenario file. A version that differs between
+# this manifest and its lock file is a defect.
 dependencies = [
-    # Oracle's official MySQL driver and the primary database path for
-    # acas_posting.dal. Ships a compiled C extension for CPython 3.12.
-    # This is the ONLY third-party module acas_posting imports.
+    # The ONLY third-party module acas_posting imports. Ships a compiled C
+    # extension for CPython 3.12 and materialises DECIMAL as decimal.Decimal.
     "mysql-connector-python==26.7.0",
-    # SQLAlchemy is used at CORE LEVEL ONLY: text() statements executed on an
-    # explicit Connection. An ORM entity layer is forbidden (R-3) - it would
-    # want to own schema definition, and it would introduce identity-map and
-    # flush-ordering semantics the COBOL does not have, obscuring the exact
-    # statement ordering the state diff is sensitive to.
+    # CORE LEVEL ONLY: text() statements on an explicit Connection. An ORM entity
+    # layer is forbidden (R-3) -- it would want to own schema definition, and its
+    # identity-map and flush ordering would obscure the exact statement order the
+    # state diff is sensitive to.
     "SQLAlchemy==2.0.51",
-    # Transitive closure of SQLAlchemy, pinned so an install is reproducible.
-    # Both are SQLAlchemy's own requirements, not choices of this migration:
-    # greenlet is installed alongside SQLAlchemy on this platform whether or not
-    # it is named here, and pinning it changes nothing about how the migration
-    # runs. Nothing in acas_posting imports greenlet, nothing calls
-    # create_async_engine, and execution is strictly sequential - R-3 forbids
-    # asyncio, threads, multiprocessing and connection pooling outright.
+    # SQLAlchemy's own requirements, pinned so an install is reproducible. Nothing
+    # here imports greenlet and nothing calls create_async_engine.
     "greenlet==3.5.4",
     "typing_extensions==4.16.0",
 ]
 
 [project.optional-dependencies]
-# Oracle-harness toolchain. Kept out of the shipped runtime set because nothing
-# under acas_posting/ imports it: PyYAML parses the eight scenario definitions
-# under harness/scenarios/*.yaml, and is imported lazily by
-# harness/dump_tables.py and harness/diff_states.py only. Extras are additive to
-# [project].dependencies, so `pip install ".[harness]"` yields the runtime set
-# plus this one.
+# The oracle harness reads scenario definitions with PyYAML. Kept out of the
+# shipped set because nothing under acas_posting/ imports it.
 harness = [
     "PyYAML==6.0.3",
 ]
-# Verification toolchain. Kept out of the runtime set so that installing the
-# migrated cycle does not drag a test runner in with it; still exactly pinned,
-# and still mirrored in requirements-dev.txt.
+# The verification toolchain, kept out of the runtime set so that installing the
+# migrated cycle does not drag a test runner in with it.
 dev = [
     "pytest==9.1.1",
-    # Coverage measurement over the migrated modules. It is traceability
-    # evidence that every traced module is actually exercised (R-5), NOT a
-    # quality gate - see [tool.coverage.report], which sets no fail_under.
+    # Coverage is traceability evidence that a migrated module was exercised
+    # (R-5), never a quality gate -- [tool.coverage.report] sets no fail_under.
     "pytest-cov==7.1.0",
     # Transitive closure of the two above, pinned for reproducibility.
     "coverage==7.15.2",
@@ -198,34 +93,23 @@ dev = [
     "packaging==26.2",
     "Pygments==2.20.0",
 ]
-# Compatibility alias, defined BY REFERENCE so the sets can never drift apart.
-# The test suites need both: tests/arithmetic/* needs only `dev`, while
-# tests/scenarios/* and tests/determinism/* drive the harness and therefore need
-# `harness` as well.
+# Defined BY REFERENCE so the two sets can never drift apart.
 test = ["acas-posting[dev,harness]"]
 
-#  DELIBERATELY EXCLUDED - do not add any of the following:
-#    * pandas, numpy, or any other library that computes in binary floating
-#      point. Absolute, and it extends to the harness dump comparison, which
-#      uses ordered row sequences rather than dataframes.                (R-2)
-#    * any ORM entity layer, and any declarative metadata that could emit
-#      DDL against the frozen schema.                                   (R-3)
-#    * alembic or any other schema-migration tool: the schema is frozen, no
-#      DDL is emitted, so a migration tool has nothing legitimate to do and
-#      its presence would invite schema drift.                          (R-3)
-#    * asyncio helpers, thread pools, connection pools. Execution is strictly
-#      sequential, matching the single-threaded COBOL.                   (R-3)
-
-#    * pytest-xdist or any other parallel runner: parallel tests against one
-#      shared MariaDB would break the seed / run / dump / reset / run / dump /
-#      diff protocol the whole verification rests on.                    (R-3)
+#  DELIBERATELY EXCLUDED -- do not add any of the following:
+#    * pandas, numpy, or anything else computing in binary floating point (R-2).
+#    * an ORM entity layer, or declarative metadata that could emit DDL against
+#      the frozen schema; alembic or any other migration tool (R-3).
+#    * asyncio helpers, thread pools, connection pools (R-3).
+#    * pytest-xdist or any parallel runner: parallel tests against one shared
+#      MariaDB would break the seed/run/dump/reset/run/dump/diff protocol (R-3).
 #    * pytest-randomly or any plugin that reorders execution: posting order is
-#      load-bearing and the state diff is order-sensitive.               (R-6)
-#    * any third-party date library. common/maps04.cbl has a 1600-12-31 epoch
-#      and idiosyncratic rejection behaviour that must be reproduced, not
-#      improved on.                                                     (R-4)
-#    * cobc, GnuCOBOL bindings, or anything that would put the COBOL toolchain
-#      on the shipped package's dependency graph.                       (R-1)
+#      load-bearing and the state diff is order-sensitive (R-6).
+#    * a third-party date library. common/maps04.cbl has a 1600-12-31 epoch and
+#      idiosyncratic rejection behaviour that must be reproduced, not improved
+#      on (R-4).
+#    * cobc, GnuCOBOL bindings, or anything that would put the COBOL toolchain on
+#      the shipped package's dependency graph (R-1).
 
 #  No console entry points are declared: `python -m acas_posting` is the
 #  documented invocation route - served by acas_posting/__main__.py, which
@@ -235,76 +119,21 @@ test = ["acas-posting[dev,harness]"]
 #  `python -m acas_posting.cli.<module>`, and the two forms return the same
 #  status because the router passes the route's value through unchanged.
 
-#  Packaging: ship the seven acas_posting packages, ship the generated data
-#  dictionary WITH them, and ship nothing else.
-#  This block is where R-1 stops being a promise and becomes a fact. harness/
-#  holds the compiled GnuCOBOL comparison oracle; it is a SIBLING of
-#  acas_posting/, never a sub-package, so that there is no import path from the
-#  shipped package to the oracle and the artifact needs neither a COBOL
-#  compiler nor a COBOL runtime to run. tests/ and docs/ are likewise top-level
-#  siblings and are not shipped, and no COBOL source, copybook or schema file
-#  enters the distribution in any form.
+#  PACKAGING -- an explicit ALLOW-LIST, not a pattern search, so anything not
+#  named below is excluded by construction and what ships never depends on what
+#  happens to be lying in the checkout (R-1, R-6).
 #
-#  data_dictionary/ is the one sibling whose CONTENT is shipped, as package data
-#  rather than as a package - the two generated JSON artifacts and nothing else.
-#  That is not a weakening of the rule above: JSON field metadata derived from
-#  the frozen bridge is not COBOL, needs no compiler and no runtime, and is the
-#  very thing every record module reads at import. The mechanism and the reason
-#  are set out below.
-#
-#  AN EXPLICIT ALLOW-LIST, NOT A PATTERN SEARCH. `packages` names every package
-#  shipped, so anything not named is excluded by construction rather than by a
-#  pattern that has to be trusted to keep matching. What that shuts out, stated
-#  so a reader sees the prohibition instead of inferring it: the four
-#  Python-side siblings harness/, tests/, docs/ and data_dictionary/ as
-#  top-level packages; the frozen COBOL tree common/, copybooks/, general/,
-#  sales/, purchase/, irs/ and stock/ with its schema mysql/ and its manuals;
-#  the out-of-scope legacy subsystems payroll/, Basic-Code/ and home/; the
-#  loader configuration under etc/; and any agent or tooling scratch. The list
-#  is complete against the target layout the Agent Action Plan fixes in section
-#  0.3.1, which enumerates exactly these seven packages under acas_posting/ and
-#  no others, so it is exhaustive by construction and not a list that quietly
-#  falls behind.
-#
-#  THE GENERATED DATA DICTIONARY IS SHIPPED, AND ITS SOURCE OF TRUTH DOES NOT
-#  MOVE. Every record module builds its field descriptors from the dictionary
-#  during a NORMAL import, so a wheel without it cannot import
-#  acas_posting.records at all - the failure is a DictionaryNotFoundError on
-#  `import acas_posting.records.gl_posting`, not a deferred inconvenience. But
-#  Agent Action Plan sections 0.3.1 and 0.4.1.6 place the artifact at the
-#  repository root in data_dictionary/, and section 0.2.1.2 lists
-#  `data_dictionary/*.json` there, so relocating it into the package would
-#  break the plan the migration is held to.
-#
-#  Both facts hold at once through the `package-dir` mapping below, which is
-#  what setuptools provides for exactly this: one on-disk location serving as a
-#  package's data directory. The repository keeps data_dictionary/ where the
-#  plan mandates - it is what the generator writes and what `--check`
-#  compares - while the built wheel carries a copy at
-#  acas_posting/data_dictionary/, addressable through importlib.resources.
-#  acas_posting/dictionary/loader.py prefers the packaged copy and falls back
-#  to the repository sibling, so a source checkout and an installed wheel both
-#  resolve without a caller having to know which it is holding. The sdist keeps
-#  the artifact at its repository path, mirroring the source tree.
-#
-#  `acas_posting.data_dictionary` carries no __init__.py and is never imported;
-#  it is a data directory that setuptools materialises inside the wheel, and
-#  the loader reaches it by traversing from the acas_posting package rather
-#  than by importing it. Adding an __init__.py there would put a Python module
-#  inside a generated-data directory the plan lists as holding two JSON files.
-#
-#  An explicit list is also DETERMINISTIC (rule R-6): what ships never depends on
-#  what happens to be lying in the checkout when the wheel is built, whereas a
-#  discovery include/exclude pair would, and discovery cannot name a package whose
-#  directory sits outside the package tree - which the data package does.
-#
-#  The JSON Schema travels with the dictionary rather than being left behind: the
-#  artifact's own `meta.schema_ref` names it RELATIVELY, so separating the pair
-#  would leave that reference dangling in an installed distribution.
-# -----------------------------------------------------------------------------
+#  The generated data dictionary is the one sibling whose CONTENT is shipped, as
+#  package data: every record module builds its field descriptors from it during
+#  a normal import, so a wheel without it cannot import acas_posting.records at
+#  all. The Agent Action Plan fixes its path at data_dictionary/, so the
+#  `package-dir` mapping below serves both -- the checkout keeps that path while
+#  the wheel carries a copy inside the package, which the loader reaches through
+#  importlib.resources and falls back from to the repository sibling. The schema
+#  travels with it because the artifact's `meta.schema_ref` names it relatively.
 [tool.setuptools]
 packages = [
-    # The seven code packages. Each has an __init__.py; none is a namespace
+    # The seven code packages; each has an __init__.py and none is a namespace
     # package.
     "acas_posting",
     "acas_posting.cli",
@@ -313,50 +142,38 @@ packages = [
     "acas_posting.dictionary",
     "acas_posting.programs",
     "acas_posting.records",
-    # The generated data dictionary: a DATA DIRECTORY, not an importable
-    # package - see the note above. It holds no Python module and is never
-    # imported; only `importlib.resources` reaches into it, which needs no
-    # __init__.py.
+    # A DATA DIRECTORY, not an importable package: it holds no Python module and
+    # is reached only through importlib.resources, which needs no __init__.py.
     "acas_posting.data_dictionary",
 ]
 # Automatic inclusion is off, so the only non-Python files in the wheel are the
-# two named by `package-data` below. Nothing is swept in by a version-control
-# plugin, and no stray file in the checkout can reach the distribution.
+# two named by `package-data`; no stray file in the checkout can reach it.
 include-package-data = false
 
-# The one directory mapped from outside the package tree: the repository's
-# top-level data_dictionary/, shipped inside the package as
-# acas_posting/data_dictionary/. Every other package keeps its natural path,
-# which is why there is no "" entry here - adding one would re-root the whole
-# distribution.
+# The one directory mapped from outside the package tree. Every other package
+# keeps its natural path, which is why there is no "" entry -- adding one would
+# re-root the whole distribution.
 [tool.setuptools.package-dir]
 "acas_posting.data_dictionary" = "data_dictionary"
 
-# Exactly the two committed JSON artifacts: the dictionary and the schema it
-# validates against.
-[tool.setuptools.package-data]
 # Named file by file rather than as a glob: these two artifacts are the entire
-# contents of that directory, and a glob would silently ship whatever else ever
-# landed beside them.
+# contents of that directory, and a glob would ship whatever else landed there.
+[tool.setuptools.package-data]
 "acas_posting.data_dictionary" = [
     "acas_posting_dictionary.json",
     "acas_posting_dictionary.schema.json",
 ]
 
-#  Test runner.
-#  Selection idiom - this is what makes the three-tier suite usable:
-#      pytest -m arithmetic                      infrastructure-free: no Docker,
-#                                                no MariaDB, no cobc needed
-#      pytest -m "scenario or determinism"       the oracle suites; these need
-#                                                the harness/ Compose stack
-#      pytest -m "not (scenario or determinism)" everything a bare host can run
+#  Test runner. Selection idiom:
+#      pytest -m arithmetic                       infrastructure-free
+#      pytest -m "scenario or determinism"        needs the harness/ stack
+#      pytest -m "not (scenario or determinism)"  everything a bare host can run
 #  Execution order is never randomised and never parallelised: posting order is
 #  load-bearing in this cycle and the scenario comparison is order-sensitive.
 [tool.pytest.ini_options]
 minversion = "9.1"
 testpaths = ["tests"]
-# -ra summary, strict marker and strict config enforcement, short tracebacks.
-# No -n/xdist flag, no --cov-fail-under, no --doctest-modules, no plugin that
+# No -n/xdist flag, no --cov-fail-under, no --doctest-modules, and no plugin that
 # changes collection or execution order.
 addopts = "-ra --strict-markers --strict-config --tb=short"
 python_files = ["test_*.py"]
@@ -369,17 +186,15 @@ markers = [
     "database: REQUIRES a live MariaDB 10.11.7 instance with mysql/ACASDB.sql applied verbatim.",
     "oracle: REQUIRES the compiled GnuCOBOL 3.2 oracle under harness/ to have been built by harness/build_oracle.sh.",
 ]
-# Conservative on purpose. Third-party warnings are left at their default
-# disposition so nothing is masked and no behaviour is altered; only
-# DeprecationWarnings raised from inside acas_posting are escalated to errors,
-# and later entries take precedence in pytest.
+# Third-party warnings keep their default disposition so nothing is masked and no
+# behaviour is altered; only DeprecationWarnings raised from inside acas_posting
+# are escalated, and later entries take precedence in pytest.
 filterwarnings = [
     "default",
     "error::DeprecationWarning:acas_posting",
 ]
-# If tests/ has not been created yet, pytest falls back to recursive collection
-# from the invocation directory. These keep that fallback out of the frozen
-# COBOL tree, the legacy-BASIC trees and the build output.
+# Keep the collection fallback out of the frozen COBOL tree, the legacy-BASIC
+# trees and the build output.
 norecursedirs = [
     ".git",
     ".venv",
@@ -404,12 +219,10 @@ norecursedirs = [
     "*.egg-info",
 ]
 
-#  Coverage - traceability evidence (R-5), NOT a quality gate.
-#  The report shows which migrated modules a run exercised, which is how the
-#  traceability document evidences that every program-to-module mapping is
-#  live. There is deliberately NO fail_under and no --cov flag in addopts: a
-#  coverage number never decides whether this migration is correct. Only an
-#  empty scenario diff against the compiled oracle does.
+#  Coverage -- traceability evidence (R-5), NOT a quality gate. There is
+#  deliberately no fail_under and no --cov flag in addopts: a coverage number
+#  never decides whether this migration is correct. Only an empty scenario diff
+#  against the compiled oracle does.
 [tool.coverage.run]
 branch = true
 source = ["acas_posting"]

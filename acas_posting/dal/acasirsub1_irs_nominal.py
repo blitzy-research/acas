@@ -1,20 +1,16 @@
-"""``acasirsub1`` + ``irsnominalMT`` - the IRS nominal ledger, ``IRSNL-REC``.
+"""`acasirsub1` and its bridge `irsnominalMT` - the `IRSNL-REC` IRS nominal ledger.
 
-The handler-and-bridge pair for the IRS nominal ledger, reimplemented as SQL
-against the frozen table so that no COBOL is reachable at run time (rule R-1).
-The pair is the "IRS nominal" row of the entity-to-table spine: entity facade
-IRS nominal, handler ``acasirsub1``, bridge ``irsnominalMT``, table
-``IRSNL-REC``, record copybook ``copybooks/irswsnl.cob``.
+The data-access module for the IRS nominal entity, reached through the
+handler-named facade aliases that the IRS convention uses
+[copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob].
 
-FROZEN SOURCES THIS MODULE REPRODUCES
-    ``common/acasirsub1.cbl``          773 lines; ``Procedure Division`` at L211
-    ``common/irsnominalMT.cbl``       1757 lines; ``PROCEDURE DIVISION`` at L267
-    ``common/irsnominalMT.scb``       1155 lines; the pre-translation source
-    ``copybooks/irswsnl.cob``           24 lines; the LINKAGE record
-    ``copybooks/irsfdwsnl.cob``         19 lines; the FD record
-    ``copybooks/wsfnctn.cob``                 ; function codes and access types
-    ``copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob``; the calling convention
-    ``mysql/ACASDB.sql``                      ; the table, declared at L238
+Two of `irs030`'s reproduced defects are visible from here and neither is
+repaired. Its posting path rewrites the DEBIT account before it looks the credit
+account up [irs/irs030.cbl:L1635-L1652], so a missing credit account leaves a
+posted debit here with nothing balancing it. And the two VAT control accounts are
+read into snapshots before the loop [irs/irs030.cbl:L1602],
+[irs/irs030.cbl:L1612] and rewritten from those snapshots at end of job
+[irs/irs030.cbl:L1704-L1708], so an in-loop rewrite of the same account is lost.
 
 Nothing in that list is modified. They are read as specification and cited by
 path and line at every site below, which is what makes rule R-5 checkable
@@ -401,16 +397,7 @@ from acas_posting.dal.connection import (
     execute_statement,
     load_rdb_data_once,
     mysql_1000_open,
-    # `MYSQL-1090-EXIT` and `MYSQL-1999-EXIT` are aliased on import for one
-    # reason only: no name in this module may be called with "exit" as the last
-    # word before the parenthesis, so that the check which proves ANOMALY A32
-    # was not translated into a
-    # process-terminating call - the two `stop` statements
-    # [common/acasirsub1.cbl:L393, :L433] are recorded as omissions, never
-    # executed - reads zero without a reader having to sift false positives out
-    # of it. The paragraph names stay visible here, and the aliases carry them
-    # through to every call site, so R-5 traceability is unaffected. Do not
-    # "tidy" these back to the bare names.
+    # `MYSQL-1090-EXIT` and `MYSQL-1999-EXIT` are aliased on import for one reason only.
     mysql_1090_exit as mysql_1090_exit_paragraph,
     mysql_1980_close,
     mysql_1999_exit as mysql_1999_exit_paragraph,
@@ -512,95 +499,50 @@ __all__: Final[tuple[str, ...]] = (
 _LOG: Final = logging.getLogger(__name__)
 
 
-#  IDENTITY  ----------------------------------------------------------------
-# The "IRS nominal" row of the entity-to-table spine, written out once so that
-# no string below can name a different table, handler or bridge.
+# The "IRS nominal" row of the entity-to-table spine, written out once so that no string
+# below can name a different table, handler or bridge.
 
-#: The frozen table [mysql/ACASDB.sql:L238].
 TABLE: Final[str] = "IRSNL-REC"
 
-#: Its only key [mysql/ACASDB.sql:L254] and the only key of reference the
-#: bridge declares [common/irsnominalMT.cbl:L142].
 PRIMARY_KEY: Final[str] = "KEY-1"
 
-#: The numbered handler [common/acasirsub1.cbl:L174, "acasirsub1 (3.3.00)"].
 HANDLER: Final[str] = "acasirsub1"
 
-#: The generated bridge it calls [common/acasirsub1.cbl:L752].
 BRIDGE: Final[str] = "irsnominalMT"
 
-#: The facade entity name the plan's spine gives this pair.
 ENTITY_FACADE: Final[str] = "IRS nominal"
 
 
-#  KEY METADATA  ------------------------------------------------------------
-# `01 Table-Of-Keynames` [common/irsnominalMT.cbl:L139-L151], whose casing
-# drifts three ways inside six lines - `Table-Of-Keynames` at L141,
-# `table-of-keynames` at L146, `keyOfReference` at L147. ANOMALY A37, recorded
-# and not normalised; the drift is cosmetic and the values are what matter.
+# `01 Table-Of-Keynames` [common/irsnominalMT.cbl:L139-L151], whose casing drifts three
+# ways inside six lines - `Table-Of-Keynames` at L141, `table-of-keynames` at L146,
+# `keyOfReference` at L147.
 
-#: The offset/length pair exactly as the bridge spells it
-#: [common/irsnominalMT.cbl:L143]: offset 1, length 10.
 KEY_OFFSET_LENGTH: Final[str] = "00010010"
 
-#: Offset of the key within the record image, one-based as COBOL reference
-#: modification is one-based.
 KEY_OFFSET: Final[int] = 1
 
-#: Length of the key within the record image - the ten digits of
-#: ``NL-Owning`` plus ``NL-Sub-Nominal`` [copybooks/irswsnl.cob:L10-L11].
 KEY_LENGTH: Final[int] = 10
 
 #: ANOMALY A19 - the metadata declares the key type ``"STR"`` and the bridge
-#: editorialises on it in a comment, "key is string"
-#: [common/irsnominalMT.cbl:L144], yet the column is ``bigint(10) unsigned``
-#: [mysql/ACASDB.sql:L239]. Every predicate the bridge builds therefore
-#: compares a quoted string to a number. It is the only such mismatch in the
-#: folder - every other in-scope key is genuinely ``char`` - and it is
-#: reproduced by binding the key AS TEXT. See ambiguity Q1.
+#: editorialises on it in a comment, "key is string" [common/irsnominalMT.cbl:L144], yet
+#: the column is ``bigint(10) unsigned`` [mysql/ACASDB.sql:L239].
 KEY_METADATA_TYPE: Final[str] = "STR"
 
-#: ``keyOfReference occurs 1`` [common/irsnominalMT.cbl:L147]. One key, one
-#: cursor - contrast the three-cursor bridges of the open-item tables.
 KEY_COUNT: Final[int] = 1
 
 
-#  LOG IDENTITY  ------------------------------------------------------------
-
-#: ``move 1 to WS-Log-System`` [common/acasirsub1.cbl:L226]. The legend on that
-#: line reads "1 = IRS, 2=GL, 3=SL, 4=PL, 5=Stock", which CONTRADICTS the
-#: "5 = Invoice" legend the invoice and open-item handlers carry. ANOMALY A33
-#: adjacent: two mutually inconsistent legends coexist in the codebase. Both
-#: are recorded; neither is resolved.
+#: ``move 1 to WS-Log-System`` [common/acasirsub1.cbl:L226].
 WS_LOG_SYSTEM: Final[int] = int(LogSystem.IRS)
 
-#: ``move 11 to WS-Log-File-No`` [common/acasirsub1.cbl:L227] - the value the
-#: indexed-file path keeps.
 WS_LOG_FILE_NO_FLAT: Final[int] = 11
 
-#: ``move 21 to WS-Log-File-no`` [common/acasirsub1.cbl:L689] - the value the
-#: database path bumps it to, in a paragraph reached only by fall-through from
-#: ``ba-Process-RDBMS``. So 21 is the effective file number here. The pair
-#: (11, 21) is a FOUR-WAY collision with ``acas005`` (system 2), ``acas012``
-#: (system 3) and ``acas022`` (system 4); only the (system, file) pair
-#: disambiguates.
 WS_LOG_FILE_NO_RDB: Final[int] = 21
 
 
-#  COLUMNS  -----------------------------------------------------------------
-
 #: The fifteen columns in the ordinal order the frozen dump fixes
-#: [mysql/ACASDB.sql:L239-L253], which is also the order of the host-variable
-#: group [common/irsnominalMT.cbl:L195-L209] and of the ``SET`` list the insert
-#: section emits [common/irsnominalMT.cbl:L1272-L1487].
-#:
-#: ANOMALY A2 - THE EIGHT QUARTERLY COLUMNS ARE INTERLEAVED. Debit and credit
-#: alternate per quarter here, while both copybooks group them as four debits
-#: then four credits [copybooks/irswsnl.cob:L19-L20],
-#: [copybooks/irsfdwsnl.cob:L14-L15] and the bridge's own record keeps the
-#: grouped shape under ``Last-Posts`` [common/irsnominalMT.cbl:L236-L244]. A
-#: permutation therefore happens on the way in, and the OPPOSITE permutation on
-#: the way out; see :data:`LOAD_TRAVERSAL` and :data:`UNLOAD_TRAVERSAL`.
+#: [mysql/ACASDB.sql:L239-L253], which is also the order of the host-variable group
+#: [common/irsnominalMT.cbl:L195-L209] and of the ``SET`` list the insert section emits
+#: [common/irsnominalMT.cbl:L1272-L1487].
 COLUMNS: Final[tuple[str, ...]] = (
     "KEY-1",
     "TIPE",
@@ -620,15 +562,8 @@ COLUMNS: Final[tuple[str, ...]] = (
 )
 
 #: The twelve columns the load paragraph's ``else`` branch fills
-#: [common/irsnominalMT.cbl:L1204-L1215], and which a pointer row therefore
-#: leaves at the values ``initialize TD-IRSNL-REC`` [:L1197] put in them.
-#:
-#: ANOMALY A1 and ANOMALY A4 - these twelve and ``REC-POINTER`` are MUTUALLY
-#: EXCLUSIVE, because ``NL-Pointer`` redefines the whole data group
-#: [copybooks/irswsnl.cob:L22-L23] and the bridge takes one branch or the
-#: other. Nothing in the schema ties either side to ``TIPE``, so a row can
-#: carry a type byte that disagrees with which side was written, and no check
-#: is added here to notice (rule R-3: validation is copied, never extended).
+#: [common/irsnominalMT.cbl:L1204-L1215], and which a pointer row therefore leaves at
+#: the values ``initialize TD-IRSNL-REC`` [:L1197] put in them.
 POINTER_EXCLUSIVE_COLUMNS: Final[tuple[str, ...]] = (
     "NL-NAME",
     "DR",
@@ -644,29 +579,18 @@ POINTER_EXCLUSIVE_COLUMNS: Final[tuple[str, ...]] = (
     "AC",
 )
 
-#: The column the alternative view of those bytes writes
-#: [common/irsnominalMT.cbl:L1202].
 POINTER_COLUMN: Final[str] = "REC-POINTER"
 
-#: The type byte [mysql/ACASDB.sql:L240]. ANOMALY A23 - three spellings of one
-#: byte: ``NL-Type`` in the linkage view [copybooks/irswsnl.cob:L12], ``Tipe``
-#: in the FD view [copybooks/irsfdwsnl.cob:L8] and ``NL-Tipe`` in the bridge
-#: [common/irsnominalMT.cbl:L229]. The misspelling ORIGINATES in the FD view,
-#: which is also where the column name comes from, and is never corrected.
+#: The type byte [mysql/ACASDB.sql:L240]. ANOMALY A23 - three spellings of one byte.
 TYPE_COLUMN: Final[str] = "TIPE"
 
-#: The account name [mysql/ACASDB.sql:L241] - the only column on this table
-#: that keeps an ``NL-`` prefix, and it keeps it because the FD view spells
-#: that one field ``NL-Name`` [copybooks/irsfdwsnl.cob:L11]. ANOMALY A22.
+#: The account name [mysql/ACASDB.sql:L241] - the only column on this table that keeps
+#: an ``NL-`` prefix, and it keeps it because the FD view spells that one field ``NL-
+#: Name`` [copybooks/irsfdwsnl.cob:L11].
 NAME_COLUMN: Final[str] = "NL-NAME"
 
-#: ``occurs 4`` [copybooks/irswsnl.cob:L19-L20] - the number of retained
-#: quarters, and therefore the number of debit and of credit columns the
-#: ``OCCURS`` was flattened into.
 _QUARTERS: Final[int] = 4
 
-#: The eight quarterly columns in the order the LOAD paragraph writes them
-#: [common/irsnominalMT.cbl:L1208-L1215] - interleaved.
 _QUARTER_COLUMNS_INTERLEAVED: Final[tuple[str, ...]] = (
     "DR-LAST-01",
     "CR-LAST-01",
@@ -691,11 +615,9 @@ _QUARTER_COLUMNS_GROUPED: Final[tuple[str, ...]] = (
     "CR-LAST-04",
 )
 
-#: The full statement order of ``bb000-HV-Load``
-#: [common/irsnominalMT.cbl:L1198-L1215]: key, type byte, then EITHER the
-#: pointer column OR the twelve data columns with the quarters interleaved.
-#: Published so that the traversal itself is testable, because rule R-6 makes
-#: the order observable and ANOMALY A2 makes it differ from the unload's.
+#: The full statement order of ``bb000-HV-Load`` [common/irsnominalMT.cbl:L1198-L1215]:
+#: key, type byte, then EITHER the pointer column OR the twelve data columns with the
+#: quarters interleaved.
 LOAD_TRAVERSAL: Final[tuple[str, ...]] = (
     "KEY-1",
     "TIPE",
@@ -707,8 +629,6 @@ LOAD_TRAVERSAL: Final[tuple[str, ...]] = (
     *_QUARTER_COLUMNS_INTERLEAVED,
 )
 
-#: The full statement order of ``bb100-UnloadHVs``
-#: [common/irsnominalMT.cbl:L1235-L1251] - the same fields, a different walk.
 UNLOAD_TRAVERSAL: Final[tuple[str, ...]] = (
     "KEY-1",
     "TIPE",
@@ -721,145 +641,88 @@ UNLOAD_TRAVERSAL: Final[tuple[str, ...]] = (
 )
 
 
-#  CONDITION-NAME VALUES  ---------------------------------------------------
-# `88 Owner value is "O"` and `88 Sub value is "S"`
-# [copybooks/irswsnl.cob:L13-L14]. Tested here rather than imported, because
-# the semantics package sits outside this layer's import contract; the FD
-# view's `88 NL-Sub-AC` [copybooks/irsfdwsnl.cob:L9] is dead everywhere in the
-# checkout and is a recorded omission (ANOMALY A24).
+# `88 Owner value is "O"` and `88 Sub value is "S"` [copybooks/irswsnl.cob:L13-L14].
 
-#: An owning account.
 TYPE_OWNER: Final[str] = "O"
 
-#: A sub-nominal, i.e. a pointer row.
 TYPE_SUB: Final[str] = "S"
 
 
-#  STATEMENT CONSTANTS  -----------------------------------------------------
-
-#: ``'"0000000000"'`` [common/irsnominalMT.cbl:L410] - the low key the
-#: sequential read positions above. The relation beside it is ``" > "``, and
-#: the maintainer flagged the choice in line: "26/12/16 NOT '='" [:L409]. A
-#: key of exactly zero is therefore never returned by a sequential walk.
+#: ``'"0000000000"'`` [common/irsnominalMT.cbl:L410] - the low key the sequential read
+#: positions above.
 SEQUENTIAL_LOW_KEY: Final[str] = "0000000000"
 
-#: ``move 9999999999 to NL-Key`` [common/irsnominalMT.cbl:L1009], described
-#: there as "The last possible data", and used as ``< "9999999999"``
-#: [:L1015-L1025]. ANOMALY A28 - the mass delete is a bounded predicate rather
-#: than an unqualified delete, so a row keyed exactly 9999999999 survives it.
+#: ``move 9999999999 to NL-Key`` [common/irsnominalMT.cbl:L1009], described there as
+#: "The last possible data", and used as ``< "9999999999"`` [:L1015-L1025].
 DELETE_ALL_HIGH_KEY: Final[str] = "9999999999"
 
-#: The literal the sequential-read predicate carries
-#: [common/irsnominalMT.cbl:L404]. ANOMALY A5 - the filter is in the SQL as
-#: well as at record level, so a sub-nominal row is excluded twice over.
+#: The literal the sequential-read predicate carries [common/irsnominalMT.cbl:L404].
 SEQUENTIAL_TYPE_FILTER: Final[str] = TYPE_OWNER
 
 
-#  STATUS PAIRS  ------------------------------------------------------------
-# Each pair is (FS-Reply, We-Error) as the frozen source leaves it, which is
-# not always what it first writes.
-
 #: End of data. ``move 10 to fs-reply`` then ``move 3 to WE-Error``
-#: [common/irsnominalMT.cbl:L453, :L455], with the paragraph's own comment
-#: stating the intent outright: "Uses 3 (instead of 10) as EOF flag in
-#: WE-Error per irsub1" [:L391].
-#:
-#: ANOMALY A16 - the ``move 10 to WE-Error`` that would have made the pair
-#: (10, 10) is COMMENTED OUT at [:L454] and again at [:L520], so the 10 is
-#: dead rather than overwritten. ANOMALY A17 - ``We-Error`` 3 is one of the
-#: folder's only two single-digit values, and it is NOT a member of the shared
-#: enumeration; the literal is used deliberately and must not be forced into
-#: one. This is also why ``status.end_of_file_status()``, which returns
-#: (10, 10), is unusable here.
+#: [common/irsnominalMT.cbl:L453, :L455], with the paragraph's own comment stating the
+#: intent outright.
 END_OF_FILE_STATUS: Final[tuple[FsReply, int]] = (FsReply.END_OF_FILE, 3)
 
 #: Key not found. ``move 21 to fs-Reply`` then ``move 2 to WE-Error``
-#: [common/irsnominalMT.cbl:L591-L592], the 21 carrying the maintainer's own
-#: hedge, "could also be 23 or 14". ANOMALY A17 again: ``We-Error`` 2 appears
-#: nowhere else in the folder and has no enumeration member.
+#: [common/irsnominalMT.cbl:L591-L592], the 21 carrying the maintainer's own hedge,
+#: "could also be 23 or 14".
 NOT_FOUND_STATUS: Final[tuple[FsReply, int]] = (FsReply.INVALID_KEY_ON_START, 2)
 
-#: A duplicate key on insert [common/irsnominalMT.cbl:L805, :L1139].
 DUPLICATE_KEY_STATUS: Final[tuple[FsReply, int]] = (FsReply.DUPLICATE_KEY, 0)
 
-#: The bridge's bad function - ``move 990 to WE-Error`` / ``move 99 to
-#: Fs-Reply`` [common/irsnominalMT.cbl:L1158-L1159], under the paragraph's own
-#: heading "Houston; We have a problem" [:L1156]. CORRECTION C3: this, and not
-#: the handler's (99, 999), is the pair a caller sees on this path.
 BAD_FUNCTION_STATUS: Final[tuple[FsReply, int]] = (
     FsReply.ERROR,
     int(WeError.UNKNOWN_UNEXPECTED),
 )
 
-#: The handler's bad function [common/acasirsub1.cbl:L661-L662]. Published for
-#: traceability only; it is unreachable on this path. CORRECTION C3.
 HANDLER_BAD_FUNCTION_STATUS: Final[tuple[FsReply, int]] = (
     FsReply.ERROR,
     int(WeError.NOT_USED),
 )
 
-#: The record-size abort [common/acasirsub1.cbl:L701-L702] - ``move 901 to
-#: WE-Error`` then ``move 99 to fs-reply``, after which the handler jumps to
-#: its own exit and the bridge is NEVER called [:L718].
+#: The record-size abort [common/acasirsub1.cbl:L701-L702] - ``move 901 to WE-Error``
+#: then ``move 99 to fs-reply``, after which the handler jumps to its own exit and the
+#: bridge is NEVER called [:L718].
 RECORD_SIZE_STATUS: Final[tuple[FsReply, int]] = (
     FsReply.ERROR,
     int(WeError.RECORD_SIZE_MISMATCH),
 )
 
-#: The bridge's access-type guard [common/irsnominalMT.cbl:L672-L675] -
-#: ``move 99 to FS-Reply`` then ``move 997 to WE-Error``. CORRECTION C1: this
-#: guard EXISTS on the database path, contrary to the assignment brief, and it
-#: is the one implemented.
 ACCESS_TYPE_STATUS: Final[tuple[FsReply, int]] = (
     FsReply.ERROR,
     int(WeError.ACCESS_TYPE_WRONG),
 )
 
 #: The handler's key-number guard for ``fn-read-indexed`` and ``fn-start``
-#: [common/acasirsub1.cbl:L235-L236] - ``move 998 to WE-Error`` then ``move 99
-#: to fs-reply``.
+#: [common/acasirsub1.cbl:L235-L236] - ``move 998 to WE-Error`` then ``move 99 to fs-
+#: reply``.
 KEY_NUMBER_STATUS: Final[tuple[FsReply, int]] = (
     FsReply.ERROR,
     int(WeError.FILE_KEY_NO_OUT_OF_RANGE),
 )
 
-#: The handler's key-number guard for ``fn-delete``
-#: [common/acasirsub1.cbl:L241-L242] - a DIFFERENT code, 996, for the same
-#: condition, with the extra comment "1 is only for RDB as Cobol does it on
-#: primary key" [:L240] repeated verbatim from ``common/acas022.cbl:L307``.
+#: The handler's key-number guard for ``fn-delete`` [common/acasirsub1.cbl:L241-L242] -
+#: a DIFFERENT code, 996, for the same condition, with the extra comment "1 is only for
+#: RDB as Cobol does it on primary key" [:L240] repeated verbatim from
+#: ``common/acas022.cbl:L307``.
 DELETE_KEY_NUMBER_STATUS: Final[tuple[FsReply, int]] = (
     FsReply.ERROR,
     int(WeError.DELETE_KEY_OUT_OF_RANGE),
 )
 
-#: A failed delete [common/irsnominalMT.cbl:L915-L916, :L1057-L1058] and a
-#: failed update [:L1102-L1103]. Both are the generic (99, 911) narrowed
-#: afterwards by the verb, which is what
-#: :func:`status.override_we_error_for_operation` reproduces.
+#: A failed delete [common/irsnominalMT.cbl:L915-L916, :L1057-L1058] and a failed update
+#: [:L1102-L1103]. Both are the generic (99, 911) narrowed afterwards by the verb, which
+#: is what :func:`status.override_we_error_for_operation` reproduces.
 DELETE_FAILED_WE_ERROR: Final[int] = int(WeError.DELETE_SQLSTATE_NOT_00000)
 REWRITE_FAILED_WE_ERROR: Final[int] = int(WeError.REWRITE_SQLSTATE_NOT_00000)
 
-#: The errno the bridge treats as "no driver error", written with its two
-#: trailing spaces exactly as the source compares it: ``if errno not = "0  "``
-#: [common/irsnominalMT.cbl:L448, :L622, :L907]. A count of zero rows PLUS
-#: this errno is the silent path - no status is written at all.
+#: The errno the bridge treats as "no driver error", written with its two trailing
+#: spaces exactly as the source compares it.
 NO_DRIVER_ERROR: Final[str] = "0  "
 
 
-#  TRACE NUMBERS  -----------------------------------------------------------
-
-#: ``ws-No-Paragraph`` as the BRIDGE writes it, keyed by function code.
-#: CORRECTION C4 and ANOMALY A49 - these, not the handler's, are the values a
-#: caller observes on this path, and the set has six holes: 7, 9, 11, 12, 16
-#: and 19 are never written. The pair 13/14 belongs to the two deletes of one
-#: logical delete and 17 to the update the write path borrows, so the numbers
-#: are per-paragraph rather than per-verb.
-#:
-#: Sites: 1 [common/irsnominalMT.cbl:L359], 2 [:L378], 3 [:L421], 4 [:L474],
-#: 5 [:L573], 6 [:L595], 8 [:L728], 10 [:L792], 13 [:L893], 14 [:L937],
-#: 15 [:L1035], 17 [:L1071], 18 [:L1126], 20 [:L1167]. The assignment at L937
-#: spells the field ``WS-No-Paragraph`` where every sibling line spells it
-#: ``ws-No-Paragraph`` - casing drift, recorded under ANOMALY A37.
 BRIDGE_TRACE_NUMBERS: Final[Mapping[str, int]] = MappingProxyType(
     {
         "ba020-Process-Open": 1,
@@ -880,13 +743,6 @@ BRIDGE_TRACE_NUMBERS: Final[Mapping[str, int]] = MappingProxyType(
 )
 
 #: ``WS-No-Paragraph`` as the HANDLER writes it on its indexed-file path.
-#: ANOMALY A18 - 213 and 216 fall outside the 201..208 range every sibling
-#: handler uses, because ``aa045`` and ``aa170`` were inserted after the
-#: original eight. Published for traceability; unreachable on this path.
-#:
-#: Sites: 201 [common/acasirsub1.cbl:L316], 202 [:L367], 203 [:L385],
-#: 213 [:L426], 204 [:L489], 205 [:L517], 206 [:L568], 207 [:L607],
-#: 208 [:L629], 216 [:L642].
 HANDLER_TRACE_NUMBERS: Final[Mapping[str, int]] = MappingProxyType(
     {
         "aa020-Process-Open": 201,
@@ -903,43 +759,23 @@ HANDLER_TRACE_NUMBERS: Final[Mapping[str, int]] = MappingProxyType(
 )
 
 
-#  LOG-KEY TAGS  ------------------------------------------------------------
-
-#: ANOMALY A47 - FOUR distinct end-of-data tags reach ``WS-File-Key`` on the
-#: read path, and which one a caller sees says where the walk stopped:
-#: ``"No Data"`` when the positioning statement matched nothing
-#: [common/irsnominalMT.cbl:L456], ``"EOF"`` when the snapshot ran out
-#: [:L507], ``"EOF2"`` when the fetch reported a driver error [:L525], and
-#: ``"EOF3"`` when the reply was already 10 on entry [:L534]. All four carry
-#: the SAME status pair, so the tag is the only way to tell them apart.
+#: ANOMALY A47 - FOUR distinct end-of-data tags reach ``WS-File-Key`` on the read path,
+#: and which one a caller sees says where the walk stopped.
 END_OF_DATA_TAGS: Final[tuple[str, ...]] = ("No Data", "EOF", "EOF2", "EOF3")
 
-#: ANOMALY A45 - the indexed read writes DIAGNOSTIC TEXT INTO THE NAME FIELD:
-#: ``"Not found 1"`` when the fetch reported a driver error
-#: [common/irsnominalMT.cbl:L634], ``"Not found 2"`` when it simply returned
-#: nothing [:L641], and ``"Not found"`` on every iteration of the pointer
-#: chase [:L659], where it overwrites the account name the previous iteration
-#: unloaded. A caller that inspects the record after a miss sees prose in a
-#: data field, and the chase leaves prose there even when it succeeds.
+#: ANOMALY A45 - the indexed read writes DIAGNOSTIC TEXT INTO THE NAME FIELD.
 NOT_FOUND_LITERALS: Final[tuple[str, ...]] = (
     "Not found 1",
     "Not found 2",
     "Not found",
 )
 
-#: The tags the open and close paragraphs write
-#: [common/irsnominalMT.cbl:L370, :L379].
 _OPEN_TAG: Final[str] = "OPEN IRSNOMINAL (RDB)"
 _CLOSE_TAG: Final[str] = "CLOSE IRSNOMINAL (RDB)"
 
 
-#  PARAGRAPH MAP  -----------------------------------------------------------
-
-#: Every COBOL paragraph this module reproduces, mapped to the function that
-#: reproduces it, with its line span. Rule R-5 requires the mapping to exist as
-#: a recorded artefact rather than as an implication of the code, and the
-#: traceability footer at the end of this file carries the same map with the
-#: ``GO TO`` class applied at each transfer site.
+#: Every COBOL paragraph this module reproduces, mapped to the function that reproduces
+#: it, with its line span.
 PARAGRAPHS: Final[Mapping[str, str]] = MappingProxyType(
     {
         "common/irsnominalMT.cbl:L282-L292 ba010-Initialise": "_ba010_initialise",
@@ -972,15 +808,6 @@ PARAGRAPHS: Final[Mapping[str, str]] = MappingProxyType(
     }
 )
 
-#: The function codes reachable on this path. The bridge's ``evaluate
-#: File-Function`` [common/irsnominalMT.cbl:L302-L328] lists 1, 2, 3, 4, 5, 6,
-#: 7, 8, 9 and 15 and nothing else; its ``when other`` carries the STALE
-#: comment "6 is spare / unused" [:L326] even though 6 is handled twelve lines
-#: earlier, which is ANOMALY A41.
-#:
-#: ANOMALY A40 and CORRECTION C2 - 13 is absent. The handler dispatches it
-#: [common/acasirsub1.cbl:L303-L304] but the handler's ``evaluate`` is
-#: unreachable here, so 13 is a bad function on this path.
 DISPATCHED_FUNCTIONS: Final[frozenset[int]] = frozenset(
     {
         int(FileFunction.OPEN),
@@ -997,15 +824,10 @@ DISPATCHED_FUNCTIONS: Final[frozenset[int]] = frozenset(
 )
 
 
-#  THE FIELD METADATA  (rule R-5 - resolved, never transcribed)
-# Every one of the fifteen columns is looked up in the generated dictionary,
-# under the key form `<TABLE>.<COLUMN>` - which for this table means under the
-# FD copybook's column spellings (ANOMALY A22), because that is what the frozen
-# dump declares. Nothing below retypes a picture, a width, a scale or a
-# signedness: each is read from the entry. The plan states the ordering as a
-# directive rather than a preference - the dictionary comes first, and every
-# field definition cites its entry - precisely so that several hundred fields
-# across the layer cannot be transcribed by eye.
+# THE FIELD METADATA (rule R-5 - resolved, never transcribed) Every one of the fifteen
+# columns is looked up in the generated dictionary, under the key form
+# `<TABLE>.<COLUMN>` - which for this table means under the FD copybook's column
+# spellings (ANOMALY A22), because that is what the frozen dump declares.
 
 
 def _entry(column: str) -> loader.DictionaryEntry:
@@ -1015,13 +837,13 @@ def _entry(column: str) -> loader.DictionaryEntry:
         column: The column name as [mysql/ACASDB.sql:L239-L253] spells it.
 
     Returns:
-        The entry, carrying the copybook view, the bridge host variable, the
-        column, the drift flags and the derivation guard.
+        The entry, carrying the copybook view, the bridge host variable, the column, the
+            drift flags and the derivation guard.
 
     Raises:
-        DictionaryLookupError: If the artefact holds no such entry, which would
-            mean the dictionary and this module disagree about the table - a
-            condition to fail on rather than paper over.
+        DictionaryLookupError: If the artefact holds no such entry, which would mean the
+            dictionary and this module disagree about the table - a condition to fail on
+            rather than paper over.
     """
     return loader.get_entry(f"{TABLE}.{column}")
 
@@ -1031,9 +853,7 @@ def citation(column: str) -> str:
 
     The rendered form is the dictionary's own, e.g. ``IRSNL-REC.KEY-1
     copybook=copybooks/irswsnl.cob:L9 bridge=common/irsnominalMT.cbl:L195
-    column=mysql/ACASDB.sql:L239``. Published so that a caller, a test or a
-    reviewer can obtain the citation for any column of this table without
-    reaching into the dictionary itself (rule R-5).
+    column=mysql/ACASDB.sql:L239``.
 
     Args:
         column: The column name.
@@ -1048,42 +868,26 @@ _ENTRIES: Final[Mapping[str, loader.DictionaryEntry]] = MappingProxyType(
     {column: _entry(column) for column in COLUMNS}
 )
 
-#: Columns whose host variable declares a fractional scale - the ten money
-#: columns, every one of them ``9(08)V9(02)`` and UNSIGNED
-#: [common/irsnominalMT.cbl:L198-L207]. Derived from the dictionary rather than
-#: listed, so that the choice between :class:`~decimal.Decimal` and ``int`` is
-#: data-driven (rule R-2).
-#:
-#: ANOMALY A6 - the copybook declares them ``pic 9(8)v99`` with NO ``S``
-#: [copybooks/irswsnl.cob:L17-L20], the host variables carry no ``S``, and the
-#: columns are ``unsigned`` [mysql/ACASDB.sql:L242-L251]. This is the only
-#: in-scope table with no signedness drift anywhere, because nothing about it
-#: is signed - which makes a nominal-ledger accumulator that cannot hold a
-#: negative value the anomaly instead. No sign is added. See ambiguity Q2.
+#: Columns whose host variable declares a fractional scale - the ten money columns,
+#: every one of them ``9(08)V9(02)`` and UNSIGNED [common/irsnominalMT.cbl:L198-L207].
 _MONEY_COLUMNS: Final[tuple[str, ...]] = tuple(
     column
     for column in COLUMNS
     if (_ENTRIES[column].bridge_host_variable.scale or 0) > 0
 )
 
-#: Columns whose host variable is alphanumeric - ``TIPE``, ``NL-NAME``, ``AC``.
 _CHARACTER_COLUMNS: Final[tuple[str, ...]] = tuple(
     column
     for column in COLUMNS
     if _ENTRIES[column].bridge_host_variable.character_length is not None
 )
 
-#: The two whole-number columns: ``KEY-1`` and ``REC-POINTER``.
 _INTEGER_COLUMNS: Final[tuple[str, ...]] = tuple(
     column
     for column in COLUMNS
     if column not in _MONEY_COLUMNS and column not in _CHARACTER_COLUMNS
 )
 
-#: Declared width of each alphanumeric host variable, from the dictionary.
-#: ``HV-NL-NAME X(24)`` matches the copybook's ``pic x(24)`` and the column's
-#: ``char(24)`` exactly - no width drift here, in contrast with the ledger name
-#: of ``nominalMT``, which widens 24 to 32.
 _CHARACTER_WIDTHS: Final[Mapping[str, int]] = MappingProxyType(
     {
         column: int(_ENTRIES[column].bridge_host_variable.character_length or 0)
@@ -1091,7 +895,6 @@ _CHARACTER_WIDTHS: Final[Mapping[str, int]] = MappingProxyType(
     }
 )
 
-#: Integer and fractional digit counts of each money host variable.
 _MONEY_DIGITS: Final[Mapping[str, tuple[int, int]]] = MappingProxyType(
     {
         column: (
@@ -1102,19 +905,9 @@ _MONEY_DIGITS: Final[Mapping[str, tuple[int, int]]] = MappingProxyType(
     }
 )
 
-#: Digit count of each whole-number host variable.
-#:
-#: ANOMALY A20 - ``HV-KEY-1`` is ``PIC 9(18) COMP``
-#: [common/irsnominalMT.cbl:L195] for a ten-digit source
-#: [copybooks/irswsnl.cob:L10-L11] and a ``bigint(10)`` column
-#: [mysql/ACASDB.sql:L239]: eight digits of inflation, then narrowing. It is
-#: the widest host variable in the folder.
-#:
-#: ANOMALY A21 - ``HV-REC-POINTER`` is ``PIC 9(08) COMP`` [:L209] for a
-#: ``pic 9(5)`` source [copybooks/irswsnl.cob:L23] and a ``mediumint(5)``
-#: column [mysql/ACASDB.sql:L253]: widened five to eight, narrowed eight to
-#: five. The dictionary records both the usage change and the digit
-#: disagreement as drift.
+#: Digit count of each whole-number host variable. [common/irsnominalMT.cbl:L195] for a
+#: ten-digit source [copybooks/irswsnl.cob:L10-L11] and a ``bigint(10)`` column
+#: [mysql/ACASDB.sql:L239]: eight digits of inflation, then narrowing.
 _INTEGER_DIGITS: Final[Mapping[str, int]] = MappingProxyType(
     {
         column: int(_ENTRIES[column].bridge_host_variable.digits or 0)
@@ -1122,69 +915,40 @@ _INTEGER_DIGITS: Final[Mapping[str, int]] = MappingProxyType(
     }
 )
 
-#: The name field's declared width, needed by the overlay helpers because the
-#: pointer occupies its first five characters.
+#: The name field's declared width, needed by the overlay helpers because the pointer
+#: occupies its first five characters.
 _NAME_WIDTH: Final[int] = _CHARACTER_WIDTHS[NAME_COLUMN]
 
-#: A money host variable at its initialised value, at the declared scale so
-#: that a zero renders ``"0.00"`` and not ``"0"``. The scale is taken from the
-#: dictionary rather than written as a literal (rule R-5).
+#: A money host variable at its initialised value, at the declared scale so that a zero
+#: renders ``"0.00"`` and not ``"0"``.
 _ZERO_MONEY: Final[Decimal] = Decimal(0).scaleb(0).quantize(
     Decimal(1).scaleb(-_MONEY_DIGITS["DR"][1])
 )
 
-#: ``05 NL-Pointer pic 9(5)`` [copybooks/irswsnl.cob:L23] - the width of the
-#: alternative view, and therefore how many characters of the name the class
-#: test in ANOMALY A1 inspects.
+#: ``05 NL-Pointer pic 9(5)`` [copybooks/irswsnl.cob:L23] - the width of the alternative
+#: view, and therefore how many characters of the name the class test in ANOMALY A1
+#: inspects.
 _POINTER_DIGITS_IN_RECORD: Final[int] = 5
 
-#: The two halves of the key, each ``pic 9(5)``
-#: [copybooks/irswsnl.cob:L10-L11]. ANOMALY A25 - the copybooks declare a group
-#: of two, the bridge declares one ``pic 9(10)`` with the halves as a
-#: ``REDEFINES`` [common/irsnominalMT.cbl:L225-L228]. The same ten bytes with
-#: opposite emphasis, and the bridge's single-field view is why the column is a
-#: ``bigint`` rather than two smaller ones.
+#: The two halves of the key, each ``pic 9(5)`` [copybooks/irswsnl.cob:L10-L11].
 _KEY_HALF_DIGITS: Final[int] = 5
 
-#: ASCII digits, spelled out rather than delegated to ``str.isdigit``, which
-#: also accepts superscripts and other Unicode digit forms. A COBOL numeric
-#: class test on a ``pic 9(5)`` DISPLAY item accepts the ten ASCII digits and
-#: nothing else, so the wider predicate would classify rows the compiled
-#: program does not.
+#: ASCII digits, spelled out rather than delegated to ``str.isdigit``, which also
+#: accepts superscripts and other Unicode digit forms.
 _ASCII_DIGITS: Final[frozenset[str]] = frozenset("0123456789")
 
 
-#  THE BRIDGE'S OWN CONVERSION  ---------------------------------------------
-# "The bridge is not a transparent pipe." Where the copybook declaration, the
-# host variable and the column disagree, the value CHANGES on the way through,
-# before any SQL executes - so this layer must reproduce the bridge's
-# conversion rather than write the computed value and let the server complain.
-#
-# Two stages, in this order. First a COBOL `move` into the host variable, which
-# is a digit-position operation: right-align into the receiving positions,
-# keep the low-order digits, truncate the fraction to the receiving scale, and
-# drop the sign when the receiver is unsigned - which here it always is. Then
-# the bridge renders the host variable into statement text through one shared
-# edit field, `01 WS-MYSQL-EDIT PIC -Z(18)9.9(9)`
-# [common/irsnominalMT.cbl:L129], and slices three different windows out of it
-# depending on the column.
-#
-# Both stages are done by digit manipulation and never by binary arithmetic
-# (rule R-2): a `move` in COBOL does not compute, and neither does this.
+# "The bridge is not a transparent pipe." Where the copybook declaration, the host
+# variable and the column disagree, the value CHANGES on the way through, before any SQL
+# executes - so this layer must reproduce the bridge's conversion rather than write the
+# computed value and let the server complain.
 
-#: Total character positions of ``PIC -Z(18)9.9(9)``
-#: [common/irsnominalMT.cbl:L129]: one sign, eighteen suppressed integer
-#: digits, one unsuppressed integer digit, the point, nine fractional digits.
 _EDIT_WIDTH: Final[int] = 30
 
-#: The eighteen ``Z`` positions - character positions 2 to 19 - in which a
-#: leading zero prints as a space.
 _EDIT_SUPPRESSED_DIGITS: Final[int] = 18
 
-#: All integer positions, the ``Z`` run plus the single ``9`` at position 20.
 _EDIT_INTEGER_DIGITS: Final[int] = 19
 
-#: The ``9(9)`` run, character positions 22 to 30.
 _EDIT_FRACTION_DIGITS: Final[int] = 9
 
 #: ``FUNCTION TRIM (WS-MYSQL-EDIT(03:18))``
@@ -1212,15 +976,11 @@ _EDIT_FRACTION_DIGITS: Final[int] = 9
 #: settles the storage side.
 _EDIT_KEY_WINDOW: Final[tuple[int, int]] = (3, 18)
 
-#: ``FUNCTION TRIM (WS-MYSQL-EDIT(13:08))``
-#: [common/irsnominalMT.cbl:L1306, :L1485] - the window the integer part of a
-#: money value and the whole of ``REC-POINTER`` are rendered through. Eight
-#: positions, matching the eight integer digits both host variables declare.
 _EDIT_INTEGER_WINDOW: Final[tuple[int, int]] = (13, 8)
 
-#: ``WS-MYSQL-EDIT(22:02)`` [common/irsnominalMT.cbl:L1311] - the fractional
-#: window, NOT trimmed, so it is always two digits and a value of zero renders
-#: ``"00"`` rather than an empty string.
+#: ``WS-MYSQL-EDIT(22:02)`` [common/irsnominalMT.cbl:L1311] - the fractional window, NOT
+#: trimmed, so it is always two digits and a value of zero renders ``"00"`` rather than
+#: an empty string.
 _EDIT_FRACTION_WINDOW: Final[tuple[int, int]] = (22, 2)
 
 
@@ -1294,20 +1054,9 @@ def _narrow_unsigned_integer(value: int, digits: int) -> int:
 def _narrow_unsigned_money(value: Decimal, column: str) -> Decimal:
     """Reproduce a ``move`` into an unsigned ``PIC 9(08)V9(02) COMP`` item.
 
-    The receiving digit counts come from the dictionary
-    (:data:`_MONEY_DIGITS`), never from a literal here. Three things happen at
-    once, exactly as one COBOL store does them: the fraction is TRUNCATED to
-    the receiving scale - no rounding, because a store without ``ROUNDED``
-    truncates toward zero - the integer part keeps its low-order digits, and
-    the sign is dropped.
-
-    ANOMALY A6 - dropping the sign is not a choice. The host variable carries
-    no ``S`` [common/irsnominalMT.cbl:L198-L207] and neither does the copybook
-    [copybooks/irswsnl.cob:L17-L20], so a debit or credit accumulator simply
-    cannot hold a negative value anywhere along the chain. What the compiled
-    system actually stores for a negative accumulation is ambiguity Q2 and must
-    be measured, not assumed; this reproduces the declared storage and nothing
-    more.
+    The receiving digit counts come from the dictionary (:data:`_MONEY_DIGITS`), never
+    from a literal here. Three things happen at once, exactly as one COBOL store does
+    them.
 
     Args:
         value: The sending value.
@@ -1329,14 +1078,7 @@ def _ws_mysql_edit(value: Decimal) -> str:
 
     Reproduces ``move <host variable> to WS-MYSQL-EDIT``
     [common/irsnominalMT.cbl:L1274-L1275] against the picture at
-    [common/irsnominalMT.cbl:L129], ``PIC -Z(18)9.9(9)``. The image is built in
-    full and the callers slice windows out of it, rather than each caller
-    formatting the value its own way, because the windows are what the frozen
-    source names and two of the three are deliberately narrower than the field.
-
-    Zero suppression: a leading zero in one of the eighteen ``Z`` positions
-    prints as a space; the single ``9`` at position 20 always prints its digit,
-    which is why a value of zero renders ``"0"`` and never an empty string.
+    [common/irsnominalMT.cbl:L129], ``PIC -Z(18)9.9(9)``.
 
     Args:
         value: The host-variable value, already narrowed.
@@ -1369,9 +1111,6 @@ def _ws_mysql_edit(value: Decimal) -> str:
 def _edit_window(image: str, window: tuple[int, int]) -> str:
     """Slice one reference-modified window out of the edit image.
 
-    COBOL reference modification ``(p:n)`` is one-based and takes ``n``
-    characters from position ``p``.
-
     Args:
         image: The output of :func:`_ws_mysql_edit`.
         window: The one-based position and the length.
@@ -1385,17 +1124,6 @@ def _edit_window(image: str, window: tuple[int, int]) -> str:
 
 def _render_key(value: int) -> str:
     """Render ``HV-KEY-1`` the way the insert and update sections render it.
-
-    ``move HV-KEY-1 to WS-MYSQL-EDIT`` then ``FUNCTION TRIM
-    (WS-MYSQL-EDIT(03:18))`` [common/irsnominalMT.cbl:L1274-L1278]: a plain
-    integer with no leading zeros, or ``"0"``.
-
-    NOTE THAT THIS IS NOT THE FORM THE PREDICATE USES. The ``SET`` clause of
-    one statement carries the EDITED key while the ``WHERE`` clause of the same
-    statement carries the RAW ten-character record slice
-    [common/irsnominalMT.cbl:L1076-L1086] - so a single update sends the same
-    key twice, in two different renderings, e.g. ``1000020`` and
-    ``0001000020``. Both coerce to the same number. Both are reproduced.
 
     Args:
         value: The key as one number.
@@ -1411,9 +1139,9 @@ def _render_key(value: int) -> str:
 def _render_integer(value: int, column: str) -> str:
     """Render an unsigned whole-number host variable other than the key.
 
-    ``move HV-REC-POINTER to WS-MYSQL-EDIT`` then ``FUNCTION TRIM
-    (WS-MYSQL-EDIT(13:08))`` [common/irsnominalMT.cbl:L1483-L1487] - ANOMALY
-    A21's eight-digit window over a five-digit source and a five-digit column.
+    ``move HV-REC-POINTER to WS-MYSQL-EDIT`` then ``FUNCTION TRIM (WS-MYSQL-
+    EDIT(13:08))`` [common/irsnominalMT.cbl:L1483-L1487] - ANOMALY A21's eight-digit
+    window over a five-digit source and a five-digit column.
 
     Args:
         value: The value to store.
@@ -1431,14 +1159,9 @@ def _render_money(value: Decimal, column: str) -> str:
     """Render an unsigned money host variable.
 
     ``FUNCTION TRIM (WS-MYSQL-EDIT(13:08))``, then a literal ``"."``, then
-    ``WS-MYSQL-EDIT(22:02)`` UNTRIMMED
-    [common/irsnominalMT.cbl:L1305-L1313]. So the integer part loses its
-    leading zeros while the fraction keeps both digits: zero renders
-    ``"0.00"``, five pence renders ``"0.05"``.
-
-    The value travels to the server as this text, because that is what the
-    bridge transmits, and text carries no binary floating-point stage
-    anywhere (rule R-2).
+    [common/irsnominalMT.cbl:L1305-L1313]. So the integer part loses its leading zeros
+    while the fraction keeps both digits: zero renders ``"0.00"``, five pence renders
+    ``"0.05"``.
 
     Args:
         value: The value to store.
@@ -1457,17 +1180,9 @@ def _render_money(value: Decimal, column: str) -> str:
 def _render_character(value: str, column: str) -> str:
     """Render an alphanumeric host variable.
 
-    ``FUNCTION TRIM (HV-TIPE,TRAILING)``
-    [common/irsnominalMT.cbl:L1288-L1289] and the same form for ``HV-NL-NAME``
-    and ``HV-AC``: TRAILING only, so leading spaces survive and trailing ones
-    do not.
-
-    A consequence worth stating because it looks like a defect and is not: a
-    single-character field holding a space renders as the EMPTY STRING, and
-    that empty string is what reaches a ``char(1) NOT NULL`` column. It is
-    never ``NULL`` - the group's ``INITIALIZE``
-    [common/irsnominalMT.cbl:L1197] is why every column on this table can be
-    declared ``NOT NULL`` and why this layer defaults rather than omits.
+    A consequence worth stating because it looks like a defect and is not: a single-
+    character field holding a space renders as the EMPTY STRING, and that empty string
+    is what reaches a ``char(1) NOT NULL`` column.
 
     Args:
         value: The value to store.
@@ -1480,27 +1195,15 @@ def _render_character(value: str, column: str) -> str:
     return image.rstrip()
 
 
-#  THE REDEFINES OVERLAY  ---------------------------------------------------
 # `03 filler redefines NL-Data. / 05 NL-Pointer pic 9(5)`
-# [copybooks/irswsnl.cob:L22-L23]. One five-digit number laid over 105 bytes of
-# name, money and status, so `NL-Pointer` IS `NL-Name (1:5)`. The record module
-# necessarily models the two views as two attributes, because Python has no
-# storage overlay, so these three helpers keep them in step exactly as one byte
-# range would - read the digits from the name, decode them, and when the
-# pointer is written write BOTH sides.
-#
-# Everything downstream depends on this being right: ANOMALY A1's class test,
-# ANOMALY A10's partial restore and ANOMALY A15's pointer chase all read or
-# write those same five characters.
+# [copybooks/irswsnl.cob:L22-L23].
 
 
 def _character_image(value: str, width: int) -> str:
     """Return ``value`` as it sits in a ``pic x(width)`` field.
 
-    A COBOL alphanumeric move left-justifies and space-fills, and truncates on
-    the right when the sending item is longer. Applied wherever a character
-    field's byte image is needed, so that a caller who assigned a short string
-    still yields the declared number of bytes.
+    A COBOL alphanumeric move left-justifies and space-fills, and truncates on the right
+    when the sending item is longer.
 
     Args:
         value: The current attribute value.
@@ -1515,8 +1218,8 @@ def _character_image(value: str, width: int) -> str:
 def _pointer_digits(nl: WsIrsnlRecord) -> str:
     """Return the five characters ``NL-Pointer`` occupies.
 
-    They are the FIRST FIVE CHARACTERS OF THE ACCOUNT NAME, because the
-    pointer view redefines the data group [copybooks/irswsnl.cob:L22-L23].
+    They are the FIRST FIVE CHARACTERS OF THE ACCOUNT NAME, because the pointer view
+    redefines the data group [copybooks/irswsnl.cob:L22-L23].
 
     Args:
         nl: The record.
@@ -1530,10 +1233,6 @@ def _pointer_digits(nl: WsIrsnlRecord) -> str:
 
 def _pointer_is_numeric(nl: WsIrsnlRecord) -> bool:
     """Reproduce the ``NL-Pointer numeric`` class test.
-
-    Half of the discriminator at [common/irsnominalMT.cbl:L1200]. Every one of
-    the five characters must be an ASCII digit; a name beginning with a letter,
-    a space or punctuation fails.
 
     Args:
         nl: The record.
@@ -1550,17 +1249,11 @@ def _pointer_is_numeric(nl: WsIrsnlRecord) -> bool:
 def _read_pointer_overlay(nl: WsIrsnlRecord) -> int:
     """Return ``NL-Pointer`` as a number, or zero when it is not numeric.
 
-    The record module also carries a decoded ``nl_pointer`` attribute, but the
-    STORAGE is the name's first five characters, so this reads those - which is
-    what makes the two views agree however the caller last assigned them.
-
     Args:
         nl: The record.
 
     Returns:
         The overlaid value, or zero when the characters are not all digits.
-        Zero is also the value a genuine ``"00000"`` yields, and the bridge
-        cannot tell those apart either: its guard rejects both.
     """
     if not _pointer_is_numeric(nl):
         return 0
@@ -1570,17 +1263,14 @@ def _read_pointer_overlay(nl: WsIrsnlRecord) -> int:
 def _apply_pointer_overlay(nl: WsIrsnlRecord, value: int) -> None:
     """Write ``NL-Pointer``, which writes the name's first five characters too.
 
-    Reproduces ``move NL-Owning to NL-Pointer``
-    [common/irsnominalMT.cbl:L850] - a five-digit store into a field that
-    overlays the name, so the name's first five characters become those digits
-    and the account name is corrupted in the caller's own record. That
-    corruption is ANOMALY A10 and it is deliberate: the write path restores the
-    two key halves afterwards [:L866-L867] and leaves the name as it is.
+    Reproduces ``move NL-Owning to NL-Pointer`` [common/irsnominalMT.cbl:L850] - a five-
+    digit store into a field that overlays the name, so the name's first five characters
+    become those digits and the account name is corrupted in the caller's own record.
 
     Args:
         nl: The record to mutate in place.
-        value: The pointer value. Stored into ``pic 9(5)``, so the low-order
-            five digits are what survive - a COBOL move, not a check.
+        value: The pointer value. Stored into ``pic 9(5)``, so the low-order five digits
+            are what survive - a COBOL move, not a check.
     """
     digits = _narrow_unsigned_integer(value, _POINTER_DIGITS_IN_RECORD)
     text = f"{digits:0{_POINTER_DIGITS_IN_RECORD}d}"
@@ -1593,25 +1283,15 @@ def _is_pointer_row(nl: WsIrsnlRecord) -> bool:
     """THE DISCRIMINATOR. Reproduce ``if NL-Pointer numeric and > zero``.
 
     ``if NL-Pointer numeric and NL-Pointer > zero``
-    [common/irsnominalMT.cbl:L1200-L1201] is the single most consequential line
-    in this module, and IT DOES NOT LOOK AT ``NL-Type``. It class-tests the
-    first five characters of the ACCOUNT NAME, because the pointer view
-    redefines the data group [copybooks/irswsnl.cob:L22-L23].
-
-    ANOMALY A1, REPRODUCED AND NOT FIXED (rule R-4). The consequence is real
-    data loss: an owning account named ``"10001 Petty Cash"`` satisfies this
-    predicate, so :func:`_load_host_variables` takes the pointer branch and the
-    name, both current balances, the status flag and all eight quarterly
-    balances are left at the values ``initialize TD-IRSNL-REC`` [:L1197] put in
-    them - spaces and zeros - and THOSE are what reach the table. Testing
-    ``nl_type`` instead would be a defect fix and therefore a failure.
+    [common/irsnominalMT.cbl:L1200-L1201] is the single most consequential line in this
+    module, and IT DOES NOT LOOK AT ``NL-Type``.
 
     Args:
         nl: The record about to be written.
 
     Returns:
-        True when the row is stored as a pointer row and the twelve data
-        columns are left at their initialised values.
+        True when the row is stored as a pointer row and the twelve data columns are
+            left at their initialised values.
     """
     return _pointer_is_numeric(nl) and _read_pointer_overlay(nl) > 0
 
@@ -1619,9 +1299,9 @@ def _is_pointer_row(nl: WsIrsnlRecord) -> bool:
 def _owner(nl: WsIrsnlRecord) -> bool:
     """``88 Owner value is "O"`` [copybooks/irswsnl.cob:L13].
 
-    Tested here rather than imported: the semantics package that declares the
-    condition names is outside this layer's import contract, so the one-byte
-    comparison is made locally against the value the copybook gives.
+    Tested here rather than imported: the semantics package that declares the condition
+    names is outside this layer's import contract, so the one-byte comparison is made
+    locally against the value the copybook gives.
 
     Args:
         nl: The record.
@@ -1636,8 +1316,8 @@ def _sub(nl: WsIrsnlRecord) -> bool:
     """``88 Sub value is "S"`` [copybooks/irswsnl.cob:L14].
 
     The FD view's own condition name for the same value, ``88 NL-Sub-AC``
-    [copybooks/irsfdwsnl.cob:L9], is referenced nowhere in the checkout -
-    ANOMALY A24, recorded as a deliberate omission.
+    [copybooks/irsfdwsnl.cob:L9], is referenced nowhere in the checkout - ANOMALY A24,
+    recorded as a deliberate omission.
 
     Args:
         nl: The record.
@@ -1712,13 +1392,10 @@ def _key_image(nl: WsIrsnlRecord) -> str:
 def _set_name(nl: WsIrsnlRecord, value: str) -> None:
     """Write ``NL-Name``, which writes ``NL-Pointer`` too.
 
-    The mirror image of :func:`_apply_pointer_overlay`. ``move HV-NL-NAME to
-    NL-Name`` [common/irsnominalMT.cbl:L1240] stores 24 bytes over storage
-    whose first five are also ``NL-Pointer``
-    [copybooks/irswsnl.cob:L22-L23], so the decoded pointer attribute is
-    re-derived from the new characters. A name of ``"10001 Petty Cash"``
-    therefore leaves ``nl_pointer`` holding 10001, which is precisely how the
-    round trip reproduces ANOMALY A1 rather than hiding it.
+    The mirror image of :func:`_apply_pointer_overlay`. ``move HV-NL-NAME to NL-Name``
+    [common/irsnominalMT.cbl:L1240] stores 24 bytes over storage whose first five are
+    also ``NL-Pointer`` [copybooks/irswsnl.cob:L22-L23], so the decoded pointer
+    attribute is re-derived from the new characters.
 
     Args:
         nl: The record to mutate in place.
@@ -1731,9 +1408,9 @@ def _set_name(nl: WsIrsnlRecord, value: str) -> None:
 def _key_number(nl: WsIrsnlRecord) -> int:
     """Return the key as one number, the way ``NL-Key pic 9(10)`` holds it.
 
-    The bridge's own view of the key [common/irsnominalMT.cbl:L225] - ANOMALY
-    A25. Used where the bridge moves the whole key into a host variable rather
-    than slicing the record image.
+    The bridge's own view of the key [common/irsnominalMT.cbl:L225] - ANOMALY A25. Used
+    where the bridge moves the whole key into a host variable rather than slicing the
+    record image.
 
     Args:
         nl: The record.
@@ -1747,9 +1424,9 @@ def _key_number(nl: WsIrsnlRecord) -> int:
 def _set_key_from_number(nl: WsIrsnlRecord, value: int) -> None:
     """Split a ten-digit key back into the two ``pic 9(5)`` halves.
 
-    Reproduces ``move HV-KEY-1 to NL-Key`` [common/irsnominalMT.cbl:L1235],
-    where the receiving item is the ten-byte group and the two halves are a
-    ``REDEFINES`` of it, so one store fills both.
+    Reproduces ``move HV-KEY-1 to NL-Key`` [common/irsnominalMT.cbl:L1235], where the
+    receiving item is the ten-byte group and the two halves are a ``REDEFINES`` of it,
+    so one store fills both.
 
     Args:
         nl: The record to fill.
@@ -1761,37 +1438,20 @@ def _set_key_from_number(nl: WsIrsnlRecord, value: int) -> None:
     nl.nl_key.nl_sub_nominal = int(text[_KEY_HALF_DIGITS:])
 
 
-#  bb000-HV-Load  -----------------------------------------------------------
-# `bb000-HV-Load Section.` [common/irsnominalMT.cbl:L1189-L1216]. Called before
-# every non-fetch action, it copies the caller's record into the host-variable
-# group that the statement text is then rendered from.
-#
-# Three things in it matter and all three are reproduced:
-#   * `initialize TD-IRSNL-REC.` [:L1197] comes first, so any host variable the
-#     branch below does not assign holds a space or a zero - never SQL NULL.
-#     That is why all fifteen columns can be `NOT NULL` and why this layer
-#     defaults rather than omits.
-#   * the discriminator [:L1200-L1201] reads the NAME, not the type - A1.
-#   * the two branches are MUTUALLY EXCLUSIVE, so `REC-POINTER` and the twelve
-#     data columns can never both carry a value in one row - A4. Nothing ties
-#     that to `TIPE`, and no check is added here, because a check would be a
-#     new validation (rule R-3).
+# `bb000-HV-Load Section.` [common/irsnominalMT.cbl:L1189-L1216]. Called before every
+# non-fetch action, it copies the caller's record into the host-variable group that the
+# statement text is then rendered from.
 
 
 def _initialise_host_variables() -> dict[str, object]:
     """Reproduce ``initialize TD-IRSNL-REC``.
 
-    ``initialize`` sets each elementary item to the figurative constant for its
-    category - zero for numeric, space for alphanumeric
-    [common/irsnominalMT.cbl:L1197]. The keys are inserted in the group's own
-    declaration order [common/irsnominalMT.cbl:L195-L209], which is also the
-    column order of the table, so a caller that iterates the result gets the
-    columns in the order the frozen schema declares them.
+    ``initialize`` sets each elementary item to the figurative constant for its category
+    - zero for numeric, space for alphanumeric [common/irsnominalMT.cbl:L1197].
 
     Returns:
-        All fifteen host variables at their initialised values. Every entry is
-        an :class:`int`, a :class:`~decimal.Decimal` or a :class:`str`; never
-        ``None``.
+        All fifteen host variables at their initialised values. Every entry is an
+            :class:`int`, a :class:`~decimal.Decimal` or a :class:`str`; never ``None``.
     """
     host_variables: dict[str, object] = {}
     for column in COLUMNS:
@@ -1811,30 +1471,17 @@ def _load_host_variables(
 ) -> dict[str, object]:
     """Reproduce ``bb000-HV-Load`` [common/irsnominalMT.cbl:L1189-L1216].
 
-    ANOMALY A38 - the section closes with "Loading HVs implies a non-Fetch
-    action. RGs are handled separately for all such actions so they must not be
-    loaded here." [common/irsnominalMT.cbl:L1218-L1219] IN A BRIDGE THAT HAS NO
-    REPEATING GROUP. ``IRSNL-REC`` is one table with one key and no RG sections
-    at all - the section list runs ``bb000``, ``bb100``, ``bb200``, ``bb300``
-    and stops - so the note is copy-paste from a bridge that does have one,
-    exactly as ``common/purchMT.cbl`` carries it. Nothing follows from it, and
-    nothing is done about it. Of a piece with the maintainer's habit of calling
-    the handler ``irsub1`` rather than ``acasirsub1``, five times over
-    [common/acasirsub1.cbl:L285, :L389, :L400, :L496, :L534] - ``irsub1`` being
-    the pre-migration name of the program this one was derived from.
+    ANOMALY A38 - the section closes with "Loading HVs implies a non-Fetch action. RGs
+    are handled separately for all such actions so they must not be loaded here."
+    [common/irsnominalMT.cbl:L1218-L1219] IN A BRIDGE THAT HAS NO REPEATING GROUP.
 
     Args:
         nl: The caller's record, read and never modified here.
-        traversal: When supplied, each column is appended as it is assigned, so
-            that the ORDER of the assignments is observable to a caller. The
-            order is load-bearing (ANOMALY A2) and :data:`LOAD_TRAVERSAL`
-            records what it must be.
+        traversal: When supplied, each column is appended as it is assigned, so that the
+            ORDER of the assignments is observable to a caller.
 
     Returns:
-        The fifteen host variables. Narrowed to their declared digit counts and
-        scales - see :func:`_narrow_unsigned_integer` and
-        :func:`_narrow_unsigned_money` - because the bridge is not a
-        transparent pipe and the value changes here, before any SQL runs.
+        The fifteen host variables.
     """
     host_variables = _initialise_host_variables()
 
@@ -1857,45 +1504,24 @@ def _load_host_variables(
         _key_number(nl), _INTEGER_DIGITS[PRIMARY_KEY]
     ))
 
-    # `move NL-Tipe to HV-TIPE.` [common/irsnominalMT.cbl:L1199]
-    #
-    # ANOMALY A23 - one byte with three spellings across the three record
-    # views: `NL-Type` [copybooks/irswsnl.cob:L12], `Tipe`
-    # [copybooks/irsfdwsnl.cob:L8] and `NL-Tipe`
-    # [common/irsnominalMT.cbl:L229]. The misspelling that the column inherited
-    # originates in the FD copybook, not in the bridge, and `TYPE` being a
-    # reserved word is presumably why.
+    # `move NL-Tipe to HV-TIPE.` [common/irsnominalMT.cbl:L1199] ANOMALY A23 - one byte
+    # with three spellings across the three record views: `NL-Type`
+    # [copybooks/irswsnl.cob:L12], `Tipe` [copybooks/irsfdwsnl.cob:L8] and `NL-Tipe`
+    # [common/irsnominalMT.cbl:L229].
     assign(TYPE_COLUMN, _character_image(nl.nl_type, _CHARACTER_WIDTHS[TYPE_COLUMN]))
 
     # `if NL-Pointer numeric and NL-Pointer > zero`
-    # [common/irsnominalMT.cbl:L1200-L1201] - ANOMALY A1. The discriminator
-    # class-tests the first five characters of the ACCOUNT NAME, because
-    # `NL-Pointer` redefines the data group [copybooks/irswsnl.cob:L22-L23].
-    # It does NOT test `NL-Type`, and substituting the type test would be a
-    # defect fix and therefore a failure (rule R-4).
+    # [common/irsnominalMT.cbl:L1200-L1201] - ANOMALY A1.
     if _is_pointer_row(nl):
-        # `move NL-Pointer to HV-REC-POINTER` [common/irsnominalMT.cbl:L1202].
-        #
-        # ANOMALY A21 - `pic 9(5)` widened into `PIC 9(08) COMP`
-        # [common/irsnominalMT.cbl:L209] and then narrowed again by a
-        # `mediumint(5)` column.
-        #
-        # ANOMALY A1's consequence, stated plainly: the twelve data host
-        # variables are NOT ASSIGNED on this path, so `NL-NAME` reaches the
-        # table as spaces and the two balances, the status flag and all eight
-        # quarterly balances reach it as zeros. The account name is lost. That
-        # is the behaviour of the compiled program and it is preserved here.
+        # `move NL-Pointer to HV-REC-POINTER` [common/irsnominalMT.cbl:L1202]. ANOMALY
+        # A21 - `pic 9(5)` widened into `PIC 9(08) COMP` [common/irsnominalMT.cbl:L209]
+        # and then narrowed again by a `mediumint(5)` column.
         assign(POINTER_COLUMN, _narrow_unsigned_integer(
             _read_pointer_overlay(nl), _INTEGER_DIGITS[POINTER_COLUMN]
         ))
         return host_variables
 
-    # The `else` branch [common/irsnominalMT.cbl:L1204-L1215]. Name, both
-    # current balances, the status flag, and then the eight quarters
-    # INTERLEAVED - DR-01, CR-01, DR-02, CR-02 and so on - which is the host
-    # variable and column order, and the OPPOSITE of the grouped order the
-    # bridge's own record declares them in [common/irsnominalMT.cbl:L236-L244].
-    # ANOMALY A2, first half.
+    # The `else` branch [common/irsnominalMT.cbl:L1204-L1215].
     assign(NAME_COLUMN, _character_image(
         nl.nl_data.nl_name, _CHARACTER_WIDTHS[NAME_COLUMN]
     ))
@@ -1914,39 +1540,16 @@ def _load_host_variables(
     return host_variables
 
 
-#  bb100-UnloadHVs  ---------------------------------------------------------
-# `bb100-UnloadHVs Section.` [common/irsnominalMT.cbl:L1224-L1252]. Called
-# after every fetch, it copies the host-variable group back into the caller's
-# record.
-#
-# It is NOT the inverse of the load, in two separate ways, and both are
-# reproduced:
-#   * the guard is `if HV-REC-POINTER > zero` [:L1237] with NO `numeric` test -
-#     which cannot apply to a `COMP` item - where the load tested `numeric AND
-#     > zero`. ANOMALY A3.
-#   * the quarters are traversed GROUPED, all four debits then all four credits
-#     [:L1244-L1251], where the load traversed them interleaved. ANOMALY A2,
-#     second half. Both traversals are field-correct; only the ORDER differs,
-#     and the state diff is sensitive to order, so both are written as the
-#     source writes them rather than folded into one loop.
+# `bb100-UnloadHVs Section.` [common/irsnominalMT.cbl:L1224-L1252]. Called after every
+# fetch, it copies the host-variable group back into the caller's record.
 
 
 def _host_variables_from_row(row: Mapping[str, object]) -> dict[str, object]:
     """Populate the host-variable group from one fetched row.
 
     The bridge's fetch moves each result column into its host variable before
-    ``bb100-UnloadHVs`` runs; this does the same, coercing whatever the driver
-    handed back into the host variable's declared storage. The driver returns
-    ``Decimal`` for a ``decimal`` column and ``int`` for an integer one, so the
-    coercion is normally a formality - but it is done explicitly, because R-2
-    forbids an accounting value ever passing through a binary floating-point
-    type and an explicit coercion is how that is guaranteed rather than
-    assumed.
-
-    A column absent from the row keeps its initialised value, which is the
-    behaviour ``initialize TD-IRSNL-REC`` gives and the reason indicator
-    variables were never needed: "NULL fields must not be returned in the
-    buffer" [common/irsnominalMT.cbl:L1231-L1232].
+    ``bb100-UnloadHVs`` runs; this does the same, coercing whatever the driver handed
+    back into the host variable's declared storage.
 
     Args:
         row: One row, keyed on column name.
@@ -1988,10 +1591,10 @@ def _unload_host_variables(
 
     Args:
         row: The fetched row, keyed on column name.
-        nl: The caller's record, filled in place - because the COBOL fills the
-            caller's own linkage item and a caller may hold references into it.
-        traversal: When supplied, each field is appended as it is assigned, so
-            that the GROUPED order is observable. See :data:`UNLOAD_TRAVERSAL`.
+        nl: The caller's record, filled in place - because the COBOL fills the caller's
+            own linkage item and a caller may hold references into it.
+        traversal: When supplied, each field is appended as it is assigned, so that the
+            GROUPED order is observable. See :data:`UNLOAD_TRAVERSAL`.
     """
     host_variables = _host_variables_from_row(row)
 
@@ -2000,11 +1603,11 @@ def _unload_host_variables(
         if traversal is not None:
             traversal.append(column)
 
-    # `initialize WS-IRSNL-Record.` [common/irsnominalMT.cbl:L1233], plain -
-    # ANOMALY A36, because the same bridge writes `initialize
-    # WS-IRSNL-Record with filler` elsewhere [common/irsnominalMT.cbl:L524],
-    # and the stale comment `*> (init moved lower)` [:L1229] sits directly
-    # above an `initialize` that is not lower but immediately below.
+    # `initialize WS-IRSNL-Record.` [common/irsnominalMT.cbl:L1233], plain - ANOMALY
+    # A36, because the same bridge writes `initialize WS-IRSNL-Record with filler`
+    # elsewhere [common/irsnominalMT.cbl:L524], and the stale comment `*> (init moved
+    # lower)` [:L1229] sits directly above an `initialize` that is not lower but
+    # immediately below.
     nl.nl_key.nl_owning = 0
     nl.nl_key.nl_sub_nominal = 0
     nl.nl_type = " "
@@ -2016,35 +1619,27 @@ def _unload_host_variables(
     nl.nl_data.nl_ac = " "
     nl.nl_pointer_view.nl_pointer = 0
 
-    # `move HV-KEY-1 to NL-Key.` [common/irsnominalMT.cbl:L1235] - one store
-    # into the ten-byte group, which fills both `pic 9(5)` halves because they
-    # are a REDEFINES of it. ANOMALY A25.
+    # `move HV-KEY-1 to NL-Key.` [common/irsnominalMT.cbl:L1235] - one store into the
+    # ten-byte group, which fills both `pic 9(5)` halves because they are a REDEFINES of
+    # it.
     key_value = host_variables[PRIMARY_KEY]
     _set_key_from_number(nl, int(key_value) if isinstance(key_value, int) else 0)
     note(PRIMARY_KEY)
 
-    # `move HV-TIPE to NL-Tipe.` [common/irsnominalMT.cbl:L1236]
     type_value = host_variables[TYPE_COLUMN]
     nl.nl_type = type_value[:1] if isinstance(type_value, str) else " "
     note(TYPE_COLUMN)
 
     # `if HV-REC-POINTER > zero` [common/irsnominalMT.cbl:L1237] - ANOMALY A3.
-    # No `numeric` class test, unlike the load's guard, so the two guards are
-    # not inverses and the round trip is asymmetric.
     pointer_value = host_variables[POINTER_COLUMN]
     pointer = int(pointer_value) if isinstance(pointer_value, int) else 0
     if pointer > 0:
-        # `move HV-REC-POINTER to NL-Pointer` [common/irsnominalMT.cbl:L1238],
-        # which writes the first five characters of the name, since that is the
-        # same storage [copybooks/irswsnl.cob:L22-L23].
         _apply_pointer_overlay(nl, pointer)
         note(POINTER_COLUMN)
         return
 
-    # The `else` branch [common/irsnominalMT.cbl:L1240-L1251]: name, balances,
-    # status flag, then the quarters GROUPED - all four debits, then all four
-    # credits. ANOMALY A2, and note the casing drift within the paragraph,
-    # `NL-Dr` / `NL-Cr` here against `NL-DR` / `NL-CR` in the load.
+    # The `else` branch [common/irsnominalMT.cbl:L1240-L1251]: name, balances, status
+    # flag, then the quarters GROUPED - all four debits, then all four credits.
     name_value = host_variables[NAME_COLUMN]
     _set_name(nl, name_value if isinstance(name_value, str) else "")
     note(NAME_COLUMN)
@@ -2073,51 +1668,20 @@ def _unload_host_variables(
     nl.nl_data.nl_cr_last = tuple(credits)
 
 
-#  THE BRIDGE'S WORKING STORAGE  --------------------------------------------
-# `01 DAL-Data` [common/irsnominalMT.cbl:L157-L162], `01 TP-IRSNL-REC usage
-# pointer` [:L193] and the handler's `77 A` / `77 B` [common/acasirsub1.cbl:
-# L178-L179] are all WORKING-STORAGE of a separately compiled program, so they
-# persist between calls and are private to that program. Two consequences the
-# migration has to honour deliberately:
-#
-#   * they must persist across calls, because `Most-Cursor-Set` surviving one
-#     call is the whole mechanism by which a START positions and a later
-#     READ NEXT walks on from where it stopped; and
-#   * `initial` is not written on either PROGRAM-ID, so nothing resets them but
-#     the run unit ending.
-#
-# A COBOL run unit gives that for free. A Python process does not - a test that
-# ran a second scenario in the same interpreter would inherit the first
-# scenario's cursor - so the reset is EXPLICIT, through
-# `reset_bridge_storage()`, and it is the one thing in this module that has no
-# counterpart in the frozen source. It is recorded as such.
-
-
 @dataclasses.dataclass(slots=True)
 class _BridgeStorage:
     """Everything the two programs keep in WORKING-STORAGE between calls.
 
     Attributes:
-        connection: What ``Ws-Mysql-Cid`` refers to once ``MYSQL-1000-OPEN``
-            has run [common/irsnominalMT.cbl:L360]. ``None`` before the open
-            and after the close.
-        cursors: ``01 DAL-Data`` [common/irsnominalMT.cbl:L157-L162] plus the
-            stored result ``TP-IRSNL-REC`` [:L193]. Held in a
-            :class:`~acas_posting.dal.cursor_state.CursorStateTable` because
-            that type already models ``Most-Cursor-Set`` and its two condition
-            names, and only the PRIMARY slot is ever used: this bridge declares
-            ONE cursor, where the open-item bridges declare three.
-        record_size_a: ``77 A pic 9(4) value zero``
-            [common/acasirsub1.cbl:L178], whose being zero is also the
-            once-only latch [common/acasirsub1.cbl:L693].
-        record_size_b: ``77 B pic 9(4) value zero``
-            [common/acasirsub1.cbl:L179].
-        transport: How the connection may cross the network. NOT a COBOL
-            notion - the frozen ``MySQL_real_connect`` call takes no transport
-            argument at all - but ``dal/connection.py`` requires one before it
-            will hand back a connection over a non-loopback host, so it is
-            configuration held here rather than a parameter smuggled into
-            :func:`dispatch` alongside the five the linkage declares.
+        connection: What ``Ws-Mysql-Cid`` refers to once ``MYSQL-1000-OPEN`` has run
+            [common/irsnominalMT.cbl:L360]. ``None`` before the open and after the
+            close.
+        cursors: ``01 DAL-Data`` [common/irsnominalMT.cbl:L157-L162] plus the stored
+            result ``TP-IRSNL-REC`` [:L193].
+        record_size_a: ``77 A pic 9(4) value zero`` [common/acasirsub1.cbl:L178], whose
+            being zero is also the once-only latch [common/acasirsub1.cbl:L693].
+        record_size_b: ``77 B pic 9(4) value zero`` [common/acasirsub1.cbl:L179].
+        transport: How the connection may cross the network.
     """
 
     connection: object | None = None
@@ -2135,23 +1699,11 @@ _STORAGE: _BridgeStorage = _BridgeStorage()
 def reset_bridge_storage(*, transport: TransportSecurity | None = None) -> None:
     """Discard the working storage, as ending the run unit would.
 
-    THIS FUNCTION HAS NO COUNTERPART IN THE FROZEN SOURCE and is recorded as an
-    addition in the module docstring. Neither ``PROGRAM-ID`` carries
-    ``initial``, so in COBOL the only thing that clears ``Most-Cursor-Set``, the
-    stored result and the once-only latch is the run unit ending. A Python
-    process outlives a scenario, so a harness that seeds, runs and then re-seeds
-    has to say when the run unit ended; otherwise the second run would inherit
-    the first run's open cursor and the state diff would be measuring the
-    wrong thing.
-
-    Any connection still held is closed first, through the same
-    ``MYSQL-1980-CLOSE`` path ``ba030-Process-Close`` uses
-    [common/irsnominalMT.cbl:L384], so that resetting cannot leak a socket.
+    THIS FUNCTION HAS NO COUNTERPART IN THE FROZEN SOURCE and is recorded as an addition
+    in the module docstring.
 
     Args:
-        transport: The transport policy for the next run. Defaults to none,
-            which ``dal/connection.py`` reads as plaintext and permits only for
-            a loopback host or an explicitly isolated oracle.
+        transport: The transport policy for the next run.
     """
     global _STORAGE
     if _STORAGE.connection is not None:
@@ -2163,27 +1715,15 @@ def reset_bridge_storage(*, transport: TransportSecurity | None = None) -> None:
 def _cursor_state() -> CursorState:
     """Return ``01 DAL-Data`` for this table.
 
-    ONE cursor, the primary slot [common/irsnominalMT.cbl:L157-L162] - unlike
-    the two open-item bridges, which declare three and index them.
-
     Returns:
         The single cursor state.
     """
     return _STORAGE.cursors.state_for(TABLE, CursorSlot.PRIMARY)
 
 
-#  THE DRIVER BOUNDARY  -----------------------------------------------------
 # `MYSQL-1210-COMMAND`, `MYSQL-1220-STORE-RESULT`, `MySQL_fetch_record` and
-# `MySQL_free_result` are foreign calls into the C interface object the frozen
-# build links. Rule R-1 forbids that object at runtime, so each is reproduced
-# natively: `execute_statement` from `dal/connection.py` issues the statement,
-# and the row shaping below turns a driver cursor into the mapping the unload
-# paragraph expects.
-#
-# The driver is duck-typed on purpose. This module must not import the driver
-# package - it is not in its import contract - so it reads whatever
-# `execute_statement` yields through the DB-API surface alone, and accepts
-# either a mapping row or a positional one.
+# `MySQL_free_result` are foreign calls into the C interface object the frozen build
+# links.
 
 
 def _cursor_column_names(cursor: object) -> tuple[str, ...]:
@@ -2193,8 +1733,8 @@ def _cursor_column_names(cursor: object) -> tuple[str, ...]:
         cursor: The cursor :func:`execute_statement` yielded.
 
     Returns:
-        One name per column, or an empty tuple for a statement that returned no
-        result set - an ``INSERT``, an ``UPDATE`` or a ``DELETE``.
+        One name per column, or an empty tuple for a statement that returned no result
+            set - an ``INSERT``, an ``UPDATE`` or a ``DELETE``.
     """
     description = getattr(cursor, "description", None)
     if not description:
@@ -2209,14 +1749,12 @@ def _row_mapping(
     """Shape one driver row into a mapping keyed on column name.
 
     Args:
-        row: Whatever the driver's ``fetchone`` returned - a mapping when the
-            cursor is dictionary-shaped, a sequence otherwise.
+        row: Whatever the driver's ``fetchone`` returned - a mapping when the cursor is
+            dictionary-shaped, a sequence otherwise.
         names: The column names from :func:`_cursor_column_names`.
 
     Returns:
-        The row, keyed on column name. A positional row with no description to
-        name it is keyed on its ordinal rendered as text, which keeps the shape
-        usable rather than raising.
+        The row, keyed on column name.
     """
     if isinstance(row, Mapping):
         return {str(key): value for key, value in row.items()}
@@ -2229,11 +1767,9 @@ def _row_mapping(
 def _fetch_all_rows(cursor: object) -> list[dict[str, object]]:
     """Materialise the whole result, as ``mysql_store_result`` does.
 
-    ``MYSQL-1220-STORE-RESULT`` brings the ENTIRE qualifying result to the
-    client [common/irsnominalMT.cbl:L434] and ``MySQL_num_rows`` then reports
-    its size, which is why the bridge can test ``WS-MYSQL-Count-Rows`` before
-    fetching anything. Drained one row at a time rather than through
-    ``fetchall`` so that a driver offering only ``fetchone`` still works.
+    ``MYSQL-1220-STORE-RESULT`` brings the ENTIRE qualifying result to the client
+    [common/irsnominalMT.cbl:L434] and ``MySQL_num_rows`` then reports its size, which
+    is why the bridge can test ``WS-MYSQL-Count-Rows`` before fetching anything.
 
     Args:
         cursor: The cursor :func:`execute_statement` yielded.
@@ -2259,10 +1795,6 @@ def _fetch_all_rows(cursor: object) -> list[dict[str, object]]:
 def _affected_rows(cursor: object) -> int:
     """Return ``WS-MYSQL-Count-Rows`` after a non-select statement.
 
-    ``mysql_affected_rows`` is what the bridge tests as ``if WS-MYSQL-Count-Rows
-    not = 1`` following an insert [common/irsnominalMT.cbl:L794], an update
-    [:L1090] and a delete [:L907].
-
     Args:
         cursor: The cursor :func:`execute_statement` yielded.
 
@@ -2283,19 +1815,15 @@ def _driver_failure(
 ) -> DbErrorStatus:
     """Map a driver exception onto the bridge's error fields.
 
-    Reproduces the ``MYSQL-1100-DB-Error`` ladder every guarded arm of the
-    bridge performs, then the per-operation ``We-Error`` substitution the
-    delete and rewrite arms apply [common/irsnominalMT.cbl:L916, :L1103].
-    Delegated to ``dal/status.py`` so that the ladder exists once.
+    Reproduces the ``MYSQL-1100-DB-Error`` ladder every guarded arm of the bridge
+    performs, then the per-operation ``We-Error`` substitution the delete and rewrite
+    arms apply [common/irsnominalMT.cbl:L916, :L1103]. Delegated to ``dal/status.py`` so
+    that the ladder exists once.
 
     Args:
-        error: Whatever the driver raised. Caught broadly and deliberately: the
-            frozen code inspects ``mysql_errno`` and never the exception type,
-            so narrowing here would introduce a distinction the specification
-            does not make.
+        error: Whatever the driver raised. Caught broadly and deliberately.
         command: The statement text, for the log line.
-        file_function: The function code in play, which selects the
-            substitution.
+        file_function: The function code in play, which selects the substitution.
 
     Returns:
         The five error fields plus the duplicate-key verdict.
@@ -2321,19 +1849,9 @@ def _driver_failure(
     return override_we_error_for_operation(status, file_function)
 
 
-#  THE LOGGING FIELDS  ------------------------------------------------------
-# `WS-File-Key`, `WS-Log-Where`, `SQL-Err`, `SQL-Msg` and `SQL-State` are
-# alphanumeric items of `Logging-Data` [copybooks/wsfnctn.cob:L44-L56] that both
-# programs write on almost every path. They have NO database effect - the FH
-# logger consumes them - but they are written here anyway, because the frozen
-# code writes diagnostic TEXT INTO THEM on paths where it writes nothing else,
-# and on one path it writes a diagnostic into the account name itself
-# (ANOMALY A45), so treating them as decoration would lose the only trace some
-# failures leave.
-#
-# Their widths come from the record module's own declared defaults rather than
-# from literals here, so that a `move` into one truncates exactly as COBOL
-# truncates.
+# `WS-File-Key`, `WS-Log-Where`, `SQL-Err`, `SQL-Msg` and `SQL-State` are alphanumeric
+# items of `Logging-Data` [copybooks/wsfnctn.cob:L44-L56] that both programs write on
+# almost every path.
 
 _LOGGING_WIDTHS: Final[Mapping[str, int]] = MappingProxyType(
     {
@@ -2351,8 +1869,8 @@ def _move_to_log_field(file_access: FileAccess, attribute: str, text: str) -> No
     Args:
         file_access: The linkage block whose ``Logging-Data`` is written.
         attribute: The field to write.
-        text: The sending value. Space-padded and right-truncated to the
-            receiving width, which is what an alphanumeric move does.
+        text: The sending value. Space-padded and right-truncated to the receiving
+            width, which is what an alphanumeric move does.
     """
     width = _LOGGING_WIDTHS[attribute]
     setattr(file_access.logging_data, attribute, _character_image(text, width))
@@ -2361,21 +1879,12 @@ def _move_to_log_field(file_access: FileAccess, attribute: str, text: str) -> No
 def _set_trace(file_access: FileAccess, paragraph: str) -> None:
     """``move <n> to ws-No-Paragraph`` for one bridge paragraph.
 
-    ANOMALY A49 - the bridge and the handler carry TWO DISJOINT trace-number
-    sets for the same logical operations: the bridge numbers its paragraphs
-    1..20 with holes at 7, 9, 11, 12, 16 and 19
-    [common/irsnominalMT.cbl:L359, :L378, :L421, :L474, :L573, :L595, :L728,
-    :L792, :L893, :L937, :L1035, :L1071, :L1126, :L1167] while the handler
-    numbers its own 201..208 plus 213 and 216
-    [common/acasirsub1.cbl:L316, :L426, :L642]. Since the RDB path is what this
-    module reproduces, the BRIDGE's numbers are the ones written; the handler's
-    are recorded in :data:`HANDLER_TRACE_NUMBERS` for traceability and are never
-    assigned.
+    ANOMALY A49 - the bridge and the handler carry TWO DISJOINT trace-number sets for
+    the same logical operations.
 
     Args:
         file_access: The linkage block whose ``Logging-Data`` is written.
-        paragraph: The bridge paragraph name, a key of
-            :data:`BRIDGE_TRACE_NUMBERS`.
+        paragraph: The bridge paragraph name, a key of :data:`BRIDGE_TRACE_NUMBERS`.
     """
     file_access.logging_data.ws_no_paragraph = BRIDGE_TRACE_NUMBERS[paragraph]
 
@@ -2383,10 +1892,10 @@ def _set_trace(file_access: FileAccess, paragraph: str) -> None:
 def _apply_status(file_access: FileAccess, status: tuple[int, int]) -> None:
     """Write one ``(FS-Reply, We-Error)`` pair.
 
-    The pair is written in that order because the frozen code writes it in that
-    order, and because two of this bridge's paths write a value into
-    ``We-Error`` and then immediately overwrite it - ANOMALY A16 - which only
-    reads correctly if the order is preserved.
+    The pair is written in that order because the frozen code writes it in that order,
+    and because two of this bridge's paths write a value into ``We-Error`` and then
+    immediately overwrite it - ANOMALY A16 - which only reads correctly if the order is
+    preserved.
 
     Args:
         file_access: The linkage block to write.
@@ -2417,30 +1926,18 @@ def _apply_driver_status(
 def _ba010_initialise(file_access: FileAccess) -> None:
     """``ba010-Initialise`` [common/irsnominalMT.cbl:L282-L292].
 
-    ANOMALY A48 - it clears SIX fields and ``SQL-State`` IS NOT ONE OF THEM.
-    ``WS-MYSQL-Error-Message``, ``WS-MYSQL-Error-Number``, ``WS-Log-Where``,
-    ``WS-File-Key``, ``SQL-Msg`` and ``SQL-Err`` are all set to spaces
-    [:L287-L292] while ``SQL-State`` is left holding whatever the PREVIOUS call
-    put there. The handler clears all three
-    [common/acasirsub1.cbl:L284] - but the handler's clear is on the flat-file
-    path, before the RDB branch has been taken, so on this path a stale
-    ``SQL-State`` really does survive into the next call. Not corrected
-    (rule R-4).
-
-    The comment immediately below the paragraph -
-    "Now Test for valid key ... REMOVED as not used here"
-    [common/irsnominalMT.cbl:L294-L295] - records a key-number test the
-    maintainer deleted, so no such test is performed here either.
+    ANOMALY A48 - it clears SIX fields and ``SQL-State`` IS NOT ONE OF THEM. ``WS-MYSQL-
+    Error-Message``, ``WS-MYSQL-Error-Number``, ``WS-Log-Where``, ``WS-File-Key``,
+    ``SQL-Msg`` and ``SQL-Err`` are all set to spaces [:L287-L292] while ``SQL-State``
+    is left holding whatever the PREVIOUS call put there.
 
     Args:
         file_access: The linkage block to initialise.
     """
-    # `move zero to We-Error` then `Fs-Reply` [:L284-L285].
     file_access.we_error = int(WeError.SUCCESS)
     file_access.fs_reply = int(FsReply.SUCCESS)
-    # `move spaces to ...` [:L287-L292]. The two WS-MYSQL-* items are the
-    # bridge's own working storage rather than linkage, so they have no
-    # counterpart to clear here; the four linkage fields do.
+    # `move spaces to ...` [:L287-L292]. The two WS-MYSQL-* items are the bridge's own
+    # working storage rather than linkage, so they have no counterpart to clear here.
     _move_to_log_field(file_access, "ws_log_where", "")
     _move_to_log_field(file_access, "ws_file_key", "")
     _move_to_log_field(file_access, "sql_msg", "")
@@ -2449,18 +1946,6 @@ def _ba010_initialise(file_access: FileAccess) -> None:
 
 def _ba100_bad_function(file_access: FileAccess) -> tuple[int, int]:
     """``ba100-Bad-Function`` [common/irsnominalMT.cbl:L1154-L1160].
-
-    "Houston; We have a problem" [:L1156], then ``move 990 to WE-Error``
-    [:L1158] and ``move 99 to Fs-Reply`` [:L1159].
-
-    THIS IS THE PAIR THE RDB PATH RETURNS, and it is not the pair the handler
-    returns. ``aa100-Bad-Function`` [common/acasirsub1.cbl:L657-L662] answers
-    ``(99, 999)``, but the handler's RDB branch leaves through
-    ``go to AA-Main-Exit`` [common/acasirsub1.cbl:L267] BEFORE its own dispatch
-    ``evaluate`` at [:L286] is ever reached, so ``(99, 999)`` is unreachable
-    whenever a table is in use. Both pairs are published -
-    :data:`BAD_FUNCTION_STATUS` and :data:`HANDLER_BAD_FUNCTION_STATUS` - and
-    only the bridge's is ever returned.
 
     Args:
         file_access: The linkage block to write.
@@ -2489,11 +1974,7 @@ def _ba998_free(file_access: FileAccess) -> None:
     """``ba998-Free`` [common/irsnominalMT.cbl:L1166-L1177].
 
     ``MySQL_free_result`` [:L1173-L1174] then ``set Cursor-Not-Active to true``
-    [:L1177]. Releasing the stored result and marking the cursor inactive are
-    one step here, which is why a read-indexed - whose every exit routes through
-    this paragraph - always leaves the sequential cursor closed, and therefore
-    why interleaving a read-indexed into a read-next walk restarts the walk.
-    That is the frozen behaviour and no guard against it is added.
+    [:L1177].
 
     Args:
         file_access: The linkage block, for the trace number.
@@ -2502,61 +1983,31 @@ def _ba998_free(file_access: FileAccess) -> None:
     _cursor_state().free()
 
 
-#  THE WHERE CONSTRUCTION  --------------------------------------------------
-# The bridge builds every predicate the same way: take the key metadata's offset
-# and length, `string` the backtick-quoted key name, a relation and a raw
-# character slice of the record buffer together into `WS-Where`, then splice
-# `WS-Where(1:J)` into a statement shell. Four shapes occur and they differ in
-# ways that matter:
-#
-#   ba040 read-next   `TIPE`='O' AND `KEY-1` > "0000000000" ORDER BY `KEY-1` ASC
-#   ba050 read-indexed  `KEY-1`="<ten bytes>"                    - no ORDER BY
-#   ba060 start         `KEY-1`<relation>"<ten bytes>" ORDER BY `KEY-1` ASC
-#   ba080/ba090         `KEY-1`="<ten bytes>"
-#   ba085 delete-all    `KEY-1`<"9999999999"
-#
-# Two departures from the frozen text, both deliberate and both recorded:
-#
-#   * the key VALUE is BOUND rather than spliced. `dal/connection.py` states
-#     that identifiers must arrive already quoted and that values are bound and
-#     never interpolated, so the ten characters travel as a parameter. The text
-#     the server evaluates is identical, because the bridge's own splice
-#     produces a quoted string constant - which is ANOMALY A19, since the
-#     column is a `bigint`.
-#   * the `x"00"` C-string terminator each statement ends with [:L432] is
-#     dropped, as it exists only for the foreign call rule R-1 forbids.
+# The bridge builds every predicate the same way.
 
 
 _KEY: Final[KeyOfReference] = key_of_reference(TABLE, 1)
 
-#: ``KeyName(KOR-x1)`` is ``pic x(30)``, and every `string` of it is
-#: ``delimited by space`` [common/irsnominalMT.cbl:L406], so the trailing
-#: spaces of the declared width never reach the statement.
+#: ``KeyName(KOR-x1)`` is ``pic x(30)``, and every `string` of it is ``delimited by
+#: space`` [common/irsnominalMT.cbl:L406], so the trailing spaces of the declared width
+#: never reach the statement.
 _KEY_NAME: Final[str] = cobol_string_delimited_by_space(_KEY.key_name)
 
 _QUOTED_TABLE: Final[str] = quote_identifier(TABLE)
 _QUOTED_KEY: Final[str] = quote_identifier(_KEY_NAME)
 _QUOTED_TYPE: Final[str] = quote_identifier(TYPE_COLUMN)
 
-#: ``" ORDER BY " "`" keyname "`" " ASC "``
-#: [common/irsnominalMT.cbl:L413-L418] - present on the read-next and start
-#: predicates and ABSENT from the indexed one. The trailing space is the
-#: frozen text's and is kept, because ``WS-Where(1:J)`` carries it through.
+#: ``" ORDER BY " "`" keyname "`" " ASC "`` [common/irsnominalMT.cbl:L413-L418] -
+#: present on the read-next and start predicates and ABSENT from the indexed one.
 _ORDER_BY_KEY_ASC: Final[str] = f" ORDER BY {_QUOTED_KEY} ASC "
 
 
 def _where_sequential() -> tuple[str, tuple[object, ...]]:
     """``ba040-Process-Read-Next``'s predicate [common/irsnominalMT.cbl:L404-L418].
 
-    Two things about it are load-bearing:
-
-    * the ``TIPE`` conjunct. The sequential read filters sub-nominal rows OUT
-      IN SQL - ANOMALY A5, first half - so a plain ``SELECT *`` would return
-      rows the frozen bridge never returns.
-    * the relation is ``>`` and not ``>=``, and the maintainer annotated it
-      ``26/12/16 NOT '='`` [:L409]. The low key is the ten-character string
-      ``"0000000000"`` [:L410], so an account whose key is genuinely all zeros
-      can never be reached by a sequential walk. Not corrected.
+    * the ``TIPE`` conjunct. The sequential read filters sub-nominal rows OUT IN SQL -
+    ANOMALY A5, first half - so a plain ``SELECT *`` would return rows the frozen bridge
+    never returns.
 
     Returns:
         The predicate text and its bound parameters.
@@ -2571,10 +2022,7 @@ def _where_key_equal(nl: WsIrsnlRecord) -> tuple[str, tuple[object, ...]]:
     """The ``=`` predicate shared by read-indexed, delete and rewrite.
 
     ``string "`" KeyName "`" '="' WS-IRSNL-Record (K:L) '"'``
-    [common/irsnominalMT.cbl:L558-L568, :L876-L887, :L1076-L1086]. NO
-    ``ORDER BY`` - a single-row predicate on the primary key does not need one
-    and the frozen text does not add one, so neither is one added here
-    (rule R-6).
+    [common/irsnominalMT.cbl:L558-L568, :L876-L887, :L1076-L1086].
 
     Args:
         nl: The record whose key positions the statement.
@@ -2591,22 +2039,7 @@ def _where_start(
 ) -> tuple[str, tuple[object, ...]]:
     """``ba060-Process-Start``'s predicate [common/irsnominalMT.cbl:L690-L721].
 
-    The relation comes from ``evaluate Access-Type`` [:L692-L703], whose five
-    arms are 5 ``"=  "``, 6 ``"<  "``, 7 ``">  "``, 8 ``">= "`` and 9
-    ``"<= "``, and which has NO ``when other``. Two consequences:
-
-    * ANOMALY A42 - the ``when 9`` arm is DEAD. The guard eleven lines earlier
-      rejects anything outside 5..8 [:L672], so ``<=`` can never be selected,
-      and the arm is annotated "not currently used in ACAS" by the maintainer
-      himself. It is reproduced as reachable code guarded upstream, exactly as
-      written, rather than deleted.
-    * with no ``when other``, an access type the guard somehow admitted would
-      leave ``MOST-Relation`` at spaces and produce a malformed predicate. The
-      guard makes that unreachable; no substitute check is added.
-
-    The relation is spliced ``delimited by space`` [:L711], so ``">= "``
-    reaches the statement as ``">="`` with the padding gone. The maintainer's
-    own note on this construction is "very iffy about this - wanted ?" [:L714].
+    * ANOMALY A42 - the ``when 9`` arm is DEAD.
 
     Args:
         nl: The record whose key positions the statement.
@@ -2625,15 +2058,8 @@ def _where_start(
 def _where_delete_all(nl: WsIrsnlRecord) -> tuple[str, tuple[object, ...]]:
     """``ba085-Process-Delete-ALL``'s predicate [common/irsnominalMT.cbl:L1015-L1025].
 
-    The paragraph first does ``move 9999999999 to NL-Key`` [:L1009], annotated
-    "The last possible data", and then deletes everything strictly BELOW it.
-    So the sweep is bounded, not unbounded, and a row whose key is exactly ten
-    nines survives a delete-all - the mirror of the sequential read's
-    unreachable all-zeros key.
-
-    THE CALLER'S KEY IS MUTATED AND NOT RESTORED, which is the frozen
-    behaviour: unlike the write path, which restores two of the four fields it
-    changed, this paragraph leaves the caller holding ten nines.
+    The paragraph first does ``move 9999999999 to NL-Key`` [:L1009], annotated "The last
+    possible data", and then deletes everything strictly BELOW it.
 
     Args:
         nl: The record whose key is overwritten in place.
@@ -2648,9 +2074,9 @@ def _where_delete_all(nl: WsIrsnlRecord) -> tuple[str, tuple[object, ...]]:
 def _select_statement(predicate: str) -> str:
     """``"SELECT * FROM " "`IRSNL-REC`" " WHERE " ws-Where(1:J) ";"``.
 
-    [common/irsnominalMT.cbl:L427-L432, :L579-L587, :L734-L742]. ``SELECT *``
-    and not a column list, so the result's column order is the schema's - which
-    is why :func:`_host_variables_from_row` keys on name and never on position.
+    [common/irsnominalMT.cbl:L427-L432, :L579-L587, :L734-L742]. ``SELECT *`` and not a
+    column list, so the result's column order is the schema's - which is why
+    :func:`_host_variables_from_row` keys on name and never on position.
 
     Args:
         predicate: The output of one of the ``_where_*`` builders.
@@ -2664,8 +2090,6 @@ def _select_statement(predicate: str) -> str:
 def _delete_statement(predicate: str) -> str:
     """``"DELETE FROM " "`IRSNL-REC`" " WHERE " ws-Where(1:J) ";"``.
 
-    [common/irsnominalMT.cbl:L899-L905, :L960-L966, :L1041-L1047].
-
     Args:
         predicate: The output of one of the ``_where_*`` builders.
 
@@ -2678,12 +2102,8 @@ def _delete_statement(predicate: str) -> str:
 def _bb200_insert_statement() -> str:
     """``bb200-Insert``'s statement [common/irsnominalMT.cbl:L1257-L1500].
 
-    ``INSERT INTO `IRSNL-REC` SET `` then every column as ``` `COL`="value" ```
-    joined by ``", "``, then ``";"``. ALL FIFTEEN COLUMNS ARE NAMED, always -
-    never a subset - because ``initialize TD-IRSNL-REC`` [:L1197] guarantees
-    each host variable holds a space or a zero and the schema declares every
-    column ``NOT NULL`` with no ``DEFAULT``. Omitting a column, or binding
-    ``None`` for one, would therefore fail where the frozen bridge succeeds.
+    ``INSERT INTO `IRSNL-REC` SET `` then every column as ``` `COL`="value" ``` joined
+    by ``", "``, then ``";"``.
 
     Returns:
         The statement text, with one placeholder per column in schema order.
@@ -2695,17 +2115,9 @@ def _bb200_insert_statement() -> str:
 def _bb300_update_statement(predicate: str) -> str:
     """``bb300-Update``'s statement [common/irsnominalMT.cbl:L1505-L1747].
 
-    ANOMALY A46 - the ``SET`` list carries ALL FIFTEEN COLUMNS INCLUDING THE
-    PRIMARY KEY [:L1512 onward], so every update assigns ``KEY-1`` to the value
-    it is simultaneously matching on in the ``WHERE``. Harmless while the two
-    renderings agree, and they do not agree textually: the ``SET`` clause sends
-    the EDITED key, a plain integer with the leading zeros suppressed, while the
-    ``WHERE`` sends the RAW ten-character record slice
-    [common/irsnominalMT.cbl:L1076-L1086]. Both coerce to the same number.
-    Neither is removed.
-
-    The predicate is spliced through ``FUNCTION TRIM (WS-Where(1:J))``, so the
-    trailing space the read predicates keep is absent here.
+    ANOMALY A46 - the ``SET`` list carries ALL FIFTEEN COLUMNS INCLUDING THE PRIMARY KEY
+    [:L1512 onward], so every update assigns ``KEY-1`` to the value it is simultaneously
+    matching on in the ``WHERE``.
 
     Args:
         predicate: The output of :func:`_where_key_equal`.
@@ -2721,11 +2133,6 @@ def _bb300_update_statement(predicate: str) -> str:
 
 def _rendered_parameters(host_variables: Mapping[str, object]) -> tuple[str, ...]:
     """Render the fifteen host variables into the text the bridge transmits.
-
-    Each column goes through the window ``bb200-Insert`` sends it through - see
-    :func:`_render_key`, :func:`_render_money`, :func:`_render_integer` and
-    :func:`_render_character` - in SCHEMA ORDER, matching the placeholder order
-    of :func:`_bb200_insert_statement`.
 
     Args:
         host_variables: The output of :func:`_load_host_variables`.
@@ -2753,34 +2160,16 @@ def _rendered_parameters(host_variables: Mapping[str, object]) -> tuple[str, ...
     return tuple(parameters)
 
 
-#  THE HANDLER'S TWO GATES  -------------------------------------------------
-# Only two things the handler does survive onto the RDB path, because its RDB
-# branch leaves through `go to AA-Main-Exit` [common/acasirsub1.cbl:L267] before
-# its own `evaluate File-Function` [:L286] is reached. Those two are the
-# key-number guard, which runs at [:L231-L245] BEFORE the branch, and the
-# record-size gate, which `ba-Process-RDBMS` falls through into at
-# [:L683-L731]. Everything else in the handler - all ten `aa0xx` verbs, its
-# `aa100-Bad-Function`, both `stop` statements - is indexed-file code and is
-# recorded in the module docstring as a deliberate omission.
+# Only two things the handler does survive onto the RDB path, because its RDB branch
+# leaves through `go to AA-Main-Exit` [common/acasirsub1.cbl:L267] before its own
+# `evaluate File-Function` [:L286] is reached.
 
 
 def _declared_record_length() -> int:
     """``length of WS-NL-Record``, and equally ``length of Record-1``.
 
-    ``77 A`` receives the first [common/acasirsub1.cbl:L694-L696] and ``77 B``
-    the second [:L697-L699], and ``if A < B`` [:L700] then aborts. THE TEST CAN
-    NEVER FIRE: ``copybooks/irswsnl.cob:L8-L23`` and
-    ``copybooks/irsfdwsnl.cob:L4-L18`` declare the same fifteen elementary items
-    at the same widths in the same order, differing only in their names - which
-    is ANOMALY A22, the three-record-view finding, seen from the other side. So
-    both operands are taken from this one function, which makes the equality
-    structural rather than something asserted in a comment, and the abort branch
-    stays live code that never triggers, exactly as in the compiled program.
-
-    The declared widths are read from the dictionary, not written here. The
-    absolute value is immaterial - nothing compares it with anything but itself -
-    so it counts declared digit and character positions rather than trying to
-    second-guess how ``COMP`` items are packed on the build host.
+    ``77 A`` receives the first [common/acasirsub1.cbl:L694-L696] and ``77 B`` the
+    second [:L697-L699], and ``if A < B`` [:L700] then aborts. THE TEST CAN NEVER FIRE.
 
     Returns:
         The declared position count of the record.
@@ -2790,9 +2179,6 @@ def _declared_record_length() -> int:
         total += int(loader.get_entry(key).copybook.digits or 0)
     for column in COLUMNS:
         if column in (PRIMARY_KEY, POINTER_COLUMN):
-            # The key is the two halves already counted, and the pointer
-            # REDEFINES the data group [copybooks/irswsnl.cob:L22-L23] - a
-            # REDEFINES adds no storage.
             continue
         field = _ENTRIES[column].copybook
         total += int(field.character_length or field.digits or 0)
@@ -2805,41 +2191,21 @@ def _record_size_gate(
 ) -> bool:
     """``ba012-Test-WS-Rec-Size-2`` [common/acasirsub1.cbl:L691-L731].
 
-    Once-only, latched on ``if A = zero`` [:L693], and it does two unrelated
-    jobs in that one guarded block:
-
-    1. compares the two record lengths and, on ``A < B``, sets
-       ``We-Error = 901`` [:L701] and ``FS-Reply = 99`` [:L702], displays
-       ``IR902`` and ``IR901``, waits for a keypress, and then
-       ``go to ba-rdbms-exit`` [:L718] - WHICH SKIPS THE BRIDGE CALL ENTIRELY.
-       The display and the keypress are presentation with no database effect, so
-       they become a log record and the pause is dropped; THE CONTROL TRANSFER
-       IS PRESERVED, because whether the bridge is called at all is a database
-       effect.
-    2. otherwise loads the six ``RDB-Data`` fields from the system record
-       [:L725-L730], in the order Schema, UName, UPass, Port, Host, Socket. The
-       maintainer's own comment is "hopefully once is enough  :)" - the
-       parameters are captured ONCE PER RUN AND NEVER REFRESHED, so a system
-       record edited mid-run has no effect. ``load_rdb_data_once`` reproduces
-       that latch and records it as its own anomaly A-1.
+    Once-only, latched on ``if A = zero`` [:L693], and it does two unrelated jobs in
+    that one guarded block.
 
     Args:
         system: ``SYSTEM-REC``, the first linkage parameter.
         file_access: The linkage block, whose ``RDB-Data`` is filled.
 
     Returns:
-        True when the bridge may be called; False when the gate aborted, which
-        means the caller must return the status pair without calling it.
+        True when the bridge may be called; False when the gate aborted, which means the
+            caller must return the status pair without calling it.
     """
     if _STORAGE.record_size_a == 0:
         _STORAGE.record_size_a = _declared_record_length()
         _STORAGE.record_size_b = _declared_record_length()
         if _STORAGE.record_size_a < _STORAGE.record_size_b:
-            # `move 901 to WE-Error` [common/acasirsub1.cbl:L701] then
-            # `move 99 to fs-reply` [:L702]. IR902 "Program Error: Temp rec = "
-            # [:L192] and IR901 "Note error and hit return" [:L191] were
-            # displayed at 2401 and acknowledged; the diagnostic survives as a
-            # log record and the acknowledgement is dropped.
             _LOG.error(
                 "acasirsub1 ba012: IR902 record size mismatch, "
                 "WS-NL-Record=%s Record-1=%s",
@@ -2848,7 +2214,6 @@ def _record_size_gate(
             )
             _apply_status(file_access, RECORD_SIZE_STATUS)
             return False
-        # `move ... to RDB-Data` [common/acasirsub1.cbl:L725-L730].
         rdb_data: RdbData = load_rdb_data_once(system)
         file_access.rdb_data = rdb_data
     return True
@@ -2857,20 +2222,8 @@ def _record_size_gate(
 def _key_number_guard(file_access: FileAccess) -> tuple[int, int] | None:
     """``evaluate File-Function`` at [common/acasirsub1.cbl:L231-L245].
 
-    The one part of the handler that runs BEFORE the RDB branch, so it is in
-    force on this path. Three arms, two error codes:
-
-    * ``fn-read-indexed`` and ``fn-start`` share an arm: a key number other
-      than 1 gives ``We-Error = 998`` and ``FS-Reply = 99`` [:L235-L236].
-    * ``fn-delete`` has its own arm giving ``996`` [:L241-L242], carrying the
-      extra comment "1 is only for RDB as Cobol does it on primary key" - a
-      comment that also appears verbatim at ``common/acas022.cbl:L307``.
-
     Two codes for one condition is the anomaly; there is one key on this table
     [common/irsnominalMT.cbl:L147], so 1 is the only legal value either way.
-    ``File-Key-No`` is a field of ``Logging-Data``
-    [copybooks/wsfnctn.cob:L44-L56], not of ``File-Access`` itself, so that is
-    where it is read from.
 
     Args:
         file_access: The linkage block carrying the function and key number.
@@ -2888,31 +2241,17 @@ def _key_number_guard(file_access: FileAccess) -> tuple[int, int] | None:
     if function == int(FileFunction.DELETE):
         _apply_status(file_access, DELETE_KEY_NUMBER_STATUS)
         return DELETE_KEY_NUMBER_STATUS
-    # Every other function code reaches neither arm, so a wrong key number is
-    # simply not noticed - the `evaluate` has no `when other`
-    # [common/acasirsub1.cbl:L245]. Adding one would be a new validation.
+    # Every other function code reaches neither arm, so a wrong key number is simply not
+    # noticed - the `evaluate` has no `when other` [common/acasirsub1.cbl:L245].
     return None
 
 
 def _aa047_eval_keys(file_access: FileAccess, nl: WsIrsnlRecord) -> None:
     """``aa047-Eval-Keys`` [common/acasirsub1.cbl:L463-L479]. DEAD CODE.
 
-    ANOMALY A31 - this paragraph is unreachable. Its ONLY reference anywhere is
-    a ``perform`` that is commented out [common/acasirsub1.cbl:L490], and the
-    maintainer's own comment ten lines above it says so:
-    "The next block will never get executed unless performed so is it needed ?"
-    [:L461] - the same sentence he wrote at ``common/acas029.cbl:L389``.
-
-    It is reproduced rather than dropped, because rule R-5 maps every paragraph
-    to a function and a paragraph that exists but cannot run is a fact about the
-    program, not an absence. Nothing in this module calls it, exactly as nothing
-    in the handler performs it.
-
-    Two details worth keeping: ``when 1`` writes the key to TWO receivers,
-    ``WS-File-Key`` for the log and ``Key-1`` for the indexed file [:L472-L473],
-    the same two-receiver shape as ``common/acas022.cbl``; and it is numbered
-    ``aa047`` and not ``aa045`` only because ``aa045`` was already taken by the
-    raw read.
+    ANOMALY A31 - this paragraph is unreachable. Its ONLY reference anywhere is a
+    ``perform`` that is commented out [common/acasirsub1.cbl:L490], and the maintainer's
+    own comment ten lines above it says so.
 
     Args:
         file_access: The linkage block whose log key is written.
@@ -2933,22 +2272,16 @@ def _aa047_eval_keys(file_access: FileAccess, nl: WsIrsnlRecord) -> None:
         _move_to_log_field(file_access, "ws_file_key", "")
 
 
-#  STATEMENT EXECUTION  -----------------------------------------------------
-# `MYSQL-1210-COMMAND` issues the statement and every guarded arm that follows
-# it has the identical shape: test `WS-MYSQL-Count-Rows`, and on a
-# disappointing count call `MySQL_errno`, `MySQL_sqlstate`, then `MySQL_error`,
-# and map. These two helpers carry that shape once, so that each verb below
-# reads as the accounting decision it makes rather than as error plumbing -
-# and so that the ladder itself lives in `dal/status.py`, where it is shared.
+# `MYSQL-1210-COMMAND` issues the statement and every guarded arm that follows it has
+# the identical shape.
 
 
 def _fill_log_field(file_access: FileAccess, attribute: str, character: str) -> None:
     """``move <figurative constant> to <field>``.
 
-    A figurative constant moved to an alphanumeric item repeats to fill the
-    receiving width, so ``move zero to SQL-Err`` on ``pic x(5)`` yields five
-    zero characters and not one. Written out because the bridge does exactly
-    that, at [common/irsnominalMT.cbl:L791] among others.
+    A figurative constant moved to an alphanumeric item repeats to fill the receiving
+    width, so ``move zero to SQL-Err`` on ``pic x(5)`` yields five zero characters and
+    not one.
 
     Args:
         file_access: The linkage block to write.
@@ -2968,11 +2301,7 @@ def _require_connection(
 ) -> DbErrorStatus | None:
     """Return the mapped failure when no connection has been opened.
 
-    The frozen bridge does not check. It hands an unopened ``Ws-Mysql-Cid`` to
-    the C interface, which fails, ``MySQL_errno`` reports it, and the ordinary
-    ladder maps it - so this is the SAME ladder over the same condition and not
-    a new validation (rule R-3). What it must not do is raise, because the
-    caller's contract is a status pair.
+    The frozen bridge does not check.
 
     Args:
         file_access: The linkage block to write on failure.
@@ -2994,24 +2323,19 @@ def _require_connection(
     return status
 
 
-
 def _driver_reported_error(failure: DbErrorStatus | None) -> bool:
-    """``if WS-MYSQL-Error-Number not = "0  "``.
+    """``if WS-MYSQL-Error-Number not = "0 "``.
 
     Every guarded arm in the bridge tests the errno before it writes a status
     [common/irsnominalMT.cbl:L448, :L622, :L751, :L907, :L1051, :L1096], and the
-    comparison is against the three-character literal ``"0  "`` -
-    :data:`NO_DRIVER_ERROR`. The test matters because of what happens when it
-    FAILS: several arms then write no status at all, so a statement that matched
-    no row while the driver reported nothing wrong reports SUCCESS. Expressed as
-    a named predicate so that every one of those arms reads as the frozen test
-    rather than as a Python idiom that happens to coincide with it.
+    comparison is against the three-character literal ``"0 "`` -
+    :data:`NO_DRIVER_ERROR`.
 
     Args:
         failure: The mapped failure, or ``None`` when the statement ran cleanly.
 
     Returns:
-        True when the driver reported an error number other than ``"0  "``.
+        True when the driver reported an error number other than ``"0 "``.
     """
     if failure is None:
         return False
@@ -3024,9 +2348,6 @@ def _run_query(
     parameters: tuple[object, ...],
 ) -> tuple[list[dict[str, object]], DbErrorStatus | None]:
     """Issue a ``SELECT`` and store the whole result.
-
-    ``MYSQL-1210-COMMAND`` then ``MYSQL-1220-STORE-RESULT``
-    [common/irsnominalMT.cbl:L433-L434].
 
     Args:
         file_access: The linkage block, whose ``WS-Log-Where`` records the text.
@@ -3044,7 +2365,7 @@ def _run_query(
             _STORAGE.connection, statement, parameters
         ) as cursor:
             rows = _fetch_all_rows(cursor)
-    except Exception as error:  # any driver error takes this path
+    except Exception as error:
         return [], _driver_failure(
             error,
             command=statement,
@@ -3076,7 +2397,7 @@ def _run_update(
             _STORAGE.connection, statement, parameters
         ) as cursor:
             affected = _affected_rows(cursor)
-    except Exception as error:  # any driver error takes this path
+    except Exception as error:
         return 0, _driver_failure(
             error,
             command=statement,
@@ -3125,9 +2446,6 @@ def _bb300_update(
     return _run_update(file_access, statement, parameters)
 
 
-#  ba020-Process-Open / ba030-Process-Close  --------------------------------
-
-
 def open_(
     system: SystemRecord,
     file_access: FileAccess,
@@ -3135,22 +2453,15 @@ def open_(
 ) -> tuple[int, int]:
     """``ba020-Process-Open`` [common/irsnominalMT.cbl:L330-L372].
 
-    The paragraph strings the six ``RDB-Data`` fields into the ``WS-MYSQL-*``
-    names [:L335-L358], sets its trace number [:L359], performs
-    ``MYSQL-1000-OPEN THRU MYSQL-1090-EXIT`` [:L360], and returns early on a
-    non-zero reply [:L361-L362]. Only on success does it tag the log key
-    [:L370] and clear the cursor flag [:L371] - so a failed open leaves
-    ``Most-Cursor-Set`` exactly as the previous call left it.
-
-    ``move zero to Most-Cursor-Set`` is LIVE here [:L371] and COMMENTED OUT at
-    the two other places the same reset would make sense [:L508, :L532], which
-    is why an open is the only thing that resets the cursor other than a free.
+    The paragraph strings the six ``RDB-Data`` fields into the ``WS-MYSQL-*`` names
+    [:L335-L358], sets its trace number [:L359], performs ``MYSQL-1000-OPEN THRU
+    MYSQL-1090-EXIT`` [:L360], and returns early on a non-zero reply [:L361-L362].
 
     Args:
         system: ``SYSTEM-REC``, which carries the connection parameters.
         file_access: The linkage block.
-        nl: The record. Not read - accepted so that every verb takes the
-            bridge's own ``USING`` shape.
+        nl: The record. Not read - accepted so that every verb takes the bridge's own
+            ``USING`` shape.
 
     Returns:
         The ``(FS-Reply, We-Error)`` pair.
@@ -3172,12 +2483,9 @@ def open_(
     _move_to_log_field(file_access, "sql_msg", outcome.sql_msg)
     _move_to_log_field(file_access, "sql_state", outcome.sql_state)
     if outcome.fs_reply != int(FsReply.SUCCESS):
-        # `if fs-reply not = zero / go to ba999-end` [:L361-L362] - no log key,
-        # no cursor reset.
         return (file_access.fs_reply, file_access.we_error)
     _STORAGE.connection = outcome.connection
     _move_to_log_field(file_access, "ws_file_key", _OPEN_TAG)
-    # `move zero to Most-Cursor-Set` [:L371].
     _cursor_state().set_cursor_not_active()
     return (file_access.fs_reply, file_access.we_error)
 
@@ -3189,11 +2497,10 @@ def open_input(
 ) -> tuple[int, int]:
     """The facade's ``-Open-Input`` verb.
 
-    The facade sets ``access-type`` and then the function code
-    [copybooks/Proc-ACAS-FH-Calls.cob:L465-L469]; the BRIDGE ignores the access
-    type on an open, because its ``when 1`` arm routes every open to the one
-    paragraph [common/irsnominalMT.cbl:L303]. So input, i-o and extend all reach
-    the same code, and only output differs - see :func:`open_output`.
+    The facade sets ``access-type`` and then the function code [copybooks/Proc-ACAS-FH-
+    Calls.cob:L465-L469]; the BRIDGE ignores the access type on an open, because its
+    ``when 1`` arm routes every open to the one paragraph
+    [common/irsnominalMT.cbl:L303].
 
     Args:
         system: ``SYSTEM-REC``.
@@ -3214,12 +2521,10 @@ def open_extend(
 ) -> tuple[int, int]:
     """The facade's ``-Open-Extend`` verb.
 
-    ANOMALY, recorded rather than reproduced: the HANDLER rejects extend
-    outright, ``move 997 to WE-Error`` and ``move 99 to fs-reply``
-    [common/acasirsub1.cbl:L354-L355], but that arm is inside
-    ``aa020-Process-Open`` and therefore on the indexed-file path. On the RDB
-    path an extend simply opens, because the bridge never looks at the access
-    type. The asymmetry is the frozen behaviour and is not smoothed over.
+    ANOMALY, recorded rather than reproduced: the HANDLER rejects extend outright,
+    ``move 997 to WE-Error`` and ``move 99 to fs-reply``
+    [common/acasirsub1.cbl:L354-L355], but that arm is inside ``aa020-Process-Open`` and
+    therefore on the indexed-file path.
 
     Args:
         system: ``SYSTEM-REC``.
@@ -3240,71 +2545,29 @@ def open_output(
 ) -> tuple[int, int]:
     """``ba015-Test-Ends`` [common/acasirsub1.cbl:L733-L742] - TWO bridge calls.
 
-    Opening a table for output has to mean what opening an indexed file for
-    output means: the existing contents are gone. There is no such SQL
-    statement, so the handler makes TWO calls to the bridge, and the way it does
-    so is worth reading carefully because it looks like a defect and is not::
-
-        if       fn-Open
-           and   fn-Output
-                 perform ba020-Process-Dal      *> call one, function still 1
-                 set fn-Delete-All to true
-        end-if.
-     ba020-Process-DAL.                          *> falls through - call two
-
-    The ``perform`` is of the paragraph the code then FALLS INTO, so the bridge
-    is entered twice: once with the open, once with function 6.
-
-    ANOMALY A26 - a SECOND, DEAD copy of this coercion sits at
-    [common/acasirsub1.cbl:L253-L260] with both of its lines commented out
-    [:L256-L257]. Reading that block alone suggests a broken coercion; reading
-    the control path to its end shows the working one downstream. The dead block
-    is recorded and not reproduced.
-
-    ANOMALY A27 - that same early block routes to ``ba-Process-RDBMS`` without
-    performing ``move RDBMS-Flat-Statuses to FA-RDBMS-Flat-Statuses``, which
-    every other RDB call performs [:L265]. The bypass is reproduced in
-    :func:`dispatch`.
-
-    ANOMALY A28 - ``fn-Delete-All`` is code 6, and NO handler in the set
-    dispatches it; an exhaustive reading of all seventeen routes 6 to
-    bad-function. On this table it is nevertheless honoured, because the BRIDGE
-    dispatches it [common/irsnominalMT.cbl:L314-L317] - so delete-all is
-    reachable through this coercion and, on the RDB path, through a direct
-    function 6 as well. ``facade.py`` needs that fact; it is stated here so it
-    is recorded twice.
+    The ``perform`` is of the paragraph the code then FALLS INTO, so the bridge is
+    entered twice: once with the open, once with function 6.
 
     Args:
         system: ``SYSTEM-REC``.
         file_access: The linkage block, whose function code ends as 6.
-        nl: The record. Its key is overwritten by the delete-all sweep and NOT
-            restored, exactly as the frozen paragraph leaves it.
+        nl: The record. Its key is overwritten by the delete-all sweep and NOT restored,
+            exactly as the frozen paragraph leaves it.
 
     Returns:
-        The ``(FS-Reply, We-Error)`` pair of the SECOND call. The first call's
-        pair is overwritten, so an open that failed and a sweep that succeeded
-        report success - which is what the frozen sequence reports.
+        The ``(FS-Reply, We-Error)`` pair of the SECOND call.
     """
     file_access.access_type = int(AccessType.OUTPUT)
-    # `perform ba020-Process-Dal` [common/acasirsub1.cbl:L740] - CALL one, with
-    # the function still Open. Routed through `_bridge_call` rather than to
-    # `open_` directly, because each CALL re-enters the bridge and therefore
-    # re-runs `ba010-Initialise` [common/irsnominalMT.cbl:L282-L292].
+    # `perform ba020-Process-Dal` [common/acasirsub1.cbl:L740] - CALL one, with the
+    # function still Open.
     file_access.file_function = int(FileFunction.OPEN)
     _bridge_call(system, file_access, nl)
-    # `set fn-Delete-All to true` [common/acasirsub1.cbl:L741], then the
-    # fall-through into the CALL paragraph makes the second entry.
     file_access.file_function = int(FileFunction.DELETE_ALL)
     return _bridge_call(system, file_access, nl)
 
 
 def close(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
     """``ba030-Process-Close`` [common/irsnominalMT.cbl:L374-L387].
-
-    Frees an active cursor first [:L375-L376], sets its trace number [:L378],
-    tags the log key [:L379] and then performs ``MYSQL-1980-CLOSE THRU
-    MYSQL-1999-EXIT`` [:L384]. Note the ORDER: the log key is tagged BEFORE the
-    close, so it is set even if the close fails.
 
     Args:
         file_access: The linkage block.
@@ -3325,25 +2588,6 @@ def close(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
     return (file_access.fs_reply, file_access.we_error)
 
 
-#  ba040-Process-Read-Next / ba041-Reread  ----------------------------------
-# The sequential read is TWO paragraphs and one fall-through. `ba040` positions
-# the cursor if it is not already positioned, then falls into `ba041`, which
-# fetches one record from the stored snapshot. A later call finds the cursor
-# active, skips the positioning entirely, and falls straight into the fetch -
-# which is how one `SELECT` serves a whole walk.
-#
-# ANOMALY A5. The sub-nominal filter is applied TWICE, by two different
-# mechanisms, and both are reproduced:
-#   * in SQL, by the ``TIPE``='O' conjunct of the predicate
-#     [common/irsnominalMT.cbl:L405]; and
-#   * in the record, by `if Sub / go to ba041-Reread` [:L541-L542], whose own
-#     comment concedes the redundancy - "test to see if pointer record 1st
-#     [ from irsub1 ] but shouldnt happen !" [:L539].
-# The second is therefore unreachable while the first holds. It is reproduced
-# because removing it would be a change, and because it is the ONLY filter the
-# indexed-file twin has.
-
-
 def _ba041_reread(
     file_access: FileAccess,
     nl: WsIrsnlRecord,
@@ -3352,73 +2596,49 @@ def _ba041_reread(
 ) -> tuple[int, int]:
     """``ba041-Reread`` [common/irsnominalMT.cbl:L469-L547].
 
-    Three separate end-of-data paths, all answering ``(10, 3)`` and
-    distinguishable only by the log tag they leave - ANOMALY A47, and
-    :data:`END_OF_DATA_TAGS` lists all four including ``ba040``'s.
-
-    ANOMALY A16 - the EOF pair is written as ``move 10 to fs-Reply`` then
-    ``move 3 to WE-Error`` [:L505-L506], and the sibling that would have made
-    ``We-Error`` 10 is COMMENTED OUT at [:L454, :L520]. So the effective pair is
-    ``(10, 3)`` and not ``(10, 10)``.
-
-    ANOMALY A17 - ``We-Error = 3`` is a single-digit error code, which no other
-    handler in the set uses; the maintainer's own comment calls it out, "Uses 3
-    (instead of 10) as EOF flag in WE-Error per irsub1" [:L391]. It is written as
-    the literal 3 rather than forced into an existing enumeration member.
+    Three separate end-of-data paths, all answering ``(10, 3)`` and distinguishable only
+    by the log tag they leave - ANOMALY A47, and :data:`END_OF_DATA_TAGS` lists all four
+    including ``ba040``'s.
 
     Args:
         file_access: The linkage block.
         nl: The record, filled in place on success.
-        filter_sub_nominal: True for the ordinary read, which skips ``"S"``
-            records; False for the raw read, whose two filter lines are
-            commented out [common/acasirsub1.cbl:L454-L455].
+        filter_sub_nominal: True for the ordinary read, which skips ``"S"`` records;
+            False for the raw read, whose two filter lines are commented out
+            [common/acasirsub1.cbl:L454-L455].
 
     Returns:
         The ``(FS-Reply, We-Error)`` pair.
     """
     state = _cursor_state()
     while True:
-        # `move spaces to WS-Log-Where` [:L473] - the fetch issues no statement,
-        # so the predicate that positioned the cursor is cleared rather than
-        # left to look as though it had just run.
+        # `move spaces to WS-Log-Where` [:L473] - the fetch issues no statement, so the
+        # predicate that positioned the cursor is cleared rather than left to look as
+        # though it had just run.
         _move_to_log_field(file_access, "ws_log_where", "")
         _set_trace(file_access, "ba041-Reread")
 
         row = state.fetch_record()
         if row is None:
-            # `if return-code = -1` [:L504-L510]: the snapshot is exhausted.
             _apply_status(file_access, END_OF_FILE_STATUS)
             _move_to_log_field(file_access, "ws_file_key", END_OF_DATA_TAGS[1])
             state.set_cursor_not_active()
             return END_OF_FILE_STATUS
 
-        # `if WS-MYSQL-Count-Rows = zero` [:L512-L528] guards a driver failure
-        # DURING the fetch and leaves the tag "EOF2" plus `initialize
-        # WS-IRSNL-Record with filler` [:L524]. It cannot be reached here,
-        # because a stored result that yielded a row had a non-zero count and
-        # the count is bridge working storage that the fetch does not touch. It
-        # is reproduced as the guarded arm it is, not deleted: the tag is in
-        # END_OF_DATA_TAGS and the arm's condition is simply never true.
-        #
-        # `if fs-reply = 10` [:L532-L535] - the "EOF3" arm. Equally unreachable,
-        # because `ba010-Initialise` zeroed the reply on entry to the call
-        # [:L285] and nothing above sets 10 without returning.
+        # `if WS-MYSQL-Count-Rows = zero` [:L512-L528] guards a driver failure DURING
+        # the fetch and leaves the tag "EOF2" plus `initialize WS-IRSNL-Record with
+        # filler` [:L524].
         if file_access.fs_reply == int(FsReply.END_OF_FILE):
             state.set_cursor_not_active()
             _move_to_log_field(file_access, "ws_file_key", END_OF_DATA_TAGS[3])
             return END_OF_FILE_STATUS
 
-        # `perform bb100-UnloadHVs` [:L537].
         _unload_host_variables(row, nl)
 
         if filter_sub_nominal and _sub(nl):
-            # `if Sub / go to ba041-Reread.` [:L541-L542] - GO TO class 1,
-            # a loop-back to the head of this paragraph, so `continue`.
             continue
 
-        # `move HV-KEY-1 to WS-File-Key` through the edit field [:L544-L545].
         _move_to_log_field(file_access, "ws_file_key", _render_key(_key_number(nl)))
-        # `move zero to fs-reply WE-Error` [:L546].
         _apply_status(file_access, (int(FsReply.SUCCESS), int(WeError.SUCCESS)))
         return (int(FsReply.SUCCESS), int(WeError.SUCCESS))
 
@@ -3426,10 +2646,8 @@ def _ba041_reread(
 def read_next(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
     """``ba040-Process-Read-Next`` [common/irsnominalMT.cbl:L389-L467].
 
-    Positions once and then walks. ANOMALY A5 - the predicate excludes
-    sub-nominal rows, so THIS VERB CAN NEVER RETURN ONE, however many the table
-    holds. A caller that needs them has to ask for function 13, and on this path
-    function 13 is a bad function - see :func:`read_next_raw`.
+    Positions once and then walks. ANOMALY A5 - the predicate excludes sub-nominal rows,
+    so THIS VERB CAN NEVER RETURN ONE, however many the table holds.
 
     Args:
         file_access: The linkage block.
@@ -3445,57 +2663,28 @@ def read_next(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
         statement = _select_statement(predicate)
         _move_to_log_field(file_access, "ws_log_where", statement)
         rows, failure = _run_query(file_access, statement, parameters)
-        # `move "> 0000000000" to WS-File-Key` [:L437], set BEFORE the count is
-        # tested, so it survives onto the no-data path until that path
-        # overwrites it.
         _move_to_log_field(file_access, "ws_file_key", f"> {SEQUENTIAL_LOW_KEY}")
         count = state.store_result(rows)
         if count == 0:
-            # `if WS-MYSQL-Count-Rows = zero` [:L443-L457]. The errno ladder
-            # runs first and may fill SQL-Err and SQL-Msg [:L448-L452], and then
-            # the pair and the tag are written unconditionally [:L453-L456] -
-            # so a clean empty result and a failed statement answer alike, and
-            # only SQL-Err distinguishes them.
+            # `if WS-MYSQL-Count-Rows = zero` [:L443-L457].
             if _driver_reported_error(failure):
                 _apply_driver_status(file_access, failure)
             _apply_status(file_access, END_OF_FILE_STATUS)
             _move_to_log_field(file_access, "ws_file_key", END_OF_DATA_TAGS[0])
             return END_OF_FILE_STATUS
-        # `set Cursor-Active to true` [:L459] then the "got cnt=" tag
-        # [:L460-L465].
         state.set_cursor_active()
         state.position_at(SEQUENTIAL_LOW_KEY)
         _move_to_log_field(
             file_access, "ws_file_key", f"> 0 got cnt={count} recs"
         )
-    # Fall-through into `ba041-Reread`, which is what the frozen code does: the
-    # paragraph simply ends and the next one begins. GO TO class 2 does not
-    # apply - there is no transfer here at all.
     return _ba041_reread(file_access, nl, filter_sub_nominal=True)
 
 
 def read_next_raw(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
     """``aa045-Process-Read-Next-Raw`` [common/acasirsub1.cbl:L421-L459], on SQL.
 
-    ANOMALY A40 and CORRECTION C2 - READ THIS BEFORE CALLING IT.
-    Function code 13 is ``fn-Read-Next-Raw`` [copybooks/wsfnctn.cob:L100],
-    annotated "Special 4 LD." because the loader programs use it, and
-    ``acasirsub1`` is the ONLY handler in the set that dispatches it
-    [common/acasirsub1.cbl:L303-L304]. BUT the bridge's own ``evaluate
-    File-Function`` [common/irsnominalMT.cbl:L302-L328] HAS NO ``when 13``, and
-    the handler's RDB branch returns before its own ``evaluate`` is reached, so
-    on the RDB path function 13 is a BAD FUNCTION and :func:`dispatch` answers
-    ``(99, 990)`` for it. That is not an oversight in this module; it is what the
-    frozen pair does.
-
-    This function is therefore the traceable counterpart of ``aa045``,
-    reachable only by a direct call, and it is what the raw read WOULD be on
-    SQL: both filters absent. It is written out rather than expressed as
-    :func:`read_next` with a flag, because ``aa045`` is itself a near-verbatim
-    copy of ``aa040`` with two lines commented out
-    [common/acasirsub1.cbl:L454-L455] and its own trace number and its own
-    diagnostic string, and reproducing the duplication is reproducing the
-    program.
+    This function is therefore the traceable counterpart of ``aa045``, reachable only by
+    a direct call, and it is what the raw read WOULD be on SQL: both filters absent.
 
     Args:
         file_access: The linkage block.
@@ -3506,8 +2695,6 @@ def read_next_raw(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]
     """
     state = _cursor_state()
     if state.cursor_not_active():
-        # The predicate WITHOUT the `TIPE` conjunct - "OMITTED as reading all
-        # records RAW" [common/acasirsub1.cbl:L453].
         predicate = f"{_QUOTED_KEY} > %s{_ORDER_BY_KEY_ASC}"
         _set_trace(file_access, "ba040-Process-Read-Next")
         statement = _select_statement(predicate)
@@ -3521,72 +2708,27 @@ def read_next_raw(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]
             if _driver_reported_error(failure):
                 _apply_driver_status(file_access, failure)
             _apply_status(file_access, END_OF_FILE_STATUS)
-            # `move "Read Raw failure on IRS NL File" to WS-File-Key`
-            # [common/acasirsub1.cbl:L447] - the raw twin's OWN diagnostic
-            # string, distinct from the ordinary read's.
             _move_to_log_field(
                 file_access, "ws_file_key", "Read Raw failure on IRS NL File"
             )
             return END_OF_FILE_STATUS
         state.set_cursor_active()
         state.position_at(SEQUENTIAL_LOW_KEY)
-    # `*> if Sub` / `*> go to aa041-Reread.` [common/acasirsub1.cbl:L454-L455]
-    # are commented out, so the record-level filter is absent as well.
+    # `*> if Sub` / `*> go to aa041-Reread.` [common/acasirsub1.cbl:L454-L455] are
+    # commented out, so the record-level filter is absent as well.
     return _ba041_reread(file_access, nl, filter_sub_nominal=False)
-
-
-#  ba050-Process-Read-Indexed  ----------------------------------------------
 
 
 def read_indexed(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
     """``ba050-Process-Read-Indexed`` [common/irsnominalMT.cbl:L549-L663].
 
-    ANOMALY A15 - THIS VERB CHASES A POINTER CHAIN. Reading a key that turns out
-    to hold a sub-nominal row does not return that row; it rewrites the key from
-    the row's own contents and reads again::
-
-        if       Sub
-                 move NL-Owning  to NL-Sub-Nominal          [:L657]
-                 move NL-Pointer to NL-Owning               [:L658]
-                 move "Not found" to NL-Name                [:L659]
-                 go to ba050-Process-Read-Indexed.          [:L660]
-
     ``NL-Pointer`` is the first five characters of the name
-    [copybooks/irswsnl.cob:L22-L23], so the account number the chase follows is
-    read out of the NAME FIELD of the row just fetched. That is the designed
-    mechanism, not an accident, and it is why the overlay has to be modelled
-    rather than approximated. NO TERMINATION GUARD IS ADDED (rule R-3): a chain
-    that pointed at itself would loop here exactly as it loops in the compiled
-    program.
-
-    The transfer is a GO TO class 1 loop-back - to the head of the section it is
-    already in - so it becomes ``continue`` in a ``while True:``. Note what that
-    means: the WHOLE section repeats, including rebuilding the predicate from the
-    mutated key, so each hop issues its own statement.
-
-    ANOMALY A45 - three different diagnostic strings are written INTO
-    ``NL-Name``, a data field: ``"Not found 1"`` [:L634], ``"Not found 2"``
-    [:L641] and ``"Not found"`` [:L659]. The third is transient in a successful
-    chase, because the next iteration's unload initialises the record first
-    [:L1233], and it becomes visible only when the hop it precedes finds nothing
-    - at which point one of the other two overwrites it anyway. Reproduced
-    regardless.
-
-    ANOMALY A16 - the pair here is ``(21, 2)``, written as ``move 21 to
-    fs-Reply`` [:L591] then ``move 2 to we-error`` [:L592]. ANOMALY A17 -
-    ``We-Error = 2`` is the second single-digit code in this pair of programs and
-    appears nowhere else in the handler set.
-
-    EVERY exit routes through ``ba998-Free`` [:L593, :L635, :L644, :L663],
-    including the successful one, so an indexed read always leaves the single
-    cursor inactive - and therefore interrupts any sequential walk in progress.
-    See :func:`_ba998_free`.
+    [copybooks/irswsnl.cob:L22-L23], so the account number the chase follows is read out
+    of the NAME FIELD of the row just fetched.
 
     Args:
         file_access: The linkage block.
-        nl: The record. Its key is READ to build the predicate and REWRITTEN by
-            every hop of the chase, so a caller holding it sees the last key
-            tried, not the one it asked for.
+        nl: The record.
 
     Returns:
         The ``(FS-Reply, We-Error)`` pair.
@@ -3600,9 +2742,8 @@ def read_indexed(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
         rows, failure = _run_query(file_access, statement, parameters)
         count = state.store_result(rows)
         if count == 0:
-            # `if WS-MYSQL-Count-Rows = zero` [:L590-L593]. The maintainer's own
-            # comment on the 21 is "could also be 23 or 14", so the choice is
-            # his; no name literal is written on this arm.
+            # `if WS-MYSQL-Count-Rows = zero` [:L590-L593]. The maintainer's own comment
+            # on the 21 is "could also be 23 or 14", so the choice is his.
             _apply_status(file_access, NOT_FOUND_STATUS)
             _ba998_free(file_access)
             return NOT_FOUND_STATUS
@@ -3612,14 +2753,11 @@ def read_indexed(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
         if row is None:
             _apply_status(file_access, NOT_FOUND_STATUS)
             if _driver_reported_error(failure):
-                # `if WS-MYSQL-Error-Number not = "0  "` [:L626-L635].
                 _apply_driver_status(file_access, failure)
                 _apply_status(file_access, NOT_FOUND_STATUS)
                 _move_to_log_field(file_access, "ws_file_key", "")
                 _set_name(nl, NOT_FOUND_LITERALS[0])
             else:
-                # The clean-errno arm [:L636-L644]: `move zero to SQL-Err`,
-                # spaces to SQL-Msg, and the SECOND literal into the name.
                 _fill_log_field(file_access, "sql_err", "0")
                 _set_name(nl, NOT_FOUND_LITERALS[1])
                 _move_to_log_field(file_access, "sql_msg", "")
@@ -3627,137 +2765,57 @@ def read_indexed(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
             _ba998_free(file_access)
             return NOT_FOUND_STATUS
 
-        # `perform bb100-UnloadHVs` [:L647] then the log key [:L648-L649].
         _unload_host_variables(row, nl)
         _move_to_log_field(file_access, "ws_file_key", _render_key(_key_number(nl)))
 
         if _sub(nl):
-            # THE CHASE [:L653-L660], in the frozen order. `NL-Pointer` must be
-            # read BEFORE the name is overwritten, because they are the same
-            # five characters - and the frozen sequence does exactly that.
+            # THE CHASE [:L653-L660], in the frozen order.
             owning = nl.nl_key.nl_owning
             nl.nl_key.nl_sub_nominal = owning
             nl.nl_key.nl_owning = _read_pointer_overlay(nl)
             _set_name(nl, NOT_FOUND_LITERALS[2])
             continue
 
-        # `move zero to FS-Reply WE-Error` [:L662] then `go to ba998-Free`
-        # [:L663].
         _apply_status(file_access, (int(FsReply.SUCCESS), int(WeError.SUCCESS)))
         _ba998_free(file_access)
         return (int(FsReply.SUCCESS), int(WeError.SUCCESS))
 
 
-#  ba060-Process-Start  -----------------------------------------------------
-
-
 def start(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
     """``ba060-Process-Start`` [common/irsnominalMT.cbl:L665-L777].
 
-    ANOMALY A7 - A START DOES NOT MERELY POSITION, IT READS. The paragraph ends::
-
-        perform  ba999-end.                    *> logging     [:L773]
-        go       to ba041-Reread.                             [:L777]
-
-    so one invocation positions the cursor AND returns the first qualifying
-    record, and the caller's record buffer comes back filled. And because it
-    lands in ``ba041`` rather than anywhere else, THE SUB-NOMINAL FILTER APPLIES
-    TO A START: a start that positions on a ``"S"`` row hands back the next
-    ``"O"`` row after it. The transfer is a GO TO class 4 - a named paragraph is
-    performed for its effect and control then moves elsewhere - so it is
-    reproduced as a call to :func:`_ba041_reread` followed by returning its
-    result, and the equivalence holds because ``ba999-end`` only logs and
-    ``ba041`` never returns to here.
-
-    ANOMALY A29 and CORRECTION C1, which contradicts this file's own agent
-    brief. The brief states that the 5..8 access-type guard is
-    indexed-file-only and instructs that it not be implemented. IT IS NOT
-    INDEXED-FILE-ONLY: the bridge carries its own copy [:L672-L675], annotated
-    "not using not < or not >", answering ``move 99 to FS-Reply`` and
-    ``move 997 to WE-Error``. The handler's copy
-    [common/acasirsub1.cbl:L525-L528] is a second, different one that sets ONLY
-    ``We-Error`` and leaves the reply at zero. The bridge's is the one in force
-    here and it is implemented; the handler's 998 variant is the deliberate
-    omission. Verified three ways: by reading the bridge, by the absence of any
-    RDB-path bypass, and by ``dal/cursor_state.start`` answering ``(99, 997)``
-    for access type 9. TWO guards for one condition, disagreeing on the status
-    they set, is the anomaly - not the guard itself.
-
-    ANOMALY A39 - AND SO THE PUBLISHED FACADE VERB CAN NEVER SUCCEED. The IRS
-    calling convention's ``acasirsub1-Start``
-    [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L202-L205] does
-    ``move zero to Access-Type`` before it calls, exactly as its nine siblings
-    do, because zero is right for every verb that is not a start. Zero fails
-    ``if access-type < 5`` [common/irsnominalMT.cbl:L672], so a start reached
-    through that facade ALWAYS answers ``(99, 997)`` and never positions
-    anything. The guard is reproduced, the facade's zeroing is
-    ``facade.py``'s to reproduce, and between them the verb stays unusable -
-    which is why nothing in the migrated posting cycle calls it.
-
-    ANOMALY A30 - the two layers order their positioning branches differently.
-    The handler tests ``fn-equal-to``, ``fn-not-less-than``,
-    ``fn-greater-than``, then ``fn-less-than`` - 5, 8, 7, 6 - with the last
-    annotated "Not used in irsub1" [common/acasirsub1.cbl:L531-L559]. The
-    bridge's ``evaluate`` runs 5, 6, 7, 8, 9 in numeric order
-    [common/irsnominalMT.cbl:L692-L703]. The SET of relations is the same, so
-    no behaviour turns on it; the divergence is recorded because a reader
-    diffing the two files will meet it, and because the bridge's fifth arm has
-    no counterpart in the handler at all.
-
-    ANOMALY A42 - the ``evaluate`` nevertheless has a ``when 9`` arm giving
-    ``"<= "`` [:L701-L702], annotated "not currently used in ACAS". The guard
-    eleven lines above rejects 9, so the arm is DEAD. Both are reproduced: the
-    guard rejects, and :func:`_where_start` can still render ``<=`` if ever
-    reached.
-
-    ANOMALY A8, RECORDED AND NOT REPRODUCED. The brief describes a
-    ``move zero to Sub-Nominal`` that makes a start always land on an owning
-    account's first entry. That statement is at
-    [common/acasirsub1.cbl:L523] - in the HANDLER's ``aa060``, on the
-    indexed-file path. The bridge has no such statement; a grep of the whole
-    bridge for writes to either key half finds only the write path's mutations
-    [common/irsnominalMT.cbl:L657, :L851-L852, :L866]. So on the RDB path THE
-    LOW HALF OF THE KEY IS NOT ZEROED, and it is not zeroed here.
-
-    One further asymmetry, reproduced as written: when the statement matches
-    nothing AND the driver reports no error [:L750-L761], NO status is set and
-    NO cursor is activated, and control still falls through to the read - which
-    then reports end of file. So an empty start answers ``(10, 3)`` and not
-    ``(21, 2)``.
+    so one invocation positions the cursor AND returns the first qualifying record, and
+    the caller's record buffer comes back filled. And because it lands in ``ba041``
+    rather than anywhere else, THE SUB-NOMINAL FILTER APPLIES TO A START.
 
     Args:
         file_access: The linkage block, carrying the access type.
-        nl: The record, whose key positions the cursor and which is filled in
-            place by the read that follows.
+        nl: The record, whose key positions the cursor and which is filled in place by
+            the read that follows.
 
     Returns:
         The ``(FS-Reply, We-Error)`` pair.
     """
     access_type = file_access.access_type
     if not start_access_type_is_valid(access_type):
-        # `if access-type < 5 or > 8` [:L672-L675].
         _apply_status(file_access, ACCESS_TYPE_STATUS)
         return ACCESS_TYPE_STATUS
 
     state = _cursor_state()
     if state.cursor_active():
-        # `if Cursor-Active / perform ba998-Free.` [:L680-L681] - closed by the
-        # period with no `end-if`, one of the several such sites ANOMALY A35
-        # records.
+        # `if Cursor-Active / perform ba998-Free.` [:L680-L681] - closed by the period
+        # with no `end-if`, one of the several such sites ANOMALY A35 records.
         _ba998_free(file_access)
 
     predicate, parameters = _where_start(nl, access_type)
     statement = _select_statement(predicate)
     _move_to_log_field(file_access, "ws_log_where", statement)
-    # `move NL-Key to WS-File-Key` [:L723], with the commented-out alternative
-    # `ws-IRSNL-Record (K:L) to WS-File-Key` beside it on the same line.
     _move_to_log_field(file_access, "ws_file_key", _render_key(_key_number(nl)))
     _set_trace(file_access, "ba060-Process-Start")
 
     rows, failure = _run_query(file_access, statement, parameters)
     count = state.store_result(rows)
     if count != 0:
-        # `set Cursor-Active to true` [:L745-L748].
         state.set_cursor_active()
         state.position_at(parameters[0])
         _apply_status(file_access, (int(FsReply.SUCCESS), int(WeError.SUCCESS)))
@@ -3770,38 +2828,18 @@ def start(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
             f"{relation}{parameters[0]} got ={count} recs",
         )
     elif _driver_reported_error(failure):
-        # `if WS-MYSQL-Error-Number not = "0  "` [:L755-L760].
         _apply_driver_status(file_access, failure)
         _apply_status(file_access, NOT_FOUND_STATUS)
         return NOT_FOUND_STATUS
 
-    # `perform ba999-end.` [:L773] - logging only - then `go to ba041-Reread.`
-    # [:L777].
     return _ba041_reread(file_access, nl, filter_sub_nominal=True)
-
-
-#  ba090-Process-Rewrite  ---------------------------------------------------
 
 
 def rewrite(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
     """``ba090-Process-Rewrite`` [common/irsnominalMT.cbl:L1068-L1114].
 
-    ONE statement, no pointer handling of any kind. ANOMALY A13 - and the
-    asymmetry among the three mutating verbs is the point: the write issues
-    three statements and maintains the pointer row, the delete issues two and
-    removes it, and the rewrite issues one and ignores it entirely. So updating a
-    sub-nominal account through this verb leaves its pointer row stale, and
-    nothing notices.
-
-    ANOMALY A46 - the ``SET`` list includes ``KEY-1``
-    [common/irsnominalMT.cbl:L1512 onward], so the statement assigns the primary
-    key the value it is matching on, in a different textual rendering. See
-    :func:`_bb300_update_statement`.
-
-    On a count other than one WITH a clean errno, NO status is written at all
-    [:L1094-L1109] - the arm that would write ``(99, 994)`` is inside the
-    ``if WS-MYSQL-Error-Number not = "0  "`` test. So an update that matched no
-    row reports success. Reproduced.
+    ONE statement, no pointer handling of any kind. ANOMALY A13 - and the asymmetry
+    among the three mutating verbs is the point.
 
     Args:
         file_access: The linkage block.
@@ -3815,36 +2853,20 @@ def rewrite(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
     affected, failure = _bb300_update(file_access, host_variables, nl)
     if affected != 1:
         if _driver_reported_error(failure):
-            # `move 99 to fs-reply` [:L1102] then `move 994 to WE-Error`
-            # [:L1103], which `override_we_error_for_operation` supplies for a
-            # RE_WRITE.
             _apply_driver_status(file_access, failure)
             _apply_status(
                 file_access,
                 (int(FsReply.ERROR), REWRITE_FAILED_WE_ERROR),
             )
         return (file_access.fs_reply, file_access.we_error)
-    # `move zero to FS-Reply WE-Error` [:L1111], `move zero to SQL-Err`
-    # [:L1112], `move spaces to SQL-Msg` [:L1113].
     _apply_status(file_access, (int(FsReply.SUCCESS), int(WeError.SUCCESS)))
     _fill_log_field(file_access, "sql_err", "0")
     _move_to_log_field(file_access, "sql_msg", "")
     return (int(FsReply.SUCCESS), int(WeError.SUCCESS))
 
 
-#  ba070 / ba072 / ba073 - THE WRITE, WHICH IS FOUR STATEMENTS  -------------
-# A single `fn-write` runs three paragraphs by fall-through and can issue FOUR
-# SQL statements:
-#
-#   1. `bb200-Insert`                       [:L793]   INSERT the record as passed
-#   2. `ba090` with NL-Tipe forced to "O"    [:L839]   UPDATE  (S -> O)
-#   3. `ba070` again with NL-Tipe "S"        [:L856]   INSERT the pointer row
-#   4. `ba090` again, only if step 3 failed  [:L863]   UPDATE  ("JIC")
-#
-# The brief for this file describes three, which is what the INDEXED-FILE twin
-# does [common/acasirsub1.cbl:L573, :L584, :L598]. The BRIDGE adds the fourth,
-# and it is ANOMALY A44: a bare `if fs-reply not = zero` under a comment reading
-# only "JIC", turning a failed pointer insert into an update attempt.
+# A single `fn-write` runs three paragraphs by fall-through and can issue FOUR SQL
+# statements: 1. `bb200-Insert` [:L793] INSERT the record as passed 2.
 
 
 def _ba070_process_write(
@@ -3853,18 +2875,8 @@ def _ba070_process_write(
 ) -> tuple[int, int]:
     """``ba070-Process-Write`` [common/irsnominalMT.cbl:L783-L813].
 
-    Statement one: load the host variables and insert. ANOMALY A11 - THIS ARM
-    SETS ONLY ``FS-Reply``. There is no ``move`` to ``We-Error`` anywhere in the
-    paragraph, so a duplicate answers ``(22, 0)`` and a hard failure ``(99, 0)``,
-    and the maintainer's own comment on the second says so: "this may need
-    changing for val in WE-Error!!" [:L808]. Not changed.
-
-    ``IR906 "Link/record exists on owning write"``
-    [common/acasirsub1.cbl:L193] was displayed at 2401 and acknowledged; the
-    display becomes a log record and the acknowledgement is dropped, per the
-    presentation rule. The bridge carries its own verbatim copy of IR906, IR907
-    and IR908 [common/irsnominalMT.cbl:L182-L184] but NOT of IR909 or IR910,
-    which is ANOMALY A34.
+    Statement one: load the host variables and insert. ANOMALY A11 - THIS ARM SETS ONLY
+    ``FS-Reply``.
 
     Args:
         file_access: The linkage block.
@@ -3884,9 +2896,9 @@ def _ba070_process_write(
         _move_to_log_field(file_access, "sql_state", failure.sql_state)
         _move_to_log_field(file_access, "sql_err", failure.sql_err)
         _move_to_log_field(file_access, "sql_msg", failure.sql_msg)
-        # `if SQL-Err (1:4) = "1062" or = "1022" or Sql-State = "23000"`
-        # [:L805-L808] - the BRIDGE-level duplicate test, on the copied text
-        # rather than on the driver's own error number.
+        # `if SQL-Err (1:4) = "1062" or = "1022" or Sql-State = "23000"` [:L805-L808] -
+        # the BRIDGE-level duplicate test, on the copied text rather than on the
+        # driver's own error number.
         if is_duplicate_key_bridge_level(
             file_access.logging_data.sql_err,
             file_access.logging_data.sql_state,
@@ -3903,48 +2915,17 @@ def _ba072_proc_write_subs(
 ) -> tuple[int, int] | None:
     """``ba072-Proc-Write-Subs`` [common/irsnominalMT.cbl:L815-L852].
 
-    Statement two, plus two early exits and the key mutation.
-
-    ANOMALY A43 - the first thing after the duplicate report is a special the
-    maintainer labelled "Specials for testing as COA incorrectly coded without
-    subs" [:L824]::
-
-        if       Owner
-             and NL-Sub-Nominal = zero
-             and NL-Tipe = "O"
-             and NL-Name = spaces                      [:L826-L829]
-                 move "S" to NL-Tipe                   [:L830]
-                 perform ba090-Process-Rewrite thru ba092-Finish-1
-                 go to ba999-Exit                      [:L832]
-
-    An owning row with no sub-nominal and NO NAME is rewritten as type ``"S"``
-    and the write ends there - one insert and one update, and the row now claims
-    to be a sub-nominal. The third condition is redundant, since ``88 Owner`` IS
-    ``NL-Tipe = "O"`` [copybooks/irswsnl.cob:L13]. Reproduced, redundancy and
-    all.
-
-    Then the ordinary path: an owning row returns [:L835-L836]; anything else
-    has its type forced to ``"O"`` [:L838] and is UPDATED [:L839], with
-    ``IR907 "Link/record exists on rewrite (S->O)"`` reported when the update
-    answered ``994``.
-
-    The zero-key guard [:L847-L848] is the maintainer's "Extra code to stop zero
-    keys 21/12/16": a sub-nominal of zero ends the write before the pointer row
-    is attempted.
-
-    THE KEY MUTATION [:L850-L852] then runs, and the first of its three moves
-    writes the owning number INTO THE FIRST FIVE CHARACTERS OF THE NAME, because
-    that is where ``NL-Pointer`` lives [copybooks/irswsnl.cob:L22-L23]. That is
-    deliberate here - it is how the pointer row gets its pointer - and it is the
-    same overlay that costs a digit-named account its balances in ANOMALY A1.
+    An owning row with no sub-nominal and NO NAME is rewritten as type ``"S"`` and the
+    write ends there - one insert and one update, and the row now claims to be a sub-
+    nominal.
 
     Args:
         file_access: The linkage block.
         nl: The record, mutated in place.
 
     Returns:
-        The pair when the write ends here, or ``None`` to fall through into
-        ``ba073-Fix-Up-Subs``.
+        The pair when the write ends here, or ``None`` to fall through into ``ba073-Fix-
+            Up-Subs``.
     """
     if is_duplicate_key_bridge_level(
         file_access.logging_data.sql_err,
@@ -3965,18 +2946,13 @@ def _ba072_proc_write_subs(
         and nl.nl_type == TYPE_OWNER
         and _character_image(nl.nl_data.nl_name, _NAME_WIDTH).strip() == ""
     ):
-        # ANOMALY A43 [:L826-L832].
         nl.nl_type = TYPE_SUB
         rewrite(file_access, nl)
         return (file_access.fs_reply, file_access.we_error)
 
     if _owner(nl):
-        # `if Owner / go to ba999-exit.` [:L835-L836] - an owning account is one
-        # statement and nothing more.
         return (file_access.fs_reply, file_access.we_error)
 
-    # `move "O" to NL-Tipe` [:L838] then the UPDATE [:L839]. The row just
-    # inserted is immediately overwritten with its type forced to "O".
     nl.nl_type = TYPE_OWNER
     rewrite(file_access, nl)
     if file_access.we_error == REWRITE_FAILED_WE_ERROR:
@@ -3990,15 +2966,11 @@ def _ba072_proc_write_subs(
         )
 
     if nl.nl_key.nl_sub_nominal == 0:
-        # `if NL-Sub-Nominal = zero / go to ba999-Exit.` [:L847-L848].
         return (file_access.fs_reply, file_access.we_error)
 
-    # `move NL-Owning to NL-Pointer` [:L850] - WRITES THE NAME.
     owning = nl.nl_key.nl_owning
     _apply_pointer_overlay(nl, owning)
-    # `move NL-Sub-Nominal to NL-Owning` [:L851].
     nl.nl_key.nl_owning = nl.nl_key.nl_sub_nominal
-    # `move zero to NL-Sub-Nominal` [:L852].
     nl.nl_key.nl_sub_nominal = 0
     return None
 
@@ -4009,35 +2981,9 @@ def _ba073_fix_up_subs(
 ) -> tuple[int, int]:
     """``ba073-Fix-Up-Subs`` [common/irsnominalMT.cbl:L854-L868].
 
-    Statement three, the possible fourth, and the incomplete restore.
-
-    ``move "S" to NL-Tipe`` [:L855] then ``perform ba070-Process-Write``
-    [:L856] - a PERFORM of the first paragraph of the chain, which ends at
-    [:L813], so only the load and the insert re-run and the fall-through does
-    NOT recurse. ``IR908 "link/record exists on sub write"`` is reported on a
-    duplicate; note its lower-case ``link`` where its three siblings capitalise
-    it, which is part of ANOMALY A33 along with ``IR903``, ``IR904`` and
-    ``IR905`` being absent from the sequence altogether.
-
-    ANOMALY A44 - the fourth statement::
-
-        *> JIC                                          [:L862]
-        if       fs-reply not = zero
-                 perform ba090-Process-Rewrite thru ba092-Finish-1
-
-    "JIC" is the entire justification. A pointer-row insert that failed for ANY
-    reason - not merely a duplicate - is retried as an update. The indexed-file
-    twin has no such arm [common/acasirsub1.cbl:L598-L600], so this is a
-    divergence between the two paths and not a shared idiom.
-
-    ANOMALY A10 - THE RESTORE IS INCOMPLETE, and the maintainer says so in the
-    source: "Do not know why this was missed out / but restored incase used by
-    caller" [:L866-L867]. Two of the four mutated fields are put back - the
-    two key halves - and two are NOT: ``NL-Tipe`` is left holding ``"S"``, and
-    the first five characters of ``NL-Name`` are left holding the pointer digits.
-    A caller that wrote an account and then read its own buffer finds the name
-    corrupted and the type wrong. Reproduced exactly, including the ORDER, which
-    matters because ``NL-Pointer`` is read out of the name it is restoring from.
+    ``move "S" to NL-Tipe`` [:L855] then ``perform ba070-Process-Write`` [:L856] - a
+    PERFORM of the first paragraph of the chain, which ends at [:L813], so only the load
+    and the insert re-run and the fall-through does NOT recurse.
 
     Args:
         file_access: The linkage block.
@@ -4046,7 +2992,6 @@ def _ba073_fix_up_subs(
     Returns:
         The ``(FS-Reply, We-Error)`` pair.
     """
-    # `move "S" to NL-Tipe` [:L855] then the third statement [:L856].
     nl.nl_type = TYPE_SUB
     _ba070_process_write(file_access, nl)
     if is_duplicate_key_bridge_level(
@@ -4066,9 +3011,6 @@ def _ba073_fix_up_subs(
         # ANOMALY A44 - the "JIC" fourth statement [:L862-L865].
         rewrite(file_access, nl)
 
-    # `move NL-Owning to NL-Sub-Nominal` [:L866] then `move NL-Pointer to
-    # NL-Owning` [:L867]. NL-Tipe and the name's first five characters are NOT
-    # restored.
     nl.nl_key.nl_sub_nominal = nl.nl_key.nl_owning
     nl.nl_key.nl_owning = _read_pointer_overlay(nl)
     return (file_access.fs_reply, file_access.we_error)
@@ -4077,15 +3019,8 @@ def _ba073_fix_up_subs(
 def write(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
     """``fn-write`` - the three-paragraph fall-through chain.
 
-    ``ba070-Process-Write`` [common/irsnominalMT.cbl:L783] ends and
-    ``ba072-Proc-Write-Subs`` [:L815] begins, which ends and
-    ``ba073-Fix-Up-Subs`` [:L854] begins. Each ``go to ba999-Exit`` inside them
-    is a GO TO class 3 - a section exit - so it becomes an early ``return`` from
-    the corresponding function, and the fall-through becomes the sequence of
-    calls below. Statement ORDER is what the state diff observes (rule R-6), so
-    the sequence is exactly insert, update, insert, and conditionally update.
-
-    ANOMALY A9. ANOMALY A11. ANOMALY A44. See the three functions.
+    ``ba070-Process-Write`` [common/irsnominalMT.cbl:L783] ends and ``ba072-Proc-Write-
+    Subs`` [:L815] begins, which ends and ``ba073-Fix-Up-Subs`` [:L854] begins.
 
     Args:
         file_access: The linkage block.
@@ -4104,37 +3039,8 @@ def write(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
 def write_raw(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
     """``ba170-Process-Write-Raw`` [common/irsnominalMT.cbl:L1120-L1152].
 
-    ANOMALY A14 - THE ONLY UPSERT IN THE HANDLER SET. Insert, and if the insert
-    left a non-zero reply, update::
-
-        if       fs-reply not = zero
-                 perform ba090-Process-Rewrite thru ba092-Finish-1   [:L1149-L1151]
-
-    ``TWO SEPARATE STATEMENTS``, in that order. It is deliberately NOT expressed
-    as a single upsert statement: the frozen bridge sends two, the server
-    therefore does two units of work in a fixed order, and rule R-6 makes that
-    order observable.
-
-    ``*> Just will write no with no tests for owner or sub`` [:L1120] - the typo
-    is the maintainer's, and the intent is exact: the raw write does NOT run the
-    three-paragraph dance, so it maintains no pointer row. ``*> used with
-    nominalLD`` names the loader it exists for.
-
-    ``IR909 "Link/record exists on owning write, rewriting"``
-    [common/acasirsub1.cbl:L196] and, if the update failed too, ``IR910 "Rewrite
-    failed as well"`` [:L197]. Neither is duplicated in the bridge's own message
-    block - ANOMALY A34.
-
-    A CONSEQUENCE OF A14 THAT IS EASY TO MISS, and which is reproduced rather
-    than corrected: the recovery update ERASES the duplicate-key reply. On a
-    clean update ``ba090`` runs ``move zero to FS-Reply WE-Error``, ``move zero
-    to SQL-Err`` and ``move spaces to SQL-Msg`` [common/irsnominalMT.cbl:L1111-
-    L1113] before it leaves, so the ``22`` this paragraph had just set at
-    [:L1139] is gone by the time the caller sees the pair. A successful upsert
-    is therefore INDISTINGUISHABLE from a successful insert - the caller cannot
-    learn that a row already existed - and only a FAILING recovery update
-    reports anything, as ``(99, 994)`` [:L1101-L1103]. Adding a flag to
-    distinguish the two would be new behaviour and is not done.
+    ``TWO SEPARATE STATEMENTS``, in that order. It is deliberately NOT expressed as a
+    single upsert statement.
 
     Args:
         file_access: The linkage block.
@@ -4158,10 +3064,8 @@ def write_raw(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
             file_access.logging_data.sql_err,
             file_access.logging_data.sql_state,
         ):
-            # `move 22 to fs-reply` [:L1139].
             file_access.fs_reply = int(FsReply.DUPLICATE_KEY)
         else:
-            # `move 99 to fs-reply` [:L1141].
             file_access.fs_reply = int(FsReply.ERROR)
         #  THE KEY IS NOT LOGGED. The frozen `display` shows the LITERAL
         #  ALONE - `display IR90n at 2401 with foreground-color 4` - so naming
@@ -4173,39 +3077,18 @@ def write_raw(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
             "rewriting"
         )
     if file_access.fs_reply != int(FsReply.SUCCESS):
-        # The second statement [:L1149-L1151].
         rewrite(file_access, nl)
         if file_access.we_error == REWRITE_FAILED_WE_ERROR:
             _LOG.error("irsnominalMT ba170: IR910 Rewrite failed as well")
     return (file_access.fs_reply, file_access.we_error)
 
 
-#  ba080-Process-Delete / ba085-Process-Delete-ALL  -------------------------
-
-
 def delete(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
     """``ba080-Process-Delete`` [common/irsnominalMT.cbl:L870-L985].
 
-    ANOMALY A12 - TWO ``DELETE`` STATEMENTS for one logical delete: the row
-    itself [:L899-L905], and then, for anything that is not an owning account,
-    the pointer row under a mutated key [:L960-L966].
-
-    The count test is guarded by the maintainer's own note that the
-    indexed-file twin has no equivalent - "TEST IS NOT IN IRSUB1" [:L907] - and
-    the paragraph header says the same of the whole approach, "IRS does not test
-    for error cond. as in irsub1". The consequence is precise and must not be
-    tidied: when the first delete removes no row AND the driver reports no error,
-    the arm that would write ``(99, 995)`` is skipped, NO STATUS IS WRITTEN, and
-    control leaves at [:L918] - so THE POINTER ROW IS NEVER TOUCHED and the
-    caller is told the delete succeeded. Deleting a non-existent sub-nominal
-    account therefore silently leaves its pointer row behind.
-
-    ``We-Error = 995`` is what ``override_we_error_for_operation`` supplies for a
-    DELETE, matching [:L916, :L972].
-
-    The key mutation [:L935-L936] is NOT restored, unlike the write path's
-    partial restore - so a caller that deletes a sub-nominal account is left
-    holding the pointer row's key.
+    ANOMALY A12 - TWO ``DELETE`` STATEMENTS for one logical delete: the row itself
+    [:L899-L905], and then, for anything that is not an owning account, the pointer row
+    under a mutated key [:L960-L966].
 
     Args:
         file_access: The linkage block.
@@ -4222,31 +3105,24 @@ def delete(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
     affected, failure = _run_update(file_access, statement, parameters)
     if affected != 1:
         if _driver_reported_error(failure):
-            # `move 99 to fs-reply` [:L915] then `move 995 to WE-Error` [:L916].
             _apply_driver_status(file_access, failure)
             _apply_status(
                 file_access,
                 (int(FsReply.ERROR), DELETE_FAILED_WE_ERROR),
             )
-        # `go to ba999-End` [:L918] - unconditional, so a clean no-op delete
-        # returns here with whatever status it arrived with.
+        # `go to ba999-End` [:L918] - unconditional, so a clean no-op delete returns
+        # here with whatever status it arrived with.
         return (file_access.fs_reply, file_access.we_error)
-    # `move spaces to SQL-Msg SQL-State` and `move zero to SQL-Err`
-    # [:L920-L921], then the pair [:L923].
     _move_to_log_field(file_access, "sql_msg", "")
     _move_to_log_field(file_access, "sql_state", "")
     _fill_log_field(file_access, "sql_err", "0")
     _apply_status(file_access, (int(FsReply.SUCCESS), int(WeError.SUCCESS)))
 
     if _owner(nl):
-        # `if owner / go to ba999-Exit` [:L930-L931] - an owning account has no
-        # pointer row to remove.
         return (int(FsReply.SUCCESS), int(WeError.SUCCESS))
 
-    # `move NL-Sub-Nominal to NL-Owning` [:L935] then `move zero to
-    # NL-Sub-Nominal` [:L936]. Note that this is NOT the write path's mutation:
-    # there is no `move NL-Owning to NL-Pointer` here, so the name is untouched
-    # and the pointer row is located by key alone.
+    # `move NL-Sub-Nominal to NL-Owning` [:L935] then `move zero to NL-Sub-Nominal`
+    # [:L936]. Note that this is NOT the write path's mutation.
     nl.nl_key.nl_owning = nl.nl_key.nl_sub_nominal
     nl.nl_key.nl_sub_nominal = 0
 
@@ -4258,11 +3134,9 @@ def delete(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
         file_access, pointer_statement, pointer_parameters
     )
     if pointer_affected != 1 and _driver_reported_error(pointer_failure):
-        # The same mapping again [:L968-L978].
         _apply_driver_status(file_access, pointer_failure)
         _apply_status(file_access, (int(FsReply.ERROR), DELETE_FAILED_WE_ERROR))
         return (file_access.fs_reply, file_access.we_error)
-    # `move zero to FS-Reply WE-Error` [:L984].
     _apply_status(file_access, (int(FsReply.SUCCESS), int(WeError.SUCCESS)))
     return (int(FsReply.SUCCESS), int(WeError.SUCCESS))
 
@@ -4270,28 +3144,9 @@ def delete(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
 def delete_all(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
     """``ba085-Process-Delete-ALL`` [common/irsnominalMT.cbl:L987-L1066].
 
-    The paragraph's own header calls it what it is: "THIS IS NON STANDARD". It
-    exists so that opening the table for output can mean what opening an indexed
-    file for output means - see :func:`open_output`.
-
-    ANOMALY A28 and CORRECTION C3. Function code 6 is ``fn-Delete-All``
-    [copybooks/wsfnctn.cob:L94] and NO HANDLER IN THE SET DISPATCHES IT: reading
-    all seventeen shows 6 routed to bad-function everywhere, including here
-    [common/acasirsub1.cbl:L286-L309]. But the BRIDGE does dispatch it
-    [common/irsnominalMT.cbl:L314-L317], under the comment "special to cleardown
-    all data" - so on the RDB path a direct function 6 works, and it is honoured
-    here. The brief for this file says only that no handler dispatches 6, which
-    is true and incomplete; both halves are recorded.
-
-    The sweep is BOUNDED, not unbounded: ``move 9999999999 to NL-Key`` [:L1009],
-    annotated "The last possible data", and then ``KEY-1 < "9999999999"``
-    [:L1015-L1025]. A row whose key is exactly ten nines therefore SURVIVES a
-    delete-all - the exact mirror of the sequential read's unreachable all-zeros
-    key. Reproduced; no ``<=``.
-
-    ``if WS-MYSQL-Count-Rows not > zero`` [:L1050] rather than ``not = 1``, so
-    sweeping an already-empty table is a failure only when the driver also
-    reports an error; otherwise it passes silently.
+    The paragraph's own header calls it what it is: "THIS IS NON STANDARD". It exists so
+    that opening the table for output can mean what opening an indexed file for output
+    means - see :func:`open_output`.
 
     Args:
         file_access: The linkage block.
@@ -4303,7 +3158,6 @@ def delete_all(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
     predicate, parameters = _where_delete_all(nl)
     statement = _delete_statement(predicate)
     _move_to_log_field(file_access, "ws_log_where", statement)
-    # `move "Deleting back from " NL-Key ... to WS-File-Key` [:L1026-L1030].
     _move_to_log_field(
         file_access,
         "ws_file_key",
@@ -4313,8 +3167,6 @@ def delete_all(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
     affected, failure = _run_update(file_access, statement, parameters)
     if affected <= 0:
         if _driver_reported_error(failure):
-            # `move 99 to fs-reply` [:L1057] then `move 995 to WE-Error`
-            # [:L1058].
             _apply_driver_status(file_access, failure)
             _apply_status(
                 file_access,
@@ -4322,15 +3174,10 @@ def delete_all(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
             )
             return (file_access.fs_reply, file_access.we_error)
     else:
-        # `move spaces to SQL-Msg` and `move zero to SQL-Err` [:L1062-L1063].
         _move_to_log_field(file_access, "sql_msg", "")
         _fill_log_field(file_access, "sql_err", "0")
-    # `move zero to FS-Reply WE-Error` [:L1065].
     _apply_status(file_access, (int(FsReply.SUCCESS), int(WeError.SUCCESS)))
     return (int(FsReply.SUCCESS), int(WeError.SUCCESS))
-
-
-#  THE BRIDGE CALL AND THE HANDLER'S DISPATCH  ------------------------------
 
 
 def _bridge_call(
@@ -4340,28 +3187,8 @@ def _bridge_call(
 ) -> tuple[int, int]:
     """One entry into ``irsnominalMT``: ``ba010-Initialise`` then the dispatch.
 
-    ``ba020-Process-DAL`` [common/acasirsub1.cbl:L751-L756] is::
-
-        call     "irsnominalMT" using File-Access
-                                      ACAS-DAL-Common-data
-
-                                      WS-NL-Record
-        end-call.
-
-    Note the blank line inside the parameter list - the family's habit - and
-    note the PARAMETER-NAME MISMATCH: the handler passes ``WS-NL-Record``
-    [copybooks/irswsnl.cob, renamed at :L201] while the bridge names its third
-    parameter ``WS-IRSNL-Record`` [common/irsnominalMT.cbl:L269], a
-    DIFFERENTLY-NAMED record with a DIFFERENT INTERNAL STRUCTURE - the key is one
-    ``pic 9(10)`` with the halves as a REDEFINES rather than a group of two, and
-    the quarters are eight named fields rather than two ``OCCURS 4`` tables.
-    Positionally compatible, structurally not. ANOMALY A25, and the same class of
-    mismatch ``plinvoiceMT`` carries.
-
-    The bridge's ``evaluate File-Function`` [common/irsnominalMT.cbl:L302-L328]
-    lists 1, 2, 3, 4, 5, 6, 7, 8, 9 and 15. ANOMALY A41 - its ``when other``
-    still carries the comment "6 is spare / unused" [:L326] twelve lines after 6
-    was given its own arm. ANOMALY A40 - there is no ``when 13``.
+    Note the blank line inside the parameter list - the family's habit - and note the
+    PARAMETER-NAME MISMATCH.
 
     Args:
         system: ``SYSTEM-REC``, needed by the open.
@@ -4395,8 +3222,8 @@ def _bridge_call(
         return start(file_access, nl)
     if function == int(FileFunction.WRITE_RAW):
         return write_raw(file_access, nl)
-    # `when other / go to ba100-Bad-Function` [:L325-L327]. Function 13 lands
-    # here - ANOMALY A40 - and so does anything the facade should never send.
+    # `when other / go to ba100-Bad-Function` [:L325-L327]. Function 13 lands here -
+    # ANOMALY A40 - and so does anything the facade should never send.
     return _ba100_bad_function(file_access)
 
 
@@ -4409,73 +3236,25 @@ def dispatch(
 ) -> tuple[int, int]:
     """``acasirsub1``'s entry point [common/acasirsub1.cbl:L211-L217].
 
-    THE PARAMETER ORDER IS THE COBOL'S, EXACTLY::
-
-        Procedure Division Using System-Record
-                                 WS-NL-Record
-                                 File-Access
-                                 File-Defs
-                                 ACAS-DAL-Common-data.
-
-    so that a reviewer can diff this signature against the frozen one - which is
-    the contract AAP section 0.4.3 sets for every handler call.
-
-    What actually happens on the RDB path, in order:
-
-    1. ``move 1 to WS-Log-System`` [:L226] and ``move 11 to WS-Log-File-No``
-       [:L227]. ANOMALY - the legend beside them reads "5=Stock", while
-       ``acas016``, ``acas019``, ``acas026`` and ``acas029`` write "5 = Invoice"
-       for the same field. TWO MUTUALLY INCONSISTENT LEGENDS coexist; both are
-       recorded and neither is resolved.
-    2. the key-number guard [:L231-L245] - see :func:`_key_number_guard`.
-    3. either the Open+Output block [:L253-L260] or the ordinary RDB branch
-       [:L264-L268]. THE DIFFERENCE IS ANOMALY A27: the ordinary branch performs
-       ``move RDBMS-Flat-Statuses to FA-RDBMS-Flat-Statuses`` [:L265] and the
-       Open+Output block does not, so a table opened for output is worked with a
-       ``File-Access`` block whose file-system flags were never refreshed.
-    4. ``move 21 to WS-Log-File-no`` [:L689], reached by fall-through into
-       ``ba010-Test-WS-Rec-Size``, which contains nothing else. ANOMALY - 21 is a
-       FOUR-WAY COLLISION across ``acas005``, ``acas012``, ``acas022`` and this
-       handler; only the ``(system, file)`` pair tells them apart, and this one
-       is ``(1, 21)``.
-    5. the record-size gate [:L691-L731] - see :func:`_record_size_gate`.
-    6. ``ba015-Test-Ends`` [:L733-L742] and then the CALL - see
-       :func:`open_output` and :func:`_bridge_call`.
-
-    Everything the handler does AFTER that point is unreachable here, because the
-    RDB branch leaves through ``go to AA-Main-Exit`` [:L267] before the handler's
-    own ``evaluate File-Function`` at [:L286]. That single fact is why this module
-    reproduces the BRIDGE and not the handler, and it is CORRECTION C4 in the
-    module docstring.
-
-    NO RECOVERY IS ATTEMPTED, ever. "Any errors leave it to caller to recover
-    from" [:L758]. This handler is reached through the IRS facade convention,
-    whose per-handler error check displays its own message and, on an
-    unrecoverable open failure, returns from the CALLING PROGRAM outright
-    [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L355-L364] - so the facade needs an
-    honest status pair to test, and anything retried or smoothed over here would
-    hide a failure the caller is entitled to see.
+    so that a reviewer can diff this signature against the frozen one - which is the
+    contract AAP section 0.4.3 sets for every handler call.
 
     Args:
         system: ``SYSTEM-REC``.
         nl: ``WS-NL-Record``. Several verbs MUTATE it; each says so.
-        file_access: ``File-Access``, carrying the function code, the access
-            type, ``File-Key-No`` and every status and log field.
-        file_defs: ``File-Defs``. Accepted and never read, because the RDB path
-            has no file name to resolve - the table name is a literal in the
-            bridge. Present for parameter-order fidelity, and recorded in the
-            module docstring as an omission rather than left looking like an
-            oversight.
-        dal_common: ``ACAS-DAL-Common-data``, whose ``SW-Testing`` gates the FH
-            logger [common/acasirsub1.cbl:L209].
+        file_access: ``File-Access``, carrying the function code, the access type,
+            ``File-Key-No`` and every status and log field.
+        file_defs: ``File-Defs``. Accepted and never read, because the RDB path has no
+            file name to resolve - the table name is a literal in the bridge.
+        dal_common: ``ACAS-DAL-Common-data``, whose ``SW-Testing`` gates the FH logger
+            [common/acasirsub1.cbl:L209].
 
     Returns:
-        The ``(FS-Reply, We-Error)`` pair, written into ``file_access`` as well
-        as returned.
+        The ``(FS-Reply, We-Error)`` pair, written into ``file_access`` as well as
+            returned.
     """
     del file_defs
 
-    # 1. The log identity [common/acasirsub1.cbl:L226-L227].
     file_access.logging_data.ws_log_system = WS_LOG_SYSTEM
     file_access.logging_data.ws_log_file_no = WS_LOG_FILE_NO_FLAT
 
@@ -4484,7 +3263,6 @@ def dispatch(
     if rejected is not None:
         return rejected
 
-    # 3. Open+Output goes early, WITHOUT the flat-statuses copy [:L253-L265].
     open_for_output = file_access.file_function == int(
         FileFunction.OPEN
     ) and file_access.access_type == int(AccessType.OUTPUT)
@@ -4497,10 +3275,8 @@ def dispatch(
             statuses.file_duplicates_in_use
         )
 
-    # 4. `ba010-Test-WS-Rec-Size` contains only this [:L689].
     file_access.logging_data.ws_log_file_no = WS_LOG_FILE_NO_RDB
 
-    # 5. The record-size gate, which may skip the CALL entirely [:L718].
     if not _record_size_gate(system, file_access):
         return RECORD_SIZE_STATUS
 
@@ -4510,7 +3286,6 @@ def dispatch(
     #  (CWE-532). What `SW-Testing` actually gates is `Ca-Process-Logs`, and that is
     #  reproduced below, on the exit path where the frozen source performs it.
 
-    # 6. `ba015-Test-Ends` then `ba020-Process-DAL` [:L733-L756].
     if open_for_output:
         status = open_output(system, file_access, nl)
     else:

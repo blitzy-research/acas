@@ -1,41 +1,31 @@
 """The General Ledger posting cycle - `gl070`, the abort gate, `gl071`, `gl072`.
 
-The migration of `general/general.cbl` `load08.` **L805-L815**, together with the
-dispatch paragraph it performs three times, `load00.` **L711-L721**. Those two
-paragraphs, verbatim from the frozen source with the `*>` rule lines elided::
+The migration of `general/general.cbl` `load08.` L805-L815 together with the
+dispatch paragraph it performs three times, `load00.` L711-L721. Screen I/O is
+removed; the dispatch, its order and its gate are not.
 
-    805  load08.
-    808      move     "gl070" to ws-called.
-    809      perform  load00.
-    810      if       ws-term-code = 5
-    811               go to display-menu.
-    812      move     "gl071" to ws-called.
-    813      perform  load00.
-    814      move     "gl072" to ws-called.
-    815      go       to load00.
+The abort gate is hard, not a warning. `if ws-term-code = 5 go to display-menu`
+[general/general.cbl:L810-L811] means that when gl070 finds a batch left open
+[general/gl070.cbl:L288] and raises 5 [general/gl070.cbl:L312-L313], gl071 and
+gl072 NEVER RUN. The database effect of the rejection is therefore the absence of
+everything the later phases would have written, and reporting a warning and
+continuing would be a behaviour change.
 
-    711  load00.
-    714      move     zero to ws-term-code.
-    715      call     ws-called using ws-calling-data
-    716                               system-record
-    717                               to-day
-    718                               file-defs
-    719      end-call
-    720      if       ws-term-code > 7
-    721               go to overrewrite.
-    723  load00-exit.
-    725      go       to display-menu.
+Phase numbering is the programs' own and is not the execution order: batch check
+and pre-process are phases 1 and 2 [general/gl070.cbl:L283], transaction update
+is phase 4 [general/gl072.cbl:L277], and deletion is labelled phase 3 although it
+runs afterwards, inside gl080 [general/gl080.cbl:L319].
 
-THE LINKAGE IS THE COMMAND-LINE CONTRACT
-========================================
-None of the three callees is a main program. Each is a `CALL`ed sub-program with
-a fixed parameter list, and all three take the same four-parameter General Ledger
-shape [general/gl070.cbl:L245-L248]::
+The sort order between the phases is load-bearing. gl072 locates the
+nominal-ledger account for each posting with a SEQUENTIAL read
+[general/gl072.cbl:L408], guarded at L407, so it finds the right account only
+because gl071 emitted the stream in nominal-key order. A perturbed order misposts
+silently.
 
-    procedure division using ws-calling-data
-                             system-record
-                             to-day
-                             file-defs.
+The run date is an argument, never a clock reading (R-6): `--run-date` is
+required and pins both observables, and none of the three programs dispatched
+here reads a clock. The exit status is `WS-Term-Code` itself, so a caller can
+tell the abort code 5 from a serious error above 7.
 
 identical in `gl071` [general/gl071.cbl:L161-L164] and `gl072`
 [general/gl072.cbl:L262-L265], because all three are dispatched through the one
@@ -47,96 +37,6 @@ be diffed line for line. This is NOT the five-parameter Sales and Purchase shape
 [irs/irs030.cbl:L552-L554]; neither applies here.
 
 THE ABORT GATE IS HARD, NOT A WARNING
-=====================================
-Agent Action Plan section 0.6.4, verbatim: "The Python CLI must reproduce this as
-a **hard gate between phases, not as a warning**."
-
-The chain is four links long and crosses three programs:
-
-    1. phase 1 of `gl070` raises a detector flag on meeting a batch left OPEN in
-       the current accounting cycle          [general/gl070.cbl:L314-L315]
-    2. `menu-input2.` tests the flag, runs the open-batch report and stores `5`
-       into `WS-Term-Code`                   [general/gl070.cbl:L287-L290]
-    3. `load00.` hands control back WITHOUT tripping its own gate, because that
-       gate is `if ws-term-code > 7` and 5 is not greater than 7
-                                             [general/general.cbl:L720-L721]
-    4. `load08.` tests `if ws-term-code = 5 go to display-menu.`
-                                             [general/general.cbl:L810-L811]
-
-**The effect is that `gl071` and `gl072` never run at all.** Not "run with a
-warning" - not run. The database effect of the abort is the ABSENCE of everything
-those two phases would have written, so an entry point that logged the condition
-and carried on would post a batch the frozen system refuses to post.
-
-The exact value matters twice over, which is why nobody may "simplify" it: below
-five and `load08.` stops matching, above seven and `load00.` diverts to
-`overrewrite.` instead. And `general/general.cbl:L714` clears `WS-Term-Code`
-before EVERY dispatch, so no code is ever carried from one phase into the next.
-
-THE PHASE NUMBERING IS NOT THE EXECUTION ORDER
-==============================================
-The programs label their own phases on screen, and Agent Action Plan section
-0.6.4 asks that the labels be preserved "so a maintainer is not misled":
-
-    phase 1  batch check              `gl070`  [general/gl070.cbl:L284]
-    phase 2  transaction pre-process  `gl070`  [general/gl070.cbl:L292]
-    (sort)                            `gl071`  [general/gl071.cbl:L170]
-    phase 4  transaction update       `gl072`  [general/gl072.cbl:L274]
-    phase 3  transaction deletion     `gl080`  [general/gl080.cbl:L319]
-    phase 5  end of period            `gl080`  [general/gl080.cbl:L336]
-
-So **deletion is labelled phase 3 but executes after phase 4**, and the numbering
-is not sequential with execution. Phases 3 and 5 are NOT dispatched from here:
-`gl080` is `load09.` [general/general.cbl:L817-L821] and belongs to the sibling
-entry point `acas_posting/cli/gl_end_of_cycle.py`.
-
-THE SORT ORDER IS LOAD-BEARING - THE MOST FRAGILE THING IN THE CYCLE
-====================================================================
-`gl072` locates the nominal-ledger account for each posting with a SEQUENTIAL
-read-next rather than an indexed read [general/gl072.cbl:L407-L408], and there is
-no error path at all. It finds the right account ONLY because `gl071` has already
-emitted the stream in nominal-key order, sorting on
-`(sort-batch, sort-ac, sort-pc, sort-post)` [general/gl071.cbl:L172-L176]. Agent
-Action Plan section 0.6.4: "Any change in sort stability or key composition
-produces silent misposting - no error, no diagnostic, wrong balances."
-
-Two consequences bind this module. The three phases run **in this order, in one
-process, strictly sequentially** - never reordered, never parallelised (rule
-R-3). And the three phases share ONE work-file container, because `pre-trans` and
-`post-trans` [copybooks/wsnames.cob:L15-L16] are how they communicate: `gl070`
-writes `pre_trans`, `gl071` sorts it into `post_trans`, `gl072` posts from
-`post_trans`. See `_CycleWorkFiles`.
-
-WHAT IS DELIBERATELY NOT HERE
-=============================
-No screen output of any kind. The menu's own `display-menu` redraw, its
-`accept-loop` and its `go to load01 ... depending on z` dispatch table are all
-omitted, and each omission is recorded in the traceability footer rather than
-left to be noticed (Agent Action Plan section 0.4.3). The programs' phase banners
-belong to `acas_posting.programs` and are not duplicated here.
-
-WHAT IS HERE AND USED TO BE OMITTED. `overrewrite`'s persistence of the system
-records IS reproduced, from BOTH of the two places the frozen session reaches it:
-the `> 7` arm of the dispatch paragraph, `if ws-term-code > 7 / go to overrewrite`
-[general/general.cbl:L720-L721], performed inside `load00`; and the MENU QUIT,
-`if menu-reply = "X" / go to pre-overrewrite` [general/general.cbl:L595-L596],
-performed once at the end of `main` because a one-shot process runs one operation
-per session and its ordinary completion IS that session end. The two are mutually
-exclusive - `main` guards on `args.is_serious_error` - so the paragraph runs
-exactly once per process, as it does once per frozen session. It matters because
-the callees mutate the caller's `SYSTEM-REC` by reference and nothing else in this
-route writes those changes to the store. The paragraph itself lives once, in
-`acas_posting.cli.args`, and this route performs it; the state it persists is
-loaded by the same module before the first dispatch.
-
-Example:
-    Run the cycle for the 21st of September 2025, General Ledger only::
-
-        python -m acas_posting.cli.gl_post_cycle \\
-            --run-date 21/09/2025 --irs-instead " "
-
-    The exit status is `WS-Term-Code` itself: 0 when all three phases ran, 5 when
-    the abort gate fired, and the reported code when a phase failed seriously.
 """
 
 from __future__ import annotations
@@ -156,23 +56,10 @@ from acas_posting.programs import (
 
 __all__: Final[tuple[str, ...]] = ("main", "load00", "load08")
 
-#: Diagnostics only. Every `display` of the frozen menu that has no database
-#: effect becomes a log record (Agent Action Plan section 0.3.4), and a log
-#: record must "not alter control flow and must not appear in any table dump".
-#: Nothing below branches on a logging call, and nothing below prints.
-#: A module-level `getLogger` is not a side effect - it registers a name and
-#: performs no input or output. Configuring the root logger IS a side effect, so
-#: it happens only inside `main`: importing this module configures nothing, which
-#: is what lets a test import it and drive `load08` directly.
+#: Diagnostics only.
 _LOG: Final[logging.Logger] = logging.getLogger(__name__)
 
-#  THE THREE PROGRAM-IDS THE MENU MOVES INTO `WS-Called`, named once each.
-#  `move "gl070" to ws-called` [general/general.cbl:L808],
-#  `move "gl071" to ws-called` [general/general.cbl:L812] and
-#  `move "gl072" to ws-called` [general/general.cbl:L814]. They are the literals
-#  the frozen source writes, at the width `PIC X(8)` [copybooks/wscall.cob:L7]
-#  will hold them - `args.set_called` applies the receiving-field `MOVE`, so a
-#  five-character id lands as five characters and three spaces.
+# THE THREE PROGRAM-IDS THE MENU MOVES INTO `WS-Called`, named once each.
 _GL070: Final[str] = "gl070"
 _GL071: Final[str] = "gl071"
 _GL072: Final[str] = "gl072"
@@ -194,28 +81,10 @@ class _Disposition(enum.Enum):
     """What `load00` observed after a dispatch, and therefore what follows it.
 
     TWO MEMBERS, because `load00.` has exactly two exits and no others: it either
-    reaches its own end and returns to whichever paragraph performed it, or it
-    takes `go to overrewrite` at [general/general.cbl:L720-L721] and the run unit
-    ends. There is deliberately no member for the abort code 5 - that is NOT a
-    `load00.` outcome. `load00.` cannot see it, because its only test is `> 7`
-    and 5 is not greater than 7, so the abort is invisible here and is caught one
-    level up by `load08.` reading `WS-Term-Code` itself. Adding a third member
-    would move the gate into the wrong paragraph and lose exactly the asymmetry
-    that makes the General Ledger route differ from the Sales one.
-
-    An enum rather than a bool, so that a call site reads as the COBOL does and
-    cannot be misread as "succeeded / failed": `CONTINUE` is silent about whether
-    anything went wrong, which is precisely `load00.`'s position after a code of
-    5 has been stored.
+    reaches its own end and returns to whichever paragraph performed it, or it takes `go
+    to overrewrite` at [general/general.cbl:L720-L721] and the run unit ends.
     """
 
-    #: `load00.` ran to its end and control returned to the performing paragraph.
-    #: `WS-Term-Code` may still be non-zero - 5, for instance - and reading it is
-    #: the caller's business, exactly as `load08.` L810 reads it. NOTHING HAS BEEN
-    #: PERSISTED on this exit, because the frozen paragraph's ordinary exit at
-    #: [general/general.cbl:L722] persists nothing; the quit-time `overrewrite`
-    #: [general/general.cbl:L595-L596] is still owed and `main` performs it once
-    #: when the run completes.
     CONTINUE = enum.auto()
 
     #: `if ws-term-code > 7 / go to overrewrite.`
@@ -231,26 +100,9 @@ class _Disposition(enum.Enum):
 class _GlProgram(Protocol):
     """The shape every migrated General Ledger program module presents.
 
-    Structural, not nominal: `gl070_transaction_pre_process`,
-    `gl071_batch_sort` and `gl072_transaction_update` are MODULES, and each
-    publishes `__all__ = ("run",)` with every paragraph function private. So a
-    dispatch reaches a program through exactly one door, which is what
-    Agent Action Plan section 0.3.3 requires - "Callers cannot reach into a
-    program's internals, exactly as a COBOL `CALL` cannot."
-
-    The four linkage parameters are declared POSITIONAL-ONLY here. Their names
-    are documentation of the `PROCEDURE DIVISION USING` order and nothing else,
-    because `load00` supplies them by splatting `args.GlLinkage`, exactly as
-    `call ws-called using ...` supplies them by position
-    [general/general.cbl:L715-L718].
-
-    They are typed `object` rather than by their record classes on purpose: the
-    per-directory import table of Agent Action Plan section 0.4.3 lets a `cli`
-    module import `programs`, `clock` and `cli.args`, and nothing else - not
-    `records`, not `cobol`, not `dal` and not `workfiles`. The linkage carrier
-    that `cli.args` publishes is already precisely typed, so the types are
-    checked where they are constructed and this protocol only has to name the
-    arity and the order.
+    Structural, not nominal: `gl070_transaction_pre_process`, `gl071_batch_sort` and
+    `gl072_transaction_update` are MODULES, and each publishes `__all__ = ("run",)` with
+    every paragraph function private.
     """
 
     def run(
@@ -269,45 +121,12 @@ class _GlProgram(Protocol):
 class _CycleWorkFiles:
     """The ONE work-file container the three phases of the cycle share.
 
-    Not a linkage parameter and not a table. It stands in for what the compiled
-    programs use instead - their own FILE SECTIONs over two transient work files
-    that persist on the filesystem between phases, `pre-trans.tmp` and
-    `post-trans.tmp`, both named in the shared names copybook and both annotated
-    by the maintainer as belonging to `gl071` [copybooks/wsnames.cob:L15-L16].
-    Nothing about them reaches the database, so nothing about them appears in a
-    table dump.
-
-    WHY A HOLDER RATHER THAN A LOCAL. The container has to outlive one dispatch
-    and reach the next two, because that is how the phases communicate: `gl070`
-    appends the exploded double-entry legs to `pre_trans`, `gl071` sorts those
-    into `post_trans` [general/gl071.cbl:L172-L178], and `gl072` posts from
-    `post_trans` [general/gl072.cbl:L286]. All three program modules therefore
-    accept the same keyword-only `work_files`, and their own docstrings state the
-    contract in the same words - "the General Ledger cycle passes ONE container
-    through all three phases". Threading it through a holder keeps `load00`
-    returning the disposition enum that `load08.` reads, while still letting the
-    container the FIRST dispatch creates reach the other two.
-
-    WHY NOT A MODULE-LEVEL DEFAULT. `acas_posting/workfiles.py` deliberately
-    builds a fresh set on every request and caches nothing, so that one run's
-    records cannot leak into the next; a shared container would break rule R-6's
-    byte-identical-reruns guarantee silently. This holder is created per call to
-    `load08`, which preserves that property.
-
-    WHO CREATES THE CONTAINER. Not this class. `gl070.run` creates one when it is
-    passed None and RETURNS it, so the first dispatch of the cycle both produces
-    the container and populates it; `load00` captures the returned value here and
-    the remaining two dispatches receive it. That is why this holder starts empty
-    and why the type is `object`: the concrete class lives in
-    `acas_posting/workfiles.py`, which a `cli` module may not import (Agent
-    Action Plan section 0.4.3), and it never needs to - the container is only
-    ever carried, never inspected.
+    WHY A HOLDER RATHER THAN A LOCAL. The container has to outlive one dispatch and
+    reach the next two, because that is how the phases communicate.
 
     Attributes:
-        container: the cycle's work files once a dispatch has produced them, and
-            None before that. Passed to every dispatch as-is: a None means "you
-            declare them", which is exactly what each program module's own
-            `work_files=None` default means.
+        container: the cycle's work files once a dispatch has produced them, and None
+            before that. Passed to every dispatch as-is.
     """
 
     __slots__ = ("container",)
@@ -324,68 +143,21 @@ def load00(
     *,
     menu_state: args.MenuState,
     work_files: _CycleWorkFiles | None = None,
+    transport: object = None,
 ) -> _Disposition:
     """`load00.` [general/general.cbl:L711-L721] - dispatch one program.
 
-    The shared dispatch paragraph of the General Ledger menu, and the reason all
-    five General Ledger programs take the identical four-parameter shape. Four
-    statements, reproduced in the order the frozen source writes them::
-
-        714      move     zero to ws-term-code.
-        715      call     ws-called using ws-calling-data
-        716                               system-record
-        717                               to-day
-        718                               file-defs
-        719      end-call
-        720      if       ws-term-code > 7
-        721               go to overrewrite.
-
     THE PARAGRAPH ENDS AT L721, AND THAT IS WHY THE ABORT GATE IS REACHABLE.
-    `load00-exit.` [general/general.cbl:L723] is a SEPARATE paragraph, so its
-    `go to display-menu` [general/general.cbl:L725] is NOT part of the range that
-    `perform load00` executes: a `perform` returns after L721 to the paragraph
-    that issued it, while `go to load00` falls through into `load00-exit.` and
-    ends the dispatch at the menu. `load08.` performs it twice and transfers to it
-    once for exactly that reason - had L725 been inside this paragraph, control
-    would never reach L810 and the abort gate would be unreachable.
-
-    THE RESET IS FIRST, AND IT IS PER DISPATCH (rule R-4).
-    `move zero to ws-term-code` [general/general.cbl:L714] runs before EVERY
-    `CALL`, not once per run. `WS-Term-Code` is shared linkage storage, so a code
-    a previous phase left behind would still be there for the next test of it -
-    and in this cycle that test decides whether the remaining phases run at all
-    [general/general.cbl:L810-L811]. Clearing it per dispatch is what makes each
-    phase's verdict its own.
-
-    THE THRESHOLD IS `> 7`, NOT `>= 5`. REPRODUCED (rule R-4), and the two
-    statements above INTERACT - this is the fifth thing this module reproduces and
-    the least obvious. Because L714 has just cleared the field, the only value
-    L720 can see is the one the callee just stored, and
-    [general/general.cbl:L720-L721] is `> 7`. Five - the General Ledger abort code
-    [general/gl070.cbl:L289] - does NOT satisfy it, so an abort leaves this
-    paragraph by the ORDINARY exit and is caught one level up by the paragraph
-    gate, whose disposition is RETURN TO THE MENU and not program exit. That
-    asymmetry is
-    the whole reason the General Ledger stop is *return to the menu* while the
-    Sales and Purchase stops are *end the program*: their own dispatch paragraphs
-    add a `goback` to the `> 7` branch [sales/sales.cbl:L710-L712],
-    [purchase/purchase.cbl:L703-L704] and their abort code is 8
-    [sales/sl055.cbl:L344], [purchase/pl055.cbl:L286], which IS greater than 7.
-    Nothing of that reasoning may be imported into this route.
+    `load00-exit.` [general/general.cbl:L723] is a SEPARATE paragraph, so its `go to
+    display-menu` [general/general.cbl:L725] is NOT part of the range that `perform
+    load00` executes.
 
     Args:
         linkage: the four `CALL` arguments in COBOL parameter order
-            [general/gl070.cbl:L245-L248]. The carrier is immutable; the
-            `WS-Calling-Data` record inside it is NOT, because COBOL passes a
-            group item by reference and `gl070` writes `WS-Term-Code` back into
-            the caller's own storage [general/gl070.cbl:L289].
-        program: the callee, as a module publishing `run`. Corresponds to
-            `call ws-called` [general/general.cbl:L715] - a dynamic call by name
-            in the frozen program, resolved here by the caller choosing the
-            module, because rule R-1 leaves no COBOL runtime to resolve a name
-            against.
-        program_id: the literal the menu moves into `WS-Called` immediately
-            before transferring here - `"gl070"`, `"gl071"` or `"gl072"`
+            [general/gl070.cbl:L245-L248]. The carrier is immutable.
+        program: the callee, as a module publishing `run`.
+        program_id: the literal the menu moves into `WS-Called` immediately before
+            transferring here - `"gl070"`, `"gl071"` or `"gl072"`
             [general/general.cbl:L808], [general/general.cbl:L812],
             [general/general.cbl:L814]. Written into the record for
             traceability and for any callee that reads it.
@@ -416,33 +188,20 @@ def load00(
         `CONTINUE`, deliberately: see THE THRESHOLD above.
 
     Raises:
-        Exception: whatever the callee raises is propagated unchanged. Nothing is
-            caught here. The frozen paragraph has no error handler either - it
-            reports through `WS-Term-Code` and nothing else - so swallowing an
-            exception would invent a disposition the COBOL has not got, and
-            losing the traceback would cost a maintainer the only diagnostic a
-            genuine defect leaves behind.
+        Exception: whatever the callee raises is propagated unchanged. Nothing is caught
+            here.
     """
     carrier = _CycleWorkFiles() if work_files is None else work_files
 
-    # 714  move     zero to ws-term-code.
-    #      REPRODUCED (rule R-4). First, and once per dispatch - see the docstring
-    #      on why the placement is load-bearing rather than tidy.
+    # 714 move zero to ws-term-code. REPRODUCED (rule R-4). First, and once per dispatch
+    # - see the docstring on why the placement is load-bearing rather than tidy.
     args.reset_term_code(linkage.calling_data)
 
-    #      `move "<prog>" to ws-called.` - the statement each caller of this
-    #      paragraph executes immediately before transferring here
-    #      [general/general.cbl:L808], [general/general.cbl:L812],
-    #      [general/general.cbl:L814]. Placed inside the dispatch so that the
-    #      field and the callee cannot disagree, which in the frozen program they
-    #      cannot either: there the field IS the call target.
+    # `move "<prog>" to ws-called.` - the statement each caller of this paragraph
+    # executes immediately before transferring here [general/general.cbl:L808],
+    # [general/general.cbl:L812], [general/general.cbl:L814].
     args.set_called(linkage.calling_data, program_id)
 
-    #      Diagnostic only, and at INFO. The frozen menu displays nothing at this
-    #      point; the phase banners belong to the programs themselves
-    #      [general/gl070.cbl:L284], [general/gl070.cbl:L292],
-    #      [general/gl071.cbl:L170], [general/gl072.cbl:L274] and are not
-    #      duplicated here. No control flow depends on this record.
     _LOG.info("dispatching %s (general/general.cbl:L715-L718)", program_id)
 
     # 715  call     ws-called using ws-calling-data
@@ -472,13 +231,8 @@ def load00(
     #  the route leaves it unset for exactly this reason.
     returned = program.run(*linkage, work_files=carrier.container)
 
-    #      The one conditional that is a Python-language necessity rather than a
-    #      test of any value the COBOL tests. `gl070.run` returns the work-file
-    #      container - the migration's equivalent of naming the same file in the
-    #      next program's `SELECT` - while `gl071.run` and `gl072.run` return None
-    #      because they have nothing new to hand on. Capturing the first is what
-    #      lets `post-trans` reach `gl072` in the order `gl071` left it, which
-    #      [general/gl072.cbl:L407-L408] depends on absolutely.
+    # The one conditional that is a Python-language necessity rather than a test of any
+    # value the COBOL tests.
     if returned is not None:
         carrier.container = returned
 
@@ -544,33 +298,14 @@ def load00(
         args.overrewrite(linkage.system_record, menu_state, linkage.file_defs)
         return _Disposition.SERIOUS_ERROR
 
-    # 722  *>
-    #      Falling off the end of the paragraph is the ordinary exit: `perform
-    #      load00` returns to the performing paragraph here, WITHOUT executing
-    #      `load00-exit.` [general/general.cbl:L723-L725]. See the docstring.
     return _Disposition.CONTINUE
 
 
 def load08(linkage: args.GlLinkage, *, menu_state: args.MenuState) -> None:
     """`load08.` [general/general.cbl:L805-L815] - run the posting cycle.
 
-    Three phases, one at a time, with the abort gate between the first and the
-    second. Rule R-3 names this function's file for exactly this: it "runs the
-    three phases **one at a time** with the abort gate between them, exactly as
-    the menu does".
-
-    STRICTLY SEQUENTIAL, AND THE ORDER IS NOT NEGOTIABLE (rule R-3). There is no
-    concurrency of any kind here - no threads, no event loop, no child process,
-    no pooling - and the order is `gl070`, then `gl071`, then `gl072`, because
-    `gl072` reads each nominal account with a SEQUENTIAL read
-    [general/gl072.cbl:L407-L408] and is correct only against the stream `gl071`
-    ordered. Reordering or overlapping them produces silent misposting: no error,
-    no diagnostic, wrong balances.
-
-    ONE WORK-FILE CONTAINER, CREATED HERE AND SHARED BY ALL THREE. The three
-    phases communicate through `pre-trans` and `post-trans`
-    [copybooks/wsnames.cob:L15-L16], never through a table. A fresh holder per
-    call keeps two runs of one scenario independent, which rule R-6 requires.
+    Three phases, one at a time, with the abort gate between the first and the second.
+    Rule R-3 names this function's file for exactly this.
 
     Args:
         linkage: the four `CALL` arguments in COBOL parameter order
@@ -598,15 +333,8 @@ def load08(linkage: args.GlLinkage, *, menu_state: args.MenuState) -> None:
     Raises:
         Exception: propagated unchanged from a phase. See `load00`.
     """
-    #      The cycle's own work files. `gl070` declares the container on the first
-    #      dispatch and `load00` captures it here - see `_CycleWorkFiles`.
     work_files = _CycleWorkFiles()
 
-    # 808  move     "gl070" to ws-called.
-    # 809  perform  load00.
-    #      PHASE 1 (batch check) and PHASE 2 (transaction pre-process). `perform`,
-    #      not `go to`: control comes back to L810 below, which is what makes the
-    #      gate reachable at all.
     disposition = load00(
         linkage,
         gl070_transaction_pre_process,
@@ -615,54 +343,13 @@ def load08(linkage: args.GlLinkage, *, menu_state: args.MenuState) -> None:
         work_files=work_files,
     )
 
-    #      Not a statement of `load08.`, but the disposition of L720-L721 inside
-    #      the paragraph just performed. GO TO class 4 (sibling re-dispatch), and
-    #      the proof is at the `> 7` site in `load00`: the frozen program has
-    #      already left for `overrewrite.` and `goback` by this point, so nothing
-    #      after it runs. Tested BEFORE the `= 5` gate because that is where the
-    #      transfer happens in the frozen source - inside the performed paragraph,
-    #      before control could ever reach L810. The two are mutually exclusive
-    #      anyway: 5 is not greater than 7.
+    # Not a statement of `load08.`, but the disposition of L720-L721 inside the
+    # paragraph just performed.
     if disposition is _Disposition.SERIOUS_ERROR:
         return
 
-    # 810  if       ws-term-code = 5
-    # 811           go to display-menu.
-    #      ⭐ THE HARD GATE. REPRODUCED (rule R-4), and reproduced as an EQUALITY
-    #      test because that is what the frozen source writes - not `>= 5`, not
-    #      `> 4`, not `not = zero`. The Sales route tests a different predicate,
-    #      `if ws-term-code not = zero` [sales/sales.cbl:L761-L762] and again at
-    #      [sales/sales.cbl:L765-L766], and the Purchase route has NO
-    #      paragraph-level gate at all - its lines are commented out in the frozen
-    #      source [purchase/purchase.cbl:L755-L758]. The three forms must stay
-    #      different; harmonising them would be a behaviour change and therefore,
-    #      under rule R-4, a failure.
-    #
-    #      GO TO class 4 (sibling re-dispatch). PER-SITE PROOF OF EQUIVALENCE:
-    #        COBOL: `go to display-menu` reaches `display-menu.`
-    #               [general/general.cbl:L509], which redraws the menu and waits
-    #               for the next selection. `gl071` and `gl072` are never reached.
-    #        Python: this function returns immediately; neither `gl071_batch_sort`
-    #               nor `gl072_transaction_update` is invoked.
-    #        PROOF: the set of programs invoked is identical - `gl070` alone - and
-    #               so is the database effect, which is the ABSENCE of everything
-    #               phases 4 and 5 would have written. The omitted part is only
-    #               the menu redraw, which has no database effect and is dropped
-    #               under Agent Action Plan section 0.3.4; OMISSION 1 in the
-    #               traceability footer records it.
+    # 810 if ws-term-code = 5 811 go to display-menu. ⭐ THE HARD GATE.
     if linkage.calling_data.ws_term_code == args.GL_ABORT_TERM_CODE:
-        #  A log record, not a warning in the sense the gate is not: the transfer
-        #  above is unconditional once the code is 5. This line reports; the
-        #  `return` decides.
-        #
-        #  AND IT IS THE ONLY RECORD FOR THE ABORT. `gl070` sets the code at
-        #  [general/gl070.cbl:L288] with no `display` beside it, and used to log
-        #  it there as well, so one abort produced two records at two layers. The
-        #  event belongs HERE: this is the layer that evaluates the gate
-        #  [general/general.cbl:L810-L811] and therefore the layer that decides
-        #  the cycle stops, so this record can name the whole consequence - which
-        #  programs will not run - where `gl070` could only report its own local
-        #  assignment.
         _LOG.warning(
             "%s left a batch open and raised term code %d "
             "(general/gl070.cbl:L289); the cycle stops here and %s and %s do NOT "
@@ -747,22 +434,13 @@ def load08(linkage: args.GlLinkage, *, menu_state: args.MenuState) -> None:
 def _build_parser() -> argparse.ArgumentParser:
     """Build this route's parser by composing the two published fragments.
 
-    COMPOSED, NEVER REDEFINED. Both option groups come from
-    `acas_posting.cli.args`, which owns the binding of `01 WS-Calling-Data`
-    [copybooks/wscall.cob:L6-L14], of the run date and of the system record. No
-    option is declared here, and in particular this route adds no option of its
-    own: an option the COBOL menu does not offer would be an input the frozen
-    system has not got.
-
-    Two options the fragments deliberately do NOT offer, because their absence is
-    part of the specification: `--ws-called`, since `WS-Called` is set per
-    dispatch by `load00` [general/general.cbl:L808]; and `--ws-term-code`, since
-    `WS-Term-Code` is an OUTPUT that every dispatch clears first
-    [general/general.cbl:L714].
+    COMPOSED, NEVER REDEFINED. Both option groups come from `acas_posting.cli.args`,
+    which owns the binding of `01 WS-Calling-Data` [copybooks/wscall.cob:L6-L14], of the
+    run date and of the system record.
 
     Returns:
-        A parser requiring `--run-date` and accepting the five calling-data
-        options plus the two pinnable system-record fields.
+        A parser requiring `--run-date` and accepting the five calling-data options plus
+            the two pinnable system-record fields.
     """
     parser = argparse.ArgumentParser(
         prog="python -m acas_posting.cli.gl_post_cycle",
@@ -786,10 +464,9 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    #  `move "general" to ws-caller.` [general/general.cbl:L512] - this route's
-    #  dispatching menu is the General Ledger one, so that is the default identity.
+    # `move "general" to ws-caller.` [general/general.cbl:L512] - this route's
+    # dispatching menu is the General Ledger one, so that is the default identity.
     args.add_calling_data_arguments(parser, default_caller=args.WS_CALLER_GENERAL)
-    #  The REQUIRED `--run-date`, plus the two pinnable `SYSTEM-REC` fields.
     args.add_gl_linkage_arguments(parser)
     #  THE TRANSPORT DECLARATION - one contract, published on every route
     #  (`args.add_transport_security_arguments`). No COBOL counterpart: the frozen
@@ -830,9 +507,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     (Agent Action Plan section 0.8.5).
 
     Args:
-        argv: the argument vector, WITHOUT the program name. None reads
-            `sys.argv[1:]`, which is what argparse does by default and what a
-            real invocation wants; a test passes a list.
+        argv: the argument vector, WITHOUT the program name. None reads `sys.argv[1:]`,
+            which is what argparse does by default and what a real invocation wants.
 
     Returns:
         `WS-Term-Code` as the process exit status, through
@@ -990,24 +666,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         args.overrewrite(linkage.system_record, menu_state, linkage.file_defs)
 
-    #  AMBIGUITY Q-CLI-EXITSTATUS: the COBOL disposition for term code 5 is
-    #  "return to display-menu", which has no process-status analogue in a
-    #  single-operation CLI - resolve against the compiled oracle; record in
-    #  docs/migration/ambiguity-resolutions.md. Locators:
-    #  [general/general.cbl:L810-L811], [general/general.cbl:L720-L721].
-    #  STATE OF THE QUESTION. `args.exit_status_for` records it as settled, and
-    #  settled by proving there is no oracle observable to arbitrate against: a
-    #  census of the five menus and all twelve in-scope programs finds
-    #  `RETURN-CODE` read and never written, every occurrence being the shell-out
-    #  test `if Return-Code not = zero` [general/general.cbl:L496], and the
-    #  transfers that do end a run end it with a bare `goback` carrying nothing
-    #  [general/general.cbl:L694]. The compiled cycle therefore emits no exit
-    #  status derived from `WS-Term-Code` in any band. The identity is adopted
-    #  because it is total and lossless over `pic 99`
-    #  [copybooks/wscall.cob:L10] and because banding would discard the
-    #  distinction between the abort code 5 and a serious error above 7 - making
-    #  the migrated cycle report LESS than the original. This entry point does not
-    #  re-encode the value; it is the code itself.
     return args.exit_status_for(linkage.calling_data.ws_term_code)
 
 

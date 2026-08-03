@@ -1,419 +1,18 @@
-#!/usr/bin/env python3
 """Compare two normalised dumps. AN EMPTY DIFF IS THE PASS CONDITION.
 
-Stage 8 of the eight-stage parity protocol, and the last word in it.
-Agent Action Plan section 0.3.2 fixes the stage order - "seed, run, dump,
-normalize, reset, run, dump, diff" - and this module is the diff.
+Stage 8 of the parity protocol, and the only arbiter in it. Exit 0 with empty
+output means the Python cycle reproduced the compiled COBOL exactly; exit 1 means
+a real behavioural difference; exit 2 means the comparison could not be performed
+at all, which is never weaker evidence than a difference - it is none.
 
-    stage 1  seed        harness/seed.sh              (COBOL *LD loaders)
-    stage 2  run  COBOL  harness/run_cobol_scenario.sh
-    stage 3  dump        harness/dump_tables.py   -> .../cobol
-    stage 4  normalize   harness/normalize.py     -> .../cobol.norm
-    stage 5  reset       harness/reset_db.sh          (+ re-seed)
-    stage 6  run  Python harness/run_python_scenario.sh
-    stage 7  dump        harness/dump_tables.py   -> .../python
-    stage 8  normalize   harness/normalize.py     -> .../python.norm
-    stage 8  diff        THIS MODULE              -> MUST be EMPTY
+Both trees must be normalised, and each must carry the `_manifest.json` its
+producing stage wrote, so a truncated capture cannot masquerade as a small diff.
+The table list comes from the scenario definition, because a comparison is
+bounded by the scenario that produced it; `--all-tables` exists for debugging.
 
-THIS MODULE IS THE ACCEPTANCE CRITERION
-=======================================
-Agent Action Plan section 0.8.5 states the criterion, verbatim:
-
-    "Scenario state parity. For each scenario: seed identically through
-    the maintainer's load programs, run the compiled cycle, dump the
-    affected tables ordering-normalised, reset, run the Python cycle,
-    dump again - and the diff must be empty. Section 0.6.6 establishes
-    that the dump is deterministic by construction, so a non-empty diff
-    is always a real behavioral difference and never an artefact of the
-    comparison."
-
-And section 0.1.1 makes the same sentence the operational definition of
-the whole engagement, verbatim:
-
-    "'exact' is defined operationally as the ordering-normalized diff of
-    affected database tables after a Python run versus a COBOL run
-    against an identical seed must be empty."
-
-So this module is the judge. Its exit code is the verdict for every one
-of the eight scenarios, and the per-scenario diff evidence is built from
-its output. It is written so that its verdict cannot be wrong in either
-direction.
-
-THE EXIT-CODE CONTRACT  (rule R-6, non-negotiable)
-==================================================
-    0   The two trees are IDENTICAL. stdout is EMPTY - not a banner, not
-        a summary, not "no differences found". Zero bytes. Agent Action
-        Plan section 0.8.5: "the diff must be empty."
-    1   A REAL DIFFERENCE was found. A deterministic report goes to
-        stdout, and to --out when one is given.
-    2   The comparison COULD NOT BE PERFORMED - a missing tree, a missing
-        table file, a malformed dump, a shape mismatch, a duplicate
-        primary key, a float or a null in the input, a usage error.
-
-Exit 2 is NEVER conflated with exit 0. An inability to compare is not a
-pass, and treating it as one is the single most dangerous defect this
-module could carry.
-
-Nor is the exit status ever unconditional. Two frozen build scripts end
-with a bare `exit 0` - [comp-all.sh:L45] and [common/comp-common.sh:L59]
-- so their status is not a success signal, which is why
-harness/build_oracle.sh scans their output for errors instead. Those are
-defects the harness works AROUND (rule R-4); the shape is deliberately
-not reproduced HERE, in the module whose exit code is the verdict.
-
-The 80+ exit band the sibling harness modules use is deliberately NOT
-used here: they exit 0 for "I did my job", this one for "the migration is
-exact", so 1 must mean "difference found" and not an unrelated failure.
-The file specification fixes 0/1/2, and that is what is implemented.
-
-THE TWO WAYS THIS MODULE COULD BE WRONG
-=======================================
-A FALSE PASS is the worse of the two: there is no correct answer other
-than what the compiled COBOL produced, so a wrongly-empty diff certifies
-a broken migration and nothing downstream would catch it. Every
-plausible route to one is closed explicitly:
-
-  * a missing or unreadable tree           -> MissingTreeError,   exit 2
-  * a missing table file on one side       -> a reported DIFFERENCE
-  * both sides missing a requested table   -> MissingTableFileError, 2
-  * an empty table selection               -> EmptyComparisonError, 2
-  * a shape mismatch in a dump             -> DumpShapeError,     exit 2
-  * comparing a tree with ITSELF           -> SameTreeError,      exit 2
-  * a float or a null in a value           -> raised, never coerced, 2
-
-A FALSE FAIL is less dangerous but would waste the oracle's time. Its two
-plausible routes are also closed: rows are aligned BY PRIMARY KEY and
-never by position, and the module refuses to compare raw dumps, because
-raw dumps still carry the representation artefacts harness/normalize.py
-exists to remove.
-
-COMPARE THE `.normalized` TREES, NEVER THE RAW DUMPS
-====================================================
-Agent Action Plan section 0.6.2's width drift is the reason. The same
-logical field is declared three different widths, and the bridge trims
-trailing spaces as it builds its SQL text:
-
-    [copybooks/wsledger.cob:L27]   03  Ledger-Name pic x(24).       24
-    [common/nominalMT.cbl:L299]    HV-LEDGER-NAME PIC X(32).        32
-    [mysql/ACASDB.sql:L127]        `LEDGER-NAME` char(32) NOT NULL, 32
-    [common/nominalMT.cbl:L1065-L1067]
-        STRING FUNCTION TRIM (HV-LEDGER-NAME,TRAILING) ...
-
-So the COBOL side can store a character column trimmed while a Python
-data-access layer writing padded values stores it padded. That is a
-representation artefact, not a behavioural difference, and canonicalising
-it is harness/normalize.py's first job. Comparing the raw dumps would
-report it as a failure on almost every character column.
-
-A directory is therefore accepted only when its name ends with one of the
-two suffixes this repository documents - `.normalized`, which
-harness/normalize.py defaults to, or `.norm`, which the committed
-canonical recipe passes explicitly. `NORMALIZED_SUFFIXES` below carries
-both with their locators. Anything else is refused with an explanation
-unless --allow-raw is given, a debugging escape that says so on stderr.
-
-BOUND THE COMPARISON BY THE SCENARIO, NEVER BY AN IGNORE-LIST
-=============================================================
-Agent Action Plan section 0.4.1.7 specifies that each
-harness/scenarios/*.yaml carries "Seed data, inputs and the
-affected-table list per scenario", and there is a concrete reason that
-list matters. [general/general.cbl:L656-L691] rewrites SYSTEM-REC,
-SYSDEFLT-REC and SYSTOT-REC to BOTH stores when the operator leaves the
-menu with "X" - System-Open, a key-1 rewrite of the system record, key 2
-for the default record, key 4 for WS-System-Record-4, System-Close, then
-the same three rewrites against the COBOL flat file. The Python command
-line has no menu and performs no such rewrite, so comparing those tables
-in a scenario that does not affect them would be a FALSE FAILURE.
-
-harness/run_cobol_scenario.sh reaches the same conclusion from the other
-end and names this module in doing so [L1216-L1218]: the comparison must
-be bounded "by an explicit per-scenario list rather than by an ignore-list
-in diff_states.py".
-
-SYSTOT-REC is nevertheless genuinely in scope for the period-end
-scenario - Agent Action Plan section 0.6.4 identifies nine period-total
-write sites in the Sales and Purchase programs, "the sole writers of the
-totals record". That overlap between "a table the menu shell rewrites"
-and "a table the cycle legitimately writes" is real, and it belongs in
-the migration ambiguity register, arbitrated by the oracle. It does NOT
-belong in a special case here.
-
-ROW ALIGNMENT IS BY PRIMARY KEY
-===============================
-harness/normalize.py preserves the primary-key ordering it inherits from
-`SELECT * ... ORDER BY <primary key>`, so positional alignment would
-usually work - and would be catastrophic when it did not, one inserted
-row turning a single finding into hundreds of spurious column differences
-in a 169-column table. Rows are keyed on their primary-key VALUE instead,
-and a key present on one side only is reported as such.
-
-The direction is labelled, because the two directions are materially
-different findings. "The Python run created a row the COBOL run did not"
-is not the same evidence as the reverse, and the anomaly analysis depends
-on telling them apart:
-
-  * Anomaly #4, the half-posted double entry at
-    [irs/irs030.cbl:L1635-L1652] - the debit is rewritten before the
-    credit account is looked up, so a missing credit leaves an unbalanced
-    debit and NO posting record - shows up as a one-sided missing row.
-  * Anomaly #5, the lost update on the two VAT control accounts
-    [irs/irs030.cbl:L1602, L1612, L1704-L1708] - pre-loop snapshots
-    rewritten at end of job, discarding any in-loop rewrite - shows up as
-    a single stale value.
-
-VALUE COMPARISON IS EXACT, AND NOTHING ELSE
-===========================================
-Agent Action Plan section 0.1.1 requires "a behaviorally exact clone of
-the compiled COBOL". A one-penny difference is a FAILURE, by design.
-There is no tolerance, no epsilon, no math.isclose, no case-insensitive
-compare, no whitespace-insensitive compare and no numeric coercion
-anywhere in this file.
-
-Decimal values arrive from harness/normalize.py as JSON STRINGS, already
-rendered at their column's declared scale [harness/normalize.py, job 2].
-They are compared AS STRINGS, which is both exact and scale-aware, and is
-why decimal.Decimal is not imported here: there is nothing to compute.
-Integers arrive as JSON integers and compare as integers. A type mismatch
-is reported with BOTH type names, because it would mean the two dumps
-came from inconsistent serialisation - a real defect, not one to smooth.
-
-THE MODULE IS NEUTRAL ABOUT WHETHER A VALUE "LOOKS WRONG"  (rule R-4)
-=====================================================================
-Agent Action Plan section 0.8.2, verbatim: "A defect reproduced is
-correct; a defect fixed is a failure." This module reports DIFFERENCES,
-never defects, and it makes no judgement beyond equality. There is no
-ignore-list, no tolerance list, no "known difference" allowance and no
-per-column special case of any kind.
-
-The canonical case is anomaly #7. IRSPOSTING-REC carries three date
-component columns, POST4-DAY, POST4-MONTH and POST4-YEAR, that exist in
-no copybook: the bridge derives them from a date string under a guard
-[common/irspostingMT.cbl:L982-L987], and when the guard fails they stay
-ZERO while POST4-DAT still holds the date text. That row is internally
-inconsistent, and it is CORRECT. Produced by both sides, it draws no
-report; produced by one, a difference. Never an excuse, never a repair.
-
-Two further shapes that are legitimate and must not be second-guessed:
-
-  * PSIRSPOST-REC can legitimately end a scenario EMPTY. Opening the
-    transfer file for output means DELETING EVERY ROW
-    [common/acas008.cbl:L309-L319, L566-L574], which is how irs030's
-    end-of-job clear works [irs/irs030.cbl:L1715-L1724]. Empty on both
-    sides is a pass; empty on one side is a real failure.
-  * SYSTEM-REC carries the two pinned, diff-visible observables. The
-    controlled clock's binary run date, `05 Run-Date binary-long`
-    [copybooks/wssystem.cob:L67], is column `RUN-DAT int(8) unsigned`
-    [mysql/ACASDB.sql:L1199]; and the three-state IRS fan-out switch,
-    `05 IRS-Instead pic x.` with `88 IRS-Used value "Y".` and
-    `88 IRS-Both-Used value "B".` [copybooks/wssystem.cob:L179-L181], is
-    column `IRS-INSTEAD char(1)` [mysql/ACASDB.sql:L1252] - space for
-    General Ledger only, "Y" for IRS instead, "B" for IRS as well as.
-    Agent Action Plan section 0.6.4 warns that "leaving it at a default
-    would make the affected-table list ambiguous". A difference in
-    either is a genuine failure, never something to excuse.
-
-THE INPUT CONTRACT
-==================
-    $ACAS_OUT/<scenario>/cobol.normalized/<TABLE>.json    LEFT, the oracle
-    $ACAS_OUT/<scenario>/cobol.normalized/_manifest.json  its completeness proof
-    $ACAS_OUT/<scenario>/python.normalized/<TABLE>.json   RIGHT, the migration
-    $ACAS_OUT/<scenario>/python.normalized/_manifest.json its completeness proof
-    $ACAS_OUT/<scenario>/diff.txt                         this module's output
-
-EACH TREE IS A SET, AND MUST DECLARE ITSELF WHOLE. `_manifest.json` is
-written LAST by the stage that publishes a tree, so its presence is the
-only available evidence that the set is complete; both trees must carry
-one, must name the SAME scenario, must hold every table their manifest
-declares with the digest it records, and must hold no undeclared dump.
-This is not bookkeeping. Two PARTIAL captures compare cleanly over the
-tables that happen to be present in both, and a clean comparison is the
-PASS condition - so an unmarked tree is the one input that could turn a
-half-finished run into a green verdict. Refused, therefore, rather than
-compared. `--allow-unmanifested` waives the check for a hand-assembled
-tree and forfeits the claim that the verdict is evidence (rule R-6).
-
-A dump object carries exactly five keys, in this order and no others -
-the layout fixed at [harness/dump_tables.py:L548-L554] and preserved
-unchanged by [harness/normalize.py]:
-
-    {
-      "table": "GLLEDGER-REC",
-      "primary_key": "LEDGER-KEY",
-      "columns": ["LEDGER-KEY", ..., "LEDGER-BALANCE", ...],
-      "row_count": 2,
-      "rows": [[1, 1, "B", 1, "Sales Ledger Control", "1234.56", ...], ...]
-    }
-
-Seven assertions are checked before any comparison, each failing at
-exit 2 with the file and the failed assertion named. `_assert_dump` holds
-them and documents each:
-
-  1. A JSON object carrying exactly the five keys, in order.
-  2. `table` is an in-scope table name and equals the file's name stem.
-  3. `primary_key` is a member of `columns`, and both sides agree on it.
-  4. `columns` is a list of unique, non-empty strings.
-  5. `row_count` equals `len(rows)`; every row has `len(columns)` values.
-  6. No value is a float and no value is null.
-  7. No primary-key value appears twice.
-
-The last two rest on the frozen schema. ZERO of the 513 in-scope columns
-is nullable - Agent Action Plan section 0.6.2 explains why: each bridge
-load paragraph initialises the host-variable group, "so unset fields
-become zero or space rather than SQL NULL" - so a null is genuinely new
-information, reported and never coalesced. A float would mean a producer
-was reconfigured, and comparing floats here would launder that bug (rule
-R-2). A PRIMARY KEY column cannot produce a duplicate, so one means the
-input is malformed.
-
-The ONE cross-side check that is a DIFFERENCE rather than an error is the
-column list. The file specification lists it among the pre-comparison
-assertions and then, in the same breath, calls a column-set or
-column-order difference "a structural failure, not a row difference"; its
-validation step 12 settles the tie at exit 1, "reported as a structural
-finding, with row comparison skipped for that table". So `load_dump`
-deliberately does NOT check a dump's columns against a hardcoded
-per-table list, which would have pre-empted that finding with an exit 2.
-
-THE REPORT
-==========
-One difference per line, two spaces between fields, self-describing, and
-BYTE-DETERMINISTIC for a given pair of inputs: no timestamp, no host
-name, no process id, no absolute path, no elapsed time, no tool version,
-and no dependence on dictionary or filesystem iteration order.
-
-    GLLEDGER-REC  row_count  cobol=12  python=11
-    GLLEDGER-REC  missing_in_python  LEDGER-KEY=1204
-    GLLEDGER-REC  LEDGER-KEY=1100  col[6] LEDGER-BALANCE
-        cobol="1234.56"  python="1234.55"
-
-(that last finding is ONE line in the real report, wrapped here only to
-keep this docstring inside the file's 79-column margin)
-
-The sides are labelled `cobol` and `python`, matching the directory
-names, so the report says which one is the oracle. Values are rendered as
-JSON, so a trailing space, a leading space and an empty string are all
-visible. Column ordinals are 1-based, matching SQL's ORDINAL_POSITION -
-SYSTEM-REC has 169 columns, and finding a difference by hand without an
-ordinal is impractical, so the ordinal is evidence rather than decoration
-(rule R-5).
-
-Ordering, top to bottom, is fixed:
-
-  1. Tables in the order the scenario's affected-table list gives them;
-     with no list, in ASCII-sorted table-name order. Never in
-     filesystem-iteration order.
-  2. Within a table: the structural findings first - a one-sided table,
-     a column mismatch, a row-count difference - then missing_in_python,
-     then missing_in_cobol, then the value differences.
-  3. Keys ascending: numeric keys numerically, character keys by ASCII.
-  4. Within a key: columns in schema ordinal order, never alphabetical.
-
---max-differences caps the DETAIL lines per table so a catastrophic
-mismatch cannot produce an unusable megabyte. The structural headline is
-never capped, the notice carries the TRUE total, and truncation NEVER
-changes the exit code.
-
-THE RULES CITED BELOW BY NUMBER
-===============================
-This project ships NO separate rules document: `review_rules` reports
-exactly "No user rules provided.", confirmed by a full read. The six
-binding rules R-1 to R-6 are the Agent Action Plan's own, section 0.7.2.
-Where the plan is silent, ordinary enterprise practice applies. Nothing
-here is invented.
-
-R-1  NO COBOL AT RUNTIME, AND NO COUPLING TO THE SHIPPED PACKAGE.
-     `acas_posting` is never imported and data_dictionary/*.json is never
-     read: the judge cannot depend on the defendant, and this module must
-     run with the migrated package not installed. No COBOL, no cobc, no
-     database connection - it is pure file-to-file, so it needs no driver
-     at all. harness/ is a SIBLING of acas_posting/ with NO __init__.py,
-     which makes "there is no import path from acas_posting to harness"
-     (Agent Action Plan section 0.3.1) structural; pyproject.toml packages
-     `acas_posting*` and excludes `harness*` from the other side. Imports
-     are the standard library plus, lazily and only for a scenario file,
-     PyYAML.
-R-2  ZERO BINARY FLOATING POINT. No pandas and no numpy, for any reason;
-     Agent Action Plan section 0.5.1 extends that prohibition to this
-     exact file, verbatim: "This exclusion is absolute, including for the
-     harness dump comparison, which uses ordered row sequences rather
-     than dataframes." `float(...)` is never called; a float in an input
-     is raised on, never compared; comparison is exact.
-R-3  NO SCHEMA CHANGE, STRICTLY SEQUENTIAL. No SQL, no DDL, no
-     connection. Tables are compared one after another in a plain loop -
-     no thread, no event loop, no process pool. Nothing is written under
-     $ACAS_REPO, which is mounted read-only and holds the frozen
-     artifacts (Agent Action Plan section 0.8.1).
-R-4  LEGACY ANOMALIES REPRODUCED, NEVER FIXED. See the neutrality section
-     above. No ignore-list, no tolerance, no judgement.
-R-5  FULL TRACEABILITY. Every reported difference names its table, its
-     primary-key value, and its column by NAME and by ORDINAL, which is
-     what makes the per-scenario diff evidence and the ambiguity register
-     writable from this output.
-R-6  COMPILED BEHAVIOUR IS THE TIE-BREAKER. This module is the
-     arbitration. Its exit code is the verdict and its report is
-     byte-deterministic.
-
-THE FROZEN-SCHEMA INVENTORY
-===========================
-mysql/ACASDB.sql declares 33 tables, 22 in scope and 11 out; the 22 hold
-513 columns between them, not one nullable, and no FLOAT, DOUBLE or REAL
-column appears anywhere in the file. That matches Agent Action Plan
-section 0.6.6 exactly. Every in-scope table has a single-column primary
-key, which is why no compound key is modelled.
-
-`IN_SCOPE` below carries the three per-table facts - primary key,
-declared column count, and `CREATE TABLE` line in mysql/ACASDB.sql - so
-the inventory is data rather than prose. `OUT_OF_SCOPE` carries the
-eleven names the posting cycle never touches, so a wrong request is
-refused BY NAME citing Agent Action Plan section 0.2.2, not by a
-not-found.
-
-INVOCATIONS
-===========
-Both forms this repository documents are supported, and neither is a
-guess. The committed canonical eight-stage recipe passes the two
-directories POSITIONALLY [harness/docker-compose.yml:L357]:
-
-    harness/diff_states.py /out/cobol.norm /out/python.norm
-    harness/diff_states.py --cobol /out/cobol.norm --python /out/py.norm
-    harness/diff_states.py --scenario clean_batch_gl --out-dir /out
-    harness/diff_states.py ... --scenario-file S.yaml  # or --tables A,B
-
-USED AS A LIBRARY
-=================
-A test fixture provides "the pinned-clock fixture and the seed/dump/
-normalize/diff helpers so that no test reimplements the comparison
-protocol" (Agent Action Plan section 0.4.3), so this module is both an
-importable plain module and a runnable command line. `main` RETURNS its
-exit code and never calls sys.exit. Each of the eight scenario tests asks
-one cheap question:
-
-    from harness import diff_states
-    diff = diff_states.diff_trees(cobol_dir, python_dir, tables)
-    assert diff.is_empty, diff_states.render(diff)
-
-That import works even though harness/ has no __init__.py and must never
-gain one (rule R-1): harness/ resolves as an implicit namespace package
-(PEP 420) whenever the repository root is on sys.path, which is what
-pytest's rootdir insertion already provides. It is genuinely not a
-regular package - `harness.__file__` is None - so no import path from
-acas_posting to harness is created by it.
-
-If a caller prefers to bypass sys.path entirely and load this file by
-its path, the registration line below is MANDATORY, not decorative:
-
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module          # REQUIRED before exec_module
-    spec.loader.exec_module(module)
-
-Omitting it raises `AttributeError: 'NoneType' object has no attribute
-'__dict__'` from inside dataclasses, for a reason that is not local to
-this module: `from __future__ import annotations` makes every field
-annotation a string, and @dataclass resolves those strings through
-`sys.modules[cls.__module__].__dict__` while deciding whether any names
-dataclasses.KW_ONLY. A module being executed but not yet registered has
-no sys.modules entry for that lookup to find.
+Rows are matched on the primary key and compared field by field. Numeric values
+are compared as `decimal.Decimal` or `int`; a float anywhere aborts the
+comparison rather than being coerced (R-2). Run `--help` for the options.
 """
 
 from __future__ import annotations
@@ -430,14 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
-#  THE FROZEN INVENTORY
-#  Re-declared here rather than imported. harness/ has no __init__.py - by
-#  design, rule R-1 - so there is no package path from this module to
-#  harness/dump_tables.py or harness/normalize.py, and each of the three
-#  carries its own copy of these facts. That is the established pattern in
-#  this tree, and it is what lets any one of them be run or imported on
-#  its own. Every entry traces to mysql/ACASDB.sql, which is read as
-#  specification and never modified.
+# Re-declared here rather than imported.
 
 
 @dataclass(frozen=True, slots=True)
@@ -445,16 +37,11 @@ class TableSpec:
     """One in-scope table's frozen-schema facts.
 
     Attributes:
-        primary_key: The single column rows are aligned on. Agent Action
-            Plan section 0.6.6 establishes that every in-scope table has
-            exactly one, which is why no compound key is modelled.
-        column_count: The declared number of columns. Recorded for the
-            error messages and for a one-line inventory assertion; a
-            dump's own column list is never checked against it, because
-            a column-count difference between the two SIDES is a
-            reported structural finding rather than an error.
-        schema_line: The `CREATE TABLE` line in `mysql/ACASDB.sql`, so a
-            reader can go straight to the declaration.
+        primary_key: The single column rows are aligned on.
+        column_count: The declared number of columns. Recorded for the error messages
+            and for a one-line inventory assertion.
+        schema_line: The `CREATE TABLE` line in `mysql/ACASDB.sql`, so a reader can go
+            straight to the declaration.
     """
 
     primary_key: str
@@ -487,11 +74,8 @@ IN_SCOPE: Final[Mapping[str, TableSpec]] = {
     "VALUEANAL-REC": TableSpec("VA-CODE", 10, 1418),
 }
 
-# The eleven tables the posting cycle never touches, listed BY NAME so a
-# wrong request is refused with an explanation rather than with a
-# not-found. Agent Action Plan section 0.2.2 enumerates them. 22 + 11 =
-# 33, the schema's full CREATE TABLE count. The same list appears at
-# [harness/dump_tables.py:L514-L528] and [harness/reset_db.sh:L295-L307].
+# The eleven tables the posting cycle never touches, listed BY NAME so a wrong request
+# is refused with an explanation rather than with a not-found.
 OUT_OF_SCOPE: Final[frozenset[str]] = frozenset(
     {
         "DELIVERY-REC",
@@ -508,30 +92,25 @@ OUT_OF_SCOPE: Final[frozenset[str]] = frozenset(
     }
 )
 
-# The default table order: the names, ASCII-ascending. Sorted ONCE here,
-# never per run, so the report's table order cannot depend on dictionary
-# or filesystem iteration order (rule R-6).
+# The default table order.
 IN_SCOPE_TABLES: Final[tuple[str, ...]] = tuple(sorted(IN_SCOPE))
 
-# 513 and 33, both as mysql/ACASDB.sql declares them. Exposed so a test
-# can assert the whole inventory in two lines.
+# 513 and 33, both as mysql/ACASDB.sql declares them. Exposed so a test can assert the
+# whole inventory in two lines.
 EXPECTED_TOTAL_COLUMNS: Final[int] = sum(
     spec.column_count for spec in IN_SCOPE.values()
 )
 EXPECTED_SCHEMA_TABLES: Final[int] = len(IN_SCOPE) + len(OUT_OF_SCOPE)
 
-# The two sides of the comparison, in the order they are always named:
-# the compiled COBOL oracle first, the migrated Python cycle second.
 SIDES: Final[tuple[str, ...]] = ("cobol", "python")
 
-# The report's side labels. `cobol` and `python` rather than left and
-# right, so the report says which side is the ORACLE.
+# The report's side labels. `cobol` and `python` rather than left and right, so the
+# report says which side is the ORACLE.
 LABEL_COBOL: Final[str] = SIDES[0]
 LABEL_PYTHON: Final[str] = SIDES[1]
 
-# A dump object's key order, fixed at [harness/dump_tables.py:L548-L554]
-# and preserved unchanged by harness/normalize.py. Checked exactly - not
-# as a set - because the order is part of the byte-identical guarantee.
+# A dump object's key order, fixed at harness/dump_tables.py and preserved unchanged by
+# harness/normalize.py.
 DUMP_KEYS: Final[tuple[str, ...]] = (
     "table",
     "primary_key",
@@ -540,130 +119,59 @@ DUMP_KEYS: Final[tuple[str, ...]] = (
     "rows",
 )
 
-# One file per table: `<TABLE>.json`, the table spelled exactly as the
-# frozen schema spells it, hyphens included
-# [harness/dump_tables.py:L1672].
 DUMP_SUFFIX: Final[str] = ".json"
 
-# harness/dump_tables.py and harness/normalize.py both write through a
-# temporary file named `.<stem>.json.tmp` in the target directory and
-# then os.replace it into position, so a partial file can never be
-# compared. Anything beginning with a dot is skipped when a tree is
-# scanned, which covers those leftovers and any other hidden file.
+# harness/dump_tables.py and harness/normalize.py both write through a temporary file
+# named `.<stem>.json.tmp` in the target directory and then os.replace it into position,
+# so a partial file can never be compared.
 TEMP_PREFIX: Final[str] = "."
 
-# The two directory suffixes that mark a NORMALISED tree, both documented
-# in this repository:
-#   `.normalized`  harness/normalize.py's own default and the suffix its
-#                  composed layout appends [harness/normalize.py:L736]
-#   `.norm`        what the committed canonical recipe passes explicitly
-#                  [harness/docker-compose.yml:L147, L153]
-# The composed layout this module offers derives `.normalized`, matching
-# harness/normalize.py's composed layout [normalize.py:L3053-L3054].
 NORMALIZED_SUFFIXES: Final[tuple[str, ...]] = (".normalized", ".norm")
 NORMALIZED_SUFFIX: Final[str] = NORMALIZED_SUFFIXES[0]
 
-# ---------------------------------------------------------------------------
-#  THE COMPLETENESS MANIFEST
-#
-#  Mirrored from [harness/dump_tables.py] and [harness/normalize.py] rather
-#  than imported, following the convention every constant this module
-#  already shares with its siblings follows - `DUMP_KEYS`,
-#  `IN_SCOPE_TABLES`, `SIDES`, `TEMP_PREFIX`. Each harness utility stays a
-#  standalone script the Compose recipe can invoke by path, and a
-#  disagreement between the spellings cannot hide because the manifest is
-#  READ and CHECKED here, not assumed.
-#
-#  WHY THIS STAGE REQUIRES ONE FROM BOTH SIDES. This is the stage that
-#  renders the verdict, and the verdict's whole value is that an empty diff
-#  means the migration is exact. Two trees of individually well-formed
-#  files can nonetheless be a partial capture from a stage that died part
-#  way through - and comparing two partial captures can produce an EMPTY
-#  DIFF, which is to say a PASS, over the tables that happen to be present
-#  on both sides. That is the one failure this tool must not have. A
-#  manifest is written LAST by the stage that publishes a tree, so its
-#  presence is the only evidence available that a tree is whole.
-#
-#  IT ALSO CARRIES IDENTITY, which is what makes the comparison's SCOPE
-#  reportable: the scenario, the side and how the table list was chosen.
-#  Two trees whose manifests name different scenarios are not two sides of
-#  one run, and comparing them is meaningless however clean the diff.
-# ---------------------------------------------------------------------------
+# Mirrored from [harness/dump_tables.py] and [harness/normalize.py] rather than
+# imported, following the convention every constant this module already shares with its
+# siblings follows - `DUMP_KEYS`, `IN_SCOPE_TABLES`, `SIDES`, `TEMP_PREFIX`.
 MANIFEST_FILENAME: Final[str] = "_manifest.json"
 MANIFEST_VERSION: Final[int] = 1
 MANIFEST_STAGE_NORMALIZED: Final[str] = "normalized"
 
-# The reserved file-name namespace inside a published tree. No table of the
-# frozen schema begins with an underscore - all 22 are upper case and
-# hyphenated - so a table scan can exclude `_*` outright and never mistake
-# the manifest, or anything added beside it later, for a dump.
+# The reserved file-name namespace inside a published tree.
 RESERVED_PREFIX: Final[str] = "_"
 
-# The block size a manifest digest is read in.
 _DIGEST_BLOCK: Final[int] = 1 << 16
 
 # THE VERDICT (rule R-6). Three values, and no others.
-#   0  identical           stdout is EMPTY
-#   1  difference found    a value-free summary is on stdout; the values are
-#                          in the 0600 report file the summary names
-#   2  cannot compare      a diagnosis is on stderr
-# Deliberately NOT the 80+ band the sibling harness modules use: they
-# exit 0 for "I did my job", this one exits 0 for "the migration is
-# exact", and 1 must mean "difference found".
 EX_IDENTICAL: Final[int] = 0
 EX_DIFFERENT: Final[int] = 1
 EX_ERROR: Final[int] = 2
 
 # How many DETAIL lines per table the report prints before truncating.
-# The structural headline is never truncated, the notice always carries
-# the true total, and truncation never changes the exit code.
 DEFAULT_MAX_DIFFERENCES: Final[int] = 200
 
-# The report file name the composed layout writes:
-# $ACAS_OUT/<scenario>/diff.txt.
 DIFF_FILENAME: Final[str] = "diff.txt"
 
-# The output root for the composed layout, and the read-only checkout
-# nothing may be written into. The Compose service sets both
-# [harness/docker-compose.yml].
 _ENV_OUT: Final[str] = "ACAS_OUT"
 _ENV_REPO: Final[str] = "ACAS_REPO"
 
-# The scenario key this module reads. Agent Action Plan section 0.4.1.7
-# specifies that each harness/scenarios/*.yaml carries "Seed data, inputs
-# and the affected-table list per scenario"; these are the two spellings
-# of that list - the underscored form and the hyphenated form the
-# repository uses for every COBOL and SQL identifier. Both mean the same
-# thing and only one may appear. Identical to
-# [harness/dump_tables.py:L645-L648] and to the keys
-# harness/run_cobol_scenario.sh reads [L1323-L1326].
 _SCENARIO_TABLE_KEYS: Final[tuple[str, ...]] = (
     "affected_tables",
     "affected-tables",
 )
 
-# How many near-miss names an unknown-table message offers.
 _SUGGESTION_LIMIT: Final[int] = 4
 
-# The report's field separator. Two spaces, so a line stays greppable and
-# a value containing a single space is still unambiguous.
+# The report's field separator. Two spaces, so a line stays greppable and a value
+# containing a single space is still unambiguous.
 _FIELD_GAP: Final[str] = "  "
 
-# The prog name every diagnostic is prefixed with. A fixed string, not
-# sys.argv[0]: an absolute path would make stderr depend on how the
-# module was invoked (rule R-6).
+# The prog name every diagnostic is prefixed with. A fixed string, not sys.argv[0].
 _PROG: Final[str] = "harness/diff_states.py"
 
 
-#  PROGRESS
-#  STDERR ONLY, and never stdout. stdout carries the verdict and nothing
-#  else: on a pass it must be zero bytes, so a single reassuring word
-#  written there would break the contract. No line carries a clock
-#  reading, a host name, a process id or an elapsed time (rule R-6).
+# STDERR ONLY, and never stdout. stdout carries the verdict and nothing else.
 
-# Set once by `main` from --quiet. A module-level flag rather than a
-# parameter threaded through every function, because there is exactly one
-# process and one run (rule R-3, strictly sequential).
+# Set once by `main` from --quiet.
 _QUIET: bool = False
 
 
@@ -681,26 +189,14 @@ def _progress(message: str) -> None:
 def _warn(message: str) -> None:
     """Write one warning line to stderr. Never silenced by `--quiet`.
 
-    A warning marks a departure from the protocol - comparing raw trees,
-    or comparing without a scenario's affected-table list - and a
-    departure from the protocol must always be visible.
-
     Args:
         message: The line to write.
     """
     print(f"{_PROG}: warning: {message}", file=sys.stderr)
 
 
-#  ERRORS - EVERY ONE OF THEM IS EXIT 2
-#  One root, so a caller can catch everything this module raises with a
-#  single clause, and one subclass per distinct cause so a caller that
-#  cares can tell them apart. Each also subclasses the builtin a reader
-#  would expect, which is the convention the sibling modules follow
-#  [harness/dump_tables.py:L692-L754], [harness/normalize.py:L880-L948].
-#
-#  EVERY error here means "the comparison could not be performed", which
-#  is exit 2 and NEVER exit 0. That distinction is the whole reason exit 2
-#  exists: an inability to compare is not a pass.
+# One root, so a caller can catch everything this module raises with a single clause,
+# and one subclass per distinct cause so a caller that cares can tell them apart.
 
 
 class DiffStatesError(Exception):
@@ -710,43 +206,42 @@ class DiffStatesError(Exception):
 class MissingTreeError(DiffStatesError, OSError):
     """A tree to compare is absent, or is not a directory.
 
-    The most dangerous input this module can be given, because the
-    tempting response - "nothing to compare, so nothing differs" - is a
-    FALSE PASS. It is exit 2.
+    The most dangerous input this module can be given, because the tempting response -
+    "nothing to compare, so nothing differs" - is a FALSE PASS. It is exit 2.
     """
 
 
 class RawTreeError(DiffStatesError, ValueError):
     """A directory is not a normalised tree and --allow-raw was not given.
 
-    Comparing raw dumps would report harness/normalize.py's three
-    representation artefacts as behavioural differences - the character
-    padding of Agent Action Plan section 0.6.2 chief among them.
+    Comparing raw dumps would report harness/normalize.py's three representation
+    artefacts as behavioural differences - the character padding of Agent Action Plan
+    section 0.6.2 chief among them.
     """
 
 
 class SameTreeError(DiffStatesError, ValueError):
     """Both sides name the same directory.
 
-    A tree always equals itself, so the comparison would return empty
-    whatever the migration did. That is a FALSE PASS, so it is refused.
+    A tree always equals itself, so the comparison would return empty whatever the
+    migration did. That is a FALSE PASS, so it is refused.
     """
 
 
 class EmptyComparisonError(DiffStatesError, ValueError):
     """There is no table to compare.
 
-    Comparing nothing would return empty and read as a pass. Refused for
-    the same reason as `SameTreeError`.
+    Comparing nothing would return empty and read as a pass. Refused for the same reason
+    as `SameTreeError`.
     """
 
 
 class MissingTableFileError(DiffStatesError, OSError):
     """A requested table's dump is absent from BOTH trees.
 
-    Absent from ONE tree is a reported DIFFERENCE, never an error - that
-    asymmetry is exactly what a naive intersection would hide. Absent
-    from both means the dumps were never taken.
+    Absent from ONE tree is a reported DIFFERENCE, never an error - that asymmetry is
+    exactly what a naive intersection would hide. Absent from both means the dumps were
+    never taken.
     """
 
 
@@ -755,51 +250,35 @@ class DumpReadError(DiffStatesError, OSError):
 
 
 class DumpShapeError(DiffStatesError, ValueError):
-    """A dump object's shape is wrong.
-
-    Wrong keys, a wrong key order, a `row_count` that disagrees with the
-    rows, a ragged row, a primary key that is not one of the columns, or
-    the two sides disagreeing on the alignment column.
-    """
+    """A dump object's shape is wrong."""
 
 
 class NumericPolicyError(DiffStatesError, TypeError):
     """A value is a binary floating-point number (rule R-2).
 
-    The frozen schema declares zero FLOAT, DOUBLE and REAL columns and
-    both producers refuse to emit a float, so this is unreachable unless
-    one of them was reconfigured. Comparing floats here would silently
-    launder that bug, so it is raised on instead - and never coerced.
+    The frozen schema declares zero FLOAT, DOUBLE and REAL columns and both producers
+    refuse to emit a float, so this is unreachable unless one of them was reconfigured.
     """
 
 
 class UnexpectedValueTypeError(DiffStatesError, TypeError):
-    """A value is of a type no in-scope column can hold.
-
-    A dump holds only JSON strings and JSON integers. A bool, a list, an
-    object or a number with a fractional part means the file was not
-    written by harness/normalize.py.
-    """
+    """A value is of a type no in-scope column can hold."""
 
 
 class UnexpectedNullError(DiffStatesError, ValueError):
     """A value is JSON null.
 
-    Not one of the 513 in-scope columns is nullable. Agent Action Plan
-    section 0.6.2 explains why - each bridge load paragraph initialises
-    the host-variable group, "so unset fields become zero or space rather
-    than SQL NULL". A null is genuinely new information, so it is
-    reported and NEVER coalesced to zero, to a space or to an empty
-    string.
+    Not one of the 513 in-scope columns is nullable. Agent Action Plan section 0.6.2
+    explains why - each bridge load paragraph initialises the host-variable group, "so
+    unset fields become zero or space rather than SQL NULL".
     """
 
 
 class DuplicateKeyError(DiffStatesError, ValueError):
     """A primary-key value appears twice in one dump.
 
-    A PRIMARY KEY column cannot produce a duplicate, so the input is
-    malformed - and with a duplicate there is no unambiguous row to
-    align against.
+    A PRIMARY KEY column cannot produce a duplicate, so the input is malformed - and
+    with a duplicate there is no unambiguous row to align against.
     """
 
 
@@ -816,33 +295,23 @@ class ScenarioFileError(DiffStatesError, ValueError):
 
 
 class ManifestError(DiffStatesError, ValueError):
-    """A tree does not declare itself complete, or the two disagree.
-
-    Distinct from `MissingTreeError`: "the directory is not there" is an
-    operator mistake, whereas "the directory is there but unmarked" means
-    an upstream stage did not finish - and comparing two partial captures
-    can yield an EMPTY diff, which is a false pass.
-    """
+    """A tree does not declare itself complete, or the two disagree."""
 
 
 class ReportPathError(DiffStatesError, ValueError):
     """The report would be written somewhere it must not be.
 
-    Nothing may be written under `$ACAS_REPO`: it holds the frozen
-    artifacts and is mounted read-only (rule R-3, Agent Action Plan
-    section 0.8.1).
+    Nothing may be written under `$ACAS_REPO`: it holds the frozen artifacts and is
+    mounted read-only (rule R-3, Agent Action Plan section 0.8.1).
     """
-
-
-#  TABLE NAMES
 
 
 def table_spec(table: str) -> TableSpec:
     """Look up an in-scope table's frozen-schema facts.
 
     Args:
-        table: A table name, spelled exactly as `mysql/ACASDB.sql` spells
-            it, hyphens included and upper case.
+        table: A table name, spelled exactly as `mysql/ACASDB.sql` spells it, hyphens
+            included and upper case.
 
     Returns:
         Its `TableSpec`.
@@ -865,9 +334,8 @@ def table_spec(table: str) -> TableSpec:
             f"refused rather than compared."
         )
 
-    # A near-miss list, so a typo or a case error is obvious at once. The
-    # comparison is upper-cased for the SUGGESTION only; the name itself
-    # is matched exactly, because the schema's spelling is the contract.
+    # A near-miss list, so a typo or a case error is obvious at once. The comparison is
+    # upper-cased for the SUGGESTION only.
     wanted = table.upper().replace("_", "-")
     close = [name for name in IN_SCOPE_TABLES if name.upper() == wanted]
     if not close:
@@ -896,25 +364,16 @@ def dump_filename(table: str) -> str:
         table: The table name.
 
     Returns:
-        `<TABLE>.json`, matching [harness/dump_tables.py:L1672] and
-        [harness/normalize.py:L2534-L2545] exactly.
+        `<TABLE>.json`, matching harness/dump_tables.py and harness/normalize.py
+            exactly.
     """
     return f"{table}{DUMP_SUFFIX}"
-
-
-#  IS THIS A NORMALISED TREE?
-#  The second most likely cause of a FALSE FAIL, after positional row
-#  alignment: comparing the raw dumps instead of the normalised ones.
 
 
 def is_normalized_tree(directory: Path | str) -> bool:
     """Report whether a directory NAME marks it as a normalised tree.
 
-    The test is on the name, not on the contents: a normalised dump is
-    byte-comparable with a raw one - harness/normalize.py preserves the
-    shape exactly and changes only values - so there is nothing inside a
-    file that could distinguish the two. The name is the only signal, and
-    both producers of that name are committed in this repository.
+    The test is on the name, not on the contents.
 
     Args:
         directory: The directory to test.
@@ -938,8 +397,7 @@ def _assert_tree(
 
     Raises:
         MissingTreeError: It does not exist, or is not a directory.
-        RawTreeError: Its name does not mark it as normalised and
-            `allow_raw` is false.
+        RawTreeError: Its name does not mark it as normalised and `allow_raw` is false.
     """
     if not directory.exists():
         raise MissingTreeError(
@@ -947,8 +405,8 @@ def _assert_tree(
             f"is NOT an empty diff: exit 2 says the comparison could not "
             f"be performed, and it is never reported as a pass. Run "
             f"stages 3 and 4 - harness/dump_tables.py then "
-            f"harness/normalize.py - for the {label} side first "
-            f"[harness/docker-compose.yml:L351-L356]."
+            f"harness/normalize.py - for the {label} side first; see "
+            f"harness/docker-compose.yml."
         )
     if not directory.is_dir():
         raise MissingTreeError(
@@ -995,18 +453,8 @@ def _assert_tree(
     )
 
 
-#  LOADING AND ASSERTING ONE DUMP
-#  Every assertion here is about ONE file in isolation, and every one is
-#  exit 2: a malformed dump means the comparison could not be performed.
-#  Nothing CROSS-SIDE is asserted. A dump's `columns` list in particular
-#  is never checked against a hardcoded per-table list, because the file
-#  specification's validation step 12 requires a column-order mismatch to
-#  be a STRUCTURAL DIFFERENCE at exit 1 with that table's rows left
-#  uncompared, and an assertion here would pre-empt it with an exit 2.
-#  `_assert_dump` is pure, so in-memory and file callers get identical
-#  checks - the split harness/normalize.py makes between `normalize_dump`
-#  [L2281] and `read_dump` [L2433] - which is why the rule R-2 float guard
-#  fires on a hand-built dict passed to `diff_table`, not only on a file.
+# Every assertion here is about ONE file in isolation, and every one is exit 2: a
+# malformed dump means the comparison could not be performed.
 
 
 def _assert_value(
@@ -1022,14 +470,14 @@ def _assert_value(
         row_index: The row's zero-based position, for the message.
 
     Returns:
-        The value unchanged - a `str` or an `int`. Nothing is converted,
-        rounded, padded, trimmed or coerced.
+        The value unchanged - a `str` or an `int`. Nothing is converted, rounded,
+            padded, trimmed or coerced.
 
     Raises:
         UnexpectedNullError: It is `None`.
         NumericPolicyError: It is a `float` (rule R-2).
-        UnexpectedValueTypeError: It is a `bool`, a container, or any
-            other type no in-scope column can hold.
+        UnexpectedValueTypeError: It is a `bool`, a container, or any other type no in-
+            scope column can hold.
     """
     site = f"{where}: `{table}`.`{column}` row {row_index}"
 
@@ -1046,24 +494,16 @@ def _assert_value(
             f"string."
         )
 
-    # bool BEFORE int, because bool is a subclass of int. JSON true is not
-    # the integer a tinyint column holds, and no in-scope column can
-    # produce one.
+    # bool BEFORE int, because bool is a subclass of int.
     if isinstance(value, bool):
         raise UnexpectedValueTypeError(
             f"{site} is the JSON boolean {json.dumps(value)}. A dump holds "
-            f"JSON integers and JSON strings only "
-            f"[harness/dump_tables.py:L1396-L1465]; a boolean means the "
+            f"JSON integers and JSON strings only, as "
+            f"harness/dump_tables.py writes them; a boolean means the "
             f"file was not written by harness/normalize.py."
         )
 
-    # THE RULE R-2 GUARD. A float here would mean
-    # harness/dump_tables.py or harness/normalize.py had its type
-    # conversion overridden - the schema declares zero FLOAT, DOUBLE and
-    # REAL columns and both producers raise rather than emit one. It is
-    # NOT compared, because comparing floats here would launder the bug,
-    # and it is NOT converted, because a conversion would decide by
-    # itself what the value was meant to be.
+    # THE RULE R-2 GUARD.
     if isinstance(value, float):
         raise NumericPolicyError(
             f"{site} is the binary floating-point value {value!r}. No "
@@ -1096,12 +536,12 @@ def _assert_dump(dump: Mapping[str, Any], where: str) -> None:
 
     Args:
         dump: The parsed dump object.
-        where: The file path or the side name it came from, quoted in
-            every message so a failure is traceable to its source.
+        where: The file path or the side name it came from, quoted in every message so a
+            failure is traceable to its source.
 
     Raises:
-        DumpShapeError: The keys, the columns, the primary key, the row
-            count or a row's width is wrong.
+        DumpShapeError: The keys, the columns, the primary key, the row count or a row's
+            width is wrong.
         TableNotInScopeError: Its table is out of scope.
         UnknownTableError: Its table is not a table of the schema.
         DuplicateKeyError: A primary-key value appears twice.
@@ -1116,8 +556,8 @@ def _assert_dump(dump: Mapping[str, Any], where: str) -> None:
             f"{list(DUMP_KEYS)} in that order; got {list(keys)}. The key "
             f"order is part of the byte-identical guarantee (rule R-6) "
             f"and no other key may appear - not a timestamp, a server "
-            f"version, a scenario name or a side. The layout is fixed at "
-            f"[harness/dump_tables.py:L548-L554]."
+            f"version, a scenario name or a side. The layout is fixed by "
+            f"harness/dump_tables.py."
         )
 
     table = dump["table"]
@@ -1126,7 +566,6 @@ def _assert_dump(dump: Mapping[str, Any], where: str) -> None:
             f"{where}: `table` must be the table name as a string; got "
             f"{type(table).__name__} ({table!r})."
         )
-    # Raises TableNotInScopeError or UnknownTableError, both exit 2.
     table_spec(table)
 
     columns = dump["columns"]
@@ -1220,8 +659,6 @@ def _assert_dump(dump: Mapping[str, Any], where: str) -> None:
             )
 
         key = row[key_index]
-        # A str|int by construction: _assert_value has just accepted
-        # every value in this row, and it admits nothing else.
         if key in keys_seen:
             raise DuplicateKeyError(
                 f"{where}: `{table}`: the primary-key value "
@@ -1247,8 +684,8 @@ def read_dump(path: Path | str) -> dict[str, Any]:
 
     Raises:
         MissingTableFileError: The file does not exist.
-        DumpReadError: It could not be read, is not valid UTF-8 JSON, or
-            does not parse to a JSON object.
+        DumpReadError: It could not be read, is not valid UTF-8 JSON, or does not parse
+            to a JSON object.
     """
     target = Path(path)
     if not target.exists():
@@ -1289,8 +726,7 @@ def read_dump(path: Path | str) -> dict[str, Any]:
 def load_dump(path: Path | str) -> dict[str, Any]:
     """Read one dump file and assert it is well formed.
 
-    Every failure is exit 2: a dump that cannot be trusted cannot produce
-    a verdict.
+    Every failure is exit 2: a dump that cannot be trusted cannot produce a verdict.
 
     Args:
         path: The `<TABLE>.json` file to read.
@@ -1301,8 +737,8 @@ def load_dump(path: Path | str) -> dict[str, Any]:
     Raises:
         MissingTableFileError: The file does not exist.
         DumpReadError: It is unreadable or is not a JSON object.
-        DumpShapeError: Its shape is wrong, including its name not
-            matching the table it declares.
+        DumpShapeError: Its shape is wrong, including its name not matching the table it
+            declares.
         TableNotInScopeError: Its table is out of scope.
         UnknownTableError: Its table is not a table of the schema.
         DuplicateKeyError: A primary-key value appears twice.
@@ -1314,26 +750,22 @@ def load_dump(path: Path | str) -> dict[str, Any]:
     dump = read_dump(target)
     _assert_dump(dump, str(target))
 
-    # The file name and the declared table must agree, or a report would
-    # name a table whose data came from somewhere else.
+    # The file name and the declared table must agree, or a report would name a table
+    # whose data came from somewhere else.
     stem = target.name.removesuffix(DUMP_SUFFIX)
     if stem != dump["table"]:
         raise DumpShapeError(
             f"{target}: the file is named for table {stem!r} but declares "
             f"{dump['table']!r}. Both producers name a dump "
-            f"`<TABLE>{DUMP_SUFFIX}` for the table it holds "
-            f"[harness/dump_tables.py:L1672], and a report that named the "
+            f"`<TABLE>{DUMP_SUFFIX}` for the table it holds, and a report "
+            f"that named the "
             f"wrong table would be worthless as evidence."
         )
     return dump
 
 
-#  RENDERING ONE VALUE, AND ORDERING KEYS
-#  Values are rendered as JSON, which quotes strings and leaves integers
-#  bare. That is exactly the distinction the report needs: a trailing
-#  space, a leading space and the empty string are all visible, and `1`
-#  can never be mistaken for `"1"`. ensure_ascii=True keeps the report
-#  byte-identical whatever the locale (rule R-6).
+# Values are rendered as JSON, which quotes strings and leaves integers bare. That is
+# exactly the distinction the report needs.
 
 
 def _render_value(value: str | int) -> str:
@@ -1343,8 +775,8 @@ def _render_value(value: str | int) -> str:
         value: A dumped value - a `str` or an `int`.
 
     Returns:
-        `1234` for an integer, `"1234.56"` for a string. Quoting is what
-        makes padding and emptiness visible.
+        `1234` for an integer, `"1234.56"` for a string. Quoting is what makes padding
+            and emptiness visible.
     """
     return json.dumps(value, ensure_ascii=True)
 
@@ -1352,31 +784,23 @@ def _render_value(value: str | int) -> str:
 def _key_sort_key(key: str | int) -> tuple[int, int, str]:
     """Build a total, deterministic sort key for a primary-key value.
 
-    Numeric keys sort NUMERICALLY, so `2` comes before `10`; character
-    keys sort by ASCII, which is what Python's own string ordering gives
-    for the ASCII-only content a dump can hold. Integers sort before
-    strings, so that a dump whose key column was serialised
-    inconsistently still produces a stable, reproducible order rather
-    than a TypeError.
+    Numeric keys sort NUMERICALLY, so `2` comes before `10`; character keys sort by
+    ASCII, which is what Python's own string ordering gives for the ASCII-only content a
+    dump can hold.
 
     Args:
         key: The primary-key value.
 
     Returns:
-        A tuple ordering integers first and numerically, then strings by
-        code point.
+        A tuple ordering integers first and numerically, then strings by code point.
     """
     if isinstance(key, int):
         return (0, key, "")
     return (1, 0, key)
 
 
-#  THE DIFFERENCE MODEL
-#  Frozen dataclasses, so a diff cannot be edited after the fact, and
-#  every collection inside one is a tuple in its final report order -
-#  sorted once, at construction. `is_empty` is the single cheap question
-#  the eight scenario tests ask, and `__bool__` is its inverse so
-#  `if diff:` reads as "if anything differs".
+# Frozen dataclasses, so a diff cannot be edited after the fact, and every collection
+# inside one is a tuple in its final report order - sorted once, at construction.
 
 
 @dataclass(frozen=True, slots=True)
@@ -1385,10 +809,8 @@ class ValueDifference:
 
     Attributes:
         column: The column name.
-        ordinal: Its 1-based position in the table's column list, which
-            is the schema's ORDINAL_POSITION. SYSTEM-REC has 169
-            columns; without an ordinal a reader cannot find the
-            difference by hand (rule R-5).
+        ordinal: Its 1-based position in the table's column list, which is the schema's
+            ORDINAL_POSITION. SYSTEM-REC has 169 columns.
         cobol: The value the compiled oracle produced.
         python: The value the migrated cycle produced.
     """
@@ -1402,9 +824,9 @@ class ValueDifference:
     def type_mismatch(self) -> bool:
         """Whether the two values are of different Python types.
 
-        A type mismatch is a difference in its own right: it would mean
-        the two dumps were produced by inconsistent serialisation, which
-        is a real defect rather than something to smooth over.
+        A type mismatch is a difference in its own right: it would mean the two dumps
+        were produced by inconsistent serialisation, which is a real defect rather than
+        something to smooth over.
         """
         return type(self.cobol) is not type(self.python)
 
@@ -1426,8 +848,8 @@ class RowDifference:
 class TableDiff:
     """Everything that differs for one table.
 
-    A one-sided table is expressed by `in_cobol` or `in_python` being
-    false; that is a DIFFERENCE, never a reason to skip the table.
+    A one-sided table is expressed by `in_cobol` or `in_python` being false; that is a
+    DIFFERENCE, never a reason to skip the table.
 
     Attributes:
         table: The in-scope table name.
@@ -1438,22 +860,16 @@ class TableDiff:
         python_columns: The migrated side's column list.
         cobol_row_count: The oracle's row count.
         python_row_count: The migrated side's row count.
-        missing_in_python: Primary keys the oracle produced and the
-            migrated cycle did not, ascending.
-        missing_in_cobol: Primary keys the migrated cycle produced and
-            the oracle did not, ascending. Reported separately from the
-            above because the two directions are materially different
-            findings.
-        value_differences: Rows present on both sides that differ in at
-            least one column, ascending by key.
-        rows_compared: Whether the rows were compared at all. False when
-            the column lists disagree, because rows are positional and
-            there is then no meaningful alignment, and false when a
-            table is one-sided.
-        cobol_key_types: The distinct Python type names of the oracle's
-            primary-key values, ascending. Recorded so that a
-            serialisation difference IN THE ALIGNMENT COLUMN can be named
-            rather than merely implied - see `key_types_differ`.
+        missing_in_python: Primary keys the oracle produced and the migrated cycle did
+            not, ascending.
+        missing_in_cobol: Primary keys the migrated cycle produced and the oracle did
+            not, ascending. Reported separately from the above because the two
+            directions are materially different findings.
+        value_differences: Rows present on both sides that differ in at least one
+            column, ascending by key.
+        rows_compared: Whether the rows were compared at all.
+        cobol_key_types: The distinct Python type names of the oracle's primary-key
+            values, ascending.
         python_key_types: The same for the migrated side.
     """
 
@@ -1479,22 +895,14 @@ class TableDiff:
 
     @property
     def columns_differ(self) -> bool:
-        """Whether the two column lists disagree in names, order or count.
-
-        Only meaningful when both sides were present; a one-sided table
-        has nothing to compare its columns with.
-        """
+        """Whether the two column lists disagree in names, order or count."""
         if self.table_missing:
             return False
         return self.cobol_columns != self.python_columns
 
     @property
     def row_count_differs(self) -> bool:
-        """Whether the two row counts disagree.
-
-        Reported once per table as a headline, in addition to the
-        key-level detail that explains it.
-        """
+        """Whether the two row counts disagree."""
         if self.table_missing:
             return False
         return self.cobol_row_count != self.python_row_count
@@ -1503,19 +911,9 @@ class TableDiff:
     def key_types_differ(self) -> bool:
         """Whether the two sides serialised the ALIGNMENT COLUMN differently.
 
-        A type mismatch in an ordinary column is reported per row with
-        both type names. A type mismatch in the primary key cannot be,
-        because rows are aligned on that column's VALUE and `1` is not
-        `"1"`: the two rows land under different keys and are correctly
-        reported as one-sided. Coercing them together to pair them would
-        be exactly the numeric coercion rule R-2 forbids.
-
-        So this flag names the cause instead. It is purely diagnostic and
-        purely additive: it never pairs a row, never suppresses a
-        one-sided finding, and cannot turn an empty diff into a non-empty
-        one - if the key types differ then no key is shared, so any row
-        at all already produced a one-sided finding, and if neither side
-        has a row then both type sets are empty and equal.
+        A type mismatch in an ordinary column is reported per row with both type names.
+        A type mismatch in the primary key cannot be, because rows are aligned on that
+        column's VALUE and `1` is not `"1"`.
         """
         if self.table_missing or not self.rows_compared:
             return False
@@ -1563,14 +961,11 @@ class TreeDiff:
     """Everything that differs between two normalised trees.
 
     Attributes:
-        tables: One entry per compared table, in the report's table
-            order - the scenario's affected-table order when one was
-            given, ASCII-sorted otherwise. Tables that agree are kept in
-            the sequence, so a caller can see what WAS compared; they
-            simply contribute nothing to the report.
-        cobol_dir: The oracle tree that was compared, for the operator's
-            benefit. Never rendered into the report - an absolute path
-            would break byte-determinism (rule R-6).
+        tables: One entry per compared table, in the report's table order - the
+            scenario's affected-table order when one was given, ASCII-sorted otherwise.
+        cobol_dir: The oracle tree that was compared, for the operator's benefit. Never
+            rendered into the report - an absolute path would break byte-determinism
+            (rule R-6).
         python_dir: The migrated-cycle tree that was compared.
     """
 
@@ -1590,12 +985,7 @@ class TreeDiff:
 
     @property
     def is_empty(self) -> bool:
-        """THE PASS CONDITION. True when the two trees are identical.
-
-        Agent Action Plan section 0.8.5: "the diff must be empty". This
-        is the single question the eight scenario tests ask, and the
-        single question `main` turns into an exit code.
-        """
+        """THE PASS CONDITION. True when the two trees are identical."""
         return self.total_differences == 0
 
     def __bool__(self) -> bool:
@@ -1603,17 +993,8 @@ class TreeDiff:
         return not self.is_empty
 
 
-#  COMPARING ONE TABLE
-#  Pure: no I/O, no clock, no environment, no mutation of its arguments.
-#  Exact: `==` after a type check, and nothing else. There is no
-#  tolerance, no epsilon, no case-insensitive compare, no
-#  whitespace-insensitive compare and no numeric coercion, because Agent
-#  Action Plan section 0.1.1 requires "a behaviorally exact clone" and a
-#  tolerance would defeat the entire engagement (rule R-2).
-#  harness/normalize.py has already canonicalised the three
-#  representation artefacts - trailing spaces in character columns,
-#  decimal scale rendering, and the two-digit versus four-digit date text
-#  forms. ANYTHING LEFT IS REAL.
+# Pure: no I/O, no clock, no environment, no mutation of its arguments. Exact: `==`
+# after a type check, and nothing else.
 
 
 def _key_type_names(rows_by_key: Mapping[str | int, Any]) -> tuple[str, ...]:
@@ -1623,8 +1004,8 @@ def _key_type_names(rows_by_key: Mapping[str | int, Any]) -> tuple[str, ...]:
         rows_by_key: The side's rows, keyed by primary-key value.
 
     Returns:
-        The distinct type names, ascending, so the comparison against the
-        other side is deterministic. Empty when the side has no rows.
+        The distinct type names, ascending, so the comparison against the other side is
+            deterministic. Empty when the side has no rows.
     """
     return tuple(sorted({type(key).__name__ for key in rows_by_key}))
 
@@ -1642,10 +1023,9 @@ def diff_table(
         A `TableDiff`. It is empty, and falsy, when the two agree.
 
     Raises:
-        DumpShapeError: Either object is malformed, they are for
-            different tables, or they disagree on the primary key - the
-            alignment column, so a disagreement there leaves no
-            meaningful way to compare.
+        DumpShapeError: Either object is malformed, they are for different tables, or
+            they disagree on the primary key - the alignment column, so a disagreement
+            there leaves no meaningful way to compare.
         TableNotInScopeError: Either table is out of scope.
         UnknownTableError: Either table is not a table of the schema.
         DuplicateKeyError: A primary-key value appears twice.
@@ -1682,12 +1062,7 @@ def diff_table(
     cobol_rows: Sequence[Sequence[str | int]] = left["rows"]
     python_rows: Sequence[Sequence[str | int]] = right["rows"]
 
-    # A COLUMN-SET OR COLUMN-ORDER DIFFERENCE IS STRUCTURAL. Rows are
-    # positional, so there is no meaningful alignment left to make: the
-    # finding is reported and this table's rows are NOT compared, which is
-    # what the file specification's validation step 12 requires. Comparing
-    # them anyway would emit a cascade of spurious differences that told a
-    # reader nothing.
+    # positional, so there is no meaningful alignment left to make.
     if cobol_columns != python_columns:
         return TableDiff(
             table=table,
@@ -1703,12 +1078,6 @@ def diff_table(
     key_index = columns.index(primary_key)
 
     # ROWS ARE ALIGNED ON THE PRIMARY-KEY VALUE, NEVER ON POSITION.
-    # harness/normalize.py preserves the primary-key ordering it inherits
-    # from `ORDER BY <primary key>`, so position would usually work - and
-    # would be catastrophic when it did not, turning one inserted row into
-    # a cascade of hundreds of spurious column differences. Duplicate keys
-    # were already refused by `_assert_dump`, so each dictionary below has
-    # exactly one row per key.
     cobol_by_key: dict[str | int, Sequence[str | int]] = {
         row[key_index]: row for row in cobol_rows
     }
@@ -1738,8 +1107,8 @@ def diff_table(
     for key in shared:
         cobol_row = cobol_by_key[key]
         python_row = python_by_key[key]
-        # Columns in SCHEMA ORDINAL ORDER, never alphabetical, so a reader
-        # can walk the report against the CREATE TABLE statement.
+        # Columns in SCHEMA ORDINAL ORDER, never alphabetical, so a reader can walk the
+        # report against the CREATE TABLE statement.
         values = tuple(
             ValueDifference(
                 column=columns[position],
@@ -1750,9 +1119,7 @@ def diff_table(
             for position, (cobol_value, python_value) in enumerate(
                 zip(cobol_row, python_row, strict=True)
             )
-            # EXACT, and nothing else. A type mismatch fails this test as
-            # surely as a value mismatch, and is reported with both type
-            # names rather than coerced away.
+            # EXACT, and nothing else.
             if type(cobol_value) is not type(python_value)
             or cobol_value != python_value
         )
@@ -1774,18 +1141,8 @@ def diff_table(
     )
 
 
-#  COMPARING TWO TREES, SEQUENTIALLY  (rule R-3)
-#  One table at a time, plain loop, fixed order: no thread, no event loop,
-#  no process pool, no synchronisation primitive. A ONE-SIDED TABLE IS
-#  NEVER SKIPPED, and what it means depends on who chose it. DISCOVERED
-#  (no selection, so the union of both trees) is a reported DIFFERENCE at
-#  exit 1 - the asymmetry a naive intersection hides. REQUESTED (--tables,
-#  or a scenario's list) is exit 2: dump_tables.py writes a file for every
-#  table asked of it whatever its row count, an empty one still getting
-#  `"row_count": 0`, so a missing file means a stage did not run. Neither
-#  can be a false pass. Behaviour diverges at ROW level instead: anomaly
-#  #4 [irs/irs030.cbl:L1635-L1652] leaves an unbalanced debit and NO
-#  posting record, reported missing_in_python or missing_in_cobol.
+# One table at a time, plain loop, fixed order: no thread, no event loop, no process
+# pool, no synchronisation primitive.
 
 
 def discover_tables(directory: Path | str) -> tuple[str, ...]:
@@ -1795,14 +1152,13 @@ def discover_tables(directory: Path | str) -> tuple[str, ...]:
         directory: A normalised tree.
 
     Returns:
-        The table names, ASCII-ascending - sorted once, so the report's
-        order can never depend on filesystem iteration order (rule R-6).
+        The table names, ASCII-ascending - sorted once, so the report's order can never
+            depend on filesystem iteration order (rule R-6).
 
     Raises:
-        MissingTreeError: The directory does not exist or is not a
-            directory.
-        UnknownTableError: It holds a `<NAME>.json` file whose name is
-            not a table of the frozen schema.
+        MissingTreeError: The directory does not exist or is not a directory.
+        UnknownTableError: It holds a `<NAME>.json` file whose name is not a table of
+            the frozen schema.
         TableNotInScopeError: It holds a dump for an out-of-scope table.
     """
     source = Path(directory)
@@ -1817,16 +1173,12 @@ def discover_tables(directory: Path | str) -> tuple[str, ...]:
     names: list[str] = []
     for entry in sorted(source.iterdir(), key=lambda item: item.name):
         name = entry.name
-        # Both producers write through `.<stem>.json.tmp` and then
-        # os.replace, so a dot-prefixed name is a leftover from a failed
-        # write and never a dump. Skipped rather than compared.
+        # Both producers write through `.<stem>.json.tmp` and then os.replace, so a dot-
+        # prefixed name is a leftover from a failed write and never a dump.
         if name.startswith(TEMP_PREFIX):
             continue
-        # Skip the reserved `_*` namespace, which is where the completeness
-        # manifest lives. No table of the frozen schema begins with an
-        # underscore, so nothing real is excluded - and the manifest must
-        # not be mistaken for a dump named `_manifest`, which would raise
-        # UnknownTableError below and turn a well-formed tree into an error.
+        # Skip the reserved `_*` namespace, which is where the completeness manifest
+        # lives.
         if name.startswith(RESERVED_PREFIX):
             continue
         if not name.endswith(DUMP_SUFFIX):
@@ -1834,11 +1186,7 @@ def discover_tables(directory: Path | str) -> tuple[str, ...]:
         if not entry.is_file():
             continue
         table = name[: -len(DUMP_SUFFIX)]
-        # Raises rather than ignoring: harness/normalize.py writes ONLY
-        # `<TABLE>.json` files for in-scope tables into its destination,
-        # so anything else there means the tree is not what it claims to
-        # be, and silently ignoring a file in a tree being judged would
-        # be exactly the wrong instinct.
+        # Raises rather than ignoring.
         table_spec(table)
         names.append(table)
     return tuple(sorted(names))
@@ -1902,16 +1250,12 @@ def read_manifest(directory: Path | str) -> dict[str, Any] | None:
         directory: The published tree.
 
     Returns:
-        The manifest object, or None when the tree carries none - which
-        means the stage that wrote it did not finish.
+        The manifest object, or None when the tree carries none - which means the stage
+            that wrote it did not finish.
 
     Raises:
-        ManifestError: The manifest is present but unreadable, is not
-            valid JSON, is not an object, or declares a version this tool
-            does not understand. An unknown version is refused rather than
-            guessed at: a manifest half-understood would let an incomplete
-            tree pass for a complete one, and a false pass is the one
-            outcome this module must never produce.
+        ManifestError: The manifest is present but unreadable, is not valid JSON, is not
+            an object, or declares a version this tool does not understand.
     """
     path = Path(directory) / MANIFEST_FILENAME
     if not path.is_file():
@@ -1953,8 +1297,8 @@ def _verify_tree(directory: Path, label: str) -> dict[str, Any]:
         The verified manifest.
 
     Raises:
-        ManifestError: The tree carries no manifest, over-declares, holds a
-            file whose digest has changed, or holds an undeclared dump.
+        ManifestError: The tree carries no manifest, over-declares, holds a file whose
+            digest has changed, or holds an undeclared dump.
     """
     manifest = read_manifest(directory)
     if manifest is None:
@@ -2037,6 +1381,11 @@ def verify_trees(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Assert both trees are complete and belong to the SAME run.
 
+    dump and normalise stages record the scenario they were run for, so two trees whose
+    manifests name different scenarios are not two sides of one comparison - they are
+    two unrelated runs, and a clean diff between them says nothing whatever about the
+    migration.
+
     Args:
         left_dir: The COBOL oracle's normalised tree.
         right_dir: The Python cycle's normalised tree.
@@ -2045,16 +1394,8 @@ def verify_trees(
         The two verified manifests, left then right.
 
     Raises:
-        ManifestError: Either tree is incomplete, or the two disagree about
-            which scenario they belong to.
-
-    THE CROSS-CHECK IS THE POINT OF CARRYING IDENTITY AT ALL. Each side's
-    dump and normalise stages record the scenario they were run for, so two
-    trees whose manifests name different scenarios are not two sides of one
-    comparison - they are two unrelated runs, and a clean diff between them
-    says nothing whatever about the migration. Under rule R-6 the evidence
-    has to be able to state its own scope, and this is where that statement
-    is checked rather than assumed.
+        ManifestError: Either tree is incomplete, or the two disagree about which
+            scenario they belong to.
     """
     left_manifest = _verify_tree(Path(left_dir), LABEL_COBOL)
     right_manifest = _verify_tree(Path(right_dir), LABEL_PYTHON)
@@ -2102,41 +1443,32 @@ def diff_trees(
     """Compare two normalised trees, table by table, sequentially.
 
     Args:
-        left_dir: The COBOL oracle's normalised tree - the specification
-            side, reported as `cobol`.
-        right_dir: The migrated Python cycle's normalised tree, reported
-            as `python`.
-        tables: The tables to compare, in the order to report them -
-            normally the scenario's affected-table list. When omitted,
-            the UNION of the tables the two trees hold is compared, in
-            ASCII order, and a table present in only one of them is
-            reported as a difference. When given, every named table must
-            be present in BOTH trees, since a dump file exists for every
-            table that was dumped whatever its row count.
-        allow_raw: Permit comparing directories whose names do not mark
-            them as normalised. A debugging escape; it warns loudly.
+        left_dir: The COBOL oracle's normalised tree - the specification side, reported
+            as `cobol`.
+        right_dir: The migrated Python cycle's normalised tree, reported as `python`.
+        tables: The tables to compare, in the order to report them - normally the
+            scenario's affected-table list.
+        allow_raw: Permit comparing directories whose names do not mark them as
+            normalised.
 
     Returns:
         A `TreeDiff`. `is_empty` is the pass condition.
 
     Raises:
-        MissingTreeError: Either directory is absent or is not a
-            directory.
-        SameTreeError: Both sides name the same directory, which would
-            always compare equal and so would be a false pass.
-        RawTreeError: A directory is not a normalised tree and
-            `allow_raw` is false.
+        MissingTreeError: Either directory is absent or is not a directory.
+        SameTreeError: Both sides name the same directory, which would always compare
+            equal and so would be a false pass.
+        RawTreeError: A directory is not a normalised tree and `allow_raw` is false.
         EmptyComparisonError: There is no table to compare.
-        MissingTableFileError: A requested table's dump is absent from
-            one or both trees. Absence is a reported difference only for
-            a table that was DISCOVERED rather than requested.
-        UnknownTableError: A requested or discovered name is not a table
-            of the frozen schema.
-        TableNotInScopeError: A requested or discovered name is out of
-            scope.
+        MissingTableFileError: A requested table's dump is absent from one or both
+            trees. Absence is a reported difference only for a table that was DISCOVERED
+            rather than requested.
+        UnknownTableError: A requested or discovered name is not a table of the frozen
+            schema.
+        TableNotInScopeError: A requested or discovered name is out of scope.
         DumpReadError: A dump is unreadable or is not a JSON object.
-        DumpShapeError: A dump's shape is wrong, or the two sides
-            disagree on the alignment column.
+        DumpShapeError: A dump's shape is wrong, or the two sides disagree on the
+            alignment column.
         DuplicateKeyError: A primary-key value appears twice in a dump.
         UnexpectedNullError: A value is null.
         NumericPolicyError: A value is a float (rule R-2).
@@ -2145,10 +1477,8 @@ def diff_trees(
     left = Path(left_dir)
     right = Path(right_dir)
 
-    # COMPARING A TREE WITH ITSELF ALWAYS PASSES, whatever the migration
-    # did, so it is refused rather than answered. `resolve` is non-strict
-    # and normalises `..` and symlinks, the same test
-    # harness/normalize.py makes for the same reason [L2581, L2638].
+    # COMPARING A TREE WITH ITSELF ALWAYS PASSES, whatever the migration did, so it is
+    # refused rather than answered.
     if left.resolve() == right.resolve():
         raise SameTreeError(
             f"both sides name the same directory, {left}. A tree always "
@@ -2162,14 +1492,10 @@ def diff_trees(
     _assert_tree(left, LABEL_COBOL, allow_raw=allow_raw)
     _assert_tree(right, LABEL_PYTHON, allow_raw=allow_raw)
 
-    # Which of the two one-sided-table dispositions applies is decided
-    # here, once, by who chose the tables.
     discovered = tables is None
 
     if discovered:
-        # The UNION, not the intersection: an intersection would silently
-        # drop a table one side produced and the other did not, which is
-        # a difference and one of the more diagnostic ones.
+        # The UNION, not the intersection.
         selected = tuple(
             sorted(set(discover_tables(left)) | set(discover_tables(right)))
         )
@@ -2214,13 +1540,8 @@ def diff_trees(
             )
 
         if (not in_cobol or not in_python) and not discovered:
-            # AN EXPLICITLY REQUESTED TABLE MUST BE PRESENT ON BOTH SIDES.
-            # harness/dump_tables.py writes a file for every table it is
-            # asked to dump whatever the row count - an empty table still
-            # gets `"row_count": 0` - so a missing FILE cannot have been
-            # produced by a behavioural difference. It means one side's
-            # dump or normalise stage did not cover this table, and a
-            # verdict rendered on half a comparison would be worthless.
+            # harness/dump_tables.py writes a file for every table it is asked to dump
+            # whatever the row count - an empty table still gets `"row_count".
             missing_side = LABEL_PYTHON if in_cobol else LABEL_COBOL
             missing_path = right_path if in_cobol else left_path
             raise MissingTableFileError(
@@ -2236,10 +1557,8 @@ def diff_trees(
 
         specification = IN_SCOPE[table]
         if not in_cobol or not in_python:
-            # A ONE-SIDED DISCOVERED TABLE IS A DIFFERENCE, never a skip:
-            # a naive intersection would have hidden it. The present side
-            # is still loaded and asserted, so a malformed dump is still
-            # reported as such, and so the row count can be quoted.
+            # A ONE-SIDED DISCOVERED TABLE IS A DIFFERENCE, never a skip: a naive
+            # intersection would have hidden it.
             present = left_path if in_cobol else right_path
             dump = load_dump(present)
             row_count = int(dump["row_count"])
@@ -2302,41 +1621,35 @@ def _validate_table_selection(tables: Sequence[str]) -> tuple[str, ...]:
             "compare. An empty comparison is NOT an empty diff: it would "
             "read as a pass while proving nothing. Agent Action Plan "
             "section 0.4.1.7 requires each scenario to declare the tables "
-            "it affects, and harness/run_cobol_scenario.sh:L1329-L1336 "
-            "says the same: the comparison must be bounded by an explicit "
+            "it affects, and harness/run_cobol_scenario.sh says the same: "
+            "the comparison must be bounded by an explicit "
             "per-scenario list."
         )
     return tuple(selected)
 
 
-#  THE SCENARIO'S AFFECTED-TABLE LIST
-#  Bounding the comparison by the SCENARIO is the protocol, and the
-#  alternative - an ignore-list here - is forbidden by rule R-4. Both
-#  spellings of the key are accepted, matching
-#  [harness/dump_tables.py:L645-L648] and the keys
-#  harness/run_cobol_scenario.sh reads [L1323-L1326], so one scenario file
-#  serves every stage.
+# Bounding the comparison by the SCENARIO is the protocol, and the alternative - an
+# ignore-list here - is forbidden by rule R-4.
 
 
 def scenario_tables(path: Path | str) -> tuple[str, ...]:
     """Read a scenario's affected-table list, in the order it declares it.
 
-    Only that one list is read: no seed data is interpreted and no input
-    is validated, because interpreting a scenario's declared contents
-    would be exactly the added validation rule R-3 forbids.
+    Only that one list is read: no seed data is interpreted and no input is validated,
+    because interpreting a scenario's declared contents would be exactly the added
+    validation rule R-3 forbids.
 
     Args:
         path: The scenario definition to read.
 
     Returns:
-        The table names, in the scenario's own order - which becomes the
-        report's table order.
+        The table names, in the scenario's own order - which becomes the report's table
+            order.
 
     Raises:
-        ScenarioFileError: PyYAML is unavailable, or the file is missing,
-            unreadable, not a mapping, carries neither key or both, or
-            its list is empty or holds something that is not a table
-            name.
+        ScenarioFileError: PyYAML is unavailable, or the file is missing, unreadable,
+            not a mapping, carries neither key or both, or its list is empty or holds
+            something that is not a table name.
         UnknownTableError: The list names something that is not a table.
         TableNotInScopeError: The list names an out-of-scope table.
     """
@@ -2355,9 +1668,8 @@ def scenario_tables(path: Path | str) -> tuple[str, ...]:
     except OSError as exc:
         raise ScenarioFileError(
             f"could not read the scenario definition {source}: {exc}. The "
-            f"canonical invocation passes a path such as "
-            f"harness/scenarios/clean_batch_gl.yaml "
-            f"[harness/docker-compose.yml:L349-L350]."
+            f"canonical invocation passes a scenario definition path; see "
+            f"harness/docker-compose.yml."
         ) from exc
 
     try:
@@ -2437,13 +1749,12 @@ def resolve_tables(
         scenario_file: A scenario definition to read the list from.
 
     Returns:
-        The table names in the order to report them, or `None` when
-        neither selector was given - which asks `diff_trees` for the
-        union of what the two trees hold.
+        The table names in the order to report them, or `None` when neither selector was
+            given - which asks `diff_trees` for the union of what the two trees hold.
 
     Raises:
-        ValueError: Both selectors were given, or `tables` is empty or
-            names a table twice.
+        ValueError: Both selectors were given, or `tables` is empty or names a table
+            twice.
         ScenarioFileError: The scenario definition is unusable.
         UnknownTableError: A named table is not a table of the schema.
         TableNotInScopeError: A named table is out of scope.
@@ -2473,21 +1784,10 @@ def resolve_tables(
     return None
 
 
-#  THE REPORT
-#  BYTE-DETERMINISTIC for a given pair of inputs (rule R-6). No timestamp,
-#  no host name, no process id, no absolute path, no elapsed time, no tool
-#  version, and no dependence on dictionary or filesystem iteration order:
-#  every collection was sorted once at construction, and the table order
-#  is the caller's or ASCII.
-#  EVIDENCE-GRADE (rule R-5). The per-scenario diff evidence is built
-#  from this output, so every line names its table, its primary-key value
-#  where it has one, and its column by NAME and by 1-based ORDINAL.
+# BYTE-DETERMINISTIC for a given pair of inputs (rule R-6).
 
-# The report's finding labels. Fixed strings, so the report is greppable
-# and a downstream document can quote them. `missing_in_python` and
-# `missing_in_cobol` are deliberately DIFFERENT words rather than one word
-# with a direction argument: "the Python run created a row the COBOL run
-# did not" is a materially different finding from the reverse.
+# The report's finding labels. Fixed strings, so the report is greppable and a
+# downstream document can quote them.
 _F_TABLE_MISSING_PYTHON: Final[str] = "missing_table_in_python"
 _F_TABLE_MISSING_COBOL: Final[str] = "missing_table_in_cobol"
 _F_COLUMNS: Final[str] = "columns"
@@ -2517,16 +1817,12 @@ def _first_column_difference(
 ) -> str:
     """Describe the first position at which two column lists differ.
 
-    Naming the first disagreement keeps a 169-column mismatch to one
-    readable line instead of two lists of 169 names.
-
     Args:
         cobol: The oracle's column list.
         python: The migrated side's column list.
 
     Returns:
-        A rendered description, or the empty string when the lists are
-        equal.
+        A rendered description, or the empty string when the lists are equal.
     """
     for position in range(max(len(cobol), len(python))):
         left = cobol[position] if position < len(cobol) else None
@@ -2579,9 +1875,8 @@ def _render_value_difference(
     cobol = f"{LABEL_COBOL}={_render_value(value.cobol)}"
     python = f"{LABEL_PYTHON}={_render_value(value.python)}"
     if value.type_mismatch:
-        # Both types named, because a type mismatch means the two dumps
-        # were produced by inconsistent serialisation - a real defect, not
-        # a rendering quirk.
+        # Both types named, because a type mismatch means the two dumps were produced by
+        # inconsistent serialisation - a real defect, not a rendering quirk.
         cobol = f"{cobol} ({type(value.cobol).__name__})"
         python = f"{python} ({type(value.python).__name__})"
         return _join(
@@ -2606,16 +1901,11 @@ def render_table(
 ) -> tuple[str, ...]:
     """Render one table's findings as report lines.
 
-    The order is fixed: the structural findings first - a one-sided
-    table, a column mismatch, a row-count difference - then
-    `missing_in_python`, then `missing_in_cobol`, then the value
-    differences. Keys ascend; columns follow schema ordinal order.
-
     Args:
         diff: The table's findings.
-        max_differences: How many DETAIL lines to print before
-            truncating. The structural headline is never truncated, and
-            truncation never changes the exit code.
+        max_differences: How many DETAIL lines to print before truncating. The
+            structural headline is never truncated, and truncation never changes the
+            exit code.
 
     Returns:
         The lines, without newlines. Empty when the table agrees.
@@ -2626,8 +1916,8 @@ def render_table(
     table = diff.table
     lines: list[str] = []
 
-    # 1. STRUCTURAL FINDINGS. Never truncated: at most three lines, and
-    #    they are the headline a reader needs before any detail.
+    # 1. STRUCTURAL FINDINGS. Never truncated: at most three lines, and they are the
+    # headline a reader needs before any detail.
     if not diff.in_python:
         lines.append(
             _join(
@@ -2674,10 +1964,8 @@ def render_table(
             )
         )
     if diff.key_types_differ:
-        # The alignment column itself was serialised differently, so no
-        # key could be shared and every row below is reported one-sided.
-        # Naming both types here is what makes that legible; the rows are
-        # still NOT paired, because pairing them would be coercion.
+        # The alignment column itself was serialised differently, so no key could be
+        # shared and every row below is reported one-sided.
         lines.append(
             _join(
                 table,
@@ -2688,18 +1976,8 @@ def render_table(
             )
         )
 
-    # 2. DETAIL FINDINGS, capped. The cap exists so that a catastrophic
-    #    mismatch cannot produce an unusable megabyte; the notice always
-    #    carries the TRUE total, and the exit code is unaffected.
-    #
-    #    THE PRIMARY KEYS AND VALUES BELOW ARE ACCOUNTING DATA, and they
-    #    stay. They are the mandated evidence (Agent Action Plan section
-    #    0.8.5), so the disclosure risk is answered by the report file's
-    #    0600 mode and by `summarise` standing in for this rendering on
-    #    stdout - see the docstring of `_render_value_difference` and THE
-    #    OPERATOR SUMMARY above `summarise`. The cap is NOT a security
-    #    control and must not be mistaken for one: it bounds size, not
-    #    exposure.
+    # 2. DETAIL FINDINGS, capped. The cap exists so that a catastrophic mismatch cannot
+    # produce an unusable megabyte.
     budget = max(max_differences, 0)
     shown = 0
     key_label = f"{diff.primary_key}="
@@ -2762,14 +2040,11 @@ def render(
 
     Args:
         diff: The comparison.
-        max_differences: How many detail lines per table to print before
-            truncating.
+        max_differences: How many detail lines per table to print before truncating.
 
     Returns:
-        THE EMPTY STRING when the two trees are identical - Agent Action
-        Plan section 0.8.5: "the diff must be empty", so the pass case is
-        zero bytes, not a banner. Otherwise the report, one finding per
-        line, each line terminated with a single LF.
+        THE EMPTY STRING when the two trees are identical - Agent Action Plan section
+            0.8.5.
     """
     lines: list[str] = []
     for table in diff.tables:
@@ -2781,74 +2056,23 @@ def render(
     return "".join(f"{line}\n" for line in lines)
 
 
-#  WRITING THE REPORT TO A FILE
-#  The composed layout writes $ACAS_OUT/<scenario>/diff.txt, which is the
-#  path the file specification for this module names and the path the
-#  per-scenario diff evidence will cite.
-#  ON A PASS A ZERO-BYTE FILE IS WRITTEN. That is a deliberate choice
-#  between the two the specification offers, and it is documented here and
-#  in the CLI epilogue so that the scenario tests can assert it: the
-#  evidence document needs to distinguish "compared, and identical" from
-#  "never compared", and an existing empty file says the first while an
-#  absent file says nothing at all.
+# The composed layout writes $ACAS_OUT/<scenario>/diff.txt, which is the path the file
+# specification for this module names and the path the per-scenario diff evidence will
+# cite.
 
-# The temporary name the report is written under before os.replace moves
-# it into place, in the SAME directory as its target so the replace is
-# atomic. Matches the convention of both producers
-# [harness/dump_tables.py:L1677-L1678].
+# The temporary name the report is written under before os.replace moves it into place,
+# in the SAME directory as its target so the replace is atomic.
 _TEMP_SUFFIX: Final[str] = ".txt.tmp"
 
-# ---------------------------------------------------------------------------
-#  SECURE OUTPUT  (CWE-59 symlink following, CWE-367 TOCTOU, CWE-312
-#  cleartext storage, CWE-732 over-permissive files)
-#
-#  The report is the most concentrated accounting data this harness produces.
-#  It does not hold a whole table; it holds precisely the values that DIFFER,
-#  each one beside its primary key, its column name and which side produced
-#  it - and every one of them is a real customer balance, invoice figure or
-#  ledger amount. `_assert_writable` already refuses to write it into the
-#  read-only checkout, but that says nothing about who may READ it once
-#  written, and the composed layout writes it into a bind mount shared
-#  between two Compose services [harness/docker-compose.yml:L689].
-#
-#  * 0600 at creation AND re-applied with `fchmod`, so a permissive process
-#    umask cannot widen it.
-#  * `O_EXCL | O_NOFOLLOW` on the staging name, because `Path.open("w")`
-#    follows a symlink and truncates its target: anything able to create
-#    `.diff.txt.tmp` in the output directory first could otherwise have this
-#    module truncate a file of its choosing and then read the report written
-#    in its place.
-#  * A stale staging file removed first, so `O_EXCL` cannot turn a previous
-#    crash into a permanent failure.
-#
-#  WHAT IS NOT CHANGED: the BYTES. The same `report` string, the same
-#  `os.replace`, and A PASS STILL LEAVES A ZERO-BYTE FILE - the deliberate
-#  choice documented above, which tests/scenarios/* assert. The report keeps
-#  its FULL detail, because it IS the mandated evidence that
-#  docs/migration/scenario-diff-evidence.md cites (Agent Action Plan section
-#  0.8.5) and an operator needs the actual differing values to interrogate
-#  the compiled oracle (rule R-6). Protecting the file is the fix; censoring
-#  it would destroy the deliverable. What IS censored is stdout - see
-#  THE OPERATOR SUMMARY below.
-#
-#  Duplicated rather than imported, for the reasons given in
-#  [harness/normalize.py:L836-L869]: the three utilities are self-contained,
-#  Agent Action Plan section 0.3.1 lists no shared helper module, and section
-#  0.4.3 forbids `harness/*` from importing an `acas_posting` module.
-# ---------------------------------------------------------------------------
 
-#: Mode the report is created with and left at.
 _OUTPUT_FILE_MODE: Final[int] = 0o600
 
-#: Mode a directory this module creates is created with.
 _OUTPUT_DIR_MODE: Final[int] = 0o700
 
-#: The umask `main` installs, so nothing this process creates is readable by
-#: group or other.
 _OUTPUT_UMASK: Final[int] = 0o077
 
-#: `O_NOFOLLOW` where the platform has it; 0 leaves the flag word unchanged
-#: rather than making the module unimportable where it is absent.
+#: `O_NOFOLLOW` where the platform has it; 0 leaves the flag word unchanged rather than
+#: making the module unimportable where it is absent.
 _O_NOFOLLOW: Final[int] = getattr(os, "O_NOFOLLOW", 0)
 
 
@@ -2856,26 +2080,23 @@ def _write_text_securely(text: str, target: Path, staging: Path) -> None:
     """Write `text` to `target` atomically, privately, and without following.
 
     Args:
-        text: The exact bytes-to-be. May be EMPTY, which is the pass case
-            and must produce a zero-byte file rather than no file.
-        target: The final path. Replaced atomically. `os.replace` does not
-            follow a symlink at this name either: a symlinked destination is
-            REPLACED, so its target cannot be written through.
-        staging: The temporary name, which MUST share `target`'s directory
-            for the replace to be atomic.
+        text: The exact bytes-to-be. May be EMPTY, which is the pass case and must
+            produce a zero-byte file rather than no file.
+        target: The final path. Replaced atomically. `os.replace` does not follow a
+            symlink at this name either.
+        staging: The temporary name, which MUST share `target`'s directory for the
+            replace to be atomic.
 
     Raises:
         OSError: The staging file could not be created, written or moved.
-            Nothing is left behind - the staging file is removed on every
-            failure path - and the caller wraps this in its own error type.
     """
     staging.unlink(missing_ok=True)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_NOFOLLOW
     descriptor = os.open(staging, flags, _OUTPUT_FILE_MODE)
     try:
-        # Re-applied explicitly, because the mode passed to `os.open` is
-        # masked by the process umask. `fchmod` on the open descriptor
-        # cannot be redirected to another file.
+        # Re-applied explicitly, because the mode passed to `os.open` is masked by the
+        # process umask. `fchmod` on the open descriptor cannot be redirected to another
+        # file.
         os.fchmod(descriptor, _OUTPUT_FILE_MODE)
         with os.fdopen(
             descriptor, "w", encoding="utf-8", newline="\n"
@@ -2910,9 +2131,7 @@ def _make_output_directory(directory: Path) -> None:
     """Create `directory` and its parents, private to their owner.
 
     Args:
-        directory: The directory to create. An existing directory's mode is
-            left exactly as it is, because an output root is frequently a
-            bind mount whose permissions belong to whoever created it.
+        directory: The directory to create.
 
     Raises:
         OSError: The directory could not be created.
@@ -2951,36 +2170,16 @@ def _assert_writable(target: Path, env: Mapping[str, str]) -> None:
 def invalidate_report(target: Path) -> None:
     """Remove any report already at `target`, before comparing anything.
 
+    So the accepted output is invalidated the moment the path is known and before a
+    single dump is read. Afterwards there are exactly three states, and each says only
+    what is true.
+
     Args:
         target: The report path this run will write.
 
     Raises:
-        ReportPathError: An existing report could not be removed. Fatal
-            rather than ignored: proceeding would leave the stale artifact
-            in place, which is exactly what this function exists to
-            prevent.
-
-    THIS IS NOT TIDINESS, IT IS THE PASS CONDITION.
-
-    A passing run writes a ZERO-BYTE report on purpose - the choice is
-    documented above and `tests/scenarios/*` assert it, because the
-    evidence document has to distinguish "compared, and identical" from
-    "never compared", and an existing empty file says the first while an
-    absent file says nothing at all.
-
-    That choice has a consequence. Every failure path in `main` returns
-    `EX_ERROR` BEFORE `write_report` is reached: a missing tree, an
-    unmarked tree, a malformed dump, a bad selector. If a previous PASSING
-    run left its zero-byte file behind, the artifact that survives such a
-    failure is indistinguishable from proof that this run passed - and it
-    is the artifact docs/migration/scenario-diff-evidence.md is built
-    from. The exit code says 2 and the evidence on disk says 0.
-
-    So the accepted output is invalidated the moment the path is known and
-    before a single dump is read. Afterwards there are exactly three
-    states, and each says only what is true: a zero-byte file means this
-    run compared and found nothing; a non-empty file means this run found
-    differences; NO file means this run did not complete a comparison.
+        ReportPathError: An existing report could not be removed. Fatal rather than
+            ignored.
     """
     try:
         target.unlink(missing_ok=True)
@@ -2989,9 +2188,8 @@ def invalidate_report(target: Path) -> None:
             f"could not remove the previous report {target} before "
             f"comparing: {exc}. It has to go first: a passing run leaves a "
             f"ZERO-BYTE file, so a stale one surviving an error path would "
-            f"be indistinguishable from proof that this run passed - and "
-            f"docs/migration/scenario-diff-evidence.md is built from that "
-            f"file."
+            f"be indistinguishable from proof that this run passed - and the "
+            f"migration's scenario diff evidence is built from that file."
         ) from exc
 
 
@@ -3035,12 +2233,8 @@ def _fallback_report_path() -> Path:
 def write_report(report: str, path: Path | str) -> Path:
     """Write the report to a file, atomically and privately.
 
-    The file is created mode 0600 through a descriptor opened `O_EXCL` and
-    `O_NOFOLLOW`. See the SECURE OUTPUT commentary above
-    `_write_text_securely`: the report holds precisely the values that
-    differ, each beside its primary key, and the composed layout writes it
-    into a shared bind mount. The BYTES are unchanged, and a pass still
-    leaves a ZERO-BYTE file rather than no file.
+    The file is created mode 0600 through a descriptor opened `O_EXCL` and `O_NOFOLLOW`.
+    See the SECURE OUTPUT commentary above `_write_text_securely`.
 
     Args:
         report: The rendered report; the empty string on a pass.
@@ -3063,9 +2257,9 @@ def write_report(report: str, path: Path | str) -> Path:
 
     temporary = target.parent / f"{TEMP_PREFIX}{target.stem}{_TEMP_SUFFIX}"
     try:
-        # `report` already ends with a newline when it is non-empty, and is
-        # empty on a pass - so a passing run leaves a zero-byte file rather
-        # than a file containing a bare newline.
+        # `report` already ends with a newline when it is non-empty, and is empty on a
+        # pass - so a passing run leaves a zero-byte file rather than a file containing
+        # a bare newline.
         _write_text_securely(report, target, temporary)
     except OSError as exc:
         raise ReportPathError(
@@ -3074,53 +2268,6 @@ def write_report(report: str, path: Path | str) -> Path:
     return target
 
 
-# ---------------------------------------------------------------------------
-#  THE OPERATOR SUMMARY  (CWE-312 cleartext storage of sensitive data)
-#
-#  `render` puts every differing VALUE on stdout. In the composed recipe
-#  stdout is a container log: collected, forwarded, retained, and readable by
-#  anything with access to the log stream - a destination with none of the
-#  protections just applied to the report file. The values are customer
-#  balances and invoice figures, so that is a disclosure.
-#
-#  THE SPLIT, and why it is this way round:
-#
-#  * The FILE keeps every value. It is the mandated evidence that
-#    docs/migration/scenario-diff-evidence.md cites, an operator needs the
-#    actual figures to interrogate the compiled oracle (rule R-6), and it is
-#    now 0600 in a directory this module creates 0700.
-#  * STDOUT gets a value-free summary that names the table, the finding kinds,
-#    the counts and the COLUMNS, and points at the protected file. Every one
-#    of those is frozen public metadata - the table and column names are in
-#    the committed data_dictionary/acas_posting_dictionary.json already - so
-#    the summary tells an operator exactly where to look while disclosing
-#    nothing.
-#  * WHEN NO FILE WAS ASKED FOR, one is still written: `_fallback_report_path`
-#    creates a private directory (0700 by construction, from `tempfile.mkdtemp`)
-#    and the report goes there, 0600, exactly as `--out` would have put it.
-#    STDOUT NEVER CARRIES THE VALUES - not on any path, and there is no flag
-#    that makes it. The trade this module used to make, "no file, so keep the
-#    full report on stdout because losing the finding would be worse than the
-#    disclosure", was a false choice: `summarise` already carries the whole
-#    FINDING - which tables, which finding kinds, which columns, how many rows -
-#    and only the differing VALUES stay behind, now in a file that always
-#    exists. If even the fallback cannot be written, the summary is printed
-#    WITHOUT a pointer and the failure is reported on stderr; the verdict and
-#    the exit code are unchanged.
-#  * THE POINTER IS BOUND TO THE BYTES. The summary names the report path AND
-#    its SHA-256, so the file a reader opens is provably the file this verdict
-#    was rendered from (rule R-6), and the same digest can be quoted in
-#    docs/migration/scenario-diff-evidence.md.
-#
-#  WHAT IS NOT CHANGED: `render`, `render_table` and
-#  `_render_value_difference` are untouched, so the report bytes and the
-#  exit codes are exactly what they were. The comparison itself reads no
-#  differently: `diff_trees` still compares values EXACTLY, and the summary
-#  is computed from the finished `TreeDiff` rather than replacing any part of
-#  it. Nothing branches on the summary.
-# ---------------------------------------------------------------------------
-
-#: Stands in for the report body on stdout when the report went to a file.
 _SUMMARY_HEADER: Final[str] = "difference(s) found; values withheld from"
 
 
@@ -3150,10 +2297,8 @@ def summarise(
             file, or when it could not be read back.
 
     Returns:
-        The summary, one line per differing table plus a header and a
-        pointer, each line terminated with a single LF. THE EMPTY STRING
-        when the comparison found nothing, so the pass case stays at zero
-        bytes on stdout exactly as before.
+        The summary, one line per differing table plus a header and a pointer, each line
+            terminated with a single LF.
     """
     if diff.is_empty:
         return ""
@@ -3161,8 +2306,6 @@ def summarise(
     lines: list[str] = []
     for table in diff.differing:
         parts: list[str] = []
-        # The same structural findings render_table leads with, in the same
-        # order, minus nothing: a row COUNT is not a value.
         if not table.in_python:
             parts.append(
                 f"{_F_TABLE_MISSING_PYTHON} "
@@ -3199,9 +2342,9 @@ def summarise(
                 f"{_F_MISSING_COBOL}={len(table.missing_in_cobol)}"
             )
         if table.value_differences:
-            # The COLUMN names, de-duplicated and in first-seen order - the
-            # single most useful pointer into the protected file, and frozen
-            # schema metadata rather than data.
+            # The COLUMN names, de-duplicated and in first-seen order - the single most
+            # useful pointer into the protected file, and frozen schema metadata rather
+            # than data.
             columns: list[str] = []
             for row in table.value_differences:
                 for value in row.values:
@@ -3238,19 +2381,12 @@ def summarise(
     return "".join(f"{line}\n" for line in (header, *lines))
 
 
-# ---------------------------------------------------------------------------
-#  THE COMMAND LINE
-#  Every diagnostic goes to STDERR. stdout carries the verdict and nothing
-#  else, so that a passing run leaves stdout at zero bytes.
-#  `main` RETURNS an exit code and never calls sys.exit, so a test
-#  fixture can drive it in process and inspect the code - including
-#  argparse's own usage failures, which are caught and mapped to exit 2
-#  rather than allowed to escape as SystemExit.
+# Every diagnostic goes to STDERR. stdout carries the verdict and nothing else, so that
+# a passing run leaves stdout at zero bytes.
 
 _EPILOGUE: Final[str] = f"""\
 the two trees
-  positionally, the form the canonical recipe uses
-  [harness/docker-compose.yml:L357]:
+  positionally, the form the recipe in harness/docker-compose.yml uses:
       {_PROG} /out/{LABEL_COBOL}.norm /out/{LABEL_PYTHON}.norm
   by name:
       {_PROG} --{LABEL_COBOL} DIR --{LABEL_PYTHON} DIR
@@ -3311,9 +2447,8 @@ scale and date text, so anything left is a real behavioural difference.
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser.
 
-    `allow_abbrev=False`, so `--out` and `--out-dir` can never be confused
-    with one another and no abbreviation of any option is silently
-    accepted.
+    `allow_abbrev=False`, so `--out` and `--out-dir` can never be confused with one
+    another and no abbreviation of any option is silently accepted.
 
     Returns:
         The parser.
@@ -3340,7 +2475,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             f"the two normalised trees, {LABEL_COBOL} first then "
             f"{LABEL_PYTHON} - the positional form the canonical recipe "
-            f"uses [harness/docker-compose.yml:L357]. Equivalent to "
+            f"in harness/docker-compose.yml uses. Equivalent to "
             f"--{LABEL_COBOL}/--{LABEL_PYTHON}."
         ),
     )
@@ -3488,9 +2623,8 @@ def _resolve_trees(
         env: The environment, for `$ACAS_OUT`.
 
     Returns:
-        The `cobol` tree, the `python` tree, the scenario name when the
-        composed layout was used, and the report path when one was asked
-        for or implied.
+        The `cobol` tree, the `python` tree, the scenario name when the composed layout
+            was used, and the report path when one was asked for or implied.
 
     Raises:
         ValueError: The forms were mixed, or one of them is incomplete.
@@ -3517,7 +2651,7 @@ def _resolve_trees(
         raise ValueError(
             f"no trees to compare. Give them positionally - "
             f"`{_PROG} /out/{LABEL_COBOL}.norm /out/{LABEL_PYTHON}.norm`, "
-            f"the form [harness/docker-compose.yml:L357] uses - or by name "
+            f"the form harness/docker-compose.yml uses - or by name "
             f"with --{LABEL_COBOL} and --{LABEL_PYTHON}, or let "
             f"--scenario NAME derive both from the canonical layout."
         )
@@ -3539,8 +2673,8 @@ def _resolve_trees(
                 f"tree then the {LABEL_PYTHON} tree; got "
                 f"{len(positional)}. The canonical form is "
                 f"`{_PROG} /out/{LABEL_COBOL}.norm "
-                f"/out/{LABEL_PYTHON}.norm` "
-                f"[harness/docker-compose.yml:L357]."
+                f"/out/{LABEL_PYTHON}.norm`, the form "
+                f"harness/docker-compose.yml uses."
             )
         return Path(positional[0]), Path(positional[1]), None, report
 
@@ -3586,19 +2720,15 @@ def _resolve_trees(
 def _describe_missing_tree(directory: Path) -> str:
     """Suggest the sibling tree an operator probably meant.
 
-    The two normalised suffixes both occur in this repository - the
-    composed layout appends `.normalized`, the committed recipe passes
-    `.norm` - so a missing directory is most often the other spelling.
-    Naming it turns an exit 2 into an obvious fix, without this module
-    ever guessing which tree to compare (rule R-6: the verdict must never
-    be ambiguous about what was compared).
+    The two normalised suffixes both occur in this repository - the composed layout
+    appends `.normalized`, the committed recipe passes `.norm` - so a missing directory
+    is most often the other spelling.
 
     Args:
         directory: The directory that was not there.
 
     Returns:
-        A sentence naming the sibling that does exist, or the empty
-        string.
+        A sentence naming the sibling that does exist, or the empty string.
     """
     name = directory.name
     for suffix in NORMALIZED_SUFFIXES:
@@ -3613,8 +2743,8 @@ def _describe_missing_tree(directory: Path) -> str:
                 return (
                     f" {sibling} does exist: harness/normalize.py's "
                     f"composed layout writes `{NORMALIZED_SUFFIXES[0]}` "
-                    f"while the recipe at "
-                    f"[harness/docker-compose.yml:L352] passes "
+                    f"while the recipe in "
+                    f"harness/docker-compose.yml passes "
                     f"`{NORMALIZED_SUFFIXES[1]}` explicitly. Name the two "
                     f"trees directly rather than using --scenario, so it "
                     f"is unambiguous which pair was compared."
@@ -3625,12 +2755,12 @@ def _describe_missing_tree(directory: Path) -> str:
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command line and return the verdict as an exit code.
 
-    Never calls `sys.exit`, so a test fixture can drive it in process and
-    inspect the code - argparse's own usage failures included, which are
-    caught and mapped to exit 2 rather than allowed to escape.
+    Never calls `sys.exit`, so a test fixture can drive it in process and inspect the
+    code - argparse's own usage failures included, which are caught and mapped to exit 2
+    rather than allowed to escape.
 
     Args:
-        argv: The arguments; `sys.argv[1:]` when omitted.
+        argv: The arguments.
 
     Returns:
         `EX_IDENTICAL` (0) when the two trees are identical, and stdout is
@@ -3645,9 +2775,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         arguments = parser.parse_args(argv)
     except SystemExit as exc:
-        # argparse exits 0 for --help and 2 for a usage error. Both are
-        # returned rather than propagated, and a usage error is exit 2 -
-        # "the comparison could not be performed" - never exit 0.
+        # argparse exits 0 for --help and 2 for a usage error.
         code = exc.code
         if code is None or code == 0:
             return EX_IDENTICAL
@@ -3656,12 +2784,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     _QUIET = bool(arguments.quiet)
     env: Mapping[str, str] = os.environ
 
-    # Tightened HERE and not at import time. The report holds precisely the
-    # values that differ (CWE-312) and the composed layout writes it into a
-    # shared bind mount, so nothing this process creates should be group- or
-    # world-readable. At import time it would change the umask of any
-    # in-process caller that merely imported the module, which is a side
-    # effect a library has no business having.
+    # Tightened HERE and not at import time.
     os.umask(_OUTPUT_UMASK)
 
     if arguments.max_differences < 1:
@@ -3686,19 +2809,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         and arguments.scenario_file is None
         and not arguments.all_tables
     ):
-        # REFUSED, not defaulted to the union. Until this returned an error
-        # the canonical recipe could render a 22-table verdict that LOOKED
-        # like scenario evidence while comparing three tables the migration
-        # is not required to reproduce: [general/general.cbl:L656-L691]
-        # rewrites SYSTEM-REC, SYSDEFLT-REC and SYSTOT-REC to both stores on
-        # menu exit, and the Python cycle has no menu. Worse for rule R-6, a
-        # reader of the resulting evidence cannot tell which tables the
-        # scenario claimed - and a verdict whose scope is implicit is not a
-        # verdict.
+        # REFUSED, not defaulted to the union.
         print(
             f"{_PROG}: no table selector was given, so the scope of this "
             f"comparison is undefined. Bound it by the scenario:\n"
-            f"  --scenario-file harness/scenarios/<scenario>.yaml   "
+            f"  --scenario-file <scenario>.yaml                    "
             f"the protocol; the list comes from affected_tables\n"
             f"  --tables A,B                                       "
             f"an explicit list, for narrowing by hand\n"
@@ -3727,17 +2842,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             _assert_writable(report_path, env)
             # INVALIDATE THE ACCEPTED OUTPUT NOW, before a dump is read.
-            # Every failure below returns EX_ERROR without reaching
-            # write_report, and a passing run's artifact is a ZERO-BYTE
-            # file - so a stale one left in place would survive an error
-            # path looking exactly like proof that this run passed.
             invalidate_report(report_path)
         except ReportPathError as exc:
             print(f"{_PROG}: {exc}", file=sys.stderr)
             return EX_ERROR
 
-    # BOTH TREES MUST DECLARE THEMSELVES COMPLETE, and must agree about
-    # which scenario they belong to, before a byte of either is compared.
     manifests: tuple[dict[str, Any], dict[str, Any]] | None = None
     if arguments.allow_unmanifested:
         _progress(
@@ -3759,10 +2868,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return EX_ERROR
 
-        # A requested table that neither side ever captured is a harness
-        # malfunction, not a difference - and it must not be discovered
-        # halfway through as a missing file. The manifests say outright what
-        # was captured, so the mismatch is reported here, in full.
+        # A requested table that neither side ever captured is a harness malfunction,
+        # not a difference - and it must not be discovered halfway through as a missing
+        # file.
         if tables is not None:
             declared = set(manifest_tables(manifests[0])) & set(
                 manifest_tables(manifests[1])
@@ -3812,8 +2920,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             left, right, tables, allow_raw=bool(arguments.allow_raw)
         )
     except MissingTreeError as exc:
-        # The most dangerous input this module can be given, so the
-        # message says outright that it is not a pass.
+        # The most dangerous input this module can be given, so the message says
+        # outright that it is not a pass.
         print(f"{_PROG}: {exc}{_describe_missing_tree(left)}", file=sys.stderr)
         return EX_ERROR
     except (DiffStatesError, ValueError) as exc:
@@ -3830,10 +2938,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return EX_ERROR
 
     if diff.is_empty:
-        # THE PASS CONDITION. Not one byte on stdout: Agent Action Plan
-        # section 0.8.5 says "the diff must be empty", and a banner here
-        # would make an empty diff indistinguishable from a small one to
-        # anything reading stdout.
+        # THE PASS CONDITION. Not one byte on stdout.
         _progress(
             f"{_PROG}: identical - {len(diff.tables)} table(s) compared, "
             f"no difference"
@@ -3879,7 +2984,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"non-empty diff is a real behavioural difference, never an "
         f"artefact of the comparison (Agent Action Plan section 0.6.6): "
         f"interrogate the compiled oracle, and record the resolution in "
-        f"docs/migration/ambiguity-resolutions.md."
+        f"the migration's ambiguity register."
     )
     return EX_DIFFERENT
 

@@ -1,17 +1,14 @@
-"""The `maps03-ws` date-conversion interface record.
+"""The `maps03-ws` date-conversion interface record [copybooks/wsmaps03.cob:L6-L30].
 
 Fourteen bytes: ten characters of date text plus a signed 32-bit binary day
-number. Declared at [copybooks/wsmaps03.cob:L6-L30] and brought into every
-in-scope posting program by `copy "wsmaps03.cob"`.
+number. This is the block every caller of the date module fills in and reads back,
+so its layout is the whole interface between a program and
+`acas_posting.dates`.
 
-This module DECLARES that record and does nothing else. It holds no date logic,
-no arithmetic, no database access and no control flow. The six dataclasses
-below are the layout, and every attribute's storage metadata is looked up in
-the generated data dictionary rather than typed by hand. Section 0.4.1.3 gives
-this file its row verbatim - "`acas_posting/records/maps03.py` | CREATE |
-`copybooks/wsmaps03.cob` | The date-conversion interface block passed to the
-date module" - and R-3 adds that the record modules mirror their copybooks
-field for field with nothing added.
+The UK redefine over the text field is load-bearing - `u-days` at 1:2, a `/` at
+3, `u-month` at 4:2, a `/` at 6 and `u-year` at 7:4
+[copybooks/wsmaps03.cob:L8-L15] - because the conversion writes only the digit
+positions and relies on the separators already being there.
 
 WHERE THE BEHAVIOUR LIVES - NOT HERE
 ------------------------------------
@@ -342,9 +339,8 @@ from typing import ClassVar, Final
 from acas_posting.cobol.field import FieldDescriptor
 
 __all__: Final[tuple[str, ...]] = (
-    # The 01-level record first, then its readings in name order. Sorted with
-    # `sorted()` so the order is mechanical rather than a matter of taste:
-    # "Maps03Ws" precedes the "MapsU..." names because "0" sorts before "U".
+    # The 01-level record first, then its readings in name order. Sorted with `sorted()`
+    # so the order is mechanical rather than a matter of taste.
     "Maps03Ws",
     "MapsUIntl",
     "MapsUIntlYear",
@@ -354,79 +350,44 @@ __all__: Final[tuple[str, ...]] = (
 )
 
 
-#  THE DICTIONARY LOOKUP  (RULE R-5)
-
-# The 01-level record name, verbatim from [copybooks/wsmaps03.cob:L6] - LOWER
-# case, because that is how the copybook writes it and dictionary keys carry
-# names exactly as the frozen source spells them. It is the record half of
-# every key below, and the argument
-# `acas_posting.dictionary.loader.entries_for_copybook_record` takes.
+# The 01-level record name, verbatim from [copybooks/wsmaps03.cob:L6] - LOWER case,
+# because that is how the copybook writes it and dictionary keys carry names exactly as
+# the frozen source spells them.
 _COPYBOOK_RECORD: Final[str] = "maps03-ws"
 
 
 def _descriptor(field_name: str) -> FieldDescriptor:
     """Return the dictionary-backed descriptor for one field of this record.
 
-    Composes the qualified key and delegates. It holds no metadata of its own,
-    which is the whole point: every storage component comes from the generated
-    dictionary (rule R-5), and a bare field name is never used as a key.
+    Composes the qualified key and delegates. It holds no metadata of its own, which is
+    the whole point: every storage component comes from the generated dictionary (rule
+    R-5), and a bare field name is never used as a key.
 
     Args:
-        field_name: The field's COBOL name verbatim - `"u-date"`, `"u-UK"`,
-            `"u-intl-days"` - or `"filler#<line>"` for one of the seven
-            fillers, which repeat and are therefore keyed by the line that
-            declares them.
+        field_name: The field's COBOL name verbatim - `"u-date"`, `"u-UK"`, `"u-intl-
+            days"` - or `"filler#<line>"` for one of the seven fillers, which repeat and
+            are therefore keyed by the line that declares them.
 
     Returns:
         That field's descriptor, carrying both its dictionary key and its
-        `copybooks/wsmaps03.cob:L<n>` locator as provenance. Memoised by
-        `FieldDescriptor.from_dictionary_key`, so a repeated lookup of one key
-        returns the same frozen object.
+            `copybooks/wsmaps03.cob:L<n>` locator as provenance.
     """
     return FieldDescriptor.from_dictionary_key(
         f"{_COPYBOOK_RECORD}.{field_name}"
     )
 
 
-# `u-date`'s declared character width, taken from its own descriptor rather
-# than typed here [copybooks/wsmaps03.cob:L7]. It gives a freshly built record
-# its declared text width instead of an empty string. Note what that starting
-# value is NOT: `maps03-ws` is a LINKAGE item in the date module
-# [common/maps04.cbl:L102-L109], so at run time the caller's own storage
-# supplies the content and this value is never what the date module reads.
+# `u-date`'s declared character width, taken from its own descriptor rather than typed
+# here [copybooks/wsmaps03.cob:L7].
 _DATE_TEXT_WIDTH: Final[int] = _descriptor("u-date").byte_length
 
 
-#  REDEFINES ADDRESSING  -  COBOL STORAGE MECHANICS, NOT DATE LOGIC
-#  `u-UK`, `u-USA` and `u-Intl` each `redefines u-date`, so the bytes they name
-#  ARE `u-date`'s bytes. `move 21 to u-days` writes offsets 1 and 2 of the ten
-#  characters and touches nothing else; `if u-cc not numeric` tests offsets 7
-#  and 8 of those same characters [common/maps04.cbl:L141-L146]. Python has no
-#  storage aliasing, so that addressing is reproduced by reference
-#  modification over `Maps03Ws.u_date` - the views declared on the record
-#  below.
-#
-#  These three helpers are the fixed-width mechanics addressing needs, and
-#  nothing more. No business rule lives in them: they do not know what a date
-#  is, which of the three readings is in play, or whether any value is valid.
-#
-#  THEY ARE LOCAL BY NECESSITY, NOT BY PREFERENCE. Section 0.4.3 permits this
-#  module exactly two package imports - `acas_posting.cobol.field` and
-#  `acas_posting.dictionary.loader` - so `acas_posting.cobol.move`, which owns
-#  the general MOVE verb, is out of reach from the record layer, and importing
-#  it would stop this module being a leaf. `acas_posting/dates.py` carries the
-#  same three helpers for its own working-storage records; that duplication is
-#  deliberate and is recorded here rather than removed by an import the
-#  layering forbids.
+# `u-UK`, `u-USA` and `u-Intl` each `redefines u-date`, so the bytes they name ARE
+# `u-date`'s bytes.
 
 
 def _alphanumeric_move(source: str, width: int) -> str:
-    """Reproduce a COBOL `MOVE` into an alphanumeric `PIC X(width)` field.
-
-    An alphanumeric move is left-justified: a short sending field is padded on
-    the right with spaces and a long one is truncated on the right. The
-    receiving field is exactly `width` characters afterwards, always.
-    """
+    """Reproduce a COBOL `MOVE` into an alphanumeric `PIC X(width)` field."""
     if len(source) >= width:
         return source[:width]
     return source + " " * (width - len(source))
@@ -435,10 +396,7 @@ def _alphanumeric_move(source: str, width: int) -> str:
 def _ref_mod(field_text: str, offset: int, length: int) -> str:
     """Reproduce COBOL reference modification `field (offset:length)`.
 
-    `offset` is 1-based, the way COBOL writes it. The declared field is
-    materialised at its full width first, so that reading past the end of a
-    short Python string yields the spaces a real COBOL field would hold there
-    rather than a short slice. The result is exactly `length` characters.
+    `offset` is 1-based, the way COBOL writes it.
     """
     start = offset - 1
     required_width = max(len(field_text), start + length)
@@ -452,10 +410,8 @@ def _poke(
     """Reproduce a COBOL `MOVE` into a `REDEFINES` sub-field of a group.
 
     Writes `value` into the `length` characters at 1-based `offset` of a
-    `width`-character group and leaves every other character exactly as it
-    was. That is how a component move keeps the separators: it overwrites the
-    digit positions and never touches offsets 3 and 6 of the UK reading, or 5
-    and 8 of the International one.
+    `width`-character group and leaves every other character exactly as it was. That is
+    how a component move keeps the separators.
     """
     start = offset - 1
     materialised = _alphanumeric_move(base_text, width)
@@ -463,115 +419,41 @@ def _poke(
     return materialised[:start] + stored + materialised[start + length:]
 
 
-#  THE RECORD  (Agent Action Plan section 0.4.3 fixes the class name)
-
-
 @dataclass(slots=True)
 class Maps03Ws:
-    """`01  maps03-ws.` [copybooks/wsmaps03.cob:L6] - the date record.
+    """`01 maps03-ws.` [copybooks/wsmaps03.cob:L6] - the date record.
 
-    The record every in-scope posting program obtains by `copy "wsmaps03.cob"`
-    and hands over by `call "maps04" using maps03-ws`. Fourteen bytes: ten
-    characters of date text, then a four-byte binary day number. The date
-    module declares the same fourteen bytes as `Mapa03-WS` with `A-*` field
-    names [common/maps04.cbl:L109-L120]; see this module's docstring for that
-    divergence, which is recorded and not harmonised (rule R-4).
-
-    Only two of the five items the `01` group declares hold storage of their
-    own. The other three - `u-UK`, `u-USA` and `u-Intl` - each `redefines
-    u-date`, so they are alternative readings of the ten characters `u_date`
-    already holds; they are modelled by `MapsUUk`, `MapsUUsa` and `MapsUIntl`
-    and are attributes of nothing. All five appear in `FIELDS`, in declaration
-    order.
-
-    MUTABLE, and not as a matter of style. A COBOL linkage record is passed by
-    reference and the date module writes into it selectively - which is exactly
-    what anomaly #16 is about. A frozen record, or an entry point that returned
-    a new object, would hide the absence of a write behind an apparently fresh
-    value. There is no post-initialisation hook and no checking of any value
-    (rule R-3): this record must be able to hold the malformed text the COBOL
-    can hold.
-
-    THE REDEFINITION VIEWS. Twelve read/write views address the components the
-    three readings name, over the ten characters `u_date` holds: `u_days`,
-    `u_month`, `u_year`, `u_cc` and `u_yy` for the UK reading; `u_usa_month`
-    and `u_usa_days` for the USA reading; `u_intl_year`, `u_intl_cc`,
-    `u_intl_yy`, `u_intl_month` and `u_intl_days` for the International one.
-    Each carries `str`, because a zoned DISPLAY item can hold characters that
-    are not digits and the date module tests exactly that
-    [common/maps04.cbl:L140-L146]. Reading one materialises the field at its
-    declared width first, so a short or empty `u_date` reads as the spaces a
-    real COBOL field would hold; writing one overwrites only its own
-    characters and leaves the separators alone, as a `MOVE` into a `REDEFINES`
-    sub-field does. The section comment above the views records why they are
-    part of the layout rather than of `acas_posting/dates.py`.
+    The record every in-scope posting program obtains by `copy "wsmaps03.cob"` and hands
+    over by `call "maps04" using maps03-ws`. Fourteen bytes: ten characters of date
+    text, then a four-byte binary day number.
 
     Attributes:
-        u_date: `u-date pic x(10)` [copybooks/wsmaps03.cob:L7]. The date text,
-            ten characters. Which of the three readings applies to a given
-            value is the calling program's business; `acas_posting/dates.py`
-            owns every conversion (section 0.4.1.6).
-        u_bin: `u-bin binary-long` [copybooks/wsmaps03.cob:L30]. The binary day
-            number - a signed 32-bit integer, hence a Python `int` and never a
-            binary floating-point value (rule R-2). Its value after a REJECTED
-            date is an open question; see the note on the attribute below.
+        u_date: `u-date pic x(10)` [copybooks/wsmaps03.cob:L7]. The date text, ten
+            characters. Which of the three readings applies to a given value is the
+            calling program's business.
+        u_bin: `u-bin binary-long` [copybooks/wsmaps03.cob:L30]. The binary day number -
+            a signed 32-bit integer, hence a Python `int` and never a binary floating-
+            point value (rule R-2).
     """
 
-    #  Element 0 is the `01` group header itself, then the five items it
-    #  declares, in copybook declaration order. `u-UK`, `u-USA` and `u-Intl`
-    #  each carry `redefines == "u-date"`, straight from the dictionary entry
-    #  the copybook produced; nothing here states a `redefines` that the
-    #  copybook does not declare.
     FIELDS: ClassVar[tuple[FieldDescriptor, ...]] = (
-        _descriptor("maps03-ws"),  # 01 maps03-ws.               [:L6]  group
-        _descriptor("u-date"),  # 03 u-date  pic x(10)           [:L7]
-        _descriptor("u-UK"),  # 03 u-UK    redefines u-date      [:L8]  group
-        _descriptor("u-USA"),  # 03 u-USA   redefines u-date     [:L16] group
-        _descriptor("u-Intl"),  # 03 u-Intl  redefines u-date    [:L22] group
-        _descriptor("u-bin"),  # 03 u-bin   binary-long          [:L30]
+        _descriptor("maps03-ws"),
+        _descriptor("u-date"),
+        _descriptor("u-UK"),
+        _descriptor("u-USA"),
+        _descriptor("u-Intl"),
+        _descriptor("u-bin"),
     )
 
-    # u-date  pic x(10)  [copybooks/wsmaps03.cob:L7]
     u_date: str = " " * _DATE_TEXT_WIDTH
 
-    # u-bin   binary-long  [copybooks/wsmaps03.cob:L30]
-    # ANOMALY #16, RECORDED HERE AND SETTLED NOWHERE (rules R-4, R-6). The date module's own
-    # comments promise that a bad date comes back as zero - "Date errors returned as A-Bin equal
-    # zero" [common/maps04.cbl:L163] and "if dd/mm/ccyy is bad A-Bin = zero" [:L125] - but
-    # neither reject path writes this field: the six-part text test transfers to the exit
-    # [:L146], the calendar test does the same [:L154], and the exit stores nothing
-    # [:L188-L189]. The promise holds only because the known caller writes the zero itself,
-    # `move zero to u-bin` [copybooks/Proc-ACAS-Mapser-RDB.cob:L78], one line before its `call
-    # "maps04"` at [:L79].
-    # So AFTER A REJECTED DATE THIS FIELD IS NOT GUARANTEED TO BE ZERO: it holds whatever it
-    # held before the call, an open question section 0.6.8 leaves to the compiled program. The
-    # zero below only lets the record be built - it is not a pre-zeroing on any caller's behalf.
+    # u-bin binary-long [copybooks/wsmaps03.cob:L30] ANOMALY #16, RECORDED HERE AND
+    # SETTLED NOWHERE (rules R-4, R-6).
     u_bin: int = 0
 
-    # -- THE THREE READINGS, ADDRESSED  ------------------------------------
-    #
-    #  One view per component the copybook names under `u-UK`, `u-USA` and
-    #  `u-Intl`, in copybook declaration order within each reading. Each reads
-    #  or writes ITS OWN characters of `u_date` and no others, which is what
-    #  `redefines` means, and each declares its 1-based offset and length in
-    #  its docstring beside the copybook line that fixes them.
-    #
-    #  THE CARRIER IS `str`, DELIBERATELY. `u-days pic 99` is a zoned DISPLAY
-    #  item, so the two characters it names can hold text that is not a number
-    #  at all - which is the entire reason the date module tests six of them
-    #  for the NUMERIC class condition before converting any of them
-    #  [common/maps04.cbl:L140-L146]. A view returning `int` could not carry
-    #  `"2 "` and would silently repair the input the reject path exists to
-    #  reject (rules R-3 and R-4). The declared numeric metadata is not lost by
-    #  that choice: it is on each component's descriptor in the reading class's
-    #  `FIELDS`, where the dictionary put it.
-    #
-    #  NO VIEW DECIDES WHICH READING APPLIES, and none converts, validates,
-    #  normalises a separator or touches `u_bin`. That is `acas_posting/
-    #  dates.py`'s work, per section 0.4.1.6, and none of it is duplicated
-    #  here.
+    # One view per component the copybook names under `u-UK`, `u-USA` and `u-Intl`, in
+    # copybook declaration order within each reading.
 
-    #  u-UK  [copybooks/wsmaps03.cob:L8-L15]  -  DD/MM/CCYY
 
     @property
     def u_days(self) -> str:
@@ -595,10 +477,9 @@ class Maps03Ws:
     def u_year(self) -> str:
         """`u-year` group [copybooks/wsmaps03.cob:L13] - offset 7, length 4.
 
-        The group's four characters as one field. The date module declares the
-        same four as `A-CCYY pic 9(4)` [common/maps04.cbl:L116]; that
-        structural divergence is recorded in this module's docstring and not
-        harmonised (rule R-4).
+        The group's four characters as one field. The date module declares the same four
+        as `A-CCYY pic 9(4)` [common/maps04.cbl:L116]; that structural divergence is
+        recorded in this module's docstring and not harmonised (rule R-4).
         """
         return _ref_mod(self.u_date, 7, 4)
 
@@ -624,9 +505,9 @@ class Maps03Ws:
     def u_yy(self, value: str) -> None:
         self.u_date = _poke(self.u_date, 9, 2, value, _DATE_TEXT_WIDTH)
 
-    #  u-USA  [copybooks/wsmaps03.cob:L16-L21]  -  MM/DD. Declared by the
-    #  CALLER's copybook only; the date module has no such redefinition
-    #  [common/maps04.cbl:L111] and never addresses these two.
+    # u-USA [copybooks/wsmaps03.cob:L16-L21] - MM/DD. Declared by the CALLER's copybook
+    # only; the date module has no such redefinition [common/maps04.cbl:L111] and never
+    # addresses these two.
 
     @property
     def u_usa_month(self) -> str:
@@ -646,8 +527,6 @@ class Maps03Ws:
     def u_usa_days(self, value: str) -> None:
         self.u_date = _poke(self.u_date, 4, 2, value, _DATE_TEXT_WIDTH)
 
-    #  u-Intl  [copybooks/wsmaps03.cob:L22-L29]  -  CCYY/MM/DD. Caller's
-    #  copybook only, as above.
 
     @property
     def u_intl_year(self) -> str:
@@ -695,26 +574,17 @@ class Maps03Ws:
         self.u_date = _poke(self.u_date, 9, 2, value, _DATE_TEXT_WIDTH)
 
 
-#  THE UK READING  -  u-UK redefines u-date  -  DD/MM/CCYY
-#  `MapsUYear` is hoisted above `MapsUUk`, which declares it: a dataclass
-#  default is built by name at class-creation time, so the name has to exist
-#  first. Copybook order is otherwise untouched.
+# THE UK READING - u-UK redefines u-date - DD/MM/CCYY `MapsUYear` is hoisted above
+# `MapsUUk`, which declares it.
 
 
 @dataclass(slots=True)
 class MapsUYear:
-    """`05  u-year.` [copybooks/wsmaps03.cob:L13] - century and year, CCYY.
+    """`05 u-year.` [copybooks/wsmaps03.cob:L13] - century and year, CCYY.
 
-    A group of two two-digit items inside the UK reading, occupying offsets 7
-    to 10 of the date text. The class name is the PascalCase of the COBOL group
-    name `u-year` with the hyphen removed.
-
-    A GROUP is how the copybook splits these four bytes. The date module splits
-    the same four bytes differently, with `05 A-CCYY pic 9(4)` redefined into
-    `07 A-CC` and `07 A-Year` [common/maps04.cbl:L116-L119]. Both declarations
-    stand as written; see this module's docstring (rule R-4).
-
-    Declared widths: u-cc 2 + u-yy 2 = 4 characters.
+    A GROUP is how the copybook splits these four bytes. The date module splits the same
+    four bytes differently, with `05 A-CCYY pic 9(4)` redefined into `07 A-CC` and `07
+    A-Year` [common/maps04.cbl:L116-L119]. Both declarations stand as written.
 
     Attributes:
         u_cc: `u-cc pic 99` [copybooks/wsmaps03.cob:L14]. The century part.
@@ -722,138 +592,81 @@ class MapsUYear:
     """
 
     FIELDS: ClassVar[tuple[FieldDescriptor, ...]] = (
-        _descriptor("u-year"),  # 05 u-year                      [:L13] group
-        _descriptor("u-cc"),  # 07 u-cc  pic 99                  [:L14]
-        _descriptor("u-yy"),  # 07 u-yy  pic 99                  [:L15]
+        _descriptor("u-year"),
+        _descriptor("u-cc"),
+        _descriptor("u-yy"),
     )
 
-    # u-cc  pic 99  [copybooks/wsmaps03.cob:L14]
     u_cc: int = 0
 
-    # u-yy  pic 99  [copybooks/wsmaps03.cob:L15]
     u_yy: int = 0
 
 
 @dataclass(slots=True)
 class MapsUUk:
-    """`03  u-UK redefines u-date.` [copybooks/wsmaps03.cob:L8] - DD/MM/CCYY.
+    """`03 u-UK redefines u-date.` [copybooks/wsmaps03.cob:L8] - DD/MM/CCYY.
 
-    The UK reading of the ten characters `Maps03Ws.u_date` holds. The class
-    name is the PascalCase of the COBOL group name `u-UK` with the hyphen
-    removed; the mixed-case COBOL spelling is kept verbatim in the comments.
-
-    This is the one reading the date module itself declares - anonymously, as
-    `03 filler redefines A-Date.` [common/maps04.cbl:L111] - so it is the
-    reading that program's checks and conversion work in. The other two exist
-    only in the caller's copybook.
-
-    Declared widths: u-days 2 + filler 1 + u-month 2 + filler 1
-    + u-year (u-cc 2 + u-yy 2) = 10 characters.
-
-    Real callers write these components rather than the whole text: the menu
-    shell moves the year, month and day of the run date into `u-year`,
-    `u-month` and `u-days` [copybooks/Proc-ACAS-Mapser-RDB.cob:L74-L76], after
-    seeding the text with "00/00/0000"
-    [copybooks/Proc-ACAS-Mapser-RDB.cob:L73]. The two `filler` items at L10
-    and L12 are the "/" separators and get no attribute, because no COBOL
-    statement can name a FILLER.
+    Real callers write these components rather than the whole text: the menu shell moves
+    the year, month and day of the run date into `u-year`, `u-month` and `u-days`
+    [copybooks/Proc-ACAS-Mapser-RDB.cob:L74-L76], after seeding the text with
+    "00/00/0000" [copybooks/Proc-ACAS-Mapser-RDB.cob:L73].
 
     Attributes:
-        u_days: `u-days pic 99` [copybooks/wsmaps03.cob:L9]. Day of month, at
-            offsets 1 to 2.
-        u_month: `u-month pic 99` [copybooks/wsmaps03.cob:L11]. Month, at
-            offsets 4 to 5.
-        u_year: `u-year` [copybooks/wsmaps03.cob:L13]. The century-and-year
-            group at offsets 7 to 10, held as one `MapsUYear`. It is a group
-            and not an elementary item, so it is a nested record here rather
-            than a number - and that is one half of the structural divergence
-            this module's docstring records, the date module declaring the same
-            four bytes as `A-CCYY pic 9(4)` redefined into `A-CC` and `A-Year`
-            [common/maps04.cbl:L116-L119].
+        u_days: `u-days pic 99` [copybooks/wsmaps03.cob:L9]. Day of month, at offsets 1
+            to 2.
+        u_month: `u-month pic 99` [copybooks/wsmaps03.cob:L11]. Month, at offsets 4 to
+            5.
+        u_year: `u-year` [copybooks/wsmaps03.cob:L13]. The century-and-year group at
+            offsets 7 to 10, held as one `MapsUYear`.
     """
 
     FIELDS: ClassVar[tuple[FieldDescriptor, ...]] = (
-        _descriptor("u-UK"),  # 03 u-UK  redefines u-date        [:L8]  group
-        _descriptor("u-days"),  # 05 u-days   pic 99             [:L9]
-        _descriptor("filler#10"),  # 05 filler pic x             [:L10] "/"
-        _descriptor("u-month"),  # 05 u-month  pic 99            [:L11]
-        _descriptor("filler#12"),  # 05 filler pic x             [:L12] "/"
-        _descriptor("u-year"),  # 05 u-year                      [:L13] group
+        _descriptor("u-UK"),
+        _descriptor("u-days"),
+        _descriptor("filler#10"),
+        _descriptor("u-month"),
+        _descriptor("filler#12"),
+        _descriptor("u-year"),
     )
 
-    # u-days   pic 99  [copybooks/wsmaps03.cob:L9]
     u_days: int = 0
 
-    # u-month  pic 99  [copybooks/wsmaps03.cob:L11]
     u_month: int = 0
 
-    # u-year           [copybooks/wsmaps03.cob:L13]  - a GROUP, and not a
-    # redefinition: it occupies its own four bytes inside this reading, so it
-    # is both a nested record and an attribute. Built per instance by
-    # `default_factory`, so two records never share one nested group.
+    # u-year [copybooks/wsmaps03.cob:L13] - a GROUP, and not a redefinition.
     u_year: MapsUYear = field(default_factory=MapsUYear)
-
-
-#  THE USA READING  -  u-USA redefines u-date  -  MM/DD
 
 
 @dataclass(slots=True)
 class MapsUUsa:
-    """`03  u-USA redefines u-date.` [copybooks/wsmaps03.cob:L16] - MM/DD.
+    """`03 u-USA redefines u-date.` [copybooks/wsmaps03.cob:L16] - MM/DD.
 
-    The USA reading of the same ten characters: month first, then day. The
-    class name is the PascalCase of the COBOL group name `u-USA` with the
-    hyphen removed.
-
-    Declared widths: u-usa-month 2 + filler 1 + u-usa-days 2 + filler 1
-    + filler 4 = 10 characters.
-
-    Note the shape of that arithmetic. This reading names only TWO components
-    and then covers the remaining four characters with a single unnamed item,
-    `05 filler pic x(4).` [copybooks/wsmaps03.cob:L21] - so the century and
-    year bytes are reachable through the UK and International readings but not
-    through this one. That is what the copybook declares and it stands as
-    declared. Three of this reading's five subordinate items are FILLER and so
-    have no attribute; only the two named components do.
+    Note the shape of that arithmetic.
 
     Attributes:
-        u_usa_month: `u-usa-month pic 99` [copybooks/wsmaps03.cob:L17]. Month,
-            at offsets 1 to 2 - where the UK reading has the day.
-        u_usa_days: `u-usa-days pic 99` [copybooks/wsmaps03.cob:L19]. Day of
-            month, at offsets 4 to 5 - where the UK reading has the month.
+        u_usa_month: `u-usa-month pic 99` [copybooks/wsmaps03.cob:L17]. Month, at
+            offsets 1 to 2 - where the UK reading has the day.
+        u_usa_days: `u-usa-days pic 99` [copybooks/wsmaps03.cob:L19]. Day of month, at
+            offsets 4 to 5 - where the UK reading has the month.
     """
 
     FIELDS: ClassVar[tuple[FieldDescriptor, ...]] = (
-        _descriptor("u-USA"),  # 03 u-USA redefines u-date       [:L16] group
-        _descriptor("u-usa-month"),  # 05 u-usa-month pic 99     [:L17]
-        _descriptor("filler#18"),  # 05 filler pic x             [:L18] "/"
-        _descriptor("u-usa-days"),  # 05 u-usa-days  pic 99      [:L19]
-        _descriptor("filler#20"),  # 05 filler pic x             [:L20] "/"
-        _descriptor("filler#21"),  # 05 filler pic x(4)          [:L21] tail
+        _descriptor("u-USA"),
+        _descriptor("u-usa-month"),
+        _descriptor("filler#18"),
+        _descriptor("u-usa-days"),
+        _descriptor("filler#20"),
+        _descriptor("filler#21"),
     )
 
-    # u-usa-month  pic 99  [copybooks/wsmaps03.cob:L17]
     u_usa_month: int = 0
 
-    # u-usa-days   pic 99  [copybooks/wsmaps03.cob:L19]
     u_usa_days: int = 0
-
-
-#  THE INTERNATIONAL READING  -  u-Intl redefines u-date  -  CCYY/MM/DD
-#  `MapsUIntlYear` is hoisted above `MapsUIntl` for the same reason `MapsUYear`
-#  is hoisted above `MapsUUk`.
 
 
 @dataclass(slots=True)
 class MapsUIntlYear:
-    """`05  u-intl-year.` [copybooks/wsmaps03.cob:L23] - CCYY, 1 to 4.
-
-    A group of two two-digit items inside the International reading, occupying
-    offsets 1 to 4 of the date text - the same CCYY the UK reading places at
-    offsets 7 to 10. The class name is the PascalCase of the COBOL group name
-    `u-intl-year` with the hyphens removed.
-
-    Declared widths: u-intl-cc 2 + u-intl-yy 2 = 4 characters.
+    """`05 u-intl-year.` [copybooks/wsmaps03.cob:L23] - CCYY, 1 to 4.
 
     Attributes:
         u_intl_cc: `u-intl-cc pic 99` [copybooks/wsmaps03.cob:L24]. Century.
@@ -861,60 +674,43 @@ class MapsUIntlYear:
     """
 
     FIELDS: ClassVar[tuple[FieldDescriptor, ...]] = (
-        _descriptor("u-intl-year"),  # 05 u-intl-year            [:L23] group
-        _descriptor("u-intl-cc"),  # 07 u-intl-cc  pic 99        [:L24]
-        _descriptor("u-intl-yy"),  # 07 u-intl-yy  pic 99        [:L25]
+        _descriptor("u-intl-year"),
+        _descriptor("u-intl-cc"),
+        _descriptor("u-intl-yy"),
     )
 
-    # u-intl-cc  pic 99  [copybooks/wsmaps03.cob:L24]
     u_intl_cc: int = 0
 
-    # u-intl-yy  pic 99  [copybooks/wsmaps03.cob:L25]
     u_intl_yy: int = 0
 
 
 @dataclass(slots=True)
 class MapsUIntl:
-    """`03  u-Intl redefines u-date.` [copybooks/wsmaps03.cob:L22].
-
-    The CCYY/MM/DD reading of the same ten characters: century and year
-    first, then month, then day. The class name is the PascalCase of the COBOL
-    group name `u-Intl` with the hyphen removed.
-
-    Declared widths: u-intl-year (u-intl-cc 2 + u-intl-yy 2) + filler 1
-    + u-intl-month 2 + filler 1 + u-intl-days 2 = 10 characters.
+    """`03 u-Intl redefines u-date.` [copybooks/wsmaps03.cob:L22].
 
     This reading leads with its group rather than trailing it, which is why its
-    separators fall at offsets 5 and 8 instead of 3 and 6. The two `filler`
-    items at L26 and L28 are those separators and get no attribute.
+    separators fall at offsets 5 and 8 instead of 3 and 6.
 
     Attributes:
-        u_intl_year: `u-intl-year` [copybooks/wsmaps03.cob:L23]. The
-            century-and-year group at offsets 1 to 4, held as one
-            `MapsUIntlYear`. A group and not an elementary item, so a nested
-            record here rather than a number.
-        u_intl_month: `u-intl-month pic 99` [copybooks/wsmaps03.cob:L27].
-            Month, at offsets 6 to 7.
-        u_intl_days: `u-intl-days pic 99` [copybooks/wsmaps03.cob:L29]. Day of
-            month, at offsets 9 to 10.
+        u_intl_year: `u-intl-year` [copybooks/wsmaps03.cob:L23]. The century-and-year
+            group at offsets 1 to 4, held as one `MapsUIntlYear`.
+        u_intl_month: `u-intl-month pic 99` [copybooks/wsmaps03.cob:L27]. Month, at
+            offsets 6 to 7.
+        u_intl_days: `u-intl-days pic 99` [copybooks/wsmaps03.cob:L29]. Day of month, at
+            offsets 9 to 10.
     """
 
     FIELDS: ClassVar[tuple[FieldDescriptor, ...]] = (
-        _descriptor("u-Intl"),  # 03 u-Intl redefines u-date     [:L22] group
-        _descriptor("u-intl-year"),  # 05 u-intl-year            [:L23] group
-        _descriptor("filler#26"),  # 05 filler pic x             [:L26] "/"
-        _descriptor("u-intl-month"),  # 05 u-intl-month pic 99    [:L27]
-        _descriptor("filler#28"),  # 05 filler pic x             [:L28] "/"
-        _descriptor("u-intl-days"),  # 05 u-intl-days  pic 99    [:L29]
+        _descriptor("u-Intl"),
+        _descriptor("u-intl-year"),
+        _descriptor("filler#26"),
+        _descriptor("u-intl-month"),
+        _descriptor("filler#28"),
+        _descriptor("u-intl-days"),
     )
 
-    # u-intl-year           [copybooks/wsmaps03.cob:L23]  - a GROUP, and not a
-    # redefinition: its four bytes are its own inside this reading. Built per
-    # instance by `default_factory`, as `MapsUUk.u_year` is.
     u_intl_year: MapsUIntlYear = field(default_factory=MapsUIntlYear)
 
-    # u-intl-month  pic 99  [copybooks/wsmaps03.cob:L27]
     u_intl_month: int = 0
 
-    # u-intl-days   pic 99  [copybooks/wsmaps03.cob:L29]
     u_intl_days: int = 0

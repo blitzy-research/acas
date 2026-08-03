@@ -1,92 +1,41 @@
 #!/usr/bin/env bash
-# harness/build_oracle.sh
-# The five-step bootstrap that builds the compiled-COBOL ORACLE for the ACAS
-# posting-cycle migration: (1) unpack the vendored JC preSQL archive inside the
-# container, (2) compile the bridge's C interface object cobmysqlapi.o with the
-# build rule RECOVERED from that archive, (3) build and install the `presql2'
-# translator onto the PATH, (4) run common/comp-common.sh UNMODIFIED, (5) run
-# comp-all.sh UNMODIFIED. For the options, the environment and the exit codes,
-# run `--help'.
-# NOTATION. Backticked locators -- `presql2.cbl:L543', `cobmysqlapi38.sh' --
-# name members of the vendored `presql2-latest.zip' unpacked in the container,
-# never checkout paths; bracketed [path:Lnn] locators are checkout paths.
+# harness/build_oracle.sh -- build the compiled-COBOL comparison ORACLE.
+#
+# Five steps, one exit code each (run `--help' for the options, the environment
+# and the codes): unpack the vendored JC preSQL archive, compile the bridge's C
+# interface object cobmysqlapi.o with the build rule recovered from that archive,
+# install `presql2' on PATH, then run common/comp-common.sh and comp-all.sh
+# UNMODIFIED. No cobc flag is changed, because default compiler arithmetic is
+# what the migration's truncation and rounding behaviour depends on.
+#
+# Two invariants the code below rests on:
+#   * $ACAS_REPO is READ and never written. presql2 truncates its output file
+#     before it validates its parameters, so running it inside the checkout would
+#     zero the 28 generated common/*MT.cbl bridges -- the authoritative
+#     record-layout to table mapping. The tree is copied to $ACAS_BUILD instead.
+#   * every frozen compile script ends in a bare, unconditional `exit 0'
+#     ([common/comp-common.sh:L59], [comp-all.sh:L45]), so its status is not a
+#     success signal and neither `set -e' nor `pipefail' can see a failed
+#     compile. acas_scan_build_log and acas_assert_artifacts decide instead.
+#     These are frozen defects: worked around here, never fixed (R-4).
+#
+# Locator notation: [path:Lnn] names a checkout file. [<archive>:member:Lnn]
+# names a member of a vendored archive that is unpacked inside the container.
 
-# WHAT THIS SCRIPT IS FOR
-# The migration has no test suite. Compiled COBOL execution IS the behavioural
-# specification, defects included, and this script is what makes that
-# specification executable. If it does not work there is no arbiter, and every
-# ambiguity in the migration becomes unresolvable.
-# WHERE THIS FILE SITS
-# harness/ is the compiled oracle and is a SIBLING of acas_posting/, never a
-# sub-package. There is no import path from the shipped Python package to this
-# tree, and this script never creates one: it writes no __init__.py, installs
-# no import hook, and puts no artifact where acas_posting/ can reach it (R-1).
-# Every product of the build lands under $ACAS_BUILD.
-
-# THE FROZEN-ARTIFACT GUARANTEE
-# The COBOL source, the bridge programs and the MySQL schema are frozen. This
-# script READS $ACAS_REPO and NEVER writes to it -- not a .prn listing, not a
-# .o, not a .so, not a .param, not a regenerated *MT.cbl, not an executable.
-# It copies the tree into the writable $ACAS_BUILD and builds there. The reason
-# is specific and severe: [common/comp-common.sh:L25] runs `presql2 $i' over
-# every *MT.scb, and presql2 truncates its output with OPEN OUTPUT OUTPUT-FILE
-# at `presql2.cbl:L543' BEFORE it validates parameters at `presql2.cbl:L759'.
-# Run inside the checkout it would zero the 28 GENERATED common/*MT.cbl bridges
-# -- the authoritative record-layout to table mapping, i.e. the data dictionary
-# for this migration -- and it would do so even when merely misconfigured.
-
-# THE FROZEN SCRIPTS ARE RUN UNMODIFIED
-# common/comp-common.sh, comp-all.sh and the five per-directory scripts that
-# comp-all.sh invokes [comp-all.sh:L15-L32] are executed exactly as written:
-# not patched, sed-ed, re-implemented or reordered, and NO cobc flag changed.
-# Default compiler arithmetic is mandatory: a census of every frozen compile
-# invocation finds no -std= dialect selection, no >>SET ARITHMETIC directive
-# and no binary-truncate flag, and the migration's truncation and rounding
-# behaviour depends on exactly that.
-
-# WHY `set -e' IS NOT ENOUGH -- READ THIS BEFORE CHANGING THE ERROR HANDLING
-# Every frozen compile script ends with a bare, unconditional `exit 0':
-# [common/comp-common.sh:L59], [comp-all.sh:L45], [general/comp-gl.sh:L7],
-# [irs/comp-irs.sh:L9], [purchase/comp-purchase.sh:L6],
-# [sales/comp-sales.sh:L22], [stock/comp-stock.sh:L7] -- in each case the last
-# line of the file. Their exit status is therefore NOT a build-success signal,
-# and neither `set -e' nor `pipefail' can catch a failed compile. These are
-# frozen defects: worked around here, never fixed (R-4). What actually catches
-# failure is (a) the two-tier log scan in acas_scan_build_log and (b) the
-# artifact assertions in acas_assert_artifacts, which inspect the products
-# rather than the prose and are the more reliable of the two. Both always run.
-
-# RULES PROVENANCE
-# There is no user rules document for this project: `review_rules' returns
-# "No user rules provided." The binding rules R-1..R-6 come from the Agent
-# Action Plan and are cited inline below as (R-n). Where they are silent this
-# script holds to enterprise-standard best practice.
-#   R-1 no COBOL at runtime          R-2 zero binary floating point
-#   R-3 no schema change, sequential R-4 anomalies reproduced, never fixed
-#   R-5 full traceability            R-6 compiled behaviour is the tie-breaker
-
-# Strict mode. -E propagates the ERR trap into functions and subshells so that
-# an unexpected failure anywhere is attributed to a line number rather than
-# silently ignored. See the caveat above: this protects THIS script, not the
-# frozen ones.
 set -Eeuo pipefail
 
 # A conservative IFS: word splitting on newlines and tabs only, so a path
-# containing a space can never be split apart. Every expansion below is quoted
-# regardless.
+# containing a space can never be split apart.
 IFS=$'\n\t'
 
 # Unmatched globs must expand to nothing rather than to the pattern text, so
-# the artifact assertions report "no sources found" instead of a literal "*.cbl".
+# the artifact assertions report "no sources found" instead of a literal
+# "*.cbl".
 shopt -s nullglob
 
-# 0077 by default: nothing this script writes is world- or group-readable. The
-# credential file written by acas_write_presql2_param re-asserts this locally
-# and then chmods explicitly, so the guarantee does not depend on inheritance.
+# 0077 by default: nothing this script writes is world- or group-readable.
 umask 077
 
-# Exit codes -- one per stage, so an automated caller can attribute a failure
-# without parsing text. 64/65 follow the sysexits.h convention.
 readonly EX_OK=0
 readonly EX_USAGE=64            # bad command line
 readonly EX_PRECONDITION=65     # environment, directory or toolchain assertion
@@ -103,70 +52,14 @@ readonly EX_TIMEOUT=78          # an external command exceeded its finite deadli
 readonly EX_ARCHIVE=79          # vendored archive failed its digest or member audit
 
 # The frozen recipe's hard-coded paths.
-# [common/comp-common.sh:L26] links `-L/usr/local/mysql/lib -lmysqlclient' and
-# `cobmysqlapi38.sh' compiles with `-I/usr/local/mysql/include'.
-# Both are LITERAL in the frozen sources, so this script uses the literal too
-# and merely CHECKS that any ACAS_MYSQL_PREFIX published by the image agrees
-# with it. Honouring a different prefix here would be a lie: the frozen scripts
-# would still use /usr/local/mysql.
 readonly ACAS_FROZEN_MYSQL_PREFIX='/usr/local/mysql'
 
-# The compiler the maintainer targets, per [common/comp-common.sh:L8-L9]
-# ("...the silly default warning in latest gnucobol v3.2") and [README.TXT:L53].
 readonly ACAS_REQUIRED_COBC_VERSION='3.2'
 
-# -----------------------------------------------------------------------------
-# The vendored preSQL archive -- IDENTITY PIN.
-#
-# Step 1 unpacks $ACAS_REPO/presql2-latest.zip and steps 2 and 3 then compile C
-# and COBOL out of it and INSTALL the result to /usr/local/bin. The archive is
-# therefore executable input to a privileged step, and its identity decides what
-# the oracle is. Two consequences, both mandatory:
-#
-#   1. The digest is pinned. The oracle is the behavioural specification for the
-#      whole migration (R-6), so "whatever zip happens to be on disk" cannot be
-#      allowed to redefine it. This value is the SHA-256 of the archive as
-#      committed to this repository, measured with sha256sum; the archive holds
-#      61 members under a single `presql2-package/' root.
-#
-#   2. Extraction is audited member by member -- see acas_extract_audited_zip.
-#      An archive is an untrusted directory listing: a member named `../x' or
-#      `/etc/x', or a symlink member pointing outside the scratch tree, writes
-#      wherever the archive says rather than where this script says. `unzip -o'
-#      and zipfile.extractall() are both unsuitable and neither is used.
-#
-# The same value is declared in harness/Dockerfile.gnucobol, which unpacks the
-# same archive at image build time (ARG PRESQL2_SHA256); THE TWO MUST AGREE, and
-# a disagreement between them is itself a finding.
-#
-# A maintainer replacing the archive sets ACAS_PRESQL2_SHA256 to the new digest.
-# That is a deliberate, logged act: the override is announced as a warning, it
-# is replayed in the closing summary, and the recorded expectation still appears
-# in the log, so the evidence trail never silently loses the pin.
-# -----------------------------------------------------------------------------
 readonly ACAS_PRESQL2_SHA256_EXPECTED='638db9530d2fe008fbb46cf8600b9406f6f780c9fc59d0e0c94e868b4d615475'
 readonly ACAS_PRESQL2_ARCHIVE_ROOT='presql2-package'
 
-# -----------------------------------------------------------------------------
 # Finite deadlines -- every external command this script spawns runs under one.
-#
-# The frozen build recipe can block indefinitely and does so for reasons that
-# are entirely ordinary: `cobc' resolving a copybook over a stalled mount, the
-# MariaDB client waiting on a TCP connection that is neither accepted nor
-# refused, [common/comp-common.sh] itself reaching a prompt. An unbounded wait
-# in a harness is worse than a failure, because a hung run yields no verdict at
-# all -- and a protocol that cannot terminate cannot produce the empty-diff
-# evidence the plan requires (R-6, AAP 0.8.5).
-#
-# Budgets are per-command wall-clock seconds, overridable by environment for a
-# slower host, validated as integers >= 1, and reported in the failure message
-# together with the variable that raises them. The grace period is the interval
-# between the TERM that asks the child to stop and the KILL that makes it.
-#
-# Only the exact spawned child is signalled: `timeout' becomes the parent of
-# that one process. Nothing here inspects a process table or matches on a
-# command name, so no unrelated process on the host can be caught.
-# -----------------------------------------------------------------------------
 readonly ACAS_TIMEOUT_MAX=86400     # 24h -- an upper bound on any single budget
 ACAS_TIMEOUT_GRACE="${ACAS_TIMEOUT_GRACE-}"               # resolved by acas_resolve_deadlines
 ACAS_TIMEOUT_UNPACK="${ACAS_TIMEOUT_UNPACK-}"              # step 1: audit + extract the vendored zip
@@ -177,16 +70,9 @@ ACAS_TIMEOUT_RESOLVED=''            # out-parameter of acas_timeout_seconds
 declare -a ACAS_DEADLINE_ARGV=()    # populated by acas_deadline_prefix
 
 # [comp-all.sh:L15-L32] cd's through exactly these six directories in this
-# order. Because every RDBMS-touching compile links a BARE `cobmysqlapi.o'
-# filename resolved against the current directory, the object must be present
-# in all six. The order is the maintainer's own and is preserved.
+# order.
 readonly -a ACAS_COMPILE_DIRS=(common general irs purchase sales stock)
 
-# The loaders harness/seed.sh invokes -- the 20 that serve the 22 in-scope
-# tables. All 28 common/*LD.cbl are BUILT (that is what
-# [common/comp-common.sh:L51] does); only these 20 are ever invoked. The other
-# eight -- delfolioLD, sldelinvnosLD, deliveryLD, paymentsLD, plautogenLD,
-# slautogenLD, auditLD, stockLD -- serve out-of-scope tables.
 readonly -a ACAS_INSCOPE_LOADERS=(
   analLD dfltLD finalLD glbatchLD glpostingLD irsdfltLD irsfinalLD
   irsnominalLD irspostingLD nominalLD otm3LD otm5LD plinvoiceLD purchLD
@@ -194,49 +80,15 @@ readonly -a ACAS_INSCOPE_LOADERS=(
 )
 
 # The in-scope posting programs, per ledger, plus the Date Entry program each
-# runner uses to pin the clock. Asserted by name because a state diff cannot
-# be produced without them.
+# runner uses to pin the clock.
 readonly -a ACAS_GENERAL_MODULES=(gl000 gl051 gl070 gl071 gl072 gl080)
 readonly -a ACAS_SALES_MODULES=(sl000 sl055 sl060 sl100)
 readonly -a ACAS_PURCHASE_MODULES=(pl000 pl055 pl060 pl100)
 readonly -a ACAS_IRS_MODULES=(irs000 irs030)
 
-# -----------------------------------------------------------------------------
-# THE PINNED IDENTITY OF THE VENDORED preSQL ARCHIVE  (CWE-494 download of code
-# without integrity check)
-#
-# presql2-latest.zip is not a passive data file. Step 1 unpacks it and steps 2
-# and 3 then COMPILE AND EXECUTE what came out: cobmysqlapi38.c becomes the
-# object every bridge, handler and loader links, and presql2.cbl becomes the
-# translator that rewrites every *MT.scb. Whoever controls the bytes of this
-# archive controls the whole oracle -- and therefore controls the values every
-# scenario diff is measured against. An oracle built from a substituted archive
-# would still produce a confident, empty diff.
-#
-# The archive lives in the read-only checkout, so this pin is not defending
-# against a network fetch; it is defending against the checkout not being the
-# checkout this harness was written for -- a bind mount pointed elsewhere, a
-# tampered clone, or simply a different revision of the vendored package
-# arriving silently. The digest is asserted BEFORE a single byte is extracted.
-#
-# The value is the SHA-256 of the archive as committed. It is also declared in
-# harness/Dockerfile.gnucobol, which unpacks the same archive at image build
-# time; THE TWO MUST AGREE, and a mismatch between them is itself a finding.
-#
-# ACAS_PRESQL2_SHA256 may override it, for the one legitimate case: the
-# maintainer publishing a new vendored package. That is an explicit, auditable
-# act -- not a silent default.
-#
-# The pin itself is ACAS_PRESQL2_SHA256_EXPECTED, declared once above with
-# ACAS_PRESQL2_ARCHIVE_ROOT: one declaration, so the pin cannot be updated in
-# one place and left stale in another.
-# -----------------------------------------------------------------------------
+# THE PINNED IDENTITY OF THE VENDORED preSQL ARCHIVE (CWE-494 download of code
+# without integrity check) presql2-latest.zip is not a passive data file.
 
-# Mutable state. Declared up front because `set -u' makes an unset array a
-# fatal reference.
-# The client transports this target has earned, most secure first. Decided ONCE
-# by acas_assert_transport_policy, before anything connects, and consumed
-# read-only by acas_db_credentialed_probe -- see TRANSPORT SECURITY.
 declare -a ACAS_BUILD_TLS_VARIANTS=()
 declare -a ACAS_PARAM_FILES=()      # credential files to shred on exit
 declare -a ACAS_SCRATCH_DIRS=()     # scratch trees to remove on exit
@@ -274,9 +126,6 @@ acas_warn() {
   ACAS_WARN_SUMMARY+=("$*")
 }
 
-# acas_die <exit-code> <message>...
-# Every abort names the artifact or setting at fault and, wherever the cause is
-# a frozen recipe, cites its locator so the claim is traceable to it (R-5).
 acas_die() {
   local code="$1"
   shift
@@ -450,34 +299,15 @@ acas_join_re() {
 }
 
 # Join the remaining arguments with single spaces for human-readable output.
-# Needed because this script sets IFS=$'\n\t', so a bare "${array[*]}" would
-# join on a NEWLINE and break a one-line log message across several lines.
 acas_join_words() {
   local IFS=' '
   printf '%s' "$*"
 }
 
-# =============================================================================
-# FINITE DEADLINES
-#
-# One definition of what "run this with a deadline" means, used by every call
-# site that spawns an external process. Nothing in this script may block
-# forever: see the rationale beside the ACAS_TIMEOUT_* declarations above.
-# =============================================================================
 
-# acas_timeout_seconds <env-var-name> <default>
-# Resolve one budget from the environment, validating it as a positive integer
-# no larger than ACAS_TIMEOUT_MAX. An unparsable or zero budget is a usage
-# error and not a reason to fall back to "wait forever": a caller who asks for
-# no deadline has asked for the defect this section exists to prevent.
-#
-# The resolved value is published in ACAS_TIMEOUT_RESOLVED rather than written to
-# stdout, and the reason is the same hazard documented for acas_run_deadline: a
-# caller writing `x="$(acas_timeout_seconds ...)"' would run this function in a
-# command substitution, where acas_die's `exit' terminates only that subshell.
-# The assignment would then swallow both the message and the status and the run
-# would continue with an empty budget -- which is to say, with no deadline at
-# all, silently. Returning through a variable keeps the abort real.
+# acas_timeout_seconds <env-var-name> <default> Resolve one budget from the
+# environment, validating it as a positive integer no larger than
+# ACAS_TIMEOUT_MAX.
 acas_timeout_seconds() {
   local name="$1" default="$2" value
   ACAS_TIMEOUT_RESOLVED=''
@@ -511,8 +341,8 @@ acas_timeout_seconds() {
 }
 
 # Resolve every budget once, before any external command is spawned, so that a
-# malformed value is reported as a usage error at startup rather than hours into
-# a build. Also asserts the one tool the whole mechanism depends on.
+# malformed value is reported as a usage error at startup rather than hours
+# into a build.
 acas_resolve_deadlines() {
   acas_have timeout || acas_die "$EX_PRECONDITION" \
     'timeout is not on the PATH.' \
@@ -534,8 +364,8 @@ acas_resolve_deadlines() {
   readonly ACAS_TIMEOUT_GRACE ACAS_TIMEOUT_UNPACK ACAS_TIMEOUT_COMPILE
   readonly ACAS_TIMEOUT_BUILD ACAS_TIMEOUT_PROBE
 
-  # Belt and braces: nothing downstream may run with an unresolved budget, and a
-  # missing one would degrade to "no deadline" -- the defect, not a fallback.
+  # Belt and braces: nothing downstream may run with an unresolved budget, and
+  # a missing one would degrade to "no deadline" -- the defect, not a fallback.
   local budget
   for budget in "$ACAS_TIMEOUT_GRACE" "$ACAS_TIMEOUT_UNPACK" "$ACAS_TIMEOUT_COMPILE" \
                 "$ACAS_TIMEOUT_BUILD" "$ACAS_TIMEOUT_PROBE"; do
@@ -551,28 +381,6 @@ acas_resolve_deadlines() {
 
 # Measure whether the `timeout' on this PATH really bounds a child that refuses
 # to stop, and report it when it does not.
-#
-# The deadline itself -- TERM at the budget -- works everywhere and is what every
-# real command in this script needs: gcc, cobc, python3, ldconfig and the MariaDB
-# clients all terminate on TERM. The ESCALATION path matters for the two
-# delegated frozen build scripts, whose own children (cobc) are what would
-# actually be wedged.
-#
-# Measured difference between the two implementations in circulation:
-#
-#   GNU coreutils    -- sends TERM at the deadline, KILL after --kill-after, and
-#                       returns as soon as its direct child is reaped. Correct.
-#   uutils coreutils -- verified against 0.2.2: it reports 137 correctly but does
-#                       not RETURN until the child's orphaned descendants have
-#                       also exited, so a wedged grandchild can hold the run past
-#                       the deadline.
-#
-# harness/Dockerfile.gnucobol is Ubuntu-based and provides GNU coreutils, so the
-# documented execution environment is the correct one. A developer running this
-# on a host with the Rust reimplementation gets a warning instead of a silent
-# weakening -- which is the whole point of a harness. Non-fatal: refusing to
-# build would be a worse outcome than reporting the exposure, and the warning is
-# replayed in the closing summary so it cannot be scrolled past.
 acas_verify_deadline_escalation() {
   local probe_budget=1 probe_grace=1 sleep_for=4 allowance_ms=3200
   local started_us ended_us elapsed_ms rc=0 raw
@@ -584,13 +392,11 @@ acas_verify_deadline_escalation() {
   fi
 
   # EPOCHREALTIME is seconds.microseconds; removing the separator yields whole
-  # microseconds as an integer. The comma form is accepted because the separator
-  # follows LC_NUMERIC.
+  # microseconds as an integer. The comma form is accepted because the
+  # separator follows LC_NUMERIC.
   raw="${raw/,/.}"
   started_us="${raw/./}"
 
-  # stdio is detached so nothing about this probe can be confused with a build
-  # diagnostic, and so an orphaned `sleep' holds no descriptor of ours.
   timeout "--kill-after=$probe_grace" --signal=TERM "$probe_budget" \
     bash -c 'trap "" TERM; sleep '"$sleep_for" >/dev/null 2>&1 </dev/null || rc=$?
 
@@ -614,16 +420,8 @@ acas_verify_deadline_escalation() {
   return 0
 }
 
-# acas_deadline_prefix <budget>
-# Populate ACAS_DEADLINE_ARGV with the invocation words that impose <budget> on
-# whatever command words are appended to them. The single place in this script
-# that knows the flag spelling, so a call site that must pipe its output (and
-# therefore cannot delegate to acas_run_deadline) still gets identical
-# semantics: TERM at the deadline, KILL after the grace period.
-#
-# `timeout' becomes the parent of exactly the process it is given. Only that one
-# child is ever signalled -- this script never matches on a process name and
-# never signals a process group, so no unrelated process can be caught.
+# acas_deadline_prefix <budget> Populate ACAS_DEADLINE_ARGV with the invocation
+# words that impose <budget> on whatever command words are appended to them.
 acas_deadline_prefix() {
   ACAS_DEADLINE_ARGV=(
     timeout
@@ -633,18 +431,9 @@ acas_deadline_prefix() {
   )
 }
 
-# acas_is_timeout_status <rc> <elapsed> <budget>
-# True when <rc> means "the deadline expired" rather than "the command ran and
-# failed". Measured behaviour of the two implementations in play:
-#
-#   GNU coreutils   : 124 when the deadline expires; 125 means timeout ITSELF
-#                     failed, which is not a deadline expiry.
-#   uutils coreutils: 125 where GNU returns 124 (verified against 0.2.2).
-#
-# Because 125 is ambiguous across the two, status alone cannot decide it. The
-# elapsed wall clock does: a command that consumed its whole budget and then
-# failed timed out, whichever implementation reported it. 137 (128+9) is the
-# escalation path -- the child ignored TERM and --kill-after sent KILL.
+# acas_is_timeout_status <rc> <elapsed> <budget> True when <rc> means "the
+# deadline expired" rather than "the command ran and failed". Measured
+# behaviour of the two implementations in play.
 acas_is_timeout_status() {
   local rc="$1" elapsed="$2" budget="$3"
 
@@ -659,9 +448,7 @@ acas_is_timeout_status() {
 
 # acas_assert_not_timed_out <rc> <elapsed> <budget> <budget-var> <label> <code>
 # Abort with EX_TIMEOUT when the deadline expired, naming the stage, the budget
-# it exceeded and the variable that raises it. Returns without comment for any
-# other status: an ordinary failure is the CALLER's to report, because only the
-# caller knows which stage exit code applies.
+# it exceeded and the variable that raises it.
 acas_assert_not_timed_out() {
   local rc="$1" elapsed="$2" budget="$3" budget_var="$4" label="$5" code="$6"
 
@@ -669,10 +456,7 @@ acas_assert_not_timed_out() {
     return 0
   fi
 
-  # The stage code is reported alongside EX_TIMEOUT rather than instead of it:
-  # a caller distinguishing "the build failed" from "the build never finished"
-  # needs the latter to be its own status, and a reader needs to know which
-  # stage stalled.
+  # The stage code is reported alongside EX_TIMEOUT rather than instead of it.
   acas_die "$EX_TIMEOUT" \
     "$label exceeded its ${budget}s deadline (stage exit code would have been $code)." \
     "Raise $budget_var if this host is simply slower than the budget assumes;" \
@@ -681,15 +465,6 @@ acas_assert_not_timed_out() {
 }
 
 # acas_run_deadline <budget> <budget-var> <label> <code> <workdir|-> -- cmd...
-# Run one external command under its deadline and return the command's own exit
-# status, having already aborted if the deadline expired.
-#
-# The optional working directory is handled here rather than by the caller
-# wrapping the call in `( cd x && ... )'. That matters: acas_die inside a
-# subshell would exit only the subshell, the caller's own `|| acas_die' would
-# then fire, and the run would be attributed to the stage code instead of to
-# EX_TIMEOUT. Here the cd is confined to a subshell but the VERDICT is reached
-# in the function's own shell, so the abort is real.
 acas_run_deadline() {
   local budget="$1" budget_var="$2" label="$3" code="$4" workdir="$5"
   shift 5
@@ -707,8 +482,7 @@ acas_run_deadline() {
   if [[ "$workdir" == '-' ]]; then
     "${ACAS_DEADLINE_ARGV[@]}" "$@" || rc=$?
   else
-    # `exec' so the subshell process BECOMES timeout: no extra shell survives to
-    # be left behind when the deadline fires.
+    # `exec' so the subshell process BECOMES timeout.
     ( cd "$workdir" && exec "${ACAS_DEADLINE_ARGV[@]}" "$@" ) || rc=$?
   fi
   elapsed=$(( SECONDS - started ))
@@ -717,23 +491,14 @@ acas_run_deadline() {
   return "$rc"
 }
 
-# =============================================================================
-# VENDORED ARCHIVE AUDIT
-#
-# See the ACAS_PRESQL2_SHA256_EXPECTED declaration for why an archive that feeds
-# a compile-and-install step is treated as untrusted input with a pinned
+# See the ACAS_PRESQL2_SHA256_EXPECTED declaration for why an archive that
+# feeds a compile-and-install step is treated as untrusted input with a pinned
 # identity.
-# =============================================================================
 
-# acas_file_sha256 <path>
-# sha256sum when present, python3 hashlib otherwise. python3 is already a hard
-# requirement of this script (acas_assert_toolchain), so the fallback adds no
-# new dependency and the digest check can never be skipped for want of a tool.
+# acas_file_sha256 <path> sha256sum when present, python3 hashlib otherwise.
 acas_file_sha256() {
   local path="$1" digest=''
 
-  # Under a deadline like every other external command: the archive is read from
-  # $ACAS_REPO, which is a bind mount in the Compose stack.
   acas_deadline_prefix "$ACAS_TIMEOUT_PROBE"
 
   if acas_have sha256sum; then
@@ -754,11 +519,9 @@ sys.stdout.write(digest.hexdigest())
 PY
 }
 
-# acas_assert_archive_digest <path>
-# Refuse to unpack an archive whose identity is not the pinned one, unless the
-# maintainer has explicitly named a replacement digest. The override is a
-# warning and is replayed in the closing summary, so a run that redefined the
-# oracle's provenance cannot be mistaken for a run that did not.
+# acas_assert_archive_digest <path> Refuse to unpack an archive whose identity
+# is not the pinned one, unless the maintainer has explicitly named a
+# replacement digest.
 acas_assert_archive_digest() {
   local path="$1" expected="$ACAS_PRESQL2_SHA256_EXPECTED" actual=''
   local override="${ACAS_PRESQL2_SHA256-}"
@@ -803,29 +566,12 @@ acas_assert_archive_digest() {
   acas_log "archive digest verified: sha256 $actual"
 }
 
-# acas_extract_audited_zip <archive> <destination> <expected-root>
-# Extract every member of <archive> beneath <destination>, having first audited
-# the WHOLE member list. Nothing is written until every member has passed, so a
-# rejected archive leaves no partial tree behind.
-#
-# Replaces `unzip -o' and zipfile.extractall(), neither of which is safe here:
-# both honour the member names the archive supplies, so a member named `../x' or
-# `/etc/x' escapes the destination, and a symlink member followed by a write
-# through it escapes just as effectively. Python 3.12's extractall() sanitises
-# absolute paths and `..', but it still MATERIALISES symlink members verbatim
-# and reports nothing about what it changed -- neither acceptable for input to a
-# privileged compile-and-install step.
-#
-# The audit and the extraction both live in python3 because zip member metadata
-# (the type bits in external_attr, the create_system field) is not reachable
-# from the shell. The archive path, destination and expected root arrive as argv
-# and are never interpolated into the program text.
+# acas_extract_audited_zip <archive> <destination> <expected-root> Extract
+# every member of <archive> beneath <destination>, having first audited the
+# WHOLE member list.
 acas_extract_audited_zip() {
   local archive="$1" destination="$2" root="$3" rc=0
 
-  # The heredoc is attached to the function call, so it is the stdin `python3 -'
-  # reads through acas_run_deadline and on through timeout. Failure statuses are
-  # the ones the program below documents.
   acas_run_deadline "$ACAS_TIMEOUT_UNPACK" ACAS_TIMEOUT_UNPACK \
     "auditing and extracting $archive" "$EX_ARCHIVE" - \
     -- python3 - "$archive" "$destination" "$root" <<'PY' || rc=$?
@@ -1021,22 +767,9 @@ PY
   esac
 }
 
-# -----------------------------------------------------------------------------
-# Re-exec guard -- SAFETY CRITICAL, do not remove.
-#   1. bash reads a script file incrementally as it executes it. This script
-#      copies $ACAS_REPO over $ACAS_BUILD, and $ACAS_BUILD/harness/ holds a
-#      copy of THIS FILE. If the running instance is the one under
-#      $ACAS_BUILD, `cp' truncates and rewrites the very file bash is reading
-#      and execution can continue into rewritten bytes. Re-executing the
-#      $ACAS_REPO copy -- read-only, never a copy target -- removes it.
-#   2. Determinism (R-6). $ACAS_REPO is the specification; a copy left in a
-#      build volume by an earlier run is not.
-# harness/docker-compose.yml sets `working_dir: /build', so a plain
-# `docker compose run ... harness/build_oracle.sh' resolves to $ACAS_BUILD --
-# exactly the case this guard redirects. It is also why nothing here uses $0.
+# Re-exec guard -- SAFETY CRITICAL, do not remove. 1. bash reads a script file
+# incrementally as it executes it.
 acas_reexec_from_repo_if_needed() {
-  # Nothing to do if we have already redirected once (loop breaker), or if the
-  # environment contract is not yet known -- the preflight reports that.
   if [[ -n "${ACAS_BUILD_ORACLE_REEXEC-}" ]]; then
     return 0
   fi
@@ -1064,29 +797,14 @@ acas_reexec_from_repo_if_needed() {
   printf '    to   %s\n' "$repo_copy"
   export ACAS_BUILD_ORACLE_REEXEC=1
   # THE ONE DELIBERATE EXCEPTION to the finite-deadline rule, and it is not a
-  # gap. `exec' REPLACES this process with the checkout's copy of this same
-  # script, which then imposes its own per-command deadlines. Wrapping it in
-  # `timeout' would instead bound the ENTIRE build to a single budget and leave
-  # a supervisor process in the chain for the whole run. The re-exec itself
-  # cannot block: it is a kernel execve of a local file whose existence was
-  # asserted immediately above.
+  # gap.
   exec bash "$repo_copy" "$@"
 }
 
 acas_reexec_from_repo_if_needed "$@"
 
-# Traps.
-# ERR reports the failing line so an unexpected failure is attributable.
-# EXIT shreds every credential file this script wrote, on EVERY exit path
-# including a fatal abort or an interrupt -- no password may survive the run.
-# The three functions below are reached ONLY through the `trap' statements that
-# follow them. ShellCheck's reachability pass cannot see an indirect invocation
-# through a trap in a script that ends with an explicit `exit', so it reports
-# their bodies as unreachable (SC2317) -- its own message says "or ignore if
-# invoked indirectly", which is exactly the case here (SC2317 is ShellCheck
-# 0.10.0's reachability diagnostic). The suppression is scoped to these three
-# definitions and to nothing else.
 # shellcheck disable=SC2317
+# Traps. ERR reports the failing line so an unexpected failure is attributable.
 acas_on_err() {
   local code="$1" line="$2" cmd="$3"
   printf '\nFATAL: unexpected failure at %s line %s (exit %s)\n' \
@@ -1094,40 +812,9 @@ acas_on_err() {
   printf '       failing command: %s\n' "$cmd" >&2
 }
 
-# -----------------------------------------------------------------------------
-# SAFE FILE CREATION  (CWE-59 symlink following, CWE-367 TOCTOU, CWE-732
-# over-permissive files)
-#
-# presql2.param was written with a plain `> "$target"' and chmod'ed 0600
-# afterwards. Both halves of that are wrong for a file that holds a database
-# password in cleartext:
-#
-#   * `> "$target"' FOLLOWS a symlink and TRUNCATES its target. The file is
-#     written into the build tree, which the Compose recipe makes a named volume;
-#     anything able to place `presql2.param' there first chooses which file gets
-#     overwritten AND then reads the password that lands in its place.
-#   * chmod AFTER the write is too late. Between the create and the chmod the
-#     file exists at whatever the umask allows -- the local `umask 077' narrowed
-#     that window but did not close it, because a mode is a property of the
-#     inode, not of the write.
-#
-# THE PATTERN, in four steps, each load-bearing, identical to the one
-# harness/reset_db.sh, harness/seed.sh and harness/run_cobol_scenario.sh use
-# (deliberately duplicated rather than sourced: the four scripts are independent
-# entry points and none may fail because another is absent):
-#
-#   1. REFUSE a symlink outright. Bash has no O_NOFOLLOW, so this is an explicit
-#      `-L' test. On its own it would be a TOCTOU window, which is why step 3
-#      exists.
-#   2. REMOVE an existing regular file, so step 3's exclusive create is not
-#      defeated by our own previous run -- or by a param file the EXIT trap of an
-#      earlier, killed run never got to shred.
-#   3. CREATE under `set -C' (noclobber), which is O_EXCL: if anything appears at
-#      the name between step 1 and here, the create FAILS rather than following
-#      or truncating it.
-#   4. chmod 600 on the EMPTY file, BEFORE any content is written, so the
-#      password never exists on disk at a wider mode even momentarily.
-# -----------------------------------------------------------------------------
+# Create a file that cannot be hijacked: a symlink or non-regular path is refused
+# rather than followed, and the file is created under `set -C' (O_EXCL) so it can
+# neither be pre-created by another user nor widened between create and chmod.
 acas_create_private_file() {
   local path="$1" what="$2" code="${3:-$EX_PRECONDITION}"
 
@@ -1175,8 +862,7 @@ acas_remove_scratch_dirs() {
   local d
   for d in "${ACAS_SCRATCH_DIRS[@]+"${ACAS_SCRATCH_DIRS[@]}"}"; do
     # Only ever remove a directory this script created itself, and only when
-    # the path is absolute and at least two components deep. A recursive
-    # remove must never be able to walk into a shared or mounted tree.
+    # the path is absolute and at least two components deep.
     [[ -n "$d" && "$d" == /*/* && -d "$d" ]] || continue
     rm -rf -- "$d" 2>/dev/null || true
   done
@@ -1201,7 +887,6 @@ trap 'acas_on_exit "$?"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# Usage
 acas_usage() {
   cat <<'USAGE'
 build_oracle.sh - build the compiled-COBOL oracle for the ACAS posting cycle.
@@ -1214,9 +899,9 @@ The five steps, always in this order:
   2  Compile cobmysqlapi.o with the rule RECOVERED from that archive and place a
      copy in each of the six compile directories, because every frozen compile
      links a bare `cobmysqlapi.o' filename resolved against the current
-     directory.  [presql2-package/cobmysqlapi38.sh] [common/comp-common.sh:L26]
+     directory.  [presql2-latest.zip:presql2-package/cobmysqlapi38.sh] [common/comp-common.sh:L26]
   3  Build and install the `presql2' translator onto the PATH.
-     [presql2-package/presql2.sh]
+     [presql2-latest.zip:presql2-package/presql2.sh]
   4  Run common/comp-common.sh UNMODIFIED, in the build copy.
   5  Run comp-all.sh UNMODIFIED, in the build copy.
 
@@ -1229,7 +914,7 @@ Options:
                       the full sequence runs).
   --skip-preflight-link
                       Skip the step-3 toolchain proof that reproduces the
-                      vendored worked example [presql2-package/ACAS/comp-stockMT.sh].
+                      vendored worked example [presql2-latest.zip:presql2-package/ACAS/comp-stockMT.sh].
   -h, --help          Print this help and exit 0.
 
 Required environment (harness/docker-compose.yml supplies all of it):
@@ -1245,7 +930,7 @@ Required environment (harness/docker-compose.yml supplies all of it):
   ACAS_DB_SOCKET      unix socket path; may legitimately be EMPTY, in which
                       case DBSOCKET=NULL is written, the only spelling the C
                       shim maps to "no socket"
-                      [presql2-package/cobmysqlapi38.c:L513-L525]
+                      [presql2-latest.zip:presql2-package/cobmysqlapi38.c:L513-L525]
 
 Optional environment:
   ACAS_BUILD_STRICT=1        promote compiler warnings to fatal
@@ -1325,8 +1010,7 @@ USAGE
 }
 
 # Validate in place and die on failure. Deliberately NOT a value-returning
-# helper: `acas_die' calls `exit', and inside a command substitution that would
-# terminate only the subshell, leaving the caller running with an empty value.
+# helper.
 acas_assert_step_number() {
   local flag="$1" value="$2"
   if [[ ! "$value" =~ ^[1-5]$ ]]; then
@@ -1420,16 +1104,10 @@ acas_step_enabled() {
   return 1
 }
 
-# PRECONDITIONS
-# This script ASSERTS its toolchain; it never installs one. harness/Dockerfile.
-# gnucobol is what provides GnuCOBOL 3.2, the MySQL client libraries under the
-# frozen prefix, the JC preSQL package and CPython 3.12. Asserting here means a
-# misconfigured image fails in seconds with a named cause instead of failing
-# minutes later inside a frozen script that reports success anyway.
+# This script ASSERTS its toolchain; it never installs one.
 
 # The full environment contract. ACAS_DB_SOCKET is deliberately in the
-# "declared" list rather than the "non-empty" list: harness/docker-compose.yml
-# sets it to the empty string on purpose, because the harness connects over TCP.
+# "declared" list rather than the "non-empty" list.
 readonly -a ACAS_REQUIRED_ENV_NONEMPTY=(
   ACAS_REPO ACAS_BUILD ACAS_DATA ACAS_OUT
   ACAS_DB_HOST ACAS_DB_PORT ACAS_DB_NAME ACAS_DB_USER ACAS_DB_PASSWORD
@@ -1449,9 +1127,6 @@ acas_assert_environment() {
     fi
   done
   for name in "${ACAS_REQUIRED_ENV_DECLARED[@]}"; do
-    # `-v' tests declaration, not content. An empty ACAS_DB_SOCKET is valid and
-    # means "no unix socket"; an UNDECLARED one means the caller did not supply
-    # the contract at all, which is a configuration error worth reporting.
     if [[ ! -v "$name" ]]; then
       printf 'FATAL: required environment variable %s is not declared.\n' "$name" >&2
       printf '       It may legitimately be EMPTY, but it must be declared.\n' >&2
@@ -1468,29 +1143,22 @@ acas_assert_environment() {
   if [[ ! "$ACAS_DB_PORT" =~ ^[0-9]+$ ]]; then
     acas_die "$EX_PRECONDITION" \
       "ACAS_DB_PORT must be numeric; got '$ACAS_DB_PORT'." \
-      'The C shim converts it with atoi() at [presql2-package/cobmysqlapi38.c:L511],' \
+      'The C shim converts it with atoi() at [presql2-latest.zip:presql2-package/cobmysqlapi38.c:L511],' \
       'so a non-numeric value silently becomes port 0.'
   fi
   # THE RANGE, not merely the character class -- and here the consequence is
-  # worse than a failed connection. atoi() has no error return
-  # [presql2-package/cobmysqlapi38.c:L511], so a value outside the port range is
-  # converted to whatever the platform's int truncation produces and handed
-  # straight to mysql_real_connect. The build would then either fail with a cause
-  # naming neither the variable nor the value, or -- worse -- succeed against a
-  # DIFFERENT port than the operator specified.
+  # worse than a failed connection.
   if (( 10#$ACAS_DB_PORT < 1 || 10#$ACAS_DB_PORT > 65535 )); then
     acas_die "$EX_PRECONDITION" \
       "ACAS_DB_PORT must be between 1 and 65535; got '$ACAS_DB_PORT'." \
       'It is written verbatim into presql2.param and converted with atoi(), which' \
-      'has no error return [presql2-package/cobmysqlapi38.c:L511], so an' \
+      'has no error return [presql2-latest.zip:presql2-package/cobmysqlapi38.c:L511], so an' \
       'out-of-range value becomes an arbitrary port rather than an error.'
   fi
 
   # Every card written into presql2.param is copied with strncpy(..., 32) at
-  # `cobmysqlapi38.c:L138,L145,L152,L159,L166,L173' into a
-  # 32-byte COBOL pic x(32) field. A longer value is TRUNCATED SILENTLY, which
-  # would produce a connection failure with no explanation, so it is rejected
-  # here instead. The password's LENGTH is checked; its VALUE is never printed.
+  # `cobmysqlapi38.c:L138,L145,L152,L159,L166,L173' into a 32-byte COBOL pic
+  # x(32) field.
   local -a checked_names=(ACAS_DB_HOST ACAS_DB_USER ACAS_DB_PASSWORD ACAS_DB_NAME
                           ACAS_DB_PORT ACAS_DB_SOCKET)
   local value
@@ -1501,15 +1169,12 @@ acas_assert_environment() {
         "$name is ${#value} characters long; the maximum is 32." \
         'read_params() copies each parameter card with strncpy(..., 32) into a' \
         'pic x(32) host field, so anything longer is truncated without warning.' \
-        '[presql2-package/cobmysqlapi38.c:L114-L176]'
+        '[presql2-latest.zip:presql2-package/cobmysqlapi38.c:L114-L176]'
     fi
   done
 
-  # Canonicalised AFTER the 32-character width check above, so an over-long value
-  # is still rejected on width exactly as before. `10#' forces base-10 so a
-  # leading zero is stripped rather than read as octal -- which matters here
-  # because the value is written verbatim into presql2.param and then read by
-  # atoi(), whose own base-10 interpretation would disagree with the shell's.
+  # Canonicalised AFTER the 32-character width check above, so an over-long
+  # value is still rejected on width exactly as before.
   ACAS_DB_PORT="$(( 10#$ACAS_DB_PORT ))"
 
   # Decided HERE, before anything connects, and not lazily on first use -- see
@@ -1759,8 +1424,7 @@ acas_assert_directories() {
 
   # THE central safety assertion. /repo is mounted read-only by
   # harness/docker-compose.yml ("../:/repo:ro") precisely so that a frozen file
-  # cannot be written even by accident. Assert the mount actually is read-only,
-  # by attempting a write and requiring it to FAIL.
+  # cannot be written even by accident.
   local probe="$ACAS_REPO/.acas-build-oracle-write-probe"
   if : > "$probe" 2>/dev/null; then
     rm -f "$probe" 2>/dev/null || true
@@ -1769,8 +1433,8 @@ acas_assert_directories() {
       'A writable checkout is the one configuration error that can silently' \
       'destroy the specification: [common/comp-common.sh:L25] regenerates every' \
       'common/*MT.cbl with presql2, and presql2 truncates its output at' \
-      '[presql2-package/presql2.cbl:L543] BEFORE validating its parameters at' \
-      '[presql2-package/presql2.cbl:L759]. Mount it "../:/repo:ro" as' \
+      '[presql2-latest.zip:presql2-package/presql2.cbl:L543] BEFORE validating its parameters at' \
+      '[presql2-latest.zip:presql2-package/presql2.cbl:L759]. Mount it "../:/repo:ro" as' \
       'harness/docker-compose.yml does, then re-run.'
   fi
   acas_log "verified: $ACAS_REPO is not writable"
@@ -1787,19 +1451,11 @@ acas_assert_directories() {
   done
   acas_log "verified: $ACAS_BUILD, $ACAS_DATA and $ACAS_OUT are writable"
 
-  # Build logs live under $ACAS_OUT/build/. They are never compared, so a
-  # timestamp there is harmless -- but nothing this script writes goes into
-  # $ACAS_OUT/<scenario>/, because the determinism test requires byte-identical
-  # scenario dumps and a clock reading in a compared file would break it.
+  # Build logs live under $ACAS_OUT/build/.
   ACAS_LOG_DIR="$ACAS_OUT/build"
   mkdir -p "$ACAS_LOG_DIR"
   # 0700, for the same reason harness/reset_db.sh, seed.sh and
-  # run_cobol_scenario.sh all narrow their own output directories: the build
-  # logs below are created no-follow, and a private directory means nothing can
-  # unlink one of those names and leave a symlink in its place between the
-  # create and the compiler's append. Best-effort by design -- if the directory
-  # was not ours to change the create still refuses a link on its own, so this
-  # is defence in depth and never the only guard.
+  # run_cobol_scenario.sh all narrow their own output directories.
   chmod 700 -- "$ACAS_LOG_DIR" 2>/dev/null || true
   acas_log "build logs: $ACAS_LOG_DIR"
 }
@@ -1817,13 +1473,8 @@ acas_assert_toolchain() {
   acas_have ldconfig || acas_warn \
     'ldconfig is not on the PATH; the shared-library cache cannot be refreshed.'
 
-  # cobc MUST be 3.2 -- the compiler the maintainer targets. A different release
-  # is a different oracle, and the oracle is the specification.
-  # [common/comp-common.sh:L8-L9] [README.TXT:L53]
-  # Even an interrogation runs under a deadline. `cobc --version' loads the
-  # runtime library, so a wedged NFS mount under COB_LIBRARY_PATH stalls it just
-  # as readily as a real compile, and a preflight check that never returns is
-  # the worst place of all to lose a run.
+  # cobc MUST be 3.2 -- the compiler the maintainer targets. A different
+  # release is a different oracle, and the oracle is the specification.
   local -a deadline=()
   acas_deadline_prefix "$ACAS_TIMEOUT_PROBE"
   deadline=("${ACAS_DEADLINE_ARGV[@]}")
@@ -1841,11 +1492,6 @@ acas_assert_toolchain() {
   fi
   acas_log "cobc: $cobc_line"
 
-  # An ISAM handler is not optional and the reason is not obvious.
-  # [general/general.cbl:L385-L396] forces COBOL indexed processing for the
-  # system parameter file ('move "00" to FA-RDBMS-Flat-Statuses') and, if that
-  # OPEN fails, CALLs the interactive sys002 -- which waits on a terminal and
-  # hangs a headless harness forever. Surface it at build time instead.
   local cobc_info isam_line
   cobc_info="$("${deadline[@]}" cobc --info 2>&1 || true)"
   isam_line="$(printf '%s\n' "$cobc_info" | grep -i 'indexed file handler' || true)"
@@ -1863,10 +1509,6 @@ acas_assert_toolchain() {
   acas_log "cobc --info: ${isam_line#*:}"
   acas_log "cobc --info: $(printf '%s\n' "$cobc_info" | grep -i 'mathematical library' || true)"
 
-  # The frozen prefix. These two paths are LITERAL in the frozen recipe, so they
-  # are checked literally: [common/comp-common.sh:L26] links
-  # -L/usr/local/mysql/lib -lmysqlclient and archive member
-  # `cobmysqlapi38.sh' compiles with -I/usr/local/mysql/include.
   [[ -e "$ACAS_FROZEN_MYSQL_PREFIX/lib/libmysqlclient.so" ]] \
     || acas_die "$EX_PRECONDITION" \
       "$ACAS_FROZEN_MYSQL_PREFIX/lib/libmysqlclient.so is absent." \
@@ -1876,11 +1518,12 @@ acas_assert_toolchain() {
     || acas_die "$EX_PRECONDITION" \
       "$ACAS_FROZEN_MYSQL_PREFIX/include/mysql.h is absent." \
       'cobmysqlapi38.c includes <mysql.h> and the recovered rule compiles with' \
-      '-I/usr/local/mysql/include. [presql2-package/cobmysqlapi38.sh]'
+      '-I/usr/local/mysql/include. [presql2-latest.zip:presql2-package/cobmysqlapi38.sh]'
   acas_log "MySQL client prefix: $ACAS_FROZEN_MYSQL_PREFIX (lib + headers present)"
 
   # ACAS_MYSQL_PREFIX is published by the image for documentation. It cannot
-  # override the frozen literal, so disagreement is reported rather than obeyed.
+  # override the frozen literal, so disagreement is reported rather than
+  # obeyed.
   if [[ -n "${ACAS_MYSQL_PREFIX-}" && "${ACAS_MYSQL_PREFIX}" != "$ACAS_FROZEN_MYSQL_PREFIX" ]]; then
     acas_warn \
       "ACAS_MYSQL_PREFIX=${ACAS_MYSQL_PREFIX} disagrees with the frozen literal ${ACAS_FROZEN_MYSQL_PREFIX}; the frozen scripts hard-code the literal, so it is used regardless."
@@ -1890,9 +1533,6 @@ acas_assert_toolchain() {
 acas_assert_loader_configuration() {
   acas_stage 'Preconditions 4/5: shared-library loader paths'
 
-  # The repository's own loader configuration, read and LEFT UNTOUCHED. The
-  # search ORDER is part of the configuration, so both content and order are
-  # compared. [etc/ld.so.conf.d/gnucobol.conf]
   local reference="$ACAS_REPO/etc/ld.so.conf.d/gnucobol.conf"
   local installed='/etc/ld.so.conf.d/gnucobol.conf'
 
@@ -1932,45 +1572,15 @@ acas_assert_loader_configuration() {
   fi
 }
 
-# -----------------------------------------------------------------------------
-# TRANSPORT SECURITY (CWE-295 improper certificate validation, CWE-319 cleartext
-# transmission). Both credentialed probes searched, unconditionally:
-#
-#     local -a ssl_variant=('' '--skip-ssl')      <-- the defect, as it was
-#
-# so a server that merely declined TLS -- or a middlebox that stripped it --
-# caused a SILENT downgrade to plaintext on the second iteration. Worse, the
-# first iteration passed no --ssl-verify-server-cert either, so even the TLS
-# attempt validated nothing: any certificate, from anyone, was accepted.
-#
-# THE POLICY, enforced by acas_assert_transport_policy and FAIL-CLOSED:
-#
-#   * A LOCAL target -- a unix socket, an empty host, or a loopback host -- may
-#     use plaintext. Nothing leaves the machine, and it is the configuration the
-#     harness actually uses: a current client enforces TLS while this server has
-#     none, so --skip-ssl is REQUIRED there.
-#   * A NON-LOCAL target must present a certificate chaining to $ACAS_DB_TLS_CA
-#     and matching its hostname. That is what --ssl-verify-server-cert adds;
-#     without a CA it verifies nothing, so the CA is required rather than optional.
-#   * Plaintext to a non-local target is permitted ONLY when
-#     ACAS_DB_ALLOW_PLAINTEXT explicitly declares the network isolated. The
-#     accepted values are a CLOSED set, so a typo fails closed.
-#   * Anything else is REFUSED before the first connection.
-#
-# A NOTE ON SCOPE, so this is not mistaken for more than it is: presql2 itself
-# connects through the vendored C shim, which calls mysql_real_connect with no
-# TLS options at all [presql2-package/cobmysqlapi38.c] -- that is FROZEN source
-# and is not modified (R-3). This policy governs the probes THIS SCRIPT issues.
-# For a non-local server the honest conclusion is therefore that the isolated
-# network has to be declared explicitly, which is exactly what
-# ACAS_DB_ALLOW_PLAINTEXT records -- as a deliberate, auditable statement instead
-# of a silent fallback.
-# -----------------------------------------------------------------------------
+# TRANSPORT SECURITY (CWE-295 certificate validation, CWE-319 cleartext).
+# The transport is decided ONCE, before anything connects, and never downgraded
+# silently. A local target may use plaintext; a non-local target needs either a
+# CA bundle in ACAS_DB_TLS_CA, whose certificate and hostname are then verified,
+# or an explicit ACAS_DB_ALLOW_PLAINTEXT declaration -- otherwise the run aborts
+# with a named cause, because the probe authenticates with a real credential.
 
 # True when the target is reachable without leaving the machine: a unix socket,
-# an empty host, a loopback name, or a numeric loopback address. RESOLVES NOTHING
-# about whether the server is trustworthy (R-6) -- it answers only "could this
-# traffic be observed on a network".
+# an empty host, a loopback name, or a numeric loopback address.
 acas_target_is_local() {
   [[ -n "${ACAS_DB_SOCKET-}" ]] && return 0
   [[ -z "$ACAS_DB_HOST" ]] && return 0
@@ -1983,8 +1593,6 @@ acas_target_is_local() {
   return 1
 }
 
-# True when ACAS_DB_ALLOW_PLAINTEXT explicitly declares the network isolated.
-# A CLOSED set of accepted spellings, so `ture' or `TRUE ' fails closed.
 acas_plaintext_declared() {
   case "${ACAS_DB_ALLOW_PLAINTEXT-}" in
     1|true|yes|on) return 0 ;;
@@ -1992,14 +1600,9 @@ acas_plaintext_declared() {
   return 1
 }
 
-# Decide, ONCE and BEFORE ANYTHING CONNECTS, which client transports this target
-# has earned. Populates ACAS_BUILD_TLS_VARIANTS, most secure first, or aborts.
-#
-# Called from acas_assert_environment, and NOT lazily from the probe: a policy
-# that is only evaluated when a connection is first attempted arrives AFTER the
-# readiness wait, which can spend its whole timeout on an unreachable host before
-# the refusal is ever reported. The operator would then be told "MariaDB never
-# became reachable" when the truth is "this script refuses to talk to it that way".
+# Decide, ONCE and BEFORE ANYTHING CONNECTS, which client transports this
+# target has earned. Populates ACAS_BUILD_TLS_VARIANTS, most secure first, or
+# aborts.
 acas_assert_transport_policy() {
   local ca="${ACAS_DB_TLS_CA-}"
   ACAS_BUILD_TLS_VARIANTS=()
@@ -2008,9 +1611,6 @@ acas_assert_transport_policy() {
     [[ -r "$ca" ]] || acas_die "$EX_PRECONDITION" \
       "ACAS_DB_TLS_CA names a file that cannot be read: $ca" \
       'It must be the PEM bundle the server certificate chains to.'
-    # --ssl-verify-server-cert is what makes the CA meaningful: without it the
-    # client encrypts but accepts any certificate, which is CWE-295 with extra
-    # steps.
     ACAS_BUILD_TLS_VARIANTS+=("--ssl-ca=$ca --ssl-verify-server-cert")
   fi
 
@@ -2045,16 +1645,8 @@ acas_assert_transport_policy() {
 # toolchain assertion and needs no client binary or credentials.
 acas_db_tcp_probe() {
   # The port range is asserted in acas_assert_environment, before anything
-  # connects, so `int(sys.argv[2])' here can no longer receive 99999 and fail with
-  # an OverflowError that names neither the variable nor the value. The range is
-  # re-checked in the probe itself because a defence that only exists at one entry
-  # point is one refactor away from not existing.
-  #
-  # An EXTERNAL deadline as well as the socket timeout below, because the two
-  # bound different things: create_connection's timeout covers the connect, but
-  # NOT the getaddrinfo() that precedes it. A host name served by an
-  # unresponsive resolver would block in name resolution with the socket timeout
-  # never reached.
+  # connects, so `int(sys.argv[2])' here can no longer receive 99999 and fail
+  # with an OverflowError that names neither the variable nor the value.
   acas_deadline_prefix "$ACAS_TIMEOUT_PROBE"
   "${ACAS_DEADLINE_ARGV[@]}" python3 - "$ACAS_DB_HOST" "$ACAS_DB_PORT" <<'PY'
 import socket
@@ -2079,45 +1671,21 @@ PY
 }
 
 # A genuinely credentialed probe -- this is what presql2 will actually need.
-# WHY THIS IS NOT A `ping': `mariadb-admin ping' ANSWERS "IS THE SERVER ALIVE",
-# NOT "ARE THESE CREDENTIALS ACCEPTED", so it exits 0 even when authentication
-# is refused -- it prints `error: 'Access denied for user ...'' on stderr and
-# still succeeds -- a refusal only comes from a server that is up. Used as a
-# readiness gate it would let a wrong password through, to resurface much later
-# as one presql2 diagnostic per bridge inside step 4. `status' and a real
-# `select 1' both exit 1 instead. Therefore: prefer a real authenticated
-# statement; fall back to `status', never to `ping'.
-# The statement runs against the schema presql2 itself connects to
-# (information_schema by default -- see acas_write_presql2_param and
-# `presql2.cbl:L798-L806'), so a grant excluding it is caught here, not later.
 
 # The password goes through MYSQL_PWD rather than argv so it never appears in
-# the process list. Both a TLS-enforcing client (which needs --skip-ssl against
-# a server without TLS) and a permissive one are tolerated.
-# Returns: 0 authenticated, 1 transient failure (retry), 2 credentials rejected
-# (a configuration error), 3 no client binary available.
-# Side effect: sets ACAS_DB_PROBE_DIAG to the client's last diagnostic.
+# the process list.
 acas_db_credentialed_probe() {
   ACAS_DB_PROBE_DIAG=''
   local dbname="${ACAS_PRESQL2_DBNAME:-information_schema}"
   local client out rc started elapsed
 
-  # EVERY client invocation below runs under ACAS_TIMEOUT_PROBE. A client that
-  # neither connects nor is refused -- a dropped packet filter is the usual
-  # cause -- would otherwise block this probe, and with it the readiness gate,
-  # indefinitely. A probe that exceeds its own deadline is reported as the
-  # transient failure it is (return 1) rather than as a fatal error: the caller,
-  # acas_wait_for_database, owns the OVERALL bound and retries until
-  # ACAS_DB_WAIT_TIMEOUT is spent.
+  # EVERY client invocation below runs under ACAS_TIMEOUT_PROBE.
   local -a deadline=()
   acas_deadline_prefix "$ACAS_TIMEOUT_PROBE"
   deadline=("${ACAS_DEADLINE_ARGV[@]}")
 
   # Unreachable unless acas_assert_transport_policy was skipped or changed: it
   # either records at least one permitted variant or aborts with a named cause.
-  # Asserted rather than assumed, because an empty list would otherwise fall
-  # straight through both layers and return 3 -- "no client binary available" --
-  # which would send the operator looking for a missing package.
   if (( ${#ACAS_BUILD_TLS_VARIANTS[@]} == 0 )); then
     acas_die "$EX_PRECONDITION" \
       'no permitted client transport for this target.' \
@@ -2128,15 +1696,13 @@ acas_db_credentialed_probe() {
   # Layer 1: a real SQL client executing a real statement.
   for client in mariadb mysql; do
     if acas_have "$client"; then
-      # The PERMITTED variants, decided by policy before anything connected -- not
-      # the unconditional ('' '--skip-ssl') pair this used to be. Every variant
-      # runs under the probe deadline resolved above.
       local variant flag
       for variant in "${ACAS_BUILD_TLS_VARIANTS[@]}"; do
         local -a argv=("${deadline[@]}" "$client" '--protocol=TCP')
         if [[ -n "$variant" ]]; then
-          # A variant may carry two words (--ssl-ca=... --ssl-verify-server-cert),
-          # so it is split deliberately -- each flag must be its own argv element.
+          # A variant may carry two words (--ssl-ca=...
+          # --ssl-verify-server-cert), so it is split deliberately -- each flag
+          # must be its own argv element.
           for flag in $variant; do
             argv+=("$flag")
           done
@@ -2159,7 +1725,7 @@ acas_db_credentialed_probe() {
         fi
         ACAS_DB_PROBE_DIAG="$out"
       done
-      # Every SSL variant of a real client failed. Classify.
+      # Every SSL variant of a real client failed.
       if [[ "$ACAS_DB_PROBE_DIAG" == *'Access denied'* ]]; then
         return 2
       fi
@@ -2211,12 +1777,7 @@ acas_wait_for_database() {
 
   # Why this gate exists, and why it is not optional: presql2 opens a LIVE
   # connection. `presql2.cbl:L784' performs MYSQL-1000-OPEN, which reaches
-  # MySQL_real_connect at `cobmysqlapi38.c:L500-L531'. presql2 runs inside
-  # step 4 via [common/comp-common.sh:L25], so it must be up BEFORE step 4 or
-  # every bridge translation fails for a reason that looks like a compiler
-  # problem. harness/docker-compose.yml declares
-  # "depends_on: mariadb: condition: service_healthy" for the same reason;
-  # this loop makes the guarantee hold outside Compose too.
+  # MySQL_real_connect at `cobmysqlapi38.c:L500-L531'.
   local timeout="${ACAS_DB_WAIT_TIMEOUT:-180}"
   if [[ ! "$timeout" =~ ^[0-9]+$ ]]; then
     acas_die "$EX_PRECONDITION" \
@@ -2230,7 +1791,7 @@ acas_wait_for_database() {
       acas_die "$EX_DATABASE" \
         "MariaDB at ${ACAS_DB_HOST}:${ACAS_DB_PORT} did not accept a TCP connection within ${timeout}s." \
         'Step 4 cannot run without it: [common/comp-common.sh:L25] invokes presql2,' \
-        'which opens a live connection at [presql2-package/presql2.cbl:L784].' \
+        'which opens a live connection at [presql2-latest.zip:presql2-package/presql2.cbl:L784].' \
         'Start the service (docker compose -f harness/docker-compose.yml up -d mariadb)' \
         'and wait for its healthcheck, or raise ACAS_DB_WAIT_TIMEOUT.'
     fi
@@ -2239,18 +1800,7 @@ acas_wait_for_database() {
   done
   acas_log "TCP reachable after ${elapsed}s"
 
-  # Authentication gate. An open port is not readiness: presql2 authenticates
-  # with exactly these credentials via read_params
-  # `cobmysqlapi38.c:L114-L176', so a wrong user or password must be caught
-  # HERE, not one diagnostic per bridge into step 4.
-  # Two failure shapes, deliberately treated differently:
-  #   - transient (connection reset, server still initialising): retried for
-  #     the full ACAS_DB_WAIT_TIMEOUT, because the port often opens before the
-  #     server will talk.
-  #   - "Access denied" (a configuration error, not a readiness state): retried
-  #     only for a short grace window, because no wait fixes a wrong password.
-  #     The window exists solely to absorb the narrow race in which
-  #     grants are still being applied.
+  # Authentication gate. An open port is not readiness.
   local auth_grace="${ACAS_DB_AUTH_GRACE:-15}"
   if [[ ! "$auth_grace" =~ ^[0-9]+$ ]]; then
     acas_die "$EX_PRECONDITION" \
@@ -2284,7 +1834,7 @@ acas_wait_for_database() {
             "The server is alive and accepting connections, so this is a credential" \
             "or grant problem, not a readiness problem -- waiting longer will not fix it." \
             "presql2 authenticates with exactly these values via read_params" \
-            '[presql2-package/cobmysqlapi38.c:L114-L176], so step 4 would fail on every' \
+            '[presql2-latest.zip:presql2-package/cobmysqlapi38.c:L114-L176], so step 4 would fail on every' \
             "one of the 28 bridges in [common/comp-common.sh:L25]." \
             "Check ACAS_DB_USER and ACAS_DB_PASSWORD, and that the user is granted" \
             "access to ${ACAS_PRESQL2_DBNAME:-information_schema} and ${ACAS_DB_NAME}." \
@@ -2302,7 +1852,7 @@ acas_wait_for_database() {
           acas_die "$EX_DATABASE" \
             "MariaDB at ${ACAS_DB_HOST}:${ACAS_DB_PORT} accepted a TCP connection but would not complete an authenticated statement within ${timeout}s." \
             'presql2 authenticates with exactly these credentials via' \
-            'read_params [presql2-package/cobmysqlapi38.c:L114-L176], so step 4' \
+            'read_params [presql2-latest.zip:presql2-package/cobmysqlapi38.c:L114-L176], so step 4' \
             'would fail. Check that the server has finished initialising.' \
             "$(acas_diag_summary "$ACAS_DB_PROBE_DIAG")"
         fi
@@ -2317,26 +1867,9 @@ acas_wait_for_database() {
 }
 
 # BUILD TREE -- DEVIATION 1 of 6: the compile runs in $ACAS_BUILD, not where
-# the frozen scripts live. Not a preference but a hard requirement:
-# [common/comp-common.sh:L25] is
-#     for i in `ls *MT.scb`; do presql2 $i; ... done
-# which REGENERATES every common/*MT.cbl in whatever directory it runs in.
-# Those 28, one per *MT.scb, are the committed, frozen files AAP 0.8.2 calls
-# "the authoritative record-layout <-> table mapping ... the data dictionary
-# for this migration". Worse, presql2 TRUNCATES its output before validating
-# parameters -- `presql2.cbl:L543' precedes `presql2.cbl:L759' -- so a mere
-# misconfiguration inside the checkout would zero all 28. Four further writes
-# make the point too: .prn listings, six copies of cobmysqlapi.o,
-# presql2.param, and every .so or executable cobc emits.
+# the frozen scripts live. Not a preference but a hard requirement.
 
-# The WHOLE checkout is copied, and that is the safe choice: the frozen
-# scripts navigate with relative paths -- `-I ../copybooks' in every compile,
-# `cd common' / `cd ../general' [comp-all.sh:L15-L32] -- so the copy must
-# preserve the tree layout exactly. Excluding directories to save space
-# (ACAS-Manuals/, Basic-Code/, payroll/, home/, .git/) works against the
-# frozen scripts as they stand but would break silently the moment one grew a
-# reference, and the cost is a few hundred megabytes on a container volume.
-# The faithful replica is worth more than the disk.
+# The WHOLE checkout is copied, and that is the safe choice.
 
 acas_prepare_build_tree() {
   acas_stage 'Build tree: copy the frozen checkout into the writable tree'
@@ -2355,13 +1888,7 @@ acas_prepare_build_tree() {
     acas_log "clearing $ACAS_BUILD"
     # Delete only the CHILDREN of $ACAS_BUILD, never $ACAS_BUILD itself: the
     # directory is a mount point in the Compose stack and removing it would
-    # break the container. The guards above have already established that this
-    # path is absolute, at least two components deep, and disjoint from
-    # $ACAS_REPO in both directions.
-    #
-    # Both bulk operations run under ACAS_TIMEOUT_BUILD. $ACAS_BUILD is a mount
-    # point in the Compose stack, so a wedged volume would otherwise stall the
-    # clear or the copy indefinitely -- before a single stage banner is printed.
+    # break the container.
     acas_run_deadline "$ACAS_TIMEOUT_BUILD" ACAS_TIMEOUT_BUILD \
       "clearing $ACAS_BUILD" "$EX_BUILDTREE" - \
       -- find "$ACAS_BUILD" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + \
@@ -2405,9 +1932,6 @@ acas_prepare_build_tree() {
     "$ACAS_BUILD/common/comp-common.sh is missing from the build tree."
 
   # The executable bit, on the COPIES only -- never on the checkout.
-  # [comp-all.sh:L16,L19,L22,L25,L28,L31] invokes each per-directory script as
-  # `./comp-*.sh', which requires the bit even though this script itself calls
-  # the two top-level scripts through `bash'.
   local script
   for script in "$ACAS_BUILD/comp-all.sh" \
                 "$ACAS_BUILD/common/comp-common.sh" \
@@ -2422,8 +1946,6 @@ acas_prepare_build_tree() {
   done
   acas_log 'verified: all seven frozen compile scripts are present and executable in the copy'
 
-  # $ACAS_BIN is created by the image under /build and the refresh removes it,
-  # so restore it for the runner scripts that install modules there.
   if [[ -n "${ACAS_BIN-}" && "$ACAS_BIN" == "$ACAS_BUILD"/* ]]; then
     mkdir -p "$ACAS_BIN"
     acas_log "restored ACAS_BIN=$ACAS_BIN"
@@ -2432,29 +1954,10 @@ acas_prepare_build_tree() {
   acas_check_copybook_closure
 }
 
-# COPY-closure advisory.
-# A precise, zero-false-positive check that every copybook the frozen build
-# needs can be resolved. It exists because there is a real source-level gap:
-# copybooks/ACAS-SQLstate-error-list.cob is COPY'd by 22 of the 28 GENERATED
-# bridges and is ABSENT from the frozen archive. Without this advisory that
-# gap surfaces minutes later as 22 apparently unrelated compile errors inside
-# a script that then reports success anyway.
-# It is an ADVISORY, not a gate: the missing copybook is a frozen-archive
-# defect and must be supplied by the maintainer, never fabricated (R-3, R-4).
-# The build is still attempted so that the log scan and the artifact assertions
-# report exactly which bridges are affected.
+# COPY-closure advisory. A precise, zero-false-positive check that every
+# copybook the frozen build needs can be resolved. It exists because there is a
+# real source-level gap.
 
-# Precision notes:
-#   * only quoted COPY targets count, and only on lines with no `*' or `/'
-#     before the keyword, which excludes fixed-format comment lines (`*' in
-#     column 7) and inline `*>' comments;
-#   * a target resolves against copybooks/ AND the program's own directory,
-#     because cobc searches the current directory as well as `-I ../copybooks';
-#   * the bare name and GnuCOBOL's usual copybook extensions are all tried,
-#     because sources use both `copy "wsdnos".' and `copy "wsbatch.cob".';
-#   * only the source sets the frozen scripts actually compile are scanned,
-#     so a copybook needed solely by a program no compile script builds --
-#     common/acasconvert3.cbl is the real example -- is correctly ignored.
 acas_collect_sources() {
   local dir="$1"
   shift
@@ -2552,20 +2055,6 @@ acas_explain_missing_sqlstate_copybook() {
 EXPLAIN
 }
 
-# STEP 1/5 -- unpack the vendored JC preSQL archive
-# The vendored archives are harness build inputs: unpacked INSIDE the container
-# and never modified in the checkout. presql2-latest.zip holds 61 entries and
-# expands to a presql2-package/ directory carrying cobmysqlapi38.c and .sh,
-# presql2.cbl and .sh, bldcopy2.*, prtschema2.*, the MYSQL-*.CPY copybooks, the
-# example .param files, and the ACAS/, Variations/ and old-apis/ subdirectories.
-# =============================================================================
-# The digest of this archive is asserted BEFORE a single byte is extracted, by
-# acas_assert_archive_digest -- defined once in VENDORED ARCHIVE AUDIT above,
-# alongside acas_file_sha256 and acas_extract_audited_zip, so that the pin, the
-# digest computation and the member audit cannot drift apart. sha256sum is
-# preferred there and python3's hashlib is the fallback, so the check cannot be
-# skipped merely because coreutils is minimal: a digest check that quietly does
-# nothing is worse than none, because it reports confidence it does not have.
 
 acas_step1_unpack_presql2() {
   acas_banner 1 'unpack the vendored JC preSQL archive'
@@ -2584,35 +2073,16 @@ acas_step1_unpack_presql2() {
     acas_assert_archive_digest "$archive"
 
     # A scratch directory INSIDE the writable build tree, removed on exit. The
-    # archive itself is never touched: it is read out of the read-only checkout.
+    # archive itself is never touched: it is read out of the read-only
+    # checkout.
     local scratch="$ACAS_BUILD/.acas-presql2"
     acas_remove_build_scratch '.acas-presql2'
     mkdir -p "$scratch"
     ACAS_SCRATCH_DIRS+=("$scratch")
 
     # EXTRACTED UNDER A MEMBER POLICY, NOT WITH `unzip -o' OR `extractall'.
-    #
     # Identity was asserted above; this is the member-by-member audit that must
-    # follow it. Both of the calls this replaces trusted every member name in
-    # the archive. A zip entry may legitimately be named `../../etc/whatever' or
-    # `/etc/whatever', may be a symlink whose target is followed on the NEXT
-    # extraction, and may be a device or fifo entry -- and `unzip -o'
-    # additionally OVERWRITES without asking. Because steps 2 and 3 then compile
-    # C and COBOL out of what came out and install the result to
-    # /usr/local/bin, a traversal here is not merely a stray file: it is
-    # arbitrary content placed anywhere this process can write, in a tree whose
-    # products define the oracle -- and the oracle is the behavioural
-    # specification for the whole migration. The digest assertion above makes
-    # this defence redundant for the committed archive; it is kept because
-    # ACAS_PRESQL2_SHA256 can legitimately point the digest at a NEW package,
-    # and the member policy is what makes that override safe rather than merely
-    # explicit.
-    #
-    # `unzip' is not used at all -- it has no portable way to refuse a hostile
-    # member -- and neither is zipfile.extractall(), which still materialises
-    # symlink members verbatim. acas_extract_audited_zip judges every name
-    # before a single byte is written, so a rejected archive leaves no partial
-    # tree behind, and it runs under a finite deadline.
+    # follow it.
     acas_extract_audited_zip "$archive" "$scratch" "$ACAS_PRESQL2_ARCHIVE_ROOT"
 
     [[ -d "$scratch/$ACAS_PRESQL2_ARCHIVE_ROOT" ]] || acas_die "$EX_STEP1" \
@@ -2633,31 +2103,14 @@ acas_step1_unpack_presql2() {
 
   # Two coexisting version strings. BOTH are true and NEITHER is resolved: the
   # package README records one, the translator's own WORKING-STORAGE another.
-  # Recorded rather than reconciled (R-4, R-5).
-  acas_note 'preSQL package version per [presql2-package/README.SVN:L22]: 1.14f'
-  acas_note 'translator version per [presql2-package/presql2.cbl:L302]: " 2.22 "'
+  acas_note 'preSQL package version per [presql2-latest.zip:presql2-package/README.SVN:L22]: 1.14f'
+  acas_note 'translator version per [presql2-latest.zip:presql2-package/presql2.cbl:L302]: " 2.22 "'
 }
 
 # STEP 2/5 -- the RECOVERED build rule for the bridge's C interface object
-# `find . -name cobmysqlapi*' over the whole ACAS checkout returns nothing: no
-# object, no C source, and NO RULE ANYWHERE THAT BUILDS IT. Yet every
-# RDBMS-touching compile links a bare `cobmysqlapi.o':
-# [common/comp-common.sh:L26] (bridges), :L32 (handlers), :L34 (IRS handlers),
-# :L36 (acas-get-params), :L40-L42 (fhlogger, xl150, sys002), :L45 (ACAS.cbl),
-# :L51 (loaders), and every per-directory script -- [general/comp-gl.sh:L2],
-# [irs/comp-irs.sh:L2], [purchase/comp-purchase.sh:L2],
-# [sales/comp-sales.sh:L7], [stock/comp-stock.sh:L2]. Following the compile
-# scripts alone, the oracle cannot be built at all.
+# `find .
 
-# The rule was recovered from the vendored package. Verbatim, and the whole of
-# archive member `cobmysqlapi38.sh':
-#     gcc -I/usr/local/mysql/include -c cobmysqlapi38.c -o cobmysqlapi.o -fPIC
-# cobmysqlapi38.c ONLY. The superseded variants must not be used:
-# `old-apis/cobmysqlapi.sh' is `gcc -I/usr/include/mysql -c cobmysqlapi.005.c'
-# and `old-apis/cobmysqlapi3.sh' is
-# `gcc -I/usr/include/mysql -c cobmysqlapi3.c -o cobmysqlapi.o' -- a DIFFERENT
-# include path and, decisively, NO -fPIC, so neither can be linked into the
-# `cobc -m' shared modules the frozen scripts build.
+# The rule was recovered from the vendored package.
 acas_step2_build_cobmysqlapi() {
   acas_banner 2 'compile cobmysqlapi.o with the recovered build rule'
 
@@ -2677,34 +2130,27 @@ acas_step2_build_cobmysqlapi() {
     ACAS_SCRATCH_DIRS+=("$workdir")
     cp -p "$ACAS_PRESQL2_DIR/cobmysqlapi38.c" "$workdir/cobmysqlapi38.c"
 
-    acas_log 'running the recovered rule verbatim [presql2-package/cobmysqlapi38.sh]:'
+    acas_log 'running the recovered rule verbatim [presql2-latest.zip:presql2-package/cobmysqlapi38.sh]:'
     acas_log '  gcc -I/usr/local/mysql/include -c cobmysqlapi38.c -o cobmysqlapi.o -fPIC'
     acas_run_deadline "$ACAS_TIMEOUT_COMPILE" ACAS_TIMEOUT_COMPILE \
       'compiling cobmysqlapi38.c' "$EX_STEP2" "$workdir" \
       -- gcc -I/usr/local/mysql/include -c cobmysqlapi38.c -o cobmysqlapi.o -fPIC \
       || acas_die "$EX_STEP2" \
       'compiling cobmysqlapi38.c failed.' \
-      'This is the recovered rule from [presql2-package/cobmysqlapi38.sh]; it needs' \
+      'This is the recovered rule from [presql2-latest.zip:presql2-package/cobmysqlapi38.sh]; it needs' \
       "$ACAS_FROZEN_MYSQL_PREFIX/include/mysql.h and a working C compiler." \
       'Without the object, every bridge, handler and loader fails at link time' \
       'with nothing more informative than "cobmysqlapi.o: No such file or directory".'
 
     [[ -s "$workdir/cobmysqlapi.o" ]] || acas_die "$EX_STEP2" \
       "gcc reported success but $workdir/cobmysqlapi.o is missing or empty." \
-      '[presql2-package/cobmysqlapi38.sh]'
+      '[presql2-latest.zip:presql2-package/cobmysqlapi38.sh]'
     ACAS_COBMYSQLAPI_SRC="$workdir/cobmysqlapi.o"
     acas_log "built $ACAS_COBMYSQLAPI_SRC ($(wc -c < "$ACAS_COBMYSQLAPI_SRC") bytes)"
   fi
 
-  # SIX copies, one per compile directory. The link references a BARE FILENAME
-  # -- `cobc -m $i cobmysqlapi.o ...' at [common/comp-common.sh:L26] and
-  # `cobc -m $i ... cobmysqlapi.o ...' at [general/comp-gl.sh:L2] -- which the
-  # linker resolves against the CURRENT DIRECTORY. [comp-all.sh:L15-L32] cd s
-  # into all six directories in turn, so the object must exist in all six. This
-  # is not redundancy; it is what the frozen recipe requires.
+  # SIX copies, one per compile directory.
   local dir target
-  # $ACAS_BUILD is a mount point in the Compose stack, so even a small write into
-  # it is bounded: a wedged volume must fail this stage, not stall it.
   for dir in "${ACAS_COMPILE_DIRS[@]}"; do
     target="$ACAS_BUILD/$dir/cobmysqlapi.o"
     acas_run_deadline "$ACAS_TIMEOUT_PROBE" ACAS_TIMEOUT_PROBE \
@@ -2717,11 +2163,6 @@ acas_step2_build_cobmysqlapi() {
   acas_log "placed cobmysqlapi.o in all ${#ACAS_COMPILE_DIRS[@]} compile directories: $(acas_join_words "${ACAS_COMPILE_DIRS[@]}")"
 }
 
-# STEP 3/5 -- build and install the presql2 translator
-# Verbatim, and the whole of archive member `presql2.sh':
-#     cobc -x presql2.cbl cobmysqlapi.o -L/usr/local/mysql/lib -lmysqlclient -lz
-# [common/comp-common.sh:L25] invokes `presql2' by name over every *MT.scb, so
-# it must be on the PATH before step 4.
 acas_step3_build_presql2() {
   acas_banner 3 'build and install the presql2 translator'
 
@@ -2734,7 +2175,7 @@ acas_step3_build_presql2() {
         'Run step 1 first (omit --from/--only, or use --from 1).'
     [[ -n "$ACAS_COBMYSQLAPI_SRC" && -s "$ACAS_COBMYSQLAPI_SRC" ]] \
       || acas_die "$EX_STEP3" \
-        'cobmysqlapi.o is unavailable, and [presql2-package/presql2.sh] links it.' \
+        'cobmysqlapi.o is unavailable, and [presql2-latest.zip:presql2-package/presql2.sh] links it.' \
         'Run step 2 first.'
 
     local workdir="$ACAS_BUILD/.acas-presql2-build"
@@ -2742,8 +2183,6 @@ acas_step3_build_presql2() {
     mkdir -p "$workdir"
     ACAS_SCRATCH_DIRS+=("$workdir")
 
-    # presql2.cbl COPYs the MYSQL-*.CPY interface copybooks that ship beside it,
-    # so they are staged into the same directory and COBCPY is pointed there.
     cp -p "$ACAS_PRESQL2_DIR/presql2.cbl" "$workdir/"
     local cpy
     for cpy in MYSQL-VARIABLES.CPY MYSQL-PROCEDURES.CPY \
@@ -2752,10 +2191,9 @@ acas_step3_build_presql2() {
     done
     cp -p "$ACAS_COBMYSQLAPI_SRC" "$workdir/cobmysqlapi.o"
 
-    acas_log 'running the vendored rule verbatim [presql2-package/presql2.sh]:'
+    acas_log 'running the vendored rule verbatim [presql2-latest.zip:presql2-package/presql2.sh]:'
     acas_log '  cobc -x presql2.cbl cobmysqlapi.o -L/usr/local/mysql/lib -lmysqlclient -lz'
-    # `env' carries the two copybook variables: it EXECS cobc, so the process
-    # timeout supervises is cobc itself and nothing extra survives a deadline.
+    # `env' carries the two copybook variables.
     acas_run_deadline "$ACAS_TIMEOUT_COMPILE" ACAS_TIMEOUT_COMPILE \
       'building presql2' "$EX_STEP3" "$workdir" \
       -- env "COBCPY=$workdir" "COB_COPY_DIR=$workdir" \
@@ -2766,7 +2204,7 @@ acas_step3_build_presql2() {
 
     [[ -s "$workdir/presql2" ]] || acas_die "$EX_STEP3" \
       "cobc reported success but $workdir/presql2 was not produced." \
-      '[presql2-package/presql2.sh]'
+      '[presql2-latest.zip:presql2-package/presql2.sh]'
     acas_run_deadline "$ACAS_TIMEOUT_PROBE" ACAS_TIMEOUT_PROBE \
       'installing presql2' "$EX_STEP3" - \
       -- install -m 0755 "$workdir/presql2" /usr/local/bin/presql2 \
@@ -2775,19 +2213,13 @@ acas_step3_build_presql2() {
       'Root privileges are required, or place it on the PATH yourself.'
     acas_log 'installed /usr/local/bin/presql2'
 
-    # bldcopy2 is built for completeness. Note the SPACE after -L, which is how
-    # archive member `bldcopy2.sh' is written, and that it links WITHOUT -lz.
-    # No frozen ACAS script invokes bldcopy2, so a failure here cannot block the
-    # oracle and is reported rather than fatal.
+    # bldcopy2 is built for completeness.
     if [[ -f "$ACAS_PRESQL2_DIR/bldcopy2.cbl" ]] && ! acas_have bldcopy2; then
       cp -p "$ACAS_PRESQL2_DIR/bldcopy2.cbl" "$workdir/"
-      acas_log 'running the vendored rule verbatim [presql2-package/bldcopy2.sh]:'
+      acas_log 'running the vendored rule verbatim [presql2-latest.zip:presql2-package/bldcopy2.sh]:'
       acas_log '  cobc -x bldcopy2.cbl cobmysqlapi.o -L /usr/local/mysql/lib -lmysqlclient'
       # The deadline is imposed with acas_deadline_prefix rather than with
-      # acas_run_deadline because THIS site must stay non-fatal: a stuck
-      # bldcopy2 build is killed at the deadline and downgraded to a warning,
-      # so it can neither hang the harness nor block an oracle that does not
-      # depend on it. Every other compile in this script is fatal on timeout.
+      # acas_run_deadline because THIS site must stay non-fatal.
       local bldcopy_rc=0 bldcopy_started bldcopy_elapsed
       acas_deadline_prefix "$ACAS_TIMEOUT_COMPILE"
       bldcopy_started="$SECONDS"
@@ -2819,12 +2251,7 @@ acas_step3_build_presql2() {
     '[common/comp-common.sh:L25] invokes it by name for every *MT.scb.'
 
   # DEVIATION 6 of 6 -- a deliberate omission, recorded as one (R-5):
-  # prtschema2 is NOT built. The archive ships no prtschema2.cbl, so its own
-  # rule `prtschema2.sh:L1' has to generate it by RUNNING presql2 -- which
-  # would need a second credential
-  # file at translate time -- and no frozen ACAS script invokes prtschema2 at
-  # all. Building it would add a credential write and a failure mode for no
-  # gain to the oracle.
+  # prtschema2 is NOT built.
   acas_note 'prtschema2 is deliberately not built: the archive ships no prtschema2.cbl and no frozen ACAS script uses it'
 
   if (( ACAS_RUN_PREFLIGHT_LINK )); then
@@ -2834,15 +2261,6 @@ acas_step3_build_presql2() {
   fi
 }
 
-# Toolchain link proof.
-# Reproduces the vendored worked example `ACAS/comp-stockMT.sh'
-# verbatim in a scratch directory:
-#     cobc -m stockMT.COB cobmysqlapi.o -L/usr/local/mysql/lib -lmysqlclient -lz
-# A real generated ACAS bridge, compiled exactly as ACAS compiles its own. A
-# clean link here exercises the entire COBOL-to-MySQL toolchain before a single
-# frozen script runs, and a missing or wrong cobmysqlapi.o is precisely the
-# failure it catches -- the failure that is otherwise reported as an
-# unattributable link error minutes into step 4.
 acas_preflight_link_proof() {
   local example="$ACAS_PRESQL2_DIR/ACAS"
   if [[ -z "$ACAS_PRESQL2_DIR" || ! -f "$example/stockMT.COB" ]]; then
@@ -2857,7 +2275,7 @@ acas_preflight_link_proof() {
   cp -a "$example/." "$proof/"
   cp -p "$ACAS_COBMYSQLAPI_SRC" "$proof/cobmysqlapi.o"
 
-  acas_log 'proving the toolchain with [presql2-package/ACAS/comp-stockMT.sh]:'
+  acas_log 'proving the toolchain with [presql2-latest.zip:presql2-package/ACAS/comp-stockMT.sh]:'
   acas_log '  cobc -m stockMT.COB cobmysqlapi.o -L/usr/local/mysql/lib -lmysqlclient -lz'
   acas_run_deadline "$ACAS_TIMEOUT_COMPILE" ACAS_TIMEOUT_COMPILE \
     'the vendored worked example (stockMT)' "$EX_STEP3" "$proof" \
@@ -2867,11 +2285,11 @@ acas_preflight_link_proof() {
     'the vendored worked example failed to compile.' \
     'The COBOL-to-MySQL toolchain is incomplete, so every frozen bridge compile' \
     'would fail the same way. Check cobmysqlapi.o, mysql.h and libmysqlclient.so.' \
-    '[presql2-package/ACAS/comp-stockMT.sh]'
+    '[presql2-latest.zip:presql2-package/ACAS/comp-stockMT.sh]'
 
   [[ -s "$proof/stockMT.so" ]] || acas_die "$EX_STEP3" \
     'cobc reported success but stockMT.so was not produced.' \
-    '[presql2-package/ACAS/comp-stockMT.sh]'
+    '[presql2-latest.zip:presql2-package/ACAS/comp-stockMT.sh]'
 
   if acas_have ldd; then
     if ldd "$proof/stockMT.so" 2>/dev/null | grep -q 'not found'; then
@@ -2885,51 +2303,14 @@ acas_preflight_link_proof() {
   acas_log 'verified: a real generated ACAS bridge compiles and links against the recovered cobmysqlapi.o'
 }
 
-# presql2.param -- the credential file the translator requires and the checkout
-#                  does not contain
-# read_params() in the recovered C shim, declared at `cobmysqlapi38.c:L114',
-# derives its filename from the calling program's name -- sprintf(zwi2,
-# "%s.param", zwi) at :L126 -- and opens it RELATIVE TO THE CURRENT DIRECTORY
-# at :L127. When the file is absent it prints "Could not read file
-# >presql2.param<, aborting..." and calls exit(5) at :L129-L130. It then reads
-# exactly SIX cards and prefix-validates each in this order, exit(6) on any
-# mismatch:
-#   DBHOST=    :L134-L137      DBNAME=    :L155-L158
-#   DBUSER=    :L141-L144      DBPORT=    :L162-L165
-#   DBPASSWD=  :L148-L151      DBSOCKET=  :L169-L172
 
 # presql2.cbl reads it at `presql2.cbl:L759-L773' and states the requirement in
-# its own prologue at :L55 ("This filename MUST be presql2.param"). NO *.param
-# file exists anywhere in the ACAS checkout, so one must be materialised, and
-# in the directory presql2 runs in -- $ACAS_BUILD/common, because
-# [common/comp-common.sh:L25] runs there. DEVIATION 2 of 6 -- presql2.param is
-# a NEW file the frozen recipe never creates. Unavoidable: no *.param exists
-# anywhere in the checkout, yet read_params aborts with exit(5) without one. It
-# is written only into the writable build tree, never the checkout, and is
-# shredded on exit.
+# its own prologue at :L55 ("This filename MUST be presql2.param").
 
 # DEVIATION 3 of 6 -- WHY DBNAME IS information_schema, NOT $ACAS_DB_NAME.
-# presql2 builds its metadata query at `presql2.cbl:L798-L806' as "SELECT
-# COLUMN_NAME, DATA_TYPE, ... FROM COLUMNS WHERE TABLE_SCHEMA=..." -- and `FROM
-# COLUMNS' is UNQUALIFIED. The connected schema must therefore be the one that
-# owns COLUMNS, i.e. information_schema, and presql2 queries it LIVE. The
-# schema actually being described arrives separately, from each bridge's own
-# BASE= directive (BASE=ACASDB, e.g. [common/glpostingMT.scb:L273-L276]), and
-# is substituted into TABLE_SCHEMA. The vendored example agrees:
-# `presql2.param' line 4 is DBNAME=information_schema. ACAS_PRESQL2_DBNAME can
-# override this for experimentation; the default is the value the source
-# requires.
 
 # DEVIATION 4 of 6 -- an EMPTY ACAS_DB_SOCKET is written as the literal
-# DBSOCKET=NULL rather than as an empty value. MySQL_real_connect at
-# `cobmysqlapi38.c:L513-L525' maps unix_socket to NULL only for the literals
-# "0", "null" and "NULL"; an empty string is passed through as "" and defeats
-# the TCP connection. harness/docker-compose.yml sets ACAS_DB_SOCKET: "", so
-# this translation is what makes the Compose default work. CREDENTIAL HYGIENE.
-# Written under umask 077, chmod 0600 explicitly, never echoed, never passed in
-# argv, and shredded then unlinked by the EXIT trap on every exit path. Every
-# value is a PLACEHOLDER supplied from the environment; no real credential is
-# committed anywhere in this tree.
+# DBSOCKET=NULL rather than as an empty value.
 acas_write_presql2_param() {
   local dir="$1"
   local prog="${2:-presql2}"
@@ -2940,32 +2321,13 @@ acas_write_presql2_param() {
 
   local dbname="${ACAS_PRESQL2_DBNAME:-information_schema}"
 
-  # An EMPTY socket is written as the literal NULL. MySQL_real_connect maps
-  # unix_socket to NULL only for the exact strings "0", "null" and "NULL"
-  # `cobmysqlapi38.c:L513-L525'; an empty string is passed
-  # through as an empty socket path, which is not the same thing. NULL is the
-  # only unambiguous spelling of "connect over TCP, there is no socket", and
-  # harness/docker-compose.yml sets ACAS_DB_SOCKET to the empty string on
-  # purpose. A non-empty value is written verbatim.
   local socket="${ACAS_DB_SOCKET-}"
   if [[ -z "$socket" ]]; then
     socket='NULL'
   fi
 
-  # CREATED EMPTY, EXCLUSIVELY, AND CHMOD'ED 0600 BEFORE THE PASSWORD IS WRITTEN.
-  #
-  # This replaces `> "$target"' followed by a chmod. Two things were wrong with
-  # that and only one of them was the mode: `>' also FOLLOWS a symlink and
-  # TRUNCATES its target, so anything able to create `presql2.param' in the build
-  # tree first both chose the victim and then read the password. The local
-  # `umask 077' narrowed the mode window but could not close it -- a mode is a
-  # property of the inode, not of the write -- and it did nothing at all about the
-  # symlink. See SAFE FILE CREATION for the four steps.
-  #
-  # THE FILE IS REGISTERED FOR SHREDDING IMMEDIATELY AFTER THE CREATE AND BEFORE
-  # THE CONTENT IS WRITTEN. If the write fails half way, the EXIT trap must still
-  # find the file and shred it; registering afterwards would leave a partially
-  # written credential on disk on exactly the path where something went wrong.
+  # CREATED EMPTY, EXCLUSIVELY, AND CHMOD'ED 0600 BEFORE THE PASSWORD IS
+  # WRITTEN.
   acas_create_private_file "$target" "the $prog parameter file" "$EX_STEP4"
   ACAS_PARAM_FILES+=("$target")
 
@@ -2980,68 +2342,29 @@ acas_write_presql2_param() {
     printf 'DBSOCKET=%s\n' "$socket"
   } >> "$target" || acas_die "$EX_STEP4" "could not write $target."
 
-  # LF endings are correct: cobapi_read_line stops at '\n' or EOF and discards
-  # '\r' `cobmysqlapi38.c:L77-L93'.
   acas_log "wrote $target (0600, six cards in the order read_params requires)"
   acas_log "  DBHOST=${ACAS_DB_HOST}  DBUSER=${ACAS_DB_USER}  DBPASSWD=<redacted>"
   acas_log "  DBNAME=${dbname}  DBPORT=${ACAS_DB_PORT}  DBSOCKET=${socket}"
   acas_note 'it is shredded and unlinked by the EXIT trap, on every exit path'
 }
 
-# LOG SCANNING -- the workaround for the unconditional `exit 0'
-# Every frozen compile script ends `exit 0' unconditionally (see the header),
-# so their exit status carries no information. This scan is one of the two
-# mechanisms that actually detect failure; the artifact assertions are the
-# other, and are more reliable because they inspect the products rather than
-# the prose. Both always run.
-# THE CLASSIFICATION, stated so a reviewer can audit it:
-#   BENIGN  -- excluded from the counts, but the number excluded is REPORTED so
-#              nothing is hidden. Exactly one family qualifies: "warning:
-#              '_FORTIFY_SOURCE' redefined" and its companion "note: this is
-#              the location of the previous definition", one pair per compile.
-#              They come from the C compiler, not cobc, and say nothing about
+# LOG SCANNING -- the workaround for the unconditional `exit 0' Every frozen
+# compile script ends `exit 0' unconditionally (see the header), so their exit
+# status carries no information.
 
-#              the artifact produced: the frozen scripts pass
-#              -D_FORTIFY_SOURCE=1 ([general/comp-gl.sh:L2] and its siblings)
-#              on a toolchain that already defines it.
-#   FATAL   -- always fails the build: cobc and gcc diagnostics, linker
-#              failures, missing files, crashes, and the two exit paths of the
-#              preSQL credential reader. The patterns are colon-anchored
-#              (`error:', `warning:') for a specific reason: the frozen scripts
-#              themselves print "check for any error or warning messages"
-#              ([comp-all.sh:L44]), which must not be read as a diagnostic. The
-#              end-of-group summary is matched as `[1-9][0-9]* error' so that
-#              "0 errors" never matches.
+# the artifact produced: the frozen scripts pass -D_FORTIFY_SOURCE=1
+# ([general/comp-gl.sh:L2] and its siblings) on a toolchain that already
+# defines it. FATAL -- always fails the build.
 
-#              `No such file or directory' is matched WITHOUT a colon anchor,
-#              because a missing cobmysqlapi.o produces "prog.cbl: cobc:
-#              cobmysqlapi.o: No such file or directory" with no `error:' token
-#              at all -- and that is the single most important failure this
-#              script must catch.
-#   WARNING -- reported with a count and the full text, and fatal only when
-#              ACAS_BUILD_STRICT=1. -Wlinkage is used deliberately by the
-#              maintainer at [common/comp-common.sh:L26] and throughout, and
-#              this codebase does produce diagnostics, so warnings are neither
-#              silently accepted nor silently fatal. The warnings that DO
+# `No such file or directory' is matched WITHOUT a colon anchor, because a
+# missing cobmysqlapi.o produces.
 
-#              indicate a missing artifact -- `undefined reference', `cannot
-#              find -l' -- are classified FATAL above, which is what makes the
-#              default safe.
-# DO NOT "IMPROVE" THIS BY SCANNING THE .prn LISTINGS -- IT IS A TRAP.
-#   The frozen scripts pass `-T <name>.prn' to every compile, and each listing
-#   ends with an authoritative-looking "N errors in compilation group". That is
-#   not trustworthy on its own: when a compile fails because a COPY target is
-#   missing, cobc aborts BEFORE refreshing the listing, so a STALE listing from
-#   an earlier run survives and still claims "0 errors" for a bridge that
-#   produced no module at all.
+# indicate a missing artifact -- `undefined reference', `cannot find -l' -- are
+# classified FATAL above, which is what makes the default safe.
 
-#   With copybooks/ACAS-SQLstate-error-list.cob absent, that is exactly what
-#   analMT, auditMT and glpostingMT do. A semantic error, by contrast, DOES
-#   reach the listing. So the listing is a COMPLEMENT at best and misleading at
-#   worst. The two signals this script relies on -- this scan, which catches
-#   the abort-before-listing class, and the artifact assertions, which inspect
-#   the products -- cover both classes without ever trusting a listing. If the
-#   summary line does reach the console it is caught anyway by FATAL above.
+# With copybooks/ACAS-SQLstate-error-list.cob absent, that is exactly what
+# analMT, auditMT and glpostingMT do. A semantic error, by contrast, DOES reach
+# the listing.
 readonly -a ACAS_LOG_BENIGN_PATTERNS=(
   '_FORTIFY_SOURCE.*redefined'
   'note: this is the location of the previous definition'
@@ -3069,7 +2392,6 @@ readonly -a ACAS_LOG_WARNING_PATTERNS=(
   '[1-9][0-9]* warning[s]? in compilation group'
 )
 
-# acas_scan_build_log <logfile> <label> <exit-code-on-failure>
 acas_scan_build_log() {
   local log="$1" label="$2" failure_code="$3"
 
@@ -3085,8 +2407,6 @@ acas_scan_build_log() {
   total="$(wc -l < "$log" | tr -d '[:space:]')"
   benign_count="$(grep -cE "$benign_re" "$log" || true)"
 
-  # A filtered view with the benign families removed, kept beside the raw log so
-  # a reviewer can inspect exactly what was and was not classified.
   local filtered="${log%.log}.filtered.log"
   grep -vE "$benign_re" "$log" > "$filtered" || true
 
@@ -3129,7 +2449,7 @@ acas_scan_build_log() {
          per-directory script -- and the ACAS checkout contains neither the
          object nor any rule that builds it. Step 2 places a copy in all six
          compile directories using the rule recovered from
-         [presql2-package/cobmysqlapi38.sh]. Re-run step 2 (--from 2) and do
+         [presql2-latest.zip:presql2-package/cobmysqlapi38.sh]. Re-run step 2 (--from 2) and do
          not delete the object from any of common, general, irs, purchase,
          sales or stock.
          --------------------------------------------------------------------
@@ -3140,10 +2460,10 @@ EXPLAIN
          --------------------------------------------------------------------
          presql2 could not read or could not parse its credential file. The C
          shim opens "<progname>.param" relative to the CURRENT DIRECTORY at
-         [presql2-package/cobmysqlapi38.c:L127] and exits 5 when it is absent;
+         [presql2-latest.zip:presql2-package/cobmysqlapi38.c:L127] and exits 5 when it is absent;
          it then prefix-validates six cards in the fixed order DBHOST=, DBUSER=,
          DBPASSWD=, DBNAME=, DBPORT=, DBSOCKET= and exits 6 on any mismatch
-         [presql2-package/cobmysqlapi38.c:L134-L172]. The file is written by
+         [presql2-latest.zip:presql2-package/cobmysqlapi38.c:L134-L172]. The file is written by
          acas_write_presql2_param into the directory presql2 runs in, and the
          EXIT trap removes it afterwards. Check ACAS_DB_* and re-run.
          --------------------------------------------------------------------
@@ -3168,39 +2488,12 @@ EXPLAIN
   fi
 }
 
-# STEP 4/5 -- run common/comp-common.sh UNMODIFIED
-# What it does, in its own order, so the expected output is known:
-#   L18  cobc -m accept_numeric.c -lncursesw -A '-DHAVE_NCURSESW_NCURSES_H
-#        -DDECIMAL_RIGHT'   (needs the wide-character ncurses headers)
-#   L21  dummy-rdbmsMT.cbl        L23  ACAS-Sysout.cbl
-#   L25  presql2 over every *MT.scb -- REGENERATES *MT.cbl in the build copy,
-#        harmless there and catastrophic in the checkout
-#   L26  every *MT.cbl as a module, linking cobmysqlapi.o
-#   L29  maps0*.cbl (no cobmysqlapi.o)      L32  acas0*.cbl
-#   L34  acasirsub*.cbl                     L36  acas-get-params
-#   L40-L42  fhlogger, xl150, sys002        L45  cobc -x ACAS.cbl
-#   L51  all 28 *LD.cbl as executables -- what harness/seed.sh invokes
+# STEP 4/5 -- run common/comp-common.sh UNMODIFIED What it does, in its own
+# order, so the expected output is known.
 
-#   L54  *UNL.cbl      L57  *RES.cbl        L59  exit 0  (unconditional)
-# A frozen anomaly worth knowing and NOT fixing (R-4): `ls *MT.cbl' at L26
-# matches 29 files, not 28. The extra one is dummy-rdbmsMT.cbl, which has no
-# *MT.scb and was already compiled at L21 without cobmysqlapi.o; L26 compiles
-# it again WITH the object and overwrites the first result. Reproduced as-is.
-# TWO PHANTOM FLAGS -- RECORDED SO NOBODY "RESTORES" THEM (R-4). The frozen
-# changelog header claims two compiler flags that no live invocation uses.
-# [common/comp-common.sh:L8-L9] says "-Wno-goto-section added to remove the
-# silly default warning in latest gnucobol v3.2" and [README.TXT:L204-L212]
-# repeats it, yet across the live (non-comment) lines of all seven frozen
-# compile scripts -Wno-goto-section occurs zero times.
+# L54 *UNL.cbl L57 *RES.cbl L59 exit 0 (unconditional) A frozen anomaly worth
+# knowing and NOT fixing (R-4).
 
-# [common/comp-common.sh:L11] says "Added to all comps -fdump=all", yet
-# -fdump=all occurs zero times: what exists is -fdump=ws, in general (3 lines),
-# irs (4) and purchase (3) only, with sales and stock carrying none.
-# A maintainer reading that changelog will be tempted to put the missing flags
-# back. DO NOT. Adding either changes cobc's diagnostics and, for the
-# arithmetic the migration depends on, the compiler must be invoked exactly as
-# the maintainer actually invokes it -- default arithmetic, and no flag this
-# script added or removed.
 acas_step4_comp_common() {
   acas_banner 4 'run common/comp-common.sh UNMODIFIED'
 
@@ -3211,36 +2504,23 @@ acas_step4_comp_common() {
     "$common_dir/cobmysqlapi.o is absent or empty." \
     '[common/comp-common.sh:L26] links it as a bare filename resolved against' \
     'the current directory, so it must be present here before the script runs.' \
-    'Run step 2 (--from 2). [presql2-package/cobmysqlapi38.sh]'
+    'Run step 2 (--from 2). [presql2-latest.zip:presql2-package/cobmysqlapi38.sh]'
 
   acas_write_presql2_param "$common_dir" presql2
 
-  # No-follow, exclusive, 0600 -- the same treatment presql2.param gets. A build
-  # log holds no credential, but a bare `: >' here would still let anything that
-  # could plant a symlink at this predictable name truncate the file it pointed
-  # at, which is the whole of CWE-59/CWE-367 and is not excused by the payload
-  # being uninteresting.
+  # No-follow, exclusive, 0600 -- the same treatment presql2.param gets.
   local log="$ACAS_LOG_DIR/comp-common.log"
   acas_create_private_file "$log" 'the comp-common.sh build log' "$EX_STEP4"
 
-  # DEVIATION 5 of 6 -- COBCPY and COB_COPY_DIR are set for this invocation only.
-  # Setting them is the maintainer's own practice -- [comp-all.sh:L9-L10] exports
-  # both -- and the deviation is only that absolute paths are used instead of the relative
-  # `../copybooks', because step 4 runs comp-common.sh directly rather than
-  # through comp-all.sh. comp-all.sh's own relative values are left untouched and
-  # take effect in step 5. The frozen script itself is not modified in any way.
+  # DEVIATION 5 of 6 -- COBCPY and COB_COPY_DIR are set for this invocation
+  # only.
   acas_log "running: bash ./comp-common.sh   (cwd $common_dir)"
   acas_log "COBCPY=$ACAS_BUILD/copybooks (absolute; cf. [comp-all.sh:L9-L10])"
   acas_log "deadline: ${ACAS_TIMEOUT_BUILD}s (raise ACAS_TIMEOUT_BUILD on a slower host)"
 
   # The deadline is imposed with acas_deadline_prefix rather than with
   # acas_run_deadline because this output must reach the log through `tee' and
-  # acas_run_deadline cannot be piped: the verdict has to be reached in THIS
-  # shell for acas_die to abort the script rather than a subshell.
-  #
-  # `timeout' supervises the `bash ./comp-common.sh' process exactly. A frozen
-  # script that stalls -- on a copybook over a wedged mount, or on a prompt --
-  # is sent TERM at the deadline and KILL after the grace period.
+  # acas_run_deadline cannot be piped.
   local rc=0 started elapsed
   acas_deadline_prefix "$ACAS_TIMEOUT_BUILD"
   started="$SECONDS"
@@ -3254,41 +2534,23 @@ acas_step4_comp_common() {
   elapsed=$(( SECONDS - started ))
 
   # `pipefail' is set, so rc is the subshell's status whenever tee succeeded.
-  # A TIMEOUT is fatal even though an ordinary nonzero rc is not: the frozen
-  # script's bare `exit 0' means its own status carries no information, but
-  # "never finished" is not a status the frozen script can fake.
   acas_assert_not_timed_out "$rc" "$elapsed" "$ACAS_TIMEOUT_BUILD" \
     ACAS_TIMEOUT_BUILD 'comp-common.sh' "$EX_STEP4"
 
-  # rc is reported, never trusted: [common/comp-common.sh:L59] is a bare exit 0.
+  # rc is reported, never trusted: [common/comp-common.sh:L59] is a bare exit
+  # 0.
   acas_log "comp-common.sh returned $rc (informational only -- L59 is an unconditional exit 0)"
 
   acas_scan_build_log "$log" 'comp-common.sh' "$EX_STEP4"
   acas_shred_param_files
 }
 
-# STEP 5/5 -- run comp-all.sh UNMODIFIED
-# [comp-all.sh:L9-L10] exports COBCPY=../copybooks and
-# COB_COPY_DIR=../copybooks -- relative, and correct because every compile runs
-# with its own directory as the cwd. The body then compiles in the maintainer's
-# own order:
-#   common -> general -> irs -> purchase -> sales -> stock
-# ([comp-all.sh:L15-L32]; the OE, payroll and epos blocks are commented out).
-# comp-all.sh RE-RUNS comp-common.sh at [comp-all.sh:L16]. That is the
-# maintainer's own design and is NOT optimised away. Step 4 is retained
-# deliberately and separately: the plan prescribes the five-step order, and
-# running comp-common.sh explicitly gives a clean, attributable log for the
-# bridge/handler/loader stage instead of burying it in the full build.
+# STEP 5/5 -- run comp-all.sh UNMODIFIED [comp-all.sh:L9-L10] exports
+# COBCPY=../copybooks and COB_COPY_DIR=../copybooks -- relative, and correct
+# because every compile runs with its own directory as the cwd.
 
 # So expect that stage TWICE in a full run: do not deduplicate it, and do not
 # drop step 4 as redundant.
-# Per-directory divergences that are preserved, never harmonised (R-4):
-#   general, irs, purchase  -- -fdump=ws -fmissing-statement=ok
-#                              -D_FORTIFY_SOURCE=1
-#   sales                   -- accept_numeric references COMMENTED OUT
-#                              ([sales/comp-sales.sh:L2,L5,L11,L13]) and NO
-#                              -fdump / -fmissing-statement on live lines
-#   stock                   -- also no -fdump / -fmissing-statement
 acas_step5_comp_all() {
   acas_banner 5 'run comp-all.sh UNMODIFIED'
 
@@ -3303,8 +2565,6 @@ acas_step5_comp_all() {
       'cobmysqlapi.o as a bare filename. Run step 2 (--from 2).'
   done
 
-  # comp-all.sh:L25 runs comp-common.sh again, which runs presql2 again, which
-  # needs the credential file again -- in common/, the directory presql2 runs in.
   acas_write_presql2_param "$ACAS_BUILD/common" presql2
 
   # Same treatment as the comp-common.sh log above.
@@ -3317,9 +2577,7 @@ acas_step5_comp_all() {
   acas_log "deadline: ${ACAS_TIMEOUT_BUILD}s (raise ACAS_TIMEOUT_BUILD on a slower host)"
 
   # Same shape as step 4: piped to tee, so the deadline prefix is applied here
-  # and the verdict is reached in this shell. comp-all.sh compiles six
-  # directories, so it is the longest-running command in the script and the one
-  # most in need of a bound.
+  # and the verdict is reached in this shell.
   local rc=0 started elapsed
   acas_deadline_prefix "$ACAS_TIMEOUT_BUILD"
   started="$SECONDS"
@@ -3337,16 +2595,10 @@ acas_step5_comp_all() {
   acas_shred_param_files
 }
 
-# ARTIFACT ASSERTIONS
 # More reliable than any text scan: they inspect the products of the build
-# rather than the prose about it. Counts are derived from the build tree's own
-# source globs rather than hard-coded, so they stay correct as the frozen tree
-# is what it is -- for example `ls *MT.cbl' matches 29 files, not the 28
-# bridges, because dummy-rdbmsMT.cbl has no *MT.scb.
+# rather than the prose about it.
 declare -a ACAS_MISSING_ARTIFACTS=()
 
-# acas_expect_module_per_source <dir> <glob> <label>
-# cobc -m produces <base>.so beside the source.
 acas_expect_module_per_source() {
   local dir="$1" glob="$2" label="$3"
   local -a sources=()
@@ -3367,8 +2619,6 @@ acas_expect_module_per_source() {
   acas_log "$label: $found/${#sources[@]} modules present in $dir/"
 }
 
-# acas_expect_executable_per_source <dir> <glob> <label>
-# cobc -x produces an extensionless executable beside the source.
 acas_expect_executable_per_source() {
   local dir="$1" glob="$2" label="$3"
   local -a sources=()
@@ -3417,9 +2667,7 @@ acas_assert_artifacts() {
   acas_stage 'Post-build: artifact assertions'
   ACAS_MISSING_ARTIFACTS=()
 
-  # --- common/ : bridges, handlers, date modules, loaders -------------------
-  # [common/comp-common.sh:L26] bridges, :L29 maps, :L32 handlers,
-  # :L34 IRS handlers, :L45 ACAS executable, :L51 loaders.
+  # common/ : bridges, handlers, date modules, loaders
   acas_expect_module_per_source common '*MT.cbl' 'bridges (*MT) [common/comp-common.sh:L26]'
   acas_expect_module_per_source common 'acas0*.cbl' 'file handlers (acas0*) [common/comp-common.sh:L32]'
   acas_expect_module_per_source common 'acasirsub*.cbl' 'IRS handlers (acasirsub*) [common/comp-common.sh:L34]'
@@ -3439,9 +2687,8 @@ acas_assert_artifacts() {
   done
   acas_log "in-scope loaders required by harness/seed.sh: $found/${#ACAS_INSCOPE_LOADERS[@]} present"
 
-  # --- the four ledgers ----------------------------------------------------
-  # Each menu is built BOTH as an executable and as a module
-  # ([general/comp-gl.sh:L3,L5] and the same shape in irs, purchase, sales).
+  # The four ledger subsystems: every in-scope program must exist as a `-m'
+  # module the menu can load, and each menu itself as a `-x' executable.
   acas_expect_named_modules general \
     'in-scope General Ledger programs plus the Date Entry program' \
     "${ACAS_GENERAL_MODULES[@]}"
@@ -3483,14 +2730,11 @@ acas_assert_artifacts() {
     "diagnostics are in $ACAS_LOG_DIR."
 }
 
-# FINALISATION
 acas_finalise() {
   acas_stage 'Post-build: loader cache and module search path'
 
   if acas_have ldconfig; then
-    # Under a deadline like everything else: ldconfig walks every directory in
-    # /etc/ld.so.conf.d, and one of those pointing at an unresponsive mount is
-    # enough to stall the final stage of an otherwise successful build.
+    # Under a deadline like everything else.
     acas_deadline_prefix "$ACAS_TIMEOUT_PROBE"
     if "${ACAS_DEADLINE_ARGV[@]}" ldconfig 2>/dev/null; then
       acas_log 'refreshed the shared-library cache (ldconfig)'
@@ -3500,11 +2744,7 @@ acas_finalise() {
   fi
 
   # COB_LIBRARY_PATH must cover all six build directories so that the compiled
-  # modules resolve when harness/run_cobol_scenario.sh drives a menu. Published
-  # here and printed, because it is this script's output contract to the runner
-  # scripts. Any existing value is preserved and appended to.
-  # Every directory on the path must exist, or a menu resolves a CALL to nothing
-  # and diverts down an error path at run time instead of failing here.
+  # modules resolve when harness/run_cobol_scenario.sh drives a menu.
   local dir
   for dir in "${ACAS_COMPILE_DIRS[@]}"; do
     [[ -d "$ACAS_BUILD/$dir" ]] || acas_die "$EX_FINALISE" \
@@ -3567,15 +2807,13 @@ acas_print_summary() {
   printf 'Next: harness/seed.sh to seed a scenario, then harness/run_cobol_scenario.sh.\n'
 }
 
-# MAIN
-# Strictly sequential (R-3). No step is backgrounded, no step is parallelised,
-# and the order is the one the plan prescribes. Nothing here writes to
-# $ACAS_REPO, and nothing is placed anywhere acas_posting/ could import (R-1).
+# MAIN Strictly sequential (R-3). No step is backgrounded, no step is
+# parallelised, and the order is the one the plan prescribes.
 acas_main() {
   acas_parse_args "$@"
 
-  # Before ANY external command is spawned: a malformed budget must be a startup
-  # usage error, never something discovered hours into a build.
+  # Before ANY external command is spawned: a malformed budget must be a
+  # startup usage error, never something discovered hours into a build.
   acas_resolve_deadlines
 
   printf 'build_oracle.sh -- building the compiled-COBOL oracle for the ACAS posting cycle\n'
@@ -3613,9 +2851,7 @@ acas_main() {
     acas_note 'step 5 skipped'
   fi
 
-  # The assertions and the summary run only after a full sequence: a partial run
-  # cannot have produced the full artifact set, and reporting a false failure
-  # would be worse than reporting nothing.
+  # The assertions and the summary run only after a full sequence.
   if (( ACAS_ONLY_STEP == 0 && ACAS_START_STEP == 1 )); then
     acas_assert_artifacts
     acas_finalise
@@ -3625,9 +2861,6 @@ acas_main() {
     acas_note 'run without --from/--only to build the whole oracle and verify it'
   fi
 
-  # An explicit success exit. NEVER an unconditional `exit 0': that is the very
-  # defect this script exists to work around
-  # ([common/comp-common.sh:L59], [comp-all.sh:L44-L45]).
   exit "$EX_OK"
 }
 

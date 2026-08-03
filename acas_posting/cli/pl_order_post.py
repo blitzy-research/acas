@@ -1,33 +1,25 @@
-"""`load08.` - Purchase transaction posting: `pl055` then `pl060`, and NO gate.
+"""Purchase transaction posting: `pl055` then `pl060`, with no gate at all.
 
-The Purchase Ledger's transaction-posting route, reproduced from the frozen menu
-shell. Its menu letter is `(H)  Purchase Transactions Post`
-[purchase/purchase.cbl:L540] - the eighth letter, hence `load08.`, whose entire
-body is these eleven lines [purchase/purchase.cbl:L752-L762]::
+The batch entry point for `purchase/purchase.cbl` `load08.` L752-L762, whose menu
+letter is "(H) Purchase Transactions Post" [purchase/purchase.cbl:L540]. Both
+legs are dispatched through `load000.`, with no screen output.
 
-    L752  load08.
-    L753  *>------
-    L754  *>
-    L755  *>    move     "pl830" to WS-Called.   *> In case autogen is use
-    L756  *>    perform  load000.
-    L757  *>    if       ws-term-code not = zero
-    L758  *>             go to display-menu.
-    L759       move     "pl055" to ws-called.
-    L760       perform  load000.
-    L761       move     "pl060" to ws-called.
-    L762       go       to load000.
+This route has no paragraph-level gate, and the absence is deliberate: the lines
+that would gate it are commented out in the frozen source
+[purchase/purchase.cbl:L755-L758], where the Sales twin tests `not = zero` after
+each leg [sales/sales.cbl:L761-L766] and the General Ledger tests `= 5`
+[general/general.cbl:L810-L811]. The route is still abortable, through
+`load000.`'s own `> 7` disposition [purchase/purchase.cbl:L684], which is a
+different mechanism reaching a different disposition - so pl060 runs after a
+pl055 failure that only reported 1 through 7, exactly as it does in COBOL.
 
-THERE IS NO PARAGRAPH-LEVEL GATE ON THIS ROUTE, AND THE ABSENCE IS THE
-SPECIFICATION
-Four of those eleven lines are commented out in the frozen source, and they are
-exactly the ones that would have made a gate: the `pl830` autogen dispatch
-(L755-L756) together with its `if ws-term-code not = zero / go to display-menu`
-test (L757-L758). What remains is `pl055`, then `pl060`, with NOTHING between
-them - `pl060` runs whatever `pl055` left in `WS-Term-Code`.
+The linkage is five parameters - ws-calling-data, system-record,
+system-record-4, to-day, file-defs - matching the Sales shape
+[sales/sl060.cbl:L395-L399] and unlike the General Ledger's four
+[general/gl070.cbl:L245-L248].
 
-That is a genuine divergence from the Sales route, not an oversight in the
-reading, and it is sharper than the commented-out block alone suggests. The
-three gate forms in this package are:
+The run date is an argument and never a clock reading (R-6): neither pl055 nor
+pl060 reads a clock, both receive the date through linkage.
 
     General Ledger    `if ws-term-code = 5`         general/general.cbl:L810-L811
     Sales invoice     `if ws-term-code not = zero`  sales/sales.cbl:L761-L762 and
@@ -173,23 +165,16 @@ __all__: Final[tuple[str, ...]] = ("main", "load000", "load08")
 _LOG: Final[logging.Logger] = logging.getLogger(__name__)
 
 
-#  THE TWO PROGRAM-IDS THIS ROUTE DISPATCHES, as the menu writes them.
-#  `move "pl055" to ws-called.` [purchase/purchase.cbl:L759] and
-#  `move "pl060" to ws-called.` [purchase/purchase.cbl:L761]. Named constants
-#  rather than inline literals so that the dispatch order below reads as the
-#  paragraph does and so that `WS-Called` and the module actually invoked cannot
-#  drift apart. `WS-Called` is `PIC X(8)` [copybooks/wscall.cob:L7]; the
-#  space-filling to that width is applied by `args.set_called`, never here.
+# THE TWO PROGRAM-IDS THIS ROUTE DISPATCHES, as the menu writes them. `move "pl055" to
+# ws-called.` [purchase/purchase.cbl:L759] and `move "pl060" to ws-called.`
+# [purchase/purchase.cbl:L761].
 _PL055: Final[str] = "pl055"
 _PL060: Final[str] = "pl060"
 
-#  `display "(H)  Purchase Transactions Post"` [purchase/purchase.cbl:L540] -
-#  the menu line that selects this route, carried for traceability and shown in
-#  `--help`. The menu itself is out of scope, so nothing displays it.
 _MENU_OPTION: Final[str] = "(H)  Purchase Transactions Post"
 
-#  The invocation name argparse reports in usage and error messages. `pyproject`
-#  declares no console script, so a module invocation is the real entry form.
+# The invocation name argparse reports in usage and error messages. `pyproject` declares
+# no console script, so a module invocation is the real entry form.
 _PROG: Final[str] = "python -m acas_posting.cli.pl_order_post"
 
 #  THIS MODULE DECLARES NO LOG FORMAT AND CALLS NO `basicConfig`. There is one
@@ -267,24 +252,12 @@ class _ExtractChannel:
 def _run_unit_ended(term_code: int) -> bool:
     """Did `load000` already end the run unit? `if ws-term-code > 7`.
 
-    NAMED, rather than written inline at the one place it is asked, because what
-    it asks is easy to mistake for a gate and it is not one. `load000`'s second
-    test transfers control out of the dispatch paragraph -
-    `go to overrewrite` [purchase/purchase.cbl:L703-L704] - and `overrewrite`
-    falls through `overclose.` [purchase/purchase.cbl:L652] into `goback`
-    [purchase/purchase.cbl:L653]. In COBOL that transfer simply never comes back;
-    in Python a called function must return, so the caller has to honour the
-    non-return itself. This predicate is that honouring, and nothing else.
-
-    Why it cannot be a gate, provably: it is true only for codes ABOVE 7. A gate
-    on this route would have to hold somewhere in 1..7, and this never does. The
-    two bands are `args.is_serious_error`'s own, and its complement is exactly
-    the `< 8` of [purchase/purchase.cbl:L701] over the `pic 99` domain
-    [copybooks/wscall.cob:L10].
+    NAMED, rather than written inline at the one place it is asked, because what it asks
+    is easy to mistake for a gate and it is not one.
 
     Args:
-        term_code: `WS-Term-Code` as the callee left it, read back out of the
-            shared calling-data record.
+        term_code: `WS-Term-Code` as the callee left it, read back out of the shared
+            calling-data record.
 
     Returns:
         True when the dispatch ended the run unit, so no further program runs.
@@ -302,31 +275,18 @@ def load000(
 ) -> int:
     """`load000.` [purchase/purchase.cbl:L691-L708] - the one dispatch paragraph.
 
-    Purchase's own copy of the paragraph, reproduced statement by statement:
-    clear the code, name the callee, call it with the five operands, then make
-    the two tests over the result.
-
-    DELIBERATELY NOT SHARED WITH THE SIBLING ROUTES. Each menu shell in the
-    frozen tree carries its own `load000.`, and the copies are NOT identical -
-    Purchase's serious-error branch is `go to overrewrite`
-    [purchase/purchase.cbl:L703-L704] where Sales' is `perform overrewrite`
-    followed by `goback` [sales/sales.cbl:L710-L712]. Importing one route's
-    dispatcher into another would erase a divergence this migration is required
-    to keep, so the duplication here mirrors the duplication there.
+    Purchase's own copy of the paragraph, reproduced statement by statement: clear the
+    code, name the callee, call it with the five operands, then make the two tests over
+    the result.
 
     Args:
-        linkage: the five linkage operands, in COBOL order. The SAME instance is
-            handed to every dispatch of a route, because these are the menu's own
-            working-storage records and a callee writes back into them - which is
-            how `WS-Term-Code` gets from `pl055` to the test below.
-        program_id: the callee's program-id, `"pl055"` or `"pl060"`, moved into
-            `WS-Called` exactly as [purchase/purchase.cbl:L759] and
+        linkage: the five linkage operands, in COBOL order.
+        program_id: the callee's program-id, `"pl055"` or `"pl060"`, moved into `WS-
+            Called` exactly as [purchase/purchase.cbl:L759] and
             [purchase/purchase.cbl:L761] move it.
-        program: the migrated callee's published `run`. In the COBOL the target
-            comes from the field itself - `call ws-called` is a dynamic call by
-            name - so the two travel together here and are resolved at the same
-            moment: the caller looks the attribute up at the call site, which is
-            also what keeps the field and the target in step.
+        program: the migrated callee's published `run`. In the COBOL the target comes
+            from the field itself - `call ws-called` is a dynamic call by name - so the
+            two travel together here.
 
     Returns:
         `WS-Term-Code` as the callee left it. The caller decides what that means:
@@ -340,17 +300,10 @@ def load000(
         system supplying the file identity to two programs naming the same
         `ASSIGN` - and it is captured into `channel` rather than used.
     """
-    #  L694  `move zero to ws-term-code.`  -  BEFORE EVERY CALL, not once per
-    #  route. R-4 [purchase/purchase.cbl:L694]: the field is shared linkage
-    #  storage, so a code the previous callee left behind would still be sitting
-    #  there for the tests below, and on this route those tests are the only
-    #  thing that can stop the run. Clearing it per dispatch is what makes each
-    #  phase's verdict its own.
+    # L694 `move zero to ws-term-code.` - BEFORE EVERY CALL, not once per route. R-4
+    # [purchase/purchase.cbl:L694].
     args.reset_term_code(linkage.calling_data)
 
-    #  L759 / L761  `move "pl055" to ws-called.` / `move "pl060" to ws-called.`
-    #  The MOVE is the dispatch vehicle, and its receiving-field width applies:
-    #  `WS-Called` is `PIC X(8)` [copybooks/wscall.cob:L7].
     args.set_called(linkage.calling_data, program_id)
 
     _LOG.info(
@@ -384,35 +337,8 @@ def load000(
     if channel is not None and returned is not None:
         channel.carrier = returned
 
-    #  The callee wrote into the caller's storage, exactly as a COBOL `CALL BY
-    #  REFERENCE` does: `move 8 to WS-Term-Code` [purchase/pl055.cbl:L286] lands
-    #  in the very record handed over above. Read it back before testing it.
     term_code = linkage.calling_data.ws_term_code
 
-    #  L701-L702  `if ws-term-code < 8 / perform overrewrite.`
-    #
-    #  R-4 [purchase/purchase.cbl:L701-L702]. Two facts about this branch, and
-    #  both are recorded rather than tidied:
-    #    * it is taken on EVERY dispatch that is not a serious error, including a
-    #      wholly successful one - the maintainer's own comment on the line is
-    #      "Update sys4 and system recs in case of changes"; and
-    #    * its body IS reproduced. `overrewrite`
-    #      [purchase/purchase.cbl:L621-L636] rewrites SYSTEM-REC (key 1) and
-    #      SYSTOT-REC (key 4) to the relational store, and that is what
-    #      `args.overrewrite` performs. Its Cobol-file arm
-    #      [purchase/purchase.cbl:L637-L649] has no counterpart, the migration
-    #      having a single store - see `args.RDBMS_STORE_SELECTOR_DIGIT`.
-    #
-    #  IT IS THE SOLE PERSISTENCE OF THIS ROUTE'S PERIOD TOTALS, which is why it
-    #  could not stay omitted: `pl055` accumulates two of the nine
-    #  [purchase/pl055.cbl:L582], [purchase/pl055.cbl:L584] and `pl060` adds a
-    #  third [purchase/pl060.cbl:L628], all into the linkage record, and Agent
-    #  Action Plan section 0.8.5 requires an empty diff on the affected tables.
-    #
-    #  `not args.is_serious_error(...)` IS `< 8`: over the `pic 99` domain
-    #  [copybooks/wscall.cob:L10] the frozen tests `< 8` and `> 7` are
-    #  exhaustive and mutually exclusive, so the complement needs no second
-    #  helper and no threshold is transcribed here.
     if not args.is_serious_error(term_code):
         _LOG.debug(
             "load000: %s left ws-term-code %d; `perform overrewrite` "
@@ -469,23 +395,12 @@ def load000(
 def load08(linkage: args.SlPlLinkage, *, menu_state: args.MenuState) -> int:
     """`load08.` [purchase/purchase.cbl:L752-L762] - `pl055`, then `pl060`.
 
-    The Purchase transaction-posting route, in the frozen source's own order and
-    with the frozen source's own absence of a gate between the two phases. Both
-    dispatches go through `load000`, which is where this route's only stop lives.
-
     Args:
-        linkage: the five linkage operands. ONE instance for the whole route:
-            `pl060` must see the records `pl055` wrote, exactly as the COBOL
-            hands both programs the same working storage and the same extract
-            file.
+        linkage: the five linkage operands. ONE instance for the whole route.
 
     Returns:
         `WS-Term-Code` after the last dispatch that ran - `pl060`'s normally, or
-        `pl055`'s when `pl055` ended the run unit.
-
-    Note:
-        Strictly sequential: one program at a time, never overlapped, matching
-        the single-threaded original (rule R-3).
+            `pl055`'s when `pl055` ended the run unit.
     """
     #  L759-L760  `move "pl055" to ws-called.` / `perform load000.`
     #  Phase one - the Purchase Invoice Post Extract, which builds the OTM4
@@ -503,40 +418,11 @@ def load08(linkage: args.SlPlLinkage, *, menu_state: args.MenuState) -> int:
         channel=channel,
     )
 
-    #  ======================================================================
-    #  THE GATE THAT IS NOT HERE
-    #  ======================================================================
-    #  R-4 [purchase/purchase.cbl:L755-L758] - the `pl830` dispatch AND its
-    #  `if ws-term-code not = zero / go to display-menu` gate are BOTH COMMENTED
-    #  OUT in the frozen source. Purchase has NO paragraph-level gate. Do NOT
-    #  add one "for consistency with Sales".
-    #
-    #  And the frozen source is even emptier here than that block implies. The
-    #  commented-out test at L757-L758 guarded the `pl830` leg and sat BEFORE the
-    #  `pl055` dispatch at L759; between `pl055` (L760) and `pl060` (L761) the
-    #  paragraph has NEVER carried a statement, commented or otherwise. The Sales
-    #  route does carry one in that position - `if ws-term-code not = zero / go
-    #  to display-menu` [sales/sales.cbl:L765-L766] - and the General Ledger
-    #  route carries an equality test in its own equivalent position,
-    #  `if ws-term-code = 5` [general/general.cbl:L810-L811]. Three routes, three
-    #  different answers, and the divergence IS the specification: a defect
-    #  reproduced is correct, a defect fixed is a failure.
-    #
-    #  Adding a gate here would be invisible in practice today, which is exactly
-    #  what makes it dangerous. `pl055` raises 8 and only 8
-    #  [purchase/pl055.cbl:L286], and `load000` already stops on 8, so a gate
-    #  would change nothing that can currently be observed - and would still be a
-    #  behaviour change, because any code in 1..7 would then skip `pl060` where
-    #  the frozen program runs it. See Q-CLI-TERMCODE-1-7 in the footer.
-    #  ======================================================================
+    # R-4 [purchase/purchase.cbl:L755-L758] - the `pl830` dispatch AND its `if ws-term-
+    # code not = zero / go to display-menu` gate are BOTH COMMENTED OUT in the frozen
+    # source.
 
-    #  NOT the gate above, and not a substitute for it: this honours `load000`'s
-    #  OWN serious-error branch [purchase/purchase.cbl:L703-L704], whose
-    #  `go to overrewrite` ends the run unit at `goback`
-    #  [purchase/purchase.cbl:L653] so that L761-L762 are never reached. It holds
-    #  only ABOVE 7; for every code in 1..7 execution falls straight through to
-    #  `pl060`, which is precisely the Purchase behaviour a gate would destroy.
-    #  GO TO class 4 - the proof is at the branch itself, in `load000`.
+    # NOT the gate above, and not a substitute for it.
     if _run_unit_ended(term_code):
         return term_code
 
@@ -556,32 +442,12 @@ def load08(linkage: args.SlPlLinkage, *, menu_state: args.MenuState) -> int:
     )
 
 
-
 def _build_parser() -> argparse.ArgumentParser:
     """Compose this route's parser from the shared option fragments.
 
-    Two fragments and no local options: the calling-data group and the Sales and
-    Purchase linkage group. The `WS-Calling-Data` binding is NOT redefined here -
-    `cli/args.py` owns it, so it has one spelling across all seven routes.
-
-    What the fragments bring, and why each matters on this route:
-        `--run-date`      REQUIRED, and the only way a date enters (rule R-6).
-        `--ws-caller`     defaulted to the menu's own literal, `move "purchase"
-                          to ws-caller` [purchase/purchase.cbl:L475].
-        `--ws-cd-args`    the maintainer's unattended-invocation slot
-                          [copybooks/wscall.cob:L1-L3]; the shell reads its first
-                          five characters at [purchase/purchase.cbl:L457].
-        `--irs-instead`   the IRS fan-out switch [copybooks/wssystem.cob:
-                          L179-L181]. PIN IT EXPLICITLY for every scenario: it
-                          decides WHICH TABLES this route touches, because
-                          `pl060` performs the fan-out, and leaving it out makes
-                          the affected-table list ambiguous.
-        `--date-form`     presentation only; affects no posted figure.
-
-    Not composed, deliberately: `add_gl_linkage_arguments` (that is Shape 1) and
-    `add_irs_linkage_arguments` (Shape 3), and NO run-confirm option of any kind,
-    because `pl060`'s prompt is commented out at
-    [purchase/pl060.cbl:L363-L370].
+    What the fragments bring, and why each matters on this route: `--run-date` REQUIRED,
+    and the only way a date enters (rule R-6). `--ws-caller` defaulted to the menu's own
+    literal, `move "purchase" to ws-caller` [purchase/purchase.cbl:L475].
 
     Returns:
         The parser. Built on demand, never at import time.
@@ -630,28 +496,17 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the Purchase transaction-posting route from the command line.
 
-    The whole CLI boundary: configure logging, parse, bind the five linkage
-    operands once, run `load08`, and surface `WS-Term-Code` as the process
-    status.
-
-    THE LINKAGE IS BOUND ONCE, NOT PER DISPATCH. In the COBOL these five records
-    are the menu shell's own storage, established before the first `CALL` and
-    handed unchanged to the second [purchase/purchase.cbl:L695-L699]. Binding
-    twice would give `pl060` a fresh `SYSTOT-REC` and lose the period totals
-    `pl055` accumulated into it [purchase/pl055.cbl:L582], so it is bound here
-    and passed down. `WS-Called` is set per dispatch inside `load000`, which is
-    where the frozen source sets it.
+    THE LINKAGE IS BOUND ONCE, NOT PER DISPATCH. In the COBOL these five records are the
+    menu shell's own storage, established before the first `CALL` and handed unchanged
+    to the second [purchase/purchase.cbl:L695-L699].
 
     Args:
-        argv: the argument vector, without the program name. The real process
-            arguments when omitted, which is the case in a real run; a caller
-            driving one scenario passes an explicit sequence.
+        argv: the argument vector, without the program name. The real process arguments
+            when omitted, which is the case in a real run.
 
     Returns:
-        The process exit status, which IS `WS-Term-Code` - 0 when the route
-        completed, 8 when `pl055` found no extract file. `args.exit_status_for`
-        is the identity over the `pic 99` domain [copybooks/wscall.cob:L10], so
-        nothing here re-encodes or bands the value; see Q-CLI-EXITSTATUS.
+        The process exit status, which IS `WS-Term-Code` - 0 when the route completed, 8
+            when `pl055` found no extract file.
 
     Raises:
         SystemExit: raised by argparse for `--help` and for a malformed argument
@@ -747,10 +602,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     term_code = load08(linkage, menu_state=menu_state)
 
-    #  `term_code` IS `linkage.calling_data.ws_term_code` - the shared field the
-    #  menu reads after its own dispatch [purchase/purchase.cbl:L701],
-    #  [purchase/purchase.cbl:L703] - carried out as a value rather than re-read
-    #  so that the route's result and the status cannot disagree.
+    # `term_code` IS `linkage.calling_data.ws_term_code` - the shared field the menu
+    # reads after its own dispatch [purchase/purchase.cbl:L701],
+    # [purchase/purchase.cbl:L703] - carried out as a value rather than re-read so that
+    # the route's result and the status cannot disagree.
     return args.exit_status_for(term_code)
 
 

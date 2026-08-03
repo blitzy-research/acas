@@ -639,12 +639,44 @@ ACAS_PY_PYCACHE_BEFORE=''
 #   ACAS_PY_YAML_PRESENT[key]  the key appeared at top level, whatever its value
 #   ACAS_PY_YAML_SCALAR[key]   its scalar value, rendered as text
 #   ACAS_PY_YAML_LIST[key]     its list items, one per line, in file order
+#   ACAS_PY_YAML_GROUP[key]    the key carried a nested block this stage does
+#                              not read -- recorded so that a key the runner
+#                              DOES read can never arrive as a block and be
+#                              mistaken for an empty value
 # `_' and `-' are interchangeable in a key name because every key is normalised
 # to `_' on both sides of the lookup, which is the same tolerance the capture
 # stage and the oracle-side runner extend.
 declare -A ACAS_PY_YAML_PRESENT=()
 declare -A ACAS_PY_YAML_SCALAR=()
 declare -A ACAS_PY_YAML_LIST=()
+declare -A ACAS_PY_YAML_GROUP=()
+
+# The keys THIS runner reads out of a scenario document. A scenario legitimately
+# carries more than these -- a nested `clock:', `system:' or `seed:' block that
+# documents the seeded state, and the `seed_dir:'/`seed_files:' pair that
+# harness/seed.sh reads -- and a block under a key this runner never reads is
+# left alone, exactly as the oracle-side reader leaves it. A block under a key it
+# DOES read is refused, because that value would read as empty and change the run
+# without saying so: for the fan-out switch [copybooks/wssystem.cob:L179-L181], or
+# for the affected-table list that BOUNDS the comparison, silence is the most
+# expensive failure available here.
+readonly ACAS_PY_SCENARIO_KEYS=(
+  scenario
+  operation
+  operations
+  run_date_text
+  run_date_binary
+  date_form
+  irs_instead
+  irs_clear_postings
+  payment_post_confirm
+  gl080_proceed
+  disk_change_option
+  archive_path_override
+  ws_caller
+  affected_tables
+  expected_status
+)
 
 # Each module's own help text, read at most once per module, so that resolving
 # twenty options costs seven interpreter starts rather than twenty.
@@ -1473,10 +1505,20 @@ acas_py_resolve_interpreter() {
 #     K <TAB> key                 the key is present, whatever its value
 #     S <TAB> key <TAB> value     a scalar, rendered as text
 #     L <TAB> key <TAB> value     one list item, in file order
-# A value carrying a tab, a newline or any other control character is REFUSED
-# rather than smuggled through the separator, and a real number is refused
+#     G <TAB> key                 the key carried a nested block, which this
+#                                 stage records rather than reads
+# A value carrying a tab, a newline or any other control character is FOLDED to
+# spaces rather than smuggled through the separator, and a real number is refused
 # outright because no scenario value is a real number and R-2 forbids one from
 # entering by accident.
+#
+# A nested block -- a mapping, or a list whose items are themselves mappings --
+# is recorded as present and NOT read: a scenario documents the seeded state in
+# `clock:', `system:' and `seed:' blocks that this runner has no use for, and the
+# oracle-side reader ignores them in the same way, which is what lets one scenario
+# file serve both runners. Nothing is lost by that: the caller then refuses a
+# block that appears under a key this runner actually reads
+# (ACAS_PY_SCENARIO_KEYS), so tolerance never becomes a silent mis-read.
 # =============================================================================
 acas_py_yaml_stream() {
   acas_py_deadline_prefix "$ACAS_TIMEOUT_CLIENT"
@@ -1538,22 +1580,45 @@ def render(key, value):
     else:
         sys.stderr.write(
             "key %r carries an unsupported %s value; this stage reads scalars "
-            "and flat lists of scalars only.\n" % (key, type(value).__name__)
+            "and flat lists of scalars, and records a nested block without "
+            "reading it. A date written unquoted becomes a date object here, so "
+            "quote it to keep it text.\n" % (key, type(value).__name__)
         )
         raise SystemExit(5)
-    for character in text:
-        if ord(character) < 32 or ord(character) == 127:
-            sys.stderr.write(
-                "key %r carries a control character, which is refused: it "
-                "would forge a record boundary in the stream this reader "
-                "emits, and no legitimate scenario value contains one.\n" % key
-            )
-            raise SystemExit(5)
+    if any(ord(character) < 32 or ord(character) == 127 for character in text):
+        #  A CONTROL CHARACTER IS FOLDED, NOT REFUSED - and the distinction is the
+        #  reader's own protocol rather than a relaxation of it. The stream this
+        #  reader emits is TAB-delimited and newline-terminated, so a value
+        #  carrying either would forge a record boundary; replacing each control
+        #  character with ONE SPACE keeps that property absolutely, because no
+        #  emitted byte is a control character afterwards.
+        #
+        #  It is folded rather than refused because a scenario legitimately
+        #  carries a multi-line documentation block: `description: |` in
+        #  harness/scenarios/clean_batch_gl.yaml is a YAML literal scalar of
+        #  several hundred lines, and no key this runner consumes is documentation.
+        #  Refusing it would have made a documented scenario unreadable.
+        #
+        #  ONLY a value that actually holds a control character is touched, so
+        #  every value that travels arrives byte for byte - `irs_instead: ' '`, the
+        #  single SPACE that selects General-Ledger-only posting
+        #  [copybooks/wssystem.cob:L179-L181], included. Folding whitespace
+        #  generally would have emptied it and silently changed the fan-out.
+        text = "".join(
+            " " if (ord(character) < 32 or ord(character) == 127) else character
+            for character in text
+        )
     return text
+
+
+def is_block(value):
+    """True for a nested structure: a mapping, a sequence or a set."""
+    return isinstance(value, (dict, list, tuple, set, frozenset))
 
 
 emitted = {}
 out = []
+blocks = []
 for key in document:
     if not isinstance(key, str):
         sys.stderr.write(
@@ -1571,13 +1636,38 @@ for key in document:
     emitted[normalised] = key
     out.append("K\t%s" % normalised)
     value = document[key]
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
+        #  A LIST IS EMITTED ONLY WHEN EVERY ITEM IS A SCALAR. A part-read list is
+        #  worse than an unread one: the affected-table list BOUNDS the comparison
+        #  and the operation list ORDERS the run, so half of either would look like
+        #  a complete answer. So a list holding a nested item is recorded whole and
+        #  read not at all.
+        if any(is_block(item) for item in value):
+            out.append("G\t%s" % normalised)
+            blocks.append((key, "list whose items are themselves blocks"))
+            continue
         for item in value:
             out.append("L\t%s\t%s" % (normalised, render(key, item)))
+    elif is_block(value):
+        #  A NESTED BLOCK IS RECORDED, NOT READ. A scenario file documents the
+        #  state it seeds in `clock:', `system:' and `seed:' blocks, and states the
+        #  values this runner reads as top-level scalars beside them; the
+        #  oracle-side reader passes over a nested block in exactly the same way,
+        #  which is what lets ONE scenario file drive both runners. The caller
+        #  refuses a block that appears under a key this runner does read, so this
+        #  tolerance cannot turn into a silent mis-read.
+        out.append("G\t%s" % normalised)
+        blocks.append((key, "%s block" % type(value).__name__))
     else:
         out.append("S\t%s\t%s" % (normalised, render(key, value)))
 
 sys.stdout.write("".join(line + "\n" for line in out))
+for key, shape in blocks:
+    sys.stderr.write(
+        "note: key %r is a %s. It is recorded as present and its members are "
+        "not read: this stage reads scalars and flat lists of scalars, and no "
+        "key this runner reads is declared as a block.\n" % (key, shape)
+    )
 PY
 }
 
@@ -1602,6 +1692,7 @@ acas_py_read_scenario() {
     case "$kind" in
       '') continue ;;
       K)  ACAS_PY_YAML_PRESENT["$key"]=1 ;;
+      G)  ACAS_PY_YAML_GROUP["$key"]=1 ;;
       S)  ACAS_PY_YAML_SCALAR["$key"]="$value" ;;
       L)
         if [[ -n "${ACAS_PY_YAML_LIST[$key]+set}" ]]; then
@@ -1616,6 +1707,34 @@ acas_py_read_scenario() {
         ;;
     esac
   done <<< "$stream"
+
+  acas_py_assert_scenario_shape
+}
+
+# A nested block under a key this runner READS is refused here, in the main shell,
+# where a refusal can still stop the run -- the scalar and list accessors are
+# called inside command substitutions, where an exit would end only the subshell
+# and the run would carry on with an empty value, which is exactly the silence
+# this check exists to prevent. A block under any other key is left alone: the
+# oracle-side reader ignores a nested block too, and that shared tolerance is what
+# lets one scenario file drive both runners.
+acas_py_assert_scenario_shape() {
+  (( ${#ACAS_PY_YAML_GROUP[@]} > 0 )) || return 0
+  local key
+  for key in "${!ACAS_PY_YAML_GROUP[@]}"; do
+    if acas_py_in_list "$key" "${ACAS_PY_SCENARIO_KEYS[@]}"; then
+      acas_py_die "$EX_SCENARIO" \
+        "the scenario declares '$(acas_py_sanitise_field "$key")' as a nested block, and this runner reads that key." \
+        '  A key this runner reads must carry a scalar, or a flat list of scalars,' \
+        '  so that what the author wrote is what the run receives. As a block it' \
+        '  would read as empty and change the run without saying so -- for the' \
+        '  fan-out switch [copybooks/wssystem.cob:L179-L181] that decides which' \
+        '  ledgers a posting reaches, or for the affected-table list that bounds' \
+        '  the comparison, that silence is the most expensive failure available.' \
+        '  State the value at top level; a block under a key this runner does not' \
+        '  read -- clock, system, seed -- is perfectly fine and is left alone.'
+    fi
+  done
 }
 
 # True when the key appeared at top level at all, whatever its value. Needed

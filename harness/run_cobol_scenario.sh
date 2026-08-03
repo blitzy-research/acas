@@ -1,142 +1,32 @@
 #!/usr/bin/env bash
-# harness/run_cobol_scenario.sh
-# Drive the COMPILED ACAS Cobol posting cycle for one scenario, with the same
-# logical inputs the menus supply.
+# harness/run_cobol_scenario.sh -- stage 2 of the parity protocol: drive the
+# COMPILED Cobol posting cycle for one scenario with the same logical inputs the
+# menus supply. Run `--help' for the options and the exit codes.
 #
-# This is stage 2 of the eight-stage parity protocol:
+# Its output is not a result to be judged; it IS the behavioural specification.
+# Nothing here decides whether the Cobol did the right thing --
+# harness/diff_states.py does that. This script drives, asserts its own
+# preconditions, observes and records.
 #
-#     seed -> run(COBOL) -> dump -> normalize -> reset -> run(Python) -> dump -> diff
+# WHY IT DRIVES THE MENU EXECUTABLES RATHER THAN THE POSTING PROGRAMS. None of
+# the twelve in-scope programs is a main program: each is a CALLed sub-program
+# whose PROCEDURE DIVISION USING list is made of GROUP ITEMS, in three linkage
+# shapes -- General Ledger 4 parameters [general/gl070.cbl:L245-L248], Sales and
+# Purchase 5 [sales/sl060.cbl:L395-L399], IRS 3 with no run date and no
+# calling-data block [irs/irs030.cbl:L552-L554]. `cobcrun' can pass only string
+# arguments, and the posting programs are compiled `-m' as loadable modules
+# rather than `-x' executables, so no shell can invoke them directly. The four
+# menu executables are what construct those blocks and CALL the sub-programs.
+# Writing a new Cobol driver was rejected: the Cobol tree is frozen (R-1, R-4).
 #
-# and it is the ORACLE side of that diff. Its output is not "a result" to be
-# judged; it IS the behavioural specification. Nothing in this script decides
-# whether the Cobol did the right thing -- harness/diff_states.py does that.
-# This script drives, observes, asserts its own PRECONDITIONS, and records.
-#
-# Run it with the canonical invocation documented at
-# [harness/docker-compose.yml:L346-L357], which passes the scenario file as a
-# bare POSITIONAL argument, so that form is accepted here alongside the named
-# options.
-#
-# -----------------------------------------------------------------------------
-# WHY THIS SCRIPT DRIVES THE MENU EXECUTABLES AND NOT THE POSTING PROGRAMS
-# None of the twelve in-scope programs is a main program. Every one is a CALLed
-# sub-program whose PROCEDURE DIVISION USING list is made of GROUP ITEMS, in
-# exactly three distinct linkage shapes:
-#   Shape 1  General Ledger, 4 params: `using ws-calling-data,
-#      system-record, to-day, file-defs' [general/gl070.cbl:L245-L248],
-#      [general/gl000.cbl:L162-L165] -- gl000 gl051 gl070 gl071 gl072 gl080
-#   Shape 2  Sales / Purchase, 5 params: `using ws-calling-data,
-#      System-Record, system-record-4, to-day, file-defs'
-#      [sales/sl060.cbl:L395-L399] -- sl055 sl060 sl100 pl055 pl060 pl100
-
-#   Shape 3  IRS, 3 params, NO to-day and NO calling-data block, irs030
-#      only: `using IRS-System-Params, WS-System-Record, File-Defs'
-#      [irs/irs030.cbl:L552-L554]
-# `cobcrun' can pass only string arguments; it cannot construct a SYSTEM-REC
-# group item, a File-Defs block or a WS-Calling-Data block, and the posting
-# programs are compiled `-m' as dynamically loadable modules rather than `-x'
-# executables. So no shell can invoke them directly. The four MENU executables
-# -- general, sales, purchase, irs, built with `cobc -x' -- are what construct
-# those blocks and CALL the sub-programs. Driving them is not a convenience; it
-# is the only faithful method. Writing a NEW Cobol driver was rejected: it
-# would add Cobol source to a repository whose Cobol is frozen (R-1, R-4, and
-# the frozen-artifact guarantee) and there is no sanctioned place to put it.
-
-# THE RULES THAT BIND THIS FILE
-# There is NO user rules document for this project: `review_rules' reports that
-# no user rules were provided. The six binding rules R-1..R-6 come from the
-# Agent Action Plan itself. Where they are silent, this script is held to
-# enterprise-standard shell practice. Nothing has been invented to fill a gap.
-#   R-1  NO COBOL AT RUNTIME -- and this file is the sanctioned exception.
-#        Compiled Cobol is confined to harness/ and invoked only as an
-#        OUT-OF-PROCESS utility. This script never references acas_posting, is
-#        never invoked from inside it, and harness/ has no __init__.py.
-#   R-2  ZERO BINARY FLOATING POINT. No arithmetic on any monetary value here;
-#        the only numbers this script computes with are counts, timeouts, row
-#        counts and exit codes.
-
-#   R-3  NO NEW VALIDATIONS, NO SCHEMA CHANGE, STRICTLY SEQUENTIAL. No DDL is
-#        emitted, nothing is written under $ACAS_REPO, and exactly one scenario
-#        runs at a time -- no `&', no `xargs -P', no job control. Every check
-#        here is a HARNESS-ENVIRONMENT precondition, never an added validation
-#        of what the Cobol computed.
-#   R-4  LEGACY ANOMALIES REPRODUCED, NEVER FIXED. "A defect reproduced is
-#        correct; a defect fixed is a failure." The sharpest obligation is the
-#        THREE DIVERGENT ABORT GATES -- General `= 5', Sales `not = zero'
-#        TWICE, and Purchase's gate COMMENTED OUT ENTIRELY -- each quoted with
-#        its locator at its own plan function below. They are never harmonised.
-#        The menus implement them; this script must not compensate, so it never
-#        adds a gate to Purchase, never removes one from Sales, never turns a
-
-#        gate into a warning, and never treats "gl071 did not run" as an error.
-#        It OBSERVES which branch was taken and reports it. Sales runs sl830
-#        first and Purchase does not run pl830: preserved too. And this script
-#        never ends with an unconditional `exit 0'. The frozen build scripts do
-#        -- [comp-all.sh:L45], [common/comp-common.sh:L59] -- and they are NOT
-#        fixed; their shape is simply not adopted.
-#   R-5  FULL TRACEABILITY. Every keystroke, screen anchor, gate and
-#        precondition below carries a [<path>:<locator>] citation to the frozen
-#        source it reproduces, and every deliberate deviation is annotated as a
-#        deviation with its reason.
-
-#   R-6  COMPILED BEHAVIOUR IS THE TIE-BREAKER, AND THE RUN MUST BE
-#        REPRODUCIBLE. Two runs of one scenario under the same pinned clock
-#        must produce byte-identical dumps. Therefore: the run date is PINNED
-#        through the menus' own Date Entry option; this script never reads the
-#        host clock; and NOTHING carrying a wall-clock time, hostname, pid, run
-#        id, elapsed time or absolute path is ever written under
-#        $ACAS_OUT/<scenario>/. The pty transcript goes deliberately OUTSIDE
-#        the compared tree, to $ACAS_OUT/run-logs/<scenario>/, because
-#        [general/gl000.cbl:L194] accepts the host TIME and
-#        [general/gl000.cbl:L177] the host DATE, and the time is DISPLAYED at
-#        0373 -- so the transcript necessarily contains a host clock reading
-#        and can never be allowed into a compared dump.
-
-# DOCUMENTED DEVIATIONS FROM THE PRODUCTION CALL PATH  (R-5)
-#   D-1  Keystrokes on a pty instead of a human operator -- the only way to
-#        supply the menus' logical inputs, per the linkage shapes above.
-#   D-2  The run happens in $ACAS_DATA with $ACAS_BUILD on the library path,
-#        not in the maintainer's ~/ACAS against ~/bin, because the checkout is
-#        mounted read-only and the build is a container-local copy. That makes
-#        the frozen-artifact guarantee structural rather than a matter of care.
-#        This script never cd's into $ACAS_REPO.
-#   D-3  ACAS_BIN points at a fixed directory whose contents do not change
-#        between runs. Reason: determinism (R-6) of the CBL_CHECK_FILE_EXIST
-#        branch at [general/general.cbl:L489-L503], which otherwise displays
-#        "No BackUp Script in Bin" on one run and not the next.
-
-#   D-4  Accepts whose only effect is to pause for acknowledgement get a bare
-#        Return. AAP 0.3.4 drops such prompts on the Python side; on the Cobol
-#        side they still need a keystroke, so they get the most neutral one.
-#        Accepts that GATE A DATABASE WRITE are NOT treated this way -- they
-#        are genuine scenario inputs, and there are three of them.
-#   D-5  COB_EXIT_WAIT is forced to `off', because GnuCobol otherwise waits for
-#        a keypress when a screen-section program ends, which would hang the
-#        harness after the menu exits. This suppresses a pause, not a write, so
-#        it is the same class of deviation as D-4.
-
-# THE GATING INPUTS -- accepts that change table state, so the scenario pins
-# them. Each is quoted in full at its own plan function below.
-#   G-1  irs030 end-of-job "Can I clear the Ledgers Posting file? [Y]"
-#        [irs/irs030.cbl:L1715-L1727]. "Y" performs acas008-Open-Output, which
-#        the handler turns into a DELETE-ALL of PSIRSPOST-REC
-#        [common/acas008.cbl:L313-L318] (key irs_clear_postings).
-#   G-2  gl080's unconditional pre-run gate [general/gl080.cbl:L295-L302]:
-#        Escape or "A"/"a" means `goback', so gl080 writes NOTHING (key
-#        gl080_proceed).
-#   G-3  sl100 [sales/sl100.cbl:L310-L318] and pl100
-#        [purchase/pl100.cbl:L302-L311] each ask an unconditional YES/NO whose
-#        WORDING DIVERGES; NO posts nothing (key payment_post_confirm).
+# Exactly one scenario runs at a time -- no `&', no `xargs -P' (R-3) -- and
+# nothing is ever written under $ACAS_REPO.
 
 set -Eeuo pipefail
 IFS=$'\n\t'
 shopt -s nullglob
 umask 077
 
-# EXIT CODES
-# Chosen not to collide with the load-program codes harness/seed.sh already
-# reserves (16 / 64 / 128) and continuous with seed.sh's own 70..73 block so an
-# operator reading either log sees one scheme.
 readonly EX_OK=0
 readonly EX_USAGE=70
 readonly EX_PRECONDITION=71
@@ -150,21 +40,9 @@ readonly EX_TIMEOUT=78     # an external command exceeded its finite deadline
 readonly EX_CAPACITY=79    # the fh-logger budget cannot be met -> refuse to run
 
 
-# =============================================================================
-# FINITE DEADLINES
-#
 # No external command may run without an upper bound. The pty driver already
-# enforces a PER-PROMPT timeout inside itself, and that is not the same guarantee:
-# a driver that keeps making prompt-by-prompt progress, or one that blocks in a
-# syscall before its select loop is even reached, never trips it and runs forever.
-# ACAS_TIMEOUT_DRIVE therefore bounds the WHOLE driver process, in addition to
-# --timeout bounding each prompt within it.
-#
-# Declared as "${VAR-}" rather than as a bare default so an operator-supplied
-# value SURVIVES to be validated. Writing ACAS_TIMEOUT_X='' here would discard the
-# environment silently, which makes every documented tunable inert and -- worse --
-# means an invalid budget is never rejected.
-# =============================================================================
+# enforces a PER-PROMPT timeout inside itself, and that is not the same
+# guarantee.
 readonly ACAS_TIMEOUT_MAX=86400          # 24h, an upper bound on any one budget
 ACAS_TIMEOUT_GRACE="${ACAS_TIMEOUT_GRACE-}"    # seconds between TERM and KILL
 ACAS_TIMEOUT_CLIENT="${ACAS_TIMEOUT_CLIENT-}"  # one database client invocation
@@ -173,17 +51,12 @@ ACAS_TIMEOUT_ROTATE="${ACAS_TIMEOUT_ROTATE-}"  # one fh-logger rotation move
 ACAS_TIMEOUT_RESOLVED=''                 # out-parameter of acas_timeout_seconds
 
 # Free space reserved for the frozen file-handler log. Declared with the same
-# "${VAR-}" form as the deadlines so that an operator-supplied value survives:
-# a bare VAR='' would wipe the environment and make the knob inert, which is
-# exactly the defect that made every documented ACAS_TIMEOUT_* non-functional
-# in all three sibling scripts until it was found by testing through the
-# environment rather than by sourcing.
+# "${VAR-}" form as the deadlines so that an operator-supplied value survives.
 ACAS_FH_LOG_BUDGET_MB="${ACAS_FH_LOG_BUDGET_MB-}"
 readonly ACAS_RUN_FH_BUDGET_DEFAULT_MB=1024
 ACAS_RUN_FH_BUDGET_MB=0                  # frozen by acas_resolve_deadlines
 declare -a ACAS_DEADLINE_ARGV=()         # the resolved `timeout ...' prefix
 
-# ENVIRONMENT CONTRACT
 # Identical wording to harness/seed.sh so the two stages cannot drift.
 # ACAS_DB_SOCKET is DECLARED but may be empty: the harness connects over TCP.
 readonly -a ACAS_RUN_REQUIRED_ENV_NONEMPTY=(
@@ -195,26 +68,14 @@ readonly -a ACAS_RUN_REQUIRED_ENV_DECLARED=(
   ACAS_DB_SOCKET
 )
 
-# The one schema the frozen dump defines. [mysql/ACASDB.sql:L3] records
-# "Host: localhost    Database: ACASDB", and the file carries 33 CREATE TABLE
-# statements with zero CREATE DATABASE and zero USE -- so there is exactly one
-# database this cycle can legitimately be driven against.
 readonly ACAS_RUN_REQUIRED_SCHEMA='ACASDB'
 
-# The pty geometry. Pinned to EXACTLY 24x80 rather than "at least", because a
-# larger terminal changes how many report lines a screen holds -- ws-21-lines
-# and ws-22-lines at [general/gl070.cbl:L254] are derived from `accept ... from
-# lines' -- and that would change the keystroke count between hosts (R-6).
-# 24x80 is the MINIMUM the menu will tolerate. Below it the menu refuses to run:
-# [general/general.cbl:L374-L383] displays SY010 for too few lines and SY013 for
-# too few columns and then `goback's, producing an empty run that looks exactly
-# like a clean pass. That is the single highest-value precondition in this file.
 readonly ACAS_RUN_ROWS=24
 readonly ACAS_RUN_COLS=80
 
 # The seven operation names. These MUST stay identical to the set the
 # Python-side scenario runner is to accept, so the two runners are trivially
-# comparable; that parity is asserted by the validation checklist.
+# comparable.
 readonly -a ACAS_RUN_OPERATIONS=(
   gl_post_cycle
   gl_end_of_cycle
@@ -227,24 +88,9 @@ readonly -a ACAS_RUN_OPERATIONS=(
 
 readonly -a ACAS_RUN_SUBSYSTEMS=(general sales purchase irs)
 
-# operation:subsystem:menu-key:paragraph:locator
-# The menu key is NOT guessed. Each menu accepts one character and resolves it
-# to a paragraph by ordinal: `letters-upper' is "ABC..Z"
-# [general/general.cbl:L271], `a-entry' occurs 26 times
-# [general/general.cbl:L273], a SEARCH sets z to the matching subscript
-# [general/general.cbl:L603-L608], and `go to load01 load02 ... depending on z'
-# dispatches [general/general.cbl:L699-L704]. So the Nth letter selects loadNN.
-# Each key below follows from that rule and from the menu's own display block,
-# and agrees with the paragraph the AAP names.
+# operation:subsystem:menu-key:paragraph:locator The menu key is NOT guessed.
+# Each menu accepts one character and resolves it to a paragraph by ordinal.
 
-#   general  "(H)  Transaction Posting"      at 1044  -> H is 8th  -> load08
-#   general  "(I)  End Of Cycle Processing"  at 1144  -> I is 9th  -> load09
-#   sales    "(G)  Sales Transactions Post"  at 1604  -> G is 7th  -> load07
-#   sales    "(K)  Payment Post"             at 2004  -> K is 11th -> load11
-#   purchase "(H)  Purchase Transactions Post" at 1704 -> H is 8th -> load08
-#   purchase "(L)  Payment Post"             at 2104  -> L is 12th -> load12
-# Note in particular that Sales invoice posting is load07 and NOT load08:
-# [sales/sales.cbl:L770] load08 is sl080, a different and out-of-scope program.
 readonly -a ACAS_RUN_OPERATION_MAP=(
   'gl_post_cycle:general:H:load08:general/general.cbl:L805-L815'
   'gl_end_of_cycle:general:I:load09:general/general.cbl:L817-L821'
@@ -263,33 +109,13 @@ readonly -a ACAS_RUN_SALES_MODULES=(sl000 sl055 sl060 sl100)
 readonly -a ACAS_RUN_PURCHASE_MODULES=(pl000 pl055 pl060 pl100)
 readonly -a ACAS_RUN_IRS_MODULES=(irs000 irs030)
 
-# The subsystem directories build_oracle.sh compiles, in its own order. Used to
-# rebuild the COB_LIBRARY_PATH contract it publishes.
 readonly -a ACAS_RUN_LIBRARY_DIRS=(common general irs purchase sales stock)
 
-# Screen refusals and interactive diversions. If ANY of these reaches the
-# transcript the run is void, so the driver aborts the moment it sees one
-# rather than continuing to a dump that would silently compare nothing.
-#   SY010 / SY013  the 24x80 refusal          [general/general.cbl:L374-L383]
-#   SYS002/SY102/SY104
-#                  system.dat could not be opened, so the menu CALLed sys002
-#                  interactively [general/general.cbl:L385-L396]. sys002 is a
-#                  full interactive parameter-entry program, so its banner on
-#                  the transcript means the menu never reached a posting run.
-#   SY007          a program argument the menu refuses, then `stop run'
-#                  [copybooks/Proc-Get-Env-Set-Files.cob:L75], `stop run' at
-#                  [copybooks/Proc-Get-Env-Set-Files.cob:L82]
+# Screen refusals and interactive diversions.
 
-#   SY009          ACAS_LEDGERS or ACAS_BIN begins with a space, then a
-#                  `stop run' [copybooks/Proc-Get-Env-Set-Files.cob:L20-L28]
-#   Invalid Date   the date-entry reject loop. All four date programs word it
-#                  the same way at the end of the message -- GL009
-#                  [general/gl000.cbl:L148], SL005, PL005, IR005 -- so the
-#                  shared suffix is a single reliable detector.
-# FIELD SEPARATOR IS '|', NOT ':'. A colon cannot be used here: a locator is
-# itself path:Lnnn, and a reason may legitimately contain a colon too, so a
-# colon-split silently truncates the reason and glues its tail onto the
-# front of the locator. '|' appears in no screen code, no reason and no path.
+# SY009 ACAS_LEDGERS or ACAS_BIN begins with a space, then a `stop run'
+# [copybooks/Proc-Get-Env-Set-Files.cob:L20-L28] Invalid Date the date-entry
+# reject loop.
 readonly -a ACAS_RUN_FORBIDDEN=(
   'SY010|the menu refused to run: fewer than 24 lines|general/general.cbl:L374-L383'
   'SY013|the menu refused to run: fewer than 80 columns|general/general.cbl:L374-L383'
@@ -301,19 +127,12 @@ readonly -a ACAS_RUN_FORBIDDEN=(
   'Invalid Date|the pinned run date was rejected by maps04|general/gl000.cbl:L261-L265'
 )
 
-# The menu anchors. All three letter-menus share one prompt, written by a single
-# `display' of a 44-character literal at 0601, so it always reaches the pty
-# contiguously: [general/general.cbl:L568], [sales/sales.cbl:L537],
-# [purchase/purchase.cbl:L531]. The IRS menu is a SCREEN SECTION rather than a
-# display/accept pair, so its anchor comes from the screen item at
-# [irs/irs.cbl:L440-L441].
 readonly ACAS_RUN_MENU_ANCHOR='Select one of the following by letter'
 readonly ACAS_RUN_IRS_MENU_ANCHOR='Select the required function'
 readonly ACAS_RUN_IRS_OPTION_ANCHOR='Enter Run Option'
 
-# The 22 in-scope tables, used only to validate a scenario's affected-table list
-# against the same vocabulary harness/dump_tables.py uses. Nothing here issues
-# DDL and nothing here inspects the schema for its own sake (R-3).
+# The 22 in-scope tables, used only to validate a scenario's affected-table
+# list against the same vocabulary harness/dump_tables.py uses.
 readonly -a ACAS_RUN_INSCOPE_TABLES=(
   ANALYSIS-REC GLBATCH-REC GLLEDGER-REC GLPOSTING-REC
   IRSDFLT-REC IRSFINAL-REC IRSNL-REC IRSPOSTING-REC
@@ -322,82 +141,25 @@ readonly -a ACAS_RUN_INSCOPE_TABLES=(
   SYSDEFLT-REC SYSFINAL-REC SYSTEM-REC SYSTOT-REC VALUEANAL-REC
 )
 
-# The two autogen tables. Never seeded -- harness/seed.sh deliberately does not
-# invoke slautogenLD -- and asserted untouched after any Sales run, because the
-# Sales menu runs sl830 first [sales/sales.cbl:L759-L760] whereas the Python
-# Sales invoice CLI entry point dispatches only sl055 -> sl060. See THE sl830
-# ASYMMETRY below.
 readonly -a ACAS_RUN_AUTOGEN_TABLES=(SAAUTOGEN-REC SAAUTOGEN-LINES-REC)
 
 # THE sl830 ASYMMETRY -- the Cobol side runs a program the Python side does not
 # [sales/sales.cbl:L756-L768] load07 calls sl830 BEFORE sl055, and sl830 is
-# explicitly out of scope: AAP 0.2.2 excludes the sales autogen series
-# sl800..sl830, and AAP 0.4.1.1 has the Sales invoice CLI entry point dispatch
-# only sl055 -> sl060. Because this script must drive the menu, sl830 WILL
-# execute on the oracle side. Two facts make that safe, and both are asserted
-# rather than assumed:
+# explicitly out of scope.
 
-#   1. sl830 is a genuine no-op when autogen is not in use. Its first act after
-#      initialising is [sales/sl830.cbl:L270-L272]:
-#          if       SL-Autogen not = "Y"    *> SL Autogen not in use
-#                   goback.
-#      The field is [copybooks/wssystem.cob:L274] `05 SL-Autogen pic x value
-#      space', column SL-AUTOGEN in SYSTEM-REC. So with SL-AUTOGEN not "Y" it
-#      returns before touching anything.
 
-#   2. If SL-AUTOGEN *were* "Y" the whole Sales invoice path would become
-#      NON-DETERMINISTIC and this harness could not be trusted, because
-#      [sales/sl830.cbl:L298] does
-#          accept   WS-Temp-Run-Date from DATE YYYYMMDD.
-#      and feeds that HOST CLOCK reading into the arithmetic that decides
-#      which autogen invoices to create. That is a direct R-6 violation, and
-#      it is why SL-AUTOGEN is a hard precondition for every Sales operation
-#      here rather than a hopeful assumption.
 
 # The residual asymmetry -- the oracle runs one more program than the Python
 # does, even though that program returns immediately -- is settled by this
-# script's own post-run assertion that the two autogen tables are untouched,
-# which is what R-6 requires of an ambiguity, and recorded for the ambiguity
-# register the migration documentation set is to carry.
+# script's own post-run assertion that the two autogen tables are untouched.
 
-# THE FILE-SYSTEM-USED SILENT-PASS TRAP
-# [general/general.cbl:L385-L396] forces the Cobol path for the SYSTEM PARAMETER
-# FILE only -- `move "00" to FA-RDBMS-Flat-Statuses. *> Force Cobol proc.' What
-# decides whether the LEDGER and POSTING files reach the RDB is a different
-# field, File-System-Used [copybooks/wssystem.cob:L111-L112], read out of
-# system.dat, column FILE-SYSTEM-USED in SYSTEM-REC. The menu's own exit path
-# only rewrites the RDB copies `if File-System-Used NOT = zero'
-# [general/general.cbl:L656-L692].
-# So if FILE-SYSTEM-USED is zero the entire run writes Cobol flat files only,
-# every in-scope table is untouched, the state diff is empty, and the harness
-# reports a clean pass having compared nothing. That is the worst possible
-# failure mode for an oracle, so it is a hard precondition.
 
-# THE MENU-EXIT SIDE EFFECT, AND WHY THE COMPARISON IS BOUNDED BY THE SCENARIO
-# Leaving a letter-menu with "X" is not inert. [general/general.cbl:L656-L692]
-# reopens the system files and rewrites key 1 (SYSTEM-REC), key 2 (the default
-# record, SYSDEFLT-REC) and key 4 (WS-System-Record-4, SYSTOT-REC), closes, and
-# then repeats the identical three rewrites against the Cobol flat file. The
-# Python CLI has no menu and does none of this. THE FOUR MENUS DO NOT AGREE ON
-# WHICH KEYS THEY REWRITE, and the difference changes which tables a run
-# touches; the per-subsystem key list, with each menu's own locator, is stated
-# once at acas_plan_menu_exit and reported in the plan from there. Nothing is
-# harmonised: the divergence is the specification (R-4).
+# Leaving a letter-menu with "X" is not inert.
 
 # The resolution is NOT to avoid the exit path -- killing the process instead
 # would leave a different and non-deterministic state -- and NOT an ignore-list
-# in the diff tool. It is to exit cleanly with "X" and let each scenario's
-# affected-table list bound the comparison, which AAP 0.4.1.7 already mandates
-# and harness/dump_tables.py already implements through its `affected_tables'
-# key. This script therefore requires that key and validates it.
-# SYSTOT-REC deserves a note: it is genuinely in scope for the period-end
-# totals scenario, because AAP 0.6.4 names nine period-total write sites as
-# "the sole writers of the totals record". So the overlap between "written by
-# the menu exit" and "written by the cycle" is real, belongs in the migration
-# documentation set's ambiguity register, and must never be papered over.
+# in the diff tool.
 
-# Mutable state. Declared up front because `set -u' makes an unset array or
-# scalar a fatal reference.
 ACAS_RUN_SCENARIO=''            # scenario NAME
 ACAS_RUN_SCENARIO_FILE=''       # scenario YAML path
 ACAS_RUN_SUBSYSTEM=''           # --subsystem, or derived from --operation
@@ -405,14 +167,7 @@ ACAS_RUN_OPERATION=''           # --operation
 ACAS_RUN_TIMEOUT=120            # per-prompt timeout, seconds
 ACAS_RUN_LOG=''                 # $ACAS_OUT/run-logs/<scenario>/cobol.log
 # Whether the transcript file actually EXISTS and is writable yet, as distinct
-# from merely having been requested on the command line. --log sets the path
-# during argument parsing, long before the directory is created, so a non-empty
-# ACAS_RUN_LOG must never on its own be taken as permission to append: doing so
-# makes every diagnostic emitted between parsing and acas_open_log fail its
-# redirection, and a failed redirection is reported by the shell itself against
-# the stderr in force at that moment, which no 2>/dev/null on the command can
-# suppress after the fact. acas_open_log sets this to 1 only once the file is
-# successfully created.
+# from merely having been requested on the command line.
 ACAS_RUN_LOG_OPEN=0
 ACAS_RUN_LOCK=''                # the sequential-run lock, removed by the EXIT trap
 ACAS_RUN_PLAN_FILE=''           # the resolved keystroke plan, beside the log
@@ -437,36 +192,23 @@ ACAS_SQL_DIAG=''                # last client diagnostic, for error messages
 declare -a ACAS_RUN_TABLES=()          # the scenario's affected-table list
 declare -a ACAS_RUN_SUMMARY=()         # the closing summary table
 declare -a ACAS_RUN_WARN_SUMMARY=()    # non-fatal findings, replayed at the end
-# The client transports this target has earned, most secure first. Decided ONCE
-# by acas_assert_transport_policy, before anything connects, and consumed
-# read-only by acas_sql_scalar -- see the TRANSPORT SECURITY section.
 declare -a ACAS_RUN_TLS_VARIANTS=()
-# The schema name, validated and SQL-escaped once, for the one information_schema
-# query this script issues -- see SAFE SQL COMPOSITION.
 ACAS_RUN_SCHEMA_LITERAL=''
 # The sequential run lock. The PATH and the OWNERSHIP FLAG are separate for the
-# same reason ACAS_RUN_LOG_OPEN is separate from ACAS_RUN_LOG: knowing the name of
-# a lock is not permission to delete it. Only the process that successfully created
-# it sets the flag, so the EXIT trap can never remove a live run's lock.
+# same reason ACAS_RUN_LOG_OPEN is separate from ACAS_RUN_LOG.
 ACAS_RUN_LOCK=''
 ACAS_RUN_LOCK_HELD=0
 
-# REPORTING
 # Stage banners are numbered so the log reads as the deterministic staged
-# orchestration the plan prescribes (R-6). Everything printed goes to standard
-# output and, once the log is open, to $ACAS_OUT/run-logs/<scenario>/cobol.log.
-# NOTHING is written under $ACAS_OUT/<scenario>/, because a compared dump must
-# be byte-identical between runs and this log necessarily contains the host time
-# the menu displays at [general/general.cbl:L556-L557].
+# orchestration the plan prescribes (R-6).
 
 # Append to the run log if it is open yet. Silent before acas_open_log runs, so
 # early usage errors still print without needing a log.
 acas_tee() {
   if (( ACAS_RUN_LOG_OPEN )); then
-    # 2>/dev/null is deliberately FIRST. Redirections are applied left to right,
-    # so silencing stderr before opening the append target is what actually
-    # suppresses a redirection failure; the reverse order lets the shell's own
-    # diagnostic escape to the terminal.
+    # 2>/dev/null is deliberately FIRST. Redirections are applied left to
+    # right, so silencing stderr before opening the append target is what
+    # actually suppresses a redirection failure.
     printf '%s\n' "$*" 2>/dev/null >>"$ACAS_RUN_LOG" || true
   fi
 }
@@ -493,9 +235,6 @@ acas_warn() {
   ACAS_RUN_WARN_SUMMARY+=("$*")
 }
 
-# acas_die <exit-code> <headline> [detail-line]...
-# Every abort names the artifact or setting at fault and, wherever the cause is
-# frozen behaviour, cites its locator so the claim is traceable to it (R-5).
 acas_die() {
   local code="$1"
   shift
@@ -673,7 +412,6 @@ acas_join_words() {
 }
 
 # Membership test over an array passed by name, so the arrays stay readonly.
-# acas_in_list <needle> <element>...
 acas_in_list() {
   local needle="$1"
   shift
@@ -686,37 +424,10 @@ acas_in_list() {
   return 1
 }
 
-# Record one row of the closing summary table.
-# acas_summary_row <label> <value>
 acas_summary_row() {
   ACAS_RUN_SUMMARY+=("$(printf '%-22s %s' "$1" "$2")")
 }
 
-# -----------------------------------------------------------------------------
-# SANITISING A VALUE BEFORE IT REACHES THE TRANSCRIPT  (CWE-117 log injection,
-# CWE-532 sensitive information in a log)
-#
-# The environment block was reported straight into the transcript:
-#
-#     acas_log "database   = $ACAS_DB_NAME on $ACAS_DB_HOST:$ACAS_DB_PORT as $ACAS_DB_USER"
-#
-# Every one of those is caller-supplied. A value carrying a newline forges an
-# arbitrary transcript line -- including a plausible "PASS" or "==> Stage" banner --
-# and a value carrying ESC or a C1 control writes a terminal escape sequence into
-# a file an operator is told to `cat'. The transcript is EVIDENCE: it is the
-# artifact docs/migration/scenario-diff-evidence.md points at, so a forgeable
-# line is a forgeable finding.
-#
-# NEUTRALISED, NOT REJECTED. These values are already width-checked against the
-# frozen host-variable limits [copybooks/wsfnctn.cob:L56-L62] and a legitimate
-# one contains no control character at all, so rendering it safely loses nothing
-# real while an outright refusal would turn a cosmetic mistake into an abort.
-# CR, LF, TAB, ESC, every other C0 control and the C1 range are replaced by a
-# visible marker, and the field is capped so one value cannot flood the file.
-#
-# `LC_ALL=C tr' operates on BYTES, which is what is wanted: a multi-byte
-# character cannot smuggle a C1 control past a byte-wise class.
-# -----------------------------------------------------------------------------
 readonly ACAS_RUN_LOG_FIELD_MAX=120
 
 acas_sanitise_field() {
@@ -731,30 +442,7 @@ acas_sanitise_field() {
   printf '%s' "$value"
 }
 
-# -----------------------------------------------------------------------------
-# SAFE SQL COMPOSITION  (CWE-89)
-#
-# This script issues exactly ONE query that embeds a caller-supplied value:
-#
-#     where table_schema = '$ACAS_DB_NAME'      <-- the defect, as it was
-#
-# ACAS_DB_NAME arrives from the environment, so an apostrophe in it terminated
-# the literal and the remainder of the value was parsed as SQL. Two independent
-# controls replace it, in this order, both applied BEFORE any SQL is composed:
-#
-#   1. The name must be a plain SQL identifier and must be one of the schemas
-#      this harness is allowed to look at. That is a WHITELIST, which is the only
-#      control that actually bounds what the value can be.
-#   2. Whatever survives step 1 is escaped for a string literal anyway, so a
-#      future call site cannot reintroduce the defect by forgetting step 1.
-#
-# Identifier quoting goes through acas_sql_quote_ident, declared with the SQL
-# COMPOSITION SAFETY block below. Every SQL identifier this script names is a
-# frozen constant from the in-scope table list, so none comes from the caller;
-# the helper exists because every identifier in this schema is HYPHENATED and so
-# has to be backquoted, and one helper that emits its own delimiters is safer
-# than a backquote pair hand-written at each site.
-# -----------------------------------------------------------------------------
+# This script issues exactly ONE query that embeds a caller-supplied value.
 readonly ACAS_RUN_SCHEMA_NAME_PATTERN='^[A-Za-z_][A-Za-z0-9_$]*$'
 readonly -a ACAS_RUN_DEFAULT_ALLOWED_SCHEMAS=(
   'ACASDB'
@@ -762,8 +450,6 @@ readonly -a ACAS_RUN_DEFAULT_ALLOWED_SCHEMAS=(
 
 # Escape a value for use inside a single-quoted SQL literal and RETURN IT WITH
 # ITS QUOTES, so a call site cannot use the result and forget to quote it.
-# Backslash first, then the apostrophe: doing it the other way round would
-# re-escape the backslashes this function just added.
 acas_sql_quote_literal() {
   local value="$1"
   value="${value//\\/\\\\}"
@@ -771,9 +457,7 @@ acas_sql_quote_literal() {
   printf "'%s'" "$value"
 }
 
-# Split a comma- or space-separated list into one item per line. A LOCAL IFS is
-# used rather than `tr', because the global IFS is deliberately $'\n\t' and so
-# splitting on a comma or a space is not otherwise available here.
+# Split a comma- or space-separated list into one item per line.
 acas_split_list() {
   local raw="${1-}"
   local item
@@ -785,8 +469,6 @@ acas_split_list() {
   return 0
 }
 
-# Validate ACAS_DB_NAME and compute ACAS_RUN_SCHEMA_LITERAL once. Called from
-# acas_assert_environment, before anything connects.
 acas_assert_schema_name() {
   if [[ ! "$ACAS_DB_NAME" =~ $ACAS_RUN_SCHEMA_NAME_PATTERN ]]; then
     acas_die "$EX_PRECONDITION" \
@@ -813,40 +495,9 @@ acas_assert_schema_name() {
   ACAS_RUN_SCHEMA_LITERAL="$(acas_sql_quote_literal "$ACAS_DB_NAME")"
 }
 
-# -----------------------------------------------------------------------------
-# SAFE FILE CREATION  (CWE-59 symlink following, CWE-367 TOCTOU, CWE-732
-# over-permissive files)
-#
-# `: >"$path"' FOLLOWS a symlink and TRUNCATES its target, and creates at
-# whatever the umask allows. The three files this script creates -- the
-# transcript, the plan and the driver's outcome record -- live under $ACAS_OUT,
-# which the Compose recipe makes a bind mount shared between the `gnucobol' and
-# `mariadb' services. So anything able to place `run-logs/<scenario>/cobol.log'
-# there first chooses which file gets truncated, and then reads the pty
-# transcript of a whole posting run.
-#
-# THE PATTERN, in four steps, each load-bearing, identical to the one
-# harness/reset_db.sh and harness/seed.sh use (deliberately duplicated rather than
-# sourced: the three scripts are independent entry points and none may fail
-# because another is absent):
-#
-#   1. REFUSE a symlink outright. Bash has no O_NOFOLLOW, so this is an explicit
-#      `-L' test. On its own it would be a TOCTOU window, which is why step 3
-#      exists.
-#   2. REMOVE an existing regular file, so step 3's exclusive create is not
-#      defeated by our own previous run. These files are truncated at the start
-#      of every run by contract, so removing one is exactly the old behaviour.
-#   3. CREATE under `set -C' (noclobber), which is O_EXCL: if anything -- a
-#      symlink, a regular file, a directory -- appears at the name between step 1
-#      and here, the create FAILS instead of following or truncating.
-#   4. chmod 600, so the content is private regardless of the inherited umask.
-#      `umask 077' is set at the top of this script, which makes step 4 belt and
-#      braces rather than the only control.
-#
-# The embedded pty driver reopens two of these files later, and it does so with
-# O_NOFOLLOW -- see WRITING THE EVIDENCE inside acas_drive -- because the window
-# between this create and that reopen is exactly what step 3 cannot cover.
-# -----------------------------------------------------------------------------
+# Create a file that cannot be hijacked: a symlink or non-regular path is refused
+# rather than followed, and the file is created under `set -C' (O_EXCL) so it can
+# neither be pre-created by another user nor widened between create and chmod.
 acas_create_private_file() {
   local path="$1" what="$2"
 
@@ -877,19 +528,9 @@ acas_create_private_file() {
     "could not restrict $what to mode 600: $path"
 }
 
-# =============================================================================
-# DEADLINE HELPERS
-# =============================================================================
 
-# acas_timeout_seconds <variable-name> <default>
-# Validates the named variable and publishes the result in ACAS_TIMEOUT_RESOLVED.
-#
-# THE RESULT IS AN OUT-PARAMETER, NOT STDOUT, AND THAT IS LOAD-BEARING. If this
-# printed instead, callers would write `x="$(acas_timeout_seconds ...)"' -- a
-# command substitution, in which acas_die's `exit' terminates only the subshell.
-# Every rejected budget would then be accepted as the EMPTY STRING, and an empty
-# budget in `(( elapsed >= budget ))' is treated as zero, so every non-zero status
-# would look like a timeout while no deadline was actually applied.
+# acas_timeout_seconds <variable-name> <default> Validates the named variable
+# and publishes the result in ACAS_TIMEOUT_RESOLVED.
 acas_timeout_seconds() {
   local name="$1" default="$2" value
   ACAS_TIMEOUT_RESOLVED=''
@@ -930,13 +571,9 @@ acas_resolve_deadlines() {
   ACAS_TIMEOUT_ROTATE="$ACAS_TIMEOUT_RESOLVED"
   readonly ACAS_TIMEOUT_GRACE ACAS_TIMEOUT_CLIENT ACAS_TIMEOUT_DRIVE ACAS_TIMEOUT_ROTATE
 
-  # The fh-logger budget is resolved HERE, with the deadlines, because it is the
-  # same kind of value -- a number arriving from the environment that silently
-  # becomes meaningless if it is malformed. Validating it this early means a typo
-  # is a usage error before any scenario file is parsed or any socket is opened.
-  # The free-space CHECK it feeds cannot happen here, because $ACAS_DATA is not
-  # known to exist yet; that is acas_assert_fh_log_capacity, called as soon as it
-  # is. Syntax first, enforcement when the facts are available.
+  # The fh-logger budget is resolved HERE, with the deadlines, because it is
+  # the same kind of value -- a number arriving from the environment that
+  # silently becomes meaningless if it is malformed.
   local budget="${ACAS_FH_LOG_BUDGET_MB-}"
   [[ -n "$budget" ]] || budget="$ACAS_RUN_FH_BUDGET_DEFAULT_MB"
   if [[ ! "$budget" =~ ^[0-9]+$ ]]; then
@@ -957,21 +594,8 @@ acas_resolve_deadlines() {
   readonly ACAS_RUN_FH_BUDGET_MB
 }
 
-# -----------------------------------------------------------------------------
 # Free space for the frozen file-handler log, asserted BEFORE the database is
 # contacted and long before the menu is spawned.
-#
-# The ordering is the whole point of the check. Logging cannot be switched off --
-# [copybooks/Test-Data-Flags.cob] hardcodes `SW-Testing value 1' and that file is
-# frozen (R-4) -- and the log has been measured growing 473 MB in about three
-# minutes. If the volume fills part-way through a posting cycle, the database is
-# left half-posted: some batches cleared, some not. That state is not a failure
-# this protocol can diff its way out of, because the diff would show real
-# differences produced by an unrelated cause, and the run that produced it would
-# report a write error rather than a capacity problem.
-#
-# So the refusal happens while refusing is still free.
-# -----------------------------------------------------------------------------
 acas_assert_fh_log_capacity() {
   local avail_mb=''
 
@@ -1006,9 +630,8 @@ acas_assert_fh_log_capacity() {
   fi
 }
 
-# acas_deadline_prefix <budget-seconds>
-# Publishes the command prefix in ACAS_DEADLINE_ARGV. TERM first so a child can
-# clean up, KILL after the grace period so one that ignores TERM still dies.
+# acas_deadline_prefix <budget-seconds> Publishes the command prefix in
+# ACAS_DEADLINE_ARGV.
 acas_deadline_prefix() {
   local budget="$1"
   [[ "$budget" =~ ^[1-9][0-9]*$ ]] || acas_die "$EX_PRECONDITION" \
@@ -1022,14 +645,6 @@ acas_deadline_prefix() {
   )
 }
 
-# acas_is_timeout_status <rc> <elapsed> <budget>
-# True when a status plausibly means "the deadline expired".
-#
-# GNU coreutils reports 124 on expiry and 137 when the KILL was needed. The uutils
-# reimplementation -- which is what is on some hosts, including this container --
-# reports 125 where GNU reports 124, and GNU uses 125 for "timeout itself failed".
-# The status alone is therefore ambiguous, so elapsed time disambiguates: a command
-# that consumed its entire budget and then failed timed out, whatever it reported.
 acas_is_timeout_status() {
   local rc="$1" elapsed="$2" budget="$3"
   if (( rc == 124 || rc == 137 )); then
@@ -1041,10 +656,6 @@ acas_is_timeout_status() {
   return 1
 }
 
-# acas_assert_not_timed_out <rc> <elapsed> <budget> <budget-var> <label>...
-# Dies with EX_TIMEOUT when the status means the deadline expired. Names both the
-# stage and the variable, so an under-provisioned budget is distinguishable from a
-# genuinely stuck command.
 acas_assert_not_timed_out() {
   local rc="$1" elapsed="$2" budget="$3" budget_var="$4"
   shift 4
@@ -1059,33 +670,16 @@ acas_assert_not_timed_out() {
 }
 
 
-# =============================================================================
-# PATH CONTAINMENT
-#
 # Every write target is judged by its CANONICAL path, never by the string the
-# operator typed. A textual prefix test -- `[[ "$p" == "$root"/* ]]' -- is
-# satisfied by none of the ways a path actually escapes:
-#   * `$root/../<same-basename>/x'   resolves back inside, but does not match
-#   * a symlink whose target is inside resolves inside, but does not match
-#   * a relative path matches nothing at all, yet lands wherever the cwd is
-# So each check resolves both sides with readlink -f first. For a target that
-# does not exist yet, the nearest EXISTING ancestor is resolved instead, because
-# readlink -f on a missing leaf cannot follow a symlink that is not there.
-#
-# Containment is rejected in BOTH directions: the target must not sit inside the
-# protected root, and the protected root must not sit inside the target -- the
-# second because a write target that CONTAINS the checkout would have the frozen
-# tree deleted underneath it by any cleanup that treats the target as its own.
-# =============================================================================
+# operator typed.
 
-# acas_canonical_path <path>
-# Prints the canonical form of <path>, resolving through the nearest existing
-# ancestor when the leaf does not exist yet. Never fails; falls back to the input.
+# acas_canonical_path <path> Prints the canonical form of <path>, resolving
+# through the nearest existing ancestor when the leaf does not exist yet.
 acas_canonical_path() {
   local path="$1" probe parent tail=''
 
-  # An empty or relative path is anchored first, so the answer does not depend on
-  # the caller's working directory.
+  # An empty or relative path is anchored first, so the answer does not depend
+  # on the caller's working directory.
   if [[ -z "$path" ]]; then
     printf '%s' ''
     return 0
@@ -1115,19 +709,15 @@ acas_canonical_path() {
   printf '%s' "$resolved"
 }
 
-# acas_path_contains <root> <path>
-# True when <path> IS <root> or lies beneath it, or when <root> lies beneath
-# <path>. Both arguments must already be canonical.
 acas_path_contains() {
   local root="${1%/}" path="${2%/}"
   [[ -n "$root" && -n "$path" ]] || return 1
   [[ "$path" == "$root" || "$path" == "$root"/* || "$root" == "$path"/* ]]
 }
 
-# acas_assert_outside_repo <label> <path>
-# Refuses a write target that resolves into the frozen checkout, in either
-# direction. The checkout is REFERENCE-only: "any diff touching ... is a defect
-# in the migration, regardless of how harmless it appears" (AAP 0.8.1).
+# acas_assert_outside_repo <label> <path> Refuses a write target that resolves
+# into the frozen checkout, in either direction. The checkout is
+# REFERENCE-only.
 acas_assert_outside_repo() {
   local label="$1" path="$2"
   local repo_real target
@@ -1146,8 +736,6 @@ acas_assert_outside_repo() {
 }
 
 # acas_assert_outside_tree <label> <path> <protected-root> <why>...
-# The generic form, for roots other than the checkout -- principally the compared
-# trees, whose contents are diffed byte for byte between the two cycles.
 acas_assert_outside_tree() {
   local label="$1" path="$2" root="$3"
   shift 3
@@ -1164,13 +752,7 @@ acas_assert_outside_tree() {
   fi
 }
 
-# =============================================================================
-# TRAPS
-# There is no credential FILE to shred: the password reaches the client through
-# MYSQL_PWD only (see acas_sql_scalar), so it never appears in argv, never in
-# `ps', and never on disk. `set -x' is never enabled anywhere in this script for
-# the same reason, and no credential is ever passed to the driver or written to
-# the plan, the transcript or the log.
+# TRAPS There is no credential FILE to shred.
 ACAS_RUN_CURRENT_STAGE=''
 
 # shellcheck disable=SC2317  # reached only through the ERR trap installed below,
@@ -1189,12 +771,9 @@ acas_on_err() {
 trap 'acas_on_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
 
 # shellcheck disable=SC2317  # reached only through the EXIT trap installed below.
-# Release the sequential run lock, but only if THIS process took it, so an early
-# failure can never delete a lock belonging to a live run. Reached only through
-# the EXIT trap, so it must be safe to call when no lock is held.
 # shellcheck disable=SC2317  # reached only through the EXIT trap installed below,
-# which shellcheck cannot follow; the body is live and is exercised by the
-# concurrency validation case.
+# Release the sequential run lock, but only if THIS process took it, so an
+# early failure can never delete a lock belonging to a live run.
 acas_release_lock() {
   if (( ACAS_RUN_LOCK_HELD )) && [[ -n "$ACAS_RUN_LOCK" ]]; then
     rm -f -- "$ACAS_RUN_LOCK" 2>/dev/null || true
@@ -1207,13 +786,7 @@ acas_release_lock() {
 # non-zero exit path.
 acas_on_exit() {
   local status="$1"
-  # FIRST, unconditionally, and before the status is even examined: a lock that
-  # outlives its owner wedges every later invocation, and acas_take_lock's stale
-  # reclaim exists to recover from the cases this cannot cover -- not to excuse
-  # skipping it. Releasing here rather than from a lock-specific trap also means
-  # there is exactly ONE EXIT trap in this script, so installing the lock can no
-  # longer overwrite the reporting trap (which is what the previous
-  # `trap "rm -f ...; acas_on_exit" EXIT' inside acas_take_lock did).
+  # FIRST, unconditionally, and before the status is even examined.
   acas_release_lock
   if (( status == 0 )); then
     return 0
@@ -1236,12 +809,10 @@ acas_on_exit() {
 trap 'acas_on_exit "$?"' EXIT
 
 
-# USAGE
 acas_usage() {
   # The delimiter is USAGE_EOF and not USAGE, because the text below uses
   # "USAGE" as a section heading on a line of its own and that would end the
-  # here-document early -- silently truncating the help and leaving the rest to
-  # be parsed as shell.
+  # here-document early -- silently truncating the help and leaving the rest to.
   cat <<'USAGE_EOF'
 harness/run_cobol_scenario.sh -- drive the COMPILED ACAS Cobol posting cycle.
 
@@ -1259,13 +830,13 @@ OPTIONS
     --scenario NAME        Scenario name. Defaults to the scenario file's
                           basename without its extension.
     --scenario-file PATH   Scenario definition. Same as the positional form,
-                          which exists for the canonical invocation at
-                          [harness/docker-compose.yml:L346-L357].
+                          which exists for the canonical invocation in
+                          harness/docker-compose.yml.
     --subsystem NAME       One of: general sales purchase irs.
                           Optional -- it is derived from --operation, and is
                           cross-checked when both are given.
-    --operation NAME       One of the seven operations, identical to the set
-                          harness/run_python_scenario.sh accepts:
+    --operation NAME       One of the seven operations of the posting cycle,
+                          named as acas_posting/cli/ names them:
                               gl_post_cycle      general, load08 via "H"
                               gl_end_of_cycle    general, load09 via "I"
                               sl_invoice_post    sales,    load07 via "G"
@@ -1415,10 +986,6 @@ their shape is simply not adopted here.
 USAGE_EOF
 }
 
-# ARGUMENT PARSING
-# Both `--opt value' and `--opt=value' forms are accepted, `--' terminates the
-# options, and a bare word is the scenario file. That matches harness/seed.sh so
-# an operator does not have to remember which stage wants which form.
 acas_parse_args() {
   local positional=''
   while (( $# > 0 )); do
@@ -1482,7 +1049,8 @@ acas_parse_args() {
         shift
         ;;
       --rotate-fh-log)
-        # Retained so an existing invocation that asks for the default keeps working.
+        # Retained so an existing invocation that asks for the default keeps
+        # working.
         ACAS_RUN_ROTATE_FH_LOG=1
         shift
         ;;
@@ -1540,33 +1108,10 @@ acas_parse_args() {
     'failure.'
 }
 
-# SCENARIO FILE
-# Read with pure shell rather than a YAML parser. Three reasons:
-#   1. This stage needs a handful of SCALAR keys plus one flat LIST, and the
-#      scenario files are written to that shape.
-#   2. `yq' is not installed in the harness image and adding it would be a new
-#      dependency for a job that does not need one.
-#   3. harness/dump_tables.py already validates `affected_tables' properly with
-#      PyYAML, so a second full parser here would duplicate a contract rather
-#      than enforce it. This reader deliberately FAILS LOUDLY on anything it
-#      does not understand instead of guessing.
+# Read with pure shell rather than a YAML parser.
 
-# Accepted at top level only: `key: value' (optional quotes), `key:' followed
-# by `  - ITEM' lines, and the inline flow form `key: [A, B, C]'. A `#' starts
-# a comment except inside quotes.
 
-# acas_scenario_scalar <key>
-# Prints the value, or nothing if the key is absent.
-# `_' and `-' are interchangeable in a key name, in BOTH directions, because the
-# key is normalised on both sides of the comparison rather than by trying two
-# spellings of the requested name. Asking for `affected-tables' therefore finds
-# `affected_tables' in the file and vice versa, which is the same tolerance
-# harness/dump_tables.py extends to that key.
-# An explicitly empty value must be QUOTED -- `irs_instead: ""' -- because a
-# bare `key:' is a block-list header in this dialect and in YAML proper is null.
-# Use acas_scenario_has_key to distinguish "absent" from "present and empty";
-# the difference is load-bearing for the three-state IRS fan-out switch, where
-# empty means GL only [copybooks/wssystem.cob:L179-L181].
+# acas_scenario_scalar <key> Prints the value, or nothing if the key is absent.
 acas_scenario_scalar() {
   local key="$1"
   [[ -n "$ACAS_RUN_SCENARIO_FILE" ]] || return 0
@@ -1618,10 +1163,8 @@ acas_scenario_scalar() {
   ' "$ACAS_RUN_SCENARIO_FILE"
 }
 
-# acas_scenario_has_key <key>
-# True when the key appears at top level at all, whatever its value. Needed
-# because an empty value is meaningful for irs_instead and must not be confused
-# with the key having been forgotten.
+# acas_scenario_has_key <key> True when the key appears at top level at all,
+# whatever its value.
 acas_scenario_has_key() {
   local key="$1"
   [[ -n "$ACAS_RUN_SCENARIO_FILE" ]] || return 1
@@ -1638,8 +1181,6 @@ acas_scenario_has_key() {
   ' "$ACAS_RUN_SCENARIO_FILE"
 }
 
-# acas_scenario_list <key>
-# Prints one item per line for a block list or an inline flow list.
 acas_scenario_list() {
   local key="$1"
   [[ -n "$ACAS_RUN_SCENARIO_FILE" ]] || return 0
@@ -1715,7 +1256,6 @@ acas_scenario_list() {
   ' "$ACAS_RUN_SCENARIO_FILE"
 }
 
-# acas_scenario_default <key> <fallback>
 acas_scenario_default() {
   local value
   value="$(acas_scenario_scalar "$1")"
@@ -1727,7 +1267,7 @@ acas_scenario_default() {
 }
 
 
-# STAGE 1 -- resolve the scenario, the operation and the subsystem
+# STAGE 1 -- resolve the scenario, the operation and the subsystem.
 acas_resolve_scenario() {
   ACAS_RUN_CURRENT_STAGE='resolving the scenario'
   acas_stage 'Stage 1/8: scenario, operation and subsystem'
@@ -1735,14 +1275,11 @@ acas_resolve_scenario() {
   if [[ -n "$ACAS_RUN_SCENARIO_FILE" ]]; then
     [[ -f "$ACAS_RUN_SCENARIO_FILE" ]] || acas_die "$EX_SCENARIO" \
       "scenario file not found: $ACAS_RUN_SCENARIO_FILE" \
-      'The eight scenario definitions live under harness/scenarios/.'
+      'Pass the path of a scenario definition file.'
     [[ -r "$ACAS_RUN_SCENARIO_FILE" ]] || acas_die "$EX_SCENARIO" \
       "scenario file is not readable: $ACAS_RUN_SCENARIO_FILE"
   fi
 
-  # The scenario NAME. Explicit option first, then the file's own key, then the
-  # file's basename -- which is how harness/docker-compose.yml's canonical
-  # invocation identifies a scenario, since it passes only the path.
   if [[ -z "$ACAS_RUN_SCENARIO" ]]; then
     ACAS_RUN_SCENARIO="$(acas_scenario_scalar scenario)"
   fi
@@ -1769,17 +1306,13 @@ acas_resolve_scenario() {
   acas_in_list "$ACAS_RUN_OPERATION" "${ACAS_RUN_OPERATIONS[@]}" || acas_die "$EX_USAGE" \
     "unknown operation '$ACAS_RUN_OPERATION'." \
     "The seven operations are: $(acas_join_words "${ACAS_RUN_OPERATIONS[@]}")." \
-    'This set is identical to the one harness/run_python_scenario.sh accepts, so' \
-    'the two runners stay trivially comparable.'
+    'The set is identical to the seven entry points under acas_posting/cli/, so' \
+    'the two sides of the comparison stay trivially comparable.'
 
   local entry name mapped_subsystem
-  # A colon separator IS safe for this array, unlike ACAS_RUN_FORBIDDEN, and the
-  # difference is worth stating so the two conventions do not look arbitrary:
-  # here only the LAST field (the locator, path:Lnnn) can contain a colon, and it
-  # is extracted with ${rest#*:} -- a leftmost strip that keeps the remainder
-  # whole. The first four fields are colon-free identifiers. ACAS_RUN_FORBIDDEN
-  # instead has a colon in a MIDDLE field, which no left-to-right strip can
-  # survive, hence '|' there.
+  # A colon separator IS safe for this array, unlike ACAS_RUN_FORBIDDEN, and
+  # the difference is worth stating so the two conventions do not look
+  # arbitrary.
   for entry in "${ACAS_RUN_OPERATION_MAP[@]}"; do
     name="${entry%%:*}"
     if [[ "$name" == "$ACAS_RUN_OPERATION" ]]; then
@@ -1816,10 +1349,6 @@ acas_resolve_scenario() {
   acas_in_list "$ACAS_RUN_SUBSYSTEM" "${ACAS_RUN_SUBSYSTEMS[@]}" || acas_die "$EX_USAGE" \
     "internal: unknown subsystem '$ACAS_RUN_SUBSYSTEM'."
 
-  # AAP 0.6.4: "Sales and Purchase batches balance by construction, so the
-  # control-total mismatch scenario is General-Ledger-specific -- there is no
-  # meaningful way to construct an unbalanced sales batch." So this scenario is
-  # refused anywhere but General rather than being run to a meaningless result.
   if [[ "$ACAS_RUN_SCENARIO" == *control_total_mismatch* && "$ACAS_RUN_SUBSYSTEM" != 'general' ]]; then
     acas_die "$EX_USAGE" \
       "the control_total_mismatch scenario is General-Ledger-specific." \
@@ -1845,9 +1374,9 @@ acas_resolve_scenario() {
   fi
 }
 
-# STAGE 2 -- the pinned values the scenario must supply
-# Every one of these changes what the run writes, so none of them may be left to
-# a default that happens to be whatever the database currently holds (R-6).
+# STAGE 2 -- the pinned values the scenario must supply Every one of these
+# changes what the run writes, so none of them may be left to a default that
+# happens to be whatever the database currently holds (R-6).
 acas_resolve_pinned_values() {
   ACAS_RUN_CURRENT_STAGE='resolving the pinned scenario values'
   acas_stage 'Stage 4/8: pinned run date, date form and switches'
@@ -1893,8 +1422,7 @@ acas_resolve_pinned_values() {
       ;;
   esac
   # Cross-check the typed order against the declared form, because the prompt
-  # this script waits for is chosen from date_form: a mismatch would otherwise
-  # surface only as an unexplained timeout.
+  # this script waits for is chosen from date_form.
   if [[ "$ACAS_RUN_DATE_FORM" == '3' && ! "$ACAS_RUN_DATE_TEXT" =~ ^[0-9]{4}/ ]]; then
     acas_die "$EX_SCENARIO" \
       "date_form 3 expects yyyy/mm/dd but run_date_text is '$ACAS_RUN_DATE_TEXT'."
@@ -1904,22 +1432,12 @@ acas_resolve_pinned_values() {
       "date_form $ACAS_RUN_DATE_FORM expects a two-digit leading field but run_date_text is '$ACAS_RUN_DATE_TEXT'."
   fi
 
-  # The three-state IRS fan-out switch. AAP 0.6.4: "leaving it at a default would
-  # make the affected-table list ambiguous", so it must be pinned EXPLICITLY --
-  # which means the key has to be present even when its value is the empty
-  # string that selects GL only.
+  # The three-state IRS fan-out switch.
   if acas_scenario_has_key irs_instead; then
     ACAS_RUN_IRS_INSTEAD="$(acas_scenario_scalar irs_instead)"
     # IRS-Instead is `pic x' [copybooks/wssystem.cob:L179], and a pic x holds a
-    # SPACE for the General-Ledger-only state -- Cobol has no empty string for a
-    # single-character alphanumeric field, and neither condition name matches, so
-    # the state is literally a space. A scenario author writing `irs_instead: " "'
-    # is therefore being MORE faithful to the frozen record than one writing "",
-    # and both spellings must be accepted. Spaces are stripped here so the two
-    # converge on the same internal form, which is exactly what the seeded-column
-    # comparison already does to the value it reads back out of SYSTEM-REC. Do NOT
-    # "tighten" this into rejecting one spelling: that turns a correct scenario
-    # into a fatal error, and the two are indistinguishable once seeded.
+    # SPACE for the General-Ledger-only state -- Cobol has no empty string for
+    # a single-character alphanumeric field, and neither condition name.
     ACAS_RUN_IRS_INSTEAD="${ACAS_RUN_IRS_INSTEAD// /}"
   elif [[ -n "$ACAS_RUN_SCENARIO_FILE" ]]; then
     acas_die "$EX_SCENARIO" \
@@ -1946,8 +1464,6 @@ acas_resolve_pinned_values() {
       ;;
   esac
 
-  # G-1 -- irs030's clear-transfer-file answer. A genuine input: "Y" deletes
-  # every row of PSIRSPOST-REC.
   if [[ "$ACAS_RUN_OPERATION" == 'irs_post' ]]; then
     ACAS_RUN_IRS_CLEAR="$(acas_scenario_scalar irs_clear_postings)"
     [[ -n "$ACAS_RUN_IRS_CLEAR" ]] || acas_die "$EX_SCENARIO" \
@@ -1970,8 +1486,6 @@ acas_resolve_pinned_values() {
     esac
   fi
 
-  # G-2 -- gl080's unconditional pre-run gate. "A" (or Escape) means gl080
-  # writes nothing at all, so this too is a genuine input.
   if [[ "$ACAS_RUN_OPERATION" == 'gl_end_of_cycle' ]]; then
     ACAS_RUN_GL080_PROCEED="$(acas_scenario_default gl080_proceed 'Y')"
     ACAS_RUN_GL080_PROCEED="${ACAS_RUN_GL080_PROCEED^^}"
@@ -2026,9 +1540,6 @@ acas_resolve_pinned_values() {
     esac
   fi
 
-  # The affected-table list. This is what BOUNDS the comparison, which is how
-  # the menu-exit rewrite at [general/general.cbl:L656-L692] is kept from
-  # producing a spurious diff without resorting to an ignore-list.
   local -a tables=()
   mapfile -t tables < <(acas_scenario_list affected_tables)
   if (( ${#tables[@]} == 0 )); then
@@ -2052,9 +1563,7 @@ acas_resolve_pinned_values() {
       acas_in_list "$table" "${ACAS_RUN_INSCOPE_TABLES[@]}" || acas_die "$EX_SCENARIO" \
         "affected_tables names '$table', which is not one of the 22 in-scope tables." \
         "The in-scope tables are: $(acas_join_words "${ACAS_RUN_INSCOPE_TABLES[@]}")."
-      # Written as an `if' and not as `acas_in_list ... && acas_die', because
-      # under `set -e' a trailing `&&' whose left side FAILS makes the whole
-      # compound non-zero and aborts the script on the success path.
+      # Written as an `if' and not as `acas_in_list ...
       if (( ${#ACAS_RUN_TABLES[@]} > 0 )) && acas_in_list "$table" "${ACAS_RUN_TABLES[@]}"; then
         acas_die "$EX_SCENARIO" "affected_tables names '$table' more than once."
       fi
@@ -2079,8 +1588,6 @@ acas_resolve_pinned_values() {
     acas_log "affected tables ($((${#ACAS_RUN_TABLES[@]}))) = $(acas_join_words "${ACAS_RUN_TABLES[@]}")"
   fi
 
-  # G-1 consistency: if irs030 may clear the transfer file, the scenario must be
-  # comparing that table, or the clear is invisible to the diff.
   if [[ "$ACAS_RUN_OPERATION" == 'irs_post' && ${#ACAS_RUN_TABLES[@]} -gt 0 ]]; then
     acas_in_list 'PSIRSPOST-REC' "${ACAS_RUN_TABLES[@]}" || acas_die "$EX_SCENARIO" \
       'an irs_post scenario must list PSIRSPOST-REC in affected_tables.' \
@@ -2091,7 +1598,7 @@ acas_resolve_pinned_values() {
 }
 
 
-# STAGE 3 -- the environment contract
+# STAGE 3 -- the environment contract.
 acas_assert_environment() {
   ACAS_RUN_CURRENT_STAGE='asserting the environment contract'
   acas_stage 'Stage 2/8: environment'
@@ -2101,8 +1608,8 @@ acas_assert_environment() {
     if [[ -z "${!name:-}" ]]; then
       acas_die "$EX_PRECONDITION" \
         "$name is unset or empty." \
-        'The harness environment is published by harness/docker-compose.yml; see the' \
-        'canonical invocation at [harness/docker-compose.yml:L346-L357].'
+        'The harness environment is published by harness/docker-compose.yml,' \
+        'which also documents the canonical invocation.'
     fi
   done
   for name in "${ACAS_RUN_REQUIRED_ENV_DECLARED[@]}"; do
@@ -2115,11 +1622,7 @@ acas_assert_environment() {
     fi
   done
 
-  # The Cobol host-variable widths are hard limits, not conventions:
-  # DB-Schema x(12), DB-UName x(12), DB-UPass x(12), DB-Host x(32),
-  # DB-Socket x(64), DB-Port x(5)   [copybooks/wsfnctn.cob:L56-L62]
-  # A longer value is silently truncated by the MOVE into the host variable, so
-  # the Cobol would connect with different credentials than this script checks.
+  # The Cobol host-variable widths are hard limits, not conventions.
   acas_assert_width ACAS_DB_NAME 12
   acas_assert_width ACAS_DB_USER 12
   acas_assert_width ACAS_DB_PASSWORD 12
@@ -2128,16 +1631,7 @@ acas_assert_environment() {
   if [[ -n "${ACAS_DB_SOCKET:-}" ]]; then
     acas_assert_width ACAS_DB_SOCKET 64
   fi
-  # THE RANGE, not merely the character class. A numeric-only test admitted 0 and
-  # 99999, both of which reached the python TCP probe and the client as an
-  # out-of-range port and failed with a cause naming neither the variable nor the
-  # value. Asserted here, once, before anything connects.
-  #
-  # This checks the harness environment variable, NOT the Cobol field: `DB-Port'
-  # is `pic x(5)' CHARACTER data [copybooks/wsfnctn.cob:L56-L62] and its value
-  # semantics are untouched -- port 65535 is five characters and fits, which is
-  # exactly why the frozen field is five wide and why acas_assert_width above
-  # remains the width check.
+  # THE RANGE, not merely the character class.
   [[ "$ACAS_DB_PORT" =~ ^[0-9]+$ ]] || acas_die "$EX_PRECONDITION" \
     "ACAS_DB_PORT must be numeric; got '$(acas_sanitise_field "$ACAS_DB_PORT")'."
   if (( 10#$ACAS_DB_PORT < 1 || 10#$ACAS_DB_PORT > 65535 )); then
@@ -2147,32 +1641,25 @@ acas_assert_environment() {
       'out-of-range port, which fails with a cause that names neither the' \
       'variable nor the value.'
   fi
-  # Canonicalised so the port this script reports, probes and hands the client is
-  # one value rather than several spellings of it. `10#' forces base-10 so a
-  # leading zero is stripped rather than read as octal. Done AFTER the x(5) width
-  # check, so a six-character value is still rejected on width as before.
+  # Canonicalised so the port this script reports, probes and hands the client
+  # is one value rather than several spellings of it.
   ACAS_DB_PORT="$(( 10#$ACAS_DB_PORT ))"
 
   # The schema name is embedded in an information_schema query, so it is
   # validated and escaped here rather than at the query site.
   acas_assert_schema_name
 
-  # Decided HERE, before the readiness probe, and not lazily on first use -- see
-  # acas_assert_transport_policy for why the ordering matters.
+  # Decided HERE, before the readiness probe, and not lazily on first use --
+  # see acas_assert_transport_policy for why the ordering matters.
   acas_assert_transport_policy
 
-  # The schema name is composed into SQL text and passed to the client, so it is
-  # restricted to a plain identifier here -- refused rather than escaped -- before
-  # anything can build a statement from it.
+  # The schema name is composed into SQL text and passed to the client, so it
+  # is restricted to a plain identifier here -- refused rather than escaped --
+  # before anything can build a statement from it.
   acas_assert_sql_identifier 'ACAS_DB_NAME' "$ACAS_DB_NAME"
   acas_assert_sql_identifier 'ACAS_DB_USER' "$ACAS_DB_USER"
 
-  # And it must be THE schema. The frozen mysql/ACASDB.sql contains 33 CREATE
-  # TABLE statements, zero CREATE DATABASE and zero USE [mysql/ACASDB.sql], so it
-  # defines exactly one database and this cycle has exactly one place to run.
-  # Driving the compiled menus at a differently-named schema would either fail
-  # obscurely inside COBOL or -- worse -- succeed against something else and
-  # produce a state diff that looks like evidence.
+  # And it must be THE schema.
   if [[ "$ACAS_DB_NAME" != "$ACAS_RUN_REQUIRED_SCHEMA" ]]; then
     acas_die "$EX_PRECONDITION" \
       "ACAS_DB_NAME is '$ACAS_DB_NAME', not '$ACAS_RUN_REQUIRED_SCHEMA'." \
@@ -2185,10 +1672,9 @@ acas_assert_environment() {
       "ACAS_DB_NAME=$ACAS_RUN_REQUIRED_SCHEMA."
   fi
 
-  # [copybooks/Proc-Get-Env-Set-Files.cob:L20-L28] tests only character 1 of each
-  # of these, so a value that BEGINS with a space is treated as absent and the
-  # menu displays SY009, waits for a keystroke, and stops. That is a hang, and it
-  # is invisible from outside, so it is checked here rather than discovered later.
+  # [copybooks/Proc-Get-Env-Set-Files.cob:L20-L28] tests only character 1 of
+  # each of these, so a value that BEGINS with a space is treated as absent and
+  # the menu displays SY009, waits for a keystroke, and stops.
   for name in ACAS_LEDGERS ACAS_BIN; do
     if [[ "${!name}" == ' '* ]]; then
       acas_die "$EX_PRECONDITION" \
@@ -2201,7 +1687,7 @@ acas_assert_environment() {
 
   # $ACAS_REPO is the read-only checkout. The frozen-artifact guarantee is
   # structural -- the mount is :ro -- but this script also simply never goes
-  # there: it never cd's into it and never names it as a write target.
+  # there.
   [[ -d "$ACAS_REPO" ]] || acas_die "$EX_PRECONDITION" \
     "ACAS_REPO is not a directory: $ACAS_REPO"
   [[ -d "$ACAS_BUILD" ]] || acas_die "$EX_PRECONDITION" \
@@ -2226,29 +1712,19 @@ acas_assert_environment() {
     "ACAS_OUT is not writable: $ACAS_OUT"
 
   # ACAS_BIN is the target of the CBL_CHECK_FILE_EXIST probe at
-  # [general/general.cbl:L489-L503]. Its absence is NOT fatal to the Cobol, but a
-  # directory whose contents change between runs would change the displayed
-  # branch and therefore the transcript, so it must at least exist (D-3).
+  # [general/general.cbl:L489-L503].
   if [[ ! -d "$ACAS_BIN" ]]; then
     mkdir -p "$ACAS_BIN" 2>/dev/null || acas_die "$EX_PRECONDITION" \
       "ACAS_BIN is not a directory and could not be created: $ACAS_BIN"
     acas_note "created ACAS_BIN so the backup-script probe takes the same branch every run"
   fi
 
-  # python3 drives the pty. It is the ONLY option available: `expect' and `socat'
-  # are not installed in the harness image, and `script -q -c' can feed a pty but
-  # cannot match a prompt and then answer it, which is exactly what is required
-  # here -- see WHY EVERY PROMPT IS MATCHED BEFORE IT IS ANSWERED below.
+  # python3 drives the pty. It is the ONLY option available.
   acas_have python3 || acas_die "$EX_PRECONDITION" \
     'python3 is not on PATH.' \
     'It drives the pty, using only the standard library (pty, termios, fcntl,' \
     'struct, select, signal, os, re). harness/Dockerfile.gnucobol provides it.'
 
-  # EVERY interpolated value below is caller-supplied, so every one goes through
-  # acas_sanitise_field first: the transcript is the evidence artifact
-  # docs/migration/scenario-diff-evidence.md points at, and a value carrying a
-  # newline could otherwise forge a line in it. See SANITISING A VALUE BEFORE IT
-  # REACHES THE TRANSCRIPT. The VALUES ARE UNCHANGED -- only their rendering is.
   acas_log "ACAS_REPO  = $(acas_sanitise_field "$ACAS_REPO") (read-only; never written, never entered)"
   acas_log "ACAS_BUILD = $(acas_sanitise_field "$ACAS_BUILD")"
   acas_log "ACAS_DATA  = $(acas_sanitise_field "$ACAS_DATA") (working directory for the run)"
@@ -2258,7 +1734,6 @@ acas_assert_environment() {
   acas_note 'the database password is never logged, never placed in argv and never written to disk'
 }
 
-# acas_assert_width <env-var-name> <max>
 acas_assert_width() {
   local name="$1" max="$2" value
   value="${!name:-}"
@@ -2273,13 +1748,8 @@ acas_assert_width() {
   fi
 }
 
-# STAGE 4 -- open the transcript
-# Deliberately under $ACAS_OUT/run-logs/<scenario>/ and NOT under
-# $ACAS_OUT/<scenario>/. The determinism test compares scenario dumps byte for
-# byte, and this transcript necessarily contains a host clock reading: the menu
-# displays the host time at [general/general.cbl:L556-L557] and
-# [general/gl000.cbl:L194] accepts it from TIME and displays it at 0373. A file
-# containing that can never be allowed into a compared tree (R-6).
+# STAGE 4 -- open the transcript Deliberately under
+# $ACAS_OUT/run-logs/<scenario>/ and NOT under $ACAS_OUT/<scenario>/.
 acas_open_log() {
   ACAS_RUN_CURRENT_STAGE='opening the transcript'
   local dir
@@ -2293,28 +1763,12 @@ acas_open_log() {
     fi
   fi
 
-  # Refuse a --log that would land anywhere its contents could be mistaken for
-  # evidence, or could perturb the evidence. This is a guard against an operator,
-  # not against this script's own default.
-  #
-  # Judged on the CANONICAL path, and BEFORE mkdir -p: the previous form compared
-  # the raw string against one root, which let `$ACAS_OUT/../<out>/<scenario>/x',
-  # a symlink into the tree, and any relative path straight through -- and by the
-  # time a later check could notice, mkdir -p had already created directories
-  # inside the compared tree.
-  #
-  # The transcript must be excluded from comparison because it records the host
-  # time the menu displays [general/general.cbl:L556-L557], which differs between
-  # two runs by construction and would make every diff non-empty (R-6).
   local compared="$ACAS_OUT/$ACAS_RUN_SCENARIO"
   local suggest="$ACAS_OUT/run-logs/$ACAS_RUN_SCENARIO/cobol.log"
 
   acas_assert_outside_repo '--log' "$ACAS_RUN_LOG"
 
-  # The scenario tree itself, plus each raw and normalized side beneath it. The
-  # sides are named explicitly rather than relying on the parent check alone, so
-  # that a future layout change which moves them out from under <scenario> does
-  # not silently drop the guard.
+  # The scenario tree itself, plus each raw and normalized side beneath it.
   local root
   for root in \
     "$compared" \
@@ -2328,10 +1782,7 @@ acas_open_log() {
       "Use a path outside it; the default is $suggest"
   done
 
-  # A symlinked leaf is refused outright rather than followed. The checks above
-  # already resolve it, so this only adds a clearer diagnostic -- and it prevents
-  # the confusing case of a transcript that appears at one path and lands at
-  # another, which makes an evidence trail unreadable.
+  # A symlinked leaf is refused outright rather than followed.
   if [[ -L "$ACAS_RUN_LOG" ]]; then
     acas_die "$EX_USAGE" \
       "--log is a symbolic link: $ACAS_RUN_LOG" \
@@ -2344,24 +1795,15 @@ acas_open_log() {
     "cannot create the transcript directory: $dir"
   chmod 700 -- "$dir" 2>/dev/null || true
 
-  # Re-checked after creation: mkdir -p follows symlinks along the way, so the
-  # path that now exists is the one to judge, not the one that was requested.
   acas_assert_outside_repo 'the transcript directory' "$dir"
   acas_assert_outside_tree 'the transcript directory' "$dir" "$compared" \
     "Use a path outside it; the default is $suggest"
 
-  # ACAS_RUN_LOG_OPEN IS SET ONLY AFTER THE CREATE SUCCEEDS, and that ordering is
-  # load-bearing rather than tidy. acas_tee appends whenever the flag is set and
-  # acas_die reports through acas_tee, so raising the flag before the path was
-  # proven safe would write the refusal message itself through the very symlink it
-  # was refusing. Until then every diagnostic goes to the terminal only -- which
-  # is also why the flag exists separately from the path (see its declaration).
+  # ACAS_RUN_LOG_OPEN IS SET ONLY AFTER THE CREATE SUCCEEDS, and that ordering
+  # is load-bearing rather than tidy.
   acas_create_private_file "$ACAS_RUN_LOG" 'the transcript'
   ACAS_RUN_LOG_OPEN=1
 
-  # The plan and the outcome record get the same treatment. The outcome record in
-  # particular is reopened by the embedded pty driver, which uses O_NOFOLLOW for
-  # the same reason this create refuses a link.
   local plan="$dir/cobol.plan"
   local result="$dir/cobol.result"
   acas_create_private_file "$plan" 'the keystroke plan'
@@ -2369,9 +1811,7 @@ acas_open_log() {
   ACAS_RUN_PLAN_FILE="$plan"
   ACAS_RUN_RESULT_FILE="$result"
 
-  # No timestamp in this header, by design. The prohibition on reading the host
-  # clock is absolute in this script (R-6) and a header line is not worth an
-  # exception; the scenario and operation identify the run unambiguously.
+  # No timestamp in this header, by design.
   acas_tee "harness/run_cobol_scenario.sh -- scenario $ACAS_RUN_SCENARIO, operation $ACAS_RUN_OPERATION"
   acas_stage 'Stage 3/8: transcript'
   acas_log "transcript = $ACAS_RUN_LOG"
@@ -2384,14 +1824,13 @@ acas_open_log() {
   acas_note '(rule R-6)'
 }
 
-# STAGE 5 -- the compiled oracle
+# STAGE 5 -- the compiled oracle.
 acas_assert_oracle() {
   ACAS_RUN_CURRENT_STAGE='asserting the compiled oracle'
   acas_stage 'Stage 5/8: compiled artifacts'
 
-  # The four menu executables, each built with `cobc -x' by the maintainer's own
-  # per-directory script. Only the one this operation needs is required to be
-  # runnable, but all four are reported so a partial build is obvious.
+  # The four menu executables, each built with `cobc -x' by the maintainer's
+  # own per-directory script.
   local -a menus=(
     'general:general/comp-gl.sh:L3'
     'sales:sales/comp-sales.sh:L9'
@@ -2433,9 +1872,7 @@ acas_assert_oracle() {
     acas_warn "not every menu executable is built; only $ACAS_RUN_SUBSYSTEM is needed for this operation"
   fi
 
-  # The `-m' modules this subsystem's menu will dynamically load. Names come from
-  # the arrays harness/build_oracle.sh publishes, so the two files cannot
-  # disagree about what "built" means.
+  # The `-m' modules this subsystem's menu will dynamically load.
   local -a modules=()
   case "$ACAS_RUN_SUBSYSTEM" in
     general)  modules=("${ACAS_RUN_GENERAL_MODULES[@]}") ;;
@@ -2444,8 +1881,6 @@ acas_assert_oracle() {
     irs)      modules=("${ACAS_RUN_IRS_MODULES[@]}") ;;
   esac
   # Sales additionally loads sl830 before sl055 [sales/sales.cbl:L759-L760].
-  # It is OUT OF SCOPE and a no-op when autogen is unused, but the menu calls it
-  # unconditionally, so a missing module would abort the run inside load07.
   if [[ "$ACAS_RUN_SUBSYSTEM" == 'sales' ]]; then
     modules+=(sl830)
   fi
@@ -2472,11 +1907,8 @@ acas_assert_oracle() {
   fi
   acas_log "modules    = $(acas_join_words "${modules[@]}") -- all present"
 
-  # COB_LIBRARY_PATH must name every build directory or the menu cannot load its
-  # sub-programs. This reproduces the value harness/build_oracle.sh publishes as
-  # "this script's output contract to the runner scripts" rather than inventing
-  # one, and it PREPENDS rather than replaces so an operator's own additions
-  # survive.
+  # COB_LIBRARY_PATH must name every build directory or the menu cannot load
+  # its sub-programs.
   local dir want=''
   for dir in "${ACAS_RUN_LIBRARY_DIRS[@]}"; do
     if [[ -d "$ACAS_BUILD/$dir" ]]; then
@@ -2498,11 +1930,6 @@ acas_assert_oracle() {
   export COB_LIBRARY_PATH
   acas_log "COB_LIBRARY_PATH = $COB_LIBRARY_PATH"
 
-  # GnuCobol must have a REAL indexed-file backend. system.dat is opened as a
-  # Cobol INDEXED file -- [general/general.cbl:L385-L396] forces that path with
-  # `move "00" to FA-RDBMS-Flat-Statuses. *> Force Cobol proc.' -- so without a
-  # backend the open fails, the menu CALLs sys002 interactively, and the harness
-  # hangs with no diagnostic at all.
   local info=''
   if acas_have cobc; then
     info="$(cobc --info 2>/dev/null | grep -i 'indexed file handler' || true)"
@@ -2526,10 +1953,6 @@ acas_assert_oracle() {
   fi
 }
 
-# acas_module_present <name>
-# A `-m' module is a shared object named after the program. GnuCobol accepts
-# either the plain name or the platform suffix, so both are tried, across every
-# build directory on the library path.
 acas_module_present() {
   local module="$1" dir
   for dir in "${ACAS_RUN_LIBRARY_DIRS[@]}"; do
@@ -2543,50 +1966,17 @@ acas_module_present() {
 }
 
 
-# DATABASE ACCESS
-# The password reaches the client through MYSQL_PWD ONLY. It is never an argv
-# element, so it never appears in `ps'; it is never written to a defaults file,
-# so there is nothing to shred on exit; and it is never echoed, logged or teed.
-# Identical to harness/seed.sh, deliberately.
-# Every query below is a SELECT. This stage emits no DDL and no DML of any kind
-# (R-3): the only thing that writes during this stage is the compiled Cobol.
-# =============================================================================
-# -----------------------------------------------------------------------------
-# TRANSPORT SECURITY (CWE-295 improper certificate validation, CWE-319 cleartext
-# transmission). The variant search used to be, unconditionally:
-#
-#     for variant in '' '--skip-ssl'; do          <-- the defect, as it was
-#
-# so a server that merely declined TLS -- or a middlebox that stripped it --
-# caused a SILENT downgrade to plaintext on the second iteration. Worse, the
-# first iteration passed no --ssl-verify-server-cert either, so even the TLS
-# attempt validated nothing: any certificate, from anyone, was accepted.
-#
-# THE POLICY, enforced by acas_assert_transport_policy and FAIL-CLOSED:
-#
-#   * A LOCAL target -- a unix socket, an empty host, or a loopback host -- may
-#     use plaintext. Nothing leaves the machine, and it is the configuration the
-#     harness actually uses: a current client enforces TLS while this server has
-#     none, so --skip-ssl is REQUIRED there. Removing that path would break every
-#     local probe while protecting nothing.
-#   * A NON-LOCAL target must present a certificate chaining to $ACAS_DB_TLS_CA
-#     and matching its hostname. That is what --ssl-verify-server-cert adds;
-#     without a CA it verifies nothing, so the CA is required rather than optional.
-#   * Plaintext to a non-local target is permitted ONLY when
-#     ACAS_DB_ALLOW_PLAINTEXT explicitly declares the network isolated. The
-#     accepted values are a CLOSED set, so a typo fails closed.
-#   * Anything else is REFUSED before the first connection.
-#
-# NOTHING ELSE CHANGES: the same two binaries are probed in the same order, the
-# same four return codes are reported, and the composed argv is otherwise
-# identical -- still every query a SELECT, still no --force, still no DDL and no
-# DML from this script (R-3).
-# -----------------------------------------------------------------------------
+# The password reaches the client through MYSQL_PWD ONLY.
+
+# TRANSPORT SECURITY (CWE-295 certificate validation, CWE-319 cleartext).
+# The transport is decided ONCE, before anything connects, and never downgraded
+# silently. A local target may use plaintext; a non-local target needs either a
+# CA bundle in ACAS_DB_TLS_CA, whose certificate and hostname are then verified,
+# or an explicit ACAS_DB_ALLOW_PLAINTEXT declaration -- otherwise the run aborts
+# with a named cause, because the probe authenticates with a real credential.
 
 # True when the target is reachable without leaving the machine: a unix socket,
-# an empty host, a loopback name, or a numeric loopback address. RESOLVES NOTHING
-# about whether the server is trustworthy (R-6) -- it answers only "could this
-# traffic be observed on a network".
+# an empty host, a loopback name, or a numeric loopback address.
 acas_target_is_local() {
   [[ -n "${ACAS_DB_SOCKET:-}" ]] && return 0
   [[ -z "$ACAS_DB_HOST" ]] && return 0
@@ -2599,8 +1989,6 @@ acas_target_is_local() {
   return 1
 }
 
-# True when ACAS_DB_ALLOW_PLAINTEXT explicitly declares the network isolated.
-# A CLOSED set of accepted spellings, so `ture' or `TRUE ' fails closed.
 acas_plaintext_declared() {
   case "${ACAS_DB_ALLOW_PLAINTEXT:-}" in
     1|true|yes|on) return 0 ;;
@@ -2608,14 +1996,9 @@ acas_plaintext_declared() {
   return 1
 }
 
-# Decide, ONCE and BEFORE ANYTHING CONNECTS, which client transports this target
-# has earned. Populates ACAS_RUN_TLS_VARIANTS, most secure first, or aborts.
-#
-# Called from acas_assert_environment (stage 2 of 8), and NOT lazily from the
-# query path: a policy that is only evaluated when a connection is first attempted
-# arrives AFTER the TCP reachability probe in stage 6, so the operator would be
-# told "cannot reach <host>:<port>" when the truth is "this script refuses to talk
-# to it that way".
+# Decide, ONCE and BEFORE ANYTHING CONNECTS, which client transports this
+# target has earned. Populates ACAS_RUN_TLS_VARIANTS, most secure first, or
+# aborts.
 acas_assert_transport_policy() {
   local ca="${ACAS_DB_TLS_CA:-}"
   ACAS_RUN_TLS_VARIANTS=()
@@ -2624,9 +2007,6 @@ acas_assert_transport_policy() {
     [[ -r "$ca" ]] || acas_die "$EX_PRECONDITION" \
       "ACAS_DB_TLS_CA names a file that cannot be read: $(acas_sanitise_field "$ca")" \
       'It must be the PEM bundle the server certificate chains to.'
-    # --ssl-verify-server-cert is what makes the CA meaningful: without it the
-    # client encrypts but accepts any certificate, which is CWE-295 with extra
-    # steps.
     ACAS_RUN_TLS_VARIANTS+=("--ssl-ca=$ca --ssl-verify-server-cert")
   fi
 
@@ -2658,25 +2038,9 @@ acas_assert_transport_policy() {
   return 0
 }
 
-# =============================================================================
-# SQL COMPOSITION SAFETY
-#
-# Every value that reaches SQL text does so through one of these, never by being
-# interpolated between hand-written quotes. Both quoters EMIT THEIR OWN
-# DELIMITERS, which is the point: a call site cannot end up writing `'$(...)''
-# and re-opening the hole the helper exists to close.
-#
-# Two validators rather than one loosened validator, because the two alphabets
-# differ for different reasons and merging them would weaken the stricter:
-#   * a schema or user name comes from the environment and is bounded by the
-#     COBOL RDB-Data pic x(12) field [copybooks/wsfnctn.cob:L56-L62];
-#   * a table name comes from the frozen schema, which uses hyphens throughout
-#     (GLLEDGER-REC) and reaches 19 characters (PUAUTOGEN-LINES-REC).
-# The backtick is absent from both -- it is the character that would escape a
-# quoted identifier.
-# =============================================================================
+# Every value that reaches SQL text does so through one of these, never by
+# being interpolated between hand-written quotes.
 
-# acas_assert_sql_identifier <label> <value>
 acas_assert_sql_identifier() {
   local label="$1" value="$2"
   if [[ ! "$value" =~ ^[A-Za-z0-9_]{1,12}$ ]]; then
@@ -2690,7 +2054,6 @@ acas_assert_sql_identifier() {
   fi
 }
 
-# acas_assert_table_name <label> <value>
 acas_assert_table_name() {
   local label="$1" value="$2"
   if [[ ! "$value" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; then
@@ -2703,20 +2066,17 @@ acas_assert_table_name() {
   fi
 }
 
-# acas_sql_quote <value>  -> 'value', escaped, WITH its own delimiters.
-# ONE implementation, two published names: acas_sql_quote_literal, declared with
-# the SAFE SQL COMPOSITION block above, is the implementation. Two separate
-# escapers would be two places for the escaping to be got wrong.
+# acas_sql_quote <value> -> 'value', escaped, WITH its own delimiters. ONE
+# implementation, two published names: acas_sql_quote_literal, declared with
+# the SAFE SQL COMPOSITION block above, is the implementation.
 acas_sql_quote() {
   acas_sql_quote_literal "${1-}"
 }
 
-# acas_sql_quote_ident <value>  -> `value` with embedded backticks doubled
+# acas_sql_quote_ident <value> -> `value` with embedded backticks doubled.
 acas_sql_quote_ident() {
   local value="$1"
-  # The delimiter travels in a variable rather than inside the printf format: a
-  # backtick in a single-quoted format is literal and would be correct, but it
-  # reads as an attempted command substitution to both static analysis and humans.
+  # The delimiter travels in a variable rather than inside the printf format.
   local bq='`'
   printf '%s%s%s' "$bq" "${value//"$bq"/"$bq$bq"}" "$bq"
 }
@@ -2729,9 +2089,6 @@ acas_sql_scalar() {
   local client variant flag out rc
   # Unreachable unless acas_assert_transport_policy was skipped or changed: it
   # either records at least one permitted variant or aborts with a named cause.
-  # Asserted rather than assumed, because an empty list would otherwise fall
-  # straight through the loop and report a bare "the query failed" with no
-  # diagnostic at all -- the least informative failure this script could produce.
   if (( ${#ACAS_RUN_TLS_VARIANTS[@]} == 0 )); then
     acas_die "$EX_PRECONDITION" \
       'no permitted client transport for this target.' \
@@ -2746,9 +2103,9 @@ acas_sql_scalar() {
       acas_deadline_prefix "$ACAS_TIMEOUT_CLIENT"
       local -a argv=("${ACAS_DEADLINE_ARGV[@]}" "$client" '--protocol=TCP')
       if [[ -n "$variant" ]]; then
-        # A variant may carry two words (--ssl-ca=... --ssl-verify-server-cert),
-        # so it is split deliberately here -- each flag must be its own argv
-        # element.
+        # A variant may carry two words (--ssl-ca=...
+        # --ssl-verify-server-cert), so it is split deliberately here -- each
+        # flag must be its own argv element.
         for flag in $variant; do
           argv+=("$flag")
         done
@@ -2777,14 +2134,8 @@ acas_sql_scalar() {
 # TCP reachability without a client binary and without a credential.
 acas_db_tcp_probe() {
   # The port range is asserted in acas_assert_environment, before anything
-  # connects, so `int(sys.argv[2])' here can no longer receive 99999 and fail with
-  # an OverflowError that names neither the variable nor the value. The range is
-  # re-checked in the probe itself because a defence that only exists at one entry
-  # point is one refactor away from not existing.
-  #
-  # Bounded even though create_connection carries its own timeout: that timeout
-  # covers the CONNECT, not the getaddrinfo() before it. A lookup against an
-  # unreachable resolver blocks in libc, where no Python-level timeout reaches.
+  # connects, so `int(sys.argv[2])' here can no longer receive 99999 and fail
+  # with an OverflowError that names neither the variable nor the value.
   acas_deadline_prefix "$ACAS_TIMEOUT_CLIENT"
   "${ACAS_DEADLINE_ARGV[@]}" python3 - "$ACAS_DB_HOST" "$ACAS_DB_PORT" <<'PY'
 import socket
@@ -2808,13 +2159,9 @@ sys.exit(0)
 PY
 }
 
-# acas_system_column <column>
-# Read one column of the single SYSTEM-REC row. Used only for PRECONDITIONS and
-# for POST-RUN OBSERVATION -- never to validate what the Cobol computed (R-3).
+# acas_system_column <column> Read one column of the single SYSTEM-REC row.
 acas_system_column() {
   local column="$1" rc=0
-  # The column name reaches SQL as a quoted identifier. Callers pass fixed names,
-  # so this is defence in depth: it makes the composition correct by construction.
   acas_assert_table_name 'a SYSTEM-REC column name' "$column"
   acas_sql_scalar "select $(acas_sql_quote_ident "$column") from $(acas_sql_quote_ident 'SYSTEM-REC') limit 1;" || rc=$?
   if (( rc != 0 )); then
@@ -2823,7 +2170,7 @@ acas_system_column() {
   printf '%s' "$ACAS_SQL_OUT"
 }
 
-# STAGE 6 -- the database
+# STAGE 6 -- the database.
 acas_assert_database() {
   ACAS_RUN_CURRENT_STAGE='asserting the database'
   acas_stage 'Stage 6/8: database, schema and the two silent-pass traps'
@@ -2852,9 +2199,6 @@ acas_assert_database() {
   # The frozen schema must be present. 33 CREATE TABLE statements, no ALTER and
   # no CREATE INDEX [mysql/ACASDB.sql]. Nothing here alters it (R-3).
   rc=0
-  # ACAS_RUN_SCHEMA_LITERAL, not "'$ACAS_DB_NAME'": the name has been checked
-  # against the allow-list and escaped for a string literal by
-  # acas_assert_schema_name, and the literal ALREADY CARRIES ITS QUOTES.
   acas_sql_scalar "select count(*) from information_schema.tables where table_schema = ${ACAS_RUN_SCHEMA_LITERAL};" || rc=$?
   (( rc == 0 )) || acas_die "$EX_DATABASE" \
     'could not count the tables in the schema.' \
@@ -2952,7 +2296,6 @@ acas_assert_database() {
       'which harness/seed.sh reproduces rather than invokes.'
   fi
 
-  # TRAP 1 -- FILE-SYSTEM-USED. The silent pass.
   local file_system_used
   file_system_used="$(acas_system_column 'FILE-SYSTEM-USED')" || acas_die "$EX_DATABASE" \
     'could not read SYSTEM-REC.FILE-SYSTEM-USED.' \
@@ -2997,8 +2340,9 @@ acas_assert_database() {
     'could not read SYSTEM-REC.DATE-FORM.' \
     "$(acas_diag_summary "$ACAS_SQL_DIAG")"
   acas_log "DATE-FORM = $seeded_date_form (scenario says $ACAS_RUN_DATE_FORM)"
-  # [general/gl000.cbl:L205] coerces an out-of-range value to 1 before choosing a
-  # prompt, so the effective form -- not the stored one -- is what must match.
+  # [general/gl000.cbl:L205] coerces an out-of-range value to 1 before choosing
+  # a prompt, so the effective form -- not the stored one -- is what must
+  # match.
   local effective_form="$seeded_date_form"
   if [[ ! "$effective_form" =~ ^[123]$ ]]; then
     effective_form=1
@@ -3014,8 +2358,7 @@ acas_assert_database() {
   fi
 
   # The IRS fan-out switch must already hold the pinned value. This script does
-  # NOT write it: seeding is harness/seed.sh's job, and writing it here would be
-  # this stage mutating the state it is about to be compared on.
+  # NOT write it.
   local seeded_irs
   seeded_irs="$(acas_system_column 'IRS-INSTEAD')" || acas_die "$EX_DATABASE" \
     'could not read SYSTEM-REC.IRS-INSTEAD.' \
@@ -3034,7 +2377,6 @@ acas_assert_database() {
       'that adjusted the state it is about to measure would not be an oracle.'
   fi
 
-  # TRAP 2 -- SL-AUTOGEN. The determinism landmine. Sales operations only.
   if [[ "$ACAS_RUN_SUBSYSTEM" == 'sales' ]]; then
     local sl_autogen
     sl_autogen="$(acas_system_column 'SL-AUTOGEN')" || acas_die "$EX_DATABASE" \
@@ -3083,10 +2425,7 @@ acas_assert_database() {
 
   # The Cobol reads its OWN credentials out of system.dat, not out of this
   # environment: SYSTEM-REC carries RDBMS-DB-NAME, RDBMS-USER, RDBMS-PASSWD,
-  # RDBMS-PORT, RDBMS-HOST and RDBMS-SOCKET. If those disagree with ACAS_DB_*,
-  # this script would check one database while the Cobol wrote to another.
-  # Only the NON-SECRET fields are compared, and the password is never read,
-  # never printed and never compared.
+  # RDBMS-PORT, RDBMS-HOST and RDBMS-SOCKET.
   local pair column env_value seeded_value
   for pair in "RDBMS-DB-NAME:$ACAS_DB_NAME" "RDBMS-USER:$ACAS_DB_USER" "RDBMS-HOST:$ACAS_DB_HOST"; do
     column="${pair%%:*}"
@@ -3204,17 +2543,10 @@ acas_assert_data_dir() {
 # LITERAL, and that copybook is frozen, so file-handler logging cannot be turned
 # off without editing a frozen file. [common/fhlogger.cbl:L111] assigns the log a
 # RELATIVE name -- `select Log-File assign "fh-logger.txt"' -- so it lands in the
-# process working directory, which for this harness is $ACAS_DATA.
-#
-# Measured growth: 473 MB in roughly three minutes. That makes it an operational
-# hazard rather than a curiosity, and the hazard has a specific shape -- a volume
-# that fills DURING the run leaves the database half-posted and reports something
-# unrelated as the cause.
-# =============================================================================
+# process working directory, which for this harness is $ACAS_DATA. Measured
+# growth: 473 MB in roughly three minutes.
 
-# The rotated log is labelled and kept, never overwritten. Deterministic given the
-# directory's contents, and it lives under run-logs/ which is never compared, so
-# no naming choice here can perturb a state diff.
+# The rotated log is labelled and kept, never overwritten.
 acas_fh_rotation_target() {
   local dir="$1" base="$2" n=1 candidate
   candidate="$dir/$base.001"
@@ -3243,9 +2575,8 @@ acas_rotate_fh_log() {
     acas_log 'fh-logger.txt = absent; the file handler will create it during the run'
   fi
 
-  # Capacity was asserted much earlier, by acas_assert_fh_log_capacity, so that a
-  # volume with no room refuses before the database is contacted at all. By the
-  # time rotation runs, the only remaining question is where the existing log goes.
+  # Capacity was asserted much earlier, by acas_assert_fh_log_capacity, so that
+  # a volume with no room refuses before the database is contacted at all.
 
   if [[ ! -f "$fh_log" ]]; then
     return 0
@@ -3256,9 +2587,9 @@ acas_rotate_fh_log() {
     return 0
   fi
 
-  # The destination is under run-logs/<scenario>/, which is OUTSIDE every compared
-  # tree, so a multi-hundred-megabyte log can never enter a dump or a diff. It is
-  # also where the transcript already lives, so all of a run's evidence is together.
+  # The destination is under run-logs/<scenario>/, which is OUTSIDE every
+  # compared tree, so a multi-hundred-megabyte log can never enter a dump or a
+  # diff.
   local dest_dir="$ACAS_OUT/run-logs/$ACAS_RUN_SCENARIO"
   acas_assert_outside_repo 'the fh-logger rotation directory' "$dest_dir"
   acas_assert_outside_tree 'the fh-logger rotation directory' "$dest_dir" \
@@ -3308,25 +2639,8 @@ acas_plan_forbidden() {
 }
 
 # The date-entry step. All four menus force Date Entry on the first pass, so no
-# keystroke selects it:
-#     general  [general/general.cbl:L268] menu-reply pic x value "A"
-#              [general/general.cbl:L506-L507] if menu-reply = "A" go to load01
-#     sales    [sales/sales.cbl:L219], [sales/sales.cbl:L475-L476]
-#     purchase [purchase/purchase.cbl:L215], [purchase/purchase.cbl:L469-L470]
-#     irs      [irs/irs.cbl:L338] Menu-Reply pic x value "1"
-#              *> Force Run Date updating at SOJ.
-#              [irs/irs.cbl:L626-L630]
-# Sending "A" or "1" first would therefore be a keystroke too many, and it
-# would land in the date field.
+# keystroke selects it.
 
-# The prompt is chosen from DATE-FORM, so waiting for the specific variant also
-# pins the seeded form and the typed digit order together:
-#     [general/gl000.cbl:L230-L237] "Enter todays date as dd/mm/yyyy -
-#                                   [          ]" ... mm/dd/yyyy ... yyyy/mm/dd
-#     [irs/irs000.cbl:L222-L228]    "Enter today's date as ..."  -- with an
-#                                   apostrophe, so only the tail is matched.
-# The accept is ten characters wide with no AUTO
-# [general/gl000.cbl:L238-L239], so it needs an explicit Return.
 acas_plan_date_entry() {
   local order
   case "$ACAS_RUN_DATE_FORM" in
@@ -3334,11 +2648,8 @@ acas_plan_date_entry() {
     2) order='mm/dd/yyyy' ;;
     3) order='yyyy/mm/dd' ;;
   esac
-  # Each subsystem has its OWN date-entry program, and the citation must name the
-  # one that actually runs. All four display the same three prompts and accept
-  # u-date, but at different lines, and irs000 additionally spells the literal
-  # with an apostrophe ("today's"), which is why the match anchor below is only
-  # the shared tail "date as <order>".
+  # Each subsystem has its OWN date-entry program, and the citation must name
+  # the one that actually runs.
   local locator
   case "$ACAS_RUN_SUBSYSTEM" in
     general)  locator='general/gl000.cbl:L230-L239'  ;;  # prompts L230/233/236, accept L239
@@ -3351,37 +2662,19 @@ acas_plan_date_entry() {
 }
 
 # The three letter-menus. One character, and NO Return: the accept carries AUTO
-#     [general/general.cbl:L591-L593] accept menu-reply at 0644 with ... auto UPPER
-# so a single keystroke terminates it. A trailing Return would be consumed by
-# whatever screen came next.
+# [general/general.cbl:L591-L593] accept menu-reply at 0644 with ...
 acas_plan_menu_select() {
   acas_plan_add 1 'menu-select' expect "$ACAS_RUN_MENU_ANCHOR" "$ACAS_RUN_MENU_KEY" 1 \
     "select '$ACAS_RUN_MENU_KEY' -> $ACAS_RUN_PARAGRAPH [$ACAS_RUN_PARAGRAPH_LOCATOR]"
 }
 
-# Leaving a letter-menu. "X" is tested before the ordinal search
-#     [general/general.cbl:L595-L596], [sales/sales.cbl:L572],
-#     [purchase/purchase.cbl:L566]
-# and the exit path REWRITES system records twice -- once through the RDB and
-# once through the Cobol flat file. That is left to happen: killing the menu
-# instead would leave a different and non-deterministic state. The comparison
-# is bounded by the scenario's affected-table list instead.
 
 # THE EXIT SIDE EFFECT IS NOT THE SAME IN ALL FOUR MENUS, and the difference
 # decides which extra tables a run touches, so it is stated per subsystem
-# rather than generalised from General. Each menu's own paragraph:
-#   general   keys 1, 2 AND 4 -> SYSTEM-REC, SYSDEFLT-REC, SYSTOT-REC
-#             [general/general.cbl:L656-L692], and every rewrite is then
-#             REPEATED against the flat file [general/general.cbl:L674-L691]
-#   sales     keys 1 and 4 ONLY -> SYSTEM-REC, SYSTOT-REC. There is NO key 2
-#             and therefore NO SYSDEFLT-REC write [sales/sales.cbl:L628-L657]
-#   purchase  keys 1 and 4 ONLY, as Sales [purchase/purchase.cbl:L621-L651]
-#   irs       key 1 ONLY -> SYSTEM-REC [irs/irs.cbl:L755-L775]
+# rather than generalised from General.
 
 # The RDB half of each block is guarded by `if File-System-Used NOT = zero',
-# which is why a zero FILE-SYSTEM-USED is asserted as a silent-pass trap: with
-# it zero the RDB is never written and a diff would be empty for the wrong
-# reason.
+# which is why a zero FILE-SYSTEM-USED is asserted as a silent-pass trap.
 acas_plan_menu_exit() {
   local keys locator
   case "$ACAS_RUN_SUBSYSTEM" in
@@ -3398,47 +2691,19 @@ acas_plan_menu_exit() {
     "leave the menu cleanly; the exit path rewrites $keys [$locator]"
 }
 
-# Prompts that merely pause for acknowledgement (D-4). Each is conditional -- it
-# fires only if the program actually reaches that error path -- so each is a
-# react rule rather than an expect step, and none may change control flow.
+# Prompts that merely pause for acknowledgement (D-4).
 acas_plan_ack() {
   local step="$1" pattern="$2" limit="$3" citation="$4"
   acas_plan_add 2 "$step" react "$pattern" '\r' "$limit" "$citation"
 }
 
 
-# gl_post_cycle -- general, letter "H", load08
-# THE GENERAL GATE. [general/general.cbl:L805-L815], `*>' rule lines elided:
-#     load08.
-#         move     "gl070" to ws-called.
-#         perform  load00.
-#         if       ws-term-code = 5
-#                  go to display-menu.
-#         move     "gl071" to ws-called.
-#         perform  load00.
-#         move     "gl072" to ws-called.
-#         go       to load00.
-# The predicate is `ws-term-code = 5' [general/general.cbl:L810-L811].
 
 # The code is raised inside gl070 on finding a batch left open
-# [general/gl070.cbl:L287-L290]: `if a = 1 / perform gl060a / move 5 to
-# ws-term-code / go to main-exit.' When it fires, gl071 and gl072 NEVER RUN AT
-# ALL and the database shows none of their effects. This script neither
-# implements that gate nor compensates for it: it answers whatever prompts
-# appear and records which program banners were seen, so the branch taken is
-# derived from the record.
-# The gate path is NOT quiet, and this is the detail most likely to hang a
-# harness: `perform gl060a' runs a full Batch Status Report, which paginates.
-#     [general/gl070.cbl:L416]       "Enter <N> for next screen or <X> to
-#                                     exit :- [ ]"
-#     [general/gl070.cbl:L421-L424]  accept ws-reply, then the "X" or "x" test
+# [general/gl070.cbl:L287-L290].
 
-#                                    and `go to end-report'
-#     [general/gl070.cbl:L438-L439]  "Type return to exit." and a second accept
-# Both prompts are answered. "X" leaves the report immediately, which is the
-# minimum interaction that reaches end-report and closes the batch file --
-# paging with "N" would produce a different number of keystrokes per scenario
-# and is not needed, since the report has no database effect.
+# and `go to end-report' [general/gl070.cbl:L438-L439] "Type return to exit."
+# and a second accept Both prompts are answered.
 acas_plan_gl_post_cycle() {
   acas_plan_date_entry
   acas_plan_menu_select
@@ -3456,9 +2721,6 @@ acas_plan_gl_post_cycle() {
   acas_plan_ack 'gl060a-exit' 'Type return to exit.' 4 \
     'gl060a end-of-report acknowledgement [general/gl070.cbl:L435-L439]'
 
-  # The gate-not-fired path: gl071 then gl072. Neither program has an accept --
-  # gl071's only display is its sort banner and gl072 has none at all -- so these
-  # are pure observations with nothing sent.
   acas_plan_add 2 'gl071-sort' react 'Sorting.......Please wait' '' 2 \
     'gl071 sort banner; its output ordering is what gl072 depends on [general/gl071.cbl:L170]'
   acas_plan_add 2 'gl072-phase4' react 'Phase - 4. Transaction Update' '' 2 \
@@ -3468,17 +2730,8 @@ acas_plan_gl_post_cycle() {
 }
 
 # gl_end_of_cycle -- general, letter "I", load09 -> gl080
-#     [general/general.cbl:L817-L821]
-# G-2. gl080 opens with an UNCONDITIONAL gate [general/gl080.cbl:L295-L302]:
-#     display  GL085 ... GL086 ... GL087
-#     move     space to keyed-reply.
-#     accept   keyed-reply at 1065 with update auto.
-#     if       cob-crt-status = cob-scr-esc
-#         or   keyed-reply = "A" or "a"
-#              goback.
-# "A" or Escape means gl080 writes NOTHING, so the answer is a genuine input.
-# Proceeding is a bare Return: the Cobol default immediately before the accept
-# is `move space to keyed-reply' and Return on an AUTO field leaves it there.
+# [general/general.cbl:L817-L821] G-2. gl080 opens with an UNCONDITIONAL gate
+# [general/gl080.cbl:L295-L302].
 acas_plan_gl_end_of_cycle() {
   acas_plan_date_entry
   acas_plan_menu_select
@@ -3493,17 +2746,13 @@ acas_plan_gl_end_of_cycle() {
   fi
   acas_plan_add 2 'gl080-gate' react 'GL087' "$send" 2 "$citation"
 
-  # GL088 -- unproofed or unposted batches present. A second gate, conditional:
-  # it acknowledges and then `go to main-end' [general/gl080.cbl:L308-L313].
   acas_plan_add 2 'gl080-unproofed' react 'GL088' '\r' 2 \
     'gl080 found unproofed or unposted batches and will end after this [general/gl080.cbl:L308-L313]'
   acas_plan_ack 'gl080-note' 'GL012' 3 \
     'gl080 note-and-return acknowledgement [general/gl080.cbl:L310]'
 
   # GL084 sits deeper in the archive path and is a genuine choice: "<0> to
-  # signify change made or <9> to abort this run". "0" continues, which is the
-  # answer that lets the run complete; aborting here is not a scenario input the
-  # AAP defines, so the continuing branch is taken and recorded.
+  # signify change made or <9> to abort this run".
   acas_plan_add 2 'gl080-archive' react 'GL084' '0\r' 3 \
     'gl080 archive-path question; 0 = change made, continue [general/gl080.cbl:L539-L545]'
 
@@ -3519,30 +2768,11 @@ acas_plan_gl_end_of_cycle() {
   acas_plan_menu_exit
 }
 
-# sl_invoice_post -- sales, letter "G", load07
+# sl_invoice_post -- sales, letter "G", load07.
 
-# THE SALES GATE. [sales/sales.cbl:L756-L768], with its `*>' rule lines elided:
-#     load07.             *> Sales trans posting
-#         move     "sl830" to WS-Called.   *> In case autogen is use
-#         perform  load00.
-#         if       ws-term-code not = zero
-#                  go to display-menu.
-#         move     "sl055" to ws-called.
-#         perform  load000.
-#         if       ws-term-code not = zero
-#                  go to display-menu.
-#         move     "sl060" to ws-called.
-#         go       to load000.
 
 # The predicate is `ws-term-code not = zero' and it appears TWICE
-# [sales/sales.cbl:L761-L762], [sales/sales.cbl:L765-L766]. That differs from
-# General's `= 5' and from Purchase's absence, and the divergence is the
-# specification: it is never harmonised (R-4).
-# sl830 runs FIRST and is out of scope -- see THE sl830 ASYMMETRY above.
-# load07 dispatches sl830 through load00, the FOUR-parameter shape
-# [sales/sales.cbl:L677], and sl055 and sl060 through load000, the FIVE-
-# parameter shape [sales/sales.cbl:L698]. Both are the menu's own behaviour,
-# noted so a reader comparing the two files is not surprised.
+# [sales/sales.cbl:L761-L762], [sales/sales.cbl:L765-L766].
 
 # The error acknowledgements in sl055 and sl060 are guarded by `if WS-Caller
 # not = "xl150"' and the Sales menu sets `move "sales" to ws-caller'
@@ -3581,16 +2811,8 @@ acas_plan_sl_invoice_post() {
 }
 
 # sl_cash_post -- sales, letter "K", load11 -> sl100
-#     [sales/sales.cbl:L792-L796]
-# G-3. sl100 asks an UNCONDITIONAL YES/NO [sales/sl100.cbl:L310-L318]:
-#     display  "OK to Post Payment Transactions (YES/NO) ? [   ]"  at 1212 ...
-#     accept   wx-reply at 1256 with foreground-color 6 update.
-#     move     function upper-case (wx-reply) to wx-reply.
-#     if       wx-reply = "NO"   go to menu-exit.
-#     if       wx-reply not = "YES"  go to acpt-xrply.
-# NO posts nothing; anything that is neither loops. The wording differs from
-# pl100's and that divergence is preserved -- the pattern here is deliberately
-# specific to this program's capital "Post".
+# [sales/sales.cbl:L792-L796] G-3. sl100 asks an UNCONDITIONAL YES/NO
+# [sales/sl100.cbl:L310-L318].
 acas_plan_sl_cash_post() {
   acas_plan_date_entry
   acas_plan_menu_select
@@ -3608,30 +2830,9 @@ acas_plan_sl_cash_post() {
   acas_plan_menu_exit
 }
 
-# pl_order_post -- purchase, letter "H", load08
-# THE PURCHASE NON-GATE. [purchase/purchase.cbl:L752-L762], with its `*>' rule
-# lines elided:
-#     load08.
-#     *>    move     "pl830" to WS-Called.   *> In case autogen is use
-#     *>    perform  load000.
-#     *>    if       ws-term-code not = zero
-#     *>             go to display-menu.
-#         move     "pl055" to ws-called.
-#         perform  load000.
-#         move     "pl060" to ws-called.
-#         go       to load000.
 
 # BOTH the pl830 call AND the gate are COMMENTED OUT [purchase/purchase.cbl:
-# L755-L758]. Purchase has NO ABORT GATE AT ALL: pl055 is followed by pl060
-# unconditionally, whatever ws-term-code holds. This is the sharpest R-4
-# obligation in this file. No gate is added here in any form; it is not
-# "aligned with Sales"; and it is not turned into a warning, because a warning
-# that changed what this script did next would change behaviour and one that
-# did not would be noise. The absence is simply recorded, and the validation
-# suite asserts that pl060 still runs where Sales would have stopped -- which
-# is what locks the divergence in place against a future correction.
-# Purchase also does NOT run pl830, unlike Sales. That divergence is preserved
-# too: no autogen program is expected, and none is answered for.
+# L755-L758]. Purchase has NO ABORT GATE AT ALL.
 acas_plan_pl_order_post() {
   acas_plan_date_entry
   acas_plan_menu_select
@@ -3660,14 +2861,8 @@ acas_plan_pl_order_post() {
 }
 
 # pl_payment_post -- purchase, letter "L", load12 -> pl100
-#     [purchase/purchase.cbl:L786-L790]
-# G-3 again, but the prompt text DIVERGES from sl100's and is matched separately.
-# [purchase/pl100.cbl:L302-L311]:
-#     display  "OK to post payment transactions (YES/NO) ? <   > enter {CR}" ...
-# Lowercase "post", ANGLE brackets, and a trailing "enter {CR}", where
-# [sales/sl100.cbl:L310] has a capital "Post" and SQUARE brackets. Normalising
-# the two into one pattern would erase a real difference between the programs, so
-# each keeps its own (R-4).
+# [purchase/purchase.cbl:L786-L790] G-3 again, but the prompt text DIVERGES
+# from sl100's and is matched separately.
 acas_plan_pl_payment_post() {
   acas_plan_date_entry
   acas_plan_menu_select
@@ -3685,44 +2880,10 @@ acas_plan_pl_payment_post() {
   acas_plan_menu_exit
 }
 
-# irs_post -- irs, option "4", then irs030's OWN run option "66"
-# The IRS menu is a SCREEN SECTION, not a display/accept pair
-# [irs/irs.cbl:L640-L643], and its replies are DIGITS or function keys rather
-# than letters. The in-scope dispatch is [irs/irs.cbl:L666-L672]:
-#     if       Menu-Reply = "4"
-#           or Cob-Crt-Status = Cob-Scr-F4
-#              call   "irs030" using IRS-System-Params
-#                                    WS-System-Record
-#                                    file-defs
-#              end-call
-#              go to main-loop.
-# Three parameters, and NEITHER a calling-data block NOR to-day -- Shape 3.
 
-# The IRS menu derives its text date from the binary one
-# [irs/irs.cbl:L632-L634] `move run-date to u-bin / perform maps04 / move
-# u-date to to-day', so pinning Run-Date through Date Entry is sufficient here
-# too. irs030 then presents its OWN run-option menu
-# [irs/irs030.cbl:L570-L582]; the in-scope option is 66, displayed as "(<66>
-# Add PL or SL Postings from file)" at [irs/irs030.cbl:L579] and dispatched at
-# [irs/irs030.cbl:L601]. The accept is `w pic 99' [irs/irs030.cbl:L232] with
-# UPDATE and no AUTO [irs/irs030.cbl:L582], so it needs a Return.
-# Exiting irs030 is a bare Return: `Main-Loop.' begins `move zero to w'
-# [irs/irs030.cbl:L571-L572], the screen offers "(<Return> to exit to System
-# Menu)" [irs/irs030.cbl:L580], and `if w = zero / perform acasirsub1-Close /
-# go to Main-Exit' [irs/irs030.cbl:L588-L590] then fires.
 
 # G-1 is answered here. [irs/irs030.cbl:L1715-L1727] is paragraph EOJ-q1:
-#         display  "Can I clear the Ledgers Posting file? [Y]" at 1401 ...
-#         accept   WS-Reply at 1440 with foreground-color 6 UPPER.
-#         if       WS-Reply not = "Y" and not = "N"
-#                  go to EOJ-q1.
-#         if       WS-Reply = "Y"
-#                  perform acas008-Open-Output    *> a acas008-Delete-All
-#                  perform acas008-Close.
-# An empty reply is NOT accepted despite the "[Y]" hint, so the scenario's
-# answer is mandatory. The following "Note counts and any messages" accept is a
-# pure acknowledgement and gets a Return (D-4). The LIMIT on the EOJ-q1 rule
-# turns a mis-keyed answer into a loud failure instead of an endless loop.
+# display "Can I clear the Ledgers Posting file? [Y]" at 1401 ...
 acas_plan_irs_post() {
   acas_plan_date_entry
 
@@ -3736,18 +2897,14 @@ acas_plan_irs_post() {
   acas_plan_add 2 'irs030-complete' react 'Processing Complete on' '' 2 \
     'Ledger-Postings-Add finished [irs/irs030.cbl:L1713-L1714]'
 
-  # G-1. LIMIT 2 rather than 1: one legitimate appearance, and one more to catch a
-  # rejected answer as a failure rather than as a hang.
+  # G-1. LIMIT 2 rather than 1: one legitimate appearance, and one more to
+  # catch a rejected answer as a failure rather than as a hang.
   acas_plan_add 2 'irs030-clear' react 'Can I clear the Ledgers Posting' \
     "$ACAS_RUN_IRS_CLEAR" 2 \
     "G-1: clear the transfer file = $ACAS_RUN_IRS_CLEAR; \"Y\" deletes every row of PSIRSPOST-REC [irs/irs030.cbl:L1715-L1724]"
   acas_plan_ack 'irs030-note-counts' 'Note counts and any messages' 2 \
     'pure acknowledgement, no database effect [irs/irs030.cbl:L1725-L1726]'
 
-  # Conditional error paths inside irs030. IR031 has NO accept -- it displays and
-  # transfers control [irs/irs030.cbl:L1579-L1581] -- so it is observed with
-  # nothing sent, which is exactly the "diagnostic with no database effect"
-  # class AAP 0.3.4 turns into a log line.
   acas_plan_add 2 'irs030-no-postings' react 'IR031' '' 2 \
     'no ledger posting file found; irs030 aborts the section with no accept [irs/irs030.cbl:L1579-L1581]'
   acas_plan_ack 'irs030-vat-missing' 'IR035' 4 \
@@ -3766,8 +2923,7 @@ acas_plan_irs_post() {
     'Return exits irs030 to the System Menu; Main-Loop pre-zeroes w [irs/irs030.cbl:L571-L572], [irs/irs030.cbl:L587-L589]'
 
   # And then leave the IRS menu itself. "X" or Escape both work
-  # [irs/irs.cbl:L751-L753]; "X" is sent because it is the option the screen
-  # actually offers at [irs/irs.cbl:L455].
+  # [irs/irs.cbl:L751-L753].
   acas_plan_add 3 'irs-menu-exit' expect "$ACAS_RUN_IRS_MENU_ANCHOR" 'X' 1 \
     'leave the IRS menu [irs/irs.cbl:L751-L753]'
 }
@@ -3779,15 +2935,7 @@ acas_build_plan() {
 
   # The plan file was already created safely at stage 3 (acas_open_transcript),
   # but stage 8 runs five stages later and this line EMPTIES it before the
-  # builders append to it. A bare `: >' here would have undone the whole point
-  # of that create: anything able to unlink the name in the interval could have
-  # left a symlink behind, and the redirect would then have truncated whatever
-  # it pointed at. Re-creating through the same primitive keeps the no-follow
-  # refusal, the exclusive create and mode 0600 for the SECOND write as well as
-  # the first, which is what closes the window rather than merely narrowing it.
-  # The directory is 0700 (see acas_open_transcript), so this is defence in
-  # depth over that, not a substitute for it -- that chmod is best-effort and
-  # silently does nothing if the directory was not ours to change.
+  # builders append to it.
   acas_create_private_file "$ACAS_RUN_PLAN_FILE" 'the keystroke plan'
   acas_plan_forbidden
 
@@ -3808,18 +2956,7 @@ acas_build_plan() {
   acas_print_plan
 }
 
-# Render the plan for a human. Sent keystrokes are shown with Return and Escape
-# spelled out, because a bare control character in a log is unreadable and,
-# worse, indistinguishable from no keystroke at all.
-# Split $1 on TAB into ACAS_SPLIT, PRESERVING EMPTY FIELDS. `IFS=$'\t' read -r
-# a b c d' cannot read this plan file, and the reason is a bash rule rather
-# than a style preference: TAB is an IFS *whitespace* character, so a run of
-# tabs is a SINGLE delimiter and leading and trailing ones are stripped. For
-# "a<TAB>b<TAB><TAB>d" that read yields (a, b, d, "") while awk -F'\t' and
-# python's str.split('\t') both yield (a, b, "", d). A react step that sends
-# nothing writes two adjacent tabs, so under IFS-read the limit would print in
-# the "send" column. The plan FILE and the python driver are unaffected -- the
-# driver splits with str.split('\t') -- so the format is left unchanged.
+# Render the plan for a human.
 ACAS_SPLIT=()
 acas_split_tabs() {
   local rest="$1"
@@ -3871,36 +3008,13 @@ acas_print_plan() {
 }
 
 
-# THE PTY DRIVER
-# A REAL pty of exactly 24x80 is mandatory, for two independent reasons.
-#   * Smaller than 24x80 the menu REFUSES: [general/general.cbl:L374-L383]
-#     displays SY010 when `ws-env-lines < 24' and SY013 when `ws-Env-Columns <
-#     80', then `goback'.
-#   * Under a PIPE the gate does not save us. GnuCobol answers `accept ... from
-#     lines' out of the LINES and COLUMNS variables, so the geometry test
-#     passes with no terminal at all -- and then the first real `accept' reads
-#     end-of-file, returns immediately, and the program SPINS, redrawing one
-#     screen without limit. A hang looks like progress, which is the failure
-#     mode this driver exists to make impossible.
+# A REAL pty of exactly 24x80 is mandatory, for two independent reasons. *
+# Smaller than 24x80 the menu REFUSES.
 
 # `pty.fork' is used rather than `script -q -c' because the driver has to MATCH
 # a prompt and then answer it, and `script' can only feed a fixed stream.
-# `expect' and `socat' would both do and neither is installed in the harness
-# image, so the standard library is the only dependency-free option.
-# ON THE CLOCK (R-6): the driver's timeouts use time.monotonic(), a relative
-# interval timer. It cannot influence any value the Cobol computes, it never
-# reaches the transcript, and no elapsed time is printed anywhere.
-# ON MATCHING: ncurses interleaves cursor-positioning escapes with text, so the
-# raw stream is unmatchable. The driver strips the escapes, collapses runs of
-# whitespace and searches from an ADVANCING OFFSET, so a screen redrawn ten
-# times matches once per redraw. Every pattern is a substring of a SINGLE Cobol
-# `display' of a single literal, so no pattern can split across two writes.
 
-# Exit codes, mapped to EX_DRIVE by the caller with a specific message:
-#   0  every strict step matched and the reactive phase terminated cleanly
-#   10 a strict step timed out          13 the menu exited before a strict step
-#   11 a forbidden pattern appeared     14 the reactive phase never terminated
-#   12 a react rule exceeded its limit  15 an internal driver error
+# Exit codes, mapped to EX_DRIVE by the caller with a specific message.
 acas_drive() {
   ACAS_RUN_CURRENT_STAGE='driving the compiled menu over a pty'
   acas_stage "Driving: $ACAS_RUN_SUBSYSTEM menu, operation $ACAS_RUN_OPERATION"
@@ -3908,21 +3022,15 @@ acas_drive() {
   acas_log "geometry   = ${ACAS_RUN_ROWS}x${ACAS_RUN_COLS} (pinned, not 'at least')"
   acas_log "per-prompt timeout = ${ACAS_RUN_TIMEOUT}s"
 
-  # The curses environment. The programs set the first two themselves --
-  # [general/general.cbl:L369-L370] and [general/gl000.cbl:L172-L173] -- but they
-  # are exported here as well so the runtime sees them from the first screen.
-  # TERM must be a real terminfo entry: [common/comp-common.sh:L18] compiles
-  # accept_numeric.c against ncursesw, so the runtime needs a working terminal
-  # description.
+  # [general/general.cbl:L369-L370] and [general/gl000.cbl:L172-L173] -- but
+  # they are exported here as well so the runtime sees them from the first
+  # screen.
   export COB_SCREEN_EXCEPTIONS='Y'
   export COB_SCREEN_ESC='Y'
   export TERM="${TERM:-xterm}"
   # D-5. Without this GnuCobol waits for a keypress when a screen program ends,
-  # which would hang the harness after the menu exits. It suppresses a pause, not
-  # a write.
+  # which would hang the harness after the menu exits.
   export COB_EXIT_WAIT='off'
-  # Belt and braces with the pty winsize: GnuCobol consults these for
-  # `accept ... from lines / columns', and the ioctl below sets the real thing.
   export LINES="$ACAS_RUN_ROWS"
   export COLUMNS="$ACAS_RUN_COLS"
   export COB_COPY_DIR="${COB_COPY_DIR:-$ACAS_BUILD/copybooks}"
@@ -3947,17 +3055,8 @@ acas_drive() {
 
   local rc=0
   # The menu is invoked with NO ARGUMENTS, deliberately.
-  # [copybooks/Proc-Get-Env-Set-Files.cob:L37] zz020-Get-Program-Args accepts only
-  # a blank first argument, or "NONE", "NULL" or "ACAS_LEDGERS="; anything else
-  # displays SY007, waits for a keystroke and `stop run'. That is another hang, so
-  # the safe argument list is the empty one.
-  # An OVERALL bound on the driver, distinct from the per-prompt --timeout the
-  # driver enforces internally. The two catch different failures: --timeout catches
-  # "this screen never arrived", while this catches "the driver as a whole never
-  # finished" -- a plan that keeps making prompt-by-prompt progress without ever
-  # terminating, or a process blocked before its select loop is reached. Without
-  # this, the only such failures the harness can survive are the ones the driver
-  # happens to model.
+  # [copybooks/Proc-Get-Env-Set-Files.cob:L37] zz020-Get-Program-Args accepts
+  # only a blank first argument, or "NONE", "NULL" or "ACAS_LEDGERS=".
   acas_deadline_prefix "$ACAS_TIMEOUT_DRIVE"
   local drive_started="$SECONDS"
   set +e
@@ -4397,11 +3496,7 @@ PY
   set -e
 
   # A deadline expiry is separated from every driver-defined status BEFORE the
-  # caller classifies it. The driver's own codes (10 prompt never appeared, 11
-  # refusal, 12 spinning, ...) each name a specific diagnosis, and reporting
-  # "never finished" as one of them would send an operator after a defect that is
-  # not there. ACAS_RUN_DRIVEN is already 1, so the exit trap still warns that the
-  # database may hold a partial result.
+  # caller classifies it.
   local drive_elapsed=$(( SECONDS - drive_started ))
   acas_assert_not_timed_out "$rc" "$drive_elapsed" "$ACAS_TIMEOUT_DRIVE" \
     'ACAS_TIMEOUT_DRIVE' 'driving the compiled menu'
@@ -4410,7 +3505,6 @@ PY
 }
 
 
-# TRANSLATING A DRIVER FAILURE INTO SOMETHING ACTIONABLE
 acas_report_drive_failure() {
   local rc="$1"
   local -a details=()
@@ -4502,30 +3596,20 @@ acas_report_drive_failure() {
   esac
 }
 
-# acas_matched <step-id>
-# Did the driver record a match for this step?
 acas_matched() {
   [[ -f "$ACAS_RUN_RESULT_FILE" ]] || return 1
   grep -q -F "$(printf 'matched\t%s\t' "$1")" "$ACAS_RUN_RESULT_FILE"
 }
 
-# POST-RUN ASSERTIONS
 # These check that THE HARNESS did what it set out to do. They never judge the
-# accounting: no balance is recomputed, no total is checked, no posting is
-# validated. harness/diff_states.py is the only thing entitled to an opinion
-# about the numbers, and it forms that opinion by comparison rather than by rule.
+# accounting.
 acas_assert_after_run() {
   ACAS_RUN_CURRENT_STAGE='post-run assertions'
   acas_stage 'Post-run assertions'
 
   local failures=0
 
-  # 1. The clock actually got pinned. maps04 leaves its output field UNCHANGED on
-  #    a bad date [common/maps04.cbl:L146], and the caller pre-zeroes it
-  #    [copybooks/Proc-ACAS-Mapser-RDB.cob:L78] -- anomaly 16 -- so a rejected date
-  #    shows up either as the OLD value or as zero. Neither is detectable without
-  #    reading the column back, which is why the scenario has to state the value
-  #    it expects.
+  # 1. The clock actually got pinned.
   local actual
   if actual="$(acas_system_column 'RUN-DAT')"; then
     if [[ "$actual" == "$ACAS_RUN_RUN_DATE" ]]; then
@@ -4545,9 +3629,6 @@ acas_assert_after_run() {
     acas_warn 'FAIL  could not read SYSTEM-REC.RUN-DAT after the run'
   fi
 
-  # 2. The IRS fan-out switch still holds the pinned value. Nothing in the cycle
-  #    should change it; if it did, the affected-table list for this scenario no
-  #    longer describes what the run touched.
   local irs_after
   if irs_after="$(acas_system_column 'IRS-INSTEAD')"; then
     irs_after="${irs_after// /}"
@@ -4562,8 +3643,6 @@ acas_assert_after_run() {
     acas_warn 'FAIL  could not read SYSTEM-REC.IRS-INSTEAD after the run'
   fi
 
-  # 3. Sales only: the two autogen tables must be untouched, which is what makes
-  #    the sl830 asymmetry safe to live with rather than merely asserted in prose.
   if [[ "$ACAS_RUN_SUBSYSTEM" == 'sales' ]]; then
     local table rc rows
     for table in "${ACAS_RUN_AUTOGEN_TABLES[@]}"; do
@@ -4584,9 +3663,8 @@ acas_assert_after_run() {
     done
   fi
 
-  # 4. Report which branch each divergent gate took. This is OBSERVATION, and it
-  #    is deliberately not an assertion: presuming an outcome is exactly how a
-  #    gate gets "helpfully" harmonised.
+  # 4. Report which branch each divergent gate took. This is OBSERVATION, and
+  # it is deliberately not an assertion.
   case "$ACAS_RUN_OPERATION" in
     gl_post_cycle)
       local gl071_ran='no' gl072_ran='no' gate='did NOT fire'
@@ -4664,9 +3742,7 @@ acas_assert_after_run() {
       ;;
   esac
 
-  # 5. Row counts for the scenario's own tables. Reported, never judged: the
-  #    comparison belongs to harness/diff_states.py, and a count here is only a
-  #    breadcrumb for an operator reading the log.
+  # 5. Row counts for the scenario's own tables.
   if (( ${#ACAS_RUN_TABLES[@]} > 0 )); then
     acas_log 'row counts for the affected tables (reported, not judged):'
     local table rc3
@@ -4682,8 +3758,7 @@ acas_assert_after_run() {
     done
   fi
 
-  # 6. The file-handler log, which cannot be switched off. Reported so the growth
-  #    this run caused is on the record next to the run that caused it.
+  # 6. The file-handler log, which cannot be switched off.
   local fh_log="$ACAS_DATA/fh-logger.txt"
   if [[ -f "$fh_log" ]]; then
     local fh_bytes
@@ -4858,21 +3933,8 @@ acas_run_report() {
   else
     printf '\nThe compiled cycle ran for scenario %s.\n' "$ACAS_RUN_SCENARIO"
 
-    # The next-step commands CARRY THE SELECTOR. Every one of them passes
-    # --scenario-file, because the comparison is only evidence if it is bounded by
-    # the same affected-table list the scenario declares:
-    #
-    #   * dump_tables.py and diff_states.py both REFUSE an unbounded run now, so a
-    #     command printed without the selector would simply fail -- and worse, the
-    #     obvious "fix" for that failure is --all-in-scope / --all-tables, which
-    #     silently widens the comparison and turns a bounded proof into a survey.
-    #   * an unbounded diff compares whatever happens to be in the two trees. If a
-    #     table is missing from BOTH sides it is not compared, is not reported, and
-    #     the run passes -- a false empty diff, which is the one outcome the
-    #     protocol must never produce (R-6).
-    #
-    # Printed with the resolved scenario-file path rather than the bare name so the
-    # commands can be pasted and run as they stand.
+    # The next-step commands CARRY THE SELECTOR. Every one of them passes the
+    # same affected-table list the scenario declares.
     printf '\nNext steps -- each one bounded by the scenario'"'"'s affected_tables list:\n'
     printf '  harness/dump_tables.py --scenario %s --side cobol --scenario-file %s\n' \
       "$ACAS_RUN_SCENARIO" "$ACAS_RUN_SCENARIO_FILE"
@@ -4888,60 +3950,9 @@ acas_run_report() {
   fi
 }
 
-# MAIN
-# Strictly sequential, one scenario at a time (R-3). There is no `&' anywhere in
-# this script, no `xargs -P', and no job control: the menus already serialise the
-# CALLs, and the database is shared, so two concurrent scenarios would corrupt
-# each other's state and neither result would mean anything.
-# A lock is taken so that a second invocation cannot start against the same
-# database while this one is driving. It is advisory and it is released on exit.
-# =============================================================================
-# THE LOCK RECORDS ITS OWNER AND A STALE ONE IS RECLAIMED  (CWE-400 uncontrolled
-# resource consumption). It used to be an EMPTY file:
-#
-#     if ! ( set -o noclobber; : >"$lock" ) 2>/dev/null; then     <-- the defect
-#
-# which is atomic, and that part was right -- but it recorded NOTHING. A container
-# killed mid-run, an OOM kill, a `docker compose down' during a drive, or any exit
-# path that outran the trap left a file that no later invocation could distinguish
-# from a live run. The harness then refused EVERY subsequent scenario, for ever,
-# and the only remedy was an operator reading the diagnostic and deleting the file
-# by hand. A lock that can be permanently wedged by an abnormal exit is a denial of
-# service against the harness itself.
-#
-# The owning pid is now written into the lock, so a later invocation can ask
-# whether that process still exists:
-#
-#   * A LIVE holder is refused, and the diagnostic names its pid.
-#   * A STALE holder -- gone, or an unreadable/garbage lock body -- is reclaimed
-#     with a warning, so the harness recovers by itself.
-#   * The create is still `set -C` (noclobber = O_EXCL) AFTER the reclaim, so if
-#     two invocations race between the staleness check and the create, exactly one
-#     wins and the loser is refused rather than both proceeding.
-#
-# Deliberately NOT `flock': it is not guaranteed present in the harness image, and
-# a lock that silently degrades to no lock is worse than none -- the same
-# reasoning harness/reset_db.sh records for the identical pattern.
-#
-# The lock is released only by the process that took it: ACAS_RUN_LOCK_HELD gates
-# the removal, so an early failure cannot delete a lock belonging to someone else.
-#
-# NO SECOND EXIT TRAP IS INSTALLED HERE, and that matters for two reasons beyond
-# tidiness. A trap body must never carry data: the form this replaced --
-#   trap "rm -f '$lock'; acas_on_exit \"\$?\"" EXIT
-# -- interpolated an operator-supplied path into the trap string, so a single
-# quote in $ACAS_OUT closed the literal and the remainder ran as shell code at
-# exit (CWE-78). It also passed RM's status to acas_on_exit rather than the
-# script's, so the "the database may hold a PARTIAL result" warning could never
-# appear. The single trap installed at the top of this script is statically
-# quoted, captures the status first, and reaches the lock through
-# acas_release_lock -- which is gated on ACAS_RUN_LOCK_HELD, so a refused
-# acquisition can never delete the live holder's lock.
 acas_take_lock() {
   ACAS_RUN_LOCK="$ACAS_OUT/run-logs/.run_cobol_scenario.lock"
 
-  # The lock is a write target this script also DELETES, so it is canonicalised
-  # and refused if it resolves into the frozen checkout.
   acas_assert_outside_repo 'the sequential run lock' "$ACAS_RUN_LOCK"
 
   mkdir -p "${ACAS_RUN_LOCK%/*}" 2>/dev/null || true
@@ -4961,8 +3972,6 @@ acas_take_lock() {
     rm -f -- "$ACAS_RUN_LOCK" 2>/dev/null || true
   fi
 
-  # noclobber makes the create fail if another process won the race between the
-  # staleness check above and here.
   if ! (set -C; printf '%s\n' "$$" >"$ACAS_RUN_LOCK") 2>/dev/null; then
     acas_die "$EX_PRECONDITION" \
       "could not take the run lock $ACAS_RUN_LOCK." \
@@ -4973,23 +3982,10 @@ acas_take_lock() {
 }
 
 acas_main() {
-  # THE ORDER OF THESE SIX CALLS IS CONSTRAINED, AND THE STAGE NUMBERS FOLLOW IT
-  # RATHER THAN LEADING IT. Do not reorder to make the names read alphabetically
-  # or to group the "resolve" steps together:
-  #   * acas_assert_environment must precede acas_open_log, because the default
-  #     transcript path is derived from $ACAS_OUT and that variable is not known
-  #     to be set or sane until the environment has been asserted.
-  #   * acas_open_log must precede acas_resolve_pinned_values, so that the pinned
-  #     date, date form and fan-out switch -- the values a later state diff is
-  #     most sensitive to (R-6) -- are recorded in the transcript rather than
-  #     only on the terminal.
-  #   * acas_take_lock must precede everything that touches the database, to keep
-  #     execution strictly sequential (R-3).
   acas_parse_args "$@"
 
-  # FIRST, before anything can spawn an external command: resolve and freeze every
-  # deadline. It validates each budget and makes them readonly, which is the
-  # invariant acas_deadline_prefix relies on.
+  # FIRST, before anything can spawn an external command: resolve and freeze
+  # every deadline.
   acas_resolve_deadlines
 
   acas_resolve_scenario
@@ -4997,10 +3993,7 @@ acas_main() {
   acas_open_log
 
   # As soon as $ACAS_DATA is known good and the transcript is open, and while a
-  # refusal is still free: the frozen file-handler log cannot be switched off, so
-  # a volume without room for it must stop the run BEFORE the database is
-  # contacted. Placed after acas_open_log only so the refusal is recorded in the
-  # transcript rather than only on the terminal.
+  # refusal is still free.
   acas_assert_fh_log_capacity
 
   acas_take_lock
@@ -5024,12 +4017,7 @@ acas_main() {
   acas_assert_after_run
   acas_run_report
 
-  # Explicitly the success code, reached only after every assertion passed. Note
-  # that this is NOT an unconditional `exit 0' bolted to the end of the file: the
-  # frozen build scripts do that -- [comp-all.sh:L45] and
-  # [common/comp-common.sh:L59] -- which is why their exit status carries no
-  # information. Those files are not fixed (R-4); their shape is simply not
-  # copied here.
+  # Explicitly the success code, reached only after every assertion passed.
   exit "$EX_OK"
 }
 
