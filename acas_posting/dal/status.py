@@ -1,6 +1,10 @@
 """ACAS file-handler status protocol and operation vocabulary.
 
 WHAT THIS MODULE OWNS
+Two things, for the whole migrated cycle:
+=======
+=====================
+Three things, for the whole migrated cycle:
 
 * the **status protocol** - the ``FS-Reply`` value set, the ``We-Error`` code
   set, the SQLSTATE vocabulary, and the mapping from a driver error to that

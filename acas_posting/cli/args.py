@@ -134,6 +134,277 @@ question Q-CLI-IRS-RUNDATE. Without `--run-date` this module would have to read
 a live clock (R-6) or leave both fields unpinned (R-3, R-4).
 
 WHAT THIS MODULE MAY AND MAY NOT IMPORT
+MAY, and does: the standard library, `acas_posting.clock`, its sibling
+`acas_posting.cli.rdbms_params`, the record modules whose dataclasses the three
+shapes are built from, the `MOVE` implementation `acas_posting.cobol.move`, and
+- see the next section - the data-access FACADE `acas_posting.dal.facade` with
+its status vocabulary, plus `acas_posting.dal.connection` for the one
+process-level connection policy. Together with that sibling this is the ONLY part
+of `acas_posting/cli/` permitted to import the record layer, precisely because
+section 0.4.1.1 assigns it the job of binding "the system records"; the seven
+entry-point modules of this package construct their linkage through here.
+
+The sibling import is intra-package and acyclic: `rdbms_params` imports one
+record module and nothing else of this package, and `acas_posting/cli/__init__.py`
+imports no submodule at all, so there is no cycle to create.
+
+`acas_posting.cobol.move` belongs on that list, and an earlier draft of this file
+put it on the other one. The import table of section 0.4.3 bars
+`acas_posting/cli/` from the data-access handlers - "Must not import:
+`dal.acas*`" - and from nothing else in the semantics package, while section
+0.1.2, transformation rule 11, requires a `MOVE` between unlike pictures to go
+through "Sending-field-to-receiving-field rules, not assignment". argv is the one
+place in the migrated cycle where a string of arbitrary length meets a `PIC X(8)`
+receiving field, so this is precisely where rule 11 has to be applied. The edge
+is acyclic: `acas_posting.cobol.move` reaches only `cobol.arithmetic`,
+`cobol.usage`, `cobol.field` and `dictionary.model`, and none of those reaches
+`acas_posting.cli`.
+
+MAY NOT, and does not: the program layer, the data-access HANDLERS
+`acas_posting.dal.acas*`, the dictionary package and the work-file module. The
+import table of section 0.4.3 names exactly one prohibition for this layer -
+"Must not import: `dal.acas*` directly" - and the facade exists precisely so
+that a caller reaches a handler THROUGH it, which is what
+`aa010_get_system_recs` and `overrewrite` below do. One consequence worth
+stating because it looks like an omission:
+
+  * `MOVE` receiving-field semantics ARE applied to the seven `WS-Calling-Data`
+    fields, through `acas_posting/cobol/move.py`, because argv is the one place
+    in the migrated cycle where a string of arbitrary length meets a `PIC X(8)`
+    receiving field. What is deliberately NOT re-plumbed is named in the footer.
+    `rdbms_params` pads each connection value to its receiving `pic x(n)` width
+    with a local helper instead - the same accommodation
+    `acas_posting/dal/connection.py` already makes, and for the same layering
+    reason.
+  * the system records are LOADED FROM THE STORE, field for field, by
+    `aa010_get_system_recs` below, reproducing the menu shells' own
+    `aa010-Get-System-Recs` paragraph; only the six connection fields and the
+    two pinnable clock fields are re-applied afterwards, for the reasons the
+    next section and Q-CLI-SYSREC-LOAD give. The declared dataclass defaults
+    survive only for a field the loaded row does not carry.
+
+THE SIX CONNECTION FIELDS ARE THE ONE EXCEPTION TO "DECLARED DEFAULTS"
+=====================================================================
+`RDBMS-DB-Name`, `RDBMS-User`, `RDBMS-Passwd`, `RDBMS-Port`, `RDBMS-Host` and
+`RDBMS-Socket` [copybooks/wssystem.cob:L137-L144] are filled from the deployment
+contract by `acas_posting/cli/rdbms_params.py`, which reproduces the frozen
+`common/acas-get-params.cbl` and the six `MOVE` statements every load program
+performs after calling it [common/glbatchLD.cbl:L262-L267].
+
+They cannot be left at their declared defaults, because those defaults are the
+copybook's own placeholders - the literal user `"ACAS-User"` and the literal
+password `"PaSsWoRd"` - and `SYSTEM-REC` is the ONLY carrier by which a
+connection parameter reaches the data-access layer
+[common/acas008.cbl:L558-L563]. A run built purely at declared defaults would
+therefore not reach the database the operator provisioned.
+
+No CLI option is added for any of the six: the frozen counterpart takes its
+values from a source outside the command line, so this one does too. The closed
+list of two settable `SYSTEM-REC` options stays closed, and a password never
+appears in argv.
+
+RECEIVING-FIELD SEMANTICS ARE APPLIED, NOT SKIPPED
+==================================================
+Every write into `01 WS-Calling-Data` [copybooks/wscall.cob:L6-L14] is a `MOVE`
+through `acas_posting.cobol.move.move`, carrying the RECEIVING FIELD'S OWN
+descriptor. The descriptor is fetched by attribute name from
+`acas_posting.records.calling_data.descriptor_for`, imported here under the
+local alias `calling_data_record`, so the picture comes from the generated data
+dictionary and is never transcribed in this file (rule R-5, and the "data
+dictionary first" directive of section 0.8.1). The call sites need know nothing
+about field categories, because `move` dispatches on the receiver.
+
+What that buys is the behaviour the frozen copybook declares rather than
+Python's assignment: `move "gl070" to ws-called` leaves EIGHT characters in a
+`PIC X(8)` field, not five; an over-long `--ws-cd-args` loses its tail at
+thirteen instead of widening the field; and a value moved into
+`WS-Term-Code pic 99` or `WS-Process-Func pic 9` lands at the declared digit
+count. Nothing is checked and nothing is reported on the way in (rule R-3): a
+`MOVE` pads and truncates silently, and that silence is the whole of what the
+COBOL does.
+
+NO IMPORT-TIME SIDE EFFECTS
+Importing this module binds names and evaluates a handful of pure in-memory
+dataclass constructions, and has no other observable effect. It builds no
+parser, configures no logging, opens no file, connection or directory, reads
+nothing from its surroundings, starts nothing, and cannot fail for an
+environmental reason. That is a hard requirement rather than a preference: the
+scenario test suites import this package, and a module that did work at import
+would make their arithmetic tier's "runs anywhere" promise untrue.
+
+Stated precisely, because the connection binding above could be read as
+contradicting it: the ENVIRONMENT IS READ ONLY WHEN A BINDER IS CALLED, never at
+import. `bind_rdbms_connection` is imported here but not invoked here, and it
+accepts an explicit `env` mapping, so a test can drive every binder without
+touching the real environment. The three public binders CAN therefore now fail
+for an environmental reason - deliberately, because a run that cannot reach the
+provisioned database must stop before it writes - while importing this module
+still cannot.
+
+THE RULES THAT BIND THIS FILE
+=============================
+`review_rules` reports NO user rules document for this project, so the binding
+constraints are the Agent Action Plan's own six (section 0.7.2):
+
+R-1 No COBOL at run time. Nothing here spawns a child process, loads a foreign
+    library or reaches the GnuCOBOL toolchain, and there is no import path from
+    this package to the compiled comparison oracle. No option selects, invokes
+    or compares against that oracle either - the oracle's own scripts drive
+    these entry points from outside, never the reverse.
+R-2 Zero binary floating point. `WS-Term-Code` is an `int` (from `pic 99`),
+    `to-day` is a `str`, `Run-Date` is an `int` and the IRS `run-date` is a
+    `str`. No binary-radix numeric type appears anywhere in this module, in a
+    signature, an option type or a computation.
+R-3 No added validation, no added field, no schema change, no concurrency.
+    Nothing here judges a run date, extends a record or reaches a database, and
+    execution is strictly sequential - there is no worker, pool or event loop
+    to configure and no option that would create one. The six connection fields
+    the binders fill already exist in [copybooks/wssystem.cob:L137-L144], so no
+    field is added; the width and blank checks that guard them live in
+    `rdbms_params` and apply to DEPLOYMENT CONFIGURATION rather than to any
+    accounting value, which that module argues at length.
+R-4 Legacy behaviour is reproduced, never corrected. Agent Action Plan section
+    0.8.2, verbatim: "A defect reproduced is correct; a defect fixed is a
+    failure." Each reproduction below carries its COBOL locator in a comment,
+    as section 0.7.4 C-4 requires.
+R-5 Full traceability - see the mandatory footer.
+R-6 Compiled behaviour is the tie-breaker, so the clock is injected and the
+    three genuinely open questions are marked in place rather than guessed.
+=======
+=======================================
+MAY, and does: the standard library, `acas_posting.clock`, its sibling
+`acas_posting.cli.rdbms_params`, the five record modules whose dataclasses the
+three shapes are built from, and the `MOVE` implementation
+`acas_posting.cobol.move`. Together with that sibling this is the ONLY part of
+`acas_posting/cli/` permitted to import the record layer, precisely because
+section 0.4.1.1 assigns it the job of binding "the system records"; the seven
+entry-point modules of this package construct their linkage through here.
+
+The sibling import is intra-package and acyclic: `rdbms_params` imports one
+record module and nothing else of this package, and `acas_posting/cli/__init__.py`
+imports no submodule at all, so there is no cycle to create.
+
+`acas_posting.cobol.move` belongs on that list, and an earlier draft of this file
+put it on the other one. The import table of section 0.4.3 bars
+`acas_posting/cli/` from the data-access handlers - "Must not import:
+`dal.acas*`" - and from nothing else in the semantics package, while section
+0.1.2, transformation rule 11, requires a `MOVE` between unlike pictures to go
+through "Sending-field-to-receiving-field rules, not assignment". argv is the one
+place in the migrated cycle where a string of arbitrary length meets a `PIC X(8)`
+receiving field, so this is precisely where rule 11 has to be applied. The edge
+is acyclic: `acas_posting.cobol.move` reaches only `cobol.arithmetic`,
+`cobol.usage`, `cobol.field` and `dictionary.model`, and none of those reaches
+`acas_posting.cli`.
+
+MAY NOT, and does not: the program layer, the data-access layer including its
+facade, the dictionary package and the work-file module. One consequence worth
+stating because it looks like an omission:
+
+  * `MOVE` receiving-field semantics ARE applied to the seven `WS-Calling-Data`
+    fields, through `acas_posting/cobol/move.py`, because argv is the one place
+    in the migrated cycle where a string of arbitrary length meets a `PIC X(8)`
+    receiving field. What is deliberately NOT re-plumbed is named in the footer.
+    `rdbms_params` pads each connection value to its receiving `pic x(n)` width
+    with a local helper instead - the same accommodation
+    `acas_posting/dal/connection.py` already makes, and for the same layering
+    reason.
+  * the system records are BOUND here and LOADED elsewhere. This module fills
+    the three pinnable fields and the six connection fields; the other 160
+    columns of `SYSTEM-REC`, the whole of `SYSTOT-REC` and the whole of
+    `IRS-System-Params` come from the store, read by
+    `aa010_get_system_recs` below - the migrated menu boundary - and handed to
+    the three binders as keyword arguments. Recorded as Q-CLI-SYSREC-LOAD, and
+    settled there; a binder called WITHOUT them still builds declared-default
+    records, which is what a caller inspecting a linkage shape without a database
+    wants.
+
+THE SIX CONNECTION FIELDS ARE THE ONE EXCEPTION TO "DECLARED DEFAULTS"
+=====================================================================
+`RDBMS-DB-Name`, `RDBMS-User`, `RDBMS-Passwd`, `RDBMS-Port`, `RDBMS-Host` and
+`RDBMS-Socket` [copybooks/wssystem.cob:L137-L144] are filled from the deployment
+contract by `acas_posting/cli/rdbms_params.py`, which reproduces the frozen
+`common/acas-get-params.cbl` and the six `MOVE` statements every load program
+performs after calling it [common/glbatchLD.cbl:L262-L267].
+
+They cannot be left at their declared defaults, because those defaults are the
+copybook's own placeholders - the literal user `"ACAS-User"` and the literal
+password `"PaSsWoRd"` - and `SYSTEM-REC` is the ONLY carrier by which a
+connection parameter reaches the data-access layer
+[common/acas008.cbl:L558-L563]. A run built purely at declared defaults would
+therefore not reach the database the operator provisioned.
+
+No CLI option is added for any of the six: the frozen counterpart takes its
+values from a source outside the command line, so this one does too. The closed
+list of two settable `SYSTEM-REC` options stays closed, and a password never
+appears in argv.
+
+RECEIVING-FIELD SEMANTICS ARE APPLIED, NOT SKIPPED
+==================================================
+Every write into `01 WS-Calling-Data` [copybooks/wscall.cob:L6-L14] is a `MOVE`
+through `acas_posting.cobol.move.move`, carrying the RECEIVING FIELD'S OWN
+descriptor. The descriptor is fetched by attribute name from
+`acas_posting.records.calling_data.descriptor_for`, imported here under the
+local alias `calling_data_record`, so the picture comes from the generated data
+dictionary and is never transcribed in this file (rule R-5, and the "data
+dictionary first" directive of section 0.8.1). The call sites need know nothing
+about field categories, because `move` dispatches on the receiver.
+
+What that buys is the behaviour the frozen copybook declares rather than
+Python's assignment: `move "gl070" to ws-called` leaves EIGHT characters in a
+`PIC X(8)` field, not five; an over-long `--ws-cd-args` loses its tail at
+thirteen instead of widening the field; and a value moved into
+`WS-Term-Code pic 99` or `WS-Process-Func pic 9` lands at the declared digit
+count. Nothing is checked and nothing is reported on the way in (rule R-3): a
+`MOVE` pads and truncates silently, and that silence is the whole of what the
+COBOL does.
+
+NO IMPORT-TIME SIDE EFFECTS
+Importing this module binds names and evaluates a handful of pure in-memory
+dataclass constructions, and has no other observable effect. It builds no
+parser, configures no logging, opens no file, connection or directory, reads
+nothing from its surroundings, starts nothing, and cannot fail for an
+environmental reason. That is a hard requirement rather than a preference: the
+scenario test suites import this package, and a module that did work at import
+would make their arithmetic tier's "runs anywhere" promise untrue.
+
+Stated precisely, because the connection binding above could be read as
+contradicting it: the ENVIRONMENT IS READ ONLY WHEN A BINDER IS CALLED, never at
+import. `bind_rdbms_connection` is imported here but not invoked here, and it
+accepts an explicit `env` mapping, so a test can drive every binder without
+touching the real environment. The three public binders CAN therefore now fail
+for an environmental reason - deliberately, because a run that cannot reach the
+provisioned database must stop before it writes - while importing this module
+still cannot.
+
+THE RULES THAT BIND THIS FILE
+=============================
+`review_rules` reports NO user rules document for this project, so the binding
+constraints are the Agent Action Plan's own six (section 0.7.2):
+
+R-1 No COBOL at run time. Nothing here spawns a child process, loads a foreign
+    library or reaches the GnuCOBOL toolchain, and there is no import path from
+    this package to the compiled comparison oracle. No option selects, invokes
+    or compares against that oracle either - the oracle's own scripts drive
+    these entry points from outside, never the reverse.
+R-2 Zero binary floating point. `WS-Term-Code` is an `int` (from `pic 99`),
+    `to-day` is a `str`, `Run-Date` is an `int` and the IRS `run-date` is a
+    `str`. No binary-radix numeric type appears anywhere in this module, in a
+    signature, an option type or a computation.
+R-3 No added validation, no added field, no schema change, no concurrency.
+    Nothing here judges a run date, extends a record or reaches a database, and
+    execution is strictly sequential - there is no worker, pool or event loop
+    to configure and no option that would create one. The six connection fields
+    the binders fill already exist in [copybooks/wssystem.cob:L137-L144], so no
+    field is added; the width and blank checks that guard them live in
+    `rdbms_params` and apply to DEPLOYMENT CONFIGURATION rather than to any
+    accounting value, which that module argues at length.
+R-4 Legacy behaviour is reproduced, never corrected. Agent Action Plan section
+    0.8.2, verbatim: "A defect reproduced is correct; a defect fixed is a
+    failure." Each reproduction below carries its COBOL locator in a comment,
+    as section 0.7.4 C-4 requires.
+R-5 Full traceability - see the mandatory footer.
+R-6 Compiled behaviour is the tie-breaker, so the clock is injected and the
+    three genuinely open questions are marked in place rather than guessed.
 """
 
 from __future__ import annotations
@@ -2935,6 +3206,19 @@ def bind_irs_linkage(
     `irs_menu_state()` block and is therefore key 1 alone, and by
     `zz090_set_up_irs_system_data`.  A caller that passes no `menu_state` gets
     neither. A caller that binds Shape 3 and dispatches without
+    them allocates posting keys from zero and collides with the seed.
+
+    ⭐ BINDING IS NOT THE WHOLE OF SHAPE 3, AND MUST NOT BE MISTAKEN FOR IT.
+    What this function returns is the three records at their DECLARED DEFAULTS
+    plus whatever argv supplies - which leaves `IRS-System-Params.Next-Post`, the
+    POSTING-KEY ALLOCATOR `irs030` numbers each posting from, at ZERO. The frozen
+    menu never calls `irs030` with the record in that state: between the bind and
+    the dispatch it performs `aa010-Get-System-Recs` [irs/irs.cbl:L507-L551] to
+    load the seeded `SYSTEM-REC` row and then `zz090-Set-Up-IRS-System-Data`
+    [irs/irs.cbl:L556] to copy the allocator and seventeen other fields across.
+    Both are the ROUTE's work, not argv binding's, so they live in
+    `aa010_get_system_recs_irs` and `zz090_set_up_irs_system_data` and are called
+    from `cli/irs_post.main`. A caller that binds Shape 3 and dispatches without
     them allocates posting keys from zero and collides with the seed.
 
     ⭐ BINDING IS NOT THE WHOLE OF SHAPE 3, AND MUST NOT BE MISTAKEN FOR IT.

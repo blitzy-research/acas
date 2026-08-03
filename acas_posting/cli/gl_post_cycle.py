@@ -37,6 +37,165 @@ be diffed line for line. This is NOT the five-parameter Sales and Purchase shape
 [irs/irs030.cbl:L552-L554]; neither applies here.
 
 THE ABORT GATE IS HARD, NOT A WARNING
+Agent Action Plan section 0.6.4, verbatim: "The Python CLI must reproduce this as
+a **hard gate between phases, not as a warning**."
+
+The chain is four links long and crosses three programs:
+
+    1. phase 1 of `gl070` raises a detector flag on meeting a batch left OPEN in
+       the current accounting cycle          [general/gl070.cbl:L314-L315]
+    2. `menu-input2.` tests the flag, runs the open-batch report and stores `5`
+       into `WS-Term-Code`                   [general/gl070.cbl:L287-L290]
+    3. `load00.` hands control back WITHOUT tripping its own gate, because that
+       gate is `if ws-term-code > 7` and 5 is not greater than 7
+                                             [general/general.cbl:L720-L721]
+    4. `load08.` tests `if ws-term-code = 5 go to display-menu.`
+                                             [general/general.cbl:L810-L811]
+
+**The effect is that `gl071` and `gl072` never run at all.** Not "run with a
+warning" - not run. The database effect of the abort is the ABSENCE of everything
+those two phases would have written, so an entry point that logged the condition
+and carried on would post a batch the frozen system refuses to post.
+
+The exact value matters twice over, which is why nobody may "simplify" it: below
+five and `load08.` stops matching, above seven and `load00.` diverts to
+`overrewrite.` instead. And `general/general.cbl:L714` clears `WS-Term-Code`
+before EVERY dispatch, so no code is ever carried from one phase into the next.
+
+THE PHASE NUMBERING IS NOT THE EXECUTION ORDER
+==============================================
+The programs label their own phases on screen, and Agent Action Plan section
+0.6.4 asks that the labels be preserved "so a maintainer is not misled":
+
+    phase 1  batch check              `gl070`  [general/gl070.cbl:L284]
+    phase 2  transaction pre-process  `gl070`  [general/gl070.cbl:L292]
+    (sort)                            `gl071`  [general/gl071.cbl:L170]
+    phase 4  transaction update       `gl072`  [general/gl072.cbl:L274]
+    phase 3  transaction deletion     `gl080`  [general/gl080.cbl:L319]
+    phase 5  end of period            `gl080`  [general/gl080.cbl:L336]
+
+So **deletion is labelled phase 3 but executes after phase 4**, and the numbering
+is not sequential with execution. Phases 3 and 5 are NOT dispatched from here:
+`gl080` is `load09.` [general/general.cbl:L817-L821] and belongs to the sibling
+entry point `acas_posting/cli/gl_end_of_cycle.py`.
+
+THE SORT ORDER IS LOAD-BEARING - THE MOST FRAGILE THING IN THE CYCLE
+====================================================================
+`gl072` locates the nominal-ledger account for each posting with a SEQUENTIAL
+read-next rather than an indexed read [general/gl072.cbl:L407-L408], and there is
+no error path at all. It finds the right account ONLY because `gl071` has already
+emitted the stream in nominal-key order, sorting on
+`(sort-batch, sort-ac, sort-pc, sort-post)` [general/gl071.cbl:L172-L176]. Agent
+Action Plan section 0.6.4: "Any change in sort stability or key composition
+produces silent misposting - no error, no diagnostic, wrong balances."
+
+Two consequences bind this module. The three phases run **in this order, in one
+process, strictly sequentially** - never reordered, never parallelised (rule
+R-3). And the three phases share ONE work-file container, because `pre-trans` and
+`post-trans` [copybooks/wsnames.cob:L15-L16] are how they communicate: `gl070`
+writes `pre_trans`, `gl071` sorts it into `post_trans`, `gl072` posts from
+`post_trans`. See `_CycleWorkFiles`.
+
+WHAT IS DELIBERATELY NOT HERE
+=============================
+No screen output of any kind. The menu's own `display-menu` redraw, its
+`accept-loop`, its `go to load01 ... depending on z` dispatch table and its
+`overrewrite` persistence of the system records are all omitted, and each
+omission is recorded in the traceability footer rather than left to be noticed
+(Agent Action Plan section 0.4.3). The programs' phase banners belong to
+`acas_posting.programs` and are not duplicated here.
+
+Example:
+    Run the cycle for the 21st of September 2025, General Ledger only::
+
+        python -m acas_posting.cli.gl_post_cycle \\
+            --run-date 21/09/2025 --irs-instead " "
+
+    The exit status is `WS-Term-Code` itself: 0 when all three phases ran, 5 when
+    the abort gate fired, and the reported code when a phase failed seriously.
+=======
+=====================================
+Agent Action Plan section 0.6.4, verbatim: "The Python CLI must reproduce this as
+a **hard gate between phases, not as a warning**."
+
+The chain is four links long and crosses three programs:
+
+    1. phase 1 of `gl070` raises a detector flag on meeting a batch left OPEN in
+       the current accounting cycle          [general/gl070.cbl:L314-L315]
+    2. `menu-input2.` tests the flag, runs the open-batch report and stores `5`
+       into `WS-Term-Code`                   [general/gl070.cbl:L287-L290]
+    3. `load00.` hands control back WITHOUT tripping its own gate, because that
+       gate is `if ws-term-code > 7` and 5 is not greater than 7
+                                             [general/general.cbl:L720-L721]
+    4. `load08.` tests `if ws-term-code = 5 go to display-menu.`
+                                             [general/general.cbl:L810-L811]
+
+**The effect is that `gl071` and `gl072` never run at all.** Not "run with a
+warning" - not run. The database effect of the abort is the ABSENCE of everything
+those two phases would have written, so an entry point that logged the condition
+and carried on would post a batch the frozen system refuses to post.
+
+The exact value matters twice over, which is why nobody may "simplify" it: below
+five and `load08.` stops matching, above seven and `load00.` diverts to
+`overrewrite.` instead. And `general/general.cbl:L714` clears `WS-Term-Code`
+before EVERY dispatch, so no code is ever carried from one phase into the next.
+
+THE PHASE NUMBERING IS NOT THE EXECUTION ORDER
+==============================================
+The programs label their own phases on screen, and Agent Action Plan section
+0.6.4 asks that the labels be preserved "so a maintainer is not misled":
+
+    phase 1  batch check              `gl070`  [general/gl070.cbl:L284]
+    phase 2  transaction pre-process  `gl070`  [general/gl070.cbl:L292]
+    (sort)                            `gl071`  [general/gl071.cbl:L170]
+    phase 4  transaction update       `gl072`  [general/gl072.cbl:L274]
+    phase 3  transaction deletion     `gl080`  [general/gl080.cbl:L319]
+    phase 5  end of period            `gl080`  [general/gl080.cbl:L336]
+
+So **deletion is labelled phase 3 but executes after phase 4**, and the numbering
+is not sequential with execution. Phases 3 and 5 are NOT dispatched from here:
+`gl080` is `load09.` [general/general.cbl:L817-L821] and belongs to the sibling
+entry point `acas_posting/cli/gl_end_of_cycle.py`.
+
+THE SORT ORDER IS LOAD-BEARING - THE MOST FRAGILE THING IN THE CYCLE
+====================================================================
+`gl072` locates the nominal-ledger account for each posting with a SEQUENTIAL
+read-next rather than an indexed read [general/gl072.cbl:L407-L408], and there is
+no error path at all. It finds the right account ONLY because `gl071` has already
+emitted the stream in nominal-key order, sorting on
+`(sort-batch, sort-ac, sort-pc, sort-post)` [general/gl071.cbl:L172-L176]. Agent
+Action Plan section 0.6.4: "Any change in sort stability or key composition
+produces silent misposting - no error, no diagnostic, wrong balances."
+
+Two consequences bind this module. The three phases run **in this order, in one
+process, strictly sequentially** - never reordered, never parallelised (rule
+R-3). And the three phases share ONE work-file container, because `pre-trans` and
+`post-trans` [copybooks/wsnames.cob:L15-L16] are how they communicate: `gl070`
+writes `pre_trans`, `gl071` sorts it into `post_trans`, `gl072` posts from
+`post_trans`. See `_CycleWorkFiles`.
+
+WHAT IS DELIBERATELY NOT HERE
+=============================
+No screen output of any kind. The menu's own `display-menu` redraw, its
+`accept-loop` and its `go to load01 ... depending on z` dispatch table are all
+omitted, and each omission is recorded in the traceability footer rather than
+left to be noticed (Agent Action Plan section 0.4.3). The programs' phase banners
+belong to `acas_posting.programs` and are not duplicated here.
+
+WHAT IS HERE AND USED TO BE OMITTED. `overrewrite`'s persistence of the system
+records IS reproduced, on the one arm the frozen `load00.` reaches it from -
+`if ws-term-code > 7 / go to overrewrite` [general/general.cbl:L720-L721]. The
+paragraph itself lives once, in `acas_posting.cli.args`, and this route performs
+it; the state it persists is loaded by the same module before the first dispatch.
+
+Example:
+    Run the cycle for the 21st of September 2025, General Ledger only::
+
+        python -m acas_posting.cli.gl_post_cycle \\
+            --run-date 21/09/2025 --irs-instead " "
+
+    The exit status is `WS-Term-Code` itself: 0 when all three phases ran, 5 when
+    the abort gate fired, and the reported code when a phase failed seriously.
 """
 
 from __future__ import annotations

@@ -2279,8 +2279,8 @@ acas_assert_database() {
   # specification.
   acas_warn 'the frozen COBOL reaches no COMMIT, so under this AAP-mandated mode this posting run leaves NO durable rows: in all 28 common/*LD.cbl loaders every "perform aa020-Rollback" is commented out (78 sites, none live) and "perform aa030-Commit" occurs exactly once anywhere, at [common/irsdfltLD.cbl:L437], commented out too, while the twenty in-scope bridges, the in-scope handlers and every bridge close path contain zero COMMIT/ROLLBACK/START TRANSACTION. The maintainer recorded the same observation at [common/analLD.cbl:L442] ("These do not work during testing with mariadb - Non transactional model or autocommit set ON"). This is the reproduced legacy defect (R-4); nothing here issues the missing COMMIT, because a defect fixed is a failure.'
 
-  # There must BE a system record. Without it the menu cannot start, and an empty
-  # result would otherwise make every column check below vacuously pass.
+  # There must BE a system record. Without it the menu cannot start, and an
+  # empty result would otherwise make every column check below vacuously pass.
   rc=0
   acas_sql_scalar "select count(*) from $(acas_sql_quote_ident 'SYSTEM-REC');" || rc=$?
   (( rc == 0 )) || acas_die "$EX_DATABASE" \

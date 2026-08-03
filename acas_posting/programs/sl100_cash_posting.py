@@ -1531,6 +1531,20 @@ def run(
         ``TransportSecurity(ca_file=...)``.  It changes no status, no statement,
         no arithmetic and no write order.
 
+    :param dal_options: keyword-only, and NOT one of the five linkage operands.
+        Forwarded to every facade ``PERFORM`` this program issues, and the
+        declaration it exists for is the caller's transport-security policy.  The
+        frozen program has no counterpart because its bridge has none: transport
+        is compiled into ``cobmysqlapi.c`` [common/otm3MT.cbl:L459] rather than
+        declared by the COBOL.  ``None`` - the default - declares nothing, which
+        every handler resolves FAIL-CLOSED: a Unix socket or a loopback address is
+        permitted and any other target refused.  A run against the containerised
+        parity harness must therefore say so explicitly,
+        ``dal_options={"transport": TransportSecurity(isolated_oracle=True)}``,
+        and a run against a real server should be given
+        ``TransportSecurity(ca_file=...)``.  It changes no status, no statement,
+        no arithmetic and no write order.
+
     Nothing is returned.  Every effect is a mutation of the linkage records or a
     row written through the facade, exactly as in the COBOL.
     """

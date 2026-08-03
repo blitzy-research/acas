@@ -29,6 +29,792 @@ are published by the committed Compose file at
 [harness/docker-compose.yml:L138-L157].
 
 THE DUMP IS DELIBERATELY DUMB
+Agent Action Plan section 0.6.6 establishes why one `ORDER BY` on one
+column suffices: "All 22 in-scope tables have a single-column primary key
+and zero secondary indexes, and none contains a `TIMESTAMP` column, an
+`AUTO_INCREMENT` column, or a column-level `DEFAULT` ... Consequently the
+dump is `SELECT * FROM <table> ORDER BY <primary key>` with no
+tie-breaking logic, no timestamp masking and no surrogate-key remapping
+needed." Each clause is checkable against `mysql/ACASDB.sql`, and
+`assert_table_structure` re-checks it against `information_schema` on
+every run rather than trusting it. So: no `ORDER BY` beyond the single
+primary-key column, no secondary sort, no row-hash tie-break and no
+client-side re-sorting - rows arrive primary-key-ordered from SQL and are
+written in that order, untouched. No timestamp masking, there being zero
+temporal columns in scope. No surrogate-key remapping, the schema's only
+`AUTO_INCREMENT` column being `STOCKAUDIT-REC`.`AUDIT-ID`, out of scope.
+
+The schema's only composite primary key, only `UNIQUE` constraint and
+only `FOREIGN KEY` all belong to `PLPAY-RECrg01`, and its only secondary
+indexes are three `KEY` clauses on `STOCK-REC` plus one on
+`PLPAY-RECrg01`. Both tables are out of scope, which is why nothing in
+scope needs special handling. `harness/reset_db.sh` asserts the same
+invariant from the other side and says so at [harness/reset_db.sh:L320]
+and [harness/reset_db.sh:L1779].
+
+Every cleverness added here would be a place where a real behavioural
+difference could hide. Agent Action Plan section 0.6.6 states the
+guarantee that dumbness buys: "a non-empty diff is always a real
+behavioral difference and never an artefact of the comparison."
+
+THE ONE PLACE THE PROSE AND THE FROZEN SCHEMA DISAGREE
+======================================================
+The frozen artifact wins, always. Section 0.6.6's clause "none contains
+... a column-level `DEFAULT`" is not quite true of the schema it
+describes. There is exactly one, and it is in scope:
+
+    [mysql/ACASDB.sql:L1219]   `PASS-WORD` char(4) NOT NULL DEFAULT '',
+
+Over all thirty-three tables and seven hundred and twenty columns,
+`SYSTEM-REC`.`PASS-WORD` is the single column whose declaration carries a
+`DEFAULT` clause. It changes nothing here: a column default applies only
+to an `INSERT` that omits the column, and this module issues `SELECT`
+only. Rather than drop the check or let it fail against the real schema,
+`KNOWN_COLUMN_DEFAULTS` records this one default as a cited allowance and
+`assert_table_structure` aborts on any OTHER column-level default. The
+tripwire on frozen-schema tampering is kept; the false alarm is not.
+
+FAITHFUL CAPTURE, NOT NORMALISATION
+===================================
+This module has zero canonicalisation jobs. `harness/normalize.py` has
+exactly three: trailing spaces in fixed-width character columns, decimal
+scale rendering, and the two-digit versus four-digit date text forms. The
+split is deliberate and load-bearing. Agent Action Plan section 0.6.2's
+width drift, traced end to end:
+
+    [copybooks/wsledger.cob:L27]  03  Ledger-Name pic x(24).       24
+    [common/nominalMT.cbl:L299]   HV-LEDGER-NAME PIC X(32).        32
+    [mysql/ACASDB.sql:L127]       `LEDGER-NAME` char(32) NOT NULL, 32
+
+And the bridge TRIMS TRAILING SPACES as it builds the SQL text, so the
+COBOL side stores character columns trimmed while a Python data-access
+layer writing padded values could store them padded:
+
+    [common/nominalMT.cbl:L1065-L1067]
+        STRING '`LEDGER-NAME`="' INTO WS-MYSQL-COMMAND ...
+        STRING FUNCTION TRIM (HV-LEDGER-NAME,TRAILING) ...
+
+That is not one stray call: `common/nominalMT.cbl` carries twenty-three
+`FUNCTION TRIM` sites and `common/glpostingMT.cbl` twenty-nine. Whether
+the difference is even retrievable then depends on the server's
+`PAD_CHAR_TO_FULL_LENGTH` mode, which `harness/Dockerfile.mariadb`
+deliberately leaves unset for exactly this reason. So: capture what the
+driver returns, byte for byte, and let `normalize.py` canonicalise.
+Trimming or padding here would hide a real behavioural difference behind
+a helpful-looking transformation.
+
+FACTS `harness/normalize.py` NEEDS, RECORDED SO THE PAIR AGREES
+===============================================================
+  * FIXED-WIDTH COLUMNS. The schema declares 238 `char(...)` columns and
+    ZERO `varchar(...)`; 177 of those 238 are in scope. In-scope width
+    census: 79 x char(1), 12 x char(2), 6 x char(3), 5 x char(4),
+    3 x char(5), 2 x char(6), 6 x char(7), 5 x char(8), 10 x char(10),
+    1 x char(11), 4 x char(12), 6 x char(13), 1 x char(14), 2 x char(15),
+    1 x char(16), 1 x char(18), 12 x char(24), 5 x char(30),
+    10 x char(32), 3 x char(48), 1 x char(64), 2 x char(96).
+  * DECIMAL SCALE IS NOT UNIFORMLY 2. The schema carries 167 `DECIMAL`
+    columns, 128 in scope, and the in-scope scales are 55 x decimal(10,2),
+    44 x decimal(9,2), 15 x decimal(4,2), 8 x decimal(5,2),
+    4 x decimal(14,2), 1 x decimal(6,2) and 1 x decimal(5,0). Out of
+    scope there are also `,4` scales. NEVER hard-code two places.
+  * `char(8)` DOES NOT MEAN "DATE". The in-scope char(8) columns are
+    `GLPOSTING-REC`.`POST-DAT`, `IRSPOSTING-REC`.`POST4-DAT` and
+    `PSIRSPOST-REC`.`IRS-POST-DAT`, which are date text - but ALSO
+    `PUITM5-REC`.`OI5-BATCH` and `SAITM3-REC`.`OI3-BATCH`, which are
+    batch references. Any date handling in `normalize.py` must be driven
+    by an explicit COLUMN ALLOW-LIST, never by a width or content
+    heuristic.
+  * NO EXTRA FILES IN THE OUTPUT DIRECTORY. `normalize.py` is invoked as
+    `--in /out/cobol --out /out/cobol.norm`
+    [harness/docker-compose.yml:L352], so it reads a directory. This
+    module writes ONLY `<TABLE>.json` files there - no manifest, no log,
+    no marker. Progress goes to stderr.
+
+THE OUTPUT CONTRACT
+===================
+One file per table, named for the table exactly as the schema spells it,
+hyphens included, for example `GLPOSTING-REC.json`. The object carries
+five keys, in this insertion order and no others:
+
+    {"table": "GLLEDGER-REC",
+     "primary_key": "LEDGER-KEY",
+     "columns": ["LEDGER-KEY", "LEDGER-TYPE", ... ],
+     "row_count": 2,
+     "rows": [[1, 1, "B", 1, "Sales Ledger Control", "1234.56", ... ],
+              [2, 1, "B", 1, "VAT Control", "-99.99", ... ]]}
+
+`columns` is in schema ordinal order, taken from the cursor description of
+`SELECT *` and cross-checked against `information_schema`; it is never
+sorted. `rows` is a list of lists in the order SQL returned them, which is
+primary-key ascending, positionally aligned with `columns`; `row_count` is
+derived and asserted equal to `len(rows)`. A `DECIMAL` becomes a canonical
+JSON STRING with the column's declared scale intact, rendered with
+`format(value, "f")` so exponent notation can never appear, and trailing
+zeros are NOT stripped here; integers become JSON integers; `CHAR` becomes
+a JSON string exactly as the driver returned it, unpadded and untrimmed.
+NO other key - no timestamp, no server version, no connection detail, no
+scenario name, no side, because the file's PATH carries the scenario and
+the side.
+
+TWO ACCEPTED OUTPUT LAYOUTS, BOTH FROM THIS REPOSITORY'S DOCUMENTATION
+======================================================================
+    <out-dir>/<scenario>/<side>/<TABLE>.json    --scenario NAME --side S
+    <out>/<TABLE>.json                          --out DIR
+
+The first is the layout this module's file specification defines, with
+`side` one of `cobol` or `python`. The second is the invocation the
+committed Compose file publishes verbatim as the canonical eight-stage
+recipe, `harness/dump_tables.py --out /out/cobol`
+[harness/docker-compose.yml:L351]. Both are supported because both are
+documented in this repository, and neither is a guess. `--out` names the
+directory the `<TABLE>.json` files are written into directly; `--out-dir`
+names the root under which `<scenario>/<side>/` is composed.
+
+CONNECTION POLICY
+=================
+Credentials come from the environment `harness/docker-compose.yml` already
+defines for the `gnucobol` service [harness/docker-compose.yml:L418-L423]:
+`ACAS_DB_HOST`, `ACAS_DB_PORT`, `ACAS_DB_NAME`, `ACAS_DB_USER`,
+`ACAS_DB_PASSWORD` and `ACAS_DB_SOCKET` (declared, and legitimately
+empty). They are never logged, never echoed, never persisted and never
+allowed to influence a single output byte; `ConnectionSettings.__repr__`
+redacts the password.
+
+Widths are enforced because the COBOL side cannot carry more. The
+`RDB-Data` group at [copybooks/wsfnctn.cob:L56-L62] declares
+`DB-Schema pic x(12)`, `DB-UName pic x(12)`, `DB-UPass pic x(12)`,
+`DB-Host pic x(32)`, `DB-Socket pic x(64)` and `DB-Port pic x(5)`. A
+credential the bridge cannot hold would make the two sides connect as
+different users, and two dumps taken as different users are not
+comparable.
+
+NO SESSION STATE IS SET. `harness/Dockerfile.mariadb` pins autocommit
+at SERVER level precisely so that every client inherits the same value
+identically - the COBOL loaders, the bridges through `cobmysqlapi.o`,
+the `mariadb` client in `seed.sh` and `reset_db.sh`, and the Python
+driver here - and warns that a per-session setting "would let one side
+of the diff differ from the other". This module therefore sets no
+`autocommit`, no `sql_mode`, no `charset`, no collation and no
+`PAD_CHAR_TO_FULL_LENGTH`: it reads the server as configured. Being
+`SELECT`-only, the autocommit value cannot affect its output either way.
+Under the pinned `autocommit=1` each `SELECT` is its own read rather
+than one long snapshot, which is equally deterministic here because
+execution is strictly sequential and nothing writes to the schema while
+a dump is in progress - the run has finished before the dump starts.
+The connection is still released with a write-free `rollback()`, never
+a commit, so the module cannot alter state even if the server were
+reconfigured.
+
+THE RULES CITED BELOW BY NUMBER
+===============================
+This project ships NO separate rules document - `review_rules` reports
+"No user rules provided.". The six binding rules R-1 to R-6 are the Agent
+Action Plan's own, section 0.7.2, and each section below names the one it
+satisfies. Where the plan is silent, ordinary enterprise practice applies;
+nothing here is invented.
+
+NUMERIC POLICY  (rule R-2)
+==========================
+No accounting value may pass through a binary floating-point type at any
+point - not in computation, not in storage, not in transport. Agent Action
+Plan section 0.5.1 extends the prohibition to this exact file: "No
+`pandas` and no `numpy` - both compute in binary floating point by
+default, which is prohibited outright for accounting computation. This
+exclusion is absolute, including for the harness dump comparison, which
+uses ordered row sequences rather than dataframes." So, structurally:
+
+  * `pandas` and `numpy` are not imported here, for any reason. Neither is
+    in `requirements.txt`, and `harness/Dockerfile.gnucobol` fails its own
+    build if either is importable.
+  * `float(...)` is never called on a database value, and no value is
+    allowed to reach `float` by inference.
+  * A `DECIMAL` is NEVER serialised as a JSON number, JSON numbers being
+    IEEE-754 doubles in every consumer, so `"1234.56"` is written as text.
+    Integers are written as JSON integers, exact for every integer width
+    the schema uses - the widest in scope is `bigint(11)`, comfortably
+    inside a 64-bit integer.
+  * `render_value` DISPATCHES ON TYPE AND RAISES on anything unexpected
+    rather than coercing it. A `float` raises `NumericPolicyError` naming
+    the table, the column and the value; so does a non-finite `Decimal`; a
+    `bool` raises too, because JSON `true` is not the integer the column
+    holds. Silently rounding any of these would destroy the exactness the
+    whole engagement rests on.
+  * `assert_table_structure` additionally refuses a table carrying a
+    `float`, `double` or `real` column, so the guard is structural as well
+    as per value.
+
+The schema supports all of this: it declares ZERO `FLOAT`, `DOUBLE` and
+`REAL` columns. Its numeric census is 167 `DECIMAL`, 151 `INT`, 116
+`TINYINT`, 23 `MEDIUMINT`, 22 `SMALLINT` and 3 `BIGINT`; in scope, 128
+`DECIMAL`, 65 `INT`, 99 `TINYINT`, 21 `MEDIUMINT`, 20 `SMALLINT` and 3
+`BIGINT`. The pinned driver `mysql-connector-python==26.7.0` maps
+`DECIMAL` to `decimal.Decimal` with the declared scale intact -
+`decimal(14,4)` arrives as `Decimal("0.0000")` - and every integer width
+to `int`. `render_value` does not rely on that mapping: it asserts it per
+value, so a driver change that broke it would raise rather than round.
+
+NO COBOL AT RUNTIME, NO COUPLING TO THE SHIPPED PACKAGE  (rule R-1)
+===================================================================
+`harness/` is the compiled-COBOL oracle tree and a SIBLING of
+`acas_posting/`. Agent Action Plan section 0.3.1 annotates it "the
+compiled oracle; NEVER on the package import path" and states the
+guarantee: "there is no import path from `acas_posting` to `harness`, and
+the shipped artifact carries no COBOL, no `cobc` requirement and no
+linkage to the bridge's C interface object."
+
+  * THERE IS NO `harness/__init__.py` AND THERE MUST NEVER BE ONE. This is
+    a plain module invoked BY PATH, on `sys.path` only for its own run.
+  * `acas_posting` is NOT imported here, in any form - not `dal`, not
+    `records`, not `dictionary`. This module imports cleanly on a host
+    where `acas_posting` is not installed at all, which is exactly the
+    situation inside `harness/Dockerfile.gnucobol`.
+  * No COBOL is invoked, no `cobc` is shelled out to, no compiled module
+    is loaded and no child process is started.
+  * Imports are confined to the standard library, `PyYAML` and the
+    database driver, which is the permission Agent Action Plan section
+    0.4.3 grants `harness/*`. The driver is imported LAZILY inside
+    `connect`, so the pure functions - `render_value`, `write_dump`,
+    `dump_path`, `_ident` - are usable, and unit-testable, with no driver
+    installed and no database reachable. `jsonschema` is not imported: it
+    is not in `requirements.txt`.
+
+NO SCHEMA CHANGE, STRICTLY SEQUENTIAL  (rule R-3)
+=================================================
+Agent Action Plan section 0.2.2 forbids "new tables, columns, indexes,
+constraints, views, triggers or DDL statements" and any concurrency: "No
+threads, no `asyncio`, no `multiprocessing`, no connection pooling.
+Execution is strictly sequential."
+
+  * This module issues `SELECT` only, against the twenty-two in-scope
+    tables and against `information_schema`. It emits no `INSERT`,
+    `UPDATE`, `DELETE`, `CREATE`, `DROP`, `ALTER` or `TRUNCATE`, creates
+    no temporary table or view, and runs no `ANALYZE TABLE`. The single
+    transaction-control statement it issues is a write-free `rollback()`,
+    which releases any read-only transaction the server may have opened
+    and is a harmless no-op under the pinned `autocommit=1`.
+  * ONE connection, no pool. Tables are dumped one after another in a
+    plain loop. There is no thread, no event loop, no process pool and no
+    synchronisation primitive anywhere in this file.
+  * It writes nothing under `$ACAS_REPO`, which the Compose file mounts
+    read-only [harness/docker-compose.yml:L792] to keep the frozen
+    artifact guarantee of section 0.8.1 structural.
+  * It adds no validation of the DATA. The structural assertions check the
+    SCHEMA - shape, keys, types - never a row's contents.
+
+ANOMALIES ARE REPRODUCED, NEVER REPAIRED  (rule R-4)
+====================================================
+Agent Action Plan section 0.8.2, preserving the user's own requirement: "A
+defect reproduced is correct; a defect fixed is a failure." For a dump
+that means: DUMP WHAT IS THERE. The clearest case is the plan's anomaly 7.
+`IRSPOSTING-REC` carries three columns that exist in NO copybook -
+`POST4-DAY`, `POST4-MONTH` and `POST4-YEAR` - because the bridge derives
+them from two-character slices of a date string under a guard
+[common/irspostingMT.cbl:L982-L987]. When the guard does not hold the
+slices are simply not moved, so the components keep the zero left by the
+group `INITIALIZE` while `POST4-DAT` still holds the raw date text. The
+row is internally inconsistent, and that is the specification. Nothing
+here derives, back-fills, cross-checks or "repairs" those three columns,
+and nothing rounds, re-scales, trims, pads or reformats any other value.
+`render_value` is a type dispatch, not a transformation.
+
+TRACEABILITY  (rule R-5)
+========================
+Every table, primary key and column count in `IN_SCOPE` is traceable to
+`mysql/ACASDB.sql` and carries the `CREATE TABLE` line it was read from.
+The same twenty-two triples appear independently in
+[harness/reset_db.sh:L267-L290] and the same eleven out-of-scope names in
+[harness/reset_db.sh:L295-L307]; the two were checked against each other
+and against the schema.
+
+The map cannot silently drift, because `assert_table_structure`
+cross-checks it against `information_schema` on every run and aborts on
+any disagreement, and because the column names taken from the cursor
+description are compared with the ordinal order `information_schema`
+reports.
+
+DETERMINISM IS THE PRODUCT  (rule R-6)
+======================================
+Agent Action Plan section 0.8.5: "Two runs of the same scenario under the
+same pinned clock produce byte-identical dumps, proven by
+`tests/determinism/test_two_runs_byte_identical.py`." That determinism
+suite is written at a later boundary; the property it will assert is the
+one this module is built to deliver.
+
+NOT ONE BYTE OF NON-REPRODUCIBLE CONTENT MAY APPEAR IN A DUMP FILE. There
+is no wall-clock timestamp, no hostname, no run identifier, no elapsed
+time, no absolute path, no process id, no driver version, no server
+version and no random ordering in the output - this module reads no clock,
+no entropy source and no distribution metadata, and lists no directory.
+Provenance, when wanted, belongs in a log outside the dump tree.
+
+Serialisation is pinned rather than left to a default: `indent=2`,
+`ensure_ascii=True`, `sort_keys=False`, `separators=(",", ": ")`, LF
+newlines, UTF-8, exactly one trailing newline, and the five keys always in
+the same insertion order. `ensure_ascii=True` is deliberate - it makes the
+bytes independent of any locale or filesystem-encoding difference between
+the two runs, so do not "improve" it. Each file is written to a temporary
+name in its own directory and moved into place with `os.replace`, so a
+partial write can never be compared.
+
+THE PUBLIC API
+==============
+`tests/conftest.py` is specified to provide "the seed/dump/normalize/diff
+helpers so that no test reimplements the comparison protocol" (Agent
+Action Plan section 0.4.3), so it will import this module and call these
+functions directly. They are a library first and a command second.
+
+    connect                    context manager over one read-only
+                               connection, from the ACAS_DB_* environment
+    connection_settings        the resolved settings, password redacted
+    dump_table                 the dump object for one table
+    dump_tables                the dump objects for many, sequentially
+    write_dump                 the deterministic serialiser, one file
+    publish_dumps              the whole set, staged and committed with a
+                               manifest written last
+    build_manifest             the completeness manifest object
+    write_manifest             its deterministic serialiser
+    file_digest                the SHA-256 the manifest records
+    dump_path                  either accepted output layout
+    render_value               the value dispatch, on its own for testing
+    assert_table_structure     the seven structural assertions
+    resolve_tables             the table list, from the CLI selectors
+    scenario_tables            the affected-table list from a scenario
+    table_spec                 one table's frozen-schema facts
+    build_parser / main        the command line; `main` RETURNS a code
+
+`main` returns an exit status and never calls `sys.exit`, so a caller can
+drive it in-process. The module guard raises `SystemExit(main())`.
+
+EXIT CODES
+==========
+    0   every requested table was dumped, published and marked complete
+    80  usage - bad or contradictory command line, or NO table selector
+    81  precondition - environment or output directory
+    82  database - unreachable, or credentials rejected
+    83  scope - an out-of-scope or unknown table was requested
+    84  drift - a structural assertion against the frozen schema failed
+    85  numeric - the R-2 value guard tripped, or a NULL was fetched
+    86  write - a file could not be written, or the output directory
+        overlaps the read-only checkout in either direction
+    87  timeout - a connect, read or write deadline expired
+
+A table selector is REQUIRED, not optional: an unbounded 22-table
+comparison is refused rather than defaulted, because it can report a
+false failure on the three tables [general/general.cbl:L656-L691]
+rewrites on menu exit, and because evidence whose scope is implicit is
+not evidence (rule R-6).
+
+Every network operation is bounded by a finite, configurable deadline, so
+no stage of the protocol can hang: ACAS_DB_CONNECT_TIMEOUT,
+ACAS_DB_READ_TIMEOUT and ACAS_DB_WRITE_TIMEOUT, none of which may be 0.
+
+FURTHER READING
+===============
+    mysql/ACASDB.sql             the frozen schema; the source of the
+                                 table, key and column inventory
+    harness/docker-compose.yml   the eight stages and the environment
+    harness/reset_db.sh          the same invariants, from the database
+                                 side
+    harness/normalize.py         the three canonicalisation jobs
+    harness/diff_states.py       the comparison; empty is the pass
+
+The migration anomaly log and the per-scenario diff evidence, both written
+at a later boundary, are built from this pipeline's output.
+=======
+=============================
+Agent Action Plan section 0.6.6 establishes why one `ORDER BY` on one
+column suffices: "All 22 in-scope tables have a single-column primary key
+and zero secondary indexes, and none contains a `TIMESTAMP` column, an
+`AUTO_INCREMENT` column, or a column-level `DEFAULT` ... Consequently the
+dump is `SELECT * FROM <table> ORDER BY <primary key>` with no
+tie-breaking logic, no timestamp masking and no surrogate-key remapping
+needed." Each clause is checkable against `mysql/ACASDB.sql`, and
+`assert_table_structure` re-checks it against `information_schema` on
+every run rather than trusting it. So: no `ORDER BY` beyond the single
+primary-key column, no secondary sort, no row-hash tie-break and no
+client-side re-sorting - rows arrive primary-key-ordered from SQL and are
+written in that order, untouched. No timestamp masking, there being zero
+temporal columns in scope. No surrogate-key remapping, the schema's only
+`AUTO_INCREMENT` column being `STOCKAUDIT-REC`.`AUDIT-ID`, out of scope.
+
+The schema's only composite primary key, only `UNIQUE` constraint and
+only `FOREIGN KEY` all belong to `PLPAY-RECrg01`, and its only secondary
+indexes are three `KEY` clauses on `STOCK-REC` plus one on
+`PLPAY-RECrg01`. Both tables are out of scope, which is why nothing in
+scope needs special handling. `harness/reset_db.sh` asserts the same
+invariant from the other side and says so at [harness/reset_db.sh:L320]
+and [harness/reset_db.sh:L1779].
+
+Every cleverness added here would be a place where a real behavioural
+difference could hide. Agent Action Plan section 0.6.6 states the
+guarantee that dumbness buys: "a non-empty diff is always a real
+behavioral difference and never an artefact of the comparison."
+
+THE ONE PLACE THE PROSE AND THE FROZEN SCHEMA DISAGREE
+======================================================
+The frozen artifact wins, always. Section 0.6.6's clause "none contains
+... a column-level `DEFAULT`" is not quite true of the schema it
+describes. There is exactly one, and it is in scope:
+
+    [mysql/ACASDB.sql:L1219]   `PASS-WORD` char(4) NOT NULL DEFAULT '',
+
+Over all thirty-three tables and seven hundred and twenty columns,
+`SYSTEM-REC`.`PASS-WORD` is the single column whose declaration carries a
+`DEFAULT` clause. It changes nothing here: a column default applies only
+to an `INSERT` that omits the column, and this module issues `SELECT`
+only. Rather than drop the check or let it fail against the real schema,
+`KNOWN_COLUMN_DEFAULTS` records this one default as a cited allowance and
+`assert_table_structure` aborts on any OTHER column-level default. The
+tripwire on frozen-schema tampering is kept; the false alarm is not.
+
+FAITHFUL CAPTURE, NOT NORMALISATION
+===================================
+This module has zero canonicalisation jobs. `harness/normalize.py` has
+exactly three: trailing spaces in fixed-width character columns, decimal
+scale rendering, and the two-digit versus four-digit date text forms. The
+split is deliberate and load-bearing. Agent Action Plan section 0.6.2's
+width drift, traced end to end:
+
+    [copybooks/wsledger.cob:L27]  03  Ledger-Name pic x(24).       24
+    [common/nominalMT.cbl:L299]   HV-LEDGER-NAME PIC X(32).        32
+    [mysql/ACASDB.sql:L127]       `LEDGER-NAME` char(32) NOT NULL, 32
+
+And the bridge TRIMS TRAILING SPACES as it builds the SQL text, so the
+COBOL side stores character columns trimmed while a Python data-access
+layer writing padded values could store them padded:
+
+    [common/nominalMT.cbl:L1065-L1067]
+        STRING '`LEDGER-NAME`="' INTO WS-MYSQL-COMMAND ...
+        STRING FUNCTION TRIM (HV-LEDGER-NAME,TRAILING) ...
+
+That is not one stray call: `common/nominalMT.cbl` carries twenty-three
+`FUNCTION TRIM` sites and `common/glpostingMT.cbl` twenty-nine. Whether
+the difference is even retrievable then depends on the server's
+`PAD_CHAR_TO_FULL_LENGTH` mode, which `harness/Dockerfile.mariadb`
+deliberately leaves unset for exactly this reason. So: capture what the
+driver returns, byte for byte, and let `normalize.py` canonicalise.
+Trimming or padding here would hide a real behavioural difference behind
+a helpful-looking transformation.
+
+FACTS `harness/normalize.py` NEEDS, RECORDED SO THE PAIR AGREES
+===============================================================
+  * FIXED-WIDTH COLUMNS. The schema declares 238 `char(...)` columns and
+    ZERO `varchar(...)`; 177 of those 238 are in scope. In-scope width
+    census: 79 x char(1), 12 x char(2), 6 x char(3), 5 x char(4),
+    3 x char(5), 2 x char(6), 6 x char(7), 5 x char(8), 10 x char(10),
+    1 x char(11), 4 x char(12), 6 x char(13), 1 x char(14), 2 x char(15),
+    1 x char(16), 1 x char(18), 12 x char(24), 5 x char(30),
+    10 x char(32), 3 x char(48), 1 x char(64), 2 x char(96).
+  * DECIMAL SCALE IS NOT UNIFORMLY 2. The schema carries 167 `DECIMAL`
+    columns, 128 in scope, and the in-scope scales are 55 x decimal(10,2),
+    44 x decimal(9,2), 15 x decimal(4,2), 8 x decimal(5,2),
+    4 x decimal(14,2), 1 x decimal(6,2) and 1 x decimal(5,0). Out of
+    scope there are also `,4` scales. NEVER hard-code two places.
+  * `char(8)` DOES NOT MEAN "DATE". The in-scope char(8) columns are
+    `GLPOSTING-REC`.`POST-DAT`, `IRSPOSTING-REC`.`POST4-DAT` and
+    `PSIRSPOST-REC`.`IRS-POST-DAT`, which are date text - but ALSO
+    `PUITM5-REC`.`OI5-BATCH` and `SAITM3-REC`.`OI3-BATCH`, which are
+    batch references. Any date handling in `normalize.py` must be driven
+    by an explicit COLUMN ALLOW-LIST, never by a width or content
+    heuristic.
+  * NO EXTRA FILES IN THE OUTPUT DIRECTORY. `normalize.py` is invoked as
+    `--in /out/cobol --out /out/cobol.norm`
+    [harness/docker-compose.yml:L352], so it reads a directory. This
+    module writes ONLY `<TABLE>.json` files there - no manifest, no log,
+    no marker. Progress goes to stderr.
+
+THE OUTPUT CONTRACT
+===================
+One file per table, named for the table exactly as the schema spells it,
+hyphens included, for example `GLPOSTING-REC.json`. The object carries
+five keys, in this insertion order and no others:
+
+    {"table": "GLLEDGER-REC",
+     "primary_key": "LEDGER-KEY",
+     "columns": ["LEDGER-KEY", "LEDGER-TYPE", ... ],
+     "row_count": 2,
+     "rows": [[1, 1, "B", 1, "Sales Ledger Control", "1234.56", ... ],
+              [2, 1, "B", 1, "VAT Control", "-99.99", ... ]]}
+
+`columns` is in schema ordinal order, taken from the cursor description of
+`SELECT *` and cross-checked against `information_schema`; it is never
+sorted. `rows` is a list of lists in the order SQL returned them, which is
+primary-key ascending, positionally aligned with `columns`; `row_count` is
+derived and asserted equal to `len(rows)`. A `DECIMAL` becomes a canonical
+JSON STRING with the column's declared scale intact, rendered with
+`format(value, "f")` so exponent notation can never appear, and trailing
+zeros are NOT stripped here; integers become JSON integers; `CHAR` becomes
+a JSON string exactly as the driver returned it, unpadded and untrimmed.
+NO other key - no timestamp, no server version, no connection detail, no
+scenario name, no side, because the file's PATH carries the scenario and
+the side.
+
+TWO ACCEPTED OUTPUT LAYOUTS, BOTH FROM THIS REPOSITORY'S DOCUMENTATION
+======================================================================
+    <out-dir>/<scenario>/<side>/<TABLE>.json    --scenario NAME --side S
+    <out>/<TABLE>.json                          --out DIR
+
+The first is the layout this module's file specification defines, with
+`side` one of `cobol` or `python`. The second is the invocation the
+committed Compose file publishes verbatim as the canonical eight-stage
+recipe, `harness/dump_tables.py --out /out/cobol`
+[harness/docker-compose.yml:L351]. Both are supported because both are
+documented in this repository, and neither is a guess. `--out` names the
+directory the `<TABLE>.json` files are written into directly; `--out-dir`
+names the root under which `<scenario>/<side>/` is composed.
+
+CONNECTION POLICY
+=================
+Credentials come from the environment `harness/docker-compose.yml` already
+defines for the `gnucobol` service [harness/docker-compose.yml:L418-L423]:
+`ACAS_DB_HOST`, `ACAS_DB_PORT`, `ACAS_DB_NAME`, `ACAS_DB_USER`,
+`ACAS_DB_PASSWORD` and `ACAS_DB_SOCKET` (declared, and legitimately
+empty). They are never logged, never echoed, never persisted and never
+allowed to influence a single output byte; `ConnectionSettings.__repr__`
+redacts the password.
+
+Widths are enforced because the COBOL side cannot carry more. The
+`RDB-Data` group at [copybooks/wsfnctn.cob:L56-L62] declares
+`DB-Schema pic x(12)`, `DB-UName pic x(12)`, `DB-UPass pic x(12)`,
+`DB-Host pic x(32)`, `DB-Socket pic x(64)` and `DB-Port pic x(5)`. A
+credential the bridge cannot hold would make the two sides connect as
+different users, and two dumps taken as different users are not
+comparable.
+
+NO SESSION STATE IS SET. `harness/Dockerfile.mariadb` pins autocommit
+at SERVER level precisely so that every client inherits the same value
+identically - the COBOL loaders, the bridges through `cobmysqlapi.o`,
+the `mariadb` client in `seed.sh` and `reset_db.sh`, and the Python
+driver here - and warns that a per-session setting "would let one side
+of the diff differ from the other". This module therefore sets no
+`autocommit`, no `sql_mode`, no `charset`, no collation and no
+`PAD_CHAR_TO_FULL_LENGTH`: it reads the server as configured. Being
+`SELECT`-only, the autocommit value cannot affect its output either way.
+Under the pinned `autocommit=0` the session's SELECTs share one implicit
+read transaction rather than each standing alone, which is equally
+deterministic here - and if anything more so - because
+execution is strictly sequential and nothing writes to the schema while
+a dump is in progress - the run has finished before the dump starts.
+The connection is still released with a write-free `rollback()`, never
+a commit, so the module cannot alter state even if the server were
+reconfigured.
+
+THE RULES CITED BELOW BY NUMBER
+===============================
+This project ships NO separate rules document - `review_rules` reports
+"No user rules provided.". The six binding rules R-1 to R-6 are the Agent
+Action Plan's own, section 0.7.2, and each section below names the one it
+satisfies. Where the plan is silent, ordinary enterprise practice applies;
+nothing here is invented.
+
+NUMERIC POLICY  (rule R-2)
+==========================
+No accounting value may pass through a binary floating-point type at any
+point - not in computation, not in storage, not in transport. Agent Action
+Plan section 0.5.1 extends the prohibition to this exact file: "No
+`pandas` and no `numpy` - both compute in binary floating point by
+default, which is prohibited outright for accounting computation. This
+exclusion is absolute, including for the harness dump comparison, which
+uses ordered row sequences rather than dataframes." So, structurally:
+
+  * `pandas` and `numpy` are not imported here, for any reason. Neither is
+    in `requirements.txt`, and `harness/Dockerfile.gnucobol` fails its own
+    build if either is importable.
+  * `float(...)` is never called on a database value, and no value is
+    allowed to reach `float` by inference.
+  * A `DECIMAL` is NEVER serialised as a JSON number, JSON numbers being
+    IEEE-754 doubles in every consumer, so `"1234.56"` is written as text.
+    Integers are written as JSON integers, exact for every integer width
+    the schema uses - the widest in scope is `bigint(11)`, comfortably
+    inside a 64-bit integer.
+  * `render_value` DISPATCHES ON TYPE AND RAISES on anything unexpected
+    rather than coercing it. A `float` raises `NumericPolicyError` naming
+    the table, the column and the value; so does a non-finite `Decimal`; a
+    `bool` raises too, because JSON `true` is not the integer the column
+    holds. Silently rounding any of these would destroy the exactness the
+    whole engagement rests on.
+  * `assert_table_structure` additionally refuses a table carrying a
+    `float`, `double` or `real` column, so the guard is structural as well
+    as per value.
+
+The schema supports all of this: it declares ZERO `FLOAT`, `DOUBLE` and
+`REAL` columns. Its numeric census is 167 `DECIMAL`, 151 `INT`, 116
+`TINYINT`, 23 `MEDIUMINT`, 22 `SMALLINT` and 3 `BIGINT`; in scope, 128
+`DECIMAL`, 65 `INT`, 99 `TINYINT`, 21 `MEDIUMINT`, 20 `SMALLINT` and 3
+`BIGINT`. The pinned driver `mysql-connector-python==26.7.0` maps
+`DECIMAL` to `decimal.Decimal` with the declared scale intact -
+`decimal(14,4)` arrives as `Decimal("0.0000")` - and every integer width
+to `int`. `render_value` does not rely on that mapping: it asserts it per
+value, so a driver change that broke it would raise rather than round.
+
+NO COBOL AT RUNTIME, NO COUPLING TO THE SHIPPED PACKAGE  (rule R-1)
+===================================================================
+`harness/` is the compiled-COBOL oracle tree and a SIBLING of
+`acas_posting/`. Agent Action Plan section 0.3.1 annotates it "the
+compiled oracle; NEVER on the package import path" and states the
+guarantee: "there is no import path from `acas_posting` to `harness`, and
+the shipped artifact carries no COBOL, no `cobc` requirement and no
+linkage to the bridge's C interface object."
+
+  * THERE IS NO `harness/__init__.py` AND THERE MUST NEVER BE ONE. This is
+    a plain module invoked BY PATH, on `sys.path` only for its own run.
+  * `acas_posting` is NOT imported here, in any form - not `dal`, not
+    `records`, not `dictionary`. This module imports cleanly on a host
+    where `acas_posting` is not installed at all, which is exactly the
+    situation inside `harness/Dockerfile.gnucobol`.
+  * No COBOL is invoked, no `cobc` is shelled out to, no compiled module
+    is loaded and no child process is started.
+  * Imports are confined to the standard library, `PyYAML` and the
+    database driver, which is the permission Agent Action Plan section
+    0.4.3 grants `harness/*`. The driver is imported LAZILY inside
+    `connect`, so the pure functions - `render_value`, `write_dump`,
+    `dump_path`, `_ident` - are usable, and unit-testable, with no driver
+    installed and no database reachable. `jsonschema` is not imported: it
+    is not in `requirements.txt`.
+
+NO SCHEMA CHANGE, STRICTLY SEQUENTIAL  (rule R-3)
+=================================================
+Agent Action Plan section 0.2.2 forbids "new tables, columns, indexes,
+constraints, views, triggers or DDL statements" and any concurrency: "No
+threads, no `asyncio`, no `multiprocessing`, no connection pooling.
+Execution is strictly sequential."
+
+  * This module issues `SELECT` only, against the twenty-two in-scope
+    tables and against `information_schema`. It emits no `INSERT`,
+    `UPDATE`, `DELETE`, `CREATE`, `DROP`, `ALTER` or `TRUNCATE`, creates
+    no temporary table or view, and runs no `ANALYZE TABLE`. The single
+    transaction-control statement it issues is a write-free `rollback()`,
+    which releases the read-only transaction the server opens under the
+    pinned `autocommit=0`. It writes nothing either way, because this
+    module only ever reads.
+  * ONE connection, no pool. Tables are dumped one after another in a
+    plain loop. There is no thread, no event loop, no process pool and no
+    synchronisation primitive anywhere in this file.
+  * It writes nothing under `$ACAS_REPO`, which the Compose file mounts
+    read-only [harness/docker-compose.yml:L792] to keep the frozen
+    artifact guarantee of section 0.8.1 structural.
+  * It adds no validation of the DATA. The structural assertions check the
+    SCHEMA - shape, keys, types - never a row's contents.
+
+ANOMALIES ARE REPRODUCED, NEVER REPAIRED  (rule R-4)
+====================================================
+Agent Action Plan section 0.8.2, preserving the user's own requirement: "A
+defect reproduced is correct; a defect fixed is a failure." For a dump
+that means: DUMP WHAT IS THERE. The clearest case is the plan's anomaly 7.
+`IRSPOSTING-REC` carries three columns that exist in NO copybook -
+`POST4-DAY`, `POST4-MONTH` and `POST4-YEAR` - because the bridge derives
+them from two-character slices of a date string under a guard
+[common/irspostingMT.cbl:L982-L987]. When the guard does not hold the
+slices are simply not moved, so the components keep the zero left by the
+group `INITIALIZE` while `POST4-DAT` still holds the raw date text. The
+row is internally inconsistent, and that is the specification. Nothing
+here derives, back-fills, cross-checks or "repairs" those three columns,
+and nothing rounds, re-scales, trims, pads or reformats any other value.
+`render_value` is a type dispatch, not a transformation.
+
+TRACEABILITY  (rule R-5)
+========================
+Every table, primary key and column count in `IN_SCOPE` is traceable to
+`mysql/ACASDB.sql` and carries the `CREATE TABLE` line it was read from.
+The same twenty-two triples appear independently in
+[harness/reset_db.sh:L267-L290] and the same eleven out-of-scope names in
+[harness/reset_db.sh:L295-L307]; the two were checked against each other
+and against the schema.
+
+The map cannot silently drift, because `assert_table_structure`
+cross-checks it against `information_schema` on every run and aborts on
+any disagreement, and because the column names taken from the cursor
+description are compared with the ordinal order `information_schema`
+reports.
+
+DETERMINISM IS THE PRODUCT  (rule R-6)
+======================================
+Agent Action Plan section 0.8.5: "Two runs of the same scenario under the
+same pinned clock produce byte-identical dumps, proven by
+`tests/determinism/test_two_runs_byte_identical.py`." That determinism
+suite is written at a later boundary; the property it will assert is the
+one this module is built to deliver.
+
+NOT ONE BYTE OF NON-REPRODUCIBLE CONTENT MAY APPEAR IN A DUMP FILE. There
+is no wall-clock timestamp, no hostname, no run identifier, no elapsed
+time, no absolute path, no process id, no driver version, no server
+version and no random ordering in the output - this module reads no clock,
+no entropy source and no distribution metadata, and lists no directory.
+Provenance, when wanted, belongs in a log outside the dump tree.
+
+Serialisation is pinned rather than left to a default: `indent=2`,
+`ensure_ascii=True`, `sort_keys=False`, `separators=(",", ": ")`, LF
+newlines, UTF-8, exactly one trailing newline, and the five keys always in
+the same insertion order. `ensure_ascii=True` is deliberate - it makes the
+bytes independent of any locale or filesystem-encoding difference between
+the two runs, so do not "improve" it. Each file is written to a temporary
+name in its own directory and moved into place with `os.replace`, so a
+partial write can never be compared.
+
+THE PUBLIC API
+==============
+`tests/conftest.py` is specified to provide "the seed/dump/normalize/diff
+helpers so that no test reimplements the comparison protocol" (Agent
+Action Plan section 0.4.3), so it will import this module and call these
+functions directly. They are a library first and a command second.
+
+    connect                    context manager over one read-only
+                               connection, from the ACAS_DB_* environment
+    connection_settings        the resolved settings, password redacted
+    dump_table                 the dump object for one table
+    dump_tables                the dump objects for many, sequentially
+    write_dump                 the deterministic serialiser, one file
+    publish_dumps              the whole set, staged and committed with a
+                               manifest written last
+    build_manifest             the completeness manifest object
+    write_manifest             its deterministic serialiser
+    file_digest                the SHA-256 the manifest records
+    dump_path                  either accepted output layout
+    render_value               the value dispatch, on its own for testing
+    assert_table_structure     the seven structural assertions
+    resolve_tables             the table list, from the CLI selectors
+    scenario_tables            the affected-table list from a scenario
+    table_spec                 one table's frozen-schema facts
+    build_parser / main        the command line; `main` RETURNS a code
+
+`main` returns an exit status and never calls `sys.exit`, so a caller can
+drive it in-process. The module guard raises `SystemExit(main())`.
+
+EXIT CODES
+==========
+    0   every requested table was dumped, published and marked complete
+    80  usage - bad or contradictory command line, or NO table selector
+    81  precondition - environment or output directory
+    82  database - unreachable, or credentials rejected
+    83  scope - an out-of-scope or unknown table was requested
+    84  drift - a structural assertion against the frozen schema failed
+    85  numeric - the R-2 value guard tripped, or a NULL was fetched
+    86  write - a file could not be written, or the output directory
+        overlaps the read-only checkout in either direction
+    87  timeout - a connect, read or write deadline expired
+
+A table selector is REQUIRED, not optional: an unbounded 22-table
+comparison is refused rather than defaulted, because it can report a
+false failure on the three tables [general/general.cbl:L656-L691]
+rewrites on menu exit, and because evidence whose scope is implicit is
+not evidence (rule R-6).
+
+Every network operation is bounded by a finite, configurable deadline, so
+no stage of the protocol can hang: ACAS_DB_CONNECT_TIMEOUT,
+ACAS_DB_READ_TIMEOUT and ACAS_DB_WRITE_TIMEOUT, none of which may be 0.
+
+FURTHER READING
+===============
+    mysql/ACASDB.sql             the frozen schema; the source of the
+                                 table, key and column inventory
+    harness/docker-compose.yml   the eight stages and the environment
+    harness/reset_db.sh          the same invariants, from the database
+                                 side
+    harness/normalize.py         the three canonicalisation jobs
+    harness/diff_states.py       the comparison; empty is the pass
+
+The migration anomaly log and the per-scenario diff evidence, both written
+at a later boundary, are built from this pipeline's output.
 """
 
 # Every fact this module encodes comes from the frozen schema mysql/ACASDB.sql, the

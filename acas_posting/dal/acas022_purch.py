@@ -1551,6 +1551,22 @@ def _trace(message: str, *arguments: object) -> None:
     developer's own, read at the terminal beside the running program, and the frozen
     copybook leaves its switch at zero.
 
+     THE EIGHT CALL SITES ARE PRESERVED AND THIS FUNCTION EMITS NOTHING.
+    Every one of them passes the assembled ``WHERE`` clause or the whole statement -
+    for this table a predicate carrying ``PURCH-KEY``, the supplier code, as a
+    literal, and an INSERT or UPDATE naming every one of the twenty-nine columns and
+    its value. The safe-event schema in :mod:`acas_posting.dal.status` admits no SQL
+    text and no record key (CWE-532), and no redaction can help: escaping a
+    statement's control characters leaves the statement.
+
+    The function, its eight call sites and the ``Testing-2`` guard around each are
+    all kept, so a reader following the frozen source still finds every ``display``
+    and finds what it now does. The clause itself is still BUILT and still stored in
+    ``WS-Log-Where``, because the bridge's own statements read it - the disposition
+    is unchanged (R-3). Nothing acts on this trace operationally: it was a
+    developer's own, read at the terminal beside the running program, and the frozen
+    copybook leaves its switch at zero.
+
     Args:
         message: A printf-style template, retained so every call site still records
             which paragraph displayed what.

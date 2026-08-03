@@ -17,6 +17,535 @@ table declaration. Anomaly ``A-7`` in the plan's register is this module's
 headline, and a dedicated parity test locks it in place.
 
 THE THREE RECORD VIEWS, AND WHICH ONE NAMES THE COLUMNS
+
+Three different COBOL declarations describe the same row, and they disagree.
+
+=========================  =========================  =========================
+Linkage view               FD view                    Bridge host variable
+[copybooks/irswspost.cob]  [common/acasirsub4.cbl]    [common/irspostingMT.cbl]
+=========================  =========================  =========================
+``Post-Key``     pic 9(5)  ``Key-4`` group      L102  ``HV-KEY-4``    9(08) L174
+``Post-Code``    pic xx    ``Post4-Code``       L104  ``X(2)``              L175
+``Post-Date``    pic x(8)  ``Post4-Date``       L105  ``X(8)``              L176
+-- absent --               -- absent --               ``HV-POST4-DAY``      L177
+-- absent --               -- absent --               ``HV-POST4-MONTH``    L178
+-- absent --               -- absent --               ``HV-POST4-YEAR``     L179
+``Post-DR``      pic 9(5)  ``Post4-DR``         L106  ``9(08) COMP``        L180
+``Post-CR``      pic 9(5)  ``Post4-CR``         L107  ``9(08) COMP``        L181
+``Post-Amount``  signed    ``Post4-Amount``     L108  ``S9(07)V9(02)``      L182
+``Post-Legend``  pic x(32) ``Post4-Legend``     L109  ``X(32)``             L183
+``Vat-AC-Def``   pic 99    ``Vat-AC-Def4``      L110  ``9(03) COMP``        L184
+``Post-Vat-Side`` pic xx   ``Post4-Vat-Side``   L111  ``X(2)``              L185
+``Vat-Amount``   signed    ``Vat-Amount4``      L112  ``9(07)V9(02)``       L186
+=========================  =========================  =========================
+
+THE COLUMN NAMES COME FROM THE FD VIEW, NOT THE LINKAGE VIEW (anomaly A27). The
+inline ``01 Record-4`` at [common/acasirsub4.cbl:L101-L112] supplies ``KEY-4``,
+``POST4-CODE``, ``POST4-DR``, ``VAT-AC-DEF4`` and ``VAT-AMOUNT4`` verbatim; the
+linkage names (``Post-Key``, ``Post-Code``, ``Post-DR``, ``Vat-AC-Def``,
+``Vat-Amount``) match no column at all. Only ``POST4-DAT`` is a genuine
+bridge-side rename, "DATE" truncated to dodge the reserved word. The same holds
+for ``IRSNL-REC``, whose names come from ``copybooks/irsfdwsnl.cob`` - so across
+both IRS record tables the schema follows the FD view. Anyone resolving field
+metadata from the linkage copybook gets most of thirteen names wrong, which is
+why every lookup below goes through ``dictionary.loader`` (rule R-5, and the plan
+section 0.8.1 directive "Data dictionary first ... This ordering is a directive,
+not a preference").
+
+``Key-Number`` [common/acasirsub4.cbl:L103], the elementary item inside the
+``Key-4`` group, has NO column and NO host variable - the column is named after
+its parent group. Recorded as a deliberate omission (anomaly A28).
+
+THE THREE DERIVED COLUMNS
+=========================
+
+``bb000-HV-Load`` [common/irspostingMT.cbl:L958] ends with three INDEPENDENT
+guarded moves [common/irspostingMT.cbl:L982-L987]::
+
+    if       Post-Date (1:2) numeric
+             move     Post-Date (1:2) to HV-POST4-DAY.
+    if       Post-Date (4:2) numeric
+             move     Post-Date (4:2) to HV-POST4-MONTH.
+    if       Post-Date (7:2) numeric
+             move     Post-Date (7:2) to HV-POST4-YEAR.
+
+THREE GUARDS, NOT ONE (anomaly A2). The plan's register describes a single rule,
+but the source tests each component separately, so derivation is PARTIAL: a date
+of ``"01/AB/23"`` yields day 1, month 0, year 23 while ``POST4-DAT`` still holds
+the raw text. Eight outcomes are reachable, not two. Verified against the
+compiled oracle, which returned day ``1`` and month ``0`` for exactly that input.
+
+``initialize TD-IRSPOSTING-REC`` [common/irspostingMT.cbl:L966] is the
+load-bearing statement, not the moves: a failed guard leaves its host variable at
+the initialised value, ZERO - never SQL null. That single line is why all
+thirteen columns can be declared not-null with no default, and it is the general
+mechanism behind plan section 0.6.2's "the Python layer must default rather than
+omit". Every statement below binds all thirteen columns and never omits one.
+
+The maintainer expected these guards never to fire
+[common/irspostingMT.cbl:L978-L980] - "and yes they all should be numeric as a
+date is present / but JIC (just in case)." So a firing guard produces a row in a
+state its author did not anticipate: internally inconsistent, and reproduced as
+such rather than repaired (rule R-4, "A defect reproduced is correct; a defect
+fixed is a failure").
+
+Separator positions 3 and 6 are NEVER examined (anomaly A4), so ``"01X02X23"``
+derives cleanly, and only a two-digit year is ever stored. The components are
+sliced, never parsed - a general-purpose date routine "would be more correct than
+the specification, which is the one outcome to avoid" (plan section 0.8.6).
+
+LOAD ORDER IS NOT COLUMN ORDER (anomaly A5). The three derived columns sit at
+ordinals 4, 5 and 6 [mysql/ACASDB.sql:L278-L280] but are loaded LAST, after all
+ten copybook fields, because they were bolted on - "These added after new columns
+created 31/12/16" [common/irspostingMT.cbl:L978]. Both orders are reproduced
+where each belongs: load order in :func:`_load_host_variables`, column order in
+every statement.
+
+THEY ARE WRITE-ONLY (anomaly A3). ``bb100-UnloadHVs``
+[common/irspostingMT.cbl:L995] performs TEN moves for THIRTEEN columns
+[common/irspostingMT.cbl:L1006-L1015] - it cannot do otherwise, since no
+copybook field exists to receive them. The maintainer states the purpose
+[common/irspostingMT.cbl:L1017-L1018]: "We do not need to unload POST4- DAY,
+MONTH or YEAR as only used in select statements instead of a sort." This is the
+only entry in the folder's write-only-host-variable inventory carrying a
+documented rationale.
+
+CORRECTIONS ESTABLISHED AGAINST THE FROZEN SOURCE
+=================================================
+
+Five claims inherited from the working notes were checked against the source and
+found wrong. Rule R-6 makes observed behaviour the tie-breaker, so the source
+wins and the corrections are recorded here rather than propagated:
+
+* The flat-file write DOES load its FD record - [common/acasirsub4.cbl:L405] is
+  ``move Posting-Record to Record-4.``, identical to the rewrite at
+  [common/acasirsub4.cbl:L430]. There is no write/rewrite asymmetry and no stale
+  record. (Corrects the claimed anomaly A7, which is withdrawn.)
+* The duplicate-key retry [common/acasirsub4.cbl:L409-L411] is therefore NOT a
+  guaranteed non-terminating loop: because ``Record-4`` is reloaded at the top of
+  the paragraph on every pass and ``add 1 to Post-Key`` mutates the CALLER's
+  linkage record, the retry advances and stops at the first free key. The real
+  defect is the silent unbounded mutation of the caller's key, which wraps at
+  99999. (Refines anomaly A6.)
+* ``Post-Key`` IS moved into ``Key-Number`` before the flat start -
+  [common/acasirsub4.cbl:L358-L359] is one ``move`` with two targets.
+  (Corrects the claimed anomaly A22, which is withdrawn.)
+* The access-type guard IS LIVE on this path. The bridge repeats it at
+  [common/irspostingMT.cbl:L599-L601] with a different status pair, so it is
+  implemented here - see :data:`BRIDGE_START_PARAM_ERROR`. (Corrects anomaly A21,
+  which claimed the guard was reachable only from the flat path.)
+* Delete-all is BOUNDED, not a whole-table wipe. ``ba085-Process-Delete-ALL``
+  increments the key [common/irspostingMT.cbl:L812] and builds a ``WHERE``
+  predicate [common/irspostingMT.cbl:L818-L828] before issuing its statement
+  [common/irspostingMT.cbl:L845-L848]. (Corrects anomaly A18.)
+
+The guard line numbers are ``L982-L987``, matching both the plan's own citation
+and the generated dictionary; the working notes were consistently one line high.
+
+THE MEASURED SIGN LOSS
+======================
+
+``POST4-AMOUNT`` and ``VAT-AMOUNT4`` are signed at all three declarations -
+``sign is leading`` [copybooks/irswspost.cob:L14], ``S9(07)V9(02) COMP``
+[common/irspostingMT.cbl:L182], and a column with no unsigned qualifier
+[mysql/ACASDB.sql:L283]. The sign nevertheless DOES NOT REACH THE DATABASE, and
+this was measured rather than assumed.
+
+The bridge renders every value through one edit field, ``WS-MYSQL-EDIT PIC
+-Z(18)9.9(9)``, and extracts a fixed window from it
+[common/irspostingMT.cbl:L1101-L1105]. That field is thirty characters wide and
+its ``-`` is a FIXED insertion character at position 1, because a floating sign
+needs at least two occurrences. The money window begins at position 14, so the
+sign is outside every window the bridge reads. Compiled measurement:
+
+    ``-12345.67`` -> ``[-              12345.670000000]`` -> window ``12345.67``
+    ``+12345.67`` -> window ``12345.67``          <- IDENTICAL
+
+Plan section 0.6.2 requires "the Python data-access layer must reproduce the
+bridge's conversion, not merely write the computed value and let MySQL
+complain", so :func:`_mysql_edit` reproduces the edit field and the windowing,
+and the sign is lost exactly where the bridge loses it. See ``TODO(oracle)``
+below.
+
+WHAT THIS MODULE DELIBERATELY DOES NOT DO
+=========================================
+
+Recorded as omissions per plan section 0.5.3, "Deliberate omissions are recorded
+as omissions":
+
+* THE WHOLE FLAT-FILE PATH. Dispatch reaches the database branch at
+  [common/acasirsub4.cbl:L196-L200] and never returns, so ``aa020`` through
+  ``aa100`` are specification only. With it go: the duplicate-key retry (A6), the
+  flat start's reliance on ``Key-Number`` (A22), and the live ``stop "Cobol File
+  EOF"`` in a block whose own comment says it "should NOT occur"
+  [common/acasirsub4.cbl:L301-L308] (A23) - never translated to a
+  process-terminating call.
+* DUAL-WRITE SEMANTICS (A32). The banner at [common/acasirsub4.cbl:L208-L212]
+  documents writing to both stores when both are configured, a flat read being
+  "overwritten by rdb processing if set". Only the database path is in scope.
+* ``Key-Number`` (A28), which has neither column nor host variable.
+* ALL PRESENTATION. The record-size failure's ``display``/``accept`` dialogue
+  [common/acasirsub4.cbl:L484-L499] keeps its control transfer and loses its
+  screen I/O; the bridge's terminal-height probe
+  [common/irspostingMT.scb:L207-L211] is dropped entirely.
+* THE FH LOGGING CALL at [common/acasirsub4.cbl:L544-L548]. That program is out
+  of scope per plan section 0.2.2, so ``Ca-Process-Logs`` becomes a Python log
+  record (rule R-1).
+
+REPRESENTATION-ONLY ODDITIES, CARRIED AS EVIDENCE
+=================================================
+
+These change no behaviour, so there is nothing to reproduce - but each is a fact
+about the frozen source that a later reader would otherwise have to rediscover,
+and rule R-4 wants them recorded rather than silently dropped.
+
+* A25 - A REREAD PARAGRAPH INSIDE A BRIDGE. ``ba041-Reread``
+  [common/irspostingMT.cbl:L420] is the only such paragraph in any of the twenty
+  in-scope bridges; the others fetch inline. It exists because this bridge's START
+  ends by jumping to it [common/irspostingMT.cbl:L702], which is the same
+  start-then-read shape the handler has, pushed down a layer. It is why
+  :func:`start` ends with a call to :func:`read_next` rather than returning a
+  position.
+* A29 - TWO SPELLINGS OF ``initialize`` FOR THE SAME RECORD, in one bridge. The
+  read path uses ``initialize Posting-Record with filler``
+  [common/irspostingMT.cbl:L472] while the unload uses the plain form
+  [common/irspostingMT.cbl:L1004]. Only the plain form is on the path this module
+  takes, so :func:`_unload_host_variables` reproduces that one; the ``with
+  filler`` variant sits on the errno branch of the fetch. The unload is also
+  preceded by a stale ``*> (init moved lower)``
+  [common/irspostingMT.cbl:L999] whose ``initialize`` is in fact five lines BELOW
+  it, not lower still - the same stale note ``irsnominalMT`` carries.
+* A30 - A REPEATING-GROUP NOTE IN A BRIDGE WITH NO REPEATING GROUP. "RGs are
+  handled separately for all such actions so they must not be loaded here"
+  [common/irspostingMT.cbl:L989-L990] follows the load paragraph, but
+  ``IRSPOSTING-REC`` has no repeating group and no ``occurs`` anywhere - the same
+  copy-paste ``purchMT`` and ``irsnominalMT`` carry. And the linkage copybook's
+  own change note opens with a DOUBLED comment marker, ``*>> Chg 16/01/09 money to
+  9M`` [copybooks/irswspost.cob:L6], where every sibling line uses ``*>``.
+
+HOW THIS MODULE IS REACHED
+==========================
+
+Through the IRS facade convention [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L69],
+which sets ``File-Key-No`` to 1 and calls with the linkage order preserved here.
+That convention wraps most handlers in a per-handler error check - but there is
+NONE for ``acasirsub4``; checks exist only for ``acas000``, ``acas008``,
+``irsub1``, ``irsub3`` and ``irsub5`` at [:L320], [:L327], [:L334], [:L341] and
+[:L348]. Consistently, the handler declares a ``*> Module Specific`` heading and
+then no module-specific message at all [common/acasirsub4.cbl:L129-L131] (A26).
+SO :func:`dispatch` PERFORMS NO RECOVERY: it returns the status pair and leaves
+recovery to the caller, exactly as [common/acasirsub4.cbl:L538] directs - "Any
+errors leave it to caller to recover from". This matters because ``irs030``
+abandons its run on a posting-write failure [irs/irs030.cbl:L1673-L1678] while
+still committing partial state, so the pair returned here decides which rows
+survive.
+
+The verb surface narrows at each layer: the facade publishes SIX verbs
+[copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L256-L281], the handler dispatches
+EIGHT function codes [common/acasirsub4.cbl:L218-L235], and the bridge dispatches
+NINE [common/irspostingMT.cbl:L257-L281] - the extra being code 6, delete-all,
+reachable only by the coercion in ``ba015-Test-Ends``.
+
+TODO(oracle): three conversions need measurement against the compiled program
+before their values can be asserted, per plan section 0.6.8. (1) The width
+inflations - ``9(5)`` sources through ``9(08)`` host variables into
+``mediumint(5)`` columns, and two-character substrings through ``9(03)`` into
+``tinyint(2)``. (2) The signed-display-to-binary-to-decimal path for the two
+money fields, whose sign loss is measured above but whose behaviour at the
+column's precision limit is not. (3) The key predicate compares a quoted string
+to a numeric column, because the key metadata declares ``"STR"``
+[common/irspostingMT.scb:L126] for a ``mediumint`` key - it works only by server
+coercion, and the same contradiction holds for ``IRSNL-REC``.
+=======
+=======================================================
+
+Three different COBOL declarations describe the same row, and they disagree.
+
+=========================  =========================  =========================
+Linkage view               FD view                    Bridge host variable
+[copybooks/irswspost.cob]  [common/acasirsub4.cbl]    [common/irspostingMT.cbl]
+=========================  =========================  =========================
+``Post-Key``     pic 9(5)  ``Key-4`` group      L102  ``HV-KEY-4``    9(08) L174
+``Post-Code``    pic xx    ``Post4-Code``       L104  ``X(2)``              L175
+``Post-Date``    pic x(8)  ``Post4-Date``       L105  ``X(8)``              L176
+-- absent --               -- absent --               ``HV-POST4-DAY``      L177
+-- absent --               -- absent --               ``HV-POST4-MONTH``    L178
+-- absent --               -- absent --               ``HV-POST4-YEAR``     L179
+``Post-DR``      pic 9(5)  ``Post4-DR``         L106  ``9(08) COMP``        L180
+``Post-CR``      pic 9(5)  ``Post4-CR``         L107  ``9(08) COMP``        L181
+``Post-Amount``  signed    ``Post4-Amount``     L108  ``S9(07)V9(02)``      L182
+``Post-Legend``  pic x(32) ``Post4-Legend``     L109  ``X(32)``             L183
+``Vat-AC-Def``   pic 99    ``Vat-AC-Def4``      L110  ``9(03) COMP``        L184
+``Post-Vat-Side`` pic xx   ``Post4-Vat-Side``   L111  ``X(2)``              L185
+``Vat-Amount``   signed    ``Vat-Amount4``      L112  ``9(07)V9(02)``       L186
+=========================  =========================  =========================
+
+THE COLUMN NAMES COME FROM THE FD VIEW, NOT THE LINKAGE VIEW (anomaly A27). The
+inline ``01 Record-4`` at [common/acasirsub4.cbl:L101-L112] supplies ``KEY-4``,
+``POST4-CODE``, ``POST4-DR``, ``VAT-AC-DEF4`` and ``VAT-AMOUNT4`` verbatim; the
+linkage names (``Post-Key``, ``Post-Code``, ``Post-DR``, ``Vat-AC-Def``,
+``Vat-Amount``) match no column at all. Only ``POST4-DAT`` is a genuine
+bridge-side rename, "DATE" truncated to dodge the reserved word. The same holds
+for ``IRSNL-REC``, whose names come from ``copybooks/irsfdwsnl.cob`` - so across
+both IRS record tables the schema follows the FD view. Anyone resolving field
+metadata from the linkage copybook gets most of thirteen names wrong, which is
+why every lookup below goes through ``dictionary.loader`` (rule R-5, and the plan
+section 0.8.1 directive "Data dictionary first ... This ordering is a directive,
+not a preference").
+
+``Key-Number`` [common/acasirsub4.cbl:L103], the elementary item inside the
+``Key-4`` group, has NO column and NO host variable - the column is named after
+its parent group. Recorded as a deliberate omission (anomaly A28).
+
+THE THREE DERIVED COLUMNS
+=========================
+
+``bb000-HV-Load`` [common/irspostingMT.cbl:L958] ends with three INDEPENDENT
+guarded moves [common/irspostingMT.cbl:L982-L987]::
+
+    if       Post-Date (1:2) numeric
+             move     Post-Date (1:2) to HV-POST4-DAY.
+    if       Post-Date (4:2) numeric
+             move     Post-Date (4:2) to HV-POST4-MONTH.
+    if       Post-Date (7:2) numeric
+             move     Post-Date (7:2) to HV-POST4-YEAR.
+
+THREE GUARDS, NOT ONE (anomaly A2). The plan's register describes a single rule,
+but the source tests each component separately, so derivation is PARTIAL: a date
+of ``"01/AB/23"`` yields day 1, month 0, year 23 while ``POST4-DAT`` still holds
+the raw text. Eight outcomes are reachable, not two. Verified against the
+compiled oracle, which returned day ``1`` and month ``0`` for exactly that input.
+
+``initialize TD-IRSPOSTING-REC`` [common/irspostingMT.cbl:L966] is the
+load-bearing statement, not the moves: a failed guard leaves its host variable at
+the initialised value, ZERO - never SQL null. That single line is why all
+thirteen columns can be declared not-null with no default, and it is the general
+mechanism behind plan section 0.6.2's "the Python layer must default rather than
+omit". Every statement below binds all thirteen columns and never omits one.
+
+The maintainer expected these guards never to fire
+[common/irspostingMT.cbl:L978-L980] - "and yes they all should be numeric as a
+date is present / but JIC (just in case)." So a firing guard produces a row in a
+state its author did not anticipate: internally inconsistent, and reproduced as
+such rather than repaired (rule R-4, "A defect reproduced is correct; a defect
+fixed is a failure").
+
+Separator positions 3 and 6 are NEVER examined (anomaly A4), so ``"01X02X23"``
+derives cleanly, and only a two-digit year is ever stored. The components are
+sliced, never parsed - a general-purpose date routine "would be more correct than
+the specification, which is the one outcome to avoid" (plan section 0.8.6).
+
+LOAD ORDER IS NOT COLUMN ORDER (anomaly A5). The three derived columns sit at
+ordinals 4, 5 and 6 [mysql/ACASDB.sql:L278-L280] but are loaded LAST, after all
+ten copybook fields, because they were bolted on - "These added after new columns
+created 31/12/16" [common/irspostingMT.cbl:L978]. Both orders are reproduced
+where each belongs: load order in :func:`_load_host_variables`, column order in
+every statement.
+
+THEY ARE WRITE-ONLY (anomaly A3). ``bb100-UnloadHVs``
+[common/irspostingMT.cbl:L995] performs TEN moves for THIRTEEN columns
+[common/irspostingMT.cbl:L1006-L1015] - it cannot do otherwise, since no
+copybook field exists to receive them. The maintainer states the purpose
+[common/irspostingMT.cbl:L1017-L1018]: "We do not need to unload POST4- DAY,
+MONTH or YEAR as only used in select statements instead of a sort." This is the
+only entry in the folder's write-only-host-variable inventory carrying a
+documented rationale.
+
+CORRECTIONS ESTABLISHED AGAINST THE FROZEN SOURCE
+=================================================
+
+Five claims inherited from the working notes were checked against the source and
+found wrong. Rule R-6 makes observed behaviour the tie-breaker, so the source
+wins and the corrections are recorded here rather than propagated:
+
+* The flat-file write DOES load its FD record - [common/acasirsub4.cbl:L405] is
+  ``move Posting-Record to Record-4.``, identical to the rewrite at
+  [common/acasirsub4.cbl:L430]. There is no write/rewrite asymmetry and no stale
+  record. (Corrects the claimed anomaly A7, which is withdrawn.)
+* The duplicate-key retry [common/acasirsub4.cbl:L409-L411] is therefore NOT a
+  guaranteed non-terminating loop: because ``Record-4`` is reloaded at the top of
+  the paragraph on every pass and ``add 1 to Post-Key`` mutates the CALLER's
+  linkage record, the retry advances and stops at the first free key. The real
+  defect is the silent unbounded mutation of the caller's key, which wraps at
+  99999. (Refines anomaly A6.)
+* ``Post-Key`` IS moved into ``Key-Number`` before the flat start -
+  [common/acasirsub4.cbl:L358-L359] is one ``move`` with two targets.
+  (Corrects the claimed anomaly A22, which is withdrawn.)
+* The access-type guard IS LIVE on this path. The bridge repeats it at
+  [common/irspostingMT.cbl:L599-L601] with a different status pair, so it is
+  implemented here - see :data:`BRIDGE_START_PARAM_ERROR`. (Corrects anomaly A21,
+  which claimed the guard was reachable only from the flat path.)
+* Delete-all is BOUNDED, not a whole-table wipe. ``ba085-Process-Delete-ALL``
+  increments the key [common/irspostingMT.cbl:L812] and builds a ``WHERE``
+  predicate [common/irspostingMT.cbl:L818-L828] before issuing its statement
+  [common/irspostingMT.cbl:L845-L848]. (Corrects anomaly A18.)
+
+The guard line numbers are ``L982-L987``, matching both the plan's own citation
+and the generated dictionary; the working notes were consistently one line high.
+
+THE MEASURED SIGN LOSS
+======================
+
+``POST4-AMOUNT`` and ``VAT-AMOUNT4`` are signed at all three declarations -
+``sign is leading`` [copybooks/irswspost.cob:L14], ``S9(07)V9(02) COMP``
+[common/irspostingMT.cbl:L182], and a column with no unsigned qualifier
+[mysql/ACASDB.sql:L283]. The sign nevertheless DOES NOT REACH THE DATABASE, and
+this was measured rather than assumed.
+
+The bridge renders every value through one edit field, ``WS-MYSQL-EDIT PIC
+-Z(18)9.9(9)``, and extracts a fixed window from it
+[common/irspostingMT.cbl:L1101-L1105]. That field is thirty characters wide and
+its ``-`` is a FIXED insertion character at position 1, because a floating sign
+needs at least two occurrences. The money window begins at position 14, so the
+sign is outside every window the bridge reads. Compiled measurement:
+
+    ``-12345.67`` -> ``[-              12345.670000000]`` -> window ``12345.67``
+    ``+12345.67`` -> window ``12345.67``          <- IDENTICAL
+
+Plan section 0.6.2 requires "the Python data-access layer must reproduce the
+bridge's conversion, not merely write the computed value and let MySQL
+complain", so :func:`_mysql_edit` reproduces the edit field and the windowing,
+and the sign is lost exactly where the bridge loses it. That it is lost HERE and
+not at the column is confirmed by measurement, not assumed: the column is
+``decimal(9,2)`` with no ``unsigned`` [mysql/ACASDB.sql:L279] and keeps a negative
+value when one is sent. See ambiguity Q-B below.
+
+WHAT THIS MODULE DELIBERATELY DOES NOT DO
+=========================================
+
+Recorded as omissions per plan section 0.5.3, "Deliberate omissions are recorded
+as omissions":
+
+* THE WHOLE FLAT-FILE PATH. Dispatch reaches the database branch at
+  [common/acasirsub4.cbl:L196-L200] and never returns, so ``aa020`` through
+  ``aa100`` are specification only. With it go: the duplicate-key retry (A6), the
+  flat start's reliance on ``Key-Number`` (A22), and the live ``stop "Cobol File
+  EOF"`` in a block whose own comment says it "should NOT occur"
+  [common/acasirsub4.cbl:L301-L308] (A23) - never translated to a
+  process-terminating call.
+* DUAL-WRITE SEMANTICS (A32). The banner at [common/acasirsub4.cbl:L208-L212]
+  documents writing to both stores when both are configured, a flat read being
+  "overwritten by rdb processing if set". Only the database path is in scope.
+* ``Key-Number`` (A28), which has neither column nor host variable.
+* ALL PRESENTATION. The record-size failure's ``display``/``accept`` dialogue
+  [common/acasirsub4.cbl:L484-L499] keeps its control transfer and loses its
+  screen I/O; the bridge's terminal-height probe
+  [common/irspostingMT.scb:L207-L211] is dropped entirely.
+* THE FH LOGGING CALL at [common/acasirsub4.cbl:L544-L548]. That program is out
+  of scope per plan section 0.2.2, so ``Ca-Process-Logs`` becomes a Python log
+  record (rule R-1).
+
+REPRESENTATION-ONLY ODDITIES, CARRIED AS EVIDENCE
+=================================================
+
+These change no behaviour, so there is nothing to reproduce - but each is a fact
+about the frozen source that a later reader would otherwise have to rediscover,
+and rule R-4 wants them recorded rather than silently dropped.
+
+* A25 - A REREAD PARAGRAPH INSIDE A BRIDGE. ``ba041-Reread``
+  [common/irspostingMT.cbl:L420] is the only such paragraph in any of the twenty
+  in-scope bridges; the others fetch inline. It exists because this bridge's START
+  ends by jumping to it [common/irspostingMT.cbl:L702], which is the same
+  start-then-read shape the handler has, pushed down a layer. It is why
+  :func:`start` ends with a call to :func:`read_next` rather than returning a
+  position.
+* A29 - TWO SPELLINGS OF ``initialize`` FOR THE SAME RECORD, in one bridge. The
+  read path uses ``initialize Posting-Record with filler``
+  [common/irspostingMT.cbl:L472] while the unload uses the plain form
+  [common/irspostingMT.cbl:L1004]. Only the plain form is on the path this module
+  takes, so :func:`_unload_host_variables` reproduces that one; the ``with
+  filler`` variant sits on the errno branch of the fetch. The unload is also
+  preceded by a stale ``*> (init moved lower)``
+  [common/irspostingMT.cbl:L999] whose ``initialize`` is in fact five lines BELOW
+  it, not lower still - the same stale note ``irsnominalMT`` carries.
+* A30 - A REPEATING-GROUP NOTE IN A BRIDGE WITH NO REPEATING GROUP. "RGs are
+  handled separately for all such actions so they must not be loaded here"
+  [common/irspostingMT.cbl:L989-L990] follows the load paragraph, but
+  ``IRSPOSTING-REC`` has no repeating group and no ``occurs`` anywhere - the same
+  copy-paste ``purchMT`` and ``irsnominalMT`` carry. And the linkage copybook's
+  own change note opens with a DOUBLED comment marker, ``*>> Chg 16/01/09 money to
+  9M`` [copybooks/irswspost.cob:L6], where every sibling line uses ``*>``.
+
+HOW THIS MODULE IS REACHED
+==========================
+
+Through the IRS facade convention [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L69],
+which sets ``File-Key-No`` to 1 and calls with the linkage order preserved here.
+That convention wraps most handlers in a per-handler error check - but there is
+NONE for ``acasirsub4``; checks exist only for ``acas000``, ``acas008``,
+``irsub1``, ``irsub3`` and ``irsub5`` at [:L320], [:L327], [:L334], [:L341] and
+[:L348]. Consistently, the handler declares a ``*> Module Specific`` heading and
+then no module-specific message at all [common/acasirsub4.cbl:L129-L131] (A26).
+SO :func:`dispatch` PERFORMS NO RECOVERY: it returns the status pair and leaves
+recovery to the caller, exactly as [common/acasirsub4.cbl:L538] directs - "Any
+errors leave it to caller to recover from". This matters because ``irs030``
+abandons its run on a posting-write failure [irs/irs030.cbl:L1673-L1678] while
+still committing partial state, so the pair returned here decides which rows
+survive.
+
+The verb surface narrows at each layer: the facade publishes SIX verbs
+[copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L256-L281], the handler dispatches
+EIGHT function codes [common/acasirsub4.cbl:L218-L235], and the bridge dispatches
+NINE [common/irspostingMT.cbl:L257-L281] - the extra being code 6, delete-all,
+reachable only by the coercion in ``ba015-Test-Ends``.
+
+AMBIGUITIES, RESOLVED BY MEASUREMENT  (rule R-6, plan section 0.6.8)
+====================================================================
+Three conversions could not be asserted from the source alone. All three are now
+measured against **MariaDB 10.11.7** - the server version the frozen schema
+records as its producer [mysql/ACASDB.sql:L1, :L5] - with the frozen
+``ENGINE=InnoDB`` and the server's default ``sql_mode``
+(``STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION``),
+which is what the bridge's C interface gets. The dump's own
+``SQL_MODE='NO_AUTO_VALUE_ON_ZERO'`` [mysql/ACASDB.sql:L21] does not change that:
+it is SESSION-scoped, leaves ``@@global.sql_mode`` untouched (measured) and is
+restored at [:L1451], so it governs only the schema load - and is inert even there,
+the schema's only ``AUTO_INCREMENT`` column belonging to the out-of-scope
+``STOCKAUDIT-REC`` [mysql/ACASDB.sql:L1107]. None of the three results changes a
+line of code, and that is what measuring rather than guessing was for.
+
+    Q-A  THE WIDTH INFLATIONS. ``9(5)`` sources travel through ``9(08)`` host
+         variables into ``mediumint(5) unsigned`` columns, and two-character
+         substrings through ``9(03)`` into ``tinyint(2) unsigned``. THE PREMISE
+         THAT THE HOST VARIABLE IS WIDER THAN THE COLUMN IS WRONG: ``(5)`` and
+         ``(2)`` ARE DISPLAY WIDTHS, NOT CONSTRAINTS. Measured, ``mediumint
+         unsigned`` holds 0..16777215 - so ``POST4-DR`` accepted both ``99999``
+         and ``16777215``, i.e. all five source digits and three more - and
+         ``tinyint unsigned`` holds 0..255. Past those the server REFUSES rather
+         than clamps: ``16777216`` into ``POST4-DR`` and into ``KEY-4``, and
+         ``256`` into ``POST4-DAY``, each raise ERROR 1264, SQLSTATE 22003, "Out
+         of range value", and the row is NOT written. So the inflation is harmless
+         over the whole source domain, and beyond it the refusal is the server's -
+         which is where the frozen bridge meets it too, so no check is added here
+         (rule R-3).
+
+    Q-B  THE MONEY PATH AT THE COLUMN'S PRECISION LIMIT. ``POST4-AMOUNT`` and
+         ``VAT-AMOUNT4`` are ``decimal(9,2)`` with **no** ``unsigned``
+         [mysql/ACASDB.sql:L279, :L282], so the column itself would keep a sign;
+         measured, ``-12345.67`` stores as ``-12345.67``. The sign is therefore
+         lost STRICTLY EARLIER, at the edit window described above, and that is a
+         COBOL fact this module already reproduces rather than a column effect.
+         At the precision limit: ``9999999.99`` (seven integer digits, the most
+         ``decimal(9,2)`` holds) stores exactly, and ``10000000.00`` raises ERROR
+         1264 / 22003 with nothing written. Note the contrast, also measured -
+         SCALE overflow ROUNDS instead of failing: ``1.005`` stores ``1.01`` and
+         ``1.004`` stores ``1.00``. Precision and scale have different
+         dispositions, and only precision can abort a statement.
+
+    Q-C  THE KEY PREDICATE, ANOMALY A15. The key metadata declares ``"STR"``
+         [common/irspostingMT.scb:L126] for a ``mediumint(5) unsigned`` key
+         [mysql/ACASDB.sql:L275], so the bridge quotes the value and the
+         comparison works only by server coercion. IT COERCES TO A NUMBER, proved
+         with a probe whose two readings disagree: against a numeric column
+         holding 9 and 10, ``k > "10"`` returned NO rows and ``k < "10"`` returned
+         9 - the opposite of the lexical answer - and ``9 > "10"`` evaluates 0
+         while ``"9" > "10"`` evaluates 1. Measured on this shape:
+         ``KEY-4 = "1"`` returned 1, ``KEY-4 > "1"`` returned 2, and
+         ``KEY-4 > "000"`` returned both. The same holds for ``IRSNL-REC``, whose
+         ``bigint(10) unsigned`` key matched a zero-filled ten-character image.
+         So the quoted literal is reproduced exactly as the bridge emits it, and
+         binding an integer "because the column is numeric" would be a different
+         statement for no gain.
 """
 
 from __future__ import annotations
