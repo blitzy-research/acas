@@ -116,10 +116,18 @@ left to be noticed (Agent Action Plan section 0.4.3). The programs' phase banner
 belong to `acas_posting.programs` and are not duplicated here.
 
 WHAT IS HERE AND USED TO BE OMITTED. `overrewrite`'s persistence of the system
-records IS reproduced, on the one arm the frozen `load00.` reaches it from -
-`if ws-term-code > 7 / go to overrewrite` [general/general.cbl:L720-L721]. The
-paragraph itself lives once, in `acas_posting.cli.args`, and this route performs
-it; the state it persists is loaded by the same module before the first dispatch.
+records IS reproduced, from BOTH of the two places the frozen session reaches it:
+the `> 7` arm of the dispatch paragraph, `if ws-term-code > 7 / go to overrewrite`
+[general/general.cbl:L720-L721], performed inside `load00`; and the MENU QUIT,
+`if menu-reply = "X" / go to pre-overrewrite` [general/general.cbl:L595-L596],
+performed once at the end of `main` because a one-shot process runs one operation
+per session and its ordinary completion IS that session end. The two are mutually
+exclusive - `main` guards on `args.is_serious_error` - so the paragraph runs
+exactly once per process, as it does once per frozen session. It matters because
+the callees mutate the caller's `SYSTEM-REC` by reference and nothing else in this
+route writes those changes to the store. The paragraph itself lives once, in
+`acas_posting.cli.args`, and this route performs it; the state it persists is
+loaded by the same module before the first dispatch.
 
 Example:
     Run the cycle for the 21st of September 2025, General Ledger only::
@@ -203,7 +211,11 @@ class _Disposition(enum.Enum):
 
     #: `load00.` ran to its end and control returned to the performing paragraph.
     #: `WS-Term-Code` may still be non-zero - 5, for instance - and reading it is
-    #: the caller's business, exactly as `load08.` L810 reads it.
+    #: the caller's business, exactly as `load08.` L810 reads it. NOTHING HAS BEEN
+    #: PERSISTED on this exit, because the frozen paragraph's ordinary exit at
+    #: [general/general.cbl:L722] persists nothing; the quit-time `overrewrite`
+    #: [general/general.cbl:L595-L596] is still owed and `main` performs it once
+    #: when the run completes.
     CONTINUE = enum.auto()
 
     #: `if ws-term-code > 7 / go to overrewrite.`
@@ -312,7 +324,6 @@ def load00(
     *,
     menu_state: args.MenuState,
     work_files: _CycleWorkFiles | None = None,
-    transport: object = None,
 ) -> _Disposition:
     """`load00.` [general/general.cbl:L711-L721] - dispatch one program.
 
@@ -386,7 +397,13 @@ def load00(
             linkage parameter - see `_CycleWorkFiles`. Omitting it dispatches the
             program against work files of its own, which is what a single
             standalone dispatch wants and what every program module's own
-            `work_files=None` default already means.
+            `work_files=None` default already means. IT IS THE ONLY KEYWORD THIS
+            FUNCTION FORWARDS: none of the three callees declares any other, so
+            offering one would raise `TypeError` before the dispatch. The
+            operator's transport declaration reaches the handlers through the
+            process-level policy `args.install_connection_policy` installs while
+            the linkage is bound, not call by call - see the comment at the
+            dispatch.
 
     Returns:
         `_Disposition.SERIOUS_ERROR` when the callee reported `> 7`, in which case
@@ -394,8 +411,9 @@ def load00(
         to `overrewrite.` rather than reporting that one is due. Otherwise
         `_Disposition.CONTINUE`, and nothing has been persisted, because the
         frozen paragraph's ordinary exit at [general/general.cbl:L722] persists
-        nothing. A code of 5 returns `CONTINUE`, deliberately: see THE THRESHOLD
-        above.
+        nothing - the quit-time `overrewrite` [general/general.cbl:L595-L596] is
+        then still owed, and `main` performs it once. A code of 5 returns
+        `CONTINUE`, deliberately: see THE THRESHOLD above.
 
     Raises:
         Exception: whatever the callee raises is propagated unchanged. Nothing is
@@ -434,23 +452,25 @@ def load00(
     # 719  end-call
     #      FOUR POSITIONAL ARGUMENTS, IN THE COBOL ORDER. `args.GlLinkage` holds
     #      them in that order, so the splat below and L715-L718 above are the same
-    #      list and can be diffed line for line.
-    #  THE OPERATOR'S TRANSPORT DECLARATION, AND ONLY WHERE A CALLEE DECLARES IT.
-    #  `gl070.run` publishes a keyword-only `transport` and forwards it to the
-    #  posting handler; `gl071.run` reaches no handler at all - it is a pure sort
-    #  [general/gl071.cbl] - and `gl072.run` publishes no such parameter, so its
-    #  handlers keep the fail-closed default. None of the three is a COBOL operand:
-    #  the frozen `CALL` at L715-L718 passes four things and no fifth, its bridge
-    #  having no transport policy to pass [copybooks/mysql-procedures.cpy:L72-L77].
-    #  Offering the argument to a callee that does not declare it would be a
-    #  `TypeError` at the dispatch, and never offering it at all is how a policy
-    #  comes to be decided by a handler instead of by the operator.
-    if transport is None:
-        returned = program.run(*linkage, work_files=carrier.container)
-    else:
-        returned = program.run(
-            *linkage, work_files=carrier.container, transport=transport
-        )
+    #      list and can be diffed line for line. The ONE keyword is `work_files`,
+    #      which is not a COBOL operand at all - see `_CycleWorkFiles`.
+    #
+    #  THE OPERATOR'S TRANSPORT DECLARATION IS NOT THREADED THROUGH HERE, AND THE
+    #  REASON IS A FACT ABOUT THE THREE CALLEES RATHER THAN A PREFERENCE. None of
+    #  `gl070.run`, `gl071.run` or `gl072.run` declares a `transport` parameter -
+    #  their keyword-only parameters are `work_files` and, for two of them,
+    #  `file_access`, `dal_common` and `states` - so offering one would raise
+    #  `TypeError` before the dispatch and the phase would never run. It is not a
+    #  COBOL operand either: the frozen `CALL` at L715-L718 passes four things and
+    #  no fifth, its bridge having no transport policy to pass
+    #  [copybooks/mysql-procedures.cpy:L72-L77]. What carries the declaration
+    #  instead is the ONE process-level policy `args.install_connection_policy`
+    #  installs while the linkage is bound, from `--db-tls-*` and the deployment
+    #  contract, so every handler any phase reaches observes it without being told.
+    #  That is the same mechanism the other six routes use; `gl_end_of_cycle.py`
+    #  differs only because `gl080.run` DOES declare `dal_options`, and even there
+    #  the route leaves it unset for exactly this reason.
+    returned = program.run(*linkage, work_files=carrier.container)
 
     #      The one conditional that is a Python-language necessity rather than a
     #      test of any value the COBOL tests. `gl070.run` returns the work-file
@@ -482,15 +502,21 @@ def load00(
     #               control never returns to the dispatch paragraph and no further
     #               program is invoked - so the set of programs run and the
     #               database effect are identical.
-    #      THE PERSISTENCE IS ON THIS ARM ALONE, AND THAT IS THE FROZEN SHAPE.
-    #      `load00.` has exactly one transfer to `overrewrite`, guarded by `> 7`
-    #      [general/general.cbl:L720-L721]; the ordinary exit at L722 persists
-    #      NOTHING. This is where the General menu differs from the Sales and
-    #      Purchase ones, whose `load000.` performs `overrewrite` on BOTH arms
-    #      [sales/sales.cbl:L708-L712], [purchase/purchase.cbl:L701-L704]. Neither
-    #      `load08.` nor `load09.` adds a persist of its own - `load03` through
-    #      `load06` do, and none of those four serves an in-scope program. The
-    #      asymmetry is reproduced, not smoothed away (rule R-4).
+    #      THE PERSISTENCE IS ON THIS ARM ALONE WITHIN THIS PARAGRAPH, AND THAT IS
+    #      THE FROZEN SHAPE. `load00.` has exactly one transfer to `overrewrite`,
+    #      guarded by `> 7` [general/general.cbl:L720-L721]; the ordinary exit at
+    #      L722 persists NOTHING. This is where the General menu differs from the
+    #      Sales and Purchase ones, whose `load000.` performs `overrewrite` on BOTH
+    #      arms [sales/sales.cbl:L708-L712], [purchase/purchase.cbl:L701-L704].
+    #      Neither `load08.` nor `load09.` adds a persist of its own - `load03`
+    #      through `load06` do, and none of those four serves an in-scope program.
+    #      The asymmetry is reproduced, not smoothed away (rule R-4).
+    #      WHAT PERSISTS ON THE ORDINARY EXIT IS THE MENU QUIT, NOT THIS PARAGRAPH.
+    #      `main` performs `args.overrewrite` once when the run completes without a
+    #      serious code, reproducing [general/general.cbl:L595-L596] and the
+    #      paragraph it transfers to - a different statement of the frozen session,
+    #      not a `< 8` arm added to this one. The guard there is this same
+    #      predicate, so the two sites cannot both fire.
     #      REPRODUCED (rule R-4): the predicate is the threshold `> 7` the frozen
     #      source writes, evaluated through `args.is_serious_error`, so this route
     #      and the six others share one implementation of it.
@@ -563,9 +589,11 @@ def load08(linkage: args.GlLinkage, *, menu_state: args.MenuState) -> None:
         None. The cycle reports through `WS-Term-Code` inside
         `linkage.calling_data` and through nothing else, exactly as the frozen
         menu does - which is why `main` reads that field afterwards rather than a
-        return value. After the gate has fired the field holds
-        `args.GL_ABORT_TERM_CODE`; after a clean cycle it holds the zero the last
-        dispatch reset it to.
+        return value, both for the exit status and to decide whether the
+        quit-time `overrewrite` is still owed. After the gate has fired the field
+        holds `args.GL_ABORT_TERM_CODE`; after a clean cycle it holds the zero the
+        last dispatch reset it to; and above `args.SERIOUS_ERROR_THRESHOLD` it
+        means a phase reported seriously AND `load00` has already persisted.
 
     Raises:
         Exception: propagated unchanged from a phase. See `load00`.
@@ -650,19 +678,41 @@ def load08(linkage: args.GlLinkage, *, menu_state: args.MenuState) -> None:
     # 813  perform  load00.
     #      THE SORT. Its output ordering is a hard contract consumed by `gl072`
     #      [general/gl071.cbl:L172-L176].
-    #      ⛔ NO GATE FOLLOWS THIS DISPATCH. REPRODUCED (rule R-4): the frozen
-    #      source runs straight from L813 into L814 with no test of any kind
-    #      [general/general.cbl:L813-L814], and `gl071` never writes
-    #      `WS-Term-Code` at all - the string does not occur in
-    #      general/gl071.cbl. Adding a gate here "for symmetry" with L810 would
-    #      invent a stop the COBOL has not got.
-    load00(
+    #      ⛔ NO GATE OF `load08.`'s OWN FOLLOWS THIS DISPATCH. REPRODUCED
+    #      (rule R-4): the frozen source runs straight from L813 into L814 with no
+    #      test of any kind [general/general.cbl:L813-L814], and `gl071` never
+    #      writes `WS-Term-Code` at all - the string does not occur in
+    #      general/gl071.cbl. No `= 5` gate is added here "for symmetry" with L810,
+    #      because that would invent a stop the COBOL has not got.
+    disposition = load00(
         linkage,
         gl071_batch_sort,
         _GL071,
         menu_state=menu_state,
         work_files=work_files,
     )
+
+    #      ⭐ BUT THE DISPATCH PARAGRAPH'S OWN TRANSFER STILL APPLIES, AND IT IS
+    #      NOT A GATE OF THIS PARAGRAPH. `load00.` ends `if ws-term-code > 7 / go
+    #      to overrewrite` [general/general.cbl:L720-L721], and that transfer
+    #      leaves the dispatch paragraph for `overrewrite.`
+    #      [general/general.cbl:L656], falls through into `overclose.`
+    #      [general/general.cbl:L693] and ends the run unit at `goback`
+    #      [general/general.cbl:L694]. Control never returns to L814, so `gl072`
+    #      cannot run. The FIRST dispatch above honours that contract and this one
+    #      must honour it identically - which is what returning here does. The
+    #      persistence has already happened inside `load00`; nothing is repeated.
+    #
+    #      LATENT, AND IMPLEMENTED ANYWAY. `gl071` never assigns `WS-Term-Code`,
+    #      and L714 clears the field before the `CALL`, so the value read back can
+    #      only be the zero just written and this branch cannot be taken by this
+    #      callee. It is written because the frozen dispatch paragraph contains the
+    #      transfer, exactly as the `> 7` branch inside `load00` is written for
+    #      `gl071` although the same reasoning applies there - and because a
+    #      neighbour contract that holds for one dispatch and not for its sibling
+    #      is wrong even when nothing currently trips it.
+    if disposition is _Disposition.SERIOUS_ERROR:
+        return
 
     # 814  move     "gl072" to ws-called.
     # 815  go       to load00.
@@ -887,6 +937,59 @@ def main(argv: Sequence[str] | None = None) -> int:
     #  805  load08.
     load08(linkage, menu_state=menu_state)
 
+    #  595  if       menu-reply = "X"
+    #  596           go to pre-overrewrite.
+    #  634  pre-overrewrite.  ->  656  overrewrite.  ->  693 overclose. 694 goback.
+    #  ⭐ THE MENU-QUIT PERSISTENCE, AND PROCESS COMPLETION IS THE MENU QUIT.
+    #  This is the one statement of the frozen session that `load08.` itself does
+    #  not contain and that a headless one-shot process must still perform, because
+    #  the callees MUTATE the caller's `SYSTEM-REC` by reference -
+    #  `gl070_transaction_pre_process` writes `Date-Form` at its own L2013 and
+    #  L2064 and `gl072_transaction_update` at its L761, reproducing
+    #  `zz070-Convert-Date`'s write-back [general/gl070.cbl:L580-L581] - and
+    #  nothing else in this route writes those changes to the store.
+    #
+    #  WHY THIS IS THE FROZEN SHAPE AND NOT AN ADDITION. A frozen SESSION cannot
+    #  end any other way: `display-menu.` is a loop, the only exit is the quit key
+    #  [general/general.cbl:L595-L596], and that key reaches `overrewrite.` whether
+    #  or not a backup script is installed - `go to overrewrite`
+    #  [general/general.cbl:L636] when none is, `perform overrewrite`
+    #  [general/general.cbl:L649] when one is. So every operator who runs the
+    #  posting cycle and then leaves the menu persists the mutated records, exactly
+    #  once. A one-shot process runs ONE operation per session, so its ordinary
+    #  completion IS that session end, and performing the paragraph once here is
+    #  what makes the two runs comparable at all: `harness/run_cobol_scenario.sh`
+    #  drives the oracle through the same menu and leaves it with "X", so the
+    #  COBOL side of every scenario carries these writes (Agent Action Plan
+    #  section 0.8.5's empty ordering-normalised diff).
+    #
+    #  EXACTLY ONCE, AND THE GUARD IS WHAT MAKES IT SO. `load00.` transfers to
+    #  `overrewrite` on its own `> 7` arm [general/general.cbl:L720-L721], and
+    #  `load00` above has already performed the paragraph and returned
+    #  `SERIOUS_ERROR` on that arm, after which `load08` returns at once. So a term
+    #  code above 7 here means the persistence has ALREADY happened and the frozen
+    #  `goback` [general/general.cbl:L694] has already ended the run unit - there
+    #  is no second `overrewrite` to perform, and performing one would write the
+    #  same rows twice. Every other code, INCLUDING the abort code 5, reaches this
+    #  line unpersisted: the frozen menu answers a 5 with `go to display-menu`
+    #  [general/general.cbl:L810-L811] and persists later, at the quit, which is
+    #  here. The predicate is `args.is_serious_error`, the same implementation the
+    #  `> 7` arm uses, so the two cannot disagree about the band.
+    #
+    #  NOT REPRODUCED, and recorded as OMISSION 2 in the footer: the backup
+    #  spool-out half of `pre-overrewrite.` - the `string "nohup " ... Run-Backup`
+    #  assembly [general/general.cbl:L637-L648] and the `call "SYSTEM" using
+    #  Full-Backup-Script` [general/general.cbl:L650] - which Agent Action Plan
+    #  section 0.2.2 excludes as a spool-out path and rule R-1 excludes again. It
+    #  has no database effect; the persistence beside it has nothing but.
+    if not args.is_serious_error(linkage.calling_data.ws_term_code):
+        _LOG.info(
+            "persisting the system records once, as the menu does at its quit key "
+            "(general/general.cbl:L595-L596 -> L656-L672); ws-term-code %d",
+            linkage.calling_data.ws_term_code,
+        )
+        args.overrewrite(linkage.system_record, menu_state, linkage.file_defs)
+
     #  AMBIGUITY Q-CLI-EXITSTATUS: the COBOL disposition for term code 5 is
     #  "return to display-menu", which has no process-status analogue in a
     #  single-operation CLI - resolve against the compiled oracle; record in
@@ -1057,8 +1160,17 @@ if __name__ == "__main__":
 #      frozen source [purchase/purchase.cbl:L755-L758]. THE THREE FORMS STAY
 #      DIFFERENT. Harmonising them would be a behaviour change and therefore a
 #      failure.
-#   2. NO GATE AFTER `gl071` [general/general.cbl:L813-L814]. L813 runs straight
-#      into L814 with no test of any kind. None is added "for symmetry".
+#   2. NO GATE OF `load08.`'s OWN AFTER `gl071` [general/general.cbl:L813-L814].
+#      L813 runs straight into L814 with no `= 5` test of any kind, and none is
+#      added "for symmetry" with L810. What DOES still apply after that dispatch is
+#      the dispatch paragraph's own `if ws-term-code > 7 / go to overrewrite`
+#      [general/general.cbl:L720-L721], which leaves `load00.` for `overrewrite.`
+#      and ends the run unit at `goback` [general/general.cbl:L694] - so control
+#      never reaches L814 and `gl072` cannot run. `load08` honours that after ALL
+#      THREE dispatches, not just the first: the returned disposition is read after
+#      `gl071` as well. Latent, because `gl071` never assigns `WS-Term-Code` - the
+#      string does not occur in general/gl071.cbl - and implemented anyway, because
+#      the transfer belongs to the paragraph being reproduced.
 #   3. `move zero to ws-term-code` BEFORE EVERY CALL
 #      [general/general.cbl:L714] - per dispatch, not once per run, so no code is
 #      ever carried from one phase into the next.
@@ -1083,32 +1195,46 @@ if __name__ == "__main__":
 #      [general/general.cbl:L706-L709]. Screen output with no database effect is
 #      dropped (Agent Action Plan section 0.3.4); `main` replaces the selection
 #      with one command line.
-#   2. NO LONGER OMITTED - `overrewrite.` [general/general.cbl:L656] IS
-#      reproduced, by `args.overrewrite`, performed from the `> 7` arm of
-#      `load00` and from nowhere else. It persists three records - `System-Record`
-#      at File-Key-No 1, `Default-Record` at 2 and `WS-System-Record-4` at 4 - and
-#      the matching load is performed by `args.aa010_get_system_recs` through the
-#      binder before the first dispatch. What IS still omitted from that paragraph
-#      is its COBOL-FILE arm [general/general.cbl:L674-L691]: the migration has no
-#      ISAM store, so only the RDB arm has a counterpart. Recorded in
-#      `acas_posting/cli/args.py`, at `RDBMS_STORE_SELECTOR_DIGIT`.
-#      STILL OMITTED IN ITS ENTIRETY, BOTH HALVES: `pre-overrewrite.`
-#      [general/general.cbl:L634-L651]. Its backup `call "SYSTEM" using
-#      Full-Backup-Script` [general/general.cbl:L650] is excluded by rule R-1 and
-#      by Agent Action Plan section 0.2.2's spool-out exclusion. Its PERSISTENCE
-#      half - `go to overrewrite` at [general/general.cbl:L636] when no backup
-#      script is installed, `perform overrewrite` at [general/general.cbl:L649]
-#      when one is - is omitted because the paragraph is reached ONLY from the
-#      menu's quit key [general/general.cbl:L596], and a single-operation process
-#      has no menu to quit. So a frozen operator's mutated working-storage records
-#      reach the store when he quits, whereas here they reach it only through the
-#      `> 7` arm. The asymmetry is stated, not engineered around: relocating the
-#      quit-time rewrite to the end of this route would fire it after every single
-#      operation, which the frozen menu does not do for `load08.` - see the same
-#      omission and the ambiguity marker Q-CLI-OVERREWRITE-QUIT in
-#      `acas_posting/cli/gl_end_of_cycle.py`. `overclose.`
-#      [general/general.cbl:L693] and its `goback` [general/general.cbl:L694] are
-#      the return from `main`, not a statement of their own.
+#   2. NOT OMITTED AT ALL, AND THE SECOND HALF OF THIS ENTRY WAS REVISED -
+#      `overrewrite.` [general/general.cbl:L656] is reproduced by
+#      `args.overrewrite`, and it is now performed from TWO places, which is what
+#      the frozen session does:
+#        * from the `> 7` arm of `load00`, reproducing `go to overrewrite`
+#          [general/general.cbl:L720-L721]; and
+#        * ONCE from `main`, on ordinary completion, reproducing the quit-time
+#          transfer `if menu-reply = "X" / go to pre-overrewrite`
+#          [general/general.cbl:L595-L596] and the `go to overrewrite` /
+#          `perform overrewrite` inside that paragraph
+#          [general/general.cbl:L636], [general/general.cbl:L649].
+#      It persists three records - `System-Record` at File-Key-No 1,
+#      `Default-Record` at 2 and `WS-System-Record-4` at 4 - and the matching load
+#      is performed by `args.aa010_get_system_recs` through the binder before the
+#      first dispatch. The two sites are mutually exclusive: `main` guards on
+#      `args.is_serious_error`, so the arm that has already persisted does not
+#      persist again.
+#      WHY THE EARLIER READING - that the quit-time rewrite has "no counterpart in
+#      a single-operation process" - WAS WRONG, stated so it is not restored. A
+#      frozen SESSION cannot end any other way: `display-menu.` loops and the quit
+#      key is its only exit, so every operator who runs `load08.` and then leaves
+#      the menu persists the mutated records exactly once. The callees DO mutate
+#      them - `gl070` and `gl072` write `Date-Form` back through
+#      `zz070-Convert-Date` [general/gl070.cbl:L580-L581] - and
+#      `harness/run_cobol_scenario.sh` leaves the oracle's menu with "X", so the
+#      COBOL side of every scenario carries those writes. Skipping them here would
+#      make Agent Action Plan section 0.8.5's empty ordering-normalised diff
+#      unreachable. What is NOT relocated is anything conditional: one operation
+#      per process, one persist per process.
+#      STILL OMITTED, and only this half: the BACKUP SPOOL-OUT of
+#      `pre-overrewrite.` - the `string "nohup " ... Run-Backup` assembly
+#      [general/general.cbl:L637-L648] and `call "SYSTEM" using
+#      Full-Backup-Script` [general/general.cbl:L650] - excluded by rule R-1 and by
+#      Agent Action Plan section 0.2.2's spool-out exclusion. It has no database
+#      effect. Also still omitted from `overrewrite.` itself is its COBOL-FILE arm
+#      [general/general.cbl:L674-L691]: the migration has no ISAM store, so only
+#      the RDB arm has a counterpart - recorded in `acas_posting/cli/args.py`, at
+#      `RDBMS_STORE_SELECTOR_DIGIT`. `overclose.` [general/general.cbl:L693] and
+#      its `goback` [general/general.cbl:L694] are the return from `main`, not a
+#      statement of their own.
 #   3. `load12.` [general/general.cbl:L835-L855], which dispatches `gl100` then
 #      `gl105` and contains a SECOND `ws-term-code = 5` gate at
 #      [general/general.cbl:L844-L845] - whose target is `accept-loop`, NOT

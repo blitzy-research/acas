@@ -185,10 +185,17 @@ only effect was to hold a terminal. The screen literals GL084 to GL087 are not
 reproduced either - their EFFECT survives as the three parameters above, their
 DISPLAY does not. The menu's own `overrewrite` persistence of System-Record,
 Default-Record and WS-System-Record-4 [general/general.cbl:L656] IS reproduced -
-by `args.overrewrite`, performed from the `> 7` arm of `load00`, with the matching
-`aa010-Get-System-Recs.` load performed by the binder before the dispatch. Its
-COBOL-FILE arm [general/general.cbl:L674-L691] is not, because the migration has
-one store. The backup spool-out `call "SYSTEM" using Full-Backup-Script`
+by `args.overrewrite`, performed from BOTH places the frozen session reaches it:
+the `> 7` arm of `load00` [general/general.cbl:L720-L721], and the MENU QUIT
+[general/general.cbl:L595-L596], which `main` performs once on ordinary completion
+because a one-shot process runs one operation per session. The two are guarded to
+be mutually exclusive, so the paragraph runs exactly once per process. This route
+needs it: `gl080` mutates `Scycle`, `Current-Quarter` and `Date-Form` in the
+caller's record, and without the quit-time rewrite a successful period end would
+leave SYSTEM-REC at the prior cycle. The matching `aa010-Get-System-Recs.` load is
+performed by the binder before the dispatch. `overrewrite`'s COBOL-FILE arm
+[general/general.cbl:L674-L691] is not reproduced, because the migration has one
+store. The backup spool-out `call "SYSTEM" using Full-Backup-Script`
 [general/general.cbl:L650] remains excluded by Agent Action Plan section 0.2.2 and
 by rule R-1. The footer lists every omission.
 
@@ -996,9 +1003,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         archive_path_override=ns.archive_path_override,
     )
 
-    #  NO ORDINARY-EXIT PERSISTENCE, AND THAT IS THE FROZEN SHAPE - MEASURED, NOT
-    #  ASSUMED. `load09.` is two statements and reaches the dispatch block by `go
-    #  to load00` [general/general.cbl:L820-L821]; `load00.` has exactly ONE
+    #  NO `< 8` ARM IN THE DISPATCH BLOCK, AND THAT IS THE FROZEN SHAPE - MEASURED,
+    #  NOT ASSUMED. `load09.` is two statements and reaches the dispatch block by
+    #  `go to load00` [general/general.cbl:L820-L821]; `load00.` has exactly ONE
     #  transfer to `overrewrite`, guarded by `> 7`
     #  [general/general.cbl:L720-L721], and its ordinary exit falls through to
     #  `load00-exit.` and `go to display-menu` [general/general.cbl:L723-L725],
@@ -1012,14 +1019,55 @@ def main(argv: Sequence[str] | None = None) -> int:
     #  `load08.` nor `load09.` is among them. Sales and Purchase differ again,
     #  performing `overrewrite` on BOTH arms [sales/sales.cbl:L708-L712],
     #  [purchase/purchase.cbl:L701-L704], which is why the two SL and the two PL
-    #  routes DO persist on their ordinary exits and this one does not. Adding a
-    #  `< 8` arm here would make the migrated route write rows the frozen one
-    #  leaves alone (rules R-3 and R-4), so none is added. What the frozen system
-    #  does with the mutated records instead is persist them at MENU QUIT, through
-    #  `pre-overrewrite.` [general/general.cbl:L634-L636] reached from
-    #  [general/general.cbl:L596] - a screen-driven exit with no counterpart in a
-    #  single-operation process, recorded as an OMISSION in the footer rather than
-    #  relocated to the end of this route.
+    #  routes persist inside their dispatch wrappers and this one does not. No
+    #  `< 8` arm is added to `load00` (rules R-3 and R-4).
+    #
+    #  595  if       menu-reply = "X"
+    #  596           go to pre-overrewrite.
+    #  634  pre-overrewrite.  ->  656  overrewrite.  ->  693 overclose. 694 goback.
+    #  ⭐ THE MENU-QUIT PERSISTENCE, PERFORMED ONCE HERE BECAUSE PROCESS COMPLETION
+    #  IS THE MENU QUIT. What the frozen system does with the records `gl080`
+    #  mutated is persist them when the operator leaves the menu, and this route
+    #  needs that more than any other: `gl080` writes `Scycle`
+    #  (`programs/gl080_end_of_cycle.py:L1797-L1799`, reproducing
+    #  [general/gl080.cbl:L334]), `Current-Quarter` (L2244-L2254, reproducing
+    #  [general/gl080.cbl:L355-L360]) and `Date-Form` (L4679) into the CALLER's
+    #  `SYSTEM-REC` by reference. Without this statement a successful period end
+    #  updates GLLEDGER-REC, GLBATCH-REC and GLPOSTING-REC and leaves SYSTEM-REC at
+    #  the PRIOR cycle and quarter, so the next run would repeat the wrong period -
+    #  and question Q-21 in that module's footer would stay unanswered.
+    #
+    #  WHY IT IS THE FROZEN SHAPE AND NOT AN ADDITION. A frozen SESSION has exactly
+    #  one exit: `display-menu.` loops until the quit key
+    #  [general/general.cbl:L595-L596], and that key reaches `overrewrite.` on
+    #  either arm of `pre-overrewrite.` - `go to overrewrite`
+    #  [general/general.cbl:L636] with no backup script installed, `perform
+    #  overrewrite` [general/general.cbl:L649] with one. So an operator who runs
+    #  End Of Cycle and then leaves persists the mutated records exactly once. A
+    #  one-shot process runs ONE operation per session, so its ordinary completion
+    #  IS that session end. `harness/run_cobol_scenario.sh` drives the oracle
+    #  through the same menu and leaves it with "X", so the COBOL side of the
+    #  period-end scenario carries these writes; a Python side that skipped them
+    #  could not produce Agent Action Plan section 0.8.5's empty diff.
+    #
+    #  EXACTLY ONCE. `load00` above performs `args.overrewrite` on its `> 7` arm
+    #  and returns that code, so a serious error has ALREADY persisted and the
+    #  frozen `goback` [general/general.cbl:L694] has already ended the run unit;
+    #  the guard therefore skips the second one. Every other code reaches it
+    #  unpersisted. The predicate is `args.is_serious_error`, the same
+    #  implementation the `> 7` arm uses.
+    #
+    #  NOT REPRODUCED: the backup spool-out half of `pre-overrewrite.`
+    #  [general/general.cbl:L637-L650], which ends in `call "SYSTEM"` and is
+    #  excluded by Agent Action Plan section 0.2.2 and by rule R-1. Recorded in the
+    #  footer's OMISSIONS.
+    if not args.is_serious_error(term_code):
+        _LOG.info(
+            "persisting the system records once, as the menu does at its quit key "
+            "(general/general.cbl:L595-L596 -> L656-L672); ws-term-code %d",
+            term_code,
+        )
+        args.overrewrite(linkage.system_record, menu_state, linkage.file_defs)
     #
     #  AMBIGUITY Q-CLI-EXITSTATUS: which process exit status each band of the
     #  `pic 99` term-code domain should produce - resolve against the compiled
@@ -1208,26 +1256,29 @@ if __name__ == "__main__":  # pragma: no cover - module entry point
 #       arm of `load00`, and `overclose.` [general/general.cbl:L693] with its
 #       `goback` [general/general.cbl:L694] is the return from `main`. The
 #       migration has no ISAM store - see `args.RDBMS_STORE_SELECTOR_DIGIT`;
-#     * `pre-overrewrite.` [general/general.cbl:L634-L651] IN ITS ENTIRETY, both
-#       halves. Its backup spool-out `call "SYSTEM" using Full-Backup-Script`
-#       [general/general.cbl:L650] is excluded by Agent Action Plan section 0.2.2
-#       and by rule R-1. Its PERSISTENCE half - `go to overrewrite` at
-#       [general/general.cbl:L636] when no backup script is installed, and
-#       `perform overrewrite` at [general/general.cbl:L649] when one is - has no
-#       counterpart either, because the paragraph is reached only from the menu's
-#       own quit key [general/general.cbl:L596] and a single-operation process has
-#       no menu to quit. The consequence is stated rather than engineered around:
-#       in the frozen system a `gl080` run that mutates `Scycle`
-#       [general/gl080.cbl:L334], rotates the quarter
-#       [general/gl080.cbl:L355-L357] or rolls the year over
-#       [general/gl080.cbl:L360-L363] leaves those changes in WORKING-STORAGE
-#       until the operator quits, and they reach the store then; here the process
-#       ends at the `> 7` arm's rewrite or at no rewrite at all. Relocating the
-#       quit-time persistence to the end of this route would make it fire after
-#       every single operation, which is not what the frozen menu does - and it is
-#       what finding C-02 proposed and what the arbitration rejected. Arbitrate
-#       the resulting table state against the compiled oracle and record it in
-#       docs/migration/ambiguity-resolutions.md under Q-CLI-OVERREWRITE-QUIT;
+#     * ONLY THE BACKUP HALF of `pre-overrewrite.`
+#       [general/general.cbl:L634-L651]: the `string "nohup " ... Run-Backup`
+#       assembly [general/general.cbl:L637-L648] and `call "SYSTEM" using
+#       Full-Backup-Script` [general/general.cbl:L650], excluded by Agent Action
+#       Plan section 0.2.2 and by rule R-1. It has no database effect.
+#       ITS PERSISTENCE HALF IS NOW REPRODUCED, and the earlier reading here was
+#       wrong - stated so it is not restored. `go to overrewrite`
+#       [general/general.cbl:L636] when no backup script is installed and `perform
+#       overrewrite` [general/general.cbl:L649] when one is: EITHER WAY the
+#       paragraph reached from the quit key [general/general.cbl:L595-L596]
+#       persists, and the quit key is the ONLY exit `display-menu.` has. So a
+#       frozen operator who runs End Of Cycle and then leaves the menu ALWAYS
+#       persists the records `gl080` mutated - `Scycle` [general/gl080.cbl:L334],
+#       the rotated quarter [general/gl080.cbl:L355-L357], the rolled-over year
+#       [general/gl080.cbl:L360-L363] - and `harness/run_cobol_scenario.sh` leaves
+#       the oracle's menu with "X", so the COBOL side of the period-end scenario
+#       carries them. A one-shot process runs ONE operation per session, so its
+#       ordinary completion IS that session end: `main` performs the paragraph once
+#       there, guarded by `args.is_serious_error` so the `> 7` arm inside `load00`
+#       cannot persist twice. Without it a successful period end would update
+#       GLLEDGER-REC, GLBATCH-REC and GLPOSTING-REC and leave SYSTEM-REC at the
+#       prior cycle and quarter, and Agent Action Plan section 0.8.5's empty
+#       ordering-normalised diff would be unreachable;
 #     * the GL084-GL087 screen literals themselves
 #       [general/gl080.cbl:L252-L255]: their EFFECT is preserved as the three
 #       promoted parameters, their DISPLAY is not;
@@ -1253,6 +1304,20 @@ if __name__ == "__main__":  # pragma: no cover - module entry point
 #         never written anywhere in the five menus or the twelve in-scope
 #         programs, so there is no oracle observable and the identity map is the
 #         recorded decision. This route defers to it and re-encodes nothing.
+#     Q-CLI-OVERREWRITE-QUIT   [general/general.cbl:L595-L596],
+#         [general/general.cbl:L634-L649], [general/general.cbl:L656-L672]. NOW
+#         SETTLED, BY REPRODUCING THE PARAGRAPH RATHER THAN BY DEFERRING IT. The
+#         question was whether a single-operation process has any counterpart to
+#         the menu's quit-time rewrite. It does: the quit key is the ONLY exit
+#         `display-menu.` has, so a frozen session that ran End Of Cycle always
+#         persists on the way out - both arms of `pre-overrewrite.` reach
+#         `overrewrite.` - and the oracle harness leaves the menu with "X"
+#         accordingly. One operation per process therefore means one persist per
+#         process, performed at the end of `main` and guarded by
+#         `args.is_serious_error` so the `> 7` arm cannot persist twice. What
+#         remains for the oracle is the ordinary table comparison, not this
+#         question. Recorded in docs/migration/ambiguity-resolutions.md as settled;
+#         the same resolution is stated in `acas_posting/cli/gl_post_cycle.py`.
 #     Q-CLI-GL080-DEFAULTS     [general/gl080.cbl:L298-L302],
 #         [general/gl080.cbl:L546-L549], [general/gl080.cbl:L555-L557]. OPEN: the
 #         prompts have no textual defaults beyond their pre-filled accept values,

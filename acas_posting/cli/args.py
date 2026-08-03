@@ -284,7 +284,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Final, NamedTuple
 
 from acas_posting import clock, dates
@@ -314,6 +314,12 @@ from acas_posting.dal import facade
 #  optional strings and a bool, and `dal/connection.py` imports no handler, so
 #  plan section 0.4.3's bar on a `cli` module reaching `dal.acas*` is not touched.
 from acas_posting.dal.connection import ConnectionPolicyError, TransportSecurity
+
+#  `FS-Reply`'s declared value set [copybooks/wsfnctn.cob:L38], from the module
+#  that owns it, so that the ONE reply this layer tests - the key-1 read in
+#  `aa010_get_system_recs`, which all four frozen menus test - is written against
+#  the vocabulary rather than against a bare zero.
+from acas_posting.dal.status import FsReply
 
 #  The data-access layer's OWN redactor, imported rather than reimplemented so
 #  the CLI and the handlers cannot disagree about what a safe diagnostic is.
@@ -372,6 +378,11 @@ __all__: Final[tuple[str, ...]] = (
     "zz090_set_up_irs_system_data",
     "zz095_restore_irs_system_data",
     "eoj_persist_irs_system_data",
+    #  The disposition of the key-1 test every menu makes before it dispatches
+    #  [general/general.cbl:L412-L418]. Published so a caller driving the load
+    #  itself can name the condition, and so the process boundary's report has a
+    #  greppable class name.
+    "SystemRecordUnavailableError",
     # ---- argparse fragments, one per route shape --------------------------
     "add_calling_data_arguments",
     "add_gl_linkage_arguments",
@@ -942,6 +953,21 @@ class MenuState(NamedTuple):
             menu touches key 2 at all and their `overrewrite` rewrites keys 1 and
             4 only [sales/sales.cbl:L628-L641],
             [purchase/purchase.cbl:L621-L634]. Reproduced as the asymmetry it is.
+        handler_named_verbs: WHICH OF THE TWO FACADE VOCABULARIES THIS MENU DRIVES
+            `acas000` THROUGH, and a behavioural property rather than a naming
+            one. False for the General, Sales and Purchase menus, each of which
+            copies [copybooks/Proc-ACAS-FH-Calls.cob] and performs the
+            ENTITY-named `System-*` verbs [general/general.cbl:L411]; True for the
+            IRS menu, which copies [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob]
+            [irs/irs.cbl:L1035] and performs the HANDLER-named `acas000-*` verbs
+            [irs/irs.cbl:L499, L512, L514]. See
+            `_HANDLER_NAMED_SYSTEM_VERBS` for the three consequences and their
+            locators; the decisive one is that the handler-named open family
+            carries `acas000-Check-4-Errors` and can therefore end the menu
+            program outright, which the entity-named set cannot. It lives on the
+            menu state because the vocabulary belongs to the MENU PROGRAM: it is
+            fixed for a whole session, and every verb site is already handed this
+            block. Set by the three factories below and by nothing else.
 
     Note:
         `WS-Temp-System-Rec` [general/general.cbl:L359] has NO counterpart here,
@@ -961,6 +987,7 @@ class MenuState(NamedTuple):
     dal_common: AcasDalCommonData
     system_record_4: SystemRecord4 | None = None
     default_record: SysDefaultRecord | None = None
+    handler_named_verbs: bool = False
 
 
 class IrsSystemSnapshot(NamedTuple):
@@ -1742,7 +1769,19 @@ def _bind_system_record(
             it (M-06); call `rdbms_params.audit_deployment_contract` to be warned
             about those.
     """
-    system_record = _declared_system_record()
+    #  ⭐ THE SUPPLIED RECORD IS THE RECORD, AND REPLACING IT WOULD BREAK COBOL
+    #  LINKAGE. A COBOL `CALL ... USING` passes a group item BY REFERENCE: the
+    #  callee writes into the CALLER's storage, and the menu shell holds exactly
+    #  one `01 SYSTEM-REC` that its load fills, its `CALL` hands over and its
+    #  `overrewrite` writes back [general/general.cbl:L411, L715-L718, L662-L663].
+    #  Building a second record here and pinning that instead would silently
+    #  discard every accounting field the caller had already loaded or seeded, and
+    #  would leave the object the caller still holds - and `overrewrite` still
+    #  persists - unrelated to the one the callee received. So a supplied instance
+    #  is MUTATED IN PLACE and returned; only its absence builds one, which is what
+    #  a caller inspecting a linkage shape without a database gets (finding CLI-02).
+    if system_record is None:
+        system_record = _declared_system_record()
     _apply_cli_pins(system_record, ns, pinned, env=env)
     return system_record
 
@@ -1953,6 +1992,196 @@ def _apply_cli_pins(
     #  docs/migration/ambiguity-resolutions.md.
 
 
+class SystemRecordUnavailableError(RuntimeError):
+    """The key-1 read failed, so the menu never reaches a dispatch.
+
+    Raised by `aa010_get_system_recs`, and by nothing else. It reproduces the
+    DISPOSITION of the four frozen menus' key-1 test, not a validation added
+    here. Verbatim, from the General menu [general/general.cbl:L410-L418]::
+
+         410      move     1 to File-Key-No.
+         411      perform  System-Read-Indexed.        *> Read Cobol file params
+         412      if       fs-reply not = zero          *> should NOT happen as done in
+         413               perform System-close          *> open-system
+         414               move    "sys002" to ws-called
+         415               call    ws-called using ws-calling-data file-defs
+         416               perform System-open
+         417               go to aa010-Get-System-Recs
+         418      end-if.
+
+    ALL FOUR MENUS TEST THIS READ AND NONE OF THEM DISPATCHES UNTIL IT SUCCEEDS.
+    [general/general.cbl:L412-L418], [sales/sales.cbl:L361-L367],
+    [purchase/purchase.cbl:L355-L361] and [irs/irs.cbl:L513-L519] are the same
+    four statements in the same order, differing only in the verb vocabulary. The
+    transfer at L417 is a GO TO class 1 loop-back over an interactive recovery, so
+    in the frozen system the paragraph cannot be LEFT while the reply is non-zero:
+    either `sys002` creates the record and the loop succeeds, or the operator
+    never gets a menu at all.
+
+    WHY THE MIGRATION RAISES WHERE THE COBOL LOOPS. `common/sys002.cbl` is out of
+    scope by name (Agent Action Plan section 0.2.2) and is an interactive
+    record-creation dialog: it asks the operator for every parameter, and this
+    process has no operator. With the recovery unreproducible the loop can never
+    terminate successfully, so the only reachable frozen outcome is the one this
+    exception carries - NO posting program is called and nothing is written. The
+    frozen menu reaches the same end itself by a second route: when `sys002`
+    reports a serious code, `call-system-setup.` answers `stop run`
+    [general/general.cbl:L630-L631].
+
+    ⛔ WHAT MUST NOT HAPPEN INSTEAD, and why this is not a new validation
+    (rule R-3). Continuing past a failed key-1 read hands every callee a record at
+    its DECLARED DEFAULTS - accounting cycle zero, period zero, current quarter
+    zero, spaces in the control accounts and a posting-key allocator at zero - and
+    a posting cycle driven from zeroes posts differently. Reproducing the frozen
+    non-dispatch is therefore the faithful reading; fabricating a system row would
+    be the added behaviour.
+
+    NOTHING IS ROLLED BACK, deliberately. The failure arm performs the frozen
+    close [general/general.cbl:L413] and then stops. The load only reads, so
+    there is nothing to undo - and Agent Action Plan section 0.6.5 is explicit
+    that partial state is committed rather than rolled back in this system.
+
+    NO `return_code` ATTRIBUTE IS CARRIED, and that is a decision rather than an
+    omission: the process boundary `acas_posting.__main__.run_entry_point` then
+    reports `SERIOUS_ERROR_THRESHOLD + 1`, the smallest status the frozen menu
+    treats as serious [general/general.cbl:L720], which is also the band
+    [general/general.cbl:L630-L631] answers with `stop run`. Inventing a distinct
+    numeric code would publish an observable the compiled program has not got.
+
+    Attributes:
+        fs_reply: `FS-Reply` [copybooks/wsfnctn.cob:L38] AS THE KEY-1 READ LEFT
+            IT, captured before the failure arm's close could overwrite it. This
+            is the decisive status the frozen `if` tests, preserved rather than
+            lost.
+        we_error: `We-Error` [copybooks/wsfnctn.cob:L23] from the same read. The
+            two travel together because the handlers' own documentation ties them
+            together.
+
+    Note:
+        The two attributes are named exactly as
+        `acas_posting.dal.status.AcasFileHandlerError` names its own, because
+        `run_entry_point` reads them reflectively when it builds its one sanitised
+        record. They are small closed integer vocabularies and carry no row key,
+        no account and no credential, so reporting them cannot disclose anything.
+
+    Note:
+        NOT a subclass of `acas_posting.dal.status.AcasFileHandlerError`, and the
+        reason is behavioural. That exception's own docstring records that it
+        "belongs to one calling convention and not the other, and a General Ledger
+        caller that raised it would be adding behaviour" - it stands for the IRS
+        convention's `Open-Error-Continued` tail
+        [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L355-L364]. The key-1 test
+        reproduced here is the MENU's own statement in all four shells, so it
+        needs its own type. `acas_posting.dal.facade.FacadeGoback` is excluded for
+        the same reason.
+    """
+
+    def __init__(self, fs_reply: int, we_error: int) -> None:
+        """Record the reply pair the key-1 read left behind.
+
+        Args:
+            fs_reply: `FS-Reply` as the read left it, before any close.
+            we_error: `We-Error` from the same read.
+        """
+        self.fs_reply = int(fs_reply)
+        self.we_error = int(we_error)
+        super().__init__(
+            "the system parameter record could not be read under File-Key-No "
+            f"{SYSTEM_FILE_KEY_PARAMS}: FS-Reply={self.fs_reply} "
+            f"WE-Error={self.we_error}. No posting program is called, exactly as "
+            "the frozen menus dispatch nothing until this read succeeds "
+            "[general/general.cbl:L412-L418]; their recovery is the interactive "
+            "sys002, which is out of scope (Agent Action Plan section 0.2.2). "
+            "Seed SYSTEM-REC under key 1 before running the cycle."
+        )
+
+
+class _SystemVerbs(NamedTuple):
+    """The three `acas000` verbs the menu load issues, in ONE vocabulary.
+
+    Agent Action Plan section 0.3.3 gives the facade "One implementation, two
+    published name sets", and section 0.6.5 states that the difference between
+    them is behavioural rather than cosmetic: the handler-named open family
+    carries a per-handler error check that ends in `goback`, and the entity-named
+    one "has NO such paragraph at all - its callers test the reply inline". So the
+    load cannot pick a set arbitrarily; it picks the one its own menu uses, and
+    this triple is how that choice is expressed once rather than at three call
+    sites.
+
+    Attributes:
+        open_input: the open. `System-Open-Input`
+            [copybooks/Proc-ACAS-FH-Calls.cob:L197-L202] or `acas000-Open-Input`
+            [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L98-L102].
+        read_indexed: the read. `System-Read-Indexed`
+            [copybooks/Proc-ACAS-FH-Calls.cob:L217-L220] or
+            `acas000-Read-Indexed`
+            [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L114-L117].
+        close: the close. `System-Close`
+            [copybooks/Proc-ACAS-FH-Calls.cob:L211-L215] or `acas000-Close`
+            [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L104-L107].
+        paragraphs: the three COBOL paragraph names, for the log record and for
+            the traceability document. Data, never a decision.
+        copybook: the copybook the three come from, for the same two reasons.
+    """
+
+    open_input: Callable[[facade.FacadeContext], facade.StatusPair]
+    read_indexed: Callable[[facade.FacadeContext], facade.StatusPair]
+    close: Callable[[facade.FacadeContext], facade.StatusPair]
+    paragraphs: str
+    copybook: str
+
+
+#: The vocabulary the General, Sales and Purchase menus use. Each of the three
+#: copies [copybooks/Proc-ACAS-FH-Calls.cob] and drives the System entity by its
+#: ENTITY name - `perform System-Read-Indexed` [general/general.cbl:L411],
+#: [sales/sales.cbl:L360], [purchase/purchase.cbl:L354]. None of the twelve verbs
+#: in that copybook carries an error check, so a failing reply is left in
+#: `File-Access` for the caller to test, which is exactly what those three menus
+#: do inline at [general/general.cbl:L412].
+_ENTITY_NAMED_SYSTEM_VERBS: Final[_SystemVerbs] = _SystemVerbs(
+    facade.system_open_input,
+    facade.system_read_indexed,
+    facade.system_close,
+    "System-Open-Input / System-Read-Indexed / System-Close",
+    "copybooks/Proc-ACAS-FH-Calls.cob",
+)
+
+#: The vocabulary the IRS menu uses, and using it is not a naming preference.
+#: irs/irs.cbl copies [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob] instead
+#: [irs/irs.cbl:L1035] and drives the same handler by its HANDLER name -
+#: `perform acas000-open-Input` [irs/irs.cbl:L499], `perform
+#: acas000-Read-Indexed` [irs/irs.cbl:L512], `perform acas000-close`
+#: [irs/irs.cbl:L514]. Three consequences follow, all reproduced by the facade
+#: and none of them available from the entity-named set:
+#:
+#:   * the open family performs `acas000-Check-4-Errors`
+#:     [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L320-L325], which on a non-zero
+#:     reply closes the handler and transfers to `Open-Error-Continued`
+#:     [:L355-L364], whose `goback` the facade raises as `FacadeGoback`. Because
+#:     the copybook is textually included in irs/irs.cbl, that `goback` returns
+#:     from THE MENU PROGRAM, which is why `acas_posting/cli/irs_post.py` absorbs
+#:     it at its own boundary rather than treating it as a condition from
+#:     `irs030`;
+#:   * `acas000-Open-Input` performs the check BEFORE the dispatch rather than
+#:     after [:L98-L102] - alone among all 42 verb paragraphs - so it tests
+#:     whatever reply the PREVIOUS operation left and this open's own failure is
+#:     never checked. The facade reproduces that as written;
+#:   * the dispatch paragraph itself pins `File-Key-No` to 1
+#:     [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L22-L29], where the entity-named
+#:     one leaves the caller's key alone. Harmless here and impossible to trip
+#:     through the published factories: `irs_menu_state` carries neither a totals
+#:     record nor a defaults record, so keys 4 and 2 are never read on the one
+#:     route that selects this set. Documented rather than guarded - a guard would
+#:     be a validation the COBOL does not have (rule R-3).
+_HANDLER_NAMED_SYSTEM_VERBS: Final[_SystemVerbs] = _SystemVerbs(
+    facade.acas000_open_input,
+    facade.acas000_read_indexed,
+    facade.acas000_close,
+    "acas000-Open-Input / acas000-Read-Indexed / acas000-Close",
+    "copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob",
+)
+
+
 #  THE MENU SHELL'S OWN acas000 TRAFFIC
 #  Four functions, each named after the paragraph it reproduces, because rule R-5
 #  requires paragraph-to-function traceability and these are menu paragraphs:
@@ -1989,6 +2218,11 @@ def general_menu_state() -> MenuState:
     `records.test_data_flags`, and every `cli/*` entry point states that it names
     no record module - the record dataclasses are this module's business. Keeping
     the construction here keeps that true.
+
+    THE ENTITY-NAMED VOCABULARY, because general/general.cbl copies
+    [copybooks/Proc-ACAS-FH-Calls.cob] and performs `System-Read-Indexed`
+    [general/general.cbl:L411]. `handler_named_verbs` is therefore left at its
+    False default - see `MenuState` and `_ENTITY_NAMED_SYSTEM_VERBS`.
     """
     return MenuState(
         FileAccess(), AcasDalCommonData(), SystemRecord4(), SysDefaultRecord()
@@ -2009,6 +2243,11 @@ def slpl_menu_state() -> MenuState:
     it becomes `SlPlLinkage.system_record_4`, the third linkage argument
     [sales/sl060.cbl:L397] that the nine period-total writes mutate, and it is the
     same object `overrewrite` rewrites under key 4.
+
+    THE ENTITY-NAMED VOCABULARY, as the General menu's: both shells copy
+    [copybooks/Proc-ACAS-FH-Calls.cob] and perform `System-Read-Indexed`
+    [sales/sales.cbl:L360], [purchase/purchase.cbl:L354]. `handler_named_verbs`
+    stays False.
     """
     return MenuState(FileAccess(), AcasDalCommonData(), SystemRecord4())
 
@@ -2020,8 +2259,25 @@ def irs_menu_state() -> MenuState:
     `EOJ.` re-reads and rewrites key 1 and nothing else
     [irs/irs.cbl:L759-L774]. So neither a totals record nor a defaults record is
     carried, and `aa010_get_system_recs` reads neither.
+
+    ⭐ AND THE HANDLER-NAMED VOCABULARY, WHICH IS THIS FACTORY'S SECOND JOB.
+    irs/irs.cbl copies [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob]
+    [irs/irs.cbl:L1035], not the entity-named copybook the other three menus copy,
+    and drives the same handler through `acas000-open-Input`
+    [irs/irs.cbl:L499], `acas000-Read-Indexed` [irs/irs.cbl:L512] and
+    `acas000-close` [irs/irs.cbl:L514]. Agent Action Plan section 0.6.5 records
+    why that is not a naming preference: the handler-named open family carries a
+    per-handler error check that closes the file and returns from the program,
+    while the entity-named convention "has NO such paragraph at all", so "the
+    Python facade must therefore behave differently depending on which alias set
+    the caller used, which is a behavioral difference and not merely a naming
+    one". `handler_named_verbs=True` is what makes `aa010_get_system_recs` select
+    it, and it is what lets a startup failure reach the `FacadeGoback` boundary
+    `acas_posting/cli/irs_post.py` already holds open. The IRS menu's own
+    persistence, `eoj_persist_irs_system_data`, names those verbs directly because
+    it serves this one menu and no other.
     """
-    return MenuState(FileAccess(), AcasDalCommonData())
+    return MenuState(FileAccess(), AcasDalCommonData(), handler_named_verbs=True)
 
 
 def _force_rdbms_store(file_access: FileAccess) -> None:
@@ -2035,6 +2291,30 @@ def _force_rdbms_store(file_access: FileAccess) -> None:
     statuses = file_access.fa_rdbms_flat_statuses
     statuses.fa_file_system_used = RDBMS_STORE_SELECTOR_DIGIT
     statuses.fa_file_duplicates_in_use = RDBMS_STORE_SELECTOR_DIGIT
+
+
+def _system_verbs(state: MenuState) -> _SystemVerbs:
+    """Return the three `acas000` verbs THIS menu performs.
+
+    The choice is the menu program's own and is fixed for a whole session: three
+    shells copy [copybooks/Proc-ACAS-FH-Calls.cob] and perform the entity-named
+    `System-*` paragraphs, irs/irs.cbl copies
+    [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob] [irs/irs.cbl:L1035] and performs the
+    handler-named `acas000-*` ones. Reading it off `MenuState` rather than
+    branching at each call site is what keeps `aa010_get_system_recs` ONE
+    reproduction of ONE paragraph while still behaving as each shell behaves.
+
+    Args:
+        state: the menu's own WORKING-STORAGE, whose `handler_named_verbs` the
+            factory that built it set.
+
+    Returns:
+        `_HANDLER_NAMED_SYSTEM_VERBS` for the IRS menu, otherwise
+        `_ENTITY_NAMED_SYSTEM_VERBS`.
+    """
+    if state.handler_named_verbs:
+        return _HANDLER_NAMED_SYSTEM_VERBS
+    return _ENTITY_NAMED_SYSTEM_VERBS
 
 
 def _select_key(file_access: FileAccess, key: int) -> None:
@@ -2103,7 +2383,13 @@ def aa010_get_system_recs(
          407      move     System-Record to Default-Record.
          408      move     1 to File-Key-No.
          409      perform  System-Read-Indexed.        *> Read Cobol file params
-         ...
+         412      if       fs-reply not = zero          *> should NOT happen as
+         413               perform System-close          *>  done in open-system
+         414               move    "sys002" to ws-called
+         415               call    ws-called using ws-calling-data file-defs
+         416               perform System-open
+         417               go to aa010-Get-System-Recs
+         418      end-if.
          460      perform  System-Close.
 
     THE KEY ORDER IS 4, THEN 2, THEN 1, AND IT IS NOT ARBITRARY. Key 1 is read
@@ -2124,18 +2410,44 @@ def aa010_get_system_recs(
     four bridges reinterpret; here each key is given its own record and the
     handler writes straight into it. See `MenuState`'s note.
 
+    ⭐ THE KEY-1 REPLY IS TESTED, AND TESTED BEFORE THE CLOSE. All four menus
+    write the same four statements after the key-1 read -
+    [general/general.cbl:L412-L418], [sales/sales.cbl:L361-L367],
+    [purchase/purchase.cbl:L355-L361], [irs/irs.cbl:L513-L519] - and none of them
+    dispatches anything until that read succeeds. Two properties of the frozen
+    shape are load-bearing and both are reproduced:
+
+    * THE TEST PRECEDES THE CLOSE. `if fs-reply not = zero` is L412 and `perform
+      System-close` is L413, in that order. A close issued first would leave its
+      OWN reply in `File-Access` and the decisive one would be gone, so the read's
+      pair is captured off the returned `StatusPair` the moment the read returns
+      and the test is made on that.
+    * ONLY KEY 1 IS TESTED. The key-4 and key-2 reads above are NOT tested by any
+      menu, and no test is added to them (rule R-4). The asymmetry is the
+      specification: key 1 carries the accounting cycle, the period, the control
+      accounts and the allocator that every callee reads.
+
+    A non-zero reply raises `SystemRecordUnavailableError` after the frozen close,
+    which is where the frozen paragraph's own recovery - `sys002`, then a loop back
+    to the top - cannot be followed, because `common/sys002.cbl` is an interactive
+    record-creation dialog and out of scope by name (Agent Action Plan section
+    0.2.2). See that exception for the full argument, including why continuing with
+    a declared-default record would be the added behaviour rather than this.
+
     NOT REPRODUCED, and each for a stated reason:
 
     * `move zeros to File-System-Used File-Duplicates-In-Use` and `move "00" to
       FA-RDBMS-Flat-Statuses`. Both select the ISAM store, which the migration
       does not have - see `RDBMS_STORE_SELECTOR_DIGIT`. `"66"` is forced instead.
-    * The `sys002` recovery arms at [general/general.cbl:L391-L396] and
-      [general/general.cbl:L413-L419]. `common/sys002.cbl` is out of scope by
-      name (Agent Action Plan section 0.2.2), and it is an interactive
-      record-creation dialog: it asks the operator for every parameter. There is
-      nothing to call and nothing to reproduce, so a failing read is reported
-      through `File-Access` and left there, exactly as it is for every other
-      handler failure in the migrated cycle.
+    * The `sys002` CALL and the loop-back inside the two recovery arms at
+      [general/general.cbl:L391-L396] and [general/general.cbl:L414-L417] - but
+      NOT the arms' own guard and not the close. The guard on the key-1 read IS
+      reproduced, above; what has no counterpart is `call "sys002"` itself and the
+      `go to aa010-Get-System-Recs` that only makes sense after it. The open arm's
+      guard at [general/general.cbl:L391] is left untranslated because its whole
+      body is that unreproducible recovery and because a failed open makes the
+      key-1 read fail too, so the disposition is reached one statement later
+      either way.
     * The commented-out RDB cross-load at [general/general.cbl:L419-L459], which
       the maintainer disabled with "BY PASS THIS CODE AS THE FILE WILL ALWAYS BE
       CURRENT."
@@ -2161,53 +2473,125 @@ def aa010_get_system_recs(
     against the compiled oracle and record in
     docs/migration/ambiguity-resolutions.md.
 
+    ⭐ THE VERB VOCABULARY IS THE MENU'S, NOT THIS FUNCTION'S. Three of the four
+    shells drive `acas000` by its ENTITY name and the IRS shell drives it by its
+    HANDLER name, and Agent Action Plan section 0.6.5 records that the difference
+    is behavioural: the handler-named open family performs
+    `acas000-Check-4-Errors` and can end the menu program outright, while the
+    entity-named convention "has NO such paragraph at all". `state` therefore
+    decides here too - `MenuState.handler_named_verbs`, set by `irs_menu_state`
+    alone - and the two sets are `_ENTITY_NAMED_SYSTEM_VERBS` and
+    `_HANDLER_NAMED_SYSTEM_VERBS`, whose notes carry the three differences and
+    their locators. One implementation, two vocabularies, exactly as the facade
+    publishes them.
+
     Args:
         system_record: `SYSTEM-REC`, loaded by the key-1 read. Mutated in place,
             then re-pinned.
         state: the menu's own WORKING-STORAGE. `system_record_4` and
-            `default_record` decide which of keys 4 and 2 are read.
+            `default_record` decide which of keys 4 and 2 are read, and
+            `handler_named_verbs` decides which facade vocabulary the three verbs
+            come from.
         file_defs: `01 File-Defs.`, the fourth operand of every dispatch.
         ns: the parsed namespace, for the re-application of the pins.
         pinned: the pinned pair from `resolve_clock`.
         env: the mapping the six connection parameters are resolved from.
 
     Raises:
-        acas_posting.dal.facade.FacadeGoback: never from this entity - the
-            entity-named `System-*` verbs carry no error check
-            [copybooks/Proc-ACAS-FH-Calls.cob:L190-L230], unlike their
-            handler-named counterparts. Named here only so that a reader does not
-            have to check.
+        SystemRecordUnavailableError: the key-1 read left a non-zero `FS-Reply`.
+            The frozen menus answer that by running the interactive `sys002` and
+            looping until the read succeeds, so no dispatch follows a failure;
+            with `sys002` out of scope the only reachable frozen outcome is that
+            non-dispatch. Raised AFTER the frozen close
+            [general/general.cbl:L413], carrying the reply pair the read left.
+        acas_posting.dal.facade.FacadeGoback: on the IRS route only, and from the
+            OPEN alone. `acas000-Open-Input` performs `acas000-Check-4-Errors`
+            [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L98-L102], which on a
+            non-zero reply reaches `Open-Error-Continued` and its `goback`
+            [:L355-L364]; because the copybook is textually included in
+            irs/irs.cbl, that `goback` returns from THE MENU PROGRAM, and
+            `acas_posting/cli/irs_post.py` absorbs it at that boundary. NEVER
+            raised for the General, Sales or Purchase menus: their entity-named
+            `System-*` verbs carry no error check
+            [copybooks/Proc-ACAS-FH-Calls.cob:L190-L230].
         rdbms_params.RdbmsParamError: from the re-application of the pins.
     """
+    #       The menu's own vocabulary, chosen once for all three verbs below.
+    verbs = _system_verbs(state)
+
     #  385  Open-System.  /  494  aa005-Open-System.
     #       `perform System-Open-Input` with key 1 - "as Input as I/o may create"
     #       [irs/irs.cbl:L499]. The key is set before the open because `acas000`
     #       dispatches the OPEN on it too.
     _force_rdbms_store(state.file_access)
     _select_key(state.file_access, SYSTEM_FILE_KEY_PARAMS)
-    facade.system_open_input(_system_context(system_record, state, file_defs))
+    verbs.open_input(_system_context(system_record, state, file_defs))
 
     #  403  perform  System-Read-Indexed.        *> Read Cobol file sys totals
+    #       NOT TESTED, in any menu. Only key 1 is [general/general.cbl:L412].
     if state.system_record_4 is not None:
         _select_key(state.file_access, SYSTEM_FILE_KEY_TOTALS)
-        facade.system_read_indexed(
-            _system_context(state.system_record_4, state, file_defs)
-        )
+        verbs.read_indexed(_system_context(state.system_record_4, state, file_defs))
 
     #  406  perform  System-Read-Indexed.        *> Read Cobol file defaults
+    #       NOT TESTED either, and the General menu is the only one that reads it.
     if state.default_record is not None:
         _select_key(state.file_access, SYSTEM_FILE_KEY_DEFAULTS)
-        facade.system_read_indexed(
-            _system_context(state.default_record, state, file_defs)
-        )
+        verbs.read_indexed(_system_context(state.default_record, state, file_defs))
 
     #  409  perform  System-Read-Indexed.        *> Read Cobol file params
-    #       LAST, as the frozen paragraph reads it.
+    #       LAST, as the frozen paragraph reads it. THE PAIR IS CAPTURED FROM THE
+    #       RETURN VALUE, because the close below - either the failure arm's at
+    #       L413 or the success path's at L460 - overwrites `File-Access` with its
+    #       own reply, and the reply the frozen `if` tests is THIS one.
     _select_key(state.file_access, SYSTEM_FILE_KEY_PARAMS)
-    facade.system_read_indexed(_system_context(system_record, state, file_defs))
+    key_1_status = verbs.read_indexed(
+        _system_context(system_record, state, file_defs)
+    )
+
+    #  412  if       fs-reply not = zero          *> should NOT happen as done in
+    #  413           perform System-close          *> open-system
+    #  414           move    "sys002" to ws-called
+    #  415           call    ws-called using ws-calling-data file-defs
+    #  416           perform System-open
+    #  417           go to aa010-Get-System-Recs
+    #  418  end-if.
+    #       ⭐ THE GATE. Present in all four shells and identical in all four
+    #       [general/general.cbl:L412-L418], [sales/sales.cbl:L361-L367],
+    #       [purchase/purchase.cbl:L355-L361], [irs/irs.cbl:L513-L519]. L413 IS
+    #       reproduced; L414-L417 cannot be, because `common/sys002.cbl` is an
+    #       interactive record-creation dialog and out of scope by name (Agent
+    #       Action Plan section 0.2.2), and the loop-back at L417 is meaningful
+    #       only after it. What survives is the frozen DISPOSITION: the paragraph
+    #       is never left with a bad reply, so nothing is dispatched and nothing is
+    #       written. See `SystemRecordUnavailableError`.
+    if key_1_status.fs_reply != FsReply.SUCCESS:
+        #  A diagnostic, at ERROR because the run stops here. The frozen paragraph
+        #  displays nothing at this point - `sys002` puts up its own screens - so
+        #  this record replaces a program the migration does not call rather than a
+        #  display it dropped, and it names the two locators a reader needs.
+        _LOG.error(
+            "the system parameter record could not be read: File-Key-No %d, "
+            "FS-Reply %d, WE-Error %d, through %s [%s]. The frozen menus recover "
+            "by calling the interactive sys002 and re-reading "
+            "[general/general.cbl:L412-L418]; sys002 is out of scope (Agent "
+            "Action Plan section 0.2.2), so no posting program is called. Seed "
+            "SYSTEM-REC under key %d.",
+            SYSTEM_FILE_KEY_PARAMS,
+            key_1_status.fs_reply,
+            key_1_status.we_error,
+            verbs.paragraphs,
+            verbs.copybook,
+            SYSTEM_FILE_KEY_PARAMS,
+        )
+        #  413  perform System-close.
+        verbs.close(_system_context(system_record, state, file_defs))
+        raise SystemRecordUnavailableError(
+            key_1_status.fs_reply, key_1_status.we_error
+        )
 
     #  460  perform  System-Close.
-    facade.system_close(_system_context(system_record, state, file_defs))
+    verbs.close(_system_context(system_record, state, file_defs))
 
     #  The pins, re-applied over the loaded row. See Q-CLI-SYSREC-PINS in
     #  `_bind_system_record` and the field-by-field reasons in `_apply_cli_pins`.
@@ -2774,6 +3158,11 @@ def bind_gl_linkage(
             because the alternative is an ambient one (rule R-6).
         rdbms_params.RdbmsParamError: the deployment contract is absent - not one
             of the six variables is set. See `_bind_system_record`.
+        SystemRecordUnavailableError: the key-1 read failed inside
+            `aa010_get_system_recs`, so this binder returns nothing and no phase
+            is dispatched - which is what the frozen menu does
+            [general/general.cbl:L412-L418]. Only when a `menu_state` was
+            supplied, since only then is anything read.
 
     Note:
         The returned `system_record` carries the connection parameters the
@@ -2784,7 +3173,15 @@ def bind_gl_linkage(
     """
     pinned = resolve_clock(ns.run_date)
     file_defs = FileDefs()
-    system_record = _bind_system_record(ns, pinned, env=env)
+
+    #  THE CALLER'S OWN RECORD, CARRIED THROUGH BY REFERENCE. `_bind_system_record`
+    #  mutates and returns the instance it is handed and builds one only when
+    #  handed None, so a caller that has already loaded or seeded `SYSTEM-REC` gets
+    #  that object in the linkage - which is what a COBOL menu's single
+    #  `01 SYSTEM-REC` is. See `_bind_system_record`.
+    system_record = _bind_system_record(
+        ns, pinned, env=env, system_record=system_record
+    )
 
     #  [general/general.cbl:L385-L419] `Open-System.` then
     #  `aa010-Get-System-Recs.` - the menu loads its state BEFORE it fills
@@ -2833,8 +3230,12 @@ def bind_slpl_linkage(
             `aa010_get_system_recs`, which both shells read under file-key 4
             immediately before it - `move 4 to File-Key-No. perform
             System-Read-Indexed. move System-Record to WS-System-Record-4.`
-            [sales/sales.cbl:L355-L357], [purchase/purchase.cbl:L350-L352]. `None`
-            builds one at its declared defaults.
+            [sales/sales.cbl:L355-L357], [purchase/purchase.cbl:L350-L352].
+            Carried into the linkage as the SAME object, because the nine
+            period-total writes mutate it by reference. `None` falls back to
+            `menu_state.system_record_4` - the menu's own record, which is what
+            every route relies on - and then, when there is no menu state either,
+            to a declared default.
 
     Returns:
         The five arguments in COBOL parameter order
@@ -2846,6 +3247,7 @@ def bind_slpl_linkage(
     Raises:
         AttributeError: as `bind_gl_linkage`.
         rdbms_params.RdbmsParamError: as `bind_gl_linkage`.
+        SystemRecordUnavailableError: as `bind_gl_linkage`.
 
     Note:
         As `bind_gl_linkage` - the connection parameters come from the
@@ -2855,7 +3257,12 @@ def bind_slpl_linkage(
     pinned = resolve_clock(ns.run_date)
     pinned_state = menu_state
     file_defs = FileDefs()
-    system_record = _bind_system_record(ns, pinned, env=env)
+
+    #  THE CALLER'S OWN RECORD, CARRIED THROUGH BY REFERENCE - see
+    #  `_bind_system_record` and `bind_gl_linkage`.
+    system_record = _bind_system_record(
+        ns, pinned, env=env, system_record=system_record
+    )
 
     #  THE TOTALS RECORD MUST BE THE MENU'S OWN OBJECT, not a second one. The
     #  nine period-total writes mutate the record passed as the THIRD linkage
@@ -2863,11 +3270,22 @@ def bind_slpl_linkage(
     #  `WS-System-Record-4` - the SAME `01` item, because a COBOL menu has only
     #  one. Handing the linkage a fresh `SystemRecord4` while the persist wrote
     #  `menu_state.system_record_4` would silently discard every period total.
-    system_record_4 = (
-        SystemRecord4()
-        if pinned_state is None or pinned_state.system_record_4 is None
-        else pinned_state.system_record_4
-    )
+    #
+    #  AN EXPLICIT ARGUMENT WINS, AND IT IS FIRST IN THE ORDER FOR THE SAME REASON
+    #  THE SYSTEM RECORD IS: it is the caller's `01` item, passed by reference, and
+    #  replacing it would drop whatever the caller had seeded into it. The order is
+    #  therefore explicit argument, then the menu's own record, then a declared
+    #  default. A caller supplying BOTH should supply the SAME object - the linkage
+    #  carries what it passed here and `overrewrite` persists
+    #  `menu_state.system_record_4`, so two different instances would split the
+    #  period totals from the row that gets written, exactly as passing two
+    #  different `01` items would in COBOL if a menu had two.
+    if system_record_4 is None:
+        system_record_4 = (
+            SystemRecord4()
+            if pinned_state is None or pinned_state.system_record_4 is None
+            else pinned_state.system_record_4
+        )
 
     #  [sales/sales.cbl:L338-L360], [purchase/purchase.cbl:L333-L354] - keys 4
     #  and 1 only. Neither menu reads key 2.
@@ -2950,6 +3368,15 @@ def bind_irs_linkage(
     Raises:
         AttributeError: as `bind_gl_linkage`.
         rdbms_params.RdbmsParamError: as `bind_gl_linkage`.
+        SystemRecordUnavailableError: as `bind_gl_linkage`, and reached through the
+            HANDLER-named vocabulary on this route [irs/irs.cbl:L513-L519].
+        acas_posting.dal.facade.FacadeGoback: from the startup OPEN, which on this
+            route performs `acas000-Check-4-Errors`
+            [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L98-L102] and can therefore
+            reach `Open-Error-Continued` and its `goback` [:L355-L364]. That
+            `goback` returns from the MENU PROGRAM, and
+            `acas_posting/cli/irs_post.py` absorbs it at that boundary - see
+            `irs_menu_state`.
 
     Note:
         As `bind_gl_linkage` - the connection parameters come from the
@@ -3631,6 +4058,11 @@ def declare_connection_policy(
 #: return code of the parameter loader the whole loader family calls
 #: [common/acas-get-params.cbl:L37-L42]. `ConnectionPolicyError` covers a
 #: transport or credential declaration the data-access layer refuses.
+#: `SystemRecordUnavailableError` covers the one condition the frozen menus
+#: themselves refuse to dispatch past - a key-1 read that did not succeed
+#: [general/general.cbl:L412-L418] - and belongs here because it is a state of the
+#: SEEDED DATABASE rather than a defect in this code: the run stops having written
+#: nothing, and the operator's remedy is to seed SYSTEM-REC.
 #:
 #: Deliberately NOT including `Exception`: a failure inside the cycle is a defect
 #: and must keep its traceback. Deliberately NOT including `SystemExit` either -
@@ -3639,6 +4071,7 @@ def declare_connection_policy(
 EXPECTED_BOUNDARY_ERRORS: Final[tuple[type[Exception], ...]] = (
     ValueError,
     ConnectionPolicyError,
+    SystemRecordUnavailableError,
 )
 
 
@@ -4133,6 +4566,63 @@ def require_stated(
 #   Each defaults to None, which keeps the declared-default behaviour, so no
 #   existing caller changes meaning and the arithmetic tier still needs no
 #   database.
+#   A SUPPLIED INSTANCE IS THE INSTANCE (finding F4 of the B2 review). COBOL
+#   passes a group item BY REFERENCE, and a menu shell holds exactly ONE
+#   `01 SYSTEM-REC` that its load fills [general/general.cbl:L411], its `CALL`
+#   hands over [general/general.cbl:L715-L718] and its `overrewrite` writes back
+#   [general/general.cbl:L662-L663]. So `_bind_system_record` mutates and returns
+#   the record it is handed and builds one only when handed None, and both public
+#   binders forward the argument rather than shadowing it. `bind_slpl_linkage`
+#   resolves `SYSTOT-REC` in the order explicit argument, then
+#   `menu_state.system_record_4`, then a declared default - the menu's own record
+#   being what the nine period-total writes mutate and what `overrewrite`
+#   rewrites under key 4. `bind_irs_linkage` still builds both of its records, as
+#   its own docstring states and as [irs/irs.cbl:L934-L968] does.
+#
+# THE KEY-1 GATE  ->  THE ONE REPLY EVERY MENU TESTS  (finding F2 of the B2 review)
+#   aa010_get_system_recs reproduces `if fs-reply not = zero` and the `perform
+#   System-close` beside it, in that order, and captures the reply from the read's
+#   own return value so the close cannot overwrite the value the test needs:
+#     general/general.cbl:L412-L413    entity-named, keys 4-2-1
+#     sales/sales.cbl:L361-L362        entity-named, keys 4-1
+#     purchase/purchase.cbl:L355-L356  entity-named, keys 4-1
+#     irs/irs.cbl:L513-L514            handler-named, key 1 only
+#   NOT reproduced: `call "sys002"` and the `go to aa010-Get-System-Recs` after it
+#   [general/general.cbl:L414-L417] - an interactive record-creation dialog, out of
+#   scope by name (Agent Action Plan section 0.2.2), so the loop it heads cannot be
+#   entered. What IS reproduced is the frozen DISPOSITION: the paragraph is never
+#   left with a bad reply, so nothing is dispatched and nothing is written.
+#   `SystemRecordUnavailableError` carries it, and the frozen menu reaches the same
+#   end by its own second route when `sys002` reports a serious code -
+#   `stop run` [general/general.cbl:L630-L631]. Keys 4 and 2 are NOT tested,
+#   because no menu tests them (rule R-4).
+#
+# THE TWO VERB VOCABULARIES  ->  ONE LOAD  (finding F3 of the B2 review)
+#   Agent Action Plan section 0.3.3 gives the facade both name sets and section
+#   0.6.5 records that the difference is behavioural, so the load selects per menu
+#   through `MenuState.handler_named_verbs`:
+#     _ENTITY_NAMED_SYSTEM_VERBS   copybooks/Proc-ACAS-FH-Calls.cob
+#         System-Open-Input   L197-L202   general/general.cbl:L390
+#         System-Read-Indexed L217-L220   general/general.cbl:L403, L407, L411
+#         System-Close        L211-L215   general/general.cbl:L413, L460
+#         No verb in that copybook carries an error check; its callers test the
+#         reply inline, which is what the gate above does.
+#     _HANDLER_NAMED_SYSTEM_VERBS  copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob
+#         acas000-Open-Input   L98-L102   irs/irs.cbl:L499
+#         acas000-Read-Indexed L114-L117  irs/irs.cbl:L512
+#         acas000-Close        L104-L107  irs/irs.cbl:L514
+#         The open family performs acas000-Check-4-Errors L320-L325, reaching
+#         Open-Error-Continued L355-L364 and its `goback`, which the facade raises
+#         as FacadeGoback and acas_posting/cli/irs_post.py absorbs at the menu
+#         program's boundary. acas000-Open-Input performs that check BEFORE the
+#         dispatch - alone among all 42 verb paragraphs - and the facade reproduces
+#         the ordering rather than straightening it. The dispatch paragraph also
+#         pins File-Key-No to 1 [:L22-L29]; harmless here because the one menu that
+#         selects this set reads key 1 alone.
+#   `eoj_persist_irs_system_data` names the handler-named verbs directly rather
+#   than through the selector, because it reproduces one paragraph of one menu -
+#   `EOJ.` [irs/irs.cbl:L755-L775] - and `overrewrite` names the entity-named ones
+#   for the same reason.
 #
 # AMBIGUITIES RAISED BY THIS MODULE  (rule R-6)  -  three, each marked in place
 # at the code it governs. TWO ARE NOW SETTLED, and each is settled at its own
@@ -4217,7 +4707,11 @@ def require_stated(
 #        `88 Date-Valid-Formats` gives 1, 2, 3. The four acas000 paragraphs this
 #        module reproduces DO reach SQL, through `dal.facade` and only through
 #        the verbs the frozen paragraphs perform; no statement is issued that a
-#        menu paragraph does not issue, and no verb is added.
+#        menu paragraph does not issue, and no verb is added. The ONE reply this
+#        module tests is the one all four menus test at
+#        [general/general.cbl:L412] and its three siblings, so it is a
+#        transcription and not an added check - and the alternative, continuing
+#        with a declared-default `SYSTEM-REC`, would be the added behaviour.
 #   R-4  reproductions, each carrying its locator at the site: WS-CD-Args
 #        defaulting to spaces because no menu assigns it
 #        (copybooks/wscall.cob:L14); WS-Term-Code cleared before every dispatch
