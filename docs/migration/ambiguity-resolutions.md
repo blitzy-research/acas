@@ -546,9 +546,10 @@ reading can be shown, rather than in a column that cannot hold one.
 **§13** carries the deferrals handed up from the arithmetic tier: **six** entries of its own, mostly under
 mnemonic identifiers, plus a companion answer key that a run supplies, plus **three** questions cited by
 scope because the semantics layer already owns them. **§14** catalogues every remaining `Q-` identifier the
-repository cites — **91** distinct identifiers are cited across the checkout, and **every one of them
+repository cites — **82** distinct identifiers are cited across the migration trees, and **every one of them
 resolves to an entry or a catalogue row in this file**, so no citation anywhere dangles (§17 states that as a
-counted property). **§15** tabulates the identifier collisions between the three coexisting registers.
+counted property, with the census scope defined so the figure is reproducible). **§15** tabulates the
+identifier collisions between the three coexisting registers.
 **§16** records three scope declinations that are decisions rather than ambiguities, and **§17** is a counted
 self-audit of this file.
 
@@ -1609,9 +1610,15 @@ form because the experiments share a shape.
 
 Most carry a **mnemonic** identifier rather than a number. That is deliberate and not a lapse in the
 numbering: they were opened by the modules and tests that hit them, an id that names the question survives
-being moved between files better than an ordinal does, and appending a mnemonic disturbs nothing. Every
-identifier below is one the repository already cites — none has been coined here for tidiness. Where a
+being moved between files better than an ordinal does, and appending a mnemonic disturbs nothing. Where a
 question is owned by another register (§5), the owner is named rather than the id re-issued.
+
+⚠️ **One name below is coined, and it is declared rather than passed off.** Every identifier here is one the
+repository already cites, with a single exception: `Q-GL080-DIVIDE-BY-ZERO`. The zero-divisor question it
+names is **not** new — the arithmetic tier files it as `Q-7` — but §12's `Q-7` is externally mandated to a
+different question, so the number cannot be reused here and a mnemonic stands in for it. That is a **coined
+name for an existing question**, tabulated as a collision in §15 and counted in §17. Nothing else in this
+section, and nothing anywhere else in this file, introduces a question the project did not already have.
 
 <a id="q-sort-tie-order"></a>
 
@@ -1713,6 +1720,30 @@ that precedes it does not protect it. `[general/gl080.cbl:L324-L326]`:
 `scycle < period` is **false for any non-negative `scycle` when `period` is zero**, so a zero divisor
 reaches the divide. That is **A-NEW-6**, and `[general/gl080.cbl:L329]` — `multiply a by period giving y.` —
 then consumes whatever the divide produced.
+
+⭐ **The mnemonic is an alias, not a new question.** The shared register already numbers this question **`Q-7`**:
+`tests/arithmetic/test_gl080_cycle_divide_rounded.py` lists it among *"THE AMBIGUITY REGISTER IDS CITED HERE,
+none of them invented by this file"* as *"`Q-7` the zero divisor"*, and
+`tests/arithmetic/test_compute_truncate_unrounded.py` cites the same number for the same subject. This register
+cannot use that number, because §12's `Q-7` is externally mandated to the menu shells' exit-path rewrite — so
+the mnemonic stands in for a number already taken, exactly as `Q-8` and `Q-25` stand in for one another
+(§15). **This register coins no question here; it files an existing one under a name it can use.** The
+collision is tabulated in §15 and the arithmetic tier's reading is the one to follow when reading that tier's
+code.
+
+⭐ **A third-party measurement exists, and this register does not adopt it.** The arithmetic tier reports the
+question **answered**: `tests/arithmetic/test_gl080_cycle_divide_rounded.py` records *"MEASURED: GnuCOBOL 3.2
+raises the SIZE ERROR condition, performs NO STORE, and the program CONTINUES with the receiving field
+unchanged"*, carried on `acas_posting.cobol.arithmetic.SizeErrorNoStore`, and
+`tests/arithmetic/test_compute_truncate_unrounded.py` adds that *"the resolution overturned the provisional
+answer"*. Of the three candidate answers in **(a)**, that selects *receiver left untouched* and rejects both
+*abort* and *zero*. It is recorded here **attributed and unpromoted**, for the same three reasons this
+register does not promote `Q-OTM5-NARROW` (§14.4): the measurement belongs to the tier that took it and its
+provenance must stay visible; **this register observed no run**, so adopting it would breach the honesty
+mandate of §2 and R-6 alike; and §10.1 records that the oracle cannot presently be built at all, so no run is
+available to this register to confirm it against. The status below therefore stays `PENDING`, and if the
+oracle run confirms the arithmetic tier's measurement then this entry closes by citing it rather than by
+restating it.
 
 **(c) Oracle experiment.** Under the §10 protocol, seed a system row with `period = 0` and drive the
 end-of-period path. ⚠️ Note the §16 declination: **no mandated scenario drives `gl080`**, so this experiment
@@ -2097,7 +2128,8 @@ qualified form — `Q-9 (cobol/move)` — is used.
 | `Q-5` | the unexplained move | its **value** half is `Q-A17-POSTINGS-EFFECT` (§14.4), which is the identifier **A-17** carries |
 | `Q-9` | `HV-POST-RRN` declared and fetched but never loaded | ⚠️ **the sharpest collision.** `acas_posting/cobol/move.py` and `tests/arithmetic/test_move_truncation.py` publish a `Q-9` meaning *`MOVE SPACE` into a numeric receiver*; `gl051_batch_control_check.py` publishes a local `Q-9` meaning *A-15's record-length contradiction*, which is **this register's `Q-4`**; and `sl060_invoice_posting.py` publishes a third. Resolved by scoping only — see §13's handed-down table for the `cobol/move` reading |
 | `Q-8` | `Post-Date (7:2)`: year or century | **the same question** as `Q-25` (§14.1), which `tests/arithmetic/test_irs_date_component_derivation.py` declares *"OWNED HERE"*. The two are **aliases**, not rivals: `Q-8` is the register entry and `Q-25` is the owning test's identifier for the same subject, with the same split — Sales closed by construction, other callers open. Both are kept so that neither a document citation nor a test citation dangles |
-| `Q-6`, `Q-7` | the `sl830` asymmetry; the menu-shell exit-path rewrite | `acas_posting/programs/sl060_invoice_posting.py` keeps a local `Q-6`; `acas_posting/cli/sl_cash_post.py` records that its program module carries the ok-to-post question as *its own* `Q-6`. `Q-7` has no competing reading, but `Q-CLI-OVERREWRITE` and `Q-CLI-OVERREWRITE-SECOND-LEG` (§14.2) are its neighbours at the CLI boundary |
+| `Q-6` | the `sl830` asymmetry | `acas_posting/programs/sl060_invoice_posting.py` keeps a local `Q-6`; `acas_posting/cli/sl_cash_post.py` records that its program module carries the ok-to-post question as *its own* `Q-6` |
+| `Q-7` | the menu-shell exit-path rewrite | ⚠️ **the collision this register could not absorb.** `tests/arithmetic/test_gl080_cycle_divide_rounded.py` and `tests/arithmetic/test_compute_truncate_unrounded.py` both publish a `Q-7` meaning *the zero divisor*, carried on `acas_posting.cobol.arithmetic.SizeErrorNoStore`. §12's `Q-7` is externally mandated to the menu-shell rewrite and the arithmetic tier's citations are equally fixed, so **neither could yield the number**: the zero-divisor question is filed in §13 under the mnemonic `Q-GL080-DIVIDE-BY-ZERO`, which is an **alias** for the arithmetic tier's `Q-7` and not a new question. `Q-CLI-OVERREWRITE` and `Q-CLI-OVERREWRITE-SECOND-LEG` (§14.2) are this entry's neighbours at the CLI boundary |
 
 **Why the collisions were not simply prevented.** Because the register was being written at the same time as
 the modules that cite it, and there was no shared allocation point until this file existed. One module solved
@@ -2218,7 +2250,9 @@ document's word for its own discipline. Each was verified at the time of writing
 | `RESOLVED BY CONSTRUCTION` used as a whole-entry status | **0.** The two part-resolved entries carry their settled halves inside the entry, where the reading can be shown |
 | Entries carrying all five template parts | **all of them.** Every §12 entry has (a) question, (b) evidence, (c) oracle experiment, (d) resolution-or-status and (e) consuming module(s) |
 | Explicit anchors | **19** — one for each of the **18** entries (`q-1` … `q-9`, `q-5-1` … `q-5-3`, and one per §13 entry), plus one on §13's closing scoping table, so a bare `#q-n` citation resolves |
-| `Q-` identifiers cited anywhere in the checkout | **91** under a census permissive enough to catch all four identifier forms of §5, and **every one of them appears in this file** — §12, §13, §14 or §15. The converse also holds: every identifier this file uses is cited elsewhere in the project, so it coins none |
+| `Q-` identifiers cited by the project | **82**, and **every one of them appears in this file** — §12, §13, §14 or §15. Census scope, stated so the figure is reproducible: the tracked text files of `acas_posting/`, `tests/`, `harness/`, `docs/`, `data_dictionary/` and the two manifests, under a pattern permissive enough to catch all four identifier forms of §5, excluding the family labels `Q-5.x` / `Q-70` / `Q-CLI` and the metasyntactic placeholder `Q-nn` that `acas_posting/programs/gl080_end_of_cycle.py` uses for *"`AMBIGUITY Q-nn` at the site that raises it"* |
+| Identifiers this file uses **as register identifiers** | **86** — the 82 above plus exactly four that are register-only and each declared as such: `Q-12`, `Q-13` and `Q-70c`, documented as **unassigned** rather than missing, and `Q-GL080-DIVIDE-BY-ZERO`, the one **coined name** for an existing question (§13, §15) |
+| Tokens outside the census, and why | **12** — `Q-TAX`, `Q-TAXES`, `Q-FICA-TAX`, `Q-CO-FUTA-LIAB`, `Q-ENDED`, `Q-Year`, `Q-mmdd` and five case variants are COBOL **data-item names** in the Payroll sub system, which AAP §0.2.2 excludes in its entirety. They are not register identifiers and are deliberately not catalogued. ⚠️ The seven forms are spelled out in the row above so the exclusion is checkable, which is why a naive `Q-` pattern over this file returns **93** tokens rather than 86: those seven are the **only** `Q-`-prefixed tokens anywhere in this file that are not register identifiers, and the family labels `Q-5.x` / `Q-70` / `Q-CLI` and the placeholder `Q-nn` are named for the same reason |
 | Experiments described as having been run | **0** |
 | Measured values claimed as this register's own observations | **0** |
 | Experiments that instrument the frozen source | **0.** §3 lists the five permitted observables; none of them requires a change to a frozen file |
@@ -2227,7 +2261,8 @@ document's word for its own discipline. Each was verified at the time of writing
 | Experiments that build inside the mounted checkout | **0.** §3's hazard note and §10's protocol both forbid it |
 | Locators verified by direct reading of the frozen source | **all of them.** §8 lists the thirteen corrections that verification produced |
 | Identifiers renumbered | **0.** §15 resolves every collision by scoping |
-| Identifiers newly opened here | **0.** One question was drafted under a new mnemonic and then filed under the existing `Q-70f` when `gl070`'s own question family was found, so this register coins nothing |
+| Identifiers newly opened here | **0 questions.** Two were drafted under new mnemonics and both were then traced to identifiers the project already had: one became `Q-70f` when `gl070`'s own question family was found (§14.1a), and one — the zero divisor — is the arithmetic tier's `Q-7`, which §12's mandated `Q-7` prevents this register from using, so it keeps the mnemonic `Q-GL080-DIVIDE-BY-ZERO` as a declared **alias** (§15). **One name is coined; no question is.** |
+| Third-party measurements recorded but **not** promoted to a resolution | **3** — `Q-OTM5-NARROW`'s magnitude finding (§14.4), the arithmetic tier's zero-divisor measurement (§13), and the provisional constants named in `Q-2`, `Q-3`, `Q-5.1`–`Q-5.3` and `Q-ROUNDED-OVERFLOW-ORDER`. Each is attributed to the tier that took it; none changes a status in this register |
 
 Two properties that are deliberately **not** claimed, because claiming them would be the failure this file
 exists to prevent:
