@@ -1,0 +1,893 @@
+# =============================================================================
+# ACAS -- COBOL to Python migration of the batch posting cycle.
+#
+# SCENARIO clean_batch_irs -- the IRS-ledger clean-batch route, and the most
+# consequential of the eight scenario definitions under harness/scenarios/.
+# The eight the protocol expects, per Agent Action Plan section 0.8.5 and
+# [harness/run_python_scenario.sh:L1979-L1982], are: clean_batch_gl,
+# clean_batch_sl, clean_batch_pl, clean_batch_irs, mixed_accepted_rejected,
+# period_end_totals, control_total_mismatch and empty_batch. This file
+# replicates the CANONICAL SHAPE established by clean_batch_gl.yaml, key for
+# key and in the same order, because two runners read these files with two
+# different strategies and only the shared shape satisfies both.
+#
+# TWO THINGS MAKE THIS SCENARIO DIFFERENT FROM ITS SEVEN SIBLINGS.
+#   1. Its run EMPTIES A TABLE. The pinned end-of-job answer below performs an
+#      open-output on the IRS transfer file, which that handler turns into a
+#      mass delete of every row of PSIRSPOST-REC.
+#   2. It is the ONLY route on which the three-state IRS fan-out switch cannot
+#      be delivered as a command-line input. On this route it reaches the
+#      program solely through the seeded system record, so the value declared
+#      below is an ASSERTION ABOUT THE SEED and not an argument the runner
+#      passes.
+#
+# THIS FILE IS INERT DATA (rule R-1, no COBOL at runtime). It carries no shell
+# command, no compiler invocation, no Python expression, no non-standard YAML
+# tag and no path into a build tree: both runners read it with yaml.safe_load
+# or with a plain top-level scalar reader, and the file only DESCRIBES the
+# inputs -- the runner scripts are the only things that act on them. Nothing
+# else belongs in this directory either: the harness tree is never on the
+# package import path (Agent Action Plan section 0.3.1), so there is no
+# __init__.py here.
+#
+# NO ACCOUNTING VALUE APPEARS AS A YAML SCALAR ANYWHERE IN THIS FILE (rule
+# R-2, zero binary floating point). YAML parses a bare decimal literal as a
+# binary float, so every money figure, every quantity and every tax rate lives
+# in the seeded flat files as decimal text in the frozen record layout, never
+# here, and no decimal literal appears in the prose either. Only these keys
+# hold bare integers, and each one is a whole-number COBOL field: run_date,
+# run_date_binary, cyclea, period, date_form, file_system_used, s_flag_p,
+# p_flag_p and expected_status. There is no scientific notation and no
+# infinity or not-a-number token in this file.
+#
+# NOTHING HERE DEFINES OR ALTERS THE SCHEMA (rule R-3). affected_tables SELECTS
+# four of the 33 frozen tables of mysql/ACASDB.sql; it never adds a table, a
+# column, an index or a constraint. operations is a strictly ordered list and
+# its steps run one at a time, matching the single-threaded COBOL.
+#
+# THE LEGACY DEFECTS ARE THE POINT, NOT AN EMBARRASSMENT (rule R-4). The seed
+# contract below is engineered so that five recorded anomalies -- A-4, A-5,
+# A-6, A-7 and A-19 -- actually occur during the run and therefore appear in
+# the diff. A seed tidied up to make the run look clean would defeat this
+# file's entire purpose: a defect reproduced is correct, a defect fixed is a
+# failure.
+#
+# KEYS APPEAR IN A FIXED ORDER, identically in all eight scenario files, and
+# the file is UTF-8, ASCII-only, LF-terminated, two-space indented and free of
+# tabs. It carries no wall-clock reading, no host identity, no process id, no
+# random value and no absolute host path, so two captures of one scenario are
+# byte-identical (rule R-6).
+# =============================================================================
+
+name: clean_batch_irs
+
+description: |
+  PURPOSE
+  A seeded IRS transfer file is walked end to end by the posting section of
+  irs030, updating the IRS nominal ledger, writing the internal IRS posting
+  records, and finally emptying the transfer file. The resulting IRSNL-REC,
+  IRSPOSTING-REC and PSIRSPOST-REC state must match the compiled COBOL oracle
+  byte for byte after normalisation, and IRSDFLT-REC must come through the run
+  unchanged. An empty normalised diff is the only pass condition. This is a
+  clean batch in the sense its siblings are -- no run aborts and no operator
+  intervention is required -- but it is NOT a defect-free batch, and it is not
+  meant to be. The frozen section carries a half-posted double entry and a lost
+  update that are part of the behavioural specification, so the seed is built to
+  trigger them rather than to step around them.
+
+  THE MIGRATION BOUNDARY -- ONE SECTION OF A PROGRAM OF 1733 LINES
+  Only Ledger-Postings-Add is in scope: [irs/irs030.cbl:L1569] through
+  [irs/irs030.cbl:L1733], which is the part that walks the transfer file and
+  updates the IRS nominal ledger. Everything else in that file is out of scope
+  -- Init-Main at [irs/irs030.cbl:L557], Input-Headings at
+  [irs/irs030.cbl:L1239], Date-Validate at [irs/irs030.cbl:L1285],
+  Initialise-Main at [irs/irs030.cbl:L1402], Show-Default at
+  [irs/irs030.cbl:L1504] and file-init at [irs/irs030.cbl:L1518] -- with two
+  exceptions, the Net section at [irs/irs030.cbl:L1544] and the Gross section at
+  [irs/irs030.cbl:L1556], whose tax computations the posting path consumes. The
+  boundary is stated here because it is narrow and the file is dominated by
+  interactive code: an agent working from the file rather than from the stated
+  boundary would migrate several hundred lines that must not be migrated.
+
+  PYTHON MODULES EXERCISED (rule R-5, full traceability)
+    acas_posting/programs/irs030_posting.py    from irs/irs030.cbl
+  driven by acas_posting/cli/irs_post.py, which reproduces the IRS menu's own
+  dispatch of option four [irs/irs.cbl:L666-L672]. Two data-access modules are
+  reached along the way and both carry reproduced defects of their own:
+  acas_posting/dal/acas008_spl_posting.py for the transfer file and
+  acas_posting/dal/acasirsub4_irs_posting.py for the internal posting table.
+  The nominal-ledger and defaults handlers are reached through
+  acas_posting/dal/acasirsub1_irs_nominal.py and
+  acas_posting/dal/acasirsub3_irs_dflt.py.
+
+  THE THIRD LINKAGE SHAPE -- THREE PARAMETERS, AND NO RUN DATE
+  irs030 is the odd one out of the twelve in-scope programs. Its interface is
+  [irs/irs030.cbl:L552-L554], verbatim: procedure division using
+  IRS-System-Params, WS-System-Record, File-Defs. THREE parameters -- neither
+  the calling-data block that the General, Sales and Purchase families pass nor
+  the run-date text they pass alongside it. The menu call matches:
+  [irs/irs.cbl:L666-L672] tests for menu reply four or the fourth function key
+  and calls irs030 with exactly those three arguments before returning to the
+  menu loop at [irs/irs.cbl:L637]. One consequence matters for the comparison.
+  Because there is no calling-data block there is no term code either, so the
+  expected status declared below is the process status of a program that ran to
+  completion rather than a value the frozen program set. The identity mapping
+  still holds, and zero still means the run finished.
+
+  THE PINNED CLOCK -- TWO OBSERVABLES, REACHED BY A DIFFERENT PATH
+  Determinism needs exactly two values pinned: the text date in the form the
+  date form selects, and the binary run date that the system record carries as
+  Run-Date, declared binary-long at [copybooks/wssystem.cob:L67]. Every in-scope
+  posting program takes the date through linkage and reads no clock at all, so
+  pinning these two at the entry point is sufficient. On this route the text
+  date is not passed in; it is DERIVED. The IRS menu converts the binary run
+  date into text itself at [irs/irs.cbl:L632-L634] -- move run-date to u-bin,
+  perform maps04, move u-date to to-day -- and its own date-entry option calls
+  irs000 with the text date at [irs/irs.cbl:L626-L630]. So the same two
+  observables still govern the run; they simply arrive by a different path than
+  on the General Ledger route, and the binary value is the one that must be
+  pinned for the text to follow deterministically. Note that the IRS parameter
+  record keeps its own separate run date as character data, run-date pic x(8) at
+  [copybooks/irswssystem.cob:L14], while the ACAS system record's Run-Date is
+  binary. irs030 renames the latter to ACAS-Run-Date when it copies the record
+  in, at [irs/irs030.cbl:L419-L421], so the two never collide.
+
+  THE SEEDED SYSTEM RECORD -- TWO WAYS THIS SCENARIO CAN LIE
+  The system block below is not decoration. Two of its values decide whether the
+  run means anything at all, and a wrong value produces a PASSING diff rather
+  than a failing one, which is the worst outcome available here. FIRST,
+  file_system_used. It is File-System-Used pic 9 at
+  [copybooks/wssystem.cob:L112], inside RDBMS-Flat-Statuses at
+  [copybooks/wssystem.cob:L111], with condition names FS-Cobol-Files-Used for
+  zero at [copybooks/wssystem.cob:L113] and FS-MySql-Used for one at
+  [copybooks/wssystem.cob:L114]; the valid range is nothing but those two,
+  values zero through one at [copybooks/wssystem.cob:L122]. Every handler routes
+  to the SQL bridge only when the flag is non-zero -- the generic shape is
+  [common/acas007.cbl:L316-L320] -- so a seeded zero would send the whole run to
+  indexed files, leave both dumps empty, and let the diff stage exit clean
+  having compared nothing. On this route the flag is doubly load-bearing,
+  because the destructive end-of-job answer only reaches the database through
+  the same gate. The conversion of an open-output into a mass delete is guarded
+  at [common/acas008.cbl:L313-L319], and the third leg of that guard, at
+  [common/acas008.cbl:L315], is NOT FS-Cobol-Files-Used. With a seeded zero the
+  transfer table would never be emptied and the most distinctive effect of the
+  scenario would silently disappear. SECOND, irs_instead. It is IRS-Instead pic
+  x at [copybooks/wssystem.cob:L179], with exactly two condition names --
+  IRS-Used for "Y" at [copybooks/wssystem.cob:L180] and IRS-Both-Used for "B" at
+  [copybooks/wssystem.cob:L181] -- so a space means General Ledger only, "Y"
+  means IRS instead of the General Ledger and "B" means IRS as well as it. The
+  column is IRS-INSTEAD char(1) NOT NULL at [mysql/ACASDB.sql:L1252]. THE VALUE
+  DECLARED BELOW IS AN ASSERTION ABOUT system.dat, NOT AN ARGUMENT. The IRS
+  entry point accepts no fan-out option and no calling-data option, so on this
+  route the switch reaches the program only through the seeded system row. Any
+  disagreement between the value stated here and the value inside the seeded
+  flat file is a HARNESS FAULT and must never be read as a behavioural
+  difference between the two implementations. It is pinned explicitly all the
+  same, because leaving it to a default would make the affected-table list
+  ambiguous. A space is the right pin here even though this is the IRS scenario.
+  irs030 itself never tests IRS-Instead; the switch governs whether the four
+  Sales and Purchase posting programs fan out into the transfer table. Pinning
+  the space guarantees the transfer file holds exactly what the seed put there
+  and nothing a sibling program contributed, which is precisely the determinism
+  this scenario needs. The remaining system values are pinned for uniformity
+  rather than effect, so that one system block serves all eight scenario files:
+  cyclea, which is Cyclea binary-char at [copybooks/wssystem.cob:L62]; period,
+  Period binary-char at [copybooks/wssystem.cob:L64]; date_form, Date-Form pic 9
+  at [copybooks/wssystem.cob:L128] whose valid formats are the three at
+  [copybooks/wssystem.cob:L129-L132]; and the two autogen switches and two proof
+  flags, none of which is on this path.
+
+  WHY EXACTLY THESE FOUR TABLES -- A MEASURED VERB CENSUS, NOT AN INFERENCE
+  The affected-table list bounds the comparison and nothing else does, so it
+  was built by counting the facade verbs the in-scope section actually issues
+  rather than by reasoning about what an IRS posting run ought to touch.
+    acas008, the transfer file -- Open-Input at [irs/irs030.cbl:L1578],
+      Read-Next at [irs/irs030.cbl:L1620], Open-Output at
+      [irs/irs030.cbl:L1723] and Close at [irs/irs030.cbl:L1712] and
+      [irs/irs030.cbl:L1724]. Read, then EMPTIED by the end-of-job clear.
+      PSIRSPOST-REC is affected.
+    acasirsub1, the IRS nominal ledger -- Read-Indexed at
+      [irs/irs030.cbl:L1596], [irs/irs030.cbl:L1606], [irs/irs030.cbl:L1629]
+      and [irs/irs030.cbl:L1647], and Rewrite at [irs/irs030.cbl:L1641],
+      [irs/irs030.cbl:L1657], [irs/irs030.cbl:L1705] and
+      [irs/irs030.cbl:L1708]. Mutated on every posting and again at end of job.
+      IRSNL-REC is affected.
+    acasirsub4, the internal IRS posting table -- Open at
+      [irs/irs030.cbl:L1617], Write at [irs/irs030.cbl:L1673] and Close at
+      [irs/irs030.cbl:L1711]. One row written per accepted posting.
+      IRSPOSTING-REC is affected.
+    acasirsub3, the IRS defaults -- reached through no facade verb at all. The
+      section sets the function code and performs the handler directly, at
+      [irs/irs030.cbl:L1585-L1586]. READ ONLY.
+    acasirsub5, the IRS final accounts -- ZERO verbs of any kind.
+  IRSDFLT-REC is listed even though it is only read, and listing it is
+  deliberate. Its account-code table selects the two tax control accounts the
+  whole run pivots on, so including it makes the dump an explicit witness that
+  the run left it untouched. A Python implementation that accidentally rewrote
+  it would otherwise slip through a diff that never looked.
+  Four system-level tables are NOT listed -- SYSTEM-REC, SYSDEFLT-REC,
+  SYSFINAL-REC and SYSTOT-REC. A verb census across all twelve in-scope
+  programs finds no System-family facade verb anywhere, and irs030 writes no
+  period total: the nine sites that write the period-totals record all belong to
+  the Sales and Purchase programs. The system record is an INPUT to this
+  scenario, carried by the seed, not an output of it.
+
+  WHY IRSFINAL-REC IS ABSENT, ON THE MAINTAINER'S OWN EVIDENCE
+  It would be easy to assume an IRS scenario touches the IRS final-accounts
+  table. It does not, and the frozen source says so in one line.
+  [irs/irs030.cbl:L296], verbatim: 03 Final-Record pic x. -- Table/File not used
+  in this program. A one-byte dummy, declared only so the shared IRS call block
+  resolves, inside the group at [irs/irs030.cbl:L290] whose four other entries
+  -- the records for the handlers that ARE in use -- are commented out precisely
+  because those four are declared for real elsewhere. Add the verb census above,
+  in which acasirsub5 appears not once, and the conclusion is not an inference:
+  the program cannot touch the table. irsfinal.dat is still seeded, so that the
+  pre-state of every IRS table is defined rather than ambient, but IRSFINAL-REC
+  is deliberately not dumped and not compared. Seeding a table and comparing a
+  table are separate decisions here, and this is the one place they part
+  company.
+
+  WHY THE POSTING SEQUENCE NUMBER IS NOT DIFF-VISIBLE
+  The section allocates each posting key from a running counter and advances it:
+  move next-post to post-key at [irs/irs030.cbl:L1670], then add 1 to next-post
+  at [irs/irs030.cbl:L1671]. A reader looking for the incremented value in a
+  table dump will not find it, and that is correct rather than a gap. next-post
+  is not in the final-accounts copybook, which holds nothing but the
+  account-report arrays and a trailing five-character field. It lives at
+  [copybooks/irswssystem.cob:L25] -- 03 next-post pic 9(5) -- inside the record
+  that irs030 renames to IRS-System-Params at [irs/irs030.cbl:L416-L417]. That
+  is the FIRST linkage parameter: a flat IRS parameter record with no bridge
+  program and no table in the frozen schema. Its increment is therefore real,
+  and load-bearing for the posting keys the run writes, but invisible to any
+  dump. There is a same-named field in the ACAS system record too, Next-Post pic
+  9(5) at [copybooks/wssystem.cob:L311] inside the IRS-Entry-Block at
+  [copybooks/wssystem.cob:L309]. irs030 renames THAT one out of the way, to
+  IRS-Next-Post at [irs/irs030.cbl:L437], which is exactly what proves the
+  counter the section advances is the parameter-record field and not the system
+  column.
+
+  THE THREE ABORT-WITH-NOTHING GUARDS, AND WHY THEY BYPASS END OF JOB
+  The section refuses to start unless three preconditions hold, and each refusal
+  leaves the database completely untouched.
+    One -- the transfer file must open. Open-Input at [irs/irs030.cbl:L1578],
+      and on a non-zero reply the guard at [irs/irs030.cbl:L1579-L1581]
+      displays its message and leaves.
+    Two -- the account named by the thirty-first default must exist in the IRS
+      nominal ledger. It is fetched at [irs/irs030.cbl:L1594-L1596], and the
+      guard at [irs/irs030.cbl:L1597-L1601] leaves on any error.
+    Three -- the same for the thirty-second default, fetched at
+      [irs/irs030.cbl:L1604-L1606] with its guard at
+      [irs/irs030.cbl:L1607-L1611].
+  All three jump to main99-exit, and the position of that label is the whole
+  point: it is at [irs/irs030.cbl:L1729], AFTER the end-of-job paragraph at
+  [irs/irs030.cbl:L1702] and after the clear question at
+  [irs/irs030.cbl:L1715]. So an abort skips the two snapshot rewrites and skips
+  the transfer-file clear entirely. The database effect of tripping a guard is
+  not a partial run; it is no run.
+  That is why the seed contract below insists the two default accounts exist.
+  A seed that missed either one would produce a scenario in which both sides
+  correctly write nothing, the diff would be empty, and the run would prove
+  nothing whatever.
+
+  THE TWO ROUNDED COMPUTES -- TWO OF ONLY FIVE IN THE WHOLE MIGRATION
+  COBOL truncates toward zero on store unless ROUNDED is written. Across the
+  entire in-scope cycle there are exactly five ROUNDED sites, and two of them
+  are in this scenario's path, which is why the seed must exercise both. Tax
+  from net, the Net section at [irs/irs030.cbl:L1544]: the live statement is
+  [irs/irs030.cbl:L1551], computing the tax amount rounded as the posting amount
+  multiplied by the current rate and divided by one hundred, with the section
+  ending at [irs/irs030.cbl:L1553]. Tax from gross, the Gross section at
+  [irs/irs030.cbl:L1556]: the live statement spans [irs/irs030.cbl:L1562-L1563],
+  computing the tax amount rounded as the posting amount less the posting amount
+  divided by the rate-plus-hundred ratio. It is immediately followed by an
+  UN-ROUNDED store at [irs/irs030.cbl:L1564] -- subtract vat-amount from
+  post-amount -- which truncates. Rounded and truncated behaviour therefore sit
+  on adjacent lines, and getting either one backwards corrupts the posted
+  figure. Both receiving fields are signed with a leading sign:
+  [copybooks/irswspost.cob:L14] for the amount and [copybooks/irswspost.cob:L18]
+  for the tax, both pic s9(7)v99 sign is leading. The rates come from the seeded
+  record and appear nowhere in this file as a scalar, per rule R-2. The
+  maintainer's own uncertainty is recorded next to the first of the two, at
+  [irs/irs030.cbl:L1547-L1548], wondering whether a test for a non-zero rate is
+  needed before the compute. There is no such test in the frozen code, so there
+  is none in the migrated code, and a seeded zero rate must therefore produce a
+  computed zero rather than a skipped statement.
+
+  ANOMALY A-19 -- THE SUPERSEDED COMPUTES, LEFT WHERE THEY LIE
+  Directly above each live statement sits a commented-out earlier version of it:
+  [irs/irs030.cbl:L1550] above the net form and [irs/irs030.cbl:L1561] above the
+  gross form. Both reference a DIFFERENTLY NAMED rate field than the live
+  statements use -- the older, unqualified one rather than the current-rate
+  working field. They are preserved as they are, recorded in
+  docs/migration/anomaly-log.md as entry A-19, and never deleted: the migration
+  reproduces the frozen source's state, and tidying a superseded comment away
+  would lose the evidence that the rate field was renamed at all.
+
+
+  ANOMALY A-4 -- THE HALF-POSTED DOUBLE ENTRY
+  This is the defect that makes the scenario worth running, and the seed is
+  built to make it happen. The loop begins at [irs/irs030.cbl:L1619], reads the
+  next transfer record at [irs/irs030.cbl:L1620], leaves for end of job on the
+  end-of-file reply at [irs/irs030.cbl:L1621-L1622] and counts the record at
+  [irs/irs030.cbl:L1623]. THE DEBIT SIDE IS COMMITTED BEFORE THE CREDIT SIDE IS
+  EVEN LOOKED UP. The debit account is fetched at [irs/irs030.cbl:L1627-L1629];
+  a missing one is skipped at [irs/irs030.cbl:L1630-L1634]; the posting amount
+  is accumulated at [irs/irs030.cbl:L1635]; the tax is added to the same side
+  when the tax side is the credit side, at [irs/irs030.cbl:L1636-L1637]; and the
+  account is REWRITTEN at [irs/irs030.cbl:L1641]. Only then is the credit
+  account fetched, at [irs/irs030.cbl:L1645-L1647] -- and if it is missing, the
+  guard at [irs/irs030.cbl:L1648-L1652] returns straight to the top of the loop.
+  The debit is already written. Nothing balances it, no posting row is written
+  for that transfer record, and the run continues to the next one as though
+  nothing had happened. So the disposition of a rejected posting and its effect
+  on the database are BOTH part of the specification: the record is rejected,
+  and the database keeps a one-sided entry. Both must be reproduced. Note also
+  the asymmetry between the two sides. The debit side tests the tax side for the
+  credit value at [irs/irs030.cbl:L1636], while the credit side tests it for the
+  debit value at [irs/irs030.cbl:L1654-L1655] before its own rewrite at
+  [irs/irs030.cbl:L1657]. The two tests are mirror images and must stay mirror
+  images; collapsing them into one shared helper is the easiest available way to
+  change behaviour by accident. A further quiet detail: the amounts are
+  accumulated into UNSIGNED receiving fields. NL-DR and NL-CR are pic 9(8)v99
+  comp at [copybooks/irswsnl.cob:L17-L18] and the columns are decimal(10,2)
+  unsigned at [mysql/ACASDB.sql:L238], while the amount arriving from the
+  transfer record is signed. The narrowing is part of the frozen behaviour and
+  belongs to the same family as the recorded signedness drift elsewhere in the
+  migration.
+  SEED REQUIREMENT: at least one transfer record whose CREDIT account is absent
+  from the seeded nominal ledger, so the half-post actually occurs and the
+  unbalanced debit shows up in the IRSNL-REC dump. Recorded as A-4 in
+  docs/migration/anomaly-log.md.
+
+  ANOMALY A-5 -- THE LOST UPDATE ON THE TWO TAX CONTROL ACCOUNTS
+  The second defect this scenario exists to pin down, and it is structural
+  rather than incidental. Before the loop starts, the section reads both tax
+  control accounts and takes PRIVATE COPIES of them: the account named by the
+  thirty-first default is read at [irs/irs030.cbl:L1594-L1596] and copied at
+  [irs/irs030.cbl:L1602], and the thirty-second at [irs/irs030.cbl:L1604-L1606]
+  and [irs/irs030.cbl:L1612]. Inside the loop, tax is accumulated into those
+  COPIES and never into the live rows. The ladder is gated by a zero tax-account
+  code at [irs/irs030.cbl:L1682-L1683] and then chooses one of four
+  destinations: the thirty-first account's credit side at
+  [irs/irs030.cbl:L1685-L1687], its debit side at [irs/irs030.cbl:L1689-L1691],
+  the thirty-second account's credit side at [irs/irs030.cbl:L1693-L1695] and
+  its debit side at [irs/irs030.cbl:L1697-L1699], before returning to the loop
+  at [irs/irs030.cbl:L1700]. THE LADDER HAS NO FINAL ELSE. A tax-account code
+  that is neither of the two, or a tax side that is neither of the two,
+  accumulates NOWHERE -- silently, with no message and no counter. That is a
+  second reproduced behaviour hiding inside the first. Then at end of job,
+  [irs/irs030.cbl:L1702], the two private copies are moved back over the live
+  records and rewritten: [irs/irs030.cbl:L1704-L1705] for the first and
+  [irs/irs030.cbl:L1707-L1708] for the second. THE CONSEQUENCE: if any transfer
+  record's own debit or credit account IS one of the two tax control accounts,
+  the in-loop rewrite at [irs/irs030.cbl:L1641] or [irs/irs030.cbl:L1657]
+  updated the live row, and the end-of-job rewrite then overwrites it from a
+  copy taken BEFORE the loop began. The in-loop update is lost. This is a
+  textbook lost update and it is reproduced exactly.
+  SEED REQUIREMENT, two parts. First, transfer records that route tax to BOTH
+  control accounts, so both snapshot rewrites carry real accumulated values.
+  Second, at least one transfer record whose own debit or credit account IS one
+  of the two control accounts, so the lost update provably manifests in the
+  IRSNL-REC dump rather than merely being possible. Recorded as A-5.
+
+  ANOMALY A-7 -- THE GUARDED DATE COMPONENTS AND THE INCONSISTENT ROW
+  The internal posting table carries three columns that exist in NO copybook
+  anywhere in the frozen tree. This is the single clearest reason the migration
+  takes its data dictionary from the bridge rather than from the copybooks: a
+  dictionary built from the copybooks alone would omit three columns of a table
+  the run writes. The columns are POST4-DAY, POST4-MONTH and POST4-YEAR, all
+  tinyint(2) unsigned NOT NULL at [mysql/ACASDB.sql:L274], declared as host
+  variables at [common/irspostingMT.cbl:L177-L179]. They are derived, and only
+  derived, by the bridge's load paragraph at [common/irspostingMT.cbl:L958]: the
+  group is initialised at [common/irspostingMT.cbl:L966], the RAW date text is
+  stored UNCONDITIONALLY at [common/irspostingMT.cbl:L969], and the three
+  components are then filled under THREE INDEPENDENT numeric guards at
+  [common/irspostingMT.cbl:L982-L987] -- one guard per component, testing the
+  first two characters, the two at offset four and the two at offset seven of
+  the date text in turn. The maintainer's own note above them, at
+  [common/irspostingMT.cbl:L978-L980], says the columns were added later and
+  that the guards are there just in case. Because the guards are INDEPENDENT
+  rather than one combined test, a partially non-numeric date fills some
+  components and leaves the others at zero. And because the group was
+  initialised and the columns are NOT NULL, an unfilled component stores as ZERO
+  rather than as null. The row that results carries a perfectly good date text
+  beside a zeroed component: internally inconsistent, and exactly what must be
+  reproduced. The offsets are right for the field they read. The date is
+  Post-Date pic x(8) at [copybooks/irswspost.cob:L11] and the column is
+  POST4-DAT char(8), so an eight-character day, month and two-digit-year text
+  lines up with the three offsets. It is a date that does NOT line up --
+  unpadded, blank or differently punctuated -- that trips a guard.
+  SEED REQUIREMENT: at least one transfer record whose date text fails at least
+  one of the three guards, so the inconsistent row appears in the IRSPOSTING-REC
+  dump. It is the single most valuable row in the fixture, and the guard that
+  fails should be one specific component rather than all three, so that the
+  independence of the guards is exercised and not merely their existence.
+  Reproduced in acas_posting/dal/acasirsub4_irs_posting.py and recorded as A-7.
+  The write itself is at [irs/irs030.cbl:L1673], with the record built
+  immediately above at [irs/irs030.cbl:L1661-L1671]. A failed write jumps to end
+  of job at [irs/irs030.cbl:L1674-L1678] -- which still performs both snapshot
+  rewrites and all three closes, so the partial state is COMMITTED rather than
+  rolled back. That is a third distinct rejection class in one section, and it
+  differs from the other two precisely in what it leaves behind.
+
+  ANOMALY A-6 -- FOUR PUBLISHED VERBS THAT CAN NEVER SUCCEED
+  The transfer-file handler rejects four of its own published verbs before it
+  looks at anything. Its entry paragraph is [common/acas008.cbl:L289], it
+  identifies itself for logging as the IRS subsystem at
+  [common/acas008.cbl:L293-L294], and then the block at
+  [common/acas008.cbl:L299-L307] evaluates the function code and, for
+  read-indexed, rewrite, start and delete, sets an error of nine hundred and
+  eighty-eight at [common/acas008.cbl:L304], a reply of ninety-nine at
+  [common/acas008.cbl:L305], and leaves at [common/acas008.cbl:L306]. Those four
+  codes are not a guess: they are the condition names fn-read-indexed at
+  [copybooks/wsfnctn.cob:L92], fn-re-write at [copybooks/wsfnctn.cob:L95],
+  fn-delete at [copybooks/wsfnctn.cob:L96] and fn-start at
+  [copybooks/wsfnctn.cob:L97], which carry exactly the four values the evaluate
+  lists. The facade nonetheless publishes a rewrite verb for this handler, so
+  any caller invoking it ALWAYS fails with that same status pair. The migrated
+  module reproduces the guard rather than performing an update, returning the
+  identical pair, in acas_posting/dal/acas008_spl_posting.py. Recorded as A-6.
+  This scenario does not itself invoke the impossible verb -- the section uses
+  only open-input, read-next, open-output and close -- and that is the point of
+  recording it here: the guard must survive in the migrated handler even though
+  this run never trips it, because a later scenario or a later reader will
+  expect it to be there.
+
+  THE DESTRUCTIVE ANSWER -- THERE IS NO DEFAULT, AND IT EMPTIES A TABLE
+  The end-of-job question is the one interactive input on this route that
+  changes table state, so it is promoted to a pinned parameter rather than
+  dropped. The question is asked at [irs/irs030.cbl:L1715-L1716] and the reply
+  is accepted, upper-cased, at [irs/irs030.cbl:L1717]. THE BRACKETED "Y" IN THE
+  PROMPT TEXT IS DISPLAY TEXT AND NOT A DEFAULT: the test at
+  [irs/irs030.cbl:L1718-L1719] sends anything that is neither "Y" nor "N"
+  straight back to the prompt, for ever. An unanswered question is therefore not
+  a defaulted question, it is a hung oracle run, which is why the answer is a
+  REQUIRED key here and both runners refuse a scenario that omits it. An answer
+  of "Y" reaches [irs/irs030.cbl:L1720] and then performs an open-output on the
+  transfer file at [irs/irs030.cbl:L1723] followed by a close at
+  [irs/irs030.cbl:L1724]. On this handler an open-output is not an open. The
+  guard at [common/acas008.cbl:L313-L319] converts it into a mass delete, and
+  the handler forces the same conversion again at [common/acas008.cbl:L571-L574]
+  under the paragraph at [common/acas008.cbl:L566]. THE TABLE IS PSIRSPOST-REC
+  AND THE RUN LEAVES IT EMPTY. Two consequences follow, and both are honoured
+  below. PSIRSPOST-REC must appear in affected_tables, because the answer is a
+  pinned input whose whole effect lands there and leaving the table out would
+  hide a real behavioural difference from the diff. And the protocol's
+  reset-and-re-seed stage becomes load-bearing rather than hygienic: without a
+  full re-seed from the same fixture, the second run would begin with an
+  already-empty transfer file, post nothing at all, and produce an empty diff
+  that means nothing. Worth recording as a contrast: the equivalent conversion
+  in the General Ledger batch handler is present in shape but DISABLED -- the
+  line that would force the mass delete is commented out at
+  [common/acas007.cbl:L308-L309], under the same explanatory note at
+  [common/acas007.cbl:L301-L303]. So this behaviour is live in the transfer-file
+  handler specifically, not a uniform property of every handler, and it must not
+  be generalised.
+
+  THE DISPLAY AND ACCEPT RULE, APPLIED THREE WAYS IN ONE SECTION
+  This section is the clearest illustration in the whole migration of the
+  three-way rule for interactive statements entangled with business logic.
+  PROMOTED: the reply at [irs/irs030.cbl:L1717]. It gates a database write -- in
+  fact a mass delete -- so it becomes an explicit pinned parameter, with the
+  frozen program's own absence of a default faithfully preserved as a hard
+  requirement rather than smoothed into a convenient assumption. DROPPED: the
+  bare acknowledgement pause at [irs/irs030.cbl:L1726], which follows a
+  note-the-counts display at [irs/irs030.cbl:L1725] and has no database effect
+  whatever. Its only function is to hold a terminal, so it is removed outright.
+  DEMOTED TO A LOG LINE, BUT WITH THE CONTROL TRANSFER KEPT: the diagnostic
+  displays and pauses inside the two account-missing guards, at
+  [irs/irs030.cbl:L1630-L1634] and [irs/irs030.cbl:L1648-L1652]. Each shows a
+  message, shows the offending account number and waits for a keystroke, none of
+  which touches the database -- but each then transfers control back to the top
+  of the loop, and THAT transfer is behaviour. The message becomes a log record,
+  the pause disappears, and the jump is preserved exactly.
+
+  THE IRS FACADE IS BEHAVIOURALLY DIFFERENT, NOT MERELY DIFFERENTLY NAMED
+  irs030 pulls in its facade at [irs/irs030.cbl:L1732]. That copybook is the
+  second of the two facade conventions in the codebase: it names its paragraphs
+  after the HANDLER rather than after the entity, and -- this is the part that
+  matters -- it adds a per-handler error check that the General, Sales and
+  Purchase convention does not have at all. There are five such checks: for the
+  system handler at [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L320], the
+  transfer-file handler at [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L327], the
+  nominal handler at [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L334], the
+  defaults handler at [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L341] and the
+  final-accounts handler at [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L348], each
+  displaying its OWN message identifier. All five funnel into
+  [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L355-L364], which the maintainer
+  annotates as a major failure from which the program cannot continue, and which
+  ends by returning from the program outright. THERE IS NO SUCH CHECK FOR THE
+  POSTING HANDLER. The five above are the complete set, which is precisely why
+  irs030 has to test the error inline after its own write, at
+  [irs/irs030.cbl:L1674] -- and why that inline test is a commit-and-stop rather
+  than a hard return. By contrast copybooks/Proc-ACAS-FH-Calls.cob, the
+  convention the other eleven in-scope programs use, contains no error-checking
+  paragraph of any kind: not one occurrence of the word appears in the file, and
+  its callers test the reply inline instead. The migrated facade must therefore
+  behave DIFFERENTLY depending on which alias set the caller used. That is a
+  behavioural difference, not a naming one, and this scenario is the one that
+  exercises the IRS side of it.
+
+  A FURTHER FINDING -- THE DEFAULTS TABLE STOPS AT THIRTY-TWO
+  Recorded here because it bears directly on this scenario's seed and was not
+  previously catalogued. The defaults record is one flat record holding a table
+  of thirty-three groups: [copybooks/irswsdflt.cob:L8-L12] declares the record,
+  the group occurring thirty-three times, and its account, code and tax fields.
+  The comment immediately above, [copybooks/irswsdflt.cob:L6-L7], records the
+  record being grown from two hundred and fifty-six bytes to two hundred and
+  sixty-four bytes for the express purpose of supporting the THIRTY-THIRD
+  default in irs030. The bridge does not agree. IRSDFLT-REC is four columns wide
+  with a key column at [mysql/ACASDB.sql:L189], and the bridge stores ONE ROW
+  PER GROUP with the row key holding the group's position -- the maintainer says
+  so in a comment on [common/irsdfltMT.cbl:L603]. But the loop that writes those
+  rows runs from one to THIRTY-TWO, at [common/irsdfltMT.cbl:L626] with the
+  insert at [common/irsdfltMT.cbl:L642], and the read side rejects any row keyed
+  above thirty-two at [common/irsdfltMT.cbl:L575-L577], with a matching loop
+  bound at [common/irsdfltMT.cbl:L565]. So the thirty-third default -- the one
+  the record was lengthened for -- can neither reach the table nor come back
+  from it. This scenario is unaffected and remains valid, because the two
+  defaults it reads are the thirty-first and thirty-second, both inside the
+  bridge's range. It is stated because it fixes the shape of the seed: the
+  defaults flat file is one record, and it becomes up to THIRTY-TWO rows in the
+  table, keyed by position -- not one row carrying thirty-three groups. One more
+  guarded derivation lives in the same paragraph, in the same family as A-7: a
+  non-numeric account in a group is silently stored as ZERO rather than
+  rejected, at [common/irsdfltMT.cbl:L632-L635].
+
+
+  THE SEED CONTRACT
+  The seed directory name below is a RELATIVE directory name and never an
+  absolute path. Its two consumers resolve it against different bases, which is
+  a property of the consumers and not of this file: the COBOL-side seeder joins
+  a relative name to the directory holding this scenario file
+  [harness/seed.sh:L2054-L2063] and stages the declared files into a fresh
+  scenario-owned fixture, while the Python side reads it as a subdirectory of
+  the harness data directory. Each declared name must be a BARE file name --
+  the seeder rejects anything containing a path separator, and rejects a
+  duplicate, at [harness/seed.sh:L2066-L2078]. The flat files themselves are a
+  separate deliverable and are deliberately NOT created in this directory.
+  Six flat files are declared, and each is one of the sixteen names the frozen
+  loader script recognises as in scope. The eight names it also recognises but
+  which belong to the out-of-scope subsystems are not declared here and must
+  never be: the stock, delivery, payment and autogen fixtures have no place in
+  this cycle.
+    system.dat        -- the system block, loaded first and unconditionally by
+                         four loaders in a fixed order,
+                         [common/masterLD.sh:L50-L88]: the system loader at
+                         [common/masterLD.sh:L52], then the totals loader at
+                         [common/masterLD.sh:L61], the final-accounts loader at
+                         [common/masterLD.sh:L70] and the defaults loader at
+                         [common/masterLD.sh:L79]. Mandatory rather than
+                         optional: the seeder refuses a scenario that does not
+                         declare it, at [harness/seed.sh:L2125-L2126]. It must
+                         carry file_system_used, cyclea, period, date_form,
+                         irs_instead, the two autogen switches and the two
+                         proof flags exactly as pinned below, plus the database
+                         credential fields described under THE CREDENTIAL
+                         PRECONDITION.
+    irsacnts.dat      -- [common/masterLD.sh:L99], loaded into IRSNL-REC. It
+                         must contain, at minimum: the two accounts named by
+                         the thirty-first and thirty-second defaults, or the run
+                         aborts having written nothing; every debit account and
+                         every credit account the transfer records reference,
+                         EXCEPT the one deliberately withheld for A-4; and at
+                         least one account that is ALSO a transfer record's own
+                         debit or credit account while being one of the two
+                         control accounts, for A-5. Each row carries its own
+                         debit and credit accumulators and the four quarterly
+                         pairs, [copybooks/irswsnl.cob:L17-L20].
+    irsdflt.dat       -- [common/masterLD.sh:L100], loaded into IRSDFLT-REC as
+                         one row per group position, keyed by position. Its
+                         thirty-first and thirty-second account fields are the
+                         ones the section reads at [irs/irs030.cbl:L1594] and
+                         [irs/irs030.cbl:L1604], and BOTH MUST NAME ACCOUNTS
+                         THAT EXIST IN IRSNL-REC. If either does not, the run
+                         leaves through a guard having written nothing and the
+                         scenario degenerates into a comparison of two empty
+                         outcomes.
+    irsfinal.dat      -- [common/masterLD.sh:L101], loaded into IRSFINAL-REC so
+                         that the pre-state of every IRS table is defined. The
+                         table is NOT in affected_tables and is NOT dumped, for
+                         the reason set out under WHY IRSFINAL-REC IS ABSENT.
+    irspost.dat       -- [common/masterLD.sh:L102], loaded into IRSPOSTING-REC.
+                         A defined pre-state for the internal posting table,
+                         which may legitimately be empty; the frozen loader
+                         script guards each name with an existence test and the
+                         seeder reproduces that, so a missing file is skipped
+                         rather than fatal. Whatever it holds must not collide
+                         with the posting keys the run allocates from the
+                         parameter record's counter.
+    postings2irs.dat  -- [common/masterLD.sh:L110], loaded into PSIRSPOST-REC.
+                         THE HEART OF THE FIXTURE, and the file the whole
+                         scenario turns on. It must contain all four of the
+                         following, and it must contain them together:
+                           one clean, fully balanced posting whose debit and
+                             credit accounts both exist -- the happy path,
+                             without which nothing demonstrates the section
+                             working;
+                           postings that route tax to BOTH control accounts,
+                             plus at least one whose own debit or credit account
+                             IS one of those two, so A-5's lost update
+                             manifests rather than merely being possible;
+                           one posting whose CREDIT account is absent from
+                             IRSNL-REC, so A-4's half-post occurs and the
+                             unbalanced debit lands in the dump;
+                           one posting whose date text FAILS one of the three
+                             component guards, so A-7's internally inconsistent
+                             row lands in the IRSPOSTING-REC dump.
+                         It must also cover BOTH tax formulations, from net and
+                         from gross, so that both rounded computes fire.
+                         Reaching a tax side or a tax-account code outside the
+                         four the ladder recognises is worth including too,
+                         since the missing final branch is itself reproduced
+                         behaviour.
+  Every amount and every rate lives inside these flat files as decimal text in
+  the frozen record layout. None of them appears as a YAML scalar here, and none
+  appears as a decimal literal in this prose either, per rule R-2.
+
+  THE CREDENTIAL PRECONDITION -- CANNOT BE SATISFIED FROM THIS DIRECTORY
+  The COBOL takes its database credentials from the SEEDED SYSTEM RECORD, not
+  from the environment. The fields are declared with their shipped defaults at
+  [copybooks/wssystem.cob:L137-L139] for the database name, user and password,
+  each pic x(12), and at [copybooks/wssystem.cob:L142-L144] for the port, host
+  and socket -- pic x(5), pic x(32) and pic x(64). They are not contiguous: a
+  registration number and a restriction flag sit between the two runs of fields.
+  Every handler on this route copies them into the shared connection block
+  before use -- [common/acasirsub1.cbl:L725-L730] for the nominal handler,
+  [common/acasirsub3.cbl:L408-L413] for the defaults handler and
+  [common/acas008.cbl:L558-L563] for the transfer-file handler -- and the target
+  block is [copybooks/wsfnctn.cob:L56-L62], where the user and password fields
+  are only TWELVE characters wide. THE DATABASE ENVIRONMENT THE PYTHON SIDE USES
+  MUST EQUAL THE CREDENTIAL FIELDS INSIDE THE SEEDED SYSTEM FLAT FILE, or the
+  two sides address different servers and the diff is meaningless. A credential
+  longer than its field is silently truncated into that field, so the COBOL side
+  then fails to authenticate while the Python side succeeds -- a failure that
+  presents as a connection problem rather than as a length problem. This cannot
+  be fixed from this directory, because that flat file lives under the harness
+  data directory.
+
+  THE OTHER PRECONDITIONS, EACH A HANG RISK RATHER THAN A FAILURE
+  The oracle side runs a curses program, so it needs a terminal of at least the
+  standard twenty-four rows by eighty columns: this section addresses fields as
+  far down as row twenty-four and as far right as column fifty-five, and a
+  smaller terminal loses them rather than reporting anything. Autocommit must be
+  OFF while seeding. The frozen loaders say so themselves --
+  [common/glbatchLD.cbl:L9-L12], verbatim: this modules uses commit and rollback
+  so you MUST ensure that autocommit is OFF in the rdb settings, it is as
+  default set ON. The seeded state depends on the loaders' commit boundaries.
+  The frozen seeding driver is not invoked. Its author marks it untested at
+  [common/masterLD.sh:L4-L5], and independently it is not valid shell: the
+  twenty-four loader lines at [common/masterLD.sh:L93-L116] omit the semicolon
+  before the closing keyword. The harness reproduces its per-file contract and
+  checks loader exit codes instead, and the frozen file is not corrected --
+  rules R-3 and R-4 both forbid it. The end-of-job answer must be pinned. That
+  is not a nicety on this route: an unpinned answer does not default, it spins,
+  for the reason set out above.
+
+  THE ACCEPTANCE PROTOCOL
+  Build the oracle, then, in this exact order and with no stage skipped: seed,
+  run the COBOL cycle, dump the affected tables, normalise, reset and re-seed
+  from the same fixture, run the Python cycle, dump, normalise, and diff. AN
+  EMPTY NORMALISED DIFF IS THE ONLY PASS CONDITION. The comparison is bounded by
+  the affected-table list and by nothing else: the diff stage has no ignore
+  list, no tolerance list and no known-difference allowance. A stage that exits
+  non-zero has produced no evidence rather than weaker evidence, so the protocol
+  restarts from the seed rather than carrying forward. The per-scenario outcome
+  is recorded in docs/migration/scenario-diff-evidence.md. The reset-and-re-seed
+  stage deserves emphasis on this scenario specifically, and it is the one stage
+  an impatient operator would be tempted to skip. Because the run EMPTIES
+  PSIRSPOST-REC, a second run against the leftover state would start from an
+  empty transfer file, walk zero records, write nothing, and produce an empty
+  diff for entirely the wrong reason. The reset script asserts that its re-seed
+  reused the fixture the first run used, which is how the protocol demonstrates
+  the two sides began from identical state. Two runs of this scenario under the
+  same pinned clock must additionally produce byte-identical dumps; that is what
+  the determinism suite asserts. Forward reference: docs/migration/ and the
+  scenario test suite do not exist yet, nor do the seed flat files; they arrive
+  with the deliverables that consume this file.
+
+  THE CONSUMER CONTRACT -- WHY SOME VALUES APPEAR UNDER TWO KEYS
+  This file serves consumers with two different reading strategies, so a few
+  values are published under both a grouped and a flat key. THE PAIRS ARE
+  ADJACENT AND MUST ALWAYS HOLD THE SAME VALUE; they are written side by side
+  precisely so that any drift is visible at a glance.
+    clock.to_day    and run_date_text
+    clock.run_date  and run_date_binary
+    system.date_form    and date_form
+    system.irs_instead  and irs_instead
+    seed.data_dir       and seed_dir
+    seed.files          and seed_files
+    operations[0]       and operation
+  The reason is measured, not assumed. The COBOL-side runner reads this file
+  with a plain reader that accepts TOP-LEVEL KEYS ONLY, with no leading
+  whitespace before the key [harness/run_cobol_scenario.sh:L1115-L1163], and it
+  requires the operation [harness/run_cobol_scenario.sh:L1300], the text date
+  [harness/run_cobol_scenario.sh:L1384], the binary date
+  [harness/run_cobol_scenario.sh:L1398], the date form
+  [harness/run_cobol_scenario.sh:L1413], the fan-out switch as a key that must
+  be PRESENT even when its value is a space
+  [harness/run_cobol_scenario.sh:L1436-L1437] and the affected-table list
+  [harness/run_cobol_scenario.sh:L1544]. The Python-side runner reads the
+  ordered operation list and falls back to the singular key
+  [harness/run_python_scenario.sh:L2016-L2019], and reads the expected statuses
+  positionally [harness/run_python_scenario.sh:L3251]. The seeder requires the
+  flat file list and honours the flat directory name
+  [harness/seed.sh:L2041-L2063], and the dumper reads the affected-table list
+  with a full YAML parser. A nested-only file would be silently invisible to the
+  first two and the protocol could not start.
+  THE END-OF-JOB ANSWER IS A TOP-LEVEL KEY FOR THE SAME REASON. Both runners
+  read it as a top-level scalar and both refuse this operation without it:
+  [harness/run_cobol_scenario.sh:L1467-L1487] and
+  [harness/run_python_scenario.sh:L2428-L2445]. Only "Y" or "N" is accepted, and
+  the value is upper-cased before the test, matching the frozen accept.
+  ANSWER KEYS ARE SEMANTIC AND NEVER A COPY OF A COMMAND-LINE OPTION SPELLING,
+  because the option spellings belong to the entry points and are discovered
+  from them at run time rather than assumed here. The name used below is the one
+  both runners actually read; a plausible synonym would parse cleanly, be
+  silently ignored, and hang the oracle at the prompt.
+  THE AFFECTED-TABLE ORDER IS LOAD-BEARING, not cosmetic. The diff stage reports
+  in the scenario's declared order when a scenario was given, and sorts only in
+  its absence [harness/diff_states.py:L965], and the Python-side runner
+  fingerprints the seeded row counts one table per line in the declared order.
+  The order below is alphabetical, which is the convention all eight files
+  share.
+  The grouped blocks are the documented shape and carry the seven system values
+  that have no flat consumer at all -- file_system_used, cyclea, period, the two
+  autogen switches and the two proof flags are assertions about the SEEDED
+  RECORD rather than command-line inputs, which is why the Python entry point
+  exposes no option for them, and on this route the fan-out switch joins them in
+  substance even though it is published flat as well.
+  The scenario NAME is published once, as name. Both runners take the name from
+  this file's own basename when no explicit scenario key is present
+  [harness/run_python_scenario.sh:L1991-L1997], and the two agree by
+  construction: name equals clean_batch_irs equals the file stem, which is also
+  how the Python runner derives this path when given only a name
+  [harness/run_python_scenario.sh:L1970].
+
+  LOCATOR PROVENANCE
+  Every line number cited above was read directly out of the frozen source and
+  out of the harness scripts in this checkout, rather than copied from a plan or
+  from a sibling file, and several inherited citations were found to be wrong.
+  The corrections are worth knowing when cross-reading. In the frozen source:
+  the un-rounded subtract that follows the gross compute is at
+  [irs/irs030.cbl:L1564] and not the line after it; the tax amount in the
+  posting record is at [copybooks/irswspost.cob:L18] and not the line after it;
+  the credential copies begin at [common/acasirsub1.cbl:L725],
+  [common/acasirsub3.cbl:L408] and [common/acas008.cbl:L558] rather than one
+  line later in each case; the autocommit warning occupies
+  [common/glbatchLD.cbl:L9-L12] and the line after it is blank; the system-block
+  span in the frozen loader script is [common/masterLD.sh:L50-L88]; and the menu
+  dispatch of this operation is in [irs/irs.cbl:L666-L672] -- the operation map
+  inside [harness/run_cobol_scenario.sh:L101] attributes those line numbers to
+  irs030 itself, which is a misattribution. Two claims were checked rather than
+  assumed, and both held. The three derived date columns appear in NO copybook
+  in the frozen tree, which is what makes them bridge-only. And the four
+  function codes the transfer-file handler rejects are exactly the four
+  condition-name values at [copybooks/wsfnctn.cob:L92],
+  [copybooks/wsfnctn.cob:L95], [copybooks/wsfnctn.cob:L96] and
+  [copybooks/wsfnctn.cob:L97]. One claim was checked and did NOT hold, and the
+  correction is recorded above under A FURTHER FINDING: the defaults record
+  declares thirty-three groups but the bridge writes and accepts only thirty-two
+  rows, so the defaults fixture is one flat record becoming up to thirty-two
+  keyed rows and not one row carrying thirty-three groups. The four affected
+  tables were each confirmed present in the frozen schema with the primary key
+  the capture stage orders by: IRSDFLT-REC at [mysql/ACASDB.sql:L189], IRSNL-REC
+  at [mysql/ACASDB.sql:L238], IRSPOSTING-REC at [mysql/ACASDB.sql:L274] and
+  PSIRSPOST-REC at [mysql/ACASDB.sql:L366]. All four are among the twenty-two
+  in-scope tables [harness/run_python_scenario.sh:L541-L547]. THE FROZEN SOURCE
+  IS READ AND NEVER EDITED: any diff under common, copybooks, general, sales,
+  purchase, irs, stock or mysql is a defect in the migration however harmless it
+  looks. This file is the only thing this scenario adds. Finally, on provenance:
+  there is no user rules document for this project -- the rules facility reports
+  none -- so the six rules referenced throughout are the ones the Agent Action
+  Plan carries, and where those are silent the work is held to ordinary
+  enterprise practice.
+
+subsystem: irs
+
+# Read by the oracle-side runner as the default for its --operation option
+# [harness/run_cobol_scenario.sh:L1300]; the operation-to-menu-key map, which
+# resolves this operation to IRS menu option four, is at
+# [harness/run_cobol_scenario.sh:L101].
+operation: irs_post
+
+clock:
+  to_day: "21/09/2025"
+  run_date: 155127
+
+# Flat mirrors of the clock block, required by
+# [harness/run_cobol_scenario.sh:L1384] and
+# [harness/run_cobol_scenario.sh:L1398].
+# On this route the text form is DERIVED by the menu from the binary value
+# [irs/irs.cbl:L632-L634] rather than passed in, so the pair must agree.
+run_date_text: "21/09/2025"
+run_date_binary: 155127
+
+system:
+  file_system_used: 1
+  cyclea: 1
+  period: 1
+  date_form: 1
+  irs_instead: " "
+  sl_autogen: " "
+  pl_autogen: " "
+  s_flag_p: 2
+  p_flag_p: 2
+
+# Flat mirrors of the two system values the runners read directly:
+# [harness/run_cobol_scenario.sh:L1413] and
+# [harness/run_cobol_scenario.sh:L1436-L1437]. The fan-out switch is quoted
+# because IRS-Instead is a pic x [copybooks/wssystem.cob:L179] and the
+# General-Ledger-only state of a single alphanumeric character is a SPACE, not
+# an empty string. On this route no entry-point option carries it, so the value
+# here is an assertion about the seeded row.
+date_form: 1
+irs_instead: " "
+
+seed:
+  data_dir: irs_clean
+  files:
+    - system.dat
+    - irsacnts.dat
+    - irsdflt.dat
+    - irsfinal.dat
+    - irspost.dat
+    - postings2irs.dat
+
+# Flat mirrors of the seed block, required by [harness/seed.sh:L2041] and
+# honoured by [harness/seed.sh:L2054-L2063].
+seed_dir: irs_clean
+seed_files:
+  - system.dat
+  - irsacnts.dat
+  - irsdflt.dat
+  - irsfinal.dat
+  - irspost.dat
+  - postings2irs.dat
+
+# The operations this scenario runs, in order. The Python runner reads this key
+# as a flat sequence of operation NAMES and prefers it over the singular
+# "operation:" key above, so the sequence holds names and nothing else; the
+# oracle-side runner reads the singular key, which names the same operation, so
+# both runners resolve the same single operation from this one file. The
+# subsystem each name belongs to is not restated per item: each runner owns the
+# operation-to-subsystem map, and this scenario's subsystem is stated once at
+# top level above.
+operations:
+  - irs_post
+
+# The process status each operation is expected to end with, positionally. This
+# route has no calling-data block and therefore no term code at all
+# [irs/irs030.cbl:L552-L554], so zero states that the section ran to completion:
+# it opened the transfer file, found both control accounts, walked the fixture
+# and reached the end-of-job paragraph [irs/irs030.cbl:L1702] rather than
+# leaving through one of the three guards. A status that contradicts this is
+# reported as a behavioural difference and the capture is still taken, so the
+# table diff can corroborate it (R-4).
+expected_status:
+  - 0
+
+# THE ONE PROMOTED INTERACTIVE ANSWER, AND IT IS THE DESTRUCTIVE ONE. It
+# occupies the slot the sibling scenarios leave empty, so the key order stays
+# identical across all eight files. Required by both runners for this operation
+# and defaulted by neither, because the frozen program has no default: the
+# bracketed hint in the prompt at [irs/irs030.cbl:L1716] is display text only,
+# and the test at [irs/irs030.cbl:L1718-L1719] re-asks for ever on anything that
+# is neither Y nor N. Both runners refuse an irs_post scenario that omits it
+# [harness/run_cobol_scenario.sh:L1467-L1487],
+# [harness/run_python_scenario.sh:L2428-L2445]. "Y" performs an open-output on
+# the transfer file [irs/irs030.cbl:L1723], which this handler turns into a mass
+# delete of every row of PSIRSPOST-REC [common/acas008.cbl:L313-L319],
+# [common/acas008.cbl:L571-L574]. That is why PSIRSPOST-REC is listed below and
+# why the protocol's reset-and-re-seed stage is load-bearing rather than
+# hygienic. The three answer keys belonging to the payment and end-of-cycle
+# routes are not declared, because none of them is on this path; leaving them
+# unstated is what keeps this scenario's inputs exactly the inputs the frozen
+# program takes.
+irs_clear_postings: "Y"
+
+affected_tables:
+  - IRSDFLT-REC
+  - IRSNL-REC
+  - IRSPOSTING-REC
+  - PSIRSPOST-REC

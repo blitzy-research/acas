@@ -1,0 +1,815 @@
+# =============================================================================
+# ACAS -- COBOL to Python migration of the batch posting cycle.
+#
+# SCENARIO mixed_accepted_rejected -- the mixed accepted-and-rejected batch of
+# the General Ledger posting cycle. Its whole purpose is to make gl072's TWO
+# ENTIRELY SILENT SKIPS observable in a table diff, and the only way a silent
+# skip can be observed is as an ABSENCE. Of the eight scenarios the protocol
+# expects (Agent Action Plan section 0.8.5) this is the one that posts some
+# transactions and drops others in a single run; the reference happy path is
+# harness/scenarios/clean_batch_gl.yaml, whose shape and key order this file
+# replicates exactly, and the run-aborting rejection belongs to
+# harness/scenarios/control_total_mismatch.yaml.
+#
+# THIS FILE IS INERT DATA (rule R-1, no COBOL at runtime). It carries no shell
+# command, no compiler invocation, no Python expression, no non-standard YAML
+# tag and no path into a build tree: both runners read it with yaml.safe_load
+# or with a plain top-level scalar reader, and the file only DESCRIBES the
+# inputs -- the runner scripts are the only things that act on them. Nothing
+# else belongs in this directory either: the harness tree is never on the
+# package import path (Agent Action Plan section 0.3.1), so there is no
+# __init__.py here.
+#
+# NO ACCOUNTING VALUE APPEARS AS A YAML SCALAR ANYWHERE IN THIS FILE (rule
+# R-2, zero binary floating point). YAML parses a bare decimal literal as a
+# binary float, so every money and quantity figure lives in the seeded flat
+# files as decimal text in the frozen record layout, never here. Only these
+# keys hold bare integers, and each one is a whole-number COBOL field:
+# run_date, run_date_binary, cyclea, period, date_form, file_system_used,
+# s_flag_p, p_flag_p and expected_status. There is no scientific notation and
+# no infinity or not-a-number token in this file. The Python-side reader
+# enforces the same rule from its end and REFUSES a real number outright
+# [harness/run_python_scenario.sh:L1570-L1580].
+#
+# NOTHING HERE DEFINES OR ALTERS THE SCHEMA (rule R-3). affected_tables SELECTS
+# from the 33 frozen tables of mysql/ACASDB.sql; it never adds a table, a
+# column, an index or a constraint. operations is a strictly ordered list and
+# its steps run one at a time, matching the single-threaded COBOL. R-3 bites
+# this file a second way that is easy to miss: the two skips are SILENT, so no
+# warning, counter, log line or rejection report may be added to make them
+# visible (Agent Action Plan section 0.6.5).
+#
+# KEYS APPEAR IN A FIXED ORDER, identically in all eight scenario files, and
+# the file is UTF-8, ASCII-only, LF-terminated, two-space indented and free of
+# tabs. It carries no wall-clock reading, no host identity, no process id, no
+# random value and no absolute host path, so two captures of one scenario are
+# byte-identical (rule R-6).
+# =============================================================================
+
+name: mixed_accepted_rejected
+
+description: |
+  PURPOSE
+  ONE closed, proofed General Ledger batch posts exactly as it does on the
+  reference happy path while OTHER transactions in the SAME RUN are abandoned
+  without a trace. gl070 -> gl071 -> gl072 all three run to completion; the
+  postable transactions move the nominal balances and stamp their batch; the
+  skippable ones leave no row, no counter, no message and no log line anywhere.
+  An empty normalised diff therefore proves TWO things at once -- that what
+  posted, posted identically, and that what was dropped was dropped identically
+  [harness/docker-compose.yml:L42-L44].
+
+  PYTHON MODULES EXERCISED (rule R-5, full traceability)
+    acas_posting/programs/gl070_transaction_pre_process.py   from general/gl070.cbl
+    acas_posting/programs/gl071_batch_sort.py                from general/gl071.cbl
+    acas_posting/programs/gl072_transaction_update.py        from general/gl072.cbl
+  driven by acas_posting/cli/gl_post_cycle.py, which reproduces the menu's own
+  dispatch paragraph load08 [general/general.cbl:L805-L815] and whose process
+  exit status IS WS-Term-Code [copybooks/wscall.cob:L10] -- zero when all three
+  phases ran. That is what expected_status below asserts.
+  FOUR ANOMALIES ARE IN PLAY, each registered in docs/migration/anomaly-log.md
+  and each reproduced rather than repaired (rule R-4):
+    A-13  the two entirely silent skips -- THE HEADLINE OF THIS FILE.
+    A-14  the sequential nominal read, which the skips interact with.
+    A-15  the batch-record length contradiction.
+    A-21  the qualified references forced by field-name collisions across three
+          posting copybooks.
+
+  WHY THE SEEDED BATCH IS CLOSED AND WAITING, AND NOT OPEN
+  THIS IS THE CENTRAL DESIGN DECISION OF THE FILE, and getting it wrong would
+  not merely weaken the scenario, it would DELETE it: an open batch aborts the
+  cycle before either skip can be reached, so this file would collapse into
+  harness/scenarios/control_total_mismatch.yaml, which is the scenario that
+  owns that behaviour. The abort chain has four links:
+    ONE. Phase one walks the batch file and flags any open batch:
+      if status-open / move 1 to a [general/gl070.cbl:L314-L315].
+    TWO. The mainline then raises the terminate code: if a = 1 / perform gl060a
+      / move 5 to ws-term-code / go to main-exit
+      [general/gl070.cbl:L287-L290]. THE RAISE IS THE THIRD OF THOSE LINES, at
+      [general/gl070.cbl:L289]; the line before it is a display paragraph and
+      not the raise.
+    THREE. The menu tests the code and returns to the menu rather than
+      continuing: if ws-term-code = 5 / go to display-menu
+      [general/general.cbl:L810-L811].
+    FOUR. gl071 AND gl072 THEREFORE NEVER RUN, and the database effect is the
+      absence of everything the later phases would have written.
+  So every batch this scenario means to post is seeded CLOSED, meaning proofed
+  [copybooks/wsbatch.cob:L25-L27], and WAITING
+  [copybooks/wsbatch.cob:L29-L31]. Phase one then finds nothing open, the run
+  reaches phase four, and both skips are live.
+
+  WHY expected_status IS ZERO -- A SILENT SKIP RAISES NO TERM CODE
+  Neither skip path touches ws-term-code. Both are a bare go to loop, at
+  [general/gl072.cbl:L292] and [general/gl072.cbl:L307], and gl072 sets a term
+  code nowhere at all. The only two term codes this harness can observe are
+  five, from [general/gl070.cbl:L289], which belongs to the control-total
+  scenario, and eight, from [sales/sl055.cbl:L344] and
+  [purchase/pl055.cbl:L286], which cannot arise here for two independent
+  reasons: each sits inside an if FS-Cobol-Files-Used guard
+  [sales/sl055.cbl:L326] and [purchase/pl055.cbl:L266] that the pinned
+  file_system_used of one closes, and both belong to the Sales and Purchase
+  routes rather than to this one. The runner states the same mapping from its
+  own side [harness/run_python_scenario.sh:L3276-L3280]. A status that
+  contradicts the declaration is reported as a behavioural difference AND THE
+  CAPTURE IS STILL TAKEN, so the table diff can corroborate it.
+
+  THE TWO SILENT SKIPS -- ANOMALY A-13
+  gl072 abandons a work-file record in two places, and the Agent Action Plan
+  classifies both as a clean rejection with no database effect:
+    SKIP (a)   if post-batch not numeric / go to loop
+               [general/gl072.cbl:L291-L292].
+    SKIP (b)   if we-error equal 999 / go to loop
+               [general/gl072.cbl:L306-L307].
+  THE MEASURED TRIGGER FOR SKIP (b) is the batch fetch, which sets that very
+  code when the batch it lands on is not waiting: if not waiting / move 999 to
+  we-error / move 0 to save-batch, else move 0 to we-error
+  [general/gl072.cbl:L458-L462]. The sentinel is 999 because the field is
+  We-Error pic 999 [copybooks/wsfnctn.cob:L23] and 999 is the largest value it
+  can hold. The fetch is a section of its own at [general/gl072.cbl:L448] and
+  is performed from ONE place only, the headings paragraph
+  [general/gl072.cbl:L346], which the read loop reaches through the two
+  PERFORM THRU sites [general/gl072.cbl:L300] and [general/gl072.cbl:L304] --
+  two of the only SEVEN PERFORM THRU sites in the whole migration, hand
+  verified rather than pattern matched -- and through the page-overflow path
+  [general/gl072.cbl:L337]. When the code is set, headings abandons itself too:
+  if we-error equal 999 / go to headings-end [general/gl072.cbl:L348-L349], so
+  not even a page heading appears.
+
+  WHY THE SEED NEEDS THREE BATCH ROWS AND NOT TWO -- SKIP (b) IS POSITIONAL
+  This is the subtlest fact in the file and it was measured, not assumed.
+  It would be natural to assume that a posting belonging to a non-waiting batch
+  is what trips skip (b). IT CANNOT BE, because such a posting never reaches
+  gl072 at all: gl070's phase-two rejector drops the whole batch before its
+  postings are pre-processed -- if status-open / or not waiting / or not
+  gl-batch / go to loop [general/gl070.cbl:L460-L463] -- so nothing of it is
+  ever written to the work file.
+  What actually trips skip (b) is HOW the batch fetch finds its record. It
+  moves the wanted key into the record area and then reads SEQUENTIALLY:
+  move 1 to WS-Ledger / move post-batch to save-batch WS-Batch-Nos
+  [general/gl072.cbl:L451-L452] and then perform GL-Batch-Read-Next
+  [general/gl072.cbl:L454]. That verb sets fn-Read-Next and nothing else
+  [copybooks/Proc-ACAS-FH-Calls.cob:L460-L463], so THE KEY MOVE IS INERT for
+  the read exactly as it is in the nominal case below, and the record the fetch
+  tests is simply THE NEXT ROW IN CURSOR ORDER. The cursor is ascending primary
+  key: the bridge builds BATCH-KEY >= "000000" ORDER BY BATCH-KEY ASC
+  [common/glbatchMT.cbl:L462-L479] and issues it at
+  [common/glbatchMT.cbl:L491-L497].
+  So the batch rows must be ARRANGED, not merely present. The seed carries
+  three General Ledger batches in the pinned cycle, and their KEY ORDER is the
+  contract:
+    BATCH A, waiting, the lowest key. Its postings are pre-processed and post
+      normally, and the fetch lands on it first.
+    BATCH B, NOT waiting -- Processed or Archived
+      [copybooks/wsbatch.cob:L29-L32] -- with the MIDDLE key. gl070 rejects it
+      at [general/gl070.cbl:L460-L463] so it contributes no postings; its only
+      role is to be the row the fetch lands on next.
+    BATCH C, waiting, the highest key. Its postings are pre-processed too.
+  The resulting run, traced against the frozen source: A's postings post; the
+  change of batch number closes A at [general/gl072.cbl:L294-L300], which
+  performs end-account then end-batch and zeroes save-ledger
+  [general/gl072.cbl:L299], and then performs headings, whose fetch reads B,
+  finds it not waiting and sets the code together with move 0 to save-batch
+  [general/gl072.cbl:L459-L460]; C's FIRST posting is therefore skipped
+  silently at [general/gl072.cbl:L306-L307]; the next posting re-enters through
+  if save-batch equal zero [general/gl072.cbl:L302-L304], the fetch advances to
+  C, finds it waiting, clears the code at [general/gl072.cbl:L462], and the
+  remainder of C posts normally. SOME TRANSACTIONS POST AND SOME VANISH, in one
+  run, with no diagnostic of any kind.
+  IF BATCH B HELD THE LOWEST KEY INSTEAD, the very first fetch would find it
+  and EVERY posting in the run would be skipped: the scenario would stop being
+  mixed and would become an all-rejected run. That is why the arrangement is
+  stated as a contract here rather than left to whoever writes the flat files.
+  Note also, because it follows from the same lines: the batch-change branch is
+  guarded by we-error not = 999 [general/gl072.cbl:L296], so while the code is
+  set no batch is closed by that path -- and the end-of-data path closes
+  whatever is current unconditionally [general/gl072.cbl:L286-L289]. What the
+  compiled cycle leaves in the two tables after all of that is for the ORACLE
+  to state and for the Python side to match, never for this file to predict.
+
+  NO WARNING, NO COUNTER, NO LOG LINE, NO REPORT (rule R-3)
+  The Agent Action Plan's analysis of rejection paths is verbatim on this
+  point: Both are silent -- no message, no counter, no trace. The Python
+  equivalent must be equally silent; adding a warning would be an added
+  behaviour. So the migrated gl072 module must not count skips, must not log
+  them, must not summarise them and must not return them: THE ONLY LEGITIMATE
+  EVIDENCE THAT A SKIP HAPPENED IS THE ABSENCE OF ITS EFFECT IN THE TABLE DUMP.
+  That is also why this scenario is dangerous to run carelessly -- see the
+  false-pass trap under THE SEEDED SYSTEM RECORD below, because a run that
+  never reached the database at all would look exactly like a run in which
+  everything was correctly skipped.
+
+  THE A-13 AND A-14 INTERACTION -- THE SUBTLEST REQUIREMENT IN THIS FILE
+  gl072 does not look the nominal account up by key. Its new-account paragraph
+  [general/gl072.cbl:L402] moves the ledger number into the key field at
+  [general/gl072.cbl:L405] -- inert, exactly as in the batch fetch above -- and
+  then, guarded only by if read-ledger not = "R" [general/gl072.cbl:L407],
+  performs a SEQUENTIAL read-next at [general/gl072.cbl:L408]. It lands on the
+  right account ONLY because gl071 has already emitted the stream in
+  nominal-key order. That is anomaly A-14, reproduced and never repaired into an
+  indexed read.
+  NOW COMBINE THE TWO ANOMALIES. A skipped posting is skipped AFTER the sort has
+  already placed it in the stream, and the skip is a bare go to loop that
+  reaches neither new-account nor the read: SO A SKIPPED POSTING NEVER ADVANCES
+  THE SEQUENTIAL NOMINAL CURSOR. It follows that a skipped posting MUST NOT
+  perturb the account position of the postings that come after it, and an empty
+  diff is what proves the migrated code got that right.
+  This is precisely what a well-meant restructuring would break. Filtering the
+  stream first and posting afterwards -- the obvious tidy-up -- changes nothing
+  about which postings are skipped, but it changes WHERE THE CURSOR IS when the
+  survivors are posted, and the result is SILENT MISPOSTING: no error, no
+  diagnostic, simply wrong balances in GLLEDGER-REC. The skip must therefore
+  stay exactly where the frozen program puts it, inside the loop, after the
+  record has been read and before the account is resolved.
+  The single state mutation for a posting is add post-amount to ledger-balance
+  [general/gl072.cbl:L331], and the balance field it lands in is
+  Ledger-Balance pic s9(8)v99 comp-3 [copybooks/wsledger.cob:L28].
+
+  THE SORT ORDERING CONTRACT
+  gl071 declares its sort record at [general/gl071.cbl:L134] with the field
+  order sort-batch, sort-post, sort-code, sort-date, sort-ac, sort-pc,
+  sort-amount, sort-legend [general/gl071.cbl:L137-L144], takes the same four
+  linkage parameters as its siblings [general/gl071.cbl:L161-L164], and sorts at
+  [general/gl071.cbl:L172-L178] on ascending key sort-batch
+  [general/gl071.cbl:L173], sort-ac [general/gl071.cbl:L174], sort-pc
+  [general/gl071.cbl:L175] and sort-post [general/gl071.cbl:L176], reading the
+  pre-transaction work file [general/gl071.cbl:L177] and giving the
+  post-transaction one [general/gl071.cbl:L178]. It contains no arithmetic
+  whatsoever.
+  TWO PROPERTIES OF THAT SORT MATTER HERE. First, THE KEY ORDER IS NOT THE
+  DECLARATION ORDER: the keys are batch, account, profit centre, posting number,
+  whereas the record declares posting number second and account fifth. Second,
+  THERE IS NO DUPLICATES IN ORDER PHRASE anywhere in the program, so the
+  relative order of records equal on all four keys is unspecified by the
+  standard and the Python replacement must be a stable sort on that same key
+  tuple. Because the FIRST key is the batch number, the postings of the seeded
+  batches arrive at gl072 GROUPED BY BATCH, which is what makes the batch-change
+  path above the point at which the fetch advances.
+
+  THE PARAGRAPH ORDER AND THE STAMPING THAT MAKES THE DIFF VISIBLE
+  gl072 opens the batch file for i-o [general/gl072.cbl:L276], the nominal
+  ledger [general/gl072.cbl:L277] and the work file
+  [general/gl072.cbl:L278] -- the last of these being a LINE SEQUENTIAL file
+  [general/gl072.cbl:L95-L98] rather than anything in the database -- and then
+  loops from [general/gl072.cbl:L283].
+  ORDERING: at end of data, perform end-account [general/gl072.cbl:L287] runs
+  BEFORE perform end-batch [general/gl072.cbl:L288]. Inverting them would mark a
+  batch posted while its final account was still unclosed.
+  end-account [general/gl072.cbl:L379] has exactly one database effect, the
+  rewrite at [general/gl072.cbl:L382]. end-batch [general/gl072.cbl:L372] has
+  exactly one, and it stamps two columns first: move 1 to cleared-status
+  [general/gl072.cbl:L375] and move run-date to posted
+  [general/gl072.cbl:L376], then perform GL-Batch-Rewrite
+  [general/gl072.cbl:L377]. Both are columns of GLBATCH-REC in the frozen
+  schema -- CLEARED-STATUS at [mysql/ACASDB.sql:L84] and POSTED at
+  [mysql/ACASDB.sql:L88] -- which is exactly why the pinned binary run date is
+  diff-visible and must come from this file and from no clock.
+  A NOTE ON PAGE LENGTH, so that no reader concludes a key is missing here: when
+  the print line count passes the system record's page length
+  [copybooks/wssystem.cob:L65], gl072 performs an extra mid-batch sequence
+  [general/gl072.cbl:L335-L339] whose "R" latch makes new-account skip both the
+  sequential read [general/gl072.cbl:L407-L408] and the total reset
+  [general/gl072.cbl:L410-L411], so the extra rewrite writes the same balance
+  again and cannot change final table state. It does, however, perform headings
+  and therefore the batch fetch, which is the third route by which the fetch can
+  advance; the seed keeps its posting count well under a page so that the
+  scenario tests the batch-change route and not this one.
+
+  THE THREE-LEG DOUBLE-ENTRY EXPLOSION, AND ANOMALY A-21
+  Every posting that survives to the work file was exploded into two or three
+  legs by gl070 [general/gl070.cbl:L490-L533]:
+    guards at [general/gl070.cbl:L490-L493] skip a zero key and any posting
+      belonging to another batch;
+    the header fields are set ONCE at [general/gl070.cbl:L495-L499], so all
+      three legs share them -- and note that the batch number written into the
+      work file comes from the POSTING ROW's own field at
+      [general/gl070.cbl:L495] and not from the batch record, which is what
+      makes skip (a) a question about the posting data;
+    LEG ONE, the debit [general/gl070.cbl:L501-L506], adds VAT into the amount
+      when the VAT side is "CR" [general/gl070.cbl:L503] and writes at
+      [general/gl070.cbl:L508];
+    LEG TWO, the credit [general/gl070.cbl:L510-L515], tests the OPPOSITE side
+      "DR" [general/gl070.cbl:L512] and is then negated UNCONDITIONALLY --
+      multiply pre-amount by -1 giving pre-amount
+      [general/gl070.cbl:L517] -- before writing at [general/gl070.cbl:L519];
+    the VAT leg is SKIPPED unless BOTH the VAT account and the VAT amount are
+      non-zero, by an OR-gate at [general/gl070.cbl:L521-L523];
+    LEG THREE [general/gl070.cbl:L525-L527] is negated only CONDITIONALLY
+      [general/gl070.cbl:L529-L530], written at [general/gl070.cbl:L532], and
+      the loop repeats [general/gl070.cbl:L533].
+  ANOMALY A-21 is observable right here: the field names collide across three
+  posting copybooks, so the source must qualify them -- post-code in
+  WS-Posting-Record at [general/gl070.cbl:L497] and vat-ac of WS-Posting-Record
+  at [general/gl070.cbl:L521] and [general/gl070.cbl:L525]. gl072 carries one of
+  its own, description of WS-Batch-Record at [general/gl072.cbl:L456], inside
+  the very fetch that decides skip (b). The qualification is preserved in the
+  Python records rather than tidied away.
+
+  THE TWO CYCLE FILTERS ARE NOT IDENTICAL AND MUST NOT BE COLLAPSED
+  Phase one filters on the accounting cycle alone: if bcycle not = scycle / go
+  to loop [general/gl070.cbl:L312-L313]. Phase two filters on the same cycle at
+  [general/gl070.cbl:L457-L458] and THEN adds three status conditions the first
+  pass does not have [general/gl070.cbl:L460-L463]. Merging the two passes would
+  change which batches are pre-processed at all -- and in THIS scenario it would
+  do so visibly, because batch B is precisely a batch that passes the first
+  filter and is rejected by the second. All three seeded batches therefore carry
+  Bcycle equal to the pinned cyclea [copybooks/wsbatch.cob:L34].
+
+  ANOMALY A-15 -- THE BATCH-RECORD LENGTH CONTRADICTION
+  The batch copybook carries the maintainer's own unresolved note, verbatim at
+  [copybooks/wsbatch.cob:L7-L9]: 96 bytes 26/03/09 / 98 bytes 20/12/11 (no,
+  dont understand as I count 96) / but function length (Batch-record) says 98?
+  Whether the declared length or the sum of the fields governs the record
+  actually read affects the alignment of the TRAILING fields, and only execution
+  shows which. It matters more here than on the happy path, because this
+  scenario's whole outcome turns on ONE field of that record being read
+  correctly: Cleared-Status [copybooks/wsbatch.cob:L29-L32], which the fetch
+  tests at [general/gl072.cbl:L458]. Arbitrated against the compiled oracle and
+  recorded in docs/migration/ambiguity-resolutions.md.
+
+  SKIP (a) AND ITS REACHABILITY -- AN ARBITRATION, NOT AN ASSUMPTION (rule R-6)
+  Skip (a) tests a work-file field: if post-batch not numeric
+  [general/gl072.cbl:L291-L292], where post-batch is pic 9(5) at the very front
+  of the record [general/gl072.cbl:L111]. The value was written by gl070 from
+  the posting row's own batch field [general/gl070.cbl:L495], declared as Batch
+  pic 9(5) inside the ten-character group WS-Post-Key
+  [copybooks/wspost.cob:L14-L16].
+  THE HONEST POSITION, MEASURED. Through the database path that group does not
+  travel as text: the frozen schema holds the whole of it as ONE numeric column,
+  POST-KEY bigint(10) unsigned [mysql/ACASDB.sql:L156], and the bridge carries
+  it in HV-POST-KEY PIC 9(18) COMP [common/glpostingMT.cbl:L283], loading it
+  with move WS-Post-Key to HV-POST-KEY [common/glpostingMT.cbl:L1054] and
+  unloading it with move HV-POST-KEY to WS-Post-Key
+  [common/glpostingMT.cbl:L1085]. A non-numeric batch number written into the
+  seed is therefore COERCED by that pair of group-to-binary moves, and whether
+  any value can still reach gl072 as non-numeric is a question about the
+  compiled behaviour of those moves -- exactly the kind of question rule R-6
+  says the oracle settles and docs/migration/ambiguity-resolutions.md records.
+  A SECOND, INDEPENDENT ROUTE exists and is worth knowing while arbitrating: the
+  work files are ORGANIZATION LINE SEQUENTIAL at [general/gl070.cbl:L93-L96],
+  [general/gl071.cbl:L92-L100] and [general/gl072.cbl:L95-L98], and they carry a
+  signed DISPLAY amount, pre-amount pic s9(8)v99
+  [general/gl070.cbl:L108-L116], that [general/gl070.cbl:L517] makes negative on
+  every credit leg -- so the work file is not plain digits and text, and record
+  alignment on read is itself a compiled-behaviour question.
+  WHAT THIS FILE DOES ABOUT IT: the seed DECLARES a posting row aimed at that
+  guard and does not tidy it away, because rule R-4 forbids removing the very
+  data an anomaly needs; and the Python side must take the same branch, or not
+  take it, exactly as the oracle does, silently either way. THE SEED IS NEVER
+  ADJUSTED TO MAKE A RUN LOOK NEATER.
+
+  THE PHASE LABELS, AND WHY THEIR NUMBERING IS NOT EXECUTION ORDER
+  The programs label their own phases on screen:
+    [general/gl070.cbl:L284]  Phase - 1.  Batch Check
+    [general/gl070.cbl:L292]  Phase - 2.  Transaction Pre-process
+    [general/gl072.cbl:L274]  Phase - 4.  Transaction Update
+  gl071 displays only a wait message [general/gl071.cbl:L170] and is unnumbered.
+  Phase three is transaction DELETION and lives in gl080, which executes AFTER
+  phase four and which this scenario does not drive. The numbering is preserved
+  as found and is not renumbered.
+
+
+  WHY EXACTLY THESE THREE TABLES -- A MEASURED VERB CENSUS, NOT AN INFERENCE
+  Counting every facade verb the three programs issue:
+    gl070 issues twelve, and every one is READ-ONLY: GL-Batch-Open-Input at
+      [general/gl070.cbl:L303], [general/gl070.cbl:L342] and
+      [general/gl070.cbl:L448]; GL-Batch-Read-Next at [general/gl070.cbl:L308],
+      [general/gl070.cbl:L347] and [general/gl070.cbl:L453]; GL-Batch-Close at
+      [general/gl070.cbl:L321], [general/gl070.cbl:L440] and
+      [general/gl070.cbl:L473]; GL-Posting-Open-Input at
+      [general/gl070.cbl:L481]; GL-Posting-Read-Next at
+      [general/gl070.cbl:L486]; GL-Posting-Close at [general/gl070.cbl:L466].
+    gl071 issues NONE. It is a pure SORT.
+    gl072 issues exactly eight: GL-Batch-Open [general/gl072.cbl:L276],
+      GL-Nominal-Open [general/gl072.cbl:L277], GL-Batch-Rewrite
+      [general/gl072.cbl:L377], GL-Nominal-Rewrite [general/gl072.cbl:L382],
+      GL-Nominal-Read-Next [general/gl072.cbl:L408], GL-Batch-Close
+      [general/gl072.cbl:L441], GL-Nominal-Close [general/gl072.cbl:L442] and
+      GL-Batch-Read-Next [general/gl072.cbl:L454] -- and ZERO GL-Posting verbs
+      of any kind.
+  The only two mutating verbs on the whole route are therefore the two Rewrites
+  in gl072, so the route MUTATES exactly GLBATCH-REC and GLLEDGER-REC.
+  GLPOSTING-REC IS AN UNCHANGED-WITNESS: gl070 reads it and nothing on this
+  route writes it. It is listed anyway, and in this scenario that listing earns
+  its place twice over -- a skipped posting must leave its source row exactly as
+  seeded, and the dump is what proves it. gl072's own WS-Posting-Record is a
+  ONE-BYTE DUMMY, part of the stub block at [general/gl072.cbl:L135-L155] that
+  exists purely to satisfy the linker and maps to nothing at all in Python.
+  THE SYSTEM TABLES ARE DELIBERATELY NOT LISTED. On leaving, the COBOL menu
+  rewrites SYSTEM-REC, SYSTOT-REC and the defaults record at
+  [general/general.cbl:L656-L691], and the headless Python entry point has no
+  menu and never does; a census across all twelve in-scope programs finds no
+  System facade verb in any of them. Comparing any of those tables would produce
+  a guaranteed FALSE FAILURE that is an artefact of the harness rather than a
+  behavioural difference. The eleven out-of-scope tables of the frozen schema are
+  likewise absent, and the dumper refuses them by name
+  [harness/dump_tables.py:L104-L119]; the twenty-two it accepts, with the primary
+  key each dump is ordered by, are at [harness/dump_tables.py:L77-L100].
+  THE ORDER OF THE LIST IS LOAD-BEARING, not cosmetic: the Python-side runner
+  records one row count per affected table IN THE ORDER DECLARED HERE and
+  refuses to proceed if the two sides disagree
+  [harness/run_python_scenario.sh:L3163-L3183]. Alphabetical, which is also the
+  dumper's own iteration order [harness/dump_tables.py:L122].
+
+  THE SEEDED SYSTEM RECORD -- AND THE FALSE PASS THAT WOULD BE INVISIBLE HERE
+  Every value in the system block below must ALSO be carried by the seeded system
+  flat file, because the COBOL reads it from there and not from argv.
+    1. file_system_used = 1 IS THE FALSE-PASS TRAP, AND IT IS WORSE IN THIS
+       SCENARIO THAN IN ANY OTHER. The batch handler routes to the database only
+       when the flag is non-zero: if not FS-Cobol-Files-Used / move
+       RDBMS-Flat-Statuses to FA-RDBMS-Flat-Statuses / perform ba-Process-RDBMS /
+       go to AA-Main-Exit [common/acas007.cbl:L316-L320]. With the flag at zero
+       that test is false, control falls through to the COBOL indexed-file path,
+       both dumps come back empty and the diff is empty: A SILENT FALSE PASS. On
+       the happy path a reader might notice that nothing posted. HERE THEY WOULD
+       NOT, because this scenario's evidence is ITSELF partly an absence -- a run
+       that never touched the database is indistinguishable at a glance from a
+       run in which everything was correctly skipped. The condition names are at
+       [copybooks/wssystem.cob:L111-L114], with FS-Valid-Options at
+       [copybooks/wssystem.cob:L122].
+       Noted from the same handler: opening for output means DELETING EVERY ROW
+       [common/acas007.cbl:L305-L312], which is generic handler behaviour and not
+       something peculiar to one handler.
+    2. cyclea MUST BE NON-ZERO or the menu diverts into interactive setup: if
+       scycle = zero / go to call-system-setup
+       [general/general.cbl:L462-L463]. The field and its redefinition are at
+       [copybooks/wssystem.cob:L62-L63]. A zero here does not fail the run, it
+       HANGS it on a terminal prompt. All three seeded batches carry Bcycle equal
+       to this value, or phase one and phase two filter them out and the run
+       posts nothing.
+    3. irs_instead IS PINNED EXPLICITLY, to a space, because its state decides
+       WHICH TABLES a run touches and a default would make the affected-table
+       list ambiguous. Verbatim [copybooks/wssystem.cob:L179-L181]:
+       05  IRS-Instead     pic x. / 88  IRS-Used  value "Y". /
+       88  IRS-Both-Used   value "B".
+       A space selects General Ledger only, Y selects IRS instead of it and B
+       selects IRS as well as it. Those two condition names are the field's ONLY
+       ones: there is no third value and in particular no N. A pic x cannot hold
+       an empty string, so a space is the more faithful spelling of the
+       General-Ledger-only state, and both runners accept it and strip it so that
+       the two spellings converge [harness/run_cobol_scenario.sh:L1436-L1460],
+       [harness/run_python_scenario.sh:L2319-L2345].
+  The remaining four are INERT on this General Ledger route and are present only
+  so that all eight scenario files share one system block and so the seeded
+  system record is fully determined: period, the cycles-per-quarter divisor used
+  only by gl080 [copybooks/wssystem.cob:L64]; sl_autogen and pl_autogen, pinned
+  to a space so the Sales side's pre-pass program is a provable no-op; and
+  s_flag_p and p_flag_p, the cash and payment posting latches
+  [copybooks/wssystem.cob:L226] and [copybooks/wssystem.cob:L206]. date_form
+  governs the digit ORDER the COBOL runner types at the date prompt
+  [copybooks/wssystem.cob:L128-L132] and is one, the UK form, matching the text
+  date pinned below.
+
+  THE SEED CONTRACT
+  The seed directory name below is a RELATIVE directory name and never an
+  absolute path. Its two consumers resolve it against different bases, which is a
+  property of the consumers and not of this file: the COBOL-side seeder joins a
+  relative name to the directory holding this scenario file
+  [harness/seed.sh:L2054-L2063] and stages the declared files into a fresh
+  scenario-owned fixture, while the Python side reads it as a subdirectory of the
+  harness data directory. Each declared name must be a BARE file name
+  [harness/seed.sh:L2072-L2078]. The flat files themselves are a separate
+  deliverable and are deliberately NOT created in this directory.
+  Four flat files are declared, and each is one of the names the frozen loader
+  script recognises:
+    system.dat   -- the system block, loaded first and unconditionally by four
+                    loaders in a fixed order [common/masterLD.sh:L51-L88], and
+                    required by the seeder itself
+                    [harness/seed.sh:L2125-L2129]. Effectively mandatory:
+                    without the system record the menu calls its interactive
+                    setup program [general/general.cbl:L385-L396] and the runner
+                    blocks on a terminal. It must carry file_system_used, cyclea,
+                    period, date_form, irs_instead, sl_autogen, pl_autogen,
+                    s_flag_p and p_flag_p exactly as pinned below, plus the
+                    database credential fields described under THE CREDENTIAL
+                    PRECONDITION.
+    ledger.dat   -- [common/masterLD.sh:L103], loaded into GLLEDGER-REC by
+                    nominalLD. THREE OR MORE nominal accounts, so that gl071's
+                    ordering is genuinely load-bearing and the A-13 and A-14
+                    interaction above is actually testable rather than vacuous.
+                    The key is the six-digit account plus the two-digit profit
+                    centre [copybooks/wsledger.cob:L13-L20] and the balance is
+                    Ledger-Balance pic s9(8)v99 comp-3
+                    [copybooks/wsledger.cob:L28]. Its name field is the width
+                    drift the normaliser exists for: pic x(24) in the copybook
+                    [copybooks/wsledger.cob:L27] against char(32) in the frozen
+                    schema [mysql/ACASDB.sql:L127].
+    batch.dat    -- [common/masterLD.sh:L94], loaded into GLBATCH-REC by
+                    glbatchLD. THREE General Ledger batches, arranged by key as
+                    the positional argument above requires, using the copybook's
+                    own condition names: WS-Ledger one, so GL-Batch is true
+                    [copybooks/wsbatch.cob:L15-L16]; Bcycle equal to cyclea
+                    [copybooks/wsbatch.cob:L34]; Items equal to the true
+                    transaction count [copybooks/wsbatch.cob:L23]; and the four
+                    UNSIGNED packed-decimal money fields
+                    [copybooks/wsbatch.cob:L41-L44] consistent with each batch's
+                    own postings.
+                      BATCH A, lowest key: Batch-Status one so Status-Closed is
+                        true [copybooks/wsbatch.cob:L25-L27] and Cleared-Status
+                        zero so Waiting is true
+                        [copybooks/wsbatch.cob:L29-L31].
+                      BATCH B, middle key: General Ledger, closed, and
+                        Cleared-Status NOT zero -- one for Processed or two for
+                        Archived [copybooks/wsbatch.cob:L29-L32]. This single
+                        field is the trigger for skip (b) at
+                        [general/gl072.cbl:L458-L459].
+                      BATCH C, highest key: closed and waiting, exactly like A.
+                    Posted [copybooks/wsbatch.cob:L38] and Cleared-Status are the
+                    two fields gl072 stamps
+                    [general/gl072.cbl:L375-L376]. NOTE, because a planning
+                    document says otherwise: this record has NO actual-debit or
+                    actual-credit field at all. Its only four money fields are
+                    the ones cited above, and any description of the batch
+                    control-total gate as accumulating actual debits and credits
+                    is inaccurate against the frozen copybook. The correction is
+                    recorded in docs/migration/ambiguity-resolutions.md rather
+                    than silently applied.
+    posting.dat  -- [common/masterLD.sh:L109], loaded into GLPOSTING-REC by
+                    glpostingLD. THREE KINDS OF ROW, and the interleaving is part
+                    of the contract:
+                      KIND ONE, postable: rows of batch A and of batch C,
+                        spanning at least two nominal accounts and at least two
+                        profit centres, with at least one carrying VAT so the
+                        third leg is written and at least one without it so the
+                        OR-gate skip [general/gl070.cbl:L521-L523] is covered.
+                      KIND TWO, aimed at skip (a): a row whose batch number is
+                        written non-numerically, so that
+                        [general/gl072.cbl:L291-L292] is exercised if the frozen
+                        chain lets such a value through -- see SKIP (a) AND ITS
+                        REACHABILITY above, which is an arbitration and not an
+                        assumption.
+                      KIND THREE, the consequence of batch B: batch B's own
+                        postings, which gl070 never pre-processes
+                        [general/gl070.cbl:L460-L463], seeded so that the
+                        rejection is visible as GLPOSTING-REC rows that produced
+                        no ledger movement at all.
+                    KINDS TWO AND THREE ARE INTERLEAVED BETWEEN KIND-ONE ROWS
+                    THAT TARGET DIFFERENT NOMINAL ACCOUNTS, so that a Python
+                    implementation which mishandled the sequential-cursor
+                    interaction would post into the wrong account and the error
+                    would surface in GLLEDGER-REC rather than hide.
+                    All money amounts live in this file as decimal text in the
+                    frozen record layout [copybooks/wspost.cob:L12-L28]; no
+                    monetary value appears as a YAML scalar anywhere (rule R-2).
+  The declared set maps one-to-one onto the affected tables: batch.dat to
+  GLBATCH-REC, ledger.dat to GLLEDGER-REC, posting.dat to GLPOSTING-REC. NONE of
+  the eight out-of-scope flat-file names of [common/masterLD.sh:L93-L116] appears
+  here; their tables are out of scope and the omission of the two
+  automatic-generation loaders in particular is load-bearing, not an oversight.
+  NOTHING IN THE SEED IS TIDIED to make a run look neater (rule R-4): the seed
+  exists to make these anomalies observable, and data that dodges one defeats the
+  file's purpose.
+
+  THE CREDENTIAL PRECONDITION -- CANNOT BE SATISFIED FROM THIS DIRECTORY
+  The COBOL takes its database credentials from the SEEDED SYSTEM RECORD, not
+  from the environment. The fields are declared with their shipped defaults at
+  [copybooks/wssystem.cob:L137-L144] -- database name, user and password each
+  pic x(12), port pic x(5), host pic x(32) and socket pic x(64) -- and every
+  handler copies them into the shared connection block before use, for example
+  [common/acas005.cbl:L636-L641] and [common/acas007.cbl:L614-L619] into the
+  block at [copybooks/wsfnctn.cob:L56-L62], where the user and password fields
+  are only twelve characters wide. THE DATABASE ENVIRONMENT THE PYTHON SIDE USES
+  MUST EQUAL THE CREDENTIAL FIELDS INSIDE THE SEEDED SYSTEM FLAT FILE, or the two
+  sides address different servers and the diff is meaningless. This file carries
+  no credential of any kind and cannot: that flat file lives under the harness
+  data directory.
+  Note also that the General menu never reads the system record from the database
+  at all: it forces the flag to zero locally [general/general.cbl:L399-L401],
+  reads keys four, two and one from the COBOL indexed file
+  [general/general.cbl:L402-L419], and the database-read block below that is
+  commented out under the maintainer's own banner
+  [general/general.cbl:L421]. So the seeded system file must be a real COBOL
+  indexed file, and the flag value IT carries is what every child program
+  inherits through the system-record linkage parameter
+  [general/general.cbl:L715-L719].
+
+  THE OTHER PRECONDITIONS, EACH A HANG RISK RATHER THAN A FAILURE
+    The menu forces the escape and exception screen settings
+    [general/general.cbl:L369-L370] and then REFUSES TO RUN below twenty-four
+    lines or eighty columns [general/general.cbl:L374-L383].
+    Autocommit MUST BE OFF while seeding. The batch loader says so itself,
+    verbatim at [common/glbatchLD.cbl:L9-L12]: this modules uses commit and
+    rollback so you MUST ensure that autocommit is OFF in the rdb settings. It is
+    as default set ON.
+    The loaders signal failure through exit codes whose values above sixty-three
+    abort the load [common/masterLD.sh:L56-L60], so the seeder must test them
+    rather than assume success.
+
+  THE GENERAL LEDGER CAVEAT -- WHY EXPECTED VALUES COME ONLY FROM THE ORACLE
+  The maintainer records that he has not worked with General at all since it was
+  migrated to the current compiler [README.TXT:L50-L53], while the same passage
+  reports the other ledgers as tested. THAT WARNING APPLIES WITH FULL FORCE HERE,
+  because this scenario deliberately provokes an error path in the least
+  exercised ledger in the system. No expected value for it may be derived from
+  documentation or from reasoning about intended behaviour: if the compiled cycle
+  behaves surprisingly -- if a batch is stamped that a reader would not expect,
+  or a balance moves that one would not -- THE SURPRISE IS THE SPECIFICATION
+  (rule R-6), it is reproduced rather than corrected (rule R-4), and the
+  arbitration is recorded in docs/migration/ambiguity-resolutions.md.
+
+  THE ACCEPTANCE PROTOCOL, AND WHAT AN EMPTY DIFF PROVES HERE
+  Build the oracle, then, in this exact order and with no stage skipped: seed,
+  run the COBOL cycle, dump the affected tables, normalise, reset and re-seed
+  from the same fixture, run the Python cycle, dump, normalise, and diff. The
+  canonical command sequence is spelled out at
+  [harness/docker-compose.yml:L29-L45]. AN EMPTY NORMALISED DIFF IS THE ONLY PASS
+  CONDITION [harness/docker-compose.yml:L42-L44],
+  [harness/diff_states.py:L1]; a stage that exits non-zero has produced no
+  evidence rather than weaker evidence, so the protocol is restarted from the
+  seed rather than carried forward. The per-scenario outcome is recorded in
+  docs/migration/scenario-diff-evidence.md.
+  FOR THIS SCENARIO, AN EMPTY DIFF PROVES THREE THINGS AT ONCE:
+    that the postable transactions produced identical GLLEDGER-REC balances and
+      identical GLBATCH-REC stamping;
+    that the skipped transactions produced identically NOTHING -- no ledger
+      movement, no batch stamp, no row anywhere;
+    and that the skipped transactions DID NOT SHIFT THE SEQUENTIAL NOMINAL
+      CURSOR, because if they had, the survivors' balances would have landed in
+      the wrong accounts and the first assertion would have failed.
+  The normaliser makes those comparisons honest by canonicalising trailing spaces
+  in fixed-character columns, decimal scale rendering and the date text forms
+  [harness/normalize.py:L10-L17]; the differ requires both trees to be normalised
+  before it will compare them [harness/diff_states.py:L129].
+  Forward reference: docs/migration/ and the scenario test suite do not exist yet;
+  they arrive with the deliverables that consume this file.
+
+
+  THE CONSUMER CONTRACT -- WHY SOME VALUES APPEAR UNDER TWO KEYS
+  This file serves consumers with two different reading strategies, so a few
+  values are published under both a grouped and a flat key. THE PAIRS ARE
+  ADJACENT AND MUST ALWAYS HOLD THE SAME VALUE; they are written side by side
+  precisely so that any drift is visible at a glance.
+    clock.to_day    and run_date_text
+    clock.run_date  and run_date_binary
+    system.date_form    and date_form
+    system.irs_instead  and irs_instead
+    seed.data_dir       and seed_dir
+    seed.files          and seed_files
+    operations[0]       and operation
+  The reason is measured, not assumed. The COBOL runner reads this file with a
+  plain reader that accepts TOP-LEVEL KEYS ONLY, with no leading whitespace
+  before the key [harness/run_cobol_scenario.sh:L1115-L1167] and specifically
+  [harness/run_cobol_scenario.sh:L1150], and it requires run_date_text
+  [harness/run_cobol_scenario.sh:L1384-L1393], run_date_binary
+  [harness/run_cobol_scenario.sh:L1398-L1408], date_form
+  [harness/run_cobol_scenario.sh:L1413-L1418], irs_instead as a key that must be
+  PRESENT even when its value is a space
+  [harness/run_cobol_scenario.sh:L1436-L1460] and affected_tables
+  [harness/run_cobol_scenario.sh:L1544-L1568]; it takes the operation from
+  [harness/run_cobol_scenario.sh:L1300]. The seeder requires seed_files and
+  honours seed_dir [harness/seed.sh:L2041-L2063], and the dumper reads the
+  affected-table list with a full YAML parser
+  [harness/dump_tables.py:L2242-L2296]. A nested-only file would be silently
+  invisible to the first two and the protocol could not start.
+  The grouped blocks are the documented shape and carry the four system values
+  that have no flat consumer at all -- file_system_used, cyclea, period,
+  sl_autogen, pl_autogen, s_flag_p and p_flag_p are assertions about the SEEDED
+  RECORD rather than command-line inputs, which is why the Python entry point
+  exposes no option for them. The Python-side reader records a nested block under
+  a key it does not read and leaves it alone
+  [harness/run_python_scenario.sh:L1651-L1660].
+  THREE SHAPES A READER MIGHT EXPECT HERE AND WILL NOT FIND, each with the
+  measured reason:
+    operations IS A FLAT SEQUENCE OF OPERATION NAMES, not a sequence of steps
+      carrying their own subsystem, answer map and expectation. A list whose
+      items are themselves blocks is recorded and NOT read
+      [harness/run_python_scenario.sh:L1639-L1648], and a block under a key the
+      runner does read is then REFUSED outright and the run stops
+      [harness/run_python_scenario.sh:L1721-L1737]. Each runner owns the
+      operation-to-subsystem map, and this scenario's subsystem is stated once at
+      top level.
+    THE EXPECTED TERM CODE IS expected_status, positionally
+      [harness/run_python_scenario.sh:L3245-L3283]. The term-code mapping is the
+      identity, so the single zero below states that gl070 did not raise the
+      open-batch abort and that the cycle therefore ran all three phases.
+    NO ANSWER KEY IS DECLARED, because the General Ledger posting cycle asks
+      nothing interactively. The runner promotes an answer only for the payment,
+      IRS and end-of-cycle routes [harness/run_python_scenario.sh:L2403-L2412],
+      and answer keys are SEMANTIC in any case, never a copy of a command-line
+      option spelling, because the option spellings belong to the entry points
+      and are discovered from them.
+  The scenario NAME is published once, as name. The COBOL runner takes the name
+  from this file's own basename when no scenario key is present, and the two agree
+  by construction: name equals mixed_accepted_rejected equals the file stem.
+
+  LOCATOR PROVENANCE
+  Every line number cited above was read directly out of the frozen source and
+  out of the harness scripts in this checkout rather than copied from a plan, and
+  several planning citations were found to be off by one or misattributed. The
+  corrections worth knowing when cross-reading, all of them recorded in
+  docs/migration/ambiguity-resolutions.md:
+    gl070 -- the phase labels are at [general/gl070.cbl:L284] and
+      [general/gl070.cbl:L292]; the terminate-code raise is at
+      [general/gl070.cbl:L289] and not the line above it, which is a display
+      paragraph; the two cycle filters are at [general/gl070.cbl:L312-L313] and
+      [general/gl070.cbl:L457-L458], with the extra status conditions at
+      [general/gl070.cbl:L460-L463]; the qualified references are at
+      [general/gl070.cbl:L497], [general/gl070.cbl:L521] and
+      [general/gl070.cbl:L525].
+    gl071 -- the sort spans [general/gl071.cbl:L172-L178] with its first key at
+      [general/gl071.cbl:L173].
+    gl072 -- the phase-four label is at [general/gl072.cbl:L274]; the two silent
+      skips are at [general/gl072.cbl:L291-L292] and
+      [general/gl072.cbl:L306-L307]; the batch fetch sets the sentinel at
+      [general/gl072.cbl:L459] inside the test at [general/gl072.cbl:L458]; and
+      the sequential nominal read is a single statement at
+      [general/gl072.cbl:L408].
+    wsbatch -- the record carries no actual-debit or actual-credit field, so the
+      four money fields at [copybooks/wsbatch.cob:L41-L44] are the whole of its
+      monetary content.
+  THE FROZEN SOURCE IS READ AND NEVER EDITED: any diff under common, copybooks,
+  general, sales, purchase, irs, stock or mysql is a defect in the migration
+  however harmless it looks.
+
+subsystem: general
+
+# Read by [harness/run_cobol_scenario.sh:L1300] as the default for its
+# --operation option; the seven valid operation names are listed at
+# [harness/run_cobol_scenario.sh:L79-L87] and
+# [harness/run_python_scenario.sh:L511-L519].
+operation: gl_post_cycle
+
+clock:
+  to_day: "21/09/2025"
+  run_date: 155127
+
+# Flat mirrors of the clock block, required by
+# [harness/run_cobol_scenario.sh:L1384] and [harness/run_cobol_scenario.sh:L1398].
+# The pair is not two independent facts: the menu computes the text FROM the
+# binary [general/general.cbl:L465-L467] through maps04, whose epoch the
+# maintainer records as 31/12/1600 [common/maps04.cbl:L39-L41], and under that
+# epoch the date below is exactly this day number. They must never be edited
+# independently. The binary value is diff-visible because gl072 stamps it into
+# the batch [general/gl072.cbl:L376].
+run_date_text: "21/09/2025"
+run_date_binary: 155127
+
+system:
+  file_system_used: 1
+  cyclea: 1
+  period: 1
+  date_form: 1
+  irs_instead: " "
+  sl_autogen: " "
+  pl_autogen: " "
+  s_flag_p: 2
+  p_flag_p: 2
+
+# Flat mirrors of the two system values the COBOL runner reads directly:
+# [harness/run_cobol_scenario.sh:L1413] and [harness/run_cobol_scenario.sh:L1436].
+date_form: 1
+irs_instead: " "
+
+seed:
+  data_dir: gl_mixed
+  files:
+    - system.dat
+    - ledger.dat
+    - batch.dat
+    - posting.dat
+
+# Flat mirrors of the seed block, required by [harness/seed.sh:L2041] and
+# honoured by [harness/seed.sh:L2054]. system.dat is not optional
+# [harness/seed.sh:L2125-L2129].
+seed_dir: gl_mixed
+seed_files:
+  - system.dat
+  - ledger.dat
+  - batch.dat
+  - posting.dat
+
+# The operations this scenario runs, in order: one, and the whole three-phase
+# General Ledger cycle. A FLAT SEQUENCE OF NAMES -- see THE CONSUMER CONTRACT
+# above for why it cannot be a sequence of blocks
+# [harness/run_python_scenario.sh:L1723-L1745]. The Python runner reads this key
+# [harness/run_python_scenario.sh:L2016] and prefers it over the singular
+# operation key above; the oracle-side runner reads the singular key, which names
+# the same operation, so both resolve the same run from this one file.
+operations:
+  - gl_post_cycle
+
+# The process status the operation is expected to end with. THE SKIPS RAISE NO
+# TERM CODE: neither [general/gl072.cbl:L292] nor [general/gl072.cbl:L307]
+# touches ws-term-code, so zero states that gl070 did NOT raise the open-batch
+# abort [general/gl070.cbl:L289] and that all three phases ran -- batch check and
+# pre-process, sort, then transaction update. A status that contradicts this is
+# reported as a behavioural difference and the capture is still taken, so the
+# table diff can corroborate it (rule R-4).
+expected_status:
+  - 0
+
+# No answer key is declared: the General Ledger posting cycle asks nothing
+# interactively, and the four promoted answers -- irs_clear_postings,
+# payment_post_confirm, gl080_proceed and disk_change_option -- belong to the
+# IRS, payment and end-of-cycle routes, none of which is on this path
+# [harness/run_python_scenario.sh:L2403-L2412]. Leaving them unstated is what
+# keeps this scenario's inputs exactly the inputs the frozen cycle takes.
+
+# The tables this scenario BOUNDS the comparison to, alphabetically, and the
+# order is load-bearing for the seed fingerprint
+# [harness/run_python_scenario.sh:L3163-L3183]. Two are mutated by gl072's two
+# Rewrites; GLPOSTING-REC is an unchanged witness that proves the skipped
+# postings' source rows survived untouched.
+affected_tables:
+  - GLBATCH-REC
+  - GLLEDGER-REC
+  - GLPOSTING-REC
