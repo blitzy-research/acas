@@ -2920,6 +2920,49 @@ def _apportion__main_exit(ws: _Ws) -> None:
 # ===========================================================================
 
 
+#: ``05 WS-Batch-Nos pic 9(5)`` [copybooks/wsbatch.cob:L19] - the scale at which
+#: ``WS-Ledger`` [:L15] contributes to the six digits ``WS-Batch-Key9`` reads.
+_BATCH_NOS_SCALE: Final[int] = 10**5
+
+
+def _restate_ws_batch_key9(batch: GlBatchRecord) -> None:
+    """Keep ``WS-Batch-Key9`` in step with the two members it redefines.
+
+    ⭐⭐ ONE STORAGE, TWO READINGS. ``03 WS-Batch-Key.`` holds ``05 WS-Ledger
+    pic 9.`` and ``05 WS-Batch-Nos pic 9(5).``, and ``03 WS-Batch-Key9 redefines
+    WS-Batch-Key pic 9(6).`` [copybooks/wsbatch.cob:L14-L21] is those SAME six
+    bytes read as one number. ``move next-batch to WS-Batch-nos``
+    [purchase/pl060.cbl:L885] and ``move 2 to WS-Ledger`` [:L886] therefore change
+    what ``WS-Batch-Key9`` reads, instantly - in COBOL there is nothing to keep in
+    step because there is only one storage. Python has no aliasing, so restating it
+    is a MODELLING obligation, not a new rule.
+
+    THE ROLLOVER IS WHY THIS IS REACHED TWICE. ``if items = 99 / perform BL-Close /
+    perform BL-Open`` [purchase/pl060.cbl:L1006] closes the full batch and opens the
+    next, so a hundredth item returns here with a key already in working storage.
+    Without the restatement the grouped reading held the NEW batch while the
+    redefined reading still held the PREVIOUS one, and ``acas007``'s
+    ``synchronise_batch_key_views`` - which deliberately refuses to pick between two
+    non-default disagreeing readings, because ``bb000-HV-Load`` reads
+    ``WS-BATCH-KEY9`` [common/glbatchMT.cbl:L1069] while ``ba070`` logs
+    ``ws-BATCH-KEY`` - raised ``BatchKeyViewsDisagreeError`` and aborted the run,
+    turning a key rollover into a failure.
+
+    ⛔ DO NOT relax the reconciler instead. Its refusal is the safeguard; the defect
+    was here, at the writer. NOT a new validation (rule R-3) and NOT an anomaly
+    repair (rule R-4) - nothing is tested, clamped or corrected, and the value
+    computed is the one the COBOL's own bytes already carry after [:L885-L886].
+
+    Args:
+        batch: ``01 WS-Batch-Record.`` [copybooks/wsbatch.cob:L13], mutated in
+            place so both readings of its key agree.
+    """
+    batch.ws_batch_key9.ws_batch_key9 = (
+        int(batch.ws_batch_key.ws_ledger) * _BATCH_NOS_SCALE
+        + int(batch.ws_batch_key.ws_batch_nos)
+    )
+
+
 def _bl_open(ws: _Ws) -> None:
     """``BL-Open section.`` [purchase/pl060.cbl:L877-L921] - allocate and build the batch."""
     _fh("gl_batch_open", _ctx(ws, ws.batch))  # [L880] open i-o batch-file
@@ -2936,6 +2979,9 @@ def _bl_open(ws: _Ws) -> None:
         sending_field=_D_NEXT_BATCH,
     )
     ws.batch.ws_batch_key.ws_ledger = mv.move(2, _D_WS_LEDGER)
+    # ⭐ The two moves above have just changed the bytes ``WS-Batch-Key9`` redefines,
+    # so its reading is restated - see `_restate_ws_batch_key9`.
+    _restate_ws_batch_key9(ws.batch)
     # [L887] add 1 to Next-Batch. A ``SYSTEM-REC`` MUTATION, diff-visible and load-bearing
     # for batch numbering: it is what makes the number allocated at [L885] unique.
     ws.system_record.general_ledger_block.next_batch = ar.add_to(

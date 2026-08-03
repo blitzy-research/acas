@@ -558,12 +558,21 @@ class SizeErrorNoStore(ZeroDivisionError):
     and behave differently, and conflating them would corrupt every posted
     figure that overflows.
 
-    REACHABILITY.  No in-scope statement can reach this. Every site whose
-    divisor could be zero guards it in its own business logic -
+    REACHABILITY - CORRECTED.  This condition IS reachable, at exactly one
+    in-scope site, and an earlier reading of this module said otherwise. The
+    moving-average divides are guarded by their own business logic -
     [sales/sl060.cbl:L819], [sales/sl060.cbl:L835], [sales/sl100.cbl:L506] each
-    test their counter before dividing - and every other divisor in the cycle
-    is a literal. No guard is added here, because adding one would be an added
-    validation (rule R-3) and would hide a real divergence from the oracle.
+    test their counter before dividing - and every other divisor in the cycle is
+    a literal EXCEPT ONE: `divide scycle by period giving a rounded`
+    [general/gl080.cbl:L328], whose divisor is `Period pic 99`
+    [copybooks/wssystem.cob] and whose only gate is
+    `if a = 9 or scycle < period` [general/gl080.cbl:L326-L327]. `Period` is
+    UNSIGNED, so `scycle < 0` is false for every `scycle` and a zeroed system row
+    - `period = 0` - falls straight through the gate into the divide. The call
+    site therefore passes `receiver_value`, and this exception stays unraised
+    there because the measured outcome can be returned rather than announced.
+    No guard is added here, because adding one would be an added validation
+    (rule R-3) and would hide a real divergence from the oracle.
 
     docs/migration/ambiguity-resolutions.md carries the register entry; this
     class is the resolution itself, recorded where the condition is raised.
@@ -626,6 +635,46 @@ def _no_store(
     if receiver_value is None:
         raise SizeErrorNoStore(operation)
     return store(receiver_value, receiving)
+
+
+def _is_undefined_division(signalled: decimal.InvalidOperation) -> bool:
+    """Whether an `InvalidOperation` reports `0 / 0` rather than a bad operand.
+
+    `0 / 0` is a division by zero in COBOL terms and must reach the same
+    measured no-store outcome as `n / 0`, but the two arrive as different Python
+    classes because they are different `decimal` CONDITIONS: `n / 0` signals
+    DivisionByZero, whose class subclasses `ZeroDivisionError`, while `0 / 0`
+    signals DivisionUndefined, whose SIGNAL is `InvalidOperation` and which
+    therefore does not.
+
+    THE CONDITION IS READ OFF THE EXCEPTION, because the two `decimal`
+    implementations deliver it differently and both must be handled:
+
+    * the C implementation - the one this interpreter runs, `libmpdec` 4.0.0 -
+      raises the SIGNAL class and reports the condition in the argument list, so
+      `0 / 0` arrives as `InvalidOperation([DivisionUndefined])`;
+    * the pure-Python fallback raises the CONDITION class itself, so the same
+      divide arrives as `DivisionUndefined`, a subclass of `InvalidOperation`.
+
+    Both are recognised, and nothing else is: `InvalidOperation([ConversionSyntax])`
+    from a malformed numeric string and `InvalidOperation([InvalidOperation])`
+    from an infinity subtraction are programmer errors this module raises on
+    (rule R-2's carrier gate and `_exact`), never a zero divisor to absorb.
+
+    Args:
+        signalled: The exception the trap raised.
+
+    Returns:
+        True only for the undefined-division condition.
+    """
+    reported: tuple[object, ...] = (type(signalled),)
+    if signalled.args:
+        first = signalled.args[0]
+        reported += tuple(first) if isinstance(first, (list, tuple)) else (first,)
+    return any(
+        isinstance(item, type) and issubclass(item, decimal.DivisionUndefined)
+        for item in reported
+    )
 
 
 # =============================================================================
@@ -1006,7 +1055,20 @@ def compute(
     except SizeErrorNoStore:
         raise
     except ZeroDivisionError:
+        # `decimal.DivisionByZero` from an `x / 0` inside the caller's
+        # expression, and the builtin from an integer one.
         return _no_store("COMPUTE", receiver_value, receiving)
+    except decimal.InvalidOperation as signalled:
+        # A `0 / 0` inside the caller's expression signals DivisionUndefined,
+        # whose SIGNAL class is `decimal.InvalidOperation` and NOT a
+        # `ZeroDivisionError` - the same distinction `_quotient` records. Here
+        # the divisor lives inside the caller's callable and cannot be
+        # inspected, so the CONDITION is read off the signal itself; every other
+        # InvalidOperation - a signalling NaN, a malformed numeric string - is
+        # re-raised as the programmer error it is.
+        if _is_undefined_division(signalled):
+            return _no_store("COMPUTE", receiver_value, receiving)
+        raise
     return store(evaluated, receiving, rounded=rounded)
 
 
@@ -1450,11 +1512,25 @@ def _quotient(
     not theoretical.
 
     A ZERO DIVISOR is not tested for in advance - the divisor is used, and the
-    two routes fail differently, `usage.truncate_toward_zero` with the builtin
-    `ZeroDivisionError` and the decimal route with `decimal.DivisionByZero`
-    under this module's trap policy. Both are caught here and both reach the
-    ONE measured outcome, `_no_store`, so neither route can develop its own
-    behaviour.
+    routes fail differently. `usage.truncate_toward_zero` raises the builtin
+    `ZeroDivisionError`. The decimal route raises whichever signal the libmpdec
+    trap policy attaches to the CONDITION the operands produce, and there are
+    TWO conditions, not one:
+
+        1 / 0   signals DivisionByZero, trapped as `decimal.DivisionByZero`,
+                which subclasses `ZeroDivisionError`;
+        0 / 0   signals DivisionUndefined, whose SIGNAL - and therefore the
+                class the trap raises - is `decimal.InvalidOperation`, which
+                does NOT subclass `ZeroDivisionError`.
+
+    Both are a divide by zero in COBOL terms and both must reach the ONE
+    measured outcome, `_no_store`, so both are caught. The `InvalidOperation`
+    arm is admitted ONLY when the divisor is genuinely zero: the same signal
+    also carries a NaN operand and a malformed numeric string, and those are
+    programmer errors this module raises on rather than silently turns into a
+    no-store (see `_exact`). Nothing here tests the divisor to DECIDE anything -
+    the divide has already happened and failed; the test only attributes the
+    failure, so no guard is added to the arithmetic itself (rule R-3).
     """
     try:
         if not rounded and receiving.is_int:
@@ -1468,7 +1544,17 @@ def _quotient(
         with decimal.localcontext(INTERMEDIATE_CONTEXT):
             quotient = dividend / divisor
     except ZeroDivisionError:
+        # `usage.truncate_toward_zero`'s builtin, and the decimal route's
+        # `decimal.DivisionByZero`, which subclasses it.
         return _no_store(operation, receiver_value, receiving)
+    except decimal.InvalidOperation:
+        # 0 / 0 - DivisionUndefined, delivered as its signal class.
+        # `is_zero()` is a predicate on the value's own class and signals
+        # nothing, so a NaN divisor answers False here instead of raising a
+        # second exception from inside the handler.
+        if divisor.is_zero():
+            return _no_store(operation, receiver_value, receiving)
+        raise
     return store(quotient, receiving, rounded=rounded)
 
 

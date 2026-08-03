@@ -658,6 +658,13 @@ from acas_posting.records.sales_invoice import (
     HANDLER,
     HEADER_TABLE,
     LINES_TABLE,
+    IhCustomer,
+    IhFig,
+    IhInvoiceHeader,
+    IhOrderView,
+    IhPrime,
+    IhSubPrime,
+    IlInvoiceLine,
     SihCustomer,
     SihFig,
     SihOrderView,
@@ -708,6 +715,10 @@ __all__: Final[tuple[str, ...]] = (
     # Host-variable groups and the record areas.
     "BridgeState",
     "InvoiceBuffer",
+    # The linkage projection - the `sih-`/`ih-` rename `COPY ... REPLACING`
+    # performs at compile time [common/acas016.cbl:L218-L221].
+    "linkage_buffer_for",
+    "publish_linkage_buffer",
     "TdSainvLinesRec",
     "TdSainvoiceRec",
     "WsInvoiceLine",
@@ -2893,7 +2904,14 @@ def bb100_unload_hvs(state: BridgeState, buffer: InvoiceBuffer) -> None:
     #   *>  ---------------------------------------------------------
     #   *>   Here save the ih-Lines to WS so we can keep track of body-lines.
     # L1533  move HV-IH-LINES to WS-Actual-Lines-In-Row.
-    state.ws_actual_lines_in_row = int(group["IH-LINES"])
+    #
+    # ⭐ THE RECEIVING FIELD IS NARROWER THAN THE SENDER, and the MOVE rule is the
+    # RECEIVER'S.  `HV-IH-LINES PIC 9(03) COMP` [:L419] sends three digits into
+    # `01 WS-Actual-Lines-In-Row pic 99` [:L288], which holds two, so a header
+    # declaring 100 lines leaves this counter at ZERO and the line walk at
+    # [:L725] therefore never starts.  Storing 100 instead would compare
+    # `WS-Last-Read-Line < 100` and walk for ever.
+    state.ws_actual_lines_in_row = _move_to_actual_lines_in_row(int(group["IH-LINES"]))
     # L1535  *>   Save sih Invoice & test as last key read.
     # L1537  move HV-IH-INVOICE to WS-Last-Read-Invoice.
     state.ws_last_read_invoice = int(group["IH-INVOICE"])
@@ -2962,6 +2980,86 @@ def _initialize_header_record(header: SInvoiceHeader) -> None:
     sub.sih_update = " "
 
 
+def _initialize_line_record(line: SilInvoiceLine) -> None:
+    """``initialize`` the line view IN PLACE - every field zero or space.
+
+    The in-place counterpart of :func:`_new_line_record`, needed because the
+    caller holds a reference to the view object: replacing it would leave the
+    caller reading the record it held before the ``INITIALIZE``, where the COBOL
+    leaves it reading zeros and spaces in the very same storage.
+    """
+    line.sil_key.sil_invoice = 0
+    line.sil_key.sil_line = 0
+    line.sil_product = " " * 13
+    line.sil_pa = " " * 2
+    line.sil_qty = 0
+    line.sil_type = " "
+    line.sil_description = " " * 32
+    zero_money = Decimal("0.00")
+    line.sil_net = zero_money
+    line.sil_unit = zero_money
+    line.sil_discount = zero_money
+    line.sil_vat = zero_money
+    line.sil_vat_code = 0
+    line.sil_update = " "
+    # Declared, initialised, and never carried to any column - see
+    # `_new_line_record`'s N-back-ordered-dropped note.
+    line.sil_back_ordered = " "
+
+
+def _initialise_ws_invoice_record(buffer: InvoiceBuffer) -> None:
+    """``initialise WS-Invoice-Record.`` - the WHOLE 137-byte linkage area.
+
+    ⭐⭐ THE SHARED TEN BYTES ARE PART OF THE RECORD, so ``INITIALIZE`` clears
+    them too.  ``WS-Invoice-Record`` is the bridge's linkage record - the whole
+    137 bytes [copybooks/slwsinv2.cob:L27] - and the first ten of those bytes are
+    ``Invoice-Nos``/``Item-Nos``, the very field the two views call
+    ``sih-invoice``/``sih-test`` and ``sil-invoice``/``sil-line``.  A statement
+    that names the ``01`` therefore zeroes the KEY as well as everything else,
+    which is directly observable at the ``ba041-Reread`` not-found arm
+    [common/slinvoiceMT.cbl:L730-L735], verbatim::
+
+        initialise WS-Invoice-Record
+        move spaces to WS-File-Key
+        string WS-Invoice-Key
+               " Not Found"
+                    into WS-File-Key
+
+    - the ``STRING`` runs AFTER the ``INITIALIZE`` and reads ``WS-Invoice-Key``,
+    so the logged text is the ten ZERO characters and not the key that was just
+    searched for.  Clearing only the two typed views would leave that key intact
+    and the message would read ``0000010002 Not Found`` where the compiled
+    program writes ``0000000000 Not Found``.
+
+    ⭐ THE VIEWS ARE ZEROED, NOT DISCARDED.  In COBOL both "views" always exist,
+    because both ARE the storage; there is no absent state to model.  The frozen
+    bridge relies on that: ``initialise WS-Invoice-Record WS-Invoice-Line``
+    [common/slinvoiceMT.cbl:L2452-L2453] carries the maintainer's own reason -
+    *"Clear both in case called does not spot end of data for Invoice and to help
+    debugging if so"* - which is a statement about what the CALLER will read
+    next.  A caller reading a zeroed record is the behaviour; a caller finding no
+    record at all is not, and would raise where the compiled program quietly
+    processes a row of zeros.
+
+    ``with filler`` versus plain makes NO difference in this model, and that is a
+    fact about the record rather than a shortcut: the only FILLER in the area is
+    ``filler redefines sih-order`` [copybooks/slwsinv.cob:L28], whose ten bytes
+    the plain form already clears through ``sih-order`` itself (CORRECTION C1 on
+    :func:`_initialize_header_record`), and the line view declares none.  Both
+    spellings and both forms therefore route here, each keeping its own citation
+    at its own site.
+
+    Args:
+        buffer: The linkage record area, mutated in place.
+    """
+    # The shared ten bytes first, so the two `select_*` calls below carry the
+    # cleared key into whichever views the caller supplied.
+    buffer.ws_sih_invoice = 0
+    buffer.ws_sih_test = 0
+    _initialize_header_record(buffer.select_header())
+    _initialize_line_record(buffer.select_line())
+
+
 def _digit_or_zero(text: str) -> int:
     """A single ``PIC 9`` read out of a group move, defaulting to zero.
 
@@ -2980,6 +3078,48 @@ def _decimal_of(held: str | int | Decimal) -> Decimal:
     if isinstance(held, Decimal):
         return held
     return Decimal(str(held))
+
+
+#: The digit count of ``01 WS-Actual-Lines-In-Row pic 99``
+#: [common/slinvoiceMT.cbl:L288] - the bridge's own line counter, and the ONE
+#: field in this module whose sending item is wider than it is.
+_ACTUAL_LINES_IN_ROW_DIGITS: Final[int] = 2
+
+
+def _move_to_actual_lines_in_row(value: int) -> int:
+    """``move HV-IH-LINES to WS-Actual-Lines-In-Row.`` [common/slinvoiceMT.cbl:L1533].
+
+    A NARROWING MOVE, and the rule is the RECEIVING field's:
+
+    * sender   ``HV-IH-LINES PIC 9(03) COMP``  [common/slinvoiceMT.cbl:L419]
+    * receiver ``01 WS-Actual-Lines-In-Row pic 99`` [common/slinvoiceMT.cbl:L288]
+    * column   ``IH-LINES tinyint(2) unsigned`` [mysql/ACASDB.sql]
+
+    COBOL discards HIGH-ORDER digits on a move into a shorter numeric item, so a
+    header carrying 100 lines stores **zero** here, 123 stores 23, and 99 stores
+    99.  Nothing clamps to the maximum and nothing raises - the same rule
+    :func:`narrow_signed_host_variable` applies in the other direction, written
+    out separately because that one is about SIGN and this one is about WIDTH.
+
+    WHY IT MATTERS RATHER THAN BEING PEDANTRY.  This counter is the line walk's
+    terminator: ``if WS-Last-Read-Line < WS-Actual-Lines-In-Row``
+    [common/slinvoiceMT.cbl:L725] decides whether ``ba041-Reread`` fetches
+    another line or moves on to the next header.  A stored 100 makes that test
+    true for every reachable line number, so the walk never ends; the frozen
+    zero makes it false at once and the reread falls through to ``ba042-Fetch``.
+
+    The magnitude is taken without the builtin ``abs()``, which rule R-2's audit
+    forbids in this layer; the sender is unsigned, so the expression is a
+    faithful no-op for every value a column can hold.
+
+    Args:
+        value: What the host variable holds - the ``IH-LINES`` column's value.
+
+    Returns:
+        The two digits the receiving field keeps.
+    """
+    magnitude = -value if value < 0 else value
+    return magnitude % 10**_ACTUAL_LINES_IN_ROW_DIGITS
 
 
 # ---------------------------------------------------------------------------
@@ -4232,8 +4372,10 @@ def ba041_reread(ctx: _BridgeContext) -> None:
         # if fs-Reply not = zero  *> = 23  *> no row found   [:L729]
         if ctx.file_access.fs_reply != int(FsReply.SUCCESS):
             # initialise WS-Invoice-Record   [:L730]
-            ctx.buffer.ws_invoice_record = None
-            ctx.buffer.invoice_line = None
+            # The WHOLE record, key included - which is what makes the STRING on
+            # the next line read ten zeros.  See
+            # `_initialise_ws_invoice_record`.
+            _initialise_ws_invoice_record(ctx.buffer)
             # string WS-Invoice-Key " Not Found" into WS-File-Key  [:L731-L735]
             _move_to_ws_file_key(ctx, f"{ctx.buffer.ws_invoice_key} Not Found")
             # go to ba999-End  *> This should NOT happen   [:L736-L737]
@@ -4284,9 +4426,9 @@ def ba042_fetch(ctx: _BridgeContext) -> None:
     if cursor.count_rows == 0:
         # initialize WS-Invoice-Record with filler   [:L804]
         # N-initialize: 'with filler' HERE, plain at [:L1496].  Two semantics in
-        # one bridge; both reproduced in their own place.
-        ctx.buffer.ws_invoice_record = None
-        ctx.buffer.invoice_line = None
+        # one bridge; both reproduced in their own place - and in THIS model they
+        # coincide, for the reason `_initialise_ws_invoice_record` records.
+        _initialise_ws_invoice_record(ctx.buffer)
         _move_to_ws_file_key(ctx, "EOF2")
         ctx.file_access.fs_reply = int(FsReply.END_OF_FILE)
         ctx.file_access.we_error = int(FsReply.END_OF_FILE)
@@ -4936,8 +5078,9 @@ def bc050_process_read_indexed(ctx: _BridgeContext) -> None:
         # string "No RG1 Data for " WS-Invoice-Record (K:L) into WS-File-Key  [:L2448-L2451]
         _move_to_ws_file_key(ctx, f"No RG1 Data for {key_value}")
         # initialise WS-Invoice-Record WS-Invoice-Line   [:L2452-L2453]
-        ctx.buffer.ws_invoice_record = None
-        ctx.buffer.invoice_line = None
+        # TWO operands in ONE statement, in the source's own order - the shared
+        # buffer first and the bridge's staging record second.
+        _initialise_ws_invoice_record(ctx.buffer)
         _initialise_ws_invoice_line(ctx.state)
         # go to bc058-Restore-Pointers  *> do ba999-end at end   [:L2454]
         # Class 4 - sibling re-dispatch, then explicit return.
@@ -4999,9 +5142,10 @@ def bc051_fetch_rg1(ctx: _BridgeContext) -> None:
         _move_ws_invoice_line_to_ws_invoice_record(ctx.state, ctx.buffer)
     else:
         # initialise WS-Invoice-Line WS-Invoice-Record  [:L2501-L2502]
+        # The REVERSE order of [:L2452-L2453] - staging record first here - and
+        # the order is kept because the source keeps it.
         _initialise_ws_invoice_line(ctx.state)
-        ctx.buffer.ws_invoice_record = None
-        ctx.buffer.invoice_line = None
+        _initialise_ws_invoice_record(ctx.buffer)
         # move 23 to FS-Reply  [:L2503]
         ctx.file_access.fs_reply = int(FsReply.KEY_NOT_FOUND)
     # move WS-Invoice-Record (K:L) to WS-File-Key.  [:L2506]
@@ -5780,8 +5924,9 @@ def aa040_process_read_next(ctx: _HandlerContext) -> None:
     # *> JIC above dont work :)   [:L385-L386]
     ctx.cobol_file_status = 1
     # initialize Invoice-Record  [:L387]
-    ctx.invoice.ws_invoice_record = None
-    ctx.invoice.invoice_line = None
+    # The handler's own ISAM record area is the SAME linkage record the bridge
+    # sees, so the whole of it clears - key included.
+    _initialise_ws_invoice_record(ctx.invoice)
     # move "EOF" to WS-File-Key  *> for logging   [:L388]
     _handler_file_key(ctx, "EOF")
     # go to aa999-main-exit  [:L389]
@@ -5848,8 +5993,7 @@ def aa050_process_read_indexed(ctx: _HandlerContext) -> None:
             _handler_file_key(ctx, ctx.invoice.ws_invoice_key)
         else:
             # initialize WS-Invoice-Record / spaces / the message   [:L431-L435]
-            ctx.invoice.ws_invoice_record = None
-            ctx.invoice.invoice_line = None
+            _initialise_ws_invoice_record(ctx.invoice)
             _handler_file_key(
                 ctx,
                 f"Failed action in read-indexed for {ctx.invoice.ws_invoice_key}",
@@ -6459,7 +6603,29 @@ def dispatch(
     flat_statuses = system.system_data_block.rdbms_flat_statuses
     if not _fs_cobol_files_used(flat_statuses):
         # move RDBMS-Flat-Statuses to FA-RDBMS-Flat-Statuses
-        file_access.fa_rdbms_flat_statuses = flat_statuses
+        #
+        # ⭐ A GROUP MOVE, NOT A REBIND.  `03 RDBMS-Flat-Statuses`
+        # [copybooks/wssystem.cob] and `03 FA-RDBMS-Flat-Statuses`
+        # [copybooks/wsfnctn.cob:L72-L83] are two SEPARATE storage areas of the
+        # same shape, and a COBOL group `MOVE` copies the sending group's bytes
+        # INTO the receiving group - it cannot make one name refer to the other's
+        # storage, because COBOL has no such operation.  So each member is copied
+        # into the group the caller already holds, which is what the other
+        # sixteen handlers do (`acas013_value.py`'s transcription of
+        # [common/acas013.cbl:L322] is the same two lines).
+        #
+        # Rebinding the attribute instead would ALIAS the caller's `File-Access`
+        # onto `System-Record`'s own group - two records sharing one object where
+        # the COBOL has two areas - so a later write through either name would be
+        # visible through the other, and the receiving group would carry the
+        # SENDING group's member names (`file_system_used` instead of
+        # `fa_file_system_used`), which the next handler to read it cannot find.
+        source_statuses = flat_statuses
+        target_statuses = file_access.fa_rdbms_flat_statuses
+        target_statuses.fa_file_system_used = source_statuses.file_system_used
+        target_statuses.fa_file_duplicates_in_use = (
+            source_statuses.file_duplicates_in_use
+        )
         # perform ba-Process-RDBMS   *> Can't hurt
         ba_process_rdbms_handler(ctx)
         # go to AA-Main-Exit  - Class 3.  The ISAM 'evaluate' below is never
@@ -6579,6 +6745,397 @@ def dispatch(
     # are preserved: the branch calls, and this note documents the second route
     # rather than adding a call that the Python control flow makes dead.
     return file_access
+
+
+# ---------------------------------------------------------------------------
+# The linkage projection - `copy "slwsinv2.cob" replacing Invoice-Record by
+# WS-Invoice-Record` [common/acas016.cbl:L218-L221]
+# ---------------------------------------------------------------------------
+#
+# ⭐⭐ WHY THIS EXISTS AT ALL.  The handler's linkage record and its callers'
+# record areas are THE SAME 137 BYTES DECLARED TWICE, under two prefixes:
+#
+#   * the handler copies `slwsinv2.cob` with a renaming clause
+#     [common/acas016.cbl:L218-L221], so its parameter is `Invoice-Record` /
+#     `Invoice-Header` / `Invoice-Line` - the `ih-` and `il-` names;
+#   * the bridge copies `slwsinv.cob`, whose `SInvoice-Header` and
+#     `SInvoice-Bodies` are the identical layout under the `sih-` and `sil-`
+#     names, which is what :class:`InvoiceBuffer` models because the bridge is
+#     the layer that touches the columns.
+#
+# Field for field the two are the same declarations: `pic 9(8)` + `pic 99` key,
+# `pic x(6)` + `pic 9` customer, `binary-long` date, `pic x(10)` order with its
+# four-item overlay, `pic 9` type, `pic x(10)` ref, `pic x(32)` description,
+# eight `pic s9(7)v99 comp-3` money fields, six `pic x` status bytes, two
+# `binary-char` counts, two `pic 999v99 comp` deductions, `binary-char` days,
+# `binary-long` cr, and two `pic x` flags - compare [copybooks/slwsinv.cob:L18-L71]
+# with [copybooks/slwsinv2.cob:L38-L89] and [:L91-L107].  So the projection below
+# is a RENAME, and nothing else: no width is changed, no value is coerced,
+# rounded, truncated or padded, and no field is added or dropped.  In COBOL the
+# rename costs nothing because `COPY ... REPLACING` does it at compile time;
+# Python has no such facility, so it is spelled out once, here, in the module
+# that owns both shapes.
+#
+# ⭐ WHERE IT IS CALLED FROM.  `dal/facade.py`'s `acas016` dispatch paragraph,
+# because that is the layer the Agent Action Plan section 0.4.3 makes responsible
+# for handing a handler the parameter shape its `PROCEDURE DIVISION USING`
+# declares - and the facade may not import a records module, so the conversion
+# cannot live there.  A caller that already holds an :class:`InvoiceBuffer`
+# passes straight through untouched.
+
+
+def _projected_record_views(record: object) -> tuple[object, object] | None:
+    """Return ``(header, line)`` if ``record`` is a caller's own record area.
+
+    The area is recognised STRUCTURALLY, by the four names the copybook gives it -
+    ``Invoice-Nos``, ``Item-Nos`` and the two redefining views - because the
+    callers are ``programs/*`` modules this layer may not import. ``None`` means
+    the object is not a caller area, and the only other thing it can be is an
+    :class:`InvoiceBuffer`.
+    """
+    if isinstance(record, InvoiceBuffer):
+        return None
+    for attribute in ("invoice_nos", "item_nos", "invoice_header", "invoice_line"):
+        if not hasattr(record, attribute):
+            return None
+    return getattr(record, "invoice_header"), getattr(record, "invoice_line")
+
+
+def linkage_buffer_for(record: object) -> InvoiceBuffer:
+    """Adopt the caller's record area as this handler's ``WS-Invoice-Record``.
+
+    Returns the :class:`InvoiceBuffer` the handler is entered with, having first
+    copied the caller's area into it - the ``ih-``/``il-`` names into the
+    ``sih-``/``sil-`` names of the same 137 bytes, plus the shared ten-byte key.
+
+    ⭐ THE BUFFER IS THE SAME ONE ON EVERY CALL for a given record area, and it
+    has to be.  ``slinvoiceMT``'s Working-Storage survives between ``CALL``s -
+    the cursor flags [common/slinvoiceMT.cbl:L331-L336], ``WS-Last-Read-Invoice``
+    / ``WS-Last-Read-Line`` [:L285-L287] and ``WS-Actual-Lines-In-Row`` [:L288]
+    are all written by one call and read by the next, which is the entire
+    mechanism of the two-table walk at ``ba041-Reread`` [:L722-L741] - and the
+    connection the C interface holds outlives a call for the same reason
+    (anomaly A-8).  Both live on the buffer, so a fresh buffer per verb would
+    reset the cursor on every read and the walk could never advance.
+
+    ⭐ KEYED BY THE CALLER'S AREA, NOT MODULE-WIDE, which is what keeps two runs
+    in one interpreter independent as section 0.6.6 requires: a run builds its
+    own record area, so it gets its own buffer, and nothing a previous run left
+    behind is visible to it.  The area is held by reference in the registry so
+    that its identity cannot be recycled underneath the key while the run is
+    live.
+
+    Args:
+        record: The second operand of the ``CALL`` - either a caller's record
+            area or an :class:`InvoiceBuffer` the caller manages itself.
+
+    Returns:
+        The buffer to pass to :func:`dispatch`.
+    """
+    if isinstance(record, InvoiceBuffer):
+        return record
+    views = _projected_record_views(record)
+    if views is None:
+        raise TypeError(
+            "acas016 takes WS-Invoice-Record [common/acas016.cbl:L218-L221] - "
+            "either an InvoiceBuffer or a record area exposing invoice_nos, "
+            f"item_nos, invoice_header and invoice_line; got {type(record).__name__}"
+        )
+    identity = id(record)
+    held = _LINKAGE_BUFFERS.get(identity)
+    if held is None or held[0] is not record:
+        held = (record, InvoiceBuffer())
+        _LINKAGE_BUFFERS[identity] = held
+    buffer = held[1]
+    _load_buffer_from_record(record, buffer)
+    return buffer
+
+
+def publish_linkage_buffer(buffer: InvoiceBuffer, record: object) -> None:
+    """Copy the buffer back over the caller's record area, after the ``CALL``.
+
+    ``File-Access`` is not the only thing a COBOL ``CALL`` passes by reference -
+    the record area is passed the same way, so whatever the handler and the
+    bridge left in ``WS-Invoice-Record`` is what the caller reads next.  A read
+    verb loads it, ``INITIALIZE`` clears it, and a write verb leaves it alone;
+    all three are reproduced by copying the buffer's state back out.
+
+    BOTH VIEWS ARE PUBLISHED, because in COBOL both always hold data - they are
+    one storage seen twice.  The shared ten bytes are taken from the buffer's own
+    key, which the bridge keeps pointing at whichever record it last handled:
+    ``move WS-Invoice-Line to WS-Invoice-Record`` [common/slinvoiceMT.cbl:L2842]
+    is what puts a LINE's number into those bytes after a line read, and it is
+    how a caller tells a header from a line - ``if ih-test = zero``
+    [sales/sl055.cbl:L370].
+
+    The caller's view objects are mutated IN PLACE rather than replaced, because
+    a caller may hold a direct reference to one and the COBOL never gives it a
+    new area.
+
+    Args:
+        buffer: The buffer :func:`dispatch` was given.
+        record: The caller's record area, mutated in place. An
+            :class:`InvoiceBuffer` is its own area and is left alone.
+    """
+    if isinstance(record, InvoiceBuffer):
+        return
+    if _projected_record_views(record) is None:
+        return
+    _store_record_from_buffer(buffer, record)
+
+
+#: The buffer each caller record area is walked through, keyed by the area's
+#: identity and holding the area itself so the key stays valid. Not a cache of
+#: anything computed: it is `slinvoiceMT`'s Working-Storage, which the COBOL keeps
+#: alive between `CALL`s for exactly as long as the module stays resident.
+_LINKAGE_BUFFERS: Final[dict[int, tuple[object, InvoiceBuffer]]] = {}
+
+
+def _load_buffer_from_record(record: object, buffer: InvoiceBuffer) -> None:
+    """The `ih-`/`il-` area into the `sih-`/`sil-` buffer - a rename, field for field.
+
+    ⭐ THE SHARED TEN BYTES ARE RECONCILED FIRST, AND ONCE. `Invoice-Key`
+    [copybooks/slwsinv2.cob:L28-L30] and the two views' own key fields
+    [:L40-L41], [:L92-L93] are ONE storage read three ways, so they cannot
+    disagree in the compiled program - and a caller writes whichever name suits
+    it: `sl055` positions its `Invoice-Start` by writing the GENERIC view,
+    `move ws-invoice-nos to invoice-nos` [sales/sl055.cbl:L473-L474], while a
+    caller that builds a header for a write fills the header view instead. The
+    generic view therefore wins where it is set, and the typed view is adopted
+    when the generic one is still at its `INITIALIZE` zero - the same
+    "whichever is non-default" reconciliation `acas007`'s
+    `synchronise_batch_key_views` applies to `WS-Batch-Key`/`WS-Batch-Key9`,
+    and for the same reason: with one storage there is nothing else to go on.
+    """
+    header_view = getattr(record, "invoice_header")
+    generic_invoice = int(getattr(record, "invoice_nos"))
+    generic_test = int(getattr(record, "item_nos"))
+    if header_view is not None and not generic_invoice and not generic_test:
+        generic_invoice = int(header_view.ih_prime.ih_invoice)
+        generic_test = int(header_view.ih_prime.ih_test)
+    buffer.ws_sih_invoice = generic_invoice
+    buffer.ws_sih_test = generic_test
+    if header_view is not None:
+        target = buffer.select_header()
+        source_prime = header_view.ih_prime
+        target_prime = target.sih_prime
+        target_prime.sih_customer.sih_nos = source_prime.ih_customer.ih_nos
+        target_prime.sih_customer.sih_check = source_prime.ih_customer.ih_check
+        target_prime.sih_date = source_prime.ih_date
+        target_prime.sih_order = source_prime.ih_order
+        # `filler redefines sih-order` [copybooks/slwsinv.cob:L28] against
+        # `filler redefines ih-order` [copybooks/slwsinv2.cob:L47] - the same
+        # overlay, carried across so a stale one cannot survive a projection.
+        source_overlay = source_prime.filler_47
+        target_overlay = target_prime.filler_28
+        target_overlay.sih_freq = source_overlay.ih_freq
+        target_overlay.sih_repeat = source_overlay.ih_repeat
+        target_overlay.filler_37 = source_overlay.filler_56
+        target_overlay.sih_last_date = source_overlay.ih_last_date
+        target_prime.sih_type = source_prime.ih_type
+        target_prime.sih_ref = source_prime.ih_ref
+        source_sub = header_view.ih_sub_prime
+        target_sub = target.sih_sub_prime
+        target_sub.sih_description = source_sub.ih_description
+        source_fig = source_sub.ih_fig
+        target_fig = target_sub.sih_fig
+        target_fig.sih_p_c = source_fig.ih_p_c
+        target_fig.sih_net = source_fig.ih_net
+        target_fig.sih_extra = source_fig.ih_extra
+        target_fig.sih_carriage = source_fig.ih_carriage
+        target_fig.sih_vat = source_fig.ih_vat
+        target_fig.sih_discount = source_fig.ih_discount
+        target_fig.sih_e_vat = source_fig.ih_e_vat
+        target_fig.sih_c_vat = source_fig.ih_c_vat
+        target_sub.sih_status = source_sub.ih_status
+        target_sub.sih_status_p = source_sub.ih_status_p
+        target_sub.sih_status_l = source_sub.ih_status_l
+        target_sub.sih_status_c = source_sub.ih_status_c
+        target_sub.sih_status_a = source_sub.ih_status_a
+        target_sub.sih_status_i = source_sub.ih_status_i
+        target_sub.sih_lines = source_sub.ih_lines
+        target_sub.sih_deduct_days = source_sub.ih_deduct_days
+        target_sub.sih_deduct_amt = source_sub.ih_deduct_amt
+        target_sub.sih_deduct_vat = source_sub.ih_deduct_vat
+        target_sub.sih_days = source_sub.ih_days
+        target_sub.sih_cr = source_sub.ih_cr
+        target_sub.sih_day_book_flag = source_sub.ih_day_book_flag
+        target_sub.sih_update = source_sub.ih_update
+    line_view = getattr(record, "invoice_line")
+    if line_view is not None:
+        line = buffer.select_line()
+        line.sil_product = line_view.il_product
+        line.sil_pa = line_view.il_pa
+        line.sil_qty = line_view.il_qty
+        line.sil_type = line_view.il_type
+        line.sil_description = line_view.il_description
+        line.sil_net = line_view.il_net
+        line.sil_unit = line_view.il_unit
+        line.sil_discount = line_view.il_discount
+        line.sil_vat = line_view.il_vat
+        line.sil_vat_code = line_view.il_vat_code
+        line.sil_update = line_view.il_update
+        line.sil_back_ordered = line_view.il_back_ordered
+    # The reconciled ten bytes into whichever views are present - the REDEFINES,
+    # made explicit exactly as `InvoiceBuffer` documents.
+    buffer.sync_key_into_views()
+
+
+def _new_caller_header_view() -> IhInvoiceHeader:
+    """``01 Invoice-Header redefines Invoice-Record.`` [copybooks/slwsinv2.cob:L38].
+
+    The caller's own view of the shared area, at its ``INITIALIZE`` values.
+    Needed because a Python record area can hold ``None`` where COBOL storage
+    always exists: a caller that has performed no read yet has no view object,
+    and after a read the compiled program leaves it reading real bytes. One is
+    therefore materialised at the moment the buffer has something to publish -
+    the same reason :meth:`InvoiceBuffer.select_header` materialises the other
+    side.
+    """
+    return IhInvoiceHeader(
+        ih_prime=IhPrime(
+            ih_invoice=0,
+            ih_test=0,
+            ih_customer=IhCustomer(ih_nos=" " * 6, ih_check=0),
+            ih_date=0,
+            ih_order=" " * 10,
+            filler_47=IhOrderView(
+                ih_freq=" ", ih_repeat=0, filler_56=" " * 3, ih_last_date=0
+            ),
+            ih_type=0,
+            ih_ref=" " * 10,
+        ),
+        ih_sub_prime=IhSubPrime(
+            ih_description=" " * 32,
+            ih_fig=IhFig(
+                ih_p_c=Decimal("0.00"),
+                ih_net=Decimal("0.00"),
+                ih_extra=Decimal("0.00"),
+                ih_carriage=Decimal("0.00"),
+                ih_vat=Decimal("0.00"),
+                ih_discount=Decimal("0.00"),
+                ih_e_vat=Decimal("0.00"),
+                ih_c_vat=Decimal("0.00"),
+            ),
+            ih_status=" ",
+            ih_status_p=" ",
+            ih_status_l=" ",
+            ih_status_c=" ",
+            ih_status_a=" ",
+            ih_status_i=" ",
+            ih_lines=0,
+            ih_deduct_days=0,
+            ih_deduct_amt=Decimal("0.00"),
+            ih_deduct_vat=Decimal("0.00"),
+            ih_days=0,
+            ih_cr=0,
+            ih_day_book_flag=" ",
+            ih_update=" ",
+        ),
+    )
+
+
+def _new_caller_line_view() -> IlInvoiceLine:
+    """``01 Invoice-Line redefines Invoice-Record.`` [copybooks/slwsinv2.cob:L91].
+
+    The line counterpart of :func:`_new_caller_header_view`, at its
+    ``INITIALIZE`` values.
+    """
+    return IlInvoiceLine(
+        il_invoice=0,
+        il_line=0,
+        il_product=" " * 13,
+        il_pa=" " * 2,
+        il_qty=0,
+        il_type=" ",
+        il_description=" " * 32,
+        il_net=Decimal("0.00"),
+        il_unit=Decimal("0.00"),
+        il_discount=Decimal("0.00"),
+        il_vat=Decimal("0.00"),
+        il_vat_code=0,
+        il_update=" ",
+        il_back_ordered=" ",
+    )
+
+
+def _store_record_from_buffer(buffer: InvoiceBuffer, record: object) -> None:
+    """The `sih-`/`sil-` buffer back into the `ih-`/`il-` area - the same rename."""
+    setattr(record, "invoice_nos", buffer.ws_sih_invoice)
+    setattr(record, "item_nos", buffer.ws_sih_test)
+    header_view = getattr(record, "invoice_header")
+    source = buffer.ws_invoice_record
+    if header_view is None and source is not None:
+        # COBOL storage always exists, so a caller that arrived with no view
+        # object gets one rather than an exception. See
+        # `_new_caller_header_view`.
+        header_view = _new_caller_header_view()
+        setattr(record, "invoice_header", header_view)
+    if header_view is not None and source is not None:
+        source_prime = source.sih_prime
+        target_prime = header_view.ih_prime
+        # The ten shared bytes read through the header view's own names.
+        target_prime.ih_invoice = buffer.ws_sih_invoice
+        target_prime.ih_test = buffer.ws_sih_test
+        target_prime.ih_customer.ih_nos = source_prime.sih_customer.sih_nos
+        target_prime.ih_customer.ih_check = source_prime.sih_customer.sih_check
+        target_prime.ih_date = source_prime.sih_date
+        target_prime.ih_order = source_prime.sih_order
+        source_overlay = source_prime.filler_28
+        target_overlay = target_prime.filler_47
+        target_overlay.ih_freq = source_overlay.sih_freq
+        target_overlay.ih_repeat = source_overlay.sih_repeat
+        target_overlay.filler_56 = source_overlay.filler_37
+        target_overlay.ih_last_date = source_overlay.sih_last_date
+        target_prime.ih_type = source_prime.sih_type
+        target_prime.ih_ref = source_prime.sih_ref
+        source_sub = source.sih_sub_prime
+        target_sub = header_view.ih_sub_prime
+        target_sub.ih_description = source_sub.sih_description
+        source_fig = source_sub.sih_fig
+        target_fig = target_sub.ih_fig
+        target_fig.ih_p_c = source_fig.sih_p_c
+        target_fig.ih_net = source_fig.sih_net
+        target_fig.ih_extra = source_fig.sih_extra
+        target_fig.ih_carriage = source_fig.sih_carriage
+        target_fig.ih_vat = source_fig.sih_vat
+        target_fig.ih_discount = source_fig.sih_discount
+        target_fig.ih_e_vat = source_fig.sih_e_vat
+        target_fig.ih_c_vat = source_fig.sih_c_vat
+        target_sub.ih_status = source_sub.sih_status
+        target_sub.ih_status_p = source_sub.sih_status_p
+        target_sub.ih_status_l = source_sub.sih_status_l
+        target_sub.ih_status_c = source_sub.sih_status_c
+        target_sub.ih_status_a = source_sub.sih_status_a
+        target_sub.ih_status_i = source_sub.sih_status_i
+        target_sub.ih_lines = source_sub.sih_lines
+        target_sub.ih_deduct_days = source_sub.sih_deduct_days
+        target_sub.ih_deduct_amt = source_sub.sih_deduct_amt
+        target_sub.ih_deduct_vat = source_sub.sih_deduct_vat
+        target_sub.ih_days = source_sub.sih_days
+        target_sub.ih_cr = source_sub.sih_cr
+        target_sub.ih_day_book_flag = source_sub.sih_day_book_flag
+        target_sub.ih_update = source_sub.sih_update
+    line_view = getattr(record, "invoice_line")
+    line = buffer.invoice_line
+    if line_view is None and line is not None:
+        line_view = _new_caller_line_view()
+        setattr(record, "invoice_line", line_view)
+    if line_view is not None and line is not None:
+        line_view.il_invoice = buffer.ws_sih_invoice
+        line_view.il_line = buffer.ws_sih_test
+        line_view.il_product = line.sil_product
+        line_view.il_pa = line.sil_pa
+        line_view.il_qty = line.sil_qty
+        line_view.il_type = line.sil_type
+        line_view.il_description = line.sil_description
+        line_view.il_net = line.sil_net
+        line_view.il_unit = line.sil_unit
+        line_view.il_discount = line.sil_discount
+        line_view.il_vat = line.sil_vat
+        line_view.il_vat_code = line.sil_vat_code
+        line_view.il_update = line.sil_update
+        line_view.il_back_ordered = line.sil_back_ordered
 
 
 def _fs_cobol_files_used(flat_statuses: object) -> bool:

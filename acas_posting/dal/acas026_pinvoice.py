@@ -988,14 +988,18 @@ from acas_posting.dictionary import loader
 from acas_posting.records.file_access import FileAccess
 from acas_posting.records.file_defs import FileDefs
 from acas_posting.records.purchase_invoice import (
+    IhFig,
     IhInvoiceHeader,
+    IhOrder,
     IhPrime,
     IhSubPrime,
+    IhSupplier,
     IlInvoiceLine,
     IlInvoiceLineBody,
     IlKey,
     PInvoiceBodies,
     PInvoiceHeader,
+    WsInvoiceKey,
     WsPInvoiceRecord,
     cite_for,
     dictionary_key_for,
@@ -1120,6 +1124,10 @@ __all__ = [
     "default_context",
     "dictionary_key_for",
     "dispatch",
+    # The linkage projection - the flat/nested description swap the two
+    # purchase-invoice copybooks make necessary (AMBIGUITY Q-PL055-8).
+    "linkage_header_for",
+    "publish_linkage_header",
     "line_from_bodies",
     "line_from_buffer",
     "plinvoice_mt",
@@ -4312,7 +4320,18 @@ def bb100_unload_hvs(pinvoice: PInvoiceHeader, context: PInvoiceContext) -> None
 
     # `*>  Here save the ih-Lines to WS so we can keep track of body-lines.`
     # [common/plinvoiceMT.cbl:L1516]
-    context.ws_actual_lines_in_row = header.hv_ih_lines  # [:L1518]
+    #
+    # ⭐ A NARROWING MOVE, and the rule is the RECEIVING field's.
+    # `HV-IH-LINES PIC 9(03) COMP` [common/plinvoiceMT.cbl:L418] sends three
+    # digits into `01 WS-Actual-Lines-In-Row pic 99` [:L289], which holds two, so
+    # a header declaring 100 lines leaves this counter at ZERO.  That is what
+    # keeps `bc050`'s `if WS-Last-Read-Line(40) < WS-Actual-Lines-In-Row(0)`
+    # [:L2394] false on the first call, so the reread falls through to
+    # `ba042-Fetch` instead of reporting 23 and ending the caller's walk early on
+    # a phantom line.
+    context.ws_actual_lines_in_row = _move_to_actual_lines_in_row(
+        header.hv_ih_lines
+    )  # [:L1518]
     # `*>   Save sih Invoice & test as last key read.` [common/plinvoiceMT.cbl:L1520]
     # - and note `sih`, the SALES prefix, in the PURCHASE bridge's own comment
     # (anomaly ``N-sih-in-purchase-comment``).
@@ -8863,3 +8882,430 @@ def dispatch(
             system, pinvoice, file_access, file_defs, dal_common, active
         )
     return file_access
+
+
+# ---------------------------------------------------------------------------
+# The linkage projection - `WS-PInvoice-Record` and its two redefinitions
+# ---------------------------------------------------------------------------
+#
+# ⭐⭐ TWO COPYBOOKS DESCRIBE THE SAME HUNDRED BYTES, and each caller copies the
+# one it wants:
+#
+#   * `copybooks/plwspinv.cob` declares `01 PInvoice-Header.` as a NESTED record -
+#     `03 ih-prime.` with `05 WS-Invoice-Key.` inside it and `05 ih-order.` as a
+#     four-member group - and `01 Pinvoice-Bodies.` as an `occurs 40` table of
+#     lines. That is the description this module dispatches on, because it is the
+#     description the header-plus-lines table split is modelled from;
+#   * `copybooks/plwspinv2.cob` declares the SAME hundred bytes FLAT - `01
+#     WS-PInvoice-Record.` with `01 Invoice-Header redefines WS-PInvoice-Record.`
+#     [:L21] and `01 Invoice-Line redefines WS-PInvoice-Record.` [:L56] over it -
+#     and that is what `pl055` copies [purchase/pl055.cbl:L135].
+#
+# `acas026` itself is handed whatever its caller's `WS-PInvoice-Record` happens
+# to be, because a COBOL `CALL` passes storage and the callee's `LINKAGE SECTION`
+# decides how to read it. Python has no storage aliasing, so the two descriptions
+# are separate objects and the handover is spelled out here, in the module that
+# owns both - AMBIGUITY Q-PL055-8, which asked exactly this and which the facade
+# was told to answer.
+#
+# ONE STRUCTURAL DIFFERENCE, and it is a difference of DESCRIPTION and not of
+# data: `ih-order` is ten characters flat in `plwspinv2.cob:L28` and a group of
+# `pic x` + `pic 99` + `pic xxx` + `binary-long` in `plwspinv.cob:L17-L27`, whose
+# own comment `*> pic x(10).` records that it replaced the flat form in 2023.
+# Those are the same ten bytes, so the projection splits and joins them with the
+# very helpers the bridge boundary already uses - `_group_ih_order` on the way in
+# and the four-way split on the way out - and NOT with a re-interpretation of its
+# own.
+
+
+def _projected_pinvoice_views(record: object) -> bool:
+    """Whether ``record`` is a caller's record AREA rather than a header.
+
+    Recognised structurally, by the three names `plwspinv2.cob` gives the area
+    and its two redefinitions, because the callers are ``programs/*`` modules
+    this layer may not import.
+    """
+    if isinstance(record, PInvoiceHeader):
+        return False
+    return all(
+        hasattr(record, attribute)
+        for attribute in ("ws_pinvoice_record", "invoice_header", "invoice_line")
+    )
+
+
+def linkage_header_for(
+    record: object, context: PInvoiceContext | None = None
+) -> PInvoiceHeader:
+    """Adopt the caller's record area as this handler's ``WS-PInvoice-Record``.
+
+    Returns the :class:`PInvoiceHeader` :func:`dispatch` is entered with, having
+    first copied the caller's flat views into it - BOTH of them, because a
+    ``CALL`` hands over one storage and the two redefinitions are that storage
+    seen twice. The header view becomes the returned record; the line view is
+    staged by :func:`_stage_line_from_record` into the working storage the bridge
+    re-derives a row from.
+
+    ⭐ THE HEADER OBJECT IS THE SAME ONE ON EVERY CALL for a given record area.
+    The bridge's cursor state lives in :class:`PInvoiceContext`, which is
+    module-level exactly as GnuCOBOL's working storage is, but the KEY the next
+    ``ba041``-style reread synthesises is read out of this record - so a fresh
+    object per verb would restart the walk. Keyed by the caller's area so that
+    two runs in one interpreter stay independent (section 0.6.6): a run builds
+    its own area, so it gets its own header.
+
+    Args:
+        record: The second operand of the ``CALL`` - a caller's record area, or a
+            :class:`PInvoiceHeader` the caller manages itself.
+        context: The working storage the call will use, so the caller's line view
+            is staged where the bridge looks for it. Defaults to the module-level
+            instance, as :func:`dispatch` does.
+
+    Returns:
+        The header record to pass to :func:`dispatch`.
+    """
+    if isinstance(record, PInvoiceHeader):
+        return record
+    if not _projected_pinvoice_views(record):
+        raise TypeError(
+            "acas026 takes WS-PInvoice-Record [common/acas026.cbl:L225-L231] - "
+            "either a PInvoiceHeader or a record area exposing "
+            "ws_pinvoice_record, invoice_header and invoice_line; got "
+            f"{type(record).__name__}"
+        )
+    identity = id(record)
+    held = _LINKAGE_HEADERS.get(identity)
+    if held is None or held[0] is not record:
+        held = (record, _new_linkage_header())
+        _LINKAGE_HEADERS[identity] = held
+    header = held[1]
+    _load_header_from_record(record, header)
+    _stage_line_from_record(record, _DEFAULT_CONTEXT if context is None else context)
+    return header
+
+
+def publish_linkage_header(
+    header: PInvoiceHeader,
+    record: object,
+    context: PInvoiceContext | None = None,
+) -> None:
+    """Copy the handler's record back over the caller's area, after the ``CALL``.
+
+    A COBOL ``CALL`` passes the record area by reference, so whatever the handler
+    and the bridge left in ``WS-PInvoice-Record`` is what the caller reads next.
+    Both redefinitions are published, because in COBOL both always hold data -
+    they are one storage seen twice - and the shared ten bytes decide which one
+    MEANS anything: ``if ih-test = zero`` [purchase/pl055.cbl:L311] is how the
+    caller tells a header from a line.
+
+    ⭐ AFTER A LINES READ THE AREA HOLDS A LINE. ``move WS-Invoice-Line to
+    WS-Invoice-Record.`` [common/plinvoiceMT.cbl:L2809] copies the line view over
+    the shared buffer, so the ten bytes then carry the LINE's number - which is
+    why the line the bridge staged in ``context.ws_invoice_line`` supplies the key
+    whenever the buffer view is the line one.
+
+    The caller's view objects are mutated IN PLACE, never replaced: ``pl055``
+    binds ``line = ctx.invoice_line`` and ``header = ctx.invoice_header`` ONCE,
+    before its read loop [purchase/pl055.cbl:L306], and re-tests those same
+    objects on every iteration.
+
+    Args:
+        header: The record :func:`dispatch` was given.
+        record: The caller's record area, mutated in place. A
+            :class:`PInvoiceHeader` is its own area and is left alone.
+        context: The working storage the call used, for the staged line. Defaults
+            to the module-level instance, as :func:`dispatch` does.
+    """
+    if isinstance(record, PInvoiceHeader):
+        return
+    if not _projected_pinvoice_views(record):
+        return
+    _store_record_from_header(
+        header, record, _DEFAULT_CONTEXT if context is None else context
+    )
+
+
+#: The header record each caller area is walked through, keyed by the area's
+#: identity and holding the area itself so the key stays valid.
+_LINKAGE_HEADERS: Final[dict[int, tuple[object, PInvoiceHeader]]] = {}
+
+
+def _new_linkage_header() -> PInvoiceHeader:
+    """A ``PInvoice-Header`` at its ``INITIALIZE`` values [copybooks/plwspinv.cob:L8]."""
+    header = PInvoiceHeader(
+        ih_prime=IhPrime(
+            ws_invoice_key=WsInvoiceKey(ih_invoice=0, ih_test=0),
+            ih_supplier=IhSupplier(ih_nos=" " * 6, ih_check=0),
+            ih_date=0,
+            ih_order=IhOrder(
+                ih_freq=" ", ih_repeat=0, filler_1=" " * 3, ih_last_date=0
+            ),
+            ih_type=0,
+            ih_ref=" " * 10,
+        ),
+        ih_sub_prime=IhSubPrime(
+            ih_fig=IhFig(
+                ih_p_c=_DECIMAL_ZERO,
+                ih_net=_DECIMAL_ZERO,
+                ih_extra=_DECIMAL_ZERO,
+                ih_carriage=_DECIMAL_ZERO,
+                ih_vat=_DECIMAL_ZERO,
+                ih_discount=_DECIMAL_ZERO,
+                ih_e_vat=_DECIMAL_ZERO,
+                ih_c_vat=_DECIMAL_ZERO,
+            ),
+            ih_status=" ",
+            ih_lines=0,
+            ih_deduct_days=0,
+            ih_deduct_amt=_DECIMAL_ZERO,
+            ih_deduct_vat=_DECIMAL_ZERO,
+            ih_days=0,
+            ih_cr=0,
+            ih_day_book_flag=" ",
+            ih_update=" ",
+        ),
+    )
+    return header
+
+
+def _stage_line_from_record(record: object, context: PInvoiceContext) -> None:
+    """The caller's `Invoice-Line` view into the buffer the bridge re-derives from.
+
+    ⭐⭐ THE INBOUND HALF OF THE LINE VIEW, and it is what makes a caller's edit to
+    a line REACH the database. `bc090-Process-Rewrite` opens with `move
+    WS-Invoice-Record to WS-Invoice-Line.` [common/plinvoiceMT.cbl:L2693] and
+    `bc070-Process-Write` with the same move [:L2490], so the bridge builds the row
+    it sends from THE CALLER'S OWN BYTES - in COBOL that is free, because
+    `01 Invoice-Line redefines WS-PInvoice-Record.` [copybooks/plwspinv2.cob:L56]
+    IS those bytes and a caller storing `il-update` has already stored into them.
+
+    Python has no aliasing, so the caller's line view is a separate object and the
+    hand-over has to be written down. :func:`line_from_buffer` takes the ten-byte
+    key from the buffer and *"the remaining thirteen line fields ... from the line
+    the caller staged through ``context.ws_invoice_line``"* - and this is that
+    staging, performed for the caller because a ``programs`` module cannot reach
+    the handler's working storage.
+
+    WITHOUT IT a rewrite re-sends whatever the bridge itself last read, so an
+    `UPDATE` that should change a row changes nothing, `WS-MYSQL-COUNT-ROWS` comes
+    back 0 rather than 1, and the caller is handed the failure pair `99` / `994`
+    [:L2730-L2731] for a row that is present and writable.
+
+    `buffer_view` is deliberately NOT touched. That flag records which
+    redefinition the BRIDGE last left in the shared bytes [:L2809], and it is the
+    bridge's own state; staging a caller's line is not a read and must not claim to
+    be one.
+    """
+    flat_line = getattr(record, "invoice_line", None)
+    if flat_line is None:
+        return
+    context.ws_invoice_line = IlInvoiceLineBody(
+        il_key=IlKey(
+            il_invoice=int(flat_line.il_invoice),
+            il_line=int(flat_line.il_line),
+        ),
+        il_product=flat_line.il_product,
+        il_pa=flat_line.il_pa,
+        filler_1=flat_line.filler_1,
+        il_qty=flat_line.il_qty,
+        il_type=flat_line.il_type,
+        il_description=flat_line.il_description,
+        filler_2=flat_line.filler_2,
+        il_net=flat_line.il_net,
+        il_unit=flat_line.il_unit,
+        il_discount=flat_line.il_discount,
+        il_vat=flat_line.il_vat,
+        il_vat_code=flat_line.il_vat_code,
+        il_update=flat_line.il_update,
+    )
+
+
+def _load_header_from_record(record: object, header: PInvoiceHeader) -> None:
+    """The flat views into the nested record - one description into the other.
+
+    ⭐ THE SHARED TEN BYTES ARE RECONCILED FIRST, AND ONCE. `Invoice-Key`
+    [copybooks/plwspinv2.cob:L11-L13] and the two redefinitions' own key fields
+    [:L22-L23], [:L57-L58] are ONE storage read three ways, so the generic view
+    wins where it is set and the header view is adopted while the generic pair is
+    still at its `INITIALIZE` zero - the "whichever is non-default"
+    reconciliation `acas007` applies to `WS-Batch-Key`/`WS-Batch-Key9`, for the
+    same reason: with one storage there is nothing else to go on.
+
+    The LINE view of the same bytes is carried by
+    :func:`_stage_line_from_record`, which the caller of this function runs
+    alongside it - the two together are one `CALL`'s worth of storage.
+    """
+    flat_header = getattr(record, "invoice_header")
+    base = getattr(record, "ws_pinvoice_record")
+    generic_invoice = int(base.invoice_key.invoice_nos) if base is not None else 0
+    generic_test = int(base.invoice_key.item_nos) if base is not None else 0
+    if flat_header is not None and not generic_invoice and not generic_test:
+        generic_invoice = int(flat_header.ih_invoice)
+        generic_test = int(flat_header.ih_test)
+    prime = header.ih_prime
+    sub = header.ih_sub_prime
+    prime.ws_invoice_key.ih_invoice = generic_invoice
+    prime.ws_invoice_key.ih_test = generic_test
+    if flat_header is not None:
+        prime.ih_supplier.ih_nos = flat_header.ih_supplier.ih_nos
+        prime.ih_supplier.ih_check = flat_header.ih_supplier.ih_check
+        prime.ih_date = flat_header.ih_date
+        # `ih-order` flat [copybooks/plwspinv2.cob:L28] into the four-member group
+        # [copybooks/plwspinv.cob:L17-L27] - the same ten bytes, split the way the
+        # bridge's own unload splits them.
+        _split_ih_order(flat_header.ih_order, prime.ih_order)
+        prime.ih_type = flat_header.ih_type
+        prime.ih_ref = flat_header.ih_ref
+        sub.ih_fig.ih_p_c = flat_header.ih_fig.ih_p_c
+        sub.ih_fig.ih_net = flat_header.ih_fig.ih_net
+        sub.ih_fig.ih_extra = flat_header.ih_fig.ih_extra
+        sub.ih_fig.ih_carriage = flat_header.ih_fig.ih_carriage
+        sub.ih_fig.ih_vat = flat_header.ih_fig.ih_vat
+        sub.ih_fig.ih_discount = flat_header.ih_fig.ih_discount
+        sub.ih_fig.ih_e_vat = flat_header.ih_fig.ih_e_vat
+        sub.ih_fig.ih_c_vat = flat_header.ih_fig.ih_c_vat
+        sub.ih_status = flat_header.ih_status
+        sub.ih_lines = flat_header.ih_lines
+        sub.ih_deduct_days = flat_header.ih_deduct_days
+        sub.ih_deduct_amt = flat_header.ih_deduct_amt
+        sub.ih_deduct_vat = flat_header.ih_deduct_vat
+        sub.ih_days = flat_header.ih_days
+        sub.ih_cr = flat_header.ih_cr
+        sub.ih_day_book_flag = flat_header.ih_day_book_flag
+        sub.ih_update = flat_header.ih_update
+
+
+def _store_record_from_header(
+    header: PInvoiceHeader, record: object, context: PInvoiceContext
+) -> None:
+    """The nested record back into the flat views - the same description swap."""
+    prime = header.ih_prime
+    sub = header.ih_sub_prime
+    staged = context.ws_invoice_line
+    # Which redefinition the shared ten bytes currently carry - see
+    # `publish_linkage_header`.
+    if context.buffer_view is _BufferView.LINE and staged is not None:
+        shared_invoice = int(staged.il_key.il_invoice)
+        shared_test = int(staged.il_key.il_line)
+    else:
+        shared_invoice = int(prime.ws_invoice_key.ih_invoice)
+        shared_test = int(prime.ws_invoice_key.ih_test)
+
+    base = getattr(record, "ws_pinvoice_record")
+    if base is not None:
+        base.invoice_key.invoice_nos = shared_invoice
+        base.invoice_key.item_nos = shared_test
+        # `Invoice-Supplier pic x(7)` [copybooks/plwspinv2.cob:L14] is the same
+        # seven bytes as `ih-supplier`'s two members.
+        base.invoice_supplier = _group_ih_supplier(
+            prime.ih_supplier.ih_nos, prime.ih_supplier.ih_check
+        )
+        base.invoice_date = prime.ih_date
+        base.inv_order = _group_ih_order(
+            prime.ih_order.ih_freq,
+            prime.ih_order.ih_repeat,
+            prime.ih_order.filler_1,
+            prime.ih_order.ih_last_date,
+        )
+        base.invoice_type = prime.ih_type
+
+    flat_header = getattr(record, "invoice_header")
+    if flat_header is not None:
+        flat_header.ih_invoice = shared_invoice
+        flat_header.ih_test = shared_test
+        flat_header.ih_supplier.ih_nos = prime.ih_supplier.ih_nos
+        flat_header.ih_supplier.ih_check = prime.ih_supplier.ih_check
+        flat_header.ih_date = prime.ih_date
+        flat_header.ih_order = _group_ih_order(
+            prime.ih_order.ih_freq,
+            prime.ih_order.ih_repeat,
+            prime.ih_order.filler_1,
+            prime.ih_order.ih_last_date,
+        )
+        flat_header.ih_type = prime.ih_type
+        flat_header.ih_ref = prime.ih_ref
+        flat_header.ih_fig.ih_p_c = sub.ih_fig.ih_p_c
+        flat_header.ih_fig.ih_net = sub.ih_fig.ih_net
+        flat_header.ih_fig.ih_extra = sub.ih_fig.ih_extra
+        flat_header.ih_fig.ih_carriage = sub.ih_fig.ih_carriage
+        flat_header.ih_fig.ih_vat = sub.ih_fig.ih_vat
+        flat_header.ih_fig.ih_discount = sub.ih_fig.ih_discount
+        flat_header.ih_fig.ih_e_vat = sub.ih_fig.ih_e_vat
+        flat_header.ih_fig.ih_c_vat = sub.ih_fig.ih_c_vat
+        flat_header.ih_status = sub.ih_status
+        flat_header.ih_lines = sub.ih_lines
+        flat_header.ih_deduct_days = sub.ih_deduct_days
+        flat_header.ih_deduct_amt = sub.ih_deduct_amt
+        flat_header.ih_deduct_vat = sub.ih_deduct_vat
+        flat_header.ih_days = sub.ih_days
+        flat_header.ih_cr = sub.ih_cr
+        flat_header.ih_day_book_flag = sub.ih_day_book_flag
+        flat_header.ih_update = sub.ih_update
+
+    flat_line = getattr(record, "invoice_line")
+    if flat_line is not None and staged is not None:
+        flat_line.il_invoice = shared_invoice
+        flat_line.il_line = shared_test
+        flat_line.il_product = staged.il_product
+        flat_line.il_pa = staged.il_pa
+        flat_line.filler_1 = staged.filler_1
+        flat_line.il_qty = staged.il_qty
+        flat_line.il_type = staged.il_type
+        flat_line.il_description = staged.il_description
+        flat_line.filler_2 = staged.filler_2
+        flat_line.il_net = staged.il_net
+        flat_line.il_unit = staged.il_unit
+        flat_line.il_discount = staged.il_discount
+        flat_line.il_vat = staged.il_vat
+        flat_line.il_vat_code = staged.il_vat_code
+        flat_line.il_update = staged.il_update
+
+
+#: The digit count of ``01 WS-Actual-Lines-In-Row pic 99``
+#: [common/plinvoiceMT.cbl:L289].
+_ACTUAL_LINES_IN_ROW_DIGITS: Final[int] = 2
+
+
+def _move_to_actual_lines_in_row(value: int) -> int:
+    """``move HV-IH-LINES to WS-Actual-Lines-In-Row.`` [common/plinvoiceMT.cbl:L1518].
+
+    A NARROWING MOVE across three layers that do not agree on width:
+
+    * copybook ``ih-lines binary-char``        [copybooks/plwspinv.cob:L45]
+    * host variable ``HV-IH-LINES PIC 9(03) COMP`` [common/plinvoiceMT.cbl:L418]
+    * receiver ``01 WS-Actual-Lines-In-Row pic 99`` [common/plinvoiceMT.cbl:L289]
+
+    COBOL discards HIGH-ORDER digits on a move into a shorter numeric item, so
+    100 stores **zero**, 123 stores 23 and 99 stores 99. Nothing clamps and
+    nothing raises - the width rule, exactly as
+    :func:`_narrow_signed_to_unsigned_host_variable` is the sign rule.
+
+    The magnitude is taken without the builtin ``abs()``, which rule R-2's audit
+    forbids in this layer; the sender is unsigned, so it is a faithful no-op for
+    every value the column can hold.
+
+    Args:
+        value: What the host variable holds - the ``IH-LINES`` column's value.
+
+    Returns:
+        The two digits the receiving field keeps.
+    """
+    magnitude = -value if value < 0 else value
+    return magnitude % 10**_ACTUAL_LINES_IN_ROW_DIGITS
+
+
+def _split_ih_order(order: str, group: IhOrder) -> None:
+    """Ten characters into ``05 ih-order.``'s four members, byte for byte.
+
+    The inverse of :func:`_group_ih_order`, and the same split the bridge's own
+    unload performs at [common/plinvoiceMT.cbl:L1493]: one character of
+    frequency, two digits of repeat, three of filler, then four BINARY bytes of
+    ``ih-Last-Date`` read big-endian and signed, as
+    :func:`_binary_long_bytes` writes them.
+    """
+    text = _characters(order, 10)
+    group.ih_freq = text[0]
+    group.ih_repeat = int(text[1:3]) if text[1:3].isdigit() else 0
+    group.filler_1 = text[3:6]
+    group.ih_last_date = int.from_bytes(
+        text[6:10].encode("latin-1"), "big", signed=True
+    )

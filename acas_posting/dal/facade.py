@@ -796,16 +796,41 @@ def _dispatch_acas016(ctx: FacadeContext) -> None:
     """``acas016`` passing ``WS-Invoice-Record``.
 
     [copybooks/Proc-ACAS-FH-Calls.cob:L116-L121]
+
+    ⭐ THE ONE DISPATCH PARAGRAPH THAT HANDS OVER A PROJECTED RECORD, and the
+    reason is in the handler's own linkage. ``acas016`` copies its parameter with
+    a renaming clause - ``copy "slwsinv2.cob" replacing Invoice-Record by
+    WS-Invoice-Record`` [common/acas016.cbl:L218-L221] - while the bridge behind
+    it copies ``slwsinv.cob``, the identical 137-byte layout under the ``sih-``
+    and ``sil-`` names. In COBOL that costs nothing, because ``COPY ...
+    REPLACING`` renames at compile time and a ``CALL`` passes the caller's bytes
+    by reference either way. Python has no compile-time rename, so the two
+    declarations are two classes and the handover has to be spelled out.
+
+    It is spelled out in ``dal.acas016_invoice``, which owns both shapes, and
+    called from here, which is where Agent Action Plan section 0.4.3 puts the
+    business of handing a handler the parameter shape its ``PROCEDURE DIVISION
+    USING`` declares - this module may not import a records module, so the
+    conversion cannot live in it. A caller holding an ``InvoiceBuffer`` already
+    passes straight through: ``linkage_buffer_for`` returns it unchanged and
+    ``publish_linkage_buffer`` does nothing.
+
+    ``publish_linkage_buffer`` runs AFTER the dispatch and not in a ``finally``,
+    because the handler never raises [common/acas016.cbl:L627] - *"Any errors
+    leave it to caller to recover from"* - so there is no failure path for which
+    the COBOL would still have copied the record area back.
     """
     _apply(ctx.file_access, _FILE_KEY_NO, PRIMARY_FILE_KEY_NO)
+    invoice = acas016_invoice.linkage_buffer_for(ctx.record)
     acas016_invoice.dispatch(
         ctx.system,
-        ctx.record,
+        invoice,
         ctx.file_access,
         ctx.file_defs,
         ctx.dal_common,
         **_forward(ctx),
     )
+    acas016_invoice.publish_linkage_buffer(invoice, ctx.record)
 
 
 def _dispatch_acas017(ctx: FacadeContext) -> None:
@@ -872,16 +897,42 @@ def _dispatch_acas026(ctx: FacadeContext) -> None:
     """``acas026`` passing ``WS-PInvoice-Record``.
 
     [copybooks/Proc-ACAS-FH-Calls.cob:L156-L161]
+
+    ⭐ THE SECOND DISPATCH PARAGRAPH THAT HANDS OVER A PROJECTED RECORD, for the
+    same reason as ``acas016`` and with a different pair of descriptions. The
+    purchase-invoice record is described TWICE in the frozen source -
+    ``copybooks/plwspinv.cob`` nests it, ``copybooks/plwspinv2.cob`` lays it flat
+    with two redefinitions over it - and each caller copies the one it wants, so
+    ``acas026`` is handed whatever its caller's ``WS-PInvoice-Record`` happens to
+    be. In COBOL that works because a ``CALL`` passes storage and the callee's
+    ``LINKAGE SECTION`` decides how to read it; Python has no storage aliasing, so
+    the swap is spelled out in ``dal.acas026_pinvoice``, which owns both
+    descriptions, and called from here. That answers AMBIGUITY Q-PL055-8, which
+    asked which description the handler wants and said the facade owns the
+    translation.
+
+    A caller holding a ``PInvoiceHeader`` passes straight through unchanged.
+
+    The published-back copy runs AFTER the dispatch and not in a ``finally``,
+    because the handler never raises [common/acas026.cbl:L617] - *"Any errors
+    leave it to caller to recover from"*.
     """
     _apply(ctx.file_access, _FILE_KEY_NO, PRIMARY_FILE_KEY_NO)
+    options = _forward(ctx)
+    # The staged line lives in the working storage the call uses, so the same
+    # `context` the caller forwarded - if any - is the one to project through, on
+    # the way in AND on the way out.
+    context = options.get("context")
+    pinvoice = acas026_pinvoice.linkage_header_for(ctx.record, context)  # type: ignore[arg-type]
     acas026_pinvoice.dispatch(
         ctx.system,
-        ctx.record,
+        pinvoice,
         ctx.file_access,
         ctx.file_defs,
         ctx.dal_common,
-        **_forward(ctx),
+        **options,
     )
+    acas026_pinvoice.publish_linkage_header(pinvoice, ctx.record, context)  # type: ignore[arg-type]
 
 
 def _dispatch_acas029(ctx: FacadeContext) -> None:

@@ -1736,6 +1736,55 @@ def _analise_deductions__main_exit(state: _Pl100State) -> None:
 # inconsistency is recorded as a FINDING.
 
 
+#: ``05 WS-Batch-Nos pic 9(5)`` [copybooks/wsbatch.cob:L19] - the scale at which
+#: ``WS-Ledger`` [:L15] contributes to the six digits ``WS-Batch-Key9`` reads.
+_BATCH_NOS_SCALE: Final[int] = 10**5
+
+
+def _restate_ws_batch_key9(batch: GlBatchRecord) -> None:
+    """Keep ``WS-Batch-Key9`` in step with the two members it redefines.
+
+    ⭐⭐ ONE STORAGE, TWO READINGS. ``03 WS-Batch-Key.`` holds ``05 WS-Ledger
+    pic 9.`` and ``05 WS-Batch-Nos pic 9(5).``, and ``03 WS-Batch-Key9 redefines
+    WS-Batch-Key pic 9(6).`` [copybooks/wsbatch.cob:L14-L21] is those SAME six
+    bytes read as one number. ``move bl-next-batch to WS-Batch-Nos``
+    [purchase/pl100.cbl:L546] and ``move 2 to WS-Ledger`` [:L547] therefore change
+    what ``WS-Batch-Key9`` reads, instantly - in COBOL there is nothing to keep in
+    step because there is only one storage. Python has no aliasing, so restating it
+    is a MODELLING obligation, not a new rule. (Note this program allocates from
+    ``BL-Next-Batch`` rather than ``Next-Batch``, the FINDING recorded at the move
+    site; the redefinition behaves the same either way.)
+
+    THE ROLLOVER IS WHY THIS IS REACHED TWICE. ``if items = 99 / perform bl-close /
+    perform bl-open`` [purchase/pl100.cbl:L653] closes the full batch and opens the
+    next, so a hundredth item returns here with a key already in working storage.
+    Without the restatement the grouped reading held the NEW batch while the
+    redefined reading still held the PREVIOUS one, and ``acas007``'s
+    ``synchronise_batch_key_views`` - which deliberately refuses to pick between two
+    non-default disagreeing readings, because ``bb000-HV-Load`` reads
+    ``WS-BATCH-KEY9`` [common/glbatchMT.cbl:L1069] while ``ba070`` logs
+    ``ws-BATCH-KEY`` - raised ``BatchKeyViewsDisagreeError`` and aborted the run.
+
+    ⭐ THE ABORT WAS ALSO A DOUBLE-POST HAZARD IN THIS PROGRAM, as in ``sl100``: it
+    struck UPSTREAM of the point at which the posted-item latch is cleared, leaving
+    it set on a run that had already written postings. Restoring the rollover to a
+    plain key transition lets the latch reach its reset, as the COBOL always did.
+
+    ⛔ DO NOT relax the reconciler instead. Its refusal is the safeguard; the defect
+    was here, at the writer. NOT a new validation (rule R-3) and NOT an anomaly
+    repair (rule R-4) - nothing is tested, clamped or corrected, and the value
+    computed is the one the COBOL's own bytes already carry after [:L546-L547].
+
+    Args:
+        batch: ``01 WS-Batch-Record.`` [copybooks/wsbatch.cob:L13], mutated in
+            place so both readings of its key agree.
+    """
+    batch.ws_batch_key9.ws_batch_key9 = (
+        int(batch.ws_batch_key.ws_ledger) * _BATCH_NOS_SCALE
+        + int(batch.ws_batch_key.ws_batch_nos)
+    )
+
+
 def _bl_open(state: _Pl100State) -> None:
     """``bl-open section.``  [purchase/pl100.cbl:L541-L572] - batch allocation, AND A-NEW-5.
 
@@ -1759,6 +1808,9 @@ def _bl_open(state: _Pl100State) -> None:
     # [L547]  move 2 to WS-Ledger.       Ledger 2 = Purchase.
     # `88 PL-Batch value 2.` [copybooks/wsbatch.cob]
     state.batch.ws_batch_key.ws_ledger = movelib.move(2, _D_WS_LEDGER)
+    # ⭐ The two moves above have just changed the bytes ``WS-Batch-Key9`` redefines,
+    # so its reading is restated - see `_restate_ws_batch_key9`.
+    _restate_ws_batch_key9(state.batch)
     # [L548]  add 1 to bl-next-batch.    A REAL `SYSTEM-REC` write.
     state.system_record.purchase_ledger_block.bl_next_batch = arithmetic.add_to(
         1, receiver_value=state._pl.bl_next_batch, receiving=_D_BL_NEXT_BATCH

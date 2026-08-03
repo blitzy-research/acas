@@ -1608,11 +1608,26 @@ def _gl080_main(st: _Gl080Storage) -> None:
     # NO GUARD ON `period` (rule R-3). The frozen source tests nothing before
     # dividing, so nothing is tested here; a zero divisor is the compiled
     # program's behaviour to exhibit, not this module's to prevent.
+    #
+    # `receiver_value=st.a` IS WHAT EXHIBITS IT. The gate two lines above is
+    # `if a = 9 or scycle < period` [general/gl080.cbl:L326-L327] and `period` is
+    # an UNSIGNED `pic 99`, so `scycle < 0` is false for every `scycle` and a
+    # system row carrying `period = 0` reaches THIS DIVIDE. GnuCOBOL 3.2 raises
+    # the SIZE ERROR condition, performs NO STORE and carries on - question Q-7,
+    # measured - so the receiving field keeps the value it already holds, which
+    # is `a` in its second role, the `disk-change` abort code. Passing that
+    # previous value is the ONLY way the primitive can return it; omitting it
+    # makes the primitive raise instead, which would abort a run the compiled
+    # program completes (`y = 0 * 0 = 0`, `scycle not = y`, so control goes to
+    # `main-end` and no phase-5 write happens at all). The argument adds no
+    # guard, no clamp and no validation - it hands the primitive the one fact
+    # only the caller has.
     st.a = arithmetic.divide_by_giving(
         st.system.system_data_block.scycle,
         st.system.system_data_block.period,
         _A,
         rounded=True,
+        receiver_value=st.a,
     )
 
     # 329  multiply a  by  period  giving  y.

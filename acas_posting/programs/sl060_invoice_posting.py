@@ -1161,6 +1161,74 @@ class _Sl060State:
         )
 
 
+#: The fallback name, used only when ``File-Defs`` carries no assignment - the
+#: ``SELECT``'s own file name [copybooks/seloi2.cob:L2].
+_OTM2_NAME: Final[str] = "open-item-file-2"
+
+
+#: The OTM2 sequences this process has opened, keyed by the name ``file-18`` assigns.
+#:
+#: ⭐⭐ THIS IS THE ``sl055`` -> ``sl060`` HANDOFF CHANNEL, and it exists because
+#: ``select open-item-file-2 assign file-18`` [copybooks/seloi2.cob:L2] names a
+#: FILE, and a file OUTLIVES the program that opened it. ``sl055`` writes the
+#: extract - ``open extend`` [sales/sl055.cbl:L359], ``write oi-header``
+#: [sales/sl055.cbl:L681] - and ``sl060`` reads it back at [:L437] before
+#: TRUNCATING it at [:L677-L678] once the transfer to OTM3 is complete. A single
+#: ``run`` call therefore cannot own the sequence.
+#:
+#: ``run``'s parameter list cannot carry it either: the frozen source's
+#: ``PROCEDURE DIVISION USING`` has exactly five entries [sales/sl060.cbl:L395-L399]
+#: and adding a sixth would misrepresent the linkage. Keying by the assigned name
+#: is what the ``ASSIGN`` clause itself does, so the registry is addressable by the
+#: same thing the COBOL addresses the file by.
+#:
+#: ⭐ SYMMETRIC WITH ``pl060``, DELIBERATELY. ``_OTM4_SEQUENCES`` /
+#: ``_otm4_sequence`` in ``acas_posting/programs/pl060_order_posting.py`` is the
+#: identical construct for the purchase side's ``file-28``, and the two ledgers
+#: run the same lifecycle grammar. ``sl055``'s own note - *"the handoff is via the
+#: sequence object exactly as it is via the file in COBOL. ``run`` exposes it as
+#: the keyword-only ``open_item_file_2`` so the CLI can pass one object to both
+#: programs"* - requires a reachable sequence on THIS side for that sentence to be
+#: true; before this registry existed, ``_new_state`` built a private empty
+#: sequence per call and nothing ``sl055`` wrote could ever be read.
+#:
+#: STRUCTURAL NOTE - ``acas_posting/workfiles.py`` publishes only ``pre_trans``,
+#: ``post_trans`` and ``sort_trans``, and both ``acas_posting/programs/`` and
+#: ``acas_posting/records/`` are closed at a fixed file list (Agent Action Plan
+#: sections 0.4.1.2, 0.4.4), so no shared registry exists for OTM2 and none may be
+#: created. It lives here, beside the program that owns the file's input side.
+#:
+#: AMBIGUITY Q-OTM2-HANDOFF - whether this registry or a future entry in
+#: ``workfiles.py`` is the agreed home, and whether ``sl055``'s module-private
+#: ``_OpenItemFile2`` (which needs the EXTEND mode ``LineSequentialWorkFile`` does
+#: not publish) should be reconciled with this type or drained into it by the CLI,
+#: has to be settled against the compiled cycle's observable ``SAITM3-REC`` and
+#: ``SALEDGER-REC`` state rather than decided here. What is NOT ambiguous is that
+#: the channel must be keyed by ``file-18`` and must outlive a single ``run``.
+_OTM2_SEQUENCES: Final[dict[str, LineSequentialWorkFile]] = {}
+
+
+def _otm2_sequence(file_defs: FileDefs) -> LineSequentialWorkFile:
+    """The OTM2 sequence ``file-18`` assigns, created on first use.
+
+    ``01 open-item-record-2 pic x(118)`` [copybooks/fdoi2.cob:L11] is the file's
+    single record and it holds exactly the ``OI-Header`` layout, which is why the
+    sequence carries :class:`OiHeader` records - the same class ``sl055`` writes
+    and the same one ``acas_posting/records/otm3.py`` publishes. Nothing about the
+    file reaches a schema table (Agent Action Plan section 0.3.1), so nothing about
+    it appears in a table dump.
+
+    Two different assigned names get two independent sequences, which is what keeps
+    two runs in one interpreter from reading each other's extract (section 0.6.6).
+    """
+    assigned = str(file_defs.file_defs_a.file_18).strip() or _OTM2_NAME
+    sequence = _OTM2_SEQUENCES.get(assigned)
+    if sequence is None:
+        sequence = LineSequentialWorkFile(assigned, OiHeader)
+        _OTM2_SEQUENCES[assigned] = sequence
+    return sequence
+
+
 def _new_state(
     ws_calling_data: WsCallingData,
     system_record: SystemRecord,
@@ -1190,9 +1258,10 @@ def _new_state(
         # "openitm2". The sequence is the OTM2 extract ``sl055`` wrote; it
         # reaches no schema table and appears in no table dump, and [:L677-L678]
         # TRUNCATES it once the transfer to OTM3 is complete.
-        open_item_file_2=LineSequentialWorkFile(
-            file_defs.file_defs_a.file_18, OiHeader
-        ),
+        # ⭐ OBTAINED FROM THE REGISTRY, NOT CONSTRUCTED HERE. A file outlives the
+        # program that opens it, so building a fresh empty sequence per call would
+        # make ``sl055``'s extract unreachable - see ``_otm2_sequence``.
+        open_item_file_2=_otm2_sequence(file_defs),
         si_header=_initial_oi_header(),
     )
 
@@ -1200,6 +1269,90 @@ def _new_state(
 # ---------------------------------------------------------------------------
 # The one place the two turnover declarations are reconciled
 # ---------------------------------------------------------------------------
+
+#: ``03 total-group occurs 3`` [sales/sl060.cbl:L219] - the occurrence count, named
+#: once so the boundary is stated rather than spelled as a literal at the use site.
+_TOTAL_GROUP_OCCURS: Final[int] = 3
+
+
+class _TotalGroupSubscriptOutOfRange(LookupError):
+    """``total-vat (a)`` / ``total-net (a)`` reached outside ``occurs 3``.
+
+    RAISED RATHER THAN GUESSED, on purpose. See :func:`_total_group_occurrence`.
+    """
+
+
+def _total_group_occurrence(a: int) -> int:
+    """``(a)`` -> the Python index of that occurrence of ``total-group``.
+
+    ⭐⭐ THE SUBSCRIPT IS UNCHECKED IN THE FROZEN SOURCE, AND THAT IS THE WHOLE
+    PROBLEM. ``add work-vat to total-vat (a).`` [sales/sl060.cbl:L526] and
+    ``add work-net to total-net (a).`` [:L527] index ``03 total-group occurs 3``
+    [:L219] with ``03 a pic 9`` [:L222], which was loaded by ``move oi-type to a.``
+    [:L509]. Nothing between the load and the use tests ``a``: the three-way
+    ``if oi-type = 2 / = 3 / = 1`` [:L511-L517] chooses a PRINT literal and has no
+    ``else``, so an ``oi-type`` of 0 - or of 4 through 9, which ``pic 9`` admits -
+    flows straight through to the subscript.
+
+    WHY THIS IS A FUNCTION AND NOT ``[a - 1]``. Written as a bare Python subscript,
+    ``a = 0`` becomes index ``-1`` and SILENTLY ACCUMULATES INTO THE THIRD
+    OCCURRENCE. That corresponds to nothing the compiled program does. Laying the
+    record out from [:L216-L222] - ``work-net``, ``work-vat`` and ``work-goods`` are
+    each ``comp-3 pic s9(7)v99``, so five packed bytes each, and one occurrence of
+    ``total-group`` is ``total-net`` plus ``total-vat``, so ten - occurrence ``n``
+    begins thirty bytes into a table that starts fifteen bytes past ``work-net``.
+    Subscript 0 therefore addresses the ten bytes IMMEDIATELY BEFORE the table,
+    which are ``work-vat`` and ``work-goods``, not its last occurrence; and a
+    subscript of 4 or more runs off the far end into ``a`` and ``line-cnt`` [:L222,
+    :L223]. Python's negative-index wraparound is an artefact of the language, not
+    a reproduction of the defect.
+
+    WHY IT RAISES INSTEAD OF EMULATING THE OVERRUN. Reproducing the overrun
+    faithfully would mean modelling this record as packed bytes and letting an
+    out-of-range store land on whichever field shares those bytes - and the
+    ``comp-3`` codec lives in ``acas_posting.cobol.usage``, which a ``programs``
+    module reaches only through the arithmetic and move helpers, never as raw
+    storage. The alternative of PICKING a bucket would invent an accumulation the
+    oracle has not been asked, so ANOMALY A-SUBSCRIPT is recorded and the condition
+    is surfaced loudly instead, exactly as ``arithmetic.SizeErrorNoStore`` and
+    ``acas007``'s batch-key reconciler refuse to pick a side. ⛔ DO NOT replace this
+    with a clamp, a modulo, a default bucket or a silent skip - each of those is a
+    behaviour this program does not have.
+
+    NOT A NEW VALIDATION (rule R-3). Nothing is validated on the path the program
+    actually takes: ``a`` of 1, 2 or 3 returns its occurrence and the accumulation
+    proceeds unchanged. The receivers are print-only totals reported at
+    [:L613-L620], so no table state depends on this for an in-range ``a``.
+
+    AMBIGUITY Q-SL060-SUBSCRIPT - what the compiled program stores for ``a`` of 0
+    or 4..9 is UNMEASURED, because the oracle cannot be built at this checkpoint
+    (``copybooks/ACAS-SQLstate-error-list.cob`` is absent from the frozen archive).
+    Settle it by driving one OTM2 record whose ``oi-type`` is 0 through the compiled
+    ``sl060`` and reading ``work-vat``, ``work-goods`` and the three occurrences,
+    then reproduce whatever it does here.
+
+    Args:
+        a: ``03 a pic 9`` [sales/sl060.cbl:L222], as loaded from ``oi-type``.
+
+    Returns:
+        The 0-based index of occurrence ``a``.
+
+    Raises:
+        _TotalGroupSubscriptOutOfRange: If ``a`` is outside 1..3.
+    """
+    if 1 <= a <= _TOTAL_GROUP_OCCURS:
+        return a - 1
+    raise _TotalGroupSubscriptOutOfRange(
+        f"total-group (a) reached with a = {a}, outside `occurs "
+        f"{_TOTAL_GROUP_OCCURS}` [sales/sl060.cbl:L219]. `a` was loaded by `move "
+        f"oi-type to a.` [:L509] and used unchecked at [:L526-L527], so an "
+        f"OI-Header carrying oi-type = {a} reaches a subscript the table does not "
+        f"have. What the compiled program stores here is UNMEASURED - see "
+        f"AMBIGUITY Q-SL060-SUBSCRIPT in _total_group_occurrence - and it is NOT "
+        f"occurrence {_TOTAL_GROUP_OCCURS}, which is where a bare Python `[a - 1]` "
+        f"would have silently accumulated for a = 0"
+    )
+
 
 #: ``05 Turnover-Q1`` through ``Turnover-Q4`` [copybooks/wssl.cob], the
 #: declaration the data-access layer persists as four columns.
@@ -1694,15 +1847,21 @@ def _aa020_read_loop(state: _Sl060State) -> None:
 
         # [:L526] add work-vat to total-vat (a).
         # [:L527] add work-net to total-net (a).
-        # FINDING 8(a) again: both subscripted by `a`, unchecked.
-        state.total_vat[state.a - 1] = arithmetic.add_to(
+        # FINDING 8(a) again: both subscripted by `a`, unchecked. The occurrence is
+        # resolved ONCE, through `_total_group_occurrence`, because a bare
+        # `[state.a - 1]` turns `a = 0` into a silent write to the THIRD occurrence
+        # - a Python wraparound that corresponds to nothing the compiled program
+        # does. Both statements share the one resolved index, exactly as both share
+        # the one `a` in the COBOL.
+        occurrence = _total_group_occurrence(state.a)
+        state.total_vat[occurrence] = arithmetic.add_to(
             state.work_vat,
-            receiver_value=state.total_vat[state.a - 1],
+            receiver_value=state.total_vat[occurrence],
             receiving=_TOTAL_VAT,
         )
-        state.total_net[state.a - 1] = arithmetic.add_to(
+        state.total_net[occurrence] = arithmetic.add_to(
             state.work_net,
-            receiver_value=state.total_net[state.a - 1],
+            receiver_value=state.total_net[occurrence],
             receiving=_TOTAL_NET,
         )
 
@@ -3185,6 +3344,62 @@ def _ba999_main_exit(state: _Sl060State) -> None:
 # ---------------------------------------------------------------------------
 
 
+#: ``05 WS-Batch-Nos pic 9(5)`` [copybooks/wsbatch.cob:L19] - the five low-order
+#: digits of the six ``WS-Batch-Key9`` reads as one number, so ``WS-Ledger``
+#: [:L15] contributes at this scale.
+_BATCH_NOS_SCALE: Final[int] = 10**5
+
+
+def _restate_ws_batch_key9(batch: GlBatchRecord) -> None:
+    """Keep ``WS-Batch-Key9`` in step with the two members it redefines.
+
+    ⭐⭐ ONE STORAGE, TWO READINGS. ``03 WS-Batch-Key.`` holds ``05 WS-Ledger
+    pic 9.`` and ``05 WS-Batch-Nos pic 9(5).``, and ``03 WS-Batch-Key9 redefines
+    WS-Batch-Key pic 9(6).`` [copybooks/wsbatch.cob:L14-L21] is those SAME six
+    bytes read as a single number. In the compiled program ``move next-Batch to
+    WS-Batch-nos`` [sales/sl060.cbl:L1016] and ``move 3 to WS-ledger`` [:L1017]
+    therefore change what ``WS-Batch-Key9`` reads, instantly and unavoidably -
+    there is nothing to keep in step because there is only one storage.
+
+    Python has no storage aliasing, so the two readings are two fields and the
+    second does NOT follow the first. Restating it here is what the redefinition
+    does for free; it is a MODELLING obligation, not a new rule.
+
+    WHY IT MATTERS, AND WHAT IT FIXES. ``acas007``'s
+    ``synchronise_batch_key_views`` reconciles the pair at the bridge boundary and
+    deliberately REFUSES to pick a side: *"If both are non-default and they
+    disagree, there is no basis in the copybook for preferring one"*, because
+    ``bb000-HV-Load`` reads ``WS-BATCH-KEY9`` [common/glbatchMT.cbl:L1069] while
+    ``ba070`` logs ``ws-BATCH-KEY``, so a silent choice would post a batch to the
+    wrong key. Without this restatement the second pass through ``ca000-BL-Open``
+    left the grouped reading on the NEW batch and the redefined reading on the
+    PREVIOUS one - both non-default, both different - and the next batch verb
+    raised ``BatchKeyViewsDisagreeError``, turning ``items = 99`` from a key
+    rollover into an aborted run. Its docstring names the remedy exactly: *"Set
+    one reading and let the acas007 handler derive the other."* This sets them
+    together, which additionally leaves no window in which the redefined reading
+    is stale or zero - matching the compiled program, where no such window exists.
+
+    ⛔ DO NOT instead relax the reconciler. Its refusal is the safeguard; the
+    defect was here, at the writer.
+
+    NOT A NEW VALIDATION (rule R-3) and NOT AN ANOMALY REPAIR (rule R-4). No test
+    is added, no value is clamped and no behaviour is corrected - the batch key
+    this computes is the one the COBOL's own bytes already carry after [:L1016]
+    and [:L1017]. The precedent is this module's own
+    ``_add_to_turnover_quarter``, which likewise writes both readings of a
+    ``REDEFINES`` pair rather than letting one drift.
+
+    Args:
+        batch: ``01 WS-Batch-Record.`` [copybooks/wsbatch.cob:L13], mutated in
+            place so both readings of its key agree.
+    """
+    batch.ws_batch_key9.ws_batch_key9 = (
+        int(batch.ws_batch_key.ws_ledger) * _BATCH_NOS_SCALE
+        + int(batch.ws_batch_key.ws_batch_nos)
+    )
+
+
 def _ca000_bl_open(state: _Sl060State) -> None:
     """``ca000-BL-Open section.`` [sales/sl060.cbl:L1007] - start a GL batch.
 
@@ -3193,6 +3408,12 @@ def _ca000_bl_open(state: _Sl060State) -> None:
     switch selects.
 
     A-17's OTHER END lives here, at [:L1037].
+
+    ⭐ THE BATCH ROLLOVER REACHES THIS SECTION A SECOND TIME. ``if items = 99 /
+    perform ca000-BL-Close / perform ca000-BL-Open.`` [:L1150-L1152] closes the
+    full batch and opens the next one, so a run that posts a hundredth item comes
+    back through here with a batch key already in working storage. That is a KEY
+    TRANSITION and nothing more - see `_restate_ws_batch_key9`.
     """
     system = state.system_record
     gl_block = system.general_ledger_block
@@ -3216,6 +3437,9 @@ def _ca000_bl_open(state: _Sl060State) -> None:
     )
     # [:L1017] move 3 to WS-ledger.  3 = Sales Ledger.
     batch.ws_batch_key.ws_ledger = move.move_numeric(3, _BATCH["ws-ledger"])
+    # ⭐ THE REDEFINED READING IS RESTATED HERE, because the two preceding moves
+    # have just changed the bytes it shares. See `_restate_ws_batch_key9`.
+    _restate_ws_batch_key9(batch)
     # [:L1018] add 1 to next-Batch.  The system record is mutated here but only
     # persisted by whatever later writes SYSTEM-REC; sl060 never writes it
     # itself, which is why A-17's `postings` update [:L1173] shares its fate.

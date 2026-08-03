@@ -751,11 +751,13 @@ class _FacadeContext:
     resolves the difference by having each caller copy the description it wants -
     `acas026` itself is handed whatever its caller's `WS-PInvoice-Record`
     happens to be. Reproduced the same way here: this module holds the flat
-    views its own `copy` declares and the facade owns any translation to the
-    handler's shape, because inventing a conversion in a program module would
-    put a data-access concern in `programs/`. Measure a read-then-rewrite round
-    trip through the compiled `acas026` to confirm the two descriptions agree
-    field for field before relying on it.
+    views its own `copy` declares and the DATA-ACCESS LAYER owns the translation
+    to the handler's shape, because inventing a conversion in a program module
+    would put a data-access concern in `programs/`. ANSWERED: `acas026` publishes
+    `linkage_header_for` / `publish_linkage_header`, which the facade calls around
+    its dispatch, so the two descriptions are reconciled field for field in the
+    module that owns both. What this module hands over is the RECORD AREA - see
+    `_PInvoiceRecordArea` and `pinvoice_record_area` below.
     """
 
     system_record: SystemRecord
@@ -767,6 +769,40 @@ class _FacadeContext:
     file_access: FileAccess
     file_defs: FileDefs
     acas_dal_common_data: AcasDalCommonData
+
+    #: The one `WS-PInvoice-Record` area the `acas026` `CALL` reaches, built on
+    #: first use and then held. NOT an operand and NOT a tenth field of any
+    #: `using` list - it is the handle for the three fields above, which is why it
+    #: is private and `init=False`.
+    _pinvoice_record_area: _PInvoiceRecordArea | None = dataclass_field(
+        default=None, init=False, repr=False, compare=False
+    )
+
+    def pinvoice_record_area(self) -> _PInvoiceRecordArea:
+        """`WS-PInvoice-Record` as ONE area, stable for the life of the run.
+
+        ⭐ THE SAME OBJECT ON EVERY VERB, deliberately. A COBOL record area is one
+        storage for the life of the program, and the data-access layer relies on
+        that: `acas026.linkage_header_for` keys the `PInvoice-Header` it walks the
+        bridge with on the identity of the area handed over, because the key the
+        next reread synthesises is read back out of that record. A fresh wrapper
+        per verb would hand over a new identity each time and restart the walk
+        after every read - so the trio is built once here and reused, exactly as
+        the three objects it references are.
+
+        It is built lazily rather than in `__init__` so that `_FacadeContext`
+        stays constructible from the nine COBOL operands alone, and so a caller
+        that never reaches the PInvoice entity never builds one.
+        """
+        area = self._pinvoice_record_area
+        if area is None:
+            area = _PInvoiceRecordArea(
+                ws_pinvoice_record=self.ws_pinvoice_record,
+                invoice_header=self.invoice_header,
+                invoice_line=self.invoice_line,
+            )
+            self._pinvoice_record_area = area
+        return area
 
     @property
     def invoice_fig(self) -> IhFig2:
@@ -796,6 +832,41 @@ _ENTITY_RECORD: Final[dict[str, str]] = {
 }
 
 
+@dataclass(frozen=True, slots=True)
+class _PInvoiceRecordArea:
+    """`WS-PInvoice-Record` and its two `REDEFINES` views - ONE record area.
+
+    THE OPERAND `acas026`'s DISPATCH PARAGRAPH NAMES is `WS-PInvoice-Record`
+    [copybooks/Proc-ACAS-FH-Calls.cob:L156-L162], and in the compiled program that
+    single name reaches the whole hundred bytes - so the callee sees the header
+    view and the line view too, because `01 Invoice-Header redefines
+    WS-PInvoice-Record.` [copybooks/plwspinv2.cob:L21] and `01 Invoice-Line
+    redefines WS-PInvoice-Record.` [:L56] ARE those bytes. A `CALL` passes
+    storage; it does not pass a chosen view.
+
+    This module holds the three as three objects, because Python cannot overlay
+    storage and because `copy "plwspinv2.cob"` [purchase/pl055.cbl:L135] declares
+    three `01` items. So the operand handed over is the TRIO, which is the
+    closest Python has to the one area the COBOL passes. It carries REFERENCES to
+    the very objects `_FacadeContext` holds, so a verb that loads a record leaves
+    it visible through `ctx.invoice_header` / `ctx.invoice_line` exactly as the
+    compiled program leaves it visible through the redefinitions - and this
+    module's own paragraph functions go on reading those attributes, unchanged.
+
+    THIS RESOLVES THE OTHER HALF OF AMBIGUITY Q-PL055-8. The first half - which
+    of the two purchase-invoice DESCRIPTIONS the handler wants - is the facade's,
+    and `acas026` answers it by projecting between them. The half that is this
+    module's is which OPERAND to hand over, and the answer is the copybook's: the
+    record area, not one of its views. `_ENTITY_RECORD` above still records the
+    operand's COBOL name, which is what makes it diffable against
+    [copybooks/Proc-ACAS-FH-Calls.cob:L156-L162].
+    """
+
+    ws_pinvoice_record: WsPInvoiceRecord
+    invoice_header: IhInvoiceHeader
+    invoice_line: IlInvoiceLine
+
+
 class _BoundFacade:
     """`_FacadeContext` on this side, `facade.FacadeContext` on the other.
 
@@ -820,12 +891,21 @@ class _BoundFacade:
     `facade` parameter still overrides this binding, so a test double remains
     structurally sufficient.
 
-    AMBIGUITY Q-PL055-8 IS NOT TOUCHED and remains open. `ws_pinvoice_record` is
-    handed over as the base record area, exactly as `acas026`'s dispatch paragraph
-    passes `WS-PInvoice-Record` [copybooks/Proc-ACAS-FH-Calls.cob:L156-L162]; the
-    flat-versus-nested question of which purchase-invoice description the handler
-    wants is the facade's and the handler's, and is still to be settled by
-    measuring a read-then-rewrite round trip through the compiled `acas026`.
+    AMBIGUITY Q-PL055-8 IS ANSWERED FROM THE FROZEN TEXT, in its two halves.
+    The half that is this module's is WHICH OPERAND to hand over, and the answer
+    is the copybook's: `acas026`'s dispatch paragraph names `WS-PInvoice-Record`
+    [copybooks/Proc-ACAS-FH-Calls.cob:L156-L162], and in the compiled program that
+    one name reaches the whole hundred bytes - the two `REDEFINES` views included,
+    because `01 Invoice-Header redefines WS-PInvoice-Record.`
+    [copybooks/plwspinv2.cob:L21] and `01 Invoice-Line redefines
+    WS-PInvoice-Record.` [:L56] ARE those bytes. A `CALL` passes storage, not a
+    chosen view, so the operand handed over is the trio - see
+    `_PInvoiceRecordArea`, which carries references to the very objects this
+    context holds. The other half - which of the two purchase-invoice
+    DESCRIPTIONS the handler wants - is the facade's and the handler's, and
+    `acas026` answers it by projecting between them rather than by requiring a
+    caller to pick. Nothing here coerces, converts or reshapes a field; the trio
+    is a handover of the same three objects under one name.
 
     Nothing about the operation changes. `File-Access` is passed by reference, so
     each verb writes `We-Error` and `Fs-Reply` into the very block this context
@@ -853,11 +933,23 @@ class _BoundFacade:
         target = getattr(self._facade, verb)
         record_attribute = _ENTITY_RECORD[entity]
 
+        def _operand(ctx: _FacadeContext) -> Any:
+            """The second operand of the `CALL`, as the copybook names it.
+
+            For Value and Analysis that is one record and one object. For
+            PInvoice the COBOL name reaches the whole record AREA including its
+            two redefinitions, so the trio goes over under the one name - see
+            `_PInvoiceRecordArea` and `_FacadeContext.pinvoice_record_area`.
+            """
+            if entity == "pinvoice":
+                return ctx.pinvoice_record_area()
+            return getattr(ctx, record_attribute)
+
         def _perform(ctx: _FacadeContext, /) -> None:
             target(
                 self._facade.FacadeContext(
                     ctx.system_record,
-                    getattr(ctx, record_attribute),
+                    _operand(ctx),
                     ctx.file_access,
                     ctx.file_defs,
                     ctx.acas_dal_common_data,
