@@ -10,7 +10,7 @@ Present in this package
     args    binds `01 WS-Calling-Data` [copybooks/wscall.cob:L6-L14], the run
             date and the system records to command-line arguments.
 
-Target inventory, named in `__all__` but NOT YET PRESENT
+The seven entry points, named in `__all__`
     gl_post_cycle, gl_end_of_cycle, sl_invoice_post, sl_cash_post,
     pl_order_post, pl_payment_post, irs_post.
 Listing a name in `__all__` records the target tree for traceability; it does
