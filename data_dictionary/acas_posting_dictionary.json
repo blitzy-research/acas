@@ -39,7 +39,7 @@
       "usage_inheritance": "The parser keeps a stack of open levels. A group that declares a USAGE passes it to every subordinate item that declares none, and the inheritance is recorded rather than silently applied: usage_declared_at is FIELD when the clause is on the item, GROUP when it was inherited - with usage_inherited_from naming the group and usage_group_source citing its line - and DEFAULT when no clause governs the item anywhere, so COBOL's DISPLAY applies. This is the single highest-risk rule in the whole generator: copybooks/wsbatch.cob:L40 declares 03 Amounts comp-3 and the four amount fields beneath it at L41-L44 carry no usage on their own picture lines, and copybooks/wssys4.cob:L9 and L20 do the same for twenty period totals. Reading usage from the picture line alone would class all of them as DISPLAY and every stored value would be wrong. A PIC X item is recorded as ALPHANUMERIC and an item with subordinates and no picture as GROUP.",
       "bridge_derived_columns": "A host variable is bound to the copybook field it carries by trying, in this fixed order: the data-name the load move names, the data-name the unload move names, the host-variable name with its HV or HV1 prefix removed, and the column name; each also retried under the spelling substitutions the frozen source itself evidences - adding or removing a WS- prefix, expanding a trailing -DAT to -DATE, reading TIPE as TYPE, and reading an OI3- or OI5- prefix as OI-. Finally a trailing -NN is stripped and the base retried, binding only when the field found declares OCCURS at least NN, which is how the bridges that flatten an array into separately named columns still reach the single copybook item that declares it. A reference modification such as Post-Date (1:2) is never a binding candidate, because it derives a new value from part of a field rather than carrying that field - which is exactly why the three IRS date components correctly have no copybook view. When no candidate binds and a column exists, the entry carries copybook null and a derivation: BRIDGE_DERIVED when the bridge computes the value from other record data, from a literal, or from the subscript of an OCCURS group; GROUP_CONCATENATION when a whole copybook group is moved into one host variable; REDEFINES_ALTERNATIVE when the value comes from a REDEFINES view of the storage. A load made inside an IF records that condition verbatim as the guard and states in guard_failure_behaviour what is stored when it does not hold, because the failure mode is part of the specification and must be reproduced rather than repaired (R-4).",
       "cobol_python_storage": "Chosen from the declaring COBOL view alone - the copybook view, or the program-source view for a work-file field that no copybook declares: NONE for a group item or for an entry with neither of those views; STR for an alphanumeric item; DECIMAL for a numeric item with a non-zero scale; INT for the BINARY-CHAR, BINARY-SHORT, BINARY-LONG and COMP-5 family and for any zero-scale integer. This member exists only so that the choice between decimal.Decimal and int is data-driven rather than hand-coded per field (R-2); getting the binary family right is what makes the integer truncation in the legacy moving averages reproducible. It is emphatically NOT a settlement of any drift: it describes the COBOL side alone, and anything that needs to know what the bridge or the database does must read those views instead.",
-      "program_source_entries": "A record a posting program declares INLINE, in its own FILE SECTION rather than by COPY, is read from a stated line span and never from a search: the generator holds the program path, the 01-level record name, whether an FD or an SD introduces it, and the first and last physical lines of the declaration, and it refuses to parse a span whose first line does not declare the named record or whose nearest preceding FD or SD does not match. Five such records exist, all of them General Ledger work files - pre-trans-record in general/gl070.cbl and general/gl071.cbl, post-trans-record in general/gl071.cbl and general/gl072.cbl, and sort-trans-record in general/gl071.cbl. The declarations are parsed by the same code that parses a copybook, because a COBOL data declaration has one shape wherever it is written, so digits, scale, signedness, sign position and storage class are derived for these fields exactly as they are for every other field and none of them is hand-bound (R-5). Their bridge and column views are recorded as ABSENT rather than searched for: copybooks/wsnames.cob:L14-L17 names pretrans.tmp and postrans.tmp as transient work files, no bridge COPYs these records and the frozen dump declares no table for them, so presence.in_program_source is true with in_copybook, in_bridge and in_column all false, one_sided is true by construction, and derivation is null because there is no column to derive. They are in the dictionary because their widths and their order are load-bearing anyway: general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the order general/gl071.cbl sorted the stream into, which is anomaly A-14."
+      "program_source_entries": "A record a posting program declares INLINE, in its own FILE SECTION rather than by COPY, is read from a stated line span and never from a search: the generator holds the program path, the 01-level record name, whether an FD or an SD introduces it, and the first and last physical lines of the declaration, and it refuses to parse a span whose first line does not declare the named record or whose nearest preceding FD or SD does not match. Five such records exist, all of them General Ledger work files - pre-trans-record in general/gl070.cbl and general/gl071.cbl, post-trans-record in general/gl071.cbl and general/gl072.cbl, and sort-trans-record in general/gl071.cbl. The declarations are parsed by the same code that parses a copybook, because a COBOL data declaration has one shape wherever it is written, so digits, scale, signedness, sign position and storage class are derived for these fields exactly as they are for every other field and none of them is hand-bound (R-5). Their bridge and column views are recorded as ABSENT rather than searched for: copybooks/wsnames.cob:L14-L17 names pretrans.tmp and postrans.tmp as transient work files, no bridge COPYs these records and the frozen dump declares no table for them, so presence.in_program_source is true with in_copybook, in_bridge and in_column all false, one_sided is true by construction, and derivation is null because there is no column to derive. They are in the dictionary because their widths and their order are load-bearing anyway: general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the order general/gl071.cbl sorted the stream into, which is anomaly A-14."
     },
     "binding_rules": [
       {
@@ -1902,7 +1902,7 @@
           "Transient scratch storage: no bridge COPYs this record and the frozen dump declares no table for it, so every field of it is recorded with its bridge and column views absent rather than searched for. copybooks/wsnames.cob:L14-L17 names the two General Ledger work files pretrans.tmp and postrans.tmp and annotates both as belonging to gl071.",
           "general/gl072.cbl declares a record of the same name at general/gl072.cbl:L110. The two are separate physical declarations, both are recorded in full, and neither is harmonised against the other (R-4).",
           "The two declarations do not agree: general/gl072.cbl additionally declares post-ledger, which this one does not. Both shapes are kept exactly as written.",
-          "The order of these records is load-bearing rather than incidental: general/gl072.cbl:L410-L412 locates the nominal-ledger account for each posting by SEQUENTIAL read rather than by key, so it finds the right account only because general/gl071.cbl has already sorted the stream into nominal-key order. A change of sort key or of sort stability posts to the wrong account with no error and no diagnostic - anomaly A-14."
+          "The order of these records is load-bearing rather than incidental: general/gl072.cbl:L408 locates the nominal-ledger account for each posting by SEQUENTIAL read rather than by key, so it finds the right account only because general/gl071.cbl has already sorted the stream into nominal-key order. A change of sort key or of sort stability posts to the wrong account with no error and no diagnostic - anomaly A-14."
         ]
       },
       {
@@ -1913,7 +1913,7 @@
         "notes": [
           "SD sort-trans at general/gl071.cbl:L134 introduces the record, and the FILE-CONTROL entry that assigns that file reads \"select sort-trans assign file-21\" at general/gl071.cbl:L102.",
           "Transient scratch storage: no bridge COPYs this record and the frozen dump declares no table for it, so every field of it is recorded with its bridge and column views absent rather than searched for. copybooks/wsnames.cob:L14-L17 names the two General Ledger work files pretrans.tmp and postrans.tmp and annotates both as belonging to gl071.",
-          "The order of these records is load-bearing rather than incidental: general/gl072.cbl:L410-L412 locates the nominal-ledger account for each posting by SEQUENTIAL read rather than by key, so it finds the right account only because general/gl071.cbl has already sorted the stream into nominal-key order. A change of sort key or of sort stability posts to the wrong account with no error and no diagnostic - anomaly A-14."
+          "The order of these records is load-bearing rather than incidental: general/gl072.cbl:L408 locates the nominal-ledger account for each posting by SEQUENTIAL read rather than by key, so it finds the right account only because general/gl071.cbl has already sorted the stream into nominal-key order. A change of sort key or of sort stability posts to the wrong account with no error and no diagnostic - anomaly A-14."
         ]
       },
       {
@@ -1925,7 +1925,7 @@
           "FD post-trans at general/gl072.cbl:L108 introduces the record, and the FILE-CONTROL entry that assigns that file reads \"select post-trans assign post-trans-name access sequential status fs-reply organization line sequential\" at general/gl072.cbl:L95.",
           "Transient scratch storage: no bridge COPYs this record and the frozen dump declares no table for it, so every field of it is recorded with its bridge and column views absent rather than searched for. copybooks/wsnames.cob:L14-L17 names the two General Ledger work files pretrans.tmp and postrans.tmp and annotates both as belonging to gl071.",
           "general/gl071.cbl declares a record of the same name at general/gl071.cbl:L124. The two are separate physical declarations, both are recorded in full, and neither is harmonised against the other (R-4).",
-          "The order of these records is load-bearing rather than incidental: general/gl072.cbl:L410-L412 locates the nominal-ledger account for each posting by SEQUENTIAL read rather than by key, so it finds the right account only because general/gl071.cbl has already sorted the stream into nominal-key order. A change of sort key or of sort stability posts to the wrong account with no error and no diagnostic - anomaly A-14."
+          "The order of these records is load-bearing rather than incidental: general/gl072.cbl:L408 locates the nominal-ledger account for each posting by SEQUENTIAL read rather than by key, so it finds the right account only because general/gl071.cbl has already sorted the stream into nominal-key order. A change of sort key or of sort stability posts to the wrong account with no error and no diagnostic - anomaly A-14."
         ]
       }
     ]
@@ -78558,7 +78558,7 @@
       "derivation": null,
       "cobol_python_storage": "NONE",
       "notes": [
-        "Program-source field: declared inline in general/gl070.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl070.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl071.cbl declares a record named pre-trans-record at general/gl071.cbl:L112 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [],
@@ -78616,7 +78616,7 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Program-source field: declared inline in general/gl070.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl070.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl071.cbl declares a record named pre-trans-record at general/gl071.cbl:L112 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [],
@@ -78674,7 +78674,7 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Program-source field: declared inline in general/gl070.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl070.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl071.cbl declares a record named pre-trans-record at general/gl071.cbl:L112 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [],
@@ -78732,7 +78732,7 @@
       "derivation": null,
       "cobol_python_storage": "STR",
       "notes": [
-        "Program-source field: declared inline in general/gl070.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl070.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl071.cbl declares a record named pre-trans-record at general/gl071.cbl:L112 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [],
@@ -78790,7 +78790,7 @@
       "derivation": null,
       "cobol_python_storage": "STR",
       "notes": [
-        "Program-source field: declared inline in general/gl070.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl070.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl071.cbl declares a record named pre-trans-record at general/gl071.cbl:L112 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [],
@@ -78848,7 +78848,7 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Program-source field: declared inline in general/gl070.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl070.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl071.cbl declares a record named pre-trans-record at general/gl071.cbl:L112 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [],
@@ -78906,7 +78906,7 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Program-source field: declared inline in general/gl070.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl070.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl071.cbl declares a record named pre-trans-record at general/gl071.cbl:L112 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [],
@@ -78964,7 +78964,7 @@
       "derivation": null,
       "cobol_python_storage": "DECIMAL",
       "notes": [
-        "Program-source field: declared inline in general/gl070.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl070.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl071.cbl declares a record named pre-trans-record at general/gl071.cbl:L112 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [],
@@ -79022,7 +79022,7 @@
       "derivation": null,
       "cobol_python_storage": "STR",
       "notes": [
-        "Program-source field: declared inline in general/gl070.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl070.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl071.cbl declares a record named pre-trans-record at general/gl071.cbl:L112 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [],
@@ -79080,7 +79080,7 @@
       "derivation": null,
       "cobol_python_storage": "NONE",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl070.cbl declares a record named pre-trans-record at general/gl070.cbl:L108 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [],
@@ -79138,7 +79138,7 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl070.cbl declares a record named pre-trans-record at general/gl070.cbl:L108 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [],
@@ -79196,7 +79196,7 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl070.cbl declares a record named pre-trans-record at general/gl070.cbl:L108 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [],
@@ -79254,7 +79254,7 @@
       "derivation": null,
       "cobol_python_storage": "STR",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl070.cbl declares a record named pre-trans-record at general/gl070.cbl:L108 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [],
@@ -79312,7 +79312,7 @@
       "derivation": null,
       "cobol_python_storage": "STR",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl070.cbl declares a record named pre-trans-record at general/gl070.cbl:L108 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [],
@@ -79370,7 +79370,7 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl070.cbl declares a record named pre-trans-record at general/gl070.cbl:L108 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [],
@@ -79428,7 +79428,7 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl070.cbl declares a record named pre-trans-record at general/gl070.cbl:L108 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [],
@@ -79486,7 +79486,7 @@
       "derivation": null,
       "cobol_python_storage": "DECIMAL",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl070.cbl declares a record named pre-trans-record at general/gl070.cbl:L108 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [],
@@ -79544,7 +79544,7 @@
       "derivation": null,
       "cobol_python_storage": "STR",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl070.cbl declares a record named pre-trans-record at general/gl070.cbl:L108 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [],
@@ -79602,7 +79602,7 @@
       "derivation": null,
       "cobol_python_storage": "NONE",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl072.cbl declares a record named post-trans-record at general/gl072.cbl:L110 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [
@@ -79662,7 +79662,7 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl072.cbl declares a record named post-trans-record at general/gl072.cbl:L110 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [
@@ -79722,7 +79722,7 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl072.cbl declares a record named post-trans-record at general/gl072.cbl:L110 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [
@@ -79782,7 +79782,7 @@
       "derivation": null,
       "cobol_python_storage": "STR",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl072.cbl declares a record named post-trans-record at general/gl072.cbl:L110 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [
@@ -79842,7 +79842,7 @@
       "derivation": null,
       "cobol_python_storage": "STR",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl072.cbl declares a record named post-trans-record at general/gl072.cbl:L110 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [
@@ -79902,7 +79902,7 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl072.cbl declares a record named post-trans-record at general/gl072.cbl:L110 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [
@@ -79962,7 +79962,7 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl072.cbl declares a record named post-trans-record at general/gl072.cbl:L110 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [
@@ -80022,7 +80022,7 @@
       "derivation": null,
       "cobol_python_storage": "DECIMAL",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl072.cbl declares a record named post-trans-record at general/gl072.cbl:L110 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [
@@ -80082,7 +80082,7 @@
       "derivation": null,
       "cobol_python_storage": "STR",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl072.cbl declares a record named post-trans-record at general/gl072.cbl:L110 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [
@@ -80142,7 +80142,7 @@
       "derivation": null,
       "cobol_python_storage": "NONE",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an SD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix."
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an SD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix."
       ],
       "anomaly_refs": [
         "A-14"
@@ -80201,7 +80201,7 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an SD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix."
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an SD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix."
       ],
       "anomaly_refs": [
         "A-14"
@@ -80260,7 +80260,7 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an SD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix."
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an SD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix."
       ],
       "anomaly_refs": [
         "A-14"
@@ -80319,7 +80319,7 @@
       "derivation": null,
       "cobol_python_storage": "STR",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an SD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix."
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an SD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix."
       ],
       "anomaly_refs": [
         "A-14"
@@ -80378,7 +80378,7 @@
       "derivation": null,
       "cobol_python_storage": "STR",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an SD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix."
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an SD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix."
       ],
       "anomaly_refs": [
         "A-14"
@@ -80437,7 +80437,7 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an SD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix."
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an SD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix."
       ],
       "anomaly_refs": [
         "A-14"
@@ -80496,7 +80496,7 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an SD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix."
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an SD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix."
       ],
       "anomaly_refs": [
         "A-14"
@@ -80555,7 +80555,7 @@
       "derivation": null,
       "cobol_python_storage": "DECIMAL",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an SD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix."
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an SD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix."
       ],
       "anomaly_refs": [
         "A-14"
@@ -80614,7 +80614,7 @@
       "derivation": null,
       "cobol_python_storage": "STR",
       "notes": [
-        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an SD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix."
+        "Program-source field: declared inline in general/gl071.cbl, in the program's own FILE SECTION under an SD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix."
       ],
       "anomaly_refs": [
         "A-14"
@@ -80673,7 +80673,7 @@
       "derivation": null,
       "cobol_python_storage": "NONE",
       "notes": [
-        "Program-source field: declared inline in general/gl072.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl072.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl071.cbl declares a record named post-trans-record at general/gl071.cbl:L124 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [
@@ -80733,7 +80733,7 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Program-source field: declared inline in general/gl072.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl072.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl071.cbl declares a record named post-trans-record at general/gl071.cbl:L124 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [
@@ -80793,7 +80793,7 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Program-source field: declared inline in general/gl072.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl072.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl071.cbl declares a record named post-trans-record at general/gl071.cbl:L124 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [
@@ -80853,7 +80853,7 @@
       "derivation": null,
       "cobol_python_storage": "STR",
       "notes": [
-        "Program-source field: declared inline in general/gl072.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl072.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl071.cbl declares a record named post-trans-record at general/gl071.cbl:L124 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [
@@ -80913,7 +80913,7 @@
       "derivation": null,
       "cobol_python_storage": "STR",
       "notes": [
-        "Program-source field: declared inline in general/gl072.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl072.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl071.cbl declares a record named post-trans-record at general/gl071.cbl:L124 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [
@@ -80973,7 +80973,7 @@
       "derivation": null,
       "cobol_python_storage": "NONE",
       "notes": [
-        "Program-source field: declared inline in general/gl072.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl072.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl071.cbl declares a record named post-trans-record at general/gl071.cbl:L124 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart.",
         "This group exists in this declaration alone: general/gl071.cbl declares the same record without it and carries the subordinate items flat at the group's own level instead. Both shapes are recorded and neither is harmonised against the other (R-4)."
       ],
@@ -81034,7 +81034,7 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Program-source field: declared inline in general/gl072.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl072.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl071.cbl declares a record named post-trans-record at general/gl071.cbl:L124 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [
@@ -81094,7 +81094,7 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Program-source field: declared inline in general/gl072.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl072.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl071.cbl declares a record named post-trans-record at general/gl071.cbl:L124 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [
@@ -81154,7 +81154,7 @@
       "derivation": null,
       "cobol_python_storage": "DECIMAL",
       "notes": [
-        "Program-source field: declared inline in general/gl072.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl072.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl071.cbl declares a record named post-trans-record at general/gl071.cbl:L124 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [
@@ -81214,7 +81214,7 @@
       "derivation": null,
       "cobol_python_storage": "STR",
       "notes": [
-        "Program-source field: declared inline in general/gl072.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L410-L412 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
+        "Program-source field: declared inline in general/gl072.cbl, in the program's own FILE SECTION under an FD entry rather than in any copybook. The record is a transient General Ledger work file, so no bridge host variable carries this field and no column stores it - the absence is recorded rather than searched for. It is catalogued anyway because general/gl072.cbl:L408 locates a nominal-ledger account by sequential read and therefore depends on the widths and the order these records fix.",
         "general/gl071.cbl declares a record named post-trans-record at general/gl071.cbl:L124 as well. The two are separate physical declarations rather than two spellings of one, so both are recorded and this entry's key carries its own declaration line to keep them apart."
       ],
       "anomaly_refs": [

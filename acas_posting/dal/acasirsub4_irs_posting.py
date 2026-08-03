@@ -171,8 +171,10 @@ sign is outside every window the bridge reads. Compiled measurement:
 Plan section 0.6.2 requires "the Python data-access layer must reproduce the
 bridge's conversion, not merely write the computed value and let MySQL
 complain", so :func:`_mysql_edit` reproduces the edit field and the windowing,
-and the sign is lost exactly where the bridge loses it. See ``TODO(oracle)``
-below.
+and the sign is lost exactly where the bridge loses it. That it is lost HERE and
+not at the column is confirmed by measurement, not assumed: the column is
+``decimal(9,2)`` with no ``unsigned`` [mysql/ACASDB.sql:L279] and keeps a negative
+value when one is sent. See ambiguity Q-B below.
 
 WHAT THIS MODULE DELIBERATELY DOES NOT DO
 =========================================
@@ -253,16 +255,63 @@ EIGHT function codes [common/acasirsub4.cbl:L218-L235], and the bridge dispatche
 NINE [common/irspostingMT.cbl:L257-L281] - the extra being code 6, delete-all,
 reachable only by the coercion in ``ba015-Test-Ends``.
 
-TODO(oracle): three conversions need measurement against the compiled program
-before their values can be asserted, per plan section 0.6.8. (1) The width
-inflations - ``9(5)`` sources through ``9(08)`` host variables into
-``mediumint(5)`` columns, and two-character substrings through ``9(03)`` into
-``tinyint(2)``. (2) The signed-display-to-binary-to-decimal path for the two
-money fields, whose sign loss is measured above but whose behaviour at the
-column's precision limit is not. (3) The key predicate compares a quoted string
-to a numeric column, because the key metadata declares ``"STR"``
-[common/irspostingMT.scb:L126] for a ``mediumint`` key - it works only by server
-coercion, and the same contradiction holds for ``IRSNL-REC``.
+AMBIGUITIES, RESOLVED BY MEASUREMENT  (rule R-6, plan section 0.6.8)
+====================================================================
+Three conversions could not be asserted from the source alone. All three are now
+measured against **MariaDB 10.11.7** - the server version the frozen schema
+records as its producer [mysql/ACASDB.sql:L1, :L5] - with the frozen
+``ENGINE=InnoDB`` and the server's default ``sql_mode``
+(``STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION``),
+which is what the bridge's C interface gets. The dump's own
+``SQL_MODE='NO_AUTO_VALUE_ON_ZERO'`` [mysql/ACASDB.sql:L21] does not change that:
+it is SESSION-scoped, leaves ``@@global.sql_mode`` untouched (measured) and is
+restored at [:L1451], so it governs only the schema load - and is inert even there,
+the schema's only ``AUTO_INCREMENT`` column belonging to the out-of-scope
+``STOCKAUDIT-REC`` [mysql/ACASDB.sql:L1107]. None of the three results changes a
+line of code, and that is what measuring rather than guessing was for.
+
+    Q-A  THE WIDTH INFLATIONS. ``9(5)`` sources travel through ``9(08)`` host
+         variables into ``mediumint(5) unsigned`` columns, and two-character
+         substrings through ``9(03)`` into ``tinyint(2) unsigned``. THE PREMISE
+         THAT THE HOST VARIABLE IS WIDER THAN THE COLUMN IS WRONG: ``(5)`` and
+         ``(2)`` ARE DISPLAY WIDTHS, NOT CONSTRAINTS. Measured, ``mediumint
+         unsigned`` holds 0..16777215 - so ``POST4-DR`` accepted both ``99999``
+         and ``16777215``, i.e. all five source digits and three more - and
+         ``tinyint unsigned`` holds 0..255. Past those the server REFUSES rather
+         than clamps: ``16777216`` into ``POST4-DR`` and into ``KEY-4``, and
+         ``256`` into ``POST4-DAY``, each raise ERROR 1264, SQLSTATE 22003, "Out
+         of range value", and the row is NOT written. So the inflation is harmless
+         over the whole source domain, and beyond it the refusal is the server's -
+         which is where the frozen bridge meets it too, so no check is added here
+         (rule R-3).
+
+    Q-B  THE MONEY PATH AT THE COLUMN'S PRECISION LIMIT. ``POST4-AMOUNT`` and
+         ``VAT-AMOUNT4`` are ``decimal(9,2)`` with **no** ``unsigned``
+         [mysql/ACASDB.sql:L279, :L282], so the column itself would keep a sign;
+         measured, ``-12345.67`` stores as ``-12345.67``. The sign is therefore
+         lost STRICTLY EARLIER, at the edit window described above, and that is a
+         COBOL fact this module already reproduces rather than a column effect.
+         At the precision limit: ``9999999.99`` (seven integer digits, the most
+         ``decimal(9,2)`` holds) stores exactly, and ``10000000.00`` raises ERROR
+         1264 / 22003 with nothing written. Note the contrast, also measured -
+         SCALE overflow ROUNDS instead of failing: ``1.005`` stores ``1.01`` and
+         ``1.004`` stores ``1.00``. Precision and scale have different
+         dispositions, and only precision can abort a statement.
+
+    Q-C  THE KEY PREDICATE, ANOMALY A15. The key metadata declares ``"STR"``
+         [common/irspostingMT.scb:L126] for a ``mediumint(5) unsigned`` key
+         [mysql/ACASDB.sql:L275], so the bridge quotes the value and the
+         comparison works only by server coercion. IT COERCES TO A NUMBER, proved
+         with a probe whose two readings disagree: against a numeric column
+         holding 9 and 10, ``k > "10"`` returned NO rows and ``k < "10"`` returned
+         9 - the opposite of the lexical answer - and ``9 > "10"`` evaluates 0
+         while ``"9" > "10"`` evaluates 1. Measured on this shape:
+         ``KEY-4 = "1"`` returned 1, ``KEY-4 > "1"`` returned 2, and
+         ``KEY-4 > "000"`` returned both. The same holds for ``IRSNL-REC``, whose
+         ``bigint(10) unsigned`` key matched a zero-filled ten-character image.
+         So the quoted literal is reproduced exactly as the bridge emits it, and
+         binding an integer "because the column is numeric" would be a different
+         statement for no gain.
 """
 
 from __future__ import annotations
@@ -298,6 +347,7 @@ from acas_posting.dal.status import (
     FsReply,
     LogSystem,
     WeError,
+    log_handler_failure,
     mysql_1100_db_error,
     override_we_error_for_operation,
 )
@@ -366,7 +416,8 @@ ANOMALY A15: the key metadata declares a string type for ``KEY-4``, which is
 bridge builds wraps the value in double quotes regardless, so it compares a
 quoted string to a numeric column and works only because the server coerces.
 Both IRS record tables share the contradiction. Reproduced, not corrected; the
-resulting comparison is a ``TODO(oracle)`` question in the module docstring.
+coercion is NUMERIC, measured on MariaDB 10.11.7 - see ambiguity Q-C in the module
+docstring - so the quoted literal returns the same rows an integer bind would.
 """
 
 KEY_COUNT: Final[int] = 1
@@ -1006,14 +1057,18 @@ def _derive_date_components(post_date: str) -> tuple[int, int, int]:
         # the zero that `initialize TD-IRSPOSTING-REC` left
         # [common/irspostingMT.cbl:L966]. Reproduced, not repaired - rule R-4.
         components.append(0)
+        #  THE DATE TEXT ITSELF IS NOT LOGGED. `POST4-DAT` carries a posting's
+        #  own date - business data, which the safe-event schema forbids in a record
+        #  (CWE-532) - and the guard's failure is fully identified by the table and
+        #  the column it left at zero. The raw text is still STORED, because the
+        #  frozen bridge stores it, so the row is exactly as inconsistent as it is in
+        #  the compiled program (anomaly 7, R-4).
         _LOG.debug(
-            "%s: the guard on %s did not hold for date text %r, so the column "
-            "stays zero while POST4-DAT keeps the raw text - the maintainer "
-            "expected this never to occur "
-            "[common/irspostingMT.cbl:L978-L987]",
+            "%s: the guard on %s did not hold, so the column stays zero while "
+            "POST4-DAT keeps the raw text - the maintainer expected this never "
+            "to occur [common/irspostingMT.cbl:L978-L987]",
             TABLE,
             column,
-            text,
         )
     day, month, year = components
     return day, month, year
@@ -1209,16 +1264,12 @@ def _unload_host_variables(row: Mapping[str, Any]) -> PostingRecord:
     # nothing with them is the faithful translation of ten moves for thirteen
     # columns [common/irspostingMT.cbl:L1006-L1018]; the read is what makes the
     # omission visible to a reader rather than looking like an oversight.
-    for column in DERIVED_COLUMNS:
-        if column in row:
-            _LOG.debug(
-                "%s: %s came back in the row and is discarded - it is write-only "
-                "and no copybook field can receive it "
-                "[common/irspostingMT.cbl:L1017-L1018]",
-                TABLE,
-                column,
-            )
-
+    #  NO RECORD HERE. `bb100-UnloadHVs` issues ten moves for thirteen columns
+    #  [common/irspostingMT.cbl:L1006-L1018]: the three derived columns are simply
+    #  not among them, and the bridge displays nothing about it. A record announcing
+    #  the absence of a move is a record with no counterpart (R-4), and it fired once
+    #  per column per row. The omission is `DERIVED_COLUMNS` itself, and it is
+    #  documented there and in `docs/migration/anomaly-log.md`.
     return posting
 
 
@@ -1707,11 +1758,17 @@ def _require_connection(file_access: FileAccess) -> Any:
     the log.
     """
     if _CONNECTION is None:
-        _LOG.error(
-            "%s: a verb was called with no open connection; the frozen bridge "
-            "assumes one from ba020-Process-Open onward "
-            "[common/irspostingMT.cbl:L283-L325]",
-            TABLE,
+        # ONE ERROR, through the shared reporter, so this failure renders with the
+        # same fields in the same order as every other handler's.
+        log_handler_failure(
+            _LOG,
+            program=TABLE,
+            paragraph="_require_connection",
+            locator="[common/irspostingMT.cbl:L283-L325]",
+            fs_reply=int(FsReply.ERROR),
+            we_error=int(WeError.RDB_INIT_ERROR),
+            detail="a verb was called with no open connection; the frozen bridge "
+            "assumes one from ba020-Process-Open onward",
         )
         _store(file_access, int(FsReply.ERROR), int(WeError.RDB_INIT_ERROR))
         return None
@@ -1750,13 +1807,17 @@ def _positioning_cursor(connection: Any) -> Iterator[Any]:
     finally:
         try:
             cursor.close()
-        except Exception as error:  # pragma: no cover - driver-specific
-            # A cursor that will not close is not a condition the frozen source
-            # has an error path for, and raising from a `finally` would hide the
-            # caller's own failure. Recorded and dropped.
-            _LOG.debug(
-                "%s: closing the positioning cursor reported %s", TABLE, error
-            )
+        except Exception:  # noqa: BLE001, S110 - driver-specific, see below
+            # A cursor that will not close is not a condition the frozen source has
+            # an error path for, and raising from a `finally` would hide the caller's
+            # own failure. Dropped.
+            #  NOTHING IS LOGGED AND NO NAME IS BOUND. The frozen bridge has no
+            #  cursor-close step, so a record here was invented (R-4), and the record
+            #  it replaced interpolated the driver's exception WITHOUT EVEN
+            #  ESCAPING IT - a message carrying a newline could forge a second log
+            #  record (CWE-117) and one carrying the statement leaks the posting key
+            #  (CWE-532). Binding no name means nothing can leak by accident.
+            pass
 
 
 def read_next(file_access: FileAccess) -> tuple[int, PostingRecord | None]:
@@ -1963,11 +2024,19 @@ def start(
     if not 5 <= int(access_type) <= 8:
         # `(99, 997)` and leave, WITHOUT issuing a statement
         # [common/irspostingMT.cbl:L599-L603].
-        _LOG.debug(
-            "%s: fn-start refused access type %s - the bridge admits 5 through 8 "
-            "only and rejects 9 [common/irspostingMT.cbl:L599-L601]",
-            TABLE,
-            access_type,
+        # ONE ERROR, through the shared reporter. The refusal returns 99 to the
+        # caller, so it is a failure and DEBUG put it below the level an operator
+        # watches - the same reasoning that took every sibling's verb refusal off
+        # DEBUG.
+        log_handler_failure(
+            _LOG,
+            program=TABLE,
+            paragraph="ba060-Process-Start",
+            locator="[common/irspostingMT.cbl:L599-L601]",
+            fs_reply=int(FsReply.ERROR),
+            we_error=BRIDGE_START_PARAM_ERROR,
+            detail="fn-start refused access type %s: the bridge admits 5 through "
+            "8 only and rejects 9" % access_type,
         )
         fs_reply, we_error = _store(
             file_access,
@@ -2160,13 +2229,12 @@ def rewrite(posting: PostingRecord, file_access: FileAccess) -> tuple[int, int]:
 
     if affected != 1:
         # ANOMALY A10: no status is written. The caller's pair stands.
-        _LOG.debug(
-            "%s: fn-re-write matched %s rows and therefore writes NO status - "
-            "the frozen update has no invalid-key path "
-            "[common/irspostingMT.cbl:L898-L919]",
-            TABLE,
-            affected,
-        )
+        #  NO RECORD HERE. The frozen update has no invalid-key path and writes
+        #  NEITHER status field [common/irspostingMT.cbl:L898-L919], nor does it
+        #  display anything, so a record was invented (R-4) - and the SILENCE is the
+        #  anomaly, recorded in `docs/migration/anomaly-log.md`. The caller's own pair
+        #  standing unchanged is what a caller observes, and it observes it exactly as
+        #  it would from the compiled bridge.
         return int(file_access.fs_reply), int(file_access.we_error)
 
     # `move zero to FS-Reply WE-Error SQL-Err` / `move spaces to SQL-Msg`
@@ -2231,12 +2299,9 @@ def delete(posting: PostingRecord, file_access: FileAccess) -> tuple[int, int]:
 
     if affected != 1:
         # ANOMALY A10 again - no status for a row that was not there.
-        _LOG.debug(
-            "%s: fn-delete matched %s rows and therefore writes NO status "
-            "[common/irspostingMT.cbl:L771-L788]",
-            TABLE,
-            affected,
-        )
+        #  NO RECORD HERE, for the reason the rewrite arm gives: the frozen
+        #  delete writes neither status field [common/irspostingMT.cbl:L771-L788] and
+        #  displays nothing, and the silence is the anomaly.
         return int(file_access.fs_reply), int(file_access.we_error)
 
     return _store(
@@ -2529,12 +2594,18 @@ def dispatch(
     # Step 2 - the key-number guard, before anything else can run.
     refusal = _key_number_guard(file_access)
     if refusal is not None:
-        _LOG.debug(
-            "%s: function %s refused for key number %s "
-            "[common/acasirsub4.cbl:L165-L179]",
-            TABLE,
-            function,
-            logging_data.file_key_no,
+        # ONE ERROR, through the shared reporter. `File-Function` and `File-Key-No`
+        # are operation codes from the frozen vocabulary
+        # [copybooks/wsfnctn.cob:L88-L118], not business data.
+        log_handler_failure(
+            _LOG,
+            program=TABLE,
+            paragraph="aa000-Main-Process key guard",
+            locator="[common/acasirsub4.cbl:L165-L179]",
+            fs_reply=int(refusal[0]),
+            we_error=int(refusal[1]),
+            detail="File-Function %s refused for File-Key-No %s"
+            % (function, int(logging_data.file_key_no)),
         )
         return refusal
 
@@ -2602,23 +2673,25 @@ def dispatch(
     # [common/acasirsub4.cbl:L234-L235]. Code 6 lands here even though the BRIDGE
     # dispatches it [common/irspostingMT.cbl:L271-L272] - delete-all is reachable
     # only through the open/output coercion in step 3. Anomaly A18.
-    if function == int(FileFunction.DELETE_ALL):
-        _LOG.debug(
-            "%s: function 6 is not dispatched by this handler "
-            "[common/acasirsub4.cbl:L234] although the bridge implements it "
-            "[common/irspostingMT.cbl:L271-L272]; delete-all is reached only by "
-            "the ba015-Test-Ends coercion",
-            TABLE,
-        )
+    #  NO SEPARATE RECORD FOR CODE 6. The frozen `when other` treats it exactly
+    #  as it treats any other unhandled code - one arm, one outcome - so a record
+    #  distinguishing it announced an anomaly rather than an event (R-4). Anomaly A18
+    #  is recorded in this function's docstring and in
+    #  `docs/migration/anomaly-log.md`, and the ONE bad-function record below names
+    #  the code, so an operator still sees which function was refused.
 
     # `aa100-Bad-Function` -> `(99, 999)`. `*> Houston; We have a problem`
     # [common/acasirsub4.cbl:L437-L441].
-    _LOG.error(
-        "%s: function %s is not dispatched - (99, %d) "
-        "[common/acasirsub4.cbl:L437-L441]",
-        TABLE,
-        function,
-        HANDLER_BAD_FUNCTION,
+    log_handler_failure(
+        _LOG,
+        program=TABLE,
+        paragraph="aa100-Bad-Function",
+        locator="[common/acasirsub4.cbl:L437-L441]",
+        fs_reply=int(FsReply.ERROR),
+        we_error=HANDLER_BAD_FUNCTION,
+        detail="File-Function %s is not dispatched by this handler; code 6 lands "
+        "here even though the bridge implements it "
+        "[common/irspostingMT.cbl:L271-L272] - anomaly A18" % function,
     )
     return _store(file_access, int(FsReply.ERROR), HANDLER_BAD_FUNCTION)
 

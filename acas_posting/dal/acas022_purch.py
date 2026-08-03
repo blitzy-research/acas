@@ -814,7 +814,6 @@ from acas_posting.dal.cursor_state import (
     key_of_reference,
 )
 from acas_posting.dal.status import (
-    LOG_FIELD_MAX_CHARS,
     AccessType,
     FileFunction,
     FsReply,
@@ -822,6 +821,8 @@ from acas_posting.dal.status import (
     WeError,
     end_of_file_status,
     is_duplicate_key_bridge_level,
+    log_cobol_stop,
+    log_file_handler_record,
     mysql_1100_db_error,
     redact_for_log,
 )
@@ -3041,11 +3042,29 @@ def _trace(message: str, *arguments: object) -> None:
     ``SW-Testing-2``, which the frozen copybook leaves at zero
     [copybooks/Test-Data-Flags.cob:L15].
 
+     THE EIGHT CALL SITES ARE PRESERVED AND THIS FUNCTION EMITS NOTHING.
+    Every one of them passes the assembled ``WHERE`` clause or the whole statement -
+    for this table a predicate carrying ``PURCH-KEY``, the supplier code, as a
+    literal, and an INSERT or UPDATE naming every one of the twenty-nine columns and
+    its value. The safe-event schema in :mod:`acas_posting.dal.status` admits no SQL
+    text and no record key (CWE-532), and no redaction can help: escaping a
+    statement's control characters leaves the statement.
+
+    The function, its eight call sites and the ``Testing-2`` guard around each are
+    all kept, so a reader following the frozen source still finds every ``display``
+    and finds what it now does. The clause itself is still BUILT and still stored in
+    ``WS-Log-Where``, because the bridge's own statements read it - the disposition
+    is unchanged (R-3). Nothing acts on this trace operationally: it was a
+    developer's own, read at the terminal beside the running program, and the frozen
+    copybook leaves its switch at zero.
+
     Args:
-        message: A printf-style template, formatted lazily by ``logging``.
-        *arguments: Its arguments.
+        message: A printf-style template, retained so every call site still records
+            which paragraph displayed what.
+        *arguments: Its arguments, evaluated by the caller and then discarded here -
+            no argument is rendered, so nothing can leak by accident.
     """
-    _LOG.debug(message, *arguments)
+    del message, arguments
 
 
 # ============================================================================
@@ -4647,9 +4666,23 @@ def purchmt_ca_process_logs(
     AAP section 0.1.1 places this transformation explicitly - diagnostics with no
     database effect become log lines - and section 0.2.2 puts ``common/fhlogger``
     ``.cbl`` out of scope, so there is nothing to reimplement beyond the record
-    itself. ``Log-File-Rec-Written`` is left alone: the COBOL program owns that
-    counter, this module never reads it, and incrementing it here would invent
-    state.
+    itself. It is emitted through
+    :func:`acas_posting.dal.status.log_file_handler_record`, THE ONE ADAPTER every
+    handler in this package shares, so the single legacy log this cycle produces
+    reads the same whichever table wrote it.
+
+    THREE FIELDS ARE WITHHELD. ``WS-File-Key`` is ``PURCH-KEY``, the supplier
+    code; ``WS-Log-Where`` is a predicate carrying it as a literal; ``SQL-Msg`` is
+    driver free text. All three are CWE-532 in a log and none is needed to act on a
+    failure, and ``redact_for_log`` was escaping the first two rather than removing
+    them.
+
+    ``Log-File-Rec-Written`` IS NOW ADVANCED, by the adapter, modulo one
+    million - the range of the frozen ``pic 9(6)``
+    [copybooks/Test-Data-Flags.cob:L20]. Leaving it alone was wrong: the counter
+    lives in ``ACAS-DAL-Common-data``, which the CALLER owns and carries across
+    calls, so it is not the COBOL program's private state but part of the linkage
+    this module is reproducing.
 
     Args:
         file_access: The block whose fields make up the record.
@@ -4658,27 +4691,20 @@ def purchmt_ca_process_logs(
             :func:`purchmt_ba999_end`.
     """
     logging_data = file_access.logging_data
-    _LOG.debug(
-        "%s log: system=%d file=%d paragraph=%d function=%d access=%d "
-        "key=%r where=%r fs-reply=%d we-error=%d sql-state=%r sql-err=%r "
-        "testing=%d",
-        BRIDGE_PROG_NAME,
-        int(logging_data.ws_log_system),
-        int(logging_data.ws_log_file_no),
-        int(logging_data.ws_no_paragraph),
-        int(file_access.file_function),
-        int(file_access.access_type),
-        redact_for_log(
-            logging_data.ws_file_key.rstrip(), limit=LOG_FIELD_MAX_CHARS
-        ),
-        redact_for_log(
-            logging_data.ws_log_where.rstrip(), limit=LOG_FIELD_MAX_CHARS
-        ),
-        int(file_access.fs_reply),
-        int(file_access.we_error),
-        logging_data.sql_state.rstrip(),
-        logging_data.sql_err.rstrip(),
-        int(dal_common.sw_testing),
+    log_file_handler_record(
+        _LOG,
+        program=BRIDGE_PROG_NAME,
+        paragraph="Ca-Process-Logs",
+        log_system=logging_data.ws_log_system,
+        log_file_no=logging_data.ws_log_file_no,
+        no_paragraph=logging_data.ws_no_paragraph,
+        file_function=int(file_access.file_function),
+        access_type=int(file_access.access_type),
+        fs_reply=int(file_access.fs_reply),
+        we_error=int(file_access.we_error),
+        sql_err=logging_data.sql_err,
+        sql_state=logging_data.sql_state,
+        dal_common=dal_common,
     )
     # Falls through into ca-Exit.
 
@@ -5513,10 +5539,12 @@ def aa040_process_read_next(
     ``stop "Cobol File EOF"`` annotated "for testing"
     [common/acas022.cbl:L427] - a debugging statement that halts the run in
     shipped source, left inside a branch that also sets a clean end-of-file
-    status. It is DELIBERATELY OMITTED, per AAP section 0.3.4: a pause has no
-    database effect, and reproducing it as a halt would make the migrated cycle
-    unrunnable. The branch's status, log key and control transfer are all
-    preserved; only the halt is dropped, and the omission is recorded here and in
+    status. It is SPLIT, per AAP section 0.3.4: the DISPLAY half becomes one record
+    at ERROR through :func:`acas_posting.dal.status.log_cobol_stop`, identical in
+    wording and level to every sibling handler's, and the HALT half is deliberately
+    omitted - a pause has no database effect, and reproducing it would make the
+    migrated cycle unrunnable. The branch's status, log key and control transfer are
+    all preserved, and the omission is recorded here and in
     ``docs/migration/anomaly-log.md``.
 
     ANOMALY ``N-spaces-into-key`` [common/acas022.cbl:L424]. The pre-test moves
@@ -5563,7 +5591,21 @@ def aa040_process_read_next(
         purchase_file.record.ws_purch_key = " " * KEY_OF_REFERENCE.kor_length
         file_access.logging_data.sql_err = " " * 5
         file_access.logging_data.sql_msg = " " * 512
-        # `stop "Cobol File EOF"` [common/acas022.cbl:L427] - N-stop, omitted.
+        # `stop "Cobol File EOF"` [common/acas022.cbl:L427] - N-stop.
+        #  ONE ERROR, THROUGH THE ONE REPORTER, at the SAME LEVEL and in the
+        #  same words as every sibling handler that carries this statement. `STOP`
+        #  with a literal DISPLAYS the literal and then waits, so the display is a
+        #  record and only the WAIT is the omission. Emitting nothing here, while
+        #  acas006 and acas007 logged it at WARNING, acas012 at INFO, acas016 at
+        #  DEBUG and acas019 at ERROR, meant one event had five different renderings
+        #  and, in this module, none at all.
+        log_cobol_stop(
+            _LOG,
+            program=PROG_NAME,
+            paragraph="aa040-Process-Read-Next",
+            literal="Cobol File EOF",
+            locator="[common/acas022.cbl:L427]",
+        )
         aa999_main_exit(file_access, dal_common)  # Class 3.
         return
     # `read Purchase-File next record` [common/acas022.cbl:L431]. THE SELECT
@@ -6149,15 +6191,21 @@ def ba012_test_ws_rec_size_2(
     if int(file_access.we_error) == int(
         WeError.RECORD_SIZE_MISMATCH
     ):  # pragma: no cover - unreachable with the frozen copybooks
-        # The panel [common/acas022.cbl:L620-L635]: two displays become one
-        # record, the `accept` is dropped, the transfer is preserved.
+        # The panel [common/acas022.cbl:L620-L635] splits THREE ways, not two:
+        #   * the `display` of the assembled `PL905` diagnostic is the substance, so
+        #     ONE record at ERROR - a programming error the caller must stop for.
+        #   * the `display PL901` is "PL901 Note error and hit return"
+        #     [common/acas022.cbl:L262] - the acknowledgement half, paired with the
+        #     `accept` below it. AAP section 0.3.4 drops an acknowledgement pause
+        #     ENTIRELY, and quoting its text in a log line is still emitting it, to a
+        #     destination where no operator can answer it.
+        #   * the `go to ba-rdbms-exit` is CONTROL, preserved as `return False`.
         _LOG.error(
-            "%s %s%d < Purch-Rec = %d / %s",
+            "%s %s%d < Purch-Rec = %d",
             PROG_NAME,
             _PL905,
             _WS_A,
             _WS_B,
-            _PL901,
         )
         if dal_common.sw_testing == 1:
             ca_process_logs(file_access, dal_common)
@@ -6273,22 +6321,25 @@ def ca_process_logs(
         dal_common: Carried for signature fidelity with the COBOL parameter list.
     """
     logging_data = file_access.logging_data
-    _LOG.debug(
-        "%s log: system=%d file=%d paragraph=%d function=%d access=%d "
-        "key=%r fs-reply=%d we-error=%d",
-        PROG_NAME,
-        int(logging_data.ws_log_system),
-        int(logging_data.ws_log_file_no),
-        int(logging_data.ws_no_paragraph),
-        int(file_access.file_function),
-        int(file_access.access_type),
-        redact_for_log(
-            logging_data.ws_file_key.rstrip(), limit=LOG_FIELD_MAX_CHARS
-        ),
-        int(file_access.fs_reply),
-        int(file_access.we_error),
+    #  THE SAME ONE ADAPTER the bridge's like-named paragraph uses, so the two
+    # render identically and differ only in the program they name. `WS-File-Key` -
+    # the supplier code - is withheld (CWE-532), and `Log-File-Rec-Written` is
+    # advanced modulo one million rather than left alone.
+    log_file_handler_record(
+        _LOG,
+        program=PROG_NAME,
+        paragraph="Ca-Process-Logs",
+        log_system=logging_data.ws_log_system,
+        log_file_no=logging_data.ws_log_file_no,
+        no_paragraph=logging_data.ws_no_paragraph,
+        file_function=int(file_access.file_function),
+        access_type=int(file_access.access_type),
+        fs_reply=int(file_access.fs_reply),
+        we_error=int(file_access.we_error),
+        sql_err=logging_data.sql_err,
+        sql_state=logging_data.sql_state,
+        dal_common=dal_common,
     )
-    del dal_common
     # Falls through into ca-Exit.
 
 

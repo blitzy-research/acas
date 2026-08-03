@@ -382,8 +382,10 @@ DETERMINISM (RULE R-6)
 ======================
 No clock, no randomness, no identifier generation. The single ``ORDER BY`` in
 the frozen source is preserved verbatim (A17) and none is added anywhere else.
-Two questions this module cannot settle from the source are marked
-``TODO(oracle)`` against section 0.6.8 rather than guessed.
+Two questions this module could not settle from the source alone are now RESOLVED
+BY MEASUREMENT against MariaDB 10.11.7 - the server version the frozen schema
+records as its producer [mysql/ACASDB.sql:L1] - rather than guessed; each is
+recorded at its site and in ``docs/migration/ambiguity-resolutions.md``.
 """
 
 from __future__ import annotations
@@ -987,30 +989,44 @@ _DEF_ACS_MODULUS: Final[int] = 10**_DEF_ACS_DIGITS
 # rather than extrapolated from a sibling handler.
 _DEF_ACS_DRIFT: Final = _loader.drift_for(f"{TABLE}.DEF-ACS")
 
-# TODO(oracle): measure the DISPLAY -> COMP -> decimal(5,0) path and the
-# 9(03) -> tinyint(2) narrowing against the compiled bridge, per Agent Action
-# Plan section 0.6.8, which requires that the bridge's numeric conversions
-# "must be measured rather than assumed". Two conversions are unresolved from
-# the source alone:
-#   * `Def-Acs pic 9(5)` DISPLAY [copybooks/irswsdflt.cob:L10] is moved into
-#     `HV-DEF-ACS PIC 9(05) COMP` [common/irsdfltMT.cbl:L325] and rendered for
-#     SQL through `WS-MYSQL-EDIT PIC -Z(18)9.9(9)` [:L257] sliced at `(16:05)`
-#     and trimmed, into a `decimal(5,0) unsigned` column
-#     [mysql/ACASDB.sql:L191]. Zero-suppressed rendering of a five-digit
-#     unsigned integer is expected to be the plain decimal digits, which is
-#     what binding an `int` produces, but the edited-picture slice boundary has
-#     not been measured on the compiled program.
-#   * `HV-DEF-REC-KEY PIC 9(03) COMP` [common/irsdfltMT.cbl:L324] feeds a
-#     `tinyint(2) unsigned` column [mysql/ACASDB.sql:L190]. A three-digit host
-#     variable is wider than the column, so values 256..999 are representable
-#     in the host variable and not in the column. The bridge never generates
-#     one - `A` runs 1..32 and is itself `pic 99` [common/irsdfltMT.cbl:L310]
-#     - so the narrowing is unreachable through the write path; what a fetched
-#     out-of-range value
-#     does to the read's guard is settled by A3 and needs no measurement, but
-#     the store direction remains unmeasured.
-# Until measured, both are left exactly as the frozen source expresses them and
-# nothing is normalised.
+# AMBIGUITY Q-IRSDFLT-NUMERIC - RESOLVED BY MEASUREMENT against MariaDB 10.11.7,
+# the server version the frozen schema records as its producer
+# [mysql/ACASDB.sql:L1, :L5], with the frozen `ENGINE=InnoDB` and the server's
+# DEFAULT `sql_mode`, which carries `STRICT_TRANS_TABLES`. That default is what the
+# bridge's C interface gets: the dump's own `SQL_MODE='NO_AUTO_VALUE_ON_ZERO'`
+# [mysql/ACASDB.sql:L21] is SESSION-scoped, leaves `@@global.sql_mode` untouched
+# (measured) and is restored at [:L1451], so it governs only the schema load - and
+# is inert even there, the schema's only `AUTO_INCREMENT` column belonging to the
+# out-of-scope `STOCKAUDIT-REC` [mysql/ACASDB.sql:L1107]. Agent
+# Action Plan section 0.6.8 requires the bridge's numeric conversions "be measured
+# rather than assumed"; both were, and NEITHER RESULT CHANGES A LINE OF CODE below,
+# which is the point of measuring rather than guessing.
+#
+#   * `Def-Acs pic 9(5)` DISPLAY [copybooks/irswsdflt.cob:L10] -> `HV-DEF-ACS
+#     PIC 9(05) COMP` [common/irsdfltMT.cbl:L325] -> rendered through
+#     `WS-MYSQL-EDIT PIC -Z(18)9.9(9)` [:L257] sliced at `(16:05)` and trimmed ->
+#     `decimal(5,0) unsigned` [mysql/ACASDB.sql:L191].
+#     MEASURED: the zero-suppressed text round-trips EXACTLY. `'00001'` stored 1
+#     and `'99999'` stored 99999, so the edited-picture slice boundary holds and
+#     the plain decimal digits an `int` bind produces are the same value. Out of
+#     range the server REFUSES rather than clamps: `100000` and `-1` each raise
+#     ERROR 1264, SQLSTATE 22003, "Out of range value", and the row is NOT
+#     written; the empty string raises ERROR 1366, SQLSTATE 22007, "Incorrect
+#     decimal value". So a negative or oversized `Def-Acs` fails at the server,
+#     exactly where the frozen bridge meets it, and no Python check is added
+#     (rule R-3) - one would move the refusal to a layer the source has nothing at
+#     and would hide the error the frozen bridge receives.
+#   * `HV-DEF-REC-KEY PIC 9(03) COMP` [common/irsdfltMT.cbl:L324] -> `tinyint(2)
+#     unsigned` [mysql/ACASDB.sql:L190].
+#     MEASURED, AND THE PREMISE WAS WRONG: `(2)` IS A DISPLAY WIDTH, NOT A
+#     CONSTRAINT. `tinyint unsigned` holds 0..255, so it accepted 255, and the
+#     three-digit host variable is NOT wider than the column over 0..255 - it is
+#     wider only over 256..999, where the server raises ERROR 1264 / 22003 and
+#     writes nothing. The write path still cannot reach even that: `A` runs 1..32
+#     and is itself `pic 99` [common/irsdfltMT.cbl:L310]. What a fetched
+#     out-of-range value does to the read's guard was already settled by A3.
+# Both are left exactly as the frozen source expresses them and nothing is
+# normalised - now on evidence rather than pending it.
 
 
 def _truncate_trailing(value: str) -> str:
@@ -1822,16 +1838,25 @@ def _ba040_process_read_next(
         # [:L505-L513]. The bound value is the literal `"000"` the frozen source
         # interpolates [:L487]; binding it yields the identical predicate.
         #
-        # TODO(oracle): the frozen predicate compares a QUOTED THREE-CHARACTER
-        # STRING against a `tinyint(2) unsigned` column [mysql/ACASDB.sql:L190],
-        # and MySQL's coercion of `"000"` in that comparison has not been
-        # measured on the compiled bridge. Per Agent Action Plan section 0.6.8
-        # this is arbitrated by running the oracle, not by reasoning: the
-        # expected coercion to the integer 0 would make the predicate
-        # `> 0`, which admits every legal key 1..32, but a string-context
-        # comparison would order lexically and change which rows are returned.
-        # The literal and its type are left exactly as the source expresses
-        # them until measured.
+        # AMBIGUITY Q-IRSDFLT-PREDICATE - RESOLVED BY MEASUREMENT against
+        # MariaDB 10.11.7 [mysql/ACASDB.sql:L1]. The frozen predicate compares a
+        # QUOTED THREE-CHARACTER STRING against a `tinyint(2) unsigned` column
+        # [mysql/ACASDB.sql:L190], and which way the coercion goes decides which
+        # rows come back: numeric would make it `> 0` and admit every legal key
+        # 1..32, while a lexical comparison would order by characters.
+        #
+        # IT COERCES TO A NUMBER. Proved with a probe whose two readings disagree,
+        # because `> "000"` on its own does not discriminate - every positive
+        # integer's text also sorts above "000". Against a `tinyint(2) unsigned`
+        # column holding 9 and 10: `k > "10"` returned NO rows and `k < "10"`
+        # returned 9, which is the exact opposite of the lexical answer; and
+        # `9 > "10"` evaluates 0 while `"9" > "10"` evaluates 1, so it is the
+        # numeric operand that decides. Then measured directly on this shape: with
+        # rows {1,2,9,10,31,32} present, `DEF-REC-KEY > "000"` matched ALL SIX,
+        # identically to `> 0`.
+        #
+        # So the frozen predicate does admit every legal key, and the literal and
+        # its type stay exactly as the source expresses them - now on evidence.
         rows, select_error = _execute_select(
             connection, _SELECT_STATEMENT, (READ_KEY_LITERAL,)
         )
@@ -1968,15 +1993,22 @@ def _ba040_process_read_next(
         # [common/irsdfltMT.cbl:L258], which cannot hold a value above 99.
         logging_data.ws_file_key = str(stored_key % 100)
 
-        # [:L608-L610] `if Testing-1 perform Ca-Process-Logs` - "do for each
-        # row", so the hook fires ONCE PER ROW rather than once per call.
-        # `fhlogger` is out of scope (R-1), so it is a log record here.
-        _LOG.debug(
-            "%s: loaded %s row %d [common/irsdfltMT.cbl:L603-L610]",
-            BRIDGE,
-            TABLE,
-            stored_key,
-        )
+        # [:L608-L610] `if Testing-1 perform Ca-Process-Logs` - "do for each row",
+        # so the frozen hook fires ONCE PER ROW rather than once per call.
+        #  NOTHING IS EMITTED HERE, for two reasons. The record named
+        #  `stored_key`, which is `DEF-REC-KEY` - a business key (CWE-532) - and it
+        #  was a per-row record, the highest volume in the module.
+        # THE OTHER `perform Ca-Process-Logs` SITES ARE A RECORDED OMISSION. The
+        # frozen paragraph is `call "fhlogger" using File-Access ACAS-DAL-Common-data`
+        # [common/acasirsub3.cbl:L534-L538], and this verb does not receive
+        # `ACAS-DAL-Common-data` - inventing a route for it would change the module's
+        # linkage, which R-3 forbids. :func:`ca_process_logs` is the ONE faithful
+        # reproduction of the paragraph and is performed where the linkage allows it,
+        # at the common exit in :func:`dispatch` [:L347-L350]. A hand-rolled record
+        # here stood for the paragraph without its field set, without its level and
+        # without advancing `Log-File-Rec-Written`, which is the incoherence OBS-010
+        # names; the omission is listed in `docs/migration/traceability.md`.
+
 
     # A7. THE POST-LOOP STATUS RESET IS COMMENTED OUT.
     # `*> move HV-DEF-REC-KEY to WS-File-Key.` [:L613] and
@@ -2072,17 +2104,17 @@ def _ba070_process_write(
             # sets both and then discards both [:L727-L728]. The asymmetry is
             # reproduced: `we_error` is not touched anywhere in this loop.
 
-        # [:L660-L662] `if Testing-1 perform Ca-Process-Logs`. Out of scope
-        # (R-1), so a log record.
-        if file_access.fs_reply != int(_status.FsReply.SUCCESS):
-            _LOG.debug(
-                "%s: row %d of %s reported fs-reply %d "
-                "[common/irsdfltMT.cbl:L663-L666]",
-                BRIDGE,
-                a,
-                TABLE,
-                int(file_access.fs_reply),
-            )
+        # [:L660-L662] `if Testing-1 perform Ca-Process-Logs`.
+        # THE OTHER `perform Ca-Process-Logs` SITES ARE A RECORDED OMISSION. The
+        # frozen paragraph is `call "fhlogger" using File-Access ACAS-DAL-Common-data`
+        # [common/acasirsub3.cbl:L534-L538], and this verb does not receive
+        # `ACAS-DAL-Common-data` - inventing a route for it would change the module's
+        # linkage, which R-3 forbids. :func:`ca_process_logs` is the ONE faithful
+        # reproduction of the paragraph and is performed where the linkage allows it,
+        # at the common exit in :func:`dispatch` [:L347-L350]. A hand-rolled record
+        # here stood for the paragraph without its field set, without its level and
+        # without advancing `Log-File-Rec-Written`, which is the incoherence OBS-010
+        # names; the omission is listed in `docs/migration/traceability.md`.
 
         # A9. THE SQUASHING LOOP [:L663-L666].
         # Each failing row's status is stashed and `fs-reply` is CLEARED "for
@@ -2195,21 +2227,21 @@ def _ba090_process_rewrite(
                 # clearing is the defect.
                 file_access.we_error = REWRITE_UNOBSERVABLE_WE_ERROR
 
-        # [:L731-L733] `if Testing-1 perform Ca-Process-Logs`. The failure is
-        # recorded HERE, before it is destroyed, because rule R-4 requires the
-        # defect be reproduced but says nothing against observing it on the way
-        # past. Nothing about this log record reaches the caller or the
-        # database, so the reproduced behaviour is unaffected.
-        if file_access.fs_reply != int(_status.FsReply.SUCCESS):
-            _LOG.warning(
-                "%s: row %d of %s failed with fs-reply %d we-error %d, which "
-                "[common/irsdfltMT.cbl:L736-L738] is about to discard",
-                BRIDGE,
-                a,
-                TABLE,
-                int(file_access.fs_reply),
-                int(file_access.we_error),
-            )
+        # [:L731-L733] `if Testing-1 perform Ca-Process-Logs`. The status this
+        # loop is about to destroy [:L736-L738] is anomaly A19's own content, and it
+        # is documented in `docs/migration/anomaly-log.md` rather than narrated once
+        # per row.
+        # THE OTHER `perform Ca-Process-Logs` SITES ARE A RECORDED OMISSION. The
+        # frozen paragraph is `call "fhlogger" using File-Access ACAS-DAL-Common-data`
+        # [common/acasirsub3.cbl:L534-L538], and this verb does not receive
+        # `ACAS-DAL-Common-data` - inventing a route for it would change the module's
+        # linkage, which R-3 forbids. :func:`ca_process_logs` is the ONE faithful
+        # reproduction of the paragraph and is performed where the linkage allows it,
+        # at the common exit in :func:`dispatch` [:L347-L350]. A hand-rolled record
+        # here stood for the paragraph without its field set, without its level and
+        # without advancing `Log-File-Rec-Written`, which is the incoherence OBS-010
+        # names; the omission is listed in `docs/migration/traceability.md`.
+
 
     # A1 / A18. THE UNCONDITIONAL RESET [:L736-L738].
     #
@@ -2416,11 +2448,19 @@ def _unsupported_verb(file_access: FileAccess, verb: str) -> StatusPair:
         reconciled; the handler is the module boundary, so 999 is what a caller
         sees.
     """
-    _LOG.debug(
-        "%s: %s is not dispatched by this handler "
-        "[common/acasirsub3.cbl:L199-L215]",
-        HANDLER,
-        verb,
+    # ONE ERROR, through the shared reporter. The refusal returns (99, 999) to the
+    # caller, so it is a failure and DEBUG put it below the level an operator
+    # watches - the same reasoning that took every other handler's verb refusal off
+    # DEBUG.
+    _status.log_handler_failure(
+        _LOG,
+        program=HANDLER,
+        paragraph="aa100-Bad-Function",
+        locator="[common/acasirsub3.cbl:L199-L215]",
+        fs_reply=int(_status.FsReply.ERROR),
+        we_error=int(_status.WeError.NOT_USED),
+        detail="verb %s is not dispatched by this handler; the bridge's own "
+        "bad-function paragraph would report 990 instead (anomaly A26)" % verb,
     )
     return _aa100_bad_function(file_access)
 
@@ -2528,15 +2568,19 @@ def read_next(
     # BEFORE THE CLOSE, so the close can never report anything.
     saved_fs_reply, saved_we_error = fs_reply, we_error
 
-    # `perform Ca-Process-Logs` [:L454] - UNGATED here, unlike the bridge's
-    # hooks which test `Testing-1`, and marked "temp only during testing". Out
-    # of scope (R-1), so a log record.
-    _LOG.debug(
-        "%s: read returned (%d, %d) [common/acasirsub3.cbl:L452-L454]",
-        HANDLER,
-        saved_fs_reply,
-        saved_we_error,
-    )
+    # `perform Ca-Process-Logs` [:L454] - UNGATED here, unlike the bridge's hooks
+    # which test `Testing-1`, and marked "temp only during testing".
+    # THE OTHER `perform Ca-Process-Logs` SITES ARE A RECORDED OMISSION. The
+    # frozen paragraph is `call "fhlogger" using File-Access ACAS-DAL-Common-data`
+    # [common/acasirsub3.cbl:L534-L538], and this verb does not receive
+    # `ACAS-DAL-Common-data` - inventing a route for it would change the module's
+    # linkage, which R-3 forbids. :func:`ca_process_logs` is the ONE faithful
+    # reproduction of the paragraph and is performed where the linkage allows it,
+    # at the common exit in :func:`dispatch` [:L347-L350]. A hand-rolled record
+    # here stood for the paragraph without its field set, without its level and
+    # without advancing `Log-File-Rec-Written`, which is the incoherence OBS-010
+    # names; the omission is listed in `docs/migration/traceability.md`.
+
 
     if saved_fs_reply != int(_status.FsReply.SUCCESS) or saved_we_error != int(
         _status.WeError.SUCCESS
@@ -2556,11 +2600,10 @@ def read_next(
         # process-lifetime leak only in a way no table dump can see, while
         # retaining a reference would make the leak strictly worse than the
         # original. Adding the missing close would be the prohibited fix.
-        _LOG.debug(
-            "%s: close skipped after a failed read, leaving the cursor and "
-            "connection open [common/acasirsub3.cbl:L455-L458]",
-            HANDLER,
-        )
+        #  NO RECORD HERE. The frozen source SKIPS the close - it executes
+        #  nothing on this path and displays nothing - so a record announcing the
+        #  absence was invented (R-4). The leak is the anomaly, and it is recorded in
+        #  the comment above and in `docs/migration/anomaly-log.md`.
         return saved_fs_reply, saved_we_error
 
     # `set fn-Close to true` / `perform ba020-Call-DAL` [:L459-L460].
@@ -2656,17 +2699,20 @@ def write(
     # DESTROY THE STATUS [:L486-L489].
     file_access.logging_data.ws_file_key = _KEY_OPEN_WRITE_FAILED_CLOSE  # [:L486]
 
-    # `perform Ca-Process-Logs` [:L487]. Recorded here because this is the last
-    # moment the failure exists; nothing about the log record reaches the caller
-    # or the database, so the reproduced behaviour is unaffected.
-    _LOG.warning(
-        "%s: write failed with (%d, %d) and is being retried as a rewrite, "
-        "which will report success [common/acasirsub3.cbl:L484-L492] "
-        "[common/irsdfltMT.cbl:L736-L738]",
-        HANDLER,
-        saved_fs_reply,
-        saved_we_error,
-    )
+    # `perform Ca-Process-Logs` [:L487]. Anomalies A1 and A14 - a failed write is
+    # retried as a rewrite that reports success, destroying the status - are recorded
+    # in `docs/migration/anomaly-log.md`, which is where a reader finds them.
+    # THE OTHER `perform Ca-Process-Logs` SITES ARE A RECORDED OMISSION. The
+    # frozen paragraph is `call "fhlogger" using File-Access ACAS-DAL-Common-data`
+    # [common/acasirsub3.cbl:L534-L538], and this verb does not receive
+    # `ACAS-DAL-Common-data` - inventing a route for it would change the module's
+    # linkage, which R-3 forbids. :func:`ca_process_logs` is the ONE faithful
+    # reproduction of the paragraph and is performed where the linkage allows it,
+    # at the common exit in :func:`dispatch` [:L347-L350]. A hand-rolled record
+    # here stood for the paragraph without its field set, without its level and
+    # without advancing `Log-File-Rec-Written`, which is the incoherence OBS-010
+    # names; the omission is listed in `docs/migration/traceability.md`.
+
 
     # `set fn-Re-write to true` [:L488] and `move zero to fs-reply we-error`
     # [:L489], commented "clear if used in write".
@@ -2743,12 +2789,16 @@ def rewrite(
     _set_status(file_access, saved_fs_reply, saved_we_error)
 
     file_access.logging_data.ws_file_key = _KEY_OPEN_REWRITE_CLOSE  # [:L510]
-    _LOG.debug(
-        "%s: rewrite returned (%d, %d) [common/acasirsub3.cbl:L508-L511]",
-        HANDLER,
-        saved_fs_reply,
-        saved_we_error,
-    )
+    # THE OTHER `perform Ca-Process-Logs` SITES ARE A RECORDED OMISSION. The
+    # frozen paragraph is `call "fhlogger" using File-Access ACAS-DAL-Common-data`
+    # [common/acasirsub3.cbl:L534-L538], and this verb does not receive
+    # `ACAS-DAL-Common-data` - inventing a route for it would change the module's
+    # linkage, which R-3 forbids. :func:`ca_process_logs` is the ONE faithful
+    # reproduction of the paragraph and is performed where the linkage allows it,
+    # at the common exit in :func:`dispatch` [:L347-L350]. A hand-rolled record
+    # here stood for the paragraph without its field set, without its level and
+    # without advancing `Log-File-Rec-Written`, which is the incoherence OBS-010
+    # names; the omission is listed in `docs/migration/traceability.md`.
     # `go to ba-RDBMS-Exit` [:L512]. Class 3 -> return.
     return saved_fs_reply, saved_we_error
 
@@ -2905,14 +2955,11 @@ def dispatch(
         logging_data.ws_no_paragraph = (
             _PARA_FLAT_READ if verb == "read_next" else _PARA_FLAT_WRITE
         )
-        _LOG.debug(
-            "%s: %s requested on the flat path; the migrated store is used "
-            "because the line-sequential path over %s is a documented "
-            "omission [common/acasirsub3.cbl:L103-L113]",
-            HANDLER,
-            verb,
-            file_defs.file_defs_a.file_35.strip(),
-        )
+        #  NO RECORD HERE. The frozen flat-path dispatch displays nothing, so a
+        #  record was invented (R-4) - and it named `File-35`, an absolute filesystem
+        #  path from the deployment's own configuration (CWE-532). The omission of the
+        #  line-sequential path is documented in the comment above and in
+        #  `docs/migration/traceability.md`.
 
     if verb == "read_next":
         status = read_next(system, dflt, file_access, transport=transport)
@@ -2930,18 +2977,55 @@ def dispatch(
     # becomes a log record - and the switch is honoured so that the gating
     # structure survives even though the logger does not.
     if int(dal_common.sw_testing) != 0:
-        _LOG.debug(
-            "%s: %s on %s returned (%d, %d), file-key %r "
-            "[common/acasirsub3.cbl:L347-L350]",
-            HANDLER,
-            verb,
-            TABLE,
-            status[0],
-            status[1],
-            logging_data.ws_file_key.strip(),
-        )
+        ca_process_logs(file_access, dal_common)
 
     return status
+
+
+def ca_process_logs(
+    file_access: FileAccess, dal_common: AcasDalCommonData
+) -> None:
+    """``Ca-Process-Logs`` [common/acasirsub3.cbl:L534-L538].
+
+    Two statements, ``call "fhlogger" using File-Access ACAS-DAL-Common-data``,
+    followed by ``ca-Exit.     exit.``, under a label whose own comment reads
+    ``*> Not called on DAL access as it does it already``.
+
+    ``common/fhlogger.cbl`` is out of scope per Agent Action Plan section 0.2.2 and
+    rule R-1 forbids calling a COBOL program, so the record it would have appended to
+    its flat log is emitted through
+    :func:`acas_posting.dal.status.log_file_handler_record` - THE ONE ADAPTER every
+    handler in this package shares, at one level, with one field set. Before it, this
+    module stood the paragraph up nine different times as nine hand-rolled records,
+    each with its own fields and its own level and none of them advancing the
+    counter, which is the incoherence OBS-010 names.
+
+    ``WS-File-Key`` is WITHHELD: on this table it is ``DEF-REC-KEY``, and the
+    safe-event schema admits no record key (CWE-532). So are ``WS-Log-Where`` and
+    ``SQL-Msg``. ``Log-File-Rec-Written`` is advanced by one modulo a million - the
+    range of the frozen ``pic 9(6)`` [copybooks/Test-Data-Flags.cob:L20] - once per
+    record, by the adapter.
+
+    Args:
+        file_access: The block the record is built from.
+        dal_common: The block carrying ``SW-Testing`` and the counter.
+    """
+    logging_data = file_access.logging_data
+    _status.log_file_handler_record(
+        _LOG,
+        program=HANDLER,
+        paragraph="Ca-Process-Logs",
+        log_system=logging_data.ws_log_system,
+        log_file_no=logging_data.ws_log_file_no,
+        no_paragraph=logging_data.ws_no_paragraph,
+        file_function=int(file_access.file_function),
+        access_type=int(file_access.access_type),
+        fs_reply=int(file_access.fs_reply),
+        we_error=int(file_access.we_error),
+        sql_err=logging_data.sql_err,
+        sql_state=logging_data.sql_state,
+        dal_common=dal_common,
+    )
 
 
 

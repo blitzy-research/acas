@@ -234,9 +234,36 @@ from acas_posting import __version__
 #  or route the router's records independently of an entry point's.
 _LOG: Final[logging.Logger] = logging.getLogger(__name__)
 
-#  The format used only if `main` is the first thing to configure logging. It
-#  matches the entry points' own so that a run reads as one stream.
-_LOG_FORMAT: Final[str] = "%(levelname)s %(name)s: %(message)s"
+#  THE ONE RECORD FORMAT FOR THE WHOLE PACKAGE, declared here because this
+#  module is the process boundary and the seven entry points read it from here
+#  rather than each spelling their own. Level first so a record's severity is
+#  greppable at the start of a line, then the logger name, which is the module
+#  that emitted it and therefore the program-id or handler-id an operator is
+#  looking for. NO TIMESTAMP: `asctime` reads the wall clock, and rule R-6 admits
+#  exactly one time source - the pinned `--run-date` - so a timestamp would also
+#  make two runs of one scenario differ textually.
+LOG_FORMAT: Final[str] = "%(levelname)s %(name)s: %(message)s"
+
+#: The level names `--log-level` accepts, in increasing severity.
+LOG_LEVEL_NAMES: Final[tuple[str, ...]] = (
+    "DEBUG",
+    "INFO",
+    "WARNING",
+    "ERROR",
+    "CRITICAL",
+)
+
+#  The level a run uses when `--log-level` is not given. INFO, so that the phase
+#  announcements the frozen programs DISPLAY - "Phase - 1. Batch Check"
+#  [general/gl070.cbl:L283] and its siblings - are visible and the file-handler
+#  trace is not.
+DEFAULT_LOG_LEVEL: Final[str] = "INFO"
+
+#  Marks the root logger as configured BY THIS PACKAGE, so that a later explicit
+#  `--log-level` may change the level while an embedding application's own setup
+#  is never touched. It lives on the logger rather than in a module global so the
+#  answer cannot depend on which copy of this module is asking.
+_OWNED_MARKER: Final[str] = "_acas_posting_configured_logging"
 
 #  `python -m acas_posting`, spelled once. argparse would otherwise derive
 #  `prog` from `sys.argv[0]`, which for `-m` execution is the package
@@ -660,7 +687,7 @@ def load_it(subsystem: str, operation: str) -> _Dispatch:
 
 def accept_loop(
     parser: argparse.ArgumentParser, argv: Sequence[str] | None
-) -> tuple[str, str, list[str]]:
+) -> tuple[str, str, list[str], str]:
     """`accept-loop.` [common/ACAS.cbl:L508-L525] - take one selection.
 
     The frozen paragraph, and what becomes of each statement::
@@ -703,8 +730,10 @@ def accept_loop(
             `sys.argv[1:]`, which is what argparse does by default.
 
     Returns:
-        The subsystem name, the operation name, and every remaining argument in
-        the order given, to be forwarded verbatim.
+        The subsystem name, the operation name, every remaining argument in the
+        order given - to be forwarded verbatim - and the diagnostic level, which
+        is not part of the selection but is read from the same parse because it
+        must be applied before anything is dispatched.
 
     Raises:
         SystemExit: raised by argparse for `--help` and for a usage error -
@@ -716,7 +745,12 @@ def accept_loop(
     #  sets `required=True`, so argparse has already exited if either selection
     #  is missing. Read positionally through `getattr` for nothing - they are
     #  plain attributes - so read them plainly.
-    return namespace.subsystem, namespace.operation, list(route_argv)
+    return (
+        namespace.subsystem,
+        namespace.operation,
+        list(route_argv),
+        namespace.log_level,
+    )
 
 
 def overrewrite(dispatch: _Dispatch, term_code: int) -> None:
@@ -793,7 +827,12 @@ def load00_exit(dispatch: _Dispatch, term_code: int) -> None:
     )
 
 
-def load00(dispatch: _Dispatch, route_argv: Sequence[str]) -> int:
+def load00(
+    dispatch: _Dispatch,
+    route_argv: Sequence[str],
+    *,
+    log_level: str = DEFAULT_LOG_LEVEL,
+) -> int:
     """`load00.` [common/ACAS.cbl:L573-L583] - call the selection, test the code.
 
     The whole paragraph, verbatim from the frozen source::
@@ -869,6 +908,8 @@ def load00(dispatch: _Dispatch, route_argv: Sequence[str]) -> int:
     Args:
         dispatch: the callee's identity and module, from a `loadNN` paragraph.
         route_argv: every argument after the operation, forwarded verbatim.
+        log_level: the diagnostic level `run_entry_point` configures before the
+            route is entered. Records only; it reaches no program.
 
     Returns:
         `WS-Term-Code` as the process exit status - zero when the selection
@@ -880,10 +921,6 @@ def load00(dispatch: _Dispatch, route_argv: Sequence[str]) -> int:
             error, such as an omitted `--run-date`. Deliberately not caught: an
             omitted run date must fail, because the only alternative to a
             supplied date is an ambient one (rule R-6).
-        Exception: propagated unchanged from the route. A failure inside a
-            posting program keeps its traceback, which is the only diagnostic a
-            genuine defect leaves behind; nothing here converts one into a
-            status.
     """
     #  Imported here rather than at module scope so that `--help` does not pay
     #  for it: `cli.args` pulls the record layouts and the clock behind it. It is
@@ -913,7 +950,18 @@ def load00(dispatch: _Dispatch, route_argv: Sequence[str]) -> int:
     #  source, which is why nothing of this router's own is passed. `list(...)`
     #  because the route's `main` takes a sequence and argparse expects a list;
     #  copying also guarantees the route cannot mutate the caller's vector.
-    term_code = dispatch.route.main(list(route_argv))
+    #
+    #  THROUGH THE ONE SANITISED BOUNDARY. `run_entry_point` configures logging
+    #  and converts an escaping `Exception` into a deterministic status with one
+    #  ERROR record and no traceback, path or payload - the same boundary a route
+    #  invoked directly as `python -m acas_posting.cli.<name>` passes through, so
+    #  the two invocation routes cannot behave differently.
+    term_code = run_entry_point(
+        dispatch.route.main,
+        list(route_argv),
+        command=dispatch.ws_called,
+        log_level=log_level,
+    )
 
     #  578-579  if ws-term-code > 7 / go to overrewrite.
     #  The threshold is `args.SERIOUS_ERROR_THRESHOLD`, read from the one module
@@ -927,6 +975,170 @@ def load00(dispatch: _Dispatch, route_argv: Sequence[str]) -> int:
         load00_exit(dispatch, term_code)
 
     return term_code
+
+
+def configure_logging(level: str = DEFAULT_LOG_LEVEL) -> None:
+    """Configure logging for this process. THE ONLY `basicConfig` IN THE PACKAGE.
+
+    Called from the two places that are genuinely a process boundary - this
+    module's `main`, and `run_entry_point` when one of the seven entry-point
+    modules is executed directly as `python -m acas_posting.cli.<name>` - and,
+    for the level alone, from each entry point's own `main` when the operator
+    supplied `--log-level` there. No other module in `acas_posting` configures
+    logging, so a library import cannot reconfigure its host application and the
+    format cannot drift between routes.
+
+    WHY A SECOND CALL MUST BE ABLE TO SET THE LEVEL. `basicConfig` alone made
+    `--log-level` INERT on every route: a run enters through `run_entry_point`,
+    which configures `DEFAULT_LOG_LEVEL` before the entry point has parsed
+    anything, and the entry point's later call was then a no-op against a root
+    logger that already had a handler. An operator could ask for DEBUG and
+    silently get INFO. A diagnostic knob that does nothing is worse than no knob,
+    because it invites the wrong conclusion from a quiet log.
+
+    `force` is deliberately NOT passed, so the three arms below are: handler
+    absent - install the format and the level and mark the root logger as ours;
+    handler present and ours - set the level, an explicit request being more
+    specific than the boundary default; handler present and NOT ours - change
+    nothing, so the host wins.
+
+    Args:
+        level: one of `LOG_LEVEL_NAMES`. An unrecognised name falls back to
+            `DEFAULT_LOG_LEVEL` rather than raising, because a diagnostic setting
+            must not be able to stop a posting run (rule R-3).
+
+    Returns:
+        None.
+    """
+    chosen = level.upper() if level else DEFAULT_LOG_LEVEL
+    if chosen not in LOG_LEVEL_NAMES:
+        chosen = DEFAULT_LOG_LEVEL
+
+    root = logging.getLogger()
+    if not root.handlers:
+        logging.basicConfig(level=getattr(logging, chosen), format=LOG_FORMAT)
+        setattr(root, _OWNED_MARKER, True)
+        return
+    if getattr(root, _OWNED_MARKER, False):
+        root.setLevel(getattr(logging, chosen))
+
+
+def _serious_error_threshold() -> int:
+    """Return `load00`'s gate value, read from the one module that declares it.
+
+    Imported inside the function rather than at module scope so that importing
+    the router costs nothing: `cli.args` resolves its field metadata from the
+    generated data dictionary while it is being imported, and the router must
+    stay side-effect free on import.
+
+    Returns:
+        `cli.args.SERIOUS_ERROR_THRESHOLD`, which is 7 [common/ACAS.cbl:L578],
+        or 7 when `cli.args` cannot be imported at all - which would itself
+        already have failed the run.
+    """
+    try:
+        from acas_posting.cli import args
+    except Exception:  # noqa: BLE001 - a status must not depend on an import
+        return 7
+    return int(args.SERIOUS_ERROR_THRESHOLD)
+
+
+def _failure_status(error: BaseException) -> int:
+    """Return the deterministic exit status for a failure that reached the boundary.
+
+    The `return_code` attribute is read reflectively rather than by importing the
+    exception class, for the same reason `cli/gl_post_cycle.py` reads it that
+    way: the per-directory import table of plan section 0.4.3 does not grant this
+    module a path to `cli.rdbms_params`, which is reached only through
+    `cli.args`.
+
+    Args:
+        error: the failure. Only its `return_code` attribute is consulted;
+            neither its type nor its message affects the result.
+
+    Returns:
+        The error's own frozen return code when it carries one - which
+        `cli.rdbms_params.RdbmsParamError` does, holding the parameter loader's 8
+        for "contract absent" and 1 for "contract unusable"
+        [common/acas-get-params.cbl:L37-L42] - otherwise the smallest status the
+        frozen menu treats as a serious error, `ws-term-code > 7`
+        [common/ACAS.cbl:L578].
+    """
+    return_code = getattr(error, "return_code", None)
+    if isinstance(return_code, int):
+        return return_code
+    return _serious_error_threshold() + 1
+
+
+def run_entry_point(
+    entry: Callable[[Sequence[str] | None], int],
+    argv: Sequence[str] | None = None,
+    *,
+    command: str,
+    log_level: str = DEFAULT_LOG_LEVEL,
+) -> int:
+    """Run one entry point at the process boundary, converting failure to status.
+
+    THE ONE SANITISED BOUNDARY. Called by `main` for a routed command and by each
+    of the seven `cli` modules' `if __name__ == "__main__":` guards, so a route
+    behaves identically whether it was reached through
+    `python -m acas_posting general post-cycle` or through
+    `python -m acas_posting.cli.gl_post_cycle`. The second is not a convenience:
+    `pyproject.toml` declares no `[project.scripts]`.
+
+    WHAT IT CATCHES, AND WHY THAT SET. `Exception` - broadly and on purpose. A
+    process boundary is the one place where a broad catch is right, because the
+    alternative is a traceback on stderr, and a traceback here would print
+    absolute filesystem paths, the source lines of this migration and whatever
+    text the exception carries, which for a driver error is the statement and its
+    literal values (CWE-209, CWE-532). The record emitted instead names the
+    command, the exception's TYPE and the two ACAS status fields when the
+    exception carries them - all closed vocabularies of this migration - and NOT
+    `str(error)`. `SystemExit` and `KeyboardInterrupt` derive from
+    `BaseException` and are therefore not caught: the first is argparse's own
+    path for `--help` and for a usage error such as an omitted `--run-date`, and
+    the second is the operator ending the run.
+
+    THE LIBRARY CONTRACT IS UNCHANGED. `entry` is the module's `main`, and `main`
+    still raises when it is called as a library. Only this wrapper converts, and
+    only this wrapper is on the process boundary.
+
+    Args:
+        entry: the module's `main`, taking an argument vector and returning
+            `WS-Term-Code`.
+        argv: the argument vector without the program name, or None to read
+            `sys.argv[1:]`.
+        command: the routed command name, for the log record. A constant.
+        log_level: the level to configure before dispatching.
+
+    Returns:
+        `entry`'s own return value, unchanged, when it returns; otherwise the
+        deterministic status of `_failure_status`.
+    """
+    configure_logging(log_level)
+    try:
+        return entry(argv)
+    except Exception as error:  # noqa: BLE001 - see "WHAT IT CATCHES" above
+        status = _failure_status(error)
+        #  ONE record. No traceback (`exc_info` is deliberately absent), no
+        #  `str(error)`, no path and no payload. `type(error).__name__` is a class
+        #  name from this migration or from the driver, so it is a short
+        #  identifier rather than data; `fs_reply` and `we_error` are read
+        #  reflectively because only `dal.status.AcasFileHandlerError` carries
+        #  them, and they are small closed integer vocabularies.
+        _LOG.error(
+            "%s: the run failed and was not completed - %s "
+            "(fs-reply=%s we-error=%s); exiting %d. The exception detail is "
+            "deliberately not reported here: it can carry a statement, a row "
+            "key or an account name. Re-run the command as a library call to "
+            "obtain the traceback.",
+            command,
+            type(error).__name__,
+            getattr(error, "fs_reply", "-"),
+            getattr(error, "we_error", "-"),
+            status,
+        )
+        return status
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -996,6 +1208,24 @@ def _build_parser() -> argparse.ArgumentParser:
             "docs/migration/traceability.md."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+    #  DIAGNOSTIC VERBOSITY, AND NOTHING ELSE. It carries no COBOL counterpart
+    #  and reaches no program: `configure_logging` applies it at the boundary
+    #  before the operation is dispatched, and each operation declares the same
+    #  option itself through `args.add_log_level_argument` so that a level given
+    #  after the operation still wins. It is declared here rather than forwarded
+    #  because a router that accepted it silently and ignored it would be a knob
+    #  that does nothing.
+    parser.add_argument(
+        "--log-level",
+        choices=LOG_LEVEL_NAMES,
+        default=DEFAULT_LOG_LEVEL,
+        help=(
+            "Diagnostic verbosity for the whole run "
+            f"(default: {DEFAULT_LOG_LEVEL}). Affects records only - never "
+            "which programs run, which rows are written or the exit status."
+        ),
     )
 
     #  `search a-entry / when a-entry (q) = menu-reply / set z to q`
@@ -1088,24 +1318,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser ever disagreed about which operations exist.
         Exception: propagated unchanged from the dispatched operation.
     """
-    #  THE ONLY SIDE EFFECT THIS MODULE PERFORMS, AND IT PERFORMS IT HERE. At
-    #  import time `basicConfig` would configure logging for every importer,
-    #  including the suites that import an entry point to drive its dispatch
-    #  paragraph directly. It is also a no-op once the root logger has a handler,
-    #  so a caller that configured logging itself keeps its own setup - and each
-    #  route calls it too, harmlessly, for the same reason.
-    logging.basicConfig(level=logging.INFO, format=_LOG_FORMAT)
-
     #  508  accept-loop.
+    #  Parsed BEFORE logging is configured, so that `--log-level` can be honoured
+    #  on the very first record. Configuring at import time would reconfigure
+    #  logging for every importer, including the suites that import an entry
+    #  point to drive its dispatch paragraph directly.
     parser = _build_parser()
-    subsystem, operation, route_argv = accept_loop(parser, argv)
+    subsystem, operation, route_argv, log_level = accept_loop(parser, argv)
+
+    #  THE ONLY SIDE EFFECT THIS MODULE PERFORMS, AND IT PERFORMS IT HERE, ONCE.
+    #  `configure_logging` is the package's single `basicConfig`; a caller that
+    #  configured logging itself keeps its own setup.
+    configure_logging(log_level)
 
     #  547  load-it.   558  go to load08 load02 load03 load01 ... depending on z.
     #  585/591/597/627  loadNN.  -  move "<name>" to ws-called.
     dispatch = load_it(subsystem, operation)
 
     #  573  load00.  -  and the code it returns is the code this returns.
-    return load00(dispatch, route_argv)
+    return load00(dispatch, route_argv, log_level=log_level)
 
 
 if __name__ == "__main__":

@@ -146,7 +146,8 @@ ANOMALIES REPRODUCED HERE, NEVER FIXED  (RULE R-4)
 ==================================================
 Rule R-4, verbatim: "A defect reproduced is correct; a defect fixed is a
 failure." Each entry below is reproduced at a site carrying its locator, and
-each is an entry for the anomaly register, which a later boundary owns.
+each belongs in the anomaly register at ``docs/migration/anomaly-log.md``, an
+Agent Action Plan deliverable this checkout does not carry.
 
 A1  A ``READ NEXT`` with no prior ``START`` is not defended. The frozen source
     names ``'99RNP'`` for "read next with no position (no start 1st)"
@@ -446,9 +447,8 @@ from acas_posting.dal.status import (
     FsReply,
     SqlState,
     WeError,
-    db_error_log_category,
     end_of_file_status,
-    redact_for_log,
+    log_handler_failure,
     start_access_type_is_valid,
     start_relation_for,
 )
@@ -504,6 +504,16 @@ __all__: Final[tuple[str, ...]] = (
 #: which only displays to a curses screen and has no database effect, so Agent
 #: Action Plan section 0.3.4 makes it a log record here rather than output.
 _LOG: Final[logging.Logger] = logging.getLogger(__name__)
+
+#: The bridge whose positioning paragraphs this module reproduces, named in every
+#: record it emits so that a reader can put the record back against the frozen
+#: source (rule R-5).
+#:
+#: ONE NAME FOR ALL TWENTY BRIDGES, and that is a fact about the frozen source
+#: rather than a simplification: `presql2` generates the same `ba050`, `ba060` and
+#: `ba070` paragraphs into every `*MT.cbl`, so `common/glpostingMT.cbl` is the
+#: representative every locator in this module already cites.
+_BRIDGE_PROGRAM: Final[str] = "glpostingMT"
 
 
 #  IDENTIFIER QUOTING
@@ -2637,13 +2647,15 @@ def _deliver_from_stored_result(
         # pair simply persists - and the cursor is deactivated, so the next call
         # self-positions and discards a row all over again. The record IS consumed
         # from the stored result first, exactly as the bridge consumes it.
+        #  AND IT IS SILENT. `if fs-reply = 10 ... set Cursor-Not-Active` writes
+        #  no status and displays nothing [common/glpostingMT.cbl:L580-L583]; the
+        #  row is consumed and dropped without a trace. A record here was an
+        #  invented diagnostic on a path the compiled program says nothing about,
+        #  which rule R-4 forbids - the anomaly is reproduced, and it is recorded
+        #  as A10 in `docs/migration/anomaly-log.md`, which is where a reader is
+        #  meant to learn about it rather than from a log line the original cannot
+        #  produce.
         state.set_cursor_not_active()
-        _LOG.warning(
-            "fn-read-next on %s discarded a fetched row because the caller's "
-            "FS-Reply is still 10 [common/glpostingMT.cbl:L580-L583]; end of "
-            "file is sticky until some other operation resets the shared field",
-            state.table_name,
-        )
         outcome = CursorOutcome(
             fs_reply=incoming_fs_reply,
             we_error=incoming_we_error,
@@ -2771,16 +2783,25 @@ def _incoming_status(file_access: FileAccess | None) -> tuple[FsReply, int]:
     return (fs_reply, int(file_access.we_error))
 
 
-def _driver_failure_fields(error: BaseException) -> tuple[str, str, str]:
-    """Render one driver exception as three fields that are safe to log.
+def _driver_failure_fields(error: BaseException) -> tuple[str, str]:
+    """Render one driver exception as the two typed fields that may be logged.
 
-    Three of the positioning verbs catch a driver failure and report it, and each
-    of the three used to interpolate ``str(error)`` directly. That text is built
-    by the server and the client library out of material that can include the
-    connection's account, the host and key values from the data, and it can carry
-    a carriage return and a line feed - so interpolating it raw both leaks and
-    lets the failure forge a second log record (CWE-532, CWE-117). This helper is
-    the one place the three sites share, so none can be the weak one.
+    Three of the positioning verbs catch a driver failure and report it, and this
+    helper is the one place the three share, so none can be the weak one.
+
+    THE DRIVER'S MESSAGE IS NOT ONE OF THE FIELDS, AND THAT IS THE POINT. That
+    text is built by the server and the client library out of material that can
+    include the connection's account, the host, the failing statement and key
+    values from the data, and it can carry a carriage return and a line feed - so
+    interpolating it leaks and lets the failure forge a second log record
+    (CWE-532, CWE-117). Redacting it was not sufficient either: the rules of
+    ``redact_for_log`` recognise the connection-message shapes the client library
+    is known to produce, and an arbitrary SQL literal or row key is not one of
+    them. What is returned instead is the driver's error NUMBER and its SQLSTATE -
+    both short closed-vocabulary fields - from which
+    :func:`~acas_posting.dal.status.log_handler_failure` also derives the stable
+    ``db_error_log_category`` token, which is identical for every occurrence of
+    the same fault and therefore alertable in a way free text never was.
 
     NOTHING BRANCHES ON THE RESULT. The status pair each caller then reports is
     the one the frozen source dictates - ``(21, 0)`` for `fn-start`, end of file
@@ -2795,15 +2816,13 @@ def _driver_failure_fields(error: BaseException) -> tuple[str, str, str]:
             own "any error takes this path" behaviour.
 
     Returns:
-        ``(exception type name, stable category, redacted detail)``. The type
-        name is a Python class name and so carries nothing sensitive; the
-        category comes from the error number alone; the detail is the driver's
-        message with identities removed and control characters escaped.
+        ``(error number, SQLSTATE)``, each as text and each empty when the
+        exception does not carry it - which is the case for an exception raised
+        before the driver reached a server.
     """
     return (
-        type(error).__name__,
-        db_error_log_category(getattr(error, "errno", "") or ""),
-        redact_for_log(str(error)),
+        str(getattr(error, "errno", "") or ""),
+        str(getattr(error, "sqlstate", "") or ""),
     )
 
 
@@ -2955,8 +2974,20 @@ def start(
     refusal = _guarded_by_handler(table_name, FileFunction.START)
     if refusal is not None:
         fs_reply, we_error, locator = refusal
-        _LOG.debug(
-            "fn-start refused for %s by its handler %s", table_name, locator
+        #  ONE ERROR, at the level a refusal deserves. The verb was rejected and
+        #  `FS-Reply` 99 goes back to the caller, so this is a failure and not a
+        #  trace - it used to be DEBUG, which made a permanently-failing verb
+        #  (anomaly A6) invisible at the level an operator watches. Only the table
+        #  name, the paragraph and the frozen locator are reported: no key, no
+        #  statement, no value.
+        log_handler_failure(
+            _LOG,
+            program=_BRIDGE_PROGRAM,
+            paragraph="ba060-Process-Start",
+            locator=locator,
+            fs_reply=int(fs_reply),
+            we_error=int(we_error),
+            detail="fn-start refused by the handler for " + table_name,
         )
         outcome = CursorOutcome(
             fs_reply=fs_reply,
@@ -2976,12 +3007,16 @@ def start(
     try:
         key = key_of_reference(table_name, key_number)
     except IndexError:
-        _LOG.error(
-            "fn-start on %s with invalid key number %s; the frozen source "
-            "describes this as SQLSTATE %s and never implements it",
-            table_name,
-            key_number,
-            SqlState.INVALID_KEY_NUMBER,
+        log_handler_failure(
+            _LOG,
+            program=_BRIDGE_PROGRAM,
+            paragraph="ba060-Process-Start",
+            locator="[copybooks/mysql-procedures.cpy:L115, :L127-L128]",
+            fs_reply=int(FsReply.ERROR),
+            we_error=int(WeError.RDB_INIT_ERROR),
+            sql_state=str(SqlState.INVALID_KEY_NUMBER),
+            detail="invalid key number %d for %s, which the frozen source "
+            "describes and never implements" % (key_number, table_name),
         )
         outcome = CursorOutcome(
             fs_reply=FsReply.ERROR,
@@ -3001,12 +3036,15 @@ def start(
     # [common/glpostingMT.cbl:L695-L699] -> `(99, 997)`, and no statement issued.
     if not start_access_type_is_valid(access_type):
         lower, upper = START_ACCESS_TYPE_RANGE
-        _LOG.debug(
-            "fn-start rejected Access-Type %s: the guard at "
-            "[common/glpostingMT.cbl:L695] admits %s..%s only",
-            access_type,
-            lower,
-            upper,
+        log_handler_failure(
+            _LOG,
+            program=_BRIDGE_PROGRAM,
+            paragraph="ba060-Process-Start",
+            locator="[common/glpostingMT.cbl:L695-L699]",
+            fs_reply=int(FsReply.ERROR),
+            we_error=int(WeError.ACCESS_TYPE_WRONG),
+            detail="Access-Type %d rejected; the guard admits %d..%d only"
+            % (access_type, lower, upper),
         )
         outcome = CursorOutcome(
             fs_reply=FsReply.ERROR,
@@ -3059,14 +3097,20 @@ def start(
         # cursor is untouched on this path: `if ... not zero set Cursor-Active`
         # [common/glpostingMT.cbl:L767-L769] simply does not fire, and step 3
         # above has already left it inactive.
-        exception_name, category, detail = _driver_failure_fields(error)
-        _LOG.warning(
-            "fn-start on %s.%s failed at the driver: %s category=%s: %s",
-            key.table_name,
-            key.column_name,
-            exception_name,
-            category,
-            detail,
+        errno, sql_state = _driver_failure_fields(error)
+        log_handler_failure(
+            _LOG,
+            program=_BRIDGE_PROGRAM,
+            paragraph="ba060-Process-Start",
+            locator="[common/glpostingMT.cbl:L775-L781]",
+            fs_reply=int(FsReply.INVALID_KEY_ON_START),
+            we_error=int(WeError.SUCCESS),
+            sql_err=errno,
+            sql_state=sql_state,
+            detail="the positioning statement failed at the driver for "
+            + key.table_name
+            + "."
+            + key.column_name,
         )
         outcome = CursorOutcome(
             fs_reply=FsReply.INVALID_KEY_ON_START,
@@ -3096,11 +3140,13 @@ def start(
         # [common/glpostingMT.cbl:L771-L781]. The cursor is not touched here
         # either: L767's `if` does not fire and L771-L781 never mentions it, so
         # the inactive state established at step 3 stands.
-        _LOG.debug(
-            "fn-start on %s matched no row; the bridge writes no status on "
-            "this path [common/glpostingMT.cbl:L771-L781]",
-            table_name,
-        )
+        #
+        # AND NOTHING IS REPORTED, because the bridge reports nothing. This is the
+        # anomaly: a caller that asked where a key is gets its own stale status
+        # pair back and no indication that the answer is stale. A log line here
+        # would be a diagnostic the compiled program cannot produce and would make
+        # the silence look like an oversight rather than the reproduced defect it
+        # is (rule R-4). A7 is recorded in `docs/migration/anomaly-log.md`.
         outcome = CursorOutcome(
             fs_reply=incoming_fs_reply,
             we_error=incoming_we_error,
@@ -3237,8 +3283,15 @@ def read_next(
     refusal = _guarded_by_handler(table_name, FileFunction.READ_NEXT)
     if refusal is not None:
         fs_reply, we_error, locator = refusal
-        _LOG.debug(
-            "fn-read-next refused for %s by its handler %s", table_name, locator
+        #  ONE ERROR: `FS-Reply` 99 goes back to the caller, so the verb failed.
+        log_handler_failure(
+            _LOG,
+            program=_BRIDGE_PROGRAM,
+            paragraph="ba050-Process-Read-Next",
+            locator=locator,
+            fs_reply=int(fs_reply),
+            we_error=int(we_error),
+            detail="fn-read-next refused by the handler for " + table_name,
         )
         outcome = CursorOutcome(
             fs_reply=fs_reply,
@@ -3299,17 +3352,25 @@ def read_next(
     except Exception as error:  # any driver error takes this path - see below
         # ANOMALY A11: the error is MASKED as end of file, because the two
         # unconditional moves overwrite `Mysql-1100-Db-Error`'s `(99, 911)`
-        # [common/glpostingMT.cbl:L508-L509]. Logged at warning level so the
-        # masking is at least visible to an operator, which changes no status.
-        exception_name, category, detail = _driver_failure_fields(error)
-        _LOG.warning(
-            "fn-read-next on %s.%s failed at the driver and is reported as end "
-            "of file per [common/glpostingMT.cbl:L508-L509]: %s category=%s: %s",
-            key.table_name,
-            key.column_name,
-            exception_name,
-            category,
-            detail,
+        # [common/glpostingMT.cbl:L508-L509]. Reported at ERROR - one record, with
+        # the status pair that will actually be returned - so that the masking is
+        # visible to an operator at the level failures are watched at. That
+        # changes no status: the `(10, 200)` below is still what the caller sees.
+        errno, sql_state = _driver_failure_fields(error)
+        log_handler_failure(
+            _LOG,
+            program=_BRIDGE_PROGRAM,
+            paragraph="ba050-Process-Read-Next",
+            locator="[common/glpostingMT.cbl:L508-L509]",
+            fs_reply=int(end_of_file_status()[0]),
+            we_error=int(end_of_file_status()[1]),
+            sql_err=errno,
+            sql_state=sql_state,
+            detail="the sequential read failed at the driver for "
+            + key.table_name
+            + "."
+            + key.column_name
+            + " and is MASKED as end of file (anomaly A11)",
         )
         state.set_cursor_not_active()
         end_fs_reply, end_we_error = end_of_file_status()
@@ -3474,10 +3535,18 @@ def read_indexed(
     refusal = _guarded_by_handler(table_name, FileFunction.READ_INDEXED)
     if refusal is not None:
         fs_reply, we_error, locator = refusal
-        _LOG.debug(
-            "fn-read-indexed refused for %s by its handler %s",
-            table_name,
-            locator,
+        #  ONE ERROR: `FS-Reply` 99 goes back to the caller, so the verb failed.
+        #  This is the arm anomaly A6 travels on - `acas008` refuses read-indexed
+        #  unconditionally - and reporting it at DEBUG made a verb that can never
+        #  succeed invisible at the level an operator watches.
+        log_handler_failure(
+            _LOG,
+            program=_BRIDGE_PROGRAM,
+            paragraph="ba070-Process-Read-Indexed",
+            locator=locator,
+            fs_reply=int(fs_reply),
+            we_error=int(we_error),
+            detail="fn-read-indexed refused by the handler for " + table_name,
         )
         outcome = CursorOutcome(
             fs_reply=fs_reply,
@@ -3498,12 +3567,16 @@ def read_indexed(
     try:
         key = key_of_reference(table_name, key_number)
     except IndexError:
-        _LOG.error(
-            "fn-read-indexed on %s with invalid key number %s; the frozen "
-            "source describes this as SQLSTATE %s and never implements it",
-            table_name,
-            key_number,
-            SqlState.NO_VALID_KEY,
+        log_handler_failure(
+            _LOG,
+            program=_BRIDGE_PROGRAM,
+            paragraph="ba070-Process-Read-Indexed",
+            locator="[copybooks/mysql-procedures.cpy:L116, :L127-L128]",
+            fs_reply=int(FsReply.ERROR),
+            we_error=int(WeError.RDB_INIT_ERROR),
+            sql_state=str(SqlState.NO_VALID_KEY),
+            detail="invalid key number %d for %s, which the frozen source "
+            "describes and never implements" % (key_number, table_name),
         )
         outcome = CursorOutcome(
             fs_reply=FsReply.ERROR,
@@ -3548,17 +3621,22 @@ def read_indexed(
         # null [:L188-L189]. Neither performs a `go to`, so in both cases the
         # count is left at zero and `ba050`'s first guard's `move 21 to fs-Reply`
         # [common/glpostingMT.cbl:L634] overwrites the 99 while the 911 survives.
-        exception_name, category, detail = _driver_failure_fields(error)
-        _LOG.warning(
-            "fn-read-indexed on %s.%s failed at the driver; the frozen source "
-            "reports this as (21, 911) per "
-            "[common/glpostingMT.cbl:L634] over "
-            "[copybooks/mysql-procedures.cpy:L127-L128]: %s category=%s: %s",
-            key.table_name,
-            key.column_name,
-            exception_name,
-            category,
-            detail,
+        errno, sql_state = _driver_failure_fields(error)
+        log_handler_failure(
+            _LOG,
+            program=_BRIDGE_PROGRAM,
+            paragraph="ba070-Process-Read-Indexed",
+            locator="[common/glpostingMT.cbl:L634] over "
+            "[copybooks/mysql-procedures.cpy:L127-L128]",
+            fs_reply=int(FsReply.INVALID_KEY_ON_START),
+            we_error=int(WeError.RDB_INIT_ERROR),
+            sql_err=errno,
+            sql_state=sql_state,
+            detail="the indexed read failed at the driver for "
+            + key.table_name
+            + "."
+            + key.column_name
+            + " and is reported as (21, 911) (anomaly A14)",
         )
         # `go to ba998-Free` -> `set Cursor-Not-Active to true`
         # [common/glpostingMT.cbl:L635, :L1033].
@@ -3593,11 +3671,13 @@ def read_indexed(
     if row is None:
         # ANOMALY A2 and A13: 21, never 23; and `We-Error` is NOT written, so the
         # caller's value survives [common/glpostingMT.cbl:L633-L636].
-        _LOG.debug(
-            "fn-read-indexed found no %s row for the given key; FS-Reply 21 "
-            "with We-Error left untouched [common/glpostingMT.cbl:L634]",
-            table_name,
-        )
+        #
+        # AND NOTHING IS REPORTED. "Key not found" is an ORDINARY outcome that
+        # every caller in the cycle tests for and branches on - it is not a
+        # failure - and the frozen guard displays nothing. The comment below
+        # records that the reachable guard writes no log tag either, so a record
+        # here would be the only diagnostic in the whole path and would come from
+        # this migration rather than from the specification (rule R-4).
         outcome = CursorOutcome(
             fs_reply=FsReply.INVALID_KEY_ON_START,
             we_error=incoming_we_error,

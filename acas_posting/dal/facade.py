@@ -315,9 +315,11 @@ silent.
 
 from __future__ import annotations
 
+import inspect
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from functools import lru_cache
 from types import MappingProxyType
 from typing import Final, NamedTuple, NoReturn
 
@@ -341,7 +343,11 @@ from acas_posting.dal import acasirsub5_irs_final
 from acas_posting.dal import connection as _connection
 from acas_posting.dal import cursor_state as _cursor_state
 from acas_posting.dal.status import AccessType, FileFunction, FsReply
-from acas_posting.dal.status import redact_for_log
+# `redact_for_log` is deliberately NOT imported. It escapes control characters in a
+# driver message rather than removing its content, so it cannot make `SQL-Msg` safe
+# to log; `Open-Error-Continued` reports the typed fields instead. See the
+# safe-event schema in `acas_posting/dal/status.py`.
+from acas_posting.dal.status import log_handler_failure
 from acas_posting.records.file_access import FileAccess
 from acas_posting.records.file_defs import FileDefs
 
@@ -478,6 +484,28 @@ class FacadeContext:
     Whatever a caller puts here is forwarded verbatim to that handler's
     ``dispatch``; an empty mapping forwards nothing. It carries no accounting
     value and nothing here reads it.
+
+    ⭐ IT IS ALSO THE ONE CHANNEL BY WHICH A SECURITY POLICY REACHES A HANDLER,
+    and that makes an empty mapping a decision rather than an absence. Every
+    handler that opens a connection declares ``transport: TransportSecurity |
+    None = None`` and forwards it to ``connection.mysql_1000_open``, whose
+    ``_require_permitted_connection`` then FAILS CLOSED on ``None``: a Unix
+    socket or a loopback address is permitted, and any other target is refused
+    unless a certificate authority is supplied or ``isolated_oracle=True`` is
+    declared. So a caller that leaves ``options`` empty gets the safe answer for
+    every handler, and a caller that must reach a non-local server states it once
+    - ``options={"transport": TransportSecurity(...)}`` - and this context carries
+    it to whichever handler the verb dispatches to.
+
+    That uniformity is the point. It was previously possible for ONE handler to
+    default itself permissive while the other nineteen failed closed, which made
+    the policy depend on which entity a program happened to touch rather than on
+    what the operator had declared (CWE-319, CWE-295). Nothing here inspects or
+    rewrites the mapping: the enforcement lives in ``dal/connection.py`` and the
+    declaration lives with the caller, and this field is only the wire between
+    them. Forwarding is by keyword, so a handler that does not accept a given key
+    raises ``TypeError`` at the call rather than silently ignoring a policy the
+    caller believed was in force.
     """
 
     system: object
@@ -561,9 +589,202 @@ def _perform(ctx: FacadeContext, plan: _Plan) -> StatusPair:
     return StatusPair(file_access.fs_reply, file_access.we_error)
 
 
-def _forward(ctx: FacadeContext) -> Mapping[str, object]:
-    """The keyword-only extras to forward to a handler's ``dispatch``."""
-    return ctx.options
+@lru_cache(maxsize=None)
+def _keyword_extras_accepted_by(target: Callable[..., object]) -> frozenset[str]:
+    """The keyword-only parameter names ``target`` declares.
+
+    Read from the signature rather than transcribed into a table, because the
+    seventeen handler modules do NOT agree on their keyword-only extras - eight
+    take ``transport``, two of those also take ``states``, three also take
+    ``allow_frozen_placeholder_credentials``, ``acas022_purch`` takes
+    ``purchase_file``, ``acas026_pinvoice`` takes ``context``, and nine take none
+    at all. A transcribed table would be a second opinion that could drift from
+    the first; a signature cannot.
+
+    Cached because the answer is fixed for the life of the process and this is
+    consulted once per facade verb.
+
+    Args:
+        target: the handler's ``dispatch`` function.
+
+    Returns:
+        Its keyword-only parameter names.
+    """
+    return frozenset(
+        name
+        for name, parameter in inspect.signature(target).parameters.items()
+        if parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    )
+
+
+def _forward(
+    ctx: FacadeContext, target: Callable[..., object]
+) -> Mapping[str, object]:
+    """The keyword-only extras to forward to ``target``, projected from ``options``.
+
+    ⭐ WHY THIS PROJECTS RATHER THAN FORWARDING WHOLESALE. ``options`` is the one
+    channel by which a caller's transport-security policy reaches a handler, and
+    a caller states that policy ONCE for a whole run - it cannot reasonably know
+    which of the seventeen handlers a given verb dispatches to, nor which of them
+    declares which keyword. Forwarding the mapping wholesale made a single
+    uniform declaration impossible: ``options={"transport": ...}`` reached
+    ``acas006`` happily and raised ``TypeError`` from ``acas000``, so the only
+    way to avoid the error was to leave ``options`` empty everywhere and let each
+    handler decide its own transport policy - which is exactly how one handler
+    came to default itself permissive while the other nineteen failed closed
+    (CWE-319, CWE-295).
+
+    Projecting makes the uniform declaration work: the caller says it once, every
+    handler that can honour it receives it, and a handler that cannot is called
+    exactly as before. NOTHING IS SILENTLY DISCARDED - a key that no handler on
+    this path accepts is reported at WARNING, so a caller who believed a policy
+    was in force and was wrong finds out. That report is a log record with no
+    database effect and no control-flow effect, which is the whole of the test
+    AAP section 0.3.4 sets for a diagnostic.
+
+    A handler that DOES declare ``transport`` and is not given one is unaffected:
+    its own default is ``None``, and ``connection._require_permitted_connection``
+    resolves ``None`` fail-closed. Omission is therefore never the permissive
+    answer.
+
+    Args:
+        ctx: the linkage this verb was performed with.
+        target: the handler ``dispatch`` about to be called.
+
+    Returns:
+        The subset of ``ctx.options`` that ``target`` accepts. An empty mapping
+        when the caller supplied none, which is the ordinary case and forwards
+        nothing at all.
+    """
+    options = ctx.options
+    if not options:
+        return {}
+
+    accepted = _keyword_extras_accepted_by(target)
+    unhonoured = [name for name in options if name not in accepted]
+    if unhonoured:
+        # `%r` on the sorted NAMES only. The values are policy objects and record
+        # areas - a transport policy carries certificate paths - so the message
+        # says which declarations could not be honoured and never what they held
+        # (CWE-532).
+        _LOG.warning(
+            "facade: %s accepts no keyword extra named %r, so the caller's "
+            "declaration(s) of that name are not in force for this verb; the "
+            "handler's own default applies, which for a transport policy is "
+            "fail-closed",
+            getattr(target, "__module__", "the handler"),
+            sorted(unhonoured),
+        )
+
+    return {name: value for name, value in options.items() if name in accepted}
+
+
+# ---------------------------------------------------------------------------
+# THE ONE SECURITY-POLICY CONTRACT
+# ---------------------------------------------------------------------------
+#
+# `FacadeContext.options` carries a policy to the eight handlers that declare a
+# keyword-only `transport` on their `dispatch`. Four more accept one ONLY through
+# a module-level declaration function of their own - the equivalent of setting a
+# sub-program's WORKING-STORAGE before the first `CALL`, which is exactly what
+# their COBOL originals do with the six `RDBMS-*` values
+# [common/acas008.cbl:L558-L563] - and four accept none at all and can therefore
+# only ever fail closed.
+#
+# Three mechanisms is two too many for a caller to have to know about, and a
+# caller who knows about none of them is the caller whose policy silently fails
+# to apply. So this layer publishes ONE door. It is the right layer for it:
+# `dal/facade.py` is already the only path from any caller to any handler, and
+# the AAP's per-directory import table (section 0.4.3) names it as the DAL module
+# the layer above may import.
+#
+# NOT GLOBAL MUTABLE STATE INVENTED BY THE MIGRATION. Each handler's declaration
+# slot already exists, because each COBOL sub-program already has working storage
+# that outlives one `CALL`; this function does not add a slot, it gives the four
+# that can only be reached that way a single, greppable caller.
+
+
+#: The handlers whose transport policy is settable ONLY through a module-level
+#: declaration, each paired with the callable that sets it. Kept as data so the
+#: set is greppable and so adding a handler is one line rather than a branch.
+#:
+#: The three spellings are the handler modules' own and are deliberately not
+#: renamed: `acas000_system.configure_transport` takes the policy positionally,
+#: `acas007_gl_batch.declare_connection_policy` takes it by keyword and also
+#: takes the credential declaration, and
+#: `acasirsub1_irs_nominal.reset_bridge_storage` takes only the transport and
+#: additionally resets the rest of its working storage - which is why it is
+#: called here rather than a narrower setter being invented for it.
+#: `acas022_purch` publishes `reset_bridge_state()` with no policy parameter at
+#: all, so it is absent from this table: it has no slot to set, and its
+#: `dispatch` accepts `transport` instead, which the options channel reaches.
+_MODULE_LEVEL_POLICY_SETTERS: Final[
+    tuple[tuple[str, Callable[..., None]], ...]
+] = (
+    ("acas000_system", acas000_system.configure_transport),
+    ("acas007_gl_batch", acas007_gl_batch.declare_connection_policy),
+    ("acasirsub1_irs_nominal", acasirsub1_irs_nominal.reset_bridge_storage),
+)
+
+
+def declare_connection_policy(
+    *,
+    transport: _connection.TransportSecurity | None = None,
+    allow_frozen_placeholder_credentials: bool = False,
+) -> None:
+    """Declare, once, how every handler may reach the database.
+
+    THE COMPANION OF ``FacadeContext.options``, NOT A SUBSTITUTE FOR IT. Between
+    them they cover every handler that can be told a policy at all:
+
+    * eight handlers declare a keyword-only ``transport`` on their ``dispatch``
+      and are reached by ``options={"transport": ...}`` on the context;
+    * three are reached only through a module-level declaration and are reached
+      by this function;
+    * ``acas022_purch`` is in the first group;
+    * ``acas005_gl_nominal``, ``acas012_sales``, ``acas016_invoice`` and
+      ``acasirsub4_irs_posting`` publish neither, so they can only ever use the
+      fail-closed default - a Unix socket or a loopback address. That is a
+      LIMITATION AND IT IS RECORDED AS ONE: those four cannot be pointed at a
+      non-local server, and the refusal surfaces as the same ``(99, 911)`` the
+      frozen open produces on any connect failure, never as a silent plaintext
+      connection.
+
+    A process boundary should call this once and ALSO pass the same policy on
+    every context it builds; the two together are the whole contract. Calling
+    this with no arguments is meaningful and is the fail-closed declaration.
+
+    Args:
+        transport: the policy. ``None`` means the caller declares nothing, which
+            ``connection._require_permitted_connection`` resolves fail-closed:
+            loopback and Unix sockets are permitted and every other target is
+            refused unless a certificate authority is supplied or
+            ``isolated_oracle=True`` is declared.
+        allow_frozen_placeholder_credentials: whether the shipped placeholders of
+            [copybooks/wssystem.cob:L138-L139] may authenticate. ``False``, the
+            default, refuses them.
+
+    Returns:
+        None. Every effect is on the named handlers' own declaration slots.
+    """
+    for module_name, setter in _MODULE_LEVEL_POLICY_SETTERS:
+        parameters = inspect.signature(setter).parameters
+        extras: dict[str, object] = {}
+        if "allow_frozen_placeholder_credentials" in parameters:
+            extras["allow_frozen_placeholder_credentials"] = (
+                allow_frozen_placeholder_credentials
+            )
+        if parameters["transport"].kind is inspect.Parameter.KEYWORD_ONLY:
+            setter(transport=transport, **extras)
+        else:
+            setter(transport, **extras)
+        _LOG.debug(
+            "facade: connection policy declared to %s (server verified=%s, "
+            "isolated-oracle declared=%s)",
+            module_name,
+            bool(transport and transport.verifies_the_server()),
+            bool(transport and transport.isolated_oracle),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -595,7 +816,7 @@ def _dispatch_acas000_entity(ctx: FacadeContext) -> None:
         ctx.file_access,
         ctx.file_defs,
         ctx.dal_common,
-        **_forward(ctx),
+        **_forward(ctx, acas000_system.dispatch),
     )
 
 
@@ -614,7 +835,7 @@ def _dispatch_acas000_handler(ctx: FacadeContext) -> None:
         ctx.file_access,
         ctx.file_defs,
         ctx.dal_common,
-        **_forward(ctx),
+        **_forward(ctx, acas000_system.dispatch),
     )
 
 
@@ -644,7 +865,7 @@ def _dispatch_acas005(ctx: FacadeContext) -> None:
         ctx.file_access,
         ctx.file_defs,
         ctx.dal_common,
-        **_forward(ctx),
+        **_forward(ctx, acas005_gl_nominal.dispatch),
     )
 
 
@@ -660,7 +881,7 @@ def _dispatch_acas006(ctx: FacadeContext) -> None:
         ctx.file_access,
         ctx.file_defs,
         ctx.dal_common,
-        **_forward(ctx),
+        **_forward(ctx, acas006_gl_posting.dispatch),
     )
 
 
@@ -676,7 +897,7 @@ def _dispatch_acas007(ctx: FacadeContext) -> None:
         ctx.file_access,
         ctx.file_defs,
         ctx.dal_common,
-        **_forward(ctx),
+        **_forward(ctx, acas007_gl_batch.dispatch),
     )
 
 
@@ -696,7 +917,7 @@ def _dispatch_acas008(ctx: FacadeContext) -> None:
         ctx.file_access,
         ctx.file_defs,
         ctx.dal_common,
-        **_forward(ctx),
+        **_forward(ctx, acas008_spl_posting.dispatch),
     )
 
 
@@ -742,7 +963,7 @@ def _dispatch_acas012(ctx: FacadeContext) -> None:
         ctx.file_access,
         ctx.file_defs,
         ctx.dal_common,
-        **_forward(ctx),
+        **_forward(ctx, acas012_sales.dispatch),
     )
 
 
@@ -758,7 +979,7 @@ def _dispatch_acas013(ctx: FacadeContext) -> None:
         ctx.file_access,
         ctx.file_defs,
         ctx.dal_common,
-        **_forward(ctx),
+        **_forward(ctx, acas013_value.dispatch),
     )
 
 
@@ -788,7 +1009,7 @@ def _dispatch_acas015(ctx: FacadeContext) -> None:
         ctx.file_access,
         ctx.file_defs,
         ctx.dal_common,
-        **_forward(ctx),
+        **_forward(ctx, acas015_analysis.dispatch),
     )
 
 
@@ -828,7 +1049,7 @@ def _dispatch_acas016(ctx: FacadeContext) -> None:
         ctx.file_access,
         ctx.file_defs,
         ctx.dal_common,
-        **_forward(ctx),
+        **_forward(ctx, acas016_invoice.dispatch),
     )
     acas016_invoice.publish_linkage_buffer(invoice, ctx.record)
 
@@ -859,7 +1080,7 @@ def _dispatch_acas019(ctx: FacadeContext) -> None:
         ctx.file_access,
         ctx.file_defs,
         ctx.dal_common,
-        **_forward(ctx),
+        **_forward(ctx, acas019_otm3.dispatch),
     )
 
 
@@ -875,7 +1096,7 @@ def _dispatch_acas022(ctx: FacadeContext) -> None:
         ctx.file_access,
         ctx.file_defs,
         ctx.dal_common,
-        **_forward(ctx),
+        **_forward(ctx, acas022_purch.dispatch),
     )
 
 
@@ -918,7 +1139,7 @@ def _dispatch_acas026(ctx: FacadeContext) -> None:
     leave it to caller to recover from"*.
     """
     _apply(ctx.file_access, _FILE_KEY_NO, PRIMARY_FILE_KEY_NO)
-    options = _forward(ctx)
+    options = _forward(ctx, acas026_pinvoice.dispatch)
     # The staged line lives in the working storage the call uses, so the same
     # `context` the caller forwarded - if any - is the one to project through, on
     # the way in AND on the way out.
@@ -947,7 +1168,7 @@ def _dispatch_acas029(ctx: FacadeContext) -> None:
         ctx.file_access,
         ctx.file_defs,
         ctx.dal_common,
-        **_forward(ctx),
+        **_forward(ctx, acas029_otm5.dispatch),
     )
 
 
@@ -991,7 +1212,7 @@ def _dispatch_acasirsub1(ctx: FacadeContext) -> None:
         ctx.file_access,
         ctx.file_defs,
         ctx.dal_common,
-        **_forward(ctx),
+        **_forward(ctx, acasirsub1_irs_nominal.dispatch),
     )
 
 
@@ -1007,7 +1228,7 @@ def _dispatch_acasirsub3(ctx: FacadeContext) -> None:
         ctx.file_access,
         ctx.file_defs,
         ctx.dal_common,
-        **_forward(ctx),
+        **_forward(ctx, acasirsub3_irs_dflt.dispatch),
     )
 
 
@@ -1023,7 +1244,7 @@ def _dispatch_acasirsub4(ctx: FacadeContext) -> None:
         ctx.file_access,
         ctx.file_defs,
         ctx.dal_common,
-        **_forward(ctx),
+        **_forward(ctx, acasirsub4_irs_posting.dispatch),
     )
 
 
@@ -1039,7 +1260,7 @@ def _dispatch_acasirsub5(ctx: FacadeContext) -> None:
         ctx.file_access,
         ctx.file_defs,
         ctx.dal_common,
-        **_forward(ctx),
+        **_forward(ctx, acasirsub5_irs_final.dispatch),
     )
 
 
@@ -6771,13 +6992,23 @@ def open_error_continued(ctx: FacadeContext) -> NoReturn:
     the five displays become log records, the wait is dropped, and the
     ``goback`` becomes :exc:`FacadeGoback`.
 
-    Omitted, and only this: the ``accept Accept-Reply at 1335``
-    [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L363] and the screen positions.
-    Agent Action Plan section 0.3.4 governs both - a prompt whose only effect is
-    to block a terminal is dropped, and "where such a prompt sits inside an error
-    path that then transfers control, the control transfer is preserved and only
-    the pause is removed". ``SY008`` is that prompt's text, "Note message & Hit
-    return" [common/ACAS.cbl:L334].
+    Omitted: the ``display SY008`` [:L362], the ``accept Accept-Reply at 1335``
+    [:L363] and the screen positions. Agent Action Plan section 0.3.4 governs all
+    three - a prompt whose only effect is to block a terminal is dropped, and
+    "where such a prompt sits inside an error path that then transfers control, the
+    control transfer is preserved and only the pause is removed". ``SY008`` is that
+    prompt's text, "Note message & Hit return" [common/ACAS.cbl:L334], and quoting
+    it in a log line, or logging a notice that it was not quoted, is still putting
+    an unanswerable prompt in front of an operator. The transfer - the ``goback``
+    at [:L364] - is preserved.
+
+    THE FIVE DISPLAYS BECOME ONE RECORD, not four. [:L356-L361] are six
+    ``display`` statements building one diagnostic out of four fields, and emitting
+    a record per field made one failure look like four, none of which carried the
+    identity of the handler that failed. ``SQL-Msg`` [:L361] is dropped from the
+    record entirely: it is a ``pic x(512)`` of driver free text, which for these
+    tables renders the statement and its bound values, and ``redact_for_log`` was
+    escaping it rather than removing it (CWE-532).
 
     Never raises :exc:`SystemExit` and never terminates the process. ``goback``
     returns to the COBOL program's caller, which here is a ``programs/*`` module
@@ -6786,33 +7017,31 @@ def open_error_continued(ctx: FacadeContext) -> NoReturn:
     file_access = ctx.file_access
     logging_data = file_access.logging_data
 
-    # L356-L357  display "Fs-reply = " / display fs-reply
-    # L358-L359  display "WE-Error = " / display WE-Error
-    _LOG.error(
-        "Open-Error-Continued: Fs-reply = %s, WE-Error = %s",
-        file_access.fs_reply,
-        file_access.we_error,
+    # L356-L361, the six displays, as ONE record through the shared reporter, so
+    # that this failure reads like every other failure in the package: the status
+    # pair from [:L356-L359] and the SQLSTATE from [:L360], with the stable error
+    # category derived from them. `SQL-Err` is still read the way the bridges read
+    # their fixed-width fields, up to the first space.
+    log_handler_failure(
+        _LOG,
+        program="Proc-ZZ100-ACAS-IRS-Calls",
+        paragraph="Open-Error-Continued",
+        locator="[copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L355-L364]",
+        fs_reply=int(file_access.fs_reply),
+        we_error=int(file_access.we_error),
+        sql_err=_connection.cobol_string_delimited_by_space(logging_data.sql_err),
+        sql_state=_connection.cobol_string_delimited_by_space(
+            logging_data.sql_state
+        ),
+        detail="unrecoverable file-handler failure; the IRS convention's error "
+        "check has already named the handler, and this paragraph cannot continue",
     )
-    # L360  display SQL-Err. A SQLSTATE in a ``pic x(5)`` field, so it is read
-    # the way the bridges read their fixed-width fields - up to the first space.
-    _LOG.error(
-        "Open-Error-Continued: SQL-Err = %s",
-        _connection.cobol_string_delimited_by_space(logging_data.sql_err),
-    )
-    # L361  display SQL-Msg. Free text in a ``pic x(512)`` field which can carry
-    # driver detail, so it goes through the redacting formatter rather than
-    # straight into the log.
-    _LOG.error(
-        "Open-Error-Continued: SQL-Msg = %s",
-        redact_for_log(logging_data.sql_msg),
-    )
-    # L362  display SY008 with erase eol, and L363 accept Accept-Reply. The
-    # prompt and its wait are one acknowledgement pause and are dropped
-    # together; recorded at debug so the omission is observable in a log.
-    _LOG.debug(
-        "Open-Error-Continued: SY008 acknowledgement prompt and its accept are "
-        "not reproduced (presentation only; no database effect)."
-    )
+    # L362 `display SY008` and L363 `accept Accept-Reply` - the prompt and its wait
+    # are one acknowledgement pause, dropped together and NOT announced. A record
+    # saying a prompt was not reproduced is itself a presentation record, and it
+    # quoted the prompt's own identifier at a destination where no operator can
+    # answer it. The omission is documented in the docstring above and in
+    # `docs/migration/traceability.md`, which is where a reader looks for it.
     # L364  goback.
     raise FacadeGoback(
         "Open-Error-Continued: unrecoverable file-handler failure; "
@@ -6830,6 +7059,10 @@ def open_error_continued(ctx: FacadeContext) -> NoReturn:
 __all__ = (
     "ACCESS_TYPE_LOGGING_RESET",
     "ALWAYS_REFUSED_BY_HANDLER",
+    #  The one security-policy door, for the handlers that publish no
+    #  keyword-only `transport` on their `dispatch`. Its companion is
+    #  `FacadeContext.options`; see THE ONE SECURITY-POLICY CONTRACT.
+    "declare_connection_policy",
     "FacadeContext",
     "FacadeError",
     "FacadeGoback",

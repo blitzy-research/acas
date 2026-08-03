@@ -118,9 +118,18 @@ pinned by `args.resolve_clock` into both observables the cycle can see: the text
 `to-day pic x(10)` in DD/MM/CCYY form, and the binary `Run-Date`
 [copybooks/wssystem.cob:L67]. Neither `pl055` nor `pl060` reads a clock - the
 date arrives purely through linkage - so two runs of one scenario under the same
-pinned date are byte-identical (rule R-6). The single clock read in the whole
-frozen call chain lives in the menu shell's date-service copybook
-[copybooks/Proc-ACAS-Mapser-RDB.cob:L72-L80], which is out of scope.
+pinned date are byte-identical (rule R-6). The frozen call chain holds FOURTEEN
+ambient date and time reads across six files - six `FUNCTION CURRENT-DATE`
+[common/ACAS.cbl:L353], [general/general.cbl:L371], [sales/sales.cbl:L323],
+[purchase/purchase.cbl:L318], [irs/irs.cbl:L480],
+[copybooks/Proc-ACAS-Mapser-RDB.cob:L72], four `accept ... from time` and four
+`accept ... from date` - and EVERY ONE of them is in an out-of-scope menu shell or
+in the date-service copybook those shells COPY, as the census in
+`acas_posting/clock.py` records. The one that bears on a posting run is
+[copybooks/Proc-ACAS-Mapser-RDB.cob:L72-L80], and even that runs only on the
+FIRST-TIME capture path `ba010-Capture-Data`: a normal Purchase run derives
+`to-day` from the STORED `Run-Date` - `move run-date to u-bin` / `call "maps04"` /
+`move u-date to to-day` [purchase/purchase.cbl:L403-L405].
 
 WHAT THIS ROUTE DELIBERATELY DOES NOT HAVE
     * NO run-confirm option. `pl060`'s `acpt-xrply.` paragraph label survives at
@@ -183,10 +192,13 @@ _MENU_OPTION: Final[str] = "(H)  Purchase Transactions Post"
 #  declares no console script, so a module invocation is the real entry form.
 _PROG: Final[str] = "python -m acas_posting.cli.pl_order_post"
 
-#  The log format used when this module is the process entry point. Applied by
-#  `main` only - see the note there on why no module may configure logging at
-#  import time.
-_LOG_FORMAT: Final[str] = "%(levelname)s %(name)s: %(message)s"
+#  THIS MODULE DECLARES NO LOG FORMAT AND CALLS NO `basicConfig`. There is one
+#  `logging.basicConfig` in the package - `acas_posting.__main__.configure_logging`
+#  - which owns the single timestamp-free format and the single level policy, and
+#  which only a process boundary reaches. Seven modules each declaring their own
+#  format produced three different ones and a first-caller-wins race. `main` asks
+#  that same configurator to set the LEVEL when `--log-level` was supplied, which
+#  installs nothing and changes no format.
 
 
 #  A migrated program's published entry, as `load000` invokes it.
@@ -200,7 +212,56 @@ _LOG_FORMAT: Final[str] = "%(levelname)s %(name)s: %(message)s"
 #  `NamedTuple` whose members ARE the COBOL parameter list in COBOL order
 #  [purchase/pl060.cbl:L340-L344], so a callee declaring anything other than
 #  those five in that order fails at the call.
-type _ProgramEntry = Callable[..., None]
+type _ProgramEntry = Callable[..., object | None]
+
+
+class _ExtractChannel:
+    """The ONE OTM4 work file `pl055` and `pl060` share.
+
+    Not a linkage parameter and not a table. It stands in for what the compiled
+    programs use instead: their own FILE SECTIONs over one transient work file
+    that persists between the two `CALL`s, `file-28` alias `"openitm4"`
+    [copybooks/wsnames.cob:L45]. `copy "seloi4.cob"` carries its author's own note
+    on it - *"Temp file only for i/p to pl060."* [purchase/pl055.cbl:L109].
+    Nothing about it reaches the database, so nothing about it appears in a table
+    dump.
+
+    WHY A HOLDER RATHER THAN A LOCAL. The file has to outlive the first dispatch
+    and reach the second, because that is how the two programs communicate:
+    `pl055` opens it for EXTEND [purchase/pl055.cbl:L301], appends one header per
+    invoice [purchase/pl055.cbl:L587] and closes it [purchase/pl055.cbl:L423];
+    `pl060` then opens THE SAME FILE for INPUT [purchase/pl060.cbl:L421], reads
+    those headers back [purchase/pl060.cbl:L425] and finally truncates it once the
+    transfer to OTM5 is complete [purchase/pl060.cbl:L605-L606]. Threading it
+    through a holder keeps `load000` returning the term code that `load08.` reads,
+    while still letting the file the FIRST dispatch produced reach the second.
+
+    WHY NOT A MODULE-LEVEL DEFAULT. `acas_posting/workfiles.py` deliberately
+    declares a fresh file on every request and caches nothing, so that one run's
+    records cannot leak into the next; a shared carrier at module scope would
+    break rule R-6's byte-identical-reruns guarantee silently. This holder is
+    created per call to `load08`, which preserves that property.
+
+    WHO CREATES THE FILE. Not this class. `pl055.run` declares one when it is
+    passed None and RETURNS it, so the first dispatch both produces the file and
+    fills it; `load000` captures the returned value here and the second dispatch
+    receives it. That is why this holder starts empty and why the type is
+    `object`: the concrete class lives in `acas_posting/workfiles.py`, which a
+    `cli` module may not import (Agent Action Plan section 0.4.3), and it never
+    needs to - the carrier is only ever carried, never inspected.
+
+    Attributes:
+        carrier: the OTM4 work file once a dispatch has produced it, and None
+            before that. Passed to every dispatch as-is: a None means "you
+            declare it", which is exactly what each program module's own
+            `open_item_file_4=None` default means.
+    """
+
+    __slots__ = ("carrier",)
+
+    def __init__(self) -> None:
+        """Start with no file. The first dispatch produces one."""
+        self.carrier: object | None = None
 
 
 def _run_unit_ended(term_code: int) -> bool:
@@ -235,6 +296,9 @@ def load000(
     linkage: args.SlPlLinkage,
     program_id: str,
     program: _ProgramEntry,
+    *,
+    menu_state: args.MenuState,
+    channel: _ExtractChannel | None = None,
 ) -> int:
     """`load000.` [purchase/purchase.cbl:L691-L708] - the one dispatch paragraph.
 
@@ -269,9 +333,12 @@ def load000(
         `_run_unit_ended` distinguishes the two bands the COBOL distinguishes.
 
     Note:
-        The callee's own return value is discarded because there is none to keep:
-        a COBOL sub-program communicates through the shared linkage records, and
-        the migrated programs likewise return None and write into the records.
+        The callee communicates its RESULTS through the shared linkage records,
+        exactly as a COBOL sub-program does, so nothing about the posting is read
+        off the return value. The one thing the return value can carry is the OTM4
+        work file `pl055` declared - the migration's stand-in for the operating
+        system supplying the file identity to two programs naming the same
+        `ASSIGN` - and it is captured into `channel` rather than used.
     """
     #  L694  `move zero to ws-term-code.`  -  BEFORE EVERY CALL, not once per
     #  route. R-4 [purchase/purchase.cbl:L694]: the field is shared linkage
@@ -296,9 +363,26 @@ def load000(
     #  FIVE POSITIONAL ARGUMENTS IN COBOL ORDER, and the order is not retyped
     #  here: `args.SlPlLinkage` holds the five operands in the frozen source's
     #  own sequence, so the splat IS the parameter list
-    #  [purchase/purchase.cbl:L695-L699]. No keyword argument is passed - this
-    #  route has no promoted prompt to pass one for.
-    program(*linkage)
+    #  [purchase/purchase.cbl:L695-L699]. This route has no promoted prompt, so no
+    #  keyword argument is passed for one.
+    #
+    #  THE ONE KEYWORD THAT IS PASSED IS THE OTM4 FILE, and it is not an operand of
+    #  the `CALL` at all - it is the migration's stand-in for the two programs
+    #  naming the same `assign file-28`. See `_ExtractChannel`.
+    returned = (
+        program(*linkage)
+        if channel is None
+        else program(*linkage, open_item_file_4=channel.carrier)
+    )
+
+    #  The one conditional that is a Python-language necessity rather than a test
+    #  of any value the COBOL tests. `pl055.run` returns the OTM4 file - the
+    #  migration's equivalent of naming the same file in the next program's
+    #  `SELECT` - while `pl060.run` returns None because it has nothing new to hand
+    #  on. Capturing the first is what lets [purchase/pl060.cbl:L425] read what
+    #  [purchase/pl055.cbl:L587] wrote.
+    if channel is not None and returned is not None:
+        channel.carrier = returned
 
     #  The callee wrote into the caller's storage, exactly as a COBOL `CALL BY
     #  REFERENCE` does: `move 8 to WS-Term-Code` [purchase/pl055.cbl:L286] lands
@@ -312,22 +396,18 @@ def load000(
     #    * it is taken on EVERY dispatch that is not a serious error, including a
     #      wholly successful one - the maintainer's own comment on the line is
     #      "Update sys4 and system recs in case of changes"; and
-    #    * its body is an OMISSION here. `overrewrite`
-    #      [purchase/purchase.cbl:L621-L651] rewrites SYSTEM-REC (key 1) and
-    #      SYSTOT-REC (key 4) to the relational store and then to the Cobol
-    #      file, which needs the data-access layer that a `cli` module may not
-    #      reach, and it lives in a menu program that is out of scope. So a
-    #      Python run leaves those two rows as the seed left them where a COBOL
-    #      run would rewrite them.
+    #    * its body IS reproduced. `overrewrite`
+    #      [purchase/purchase.cbl:L621-L636] rewrites SYSTEM-REC (key 1) and
+    #      SYSTOT-REC (key 4) to the relational store, and that is what
+    #      `args.overrewrite` performs. Its Cobol-file arm
+    #      [purchase/purchase.cbl:L637-L649] has no counterpart, the migration
+    #      having a single store - see `args.RDBMS_STORE_SELECTOR_DIGIT`.
     #
-    #  AMBIGUITY Q-CLI-OVERREWRITE: the two omitted rewrites are the sole
-    #  persistence of the period totals that `pl055` accumulates
-    #  [purchase/pl055.cbl:L582] and [purchase/pl055.cbl:L584] and that `pl060`
-    #  adds to [purchase/pl060.cbl:L628], so SYSTEM-REC and SYSTOT-REC belong to
-    #  the seeded state and to each scenario's declared affected-table list
-    #  rather than to this layer. Resolve against the compiled oracle - run the
-    #  route both ways and compare those two tables - and record the outcome in
-    #  docs/migration/ambiguity-resolutions.md.
+    #  IT IS THE SOLE PERSISTENCE OF THIS ROUTE'S PERIOD TOTALS, which is why it
+    #  could not stay omitted: `pl055` accumulates two of the nine
+    #  [purchase/pl055.cbl:L582], [purchase/pl055.cbl:L584] and `pl060` adds a
+    #  third [purchase/pl060.cbl:L628], all into the linkage record, and Agent
+    #  Action Plan section 0.8.5 requires an empty diff on the affected tables.
     #
     #  `not args.is_serious_error(...)` IS `< 8`: over the `pic 99` domain
     #  [copybooks/wscall.cob:L10] the frozen tests `< 8` and `> 7` are
@@ -335,12 +415,13 @@ def load000(
     #  helper and no threshold is transcribed here.
     if not args.is_serious_error(term_code):
         _LOG.debug(
-            "load000: %s left ws-term-code %d; the frozen `perform overrewrite` "
-            "[purchase/purchase.cbl:L701-L702] is a recorded omission - "
-            "SYSTEM-REC and SYSTOT-REC are not rewritten",
+            "load000: %s left ws-term-code %d; `perform overrewrite` "
+            "[purchase/purchase.cbl:L701-L702] - persisting SYSTEM-REC (key 1) "
+            "and SYSTOT-REC (key 4)",
             program_id,
             term_code,
         )
+        args.overrewrite(linkage.system_record, menu_state, linkage.file_defs)
 
     #  L703-L704  `if ws-term-code > 7 / go to overrewrite.`
     #
@@ -358,31 +439,34 @@ def load000(
     #  `_run_unit_ended` and dispatches nothing further; `main` turns the code
     #  into the process status through `args.exit_status_for`.
     #
-    #  PROOF OF EQUIVALENCE: the two agree on everything observable. No further
-    #  program is invoked on either side; control never returns to the dispatch
-    #  paragraph on either side; and the code survives on both. The ONLY
-    #  difference is the persistence `overrewrite` would have performed, which is
-    #  the omission recorded above and in the footer - it is the same omission on
-    #  the `< 8` path, so honouring this branch adds nothing new.
+    #  PROOF OF EQUIVALENCE: the two agree on everything observable. The
+    #  persistence runs on both sides; no further program is invoked on either
+    #  side; control never returns to the dispatch paragraph on either side; and
+    #  the code survives on both.
     #
     #  R-4, MECHANISM DIVERGENCE PRESERVED: Purchase transfers here
     #  [purchase/purchase.cbl:L703-L704]; Sales instead performs and returns,
     #  `perform overrewrite / goback` [sales/sales.cbl:L710-L712]. Same net
-    #  effect, different mechanism, and they are left different.
+    #  effect, different mechanism, and they are left different - the transfer
+    #  reaches `overrewrite.` [purchase/purchase.cbl:L621] and falls through
+    #  `overclose.` [:L652] into `goback` [:L653], so the persistence runs and
+    #  THEN the run unit ends, in that order.
     if args.is_serious_error(term_code):
         _LOG.error(
             "load000: %s reported a serious error, ws-term-code %d - "
-            "`go to overrewrite` [purchase/purchase.cbl:L703-L704] ends the run "
-            "unit at `goback` [purchase/purchase.cbl:L653]; no further program "
-            "is dispatched",
+            "`go to overrewrite` [purchase/purchase.cbl:L703-L704] persists both "
+            "system records and then ends the run unit at `goback` "
+            "[purchase/purchase.cbl:L653]; no further program is dispatched",
             program_id,
             term_code,
         )
+        #  L704  go to overrewrite.  ->  purchase/purchase.cbl:L621-L636
+        args.overrewrite(linkage.system_record, menu_state, linkage.file_defs)
 
     return term_code
 
 
-def load08(linkage: args.SlPlLinkage) -> int:
+def load08(linkage: args.SlPlLinkage, *, menu_state: args.MenuState) -> int:
     """`load08.` [purchase/purchase.cbl:L752-L762] - `pl055`, then `pl060`.
 
     The Purchase transaction-posting route, in the frozen source's own order and
@@ -407,7 +491,17 @@ def load08(linkage: args.SlPlLinkage) -> int:
     #  Phase one - the Purchase Invoice Post Extract, which builds the OTM4
     #  extract `pl060` then posts and writes the two period totals
     #  [purchase/pl055.cbl:L582] and [purchase/pl055.cbl:L584].
-    term_code = load000(linkage, _PL055, pl055_order_proof_extract.run)
+    #  THE OTM4 CHANNEL, created per route invocation rather than per dispatch,
+    #  because the file outlives the first `CALL` and is read by the second.
+    channel = _ExtractChannel()
+
+    term_code = load000(
+        linkage,
+        _PL055,
+        pl055_order_proof_extract.run,
+        menu_state=menu_state,
+        channel=channel,
+    )
 
     #  ======================================================================
     #  THE GATE THAT IS NOT HERE
@@ -453,7 +547,13 @@ def load08(linkage: args.SlPlLinkage) -> int:
     #  `go to`, which does not - the paragraph ends at the transfer, so there is
     #  no third statement to reproduce and no post-dispatch work to place after
     #  it. The `return` carries the code out for the process status.
-    return load000(linkage, _PL060, pl060_order_posting.run)
+    return load000(
+        linkage,
+        _PL060,
+        pl060_order_posting.run,
+        menu_state=menu_state,
+        channel=channel,
+    )
 
 
 
@@ -511,6 +611,19 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     args.add_calling_data_arguments(parser, default_caller=args.WS_CALLER_PURCHASE)
     args.add_slpl_linkage_arguments(parser)
+    #  THE TRANSPORT DECLARATION - one contract, published on every route
+    #  (`args.add_transport_security_arguments`). No COBOL counterpart: the frozen
+    #  bridge's connect passes six values and no transport policy at all
+    #  [copybooks/mysql-procedures.cpy:L72-L77], transport being compiled into
+    #  `cobmysqlapi.c`, so the migration must decide it and the operator is the
+    #  only party that knows. Stating NOTHING leaves the deployment contract to
+    #  decide, which is what makes the migrated cycle behave as the compiled one
+    #  (rule R-3); it decides no posted figure, so it cannot make two runs of one
+    #  scenario differ (rule R-6).
+    args.add_transport_security_arguments(parser)
+    #  Diagnostics only: no COBOL counterpart, no database effect. Shared with
+    #  the other six routes so the level policy has one spelling.
+    args.add_log_level_argument(parser)
     return parser
 
 
@@ -544,14 +657,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         SystemExit: raised by argparse for `--help` and for a malformed argument
             vector, including a missing `--run-date`, and left to propagate with
             argparse's own status and its own message.
-        rdbms_params.RdbmsParamError: the deployment contract that supplies the
-            six connection parameters is absent or unusable. DELIBERATELY NOT
-            CAUGHT, for the reason `cli/args.py` gives at the site that raises
-            it: a run that cannot reach the provisioned database must stop before
-            it writes anything, because the alternative is a silent connection to
-            the placeholder endpoint the frozen copybook declares
-            [copybooks/wssystem.cob:L137-L144]. Converting it to a status here
-            would also invent an exit code that is not a `WS-Term-Code` value.
+    `args.RdbmsParamError` - the deployment contract for the six connection
+    parameters being absent or unusable - is CAUGHT here, and only that exact type
+    (finding CLI-09). `args.report_configuration_failure` returns the one status
+    every route of this package shares: 8 when the contract is absent, 1 when it is
+    unusable. The reason an earlier draft let it propagate still stands as far as
+    it went - a run that cannot reach the provisioned database must stop before it
+    writes anything, rather than connect silently to the placeholder endpoint the
+    frozen copybook declares [copybooks/wssystem.cob:L137-L144] - and it still
+    does stop, before the store is opened and before any program is entered. What
+    changed is only that the stop is now DIAGNOSABLE and identical across the seven
+    routes instead of route-dependent. The status is not a `WS-Term-Code` value and
+    is not claimed to be one; it is the migration's own boundary
+    (Q-CLI-EXITSTATUS). `ValueError` at large is NOT caught.
 
     Note:
         A malformed run date is NOT rejected - `args.resolve_clock` reproduces
@@ -562,22 +680,64 @@ def main(argv: Sequence[str] | None = None) -> int:
         Raising instead would add a validation and correct a defect, and this
         migration does neither (rules R-3 and R-4).
     """
-    #  CONFIGURED HERE AND ONLY HERE. `basicConfig` mutates the root logger, so a
-    #  module that called it at import time would reconfigure logging for
-    #  everything that imported it - including a test session and any other
-    #  process that reaches `load08` as a library. A process entry point is the
-    #  one place with the standing to decide, so this is that place. First
-    #  statement, so that anything the binding below reports is already visible.
-    logging.basicConfig(level=logging.INFO, format=_LOG_FORMAT)
-
+    #  NOT INSTALLED HERE. `basicConfig` mutates the root logger, so a module that
+    #  called it would reconfigure logging for everything that imported it -
+    #  including a test session and any other process that reaches `load08` as a
+    #  library. Only a process boundary has the standing to install it, and there
+    #  are exactly two: the router, and this module's own guard through
+    #  `run_entry_point`. Both call the one configurator in
+    #  `acas_posting.__main__`, so the format and the level are the same on either
+    #  route and are already in effect before the binding below reports anything.
+    #  What `main` may do is ask that same configurator to SET THE LEVEL, and only
+    #  when the operator supplied `--log-level`; see the block after the parse.
     namespace = _build_parser().parse_args(argv)
+
+    #  `--log-level` APPLIED THROUGH THE ONE CONFIGURATOR, and only when the
+    #  operator supplied it. The shared fragment defaults the option to `None`, so
+    #  `None` means "not asked for" and whatever the process boundary configured
+    #  stands - on a routed run, the router's own `--log-level`. A supplied level
+    #  is applied on either route: logging is configured once at the boundary, and
+    #  `configure_logging` then sets the level because this package owns the
+    #  handler, so the last explicit request wins. An embedding application's own
+    #  configuration is never touched. The import is local to the call for the same
+    #  reason the guard at the foot of this module gives.
+    if namespace.log_level is not None:
+        from acas_posting.__main__ import configure_logging
+
+        configure_logging(namespace.log_level)
 
     #  `bind_slpl_linkage` pins the clock from the required `--run-date` and
     #  returns the five operands in COBOL order. `called` seeds `WS-Called` with
     #  the FIRST callee, matching the state the menu is in when it enters
     #  `load08` [purchase/purchase.cbl:L759]; each dispatch then sets the field
     #  itself.
-    linkage = args.bind_slpl_linkage(namespace, called=_PL055)
+    #  THE MENU'S OWN WORKING-STORAGE - one block for the route, owning
+    #  `WS-System-Record-4`, which the binder hands to the linkage as its third
+    #  argument. See `args.slpl_menu_state`.
+    menu_state = args.slpl_menu_state()
+
+    #  L346  aa005-Open-System.   L360  aa010-Get-System-Recs.
+    #  THE RECORDS THE CALLEES MUST SEE, READ BEFORE ANYTHING IS DISPATCHED.
+    #  Passing `menu_state` makes the binder perform `Open-System.` and
+    #  `aa010-Get-System-Recs.` [purchase/purchase.cbl:L346-L398] first - file-key
+    #  4 into `WS-System-Record-4` and file-key 1 into `System-Record`, TWO keys
+    #  where the General Ledger shell reads three - so both programs receive the
+    #  PERSISTED records. `pl055` ACCUMULATES into the period totals
+    #  [purchase/pl055.cbl:L582] and [:L584] rather than initialising them, so
+    #  binding declared defaults discarded every prior period's figures
+    #  (finding CLI-02).
+    #
+    #  THE EXACT TYPE IS CAUGHT, NOT `ValueError` (finding CLI-09). The six
+    #  connection parameters are resolved inside the binder before the store is
+    #  opened, so a failure here has touched nothing.
+    try:
+        linkage = args.bind_slpl_linkage(
+            namespace, called=_PL055, menu_state=menu_state
+        )
+    except args.RdbmsParamError as error:
+        return args.report_configuration_failure(
+            error, logger=_LOG, subject="Purchase order posting"
+        )
 
     _LOG.info(
         "%s: pl055 then pl060, no gate between them "
@@ -585,7 +745,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _MENU_OPTION,
     )
 
-    term_code = load08(linkage)
+    term_code = load08(linkage, menu_state=menu_state)
 
     #  `term_code` IS `linkage.calling_data.ws_term_code` - the shared field the
     #  menu reads after its own dispatch [purchase/purchase.cbl:L701],
@@ -595,7 +755,16 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":  # pragma: no cover - module entry point
-    raise SystemExit(main())
+    #  ONE PROCESS BOUNDARY, SHARED WITH THE ROUTER. `run_entry_point` configures
+    #  logging once and converts a failure into one sanitised ERROR record and a
+    #  deterministic exit status, so no traceback, absolute path or exception
+    #  payload can reach a terminal. `harness/run_python_scenario.sh` drives this
+    #  module directly, so the direct route must get the same treatment as the
+    #  routed one. The import is inside the guard because the router imports this
+    #  module back when the router is the process.
+    from acas_posting.__main__ import run_entry_point
+
+    raise SystemExit(run_entry_point(main, command="pl-order-post"))
 
 
 # --- traceability ---------------------------------------------------------
@@ -639,9 +808,8 @@ if __name__ == "__main__":  # pragma: no cover - module entry point
 #       reaches the `go to display-menu` at L708. Python returns the code, the
 #       caller asks `_run_unit_ended` and dispatches nothing further, and
 #       `main` surfaces the code as the status. The two agree on every
-#       observable; the sole difference is the persistence `overrewrite` would
-#       have performed, recorded as an omission below and identical on the
-#       `< 8` path.
+#       observable, the persistence included: `args.overrewrite` runs on this
+#       branch and on the `< 8` one, as the frozen paragraph does.
 #   load000, purchase/purchase.cbl:L708  `go to display-menu`
 #       NOT REPRODUCED. `display-menu` purchase/purchase.cbl:L472 is the menu
 #       redraw - screen work with no database effect, out of scope. A Python
@@ -691,13 +859,14 @@ if __name__ == "__main__":  # pragma: no cover - module entry point
 #   * `display-menu` purchase/purchase.cbl:L472 and ALL MENU SCREEN I/O,
 #     including the menu line this route is selected by, L540; and the
 #     letter-to-paragraph dispatch that reaches `load08`. No database effect.
-#   * `overrewrite` purchase/purchase.cbl:L621-L651 - the persistence of
-#     `System-Record` (File-Key-No 1) and `WS-System-Record-4` (File-Key-No 4)
-#     to the relational store and then again to the Cobol parameter file,
-#     falling through `overclose.` L652 into `goback` L653. Needs the
-#     data-access layer, which this layer may not reach, and lives in an
-#     out-of-scope program. Its consequence is stated at the `< 8` branch and
-#     carried by Q-CLI-OVERREWRITE below.
+#   * ONLY THE COBOL-FILE ARM of `overrewrite` purchase/purchase.cbl:L637-L649.
+#     Its RELATIONAL arm L621-L636 - the persistence of `System-Record`
+#     (File-Key-No 1) and `WS-System-Record-4` (File-Key-No 4) - IS reproduced, by
+#     `args.overrewrite`, performed from both branches of `load000`, and the
+#     matching `aa010-Get-System-Recs.` load is performed by the binder before the
+#     first dispatch. `overclose.` L652 and its `goback` L653 are the return from
+#     `main`. The migration has no ISAM store - see
+#     `args.RDBMS_STORE_SELECTOR_DIGIT`.
 #   * `pre-overrewrite`'s backup spool-out `call "SYSTEM" using
 #     Full-Backup-Script` purchase/purchase.cbl:L618 - excluded twice, by the
 #     spool-out exclusion and by rule R-1.
@@ -752,13 +921,13 @@ if __name__ == "__main__":  # pragma: no cover - module entry point
 # AMBIGUITIES  (rule R-6 - compiled behaviour is the tie-breaker; each is
 # marked in place at the code it governs and each is to be recorded in
 # docs/migration/ambiguity-resolutions.md)
-#   Q-CLI-OVERREWRITE   at the `< 8` branch of `load000`. The omitted
-#     `overrewrite` is the sole persistence of SYSTEM-REC and SYSTOT-REC, and
-#     SYSTOT-REC is where this route's three period totals accumulate. Run the
-#     route both ways against one seed and diff those two tables to fix which
-#     side of the seeded-state boundary they fall on. Nothing provisional
-#     executes at the site: the branch's Python body is a log record either
-#     way.
+#   Q-CLI-OVERREWRITE   SETTLED at the `< 8` branch of `load000`, by reproducing
+#     the paragraph rather than by measuring the gap. `overrewrite` is the sole
+#     persistence of SYSTEM-REC and SYSTOT-REC and SYSTOT-REC is where this
+#     route's three period totals accumulate, so leaving it out could not satisfy
+#     Agent Action Plan section 0.8.5's empty diff. `args.overrewrite` now runs on
+#     both branches. What remains for the oracle is narrower and lives in
+#     `cli/args.py` as Q-CLI-SYSREC-PINS.
 #   Q-CLI-TERMCODE-1-7  at the no-gate block of `load08`. The 1..7 band is
 #     unreachable from `pl055` today, so the missing paragraph gate has no
 #     observable effect. Confirm against the compiled oracle that no in-scope

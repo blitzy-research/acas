@@ -49,8 +49,9 @@ THE FROZEN STRUCTURE, AND SEVEN AMENDMENTS TO THE PLAN'S CITATIONS
 `copybooks/wsfnctn.cob` is 117 lines and declares exactly ONE `01`-level item
 - `01 File-Access.` at L22. Everything from L23 to L116 is subordinate to it;
 L117 is a comment. Four spans quoted in the Agent Action Plan are approximate
-and one runs past end-of-file, so the frozen spans are recorded here for the
-traceability document a later boundary writes (R-5):
+and one runs past end-of-file, so the frozen spans are recorded here, this being
+the authoritative record until `docs/migration/traceability.md` carries them
+(R-5):
 
     PLAN SAYS                     FROZEN SOURCE
     File-Access L23-L38           `01 File-Access.` at L22; the group spans
@@ -567,7 +568,28 @@ class RdbData:
     db_uname: str = _spaces(_descriptor("DB-UName"))
 
     # 05  DB-UPass    pic x(12)  value spaces.          [:L59]
-    db_upass: str = _spaces(_descriptor("DB-UPass"))
+    #
+    # ⭐ `repr=False`, AND NOTHING ELSE ABOUT THIS FIELD CHANGES. It is still the
+    # third member of the group, still `x(12)`, still defaulted to twelve spaces
+    # by the same `_spaces(_descriptor(...))` call, still readable and writable by
+    # name, and still listed in `FIELDS` above - so the layout, the declaration
+    # order, the value and every dictionary and descriptor lookup are byte-for-byte
+    # what they were (rules R-3 and R-5).
+    #
+    # What changes is the DEFAULT `__repr__` this dataclass generates, which
+    # rendered every field including this one. Nothing in the migrated cycle logs
+    # the whole block today, and that is precisely the point: the exposure is
+    # latent, one `_LOG.debug("%s", rdb_data)` or one failing assertion away, and a
+    # password in a log file is not a defect that can be taken back afterwards
+    # (CWE-532). Excluding it here removes the hazard at the source rather than
+    # relying on every future call site to remember.
+    #
+    # THE VALUE IS NOT MASKED, only its rendering omitted. A caller that wants the
+    # credential asks for `db_upass` and gets it, which is what
+    # `dal/connection.py` does when it builds the connect parameters
+    # [common/acas008.cbl:L558-L563]; a caller that renders the object gets every
+    # other field and simply does not get this one.
+    db_upass: str = field(default=_spaces(_descriptor("DB-UPass")), repr=False)
 
     # 05  DB-Host     pic x(32)  value spaces.          [:L60]
     db_host: str = _spaces(_descriptor("DB-Host"))

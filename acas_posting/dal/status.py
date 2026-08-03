@@ -2,13 +2,25 @@
 
 WHAT THIS MODULE OWNS
 =====================
-Two things, for the whole migrated cycle:
+Three things, for the whole migrated cycle:
 
 * the **status protocol** - the ``FS-Reply`` value set, the ``We-Error`` code
   set, the SQLSTATE vocabulary, and the mapping from a driver error to that
-  pair; and
+  pair;
 * the **operation vocabulary** - the ``File-Function`` codes and the
-  ``Access-Type`` codes, plus the START relation those access types double as.
+  ``Access-Type`` codes, plus the START relation those access types double as;
+  and
+* the **safe-event schema** - the one allowlist of what a diagnostic record may
+  carry, the log-safety renderers that enforce it, the single ``fhlogger``
+  adapter, and the single failure and ``STOP``-literal reporters that every
+  handler and every program calls instead of composing its own record.
+
+The third belongs here rather than in a module of its own for the same reason
+the first two do: Agent Action Plan section 0.4.3 makes ``dal/status.py`` the
+import every ``COPY "wsfnctn.cob"`` resolves to, so it is the one module both
+``acas_posting.dal`` and ``acas_posting.programs`` already depend on. Adding a
+fourth home for it would have meant a new edge in the dependency table that
+section 0.4.3 does not grant.
 
 It is the deepest module of ``acas_posting.dal``: it imports nothing from
 ``dal`` and nothing from ``cobol``, so every other data-access module can
@@ -82,8 +94,10 @@ sentence:
 Six anomalies live in this module's remit. Each is reproduced, never
 corrected, and each is stated IN FULL - with every locator - in a comment at
 the site that reproduces it, per Agent Action Plan section 0.7.4 conflict C-4.
-This is the index; the sites are authoritative. Every one is also destined for
-the migration anomaly log, which a later boundary creates.
+This is the index; the sites are authoritative. Every one also belongs in the
+migration anomaly log at ``docs/migration/anomaly-log.md`` - an Agent Action
+Plan deliverable this checkout does not carry, which is why the sites here are
+the authoritative record.
 
 N1  The lock-retry backoff ladder is dead code, so ``We-Error 910`` is
     unreachable and a table lock is misreported. See ``LOCK_RETRY_LADDER``.
@@ -170,6 +184,8 @@ __all__: Final[tuple[str, ...]] = (
     "DUPLICATE_KEY_ERRNOS",
     "DUPLICATE_KEY_SQLSTATE",
     "END_OF_FILE_WE_ERROR",
+    "FH_LOG_LEVEL",
+    "FH_LOG_REC_MODULUS",
     "FILE_KEY_NO_DOCUMENTED_RANGE",
     "FILE_KEY_NO_GUARD_RANGE",
     "LOCK_ERRNOS",
@@ -210,6 +226,9 @@ __all__: Final[tuple[str, ...]] = (
     "is_duplicate_key_driver_level",
     "is_lock_errno",
     "is_ok",
+    "log_cobol_stop",
+    "log_file_handler_record",
+    "log_handler_failure",
     "mysql_1100_db_error",
     "mysql_1300_db_error",
     "override_we_error_for_operation",
@@ -946,10 +965,10 @@ FILE_KEY_NO_DOCUMENTED_RANGE: Final[tuple[int, int]] = (1, 3)
 #: keys; and value 5 is admitted by the guard while given no meaning at all by either source -
 #: the trailing note says the widening was made "to support PY", the payroll subsystem, which
 #: this migration does not reach. Violating the guard yields `(99, 998)`
-#: [common/acas000.cbl:L336-L337]. The system handler module a later boundary adds will
-#: reproduce the guard; this module only records the contradiction. Rule R-4 forbids resolving
-#: it and rule R-3 forbids
-#: validating against either range here.
+#: [common/acas000.cbl:L336-L337]. The guard itself is reproduced by
+#: `acas_posting.dal.acas000_system`, which consumes this constant; this module only records
+#: the contradiction. Rule R-4 forbids resolving it and rule R-3 forbids validating against
+#: either range here.
 FILE_KEY_NO_GUARD_RANGE: Final[tuple[int, int]] = (1, 5)
 
 
@@ -1282,8 +1301,9 @@ def is_duplicate_key_bridge_level(sql_err: str, sql_state: str) -> bool:
 
     Note that the whole fragment sits inside two guards: ``if
     WS-MYSQL-COUNT-ROWS not = 1`` [:L810] and ``if WS-MYSQL-Error-Number (1:1)
-    not = "0"`` [:L814]. Those belong to the GL posting handler's write path,
-    which a later boundary adds; this function is only the innermost test.
+    not = "0"`` [:L814]. Those belong to the GL posting handler's write path
+    in ``acas_posting.dal.acas006_gl_posting``; this function is only the
+    innermost test.
 
     Args:
         sql_err: The ``SQL-Err`` field's contents. Only the first four
@@ -1610,6 +1630,295 @@ def db_error_log_category(errno: int | str, sql_state: str = "") -> str:
     return _LOG_CATEGORY_BY_ERRNO.get(number, LOG_CATEGORY_UNCLASSIFIED)
 
 
+#  THE SAFE-EVENT SCHEMA
+#  =====================
+#  ONE allowlist, published once, applied by every diagnostic site in
+#  `acas_posting.dal` and `acas_posting.programs`. It exists because the same
+#  three mistakes were being made independently at 400-odd sites: business data
+#  reaching a log record (CWE-532), driver text reaching one unescaped or
+#  unbounded (CWE-117), and the same failure being reported two or three times
+#  by successive layers.
+#
+#  WHAT A RECORD MAY CARRY - and nothing else:
+#    * a program-id, bridge name, handler name or paragraph name; all are
+#      compile-time constants of this migration;
+#    * a frozen-source locator, likewise constant;
+#    * `FS-Reply`, `We-Error`, `File-Function`, `Access-Type`,
+#      `ws-Log-System`, `WS-Log-File-No` and `ws-No-Paragraph` - small closed
+#      integer vocabularies declared in this module;
+#    * `SQL-State` and the driver's error number, each control-escaped and cut
+#      to its picture width, plus the stable `db_error_log_category` token;
+#    * record-layout LENGTH constants and row COUNTS.
+#
+#  WHAT A RECORD MAY NEVER CARRY: statement text or any fragment of one, a
+#  WHERE clause, a host-variable value, `WS-File-Key` or any other record key,
+#  an account / batch / posting / invoice / customer / supplier identifier, a
+#  name, a monetary or quantity value, `WS-Log-Where`, `SQL-Msg`, any field of
+#  `RDB-Data`, a filesystem path, or a Python traceback. DEBUG IS NOT AN
+#  EXEMPTION: a level is a routing decision, not a confidentiality boundary,
+#  and the frozen `SW-Testing` switch is hardcoded to 1
+#  [copybooks/Test-Data-Flags.cob], so the trace level is always on in
+#  practice.
+#
+#  NONE OF THIS IS A DISPOSITION. No function below returns a value, sets a
+#  status, or reads one for any purpose other than rendering it. Rule R-3
+#  forbids logging from adding behaviour, so every one of them returns `None`,
+#  raises nothing, and touches exactly one caller-owned field - the
+#  `Log-File-Rec-Written` counter the frozen `fhlogger` owns, and only in the
+#  adapter the frozen source calls `fhlogger` from.
+
+#: The modulus that keeps ``Log-File-Rec-Written`` inside its picture.
+#:
+#: ``03  Log-File-Rec-Written     pic 9(6) value zero.``
+#: [copybooks/Test-Data-Flags.cob:L20] - six digits, so the field wraps at a
+#: million rather than growing without bound. ``common/fhlogger.cbl`` owns the
+#: counter and is out of scope (Agent Action Plan section 0.2.2), so the wrap is
+#: reproduced here, in the one adapter that stands in for it, rather than
+#: re-derived at each of the twenty call sites.
+FH_LOG_REC_MODULUS: Final[int] = 1_000_000
+
+#: The single level every ``fhlogger`` stand-in record is emitted at.
+#:
+#: ``fhlogger`` appends a trace line for every file operation whether or not it
+#: succeeded - the callers guard it with ``if Testing-1`` and nothing else - so
+#: it is instrumentation, not a failure report, and one level for all of it is
+#: the honest rendering. A failure additionally produces its own ERROR through
+#: :func:`log_handler_failure`; the trace never doubles as one.
+FH_LOG_LEVEL: Final[int] = logging.DEBUG
+
+
+def _safe_token(text: str, width: int) -> str:
+    """Render one short frozen-vocabulary field for a log record.
+
+    Args:
+        text: the field value. May be padded, may be empty.
+        width: the field's picture width, used as the elision limit.
+
+    Returns:
+        The stripped, control-escaped value, or ``"-"`` when it is blank, so
+        that an absent field reads as absent rather than as an empty gap.
+
+        >>> _safe_token(" 1062 ", 5)
+        '1062'
+        >>> _safe_token("     ", 5)
+        '-'
+        >>> _safe_token("23\\r\\n000", 20)
+        '23\\\\x0d\\\\x0a000'
+    """
+    stripped = text.strip()
+    if not stripped:
+        return "-"
+    return sanitise_for_log(stripped, limit=width)
+
+
+def _optional_int(value: int | None) -> str:
+    """Render an optional small integer field, or ``"-"`` when it is absent."""
+    return "-" if value is None else str(int(value))
+
+
+def log_file_handler_record(
+    logger: logging.Logger,
+    *,
+    program: str,
+    paragraph: str,
+    log_system: int | None = None,
+    log_file_no: int | None = None,
+    no_paragraph: int | None = None,
+    file_function: int | None = None,
+    access_type: int | None = None,
+    fs_reply: int | None = None,
+    we_error: int | None = None,
+    sql_err: str = "",
+    sql_state: str = "",
+    dal_common: object | None = None,
+) -> None:
+    """Stand in for one ``call "fhlogger"``, safely and identically everywhere.
+
+    THE ONE ADAPTER. ``common/fhlogger.cbl`` is out of scope (Agent Action Plan
+    section 0.2.2 lists it under non-posting utilities) and rule R-1 forbids
+    invoking it, so every handler that reaches ``call "fhlogger" using
+    File-Access ACAS-DAL-Common-data`` calls this instead. Routing all twenty
+    through one function is what makes the field set, the level and the counter
+    arithmetic identical rather than twenty independent readings of the same
+    paragraph.
+
+    THE FIELD SET IS THE FROZEN ONE, MINUS THREE. ``Logging-Data``
+    [copybooks/wsfnctn.cob:L44-L55] has eleven fields. Eight are reported here.
+    Three are deliberately omitted and their omission is the point:
+
+    * ``WS-File-Key pic x(64)`` [:L52] is the RECORD KEY - an account number, a
+      batch number, an invoice number or a customer code depending on the
+      handler. It identifies a business entity and never reaches a log record.
+    * ``WS-Log-Where pic x(231)`` [:L53] is free text the caller composes, so
+      its content cannot be reasoned about from here.
+    * ``SQL-Msg pic x(512)`` [:L50] is the driver's own message, which can name
+      the account and can carry a line feed. The stable
+      :func:`db_error_log_category` token and the SQLSTATE carry the
+      diagnostic value without either hazard.
+
+    ``Accept-Reply`` [:L45] is not a diagnostic at all - it is the keystroke of
+    an acknowledgement pause, and section 0.3.4 drops those - and
+    ``WS-Count-Rows`` [:L54] belongs to ``Delete-All`` reporting rather than to
+    the trace, so neither appears in the parameter list.
+
+    THE COUNTER. ``Log-File-Rec-Written`` [copybooks/Test-Data-Flags.cob:L20]
+    advances by one, modulo :data:`FH_LOG_REC_MODULUS`, exactly once per call -
+    that is, once per record the frozen source would have appended. It is
+    advanced BEFORE the emit and independently of ``logger``'s effective level,
+    because it is a COBOL-semantic field of the caller's record and must hold
+    the same value whether or not a Python handler happens to be attached
+    (rule R-3). Callers must therefore call this function only where the frozen
+    source performs its log paragraph - inside the ``if Testing-1`` guard - and
+    never unconditionally.
+
+    Args:
+        logger: the calling module's logger, so the record carries that
+            module's name rather than this one's.
+        program: the handler or bridge program-id, e.g. ``"acas006"``.
+        paragraph: the frozen paragraph the trace belongs to.
+        log_system: ``ws-Log-System`` [:L47]; see :class:`LogSystem`.
+        log_file_no: ``WS-Log-File-No`` [:L54].
+        no_paragraph: ``ws-No-Paragraph`` [:L48].
+        file_function: ``File-Function``; see :class:`FileFunction`.
+        access_type: ``Access-Type``; see :class:`AccessType`.
+        fs_reply: ``Fs-Reply`` [copybooks/wsfnctn.cob:L24].
+        we_error: ``We-Error`` [:L22].
+        sql_err: ``SQL-Err pic x(5)`` [:L49] - the driver's error number.
+        sql_state: ``SQL-State pic x(5)`` [:L51].
+        dal_common: the ``ACAS-DAL-Common-data`` record whose
+            ``log_file_rec_written`` field is advanced. ``None`` skips the
+            advance, for the handlers whose frozen call site passes only
+            ``File-Access``.
+
+    Returns:
+        ``None``. Nothing is raised and no status is touched.
+    """
+    if dal_common is not None:
+        written = getattr(dal_common, "log_file_rec_written", None)
+        if written is not None:
+            dal_common.log_file_rec_written = (  # type: ignore[attr-defined]
+                int(written) + 1
+            ) % FH_LOG_REC_MODULUS
+
+    logger.log(
+        FH_LOG_LEVEL,
+        "fhlogger %s %s: system=%s file=%s para=%s fn=%s access=%s "
+        "fs-reply=%s we-error=%s errno=%s sqlstate=%s category=%s",
+        program,
+        paragraph,
+        _optional_int(log_system),
+        _optional_int(log_file_no),
+        _optional_int(no_paragraph),
+        _optional_int(file_function),
+        _optional_int(access_type),
+        _optional_int(fs_reply),
+        _optional_int(we_error),
+        _safe_token(sql_err, SQL_ERR_WIDTH),
+        _safe_token(sql_state, SQL_STATE_WIDTH),
+        db_error_log_category(sql_err.strip(), sql_state.strip()),
+    )
+
+
+def log_handler_failure(
+    logger: logging.Logger,
+    *,
+    program: str,
+    paragraph: str,
+    locator: str = "",
+    fs_reply: int | None = None,
+    we_error: int | None = None,
+    sql_err: str = "",
+    sql_state: str = "",
+    detail: str = "",
+) -> None:
+    """Emit THE one operator record for a file-handler or bridge failure.
+
+    One failure, one record, at ERROR. A failure is a failure at every layer it
+    passes through, so the level does not vary with the layer, and the layers
+    below the one that reports do not report at all - they return their status
+    and stay quiet. That is what keeps a single fault from producing three log
+    lines that an operator must correlate.
+
+    NO FREE-FORM TEXT REACHES THE RECORD. ``detail`` is for a caller-side
+    CONSTANT - the frozen message identifier, the condition the source names -
+    and never for driver text, a statement, a key or a value. The driver's own
+    contribution is limited to its error number and SQLSTATE, each escaped and
+    cut to its picture width, plus the stable category token.
+
+    Args:
+        logger: the calling module's logger.
+        program: the handler or bridge program-id.
+        paragraph: the frozen paragraph that detected the failure.
+        locator: the frozen-source locator, e.g.
+            ``"[common/acas006.cbl:L425-L432]"``.
+        fs_reply: ``Fs-Reply`` as the handler left it.
+        we_error: ``We-Error`` as the handler left it.
+        sql_err: the driver's error number, from ``SQL-Err``.
+        sql_state: the driver's SQLSTATE, from ``SQL-State``.
+        detail: an allowlisted constant clause, or empty.
+
+    Returns:
+        ``None``. Control flow is the caller's; this reports and returns.
+    """
+    logger.error(
+        "%s %s failed%s%s: fs-reply=%s we-error=%s errno=%s sqlstate=%s "
+        "category=%s",
+        program,
+        paragraph,
+        (" - " + detail) if detail else "",
+        (" " + locator) if locator else "",
+        _optional_int(fs_reply),
+        _optional_int(we_error),
+        _safe_token(sql_err, SQL_ERR_WIDTH),
+        _safe_token(sql_state, SQL_STATE_WIDTH),
+        db_error_log_category(sql_err.strip(), sql_state.strip()),
+    )
+
+
+def log_cobol_stop(
+    logger: logging.Logger,
+    *,
+    program: str,
+    paragraph: str,
+    literal: str,
+    locator: str,
+) -> None:
+    """Report one reached ``STOP "literal"`` site, uniformly across the cycle.
+
+    Six of the seventeen handlers carry a ``stop "Cobol File EOF"`` on their
+    flat-file branch, several marked ``*> for testing`` by the maintainer. A
+    ``STOP`` with a literal displays it and BLOCKS until the operator presses a
+    key, so it is two things at once: a diagnostic, which section 0.3.4 turns
+    into a log record, and an acknowledgement pause, which section 0.3.4 drops.
+    The transfer that follows it in the frozen source is the caller's to
+    reproduce and is not affected by this call.
+
+    IT IS A FAILURE, SO IT IS AN ERROR - everywhere, once. Reaching a
+    debugging stop in a shipped handler is the strongest signal the frozen
+    source emits; reporting it at INFO or DEBUG in some handlers and WARNING or
+    ERROR in others made the same event unfindable, which is the defect this
+    function removes.
+
+    Args:
+        logger: the calling module's logger.
+        program: the handler program-id.
+        paragraph: the frozen paragraph holding the ``STOP``.
+        literal: the ``STOP`` literal, verbatim. A frozen constant, never
+            interpolated data.
+        locator: the frozen-source locator of the ``STOP``.
+
+    Returns:
+        ``None``.
+    """
+    logger.error(
+        "%s %s reached STOP %r %s - the diagnostic is recorded, the operator "
+        "pause is not reproduced (Agent Action Plan section 0.3.4); the "
+        "transfer the frozen source makes next is preserved",
+        program,
+        paragraph,
+        literal,
+        locator,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1827,18 +2136,35 @@ def mysql_1100_db_error(
     # record and the blocking `accept` at [:L136] is dropped. Control flow is
     # untouched - this returns normally either way.
     #
-    # The two ACAS status values are interpolated as themselves: they are
-    # integers drawn from this module's own enumerations, so neither can carry a
-    # control character or an identity. The driver's SQLSTATE, error number and
-    # message cannot make that claim, so each goes through the log-safety
-    # functions above, and the number is additionally reported as a stable
-    # category an operator can alert on (CWE-117, CWE-532). The status object
+    # THIS IS THE ONE OPERATOR RECORD FOR A DRIVER FAILURE. It sits here, at the
+    # layer that turns the driver's error into the ACAS status pair, because that
+    # is where the frozen source reports it. The handlers above therefore report
+    # NOTHING for the same fault: a caller that logged again would produce two or
+    # three lines an operator has to correlate, for one failure.
+    #
+    # TYPED FIELDS ONLY - NO DRIVER TEXT. The two ACAS status values are
+    # interpolated as themselves: they are integers drawn from this module's own
+    # enumerations, so neither can carry a control character or an identity. The
+    # driver's SQLSTATE and error number are short closed-vocabulary fields and
+    # are escaped and cut to their picture widths; the number is additionally
+    # reported as the stable `db_error_log_category` token, which is derived from
+    # the number and the SQLSTATE alone and is therefore identical for every
+    # occurrence of the same fault and greppable as such.
+    #
+    # `message` IS DELIBERATELY NOT LOGGED. It is `SQL-Msg pic x(512)`
+    # [copybooks/wsfnctn.cob:L50] - the driver's own free text, which names the
+    # account on an access denial, echoes the failing statement and its literal
+    # values on a constraint violation, and can carry a carriage return that
+    # forges a second log record (CWE-117, CWE-532). Redacting it was not enough:
+    # the rules of `redact_for_log` recognise the connection-message shapes and
+    # cannot recognise an arbitrary SQL literal or row key. The category token
+    # above carries the diagnostic value without the payload. The `DbErrorStatus`
     # returned below still carries all three driver fields exactly as the driver
-    # produced them, fitted only to their picture widths - the redaction is a
-    # property of this log record and of nothing else.
+    # produced them, fitted only to their picture widths, so the caller's own
+    # `SQL-Msg` field is unaffected and nothing about the status changes.
     _LOG.error(
         "ACAS file handler: FS-Reply=%d WE-Error=%d SQLSTATE=%s errno=%s "
-        "category=%s: %s "
+        "category=%s "
         "[reproduces the unconditional (99, 911) of "
         "copybooks/mysql-procedures.cpy:L127-L128 - WE-Error 911 is a "
         "catch-all here, not evidence of a connect failure]",
@@ -1847,7 +2173,6 @@ def mysql_1100_db_error(
         sanitise_for_log(sql_state, limit=SQL_STATE_WIDTH),
         sanitise_for_log(errno, limit=SQL_ERR_WIDTH),
         db_error_log_category(errno, sql_state),
-        redact_for_log(message),
     )
     return status
 
@@ -2017,10 +2342,10 @@ class LockRetryRung:
 #: matches no rung, and falls into the ``else`` at [:L244-L248] which sets the
 #: unreachable ``(99, 910)``.
 #:
-#: Published as inspectable data precisely so that the migration anomaly log
-#: and the anomaly-locking tests a later boundary adds can assert on the
-#: ladder's shape WITHOUT calling :func:`mysql_1300_db_error` - because
-#: calling it is the one thing that must never happen.
+#: Published as inspectable data precisely so that the migration anomaly log and
+#: the anomaly-locking tests the Agent Action Plan puts under ``tests/`` can
+#: assert on the ladder's shape WITHOUT calling :func:`mysql_1300_db_error` -
+#: because calling it is the one thing that must never happen.
 LOCK_RETRY_LADDER: Final[tuple[LockRetryRung, ...]] = (
     # L223   if       WS-Mysql-Time-Step = zero
     # L224            move 1 to WS-Mysql-Time-Step

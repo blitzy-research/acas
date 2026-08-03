@@ -679,6 +679,7 @@ from typing import Callable, Final, Mapping, Protocol, Sequence
 from acas_posting.dal.connection import (
     TransportSecurity,
     cobol_string_delimited_by_space,
+    transport_category,
     execute_statement,
     load_rdb_data_once,
     mysql_1000_open,
@@ -707,6 +708,9 @@ from acas_posting.dal.status import (
     LogSystem,
     WeError,
     is_duplicate_key_bridge_level,
+    log_cobol_stop,
+    log_file_handler_record,
+    log_handler_failure,
     mysql_1100_db_error,
     sanitise_for_log,
     start_access_type_is_valid,
@@ -867,8 +871,12 @@ _DISPLAY_BLK_WIDTH: Final = 75
 
 #: ``03 SL901 pic x(31) value "SL901 Note error and hit return".``
 #: [common/acas019.cbl:L207]. Displayed at 2401 immediately before the dropped ``accept``
-#: [:L581, :L585], so its own instruction no longer applies - the literal is preserved
-#: verbatim regardless, because rule R-4 keeps the diagnostic's content as it stands.
+#: [:L581, :L585], so its own instruction no longer applies.
+#:
+#: DECLARED AND DELIBERATELY UNREFERENCED. The declaration is a fact about the frozen
+#: ``Error-Messages`` group and R-5 keeps it verbatim, but the literal's whole text is the
+#: acknowledgement half of the 904 diagnostic, and quoting an acknowledgement prompt in a
+#: log line is still emitting it. Only ``_SL904``, which names the error, reaches a record.
 _SL901: Final = "SL901 Note error and hit return"
 
 #: ``03 SL904 pic x(32) value "SL904 Program Error: Temp rec = ".``
@@ -1098,10 +1106,16 @@ def ws_mysql_edit(value: Decimal | int) -> str:
         # layer, both of which carry only fixed-point fields. Rather than raise - this
         # module never raises, per [common/acas019.cbl:L617] - the condition is logged
         # and rendered as zero, which is what an `initialize`d host variable holds.
+        #  THE VALUE ITSELF IS NOT LOGGED. It is a monetary or quantity figure
+        #  from a posting, which the safe-event schema forbids in a record
+        #  (CWE-532); the table and the condition are what identify the fault, and
+        #  the caller that produced it is named by the traceback of its own tests.
+        #  This record is NOT a narration of frozen control flow - `ws_mysql_edit`
+        #  has no such arm - it is a programming-error guard on an input rule R-2
+        #  makes impossible, so it is kept at ERROR rather than removed.
         _LOG.error(
-            "ws_mysql_edit received the non-finite value %r; rendering the zero image. "
+            "ws_mysql_edit received a non-finite value; rendering the zero image. "
             "No field of %s can hold one",
-            amount,
             TABLE_NAME,
         )
         amount = Decimal(0)
@@ -1391,15 +1405,14 @@ def _drop_sign_for_unsigned_receiver(
     """
     if binding.hv_signed or value >= 0:
         return value
-    _LOG.debug(
-        "%s: signed value %s narrowed to the unsigned host variable %s %s - "
-        "anomaly N-signloss, reproduced [%s]",
-        binding.column_name,
-        value,
-        binding.hv_name,
-        binding.hv_picture,
-        binding.load_source,
-    )
+    #  NO RECORD HERE. The frozen `move` into an unsigned host variable
+    #  [see `binding.load_source`] narrows in silence - it writes no status, sets no
+    #  flag and displays nothing - so a record was invented (R-4), and the silence
+    #  IS anomaly N-signloss as the register describes it. The record it replaced
+    #  also interpolated the value being narrowed, which is a posted figure
+    #  (CWE-532). The anomaly is documented in `ANOMALIES` below and in
+    #  `docs/migration/anomaly-log.md`, where a reader can find it without an
+    #  operator having to see it once per column per row.
     return 0 - value
 
 
@@ -1574,15 +1587,10 @@ def _verify_unload_sequence() -> None:
             sorted(expected - transcribed),
             len(UNLOAD_SEQUENCE) - len(transcribed),
         )
-    else:
-        _LOG.debug(
-            "%s: %d columns, %d unloaded, write-only=%s, sign-loss=%s",
-            TABLE_NAME,
-            len(COLUMNS),
-            len(UNLOAD_SEQUENCE),
-            WRITE_ONLY_COLUMNS,
-            SIGN_LOSS_COLUMNS,
-        )
+    # The success arm emits NOTHING. A per-import summary of the column counts is a
+    # restatement of the data dictionary, which is the authority for all of it and is
+    # committed as an artifact; logging it made every import of this module write a
+    # record no operator acts on. Only the DISAGREEMENT above is reportable.
 
 
 _verify_unload_sequence()
@@ -1819,11 +1827,9 @@ def _initialize_oi_header(*, with_filler: bool) -> OiHeader:
     kept, and every call site passes it explicitly, so that each of the four sites records
     which form the frozen source used rather than silently collapsing them.
     """
-    _LOG.debug(
-        "initialize WS-OTM3-Record%s over the linkage view: identical outcome, "
-        "no elementary FILLER is declared [copybooks/slwsoi.cob:L14, :L35]",
-        " with filler" if with_filler else "",
-    )
+    # NO RECORD HERE. `initialize` displays nothing, and the equivalence argument the
+    # record used to carry is an argument about the SOURCE, which belongs in this
+    # docstring - where it is - and not in a line emitted once per record initialised.
     return OiHeader(
         oi_key=OiKey(
             oi_customer=OiCustomer(oi_nos=" " * 6, oi_check=0),
@@ -2382,26 +2388,33 @@ class _BridgeWorkingStorage:
     ws_length_a: int = 0
     ws_length_b: int = 0
 
-    #: The transport declaration ``connection.py``'s policy layer requires. It has NO
-    #: counterpart in the frozen bridge: ``call "MySQL_real_connect"``
-    #: [common/otm3MT.cbl:L459] passes host, user, password, schema, port and socket and
-    #: NOTHING else - no certificate, no key, no verification mode - so the compiled
-    #: system's transport is plaintext to whatever host the row names.
-    #: ``isolated_oracle=True`` is the declaration that states exactly that, and it is
-    #: required because the parity harness runs MariaDB in a container at a private
-    #: address rather than on the loopback. ``connection.py`` logs the warning; nothing
-    #: is hidden. A caller that has a certificate authority can replace this.
-    transport: TransportSecurity = field(
-        default_factory=lambda: TransportSecurity(isolated_oracle=True)
-    )
+    #: The transport declaration handed to ``connection.py``, and it is ``None``:
+    #: THIS HANDLER DECLARES NOTHING AND MUST NOT. There is no counterpart in the
+    #: frozen bridge - ``call "MySQL_real_connect"`` [common/otm3MT.cbl:L459] passes
+    #: host, user, password, schema, port and socket and NOTHING else, no
+    #: certificate, no key, no verification mode - so the compiled system's
+    #: transport is plaintext to whatever host the row names.
+    #:
+    #: ⭐ ``None`` MEANS "USE THE ONE INSTALLED POLICY", which
+    #: ``connection.mysql_1000_open`` resolves from
+    #: ``connection.connection_policy()``. An earlier revision defaulted this field
+    #: to ``TransportSecurity(isolated_oracle=True)`` so that the container-hosted
+    #: comparison database could be reached; that made THIS handler the only one of
+    #: the twenty that declared a policy of its own, which is precisely the
+    #: inconsistency the single boundary exists to remove - the same run would then
+    #: have declared different things depending on which table it touched. The
+    #: declaration now belongs to the deployment, is made once at the entry point,
+    #: and reaches every handler identically.
+    transport: TransportSecurity | None = None
 
     #: Whether the shipped placeholder credentials of
-    #: [copybooks/wssystem.cob:L138-L139] may be used. FALSE, deliberately: the compiled
-    #: program would connect with whatever the row holds, but a refusal here surfaces as
-    #: the same ``(99, 911)`` the frozen open produces on any connect failure, and a
-    #: scenario seeded with real credentials is unaffected. Left as a slot rather than a
-    #: constant so a disposable-server scenario can declare its intent.
-    allow_frozen_placeholder_credentials: bool = False
+    #: [copybooks/wssystem.cob:L138-L139] may be used. ``None``, meaning THIS HANDLER
+    #: DECLARES NOTHING: the compiled program connects with whatever the row holds and
+    #: reports what the server says, so the decision belongs to the deployment's one
+    #: installed ``ConnectionPolicy`` and not to any one table's working storage. Left
+    #: as a slot rather than a constant so a disposable-server scenario can narrow it
+    #: here if it ever needs to.
+    allow_frozen_placeholder_credentials: bool | None = None
 
 
 #: The single, module-level instance. One program, one working storage.
@@ -2425,6 +2438,14 @@ def _reset_working_storage() -> None:
     _BRIDGE.ws_body_key = " " * 9
     _BRIDGE.ws_length_a = 0
     _BRIDGE.ws_length_b = 0
+    # The two security declarations are reset with everything else, and for two
+    # reasons. Determinism (rule R-6): a declaration `dispatch` recorded for one
+    # scenario must not survive into the next, or two runs of the same scenario
+    # differ by whichever ran before them. And fail-closed: a permissive
+    # declaration is the one piece of state that must never be inherited by a
+    # caller who did not ask for it.
+    _BRIDGE.transport = None
+    _BRIDGE.allow_frozen_placeholder_credentials = False
 
 
 # ---------------------------------------------------------------------------
@@ -2866,11 +2887,20 @@ def _mysql_1210_command(
         # bridge would pass a null handle to the interface object and the query would fail,
         # which is the `Mysql-1100-Db-Error` path - so that is the status reported here,
         # with the RDB initialisation error the copybook itself uses.
-        _LOG.error(
-            "%s: %s issued with no open connection; ba020-Process-Open has not "
-            "succeeded [common/otm3MT.cbl:L458-L468]",
-            BRIDGE_PROGRAM_ID,
-            statement.partition(" ")[0],
+        # ONE ERROR, through the shared reporter, so that every failure in every
+        # handler renders with the same fields in the same order. The statement's
+        # leading verb is no longer interpolated: it is the first token of the SQL
+        # this module built, and the safe-event schema admits no SQL fragment at all
+        # (CWE-532). The paragraph name identifies the site without it.
+        log_handler_failure(
+            _LOG,
+            program=BRIDGE_PROGRAM_ID,
+            paragraph="_mysql_command",
+            locator="[common/otm3MT.cbl:L458-L468]",
+            fs_reply=int(FsReply.ERROR),
+            we_error=int(WeError.RDB_INIT_ERROR),
+            detail="a statement was issued with no open connection; "
+            "ba020-Process-Open has not succeeded",
         )
         status = mysql_1100_db_error(
             errno=str(int(WeError.RDB_INIT_ERROR)),
@@ -2917,12 +2947,26 @@ def _mysql_1210_command(
             errno=errno, message=message, sql_state=sql_state, command=statement
         )
         status.apply_to_logging_data(context.file_access.logging_data)
-        _LOG.warning(
-            "%s: statement failed, errno=%s sqlstate=%s: %s",
-            BRIDGE_PROGRAM_ID,
-            errno,
-            sql_state,
-            sanitise_for_log(message),
+        #  THE DRIVER'S TEXT IS NOT LOGGED. For this table it renders the whole
+        #  statement and its bound values - the customer number, the invoice number
+        #  and the deduction amounts - and `sanitise_for_log` escaped it rather than
+        #  removing any of it (CWE-117 addressed, CWE-532 not). What remains is the
+        #  errno, the SQLSTATE and the stable category derived from them, which is
+        #  what an operator acts on.
+        #  ONE ERROR, not two: `mysql_1100_db_error` above is the migration of
+        #  `Mysql-1110-Report-Problem` [copybooks/mysql-procedures.cpy:L130-L137] and
+        #  has already emitted the operator record. This site adds the paragraph
+        #  identity the shared reporter cannot know, at the same level, and `message`
+        #  is still RETURNED because `SQL-Msg` is a status field the paragraphs read.
+        log_handler_failure(
+            _LOG,
+            program=BRIDGE_PROGRAM_ID,
+            paragraph="_mysql_command",
+            locator="[copybooks/mysql-procedures.cpy:L127-L128]",
+            sql_err=errno,
+            sql_state=sql_state,
+            detail="the statement failed; the calling paragraph's own row-count "
+            "test then overwrites the (99, 911) pair, as the frozen bridge does",
         )
         return _CommandResult(
             count_rows=0,
@@ -3060,19 +3104,23 @@ class _AbsentFlatFileMedium:
     ``move 35 to fs-Reply``, ``aa050``'s ``invalid key`` phrase becomes ``move 21 to
     we-error fs-reply``, and so on. No status is invented by this module.
 
-    Every call is logged at WARNING once it happens, because on the DAL path it cannot: per
-    C2 ``acas019`` leaves for ``ba-Process-RDBMS`` before the dispatch, so reaching here in
-    a migrated run means ``FS-Cobol-Files-Used`` was true, which no in-scope scenario sets.
+    Every call is reported ONCE, AT ERROR, through the shared reporter, because on the
+    DAL path it cannot happen: per C2 ``acas019`` leaves for ``ba-Process-RDBMS`` before
+    the dispatch, so reaching here in a migrated run means ``FS-Cobol-Files-Used`` was
+    true, which no in-scope scenario sets. A verb that returns 99 to its caller is a
+    FAILURE, and reporting it at WARNING put it below the level an operator watches.
     """
 
     def _absent(self, verb: str) -> FsReply:
-        """Log the attempt and report 99, the one status this class ever produces."""
-        _LOG.warning(
-            "%s: flat-file verb %s requested but no ISAM medium is present; "
-            "returning FS-Reply 99 for the paragraph to interpret "
-            "[copybooks/slseloi3.cob] (deviation D3)",
-            HANDLER_PROGRAM_ID,
-            verb,
+        """Report the attempt and return 99, the one status this class ever produces."""
+        log_handler_failure(
+            _LOG,
+            program=HANDLER_PROGRAM_ID,
+            paragraph="_AbsentFlatFileMedium.%s" % verb,
+            locator="[copybooks/slseloi3.cob]",
+            fs_reply=int(FsReply.ERROR),
+            detail="a flat-file verb was requested but no ISAM medium is present; "
+            "the paragraph's own branch interprets the 99 (deviation D3)",
         )
         return FsReply.ERROR
 
@@ -3198,12 +3246,15 @@ def _numeric_digits(text: str, field_name: str) -> int:
     if stripped.isdigit():
         return int(stripped)
     if stripped:
+        #  THE BYTES THEMSELVES ARE NOT LOGGED. They are whatever a group move
+        #  put into the field, which on this record is part of a customer number or
+        #  an invoice number - a business key even when it is malformed (CWE-532).
+        #  The FIELD NAME is a record-layout identifier and is enough to locate it.
         _LOG.warning(
-            "%s: %s received non-numeric bytes %r from a group move; taken as zero "
+            "%s: %s received non-numeric bytes from a group move; taken as zero "
             "(anomaly N-spaces-into-numeric [common/acas019.cbl:L368])",
             HANDLER_PROGRAM_ID,
             field_name,
-            stripped,
         )
     return 0
 
@@ -3244,11 +3295,11 @@ def ba_acas_dal_process(context: _BridgeContext) -> None:
     reads them, because every ``display`` here is ``Display-Message-1 with erase eos``,
     which carries no line number.
     """
-    _LOG.debug(
-        "%s: ba-ACAS-DAL-Process entered; screen setup dropped per deviation D2 "
-        "[common/otm3MT.cbl:L370-L382]",
-        BRIDGE_PROGRAM_ID,
-    )
+    # NO RECORD HERE. Six statements were dropped and not one of them displays
+    # anything, so announcing the drop is announcing an omission - which belongs in
+    # this docstring and in `docs/migration/traceability.md`, where it is, and not in a
+    # line emitted on every relational call.
+    return None
 
 
 def ba010_initialise(context: _BridgeContext) -> tuple[int, int]:
@@ -3333,10 +3384,11 @@ def ba020_process_open(context: _BridgeContext) -> tuple[int, int]:
     Six ``string`` statements marshal the credentials, each one
     ``delimited by space`` followed by a ``X"00"`` terminator
     [common/otm3MT.cbl:L434-L457], in this order: schema, host, user, password, port,
-    socket. They are reproduced here as a debug record of the six values, because
-    ``connection.mysql_1000_open`` performs the identical marshalling from the identical
-    six fields - the AAP forbids duplicating its credential load, so the values are read
-    and logged, not re-marshalled into a connect call of this module's own.
+    socket. ``connection.mysql_1000_open`` performs the identical marshalling from the
+    identical six fields - the AAP forbids duplicating its credential load - so this
+    paragraph reads them and hands them over rather than re-marshalling them into a
+    connect call of its own. Only the transport CLASS is recorded; see the comment at the
+    record itself.
 
     Then::
 
@@ -3369,26 +3421,41 @@ def ba020_process_open(context: _BridgeContext) -> tuple[int, int]:
     # is part of `File-Access` [copybooks/wsfnctn.cob:L57-L64] and was filled by the
     # handler's `ba012-Test-WS-Rec-Size-2` [common/acas019.cbl:L586-L598].
     rdb = context.file_access.rdb_data
+    #  THE ENDPOINT IS CLASSIFIED, NOT NAMED. This record used to carry the schema,
+    #  the host, the port and the socket path. Withholding the user and the password was
+    #  not enough: the four that remained are the deployment's own identity, they differ
+    #  between every environment - so two runs of the same scenario could not produce the
+    #  same line - and they are exactly what an attacker reading a log wants (CWE-532).
+    #  `transport_category` answers the one question a record has to answer about a
+    #  connect target, whether the credentials and the posted figures can be read off the
+    #  wire, with one of five fixed tokens.
     _LOG.debug(
-        "%s: ba020 marshalling connect parameters from RDB-Data "
-        "[common/otm3MT.cbl:L434-L457]: schema=%s host=%s port=%s socket=%s "
-        "(user and password not logged)",
+        "%s: ba020 connect [common/otm3MT.cbl:L434-L457] transport=%s",
         BRIDGE_PROGRAM_ID,
-        cobol_string_delimited_by_space(rdb.db_schema),
-        cobol_string_delimited_by_space(rdb.db_host),
-        cobol_string_delimited_by_space(rdb.db_port),
-        cobol_string_delimited_by_space(rdb.db_socket),
+        transport_category(
+            {
+                "host": cobol_string_delimited_by_space(rdb.db_host),
+                "unix_socket": cobol_string_delimited_by_space(rdb.db_socket),
+            }
+            if cobol_string_delimited_by_space(rdb.db_socket)
+            else {"host": cobol_string_delimited_by_space(rdb.db_host)},
+            _BRIDGE.transport,
+        ),
     )
 
     system_record = _BRIDGE.system_record
     if system_record is None:
         # `Ws-Mysql-Cid` would be passed to `MySQL_real_connect` with blank credentials
         # and the connect would fail, which is the `Mysql-1100-Db-Error` path: (99, 911).
-        _LOG.error(
-            "%s: ba020-Process-Open reached with no system record in working storage; "
-            "the handler's ba012 has not run, so DB-Schema and its five companions are "
-            "unset [common/acas019.cbl:L586-L598]",
-            BRIDGE_PROGRAM_ID,
+        log_handler_failure(
+            _LOG,
+            program=BRIDGE_PROGRAM_ID,
+            paragraph="ba020-Process-Open",
+            locator="[common/acas019.cbl:L586-L598]",
+            fs_reply=int(FsReply.ERROR),
+            we_error=int(WeError.RDB_INIT_ERROR),
+            detail="no system record in working storage: the handler's ba012 has "
+            "not run, so DB-Schema and its five companions are unset",
         )
         status = mysql_1100_db_error(
             errno=str(int(WeError.RDB_INIT_ERROR)),
@@ -3419,10 +3486,21 @@ def ba020_process_open(context: _BridgeContext) -> tuple[int, int]:
         # unprotected non-local target by raising. The frozen program has no such notion,
         # and its only failure outcome for an open is the one below, so the refusal is
         # reported as that outcome rather than escaping this module.
-        _LOG.error(
-            "%s: ba020-Process-Open refused by the connection policy layer: %s",
-            BRIDGE_PROGRAM_ID,
-            sanitise_for_log(str(error)),
+        #  THE REFUSAL'S OWN TEXT IS NOT LOGGED. `connection.py` raises with a
+        #  message that names the target it refused and, for a placeholder credential,
+        #  the credential's own value; `sanitise_for_log` escaped it and removed none
+        #  of it (CWE-532). The exception TYPE names the reason without naming the
+        #  deployment, and the policy layer has already reported its own refusal once.
+        log_handler_failure(
+            _LOG,
+            program=BRIDGE_PROGRAM_ID,
+            paragraph="ba020-Process-Open",
+            locator="[common/otm3MT.cbl:L459-L461]",
+            fs_reply=int(FsReply.ERROR),
+            we_error=int(WeError.RDB_INIT_ERROR),
+            detail="the connect was refused by the connection policy layer (%s); "
+            "reported as the frozen open-failure outcome rather than raised, per "
+            "the never-raises contract" % type(error).__name__,
         )
         status = mysql_1100_db_error(
             errno=str(int(WeError.RDB_INIT_ERROR)),
@@ -3583,15 +3661,11 @@ def ba040_process_read_next(context: _BridgeContext) -> tuple[int, int]:
         # `set KOR-x1 to 1` / `move KOR-offset (KOR-x1) to K` / `... to L` [:L494-L496].
         # Fetched exactly as the COBOL does, and - uniquely among the paragraphs that
         # fetch them - never used, because the predicate embeds a literal low key.
-        _key_offset = KEY_OF_REFERENCE.kor_offset
-        _key_length = KEY_OF_REFERENCE.kor_length
-        _LOG.debug(
-            "%s: ba040 read KOR offset/length %d/%d and uses neither "
-            "[common/otm3MT.cbl:L495-L496]",
-            BRIDGE_PROGRAM_ID,
-            _key_offset,
-            _key_length,
-        )
+        # NO RECORD HERE. Three frozen `move`s that display nothing, whose whole
+        # interest is that the values go unused - a fact about the SOURCE, recorded in
+        # the comment above and in `docs/migration/anomaly-log.md`, not an event.
+        # `KEY_OF_REFERENCE.kor_offset` and `.kor_length` are the two values the
+        # frozen `move`s copy; nothing binds them here because nothing reads them.
         # `move spaces to WS-Where` / `move 1 to J` / the STRING [:L497-L513].
         context.ws_where = _ws_where_1_to_j(_sequential_predicate())
         _write_log_where(context.file_access, context.ws_where)   # [:L514]
@@ -3607,7 +3681,15 @@ def ba040_process_read_next(context: _BridgeContext) -> tuple[int, int]:
         # `if Testing-2 display Display-Message-1 with erase eos` [:L531-L533] - deviation
         # D2: the diagnostic becomes a log record and the control flow is unchanged.
         if _testing_2(context.dal_common):
-            _LOG.info("%s: ba040 %s", BRIDGE_PROGRAM_ID, sanitise_for_log(statement))
+            #  THE `Testing-2` GUARD IS PRESERVED AND EMITS NOTHING.
+            #  `Display-Message-1` renders `WS-Where (1:J)` - a SQL predicate carrying the
+            #  customer and invoice key as a literal - or the statement itself. Both are
+            #  forbidden in a record by the safe-event schema (CWE-532), and
+            #  `sanitise_for_log` escaped them rather than removing them. This was a
+            #  developer's trace read at the terminal beside the running program; nothing
+            #  acts on it operationally. `WS-Where` is still BUILT and still stored in
+            #  `Logging-Data`, because the bridge's own statements read it (R-3).
+            pass
 
         if result.count_rows == 0:                                # [:L536]
             _capture_driver_error(context, result)                # [:L537-L545]
@@ -3722,10 +3804,9 @@ def _fetch_one_row(
         context.status(FsReply.END_OF_FILE, int(FsReply.END_OF_FILE))  # [:L608-L609]
         _write_file_key(context.file_access, _FILE_KEY_EOF)       # [:L610]
         state.set_cursor_not_active()                             # [:L611] - see locator
-        _LOG.debug(
-            "%s: %s cleared its own cursor flag %s", BRIDGE_PROGRAM_ID, paragraph,
-            slot_locator,
-        )
+        # NO RECORD HERE. `set Cursor-Not-Active to true` displays nothing, and which
+        # of the three flags each paragraph clears is documented in this function's own
+        # docstring - the place a reader looks for it.
         return ba999_end(context)                                # [:L612] - Class 3
 
     if context.count_rows == 0:                                  # [:L615]
@@ -3847,7 +3928,15 @@ def ba050_process_read_indexed(context: _BridgeContext) -> tuple[int, int]:
     context.ws_where = _ws_where_1_to_j(_key_predicate())
     _write_log_where(context.file_access, context.ws_where)      # [:L666]
     if _testing_2(context.dal_common):                           # [:L667-L668] - D2
-        _LOG.info("%s: ba050 key=%r", BRIDGE_PROGRAM_ID, key_value)
+    #  THE `Testing-2` GUARD IS PRESERVED AND EMITS NOTHING.
+    #  `Display-Message-1` renders `WS-Where (1:J)` - a SQL predicate carrying the
+    #  customer and invoice key as a literal - or the statement itself. Both are
+    #  forbidden in a record by the safe-event schema (CWE-532), and
+    #  `sanitise_for_log` escaped them rather than removing them. This was a
+    #  developer's trace read at the terminal beside the running program; nothing
+    #  acts on it operationally. `WS-Where` is still BUILT and still stored in
+    #  `Logging-Data`, because the bridge's own statements read it (R-3).
+        pass
     context.file_access.logging_data.ws_no_paragraph = BRIDGE_PARAGRAPH_NUMBERS[
         "ba050-Process-Read-Indexed"
     ]                                                            # [:L669]
@@ -3967,12 +4056,18 @@ def ba060_process_start(context: _BridgeContext) -> tuple[int, int]:
     # rather than re-deriving `< 5 or > 8` locally is what stops the two modules drifting.
     if not start_access_type_is_valid(access_type):
         context.status(FsReply.ERROR, int(WeError.ACCESS_TYPE_WRONG))  # 997 [:L761-L762]
-        _LOG.warning(
-            "%s: ba060 rejected Access-Type %d with We-Error 997; the HANDLER rejects "
-            "the identical range with 998 [common/acas019.cbl:L437-L448] - anomaly "
-            "N-start-997-vs-998 [common/otm3MT.cbl:L760-L763]",
-            BRIDGE_PROGRAM_ID,
-            access_type,
+        # ONE ERROR, through the shared reporter. A refusal that returns 99 to the
+        # caller is a FAILURE, and WARNING put it below the level an operator watches.
+        log_handler_failure(
+            _LOG,
+            program=BRIDGE_PROGRAM_ID,
+            paragraph="ba060-Process-Start",
+            locator="[common/otm3MT.cbl:L760-L763]",
+            fs_reply=int(FsReply.ERROR),
+            we_error=int(WeError.ACCESS_TYPE_WRONG),
+            detail="Access-Type rejected with We-Error 997; the HANDLER rejects the "
+            "identical range with 998 [common/acas019.cbl:L437-L448] - anomaly "
+            "N-start-997-vs-998",
         )
         return ba999_end(context)                                # [:L763] - Class 3
 
@@ -3995,7 +4090,15 @@ def ba060_process_start(context: _BridgeContext) -> tuple[int, int]:
     _write_log_where(context.file_access, context.ws_where)      # [:L803]
     _write_file_key(context.file_access, key_value)              # [:L804]
     if _testing_2(context.dal_common):                           # [:L805-L807] - D2
-        _LOG.info("%s: ba060 %s", BRIDGE_PROGRAM_ID, sanitise_for_log(context.ws_where))
+    #  THE `Testing-2` GUARD IS PRESERVED AND EMITS NOTHING.
+    #  `Display-Message-1` renders `WS-Where (1:J)` - a SQL predicate carrying the
+    #  customer and invoice key as a literal - or the statement itself. Both are
+    #  forbidden in a record by the safe-event schema (CWE-532), and
+    #  `sanitise_for_log` escaped them rather than removing them. This was a
+    #  developer's trace read at the terminal beside the running program; nothing
+    #  acts on it operationally. `WS-Where` is still BUILT and still stored in
+    #  `Logging-Data`, because the bridge's own statements read it (R-3).
+        pass
     context.file_access.logging_data.ws_no_paragraph = BRIDGE_PARAGRAPH_NUMBERS[
         "ba060-Process-Start"
     ]                                                            # [:L808]
@@ -4158,7 +4261,15 @@ def ba080_process_delete(context: _BridgeContext) -> tuple[int, int]:
     _write_file_key(context.file_access, key_value)              # [:L908]
     _write_log_where(context.file_access, context.ws_where)      # [:L909]
     if _testing_2(context.dal_common):                           # [:L910-L912] - D2
-        _LOG.info("%s: ba080 key=%r", BRIDGE_PROGRAM_ID, key_value)
+    #  THE `Testing-2` GUARD IS PRESERVED AND EMITS NOTHING.
+    #  `Display-Message-1` renders `WS-Where (1:J)` - a SQL predicate carrying the
+    #  customer and invoice key as a literal - or the statement itself. Both are
+    #  forbidden in a record by the safe-event schema (CWE-532), and
+    #  `sanitise_for_log` escaped them rather than removing them. This was a
+    #  developer's trace read at the terminal beside the running program; nothing
+    #  acts on it operationally. `WS-Where` is still BUILT and still stored in
+    #  `Logging-Data`, because the bridge's own statements read it (R-3).
+        pass
     context.file_access.logging_data.ws_no_paragraph = BRIDGE_PARAGRAPH_NUMBERS[
         "ba080-Process-Delete"
     ]                                                            # [:L913]
@@ -4242,7 +4353,15 @@ def ba090_process_rewrite(context: _BridgeContext) -> tuple[int, int]:
     result = bb300_update(context, key_value)                    # [:L966]
     context.count_rows = result.count_rows
     if _testing_2(context.dal_common):                           # [:L967-L969] - AFTER
-        _LOG.info("%s: ba090 key=%r", BRIDGE_PROGRAM_ID, key_value)
+    #  THE `Testing-2` GUARD IS PRESERVED AND EMITS NOTHING.
+    #  `Display-Message-1` renders `WS-Where (1:J)` - a SQL predicate carrying the
+    #  customer and invoice key as a literal - or the statement itself. Both are
+    #  forbidden in a record by the safe-event schema (CWE-532), and
+    #  `sanitise_for_log` escaped them rather than removing them. This was a
+    #  developer's trace read at the terminal beside the running program; nothing
+    #  acts on it operationally. `WS-Where` is still BUILT and still stored in
+    #  `Logging-Data`, because the bridge's own statements read it (R-3).
+        pass
 
     if result.count_rows != 1:                                   # [:L970]
         _capture_driver_error(context, result)                   # [:L971-L977]
@@ -4316,20 +4435,14 @@ def _sorted_read_next(
     through into the paragraph's own reread - Class 4, as in ``ba040``.
     """
     state = context.slot_state(slot)
-    extra = _EXTRA_READS[int(function)]
     if state.cursor_not_active():                                # [:L995]
         # `set KOR-x1 to 1` / offset / length [:L996-L998] - computed, then unused.
-        _LOG.debug(
-            "%s: %s read KOR offset/length %d/%d and uses neither [%s]",
-            BRIDGE_PROGRAM_ID,
-            paragraph,
-            KEY_OF_REFERENCE.kor_offset,
-            KEY_OF_REFERENCE.kor_length,
-            extra.source_locator,
-        )
+        # NO RECORD HERE, for the reason `ba040` gives: three `move`s that display
+        # nothing and whose values go unused. `_EXTRA_READS` still carries this
+        # paragraph's `source_locator` for the traceability tables.
         # `move spaces to WS-Where` / `move 1 to J` / the STRING [:L999-L1008]. The whole
-        # of `WS-Where` is the ORDER BY - `extra.predicate_present` is False, which is the
-        # shared table's own record of the same fact.
+        # of `WS-Where` is the ORDER BY - `_EXTRA_READS[function].predicate_present` is
+        # False, which is the shared table's own record of the same fact.
         context.ws_where = _ws_where_1_to_j(_SORTED_ORDER_BY_TEXT[int(function)])
         _write_log_where(context.file_access, context.ws_where)   # [:L1009]
         context.file_access.logging_data.ws_no_paragraph = BRIDGE_PARAGRAPH_NUMBERS[
@@ -4342,12 +4455,15 @@ def _sorted_read_next(
         context.count_rows = result.count_rows
         _write_file_key(context.file_access, _FILE_KEY_SORTED)    # [:L1023]
         if _testing_2(context.dal_common):                       # [:L1024-L1026] - D2
-            _LOG.info(
-                "%s: %s %s",
-                BRIDGE_PROGRAM_ID,
-                paragraph,
-                sanitise_for_log(statement),
-            )
+            #  THE `Testing-2` GUARD IS PRESERVED AND EMITS NOTHING.
+            #  `Display-Message-1` renders `WS-Where (1:J)` - a SQL predicate carrying the
+            #  customer and invoice key as a literal - or the statement itself. Both are
+            #  forbidden in a record by the safe-event schema (CWE-532), and
+            #  `sanitise_for_log` escaped them rather than removing them. This was a
+            #  developer's trace read at the terminal beside the running program; nothing
+            #  acts on it operationally. `WS-Where` is still BUILT and still stored in
+            #  `Logging-Data`, because the bridge's own statements read it (R-3).
+            pass
 
         if result.count_rows == 0:                               # [:L1029]
             _capture_driver_error(context, result)               # [:L1030-L1038]
@@ -4478,12 +4594,19 @@ def ba100_bad_function(context: _BridgeContext) -> tuple[int, int]:
 
     Transfers: ``go to ba999-end``, Class 3.
     """
-    _LOG.error(
-        "%s: ba100-Bad-Function for File-Function %s; the bridge reports We-Error 990 "
-        "where the handler reports 999 [common/otm3MT.cbl:L1300] vs "
-        "[common/acas019.cbl:L528]",
-        BRIDGE_PROGRAM_ID,
-        context.file_access.file_function,
+    # ONE ERROR, through the shared reporter. `File-Function` is an operation code
+    # from the frozen vocabulary [copybooks/wsfnctn.cob:L88-L118], not business data, so
+    # it stays - the reporter renders it as its own field.
+    log_handler_failure(
+        _LOG,
+        program=BRIDGE_PROGRAM_ID,
+        paragraph="ba100-Bad-Function",
+        locator="[common/otm3MT.cbl:L1300]",
+        fs_reply=int(FsReply.ERROR),
+        we_error=int(WeError.UNKNOWN_UNEXPECTED),
+        detail="File-Function %d is not one this bridge implements; the bridge "
+        "reports We-Error 990 where the handler reports 999 "
+        "[common/acas019.cbl:L528]" % int(context.file_access.file_function),
     )
     context.status(FsReply.ERROR, int(WeError.UNKNOWN_UNEXPECTED))  # [:L1300-L1301]
     return ba999_end(context)                                      # [:L1302] - Class 3
@@ -4598,6 +4721,10 @@ def bb200_insert(context: _BridgeContext) -> _CommandResult:
     if len(parameters) != len(COLUMNS) or any(
         parameter is None for parameter in parameters
     ):  # pragma: no cover - unreachable while `initialize` runs first
+        # KEPT, and kept at ERROR. This is not a narration of frozen control flow -
+        # the bridge has no such arm - it is a programming-error guard on an invariant
+        # the schema imposes, and the two numbers it reports are COUNTS, which the
+        # safe-event schema admits. No parameter VALUE is named.
         _LOG.error(
             "%s: bb200-Insert built %d parameters for %d columns; every column of "
             "SAITM3-REC is NOT NULL [mysql/ACASDB.sql:L896-L926]",
@@ -4655,28 +4782,41 @@ def otm3mt_ca_process_logs(context: _BridgeContext) -> None:
                                  ACAS-DAL-Common-data.            [:L2187]
 
     ``fhlogger`` [common/fhlogger.cbl] is out of scope [AAP section 0.2.2, "Non-posting
-    utilities"], so the record it would append is emitted as a log line carrying the same
-    fields: the system, the file number, the paragraph, the key and the predicate. It has
-    no database effect - AAP section 0.3.4's first rule - so it becomes a log record and
-    alters no control flow.
+    utilities"], so the record it would append is emitted through
+    :func:`acas_posting.dal.status.log_file_handler_record`, THE ONE ADAPTER every handler
+    in this package shares. It has no database effect - AAP section 0.3.4's first rule - so
+    it becomes a log record and alters no control flow.
+
+    TWO FIELDS ARE WITHHELD. ``WS-File-Key`` is the customer-and-invoice key and
+    ``WS-Log-Where`` is a SQL predicate carrying that key as a literal; both are CWE-532 in
+    a log and neither is needed to act on a failure.
 
     ⭐ THE HANDLER HAS A PARAGRAPH OF THE SAME NAME [common/acas019.cbl:L623] which is NOT
     called on this path, per the comment on its own label line. So one CALL produces one
     log record, from here. Anomaly N-nolog-on-dal.
     """
     logging_data = context.file_access.logging_data
-    _LOG.info(
-        "fhlogger: system=%s file=%s paragraph=%s key=%r where=%r "
-        "fs-reply=%s we-error=%s [common/otm3MT.cbl:L2186-L2187]",
-        logging_data.ws_log_system,
-        logging_data.ws_log_file_no,
-        logging_data.ws_no_paragraph,
-        cobol_string_delimited_by_space(str(logging_data.ws_file_key)),
-        sanitise_for_log(str(logging_data.ws_log_where)),
-        context.file_access.fs_reply,
-        context.file_access.we_error,
+    #  `Log-File-Rec-Written` IS NOW ADVANCED, NOT PINNED. Assigning 1 was wrong
+    #  twice over: the field is `pic 9(6)` [copybooks/Test-Data-Flags.cob:L20], so it
+    #  counts to 999999 and wraps, and it lives in `ACAS-DAL-Common-data`, which the
+    #  CALLER owns and carries across calls - so pinning it to 1 discarded every count
+    #  the rest of the cycle had accumulated. The adapter advances it by one, modulo one
+    #  million, once per record it emits.
+    log_file_handler_record(
+        _LOG,
+        program=BRIDGE_PROGRAM_ID,
+        paragraph="Ca-Process-Logs",
+        log_system=logging_data.ws_log_system,
+        log_file_no=logging_data.ws_log_file_no,
+        no_paragraph=logging_data.ws_no_paragraph,
+        file_function=int(context.file_access.file_function),
+        access_type=int(context.file_access.access_type),
+        fs_reply=int(context.file_access.fs_reply),
+        we_error=int(context.file_access.we_error),
+        sql_err=logging_data.sql_err,
+        sql_state=logging_data.sql_state,
+        dal_common=context.dal_common,
     )
-    context.dal_common.log_file_rec_written = 1
     otm3mt_ca_exit(context)
 
 
@@ -4985,13 +5125,20 @@ def _aa010_key_guard(context: _HandlerContext) -> tuple[int, int] | None:
             context.status(
                 FsReply.ERROR, int(WeError.FILE_KEY_NO_OUT_OF_RANGE)
             )                                                    # 998 [:L249-L250]
-            _LOG.warning(
-                "%s: File-Key-No %d rejected for function %d with We-Error 998 "
-                "[common/acas019.cbl:L248-L251]; SAITM3-REC declares exactly one key "
-                "[common/otm3MT.scb:L249-L251]",
-                HANDLER_PROGRAM_ID,
-                key_number,
-                function,
+            # ONE ERROR, through the shared reporter: the guard returns 99 to the
+            # caller, so it is a failure and WARNING was below the level an operator
+            # watches. `File-Key-No` and `File-Function` are operation codes from the
+            # frozen vocabulary [copybooks/wsfnctn.cob:L88-L118], not business data.
+            log_handler_failure(
+                _LOG,
+                program=HANDLER_PROGRAM_ID,
+                paragraph="aa000-Main-Process key guard",
+                locator="[common/acas019.cbl:L248-L251]",
+                fs_reply=int(FsReply.ERROR),
+                we_error=int(WeError.FILE_KEY_NO_OUT_OF_RANGE),
+                detail="File-Key-No %d rejected for File-Function %d; SAITM3-REC "
+                "declares exactly one key [common/otm3MT.scb:L249-L251]"
+                % (key_number, function),
             )
             return aa999_main_exit(context)                      # [:L251] - Class 3
     elif function == int(FileFunction.DELETE):
@@ -5000,12 +5147,17 @@ def _aa010_key_guard(context: _HandlerContext) -> tuple[int, int] | None:
             context.status(
                 FsReply.ERROR, int(WeError.DELETE_KEY_OUT_OF_RANGE)
             )                                                    # 996 [:L255-L256]
-            _LOG.warning(
-                "%s: File-Key-No %d rejected for delete with We-Error 996 "
-                "[common/acas019.cbl:L254-L257]; the comment beside it is a verbatim "
-                "copy of the 998 comment at [:L249] - anomaly N-996-comment",
-                HANDLER_PROGRAM_ID,
-                key_number,
+            # ONE ERROR, as above - the delete arm has its own code, 996.
+            log_handler_failure(
+                _LOG,
+                program=HANDLER_PROGRAM_ID,
+                paragraph="aa000-Main-Process key guard",
+                locator="[common/acas019.cbl:L254-L257]",
+                fs_reply=int(FsReply.ERROR),
+                we_error=int(WeError.DELETE_KEY_OUT_OF_RANGE),
+                detail="File-Key-No %d rejected for delete; the comment beside the "
+                "frozen code is a verbatim copy of the 998 comment at [:L249] - "
+                "anomaly N-996-comment" % key_number,
             )
             return aa999_main_exit(context)                      # [:L257] - Class 3
     return None
@@ -5140,10 +5292,18 @@ def aa020_process_open(context: _HandlerContext) -> tuple[int, int]:
     elif access_type == int(AccessType.EXTEND):                    # `fn-extend` [:L330]
         # `open extend` is commented out at [:L331]; the rejection is the arm.
         context.status(FsReply.ERROR, int(WeError.ACCESS_TYPE_WRONG))  # [:L332-L333]
-        _LOG.warning(
-            "%s: aa020 rejected fn-extend with We-Error 997 - "
-            "'Must not be used for ISAM files' [common/acas019.cbl:L330-L334]",
-            HANDLER_PROGRAM_ID,
+        # ONE ERROR, through the shared reporter. A published verb that can never
+        # succeed is exactly what an operator must be able to find - the same reasoning
+        # that took anomaly A6's refusal in `acas008` off DEBUG.
+        log_handler_failure(
+            _LOG,
+            program=HANDLER_PROGRAM_ID,
+            paragraph="aa020-Process-Open",
+            locator="[common/acas019.cbl:L330-L334]",
+            fs_reply=int(FsReply.ERROR),
+            we_error=int(WeError.ACCESS_TYPE_WRONG),
+            detail="fn-extend refused: 'Must not be used for ISAM files'; the "
+            "`open extend` itself is commented out in the frozen source",
         )
         return aa999_main_exit(context)                            # [:L334] - Class 3
 
@@ -5284,12 +5444,17 @@ def aa040_process_read_next(context: _HandlerContext) -> tuple[int, int]:
         # `stop "Cobol File EOF"` [:L371] - anomaly N-stop, recorded as an omission. The
         # operator pause is NOT reproduced; the diagnostic becomes a log record and the
         # transfer below is preserved.
-        _LOG.error(
-            "%s: aa040 reached the second read past end of file, where the frozen "
-            "program halts with stop \"Cobol File EOF\" *> for testing "
-            "[common/acas019.cbl:L371]; the pause is a recorded omission and the "
-            "transfer to aa999-main-exit is preserved",
-            HANDLER_PROGRAM_ID,
+        #  ONE ERROR, THROUGH THE ONE REPORTER, worded and levelled identically
+        #  to every sibling handler's record for the same statement. ERROR was already
+        #  the right level here - a production `stop` that hangs an unattended batch run
+        #  is exactly what an operator must see - but acas006 and acas007 logged it at
+        #  WARNING, acas012 at INFO and acas016 at DEBUG, so one event read as four.
+        log_cobol_stop(
+            _LOG,
+            program=HANDLER_PROGRAM_ID,
+            paragraph="aa040-Process-Read-Next",
+            literal="Cobol File EOF",
+            locator="[common/acas019.cbl:L371]",
         )
         return aa999_main_exit(context)                            # [:L372] - Class 3
 
@@ -5587,12 +5752,19 @@ def aa060_process_start(context: _HandlerContext) -> tuple[int, int]:
     # `if access-type < 5 or > 8` [:L447] - the bridge's identical test reports 997.
     if not start_access_type_is_valid(access_type):
         context.status(context.fs_reply, int(WeError.FILE_KEY_NO_OUT_OF_RANGE))  # [:L448]
-        _LOG.warning(
-            "%s: aa060 rejected Access-Type %d with We-Error 998; the BRIDGE rejects the "
+        # ONE ERROR, through the shared reporter - the refusal returns a failing
+        # status to the caller, so WARNING was the wrong level, and it is now the same
+        # level as the BRIDGE's record for the identical test.
+        log_handler_failure(
+            _LOG,
+            program=HANDLER_PROGRAM_ID,
+            paragraph="aa060-Process-Start",
+            locator="[common/acas019.cbl:L447-L449]",
+            fs_reply=int(context.fs_reply),
+            we_error=int(WeError.FILE_KEY_NO_OUT_OF_RANGE),
+            detail="Access-Type %d rejected with We-Error 998; the BRIDGE rejects the "
             "identical range with 997 [common/otm3MT.cbl:L760-L762] - anomaly "
-            "N-start-997-vs-998 [common/acas019.cbl:L447-L449]",
-            HANDLER_PROGRAM_ID,
-            access_type,
+            "N-start-997-vs-998" % access_type,
         )
         return aa999_main_exit(context)                            # [:L449] - Class 3
 
@@ -5618,10 +5790,11 @@ def aa060_process_start(context: _HandlerContext) -> tuple[int, int]:
             if _invalid_key_condition(reply):
                 # `invalid key  move 21 to Fs-Reply` - `Fs-Reply` ONLY, not `WE-Error`.
                 context.status(FsReply.INVALID_KEY_ON_START, context.we_error)
-                _LOG.debug(
-                    "%s: aa060 start %s failed %s", HANDLER_PROGRAM_ID, relation,
-                    block_locator,
-                )
+                # NO RECORD HERE. `invalid key move 21 to Fs-Reply` displays nothing,
+                # and an `invalid key` on a START is an ORDINARY outcome every caller
+                # branches on - the same reasoning that took the equivalent record out
+                # of `dal/cursor_state.py`. The status pair IS the report, and it
+                # reaches the caller unchanged.
                 return aa999_main_exit(context)                    # Class 3
             # On success control FALLS THROUGH; every later block's `and fn-<other>` is
             # false, so no second START is issued.
@@ -5810,12 +5983,18 @@ def aa100_bad_function(context: _HandlerContext) -> tuple[int, int]:
     ``go to aa100-Bad-Function`` at [:L305], whose comment is
     ``*> Should never get here but in case :(``.
     """
-    _LOG.error(
-        "%s: aa100-Bad-Function for File-Function %s; the handler reports We-Error 999 "
-        "where the bridge reports 990 [common/acas019.cbl:L528] vs "
-        "[common/otm3MT.cbl:L1300]",
-        HANDLER_PROGRAM_ID,
-        context.file_access.file_function,
+    # ONE ERROR, through the shared reporter, matching the bridge's own record for
+    # its equivalent paragraph.
+    log_handler_failure(
+        _LOG,
+        program=HANDLER_PROGRAM_ID,
+        paragraph="aa100-Bad-Function",
+        locator="[common/acas019.cbl:L528]",
+        fs_reply=int(FsReply.ERROR),
+        we_error=int(WeError.NOT_USED),
+        detail="File-Function %d is not one this handler implements; the handler "
+        "reports We-Error 999 where the bridge reports 990 "
+        "[common/otm3MT.cbl:L1300]" % int(context.file_access.file_function),
     )
     context.status(FsReply.ERROR, int(WeError.NOT_USED))           # [:L528-L529]
     # No `go to`: falls through into `aa999-main-exit` [:L531].
@@ -6090,12 +6269,22 @@ def ba012_test_ws_rec_size_2(context: _HandlerContext) -> bool:
             )
             # `display Display-Blk at 2301 with erase eol` [:L580], carrying
             # `*> BUT WILL REMIND ME TO SET IT UP correctly`, and `display SL901 at 2401`
-            # [:L581] - deviation D2, one log record for the two.
+            # [:L581]. THE TWO DISPLAYS ARE NOT ONE RECORD, because they are not the
+            # same kind of thing:
+            #   * [:L580] carries `SL904` and the two lengths - the substance, so ONE
+            #     record at ERROR, the severity a programming error the caller must stop
+            #     for deserves.
+            #   * [:L581] carries `SL901`, whose whole text asks the operator to note the
+            #     error and hit return. That is the acknowledgement half, paired with the
+            #     `accept` at [:L585], and AAP section 0.3.4 drops an acknowledgement
+            #     pause entirely - QUOTING IT IN A LOG LINE IS STILL EMITTING IT, to a
+            #     destination where no operator can answer it.
+            #   * [:L586]'s `go to ba-rdbms-exit` is CONTROL, and it is preserved as this
+            #     function's `return True`.
             _LOG.error(
-                "%s: %s / %s [common/acas019.cbl:L580-L581]",
+                "%s: %s [common/acas019.cbl:L580]",
                 HANDLER_PROGRAM_ID,
                 display_blk.rstrip(),
-                _SL901,
             )
             # `if Testing-1 perform Ca-Process-Logs end-if` [:L582-L584] - the call site
             # that contradicts the paragraph's own comment at [:L623].
@@ -6181,14 +6370,14 @@ def ba_rdbms_exit(context: _HandlerContext) -> None:
     ⭐ IT DOES NOT LOG. ``Ca-Process-Logs`` is BELOW it at [:L623] and is reached only by an
     explicit ``perform`` - which nothing on this path issues. Anomaly N-nolog-on-dal: the
     bridge's ``ba999-end`` already logged.
+
+     AND NEITHER DOES THIS FUNCTION. ``exit section`` is one statement that writes
+    nothing and displays nothing, so the position trace this paragraph used to emit was
+    invented (R-4) - and it contradicted the docstring immediately above it, which says
+    the paragraph does not log. The status pair it announced is the caller's to read from
+    ``File-Access``, which is where the section leaves it.
     """
-    _LOG.debug(
-        "%s: ba-rdbms-exit with FS-Reply=%s We-Error=%s "
-        "[common/acas019.cbl:L619-L620]",
-        HANDLER_PROGRAM_ID,
-        context.fs_reply,
-        context.we_error,
-    )
+    del context
 
 
 def acas019_ca_process_logs(context: _HandlerContext) -> None:
@@ -6209,23 +6398,31 @@ def acas019_ca_process_logs(context: _HandlerContext) -> None:
     same name - see :func:`otm3mt_ca_process_logs` for the reasoning. Two names in each
     program are qualified; every other paragraph keeps its own.
 
-    ``fhlogger`` is out of scope [AAP section 0.2.2], so the record becomes a log line
-    carrying the same fields. No database effect, no control-flow effect.
+    ``fhlogger`` is out of scope [AAP section 0.2.2], so the record is emitted through
+    :func:`acas_posting.dal.status.log_file_handler_record`, THE SAME ONE ADAPTER the
+    bridge's like-named paragraph uses, so that the two render identically and differ only
+    in the program they name. No database effect, no control-flow effect.
+
+    ``WS-File-Key`` is WITHHELD: on this record it is the customer-and-invoice key
+    (CWE-532). ``Log-File-Rec-Written`` is ADVANCED modulo one million rather than pinned
+    to 1 - see :func:`otm3mt_ca_process_logs` for why pinning it was wrong twice over.
     """
     logging_data = context.file_access.logging_data
-    _LOG.info(
-        "fhlogger: system=%s file=%s paragraph=%s key=%r function=%s access=%s "
-        "fs-reply=%s we-error=%s [common/acas019.cbl:L626-L627]",
-        logging_data.ws_log_system,
-        logging_data.ws_log_file_no,
-        logging_data.ws_no_paragraph,
-        cobol_string_delimited_by_space(str(logging_data.ws_file_key)),
-        context.file_access.file_function,
-        context.file_access.access_type,
-        context.file_access.fs_reply,
-        context.file_access.we_error,
+    log_file_handler_record(
+        _LOG,
+        program=HANDLER_PROGRAM_ID,
+        paragraph="Ca-Process-Logs",
+        log_system=logging_data.ws_log_system,
+        log_file_no=logging_data.ws_log_file_no,
+        no_paragraph=logging_data.ws_no_paragraph,
+        file_function=int(context.file_access.file_function),
+        access_type=int(context.file_access.access_type),
+        fs_reply=int(context.file_access.fs_reply),
+        we_error=int(context.file_access.we_error),
+        sql_err=logging_data.sql_err,
+        sql_state=logging_data.sql_state,
+        dal_common=context.dal_common,
     )
-    context.dal_common.log_file_rec_written = 1
     acas019_ca_exit(context)
 
 
@@ -6243,6 +6440,9 @@ def dispatch(
     file_access: FileAccess,
     file_defs: FileDefs,
     dal_common: AcasDalCommonData,
+    *,
+    transport: TransportSecurity | None = None,
+    allow_frozen_placeholder_credentials: bool | None = None,
 ) -> tuple[int, int]:
     """``call "acas019" using System-Record, WS-OTM3-Record, File-Access, File-Defs, ACAS-DAL-Common-data``.
 
@@ -6294,10 +6494,37 @@ def dispatch(
         dal_common: ``ACAS-DAL-Common-data``
             [copybooks/Test-Data-Flags.cob:L10-L16] - ``Testing-1`` gates the logging and
             ``Testing-2`` the diagnostics (deviation D2).
+        transport: The caller's transport declaration, forwarded to the open. KEYWORD-ONLY
+            and NOT part of the frozen five-parameter linkage, for the reason
+            ``acas006_gl_posting.dispatch`` gives for the identical parameter: the bridge
+            reaches the server through ``RDB-Data`` and a C interface that has no transport
+            policy at all [common/otm3MT.cbl:L459], so there is no COBOL operand this could
+            correspond to. ``None`` - the default - leaves the working-storage declaration
+            alone, and that declaration is itself ``None``, which
+            ``connection._require_permitted_connection`` resolves FAIL-CLOSED. Pass
+            ``TransportSecurity(isolated_oracle=True)`` to declare the parity harness, or
+            ``TransportSecurity(ca_file=...)`` to verify and encrypt. It changes no status,
+            no statement and no write order.
+        allow_frozen_placeholder_credentials: Whether the shipped placeholders of
+            [copybooks/wssystem.cob:L138-L139] may authenticate. Keyword-only for the same
+            reason, and ``None`` likewise leaves the working-storage declaration - itself
+            ``False`` - alone.
 
     Returns:
         The ``(FS-Reply, We-Error)`` pair, which is also in ``file_access``.
     """
+    # The two keyword-only declarations are recorded in working storage BEFORE the
+    # dispatch, because `ba020-Process-Open` reads them from there - it is reached
+    # through the nine-arm `evaluate` and cannot take arguments of its own. `None`
+    # means "the caller stated nothing", which leaves the fail-closed default in
+    # place rather than overwriting it with a permissive one.
+    if transport is not None:
+        _BRIDGE.transport = transport
+    if allow_frozen_placeholder_credentials is not None:
+        _BRIDGE.allow_frozen_placeholder_credentials = (
+            allow_frozen_placeholder_credentials
+        )
+
     context = _HandlerContext(
         system=system,
         record=otm3,
@@ -6305,15 +6532,11 @@ def dispatch(
         file_defs=file_defs,
         dal_common=dal_common,
     )
-    # `File-Defs` is a linkage item this handler never reads a field of. Touched here so
-    # that the parameter is demonstrably part of the contract rather than decoration.
-    _LOG.debug(
-        "%s: dispatch File-Function=%s Access-Type=%s File-Key-No=%s, file-defs "
-        "delimiter=%r [common/acas019.cbl:L225-L231]",
-        HANDLER_PROGRAM_ID,
-        file_access.file_function,
-        file_access.access_type,
-        file_access.logging_data.file_key_no,
-        file_defs.file_defs_os_delimiter,
-    )
+    # `File-Defs` is a linkage item this handler never reads a field of. It is part of
+    # the contract because the frozen `PROCEDURE DIVISION USING` list names it
+    # [common/acas019.cbl:L225-L231], and the parameter above records that; NO RECORD IS
+    # EMITTED to prove it. The frozen dispatch displays nothing, so a per-CALL trace was
+    # invented (R-4) - and it would have been the highest-volume record in the module,
+    # one per handler call, with `file-defs delimiter` carrying a fragment of the
+    # deployment's own filesystem convention.
     return aa_process_flat_file(context)

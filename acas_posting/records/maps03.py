@@ -320,10 +320,14 @@ DETERMINISM (RULE R-6)
 ----------------------
 Section 0.1.1 records that "every one of the in-scope posting programs contains
 zero clock reads; the date arrives purely through linkage". THIS RECORD IS THAT
-LINKAGE. The one clock read in the whole call chain sits in the menu shell -
-`move function current-date to wse-date-block`
-[copybooks/Proc-ACAS-Mapser-RDB.cob:L72] - and the migration pins its two
-observables at the entry-point boundary, in `acas_posting/clock.py`. So there
+LINKAGE. The frozen call chain holds FOURTEEN ambient date and time reads, every
+one of them in an out-of-scope menu shell or in the date-service copybook those
+shells COPY - the census is in `acas_posting/clock.py`. The one that bears on a
+posting run is `move function current-date to wse-date-block`
+[copybooks/Proc-ACAS-Mapser-RDB.cob:L72], and even that runs only on the
+FIRST-TIME capture path; a normal run derives the date from the stored
+`Run-Date`. The migration pins both observables at the entry-point boundary, in
+`acas_posting/clock.py`. So there
 is no clock here, no unpredictable value, no process-environment read and no
 filesystem walk: a date reaches these fields only because a caller put it
 there. The one thing read at import is the generated dictionary, through the

@@ -21,11 +21,13 @@ Layout
     dal/            data access against the frozen MySQL schema
     dictionary/     the data dictionary model, generator and loader
 
-The layers below `acas_posting` are populated progressively; `programs/` and
-several `cli/` and `dal/` modules named in the plan are not present yet, and
-neither are the migration documents under `docs/migration/`, the test suites
-under `tests/` or `README-python-migration.md`. Nothing in this module depends
-on any of them.
+The layers below `acas_posting` are populated progressively, and every one of
+them listed above is now complete: `clock.py`, `dates.py`, `workfiles.py`, all
+nine `cli/` modules, all twelve `programs/` modules, `records/`, `cobol/`, all
+twenty-one `dal/` modules and `dictionary/`. What remains outstanding is outside
+this package: the migration documents under `docs/migration/`, the test suites
+under `tests/`, the scenario definitions under `harness/scenarios/` and
+`README-python-migration.md`. Nothing in this module depends on any of them.
 
 What this module publishes
     __version__                     the package version

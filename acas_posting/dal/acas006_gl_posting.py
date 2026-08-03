@@ -636,9 +636,10 @@ from acas_posting.dal.status import (
     WeError,
     end_of_file_status,
     is_duplicate_key_bridge_level,
+    log_cobol_stop,
+    log_file_handler_record,
     mysql_1100_db_error,
     override_we_error_for_operation,
-    sanitise_for_log,
 )
 from acas_posting.dictionary import loader
 from acas_posting.records.file_access import FileAccess
@@ -931,7 +932,7 @@ EDIT_FIELD_INTEGER_END: Final[int] = 20
 EDIT_FIELD_FRACTION_START: Final[int] = 22
 
 #: ANOMALY N-EDIT, recorded once here and cited again at
-#: :func:`_render_numeric_through_edit_field`. Every ``STRING FUNCTION TRIM
+#: :func:`_edit_field_image` and :func:`_edit_window`. Every ``STRING FUNCTION TRIM
 #: (WS-MYSQL-EDIT (s:l))`` in `bb200-Insert` and `bb300-Update` starts at
 #: position 3 or later, so position 1 - the sign - is never part of any window.
 #: A negative ``POST-AMOUNT`` or ``VAT-AMOUNT`` therefore reaches the column as
@@ -2356,14 +2357,18 @@ def bb200_insert(
         f"INSERT INTO {quote_identifier(TABLE_NAME)} SET "
         f"{', '.join(_column_assignments())}"
     )
-    _LOG.debug(
-        "bb200-Insert [common/glpostingMT.cbl:L1105]: %s",
-        sanitise_for_log(
-            _literal_command(
-                f"INSERT INTO {quote_identifier(TABLE_NAME)} SET ", host_variables
-            )
-        ),
-    )
+    #  THE STATEMENT IS NOT LOGGED, AND NEITHER IS THE LITERAL FORM OF IT.
+    #  `_literal_command` renders the row exactly as the bridge's `string` builds
+    #  it - every column of `GLPOSTING-REC` with its host-variable VALUE, which for
+    #  this table means the batch number, the posting number, both account numbers,
+    #  the amount and the VAT (CWE-532). `sanitise_for_log` escaped its control
+    #  characters and bounded its length; it never removed a single value, because
+    #  there is no rule that could tell a posted amount from a column name. A
+    #  failed INSERT is reported once, with typed fields, by `dal/status.py`'s
+    #  `mysql_1100_db_error`. `_literal_command` itself is retained: the bridge
+    #  builds that text and stores its prefix in `SQL-Err`, which the duplicate-key
+    #  test reads [copybooks/mysql-procedures.cpy:L99], so it is load-bearing for
+    #  STATUS - just not for logging.
     parameters = _bound_values(host_variables)
     with execute_statement(connection, statement, parameters) as cursor:
         return int(cursor.rowcount)
@@ -2402,15 +2407,11 @@ def bb300_update(
         f"UPDATE {quote_identifier(TABLE_NAME)} SET "
         f"{', '.join(_column_assignments())} WHERE {where_clause}"
     )
-    _LOG.debug(
-        "bb300-Update [common/glpostingMT.cbl:L1294]: %s WHERE %s",
-        sanitise_for_log(
-            _literal_command(
-                f"UPDATE {quote_identifier(TABLE_NAME)} SET ", host_variables
-            )
-        ),
-        sanitise_for_log(where_clause),
-    )
+    #  NEITHER THE STATEMENT NOR THE `WHERE` CLAUSE IS LOGGED - see the note in
+    #  `bb200_insert` above. The clause is worse than the SET list here: it is the
+    #  key of reference with its value, so it names the exact posting row being
+    #  rewritten (CWE-532). Both are still BUILT, because the bridge builds them and
+    #  their prefixes reach `SQL-Err`; they simply do not reach a log record.
     parameters = (*_bound_values(host_variables), *where_parameters)
     with execute_statement(connection, statement, parameters) as cursor:
         return int(cursor.rowcount)
@@ -2822,8 +2823,9 @@ def ba020_process_open(
             ``ba012-Test-WS-Rec-Size-2`` copied them there
             [common/acas006.cbl:L627-L632]; passing the record down instead
             lets ``connection.py`` own the load.
-        transport: The caller's transport policy. ``None`` means the fail-closed
-            default, which admits only loopback or a Unix socket.
+        transport: The caller's transport policy. ``None`` defers to the ONE
+            policy the deployment installed with
+            :func:`acas_posting.dal.connection.set_connection_policy`.
         states: The cursor table, for the ``Most-Cursor-Set`` reset.
 
     Raises:
@@ -3248,12 +3250,18 @@ def ba070_process_write(
         # WS-MYSQL-Error-Number (1:1) not = "0"` [:L814] is false, so NOTHING is
         # written - ANOMALY N-NOSTATUS. The values set at [:L805] stand, which
         # here means success is reported for a row that was not inserted.
-        _LOG.warning(
-            "ba070-Process-Write [common/glpostingMT.cbl:L810]: "
-            "WS-MYSQL-COUNT-ROWS = %d, not 1, with no driver error to report; "
-            "the frozen source writes no status on this path",
-            affected,
-        )
+        #  AND NOTHING IS REPORTED, WHICH IS THE ANOMALY ITSELF. "The frozen
+        #  source writes no status on this path" is the whole content of
+        #  N-NOSTATUS: the values set at [:L805] stand, so SUCCESS is reported for
+        #  a row that was not inserted, and no operator ever hears about it. A log
+        #  record here would be a diagnostic the compiled program cannot produce
+        #  and would make the defect look handled (rule R-4). N-NOSTATUS is
+        #  recorded, with its four sites, in `docs/migration/anomaly-log.md`.
+        #
+        #  The frozen `if` is kept, with an empty body, because rule R-5 requires
+        #  every branch of the paragraph to remain visible: a reader comparing the
+        #  two files must find the test, and find that it does nothing.
+        pass
     # `go to ba999-End.` [:L827] - Class 3.
     ba999_end(file_access, dal_common)
 
@@ -3335,13 +3343,16 @@ def ba080_process_delete(
         # ANOMALY N-NOSTATUS [:L866-L877]: the count is wrong but there is no
         # driver error, so the inner `if` [:L870] is false and NEITHER status
         # field is written. The caller's incoming values survive.
-        _LOG.warning(
-            "ba080-Process-Delete [common/glpostingMT.cbl:L866]: "
-            "WS-MYSQL-COUNT-ROWS = %d, not 1, with no driver error; the frozen "
-            "source writes no status on this path and ba010-Initialise's "
-            "clearing statement is commented out [:L347-L348]",
-            affected,
-        )
+        #  SILENT, per N-NOSTATUS. The caller's incoming status values survive and
+        #  nothing is written or reported - and `ba010-Initialise`'s clearing
+        #  statement is commented out [:L347-L348], so those incoming values are
+        #  whatever the previous operation left. Reproduced, not reported: a record
+        #  here has no counterpart in the frozen source (rule R-4).
+        #
+        #  The frozen `if` is kept, with an empty body, because rule R-5 requires
+        #  every branch of the paragraph to remain visible: a reader comparing the
+        #  two files must find the test, and find that it does nothing.
+        pass
         ba999_end(file_access, dal_common)
         return
     # `else move spaces to SQL-Msg / move zero to SQL-Err` [:L878-L880]
@@ -3437,13 +3448,14 @@ def ba085_process_delete_all(
         # table is a failure. With no driver error the inner `if` [:L951] is
         # false, so nothing is written - ANOMALY N-NOSTATUS again - and control
         # transfers at [:L958].
-        _LOG.warning(
-            "ba085-Process-Delete-ALL [common/glpostingMT.cbl:L947]: "
-            "WS-MYSQL-COUNT-ROWS = %d, not > zero, with no driver error; an "
-            "already-empty table takes this path and the frozen source writes "
-            "no status on it",
-            affected,
-        )
+        #  SILENT, per N-NOSTATUS. An already-empty table takes this path - `not >
+        #  zero` [:L947] makes emptiness a failure - and the frozen source writes
+        #  and displays nothing on it. Reproduced, not reported (rule R-4).
+        #
+        #  The frozen `if` is kept, with an empty body, because rule R-5 requires
+        #  every branch of the paragraph to remain visible: a reader comparing the
+        #  two files must find the test, and find that it does nothing.
+        pass
         ba999_end(file_access, dal_common)
         return
     # `else move spaces to SQL-Msg / move zero to SQL-Err` [:L959-L961]
@@ -3514,12 +3526,13 @@ def ba090_process_rewrite(
         return
     if affected != 1:
         # ANOMALY N-NOSTATUS [:L993-L1005].
-        _LOG.warning(
-            "ba090-Process-Rewrite [common/glpostingMT.cbl:L993]: "
-            "WS-MYSQL-COUNT-ROWS = %d, not 1, with no driver error; the frozen "
-            "source writes no status on this path",
-            affected,
-        )
+        #  SILENT, per N-NOSTATUS - the fourth and last of its sites. Reproduced,
+        #  not reported (rule R-4).
+        #
+        #  The frozen `if` is kept, with an empty body, because rule R-5 requires
+        #  every branch of the paragraph to remain visible: a reader comparing the
+        #  two files must find the test, and find that it does nothing.
+        pass
         ba999_end(file_access, dal_common)
         return
     # `move zero to FS-Reply WE-Error / zero to SQL-Err / spaces to SQL-Msg`
@@ -3614,32 +3627,36 @@ def mt_ca_process_logs(
     external log file it writes is not reproduced. It carries no database effect
     and appears in no table dump, which is why AAP section 0.3.4 classes such
     output as a log record rather than behaviour. A structured record with the
-    same fields is emitted instead, and ``Log-File-Rec-Written``
-    [copybooks/Test-Data-Flags.cob:L18] is left alone because ``fhlogger`` owns
-    it and ``fhlogger`` is out of scope.
+    same fields is emitted instead, by the ONE adapter every handler and bridge in
+    this layer shares - :func:`acas_posting.dal.status.log_file_handler_record`.
 
-    Every field is passed through
-    :func:`acas_posting.dal.status.sanitise_for_log`, because ``SQL-Msg`` is
-    built by the server out of material that can include account names, host names
-    and data values.
+    ``Log-File-Rec-Written`` [copybooks/Test-Data-Flags.cob:L20] IS ADVANCED, and
+    leaving it alone was a defect rather than a decision: ``fhlogger`` owns the
+    counter but the counter itself lives in ``ACAS-DAL-Common-data``, which this
+    function is handed and which the caller keeps, so an untouched field made the
+    shared block diverge from what the frozen run would hold. The adapter advances
+    it modulo one million, which is the wrap its ``pic 9(6)`` imposes.
+
+    THREE FIELDS ARE WITHHELD, and the adapter's docstring says why: ``WS-File-Key``
+    is the posting row's own ten-digit key, ``WS-Log-Where`` is the ``WHERE`` clause
+    built around it, and ``SQL-Msg`` is text the server builds out of material that
+    can include account names, host names and data values. ``sanitise_for_log`` was
+    applied to all three and only ever escaped and bounded them - it removed no
+    value, because no rule can tell a posted amount from a column name (CWE-532).
     """
     logging_data = file_access.logging_data
-    _LOG.info(
-        "fhlogger %s sys=%d file=%d para=%d fs=%d we=%d key=%s state=%s "
-        "err=%s msg=%s where=%s testing=%d/%d",
-        BRIDGE_NAME,
-        int(logging_data.ws_log_system),
-        int(logging_data.ws_log_file_no),
-        int(logging_data.ws_no_paragraph),
-        int(file_access.fs_reply),
-        int(file_access.we_error),
-        sanitise_for_log(str(logging_data.ws_file_key)),
-        sanitise_for_log(str(logging_data.sql_state)),
-        sanitise_for_log(str(logging_data.sql_err)),
-        sanitise_for_log(str(logging_data.sql_msg)),
-        sanitise_for_log(str(logging_data.ws_log_where)),
-        int(dal_common.sw_testing),
-        int(dal_common.sw_testing_2),
+    log_file_handler_record(
+        _LOG,
+        program=BRIDGE_NAME,
+        paragraph="Ca-Process-Logs",
+        log_system=logging_data.ws_log_system,
+        log_file_no=logging_data.ws_log_file_no,
+        no_paragraph=logging_data.ws_no_paragraph,
+        fs_reply=file_access.fs_reply,
+        we_error=file_access.we_error,
+        sql_err=str(logging_data.sql_err),
+        sql_state=str(logging_data.sql_state),
+        dal_common=dal_common,
     )
     mt_ca_exit()
 
@@ -3693,7 +3710,8 @@ def glposting_mt(
             write, mutated on a read.
         system_record: Needed by ``fn-Open`` alone, to reach the credentials the
             COBOL had already copied into ``RDB-Data``.
-        transport: The transport policy for the open; ``None`` is fail-closed.
+        transport: The transport policy for the open; ``None`` defers to the one
+            installed ``ConnectionPolicy``.
         states: The cursor table; ``None`` uses the bridge's own, which is the
             faithful analogue of its ``01 DAL-Data`` working storage.
     """
@@ -4309,11 +4327,18 @@ def aa040_process_read_next(
         # touched, so nothing is written here.
         # L432  stop "Cobol File EOF"  *> for testing - the operator pause is
         # dropped per Agent Action Plan section 0.3.4; the transfer is kept.
-        _LOG.warning(
-            "aa040-Process-Read-Next [common/acas006.cbl:L425-L432]: "
-            'Cobol-File-Eof was already set - the frozen source calls this '
-            '"This block should NOT occur" and pauses the run with '
-            'stop "Cobol File EOF"; the pause is dropped, the transfer kept'
+        #  ONE ERROR, THROUGH THE ONE REPORTER. Six handlers carry a `stop "Cobol
+        #  File EOF"` and each used to report it at its own level - WARNING here,
+        #  INFO, DEBUG and ERROR elsewhere - which made the same event unfindable.
+        #  `log_cobol_stop` emits it at ERROR everywhere, because reaching a
+        #  debugging stop in a shipped handler is the strongest signal the frozen
+        #  source has. The pause is dropped, the transfer below is kept.
+        log_cobol_stop(
+            _LOG,
+            program=HANDLER_NAME,
+            paragraph="aa040-Process-Read-Next",
+            literal="Cobol File EOF",
+            locator="[common/acas006.cbl:L425-L432]",
         )
         # L433  go to aa999-main-exit - Class 3.
         aa999_main_exit(file_access, dal_common)
@@ -4731,26 +4756,27 @@ def ca_process_logs(
 
     ``common/fhlogger.cbl`` is out of scope (Agent Action Plan section 0.2.2) and
     rule R-1 forbids calling it, so a structured record stands in for the file it
-    writes. It reaches no table and appears in no dump.
+    writes. It reaches no table and appears in no dump. The record is composed by
+    the ONE adapter this layer shares,
+    :func:`acas_posting.dal.status.log_file_handler_record`, which also advances
+    ``Log-File-Rec-Written`` modulo one million and withholds ``WS-File-Key``,
+    ``WS-Log-Where`` and ``SQL-Msg`` - see the note on :func:`mt_ca_process_logs`.
     """
     logging_data = file_access.logging_data
-    _LOG.info(
-        "fhlogger %s sys=%d file=%d para=%d fn=%d access=%d fs=%d we=%d "
-        "key=%s state=%s err=%s msg=%s testing=%d/%d",
-        HANDLER_NAME,
-        int(logging_data.ws_log_system),
-        int(logging_data.ws_log_file_no),
-        int(logging_data.ws_no_paragraph),
-        int(file_access.file_function),
-        int(file_access.access_type),
-        int(file_access.fs_reply),
-        int(file_access.we_error),
-        sanitise_for_log(str(logging_data.ws_file_key)),
-        sanitise_for_log(str(logging_data.sql_state)),
-        sanitise_for_log(str(logging_data.sql_err)),
-        sanitise_for_log(str(logging_data.sql_msg)),
-        int(dal_common.sw_testing),
-        int(dal_common.sw_testing_2),
+    log_file_handler_record(
+        _LOG,
+        program=HANDLER_NAME,
+        paragraph="Ca-Process-Logs",
+        log_system=logging_data.ws_log_system,
+        log_file_no=logging_data.ws_log_file_no,
+        no_paragraph=logging_data.ws_no_paragraph,
+        file_function=file_access.file_function,
+        access_type=file_access.access_type,
+        fs_reply=file_access.fs_reply,
+        we_error=file_access.we_error,
+        sql_err=str(logging_data.sql_err),
+        sql_state=str(logging_data.sql_state),
+        dal_common=dal_common,
     )
     ca_exit()
 
@@ -4918,12 +4944,19 @@ def ba012_test_ws_rec_size_2(
                 ca_process_logs(file_access, dal_common)
             # L619  accept Accept-Reply at 2433 - the pause is dropped per Agent
             # Action Plan section 0.3.4; the transfer at [:L620] is kept.
+            #  THE SUBSTANTIVE DIAGNOSTIC ONLY. `display_blk` is `GL903 Program
+            #  Error: Temp rec = ` plus the two record lengths - a fault and its
+            #  evidence, both compile-time constants of this migration. The second
+            #  `display`, `GL901 Note error and hit return`
+            #  [common/acas006.cbl:L257], is an acknowledgement prompt and nothing
+            #  else, so it is dropped together with the `accept Accept-Reply` at
+            #  [:L619] that it introduces; it is no longer quoted in this record
+            #  either, because quoting a prompt in a log line is still emitting the
+            #  prompt. The transfer at [:L620] is preserved by the `return True`.
             _LOG.error(
                 "ba012-Test-WS-Rec-Size-2 [common/acas006.cbl:L601-L620]: %s "
-                "- WE-Error 901; the frozen source displays %r and waits for "
-                "the operator before leaving the section",
+                "- WE-Error 901; the caller must stop",
                 display_blk,
-                GL901_MESSAGE,
             )
             # L620  go to ba-rdbms-exit - Class 3, out of the whole section.
             return True
@@ -5121,8 +5154,9 @@ def dispatch(
         transport: Transport policy for the open. Keyword-only, and NOT part of the
             COBOL linkage - the compiled system reaches its connection through
             ``RDB-Data`` and a C interface that has no transport policy at all, so
-            this is the migration's own fail-closed guard rather than a
-            reproduction of anything.
+            this is the migration's own reporting layer rather than a reproduction
+            of anything. ``None`` defers to the one installed
+            ``ConnectionPolicy``.
         states: The cursor table. Keyword-only for the same reason: the bridge's
             ``01 DAL-Data`` is its own working storage, and this parameter exists so
             a test can supply an isolated copy.

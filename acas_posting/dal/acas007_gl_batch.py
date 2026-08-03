@@ -631,10 +631,12 @@ from acas_posting.dal.status import (
     LogSystem,
     WeError,
     end_of_file_status,
+    log_cobol_stop,
+    log_file_handler_record,
+    log_handler_failure,
     is_duplicate_key_bridge_level,
     mysql_1100_db_error,
     override_we_error_for_operation,
-    redact_for_log,
 )
 from acas_posting.dictionary import loader
 from acas_posting.records.file_access import FileAccess, LoggingData
@@ -1874,7 +1876,7 @@ class _HandlerWorkingStorage:
     cobol_file_status: int = 0
     linkage_system_record: SystemRecord | None = None
     transport: TransportSecurity | None = None
-    allow_frozen_placeholder_credentials: bool = False
+    allow_frozen_placeholder_credentials: bool | None = None
 
 
 @dataclass(slots=True)
@@ -1963,7 +1965,7 @@ def reset_working_storage() -> None:
     _HANDLER.cobol_file_status = 0
     _HANDLER.linkage_system_record = None
     _HANDLER.transport = None
-    _HANDLER.allow_frozen_placeholder_credentials = False
+    _HANDLER.allow_frozen_placeholder_credentials = None
     _BRIDGE_WS.connection = None
     _BRIDGE_WS.ws_where = ""
     _BRIDGE_WS.j = 1
@@ -1984,21 +1986,27 @@ def reset_working_storage() -> None:
 def declare_connection_policy(
     *,
     transport: TransportSecurity | None = None,
-    allow_frozen_placeholder_credentials: bool = False,
+    allow_frozen_placeholder_credentials: bool | None = None,
 ) -> None:
-    """Record the caller's connection-policy declaration for later opens.
+    """Record a per-handler connection-policy declaration for later opens.
+
+    ⛔ NORMALLY THERE IS NOTHING TO CALL HERE. The connection policy of a run is
+    ONE object installed once by the deployment -
+    :func:`acas_posting.dal.connection.set_connection_policy` - and every open
+    that declares nothing resolves to it, this handler's included. This function
+    exists only to NARROW that policy for this one table, which no in-scope path
+    does; leaving it uncalled is the ordinary case and is what keeps the twenty
+    handlers of this package saying the same thing about the same connection.
 
     NO COBOL COUNTERPART, AND NOTHING COMPARED MOVES BY A CHARACTER.
     ``ba020-Process-Open`` marshals the six ``RDB-Data`` items and performs
     ``MYSQL-1000-OPEN`` [common/glbatchMT.cbl:L402-L427] with no notion of
     transport security at all - the C interface passes a literal zero client-flag
-    word and no TLS arguments. :func:`~acas_posting.dal.connection.mysql_1000_open`
-    adds a fail-closed policy on top of that marshalling, and its own section
-    comment is explicit that every refusal RAISES rather than manufacturing
-    ``(FS-Reply 99, We-Error 911)``, precisely so a policy refusal can never be
-    mistaken for a server declining. A declaration therefore changes which
-    connections are permitted and no stored value, status pair, statement text or
-    table dump (rules R-3, R-4).
+    word and no TLS arguments. A declaration therefore changes what
+    :func:`~acas_posting.dal.connection.mysql_1000_open` reports about a
+    connection, and in the opt-in strict configurations which connections it
+    permits - never a stored value, a status pair, a statement text or a table
+    dump (rules R-3, R-4).
 
     WHY IT IS DECLARED HERE RATHER THAN PASSED. ``glbatch_mt`` takes exactly the
     bridge's three parameters [common/acas007.cbl:L641-L644] and ``dispatch``
@@ -2009,32 +2017,44 @@ def declare_connection_policy(
     run, not one per file operation.
 
     Args:
-        transport: The transport declaration. ``None`` - the default - leaves
-            :func:`~acas_posting.dal.connection.mysql_1000_open` to apply its own
-            fail-closed default, which permits a loopback or Unix-socket
-            connection and refuses everything else. The parity harness runs
-            MariaDB on a private container network with no TLS, so it declares
-            ``TransportSecurity(isolated_oracle=True)``.
+        transport: The transport declaration. ``None`` - the default - defers to
+            the ONE installed policy, which is what every in-scope caller wants.
         allow_frozen_placeholder_credentials: ``True`` declares that the
             maintainer's shipped placeholder user and password in ``SYSTEM-REC``
-            are the intended credentials and the server is disposable.
+            are the intended credentials and the server is disposable. ``None`` -
+            the default - defers to the installed policy; ``False`` states
+            positively that no declaration is made for this table.
 
     Examples:
-        The declaration the comparison harness makes once per run::
+        The declaration a deployment makes ONCE, and not here::
 
-            declare_connection_policy(
-                transport=TransportSecurity(isolated_oracle=True),
-                allow_frozen_placeholder_credentials=True,
+            from acas_posting.dal import connection
+
+            connection.set_connection_policy(
+                connection.ConnectionPolicy(
+                    transport=connection.TransportSecurity(ca_file="/etc/ssl/ca.pem"),
+                )
             )
     """
     _HANDLER.transport = transport
-    _HANDLER.allow_frozen_placeholder_credentials = bool(
+    #  NOT coerced with `bool(...)`: `None` is a THIRD state here - "this handler
+    #  declares nothing, resolve it from the one installed policy" - and coercing
+    #  it to False would turn an absent declaration into a positive refusal to
+    #  declare, which is what made this handler's policy path diverge from its
+    #  nineteen siblings. See `connection.set_connection_policy`.
+    _HANDLER.allow_frozen_placeholder_credentials = (
         allow_frozen_placeholder_credentials
     )
+    #  THE POLICY IS REPORTED, NOT THE PATHS IT NAMES. `%r` on a
+    #  `TransportSecurity` renders `ca_file`, `certificate_file` and `key_file` -
+    #  filesystem paths, one of which is a PRIVATE KEY (CWE-532). What an operator
+    #  needs is whether the server will be authenticated and the session encrypted,
+    #  and that is one boolean.
     _LOG.debug(
-        "connection policy declared for %s: transport=%r placeholder_credentials=%s",
+        "connection policy declared for %s: server_verified=%s "
+        "placeholder_credentials=%s",
         BRIDGE,
-        transport,
+        transport.verifies_the_server(),
         _HANDLER.allow_frozen_placeholder_credentials,
     )
 
@@ -2137,18 +2157,22 @@ def signed_to_unsigned_host_variable(
     magnitude = abs(int(value))
     stored = magnitude % (10**digits)
     if value < 0:
-        # ANOMALY A-11 at the moment it happens. Logged rather than raised
-        # because the compiled program neither reports nor refuses it, and a
-        # status here would be behaviour the specification does not have.
-        _LOG.warning(
-            "%s: signed value %d loses its sign at the bridge and is stored as "
-            "%d, per [copybooks/wsbatch.cob:L36-L39] against "
-            "[common/glbatchMT.cbl:L287-L290]; absolute-value semantics "
-            "measured on GnuCOBOL 3.2, ambiguity Q-3 resolved",
-            dictionary_key,
-            value,
-            stored,
-        )
+        # ANOMALY A-11 at the moment it happens. Neither raised nor reported,
+        # because the compiled program neither refuses it nor reports it, and
+        # either would be behaviour the specification does not have.
+        #  IT IS SILENT, in both senses. The frozen bridge neither reports nor
+        #  refuses the narrowing - its own comment is the only trace it leaves - so a
+        #  record here is a diagnostic the compiled program cannot produce (rule
+        #  R-4). And the record it used to emit interpolated the VALUE, twice: the
+        #  signed figure and the unsigned figure actually stored, which for this
+        #  record are batch control totals (CWE-532). The anomaly is reproduced by
+        #  the narrowing itself and documented in
+        #  `docs/migration/anomaly-log.md`; ambiguity Q-3, resolved against
+        #  GnuCOBOL 3.2, is recorded in `docs/migration/ambiguity-resolutions.md`.
+        #
+        #  The frozen `if` is kept with an empty body so that rule R-5's reader
+        #  finds the test and finds that it reports nothing.
+        pass
     return stored
 
 
@@ -2503,12 +2527,14 @@ def _initialize_ws_batch_record(batch: GlBatchRecord, *, with_filler: bool) -> N
         # `initialize ... with filler` [common/glbatchMT.cbl:L589]. Nothing
         # further to clear: this record declares no FILLER item, so the two
         # forms coincide here. Recorded, not relied on - see the docstring.
-        _LOG.debug(
-            "initialize %s with filler at [common/glbatchMT.cbl:L589]: this "
-            "record declares no FILLER item, so the with-filler form and the "
-            "plain form of [common/glbatchMT.cbl:L1106] coincide",
-            RECORD,
-        )
+        #  NO RECORD. `initialize ... with filler` displays nothing; that the
+        #  with-filler and plain forms coincide for this record - it declares no
+        #  FILLER item - is a fact about the layout, recorded in this comment where a
+        #  reader of the code will find it, not in a run's log stream (rule R-4).
+        #
+        #  The frozen `if` is kept with an empty body so that rule R-5's reader
+        #  finds the with-filler branch and finds that it has nothing to do.
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -2641,13 +2667,11 @@ def _build_where(relation: str, key_value: str) -> str:
     # one and `WS-Where (1:J)` is the clause [common/glbatchMT.cbl:L852-L863].
     _BRIDGE_WS.j = len(clause) + 1
     _BRIDGE_WS.most_relation = relation
-    _LOG.debug(
-        "WS-Where for %s built as %r with key %r per "
-        "[common/glbatchMT.scb:L644-L650]",
-        TABLE,
-        clause,
-        key_value,
-    )
+    #  NEITHER THE CLAUSE NOR THE KEY IS LOGGED. `WS-Where` is the composed SQL
+    #  `WHERE` clause and `key_value` is the batch key it was built around, so
+    #  together they name the exact batch being operated on (CWE-532). The clause is
+    #  still BUILT and still stored, because the bridge stores it and the caller can
+    #  read it; it simply does not reach a log record.
     return clause
 
 
@@ -3282,16 +3306,11 @@ def mt_ba041_reread(
         # frozen source's and is reproduced by discarding the snapshot without
         # freeing it.
         state.set_cursor_not_active()
-        _LOG.warning(
-            "fn-read-next on %s ended the walk because Ws-Mysql-Count-Rows is "
-            "zero from an earlier write verb, not from a select "
-            "[common/glbatchMT.cbl:L579-L594]; FS-Reply and We-Error are left "
-            "at the caller's incoming (%d, %d) per "
-            "[common/glbatchMT.cbl:L351-L352]",
-            TABLE,
-            int(file_access.fs_reply),
-            int(file_access.we_error),
-        )
+        #  SILENT. [common/glbatchMT.cbl:L579-L594] writes no status and displays
+        #  nothing: the caller's incoming pair survives per [:L351-L352], and a walk
+        #  that a previous WRITE verb quietly ended looks to the caller exactly like
+        #  an empty table. That indistinguishability is the anomaly, and reporting it
+        #  would be a diagnostic the compiled program cannot produce (rule R-4).
         # `go to ba999-End` [:L593] - Class 3.
         mt_ba999_end(file_access, dal_common, batch)
         return
@@ -3482,14 +3501,16 @@ def mt_ba060_process_start(
     if access_type < lower or access_type > upper:
         file_access.fs_reply = int(FsReply.ERROR)
         file_access.we_error = int(WeError.ACCESS_TYPE_WRONG)
-        _LOG.debug(
-            "fn-start on %s refused Access-Type %s: the guard at "
-            "[common/glbatchMT.cbl:L718] admits %s..%s only, which is why the "
-            "when 9 arm at [:L747] is dead code",
-            TABLE,
-            access_type,
-            lower,
-            upper,
+        log_handler_failure(
+            _LOG,
+            program=BRIDGE,
+            paragraph="ba060-Process-Start",
+            locator="[common/glbatchMT.cbl:L718-L722]",
+            fs_reply=int(FsReply.ERROR),
+            we_error=int(WeError.ACCESS_TYPE_WRONG),
+            detail="Access-Type %d rejected for %s; the guard admits %d..%d "
+            "only, which is why the when 9 arm at [:L747] is dead code"
+            % (access_type, TABLE, lower, upper),
         )
         mt_ba999_end(file_access, dal_common, batch)
         return
@@ -3505,7 +3526,12 @@ def mt_ba060_process_start(
     )
     cursor = _bridge_cursor()
     try:
-        outcome = cursor_state.start(
+        #  The return value is deliberately not bound: `cursor_state.start` applies
+        #  the status pair to `file_access` itself, which is where the frozen bridge
+        #  leaves it, and nothing downstream in this paragraph reads the outcome
+        #  object. It was bound only to be interpolated into a per-row trace that no
+        #  longer exists.
+        cursor_state.start(
             cursor,
             TABLE,
             key_value,
@@ -3522,13 +3548,11 @@ def mt_ba060_process_start(
     # `cursor_state` along with the snapshot itself, and no write-side paragraph
     # reads it across a verb boundary. Shadowing it here would give the count two
     # homes and let them disagree.
-    _LOG.debug(
-        "fn-start on %s positioned with relation %r: FS-Reply=%d We-Error=%d",
-        TABLE,
-        relation.strip(),
-        int(outcome.fs_reply),
-        int(outcome.we_error),
-    )
+    #  NO RECORD FOR A SUCCESSFUL POSITIONING. The frozen paragraph displays
+    #  nothing on its success path, and a per-row trace of a batch walk is exactly
+    #  the kind of invented event rule R-4 excludes - it would also be the highest
+    #  volume record in the whole cycle. The status pair is returned to the caller,
+    #  which is where the frozen source leaves it.
     # `go to ba999-end` on every path out of this paragraph - Class 3.
     mt_ba999_end(file_access, dal_common, batch)
 
@@ -3763,13 +3787,10 @@ def mt_ba070_process_write(
             # THE DEFECT: no error and no row, so nothing is written and the
             # status pair stays at the `(0, 0)` of [:L821]. A write that
             # inserted nothing reports success. Reproduced, not fixed (R-4).
-            _LOG.warning(
-                "fn-write on %s affected %s rows and reported no driver error, "
-                "so it returns FS-Reply 0 / We-Error 0 per "
-                "[common/glbatchMT.cbl:L821-L842] having written nothing",
-                TABLE,
-                _BRIDGE_WS.ws_mysql_count_rows,
-            )
+            #  SILENT: [common/glbatchMT.cbl:L821-L842] displays nothing, so a
+            #  write that inserted nothing reports success and says so to nobody.
+            #  Reproduced, not reported (rule R-4).
+            pass
     # `go to ba999-End.` [:L843] - Class 3.
     mt_ba999_end(file_access, dal_common, batch)
 
@@ -3839,7 +3860,6 @@ def mt_ba080_process_delete(
     # `STRING "DELETE FROM " "`GLBATCH-REC`" " WHERE " WS-Where (1:J) X"00"`
     # [:L873-L878]. No trailing semicolon on this one, unlike `bb200-Insert`.
     statement = f"DELETE FROM {_QUOTED_TABLE} WHERE {clause}"
-    incoming = (int(file_access.fs_reply), int(file_access.we_error))
     _mysql_1210_command(
         file_access, statement, (key_value,), file_function=FileFunction.DELETE
     )
@@ -3863,14 +3883,10 @@ def mt_ba080_process_delete(
             # ANOMALY N-nostatus [common/glbatchMT.cbl:L892]: the jump is here,
             # inside the count test and outside the errno test, so the pair the
             # caller arrived with survives untouched. Do NOT write a status.
-            _LOG.warning(
-                "fn-delete on %s matched %s rows and reported no driver error, "
-                "so FS-Reply and We-Error are left at the caller's incoming "
-                "%s per [common/glbatchMT.cbl:L351-L352 and :L892]",
-                TABLE,
-                _BRIDGE_WS.ws_mysql_count_rows,
-                incoming,
-            )
+            #  SILENT, for the same reason as `fn-write` above: the count test sits
+            #  inside the errno test's shadow and [:L892] writes nothing, so the
+            #  caller's incoming pair survives untouched and undiagnosed (rule R-4).
+            pass
         # `go to ba999-End` [:L892] - Class 3.
         mt_ba999_end(file_access, dal_common, batch)
         return
@@ -3996,14 +4012,14 @@ def mt_ba085_process_delete_all(
     # The `else *> of course there could be no data in table` [:L974-L976] -
     # AND, per anomaly N-affected-rows-int32, the path a FAILED delete-all takes.
     if _errno_is_non_zero():
-        _LOG.warning(
-            "fn-delete-all on %s FAILED at the driver yet reports success: "
-            "Ws-Mysql-Count-Rows holds %d because MySQL_affected_rows narrowed "
-            "-1 through an int, so the `not > zero` guard at "
-            "[common/glbatchMT.cbl:L962] is false and [:L978] zeroes the status",
-            TABLE,
-            _BRIDGE_WS.ws_mysql_count_rows,
-        )
+        #  SILENT, AND THAT IS THE WHOLE OF ANOMALY N-affected-rows-int32: a
+        #  delete-all that FAILED at the driver reports success, because
+        #  `MySQL_affected_rows` narrowed -1 through an int, the `not > zero` guard
+        #  at [common/glbatchMT.cbl:L962] is therefore false, and [:L978] zeroes the
+        #  status. Nothing is displayed. A record here would tell an operator what
+        #  the compiled program refuses to tell them, which is precisely the defect
+        #  rule R-4 requires be reproduced rather than repaired.
+        pass
     _store_sql_msg(logging_data, "")
     logging_data.sql_err = _LOGGING_FIELDS["SQL-Err"].store(_SQL_ERR_ZERO)
     # `move zero to FS-Reply WE-Error.` [:L978]
@@ -4072,7 +4088,6 @@ def mt_ba090_process_rewrite(
     logging_data.ws_log_where = _LOGGING_FIELDS["WS-Log-Where"].store(clause)
     # `perform bb300-Update.` [:L1002]
     statement, parameters = mt_bb300_update()
-    incoming = (int(file_access.fs_reply), int(file_access.we_error))
     _mysql_1210_command(
         file_access, statement, parameters, file_function=FileFunction.RE_WRITE
     )
@@ -4092,16 +4107,11 @@ def mt_ba090_process_rewrite(
             _store_sql_msg(logging_data, _BRIDGE_WS.ws_mysql_error_message)
         else:
             # ANOMALY N-nostatus [common/glbatchMT.cbl:L1019]. Write NO status.
-            _LOG.warning(
-                "fn-re-write on %s changed %s rows and reported no driver "
-                "error, so FS-Reply and We-Error are left at the caller's "
-                "incoming %s per [common/glbatchMT.cbl:L351-L352 and :L1019]; "
-                "the zero also persists in Ws-Mysql-Count-Rows and will end "
-                "the next sequential walk",
-                TABLE,
-                _BRIDGE_WS.ws_mysql_count_rows,
-                incoming,
-            )
+            #  SILENT, per N-nostatus [common/glbatchMT.cbl:L1019]. The zero also
+            #  persists in `Ws-Mysql-Count-Rows` and will end the next sequential
+            #  walk, which is the second-order effect the walk's own silent exit
+            #  above then hides. Both are reproduced and neither is reported (R-4).
+            pass
         # `go to ba999-End` [:L1019] - Class 3.
         mt_ba999_end(file_access, dal_common, batch)
         return
@@ -4151,12 +4161,16 @@ def mt_ba100_bad_function(
     # in that order, We-Error first, which is the opposite of the handler's.
     file_access.we_error = int(WeError.UNKNOWN_UNEXPECTED)
     file_access.fs_reply = int(FsReply.ERROR)
-    _LOG.error(
-        "%s reached ba100-Bad-Function for File-Function %s: (99, 990) per "
-        "[common/glbatchMT.cbl:L1030-L1031], which is NOT the (99, 999) the "
-        "handler's own aa100-Bad-Function reports [common/acas007.cbl:L548-L549]",
-        BRIDGE,
-        int(file_access.file_function),
+    log_handler_failure(
+        _LOG,
+        program=BRIDGE,
+        paragraph="ba100-Bad-Function",
+        locator="[common/glbatchMT.cbl:L1030-L1031]",
+        fs_reply=int(FsReply.ERROR),
+        we_error=int(WeError.UNKNOWN_UNEXPECTED),
+        detail="File-Function %d matched no arm; note (99, 990) here is NOT the "
+        "(99, 999) the handler's own aa100-Bad-Function reports "
+        "[common/acas007.cbl:L548-L549]" % int(file_access.file_function),
     )
     # `go to ba999-end.` [:L1032] - Class 3.
     mt_ba999_end(file_access, dal_common, batch)
@@ -4325,25 +4339,27 @@ def mt_ca_process_logs(
     if int(dal_common.sw_testing) != 1:
         return
     logging_data = file_access.logging_data
-    _LOG.info(
-        "fhlogger %s/%s: File-Function=%s Access-Type=%s FS-Reply=%s "
-        "We-Error=%s ws-No-Paragraph=%s WS-Log-System=%s WS-Log-File-No=%s "
-        "WS-File-Key=%r SQL-Err=%r SQL-State=%r SQL-Msg=%s WS-Log-Where=%s "
-        "[stands in for common/glbatchMT.cbl:L1707-L1709]",
-        BRIDGE,
-        TABLE,
-        int(file_access.file_function),
-        int(file_access.access_type),
-        int(file_access.fs_reply),
-        int(file_access.we_error),
-        int(logging_data.ws_no_paragraph),
-        int(logging_data.ws_log_system),
-        int(logging_data.ws_log_file_no),
-        str(logging_data.ws_file_key).rstrip(),
-        str(logging_data.sql_err).rstrip(),
-        str(logging_data.sql_state).rstrip(),
-        redact_for_log(str(logging_data.sql_msg).rstrip()),
-        redact_for_log(str(logging_data.ws_log_where).rstrip()),
+    #  THE ONE ADAPTER, and three fields fewer than this record used to carry.
+    #  `WS-File-Key` is the batch key, `WS-Log-Where` is the `WHERE` clause built
+    #  around it and `SQL-Msg` is the driver's free text; `redact_for_log` was
+    #  applied to the last two and removed nothing, because its rules recognise
+    #  connection-message shapes and not a batch number (CWE-532). The adapter also
+    #  advances `Log-File-Rec-Written` modulo one million, which this module used
+    #  not to do at all.
+    log_file_handler_record(
+        _LOG,
+        program=BRIDGE,
+        paragraph="Ca-Process-Logs",
+        log_system=logging_data.ws_log_system,
+        log_file_no=logging_data.ws_log_file_no,
+        no_paragraph=logging_data.ws_no_paragraph,
+        file_function=file_access.file_function,
+        access_type=file_access.access_type,
+        fs_reply=file_access.fs_reply,
+        we_error=file_access.we_error,
+        sql_err=str(logging_data.sql_err),
+        sql_state=str(logging_data.sql_state),
+        dal_common=dal_common,
     )
 
 
@@ -4406,10 +4422,8 @@ def glbatch_mt(
     Examples:
         Read the batch keyed ledger 1, batch 7, then close::
 
-            declare_connection_policy(
-                transport=TransportSecurity(isolated_oracle=True),
-                allow_frozen_placeholder_credentials=True,
-            )
+            #  The deployment installed the one policy already; nothing is
+            #  declared per table.
             file_access.file_function = int(FileFunction.OPEN)
             file_access.access_type = int(AccessType.I_O)
             dispatch(system, batch, file_access, file_defs, dal_common)
@@ -4616,10 +4630,8 @@ def dispatch(
     Examples:
         Open the table for input, read the batch keyed ledger 1 batch 7, close::
 
-            declare_connection_policy(
-                transport=TransportSecurity(isolated_oracle=True),
-                allow_frozen_placeholder_credentials=True,
-            )
+            #  The deployment installed the one policy already; nothing is
+            #  declared per table.
             system.system_data_block.rdbms_flat_statuses.file_system_used = 1
 
             file_access.file_function = int(FileFunction.OPEN)
@@ -5209,9 +5221,15 @@ def aa040_process_read_next(
         _store_sql_msg(logging_data, "")
         # `stop "Cobol File EOF"` [:L426] - OMISSION O-3, the pause dropped and
         # the diagnostic kept, per Agent Action Plan section 0.3.4.
-        _LOG.warning(
-            'stop "Cobol File EOF" [common/acas007.cbl:L426] - the operator '
-            "pause is omission O-3; the transfer to aa999-main-exit is kept"
+        #  ONE ERROR, THROUGH THE ONE REPORTER, at the same level in every handler
+        #  that carries this stop. The pause is omission O-3; the transfer to
+        #  `aa999-main-exit` below is kept.
+        log_cobol_stop(
+            _LOG,
+            program=HANDLER,
+            paragraph="aa040-Process-Read-Next",
+            literal="Cobol File EOF",
+            locator="[common/acas007.cbl:L426]",
         )
         # `go to aa999-main-exit` [:L427] - Class 3.
         aa999_main_exit(system, batch, file_access, file_defs, dal_common)
@@ -5890,12 +5908,10 @@ def aa_exit(
         dal_common: ``ACAS-DAL-Common-data``. Untouched.
     """
     # `exit program.` [common/acas007.cbl:L561] - a return to the caller.
-    _LOG.debug(
-        "%s exit program [common/acas007.cbl:L561] fs-reply=%s we-error=%s",
-        HANDLER,
-        int(file_access.fs_reply),
-        int(file_access.we_error),
-    )
+    #  NO RECORD. `exit program` [common/acas007.cbl:L561] displays nothing; a
+    #  trace of reaching it is an invented event (rule R-4), and the status pair it
+    #  reported is already in the caller's own `File-Access` block, which is where
+    #  the frozen source leaves it.
 
 
 def ba_process_rdbms(
@@ -6147,11 +6163,15 @@ def ba012_test_ws_rec_size_2(
         # `display Display-Blk at 2301 with erase eol` [:L600] and
         # `display GL901 at 2401 with erase eol` [:L601] - OMISSION O-3. The two
         # screen writes become one log record; neither alters control flow.
+        #  ONLY THE SUBSTANTIVE HALF. `Display-Blk` is `GL902 Program Error: Temp
+        #  rec = ` plus the two record lengths - a fault and its evidence, both
+        #  compile-time constants. `GL901 Note error and hit return`
+        #  [common/acas007.cbl:L601] is an acknowledgement prompt and nothing else,
+        #  so it is dropped rather than quoted: quoting a prompt in a log record is
+        #  still emitting the prompt. The transfer to `ba-rdbms-exit` is kept.
         _LOG.error(
-            "%s [common/acas007.cbl:L600] / %s [:L601] - the screen writes are "
-            "omission O-3; the transfer to ba-rdbms-exit is kept",
+            "%s [common/acas007.cbl:L600] - the caller must stop",
             _HANDLER.display_blk.rstrip(),
-            ERROR_MESSAGE_GL901,
         )
         # `move Display-Blk to SQL-Msg` [:L602] - NOT presentation: `SQL-Msg` is
         # part of `File-Access` [copybooks/wsfnctn.cob:L51] and the caller reads
@@ -6263,13 +6283,10 @@ def ba015_test_ends(
     ) == int(AccessType.OUTPUT):
         # `perform ba020-Process-Dal` [:L629] - BRIDGE CALL ONE, still carrying
         # fn-Open and fn-Output, so the bridge opens the connection.
-        _LOG.debug(
-            "N18b call 1 of 2: %s with File-Function=%s Access-Type=%s "
-            "[common/acas007.cbl:L629]",
-            BRIDGE,
-            int(file_access.file_function),
-            int(file_access.access_type),
-        )
+        #  NO RECORD. The double call of anomaly N18b is reproduced by making the
+        #  call twice, which is the behaviour; announcing it is a diagnostic the
+        #  frozen source does not have (rule R-4). N18b is documented in
+        #  `docs/migration/anomaly-log.md`.
         ba020_process_dal(system, batch, file_access, file_defs, dal_common)
         # `set fn-Delete-All to true` [:L630] - writes 6 into the CALLER's
         # `File-Function` AFTER the open has already happened. `Access-Type` is
@@ -6386,11 +6403,8 @@ def ba_rdbms_exit(
     """
     del system, batch, file_defs, dal_common
     # `exit section.` [common/acas007.cbl:L650] - a return, nothing more.
-    _LOG.debug(
-        "ba-rdbms-exit [common/acas007.cbl:L650] fs-reply=%s we-error=%s",
-        int(file_access.fs_reply),
-        int(file_access.we_error),
-    )
+    #  NO RECORD, for the same reason as `aa999-main-exit`: an exit paragraph that
+    #  displays nothing has no diagnostic to reproduce (rule R-4).
 
 
 def ca_process_logs(
@@ -6449,25 +6463,22 @@ def ca_process_logs(
     # message can carry the connection's account, host, key values and a line
     # feed (CWE-117, CWE-532). The ACAS status values are integers from this
     # module's own enumerations and are interpolated as themselves.
-    _LOG.info(
-        "fhlogger %s/%s: File-Function=%s Access-Type=%s File-Key-No=%s "
-        "FS-Reply=%s We-Error=%s ws-No-Paragraph=%s WS-Log-System=%s "
-        "WS-Log-File-No=%s WS-File-Key=%r SQL-Err=%r SQL-State=%r SQL-Msg=%s "
-        "[stands in for common/acas007.cbl:L656-L657]",
-        HANDLER,
-        TABLE,
-        int(file_access.file_function),
-        int(file_access.access_type),
-        int(logging_data.file_key_no),
-        int(file_access.fs_reply),
-        int(file_access.we_error),
-        int(logging_data.ws_no_paragraph),
-        int(logging_data.ws_log_system),
-        int(logging_data.ws_log_file_no),
-        str(logging_data.ws_file_key).rstrip(),
-        str(logging_data.sql_err).rstrip(),
-        str(logging_data.sql_state).rstrip(),
-        redact_for_log(str(logging_data.sql_msg).rstrip()),
+    #  THE ONE ADAPTER - see the note on the bridge's own logging paragraph above
+    #  for which fields are withheld and why.
+    log_file_handler_record(
+        _LOG,
+        program=HANDLER,
+        paragraph="Ca-Process-Logs",
+        log_system=logging_data.ws_log_system,
+        log_file_no=logging_data.ws_log_file_no,
+        no_paragraph=logging_data.ws_no_paragraph,
+        file_function=file_access.file_function,
+        access_type=file_access.access_type,
+        fs_reply=file_access.fs_reply,
+        we_error=file_access.we_error,
+        sql_err=str(logging_data.sql_err),
+        sql_state=str(logging_data.sql_state),
+        dal_common=dal_common,
     )
     # FALL-THROUGH into `ca-Exit` [:L659].
     ca_exit(system, batch, file_access, file_defs, dal_common)

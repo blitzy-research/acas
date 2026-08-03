@@ -109,6 +109,12 @@ it is the strongest of them. Verbatim:
     guarantees stability and why a dedicated test asserts `gl071`'s output
     ordering."
 
+The plan's citation is off: in the frozen program the sequential read is the
+guarded `if read-ledger not = "R" / perform GL-Nominal-Read-Next` at
+[general/gl072.cbl:L407-L408]; [general/gl072.cbl:L410-L412] is the
+`move zero to tot-dr tot-cr` that follows it. The dependency itself is
+unaffected and is reproduced.
+
 That is anomaly A-14 of the register, and this module is one of the two places
 an accidental reordering could be introduced. Concretely, of this file:
 
@@ -198,7 +204,11 @@ from acas_posting.records.work_records import (
 __all__: Final[tuple[str, ...]] = (
     "FS_REPLY_AT_END",
     "FS_REPLY_OK",
+    "FS_REPLY_OPEN_NOT_FOUND",
     "FS_REPLY_READ_NOT_READABLE",
+    "FS_REPLY_WRITE_NOT_OPEN",
+    "OPEN_ITEM_2_NAME",
+    "OPEN_ITEM_4_NAME",
     "POST_TRANS_NAME",
     "PRE_TRANS_NAME",
     "SORTING_DIAGNOSTIC",
@@ -206,9 +216,11 @@ __all__: Final[tuple[str, ...]] = (
     "SORT_TRANS_NAME",
     "GeneralLedgerWorkFiles",
     "LineSequentialWorkFile",
+    "OpenItemWorkFile",
     "OpenMode",
     "WorkFileError",
     "general_ledger_work_files",
+    "open_item_work_file",
     "sort_using_giving",
 )
 
@@ -280,6 +292,30 @@ FS_REPLY_AT_END: Final[int] = 10
 #: invented one (rule R-6).
 FS_REPLY_READ_NOT_READABLE: Final[int] = 46
 
+#: `fs-reply` after an `OPEN` of a file that does not exist, where the `SELECT`
+#: did NOT say `OPTIONAL`.
+#:
+#: WHY THIS VALUE IS LOAD-BEARING RATHER THAN INCIDENTAL. Neither open-item
+#: `SELECT` says `OPTIONAL` - `select open-item-file-2 assign file-18 access
+#: sequential status fs-reply.` [copybooks/seloi2.cob] and its OTM4 twin
+#: [copybooks/seloi4.cob:L1-L4] - so an `OPEN EXTEND` of a file that has never
+#: been created REPORTS rather than creates, and the producer's very next
+#: statement tests for exactly that: `if fs-reply not = zero / close / open
+#: output` [sales/sl055.cbl:L360-L362], [purchase/pl055.cbl:L302-L304]. That is
+#: the ordinary first-run path, not an error path, and the maintainer says so in
+#: his own words at [purchase/pl055.cbl:L48] - *"On open extend otm4 if error
+#: open as output as bug in OC."* A carrier whose `open_extend` always succeeded
+#: would make the fallback unreachable and silently drop two statements.
+FS_REPLY_OPEN_NOT_FOUND: Final[int] = 35
+
+#: `fs-reply` after a `WRITE` issued while the file is not open for writing.
+#: Reported rather than raised, because the compiled program reports and RUNS ON
+#: - the producers test the field [sales/sl055.cbl:L682],
+#: [purchase/pl055.cbl:L588] rather than being aborted by the runtime. Raising
+#: here would invent a control-flow path the frozen program does not have
+#: (rules R-3, R-4).
+FS_REPLY_WRITE_NOT_OPEN: Final[int] = 48
+
 
 #  THE THREE WORK-FILE IDENTITIES  [copybooks/wsnames.cob:L13-L16]
 # These are IDENTITIES, not locations: a name by which a sequence identifies
@@ -309,6 +345,37 @@ POST_TRANS_NAME: Final[str] = "postrans.tmp"
 #: Assigned by number rather than by name, which is why it is the one of the
 #: three not declared in the `file-defs-a` prologue.
 SORT_TRANS_NAME: Final[str] = "work.tmp"
+
+#  THE TWO OPEN-ITEM WORK-FILE IDENTITIES  [copybooks/wsnames.cob:L35, :L45]
+
+#: `file-18` [copybooks/file18.cob] - the OTM2 extract `sl055` writes
+#: [sales/sl055.cbl:L681] and `sl060` reads [sales/sl060.cbl:L484]. The names
+#: copybook annotates the entry `*> "openitm2"` [copybooks/wsnames.cob:L35], and
+#: `sl055`'s own remark calls it "OTM2. TEMP (Only) Open Item File 2 -
+#: Preposting." [sales/sl055.cbl:L40] - the same species as the two General
+#: Ledger work files above, which is why it belongs in this module. Its record
+#: area is `01 open-item-record-2 pic x(118)` [copybooks/fdoi2.cob:L11].
+#:
+#: THE VALUE IS THE ASSIGNED NAME, NOT A FILENAME. It keys the carrier the
+#: producer and the consumer share; nothing here resolves it against a
+#: filesystem, because the sequence stores records rather than bytes.
+OPEN_ITEM_2_NAME: Final[str] = "openitm2"
+
+#: `file-28` [copybooks/file28.cob] - the OTM4 extract `pl055` writes
+#: [purchase/pl055.cbl:L587] and `pl060` reads [purchase/pl060.cbl:L425].
+#: Annotated `*> "openitm4"` [copybooks/wsnames.cob:L45], and `pl055` annotates
+#: its own SELECT `*> Temp file only for i/p to pl060.`
+#: [purchase/pl055.cbl:L109].
+#:
+#: ⭐ ITS RECORD AREA IS 113 BYTES, NOT 118. `01 open-item-record-4 pic x(113)`
+#: [copybooks/fdoi4.cob:L10] against the sales file's `pic x(118)`
+#: [copybooks/fdoi2.cob:L11], even though both hold an open-item header and the
+#: purchase copybook's own comment says the width was set "to match invoice
+#: record". The five-byte divergence is the frozen declaration's and is recorded
+#: rather than harmonised (rule R-4). Nothing here depends on either width: a
+#: sequence stores records, not bytes, and neither file reaches a schema table,
+#: so neither width is observable in a table dump.
+OPEN_ITEM_4_NAME: Final[str] = "openitm4"
 
 
 #  THE ONE SCREEN STATEMENT, AS A LOG RECORD  [general/gl071.cbl:L170]
@@ -340,13 +407,18 @@ class OpenMode(enum.StrEnum):
     `acas_posting.cobol.sortverb` publish, so a mode renders as its own name in
     a log line or a failure message without a conversion step.
 
-    Only the two open modes the three phases actually use are members. There is
-    deliberately no `I-O` and no `EXTEND`: `gl070` opens `pre-trans` for output
-    [general/gl070.cbl:L447], `gl072` opens `post-trans` for input
-    [general/gl072.cbl:L278], `gl071` opens neither explicitly at all, and no
-    phase of this cycle opens a work file any other way. A member for a mode
-    the compiled cycle never uses would be a behaviour with no evidence behind
-    it (rule R-6).
+    There is deliberately no `I-O`: no work file in the migrated cycle is opened
+    that way, and a member for a mode the compiled cycle never uses would be a
+    behaviour with no evidence behind it (rule R-6).
+
+    `EXTEND` IS A MEMBER BECAUSE THE SALES AND PURCHASE CYCLES USE IT, even
+    though the General Ledger cycle does not. `gl070` opens `pre-trans` for
+    output [general/gl070.cbl:L447], `gl072` opens `post-trans` for input
+    [general/gl072.cbl:L278] and `gl071` opens neither explicitly at all - which
+    is why this enumeration once carried only three members. The open-item work
+    files are opened a fourth way: `open extend open-item-file-2`
+    [sales/sl055.cbl:L359] and `open extend open-item-file-4`
+    [purchase/pl055.cbl:L301]. See `OpenItemWorkFile`.
     """
 
     CLOSED = "CLOSED"
@@ -357,11 +429,27 @@ class OpenMode(enum.StrEnum):
 
     INPUT = "INPUT"
     """`OPEN INPUT` - open for reading, positioned at the first record.
-    [general/gl072.cbl:L278]."""
+    [general/gl072.cbl:L278], [sales/sl060.cbl:L480],
+    [purchase/pl060.cbl:L421]."""
 
     OUTPUT = "OUTPUT"
     """`OPEN OUTPUT` - open for writing, and the previous contents discarded.
-    [general/gl070.cbl:L447]."""
+    [general/gl070.cbl:L447], [sales/sl055.cbl:L362],
+    [sales/sl060.cbl:L677]."""
+
+    EXTEND = "EXTEND"
+    """`OPEN EXTEND` - open for writing with the existing records PRESERVED and
+    the write position after the last one. [sales/sl055.cbl:L359],
+    [purchase/pl055.cbl:L301]. The mode that made both producers declare a
+    module-private work file of their own before `OpenItemWorkFile` existed.
+
+    ⭐ THE MODE THAT DISTINGUISHES THE TWO EXTRACT FILES FROM THE GENERAL LEDGER
+    WORK FILES, and the reason it is not interchangeable with OUTPUT: OUTPUT
+    truncates and EXTEND appends. Both extract programs try EXTEND FIRST and
+    fall back to OUTPUT only when it fails [sales/sl055.cbl:L359-L362],
+    [purchase/pl055.cbl:L301-L304], so on any run where the file already exists
+    the extract is APPENDED to what is there. Collapsing the two modes would
+    silently discard a previous extract that the frozen cycle preserves."""
 
 
 #  FAILURE
@@ -519,8 +607,10 @@ class LineSequentialWorkFile(Generic[RecordT]):
     de-duplicates, hashes or re-associates them, and no unordered container
     appears anywhere in this class. Agent Action Plan section 0.6.4: "Any
     change in sort stability or key composition produces silent misposting - no
-    error, no diagnostic, wrong balances" [general/gl072.cbl:L410-L412]. A
-    reordering introduced here would be exactly as silent.
+    error, no diagnostic, wrong balances" - the read itself being the guarded
+    `perform GL-Nominal-Read-Next` at [general/gl072.cbl:L407-L408], which the
+    plan cites as [general/gl072.cbl:L410-L412]. A reordering introduced here
+    would be exactly as silent.
 
     THE RECORD AREA IS CROSSED BY VALUE, IN BOTH DIRECTIONS. A COBOL `WRITE`
     moves the record area's current bytes into the file and a `READ` fills the
@@ -998,6 +1088,292 @@ class LineSequentialWorkFile(Generic[RecordT]):
         self._next_record_pointer = 0
         self._open_mode = OpenMode.CLOSED
         self._fs_reply = FS_REPLY_OK
+
+
+#  THE OPEN-ITEM WORK FILE  -  ONE CARRIER, TWO PROGRAMS, FOUR CALL SITES
+#
+# ⭐⭐ WHY THIS CLASS EXISTS AT ALL. The open-item work file is the CHANNEL
+# between a producer and a consumer, and a channel that is not one object is not
+# a channel. `sl055` opens `open-item-file-2` for EXTEND [sales/sl055.cbl:L359],
+# writes a header per invoice [sales/sl055.cbl:L681] and closes it
+# [sales/sl055.cbl:L501]; `sl060` then opens THE SAME FILE for INPUT
+# [sales/sl060.cbl:L480], reads those headers [sales/sl060.cbl:L484], closes it
+# [sales/sl060.cbl:L613] and finally truncates it once the transfer to OTM3 is
+# complete [sales/sl060.cbl:L677-L678]. `pl055` and `pl060` do the same over
+# `open-item-file-4` [purchase/pl055.cbl:L301, :L587, :L423] and
+# [purchase/pl060.cbl:L421, :L425, :L548, :L605-L606].
+#
+# In COBOL the two programs name the same `assign` and the operating system
+# supplies the identity. In Python the identity has to be an OBJECT that outlives
+# each `CALL`, exactly as `GeneralLedgerWorkFiles` is for the three General
+# Ledger phases - and for the same reason, stated in that class's own docstring.
+#
+# WHAT THIS REPLACES. Both producers previously declared a module-private work
+# file, and each said in its own docstring that it had to, because
+# `LineSequentialWorkFile` published no `EXTEND` and its only writable mode
+# truncated. That reasoning was correct about the class as it stood and wrong
+# about the conclusion: the answer is to publish the mode here, once, rather than
+# to declare the file twice and leave the consumers reading a different object
+# from the one the producers wrote. `OpenMode.EXTEND` and
+# `FS_REPLY_OPEN_NOT_FOUND` above are that mode and its status.
+#
+# ⛔ AND NOT A MODULE-LEVEL REGISTRY. Both consumers previously reached a
+# sequence through a dict keyed by the assigned name at module scope, which made
+# the extract reachable but shared it across every run in one interpreter. Rule
+# R-6 requires two runs of the same scenario under the same pinned clock to be
+# byte-identical, and a sequence carrying the previous run's invoices breaks that
+# without anything failing. `open_item_work_file` below caches nothing.
+#
+# THE STATUS FIELD IS ONE FIELD, DELIBERATELY. Both `SELECT`s name
+# `status fs-reply` [copybooks/seloi2.cob], [copybooks/seloi4.cob:L4], and
+# `03 Fs-Reply pic 99.` [copybooks/wsfnctn.cob:L25] is the very field every
+# facade verb writes. Every verb below therefore takes an OPTIONAL `file_access`
+# and writes it when given one, and also keeps the value readable as `fs_reply` -
+# so a program that tests `state.file_access.fs_reply` straight after a native
+# `OPEN` and one that reads `ws.otm4.fs_reply` are looking at the same value
+# through the two spellings the four programs actually use.
+
+
+@dataclass
+class OpenItemWorkFile(Generic[RecordT]):
+    """`open-item-file-2` / `open-item-file-4` - the open-item extract channel.
+
+    THE FILE, NOT THE RECORD. The record layouts are `01 OI-Header.`
+    [copybooks/slwsoi.cob:L8] for the sales side and its purchase twin
+    [copybooks/plwsoi.cob:L9], which `acas_posting.records.otm3` and
+    `acas_posting.records.otm5` already publish in full with every leaf and its
+    dictionary key. Nothing about either layout is declared here; the class is
+    generic over the record type and inspects nothing about it, so the record
+    layer stays the single authority for field metadata (rule R-5).
+
+    THE FILE DECLARATIONS, VERBATIM
+
+        select  open-item-file-2  assign        file-18
+                                  access        sequential
+                                  status        fs-reply.        [copybooks/seloi2.cob]
+        fd  open-item-file-2.
+        01  open-item-record-2  pic x(118).                       [copybooks/fdoi2.cob]
+
+        select  open-item-file-4  assign        file-28
+                                  access        sequential
+                                  status        fs-reply.  [copybooks/seloi4.cob:L1-L4]
+        fd  open-item-file-4.
+        01  open-item-record-4  pic x(113).      [copybooks/fdoi4.cob:L1-L2]
+
+    Each producer adds the OI-Header description as a SECOND `01` under the same
+    FD - `copy "slwsoi.cob"` [sales/sl055.cbl:L145] and `copy "plwsoi.cob"`
+    [purchase/pl055.cbl:L121] - which is why `write oi-header.`
+    [sales/sl055.cbl:L681] and `write open-item-record-4.`
+    [purchase/pl055.cbl:L587] both write the OI-Header layout into that one
+    record area. A second `01` under an FD is an alternative description of the
+    same bytes, not a second buffer.
+
+    NEITHER `SELECT` SAYS `OPTIONAL`, which is what makes the producers' fallback
+    a normal path rather than an error path - see `FS_REPLY_OPEN_NOT_FOUND`.
+
+    A TRANSIENT WORK FILE, NOT A TABLE. `copy "seloi4.cob"` carries its author's
+    own note, *"Temp file only for i/p to pl060."* [purchase/pl055.cbl:L109].
+    Neither file reaches a schema table and neither appears in any table dump, so
+    the Agent Action Plan models them the way it models the General Ledger work
+    files (section 0.3.1): an ordered sequence with the same record layout and
+    the same ordering guarantee, and nothing else.
+
+    ⛔ NO VERB RAISES ON A STATUS. Every verb reports through `fs-reply` and
+    returns, because that is what the compiled program does - the producers test
+    the field after the `OPEN` and after the `WRITE` rather than being aborted by
+    the runtime. Raising would invent a control-flow path the frozen source does
+    not have (rules R-3, R-4).
+
+    Attributes:
+        name: The assigned name, `OPEN_ITEM_2_NAME` or `OPEN_ITEM_4_NAME`, or
+            whatever `file-18` / `file-28` resolves to in the caller's
+            `File-Defs`. Carried for diagnostics; nothing keys off it.
+        record_type: The record description the sequence carries. Preserved so a
+            caller reads back the class it wrote.
+    """
+
+    name: str
+    record_type: type[RecordT]
+    #: Whether the file exists on the notional filesystem. False until an
+    #: `OPEN OUTPUT` creates it, which is what makes the first `OPEN EXTEND`
+    #: report `FS_REPLY_OPEN_NOT_FOUND` and drives the producers' fallback.
+    exists: bool = False
+    _records: list[RecordT] = field(default_factory=list)
+    _open_mode: OpenMode = OpenMode.CLOSED
+    _next_record_pointer: int = 0
+    _fs_reply: int = FS_REPLY_OK
+
+    #  ---- readable state -------------------------------------------------
+
+    @property
+    def fs_reply(self) -> int:
+        """`fs-reply` after the most recent verb [copybooks/wsfnctn.cob:L25].
+
+        Readable here as well as writable into a caller's `FileAccess`, because
+        the four programs spell the same field two ways: `pl060` reads
+        `ws.otm4.fs_reply` and copies it across, while `sl055` hands its own
+        `FileAccess` to every verb. One field, two spellings.
+        """
+        return self._fs_reply
+
+    @property
+    def open_mode(self) -> OpenMode:
+        """Which `OPEN` the file is under, or `OpenMode.CLOSED`."""
+        return self._open_mode
+
+    @property
+    def at_end(self) -> bool:
+        """Whether a further `READ` would raise the `AT END` condition."""
+        return self._next_record_pointer >= len(self._records)
+
+    @property
+    def records(self) -> tuple[RecordT, ...]:
+        """The sequence as written, in insertion order.
+
+        A sequential file has no other order, and the consumer reads them back
+        in exactly this one [sales/sl060.cbl:L484],
+        [purchase/pl060.cbl:L425].
+        """
+        return tuple(self._records)
+
+    def __len__(self) -> int:
+        return len(self._records)
+
+    def __repr__(self) -> str:
+        return (
+            f"OpenItemWorkFile(name={self.name!r}, "
+            f"record_type={self.record_type.__name__}, "
+            f"mode={self._open_mode.value}, records={len(self._records)}, "
+            f"exists={self.exists})"
+        )
+
+    #  ---- the verbs ------------------------------------------------------
+
+    def _report(self, status: int, file_access: Any | None) -> None:
+        """Write `fs-reply` here and, when given one, into the caller's field."""
+        self._fs_reply = status
+        if file_access is not None:
+            file_access.fs_reply = status
+
+    def open_extend(self, file_access: Any | None = None) -> None:
+        """`open extend`  [sales/sl055.cbl:L359], [purchase/pl055.cbl:L301].
+
+        Append: the existing records survive and the write position is the end.
+        Succeeds only if the file EXISTS, because neither `SELECT` is `OPTIONAL`;
+        otherwise it reports `FS_REPLY_OPEN_NOT_FOUND` and leaves the file
+        closed, which is what the producer's next statement tests for.
+        """
+        if not self.exists:
+            self._open_mode = OpenMode.CLOSED
+            self._report(FS_REPLY_OPEN_NOT_FOUND, file_access)
+            return
+        self._open_mode = OpenMode.EXTEND
+        self._next_record_pointer = len(self._records)
+        self._report(FS_REPLY_OK, file_access)
+
+    def open_output(self, file_access: Any | None = None) -> None:
+        """`open output`  [sales/sl055.cbl:L362], [sales/sl060.cbl:L677].
+
+        CREATES OR TRUNCATES, which is what `OPEN OUTPUT` on a sequential file
+        means. It is both the producers' create-on-first-run fallback and the
+        consumers' clear-down once the transfer to OTM3 / OTM5 is complete
+        [sales/sl060.cbl:L677], [purchase/pl060.cbl:L605].
+        """
+        self.exists = True
+        self._records.clear()
+        self._open_mode = OpenMode.OUTPUT
+        self._next_record_pointer = 0
+        self._report(FS_REPLY_OK, file_access)
+
+    def open_input(self, file_access: Any | None = None) -> None:
+        """`open input`  [sales/sl060.cbl:L480], [purchase/pl060.cbl:L421].
+
+        Positions at the FIRST record. A file the producer never created reports
+        `FS_REPLY_OPEN_NOT_FOUND` for the same reason `open_extend` does, and the
+        consumer's own read then sees the at-end condition rather than a record.
+        """
+        if not self.exists:
+            self._open_mode = OpenMode.CLOSED
+            self._report(FS_REPLY_OPEN_NOT_FOUND, file_access)
+            return
+        self._open_mode = OpenMode.INPUT
+        self._next_record_pointer = 0
+        self._report(FS_REPLY_OK, file_access)
+
+    def write(self, record: RecordT, file_access: Any | None = None) -> None:
+        """`write`  [sales/sl055.cbl:L681], [purchase/pl055.cbl:L587].
+
+        A SNAPSHOT IS APPENDED, NOT THE RECORD AREA ITSELF. A COBOL `WRITE`
+        transfers the record area's BYTES to the file and the producer then goes
+        on mutating that same area for the next invoice, so appending the live
+        object would leave every element of the sequence aliasing the last one
+        written.
+        """
+        if self._open_mode not in (OpenMode.EXTEND, OpenMode.OUTPUT):
+            self._report(FS_REPLY_WRITE_NOT_OPEN, file_access)
+            return
+        self._records.append(copy.deepcopy(record))
+        self._next_record_pointer = len(self._records)
+        self._report(FS_REPLY_OK, file_access)
+
+    def read_next(self, file_access: Any | None = None) -> RecordT | None:
+        """`read ... at end`  [sales/sl060.cbl:L484], [purchase/pl060.cbl:L425].
+
+        Returns the next record and reports success, or returns None and reports
+        `FS_REPLY_AT_END` when the sequence is exhausted - which is the `AT END`
+        branch both consumers take to their main-end paragraph.
+
+        A READ while the file is not open for input reports
+        `FS_REPLY_READ_NOT_READABLE` and returns None, matching the value
+        `LineSequentialWorkFile` reports for the same misuse rather than
+        inventing a second vocabulary alongside it.
+        """
+        if self._open_mode is not OpenMode.INPUT:
+            self._report(FS_REPLY_READ_NOT_READABLE, file_access)
+            return None
+        if self._next_record_pointer >= len(self._records):
+            self._report(FS_REPLY_AT_END, file_access)
+            return None
+        record = self._records[self._next_record_pointer]
+        self._next_record_pointer += 1
+        self._report(FS_REPLY_OK, file_access)
+        return copy.deepcopy(record)
+
+    def close(self, file_access: Any | None = None) -> None:
+        """`close`  [sales/sl055.cbl:L501], [sales/sl060.cbl:L613].
+
+        Closes WITHOUT discarding: the records are the deliverable the consumer
+        opens the same file to read. Only `open_output` empties the sequence.
+        """
+        self._open_mode = OpenMode.CLOSED
+        self._next_record_pointer = 0
+        self._report(FS_REPLY_OK, file_access)
+
+
+def open_item_work_file(
+    name: str, record_type: type[RecordT]
+) -> OpenItemWorkFile[RecordT]:
+    """Declare one open-item work file - the equivalent of its `SELECT` taking effect.
+
+    A NEW FILE EVERY CALL. Nothing is cached, memoised or held at module scope,
+    for the reason `general_ledger_work_files` gives: rule R-6 requires two runs
+    of the same scenario under the same pinned clock to produce byte-identical
+    results, and a shared sequence would carry one run's invoices into the next
+    without anything failing.
+
+    Args:
+        name: The assigned name - `OPEN_ITEM_2_NAME`, `OPEN_ITEM_4_NAME`, or
+            whatever `file-18` / `file-28` resolves to in the caller's
+            `File-Defs`.
+        record_type: The record description the sequence carries.
+
+    Returns:
+        A closed, empty, not-yet-existing work file. Not existing is the correct
+        initial state: it is what makes the producer's first `OPEN EXTEND` report
+        `FS_REPLY_OPEN_NOT_FOUND` and take the create fallback
+        [sales/sl055.cbl:L360-L362], [purchase/pl055.cbl:L302-L304].
+    """
+    return OpenItemWorkFile(name, record_type)
 
 
 #  THE GROUP MOVE THE `SORT` VERB PERFORMS AT ITS TWO BOUNDARIES

@@ -339,9 +339,9 @@ DETERMINISM IS THE PRODUCT  (rule R-6)
 ======================================
 Agent Action Plan section 0.8.5: "Two runs of the same scenario under the
 same pinned clock produce byte-identical dumps, proven by
-`tests/determinism/test_two_runs_byte_identical.py`." That determinism
-suite is written at a later boundary; the property it will assert is the
-one this module is built to preserve.
+`tests/determinism/test_two_runs_byte_identical.py`." That suite is an
+Agent Action Plan deliverable this checkout does not carry; the property it
+asserts is the one this module is built to preserve.
 
 NOT ONE BYTE OF NON-REPRODUCIBLE CONTENT MAY APPEAR IN A NORMALISED FILE.
 There is no wall-clock reading, no host name, no process identifier, no
@@ -433,12 +433,14 @@ FURTHER READING
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import json
 import os
 import re
 import shutil
 import sys
+import tempfile
 from collections.abc import Mapping, MutableSequence, Sequence
 from dataclasses import dataclass
 from decimal import Context, Decimal, InvalidOperation, ROUND_HALF_UP
@@ -873,10 +875,22 @@ def _write_text_securely(text: str, target: Path, staging: Path) -> None:
     except BaseException:
         try:
             os.close(descriptor)
-        except OSError:
-            # Already closed by the context manager. Swallowed so the real
-            # failure, re-raised below, is the one the caller sees.
-            pass
+        except OSError as close_error:
+            # NOT SWALLOWED SILENTLY. `EBADF` is the expected, uninteresting
+            # case - the context manager above already closed the descriptor.
+            # Anything else means the descriptor could not be released, which
+            # is REPORTED: a cleanup failure that leaves no trace is how a
+            # leaked descriptor or a full filesystem stays invisible. The
+            # original failure still propagates, unchanged, from the `raise`
+            # below.
+            if close_error.errno != errno.EBADF:
+                print(
+                    f"harness/normalize.py: warning: could not close the "
+                    f"staging descriptor for {staging} while handling an "
+                    f"earlier failure: errno {close_error.errno} "
+                    f"({os.strerror(close_error.errno or 0)})",
+                    file=sys.stderr,
+                )
         staging.unlink(missing_ok=True)
         raise
     os.replace(staging, target)
@@ -1918,10 +1932,14 @@ class DateTextOutcome:
             or the value UNCHANGED when it did not.
         reason: `None` when the value matched, otherwise the deterministic
             explanation that goes into the findings report.
+        category: `None` when the value matched, otherwise one of the four
+            `_CATEGORY_*` tokens - the console-safe half of `reason`, which for
+            two of the categories quotes bytes of the value itself.
     """
 
     value: str
     reason: str | None
+    category: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1936,7 +1954,10 @@ class DateTextFinding:
         value: The value as it arrived at job 3 - that is, after job 1
             removed trailing spaces - and as it was written out
             unchanged.
-        reason: Why it did not match its canonical shape.
+        reason: Why it did not match its canonical shape. May quote bytes of
+            `value`, so it belongs only in the 0600 report.
+        category: The console-safe classification of `reason`, one of the four
+            `_CATEGORY_*` tokens.
     """
 
     table: str
@@ -1944,6 +1965,7 @@ class DateTextFinding:
     row_index: int
     value: str
     reason: str
+    category: str = ""
 
 
 def canonicalise_date_text(
@@ -2007,7 +2029,9 @@ def canonicalise_date_text(
     if specification.form == _FORM_DATE:
         match = _DATE_TEXT_PATTERN.match(value)
         if match is None:
-            return DateTextOutcome(value, _date_text_reason(value))
+            return DateTextOutcome(
+                value, _date_text_reason(value), _date_text_category(value)
+            )
         # Rebuilt from the parsed components rather than returned as
         # found, so the canonical separator and the two-digit component
         # rendering are asserted by construction.
@@ -2025,7 +2049,9 @@ def canonicalise_date_text(
     if specification.form == _FORM_PERIOD:
         match = _PERIOD_TEXT_PATTERN.match(value)
         if match is None:
-            return DateTextOutcome(value, _period_text_reason(value))
+            return DateTextOutcome(
+                value, _period_text_reason(value), _period_text_category(value)
+            )
         return DateTextOutcome(match.group("digits"), None)
 
     raise SchemaParseError(
@@ -2035,11 +2061,63 @@ def canonicalise_date_text(
     )
 
 
+#  THE REASON CATEGORIES. A fixed four-token vocabulary, and the ONLY part of a
+#  finding's explanation that may reach a console: two of the four full reasons
+#  below quote bytes of the value itself - the separator characters and, by way
+#  of the length, its shape - which is live accounting data and belongs in the
+#  0600 report alone. `summarise_findings` carries the CATEGORY; `render_report`
+#  carries the reason. The classifier is the single place the branch lives, and
+#  each reason function dispatches on its result, so the two cannot drift apart.
+_CATEGORY_EMPTY: Final[str] = "empty-after-job-1"
+_CATEGORY_LENGTH: Final[str] = "wrong-length"
+_CATEGORY_SEPARATOR: Final[str] = "unexpected-separator"
+_CATEGORY_COMPONENT: Final[str] = "non-canonical-component"
+
+
+def _date_text_category(value: str) -> str:
+    """Classify why an eight-character date text is not canonical.
+
+    Args:
+        value: The non-canonical value, after job 1.
+
+    Returns:
+        One of the four `_CATEGORY_*` tokens. Carries no byte of `value`, so it
+        is safe on a console.
+    """
+    if not value:
+        return _CATEGORY_EMPTY
+    if len(value) != 8:
+        return _CATEGORY_LENGTH
+    if (value[2], value[5]) != (
+        _DATE_TEXT_SEPARATOR,
+        _DATE_TEXT_SEPARATOR,
+    ):
+        return _CATEGORY_SEPARATOR
+    return _CATEGORY_COMPONENT
+
+
+def _period_text_category(value: str) -> str:
+    """Classify why a four-character period text is not canonical.
+
+    Args:
+        value: The non-canonical value, after job 1.
+
+    Returns:
+        One of the four `_CATEGORY_*` tokens. Carries no byte of `value`.
+    """
+    if not value:
+        return _CATEGORY_EMPTY
+    if len(value) != 4:
+        return _CATEGORY_LENGTH
+    return _CATEGORY_COMPONENT
+
+
 def _date_text_reason(value: str) -> str:
     """Explain why an eight-character date text is not canonical.
 
     The explanation is a function of the value alone, so the findings
-    report is deterministic (rule R-6).
+    report is deterministic (rule R-6). IT QUOTES THE VALUE for two of the
+    four categories, which is why it goes only into the 0600 report file.
 
     Args:
         value: The non-canonical value, after job 1.
@@ -2047,13 +2125,14 @@ def _date_text_reason(value: str) -> str:
     Returns:
         The reason, naming the specific deviation.
     """
-    if not value:
+    category = _date_text_category(value)
+    if category == _CATEGORY_EMPTY:
         return (
             "empty after job 1 removed trailing spaces, so the stored "
             "value was all spaces; the canonical form is NN/NN/NN "
             "[copybooks/wspost.cob:L18]"
         )
-    if len(value) != 8:
+    if category == _CATEGORY_LENGTH:
         return (
             f"{len(value)} character(s), not the 8 of the canonical "
             f"NN/NN/NN form. NEITHER EXPANDED NOR CONTRACTED: the "
@@ -2062,11 +2141,10 @@ def _date_text_reason(value: str) -> str:
             f"in docs/migration/ambiguity-resolutions.md, never by this "
             f"normaliser"
         )
-    separators = (value[2], value[5])
-    if separators != (_DATE_TEXT_SEPARATOR, _DATE_TEXT_SEPARATOR):
+    if category == _CATEGORY_SEPARATOR:
         return (
-            f"separators {separators!r} at positions 3 and 6 rather than "
-            f"{_DATE_TEXT_SEPARATOR!r}. Left as found: "
+            f"separators {(value[2], value[5])!r} at positions 3 and 6 "
+            f"rather than {_DATE_TEXT_SEPARATOR!r}. Left as found: "
             f"[sales/sl060.cbl:L1071] copies `u-date (1:6)` verbatim, so "
             f"a different separator is real information rather than a "
             f"rendering artefact"
@@ -2087,13 +2165,14 @@ def _period_text_reason(value: str) -> str:
     Returns:
         The reason, naming the specific deviation.
     """
-    if not value:
+    category = _period_text_category(value)
+    if category == _CATEGORY_EMPTY:
         return (
             "empty after job 1 removed trailing spaces, so the stored "
             "value was all spaces; the canonical form is four digits "
             "[copybooks/wssystem.cob:L145]"
         )
-    if len(value) != 4:
+    if category == _CATEGORY_LENGTH:
         return (
             f"{len(value)} character(s), not the 4 digits the copybooks "
             f"declare as `pic 9(4)`. NOT zero-padded and NOT truncated "
@@ -2458,6 +2537,7 @@ def _canonicalise_value(
                     row_index=row_index,
                     value=outcome.value,
                     reason=outcome.reason,
+                    category=outcome.category or "",
                 )
             )
         return outcome.value
@@ -3013,9 +3093,20 @@ def write_manifest(manifest: Mapping[str, Any], path: Path | str) -> Path:
     except OSError as exc:
         try:
             temporary.unlink(missing_ok=True)
-        except OSError:
-            # Best effort only; the real failure is re-raised below.
-            pass
+        except OSError as unlink_error:
+            # NOT SWALLOWED SILENTLY. The staging file surviving matters: it
+            # sits in the published tree, and `discover_tables` excludes it by
+            # its `_` prefix rather than by knowing it is rubbish, so a leftover
+            # one is invisible to the next stage while still occupying the
+            # directory. Reported here; the real failure is still the
+            # `DumpWriteError` raised below.
+            print(
+                f"harness/normalize.py: warning: the staging file "
+                f"{temporary} could not be removed after the manifest write "
+                f"failed: errno {unlink_error.errno} "
+                f"({os.strerror(unlink_error.errno or 0)})",
+                file=sys.stderr,
+            )
         raise DumpWriteError(
             f"could not write the completeness manifest {target}: {exc}"
         ) from exc
@@ -3438,6 +3529,132 @@ The five allow-listed columns, and no others:
 """
 
 
+def summarise_findings(
+    findings: Sequence[DateTextFinding],
+    *,
+    report_path: Path | None,
+    report_digest: str | None = None,
+) -> str:
+    """Render a VALUE-FREE summary of the job 3 findings, for stderr.
+
+    THE REASON THIS EXISTS. `render_report` quotes every unrecognised value
+    verbatim - that is its whole point, because an operator has to take the
+    exact bytes to the compiled oracle (rule R-6) - so the report carries live
+    accounting data and is written 0600 through `_write_text_securely`. Printing
+    those same bytes to stderr, which the composed recipe collects as a container
+    log, treated the identical content as public in one channel and private in
+    the other. This summary is what stderr gets instead: the counts, the TABLE
+    and COLUMN names, the four-token reason CATEGORY, the report's path and its
+    SHA-256 - all of which are frozen public metadata or a fixed vocabulary,
+    since every table and column name is already in the committed
+    `data_dictionary/acas_posting_dictionary.json`. The full `reason` is NOT on
+    stderr: for two of the four categories it quotes bytes of the value.
+
+    Args:
+        findings: The findings collected during normalisation.
+        report_path: Where the full report was written, or None when it could
+            not be written at all.
+        report_digest: The report file's SHA-256, which binds the pointer to the
+            bytes a reader will open (rule R-6). None when there is no file or
+            it could not be read back.
+
+    Returns:
+        The summary, ending in a newline; the EMPTY STRING when there are no
+        findings, so a clean run stays silent exactly as before.
+    """
+    if not findings:
+        return ""
+
+    #: table -> column -> CATEGORY -> count. The category and not the reason:
+    #: two of the four full reasons quote bytes of the value - the separator
+    #: characters, and the length - and this line is a console line. Deterministic:
+    #: `sorted` at every level, so the same findings always render to the same
+    #: bytes.
+    grouped: dict[str, dict[str, dict[str, int]]] = {}
+    for finding in findings:
+        by_column = grouped.setdefault(finding.table, {})
+        by_category = by_column.setdefault(finding.column, {})
+        key = finding.category or _CATEGORY_COMPONENT
+        by_category[key] = by_category.get(key, 0) + 1
+
+    lines: list[str] = [
+        f"harness/normalize.py: {len(findings)} job 3 finding(s); the "
+        f"unrecognised values are withheld from stderr"
+    ]
+    for table in sorted(grouped):
+        for column in sorted(grouped[table]):
+            categories = grouped[table][column]
+            detail = "; ".join(
+                f"{category} x{categories[category]}"
+                for category in sorted(categories)
+            )
+            lines.append(f"  {table}.{column}  {detail}")
+
+    if report_path is None:
+        lines.append(
+            "  the values could NOT be preserved: see the error above. "
+            "Re-run with --report PATH pointing somewhere writable."
+        )
+    elif report_digest is None:
+        lines.append(f"  the values are in {report_path} (mode 0600)")
+    else:
+        lines.append(
+            f"  the values are in {report_path} (mode 0600, "
+            f"sha256={report_digest})"
+        )
+    lines.append(
+        "  a date-text form this module does not recognise is a question "
+        "for the compiled oracle (rule R-6)."
+    )
+    return "".join(f"{line}\n" for line in lines)
+
+
+def _fallback_report_path(source: Path) -> Path:
+    """Return a private path to hold the findings report when none was asked for.
+
+    The counterpart of `harness/diff_states.py`'s helper of the same name, and
+    for the same reason: the report quotes live accounting data, so it belongs in
+    a 0600 file on EVERY path rather than on stderr when no `--report` was given.
+    `tempfile.mkdtemp` creates its directory 0700 by construction with a name no
+    other process could have predicted.
+
+    Args:
+        source: The source directory, used only to name the file so that the two
+            sides of a comparison are distinguishable.
+
+    Returns:
+        A path inside a fresh private directory.
+
+    Raises:
+        OSError: No private directory could be created. The caller then prints
+            the value-free summary with no pointer; it does NOT fall back to
+            printing the values.
+    """
+    directory = Path(tempfile.mkdtemp(prefix="acas-normalize-"))
+    return directory / f"{_report_label(source)}-{_REPORT_FILENAME}"
+
+
+def _report_digest(path: Path) -> str | None:
+    """Return the lower-case hex SHA-256 of a written report, or None.
+
+    Args:
+        path: The report file.
+
+    Returns:
+        The digest, or None when the file could not be read back - which is
+        reported by the caller and is never fatal, because no verdict depends
+        on it.
+    """
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(_DIGEST_BLOCK), b""):
+                digest.update(block)
+    except OSError:
+        return None
+    return digest.hexdigest()
+
+
 def render_report(
     findings: Sequence[DateTextFinding],
     *,
@@ -3684,7 +3901,12 @@ def build_parser() -> argparse.ArgumentParser:
             + "/<source>-"
             + _REPORT_FILENAME
             + ", named for the source directory so the two sides do not "
-            "overwrite one another. Findings always go to stderr as well."
+            "overwrite one another. The file is mode 0600 because it quotes "
+            "the unrecognised values verbatim; when neither this option nor "
+            "$ACAS_OUT is set the report is written to a private temporary "
+            "directory instead, never to stderr. STDERR always gets a "
+            "value-free summary naming the tables, columns, reasons, counts, "
+            "the report path and its SHA-256."
         ),
     )
     parser.add_argument(
@@ -4172,22 +4394,40 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     exit_code = EX_OK
     report = render_report(findings, source=str(source))
-    if findings:
-        # Loud on stderr as well as in the file: a date-text form this
-        # module does not recognise is a question for the compiled oracle
-        # (rule R-6), and an operator who never opens the file must still
-        # see it.
-        print(report, file=sys.stderr)
+
+    #  THE VALUES GO TO A FILE, NEVER TO STDERR - on every path, and there is no
+    #  option that changes it. `render_report` quotes each unrecognised value
+    #  verbatim, which is what an operator needs in order to take the exact bytes
+    #  to the compiled oracle (rule R-6), so the report carries live accounting
+    #  data and is written 0600 through `_write_text_securely` - staged
+    #  `O_EXCL | O_NOFOLLOW` and replaced atomically. Printing the same bytes to
+    #  stderr, which the composed recipe collects as a container log, treated
+    #  identical content as private in one channel and public in the other; that
+    #  inconsistency was the disclosure. `summarise_findings` is what stderr gets
+    #  instead, and it is loud enough to serve the reason the print existed: an
+    #  operator who never opens the file still sees every table, column, reason
+    #  and count, plus where the values are and the digest that proves the file
+    #  they open is the file this run wrote.
+    #
+    #  WHEN NO `--report` AND NO $ACAS_OUT WAS GIVEN, a private file is still
+    #  written - `_fallback_report_path` creates a 0700 directory for it - so the
+    #  values are never lost and never printed. If even that fails, the summary
+    #  says so and the findings themselves are still fully described.
+    if findings and report_path is None:
+        try:
+            report_path = _fallback_report_path(source)
+        except OSError as exc:
+            print(
+                f"harness/normalize.py: neither --report nor {_ENV_OUT} is "
+                f"set and no private directory could be created for the "
+                f"findings report, so the unrecognised values cannot be "
+                f"preserved: {exc}",
+                file=sys.stderr,
+            )
+            exit_code = EX_WRITE
+
     if report_path is not None:
         try:
-            # Written through the same secure primitive as a normalised
-            # dump. A findings report quotes the values it could not
-            # classify - a date text this module does not recognise is
-            # quoted verbatim so the operator can take it to the oracle -
-            # so it carries accounting data too and gets 0600, staged
-            # `O_EXCL | O_NOFOLLOW`, and an atomic replace. Before this it
-            # was a plain `open("w")`: no staging, so a reader could see a
-            # half-written report, and no mode control at all.
             _make_output_directory(report_path.parent)
             staging = (
                 report_path.parent
@@ -4201,16 +4441,25 @@ def main(argv: Sequence[str] | None = None) -> int:
                 file=sys.stderr,
             )
             exit_code = EX_WRITE
+            report_path = None
         else:
             _progress(
                 f"harness/normalize.py: {len(findings)} job 3 finding(s) "
                 f"recorded in {report_path}"
             )
-    elif findings:
+
+    if findings:
         print(
-            f"harness/normalize.py: no report file was written because "
-            f"neither --report nor {_ENV_OUT} is set. The findings above "
-            f"are the whole record.",
+            summarise_findings(
+                findings,
+                report_path=report_path,
+                report_digest=(
+                    _report_digest(report_path)
+                    if report_path is not None
+                    else None
+                ),
+            ),
+            end="",
             file=sys.stderr,
         )
 

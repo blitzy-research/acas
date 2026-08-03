@@ -486,6 +486,7 @@ from acas_posting.dal.connection import (
     mysql_1980_close,
     mysql_1999_exit,
     quote_identifier,
+    transport_category,
 )
 from acas_posting.dal.cursor_state import (
     SEQUENTIAL_READ_START,
@@ -509,8 +510,8 @@ from acas_posting.dal.status import (
     WeError,
     end_of_file_status,
     is_duplicate_key_bridge_level,
+    log_file_handler_record,
     mysql_1100_db_error,
-    sanitise_for_log,
 )
 from acas_posting.dictionary import loader
 from acas_posting.records.file_access import FileAccess
@@ -950,7 +951,9 @@ class HandlerState:
         allow_frozen_placeholder_credentials: Whether an open may proceed with
             the placeholder credentials the copybook ships as ``VALUE`` clauses
             [copybooks/wssystem.cob:L137-L139]. Also no COBOL counterpart, for
-            the same reason.
+            the same reason. ``None`` - the default - declares nothing and defers
+            to the one policy
+            :func:`acas_posting.dal.connection.set_connection_policy` installed.
     """
 
     cobol_file_status: int = 0
@@ -959,7 +962,7 @@ class HandlerState:
     connection: Any | None = None
     cursors: CursorStateTable = field(default_factory=CursorStateTable)
     transport: TransportSecurity | None = None
-    allow_frozen_placeholder_credentials: bool = False
+    allow_frozen_placeholder_credentials: bool | None = None
     mysql_count_rows: dict[str, int] = field(default_factory=dict)
     system_record: SystemRecord | None = None
 
@@ -1017,14 +1020,14 @@ def reset_handler_state() -> None:
     _STATE.connection = None
     _STATE.cursors = CursorStateTable()
     _STATE.transport = None
-    _STATE.allow_frozen_placeholder_credentials = False
+    _STATE.allow_frozen_placeholder_credentials = None
     _LOG.debug("acas000 WORKING-STORAGE reset; A and Cobol-File-Status zeroed")
 
 
 def configure_transport(
     transport: TransportSecurity | None,
     *,
-    allow_frozen_placeholder_credentials: bool = False,
+    allow_frozen_placeholder_credentials: bool | None = None,
 ) -> None:
     """Set the transport policy the next open will use.
 
@@ -1035,10 +1038,12 @@ def configure_transport(
 
     Args:
         transport: The policy to hand :func:`~acas_posting.dal.connection
-            .mysql_1000_open`, or ``None`` to let it apply its own default.
+            .mysql_1000_open`, or ``None`` - the ordinary case - to defer to the
+            ONE policy the deployment installed with
+            :func:`acas_posting.dal.connection.set_connection_policy`.
         allow_frozen_placeholder_credentials: Whether the placeholder
             credentials the copybook ships [copybooks/wssystem.cob:L137-L139]
-            may be used to connect.
+            may be used to connect. ``None`` defers to that same policy.
     """
     _STATE.transport = transport
     _STATE.allow_frozen_placeholder_credentials = (
@@ -2401,33 +2406,46 @@ def ca_process_logs(
     control flow and must not appear in any table dump." This function does
     exactly that and nothing else.
 
-    RECORDED OMISSION: ``Log-File-Rec-Written``
-    [copybooks/Test-Data-Flags.cob] is a counter ``fhlogger`` maintains. Since
-    ``fhlogger`` is out of scope, its side effect on that counter is NOT
-    invented here. Nothing in the migrated posting cycle reads it.
+    ONE ADAPTER FOR ALL TWENTY HANDLERS. The record is composed by
+    :func:`acas_posting.dal.status.log_file_handler_record`, not here, so the
+    field set, the level and the counter arithmetic are the same in every handler
+    instead of being twenty independent readings of the same one-line paragraph.
+    That function's docstring records which three of ``Logging-Data``'s eleven
+    fields are deliberately withheld - ``WS-File-Key``, ``WS-Log-Where`` and
+    ``SQL-Msg`` - and why: the first is the record key of a business entity, and
+    the other two are free text this layer cannot reason about.
+
+    ``Log-File-Rec-Written`` [copybooks/Test-Data-Flags.cob:L20] IS NOW ADVANCED,
+    and its omission here was a defect rather than a decision. ``fhlogger`` owns
+    the counter and is out of scope, but the counter itself lives in
+    ``ACAS-DAL-Common-data``, which this function is handed and which the caller
+    keeps - so leaving it untouched made the shared block diverge from what the
+    frozen run would hold. The adapter advances it by one modulo
+    :data:`~acas_posting.dal.status.FH_LOG_REC_MODULUS`, which is the wrap its
+    ``pic 9(6)`` imposes.
 
     Args:
         file_access: The shared ``File-Access`` block, read only.
         dal_common: The shared flags block. ``SW-Testing`` decides whether the
             caller performs this paragraph at all, which is why this function
-            does not test it again - the COBOL tests it at each call site.
+            does not test it again - the COBOL tests it at each call site. Its
+            ``Log-File-Rec-Written`` field is advanced by the adapter.
     """
     logging_data = file_access.logging_data
-    _LOG.debug(
-        "fhlogger system=%s file=%s para=%s fn=%s at=%s key=%s "
-        "reply=%s werr=%s sqlerr=%s sqlstate=%s where=%s msg=%s",
-        logging_data.ws_log_system,
-        logging_data.ws_log_file_no,
-        logging_data.ws_no_paragraph,
-        file_access.file_function,
-        file_access.access_type,
-        sanitise_for_log(logging_data.ws_file_key),
-        file_access.fs_reply,
-        file_access.we_error,
-        sanitise_for_log(logging_data.sql_err),
-        sanitise_for_log(logging_data.sql_state),
-        sanitise_for_log(logging_data.ws_log_where),
-        sanitise_for_log(logging_data.sql_msg),
+    log_file_handler_record(
+        _LOG,
+        program="acas000",
+        paragraph="Ca-Process-Logs",
+        log_system=logging_data.ws_log_system,
+        log_file_no=logging_data.ws_log_file_no,
+        no_paragraph=logging_data.ws_no_paragraph,
+        file_function=file_access.file_function,
+        access_type=file_access.access_type,
+        fs_reply=file_access.fs_reply,
+        we_error=file_access.we_error,
+        sql_err=logging_data.sql_err,
+        sql_state=logging_data.sql_state,
+        dal_common=dal_common,
     )
 
 
@@ -2550,13 +2568,20 @@ def _ba020_process_open(
         cobol_string_delimited_by_space(rdb_data.db_port),
         cobol_string_delimited_by_space(rdb_data.db_socket),
     )
+    #  THE ENDPOINT IS NOT NAMED, ONLY CLASSIFIED. The four fields this record
+    #  used to interpolate - `DB-Schema`, `DB-Host`, `DB-Port` and `DB-Socket`
+    #  [copybooks/wsfnctn.cob:L57-L62] - are the deployment's identity, and an
+    #  operator needs none of it to act on a log line: it is written down in the
+    #  deployment contract they configured. Printing it hands an attacker the
+    #  reconnaissance half of the work for free (CWE-532) and makes the same event
+    #  read differently on every deployment. `transport_category` answers the only
+    #  question the record has to answer - can the credentials and the posted
+    #  figures be read off the wire - with one of five fixed tokens.
     _LOG.debug(
-        "%s open: base=%s host=%s port=%s socket=%s",
+        "%s open: transport=%s",
         bridge.program,
-        marshalled[0],
-        marshalled[1],
-        marshalled[4],
-        marshalled[5],
+        transport_category({"host": marshalled[1], "unix_socket": marshalled[5]}
+                           if marshalled[5] else {"host": marshalled[1]}),
     )
     logging_data = file_access.logging_data
     logging_data.ws_no_paragraph = BRIDGE_PARAGRAPH_NO_OPEN
@@ -3253,12 +3278,14 @@ def _execute_command(
             sql_state=str(getattr(error, "sqlstate", "") or ""),
             command=statement,
         )
-        _LOG.warning(
-            "%s: the command failed at the driver; errno=%s sqlstate=%s",
-            bridge.program,
-            sanitise_for_log(status.sql_err),
-            sanitise_for_log(status.sql_state),
-        )
+        #  NO RECORD HERE. `mysql_1100_db_error` has just emitted THE operator
+        #  record for this failure - it stands in for the frozen
+        #  `Mysql-1110-Report-Problem` [copybooks/mysql-procedures.cpy:L130-L137]
+        #  and carries the status pair, the SQLSTATE, the error number and the
+        #  stable category. A second record here reported the same three fields
+        #  again, one layer up, and an operator had to correlate two lines for one
+        #  fault. One failure, one record - see the safe-event schema in
+        #  `dal/status.py`.
         state = handler_state()
         state.mysql_count_rows[bridge.program] = 0
         return _CommandOutcome(
@@ -5227,13 +5254,23 @@ def ba012_test_ws_rec_size_2(
         file_access.we_error = int(WeError.RECORD_SIZE_MISMATCH)
         file_access.fs_reply = int(FsReply.ERROR)
     if file_access.we_error == int(WeError.RECORD_SIZE_MISMATCH):
-        #  The two `display ... at` statements and the `accept Accept-Reply at
-        #  2433` [common/acas000.cbl:L537-L549] are presentation with no
-        #  database effect, so Agent Action Plan section 0.3.4 makes them a log
-        #  record and drops the pause.
+        #  ONE OF THE TWO `display`s BECOMES THIS RECORD; THE OTHER IS DROPPED
+        #  WITH THE PAUSE. Agent Action Plan section 0.3.4 splits the block
+        #  [common/acas000.cbl:L537-L549] three ways and the split is decided by
+        #  what each literal SAYS:
+        #    * `AC902 Program Error: Temp rec = ` [common/acas000.cbl:L280] plus
+        #      the two lengths is the SUBSTANTIVE diagnostic - it names the fault
+        #      and the evidence - so it becomes this log record.
+        #    * `AC901 Note error and hit return` [common/acas000.cbl:L279] is an
+        #      acknowledgement prompt and NOTHING ELSE: it instructs the operator
+        #      to press a key. It is dropped, together with the `accept
+        #      Accept-Reply at 2433` [:L547] it introduces.
+        #    * `go to ba-rdbms-exit` [:L548] is the control transfer, and it is
+        #      PRESERVED - the caller returns without reaching the bridge.
+        #  The two lengths are record-layout constants of this migration, not data.
         _LOG.error(
-            "AC902 %s < System-Rec = %s; AC901 - the caller must stop "
-            "[common/acas000.cbl:L536-L546]",
+            "AC902 Program Error: Temp rec = %s < System-Rec = %s - the caller "
+            "must stop [common/acas000.cbl:L536-L546]",
             state.a,
             state.b,
         )
@@ -5354,14 +5391,16 @@ def ba015_test_ends(
         #  GO TO class 3 - the `evaluate` simply ends and control reaches
         #  `ba-rdbms-exit` [common/acas000.cbl:L600, :L604]. No bridge call, no
         #  status write, no counter, no trace - anomaly N8's third face.
-        _LOG.error(
-            "ba015-Test-Ends: File-Key-No %s matches no arm "
-            "[common/acas000.cbl:L574-L600], which has no `when other`, so no "
-            "bridge is called and no status is reported; the guard at "
-            "[common/acas000.cbl:L333-L341] covers only File-Function 4, 5 "
-            "and 7 (anomaly N8)",
-            file_key_no,
-        )
+        #
+        #  AND NO LOG RECORD EITHER, WHICH IS THE ANOMALY. "No trace" is the whole
+        #  content of N8's third face: the `evaluate` has no `when other`
+        #  [common/acas000.cbl:L574-L600], so an out-of-range `File-Key-No` is
+        #  swallowed entirely and the caller's stale status pair is what it reads
+        #  back. A record here would be a diagnostic the compiled program cannot
+        #  produce and would make the defect look handled (rule R-4). It is
+        #  recorded, with its locators, in `docs/migration/anomaly-log.md`, and the
+        #  guard at [common/acas000.cbl:L333-L341] - which covers only
+        #  File-Function 4, 5 and 7 - is why nothing upstream catches it.
         return
     #  Each arm is a `call`, class 3 of the taxonomy - it runs to the called
     #  program's own `exit program` and returns here.

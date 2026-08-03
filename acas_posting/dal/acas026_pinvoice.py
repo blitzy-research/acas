@@ -1277,6 +1277,13 @@ _RECORD_SIZE_DIGITS: Final[int] = 4
 #: depending only on which path served the call. Both are reproduced verbatim at
 #: their own sites; see :func:`aa020_process_open`, :func:`aa030_process_close`,
 #: :func:`ba020_process_open` and :func:`ba030_process_close`.
+#:
+#: DECLARED AND DELIBERATELY UNREFERENCED. The declaration is a fact about the frozen
+#: ``Error-Messages`` group [common/acas026.cbl:L208] and R-5 keeps it verbatim, but
+#: the literal's whole text is the acknowledgement half of the record-size
+#: diagnostic - it asks the operator to hit return, which is the ``accept`` Agent
+#: Action Plan section 0.3.4 drops - so no log record quotes it. Only the assembled
+#: ``PL907`` diagnostic reaches a record.
 _ERROR_MESSAGE_PL901: Final[str] = "PL901 Note error and hit return"
 _ERROR_MESSAGE_PL907: Final[str] = "PL907 Program Error: Temp rec = "
 
@@ -3864,14 +3871,19 @@ def _execute(
             )
     except Exception as error:  # every driver failure takes the capture path
         captured = _capture_driver_error(error, statement)
-        _LOG.warning(
-            "%s statement failed at the driver and is reported through the "
-            "bridge's own failure arm per [common/acas026.cbl:L617]: "
-            "errno=%s sqlstate=%s category=%s",
-            BRIDGE_NAME,
-            status.sanitise_for_log(captured.sql_err),
-            status.sanitise_for_log(captured.sql_state),
-            status.db_error_log_category(captured.sql_err, captured.sql_state),
+        # ONE ERROR, through the shared reporter, so this failure renders with the
+        # same fields in the same order as every other handler's. The record already
+        # carried no driver text and no statement; WARNING was the wrong LEVEL for
+        # something the caller must handle as a failure.
+        status.log_handler_failure(
+            _LOG,
+            program=BRIDGE_NAME,
+            paragraph="MYSQL-1210-COMMAND",
+            locator="[copybooks/mysql-procedures.cpy:L164-L178]",
+            sql_err=captured.sql_err,
+            sql_state=captured.sql_state,
+            detail="the statement failed at the driver and is reported through "
+            "the bridge's own failure arm [common/acas026.cbl:L617]",
         )
         return ExecutionResult(count_rows=0, error=captured)
 
@@ -4621,15 +4633,22 @@ def _display_message_1(
     """`if Testing-2 display Display-Message-1 with erase eos end-if`.
 
     Seven identical sites, listed in :func:`_testing_2`. The COBOL paints
-    `WS-Log-Where` on a curses screen; the migrated cycle is headless, so the same
-    information goes to the log at debug level. No control flow depends on it and
-    nothing reaches a table through it.
+    `WS-Log-Where` on a curses screen.
+
+     THE GUARD IS PRESERVED AND NOTHING IS EMITTED. `WS-Log-Where` is a
+    rendered SQL predicate - for these two tables one carrying `PINVOICE-KEY` or
+    `IL-LINE-KEY` as a literal - so it is SQL text and a business key in one field,
+    which the safe-event schema in :mod:`acas_posting.dal.status` forbids outright
+    (CWE-532). `redact_for_log` could not make it safe: it escapes control characters
+    and recognises connection-message shapes, and a predicate is neither.
+
+    The paragraph, its `Testing-2` guard and all seven call sites are kept, so a
+    reader following the frozen source still finds every `display`. `WS-Log-Where` is
+    still BUILT and still stored, because the bridge's own statements read it - the
+    disposition is unchanged (R-3).
     """
     if _testing_2(dal_common):
-        _LOG.debug(
-            "Display-Message-1: %s",
-            status.redact_for_log(file_access.logging_data.ws_log_where),
-        )
+        del file_access  # the predicate is deliberately not rendered into a record
 
 
 def _set_status(file_access: FileAccess, fs_reply: int, we_error: int) -> None:
@@ -4724,13 +4743,11 @@ def ba_acas_dal_process(
     so no interactive pause is being removed with it. Control then FALLS THROUGH
     into `ba010-Initialise`, which is a paragraph and not a separate entry point.
     """
-    _LOG.debug(
-        "%s entered for File-Function %s; the section's curses geometry "
-        "[common/plinvoiceMT.cbl:L483-L494] has no database effect and is "
-        "omitted",
-        BRIDGE_NAME,
-        int(file_access.file_function),
-    )
+    #  NO RECORD HERE. Six statements were dropped and not one of them
+    #  displays anything, so a record announcing the drop is a record with no
+    #  counterpart in the frozen source (R-4) - and it fired on every relational
+    #  CALL. The omission is stated in the docstring above and in
+    #  `docs/migration/traceability.md`, which is where a reader looks for it.
     # Class 2 - fall-through, not a transfer: `ba010-Initialise.` follows with no
     # `go to` between them.
     return ba010_initialise(file_access, dal_common, pinvoice, context)
@@ -7128,18 +7145,27 @@ def ca_process_logs(
     this is the only logger. :func:`ca_process_logs_handler` records the other
     half of that contract.
     """
-    _LOG.info(
-        "fhlogger: system=%s file=%s paragraph=%s function=%s key=%s "
-        "fs-reply=%s we-error=%s sqlstate=%s where=%s",
-        int(WS_LOG_SYSTEM),
-        WS_LOG_FILE_NO_RDB,
-        int(file_access.logging_data.ws_no_paragraph),
-        int(file_access.file_function),
-        status.redact_for_log(file_access.logging_data.ws_file_key),
-        int(file_access.fs_reply),
-        int(file_access.we_error),
-        status.sanitise_for_log(file_access.logging_data.sql_state),
-        status.redact_for_log(file_access.logging_data.ws_log_where),
+    #  THE ONE ADAPTER, shared by every handler in this package, so the single
+    # legacy log this cycle produces reads the same whichever table wrote it. Two
+    # fields are WITHHELD: `WS-File-Key` is `PINVOICE-KEY` or `IL-LINE-KEY`, and
+    # `WS-Log-Where` is a predicate carrying it as a literal (CWE-532). It also
+    # advances `Log-File-Rec-Written` modulo one million, the range of the frozen
+    # `pic 9(6)` [copybooks/Test-Data-Flags.cob:L20], which this paragraph did not
+    # advance at all.
+    status.log_file_handler_record(
+        _LOG,
+        program=BRIDGE_NAME,
+        paragraph="Ca-Process-Logs",
+        log_system=int(WS_LOG_SYSTEM),
+        log_file_no=WS_LOG_FILE_NO_RDB,
+        no_paragraph=file_access.logging_data.ws_no_paragraph,
+        file_function=int(file_access.file_function),
+        access_type=int(file_access.access_type),
+        fs_reply=int(file_access.fs_reply),
+        we_error=int(file_access.we_error),
+        sql_err=file_access.logging_data.sql_err,
+        sql_state=file_access.logging_data.sql_state,
+        dal_common=dal_common,
     )
 
 
@@ -7855,11 +7881,19 @@ def aa040_process_read_next(
         context.invoice_key_raw = " " * 10
         file_access.logging_data.sql_err = " " * status.SQL_ERR_WIDTH
         file_access.logging_data.sql_msg = " " * status.SQL_MSG_WIDTH
-        # `stop "Cobol File EOF"  *> for testing` [:L372] - ``N-stop``, omitted.
-        _LOG.debug(
-            "acas026 aa040: `stop \"Cobol File EOF\"` [common/acas026.cbl:L372] "
-            "is a debugging halt on the flat-file path and is deliberately not "
-            "reproduced"
+        # `stop "Cobol File EOF"  *> for testing` [:L372] - ``N-stop``.
+        #  ONE ERROR, THROUGH THE ONE REPORTER, at the same level and in the
+        #  same words as every sibling handler. `STOP` with a literal DISPLAYS the
+        #  literal and then waits: the display is a record, only the WAIT is the
+        #  omission. DEBUG was both the wrong level for a production halt and a
+        #  different level from the same statement's record in acas006, acas007,
+        #  acas012 and acas019, so one event read as five.
+        status.log_cobol_stop(
+            _LOG,
+            program=HANDLER_NAME,
+            paragraph="aa040-Process-Read-Next",
+            literal="Cobol File EOF",
+            locator="[common/acas026.cbl:L372]",
         )
         # `go to aa999-main-exit` [:L373]. Class 2.
         return _HandlerLabel.AA999_MAIN_EXIT
@@ -8614,12 +8648,19 @@ def ba012_test_ws_rec_size_2(
         )[:_DISPLAY_BLK_WIDTH].ljust(_DISPLAY_BLK_WIDTH, " ")
         # `display Display-Blk at 2301 with erase eol` [:L579] with the
         # maintainer's own `*> BUT WILL REMIND ME TO SET IT UP correctly`, and
-        # `display PL901 at 2401 with erase eol` [:L580]. Neither has a database
-        # effect, so both become one log line under Agent Action Plan section 0.3.4.
+        # `display PL901 at 2401 with erase eol` [:L580]. THE TWO ARE NOT ONE LINE,
+        # because they are not the same kind of thing under Agent Action Plan
+        # section 0.3.4:
+        #   * [:L579] carries the assembled diagnostic - the substance - so ONE
+        #     record at ERROR.
+        #   * [:L580] carries `PL901`, whose whole text is "PL901 Note error and hit
+        #     return" [common/acas026.cbl:L208]: the acknowledgement half, paired
+        #     with the `accept` at [:L585]. 0.3.4 drops an acknowledgement pause
+        #     ENTIRELY, and quoting its text in a log line is still emitting it.
+        #   * [:L586]'s `go to ba-rdbms-exit` is CONTROL, and it is preserved below.
         _LOG.error(
-            "acas026 ba012 [common/acas026.cbl:L571-L580]: %s / %s",
+            "acas026 ba012 [common/acas026.cbl:L571-L579]: %s",
             status.sanitise_for_log(context.display_blk),
-            _ERROR_MESSAGE_PL901,
         )
         # `move  Display-Blk to SQL-Msg` [:L581] - PRESERVED, because `SQL-Msg` is a
         # data field the caller reads, not screen output.
@@ -8734,21 +8775,28 @@ def ca_process_logs_handler(
     [:L583]. Reproduced: this function is reached only from those three sites, and
     :func:`ca_process_logs` is the bridge's separate logger.
 
-    R-1: `fhlogger` is a COBOL program [common/fhlogger.cbl] and is NOT called.
-    Every field that can carry a key, a host name or an error message goes through
-    :func:`acas_posting.dal.status.redact_for_log` first.
+    R-1: `fhlogger` is a COBOL program [common/fhlogger.cbl] and is NOT called. The
+    record it would have written is emitted through the SAME ONE ADAPTER the bridge's
+    like-named paragraph uses, so the two render identically and differ only in the
+    program they name. `WS-File-Key` is WITHHELD rather than redacted: for these
+    tables it is the invoice key, and `redact_for_log` escapes a key rather than
+    removing it (CWE-532).
     """
-    _LOG.info(
-        "fhlogger(acas026): system=%s file=%s paragraph=%s function=%s "
-        "access=%s key=%s fs-reply=%s we-error=%s",
-        int(file_access.logging_data.ws_log_system),
-        int(file_access.logging_data.ws_log_file_no),
-        int(file_access.logging_data.ws_no_paragraph),
-        int(file_access.file_function),
-        int(file_access.access_type),
-        status.redact_for_log(file_access.logging_data.ws_file_key),
-        int(file_access.fs_reply),
-        int(file_access.we_error),
+    logging_data = file_access.logging_data
+    status.log_file_handler_record(
+        _LOG,
+        program=HANDLER_NAME,
+        paragraph="Ca-Process-Logs",
+        log_system=logging_data.ws_log_system,
+        log_file_no=logging_data.ws_log_file_no,
+        no_paragraph=logging_data.ws_no_paragraph,
+        file_function=int(file_access.file_function),
+        access_type=int(file_access.access_type),
+        fs_reply=int(file_access.fs_reply),
+        we_error=int(file_access.we_error),
+        sql_err=logging_data.sql_err,
+        sql_state=logging_data.sql_state,
+        dal_common=dal_common,
     )
     # No transfer. `Ca-Process-Logs` is reached only by `PERFORM` - from
     # `aa999-main-exit` [:L532], from the close sentinel [:L357] and from the

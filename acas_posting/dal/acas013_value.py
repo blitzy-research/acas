@@ -466,6 +466,7 @@ from acas_posting.dal.connection import (
     mysql_1980_close,
     mysql_1999_exit,
     quote_identifier,
+    transport_category,
 )
 from acas_posting.dal.cursor_state import (
     ACCESS_TYPE_TO_RELATION,
@@ -486,8 +487,9 @@ from acas_posting.dal.status import (
     LogSystem,
     WeError,
     is_duplicate_key_bridge_level,
+    log_file_handler_record,
+    log_handler_failure,
     mysql_1100_db_error,
-    sanitise_for_log,
     start_access_type_is_valid,
 )
 from acas_posting.dictionary import loader
@@ -666,8 +668,13 @@ PROG_NAME: Final[str] = "acas013 (3.3.00)"
 
 #: ``03  AC901  pic x(31)`` [common/acas013.cbl:L263] and ``03  AC902  pic x(32)``
 #: [common/acas013.cbl:L264] - the two operator messages of the 901 record-size
-#: path. AC901's text asks the operator to "hit return", which is the ``accept``
-#: AAP section 0.3.4 drops; the message itself is kept because it names the error.
+#: path.
+#:
+#: ``_AC901`` IS DECLARED AND DELIBERATELY UNREFERENCED. The declaration is a fact
+#: about the program's ``Error-Messages`` group and R-5 keeps it, but its text is
+#: purely the acknowledgement half - it asks the operator to "hit return", which is
+#: the ``accept`` AAP section 0.3.4 drops - so no log record quotes it. Only
+#: ``_AC902``, which names the error, reaches a record.
 _AC901: Final[str] = "AC901 Note error and hit return"
 _AC902: Final[str] = "AC902 Program Error: Temp rec = "
 
@@ -2599,13 +2606,27 @@ def _mysql_1210_command(
         errno = str(getattr(exc, "errno", "") or "").strip() or "9999"
         sql_state = str(getattr(exc, "sqlstate", "") or "").strip() or "HY000"
         message = str(getattr(exc, "msg", None) or exc)
-        _LOG.warning(
-            "%s/%s statement failed: errno=%s sqlstate=%s message=%s",
-            HANDLER,
-            BRIDGE,
-            errno,
-            sql_state,
-            sanitise_for_log(message),
+        #  ONE ERROR per failure, and TYPED ONLY. The driver's message is no
+        #  longer logged: for this table it renders the statement and its bound
+        #  values - the analysis code, its description and the accumulated
+        #  amounts - and `sanitise_for_log` could not make that safe, because it
+        #  escapes control characters rather than removing content (CWE-117 was
+        #  addressed, CWE-532 was not). The errno, the SQLSTATE and the category
+        #  derived from them are what an operator acts on.
+        #  `message` is still RETURNED. `SQL-Msg` is a status field the frozen
+        #  bridge interrogates [copybooks/mysql-procedures.cpy:L130-L137], so
+        #  withholding it from the LOG must not withhold it from the CALLER;
+        #  R-3 forbids the disposition changing.
+        log_handler_failure(
+            _LOG,
+            program=BRIDGE,
+            paragraph="MYSQL-1210-COMMAND",
+            locator="[copybooks/mysql-procedures.cpy:L164-L178]",
+            sql_err=errno,
+            sql_state=sql_state,
+            detail="the statement failed; the caller branches on the status "
+            "returned here, exactly as the frozen bridge branches on its own "
+            "one-character test",
         )
         return _DriverResult((), 0, errno, sql_state, message)
 
@@ -2735,19 +2756,29 @@ def ba020_process_open(
     # `RDB-Data` [copybooks/wsfnctn.cob:L56-L63] - the six credentials that
     # `ba012-Test-WS-Rec-Size-2` moved in from the system record [:L638-L643].
     rdb: RdbData = file_access.rdb_data
-    # [:L406-L429] the six `delimited by space` marshalled values, recorded so the
-    # traceability is exact even though the connect itself is delegated. The
-    # password is deliberately NOT among them: it is a credential, and nothing here
-    # writes one to a log or keeps one in a diagnostic field (rule V.S1).
+    # [:L406-L429] the six `delimited by space` marshalled values are built by the
+    # shared opener rather than repeated here; only their CLASS is recorded.
+    #  THE ENDPOINT IS CLASSIFIED, NOT NAMED. This record used to carry the
+    #  schema, the host, the user, the port and the socket path - the deployment's
+    #  own identity, useful to an attacker and useless to an operator, and
+    #  identical on every run only by accident (CWE-532). `transport_category`
+    #  answers the one question a log has to answer about a connect target - can
+    #  the credentials and the posted figures be read off the wire - with one of
+    #  five fixed tokens. The password was never among the logged fields and
+    #  still is not (rule V.S1).
     _LOG.debug(
-        "%s/%s open: base=%s host=%s user=%s port=%s socket=%s",
+        "%s/%s open: transport=%s",
         HANDLER,
         BRIDGE,
-        cobol_string_delimited_by_space(rdb.db_schema),
-        cobol_string_delimited_by_space(rdb.db_host),
-        cobol_string_delimited_by_space(rdb.db_uname),
-        cobol_string_delimited_by_space(rdb.db_port),
-        cobol_string_delimited_by_space(rdb.db_socket),
+        transport_category(
+            {
+                "host": cobol_string_delimited_by_space(rdb.db_host),
+                "unix_socket": cobol_string_delimited_by_space(rdb.db_socket),
+            }
+            if cobol_string_delimited_by_space(rdb.db_socket)
+            else {"host": cobol_string_delimited_by_space(rdb.db_host)},
+            transport,
+        ),
     )
     # [:L431] `move 1 to ws-No-Paragraph.`
     logging_data.ws_no_paragraph = 1
@@ -3809,9 +3840,12 @@ def _indexed_file_verb(verb: str, file_access: FileAccess) -> IndexedFilePathNot
         f"scope. The relational path through {BRIDGE} implements this verb; reach it "
         f"by setting FS-RDBMS-Used in the system record, which is what "
         f"[common/acas013.cbl:L321-L325] tests. "
-        f"WS-No-Paragraph={logging_data.ws_no_paragraph}, "
-        f"WS-File-Key={sanitise_for_log(logging_data.ws_file_key.rstrip())!r}."
+        f"WS-No-Paragraph={logging_data.ws_no_paragraph}."
     )
+    # `WS-File-Key` is deliberately NOT interpolated into the message: for this
+    # table it is the analysis code, a business key, and an exception message can
+    # be logged by whatever catches it (CWE-532). The paragraph number is enough
+    # to name the verb that was refused.
 
 
 def aa010_main(
@@ -4096,13 +4130,12 @@ def aa020_process_open(
         return
     # [:L370-L388] every other arm issues an indexed-file OPEN. The path it would
     # open comes from File-Defs [copybooks/wsnames.cob], which is why parameter 4
-    # is threaded this far.
-    _LOG.debug(
-        "%s: open access-type=%s would use file-13=%s",
-        HANDLER,
-        access_type,
-        file_defs.file_defs_a.file_13.strip(),
-    )
+    # is still threaded this far even though nothing here reads it.
+    #  NO RECORD HERE. The frozen arms display nothing - each is an `open`, a
+    #  status test and a `go to` - so a record would be invented (R-4), and the
+    #  one it replaced named `File-13`, an absolute filesystem path from the
+    #  deployment's own configuration (CWE-532). The refusal is already reported
+    #  to the caller, by the exception raised on the next line.
     raise _indexed_file_verb(f"OPEN (access type {access_type})", file_access)
 
 
@@ -4600,14 +4633,14 @@ def aa_exit(file_access: FileAccess) -> None:
     ``exit program.`` [:L586] - the return to the caller, with ``File-Access``
     carrying the status. Nothing is cleared on the way out; whatever the last
     paragraph wrote is what the caller reads.
+
+     NO RECORD HERE. ``exit program.`` is one statement and it displays
+    nothing, so a per-return trace was invented (R-4) - and it would have been the
+    highest-volume record in the module, one per handler call, drowning the
+    failures an operator is watching for. The status pair it announced is the
+    caller's to read from ``File-Access``, which is where the COBOL leaves it.
     """
-    _LOG.debug(
-        "%s: exit fs-reply=%s we-error=%s para=%s",
-        HANDLER,
-        int(file_access.fs_reply),
-        int(file_access.we_error),
-        int(file_access.logging_data.ws_no_paragraph),
-    )
+    return
 
 
 def ba_process_rdbms(
@@ -4786,7 +4819,13 @@ def ba012_test_ws_rec_size_2(
         # at the severity the original intends - an error the operator must notice.
         # They must not alter control flow, and they do not.
         _LOG.error("%s: %s", PROG_NAME, display_blk.rstrip())
-        _LOG.error("%s: %s", PROG_NAME, _AC901)
+        #  THE SECOND DISPLAY IS NOT A RECORD. [:L626] displays `AC901`,
+        #  declared at [:L263] - an instruction to
+        #  the operator standing at the terminal, paired with the `accept` on the
+        #  next frozen line. AAP section 0.3.4 drops an acknowledgement pause
+        #  entirely, and quoting its text in a log line is still emitting it. The
+        #  substantive half, AC902 above, carries the whole diagnostic; the
+        #  control transfer at [:L631] is preserved as this function's return.
         # [:L627-L629] `if Testing-1 perform Ca-Process-Logs` - and see the
         # docstring on why this contradicts [:L676]'s own comment.
         if dal_common is not None and dal_common.sw_testing == 1:
@@ -4938,13 +4977,13 @@ def ba_rdbms_exit(file_access: FileAccess) -> None:
     at [:L323] or, on the 901 path, from the ``go to`` at [:L631]. It writes
     nothing, which is why the 901 status set at [:L614-L615] survives all the way
     back to the caller.
+
+     NO RECORD HERE. ``exit section.`` writes nothing and displays nothing,
+    so the position trace this paragraph used to emit was invented (R-4). That the
+    901 status survives is a fact about the ABSENCE of statements, and a record
+    announcing the absence would be the one statement the paragraph does not have.
     """
-    _LOG.debug(
-        "%s: ba-rdbms-exit fs-reply=%s we-error=%s",
-        HANDLER,
-        int(file_access.fs_reply),
-        int(file_access.we_error),
-    )
+    return
 
 
 def ca_process_logs(
@@ -4982,20 +5021,30 @@ def ca_process_logs(
     V.S1 forbids emitting a credential and because no database state depends on it.
     """
     logging_data = file_access.logging_data
-    _LOG.info(
-        "fhlogger: system=%s file=%s para=%s fs-reply=%s we-error=%s "
-        "key=%s sql-state=%s sql-err=%s function=%s access=%s testing=%s",
-        logging_data.ws_log_system,
-        logging_data.ws_log_file_no,
-        logging_data.ws_no_paragraph,
-        int(file_access.fs_reply),
-        int(file_access.we_error),
-        sanitise_for_log(logging_data.ws_file_key.rstrip()),
-        logging_data.sql_state.strip(),
-        logging_data.sql_err.strip(),
-        int(file_access.file_function),
-        int(file_access.access_type),
-        dal_common.sw_testing,
+    #  ONE ADAPTER FOR ALL TWENTY HANDLERS.
+    # :func:`acas_posting.dal.status.log_file_handler_record` is the single
+    # stand-in for `call "fhlogger"`; before it existed each handler wrote its own
+    # field list at its own level, so the one legacy log this cycle produces was
+    # unreadable as a whole. It advances `Log-File-Rec-Written` modulo one million,
+    # the range of the frozen `pic 9(6)` [copybooks/Test-Data-Flags.cob:L20], which
+    # this paragraph did not advance at all.
+    # `WS-File-Key` is WITHHELD: for this table it is the analysis code, a business
+    # key (CWE-532). So are `WS-Log-Where` and `SQL-Msg`. The password was never
+    # written and still is not.
+    log_file_handler_record(
+        _LOG,
+        program=HANDLER,
+        paragraph="Ca-Process-Logs",
+        log_system=logging_data.ws_log_system,
+        log_file_no=logging_data.ws_log_file_no,
+        no_paragraph=logging_data.ws_no_paragraph,
+        file_function=int(file_access.file_function),
+        access_type=int(file_access.access_type),
+        fs_reply=int(file_access.fs_reply),
+        we_error=int(file_access.we_error),
+        sql_err=logging_data.sql_err,
+        sql_state=logging_data.sql_state,
+        dal_common=dal_common,
     )
     ca_exit()
 
@@ -5091,10 +5140,11 @@ def dispatch(
             unmigrated flat path, and accepted because the linkage list has it.
         dal_common: ``ACAS-DAL-Common-data``. The ``sw-testing`` switch.
         transport: Transport policy for the open verb. NOT A COBOL PARAMETER - the
-            frozen bridge has no transport concept at all, and the shared connection
-            module requires one because it refuses to send a credential over an
-            unprotected link. Keyword-only, so the five positional parameters remain
-            exactly the COBOL's five.
+            frozen bridge has no transport concept at all - and ``None``, the
+            default, defers to the ONE policy the deployment installed with
+            :func:`acas_posting.dal.connection.set_connection_policy`, which
+            reports an unprotected link rather than refusing it. Keyword-only, so
+            the five positional parameters remain exactly the COBOL's five.
 
     Raises:
         IndexedFilePathNotMigrated: If the system record selects the indexed store.

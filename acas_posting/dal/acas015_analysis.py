@@ -277,8 +277,8 @@ From the handler [common/acas015.cbl]:
                    [:L424], halting the run for an operator. It sits on the
                    flat-file path, which the RDB branch exits before reaching
                    [:L314-L318], so it is unreachable in the migrated cycle.
-                   Recorded as an anomaly AND as an omission: there is no
-                   flat-file path here to halt, and no pause is substituted.
+                   Recorded as an anomaly, with the display logged once at
+                   ERROR and the halt omitted: no pause is substituted.
   N-jic            The read-next EOF arm sets the end-of-file condition and
                    then sets the underlying status byte as well, commented "JIC
                    above dont work :)" [:L429-L431]. Belt and braces, kept.
@@ -662,6 +662,9 @@ from acas_posting.dal.status import (
     WeError,
     end_of_file_status,
     is_duplicate_key_bridge_level,
+    log_cobol_stop,
+    log_file_handler_record,
+    log_handler_failure,
     mysql_1100_db_error,
     override_we_error_for_operation,
     sanitise_for_log,
@@ -1678,7 +1681,10 @@ class _HandlerWorkingStorage:
     any of them: it moves whole groups, and the one key it does name differs by
     a prefix - `PA-Code` in the FD against `WS-Pa-Code` in working storage. Agent
     Action Plan anomaly 21 records the same class of collision forcing qualified
-    references at [general/gl070.cbl:L510]; here the collision is latent rather
+    references at [general/gl070.cbl:L497], [general/gl070.cbl:L521] and
+    [general/gl070.cbl:L525] - the register cites L510, which in the frozen
+    checkout is `move post-cr to pre-ac`, an unqualified move; here the collision
+    is latent rather
     than realised, and that is worth recording precisely because a maintainer
     adding one field-level statement to this program would hit it immediately.
     """
@@ -1762,9 +1768,14 @@ _BRIDGE_WS: _BridgeWorkingStorage = _BridgeWorkingStorage(
 #: and `Most-Cursor-Set`, so one table per bridge is the faithful arrangement.
 _DAL_DATA: CursorStateTable = CursorStateTable()
 
-#: `01 Error-Messages` [common/acas015.cbl:L257-L261]. Kept because the
-#: record-length arm assembles `AC904` into a diagnostic and then displays
-#: `AC901`; the display becomes a log record, per Agent Action Plan 0.3.4.
+#: `01 Error-Messages` [common/acas015.cbl:L257-L261]. The record-length arm
+#: assembles `AC904` into a diagnostic and then displays `AC901`.
+#:
+#: `_AC901` IS DECLARED AND DELIBERATELY UNREFERENCED. The declaration is a fact
+#: about the frozen `Error-Messages` group and R-5 keeps it, but the literal's whole
+#: text is the acknowledgement half - it asks the operator to "hit return", which is
+#: the `accept` Agent Action Plan 0.3.4 drops - so no record quotes it. Only
+#: `_AC904`, which names the error, reaches a record.
 _AC901: Final[str] = "AC901 Note error and hit return"
 _AC904: Final[str] = "AC904 Program Error: Temp rec = "
 
@@ -2356,16 +2367,18 @@ def _bridge_cursor(connection: object) -> Iterator[object]:
     finally:
         try:
             cursor.close()
-        except Exception as error:  # pragma: no cover - driver-specific
+        except Exception:  # noqa: BLE001, S110 - driver-specific, see below
             # A cursor that will not close is not a condition the frozen source
             # has an error path for, and raising from a `finally` would replace
-            # the caller's own status with a misleading exception. Recorded and
-            # dropped, exactly as `connection.py` does for the same case.
-            _LOG.debug(
-                "%s: closing the positioning cursor reported %s",
-                HANDLER,
-                sanitise_for_log(str(error)),
-            )
+            # the caller's own status with a misleading exception. Dropped,
+            # exactly as `connection.py` does for the same case.
+            #  NOTHING IS LOGGED AND NO NAME IS BOUND. The frozen bridge has
+            #  no cursor-close step at all - `MySQL_query` owns the statement and
+            #  the handle - so a record here was invented (R-4), and the record it
+            #  replaced interpolated the driver's own text, which for this table
+            #  renders the statement and its bound analysis code (CWE-532).
+            #  Binding no name means nothing can leak from this block by accident.
+            pass
 
 
 def _affected_rows(cursor: object) -> int:
@@ -2581,43 +2594,50 @@ def _log_record(
     ACAS-DAL-Common-data` [common/acas015.cbl:L669-L670,
     common/analMT.cbl:L1105-L1106]. `common/fhlogger.cbl` is out of scope per
     Agent Action Plan 0.2.2, and rule R-1 forbids calling it in any case, so no
-    log FILE is written. What the call carried - the subsystem, the file number
-    within it, the paragraph number, the key, the predicate and the three SQL
-    diagnostic fields - is emitted as a structured log record instead, which is
-    Agent Action Plan 0.3.4's rule for a diagnostic with no database effect.
+    log FILE is written. What the call carried is emitted through
+    :func:`acas_posting.dal.status.log_file_handler_record`, THE ONE ADAPTER every
+    handler in this package shares, so that the single legacy log this cycle
+    produces reads the same whichever table wrote it.
 
-    `Log-File-Rec-Written` [common/analMT.cbl:L308] is NOT touched. It is
-    `fhlogger`'s own counter of records it wrote, and this module writes none.
+    THREE FIELDS ARE WITHHELD, and their omission is the point. `WS-File-Key`
+    is the analysis code - a business key; `WS-Log-Where` is a rendered SQL
+    predicate carrying that key as a literal; `SQL-Msg` is the driver's own text,
+    which quotes the statement and its bound values. All three are CWE-532 in a
+    log and none is needed to act on a failure, so the adapter emits the status
+    pair, the two log-routing numbers, the paragraph number, the function and
+    access codes, the SQLSTATE, the errno and a stable category derived from them.
+    `sanitise_for_log` was applied to all three before and could not help: it
+    escapes control characters, it does not remove content.
 
-    Every text field goes through
-    :func:`~acas_posting.dal.status.sanitise_for_log`, so a driver message
-    cannot carry an unbounded or credential-bearing string into the log.
+    `Log-File-Rec-Written` [common/analMT.cbl:L308] IS NOW ADVANCED - `(n + 1)`
+    modulo one million, the range of the frozen `pic 9(6)`
+    [copybooks/Test-Data-Flags.cob:L20]. Leaving it untouched was wrong twice: the
+    counter lives in `ACAS-DAL-Common-data`, which the CALLER owns and carries
+    across calls, and this module does write the record it counts.
 
     Args:
-        file_access: The caller's `File-Access`, read only.
-        dal_common: The testing switches, read only.
+        file_access: The caller's `File-Access`, read only apart from the counter.
+        dal_common: The testing switches, and the counter's home.
         origin: Which program's log paragraph is emitting - the handler's or the
-            bridge's. The two are distinct paragraphs with the same name.
+            bridge's. The two are distinct paragraphs with the same name, and the
+            string keeps them apart in the record itself.
     """
     logging_data = file_access.logging_data
-    _LOG.info(
-        "%s %s: log-system=%s file-no=%s paragraph=%s fs-reply=%s "
-        "we-error=%s key=%r where=%r sql-err=%r sql-state=%r sql-msg=%r "
-        "sw-testing=%s sw-testing-2=%s",
-        HANDLER,
-        origin,
-        logging_data.ws_log_system,
-        logging_data.ws_log_file_no,
-        logging_data.ws_no_paragraph,
-        file_access.fs_reply,
-        file_access.we_error,
-        sanitise_for_log(str(logging_data.ws_file_key)),
-        sanitise_for_log(str(logging_data.ws_log_where)),
-        sanitise_for_log(str(logging_data.sql_err)),
-        sanitise_for_log(str(logging_data.sql_state)),
-        sanitise_for_log(str(logging_data.sql_msg)),
-        dal_common.sw_testing,
-        dal_common.sw_testing_2,
+    program, _, paragraph = origin.partition("/")
+    log_file_handler_record(
+        _LOG,
+        program=program or HANDLER,
+        paragraph=paragraph or "Ca-Process-Logs",
+        log_system=logging_data.ws_log_system,
+        log_file_no=logging_data.ws_log_file_no,
+        no_paragraph=logging_data.ws_no_paragraph,
+        file_function=int(file_access.file_function),
+        access_type=int(file_access.access_type),
+        fs_reply=int(file_access.fs_reply),
+        we_error=int(file_access.we_error),
+        sql_err=logging_data.sql_err,
+        sql_state=logging_data.sql_state,
+        dal_common=dal_common,
     )
 
 
@@ -2668,8 +2688,21 @@ def _display_message_1(
     """`if Testing-2 display Display-Message-1 with erase eos`.
 
     `01 Display-Message-1` [common/analMT.cbl:L324-L326] is a screen group whose
-    only content is the literal `"WS-Where="` and `from WS-Where (1:J)`. The
-    screen is dropped and the same text is logged.
+    only content is the literal `"WS-Where="` and `from WS-Where (1:J)`.
+
+     THE SCREEN IS DROPPED AND NOTHING IS LOGGED IN ITS PLACE.
+    `WS-Where (1:J)` is a rendered SQL predicate - for this table the quoted
+    `PA-CODE` column compared against the analysis code as a literal - so it is
+    both SQL text and a business key in one field, which the safe-event schema
+    forbids outright (CWE-532). It was a
+    developer's own trace, enabled only by `Testing-2` and read at a terminal
+    beside the program it belonged to; nothing acts on it operationally.
+
+    The paragraph, its `Testing-2` guard and its call sites are all PRESERVED, so a
+    reader following the frozen source still finds the switch and finds what it
+    now controls. `WS-Where` itself is still BUILT and still stored in
+    `Logging-Data`, because the bridge's own statements read it - only the log is
+    gone (R-3: the disposition is unchanged).
 
     Args:
         file_access: The caller's `File-Access`, read only.
@@ -2677,11 +2710,7 @@ def _display_message_1(
     """
     if not _testing_2(dal_common):
         return
-    _LOG.debug(
-        "%s: WS-Where=%s",
-        BRIDGE,
-        sanitise_for_log(str(file_access.logging_data.ws_log_where)),
-    )
+    del file_access  # the predicate is deliberately not rendered into a record
 
 
 # =============================================================================
@@ -2986,11 +3015,17 @@ def _no_connection(
     Returns:
         `(99, 911)`.
     """
-    _LOG.error(
-        "%s: no open connection; %s must be called with fn-Open (File-Function "
-        "1) before any other function",
-        BRIDGE,
-        BRIDGE,
+    # ONE ERROR, through the shared reporter, so that every failure in every
+    # handler renders with the same fields in the same order.
+    log_handler_failure(
+        _LOG,
+        program=BRIDGE,
+        paragraph="_no_connection",
+        locator="[copybooks/mysql-procedures.cpy:L127-L128]",
+        fs_reply=int(FsReply.ERROR),
+        we_error=int(WeError.RDB_INIT_ERROR),
+        detail="no open connection: fn-Open (File-Function 1) must precede every "
+        "other function",
     )
     _set_status(file_access, int(FsReply.ERROR), int(WeError.RDB_INIT_ERROR))
     return ba999_end(file_access, dal_common)
@@ -3002,7 +3037,7 @@ def ba020_process_open(
     system: SystemRecord | None,
     *,
     transport: TransportSecurity | None = None,
-    allow_frozen_placeholder_credentials: bool = False,
+    allow_frozen_placeholder_credentials: bool | None = None,
 ) -> StatusPair:
     """`ba020-Process-Open` [common/analMT.cbl:L396-L438].
 
@@ -3068,11 +3103,13 @@ def ba020_process_open(
             is reported as the frozen open failure rather than raised.
         transport: How the connection may cross the network, passed through to
             `mysql_1000_open`. The frozen C interface had no transport policy at
-            all, so there is nothing to reproduce and the shared module's default
-            - loopback or Unix socket only - governs.
+            all, so there is nothing to reproduce and `None` defers to the ONE
+            policy the deployment installed with
+            `connection.set_connection_policy`.
         allow_frozen_placeholder_credentials: Passed through unchanged. The
-            frozen `SYSTEM-REC` ships placeholder credentials, and
-            `dal/connection.py` refuses them unless a caller says otherwise.
+            frozen `SYSTEM-REC` ships placeholder credentials; `None` defers to
+            that same policy, which reports the exposure and connects exactly as
+            the compiled program does.
 
     Returns:
         The pair the open left behind.
@@ -4118,7 +4155,7 @@ def anal_mt(
     *,
     system: SystemRecord | None = None,
     transport: TransportSecurity | None = None,
-    allow_frozen_placeholder_credentials: bool = False,
+    allow_frozen_placeholder_credentials: bool | None = None,
 ) -> StatusPair:
     """`analMT` - the bridge, entered exactly as the handler calls it.
 
@@ -4547,10 +4584,14 @@ def aa040_process_read_next(
     the migrated cycle - and the migrated cycle has no flat file to reach
     end-of-file on in the first place.
 
-    It is therefore recorded as an anomaly AND as a deliberate omission. NO pause
-    is added: no `input()`, no sleep, no prompt. The statements either side of it
+    It is therefore recorded as an anomaly, and the statement is split the way
+    Agent Action Plan 0.3.4 splits every `STOP` literal in this family: the DISPLAY
+    half becomes ONE record at ERROR through
+    :func:`acas_posting.dal.status.log_cobol_stop`, identical in wording and level
+    to the record every sibling handler emits, and the HALT half is a deliberate
+    omission - no `input()`, no sleep, no prompt. The statements either side of it
     are reproduced, so the arm's observable effect - `(10, 10)` and three blanked
-    fields - is intact and only the halt is gone.
+    fields - is intact and only the wait for a keystroke is gone.
 
     *** ANOMALY N-eof-pair - REPRODUCED (rule R-4) ***
 
@@ -4607,7 +4648,22 @@ def aa040_process_read_next(
         logging_data.sql_msg = _LOGGING_FIELDS["SQL-Msg"].store(
             " " * _SQL_MSG_WIDTH
         )
-        # [common/acas015.cbl:L424] `stop "Cobol File EOF"` - OMITTED, above.
+        # [common/acas015.cbl:L424] `stop "Cobol File EOF"` - anomaly N-stop.
+        #  ONE ERROR, THROUGH THE ONE REPORTER, at the SAME LEVEL as every
+        #  other handler that carries this stop. `STOP` with a literal DISPLAYS the
+        #  literal, so Agent Action Plan 0.3.4 makes it a record; omitting the
+        #  record here while acas006 and acas007 logged it at WARNING, acas012 at
+        #  INFO, acas016 at DEBUG and acas019 at ERROR made one event five events
+        #  and, in this module, none. The KEYSTROKE WAIT is still omitted - it has
+        #  no database effect and it hangs a batch run - and the transfer on the
+        #  next frozen line is still preserved.
+        log_cobol_stop(
+            _LOG,
+            program=HANDLER,
+            paragraph="aa040-Process-Read-Next",
+            literal="Cobol File EOF",
+            locator="[common/acas015.cbl:L424]",
+        )
         # [common/acas015.cbl:L425] - Class 3.
         return aa999_main_exit(file_access, dal_common)
 
@@ -5437,16 +5493,19 @@ def ba012_test_ws_rec_size_2(
             _DISPLAY_BLK_WIDTH,
         )
         # [common/acas015.cbl:L623-L624] - two `display ... with erase eol`
-        # statements, at 2301 and 2401. Screen output with no database effect
-        # becomes a log record at a severity matching the original's intent, per
-        # Agent Action Plan 0.3.4; a programming error the caller must stop for is
-        # an error.
-        _LOG.error(
-            "%s: %s | %s",
-            HANDLER,
-            sanitise_for_log(display_blk),
-            sanitise_for_log(_AC901),
-        )
+        # statements, at 2301 and 2401. THE FROZEN BLOCK SPLITS THREE WAYS under
+        # Agent Action Plan 0.3.4:
+        #   * [:L623] displays `Display-Blk`, which carries AC904 and the two
+        #     lengths. Substantive - a programming error the caller must stop for -
+        #     so it becomes ONE record at ERROR, the severity the original intends.
+        #   * [:L624] displays `AC901`, whose whole text is "AC901 Note error and
+        #     hit return". That is the acknowledgement half, paired with the
+        #     `accept` at [:L628], and 0.3.4 drops an acknowledgement pause
+        #     entirely - QUOTING IT IN A LOG LINE IS STILL EMITTING IT, to a
+        #     destination where no operator can answer it.
+        #   * [:L629]'s `go to ba-rdbms-exit` is CONTROL, and it is preserved as
+        #     this function's `return False`.
+        _LOG.error("%s: %s", HANDLER, sanitise_for_log(display_blk))
         # [common/acas015.cbl:L625-L627]
         if _testing_1(dal_common):
             ca_process_logs(file_access, dal_common)
@@ -5488,7 +5547,7 @@ def ba015_test_ends(
     *,
     system: SystemRecord | None = None,
     transport: TransportSecurity | None = None,
-    allow_frozen_placeholder_credentials: bool = False,
+    allow_frozen_placeholder_credentials: bool | None = None,
 ) -> StatusPair:
     """`ba015-Test-Ends` [common/acas015.cbl:L644-L658].
 
@@ -5611,7 +5670,7 @@ def ba_process_rdbms(
     dal_common: AcasDalCommonData,
     *,
     transport: TransportSecurity | None = None,
-    allow_frozen_placeholder_credentials: bool = False,
+    allow_frozen_placeholder_credentials: bool | None = None,
 ) -> StatusPair:
     """`ba-Process-RDBMS section` [common/acas015.cbl:L586].
 
@@ -5673,7 +5732,7 @@ def aa010_main(
     dal_common: AcasDalCommonData,
     *,
     transport: TransportSecurity | None = None,
-    allow_frozen_placeholder_credentials: bool = False,
+    allow_frozen_placeholder_credentials: bool | None = None,
 ) -> StatusPair:
     """`aa010-main` [common/acas015.cbl:L287-L358].
 
@@ -5892,7 +5951,7 @@ def aa_process_flat_file(
     dal_common: AcasDalCommonData,
     *,
     transport: TransportSecurity | None = None,
-    allow_frozen_placeholder_credentials: bool = False,
+    allow_frozen_placeholder_credentials: bool | None = None,
 ) -> StatusPair:
     """`aa-Process-Flat-File Section.` [common/acas015.cbl:L285].
 
@@ -5936,7 +5995,7 @@ def dispatch(
     dal_common: AcasDalCommonData,
     *,
     transport: TransportSecurity | None = None,
-    allow_frozen_placeholder_credentials: bool = False,
+    allow_frozen_placeholder_credentials: bool | None = None,
 ) -> StatusPair:
     """`acas015` - the handler, entered exactly as the facade calls it.
 

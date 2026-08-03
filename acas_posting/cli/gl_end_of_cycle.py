@@ -184,10 +184,13 @@ The acknowledgement pauses [general/gl080.cbl:L311-L312],
 only effect was to hold a terminal. The screen literals GL084 to GL087 are not
 reproduced either - their EFFECT survives as the three parameters above, their
 DISPLAY does not. The menu's own `overrewrite` persistence of System-Record,
-Default-Record and WS-System-Record-4 [general/general.cbl:L656] and its backup
-spool-out `call "SYSTEM" using Full-Backup-Script` [general/general.cbl:L650] are
-excluded by Agent Action Plan section 0.2.2 and by rule R-1. The footer lists
-every omission.
+Default-Record and WS-System-Record-4 [general/general.cbl:L656] IS reproduced -
+by `args.overrewrite`, performed from the `> 7` arm of `load00`, with the matching
+`aa010-Get-System-Recs.` load performed by the binder before the dispatch. Its
+COBOL-FILE arm [general/general.cbl:L674-L691] is not, because the migration has
+one store. The backup spool-out `call "SYSTEM" using Full-Backup-Script`
+[general/general.cbl:L650] remains excluded by Agent Action Plan section 0.2.2 and
+by rule R-1. The footer lists every omission.
 
 THE RULES THAT BIND THIS FILE
 =============================
@@ -224,11 +227,14 @@ R-6 Compiled behaviour is the tie-breaker. The run date arrives ONLY as the
     required `--run-date`, pinned through `args.resolve_clock` into
     `acas_posting/clock.py`; nothing here reads a system clock, an environment
     variable, a host name or an entropy source. All twelve in-scope programs
-    contain zero clock reads, and the one clock read in the whole call chain
-    lives in the menu shells' date-service copybook
-    [copybooks/Proc-ACAS-Mapser-RDB.cob:L72-L80]. Two runs of one scenario are
-    therefore byte-identical (section 0.8.5), and the two genuinely open
-    questions are marked in place rather than guessed.
+    contain zero clock reads. The frozen call chain holds FOURTEEN ambient date and
+    time reads across six files - the census is in `acas_posting/clock.py` and in
+    `cli/args.py` - but every one of them is in an out-of-scope menu shell or in
+    the date-service copybook those shells COPY
+    [copybooks/Proc-ACAS-Mapser-RDB.cob:L72-L80], so pinning at this boundary
+    controls both posting observables. Two runs of one scenario are therefore
+    byte-identical (section 0.8.5), and the two genuinely open questions are
+    marked in place rather than guessed.
 
 NO IMPORT-TIME SIDE EFFECTS
 Importing this module binds names and nothing else. It builds no parser,
@@ -248,7 +254,7 @@ from __future__ import annotations
 
 import argparse
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Final
 
 from acas_posting.cli import args
@@ -286,12 +292,20 @@ _GL080_PROGRAM_ID: Final[str] = "gl080"
 #  default, and it is not softened into a confirmation prompt here.
 _RUN_CONFIRMED_DEFAULT: Final[bool] = True
 
-#  [general/gl080.cbl:L546-L549]  ZERO, NOT NINE (rule R-4). `if a = 9 go to
-#  main-exit` aborts and `if a not = zero go to accept-option` re-prompts, so the
-#  single value that lets control leave the paragraph and the run proceed is 0.
-#  Getting this backwards would silently disable the archiving walk and the whole
-#  of end-of-period processing.
-_DISK_CHANGE_OPTION_DEFAULT: Final[int] = 0
+#  [general/gl080.cbl:L542-L549]  THE TWO VALUES `accept-option.` CAN BE LEFT ON,
+#  and there are exactly two. `if a = 9 go to main-exit` [:L546-L547] is a class-3
+#  section exit that aborts the run; falling through on zero proceeds; and `if a
+#  not = zero go to accept-option` [:L548-L549] is a class-1 loop-back that sends
+#  EVERY OTHER VALUE to the prompt again. So the domain of the promoted parameter
+#  is {0, 9} and nothing else - which is what `choices` on the option enforces
+#  (finding CLI-07).
+_DISK_CHANGE_OPTION_PROCEED: Final[int] = 0
+_DISK_CHANGE_OPTION_ABORT: Final[int] = 9
+
+#  ZERO, NOT NINE (rule R-4). The single value that lets control leave the
+#  paragraph and the run proceed is 0; getting this backwards would silently
+#  disable the archiving walk and the whole of end-of-period processing.
+_DISK_CHANGE_OPTION_DEFAULT: Final[int] = _DISK_CHANGE_OPTION_PROCEED
 
 #  [general/gl080.cbl:L553-L557]  NO OVERRIDE. `accept file-2 ... with update`
 #  presents the field holding the path already computed at
@@ -300,30 +314,26 @@ _DISK_CHANGE_OPTION_DEFAULT: Final[int] = 0
 _ARCHIVE_PATH_OVERRIDE_DEFAULT: Final[str | None] = None
 
 
-#  DIAGNOSTIC VERBOSITY - NOT A COBOL PARAMETER, AND NOT A GATE
-#  The frozen program writes its diagnostics to a curses screen; section 0.3.4
-#  turns those into log records "at a severity matching the original's intent".
-#  A batch entry point therefore needs a severity threshold, and `--log-level`
-#  is it. It has NO database effect, cannot alter control flow, is never read by
-#  any migrated program and never reaches `gl080.run`. Where the six rules are
-#  silent, enterprise-standard best practice applies, and a batch job whose
-#  operator cannot choose between quiet and verbose is not production-ready.
-_LOG_LEVEL_CHOICES: Final[tuple[str, ...]] = (
-    "DEBUG",
-    "INFO",
-    "WARNING",
-    "ERROR",
-    "CRITICAL",
-)
-_LOG_LEVEL_DEFAULT: Final[str] = "INFO"
+#  DIAGNOSTIC VERBOSITY IS NO LONGER DECLARED HERE
+#  `--log-level` used to be this module's private option, built from a pair of
+#  constants at this point in the file - and so it existed on exactly ONE of the
+#  seven entry points. The flag worked for this route and was a usage error for
+#  the other six, which matters because `harness/run_python_scenario.sh` invokes
+#  the entry points directly rather than through the router. The option is now
+#  `args.add_log_level_argument`, composed by all seven, taking its choices and
+#  its default from `acas_posting.__main__` - the module that owns the single
+#  `basicConfig` that consumes them. Nothing about this route's behaviour changed:
+#  the same option, the same five choices, the same INFO default, applied through
+#  the same one configurator at the same point in `main`.
 
-#  DETERMINISM EXTENDS TO THE LOG STREAM (rule R-6). The format carries no
-#  timestamp, no process id and no thread name, so two runs of one scenario
-#  produce byte-identical log text as well as byte-identical table dumps. That is
+#  DETERMINISM EXTENDS TO THE LOG STREAM (rule R-6), and the format that
+#  delivers it is now declared ONCE, in `acas_posting.__main__.LOG_FORMAT`: no
+#  timestamp, no process id, no thread name, so two runs of one scenario produce
+#  byte-identical log text as well as byte-identical table dumps. That is
 #  stricter than section 0.8.5 requires - it speaks of dumps - and it costs
-#  nothing: it also means nothing in this module can reach a clock even
-#  indirectly, through a formatter.
-_LOG_FORMAT: Final[str] = "%(levelname)s %(name)s: %(message)s"
+#  nothing. Seven modules each declaring their own format produced three
+#  different ones, one of which carried `asctime`; there is now one format, one
+#  `basicConfig`, and one level policy, all owned by the router.
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -333,9 +343,10 @@ def _build_parser() -> argparse.ArgumentParser:
     binding of `01 WS-Calling-Data` [copybooks/wscall.cob:L6-L14], the required
     `--run-date` and the two settable `SYSTEM-REC` fields, and every entry point
     of this package composes those fragments rather than restating them, so the
-    binding has one spelling. What this function adds is exactly the three
-    options that are specific to `gl080` - a promoted prompt of another program
-    has no business in a shared fragment - plus the diagnostic verbosity knob.
+    binding has one spelling. That is true of `--log-level` as well, which every
+    route now composes from `args.add_log_level_argument`. What this function
+    adds ITSELF is exactly the three options specific to `gl080` - a promoted
+    prompt of one program has no business in a shared fragment.
 
     Returns:
         A parser that has never been parsed. Built on demand and never at import,
@@ -369,6 +380,15 @@ def _build_parser() -> argparse.ArgumentParser:
         parser, default_caller=args.WS_CALLER_GENERAL
     )
     args.add_gl_linkage_arguments(parser)
+    #  THE TRANSPORT DECLARATION - one contract, published on every route
+    #  (`args.add_transport_security_arguments`). No COBOL counterpart: the frozen
+    #  bridge's connect passes six values and no transport policy at all
+    #  [copybooks/mysql-procedures.cpy:L72-L77], transport being compiled into
+    #  `cobmysqlapi.c`, so the migration must decide it and the operator is the
+    #  only party that knows. Stating NOTHING is the fail-closed policy - loopback
+    #  and Unix sockets only - not an absent one. It decides no posted figure, so
+    #  it cannot make two runs of one scenario differ (R-6).
+    args.add_transport_security_arguments(parser)
 
     #  ---- gl080's three promoted prompts  (Agent Action Plan section 0.3.4) ---
 
@@ -380,9 +400,18 @@ def _build_parser() -> argparse.ArgumentParser:
     #  The flag therefore defaults to PROCEED and the opt-out is the explicit
     #  form; it is not turned into a required confirmation, which would invert
     #  the legacy default.
+    #  ⭐ `args.ExplicitBooleanOptionalAction`, NOT `argparse.BooleanOptionalAction`.
+    #  Observationally identical - both publish `--run-confirmed` and
+    #  `--no-run-confirmed` from this one declaration and store the same value, and
+    #  the `default` below is untouched, so `--help` still shows the COBOL's own
+    #  answer and `gl080.run` still declares it (rule R-4). The difference is that
+    #  the explicit action records the FACT that the operator typed the option,
+    #  which `main` then requires. The value cannot carry that fact: SPACE proceeds
+    #  in the frozen source [general/gl080.cbl:L298-L302], so `run_confirmed=True`
+    #  cannot be told apart from "nobody was asked" (CWE-284).
     parser.add_argument(
         "--run-confirmed",
-        action=argparse.BooleanOptionalAction,
+        action=args.ExplicitBooleanOptionalAction,
         default=_RUN_CONFIRMED_DEFAULT,
         help=(
             "Whether the backup pre-flight was satisfied "
@@ -398,23 +427,48 @@ def _build_parser() -> argparse.ArgumentParser:
     #  [general/gl080.cbl:L542-L557]  THE DISK-CHANGE OPTION.
     #  ANOMALY REPRODUCED (rule R-4): `if a = 9 go to main-exit` at L546-L547 is
     #  GO TO class 3, a section exit to `main-exit.  exit section.` at L559;
-    #  `if a not = zero go to accept-option` at L548-L549 is GO TO class 1, a
-    #  loop-back to `accept-option.` at L542. So 0 is the ONLY value that
-    #  proceeds and the default is 0, NOT 9.
+    #  `if a not = zero go to accept-option` at L548-L549 transfers back to
+    #  `accept-option.` at L542, whose own only exits are those same two. So 0 is
+    #  the ONLY value that proceeds and the default is 0, NOT 9.
     #
-    #  NO `choices=` (rule R-3). The frozen program does not REJECT a third
-    #  value, it RE-PROMPTS for ever - a behaviour with no database effect and no
-    #  parameter equivalent - so restricting the option to 0 and 9 would add a
-    #  validation the COBOL has not got. `type=int` is not such an addition: the
-    #  receiving field is `77 a pic 99` [general/gl080.cbl:L183] and the screen
-    #  field at L545 accepts digits, so a numeric argument is what the frozen
-    #  source accepts. The callee stores the value through that field's own
-    #  descriptor, which truncates exactly as the screen field would.
+    #  `choices=(0, 9)` - AND THAT IS NOT AN ADDED VALIDATION (finding CLI-07).
+    #  An earlier draft of this file argued the opposite: that because the frozen
+    #  program RE-PROMPTS rather than rejects, restricting the option would add a
+    #  check the COBOL has not got. The argument inverts the facts. `accept-option.`
+    #  [general/gl080.cbl:L542-L549] is a LOOP THAT CANNOT BE LEFT until the value
+    #  is 9 (class 3, section exit) or zero (fall-through); every other value goes
+    #  straight back to L542. So in the frozen system NO OTHER VALUE EVER REACHES
+    #  THE CODE BELOW THE PROMPT - the set of values with which `gl080` can proceed
+    #  is exactly {0, 9}. Accepting a third value at this boundary is therefore not
+    #  permissiveness, it is a NEW INPUT DOMAIN, and it let database-changing
+    #  end-of-period work run on a value legacy execution can never carry there.
+    #  `choices` restores the frozen domain and makes a third value a deterministic
+    #  argparse usage error (status 2) instead.
+    #
+    #  The retry ITSELF is still not reproduced, and cannot be: an interactive
+    #  re-prompt has no parameter equivalent (Agent Action Plan section 0.4.2
+    #  places interactive retry targets outside the migrated surface). What the
+    #  loop GUARANTEED - that control leaves the paragraph only on 0 or 9 - is what
+    #  is preserved here, which is the requirement.
+    #
+    #  `type=int` is likewise faithful rather than added: the receiving field is
+    #  `77 a pic 99` [general/gl080.cbl:L183] and the screen field at L545 accepts
+    #  digits, so a numeric argument is what the frozen source accepts. The callee
+    #  stores the value through that field's own descriptor, which truncates
+    #  exactly as the screen field would.
     parser.add_argument(
         "--disk-change-option",
         type=int,
+        choices=(_DISK_CHANGE_OPTION_PROCEED, _DISK_CHANGE_OPTION_ABORT),
         default=_DISK_CHANGE_OPTION_DEFAULT,
         metavar="N",
+        #  RECORDED AS STATED WHEN IT IS TYPED, which is what makes
+        #  `args.require_stated` below able to tell an operator who chose 0 from
+        #  one who said nothing at all. With argparse's own action the option
+        #  would carry the frozen default and `stated_explicitly` would answer
+        #  False for every invocation, so the route could never run - the answer
+        #  has to be stated and there would be no way to state it.
+        action=args.STATED_ACTION,
         help=(
             "The disk-change option gl080 accepts at general/gl080.cbl:L545, "
             "into `77 a pic 99`. 0 PROCEEDS and 9 ABORTS - the program's own "
@@ -423,20 +477,31 @@ def _build_parser() -> argparse.ArgumentParser:
             "L408-L409 to skip the whole archiving walk and at L324-L326 to skip "
             "the whole of end-of-period processing, so it suppresses every batch "
             "stamp, every posting delete, the ledger-quarter rollover and the "
-            "cycle increment. Any other value re-prompts in the frozen source "
-            "and is carried forward unchanged here; it is deliberately not "
-            f"rejected. Default {_DISK_CHANGE_OPTION_DEFAULT} - the value that "
-            "proceeds."
+            "cycle increment. NO OTHER VALUE IS ACCEPTED, because no other value "
+            "can leave the frozen program's input loop: general/gl080.cbl:L548-L549 "
+            "sends anything that is neither 0 nor 9 straight back to the prompt, "
+            "so 0 and 9 are the only two values the program can proceed on. "
+            f"Default {_DISK_CHANGE_OPTION_DEFAULT} - the value that proceeds."
         ),
     )
 
     #  [general/gl080.cbl:L553-L557]  THE ARCHIVE PATH EDIT.
     #  ANOMALY REPRODUCED (rule R-4): the ONLY guard in the frozen source is
-    #  `if file-2 (1:1) = space go to accept-option` at L556-L557, GO TO class 1
-    #  again. Nothing checks whether the path exists, whether its directory is
-    #  writable, or whether it is absolute - and nothing here does either
-    #  (rule R-3). The value is a plain string all the way to the callee, which
-    #  applies the leading-space test and keeps the computed path when it fires.
+    #  `if file-2 (1:1) = space go to accept-option` at L556-L557. Nothing checks
+    #  whether the path exists, whether its directory is writable, or whether it
+    #  is absolute - and nothing here does either (rule R-3). The value is a plain
+    #  string all the way to the callee, which applies the leading-space test.
+    #
+    #  ⭐ M-04.  A LEADING SPACE DOES NOT MEAN "KEEP THE COMPUTED PATH". The
+    #  transfer at L557 goes back to the OPTION prompt at L542, not on to
+    #  `main-exit`, so the answer leaves control inside `accept-option` exactly as
+    #  a third option value does. The archive file is a flat file and not a schema
+    #  table, so the PATH is not itself a table effect - but the TRANSFER is,
+    #  because it makes everything after `perform disk-change.`
+    #  [general/gl080.cbl:L406] unreachable. The callee therefore reports
+    #  UNRESOLVED and ends the run unit rather than silently archiving to the
+    #  computed path, which is a state the frozen program has no route to on this
+    #  answer.
     parser.add_argument(
         "--archive-path-override",
         default=_ARCHIVE_PATH_OVERRIDE_DEFAULT,
@@ -446,25 +511,19 @@ def _build_parser() -> argparse.ArgumentParser:
             "general/gl080.cbl:L530-L537. The frozen prompt is "
             "`accept file-2 ... with update` (L555), which presents the field "
             "ALREADY HOLDING that computed path, so omitting this option is the "
-            "COBOL default of no override. The archive is a flat file and not a "
-            "schema table, so this has no effect on any table dump. A value "
-            "whose first character is a space is declined and the computed path "
-            "kept, reproducing L556-L557; nothing else about the path is checked."
+            "COBOL default of no override and proceeds. The archive is a flat "
+            "file and not a schema table, so the path itself has no effect on any "
+            "table dump. A value whose FIRST CHARACTER IS A SPACE returns the "
+            "frozen paragraph to its option prompt (L556-L557), from which its "
+            "exit is unreachable, so gl080 ends the run unit and performs no "
+            "archive, no posting delete, no batch stamp and no period rollover "
+            "rather than falling back to the computed path. Nothing else about "
+            "the path is checked."
         ),
     )
 
     #  ---- diagnostics only: no COBOL counterpart, no database effect ---------
-    parser.add_argument(
-        "--log-level",
-        choices=_LOG_LEVEL_CHOICES,
-        default=_LOG_LEVEL_DEFAULT,
-        help=(
-            "Severity threshold for the log records that replace gl080's screen "
-            "output (Agent Action Plan section 0.3.4). Diagnostic only: it "
-            "reaches no migrated program, alters no control flow and appears in "
-            f"no table dump. Default {_LOG_LEVEL_DEFAULT}."
-        ),
-    )
+    args.add_log_level_argument(parser)
 
     return parser
 
@@ -473,9 +532,11 @@ def load00(
     linkage: args.GlLinkage,
     *,
     called: str,
+    menu_state: args.MenuState,
     run_confirmed: bool,
     disk_change_option: int,
     archive_path_override: str | None,
+    dal_options: Mapping[str, object] | None = None,
 ) -> int:
     """`load00.` - the shared four-parameter dispatch block.
 
@@ -530,6 +591,12 @@ def load00(
             [general/gl080.cbl:L545-L549]. REQUIRED.
         archive_path_override: the promoted archive path
             [general/gl080.cbl:L553-L557]. REQUIRED, and None means no override.
+        dal_options: the caller's keyword-only declarations, transport policy
+            among them, carried to every facade context `gl080` builds. NOT a
+            COBOL operand - the frozen `CALL` [general/general.cbl:L715-L718]
+            passes four things and no fifth. `None`, which `main` leaves it at,
+            means "use the one policy `args.install_connection_policy` installed",
+            and every handler resolves that fail-closed.
 
     Returns:
         `WS-Term-Code` as the callee left it - `pic 99`
@@ -591,6 +658,14 @@ def load00(
         run_confirmed=run_confirmed,
         disk_change_option=disk_change_option,
         archive_path_override=archive_path_override,
+        #  The operator's transport declaration, carried to every facade context
+        #  `gl080` builds. NOT a promoted prompt and NOT a COBOL operand - the
+        #  frozen `CALL` at L715-L718 passes four things and no fifth, its bridge
+        #  having no transport policy to pass
+        #  [copybooks/mysql-procedures.cpy:L72-L77] - so it is stated at the
+        #  process boundary, which is the only place that knows. `None` states the
+        #  fail-closed policy, which is a statement and not an omission.
+        dal_options=dal_options,
     )
 
     #  The callee wrote into the caller's storage, so the code is read back off
@@ -611,9 +686,12 @@ def load00(
     #             into the process exit status through `args.exit_status_for`.
     #             Control never returns to this function either.
     #    Both sides therefore leave the dispatch block for good on this branch,
-    #    and the ONLY difference is the omitted persistence of the three system
-    #    records - menu behaviour excluded by Agent Action Plan section 0.2.2,
-    #    recorded as an omission in the footer rather than silently dropped.
+    #    and the persistence of the three system records happens on both:
+    #    `args.overrewrite` is the same paragraph, reproduced once in
+    #    `acas_posting.cli.args` and performed here before the return. The only
+    #    remaining difference is that paragraph's COBOL-FILE arm
+    #    [general/general.cbl:L674-L691], which has no counterpart because the
+    #    migration has one store - recorded at `args.RDBMS_STORE_SELECTOR_DIGIT`.
     #
     #  UNREACHABLE ON THIS ROUTE IN PRACTICE, AND IMPLEMENTED ANYWAY. L714 clears
     #  the field immediately before the `CALL` and `gl080` never assigns it - it
@@ -628,6 +706,8 @@ def load00(
             term_code,
             args.SERIOUS_ERROR_THRESHOLD,
         )
+        #  L721  go to overrewrite.  ->  general/general.cbl:L656-L672
+        args.overrewrite(linkage.system_record, menu_state, linkage.file_defs)
         return term_code
 
     #  Fall-through is `load00-exit.` [general/general.cbl:L723], whose whole body
@@ -644,9 +724,11 @@ def load00(
 def load09(
     linkage: args.GlLinkage,
     *,
+    menu_state: args.MenuState,
     run_confirmed: bool,
     disk_change_option: int,
     archive_path_override: str | None,
+    dal_options: Mapping[str, object] | None = None,
 ) -> int:
     """`load09.` - End Of Cycle Processing. Two statements, and NO GATE.
 
@@ -677,6 +759,11 @@ def load09(
 
     Args:
         linkage: Shape 1, built by `args.bind_gl_linkage` with `called="gl080"`.
+        menu_state: the menu's own working storage, built by
+            `args.general_menu_state` and already carrying the records
+            `args.aa010_get_system_recs` loaded, threaded through so that the
+            `> 7` arm of `load00.` can reach
+            `overrewrite.` [general/general.cbl:L720-L721].
         run_confirmed: the promoted backup pre-flight answer
             [general/gl080.cbl:L295-L302]. REQUIRED - see `load00`.
         disk_change_option: the promoted disk-change option
@@ -702,9 +789,11 @@ def load09(
     return load00(
         linkage,
         called=_GL080_PROGRAM_ID,
+        menu_state=menu_state,
         run_confirmed=run_confirmed,
         disk_change_option=disk_change_option,
         archive_path_override=archive_path_override,
+        dal_options=dal_options,
     )
 
 
@@ -730,16 +819,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     layer being allowed to substitute its own. That is what makes the CLI default
     and the callee default incapable of drifting apart silently.
 
-    ERRORS ARE NOT SWALLOWED. `args.bind_gl_linkage` raises when the deployment
-    contract that carries the six connection parameters is absent or unusable,
-    and that exception is deliberately allowed to propagate: a run that cannot
-    reach the provisioned database must stop loudly BEFORE it writes anything,
-    and returning a status for it would mean inventing an exit code the frozen
-    system has no counterpart for. The callee's `stop run.` reproduction
-    [general/gl080.cbl:L649] propagates for the same reason. An argparse usage
-    error - a missing `--run-date`, say - raises `SystemExit` from `parse_args`
-    with argparse's own status, which is the mechanically checkable proof that no
-    ambient run date exists.
+    A DEFECT IS NOT SWALLOWED; AN EXPECTED CONFIGURATION FAILURE IS NOT RAISED.
+    The two are different, and the distinction is what the boundary is for. A
+    deployment contract that is absent or unusable (`rdbms_params.RdbmsParamError`,
+    a `ValueError`) and a transport declaration the data-access layer refuses
+    (`ConnectionPolicyError`) are BOTH configuration failures at the process
+    boundary; both stop the run before anything is connected, opened or written,
+    and both are reported as one bounded, redacted line and become the parameter
+    loader's own frozen return code through `args.boundary_exit_status`. Letting
+    either escape would print a traceback carrying the installation's absolute
+    paths, module layout and internal call chain - which tells the operator nothing
+    they can act on and tells everyone else rather a lot (CWE-209) - and it is not
+    an exit code invented by the migration: 8 and 1 are the codes the frozen
+    parameter loader itself returns [common/acas-get-params.cbl:L37-L42].
+
+    A failure INSIDE the cycle is the opposite case and propagates unchanged,
+    including the callee's `stop run.` reproduction [general/gl080.cbl:L649],
+    because there the traceback is the only diagnostic a genuine defect leaves
+    behind. An argparse usage error - a missing `--run-date`, or a destructive
+    answer left unstated - raises `SystemExit` from argparse with argparse's own
+    status, which is the mechanically checkable proof that neither an ambient run
+    date nor an unstated destructive intent can enter the cycle.
 
     Args:
         argv: the argument vector WITHOUT the program name. `None` means read
@@ -755,17 +855,73 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     Raises:
         SystemExit: from `parse_args`, for `--help` and for a usage error.
-        RuntimeError: as `load09`.
+        RuntimeError: as `load09`. THE LIBRARY CONTRACT IS UNCHANGED - a caller
+            that imports this function still receives the exception and its
+            traceback. Only the PROCESS boundary differs:
+            `acas_posting.__main__.run_entry_point` converts it into one
+            sanitised ERROR record and a deterministic exit status, so no
+            traceback, absolute path or exception payload reaches a terminal.
     """
     parser = _build_parser()
     ns = parser.parse_args(argv)
 
-    #  CONFIGURED HERE AND NOWHERE ELSE. `basicConfig` mutates global state, so
-    #  it belongs to the process entry point rather than to import: a library
-    #  import that configured logging would hijack its host application's
-    #  handlers. Placed after `parse_args` so that `--log-level` is known, and
-    #  before the binder so that everything the run reports is captured.
-    logging.basicConfig(level=ns.log_level, format=_LOG_FORMAT)
+    #  `--log-level` IS APPLIED THROUGH THE ONE CONFIGURATOR, never by a second
+    #  `basicConfig`, and ONLY WHEN THE OPERATOR SUPPLIED IT. The option defaults
+    #  to `None` in the shared fragment, so `None` here means "not asked for" and
+    #  the level the process boundary chose stands - on a routed run, the router's
+    #  own `--log-level`. A supplied level is applied on either route: logging is
+    #  configured once at the boundary, and `configure_logging` then sets the level
+    #  because this package owns the handler, so the last explicit request wins. An
+    #  embedding application's own configuration is never touched. The import is
+    #  local to the call for the reason the guard at the foot of this module gives.
+    if ns.log_level is not None:
+        from acas_posting.__main__ import configure_logging
+
+        configure_logging(ns.log_level)
+
+    #  EXPLICIT DESTRUCTIVE INTENT, CHECKED BEFORE ANYTHING IS BOUND OR OPENED.
+    #  `gl080` is the most destructive program of the migrated cycle: its Phase 3
+    #  deletes posted transactions and its Phase 5 rolls the ledger quarters over
+    #  and increments the accounting cycle [general/gl080.cbl:L319, L330]. Whether
+    #  any of that happens is decided by exactly two answers, and IN THE FROZEN
+    #  SOURCE BOTH DEFAULT TO PROCEEDING: the backup pre-flight aborts only on
+    #  Escape or "A"/"a" and the field is pre-set to SPACE
+    #  [general/gl080.cbl:L298-L302], and the disk-change option proceeds on 0 and
+    #  aborts on 9 [general/gl080.cbl:L546-L549].
+    #
+    #  Those defaults are PRESERVED, exactly (rule R-4): they are what `--help`
+    #  shows, what the parser stores, and what `gl080.run` declares. What is
+    #  refused is the silence. In the frozen program a human read both questions
+    #  off the screen - the first sitting under a highlighted warning
+    #  [general/gl080.cbl:L295-L297] - and pressed a key; here nobody was asked, so
+    #  treating omitted options as that operator's affirmative answers is the
+    #  wrapper granting an authorization no one gave (CWE-284). Naming either
+    #  spelling of each satisfies this, and the answers named are passed onward
+    #  unaltered.
+    #
+    #  Placed before `bind_gl_linkage` so a refusal leaves the database wholly
+    #  untouched - nothing is connected, opened or written at this point.
+    args.require_stated(
+        parser,
+        ns,
+        (
+            "run_confirmed",
+            "whether the backup pre-flight was satisfied "
+            "(general/gl080.cbl:L295-L302). Pass --run-confirmed to PROCEED with "
+            "end-of-cycle processing, which is the answer the frozen field's "
+            "pre-set SPACE gives, or --no-run-confirmed to return before any "
+            "write of any kind.",
+        ),
+        (
+            "disk_change_option",
+            "the disk-change option (general/gl080.cbl:L542-L549). Pass "
+            "--disk-change-option 0 to PROCEED, which DELETES POSTED "
+            "TRANSACTIONS, STAMPS EVERY BATCH, ROLLS THE LEDGER QUARTERS OVER AND "
+            "INCREMENTS THE ACCOUNTING CYCLE, or --disk-change-option 9 to abort "
+            "the run and leave GLPOSTING-REC, GLBATCH-REC and GLLEDGER-REC as the "
+            "seed left them.",
+        ),
+    )
 
     #  AMBIGUITY Q-CLI-GL080-DEFAULTS: the COBOL prompts have no textual defaults
     #  beyond the pre-filled accept values; confirm the observed database effect
@@ -782,16 +938,89 @@ def main(argv: Sequence[str] | None = None) -> int:
     #  set out in this module's docstring; what the ORACLE must confirm is the
     #  resulting table state for each, in particular that 9 leaves GLPOSTING-REC,
     #  GLBATCH-REC and GLLEDGER-REC exactly as the seed left them.
-    linkage = args.bind_gl_linkage(ns, called=_GL080_PROGRAM_ID)
+    #  THE MENU'S OWN WORKING-STORAGE. One block, shared by the load below and by
+    #  the `overrewrite` inside `load00` - see `args.general_menu_state`, and see
+    #  `args.MenuState` for why sharing it is what carries the open connection and
+    #  the store selector from one to the other.
+    menu_state = args.general_menu_state()
+
+    #  385  aa005-Open-System.   399  aa010-Get-System-Recs.
+    #  ⭐ THE SEEDED ROWS ARE LOADED BEFORE THE DISPATCH, and passing `menu_state`
+    #  is what makes that happen: the binder performs `Open-System.`
+    #  [general/general.cbl:L385] then `aa010-Get-System-Recs.`
+    #  [general/general.cbl:L398-L419] first - file-key 4, then 2, then 1, key 2
+    #  being the General Ledger menu's alone [general/general.cbl:L406-L408] - so
+    #  `gl080` receives the PERSISTED system record rather than a defaulted one.
+    #  The linkage carries the very record the load filled, so what is read there
+    #  is what `gl080` then sees. This route needs it more than any other:
+    #  `gl080` READS `Period` and `Scycle` [copybooks/wssystem.cob:L63] to decide
+    #  whether phase 5 runs at all [general/gl080.cbl:L324-L332] and which cycle to
+    #  delete, and it MUTATES `Scycle`, `Current-Quarter` and `Date-Form`
+    #  [general/gl080.cbl:L334, :L355-L357, :L360, :L363, :L730] - question Q-21 in
+    #  that module's footer, which this load and the `> 7` rewrite in `load00`
+    #  together settle. Bound at declared defaults the whole of phase 5 ran from
+    #  zeroes (finding CLI-02).
+    #
+    #  A FAILING READ IS NOT REFUSED HERE. The frozen paragraph answers `if
+    #  fs-reply not = zero` by running the out-of-scope parameter-file set-up
+    #  program and looping back [general/general.cbl:L412-L417]; that recovery is
+    #  not reproduced, so the reply is left in `File-Access` exactly as it is for
+    #  every other handler failure in the migrated cycle, and refusing the run
+    #  instead would be a new validation (rule R-3). Recorded at
+    #  `args.aa010_get_system_recs`.
+    #
+    #  THE EXACT TYPE IS CAUGHT, NOT `ValueError` (finding CLI-09).
+    try:
+        linkage = args.bind_gl_linkage(
+            ns, called=_GL080_PROGRAM_ID, menu_state=menu_state
+        )
+    except args.RdbmsParamError as error:
+        return args.report_configuration_failure(
+            error, logger=_LOG, subject="General Ledger end of cycle"
+        )
 
     #  L817-L821, entered. Every promoted parameter is named at the call site.
+    #  `dal_options` is deliberately NOT among them, and this route is the same as
+    #  the other six in that: the transport declaration reaches the handlers
+    #  through the ONE process-level policy `args.install_connection_policy`
+    #  installs while the linkage is bound, not by being threaded call by call. So
+    #  `load09` keeps the keyword-only parameter with its `None` default - which
+    #  means "use the installed policy" - and nothing supplies it here. See
+    #  `args.dal_options_for`, which is published for a caller that wants the
+    #  per-call form and is on no route's critical path.
     term_code = load09(
         linkage,
+        menu_state=menu_state,
         run_confirmed=ns.run_confirmed,
         disk_change_option=ns.disk_change_option,
         archive_path_override=ns.archive_path_override,
     )
 
+    #  NO ORDINARY-EXIT PERSISTENCE, AND THAT IS THE FROZEN SHAPE - MEASURED, NOT
+    #  ASSUMED. `load09.` is two statements and reaches the dispatch block by `go
+    #  to load00` [general/general.cbl:L820-L821]; `load00.` has exactly ONE
+    #  transfer to `overrewrite`, guarded by `> 7`
+    #  [general/general.cbl:L720-L721], and its ordinary exit falls through to
+    #  `load00-exit.` and `go to display-menu` [general/general.cbl:L723-L725],
+    #  which persists NOTHING. That transfer is reproduced inside `load00` above
+    #  and nowhere else. The General menu DOES have paragraphs that persist on
+    #  their ordinary exit - `load03.` through `load06.`, each a `perform
+    #  load000`/`perform load00` followed by `perform overrewrite`
+    #  [general/general.cbl:L765-L768], [general/general.cbl:L777-L780],
+    #  [general/general.cbl:L785-L788], [general/general.cbl:L794-L797] - but
+    #  every one of the four dispatches an out-of-scope program, and neither
+    #  `load08.` nor `load09.` is among them. Sales and Purchase differ again,
+    #  performing `overrewrite` on BOTH arms [sales/sales.cbl:L708-L712],
+    #  [purchase/purchase.cbl:L701-L704], which is why the two SL and the two PL
+    #  routes DO persist on their ordinary exits and this one does not. Adding a
+    #  `< 8` arm here would make the migrated route write rows the frozen one
+    #  leaves alone (rules R-3 and R-4), so none is added. What the frozen system
+    #  does with the mutated records instead is persist them at MENU QUIT, through
+    #  `pre-overrewrite.` [general/general.cbl:L634-L636] reached from
+    #  [general/general.cbl:L596] - a screen-driven exit with no counterpart in a
+    #  single-operation process, recorded as an OMISSION in the footer rather than
+    #  relocated to the end of this route.
+    #
     #  AMBIGUITY Q-CLI-EXITSTATUS: which process exit status each band of the
     #  `pic 99` term-code domain should produce - resolve against the compiled
     #  oracle; record in docs/migration/ambiguity-resolutions.md. Citing
@@ -815,7 +1044,16 @@ if __name__ == "__main__":  # pragma: no cover - module entry point
     #  `harness/run_python_scenario.sh` invokes these modules directly with
     #  `python -m`, and `pyproject.toml` declares no `[project.scripts]`, so this
     #  guard is the documented invocation route rather than a convenience.
-    raise SystemExit(main())
+    #
+    #  ONE PROCESS BOUNDARY FOR BOTH ROUTES. `run_entry_point` configures logging
+    #  and converts a failure into one sanitised ERROR and a deterministic exit
+    #  status, so a direct invocation behaves exactly as a routed one. The import
+    #  is inside the guard because it is needed only when this module IS the
+    #  process, and because the router imports this module back when the router
+    #  is the process.
+    from acas_posting.__main__ import run_entry_point
+
+    raise SystemExit(run_entry_point(main, command="gl-end-of-cycle"))
 
 
 # --- traceability ------------------------------------------------------------
@@ -876,18 +1114,24 @@ if __name__ == "__main__":  # pragma: no cover - module entry point
 #     --disk-change-option
 #         general/gl080.cbl:L542-L557, inside `disk-change section.` L519. The
 #         accept L545, `a = 9` L546-L547, `a not = zero` L548-L549. PROCEEDS ONLY
-#         ON 0; 9 ABORTS; anything else re-prompts. Corroborated by the program's
-#         own GL084 literal at L252. Read back at L408-L409 (skips the archiving
-#         walk, and with it the batch stamping at L430-L433) and at L324-L326
-#         (skips all of end-of-period processing). DEFAULT: 0, NOT 9. Callee
-#         parameter `disk_change_option`. Receiving field `77 a pic 99 value zero.`
-#         L183.
+#         ON 0; 9 DECLINES ARCHIVING; anything else re-prompts, i.e. never reaches
+#         the paragraph's exit, so the callee ENDS THE RUN UNIT there (M-04) and
+#         nothing after L406 executes. Corroborated by the program's own GL084
+#         literal at L252. Read back at L408-L409 (skips the archiving walk, and
+#         with it the batch stamping at L430-L433) and at L324-L326 (skips all of
+#         end-of-period processing). DEFAULT: 0, NOT 9. Callee parameter
+#         `disk_change_option`. Receiving field `77 a pic 99 value zero.` L183.
 #     --archive-path-override
 #         general/gl080.cbl:L553-L557. The path display L553-L554, the
 #         `accept file-2 ... with update` L555 - pre-filled with the path built at
 #         L530-L537 - and the leading-space guard L556-L557. DEFAULT: no override
-#         (None). Callee parameter `archive_path_override`. No table effect: the
-#         archive is a flat file, not a schema table.
+#         (None), which the `with update` phrase makes the proceed answer. A
+#         leading space transfers to the OPTION prompt L542, not to the exit, so it
+#         ends the run unit exactly as a third option value does (M-04) rather than
+#         falling back to the computed path. Callee parameter
+#         `archive_path_override`. The PATH has no table effect - the archive is a
+#         flat file, not a schema table - but the TRANSFER does, because it
+#         suppresses every write below L406.
 #     --log-level
 #         NOT a promoted prompt and NOT a COBOL parameter. Diagnostic verbosity
 #         for the log records that stand in for gl080's screen output
@@ -912,10 +1156,14 @@ if __name__ == "__main__":  # pragma: no cover - module entry point
 #         `goback` L694, so the run unit ends and control never returns to the
 #         dispatch block; in Python the serious-error disposition is returned and
 #         `main` maps it through `args.exit_status_for`, and control never returns
-#         either. The ONLY difference is the omitted persistence, listed under
-#         OMISSIONS. Unreachable on this route in practice - L714 clears the field
-#         and `gl080` never assigns it, ending at a bare `goback`
-#         [general/gl080.cbl:L366] - and implemented regardless.
+#         either. The ONLY difference is the persistence of keys 1, 2 and 4 that
+#         the General Ledger form performs [general/general.cbl:L657-L672], which
+#         is listed under OMISSIONS: `args.overrewrite` implements the paragraph
+#         and the Sales and Purchase routes call it, but Shape 1 carries neither
+#         the totals record nor the defaults record, so two of its three rows have
+#         no linkage destination here. Unreachable on this route in practice -
+#         L714 clears the field and `gl080` never assigns it, ending at a bare
+#         `goback` [general/gl080.cbl:L366] - and implemented regardless.
 #     general/general.cbl:L821   `go to load00`        NOT a class-1/2/3 site: an
 #         unconditional transfer to the shared dispatch block, which itself
 #         transfers onward and never returns. That is why `load09` ends AT its
@@ -955,12 +1203,31 @@ if __name__ == "__main__":  # pragma: no cover - module entry point
 #     * the `go to load01 ... load09 ... depending on z` dispatch table
 #       [general/general.cbl:L696-L704] and the `loader.` fall-back
 #       [general/general.cbl:L706-L709];
-#     * `overrewrite`'s persistence of System-Record, Default-Record and
-#       WS-System-Record-4 [general/general.cbl:L656] through `overclose.`
-#       [general/general.cbl:L693] to `goback` [general/general.cbl:L694], and
-#       `pre-overrewrite`'s backup spool-out
-#       `call "SYSTEM" using Full-Backup-Script` [general/general.cbl:L650] -
-#       both excluded by Agent Action Plan section 0.2.2 and by rule R-1;
+#     * ONLY THE COBOL-FILE ARM of `overrewrite` [general/general.cbl:L674-L691]:
+#       the RDB arm IS reproduced by `args.overrewrite`, performed from the `> 7`
+#       arm of `load00`, and `overclose.` [general/general.cbl:L693] with its
+#       `goback` [general/general.cbl:L694] is the return from `main`. The
+#       migration has no ISAM store - see `args.RDBMS_STORE_SELECTOR_DIGIT`;
+#     * `pre-overrewrite.` [general/general.cbl:L634-L651] IN ITS ENTIRETY, both
+#       halves. Its backup spool-out `call "SYSTEM" using Full-Backup-Script`
+#       [general/general.cbl:L650] is excluded by Agent Action Plan section 0.2.2
+#       and by rule R-1. Its PERSISTENCE half - `go to overrewrite` at
+#       [general/general.cbl:L636] when no backup script is installed, and
+#       `perform overrewrite` at [general/general.cbl:L649] when one is - has no
+#       counterpart either, because the paragraph is reached only from the menu's
+#       own quit key [general/general.cbl:L596] and a single-operation process has
+#       no menu to quit. The consequence is stated rather than engineered around:
+#       in the frozen system a `gl080` run that mutates `Scycle`
+#       [general/gl080.cbl:L334], rotates the quarter
+#       [general/gl080.cbl:L355-L357] or rolls the year over
+#       [general/gl080.cbl:L360-L363] leaves those changes in WORKING-STORAGE
+#       until the operator quits, and they reach the store then; here the process
+#       ends at the `> 7` arm's rewrite or at no rewrite at all. Relocating the
+#       quit-time persistence to the end of this route would make it fire after
+#       every single operation, which is not what the frozen menu does - and it is
+#       what finding C-02 proposed and what the arbitration rejected. Arbitrate
+#       the resulting table state against the compiled oracle and record it in
+#       docs/migration/ambiguity-resolutions.md under Q-CLI-OVERREWRITE-QUIT;
 #     * the GL084-GL087 screen literals themselves
 #       [general/gl080.cbl:L252-L255]: their EFFECT is preserved as the three
 #       promoted parameters, their DISPLAY is not;

@@ -530,6 +530,9 @@ from acas_posting.dal.status import (
     WeError,
     end_of_file_status,
     is_duplicate_key_bridge_level,
+    log_cobol_stop,
+    log_file_handler_record,
+    log_handler_failure,
     sanitise_for_log,
     start_access_type_is_valid,
 )
@@ -1120,11 +1123,13 @@ class BridgeSession:
             reach the secondary, which is anomaly N-cursor2-leak.
         transport: How the connection may cross the network. Has no COBOL
             counterpart - transport policy is compiled into ``cobmysqlapi.c`` -
-            so it is settable here, at the one place the connect happens.
+            and ``None``, the default, defers to the ONE policy the deployment
+            installed with
+            :func:`acas_posting.dal.connection.set_connection_policy`.
         allow_frozen_placeholder_credentials: Passed through to the open.
             ``copybooks/wssystem.cob:L138-L139`` still ships ``"ACAS-User"`` and
-            ``"PaSsWoRd"``, and the connection module refuses them unless the
-            caller says the target is disposable.
+            ``"PaSsWoRd"``; ``None`` defers to that same policy, which reports
+            the exposure and connects exactly as the compiled program does.
         open_access_type: The ``Access-Type`` the last successful open used, kept
             for diagnostics only. It changes no status and no statement.
     """
@@ -1133,7 +1138,7 @@ class BridgeSession:
     connection: Any | None = None
     cursors: CursorStateTable = field(default_factory=CursorStateTable)
     transport: TransportSecurity | None = None
-    allow_frozen_placeholder_credentials: bool = False
+    allow_frozen_placeholder_credentials: bool | None = None
     open_access_type: int = 0
 
     def is_open(self) -> bool:
@@ -1196,7 +1201,9 @@ def reset_session() -> None:
     _SESSION.system_record = None
     _SESSION.connection = None
     _SESSION.open_access_type = 0
-    _LOG.debug("%s session reset; no close was issued", BRIDGE)
+    #  NO RECORD. Resetting the module's session state is a test and harness
+    #  affordance with no counterpart in the frozen bridge at all, so there is
+    #  nothing to reproduce and nothing to report (rule R-4).
 
 
 @contextmanager
@@ -1230,12 +1237,19 @@ connection`.
         if discard_unread is not None:
             try:
                 discard_unread()
-            except Exception as error:  # noqa: BLE001 - cleanup must not mask
-                _LOG.debug("discarding the unread result reported %s", error)
+            except Exception:  # noqa: BLE001, S110 - cleanup must not mask
+                #  SILENT. Discarding an unread result has no counterpart in the
+                #  frozen bridge, and the only thing a record could carry is the
+                #  driver's free text, which can name the account and echo a row
+                #  key (CWE-532, CWE-117). See `dal/connection.py` for the same
+                #  decision at the same kind of site.
+                pass
         try:
             cursor.close()
-        except Exception as error:  # noqa: BLE001 - cleanup must not mask
-            _LOG.debug("closing the bridge cursor reported %s", error)
+        except Exception:  # noqa: BLE001, S110 - cleanup must not mask
+            #  SILENT, for the same reason: no frozen counterpart, and nothing
+            #  to report but driver text.
+            pass
 
 
 
@@ -1367,15 +1381,16 @@ def _sign_loss_at_the_bridge(
     # point and the receiver here has no decimal places.
     stored = abs(int(value)) % (10**digits)
     if stored != value:
-        _LOG.debug(
-            "A-11 sign loss at the bridge: %s %s -> %s %s = %s "
-            "[copybooks/wssl.cob:L43-L53] -> [common/salesMT.cbl:L302-L312]",
-            ENTRIES[column].copybook.name,
-            value,
-            host_variable.name,
-            host_variable.picture,
-            stored,
-        )
+        #  SILENT, AND THE ANOMALY IS THE SILENCE. The frozen bridge neither
+        #  reports nor refuses the signed-to-unsigned narrowing
+        #  [copybooks/wssl.cob:L43-L53] against [common/salesMT.cbl:L302-L312];
+        #  the sign is simply gone before SQL executes. A record here would be a
+        #  diagnostic the compiled program cannot produce (rule R-4), and the
+        #  record this site used to emit interpolated the VALUE both before and
+        #  after the narrowing - for this table a customer's turnover or credit
+        #  figure (CWE-532). A-11 is documented in
+        #  `docs/migration/anomaly-log.md`.
+        pass
     return stored
 
 
@@ -1676,11 +1691,12 @@ def _render_character_for_sql(text: str, *, column: str) -> str:
     """
     rendered = str(text).rstrip(" ")
     if column in UNLOADED_COLUMNS and rendered == "":
-        _LOG.debug(
-            "N-2fields-lost: %s renders as the empty string because "
-            "bb000-HV-Load never loads it [common/salesMT.cbl:L1204-L1239]",
-            column,
-        )
+        #  SILENT. That `bb000-HV-Load` never loads these two columns
+        #  [common/salesMT.cbl:L1204-L1239] is a property of the frozen bridge,
+        #  reproduced by not loading them; the bridge announces it nowhere, so
+        #  neither does this (rule R-4). N-2fields-lost is documented in
+        #  `docs/migration/anomaly-log.md`.
+        pass
     return rendered
 
 
@@ -2443,11 +2459,10 @@ def bb200_insert(
     parameters = _rendered_parameters(host_variables)
     with execute_statement(connection, statement, parameters) as cursor:
         rowcount = int(getattr(cursor, "rowcount", 0) or 0)
-    _LOG.debug(
-        "bb200-Insert on %s affected %d row(s) [common/salesMT.cbl:L1297]",
-        TABLE_NAME,
-        rowcount,
-    )
+    #  NO PER-STATEMENT SUCCESS RECORD. `bb200-Insert` displays nothing, and a
+    #  trace of every inserted row would be the highest-volume record in the
+    #  cycle for no diagnostic gain (rule R-4). The count is returned to the
+    #  caller, which is where the frozen bridge leaves it.
     return rowcount
 
 
@@ -2502,11 +2517,7 @@ def bb300_update(
     parameters = (*_rendered_parameters(host_variables), where_key)
     with execute_statement(connection, statement, parameters) as cursor:
         rowcount = int(getattr(cursor, "rowcount", 0) or 0)
-    _LOG.debug(
-        "bb300-Update on %s affected %d row(s) [common/salesMT.cbl:L1777]",
-        TABLE_NAME,
-        rowcount,
-    )
+    #  NO PER-STATEMENT SUCCESS RECORD - see `bb200_insert` above.
     return rowcount
 
 
@@ -2856,27 +2867,36 @@ def ca_process_logs(
         dal_common: The block carrying the testing switches and the counter.
     """
     logging_data = file_access.logging_data
-    _LOG.info(
-        "fhlogger: system=%s file=%s fn=%s para=%s access=%s "
-        "fs=%s we=%s key=%s where=%s errno=%s state=%s msg=%s",
-        logging_data.ws_log_system,
-        logging_data.ws_log_file_no,
-        file_access.file_function,
-        logging_data.ws_no_paragraph,
-        file_access.access_type,
-        file_access.fs_reply,
-        file_access.we_error,
-        logging_data.ws_file_key,
-        logging_data.ws_log_where,
-        logging_data.sql_err,
-        logging_data.sql_state,
-        logging_data.sql_msg,
+    #  THE ONE ADAPTER, and three fields fewer than this record used to carry -
+    #  none of them redacted or even escaped before. `WS-File-Key` is the
+    #  SALES-KEY of the customer row, `WS-Log-Where` is the `WHERE` clause built
+    #  around it, and `SQL-Msg` is the driver's free text, which can name the
+    #  account and can carry a carriage return that forges a second record
+    #  (CWE-532, CWE-117). The adapter reports the closed-vocabulary fields plus
+    #  the stable error category, and advances `Log-File-Rec-Written` modulo one
+    #  million exactly once per record.
+    log_file_handler_record(
+        _LOG,
+        program=HANDLER,
+        paragraph="Ca-Process-Logs",
+        log_system=logging_data.ws_log_system,
+        log_file_no=logging_data.ws_log_file_no,
+        no_paragraph=logging_data.ws_no_paragraph,
+        file_function=file_access.file_function,
+        access_type=file_access.access_type,
+        fs_reply=file_access.fs_reply,
+        we_error=file_access.we_error,
+        sql_err=str(logging_data.sql_err),
+        sql_state=str(logging_data.sql_state),
+        dal_common=dal_common,
     )
-    # `add 1 to Log-File-Rec-Written.` [common/fhlogger.cbl:L249], in the
-    # caller's own linkage block. `pic 9(6)`, so it wraps at a million.
-    dal_common.log_file_rec_written = (
-        int(dal_common.log_file_rec_written) + 1
-    ) % 1_000_000
+    # `add 1 to Log-File-Rec-Written.` [common/fhlogger.cbl:L249] IS THE ADAPTER'S
+    # JOB and is done exactly once, inside it, immediately before the record is
+    # emitted. It was done a SECOND time here, so one record advanced the counter by
+    # two and every downstream reading of `Log-File-Rec-Written` was wrong by the
+    # number of records written - which is precisely the incoherence OBS-010 names.
+    # The field is `pic 9(6)` [copybooks/Test-Data-Flags.cob:L20], so the adapter
+    # wraps it at a million.
 
 
 def ba999_end(
@@ -2918,11 +2938,10 @@ def ba999_exit() -> None:
     and every host variable survive the return, which is what makes
     ``ba041-Reread`` able to continue a walk a previous call began.
     """
-    _LOG.debug(
-        "%s exit program [common/salesMT.cbl:L1195]; connection and cursors "
-        "survive the return",
-        BRIDGE,
-    )
+    #  NO RECORD. `exit program` [common/salesMT.cbl:L1195] displays nothing;
+    #  that the connection and cursors survive the return is a fact about the
+    #  frozen working storage, recorded in this function's docstring where a
+    #  reader will find it rather than in a run's log stream (rule R-4).
 
 
 def ba998_free(file_access: FileAccess, session_state: BridgeSession) -> None:
@@ -2958,10 +2977,11 @@ def ba998_free(file_access: FileAccess, session_state: BridgeSession) -> None:
     # `CALL "MySQL_free_result"` - the stored snapshot is released.
     _primary(session_state).free()
     _WORKING_STORAGE.stored_rows_pointer = None
-    _LOG.debug(
-        "ba998-Free released the PRIMARY result only; Most-Cursor-Set-2 is "
-        "untouched (anomaly N-cursor2-leak) [common/salesMT.cbl:L1184]"
-    )
+    #  SILENT. That `ba998-Free` releases the PRIMARY result only and leaves
+    #  `Most-Cursor-Set-2` untouched is anomaly N-cursor2-leak, and the frozen
+    #  paragraph announces it nowhere [common/salesMT.cbl:L1184]. Reproduced by
+    #  freeing one and not the other; documented in
+    #  `docs/migration/anomaly-log.md` (rule R-4).
 
 
 def ba100_bad_function(file_access: FileAccess) -> None:
@@ -3133,11 +3153,10 @@ def ba030_process_close(
         # whatever it holds [copybooks/mysql-procedures.cpy]. With no connection
         # there is nothing to close and no status is written, which is what the
         # frozen paragraph does: it tests nothing after the close.
-        _LOG.debug(
-            "%s close with no open connection; nothing to do and no status "
-            "written [common/salesMT.cbl:L468]",
-            BRIDGE,
-        )
+        #  SILENT, as the frozen paragraph is: it tests nothing after the close
+        #  [common/salesMT.cbl:L468], so there is nothing to do and no status to
+        #  write, and a record saying so would be an invented event (rule R-4).
+        pass
         return
     mysql_1980_close(connection)
     mysql_1999_exit()
@@ -3553,11 +3572,23 @@ def ba040_process_read_next(
         _WORKING_STORAGE.ws_mysql_sqlstate = sqlstate
         _WORKING_STORAGE.ws_mysql_error_message = message
         _WORKING_STORAGE.ws_mysql_count_rows = 0
-        _LOG.warning(
-            "ba040-Process-Read-Next: the statement failed and is reported as "
-            "end of file per [common/salesMT.cbl:L534-L535]; errno=%s state=%s",
-            errno,
-            sqlstate,
+        #  ONE ERROR. A driver failure DOES have an authoritative counterpart -
+        #  `Mysql-1110-Report-Problem` [copybooks/mysql-procedures.cpy:L130-L137]
+        #  displays on every one of them - so it is reported, once, at the level
+        #  a failure deserves. The MASKING is preserved exactly: the status pair
+        #  this paragraph returns is still end of file per
+        #  [common/salesMT.cbl:L534-L535], and the record says so.
+        log_handler_failure(
+            _LOG,
+            program=BRIDGE,
+            paragraph="ba040-Process-Read-Next",
+            locator="[common/salesMT.cbl:L534-L535]",
+            fs_reply=int(FsReply.END_OF_FILE),
+            we_error=int(file_access.we_error),
+            sql_err=str(errno),
+            sql_state=str(sqlstate),
+            detail="the sequential read failed at the driver and is MASKED as "
+            "end of file",
         )
         _record_diagnostics(file_access, errno, sqlstate, message)
         state.set_cursor_not_active()
@@ -3837,12 +3868,22 @@ def ba050_process_read_indexed(
         # reports `(23, 0)` with NO diagnostic: `SQL-Err`, `SQL-Msg` and
         # `SQL-State` are left as `ba010-Initialise` cleared them. The failure is
         # logged here so it is at least visible, which changes no status.
-        _LOG.warning(
-            "ba050-Process-Read-Indexed: the statement failed and is reported "
-            "as not found with no diagnostic per "
-            "[common/salesMT.cbl:L680-L684]; errno=%s state=%s",
-            errno,
-            sqlstate,
+        #  ONE ERROR, for the same reason as `ba040-Process-Read-Next` above.
+        #  `SQL-Err` and `SQL-State` are still left as `ba010-Initialise` cleared
+        #  them - the frozen source writes no diagnostic into the record - and
+        #  the returned status is still "not found"; only the log record is new,
+        #  and it changes neither.
+        log_handler_failure(
+            _LOG,
+            program=BRIDGE,
+            paragraph="ba050-Process-Read-Indexed",
+            locator="[common/salesMT.cbl:L680-L684]",
+            fs_reply=int(file_access.fs_reply),
+            we_error=int(file_access.we_error),
+            sql_err=str(errno),
+            sql_state=str(sqlstate),
+            detail="the indexed read failed at the driver and is MASKED as not "
+            "found, with no diagnostic written into the record",
         )
         rows = ()
 
@@ -3997,11 +4038,15 @@ def ba060_process_start(
         )
         outcome.apply_to(file_access)
         logging_data.ws_log_where = ""
-        _LOG.debug(
-            "ba060-Process-Start refused Access-Type %s; the guard at "
-            "[common/salesMT.cbl:L765] admits 5..8 only, so 9 is dead "
-            "(anomaly N-accesstype9)",
-            access_type,
+        log_handler_failure(
+            _LOG,
+            program=BRIDGE,
+            paragraph="ba060-Process-Start",
+            locator="[common/salesMT.cbl:L765]",
+            fs_reply=int(file_access.fs_reply),
+            we_error=int(file_access.we_error),
+            detail="Access-Type %d rejected; the guard admits 5..8 only, so 9 "
+            "is dead code (anomaly N-accesstype9)" % int(access_type),
         )
         return outcome
 
@@ -4143,13 +4188,10 @@ def ba070_process_write(
                 FsReply.DUPLICATE_KEY if duplicate else FsReply.ERROR
             )
             # `We-Error` is deliberately NOT written here - see the docstring.
-            _LOG.debug(
-                "ba070-Process-Write: %s reported as %s with We-Error left at "
-                "%s [common/salesMT.cbl:L884-L890]",
-                "a duplicate key" if duplicate else "an error",
-                file_access.fs_reply,
-                file_access.we_error,
-            )
+            #  NO SECOND RECORD. `_report_driver_failure` below is the one
+            #  reporter for this fault; that `We-Error` is deliberately not
+            #  written [common/salesMT.cbl:L884-L890] is stated in this
+            #  function's docstring, which is where a reader looks for it.
     return CursorOutcome(
         fs_reply=FsReply(int(file_access.fs_reply)),
         we_error=int(file_access.we_error),
@@ -4255,15 +4297,12 @@ def ba080_process_delete(
             file_access.we_error = int(WeError.DELETE_SQLSTATE_NOT_00000)
             status_written = True
         else:
-            _LOG.warning(
-                "ba080-Process-Delete affected %d row(s) with no driver error, "
-                "so NEITHER status field is written and the caller keeps "
-                "(%s, %s) - anomaly N-delete-stale "
-                "[common/salesMT.cbl:L931-L942]",
-                _WORKING_STORAGE.ws_mysql_count_rows,
-                file_access.fs_reply,
-                file_access.we_error,
-            )
+            #  SILENT, AND THAT IS ANOMALY N-delete-stale. With no driver error
+            #  the inner test is false, so NEITHER status field is written
+            #  [common/salesMT.cbl:L931-L942] and the caller keeps whatever the
+            #  previous operation left. The frozen bridge displays nothing on
+            #  this path, so neither does this (rule R-4).
+            pass
         # `go to ba999-End` - Class 3, jumping past the `move zero` below.
         return CursorOutcome(
             fs_reply=FsReply(int(file_access.fs_reply)),
@@ -4363,14 +4402,9 @@ def ba090_process_rewrite(
             file_access.we_error = int(WeError.REWRITE_SQLSTATE_NOT_00000)
             status_written = True
         else:
-            _LOG.warning(
-                "ba090-Process-Rewrite affected %d row(s) with no driver error, "
-                "so NEITHER status field is written and the caller keeps "
-                "(%s, %s) [common/salesMT.cbl:L977-L990]",
-                _WORKING_STORAGE.ws_mysql_count_rows,
-                file_access.fs_reply,
-                file_access.we_error,
-            )
+            #  SILENT, for the same reason as `ba080-Process-Delete` above
+            #  [common/salesMT.cbl:L977-L990] (rule R-4).
+            pass
         return CursorOutcome(
             fs_reply=FsReply(int(file_access.fs_reply)),
             we_error=int(file_access.we_error),
@@ -4463,12 +4497,19 @@ def ba140_process_read_next(
         _WORKING_STORAGE.ws_mysql_sqlstate = sqlstate
         _WORKING_STORAGE.ws_mysql_error_message = message
         _WORKING_STORAGE.ws_mysql_count_rows = 0
-        _LOG.warning(
-            "ba140-Process-Read-Next: the statement failed and is reported as "
-            "end of file per [common/salesMT.cbl:L1057-L1058]; errno=%s "
-            "state=%s",
-            errno,
-            sqlstate,
+        #  ONE ERROR - see `ba040-Process-Read-Next`. The masking to end of file
+        #  per [common/salesMT.cbl:L1057-L1058] is unchanged.
+        log_handler_failure(
+            _LOG,
+            program=BRIDGE,
+            paragraph="ba140-Process-Read-Next",
+            locator="[common/salesMT.cbl:L1057-L1058]",
+            fs_reply=int(FsReply.END_OF_FILE),
+            we_error=int(file_access.we_error),
+            sql_err=str(errno),
+            sql_state=str(sqlstate),
+            detail="the second sequential read failed at the driver and is "
+            "MASKED as end of file",
         )
         _record_diagnostics(file_access, errno, sqlstate, message)
         state.set_cursor_not_active()
@@ -5476,11 +5517,17 @@ def aa040_process_read_next(
     file_access.logging_data.sql_err = " " * SQL_ERR_WIDTH
     file_access.logging_data.sql_msg = " " * SQL_MSG_WIDTH
     # `stop "Cobol File EOF"  *> for testing` [:L425] - anomaly N-stopliteral.
-    _LOG.info(
-        'aa040-Process-Read-Next reached STOP "Cobol File EOF" - debugging '
-        "scaffolding in a shipped handler; the literal is logged and the "
-        "keystroke wait is omitted per Agent Action Plan 0.3.4 "
-        "[common/acas012.cbl:L425]"
+    #  ONE ERROR, THROUGH THE ONE REPORTER, at the SAME LEVEL as every other
+    #  handler that carries this stop. Reporting it at INFO here, WARNING in
+    #  acas006 and acas007, DEBUG in acas016 and ERROR in acas019 made the same
+    #  event unfindable. The keystroke wait is omitted per Agent Action Plan
+    #  section 0.3.4; the transfer that follows is preserved by the caller.
+    log_cobol_stop(
+        _LOG,
+        program=HANDLER,
+        paragraph="aa040-Process-Read-Next",
+        literal="Cobol File EOF",
+        locator="[common/acas012.cbl:L425]",
     )
     # `go to aa999-main-exit` [:L426] - Class 3.
     aa999_main_exit(file_access, dal_common)
@@ -6699,11 +6746,16 @@ def ba012_test_ws_rec_size_2(
             f"{storage.b:0{LENGTH_VARIABLE_DIGITS}d}"
         )[:DISPLAY_BLK_WIDTH].ljust(DISPLAY_BLK_WIDTH)
         # The two `display ... with erase eol` [:L627-L628] become one record.
+        #  ONLY THE SUBSTANTIVE HALF. `Display-Blk` is `SL905` plus the two
+        #  record lengths - a fault and its evidence, both compile-time
+        #  constants. `SL901 Note error and hit return`
+        #  [common/acas012.cbl:L260] is an acknowledgement prompt and nothing
+        #  else, so it is dropped rather than quoted: quoting a prompt in a log
+        #  record is still emitting the prompt. The transfer is preserved below.
         _LOG.error(
-            "ba012-Test-WS-Rec-Size-2 record length mismatch: %s | %s "
-            "[common/acas012.cbl:L615-L628]",
+            "ba012-Test-WS-Rec-Size-2 record length mismatch: %s "
+            "[common/acas012.cbl:L615-L628] - the caller must stop",
             storage.display_blk.rstrip(),
-            SL901,
         )
         # `if Testing-1  perform Ca-Process-Logs  end-if` [:L629-L631].
         if int(dal_common.sw_testing) == TESTING_1_VALUE:

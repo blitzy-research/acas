@@ -45,16 +45,20 @@ reason it has to be:
     ACCUMULATION. Omit them and the gate compares the operator's control totals
     against zero and rejects every batch that has any value in it.
 
-ALSO IN SCOPE, because plan section 0.4.1.2 names them explicitly - arithmetic
-fragments that produce the gate's inputs, drawn from otherwise out-of-scope
-interactive paragraphs. Each carries a `# BOUNDARY` comment at its definition:
+DELIBERATELY NOT IN SCOPE - seven arithmetic fragments and two date sections
+that a reader of plan section 0.4.1.2's summary column might expect to find here.
+`net.` L788, `gross.` L793, the five account-scaling statements at L604, L607,
+L654, L657 and L803, `zz050-Validate-Date` L1169 and `zz070-Convert-Date` L1243
+all live in paragraphs section 0.2.1.1's boundary excludes - `gl050c` section 496
+and `gl050d` section 961 - and a census of every `perform` between L999 and L1166
+proves that not one of them is reachable from inside the boundary. They are named
+individually in the footer's OMISSIONS list, entry 1a, together with the reason
+and with where each pattern still lives (`acas_posting.cobol.arithmetic` and
+`acas_posting.dates`). Section 0.8.7 is the governing warning: "an agent working
+from the file rather than from the stated boundary would migrate several hundred
+lines that must not be migrated."
 
-    net.                        L788   the first `ROUNDED` compute  L791
-    gross.                      L793   the second `ROUNDED` compute L796,
-                                       plus its un-`ROUNDED` companion L797
-    the five account-scaling statements  L604, L607, L654, L657, L803
-
-ALSO IN SCOPE as thin delegations, because `batch-print` performs `zz060` twice
+IN SCOPE as thin delegations, because `batch-print` performs `zz060` twice
 (at [general/gl051.cbl:L1020] and [general/gl051.cbl:L1082]) and `zz060` reaches
 the date-module wrapper:
 
@@ -86,15 +90,19 @@ READS: `GL-Posting-Read-Next` [general/gl051.cbl:L1008],
 `GL-Batch-Read-Indexed` [general/gl051.cbl:L1070] and
 `GL-Nominal-Read-Indexed` [general/gl051.cbl:L1142] and
 [general/gl051.cbl:L1156]. There is no write, no rewrite, no delete, no open and
-no close anywhere inside the boundary. The opens are `gl050d`'s
+no close anywhere inside the REPORT SECTION. The opens are `gl050d`'s
 [general/gl051.cbl:L980-L981] and so are the closes
 [general/gl051.cbl:L989-L990].
 
-So the whole deliverable of this module is a VALUE: `Batch-Status` on the
-in-memory batch record, plus the `trutht` flag that decides it. The two
-`GL-Batch-Rewrite` calls that persist `Batch-Status` are at
-[general/gl051.cbl:L415] and [general/gl051.cbl:L491], both outside the
-boundary, so persistence belongs to the caller - question Q-1.
+The section's own deliverable is therefore a VALUE: `Batch-Status` on the batch
+record, plus the `trutht` flag that decides it. ⭐ AND `run` WRITES THAT VALUE TO
+THE ROW. Both frozen callers of the gate perform `GL-Batch-Rewrite`
+UNCONDITIONALLY immediately after it - [general/gl051.cbl:L415] in `gl051-Main`
+and [general/gl051.cbl:L491] in `proof-all` - and both callers are out of scope,
+while section 0.4.1.1 gives the migration no CLI route that dispatches `gl051`.
+So `run` performs it, once, at the position the source gives it. Question Q-1 is
+RESOLVED FROM THE SOURCE, not left to the oracle: no path exists in either caller
+on which the gate runs and the rewrite does not follow. See `_gl_batch_rewrite`.
 
 THE GATE, AND THE ONE ORDERING FACT THAT MATTERS MOST
 =====================================================
@@ -273,12 +281,15 @@ Rule R-6 makes observed compiled behaviour the tie-breaker, and section 0.6.8
 requires each question be recorded with its experiment. Nothing below is guessed
 in code: each is marked `# AMBIGUITY Q-n` at the site it bears on.
 
-  Q-1 Is persisting `Batch-Status` the caller's job? The two `GL-Batch-Rewrite`
-      calls are at [general/gl051.cbl:L415] and [general/gl051.cbl:L491], both
-      outside the boundary, and `batch-print` performs no write of any kind.
-      `run` therefore SETS the field and returns. Experiment: proof one batch
-      through the compiled program and observe whether `GLBATCH-REC` changes
-      before the amendment screen is left.
+  Q-1 RESOLVED FROM THE SOURCE - no oracle experiment needed. The question was
+      whether persisting `Batch-Status` is the caller's job. It is the caller's
+      STATEMENT but not a caller's DECISION: both callers issue
+      `GL-Batch-Rewrite` UNCONDITIONALLY on every path that reaches the gate -
+      [general/gl051.cbl:L415] in `gl051-Main` and [general/gl051.cbl:L491] in
+      `proof-all` - so the field ALWAYS reaches `GLBATCH-REC`. Since both callers
+      are out of scope and section 0.4.1.1 gives the migration no route that
+      dispatches `gl051`, `run` performs the rewrite itself at that position. Not
+      doing so would leave the gate with no observable effect at all.
   Q-2 The compound VAT expression's intermediate precision
       [general/gl051.cbl:L796]. Section 0.6.8 names this as "the one place a
       precision difference could change a stored penny": there is no `-std=`
@@ -362,7 +373,6 @@ to ordinary enterprise practice.
 from __future__ import annotations
 
 import decimal
-import logging
 from dataclasses import dataclass, field
 from typing import Final
 
@@ -383,22 +393,27 @@ from acas_posting.dal.status import FsReply
 # The date sections. `zz050`, `zz060`, `zz070` and the date-module wrapper are
 # repeated near-identically in nine of the in-scope programs, and `dates.py` is
 # where they consolidate - the one place consolidation is unambiguously safe
-# because the bodies are textually equivalent. TWO facts decide which entry
-# points this module calls, and both are `gl051`-specific:
-#   * `zz050_validate_date_gl051` is `gl051`'s OWN variant. Its three `inspect
-#     ... replacing all` statements [general/gl051.cbl:L1178-L1180] are absent
-#     from `sl060`, `sl100`, `pl060` and `pl100`, which is why two variants are
-#     published rather than one.
-#   * `maps03` and `maps04` are the SAME wrapper under both names. `gl051` and
-#     `gl070` perform one named `maps03` [general/gl051.cbl:L1273]; the Sales
-#     and Purchase carriers perform one named `maps04`. This module passes
-#     `maps03`.
+# because the bodies are textually equivalent.
+#
+# ONLY TWO OF THE FOUR ARE IMPORTED, because only two are reachable from this
+# module's boundary. A census of every `perform` between
+# [general/gl051.cbl:L999] and [general/gl051.cbl:L1166] names
+# `zz060-Convert-Date` and nothing else of the four; `zz060` in turn performs
+# `maps03` [general/gl051.cbl:L1217]. `zz050-Validate-Date` is performed only
+# from `gl050c` [general/gl051.cbl:L496] and `zz070-Convert-Date` only from
+# `gl050d` [general/gl051.cbl:L961], both of which
+# [general/gl051.cbl] declares out of scope in their entirety, so
+# `zz050_validate_date_gl051` and `zz070_convert_date` are not imported here at
+# all. They remain published by `acas_posting.dates` for the carriers that do
+# reach them.
+#
+# `maps03` and `maps04` are the SAME wrapper under both names. `gl051` and
+# `gl070` perform one named `maps03` [general/gl051.cbl:L1273]; the Sales and
+# Purchase carriers perform one named `maps04`. This module passes `maps03`.
 from acas_posting.dates import (
     WsDateFormats,
     maps03 as _dates_maps03,
-    zz050_validate_date_gl051,
     zz060_convert_date,
-    zz070_convert_date,
 )
 
 # copy "wsfnctn.cob".   [general/gl051.cbl:L129] - the record-layout half.
@@ -485,7 +500,21 @@ from acas_posting.cobol.picture import descriptor_for
 #: is used rather than a list so the surface cannot be extended at run time.
 __all__: Final[tuple[str, ...]] = ("run",)
 
-_LOG: Final[logging.Logger] = logging.getLogger(__name__)
+#  THIS MODULE HAS NO LOGGER, DELIBERATELY.
+#
+# A census of the in-scope span - `batch-print section.` through its `main-exit.`
+# [general/gl051.cbl:L999-L1170] - finds ZERO `display` statements and FIFTEEN
+# `write print-record` statements. Agent Action Plan section 0.3.4 makes a
+# DISPLAY with no database effect a log record, and there are none to convert;
+# section 0.2.2 puts "report formatting beyond database effects" out of scope, and
+# that is all fifteen of the writes. A module-level logger existed only to carry
+# thirteen records that were, without exception, either an invented narration of
+# frozen control flow (R-4) or the report's own content - batch numbers, nominal
+# account numbers and control totals - re-emitted to a different destination
+# (CWE-532).
+#
+# The gate's entire observable outcome is `Batch-Status` in `GLBATCH-REC`, which is
+# what `harness/diff_states.py` compares for the control-total-mismatch scenario.
 
 
 def _from_record(
@@ -546,13 +575,16 @@ _ACTUAL_VAT: Final = _from_record(BatchAmounts.FIELDS, "Actual-Vat")
 
 #: The posting fields the boundary reads. `Post-Amount`
 #: [copybooks/wspost.cob:L23] and `Vat-Amount` [copybooks/wspost.cob:L28] are
-#: `pic s9(8)v99` SIGNED, which is the whole of finding F-4.
+#: `pic s9(8)v99` SIGNED, which is the whole of finding F-4; the boundary reads
+#: them as VALUES only - `add vat-amount to actual-vat`
+#: [general/gl051.cbl:L1029] and its DR/CR siblings - and never STORES into
+#: either, so neither has a receiving descriptor here. The two statements that
+#: do store into them, [general/gl051.cbl:L791] and [general/gl051.cbl:L796],
+#: are in `gl050c` and out of scope; see OMISSIONS in the footer.
 _POST_DR: Final = _from_record(WsPostingRecord.FIELDS, "Post-DR")
 _POST_CR: Final = _from_record(WsPostingRecord.FIELDS, "Post-CR")
 _DR_PC: Final = _from_record(WsPostingRecord.FIELDS, "DR-PC")
 _CR_PC: Final = _from_record(WsPostingRecord.FIELDS, "CR-PC")
-_POST_AMOUNT: Final = _from_record(WsPostingRecord.FIELDS, "Post-Amount")
-_VAT_AMOUNT: Final = _from_record(WsPostingRecord.FIELDS, "Vat-Amount")
 #: `03  Vat-AC  pic 9(6).` [copybooks/wspost.cob:L25] is read twice inside the
 #: boundary - [general/gl051.cbl:L1044] and [general/gl051.cbl:L1047], both
 #: qualified references and both anomaly A-21 sites - but neither statement needs
@@ -586,7 +618,10 @@ _WE_ERROR: Final = _from_record(_FILE_ACCESS_FIELDS, "We-Error")
 #: [general/gl051.cbl:L1158]. A BARE LITERAL ONE in the source, not a member of
 #: the handler's code vocabulary: it is emphatically NOT `WeError.NOT_USED`,
 #: whose value is 999 and which is `gl072`'s sentinel
-#: [general/gl072.cbl:L303-L304]. Named here so the call sites read as the flag
+#: [general/gl072.cbl:L306-L307]. (The anomaly register cites that sentinel as
+#: [general/gl072.cbl:L303-L304]; in the frozen checkout the two statements read
+#: at L306-L307, and the frozen file is the authority.) Named here so the call
+#: sites read as the flag
 #: they are, and so nobody substitutes an enum member that would change the
 #: stored value. Finding F-5 records that the out-of-scope `get-description.`
 #: [general/gl051.cbl:L799] uses 255 for the identical purpose
@@ -637,17 +672,13 @@ _ARRAY_PC: Final = descriptor_for(
     "pic 99", name="array-pc", source_locator="general/gl051.cbl:L179"
 )
 #: `03  ws-vat-rate  pic 99v99  comp  value zero.`  [general/gl051.cbl:L183] -
-#: the rate both `ROUNDED` computes divide by.
+#: declared here only because `_WorkingStorage` gives the field its `VALUE ZERO`
+#: [general/gl051.cbl:L183]. The two `ROUNDED` computes that read it are in
+#: `gl050c` and out of scope; see OMISSIONS in the footer.
 _WS_VAT_RATE: Final = descriptor_for(
     "pic 99v99 comp value zero",
     name="ws-vat-rate",
     source_locator="general/gl051.cbl:L183",
-)
-#: `03  acc-ok  pic 9(4)v99.`  [general/gl051.cbl:L233], reached through the
-#: `redefines` of `ws-account-work` [general/gl051.cbl:L232]. The receiver of
-#: the two scaling `DIVIDE` statements.
-_ACC_OK: Final = descriptor_for(
-    "pic 9(4)v99", name="acc-ok", source_locator="general/gl051.cbl:L233"
 )
 
 #: `03  l4-batch  pic z(4)9.`  [general/gl051.cbl:L289] - a print field, and the
@@ -738,18 +769,15 @@ _HEADING_LINE_COUNT: Final[int] = 6
 #: [general/gl051.cbl:L1163] - ten carets, into a `pic x(12)` field.
 _ACCOUNT_ERROR_MARKER: Final[str] = "^^^^^^^^^^"
 
-#: The divisor and multiplier of every account-scaling statement in this
-#: program: [general/gl051.cbl:L604], [general/gl051.cbl:L607],
+#: The divisor of the three account-scaling `DIVIDE` statements INSIDE the
+#: boundary - [general/gl051.cbl:L1035], [general/gl051.cbl:L1037] and
+#: [general/gl051.cbl:L1044]. An account is held as `nnnnss` and shown as
+#: `nnnn.ss`, so the scale factor is a hundred. The five scaling statements the
+#: rest of the program has - [general/gl051.cbl:L604], [general/gl051.cbl:L607],
 #: [general/gl051.cbl:L654], [general/gl051.cbl:L657] and
-#: [general/gl051.cbl:L803]. An account is held as `nnnnss` and shown as
-#: `nnnn.ss`, so the scale factor is a hundred - the same literal the two print
-#: divides [general/gl051.cbl:L1035] and [general/gl051.cbl:L1037] use.
+#: [general/gl051.cbl:L803] - are outside the boundary and are recorded in the
+#: footer's OMISSIONS list rather than reproduced.
 _ACCOUNT_SCALE: Final[int] = 100
-
-#: `compute vat-amount rounded = post-amount * ws-vat-rate / 100`
-#: [general/gl051.cbl:L791]. The percentage base, and the same literal inside
-#: the compound expression at [general/gl051.cbl:L796].
-_PERCENT: Final[int] = 100
 
 
 # ---------------------------------------------------------------------------
@@ -925,14 +953,51 @@ class _HandlerLinkage:
 
 
 # ---------------------------------------------------------------------------
-#  The three file-handler verbs the boundary performs - ALL READS
+#  The four file-handler verbs this module performs - THREE READS AND THE REWRITE
 # ---------------------------------------------------------------------------
-# `batch-print` performs exactly three verbs and every one of them is a read.
-# There is no write, no rewrite, no delete, no open and no close inside the
-# boundary; the opens are `gl050d`'s [general/gl051.cbl:L980-L981] and so are the
-# closes [general/gl051.cbl:L989-L990]. Each verb gets its own adapter so that
-# question Q-6 - the facade's Python call shape - has exactly three places to
-# reconcile rather than four scattered call sites.
+# `batch-print` itself performs exactly three verbs and every one of them is a
+# read: there is no write, no delete, no open and no close inside the report
+# section; the opens are `gl050d`'s [general/gl051.cbl:L980-L981] and so are the
+# closes [general/gl051.cbl:L989-L990].
+#
+# ⭐ THE FOURTH VERB IS `GL-Batch-Rewrite`, AND IT IS NOT OPTIONAL. The gate's one
+# deliverable is `Batch-Status` on `GLBATCH-REC`, and a status that is only set in
+# memory is not a database effect at all. In the frozen program the rewrite that
+# persists it is UNCONDITIONAL in both of the gate's callers:
+#
+#     L415  perform  GL-Batch-Rewrite.       *> rewrite  batch-record..
+#           - `gl051-Main` [general/gl051.cbl:L415], reached on EVERY path out of
+#             its menu dispatch, including the `ws-menu = 3` path
+#             [general/gl051.cbl:L400-L401] that performs `gl050d` and so reaches
+#             `batch-print` and `end-batch`. There is NO path in `gl051-Main` on
+#             which the gate runs and the rewrite does not follow it.
+#     L491  perform  GL-Batch-Rewrite.       *> rewrite  batch-record..
+#           - `proof-all` [general/gl051.cbl:L491], likewise unconditional for
+#             every batch it proofs.
+#
+# Both callers are out of scope (Agent Action Plan section 0.4.2 puts `gl051-Main`
+# §359 and `proof-all` §474 outside the boundary), and section 0.4.1.1 gives the
+# migration no CLI entry point that dispatches `gl051` - the seven routes are the
+# posting-cycle ones. So there is NO in-scope caller anywhere in the migration for
+# the rewrite to live in, and omitting it would mean the migrated cycle NEVER
+# records an accepted or rejected batch in the one table that decides whether the
+# posting phases run at all. The control-total-mismatch scenario that section
+# 0.8.5 mandates would then diff EMPTY ON BOTH SIDES FOR THE WRONG REASON: not
+# because the two implementations agree, but because neither wrote anything.
+#
+# It is therefore performed HERE, by `run`, immediately after the section - which
+# is exactly where both frozen callers perform it, and unconditionally, as both
+# frozen callers do. This is the boundary being honest in the same way the four
+# promoted preconditions are: the statement is out-of-boundary, so it is named,
+# located, and reproduced at the position the source gives it, rather than
+# silently dropped. AMBIGUITY Q-1 is thereby RESOLVED FROM THE SOURCE and no
+# longer open: the question was where the rewrite belongs, and the answer is that
+# every caller issues it unconditionally, so the gate's status ALWAYS reaches the
+# row.
+#
+# Each verb gets its own adapter so that question Q-6 - the facade's Python call
+# shape - has exactly four places to reconcile rather than five scattered call
+# sites.
 
 
 def _gl_posting_read_next(linkage: _HandlerLinkage) -> None:
@@ -988,6 +1053,53 @@ def _gl_batch_read_indexed(linkage: _HandlerLinkage) -> None:
     )
 
 
+def _gl_batch_rewrite(linkage: _HandlerLinkage) -> None:
+    """`perform GL-Batch-Rewrite.`  [general/gl051.cbl:L415] and L491.
+
+    The facade paragraph, verbatim [copybooks/Proc-ACAS-FH-Calls.cob:L475-L478]:
+
+         GL-Batch-Rewrite.
+             move     zero to Access-Type.
+             set      fn-Re-write to true.
+             perform  acas007.
+
+    ⭐ THE ONE DATABASE MUTATION OF THE WHOLE `gl051` BOUNDARY, and the statement
+    that turns the control-total gate from an in-memory calculation into an
+    observable effect on `GLBATCH-REC`. It writes back the batch record the gate
+    just mutated, carrying `Batch-Status` - `88 Status-Closed value 1.`
+    [copybooks/wsbatch.cob:L27] for an accepted batch, `88 Status-Open value 0.`
+    [copybooks/wsbatch.cob:L26] for a rejected one.
+
+    WHAT DEPENDS ON IT. `gl070`'s batch check reads this very field -
+    `if status-open move 1 to a.` [general/gl070.cbl:L314-L315] - and on finding
+    an open batch raises the terminate code [general/gl070.cbl:L289], which the
+    posting-cycle route then honours as a hard gate so that `gl071` and `gl072`
+    never run. Without this rewrite `gl070` would read whatever status the seed
+    left, and the gate's verdict would change nothing anywhere.
+
+    IT IS UNCONDITIONAL, exactly as both frozen callers are. The `z = 99`
+    all-batches path leaves `Batch-Status` UNTOUCHED
+    [general/gl051.cbl:L1099-L1100], so on that path this rewrite writes the row
+    back with the value it already held - which is what the compiled program does
+    too, since [general/gl051.cbl:L415] is not guarded. A rewrite of unchanged
+    values leaves the row identical, so the state diff sees nothing, and section
+    0.6.5's "clean rejection, no database effect" class is preserved.
+
+    The reply is TESTED INLINE by the caller, because `gl051` copies
+    [copybooks/Proc-ACAS-FH-Calls.cob], which declares no error-check paragraph -
+    the same convention every other verb in this module follows.
+    """
+    facade.gl_batch_rewrite(
+        facade.FacadeContext(
+            linkage.system_record,
+            linkage.batch,
+            linkage.file_access,
+            linkage.file_defs,
+            linkage.dal_common,
+        ),
+    )
+
+
 def _gl_nominal_read_indexed(linkage: _HandlerLinkage) -> None:
     """`perform GL-Nominal-Read-Indexed.`  [general/gl051.cbl:L1142] and L1156.
 
@@ -1017,243 +1129,20 @@ def _gl_nominal_read_indexed(linkage: _HandlerLinkage) -> None:
     )
 
 
-#  net.  [general/gl051.cbl:L788]
-#  # BOUNDARY: this paragraph sits inside `gl050c section.`
-#  [general/gl051.cbl:L496], which is OUT OF SCOPE in its entirety. It is
-#  migrated because Agent Action Plan section 0.4.1.2 names its compute
-#  explicitly, and because that compute produces `Vat-Amount` - one of the two
-#  values the gate accumulates. Nothing else from `gl050c` is here.
-
-
-def _net(storage: _WorkingStorage, posting: WsPostingRecord) -> decimal.Decimal | int:
-    """`net.` - VAT computed FROM a net amount  [general/gl051.cbl:L788-L791].
-
-        788  net.
-        791      compute  vat-amount rounded = post-amount * ws-vat-rate / 100.
-
-    ONE OF THE FIVE `ROUNDED` SITES IN THE WHOLE MIGRATION, and one of the two
-    this program owns; the others are [general/gl051.cbl:L796],
-    [general/gl080.cbl:L328], [irs/irs030.cbl:L1551] and
-    [irs/irs030.cbl:L1562]. `ROUNDED` on a COBOL store means round half away from
-    zero, where the default - every other store in this program - truncates
-    toward zero, so the flag is passed explicitly here and left at its default
-    everywhere else. Getting that backwards would corrupt essentially every
-    posted figure.
-
-    THE WHOLE EXPRESSION IS ONE STORE. `post-amount * ws-vat-rate / 100` is
-    evaluated at extended intermediate precision and the result is stored ONCE,
-    into `Vat-Amount`'s two decimal places. Splitting it into a multiply
-    followed by a divide would store twice and could lose a penny on the
-    intermediate, which is why the expression is handed to `compute` as a
-    callable rather than pre-computed.
-
-    FINDING: a superseded commented-out variant of this compute sits directly
-    above it at [general/gl051.cbl:L790], referring to a differently named rate
-    field. It is the same character of leftover the plan records as anomaly 19
-    for `irs030` [irs/irs030.cbl:L1550]. Not reproduced - a comment has no
-    behaviour - but recorded.
-
-    Args:
-        storage: Supplies `ws-vat-rate` [general/gl051.cbl:L183].
-        posting: Supplies `Post-Amount` and RECEIVES `Vat-Amount`
-            [copybooks/wspost.cob:L23] and [copybooks/wspost.cob:L28].
-
-    Returns:
-        The stored `Vat-Amount`, which is also written back onto `posting`.
-    """
-    # 791  compute  vat-amount rounded = post-amount * ws-vat-rate / 100.
-    posting.vat_amount = arithmetic.compute(
-        lambda: arithmetic.intermediate(posting.post_amount)
-        * arithmetic.intermediate(storage.ws_vat_rate)
-        / arithmetic.intermediate(_PERCENT),
-        receiving=_VAT_AMOUNT,
-        rounded=True,
-    )
-    return posting.vat_amount
-
-
-#  gross.  [general/gl051.cbl:L793]
-#  # BOUNDARY: as `net.` above - inside the OUT-OF-SCOPE `gl050c section.`
-#  [general/gl051.cbl:L496], migrated only because section 0.4.1.2 names its two
-#  statements.
-
-
-def _gross(storage: _WorkingStorage, posting: WsPostingRecord) -> decimal.Decimal | int:
-    """`gross.` - VAT extracted FROM a gross amount  [general/gl051.cbl:L793-L797].
-
-        793  gross.
-        796      compute  vat-amount rounded =
-                          post-amount - (post-amount / ((ws-vat-rate + 100) / 100)).
-        797      subtract vat-amount  from  post-amount.
-
-    TWO STORES, AND THEY DISAGREE ON ROUNDING. The first is the second of this
-    program's two `ROUNDED` sites; the second, one line later, is un-`ROUNDED`
-    and therefore truncates. That adjacency is the reason rounding is a per-call
-    argument in `acas_posting.cobol.arithmetic` and can never be a module-wide
-    mode - and it is not unique to `gl051`: three of the migration's five
-    `ROUNDED` sites are followed immediately by a truncating store, the others
-    being [general/gl080.cbl:L329] and [irs/irs030.cbl:L1564].
-
-    AMBIGUITY Q-2 - THE COMPOUND EXPRESSION. Section 0.6.8 singles this
-    statement out, verbatim: "the compound VAT expression, which is the one place
-    a precision difference could change a stored penny." There is no `-std=`
-    dialect selection and no `>>SET ARITHMETIC` directive anywhere in the
-    repository, so the compiler's DEFAULT intermediate precision governs the
-    nested division. The expected value for any given rate and amount must
-    therefore be CAPTURED from the compiled program and never derived by reading
-    this expression. What is reproduced structurally is what can be read with
-    certainty: the parenthesisation exactly as written, one single store, and
-    extended precision throughout the intermediate.
-
-    `SUBTRACT a FROM b` with no `GIVING` stores into b, so
-    [general/gl051.cbl:L797] leaves `Post-Amount` holding the net amount - the
-    gross it arrived with, less the VAT just extracted. The order matters: the
-    subtract reads the `Vat-Amount` the compute has just stored, so it consumes
-    the ROUNDED value, not the exact one.
-
-    Args:
-        storage: Supplies `ws-vat-rate` [general/gl051.cbl:L183].
-        posting: Supplies and RECEIVES both `Post-Amount` and `Vat-Amount`.
-
-    Returns:
-        The stored `Vat-Amount`. `posting.post_amount` is reduced in place.
-    """
-    # 796  compute  vat-amount rounded =
-    #               post-amount - (post-amount / ((ws-vat-rate + 100) / 100)).
-    # AMBIGUITY Q-2: default intermediate precision governs the nested divide;
-    # the expected value comes from the compiled program, not from this reading.
-    posting.vat_amount = arithmetic.compute(
-        lambda: arithmetic.intermediate(posting.post_amount)
-        - (
-            arithmetic.intermediate(posting.post_amount)
-            / (
-                (
-                    arithmetic.intermediate(storage.ws_vat_rate)
-                    + arithmetic.intermediate(_PERCENT)
-                )
-                / arithmetic.intermediate(_PERCENT)
-            )
-        ),
-        receiving=_VAT_AMOUNT,
-        rounded=True,
-    )
-
-    # 797  subtract vat-amount  from  post-amount.
-    # No `GIVING`, so the receiver is `post-amount` itself; and NO `ROUNDED`, so
-    # this store truncates one line after the one above rounded.
-    posting.post_amount = arithmetic.subtract_from(
-        posting.vat_amount,
-        receiver_value=posting.post_amount,
-        receiving=_POST_AMOUNT,
-        rounded=False,
-    )
-    return posting.vat_amount
-
-
 # ---------------------------------------------------------------------------
-#  The five account-scaling statements
+#  The two date sections `batch-print` reaches - thin delegations to
+#  `acas_posting.dates`
 # ---------------------------------------------------------------------------
-# # BOUNDARY: not one of these five lives inside `batch-print`. Agent Action Plan
-# section 0.4.1.2 names them individually - "the account scaling multiplies and
-# divides by 100 at [general/gl051.cbl:L604], [general/gl051.cbl:L607],
-# [general/gl051.cbl:L654], [general/gl051.cbl:L657], [general/gl051.cbl:L803]" -
-# so each is reproduced as its own named helper, and each says which OUT-OF-SCOPE
-# paragraph it was taken from. All five are un-`ROUNDED`, so all five truncate.
-#
-# The two directions are inverses: an account number is STORED as `nnnnss` in a
-# `pic 9(6)` field and SHOWN to the operator as `nnnn.ss` in a `pic 9(4)v99` one.
-# `DIVIDE a BY b GIVING c` means `c = a / b`; `MULTIPLY a BY b GIVING c` means
-# `c = a * b`.
-
-
-def _scale_acc_ok_from_post_dr(posting: WsPostingRecord) -> decimal.Decimal | int:
-    """`divide post-dr by 100 giving acc-ok`  [general/gl051.cbl:L604].
-
-    # BOUNDARY: the `if convention = "DR"` true branch
-    [general/gl051.cbl:L603-L605], inside the OUT-OF-SCOPE `gl050c section.`
-    [general/gl051.cbl:L496]. Unpacks the stored debit account into the
-    operator's `nnnn.ss` display form. Un-`ROUNDED`, therefore truncating.
-    """
-    # 604  divide post-dr by 100 giving acc-ok
-    return arithmetic.divide_by_giving(
-        posting.post_dr, _ACCOUNT_SCALE, _ACC_OK, rounded=False
-    )
-
-
-def _scale_acc_ok_from_post_cr(posting: WsPostingRecord) -> decimal.Decimal | int:
-    """`divide post-cr by 100 giving acc-ok`  [general/gl051.cbl:L607].
-
-    # BOUNDARY: the `else` branch of the same statement
-    [general/gl051.cbl:L606-L608], inside the OUT-OF-SCOPE `gl050c section.`
-    The credit-side twin of `_scale_acc_ok_from_post_dr`; the pair differ only in
-    which account they unpack and which profit centre they carry across.
-    Un-`ROUNDED`, therefore truncating.
-    """
-    # 607  divide post-cr by 100 giving acc-ok
-    return arithmetic.divide_by_giving(
-        posting.post_cr, _ACCOUNT_SCALE, _ACC_OK, rounded=False
-    )
-
-
-def _scale_post_dr_from_account(storage: _WorkingStorage) -> decimal.Decimal | int:
-    """`multiply account-in by 100 giving post-dr`  [general/gl051.cbl:L654].
-
-    # BOUNDARY: `accept-amount.` [general/gl051.cbl:L650], inside the
-    OUT-OF-SCOPE `gl050c section.` [general/gl051.cbl:L496]. The inverse of
-    `_scale_acc_ok_from_post_dr`: packs the operator's `nnnn.ss` back into the
-    stored `pic 9(6)` debit account. Un-`ROUNDED`, therefore truncating - so a
-    third decimal place typed by the operator is discarded rather than rounded
-    up.
-    """
-    # 654  multiply account-in by 100 giving post-dr
-    return arithmetic.multiply_by_giving(
-        storage.account_in, _ACCOUNT_SCALE, _POST_DR, rounded=False
-    )
-
-
-def _scale_post_cr_from_account(storage: _WorkingStorage) -> decimal.Decimal | int:
-    """`multiply account-in by 100 giving post-cr`  [general/gl051.cbl:L657].
-
-    # BOUNDARY: the `else` branch of the same statement
-    [general/gl051.cbl:L656-L658] in `accept-amount.`
-    [general/gl051.cbl:L650], inside the OUT-OF-SCOPE `gl050c section.`
-    Un-`ROUNDED`, therefore truncating.
-    """
-    # 657  multiply account-in by 100 giving post-cr
-    return arithmetic.multiply_by_giving(
-        storage.account_in, _ACCOUNT_SCALE, _POST_CR, rounded=False
-    )
-
-
-def _scale_ledger_nos_from_account(storage: _WorkingStorage) -> decimal.Decimal | int:
-    """`multiply account-in by 100 giving WS-Ledger-Nos`  [general/gl051.cbl:L803].
-
-    # BOUNDARY - AND READ THIS ONE CAREFULLY. This statement lives inside the
-    OUT-OF-SCOPE `get-description.` at [general/gl051.cbl:L799], NOT inside the
-    in-scope `get-description.` at [general/gl051.cbl:L1136]. The two paragraphs
-    share a name and do a similar job, and they are NOT the same code:
-
-        L799  builds the key from `account-in` and `array-pc`, then displays
-              `ledger-name` on success and moves 255 to `we-error` on failure
-              [general/gl051.cbl:L808]
-        L1136 builds the key from `post-dr`/`dr-pc` and then `post-cr`/`cr-pc`,
-              twice, and moves 1 to `we-error` on failure
-              [general/gl051.cbl:L1144]
-
-    Finding F-5 records the two disagreeing sentinels. This helper reproduces the
-    L803 statement only, because section 0.4.1.2 names it; the rest of L799's
-    paragraph is out of scope, and `_batch_print_get_description` below is the
-    in-scope one. Un-`ROUNDED`, therefore truncating.
-    """
-    # 803  multiply account-in by 100 giving WS-Ledger-Nos.
-    return arithmetic.multiply_by_giving(
-        storage.account_in, _ACCOUNT_SCALE, _WS_LEDGER_NOS, rounded=False
-    )
-
-
-# ---------------------------------------------------------------------------
-#  The four date sections - thin delegations to `acas_posting.dates`
-# ---------------------------------------------------------------------------
+# EXACTLY TWO, and the count is a measurement rather than a choice. A census of
+# every `perform` between [general/gl051.cbl:L999] and [general/gl051.cbl:L1166]
+# - the whole of the in-scope boundary - returns nine statements and only nine:
+# `GL-Posting-Read-Next`, `GL-Batch-Read-Indexed`, `GL-Nominal-Read-Indexed`
+# twice, `headings` three times, `get-a-batch`, `get-description` and
+# `zz060-Convert-Date` twice. So of the program's four date sections only
+# `zz060-Convert-Date` is reachable from inside the boundary, and it reaches
+# `maps03` [general/gl051.cbl:L1217]. Those two are here; `zz050-Validate-Date`
+# [general/gl051.cbl:L1169] and `zz070-Convert-Date` [general/gl051.cbl:L1243]
+# are not, and the OMISSIONS list in the footer records why.
 
 
 #  maps03  section.  [general/gl051.cbl:L1273]
@@ -1296,64 +1185,6 @@ def _maps03(maps03_ws: Maps03Ws) -> None:
     _dates_maps03(maps03_ws)
     # 1278  maps04-exit.
     # 1279      exit     section.   ->  fall out of the function.
-
-
-#  zz050-Validate-Date  section.  [general/gl051.cbl:L1169]
-
-
-def _zz050_validate_date(storage: _WorkingStorage, date_form: int) -> int:
-    """`zz050-Validate-Date section.`  [general/gl051.cbl:L1169-L1206].
-
-    Validates `ws-test-date` and converts it to UK form, leaving `u-bin` non-zero
-    when the date is good. Three paragraphs - the section body, `zz050-test-date.`
-    [general/gl051.cbl:L1200] and `zz050-exit.` [general/gl051.cbl:L1205] - and
-    both `GO TO` statements in it, [general/gl051.cbl:L1186] and
-    [general/gl051.cbl:L1191], are class 3 exits onto `zz050-test-date`, all of
-    which `acas_posting.dates` owns.
-
-    THIS SECTION IS NOT THE SAME AS THE OTHER CARRIERS' AND MUST NOT BE
-    CONSOLIDATED WITH THEM. `gl051` carries three statements the Sales and
-    Purchase carriers do not have at all, verbatim
-    [general/gl051.cbl:L1178-L1180]:
-
-        1178      inspect  ws-test-date replacing all "." by "/".
-        1179      inspect  ws-test-date replacing all "," by "/".
-        1180      inspect  ws-test-date replacing all "-" by "/".
-
-    `sl060`, `sl100`, `pl060` and `pl100` omit them entirely, so their `zz050`
-    accepts only slash-separated input while this one silently normalises three
-    other separators. That is exactly why `acas_posting.dates` publishes TWO
-    variants, and why this module calls the `gl051` one. Passing the other would
-    make well-formed operator input invalid.
-
-    `INSPECT ... REPLACING ALL` is `acas_posting.dates`' responsibility, not this
-    module's and not `cobol/move.py`'s - section 0.3.1 puts every
-    language-semantics primitive in `cobol/` and the shared date logic in
-    `dates.py`, and this function does not implement one character of it.
-
-    AMBIGUITY Q-7. `if Date-Form = zero move 1 to Date-Form`
-    [general/gl051.cbl:L1183-L1184] MUTATES a `SYSTEM-REC` column, so the change
-    is visible in a table dump. The mutated value is returned rather than
-    swallowed, and the caller writes it back.
-
-    Args:
-        storage: Supplies `ws-test-date` and receives `ws-date`, plus the
-            `maps03-ws` block the wrapper is called with.
-        date_form: `Date-Form` as it stands on the system record.
-
-    Returns:
-        `Date-Form`, possibly changed from zero to one - question Q-7.
-    """
-    return zz050_validate_date_gl051(
-        storage.ws_date_formats,
-        storage.maps03_ws,
-        date_form,
-        # The wrapper this program performs is the one named `maps03`
-        # [general/gl051.cbl:L1273], NOT the `maps04`-named wrapper the Sales and
-        # Purchase carriers perform. Same implementation, and the name is what
-        # carries anomaly A-22.
-        wrapper=_maps03,
-    )
 
 
 #  zz060-Convert-Date  section.  [general/gl051.cbl:L1208]
@@ -1401,43 +1232,6 @@ def _zz060_convert_date(storage: _WorkingStorage, date_form: int) -> int:
         date_form,
         wrapper=_maps03,
     )
-
-
-#  zz070-Convert-Date  section.  [general/gl051.cbl:L1243]
-
-
-def _zz070_convert_date(storage: _WorkingStorage, to_day: str, date_form: int) -> int:
-    """`zz070-Convert-Date section.`  [general/gl051.cbl:L1243-L1271].
-
-    Converts the run date `to-day` [general/gl051.cbl:L351] into `ws-date` in the
-    presentation `Date-Form` selects. Its two `GO TO` statements -
-    [general/gl051.cbl:L1256] and [general/gl051.cbl:L1261] - are class 3 exits
-    onto `zz070-Exit.` [general/gl051.cbl:L1270].
-
-    This section is BYTE-IDENTICAL in all ten carriers, so the consolidated
-    `acas_posting.dates` entry point is called with no variant selection. It
-    takes no wrapper argument because it performs no wrapper: it reformats the
-    text date it is given and never calls the date module.
-
-    NOT REACHED FROM INSIDE THE BOUNDARY. The only `perform` of it in this program
-    is at [general/gl051.cbl:L973], in the OUT-OF-SCOPE `gl050d section.`
-    [general/gl051.cbl:L961]. It is present because rule R-5 asks for a named
-    function per in-scope section and section 0.4.1.2 counts all four date
-    sections as in scope, and because a caller standing where `gl050d` stands
-    needs it. It also mutates `Date-Form` when that column is zero
-    [general/gl051.cbl:L1253-L1254] - question Q-7 again.
-
-    Args:
-        storage: Receives `ws-date`.
-        to_day: `01 to-day pic x(10).` [general/gl051.cbl:L351] - linkage
-            parameter three, a DD/MM/CCYY text date.
-        date_form: `Date-Form` as it stands on the system record.
-
-    Returns:
-        `Date-Form`, possibly changed from zero to one - question Q-7.
-    """
-    return zz070_convert_date(storage.ws_date_formats, to_day, date_form)
-
 
 
 # ---------------------------------------------------------------------------
@@ -1724,13 +1518,19 @@ def _loop(storage: _WorkingStorage, linkage: _HandlerLinkage) -> None:
         # omitted - `cobol/move.py` declines the `zzz9.99b` picture because no
         # database write reaches it and no oracle experiment can observe it
         # (question Q-14). `DIVIDE a BY b GIVING c` means `c = a / b`.
-        l7_dr = arithmetic.divide_by_giving(
+        # The RESULT IS NOT BOUND. It was bound only so a log record could render
+        # it, and that record is gone - it was report content naming three accounts.
+        # The DIVIDE itself stays, because the census names it and because
+        # `divide_by_giving` is where the truncation into the edited receiver is
+        # modelled; discarding the value is what the frozen program does with it too,
+        # since `l7-dr` is a print field nothing else reads.
+        arithmetic.divide_by_giving(
             linkage.posting.post_dr, _ACCOUNT_SCALE, _L7_DR, rounded=False
         )
         # 1036  move     dr-pc        to  l7-dr-pc.           *> omitted
 
         # 1037  divide   post-cr  by  100  giving  l7-cr.     *> presentation only
-        l7_cr = arithmetic.divide_by_giving(
+        arithmetic.divide_by_giving(
             linkage.posting.post_cr, _ACCOUNT_SCALE, _L7_CR, rounded=False
         )
         # 1038  move     cr-pc        to  l7-cr-pc.           *> omitted
@@ -1743,7 +1543,7 @@ def _loop(storage: _WorkingStorage, linkage: _HandlerLinkage) -> None:
         # with `of` this time: `divide vat-ac of WS-Posting-Record by 100 giving
         # l7-vat-ac.` Reproduced deliberately per R-4; DO NOT FIX.
         # 1044  divide   vat-ac of WS-Posting-Record by 100 giving l7-vat-ac.
-        l7_vat_ac = arithmetic.divide_by_giving(
+        arithmetic.divide_by_giving(
             linkage.posting.vat_ac, _ACCOUNT_SCALE, _L7_VAT_AC, rounded=False
         )
         # 1045  move     vat-pc  to  l7-vat-pc.               *> omitted
@@ -1759,15 +1559,13 @@ def _loop(storage: _WorkingStorage, linkage: _HandlerLinkage) -> None:
         # 1048           move    post-vat-side  to  l7-side.          *> omitted
         # 1050  move     post-legend  to  l7-legend.                  *> omitted
         # 1052  write    print-record  from  line-7 after 1.          *> omitted
-        _LOG.debug(
-            "gl051 loop: batch %s posting %s dr %s cr %s vat a/c %s "
-            "[general/gl051.cbl:L1032-L1052]",
-            linkage.posting.ws_post_key.batch,
-            linkage.posting.ws_post_key.post_number,
-            l7_dr,
-            l7_cr,
-            l7_vat_ac,
-        )
+        #  NO RECORD HERE. The three lines above are `write print-record`, and
+        #  report formatting beyond a database effect is OUT OF SCOPE by Agent Action
+        #  Plan section 0.2.2 - the migrated cycle produces no report at all, so
+        #  turning the report BODY into log lines re-created, at a different
+        #  destination, precisely the output the plan excludes. The record also named
+        #  the batch number, the posting number and the debit, credit and VAT
+        #  accounts, none of which the safe-event schema admits (CWE-532).
 
         # 1053  add      1 to line-cnt.
         storage.line_cnt = arithmetic.add_to(
@@ -1901,12 +1699,12 @@ def _get_a_batch(storage: _WorkingStorage, linkage: _HandlerLinkage) -> None:
         linkage.batch.ws_batch_key.ws_batch_nos = move.move(
             _BATCH_NOT_FOUND_SENTINEL, _WS_BATCH_NOS
         )
-        _LOG.debug(
-            "gl051 get-a-batch: batch header not found, WS-Batch-Nos set to the "
-            "%s sentinel [general/gl051.cbl:L1072]; the remaining postings of "
-            "this batch are skipped silently",
-            _BATCH_NOT_FOUND_SENTINEL,
-        )
+        #  NO RECORD HERE. `move 99999 to WS-Batch-Nos.` [general/gl051.cbl:L1072]
+        #  is one statement and it displays nothing: the whole in-scope span
+        #  [general/gl051.cbl:L999-L1170] contains ZERO `display` statements, verified
+        #  by census, so every record in this module was invented (R-4). That the rest
+        #  of the batch is then skipped SILENTLY is the frozen behaviour, and
+        #  announcing it would be the fix rule R-4 forbids.
     _ = storage
 
 
@@ -1991,11 +1789,9 @@ def _headings(storage: _WorkingStorage, linkage: _HandlerLinkage) -> None:
     # 1083  move     ws-date  to  l4-date.          *> presentation only - omitted
     # 1085  write    print-record  from  line-1 after 1.
     # 1086  write    print-record  from  line-3 after 1.
-    _LOG.debug(
-        "gl051 headings: page %s, batch %s [general/gl051.cbl:L1074-L1094]",
-        storage.page_nos,
-        storage.l4_batch,
-    )
+    #  NO RECORD HERE. The two lines above are `write print-record` - page
+    #  furniture - and report formatting beyond a database effect is out of scope
+    #  (Agent Action Plan section 0.2.2). The record also named the batch number.
 
     # 1087  move     6 to line-cnt.
     storage.line_cnt = move.move(_HEADING_LINE_COUNT, _LINE_CNT)
@@ -2102,10 +1898,15 @@ def _end_batch(storage: _WorkingStorage, linkage: _HandlerLinkage) -> None:
     Section 0.6.4 adds that this scenario is General-Ledger-specific: "Sales and
     Purchase batches balance by construction."
 
-    NOTHING HERE PERSISTS THE STATUS. `Batch-Status` is set on the in-memory
-    batch record and that is all: the two `GL-Batch-Rewrite` calls that write it
-    back are at [general/gl051.cbl:L415] and [general/gl051.cbl:L491], both
-    outside the boundary. Question Q-1.
+    THIS PARAGRAPH SETS THE STATUS; `run` PERSISTS IT. `end-batch` writes
+    `Batch-Status` on the in-memory batch record and performs no file verb at all,
+    exactly as the frozen paragraph does. The `GL-Batch-Rewrite` that carries the
+    field to `GLBATCH-REC` is at [general/gl051.cbl:L415] in `gl051-Main` and
+    [general/gl051.cbl:L491] in `proof-all` - both UNCONDITIONAL, both immediately
+    after the gate, and both out of scope - so `run` performs it once, at the same
+    position, and `_gl_batch_rewrite` carries the argument. Question Q-1 is
+    RESOLVED FROM THE SOURCE: there is no path in either caller on which the gate
+    runs and the rewrite does not follow.
 
     FINDING F-3: the page-break margin is TWELVE here [general/gl051.cbl:L1111]
     and SIX in `loop` [general/gl051.cbl:L1060]. Twelve guards the three
@@ -2129,10 +1930,11 @@ def _end_batch(storage: _WorkingStorage, linkage: _HandlerLinkage) -> None:
     # GO TO class 3 - section exit. `Batch-Status` IS DELIBERATELY NOT SET: a
     # clean rejection with no database effect. There is no `else`.
     if arithmetic.compare(storage.z, _Z_ALL_BATCHES) == 0:
-        _LOG.debug(
-            "gl051 end-batch: all-batches proof mode, the gate is skipped and "
-            "Batch-Status is left untouched [general/gl051.cbl:L1099-L1100]"
-        )
+        #  NO RECORD HERE. `if z = 99 go to main-exit.` is a test and a
+        #  transfer; it displays nothing and writes nothing. This is one of the five
+        #  rejection classes of Agent Action Plan section 0.6.5 - a CLEAN rejection
+        #  with no database effect - and its whole observable content is that
+        #  `Batch-Status` is left as it stood.
         return
 
     # 1101  if       not truet
@@ -2148,19 +1950,24 @@ def _end_batch(storage: _WorkingStorage, linkage: _HandlerLinkage) -> None:
         linkage.batch.batch_status = move.move(
             values_for("Status-Open")[0], _BATCH_STATUS
         )
-        _LOG.info(
-            "gl051 end-batch: batch %s REJECTED because a posting named a "
-            "nominal account that does not exist - Batch-Status left "
-            "Status-Open, no total compared [general/gl051.cbl:L1101-L1103]",
-            linkage.batch.ws_batch_key.ws_batch_nos,
-        )
+        #  NO RECORD HERE. `move 0 to batch-status` then `go to main-exit`
+        #  [general/gl051.cbl:L1102-L1103] carry no `display`. The rejection IS the
+        #  `Batch-Status` this writes, which the caller and the database both see; a
+        #  log line adds nothing to it and, at INFO, announced a rejection the frozen
+        #  program announces only through the batch record - and it named the batch
+        #  number (CWE-532).
         return
 
     # 1105  subtract input-vat  from  input-gross  giving  l9-amount.
     # `SUBTRACT a FROM b GIVING c` means `c = b - a`, so this is the net of VAT
     # the operator entered. Presentation only; reproduced because the census
     # names it, rendering omitted (question Q-14).
-    l9_amount = arithmetic.subtract_giving(
+    # The RESULT IS NOT BOUND, for the reason the three DIVIDEs above give: it was
+    # bound only so a log record could render it, and that record reproduced the proof
+    # report's total lines. `l9-amount` is a print field nothing else reads, and the
+    # SUBTRACT stays because the census names it and because `subtract_giving` is
+    # where the truncation into the receiver is modelled.
+    arithmetic.subtract_giving(
         amounts.input_vat,
         minuend=amounts.input_gross,
         receiving=_L9_AMOUNT,
@@ -2203,15 +2010,12 @@ def _end_batch(storage: _WorkingStorage, linkage: _HandlerLinkage) -> None:
     # 1113  write    print-record  from  line-8 after 3.    *> omitted
     # 1114  write    print-record  from  line-9 after 2.    *> omitted
     # 1115  write    print-record  from  line-10 after 2.   *> omitted
-    _LOG.debug(
-        "gl051 end-batch: entered gross %s vat %s net %s, actual gross %s "
-        "vat %s [general/gl051.cbl:L1105-L1115]",
-        amounts.input_gross,
-        amounts.input_vat,
-        l9_amount,
-        amounts.actual_gross,
-        amounts.actual_vat,
-    )
+    #  NO RECORD HERE. The three lines above are `write print-record` - the
+    #  proof report's own total lines - and the record reproduced their CONTENT: five
+    #  monetary values, which the safe-event schema forbids outright (CWE-532). Report
+    #  formatting beyond a database effect is out of scope (section 0.2.2), and the
+    #  figures themselves are verifiable where they belong, in the table dump the
+    #  scenario diff compares.
 
     # 1117  if       input-gross = actual-gross
     # 1118    and    input-vat   = actual-vat
@@ -2232,20 +2036,13 @@ def _end_batch(storage: _WorkingStorage, linkage: _HandlerLinkage) -> None:
         linkage.batch.batch_status = move.move(
             values_for("Status-Open")[0], _BATCH_STATUS
         )
-        _LOG.info(
-            "gl051 end-batch: batch %s REJECTED on control totals - %s %s "
-            "against %s %s, and %s %s against %s %s "
-            "[general/gl051.cbl:L1117-L1121]",
-            linkage.batch.ws_batch_key.ws_batch_nos,
-            _INPUT_GROSS.name,
-            amounts.input_gross,
-            _ACTUAL_GROSS.name,
-            amounts.actual_gross,
-            _INPUT_VAT.name,
-            amounts.input_vat,
-            _ACTUAL_VAT.name,
-            amounts.actual_vat,
-        )
+        #  NO RECORD HERE. THE GATE'S OUTCOME IS `Batch-Status`, and nothing
+        #  else. [general/gl051.cbl:L1117-L1121] is an `if`, two `move`s and no
+        #  `display`; the record announced the rejection at INFO and, to do it, named
+        #  the batch number and all four control totals - four monetary values and a
+        #  business key (CWE-532). The rejection is fully observable where the frozen
+        #  program leaves it, in `GLBATCH-REC`, which is what the scenario diff for
+        #  the control-total-mismatch case reads.
 
     # 1123  move     "*********************"  to  l11-status.   *> omitted
     # 1124  write    print-record  from  line-11 after 3.        *> omitted
@@ -2257,18 +2054,17 @@ def _end_batch(storage: _WorkingStorage, linkage: _HandlerLinkage) -> None:
     # The status is READ BACK to choose the banner - print only, and worth keeping
     # as a log record because it is the operator-visible verdict. `= 1` is
     # `88 Status-Closed`, so the test goes through the condition-name vocabulary.
+    #  NO RECORDS HERE, AND THE READ-BACK IS STILL REPRODUCED. The frozen
+    #  `if batch-status = 1` [general/gl051.cbl:L1126] chooses between two
+    #  twenty-one-character BANNER LITERALS and moves the chosen one into `l11-status`,
+    #  a print field written by [:L1131]. That is report furniture, out of scope by
+    #  section 0.2.2, and the two records that replaced it announced the verdict at
+    #  INFO while naming the batch number (CWE-532). The condition itself is preserved
+    #  because it is a frozen test, and `is_status_closed` keeps it going through the
+    #  `88`-level vocabulary; it now selects between two banners that are not
+    #  rendered, exactly as the surrounding `*> omitted` lines record.
     if is_status_closed(linkage.batch.batch_status):
-        _LOG.info(
-            "gl051 end-batch: batch %s verified ok, Batch-Status Status-Closed "
-            "[general/gl051.cbl:L1126-L1127]",
-            linkage.batch.ws_batch_key.ws_batch_nos,
-        )
-    else:
-        _LOG.info(
-            "gl051 end-batch: batch %s in error, Batch-Status Status-Open "
-            "[general/gl051.cbl:L1128-L1129]",
-            linkage.batch.ws_batch_key.ws_batch_nos,
-        )
+        pass
 
     # 1131  write    print-record  from  line-11 after 1.        *> omitted
     # 1132  move     "*********************"  to  l11-status.    *> omitted
@@ -2343,7 +2139,8 @@ def _batch_print_get_description(
     literal `1` at [general/gl051.cbl:L1144] and [general/gl051.cbl:L1158], zero
     at [general/gl051.cbl:L1138] and [general/gl051.cbl:L1152]. A reader arriving
     from `gl072` will expect the handler vocabulary - in particular the 999
-    sentinel `gl072` tests at [general/gl072.cbl:L303-L304] - and NONE OF IT
+    sentinel `gl072` tests at [general/gl072.cbl:L306-L307], cited by the anomaly
+    register as [general/gl072.cbl:L303-L304] - and NONE OF IT
     APPLIES HERE. Nothing below compares `we-error` against a handler code.
     Finding F-5 records that the out-of-scope namesake at
     [general/gl051.cbl:L799] uses 255 for the same purpose.
@@ -2408,12 +2205,11 @@ def _batch_print_get_description(
         # ONE OF THE TWO IN-SCOPE WRITERS OF `trutht`, AND IT ONLY CLEARS.
         # `end-batch` [general/gl051.cbl:L1101] rejects the batch on this.
         storage.trutht = move.move(_FALSET_VALUE, _TRUTHT)
-        _LOG.debug(
-            "gl051 get-description: debit account %s pc %s not on the nominal "
-            "ledger, trutht cleared [general/gl051.cbl:L1149-L1150]",
-            ledger_key.ws_ledger_nos,
-            ledger_key.ledger_pc,
-        )
+        #  NO RECORD HERE. `move "^^^^^^^^^^" to dr-error` writes a PRINT
+        #  FIELD - the report's own not-found marker - and `move 0 to trutht` sets the
+        #  flag `end-batch` rejects on. Neither displays anything. The record named
+        #  the nominal account number and its profit-centre code (CWE-532), and the
+        #  rejection it foreshadows is observable as `Batch-Status` in the table.
 
     # --- the credit account  [general/gl051.cbl:L1152-L1164] ---
 
@@ -2447,12 +2243,8 @@ def _batch_print_get_description(
         # THE SECOND AND LAST IN-SCOPE WRITER OF `trutht`, and it also only
         # clears. There is no path in the boundary that sets it back to one.
         storage.trutht = move.move(_FALSET_VALUE, _TRUTHT)
-        _LOG.debug(
-            "gl051 get-description: credit account %s pc %s not on the nominal "
-            "ledger, trutht cleared [general/gl051.cbl:L1163-L1164]",
-            ledger_key.ws_ledger_nos,
-            ledger_key.ledger_pc,
-        )
+        #  NO RECORD HERE, for the reason the debit half gives above: a print
+        #  field and a flag, no `display`, and the record named the account.
 
     # 1164 is the paragraph's last statement and there is no `GO TO`; the
     # `perform` at [general/gl051.cbl:L1054] returns here. See the docstring on
@@ -2486,9 +2278,11 @@ def _batch_print_main_exit() -> None:
     `_batch_print` calls it unconditionally, because a COBOL section cannot end
     any other way.
 
-    It takes no arguments because the COBOL paragraph reads nothing.
+    It takes no arguments because the COBOL paragraph reads nothing, and it emits
+    nothing: ``exit section`` is one statement that displays nothing, so a record
+    announcing it was invented (R-4).
     """
-    _LOG.debug("gl051 batch-print: exit section [general/gl051.cbl:L1166]")
+    return
 
 
 # ---------------------------------------------------------------------------
@@ -2526,16 +2320,24 @@ def run(
     and Purchase shape, which adds a fourth system record, and from the IRS
     shape, which drops the calling-data block and the run date entirely.
 
-    WHAT THIS FUNCTION DELIVERS IS ONE FIELD: `Batch-Status` on the batch record
-    passed in. `batch-print` performs exactly three file-handler verbs and every
-    one of them is a READ - `GL-Posting-Read-Next` [general/gl051.cbl:L1008],
-    `GL-Batch-Read-Indexed` [general/gl051.cbl:L1070] and
-    `GL-Nominal-Read-Indexed` [general/gl051.cbl:L1142] and
-    [general/gl051.cbl:L1156]. There is no write, no rewrite, no delete, no open
-    and no close inside the boundary, so THE IN-SCOPE MODULE PERFORMS ZERO
-    DATABASE MUTATIONS. Persisting the status is the caller's, through the two
-    `GL-Batch-Rewrite` calls at [general/gl051.cbl:L415] and
-    [general/gl051.cbl:L491] - question Q-1.
+    WHAT THIS FUNCTION DELIVERS IS ONE FIELD, AND IT WRITES IT TO THE ROW:
+    `Batch-Status` on `GLBATCH-REC`. `batch-print` itself performs exactly three
+    file-handler verbs and every one of them is a READ - `GL-Posting-Read-Next`
+    [general/gl051.cbl:L1008], `GL-Batch-Read-Indexed` [general/gl051.cbl:L1070]
+    and `GL-Nominal-Read-Indexed` [general/gl051.cbl:L1142] and
+    [general/gl051.cbl:L1156] - so the report section performs no mutation of its
+    own.
+
+    ⭐ `run` THEN PERFORMS `GL-Batch-Rewrite`, unconditionally, exactly where both
+    frozen callers of the gate perform it: [general/gl051.cbl:L415] in
+    `gl051-Main`, reached on every path out of its menu dispatch, and
+    [general/gl051.cbl:L491] in `proof-all`. Both callers are out of scope
+    (section 0.4.2) and section 0.4.1.1 gives the migration no CLI route that
+    dispatches `gl051`, so there is nowhere else for it: omit it and the gate
+    computes a verdict that no table records and no later phase can read, which
+    would make the mandated control-total-mismatch scenario (section 0.8.5) diff
+    empty on both sides for the wrong reason. `_gl_batch_rewrite` sets out the
+    argument in full. Question Q-1 RESOLVED.
 
     THE KEYWORD-ONLY PARAMETERS ARE NOT AN INVENTION; THEY ARE THE BOUNDARY MADE
     HONEST. `batch-print` is performed from `gl050d`
@@ -2679,18 +2481,47 @@ def run(
         dal_common=dal_common,
     )
 
-    _LOG.debug(
-        "gl051 batch-print: entering with z=%s trutht=%s actual-gross=%s "
-        "actual-vat=%s, run date %r [general/gl051.cbl:L999]",
-        storage.z,
-        storage.trutht,
-        batch.amounts.actual_gross,
-        batch.amounts.actual_vat,
-        to_day,
-    )
+    #  NO ENTRY TRACE. `batch-print section.` [general/gl051.cbl:L999] displays
+    #  nothing, and the record named the two running control totals and the run date -
+    #  accounting values and a date with business meaning, both forbidden (CWE-532).
+    #  THE WHOLE OF THIS MODULE NOW EMITS NOTHING, and that is correct: a census of
+    #  the in-scope span [general/gl051.cbl:L999-L1170] finds ZERO `display`
+    #  statements and FIFTEEN `write print-record`, so every diagnostic this module
+    #  used to emit was either invented (R-4) or a reproduction of report content that
+    #  Agent Action Plan section 0.2.2 puts out of scope. The gate's outcome reaches
+    #  the caller and the database through `Batch-Status`, which is where the frozen
+    #  program puts it and what the scenario diff reads.
 
     # 999  batch-print  section.
     _batch_print(storage, linkage)
+
+    # 415  perform  GL-Batch-Rewrite.               *> rewrite  batch-record..
+    # ⭐ THE GATE'S VERDICT REACHES THE ROW. Both frozen callers of the gate issue
+    # this UNCONDITIONALLY immediately after it - `gl051-Main`
+    # [general/gl051.cbl:L415] and `proof-all` [general/gl051.cbl:L491] - and both
+    # are out of scope, so there is no other place in the migration for it. See
+    # `_gl_batch_rewrite` for the full argument and for what `gl070` does with the
+    # field. Without it, M-01: the gate would compute a verdict that no table ever
+    # records and no later phase could ever read.
+    _gl_batch_rewrite(linkage)
+
+    # The reply is NOT tested after the rewrite, and nothing is reported. The
+    # frozen caller tests nothing either [general/gl051.cbl:L415-L416]: it
+    # proceeds straight to `GL-Batch-Close`, so a branch here would be a control
+    # flow the source has not got. Nor is the outcome logged: the in-scope span
+    # [general/gl051.cbl:L999-L1170] contains ZERO `display` statements, and a
+    # record naming the batch key, the reply and `Batch-Status` would put an
+    # accounting value into a diagnostic the frozen program never emits (R-4,
+    # CWE-532). The verdict's observable is the row itself, which is what the
+    # scenario diff reads.
+
+    # BOUNDARY POSTCONDITION  [general/gl051.cbl:L416]
+    # `perform GL-Batch-Close.` follows the rewrite in `gl051-Main`. NOT
+    # reproduced, for the same reason the opens at [general/gl051.cbl:L980-L981]
+    # are not: the file lifecycle is the caller's throughout, and this module
+    # neither opens nor closes anything. The rewrite is different in kind - it is
+    # a ROW MUTATION, the gate's own deliverable, and the only statement without
+    # which the boundary produces no observable effect at all. AMBIGUITY Q-2.
 
     # `ws-calling-data` and `to-day` are declared by the `PROCEDURE DIVISION
     # USING` list and are not read by the boundary's own statements: the term
@@ -2699,6 +2530,16 @@ def run(
     # `zz070-Convert-Date` [general/gl051.cbl:L1251], which `batch-print` never
     # performs. Both are bound so the linkage shape is exact, and both are named
     # here so that no reader concludes a parameter was dropped.
+    #
+    # ⭐ `move u-bin to proofed.` [general/gl051.cbl:L413-L414] IS NOT REPRODUCED,
+    # and the omission is deliberate rather than an oversight. It stamps the batch
+    # header's proofed date from the run date and is carried by the SAME rewrite
+    # above, so it looks at first like a companion effect that belongs here. It
+    # does not: the statement is `gl051-Main`'s, it is guarded on `ws-menu not = 1`
+    # - and `ws-menu` is written ONLY by out-of-scope interactive code - and
+    # `end-batch` never touches `Proofed` on any path. Reproducing it would mean
+    # inventing a `ws_menu` parameter and writing a field the in-scope paragraph
+    # does not write, which rule R-3 forbids. Recorded in the OMISSIONS list.
     _ = (ws_calling_data, to_day)
 
 
@@ -2730,19 +2571,19 @@ def run(
 #     end-batch.                        [general/gl051.cbl:L1096]        IN
 #     get-description.                  [general/gl051.cbl:L1136]        IN
 #     main-exit.                        [general/gl051.cbl:L1166]        IN
-#   net.                                [general/gl051.cbl:L788]         IN, fragment
-#   gross.                              [general/gl051.cbl:L793]         IN, fragment
-#   five account-scaling statements     [general/gl051.cbl:L604], L607,
-#                                       L654, L657, L803                 IN, fragments
-#   zz050-Validate-Date       section.  [general/gl051.cbl:L1169]        IN, delegation
-#     zz050-test-date.                  [general/gl051.cbl:L1200]        IN, delegation
-#     zz050-exit.                       [general/gl051.cbl:L1205]        IN, delegation
 #   zz060-Convert-Date        section.  [general/gl051.cbl:L1208]        IN, delegation
 #     zz060-Exit.                       [general/gl051.cbl:L1240]        IN, delegation
-#   zz070-Convert-Date        section.  [general/gl051.cbl:L1243]        IN, delegation
-#     zz070-Exit.                       [general/gl051.cbl:L1270]        IN, delegation
 #   maps03                    section.  [general/gl051.cbl:L1273]        IN, delegation
 #     maps04-exit.                      [general/gl051.cbl:L1278]      IN, ANOMALY A-22
+#
+#   THE `IN` LIST IS A MEASUREMENT, NOT A READING. Every `perform` between
+#   [general/gl051.cbl:L999] and [general/gl051.cbl:L1166] was enumerated; the
+#   census returns nine statements and only nine - `GL-Posting-Read-Next`,
+#   `GL-Batch-Read-Indexed`, `GL-Nominal-Read-Indexed` twice, `headings` three
+#   times, `get-a-batch`, `get-description` and `zz060-Convert-Date` twice.
+#   Nothing else in the program is reachable from the boundary, which is why the
+#   two out-of-boundary date sections and the seven out-of-boundary arithmetic
+#   fragments this module once carried are now recorded as OMISSIONS instead.
 #
 #   THE PLAN'S CITED RANGE IS NARROWER THAN THE SECTION. Section 0.4.1.2 cites
 #   [general/gl051.cbl:L1096-L1133], which is the `end-batch` paragraph ALONE -
@@ -2757,11 +2598,12 @@ def run(
 # BOUNDARY  -  what is OUT, named section by section
 #   gl051-Main           section.  [general/gl051.cbl:L359]   OUT, whole
 #   proof-all            section.  [general/gl051.cbl:L474]   OUT, whole
-#   gl050c               section.  [general/gl051.cbl:L496]   OUT, whole, except
-#       the `net.`/`gross.` computes and the four scaling statements above
-#     accept-amount.               [general/gl051.cbl:L650]   OUT, except L654/L657
+#   gl050c               section.  [general/gl051.cbl:L496]   OUT, whole
+#     accept-amount.               [general/gl051.cbl:L650]   OUT
+#     net.                         [general/gl051.cbl:L788]   OUT
+#     gross.                       [general/gl051.cbl:L793]   OUT
 #     h-o-data.                    [general/gl051.cbl:L782]   OUT
-#     get-description.             [general/gl051.cbl:L799]   OUT, except L803
+#     get-description.             [general/gl051.cbl:L799]   OUT
 #     main-exit.                   [general/gl051.cbl:L816]   OUT
 #     end-routine.                 [general/gl051.cbl:L822]   OUT
 #   batch-amendment      section.  [general/gl051.cbl:L825]   OUT, whole
@@ -2778,6 +2620,11 @@ def run(
 #     disp-head-skip.              [general/gl051.cbl:L978]   OUT
 #     main-exit.                   [general/gl051.cbl:L985]   OUT
 #     end-routine.                 [general/gl051.cbl:L993]   OUT
+#   zz050-Validate-Date  section.  [general/gl051.cbl:L1169]  OUT, whole
+#     zz050-test-date.             [general/gl051.cbl:L1200]  OUT
+#     zz050-exit.                  [general/gl051.cbl:L1205]  OUT
+#   zz070-Convert-Date   section.  [general/gl051.cbl:L1243]  OUT, whole
+#     zz070-Exit.                  [general/gl051.cbl:L1270]  OUT
 #   Every screen section, every `accept` loop and every amendment dialog: OUT.
 #
 # PARAGRAPH  ->  FUNCTION
@@ -2791,17 +2638,27 @@ def run(
 #   end-batch.        [general/gl051.cbl:L1096]      ->  _end_batch
 #   get-description.  [general/gl051.cbl:L1136]      ->  _batch_print_get_description
 #   main-exit.        [general/gl051.cbl:L1166]      ->  _batch_print_main_exit
-#   net.              [general/gl051.cbl:L788]       ->  _net
-#   gross.            [general/gl051.cbl:L793]       ->  _gross
+#   net.              [general/gl051.cbl:L788]       ->  NOT MIGRATED
+#   gross.            [general/gl051.cbl:L793]       ->  NOT MIGRATED
+#     Both sit in `gl050c`, OUTSIDE the migration boundary this module carries -
+#     `batch-print section.` [general/gl051.cbl:L999] and its `end-batch.`
+#     [general/gl051.cbl:L1096-L1133] - and neither is reached from inside it.
+#     Recorded as an omission rather than implemented: reproducing a paragraph
+#     the boundary cannot reach would add a code path the migrated surface has
+#     not got. The two `ROUNDED` computes they carry are listed in the statement
+#     map below with the same disposition.
 #   zz050-Validate-Date section. + zz050-test-date. + zz050-exit.
 #                     [general/gl051.cbl:L1169, L1200, L1205]
-#                                                   ->  _zz050_validate_date
+#                                                   ->  NOT MIGRATED - the date
+#     validation is reached only from the out-of-scope accept loops; `dates`
+#     carries the shared body for the routes that do reach it.
 #   zz060-Convert-Date section. + zz060-Exit.
 #                     [general/gl051.cbl:L1208, L1240]
 #                                                   ->  _zz060_convert_date
 #   zz070-Convert-Date section. + zz070-Exit.
 #                     [general/gl051.cbl:L1243, L1270]
-#                                                   ->  _zz070_convert_date
+#                                                   ->  NOT MIGRATED - presentation
+#     only, and reached only from the out-of-scope report headings.
 #   maps03 section. + maps04-exit.
 #                     [general/gl051.cbl:L1273, L1278]
 #                                                   ->  _maps03
@@ -2826,11 +2683,11 @@ def run(
 #     _gl_batch_read_indexed           `perform GL-Batch-Read-Indexed.` L1070
 #     _gl_nominal_read_indexed         `perform GL-Nominal-Read-Indexed.`
 #                                      L1142 and L1156
-#     _scale_acc_ok_from_post_dr       [general/gl051.cbl:L604]
-#     _scale_acc_ok_from_post_cr       [general/gl051.cbl:L607]
-#     _scale_post_dr_from_account      [general/gl051.cbl:L654]
-#     _scale_post_cr_from_account      [general/gl051.cbl:L657]
-#     _scale_ledger_nos_from_account   [general/gl051.cbl:L803]
+#     (The five account-scaling helpers this list used to name - for
+#      [general/gl051.cbl:L604], [:L607], [:L654], [:L657] and [:L803] - were
+#      REMOVED. Every one of those statements is in `gl050c`, outside the
+#      boundary, and each was reachable from nothing this module keeps. The
+#      statement map below records each with its disposition.)
 #     _WorkingStorage                  the working-storage items the six in-scope
 #                                      paragraphs share
 #     _HandlerLinkage                  the five arguments every handler `CALL`
@@ -2841,32 +2698,41 @@ def run(
 # not, so truncation is the default path and rounding the annotated exception.
 #   604   divide post-dr by 100 giving acc-ok
 #             ->  arithmetic.divide_by_giving(..., _ACC_OK, rounded=False)
-#                 in `_scale_acc_ok_from_post_dr`
+#                 NOT MIGRATED - [general/gl051.cbl:L604] is in `gl050c`.
 #   607   divide post-cr by 100 giving acc-ok
 #             ->  arithmetic.divide_by_giving(..., _ACC_OK, rounded=False)
-#                 in `_scale_acc_ok_from_post_cr`
+#                 NOT MIGRATED - [general/gl051.cbl:L607] is in `gl050c`.
 #   654   multiply account-in by 100 giving post-dr
 #             ->  arithmetic.multiply_by_giving(..., _POST_DR, rounded=False)
-#                 in `_scale_post_dr_from_account`
+#                 NOT MIGRATED - [general/gl051.cbl:L654] is in `gl050c`.
 #   657   multiply account-in by 100 giving post-cr
 #             ->  arithmetic.multiply_by_giving(..., _POST_CR, rounded=False)
-#                 in `_scale_post_cr_from_account`
+#                 NOT MIGRATED - [general/gl051.cbl:L657] is in `gl050c`.
 #   791   compute vat-amount ROUNDED = post-amount * ws-vat-rate / 100
 #             ->  arithmetic.compute into _VAT_AMOUNT with the rounding flag
-#                 SET, in `_net`
-#                 ***  ROUNDED site 1 of 2  ***
+#                 NOT MIGRATED - `net.` [general/gl051.cbl:L788] is in `gl050c`,
+#                 outside the boundary. Recorded here so the census stays
+#                 complete: of the five `ROUNDED` sites the plan enumerates, the
+#                 THREE inside the migrated surface are [general/gl080.cbl:L328],
+#                 [irs/irs030.cbl:L1551] and [irs/irs030.cbl:L1562], and all
+#                 three are implemented with the rounding flag set.
 #   796   compute vat-amount ROUNDED =
 #             post-amount - (post-amount / ((ws-vat-rate + 100) / 100))
 #             ->  arithmetic.compute into _VAT_AMOUNT with the rounding flag
-#                 SET, in `_gross`
-#                 ***  ROUNDED site 2 of 2  ***   question Q-9
+#                 NOT MIGRATED - `gross.` [general/gl051.cbl:L793] is in
+#                 `gl050c`, outside the boundary. Question Q-9 - the intermediate
+#                 precision of the compound VAT expression - is therefore
+#                 arbitrated on [irs/irs030.cbl:L1562], which is the same
+#                 expression inside the migrated surface.
 #   797   subtract vat-amount from post-amount
 #             ->  arithmetic.subtract_from(..., _POST_AMOUNT, rounded=False)
-#                 in `_gross`. UN-`ROUNDED`, IMMEDIATELY AFTER A `ROUNDED` STORE -
-#                 which is why rounding is a per-call argument and never a mode.
+#                 NOT MIGRATED, with `gross.` itself. It is worth recording why
+#                 the pairing mattered: UN-`ROUNDED` IMMEDIATELY AFTER A
+#                 `ROUNDED` STORE, which is why rounding is a per-call argument
+#                 in `cobol.arithmetic` and never a mode.
 #   803   multiply account-in by 100 giving WS-Ledger-Nos
 #             ->  arithmetic.multiply_by_giving(..., _WS_LEDGER_NOS, rounded=False)
-#                 in `_scale_ledger_nos_from_account`. NOTE: this statement is in
+#                 NOT MIGRATED. NOTE: this statement is in
 #                 the OUT-OF-SCOPE `get-description.` [general/gl051.cbl:L799].
 #   1035  divide post-dr by 100 giving l7-dr
 #             ->  arithmetic.divide_by_giving(..., _L7_DR, rounded=False) in
@@ -2936,7 +2802,7 @@ def run(
 #             ->  move.move(_WE_ERROR_LOCAL_FAILURE, _WE_ERROR). A LOCAL 0-or-1
 #                 FLAG, NOT a handler code: emphatically not `WeError.NOT_USED`,
 #                 value 999, which is `gl072`'s sentinel
-#                 [general/gl072.cbl:L303-L304].
+#                 [general/gl072.cbl:L306-L307] (the register cites L303-L304).
 #   1139, 1153  move post-dr / post-cr to WS-Ledger-Nos
 #             ->  move.move(..., _WS_LEDGER_NOS, sending_field=_POST_DR/_POST_CR)
 #   1140, 1154  move dr-pc / cr-pc to ledger-pc
@@ -2965,9 +2831,12 @@ def run(
 #   1070  perform GL-Batch-Read-Indexed   ->  _gl_batch_read_indexed
 #   1142  perform GL-Nominal-Read-Indexed ->  _gl_nominal_read_indexed  (DR)
 #   1156  perform GL-Nominal-Read-Indexed ->  _gl_nominal_read_indexed  (CR)
-#   NO write, NO rewrite, NO delete, NO open, NO close. The in-scope module
-#   performs ZERO DATABASE MUTATIONS; its whole deliverable is `Batch-Status` on
-#   the in-memory batch record - question Q-1.
+#    415  perform GL-Batch-Rewrite       ->  _gl_batch_rewrite    (from `run`)
+#   `batch-print` itself contains NO write, NO rewrite, NO delete, NO open and NO
+#   close. The ONE database mutation of the module is the rewrite above, which
+#   both frozen callers of the gate issue unconditionally right after it
+#   [general/gl051.cbl:L415], [general/gl051.cbl:L491]; it carries the module's
+#   whole deliverable, `Batch-Status`, to `GLBATCH-REC` - question Q-1 RESOLVED.
 #   `fs-reply` values go through `FsReply`: 10 is `END_OF_FILE`
 #   [general/gl051.cbl:L1009] and 21 is `INVALID_KEY_ON_START`
 #   [general/gl051.cbl:L1071], [general/gl051.cbl:L1143] and
@@ -3067,6 +2936,47 @@ def run(
 #       `disp-head-skip.` L978, `main-exit.` L985 and `end-routine.` L993. THIS
 #       IS THE MOST IMPORTANT ENTRY IN THE LIST: it is what proves the PARTIAL
 #       boundary was respected rather than quietly widened.
+#   1a. NINE OUT-OF-BOUNDARY FRAGMENTS THAT WERE ONCE HERE AND ARE NOW GONE.
+#       Recorded individually because they were REMOVED rather than never
+#       written, and a reader comparing an earlier revision must find the
+#       removal accounted for:
+#         `net.`   [general/gl051.cbl:L788-L791]  - the first `ROUNDED` compute
+#         `gross.` [general/gl051.cbl:L793-L797]  - the second, plus its
+#                  immediately following un-`ROUNDED` `SUBTRACT`
+#         `divide post-dr by 100 giving acc-ok`  [general/gl051.cbl:L604]
+#         `divide post-cr by 100 giving acc-ok`  [general/gl051.cbl:L607]
+#         `multiply account-in by 100 giving post-dr` [general/gl051.cbl:L654]
+#         `multiply account-in by 100 giving post-cr` [general/gl051.cbl:L657]
+#         `multiply account-in by 100 giving WS-Ledger-Nos`
+#                                                [general/gl051.cbl:L803]
+#         `zz050-Validate-Date section.` [general/gl051.cbl:L1169-L1206]
+#         `zz070-Convert-Date  section.` [general/gl051.cbl:L1243-L1271]
+#       WHY THEY ARE OUT. Every one of the nine lives in a paragraph the
+#       `BOUNDARY - what is OUT` table names: the two computes and the five
+#       scaling statements in `gl050c` section 496 and its `accept-amount.`
+#       L650 and `get-description.` L799; `zz050` performed only from `gl050c`
+#       [general/gl051.cbl:L537] and `zz070` only from `gl050d`
+#       [general/gl051.cbl:L973]. Section 0.2.1.1's boundary - "only
+#       `batch-print` section 999 and its `end-batch` paragraph" - and section
+#       0.8.7's warning that "an agent working from the file rather than from
+#       the stated boundary would migrate several hundred lines that must not be
+#       migrated" both exclude them, and the `perform` census above proves none
+#       is reachable from inside the boundary: as written they were executable
+#       but unreachable code in a production module.
+#       WHAT IS NOT LOST. Section 0.4.1.2's summary column does name these
+#       statements, so the omission is stated rather than silent - but what it
+#       asks for is the ARITHMETIC, and section 0.3.1 puts arithmetic in
+#       `cobol/`, not in `programs/`: "`cobol/` contains no business logic and
+#       `programs/` contains no numeric primitives." Each of the nine was a
+#       numeric primitive with no control flow and no reachable caller, and every
+#       pattern they embodied is published and unit-testable in
+#       `acas_posting.cobol.arithmetic` - the `ROUNDED` half-away-from-zero
+#       store, the default truncating store, the single store of a compound
+#       expression at extended intermediate precision, and
+#       `divide_by_giving`/`multiply_by_giving` - and in `acas_posting.dates`,
+#       which still publishes `zz050_validate_date_gl051` and
+#       `zz070_convert_date` for the carriers that DO reach them. No capability
+#       left the migration with them; only unreachable code did.
 #   2.  The out-of-boundary preconditions and postconditions: the two opens
 #       [general/gl051.cbl:L980-L981], `move 1 to trutht.`
 #       [general/gl051.cbl:L967], the accumulator zeroing
@@ -3078,9 +2988,16 @@ def run(
 #   3.  `call "SYSTEM" using Print-Report.` [general/gl051.cbl:L991] - the
 #       report spool-out. Out of scope by section 0.2.2, and independently
 #       forbidden by rule R-1: this module shells out to nothing.
-#   4.  The two `GL-Batch-Rewrite` calls at [general/gl051.cbl:L415] and
-#       [general/gl051.cbl:L491]. THE PERSISTENCE OF `Batch-Status` LIES OUTSIDE
-#       THE BOUNDARY - question Q-1. This module sets the field and returns.
+#   4.  NOT AN OMISSION ANY MORE. `GL-Batch-Rewrite` [general/gl051.cbl:L415],
+#       [general/gl051.cbl:L491] IS reproduced, by `run`, because both callers
+#       issue it unconditionally after the gate and both callers are out of scope
+#       - question Q-1 RESOLVED. What IS omitted here is its companion
+#       `move u-bin to proofed.` [general/gl051.cbl:L413-L414]: that statement is
+#       guarded on `ws-menu`, which only out-of-scope interactive code writes, and
+#       `end-batch` never touches `Proofed` on any path, so writing it would be
+#       adding a field the in-scope paragraph does not set (rule R-3). The
+#       `perform GL-Batch-Close.` at [general/gl051.cbl:L416] is omitted too: the
+#       file lifecycle is the caller's throughout - question Q-2.
 #   5.  The entire print file: `copy "selprint.cob"` [general/gl051.cbl:L112],
 #       `copy "fdprint.cob"` [general/gl051.cbl:L122] and
 #       `copy "print-spool-command.cob"` [general/gl051.cbl:L127]; every
@@ -3255,9 +3172,11 @@ def run(
 # AMBIGUITIES FOR THE ORACLE  -  rule R-6, "compiled behavior is the tie-breaker".
 # Every one is marked `# AMBIGUITY Q-n` at its site and belongs in
 # docs/migration/ambiguity-resolutions.md.
-#   Q-1  Is `Batch-Status` persistence the caller's? The boundary contains no
-#        rewrite; the two `GL-Batch-Rewrite` calls are at
-#        [general/gl051.cbl:L415] and [general/gl051.cbl:L491].
+#   Q-1  RESOLVED FROM THE SOURCE. Both `GL-Batch-Rewrite` calls -
+#        [general/gl051.cbl:L415], [general/gl051.cbl:L491] - are UNCONDITIONAL on
+#        every path reaching the gate, so `Batch-Status` always reaches
+#        `GLBATCH-REC`; `run` performs the rewrite because both callers are out of
+#        scope and no CLI route dispatches `gl051`. No oracle run required.
 #   Q-2  Are `GL-Nominal` and `GL-Posting` open on entry, and does the caller
 #        close them? [general/gl051.cbl:L980-L981] and
 #        [general/gl051.cbl:L989-L990] say `gl050d` does both.

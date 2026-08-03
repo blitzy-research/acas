@@ -337,9 +337,10 @@ from acas_posting.dal.status import (
     db_error_log_category,
     end_of_file_status,
     is_duplicate_key_bridge_level,
+    log_file_handler_record,
+    log_handler_failure,
     mysql_1100_db_error,
     redact_for_log,
-    sanitise_for_log,
 )
 from acas_posting.dictionary import loader
 from acas_posting.records.file_access import FileAccess
@@ -1406,13 +1407,17 @@ def _zoned_integer(text: str, *, column: str) -> int:
         else:
             # Rules 5 and 6 - a second stop, or any other byte, zeroes the
             # whole receiving field. Measured, not inferred.
+            #  THE REJECTED TEXT IS NOT LOGGED. It is the field's own content -
+            #  for this table an open-item key, a date or an amount as it was held -
+            #  and the safe-event schema admits no host-variable value (CWE-532).
+            #  `sanitise_for_log` escaped it and removed none of it. The table and
+            #  column name locate the fault; the value does not help fix it.
             _LOG.debug(
                 "%s.%s carried a byte the alphanumeric-to-numeric MOVE "
                 "rejects; the whole conversion yields zero, as measured on "
-                "GnuCOBOL 3.2.0: %s",
+                "GnuCOBOL 3.2.0",
                 TABLE,
                 column,
-                sanitise_for_log(text),
             )
             return 0
     return int("".join(integer_digits)) if integer_digits else 0
@@ -1566,10 +1571,11 @@ def _drop_sign(value: int, *, column: str) -> int:
     complain, and section 0.6.8 lists the resulting stored value as an
     AMBIGUITY that "must be measured rather than assumed".
 
-    TODO(oracle) - RESOLVED BY MEASUREMENT, retained as the section 0.6.8
-    audit trail. Measured on GnuCOBOL 3.2.0 [common/comp-common.sh:L9], the
-    signed-to-unsigned ``MOVE`` stores the MAGNITUDE, not a two's-complement
-    reinterpretation::
+    AMBIGUITY Q-OTM5-NARROW - RESOLVED BY MEASUREMENT, retained as the section
+    0.6.8 audit trail. Measured on GnuCOBOL 3.2.0 [common/comp-common.sh:L9] - and
+    RE-MEASURED independently since, on the same compiler version, with identical
+    results - the signed-to-unsigned ``MOVE`` stores the MAGNITUDE, not a
+    two's-complement reinterpretation::
 
         BINARY-LONG -5 -> PIC 9(10) COMP  = 0000000005   (not 4294967291)
         BINARY-CHAR -3 -> PIC  9(03) COMP = 003          (not 253)
@@ -1589,13 +1595,13 @@ def _drop_sign(value: int, *, column: str) -> int:
         The magnitude of ``value``.
     """
     if value < 0:
-        _LOG.debug(
-            "%s.%s is signed in the copybook and unsigned at the host "
-            "variable; the sign is lost at the bridge, as measured on "
-            "GnuCOBOL 3.2.0 - anomaly A4",
-            TABLE,
-            column,
-        )
+        #  NO RECORD HERE. The frozen `move` into an unsigned host variable
+        #  narrows in silence - it writes no status, sets no flag and displays
+        #  nothing - so a record was invented (R-4), and the silence IS anomaly A4
+        #  as the register describes it. It is documented in `ANOMALIES` and in
+        #  `docs/migration/anomaly-log.md`, where a reader finds it without an
+        #  operator seeing it once per column per row.
+        del column
         # Magnitude by unary minus; the absolute-value builtin is avoided so
         # that rule R-2's compliance scan stays literally clean.
         return -value
@@ -2436,18 +2442,24 @@ def _cursor(connection: MySQLConnectionAbstract) -> Iterator[DatabaseCursor]:
     try:
         yield cursor
     finally:
+        #  NEITHER CLEANUP PATH LOGS, AND NEITHER BINDS A NAME. The frozen
+        #  bridge has no result-discard step and no cursor-close step - `MySQL_query`
+        #  owns the statement and the handle - so a record on either was invented
+        #  (R-4), and both records interpolated the driver's own text, which for
+        #  these tables renders the statement and its bound values (CWE-532).
+        #  `redact_for_log` escaped it and removed none of it. Binding no name means
+        #  nothing can leak from either block by accident; the underlying failure, if
+        #  it matters, is reported once by the statement path that owns it.
         discard_unread = getattr(connection, "consume_results", None)
         if discard_unread is not None:
             try:
                 discard_unread()
-            except Exception as error:  # any driver error takes this path
-                _LOG.debug("%s: discarding unread result reported %s", TABLE,
-                           redact_for_log(str(error)))
+            except Exception:  # noqa: BLE001, S110 - see above
+                pass
         try:
             cursor.close()
-        except Exception as error:  # any driver error takes this path
-            _LOG.debug("%s: cursor close reported %s", TABLE,
-                       redact_for_log(str(error)))
+        except Exception:  # noqa: BLE001, S110 - see above
+            pass
 
 
 def _driver_failure(error: BaseException) -> tuple[str, str, str]:
@@ -2671,10 +2683,11 @@ def open_(
             [common/acas029.cbl:L219], whose ``RDBMS-`` fields carry the six
             connection parameters [copybooks/wsfnctn.cob:L57-L64].
         file_access: the ``File-Access`` linkage block.
-        transport: TLS material for the connection. The harness runs the
-            oracle on an isolated Docker network, which is the only situation
-            in which an unencrypted transport is accepted; pass
-            ``TransportSecurity(isolated_oracle=True)`` there.
+        transport: TLS material for the connection. ``None`` - what every
+            in-scope caller passes - defers to the ONE policy the deployment
+            installed with
+            :func:`acas_posting.dal.connection.set_connection_policy`, so this
+            handler declares nothing of its own.
 
     Returns:
         ``(0, 0)`` when the database opened, otherwise the pair
@@ -2698,11 +2711,18 @@ def open_(
     ]
     if int(outcome.fs_reply) != int(FsReply.SUCCESS):
         # Step 4 - L464-L465: no file key, no cursor change, straight out.
-        _LOG.error(
-            "%s: MYSQL-1000-OPEN reported (%s, %s) [common/otm5MT.cbl:L463]",
-            BRIDGE,
-            int(outcome.fs_reply),
-            int(outcome.we_error),
+        # ONE ERROR, through the shared reporter, so this failure renders with the
+        # same fields in the same order as every other handler's.
+        log_handler_failure(
+            _LOG,
+            program=BRIDGE,
+            paragraph="ba020-Process-Open",
+            locator="[common/otm5MT.cbl:L463]",
+            fs_reply=int(outcome.fs_reply),
+            we_error=int(outcome.we_error),
+            sql_state=str(outcome.sql_state),
+            detail="MYSQL-1000-OPEN failed; no file key is written and the cursor "
+            "state is left as it stood",
         )
         return _status(file_access, int(outcome.fs_reply), int(outcome.we_error))
     _CONNECTION = outcome.connection
@@ -3201,10 +3221,18 @@ def write(otm5: OiHeader, file_access: FileAccess) -> StatusPair:
     if affected != 1:
         # L877 with no exception raised - the row count disagreed, and the
         # frozen source's only outcome for that is (99, 0). ANOMALY A44.
-        _LOG.warning(
-            "%s: INSERT affected %d rows, not 1 [common/otm5MT.cbl:L877-L881]",
-            TABLE,
-            affected,
+        # ONE ERROR, through the shared reporter. The arm writes (99, 0) back to
+        # the caller, so it is a failure and WARNING put it below the level an
+        # operator watches; the row COUNT is safe to name, the row is not.
+        log_handler_failure(
+            _LOG,
+            program=BRIDGE,
+            paragraph="ba070-Process-Write",
+            locator="[common/otm5MT.cbl:L877-L881]",
+            fs_reply=int(FsReply.ERROR),
+            we_error=int(WeError.SUCCESS),
+            detail="the INSERT affected %d rows, not 1; WE-Error stays zero "
+            "(anomaly A44)" % affected,
         )
         return _status(file_access, FsReply.ERROR, int(WeError.SUCCESS))
     return _status(file_access, FsReply.SUCCESS, int(WeError.SUCCESS))
@@ -3270,10 +3298,15 @@ def rewrite(otm5: OiHeader, file_access: FileAccess) -> StatusPair:
         return _status(file_access, FsReply.ERROR, REWRITE_ROWCOUNT_WE_ERROR)
     if affected != 1:
         # Step 6 - L984-L985.
-        _LOG.warning(
-            "%s: UPDATE affected %d rows, not 1 [common/otm5MT.cbl:L982-L985]",
-            TABLE,
-            affected,
+        # ONE ERROR, through the shared reporter, as for the write arm above.
+        log_handler_failure(
+            _LOG,
+            program=BRIDGE,
+            paragraph="ba090-Process-Rewrite",
+            locator="[common/otm5MT.cbl:L982-L985]",
+            fs_reply=int(FsReply.ERROR),
+            we_error=REWRITE_ROWCOUNT_WE_ERROR,
+            detail="the UPDATE affected %d rows, not 1" % affected,
         )
         return _status(file_access, FsReply.ERROR, REWRITE_ROWCOUNT_WE_ERROR)
     # Step 7 - L988-L991.
@@ -3338,10 +3371,15 @@ def delete(otm5: OiHeader, file_access: FileAccess) -> StatusPair:
         return _status(file_access, FsReply.ERROR, DELETE_ROWCOUNT_WE_ERROR)
     if affected != 1:
         # Step 5 - L940-L941.
-        _LOG.warning(
-            "%s: DELETE affected %d rows, not 1 [common/otm5MT.cbl:L930-L941]",
-            TABLE,
-            affected,
+        # ONE ERROR, through the shared reporter, as for the two arms above.
+        log_handler_failure(
+            _LOG,
+            program=BRIDGE,
+            paragraph="ba080-Process-Delete",
+            locator="[common/otm5MT.cbl:L930-L941]",
+            fs_reply=int(FsReply.ERROR),
+            we_error=DELETE_ROWCOUNT_WE_ERROR,
+            detail="the DELETE affected %d rows, not 1" % affected,
         )
         return _status(file_access, FsReply.ERROR, DELETE_ROWCOUNT_WE_ERROR)
     # Step 6 - L943-L945: the diagnostics only. ANOMALY A36 - the status pair
@@ -3381,13 +3419,18 @@ def delete_all(file_access: FileAccess) -> StatusPair:
     Returns:
         ``(99, 990)`` - the BRIDGE's bad-function pair, per ANOMALY A12.
     """
-    _LOG.debug(
-        "%s: fn-Delete-All is not implemented by %s or %s; function code 6 is "
-        "'spare / unused' [common/acas029.cbl:L294] and reaches bad-function "
-        "in both programs. No statement issued.",
-        TABLE,
-        HANDLER,
-        BRIDGE,
+    # ONE ERROR, through the shared reporter. A published facade verb that can
+    # NEVER succeed is exactly what an operator must be able to find; at DEBUG it
+    # was invisible at the level anyone watches - the same reasoning that took
+    # anomaly A6's refusal in `acas008` off DEBUG.
+    log_handler_failure(
+        _LOG,
+        program=HANDLER,
+        paragraph="fn-Delete-All",
+        locator="[common/acas029.cbl:L294]",
+        detail="fn-Delete-All is implemented by neither program; function code 6 "
+        "is 'spare / unused' and reaches bad-function in both, so no statement "
+        "is issued (anomaly A12)",
     )
     return bad_function(file_access)
 
@@ -3604,13 +3647,11 @@ def _sorted_reread(
         # stored result above, exactly as the frozen fetch consumes it, and is
         # now discarded. No status is assigned, so the stale pair stands.
         state.set_cursor_not_active()
-        _LOG.warning(
-            "%s: %s discarded a fetched row because the caller's FS-Reply is "
-            "still 10 [common/otm5MT.cbl:L1138-L1142]; end of file is sticky "
-            "until another operation resets the shared field",
-            BRIDGE,
-            paragraph,
-        )
+        #  NO RECORD HERE. [common/otm5MT.cbl:L1138-L1142] assigns NO status -
+        #  the stale pair stands - and displays nothing, so a record was invented
+        #  (R-4). The silent discard IS the anomaly, recorded in `ANOMALIES` and in
+        #  `docs/migration/anomaly-log.md`; the identical record was removed from
+        #  `dal/cursor_state.py` for the same reason.
         _set_file_key(file_access, EOF_FILE_KEYS[2])
         return (
             FsReply.END_OF_FILE,
@@ -3739,14 +3780,9 @@ def _sorted_read_next(
         )
     # L1003-L1005 / L1160-L1162: the key metadata is read into K and L, and
     # then used by nothing at all - defect 3 above.
-    _LOG.debug(
-        "%s: %s read KOR offset/length %d/%d and uses neither "
-        "[common/otm5MT.cbl:L1004-L1005]",
-        BRIDGE,
-        paragraph,
-        KEY_OFFSET,
-        KEY_LENGTH,
-    )
+    # NO RECORD HERE. Two frozen `move`s that display nothing and whose values go
+    # unused; that they go unused is a fact about the SOURCE, recorded in the comment
+    # above and in `docs/migration/anomaly-log.md`, not an event.
     where_1_to_j = _sorted_where_1_to_j(function)
     # L1019 / L1174: the log records `ws-Where (1:J)` - the ORDER BY text
     # ALONE, not the statement, so the malformed `WHERE` never appears in it.
@@ -3754,12 +3790,13 @@ def _sorted_read_next(
     # L1020 / L1175: move 21 to ws-No-Paragraph, set BEFORE the statement.
     _trace(file_access, BRIDGE_TRACE_NUMBERS[paragraph][0])
     statement = _sorted_select_statement(where_1_to_j)
-    # L1037-L1039 / L1192-L1194: `if Testing-2 display Display-Message-1` is a
-    # diagnostic with no database effect, so Agent Action Plan section 0.3.4
-    # makes it a log record. It is emitted unconditionally at DEBUG rather than
-    # gated on the flag, because a logger level is the Python equivalent of the
-    # switch and `dal_common` is not a parameter of any verb in this module.
-    _LOG.debug("%s: %s issuing %s", BRIDGE, paragraph, sanitise_for_log(statement))
+    # L1037-L1039 / L1192-L1194: `if Testing-2 display Display-Message-1`.
+    #  NOTHING IS EMITTED. The record carried the WHOLE STATEMENT, which the
+    #  safe-event schema forbids outright (CWE-532), and `sanitise_for_log` escaped
+    #  it rather than removing it. It was also emitted UNCONDITIONALLY, so it fired
+    #  on every sorted read even though the frozen `display` is gated on a switch the
+    #  copybook leaves at zero. `WS-Log-Where` is still built and still stored above,
+    #  because the bridge's own statements read it (R-3).
     try:
         with execute_statement(connection, statement, ()) as cursor:
             rows = _sorted_store_result(cursor)
@@ -3993,27 +4030,32 @@ def _process_logs(file_access: FileAccess, dal_common: AcasDalCommonData) -> Non
     if int(dal_common.sw_testing) != 1:
         return
     logging_data = file_access.logging_data
-    # The frozen logger records the subsystem, the file number, the paragraph
-    # trace number and the key it was working on. Both free-text fields are
-    # sanitised before they reach a log record: WS-Log-Where carries assembled
-    # SQL and WS-File-Key carries record data, and neither is trusted input.
-    _LOG.debug(
-        "fhlogger: system=%d file=%d paragraph=%d fs-reply=%d we-error=%d "
-        "key=%s where=%s",
-        int(logging_data.ws_log_system),
-        int(logging_data.ws_log_file_no),
-        int(logging_data.ws_no_paragraph),
-        int(file_access.fs_reply),
-        int(file_access.we_error),
-        sanitise_for_log(str(logging_data.ws_file_key)),
-        redact_for_log(str(logging_data.ws_log_where)),
+    #  THE ONE ADAPTER, shared by every handler in this package, so the single
+    # legacy log this cycle produces reads the same whichever table wrote it. Two
+    # fields are WITHHELD rather than sanitised: `WS-File-Key` is the open-item key
+    # and `WS-Log-Where` is a predicate carrying it as a literal, and escaping either
+    # leaves its content intact (CWE-532).
+    #
+    # `Log-File-Rec-Written` [copybooks/Test-Data-Flags.cob:L20] is `pic 9(6)`, and
+    # the adapter advances it by one modulo a million exactly once per record it
+    # emits. The advance USED TO BE DONE HERE as well as being the adapter's job in
+    # every sibling handler; doing it in one place is what makes the counter mean the
+    # same thing across the cycle.
+    log_file_handler_record(
+        _LOG,
+        program=HANDLER,
+        paragraph="Ca-Process-Logs",
+        log_system=logging_data.ws_log_system,
+        log_file_no=logging_data.ws_log_file_no,
+        no_paragraph=logging_data.ws_no_paragraph,
+        file_function=int(file_access.file_function),
+        access_type=int(file_access.access_type),
+        fs_reply=int(file_access.fs_reply),
+        we_error=int(file_access.we_error),
+        sql_err=logging_data.sql_err,
+        sql_state=logging_data.sql_state,
+        dal_common=dal_common,
     )
-    # [copybooks/Test-Data-Flags.cob:L18] Log-File-Rec-Written pic 9(6), the
-    # counter the frozen logger bumps. Its picture is six digits, so it wraps
-    # at a million rather than growing without bound.
-    dal_common.log_file_rec_written = (
-        int(dal_common.log_file_rec_written) + 1
-    ) % 1_000_000
 
 
 def _key_guard(file_access: FileAccess) -> StatusPair | None:

@@ -18,13 +18,15 @@ Present in this package
     cursor_state    ISAM `START` / `READ NEXT` emulation driven by each
                     bridge's declared key table and relation directive
 
-Target inventory, not yet present: `facade`, and one module per handler -
-acas000_system, acas005_gl_nominal, acas006_gl_posting, acas007_gl_batch,
-acas008_spl_posting, acas012_sales, acas013_value, acas015_analysis,
-acas016_invoice, acas019_otm3, acas022_purch, acas026_pinvoice, acas029_otm5,
-acasirsub1_irs_nominal, acasirsub3_irs_dflt, acasirsub4_irs_posting and
-acasirsub5_irs_final. The mapping is recorded here because it is the shape the
-present modules are built to serve, not because the modules exist.
+    facade          the verb vocabulary, published under BOTH the entity-named
+                    and the handler-named conventions over one implementation
+
+Also present, one module per handler - all seventeen, and each owning the SQL
+for its own tables: acas000_system, acas005_gl_nominal, acas006_gl_posting,
+acas007_gl_batch, acas008_spl_posting, acas012_sales, acas013_value,
+acas015_analysis, acas016_invoice, acas019_otm3, acas022_purch,
+acas026_pinvoice, acas029_otm5, acasirsub1_irs_nominal, acasirsub3_irs_dflt,
+acasirsub4_irs_posting and acasirsub5_irs_final.
 
 One module per handler, not per table. The COBOL call chain routes through
 handlers and they are not one-to-one with tables: `acas000` dispatches to four
@@ -33,7 +35,7 @@ a lines table. Mirroring the handler boundary keeps the Python module set in
 correspondence with the COBOL programs and preserves the dispatch rather than
 flattening it.
 
-The facade will publish two name sets over one implementation: the
+The facade publishes two name sets over one implementation: the
 entity-named vocabulary of [copybooks/Proc-ACAS-FH-Calls.cob] and the
 handler-named vocabulary of [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob]. The
 difference is behavioural, not cosmetic - the IRS convention wraps each call in

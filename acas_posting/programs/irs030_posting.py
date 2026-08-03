@@ -289,7 +289,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 from decimal import Decimal
-from typing import Final
+from typing import Final, Mapping
 
 from acas_posting.cobol import arithmetic, move
 from acas_posting.cobol.field import FieldDescriptor, descriptors_for_copybook_record
@@ -692,6 +692,21 @@ class _WorkingStorage:
     # as an input because it gates a database write.  See `run`.
     clear_posting_file: bool
 
+    # NOT A COBOL FIELD.  The caller's keyword-only handler declarations - chiefly
+    # the transport-security policy - forwarded to every facade `PERFORM` this
+    # section issues.  There is no COBOL counterpart because the frozen bridge has
+    # none: its connect passes six values and no transport policy at all
+    # [copybooks/mysql-procedures.cpy:L72-L77], transport being compiled into
+    # `cobmysqlapi.c`.
+    #
+    # An empty mapping is the SAFE answer, not the absent one: every handler
+    # declares `transport: TransportSecurity | None = None` and
+    # `connection._require_permitted_connection` resolves `None` fail-closed,
+    # permitting a Unix socket or a loopback address and refusing every other
+    # target.  Carried opaquely - nothing here reads a key of it - and
+    # `dal/facade.py` projects it onto whatever extras each handler declares.
+    dal_options: Mapping[str, object]
+
 
 #  Net section.   [irs/irs030.cbl:L1544]
 # ---------------------------------------------------------------------------
@@ -923,6 +938,7 @@ def _ledger_postings_add(ws: _WorkingStorage) -> None:
             ws.file_access,
             ws.file_defs,
             ws.dal_common,
+            ws.dal_options,
         ),
     )
 
@@ -969,6 +985,7 @@ def _ledger_postings_add(ws: _WorkingStorage) -> None:
             ws.file_access,
             ws.file_defs,
             ws.dal_common,
+            ws.dal_options,
         ),
     )
 
@@ -976,6 +993,13 @@ def _ledger_postings_add(ws: _WorkingStorage) -> None:
     #       Carried as a comment: the nominal ledger is already open, having been
     #       opened by an out-of-scope initialisation section.  No open is issued
     #       here, exactly as the frozen program issues none.
+    #
+    #       That comment states this section's PRECONDITION, and `run` is where
+    #       the migration establishes it - `acasirsub1-Open-Input`
+    #       [irs/irs030.cbl:L1481] before the section and `acasirsub1-Close`
+    #       [irs/irs030.cbl:L589] after it, at the program boundary the frozen
+    #       menu loop provides.  The mode is INPUT, not I-O; see the note at
+    #       `run` for why the four rewrites below succeed against it.
 
     # --- snapshot 1: the purchase-side VAT control account -------------------
     #
@@ -1003,6 +1027,7 @@ def _ledger_postings_add(ws: _WorkingStorage) -> None:
             ws.file_access,
             ws.file_defs,
             ws.dal_common,
+            ws.dal_options,
         ),
     )
     # 1597  if       we-error not = zero
@@ -1053,6 +1078,7 @@ def _ledger_postings_add(ws: _WorkingStorage) -> None:
             ws.file_access,
             ws.file_defs,
             ws.dal_common,
+            ws.dal_options,
         ),
     )
     # 1607  if       we-error not = zero
@@ -1092,6 +1118,7 @@ def _ledger_postings_add(ws: _WorkingStorage) -> None:
             ws.file_access,
             ws.file_defs,
             ws.dal_common,
+            ws.dal_options,
         ),
     )
 
@@ -1194,6 +1221,7 @@ def _input_loop(ws: _WorkingStorage) -> None:
                 ws.file_access,
                 ws.file_defs,
                 ws.dal_common,
+                ws.dal_options,
             ),
         )
 
@@ -1240,6 +1268,7 @@ def _input_loop(ws: _WorkingStorage) -> None:
                 ws.file_access,
                 ws.file_defs,
                 ws.dal_common,
+                ws.dal_options,
             ),
         )
 
@@ -1317,6 +1346,7 @@ def _input_loop(ws: _WorkingStorage) -> None:
                 ws.file_access,
                 ws.file_defs,
                 ws.dal_common,
+                ws.dal_options,
             ),
         )
 
@@ -1340,6 +1370,7 @@ def _input_loop(ws: _WorkingStorage) -> None:
                 ws.file_access,
                 ws.file_defs,
                 ws.dal_common,
+                ws.dal_options,
             ),
         )
 
@@ -1394,6 +1425,7 @@ def _input_loop(ws: _WorkingStorage) -> None:
                 ws.file_access,
                 ws.file_defs,
                 ws.dal_common,
+                ws.dal_options,
             ),
         )
 
@@ -1516,6 +1548,7 @@ def _input_loop(ws: _WorkingStorage) -> None:
                 ws.file_access,
                 ws.file_defs,
                 ws.dal_common,
+                ws.dal_options,
             ),
         )
 
@@ -1727,6 +1760,7 @@ def _eoj(ws: _WorkingStorage) -> None:
             ws.file_access,
             ws.file_defs,
             ws.dal_common,
+            ws.dal_options,
         ),
     )
 
@@ -1747,6 +1781,7 @@ def _eoj(ws: _WorkingStorage) -> None:
             ws.file_access,
             ws.file_defs,
             ws.dal_common,
+            ws.dal_options,
         ),
     )
 
@@ -1762,6 +1797,7 @@ def _eoj(ws: _WorkingStorage) -> None:
             ws.file_access,
             ws.file_defs,
             ws.dal_common,
+            ws.dal_options,
         ),
     )
 
@@ -1775,6 +1811,7 @@ def _eoj(ws: _WorkingStorage) -> None:
             ws.file_access,
             ws.file_defs,
             ws.dal_common,
+            ws.dal_options,
         ),
     )
 
@@ -1816,9 +1853,26 @@ def _eoj_q1(ws: _WorkingStorage) -> None:
     ROW - the maintainer's own comment at [irs/irs030.cbl:L1723] records it as
     `*> performs a acas008-Delete-All`.  The answer therefore changes table
     state, so the presentation-removal rule keeps it as an explicit parameter of
-    `run` rather than dropping it.  THE COBOL DEFAULT IS `"Y"`: the prompt
-    literal displays `[Y]` and the accept is pre-populated, so the parameter
-    defaults to clearing.
+    `run` rather than dropping it.  THE COBOL HAS NO DEFAULT ANSWER, and the
+    appearance that it does is a trap: the prompt literal displays `[Y]`
+    [irs/irs030.cbl:L1716], but the `accept` on the next line carries NO `WITH
+    UPDATE` phrase [irs/irs030.cbl:L1717], so the literal never reaches the field;
+    `WS-Reply pic x` [irs/irs030.cbl:L230] is never given the value `"Y"` anywhere
+    in this program - the only moves into it are `space` [irs/irs030.cbl:L1512] and
+    `spaces` [irs/irs030.cbl:L1521], and the `move "Z"` at [irs/irs030.cbl:L1530]
+    is commented out - and L1718-L1719 send any other reply back to the prompt.
+    That the missing `WITH UPDATE` is deliberate shows in this same file, which
+    uses the phrase at six other accepts: [irs/irs030.cbl:L582], [:L732], [:L829],
+    [:L848], [:L883] and [:L1015].  So a bare Enter RE-PROMPTS rather than
+    clearing (finding CLI-05).
+
+    THIS PARAMETER'S OWN DEFAULT OF `True` IS RETAINED DELIBERATELY, and it is a
+    signature contract rather than a claim about the COBOL: this module's file
+    brief fixes the signature, and every caller in the migration passes the value
+    EXPLICITLY, so the default is never consulted.
+    `acas_posting/cli/irs_post.py` makes the switch pair `required=True` with no
+    default of its own, which is where the absence of a COBOL default is enforced -
+    at the boundary an operator actually touches.
 
     `GO TO` CLASS 4 - PER-SITE PROOF for [irs/irs030.cbl:L1719].
     The transfer is a sibling re-dispatch to the head of this same paragraph, so
@@ -1872,6 +1926,7 @@ def _eoj_q1(ws: _WorkingStorage) -> None:
                 ws.file_access,
                 ws.file_defs,
                 ws.dal_common,
+                ws.dal_options,
             ),
         )
         # 1724  perform acas008-Close.
@@ -1882,6 +1937,7 @@ def _eoj_q1(ws: _WorkingStorage) -> None:
                 ws.file_access,
                 ws.file_defs,
                 ws.dal_common,
+                ws.dal_options,
             ),
         )
 
@@ -1926,9 +1982,10 @@ def run(
     ws_system_record: SystemRecord,
     file_defs: FileDefs,
     *,
-    clear_posting_file: bool = True,
+    clear_posting_file: bool,
     file_access: FileAccess | None = None,
     dal_common: AcasDalCommonData | None = None,
+    dal_options: Mapping[str, object] | None = None,
 ) -> None:
     """Run `irs030`'s `Ledger-Postings-Add` section.
 
@@ -1960,7 +2017,14 @@ def run(
         clear_posting_file: the answer to the end-of-job question at
             [irs/irs030.cbl:L1717].  `True` clears the transfer table by
             reopening it for output, which for this handler deletes every row.
-            Defaults to `True`, preserving the COBOL prompt's `[Y]` default.
+            Defaults to `True` as a SIGNATURE CONTRACT fixed by this module's
+            file brief, NOT because the COBOL has that default - it has none. The
+            `[Y]` at [irs/irs030.cbl:L1716] is prompt text, the accept at L1717
+            carries no `WITH UPDATE`, and L1718-L1719 re-prompt on anything that is
+            not `"Y"` or `"N"`. Every caller in the migration passes this
+            explicitly, so the default is never consulted, and
+            `acas_posting/cli/irs_post.py` requires the answer at the boundary an
+            operator touches (finding CLI-05).
         file_access: the `File-Access` block [irs/irs030.cbl:L285].  Not a
             linkage parameter - it is this program's own WORKING-STORAGE, exposed
             because the connection details the handlers need are loaded into it by
@@ -1972,13 +2036,36 @@ def run(
             [irs/irs030.cbl:L298].  Also WORKING-STORAGE rather than linkage, and
             the fifth operand of every handler CALL.  A fresh block is created
             when omitted.
+        dal_options: the caller's keyword-only handler declarations, forwarded to
+            every facade `PERFORM` this section issues, and the declaration it
+            exists for is the transport-security policy.  NOT a linkage operand
+            and NOT working storage: the frozen bridge has no transport policy to
+            declare, its connect passing six values and nothing else
+            [copybooks/mysql-procedures.cpy:L72-L77].  `None` - the default -
+            declares nothing, which every handler resolves FAIL-CLOSED: a Unix
+            socket or a loopback address is permitted and any other target
+            refused.  A run against the containerised parity harness must
+            therefore say so explicitly, `dal_options={"transport":
+            TransportSecurity(isolated_oracle=True)}`, and a run against a real
+            server should be given `TransportSecurity(ca_file=...)`.  It changes
+            no status, no statement, no arithmetic and no write order.
 
     Returns:
         Nothing.  The section communicates entirely through the database, through
         the `File-Access` status block and through the advanced key allocator on
-        `irs_system_params`.  Every disposition - clean skip, commit-and-stop and
-        abort-with-nothing - is a normal return; the frozen program raises no
-        condition and signals no failure to its caller.
+        `irs_system_params`.  Every disposition - clean skip, commit-and-stop,
+        abort-with-nothing, and the facade copybook's own `goback`
+        [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L364] - is a normal return; the
+        frozen program raises no condition and signals no failure to its caller,
+        so neither does this entry point.
+
+    THE NOMINAL LEDGER IS OPENED AND CLOSED HERE, not in the section.  The
+    section runs against a file its out-of-scope `Initialise-Main` left open for
+    INPUT [irs/irs030.cbl:L1481] and which `Main-Loop-Clear` closes when the
+    operator leaves the menu [irs/irs030.cbl:L589]; `run` is the only place in
+    the migrated surface that corresponds to that program boundary.  The
+    bracketing statements and the reason the INPUT mode is correct for the
+    section's four rewrites are documented at the call site below.
     """
     # The remaining records are this program's own WORKING-STORAGE, initialised
     # as COBOL initialises WORKING-STORAGE: to the layout's own default values.
@@ -1998,8 +2085,139 @@ def run(
         nl32_record=_NlSnapshot(),  # 01 nl32-record.          [L363]
         post_record_cnt=0,  # value zero               [L272]
         clear_posting_file=clear_posting_file,
+        # `None` and `{}` are the same thing - no declaration - and both leave
+        # every handler at its fail-closed default.  Copied rather than aliased so
+        # the caller's mapping cannot change under a run in progress.
+        dal_options=dict(dal_options) if dal_options else {},
     )
-    _ledger_postings_add(ws)
+
+    # --- THE PROGRAM-BOUNDARY NOMINAL-LEDGER STATE ---------------------------
+    #
+    # The migrated section issues NO open of the nominal ledger - it says so
+    # itself, in a comment that survives in the frozen source
+    # [irs/irs030.cbl:L1590]::
+    #
+    #     1590  *>    perform  acasirsub1-Open.      *> IT is opened in intialise-main
+    #
+    # and it then drives that already-open file with four `acasirsub1-Read-
+    # Indexed` performs (L1596, L1606, L1629, L1647) and four
+    # `acasirsub1-Rewrite` performs (L1641, L1657, L1705, L1708).  The two
+    # statements that
+    # bracket it are therefore part of this PROGRAM's contract even though they
+    # sit outside the migrated SECTION, and the Python entry point is the only
+    # place they can live: `run` IS the program boundary here, because
+    # `Initialise-Main` and the menu loop that contain them are out of scope per
+    # Agent Action Plan section 0.2.1.1 ("Partial - only `Ledger-Postings-Add`").
+    #
+    # Only the acasirsub1 OPEN/CLOSE pair is reproduced.  Nothing else from
+    # `Initialise-Main` is - not the screen work, not the CoA table build, not
+    # the VAT-account existence sweep, not the VAT-rate load - and none of it is
+    # needed by the section, which reloads both VAT accounts itself at
+    # [irs/irs030.cbl:L1594-L1612].
+    #
+    # THE MODE IS `INPUT`, NOT `I-O`, AND THAT IS NOT A TRANSCRIPTION SLIP.
+    # `Initialise-Main` opens I-O first [irs/irs030.cbl:L1437], then closes and
+    # RE-OPENS FOR INPUT so it can walk the whole file to build the description
+    # search table [irs/irs030.cbl:L1480-L1481]::
+    #
+    #     1480      perform  acasirsub1-Close.
+    #     1481      perform  acasirsub1-Open-Input.
+    #
+    # and it never reverts to I-O.  `Main-Loop` is entered with the file open for
+    # INPUT, and option 66 performs the migrated section from there
+    # [irs/irs030.cbl:L603].  So the four rewrites the section issues run
+    # against a file opened for input - which succeeds, because the handler
+    # tests `access-type` on START ONLY [common/acasirsub1.cbl:L525] and its
+    # `aa090-Process-Rewrite` [common/acasirsub1.cbl:L627-L635] issues a bare
+    # `rewrite Record-1` with no mode test at all.  Opening I-O here "because a
+    # rewrite needs it" would be a fix, not a migration, and rule R-4 forbids it.
+    #
+    # THE CLOSE IS PER PROGRAM INVOCATION.  The frozen close is
+    # [irs/irs030.cbl:L589], inside `Main-Loop-Clear`, guarded by `if w = zero`
+    # - the operator pressing Return to leave the menu - and followed by `go to
+    # Main-Exit`::
+    #
+    #      589      perform acasirsub1-Close        *> call-irsub1
+    #      590      go to Main-Exit.
+    #
+    # One `run` call is one complete invocation of this program's posting
+    # operation, so the close belongs at the end of `run`.  It is NOT in `EOJ`:
+    # the frozen `EOJ` carries the close COMMENTED OUT, with the maintainer's own
+    # note saying where it really happens [irs/irs030.cbl:L1710]::
+    #
+    #     1710  *>    perform  acasirsub1-Close.                    *> Closed at EOJ
+    #
+    # which is why the migrated `EOJ` issues none and this boundary does.  On the
+    # `goback` path below no close happens at all, exactly as the frozen program
+    # leaves it - see the note on the `except` clause.
+    try:
+        # 1481  perform  acasirsub1-Open-Input.
+        facade.acasirsub1_open_input(
+            facade.FacadeContext(
+                ws.ws_system_record,
+                ws.ws_irsnl_record,
+                ws.file_access,
+                ws.file_defs,
+                ws.dal_common,
+            ),
+        )
+        #  603  perform Ledger-Postings-Add.
+        _ledger_postings_add(ws)
+        #  589  perform acasirsub1-Close        *> call-irsub1
+        #       Reached only when the open and the section both ran to
+        #       completion, because the frozen `goback` below abandons
+        #       `Main-Loop` and so never reaches L589 either.  This is why the
+        #       close is in the success path and NOT in a `finally`.
+        facade.acasirsub1_close(
+            facade.FacadeContext(
+                ws.ws_system_record,
+                ws.ws_irsnl_record,
+                ws.file_access,
+                ws.file_defs,
+                ws.dal_common,
+            ),
+        )
+    except facade.FacadeGoback:
+        # THE COPYBOOK'S `goback` DISPOSITION.
+        # [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L364] is a `goback` at the
+        # end of the shared `Open-Error-Continued` paragraph, and a `goback`
+        # returns from the PROGRAM - so in `irs030` it ends `irs030` and hands
+        # control back to the IRS menu.  Its Python counterpart is
+        # `FacadeGoback`, which must therefore be absorbed HERE, at the program
+        # boundary, and turned into the same normal subprogram return.  Letting
+        # it escape `run` would propagate a condition the frozen program cannot
+        # propagate, and would change the caller's disposition.
+        #
+        # Exactly three call sites in this program can raise it, being the three
+        # whose facade paragraphs perform an error check
+        # [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L136-L140, L175-L179,
+        # L142-L146]: the `acas008-Open-Input` at the head of the section
+        # [irs/irs030.cbl:L1578], the `acasirsub1-Open-Input` above, and the
+        # `acas008-Open-Output` that clears the transfer file at end of job
+        # [irs/irs030.cbl:L1723].  The read-indexed, rewrite, write and close
+        # verbs the section uses carry no check and cannot raise.
+        #
+        # NO CLOSE IS ADDED ON THIS PATH, and the omission is deliberate: each
+        # check paragraph performs its OWN handler close before reaching the
+        # shared abort - `perform acasirsub1-Close`
+        # [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L337] and `perform
+        # acas008-Close` [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L330] - so the
+        # failing handler is already closed.  A second close here would be a
+        # statement the frozen program does not execute.  The nominal ledger is
+        # left as the frozen program leaves it, which after an `acas008` abort
+        # means still open: `goback` skips L589, and rule R-4 keeps that.
+        #
+        # Recorded at debug because it is a disposition and not a diagnostic -
+        # `Open-Error-Continued` has already logged FS-Reply, WE-Error, SQL-Err
+        # and SQL-Msg at error level, and the `goback` itself displays nothing.
+        _LOG.debug(
+            "irs030: returning to caller via the goback at "
+            "[copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L364]; FS-Reply=%s "
+            "WE-Error=%s",
+            ws.file_access.fs_reply,
+            ws.file_access.we_error,
+        )
+        return
 
 
 # --- STRUCTURAL NOTES -------------------------------------------------------
@@ -2093,7 +2311,23 @@ def run(
 #     L1569-L1730   Ledger-Postings-Add section.  (the migrated surface)
 #     L1732         copy "Proc-ZZ100-ACAS-IRS-Calls.cob".  -> an import
 #
-# 187 lines of 1733.  Everything else in the program is out of scope.  The six
+# 187 lines of 1733, PLUS EXACTLY TWO MORE STATEMENTS, named here so the count
+# stays honest and the reason is not buried at the call site:
+#
+#     L1481         perform  acasirsub1-Open-Input.   -> at the head of `run`
+#     L589          perform  acasirsub1-Close         -> at the tail of `run`
+#
+# 189 lines of 1733.  Those two are the nominal ledger's OPEN and CLOSE, and
+# they are the section's stated precondition rather than an extension of it: the
+# section drives an already-open file and says so in a surviving comment at
+# L1590, then issues four read-indexed and four rewrite performs through it.
+# `run` is the only place in the migrated surface that corresponds to the program
+# boundary where the frozen statements sit - L1481 inside `Initialise-Main`,
+# performed once at L562, and L589 inside `Main-Loop-Clear`, performed when the
+# operator leaves the menu.  NOTHING ELSE from either of those out-of-scope
+# paragraphs is reproduced.
+#
+# Everything else in the program is out of scope.  The six
 # named out-of-scope sections, with their line numbers, are:
 #
 #     Init-Main         section  L557    program initialisation and screen setup
@@ -2354,6 +2588,18 @@ def run(
 #        separate indexed reads with the sub-nominal zeroing written out twice,
 #        and `nl-sub-nominal` is re-zeroed before all four lookups.  An optimiser
 #        would collapse these; performance work is out of scope by construction.
+#   F-18 THE FOUR REWRITES RUN THROUGH A FILE OPENED FOR *INPUT*, and the
+#        handler lets them.  `Initialise-Main` opens the nominal ledger I-O at
+#        L1437, then closes it at L1480 and RE-OPENS IT FOR INPUT at L1481 so it
+#        can walk the whole file, and never reverts; `Main-Loop` and therefore
+#        this section run from that INPUT state.  It works because
+#        `common/acasirsub1.cbl` tests `access-type` on START ONLY
+#        [common/acasirsub1.cbl:L525] and `aa090-Process-Rewrite`
+#        [common/acasirsub1.cbl:L627-L635] issues a bare `rewrite Record-1` with
+#        no mode test whatsoever.  Reproduced as measured: `run` opens INPUT.
+#        Opening I-O instead "because a rewrite needs it" would be a fix, and
+#        rule R-4 forbids fixes.  Compounds F-3, which records that a failed
+#        rewrite is never tested for at any of its sites.
 #
 #
 # CITATION CORRECTIONS
@@ -2386,8 +2632,15 @@ def run(
 #   O-1  THE SIX OUT-OF-SCOPE SECTIONS, BY NAME AND LINE, plus every screen
 #        section and ACCEPT loop in L1-L1543 other than `Net` and `Gross`.  See
 #        BOUNDARY above for the list.  This is the largest omission in this
-#        module and the one most likely to be mistaken for a gap: 1546 of the
+#        module and the one most likely to be mistaken for a gap: 1544 of the
 #        program's 1733 lines are simply not part of this migration.
+#        THE TWO EXCEPTIONS ARE NAMED IN BOUNDARY ABOVE and are the only
+#        statements taken from outside the three in-scope sections: the
+#        `acasirsub1-Open-Input` at L1481 and the `acasirsub1-Close` at L589.
+#        `Initialise-Main`'s screen work, its CoA search-table build, its
+#        VAT-account existence sweep, its VAT-rate load and its I-O open at L1437
+#        are all still omitted, and none is needed - the section reloads both VAT
+#        accounts itself at L1594-L1612.
 #   O-2  FURTHER CONSTRUCTS EXCLUDED BY NAME, all outside the boundary and
 #        therefore NOT reproduced: the eight sign flips at L947, L963, L1096,
 #        L1125, L1127, L1139, L1141 and L1179; the amount scaling at L1074, L1077
@@ -2410,8 +2663,13 @@ def run(
 #        presentation; the transfer is behaviour.
 #   O-5  `accept WS-Reply` AT L1717 IS NOT DROPPED.  It gates a database write -
 #        the transfer-table truncation - so it becomes the explicit
-#        `clear_posting_file` parameter of `run`, defaulting to `True` to preserve
-#        the prompt's `[Y]` default.
+#        `clear_posting_file` parameter of `run`.  ITS `True` DEFAULT IS A
+#        SIGNATURE CONTRACT from this module's file brief and NOT a COBOL default:
+#        the frozen prompt has none, because the `[Y]` at L1716 is prompt text, the
+#        accept at L1717 carries no `WITH UPDATE`, `WS-Reply` is never set to `"Y"`
+#        anywhere in the program, and L1718-L1719 re-prompt on anything else.  Every
+#        caller passes the value explicitly, so the default is never consulted;
+#        acas_posting/cli/irs_post.py requires the answer (finding CLI-05).
 #   O-6  `copy "screenio.cpy"` (L344) and `copy "envdiv.cob"` (L197) map to
 #        nothing.  Both are representation only: a screen-section vocabulary and
 #        an environment division fragment, neither of which has a Python

@@ -37,6 +37,12 @@ Verbatim from Agent Action Plan 0.6.4:
     order. Any change in sort stability or key composition produces **silent
     misposting** - no error, no diagnostic, wrong balances.
 
+The plan's citation is off: in the frozen program the sequential read is the
+guarded ``if read-ledger not = "R" / perform GL-Nominal-Read-Next`` at
+``[general/gl072.cbl:L407-L408]``; ``[general/gl072.cbl:L410-L412]`` is the
+``move zero to tot-dr tot-cr`` that follows it. The sort-order dependency the
+finding draws from it is unaffected and is reproduced.
+
 So ``READ NEXT`` here advances in ``LEDGER-KEY`` ASCENDING order and in no
 other, driven by :mod:`acas_posting.dal.cursor_state`, which reproduces the
 bridge's own ``ORDER BY`` [common/nominalMT.cbl:L466-L472]. There is no
@@ -384,6 +390,7 @@ from acas_posting.dal.connection import (
     mysql_1980_close,
     mysql_1999_exit,
     quote_identifier,
+    transport_category,
     transport_decimal_context,
 )
 from acas_posting.dal.cursor_state import (
@@ -402,8 +409,9 @@ from acas_posting.dal.status import (
     FsReply,
     LogSystem,
     WeError,
+    log_file_handler_record,
+    log_handler_failure,
     mysql_1100_db_error,
-    redact_for_log,
 )
 
 #  DELIBERATE OMISSION, recorded as an omission per rule R-5.
@@ -2099,12 +2107,14 @@ def _mysql_1210_command(
         The outcome, with ``count_rows`` filled whether or not the command failed.
     """
     bound = tuple(parameters)
-    _LOG.debug(
-        "%s %s: %s",
-        BRIDGE_NAME,
-        TABLE_NAME,
-        redact_for_log(statement),
-    )
+    #  THE STATEMENT IS NOT LOGGED. It used to be, redacted - and redaction cannot
+    #  help here, because what leaks is not an identity shape the rules recognise
+    #  but the statement itself: an `UPDATE ... SET` over `GLLEDGER-REC` names every
+    #  column of the nominal ledger row, and a `WHERE` clause names the account
+    #  being posted to (CWE-532). The bound parameters are not logged for the same
+    #  reason. A failed statement is reported once, with typed fields, by
+    #  `dal/status.py`'s `mysql_1100_db_error`, which is enough to identify the
+    #  fault; the statement text belongs to a debugger, not to an operator log.
     try:
         with execute_statement(connection, statement, bound) as cursor:  # type: ignore[arg-type]
             # `MySQL_affected_rows` [copybooks/mysql-procedures.cpy:L178] - read
@@ -2509,7 +2519,17 @@ def _display_message_1(file_access: FileAccess, dal_common: AcasDalCommonData | 
         return
     # `03 from WS-Where (1:J) pic x(69)` [common/nominalMT.cbl:L324] - the reference
     # modifier takes the clause's used length and the picture then truncates to 69.
-    _LOG.debug("WS-Where=%s", file_access.logging_data.ws_log_where[:_DISPLAY_WHERE_WIDTH])
+    #
+    # THE CLAUSE ITSELF IS NOT LOGGED, WHICH IS WHY THIS FUNCTION NOW ONLY GUARDS.
+    # `WS-Where` holds the composed SQL `WHERE` clause, with the key value the
+    # bridge built it around - an account number, in this table (CWE-532). The
+    # frozen `display` writes it to a curses screen that no operator log persists;
+    # a log record persists, is aggregated, and is read by people who have no
+    # business seeing which account was touched. The guard is kept in place, with
+    # its `Testing-2` predicate intact, so that the paragraph still exists for
+    # traceability and so that the switch still means what it means - it simply has
+    # nothing left to write. Nothing about control flow or status changes: this
+    # function returned `None` before and returns `None` now.
 
 
 #: ``03  from WS-Where (1:J)  pic x(69)`` [common/nominalMT.cbl:L324] - the width of
@@ -2567,13 +2587,27 @@ def ba020_process_open(
     rdb_data = file_access.rdb_data
     # [:L395-L418] - built in the frozen order and kept for the trace, exactly as
     # the bridge builds them before it opens.
+    #  THE ENDPOINT IS CLASSIFIED, NOT NAMED. `redact_for_log` was applied to these
+    #  four fields and could not help: its rules recognise the shapes a client
+    #  library's MESSAGE takes - "for user 'x'@'y'", "Unknown database 'z'" - and a
+    #  bare host name or schema name matches none of them, so every character went
+    #  straight through (CWE-532). `transport_category` answers the only question a
+    #  log record has to answer about a connect target - can the credentials and the
+    #  posted figures be read off the wire - with one of five fixed tokens, and is
+    #  identical on every deployment.
     _LOG.debug(
-        "%s connect schema=%s host=%s port=%s socket=%s",
+        "%s connect: transport=%s",
         BRIDGE_NAME,
-        redact_for_log(cobol_string_delimited_by_space(rdb_data.db_schema)),
-        redact_for_log(cobol_string_delimited_by_space(rdb_data.db_host)),
-        redact_for_log(cobol_string_delimited_by_space(rdb_data.db_port)),
-        redact_for_log(cobol_string_delimited_by_space(rdb_data.db_socket)),
+        transport_category(
+            {
+                "host": cobol_string_delimited_by_space(rdb_data.db_host),
+                "unix_socket": cobol_string_delimited_by_space(
+                    rdb_data.db_socket
+                ),
+            }
+            if cobol_string_delimited_by_space(rdb_data.db_socket)
+            else {"host": cobol_string_delimited_by_space(rdb_data.db_host)}
+        ),
     )
     if state.system_record is None:
         raise CobolFileAccessNotMigratedError(FileFunction.OPEN, access_type=AccessType.INPUT)
@@ -2710,6 +2744,11 @@ def ba040_process_read_next(
     account only because ``gl071`` has already emitted the transaction stream in
     nominal-key order. Any change in sort stability or key composition produces
     SILENT MISPOSTING - no error, no diagnostic, wrong balances."
+
+    The plan's citation is off by a few lines: the sequential read is the guarded
+    ``if read-ledger not = "R" / perform GL-Nominal-Read-Next`` at
+    ``[general/gl072.cbl:L407-L408]``, and ``[general/gl072.cbl:L410-L412]`` is the
+    ``move zero to tot-dr tot-cr`` after it. The requirement is unchanged.
 
     So the ordering below is a CORRECTNESS REQUIREMENT, not a convenience. It is
     ``ORDER BY `LEDGER-KEY` ASC``, one term, no tie-breaker, no ``LIMIT``, from the
@@ -3400,36 +3439,45 @@ def ca_process_logs(file_access: FileAccess, dal_common: AcasDalCommonData) -> N
     control flow, which is the treatment Agent Action Plan 0.3.4 prescribes for
     output that does not reach a table.
 
-    ``Log-File-Rec-Written`` [copybooks/Test-Data-Flags.cob:L20] is incremented,
-    because the counter lives in ``ACAS-DAL-Common-data`` - shared with the handler,
-    per its comment "in both acas0nn and a DAL" - and a caller can read it. It is
-    plain accounting of records written, not a clock or a random source, so it does
-    not disturb the determinism rule R-6 requires.
+    ``Log-File-Rec-Written`` [copybooks/Test-Data-Flags.cob:L20] is advanced, because
+    the counter lives in ``ACAS-DAL-Common-data`` - shared with the handler, per its
+    comment "in both acas0nn and a DAL" - and a caller can read it. It is plain
+    accounting of records written, not a clock or a random source, so it does not
+    disturb the determinism rule R-6 requires. IT IS ADVANCED MODULO ONE MILLION,
+    which this module used not to do: the field is ``pic 9(6)``, so it wraps rather
+    than growing, and an unbounded Python integer diverged from the frozen value the
+    moment a run wrote a millionth record.
 
-    Every value passes through :func:`status.redact_for_log` first. The
-    ``Logging-Data`` block can carry a driver message, and a driver message can
-    quote a connection string; rule V.S1 requires no secret reaches a log or a diff.
+    ONE ADAPTER FOR ALL TWENTY HANDLERS. The record is composed by
+    :func:`acas_posting.dal.status.log_file_handler_record`, so this handler's field
+    set, level and counter arithmetic are identical to every other handler's rather
+    than a local reading of the same one-line paragraph. Three fields are withheld
+    and the withholding is the point: ``WS-File-Key`` is the nominal-ledger ACCOUNT
+    NUMBER, ``WS-Log-Where`` is the composed ``WHERE`` clause it was built into, and
+    ``SQL-Msg`` is the driver's free text. ``redact_for_log`` was applied to all three
+    and could not help - its rules recognise connection-message shapes, not account
+    numbers - so they are not reported at all (CWE-532). ``WS-Count-Rows`` goes with
+    them: it belongs to ``Delete-All`` reporting rather than to the trace.
 
     Args:
         file_access: The block whose ``Logging-Data`` is written out.
-        dal_common: The switch block, whose counter is incremented.
+        dal_common: The switch block, whose counter is advanced.
     """
     logging_data = file_access.logging_data
-    dal_common.log_file_rec_written += 1
-    _LOG.info(
-        "fhlogger %s/%s para=%s key=%s fs-reply=%s we-error=%s sql-err=%s sql-state=%s "
-        "rows=%s where=%s msg=%s",
-        HANDLER_NAME,
-        TABLE_NAME,
-        logging_data.ws_no_paragraph,
-        redact_for_log(logging_data.ws_file_key.rstrip()),
-        file_access.fs_reply,
-        file_access.we_error,
-        redact_for_log(logging_data.sql_err.rstrip()),
-        redact_for_log(logging_data.sql_state.rstrip()),
-        logging_data.ws_count_rows,
-        redact_for_log(logging_data.ws_log_where.rstrip()),
-        redact_for_log(logging_data.sql_msg.rstrip()),
+    log_file_handler_record(
+        _LOG,
+        program=HANDLER_NAME,
+        paragraph="ca-Process-Logs",
+        log_system=logging_data.ws_log_system,
+        log_file_no=logging_data.ws_log_file_no,
+        no_paragraph=logging_data.ws_no_paragraph,
+        file_function=file_access.file_function,
+        access_type=file_access.access_type,
+        fs_reply=file_access.fs_reply,
+        we_error=file_access.we_error,
+        sql_err=logging_data.sql_err,
+        sql_state=logging_data.sql_state,
+        dal_common=dal_common,
     )
 
 
@@ -3682,10 +3730,17 @@ def ba012_test_ws_rec_size_2(
         file_access.we_error = WeError.RECORD_SIZE_MISMATCH
         file_access.fs_reply = FsReply.ERROR
         # `display Display-Blk at 2301` / `display GL901 at 2401` [:L623-L624] - two
-        # screen writes with no database effect, so log records per AAP 0.3.4.
+        # screen writes with no database effect, and AAP 0.3.4 treats them
+        # DIFFERENTLY, because they say different things.
+        #   * `GL902 Program Error: Temp rec = ` [common/acas005.cbl:L253] plus the
+        #     two lengths is the substantive diagnostic, and becomes this record.
+        #   * `GL901 Note error and hit return` [:L252] is an acknowledgement prompt
+        #     and nothing else. It is dropped, with the pause it introduces.
+        #   * The transfer that follows is preserved by the `return False` below.
+        # The two lengths are record-layout constants of this migration, not data.
         _LOG.error(
-            "GL902 %s < NL-Rec = %s : GL901 programming error, caller must stop "
-            "[common/acas005.cbl:L609]",
+            "GL902 Program Error: Temp rec = %s < NL-Rec = %s - programming "
+            "error, the caller must stop [common/acas005.cbl:L609]",
             WS_LEDGER_RECORD_LENGTH,
             LEDGER_RECORD_LENGTH,
         )
@@ -4073,7 +4128,9 @@ def aa040_process_read_next(file_access: FileAccess) -> None:
     Action Plan 0.3.4 it becomes a log record while the control transfer that follows
     it is preserved. And ``move spaces to WS-Ledger-Key`` writes SPACES into a
     ``9(6)``/``9(2)`` numeric group, leaving it non-numeric - which is exactly the
-    condition ``gl072`` silently skips on [general/gl072.cbl:L289-L290].
+    condition ``gl072`` silently skips on [general/gl072.cbl:L291-L292] - the
+    statement the anomaly register cites as [general/gl072.cbl:L289-L290], which in
+    the frozen checkout is the ``go to end-run`` of the at-end clause.
 
     Falls through into :func:`aa041_reread` when not at end of file.
 
@@ -4636,15 +4693,19 @@ def aa010_main(
         # [:L298]'s comment is a copy of [:L292]'s and describes the wrong code.
         file_access.we_error = we_error
         file_access.fs_reply = fs_reply
-        _LOG.error(
-            "%s: File-Key-No %d not = %d for %s - (%d, %d) %s",
-            HANDLER_NAME,
-            logging_data.file_key_no,
-            FILE_KEY_NO,
-            FileFunction(file_access.file_function).name,
-            int(fs_reply),
-            int(we_error),
-            locator,
+        log_handler_failure(
+            _LOG,
+            program=HANDLER_NAME,
+            paragraph="aa000-Main-Process key guard",
+            locator=locator,
+            fs_reply=int(fs_reply),
+            we_error=int(we_error),
+            detail="File-Key-No %d is not %d for %s"
+            % (
+                logging_data.file_key_no,
+                FILE_KEY_NO,
+                FileFunction(file_access.file_function).name,
+            ),
         )
         # GO TO CLASS 3 - `go to aa999-main-exit` [:L294, :L300].
         aa999_main_exit(file_access, dal_common)

@@ -200,8 +200,9 @@ of the diff differ from the other". This module therefore sets no
 `autocommit`, no `sql_mode`, no `charset`, no collation and no
 `PAD_CHAR_TO_FULL_LENGTH`: it reads the server as configured. Being
 `SELECT`-only, the autocommit value cannot affect its output either way.
-Under the pinned `autocommit=1` each `SELECT` is its own read rather
-than one long snapshot, which is equally deterministic here because
+Under the pinned `autocommit=0` the session's SELECTs share one implicit
+read transaction rather than each standing alone, which is equally
+deterministic here - and if anything more so - because
 execution is strictly sequential and nothing writes to the schema while
 a dump is in progress - the run has finished before the dump starts.
 The connection is still released with a write-free `rollback()`, never
@@ -293,8 +294,9 @@ Execution is strictly sequential."
     `UPDATE`, `DELETE`, `CREATE`, `DROP`, `ALTER` or `TRUNCATE`, creates
     no temporary table or view, and runs no `ANALYZE TABLE`. The single
     transaction-control statement it issues is a write-free `rollback()`,
-    which releases any read-only transaction the server may have opened
-    and is a harmless no-op under the pinned `autocommit=1`.
+    which releases the read-only transaction the server opens under the
+    pinned `autocommit=0`. It writes nothing either way, because this
+    module only ever reads.
   * ONE connection, no pool. Tables are dumped one after another in a
     plain loop. There is no thread, no event loop, no process pool and no
     synchronisation primitive anywhere in this file.
@@ -339,9 +341,9 @@ DETERMINISM IS THE PRODUCT  (rule R-6)
 ======================================
 Agent Action Plan section 0.8.5: "Two runs of the same scenario under the
 same pinned clock produce byte-identical dumps, proven by
-`tests/determinism/test_two_runs_byte_identical.py`." That determinism
-suite is written at a later boundary; the property it will assert is the
-one this module is built to deliver.
+`tests/determinism/test_two_runs_byte_identical.py`." That suite is an
+Agent Action Plan deliverable this checkout does not carry; the property it
+asserts is the one this module is built to deliver.
 
 NOT ONE BYTE OF NON-REPRODUCIBLE CONTENT MAY APPEAR IN A DUMP FILE. There
 is no wall-clock timestamp, no hostname, no run identifier, no elapsed
@@ -421,8 +423,9 @@ FURTHER READING
     harness/normalize.py         the three canonicalisation jobs
     harness/diff_states.py       the comparison; empty is the pass
 
-The migration anomaly log and the per-scenario diff evidence, both written
-at a later boundary, are built from this pipeline's output.
+The migration anomaly log and the per-scenario diff evidence, both Agent
+Action Plan deliverables this checkout does not carry, are built from this
+pipeline's output.
 """
 
 # PROVENANCE
@@ -438,12 +441,12 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import errno
 import hashlib
 import ipaddress
 import json
 import os
 import shutil
-import stat
 import sys
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -691,6 +694,13 @@ _ENV_REPO: Final[str] = "ACAS_REPO"
 #  two sides of the comparison reading the server exactly as
 #  harness/Dockerfile.mariadb configured it.
 # ---------------------------------------------------------------------------
+#: Stands in for a driver field the exception did not carry, or carried in a
+#: shape that is not that field. Never the driver's own text.
+_UNKNOWN_DRIVER_FIELD: Final[str] = "unknown"
+
+#: SQLSTATE is five alphanumeric characters [copybooks/wsfnctn.cob:L51].
+_SQLSTATE_WIDTH: Final[int] = 5
+
 _ENV_CONNECT_TIMEOUT: Final[str] = "ACAS_DB_CONNECT_TIMEOUT"
 _ENV_READ_TIMEOUT: Final[str] = "ACAS_DB_READ_TIMEOUT"
 _ENV_WRITE_TIMEOUT: Final[str] = "ACAS_DB_WRITE_TIMEOUT"
@@ -894,11 +904,68 @@ def _is_timeout(exc: BaseException) -> bool:
     """
     if isinstance(exc, TimeoutError):
         return True
-    errno = getattr(exc, "errno", None)
-    if isinstance(errno, int) and errno in _TIMEOUT_ERRNOS:
+    # Named `code` and not `errno`, which is now an imported module.
+    code = getattr(exc, "errno", None)
+    if isinstance(code, int) and code in _TIMEOUT_ERRNOS:
         return True
     text = str(exc).lower()
     return "timed out" in text or "timeout" in text
+
+
+def _driver_error_fields(exc: BaseException) -> tuple[str, str]:
+    """Reduce a driver exception to two typed, console-safe fields.
+
+    THE REASON THIS EXISTS. A driver message is arbitrary text the SERVER
+    supplied. It routinely names the account and the host ("Access denied for
+    user 'acas'@'db.internal'"), and on a statement failure it can quote the
+    statement and its parameters - so putting one in a diagnostic discloses
+    identity and business values (CWE-532) and lets a newline inside it forge a
+    further log line (CWE-117). The errno and the SQLSTATE say which failure it
+    was without any of that; they are the same two fields
+    `acas_posting/dal/status.py` records for the same class of event.
+
+    Args:
+        exc: The exception the driver raised.
+
+    Returns:
+        The errno and the SQLSTATE, each rendered as a short token and each
+        `"unknown"` when the driver did not supply it. Both are constrained to
+        the characters they are documented to use, so neither can carry a
+        control character into a log line however the driver behaved.
+
+    Examples:
+        >>> class _E(Exception):
+        ...     errno = 1045
+        ...     sqlstate = "28000"
+        >>> _driver_error_fields(_E("Access denied for 'a'@'h'"))
+        ('1045', '28000')
+        >>> _driver_error_fields(Exception("no fields at all"))
+        ('unknown', 'unknown')
+
+        A driver whose fields are the WRONG SHAPE - a string where an integer
+        belongs, and a forged log line where a five-character state belongs - is
+        refused rather than rendered:
+
+        >>> class _Forged(Exception):
+        ...     errno = "1045; INFO harness: everything fine"
+        ...     sqlstate = "28000\\nERROR harness: forged line"
+        >>> _driver_error_fields(_Forged())
+        ('unknown', 'unknown')
+    """
+    code = getattr(exc, "errno", None)
+    rendered_errno = (
+        str(code) if isinstance(code, int) and not isinstance(code, bool)
+        else _UNKNOWN_DRIVER_FIELD
+    )
+    state = getattr(exc, "sqlstate", None)
+    rendered_state = _UNKNOWN_DRIVER_FIELD
+    if isinstance(state, str):
+        candidate = state.strip()
+        # SQLSTATE is five alphanumeric characters by definition. Anything
+        # else is not a SQLSTATE, so it is not rendered as one.
+        if len(candidate) == _SQLSTATE_WIDTH and candidate.isalnum():
+            rendered_state = candidate
+    return rendered_errno, rendered_state
 
 
 # ---------------------------------------------------------------------------
@@ -1027,8 +1094,12 @@ class ConnectionSettings:
 
     A value object, deliberately without a `dsn` or `url` accessor: a
     connection string is the classic way a password reaches a log file.
-    `__repr__` and `__str__` both redact the password, so the object is
-    safe to interpolate into a diagnostic.
+    `__repr__` and `__str__` carry NO endpoint identity, NO socket path, NO
+    certificate or private-key path and no password - only the transport
+    CATEGORY and the three deadlines - so the object is safe to interpolate
+    into a diagnostic that reaches a collected container log (CWE-532). See
+    `__repr__` for what was removed and why, and `transport_category` for the
+    vocabulary that replaced it.
 
     Attributes:
         host: `ACAS_DB_HOST`; `mariadb` inside the Compose network.
@@ -1071,26 +1142,74 @@ class ConnectionSettings:
     write_timeout: int = _DEFAULT_WRITE_TIMEOUT
 
     def __repr__(self) -> str:
-        """Return a representation with the password redacted.
+        """Return a representation carrying NO endpoint identity and NO paths.
 
-        The certificate paths are shown: they are file names, not secrets,
-        and an operator diagnosing a refused connection needs to see which
-        ones were picked up. The KEY FILE'S PATH is shown for the same
-        reason; its contents are never read by this module.
+        WHAT THIS DELIBERATELY OMITS, AND WHY. It used to render the host, the
+        port, the schema, the account, the socket path and BOTH the certificate
+        and PRIVATE-KEY file paths, on the argument that a file name is not a
+        secret. Every one of those is now gone. Two reasons, and the first is
+        sufficient on its own:
+
+        * An operator diagnostic in this harness reaches stderr, which the
+          composed recipe collects as a container log. Endpoint identity and
+          internal file-system paths in a collected log are exactly the
+          disclosure CWE-532 describes: together they name the server, the
+          account that reaches it and where its key material is kept.
+        * A private-key PATH is a pointer at key material. Publishing where to
+          look is a meaningful step towards it, whatever the file's own mode.
+
+        What is left is `transport_category` - a token from a fixed vocabulary
+        that answers the only question a diagnostic needs, "was this connection
+        protected, and how" - and the three deadlines, which are settings this
+        process chose rather than facts about the deployment.
+
+        The password never appeared here and does not now; it is still shown as
+        redacted so that a reader can see the object HAS one rather than wonder.
         """
         return (
-            f"{type(self).__name__}(host={self.host!r}, port={self.port!r}, "
-            f"database={self.database!r}, user={self.user!r}, "
-            f"password={_REDACTED!r}, socket={self.socket!r}, "
-            f"tls_ca={self.tls_ca!r}, tls_cert={self.tls_cert!r}, "
-            f"tls_key={self.tls_key!r}, "
-            f"allow_plaintext={self.allow_plaintext!r}, "
+            f"{type(self).__name__}("
+            f"transport={self.transport_category()!r}, "
+            f"password={_REDACTED!r}, "
             f"connect_timeout={self.connect_timeout!r}, "
             f"read_timeout={self.read_timeout!r}, "
             f"write_timeout={self.write_timeout!r})"
         )
 
     __str__ = __repr__
+
+    def transport_category(self) -> str:
+        """Return a stable token naming HOW this connection is protected.
+
+        The harness counterpart of `acas_posting.dal.connection`'s
+        `transport_category`, with the same vocabulary, so a reader comparing an
+        `acas_posting` record with a harness diagnostic sees the same word for
+        the same situation. Derived entirely from settings this object already
+        holds; NOTHING is resolved, so two runs of one scenario always agree
+        (rule R-6).
+
+        Returns:
+            One of five tokens, most protective first:
+
+            * `local-socket` - a Unix socket, which cannot leave the machine.
+            * `loopback-tcp` - a loopback address or an empty host.
+            * `tls-verified` - a certificate authority was named, which turns on
+              BOTH certificate and host-name verification.
+            * `isolated-network` - plaintext to a non-local server, explicitly
+              declared as the harness's private network.
+            * `unverified` - plaintext to a non-local server with no
+              declaration. `_require_permitted_transport` refuses to connect in
+              this state, so it appears only in a message explaining the
+              refusal.
+        """
+        if self.socket:
+            return "local-socket"
+        if self.target_is_local():
+            return "loopback-tcp"
+        if self.verifies_the_server():
+            return "tls-verified"
+        if self.allow_plaintext:
+            return "isolated-network"
+        return "unverified"
 
     def verifies_the_server(self) -> bool:
         """Report whether these settings authenticate and encrypt the session.
@@ -1390,9 +1509,9 @@ def connect(
 
     On exit the connection is released with `rollback()` and closed.
     `rollback` rather than `commit` because this module only ever reads:
-    rolling back writes nothing, it releases any read-only transaction the
-    server may have opened, and under the pinned `autocommit=1` it is a
-    harmless no-op.
+    rolling back writes nothing, and it releases the read-only transaction
+    the server opens under the pinned `autocommit=0`. Being SELECT-only,
+    there is never anything to discard.
 
     Args:
         settings: Where to connect. Resolved from `env` when omitted.
@@ -1444,38 +1563,69 @@ def connect(
     try:
         connection = driver.connect(**connect_kwargs)
     except Exception as exc:  # driver-specific; re-raised as one of ours
+        #  NEITHER MESSAGE NAMES THE ENDPOINT, THE ACCOUNT OR THE DRIVER'S OWN
+        #  TEXT. Both are raised to be printed on stderr, which the composed
+        #  recipe collects as a container log:
+        #    * the account, host, port and schema together identify the server
+        #      and who reaches it (CWE-532);
+        #    * a driver message is arbitrary server-supplied text, so it can
+        #      carry a statement fragment, a value, or a newline that forges a
+        #      further log line (CWE-117 as well as CWE-532).
+        #  `transport_category` and the driver's own errno and SQLSTATE say
+        #  everything a diagnosis needs - which is also what
+        #  `acas_posting/dal/status.py` records for the same class of failure -
+        #  and the original exception is still CHAINED with `from exc`, so a
+        #  traceback in an interactive session loses nothing.
+        driver_errno, driver_sqlstate = _driver_error_fields(exc)
         if _is_timeout(exc):
             raise DumpTimeoutError(
-                f"connecting to the ACAS database as user "
-                f"{resolved.user!r} on {resolved.host}:{resolved.port} "
-                f"(database {resolved.database!r}) did not complete within "
-                f"{resolved.connect_timeout}s: {exc}. The server may still "
-                f"be starting - harness/Dockerfile.mariadb declares a "
-                f"HEALTHCHECK and harness/reset_db.sh waits for readiness, "
-                f"so run this stage after that wait. Raise "
+                f"connecting to the ACAS database "
+                f"(transport {resolved.transport_category()}) did not "
+                f"complete within {resolved.connect_timeout}s "
+                f"(errno {driver_errno}, sqlstate {driver_sqlstate}). The "
+                f"server may still be starting - harness/Dockerfile.mariadb "
+                f"declares a HEALTHCHECK and harness/reset_db.sh waits for "
+                f"readiness, so run this stage after that wait. Raise "
                 f"{_ENV_CONNECT_TIMEOUT} only if the server is genuinely "
                 f"slower than that to greet a client."
             ) from exc
         raise DumpError(
-            f"could not connect to the ACAS database as user "
-            f"{resolved.user!r} on {resolved.host}:{resolved.port} "
-            f"(database {resolved.database!r}): {exc}"
+            f"could not connect to the ACAS database (transport "
+            f"{resolved.transport_category()}, errno {driver_errno}, "
+            f"sqlstate {driver_sqlstate}). Check {_ENV_HOST}, {_ENV_PORT}, "
+            f"{_ENV_NAME}, {_ENV_USER} and {_ENV_PASSWORD} against the "
+            f"running service; they are deliberately not echoed here."
         ) from exc
 
     try:
         yield connection
     finally:
-        # Release any read-only transaction, then close. Both are guarded:
-        # a failure while tidying up must not mask the real error that
-        # brought us here.
+        # Release any read-only transaction, then close. Neither may mask the
+        # error that brought us here, so neither is allowed to propagate - but
+        # NEITHER IS SILENT EITHER. A rollback that fails means the session was
+        # already lost, and a close that fails leaks a server-side session for
+        # the life of the process; both change how a later stage behaves, and a
+        # cleanup failure that leaves no trace is how that becomes a mystery.
+        # Only the exception TYPE is reported: a driver message is arbitrary
+        # server-supplied text (CWE-117, CWE-532), and the type is the whole of
+        # what a diagnosis needs from a tidy-up path.
         try:
             connection.rollback()
-        except Exception:  # noqa: BLE001 - tidy-up must not mask a failure
-            pass
+        except Exception as rollback_error:  # noqa: BLE001 - never propagated
+            _progress(
+                f"harness/dump_tables.py: warning: the read-only transaction "
+                f"could not be rolled back before closing "
+                f"({type(rollback_error).__name__}); the session was most "
+                f"likely already lost."
+            )
         try:
             connection.close()
-        except Exception:  # noqa: BLE001 - tidy-up must not mask a failure
-            pass
+        except Exception as close_error:  # noqa: BLE001 - never propagated
+            _progress(
+                f"harness/dump_tables.py: warning: the connection could not "
+                f"be closed ({type(close_error).__name__}); a server-side "
+                f"session may remain until this process exits."
+            )
 
 
 def _schema_name(connection: Any) -> str:
@@ -1537,16 +1687,28 @@ def _query(
             return list(cursor.fetchall())
         except Exception as exc:  # driver-specific; re-raised as one of ours
             if _is_timeout(exc):
+                #  THE DRIVER'S OWN TEXT IS NOT CARRIED. Its errno and SQLSTATE
+                #  are, which say which failure this was without the arbitrary
+                #  server-supplied string that could name the account, quote a
+                #  value, or embed a newline that forges a further log line
+                #  (CWE-117, CWE-532). The abridged STATEMENT stays: this
+                #  module's statements are built from the frozen schema and the
+                #  fixed table list, carry their operands as bound parameters
+                #  rather than literals, and naming which query stalled is the
+                #  whole diagnosis. The original exception is still chained.
+                statement_errno, statement_state = _driver_error_fields(exc)
                 raise DumpTimeoutError(
                     f"a deadline expired while running "
-                    f"{_abridge_statement(statement)}: {exc}. The socket "
-                    f"budgets are {_ENV_READ_TIMEOUT} (how long one read "
-                    f"may block) and {_ENV_WRITE_TIMEOUT}. A read that "
+                    f"{_abridge_statement(statement)} (errno "
+                    f"{statement_errno}, sqlstate {statement_state}). The "
+                    f"socket budgets are {_ENV_READ_TIMEOUT} (how long one "
+                    f"read may block) and {_ENV_WRITE_TIMEOUT}. A read that "
                     f"expires on a SELECT usually means the row is held by "
                     f"a lock an earlier stage left open - "
-                    f"[common/glbatchLD.cbl:L9-L13] turns autocommit OFF "
-                    f"for seeding - so check that the seed stage committed "
-                    f"before raising the budget."
+                    f"[common/glbatchLD.cbl:L9-L13] requires autocommit OFF "
+                    f"for seeding, which the harness server pins - so check "
+                    f"that the seed stage released its locks before raising "
+                    f"the budget."
                 ) from exc
             raise
     finally:
@@ -1954,9 +2116,15 @@ def dump_table(
             # execute, so this is where a table held by a lock the seeding
             # stage left open stops the stage instead of hanging it.
             if _is_timeout(exc):
+                # As at the statement site above: the typed fields, never the
+                # driver's own text. The TABLE name is frozen public metadata -
+                # every one of the 22 is in the committed
+                # data_dictionary/acas_posting_dictionary.json.
+                fetch_errno, fetch_state = _driver_error_fields(exc)
                 raise DumpTimeoutError(
                     f"reading table {table!r} did not complete within the "
-                    f"{_ENV_READ_TIMEOUT} budget: {exc}"
+                    f"{_ENV_READ_TIMEOUT} budget (errno {fetch_errno}, "
+                    f"sqlstate {fetch_state})"
                 ) from exc
             raise
     finally:
@@ -2025,10 +2193,11 @@ def dump_tables(
 
     STRICTLY SEQUENTIAL (rule R-3): a plain loop, in the order given, on
     one connection. No thread, no pool, no batching. Under the
-    `autocommit=1` that `harness/Dockerfile.mariadb` pins at server level
-    each table is read on its own, which is equally consistent here: the
-    posting run has completed before the dump starts and nothing else
-    writes to the schema, so no table can change between reads.
+    `autocommit=0` that `harness/Dockerfile.mariadb` pins at server level
+    the tables are read inside one implicit read transaction, which is at
+    least as consistent as reading each alone: the posting run has
+    completed before the dump starts and nothing else writes to the
+    schema, so no table can change between reads.
 
     Args:
         connection: An open DB-API connection.
@@ -2170,10 +2339,20 @@ def _write_text_securely(text: str, target: Path, staging: Path) -> None:
     except BaseException:
         try:
             os.close(descriptor)
-        except OSError:
-            # Already closed by the context manager above. Swallowed so the
-            # real failure, re-raised below, is the one the caller sees.
-            pass
+        except OSError as close_error:
+            # NOT SWALLOWED SILENTLY. `EBADF` is the expected, uninteresting
+            # case - the context manager above already closed the descriptor.
+            # Anything else means the descriptor could not be released, which is
+            # REPORTED: a cleanup failure that leaves no trace is how a leaked
+            # descriptor or a full filesystem stays invisible. The real failure
+            # still propagates, unchanged, from the `raise` below.
+            if close_error.errno != errno.EBADF:
+                _progress(
+                    f"harness/dump_tables.py: warning: could not close the "
+                    f"staging descriptor for {staging} while handling an "
+                    f"earlier failure: errno {close_error.errno} "
+                    f"({os.strerror(close_error.errno or 0)})"
+                )
         staging.unlink(missing_ok=True)
         raise
     os.replace(staging, target)
@@ -2557,8 +2736,19 @@ def write_manifest(manifest: Mapping[str, Any], path: Path | str) -> Path:
     except OSError as exc:
         try:
             temporary.unlink(missing_ok=True)
-        except OSError:  # noqa: S110 - best effort; the real error follows
-            pass
+        except OSError as unlink_error:
+            # NOT SWALLOWED SILENTLY. A surviving staging file sits inside the
+            # published tree, where `discover_tables` skips it by its `_` prefix
+            # rather than by knowing it is rubbish - so a leftover one is
+            # invisible to the next stage while still occupying the directory.
+            # Reported here; the real failure is still the `DumpWriteError`
+            # raised below.
+            _progress(
+                f"harness/dump_tables.py: warning: the staging file "
+                f"{temporary} could not be removed after the manifest write "
+                f"failed: errno {unlink_error.errno} "
+                f"({os.strerror(unlink_error.errno or 0)})"
+            )
         raise DumpWriteError(
             f"could not write the completeness manifest {target}: {exc}"
         ) from exc
@@ -3360,10 +3550,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"harness/dump_tables.py: {exc}", file=sys.stderr)
         return EX_PRECONDITION
 
-    # The settings are safe to echo: __repr__ redacts the password.
+    #  ECHOES THE TRANSPORT CATEGORY AND NOTHING ELSE ABOUT THE ENDPOINT.
+    #  `ConnectionSettings.__repr__` used to render the host, the port, the
+    #  schema, the account, the socket path and both TLS file paths, and this
+    #  line put all of it on stderr - which the composed recipe collects as a
+    #  container log. The repr is now identity-free by construction (see its
+    #  docstring), so this line cannot regress even if someone interpolates the
+    #  object again.
     _progress(
         f"harness/dump_tables.py: SELECT * ORDER BY primary key for "
-        f"{len(tables)} table(s) via {settings}"
+        f"{len(tables)} table(s) over a "
+        f"{settings.transport_category()} connection"
     )
 
     try:

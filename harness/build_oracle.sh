@@ -293,6 +293,156 @@ acas_have() {
   command -v "$1" >/dev/null 2>&1
 }
 
+# ---------------------------------------------------------------------------
+#  THE CLIENT-DIAGNOSTIC SUMMARY  (OBS-008)
+#
+#  A database client's diagnostic is text the SERVER supplied, captured here with
+#  `2>&1`, and it is NOT safe to replay:
+#
+#    * it routinely names the account and the host -- "Access denied for user
+#      'acas'@'db.internal'" -- and on a statement failure it can quote the
+#      statement and its parameters, which are live accounting values (CWE-532);
+#    * it is multi-line and arbitrary, so a newline inside it forges a further
+#      line in whatever log collects this script's output (CWE-117);
+#    * these scripts run under Compose, where standard output and standard error
+#      are collected as container logs and kept.
+#
+#  So the RAW text is persisted to a private mode-0600 file and never printed,
+#  and the console gets a bounded, identity-free summary: a token from a fixed
+#  vocabulary, the client's own numeric error and SQLSTATE when it printed them,
+#  the size, and the artifact's path and SHA-256. This is the same
+#  console/artifact split `harness/diff_states.py` and `harness/normalize.py`
+#  apply to their own detail, with the same reasoning and the same vocabulary.
+#
+#  NOTHING BELOW ECHOES A BYTE OF ITS INPUT. The category comes from a `case`
+#  over fixed globs; the error and SQLSTATE are re-validated against their
+#  documented shapes and replaced by `unknown` when they do not match, so a
+#  server that returned `28000\nERROR: forged` cannot get that through.
+# ---------------------------------------------------------------------------
+
+#: Where the raw text of the most recent diagnostic was kept, or empty when none
+#: was produced or it could not be persisted.
+ACAS_DIAG_ARTIFACT=''
+
+# acas_diag_category <raw>
+# Classify a client diagnostic. Echoes ONE token and never any input byte.
+acas_diag_category() {
+  local raw="$1"
+
+  if [[ -z "${raw//[[:space:]]/}" ]]; then
+    printf 'no-diagnostic'
+    return 0
+  fi
+  case "$raw" in
+    *'Access denied'*)                          printf 'access-denied' ;;
+    *'Unknown database'*)                       printf 'unknown-database' ;;
+    *'Unknown MySQL server host'*)              printf 'host-unresolvable' ;;
+    *'is not allowed to connect'*)              printf 'host-not-permitted' ;;
+    *"Can't connect"*|*'Connection refused'*)   printf 'connect-refused' ;;
+    *'did not answer within'*|*'timed out'*|*'Timeout'*|*'timeout expired'*)
+                                                printf 'timeout' ;;
+    *'Lost connection'*|*'gone away'*)          printf 'connection-lost' ;;
+    *'Lock wait timeout'*)                      printf 'lock-wait-timeout' ;;
+    *'Deadlock found'*)                         printf 'deadlock' ;;
+    *'Duplicate entry'*)                        printf 'duplicate-key' ;;
+    *"doesn't exist"*|*'Unknown table'*)        printf 'table-missing' ;;
+    *'Unknown column'*)                         printf 'column-missing' ;;
+    *'error in your SQL syntax'*)               printf 'syntax-error' ;;
+    *'command denied'*|*'insufficient privileges'*)
+                                                printf 'grant-missing' ;;
+    *'SSL'*|*'TLS'*)                            printf 'tls-refused' ;;
+    *'read-only'*)                              printf 'server-read-only' ;;
+    *)                                          printf 'unclassified' ;;
+  esac
+}
+
+# acas_diag_code <raw>
+# Echo `<error>/<sqlstate>` from a `ERROR 1045 (28000)` prefix, each re-validated
+# against its documented shape and replaced by `unknown` when it does not match.
+acas_diag_code() {
+  local raw="$1" code='' state=''
+
+  code="$(printf '%s\n' "$raw" \
+    | sed -n 's/.*ERROR \([0-9][0-9]*\).*/\1/p' | head -n 1)"
+  state="$(printf '%s\n' "$raw" \
+    | sed -n 's/.*ERROR [0-9][0-9]* (\([0-9A-Za-z][0-9A-Za-z]*\)).*/\1/p' \
+    | head -n 1)"
+  [[ "$code" =~ ^[0-9]{1,5}$ ]] || code='unknown'
+  # SQLSTATE is five alphanumeric characters by definition
+  # [copybooks/wsfnctn.cob:L51]; anything else is not one.
+  [[ "$state" =~ ^[0-9A-Za-z]{5}$ ]] || state='unknown'
+  printf '%s/%s' "$code" "$state"
+}
+
+# acas_diag_sha256 <path>
+# Self-contained on purpose: this runs on abort paths, so it must not depend on
+# any deadline or digest machinery having been initialised. Echoes nothing on
+# failure.
+acas_diag_sha256() {
+  local path="$1" digest=''
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    digest="$(sha256sum -- "$path" 2>/dev/null)" || return 0
+    printf '%s' "${digest%% *}"
+    return 0
+  fi
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 - "$path" 2>/dev/null <<'PY' || return 0
+import hashlib
+import sys
+
+digest = hashlib.sha256()
+with open(sys.argv[1], 'rb') as handle:
+    for block in iter(lambda: handle.read(1 << 16), b''):
+        digest.update(block)
+sys.stdout.write(digest.hexdigest())
+PY
+}
+
+# acas_diag_persist <raw>
+# Write the raw text to a private mode-0600 file and set ACAS_DIAG_ARTIFACT.
+# Leaves it EMPTY when nothing could be written; never aborts, because this runs
+# on paths that are already reporting a failure.
+acas_diag_persist() {
+  local raw="$1" dir='' path=''
+
+  ACAS_DIAG_ARTIFACT=''
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/acas-diag-XXXXXXXX" 2>/dev/null)" || return 0
+  # `mktemp -d` creates 0700; the file is narrowed to 0600 explicitly because
+  # this script's `umask 077` governs creation but is not a guarantee a reader
+  # can check.
+  path="$dir/client-diagnostic.txt"
+  printf '%s\n' "$raw" >"$path" 2>/dev/null || return 0
+  chmod 600 -- "$path" 2>/dev/null || true
+  ACAS_DIAG_ARTIFACT="$path"
+}
+
+# acas_diag_summary [raw]
+# Echo the bounded, identity-free summary. Defaults to the script's own
+# last-diagnostic variable so a call site reads as one word.
+acas_diag_summary() {
+  local raw="${1-$ACAS_DB_PROBE_DIAG}" category='' code='' lines=0 bytes=0 digest=''
+
+  category="$(acas_diag_category "$raw")"
+  if [[ "$category" == 'no-diagnostic' ]]; then
+    printf 'client diagnostic: none was produced'
+    return 0
+  fi
+  code="$(acas_diag_code "$raw")"
+  lines="$(printf '%s\n' "$raw" | wc -l | tr -d '[:space:]')"
+  bytes="$(printf '%s' "$raw" | wc -c | tr -d '[:space:]')"
+  acas_diag_persist "$raw"
+  if [[ -n "$ACAS_DIAG_ARTIFACT" ]]; then
+    digest="$(acas_diag_sha256 "$ACAS_DIAG_ARTIFACT")"
+    printf 'client diagnostic: %s (error %s, %s line(s), %s byte(s)); the raw text is in %s (mode 0600%s)' \
+      "$category" "$code" "$lines" "$bytes" "$ACAS_DIAG_ARTIFACT" \
+      "${digest:+, sha256=$digest}"
+    return 0
+  fi
+  printf 'client diagnostic: %s (error %s, %s line(s), %s byte(s)); the raw text could NOT be persisted, so it is not available -- it is deliberately NOT printed here' \
+    "$category" "$code" "$lines" "$bytes"
+}
+
 # Join the remaining arguments into an alternation for grep -E.
 acas_join_re() {
   local IFS='|'
@@ -1379,6 +1529,15 @@ acas_assert_environment() {
   acas_note 'the password is never printed, never logged and never passed in argv'
 }
 
+# ⭐ M-08.  THE BUILD TREE'S OWN MARKER.  Written by acas_prepare_build_tree
+# immediately after a successful copy, and required by
+# acas_assert_clearable_build_tree before any recursive clear of a NON-EMPTY
+# directory. It is the one control that distinguishes "this is a build tree this
+# harness made" from "this is a directory that merely satisfies every structural
+# test", and it is what makes a mis-set ACAS_BUILD pointed at someone's populated
+# volume fail closed instead of clearing it.
+readonly ACAS_BUILD_MARKER='.acas-build-oracle-tree'
+
 # Guard a path before it is used as the target of a recursive operation. A
 # mis-set ACAS_BUILD is the one configuration error that could destroy something
 # irreplaceable, so the checks are deliberately paranoid.
@@ -1388,6 +1547,18 @@ acas_assert_safe_build_path() {
   path_real="$(readlink -f "$path" 2>/dev/null || printf '%s' "$path")"
   repo_real="$(readlink -f "$ACAS_REPO" 2>/dev/null || printf '%s' "$ACAS_REPO")"
 
+  # ⭐ M-08.  THE RAW VALUE, not only the resolved one. `readlink -f' canonicalises
+  # a relative path against the CURRENT directory, so `ACAS_BUILD=build' arrives
+  # here as an absolute $path_real and satisfied this test - while the recursive
+  # clear in acas_prepare_build_tree targets the UNRESOLVED "$ACAS_BUILD". The
+  # guard would then have judged $PWD/build at assertion time and the delete would
+  # have hit whatever $PWD/build meant at deletion time. Requiring the value itself
+  # to be absolute is what makes "the path I checked" and "the path I delete" the
+  # same path, which is the whole point of re-asserting before the delete.
+  [[ "$path" == /* ]] || acas_die "$EX_BUILDTREE" \
+    "ACAS_BUILD must be an absolute path; got '$path'." \
+    'A relative value is resolved against the current directory, which is not' \
+    'necessarily the same directory when the recursive clear runs.'
   [[ "$path_real" == /* ]] || acas_die "$EX_BUILDTREE" \
     "ACAS_BUILD must be an absolute path; got '$path'."
   [[ "$path_real" != '/' ]] || acas_die "$EX_BUILDTREE" \
@@ -1408,6 +1579,40 @@ acas_assert_safe_build_path() {
   #      filesystem; and
   #   2. it is not one of the distribution's own top-level directories.
   # Every other guard in this function still applies unchanged.
+  # ⭐ M-08 (CWE-73).  THE OTHER DECLARED MOUNTS ARE REFUSED BY IDENTITY, FIRST.
+  # This check used to be absent, and its absence was the finding: the top-level
+  # exception below accepts ANY dedicated mount point that is not a distribution
+  # directory, and harness/docker-compose.yml mounts THREE such volumes on this
+  # service - `acas_build:/build', `acas_data:/data' and `acas_out:/out'
+  # [harness/docker-compose.yml:L869-L871] - all four paths being exported as
+  # environment variables side by side [:L1024-L1027]. So a single mistyped or
+  # copy-pasted assignment, `ACAS_BUILD=$ACAS_DATA', passed every guard and then
+  # had its children recursively deleted: the seeded fixtures, or the evidence a
+  # completed comparison had just written.
+  #
+  # Compared by RESOLVED PATH and in BOTH DIRECTIONS, never by string or by
+  # component count: a symlink, a trailing slash or a `/data/../data' spelling all
+  # collapse under readlink, and containment either way is as destructive as
+  # equality. Skipped when a variable is unset so this function stays usable
+  # before `acas_assert_environment' has run.
+  local sibling sibling_real
+  for sibling in ACAS_DATA ACAS_OUT; do
+    [[ -n "${!sibling-}" ]] || continue
+    sibling_real="$(readlink -f "${!sibling}" 2>/dev/null || printf '%s' "${!sibling}")"
+    [[ "$path_real" != "$sibling_real" ]] || acas_die "$EX_BUILDTREE" \
+      "ACAS_BUILD ($path_real) is the same directory as $sibling." \
+      'This script recursively clears ACAS_BUILD. ACAS_DATA holds the seeded' \
+      'fixtures and ACAS_OUT holds the comparison evidence; neither is ever a' \
+      'build target. Point ACAS_BUILD at its own volume -- /build in the shipped' \
+      'Compose topology.'
+    [[ "$path_real" != "$sibling_real"/* ]] || acas_die "$EX_BUILDTREE" \
+      "ACAS_BUILD ($path_real) is inside $sibling ($sibling_real)." \
+      'Clearing it would delete part of the fixtures or the evidence.'
+    [[ "$sibling_real" != "$path_real"/* ]] || acas_die "$EX_BUILDTREE" \
+      "$sibling ($sibling_real) is inside ACAS_BUILD ($path_real)." \
+      'Clearing the build tree would delete the fixtures or the evidence.'
+  done
+
   if [[ "$path_real" != /*/* ]]; then
     local forbidden
     for forbidden in /bin /boot /dev /etc /home /lib /lib32 /lib64 /libx32 \
@@ -1426,7 +1631,22 @@ acas_assert_safe_build_path() {
       'This script clears it, so a top-level directory is only acceptable when a' \
       'dedicated volume is mounted there, as harness/docker-compose.yml does for' \
       '/build. Either mount a volume at that path or use a deeper one.'
-    acas_log "accepted top-level ACAS_BUILD ($path_real): dedicated mount point"
+
+    # ⭐ M-08.  A DEDICATED MOUNT POINT IS NOT ENOUGH ON ITS OWN, which is the
+    # other half of the finding. Being a mount point says only that a volume is
+    # there; it says nothing about WHOSE. A top-level path is therefore accepted
+    # only when it is the one THE TOPOLOGY ITSELF DECLARES as the build tree, so
+    # the exception cannot be reached by pointing ACAS_BUILD at some other
+    # volume-backed top-level directory that happens not to be on the
+    # distribution list.
+    local declared_real
+    declared_real="$(readlink -f "${ACAS_BUILD-}" 2>/dev/null || printf '%s' "${ACAS_BUILD-}")"
+    [[ "$path_real" == "$declared_real" ]] || acas_die "$EX_BUILDTREE" \
+      "$path_real is one component deep and is not the declared ACAS_BUILD." \
+      'The top-level exception exists for exactly one path, the build volume the' \
+      'Compose topology mounts at /build. A recursive clear of any other' \
+      'volume-backed top-level directory is refused however that volume got there.'
+    acas_log "accepted top-level ACAS_BUILD ($path_real): dedicated mount point, and the declared build tree"
   fi
   [[ "$path_real" != "$repo_real" ]] || acas_die "$EX_BUILDTREE" \
     'ACAS_BUILD and ACAS_REPO resolve to the same directory.' \
@@ -1438,6 +1658,93 @@ acas_assert_safe_build_path() {
   [[ "$repo_real" != "$path_real"/* ]] || acas_die "$EX_BUILDTREE" \
     "ACAS_REPO ($repo_real) is inside ACAS_BUILD ($path_real)." \
     'Clearing the build tree would delete the checkout.'
+}
+
+# ⭐ M-08.  THE GATE THAT STANDS IMMEDIATELY BEFORE THE RECURSIVE CLEAR, and the
+# only one that asks WHOSE directory this is rather than what shape it has.
+#
+# acas_assert_safe_build_path establishes that the path is absolute, is not the
+# root, is not a distribution directory, is not ACAS_DATA or ACAS_OUT or the
+# checkout in either direction, and - if it is one component deep - is a dedicated
+# mount point AND the path the topology declares. Every one of those is a check on
+# the path's SHAPE and PROVENANCE. None of them can tell a fresh build volume from
+# a populated volume that satisfies the same description, and the finding was
+# precisely that a recursive delete must not proceed on a directory this harness
+# cannot show it created.
+#
+# So the clear is admitted in exactly two states:
+#   * the directory is EMPTY - a first run on a fresh volume, which is what the
+#     Compose stack hands over; or
+#   * it carries $ACAS_BUILD_MARKER, which only acas_prepare_build_tree writes,
+#     and only after a copy of the frozen checkout has succeeded.
+# Anything else is refused with an exit code and an instruction, never cleared.
+#
+# THE MARKER IS NOT SECURITY, IT IS PROVENANCE. A caller who genuinely wants a
+# populated directory cleared can create the marker by hand, and that is the point:
+# it converts an accident into a deliberate act. Nothing here defends against a
+# hostile operator, who could delete the tree without this script.
+acas_assert_clearable_build_tree() {
+  local path="$1"
+  local path_real
+  path_real="$(readlink -f "$path" 2>/dev/null || printf '%s' "$path")"
+
+  # Never reached with a path the shape guard has not already accepted; asserted
+  # rather than assumed, because this function is the last thing between a
+  # configuration mistake and an irreversible delete.
+  acas_assert_safe_build_path "$path_real"
+
+  [[ -d "$path_real" ]] || acas_die "$EX_BUILDTREE" \
+    "ACAS_BUILD ($path_real) is not a directory."
+
+  if [[ -f "$path_real/$ACAS_BUILD_MARKER" ]]; then
+    acas_log "build tree recognised by its marker ($ACAS_BUILD_MARKER); clear permitted"
+    return 0
+  fi
+
+  # `find -mindepth 1 -maxdepth 1` rather than a glob, so that dot files count and
+  # an unreadable directory reports as non-empty rather than as empty.
+  local entries
+  entries="$(find "$path_real" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null || printf 'x')"
+  [[ -z "$entries" ]] || acas_die "$EX_BUILDTREE" \
+    "ACAS_BUILD ($path_real) is not empty and carries no $ACAS_BUILD_MARKER marker." \
+    'This script is about to delete every child of that directory, and it will' \
+    'not do so to a directory it cannot show it created. Either point ACAS_BUILD' \
+    'at an empty volume -- /build in the shipped Compose topology -- or pass' \
+    '--no-refresh to build in place without clearing, or, if you really do mean' \
+    "to clear this tree, create the marker file yourself: touch" \
+    "$path_real/$ACAS_BUILD_MARKER"
+  acas_log "build tree is empty; clear permitted"
+}
+
+# ⭐ M-08.  THE ONE PLACE A BUILD-TREE SCRATCH DIRECTORY IS REMOVED.
+#
+# Four steps each keep a scratch directory inside the build tree and clear it
+# before use - the unpacked preSQL package, the two compile working directories
+# and the link proof. Each did its own bare `rm -rf -- "$ACAS_BUILD/.acas-..."'.
+# Those were already far safer than the tree clear, because the target is a fixed
+# dot-named CHILD rather than the directory itself, so even a wildly mis-set
+# ACAS_BUILD could only lose a directory of that exact name. The finding's
+# instruction was nonetheless to "recheck before deletion", and four ad-hoc
+# recursive removes are four places a future edit can get wrong, so they are
+# funnelled through here and each one now re-asserts the shape guard first.
+#
+# The name is required to be a SINGLE component beginning with `.acas-', which is
+# what makes traversal impossible: `..', `/', an absolute path and an empty name
+# are all refused rather than joined.
+acas_remove_build_scratch() {
+  local name="$1"
+
+  [[ "$name" == .acas-* ]] || acas_die "$EX_BUILDTREE" \
+    "refusing to remove build scratch '$name': the name must begin with .acas-."
+  [[ "$name" != */* && "$name" != *..* ]] || acas_die "$EX_BUILDTREE" \
+    "refusing to remove build scratch '$name': it must be a single path component."
+
+  # Re-assert immediately before the delete, never only at resolution time.
+  acas_assert_safe_build_path "$ACAS_BUILD"
+
+  local target="$ACAS_BUILD/$name"
+  [[ ! -e "$target" ]] || rm -rf -- "$target" || acas_die "$EX_BUILDTREE" \
+    "could not remove the scratch directory $target."
 }
 
 acas_assert_directories() {
@@ -1981,7 +2288,7 @@ acas_wait_for_database() {
             "one of the 28 bridges in [common/comp-common.sh:L25]." \
             "Check ACAS_DB_USER and ACAS_DB_PASSWORD, and that the user is granted" \
             "access to ${ACAS_PRESQL2_DBNAME:-information_schema} and ${ACAS_DB_NAME}." \
-            "Server said: ${ACAS_DB_PROBE_DIAG:-<no diagnostic>}"
+            "$(acas_diag_summary "$ACAS_DB_PROBE_DIAG")"
         fi
         if (( denied_for == 0 )); then
           acas_log "credentials rejected; allowing ${auth_grace}s in case grants are still being applied"
@@ -1997,7 +2304,7 @@ acas_wait_for_database() {
             'presql2 authenticates with exactly these credentials via' \
             'read_params [presql2-package/cobmysqlapi38.c:L114-L176], so step 4' \
             'would fail. Check that the server has finished initialising.' \
-            "Client said: ${ACAS_DB_PROBE_DIAG:-<no diagnostic>}"
+            "$(acas_diag_summary "$ACAS_DB_PROBE_DIAG")"
         fi
         if (( elapsed == 0 )); then
           acas_log "port is open but an authenticated statement did not yet succeed; retrying for up to ${timeout}s"
@@ -2038,6 +2345,13 @@ acas_prepare_build_tree() {
   acas_assert_safe_build_path "$ACAS_BUILD"
 
   if (( ACAS_REFRESH_TREE )); then
+    # ⭐ M-08.  AND THE PROVENANCE GATE, re-evaluated here rather than earlier, so
+    # that a value or a directory that changed between the preconditions and this
+    # moment is caught. It re-runs the shape guard itself, so the two cannot drift
+    # apart, and it refuses a non-empty directory that this harness cannot show it
+    # created. Nothing between this line and the `find` can alter $ACAS_BUILD.
+    acas_assert_clearable_build_tree "$ACAS_BUILD"
+
     acas_log "clearing $ACAS_BUILD"
     # Delete only the CHILDREN of $ACAS_BUILD, never $ACAS_BUILD itself: the
     # directory is a mount point in the Compose stack and removing it would
@@ -2061,6 +2375,18 @@ acas_prepare_build_tree() {
         "copying $ACAS_REPO into $ACAS_BUILD failed." \
         'The build must run in a copy: [common/comp-common.sh:L25] regenerates' \
         'every common/*MT.cbl, and those files are the frozen data dictionary.'
+
+    # ⭐ M-08.  CLAIM THE TREE, and only now: the marker means "this harness built
+    # here and a subsequent run may clear it", so writing it before the copy had
+    # succeeded would licence clearing a directory that was never a build tree.
+    # A failure to write it is not fatal - the next run simply refuses to clear a
+    # tree it cannot recognise, which is the safe direction - but it is reported.
+    if : > "$ACAS_BUILD/$ACAS_BUILD_MARKER" 2>/dev/null; then
+      acas_log "marked $ACAS_BUILD as this harness's build tree ($ACAS_BUILD_MARKER)"
+    else
+      acas_warn "could not write $ACAS_BUILD/$ACAS_BUILD_MARKER;" \
+        'a later run will refuse to clear this tree and will need --no-refresh.'
+    fi
   else
     acas_log "reusing the existing build tree in $ACAS_BUILD (refresh disabled)"
   fi
@@ -2260,7 +2586,7 @@ acas_step1_unpack_presql2() {
     # A scratch directory INSIDE the writable build tree, removed on exit. The
     # archive itself is never touched: it is read out of the read-only checkout.
     local scratch="$ACAS_BUILD/.acas-presql2"
-    rm -rf -- "$scratch"
+    acas_remove_build_scratch '.acas-presql2'
     mkdir -p "$scratch"
     ACAS_SCRATCH_DIRS+=("$scratch")
 
@@ -2346,7 +2672,7 @@ acas_step2_build_cobmysqlapi() {
         'Run step 1 first (omit --from/--only, or use --from 1).'
 
     local workdir="$ACAS_BUILD/.acas-cobmysqlapi"
-    rm -rf -- "$workdir"
+    acas_remove_build_scratch '.acas-cobmysqlapi'
     mkdir -p "$workdir"
     ACAS_SCRATCH_DIRS+=("$workdir")
     cp -p "$ACAS_PRESQL2_DIR/cobmysqlapi38.c" "$workdir/cobmysqlapi38.c"
@@ -2412,7 +2738,7 @@ acas_step3_build_presql2() {
         'Run step 2 first.'
 
     local workdir="$ACAS_BUILD/.acas-presql2-build"
-    rm -rf -- "$workdir"
+    acas_remove_build_scratch '.acas-presql2-build'
     mkdir -p "$workdir"
     ACAS_SCRATCH_DIRS+=("$workdir")
 
@@ -2525,7 +2851,7 @@ acas_preflight_link_proof() {
   fi
 
   local proof="$ACAS_BUILD/.acas-link-proof"
-  rm -rf -- "$proof"
+  acas_remove_build_scratch '.acas-link-proof'
   mkdir -p "$proof"
   ACAS_SCRATCH_DIRS+=("$proof")
   cp -a "$example/." "$proof/"

@@ -5,9 +5,11 @@ parameters mirror its program's `PROCEDURE DIVISION USING` list in order, with
 the paragraph functions private to the module, so a caller cannot reach into a
 program's internals any more than a COBOL `CALL` can.
 
-This package holds only this marker. The twelve names in `__all__` are the
-target inventory from Agent Action Plan section 0.3.1 and are NOT YET PRESENT;
-naming them records the mapping for traceability and imports nothing.
+All twelve program modules named in `__all__` - the inventory of Agent Action
+Plan section 0.3.1 - ARE PRESENT in this package. Naming them here still imports
+nothing: the marker deliberately performs no import, so that reaching this
+package does not drag in twelve modules and, through them, the whole data-access
+layer and a database driver. Import the module you need directly.
 
     gl051_batch_control_check       general/gl051.cbl - the control-total gate
                                     only [general/gl051.cbl:L1096-L1133]
@@ -42,7 +44,7 @@ from typing import Final
 
 #: The twelve migrated program modules, in Agent Action Plan section 0.3.1
 #: target-tree order - not alphabetical, not grouped by ledger, not execution
-#: order. None is present yet; naming one here does not import it.
+#: order. All twelve are present; naming one here still does not import it.
 __all__: Final[tuple[str, ...]] = (
     "gl051_batch_control_check",
     "gl070_transaction_pre_process",

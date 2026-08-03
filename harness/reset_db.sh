@@ -100,15 +100,22 @@
 # The same holds on the posting side: the twenty in-scope bridges, the in-scope
 # handlers and every bridge close path contain zero COMMIT / ROLLBACK / START
 # TRANSACTION, and the vendored `cobmysqlapi38.c` exposes `MySQL_commit` without
-# ever calling it. So with autocommit OFF, MariaDB would discard every COBOL
-# write -- the re-seed AND the posting run -- at session close, while the Python
-# side commits. The database this script hands to the comparison must therefore
-# be served with autocommit ON, which is the mode the maintainer says the
-# loaders normally get ("It is as default set ON").
+# ever calling it -- and does not expose `MySQL_autocommit` at all, so no COBOL
+# program in the checkout can set the mode itself.
+#
+# The Agent Action Plan nonetheless mandates autocommit OFF -- section 0.2.1.1
+# (the seeding contract), section 0.4.1.7 (on harness/Dockerfile.mariadb:
+# "autocommit off to match the loaders") and section 0.5.2 -- and the AAP is the
+# frozen source of truth this migration aligns to. So the database this script
+# hands to the comparison is served with autocommit OFF, and the durability
+# consequence is REPORTED rather than engineered away: MariaDB discards each
+# COBOL session at disconnect, so the re-seed and any COBOL posting run leave no
+# durable rows. That is the frozen code's defect, and R-4 makes it the
+# specification -- "a defect reproduced is correct; a defect fixed is a failure".
 #
 # The setting has exactly ONE authority: harness/Dockerfile.mariadb, which
-# writes `autocommit=1` into /etc/mysql/conf.d/99-acas-oracle.cnf. This script
-# reads it and REFUSES to reset when it is off. It never issues
+# writes `autocommit=0` into /etc/mysql/conf.d/99-acas-oracle.cnf. This script
+# reads it and REFUSES to reset when it is on. It never issues
 # `SET autocommit`, not even for the duration of the DDL: doing so would create
 # a second authority and make the reset depend on which script ran last. It is
 # asserted BEFORE the apply and again AFTER it, because the frozen file changes
@@ -185,7 +192,7 @@ readonly EX_OK=0
 readonly EX_USAGE=80          # bad command line
 readonly EX_PRECONDITION=81   # environment, output directory or seed.sh assertion
 readonly EX_DATABASE=82       # MariaDB unreachable, or credentials rejected
-readonly EX_AUTOCOMMIT=83     # autocommit is not on -- see acas_assert_autocommit
+readonly EX_AUTOCOMMIT=83     # autocommit is not OFF -- see acas_assert_autocommit
 readonly EX_PRIVILEGE=84      # the account cannot perform the drop and re-apply
 readonly EX_FROZEN=85         # mysql/ACASDB.sql has been MODIFIED -- see §invariants
 readonly EX_APPLY=86          # the client rejected part of the frozen schema
@@ -406,11 +413,18 @@ readonly -a ACAS_RESET_SEED_ENV_NONEMPTY=(
 #   3. NO PRIVILEGE SEPARATION. The applying account fell back SILENTLY to the
 #      application account:
 #          ACAS_RESET_DB_USER="${ACAS_DB_ADMIN_USER:-$ACAS_DB_USER}"
-#      which Compose grants ALL PRIVILEGES. That fallback meant the account
-#      the migrated Python cycle authenticates with day to day is also the
-#      account that can drop every table -- so a credential leak from the
-#      application path is a destructive capability, and the DROP privilege
-#      the reset needs is permanently attached to the runtime account.
+#      which the MariaDB vendor entrypoint grants ALL on the schema. That
+#      fallback meant the account the migrated Python cycle authenticates with
+#      day to day was also the account that dropped every table.
+#      GATE 1 removed the fallback, which fixed WHICH ACCOUNT THIS SCRIPT USES.
+#      It did not, and could not, fix WHAT THE APPLICATION ACCOUNT MAY DO: the
+#      vendor grant stood on its own, so a leak of the runtime credential
+#      remained a destructive capability no matter what this script chose. That
+#      second half is closed elsewhere, by the least-privilege init script in
+#      harness/Dockerfile.mariadb, which narrows the account to SELECT, INSERT,
+#      UPDATE and DELETE at container start and refuses to finish initialisation
+#      if the narrowing did not take. Both halves are needed; neither alone is
+#      sufficient, and recording the distinction is the point of this note.
 #
 # THE THREE GATES, all asserted in acas_assert_environment BEFORE the first
 # connection is opened, and re-asserted immediately before the apply:
@@ -579,6 +593,156 @@ acas_die() {
 
 acas_have() {
   command -v "$1" >/dev/null 2>&1
+}
+
+# ---------------------------------------------------------------------------
+#  THE CLIENT-DIAGNOSTIC SUMMARY  (OBS-008)
+#
+#  A database client's diagnostic is text the SERVER supplied, captured here with
+#  `2>&1`, and it is NOT safe to replay:
+#
+#    * it routinely names the account and the host -- "Access denied for user
+#      'acas'@'db.internal'" -- and on a statement failure it can quote the
+#      statement and its parameters, which are live accounting values (CWE-532);
+#    * it is multi-line and arbitrary, so a newline inside it forges a further
+#      line in whatever log collects this script's output (CWE-117);
+#    * these scripts run under Compose, where standard output and standard error
+#      are collected as container logs and kept.
+#
+#  So the RAW text is persisted to a private mode-0600 file and never printed,
+#  and the console gets a bounded, identity-free summary: a token from a fixed
+#  vocabulary, the client's own numeric error and SQLSTATE when it printed them,
+#  the size, and the artifact's path and SHA-256. This is the same
+#  console/artifact split `harness/diff_states.py` and `harness/normalize.py`
+#  apply to their own detail, with the same reasoning and the same vocabulary.
+#
+#  NOTHING BELOW ECHOES A BYTE OF ITS INPUT. The category comes from a `case`
+#  over fixed globs; the error and SQLSTATE are re-validated against their
+#  documented shapes and replaced by `unknown` when they do not match, so a
+#  server that returned `28000\nERROR: forged` cannot get that through.
+# ---------------------------------------------------------------------------
+
+#: Where the raw text of the most recent diagnostic was kept, or empty when none
+#: was produced or it could not be persisted.
+ACAS_DIAG_ARTIFACT=''
+
+# acas_diag_category <raw>
+# Classify a client diagnostic. Echoes ONE token and never any input byte.
+acas_diag_category() {
+  local raw="$1"
+
+  if [[ -z "${raw//[[:space:]]/}" ]]; then
+    printf 'no-diagnostic'
+    return 0
+  fi
+  case "$raw" in
+    *'Access denied'*)                          printf 'access-denied' ;;
+    *'Unknown database'*)                       printf 'unknown-database' ;;
+    *'Unknown MySQL server host'*)              printf 'host-unresolvable' ;;
+    *'is not allowed to connect'*)              printf 'host-not-permitted' ;;
+    *"Can't connect"*|*'Connection refused'*)   printf 'connect-refused' ;;
+    *'did not answer within'*|*'timed out'*|*'Timeout'*|*'timeout expired'*)
+                                                printf 'timeout' ;;
+    *'Lost connection'*|*'gone away'*)          printf 'connection-lost' ;;
+    *'Lock wait timeout'*)                      printf 'lock-wait-timeout' ;;
+    *'Deadlock found'*)                         printf 'deadlock' ;;
+    *'Duplicate entry'*)                        printf 'duplicate-key' ;;
+    *"doesn't exist"*|*'Unknown table'*)        printf 'table-missing' ;;
+    *'Unknown column'*)                         printf 'column-missing' ;;
+    *'error in your SQL syntax'*)               printf 'syntax-error' ;;
+    *'command denied'*|*'insufficient privileges'*)
+                                                printf 'grant-missing' ;;
+    *'SSL'*|*'TLS'*)                            printf 'tls-refused' ;;
+    *'read-only'*)                              printf 'server-read-only' ;;
+    *)                                          printf 'unclassified' ;;
+  esac
+}
+
+# acas_diag_code <raw>
+# Echo `<error>/<sqlstate>` from a `ERROR 1045 (28000)` prefix, each re-validated
+# against its documented shape and replaced by `unknown` when it does not match.
+acas_diag_code() {
+  local raw="$1" code='' state=''
+
+  code="$(printf '%s\n' "$raw" \
+    | sed -n 's/.*ERROR \([0-9][0-9]*\).*/\1/p' | head -n 1)"
+  state="$(printf '%s\n' "$raw" \
+    | sed -n 's/.*ERROR [0-9][0-9]* (\([0-9A-Za-z][0-9A-Za-z]*\)).*/\1/p' \
+    | head -n 1)"
+  [[ "$code" =~ ^[0-9]{1,5}$ ]] || code='unknown'
+  # SQLSTATE is five alphanumeric characters by definition
+  # [copybooks/wsfnctn.cob:L51]; anything else is not one.
+  [[ "$state" =~ ^[0-9A-Za-z]{5}$ ]] || state='unknown'
+  printf '%s/%s' "$code" "$state"
+}
+
+# acas_diag_sha256 <path>
+# Self-contained on purpose: this runs on abort paths, so it must not depend on
+# any deadline or digest machinery having been initialised. Echoes nothing on
+# failure.
+acas_diag_sha256() {
+  local path="$1" digest=''
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    digest="$(sha256sum -- "$path" 2>/dev/null)" || return 0
+    printf '%s' "${digest%% *}"
+    return 0
+  fi
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 - "$path" 2>/dev/null <<'PY' || return 0
+import hashlib
+import sys
+
+digest = hashlib.sha256()
+with open(sys.argv[1], 'rb') as handle:
+    for block in iter(lambda: handle.read(1 << 16), b''):
+        digest.update(block)
+sys.stdout.write(digest.hexdigest())
+PY
+}
+
+# acas_diag_persist <raw>
+# Write the raw text to a private mode-0600 file and set ACAS_DIAG_ARTIFACT.
+# Leaves it EMPTY when nothing could be written; never aborts, because this runs
+# on paths that are already reporting a failure.
+acas_diag_persist() {
+  local raw="$1" dir='' path=''
+
+  ACAS_DIAG_ARTIFACT=''
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/acas-diag-XXXXXXXX" 2>/dev/null)" || return 0
+  # `mktemp -d` creates 0700; the file is narrowed to 0600 explicitly because
+  # this script's `umask 077` governs creation but is not a guarantee a reader
+  # can check.
+  path="$dir/client-diagnostic.txt"
+  printf '%s\n' "$raw" >"$path" 2>/dev/null || return 0
+  chmod 600 -- "$path" 2>/dev/null || true
+  ACAS_DIAG_ARTIFACT="$path"
+}
+
+# acas_diag_summary [raw]
+# Echo the bounded, identity-free summary. Defaults to the script's own
+# last-diagnostic variable so a call site reads as one word.
+acas_diag_summary() {
+  local raw="${1-$ACAS_SQL_DIAG}" category='' code='' lines=0 bytes=0 digest=''
+
+  category="$(acas_diag_category "$raw")"
+  if [[ "$category" == 'no-diagnostic' ]]; then
+    printf 'client diagnostic: none was produced'
+    return 0
+  fi
+  code="$(acas_diag_code "$raw")"
+  lines="$(printf '%s\n' "$raw" | wc -l | tr -d '[:space:]')"
+  bytes="$(printf '%s' "$raw" | wc -c | tr -d '[:space:]')"
+  acas_diag_persist "$raw"
+  if [[ -n "$ACAS_DIAG_ARTIFACT" ]]; then
+    digest="$(acas_diag_sha256 "$ACAS_DIAG_ARTIFACT")"
+    printf 'client diagnostic: %s (error %s, %s line(s), %s byte(s)); the raw text is in %s (mode 0600%s)' \
+      "$category" "$code" "$lines" "$bytes" "$ACAS_DIAG_ARTIFACT" \
+      "${digest:+, sha256=$digest}"
+    return 0
+  fi
+  printf 'client diagnostic: %s (error %s, %s line(s), %s byte(s)); the raw text could NOT be persisted, so it is not available -- it is deliberately NOT printed here' \
+    "$category" "$code" "$lines" "$bytes"
 }
 
 # Join the remaining arguments with single spaces. Needed because IFS is
@@ -895,9 +1059,13 @@ acas_split_list() {
 #
 # A schema name containing an apostrophe closes the literal, and because the
 # client is invoked with --execute and the frozen dump is streamed on stdin,
-# the remainder is executed as SQL by an account that -- until GATE 1 -- was
-# the one holding ALL PRIVILEGES. `--force` is deliberately absent, which
-# limits the blast radius but does not remove it.
+# the remainder is executed as SQL by whichever account is connected -- and
+# until GATE 1 that could be the application account, which the vendor grant
+# gave ALL on the schema. Today GATE 1 forces an administrative account here,
+# so the blast radius is bounded by that account rather than by the runtime
+# one, and the runtime one no longer holds DDL in any case. `--force` is
+# deliberately absent, which limits the radius further but does not remove it,
+# which is why the two controls below are applied regardless.
 #
 # TWO CONTROLS, applied together:
 #
@@ -1200,15 +1368,22 @@ Also required for the re-seed, and asserted up front unless --schema-only:
   ACAS_LEDGERS        the path every loader prefixes onto every file name
   ACAS_BIN            must be non-blank for the same reason
 
-Optional environment:
-  ACAS_DB_ADMIN_USER      Account used for the drop and re-apply. Defaults to
-  ACAS_DB_ADMIN_PASSWORD  ACAS_DB_USER / ACAS_DB_PASSWORD, which Compose grants
-                          ALL PRIVILEGES on the target schema, so an override is
-                          normally unnecessary. Provided because
-                          [harness/docker-compose.yml:L512-L527] contemplates the
-                          root account being used for exactly this operation. The
-                          12-character limit does NOT apply to an override: it is
-                          a harness credential and never enters the COBOL
+Also required -- GATE 1, privilege separation, with NO fallback:
+  ACAS_DB_ADMIN_USER      The account that performs the drop and re-apply. It
+  ACAS_DB_ADMIN_PASSWORD  MUST be set and MUST differ from ACAS_DB_USER; naming
+                          the application account is refused. There is
+                          deliberately no default -- an earlier revision fell
+                          back to ACAS_DB_USER, and this text described that
+                          fallback as making an override "normally unnecessary",
+                          which was wrong twice over: GATE 1 has no fallback to
+                          be optional about, and the application account no
+                          longer holds the privileges the apply needs. It is
+                          narrowed to SELECT, INSERT, UPDATE and DELETE by the
+                          least-privilege init script in
+                          harness/Dockerfile.mariadb, so it cannot DROP or CREATE
+                          at all. Compose supplies `root` here, which holds them
+                          globally. The 12-character limit does NOT apply: this
+                          is a harness credential and never enters the COBOL
                           `RDB-Data` block.
   ACAS_DB_WAIT_TIMEOUT=N  Seconds to wait for MariaDB (default 180).
   ACAS_DB_AUTH_GRACE=N    Seconds to tolerate "Access denied" before failing
@@ -1515,11 +1690,16 @@ acas_authorise_destructive_target() {
       'GATE 1 (privilege separation): ACAS_DB_ADMIN_USER is not set, and there' \
       'is deliberately no fallback. This script drops every table in the target' \
       "schema. It used to fall back to the application account (${ACAS_DB_USER})," \
-      'which means the account the migrated cycle authenticates with every day' \
-      'also carried DROP -- so a leak of the runtime credential was a' \
-      'destructive capability. Set ACAS_DB_ADMIN_USER and' \
+      'which would mean the account the migrated cycle authenticates with every' \
+      'day performing the drop. Set ACAS_DB_ADMIN_USER and' \
       'ACAS_DB_ADMIN_PASSWORD to a separate account holding DROP, CREATE,' \
-      'ALTER, LOCK TABLES, INSERT and SELECT on this schema and nothing else.'
+      'ALTER, LOCK TABLES, INSERT and SELECT on this schema and nothing else.' \
+      'Note that removing this fallback addressed which account this SCRIPT' \
+      'uses, not what the application account is ABLE to do: the MariaDB vendor' \
+      'entrypoint grants it ALL on the schema, so it carried DROP regardless of' \
+      'anything decided here. That capability is removed separately, by the' \
+      'least-privilege init script in harness/Dockerfile.mariadb, which reduces' \
+      'the account to SELECT, INSERT, UPDATE and DELETE at container start.'
   elif [[ "$ACAS_DB_ADMIN_USER" == "$ACAS_DB_USER" ]]; then
     acas_gate_problem \
       "GATE 1 (privilege separation): ACAS_DB_ADMIN_USER and ACAS_DB_USER are" \
@@ -2197,7 +2377,7 @@ acas_sql_value_or_die() {
   if (( rc != 0 )); then
     acas_die "$EX_VERIFY" \
       "could not read $what from the server." \
-      "Client said: ${ACAS_SQL_DIAG:-<no diagnostic>}"
+      "$(acas_diag_summary "$ACAS_SQL_DIAG")"
   fi
 }
 
@@ -2309,7 +2489,7 @@ acas_wait_for_database() {
             'variables for the application account, so a mismatch usually means' \
             'the database volume was created with a different password: recreate' \
             'it with "docker compose ... down -v", or correct the credentials.' \
-            "Server said: ${ACAS_SQL_DIAG:-<no diagnostic>}"
+            "$(acas_diag_summary "$ACAS_SQL_DIAG")"
         fi
         if (( denied_for == 0 )); then
           acas_log "credentials rejected; allowing ${auth_grace}s in case grants are still being applied"
@@ -2325,7 +2505,7 @@ acas_wait_for_database() {
             "The target database ${ACAS_DB_NAME} must already exist: the frozen dump" \
             'contains no CREATE DATABASE statement, and this script never creates' \
             'one -- the MariaDB entrypoint does, once, from MARIADB_DATABASE.' \
-            "Client said: ${ACAS_SQL_DIAG:-<no diagnostic>}"
+            "$(acas_diag_summary "$ACAS_SQL_DIAG")"
         fi
         if (( elapsed == 0 )); then
           acas_log "port is open but an authenticated statement did not yet succeed; retrying for up to ${timeout}s"
@@ -2338,17 +2518,18 @@ acas_wait_for_database() {
 }
 
 # -----------------------------------------------------------------------------
-# Precondition 8 of 9 -- autocommit MUST be ON, so that the re-seed and the
-# subsequent posting run leave durable rows.
+# Precondition 8 of 9 -- autocommit MUST be OFF, as the Agent Action Plan
+# mandates (sections 0.2.1.1, 0.4.1.7 and 0.5.2, all from the loader banner at
+# [common/glbatchLD.cbl:L9-L13]).
 #
 # ASSERTED, NEVER SET. See the header for the frozen-source proof: the loaders'
 # commit/rollback paragraphs are unreachable and the bridges never commit at all,
-# so autocommit OFF would discard every COBOL write at session close. The setting
-# belongs to the server and has exactly one authority,
-# harness/Dockerfile.mariadb, which writes `autocommit=1` into
-# /etc/mysql/conf.d/99-acas-oracle.cnf. Issuing `SET autocommit` here -- even
-# "just for the DDL" -- would create a second authority and change behaviour,
-# which R-3 and R-4 both forbid.
+# so under this mandated mode every COBOL write is discarded at session close.
+# That consequence is reported, not repaired (R-4). The setting belongs to the
+# server and has exactly one authority, harness/Dockerfile.mariadb, which writes
+# `autocommit=0` into /etc/mysql/conf.d/99-acas-oracle.cnf. Issuing
+# `SET autocommit` here -- even "just for the DDL" -- would create a second
+# authority and change behaviour, which R-3 and R-4 both forbid.
 #
 # Read TWICE: once here, before anything is applied, and again after the apply,
 # because the frozen file changes six session variables [mysql/ACASDB.sql:L13-L22]
@@ -2365,7 +2546,7 @@ acas_read_autocommit() {
   if (( rc != 0 )); then
     acas_die "$EX_DATABASE" \
       'could not read the autocommit setting from the server.' \
-      "Client said: ${ACAS_SQL_DIAG:-<no diagnostic>}"
+      "$(acas_diag_summary "$ACAS_SQL_DIAG")"
   fi
 
   local value='' line
@@ -2390,28 +2571,25 @@ acas_assert_autocommit() {
   local global="${value%%/*}" session="${value##*/}"
   acas_log "@@GLOBAL.autocommit = $global   @@SESSION.autocommit = $session   ($when)"
 
-  if (( global != 1 || session != 1 )); then
+  if (( global != 0 || session != 0 )); then
     acas_die "$EX_AUTOCOMMIT" \
-      "autocommit is OFF (global=$global, session=$session) $when; the reset is REFUSED." \
-      'The 28 ACAS load programs declare commit and rollback paragraphs but never' \
-      'reach them: every "perform aa020-Rollback" is commented out and' \
-      '"aa030-Commit" has zero perform sites, so this census returns nothing --' \
-      "  grep -n '^ *perform.*\\(aa020\\|aa030\\|Commit\\|Rollback\\)' common/*LD.cbl" \
-      'The twenty in-scope bridges, the in-scope handlers and every bridge close' \
-      'path likewise contain zero COMMIT/ROLLBACK/START TRANSACTION.' \
-      'With autocommit off, MariaDB discards those uncommitted writes at session' \
-      'close, so the re-seed would leave an EMPTY database and the posting run' \
-      'would leave no rows -- while the Python side commits and keeps its own.' \
-      'The maintainer describes the same conclusion at [common/analLD.cbl:L442]:' \
-      '"These do not work during testing with mariadb - Non transactional model' \
-      'or autocommit set ON".' \
-      'This script deliberately does NOT fix it: the setting has exactly one' \
-      'authority, harness/Dockerfile.mariadb, which writes autocommit=1 into' \
+      "autocommit is ON (global=$global, session=$session) $when; the reset is REFUSED." \
+      'The Agent Action Plan mandates autocommit OFF in three places -- section' \
+      '0.2.1.1 (the seeding contract), section 0.4.1.7 (on' \
+      'harness/Dockerfile.mariadb: "autocommit off to match the loaders") and' \
+      'section 0.5.2 -- all deriving it from the banner carried by all 28' \
+      'common/*LD.cbl loaders at [common/glbatchLD.cbl:L9-L13]: "you MUST ensure' \
+      'that autocommit is OFF in the rdb settings".' \
+      'Resetting under ON would hand the comparison a database served in a mode' \
+      'the AAP does not sanction, so the oracle would no longer be the thing the' \
+      'AAP specifies.' \
+      'This script deliberately does NOT set the mode: it has exactly one' \
+      'authority, harness/Dockerfile.mariadb, which writes autocommit=0 into' \
       '/etc/mysql/conf.d/99-acas-oracle.cnf. Start the harness MariaDB service' \
-      'built from that Dockerfile, or set autocommit=1 in the server' \
+      'built from that Dockerfile, or set autocommit=0 in the server' \
       'configuration and restart it.'
   fi
-  acas_ok "autocommit is on, globally and for this session ($when)"
+  acas_ok "autocommit is OFF, globally and for this session ($when) -- AAP-mandated"
 }
 
 # -----------------------------------------------------------------------------
@@ -2420,11 +2598,18 @@ acas_assert_autocommit() {
 # Checked by name, up front, so a missing grant is reported as a missing grant
 # instead of surfacing as the client dying part-way through the file and leaving
 # a half-applied schema.
-# Both privilege scopes must be consulted. A schema-scoped grant
-# (`GRANT ALL ON `ACASDB`.*`, which is what Compose's application account has)
-# appears in information_schema.SCHEMA_PRIVILEGES; a global grant, which a
-# superuser has, appears only in information_schema.USER_PRIVILEGES. Reading one
-# and not the other would declare a superuser unprivileged.
+# Both privilege scopes must be consulted, because an administrative account can
+# legitimately be provisioned either way. A schema-scoped grant -- what GATE 1's
+# own message tells an operator to create, "DROP, CREATE, ALTER, LOCK TABLES,
+# INSERT and SELECT on this schema and nothing else" -- appears in
+# information_schema.SCHEMA_PRIVILEGES; a global grant, which the `root` account
+# Compose names has, appears only in information_schema.USER_PRIVILEGES. Reading
+# one and not the other would declare one of those two accounts unprivileged.
+# This reads the privileges of the CONNECTED account, which GATE 1 has already
+# forced to be the admin account and never the application one. The application
+# account holds only SELECT, INSERT, UPDATE and DELETE -- narrowed at container
+# start by harness/Dockerfile.mariadb -- so it could not pass this check, which
+# is the intended outcome rather than a limitation.
 # The grantee string is built from current_user() with char(39) and char(64)
 # rather than literal quote and at-sign characters, so the SQL survives being
 # carried through the shell without any quoting subtlety.
@@ -2448,7 +2633,7 @@ acas_assert_privileges() {
   if (( rc != 0 )); then
     acas_die "$EX_PRIVILEGE" \
       'could not read the privileges of the connected account.' \
-      "Client said: ${ACAS_SQL_DIAG:-<no diagnostic>}"
+      "$(acas_diag_summary "$ACAS_SQL_DIAG")"
   fi
 
   local granted="${ACAS_SQL_OUT}"
@@ -2456,8 +2641,11 @@ acas_assert_privileges() {
     acas_die "$EX_PRIVILEGE" \
       "the account '${ACAS_RESET_DB_USER}' holds no recorded privileges on ${ACAS_DB_NAME}." \
       'Applying the frozen schema needs DROP, CREATE, LOCK TABLES, ALTER, INSERT' \
-      'and SELECT. Compose grants the application account ALL PRIVILEGES on the' \
-      'target schema; if this account was created by hand, grant them.'
+      'and SELECT. Compose names root here, which holds them globally. If this' \
+      'account was created by hand, grant it those on this schema. Note that the' \
+      'APPLICATION account is not a usable substitute: it is deliberately' \
+      'narrowed to SELECT, INSERT, UPDATE and DELETE by the least-privilege init' \
+      'script in harness/Dockerfile.mariadb, and GATE 1 refuses it by name.'
   fi
 
   # Split the comma-separated list without disturbing the global IFS, which is
@@ -2875,7 +3063,7 @@ acas_verify_table_set() {
     "select TABLE_NAME from information_schema.TABLES where TABLE_SCHEMA = ${ACAS_RESET_SCHEMA_LITERAL} order by TABLE_NAME" || rc=$?
   (( rc == 0 )) || acas_die "$EX_VERIFY" \
     'could not list the tables after the apply.' \
-    "Client said: ${ACAS_SQL_DIAG:-<no diagnostic>}"
+    "$(acas_diag_summary "$ACAS_SQL_DIAG")"
 
   local -a present=() expected=() unexpected=() missing=()
   local line
@@ -2931,7 +3119,7 @@ acas_verify_all_empty() {
   acas_sql_scalar "$sql" || rc=$?
   (( rc == 0 )) || acas_die "$EX_VERIFY" \
     'could not count the rows of the recreated tables.' \
-    "Client said: ${ACAS_SQL_DIAG:-<no diagnostic>}"
+    "$(acas_diag_summary "$ACAS_SQL_DIAG")"
 
   local -a populated=()
   local table rows seen=0
@@ -2970,7 +3158,7 @@ acas_verify_no_secondary_indexes() {
     "select distinct TABLE_NAME, INDEX_NAME from information_schema.STATISTICS where TABLE_SCHEMA = ${ACAS_RESET_SCHEMA_LITERAL} and INDEX_NAME <> 'PRIMARY' order by TABLE_NAME, INDEX_NAME" || rc=$?
   (( rc == 0 )) || acas_die "$EX_VERIFY" \
     'could not list the indexes after the apply.' \
-    "Client said: ${ACAS_SQL_DIAG:-<no diagnostic>}"
+    "$(acas_diag_summary "$ACAS_SQL_DIAG")"
 
   local -a offenders=() allowed_seen=()
   local table index
@@ -3007,7 +3195,7 @@ acas_verify_collation() {
     "select TABLE_NAME, TABLE_COLLATION from information_schema.TABLES where TABLE_SCHEMA = ${ACAS_RESET_SCHEMA_LITERAL} and TABLE_COLLATION <> $(acas_sql_quote_literal "$ACAS_RESET_COLLATION") order by TABLE_NAME" || rc=$?
   (( rc == 0 )) || acas_die "$EX_VERIFY" \
     'could not read the table collations after the apply.' \
-    "Client said: ${ACAS_SQL_DIAG:-<no diagnostic>}"
+    "$(acas_diag_summary "$ACAS_SQL_DIAG")"
 
   local -a wrong=()
   local table collation
@@ -3043,7 +3231,7 @@ acas_verify_shapes() {
     "select TABLE_NAME, count(*) from information_schema.COLUMNS where TABLE_SCHEMA = ${ACAS_RESET_SCHEMA_LITERAL} group by TABLE_NAME order by TABLE_NAME" || rc=$?
   (( rc == 0 )) || acas_die "$EX_VERIFY" \
     'could not read the column counts after the apply.' \
-    "Client said: ${ACAS_SQL_DIAG:-<no diagnostic>}"
+    "$(acas_diag_summary "$ACAS_SQL_DIAG")"
 
   local -A columns_of=()
   local table value
@@ -3057,7 +3245,7 @@ acas_verify_shapes() {
     "select TABLE_NAME, group_concat(COLUMN_NAME order by SEQ_IN_INDEX separator ',') from information_schema.STATISTICS where TABLE_SCHEMA = ${ACAS_RESET_SCHEMA_LITERAL} and INDEX_NAME = 'PRIMARY' group by TABLE_NAME order by TABLE_NAME" || rc=$?
   (( rc == 0 )) || acas_die "$EX_VERIFY" \
     'could not read the primary keys after the apply.' \
-    "Client said: ${ACAS_SQL_DIAG:-<no diagnostic>}"
+    "$(acas_diag_summary "$ACAS_SQL_DIAG")"
 
   local -A pk_of=()
   while IFS=$'\t' read -r table value; do
@@ -3164,26 +3352,32 @@ acas_verify_reset_state() {
   #    variables and restores them at the tail [mysql/ACASDB.sql:L13-L22]; this
   #    re-asserts that it left autocommit alone rather than assuming it.
   acas_assert_autocommit 'after the apply'
-  acas_check 'PASS' 'autocommit still 1/1 after the apply'
+  acas_check 'PASS' 'autocommit still 0/0 after the apply'
 
   ACAS_RESET_VERIFIED=1
 }
 
 # STAGE 3 -- DURABILITY IN A FRESH SESSION
 #
-# Durability is the one property the whole comparison rests on, and it is the
-# reason autocommit must be ON: the frozen COBOL never reaches a COMMIT, so a
-# server with autocommit off would discard its writes at session close. DDL is a
-# separate matter -- InnoDB commits CREATE TABLE and DROP TABLE implicitly
-# regardless of the autocommit mode -- so the schema apply is durable either way
-# and this script never needs to change the mode for it.
+# Durability is the one property the whole comparison rests on, and under the
+# AAP-mandated `autocommit=0` it holds for the SCHEMA but not for COBOL DATA.
+# The two cases must not be conflated:
+#   * DDL is durable either way -- InnoDB commits CREATE TABLE and DROP TABLE
+#     implicitly, regardless of the autocommit mode -- so the schema apply this
+#     stage verifies survives a fresh session, and this script never needs to
+#     change the mode for it. That is what makes the check below meaningful at
+#     all under the mandated mode.
+#   * DML from the frozen COBOL is NOT durable, because the loaders and bridges
+#     reach no COMMIT. Any subsequent re-seed or COBOL posting run therefore
+#     leaves nothing behind. That consequence is reported by the autocommit
+#     assertion and by harness/seed.sh, and is preserved as the frozen code's own
+#     defect (R-4) rather than repaired here.
 #
-# Neither property is trusted here; both are PROVED. A brand-new client process,
+# The schema property is not trusted; it is PROVED. A brand-new client process,
 # hence a brand-new server session, re-counts the tables. If the apply had
 # somehow landed inside an uncommitted transaction, the fresh session would see
 # the OLD tables and this check would fail -- which is exactly the empirical
-# verification the plan asks for, and the same mechanism that proved the
-# autocommit requirement in the first place.
+# verification the plan asks for.
 # =============================================================================
 acas_verify_durability() {
   acas_stage 'Stage 3/4: durability -- re-count in a FRESH session'
@@ -3413,7 +3607,7 @@ acas_print_plan() {
   acas_log '   e. all 22 in-scope column counts and primary keys, plus LEDGER-NAME char(32)'
   acas_log '   f. zero nullable columns'
   acas_log '   g. zero FLOAT / DOUBLE / REAL columns (R-2)'
-  acas_log '   h. autocommit still 1/1 after the apply'
+  acas_log '   h. autocommit still 0/0 after the apply'
 
   acas_log ''
   acas_log '3. durability: re-count the tables in a FRESH session'
@@ -3436,9 +3630,11 @@ acas_print_plan() {
 
   acas_log ''
   acas_note 'the MariaDB readiness, autocommit and privilege assertions are NOT performed'
-  acas_note 'in a dry run; a real run refuses to reset unless autocommit is on, globally'
-  acas_note 'and for the session, because the frozen COBOL never reaches a COMMIT and'
-  acas_note 'its writes would otherwise be discarded at disconnect'
+  acas_note 'in a dry run; a real run refuses to reset unless autocommit is OFF, globally'
+  acas_note 'and for the session, as the Agent Action Plan mandates (sections 0.2.1.1,'
+  acas_note '0.4.1.7 and 0.5.2, from [common/glbatchLD.cbl:L9-L13]). Under that mode the'
+  acas_note 'frozen COBOL, which reaches no COMMIT, leaves no durable rows -- reported'
+  acas_note 'as the reproduced legacy defect (R-4), never repaired here'
 }
 
 # MAIN
@@ -3501,7 +3697,7 @@ acas_main() {
   # would be actively misleading. Raising it at the call site keeps the
   # precondition numbering complete AND makes the ERR/EXIT traps name the
   # autocommit gate -- not MariaDB readiness -- as the failing stage.
-  acas_stage 'Preconditions 8/9: autocommit is on (the frozen COBOL never commits)'
+  acas_stage 'Preconditions 8/9: autocommit is OFF (AAP-mandated; the frozen COBOL never commits)'
   acas_assert_autocommit 'before the apply'
 
   acas_assert_privileges

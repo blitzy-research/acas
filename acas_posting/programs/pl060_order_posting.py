@@ -133,7 +133,7 @@ import inspect
 import logging
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Any, Callable, Final
+from typing import Any, Callable, Final, Mapping, cast
 
 from acas_posting.cobol import arithmetic as ar
 from acas_posting.cobol import condition_names as cn
@@ -184,7 +184,11 @@ from acas_posting.records.spl_irs_posting import WsIrsPostingRecord, WsIrsPostKe
 from acas_posting.records.system_record import SystemRecord
 from acas_posting.records.system_record_4 import SystemRecord4
 from acas_posting.records.test_data_flags import AcasDalCommonData
-from acas_posting.workfiles import LineSequentialWorkFile
+from acas_posting.workfiles import (
+    OPEN_ITEM_4_NAME,
+    OpenItemWorkFile,
+    open_item_work_file,
+)
 
 #: Agent Action Plan section 0.3.3, verbatim: *"Each ``programs/*.py`` module exposes
 #: a single ``run(...)`` entry mirroring its COBOL ``PROCEDURE DIVISION USING`` list,
@@ -213,8 +217,20 @@ _FILE_28_NOT_EXISTS: Final[int] = 1
 _WS_ERROR_PURCHASE_MISSING: Final[int] = 1
 
 #: ``01 Error-Messages`` [purchase/pl060.cbl:L248-L257], transcribed from the frozen
-#: ``VALUE`` clauses rather than paraphrased. Presentation only: they survive as log
-#: text and never as a stored value. See the OMISSIONS list in the footer.
+#: ``VALUE`` clauses rather than paraphrased.  Presentation only, and never a stored
+#: value - but they do NOT all survive as log text.  Agent Action Plan section 0.3.4
+#: splits the group three ways, and every member stays DECLARED regardless, because rule
+#: R-5 maps the whole ``01 Error-Messages`` group and a shorter group would misreport the
+#: frozen source:
+#:
+#: * ``PL130`` [L527] and ``PL132`` [L1018] are DIAGNOSTICS and become log records.
+#: * ``PL002`` is a PURE PROMPT.  Both of its displays - [L535] and [L1023] - stand
+#:   immediately before an ``accept ws-reply``, and the literal is nothing but the
+#:   instruction to press that key, so it is declared and deliberately never referenced.
+#: * ``PL133`` and ``PL133T`` are REPORT CONTENT and are never displayed at all: they are
+#:   ``move``d into ``print-record`` at [L632] and [L634], which section 0.2.2 puts out of
+#:   scope.  Declared and deliberately never referenced.
+#: * ``PL131`` is the one MIXED literal; it is split below.
 _PL002: Final[str] = "PL002 Note error and hit return"
 _PL130: Final[str] = "PL130 Error writing Open Item 5 Record"
 _PL131: Final[str] = "PL131 PE - CR SWOP: Return to continue"
@@ -222,9 +238,21 @@ _PL132: Final[str] = "PL132 Err on Batch file write : "
 _PL133: Final[str] = "PL133 Warning Record/s missing in Purchase File"
 _PL133T: Final[str] = "PL133T Warning Record/s missing in Purchase Table"
 
+#: THE SUBSTANTIVE HALF OF ``PL131``.  The frozen literal carries two things in one
+#: string: the diagnostic "PE - CR SWOP" - the credit-swap notice raised when a credit
+#: note nets to zero [L658-L659] - and, after the colon, the instruction to press the key
+#: that [L661]'s ``accept ws-reply`` reads.  Section 0.3.4 keeps the first and drops the
+#: second, so the record at [L659] carries this prefix.  Taken by slicing the declared
+#: literal rather than retyped, so the two can never drift apart.  ``sl060`` splits its
+#: own ``SL131`` the same way [sales/sl060.cbl:L265].
+_PL131_NOTICE: Final[str] = _PL131.split(":", 1)[0]
+
 #: ``01  total-lits`` with ``03 ws-lits pic x(17) occurs 3`` redefining it
-#: [purchase/pl060.cbl:L261-L266]. Indexed by ``oi-type``, one-based, and read only by
-#: the printed totals block, so the ``x(17)`` padding never reaches a stored value.
+#: [purchase/pl060.cbl:L261-L266]. Indexed by ``oi-type``, one-based, and read ONLY by the
+#: printed totals block at [L551-L571], which is report content and out of scope per
+#: section 0.2.2 - so the tuple is DECLARED AND DELIBERATELY UNREFERENCED.  It stays
+#: because R-5 maps the group, and because the ``x(17)`` width is the evidence that the
+#: captions never reach a stored value.
 _WS_LITS: Final[tuple[str, str, str]] = ("Receipts", "Invoices", "Credit Notes")
 
 
@@ -329,12 +357,12 @@ _D_PRINT_MONEY: Final[FieldDescriptor] = _ws_descriptor(
 #    the frozen schema, so it reaches no table and appears in no dump: Agent Action
 #    Plan section 0.3.1 models exactly this as *"ordered sequences with the same record
 #    layout and the same ordering guarantees"*.
-#    ``acas_posting/workfiles.py`` publishes only ``pre_trans``, ``post_trans`` and
-#    ``sort_trans`` - the General Ledger set - so OTM4 is declared here, module
-#    privately, over the published ``LineSequentialWorkFile`` primitive whose semantics
-#    match the COBOL exactly: ``open_output`` TRUNCATES, ``open_input`` positions at the
+#    ``acas_posting/workfiles.py`` publishes ``OpenItemWorkFile``, the SHARED carrier
+#    for both open-item work files, whose semantics match the COBOL exactly:
+#    ``open_extend`` appends, ``open_output`` TRUNCATES, ``open_input`` positions at the
 #    first record, ``read_next`` returns ``None`` and sets end-of-file, ``close`` keeps
-#    the records. No new file is added to ``records/`` - that folder is closed.
+#    the records. ``pl055`` writes through the same object, which is what makes the
+#    handoff a channel. No new file is added to ``records/`` - that folder is closed.
 #
 # 2. ``01 si-header`` [copybooks/plwssoi.cob:L11] is byte-identical to ``OI-Header``,
 #    field for field, with an ``si-`` prefix. It has no ``records/`` module and no
@@ -351,11 +379,6 @@ _D_PRINT_MONEY: Final[FieldDescriptor] = _ws_descriptor(
 _D_OPEN_ITEM_RECORD_4: Final[FieldDescriptor] = pic.descriptor_for(
     "pic x(113)", name="open-item-record-4", source_locator="copybooks/fdoi4.cob:L10"
 )
-
-#: The name the file is assigned to [copybooks/seloi4.cob:L2]; ``File-28`` resolves
-#: through ``file_defs`` at run time, so this constant is the fallback label only.
-_OTM4_NAME: Final[str] = "open-item-file-4"
-
 
 # ---------------------------------------------------------------------------
 # Descriptor lookup across the TWO conventions the ``records/`` layer uses.
@@ -484,17 +507,72 @@ class _FacadeContext:
     file_defs: FileDefs
     dal_common: AcasDalCommonData
 
+    #: NOT ONE OF THE FIVE OPERANDS, and deliberately last so the five above stay
+    #: diffable against [copybooks/Proc-ACAS-FH-Calls.cob:L142-L148]. It is the
+    #: caller's keyword-only handler declarations - chiefly the transport-security
+    #: policy - which have no COBOL counterpart because the frozen bridge has none:
+    #: its connect passes six values and no transport policy at all
+    #: [copybooks/mysql-procedures.cpy:L72-L77], transport being compiled into
+    #: ``cobmysqlapi.c``. An empty mapping is the SAFE answer, not the absent one:
+    #: every handler resolves an unstated policy fail-closed, permitting a Unix
+    #: socket or a loopback address and refusing every other target.
+    dal_options: Mapping[str, object] = field(default_factory=dict)
 
-def _fh(verb: str, ctx: _FacadeContext) -> tuple[int, int]:
-    """Perform one facade verb and return the ``(FS-Reply, WE-Error)`` pair.
+
+#: How many operands a dispatch paragraph's ``CALL`` carries
+#: [copybooks/Proc-ACAS-FH-Calls.cob:L142-L148]. Named once so the count is
+#: stated rather than spelled as a literal inside the binding resolver.
+_FACADE_LINKAGE_OPERANDS: Final[int] = 5
+
+
+#: ``verb`` -> the callable the facade publishes for it, paired with the calling
+#: convention that callable declares. Populated on the FIRST ``PERFORM`` of each
+#: verb and read on every later one.
+#:
+#: ⭐ WHY A BINDING CACHE AND NOT REFLECTION AT EACH CALL. ``_fh`` is performed
+#: inside the OTM4 row loop [purchase/pl060.cbl:L424-L543], so a per-call
+#: ``getattr`` plus ``inspect.signature`` would re-derive one unchanging fact -
+#: which shape ``acas_posting.dal.facade`` publishes - once per posted row.
+#: ``inspect.signature`` is the expensive half: it builds a ``Signature`` object
+#: and its ``Parameter`` objects from the callable's ``__code__`` every time it is
+#: asked. Resolving it ONCE per verb removes that work from the loop and changes
+#: nothing else.
+#:
+#: ⛔ THIS IS NOT A CACHE OF ANY VALUE, STATUS OR RESULT (rules R-3, R-6). What is
+#: memoised is the BINDING - a function object and a boolean describing its
+#: parameter list - which is a property of the imported module and cannot vary
+#: between two calls in one process. Every ``PERFORM`` still issues its own call,
+#: in source order, with its own freshly built operand list, and still reads its
+#: status back out of ``File-Access`` afterwards. Nothing is reordered, batched,
+#: deferred, coalesced or skipped, and no row's outcome depends on whether it was
+#: the first to reach its verb: the compiled program's dynamic ``CALL`` resolves a
+#: program name to an entry point once per run unit too
+#: [copybooks/Proc-ACAS-FH-Calls.cob:L51-L57].
+_FACADE_BINDINGS: Final[dict[str, tuple[Callable[..., Any], bool]]] = {}
+
+
+def _facade_binding(verb: str) -> tuple[Callable[..., Any], bool]:
+    """Resolve ``verb`` to ``(callable, takes_five_positionals)``, once per verb.
 
     ``verb`` is the entity-named facade paragraph in lower snake case, exactly as
     Agent Action Plan section 0.4.3 specifies the translation:
     ``perform GL-Batch-Read-Next`` becomes ``facade.gl_batch_read_next``.
 
-    One ``PERFORM`` is one call, in source order. Nothing is reordered, batched,
-    deferred, coalesced or cached (rules R-3 and R-6).
+    The boolean is ``True`` when the target declares at least the five operands of
+    the dispatch paragraph - or a ``*args`` - and ``False`` when it declares fewer
+    and must therefore be handed the facade's own single-argument context. That
+    question is answered from the callable's declared signature, which is fixed
+    once the module is imported, so it is answered once.
+
+    Raises:
+        _Pl060FacadeBindingError: the facade publishes no such verb, or publishes
+            one that accepts no positional argument at all - an integration
+            mismatch that must fail loudly at the seam rather than mis-post.
     """
+    binding = _FACADE_BINDINGS.get(verb)
+    if binding is not None:
+        return binding
+
     try:
         target: Callable[..., Any] = getattr(facade, verb)
     except AttributeError as exc:  # pragma: no cover - integration guard
@@ -504,6 +582,49 @@ def _fh(verb: str, ctx: _FacadeContext) -> tuple[int, int]:
             f"reach a handler module directly"
         ) from exc
 
+    try:
+        signature = inspect.signature(target)
+    except (TypeError, ValueError):  # pragma: no cover - integration guard
+        #  No introspectable signature: the facade's published shape is the
+        #  single-argument context, so that is what is supplied.
+        takes_five = False
+    else:
+        accepts = [
+            parameter
+            for parameter in signature.parameters.values()
+            if parameter.kind
+            in (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD)
+        ]
+        variadic = any(
+            parameter.kind is parameter.VAR_POSITIONAL
+            for parameter in signature.parameters.values()
+        )
+        if len(accepts) >= _FACADE_LINKAGE_OPERANDS or variadic:
+            takes_five = True
+        elif accepts:
+            takes_five = False
+        else:  # pragma: no cover - integration guard
+            raise _Pl060FacadeBindingError(
+                f"acas_posting.dal.facade.{verb} accepts no positional argument, so "
+                f"neither the context shape nor the five-parameter linkage shape of "
+                f"copybooks/Proc-ACAS-FH-Calls.cob can be supplied"
+            )
+
+    binding = (target, takes_five)
+    _FACADE_BINDINGS[verb] = binding
+    return binding
+
+
+def _fh(verb: str, ctx: _FacadeContext) -> tuple[int, int]:
+    """Perform one facade verb and return the ``(FS-Reply, WE-Error)`` pair.
+
+    One ``PERFORM`` is one call, in source order. Nothing is reordered, batched,
+    deferred, coalesced or cached (rules R-3 and R-6) - see
+    :data:`_FACADE_BINDINGS` for what IS memoised and why that is not a value
+    cache.
+    """
+    target, takes_five = _facade_binding(verb)
+
     linkage = (
         ctx.system_record,
         ctx.record,
@@ -511,11 +632,6 @@ def _fh(verb: str, ctx: _FacadeContext) -> tuple[int, int]:
         ctx.file_defs,
         ctx.dal_common,
     )
-
-    try:
-        signature = inspect.signature(target)
-    except (TypeError, ValueError):  # pragma: no cover - integration guard
-        signature = None
 
     # THE CONTEXT SHAPE THE FACADE PUBLISHES. `facade.FacadeContext` carries the
     # dispatch paragraph's five operands positionally, in the copybook's order -
@@ -528,32 +644,10 @@ def _fh(verb: str, ctx: _FacadeContext) -> tuple[int, int]:
     # either way, so `_status_pair` still reads the block the verb wrote.
     # This resolves AMBIGUITY Q-FILE-DEFS-SHAPE's sibling question - the shape of
     # the single argument - against the facade as generated.
-    def _published_context() -> Any:
-        return facade.FacadeContext(*linkage)
-
-    if signature is None:
-        reply = target(_published_context())
+    if takes_five:
+        reply = target(*linkage)
     else:
-        accepts = [
-            parameter
-            for parameter in signature.parameters.values()
-            if parameter.kind
-            in (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD)
-        ]
-        variadic = any(
-            parameter.kind is parameter.VAR_POSITIONAL
-            for parameter in signature.parameters.values()
-        )
-        if len(accepts) >= len(linkage) or variadic:
-            reply = target(*linkage)
-        elif accepts:
-            reply = target(_published_context())
-        else:  # pragma: no cover - integration guard
-            raise _Pl060FacadeBindingError(
-                f"acas_posting.dal.facade.{verb} accepts no positional argument, so "
-                f"neither the context shape nor the five-parameter linkage shape of "
-                f"copybooks/Proc-ACAS-FH-Calls.cob can be supplied"
-            )
+        reply = target(facade.FacadeContext(*linkage))
 
     return _status_pair(reply, ctx.file_access)
 
@@ -841,7 +935,12 @@ _IS_S_CLOSED: Final[Callable[[Any], bool]] = cn.predicate_for(
 # through the ``OI-Header`` view of the same storage.
 # ---------------------------------------------------------------------------
 
-#: ``05 oi5-supplier pic x(7)`` [copybooks/plwsoi5B.cob:L14].
+#: ``05 oi5-supplier pic x(7)`` [copybooks/plwsoi5B.cob:L14].  DECLARED AND
+#: DELIBERATELY UNREFERENCED: the frozen program's only use of the field is
+#: ``display oi5-supplier`` [L528], and that display is not converted because a supplier
+#: code is a record key, which the safe-event schema in ``acas_posting/dal/status.py``
+#: excludes from a log record (CWE-532).  The descriptor stays so the field keeps its
+#: dictionary citation, which is what rule R-5 asks of the group.
 _D_OI5_SUPPLIER: Final[FieldDescriptor] = descriptors_of(Oi5Key)["oi5_supplier"]
 #: ``05 oi5-invoice PIC 9(8)`` [copybooks/plwsoi5B.cob:L15].
 _D_OI5_INVOICE: Final[FieldDescriptor] = descriptors_of(Oi5Key)["oi5_invoice"]
@@ -967,7 +1066,7 @@ class _Ws:
 
     # --- fd open-item-file-4 [copybooks/seloi4.cob], [copybooks/fdoi4.cob] ----
     #: The OTM4 extract ``pl055`` produced. See the STRUCTURAL NOTES above.
-    otm4: LineSequentialWorkFile
+    otm4: OpenItemWorkFile[OiHeader]
 
     # --- the date sections' storage -------------------------------------------
     #: ``01 maps03-ws`` [copybooks/wsmaps03.cob:L6] - the ``maps04`` linkage record.
@@ -1049,6 +1148,17 @@ class _Ws:
     #: ``01 error-code pic 999.`` [purchase/pl060.cbl:L259]
     error_code: int = 0
 
+    #: NOT A COBOL FIELD. The caller's keyword-only handler declarations - chiefly
+    #: the transport-security policy - carried onto every facade context this
+    #: program builds. No COBOL counterpart: the frozen bridge's connect passes six
+    #: values and no transport policy at all
+    #: [copybooks/mysql-procedures.cpy:L72-L77]. An empty mapping is the SAFE
+    #: answer, not the absent one - an unstated policy resolves fail-closed,
+    #: permitting a Unix socket or a loopback address and refusing every other
+    #: target. Carried opaquely; ``dal/facade.py`` projects it onto whatever extras
+    #: each handler declares.
+    dal_options: Mapping[str, object] = field(default_factory=dict)
+
 
 def _is_purchase_missing(ws: _Ws) -> bool:
     """``88 purchase-missing value 1.`` on ``03 ws-error pic 9``
@@ -1100,6 +1210,7 @@ def _ctx(ws: _Ws, record: Any) -> _FacadeContext:
         file_access=ws.file_access,
         file_defs=ws.file_defs,
         dal_common=ws.dal_common,
+        dal_options=ws.dal_options,
     )
 
 
@@ -1115,44 +1226,28 @@ def _otm4_status(ws: _Ws) -> None:
     ws.file_access.fs_reply = ws.otm4.fs_reply
 
 
-#: The OTM4 sequences this process has opened, keyed by the name ``file-28`` assigns.
-#:
-#: ``select open-item-file-4 assign file-28`` [copybooks/seloi4.cob:L1] names a FILE, and a
-#: file outlives the program that opened it: ``pl055`` writes the extract, ``pl060`` reads
-#: it, and the same run of ``pl060`` reads it at [purchase/pl060.cbl:L421] and then
-#: truncates it at [purchase/pl060.cbl:L605]. A single ``run`` call therefore cannot own
-#: the sequence, and ``run``'s parameter list cannot carry it either - the frozen source's
-#: ``PROCEDURE DIVISION USING`` has exactly five entries [purchase/pl060.cbl:L340-L344] and
-#: adding a sixth would misrepresent the linkage. Keying by the assigned name is what the
-#: ``ASSIGN`` clause itself does.
-#:
-#: STRUCTURAL NOTE - neither ``copybooks/plwsoi.cob`` nor ``copybooks/plwssoi.cob`` has a
-#: module under ``acas_posting/records/``, and ``acas_posting/workfiles.py`` publishes only
-#: ``pre_trans``, ``post_trans`` and ``sort_trans``, so no shared registry exists for OTM4
-#: and none may be created - both folders are closed at a fixed file list
-#: (Agent Action Plan sections 0.4.1.2, 0.4.4).
-#:
-#: AMBIGUITY Q-OTM4-HANDOFF - how ``pl055`` and ``pl060`` are expected to share the
-#: sequence once ``pl055`` exists, and therefore whether this registry or a future entry in
-#: ``workfiles.py`` is the agreed home, has to be settled against the compiled cycle's
-#: observable ``PUITM5-REC`` and ``PULEDGER-REC`` state rather than decided here.
-_OTM4_SEQUENCES: Final[dict[str, LineSequentialWorkFile]] = {}
-
-
-def _otm4_sequence(file_defs: FileDefs) -> LineSequentialWorkFile:
-    """The OTM4 sequence ``file-28`` assigns, created on first use.
-
-    ``01 open-item-record-4 pic x(113)`` [copybooks/fdoi4.cob:L10] is the file's single
-    record and it holds exactly the ``OI-Header`` layout, which is why the sequence carries
-    ``OiHeader`` records. Nothing about it reaches a table
-    (Agent Action Plan section 0.3.1), so nothing about it appears in a dump.
-    """
-    assigned = str(file_defs.file_defs_a.file_28).strip() or _OTM4_NAME
-    sequence = _OTM4_SEQUENCES.get(assigned)
-    if sequence is None:
-        sequence = LineSequentialWorkFile(assigned, OiHeader)
-        _OTM4_SEQUENCES[assigned] = sequence
-    return sequence
+#  ⭐⭐ THE ``pl055`` -> ``pl060`` HANDOFF IS ONE OBJECT, SUPPLIED BY THE CALLER.
+#  ``select open-item-file-4 assign file-28`` [copybooks/seloi4.cob:L1] names a FILE, and a
+#  file outlives the program that opened it: ``pl055`` writes the extract
+#  [purchase/pl055.cbl:L301, :L587, :L423], this program reads it at
+#  [purchase/pl060.cbl:L421-L425] and then truncates it at [purchase/pl060.cbl:L605].
+#  In COBOL the two programs name the same ``ASSIGN`` and the operating system supplies the
+#  identity; here the identity is the ``acas_posting.workfiles.OpenItemWorkFile`` the ROUTE
+#  threads from one dispatch to the next, exactly as it threads the General Ledger work
+#  files from ``gl070`` to ``gl071`` to ``gl072``.
+#
+#  THE LINKAGE IS NOT WIDENED TO CARRY IT. ``PROCEDURE DIVISION USING`` has exactly five
+#  entries [purchase/pl060.cbl:L340-L344] and a sixth would misrepresent it, so the carrier
+#  is a KEYWORD-ONLY parameter of ``run`` - outside the positional linkage, which is the
+#  same device ``gl070``, ``gl071`` and ``gl072`` use for their work files.
+#
+#  ⛔ THIS WAS ONCE A MODULE-LEVEL REGISTRY keyed by the assigned name, on the ground that a
+#  single ``run`` call cannot own a file and that ``workfiles.py`` published no carrier for
+#  it. The first half was right; the second was a gap to be closed rather than worked
+#  around. A registry also shares the sequence across every run in one interpreter, and
+#  rule R-6 requires two runs of the same scenario under the same pinned clock to be
+#  byte-identical - a sequence still holding the previous run's orders breaks that with
+#  nothing failing.
 
 
 def run(
@@ -1161,6 +1256,8 @@ def run(
     system_record_4: SystemRecord4,
     to_day: str,
     file_defs: FileDefs,
+    *,
+    open_item_file_4: OpenItemWorkFile[OiHeader] | None = None,
 ) -> None:
     """``pl060`` - post the OTM4 purchase-order extract. The program's single entry.
 
@@ -1186,6 +1283,14 @@ def run(
             extract file and ``File-29`` the OTM5 file; both are read at
             ``[purchase/pl060.cbl:L377]``, ``[purchase/pl060.cbl:L388]``,
             ``[purchase/pl060.cbl:L610]`` and ``[purchase/pl060.cbl:L641]``.
+        open_item_file_4: the OTM4 extract file. NOT part of the linkage - the frozen
+            ``PROCEDURE DIVISION USING`` has exactly the five entries above
+            [purchase/pl060.cbl:L340-L344] and the file arrives through ``File-Defs``
+            exactly as it does in COBOL. Defaults to the file ``file-28`` names, resolved
+            out of the SHARED registry by ``_otm4_file``, which is the very file ``pl055``
+            appended to. This keyword exists so a test can supply an isolated file; a
+            caller wanting the frozen handoff should leave it alone and pass matching
+            ``File-Defs`` to both programs.
 
     Returns:
         None. ``exit-prog.`` performs ``exit program.`` [purchase/pl060.cbl:L650-L651],
@@ -1198,7 +1303,8 @@ def run(
         [copybooks/wsfnctn.cob:L23-L38] copied at ``[purchase/pl060.cbl:L142]``,
         ``01 ACAS-DAL-Common-Data`` copied at ``[purchase/pl060.cbl:L246]``, and the six
         record areas copied at ``[purchase/pl060.cbl:L146-L153]``. The OTM4 sequence is a
-        FILE and therefore outlives the call; see ``_otm4_sequence``.
+        FILE and therefore outlives the call, so it arrives as the keyword-only
+        ``open_item_file_4`` rather than being declared here; see the note above ``run``.
     """
     ws = _Ws(
         ws_calling_data=ws_calling_data,
@@ -1217,9 +1323,22 @@ def run(
         batch=GlBatchRecord(),  # copy "wsbatch.cob"     [L148]
         posting=WsPostingRecord(),  # copy "wspost.cob"      [L149]
         irs_posting=WsIrsPostingRecord(),  # copy "wspost-irs.cob"  [L150]
-        otm4=_otm4_sequence(file_defs),  # copy "seloi4"/"fdoi4"  [L125]/[L134]
+        # ⭐ SUPPLIED BY THE CALLER: the very carrier ``pl055`` wrote, which is how
+        # [L425] reads what [purchase/pl055.cbl:L587] wrote. A None means this
+        # program was run alone, in which case the file is declared empty and [L425]
+        # takes its ``at end`` branch at once - as it would against an empty file.
+        otm4=(
+            open_item_work_file(OPEN_ITEM_4_NAME, OiHeader)
+            if open_item_file_4 is None
+            else open_item_file_4
+        ),  # copy "seloi4"/"fdoi4"  [L125]/[L134]
         maps03_ws=Maps03Ws(),  # copy "wsmaps03.cob"    [L141]
         date_ws=WsDateFormats(),  # 01 ws-Test-Date [L222] + 01 ws-date-formats [L223]
+        # NOT a linkage operand, NOT a parameter of `run`, and NOT bound here: the
+        # transport policy reaches every handler through the one process-level
+        # policy the CLI boundary installs, so this field keeps its declared `{}`,
+        # which every handler resolves fail-closed. See
+        # `acas_posting.cli.args.install_connection_policy`.
     )
     _init01(ws)
 
@@ -1320,7 +1439,12 @@ def _init01(ws: _Ws) -> None:
     _LOG.info("%s - %s", _PROG_NAME, _TITLE)
 
     _zz070_convert_date(ws)  # [L358] perform zz070-Convert-Date.
-    _LOG.info("run date %s", ws.date_ws.ws_date)  # [L359] display ws-date at 0171.
+    # [L359] display ws-date at 0171.  NO LOG COUNTERPART: ``ws-date`` is the posting
+    # date this run stamps into the records it writes - a date with business meaning,
+    # which the safe-event schema in ``acas_posting/dal/status.py`` excludes (CWE-532).
+    # It is an INPUT the caller supplied through ``to-day``, already known wherever the
+    # run was started and pinned by ``clock.py``.  The conversion above still runs: it
+    # stores ``ws-date`` and may default ``Date-Form``, which IS a table effect.
 
     # [L360] move 1 to File-Key-No.
     # ``File-Key-No`` is an item of ``Logging-Data`` inside ``File-Access``
@@ -1331,8 +1455,11 @@ def _init01(ws: _Ws) -> None:
 
     _init01__acpt_xrply(ws)  # [L362] fall-through into the paragraph.
 
-    # [L372] display space at 0801 with erase eol.  -> a log record.
-    _LOG.debug("clearing the operator prompt line")
+    # [L372] display space at 0801 with erase eol.  NOT A LOG RECORD.  Its whole
+    # operand is a SPACE and its whole purpose is to blank the line the commented-out
+    # confirmation prompt [L363-L365] would have occupied: there is no diagnostic
+    # content to convert, and narrating the erase would emit an event the compiled
+    # program never produced (R-4).  Screen geometry is out of scope besides.
 
     # [L373-L375] THREE SYSTEM-REC COLUMNS ARE WRITTEN HERE, and all three are
     # diff-visible. The maintainer's own comments give the reasons: ``P-Flag-I`` marks
@@ -1409,7 +1536,7 @@ def _init01(ws: _Ws) -> None:
         mv.ZEROS, (_D_TOTAL_VAT, _D_TOTAL_VAT, _D_TOTAL_VAT)
     )
 
-    ws.otm4.open_input()  # [L421] open input open-item-file-4.
+    ws.otm4.open_input(ws.file_access)  # [L421] open input open-item-file-4.
     _otm4_status(ws)
     _fh("otm5_open", _ctx(ws, ws.otm5))  # [L422] open i-o open-item-file-5.
 
@@ -1510,6 +1637,12 @@ _D_OI_TYPE: Final[FieldDescriptor] = _desc(OiHeader, "OI-Type")
 _D_OI_DATE: Final[FieldDescriptor] = _desc(OiHeader, "OI-Date")
 _D_OI_STATUS: Final[FieldDescriptor] = _desc(OiHeader, "OI-Status")
 _D_OI_CR: Final[FieldDescriptor] = _desc(OiHeader, "OI-CR")
+#: DECLARED AND DELIBERATELY UNREFERENCED.  ``oi-invoice`` reaches only print items in
+#: this program - ``move oi-invoice to l5-nos`` [L444] and its companion at [L529] - and
+#: report formatting is out of scope (section 0.2.2); the ``display l5-nos`` at [L530] is
+#: not converted either, because an invoice number is a record key and the safe-event
+#: schema in ``acas_posting/dal/status.py`` excludes it from a log record (CWE-532).  The
+#: descriptor stays so the field keeps its dictionary citation, per rule R-5.
 _D_OI_INVOICE: Final[FieldDescriptor] = _desc(OiKey, "OI-Invoice")
 _D_OI_NET: Final[FieldDescriptor] = _desc(Filler1, "OI-Net")
 _D_OI_CARRIAGE: Final[FieldDescriptor] = _desc(Filler1, "OI-Carriage")
@@ -1646,6 +1779,261 @@ _D_IRS_VAT_AMOUNT: Final[FieldDescriptor] = _desc(
 _D_RRN: Final[FieldDescriptor] = _desc(FileAccess, "Rrn")
 
 
+def _attr_descriptor(owner: Any, attribute: str) -> FieldDescriptor:
+    """The descriptor a record dataclass attaches to one PYTHON attribute.
+
+    :func:`_desc` looks a descriptor up by its COBOL name, which is the right key
+    almost everywhere. It cannot separate the two items ``copybooks/wspl.cob``
+    both spells ``filler`` - the ``redefines`` of ``Quarters``
+    [copybooks/wspl.cob:L50] and the trailing ``x(12)``
+    [copybooks/wspl.cob:L54] - so the trailing one is taken by its attribute
+    name, which is unique. Raising keeps rule R-5's chain unbroken.
+    """
+    cls = owner if isinstance(owner, type) else type(owner)
+    member = getattr(cls, "__dataclass_fields__", {}).get(attribute)
+    descriptor = None if member is None else member.metadata.get("descriptor")
+    if descriptor is None:
+        raise LookupError(
+            f"{cls.__name__} attaches no descriptor to attribute {attribute!r}"
+        )
+    return descriptor
+
+
+#: ⭐⭐ ``01 ws-data``'s tail [purchase/pl060.cbl:L208-L220] as the BYTES the
+#: compiled program addresses, which is what the two subscripted accumulates at
+#: [purchase/pl060.cbl:L467-L468] need - their subscript is unbounded, and an
+#: unbounded subscript lands on bytes rather than on a list element.
+#:
+#: THE WINDOW STARTS AT ``a`` AND ENDS AT ``File-28-status``, because
+#: ``total-group`` sits near the END of this ``01`` rather than in the middle of
+#: it as ``sl060``'s does. That asymmetry is the whole of finding F7: occurrence 4
+#: does not land on a comfortable neighbour here, it runs off the end of the
+#: group.
+#:
+#: THE LENGTH IS VERIFIED AGAINST THE COMPILED ORACLE, not asserted: GnuCOBOL
+#: 3.2.0 reported ``function length`` = 50 for exactly this window, pinning
+#: ``binary-char`` at ONE byte and ``pic s9(7)v99 comp-3`` at FIVE.
+_WS_DATA_TOTALS_GROUP: Final[mv.StorageGroup] = mv.StorageGroup(
+    (
+        mv.GroupItem("a", _D_A),
+        mv.GroupItem("b", _D_B),
+        mv.GroupItem("c", _D_C),
+        mv.GroupItem("work-net", _D_WORK_NET),
+        mv.GroupItem("work-vat", _D_WORK_VAT),
+        mv.GroupItem("work-goods", _D_WORK_GOODS),
+        mv.GroupItem("total-net (1)", _D_TOTAL_NET),
+        mv.GroupItem("total-vat (1)", _D_TOTAL_VAT),
+        mv.GroupItem("total-net (2)", _D_TOTAL_NET),
+        mv.GroupItem("total-vat (2)", _D_TOTAL_VAT),
+        mv.GroupItem("total-net (3)", _D_TOTAL_NET),
+        mv.GroupItem("total-vat (3)", _D_TOTAL_VAT),
+        mv.GroupItem("line-cnt", _D_LINE_CNT),
+        mv.GroupItem("File-28-status", _D_FILE_28_STATUS),
+    ),
+    source_locator="purchase/pl060.cbl:L208-L220",
+)
+
+#: Bytes per occurrence of ``total-group``: one ``total-net`` plus one
+#: ``total-vat`` [purchase/pl060.cbl:L215-L216]. Read from the descriptors rather
+#: than written as a literal 10.
+_TOTAL_GROUP_ELEMENT_BYTES: Final[int] = (
+    _D_TOTAL_NET.byte_length + _D_TOTAL_VAT.byte_length
+)
+
+
+def _ws_data_totals_values(ws: _Ws) -> dict[str, object]:
+    """The window's current contents, keyed the way the byte layout names them.
+
+    ⭐⭐ FINDING F7 LIVES HERE. ``add work-vat to total-vat (a).``
+    [purchase/pl060.cbl:L467] and ``add work-net to total-net (a).`` [:L468] index
+    ``03 total-group occurs 3`` [:L214] with ``03 a pic 9`` [:L208], which
+    ``move oi-type to a.`` [:L459] loaded straight from the open-item header.
+    ``OI-Type`` is documented as ``4 = Proforma`` on the PURCHASE side
+    [copybooks/plwsoi.cob:L28] - used, not reserved - and
+    ``purchase/pl055.cbl:L552`` propagates it verbatim from ``ih-type``. So a
+    perfectly ordinary proforma drives the subscript one past the table, and
+    nothing between the load and the use tests it: the three-way
+    ``if oi-type = 2 / = 3 / = 1`` [:L461-L465] only chooses a print literal and
+    has no ``else``.
+
+    Note the contrast the migration must PRESERVE rather than smooth away: the
+    SALES copybook documents its type 4 as ``Proforma (Not used)``
+    [copybooks/slwsoi.cob:L24]. Same subscript, same unchecked table, different
+    reachability - and ``pl055``'s producer behaviour is correct as it stands.
+
+    WHAT THE COMPILED PROGRAM DOES, measured on GnuCOBOL 3.2.0 against this exact
+    declaration with a variable subscript (a literal one is refused at compile
+    time, which is why the frozen ``move oi-type to a`` form is what makes this
+    reachable at all):
+
+        a = 0  ->  ``total-vat (0)`` IS ``work-goods`` and ``total-net (0)`` IS
+                   ``work-vat``, both whole fields, both reproduced exactly.
+        a = 4  ->  ``total-net (4)`` covers ``line-cnt``, ``File-28-status`` and
+                   then three bytes PAST the ``01`` group; ``total-vat (4)`` lies
+                   ENTIRELY past it. The oracle ran to completion and returned
+                   normally, having left ``line-cnt`` at 115 and
+                   ``File-28-status`` blank, and having changed the process's own
+                   exit status - it did NOT abort.
+
+    ⛔ NO ``IndexError``, no clamp, no modulo, no skip and no bare Python
+    ``[a - 1]``: a negative index would silently accumulate into the THIRD
+    occurrence, which corresponds to nothing the compiled program does. Raising
+    would replace a reproduced anomaly with an invented one (rules R-3, R-4).
+    """
+    return {
+        "a": ws.a,
+        "b": ws.b,
+        "c": ws.c,
+        "work-net": ws.work_net,
+        "work-vat": ws.work_vat,
+        "work-goods": ws.work_goods,
+        "total-net (1)": ws.total_net[0],
+        "total-vat (1)": ws.total_vat[0],
+        "total-net (2)": ws.total_net[1],
+        "total-vat (2)": ws.total_vat[1],
+        "total-net (3)": ws.total_net[2],
+        "total-vat (3)": ws.total_vat[2],
+        "line-cnt": ws.line_cnt,
+        "File-28-status": ws.file_28_status,
+    }
+
+
+def _restore_ws_data_totals(ws: _Ws, after: Mapping[str, object]) -> None:
+    """Write the window's decoded bytes back onto the program's storage.
+
+    EVERY item is written back, not only the two the statement names, because an
+    out-of-range subscript changes fields the statement does NOT name - that is
+    the whole of the anomaly. Assigning only the totals would silently discard
+    the reproduced effect on ``line-cnt`` and ``File-28-status``.
+    """
+    ws.a = cast(int, after["a"])
+    ws.b = cast(int, after["b"])
+    ws.c = cast(int, after["c"])
+    ws.work_net = cast(Decimal, after["work-net"])
+    ws.work_vat = cast(Decimal, after["work-vat"])
+    ws.work_goods = cast(Decimal, after["work-goods"])
+    ws.total_net = [
+        cast(Decimal, after["total-net (1)"]),
+        cast(Decimal, after["total-net (2)"]),
+        cast(Decimal, after["total-net (3)"]),
+    ]
+    ws.total_vat = [
+        cast(Decimal, after["total-vat (1)"]),
+        cast(Decimal, after["total-vat (2)"]),
+        cast(Decimal, after["total-vat (3)"]),
+    ]
+    ws.line_cnt = cast(int, after["line-cnt"])
+    ws.file_28_status = cast(int, after["File-28-status"])
+
+
+def _add_to_total_group(ws: _Ws, member: str, addend: Decimal) -> None:
+    """``add <addend> to <member> (a).`` - one unchecked subscripted accumulate.
+
+    Args:
+        ws: The program's storage. ``ws.a`` is the subscript, unvalidated.
+        member: ``"total-net"`` or ``"total-vat"`` - the member of the occurrence
+            the statement names.
+        addend: The sending field's value, read before the store as COBOL reads
+            it.
+    """
+    values = _ws_data_totals_values(ws)
+    statement = (
+        "purchase/pl060.cbl:L467"
+        if member == "total-vat"
+        else "purchase/pl060.cbl:L468"
+    )
+    receiving = _D_TOTAL_VAT if member == "total-vat" else _D_TOTAL_NET
+    #  The receiver is READ through the same addressing as the store, so an
+    #  out-of-range occurrence contributes its ALIASED value to the sum.
+    receiver_value = mv.subscripted_value(
+        _WS_DATA_TOTALS_GROUP,
+        values,
+        member=f"{member} (1)",
+        element_length=_TOTAL_GROUP_ELEMENT_BYTES,
+        subscript=ws.a,
+        statement=statement,
+    )
+    total = ar.add_to(
+        addend, receiver_value=cast(Decimal, receiver_value), receiving=receiving
+    )
+    _restore_ws_data_totals(
+        ws,
+        mv.subscripted_store(
+            _WS_DATA_TOTALS_GROUP,
+            values,
+            member=f"{member} (1)",
+            element_length=_TOTAL_GROUP_ELEMENT_BYTES,
+            subscript=ws.a,
+            value=total,
+            statement=statement,
+        ),
+    )
+
+
+#: ``03 filler pic x(12).`` [copybooks/wspl.cob:L54] - the trailing item of
+#: ``01 WS-Purch-Record``, taken by attribute because it shares its COBOL name
+#: with the ``redefines`` of ``Quarters``.
+_D_PURCH_TRAILING_FILLER: Final[FieldDescriptor] = _attr_descriptor(
+    WsPurchRecord, "filler_l54"
+)
+
+#: ⭐⭐ The ``Quarters`` neighbourhood of ``01 WS-Purch-Record``
+#: [copybooks/wspl.cob:L43-L54] as the BYTES the compiled program addresses. It
+#: exists for the three subscripted accumulates at [purchase/pl060.cbl:L484,
+#: :L490, :L497], whose subscript is ``05 Current-Quarter pic 9``
+#: [copybooks/wssystem.cob:L110] and is never tested.
+#:
+#: BOTH IMMEDIATE NEIGHBOURS ARE PERSISTED COLUMNS, which is why this cannot be
+#: approximated: quarter 0 addresses ``Purch-Last`` and quarter 5
+#: ``Purch-Unapplied``. Quarter 6 reaches ``Purch-Stats-Date``, a column as well.
+#:
+#: THE LENGTH IS VERIFIED AGAINST THE COMPILED ORACLE: GnuCOBOL 3.2.0 reported
+#: ``function length`` = 58 for exactly this window - SIX more than the sales
+#: record's 52, because the purchase record carries no partial-ship flag and its
+#: trailing filler is ``x(12)`` rather than ``x(5)``.
+_PURCH_QUARTERS_GROUP: Final[mv.StorageGroup] = mv.StorageGroup(
+    (
+        mv.GroupItem("Purch-Current", _desc(WsPurchRecord, "Purch-Current")),
+        mv.GroupItem("Purch-Last", _desc(WsPurchRecord, "Purch-Last")),
+        mv.GroupItem("PTurnover-q (1)", _D_PTURNOVER_Q),
+        mv.GroupItem("PTurnover-q (2)", _D_PTURNOVER_Q),
+        mv.GroupItem("PTurnover-q (3)", _D_PTURNOVER_Q),
+        mv.GroupItem("PTurnover-q (4)", _D_PTURNOVER_Q),
+        mv.GroupItem("Purch-Unapplied", _desc(WsPurchRecord, "Purch-Unapplied")),
+        mv.GroupItem("Purch-Stats-Date", _desc(WsPurchRecord, "Purch-Stats-Date")),
+        mv.GroupItem("filler-54", _D_PURCH_TRAILING_FILLER),
+    ),
+    source_locator="copybooks/wspl.cob:L43-L54",
+)
+
+#: Bytes per occurrence of ``PTurnover-q`` [copybooks/wspl.cob:L51]. Read from
+#: the descriptor rather than written as a literal 6.
+_PTURNOVER_Q_ELEMENT_BYTES: Final[int] = _D_PTURNOVER_Q.byte_length
+
+
+def _purch_quarters_values(ws: _Ws) -> dict[str, object]:
+    """The quarters window's current contents, keyed as the byte layout names it.
+
+    ``03 Quarters`` names the four occurrences individually
+    [copybooks/wspl.cob:L45-L49] and ``03 filler redefines Quarters`` exposes the
+    same bytes as ``PTurnover-q`` [copybooks/wspl.cob:L50-L51]. They are ONE
+    four-item area, so the subscripted view is read here and both views are
+    written back together.
+    """
+    quarters = ws.purch.quarters_view.pturnover_q
+    return {
+        "Purch-Current": ws.purch.purch_current,
+        "Purch-Last": ws.purch.purch_last,
+        "PTurnover-q (1)": quarters[0],
+        "PTurnover-q (2)": quarters[1],
+        "PTurnover-q (3)": quarters[2],
+        "PTurnover-q (4)": quarters[3],
+        "Purch-Unapplied": ws.purch.purch_unapplied,
+        "Purch-Stats-Date": ws.purch.purch_stats_date,
+        "filler-54": ws.purch.filler_l54,
+    }
+
+
 def _add_to_pturnover_q(ws: _Ws, quarter: int, value: Decimal) -> None:
     """``add work-goods to pturnover-q (current-quarter)`` - one subscripted accumulate.
 
@@ -1660,28 +2048,69 @@ def _add_to_pturnover_q(ws: _Ws, quarter: int, value: Decimal) -> None:
     constrains ``05 Current-Quarter pic 9`` to 1..4.
     Reproduced deliberately per R-4; DO NOT FIX.
 
-    AMBIGUITY Q-QUARTER-SUBSCRIPT - what the compiled program does with a
-    ``current-quarter`` outside 1..4 is a property of the generated code's addressing,
-    not of the source, so only the oracle can say. No guard is added here, which means
-    the behaviour is whatever the container gives: subscript 0 addresses the last
-    occurrence and subscript 5 raises. Both are recorded as unmeasured rather than
-    presented as the answer.
+    ⭐ WHAT THE COMPILED PROGRAM DOES - MEASURED, NOT INFERRED (rule R-6). The
+    window above was transcribed verbatim into GnuCOBOL 3.2.0 and driven with a
+    variable subscript. Seeded ``Purch-Last`` 200.02, quarters 1.01/2.02/3.03/4.04,
+    ``Purch-Unapplied`` 500.05, ``Purch-Stats-Date`` 2024, adding 77.77:
 
-    Both views of the storage are kept in step. ``03 Quarters`` names the four
-    occurrences individually and ``03 filler redefines Quarters`` exposes them as
-    ``PTurnover-q`` [copybooks/wspl.cob:L45-L51]; they are one four-item area in COBOL, so
-    a store through the subscripted view is a store to the named item as well.
+        q = 1  ->  Turnover-q1 78.78          q = 4  ->  Turnover-q4 81.81
+        q = 0  ->  Purch-Last  277.79   A PERSISTED COLUMN
+        q = 5  ->  Purch-Unapplied 577.82   A PERSISTED COLUMN
+        q = 6  ->  Purch-Stats-Date, ANOTHER COLUMN, plus the first two bytes of
+                   the trailing filler - reproduced byte for byte, the six-byte
+                   window ``32 30 32 34 20 20`` being one of the readings that
+                   pinned the runtime's receiver read.
+
+    Every reading returned normally with no diagnostic and no status change: the
+    out-of-range quarters are all INSIDE ``01 WS-Purch-Record``, so unlike the
+    ``total-group`` site there is no off-the-end case here at all.
+
+    ⛔ The previous note recorded subscript 0 as addressing the LAST occurrence
+    and subscript 5 as raising. Both were wrong, and both are now measured:
+    subscript 0 addresses the field immediately BEFORE the table and subscript 5
+    the one immediately after it. A Python ``[quarter - 1]`` produces the first of
+    those errors silently, which is why the addressing is done in bytes.
+
+    Both views of the storage are kept in step, and so is every neighbour the
+    window can reach.
     """
-    index = quarter - 1  # COBOL OCCURS subscripts are ONE-based.
-    updated = ar.add_to(
-        value,
-        receiver_value=ws.purch.quarters_view.pturnover_q[index],
-        receiving=_D_PTURNOVER_Q,
+    values = _purch_quarters_values(ws)
+    statement = "purchase/pl060.cbl:L484"
+    after = mv.subscripted_store(
+        _PURCH_QUARTERS_GROUP,
+        values,
+        member="PTurnover-q (1)",
+        element_length=_PTURNOVER_Q_ELEMENT_BYTES,
+        subscript=quarter,
+        value=ar.add_to(
+            value,
+            receiver_value=cast(
+                Decimal,
+                mv.subscripted_value(
+                    _PURCH_QUARTERS_GROUP,
+                    values,
+                    member="PTurnover-q (1)",
+                    element_length=_PTURNOVER_Q_ELEMENT_BYTES,
+                    subscript=quarter,
+                    statement=statement,
+                ),
+            ),
+            receiving=_D_PTURNOVER_Q,
+        ),
+        statement=statement,
     )
-    occurrences = list(ws.purch.quarters_view.pturnover_q)
-    occurrences[index] = updated
-    ws.purch.quarters_view.pturnover_q = tuple(occurrences)
-    setattr(ws.purch.quarters, _QUARTER_ATTRS[index], updated)
+
+    ws.purch.purch_current = cast(Decimal, after["Purch-Current"])
+    ws.purch.purch_last = cast(Decimal, after["Purch-Last"])
+    ws.purch.purch_unapplied = cast(Decimal, after["Purch-Unapplied"])
+    ws.purch.purch_stats_date = cast(int, after["Purch-Stats-Date"])
+    ws.purch.filler_l54 = cast(str, after["filler-54"])
+    occurrences = tuple(
+        cast(Decimal, after[f"PTurnover-q ({index})"]) for index in (1, 2, 3, 4)
+    )
+    ws.purch.quarters_view.pturnover_q = occurrences
+    for attribute, occurrence in zip(_QUARTER_ATTRS, occurrences):
+        setattr(ws.purch.quarters, attribute, occurrence)
 
 
 def _init01__loop(ws: _Ws) -> None:
@@ -1693,7 +2122,7 @@ def _init01__loop(ws: _Ws) -> None:
     and the only way out is the at-end at ``[purchase/pl060.cbl:L425-L426]``.
     """
     while True:
-        record = ws.otm4.read_next()  # [L425] read open-item-file-4 at end
+        record = ws.otm4.read_next(ws.file_access)  # [L425] read open-item-file-4 at end
         _otm4_status(ws)
         if record is None:
             # GO TO class 2 - [L426] `go to main-end`. The post-loop work is placed in
@@ -1742,8 +2171,14 @@ def _init01__loop(ws: _Ws) -> None:
                 sending_field=_D_OI_SUPPLIER_GROUP,
             )
         else:
-            # [L442] move purch-name to l5-name. OMITTED - print item only.
-            _LOG.debug("supplier %r found", ws.purch.purch_name)
+            # [L442] move purch-name to l5-name. OMITTED - print item only, AND NOT
+            # LOGGED: report formatting is out of scope (Agent Action Plan section
+            # 0.2.2), the frozen source does not ``display`` it, and ``purch-name`` is a
+            # SUPPLIER NAME, which the safe-event schema in
+            # ``acas_posting/dal/status.py`` excludes from a record at any level
+            # (CWE-532).  The ELSE arm survives because the branch is real control flow:
+            # the THEN arm above rebuilds the key after a failed read.
+            pass
 
         # [L444] move oi-invoice to l5-nos. OMITTED - print item only.
 
@@ -1769,12 +2204,18 @@ def _init01__loop(ws: _Ws) -> None:
         # print item - but the nesting is reproduced because its shape is the program's.
         # Note there is no ELSE arm for a type outside {1,2,3}: ``l5-type`` then keeps
         # whatever the previous iteration left in it.
+        # NONE OF THE THREE IS LOGGED.  Each arm is ``move <literal> to l5-type``
+        # [L453, L456, L459] - a store into ``01 line-5``, report content that section
+        # 0.2.2 puts out of scope; the frozen program ``display``s none of it, and
+        # section 0.3.4 converts a DISPLAY, not a report field.  ALL THREE ARMS AND THE
+        # ABSENT ELSE SURVIVE, because that shape is the finding recorded just above:
+        # a type outside {1,2,3} leaves the previous iteration's caption in place.
         if ws.oi_header.oi_type == 2:
-            _LOG.debug("l5-type Invoice")  # [L453]
+            pass  # [L453]
         elif ws.oi_header.oi_type == 3:
-            _LOG.debug("l5-type Cr. Note")  # [L456]
+            pass  # [L456]
         elif ws.oi_header.oi_type == 1:
-            _LOG.debug("l5-type Receipt")  # [L459]
+            pass  # [L459]
 
         # [L461] add oi-vat oi-c-vat giving work-vat.  TWO addends, ONE quantize.
         ws.work_vat = ar.add_giving(
@@ -1800,13 +2241,16 @@ def _init01__loop(ws: _Ws) -> None:
         )
         # [L465] move work-net to l5-net. OMITTED - print item only.
 
-        # [L467-L468] the two subscripted accumulates. One-based subscript; see A-NEW-3.
-        ws.total_vat[ws.a - 1] = ar.add_to(
-            ws.work_vat, receiver_value=ws.total_vat[ws.a - 1], receiving=_D_TOTAL_VAT
-        )
-        ws.total_net[ws.a - 1] = ar.add_to(
-            ws.work_net, receiver_value=ws.total_net[ws.a - 1], receiving=_D_TOTAL_NET
-        )
+        # [L467-L468] the two subscripted accumulates, in the source's own order.
+        # THE ORDER IS LOAD-BEARING when ``a`` is out of range: at ``a = 0`` the
+        # first statement's receiver IS ``work-goods`` and the second's IS
+        # ``work-vat``, so the second reads a ``work-vat`` the first has already
+        # changed. Each statement therefore takes its own trip through
+        # ``_add_to_total_group``; nothing is hoisted, batched or reordered.
+        # See A-NEW-3 and finding F7 - ``a`` comes from ``oi-type``, which is 4
+        # for a purchase proforma [copybooks/plwsoi.cob:L28].
+        _add_to_total_group(ws, "total-vat", ws.work_vat)
+        _add_to_total_group(ws, "total-net", ws.work_net)
 
         # [L470-L471] work-1 = work-net + work-vat, in two statements and two stores.
         ws.work_1 = mv.move(ws.work_net, _D_WORK_1, sending_field=_D_WORK_NET)
@@ -1819,16 +2263,22 @@ def _init01__loop(ws: _Ws) -> None:
             _bl_write(ws)  # [L475]
 
         # [L477] subtract purch-unapplied from purch-current giving l5-old-bal.
-        # PRINT-ONLY: the receiver is an item of ``01 line-5``. The statement is performed
-        # so the arithmetic census stays complete and its receiving field's width is
-        # honoured, and the result reaches a log record rather than a table.
-        _LOG.debug(
-            "l5-old-bal %s",
-            ar.subtract_giving(
-                ws.purch.purch_unapplied,
-                minuend=ws.purch.purch_current,
-                receiving=_D_PRINT_MONEY,
-            ),
+        # PRINT-ONLY: the receiver is an item of ``01 line-5``.  THE STATEMENT IS STILL
+        # PERFORMED - unconditionally, exactly as the frozen program performs it - so the
+        # arithmetic census stays complete and the receiving field's width is honoured.
+        # ITS RESULT IS NOT BOUND AND NOT LOGGED, for three reasons that each suffice:
+        # the receiver is report content, out of scope per section 0.2.2; the value is a
+        # MONETARY BALANCE, which the safe-event schema in ``acas_posting/dal/status.py``
+        # excludes from a record at any level (CWE-532); and as a log ARGUMENT it was
+        # evaluated before the logging module decided whether the record was wanted, so a
+        # value the receiving picture could not hold would have raised from inside a
+        # disabled diagnostic.  Performing it as a plain statement removes that failure
+        # path outright, which no ``isEnabledFor`` guard could do, while keeping the
+        # frozen program's own unconditional evaluation.
+        ar.subtract_giving(
+            ws.purch.purch_unapplied,
+            minuend=ws.purch.purch_current,
+            receiving=_D_PRINT_MONEY,
         )
 
         # [L478] if oi-type = 1 or 2 - AN ABBREVIATED RELATION, i.e.
@@ -1917,14 +2367,12 @@ def _init01__loop(ws: _Ws) -> None:
         # [L511-L512] the maintainer's own invariant: "At this point only current OR
         # unapplied can be non zero and current will be = or > zero".
         # [L514] subtract purch-unapplied from purch-current giving l5-new-bal.
-        # PRINT-ONLY, as [L477] is.
-        _LOG.debug(
-            "l5-new-bal %s",
-            ar.subtract_giving(
-                ws.purch.purch_unapplied,
-                minuend=ws.purch.purch_current,
-                receiving=_D_PRINT_MONEY,
-            ),
+        # PRINT-ONLY, as [L477] is: performed unconditionally for the census, its result
+        # neither bound nor logged, for the three reasons set out at [L477].
+        ar.subtract_giving(
+            ws.purch.purch_unapplied,
+            minuend=ws.purch.purch_current,
+            receiving=_D_PRINT_MONEY,
         )
 
         if ws.ws_reply == "X":  # [L515]
@@ -1947,29 +2395,32 @@ def _init01__loop(ws: _Ws) -> None:
         if ws.file_access.fs_reply != FsReply.SUCCESS:
             _LOG.error("%s", _PL130)  # [L527]
             # [L528] display oi5-supplier.  [L529-L530] move oi5-invoice to l5-nos and
-            # display it. Both read the OTM5 record area through its key redefinition.
-            _LOG.error(
-                "oi5-supplier %r oi5-invoice %s",
-                mv.move_group(
-                    _oi_supplier_image(ws.otm5),
-                    _D_OI5_SUPPLIER,
-                    sending_field=_D_OI_SUPPLIER_GROUP,
-                ),
-                mv.move(
-                    ws.otm5.oi_key.oi_invoice,
-                    _D_OI5_INVOICE,
-                    sending_field=_D_OI_INVOICE,
-                ),
-            )
+            # display it.  NEITHER IS LOGGED, and the two renderer calls that built them
+            # are gone with them.  They are the SUPPLIER CODE and the INVOICE NUMBER of
+            # the very row that failed - record keys, which the safe-event schema in
+            # ``acas_posting/dal/status.py`` excludes from a record at any level
+            # (CWE-532), DEBUG included.  Their removal also deletes a failure path that
+            # logging must not add: both were ``cobol.move`` calls evaluated as log
+            # ARGUMENTS, before the logging module decided whether the record was wanted,
+            # so a value the receiving picture could not hold would have raised from
+            # inside a diagnostic.  ``l5-nos`` is a print item besides, omitted with the
+            # rest of ``01 line-5``.
             _LOG.error("fs-reply = %s", ws.file_access.fs_reply)  # [L531-L532]
             _evaluate_message(ws)  # [L533]
+            # ``ws-Eval-Msg`` is ``pic x(25)`` filled ONLY by ``Evaluate-Message`` from
+            # the static table ``copybooks/FileStat-Msgs.cpy`` keyed on ``fs-reply``, so
+            # it is a fixed status NAME - never driver text, never a business value.
             _LOG.error("%s", ws.ws_eval_msg)  # [L534]
-            _LOG.error("%s", _PL002)  # [L535]
+            # [L535] display PL002 / [L537] accept ws-reply at 2450.  BOTH DROPPED: the
+            # literal is nothing but the instruction to press the key the ``accept``
+            # reads, so there is no substantive half to keep, and section 0.3.4 drops a
+            # prompt whose only effect is to block a terminal.  The substantive
+            # diagnostics are the three records above.
             if ws.ws_calling_data.ws_caller.strip() != "xl150":  # [L536]
-                # [L537] accept ws-reply at 2450. The PAUSE is dropped - it only blocks a
-                # terminal - while the branch that decides whether to pause is PRESERVED,
-                # per Agent Action Plan section 0.3.4.
-                _LOG.debug("operator acknowledgement suppressed - no terminal")
+                # THE BRANCH THAT DECIDES WHETHER TO PAUSE IS PRESERVED - it is the
+                # codebase's own unattended-mode test - and it now decides nothing
+                # observable, which is exactly what dropping the pause means.
+                pass
 
         # [L539] write print-record from line-5 after 1. OMITTED - the print file.
         ws.line_cnt = ar.add_to(1, receiver_value=ws.line_cnt, receiving=_D_LINE_CNT)
@@ -1996,24 +2447,30 @@ def _init01__main_end(ws: _Ws) -> None:
     Section-qualified because ``main-end.`` is declared twice in this program - here and
     in ``cr-notes`` at ``[purchase/pl060.cbl:L823]``.
     """
-    ws.otm4.close()  # [L548] close open-item-file-4.
+    ws.otm4.close(ws.file_access)  # [L548] close open-item-file-4.
     _otm4_status(ws)
     _fh("purch_close", _ctx(ws, ws.purch))  # [L549]
     _fh("otm5_close", _ctx(ws, ws.otm5))  # [L550]
 
     # [L551-L571] THREE TOTAL BLOCKS, one per ``total-group`` occurrence, each moving the
-    # pair into ``01 line-6`` and adding them for the gross. Every receiver is a print
-    # item, so the three ``add ... giving`` statements are performed for the record and
-    # their results logged; nothing here reaches a table.
+    # pair into ``01 line-6`` and adding them for the gross.  Every receiver is a print
+    # item, so the three ``add ... giving`` statements ARE STILL PERFORMED -
+    # unconditionally, as the frozen program performs them - and NOTHING IS LOGGED.
     #
-    # ``ws-lits (n)`` [purchase/pl060.cbl:L266] supplies the caption. Subscripts are
-    # literal 1, 2 and 3 in the frozen source - not a loop - and are kept literal here.
-    _LOG.debug(  # [L551-L554]
-        "totals %s net=%s vat=%s gross=%s",
-        _WS_LITS[0],
-        ws.total_net[0],
-        ws.total_vat[0],
-        ar.add_giving(ws.total_net[0], ws.total_vat[0], receiving=_D_PRINT_MONEY),
+    # Three independent reasons, each sufficient: the receivers are report content, which
+    # section 0.2.2 puts out of scope and 0.3.4 does not convert; the operands are the
+    # run's MONETARY TOTALS, which the safe-event schema in
+    # ``acas_posting/dal/status.py`` excludes from a record at any level (CWE-532); and as
+    # log ARGUMENTS the three ``add_giving`` calls were evaluated before the logging
+    # module decided whether the record was wanted, so a value the receiving picture could
+    # not hold would have raised from inside a disabled diagnostic.  Performing them as
+    # plain statements removes that failure path outright.
+    #
+    # ``ws-lits (n)`` [purchase/pl060.cbl:L266] supplies the caption for the printed line
+    # and is therefore no longer read here.  Subscripts are literal 1, 2 and 3 in the
+    # frozen source - not a loop - and are kept literal.
+    ar.add_giving(  # [L551-L554]
+        ws.total_net[0], ws.total_vat[0], receiving=_D_PRINT_MONEY
     )
     # [L556] if line-cnt > Page-Lines - 7 perform headings.
     # A RELATION-CONDITION ARITHMETIC SITE: ``Page-Lines - 7`` has NO receiving field, so
@@ -2031,19 +2488,11 @@ def _init01__main_end(ws: _Ws) -> None:
     ):
         _headings(ws)  # [L557]
     # [L559] write print-record from line-6 after 3. OMITTED - the print file.
-    _LOG.debug(  # [L561-L565]
-        "totals %s net=%s vat=%s gross=%s",
-        _WS_LITS[1],
-        ws.total_net[1],
-        ws.total_vat[1],
-        ar.add_giving(ws.total_net[1], ws.total_vat[1], receiving=_D_PRINT_MONEY),
+    ar.add_giving(  # [L561-L565]
+        ws.total_net[1], ws.total_vat[1], receiving=_D_PRINT_MONEY
     )
-    _LOG.debug(  # [L567-L571]
-        "totals %s net=%s vat=%s gross=%s",
-        _WS_LITS[2],
-        ws.total_net[2],
-        ws.total_vat[2],
-        ar.add_giving(ws.total_net[2], ws.total_vat[2], receiving=_D_PRINT_MONEY),
+    ar.add_giving(  # [L567-L571]
+        ws.total_net[2], ws.total_vat[2], receiving=_D_PRINT_MONEY
     )
 
     if _IS_G_L(ws.system_record.system_data_block.level.level_1):  # [L573]
@@ -2112,9 +2561,9 @@ def _init01__end_loop_end(ws: _Ws) -> None:
     # clears the extract ``pl055`` produced, and it is the exact mirror of the Sales
     # twin's truncation of OTM2 [sales/sl060.cbl:L677-L678]. ``open_output`` on the work
     # sequence discards its records, which is COBOL's own semantics for the verb.
-    ws.otm4.open_output()
+    ws.otm4.open_output(ws.file_access)
     _otm4_status(ws)
-    ws.otm4.close()
+    ws.otm4.close(ws.file_access)
     _otm4_status(ws)
     _fh("otm5_close", _ctx(ws, ws.otm5))  # [L607]
 
@@ -2160,8 +2609,13 @@ def _init01__end_loop_end(ws: _Ws) -> None:
     ):
         # [L624] move "Un-Applied Credits C/F " to l8-desc.
         # [L625] move work-b to l8-tot.
-        # [L626] write print-record from line-8 after 3.  All three OMITTED - print file.
-        _LOG.debug("Un-Applied Credits C/F  %s", ws.work_b)
+        # [L626] write print-record from line-8 after 3.  All three OMITTED - print file -
+        # AND NOT LOGGED: a report line is out of scope per section 0.2.2, and ``work-b``
+        # is an accumulated MONETARY VALUE, which the safe-event schema excludes from a
+        # record (CWE-532).  THE ``if`` SURVIVES, because the split between this
+        # conditional line and the UNCONDITIONAL period-total add below it is load-bearing
+        # - the banner on that add explains why.
+        pass
 
     # [L628] add work-b to pl-cn-unappl-this-month.
     # ******************************************************************************
@@ -2192,15 +2646,22 @@ def _init01__end_loop_end(ws: _Ws) -> None:
     # NOT supplied.
     # Reproduced deliberately per R-4; DO NOT FIX.
     if _is_purchase_missing(ws):  # [L630]
+        # NEITHER ARM IS LOGGED.  Neither ``PL133`` nor ``PL133T`` is ever DISPLAYED:
+        # both are ``move``d into ``print-record``, which makes them report content, out
+        # of scope per section 0.2.2 - and section 0.3.4 converts a DISPLAY, not a report
+        # line.  Narrating the missing ``write`` would additionally invent an operator
+        # diagnostic for a defect the compiled program reports in no way at all, which is
+        # the opposite of reproducing it.  BOTH ARMS SURVIVE AS WRITTEN, because their
+        # asymmetry IS anomaly A-NEW-2 and the structure is its evidence.
         if _IS_FS_COBOL_FILES_USED(  # [L631]
             ws.system_record.system_data_block.rdbms_flat_statuses.file_system_used
         ):
             # [L632] move PL133 to print-record.  ... and no write follows.
-            _LOG.debug("print-record loaded with %r and never written", _PL133)
+            pass
         else:
             # [L634] move PL133T to print-record.
             # [L635] write print-record after 3.
-            _LOG.warning("%s", _PL133T)
+            pass
 
     # [L637] close print-file. OMITTED with the rest of the print file.
     # [L638] call "SYSTEM" using Print-Report.
@@ -2250,9 +2711,16 @@ def _cr_swop(ws: _Ws) -> None:
     # "Above should NOT happen". The pause is dropped and the branch that decides on it
     # is preserved (Agent Action Plan section 0.3.4).
     if ws.work_1 == 0:
-        _LOG.warning("%s", _PL131)  # [L659]
+        # [L659] display PL131.  A MIXED LITERAL: the diagnostic half is kept and the
+        # trailing ": Return to continue" - the instruction to press the key that [L661]'s
+        # ``accept`` reads - is dropped with the pause itself.
+        _LOG.warning("%s", _PL131_NOTICE)  # [L659]
         if ws.ws_calling_data.ws_caller.strip() != "xl150":  # [L660]
-            _LOG.debug("operator acknowledgement suppressed - no terminal")  # [L661]
+            # [L661] accept ws-reply at 2434.  THE PAUSE IS DROPPED and the branch that
+            # decides whether to pause is PRESERVED - it is the codebase's own
+            # unattended-mode test.  Narrating the suppression would emit an event the
+            # compiled program never produced (R-4).
+            pass
 
     if _IS_FS_COBOL_FILES_USED(  # [L665]
         ws.system_record.system_data_block.rdbms_flat_statuses.file_system_used
@@ -2267,14 +2735,13 @@ def _cr_swop(ws: _Ws) -> None:
     # ``l7-bal``, ``l7-appl`` and the ``write``. All OMITTED - ``01 line-7`` is print
     # furniture. ``l7-cust`` receives the ``oi-supplier`` group, which is the third of the
     # three whole-group uses of that field.
-    _LOG.debug(
-        "cr-swop %r invoice=%s cr=%s bal=%s applied=%s",
-        _oi_supplier_image(ws.oi_header),
-        ws.oi_header.oi_key.oi_invoice,
-        ws.oi_header.oi_cr,
-        ws.work_1,
-        ws.oi_header.filler_1.oi_paid,
-    )
+    # NOT LOGGED EITHER.  Every operand the record carried is excluded by the
+    # safe-event schema in ``acas_posting/dal/status.py``: the supplier group and the
+    # invoice and credit-note numbers are RECORD KEYS, and the balance and the applied
+    # amount are MONETARY VALUES (CWE-532).  The frozen source ``display``s none of them -
+    # they are ``move``s into ``01 line-7`` - so there is nothing here for section 0.3.4
+    # to convert.  Removing the record also removes an eager ``_oi_supplier_image`` call
+    # that ran before the logging module decided whether the record was wanted.
 
     ws.line_cnt = ar.add_to(  # [L678] add 1 to line-cnt.
         1, receiver_value=ws.line_cnt, receiving=_D_LINE_CNT
@@ -2350,10 +2817,11 @@ def _new_heading(ws: _Ws) -> None:
     """
     ws.j = ar.add_to(1, receiver_value=ws.j, receiving=_D_J)  # [L694]
     # [L695] move j to l3-page.  [L696] move usera to l3-user.  Both OMITTED - print
-    # items of ``01 line-3``. ``usera`` is ``05 Suser`` of the system record.
-    _LOG.debug(
-        "page %s user %r", ws.j, ws.system_record.system_data_block.suser.usera
-    )
+    # items of ``01 line-3`` - AND NOT LOGGED.  A page number is report formatting, out of
+    # scope per section 0.2.2, and ``usera`` (``05 Suser`` of the system record) is the
+    # OPERATOR IDENTITY, which the safe-event schema excludes from a record at any level
+    # (CWE-532).  The counter above stays: [L556], [L619] and [L679] all test ``line-cnt``,
+    # and ``j`` selects which heading form is written.
     if ws.j != 1:  # [L698]
         # [L699-L703] four writes: line-1 after page, line-2, line-1a, then a blank.
         pass
@@ -2378,10 +2846,9 @@ def _headings(ws: _Ws) -> None:
     and in seeding ``line-cnt`` with 5 rather than 6. The duplication is preserved.
     """
     ws.j = ar.add_to(1, receiver_value=ws.j, receiving=_D_J)  # [L720]
-    # [L721-L722] move j to l3-page. / move usera to l3-user.  OMITTED - print items.
-    _LOG.debug(
-        "page %s user %r", ws.j, ws.system_record.system_data_block.suser.usera
-    )
+    # [L721-L722] move j to l3-page. / move usera to l3-user.  OMITTED - print items -
+    # and NOT LOGGED, for the same two reasons as [L695-L696] in ``new-heading``: report
+    # formatting is out of scope, and ``usera`` is the operator identity.
     if ws.j != 1:  # [L724]
         # [L725-L728] three writes and a blank - NO ``line-1a`` here, unlike [L701].
         pass
@@ -2476,7 +2943,9 @@ def _purch_comp(ws: _Ws) -> None:
     # ``divide A into B giving C`` means ``C = B / A``, so this is
     # ``purch-average = work-2 / purch-activety``. TRUNCATION 2 of A-8: an integer
     # receiver. Note the ``INTO`` form; ``sl100`` and ``pl100`` use the ``BY`` form, which
-    # is the OPPOSITE operand order, and the two are not conflated.
+    # is the opposite operand order AS WRITTEN. It computes the same quotient -
+    # accumulator / activity - so the difference is syntactic; the two forms are
+    # still not conflated, because each program's source form is mirrored.
     ws.purch.purch_average = ar.divide_into_giving(
         ws.purch.purch_activety, ws.work_2, receiving=_D_PURCH_AVERAGE
     )
@@ -3456,9 +3925,14 @@ def _bl_close(ws: _Ws) -> None:
         _evaluate_message(ws)  # [L1020]
         _LOG.error("%s", ws.ws_eval_msg)  # [L1021]
         if ws.ws_calling_data.ws_caller.strip() != "xl150":  # [L1022]
-            _LOG.error("%s", _PL002)  # [L1023]
-            # [L1024] accept ws-reply at 2430 - the pause is dropped, the branch kept.
-            _LOG.debug("operator acknowledgement suppressed - no terminal")
+            # [L1023] display PL002 / [L1024] accept ws-reply at 2430.  BOTH DROPPED -
+            # the key-press instruction and the key press - and the suppression is not
+            # narrated either, because the compiled program produces no such output
+            # (R-4).  The branch is kept: it is the codebase's own unattended-mode test,
+            # and its ABSENCE in the ``pl100`` twin [purchase/pl100.cbl:L670] is a
+            # recorded structural divergence.  The substantive diagnostics are the two
+            # records above.
+            pass
 
     # [L1027] if IRS-Both-Used OR G-L. Fan-out site 5 of 7.
     if _IS_IRS_BOTH_USED(
@@ -4058,8 +4532,16 @@ def _zz070_convert_date__zz070_exit(ws: _Ws) -> None:
 #                             past its picture ([L1028] -> [L905] -> [L921])
 #   Q-VAT-PC-31               whether storing 31 into a percentage field [L994] is
 #                             observable downstream, and in which column
-#   Q-OTM4-HANDOFF            where the OTM4 sequence ``pl055`` writes and ``pl060`` reads
-#                             is expected to live once ``pl055`` exists
+#   Q-OTM4-HANDOFF            RESOLVED, and recorded here rather than removed. The OTM4
+#                             sequence ``pl055`` writes and this program reads lives in
+#                             ``acas_posting/workfiles.py`` as the shared
+#                             ``OpenItemWorkFile``, which publishes the ``EXTEND`` mode the
+#                             producer needs and the ``read_next`` this program needs, and
+#                             the ROUTE threads ONE instance from the ``pl055`` dispatch to
+#                             the ``pl060`` dispatch - which is what the two programs naming
+#                             the same ``assign file-28`` achieves in COBOL. It arrives as
+#                             the keyword-only ``open_item_file_4``, leaving the frozen
+#                             five-entry ``PROCEDURE DIVISION USING`` untouched.
 #   and, from the body: the exact ``post-date`` text the century-dropping reference
 #   modification at [L937-L938] produces; whether any scenario sets
 #   ``FS-Cobol-Files-Used``; and the disposition of the OTM5 write failure at [L526].
@@ -4072,15 +4554,15 @@ def _zz070_convert_date__zz070_exit(ws: _Ws) -> None:
 #   ``assign file-28 / access sequential / status fs-reply`` with NO ``organization``
 #   clause, and ``copybooks/fdoi4.cob`` gives it a single record
 #   ``01 open-item-record-4 pic x(113)``. Because ``ASSIGN`` names a FILE and a file
-#   outlives the program that opened it, the sequence is held in ``_OTM4_SEQUENCES``, keyed
-#   by the name ``file-28`` assigns, and obtained through ``_otm4_sequence`` - NOT passed as
-#   a sixth argument, because the frozen ``PROCEDURE DIVISION USING`` has exactly five
-#   entries. Neither ``copybooks/plwsoi.cob`` nor
-#   ``copybooks/plwssoi.cob`` has a module under ``acas_posting/records/``, and
-#   ``acas_posting/workfiles.py`` publishes only ``pre_trans``, ``post_trans`` and
-#   ``sort_trans``, so the sequence is declared MODULE-PRIVATELY here over
-#   ``workfiles.LineSequentialWorkFile`` - no new file is added to either folder, both of
-#   which the Agent Action Plan closes at a fixed file list (sections 0.4.1.2, 0.4.4).
+#   outlives the program that opened it, the sequence is the SHARED
+#   ``acas_posting.workfiles.OpenItemWorkFile`` that ``pl055`` wrote and the ROUTE hands on.
+#   It arrives as the KEYWORD-ONLY ``open_item_file_4`` - NOT as a sixth positional
+#   argument, because the frozen ``PROCEDURE DIVISION USING`` has exactly five entries -
+#   which is the same device the three General Ledger phases use for their work files.
+#   Neither ``copybooks/plwsoi.cob`` nor ``copybooks/plwssoi.cob`` has a module under
+#   ``acas_posting/records/``, and none is added: no new file is created in either folder,
+#   both of which the Agent Action Plan closes at a fixed file list
+#   (sections 0.4.1.2, 0.4.4).
 #   Semantics, matching the COBOL verbs exactly: ``open input`` [L421] positions at the
 #   start; ``read ... at end`` [L425] yields the EOF branch; ``open output`` [L605]
 #   TRUNCATES; ``close`` [L548], [L606] keeps the records. Because ``seloi4.cob`` names
@@ -4145,17 +4627,49 @@ def _zz070_convert_date__zz070_exit(ws: _Ws) -> None:
 #     because ``line-cnt`` is tested at [L541], [L556], [L619] and [L679].
 #   * ``copy "envdiv.cob"`` [L118] and ``set ENVIRONMENT`` [L352-L353] - representation
 #     only.
-#   * every ``display ... at`` becomes a log record. Agent Action Plan section 0.3.4: they
-#     "must not alter control flow and must not appear in any table dump."
+#   * ``display ... at`` -> A LOG RECORD, BUT NOT ALL OF IT. Agent Action Plan section
+#     0.3.4 converts a DIAGNOSTIC display, which "must not alter control flow and must not
+#     appear in any table dump" - and no record this module emits does either.
+#     CONVERTED: [L356-L357] the banner and title, [L412-L413] the wait and phase-1
+#     labels, [L527, L531-L534] the OTM5 write-failure message with its file status and
+#     the decoded status name, [L583] the phase-2 label, [L659] the substantive half of
+#     ``PL131``, and [L1018-L1021] the batch-write failure with its status and name.
+#     NOT CONVERTED, each for a stated reason:
+#       - [L535] and [L1023] - ``PL002``, PURE ACKNOWLEDGEMENT PROMPTS standing
+#         immediately before the ``accept``s below. The whole of the literal is the
+#         key-press instruction, so no substantive half is lost. ``PL131`` [L659] is the
+#         one MIXED literal and its diagnostic half IS kept, split at ``_PL131_NOTICE``.
+#       - [L359] - ``display ws-date``. THE POSTING DATE IS BUSINESS DATA, which the
+#         safe-event schema in ``acas_posting/dal/status.py`` excludes from a record
+#         (CWE-532); it is a command-line INPUT that ``clock.py`` pins.
+#       - [L528] and [L530] - ``oi5-supplier`` and ``l5-nos``. RECORD KEYS, excluded by
+#         the same schema at any level, DEBUG included; their renderers were eager log
+#         arguments besides, so removing them also removes a failure path a diagnostic
+#         must not add.
+#       - [L355], [L372] and [L411] - ``display " "`` / ``display space``. Screen erasure:
+#         the operand is a space, so there is no diagnostic content to convert.
+#     ``ws-Eval-Msg`` IS carried, because ``Evaluate-Message`` fills it only from the
+#     static table ``copybooks/FileStat-Msgs.cpy`` keyed on ``fs-reply`` - a fixed status
+#     NAME, not driver text and not a business value.
 #   * ``accept ws-reply`` at [L537], [L661] and [L1024] - acknowledgement pauses, DROPPED;
 #     the ``WS-Caller not = "xl150"`` branches around them are PRESERVED, because they are
 #     branches and not pauses.
-#   * the message literals ``PL002``, ``PL003``, ``PL130``, ``PL131``, ``PL132``, ``PL133``
-#     and ``PL133T`` [L250-L257] are kept as log text only.
+#   * the message literals [L250-L257]. ``PL130``, ``PL132`` and the diagnostic half of
+#     ``PL131`` are kept as log text. ``PL002`` is DECLARED AND DELIBERATELY NEVER
+#     REFERENCED - the acknowledgement prompt above - as are ``PL133`` and ``PL133T``,
+#     which the frozen program never ``display``s at all: [L632] and [L634] ``move`` them
+#     into ``print-record``, which is report content and out of scope. ``PL003`` is
+#     declared and never referenced BY THE FROZEN PROGRAM ITSELF. Every member stays
+#     declared because rule R-5 maps the whole ``01 Error-Messages`` group.
 #   * [L134-L153]-style facade stub block: NONE EXISTS in this program, so there is nothing
 #     to omit on that account - stated because ``gl072`` and ``gl080`` do have one.
 #   * ``01 total-lits`` / ``ws-lits`` [L261-L265] and ``01 line-*`` [L268 onward] are print
-#     furniture; the three literals survive only inside the total-block log records.
+#     furniture. The three captions are consequently DECLARED AND DELIBERATELY
+#     UNREFERENCED: their only reader was the printed totals block [L551-L571], which is
+#     report content. THE THREE ``add ... giving`` STATEMENTS IN THAT BLOCK ARE STILL
+#     PERFORMED - unconditionally, as the frozen program performs them - so the arithmetic
+#     census stays complete and the print field's width is still honoured; only their
+#     results are neither bound nor logged.
 #
 # ===========================================================================
 # 10. FIELD -> DICTIONARY  (rule R-5, third mapping)
@@ -4169,4 +4683,3 @@ def _zz070_convert_date__zz070_exit(ws: _Ws) -> None:
 # for any field that reaches storage. The tables and columns this program writes are listed
 # in the module docstring.
 # ###########################################################################
-

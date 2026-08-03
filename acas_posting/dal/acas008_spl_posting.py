@@ -710,11 +710,10 @@ from acas_posting.dal.status import (
     FsReply,
     LogSystem,
     WeError,
-    db_error_log_category,
     DUPLICATE_KEY_ERRNOS,
+    log_file_handler_record,
+    log_handler_failure,
     mysql_1100_db_error,
-    redact_for_log,
-    sanitise_for_log,
 )
 from acas_posting.dictionary import loader
 from acas_posting.records.file_access import FileAccess, LoggingData
@@ -1836,7 +1835,7 @@ class WorkingStorage:
     #: Whether the caller has declared that the frozen placeholder credentials
     #: shipped in ``copybooks/wssystem.cob`` may be used against a disposable
     #: server. ``dal/connection.py`` refuses them otherwise.
-    allow_frozen_placeholder_credentials: bool = False
+    allow_frozen_placeholder_credentials: bool | None = None
     #: ``TD-PSIRSPOST-REC`` [common/slpostingMT.cbl:L265].
     host_variables: HostVariables = field(default_factory=HostVariables)
     #: ``01 DAL-Data`` - ``MOST-Relation`` and ``Most-Cursor-Set`` with its two
@@ -2052,27 +2051,33 @@ def _clear_sql_fields(log: LoggingData) -> None:
     log.sql_err = " " * SQL_ERR_WIDTH
 
 
-def _record_driver_failure(
-    error: BaseException, statement: str, *, paragraph: int
-) -> None:
-    """Log one driver failure without leaking or forging anything.
+def _record_driver_failure(error: BaseException, *, paragraph: int) -> None:
+    """Report one driver failure - once, at ERROR, with typed fields only.
 
     The bridge's response to a failed statement is to call ``MySQL_error`` and store
-    the server's text [common/slpostingMT.cbl:L758-L760]. That text is built from
-    material that can include the account, the host and key values from the data, and
-    it can carry a carriage return - so it is redacted and its control characters
-    escaped before it reaches a log (CWE-532, CWE-117). Nothing branches on the
-    result: the status pair each caller reports is the one the frozen source dictates,
-    chosen by the exception being caught at all and never by what it said.
+    the server's text [common/slpostingMT.cbl:L758-L760]. NEITHER THAT TEXT NOR THE
+    STATEMENT REACHES THIS RECORD. The text is built from material that can include
+    the account, the host and key values from the data, and can carry a carriage
+    return that forges a second record; the statement is worse, because for this
+    table it names the IRS posting row and its amount (CWE-532, CWE-117). Redaction
+    was applied to both and removed nothing that mattered: its rules recognise
+    connection-message shapes, not a posted figure. What is reported instead is the
+    driver's error number, its SQLSTATE and the stable category the two imply - which
+    is identical for every occurrence of the same fault and therefore alertable.
+
+    Nothing branches on the result: the status pair each caller reports is the one
+    the frozen source dictates, chosen by the exception being caught at all and never
+    by what it said.
     """
-    _LOG.warning(
-        "%s/%s paragraph %d: %s (%s) on %s",
-        HANDLER_NAME,
-        BRIDGE_NAME,
-        paragraph,
-        type(error).__name__,
-        db_error_log_category(str(getattr(error, "errno", "") or "")),
-        sanitise_for_log(redact_for_log(statement)),
+    log_handler_failure(
+        _LOG,
+        program=HANDLER_NAME + "/" + BRIDGE_NAME,
+        paragraph="ws-No-Paragraph %d" % paragraph,
+        fs_reply=int(FsReply.ERROR),
+        we_error=int(WeError.RDB_INIT_ERROR),
+        sql_err=str(getattr(error, "errno", "") or ""),
+        sql_state=str(getattr(error, "sqlstate", "") or ""),
+        detail="the statement failed at the driver",
     )
 
 
@@ -2345,7 +2350,7 @@ def bb200_insert(
         #  Mysql-1190-Exit` [copybooks/mysql-procedures.cpy:L166-L177]. The bridge
         # branches on the query's return code alone and never on which error it was,
         # so catching `Exception` is the faithful width.
-        _record_driver_failure(error, statement, paragraph=_BRIDGE_PARA_INSERT)
+        _record_driver_failure(error, paragraph=_BRIDGE_PARA_INSERT)
         errno, message, sql_state = _driver_error_fields(error)
         status = mysql_1100_db_error(
             errno=errno,
@@ -2564,12 +2569,14 @@ def ba020_process_open(
         # way the copybook reports a failed connect - `(99, 911)`
         # [copybooks/mysql-procedures.cpy:L127-L128] - rather than by raising, because
         # a status is what the caller is equipped to read.
-        _LOG.error(
-            "%s/%s paragraph %d: open requested before the credentials were loaded "
-            "[common/acas008.cbl:L554-L563]",
-            HANDLER_NAME,
-            BRIDGE_NAME,
-            _BRIDGE_PARA_OPEN,
+        log_handler_failure(
+            _LOG,
+            program=HANDLER_NAME + "/" + BRIDGE_NAME,
+            paragraph="ba020-Process-Open",
+            locator="[common/acas008.cbl:L554-L563]",
+            fs_reply=int(FsReply.ERROR),
+            we_error=int(WeError.RDB_INIT_ERROR),
+            detail="open requested before the credentials were loaded",
         )
         file_access.fs_reply = int(FsReply.ERROR)
         file_access.we_error = int(WeError.RDB_INIT_ERROR)
@@ -2706,11 +2713,13 @@ def ba040_process_read_next(
         # Unreachable through `acas008`, which opens before it reads. Reported as the
         # copybook reports a dead connection rather than raised, for the same reason
         # as in `ba020_process_open`.
-        _LOG.error(
-            "%s/%s paragraph %d: read-next requested with no open connection",
-            HANDLER_NAME,
-            BRIDGE_NAME,
-            _BRIDGE_PARA_SELECT,
+        log_handler_failure(
+            _LOG,
+            program=HANDLER_NAME + "/" + BRIDGE_NAME,
+            paragraph="ba040-Process-Read-Next",
+            fs_reply=int(FsReply.ERROR),
+            we_error=int(WeError.RDB_INIT_ERROR),
+            detail="read-next requested with no open connection",
         )
         file_access.fs_reply = int(FsReply.ERROR)
         file_access.we_error = int(WeError.RDB_INIT_ERROR)
@@ -2857,11 +2866,13 @@ def ba070_process_write(
     # `move 10 to ws-No-Paragraph.` [common/slpostingMT.cbl:L753]
     log.ws_no_paragraph = _BRIDGE_PARA_INSERT
     if ws.connection is None:
-        _LOG.error(
-            "%s/%s paragraph %d: write requested with no open connection",
-            HANDLER_NAME,
-            BRIDGE_NAME,
-            _BRIDGE_PARA_INSERT,
+        log_handler_failure(
+            _LOG,
+            program=HANDLER_NAME + "/" + BRIDGE_NAME,
+            paragraph="ba070-Process-Write",
+            fs_reply=int(FsReply.ERROR),
+            we_error=int(WeError.RDB_INIT_ERROR),
+            detail="write requested with no open connection",
         )
         file_access.fs_reply = int(FsReply.ERROR)
         file_access.we_error = int(WeError.RDB_INIT_ERROR)
@@ -2998,15 +3009,23 @@ def ba085_process_delete_all(
     # [common/slpostingMT.cbl:L876-L878] - screen output with no database effect, so a
     # log record per Agent Action Plan section 0.3.4.
     if _testing_2(dal_common):
-        _LOG.debug("%s WS-Where=%s", BRIDGE_NAME, sanitise_for_log(log.ws_log_where))
+        #  THE CLAUSE IS NOT LOGGED. `WS-Where` is the composed SQL `WHERE` clause,
+        #  which for this table names the IRS posting key (CWE-532). The frozen
+        #  `display` writes it to a curses screen; a log record persists it. The
+        #  `Testing-2` guard is kept so that the paragraph and its switch still exist
+        #  for traceability - it simply has nothing left to write, and returns exactly
+        #  as it did before.
+        pass
     # `move 13 to ws-No-Paragraph.` [common/slpostingMT.cbl:L879]
     log.ws_no_paragraph = _BRIDGE_PARA_DELETE
     if ws.connection is None:
-        _LOG.error(
-            "%s/%s paragraph %d: delete-all requested with no open connection",
-            HANDLER_NAME,
-            BRIDGE_NAME,
-            _BRIDGE_PARA_DELETE,
+        log_handler_failure(
+            _LOG,
+            program=HANDLER_NAME + "/" + BRIDGE_NAME,
+            paragraph="ba085-Process-Delete-All",
+            fs_reply=int(FsReply.ERROR),
+            we_error=int(WeError.RDB_INIT_ERROR),
+            detail="delete-all requested with no open connection",
         )
         file_access.fs_reply = int(FsReply.ERROR)
         file_access.we_error = int(WeError.RDB_INIT_ERROR)
@@ -3023,7 +3042,7 @@ def ba085_process_delete_all(
                                parameters=(bound_key,)) as cursor:
             affected = cursor.rowcount
     except Exception as error:  # any driver error takes this path
-        _record_driver_failure(error, statement, paragraph=_BRIDGE_PARA_DELETE)
+        _record_driver_failure(error, paragraph=_BRIDGE_PARA_DELETE)
         errno, message, sql_state = _driver_error_fields(error)
         status = mysql_1100_db_error(
             errno=errno,
@@ -3192,25 +3211,32 @@ def ca_process_logs(
         # switch is off would be a behaviour this system does not have.
         return
     log = file_access.logging_data
-    _LOG.debug(
-        "fhlogger: system=%d file=%d para=%d function=%d access=%d "
-        "fs-reply=%d we-error=%d sql-err=%s sql-state=%s key=%s where=%s",
-        log.ws_log_system,
-        log.ws_log_file_no,
-        log.ws_no_paragraph,
-        file_access.file_function,
-        file_access.access_type,
-        file_access.fs_reply,
-        file_access.we_error,
-        log.sql_err.strip(),
-        log.sql_state.strip(),
-        sanitise_for_log(log.ws_file_key.rstrip()),
-        sanitise_for_log(log.ws_log_where.rstrip()),
+    #  THE ONE ADAPTER, and two fields fewer than this record used to carry:
+    #  `WS-File-Key` is the IRS posting key and `WS-Log-Where` is the `WHERE` clause
+    #  built around it. `sanitise_for_log` escaped and bounded both and removed
+    #  nothing (CWE-532).
+    log_file_handler_record(
+        _LOG,
+        program=HANDLER_NAME,
+        paragraph="Ca-Process-Logs",
+        log_system=log.ws_log_system,
+        log_file_no=log.ws_log_file_no,
+        no_paragraph=log.ws_no_paragraph,
+        file_function=file_access.file_function,
+        access_type=file_access.access_type,
+        fs_reply=file_access.fs_reply,
+        we_error=file_access.we_error,
+        sql_err=log.sql_err,
+        sql_state=log.sql_state,
+        dal_common=dal_common,
     )
-    # `move 1 to Log-File-Rec-Written` is the logger's own acknowledgement in
-    # `ACAS-DAL-Common-data` [copybooks/Test-Data-Flags.cob]; the handler never reads
-    # it, so it is set and not consulted, exactly as in the compiled system.
-    dal_common.log_file_rec_written = 1
+    #  `Log-File-Rec-Written` [copybooks/Test-Data-Flags.cob:L20] IS NOW ADVANCED BY
+    #  THE ADAPTER ABOVE, not assigned 1 here. Assigning 1 was wrong twice over: the
+    #  field is a COUNT of records written, so a second record must leave 2, and the
+    #  field is `pic 9(6)`, so the count wraps at a million rather than pinning. The
+    #  handler never reads it, but the caller keeps the block and can, so a pinned 1
+    #  made the shared block diverge from what the frozen run would hold. The adapter
+    #  applies `(n + 1) % 1_000_000` exactly once per emitted record.
 
 
 def ca_exit() -> None:
@@ -4150,11 +4176,20 @@ def aa010_main(
         # `move 99 to fs-reply` [:L305], in that order.
         file_access.we_error = int(we_error)
         file_access.fs_reply = int(fs_reply)
-        _LOG.debug(
-            "%s refused File-Function %d: %s",
-            HANDLER_NAME,
-            file_access.file_function,
-            locator,
+        #  ONE ERROR. This is anomaly A6's own guard - the handler refuses
+        #  read-indexed, rewrite, start and delete unconditionally because its store
+        #  is sequential - and `FS-Reply` 99 goes back to the caller, so it is a
+        #  failure. Reporting it at DEBUG made a published facade verb that can NEVER
+        #  succeed invisible at the level an operator watches.
+        log_handler_failure(
+            _LOG,
+            program=HANDLER_NAME,
+            paragraph="aa000-Main-Process entry guard",
+            locator=locator,
+            fs_reply=int(fs_reply),
+            we_error=int(we_error),
+            detail="File-Function %d refused: the store is sequential (anomaly A6)"
+            % int(file_access.file_function),
         )
         # `go to aa999-main-exit` [common/acas008.cbl:L306] - Agent Action Plan
         # section 0.4.2 CLASS 3.
@@ -4258,7 +4293,7 @@ def dispatch(
     dal_common: AcasDalCommonData,
     *,
     transport: TransportSecurity | None = None,
-    allow_frozen_placeholder_credentials: bool = False,
+    allow_frozen_placeholder_credentials: bool | None = None,
 ) -> None:
     """``call "acas008" using System-Record WS-IRS-Posting-Record File-Access
     File-Defs ACAS-DAL-Common-data`` [common/acas008.cbl:L278-L285].
@@ -4311,15 +4346,14 @@ def dispatch(
         dal_common: the two testing switches [copybooks/Test-Data-Flags.cob].
         transport: how the connection may cross the network. NOT a COBOL parameter -
             in the compiled system the C interface connects to whatever the credentials
-            name, with no transport policy at all.
-            :func:`~acas_posting.dal.connection.mysql_1000_open` refuses by default to
-            send a password anywhere but a loopback address or a Unix socket, so a
-            caller reaching a containerised oracle must say so, and saying so is the
-            caller's decision rather than this module's. Keyword-only, so the five
-            positional parameters remain exactly the COBOL's.
+            name, with no transport policy at all. ``None`` - the default - defers to
+            the ONE policy the deployment installed with
+            :func:`acas_posting.dal.connection.set_connection_policy`, so this handler
+            declares nothing of its own. Keyword-only, so the five positional
+            parameters remain exactly the COBOL's.
         allow_frozen_placeholder_credentials: whether the frozen placeholder
             credentials in ``copybooks/wssystem.cob`` may be used. Also not a COBOL
-            parameter, and refused by default for the same reason.
+            parameter, and ``None`` defers to that same policy for the same reason.
 
     Raises:
         CobolFlatFileNotMigrated: when ``File-System-Used`` selects the Cobol

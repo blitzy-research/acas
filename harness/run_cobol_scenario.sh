@@ -141,7 +141,7 @@ readonly EX_OK=0
 readonly EX_USAGE=70
 readonly EX_PRECONDITION=71
 readonly EX_DATABASE=72
-readonly EX_AUTOCOMMIT=73  # autocommit is not on -- the frozen COBOL never commits
+readonly EX_AUTOCOMMIT=73  # autocommit is not OFF -- the AAP-mandated mode
 readonly EX_ORACLE=74      # a compiled artifact is missing -> build_oracle.sh
 readonly EX_SCENARIO=75    # the scenario file is missing or malformed
 readonly EX_DRIVE=76       # the pty driver timed out, spun, or hit a refusal
@@ -512,6 +512,156 @@ acas_die() {
 
 acas_have() {
   command -v "$1" >/dev/null 2>&1
+}
+
+# ---------------------------------------------------------------------------
+#  THE CLIENT-DIAGNOSTIC SUMMARY  (OBS-008)
+#
+#  A database client's diagnostic is text the SERVER supplied, captured here with
+#  `2>&1`, and it is NOT safe to replay:
+#
+#    * it routinely names the account and the host -- "Access denied for user
+#      'acas'@'db.internal'" -- and on a statement failure it can quote the
+#      statement and its parameters, which are live accounting values (CWE-532);
+#    * it is multi-line and arbitrary, so a newline inside it forges a further
+#      line in whatever log collects this script's output (CWE-117);
+#    * these scripts run under Compose, where standard output and standard error
+#      are collected as container logs and kept.
+#
+#  So the RAW text is persisted to a private mode-0600 file and never printed,
+#  and the console gets a bounded, identity-free summary: a token from a fixed
+#  vocabulary, the client's own numeric error and SQLSTATE when it printed them,
+#  the size, and the artifact's path and SHA-256. This is the same
+#  console/artifact split `harness/diff_states.py` and `harness/normalize.py`
+#  apply to their own detail, with the same reasoning and the same vocabulary.
+#
+#  NOTHING BELOW ECHOES A BYTE OF ITS INPUT. The category comes from a `case`
+#  over fixed globs; the error and SQLSTATE are re-validated against their
+#  documented shapes and replaced by `unknown` when they do not match, so a
+#  server that returned `28000\nERROR: forged` cannot get that through.
+# ---------------------------------------------------------------------------
+
+#: Where the raw text of the most recent diagnostic was kept, or empty when none
+#: was produced or it could not be persisted.
+ACAS_DIAG_ARTIFACT=''
+
+# acas_diag_category <raw>
+# Classify a client diagnostic. Echoes ONE token and never any input byte.
+acas_diag_category() {
+  local raw="$1"
+
+  if [[ -z "${raw//[[:space:]]/}" ]]; then
+    printf 'no-diagnostic'
+    return 0
+  fi
+  case "$raw" in
+    *'Access denied'*)                          printf 'access-denied' ;;
+    *'Unknown database'*)                       printf 'unknown-database' ;;
+    *'Unknown MySQL server host'*)              printf 'host-unresolvable' ;;
+    *'is not allowed to connect'*)              printf 'host-not-permitted' ;;
+    *"Can't connect"*|*'Connection refused'*)   printf 'connect-refused' ;;
+    *'did not answer within'*|*'timed out'*|*'Timeout'*|*'timeout expired'*)
+                                                printf 'timeout' ;;
+    *'Lost connection'*|*'gone away'*)          printf 'connection-lost' ;;
+    *'Lock wait timeout'*)                      printf 'lock-wait-timeout' ;;
+    *'Deadlock found'*)                         printf 'deadlock' ;;
+    *'Duplicate entry'*)                        printf 'duplicate-key' ;;
+    *"doesn't exist"*|*'Unknown table'*)        printf 'table-missing' ;;
+    *'Unknown column'*)                         printf 'column-missing' ;;
+    *'error in your SQL syntax'*)               printf 'syntax-error' ;;
+    *'command denied'*|*'insufficient privileges'*)
+                                                printf 'grant-missing' ;;
+    *'SSL'*|*'TLS'*)                            printf 'tls-refused' ;;
+    *'read-only'*)                              printf 'server-read-only' ;;
+    *)                                          printf 'unclassified' ;;
+  esac
+}
+
+# acas_diag_code <raw>
+# Echo `<error>/<sqlstate>` from a `ERROR 1045 (28000)` prefix, each re-validated
+# against its documented shape and replaced by `unknown` when it does not match.
+acas_diag_code() {
+  local raw="$1" code='' state=''
+
+  code="$(printf '%s\n' "$raw" \
+    | sed -n 's/.*ERROR \([0-9][0-9]*\).*/\1/p' | head -n 1)"
+  state="$(printf '%s\n' "$raw" \
+    | sed -n 's/.*ERROR [0-9][0-9]* (\([0-9A-Za-z][0-9A-Za-z]*\)).*/\1/p' \
+    | head -n 1)"
+  [[ "$code" =~ ^[0-9]{1,5}$ ]] || code='unknown'
+  # SQLSTATE is five alphanumeric characters by definition
+  # [copybooks/wsfnctn.cob:L51]; anything else is not one.
+  [[ "$state" =~ ^[0-9A-Za-z]{5}$ ]] || state='unknown'
+  printf '%s/%s' "$code" "$state"
+}
+
+# acas_diag_sha256 <path>
+# Self-contained on purpose: this runs on abort paths, so it must not depend on
+# any deadline or digest machinery having been initialised. Echoes nothing on
+# failure.
+acas_diag_sha256() {
+  local path="$1" digest=''
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    digest="$(sha256sum -- "$path" 2>/dev/null)" || return 0
+    printf '%s' "${digest%% *}"
+    return 0
+  fi
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 - "$path" 2>/dev/null <<'PY' || return 0
+import hashlib
+import sys
+
+digest = hashlib.sha256()
+with open(sys.argv[1], 'rb') as handle:
+    for block in iter(lambda: handle.read(1 << 16), b''):
+        digest.update(block)
+sys.stdout.write(digest.hexdigest())
+PY
+}
+
+# acas_diag_persist <raw>
+# Write the raw text to a private mode-0600 file and set ACAS_DIAG_ARTIFACT.
+# Leaves it EMPTY when nothing could be written; never aborts, because this runs
+# on paths that are already reporting a failure.
+acas_diag_persist() {
+  local raw="$1" dir='' path=''
+
+  ACAS_DIAG_ARTIFACT=''
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/acas-diag-XXXXXXXX" 2>/dev/null)" || return 0
+  # `mktemp -d` creates 0700; the file is narrowed to 0600 explicitly because
+  # this script's `umask 077` governs creation but is not a guarantee a reader
+  # can check.
+  path="$dir/client-diagnostic.txt"
+  printf '%s\n' "$raw" >"$path" 2>/dev/null || return 0
+  chmod 600 -- "$path" 2>/dev/null || true
+  ACAS_DIAG_ARTIFACT="$path"
+}
+
+# acas_diag_summary [raw]
+# Echo the bounded, identity-free summary. Defaults to the script's own
+# last-diagnostic variable so a call site reads as one word.
+acas_diag_summary() {
+  local raw="${1-$ACAS_SQL_DIAG}" category='' code='' lines=0 bytes=0 digest=''
+
+  category="$(acas_diag_category "$raw")"
+  if [[ "$category" == 'no-diagnostic' ]]; then
+    printf 'client diagnostic: none was produced'
+    return 0
+  fi
+  code="$(acas_diag_code "$raw")"
+  lines="$(printf '%s\n' "$raw" | wc -l | tr -d '[:space:]')"
+  bytes="$(printf '%s' "$raw" | wc -c | tr -d '[:space:]')"
+  acas_diag_persist "$raw"
+  if [[ -n "$ACAS_DIAG_ARTIFACT" ]]; then
+    digest="$(acas_diag_sha256 "$ACAS_DIAG_ARTIFACT")"
+    printf 'client diagnostic: %s (error %s, %s line(s), %s byte(s)); the raw text is in %s (mode 0600%s)' \
+      "$category" "$code" "$lines" "$bytes" "$ACAS_DIAG_ARTIFACT" \
+      "${digest:+, sha256=$digest}"
+    return 0
+  fi
+  printf 'client diagnostic: %s (error %s, %s line(s), %s byte(s)); the raw text could NOT be persisted, so it is not available -- it is deliberately NOT printed here' \
+    "$category" "$code" "$lines" "$bytes"
 }
 
 # Join the remaining arguments with single spaces. Needed because IFS is
@@ -1175,7 +1325,10 @@ SCENARIO KEYS THIS STAGE READS
                           and the same key harness/dump_tables.py reads.
     irs_clear_postings     G-1. "Y" or "N". Required for irs_post.
     gl080_proceed          G-2. "Y" proceeds, "A" aborts. Default "Y".
-    payment_post_confirm   G-3. "YES" or "NO". Default "YES".
+    payment_post_confirm   G-3. "YES" or "NO". Required for sl_cash_post and
+                          pl_payment_post: neither program's prompt has a default
+                          (both blank the reply field and re-ask on a blank), so
+                          the scenario must state the answer.
 
 ENVIRONMENT
     ACAS_DB_NAME           MUST be exactly "ACASDB". This stage drives a
@@ -1837,9 +1990,28 @@ acas_resolve_pinned_values() {
     esac
   fi
 
-  # G-3 -- sl100 / pl100 YES/NO before posting.
+  # G-3 -- sl100 / pl100 YES/NO before posting. REQUIRED, exactly as G-1 is, and
+  # for the same reason: the frozen prompt has NO default, so a default here would
+  # be this harness inventing the answer rather than reproducing one. Both
+  # programs blank the reply field immediately before the accept
+  # [sales/sl100.cbl:L313], [purchase/pl100.cbl:L305] - so the `update` phrase
+  # pre-fills spaces - and both re-ask on a blank [sales/sl100.cbl:L318-L319],
+  # [purchase/pl100.cbl:L310-L311]. The Python leg demands the answer too: the
+  # --ok-to-post/--no-ok-to-post pair on both routes is argparse-required, and
+  # neither programs/sl100_cash_posting.run nor
+  # programs/pl100_payment_posting.run carries a default for it. Both legs of the
+  # comparison therefore take the answer from the scenario and neither invents it.
   if [[ "$ACAS_RUN_OPERATION" == 'sl_cash_post' || "$ACAS_RUN_OPERATION" == 'pl_payment_post' ]]; then
-    ACAS_RUN_PAYMENT_CONFIRM="$(acas_scenario_default payment_post_confirm 'YES')"
+    ACAS_RUN_PAYMENT_CONFIRM="$(acas_scenario_scalar payment_post_confirm)"
+    [[ -n "$ACAS_RUN_PAYMENT_CONFIRM" ]] || acas_die "$EX_SCENARIO" \
+      'the scenario does not answer the payment-posting confirmation.' \
+      'Add a payment_post_confirm: key with "YES" or "NO".' \
+      'An EMPTY reply is NOT accepted by either program -- wx-reply is blanked at' \
+      '[sales/sl100.cbl:L313] and [purchase/pl100.cbl:L305] and a blank re-asks at' \
+      '[sales/sl100.cbl:L318-L319] and [purchase/pl100.cbl:L310-L311] -- so there' \
+      'is no default to fall back on, and the answer decides whether anything is' \
+      'posted at all: NO transfers to menu-exit before the first file is opened.' \
+      'The Python leg requires the same answer as --ok-to-post/--no-ok-to-post.'
     ACAS_RUN_PAYMENT_CONFIRM="${ACAS_RUN_PAYMENT_CONFIRM^^}"
     case "$ACAS_RUN_PAYMENT_CONFIRM" in
       YES|NO) : ;;
@@ -2206,6 +2378,10 @@ acas_open_log() {
   acas_log "plan       = $ACAS_RUN_PLAN_FILE"
   acas_log "outcome    = $ACAS_RUN_RESULT_FILE"
   acas_note 'all three are OUTSIDE the compared tree, so they cannot perturb a state diff'
+  acas_note 'their SHA-256 fingerprints come at the END of the run, not here: two of the'
+  acas_note 'three are still empty at this point and the third is still being appended to,'
+  acas_note 'so a digest taken now would identify nothing an operator could later check'
+  acas_note '(rule R-6)'
 }
 
 # STAGE 5 -- the compiled oracle
@@ -2670,7 +2846,7 @@ acas_assert_database() {
          'the frozen compile scripts expect.' ;;
     *) acas_die "$EX_DATABASE" \
          "the database rejected a trivial query on $ACAS_DB_NAME." \
-         "client diagnostic: $ACAS_SQL_DIAG" ;;
+         "$(acas_diag_summary "$ACAS_SQL_DIAG")" ;;
   esac
 
   # The frozen schema must be present. 33 CREATE TABLE statements, no ALTER and
@@ -2682,7 +2858,7 @@ acas_assert_database() {
   acas_sql_scalar "select count(*) from information_schema.tables where table_schema = ${ACAS_RUN_SCHEMA_LITERAL};" || rc=$?
   (( rc == 0 )) || acas_die "$EX_DATABASE" \
     'could not count the tables in the schema.' \
-    "client diagnostic: $ACAS_SQL_DIAG"
+    "$(acas_diag_summary "$ACAS_SQL_DIAG")"
   local table_count="$ACAS_SQL_OUT"
   acas_log "tables present = $table_count"
   if [[ "$table_count" == '0' ]]; then
@@ -2693,30 +2869,40 @@ acas_assert_database() {
       'stands and never migrated.'
   fi
 
-  # Autocommit must be ON, because the frozen COBOL never commits.
+  # Autocommit must be OFF: that is the frozen transaction contract the Agent
+  # Action Plan mandates -- section 0.2.1.1 (the seeding contract), section
+  # 0.4.1.7 (on harness/Dockerfile.mariadb: "autocommit off to match the
+  # loaders") and section 0.5.2 -- all deriving it from the banner carried by all
+  # 28 common/*LD.cbl loaders at [common/glbatchLD.cbl:L9-L13]: "you MUST ensure
+  # that autocommit is OFF in the rdb settings".
   #
-  # The loader banner at [common/glbatchLD.cbl:L9-L13] asks for OFF, but the
-  # shipped code never carries that out: every `perform aa020-Rollback' is
-  # commented out and `aa030-Commit' has zero perform sites in any of the 28
-  # loaders, so this census returns nothing --
-  #     grep -n '^ *perform.*\(aa020\|aa030\|Commit\|Rollback\)' common/*LD.cbl
-  # and the posting path is the same: zero COMMIT / ROLLBACK / START TRANSACTION
-  # in the twenty in-scope bridges, in the in-scope handlers and on every bridge
-  # close path, with the vendored `cobmysqlapi38.c' exposing MySQL_commit
-  # without ever calling it.
+  # The banner addresses the OPERATOR because no COBOL program can act on it: the
+  # vendored `cobmysqlapi38.c' exposes MySQL_commit and MySQL_rollback but NOT
+  # MySQL_autocommit. Server configuration is the only lever, which is why the
+  # setting has exactly one authority, harness/Dockerfile.mariadb, and why this
+  # script ASSERTS and NEVER SETS it.
   #
-  # With autocommit off, MariaDB opens an implicit transaction on the first DML
-  # statement of a session and discards it at disconnect, so this posting run
-  # would write NOTHING while the Python run -- which commits -- keeps its rows.
-  # The diff would then report a harness artefact on every row.
+  # CONSEQUENCE, PRESERVED NOT REPAIRED (R-4): the frozen code reaches no COMMIT.
+  # Every `perform aa020-Rollback' in all 28 loaders is commented out (78 sites,
+  # none live) and `perform aa030-Commit' occurs exactly once anywhere, at
+  # [common/irsdfltLD.cbl:L437], commented out as well; [common/systemLD.cbl]
+  # declares both paragraphs at L406 and L420 with no perform site at all. The
+  # posting path is the same -- zero COMMIT / ROLLBACK / START TRANSACTION in the
+  # twenty in-scope bridges, in the in-scope handlers and on every bridge close
+  # path.
   #
-  # ASSERTED, NEVER SET: the setting has exactly one authority,
-  # harness/Dockerfile.mariadb.
+  # So MariaDB opens an implicit transaction on this run's first DML statement and
+  # discards it at disconnect: the compiled posting run leaves NO durable rows.
+  # That is the frozen code's own defect, and R-4 makes it the specification --
+  # "a defect reproduced is correct; a defect fixed is a failure". This script
+  # warns about it below and proceeds; it does not issue the missing COMMIT and
+  # does not demand a mode the AAP does not sanction in order to obtain a
+  # more convenient diff.
   rc=0
   acas_sql_scalar 'select concat_ws(0x2f, @@GLOBAL.autocommit + 0, @@SESSION.autocommit + 0);' || rc=$?
   (( rc == 0 )) || acas_die "$EX_DATABASE" \
     'could not read the autocommit settings.' \
-    "client diagnostic: $ACAS_SQL_DIAG"
+    "$(acas_diag_summary "$ACAS_SQL_DIAG")"
   local autocommit=''
   local line
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -2728,17 +2914,26 @@ acas_assert_database() {
     'could not parse the autocommit settings.' \
     "client returned: $ACAS_SQL_OUT"
   acas_log "autocommit (global/session) = $autocommit"
-  if [[ "$autocommit" != '1/1' ]]; then
+  if [[ "$autocommit" != '0/0' ]]; then
     acas_die "$EX_AUTOCOMMIT" \
-      "autocommit must be on; the server reports $autocommit (global/session)." \
-      'The frozen COBOL never reaches a COMMIT: in the load programs the commit' \
-      'and rollback paragraphs are unreachable, and the bridges have none --' \
-      'so with autocommit off every row this posting run writes is discarded at' \
-      'session close, while the Python run commits and keeps its own. The state' \
-      'diff would then report a harness artefact on every row.' \
-      'harness/Dockerfile.mariadb sets autocommit on for exactly this reason and' \
-      'is the single authority; this script only asserts it.'
+      "autocommit must be OFF; the server reports $autocommit (global/session)." \
+      'The Agent Action Plan mandates OFF in three places -- sections 0.2.1.1,' \
+      '0.4.1.7 and 0.5.2 -- all from the banner carried by all 28' \
+      'common/*LD.cbl loaders at [common/glbatchLD.cbl:L9-L13]: "you MUST ensure' \
+      'that autocommit is OFF in the rdb settings".' \
+      'Running the oracle under ON would drive the compiled cycle in a mode the' \
+      'AAP does not sanction, so its state would not be the frozen contract this' \
+      'harness exists to capture.' \
+      'harness/Dockerfile.mariadb writes autocommit=0 into' \
+      '/etc/mysql/conf.d/99-acas-oracle.cnf and is the single authority; this' \
+      'script only asserts it. Start the harness MariaDB service built from that' \
+      'Dockerfile, or set autocommit=0 in the server configuration and restart.'
   fi
+
+  # The reproduced defect, restated where it bites. A WARNING, not a refusal:
+  # R-4 requires the frozen behaviour, so refusing would be refusing the
+  # specification.
+  acas_warn 'the frozen COBOL reaches no COMMIT, so under this AAP-mandated mode this posting run leaves NO durable rows: in all 28 common/*LD.cbl loaders every "perform aa020-Rollback" is commented out (78 sites, none live) and "perform aa030-Commit" occurs exactly once anywhere, at [common/irsdfltLD.cbl:L437], commented out too, while the twenty in-scope bridges, the in-scope handlers and every bridge close path contain zero COMMIT/ROLLBACK/START TRANSACTION. The maintainer recorded the same observation at [common/analLD.cbl:L442] ("These do not work during testing with mariadb - Non transactional model or autocommit set ON"). This is the reproduced legacy defect (R-4); nothing here issues the missing COMMIT, because a defect fixed is a failure.'
 
   # There must BE a system record. Without it the menu cannot start, and an empty
   # result would otherwise make every column check below vacuously pass.
@@ -2746,7 +2941,7 @@ acas_assert_database() {
   acas_sql_scalar "select count(*) from $(acas_sql_quote_ident 'SYSTEM-REC');" || rc=$?
   (( rc == 0 )) || acas_die "$EX_DATABASE" \
     'could not count SYSTEM-REC.' \
-    "client diagnostic: $ACAS_SQL_DIAG"
+    "$(acas_diag_summary "$ACAS_SQL_DIAG")"
   if [[ "$ACAS_SQL_OUT" == '0' ]]; then
     acas_die "$EX_PRECONDITION" \
       'SYSTEM-REC is empty: the database has not been seeded.' \
@@ -2761,7 +2956,7 @@ acas_assert_database() {
   local file_system_used
   file_system_used="$(acas_system_column 'FILE-SYSTEM-USED')" || acas_die "$EX_DATABASE" \
     'could not read SYSTEM-REC.FILE-SYSTEM-USED.' \
-    "client diagnostic: $ACAS_SQL_DIAG"
+    "$(acas_diag_summary "$ACAS_SQL_DIAG")"
   acas_log "FILE-SYSTEM-USED = $file_system_used"
   if [[ "$file_system_used" == '0' ]]; then
     acas_die "$EX_PRECONDITION" \
@@ -2781,7 +2976,7 @@ acas_assert_database() {
   local cyclea
   cyclea="$(acas_system_column 'CYCLEA')" || acas_die "$EX_DATABASE" \
     'could not read SYSTEM-REC.CYCLEA.' \
-    "client diagnostic: $ACAS_SQL_DIAG"
+    "$(acas_diag_summary "$ACAS_SQL_DIAG")"
   acas_log "CYCLEA = $cyclea"
   if [[ -z "$cyclea" || "$cyclea" == '0' ]]; then
     acas_die "$EX_PRECONDITION" \
@@ -2800,7 +2995,7 @@ acas_assert_database() {
   local seeded_date_form
   seeded_date_form="$(acas_system_column 'DATE-FORM')" || acas_die "$EX_DATABASE" \
     'could not read SYSTEM-REC.DATE-FORM.' \
-    "client diagnostic: $ACAS_SQL_DIAG"
+    "$(acas_diag_summary "$ACAS_SQL_DIAG")"
   acas_log "DATE-FORM = $seeded_date_form (scenario says $ACAS_RUN_DATE_FORM)"
   # [general/gl000.cbl:L205] coerces an out-of-range value to 1 before choosing a
   # prompt, so the effective form -- not the stored one -- is what must match.
@@ -2824,7 +3019,7 @@ acas_assert_database() {
   local seeded_irs
   seeded_irs="$(acas_system_column 'IRS-INSTEAD')" || acas_die "$EX_DATABASE" \
     'could not read SYSTEM-REC.IRS-INSTEAD.' \
-    "client diagnostic: $ACAS_SQL_DIAG"
+    "$(acas_diag_summary "$ACAS_SQL_DIAG")"
   # The column is char(1); a space and an empty string are the same state.
   local seeded_irs_trimmed="${seeded_irs// /}"
   acas_log "IRS-INSTEAD = '$seeded_irs_trimmed' (scenario pins '$ACAS_RUN_IRS_INSTEAD')"
@@ -2844,7 +3039,7 @@ acas_assert_database() {
     local sl_autogen
     sl_autogen="$(acas_system_column 'SL-AUTOGEN')" || acas_die "$EX_DATABASE" \
       'could not read SYSTEM-REC.SL-AUTOGEN.' \
-      "client diagnostic: $ACAS_SQL_DIAG"
+      "$(acas_diag_summary "$ACAS_SQL_DIAG")"
     local sl_autogen_trimmed="${sl_autogen// /}"
     acas_log "SL-AUTOGEN = '$sl_autogen_trimmed'"
     if [[ "${sl_autogen_trimmed^^}" == 'Y' ]]; then
@@ -2874,7 +3069,7 @@ acas_assert_database() {
     local flag
     flag="$(acas_system_column "$flag_column")" || acas_die "$EX_DATABASE" \
       "could not read SYSTEM-REC.$flag_column." \
-      "client diagnostic: $ACAS_SQL_DIAG"
+      "$(acas_diag_summary "$ACAS_SQL_DIAG")"
     acas_log "$flag_column = $flag"
     if [[ "$flag" != '2' ]]; then
       acas_die "$EX_PRECONDITION" \
@@ -4517,6 +4712,76 @@ acas_assert_after_run() {
   acas_log 'all post-run assertions passed'
 }
 
+# acas_run_summarise_digest <label> <path>
+# Add one `<label>  <digest>` row naming a file's SHA-256, or a row saying plainly
+# why there is none. NEVER aborts and never alters the exit status: a digest is
+# provenance for a verdict already reached, so failing to take one must not
+# change the verdict.
+#
+# Only for artifacts that are FINAL when the row is added. A summary row is
+# replayed through acas_log at the end of the report, and acas_log appends to the
+# transcript -- so this helper cannot be used for the transcript itself. That one
+# is emitted by acas_run_fingerprint_transcript, after the last append.
+acas_run_summarise_digest() {
+  local label="$1" path="$2" digest=''
+
+  if [[ -z "$path" ]]; then
+    acas_summary_row "$label" 'none -- no such artifact for this run'
+    return 0
+  fi
+  if [[ ! -f "$path" ]]; then
+    acas_summary_row "$label" 'none -- the artifact was not written'
+    return 0
+  fi
+  digest="$(acas_diag_sha256 "$path")"
+  if [[ -z "$digest" ]]; then
+    acas_summary_row "$label" 'none -- no digest utility was available'
+    return 0
+  fi
+  acas_summary_row "$label" "$digest"
+}
+
+# acas_run_fingerprint_transcript
+# Print the pty transcript's own SHA-256 to the console.
+#
+# THIS CANNOT BE A SUMMARY ROW, and the reason is worth stating because it is the
+# defect this replaces: summary rows are replayed through acas_log at the end of
+# acas_run_report, acas_log tees into the transcript, and so a digest of the
+# transcript taken alongside the other rows would be stale by exactly the bytes of
+# the report that prints it. A file cannot contain its own digest.
+#
+# It is therefore emitted with a bare printf -- console only, no tee -- from the
+# first point at which nothing further will be appended. On the success path,
+# which is the only path that reaches the closing report, acas_on_exit returns
+# before its own acas_tee, so the file really is final. The `%-22s' width matches
+# acas_summary_row and the four-space indent matches acas_log, so the line lands
+# in the same column as the rows above it.
+#
+# Like acas_run_summarise_digest it NEVER aborts: provenance for a verdict already
+# reached must not be able to change that verdict.
+acas_run_fingerprint_transcript() {
+  local digest=''
+
+  # The two "none" cases are reported apart, exactly as acas_run_summarise_digest
+  # reports them, because they mean different things to a reader: an empty path is
+  # a run that never had a transcript (--dry-run before the pty is opened), while a
+  # named path that is absent means the create failed.
+  if [[ -z "$ACAS_RUN_LOG" ]]; then
+    printf '    %-22s %s\n' 'transcript sha256' 'none -- no such artifact for this run'
+    return 0
+  fi
+  if [[ ! -f "$ACAS_RUN_LOG" ]]; then
+    printf '    %-22s %s\n' 'transcript sha256' 'none -- the artifact was not written'
+    return 0
+  fi
+  digest="$(acas_diag_sha256 "$ACAS_RUN_LOG")"
+  if [[ -z "$digest" ]]; then
+    printf '    %-22s %s\n' 'transcript sha256' 'none -- no digest utility was available'
+    return 0
+  fi
+  printf '    %-22s %s\n' 'transcript sha256' "$digest"
+}
+
 # CLOSING REPORT
 acas_run_report() {
   acas_stage 'Summary'
@@ -4550,6 +4815,27 @@ acas_run_report() {
     acas_summary_row 'transcript' "$ACAS_RUN_LOG"
   fi
 
+  #  EVERY ARTIFACT THIS RUN CALLS EVIDENCE IS BOUND TO ITS BYTES  (OBS-016)
+  #
+  #  The rows above name a path, and a path is not evidence: a reader cannot tell
+  #  whether the file they open is the file this run wrote, and
+  #  docs/migration/scenario-diff-evidence.md cites these artifacts by name. A
+  #  SHA-256 closes that gap. Rule R-6 is why that matters rather than being a
+  #  nicety: the verdict of a scenario rests on the claim that one particular
+  #  compiled run produced one particular state, and every link in that chain has
+  #  to be checkable by someone who was not here when it ran.
+  #
+  #  WHICH ARTIFACT IS FINAL DECIDES WHERE ITS DIGEST GOES. The plan is written
+  #  once, in stage 4 [L3256]; the outcome record only while the cycle is being
+  #  driven. Both are settled by now, so both are summary rows -- and because the
+  #  rows are replayed through acas_log, the transcript ends up carrying their
+  #  fingerprints as well as the console. The TRANSCRIPT itself is deliberately
+  #  NOT a row: that same replay appends to it, so a digest taken here would be
+  #  stale by exactly the bytes of this report. It is emitted after the last
+  #  append instead, by acas_run_fingerprint_transcript.
+  acas_run_summarise_digest 'plan sha256' "$ACAS_RUN_PLAN_FILE"
+  acas_run_summarise_digest 'outcome sha256' "$ACAS_RUN_RESULT_FILE"
+
   for line in "${ACAS_RUN_SUMMARY[@]}"; do
     acas_log "$line"
   done
@@ -4561,6 +4847,10 @@ acas_run_report() {
     done
     acas_note 'a warning is a finding to record, not a failure; nothing above was repaired'
   fi
+
+  # Last, because this is the first point at which nothing further is appended to
+  # the transcript. Everything below writes to the console only.
+  acas_run_fingerprint_transcript
 
   if (( ACAS_RUN_DRY_RUN )); then
     printf '\nDry run complete. Every precondition passed and the keystroke plan resolved.\n'

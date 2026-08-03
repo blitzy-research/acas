@@ -129,9 +129,16 @@ The run date arrives only as the required `--run-date` and is pinned before any
 program is entered, which is what makes two runs of one scenario byte-identical
 (Agent Action Plan section 0.8.5, rule R-6). Nothing in this module reads a
 clock, and neither does `sl100`: all twelve in-scope programs receive the date
-purely through linkage, and the single clock read in the whole call chain is in
-the menu shell's date-service copybook
-[copybooks/Proc-ACAS-Mapser-RDB.cob:L72-L80], which is out of scope. Both
+purely through linkage. The frozen call chain holds FOURTEEN ambient date and time
+reads across six files - six `FUNCTION CURRENT-DATE` [common/ACAS.cbl:L353],
+[general/general.cbl:L371], [sales/sales.cbl:L323], [purchase/purchase.cbl:L318],
+[irs/irs.cbl:L480], [copybooks/Proc-ACAS-Mapser-RDB.cob:L72], four `accept ...
+from time` and four `accept ... from date` - and EVERY ONE of them is in an
+out-of-scope menu shell or in the date-service copybook those shells COPY, as the
+census in `acas_posting/clock.py` records. The one that bears on a posting run is
+[copybooks/Proc-ACAS-Mapser-RDB.cob:L72-L80], and even that runs only on the
+FIRST-TIME capture path `ba010-Capture-Data`: a normal Sales run derives `to-day`
+from the STORED `Run-Date` [sales/sales.cbl:L409-L411]. Both
 observables - the text `to-day pic x(10)` and the binary `Run-Date`
 [copybooks/wssystem.cob:L67] - are pinned from that one argument by
 `args.bind_slpl_linkage`, which delegates to `args.resolve_clock` and thence to
@@ -144,8 +151,12 @@ The menu's screen output, its `display-menu` paragraph and its
 not migrated, and neither is the `menu-return.` banner block
 [sales/sl100.cbl:L303-L308]. Diagnostics that have no database effect become log
 records that cannot alter control flow and cannot appear in a table dump. The
-`overrewrite` persistence of the two system records and the pre-run backup
-spool-out are omitted for reasons recorded in the footer.
+pre-run backup spool-out is omitted for the reasons recorded in the footer. The
+`overrewrite` persistence of the two system records IS reproduced - by
+`args.overrewrite`, performed from both arms of `load000` - because `sl100`
+mutates SYSTEM-REC twice [sales/sl100.cbl:L473-L474] and writes one of the nine
+period totals [sales/sl100.cbl:L404], and that paragraph is their only writer to
+the store. Only its ISAM arm has no counterpart.
 
 RULES
 =====
@@ -203,7 +214,7 @@ from __future__ import annotations
 import argparse
 import enum
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Final
 
 from acas_posting.cli import args
@@ -240,53 +251,99 @@ _SL100: Final = "sl100"
 #: identity and belongs to the program module, not here.
 _PROG: Final = "python -m acas_posting.cli.sl_cash_post"
 
+#: The promoted run-confirmation switch, spelled once so the declaration, the
+#: help text and the traceability footer cannot drift
+#: [sales/sl100.cbl:L310-L319].
+_OK_TO_POST_OPTION: Final[str] = "--ok-to-post"
+
+#  ⛔ THE RUN-CONFIRM HAS NO DEFAULT, BECAUSE THE FROZEN PROGRAM HAS NONE.
+#
+#  What is in the frozen source, in its own order [sales/sl100.cbl:L310-L319]::
+#
+#      310  acpt-xrply.
+#      312  display  "OK to Post Payment Transactions (YES/NO) ? [   ]" ...
+#      313  move     spaces to wx-reply.
+#      314  accept   wx-reply at 1256 with foreground-color 6 update.
+#      315  move     function upper-case (wx-reply) to wx-reply.
+#      316  if       wx-reply = "NO"
+#      317           go to menu-exit.
+#      318  if       wx-reply not = "YES"
+#      319           go to acpt-xrply.
+#
+#  `wx-reply` is `pic xxx value spaces` [sales/sl100.cbl:L167]; L313 moves spaces
+#  into it AGAIN immediately before the accept; the accept IS `with update`, so
+#  what it pre-fills is those spaces; and L318-L319 send a blank straight back to
+#  `acpt-xrply.`. Even the displayed field is drawn as three spaces, `[   ]`, and
+#  not as a suggested answer. The field therefore has exactly two answers - `"NO"`,
+#  which exits at L316-L317 having written nothing, and `"YES"`, which proceeds -
+#  and NO third disposition for "the operator just pressed return".
+#
+#  A CORRECTION, RECORDED RATHER THAN QUIETLY REPLACED. An earlier draft of this
+#  module reached the same reading of the source and then defaulted the switch to
+#  `True` anyway, on the ground that "an operator who runs a cash-posting command
+#  has answered the question by running it". That is a usability argument, not a
+#  fidelity one, and Agent Action Plan section 0.3.4 licenses neither: it promotes
+#  a write-gating `ACCEPT` to an explicit parameter "with the COBOL default
+#  preserved", and where the COBOL has no default there is nothing to preserve and
+#  a default invented here is added behaviour (R-3) in the direction that writes to
+#  the database. The switch is REQUIRED: argparse rejects an invocation that names
+#  neither answer, and `load11`, `load000` and `sl100_cash_posting.run` all declare
+#  the parameter without a default, so no layer can resolve an omission into a
+#  posting run.
+#
 #  R-4 sales/sl100.cbl:L167, L313, L316-L317, L318-L319 - the prompt's answer set
 #  is reproduced exactly as the frozen program defines it, including the fact that
 #  it has no third position and no defaultable answer. Nothing is normalised into
 #  a tri-state and no answer is invented.
 #
 #  AMBIGUITY Q-CLI-OKTOPOST: sales/sl100.cbl:L313 moves spaces into wx-reply and
-#  L318-L319 re-prompts on blank, so the COBOL has no defaultable answer - only
-#  "YES" proceeds; confirm the chosen CLI default against the compiled oracle;
-#  record in docs/migration/ambiguity-resolutions.md.
+#  L318-L319 re-prompts on blank, so the COBOL has NO DEFAULTABLE ANSWER - only
+#  "YES" proceeds and only "NO" exits. RESOLVED, and resolved without guessing:
+#  the answer is REQUIRED on the command line.
 #
-#  What is actually in the frozen source, and why it settles nothing on its own.
-#  `wx-reply` is `pic xxx value spaces` [sales/sl100.cbl:L167]; L313 moves spaces
-#  into it again immediately before the `accept` at L314; and L318-L319 send a
-#  blank straight back to `acpt-xrply.`. So the declared value is not an answer,
-#  and there is no "the operator just pressed return" disposition to preserve:
-#  the field's only two answers are `"NO"`, which exits at L316-L317 having
-#  written nothing, and `"YES"`, which proceeds.
+#  What is actually in the frozen source. `wx-reply` is `pic xxx value spaces`
+#  [sales/sl100.cbl:L167]; L313 moves spaces into it AGAIN immediately before the
+#  `accept` at L314; and L318-L319 send a blank straight back to `acpt-xrply.`.
+#  So the declared value is not an answer, and there is no "the operator just
+#  pressed return" disposition to preserve: the field's only two answers are
+#  `"NO"`, which exits at L316-L317 having written nothing, and `"YES"`, which
+#  proceeds. THE PROMPT CANNOT BE LEFT UNANSWERED.
 #
-#  THE DECISION. `True`. Two grounds, neither of which is convenience:
-#    * it is the only reachable answer that lets the entry point do the thing it
-#      is named for. An operator who runs a cash-posting command has answered the
-#      question by running it; and
-#    * the alternative default would make the command a no-op unless a flag were
-#      supplied, which no reading of the frozen program supports - the program
-#      that reaches `acpt-xrply.` has already passed its own proof-flag gate at
-#      [sales/sl100.cbl:L296-L301] and is on its way to post.
+#  WHY THE PREVIOUS DEFAULT OF `True` WAS WRONG (finding CLI-06). An earlier draft
+#  defaulted the switch to posting, on two grounds that do not survive contact
+#  with Agent Action Plan section 0.8.1. That section promotes a write-gating
+#  prompt to a CLI parameter "with the COBOL default preserved" - and where the
+#  COBOL HAS no default, there is nothing to preserve, so supplying one is not
+#  preservation but INVENTION. The two grounds were:
+#    * "it is the only reachable answer that lets the entry point do the thing it
+#      is named for" - an argument about the command's name, not about the frozen
+#      program's behaviour; and
+#    * "the alternative default would make the command a no-op unless a flag were
+#      supplied" - true, and it is the wrong dichotomy. THERE IS A THIRD OPTION,
+#      and it is the faithful one: refuse to run until the operator answers, which
+#      is exactly what the frozen loop does. An unanswered prompt in the COBOL
+#      produces neither a post nor a no-op; it produces a re-prompt.
+#  The invented default was the more dangerous of the two possible inventions,
+#  because it silently ENABLED EVERY DATABASE WRITE on this route (rule R-3) on
+#  behalf of an operator who had said nothing.
 #
-#  CORROBORATED ON THE ORACLE SIDE, which is what makes the two halves of the
-#  comparison agree by construction rather than by luck. The compiled-oracle
-#  scenario runner already resolves this same prompt from a scenario key whose own
-#  default is the string "YES", validating it to exactly "YES" or "NO" and
-#  refusing anything else because both programs loop on anything else. So the
-#  oracle answers YES unless a scenario says otherwise, and this switch posts
-#  unless a command line says otherwise: the two defaults are the same answer, and
-#  a scenario that pins one pins the other.
+#  WHY NOT RESOLVE IT ON THE ORACLE INSTEAD (rule R-6). Because the oracle cannot
+#  currently be built: the frozen archive is missing
+#  copybooks/ACAS-SQLstate-error-list.cob, which 44 frozen files COPY, so 22 of
+#  the 29 bridges do not compile. Fabricating that copybook would breach R-3 and
+#  R-4. With no compiled arbiter available, REQUIRING THE INPUT is the one
+#  disposition that pre-judges nothing: it cannot post when the operator meant not
+#  to, and it cannot skip when the operator meant to post.
 #
-#  THE EXPERIMENT that would close it: drive the compiled `sl100` under the
-#  clean-batch Sales scenario answering `"YES"`, and again answering `"NO"`, and
-#  diff the affected tables against a Python run with the switch at each
-#  position. The `"NO"` pair must both be empty diffs against the seed.
-#
-#  THE SINGLE SOURCE of the default. This constant is the argparse default AND
-#  the default of the keyword parameter on `load11` and `load000`, so a library
-#  caller gets the same answer the command line does. It is also passed
-#  EXPLICITLY into `sl100_cash_posting.run` at every call, so the callee's own
-#  default is never consulted and the two cannot silently disagree.
-_OK_TO_POST_DEFAULT: Final[bool] = True
+#  WHAT REQUIRING IT COSTS, stated plainly: a caller must now pass one of the two
+#  switches, and `load11`/`load000` take the answer as a REQUIRED keyword with no
+#  default, so no library caller can inherit a silent YES either. The scenario
+#  driver pins the answer per scenario, which it already did on the oracle side -
+#  the compiled-oracle runner resolves this same prompt from a scenario key,
+#  validating it to exactly "YES" or "NO" and refusing anything else because both
+#  programs loop on anything else. Both halves of the comparison are now explicit,
+#  which is what makes them agree by construction rather than by a matched pair of
+#  assumptions.
 
 
 # ---------------------------------------------------------------------------
@@ -327,69 +384,54 @@ class _Disposition(enum.Enum):
     ENDED_RUN_UNIT = enum.auto()
 
 
-def _overrewrite_not_migrated(locator: str) -> None:
-    """Record that `perform overrewrite` was reached but is not migrated.
+def _perform_overrewrite(
+    linkage: args.SlPlLinkage, menu_state: args.MenuState, locator: str
+) -> None:
+    """`perform overrewrite` - reproduced, at both of the two sites that reach it.
 
-    `overrewrite.` [sales/sales.cbl:L628] persists `System-Record` under file-key
-    1 and `WS-System-Record-4` under file-key 4, to the relational store
+    The paragraph persists `System-Record` under file-key 1 and
+    `WS-System-Record-4` under file-key 4, to the relational store
     [sales/sales.cbl:L629-L641] and then again to the Cobol file
     [sales/sales.cbl:L645-L657], before falling through `overclose.`
-    [sales/sales.cbl:L659] to `goback.` [sales/sales.cbl:L660]. It belongs to the
-    menu shell, which is a frozen reference source and out of scope as a program
-    (Agent Action Plan section 0.2.2), so the persistence is an OMISSION recorded
-    in the footer rather than a behaviour reproduced here.
+    [sales/sales.cbl:L659] to `goback.` [sales/sales.cbl:L660]. The RDB arm is
+    reproduced once, in `acas_posting.cli.args.overrewrite`; the Cobol arm has no
+    counterpart because the migration has a single store, which is recorded at
+    `args.RDBMS_STORE_SELECTOR_DIGIT`.
 
-    This function exists so that the omission is stated once, at both of the two
-    sites the COBOL reaches it from, with the locator of the site rather than a
-    generic note. It writes one debug record and does nothing else: a log record
-    cannot alter control flow and cannot appear in a table dump, which is the
-    condition Agent Action Plan section 0.3.4 places on anything that replaces
-    presentation.
+    IT IS REACHED ON BOTH PATHS, ALWAYS. `load000.` performs it at L709 and again
+    at L711, and `WS-Term-Code` is `pic 99` [copybooks/wscall.cob:L10], so `< 8`
+    and `> 7` are exhaustive: the persistence is unconditional in effect. This
+    route needs it for a concrete reason - `sl100` mutates SYSTEM-REC twice
+    [sales/sl100.cbl:L473-L474] and writes one of the nine period totals
+    [sales/sl100.cbl:L404], and every one of those changes leaves the program
+    through linkage with `overrewrite` as its only writer to the store.
+
+    This function exists so that the citation and the log record sit at both call
+    sites with the locator of the site rather than a generic note.
 
     Args:
-        locator: the `sales/sales.cbl` line the `perform` sits on, so the two
-            call sites are distinguishable in a log.
+        linkage: the five `CALL` arguments. `system_record` is rewritten under key
+            1; `menu_state.system_record_4` - the SAME object as
+            `linkage.system_record_4` - under key 4.
+        menu_state: the menu's own WORKING-STORAGE.
+        locator: the `sales/sales.cbl` line the `perform` sits on, so the two call
+            sites are distinguishable in a log.
     """
-    #  AMBIGUITY Q-CLI-OVERREWRITE: `load000.` performs `overrewrite` on BOTH
-    #  paths - L709 and L711 - and `WS-Term-Code` is `pic 99`
-    #  [copybooks/wscall.cob:L10], so `< 8` and `> 7` are exhaustive and the
-    #  persistence therefore ALWAYS happens. It is nonetheless omitted here,
-    #  because the menu shell is out of scope as a program, and because no
-    #  in-scope program performs a `System-*` facade verb of its own: `sl100`'s
-    #  own two SYSTEM-REC mutations [sales/sl100.cbl:L473-L474] leave the program
-    #  through linkage with nobody in the migrated surface writing them.
-    #
-    #  THE QUESTION is whether any mandated scenario has a diff in SYSTEM-REC or
-    #  SYSTOT-REC that only this persistence explains. Both tables are among the
-    #  22 the comparison dumps, so the question is decidable rather than
-    #  academic, and it is decided by measurement and not by argument.
-    #
-    #  THE EXPERIMENT: run the clean-batch Sales scenario and the period-end
-    #  totals scenario against the compiled oracle, dump SYSTEM-REC and
-    #  SYSTOT-REC, and compare with the Python run. A non-empty diff confined to
-    #  those two tables localises the effect here; record the outcome in
-    #  docs/migration/ambiguity-resolutions.md. Until it is measured nothing is
-    #  added, because adding a write on a guess would be the one failure mode
-    #  this migration exists to avoid.
     _log.debug(
-        "%s:%s `perform overrewrite` reached; the menu shell's persistence of "
-        "System-Record (file-key 1) and WS-System-Record-4 (file-key 4) is out "
-        "of scope and not migrated - see Q-CLI-OVERREWRITE",
+        "%s:%s `perform overrewrite` - persisting System-Record (file-key 1) and "
+        "WS-System-Record-4 (file-key 4) [sales/sales.cbl:L628-L641]",
         _MENU_SRC,
         locator,
     )
-
-
-# ---------------------------------------------------------------------------
-# The migrated paragraphs
-# ---------------------------------------------------------------------------
-
+    args.overrewrite(linkage.system_record, menu_state, linkage.file_defs)
 
 def load000(
     linkage: args.SlPlLinkage,
     *,
     program_id: str,
-    ok_to_post: bool = _OK_TO_POST_DEFAULT,
+    menu_state: args.MenuState,
+    ok_to_post: bool,
+    dal_options: Mapping[str, object] | None = None,
 ) -> _Disposition:
     """`load000.` [sales/sales.cbl:L698-L712] - the five-parameter dispatch.
 
@@ -418,8 +460,10 @@ def load000(
             Python resolves the callee at the call site.
         ok_to_post: the promoted run-confirm - the callee's own interactive
             prompt at [sales/sl100.cbl:L310-L319], which has no counterpart in
-            this paragraph and is carried through it. Forwarded EXPLICITLY into
-            `run`, so the callee's own default is never the one that applies.
+            this paragraph and is carried through it. REQUIRED, with no default
+            at any layer (M-09): a blank answer re-prompts for ever in the frozen
+            source [sales/sl100.cbl:L313, L318-L319], so there is no silence to
+            interpret. Forwarded EXPLICITLY into `run`.
 
     Returns:
         Which of the paragraph's two exits was taken. See `_Disposition`.
@@ -470,6 +514,13 @@ def load000(
         linkage.to_day,
         linkage.file_defs,
         ok_to_post=ok_to_post,
+        #  The operator's transport declaration, carried to every facade context
+        #  `sl100` builds. NO COBOL COUNTERPART - the frozen bridge's connect
+        #  passes six values and no transport policy at all
+        #  [copybooks/mysql-procedures.cpy:L72-L77] - so it is stated at the
+        #  process boundary, which is the only place that knows. `None` states the
+        #  fail-closed policy, which is a statement rather than an omission.
+        dal_options=dal_options,
     )
 
     #  The two tests below are TWO SEPARATE `if` STATEMENTS in the frozen source,
@@ -498,7 +549,7 @@ def load000(
     # maintainer's own comment names the programs he had in mind - and `sl100` is
     # not among them, even though this is the paragraph that dispatches it.
     if not args.is_serious_error(term_code):
-        _overrewrite_not_migrated("L709")
+        _perform_overrewrite(linkage, menu_state, "L709")
 
     # R-4 sales/sales.cbl:L710-L712
     #     L710       if       ws-term-code > 7      *> Got a serious (reported) error
@@ -525,10 +576,12 @@ def load000(
     #           happened in both; no further dispatch occurs in either, because
     #           `load11` has nothing after its transfer [L796] and the caller
     #           here returns immediately; and the menu redraw that the COBOL
-    #           skips is not migrated at all. The only difference is the omitted
-    #           `overrewrite` persistence, which is recorded in the footer as an
-    #           OMISSION and is common to both branches rather than specific to
-    #           this one.
+    #           skips is not migrated at all. `overrewrite`'s persistence is NOT
+    #           a difference either: it is performed on this branch and on the
+    #           ordinary one, as the frozen source performs it on both. The only
+    #           part left out is that paragraph's flat-file half
+    #           [sales/sales.cbl:L643-L657], which repeats both rewrites against
+    #           an ISAM parameter file this migration's target does not have.
     #
     # MECHANISM DIVERGENCE, PRESERVED. Sales writes `perform overrewrite` then
     # `goback` [sales/sales.cbl:L710-L712]; Purchase writes `go to overrewrite`
@@ -538,7 +591,7 @@ def load000(
     # one file. Net effect identical, mechanism different; both are preserved and
     # neither is harmonised (R-4).
     if args.is_serious_error(term_code):
-        _overrewrite_not_migrated("L711")
+        _perform_overrewrite(linkage, menu_state, "L711")
         disposition = _Disposition.ENDED_RUN_UNIT
 
     return disposition
@@ -547,7 +600,8 @@ def load000(
 def load11(
     linkage: args.SlPlLinkage,
     *,
-    ok_to_post: bool = _OK_TO_POST_DEFAULT,
+    menu_state: args.MenuState,
+    ok_to_post: bool,
 ) -> _Disposition:
     """`load11.` [sales/sales.cbl:L792-L796] - Sales payments posting.
 
@@ -577,8 +631,9 @@ def load11(
         linkage: the bound five-parameter Shape 2 carrier, its `calling_data`
             mutated in place by the dispatch.
         ok_to_post: the promoted run-confirm [sales/sl100.cbl:L310-L319].
-            Defaults to posting - see Q-CLI-OKTOPOST - and is forwarded
-            explicitly all the way to the program module.
+            REQUIRED, with no default at any layer - see Q-CLI-OKTOPOST, resolved
+            from the source (M-09) - and forwarded explicitly all the way to the
+            program module.
 
     Returns:
         Whichever of `load000.`'s two exits was taken, unchanged. This paragraph
@@ -597,7 +652,9 @@ def load11(
     #           executes nothing after the call, so the two tails are both empty.
     #           Where the peer's own transfer goes is carried out of the call as
     #           the returned disposition rather than being re-decided here.
-    return load000(linkage, program_id=_SL100, ok_to_post=ok_to_post)
+    return load000(
+        linkage, program_id=_SL100, menu_state=menu_state, ok_to_post=ok_to_post
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -642,6 +699,15 @@ def _build_parser() -> argparse.ArgumentParser:
     # The shared fragments, composed rather than reimplemented.
     args.add_calling_data_arguments(parser, default_caller=args.WS_CALLER_SALES)
     args.add_slpl_linkage_arguments(parser)
+    #  THE TRANSPORT DECLARATION - one contract, published on every route
+    #  (`args.add_transport_security_arguments`). No COBOL counterpart: the frozen
+    #  bridge's connect passes six values and no transport policy at all
+    #  [copybooks/mysql-procedures.cpy:L72-L77], transport being compiled into
+    #  `cobmysqlapi.c`, so the migration must decide it and the operator is the
+    #  only party that knows. Stating NOTHING is the fail-closed policy - loopback
+    #  and Unix sockets only - not an absent one. It decides no posted figure, so
+    #  it cannot make two runs of one scenario differ (R-6).
+    args.add_transport_security_arguments(parser)
 
     #  THE RUN-CONFIRM, OWNED HERE. It is specific to `sl100`
     #  [sales/sl100.cbl:L310-L319], so `cli/args.py` must not carry it: a shared
@@ -661,25 +727,39 @@ def _build_parser() -> argparse.ArgumentParser:
     #  to a `(YES/NO)` field. No third position is offered, because the COBOL has
     #  no third answer: a blank re-prompts [sales/sl100.cbl:L313, L318-L319]
     #  rather than resolving, so there is nothing for a third position to mean.
+    #
+    #  `required=True`, AND NO `default` (finding CLI-06). The frozen prompt cannot
+    #  be left unanswered - `wx-reply pic xxx value spaces` [sales/sl100.cbl:L167]
+    #  is re-blanked at L313 and a blank goes straight back to `acpt-xrply.` at
+    #  L318-L319 - so there is no default to preserve and any default would be an
+    #  invention (Agent Action Plan section 0.8.1). Omitting the switch is
+    #  therefore a USAGE ERROR: argparse exits with status 2 and names the missing
+    #  argument, which is the headless analogue of a prompt that will not accept
+    #  a blank. It is NOT a validation added to the cycle (rule R-3): nothing is
+    #  checked that the frozen source does not check, and what the frozen source
+    #  does with an unanswered prompt is refuse to proceed.
     parser.add_argument(
-        "--ok-to-post",
+        _OK_TO_POST_OPTION,
         action=argparse.BooleanOptionalAction,
-        default=_OK_TO_POST_DEFAULT,
+        required=True,
         help=(
-            "The promoted run-confirm of "
+            "REQUIRED. The promoted run-confirm of "
             f"{_PROGRAM_SRC}:L310-L319 - 'OK to Post Payment Transactions "
             "(YES/NO) ?'. It gates EVERY database write: --no-ok-to-post "
             f'reproduces the "NO" branch at {_PROGRAM_SRC}:L316-L317, which '
             "transfers to menu-exit before the first file is opened at "
             f"{_PROGRAM_SRC}:L321, so the run has no effect whatsoever. The "
             "program is still entered either way, exactly as the COBOL enters it "
-            "before asking. There is no COBOL default to preserve - wx-reply is "
-            f"'pic xxx value spaces' ({_PROGRAM_SRC}:L167) and a blank "
-            f're-prompts ({_PROGRAM_SRC}:L313, L318-L319), so only "YES" '
-            "proceeds; the default here is therefore to post. Default: "
-            f"{'--ok-to-post' if _OK_TO_POST_DEFAULT else '--no-ok-to-post'}."
+            "before asking. THERE IS NO DEFAULT because the frozen program has "
+            f"none - wx-reply is 'pic xxx value spaces' ({_PROGRAM_SRC}:L167) and "
+            f'a blank re-prompts ({_PROGRAM_SRC}:L313, L318-L319), so only "YES" '
+            'proceeds and only "NO" declines. Pass one of the two switches; '
+            "omitting both is a usage error, not an implied yes."
         ),
     )
+    #  Diagnostics only: no COBOL counterpart, no database effect. Shared with
+    #  the other six routes so the level policy has one spelling.
+    args.add_log_level_argument(parser)
     return parser
 
 
@@ -690,18 +770,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging or touches `argv`. It does four things in order: parse, pin and bind,
     dispatch, report.
 
-    NO CONNECTION CONTRACT, NO RUN. `args.bind_slpl_linkage` resolves the six
-    connection fields of `SYSTEM-REC` from the deployment contract and raises
-    `rdbms_params.RdbmsParamError` if that contract is absent or unusable. It is
-    deliberately NOT caught here, and the reason is evidence rather than taste:
-    the frozen loaders abandon on exactly this condition by displaying a message
-    and issuing a bare `goback` WITHOUT setting a return code
-    [common/glbatchLD.cbl:L245-L259], so there is no frozen exit-status
-    vocabulary for it to be mapped onto, and inventing one would re-encode a
-    value the migration is required to carry unchanged. Letting it propagate
-    surfaces the full diagnostic and exits non-zero, having written nothing - the
-    raise happens while the linkage is still being bound, before any program is
-    entered.
+    NO CONNECTION CONTRACT, NO RUN - AND ONE STATUS FOR IT ACROSS THE PACKAGE
+    (finding CLI-09). The six connection fields of `SYSTEM-REC` are resolved from
+    the deployment contract, which raises `args.RdbmsParamError` when that
+    contract is absent or unusable. That EXACT TYPE is caught here and turned into
+    the one documented status every route of this package shares, through
+    `args.report_configuration_failure`: 8 when the contract is absent, 1 when it
+    is present but unusable. Nothing has been written when it surfaces - the raise
+    happens while the parameters are still being resolved, before the system store
+    is opened and before any program is entered.
+
+    This does not re-encode a COBOL value, and that was the objection an earlier
+    draft raised against catching it: the frozen loaders abandon on exactly this
+    condition by displaying a message and issuing a bare `goback` WITHOUT setting a
+    return code [common/glbatchLD.cbl:L245-L259], so there is no frozen
+    exit-status vocabulary to map onto. True - and it cuts the other way too. The
+    process exit status is a boundary the migration introduces (Q-CLI-EXITSTATUS),
+    so it must be DECIDED rather than derived, and deciding it once for all seven
+    routes is what makes a failed configuration diagnosable instead of
+    route-dependent. What is NOT caught is `ValueError` at large: a genuine defect
+    keeps its traceback.
 
     A REJECTED RUN DATE IS NOT AN ERROR. `args.resolve_clock` returns a binary
     `Run-Date` of 0 for a date the legacy module rejects and raises nothing,
@@ -723,30 +811,47 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     Raises:
         SystemExit: argparse's own, for `--help` and for a usage error such as
-            the required `--run-date` being omitted.
-        rdbms_params.RdbmsParamError: the connection contract is absent or
-            unusable. Nothing has been written when this is raised.
+            the required `--run-date` or the required `--ok-to-post` /
+            `--no-ok-to-post` decision being omitted.
+
+    `args.RdbmsParamError` is CAUGHT, not raised: `main` returns
+    `args.report_configuration_failure`'s status instead - 8 for an absent
+    deployment contract, 1 for an unusable one (finding CLI-09). Nothing has been
+    written when it surfaces.
     """
     parser = _build_parser()
     ns = parser.parse_args(argv)
 
-    #  `logging.basicConfig` BELONGS HERE AND NOWHERE ELSE. Calling it at import
-    #  time would configure the root logger of any process that merely imported
-    #  this module - the scenario tests import the package - and would be an
-    #  import-time side effect. Inside `main` it configures only a process that
-    #  chose to be an entry point, and `force` is deliberately not passed so an
-    #  embedding caller that has already configured logging keeps its own setup.
+    #  `--log-level` APPLIED THROUGH THE ONE CONFIGURATOR, and only when the
+    #  operator supplied it. The shared fragment defaults the option to `None`, so
+    #  `None` means "not asked for" and whatever the process boundary configured
+    #  stands - on a routed run, the router's own `--log-level`. A supplied level
+    #  is applied on either route: logging is configured once at the boundary, and
+    #  `configure_logging` then sets the level because this package owns the
+    #  handler, so the last explicit request wins. An embedding application's own
+    #  configuration is never touched. The import is local to the call for the same
+    #  reason the guard at the foot of this module gives.
+    if ns.log_level is not None:
+        from acas_posting.__main__ import configure_logging
+
+        configure_logging(ns.log_level)
+
+    #  THIS MODULE CALLS NO `basicConfig`, AND ITS `asctime` FIELD IS GONE.
+    #  The package contains exactly one call to it -
+    #  `acas_posting.__main__.configure_logging` - which both process boundaries
+    #  reach: the router, and this module's own guard through `run_entry_point`.
+    #  `main` does ask that configurator to SET THE LEVEL, but only when the
+    #  operator supplied `--log-level`; called as a library without that option,
+    #  which is how the scenario suites reach it, it touches nothing.
     #
-    #  The `asctime` field is the logging library's own record timestamp, not a
-    #  clock this module reads, and it is not a run-date observable: it reaches
-    #  the log stream and nothing else. Determinism is defined over TABLE DUMPS
-    #  (Agent Action Plan section 0.8.5), and no log record can appear in one, so
-    #  R-6 is untouched by it. The two date observables still come only from
+    #  The format that configurator applies carries NO `%(asctime)s`. The old
+    #  reasoning here - that a record timestamp reaches the log stream and never a
+    #  table dump, so section 0.8.5's determinism is untouched - was true and is
+    #  still beside the point: it made this route the only one whose transcript of
+    #  two identical runs differed, and it was the only reading of a wall clock
+    #  anywhere in an otherwise clock-free package. One format for seven routes,
+    #  and no clock in any of them. The two date observables still come only from
     #  `--run-date`.
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)-8s %(name)s %(message)s",
-    )
 
     #  PIN AND BIND. One call resolves the clock from `--run-date` and returns
     #  the five Shape 2 arguments in COBOL parameter order. `called` is the
@@ -761,13 +866,35 @@ def main(argv: Sequence[str] | None = None) -> int:
     #  loaders call and whose own remarks say it "Uses Current directory only."
     #  The run date is untouched by that and still arrives only as `--run-date`,
     #  so no ambient input can make two runs of one scenario differ (R-6).
-    linkage = args.bind_slpl_linkage(ns, called=_SL100)
+    #  THE MENU'S OWN WORKING-STORAGE - one block for the whole route, owning
+    #  `WS-System-Record-4`, which the binder hands to the linkage as its third
+    #  argument. See `args.slpl_menu_state`.
+    menu_state = args.slpl_menu_state()
+
+    #  L351  aa005-Open-System.   L365  aa010-Get-System-Recs.
+    #  Passing it makes the binder perform `Open-System.` and
+    #  `aa010-Get-System-Recs.` [sales/sales.cbl:L338-L360] - keys 4 then 1, never
+    #  key 2, TWO keys where the General Ledger shell reads three - so `sl100`
+    #  receives the PERSISTED records rather than defaulted ones (finding CLI-02).
+    #
+    #  THE EXACT TYPE IS CAUGHT, NOT `ValueError` (finding CLI-09). The six
+    #  connection parameters are resolved inside the binder before the store is
+    #  opened, so a failure here has touched nothing, and catching the base class
+    #  would swallow a genuine defect as if it were a configuration problem.
+    try:
+        linkage = args.bind_slpl_linkage(ns, called=_SL100, menu_state=menu_state)
+    except args.RdbmsParamError as error:
+        return args.report_configuration_failure(
+            error, logger=_log, subject="Sales cash posting"
+        )
 
     # `go       to load11` - the menu's own `depending on z` dispatch table
     # [sales/sales.cbl:L662-L670] selected this paragraph for menu letter
     # `(K)  Payment Post` [sales/sales.cbl:L549]. The table itself is an
     # OMISSION; a command line selects the route by being invoked.
-    disposition = load11(linkage, ok_to_post=ns.ok_to_post)
+    disposition = load11(
+        linkage, menu_state=menu_state, ok_to_post=ns.ok_to_post
+    )
 
     term_code = linkage.calling_data.ws_term_code
     if disposition is _Disposition.ENDED_RUN_UNIT:
@@ -792,7 +919,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":  # pragma: no cover - the module-as-script boundary
-    raise SystemExit(main())
+    #  ONE PROCESS BOUNDARY, SHARED WITH THE ROUTER. `run_entry_point` configures
+    #  logging once, from the single format and level policy, and converts a
+    #  failure into one sanitised ERROR record and a deterministic exit status.
+    #  The import is inside the guard: it is needed only when this module IS the
+    #  process, and the router imports this module back when the router is.
+    from acas_posting.__main__ import run_entry_point
+
+    raise SystemExit(run_entry_point(main, command="sl-cash-post"))
 
 
 # ===========================================================================
@@ -820,8 +954,9 @@ if __name__ == "__main__":  # pragma: no cover - the module-as-script boundary
 #                              `*> Sales payments posting`, L795 the `move`,
 #                              L796 the `go to`. Two statements, NO gate.
 #   _Disposition               the two exits of `load000.` - L714/L716 and L712.
-#   _overrewrite_not_migrated  the two `perform overrewrite` sites, L709 and
-#                              L711. Records the omission; performs nothing.
+#   _perform_overrewrite       the two `perform overrewrite` sites, L709 and
+#                              L711. Performs `args.overrewrite`, the paragraph
+#                              itself, and logs the site's own locator.
 #   _build_parser              the CLI boundary. No COBOL counterpart: the menu
 #                              selects a route with a letter
 #                              [sales/sales.cbl:L549] through a `depending on z`
@@ -856,7 +991,8 @@ if __name__ == "__main__":  # pragma: no cover - the module-as-script boundary
 #                  BEFORE the first open at L321, so NOTHING is written
 #       L318-L319  blank, and anything else, re-prompts
 #       => only "YES" proceeds, so there is no defaultable answer to preserve.
-#          The switch pair defaults to posting; see Q-CLI-OKTOPOST.
+#          The switch pair is `required=True` with no default, so the decision
+#          must be stated (finding CLI-06); see Q-CLI-OKTOPOST.
 #          The value is passed EXPLICITLY into `run` at every call, so the
 #          callee's own `ok_to_post: bool = True` is never consulted and the two
 #          defaults cannot silently drift.
@@ -1012,8 +1148,11 @@ if __name__ == "__main__":  # pragma: no cover - the module-as-script boundary
 #      Implemented faithfully anyway.
 #   Not this module's to reproduce, recorded so a reader does not look for them
 #   here: anomaly 10 of the register - `sl100`'s moving-average guard uses the
-#   OPPOSITE divide operand order from its two siblings
-#   [sales/sl100.cbl:L506, L511], integer truncation throughout and never a
+#   `divide ... BY ... giving` form where its two siblings write
+#   `divide ... INTO ... giving` [sales/sl100.cbl:L506, L511] - a SYNTACTIC
+#   difference only, since both forms compute accumulator / activity and the
+#   two are therefore arithmetically equal; the truncation, not the operand
+#   order, is what the anomaly turns on - integer truncation throughout and never a
 #   binary fraction - lives in `programs/sl100_cash_posting.py`, and nothing here
 #   compensates for it. So does the period-total write to `sl-payments`
 #   [sales/sl100.cbl:L404, copybooks/wssys4.cob:L17], which is one of the nine
@@ -1027,30 +1166,38 @@ if __name__ == "__main__":  # pragma: no cover - the module-as-script boundary
 # 9. AMBIGUITIES - each to be recorded in
 #    docs/migration/ambiguity-resolutions.md with its experiment and outcome.
 # ---------------------------------------------------------------------------
-#   Q-CLI-OKTOPOST     OPEN, but corroborated on both sides. Stated in full at
-#                      `_OK_TO_POST_DEFAULT`. What CLI default preserves a prompt
-#                      that has no defaultable answer [sales/sl100.cbl:L167, L313,
-#                      L318-L319]? Decided `True`, and the decision is not
-#                      unilateral: the compiled-oracle scenario runner defaults
-#                      the same prompt to the string "YES" and validates it to
-#                      "YES" or "NO", so both halves of the comparison answer the
-#                      same way unless a scenario pins them. Still to be confirmed
-#                      by driving the compiled `sl100` under the clean-batch Sales
-#                      scenario at both positions and diffing. The program module
-#                      records the same question as its own AMBIGUITY Q-6, and the
-#                      two answers must stay identical - which passing the value
-#                      explicitly guarantees.
+#   Q-CLI-OKTOPOST     RESOLVED. Stated in full above the parser's `--ok-to-post`
+#                      declaration. The question was: what CLI default preserves a
+#                      prompt that has no defaultable answer
+#                      [sales/sl100.cbl:L167, L313, L318-L319]? The answer is that
+#                      NONE DOES, so the switch is `required=True` with no default
+#                      and omitting it is a usage error (status 2). An earlier
+#                      draft answered `True`, which invented the one answer that
+#                      silently enables every database write on this route
+#                      (finding CLI-06, rule R-3). Resolution by oracle is
+#                      unavailable - the frozen archive is missing
+#                      copybooks/ACAS-SQLstate-error-list.cob, so 22 of the 29
+#                      bridges do not compile and fabricating it would breach R-3
+#                      and R-4 - and requiring the input is the one disposition
+#                      that pre-judges neither answer. The oracle runner already
+#                      pins this prompt per scenario, so both halves of the
+#                      comparison are now explicit rather than relying on a matched
+#                      pair of assumptions. The program module records the same
+#                      question as its own AMBIGUITY Q-6; the value is passed
+#                      explicitly at every call, so the two cannot disagree.
 #                      One span note: the oracle runner cites the prompt's loop as
 #                      [sales/sl100.cbl:L316-L318]. Measured precisely, the two
 #                      tests are L316-L317 (`"NO"` -> `menu-exit`) and L318-L319
 #                      (anything but `"YES"` -> `acpt-xrply`); this module cites
 #                      those.
-#   Q-CLI-OVERREWRITE  OPEN. Stated in full at `_overrewrite_not_migrated`. Does
-#                      any mandated scenario show a SYSTEM-REC or SYSTOT-REC diff
-#                      that only the menu's omitted persistence
-#                      [sales/sales.cbl:L628, L709, L711] explains? Both tables
-#                      are among the 22 the comparison dumps, so it is decidable.
-#                      Nothing is added until it is measured.
+#   Q-CLI-OVERREWRITE  SETTLED, by reproducing the paragraph. `args.overrewrite`
+#                      is performed from both sites [sales/sales.cbl:L709, L711]
+#                      and `args.aa010_get_system_recs` loads the same two rows
+#                      before the dispatch, so SYSTEM-REC and SYSTOT-REC are
+#                      written on both sides. What remains for the oracle is
+#                      narrower and lives in `cli/args.py` as
+#                      Q-CLI-SYSREC-PINS: three columns are re-pinned from the
+#                      command line over the loaded row.
 #   Q-CLI-EXITSTATUS   SETTLED, and settled in `cli/args.py:exit_status_for`,
 #                      which this module calls rather than re-deciding. The
 #                      mapping is the identity: `WS-Term-Code` is `pic 99` so its

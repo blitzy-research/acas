@@ -254,7 +254,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field as dc_field
 from decimal import Decimal
-from typing import Final
+from typing import Final, Mapping
 
 # The COBOL-language semantics runtime.  Per plan section 0.3.1, "`cobol/`
 # contains no business logic and `programs/` contains no numeric primitives" -
@@ -322,8 +322,13 @@ _SRC: Final[str] = "purchase/pl100.cbl"
 _PROG_NAME: Final[str] = "PL100 (3.3.01)"
 
 #: ``03  PL002  pic x(31) value "PL002 Note error and hit return".``  [L204]
-#: Retained as log text only - the display it drove is an acknowledgement
-#: pause with no database effect (see the OMISSIONS list in the footer).
+#: DECLARED AND DELIBERATELY NEVER REFERENCED.  Both of its displays - [L291] and
+#: [L669] - stand immediately before an `accept ws-reply`, and the literal is
+#: nothing but the instruction to press that key, so plan section 0.3.4 drops it
+#: with the pause and no log record carries it; the substantive diagnostic on each
+#: of those paths is the `PL137`/`PL132` record beside it.  The DECLARATION stays
+#: because rule R-5 maps the whole `01 Error-Messages.` group and a shorter group
+#: would misreport the frozen source.  See the OMISSIONS list in the footer.
 _PL002: Final[str] = "PL002 Note error and hit return"
 #: ``03  PL132  pic x(32) value "PL132 Err on Batch file write : ".``  [L207]
 _PL132: Final[str] = "PL132 Err on Batch file write : "
@@ -506,7 +511,7 @@ _D_VAT_PC: Final = _K("GLPOSTING-REC.VAT-PC")
 _D_POST_VAT_SIDE: Final = _K("GLPOSTING-REC.POST-VAT-SIDE")
 _D_VAT_AMOUNT: Final = _K("GLPOSTING-REC.VAT-AMOUNT")
 
-# --- WS-IRS-Posting-Record  copy "wspost-irs.cob"  [pl100.cbl:L218] -------
+# --- WS-IRS-Posting-Record  copy "wspost-irs.cob"  [purchase/pl100.cbl:L218] -
 # The DR and CR account numbers NARROW from `9(6)` on the GL side to `9(5)`
 # here, so the fan-out moves at [L634]/[L636] are truncating stores.  The two
 # amount fields are `SIGN LEADING` display, not COMP-3.
@@ -544,9 +549,12 @@ _D_RRN: Final = _K("File-Access.Rrn")
 _D_FILE_KEY_NO: Final = _K("File-Access.File-Key-No")
 
 # --- WS-Calling-Data  copy "wscall.cob"  [purchase/pl100.cbl:L258] --------
-# `WS-Caller pic x(8)` [copybooks/wscall.cob:L8].  Referenced only for the
-# entry log line; `pl100` - unlike [purchase/pl060.cbl:L1022-L1025] - never
-# tests it for the unattended `"xl150"` caller.
+# `WS-Caller pic x(8)` [copybooks/wscall.cob:L8].  DECLARED AND DELIBERATELY
+# UNUSED: `pl100` - unlike [purchase/pl060.cbl:L1022-L1025] - never tests it for
+# the unattended `"xl150"` caller, and the entry log record that once rendered it
+# was removed because a caller name is not inside the safe-event schema and its
+# eager `move` made a diagnostic into a failure path.  The descriptor stays so the
+# field keeps its dictionary citation, which is what rule R-5 asks of the group.
 _D_WS_CALLER: Final = _K("WS-Calling-Data.WS-Caller")
 
 # --- maps03-ws  copy "wsmaps03.cob"  [purchase/pl100.cbl:L128] ------------
@@ -652,6 +660,19 @@ class _Pl100State:
     # ---- the run-confirm answer, from `accept wx-reply` [L306] -----------
     ok_to_post: bool
 
+    # ---- NOT A COBOL FIELD: the caller's keyword-only handler declarations --
+    # Chiefly the transport-security policy, forwarded to every facade
+    # `PERFORM` this program issues.  No COBOL counterpart: the frozen bridge's
+    # connect passes six values and no transport policy at all
+    # [copybooks/mysql-procedures.cpy:L72-L77] - transport is compiled into
+    # `cobmysqlapi.c`.  An empty mapping is the SAFE answer, not the absent one:
+    # every handler declares `transport: TransportSecurity | None = None` and
+    # `connection._require_permitted_connection` resolves `None` fail-closed,
+    # permitting a Unix socket or a loopback address and refusing every other
+    # target.  Carried opaquely; `dal/facade.py` projects it onto whatever extras
+    # each handler declares.
+    dal_options: Mapping[str, object] = dc_field(default_factory=dict)
+
     # ---- records the facade reads into and writes from -------------------
     purch: WsPurchRecord = dc_field(default_factory=WsPurchRecord)
     otm5: OiHeader = dc_field(default_factory=_fresh_oi_header)
@@ -720,6 +741,11 @@ class _Pl100State:
             file_access=self.file_access,
             file_defs=self.file_defs,
             dal_common=self.dal_common,
+            # Sixth operand, no COBOL counterpart and no accounting value: the
+            # caller's keyword-only declarations, transport policy among them.
+            # Attached to EVERY context so the policy does not depend on which
+            # entity a verb happens to touch.
+            options=self.dal_options,
         )
 
     # ------------------------------------------------------------------
@@ -827,9 +853,11 @@ def _init01(state: _Pl100State) -> None:
     second immediate run is refused too.  `sl100` has the same latch on
     `S-Flag-P` [sales/sl100.cbl:L296-L301] and [sales/sl100.cbl:L474], but
     `pl100`'s DISPLAYS AND ACCEPTS BEFORE RETURNING where `sl100`'s does not.
-    The latch and its clearing are reproduced; only the display and the
-    acknowledgement accept are dropped, and the `go to menu-exit` control
-    transfer is preserved.
+    The latch and its clearing are reproduced.  `PL137` [L290] becomes a log
+    record because it is the diagnostic; `PL002` [L291] and the acknowledgement
+    `accept` [L292] are dropped together, the literal being nothing but the
+    instruction to press that key; and the `go to menu-exit` control transfer at
+    [L293] is preserved.
     """
     # [L273-L274]  move prog-name to l1-name.  move Print-Spool-Name to PSN.
     # OMITTED - both receivers are print-file layout items.  `prog-name` is
@@ -846,16 +874,21 @@ def _init01(state: _Pl100State) -> None:
 
     # [L289]  if p-flag-p not = 2
     if arithmetic.compare(state._pl.p_flag_p, 2) != 0:
-        # [L290-L292]  display PL137 / PL002 / accept ws-reply.  The displays
-        # become log records and the accept is an acknowledgement pause with no
-        # database effect, so it is dropped - but the transfer below is not.
-        _LOG.warning(
-            "%s: %s - P-Flag-P is %s, not 2; payments are not proofed. %s",
-            _PROG_NAME,
-            _PL137,
-            state._pl.p_flag_p,
-            _PL002,
-        )
+        # [L290]  display PL137 at 2301.  A DIAGNOSTIC with no database effect
+        # becomes a log record (plan section 0.3.4).  THE RECORD IS THE LITERAL
+        # AND NOTHING ELSE:
+        #   * [L291] `display PL002` and [L292] `accept ws-reply` are DROPPED
+        #     together.  "PL002 Note error and hit return" is nothing but the
+        #     instruction to press the key the `accept` reads, so there is no
+        #     substantive half to keep and a headless run has no operator to
+        #     instruct.
+        #   * `P-Flag-P` ITSELF IS NOT LOGGED.  The frozen display shows the
+        #     literal alone; the flag's value is a SYSTEM-REC host-variable
+        #     value, which the safe-event schema in `acas_posting/dal/status.py`
+        #     excludes from a record (CWE-532), and narrating it would also state
+        #     more than the compiled program does.
+        # The TRANSFER below is not dropped.
+        _LOG.warning("%s: %s", _PROG_NAME, _PL137)
         # [L293]  go to menu-exit.        # GO TO class 3 -> menu-exit [L467]
         _init01__menu_exit(state)
         return
@@ -879,7 +912,13 @@ def _init01__menu_return(state: _Pl100State) -> None:
     # [L300]  perform zz070-Convert-Date.
     _zz070_convert_date(state)
     # [L301]  display ws-date at 0171.
-    _LOG.info("%s: run date %s", _PROG_NAME, state.date_formats.ws_date)
+    # NO LOG COUNTERPART.  `ws-date` is the posting date this run stamps into the
+    # records it writes - a date with business meaning, which the safe-event
+    # schema in `acas_posting/dal/status.py` excludes (CWE-532).  It is an INPUT
+    # the caller supplied through `to-day`, already known wherever the run was
+    # started and pinned by `clock.py`.  The conversion above still runs: it is a
+    # redundant recomputation that is reproduced, and it can default `Date-Form`
+    # in the system record, which IS a table effect.
     # FALL-THROUGH [L301] -> acpt-xrply. [L302]
     _init01__acpt_xrply(state)
 
@@ -920,11 +959,13 @@ def _init01__acpt_xrply(state: _Pl100State) -> None:
     """
     while True:
         # [L303-L304]  display "OK to post payment transactions (YES/NO) ?".
-        _LOG.info(
-            "%s: OK to post payment transactions (YES/NO) ? -> %s",
-            _PROG_NAME,
-            "YES" if state.ok_to_post else "NO",
-        )
+        # NOT LOGGED.  It is the screen text for the `accept wx-reply` at [L306],
+        # and plan section 0.3.4 resolves an `accept` that gates a database write
+        # into "an explicit CLI parameter with the COBOL default preserved" -
+        # which `ok_to_post` is.  The prompt is the dialogue around that
+        # parameter, so emitting it as an operator diagnostic would log a question
+        # no one can answer, and echoing the answer back would only restate a
+        # command-line argument the caller already holds.
         # [L305]  move spaces to wx-reply.
         state.wx_reply = movelib.move_figurative(movelib.SPACE, _D_WX_REPLY)
         # [L306]  accept wx-reply at 1256 with foreground-color 6 update.
@@ -1355,19 +1396,15 @@ def _init01__main_end(state: _Pl100State) -> None:
     # [L431]  perform Purch-Close.
     facade.purch_close(state.ctx(state.purch))
 
-    # [L433-L444]  the two total print blocks.  OMITTED - print layout only;
-    # the totals themselves are already accumulated and are logged instead.
-    _LOG.info(
-        "%s: payment totals approp=%s deduct=%s paid=%s; "
-        "journal totals approp=%s deduct=%s paid=%s",
-        _PROG_NAME,
-        state.t_approp,
-        state.t_deduct,
-        state.t_paid,
-        state.j_approp,
-        state.j_deduct,
-        state.j_paid,
-    )
+    # [L433-L444]  the two total print blocks.  OMITTED AND NOT LOGGED.  Every
+    # statement in both is a `move` into the print line followed by `write
+    # print-record`; the frozen program DISPLAYS none of it.  Report formatting
+    # beyond database effects is out of scope (plan section 0.2.2), and section
+    # 0.3.4 converts a DISPLAY, not a report line.  The six operands are
+    # MONETARY TOTALS besides, which the safe-event schema in
+    # `acas_posting/dal/status.py` excludes from a record at any level (CWE-532).
+    # The accumulators themselves are untouched: they are real, and the ones that
+    # matter reach SYSTOT-REC, which is where the audit trail lives.
     # [L445]  close print-file.  OMITTED - the print file.
     # [L446]  call "SYSTEM" using Print-Report.  OMITTED - plan section 0.1.1
     # excludes "the `call "SYSTEM" using Print-Report` spool-out path" by name.
@@ -1452,7 +1489,13 @@ def _init01__menu_exit(state: _Pl100State) -> None:
     fall-through from `[L465]`.  In every case the predecessor's last act is
     the call to this function, so returning unwinds to `run()`.
     """
-    _LOG.info("%s: exit program (WS-Term-Code %s)", _PROG_NAME, state.ws_calling_data.ws_term_code)
+    # NO LOG RECORD.  `menu-exit.` [L467-L468] displays NOTHING - `exit program.`
+    # is its only statement - so an "exit program" event would be output the
+    # compiled program never produced, which R-4 forbids inventing, and
+    # `WS-Term-Code` is a linkage field the caller reads directly.  `state` stays
+    # in the signature so every paragraph function in this module has the same
+    # shape (R-5) and the three transfer sites pass it as written.
+    del state
     return
 
 
@@ -1471,8 +1514,11 @@ def _init01__headings(state: _Pl100State) -> None:
     # [L472]  move j to l1-page.       OMITTED - print layout item.
     # [L473]  move usera to l2-user.   OMITTED - print layout item.
     # [L475-L485]  the six `write print-record` statements and the page/before
-    # /after phrases.  OMITTED - the print file (see OMISSIONS).
-    _LOG.debug("%s: page %s headings", _PROG_NAME, state.j)
+    # /after phrases.  OMITTED - the print file (see OMISSIONS) - AND NOT LOGGED:
+    # a page number and a column ruler are report formatting, out of scope per
+    # plan section 0.2.2, and this paragraph contains no `display` at all.  The
+    # counter statements above and below stay, because [L422] tests the line
+    # budget this paragraph resets.
     # [L486]  move 5 to line-cnt.
     state.line_cnt = movelib.move(5, _D_LINE_CNT)
 
@@ -2284,16 +2330,21 @@ def _bl_close(state: _Pl100State) -> None:
         # [L665]  display PL132 at 2301
         # [L666]  perform Eval-Status
         _eval_status(state)
-        # [L667-L669]  display fs-reply / exception-msg / PL002
+        # [L667-L668]  display fs-reply / exception-msg.  Four displays, one
+        # record.  `PL002` [L669] IS DROPPED with the `accept` it introduces -
+        # the whole literal is the key-press instruction.  `exception-msg` STAYS:
+        # it is `pic x(25)` [purchase/pl100.cbl:L126] filled ONLY by
+        # `Eval-Status` above from the static status table
+        # `copybooks/FileStat-Msgs.cpy` keyed on `fs-reply`, so it is a fixed
+        # status NAME - never driver text and never a business value.
         _LOG.error(
-            "%s [%s:L665-L669] %s fs-reply=%s we-error=%s %s | %s",
+            "%s [%s:L665-L668] %s fs-reply=%s we-error=%s %s",
             _PROG_NAME,
             _SRC,
             _PL132,
             state.file_access.fs_reply,
             state.file_access.we_error,
             state.exception_msg,
-            _PL002,
         )
         # [L670]  accept ws-reply at 2430.
         # FINDING: this `accept` is NOT wrapped in `if WS-Caller not =
@@ -2650,7 +2701,8 @@ def run(
     to_day: str,
     file_defs: FileDefs,
     *,
-    ok_to_post: bool = True,
+    ok_to_post: bool,
+    dal_options: Mapping[str, object] | None = None,
 ) -> None:
     '''Run `pl100` - Purchase Ledger Cash/Payment Posting.
 
@@ -2694,12 +2746,37 @@ def run(
             EVERY write the program makes: answering NO transfers to
             `menu-exit` [L309] having opened nothing and written nothing at
             all.  `True` corresponds to the COBOL's `"YES"`, the only reply
-            that proceeds.  The COBOL upper-cases the reply
+            that proceeds.  ⛔ REQUIRED, WITH NO DEFAULT: there is no COBOL
+            default for section 0.3.4 to preserve, because `wx-reply` is
+            `pic xxx value spaces` [L157], [L305] moves spaces into it again
+            immediately before the accept so that [L306]'s `update` pre-fills
+            blanks, and [L310-L311] re-asks on a blank.  A keyword default
+            would invent an answer the frozen program has not got, and the
+            affirmative one writes to the database; an earlier draft defaulted
+            this to `True`.  The COBOL upper-cases the reply
             (`function upper-case`, [L307]) and re-asks on anything other than
             `"YES"` or `"NO"` [L310-L311]; with a boolean the re-ask collapses,
             which is a consequence of removing the presentation layer and NOT
             a behaviour change - see the Class 4 proof on
             `_init01__acpt_xrply`.
+
+            ⭐ REQUIRED, WITH NO DEFAULT (M-09, CWE-636).  It defaulted to
+            `True`, on the reasoning that `"YES"` is "the only reply that
+            proceeds".  That reasoning is sound and it does not yield a
+            default, because a default is what the program does when the
+            operator supplies NOTHING and this program then does neither.
+            `wx-reply` is `pic xxx value spaces` [purchase/pl100.cbl:L157] and
+            [L305] re-fills it with spaces immediately before the accept, so
+            pressing return leaves it blank, [L310-L311] fires and control
+            returns to `acpt-xrply.` [L302] - for ever.  [L313] is
+            UNREACHABLE on a blank answer, so inferring `"YES"` from silence
+            authorised every `OTM5-Rewrite`, every `Purch-Rewrite`, the GL
+            batch family and the `PL-Payments` period total on an answer the
+            compiled program never accepts.  Requiring the keyword removes the
+            inference rather than replacing it with the opposite one: the
+            caller must state the answer, as the operator must type it.  The
+            same change is made to the Sales twin `sl100`, whose paragraph is
+            character-for-character the same decision.
 
     Returns:
         None.  `pl100` is a COBOL sub-program; it communicates only through
@@ -2712,27 +2789,28 @@ def run(
         to_day=to_day,
         file_defs=file_defs,
         ok_to_post=ok_to_post,
+        # `None` and `{}` are the same thing - no declaration - and both leave
+        # every handler at its fail-closed default.
+        dal_options=dict(dal_options) if dal_options else {},
     )
-    _LOG.info(
-        "%s [%s] entered: caller=%r to-day=%r ok-to-post=%s",
-        _PROG_NAME,
-        _SRC,
-        movelib.move(ws_calling_data.ws_caller, _D_WS_CALLER),
-        to_day,
-        ok_to_post,
-    )
+    # NO ENTRY OR EXIT RECORD.  `pl100` is a `CALL`ed sub-program: the COBOL
+    # displays nothing on entry and nothing at [L467-L468] on the way out, so
+    # both events would be output the compiled program never produced (R-4).
+    # Each also carried data the safe-event schema in `acas_posting/dal/status.py`
+    # excludes (CWE-532) - the caller name and the run date on the way in, the
+    # batch item count and two accumulated deduction amounts on the way out.
+    #
+    # AND THE ENTRY RECORD WAS A FAILURE PATH THAT LOGGING MUST NOT ADD.  Its
+    # `movelib.move(...)` argument was evaluated BEFORE the logging module
+    # decided whether the record was wanted, so a value the receiving picture
+    # could not hold would have raised from inside a disabled diagnostic.
+    # Removing the operand removes the risk outright, which no `isEnabledFor`
+    # guard can do.
+    #
     # `init01 section.` [L272] is the program's first executable section, so
     # control enters there and reaches every other section by PERFORM or by
     # fall-through.
     _init01(state)
-    _LOG.info(
-        "%s [%s] exited: items=%s n-deduct=%s t-deduct=%s",
-        _PROG_NAME,
-        _SRC,
-        state.batch.items,
-        state.n_deduct,
-        state.t_deduct,
-    )
 
 
 # ==========================================================================
@@ -3003,11 +3081,37 @@ def run(
 #        `"print-spool-command"` [L127].  `headings` [L470] SURVIVES as a
 #        named log-only function because R-5 requires it, and `line-cnt` is
 #        still maintained because [L422] tests it.
-#   O-3  Every `display ... at` -> a log record.  Plan section 0.3.4: such
-#        records "must not alter control flow and must not appear in any table
-#        dump".  None does.
+#   O-3  `display ... at` -> A LOG RECORD, BUT NOT ALL OF IT.  Plan section 0.3.4
+#        converts a DIAGNOSTIC display, and such records "must not alter control
+#        flow and must not appear in any table dump" - none of these does.
+#        CONVERTED: [L290] (`PL137`), [L298-L299] (the banner) and [L665-L668]
+#        (the batch-write failure with its file status, we-error and the decoded
+#        status name).  NOT CONVERTED, each for a stated reason:
+#          - [L291] and [L669] - `PL002`.  PURE ACKNOWLEDGEMENT PROMPTS standing
+#            immediately before the `accept ws-reply`s of O-4; the whole of the
+#            literal is the key-press instruction, so nothing substantive is lost.
+#            `P-Flag-P`, which the [L290] record once narrated, is a SYSTEM-REC
+#            host-variable value and is excluded by the safe-event schema in
+#            `acas_posting/dal/status.py` (CWE-532) - and the frozen display shows
+#            the literal alone in any case.
+#          - [L301] - `display ws-date`.  THE POSTING DATE IS BUSINESS DATA,
+#            excluded by the same schema; it is a command-line INPUT that
+#            `clock.py` pins.
+#          - [L303-L304] - the run-confirm PROMPT.  It is the screen text for the
+#            `accept wx-reply` that O-4 resolves into the `ok_to_post` parameter,
+#            so reproducing it would log a question no one can answer, and echoing
+#            the answer would restate a command-line argument.
+#        Nothing from `01 line-1`..`line-5` is logged either: [L433-L444] (the two
+#        total blocks) and [L472-L473] (the page number and the operator identity)
+#        are report content, out of scope per plan section 0.2.2, and the amounts
+#        and user identity they carry are excluded by the safe-event schema.
+#        `run()` emits NO entry or exit record: the COBOL displays nothing on
+#        either boundary, so both would be invented output (R-4).
 #   O-4  `accept wx-reply` [L306] -> the explicit `ok_to_post` parameter of
-#        `run()`, because it GATES A DATABASE WRITE.  `accept ws-reply` [L292]
+#        `run()`, because it GATES A DATABASE WRITE.  That parameter carries NO
+#        default: [L157], [L305] and [L310-L311] leave the frozen prompt with
+#        none, so section 0.3.4's "with the COBOL default preserved" has nothing
+#        to preserve and the answer is required of the caller.  `accept ws-reply` [L292]
 #        and [L670] -> DROPPED as acknowledgement pauses; but [L293]'s
 #        `go to menu-exit` control transfer IS PRESERVED.
 #   O-5  `set ENVIRONMENT` [L276-L277] and `copy "envdiv.cob"` [L108] -
@@ -3016,8 +3120,10 @@ def run(
 #        group but NO facade stub block of the kind [general/gl072.cbl:L135]
 #        and [general/gl080.cbl:L194] carry; Python needs no linker
 #        satisfaction either way.  Maps to nothing.
-#   O-7  The message literals `PL002` [L204], `PL132` [L207] and `PL137`
-#        [L208] survive only as log text.
+#   O-7  The message literals.  `PL132` [L207] and `PL137` [L208] survive as log
+#        text.  `PL002` [L204] is DECLARED AND DELIBERATELY NEVER REFERENCED - it
+#        is the acknowledgement prompt of O-3 - and stays declared because rule
+#        R-5 maps the whole `01 Error-Messages.` group.
 #   O-8  The local print totals `t-approp`, `j-approp`, `j-paid` and
 #        `j-deduct` are still COMPUTED - [L396] and [L448] consume them - but
 #        their print lines are omitted.  `t-paid`, `t-deduct` and `n-deduct`

@@ -273,11 +273,17 @@ from acas_posting.records.value_analysis import WsValueRecord
 
 # `open extend`/`open output`/`write`/`close open-item-file-4`
 # [purchase/pl055.cbl:L301-L304, L423, L587] act on a transient work file that
-# reaches no schema table. The published status constant, open-mode vocabulary
-# and error type are reused so this module invents no parallel vocabulary; the
-# file itself is module-private because `OpenMode` has no `EXTEND` member -
-# see STRUCTURAL NOTES.
-from acas_posting.workfiles import FS_REPLY_OK, OpenMode, WorkFileError
+# reaches no schema table - and that `pl060` READS, so it is a channel and must be
+# ONE object. `acas_posting.workfiles` publishes that object, `OpenItemWorkFile`,
+# along with `OpenMode.EXTEND` and the raw file statuses it reports. The file was
+# once declared module-privately here on the ground that `OpenMode` had no
+# `EXTEND`; the ground was true and the conclusion was wrong - see STRUCTURAL
+# NOTES.
+from acas_posting.workfiles import (
+    OPEN_ITEM_4_NAME,
+    OpenItemWorkFile,
+    open_item_work_file,
+)
 
 #: Agent Action Plan section 0.3.3, verbatim: *"Each `programs/*.py` module
 #: exposes a single `run(...)` entry mirroring its COBOL `PROCEDURE DIVISION
@@ -406,10 +412,23 @@ _D_TERM_CODE: Final[FieldDescriptor] = calling_data_descriptor_for("ws_term_code
 #: `77 prog-name pic x(15) value "PL055 (3.3.00)".` [purchase/pl055.cbl:L125]
 _PROG_NAME: Final[str] = "PL055 (3.3.00)"
 
-#: `01 Error-Messages.` [purchase/pl055.cbl:L215-L223]. Screen literals have
-#: no database effect, so they survive only as log text (Agent Action Plan
-#: section 0.3.4). `PL003` and `PL006` are the two acknowledgement prompts
-#: whose `accept` is dropped.
+#: `01 Error-Messages.` [purchase/pl055.cbl:L215-L223]. Screen literals have no
+#: database effect, so a DIAGNOSTIC among them survives as log text (Agent Action
+#: Plan section 0.3.4) - but three of the six reach no record at all, and each
+#: stays DECLARED because rule R-5 maps the whole group and a shorter group would
+#: misreport the frozen source:
+#:
+#: * `PL003` and `PL006` are the two ACKNOWLEDGEMENT PROMPTS. Every one of their
+#:   four displays [purchase/pl055.cbl:L282, L429, L593] stands immediately
+#:   before an `accept ws-reply`, and each literal is nothing but the instruction
+#:   to press that key - there is no substantive half to keep. Section 0.3.4
+#:   drops a prompt whose only effect is to block a terminal, so both are
+#:   declared and deliberately never referenced.
+#: * `PL203` is displayed once, at [purchase/pl055.cbl:L281], inside the
+#:   `CBL_CHECK_FILE_EXIST`/`call "sl070"` block. That block is UNREACHABLE in
+#:   this module by design - it raises `_CobolFilesModeUnsupportedError` before
+#:   reaching the display, for the reasons set out at the raise - so the literal
+#:   is declared and deliberately never referenced too.
 _PL003: Final[str] = "PL003 Hit Return To Continue"
 _PL006: Final[str] = "PL006 Note Details & Hit Return to continue"
 _PL201: Final[str] = "PL201 Analyst records with desc, 'Emergency Name' created"
@@ -471,176 +490,6 @@ class _CobolFilesModeUnsupportedError(RuntimeError):
     Value files that both ledgers read, it is very likely deliberate. It is
     NOT "corrected" to `pl070`.
     """
-
-
-@dataclass
-class _OpenItemFile4:
-    """`open-item-file-4` - the OTM4 extract, an ordered in-process sequence.
-
-        select  open-item-file-4  assign        file-28
-                                  access        sequential
-                                  status        fs-reply.
-                                             [copybooks/seloi4.cob:L1-L4]
-        fd  open-item-file-4.
-        01  open-item-record-4  pic x(113).  [copybooks/fdoi4.cob:L1-L2]
-
-    A TRANSIENT WORK FILE, NOT A TABLE. `copy "seloi4.cob"` carries its
-    author's own note - `*> Temp file only for i/p to pl060.`
-    [purchase/pl055.cbl:L109] - and `file-28` is `"openitm4.dat"`
-    [copybooks/file28.cob:L1]. It reaches no schema table, appears in no table
-    dump, and is consumed by `pl060` [purchase/pl060.cbl:L421-L425]. It is
-    therefore modelled the way the Agent Action Plan models the General Ledger
-    work files: an ordered sequence with the same record layout and the same
-    ordering guarantee, and nothing else.
-
-    WHY THIS IS MODULE-PRIVATE RATHER THAN `workfiles.LineSequentialWorkFile`.
-    `pl055` opens this file with `open extend` [purchase/pl055.cbl:L301] -
-    append, preserving what is already there. The published work-file class
-    has no `open_extend`, its `OpenMode` vocabulary is exactly
-    `CLOSED`/`INPUT`/`OUTPUT`, and its only route into a writable state is
-    `open_output`, which truncates. Reaching into its private record list to
-    add an extend would be a layering violation dressed up as reuse. So the
-    file is declared here, and the published `FS_REPLY_OK`, `OpenMode` and
-    `WorkFileError` are reused so that no parallel status vocabulary is
-    invented alongside them.
-
-    THE STATUS FIELD IS SHARED WITH THE DATA-ACCESS LAYER, DELIBERATELY.
-    `seloi4.cob:L4` declares `status fs-reply`, and `Fs-Reply`
-    [copybooks/wsfnctn.cob:L25] is the very field every facade verb also
-    writes. That sharing is not incidental: it is what lets
-    [purchase/pl055.cbl:L302] and [purchase/pl055.cbl:L588] test `fs-reply`
-    straight after a native `OPEN` and `WRITE`. Callers pass the same
-    `FileAccess` this program hands the facade, so the field is one field.
-
-    AMBIGUITY Q-PL055-5 - the `OI-Header` / `open-item-record-4` storage
-    relationship, and what a reader of the sequence actually sees. Divergence
-    13 is that [purchase/pl055.cbl:L587] writes `open-item-record-4` while
-    [purchase/pl055.cbl:L547] initialises `OI-Header`, which reads at first
-    glance as a write of an area nothing filled. It is not, and the evidence is
-    structural: in `pl055` BOTH `copy "fdoi4.cob"` [purchase/pl055.cbl:L120] and
-    `copy "plwsoi.cob"` [purchase/pl055.cbl:L121] sit inside the FILE SECTION
-    under one FD, so `01 open-item-record-4 pic x(113)`
-    [copybooks/fdoi4.cob:L2] and `01 OI-Header` [copybooks/plwsoi.cob:L9] are
-    two `01` descriptions of THE SAME 113-byte record area - the second `01`
-    under an FD is an alternative description, not a second buffer - and
-    `OI-Header`'s fields sum to exactly 113. The divergence is therefore
-    COSMETIC in `pl055`, and this class models the one area. `pl060` proves the
-    contrast: it copies `plwsoi.cob` into WORKING-STORAGE
-    [purchase/pl060.cbl:L152] and consequently needs an explicit `move
-    open-item-record-4 to oi-header` [purchase/pl060.cbl:L428] that `pl055` has
-    no counterpart to.
-    WHAT REMAINS FOR THE ORACLE: the sequence is handed to `pl060` as OBJECTS
-    here and as 113 BYTES there, so any field whose Python value can render to
-    more than one byte image - and the `FILLER` bytes that
-    [purchase/pl055.cbl:L547] does not reset, per Q-PL055-1 - could in principle
-    be read back differently by the two programs. Measure a round trip through
-    the compiled pair before treating the two representations as
-    interchangeable.
-    """
-
-    file_access: FileAccess
-    _records: list[OiHeader] = dataclass_field(default_factory=list)
-    _open_mode: OpenMode = OpenMode.CLOSED
-
-    @property
-    def records(self) -> tuple[OiHeader, ...]:
-        """The sequence as written, in insertion order - what `pl060` reads."""
-        return tuple(self._records)
-
-    def __len__(self) -> int:
-        return len(self._records)
-
-    def open_extend(self) -> None:
-        """`open extend open-item-file-4.`   [purchase/pl055.cbl:L301]
-
-        Append: existing records survive and the write position is the end.
-        On a sequential work file this always succeeds once the sequence
-        exists, so `fs-reply` is set to zero and the fallback at
-        [purchase/pl055.cbl:L302-L304] does not fire. It is still transcribed,
-        because whether it fires is a property of the run and not of the code.
-        """
-        self._open_mode = OpenMode.OUTPUT
-        self.file_access.fs_reply = FS_REPLY_OK
-
-    def open_output(self) -> None:
-        """`open output open-item-file-4.`   [purchase/pl055.cbl:L304]
-
-        Truncate: the sequence is emptied, which is what `OPEN OUTPUT` on a
-        sequential file means and what makes the fallback a create.
-        """
-        self._records.clear()
-        self._open_mode = OpenMode.OUTPUT
-        self.file_access.fs_reply = FS_REPLY_OK
-
-    def write(self, record: OiHeader) -> None:
-        """`write open-item-record-4.`       [purchase/pl055.cbl:L587]
-
-        Appends a SNAPSHOT. `OI-Header` is one 113-byte record area that the
-        extract paragraph rebuilds for every invoice, so storing the live
-        object would leave every element of the sequence pointing at the last
-        invoice written. The copy is what makes the sequence a file.
-        """
-        if self._open_mode is not OpenMode.OUTPUT:
-            raise WorkFileError(
-                "write to open-item-file-4 while it is not open for output: "
-                f"mode is {self._open_mode.value}"
-            )
-        self._records.append(_copy_oi_header(record))
-        self.file_access.fs_reply = FS_REPLY_OK
-
-    def close(self) -> None:
-        """`close open-item-file-4.`         [purchase/pl055.cbl:L423]
-
-        Closes without discarding: the records are the deliverable, and
-        `pl060` opens the same file for input afterwards.
-        """
-        self._open_mode = OpenMode.CLOSED
-        self.file_access.fs_reply = FS_REPLY_OK
-
-
-def _copy_oi_header(source: OiHeader) -> OiHeader:
-    """A deep copy of one `OI-Header`, group by group.
-
-    Written out rather than deep-copied generically so that a reader can see
-    that all seventeen top-level fields of [copybooks/plwsoi.cob:L9-L64] are
-    carried, including the three nested groups and the ten money fields inside
-    `03 filler comp-3.` [copybooks/plwsoi.cob:L41].
-    """
-    return OiHeader(
-        oi_key=OiKey(
-            oi_customer=OiCustomer(oi_supplier=source.oi_key.oi_customer.oi_supplier),
-            oi_invoice=source.oi_key.oi_invoice,
-        ),
-        oi_date=source.oi_date,
-        oi_batch=OiBatch(
-            oi_b_nos=source.oi_batch.oi_b_nos, oi_b_item=source.oi_batch.oi_b_item
-        ),
-        oi_type=source.oi_type,
-        oi_ref=source.oi_ref,
-        oi_order=source.oi_order,
-        oi_hold_flag=source.oi_hold_flag,
-        oi_unapl=source.oi_unapl,
-        filler_1=Filler1(
-            oi_p_c=source.filler_1.oi_p_c,
-            oi_net=source.filler_1.oi_net,
-            oi_approp=source.filler_1.oi_approp,
-            oi_extra=source.filler_1.oi_extra,
-            oi_carriage=source.filler_1.oi_carriage,
-            oi_vat=source.filler_1.oi_vat,
-            oi_discount=source.filler_1.oi_discount,
-            oi_e_vat=source.filler_1.oi_e_vat,
-            oi_c_vat=source.filler_1.oi_c_vat,
-            oi_paid=source.filler_1.oi_paid,
-        ),
-        oi_status=source.oi_status,
-        oi_deduct_days=source.oi_deduct_days,
-        oi_deduct_amt=source.oi_deduct_amt,
-        oi_deduct_vat=source.oi_deduct_vat,
-        oi_days=source.oi_days,
-        oi_cr=source.oi_cr,
-        oi_applied=source.oi_applied,
-        oi_date_cleared=source.oi_date_cleared,
-    )
 
 
 #: The only group items in the three `plwspinv2.cob` views, named explicitly
@@ -974,7 +823,7 @@ class _Pl055State:
 
     ctx: _FacadeContext
     facade: ModuleType | _BoundFacade
-    open_item_file_4: _OpenItemFile4
+    open_item_file_4: OpenItemWorkFile[OiHeader]
     ws_calling_data: WsCallingData
     system_record_4: SystemRecord4
     to_day: str
@@ -1215,7 +1064,14 @@ def _mainline(st: _Pl055State) -> None:
     _zz070_convert_date(st)
 
     # 296  display  ws-date at 0171 ...
-    _LOG.info("run date %s", st.ws_date_formats.ws_date)
+    #
+    #  NO LOG COUNTERPART. `ws-date` is the posting date this run stamps into the
+    #  records it writes - a date with business meaning, which the safe-event
+    #  schema in `acas_posting/dal/status.py` excludes (CWE-532). It is an INPUT
+    #  the caller supplied through the `to-day` operand, already known wherever
+    #  the run was started and pinned by `clock.py`, so no record is needed to
+    #  reconstruct it. The conversion above still runs: it stores `ws-date` and
+    #  may default `Date-Form` in the system record, which IS a table effect.
 
     # 298  perform  PInvoice-Open.
     st.facade.pinvoice_open(st.ctx)
@@ -1226,14 +1082,14 @@ def _mainline(st: _Pl055State) -> None:
     st.facade.analysis_open(st.ctx)
 
     # 301  open     extend  open-item-file-4.
-    st.open_item_file_4.open_extend()
+    st.open_item_file_4.open_extend(st.ctx.file_access)
     # 302  if       fs-reply not = zero
     # The extend-then-fallback idiom: append if you can, otherwise create.
     if st.ctx.file_access.fs_reply != FsReply.SUCCESS:
         # 303           close open-item-file-4
-        st.open_item_file_4.close()
+        st.open_item_file_4.close(st.ctx.file_access)
         # 304           open output open-item-file-4.
-        st.open_item_file_4.open_output()
+        st.open_item_file_4.open_output(st.ctx.file_access)
 
     # FALL-THROUGH into `read-loop.` [purchase/pl055.cbl:L306]. `mainline` has
     # no terminating `exit section.`, so control simply arrives at the next
@@ -1887,7 +1743,7 @@ def _close_files(st: _Pl055State) -> None:
     # 422  perform  Analysis-Close.
     st.facade.analysis_close(ctx)
     # 423  close    open-item-file-4.
-    st.open_item_file_4.close()
+    st.open_item_file_4.close(st.ctx.file_access)
 
     # 425  if       Anal-Created not = zero
     if arithmetic.compare(st.anal_created, 0) != 0:
@@ -1902,10 +1758,17 @@ def _close_files(st: _Pl055State) -> None:
         # `accept` inside it is dropped.
         if not _caller_is_xl150(st):
             # 429                  display PL006 at 1601 ...
-            _LOG.warning("%s", _PL006)
             # 430                  accept ws-reply at 1645
-            # Dropped: an acknowledgement pause whose only effect is to block a
-            # terminal (Agent Action Plan section 0.3.4).
+            #
+            # BOTH DROPPED. `PL006` is "PL006 Note Details & Hit Return to
+            # continue" [purchase/pl055.cbl:L218] - the whole literal is the
+            # instruction to press the key that the `accept` on the next line
+            # reads, so there is no substantive half to keep and a headless run
+            # has no operator to instruct. Agent Action Plan section 0.3.4 drops
+            # a prompt whose only effect is to block a terminal. The substantive
+            # diagnostics are the `PL201`/`PL202` records above, and the BRANCH
+            # survives because it is the codebase's own unattended-mode test.
+            pass
         # 432           goback.
         # *> Yep, I know but just in case extra code goes here!
         return
@@ -1976,7 +1839,11 @@ def _menu_exit() -> None:
     C-4, verbatim: *"every paragraph retains a named function even where its
     `GO TO` becomes a `continue`, a `break` or a `return`."*
     """
-    _LOG.debug("pl055 menu-exit  [purchase/pl055.cbl:L434-L435]")
+    #  NO LOG RECORD. This paragraph displays NOTHING - [purchase/pl055.cbl:L434-L435] carries
+    #  the `exit`/`goback` and no other statement - so an "entered/left the
+    #  paragraph" event would be output the compiled program never produced.
+    #  Rule R-4 forbids inventing observable output on a frozen silent path, and
+    #  the function itself is what rule R-5 requires, not a trace of it.
 
 
 #
@@ -2345,7 +2212,11 @@ def _create__main_exit() -> None:
     [purchase/pl055.cbl:L536] and at [purchase/pl055.cbl:L597] - so paragraph
     names are not unique and a bare `_main_exit` would silently collide.
     """
-    _LOG.debug("pl055 create/main-exit  [purchase/pl055.cbl:L501]")
+    #  NO LOG RECORD. This paragraph displays NOTHING - [purchase/pl055.cbl:L501] carries
+    #  the `exit`/`goback` and no other statement - so an "entered/left the
+    #  paragraph" event would be output the compiled program never produced.
+    #  Rule R-4 forbids inventing observable output on a frozen silent path, and
+    #  the function itself is what rule R-5 requires, not a trace of it.
 
 
 def _va_code_image(value: WsValueRecord) -> str:
@@ -2609,7 +2480,11 @@ def _store_specials__main_exit() -> None:
     The `store-specials` section's exit - the second of the three paragraphs in
     this program named `main-exit`, hence the section-qualified name.
     """
-    _LOG.debug("pl055 store-specials/main-exit  [purchase/pl055.cbl:L536]")
+    #  NO LOG RECORD. This paragraph displays NOTHING - [purchase/pl055.cbl:L536] carries
+    #  the `exit`/`goback` and no other statement - so an "entered/left the
+    #  paragraph" event would be output the compiled program never produced.
+    #  Rule R-4 forbids inventing observable output on a frozen silent path, and
+    #  the function itself is what rule R-5 requires, not a trace of it.
 
 
 #
@@ -2916,21 +2791,29 @@ def _extract(st: _Pl055State) -> None:
     # 113-byte area in `pl055`, because `fdoi4.cob` and `plwsoi.cob` are both in
     # its FILE SECTION [purchase/pl055.cbl:L120-L121]; the divergence is which
     # of two names for one storage the programmer typed. See STRUCTURAL NOTES.
-    st.open_item_file_4.write(oi)
+    st.open_item_file_4.write(oi, st.ctx.file_access)
     # 588  if       fs-reply not = zero
     if ctx.file_access.fs_reply != FsReply.SUCCESS:
         # 589           perform  a01-Eval-Status
         _a01_eval_status(st)
-        # 590-593       display PL204 / fs-reply / Exception-Msg / PL006
+        # 590-592       display PL204 / fs-reply / Exception-Msg
+        #
+        # Three displays, one record. `Exception-Msg` is `pic x(25)`
+        # [purchase/pl055.cbl:L126] and is filled ONLY by `a01-Eval-Status`
+        # above, from the static status table `copybooks/FileStat-Msgs.cpy` keyed
+        # on `fs-reply`, so it is a fixed status NAME - never driver text and
+        # never a business value - and sits inside the safe-event allowlist
+        # alongside `FS-Reply` itself.
         _LOG.error(
             "%s fs-reply=%s %s",
             _PL204,
             ctx.file_access.fs_reply,
             st.exception_msg,
         )
-        _LOG.error("%s", _PL006)
+        # 593           display  PL006 ...
         # 594           accept   ws-reply ...
-        # Dropped: an acknowledgement pause.
+        # BOTH DROPPED - the key-press instruction and the key press. The
+        # substantive diagnostic is the record above.
         #
         # A REJECTION CLASS WITH A PARTIAL EFFECT, RECORDED. There is no retry,
         # no abort and no control transfer here: the invoice's header has
@@ -2966,7 +2849,11 @@ def _extract__main_exit() -> None:
     `main-exit` in this program and rule R-5 requires one function per
     paragraph regardless of what the paragraph does.
     """
-    _LOG.debug("pl055 extract/main-exit  [purchase/pl055.cbl:L597]")
+    #  NO LOG RECORD. This paragraph displays NOTHING - [purchase/pl055.cbl:L597] carries
+    #  the `exit`/`goback` and no other statement - so an "entered/left the
+    #  paragraph" event would be output the compiled program never produced.
+    #  Rule R-4 forbids inventing observable output on a frozen silent path, and
+    #  the function itself is what rule R-5 requires, not a trace of it.
 
 
 def _ih_supplier_image(header: IhInvoiceHeader) -> str:
@@ -3081,7 +2968,11 @@ def _zz070_exit() -> None:
     [purchase/pl055.cbl:L617]. It carries nothing but the `exit section.` and is
     retained as a named function under rule R-5.
     """
-    _LOG.debug("pl055 zz070-Exit  [purchase/pl055.cbl:L626-L627]")
+    #  NO LOG RECORD. This paragraph displays NOTHING - [purchase/pl055.cbl:L626-L627] carries
+    #  the `exit`/`goback` and no other statement - so an "entered/left the
+    #  paragraph" event would be output the compiled program never produced.
+    #  Rule R-4 forbids inventing observable output on a frozen silent path, and
+    #  the function itself is what rule R-5 requires, not a trace of it.
 
 
 #
@@ -3161,8 +3052,8 @@ def run(
     ws_pinvoice_record: WsPInvoiceRecord | None = None,
     invoice_header: IhInvoiceHeader | None = None,
     invoice_line: IlInvoiceLine | None = None,
-    open_item_file_4: _OpenItemFile4 | None = None,
-) -> None:
+    open_item_file_4: OpenItemWorkFile[OiHeader] | None = None,
+) -> OpenItemWorkFile[OiHeader]:
     """Run `pl055`, the Purchase Invoice Post Extract.
 
     THE LINKAGE, VERBATIM  [purchase/pl055.cbl:L239-L243]
@@ -3239,15 +3130,28 @@ def run(
             [copybooks/plwspinv2.cob:L21].
         invoice_line: `01 Invoice-Line redefines WS-PInvoice-Record.`
             [copybooks/plwspinv2.cob:L56].
-        open_item_file_4: The OTM4 extract sequence that `pl060` consumes. A
-            caller sequencing the two programs passes one instance to both.
+        open_item_file_4: The OTM4 extract sequence that `pl060` consumes - the
+            SHARED `acas_posting.workfiles.OpenItemWorkFile`, not a private one.
+            A caller sequencing the two programs passes ONE instance to both, and
+            the route does exactly that. Defaults to a fresh, not-yet-existing
+            file, which makes the `open extend` at [purchase/pl055.cbl:L301]
+            report status 35 and the `open output` fallback at
+            [purchase/pl055.cbl:L304] create it - the compiled program's own
+            first-run path, and the one the maintainer describes at
+            [purchase/pl055.cbl:L48].
+
+    Returns:
+        The OTM4 work file this program wrote - the one it was given, or the one
+        it declared when given None. RETURNED because it IS the handoff: in COBOL
+        the file survives the run unit and `pl060` reaches it by naming the same
+        `assign file-28`, so the migrated equivalent has to hand the object back
+        for the route to pass on. Nothing about the posting is communicated this
+        way; the five linkage records carry that, by reference, as COBOL does.
 
     Raises:
         _CobolFilesModeUnsupportedError: If `FS-Cobol-Files-Used`
             [copybooks/wssystem.cob:L113] is true. Unreachable in the RDBMS
             configuration the migration targets.
-        WorkFileError: If the OTM4 sequence is written while not open for
-            output, which the `mainline` open sequence prevents.
     """
     if facade is None:
         # The Agent Action Plan's own import form, section 0.4.3. Resolved here
@@ -3295,8 +3199,12 @@ def run(
     st = _Pl055State(
         ctx=ctx,
         facade=resolved_facade,
+        #  THE CHANNEL TO `pl060`. Declared here only when the caller passed
+        #  none, and RETURNED either way, so the route can hand the very object
+        #  this program wrote to the program that reads it - the same pattern
+        #  `gl070.run` uses for the General Ledger work files.
         open_item_file_4=(
-            _OpenItemFile4(file_access=resolved_file_access)
+            open_item_work_file(OPEN_ITEM_4_NAME, OiHeader)
             if open_item_file_4 is None
             else open_item_file_4
         ),
@@ -3309,6 +3217,11 @@ def run(
     # `mainline section.` [purchase/pl055.cbl:L246] and everything it falls
     # through into. The program has no other entry.
     _mainline(st)
+
+    #  THE CHANNEL IS RETURNED so that `pl060` reads what this program wrote. In
+    #  COBOL the file survives the run unit and `pl060` names the same
+    #  `assign file-28`; here the identity is this object.
+    return st.open_item_file_4
 
 
 # =============================================================================
@@ -3365,14 +3278,14 @@ def run(
 #   COBOL statement can need several Python ones - a two-receiver `MOVE`, a
 #   group move into a nested dataclass, a byte image of a group item - and each
 #   names in its docstring the statement it serves:
-#     _by_name  _ws  _copy_oi_header  _initialise_oi_header
+#     _by_name  _ws  _initialise_oi_header
 #     _initial_pinvoice_view  _pinvoice_attributes  _move_into_va_group
 #     _add_to_pair  _subtract_from_pair  _store_group  _caller_is_xl150
 #     _va_code_image  _pa_code_image  _move_into_va_code  _move_into_pa_code
 #     _group_move_analysis_into_value  _analysis_tail_image
 #     _zero_the_six_value_totals  _ih_supplier_image  _move_into_oi_supplier
 #     _set_oi_net  _fs_reply_message
-#   Types: _CobolFilesModeUnsupportedError  _OpenItemFile4  _FacadeContext
+#   Types: _CobolFilesModeUnsupportedError  _FacadeContext
 #          _Pl055State.
 #   Public API: `run` alone. `__all__ = ("run",)`, and every other module-level
 #   name begins with an underscore, so a caller cannot reach into the program's
@@ -3695,7 +3608,7 @@ def run(
 # -----------------------------------------------------------------------------
 # 5.  STRUCTURAL NOTES
 #
-# 5.1  THE OTM4 WORK FILE, AND WHY IT IS DECLARED HERE
+# 5.1  THE OTM4 WORK FILE, AND WHY IT LIVES IN `acas_posting.workfiles`
 #
 #   `open-item-file-4` is the purchase temp extract: `copy "seloi4.cob"` [L109]
 #   carries its author's own note *"Temp file only for i/p to pl060"*, `copy
@@ -3706,26 +3619,37 @@ def run(
 #
 #   It is modelled the way the Agent Action Plan models the General Ledger work
 #   files - an ordered in-process sequence with the same record layout and the
-#   same ordering guarantee - by the module-private `_OpenItemFile4`:
+#   same ordering guarantee - by the SHARED `acas_posting.workfiles`
+#   `OpenItemWorkFile`, which serves both open-item files and both sides of each:
 #     `open extend`  [L301]  -> positions at the end, existing records survive
 #     `open output`  [L304]  -> truncates, which is what makes the fallback a
 #                               create
 #     `write`        [L587]  -> appends, in insertion order, a SNAPSHOT
 #     `close`        [L423]  -> a no-op on the records; they are the deliverable
+#     `read_next`            -> what `pl060` uses [purchase/pl060.cbl:L425]
+#   IT WAS ONCE DECLARED HERE, module-privately, because `OpenMode` had no
+#   `EXTEND` member. The observation was true and the conclusion was wrong: a work
+#   file the producer and the consumer declare separately is not a channel, so
+#   `pl060` could never read what this program wrote. `OpenMode.EXTEND` is now
+#   published and the file is declared ONCE. `run` returns the carrier so the
+#   route can hand it to `pl060`, which is what naming the same `assign file-28`
+#   does in COBOL.
 #
-#   WHY MODULE-PRIVATE RATHER THAN `workfiles.LineSequentialWorkFile`. That
-#   published class has no `open_extend`; its `OpenMode` vocabulary is exactly
+#   WHY `OpenItemWorkFile` RATHER THAN `workfiles.LineSequentialWorkFile`. The
+#   General Ledger class has no `open_extend`; its `OpenMode` vocabulary is
 #   `CLOSED`/`INPUT`/`OUTPUT`, and its only route into a writable state is
 #   `open_output`, which truncates. Its record list, open mode, read pointer and
-#   status field are all private. Adding an extend by reaching into them would
-#   be a layering violation dressed up as reuse, and `acas_posting/workfiles.py`
-#   publishes only `pre_trans`, `post_trans` and `sort_trans` - none of which is
-#   this file. The published `FS_REPLY_OK`, `OpenMode` and `WorkFileError` ARE
-#   reused, so no parallel status vocabulary is invented beside them.
+#   status field are all private, so adding an extend by reaching into them would
+#   be a layering violation dressed up as reuse. The answer was to publish a
+#   SECOND carrier beside it, in the same module and over the same status
+#   vocabulary - `OpenItemWorkFile`, whose `OpenMode.EXTEND` and raw file statuses
+#   `FS_REPLY_OPEN_NOT_FOUND` and `FS_REPLY_WRITE_NOT_OPEN` are declared there
+#   once. No parallel vocabulary is invented beside the published one.
 #
 #   AND NO NEW FILE WAS CREATED. `acas_posting/programs/` is closed at exactly
 #   thirteen files - `__init__.py` plus the twelve program modules - per Agent
-#   Action Plan sections 0.4.1.2 and 0.4.4.
+#   Action Plan sections 0.4.1.2 and 0.4.4, and `acas_posting/workfiles.py` is
+#   an existing individually-named in-scope module (sections 0.3.1, 0.4.1.6).
 #
 #   The status field is shared with the data-access layer DELIBERATELY:
 #   `seloi4.cob:L4` declares `status fs-reply`, and `Fs-Reply`
@@ -3742,7 +3666,7 @@ def run(
 #   and `01 OI-Header` are two `01` DESCRIPTIONS OF THE SAME 113-BYTE RECORD
 #   AREA - a second `01` under an FD is an alternative description, not a second
 #   buffer - and `OI-Header`'s fields sum to exactly 113. The divergence is
-#   therefore COSMETIC here, and `_OpenItemFile4` models the one area.
+#   therefore COSMETIC here, and `OpenItemWorkFile` models the one area.
 #
 #   `pl060` proves the contrast: it copies `plwsoi.cob` into WORKING-STORAGE
 #   [purchase/pl060.cbl:L152] and consequently needs an explicit `move
@@ -3907,12 +3831,29 @@ def run(
 #   - `move 8 to WS-Term-Code` [L286] happens BEFORE the raise, and the `goback`
 #   [L287] is the raise itself. See AMBIGUITY Q-PL055-6.
 #
-# 7.2  ALL `display ... at` OUTPUT -> LOG RECORDS
-#   [L281-L282] the two file-missing messages; [L293-L296] the program banner,
-#   the "Invoice Post Extract" title and the converted date; [L426-L429] the
-#   emergency-analysis warnings; [L590-L593] the OTM4 write-failure diagnostic.
-#   Agent Action Plan section 0.3.4: they *"must not alter control flow and must
-#   not appear in any table dump."* None of them does either.
+# 7.2  `display ... at` OUTPUT -> LOG RECORDS, BUT NOT ALL OF IT
+#   Agent Action Plan section 0.3.4 converts a DIAGNOSTIC display, and requires
+#   that it *"must not alter control flow and must not appear in any table
+#   dump."* Neither does any record this module emits. What is converted:
+#   [L293-L294] the program banner and the "Invoice Post Extract" title;
+#   [L426-L427] the two emergency-analysis warnings; [L590-L592] the OTM4
+#   write-failure message, its file status and the decoded status name.
+#
+#   WHAT IS NOT CONVERTED, AND WHY:
+#     * [L282], [L429], [L593] - `PL003`/`PL006`, pure acknowledgement prompts.
+#       Dropped with the `accept` each introduces; see 7.3 and the note on the
+#       `01 Error-Messages.` block.
+#     * [L281] - `PL203`, inside the unreachable `sl070` block; see the same note.
+#     * [L296] - `display ws-date`. The posting date is business data, which the
+#       safe-event schema in `acas_posting/dal/status.py` excludes from a record
+#       (CWE-532); it is a command-line INPUT and `clock.py` pins it.
+#     * Every `move ... to print-record`/`l?-...` field. Report formatting is out
+#       of scope per section 0.2.2, and section 0.3.4 converts a DISPLAY, not a
+#       report line.
+#     * The five paragraph exits [L434, L501, L536, L597, L626]. Each carries the
+#       `exit`/`goback` and nothing else, so there is nothing to convert; an
+#       "entered/left" trace would be output the compiled program never produced,
+#       which R-4 forbids inventing.
 #
 # 7.3  `accept WS-Reply`  [L284], [L430], [L594]  -> DROPPED
 #   Acknowledgement pauses whose only effect is to block a terminal. BUT the
@@ -4004,7 +3945,8 @@ def run(
 #   Q-PL055-5  The `OI-Header` / `open-item-record-4` storage relationship and
 #              whether the object handoff to `pl060` can differ from the
 #              113-byte handoff the COBOL performs.
-#              Site: `_OpenItemFile4`.  Divergence 13.  See 5.2 above.
+#              Site: `acas_posting.workfiles.OpenItemWorkFile`.
+#              Divergence 13.  See 5.2 above.
 #   Q-PL055-6  Whether any mandated scenario seeds `File-System-Used` to zero
 #              and therefore reaches the `FS-Cobol-Files-Used` branch at all.
 #              Site: `_mainline`.  See 7.1 above.

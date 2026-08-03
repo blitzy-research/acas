@@ -324,9 +324,8 @@ Q-55  `File-Key-No` IS SET NINE TIMES AND IS ALREADY SET TWICE OVER.
 Q-56  IS `FS-Cobol-Files-Used` EVER TRUE IN A SCENARIO? If it is, the block
       [sales/sl055.cbl:L326-L348] needs `sl070`, which is out of scope. See
       R-1 above and `CobolFileSystemPathUnavailable`.
-Q-57  THE FACADE'S CALL SHAPE. `acas_posting/dal/facade.py` is not yet written.
-      Section 0.4.3 fixes the shape as `facade.<verb>(ctx)` - one context
-      argument - so `_Sl055Context` below publishes the seven blocks the
+Q-57  THE FACADE'S CALL SHAPE. Section 0.4.3 fixes it as `facade.<verb>(ctx)` -
+      one context argument - so `_Sl055Context` below publishes the seven blocks the
       `acas013.`/`acas015.`/`acas016.` dispatch paragraphs name, under those
       names. The binding is deferred to first use and is injectable; see
       `_FacadeVerbs` and `run`.
@@ -341,7 +340,6 @@ Q-58  THE INVOICE RECORD AREA IS ONE 137-BYTE AREA WITH THREE `REDEFINES`
 
 from __future__ import annotations
 
-import copy as _copy
 import enum
 import logging
 from collections.abc import Mapping
@@ -453,10 +451,10 @@ from acas_posting.dal.status import AccessType, FsReply
 # COPY is the one whose Python translation is NOT a module-level import: the
 # contract is stated structurally by the `_FacadeVerbs` Protocol below, and the
 # actual `from acas_posting.dal import facade` lives inside `_resolve_facade`,
-# which runs at first use rather than at import. `acas_posting/dal/facade.py` is
-# not yet written, and deferring keeps this module importable and its arithmetic
-# testable without a data-access layer - which is also how a COBOL `CALL`
-# behaves, resolving its target when it executes. AMBIGUITY Q-57.
+# which runs at first use rather than at import. Deferring keeps this module
+# importable and its arithmetic testable without a data-access layer - which is
+# also how a COBOL `CALL` behaves, resolving its target when it executes.
+# AMBIGUITY Q-57.
 
 # `01 to-day pic x(10).` [sales/sl055.cbl:L264] is converted for display by
 # `zz070-Convert-Date section.` [sales/sl055.cbl:L694], whose body is
@@ -464,6 +462,24 @@ from acas_posting.dal.status import AccessType, FsReply
 # in `acas_posting.dates`. No `zz050`, no `zz060` and no `maps04` wrapper: this
 # program has none of them.
 from acas_posting import dates
+from acas_posting.workfiles import (
+    OPEN_ITEM_2_NAME,
+    OpenItemWorkFile,
+    open_item_work_file,
+)
+
+# `select open-item-file-2 assign file-18 access sequential status fs-reply.`
+# [copybooks/seloi2.cob:L2-L4] is copied by BOTH this program and `sl060`
+# [sales/sl060.cbl:L178], because both open the same transient extract file - this
+# one to append headers, `sl060` to walk them. Section 0.4.3 forbids one
+# `programs/` module from importing another, and section 0.3.1 assigns this
+# species of file - "ordered in-process sequences", reaching no schema table - to
+# `acas_posting.workfiles`, which both ends ARE permitted to import. Both ends
+# therefore take the SAME carrier type from there - `OpenItemWorkFile`, keyed by
+# the name `file-18` assigns - and the CALLER hands one instance to both, which
+# is what makes the handoff a handoff: `cli/sl_invoice_post` creates it once per
+# route invocation, because the file outlives the first `CALL` and is read by the
+# second. See `open_item_file_2` in `run`.
 
 #: The whole public surface: this program's single entry point, mirroring its
 #: `PROCEDURE DIVISION USING` list [sales/sl055.cbl:L271-L275]. Agent Action Plan
@@ -585,6 +601,14 @@ _D_EXCEPTION_MSG: Final[FieldDescriptor] = picture.descriptor_for(
 # and never reaches a column. `SL124` is DECLARED [sales/sl055.cbl:L255] and
 # never referenced anywhere in the program - recorded in the OMISSIONS list
 # rather than dropped silently.
+#
+# `SL002` IS DECLARED HERE AND DELIBERATELY NEVER REFERENCED. The frozen program
+# displays it at [sales/sl055.cbl:L340, L506, L515, L687], always immediately
+# before an `accept ws-reply`, and the literal itself - "Note error and hit
+# return" - is nothing but the instruction to press that key. Section 0.3.4 drops
+# such a prompt entirely, so no log record carries it. The DECLARATION stays
+# because rule R-5 maps the whole `01 Error-Messages` group, and dropping the
+# member would make the group look shorter than the frozen source's.
 _SL002: Final[str] = "SL002 Note error and hit return"
 _SL121: Final[str] = "SL121 Error writing to Open Item 2 File "
 _SL122: Final[str] = "SL122 Unprinted Invoices Exist. Correct & Run Again"
@@ -631,18 +655,16 @@ _XL150: Final[str] = move.move_alphanumeric("xl150", _calling_descriptor("ws_cal
 # [sales/sl055.cbl:L360] and [sales/sl055.cbl:L682] - are both `not = zero`,
 # which is why the exact non-zero value never changes a decision here.
 #
-# The values below are RAW COBOL FILE STATUSES and deliberately NOT `FsReply`
+# The RAW COBOL FILE STATUSES this file reports are deliberately NOT `FsReply`
 # members: `Fs-Reply pic 99` holds whatever the file system returns, and the six
-# `FsReply` values are the data-access layer's own vocabulary. Recorded as
-# constants with locators so the two vocabularies are not confused.
-
-#: Status 35 - `OPEN EXTEND`/`OPEN INPUT` on a non-optional file that does not
-#: exist. `copybooks/seloi2.cob` declares no `OPTIONAL`, which is exactly what
-#: makes the fallback at [sales/sl055.cbl:L360-L362] the normal first-run path.
-_FILE_STATUS_NOT_FOUND: Final[int] = 35
-
-#: Status 48 - `WRITE` attempted while the file is not open for output or extend.
-_FILE_STATUS_WRITE_NOT_OPEN: Final[int] = 48
+# `FsReply` values are the data-access layer's own vocabulary. They are declared
+# ONCE, beside the carrier that reports them, as
+# `acas_posting.workfiles.FS_REPLY_OPEN_NOT_FOUND` (35, the status that makes the
+# fallback at [sales/sl055.cbl:L360-L362] the normal first-run path, since
+# `copybooks/seloi2.cob` declares no `OPTIONAL`) and `FS_REPLY_WRITE_NOT_OPEN`
+# (48). This program only ever tests them as `not = zero`
+# [sales/sl055.cbl:L360], [sales/sl055.cbl:L682], so the exact non-zero value
+# never changes a decision here.
 
 
 
@@ -1038,108 +1060,6 @@ class _Label(enum.Enum):
     DB999_MAIN_EXIT = "db999-Main-Exit"
 
 
-@dataclass(slots=True)
-class _OpenItemFile2:
-    """`open-item-file-2` - the OTM2 work file, as an ordered sequence.
-
-    THE FILE, NOT THE RECORD. The RECORD is `01 OI-Header.`
-    [copybooks/slwsoi.cob:L8], which `acas_posting.records.otm3` already
-    publishes in full with all twenty-eight leaves and their dictionary keys, so
-    no layout is declared here. Only the FILE is local, and it is local because
-    `acas_posting.workfiles` cannot express it:
-    `workfiles.LineSequentialWorkFile` has an `OpenMode` of CLOSED, INPUT or
-    OUTPUT and NO EXTEND, and its `write` requires OUTPUT - whereas
-    [sales/sl055.cbl:L359] opens this file for EXTEND. The General Ledger cycle
-    never extends anything, which is why the shared helper does not offer it.
-
-    THE FILE DECLARATION, VERBATIM  [copybooks/seloi2.cob]
-
-        select  open-item-file-2  assign        file-18
-                                 access        sequential
-                                 status        fs-reply.
-
-    and its record area, [copybooks/fdoi2.cob]
-
-        fd  open-item-file-2.
-        01  open-item-record-2  pic x(118).
-
-    `sl055` adds `01 OI-Header.` as a SECOND record description in the same FD by
-    copying `slwsoi.cob` at [sales/sl055.cbl:L145], which is why
-    `write oi-header.` [sales/sl055.cbl:L681] writes the OI-Header layout into
-    that 118-byte area.
-
-    NO `OPTIONAL`, WHICH IS THE WHOLE POINT OF THE FALLBACK. Because the SELECT
-    does not say `OPTIONAL`, opening a file that does not exist reports a
-    non-zero status instead of creating it - so [sales/sl055.cbl:L360-L362]
-    closes and re-opens for OUTPUT, which creates it. That is the normal
-    first-run path, not an error path, and both branches are reproduced.
-
-    THE FILE STATUS FIELD IS SHARED WITH THE DATA-ACCESS LAYER. The SELECT names
-    `fs-reply`, which is `03 Fs-Reply pic 99.` [copybooks/wsfnctn.cob:L25] inside
-    `01 File-Access.` - the very field every facade verb writes. So each method
-    below writes the caller's `FileAccess`, exactly as the compiled file
-    operations do, and the program's tests of `fs-reply` see whichever producer
-    wrote last.
-
-    Nothing here reaches a schema table: the OTM2 file is a transient work file
-    and appears in no table dump. `sl060` is its consumer.
-    """
-
-    #: The records written, in insertion order. A sequential file has no other
-    #: order, and `sl060` reads them back in this one.
-    records: list[OiHeader] = field(default_factory=list)
-    #: Whether the file exists on the notional filesystem. False until an
-    #: `OPEN OUTPUT` creates it, which is what makes the first `OPEN EXTEND`
-    #: report status 35 and drives the fallback.
-    exists: bool = False
-    #: Whether the file is currently open for writing - `EXTEND` or `OUTPUT`.
-    #: A `WRITE` while closed reports status 48.
-    open_for_write: bool = False
-
-    def open_extend(self, file_access: FileAccess) -> None:
-        """`open extend open-item-file-2.`  [sales/sl055.cbl:L359]."""
-        if self.exists:
-            self.open_for_write = True
-            file_access.fs_reply = int(FsReply.SUCCESS)
-            return
-        # The file has never been created, and the SELECT is not OPTIONAL, so the
-        # open FAILS and leaves the file closed. [sales/sl055.cbl:L360] then sees
-        # a non-zero status.
-        self.open_for_write = False
-        file_access.fs_reply = _FILE_STATUS_NOT_FOUND
-
-    def open_output(self, file_access: FileAccess) -> None:
-        """`open output open-item-file-2.`  [sales/sl055.cbl:L362].
-
-        `OPEN OUTPUT` on a sequential file CREATES OR TRUNCATES it, so any rows a
-        previous run left are discarded here. That is the only way this program
-        clears the file, and it happens only when the EXTEND failed.
-        """
-        self.exists = True
-        self.open_for_write = True
-        self.records.clear()
-        file_access.fs_reply = int(FsReply.SUCCESS)
-
-    def close(self, file_access: FileAccess) -> None:
-        """`close open-item-file-2.`  [sales/sl055.cbl:L501]."""
-        self.open_for_write = False
-        file_access.fs_reply = int(FsReply.SUCCESS)
-
-    def write(self, oi_header: OiHeader, file_access: FileAccess) -> None:
-        """`write oi-header.`  [sales/sl055.cbl:L681].
-
-        A SNAPSHOT IS APPENDED, NOT THE RECORD AREA ITSELF. A COBOL `WRITE`
-        transfers the record area's BYTES to the file and the program then goes on
-        mutating that same area for the next invoice; appending the live object
-        would make every stored row alias the last one written.
-        """
-        if not self.open_for_write:
-            file_access.fs_reply = _FILE_STATUS_WRITE_NOT_OPEN
-            return
-        self.records.append(_copy.deepcopy(oi_header))
-        file_access.fs_reply = int(FsReply.SUCCESS)
-
-
 class _FacadeVerbs(Protocol):
     """The sixteen ENTITY-named facade verbs this program performs.
 
@@ -1156,10 +1076,9 @@ class _FacadeVerbs(Protocol):
     becomes `facade.gl_batch_read_next(ctx)` - one context argument carrying the
     blocks the dispatch paragraph names. Here that is `_Sl055Context`. Declared
     as a Protocol so the sixteen verbs are named explicitly and a test double is
-    structurally sufficient; `acas_posting/dal/facade.py` is not yet written, so
-    the real binding is resolved at first use by `_resolve_facade`.
-    AMBIGUITY Q-57 covers whether the verb shape assumed here is the one it will
-    publish.
+    structurally sufficient, and the real binding is resolved at first use by
+    `_resolve_facade`. AMBIGUITY Q-57 covers whether the verb shape assumed here
+    is the one `acas_posting.dal.facade` publishes.
 
     Each verb SETS `File-Function` and `Access-Type` and then dispatches to its
     handler, so each one writes `ctx.file_access.fs_reply` and returns nothing.
@@ -1657,8 +1576,14 @@ class _Sl055Context:
     #: `01 OI-Header.` [copybooks/slwsoi.cob:L8] - the OTM2 record area, rebuilt
     #: by `INITIALIZE` at the head of every extract.
     oi_header: OiHeader = field(default_factory=_initialize_oi_header_with_filler)
-    #: `open-item-file-2` [copybooks/seloi2.cob] - the OTM2 work file.
-    open_item_file_2: _OpenItemFile2 = field(default_factory=_OpenItemFile2)
+    #: `open-item-file-2` [copybooks/seloi2.cob] - the OTM2 work file, and the
+    #: CHANNEL to `sl060`. The SHARED carrier `acas_posting.workfiles` publishes,
+    #: not a module-private one: the producer and the consumer must hold the SAME
+    #: object or nothing this program writes can be read, which is exactly what
+    #: naming the same `assign file-18` achieves in COBOL.
+    open_item_file_2: OpenItemWorkFile[OiHeader] = field(
+        default_factory=lambda: open_item_work_file(OPEN_ITEM_2_NAME, OiHeader)
+    )
 
     #  ---- the date-format work area and the facade binding ----
 
@@ -1933,9 +1858,10 @@ def _da000_mainline(ctx: _Sl055Context) -> None:
     # OMITTED. `accept ... from lines` reads the TERMINAL'S HEIGHT, not a clock -
     # rule R-6 is about reproducibility of the run date and this is neither a date
     # nor a source of non-determinism in any table. `ws-lines` and `ws-23-lines`
-    # are used only as screen row numbers in the four `display ... at line`
-    # statements this module turns into log records, so with the positions gone
-    # the geometry has no remaining consumer. The `subtract` is therefore also
+    # are used only as screen row numbers in the `display ... at line` statements
+    # [L504, L506, L684-L687], whose positions this module drops whether the
+    # display becomes a log record or is dropped outright, so with the positions
+    # gone the geometry has no remaining consumer. The `subtract` is therefore also
     # omitted, which is why the arithmetic census in the module docstring marks it
     # as the one statement not transcribed.
     #
@@ -2025,7 +1951,16 @@ def _da000_mainline(ctx: _Sl055Context) -> None:
     _zz070_exit()
 
     # 354  display  ws-date at 0171 with foreground-color 2.
-    _LOG.info("%s", ctx.date_formats.ws_date)
+    #
+    #  THE RUN DATE IS NOT IN A RECORD, and the display therefore has no log
+    #  counterpart at all. `ws-date` is the posting date this run stamps into
+    #  every record it writes - a date with business meaning, which the
+    #  safe-event schema in `acas_posting/dal/status.py` excludes (CWE-532).
+    #  The date is an INPUT the caller supplied through the `to-day` operand, so
+    #  it is already known wherever the run was started, and `clock.py` pins it,
+    #  so no record is needed to reconstruct it. The SAME omission is made in
+    #  `gl070`, `gl080`, `sl060`, `sl100`, `pl055`, `pl060` and `pl100`, whose
+    #  banners each show the same converted date.
 
     # 356  perform  Invoice-Open.
     ctx.verbs.invoice_open(ctx)
@@ -2850,10 +2785,17 @@ def _da040_close_files(ctx: _Sl055Context) -> _Label:
         # prompts that merely pause.
         if ctx.ws_calling_data.ws_caller != _XL150:
             # 506  display SL002        at line ws-lines    col 1
-            _LOG.info(_SL002)
             # 507  accept  ws-reply     at line ws-lines    col 33
             #
-            # OMITTED - an acknowledgement pause with no database effect.
+            # BOTH OMITTED. `SL002` is "SL002 Note error and hit return"
+            # [sales/sl055.cbl:L250] - the whole literal is the instruction to
+            # press a key, and its `accept` on the next line is the key press.
+            # Section 0.3.4 drops a prompt whose only effect is to block a
+            # terminal; a headless run has no operator to instruct, and the
+            # substantive diagnostic is the `SL122` record above. The BRANCH
+            # itself survives - it is the codebase's own unattended-mode test
+            # and evidence that headless operation was designed for.
+            pass
         # 509  goback.               *> Yep, I know but just in case extra code goes here!
         #
         # The maintainer's own comment, kept: he is noting that the `goback` is
@@ -2885,10 +2827,13 @@ def _da040_close_files(ctx: _Sl055Context) -> _Label:
         # 514  if     WS-Caller not = "xl150"
         if ctx.ws_calling_data.ws_caller != _XL150:
             # 515  display SL002 at 1601 with foreground-color 2
-            _LOG.info(_SL002)
             # 516  accept ws-reply at 1633
             #
-            # OMITTED - an acknowledgement pause with no database effect.
+            # BOTH OMITTED, exactly as at [sales/sl055.cbl:L506-L507] above: the
+            # literal IS the key-press instruction and the `accept` IS the key
+            # press. The substantive diagnostics are the `SL123` and `SL126`
+            # records above. The BRANCH survives.
+            pass
         # 518  goback.   *> Yep, I know but just in case extra code goes here!
         #
         # The same missing `WS-Term-Code` as L509, and with the same consequence.
@@ -4047,12 +3992,17 @@ def _dd000_extract(ctx: _Sl055Context) -> None:
         # 686  display  Exception-Msg at line ws-23-lines col 44
         #
         # Three displays, one log record: the message, the status and its text.
+        # `Exception-Msg` is `pic x(25)` [sales/sl055.cbl:L153] and is filled
+        # ONLY by `a01-Eval-Status` above, from the static status table
+        # `copybooks/FileStat-Msgs.cpy` keyed on `fs-reply`. It is therefore a
+        # fixed status NAME, never driver text and never a business value, so it
+        # is inside the safe-event allowlist alongside `FS-Reply` itself.
         _LOG.error("%s%s %s", _SL121, ctx.fs_reply, ctx.exception_msg)
         # 687  display  SL002         at line ws-lines col 01
-        _LOG.info(_SL002)
         # 688  accept   ws-reply      at line ws-lines col 33
         #
-        # OMITTED - an acknowledgement pause with no database effect.
+        # BOTH OMITTED - the key-press instruction and the key press. The
+        # substantive diagnostic is the record above.
         #
         # ANOMALY [sales/sl055.cbl:L682-L689] - THIS PATH PERFORMS NO CONTROL
         # TRANSFER. There is no `go to`, no retry, no abort and no flag: the section
@@ -4319,8 +4269,8 @@ def run(
     file_defs: FileDefs,
     *,
     facade: _FacadeVerbs | None = None,
-    open_item_file_2: _OpenItemFile2 | None = None,
-) -> None:
+    open_item_file_2: OpenItemWorkFile[OiHeader] | None = None,
+) -> OpenItemWorkFile[OiHeader]:
     """Run `sl055` - the Sales Invoice Post Extract and analysis-total build.
 
     THE LINKAGE, VERBATIM  [sales/sl055.cbl:L271-L275]
@@ -4436,14 +4386,17 @@ def run(
             module import so that the arithmetic parity suite can exercise the
             program with no data-access layer present. A COBOL `CALL` resolves its
             target when it executes, which is the same timing.
-        open_item_file_2: The OTM2 work sequence
-            [copybooks/seloi2.cob], [copybooks/fdoi2.cob]. Defaults to a fresh,
-            not-yet-existing sequence, which makes the `open extend` at
-            [sales/sl055.cbl:L359] fail and the `open output` fallback at
-            [sales/sl055.cbl:L362] create it - exactly the compiled program's
-            behaviour on a first run. THE CALLER SHOULD PASS THE SAME OBJECT TO
-            `sl060`, because that is the handoff: `sl060` copies the same
-            `seloi2`/`fdoi2`/`slwsoi` trio and reads what this program appended.
+        open_item_file_2: The OTM2 extract file
+            [copybooks/seloi2.cob], [copybooks/fdoi2.cob]. Defaults to a fresh
+            `workfiles.OpenItemWorkFile` under the name `file-18` assigns, which
+            is what a caller driving this program alone wants. THE HANDOFF TO
+            `sl060` NEEDS THE CALLER: the route creates one carrier and passes
+            the same object to both programs, so `sl060` walks exactly what this
+            program appended. On the first run of a given name the file does not
+            yet exist, so the `open extend` at [sales/sl055.cbl:L359] fails and the
+            `open output` fallback at [sales/sl055.cbl:L362] creates it - the
+            compiled program's own first-run path. Passing an explicit object is
+            supported for tests that want an isolated file.
 
     Raises:
         CobolFileSystemPathUnavailable: `System-Record.File-System-Used` selects
@@ -4454,6 +4407,14 @@ def run(
             configuration this migration targets.
         ModuleNotFoundError: `facade` was not supplied and
             `acas_posting.dal.facade` is not yet on the import path.
+
+    Returns:
+        The OTM2 work file this program wrote - the one it was given, or the one
+        it declared when given None. RETURNED because it is the handoff: in COBOL
+        the file survives the run unit and `sl060` reaches it by naming the same
+        `assign file-18`, so the migrated equivalent has to hand the object back
+        for the route to pass on. Nothing about the posting is communicated this
+        way; the five linkage records carry that, by reference, as COBOL does.
     """
     # THE CONTEXT IS THIS PROGRAM'S WORKING-STORAGE, NOT AN ADDED ABSTRACTION.
     # Every field on it is a `01`/`03` item declared between
@@ -4468,8 +4429,14 @@ def run(
         to_day=to_day,
         file_defs=file_defs,
         facade=_resolve_facade() if facade is None else facade,
+        #  THE CHANNEL TO `sl060`. Declared here only when the caller passed
+        #  none, and RETURNED either way, so the route can hand the very object
+        #  this program wrote to the program that reads it - the same pattern
+        #  `gl070.run` uses for the General Ledger work files.
         open_item_file_2=(
-            _OpenItemFile2() if open_item_file_2 is None else open_item_file_2
+            open_item_work_file(OPEN_ITEM_2_NAME, OiHeader)
+            if open_item_file_2 is None
+            else open_item_file_2
         ),
     )
 
@@ -4531,10 +4498,14 @@ def run(
     # distinct even though both end the program: the label records which path the
     # run took, and the traceability footer maps both.
     if label is _Label.GOBACK:
-        return
+        #  THE CHANNEL IS RETURNED ON BOTH DISPOSITIONS. `sl060` reads what this
+        #  program wrote whichever `goback` ended it, because in COBOL the file
+        #  survives the run unit either way.
+        return ctx.open_item_file_2
 
     # FALL-THROUGH 2 OF 2  [sales/sl055.cbl:L518 -> sales/sl055.cbl:L520]
     _da999_menu_exit()
+    return ctx.open_item_file_2
 
 
 
@@ -4828,8 +4799,8 @@ def run(
 #           observable effect, given the handler already defaults it
 #     Q-56  whether any scenario sets `FS-Cobol-Files-Used`, which would make
 #           [sales/sl055.cbl:L326-L348] reachable
-#     Q-57  the verb shape `acas_posting/dal/facade.py` will publish, since it is
-#           not yet written
+#     Q-57  whether the verb shape assumed here is the one
+#           `acas_posting.dal.facade` publishes
 #     Q-58  the invoice record area's three `REDEFINES` views and which of them a
 #           handler populates on a `Read-Next`
 #
@@ -4868,18 +4839,21 @@ def run(
 #        new module was created and no layout was re-declared, which keeps
 #        `acas_posting/programs/` at exactly the thirteen files sections 0.4.1.2
 #        and 0.4.4 allow.
-#     2. THE FILE is declared module-privately, as `_OpenItemFile2`.
-#        `acas_posting.workfiles` publishes `pre_trans`, `post_trans` and
-#        `sort_trans` and a `LineSequentialWorkFile` whose `OpenMode` is CLOSED,
-#        INPUT or OUTPUT - with NO EXTEND, because the General Ledger cycle never
-#        extends anything. [sales/sl055.cbl:L359] opens this file for EXTEND, so
-#        the shared helper cannot express it. `_OpenItemFile2` is therefore a
-#        module-private ordered sequence: `open extend` appends to what is there,
-#        `open output` truncates, `write` appends a deep snapshot in insertion
-#        order, and `close` is a status-setting no-op. It sets `fs-reply` on every
-#        operation, because `copybooks/seloi2.cob` declares `status fs-reply` -
-#        the very same field the facade verbs write, which is why the doubled loop
-#        condition at L365/L367 is not redundant.
+#     2. THE FILE is NOT declared locally either. `acas_posting.workfiles`
+#        publishes `OpenItemWorkFile`, the shared carrier for both open-item work
+#        files, and `open_item_work_file` declares one. `open extend` appends to
+#        what is there, `open output` truncates, `write` appends a deep snapshot
+#        in insertion order, `read_next` is what `sl060` uses, and `close` keeps
+#        the records. Every verb sets `fs-reply`, because
+#        `copybooks/seloi2.cob` declares `status fs-reply` - the very same field
+#        the facade verbs write, which is why the doubled loop condition at
+#        L365/L367 is not redundant.
+#        THIS WAS ONCE A MODULE-PRIVATE CLASS, on the ground that
+#        `LineSequentialWorkFile`'s `OpenMode` had no EXTEND. The ground was true
+#        and the conclusion was wrong: a work file that the producer and the
+#        consumer declare separately is not a channel, so `sl060` could never read
+#        what this program wrote. `OpenMode.EXTEND` is now published, and the file
+#        is declared ONCE.
 #
 #   THE EXTEND-THEN-FALLBACK IDIOM. [sales/sl055.cbl:L359-L362] tries
 #   `open extend` and, on any non-zero status, closes and `open output`s -
@@ -4928,15 +4902,28 @@ def run(
 #      raise: the `SL125` diagnostic and `move 8 to WS-Term-Code` [L344] happen
 #      first. AMBIGUITY Q-56.
 #
-#   2. ALL `display ... at` OUTPUT -> LOG RECORDS. Section 0.3.4: they "must not
-#      alter control flow and must not appear in any table dump". The sites are
-#      L339-L340 (inside omission 1), L351-L352 (banner and title), L354
-#      (`ws-date`), L504 (`SL122`), L506 (`SL002`), L512-L513 (`SL123`, `SL126`),
-#      L515 (`SL002`) and L684-L687 (`SL121`, `fs-reply`, `Exception-Msg`,
-#      `SL002`). Severity matches the original's intent: `warning` for the two
-#      operator-attention flags, `error` for the failed write, `info` otherwise.
-#      The screen coordinates, `foreground-color` clauses and `erase eos` are
-#      dropped with them.
+#   2. `display ... at` OUTPUT -> LOG RECORDS, BUT NOT ALL OF IT. Section 0.3.4
+#      converts a DIAGNOSTIC display, which "must not alter control flow and must
+#      not appear in any table dump" - and none of these records does either.
+#      CONVERTED: L339 (`SL125`, inside omission 1), L351-L352 (banner and title),
+#      L504 (`SL122`), L512-L513 (`SL123`, `SL126`) and L684-L686 (`SL121`,
+#      `fs-reply`, `Exception-Msg`). Severity matches the original's intent:
+#      `warning` for the operator-attention flags, `error` for the failed write and
+#      the missing file, `info` for the banner. The screen coordinates,
+#      `foreground-color` clauses and `erase eos` are dropped with them.
+#
+#      NOT CONVERTED, and each for a stated reason:
+#        * L340, L506, L515, L687 - `SL002`. A PURE ACKNOWLEDGEMENT PROMPT: every
+#          one stands immediately before an `accept ws-reply` and the literal is
+#          nothing but the instruction to press that key, so section 0.3.4 drops
+#          it with the pause (omission 5). No substantive half remains to keep.
+#        * L354 - `display ws-date`. THE POSTING DATE IS BUSINESS DATA, which the
+#          safe-event schema in `acas_posting/dal/status.py` excludes from a record
+#          (CWE-532). It is a command-line INPUT and `clock.py` pins it, so nothing
+#          is lost.
+#      `Exception-Msg` IS carried, because `a01-Eval-Status` [L724-L727] fills it
+#      only from the static table `copybooks/FileStat-Msgs.cpy` keyed on `fs-reply`:
+#      it is a fixed status NAME, not driver text and not a business value.
 #
 #   3. `accept ws-env-lines from lines` [sales/sl055.cbl:L308] AND THE SCREEN
 #      GEOMETRY [L309-L314]. `ws-env-lines`, `ws-lines` and `ws-23-lines` exist
@@ -4961,11 +4948,14 @@ def run(
 #      control transfer around it survives.
 #
 #   6. THE VERSION BANNER AND THE MESSAGE LITERALS. `prog-name`
-#      [sales/sl055.cbl:L152] and `SL002`, `SL121`, `SL122`, `SL123`, `SL125`,
-#      `SL126` [L250-L257] survive only as log text. `SL124`
-#      [sales/sl055.cbl:L255] is DECLARED AND NEVER REFERENCED anywhere in the
-#      program, so it is transcribed nowhere - recorded here so that its absence
-#      reads as deliberate.
+#      [sales/sl055.cbl:L152] and `SL121`, `SL122`, `SL123`, `SL125`, `SL126`
+#      [L250-L257] survive as log text. `SL002` [L250] is DECLARED AND
+#      DELIBERATELY NEVER REFERENCED - it is the acknowledgement prompt of
+#      omission 2 - and `SL124` [sales/sl055.cbl:L255] is DECLARED AND NEVER
+#      REFERENCED BY THE FROZEN PROGRAM ITSELF. Both are transcribed as
+#      declarations and used nowhere, recorded here so that each absence reads as
+#      deliberate: rule R-5 maps the whole `01 Error-Messages.` group, so no member
+#      is dropped merely because nothing reads it.
 #
 #   7. THE COMMENTED-OUT DECLARATIVES BLOCK [sales/sl055.cbl:L280-L303]. A `use
 #      after standard error procedure on open-item-file-2` handler, entirely
@@ -5041,4 +5031,3 @@ def run(
 #     single statement at [purchase/pl055.cbl:L580].
 #
 # --- end traceability -----------------------------------------------------
-

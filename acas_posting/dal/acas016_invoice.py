@@ -644,8 +644,9 @@ from acas_posting.dal.status import (
     SqlState,
     WeError,
     is_duplicate_key_bridge_level,
+    log_cobol_stop,
+    log_file_handler_record,
     mysql_1100_db_error,
-    redact_for_log,
     sanitise_for_log,
     start_access_type_is_valid,
 )
@@ -695,6 +696,7 @@ __all__: Final[tuple[str, ...]] = (
     "WS_LOG_SYSTEM",
     # Status vocabulary this bridge adds to the shared set.
     "BRIDGE_BAD_FUNCTION_WE_ERROR",
+    "BRIDGE_PROGRAM_ID",
     "BRIDGE_START_ACCESS_TYPE_RANGE",
     "HANDLER_BAD_FUNCTION_WE_ERROR",
     "HANDLER_START_ACCESS_TYPE_RANGE",
@@ -972,6 +974,13 @@ BRIDGE_PARAGRAPH_TRACE: Final[Mapping[str, int]] = MappingProxyType(
 # Note the handler's 999 is the value the bridge's own documentation calls
 # "Not used here - Yet" [common/slinvoiceMT.cbl:L185] - a further divergence
 # between the two layers' vocabularies, recorded and not harmonised.
+#: The bridge's PROGRAM-ID, as `call "slinvoiceMT"` names it
+#: [common/acas016.cbl:L85]. `BRIDGE`, imported from
+#: :mod:`acas_posting.records.sales_invoice`, is the bridge's FILE PATH and is what
+#: a locator cites; a log record names the PROGRAM, so that every handler's records
+#: carry the same kind of identifier.
+BRIDGE_PROGRAM_ID: Final[str] = "slinvoiceMT"
+
 HANDLER_BAD_FUNCTION_WE_ERROR: Final[int] = int(WeError.NOT_USED)
 BRIDGE_BAD_FUNCTION_WE_ERROR: Final[int] = int(WeError.UNKNOWN_UNEXPECTED)
 
@@ -3222,7 +3231,7 @@ def _move_ws_invoice_line_to_ws_invoice_record(
 
 def _new_sil_key(invoice: int, line: int) -> Any:
     """Build a ``sil-Key`` group [copybooks/slwsinv.cob:L82] for a fresh line view."""
-    from acas_posting.records.sales_invoice import SilKey  # local: avoids a cycle
+    from acas_posting.records.sales_invoice import SilKey
 
     return SilKey(sil_invoice=invoice, sil_line=line)
 
@@ -3769,14 +3778,15 @@ def _run_command(
             command=statement,
             we_error=delete_we_error,
         )
-        _LOG.debug(
-            "acas016/slinvoiceMT statement failed: fs_reply=%s we_error=%s "
-            "sql_err=%s sql_state=%s",
-            status.fs_reply,
-            status.we_error,
-            status.sql_err,
-            redact_for_log(status.sql_state),
-        )
+        #  NO SECOND RECORD HERE.
+        # :func:`acas_posting.dal.status.mysql_1100_db_error`, called on the line
+        # above, IS the one operator record for a database failure - it is the
+        # migration of `Mysql-1110-Report-Problem`
+        # [copybooks/mysql-procedures.cpy:L130-L137], which the frozen bridge
+        # reaches on every one - and it already carries the FS-Reply, the WE-Error,
+        # the SQLSTATE, the errno and the stable category. Repeating them here made
+        # one failure two records, so an operator counting failures counted twice
+        # and a reader could not tell which record was authoritative.
         return StatementOutcome(
             statement=statement,
             parameters=bound,
@@ -5497,16 +5507,28 @@ def ca_process_logs(ctx: _BridgeContext) -> None:
     the bridge has already logged.  N-nolog-on-dal.
     """
     logging_data = ctx.logging_data
-    _LOG.debug(
-        "slinvoiceMT fhlogger: system=%s file=%s para=%s fs_reply=%s we_error=%s "
-        "key=%s where=%s",
-        logging_data.ws_log_system,
-        logging_data.ws_log_file_no,
-        logging_data.ws_no_paragraph,
-        ctx.file_access.fs_reply,
-        ctx.file_access.we_error,
-        sanitise_for_log(logging_data.ws_file_key.rstrip()),
-        sanitise_for_log(logging_data.ws_log_where.rstrip()),
+    #  ONE ADAPTER FOR ALL TWENTY HANDLERS, at one level, with one field set.
+    # `WS-File-Key` is WITHHELD - for this table it is the invoice number, a
+    # business key - and so is `WS-Log-Where`, which this bridge fills with the
+    # WHOLE STATEMENT [see `_run_statement`], making it the single most exposing
+    # field in the module (CWE-532). `sanitise_for_log` escaped both and removed
+    # neither. The adapter also advances `Log-File-Rec-Written` modulo one million,
+    # the range of the frozen `pic 9(6)` [copybooks/Test-Data-Flags.cob:L20], which
+    # this paragraph did not advance at all.
+    log_file_handler_record(
+        _LOG,
+        program=BRIDGE_PROGRAM_ID,
+        paragraph="Ca-Process-Logs",
+        log_system=logging_data.ws_log_system,
+        log_file_no=logging_data.ws_log_file_no,
+        no_paragraph=logging_data.ws_no_paragraph,
+        file_function=int(ctx.file_access.file_function),
+        access_type=int(ctx.file_access.access_type),
+        fs_reply=int(ctx.file_access.fs_reply),
+        we_error=int(ctx.file_access.we_error),
+        sql_err=logging_data.sql_err,
+        sql_state=logging_data.sql_state,
+        dal_common=ctx.dal_common,
     )
 
 
@@ -5908,9 +5930,19 @@ def aa040_process_read_next(ctx: _HandlerContext) -> None:
         logging_data.sql_msg = " " * SQL_MSG_WIDTH
         # stop "Cobol File EOF"  *> FOR TESTING ONLY   [:L379]
         # DELIBERATELY NOT REPRODUCED as a pause.  The transfer below IS reproduced.
-        _LOG.debug(
-            "acas016 aa040: ISAM 'stop \"Cobol File EOF\"' site reached "
-            "[common/acas016.cbl:L379] - recorded, not executed"
+        #  ONE ERROR, THROUGH THE ONE REPORTER. `STOP` with a literal DISPLAYS
+        #  that literal and then waits, so the display is a record and the wait is
+        #  the omission. DEBUG was the wrong level and, worse, a DIFFERENT level
+        #  from the same statement's record in every sibling handler - WARNING in
+        #  acas006 and acas007, INFO in acas012, ERROR in acas019 - so one event
+        #  appeared as four and, at DEBUG, usually as none. A production `stop` that
+        #  would hang an unattended batch run is exactly what an operator must see.
+        log_cobol_stop(
+            _LOG,
+            program=HANDLER,
+            paragraph="aa040-Process-Read-Next",
+            literal="Cobol File EOF",
+            locator="[common/acas016.cbl:L379]",
         )
         # go to aa999-main-exit  [:L380] - Class 3.
         aa999_main_exit(ctx)
@@ -6234,14 +6266,24 @@ def ca_process_logs_handler(ctx: _HandlerContext) -> None:
     at debug level per AAP section 0.3.4.
     """
     logging_data = ctx.logging_data
-    _LOG.debug(
-        "acas016 fhlogger: system=%s file=%s para=%s fs_reply=%s we_error=%s key=%s",
-        logging_data.ws_log_system,
-        logging_data.ws_log_file_no,
-        logging_data.ws_no_paragraph,
-        ctx.file_access.fs_reply,
-        ctx.file_access.we_error,
-        sanitise_for_log(logging_data.ws_file_key.rstrip()),
+    #  THE SAME ONE ADAPTER the bridge's copy uses, so that the two paragraphs
+    # that share a name render identically and differ only in the program they
+    # name. `WS-File-Key` - the invoice number - is withheld (CWE-532), and
+    # `Log-File-Rec-Written` is advanced modulo one million.
+    log_file_handler_record(
+        _LOG,
+        program=HANDLER,
+        paragraph="Ca-Process-Logs",
+        log_system=logging_data.ws_log_system,
+        log_file_no=logging_data.ws_log_file_no,
+        no_paragraph=logging_data.ws_no_paragraph,
+        file_function=int(ctx.file_access.file_function),
+        access_type=int(ctx.file_access.access_type),
+        fs_reply=int(ctx.file_access.fs_reply),
+        we_error=int(ctx.file_access.we_error),
+        sql_err=logging_data.sql_err,
+        sql_state=logging_data.sql_state,
+        dal_common=ctx.dal_common,
     )
 
 

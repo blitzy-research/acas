@@ -228,8 +228,12 @@ test = ["acas-posting[dev,harness]"]
 #      on the shipped package's dependency graph.                       (R-1)
 
 #  No console entry points are declared: `python -m acas_posting` is the
-#  documented invocation route, so [project.scripts] would add surface the
-#  Agent Action Plan does not call for.
+#  documented invocation route - served by acas_posting/__main__.py, which
+#  reproduces common/ACAS.cbl's system-selection menu and dispatches the seven
+#  cli routes - so [project.scripts] would add surface the Agent Action Plan does
+#  not call for. Each route also remains directly runnable as
+#  `python -m acas_posting.cli.<module>`, and the two forms return the same
+#  status because the router passes the route's value through unchanged.
 
 #  Packaging: ship the seven acas_posting packages, ship the generated data
 #  dictionary WITH them, and ship nothing else.

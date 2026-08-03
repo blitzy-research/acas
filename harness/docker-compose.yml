@@ -12,9 +12,12 @@
 #  Two services, and only two:
 #
 #      mariadb    the frozen ACASDB schema, served at the exact server version
-#                 the schema dump was produced by, with autocommit ON -- the
-#                 only mode in which the frozen COBOL, which never reaches a
-#                 COMMIT, writes durable rows.
+#                 the schema dump was produced by, with autocommit OFF -- the
+#                 mode the Agent Action Plan mandates (sections 0.2.1.1, 0.4.1.7
+#                 and 0.5.2, from [common/glbatchLD.cbl:L9-L13]). The frozen
+#                 COBOL reaches no COMMIT, so under that mode its writes are not
+#                 durable: a defect of the frozen code, reproduced and reported
+#                 rather than repaired (R-4).
 #                 Built from harness/Dockerfile.mariadb.
 #
 #      gnucobol   the maintainer's exact COBOL toolchain (GnuCOBOL 3.2 final,
@@ -569,16 +572,22 @@ services:
     #
     #  AUTOCOMMIT IS DELIBERATELY ABSENT HERE. It is configured server-wide
     #  inside the image, at /etc/mysql/conf.d/99-acas-oracle.cnf, which pins
-    #  `autocommit=1`. That is not a convenience: the frozen COBOL never
+    #  `autocommit=0` -- the mode the Agent Action Plan mandates in sections
+    #  0.2.1.1, 0.4.1.7 and 0.5.2, all deriving it from the banner carried by all
+    #  28 `common/*LD.cbl` loaders at [common/glbatchLD.cbl:L9-L13]: "you MUST
+    #  ensure that autocommit is OFF in the rdb settings".
+    #
+    #  The consequence is recorded, not repaired (R-4): the frozen COBOL never
     #  reaches a COMMIT -- in the 28 load programs every
-    #  `perform aa020-Rollback` is commented out and `aa030-Commit` has no
-    #  perform site at all, and the twenty in-scope bridges contain no
-    #  COMMIT / ROLLBACK / START TRANSACTION -- so with autocommit off every
-    #  COBOL write would be discarded at session close while the Python side,
-    #  which commits, kept its rows. The maintainer reaches the same conclusion
-    #  at [common/analLD.cbl:L442]: "These do not work during testing with
-    #  mariadb - Non transactional model or autocommit set ON." The setting is
-    #  NOT restated here as a `command:` flag: one authority only.
+    #  `perform aa020-Rollback` is commented out and `perform aa030-Commit`
+    #  occurs exactly once anywhere, at [common/irsdfltLD.cbl:L437], commented
+    #  out too, and the twenty in-scope bridges contain no
+    #  COMMIT / ROLLBACK / START TRANSACTION -- so under the mandated mode every
+    #  COBOL write is discarded at session close. The maintainer recorded the
+    #  same observation at [common/analLD.cbl:L442]: "These do not work during
+    #  testing with mariadb - Non transactional model or autocommit set ON."
+    #  Nothing here issues the missing COMMIT: a defect fixed is a failure.
+    #  The setting is NOT restated here as a `command:` flag: one authority only.
     #  `harness/seed.sh`, `harness/reset_db.sh` and
     #  `harness/run_cobol_scenario.sh` each ASSERT it before doing work, so a
     #  silent regression is caught.
@@ -623,7 +632,18 @@ services:
       MARIADB_PASSWORD: ${ACAS_DB_PASSWORD:?export ACAS_DB_PASSWORD before starting the stack; 12 characters or fewer, per DB-UPass pic x(12) at [copybooks/wsfnctn.cob:L57-L64] - a longer value is silently truncated by the COBOL side while the Python side sends it whole, so the two cycles would authenticate differently. See the CREDENTIALS block above for a one-line generator}
 
     # -----------------------------------------------------------------------
-    #  PRIVILEGE RESTRICTION
+    #  PRIVILEGE RESTRICTION -- OS CAPABILITIES
+    #
+    #  TWO AXES, AND THIS BLOCK IS ONLY ONE OF THEM. Container privilege and SQL
+    #  privilege are independent, and conflating them is how a gap hid here: this
+    #  section was once titled simply "PRIVILEGE RESTRICTION" while addressing
+    #  capabilities alone, so the application account's `GRANT ALL` -- issued by
+    #  the vendor entrypoint from the `MARIADB_USER` set just above -- went
+    #  unmentioned and unnoticed. The SQL axis is now narrowed to SELECT, INSERT,
+    #  UPDATE and DELETE by the `20-` init script in
+    #  `harness/Dockerfile.mariadb`, which verifies itself at start-up; see the
+    #  ACAS_DB_ADMIN_USER note on the gnucobol service for the full account. What
+    #  follows concerns only what the container process may do to its host.
     #
     #  There is deliberately NO `user:` key. The vendor entrypoint performs its
     #  OWN privilege drop -- it starts as root, fixes the data directory if
@@ -987,6 +1007,27 @@ services:
     #        Privilege separation is the point: the application account that
     #        seeds and posts does NOT hold the rights to drop the schema, so a
     #        defect in a posting path cannot destroy the comparison baseline.
+    #
+    #        THAT SEPARATION IS NOW PROVISIONED, NOT MERELY DOCUMENTED. It used
+    #        not to be, and the gap is worth recording because the wording above
+    #        read as a guarantee while nothing enforced it. The MariaDB vendor
+    #        entrypoint issues `GRANT ALL ON <schema>.*` to MARIADB_USER, so the
+    #        account named just below held DROP, CREATE, ALTER, INDEX and LOCK
+    #        TABLES along with the four statements the cycle actually uses --
+    #        exactly what the sentence above says it does not have. Removing the
+    #        admin fallback from `reset_db.sh` stopped that SCRIPT from using the
+    #        runtime credential destructively, but left the CAPABILITY in place,
+    #        which is what a leaked credential exercises.
+    #        `harness/Dockerfile.mariadb` now adds a `20-` init script that runs
+    #        after the vendor grant and narrows it to SELECT, INSERT, UPDATE and
+    #        DELETE, then reads the grant back and refuses to finish
+    #        initialisation unless exactly those four are held. So the claim is
+    #        machine-checked at container start, and this stack cannot come up
+    #        healthy with a posture different from the one described here.
+    #        Measured on a built container: the application account is refused
+    #        DROP TABLE, DROP DATABASE, CREATE TABLE, ALTER TABLE, TRUNCATE,
+    #        LOCK TABLES, CREATE TEMPORARY TABLE, CREATE INDEX, RENAME TABLE and
+    #        GRANT -- while root retains DDL so the reset below still works.
     #
     #    ACAS_RESET_CONSENT
     #        `reset_db.sh` GATE 2 requires a target-scoped consent token equal to

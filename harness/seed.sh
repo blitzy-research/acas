@@ -129,7 +129,7 @@ readonly EX_OK=0
 readonly EX_USAGE=70          # bad command line
 readonly EX_PRECONDITION=71   # environment, directory or loader assertion
 readonly EX_DATABASE=72       # MariaDB unreachable, or credentials rejected
-readonly EX_AUTOCOMMIT=73     # autocommit is not on -- see acas_assert_autocommit
+readonly EX_AUTOCOMMIT=73     # autocommit is not OFF -- see acas_assert_autocommit
 readonly EX_TIMEOUT=74        # a load program or client exceeded its deadline
 readonly EX_FIXTURE=75        # the scenario's declared seed files are not staged
 
@@ -264,6 +264,10 @@ ACAS_SEED_JOBSTATUS=0          # JOBSTATUS, tracked as [common/masterLD.sh:L50]
 ACAS_SEED_RAN=0                # loaders actually executed
 ACAS_SQL_OUT=''                # last successful scalar query result
 ACAS_SQL_DIAG=''               # last client diagnostic, for error messages
+# The size of the append-only loader log BEFORE the first loader ran, so the
+# completion report can bound itself to what THIS run appended (deviation D6).
+# Empty until `acas_seed_note_sysout_baseline' has run.
+ACAS_SEED_SYSOUT_BASELINE=''
 ACAS_SEED_FIXTURE_DIR=''       # scenario fixture staged by acas_stage_scenario_seed
 declare -a ACAS_SEED_ONLY=()         # --only, validated loader names
 declare -a ACAS_SEED_SUMMARY=()      # the final table, one row per loader
@@ -331,6 +335,156 @@ acas_die() {
 
 acas_have() {
   command -v "$1" >/dev/null 2>&1
+}
+
+# ---------------------------------------------------------------------------
+#  THE CLIENT-DIAGNOSTIC SUMMARY  (OBS-008)
+#
+#  A database client's diagnostic is text the SERVER supplied, captured here with
+#  `2>&1`, and it is NOT safe to replay:
+#
+#    * it routinely names the account and the host -- "Access denied for user
+#      'acas'@'db.internal'" -- and on a statement failure it can quote the
+#      statement and its parameters, which are live accounting values (CWE-532);
+#    * it is multi-line and arbitrary, so a newline inside it forges a further
+#      line in whatever log collects this script's output (CWE-117);
+#    * these scripts run under Compose, where standard output and standard error
+#      are collected as container logs and kept.
+#
+#  So the RAW text is persisted to a private mode-0600 file and never printed,
+#  and the console gets a bounded, identity-free summary: a token from a fixed
+#  vocabulary, the client's own numeric error and SQLSTATE when it printed them,
+#  the size, and the artifact's path and SHA-256. This is the same
+#  console/artifact split `harness/diff_states.py` and `harness/normalize.py`
+#  apply to their own detail, with the same reasoning and the same vocabulary.
+#
+#  NOTHING BELOW ECHOES A BYTE OF ITS INPUT. The category comes from a `case`
+#  over fixed globs; the error and SQLSTATE are re-validated against their
+#  documented shapes and replaced by `unknown` when they do not match, so a
+#  server that returned `28000\nERROR: forged` cannot get that through.
+# ---------------------------------------------------------------------------
+
+#: Where the raw text of the most recent diagnostic was kept, or empty when none
+#: was produced or it could not be persisted.
+ACAS_DIAG_ARTIFACT=''
+
+# acas_diag_category <raw>
+# Classify a client diagnostic. Echoes ONE token and never any input byte.
+acas_diag_category() {
+  local raw="$1"
+
+  if [[ -z "${raw//[[:space:]]/}" ]]; then
+    printf 'no-diagnostic'
+    return 0
+  fi
+  case "$raw" in
+    *'Access denied'*)                          printf 'access-denied' ;;
+    *'Unknown database'*)                       printf 'unknown-database' ;;
+    *'Unknown MySQL server host'*)              printf 'host-unresolvable' ;;
+    *'is not allowed to connect'*)              printf 'host-not-permitted' ;;
+    *"Can't connect"*|*'Connection refused'*)   printf 'connect-refused' ;;
+    *'did not answer within'*|*'timed out'*|*'Timeout'*|*'timeout expired'*)
+                                                printf 'timeout' ;;
+    *'Lost connection'*|*'gone away'*)          printf 'connection-lost' ;;
+    *'Lock wait timeout'*)                      printf 'lock-wait-timeout' ;;
+    *'Deadlock found'*)                         printf 'deadlock' ;;
+    *'Duplicate entry'*)                        printf 'duplicate-key' ;;
+    *"doesn't exist"*|*'Unknown table'*)        printf 'table-missing' ;;
+    *'Unknown column'*)                         printf 'column-missing' ;;
+    *'error in your SQL syntax'*)               printf 'syntax-error' ;;
+    *'command denied'*|*'insufficient privileges'*)
+                                                printf 'grant-missing' ;;
+    *'SSL'*|*'TLS'*)                            printf 'tls-refused' ;;
+    *'read-only'*)                              printf 'server-read-only' ;;
+    *)                                          printf 'unclassified' ;;
+  esac
+}
+
+# acas_diag_code <raw>
+# Echo `<error>/<sqlstate>` from a `ERROR 1045 (28000)` prefix, each re-validated
+# against its documented shape and replaced by `unknown` when it does not match.
+acas_diag_code() {
+  local raw="$1" code='' state=''
+
+  code="$(printf '%s\n' "$raw" \
+    | sed -n 's/.*ERROR \([0-9][0-9]*\).*/\1/p' | head -n 1)"
+  state="$(printf '%s\n' "$raw" \
+    | sed -n 's/.*ERROR [0-9][0-9]* (\([0-9A-Za-z][0-9A-Za-z]*\)).*/\1/p' \
+    | head -n 1)"
+  [[ "$code" =~ ^[0-9]{1,5}$ ]] || code='unknown'
+  # SQLSTATE is five alphanumeric characters by definition
+  # [copybooks/wsfnctn.cob:L51]; anything else is not one.
+  [[ "$state" =~ ^[0-9A-Za-z]{5}$ ]] || state='unknown'
+  printf '%s/%s' "$code" "$state"
+}
+
+# acas_diag_sha256 <path>
+# Self-contained on purpose: this runs on abort paths, so it must not depend on
+# any deadline or digest machinery having been initialised. Echoes nothing on
+# failure.
+acas_diag_sha256() {
+  local path="$1" digest=''
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    digest="$(sha256sum -- "$path" 2>/dev/null)" || return 0
+    printf '%s' "${digest%% *}"
+    return 0
+  fi
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 - "$path" 2>/dev/null <<'PY' || return 0
+import hashlib
+import sys
+
+digest = hashlib.sha256()
+with open(sys.argv[1], 'rb') as handle:
+    for block in iter(lambda: handle.read(1 << 16), b''):
+        digest.update(block)
+sys.stdout.write(digest.hexdigest())
+PY
+}
+
+# acas_diag_persist <raw>
+# Write the raw text to a private mode-0600 file and set ACAS_DIAG_ARTIFACT.
+# Leaves it EMPTY when nothing could be written; never aborts, because this runs
+# on paths that are already reporting a failure.
+acas_diag_persist() {
+  local raw="$1" dir='' path=''
+
+  ACAS_DIAG_ARTIFACT=''
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/acas-diag-XXXXXXXX" 2>/dev/null)" || return 0
+  # `mktemp -d` creates 0700; the file is narrowed to 0600 explicitly because
+  # this script's `umask 077` governs creation but is not a guarantee a reader
+  # can check.
+  path="$dir/client-diagnostic.txt"
+  printf '%s\n' "$raw" >"$path" 2>/dev/null || return 0
+  chmod 600 -- "$path" 2>/dev/null || true
+  ACAS_DIAG_ARTIFACT="$path"
+}
+
+# acas_diag_summary [raw]
+# Echo the bounded, identity-free summary. Defaults to the script's own
+# last-diagnostic variable so a call site reads as one word.
+acas_diag_summary() {
+  local raw="${1-$ACAS_SQL_DIAG}" category='' code='' lines=0 bytes=0 digest=''
+
+  category="$(acas_diag_category "$raw")"
+  if [[ "$category" == 'no-diagnostic' ]]; then
+    printf 'client diagnostic: none was produced'
+    return 0
+  fi
+  code="$(acas_diag_code "$raw")"
+  lines="$(printf '%s\n' "$raw" | wc -l | tr -d '[:space:]')"
+  bytes="$(printf '%s' "$raw" | wc -c | tr -d '[:space:]')"
+  acas_diag_persist "$raw"
+  if [[ -n "$ACAS_DIAG_ARTIFACT" ]]; then
+    digest="$(acas_diag_sha256 "$ACAS_DIAG_ARTIFACT")"
+    printf 'client diagnostic: %s (error %s, %s line(s), %s byte(s)); the raw text is in %s (mode 0600%s)' \
+      "$category" "$code" "$lines" "$bytes" "$ACAS_DIAG_ARTIFACT" \
+      "${digest:+, sha256=$digest}"
+    return 0
+  fi
+  printf 'client diagnostic: %s (error %s, %s line(s), %s byte(s)); the raw text could NOT be persisted, so it is not available -- it is deliberately NOT printed here' \
+    "$category" "$code" "$lines" "$bytes"
 }
 
 # Join the remaining arguments with single spaces. Needed because IFS is
@@ -1624,7 +1778,7 @@ acas_wait_for_database() {
             'the database volume was created with a different password: recreate' \
             'it with "docker compose ... down -v", or correct ACAS_DB_USER and' \
             'ACAS_DB_PASSWORD.' \
-            "Server said: ${ACAS_SQL_DIAG:-<no diagnostic>}"
+            "$(acas_diag_summary "$ACAS_SQL_DIAG")"
         fi
         if (( denied_for == 0 )); then
           acas_log "credentials rejected; allowing ${auth_grace}s in case grants are still being applied"
@@ -1637,7 +1791,7 @@ acas_wait_for_database() {
         if (( elapsed >= timeout )); then
           acas_die "$EX_DATABASE" \
             "MariaDB at ${ACAS_DB_HOST}:${ACAS_DB_PORT} accepted a TCP connection but would not complete an authenticated statement within ${timeout}s." \
-            "Client said: ${ACAS_SQL_DIAG:-<no diagnostic>}"
+            "$(acas_diag_summary "$ACAS_SQL_DIAG")"
         fi
         if (( elapsed == 0 )); then
           acas_log "port is open but an authenticated statement did not yet succeed; retrying for up to ${timeout}s"
@@ -1649,18 +1803,28 @@ acas_wait_for_database() {
   done
 }
 
-# Precondition 8 of 8 -- autocommit MUST be ON, so that the loaders' writes are
-# durable.
+# Precondition 8 of 8 -- autocommit MUST be OFF, as the Agent Action Plan
+# mandates for the seeding window.
 #
 # ASSERTED, NEVER SET. The setting belongs to the server and is configured once,
-# by harness/Dockerfile.mariadb, which writes `autocommit=1' into
+# by harness/Dockerfile.mariadb, which writes `autocommit=0' into
 # /etc/mysql/conf.d/99-acas-oracle.cnf. harness/docker-compose.yml deliberately
 # does not repeat it -- one authority only -- and records that this script
 # asserts it. Issuing `SET autocommit' here would create a second authority and
-# make the seeded state depend on which script ran last.
+# make the seeded state depend on which script ran last. It is also impossible
+# for the loaders themselves to do: the vendored cobmysqlapi38.c exposes
+# MySQL_commit and MySQL_rollback but NOT MySQL_autocommit, so no COBOL program
+# in the checkout can change the mode.
 #
-# WHY ON, WHEN THE LOADER HEADERS ASK FOR OFF
-# -------------------------------------------
+# WHY OFF -- THE AAP REQUIRES IT
+# ------------------------------
+# Three provisions mandate it, all deriving from the same banner: section 0.2.1.1
+# ("the batch loader turns autocommit off"), section 0.4.1.7 (on
+# harness/Dockerfile.mariadb: "autocommit off to match the loaders") and section
+# 0.5.2 ("autocommit must be **off** during seeding, because the batch loader
+# sets it off explicitly, and the seeded state depends on its commit
+# boundaries").
+#
 # [common/glbatchLD.cbl:L9-L13] verbatim:
 #     *>  This modules uses commit and rollback so *
 #     *>  you MUST ensure that autocommit is OFF   *
@@ -1691,26 +1855,31 @@ acas_wait_for_database() {
 # transactional model or autocommit set ON", and [common/finalLD.cbl:L361]
 # "which can be ignored unless you thought autocommit was set up."
 #
-# Consequence: with autocommit OFF, MariaDB opens an implicit transaction on a
-# loader's first INSERT and discards it when the loader disconnects, because no
-# reachable COMMIT exists. The seed would be EMPTY. Seeding is therefore refused
-# unless autocommit is ON, which is the mode the maintainer says the loaders
-# normally get and the only mode in which their writes survive. The
-# commit/rollback intention is preserved as a reproduced legacy defect (R-4),
-# not repaired: this script neither enables transactional seeding the frozen
-# code cannot drive, nor issues the COMMIT the loaders omit.
+# CONSEQUENCE, PRESERVED NOT REPAIRED (R-4): with autocommit OFF, MariaDB opens
+# an implicit transaction on a loader's first INSERT and discards it when the
+# loader disconnects, because no reachable COMMIT exists. The seed is therefore
+# NOT durable under the mandated mode -- a defect of the frozen code, which R-4
+# makes the specification rather than a bug to fix: "A defect reproduced is
+# correct; a defect fixed is a failure."
+#
+# This script consequently WARNS about that consequence and proceeds. It does not
+# issue the COMMIT the loaders omit, does not enable transactional seeding the
+# frozen code cannot drive, and does not override the AAP by demanding a more
+# convenient mode. The warning exists so that an empty table set after a
+# successful-looking seed is recognised as the reproduced defect rather than
+# mistaken for a harness fault.
 #
 # The `+ 0' coercion is required, not cosmetic: autocommit is a boolean system
 # variable and renders as ON/OFF in a string context, not as 1/0.
 acas_assert_autocommit() {
-  acas_stage 'Preconditions 8/8: autocommit must be ON'
+  acas_stage 'Preconditions 8/8: autocommit must be OFF (AAP-mandated)'
 
   local rc=0
   acas_sql_scalar 'select concat_ws(0x2f, @@GLOBAL.autocommit + 0, @@SESSION.autocommit + 0)' || rc=$?
   if (( rc != 0 )); then
     acas_die "$EX_DATABASE" \
       'could not read the autocommit setting from the server.' \
-      "Client said: ${ACAS_SQL_DIAG:-<no diagnostic>}"
+      "$(acas_diag_summary "$ACAS_SQL_DIAG")"
   fi
 
   # Take the last line that looks like the answer, so a stray client advisory
@@ -1730,26 +1899,30 @@ acas_assert_autocommit() {
   local global="${value%%/*}" session="${value##*/}"
   acas_log "@@GLOBAL.autocommit = $global   @@SESSION.autocommit = $session"
 
-  if (( global != 1 || session != 1 )); then
+  if (( global != 0 || session != 0 )); then
     acas_die "$EX_AUTOCOMMIT" \
-      "autocommit is OFF (global=$global, session=$session); seeding is REFUSED." \
-      'The 28 ACAS load programs declare commit and rollback paragraphs but' \
-      'never reach them: every "perform aa020-Rollback" is commented out and' \
-      '"aa030-Commit" has zero perform sites, so this census returns nothing --' \
-      "  grep -n '^ *perform.*\\(aa020\\|aa030\\|Commit\\|Rollback\\)' common/*LD.cbl" \
-      'With autocommit off, MariaDB opens an implicit transaction on the first' \
-      'INSERT and discards it at disconnect, so the seed would be EMPTY and' \
-      'every subsequent COBOL-versus-Python state diff would be meaningless.' \
-      'The maintainer describes the same conclusion at [common/analLD.cbl:L442]:' \
-      '"These do not work during testing with mariadb - Non transactional model' \
-      'or autocommit set ON".' \
-      'This script deliberately does NOT fix it: the setting has exactly one' \
-      'authority, harness/Dockerfile.mariadb, which writes autocommit=1 into' \
+      "autocommit is ON (global=$global, session=$session); seeding is REFUSED." \
+      'The Agent Action Plan mandates autocommit OFF for the seeding window in' \
+      'three places -- section 0.2.1.1 (the seeding contract), section 0.4.1.7' \
+      '(harness/Dockerfile.mariadb: "autocommit off to match the loaders") and' \
+      'section 0.5.2 -- all deriving it from the banner carried by all 28' \
+      'common/*LD.cbl loaders at [common/glbatchLD.cbl:L9-L13]: "you MUST ensure' \
+      'that autocommit is OFF in the rdb settings".' \
+      'Seeding under ON would produce durable rows the mandated mode does not,' \
+      'so the seeded state would depend on the server rather than on the frozen' \
+      'contract, and the oracle would no longer be the thing the AAP specifies.' \
+      'This script deliberately does NOT set the mode: it has exactly one' \
+      'authority, harness/Dockerfile.mariadb, which writes autocommit=0 into' \
       '/etc/mysql/conf.d/99-acas-oracle.cnf. Start the harness MariaDB service' \
-      'built from that Dockerfile, or set autocommit=1 in the server' \
+      'built from that Dockerfile, or set autocommit=0 in the server' \
       'configuration and restart it.'
   fi
-  acas_log 'verified: autocommit is on, globally and for this session'
+  acas_log 'verified: autocommit is OFF, globally and for this session (AAP-mandated)'
+
+  # The reproduced defect, restated at the moment it becomes relevant. This is a
+  # WARNING and not a refusal: R-4 requires the frozen behaviour, and refusing
+  # here would be refusing the specification.
+  acas_warn 'the frozen loaders reach no COMMIT, so under this AAP-mandated mode their writes are NOT durable: the tables may read EMPTY after a seed that reports success. Measured across the frozen tree -- every "perform aa020-Rollback" in all 28 common/*LD.cbl loaders is commented out (78 sites, none live) and "perform aa030-Commit" occurs exactly once anywhere, at [common/irsdfltLD.cbl:L437], commented out as well; [common/systemLD.cbl] declares both paragraphs at L406 and L420 with no perform site at all. This is the reproduced legacy defect (R-4), not a fault in this script -- the maintainer recorded the same observation at [common/analLD.cbl:L442] ("These do not work during testing with mariadb - Non transactional model or autocommit set ON"). Nothing here issues the missing COMMIT, because a defect fixed is a failure.'
 }
 
 
@@ -2077,17 +2250,59 @@ acas_report_out_of_scope() {
 #        less SYS-DISPLAY.log
 #        exit 0
 #     fi
-# Deviation D6, on two counts. `less' is an interactive pager and would block
-# the harness for ever, so the log goes to standard output with `cat': a prompt
-# whose only effect is to pause a terminal is dropped, and a diagnostic with no
-# database effect becomes a log record. And the frozen block exits 0 only when
-# the log exists, falling off the end of the file otherwise, so this script
-# always exits explicitly and never unconditionally with 0.
+# Deviation D6, on three counts.
+#
+#  1. `less' is an interactive pager and would block the harness for ever, so the
+#     prompt is dropped: a pause whose only effect is to block a terminal has no
+#     database effect and is not reproduced.
+#
+#  2. THE LOG'S CONTENT IS NOT REPLAYED (OBS-008). It used to be `cat'-ed in
+#     full, or `tail'-ed when large, onto standard output -- which Compose
+#     collects as a container log and keeps. Three reasons that is wrong, and the
+#     first alone settles it:
+#       * THE FILE IS APPEND-ONLY AND SPANS EVERY PREVIOUS RUN. The frozen
+#         loaders append and nothing in the frozen path clears it, so replaying
+#         it publishes other runs' diagnostics as though they were this run's.
+#         That is not a current-run summary, and it is not evidence of anything.
+#       * Its content is loader output about live accounting data: it names the
+#         flat files, the tables and the rows a load rejected (CWE-532).
+#       * It is arbitrary multi-line text, so a line inside it can be read as a
+#         line of this script's own output (CWE-117).
+#     What replaces it is a bounded CURRENT-RUN summary: how many bytes THIS run
+#     appended, the file's total size, its path and its SHA-256. The file itself
+#     is untouched and stays exactly where the frozen loaders put it, so an
+#     operator who wants the detail opens it -- and the digest proves the file
+#     they open is the one this run wrote to.
+#
+#  3. The frozen block exits 0 only when the log exists, falling off the end of
+#     the file otherwise, so this script always exits explicitly and never
+#     unconditionally with 0.
 
 # The log is NOT truncated between runs: the frozen loaders append to it and
 # nothing in the frozen path clears it, so clearing it here would change the
 # seed path rather than reproduce it (R-4). It lives in the data directory, is
 # never dumped and is never compared, so its growth cannot affect determinism.
+# acas_seed_note_sysout_baseline
+# Record the append-only log's size before any loader runs. Called from
+# `acas_main' immediately before the first load program, and deliberately not
+# earlier: the working directory is re-pointed at a staged scenario fixture
+# during setup, and the size that matters is the one in the directory the loaders
+# will actually write in.
+acas_seed_note_sysout_baseline() {
+  local bytes=''
+
+  if [[ ! -e "$ACAS_SEED_SYSOUT_LOG" ]]; then
+    ACAS_SEED_SYSOUT_BASELINE=0
+    return 0
+  fi
+  bytes="$(wc -c <"$ACAS_SEED_SYSOUT_LOG" 2>/dev/null | tr -d '[:space:]')"
+  if [[ "$bytes" =~ ^[0-9]+$ ]]; then
+    ACAS_SEED_SYSOUT_BASELINE="$bytes"
+  else
+    ACAS_SEED_SYSOUT_BASELINE=''
+  fi
+}
+
 acas_report_sysout_log() {
   if [[ ! -e "$ACAS_SEED_SYSOUT_LOG" ]]; then
     acas_log "no $ACAS_SEED_SYSOUT_LOG was produced in $PWD"
@@ -2099,23 +2314,30 @@ acas_report_sysout_log() {
   printf '%s\n' "$ACAS_SEED_COMPLETE_MSG"
   acas_tee "$ACAS_SEED_COMPLETE_MSG"
 
-  local bytes=0
+  local bytes=0 appended=0 digest=''
   bytes="$(wc -c <"$ACAS_SEED_SYSOUT_LOG" 2>/dev/null | tr -d '[:space:]')"
   [[ "$bytes" =~ ^[0-9]+$ ]] || bytes=0
-  acas_log "$ACAS_SEED_SYSOUT_LOG is ${bytes} byte(s), at $PWD/$ACAS_SEED_SYSOUT_LOG"
-  acas_note 'the loaders APPEND to it, so it spans previous runs as well as this one'
 
-  # 65536 bytes of diagnostics is already more than an operator will read in a
-  # terminal; beyond that the tail is shown and the full file left in place.
-  if (( bytes <= 65536 )); then
-    printf -- '--- %s ---\n' "$ACAS_SEED_SYSOUT_LOG"
-    cat -- "$ACAS_SEED_SYSOUT_LOG"
-    printf -- '--- end of %s ---\n' "$ACAS_SEED_SYSOUT_LOG"
+  # THE CURRENT-RUN BOUND. `acas_seed_note_sysout_baseline' recorded the size
+  # before the first loader ran, so the difference is exactly what THIS run
+  # appended -- which is the only part of an append-only file that this run can
+  # honestly report on.
+  if [[ "$ACAS_SEED_SYSOUT_BASELINE" =~ ^[0-9]+$ ]] \
+     && (( bytes >= ACAS_SEED_SYSOUT_BASELINE )); then
+    appended=$(( bytes - ACAS_SEED_SYSOUT_BASELINE ))
+    acas_log "$ACAS_SEED_SYSOUT_LOG grew by ${appended} byte(s) during this run, to ${bytes} byte(s) in total"
   else
-    printf -- '--- last 200 lines of %s ---\n' "$ACAS_SEED_SYSOUT_LOG"
-    tail -n 200 -- "$ACAS_SEED_SYSOUT_LOG"
-    printf -- '--- end of tail; the whole file is at %s ---\n' "$PWD/$ACAS_SEED_SYSOUT_LOG"
+    acas_log "$ACAS_SEED_SYSOUT_LOG is ${bytes} byte(s) in total; this run's share of it could not be determined"
   fi
+  acas_log "it is at $PWD/$ACAS_SEED_SYSOUT_LOG"
+  digest="$(acas_diag_sha256 "$ACAS_SEED_SYSOUT_LOG")"
+  if [[ -n "$digest" ]]; then
+    acas_log "sha256 = $digest"
+  fi
+  acas_note 'the loaders APPEND to it, so it spans previous runs as well as this one'
+  acas_note 'its CONTENT is not replayed here: it is loader output about the rows a load'
+  acas_note 'rejected, it spans runs this one cannot speak for, and standard output is a'
+  acas_note 'collected container log. Open the file above for the detail (deviation D6).'
 }
 
 # The closing report: the summary table, JOBSTATUS, and every non-fatal finding.
@@ -2221,9 +2443,12 @@ acas_print_plan() {
   acas_log "strict opt-in: ACAS_SEED_STRICT=${ACAS_SEED_STRICT:-<unset>}; unset = frozen"
   acas_log "             : tolerance plus the post-seed gate, 1 = fail fast (D5)"
   acas_note 'the MariaDB readiness and autocommit assertions are NOT performed in a'
-  acas_note 'dry run; a real run refuses to seed unless autocommit is on, globally'
-  acas_note 'and for the session, because the loaders never reach a COMMIT and'
-  acas_note 'their writes would otherwise be discarded at disconnect'
+  acas_note 'dry run; a real run refuses to seed unless autocommit is OFF, globally'
+  acas_note 'and for the session, as the Agent Action Plan mandates for the seeding'
+  acas_note 'window (sections 0.2.1.1, 0.4.1.7 and 0.5.2, from the banner at'
+  acas_note '[common/glbatchLD.cbl:L9-L13]). A real run then WARNS that the frozen'
+  acas_note 'loaders reach no COMMIT, so their writes are not durable under that'
+  acas_note 'mode -- the reproduced legacy defect (R-4), never repaired here'
 }
 
 # THE OPTIONAL SCENARIO POSITIONAL
@@ -2571,6 +2796,10 @@ acas_main() {
 
   acas_wait_for_database
   acas_assert_autocommit
+
+  # BEFORE the first loader, so the completion report can bound itself to what
+  # this run appended rather than replaying an append-only file (deviation D6).
+  acas_seed_note_sysout_baseline
 
   acas_seed_system_block
   acas_seed_mappings

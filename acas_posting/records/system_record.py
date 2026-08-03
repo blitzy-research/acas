@@ -180,8 +180,8 @@ silently creating a 170th attribute.
 
 THE ATTRIBUTE THAT COULD NOT KEEP ITS COBOL NAME
 ================================================
-One rename was unavoidable, recorded here so the traceability document a
-later boundary writes picks it up:
+One rename was unavoidable, recorded here so that
+`docs/migration/traceability.md` can pick it up (R-5):
 
     COBOL item      1st-Time-Flag        [copybooks/wssystem.cob:L326]
     dictionary key  SYSTEM-REC.1ST-TIME-FLAG
@@ -997,7 +997,30 @@ class SystemDataBlock:
     # 05 RDBMS-Passwd pic x(12) value "PaSsWoRd"
     # str, 12 chars   [copybooks/wssystem.cob:L139]
     # column SYSTEM-REC.RDBMS-PASSWD char(12)
-    rdbms_passwd: str = "PaSsWoRd".ljust(12)
+    #
+    # ⭐ `repr=False`, AND NOTHING ELSE ABOUT THIS FIELD CHANGES. It is still
+    # declared here, in this position, as `x(12)`, with the copybook's own
+    # placeholder `VALUE` padded to twelve characters exactly as before - so the
+    # layout, the declaration order, the default, the `FIELDS` tuple above and
+    # every dictionary and descriptor lookup are byte-for-byte what they were
+    # (rules R-3 and R-5). The column it maps to is untouched, and the value still
+    # reaches `RDB-Data.DB-UPass` through the six frozen moves
+    # [common/acas008.cbl:L558-L563].
+    #
+    # What changes is the DEFAULT `__repr__` this dataclass generates. SYSTEM-REC
+    # is the largest record in the migration - 169 columns of company identity,
+    # addresses and operator names - and rendering it whole put a password in the
+    # middle of that. Nothing in the cycle renders the block today, which is why
+    # this is INFO rather than a live leak; but the hazard is one
+    # `_LOG.debug("%s", system_record)` or one failing assertion away, and a
+    # password written to a log cannot be taken back (CWE-532).
+    #
+    # THE VALUE IS NOT MASKED, only its rendering omitted, and the credential
+    # question itself is settled elsewhere and is not reopened here:
+    # `carries_frozen_placeholder_rdbms_credentials` still reads this field, and
+    # `dal/connection.py` still refuses to authenticate with the shipped
+    # placeholder unless the caller declares the server disposable.
+    rdbms_passwd: str = field(default="PaSsWoRd".ljust(12), repr=False)
 
     # 05 VAT-Reg-Number pic x(11) value spaces
     # str, 11 chars   [copybooks/wssystem.cob:L140]
@@ -1059,8 +1082,9 @@ class SystemDataBlock:
 #  What this section adds is therefore NOT a change of behaviour but a way to
 #  ASK a question: "is this record still carrying the shipped placeholders?"
 #  `acas_posting/dal/connection.py` is the one module that reaches a real
-#  server, and it fails closed on a yes unless its caller explicitly opts in
-#  for a disposable local oracle. Publishing the four values here - read out of
+#  server, and on a yes it reports the exposure - and refuses only when the
+#  deployment's installed policy asked it to, since the compiled program applies
+#  no such check (rule R-3). Publishing the four values here - read out of
 #  this module's own declared defaults, never transcribed a second time - is
 #  what lets that module do so without owning a copy of the literals.
 #

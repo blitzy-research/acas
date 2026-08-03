@@ -110,11 +110,16 @@ writes `pre_trans`, `gl071` sorts it into `post_trans`, `gl072` posts from
 WHAT IS DELIBERATELY NOT HERE
 =============================
 No screen output of any kind. The menu's own `display-menu` redraw, its
-`accept-loop`, its `go to load01 ... depending on z` dispatch table and its
-`overrewrite` persistence of the system records are all omitted, and each
-omission is recorded in the traceability footer rather than left to be noticed
-(Agent Action Plan section 0.4.3). The programs' phase banners belong to
-`acas_posting.programs` and are not duplicated here.
+`accept-loop` and its `go to load01 ... depending on z` dispatch table are all
+omitted, and each omission is recorded in the traceability footer rather than
+left to be noticed (Agent Action Plan section 0.4.3). The programs' phase banners
+belong to `acas_posting.programs` and are not duplicated here.
+
+WHAT IS HERE AND USED TO BE OMITTED. `overrewrite`'s persistence of the system
+records IS reproduced, on the one arm the frozen `load00.` reaches it from -
+`if ws-term-code > 7 / go to overrewrite` [general/general.cbl:L720-L721]. The
+paragraph itself lives once, in `acas_posting.cli.args`, and this route performs
+it; the state it persists is loaded by the same module before the first dispatch.
 
 Example:
     Run the cycle for the 21st of September 2025, General Ledger only::
@@ -164,12 +169,17 @@ _GL070: Final[str] = "gl070"
 _GL071: Final[str] = "gl071"
 _GL072: Final[str] = "gl072"
 
-#: The format `main` configures the root logger with. Deliberately carries NO
-#: timestamp: a wall-clock field in the output would be the one ambient reading
-#: in an otherwise clock-free entry point, and rule R-6 is served better by log
-#: output that two runs of one scenario can be diffed against each other. The run
-#: date reaches this module only through the required `--run-date` option.
-_LOG_FORMAT: Final[str] = "%(levelname)s %(name)s: %(message)s"
+#  THIS MODULE CALLS NO `basicConfig` AND DECLARES NO LOG FORMAT.
+#  `logging.basicConfig` mutates the root logger, so seven entry points each
+#  calling it produced seven formats and a first-caller-wins race. There is now
+#  exactly one call, in `acas_posting.__main__.configure_logging`, which owns the
+#  single timestamp-free format and the single level policy - see that module's
+#  `LOG_FORMAT`. Both process boundaries reach it: the router, and this module's
+#  own `if __name__ == "__main__":` guard through `run_entry_point`. `main` asks
+#  that one configurator to SET THE LEVEL when the operator supplied
+#  `--log-level` - the option every route now shares - and does nothing at all
+#  when they did not, which is what the scenario suites need from a library
+#  call.
 
 
 class _Disposition(enum.Enum):
@@ -201,6 +211,8 @@ class _Disposition(enum.Enum):
     #: program: `overrewrite.` falls through `overclose.`
     #: [general/general.cbl:L693] to `goback` [general/general.cbl:L694] and the
     #: run unit ends. A caller that receives this must not dispatch again.
+    #: `load00` has ALREADY performed `args.overrewrite` before returning this,
+    #: so a caller has no persistence left to do.
     SERIOUS_ERROR = enum.auto()
 
 
@@ -298,7 +310,9 @@ def load00(
     program: _GlProgram,
     program_id: str,
     *,
+    menu_state: args.MenuState,
     work_files: _CycleWorkFiles | None = None,
+    transport: object = None,
 ) -> _Disposition:
     """`load00.` [general/general.cbl:L711-L721] - dispatch one program.
 
@@ -364,6 +378,10 @@ def load00(
             [general/general.cbl:L808], [general/general.cbl:L812],
             [general/general.cbl:L814]. Written into the record for
             traceability and for any callee that reads it.
+        menu_state: the menu shell's own WORKING-STORAGE, as `main` created it
+            and as `args.bind_gl_linkage` loaded through it. Required rather than
+            optional: `overrewrite` on the `> 7` arm needs it, and a dispatch that
+            could not persist would be the very gap this parameter closes.
         work_files: the cycle's shared work-file holder. Keyword-only and NOT a
             linkage parameter - see `_CycleWorkFiles`. Omitting it dispatches the
             program against work files of its own, which is what a single
@@ -371,10 +389,13 @@ def load00(
             `work_files=None` default already means.
 
     Returns:
-        `_Disposition.SERIOUS_ERROR` when the callee reported `> 7` and the frozen
-        paragraph would have transferred to `overrewrite.`, otherwise
-        `_Disposition.CONTINUE`. A code of 5 returns `CONTINUE`, deliberately:
-        see THE THRESHOLD above.
+        `_Disposition.SERIOUS_ERROR` when the callee reported `> 7`, in which case
+        `args.overrewrite` has already run - this function reproduces the transfer
+        to `overrewrite.` rather than reporting that one is due. Otherwise
+        `_Disposition.CONTINUE`, and nothing has been persisted, because the
+        frozen paragraph's ordinary exit at [general/general.cbl:L722] persists
+        nothing. A code of 5 returns `CONTINUE`, deliberately: see THE THRESHOLD
+        above.
 
     Raises:
         Exception: whatever the callee raises is propagated unchanged. Nothing is
@@ -414,7 +435,22 @@ def load00(
     #      FOUR POSITIONAL ARGUMENTS, IN THE COBOL ORDER. `args.GlLinkage` holds
     #      them in that order, so the splat below and L715-L718 above are the same
     #      list and can be diffed line for line.
-    returned = program.run(*linkage, work_files=carrier.container)
+    #  THE OPERATOR'S TRANSPORT DECLARATION, AND ONLY WHERE A CALLEE DECLARES IT.
+    #  `gl070.run` publishes a keyword-only `transport` and forwards it to the
+    #  posting handler; `gl071.run` reaches no handler at all - it is a pure sort
+    #  [general/gl071.cbl] - and `gl072.run` publishes no such parameter, so its
+    #  handlers keep the fail-closed default. None of the three is a COBOL operand:
+    #  the frozen `CALL` at L715-L718 passes four things and no fifth, its bridge
+    #  having no transport policy to pass [copybooks/mysql-procedures.cpy:L72-L77].
+    #  Offering the argument to a callee that does not declare it would be a
+    #  `TypeError` at the dispatch, and never offering it at all is how a policy
+    #  comes to be decided by a handler instead of by the operator.
+    if transport is None:
+        returned = program.run(*linkage, work_files=carrier.container)
+    else:
+        returned = program.run(
+            *linkage, work_files=carrier.container, transport=transport
+        )
 
     #      The one conditional that is a Python-language necessity rather than a
     #      test of any value the COBOL tests. `gl070.run` returns the work-file
@@ -437,17 +473,40 @@ def load00(
     #               [general/general.cbl:L693] and ends the run unit at `goback`
     #               [general/general.cbl:L694]. Control never comes back to this
     #               paragraph and no further program is called.
-    #        Python: return `SERIOUS_ERROR`; `load08` returns at once and `main`
-    #               returns `args.exit_status_for(ws_term_code)`, so the process
-    #               ends carrying the reported code.
-    #        PROOF: in both implementations control never returns to the dispatch
-    #               paragraph and no further program is invoked, so the set of
-    #               programs run and the database effect are identical. The ONLY
-    #               difference is the omitted persistence of the three system
-    #               records, recorded as OMISSION 2 in the traceability footer.
+    #        Python: perform `args.overrewrite` - the same paragraph, reproduced
+    #               once in `args.py` and shared by the routes - then return
+    #               `SERIOUS_ERROR`; `load08` returns at once and `main` returns
+    #               `args.exit_status_for(ws_term_code)`, so the process ends
+    #               carrying the reported code.
+    #        PROOF: in both implementations the system records are persisted, then
+    #               control never returns to the dispatch paragraph and no further
+    #               program is invoked - so the set of programs run and the
+    #               database effect are identical.
+    #      THE PERSISTENCE IS ON THIS ARM ALONE, AND THAT IS THE FROZEN SHAPE.
+    #      `load00.` has exactly one transfer to `overrewrite`, guarded by `> 7`
+    #      [general/general.cbl:L720-L721]; the ordinary exit at L722 persists
+    #      NOTHING. This is where the General menu differs from the Sales and
+    #      Purchase ones, whose `load000.` performs `overrewrite` on BOTH arms
+    #      [sales/sales.cbl:L708-L712], [purchase/purchase.cbl:L701-L704]. Neither
+    #      `load08.` nor `load09.` adds a persist of its own - `load03` through
+    #      `load06` do, and none of those four serves an in-scope program. The
+    #      asymmetry is reproduced, not smoothed away (rule R-4).
     #      REPRODUCED (rule R-4): the predicate is the threshold `> 7` the frozen
     #      source writes, evaluated through `args.is_serious_error`, so this route
     #      and the six others share one implementation of it.
+    #
+    #      THE GENERAL LEDGER SHELL HAS NO `< 8` ARM, and that is a divergence, not
+    #      an omission. `load00.` performs the persistence ONLY on this branch
+    #      [general/general.cbl:L720-L721], where the Sales and Purchase
+    #      `load000.` paragraphs perform it on both arms and therefore after every
+    #      dispatch [sales/sales.cbl:L708-L712],
+    #      [purchase/purchase.cbl:L701-L704]. Adding a `< 8` arm here would make
+    #      the General Ledger route write rows the frozen one leaves alone
+    #      (rule R-3), so none is added. Note also that `load00.` is not the only
+    #      General Ledger path to the paragraph - `load03.` through `load06.`
+    #      perform it explicitly after their own dispatch
+    #      [general/general.cbl:L766-L768] - but every one of those routes
+    #      dispatches an out-of-scope program, so none of them is this module's.
     if args.is_serious_error(linkage.calling_data.ws_term_code):
         _LOG.error(
             "%s reported a serious error, term code %d "
@@ -455,6 +514,8 @@ def load00(
             program_id,
             linkage.calling_data.ws_term_code,
         )
+        # 721  go to overrewrite.  ->  general/general.cbl:L656-L672
+        args.overrewrite(linkage.system_record, menu_state, linkage.file_defs)
         return _Disposition.SERIOUS_ERROR
 
     # 722  *>
@@ -464,7 +525,7 @@ def load00(
     return _Disposition.CONTINUE
 
 
-def load08(linkage: args.GlLinkage) -> None:
+def load08(linkage: args.GlLinkage, *, menu_state: args.MenuState) -> None:
     """`load08.` [general/general.cbl:L805-L815] - run the posting cycle.
 
     Three phases, one at a time, with the abort gate between the first and the
@@ -491,6 +552,12 @@ def load08(linkage: args.GlLinkage) -> None:
             overwritten per dispatch and `WS-Term-Code` is cleared per dispatch,
             exactly as the menu does, so the value the caller arrives with in
             either field is not read.
+        menu_state: the menu's own WORKING-STORAGE, built by
+            `args.general_menu_state()` and loaded by
+            `args.aa010_get_system_recs`, carrying the `SYSTEM-REC` this linkage
+            was bound from together with `SYSTOT-REC` and `SYSDEFLT-REC`.
+            Threaded into each dispatch so that the `> 7` arm of `load00.` can
+            reach `overrewrite.` [general/general.cbl:L720-L721].
 
     Returns:
         None. The cycle reports through `WS-Term-Code` inside
@@ -513,7 +580,11 @@ def load08(linkage: args.GlLinkage) -> None:
     #      not `go to`: control comes back to L810 below, which is what makes the
     #      gate reachable at all.
     disposition = load00(
-        linkage, gl070_transaction_pre_process, _GL070, work_files=work_files
+        linkage,
+        gl070_transaction_pre_process,
+        _GL070,
+        menu_state=menu_state,
+        work_files=work_files,
     )
 
     #      Not a statement of `load08.`, but the disposition of L720-L721 inside
@@ -555,6 +626,15 @@ def load08(linkage: args.GlLinkage) -> None:
         #  A log record, not a warning in the sense the gate is not: the transfer
         #  above is unconditional once the code is 5. This line reports; the
         #  `return` decides.
+        #
+        #  AND IT IS THE ONLY RECORD FOR THE ABORT. `gl070` sets the code at
+        #  [general/gl070.cbl:L288] with no `display` beside it, and used to log
+        #  it there as well, so one abort produced two records at two layers. The
+        #  event belongs HERE: this is the layer that evaluates the gate
+        #  [general/general.cbl:L810-L811] and therefore the layer that decides
+        #  the cycle stops, so this record can name the whole consequence - which
+        #  programs will not run - where `gl070` could only report its own local
+        #  assignment.
         _LOG.warning(
             "%s left a batch open and raised term code %d "
             "(general/gl070.cbl:L289); the cycle stops here and %s and %s do NOT "
@@ -576,7 +656,13 @@ def load08(linkage: args.GlLinkage) -> None:
     #      `WS-Term-Code` at all - the string does not occur in
     #      general/gl071.cbl. Adding a gate here "for symmetry" with L810 would
     #      invent a stop the COBOL has not got.
-    load00(linkage, gl071_batch_sort, _GL071, work_files=work_files)
+    load00(
+        linkage,
+        gl071_batch_sort,
+        _GL071,
+        menu_state=menu_state,
+        work_files=work_files,
+    )
 
     # 814  move     "gl072" to ws-called.
     # 815  go       to load00.
@@ -599,7 +685,13 @@ def load08(linkage: args.GlLinkage) -> None:
     #      that emptiness, not by a comment alone. The disposition is deliberately
     #      not read: `load08.` has nowhere left to take it, and `main` reads
     #      `WS-Term-Code` itself.
-    load00(linkage, gl072_transaction_update, _GL072, work_files=work_files)
+    load00(
+        linkage,
+        gl072_transaction_update,
+        _GL072,
+        menu_state=menu_state,
+        work_files=work_files,
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -649,40 +741,20 @@ def _build_parser() -> argparse.ArgumentParser:
     args.add_calling_data_arguments(parser, default_caller=args.WS_CALLER_GENERAL)
     #  The REQUIRED `--run-date`, plus the two pinnable `SYSTEM-REC` fields.
     args.add_gl_linkage_arguments(parser)
+    #  THE TRANSPORT DECLARATION - one contract, published on every route
+    #  (`args.add_transport_security_arguments`). No COBOL counterpart: the frozen
+    #  bridge's connect passes six values and no transport policy at all
+    #  [copybooks/mysql-procedures.cpy:L72-L77], transport being compiled into
+    #  `cobmysqlapi.c`, so the migration must decide it and the operator is the
+    #  only party that knows. Stating NOTHING leaves the deployment contract to
+    #  decide, which is what makes the migrated cycle behave as the compiled one
+    #  (rule R-3); it decides no posted figure, so it cannot make two runs of one
+    #  scenario differ (rule R-6).
+    args.add_transport_security_arguments(parser)
+    #  Diagnostics only: no COBOL counterpart, no database effect. Shared with
+    #  the other six routes so the level policy has one spelling.
+    args.add_log_level_argument(parser)
     return parser
-
-
-def _binding_exit_status(error: ValueError) -> int:
-    """Return the exit status for a linkage-binding failure.
-
-    `args.bind_gl_linkage` resolves the six connection parameters through
-    `acas_posting.cli.rdbms_params`, whose `RdbmsParamError` subclasses
-    `ValueError` and carries the frozen return code of the parameter loader the
-    whole loader family calls - 8 when the contract is absent entirely and 1 when
-    it is present but unusable [common/acas-get-params.cbl:L37-L42]. Surfacing
-    that code is what lets a caller tell "not configured" from "misconfigured"
-    without parsing a message.
-
-    The attribute is read reflectively rather than by importing the exception
-    class, because the per-directory import table of Agent Action Plan section
-    0.4.3 allows a `cli` entry point `cli.args`, `clock` and `programs`, and
-    `rdbms_params` is reached only through `args`, which does not re-export the
-    class. Reading the attribute costs nothing and invents nothing; the fallback
-    below covers a `ValueError` from anywhere else in the binding.
-
-    Args:
-        error: the failure raised while binding the linkage.
-
-    Returns:
-        The error's own frozen return code when it carries one, otherwise the
-        smallest status the frozen menu would treat as a serious error - derived
-        from `args.SERIOUS_ERROR_THRESHOLD` rather than typed, so that the two can
-        never disagree [general/general.cbl:L720].
-    """
-    return_code = getattr(error, "return_code", None)
-    if isinstance(return_code, int):
-        return return_code
-    return args.SERIOUS_ERROR_THRESHOLD + 1
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -700,10 +772,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     is required, has no default, no environment fallback and no test hook, and
     `args.bind_gl_linkage` pins BOTH observables from it - the text `to-day
     pic x(10)` and the binary `Run-Date` [copybooks/wssystem.cob:L67]. The frozen
-    call chain reads a clock exactly once, in the menu shell's date service
-    [copybooks/Proc-ACAS-Mapser-RDB.cob:L72-L80], and all three programs
-    dispatched below contain zero clock reads, so pinning here is sufficient to
-    make two runs of one scenario byte-identical (Agent Action Plan section 0.8.5).
+    call chain holds FOURTEEN ambient date and time reads across six files - the
+    census is in `acas_posting/clock.py` and in `cli/args.py` - but every one of
+    them is in an out-of-scope menu shell or in the date-service copybook those
+    shells COPY, and all three programs dispatched below contain zero clock reads.
+    So pinning here is sufficient to make two runs of one scenario byte-identical
+    (Agent Action Plan section 0.8.5).
 
     Args:
         argv: the argument vector, WITHOUT the program name. None reads
@@ -716,46 +790,102 @@ def main(argv: Sequence[str] | None = None) -> int:
         the cycle produced rather than a re-encoding of it. Zero when all three
         phases ran; `args.GL_ABORT_TERM_CODE` when the abort gate fired; the
         reported code when a phase failed seriously; and the parameter loader's own
-        return code when the linkage could not be bound at all.
+        frozen return code, through `args.report_configuration_failure`, when the
+        deployment contract for the database connection is absent or unusable.
 
     Raises:
         SystemExit: raised by argparse for `--help` and for a usage error, such as
             the required `--run-date` being absent. Deliberately not caught: an
             omitted run date must fail, because the only alternative is an ambient
             one.
-        Exception: propagated unchanged from a phase. A failure inside the cycle
-            keeps its traceback, which is the only diagnostic a genuine defect
-            leaves behind; nothing here converts one into a status.
+        Exception: propagated unchanged from a phase. THIS IS THE LIBRARY
+            CONTRACT and it has not changed: a caller that imports this function
+            still receives the exception, with its traceback, which is the only
+            diagnostic a genuine defect leaves behind. What changed is that the
+            PROCESS boundary no longer lets one reach a terminal:
+            `acas_posting.__main__.run_entry_point` converts it into one
+            sanitised ERROR record and a deterministic exit status, because a
+            traceback on stderr prints absolute paths, source lines and whatever
+            text the exception carries.
     """
-    #  The one side effect this module performs, and it performs it HERE and
-    #  nowhere else: `basicConfig` at import time would configure logging for
-    #  every importer, including the test suites that import this module to drive
-    #  `load08` directly. It is also a no-op when the root logger already has a
-    #  handler, so a caller that configured logging itself keeps its own setup.
-    logging.basicConfig(level=logging.INFO, format=_LOG_FORMAT)
-
     parser = _build_parser()
     namespace = parser.parse_args(argv)
+
+    #  THE MENU'S OWN WORKING-STORAGE, created once and shared by the load and by
+    #  the persist, exactly as one menu program's single `01 File-Access` serves
+    #  `aa010-Get-System-Recs` and `overrewrite` both. The General menu is the only
+    #  one of the four that carries a defaults record as well as a totals record -
+    #  see `args.general_menu_state`.
+    menu_state = args.general_menu_state()
+
+    #  `--log-level` APPLIED THROUGH THE ONE CONFIGURATOR, and only when the
+    #  operator supplied it. The shared fragment defaults the option to `None`, so
+    #  `None` means "not asked for" and whatever the process boundary configured
+    #  stands - on a routed run, the router's own `--log-level`. A supplied level
+    #  is applied on either route: logging is configured once at the boundary, and
+    #  `configure_logging` then sets the level because this package owns the
+    #  handler, so the last explicit request wins. An embedding application's own
+    #  configuration is never touched. The import is local to the call for the same
+    #  reason the guard at the foot of this module gives.
+    if namespace.log_level is not None:
+        from acas_posting.__main__ import configure_logging
+
+        configure_logging(namespace.log_level)
 
     #  `move "gl070" to ws-called.` [general/general.cbl:L808] - the first
     #  dispatch of the cycle, so the record is bound with the first callee's
     #  program-id. `load00` sets the field again before each of the three
     #  dispatches, exactly as L808, L812 and L814 do.
+    #
+    #  BINDING NOW ALSO LOADS - `Open-System.` [general/general.cbl:L385] then
+    #  `aa010-Get-System-Recs.` [general/general.cbl:L398-L419]. Passing
+    #  `menu_state` makes the binder perform both BEFORE it fills
+    #  `WS-Calling-Data`, which is the order the frozen menu establishes its state
+    #  in - the load at L385-L419, `move "general" to ws-caller` at L512 - and so
+    #  before `display-menu.` and therefore before any `load` paragraph runs. The
+    #  records are the menu's own and the linkage carries the same `SystemRecord`,
+    #  so what is read there is what `gl070`, `gl071` and `gl072` then see: the
+    #  seed's accounting cycle, its account switches, its VAT rates and its
+    #  file-system selector, rather than the record layer's declared defaults
+    #  (finding CLI-02).
+    #
+    #  THE KEY ORDER IS 4, THEN 2, THEN 1, and key 2 is the General Ledger menu's
+    #  alone [general/general.cbl:L406-L408]; Sales reads keys 4 and 1
+    #  [sales/sales.cbl:L355-L360] and Purchase the same
+    #  [purchase/purchase.cbl:L350-L354]. `args.general_menu_state` carries all
+    #  three records and `args.aa010_get_system_recs` reads a key only when its
+    #  record is present, so that asymmetry comes out of one implementation.
+    #
+    #  A FAILING READ IS NOT REFUSED HERE. The frozen paragraph answers `if
+    #  fs-reply not = zero` by running the parameter-file set-up program and
+    #  looping back [general/general.cbl:L412-L417] - a GO TO class 1 over an
+    #  interactive recovery, whose own comment says the branch "should NOT happen
+    #  as done in open-system". `common/sys002.cbl` is out of scope (Agent Action
+    #  Plan section 0.2.2) and prompts an operator this process does not have, so
+    #  the recovery is not reproduced and the reply is left in `File-Access`
+    #  exactly as it is for every other handler failure in the migrated cycle.
+    #  Refusing the run instead would be a new validation (rule R-3). Recorded at
+    #  `args.aa010_get_system_recs`.
+    #
+    #  THE EXACT TYPE IS CAUGHT, NOT `ValueError` (finding CLI-09). The deployment
+    #  contract for the six connection parameters is resolved inside the binder,
+    #  before the store is opened, so a failure here has touched nothing: no
+    #  database contacted, no file opened, no program entered. Catching the base
+    #  class also swallowed a genuine defect and reported it as a configuration
+    #  problem, so only the exact type is caught and everything else keeps its
+    #  traceback. `RdbmsParamError` never carries a parameter value, so reporting
+    #  it cannot leak a credential.
     try:
-        linkage = args.bind_gl_linkage(namespace, called=_GL070)
-    except ValueError as error:
-        #  The deployment contract for the connection parameters is absent or
-        #  unusable. Reported rather than raised because it is a configuration
-        #  failure at the process boundary, not a defect in the cycle - and
-        #  nothing has been touched yet: the failure is raised while the linkage is
-        #  still being bound, before any database is contacted, any file opened or
-        #  any program entered. The message never carries a parameter value, so
-        #  logging it cannot leak a credential.
-        _LOG.error("cannot bind the General Ledger linkage: %s", error)
-        return _binding_exit_status(error)
+        linkage = args.bind_gl_linkage(
+            namespace, called=_GL070, menu_state=menu_state
+        )
+    except args.RdbmsParamError as error:
+        return args.report_configuration_failure(
+            error, logger=_LOG, subject="General Ledger"
+        )
 
     #  805  load08.
-    load08(linkage)
+    load08(linkage, menu_state=menu_state)
 
     #  AMBIGUITY Q-CLI-EXITSTATUS: the COBOL disposition for term code 5 is
     #  "return to display-menu", which has no process-status analogue in a
@@ -783,11 +913,22 @@ if __name__ == "__main__":
     #  acas_posting` is the packaged route - but the oracle comparison scripts
     #  drive these entry points as modules,
     #  `python -m acas_posting.cli.gl_post_cycle`, so direct execution has to
-    #  work. `raise SystemExit(main())` rather than `sys.exit(main())`, which
-    #  keeps `sys` off the import list. Rule R-1 runs the other way round: those
-    #  scripts are a sibling of the shipped package and drive it from OUTSIDE,
-    #  and nothing here reaches back towards them.
-    raise SystemExit(main())
+    #  work. Rule R-1 runs the other way round: those scripts are a sibling of
+    #  the shipped package and drive it from OUTSIDE, and nothing here reaches
+    #  back towards them.
+    #
+    #  BOTH ROUTES SHARE ONE PROCESS BOUNDARY. `run_entry_point` configures
+    #  logging once and converts a failure into one sanitised ERROR record and a
+    #  deterministic exit status, so this module behaves identically whether it
+    #  was reached through the router or executed directly. The import is inside
+    #  the guard rather than at module scope for two reasons: it is needed only
+    #  when this module IS the process, and it keeps the module's import list
+    #  free of the router, which imports this module back when the router is the
+    #  process. `raise SystemExit(...)` rather than `sys.exit(...)` keeps `sys`
+    #  off the import list.
+    from acas_posting.__main__ import run_entry_point
+
+    raise SystemExit(run_entry_point(main, command="gl-post-cycle"))
 
 
 # --- traceability ------------------------------------------------------------
@@ -828,8 +969,11 @@ if __name__ == "__main__":
 #                           reimplemented (Agent Action Plan section 0.3.4).
 #   _build_parser       ->  no counterpart. Composes the two option groups that
 #                           `cli/args.py` publishes; declares no option of its own.
-#   _binding_exit_status->  no menu counterpart. The codes it surfaces ARE frozen:
-#                           [common/acas-get-params.cbl:L37-L42].
+#   (`_binding_exit_status` was REMOVED. It caught every `ValueError` and mapped
+#    it to a status, which swallowed genuine defects alongside the configuration
+#    failure it was written for. `args.report_configuration_failure` replaces it
+#    for all seven routes, catching the exact `args.RdbmsParamError` and surfacing
+#    the same frozen codes [common/acas-get-params.cbl:L37-L42] - finding CLI-09.)
 #   _Disposition        ->  the two exits of `load00.` - falling off the end at
 #                           L721, and `go to overrewrite` at L720-L721.
 #   _GlProgram          ->  `call ws-called using ...`
@@ -859,8 +1003,10 @@ if __name__ == "__main__":
 #   Every transfer reachable from these two paragraphs is CLASS 4, sibling
 #   re-dispatch - the only class that requires per-site proof of equivalence. All
 #   three proofs are written at their sites; they are indexed here.
-#     L720-L721  `go to overrewrite`     ->  return _Disposition.SERIOUS_ERROR
-#                proof at the `> 7` site in `load00`.
+#     L720-L721  `go to overrewrite`     ->  args.overrewrite(...) then return
+#                                            _Disposition.SERIOUS_ERROR
+#                proof at the `> 7` site in `load00`. The transfer is reproduced
+#                in full: the paragraph runs, then control does not come back.
 #     L810-L811  `go to display-menu`    ->  return from `load08`
 #                proof at the gate site in `load08`. THE HARD GATE.
 #     L815       `go to load00`          ->  the last statement of `load08`
@@ -937,16 +1083,32 @@ if __name__ == "__main__":
 #      [general/general.cbl:L706-L709]. Screen output with no database effect is
 #      dropped (Agent Action Plan section 0.3.4); `main` replaces the selection
 #      with one command line.
-#   2. `overrewrite.` [general/general.cbl:L656] and its persistence of three
-#      records - `System-Record` at File-Key-No 1, `Default-Record` at 2 and
-#      `WS-System-Record-4` at 4 - to both the RDB and the Cobol file, falling
-#      through `overclose.` [general/general.cbl:L693] to `goback`
-#      [general/general.cbl:L694]. Not reproduced: it is the menu's own
-#      housekeeping around a dispatch, not part of the posting cycle, and the
-#      menu is out of scope as a program. Also omitted, and additionally
-#      excluded by rule R-1 and by Agent Action Plan section 0.2.2's spool-out
-#      exclusion: `pre-overrewrite.` [general/general.cbl:L634] and its backup
-#      `call "SYSTEM" using Full-Backup-Script` [general/general.cbl:L650].
+#   2. NO LONGER OMITTED - `overrewrite.` [general/general.cbl:L656] IS
+#      reproduced, by `args.overrewrite`, performed from the `> 7` arm of
+#      `load00` and from nowhere else. It persists three records - `System-Record`
+#      at File-Key-No 1, `Default-Record` at 2 and `WS-System-Record-4` at 4 - and
+#      the matching load is performed by `args.aa010_get_system_recs` through the
+#      binder before the first dispatch. What IS still omitted from that paragraph
+#      is its COBOL-FILE arm [general/general.cbl:L674-L691]: the migration has no
+#      ISAM store, so only the RDB arm has a counterpart. Recorded in
+#      `acas_posting/cli/args.py`, at `RDBMS_STORE_SELECTOR_DIGIT`.
+#      STILL OMITTED IN ITS ENTIRETY, BOTH HALVES: `pre-overrewrite.`
+#      [general/general.cbl:L634-L651]. Its backup `call "SYSTEM" using
+#      Full-Backup-Script` [general/general.cbl:L650] is excluded by rule R-1 and
+#      by Agent Action Plan section 0.2.2's spool-out exclusion. Its PERSISTENCE
+#      half - `go to overrewrite` at [general/general.cbl:L636] when no backup
+#      script is installed, `perform overrewrite` at [general/general.cbl:L649]
+#      when one is - is omitted because the paragraph is reached ONLY from the
+#      menu's quit key [general/general.cbl:L596], and a single-operation process
+#      has no menu to quit. So a frozen operator's mutated working-storage records
+#      reach the store when he quits, whereas here they reach it only through the
+#      `> 7` arm. The asymmetry is stated, not engineered around: relocating the
+#      quit-time rewrite to the end of this route would fire it after every single
+#      operation, which the frozen menu does not do for `load08.` - see the same
+#      omission and the ambiguity marker Q-CLI-OVERREWRITE-QUIT in
+#      `acas_posting/cli/gl_end_of_cycle.py`. `overclose.`
+#      [general/general.cbl:L693] and its `goback` [general/general.cbl:L694] are
+#      the return from `main`, not a statement of their own.
 #   3. `load12.` [general/general.cbl:L835-L855], which dispatches `gl100` then
 #      `gl105` and contains a SECOND `ws-term-code = 5` gate at
 #      [general/general.cbl:L844-L845] - whose target is `accept-loop`, NOT

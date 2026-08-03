@@ -440,8 +440,10 @@ modified, reformatted, commented, relocated or built from here.
 
 from __future__ import annotations
 
+import dataclasses
 import decimal
 import enum
+import logging
 from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 from typing import Final
@@ -456,6 +458,13 @@ from acas_posting.cobol.field import FieldDescriptor
 # rules below are keyed on the same objects the dictionary artifact records
 # (rule R-5) while this layer stays inside its one permitted door.
 from acas_posting.dictionary.loader import SignPosition, Usage
+
+#: Diagnostics only. The one thing this module logs is the reading or writing of
+#: bytes OUTSIDE an enclosing group by an unchecked subscript - a condition whose
+#: outcome is a property of the compiled binary rather than of the frozen source,
+#: and therefore the one thing a maintainer must be able to see happening. No
+#: control flow depends on a log record and none appears in a table dump.
+_LOG: Final[logging.Logger] = logging.getLogger(__name__)
 
 # The export surface, sorted so that it is stable and reviewable. It is the whole
 # contract the record layer, the program layer and the arithmetic parity suite are
@@ -476,6 +485,8 @@ __all__: Final[tuple[str, ...]] = (
     "REFERENCE_MODIFICATION_CENSUS",
     "SPACE",
     "SPACES",
+    "PACKED_RECEIVER_READ_ORACLE_EVIDENCE",
+    "UNCHECKED_SUBSCRIPT_ORACLE_EVIDENCE",
     "ZERO",
     "ZEROES",
     "ZEROS",
@@ -483,8 +494,10 @@ __all__: Final[tuple[str, ...]] = (
     "Delimiter",
     "Figurative",
     "FigurativeSpaceIntoNumeric",
+    "GroupItem",
     "MovementWithNoCompiledAnswer",
     "ReferenceModificationOutOfRange",
+    "StorageGroup",
     "UnobservableEditedPicture",
     "inspect_tallying_leading",
     "is_numeric_class",
@@ -498,6 +511,8 @@ __all__: Final[tuple[str, ...]] = (
     "ref_mod",
     "ref_mod_into",
     "string_into",
+    "subscripted_store",
+    "subscripted_value",
 )
 
 # THE TWO VOCABULARIES
@@ -2317,3 +2332,665 @@ def is_numeric_class(
         # itself was accepted above, so the item is numeric.
         return True
     return body.isascii() and body.isdigit()
+
+
+# ---------------------------------------------------------------------------
+#  UNCHECKED SUBSCRIPTED STORAGE - `table (n)` where `n` is outside `OCCURS`
+# ---------------------------------------------------------------------------
+#
+# ⭐ WHY THIS EXISTS. Four of the in-scope programs index an `OCCURS` table with
+# a variable that nothing constrains to the declared range:
+#
+#     move     ledger-balance  to  ledger-q (a).          [general/gl080.cbl:L345]
+#     add      work-vat  to  total-vat (a).               [sales/sl060.cbl:L526]
+#     add      work-net  to  total-net (a).              [sales/sl060.cbl:L527]
+#     add      work-goods to STurnover-Q (current-quarter)
+#                                    [sales/sl060.cbl:L545, :L551, :L558]
+#     add      work-vat  to  total-vat (a).            [purchase/pl060.cbl:L467]
+#     add      work-net  to  total-net (a).            [purchase/pl060.cbl:L468]
+#     add      work-goods to pturnover-q (current-quarter)
+#                              [purchase/pl060.cbl:L484, :L490, :L497]
+#
+# `a` is loaded straight from `oi-type` [sales/sl060.cbl:L509],
+# [purchase/pl060.cbl:L450], whose own copybook documents type codes running to
+# 9 [copybooks/plwsoi.cob:L25-L34] against a table of `occurs 3`; and
+# `05 Current-Quarter pic 9` [copybooks/wssystem.cob:L110] is a single digit
+# indexing a table of `occurs 4`. Nothing tests either before it is used, and the
+# compile scripts pass no subscript-checking flag, so the generated code addresses
+# whatever byte the arithmetic lands on. That is anomaly A-2 in the register and
+# it is reproduced, never fixed (rule R-4).
+#
+# ⭐ WHAT THE COMPILED PROGRAM ACTUALLY DOES - MEASURED, NOT INFERRED (rule R-6).
+# GnuCOBOL 3.2.0 - the version the maintainer's own compile script targets
+# [common/comp-common.sh:L9] - was driven with each of the four real layouts
+# transcribed verbatim and a VARIABLE subscript, a literal one being refused at
+# compile time (which is itself why the frozen `move oi-type to a` form is what
+# makes any of this reachable). In every case the store is PLAIN LINEAR BYTE
+# ADDRESSING with no bounds test, no diagnostic, no status and no abort:
+# `element (n)` is written at `offset(element 1) + (n - 1) * bytes-per-occurrence`
+# and whichever elementary items share those bytes are what change.
+# :data:`UNCHECKED_SUBSCRIPT_ORACLE_EVIDENCE` records every reading.
+#
+# ⛔ WHAT MUST NOT BE DONE HERE, and each of these was measured to be wrong:
+#   * NO clamp, NO modulo, NO default occurrence, NO skip. The compiled program
+#     does none of them.
+#   * NO Python `[n - 1]`. Subscript 0 becomes index -1 and silently accumulates
+#     into the LAST occurrence, which corresponds to nothing: the measured
+#     answer is the field IMMEDIATELY BEFORE the table.
+#   * NO exception for an in-group window. The compiled program has a definite,
+#     measured answer there, so raising would replace a reproduced anomaly with
+#     an invented one (rules R-3, R-4).
+#
+# HOW IT IS MODELLED. A :class:`StorageGroup` is the enclosing COBOL group
+# expressed as what the compiled program addresses: an ordered list of elementary
+# items and their pictures, hence a byte image. A store encodes the value into the
+# member's own picture and pokes those bytes at the computed offset; every
+# elementary item overlapping the window is then decoded back out of the image, so
+# an invalid packed nibble reads exactly as the compiled program reads it -
+# tolerantly, which the measurement also confirmed.
+#
+# THE ONE THING THAT IS NOT REPRODUCIBLE, stated rather than guessed: a window
+# that extends PAST the end of the enclosing group lands on a different `01` item,
+# and which item that is - and whether the generated code padded between them - is
+# a property of the compiled binary and not of the frozen source. The measurement
+# showed the compiled program CONTINUES in that case (it ran to completion and
+# returned normally, having also changed the process's own exit status), so control
+# flow is preserved: the in-group bytes are written exactly, and the overflow is
+# reported as a log record with no effect on control flow. Section 0.3.4's rule
+# for a diagnostic that has no database effect is what licenses the log record.
+
+
+#: Every reading taken from the compiled oracle, kept beside the code that
+#: reproduces it so that a maintainer can re-run the experiment rather than
+#: trust a comment. Each entry is
+#: `(statement locator, subscript, what received the value)`.
+#:
+#: The probes transcribed `copybooks/wsledger.cob`, the tail of
+#: `sales/sl060.cbl`'s `01 ws-data` [sales/sl060.cbl:L216-L233], the tail of
+#: `purchase/pl060.cbl`'s `01 ws-data` [purchase/pl060.cbl:L208-L220] and the
+#: `Quarters` window of `copybooks/wssl.cob` [copybooks/wssl.cob:L54-L66], and
+#: `function length` of each group was read back to pin the widths GnuCOBOL
+#: chose: `pic 99 comp` is ONE byte, `pic s9(5) comp` is FOUR, and
+#: `pic s9(7)v99 comp-3` is FIVE.
+UNCHECKED_SUBSCRIPT_ORACLE_EVIDENCE: Final[tuple[tuple[str, int, str], ...]] = (
+    # `move ledger-balance to ledger-q (a)`; WS-Ledger-Record is 126 bytes.
+    ("general/gl080.cbl:L345", 0, "Ledger-Last [copybooks/wsledger.cob:L29] - A COLUMN"),
+    ("general/gl080.cbl:L345", 5, "bytes 1-6 of the trailing filler x(50) - no column"),
+    ("general/gl080.cbl:L345", 6, "bytes 7-12 of the trailing filler x(50) - no column"),
+    # `add work-vat to total-vat (a)` then `add work-net to total-net (a)`;
+    # sl060's `01 ws-data` measures 62 bytes.
+    ("sales/sl060.cbl:L526", 0, "work-goods [sales/sl060.cbl:L218]"),
+    ("sales/sl060.cbl:L527", 0, "work-vat [sales/sl060.cbl:L217]"),
+    ("sales/sl060.cbl:L526", 4, "ws-deduction and total-deduct, partially"),
+    ("sales/sl060.cbl:L527", 4, "a, line-cnt and ws-deduction, partially"),
+    # pl060's `01 ws-data` measures 50 bytes and the table is near its END.
+    ("purchase/pl060.cbl:L467", 0, "work-goods [purchase/pl060.cbl:L213]"),
+    ("purchase/pl060.cbl:L468", 0, "work-vat [purchase/pl060.cbl:L212]"),
+    (
+        "purchase/pl060.cbl:L467",
+        4,
+        "line-cnt and File-28-status, then 8 bytes PAST the 01 group",
+    ),
+    # `add work-goods to STurnover-Q (current-quarter)`; the sales-ledger window
+    # measures 52 bytes. BOTH out-of-range neighbours are COLUMNS.
+    ("sales/sl060.cbl:L545", 0, "Sales-Last [copybooks/wssl.cob:L55] - A COLUMN"),
+    (
+        "sales/sl060.cbl:L545",
+        5,
+        "Sales-Unapplied [copybooks/wssl.cob:L63] - A COLUMN",
+    ),
+    (
+        "sales/sl060.cbl:L545",
+        6,
+        "Sales-Stats-Date and Sales-Partial-Ship-Flag - BOTH COLUMNS",
+    ),
+    # `add work-goods to PTurnover-q (current-quarter)`; the purchase-ledger
+    # window [copybooks/wspl.cob:L43-L54] measures 58 bytes, SIX more than the
+    # sales one, because the purchase record carries no partial-ship flag and its
+    # trailing filler is x(12) rather than x(5). Seeded Purch-Last 200.02,
+    # quarters 1.01/2.02/3.03/4.04, Purch-Unapplied 500.05, addend 77.77:
+    # q=1 left Q1 78.78 and q=4 left Q4 81.81.
+    ("purchase/pl060.cbl:L484", 0, "Purch-Last [copybooks/wspl.cob:L44] - A COLUMN"),
+    (
+        "purchase/pl060.cbl:L484",
+        5,
+        "Purch-Unapplied [copybooks/wspl.cob:L52] - A COLUMN",
+    ),
+    (
+        "purchase/pl060.cbl:L484",
+        6,
+        "Purch-Stats-Date [copybooks/wspl.cob:L53] - A COLUMN - and the first "
+        "two bytes of the trailing filler x(12)",
+    ),
+)
+
+
+#: ⭐⭐ HOW THE COMPILED PROGRAM READS THE RECEIVER OF A SUBSCRIPTED `ADD` -
+#: MEASURED, NOT INFERRED (rule R-6).
+#:
+#: An unchecked subscript makes the receiver's bytes an arbitrary slice of the
+#: enclosing group rather than a field that was ever stored, so the receiver can
+#: carry a nibble no `MOVE` would ever put there - typically the sign nibble of the
+#: neighbouring packed field, landing in a DIGIT position. What the compiled
+#: program then reads is NOT the digit-by-digit reading that
+#: :func:`acas_posting.cobol.usage.decode` performs.
+#:
+#: `cobc -C` was used to confirm the code path first: `add <field> to <comp-3>`
+#: compiles to `cob_add (&receiver, &addend, 0)`, the runtime's generic add. That
+#: routine reads a COMP-3 receiver BYTE BY BYTE in base 100 rather than nibble by
+#: nibble in base 10, and the two agree for every byte pattern a `MOVE` can
+#: produce but diverge for the rest. The per-byte contribution was measured
+#: directly, 26 byte values in each of three positions of a
+#: `pic s9(7)v99 comp-3` field:
+#:
+#:     high nibble <= 9 and low nibble <= 9  ->  high * 10 + low   (ordinary BCD)
+#:     high nibble <= 9 and low nibble >= 10 ->  255
+#:     high nibble >= 10                     ->  0
+#:
+#: and the LAST byte of the field, whose low nibble is the sign, contributes its
+#: high nibble as a single digit - EXCEPT when that low nibble is zero, which is
+#: not a sign nibble at all, in which case the last byte contributes two digits
+#: like any other. Readings that pin this: `0x4C` -> 4, `0x5C` -> 5, `0x99` -> 9,
+#: `0x9A` -> 9, `0x9F` -> 9, against `0x10` -> 10, `0x20` -> 20, `0x30` -> 30.
+#:
+#: The reading is then truncated to the field's digit count with no diagnostic,
+#: which is how a window whose bytes decode to more digits than the field holds
+#: still yields a definite answer.
+#:
+#: ⛔ SIX READINGS ARE DELIBERATELY NOT REPRODUCED, and they are named rather than
+#: quietly absorbed. When the receiver's LAST byte has an invalid HIGH nibble and a
+#: zero low nibble - `0xA0`, `0xC0`, `0xD0`, `0xE0`, `0xF0` - the runtime yielded
+#: 2550 where every other rule it obeys predicts 0, and no consistent digit rule
+#: reproduces that column alongside the `0x20` -> 20 readings. The value is a
+#: sentinel from the runtime's own lookup, so encoding it would assert a property
+#: of one libcob build as if it were the accounting specification. The sixth is a
+#: probe artefact rather than a program state: a trailing filler seeded with `"Z"`
+#: (`0x5A`) instead of the SPACES the frozen programs hold.
+#:
+#: NEITHER EXCLUSION IS REACHABLE AT ANY MIGRATED SITE. A receiver window's last
+#: byte is always one of three things, and none can carry a high nibble above 9: a
+#: byte of a stored packed value (whose high nibble is a decimal digit), a
+#: character byte of a DISPLAY field or filler (`0x20`-`0x3F`), or a small binary
+#: counter. Every other reading - 89 of the 95 taken - is reproduced exactly,
+#: including `0x32 0x30 0x32 0x34 0x20 0x20`, the real six-byte window that
+#: `PTurnover-q (6)` addresses over `Purch-Stats-Date`.
+PACKED_RECEIVER_READ_ORACLE_EVIDENCE: Final[tuple[tuple[str, str], ...]] = (
+    ("444C000005 + 22.22", "465502222C"),
+    ("444C00000C + 22.22", "465502222C"),
+    ("000000000C + 22.22", "000002222C"),
+    ("0A0000000C + 22.22", "550002222C"),
+    ("00000000AC + 22.22", "000002222C"),
+    ("0000000C0C + 22.22", "000004772C"),
+    ("0000044655 + 22.22", "000006687C"),
+    ("2020202020 + 22.22", "020204242C"),
+    ("FFFFFFFFFC + 22.22", "000002222C"),
+    ("123456789C + 22.22", "123459011C"),
+    ("323032342020 + 77.77", "030323497 97C"),
+)
+
+
+def _packed_byte_contribution(byte_value: int) -> int:
+    """One byte's contribution to a COMP-3 receiver read, as measured.
+
+    See :data:`PACKED_RECEIVER_READ_ORACLE_EVIDENCE` for the readings. The two
+    non-BCD branches return the runtime's own sentinels rather than raising,
+    because the compiled program does not raise (rules R-3, R-4).
+    """
+    high, low = byte_value >> 4, byte_value & 0x0F
+    if high > 9:
+        return 0
+    if low > 9:
+        return 255
+    return high * 10 + low
+
+
+def _packed_receiver_value(
+    raw: bytes, *, digits: int, scale: int
+) -> decimal.Decimal:
+    """Read a signed COMP-3 receiver the way `cob_add` reads it.
+
+    Identical to :func:`acas_posting.cobol.usage.decode` for every byte pattern a
+    `MOVE` can produce, and different only where an unchecked subscript has
+    aliased bytes that were never a field. That equivalence is not asserted: it
+    was measured on ordinary values of both widths the cycle uses,
+    `pic s9(7)v99 comp-3` and `pic s9(8)v99 comp-3`, positive and negative.
+    """
+    accumulator = 0
+    for byte_value in raw[:-1]:
+        accumulator = accumulator * 100 + _packed_byte_contribution(byte_value)
+
+    last = raw[-1]
+    high, low = last >> 4, last & 0x0F
+    if low == 0:
+        #  A zero low nibble is not a sign nibble, so the byte carries two
+        #  digits like any other. Measured: 0x10 -> 10, 0x20 -> 20, 0x30 -> 30.
+        accumulator = accumulator * 100 + _packed_byte_contribution(last)
+    else:
+        accumulator = accumulator * 10 + (high if high <= 9 else 0)
+
+    #  Silent high-order truncation to the field's digit count; `cob_add` was
+    #  called with opt = 0, so there is no size-error path to take.
+    accumulator %= 10**digits
+    if low == 0x0D:
+        accumulator = -accumulator
+    return decimal.Decimal(accumulator).scaleb(-scale)
+
+
+@dataclasses.dataclass(frozen=True)
+class GroupItem:
+    """One elementary item of a COBOL group, in declaration order.
+
+    Attributes:
+        name: The item's own name, exactly as the frozen source spells it. An
+            occurrence of a table is named `item (n)` so that the layout reads
+            like the storage the compiled program addresses.
+        descriptor: Its picture, from `acas_posting.cobol.picture` or from the
+            generated dictionary. `descriptor.byte_length` is the item's width,
+            so no width is written here.
+    """
+
+    name: str
+    descriptor: FieldDescriptor
+
+
+class StorageGroup:
+    """A COBOL group as the byte image the compiled program addresses.
+
+    A group item in COBOL is not a container of independent fields; it is a run
+    of bytes that its elementary items divide up, and two declarations can name
+    the same bytes. That is the only reason this class exists: an unchecked
+    subscript lands on bytes, so a byte model is the only thing that can say
+    what it hits.
+
+    ⛔ NOT A RECORD LAYER, and not a substitute for one. It holds no values, no
+    identity and no defaults; the record dataclasses in
+    `acas_posting.records` remain the layouts. This is a projection of ONE group
+    for ONE statement, built at module scope beside the statement that needs it.
+
+    Args:
+        items: The group's elementary items, in DECLARATION ORDER, which in
+            COBOL is byte order.
+        source_locator: Where the group is declared, for the message a failure
+            carries (rule R-5).
+
+    Raises:
+        ValueError: Two items share a name, which would make an offset
+            ambiguous. A programmer error in the layout, never a data
+            condition.
+    """
+
+    __slots__ = ("_items", "_offsets", "_size", "_source_locator")
+
+    def __init__(self, items: Sequence[GroupItem], *, source_locator: str) -> None:
+        offsets: dict[str, int] = {}
+        cursor = 0
+        for item in items:
+            if item.name in offsets:
+                raise ValueError(
+                    f"StorageGroup {source_locator}: two items named "
+                    f"{item.name!r}; an offset would be ambiguous"
+                )
+            offsets[item.name] = cursor
+            cursor += item.descriptor.byte_length
+        self._items: Final[tuple[GroupItem, ...]] = tuple(items)
+        self._offsets: Final[Mapping[str, int]] = MappingProxyType(offsets)
+        self._size: Final[int] = cursor
+        self._source_locator: Final[str] = source_locator
+
+    @property
+    def items(self) -> tuple[GroupItem, ...]:
+        """The elementary items, in declaration order."""
+        return self._items
+
+    @property
+    def size(self) -> int:
+        """The group's length in bytes - what `function length` reports."""
+        return self._size
+
+    @property
+    def source_locator(self) -> str:
+        """Where the group is declared in the frozen source."""
+        return self._source_locator
+
+    def __repr__(self) -> str:
+        return (
+            f"StorageGroup({self._source_locator}, "
+            f"{len(self._items)} items, {self._size} bytes)"
+        )
+
+    def offset_of(self, name: str) -> int:
+        """The item's byte offset from the start of the group, zero-based.
+
+        Raises:
+            KeyError: No item of that name. A programmer error in the layout.
+        """
+        try:
+            return self._offsets[name]
+        except KeyError:
+            raise KeyError(
+                f"StorageGroup {self._source_locator} has no item {name!r}"
+            ) from None
+
+    def descriptor_of(self, name: str) -> FieldDescriptor:
+        """The item's descriptor.
+
+        Raises:
+            KeyError: No item of that name.
+        """
+        for item in self._items:
+            if item.name == name:
+                return item.descriptor
+        raise KeyError(f"StorageGroup {self._source_locator} has no item {name!r}")
+
+    def image(self, values: Mapping[str, object]) -> bytes:
+        """Lay the group out as bytes, exactly as the compiled program holds it.
+
+        Args:
+            values: The current contents, keyed by item name. An item the
+                mapping omits is laid out at its category's figurative value -
+                zero for a numeric item, spaces for an alphanumeric one - which
+                is how COBOL `INITIALIZE` leaves it and how every bridge's own
+                load paragraph leaves an unset host variable.
+
+        Returns:
+            Exactly `size` bytes.
+        """
+        out = bytearray()
+        for item in self._items:
+            descriptor = item.descriptor
+            if item.name in values:
+                value = values[item.name]
+            elif descriptor.is_str:
+                value = ""
+            else:
+                value = 0
+            out += cobol_usage.encode(
+                _exact_or_text(value),
+                usage=descriptor.usage,
+                digits=descriptor.digits,
+                scale=descriptor.scale,
+                character_length=descriptor.character_length,
+                signed=descriptor.signed,
+                unsigned=descriptor.unsigned,
+                sign_position=descriptor.sign_position,
+            )
+        return bytes(out)
+
+    def read(self, image: bytes) -> dict[str, decimal.Decimal | int | str]:
+        """Decode every elementary item out of a byte image.
+
+        Tolerant in exactly the way the compiled program is tolerant: a byte
+        pattern no `MOVE` would have produced is still decoded rather than
+        rejected, which is what makes an out-of-range store's aftermath
+        observable instead of fatal.
+        """
+        out: dict[str, decimal.Decimal | int | str] = {}
+        for item in self._items:
+            descriptor = item.descriptor
+            start = self._offsets[item.name]
+            raw = image[start : start + descriptor.byte_length]
+            out[item.name] = cobol_usage.decode(
+                raw,
+                usage=descriptor.usage,
+                digits=descriptor.digits,
+                scale=descriptor.scale,
+                character_length=descriptor.character_length,
+                signed=descriptor.signed,
+                unsigned=descriptor.unsigned,
+                sign_position=descriptor.sign_position,
+            )
+        return out
+
+
+def _exact_or_text(value: object) -> decimal.Decimal | int | str:
+    """Narrow a group value to a carrier `usage.encode` accepts.
+
+    Raises:
+        TypeError: The value is a binary floating-point carrier (rule R-2) or a
+            type no COBOL item can hold.
+    """
+    if isinstance(value, bool):
+        # `bool` is an `int` subclass, and a COBOL item never holds one.
+        raise TypeError(f"a COBOL item cannot hold a bool: {value!r}")
+    if isinstance(value, float):
+        raise TypeError(
+            "binary floating point cannot reach COBOL storage (rule R-2): "
+            f"{value!r}"
+        )
+    if isinstance(value, (decimal.Decimal, int, str)):
+        return value
+    raise TypeError(f"unsupported carrier for COBOL storage: {value!r}")
+
+
+def _subscript_window(
+    group: StorageGroup,
+    *,
+    member: str,
+    element_length: int,
+    subscript: int,
+) -> tuple[int, int]:
+    """Where `member (subscript)` lands, as `(offset, length)`.
+
+    The whole of the unchecked-subscript reproduction is this one expression -
+    `offset(member of occurrence 1) + (subscript - 1) * element_length` - which
+    is the address the generated code computes and the reason a subscript of
+    zero reaches the field BEFORE the table rather than its last occurrence.
+
+    Args:
+        group: The enclosing group.
+        member: The name the layout gives this member of occurrence ONE, e.g.
+            `"total-vat (1)"`.
+        element_length: Bytes per occurrence, i.e. the sum of one occurrence's
+            members. Stated by the caller from the frozen declaration rather
+            than derived, because a table's occurrence may carry members the
+            statement does not name.
+        subscript: The subscript as the program computed it. NOT validated.
+
+    Returns:
+        The zero-based byte offset and the member's own width. The offset may be
+        negative and the window may run past the end of the group; both are
+        conditions the compiled program has, so neither is refused here.
+    """
+    base = group.offset_of(member)
+    width = group.descriptor_of(member).byte_length
+    return base + (subscript - 1) * element_length, width
+
+
+def _window_bytes(
+    group: StorageGroup, image: bytes, offset: int, width: int, *, statement: str
+) -> bytes:
+    """The window's current bytes, padded where it leaves the group.
+
+    A window that starts before the group or ends after it reaches a different
+    `01` item, whose identity is a property of the compiled binary rather than
+    of the frozen source. Those bytes are read as NUL, which is what an
+    `INITIALIZE`d group holds, and the substitution is logged so it is never
+    silent.
+    """
+    if offset >= 0 and offset + width <= len(image):
+        return image[offset : offset + width]
+    raw = bytearray(width)
+    for index in range(width):
+        position = offset + index
+        if 0 <= position < len(image):
+            raw[index] = image[position]
+    _LOG.error(
+        "%s: unchecked subscript reads %d byte(s) outside %s (offset %d, width "
+        "%d, group %d bytes); those bytes belong to an adjacent 01 item whose "
+        "identity is a property of the compiled binary and are read as zero. "
+        "Anomaly A-2 reproduced; see UNCHECKED_SUBSCRIPT_ORACLE_EVIDENCE.",
+        statement,
+        sum(
+            1
+            for index in range(width)
+            if not 0 <= offset + index < len(image)
+        ),
+        group.source_locator,
+        offset,
+        width,
+        len(image),
+    )
+    return bytes(raw)
+
+
+def subscripted_value(
+    group: StorageGroup,
+    values: Mapping[str, object],
+    *,
+    member: str,
+    element_length: int,
+    subscript: int,
+    statement: str,
+) -> decimal.Decimal | int | str:
+    """Read `member (subscript)` through the group's storage, unchecked.
+
+    The read half of an `ADD ... TO table (n)`: the receiver is read from
+    whichever bytes the subscript addresses, exactly as the generated code reads
+    them, so an out-of-range receiver contributes its ALIASED value to the sum.
+
+    Args:
+        group: The enclosing group.
+        values: Its current contents, keyed by item name.
+        member: The member of occurrence ONE, as the layout names it.
+        element_length: Bytes per occurrence.
+        subscript: As the program computed it. NOT validated (rule R-3).
+        statement: The frozen statement's locator, for the log record.
+
+    Returns:
+        The value those bytes decode to under the member's own picture.
+    """
+    image = group.image(values)
+    offset, width = _subscript_window(
+        group, member=member, element_length=element_length, subscript=subscript
+    )
+    raw = _window_bytes(group, image, offset, width, statement=statement)
+    descriptor = group.descriptor_of(member)
+    if (
+        descriptor.usage is cobol_usage.Usage.COMP_3
+        and descriptor.signed
+        and descriptor.digits is not None
+    ):
+        #  A signed COMP-3 receiver is read by `cob_add`, whose base-100 per-byte
+        #  reading differs from a nibble-by-nibble one exactly where an unchecked
+        #  subscript has aliased bytes that were never a field. Measured; see
+        #  :data:`PACKED_RECEIVER_READ_ORACLE_EVIDENCE`.
+        return _packed_receiver_value(
+            raw, digits=descriptor.digits, scale=descriptor.scale or 0
+        )
+    return cobol_usage.decode(
+        raw,
+        usage=descriptor.usage,
+        digits=descriptor.digits,
+        scale=descriptor.scale,
+        character_length=descriptor.character_length,
+        signed=descriptor.signed,
+        unsigned=descriptor.unsigned,
+        sign_position=descriptor.sign_position,
+    )
+
+
+def subscripted_store(
+    group: StorageGroup,
+    values: Mapping[str, object],
+    *,
+    member: str,
+    element_length: int,
+    subscript: int,
+    value: decimal.Decimal | int | str,
+    statement: str,
+    rounding: str | None = None,
+) -> dict[str, decimal.Decimal | int | str]:
+    """Store into `member (subscript)` through the group's storage, unchecked.
+
+    The write half. The value is stored into the member's own picture first -
+    truncating toward zero unless the caller names a rounding mode, which is the
+    COBOL default for a store without `ROUNDED` - and the resulting bytes are
+    poked at the address the subscript computes. Every elementary item of the
+    group is then decoded back out, so a caller sees exactly what the compiled
+    program would leave behind, including in the fields that share the window.
+
+    ⛔ NOTHING IS VALIDATED, CLAMPED OR REFUSED for an in-group window. That is
+    the whole point: see this section's header for the measurements.
+
+    Args:
+        group: The enclosing group.
+        values: Its current contents, keyed by item name.
+        member: The member of occurrence ONE, as the layout names it.
+        element_length: Bytes per occurrence.
+        subscript: As the program computed it. NOT validated (rule R-3).
+        value: What the statement stores.
+        statement: The frozen statement's locator, for the log record.
+        rounding: A `decimal` rounding mode for the store into the member's
+            picture. None means the COBOL default, truncation toward zero.
+
+    Returns:
+        Every elementary item of the group, decoded after the store.
+
+    ⛔ THE ONE LIMIT OF A VALUE-CARRYING MODEL, stated rather than left to be
+    discovered. The window's own bytes are reproduced exactly, and so is the
+    VALUE of every neighbour the window clips - which is what reaches the
+    database, because the bridge's host variables carry values and never raw
+    bytes. What is NOT carried forward is a clipped neighbour's non-canonical BYTE
+    IMAGE. Two measured examples of the same thing:
+
+      * a clipped PACKED neighbour can be left holding a `0x5` where its sign
+        nibble was `0xC`; decoding then re-encoding normalises the nibble and
+        preserves the value;
+      * a clipped DISPLAY neighbour can be left holding `03 03 23 49`, which
+        `Purch-Stats-Date` reads as 3339 by the zoned low-nibble rule - the value
+        the oracle's own bytes yield, verified against them - and which
+        re-encodes to `33 33 33 39`.
+
+    The consequence to be aware of is narrow: a LATER `cob_add` whose RECEIVER is
+    that same clipped neighbour reads raw bytes, so it could diverge. Exactly one
+    migrated site could reach that - `sl060`'s `a = 4` clips `total-deduct`, which
+    [sales/sl060.cbl:L565] then accumulates into - and it needs `oi-type = 4`,
+    which [copybooks/slwsoi.cob:L24] documents as `Proforma (Not used)` on the
+    sales side. The purchase side DOES use type 4 [copybooks/plwsoi.cob:L28] -
+    that is finding F7 - but there the clipped neighbours are `line-cnt`
+    (`binary-char`) and `File-28-status` (`pic 9` DISPLAY), neither of which any
+    later statement accumulates into as a packed receiver, and the whole site was
+    checked against the oracle: `line-cnt` came out at 115 in both.
+    """
+    descriptor = group.descriptor_of(member)
+    encode_kwargs: dict[str, object] = {
+        "usage": descriptor.usage,
+        "digits": descriptor.digits,
+        "scale": descriptor.scale,
+        "character_length": descriptor.character_length,
+        "signed": descriptor.signed,
+        "unsigned": descriptor.unsigned,
+        "sign_position": descriptor.sign_position,
+    }
+    if rounding is not None:
+        encode_kwargs["rounding"] = rounding
+    raw = cobol_usage.encode(_exact_or_text(value), **encode_kwargs)  # type: ignore[arg-type]
+
+    image = bytearray(group.image(values))
+    offset, width = _subscript_window(
+        group, member=member, element_length=element_length, subscript=subscript
+    )
+
+    outside = 0
+    for index in range(width):
+        position = offset + index
+        if 0 <= position < len(image):
+            image[position] = raw[index]
+        else:
+            outside += 1
+    if outside:
+        _LOG.error(
+            "%s: unchecked subscript %d writes %d byte(s) outside %s (offset "
+            "%d, width %d, group %d bytes). The compiled program writes them "
+            "into an adjacent 01 item and CONTINUES, so control flow is "
+            "preserved and only the in-group bytes are reproduced here. "
+            "Anomaly A-2; see UNCHECKED_SUBSCRIPT_ORACLE_EVIDENCE.",
+            statement,
+            subscript,
+            outside,
+            group.source_locator,
+            offset,
+            width,
+            len(image),
+        )
+    return group.read(bytes(image))

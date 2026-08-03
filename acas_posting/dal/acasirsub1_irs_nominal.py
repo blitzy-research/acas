@@ -298,16 +298,29 @@ AMBIGUITIES FOR THE COMPILED ORACLE (rule R-6)
         the column is ``bigint(10) unsigned``. Every predicate the bridge
         builds therefore compares a quoted string against a number and works
         only by the server's coercion. The quoting is reproduced exactly - the
-        key binds as text, never as an integer - and what the server does with
-        an out-of-range or non-numeric ten-character literal must be measured.
+        key binds as text, never as an integer.
+        RESOLVED BY MEASUREMENT on MariaDB 10.11.7 [mysql/ACASDB.sql:L1]: the
+        coercion is NUMERIC, so the quoted ten-character image returns exactly the
+        rows an integer bind would. A NON-NUMERIC literal cannot arise from this
+        module - see :func:`_key_image`, where both key halves pass through
+        :func:`_narrow_unsigned_integer` and are rendered zero-filled - so only the
+        numeric case is reachable. Full probes at the two functions.
     Q2  ``HV-KEY-1`` is ``PIC 9(18) COMP`` [common/irsnominalMT.cbl:L195] for a
         ten-digit source and a ``bigint(10)`` column, the widest host variable
-        in the folder; and the edit field it is rendered through,
-        ``PIC -Z(18)9.9(9)`` [:L129], is sliced from position 3, so an
-        eighteen-digit value loses its leading digit before it is sent. What is
-        stored for an out-of-range key, and what an unsigned host variable and
-        an unsigned column between them make of a negative accumulation, must
-        both be measured rather than assumed.
+        in the folder, rendered through the edit field ``PIC -Z(18)9.9(9)``
+        [:L129] sliced from position 3.
+        RESOLVED BY MEASUREMENT, AND BOTH HALVES OF THE OLD READING WERE WRONG.
+        (a) The slice does NOT lose a leading digit: measured on GnuCOBOL 3.2.0,
+        the edit field's nineteen integer positions run 2 to 20, so an
+        eighteen-digit value sits at 3 to 20 and ``(3:18)`` captures all of it -
+        A20 is a misalignment, not a truncation. (b) ``bigint(10)`` does NOT limit
+        the key to ten digits: ``(10)`` is a DISPLAY WIDTH, and measured, ``bigint
+        unsigned`` stored an eighteen-digit key intact.
+        The negative-accumulation half is settled too: on ``decimal(10,2)
+        unsigned`` the server raises ERROR 1264 / SQLSTATE 22003 and writes
+        nothing, so a negative is refused at the server rather than wrapped - which
+        is where the frozen bridge meets it as well. Full probes at
+        :func:`_narrow_unsigned_integer` and ``_EDIT_KEY_WINDOW``.
 
 ANOMALY REGISTER - ALL REPRODUCED, NONE FIXED (rule R-4)
     A1  pointer-versus-data decided by class-testing the NAME
@@ -330,7 +343,8 @@ ANOMALY REGISTER - ALL REPRODUCED, NONE FIXED (rule R-4)
     A17 ``We-Error`` 2 and 3, the folder's only single-digit values
     A18 handler trace numbers outside the range every sibling uses
     A19 a key declared ``"STR"`` for a numeric column
-    A20 an eighteen-digit host variable for a ten-digit key
+    A20 an eighteen-digit host variable for a ten-digit key, rendered through a
+        window that starts one position late (measured lossless - see Q2)
     A21 a pointer widened five to eight digits and narrowed back to five
     A22 three record views with three sets of field names
     A23 three spellings of one byte, originating in the FD view
@@ -401,7 +415,6 @@ from acas_posting.dal.connection import (
     mysql_1980_close,
     mysql_1999_exit as mysql_1999_exit_paragraph,
     quote_identifier,
-    redact_for_log,
 )
 from acas_posting.dal.cursor_state import (
     CursorSlot,
@@ -417,8 +430,9 @@ from acas_posting.dal.status import (
     FsReply,
     LogSystem,
     WeError,
-    db_error_log_category,
     is_duplicate_key_bridge_level,
+    log_file_handler_record,
+    log_handler_failure,
     mysql_1100_db_error,
     override_we_error_for_operation,
     start_access_type_is_valid,
@@ -475,6 +489,7 @@ __all__: Final[tuple[str, ...]] = (
     "WS_LOG_FILE_NO_FLAT",
     "WS_LOG_FILE_NO_RDB",
     "WS_LOG_SYSTEM",
+    "ca_process_logs",
     "citation",
     "close",
     "delete",
@@ -948,6 +963,7 @@ PARAGRAPHS: Final[Mapping[str, str]] = MappingProxyType(
         "common/irsnominalMT.cbl:L1224-L1255 bb100-UnloadHVs": "_unload_host_variables",
         "common/irsnominalMT.cbl:L1257-L1499 bb200-Insert": "_bb200_insert",
         "common/irsnominalMT.cbl:L1501-L1747 bb300-Update": "_bb300_update",
+        "common/irsnominalMT.cbl:L1749-L1755 Ca-Process-Logs": "ca_process_logs",
         "common/acasirsub1.cbl:L211-L217 Procedure Division Using": "dispatch",
         "common/acasirsub1.cbl:L231-L245 key-number guard": "_key_number_guard",
         "common/acasirsub1.cbl:L463-L479 aa047-Eval-Keys": "_aa047_eval_keys",
@@ -1175,11 +1191,25 @@ _EDIT_FRACTION_DIGITS: Final[int] = 9
 #: [common/irsnominalMT.cbl:L1276] - the window the key is rendered through.
 #:
 #: ANOMALY A20, second half. The window STARTS AT POSITION 3, so it omits
-#: position 2 - the most significant of the nineteen integer positions. A key
-#: filling all eighteen digits ``HV-KEY-1`` can hold would therefore lose its
-#: leading digit before the statement was even sent. The real key is ten
-#: digits, so it does not bite; the window is reproduced as written anyway, and
-#: what an out-of-range key stores is ambiguity Q2.
+#: position 2 - the most significant of the nineteen integer positions.
+#:
+#: ⭐ CORRECTION, MEASURED ON GnuCOBOL 3.2.0 [common/comp-common.sh:L9]. This note
+#: used to conclude that "a key filling all eighteen digits ``HV-KEY-1`` can hold
+#: would therefore lose its leading digit before the statement was even sent". IT
+#: DOES NOT, and the arithmetic says why: ``WS-MYSQL-EDIT`` is
+#: ``PIC -Z(18)9.9(9)`` [common/irsnominalMT.cbl:L228], which is 1 + 18 + 1 + 1 + 9
+#: = THIRTY characters with its nineteen integer positions at 2 through 20. An
+#: eighteen-digit value therefore occupies positions 3 to 20 and position 2 stays
+#: blank. Compiled, ``123456789012345678`` renders as::
+#:
+#:     [  123456789012345678.000000000]
+#:      window (3:18) -> [123456789012345678]   COMPLETE
+#:
+#: Position 2 is reached only by a NINETEEN-digit value, and ``PIC 9(18) COMP``
+#: cannot hold one. So the window is lossless over the whole domain the host
+#: variable has, and the anomaly is that the window is MISALIGNED rather than that
+#: it truncates. It is reproduced as written either way. See ambiguity Q2, which
+#: settles the storage side.
 _EDIT_KEY_WINDOW: Final[tuple[int, int]] = (3, 18)
 
 #: ``FUNCTION TRIM (WS-MYSQL-EDIT(13:08))``
@@ -1204,18 +1234,50 @@ def _narrow_unsigned_integer(value: int, digits: int) -> int:
     does, and it is why no check is made here - a check would be a new
     validation (rule R-3).
 
-    TODO(oracle): AAP section 0.6.8 requires the out-of-range cases be
-    MEASURED. Two apply on this table. ``HV-KEY-1`` is ``PIC 9(18) COMP``
-    [common/irsnominalMT.cbl:L195] for a ten-digit source and a ``bigint(10)``
-    column, and the edit window the key is rendered through starts at position 3
-    [:L1276] and so cannot carry all eighteen digits - ANOMALY A20. And every
-    money item is unsigned at all three layers - ANOMALY A6 - so a negative
-    accumulation has no representation anywhere on the path. What the compiled
-    bridge actually stores in each case depends on the conversion its C
-    interface performs and must be established by running it, then recorded in
-    ``docs/migration/ambiguity-resolutions.md`` as ambiguity Q2. Until then this
-    reproduces the DECLARED storage and nothing more, and adds no check
-    (rule R-3).
+    AMBIGUITY Q2 - RESOLVED BY MEASUREMENT against MariaDB 10.11.7, the server
+    version the frozen schema records as its producer [mysql/ACASDB.sql:L1, :L5],
+    with the frozen ``ENGINE=InnoDB`` (all 33 tables) and the server's DEFAULT
+    ``sql_mode``,
+    ``STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION``.
+    That default is what the bridge's C interface gets, and the one ``SET SQL_MODE``
+    in the frozen dump does not change it: ``SQL_MODE='NO_AUTO_VALUE_ON_ZERO'``
+    [mysql/ACASDB.sql:L21] is SESSION-scoped - measured, it leaves
+    ``@@global.sql_mode`` untouched - and the dump restores it at [:L1451] anyway,
+    so it governs only the schema load. It is inert even there: the schema's ONLY
+    ``AUTO_INCREMENT`` column is ``STOCKAUDIT-REC.AUDIT-ID``
+    [mysql/ACASDB.sql:L1107], and that table is out of scope entirely (plan
+    section 0.2.2). Two out-of-range cases were open on this table and both are now
+    settled; nothing below is assumed.
+
+    (1) THE KEY. ``HV-KEY-1`` is ``PIC 9(18) COMP``
+        [common/irsnominalMT.cbl:L195] for a ten-digit source, and the concern was
+        that a ``bigint(10)`` column could not carry eighteen digits. IT CAN:
+        ``(10)`` IS A DISPLAY WIDTH, NOT A CONSTRAINT. Measured, ``bigint
+        unsigned`` holds 0 through 18446744073709551615, and an eighteen-digit key
+        stored intact. AND THE COBOL SIDE DOES NOT TRUNCATE EITHER: measured on
+        GnuCOBOL 3.2.0, the edit window ``(3:18)`` [:L1276] captures an
+        eighteen-digit value COMPLETE, because the edit field's integer positions
+        run 2 to 20 - see the correction on ``_EDIT_KEY_WINDOW``. So there is no
+        narrowing anywhere on the key path within the host variable's domain, and
+        ANOMALY A20 is a misalignment rather than a truncation.
+
+    (2) THE MONEY ITEMS. Every one is unsigned at all three layers - ANOMALY A6 -
+        so a negative accumulation has no representation on the path, and the
+        question was what the server does with one. Measured on ``decimal(10,2)
+        unsigned``: ``-1.00`` and ``100000000.00`` each raise **ERROR 1264,
+        SQLSTATE 22003, "Out of range value"** and THE ROW IS NOT WRITTEN. The
+        server neither clamps nor stores a wrapped value. Note the contrast, also
+        measured: SCALE overflow ROUNDS instead - ``1.005`` stores ``1.01`` and
+        ``1.004`` stores ``1.00`` - so precision and scale have different
+        dispositions.
+
+    WHAT THAT MEANS FOR THIS FUNCTION, AND WHY IT IS UNCHANGED. It reproduces the
+    DECLARED COBOL storage and adds no check, which is exactly right: the refusal
+    lives at the server, where the frozen bridge also meets it, and it arrives as
+    a driver error the bridge's own error path already handles. Adding a Python
+    check would move the refusal to a layer the frozen source has nothing at
+    (rule R-3), and would also HIDE it - the frozen bridge gets an error and this
+    module must get the same one.
 
     Args:
         value: The sending value.
@@ -1603,14 +1665,34 @@ def _key_image(nl: WsIrsnlRecord) -> str:
     integer, because that is what the bridge sends and binding an integer
     "because the column is a bigint" would be a different statement.
 
-    TODO(oracle): AAP section 0.6.8 requires this be MEASURED, not assumed. A
-    ten-character decimal string compared against a ``bigint(10) unsigned``
-    works only by MySQL's implicit coercion, and this is the only key in the
-    handler set where the declared key type and the column type disagree. What
-    the server does with a value that is not a clean ten-digit decimal - a
-    partially spaced key, or one carrying a sign - must be established by
-    running the compiled bridge and recorded in
-    ``docs/migration/ambiguity-resolutions.md`` as ambiguity Q1.
+    AMBIGUITY Q1 - RESOLVED BY MEASUREMENT against MariaDB 10.11.7
+    [mysql/ACASDB.sql:L1]. A ten-character decimal string compared against a
+    ``bigint(10) unsigned`` works by the server's implicit coercion, and this is
+    the only key in the handler set where the declared key type and the column
+    type disagree, so which direction the coercion goes decides which rows a
+    predicate returns.
+
+    IT COERCES TO A NUMBER, proved with a probe whose two readings disagree:
+    against a numeric column holding 9 and 10, ``k > "10"`` returns NO rows and
+    ``k < "10"`` returns 9 - the opposite of what a lexical comparison gives. And
+    ``9 > "10"`` evaluates 0 while ``"9" > "10"`` evaluates 1, so it is the
+    presence of a numeric operand that decides. Applied to this key: ``KEY-1 =
+    '0000000001'`` matched the row holding 1, and ``KEY-1 < '1000100001'`` returned
+    {0, 1} in numeric order. So the zero-filled ten-character image below produces
+    exactly the row set an integer bind would, and the leading zeros are harmless.
+    Binding it as TEXT therefore stays - that is what the bridge sends, and binding
+    an integer "because the column is a bigint" would be a different statement for
+    no gain.
+
+    THE MALFORMED-KEY SUB-QUESTION IS UNREACHABLE FROM HERE, which the source
+    settles without any server. The old note asked what the server does with "a
+    partially spaced key, or one carrying a sign"; this function cannot produce
+    one. Both halves pass through :func:`_narrow_unsigned_integer`, which returns
+    a non-negative ``int``, and each is then rendered zero-filled at its declared
+    width - so the image is always exactly ten decimal digits. A non-numeric key
+    could only arise from a caller that left the record's ``pic 9(5)`` halves
+    non-numeric, which is a precondition on the caller and not behaviour of this
+    module.
 
     Args:
         nl: The record whose key is wanted.
@@ -1766,7 +1848,11 @@ def _load_host_variables(
     # ANOMALY A20 - the receiving host variable is `PIC 9(18) COMP`
     # [common/irsnominalMT.cbl:L195] for a ten-digit source and a `bigint(10)`
     # column, the widest host variable in the handler set. The widening is
-    # harmless; the narrowing that follows it is ambiguity Q2.
+    # harmless, and MEASURED, SO IS EVERYTHING AFTER IT: the edit window
+    # `(3:18)` carries all eighteen digits (GnuCOBOL 3.2.0) and `bigint(10)
+    # unsigned` stores all eighteen (MariaDB 10.11.7), because `(10)` is a
+    # display width. Ambiguity Q2 is resolved; nothing narrows within the host
+    # variable's domain.
     assign(PRIMARY_KEY, _narrow_unsigned_integer(
         _key_number(nl), _INTEGER_DIGITS[PRIMARY_KEY]
     ))
@@ -2222,12 +2308,16 @@ def _driver_failure(
         sql_state=sql_state,
         command=command,
     )
-    _LOG.error(
-        "acasirsub1/irsnominalMT %s failed: category=%s detail=%s",
-        command,
-        db_error_log_category(errno, sql_state),
-        redact_for_log(str(error)),
-    )
+    #  NO RECORD HERE. `mysql_1100_db_error` has just emitted THE operator record
+    #  for this failure, at the layer that stands in for the frozen
+    #  `Mysql-1110-Report-Problem` [copybooks/mysql-procedures.cpy:L130-L137], and
+    #  it carries the same status pair, the same SQLSTATE, the same error number
+    #  and the same stable category. A second record here added nothing an
+    #  operator could act on and two things that must not be logged at all: the
+    #  `command`, which is the full statement text with its literal host-variable
+    #  values, and the driver's own message, which can name the account and echo a
+    #  row key (CWE-532). One failure, one record - see the safe-event schema in
+    #  `dal/status.py`.
     return override_we_error_for_operation(status, file_function)
 
 
@@ -2378,9 +2468,18 @@ def _ba100_bad_function(file_access: FileAccess) -> tuple[int, int]:
     Returns:
         ``(99, 990)``.
     """
-    _LOG.error(
-        "irsnominalMT ba100-Bad-Function: unsupported File-Function %s",
-        file_access.file_function,
+    # ONE ERROR, through the shared reporter, so this failure renders with the same
+    # fields in the same order as every other handler's. `File-Function` is an
+    # operation code from the frozen vocabulary [copybooks/wsfnctn.cob:L88-L118].
+    log_handler_failure(
+        _LOG,
+        program="irsnominalMT",
+        paragraph="ba100-Bad-Function",
+        locator="[common/irsnominalMT.cbl:L1179-L1188]",
+        fs_reply=int(BAD_FUNCTION_STATUS[0]),
+        we_error=int(BAD_FUNCTION_STATUS[1]),
+        detail="File-Function %s is not one this bridge implements"
+        % int(file_access.file_function),
     )
     _apply_status(file_access, BAD_FUNCTION_STATUS)
     return BAD_FUNCTION_STATUS
@@ -3851,9 +3950,13 @@ def _ba072_proc_write_subs(
         file_access.logging_data.sql_err,
         file_access.logging_data.sql_state,
     ) or file_access.fs_reply == int(FsReply.DUPLICATE_KEY):
+        #  THE KEY IS NOT LOGGED. The frozen `display` shows the LITERAL
+        #  ALONE - `display IR90n at 2401 with foreground-color 4` - so naming
+        #  the record added a business key the frozen source never showed, and
+        #  `NL-KEY` identifies a nominal account (CWE-532). The caller already
+        #  holds the record it passed in.
         _LOG.error(
-            "irsnominalMT ba072: IR906 Link/record exists on owning write, key=%s",
-            _key_image(nl),
+            "irsnominalMT ba072: IR906 Link/record exists on owning write"
         )
 
     if (
@@ -3877,9 +3980,13 @@ def _ba072_proc_write_subs(
     nl.nl_type = TYPE_OWNER
     rewrite(file_access, nl)
     if file_access.we_error == REWRITE_FAILED_WE_ERROR:
+        #  THE KEY IS NOT LOGGED. The frozen `display` shows the LITERAL
+        #  ALONE - `display IR90n at 2401 with foreground-color 4` - so naming
+        #  the record added a business key the frozen source never showed, and
+        #  `NL-KEY` identifies a nominal account (CWE-532). The caller already
+        #  holds the record it passed in.
         _LOG.error(
-            "irsnominalMT ba072: IR907 Link/record exists on rewrite (S->O), key=%s",
-            _key_image(nl),
+            "irsnominalMT ba072: IR907 Link/record exists on rewrite (S->O)"
         )
 
     if nl.nl_key.nl_sub_nominal == 0:
@@ -3946,9 +4053,13 @@ def _ba073_fix_up_subs(
         file_access.logging_data.sql_err,
         file_access.logging_data.sql_state,
     ) or file_access.fs_reply == int(FsReply.DUPLICATE_KEY):
+        #  THE KEY IS NOT LOGGED. The frozen `display` shows the LITERAL
+        #  ALONE - `display IR90n at 2401 with foreground-color 4` - so naming
+        #  the record added a business key the frozen source never showed, and
+        #  `NL-KEY` identifies a nominal account (CWE-532). The caller already
+        #  holds the record it passed in.
         _LOG.error(
-            "irsnominalMT ba073: IR908 link/record exists on sub write, key=%s",
-            _key_image(nl),
+            "irsnominalMT ba073: IR908 link/record exists on sub write"
         )
 
     if file_access.fs_reply != int(FsReply.SUCCESS):
@@ -4052,10 +4163,14 @@ def write_raw(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
         else:
             # `move 99 to fs-reply` [:L1141].
             file_access.fs_reply = int(FsReply.ERROR)
+        #  THE KEY IS NOT LOGGED. The frozen `display` shows the LITERAL
+        #  ALONE - `display IR90n at 2401 with foreground-color 4` - so naming
+        #  the record added a business key the frozen source never showed, and
+        #  `NL-KEY` identifies a nominal account (CWE-532). The caller already
+        #  holds the record it passed in.
         _LOG.error(
             "irsnominalMT ba170: IR909 Link/record exists on owning write, "
-            "rewriting, key=%s",
-            _key_image(nl),
+            "rewriting"
         )
     if file_access.fs_reply != int(FsReply.SUCCESS):
         # The second statement [:L1149-L1151].
@@ -4389,18 +4504,81 @@ def dispatch(
     if not _record_size_gate(system, file_access):
         return RECORD_SIZE_STATUS
 
-    if dal_common.sw_testing:
-        _LOG.debug(
-            "acasirsub1 -> irsnominalMT function=%s access=%s key=%s",
-            file_access.file_function,
-            file_access.access_type,
-            _key_image(nl),
-        )
+    #  NO PER-CALL TRACE HERE. The frozen `CALL "irsnominalMT"`
+    #  [common/acasirsub1.cbl:L756] displays nothing, so the record that used to sit
+    #  on this line was invented (R-4) - and it named `NL-KEY`, the nominal account
+    #  (CWE-532). What `SW-Testing` actually gates is `Ca-Process-Logs`, and that is
+    #  reproduced below, on the exit path where the frozen source performs it.
 
     # 6. `ba015-Test-Ends` then `ba020-Process-DAL` [:L733-L756].
     if open_for_output:
-        return open_output(system, file_access, nl)
-    return _bridge_call(system, file_access, nl)
+        status = open_output(system, file_access, nl)
+    else:
+        status = _bridge_call(system, file_access, nl)
+
+    # `ba999-end.` [common/irsnominalMT.cbl:L1179-L1184]::
+    #
+    #     if       Testing-1
+    #              perform Ca-Process-Logs
+    #     end-if.
+    #
+    # The bridge's common exit, reached by every verb, and the ONE site of the
+    # FH log record on this path. It was previously not reproduced at all - this
+    # module emitted no `fhlogger` record and never advanced
+    # `Log-File-Rec-Written`, which is the incoherence OBS-010 names. The frozen
+    # source ALSO performs `Ca-Process-Logs` from five error arms [:L655, :L812,
+    # :L925, :L1107, :L1146]; those five remain a recorded omission, because the
+    # verbs they sit in do not receive `ACAS-DAL-Common-data` and inventing a
+    # route for it would change this module's linkage (R-3).
+    if int(dal_common.sw_testing) == 1:
+        ca_process_logs(file_access, dal_common)
+    return status
+
+
+def ca_process_logs(
+    file_access: FileAccess, dal_common: AcasDalCommonData
+) -> None:
+    """``Ca-Process-Logs`` [common/irsnominalMT.cbl:L1749-L1755].
+
+    Two statements, ``call "fhlogger" using File-Access ACAS-DAL-Common-data``,
+    followed by ``ca-Exit.     exit.`` [:L1755].
+
+    ``common/fhlogger.cbl`` is out of scope per Agent Action Plan section 0.2.2 and
+    rule R-1 forbids calling a COBOL program, so the record it would have appended to
+    its flat log is emitted through
+    :func:`acas_posting.dal.status.log_file_handler_record` - THE ONE ADAPTER every
+    handler in this package shares, at one level, with one field set.
+
+    ``WS-File-Key`` is WITHHELD: on this table it is ``NL-KEY``, a nominal account
+    number, and the safe-event schema admits no record key (CWE-532). So are
+    ``WS-Log-Where`` and ``SQL-Msg``.
+
+    ``Log-File-Rec-Written`` is advanced by one modulo a million - the range of the
+    frozen ``pic 9(6)`` [copybooks/Test-Data-Flags.cob:L20] - once per record, by the
+    adapter. It lives in ``ACAS-DAL-Common-data``, which the CALLER owns and carries
+    across calls, so it is part of the linkage this module reproduces rather than the
+    logger's private state.
+
+    Args:
+        file_access: The block the record is built from.
+        dal_common: The block carrying ``SW-Testing`` and the counter.
+    """
+    logging_data = file_access.logging_data
+    log_file_handler_record(
+        _LOG,
+        program="irsnominalMT",
+        paragraph="Ca-Process-Logs",
+        log_system=logging_data.ws_log_system,
+        log_file_no=logging_data.ws_log_file_no,
+        no_paragraph=logging_data.ws_no_paragraph,
+        file_function=int(file_access.file_function),
+        access_type=int(file_access.access_type),
+        fs_reply=int(file_access.fs_reply),
+        we_error=int(file_access.we_error),
+        sql_err=logging_data.sql_err,
+        sql_state=logging_data.sql_state,
+        dal_common=dal_common,
+    )
 
 
 # --- traceability ------------------------------------------------------------
@@ -4445,17 +4623,22 @@ def dispatch(
 #     L1120-L1152 ba170-Process-Write-Raw     -> write_raw
 #     L1154-L1160 ba100-Bad-Function          -> _ba100_bad_function
 #     L1166-L1177 ba998-Free                  -> _ba998_free
-#     L1179-L1184 ba999-end                   -> the log fields each verb writes
+#     L1179-L1184 ba999-end                   -> the log fields each verb writes,
+#                                                plus the `if Testing-1 perform
+#                                                Ca-Process-Logs` at the tail of
+#                                                `dispatch`
 #     L1186-L1187 ba999-exit                  -> the `return` of each verb
 #     L1189-L1222 bb000-HV-Load               -> _load_host_variables
 #     L1224-L1255 bb100-UnloadHVs             -> _unload_host_variables
 #     L1257-L1499 bb200-Insert                -> _bb200_insert
 #     L1501-L1747 bb300-Update                -> _bb300_update
-#     L1749-L1755 Ca-Process-Logs             -> the `_LOG` records. The CALL it
+#     L1749-L1755 Ca-Process-Logs             -> ca_process_logs. The CALL it
 #                                                makes is to `fhlogger`, which
-#                                                rule R-1 forbids invoking, so
-#                                                the log fields are written and
-#                                                the record is emitted here.
+#                                                rule R-1 forbids invoking and
+#                                                which AAP 0.2.2 puts out of
+#                                                scope, so the record it would
+#                                                append is emitted through the
+#                                                one shared adapter instead.
 #
 #   HANDLER - common/acasirsub1.cbl, only the part that runs on this path
 #     L211-L217   Procedure Division Using    -> dispatch  (parameter order kept)

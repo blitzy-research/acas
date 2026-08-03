@@ -478,11 +478,17 @@ number in the migration's shared register, which stood at Q-17.
           facade pins the same value - so the program's own move is either
           redundant or it matters to a verb that does not re-pin it. Reproduced
           regardless.
-    Q-19  WHAT THE COMPILED PROGRAM DOES WHEN THE QUARTER SUBSCRIPT IS OUT OF
-          RANGE. See anomaly A-2 at `_gl080_main_loop`. COBOL indexes past a
-          four-element table silently, overwriting adjacent storage; Python
-          cannot do that. The divergence is declared rather than papered over,
-          and no guard is added.
+    Q-19  WHAT THE COMPILED PROGRAM WRITES WHEN THE QUARTER SUBSCRIPT RUNS PAST
+          THE RECORD. See anomaly A-2 at `_gl080_main_loop`. The subscript is
+          EMULATED by byte offset rather than validated, so `a = 1..4` reach the
+          two `Quarters` views, `a = 5..12` reach the trailing `filler pic x(50)`
+          [copybooks/wsledger.cob:L37] which carries no column, and `a = 0`/`-1`
+          reach the two packed items declared before `Quarters`. What is NOT
+          determined by the layout is `a >= 13`, which runs beyond the 126th byte
+          into storage belonging to no table: the part that still lands inside the
+          record is stored and the remainder is logged. Measure on the oracle
+          whether an overrunning run moves any of the 22 compared tables. No guard
+          is added and nothing is clamped.
     Q-20  WHETHER `GL-Posting-Open-Output` [general/gl080.cbl:L673] TRUNCATES
           `GLPOSTING-REC`. `Open-Output` on the transfer-file handler means
           "delete every row" [common/acas008.cbl:L313-L319], and if `acas006`
@@ -499,7 +505,14 @@ number in the migration's shared register, which stood at Q-17.
           record. `gl080` PERFORMS NO `System-*` FACADE VERB AT ALL, so whether
           any of them reaches `SYSTEM-REC` depends entirely on what the caller
           does with the by-reference linkage parameter afterwards. All six are
-          reproduced in memory; none is written to a table from here.
+          reproduced in memory; none is written to a table from here - and that
+          remains true. WHAT THE CALLER DOES IS NOW SETTLED, though: the frozen
+          menu shell rewrites the record in `overrewrite.`
+          [general/general.cbl:L656-L692], reached from `load00.` on the
+          serious-error arm [general/general.cbl:L720-L721], and
+          `acas_posting.cli.args.overrewrite` reproduces it. Nothing
+          about this program changes: the write belongs to the boundary, not here
+          (rule R-3).
     Q-22  WHAT PATH THE `disk-change` `STRING` ACTUALLY BUILDS. The maintainer
           flagged it himself, inline: `*> this lot looks wrong !!!!!`
           [general/gl080.cbl:L530]. Measured against the package's own record
@@ -542,6 +555,14 @@ from acas_posting.dal.status import FsReply
 # and the reference modifications delegate here (Agent Action Plan section
 # 0.3.1).
 from acas_posting.cobol import arithmetic, condition_names, move, picture
+
+# The unchecked subscript of [general/gl080.cbl:L345] is the one statement whose
+# out-of-range occurrences land in bytes that belong to a `pic x(50)` FILLER
+# rather than to a packed item, so its store has to be expressed as the byte
+# image the compiled program lays down. `move.subscripted_store` over
+# `_LEDGER_RECORD_GROUP` does that, reading every width from the record layer's
+# own descriptors, so no storage class is decoded here and this module names no
+# `usage` primitive of its own. See `_move_ledger_balance_to_quarter`.
 
 # `descriptors_for_copybook_record` is imported as a BARE NAME rather than
 # through its module, because `dataclasses.field` is already bound above and the
@@ -619,7 +640,7 @@ from acas_posting.dates import WsDateFormats, zz070_convert_date
 #: program's internals, exactly as a COBOL `CALL` cannot." All 38 paragraph and
 #: section functions are therefore private, and a tuple is used so the surface
 #: cannot be extended in place at run time.
-__all__: Final[tuple[str, ...]] = ("run",)
+__all__: Final[tuple[str, ...]] = ("DiskChangeOptionNotAcceptable", "run")
 
 _LOG: Final[logging.Logger] = logging.getLogger(__name__)
 
@@ -736,6 +757,56 @@ _LEDGER_LAST: Final[FieldDescriptor] = FieldDescriptor.from_dictionary_key(
 #: `occurs` is read from this descriptor rather than written as a literal 4.
 _LEDGER_Q: Final[FieldDescriptor] = FieldDescriptor.from_dictionary_key(
     "WS-Ledger-Record.Ledger-Q"
+)
+
+#  THE REST OF `01 WS-Ledger-Record.` [copybooks/wsledger.cob:L12-L37]. Phase 5
+#  needs the WHOLE record's layout, not only the fields it names, because
+#  [general/gl080.cbl:L345] indexes `Ledger-Q` with an unbounded subscript and an
+#  unbounded subscript reaches whatever field shares the bytes - see
+#  `_LEDGER_RECORD_GROUP` and `_move_ledger_balance_to_quarter`.
+_WS_LEDGER_NOS: Final[FieldDescriptor] = FieldDescriptor.from_dictionary_key(
+    "WS-Ledger-Record.WS-Ledger-Nos"
+)
+_LEDGER_PC: Final[FieldDescriptor] = FieldDescriptor.from_dictionary_key(
+    "WS-Ledger-Record.Ledger-PC"
+)
+_LEDGER_TYPE: Final[FieldDescriptor] = FieldDescriptor.from_dictionary_key(
+    "GLLEDGER-REC.LEDGER-TYPE"
+)
+_LEDGER_PLACE: Final[FieldDescriptor] = FieldDescriptor.from_dictionary_key(
+    "GLLEDGER-REC.LEDGER-PLACE"
+)
+_LEDGER_LEVEL: Final[FieldDescriptor] = FieldDescriptor.from_dictionary_key(
+    "GLLEDGER-REC.LEDGER-LEVEL"
+)
+#: `03  filler  pic x(5).`  [copybooks/wsledger.cob:L26]
+_LEDGER_FILLER_26: Final[FieldDescriptor] = FieldDescriptor.from_dictionary_key(
+    "WS-Ledger-Record.filler#26"
+)
+_LEDGER_NAME: Final[FieldDescriptor] = FieldDescriptor.from_dictionary_key(
+    "GLLEDGER-REC.LEDGER-NAME"
+)
+#: The four NAMED quarters [copybooks/wsledger.cob:L31-L34] - the same bytes the
+#: `occurs` view above spans, and the fields the `acas005` handler binds its
+#: columns from.
+_LEDGER_Q1: Final[FieldDescriptor] = FieldDescriptor.from_dictionary_key(
+    "GLLEDGER-REC.LEDGER-Q1"
+)
+_LEDGER_Q2: Final[FieldDescriptor] = FieldDescriptor.from_dictionary_key(
+    "GLLEDGER-REC.LEDGER-Q2"
+)
+_LEDGER_Q3: Final[FieldDescriptor] = FieldDescriptor.from_dictionary_key(
+    "GLLEDGER-REC.LEDGER-Q3"
+)
+_LEDGER_Q4: Final[FieldDescriptor] = FieldDescriptor.from_dictionary_key(
+    "GLLEDGER-REC.LEDGER-Q4"
+)
+#: `03  filler  pic x(50).`  [copybooks/wsledger.cob:L37] - the trailing filler
+#: an out-of-range quarter subscript of 5 or more lands in. No column, so no
+#: table effect; it is modelled because the measurement showed the bytes DO
+#: change and a reader must be able to see that they do.
+_LEDGER_FILLER_37: Final[FieldDescriptor] = FieldDescriptor.from_dictionary_key(
+    "WS-Ledger-Record.filler#37"
 )
 
 #: `03  Cleared-Status  pic 9.`  [copybooks/wsbatch.cob:L29]
@@ -996,6 +1067,56 @@ _FS_AT_END: Final[int] = int(FsReply.END_OF_FILE)
 #: [general/gl080.cbl:L412-L413]. Only the non-zero-ness of the reply reaches
 #: the test, so the exact digits do not change the branch taken.
 _FS_FILE_NOT_FOUND: Final[int] = 35
+
+
+class DiskChangeOptionNotAcceptable(ValueError):
+    """The promoted disk-change option is neither 0 nor 9, which cannot happen.
+
+    `accept-option.` [general/gl080.cbl:L542-L549] is an input loop with exactly
+    two exits: `if a = 9 go to main-exit` [:L546-L547], a class-3 section exit that
+    aborts the run, and falling through on zero, which proceeds. `if a not = zero
+    go to accept-option` [:L548-L549] returns EVERY OTHER VALUE to the prompt. So
+    no other value can reach the statements below the paragraph, and the value 9 is
+    read twice more afterwards - at [general/gl080.cbl:L408] to skip the archiving
+    walk and at [general/gl080.cbl:L324] to skip the whole of end-of-period
+    processing.
+
+    A THIRD VALUE THEREFORE HAS NO FROZEN BEHAVIOUR TO REPRODUCE, only a frozen
+    IMPOSSIBILITY to preserve. The interactive re-prompt cannot be reproduced -
+    Agent Action Plan section 0.4.2 places interactive retry targets outside the
+    migrated surface - and of the two remaining dispositions, proceeding would let
+    a value legacy execution can never carry here drive five tables' worth of
+    end-of-period work (finding CLI-07). Refusing is the one that keeps the
+    database effect inside the set the frozen program can produce.
+
+    NOT A VALIDATION ADDED TO THE CYCLE (rule R-3): nothing is checked that the
+    frozen source does not check, and the check is the frozen source's own
+    `if a not = zero`. What changed is only the disposition of its true arm, from a
+    re-prompt with no headless equivalent to a refusal.
+
+    `acas_posting/cli/gl_end_of_cycle.py` restricts `--disk-change-option` to
+    `{0, 9}`, so a command line reaches an argparse usage error first and this
+    exception is the second gate, for a caller that reaches `run` directly.
+
+    Attributes:
+        option: the value as `77 a pic 99` [general/gl080.cbl:L183] received it,
+            after that field's own truncation.
+    """
+
+    def __init__(self, option: int) -> None:
+        """Build the refusal from the stored option value.
+
+        Args:
+            option: the value in `a` after the store through its descriptor.
+        """
+        super().__init__(
+            f"the disk-change option is {option}, which general/gl080.cbl "
+            f"L548-L549 sends back to the prompt: the frozen program can only "
+            f"proceed on 0 or abort on 9, so no other value ever reaches the "
+            f"archiving walk or end-of-period processing. Pass 0 to proceed or 9 "
+            f"to abort."
+        )
+        self.option: int = option
 
 
 class _StopRun(RuntimeError):
@@ -1422,7 +1543,11 @@ def _gl080_main(st: _Gl080Storage) -> None:
             mutated here.
 
     Raises:
-        _StopRun: Only by way of `compress-post` [general/gl080.cbl:L649].
+        _StopRun: By way of `compress-post` [general/gl080.cbl:L649].
+        DiskChangeOptionNotAcceptable: by way of `disk-change`
+            [general/gl080.cbl:L519] when the disk-change option reaches neither
+            exit of `accept-option.` [general/gl080.cbl:L542-L557] - see
+            `_disk_change_accept_option`.
     """
     # 283  display  prog-name at 0101 ...
     # 284  display  "End Of Cycle Processing" at 0130 ...
@@ -1442,11 +1567,11 @@ def _gl080_main(st: _Gl080Storage) -> None:
 
     # 286  display  ws-date at 0171 ...
     # 287  display  usera at 0301 ...
-    _LOG.info(
-        "run date %s, user %s",
-        st.ws_date_formats.ws_date,
-        st.system.system_data_block.suser.usera,
-    )
+    #  NEITHER THE DATE NOR THE USER IS RECORDED. [general/gl080.cbl:L286-L287]
+    # displays `ws-date` and `usera`: the posting date this run stamps into every record
+    # it writes, and the OPERATOR'S USER ID. A date with business meaning and a user
+    # identity are both excluded by the safe-event schema (CWE-532), and both are inputs
+    # already known wherever the run was started.
 
     # 288  move     1  to File-Key-No.
     # AMBIGUITY Q-18 - WHETHER THIS MOVE HAS ANY OBSERVABLE EFFECT. The facade's
@@ -1500,7 +1625,11 @@ def _gl080_main(st: _Gl080Storage) -> None:
     # section 0.6.5.
     if not st.run_confirmed:
         # 302  goback.
-        _LOG.info("run declined at the backup confirmation; nothing was posted")
+        # NO RECORD HERE. [general/gl080.cbl:L299-L304] is `accept keyed-reply` then
+        # `goback` - an ACCEPT and a transfer, with no `display` of its own. Agent
+        # Action Plan section 0.3.4 makes the accept a CLI parameter, which it is, and
+        # the transfer is preserved below; announcing the decision was invented (R-4).
+        pass
         return
 
     # 306  display  "Phase - 1.  Batch Check" at 0801 ... erase eos.
@@ -1582,12 +1711,11 @@ def _gl080_main(st: _Gl080Storage) -> None:
     ):
         # 326  go to  main-end.
         # GO TO class 3.
-        _LOG.info(
-            "end of period processing skipped: cycle %s, period %s, option %s",
-            st.system.system_data_block.scycle,
-            st.system.system_data_block.period,
-            st.a,
-        )
+        #  NO RECORD HERE. The frozen statement this stood for displays nothing -
+        # gl080's thirty-nine `display`s are all accounted for, and none of them is at
+        # this site - so the record was invented (R-4). Progress and completion traces
+        # of internal phase boundaries are not events the compiled program produces.
+        # It also named the cycle and the period, which are business data.
         _main_end(st)
         return
 
@@ -1653,12 +1781,11 @@ def _gl080_main(st: _Gl080Storage) -> None:
     if arithmetic.compare(st.system.system_data_block.scycle, st.y) != 0:
         # 332  go to  main-end.
         # GO TO class 3.
-        _LOG.info(
-            "cycle %s is not a period boundary (period %s, round trip %s)",
-            st.system.system_data_block.scycle,
-            st.system.system_data_block.period,
-            st.y,
-        )
+        #  NO RECORD HERE. The frozen statement this stood for displays nothing -
+        # gl080's thirty-nine `display`s are all accounted for, and none of them is at
+        # this site - so the record was invented (R-4). Progress and completion traces
+        # of internal phase boundaries are not events the compiled program produces.
+        # It also named the cycle and the period.
         _main_end(st)
         return
 
@@ -1723,9 +1850,14 @@ def _gl080_main_loop(st: _Gl080Storage) -> None:
         st: The program's storage.
 
     Raises:
-        ValueError: When the quarter subscript is outside 1 through 4. That is
-            anomaly A-2 surfacing, NOT a check this module added; see the
-            comment at the subscripted move and question Q-19.
+        Nothing on account of the quarter subscript. It is emphatically NOT
+        validated - see anomaly A-2 at the subscripted move below. The compiled
+        program was measured rather than reasoned about (rule R-6): a subscript
+        outside 1 through 4 stores into whichever bytes the address computes,
+        `Ledger-Last` at 0 and the trailing filler at 5 and 6, and the program
+        RUNS ON with no diagnostic and no status. An exception here would replace
+        a reproduced anomaly with an invented one (rules R-3, R-4), which is what
+        question Q-19 asked and what the oracle answered.
     """
     while True:
         # 342  perform  GL-Nominal-Read-Next.
@@ -1752,18 +1884,24 @@ def _gl080_main_loop(st: _Gl080Storage) -> None:
         # table. Reproduced deliberately per R-4; DO NOT FIX. No bounds test is
         # added, and none may be.
         #
-        # AMBIGUITY Q-19 - WHAT THE COMPILED PROGRAM ACTUALLY DOES OUT OF RANGE.
-        # COBOL writes past the table into whatever storage follows - which in
-        # this record is `filler pic x(50)` [copybooks/wsledger.cob:L37] for
-        # small overruns and then off the end of the record area - silently, with
-        # no diagnostic. Python cannot reproduce that, and the three candidate
-        # behaviours are not equivalent: `ledger_q[a - 1]` would write QUARTER
-        # FOUR when `a` is zero, because Python indexes backwards from the end,
-        # which is a third behaviour that is neither the COBOL's nor an honest
-        # failure. So the subscript is resolved through the declared occurrence
-        # range and an out-of-range value RAISES rather than writing somewhere
-        # arbitrary. The divergence is declared, not papered over; what the
-        # oracle does at `a = 0` and at `a > 4` is the open question.
+        # HOW THE OUT-OF-RANGE STORE IS REPRODUCED. COBOL writes past the table
+        # into whatever storage follows, silently and with no diagnostic, and in
+        # THIS record what follows is declared: `filler pic x(50)`
+        # [copybooks/wsledger.cob:L37]. `_move_ledger_balance_to_quarter`
+        # therefore resolves the subscript to a BYTE OFFSET and stores into
+        # whichever declared item those bytes belong to - the two `Quarters` views
+        # for 1..4, the trailing filler for 5..12, the two preceding packed items
+        # for 0 and -1 - so nothing is clamped, nothing is validated and control
+        # flow continues exactly as the frozen loop's does. Note what is NOT done:
+        # `ledger_q[a - 1]` would write QUARTER FOUR when `a` is zero, because
+        # Python indexes backwards from the end, and that is a third behaviour
+        # belonging to neither language.
+        #
+        # AMBIGUITY Q-19 - WHAT THE COMPILED PROGRAM WRITES PAST THE RECORD END.
+        # From `a = 13` the store runs beyond the 126th byte into WORKING-STORAGE
+        # that belongs to no table, so the part that lands inside the record is
+        # reproduced and the remainder is reported as a log line. Measure on the
+        # oracle whether an overrunning run moves any compared table.
         _move_ledger_balance_to_quarter(st)
 
         # 346  if       current-quarter = 4
@@ -1793,6 +1931,78 @@ def _gl080_main_loop(st: _Gl080Storage) -> None:
         continue
 
 
+#: `01 WS-Ledger-Record.` [copybooks/wsledger.cob:L12-L37] as the 126 BYTES the
+#: compiled program addresses, in declaration order. It exists for exactly one
+#: statement - `move ledger-balance to ledger-q (a).`
+#: [general/gl080.cbl:L345] - because that statement's subscript is unbounded and
+#: an unbounded subscript lands on BYTES, not on an attribute.
+#:
+#: The `occurs 4` view is spelled as its four occurrences so the layout reads the
+#: way the storage is laid out; `Ledger-Q1` through `Ledger-Q4`
+#: [copybooks/wsledger.cob:L31-L34] are the SAME bytes under their own names, so
+#: they are not listed a second time. `WS-Ledger-Key9`
+#: [copybooks/wsledger.cob:L21] and `Ledger-n`/`Ledger-s`
+#: [copybooks/wsledger.cob:L17-L18] are likewise REDEFINES and not listed.
+#:
+#: THE LENGTH IS VERIFIED AGAINST THE COMPILED ORACLE, not asserted: GnuCOBOL
+#: 3.2.0 reported `function length (WS-Ledger-Record)` = 126, which is also the
+#: figure the maintainer's own change note gives
+#: [copybooks/wsledger.cob:L10] ("Resized to 126 bytes").
+_LEDGER_RECORD_GROUP: Final[move.StorageGroup] = move.StorageGroup(
+    (
+        move.GroupItem("WS-Ledger-Nos", _WS_LEDGER_NOS),
+        move.GroupItem("Ledger-PC", _LEDGER_PC),
+        move.GroupItem("Ledger-Type", _LEDGER_TYPE),
+        move.GroupItem("Ledger-Place", _LEDGER_PLACE),
+        move.GroupItem("Ledger-Level", _LEDGER_LEVEL),
+        move.GroupItem("filler-26", _LEDGER_FILLER_26),
+        move.GroupItem("Ledger-Name", _LEDGER_NAME),
+        move.GroupItem("Ledger-Balance", _LEDGER_BALANCE),
+        move.GroupItem("Ledger-Last", _LEDGER_LAST),
+        move.GroupItem("Ledger-Q (1)", _LEDGER_Q1),
+        move.GroupItem("Ledger-Q (2)", _LEDGER_Q2),
+        move.GroupItem("Ledger-Q (3)", _LEDGER_Q3),
+        move.GroupItem("Ledger-Q (4)", _LEDGER_Q4),
+        move.GroupItem("filler-37", _LEDGER_FILLER_37),
+    ),
+    source_locator="copybooks/wsledger.cob:L12-L37",
+)
+
+#: Bytes per occurrence of `Ledger-Q`, i.e. the width of one
+#: `pic s9(8)v99 comp-3` item [copybooks/wsledger.cob:L36]. Read from the
+#: descriptor rather than written as a literal 6.
+_LEDGER_Q_ELEMENT_BYTES: Final[int] = _LEDGER_Q1.byte_length
+
+#: The four named quarter attributes of `03 Quarters.`
+#: [copybooks/wsledger.cob:L30-L34], in declaration order - which is the order
+#: the `occurs` view's occurrences map onto.
+_LEDGER_QUARTER_ATTRS: Final[tuple[str, ...]] = tuple(
+    f.name for f in dataclasses.fields(LedgerQuarters)
+)
+
+
+def _ledger_record_values(ledger: WsLedgerRecord) -> dict[str, object]:
+    """The record's current contents, keyed the way the byte layout names them."""
+    key = ledger.ws_ledger_key
+    quarters = ledger.quarters
+    return {
+        "WS-Ledger-Nos": key.ws_ledger_nos,
+        "Ledger-PC": key.ledger_pc,
+        "Ledger-Type": ledger.ledger_type,
+        "Ledger-Place": ledger.ledger_place,
+        "Ledger-Level": ledger.ledger_level,
+        "filler-26": ledger.filler_l26,
+        "Ledger-Name": ledger.ledger_name,
+        "Ledger-Balance": ledger.ledger_balance,
+        "Ledger-Last": ledger.ledger_last,
+        "Ledger-Q (1)": quarters.ledger_q1,
+        "Ledger-Q (2)": quarters.ledger_q2,
+        "Ledger-Q (3)": quarters.ledger_q3,
+        "Ledger-Q (4)": quarters.ledger_q4,
+        "filler-37": ledger.filler_l37,
+    }
+
+
 def _move_ledger_balance_to_quarter(st: _Gl080Storage) -> None:
     """`move ledger-balance to ledger-q (a).`  [general/gl080.cbl:L345].
 
@@ -1814,46 +2024,181 @@ def _move_ledger_balance_to_quarter(st: _Gl080Storage) -> None:
     error and no diagnostic. The COBOL statement names the `occurs` view, so this
     function writes the `occurs` view AND the named field the same bytes carry.
 
-    The occurrence count is read from the descriptor's own `occurs`
-    [copybooks/wsledger.cob:L36] and the attribute names from the declaration
-    order of the named-field group, so neither the bound nor the four names is
-    typed as a literal here.
+    ⭐ ANOMALY A-2, REPRODUCED FROM A MEASUREMENT AND NOT FROM A GUESS
+    (rules R-4, R-6). `a` is computed by a `ROUNDED` divide at
+    [general/gl080.cbl:L328] and used here with NO bounds test, and the values it
+    can hold are not confined to 1..4: the guard at
+    [general/gl080.cbl:L326-L327] only excludes `a = 9` and a cycle below the
+    period, and [general/gl080.cbl:L332-L333] only requires `a * period` to equal
+    the cycle exactly - so period 3 with cycle 15 gives `a = 5`, cycle 18 gives
+    `a = 6`, and `77 a pic 99` [general/gl080.cbl:L183] admits both.
+
+    WHAT THE COMPILED PROGRAM DOES, measured on GnuCOBOL 3.2.0 against this exact
+    copybook with a variable subscript:
+
+        a = 0  ->  LEDGER-LAST receives the value. It is a TABLE COLUMN, so this
+                   subscript has a real, diff-visible effect on `GLLEDGER-REC`.
+        a = 5  ->  bytes 1 to 6 of the trailing `03 filler pic x(50)`
+                   [copybooks/wsledger.cob:L37]. No column, so no table effect.
+        a = 6  ->  bytes 7 to 12 of that same filler.
+
+    In every case the store is plain linear byte addressing: no bounds test, no
+    diagnostic, no status, no abort, and the run continues. ⛔ NOTHING IS
+    VALIDATED OR CLAMPED HERE, and in particular a Python `[a - 1]` is NOT used:
+    that would make `a = 0` accumulate into the LAST occurrence, which
+    corresponds to nothing the compiled program does. The reproduction goes
+    through `move.subscripted_store`, whose own header records the measurements.
+
+    THE MOVE'S OWN SEMANTICS ARE UNCHANGED for an in-range subscript: the value
+    is stored into `Ledger-Q`'s picture, truncating toward zero because
+    [general/gl080.cbl:L345] carries no `ROUNDED`.
+
+    ⛔ THE SUBSCRIPT IS NOT BOUNDS-CHECKED, AND MUST NOT BE (anomaly A-2, rule
+    R-3). An earlier draft of this function raised `ValueError` for any `a`
+    outside 1..4. That is a validation the frozen program does not perform, and
+    raising turns a silent legacy store into an abort that ends the phase-5 loop -
+    which changes the disposition of every ledger row after the first out-of-range
+    one. It is therefore replaced by STORAGE EMULATION: the subscript resolves to
+    a byte offset, and the value is stored into whichever DECLARED ITEM those
+    bytes belong to, exactly as the compiled program stores it. Control flow
+    continues in every case.
+
+    WHY `a` GOES OUT OF RANGE AT ALL, and it is reachable rather than theoretical.
+    `77 a pic 99 value zero` [general/gl080.cbl:L183] holds 0..99, and phase 5
+    computes it as `divide scycle by period giving a rounded`
+    [general/gl080.cbl:L328] guarded only by `if a = 9 or scycle < period go to
+    main-end` [general/gl080.cbl:L324-L326] and by the exact-multiple test
+    `multiply a by period giving y` / `if scycle not = y go to main-end`
+    [general/gl080.cbl:L329-L332]. So `a` is the exact quotient `scycle / period`.
+    `scycle` is reset only for `period = 3` and `period = 13`
+    [general/gl080.cbl:L358-L363] - so for those two the quotient stays within
+    1..4 - but for any other `period`, `period = 1` above all, NOTHING resets
+    `scycle` and the quotient climbs through the whole `pic 99` domain.
+
+    THE DESTINATION, BY BYTE OFFSET. `Ledger-Q` is `pic s9(8)v99 comp-3`, six
+    bytes, `occurs 4` [copybooks/wsledger.cob:L36], redefining the 24 bytes of
+    `Quarters` [copybooks/wsledger.cob:L30-L34]. The neighbouring declarations
+    settle where an out-of-range occurrence lands
+    [copybooks/wsledger.cob:L28-L37]::
+
+        offset from            declaration                          reached by
+        Quarters start
+        -12                    03  Ledger-Balance  s9(8)v99 comp-3  a = -1
+         -6                    03  Ledger-Last     s9(8)v99 comp-3  a =  0
+          0 .. 23              03  Quarters  (Ledger-Q1 .. Q4)      a = 1..4
+         24 .. 73              03  filler    pic x(50)              a = 5..12
+         74 and beyond         past the 126-byte record             a = 13..99
+
+    So `a = 5` through `a = 12` write WHOLLY INSIDE the trailing fifty-byte
+    FILLER, which carries NO MySQL COLUMN - `mysql/ACASDB.sql` gives
+    `GLLEDGER-REC` eleven columns and none of them is that filler - so those
+    stores have NO DATABASE-VISIBLE EFFECT while still not being errors. `a = 13`
+    straddles the record end: its first two bytes land in the filler and its last
+    four run past byte 126. `a >= 14` lands wholly outside the record. `a = 0` and
+    `a = -1` are unreachable here, because the guard at
+    [general/gl080.cbl:L325] forbids `scycle < period`, but they are resolved
+    rather than special-cased so that the emulation carries no bound of its own.
+
+    ⚠ AMBIGUITY Q-19, NARROWED. What the compiled program writes past the end of
+    the record is not defined by the record layout: GnuCOBOL compiled without
+    bounds checking - and no compile line in this repository passes any such flag -
+    stores into whatever WORKING-STORAGE follows, which belongs to no table and is
+    therefore invisible to the comparison. This function reproduces the part of
+    the store that lands inside the record and records the overrun as a log line;
+    measure on the oracle whether an overrunning run changes any of the 22
+    compared tables, and record the arbitration in
+    docs/migration/ambiguity-resolutions.md (rule R-6).
+
+    ⭐ AN OUT-OF-RANGE SUBSCRIPT DOES NOT RAISE. IT STORES SOMEWHERE, AND WHERE IS
+    DERIVABLE. This function previously refused the store with a `ValueError`,
+    which FIXED anomaly A-2 - and rule R-4 makes a defect fixed a failure. There
+    is no bounds test in the frozen statement and none may be added, so the
+    subscript is resolved the way the compiled program resolves it: BY BYTE
+    ADDRESS within the 126-byte record.
+
+    `move.subscripted_store` computes that address from the record's own declared
+    field widths - never from a transcribed number - and returns every elementary
+    item of the window decoded afterwards, so the declared field the six bytes
+    land in is visible by name. The four outcomes and their observability
+    against `GLLEDGER-REC`, which has exactly eleven columns and binds NONE of the
+    trailing filler:
+
+        a = 1..4    the four quarter fields.       OBSERVABLE - LEDGER-Q1..Q4.
+        a = 0       bytes 47-52 = `Ledger-Last`.   OBSERVABLE - LEDGER-LAST. The
+                    quarter store lands on the YEAR-END field, one field earlier
+                    in the record. Exact, and derived from the layout alone.
+        a = 5..12   bytes 77-124, wholly inside
+                    `filler pic x(50)`
+                    [copybooks/wsledger.cob:L37].  NOT OBSERVABLE - no column
+                    binds those bytes, so all eleven columns are unchanged and the
+                    row is still rewritten by [general/gl080.cbl:L348]. This is
+                    the band anomaly A-2 actually reaches: with `Period = 1` the
+                    guard at [general/gl080.cbl:L324-L326] passes for any
+                    `Scycle`, [general/gl080.cbl:L328] gives `a = Scycle`, and
+                    [general/gl080.cbl:L331] then agrees, so `a` walks 5, 6, 7, 8,
+                    10, 11, 12 as the cycles advance. `a = 9` alone is unreachable
+                    because the guard tests it.
+        a >= 13     bytes 125 onward, at or past the record's end. GENUINELY
+                    UNMEASURABLE FROM THE SOURCE - the store lands in whatever
+                    storage the compiler placed after the record area, which
+                    depends on its allocation and not on any declaration. Nothing
+                    is guessed: all eleven columns are left unchanged, the
+                    condition is logged, and AMBIGUITY Q-19 records it as a
+                    question only the oracle can answer.
+
+    WHY BOTH VIEWS ARE WRITTEN for the in-record cases. In COBOL `Ledger-Q (a)`
+    and `Ledger-Q1` through `Ledger-Q4` ARE THE SAME BYTES
+    [copybooks/wsledger.cob:L31-L36]; in Python they are separate attributes that
+    do not alias. `acas_posting/records/gl_ledger.py` declares both views and
+    deliberately declines to synchronise them, because keeping a redefines in step
+    would be behaviour in a record layout (rule R-3). The consequence is concrete
+    and silent: the `acas005` handler binds its columns from the FOUR NAMED
+    FIELDS, so a value written into the `occurs` view alone would never reach
+    `GLLEDGER-REC` and phase 5's entire table effect would vanish with no
+    diagnostic. So both are written.
+
+    The occurrence count, the element width and the record's total width all come
+    from the record layer's own descriptors, so neither the bound, the stride nor
+    the record length is typed as a literal here.
 
     Args:
         st: The program's storage. `st.a` is the subscript and
             `st.ledger.ledger_balance` the sending field.
-
-    Raises:
-        ValueError: The subscript is outside the declared occurrence range. See
-            anomaly A-2 and question Q-19 at the call site: this is the
-            divergence being declared, not a validation being added.
-        IndexError: Never, because the range is resolved before it is used.
     """
-    occurs = _LEDGER_Q.occurs
-    quarter_names = tuple(f.name for f in dataclasses.fields(LedgerQuarters))
-    if st.a not in range(1, occurs + 1):
-        raise ValueError(
-            "gl080 quarter subscript out of range: "
-            f"a={st.a!r} against Ledger-Q occurs {occurs} "
-            "[general/gl080.cbl:L345], [copybooks/wsledger.cob:L36]. "
-            "ANOMALY A-2 reproduced: the frozen source computes this subscript "
-            "at [general/gl080.cbl:L328] and applies no bound. AMBIGUITY Q-19 - "
-            "what the compiled program does here is a question for the oracle; "
-            "no guard is added and nothing is silently corrected."
-        )
-    index = range(1, occurs + 1).index(st.a)
-
-    stored = move.move(
-        st.ledger.ledger_balance, _LEDGER_Q, sending_field=_LEDGER_BALANCE
+    #  345  move     ledger-balance  to  ledger-q (a).
+    #       The store is performed over the record's BYTES, because that is what
+    #       the generated code addresses; `subscripted_store` returns every
+    #       elementary item decoded afterwards, so whichever field shared the
+    #       window is visible here exactly as the compiled program left it.
+    after = move.subscripted_store(
+        _LEDGER_RECORD_GROUP,
+        _ledger_record_values(st.ledger),
+        member="Ledger-Q (1)",
+        element_length=_LEDGER_Q_ELEMENT_BYTES,
+        subscript=st.a,
+        value=move.move(
+            st.ledger.ledger_balance, _LEDGER_Q, sending_field=_LEDGER_BALANCE
+        ),
+        statement="general/gl080.cbl:L345",
     )
 
-    # The `occurs` view the COBOL statement names.
-    quarters = list(st.ledger.quarters_table.ledger_q)
-    quarters[index] = stored
-    st.ledger.quarters_table = LedgerQuartersTable(ledger_q=tuple(quarters))
+    #  Write the whole record back from the image, because an out-of-range
+    #  subscript changes a field the statement does not name - `Ledger-Last` for
+    #  `a = 0`, the trailing filler for `a = 5` and above. Assigning only the
+    #  quarters would silently discard the very effect being reproduced.
+    st.ledger.ledger_last = after["Ledger-Last"]
+    st.ledger.filler_l37 = after["filler-37"]
 
-    # The named field those same bytes carry, which is what the handler reads.
-    setattr(st.ledger.quarters, quarter_names[index], stored)
+    #  The named fields those bytes carry, which is what the handler binds its
+    #  columns from - and, in the same statement, the `occurs` view the COBOL
+    #  statement itself names.
+    quarter_values = tuple(
+        after[f"Ledger-Q ({occurrence})"]
+        for occurrence in range(1, len(_LEDGER_QUARTER_ATTRS) + 1)
+    )
+    for attribute, stored in zip(_LEDGER_QUARTER_ATTRS, quarter_values, strict=True):
+        setattr(st.ledger.quarters, attribute, stored)
+    st.ledger.quarters_table = LedgerQuartersTable(ledger_q=quarter_values)
 
 
 def _gl080_main_loop_end(st: _Gl080Storage) -> None:
@@ -1963,11 +2308,12 @@ def _main_end(st: _Gl080Storage) -> None:
         st: The program's storage, unchanged by this paragraph.
     """
     # 366  goback.
-    _LOG.debug(
-        "gl080 returning to its caller; cycle %s, quarter %s",
-        st.system.system_data_block.scycle,
-        st.system.system_data_block.current_quarter,
-    )
+    #  NO RECORD HERE. The frozen statement this stood for displays nothing -
+    # gl080's thirty-nine `display`s are all accounted for, and none of them is at
+    # this site - so the record was invented (R-4). Progress and completion traces
+    # of internal phase boundaries are not events the compiled program produces.
+    # It also named the cycle and the current quarter - the latter being anomaly
+    # 3's own field, which is documented in `docs/migration/anomaly-log.md`.
     return
 
 
@@ -2131,7 +2477,10 @@ def _gl080a_main_exit(st: _Gl080Storage) -> None:
         st: The program's storage, unchanged by this paragraph.
     """
     # 395  exit section.
-    _LOG.debug("gl080a complete; detector flag a=%s", st.a)
+    #  NO RECORD HERE. The frozen statement this stood for displays nothing -
+    # gl080's thirty-nine `display`s are all accounted for, and none of them is at
+    # this site - so the record was invented (R-4). Progress and completion traces
+    # of internal phase boundaries are not events the compiled program produces.
     return
 
 
@@ -2183,7 +2532,11 @@ def _gl080b(st: _Gl080Storage) -> None:
     # 403  display  "/ Batch - " ...
     # 404  display  "/ Item  - " ...
     # Four displays that together build one progress line. One log record.
-    _LOG.info("archiving, cycle %s", st.file_access.curs2_parts.lin2)
+    #  THE CYCLE NUMBER IS NOT IN THE RECORD. The accounting cycle selects
+    # which batches a run touches, so it is business data by the same rule that
+    # excludes a batch number; the phase label is what the frozen `display` puts on
+    # the screen alongside it and is kept.
+    _LOG.info("Archiving.")
 
     # 406  perform  disk-change.
     _disk_change(st)
@@ -2357,7 +2710,10 @@ def _gl080b_main_exit(st: _Gl080Storage) -> None:
         st: The program's storage, unchanged by this paragraph.
     """
     # 442  exit section.
-    _LOG.debug("gl080b complete; %s archive rows written", len(st.archive.rows))
+    #  NO RECORD HERE. The frozen statement this stood for displays nothing -
+    # gl080's thirty-nine `display`s are all accounted for, and none of them is at
+    # this site - so the record was invented (R-4). Progress and completion traces
+    # of internal phase boundaries are not events the compiled program produces.
     return
 
 
@@ -2410,7 +2766,12 @@ def _arc_process(st: _Gl080Storage) -> None:
         st: The program's storage.
     """
     # 448  display  WS-Batch-Nos at 2345 ...
-    _LOG.info("archiving batch %s", st.batch.ws_batch_key.ws_batch_nos)
+    #  THE KEY IS NOT IN THE RECORD. The frozen `display` shows the batch or
+    # posting number on a curses screen as a moving progress counter; a batch number
+    # and a posting number are business keys, which the safe-event schema in
+    # `acas_posting/dal/status.py` excludes (CWE-532). The progress display's only
+    # purpose was to reassure an operator watching a terminal, and there is no
+    # terminal; the rows themselves are what the scenario diff compares.
 
     # 449  move     WS-Batch-Nos  to  arc-batch.
     st.archive.record.arc_batch = move.move(
@@ -2520,7 +2881,12 @@ def _arc_process_loop(st: _Gl080Storage) -> None:
             continue
 
         # 463  display  post-number at 2364 ...
-        _LOG.debug("archiving posting %s", st.posting.ws_post_key.post_number)
+        #  THE KEY IS NOT IN THE RECORD. The frozen `display` shows the batch or
+        # posting number on a curses screen as a moving progress counter; a batch number
+        # and a posting number are business keys, which the safe-event schema in
+        # `acas_posting/dal/status.py` excludes (CWE-532). The progress display's only
+        # purpose was to reassure an operator watching a terminal, and there is no
+        # terminal; the rows themselves are what the scenario diff compares.
 
         # 465  move     batch        to  arc-batch.
         # 466  move     post-number  to  arc-post.
@@ -2781,9 +3147,11 @@ def _arc_process_main_exit(st: _Gl080Storage) -> None:
         st: The program's storage, unchanged by this paragraph.
     """
     # 516  exit section.
-    _LOG.debug(
-        "arc-process complete for batch %s", st.batch.ws_batch_key.ws_batch_nos
-    )
+    #  NO RECORD HERE. The frozen statement this stood for displays nothing -
+    # gl080's thirty-nine `display`s are all accounted for, and none of them is at
+    # this site - so the record was invented (R-4). Progress and completion traces
+    # of internal phase boundaries are not events the compiled program produces.
+    # It also named the batch number.
     return
 
 
@@ -2887,10 +3255,26 @@ def _disk_change(st: _Gl080Storage) -> None:
     # 539  display  GL085 at 1201 ...
     # 540  display  Gl084 at 1301 ...
     # `GL084` [general/gl080.cbl:L252] and `GL085` [general/gl080.cbl:L253].
-    _LOG.info("archive path built as %r", st.file_defs.file_defs_a.file_2)
+    #  THE PATH IS NOT IN THE RECORD. `File-2` is an absolute filesystem path
+    # from the deployment's own configuration [copybooks/wsnames.cob], which the
+    # safe-event schema excludes (CWE-532) and which differs between environments, so
+    # a record naming it could not be identical across two runs of one scenario.
 
     # Fall-through into `accept-option.` [general/gl080.cbl:L542].
-    if _disk_change_accept_option(st):
+    #
+    # ⭐ THE THIRD ANSWER NEVER GETS BACK HERE. `accept-option.`
+    # [general/gl080.cbl:L548-L549] sends any value that is neither 9 nor zero
+    # straight back to its own prompt, so the frozen paragraph cannot reach
+    # `main-exit` [general/gl080.cbl:L559] on it and NOTHING after `perform
+    # disk-change.` [general/gl080.cbl:L406] executes - not the archive open at
+    # L411, not the batch walk, not the batch stamps at L426-L430, not
+    # `compress-post` at L322 and not phase 5. `_disk_change_accept_option`
+    # reproduces that by raising `DiskChangeOptionNotAcceptable` at the point the
+    # frozen paragraph refuses to leave, which is why only the two answers the
+    # frozen program can proceed on are returned here (M-04, CWE-636).
+    declined = _disk_change_accept_option(st)
+
+    if declined:
         # 547  go to  main-exit.
         # GO TO class 3, raised inside `accept-option` and carried out here. The
         # option value 9 has already been stored into `a`, which
@@ -2936,27 +3320,68 @@ def _disk_change_accept_option(st: _Gl080Storage) -> bool:
     Promoted to `archive_path_override`, defaulting to None, which keeps the
     path [general/gl080.cbl:L537] computed.
 
-    THE TWO RETRY LOOPS ARE DROPPED AND THEIR TRANSFERS ARE NOT. Agent Action
-    Plan section 0.4.2 puts interactive retry targets outside the migrated
-    surface "except where one gates a database write, in which case it is treated
-    as Class 4". `go to accept-option` at [general/gl080.cbl:L549] re-prompts
-    when the option is neither 9 nor zero, and at [general/gl080.cbl:L557] when
-    the edited path starts with a space; both exist only to make a terminal
-    operator try again, and a parameter cannot be retried. So the LOOPS go and
-    the DECISIONS stay: an option of 9 still transfers to the section exit, and a
-    path whose first character is a space is still rejected - by declining the
-    override and keeping the computed path, which is what the operator would
-    have been left with.
+    ⭐⭐ THERE ARE EXACTLY TWO WAYS OUT OF THIS PARAGRAPH, AND EVERY OTHER ANSWER
+    LEAVES CONTROL INSIDE IT FOREVER. That is the finding M-04 is about, and it is
+    the whole reason this function returns a THREE-STATE disposition rather than a
+    boolean. Reading the transfers as a graph:
+
+        L546-L547   a = 9                              -> main-exit    DECLINED
+        L548-L549   a not = zero                       -> accept-option (loop)
+        L556-L557   file-2 (1:1) = space               -> accept-option (loop)
+        fall-through, i.e. a = 0 AND the path is good  -> main-exit    ACCEPTED
+
+    So an option that is neither 0 nor 9, and a path override whose first
+    character is a space, BOTH return the operator to the option prompt. From
+    there the only exits are the same two. THE COMPILED PROGRAM CANNOT REACH
+    `main-exit` ON EITHER OF THOSE ANSWERS, so it cannot reach anything after
+    `perform disk-change.` [general/gl080.cbl:L406] either - not the archive open,
+    not the batch walk, not `compress-post` [general/gl080.cbl:L322] and not phase
+    5. Warning and then continuing with the computed path - what this function
+    used to do - reaches a state the frozen program has no path to, which is a
+    behaviour change and, at CWE-636, a fail-open one: the answer the operator was
+    never allowed to give would have authorised a full-table archive, a posting
+    delete and the period rollover.
+
+    THE THREE DISPOSITIONS AND THEIR DATABASE EFFECTS, which differ from each
+    other and must (Agent Action Plan section 0.6.5):
+
+      ACCEPTED   `a = 0` and the path's first character is not a space. Archiving
+                 proceeds: `open extend archive` [general/gl080.cbl:L411], the
+                 batch walk, `arc-process`, the batch stamps at
+                 [general/gl080.cbl:L426-L430], then `compress-post` and phase 5.
+      DECLINED   `a = 9`. `gl080b` reads it at [general/gl080.cbl:L408] and skips
+                 the entire archiving walk, and the main section reads THE SAME
+                 VALUE at [general/gl080.cbl:L324] and skips the entire
+                 end-of-period section. `compress-post` [general/gl080.cbl:L322]
+                 still runs. One keystroke, two suppressions.
+      REFUSED    any other answer. Control never leaves `accept-option`, so
+                 NOTHING after [general/gl080.cbl:L406] runs at all - including
+                 the `if a = 9` test itself. The effect is the ABSENCE of
+                 everything below, and it is reproduced by raising
+                 `DiskChangeOptionNotAcceptable` from here rather than returning:
+                 there is no disposition to return, because the frozen paragraph
+                 has no exit to take.
+
+    THE RETRY LOOPS THEMSELVES ARE STILL DROPPED, and only they are: a parameter
+    cannot be re-prompted, and Agent Action Plan section 0.4.2 puts interactive
+    retry targets outside the migrated surface "except where one gates a database
+    write, in which case it is treated as Class 4". Both of these gate database
+    writes, so both are Class 4: the LOOP goes and the DECISION stays, and the
+    decision here is that control does not proceed.
 
     Args:
         st: The program's storage. Writes `st.a`, and `file-2` when the override
             is accepted.
 
     Returns:
-        True when the class-3 transfer at [general/gl080.cbl:L547] was taken -
-        that is, when the option is 9 - and False when control falls through to
-        the section exit. A Python function cannot transfer into its caller, so
-        the answer is returned and `_disk_change` carries out the transfer.
+        `True` when the operator declined archiving (`a = 9`), `False` when the
+        run proceeds (`a = 0`). A Python function cannot transfer into its
+        caller, so the answer is returned and `_disk_change` carries out the
+        transfer.
+
+    Raises:
+        DiskChangeOptionNotAcceptable: the option is neither 0 nor 9, which is
+            the answer the frozen paragraph re-prompts on for ever.
     """
     # 545  accept   a at 1369.
     # `a` IN ITS SECOND ROLE. The promoted value is stored through the field's
@@ -2968,38 +3393,56 @@ def _disk_change_accept_option(st: _Gl080Storage) -> bool:
     if arithmetic.compare(st.a, 9) == 0:
         # 547  go to  main-exit.
         # GO TO class 3, carried out by the caller.
-        _LOG.info(
-            "archiving declined at the disk-change option; no batch will be "
-            "stamped and no posting deleted"
-        )
+        # NO RECORD HERE. [general/gl080.cbl:L543-L546] is `accept a` and two
+        # transfers, with no `display` of its own; the ACCEPT is a CLI parameter per
+        # Agent Action Plan section 0.3.4 and the transfer is preserved. Announcing the
+        # decision was invented (R-4).
         return True
 
     # 548  if       a  not = zero
     # 549           go to  accept-option.
     # GO TO class 1 over an INTERACTIVE RETRY. The loop is dropped with the
-    # prompt; what it guaranteed - that control leaves this paragraph only when
-    # the option is 9 or zero - is preserved by the promoted parameter, whose
-    # only two meaningful values are those two. A third value would have
-    # re-prompted forever with no database effect, so no branch is added for it
-    # (rule R-3) and none can be reached.
+    # prompt; what it guaranteed - THAT CONTROL LEAVES THIS PARAGRAPH ONLY WHEN
+    # THE OPTION IS 9 OR ZERO - is preserved by FAILING CLOSED on any other value.
+    #
+    # FAILING CLOSED, NOT WARNING AND PROCEEDING (finding CLI-07). An earlier
+    # draft logged a warning here and fell through, which let a third value carry
+    # on into the archiving walk and the whole of end-of-period processing - every
+    # batch stamp, every posting delete, the ledger-quarter rollover and the cycle
+    # increment. THE FROZEN PROGRAM CANNOT REACH THAT STATE: L548-L549 sends any
+    # value that is neither 9 nor zero straight back to L542, so the code below
+    # this paragraph only ever runs with `a` at zero. Proceeding on a third value
+    # was therefore not permissiveness but ADDED BEHAVIOUR, and behaviour that
+    # writes to five tables (rule R-3).
+    #
+    # This is not a validation added to the cycle either. It is the one disposition
+    # the frozen loop leaves for a value that can never leave it: an interactive
+    # re-prompt has no parameter equivalent (Agent Action Plan section 0.4.2 puts
+    # interactive retry targets outside the migrated surface), and of the two
+    # remaining possibilities - proceed, or refuse - only refusing keeps the
+    # database effect the frozen program can produce. The entry point restricts
+    # the option to {0, 9} as well, so this raise is the second gate for a caller
+    # that reaches `run` directly.
     if arithmetic.compare(st.a, 0) != 0:
-        _LOG.warning(
-            "disk-change option %s is neither 0 nor 9; the frozen source "
-            "re-prompts, so the value is carried forward unchanged",
-            st.a,
-        )
+        raise DiskChangeOptionNotAcceptable(st.a)
 
     # 553  display  "Current path/name is :" at 1401 ...
     # 554  display  file-2             at 1501 ...
-    _LOG.info("current archive path is %r", st.file_defs.file_defs_a.file_2)
+    #  THE PATH IS NOT IN THE RECORD. `File-2` is an absolute filesystem path
+    # from the deployment's own configuration [copybooks/wsnames.cob], which the
+    # safe-event schema excludes (CWE-532) and which differs between environments, so
+    # a record naming it could not be identical across two runs of one scenario.
+    _LOG.info("Current path/name is :")
 
     # 555  accept   file-2             at 1501 with ... update.
     # 556  if       file-2 (1:1) = space
     # 557           go to accept-option.
     #
     # The `with update` phrase means the field is presented holding its current
-    # value and the operator edits it, which is why declining the override keeps
-    # the computed path rather than blanking it.
+    # value and the operator edits it, so an operator who simply presses return
+    # accepts the computed path - which is why NOT supplying an override is
+    # ACCEPTED and not UNRESOLVED. `archive_path_override is None` is that
+    # operator.
     if st.archive_path_override is not None:
         candidate = move.move(
             st.archive_path_override, _FILE_2, sending_field=_FILE_2
@@ -3011,14 +3454,17 @@ def _disk_change_accept_option(st: _Gl080Storage) -> bool:
             # GO TO class 1 over an interactive retry. The re-prompt is dropped;
             # the REJECTION is kept, and rejecting means the computed path
             # stands. No table is affected either way.
-            _LOG.warning(
-                "archive path override rejected: its first character is a "
-                "space [general/gl080.cbl:L556]; keeping %r",
-                st.file_defs.file_defs_a.file_2,
-            )
+            # NO RECORD HERE. `if file-2 (1:1) = space go to accept-option`
+            # [general/gl080.cbl:L556-L557] is a test and a transfer that display
+            # nothing, and the record named the path it was keeping (CWE-532). The
+            # transfer itself is preserved.
+            pass
         else:
             st.file_defs.file_defs_a.file_2 = candidate
-            _LOG.info("archive path overridden to %r", candidate)
+            #  THE PATH IS NOT IN THE RECORD. `File-2` is an absolute filesystem path
+            # from the deployment's own configuration [copybooks/wsnames.cob], which the
+            # safe-event schema excludes (CWE-532) and which differs between environments, so
+            # a record naming it could not be identical across two runs of one scenario.
 
     # Control FALLS THROUGH into `main-exit.` [general/gl080.cbl:L559].
     return False
@@ -3035,7 +3481,10 @@ def _disk_change_main_exit(st: _Gl080Storage) -> None:
         st: The program's storage, unchanged by this paragraph.
     """
     # 559  exit section.
-    _LOG.debug("disk-change complete; option a=%s", st.a)
+    #  NO RECORD HERE. The frozen statement this stood for displays nothing -
+    # gl080's thirty-nine `display`s are all accounted for, and none of them is at
+    # this site - so the record was invented (R-4). Progress and completion traces
+    # of internal phase boundaries are not events the compiled program produces.
     return
 
 
@@ -3086,10 +3535,11 @@ def _gl080c(st: _Gl080Storage) -> None:
     # 568  display  "/ Item  - " at 2352 ...
     # Screen furniture with no database effect, so log records (Agent Action
     # Plan section 0.3.4). They must not alter control flow, and they do not.
-    _LOG.info(
-        "Phase - 3.  Transaction Deletion: deleting cycle %s",
-        st.file_access.curs2_parts.lin2,
-    )
+    #  THE CYCLE NUMBER IS NOT IN THE RECORD. The accounting cycle selects
+    # which batches a run touches, so it is business data by the same rule that
+    # excludes a batch number; the phase label is what the frozen `display` puts on
+    # the screen alongside it and is kept.
+    _LOG.info("Deleting.")
 
     # 570  perform  GL-Batch-Open.        *> open  i-o  batch-file.
     # `GL-Batch-Open.` [copybooks/Proc-ACAS-FH-Calls.cob:L419] sets the function
@@ -3233,7 +3683,10 @@ def _gl080c_main_exit(st: _Gl080Storage) -> None:
         st: The program's storage, unchanged by this paragraph.
     """
     # 597  exit section.
-    _LOG.debug("gl080c complete")
+    #  NO RECORD HERE. The frozen statement this stood for displays nothing -
+    # gl080's thirty-nine `display`s are all accounted for, and none of them is at
+    # this site - so the record was invented (R-4). Progress and completion traces
+    # of internal phase boundaries are not events the compiled program produces.
     return
 
 
@@ -3276,7 +3729,12 @@ def _del_process(st: _Gl080Storage) -> None:
     # Screen furniture. `arc-process` makes the same display at
     # [general/gl080.cbl:L448] and additionally moves the value into the archive
     # header at L449; there is no header here, so the display stands alone.
-    _LOG.debug("deleting postings of batch %s", st.batch.ws_batch_key.ws_batch_nos)
+    #  THE KEY IS NOT IN THE RECORD. The frozen `display` shows the batch or
+    # posting number on a curses screen as a moving progress counter; a batch number
+    # and a posting number are business keys, which the safe-event schema in
+    # `acas_posting/dal/status.py` excludes (CWE-532). The progress display's only
+    # purpose was to reassure an operator watching a terminal, and there is no
+    # terminal; the rows themselves are what the scenario diff compares.
 
     # 607  perform  GL-Posting-Open.      *> open  i-o  posting-file.
     # THE INNER HALF OF THE ASYMMETRIC PAIR - the close is in the caller at
@@ -3349,7 +3807,12 @@ def _del_process_loop(st: _Gl080Storage) -> None:
             continue
 
         # 620  display  post-number at 2364 ...
-        _LOG.debug("deleting posting %s", st.posting.ws_post_key.post_number)
+        #  THE KEY IS NOT IN THE RECORD. The frozen `display` shows the batch or
+        # posting number on a curses screen as a moving progress counter; a batch number
+        # and a posting number are business keys, which the safe-event schema in
+        # `acas_posting/dal/status.py` excludes (CWE-532). The progress display's only
+        # purpose was to reassure an operator watching a terminal, and there is no
+        # terminal; the rows themselves are what the scenario diff compares.
 
         # 622  perform  GL-Posting-Delete.   *> delete  posting-file  record.
         # THE TABLE EFFECT OF PHASE 3, one row per pass. `GL-Posting-Delete.`
@@ -3372,7 +3835,11 @@ def _del_process_main_exit(st: _Gl080Storage) -> None:
         st: The program's storage, unchanged by this paragraph.
     """
     # 625  exit section.
-    _LOG.debug("del-process complete for batch %s", st.batch.ws_batch_key.ws_batch_nos)
+    #  NO RECORD HERE. The frozen statement this stood for displays nothing -
+    # gl080's thirty-nine `display`s are all accounted for, and none of them is at
+    # this site - so the record was invented (R-4). Progress and completion traces
+    # of internal phase boundaries are not events the compiled program produces.
+    # It also named the batch number.
     return
 
 
@@ -3445,10 +3912,10 @@ def _compress_post(st: _Gl080Storage) -> None:
         # GO TO class 3 - a transfer to this section's exit paragraph
         # [general/gl080.cbl:L705]. Reproduced as a call to that paragraph
         # followed by a return.
-        _LOG.debug(
-            "compress-post skipped: the file system in use is not Cobol files "
-            "[general/gl080.cbl:L633]"
-        )
+        #  NO RECORD HERE. The frozen statement this stood for displays nothing -
+        # gl080's thirty-nine `display`s are all accounted for, and none of them is at
+        # this site - so the record was invented (R-4). Progress and completion traces
+        # of internal phase boundaries are not events the compiled program produces.
         _compress_post_main_exit(st)
         return
 
@@ -3835,7 +4302,11 @@ def _compress_post_loop2(st: _Gl080Storage) -> bool:
         # A GROUP MOVE of the 101 raw characters into a group receiver, so no
         # child picture is applied and no numeric conversion happens. Delegated
         # whole; see `_WorkFile.write_from` for how the field values travel.
-        image = move.move_group(
+        # THE RESULT IS NOT BOUND. It was bound only so a log record could report
+        # its length and the work file's path, and that record is gone. The MOVE itself
+        # stays because it is the frozen statement, and its effect is applied through
+        # `posting_group`, the receiver it is given.
+        move.move_group(
             st.work_file.record, posting_group, length=posting_length
         )
         # The 101-character sender pads to the group's 103, which is the width
@@ -3849,11 +4320,11 @@ def _compress_post_loop2(st: _Gl080Storage) -> bool:
         # every facade call.
         if st.work_file.posting_image is not None:
             st.posting = st.work_file.posting_image
-        _LOG.debug(
-            "contraction restored a %s-character posting image from %s",
-            len(image),
-            st.work_file.name,
-        )
+        #  NO RECORD HERE. The frozen statement this stood for displays nothing -
+        # gl080's thirty-nine `display`s are all accounted for, and none of them is at
+        # this site - so the record was invented (R-4). Progress and completion traces
+        # of internal phase boundaries are not events the compiled program produces.
+        # It also named the work file's own path.
 
         # 683  perform  GL-Posting-Write.   *> write posting-record from ...
         facade.gl_posting_write(st.posting_ctx())
@@ -3976,7 +4447,10 @@ def _compress_post_main_exit(st: _Gl080Storage) -> None:
         st: The program's storage, unchanged by this paragraph.
     """
     # 708  exit     section.
-    _LOG.debug("compress-post complete")
+    #  NO RECORD HERE. The frozen statement this stood for displays nothing -
+    # gl080's thirty-nine `display`s are all accounted for, and none of them is at
+    # this site - so the record was invented (R-4). Progress and completion traces
+    # of internal phase boundaries are not events the compiled program produces.
     return
 
 
@@ -4096,7 +4570,12 @@ def _eval_msg_exit(st: _Gl080Storage) -> None:
         st: The program's storage, unchanged by this paragraph.
     """
     # 716  exit section.
-    _LOG.debug("fs-reply %s reads %r", st.file_access.fs_reply, st.ws_eval_msg)
+    #  NO RECORD HERE. The frozen statement this stood for displays nothing -
+    # gl080's thirty-nine `display`s are all accounted for, and none of them is at
+    # this site - so the record was invented (R-4). Progress and completion traces
+    # of internal phase boundaries are not events the compiled program produces.
+    # The status and its message DO reach a record, once, at the one site the frozen
+    # source displays them [general/gl080.cbl:L691-L695].
     return
 
 
@@ -4218,12 +4697,11 @@ def _zz070_exit(st: _Gl080Storage) -> None:
         st: The program's storage, unchanged by this paragraph.
     """
     # 747  exit     section.
-    _LOG.debug(
-        "run date %r presented as %r under date form %s",
-        st.to_day,
-        st.ws_date_formats.ws_date,
-        st.system.system_data_block.date_form,
-    )
+    #  NO RECORD HERE. The frozen statement this stood for displays nothing -
+    # gl080's thirty-nine `display`s are all accounted for, and none of them is at
+    # this site - so the record was invented (R-4). Progress and completion traces
+    # of internal phase boundaries are not events the compiled program produces.
+    # It also named the run date twice - a date with business meaning (CWE-532).
     return
 
 
@@ -4286,7 +4764,11 @@ def run(
         [general/gl080.cbl:L408-L409] AND the whole of end-of-period processing
         [general/gl080.cbl:L324-L326], so it stops every batch stamp, every
         posting delete, the ledger-quarter rollover and the cycle increment.
-        Default 0, meaning proceed.
+        Default 0, meaning proceed. ITS DOMAIN IS EXACTLY {0, 9}: `if a not =
+        zero go to accept-option` [general/gl080.cbl:L548-L549] returns every
+        other value to the prompt, so no other value can reach the statements
+        below it. Any other value raises `DiskChangeOptionNotAcceptable` rather
+        than proceeding (finding CLI-07).
     `archive_path_override`  from [general/gl080.cbl:L555]. Edits where the flat
         archive rows are written. NO TABLE EFFECT - the archive is not a schema
         table. Default None, meaning keep the path `disk-change` computes at
@@ -4332,11 +4814,15 @@ def run(
         dal_common: `01 ACAS-DAL-Common-data.`
             [copybooks/Test-Data-Flags.cob]. A fresh record when omitted.
         run_confirmed: See above. False reproduces Escape or "A".
-        disk_change_option: See above. 9 reproduces the abort.
+        disk_change_option: See above. 0 proceeds and 9 reproduces the abort;
+            no third value is accepted.
         archive_path_override: See above.
         dal_options: Forwarded to every handler.
 
     Raises:
+        DiskChangeOptionNotAcceptable: `disk_change_option` is neither 0 nor 9,
+            which `accept-option.` [general/gl080.cbl:L542-L549] cannot leave the
+            prompt on. Raised before the archiving walk, so nothing is written.
         _StopRun: `stop run.` [general/gl080.cbl:L649], when `compress-post`
             finds the posting record and its work record are different lengths.
             The run unit ends; see AMBIGUITY Q-23 for when this can happen.
@@ -4676,13 +5162,32 @@ def run(
 #          [general/gl080.cbl:L345] uses it to subscript `05 Ledger-Q ... occurs
 #          4.` [copybooks/wsledger.cob:L36] with NO bounds check anywhere. `a` is
 #          `pic 99`, so its domain is 0..99 against a table of 4. Reproduced in
-#          `_gl080_main_loop` / `_move_ledger_balance_to_quarter`; NO GUARD ADDED,
-#          because the missing guard IS the anomaly. The subscript is resolved
-#          through the declared occurrence range so that an out-of-range value
-#          fails loudly rather than silently wrapping to the last quarter the way
-#          a negative Python index would - the divergence from COBOL's silent
-#          overwrite of adjacent storage is AMBIGUITY Q-19, and it is neither
-#          pre-empted with a check nor swallowed.
+#          `_gl080_main_loop` / `_move_ledger_balance_to_quarter`; NO GUARD ADDED
+#          and NO EXCEPTION RAISED, because both would BE the fix rule R-4 forbids.
+#          The subscript is resolved BY BYTE ADDRESS over the record's own declared
+#          widths, exactly as COBOL resolves it, by `move.subscripted_store` over
+#          `_LEDGER_RECORD_GROUP` - so the anomaly's storage effect is
+#          reproduced rather than declared unreachable. Four bands, three of them
+#          fully derived:
+#            a=1..4   the four quarter fields.               OBSERVABLE.
+#            a=0      bytes 47-52 = `Ledger-Last`.           OBSERVABLE - the
+#                     quarter store lands on the YEAR-END field. Unreachable via
+#                     [general/gl080.cbl:L324-L332] itself, which needs
+#                     `Period = 0` and so a divide by zero, but exact.
+#            a=5..12  bytes 77-124, wholly inside `filler pic x(50)`
+#                     [copybooks/wsledger.cob:L37]. NOT OBSERVABLE - `GLLEDGER-REC`
+#                     has eleven columns and binds none of those bytes, so the row
+#                     is rewritten with every column unchanged. THIS IS THE BAND
+#                     THE ANOMALY ACTUALLY REACHES: with `Period = 1` the guard
+#                     passes, L328 gives `a = Scycle` and L331 agrees, so `a` walks
+#                     5, 6, 7, 8, 10, 11, 12 as cycles advance (`a = 9` alone is
+#                     unreachable, the guard tests it).
+#            a>=13    at or past the record's 126-byte end. The ONLY remaining part
+#                     of AMBIGUITY Q-19; no declared field is changed and nothing
+#                     is invented.
+#          A NEGATIVE PYTHON INDEX WAS NEVER AN OPTION either: `ledger_q[a - 1]`
+#          would write QUARTER FOUR when `a` is zero, which is neither the COBOL's
+#          behaviour nor an honest failure.
 #
 #     A-3  TWO DISAGREEING NOTIONS OF "CURRENT QUARTER".
 #          The computed subscript `a` [general/gl080.cbl:L328],
@@ -4865,10 +5370,16 @@ def run(
 #     Q-18  `move 1 to File-Key-No.` [general/gl080.cbl:L288]. The facade's
 #           dispatch pins the key number to the primary key on every verb, so
 #           whether this move has any observable effect at all is open.
-#     Q-19  What the compiled program does at `ledger-q (a)`
-#           [general/gl080.cbl:L345] when `a` is 0 or greater than 4. COBOL
-#           silently reads or writes adjacent storage; the migration must know
-#           WHICH storage before it can claim to reproduce it.
+#     Q-19  NARROWED TO `a >= 13` ONLY. The question was what the compiled program
+#           does at `ledger-q (a)` [general/gl080.cbl:L345] when `a` is 0 or
+#           greater than 4. Byte-address arithmetic over the record's own declared
+#           widths answers it for `a = 0` (bytes 47-52, `Ledger-Last`) and for
+#           `a = 5..12` (bytes 77-124, wholly inside the unbound trailing filler),
+#           and both are now reproduced - see A-2. What REMAINS open is `a >= 13`,
+#           where the six bytes reach at or past the record's 126-byte end and the
+#           overwritten storage is whatever the compiler placed after the record
+#           area. That is not derivable from any declaration, so no declared field
+#           is changed and the condition is logged; the oracle must settle it.
 #     Q-20  Whether `acas006`'s `Open-Output` [general/gl080.cbl:L673] TRUNCATES
 #           `GLPOSTING-REC`, the way the transfer-file handler's does
 #           [common/acas008.cbl:L313-L319]. If it does, that one statement empties
@@ -4923,4 +5434,3 @@ def run(
 #       none. `gl080`'s own aborts are three local returns and one `stop run`.
 #
 # --- end traceability -----------------------------------------------------
-

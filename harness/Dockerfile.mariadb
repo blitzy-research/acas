@@ -33,9 +33,17 @@
 #  a non-empty diff is always a real behavioural difference and never an
 #  artefact of the comparison. That property is the whole point of the image,
 #  and it is why this Dockerfile is deliberately, aggressively boring: it pins
-#  a server-level `autocommit=1` -- the only mode in which the frozen COBOL
-#  writes durable rows, proven from the frozen source below -- and applies the
-#  frozen schema. Nothing else.
+#  a server-level `autocommit=0` -- the mode the Agent Action Plan mandates for
+#  the seeding window, derived from the loader banner at
+#  [common/glbatchLD.cbl:L9-L13] -- and applies the frozen schema. Nothing else.
+#
+#  That mode has a consequence the SERVER CONFIGURATION section below documents
+#  in full and this image deliberately does NOT repair: the shipped loaders and
+#  bridges contain no reachable COMMIT, so under the mandated mode their writes
+#  are not durable. That is a defect of the frozen code, reproduced rather than
+#  worked around (R-4). Repairing it here would mean either issuing a COMMIT the
+#  frozen code does not, or running the server in a mode the AAP does not
+#  sanction -- and the AAP is the frozen source of truth for this migration.
 #
 #  POSITION IN THE TREE
 #  --------------------
@@ -135,14 +143,16 @@
 #  loaders. Those loaders reach the server through the very same
 #  `cobmysqlapi.o` interface the posting bridges use and -- as the SERVER
 #  CONFIGURATION section below establishes from the frozen source -- neither the
-#  loaders nor the bridges ever execute a REACHABLE COMMIT. Seeded rows and
-#  posted rows are consequently durable under exactly one server setting,
-#  `autocommit=1`, and that setting is a property of this SERVER rather than of
-#  one script precisely so that every client session -- the COBOL loaders, the
-#  COBOL bridges via `cobmysqlapi.o`, the `mariadb` CLI used by `seed.sh` and
-#  `reset_db.sh`, and the Python driver used by `dump_tables.py` -- inherits it
-#  identically. If they did not, the two sides of the diff would not be
-#  comparable.
+#  loaders nor the bridges ever execute a REACHABLE COMMIT. Under the
+#  AAP-mandated `autocommit=0` their writes are therefore NOT durable: MariaDB
+#  discards each session's implicit transaction at disconnect. That consequence
+#  is recorded, not corrected -- see "THE NO-COMMIT DEFECT" below.
+#
+#  The setting is a property of this SERVER rather than of one script precisely
+#  so that every client session -- the COBOL loaders, the COBOL bridges via
+#  `cobmysqlapi.o`, the `mariadb` CLI used by `seed.sh` and `reset_db.sh`, and
+#  the Python driver used by `dump_tables.py` -- inherits it identically. If they
+#  did not, the two sides of the diff would not be comparable.
 #
 #  CREDENTIALS
 #  -----------
@@ -205,7 +215,7 @@ FROM --platform=linux/amd64 mariadb:10.11.7@sha256:27292753bb759cd22be72e3c8192f
 #  timestamp label: those change on every build and would break the
 #  byte-identical-dump guarantee this tree exists to provide (R-6).
 LABEL org.opencontainers.image.title="ACAS posting-cycle oracle - MariaDB" \
-      org.opencontainers.image.description="MariaDB 10.11.7 serving the frozen ACASDB schema with autocommit enabled, matching the sole mode in which the frozen COBOL loaders and bridges write durable rows, for COBOL-vs-Python posting-cycle parity comparison." \
+      org.opencontainers.image.description="MariaDB 10.11.7 serving the frozen ACASDB schema with autocommit=0, the mode the Agent Action Plan mandates and the frozen loader banners require, for COBOL-vs-Python posting-cycle parity comparison." \
       org.opencontainers.image.base.name="docker.io/library/mariadb:10.11.7@sha256:27292753bb759cd22be72e3c8192f1259ef47010c8634b5da0bc886845efe9fd" \
       org.opencontainers.image.base.digest="sha256:27292753bb759cd22be72e3c8192f1259ef47010c8634b5da0bc886845efe9fd" \
       acas.harness.platform="linux/amd64" \
@@ -213,17 +223,18 @@ LABEL org.opencontainers.image.title="ACAS posting-cycle oracle - MariaDB" \
       acas.harness.role="oracle-database" \
       acas.harness.schema.source="mysql/ACASDB.sql" \
       acas.harness.schema.frozen="true" \
-      acas.harness.autocommit="1" \
+      acas.harness.autocommit="0" \
       acas.harness.cobol.toolchain="absent"
 
 
 # -----------------------------------------------------------------------------
-#  SERVER CONFIGURATION -- autocommit MUST be ON
+#  SERVER CONFIGURATION -- autocommit MUST be OFF
 #
-#  This is the single most important behavioural setting in the image, and the
-#  reasoning behind it is counter-intuitive enough to be set out in full,
-#  because the maintainer's own loader headers appear at first reading to demand
-#  the opposite.
+#  This is the single most important behavioural setting in the image. It is set
+#  to the mode the Agent Action Plan mandates, and the consequence of that mode
+#  is set out in full below because it is counter-intuitive: the frozen code
+#  cannot actually commit under it, so the honest thing is to state that plainly
+#  rather than quietly choose a mode that hides it.
 #
 #  WHAT THE LOADER HEADERS SAY
 #  ---------------------------
@@ -279,38 +290,78 @@ LABEL org.opencontainers.image.title="ACAS posting-cycle oracle - MariaDB" \
 #      EXPOSES `MySQL_commit` but never calls it internally, and its
 #      `mysql_real_connect` never alters the session autocommit mode.
 #
-#  WHY THAT FORCES autocommit=1
-#  ----------------------------
+#  WHY autocommit=0 -- THE AAP MANDATES IT
+#  ---------------------------------------
+#  Three separate provisions of the Agent Action Plan require the OFF mode, and
+#  each derives it from the same frozen banner:
+#    * §0.2.1.1, on the seeding contract: "One operational constraint carries
+#      into the harness: the batch loader turns autocommit off
+#      [common/glbatchLD.cbl:L9-L13]".
+#    * §0.4.1.7, on THIS file: "Applies the frozen schema verbatim; autocommit
+#      off to match the loaders [common/glbatchLD.cbl:L9-L13]".
+#    * §0.5.2, among the two harness operational constraints: "autocommit must
+#      be **off** during seeding, because the batch loader sets it off
+#      explicitly [common/glbatchLD.cbl:L9-L13], and the seeded state depends on
+#      its commit boundaries."
+#  The banner itself, verbatim from [common/glbatchLD.cbl:L9-L13]:
+#      *>  This modules uses commit and rollback so *
+#      *>  you MUST ensure that autocommit is OFF   *
+#      *>   in the rdb settings. It is as default   *
+#      *>   set ON.                                 *
+#  It appears in EVERY ONE of the 28 `common/*LD.cbl` loaders, not just the batch
+#  loader -- e.g. [common/analLD.cbl:L11], [common/finalLD.cbl:L10],
+#  [common/dfltLD.cbl:L10], [common/systemLD.cbl:L9], [common/sys4LD.cbl:L10].
+#
+#  Note the banner's exact wording: it instructs the OPERATOR to ensure the
+#  setting, and cannot do otherwise. The vendored C interface
+#  `cobmysqlapi38.c` exposes 25 entry points -- MySQL_init, MySQL_real_connect,
+#  MySQL_query, MySQL_commit, MySQL_rollback, MySQL_close and the rest -- and
+#  `MySQL_autocommit` is NOT among them. No COBOL program in the checkout can
+#  change the mode; only server configuration can. That is why this file, and
+#  not any script, is the single authority.
+#
+#  THE NO-COMMIT DEFECT -- PRESERVED, NOT REPAIRED (R-4)
+#  -----------------------------------------------------
 #  Under `autocommit=0` MariaDB opens an implicit transaction on the first DML
 #  statement of every session and discards it if the client disconnects without
-#  committing. Since NO reachable COMMIT exists anywhere in the loader family,
-#  the bridges, the handlers or the C interface, `autocommit=0` makes every
-#  COBOL write -- seeding AND posting alike -- vanish at session close, while
-#  the Python side commits (`autocommit=True` in
-#  `acas_posting/dal/connection.py`) and keeps its rows. The state diff would
-#  then report a difference on every single row of every scenario, caused
-#  entirely by the harness rather than by the migration. That is precisely the
-#  comparison artefact R-6 forbids.
+#  committing. The frozen code never commits, which is measured rather than
+#  assumed:
+#    * Every `perform aa020-Rollback` in all 28 loaders is COMMENTED OUT -- 78
+#      sites, zero live ones.
+#    * `perform aa030-Commit` occurs EXACTLY ONCE anywhere in the loader family,
+#      at [common/irsdfltLD.cbl:L437], and it too is commented out.
+#    * `common/systemLD.cbl` declares both paragraphs (L406, L420) with no
+#      perform site at all, not even a commented one.
+#  So `aa020-Rollback` and `aa030-Commit` are dead paragraphs in every loader:
+#  each contains a live `call "MySQL_rollback"` / `call "MySQL_commit"` that
+#  nothing reaches. The bridges and handlers are the same -- zero COMMIT,
+#  ROLLBACK or START TRANSACTION anywhere in them.
 #
-#  Verified empirically against this exact base image: with the server started
-#  `--autocommit=0`, an INSERT followed by a clean disconnect and no COMMIT --
-#  which is literally what every ACAS loader and bridge does -- leaves a fresh
-#  session reading ZERO rows; with `autocommit=1` the identical sequence leaves
-#  the row present.
+#  The consequence, stated plainly: under the mandated mode a loader's rows are
+#  discarded at disconnect, so seeding leaves an EMPTY table set, and a COBOL
+#  posting run likewise leaves nothing. Verified empirically against this exact
+#  base image -- with the server started `--autocommit=0`, an INSERT followed by
+#  a clean disconnect and no COMMIT leaves a fresh session reading ZERO rows.
 #
-#  RELATIONSHIP TO THE AAP
-#  -----------------------
-#  The AAP scopes the loader requirement to the seeding window: "autocommit must
-#  be OFF **during seeding**" (§0.5.2, and §0.4.1.7's derivation from
-#  [common/glbatchLD.cbl:L9-L13]). Because the shipped loaders' commit
-#  boundaries are dead code, there is no seeding window in which OFF produces
-#  durable rows: an OFF window would discard the entire seed. The requirement is
-#  therefore satisfied in the only way the frozen source permits -- the loaders
-#  run exactly as written, under the autocommit default the maintainer says they
-#  normally get ("It is as default set ON"), which is also the mode his own
-#  testing notes describe. The commit/rollback intention is preserved as a
-#  reproduced legacy defect (R-4), not repaired: this image does not enable
-#  transactional seeding that the frozen code cannot drive.
+#  That is a defect of the frozen code, and R-4 makes it a specification rather
+#  than a bug: "A defect reproduced is correct; a defect fixed is a failure."
+#  The maintainer observed it himself and left his own notes beside the dead
+#  paragraphs -- [common/analLD.cbl:L442] and [common/glbatchLD.cbl:L453] "These
+#  do not work during testing with mariadb - Non transactional model or
+#  autocommit set ON", [common/analLD.cbl:L377] "otherwise as normally it is set
+#  to autocommit !!!!!", [common/finalLD.cbl:L361] "which can be ignored unless
+#  you thought autocommit was set up."
+#
+#  This image therefore reproduces the defect and records it. It does NOT:
+#    * issue a COMMIT the frozen loaders omit -- that would repair the defect;
+#    * run the server in a mode the AAP does not sanction, however convenient
+#      that mode would be for producing a non-empty diff -- the AAP is the
+#      frozen source of truth and is aligned to, never reinterpreted;
+#    * touch a single line of frozen COBOL.
+#  Anyone reading a scenario diff must therefore read it knowing which side of
+#  the comparison committed: `acas_posting/dal/connection.py` commits per
+#  statement as the bridges' own per-statement model requires, while the
+#  compiled side, under the mandated mode, does not.
 #
 #  Set at SERVER level, not per session, so that every client inherits it
 #  identically: the COBOL loaders, the COBOL bridges via `cobmysqlapi.o`, the
@@ -319,11 +370,12 @@ LABEL org.opencontainers.image.title="ACAS posting-cycle oracle - MariaDB" \
 #  differ from the other and turn this image into the comparison artefact that
 #  R-6 forbids.
 #
-#  Declared EXPLICITLY rather than left to the upstream default. The base image
-#  ships no autocommit setting anywhere under /etc/mysql, so the built-in
-#  default of 1 would already apply -- but an explicit declaration makes the
-#  setting assertable by `seed.sh`, `reset_db.sh` and `run_cobol_scenario.sh`,
-#  and immune to a future base-image default change.
+#  Declared EXPLICITLY, and here it is load-bearing rather than merely tidy. The
+#  base image ships no autocommit setting anywhere under /etc/mysql, so the
+#  built-in default of 1 would otherwise apply -- the very mode the AAP forbids.
+#  This declaration is what actually establishes the mandated mode, and it makes
+#  the setting assertable by `seed.sh`, `reset_db.sh` and
+#  `run_cobol_scenario.sh`.
 #
 #  Written INTO the image rather than shipped as a separate `harness/my.cnf`:
 #  the harness folder inventory is exactly eleven files plus `scenarios/`, and
@@ -361,11 +413,13 @@ LABEL org.opencontainers.image.title="ACAS posting-cycle oracle - MariaDB" \
 #                                         there are no parallel scenario runs
 #                                         against the shared database
 #
-#  NOTE for downstream scripts: with autocommit=1, every DML statement commits
-#  as it completes, which is the only mode in which the frozen COBOL loaders and
-#  bridges -- none of which reaches a COMMIT -- leave durable rows. `seed.sh`,
-#  `reset_db.sh` and `run_cobol_scenario.sh` ASSERT this mode before doing work;
-#  none of them ever SETS it, so this file remains the single authority.
+#  NOTE for downstream scripts: with autocommit=0 no DML statement commits of
+#  its own accord, and the frozen COBOL loaders and bridges reach no COMMIT, so
+#  their writes do not survive session close. That is the AAP-mandated mode and
+#  the reproduced defect described above, not a misconfiguration. `seed.sh`,
+#  `reset_db.sh` and `run_cobol_scenario.sh` ASSERT this mode before doing work
+#  and warn about the durability consequence; none of them ever SETS it, so this
+#  file remains the single authority.
 # -----------------------------------------------------------------------------
 RUN set -eu; \
     printf '%s\n' \
@@ -373,26 +427,37 @@ RUN set -eu; \
       '# ACAS compiled-COBOL oracle -- server configuration.' \
       '# Generated by harness/Dockerfile.mariadb. Do not edit in a running container.' \
       '#' \
-      '# autocommit=1 is REQUIRED for the frozen COBOL to write durable rows.' \
+      '# autocommit=0 is MANDATED by the Agent Action Plan: section 0.2.1.1 (the' \
+      '# seeding contract), section 0.4.1.7 (this file: "autocommit off to match' \
+      '# the loaders") and section 0.5.2 (the harness operational constraints).' \
       '#' \
-      '# The loader banner at [common/glbatchLD.cbl:L9-L13] asks for OFF:' \
+      '# All three derive it from the loader banner at' \
+      '# [common/glbatchLD.cbl:L9-L13], which appears in all 28 common/*LD.cbl:' \
       '#   "This modules uses commit and rollback so you MUST ensure that autocommit' \
       '#    is OFF in the rdb settings. It is as default set ON."' \
-      '# but the shipped code never carries that out. In all 28 common/*LD.cbl' \
-      '# loaders every "perform aa020-Rollback" is commented out and aa030-Commit' \
-      '# has zero perform sites, so both paragraphs are dead code:' \
-      '#   grep -n "^ *perform.*\\(aa020\\|aa030\\|Commit\\|Rollback\\)" common/*LD.cbl' \
-      '# returns no matches. The twenty in-scope bridges, the in-scope handlers' \
-      '# (acas007, acas008, acasirsub4) and every bridge close path likewise' \
-      '# contain zero COMMIT/ROLLBACK/START TRANSACTION, and cobmysqlapi38.c' \
-      '# exposes MySQL_commit without ever calling it.' \
+      '# The banner instructs the OPERATOR because no COBOL program can do it:' \
+      '# the vendored cobmysqlapi38.c exposes MySQL_commit and MySQL_rollback but' \
+      '# NOT MySQL_autocommit, so server configuration is the only lever. Hence' \
+      '# this file is the single authority and no script ever issues SET.' \
       '#' \
-      '# Under autocommit=0 MariaDB would therefore discard every COBOL write --' \
-      '# seeding and posting alike -- at session close, while the Python side' \
-      '# commits, making the parity diff report a harness artefact on every row.' \
-      '# The maintainer describes the same conclusion at [common/analLD.cbl:L442]:' \
-      '#   "These do not work during testing with mariadb - Non transactional' \
-      '#    model or autocommit set ON"' \
+      '# CONSEQUENCE, PRESERVED NOT REPAIRED (R-4): the shipped code never' \
+      '# reaches a COMMIT. In all 28 loaders every "perform aa020-Rollback" is' \
+      '# commented out (78 sites, none live), and "perform aa030-Commit" occurs' \
+      '# exactly once anywhere -- [common/irsdfltLD.cbl:L437] -- also commented' \
+      '# out. Both paragraphs are therefore dead code in every loader, each' \
+      '# holding a live call "MySQL_commit"/"MySQL_rollback" nothing reaches.' \
+      '# The twenty in-scope bridges, the in-scope handlers (acas007, acas008,' \
+      '# acasirsub4) and every bridge close path contain zero' \
+      '# COMMIT/ROLLBACK/START TRANSACTION.' \
+      '#' \
+      '# So under this mandated mode MariaDB discards each COBOL session at' \
+      '# disconnect: seeding leaves no rows and a COBOL posting run leaves none.' \
+      '# The maintainer saw this himself -- [common/analLD.cbl:L442] "These do' \
+      '# not work during testing with mariadb - Non transactional model or' \
+      '# autocommit set ON". R-4 makes that observed behaviour the' \
+      '# specification: a defect reproduced is correct, a defect fixed is a' \
+      '# failure. Nothing here issues the missing COMMIT and nothing overrides' \
+      '# the AAP to obtain a more convenient diff.' \
       '#' \
       '# Set server-wide so every client -- COBOL loaders, COBOL bridges via' \
       '# cobmysqlapi.o, the mariadb CLI, and the Python driver -- inherits it' \
@@ -405,10 +470,11 @@ RUN set -eu; \
       '# PAD_CHAR_TO_FULL_LENGTH, no durability change, no query logging.' \
       '#' \
       '[mysqld]' \
-      'autocommit=1' \
+      'autocommit=0' \
       > /etc/mysql/conf.d/99-acas-oracle.cnf; \
     chmod 0644 /etc/mysql/conf.d/99-acas-oracle.cnf; \
-    grep -qx 'autocommit=1' /etc/mysql/conf.d/99-acas-oracle.cnf
+    grep -qx 'autocommit=0' /etc/mysql/conf.d/99-acas-oracle.cnf; \
+    ! grep -qx 'autocommit=1' /etc/mysql/conf.d/99-acas-oracle.cnf
 
 
 #  TARGET DATABASE
@@ -626,7 +692,221 @@ RUN set -eu; \
 
 
 # -----------------------------------------------------------------------------
-#  PRIVILEGE POSTURE -- LEAST PRIVILEGE, AND WHY THERE IS NO `USER` HERE
+#  SQL LEAST PRIVILEGE -- the application account is reduced to DML
+#
+#  THE DEFECT THIS CLOSES. The vendor entrypoint grants the application account
+#  everything on the target schema:
+#
+#      userGrants="GRANT ALL ON \`${MARIADB_DATABASE//_/\\_}\`.* TO
+#                  '$MARIADB_USER'@'%';"      -- vendor docker-entrypoint.sh:L441
+#
+#  `ALL` on a schema is DROP, CREATE, ALTER, INDEX, LOCK TABLES, CREATE
+#  TEMPORARY TABLES, REFERENCES, TRIGGER, CREATE/SHOW VIEW, CREATE/ALTER
+#  ROUTINE, EXECUTE and EVENT on top of the four statements the cycle actually
+#  issues. So the credential the migrated cycle authenticates with every day
+#  could drop all 33 tables -- and `harness/reset_db.sh` GATE 1 and
+#  `harness/docker-compose.yml` both DOCUMENTED the opposite, that the
+#  application account "does NOT hold the rights to drop the schema". The
+#  separation was described but never provisioned. Removing the admin fallback
+#  from reset_db.sh stopped that script from USING the runtime credential
+#  destructively; it did not remove the CAPABILITY, which is what a leaked
+#  credential exercises. This step removes the capability, and the two
+#  documentation sites are corrected to match.
+#
+#  WHY THE FOUR ARE SUFFICIENT -- MEASURED, NOT ASSUMED. Every SQL verb the
+#  application account can issue was enumerated across the twenty `dal/acas*`
+#  handler modules and the harness Python tools. The result is SELECT, INSERT,
+#  UPDATE and DELETE, plus session `SET` and transaction control, which need no
+#  privilege. There is no TRUNCATE, no LOCK TABLES, no CREATE TEMPORARY TABLE
+#  and no DDL on any runtime path. The one construct that reads like DDL is
+#  `acas008`'s `Open-Output`, which AAP 0.6.5 establishes means "delete every
+#  row" [common/acas008.cbl:L313-L319, L571-L574] and which the handler
+#  reproduces as a DELETE -- so it needs DELETE, not DROP.
+#
+#  WHAT KEEPS WORKING. `harness/reset_db.sh` is the only consumer that performs
+#  DDL and it authenticates as ACAS_DB_ADMIN_USER, which compose sets to `root`;
+#  the vendor grants root `ALL ON *.*` (entrypoint L383/L389) and nothing here
+#  touches it. `seed.sh` INSERTs, `dump_tables.py` SELECTs, the scenario runners
+#  post -- all four verbs, all retained.
+#
+#  WHY A SOURCED `.sh` AND NOT A `.sql`. The account NAME is runtime-supplied --
+#  compose passes `MARIADB_USER: ${ACAS_DB_USER:?...}` -- so it is unknown at
+#  build time and cannot be baked into a static `.sql`. The vendor's
+#  `docker_process_init_files` SOURCES a non-executable `.sh` into its own shell
+#  (entrypoint L76-L86), which gives this script `$MARIADB_USER`,
+#  `$MARIADB_DATABASE`, the `mysql_note`/`mysql_error` loggers and
+#  `docker_process_sql`. Using the vendor's own helper is the point: it
+#  authenticates via `MYSQL_PWD=$MARIADB_ROOT_PASSWORD` internally
+#  (entrypoint L296-L303), so this script never reads, echoes, or passes a
+#  password in argv, and no credential enters an image layer. The file is
+#  deliberately left NON-executable -- 0644, not 0755 -- because that is what
+#  selects the sourcing branch over the sub-process branch.
+#
+#  ORDERING IS LOAD-BEARING, AND VERIFIED. The vendor issues `${userGrants}` at
+#  entrypoint L489 and only then replays initdb.d at L534, so a REVOKE here runs
+#  AFTER the GRANT ALL and is not undone by it. Named `20-` so it also sorts
+#  after `05-` (sentinel) and `10-ACASDB.sql` (frozen schema): the grant is
+#  narrowed once the schema it applies to exists. The narrowed state lives in the
+#  `mysql` grant tables inside the data directory, so it survives every restart
+#  -- on a restart the entrypoint skips initdb.d, but it skips the GRANT ALL too.
+#
+#  THE DATABASE PATTERN IS ESCAPED THE WAY THE VENDOR ESCAPED IT. In a GRANT the
+#  schema is a LIKE pattern, where `_` is a single-character wildcard. The vendor
+#  wrote `${MARIADB_DATABASE//_/\\_}` and this REVOKE must name the identical
+#  pattern or it will not match the grant it is trying to remove. `ACASDB`
+#  contains no underscore, so the two forms coincide today -- the substitution is
+#  reproduced anyway so that they cannot diverge if the name ever changes.
+#
+#  R-3 COMPLIANCE. This adds no table, column, index, constraint or DDL of any
+#  kind to ACASDB: the schema still receives exactly the 33 frozen tables from
+#  `mysql/ACASDB.sql`, whose byte-for-byte digest is asserted above and is
+#  untouched by this step. REVOKE and GRANT administer a SERVER ACCOUNT; they are
+#  not schema evolution, and they are invisible to every table dump and state
+#  diff. What R-3 freezes is the schema, and the schema is unchanged.
+#
+#  IT VERIFIES ITSELF AND FAILS CLOSED. After narrowing, the script reads the
+#  grant back out of `information_schema.SCHEMA_PRIVILEGES` and asserts the held
+#  set is exactly the four expected privileges. If DROP is still present, or a
+#  privilege is missing, `mysql_error` aborts initialisation -- so the container
+#  never reaches "healthy" with a posture different from the one documented, and
+#  the scripts that wait for healthy cannot race ahead of it.
+# -----------------------------------------------------------------------------
+#  ON QUOTING, BECAUSE IT IS THE ONE FRAGILE PART. The SQL needs single quotes
+#  around the account name and the `%` host, and this file generates it from a
+#  `printf` whose arguments are single-quoted -- so a literal single quote cannot
+#  appear in them. Rather than escape through three layers (Dockerfile, /bin/sh,
+#  then the generated script), the generated script obtains the character
+#  arithmetically, `acas_q="$(printf '\047')"`, octal 39 being the apostrophe.
+#  Every generated line is then plainly single-quoted with no escaping at all,
+#  and the SQL is assembled by concatenation instead of a heredoc. An earlier
+#  revision used a placeholder word and a trailing `sed` to swap it for a quote;
+#  that is recorded here as rejected, because such a substitution rewrites the
+#  placeholder wherever it occurs -- including inside the script's own comments.
+RUN set -eu; \
+    printf '%s\n' \
+      '#!/bin/bash' \
+      '#  ACAS compiled-COBOL oracle -- SQL least privilege for the application' \
+      '#  account. Generated by harness/Dockerfile.mariadb; see the rationale' \
+      '#  there. SOURCED by the vendor entrypoint (NOT executable, by design), so' \
+      '#  $MARIADB_USER, $MARIADB_DATABASE, mysql_note/mysql_error and' \
+      '#  docker_process_sql are all in scope and no credential is handled here.' \
+      '#  bash, not sh: this is sourced into the vendor entrypoint, whose own' \
+      '#  shebang is #!/bin/bash, and it uses the same bash-only pattern' \
+      '#  substitution the vendor used to build the grant it narrows.' \
+      '#' \
+      '#  Runs AFTER the vendor GRANT ALL (entrypoint L489) because initdb.d is' \
+      '#  replayed at L534. Narrows that grant to the four statements the' \
+      '#  migrated cycle actually issues, then proves the result.' \
+      '' \
+      'if [ -z "${MARIADB_USER:-}" ]; then' \
+      '    mysql_note "least privilege: no MARIADB_USER, so the vendor created no application account and there is no grant to narrow."' \
+      '#  DEFENCE IN DEPTH, not the primary catch. Measured: the vendor rejects' \
+      '#  MARIADB_USER=root earlier than this, with "ERROR 1396 Operation CREATE' \
+      '#  USER failed" because the account already exists, so init aborts before' \
+      '#  this branch is reached. It is kept because that ordering is the' \
+      "#  vendor's to change, and because a superuser under any other name would" \
+      '#  reach here and must not be narrowed.' \
+      'elif [ "${MARIADB_USER}" = "root" ]; then' \
+      '    mysql_error "least privilege: MARIADB_USER is root. Narrowing it would strip the administrative account reset_db.sh GATE 1 requires. Provision a separate application account."' \
+      'elif [ -z "${MARIADB_DATABASE:-}" ]; then' \
+      '    mysql_note "least privilege: no MARIADB_DATABASE, so the vendor issued no schema-scoped grant to narrow."' \
+      'else' \
+      '    #  Octal 39 is the apostrophe. Obtained this way so that no line of' \
+      '    #  this generated file has to carry a literal single quote.' \
+      '    acas_q="$(printf "\047")"' \
+      '' \
+      '    #  CHARACTER-FOR-CHARACTER the expansion the vendor used to build the' \
+      '    #  grant being narrowed (entrypoint L441). In a GRANT the schema is a' \
+      '    #  LIKE pattern, so an underscore is a wildcard and must be escaped;' \
+      '    #  naming a different pattern here would fail to match the grant.' \
+      '    acas_pat="${MARIADB_DATABASE//_/\\_}"' \
+      '    acas_who="$(docker_sql_escape_string_literal "${MARIADB_USER}")"' \
+      '' \
+      '    #  TWO FORMS OF THE SAME GRANTEE, AND THEY ARE NOT INTERCHANGEABLE.' \
+      '    #  GRANT and REVOKE want it as SYNTAX -- the bare quoted user@host.' \
+      '    #  information_schema.SCHEMA_PRIVILEGES stores it as DATA, quotes' \
+      '    #  included, so comparing against it needs that same text as a SQL' \
+      '    #  string LITERAL, which means every embedded quote doubled and the' \
+      '    #  whole thing wrapped. Passing the syntax form to the comparison' \
+      '    #  yields a doubled-up quote run and a 1064.' \
+      '    acas_grantee="${acas_q}${acas_who}${acas_q}@${acas_q}%${acas_q}"' \
+      '    acas_grantee_lit="${acas_q}${acas_grantee//${acas_q}/${acas_q}${acas_q}}${acas_q}"' \
+      '' \
+      '    mysql_note "least privilege: reducing ${MARIADB_USER} on ${MARIADB_DATABASE} from ALL to SELECT, INSERT, UPDATE, DELETE (harness/Dockerfile.mariadb)"' \
+      '' \
+      '    #  THE REVOKE TAKES NO ON CLAUSE, AND THAT IS THE POINT. MariaDB has' \
+      '    #  two REVOKE forms: a scoped one, REVOKE <privs> ON <level> FROM' \
+      '    #  <user>, and a global one, REVOKE ALL PRIVILEGES, GRANT OPTION FROM' \
+      '    #  <user>, which takes no ON clause at all -- writing one is a syntax' \
+      '    #  error (1064). The global form is used deliberately: it clears every' \
+      '    #  privilege at EVERY level -- global, schema, table, column and' \
+      '    #  routine -- so no stray grant from any source can survive, whereas' \
+      '    #  the scoped form would clear only the one schema named. The account' \
+      '    #  keeps implicit USAGE and can still connect. The four privileges are' \
+      '    #  then granted back explicitly, so the posture is additive from zero' \
+      '    #  rather than subtractive from ALL.' \
+      '    printf "%s\n" \' \
+      '        "REVOKE ALL PRIVILEGES, GRANT OPTION FROM ${acas_grantee};" \' \
+      '        "GRANT SELECT, INSERT, UPDATE, DELETE ON \`${acas_pat}\`.* TO ${acas_grantee};" \' \
+      '        "FLUSH PRIVILEGES;" \' \
+      '      | docker_process_sql --database=mysql --binary-mode' \
+      '' \
+      '    #  Prove it, and refuse to finish initialisation if the posture is not' \
+      '    #  the documented one. SCHEMA_PRIVILEGES rather than SHOW GRANTS, so the' \
+      '    #  result is one sorted string that can be compared exactly.' \
+      '    acas_probe="SELECT IFNULL(GROUP_CONCAT(DISTINCT PRIVILEGE_TYPE"' \
+      '    acas_probe="${acas_probe} ORDER BY PRIVILEGE_TYPE SEPARATOR ${acas_q},${acas_q})"' \
+      '    acas_probe="${acas_probe}, ${acas_q}${acas_q}) FROM"' \
+      '    acas_probe="${acas_probe} information_schema.SCHEMA_PRIVILEGES WHERE GRANTEE ="' \
+      '    acas_probe="${acas_probe} ${acas_grantee_lit} AND TABLE_SCHEMA ="' \
+      '    acas_probe="${acas_probe} ${acas_q}${MARIADB_DATABASE}${acas_q};"' \
+      '' \
+      '    acas_held="$(printf "%s\n" "${acas_probe}" \' \
+      '        | docker_process_sql --database=mysql --skip-column-names --batch)"' \
+      '    acas_held="$(printf %s "${acas_held}" | tr -d "[:space:]")"' \
+      '' \
+      '    if [ "${acas_held}" != "DELETE,INSERT,SELECT,UPDATE" ]; then' \
+      '        mysql_error "least privilege VERIFICATION FAILED for ${MARIADB_USER} on ${MARIADB_DATABASE}: expected DELETE,INSERT,SELECT,UPDATE but the account holds ${acas_held:-<nothing>}. Refusing to finish initialisation, because the privilege separation documented in harness/docker-compose.yml and harness/reset_db.sh would not hold."' \
+      '    fi' \
+      '' \
+      '    mysql_note "least privilege VERIFIED: ${MARIADB_USER} holds exactly ${acas_held} on ${MARIADB_DATABASE}; DROP, CREATE, ALTER, INDEX and LOCK TABLES are all absent."' \
+      '    unset acas_q acas_pat acas_who acas_grantee acas_grantee_lit acas_probe acas_held' \
+      'fi' \
+      > /docker-entrypoint-initdb.d/20-acas-least-privilege.sh; \
+    chmod 0644 /docker-entrypoint-initdb.d/20-acas-least-privilege.sh; \
+    \
+    echo '--- asserting the least-privilege script is well-formed ---'; \
+    bash -n /docker-entrypoint-initdb.d/20-acas-least-privilege.sh; \
+    grep -q 'REVOKE ALL PRIVILEGES' /docker-entrypoint-initdb.d/20-acas-least-privilege.sh; \
+    grep -q 'GRANT SELECT, INSERT, UPDATE, DELETE' /docker-entrypoint-initdb.d/20-acas-least-privilege.sh; \
+    grep -q 'DELETE,INSERT,SELECT,UPDATE' /docker-entrypoint-initdb.d/20-acas-least-privilege.sh; \
+    \
+    echo '--- it must NOT be executable: the vendor SOURCES a non-executable .sh ---'; \
+    [ ! -x /docker-entrypoint-initdb.d/20-acas-least-privilege.sh ] \
+      || { echo 'FATAL: the script is executable, so the vendor would run it as a sub-process and $MARIADB_USER, mysql_error and docker_process_sql would all be out of scope.' >&2; exit 1; }; \
+    \
+    echo '--- it must sort AFTER the frozen schema ---'; \
+    first="$(ls /docker-entrypoint-initdb.d/ | sort | head -1)"; \
+    last="$(ls /docker-entrypoint-initdb.d/ | sort | tail -1)"; \
+    [ "${first}" = '05-acas-harness-disposable.sql' ] \
+      || { echo "FATAL: expected the sentinel to sort first, got ${first}." >&2; exit 1; }; \
+    [ "${last}" = '20-acas-least-privilege.sh' ] \
+      || { echo "FATAL: expected the least-privilege script to sort last, got ${last}." >&2; exit 1; }; \
+    \
+    echo '--- no credential may appear in this image layer ---'; \
+    ! grep -qiE 'MARIADB_PASSWORD=|MYSQL_PWD=|IDENTIFIED BY' /docker-entrypoint-initdb.d/20-acas-least-privilege.sh \
+      || { echo 'FATAL: the least-privilege script names a credential.' >&2; exit 1; }; \
+    \
+    echo "OK: initdb.d order $(ls /docker-entrypoint-initdb.d/ | sort | tr '\n' ' ')"
+
+
+# -----------------------------------------------------------------------------
+#  OS PRIVILEGE POSTURE -- LEAST PRIVILEGE, AND WHY THERE IS NO `USER` HERE
+#
+#  The step above narrowed the application account's SQL privileges. This one is
+#  about the container's OS privileges, which are a separate axis: an account
+#  that cannot issue DROP is still a concern if the process it talks to runs as
+#  root. Both are needed and neither substitutes for the other.
 #
 #  This image deliberately does NOT carry a `USER` instruction, and that is a
 #  correctness requirement rather than an oversight. The vendor entrypoint

@@ -718,32 +718,59 @@ AMBIGUITIES, ARBITRATED AGAINST COMPILED BEHAVIOUR  (rule R-6)
 ==============================================================
 Q-16 and Q-17 are the next free numbers in the migration's shared register -
 `cobol/usage` claimed Q-5.1 to Q-5.3, `cobol/move` Q-9 to Q-14 and
-`programs/gl071_batch_sort` Q-15. Both are marked `TODO(oracle)` at their sites
-per section 0.6.8, which lists exactly this class of question.
+`programs/gl071_batch_sort` Q-15. BOTH ARE NOW RESOLVED, and neither result
+changes a line of code - which is what arbitrating rather than guessing was for.
 
     Q-16  WHAT THE `tinyint(2) unsigned` COLUMN ACTUALLY HOLDS, AND WHAT THE
-          QUOTED PREDICATE ACTUALLY COMPARES. `HV-IRS-FINAL-ACC-REC-KEY` is
-          `PIC 9(03) COMP` [irsfinalMT.cbl:L172] written into a two-digit
-          column, and the sequential predicate compares that column against the
-          QUOTED THREE-DIGIT STRING `"000"` [:L339] rather than a number. Both
-          the stored value and the comparison semantics are transport-level
-          questions the compiled bridge's C interface settles, and section
-          0.6.8 already lists the general form of this question - "what the
-          resulting stored value IS depends on the conversion the bridge's C
-          interface performs, which must be measured rather than assumed". Both
-          renderings are reproduced exactly as written; nothing is normalised.
+          QUOTED PREDICATE ACTUALLY COMPARES.
+          RESOLVED BY MEASUREMENT against MariaDB 10.11.7, the server version the
+          frozen schema records as its producer [mysql/ACASDB.sql:L1, :L5], with
+          the frozen `ENGINE=InnoDB` and the server's DEFAULT `sql_mode`, which
+          carries `STRICT_TRANS_TABLES` and is what the bridge's C interface gets.
+          The dump's own `SQL_MODE='NO_AUTO_VALUE_ON_ZERO'` [mysql/ACASDB.sql:L21]
+          does not change it: session-scoped, measured to leave
+          `@@global.sql_mode` untouched, restored at [:L1451], and inert anyway
+          because the schema's only `AUTO_INCREMENT` column belongs to the
+          out-of-scope `STOCKAUDIT-REC` [mysql/ACASDB.sql:L1107].
+          THE STORE: the premise that a `9(03)` host variable is wider than a
+          "two-digit" column is WRONG - `(2)` IS A DISPLAY WIDTH, NOT A
+          CONSTRAINT. `tinyint unsigned` holds 0..255, measured, so every
+          subscript 1..26 this table can index stores exactly, and the host
+          variable is wider only over 256..999, where the server raises ERROR
+          1264, SQLSTATE 22003, and writes nothing. The write path cannot reach
+          even that, because the subscript is bounded by the `occurs 26`.
+          THE PREDICATE: the coercion is NUMERIC, proved with a probe whose two
+          readings disagree - against a `tinyint(2) unsigned` column holding 9 and
+          10, `k > "10"` returned NO rows and `k < "10"` returned 9, the opposite
+          of the lexical answer, and `9 > "10"` evaluates 0 while `"9" > "10"`
+          evaluates 1. Measured on this shape, `> "000"` matched every one of
+          {1,2,9,10,31,32}, identically to `> 0`. So `"000"` is the number 0 and
+          the sequential predicate admits every legal key.
+          Both renderings stay exactly as written; nothing is normalised - now on
+          evidence rather than pending it.
 
     Q-17  WHAT THE TABLE HOLDS, AND WHAT A READ RETURNS, WHEN FEWER THAN 26 ROWS
-          EXIST. The bridge tolerates a short table by design - "having
-          initialised record as some rows may not be present"
-          [irsfinalMT.cbl:L320] - and A32 then erases the status the short read
-          set, while A37 makes a repeat read hand back a blank record and a
-          success status. What a caller therefore observes for a partially
-          populated table is behaviour of the compiled system and is measured,
-          not inferred. Note the state after ANY write is DENSE: A7 keeps the
-          blank-slot skip commented out, so a written table always holds exactly
-          26 rows, blanks stored as spaces rather than absent - which matters to
-          any scenario diff that expects "only the populated rows".
+          EXIST.
+          RESOLVED FROM THE FROZEN SOURCE - no oracle run needed, because the
+          question that remained was about INTENT and not behaviour, and R-4 makes
+          intent irrelevant: a defect reproduced is correct. The note used to say
+          "no reading of the source settles whether a caller was ever meant to be
+          able to tell", which is true and is not a behavioural question. THE
+          BEHAVIOUR IS FULLY DETERMINED: the bridge tolerates a short table by
+          design - "having initialised record as some rows may not be present"
+          [irsfinalMT.cbl:L320]; the exhaustion arm sets `(10, 10)` on its way out
+          [:L417]; and `move zero to fs-reply WE-Error` [:L465] is UNCONDITIONAL
+          (A32), so it erases that. The caller therefore observes `(0, 0)` -
+          success - together with a record whose unfilled slots hold the spaces
+          `initialize Final-Record with filler` [:L395] put there, and has NOTHING
+          to distinguish it from a full read. A repeat read compounds it (A37).
+          That is exactly what this module already does; nothing about it was
+          waiting on a measurement.
+          Note the state after ANY write is DENSE: A7 keeps the blank-slot skip
+          commented out, so a written table always holds exactly 26 rows, blanks
+          stored as spaces rather than absent - which matters to any scenario diff
+          that expects "only the populated rows", and which means Q-17 bites only
+          on tables seeded or loaded outside this handler.
 
 WHAT THIS MODULE MAY IMPORT, AND WHAT IT MUST NOT  (section 0.4.3)
 ==================================================================
@@ -815,8 +842,8 @@ from acas_posting.dal.status import (
     WeError,
     end_of_file_status,
     is_duplicate_key_bridge_level,
+    log_file_handler_record,
     mysql_1100_db_error,
-    redact_for_log,
 )
 from acas_posting.dictionary import loader
 from acas_posting.records.file_access import FileAccess
@@ -1475,9 +1502,10 @@ def _insert_key_text(subscript: int) -> str:
     and is far above the 26 the array can index.
 
     THE RESULT DIFFERS FROM :func:`_ws_key` FOR EVERY SUBSCRIPT BELOW TEN, and in
-    the rewrite BOTH appear in the same statement - anomaly A36. Whether the
-    `tinyint(2) unsigned` column then holds what the `9(03)` host variable
-    intended is ambiguity Q-16.
+    the rewrite BOTH appear in the same statement - anomaly A36. The
+    `tinyint(2) unsigned` column DOES hold what the `9(03)` host variable intended
+    over the whole 1..26 domain - measured, ambiguity Q-16 resolved: `(2)` is a
+    display width and the column holds 0..255.
 
     Args:
         subscript: The 1-based `occurs` position, 1 through 26.
@@ -1485,16 +1513,16 @@ def _insert_key_text(subscript: int) -> str:
     Returns:
         The trimmed edited text, ``"1"`` through ``"26"``.
     """
-    # TODO(oracle): Q-16 - `HV-IRS-FINAL-ACC-REC-KEY PIC 9(03) COMP`
+    # AMBIGUITY Q-16 - RESOLVED BY MEASUREMENT; see the module docstring for the
+    # probes. `HV-IRS-FINAL-ACC-REC-KEY PIC 9(03) COMP`
     # [common/irsfinalMT.cbl:L172] is written into a `tinyint(2) unsigned` column
     # [mysql/ACASDB.sql:L215] through this three-character edited slice, and the
     # sequential predicate then compares that column against the QUOTED literal
-    # `"000"` [common/irsfinalMT.cbl:L339]. Section 0.6.8 assigns exactly this
-    # class of question to the compiled bridge's C interface - "what the
-    # resulting stored value IS depends on the conversion the bridge's C
-    # interface performs, which must be measured rather than assumed". Both
-    # renderings are emitted exactly as the frozen source emits them and NEITHER
-    # is normalised pending that measurement.
+    # `"000"` [common/irsfinalMT.cbl:L339]. Measured on MariaDB 10.11.7: `(2)` is a
+    # DISPLAY WIDTH, so the column holds 0..255 and every subscript 1..26 stores
+    # exactly; and the quoted literal coerces to a NUMBER, so `> "000"` is `> 0`
+    # and admits every legal key. Both renderings are emitted exactly as the frozen
+    # source emits them and NEITHER is normalised - on evidence, not pending it.
     return str(subscript)
 
 
@@ -1798,9 +1826,17 @@ def _process_logs(
     `call "fhlogger" using File-Access ACAS-DAL-Common-data`
     [common/acasirsub5.cbl:L528-L529, common/irsfinalMT.cbl:L722-L723], and
     `common/fhlogger.cbl` is out of scope per section 0.2.2, so rule R-1 forbids
-    the call outright. The site therefore emits a Python log record carrying the
-    same three fields the logger would have read, and nothing else: it changes no
-    status, no control flow and no table.
+    the call outright. The site therefore emits the record through
+    :func:`acas_posting.dal.status.log_file_handler_record` - THE ONE ADAPTER every
+    handler in this package shares, at one level, with one field set - and it changes
+    no status, no control flow and no table.
+
+    `WS-File-Key` is WITHHELD: on this table it is `IRS-FINAL-ACC-REC-KEY`, a
+    business key, and the safe-event schema admits no record key (CWE-532). So are
+    `WS-Log-Where` and `SQL-Msg`. The two testing switches are withheld too - they
+    are configuration, not an event, and a record naming them said nothing an
+    operator acts on. `Log-File-Rec-Written` IS now advanced, by one modulo a
+    million, once per record.
 
     THIS FUNCTION IS THE BARE `perform`, WITH NO GATE, because the gate is not
     always there in the frozen source. EVERY ONE of the bridge's seven sites is
@@ -1822,22 +1858,20 @@ def _process_logs(
         site: Which frozen `perform` this is, for the log line.
     """
     logging_data = file_access.logging_data
-    _LOG.debug(
-        "acasirsub5/%s: system=%s file=%s paragraph=%s key=%r fs-reply=%s "
-        "we-error=%s sql-state=%r testing=%s/%s",
-        site,
-        logging_data.ws_log_system,
-        logging_data.ws_log_file_no,
-        logging_data.ws_no_paragraph,
-        logging_data.ws_file_key.rstrip(),
-        file_access.fs_reply,
-        file_access.we_error,
-        logging_data.sql_state.strip(),
-        # `Testing-1` and `Testing-2` [copybooks/Test-Data-Flags.cob], which the
-        # logger reads from its second argument. Carried so a log line shows
-        # which switch state produced it - `Testing-2` is anomaly A21's switch.
-        dal_common.sw_testing,
-        dal_common.sw_testing_2,
+    log_file_handler_record(
+        _LOG,
+        program="irsfinalMT",
+        paragraph=site,
+        log_system=logging_data.ws_log_system,
+        log_file_no=logging_data.ws_log_file_no,
+        no_paragraph=logging_data.ws_no_paragraph,
+        file_function=int(file_access.file_function),
+        access_type=int(file_access.access_type),
+        fs_reply=int(file_access.fs_reply),
+        we_error=int(file_access.we_error),
+        sql_err=logging_data.sql_err,
+        sql_state=logging_data.sql_state,
+        dal_common=dal_common,
     )
 
 
@@ -2082,13 +2116,16 @@ def _issue_command(
             # [copybooks/mysql-procedures.cpy:L99-L105 vs :L128].
             we_error=we_error,
         )
-        _LOG.debug(
-            "acasirsub5/irsfinalMT: statement failed at the driver; "
-            "Mysql-1100-Db-Error gives (%s, %s): %s",
-            int(status.fs_reply),
-            status.we_error,
-            redact_for_log(message),
-        )
+        #  NO SECOND RECORD HERE. `mysql_1100_db_error`, called on the line
+        #  above, IS the one operator record for a database failure - it is the
+        #  migration of `Mysql-1110-Report-Problem`
+        #  [copybooks/mysql-procedures.cpy:L130-L137], which the frozen bridge reaches
+        #  on every one - and it already carries the status pair, the SQLSTATE, the
+        #  errno and the stable category. Repeating them made one failure two records,
+        #  and this one also interpolated the driver's message, which for this table
+        #  renders the statement and its bound key (CWE-532); `redact_for_log` escaped
+        #  it and removed none of it. `message` is still RETURNED, because `SQL-Msg` is
+        #  a status field the paragraphs read.
         # A40: affected rows is still read, and a failed statement affected none.
         return _CommandOutcome(
             count_rows=0,
@@ -2198,13 +2235,9 @@ def _issue_select(
         # `Mysql-1220-Store-Result` still runs and still stores; with no result
         # there is nothing to store and `MySQL_num_rows` reads zero.
         state.store_result(())
-        _LOG.debug(
-            "acasirsub5/irsfinalMT ba040: select failed at the driver; "
-            "Mysql-1100-Db-Error gives (%s, %s): %s",
-            int(status.fs_reply),
-            status.we_error,
-            redact_for_log(message),
-        )
+        #  NO SECOND RECORD HERE, for the reason the command path gives above:
+        #  `mysql_1100_db_error` has already emitted the one operator record, and the
+        #  driver's message is not safe to log.
         return _CommandOutcome(
             count_rows=0,
             status=status,
@@ -2449,22 +2482,28 @@ def read_next(
     # no guard to make it selective. `go to ba999-exit` [:L466] then skips
     # `ba999-end`'s own logging hook [:L602-L604] - anomaly A38.
     #
-    # TODO(oracle): Q-17 - WHAT A CALLER OBSERVES FOR A PARTIALLY POPULATED TABLE.
-    # Section 0.6.8 makes compiled behaviour the arbiter for exactly this class of
-    # question, and three findings meet here. The bridge tolerates a short table
-    # by design - `*> having initialised record as some rows may not be present`
-    # [:L320] - so a table holding, say, nine rows leaves array entries 10..26 at
-    # the spaces `initialize Final-Record with filler` [:L395] put there; the
-    # exhaustion arm set `(10, 10)` on the way out [:L417]; and THIS LINE then
-    # erases it, so the caller is handed a half-blank record and a success status
+    # AMBIGUITY Q-17 - RESOLVED FROM THE FROZEN SOURCE. WHAT A CALLER OBSERVES FOR
+    # A PARTIALLY POPULATED TABLE. Three findings meet here. The bridge tolerates a
+    # short table by design - `*> having initialised record as some rows may not be
+    # present` [:L320] - so a table holding, say, nine rows leaves array entries
+    # 10..26 at the spaces `initialize Final-Record with filler` [:L395] put there;
+    # the exhaustion arm set `(10, 10)` on the way out [:L417]; and THIS LINE then
+    # erases it, so the caller is handed a half-blank record and a SUCCESS status
     # with nothing to distinguish it from a full read. A repeat read compounds it
-    # (anomaly A37). The reset, the tolerance and the blanking are all reproduced
-    # exactly as written; what is to be MEASURED against the compiled bridge is
-    # the observable pair for a short table, because no reading of the source
-    # settles whether a caller was ever meant to be able to tell. Note that after
-    # any WRITE the state is dense - anomaly A7 keeps the blank-slot skip
-    # commented out [:L477-L480] - so this question bites only on tables seeded
-    # or loaded outside this handler.
+    # (anomaly A37).
+    #
+    # WHY NO ORACLE RUN IS NEEDED, and the earlier note was asking the wrong
+    # question. It said "no reading of the source settles whether a caller was ever
+    # meant to be able to tell" - which is true, and is a question about INTENT.
+    # Rule R-4 makes intent irrelevant: a defect reproduced is correct. The
+    # BEHAVIOUR is fully determined by the statements above, because `move zero to
+    # fs-reply WE-Error` [:L465] carries no guard, so the observable pair for a
+    # short table is `(0, 0)` and a part-blank record, unconditionally. That is
+    # what the two lines below produce. Nothing was waiting on a measurement.
+    #
+    # Note that after any WRITE the state is dense - anomaly A7 keeps the
+    # blank-slot skip commented out [:L477-L480] - so this bites only on tables
+    # seeded or loaded outside this handler.
     file_access.fs_reply = int(FsReply.SUCCESS)
     file_access.we_error = int(WeError.SUCCESS)
     return FsReply.SUCCESS, int(WeError.SUCCESS)

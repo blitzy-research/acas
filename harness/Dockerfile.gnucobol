@@ -1463,8 +1463,12 @@ RUN set -eu; \
 #
 #  THE NUMERIC IDS ARE FIXED DELIBERATELY. `/data` and `/out` are shared with the
 #  host, so file ownership must be predictable across rebuilds rather than
-#  whatever `useradd` happens to pick next. 1001:1001 is chosen because
-#  `ubuntu:24.04` already ships a `ubuntu` account at 1000:1000.
+#  whatever `useradd` happens to pick next. 1001:1001 is the DEFAULT because
+#  `ubuntu:24.04` already ships a `ubuntu` account at 1000:1000 - and overriding
+#  the arguments to 1000:1000, which `--build-arg ACAS_UID=$(id -u)` produces on a
+#  first-user host, is now handled explicitly rather than failing the build: the
+#  layer below renames that base-image account to `ubuntu-base` and takes the id.
+#  Nothing in this image refers to it (m-02).
 #
 #  THE HARNESS SCRIPTS ALREADY ASSUME THIS. They were written not to require
 #  root and say so: `seed.sh` notes that "ldconfig needs privileges this script
@@ -1485,41 +1489,114 @@ ARG ACAS_UID=1001
 ARG ACAS_GID=1001
 ARG ACAS_USER=acas
 
+#  ⭐ m-02.  ONE IDENTITY, CREATED ONCE, FROM THE BUILD ARGUMENTS.
+#
+#  This layer used to hard-code `1001` and `acas` while the ARGs above declared
+#  `ACAS_UID`/`ACAS_GID`/`ACAS_USER`, so a build that overrode them got an account
+#  created HERE at 1001:1001 and then RECONCILED by a second `groupmod`/`usermod`
+#  layer further down - two creations, two sources of truth, and a window in which
+#  the ownership assertions below described a different identity from the one the
+#  image finally ran as. Everything now derives from the arguments, and the
+#  reconciliation layer below verifies rather than re-creates.
+#
+#  AN OCCUPIED UID OR GID IS HANDLED EXPLICITLY, which is the other half of the
+#  finding. The base image ships `ubuntu` at 1000:1000, so
+#  `--build-arg ACAS_UID=1000 --build-arg ACAS_GID=1000` - exactly what the
+#  documented `$(id -u)` invocation produces on a first-user host - made
+#  `groupadd`/`useradd` fail with "GID 1000 already in use" and, under `set -eu`,
+#  aborted the build with no explanation. The base image's own account is now
+#  REMOVED when it holds a wanted ID, because it exists only as a distribution
+#  convenience and nothing in this image refers to it, and its removal makes the
+#  creation path below identical in both cases - which is the "created once" the
+#  finding asks for. A conflict with any OTHER account is refused loudly instead
+#  of silently taking its ID.
+#
+#  AN ID IS FREED BY REMOVING ITS HOLDER, NEVER BY RENAMING IT. `groupmod
+#  --new-name` and `usermod --login` change the NAME and leave the numeric ID
+#  exactly where it was, so a rename followed by `groupadd --gid 1000` still fails
+#  with "GID '1000' already exists". Measured directly against this image's own
+#  account database rather than assumed, because the reverse assumption is the
+#  natural one and it is wrong.
+#
+#  AND: the RUN body below is parsed by `/bin/sh` - this file declares no `SHELL`
+#  directive, so Docker uses `/bin/sh -c`, which on Ubuntu is dash. It must
+#  therefore stay POSIX shell, and an apostrophe inside a DOUBLE-quoted string is
+#  written plainly: the `'"'"'` idiom belongs only inside SINGLE quotes, and using
+#  it here leaves an odd number of single quotes and an unparsable layer.
 RUN set -eu; \
-    echo '--- creating the unprivileged runtime identity acas (1001:1001) ---'; \
-    groupadd --gid 1001 acas; \
-    useradd --uid 1001 --gid 1001 --create-home --home-dir /home/acas \
-            --shell /bin/bash \
-            --comment 'ACAS posting-cycle oracle harness' acas; \
+    echo "--- creating the unprivileged runtime identity ${ACAS_USER} (${ACAS_UID}:${ACAS_GID}) ---"; \
+    if [ "${ACAS_UID}" = '0' ] || [ "${ACAS_GID}" = '0' ]; then \
+        echo 'FATAL: ACAS_UID/ACAS_GID must not be 0; the point of this identity is to drop root.' >&2; \
+        exit 1; \
+    fi; \
+    if [ "$(getent passwd "${ACAS_UID}" | cut -d: -f1)" = 'ubuntu' ] \
+       || [ "$(getent group "${ACAS_GID}" | cut -d: -f1)" = 'ubuntu' ]; then \
+        echo "    ${ACAS_UID}:${ACAS_GID} overlaps the base image's own 'ubuntu' account; removing it"; \
+        if getent passwd ubuntu > /dev/null; then \
+            userdel -r ubuntu 2> /dev/null || userdel ubuntu 2> /dev/null || true; \
+        fi; \
+        if getent passwd ubuntu > /dev/null; then \
+            echo "FATAL: could not remove the base image's 'ubuntu' account, which holds ${ACAS_UID}." >&2; \
+            exit 1; \
+        fi; \
+        if getent group ubuntu > /dev/null; then groupdel ubuntu 2> /dev/null || true; fi; \
+        if getent group ubuntu > /dev/null; then \
+            echo "FATAL: could not remove the base image's 'ubuntu' group, which holds ${ACAS_GID}." >&2; \
+            exit 1; \
+        fi; \
+    fi; \
+    occupant="$(getent group "${ACAS_GID}" | cut -d: -f1)"; \
+    if [ -n "${occupant}" ] && [ "${occupant}" != "${ACAS_USER}" ]; then \
+        echo "FATAL: gid ${ACAS_GID} is already held by group '${occupant}'. Choose another ACAS_GID." >&2; \
+        exit 1; \
+    fi; \
+    occupant="$(getent passwd "${ACAS_UID}" | cut -d: -f1)"; \
+    if [ -n "${occupant}" ] && [ "${occupant}" != "${ACAS_USER}" ]; then \
+        echo "FATAL: uid ${ACAS_UID} is already held by account '${occupant}'. Choose another ACAS_UID." >&2; \
+        exit 1; \
+    fi; \
+    getent group "${ACAS_USER}" > /dev/null \
+      || groupadd --gid "${ACAS_GID}" "${ACAS_USER}"; \
+    getent passwd "${ACAS_USER}" > /dev/null \
+      || useradd --uid "${ACAS_UID}" --gid "${ACAS_GID}" --create-home \
+                 --home-dir "/home/${ACAS_USER}" \
+                 --shell /bin/bash \
+                 --comment 'ACAS posting-cycle oracle harness' "${ACAS_USER}"; \
     \
-    mkdir -p /repo /build /build/bin /data /out; \
-    chmod 0755 /repo /build /build/bin /data /out /home/acas; \
+    mkdir -p /repo /build /build/bin /data /out "/home/${ACAS_USER}"; \
+    chmod 0755 /repo /build /build/bin /data /out "/home/${ACAS_USER}"; \
     chown root:root /repo; \
-    chown -R acas:acas /build /data /out /home/acas; \
+    chown -R "${ACAS_USER}:${ACAS_USER}" /build /data /out "/home/${ACAS_USER}"; \
     \
     echo '--- asserting the ownership split ---'; \
-    for d in /build /build/bin /data /out /home/acas; do \
+    for d in /build /build/bin /data /out "/home/${ACAS_USER}"; do \
         owner="$(stat -c '%U:%G' "$d")"; \
-        [ "${owner}" = 'acas:acas' ] \
-          || { echo "FATAL: ${d} is owned by ${owner}, not acas:acas; the unprivileged runtime could not write it." >&2; exit 1; }; \
+        [ "${owner}" = "${ACAS_USER}:${ACAS_USER}" ] \
+          || { echo "FATAL: ${d} is owned by ${owner}, not ${ACAS_USER}:${ACAS_USER}; the unprivileged runtime could not write it." >&2; exit 1; }; \
     done; \
     repo_owner="$(stat -c '%U' /repo)"; \
     [ "${repo_owner}" = 'root' ] \
       || { echo "FATAL: /repo is owned by ${repo_owner}, not root; the frozen checkout must not be writable by the runtime user." >&2; exit 1; }; \
     \
-    echo '--- asserting the acas user can actually write every writable path ---'; \
-    su -s /bin/sh -c 'set -eu; for d in /build /build/bin /data /out /home/acas; do probe="$d/.acas-write-probe"; : > "$probe"; rm -f "$probe"; done' acas \
-      || { echo 'FATAL: the acas user cannot write one of /build /build/bin /data /out /home/acas.' >&2; exit 1; }; \
+    echo "--- asserting ${ACAS_USER} can actually write every writable path ---"; \
+    su -s /bin/sh -c 'set -eu; for d in /build /build/bin /data /out "$HOME"; do probe="$d/.acas-write-probe"; : > "$probe"; rm -f "$probe"; done' "${ACAS_USER}" \
+      || { echo "FATAL: ${ACAS_USER} cannot write one of /build /build/bin /data /out /home/${ACAS_USER}." >&2; exit 1; }; \
     \
-    echo '--- asserting the acas user CANNOT write the frozen mount point ---'; \
-    if su -s /bin/sh -c ': > /repo/.acas-write-probe' acas 2>/dev/null; then \
+    echo "--- asserting ${ACAS_USER} CANNOT write the frozen mount point ---"; \
+    if su -s /bin/sh -c ': > /repo/.acas-write-probe' "${ACAS_USER}" 2>/dev/null; then \
         rm -f /repo/.acas-write-probe; \
-        echo 'FATAL: the acas user can write /repo. The frozen tree must be unwritable by the runtime user.' >&2; \
+        echo "FATAL: ${ACAS_USER} can write /repo. The frozen tree must be unwritable by the runtime user." >&2; \
         exit 1; \
     fi; \
     \
-    id acas; \
-    echo 'OK: /repo root-owned; /build, /build/bin, /data, /out and /home/acas owned by acas:acas.'
+    echo "--- asserting the identity IS the one the build arguments asked for ---"; \
+    [ "$(id -u "${ACAS_USER}")" = "${ACAS_UID}" ] \
+      || { echo "FATAL: ${ACAS_USER} has uid $(id -u "${ACAS_USER}"), not ACAS_UID=${ACAS_UID}." >&2; exit 1; }; \
+    [ "$(id -g "${ACAS_USER}")" = "${ACAS_GID}" ] \
+      || { echo "FATAL: ${ACAS_USER} has gid $(id -g "${ACAS_USER}"), not ACAS_GID=${ACAS_GID}." >&2; exit 1; }; \
+    \
+    id "${ACAS_USER}"; \
+    echo "OK: /repo root-owned; /build, /build/bin, /data, /out and /home/${ACAS_USER} owned by ${ACAS_USER}:${ACAS_USER} (${ACAS_UID}:${ACAS_GID})."
 
 
 # -----------------------------------------------------------------------------
@@ -1579,44 +1656,36 @@ RUN set -eu; \
 #  compose side, which already neuters the set-user-ID bit at the kernel level --
 #  both are kept because they fail independently.
 # -----------------------------------------------------------------------------
-#  IDEMPOTENT IDENTITY CREATION -- why this layer tests before it creates.
-#  The layer above already materialises the fixed 1001:1001 `acas` identity (it
-#  needs an account in place to assert the /repo-versus-/build ownership split).
-#  This layer is the ARG-parameterised one, so that
-#      docker compose build --build-arg ACAS_UID=$(id -u) --build-arg ACAS_GID=$(id -g)
-#  still works on a host whose bind-mount ownership differs. With a plain
-#  `groupadd`/`useradd` under `set -eu` the two layers collide on a default
-#  build: groupadd exits 9 with "group 'acas' already exists" and the image
-#  cannot be built at all. Creating only when absent -- and reconciling the ids
-#  with groupmod/usermod when they differ -- keeps BOTH layers' guarantees: the
-#  ownership assertions above still hold, and a non-default ACAS_UID/ACAS_GID is
-#  still honoured. Nothing else in this layer changes; every assertion below
-#  still runs, and none of them is relaxed.
+#  ⭐ m-02.  THIS LAYER VERIFIES THE IDENTITY; IT NO LONGER CREATES A SECOND ONE.
+#
+#  It used to be a second, ARG-parameterised creator sitting downstream of a
+#  hard-coded 1001:1001 creator, reconciling the difference with
+#  `groupmod`/`usermod`. That arrangement had three faults the finding named:
+#    * TWO SOURCES OF TRUTH for one identity, so the ownership assertions in the
+#      earlier layer could describe an identity the image did not finally run as;
+#    * the reconciliation could not help when the conflict was with a DIFFERENT
+#      NAME at the same id - the base image's own `ubuntu` at 1000:1000 - so the
+#      documented `--build-arg ACAS_UID=$(id -u)` invocation aborted the build on
+#      any host whose first user is 1000; and
+#    * `usermod --uid` on a live account leaves files owned by the OLD uid unless
+#      every path is re-chowned, which is a second silent inconsistency.
+#  The layer above now owns the whole creation, driven entirely by the ARGs and
+#  with the occupied-id case handled explicitly. What remains here is an assertion
+#  that the identity is exactly what was asked for, followed by the capability
+#  probes - which were always the valuable part of this layer.
 RUN set -eu; \
-    echo "--- creating the unprivileged runtime account ${ACAS_USER} (${ACAS_UID}:${ACAS_GID}) ---"; \
-    if [ "${ACAS_UID}" = '0' ] || [ "${ACAS_GID}" = '0' ]; then \
-        echo 'FATAL: ACAS_UID/ACAS_GID must not be 0; the point of this layer is to drop root.' >&2; \
-        exit 1; \
-    fi; \
-    if getent group "${ACAS_USER}" > /dev/null; then \
-        echo "    group ${ACAS_USER} already exists (gid $(getent group "${ACAS_USER}" | cut -d: -f3)); reconciling to ${ACAS_GID}"; \
-        [ "$(getent group "${ACAS_USER}" | cut -d: -f3)" = "${ACAS_GID}" ] \
-          || groupmod --gid "${ACAS_GID}" "${ACAS_USER}"; \
-    else \
-        groupadd --gid "${ACAS_GID}" "${ACAS_USER}"; \
-    fi; \
-    if getent passwd "${ACAS_USER}" > /dev/null; then \
-        echo "    account ${ACAS_USER} already exists (uid $(id -u "${ACAS_USER}")); reconciling to ${ACAS_UID}:${ACAS_GID}"; \
-        [ "$(id -u "${ACAS_USER}")" = "${ACAS_UID}" ] \
-          || usermod --uid "${ACAS_UID}" "${ACAS_USER}"; \
-        usermod --gid "${ACAS_GID}" --home "/home/${ACAS_USER}" --shell /bin/bash "${ACAS_USER}"; \
-        mkdir -p "/home/${ACAS_USER}"; \
-        chown "${ACAS_UID}:${ACAS_GID}" "/home/${ACAS_USER}"; \
-    else \
-        useradd --uid "${ACAS_UID}" --gid "${ACAS_GID}" \
-                --home-dir "/home/${ACAS_USER}" --create-home \
-                --shell /bin/bash "${ACAS_USER}"; \
-    fi; \
+    echo "--- verifying the unprivileged runtime account ${ACAS_USER} (${ACAS_UID}:${ACAS_GID}) ---"; \
+    getent group "${ACAS_USER}" > /dev/null \
+      || { echo "FATAL: group ${ACAS_USER} does not exist; the identity layer above did not run." >&2; exit 1; }; \
+    getent passwd "${ACAS_USER}" > /dev/null \
+      || { echo "FATAL: account ${ACAS_USER} does not exist; the identity layer above did not run." >&2; exit 1; }; \
+    [ "$(id -u "${ACAS_USER}")" = "${ACAS_UID}" ] \
+      || { echo "FATAL: ${ACAS_USER} has uid $(id -u "${ACAS_USER}"), not ACAS_UID=${ACAS_UID}." >&2; exit 1; }; \
+    [ "$(id -g "${ACAS_USER}")" = "${ACAS_GID}" ] \
+      || { echo "FATAL: ${ACAS_USER} has gid $(id -g "${ACAS_USER}"), not ACAS_GID=${ACAS_GID}." >&2; exit 1; }; \
+    [ "$(getent passwd "${ACAS_USER}" | cut -d: -f6)" = "/home/${ACAS_USER}" ] \
+      || { echo "FATAL: the home directory of ${ACAS_USER} is $(getent passwd "${ACAS_USER}" | cut -d: -f6), not /home/${ACAS_USER}; ENV HOME below would be wrong." >&2; exit 1; }; \
+    echo "    ${ACAS_USER} is ${ACAS_UID}:${ACAS_GID} with home /home/${ACAS_USER}, as the build arguments asked"; \
     \
     echo '--- handing the four writable paths to that account (/repo stays root-owned) ---'; \
     chown -R "${ACAS_UID}:${ACAS_GID}" /build /data /out; \
@@ -1741,12 +1810,30 @@ ENV ACAS_DB_HOST=mariadb \
 #      build time, so an ad-hoc install would make the running arbiter differ
 #      from the one that was built.
 # -----------------------------------------------------------------------------
+#  ⭐ m-02.  ONE `USER` DIRECTIVE, AND IT IS NUMERIC.
+#
+#  There used to be TWO - `USER ${ACAS_UID}:${ACAS_GID}` here and a bare
+#  `USER acas` three lines further down - and the second silently overrode the
+#  first, so the numeric one was dead. They happened to resolve to the same
+#  account, which is exactly why the duplication was hard to see and worth
+#  removing: nothing warns when a Dockerfile sets USER twice.
+#
+#  THE NUMERIC FORM IS THE ONE KEPT, deliberately. A name has to be resolved
+#  through /etc/passwd inside the container, so it depends on a file the runtime
+#  could differ on; a uid:gid pair is what the kernel actually enforces, is what
+#  the volume ownership above was set to, and is what `docker compose` reports.
+#  The account still exists and is still asserted, so `su`-style diagnosis by name
+#  keeps working.
 USER ${ACAS_UID}:${ACAS_GID}
 
 WORKDIR /build
 
-ENV HOME=/home/acas
-
-USER acas
+#  ⭐ m-02.  `HOME` follows ${ACAS_USER} rather than repeating the literal, and the
+#  verification layer above asserts that the account's sixth passwd field really is
+#  /home/${ACAS_USER} - so this value cannot drift away from the account it names.
+#  It matters because `USER` with a NUMERIC id leaves HOME unset otherwise, and the
+#  frozen programs create `acas.param` [common/acas-get-params.cbl:L103] and
+#  `fh-logger.txt` [common/fhlogger.cbl:L111] through plain relative assigns.
+ENV HOME=/home/${ACAS_USER}
 
 CMD ["bash"]

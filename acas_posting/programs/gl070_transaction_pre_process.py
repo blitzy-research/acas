@@ -675,9 +675,16 @@ def _init01_menu_input(store: _WorkingStorage) -> None:
     # 279  display  ws-date at 0171 with foreground-color 2.
     #      Screen positions, colours and the `erase eos` clause are dropped;
     #      omission 1.
-    _LOG.info(
-        "%s  Transaction Posting  %s", _PROG_NAME, store.ws.ws_date
-    )
+    #  THE RUN DATE IS NOT IN THE RECORD. The first two displays are the
+    #  program's own identity and the phase label Agent Action Plan section 0.2.1.1
+    #  cites as the program labelling its own work, and both are constants. The third
+    #  [:L279] shows `ws-date`, which is the posting date this run stamps into every
+    #  record it writes - a date with business meaning, which the safe-event schema in
+    #  `acas_posting/dal/status.py` excludes (CWE-532). The date is an INPUT the
+    #  operator supplied on the command line, so it is already known wherever the run
+    #  was started, and `clock.py` pins it so no record is needed to reconstruct it.
+    _LOG.info("%s  Transaction Posting", _PROG_NAME)
+    del store
 
 
 def _init01_menu_input2(store: _WorkingStorage) -> None:
@@ -735,12 +742,24 @@ def _init01_menu_input2(store: _WorkingStorage) -> None:
         #      [general/general.cbl:L810-L811] and returns to the menu, so
         #      `gl071` and `gl072` never run. A hard gate, not a warning.
         store.ws_calling_data.ws_term_code = _WS_TERM_CODE_OPEN_BATCH_FOUND
-        _LOG.info(
-            "An open batch was found in cycle %s: WS-Term-Code set to %s, so"
-            " gl071 and gl072 will not run.",
-            store.system_record.system_data_block.scycle,
-            _WS_TERM_CODE_OPEN_BATCH_FOUND,
-        )
+        #  NO LOG RECORD HERE, AND THAT IS DELIBERATE - two reasons, either of
+        #  which is sufficient.
+        #
+        #  1. THE FROZEN SOURCE IS SILENT. `move 5 to ws-term-code` at
+        #     [general/gl070.cbl:L288] carries no `display` of any kind; the
+        #     assignment and the `go to main-exit` at [:L289] are the whole of it.
+        #     A record invented here would be a diagnostic the compiled program
+        #     does not produce (rule R-4).
+        #  2. THE ABORT IS ALREADY REPORTED, ONCE, AT THE LAYER THAT DECIDES IT.
+        #     `acas_posting/cli/gl_post_cycle.py` evaluates the gate the menu
+        #     evaluates [general/general.cbl:L810-L811] and reports the whole
+        #     consequence there - that `gl071` and `gl072` will not run - which is
+        #     more than this paragraph knows. Reporting it in both places produced
+        #     two records for one event.
+        #
+        #  The scycle the open batch was found in is not reported anywhere: it is
+        #  business data (Agent Action Plan section 0.6.4's cycle filter), and the
+        #  safe-event schema in `dal/status.py` excludes it.
 
         # 290           go to  main-exit.
         # GO TO class 3 - a forward transfer to this section's TRAILING exit
@@ -981,23 +1000,16 @@ def _gl060a(store: _WorkingStorage) -> None:
     # 338  display  line-4 at 0501 with foreground-color 2.
     # 339  display  line-5 at 0601 with foreground-color 2.
     #      The report's headings and its page number: presentation throughout -
-    #      omissions 1, 5 and 6 - reproduced as the three heading log records
-    #      below. `01 line-4.` [general/gl070.cbl:L211] and `01 line-5.`
-    #      [general/gl070.cbl:L215] are column captions whose text is carried
-    #      verbatim so a reader can line the log up against the screen.
-    _LOG.info(
-        "Batch Status Report    Cycle - %s    %s",
-        store.system_record.system_data_block.scycle,
-        store.ws.ws_date,
-    )
-    _LOG.info(
-        "Ledger  Batch  Status       Last     "
-        "---------Batch Controls---------"
-    )
-    _LOG.info(
-        "------  -----  ------     Activity    "
-        "Items  ---Gross---- -----VAT----"
-    )
+    #      omissions 1, 5 and 6.
+    #  NO RECORDS HERE. These are the BATCH STATUS REPORT'S OWN HEADINGS - a
+    #  title line, a page number and two lines of column captions - and Agent Action
+    #  Plan section 0.2.2 puts "report formatting beyond database effects" out of
+    #  scope. Section 0.3.4 converts a DIAGNOSTIC display into a record; a column
+    #  ruler is not a diagnostic, and reproducing it as three log lines re-created the
+    #  report at a destination the plan does not ask for. The title line additionally
+    #  named the accounting cycle and the run date, neither of which the safe-event
+    #  schema admits. The report's DATABASE effect is nil - `gl060a` opens the batch
+    #  file for input, reads and closes - so nothing is lost.
 
     # 340  move     7  to   lin.
     #      RETAINED, not omitted: `lin` is one operand of the preserved control
@@ -1272,26 +1284,15 @@ def _gl060a_next_1(store: _WorkingStorage) -> bool:
     #      whole point of the report: the operator compares the two.
     #      `curs2 = curs + 100` moves the cursor down one line before each, and
     #      the cursor arithmetic is dropped with the rest of the cursor state.
-    _LOG.info(
-        "%s  %s  %s  %s  %s  %s  %s",
-        store.ledger_label,
-        store.batch.ws_batch_key.ws_batch_nos,
-        store.status_label,
-        store.ws.ws_date,
-        store.batch.items,
-        store.batch.amounts.input_gross,
-        store.batch.amounts.input_vat,
-    )
-    _LOG.info(
-        "%s  %s  %s  %s  %s  %s  %s",
-        "",
-        "",
-        "",
-        "",
-        store.batch.items,
-        store.batch.amounts.actual_gross,
-        store.batch.amounts.actual_vat,
-    )
+    #  NO RECORDS HERE, AND THE LABEL COMPUTATION ABOVE IS PRESERVED. The two
+    #  records that stood for these displays were the report BODY, and between them
+    #  they named the ledger label, the BATCH NUMBER, the run date, the item count and
+    #  four monetary control totals - business keys and accounting values, which the
+    #  safe-event schema forbids outright (CWE-532). Report formatting beyond a
+    #  database effect is out of scope (section 0.2.2), and every figure they carried
+    #  is in `GLBATCH-REC`, which is what `harness/diff_states.py` compares.
+    #  `store.ledger_label` and `store.status_label` are still computed, because the
+    #  frozen `move`s that compute them are statements of the program.
 
     # 411      add      3  to  lin.
     #      Two printed lines plus a blank. Plain integer addition on a `pic 99`
@@ -2034,9 +2035,14 @@ def _zz070_convert_date(store: _WorkingStorage) -> None:
     program whose system record still carries a zero `Date-Form`.
 
     NO CLOCK IS READ, here or anywhere in this program. `to-day` is the third
-    linkage parameter [general/gl070.cbl:L243], set by the menu shell from the
-    single clock read in the whole call chain, and this migration receives it as
-    an argument (rule R-6).
+    linkage parameter [general/gl070.cbl:L243], and the menu shell sets it from
+    the STORED `Run-Date` rather than from a clock - `move run-date to u-bin` /
+    `call "maps04"` / `move u-date to to-day` [general/general.cbl:L462-L465].
+    The frozen call chain does hold FOURTEEN ambient date and time reads, all of
+    them in out-of-scope menu shells or in the date-service copybook those shells
+    COPY, as the census in `acas_posting/clock.py` records; none is on the path
+    that supplies this parameter. This migration receives it as an argument
+    (rule R-6).
 
     Args:
         store: the run's working storage. `to_day` is the input; `ws.ws_date` and
@@ -2114,7 +2120,6 @@ def run(
     work_files: GeneralLedgerWorkFiles | None = None,
     file_access: FileAccess | None = None,
     dal_common: AcasDalCommonData | None = None,
-    transport: object = None,
     states: Mapping[str, object] | None = None,
 ) -> GeneralLedgerWorkFiles:
     """Run `gl070` - General Ledger phase 1 batch check and phase 2 pre-process.
@@ -2183,12 +2188,24 @@ def run(
             [copybooks/Test-Data-Flags.cob:L6], from
             [general/gl070.cbl:L154]. Defaults to a fresh record, whose
             `SW-Testing` carries the copybook's own `value 1`.
-        transport: the data-access layer's transport policy, forwarded verbatim
-            to the posting handler. `None` leaves the handler's own default in
-            force. The BATCH handler takes no such argument, so it is not
-            offered one.
         states: the data-access layer's cursor states, forwarded verbatim to the
-            posting handler on the same terms.
+            posting handler. `None` leaves the handler's own default in force.
+            The BATCH handler takes no such argument, so it is not offered one.
+
+    Note:
+        ⭐ THERE IS NO `transport` PARAMETER, AND ITS REMOVAL IS THE POINT. An
+        earlier revision accepted one and forwarded it to the POSTING context
+        only, because `acas007` takes no such argument - so half of this
+        program's two tables ran under the caller's declaration and half under
+        whatever the data-access layer defaulted to. The connection policy is one
+        decision about one connection (twenty bridges share a single handle), so
+        it belongs to the deployment and is installed once at the entry point
+        through `acas_posting.dal.connection.set_connection_policy`; every open
+        this program causes then resolves to that one policy, both tables alike.
+        A program module has no business declaring it: the layering of Agent
+        Action Plan section 0.4.3 does not admit `dal.connection` here, and the
+        frozen program has no notion of transport at all
+        [copybooks/mysql-procedures.cpy:L72-L77].
 
     Returns:
         The work-file set, so that a caller which let the default be created can
@@ -2216,12 +2233,16 @@ def run(
     #  THE OPTIONS EACH FACADE CONTEXT MAY CARRY ARE NOT THE SAME, and the
     #  difference is the handlers', not this module's: the batch handler
     #  `acas007` accepts exactly the five positional records the facade passes
-    #  it, while the posting handler `acas006` additionally accepts a transport
-    #  policy and a cursor-state map. Forwarding this program's options to BOTH
-    #  contexts would make every batch verb fail on an unexpected argument.
+    #  it, while the posting handler `acas006` additionally accepts a
+    #  cursor-state map. Forwarding this program's options to BOTH contexts would
+    #  make every batch verb fail on an unexpected argument.
+    #
+    #  NOTHING ABOUT THE CONNECTION TRAVELS THIS WAY. The transport policy used
+    #  to be forwarded here, to the posting context and therefore to only one of
+    #  this program's two tables; it is now installed once at the entry point and
+    #  resolved by `connection.mysql_1000_open` for every open alike. See the
+    #  note on `run`.
     posting_options: dict[str, object] = {}
-    if transport is not None:
-        posting_options["transport"] = transport
     if states is not None:
         posting_options["states"] = states
 
@@ -2675,11 +2696,11 @@ def run(
 # The two remaining frozen conditionals, `if Date-Form = zero` at L553 and L583,
 # live inside the consolidated date implementations.
 #
-# THE OTHER FIVE ARE NOT VALIDATIONS AND ARE DECLARED HERE SO THEY CANNOT BE
-# MISTAKEN FOR ONE. All five are in `run`, and all five resolve an OPTIONAL
+# THE OTHER FOUR ARE NOT VALIDATIONS AND ARE DECLARED HERE SO THEY CANNOT BE
+# MISTAKEN FOR ONE. All four are in `run`, and all four resolve an OPTIONAL
 # KEYWORD ARGUMENT to a freshly constructed record: `work_files is None`,
-# `file_access is None`, `dal_common is None`, `transport is not None` and
-# `states is not None`. They exist because Python has optional arguments and
+# `file_access is None`, `dal_common is None` and `states is not None`. They
+# exist because Python has optional arguments and
 # COBOL does not - the frozen program's caller simply owns the corresponding
 # WORKING-STORAGE. None of them inspects a record, filters a row, or can change
 # which postings are read, which legs are written, or what any leg contains.

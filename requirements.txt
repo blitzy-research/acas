@@ -1,135 +1,27 @@
-# -------------------------------------------------------------------------
-# ACAS - Applewood Computers Accounting System
-# COBOL -> Python 3.12 migration of the batch posting cycle
+# ACAS -- COBOL to Python 3.12 migration of the batch posting cycle.
+# THE SHIPPED RUNTIME SET: a flat, hash-verified mirror of pyproject.toml's
+# [project].dependencies, for environments without a build backend and for
+# container builds that must install under --require-hashes.
 #
-# WHAT A LOCK FILE IN THIS MIGRATION IS
+#     pip install --require-hashes -r requirements.txt
 #
-#   pyproject.toml is the AUTHORITATIVE manifest: it declares the
-#   interpreter
-#   floor and ceiling, the packaging rules, the three dependency sets and
-#   the
-#   test-runner configuration. The three lock files mirror its three sets
-#   in
-#   flat, hash-verified form, for environments without a build backend
-#   and for
-#   container builds that must install under `--require-hashes`.
+# Every requirement carries a --hash for every artifact of its pinned version
+# that CPython 3.12 can install, read from the package index metadata rather than
+# transcribed by hand, so a substituted index cannot serve different bytes under
+# the same version number. requirements-harness.txt and requirements-dev.txt
+# mirror the other two dependency sets; the three sets are pairwise disjoint, and
+# a version that differs from pyproject.toml is a defect.
 #
-#   There are three files, one per set, and the sets are PAIRWISE
-#   DISJOINT:
-#
-#     requirements.txt          [project].dependencies
-#                               the shipped
-#                               runtime set
-#     requirements-harness.txt  [project.optional-dependencies].harness
-#                               layered on
-#                               top of requir
-#                               ements.txt
-#     requirements-dev.txt      [project.optional-dependencies].dev
-#                               the
-#                               verification
-#                               toolchain,
-#                               standalone
-#
-#   A version that differs between pyproject.toml and its lock file, or a
-#   package that appears in a set it does not belong to, is a defect.
-#
-#   ONE PIN IS DELIBERATELY ABSENT FROM THIS FILE, AND ITS ABSENCE IS NOT
-#   DRIFT. The build backend - setuptools, pinned exactly in pyproject.toml's
-#   [build-system] requires - is a BUILD requirement, not a runtime
-#   distribution of the migrated cycle. It is resolved into the isolated build
-#   environment by the build frontend and is never imported by any acas_posting
-#   module, so installing it into a run-time environment would add a
-#   distribution the cycle does not use. requirements-dev.txt carries its
-#   hashed entry instead, so the backend can be installed under hash
-#   verification and the wheel then built with `--no-build-isolation`. Every
-#   pin listed BELOW is a distribution the cycle actually imports, and that set
-#   is what must reconcile pin-for-pin with pyproject.toml's
-#   [project].dependencies.
-#
-# WHY THE HASHES ARE HERE
-#
-#   Every requirement carries `--hash=sha256:` entries for every artifact of
-#   its pinned version that CPython 3.12 can install - each platform wheel
-#   plus the source distribution. Passing `--require-hashes` then makes pip
-#   refuse any artifact whose content does not match, which turns the pins
-#   from a statement of intent into an enforced one: a compromised or
-#   substituted index cannot serve different bytes under the same version
-#   number.
-#
-#   The digests were read from the package index metadata for each pinned
-#   version, not transcribed by hand.
-#
-#   Install with:  pip install --require-hashes -r <this file>
-#
-#   See README-python-migration.md for how to build the comparison oracle,
-#   seed a scenario, run both cycles and diff the resulting table state.
-#
-# WHAT A LOCK FILE IN THIS MIGRATION IS NOT
-#
-#   It is not a manifest for the COBOL system. The COBOL tree (common/,
-#   copybooks/, general/, sales/, purchase/, irs/, stock/), the generated
-#   MySQL bridge (common/*MT.scb, common/*MT.cbl) and the schema
-#   (mysql/ACASDB.sql) are FROZEN specification sources: read
-#   exhaustively,
-#   never modified. The compiled comparison oracle under harness/ needs a
-#   container toolchain - GnuCOBOL 3.2, MariaDB 10.11.7, MariaDB
-#   Connector/C
-#   3.3.4, the JC preSQL translator - declared in harness/Dockerfile.*.
-#   Those
-#   versions must never appear in a Python lock file.
-#
-# TARGET RUNTIME
-#
-#   CPython 3.12, enforced by pyproject.toml's `requires-python =
-#   "==3.12.*"`.
-#   Its decimal module is backed by the C libmpdec extension rather than
-#   the
-#   pure-Python fallback, which matters for both correctness and speed,
-#   because
-#   every monetary and quantity operation in the migrated cycle passes
-#   through
-#   decimal.Decimal. Python 3.13 and newer are rejected by design: no
-#   parity
-#   evidence against the compiled oracle was captured there.
-#
-# DO NOT UPGRADE
-#
-#   The versions were resolved on the build host, not recalled. Do not
-#   upgrade,
-#   downgrade or "check for newer": a driver or runtime change can move a
-#   stored penny, and the only acceptable proof of equivalence is an
-#   empty
-#   scenario diff against the compiled COBOL oracle.
-# THIS FILE - THE SHIPPED RUNTIME SET
-#
-#   Mirrors [project].dependencies. This is the minimum the migrated
-#   cycle
-#   itself needs: an AST import census over every .py file in the
-#   repository
-#   records that acas_posting/ imports exactly ONE third-party top-level
-#   module - `mysql`, in acas_posting/dal/connection.py. SQLAlchemy is
-#   pinned
-#   because the Agent Action Plan section 0.5.1 names it as the permitted
-#   Core-level access path; greenlet and typing_extensions are
-#   SQLAlchemy's own
-#   requirements, not choices of this migration.
-#
-#   PyYAML is NOT here. It belongs to the harness set: it is imported
-#   only by
-#   harness/dump_tables.py and harness/diff_states.py, lazily, inside the
-#   function that reads a scenario file. See requirements-harness.txt.
-# -------------------------------------------------------------------------
+# DO NOT UPGRADE, downgrade or "check for newer". A driver or runtime change can
+# move a stored penny, and the only acceptable proof of equivalence is an empty
+# scenario diff against the compiled COBOL oracle. The build backend is
+# deliberately absent: it is a BUILD requirement the cycle never imports, and
+# requirements-dev.txt carries its hashed entry instead.
 
-# Oracle's official MySQL driver and the primary database path used by
-# acas_posting/dal/*. Ships a compiled C extension for CPython 3.12 and
-# materialises DECIMAL columns as decimal.Decimal and integer columns as
-# int -
-# never as a binary float. acas_posting/dal/connection.py additionally pins
-# the
-# converter explicitly and asserts the pinning at connect time, so a driver
-# that started returning float would fail loudly rather than silently
-# corrupt
-# every posted figure.
+# The ONLY third-party module acas_posting imports (in dal/connection.py). Ships
+# a compiled C extension for CPython 3.12 and materialises DECIMAL columns as
+# decimal.Decimal and integer columns as int, never as a binary float --
+# connection.py pins the converter explicitly and asserts it at connect time.
 mysql-connector-python==26.7.0 \
     --hash=sha256:9b63672cc381f097966faecd6940beb2a91f9efdf674a5807dc45f4efdb42e62 \
     --hash=sha256:375f9a042398e515a670003f26ab07e9b2ecaecba6eaf678f66fb5c2d36bd305 \
@@ -138,17 +30,10 @@ mysql-connector-python==26.7.0 \
     --hash=sha256:43ee453b53556f690e4f4b795d3f17a1c6d4b45f729657bb0d999c8dfc9261d5 \
     --hash=sha256:d8ff5ee236ea46661ee639336323e124ed868e37f3ea991bdc5de5a146f39fd5
 
-# Connection abstraction and parameter binding, used at CORE LEVEL ONLY:
-# text()
-# statements executed on an explicit Connection. acas_posting/ contains no
-# ORM
-# entity layer, no declarative metadata and no schema-generating code,
-# because
-# an ORM would want to own schema definition (forbidden - the schema is
-# frozen)
-# and would introduce identity-map and flush-ordering semantics the COBOL
-# does
-# not have, obscuring the exact statement ordering the state diff measures.
+# Used at CORE LEVEL ONLY: text() statements on an explicit Connection. There is
+# no ORM entity layer, no declarative metadata and no schema-generating code,
+# because an ORM would want to own schema definition and its flush ordering would
+# obscure the statement order the state diff measures.
 SQLAlchemy==2.0.51 \
     --hash=sha256:7d78702b26ba1c18b2d0fb2ea940ba7f17a9581b42e8361ff93920ebbee1235a \
     --hash=sha256:581921d849d6e6f994d560389192955e80e2950e18fcdfe2ccea863e01158e6e \
@@ -160,12 +45,9 @@ SQLAlchemy==2.0.51 \
     --hash=sha256:bb024d8b621d0be75f4f44ecc7c950450026e76d66dc8f791bb5331d7fed59d5 \
     --hash=sha256:804dccd8a4a6242c4e30ad961e540e18a588f6527202f2d6791b01845d59fdc9
 
-# SQLAlchemy's own platform-conditional requirement, pinned for
-# reproducibility.
-# Nothing in acas_posting imports greenlet and nothing calls
-# create_async_engine: execution is strictly sequential, and threads,
-# asyncio,
-# multiprocessing and connection pooling are all forbidden.
+# SQLAlchemy's own requirements, pinned for reproducibility. Nothing in
+# acas_posting imports greenlet and nothing calls create_async_engine: execution
+# is strictly sequential.
 greenlet==3.5.4 \
     --hash=sha256:3d66250e8b09f182ede05490998c818b5961f7a3640332d44c4927caec7bbfe4 \
     --hash=sha256:c90e930c9c192e5b3ee9fb8bcd920ea3926155e2e3ded39fc697323addecee17 \
@@ -179,7 +61,6 @@ greenlet==3.5.4 \
     --hash=sha256:77d6ce04fed0d9aeed42e0f37923cc43eba9b027bdd9c34546bb4ccd143d0fe0 \
     --hash=sha256:0232ae1de90a8e07867bb127d7a6ba2301e859145489f25cda8a6096dabe1d20
 
-# SQLAlchemy's own requirement, pinned for reproducibility.
 typing_extensions==4.16.0 \
     --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8 \
     --hash=sha256:dc983d19a509c94dba722ee6abd33940f7c05a89e243c47e907eb4db6f1a43e5

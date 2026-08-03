@@ -268,6 +268,19 @@ __all__: Final[tuple[str, ...]] = (
     # ---- the reader, and THE adapter --------------------------------------
     "resolve_rdbms_params",
     "bind_rdbms_connection",
+    # ---- the deployment transport declaration, which has no frozen -------
+    #      counterpart and is entirely optional
+    "TRANSPORT_ALLOW_PLACEHOLDER_CREDENTIALS_VARIABLE",
+    "TRANSPORT_CA_VARIABLE",
+    "TRANSPORT_CERTIFICATE_VARIABLE",
+    "TRANSPORT_ISOLATED_ORACLE_VARIABLE",
+    "TRANSPORT_KEY_VARIABLE",
+    "TRANSPORT_REQUIRE_DECLARED_CREDENTIALS_VARIABLE",
+    "TRANSPORT_REQUIRE_ENCRYPTION_VARIABLE",
+    "TransportPolicyParams",
+    "resolve_transport_policy",
+    # ---- deployment policy, deliberately OFF the parity path (M-06) -------
+    "audit_deployment_contract",
 )
 
 
@@ -280,9 +293,17 @@ __all__: Final[tuple[str, ...]] = (
 RDB_RETURN_OK: Final[int] = 0
 
 #: "1 = No valid keyword terminator i.e., = or :" - the frozen code for "the
-#: source is present but malformed". Carried on the error when a required value
-#: is blank, when a value exceeds its frozen carrier, or when a value contains
-#: whitespace that the frozen readers would silently drop.
+#: source is present but malformed" [common/acas-get-params.cbl:L200-L203].
+#:
+#: ⭐ M-06. NOT RAISED BY THIS TRANSPORT, and recorded so the frozen set is
+#: complete rather than because anything reaches it. It used to be raised for a
+#: blank, spaced or over-long VALUE; the frozen program refuses none of those - it
+#: transforms them - so `_as_the_frozen_reader_would` now reproduces the
+#: transformation and the refusals moved to `audit_deployment_contract`, which
+#: warns instead. The condition this code actually names, a keyword terminator that
+#: is neither "=" nor ":", cannot arise over an environment mapping at all: the
+#: mapping is already split into names and values, so there is no terminator to
+#: get wrong.
 RDB_RETURN_MALFORMED: Final[int] = 1
 
 #: "8 = No file found." Carried on the error when NOT ONE of the six variables
@@ -444,11 +465,14 @@ class RdbmsParamError(ValueError):
 
     Attributes:
         return_code: The frozen counterpart from
-            [common/acas-get-params.cbl:L37-L42] - `RDB_RETURN_NO_SOURCE` (8)
-            when the contract is absent entirely, `RDB_RETURN_MALFORMED` (1)
-            when it is present but cannot work. A caller that wants to tell
-            "not configured" from "misconfigured" reads this rather than
-            parsing the message.
+            [common/acas-get-params.cbl:L37-L42]. In practice always
+            `RDB_RETURN_NO_SOURCE` (8) - the contract is absent entirely -
+            because that is the frozen program's only refusal this transport can
+            express (M-06). `RDB_RETURN_MALFORMED` (1) is published on the class
+            so the frozen set is complete and so a caller may compare against it,
+            but nothing in this module raises it: a present-but-awkward value is
+            transformed as the frozen reader transforms it, and
+            `audit_deployment_contract` reports the concern instead.
     """
 
     def __init__(self, return_code: int, message: str) -> None:
@@ -547,11 +571,11 @@ def _pic_x(text: str, width: int) -> str:
     Plan's import table (section 0.4.3) does not permit a `cli` module to reach
     the `cobol` package.
 
-    Truncation is unreachable for every value that gets this far - the caller
-    has already refused anything longer than its carrier - so in practice this
-    only ever pads. It is written as the full `MOVE` rule anyway, because a
-    helper that implemented half of a COBOL verb would be a trap for the next
-    reader.
+    ⭐ M-06. TRUNCATION IS NOW REACHABLE, and this note used to say the opposite:
+    "the caller has already refused anything longer than its carrier". That
+    refusal has been removed as an added validation, so an over-long value now
+    arrives here and is truncated - which is what the frozen `MOVE` does, and the
+    reason this helper was written as the full rule rather than as a pad.
 
     Args:
         text: The sending value.
@@ -561,6 +585,191 @@ def _pic_x(text: str, width: int) -> str:
         Exactly `width` characters.
     """
     return text[:width].ljust(width)
+
+
+#: The UNSTRING delimiter set of [common/acas-get-params.cbl:L193-L199]:
+#:
+#:     unstring ACAS-Params-Record delimited by "="
+#:                                           or ":"
+#:                                           or space
+#:                     into WS-RDB-Keyword
+#:                              DELIMITER IN WS-RDB-Equal
+#:                          WS-RDB-Value
+#:
+#: THREE CHARACTERS AND NO MORE. `space` in COBOL is X'20' - it is not "any
+#: whitespace" - so a TAB inside a value is NOT a delimiter and travels intact,
+#: while a space, an "=" or a ":" ends the value there. The second receiving item
+#: is delimited by the same set as the first, which is why a value is cut at the
+#: next delimiter rather than running to the end of the record.
+_UNSTRING_DELIMITERS: Final[tuple[str, ...]] = ("=", ":", " ")
+
+#: `03 WS-RDB-Value pic x(64).` [common/acas-get-params.cbl:L135] - the UNSTRING's
+#: second receiving item, and the sender of every one of the six `MOVE`s at
+#: [common/acas-get-params.cbl:L204-L221]. A value longer than this is truncated
+#: by the UNSTRING before any `MOVE` is reached.
+_WS_RDB_VALUE_WIDTH: Final[int] = 64
+
+
+def _as_the_frozen_reader_would(value: str, spec: _ParamSpec) -> str:
+    """Put one value through the frozen reader's own three transformations.
+
+    ⭐ M-06.  THIS IS WHAT REPLACED THREE REFUSALS. `acas-get-params` never
+    objects to a value's emptiness, spacing or length; it disposes of all three
+    silently, and each disposal is a statement in the frozen source rather than a
+    policy:
+
+      1. THE UNSTRING CUTS AT THE FIRST DELIMITER
+         [common/acas-get-params.cbl:L193-L199]. `DBPASS=my pass` yields
+         `WS-RDB-Value` = "my", and the rest of the line is discarded. So a value
+         with a space in it is SHORTENED, which is precisely what the refusal that
+         used to stand here said would happen - and then refused instead of
+         reproducing.
+      2. THE UNSTRING RECEIVER IS `pic x(64)`
+         [common/acas-get-params.cbl:L135], so anything longer is already gone
+         before a `MOVE` is reached.
+      3. THE `MOVE` TRUNCATES TO THE CARRIER
+         [common/acas-get-params.cbl:L204-L221]. This one is not theoretical: the
+         port travels `move WS-RDB-Value to LK-Port-Number` into
+         `pic x(4)` [common/acas-get-params.cbl:L158], a 64-to-4 narrowing that
+         truncates every port longer than four digits without a word.
+
+    A MISSING VARIABLE NEEDS NO CASE OF ITS OWN. `initialise LK-RDB-Vars`
+    [common/acas-get-params.cbl:L180-L182] over a group declared
+    `value spaces` [common/acas-get-params.cbl:L152] leaves an unmatched keyword's
+    carrier space-filled, and the `evaluate` simply never reaches it. Passing "" in
+    and letting step 3 pad is the same outcome by the same rule.
+
+    Args:
+        value: The raw environment value - this transport's counterpart of the
+            characters after the "=" on an `acas.param` line.
+        spec: The parameter's contract entry, which carries the receiving
+            carrier's width.
+
+    Returns:
+        The value as the frozen reader would have left it in `LK-RDB-Vars`,
+        UNPADDED - `bind_rdbms_connection`'s own `MOVE` does the padding, so
+        padding here would pad twice.
+    """
+    #  1.  `unstring ... delimited by "=" or ":" or space` - cut at the first one.
+    cut = len(value)
+    for delimiter in _UNSTRING_DELIMITERS:
+        position = value.find(delimiter)
+        if position != -1:
+            cut = min(cut, position)
+    unstrung = value[:cut]
+
+    #  2.  ...into `WS-RDB-Value pic x(64)`.
+    #  3.  `move WS-RDB-Value to LK-<carrier>`, which truncates on the right.
+    #  `_pic_x` applies the full `MOVE` rule and then `.rstrip()` undoes only its
+    #  padding, because this function's contract is to return the value unpadded.
+    return _pic_x(unstrung[:_WS_RDB_VALUE_WIDTH], spec.carrier_width).rstrip(" ")
+
+
+def audit_deployment_contract(
+    env: Mapping[str, str] | None = None,
+) -> tuple[str, ...]:
+    """Report deployment concerns about the contract. NOT on the parity path.
+
+    ⭐ M-06.  THE POLICY THAT USED TO LIVE INSIDE `resolve_rdbms_params`, MOVED
+    HERE INTACT. It was three refusals, and they were right about the operational
+    risk and wrong about where the risk belongs: `acas-get-params` refuses only an
+    absent source, a bad keyword terminator and an unrecognised keyword, so
+    refusing a blank, a spaced or an over-long VALUE added dispositions the
+    compiled program has not got, and rule R-3 forbids that.
+
+    So the concerns are published as WARNINGS from a function the migrated cycle
+    never calls. Nothing in `acas_posting` calls it - verify with a grep - which is
+    what makes it "outside the parity path" structurally rather than by
+    convention. An orchestrator, a harness script or an operator may call it
+    before a run and act on what it says; a posting program cannot be affected by
+    it, because it is not reachable from one.
+
+    WHY THE CONCERNS ARE STILL WORTH REPORTING. Each describes a way the two
+    halves of a scenario comparison could connect DIFFERENTLY while both appear to
+    succeed, and a diff between two differently-connected runs says nothing about
+    the migration:
+
+      * A blank required value leaves its carrier space-filled and the run
+        connects as spaces, or to no host.
+      * A value containing a space is cut at the space
+        [common/acas-get-params.cbl:L193-L199], so the credential actually used is
+        shorter than the one supplied.
+      * A value longer than its carrier is truncated
+        [common/acas-get-params.cbl:L204-L221] - the port narrows 64 to 4 - so the
+        run may reach a different port, database or user than intended.
+
+    THE VALUES THEMSELVES ARE NEVER INCLUDED in a message. One of the six is a
+    password, and a warning that echoed it would put it in a log.
+
+    Args:
+        env: The mapping to audit. `os.environ` when omitted.
+
+    Returns:
+        One string per concern, in contract order, or an empty tuple when the
+        contract is clean. An empty tuple is not a guarantee that a connection
+        will succeed; it only means these three shapes of silent divergence are
+        absent.
+    """
+    source: Mapping[str, str] = os.environ if env is None else env
+    concerns: list[str] = []
+
+    if not any(spec.variable in source for spec in ACAS_PARAM_CONTRACT):
+        concerns.append(
+            "no database connection contract is present: not one of "
+            + ", ".join(spec.variable for spec in ACAS_PARAM_CONTRACT)
+            + " is set. resolve_rdbms_params raises RDB_RETURN_NO_SOURCE (8) for "
+            "this, reproducing the frozen `move 8 to LK-Return / goback` "
+            "[common/acas-get-params.cbl:L174-L178]."
+        )
+        return tuple(concerns)
+
+    for spec in ACAS_PARAM_CONTRACT:
+        value = source.get(spec.variable, "")
+
+        if spec.required and not value:
+            concerns.append(
+                f"{spec.variable} is not set, or is empty, but it carries the "
+                f"{spec.keyword} parameter the frozen reader moves into "
+                f"{spec.attribute} [{spec.locator}]. Five of the six are needed "
+                f"for a working connection; only ACAS_DB_SOCKET may be empty, "
+                f"which means connect over TCP. The run will NOT stop - the "
+                f"carrier is simply left space-filled, exactly as "
+                f"`initialise LK-RDB-Vars` over a group declared `value spaces` "
+                f"[common/acas-get-params.cbl:L152] leaves it."
+            )
+
+        if any(character.isspace() for character in value):
+            concerns.append(
+                f"{spec.variable} contains whitespace. The frozen reader "
+                f"UNSTRINGs its value 'delimited by \"=\" or \":\" or space' "
+                f"[common/acas-get-params.cbl:L193-L199] and every bridge then "
+                f"extracts the item 'delimited by space' "
+                f"[common/glpostingMT.cbl:L394-L417], so the value actually used "
+                f"is CUT AT THE FIRST SPACE. Both halves of a comparison will cut "
+                f"it identically, but neither will use what was supplied. (The "
+                f"value itself is deliberately not shown.)"
+            )
+
+        if len(value) > spec.carrier_width:
+            concerns.append(
+                f"{spec.variable} is {len(value)} characters long but the COBOL "
+                f"side can carry at most {spec.carrier_width}: the value reaches "
+                f"the client library through {spec.attribute} [{spec.locator}] "
+                f"and the RDB-Data group [copybooks/wsfnctn.cob:L56-L62]"
+                + (
+                    ", narrowing again into "
+                    "`01 Ws-Mysql-Port-Number pic x(4)` "
+                    "[copybooks/mysql-variables.cpy:L91] before the connect"
+                    if spec.keyword == "DBPORT"
+                    else ""
+                )
+                + ". MOVE truncates it silently, here as in the frozen source, so "
+                "the run may authenticate as a different user or reach a "
+                "different database or port than intended. (The value itself is "
+                "deliberately not shown.)"
+            )
+
+    return tuple(concerns)
 
 
 # =============================================================================
@@ -573,11 +782,15 @@ def resolve_rdbms_params(
 ) -> RdbmsParams:
     """Read the six connection parameters, as `acas-get-params` reads them.
 
-    Reproduces `common/acas-get-params.cbl` over the environment transport:
-    the same six keywords, the same closed set, the same return codes, and the
-    same "absent source" versus "malformed source" distinction. Nothing is
-    defaulted, guessed or repaired - a contract that cannot work is refused so
-    that the run stops before it can write a row against the wrong database.
+    Reproduces `common/acas-get-params.cbl` over the environment transport: the
+    same six keywords, the same closed set, and the ONE refusal that transport can
+    express - an absent source. Nothing is defaulted, guessed or repaired, and
+    equally nothing is refused that the frozen program would have accepted: a
+    blank, spaced or over-long value is put through the frozen reader's own
+    UNSTRING-and-MOVE transformations by `_as_the_frozen_reader_would` (M-06).
+    `audit_deployment_contract` reports those three as warnings for a caller that
+    wants to act on them before a run; this function does not, because a refusal
+    here would be a disposition the compiled cycle has not got (rule R-3).
 
     THE ENVIRONMENT IS READ ONCE, HERE. Every value is taken from `env` in one
     pass, in the frozen `MOVE` order, so two calls given the same mapping
@@ -590,15 +803,19 @@ def resolve_rdbms_params(
             explicit mapping and touches the real environment not at all.
 
     Returns:
-        The six resolved values, unpadded.
+        The six resolved values, unpadded and transformed exactly as the frozen
+        reader would have left them in `LK-RDB-Vars` - see
+        `_as_the_frozen_reader_would`.
 
     Raises:
         RdbmsParamError: With `return_code` `RDB_RETURN_NO_SOURCE` (8) when not
             one of the six variables is present - this transport's "No file
-            found" [common/acas-get-params.cbl:L39]. With
-            `RDB_RETURN_MALFORMED` (1) when the contract is present but a
-            required value is blank, a value is longer than its frozen carrier,
-            or a value contains whitespace the frozen readers would drop.
+            found" [common/acas-get-params.cbl:L39], and reproducing
+            `move 8 to LK-Return / goback` [common/acas-get-params.cbl:L174-L178].
+            THAT IS THE ONLY REFUSAL (M-06). A blank, spaced or over-long value is
+            transformed rather than refused, because the frozen program transforms
+            it; call `audit_deployment_contract` to be WARNED about those three
+            instead.
     """
     source: Mapping[str, str] = os.environ if env is None else env
 
@@ -625,73 +842,30 @@ def resolve_rdbms_params(
             "ACAS-User to a blank host.",
         )
 
+    #  ⭐ M-06.  THE THREE REFUSALS THAT USED TO STAND HERE ARE REPLACED BY THE
+    #  TRANSFORMATIONS THE FROZEN READER ACTUALLY PERFORMS. They refused a
+    #  required-and-blank value, a value containing whitespace, and a value longer
+    #  than its carrier, each on the reasoning that the COBOL's silence would let
+    #  the two halves of a comparison connect differently. Every word of that
+    #  reasoning is true and none of it makes a refusal faithful: rule R-3 forbids
+    #  adding a validation, and `acas-get-params` has exactly THREE refusals - code
+    #  8 for no source at all [common/acas-get-params.cbl:L174-L178], code 1 for a
+    #  keyword terminator that is neither "=" nor ":"
+    #  [common/acas-get-params.cbl:L200-L203], and code 2 for an unrecognised
+    #  keyword [common/acas-get-params.cbl:L217-L219]. NOT ONE of them is about a
+    #  value's emptiness, its spacing or its length, because the frozen program
+    #  disposes of all three by TRANSFORMING rather than by objecting - and
+    #  reproducing the transformation preserves the parity that refusing destroyed.
+    #
+    #  THE POLICY IS NOT DISCARDED, ONLY MOVED OFF THIS PATH. Call
+    #  `audit_deployment_contract` explicitly and it returns the same three
+    #  concerns as warnings. Nothing in the migrated cycle calls it, which is
+    #  exactly what "outside the parity path" means.
     resolved: dict[str, str] = {}
     for spec in ACAS_PARAM_CONTRACT:
-        value = source.get(spec.variable, "")
-
-        # A required parameter must be present AND non-blank. The frozen reader
-        # cannot express this - a missing line simply leaves `LK-RDB-Vars` at
-        # its `value spaces` [common/acas-get-params.cbl:L152] - and the
-        # consequence there is the same silent misconnection this module exists
-        # to prevent, so an incomplete source is malformed rather than usable.
-        if spec.required and not value:
-            raise RdbmsParamError(
-                RDB_RETURN_MALFORMED,
-                f"{spec.variable} is not set, or is empty, but it carries the "
-                f"{spec.keyword} parameter that the frozen reader moves into "
-                f"{spec.attribute} [{spec.locator}]. Five of the six are "
-                f"required; only ACAS_DB_SOCKET may be empty, which means "
-                f"connect over TCP. harness/docker-compose.yml sets all six "
-                f"for the gnucobol service.",
-            )
-
-        # Whitespace ends the value TWICE on the COBOL side: at
-        # [common/acas-get-params.cbl:L193-L199], where the UNSTRING is
-        # `delimited by "=" or ":" or space`; and again in every bridge, where
-        # each item is extracted with `delimited by space`
-        # [common/glpostingMT.cbl:L394-L417]. So a value with a space in it,
-        # or with padding around it, is silently shortened rather than used.
-        if any(character.isspace() for character in value):
-            raise RdbmsParamError(
-                RDB_RETURN_MALFORMED,
-                f"{spec.variable} contains whitespace, which the COBOL side "
-                f"silently drops: the frozen reader UNSTRINGs its value "
-                f"'delimited by \"=\" or \":\" or space' "
-                f"[common/acas-get-params.cbl:L193-L199], and every bridge "
-                f"then extracts the item 'delimited by space' "
-                f"[common/glpostingMT.cbl:L394-L417]. The compiled oracle "
-                f"would therefore use a shorter value than this run does. Use "
-                f"a value with no space, tab or newline in it. (The value "
-                f"itself is deliberately not shown.)",
-            )
-
-        # The width gate. `MOVE` truncates on the right without complaint, so
-        # a longer value would make the compiled oracle authenticate as a
-        # different user, or against a different database or port, than this
-        # run - and a diff between two differently-connected runs says nothing
-        # about the migration. Only the LENGTH and the LIMIT are reported.
-        if len(value) > spec.carrier_width:
-            raise RdbmsParamError(
-                RDB_RETURN_MALFORMED,
-                f"{spec.variable} is {len(value)} characters long but the "
-                f"COBOL side can carry at most {spec.carrier_width}: the "
-                f"value has to reach the client library through "
-                f"{spec.attribute} [{spec.locator}] and the RDB-Data group "
-                f"[copybooks/wsfnctn.cob:L56-L62]"
-                + (
-                    ", narrowing again into "
-                    "`01 Ws-Mysql-Port-Number pic x(4)` "
-                    "[copybooks/mysql-variables.cpy:L91] before the connect"
-                    if spec.keyword == "DBPORT"
-                    else ""
-                )
-                + f". MOVE would truncate it silently, so it is refused "
-                f"instead. Both sides of the comparison must use the same "
-                f"credentials, so choose a value the frozen carriers can "
-                f"hold. (The value itself is deliberately not shown.)",
-            )
-
-        resolved[spec.keyword] = value
+        resolved[spec.keyword] = _as_the_frozen_reader_would(
+            source.get(spec.variable, ""), spec
+        )
 
     return RdbmsParams(
         host=resolved["DBHOST"],
@@ -737,9 +911,13 @@ def bind_rdbms_connection(
     wrap the whole block in `if RDBMS-DB-Name = spaces or FS-Cobol-Files-Used`
     [common/glbatchLD.cbl:L238-L239], because there the record has just been
     READ from `system.dat` and may already hold usable settings. Here it has
-    not: the CLI builds `SYSTEM-REC` at the record layer's declared defaults
-    and never loads it from the store (see `Q-CLI-SYSREC-LOAD` in
-    `acas_posting/cli/args.py`), so `RDBMS-DB-Name` is never spaces - it is the
+    not: this function runs BEFORE the store is read, on a `SYSTEM-REC` still at
+    the record layer's declared defaults, and it has to - the six fields it
+    fills are the only carrier by which a connection parameter reaches the
+    data-access layer, so nothing could be read without them (the load itself is
+    `aa010_get_system_recs`, and `Q-CLI-SYSREC-LOAD` in
+    `acas_posting/cli/args.py` records the ordering). `RDBMS-DB-Name` is
+    therefore never spaces at this point - it is the
     literal "ACASDB" [copybooks/wssystem.cob:L137] - and a literal
     reproduction of the guard would skip the load on every single run and leave
     the placeholder password in place. The guard's INTENT is "load them if they
@@ -794,6 +972,174 @@ def bind_rdbms_connection(
         )
 
     return parameters
+
+
+# =============================================================================
+#  THE DEPLOYMENT TRANSPORT DECLARATION  -  NO FROZEN COUNTERPART
+# =============================================================================
+#
+#  ⛔ THIS IS NOT PART OF THE SIX-PARAMETER CONTRACT, AND `ACAS_PARAM_CONTRACT`
+#  STAYS CLOSED AT SIX. `common/acas-get-params.cbl` has no seventh keyword and
+#  the frozen `evaluate` closes the set [common/acas-get-params.cbl:L204-L220];
+#  the four names below are DEPLOYMENT settings for a facility the compiled
+#  system does not have at all - the C interface passes a literal zero
+#  client-flag word and negotiates no TLS whatsoever
+#  [copybooks/mysql-procedures.cpy:L72-L77].
+#
+#  They are read here, and not in `args.py`, because this module is the one
+#  adapter in the shipped package that reads the surroundings. Every one is
+#  OPTIONAL: with none of them set the resolved declaration is empty, the
+#  data-access layer's own default applies, and the migrated cycle behaves
+#  exactly as the compiled one does - so nothing is added to the behaviour under
+#  comparison (rule R-3). Two runs given the same mapping resolve identically
+#  (rule R-6).
+# =============================================================================
+
+#: The certificate authority bundle the server's certificate is verified
+#: against. Setting it turns the session into a verified, encrypted one.
+TRANSPORT_CA_VARIABLE: Final[str] = "ACAS_DB_TLS_CA"
+
+#: A client certificate and its private key, for a server that requires one.
+#: Both or neither: the data-access layer refuses a half-configured pair,
+#: because a certificate cannot authenticate without its key.
+TRANSPORT_CERTIFICATE_VARIABLE: Final[str] = "ACAS_DB_TLS_CERT"
+TRANSPORT_KEY_VARIABLE: Final[str] = "ACAS_DB_TLS_KEY"
+
+#: Declares that the target is the comparison harness on a private network whose
+#: server has no TLS configured, so a plaintext connection to it is intended.
+#: This is what silences the unprotected-transport warning for a harness run,
+#: and it is a DECLARATION - nothing infers it from the address.
+TRANSPORT_ISOLATED_ORACLE_VARIABLE: Final[str] = "ACAS_DB_ISOLATED_ORACLE"
+
+#: Turns the unprotected-transport report into a refusal, for a deployment that
+#: wants one. Off unless set, because the compiled program applies no such check.
+TRANSPORT_REQUIRE_ENCRYPTION_VARIABLE: Final[str] = "ACAS_DB_REQUIRE_TLS"
+
+#: Turns the shipped-placeholder-credential report into a refusal, on the same
+#: terms.
+TRANSPORT_REQUIRE_DECLARED_CREDENTIALS_VARIABLE: Final[str] = (
+    "ACAS_DB_REQUIRE_DECLARED_CREDENTIALS"
+)
+
+#: Declares that the shipped placeholder credentials of
+#: [copybooks/wssystem.cob:L138-L139] are the intended ones and the server is
+#: disposable, which is the harness's situation.
+TRANSPORT_ALLOW_PLACEHOLDER_CREDENTIALS_VARIABLE: Final[str] = (
+    "ACAS_DB_ALLOW_PLACEHOLDER_CREDENTIALS"
+)
+
+#: The spellings read as true, compared case-insensitively after stripping. A
+#: closed set rather than "anything non-empty": a variable left as `"0"` or
+#: `"false"` by a deployment template must not silently mean yes.
+_TRUE_SPELLINGS: Final[frozenset[str]] = frozenset(
+    {"1", "true", "yes", "y", "on"}
+)
+
+
+@dataclass(frozen=True, slots=True)
+class TransportPolicyParams:
+    """The deployment's transport declaration, as resolved from the contract.
+
+    Frozen and slotted, like :class:`RdbmsParams`. Deliberately NOT a
+    ``dal.connection`` type: this module knows nothing of the data-access layer,
+    and the entry-point layer turns these values into the one installed
+    ``ConnectionPolicy``.
+
+    An instance with every field at its default - which is what an environment
+    setting none of the variables resolves to - declares nothing, and the
+    data-access layer then behaves exactly as the compiled system does.
+
+    Attributes:
+        ca_file: :data:`TRANSPORT_CA_VARIABLE`, or ``None`` when unset.
+        certificate_file: :data:`TRANSPORT_CERTIFICATE_VARIABLE`, or ``None``.
+        key_file: :data:`TRANSPORT_KEY_VARIABLE`, or ``None``.
+        isolated_oracle: :data:`TRANSPORT_ISOLATED_ORACLE_VARIABLE`, read as a
+            boolean.
+        require_encrypted_transport:
+            :data:`TRANSPORT_REQUIRE_ENCRYPTION_VARIABLE`, read as a boolean.
+        require_declared_placeholder_credentials:
+            :data:`TRANSPORT_REQUIRE_DECLARED_CREDENTIALS_VARIABLE`, likewise.
+        allow_frozen_placeholder_credentials:
+            :data:`TRANSPORT_ALLOW_PLACEHOLDER_CREDENTIALS_VARIABLE`, likewise.
+    """
+
+    ca_file: str | None = None
+    certificate_file: str | None = None
+    key_file: str | None = None
+    isolated_oracle: bool = False
+    require_encrypted_transport: bool = False
+    require_declared_placeholder_credentials: bool = False
+    allow_frozen_placeholder_credentials: bool = False
+
+
+def _optional_path(env: Mapping[str, str], variable: str) -> str | None:
+    """Read an optional path setting.
+
+    Args:
+        env: The mapping to read from.
+        variable: The variable name.
+
+    Returns:
+        The stripped value, or ``None`` when the variable is absent or blank. A
+        blank is read as absent rather than as an empty path, matching the way
+        the frozen socket parameter treats one [common/acas-get-params.cbl].
+    """
+    value = env.get(variable, "").strip()
+    return value or None
+
+
+def _optional_flag(env: Mapping[str, str], variable: str) -> bool:
+    """Read an optional boolean setting from its closed set of spellings.
+
+    Args:
+        env: The mapping to read from.
+        variable: The variable name.
+
+    Returns:
+        ``True`` only for a recognised affirmative spelling; ``False`` for
+        anything else, including an unrecognised value. Nothing is raised,
+        because an unrecognised spelling must not stop a posting run over a
+        setting the compiled system has not got.
+    """
+    return env.get(variable, "").strip().lower() in _TRUE_SPELLINGS
+
+
+def resolve_transport_policy(
+    env: Mapping[str, str] | None = None,
+) -> TransportPolicyParams:
+    """Resolve the deployment's transport declaration. All fields optional.
+
+    Read in one pass, in declaration order, from the same transport the six
+    connection parameters come from - so a deployment configures its database
+    reachability and its database protection in one place.
+
+    Args:
+        env: The mapping to resolve from. ``os.environ`` when omitted, which is
+            the case in a real run; a test or an orchestrator passes an explicit
+            mapping and touches the real environment not at all.
+
+    Returns:
+        The resolved declaration. Never raises: with nothing set every field is
+        at its default, which declares nothing.
+    """
+    mapping = os.environ if env is None else env
+    return TransportPolicyParams(
+        ca_file=_optional_path(mapping, TRANSPORT_CA_VARIABLE),
+        certificate_file=_optional_path(mapping, TRANSPORT_CERTIFICATE_VARIABLE),
+        key_file=_optional_path(mapping, TRANSPORT_KEY_VARIABLE),
+        isolated_oracle=_optional_flag(
+            mapping, TRANSPORT_ISOLATED_ORACLE_VARIABLE
+        ),
+        require_encrypted_transport=_optional_flag(
+            mapping, TRANSPORT_REQUIRE_ENCRYPTION_VARIABLE
+        ),
+        require_declared_placeholder_credentials=_optional_flag(
+            mapping, TRANSPORT_REQUIRE_DECLARED_CREDENTIALS_VARIABLE
+        ),
+        allow_frozen_placeholder_credentials=_optional_flag(
+            mapping, TRANSPORT_ALLOW_PLACEHOLDER_CREDENTIALS_VARIABLE
+        ),
+    )
 
 
 # -----------------------------------------------------------------------------

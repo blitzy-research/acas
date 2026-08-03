@@ -143,16 +143,9 @@ and ``acas_dal_common_data``. A successful read MUTATES the record area IN
 PLACE, which is what ``acas019``'s own contract says
 [acas_posting/dal/acas019_otm3.py], and what the COBOL ``CALL`` does.
 
-THE ONE OPEN INTEGRATION SEAM, stated plainly so nobody mistakes it for a
-defect in this module. ``acas_posting/dal/facade.py`` DOES NOT EXIST YET. The
-AAP lists it as a file to be CREATED and ``acas_posting/dal/__init__`` says so
-itself - "Target inventory, not yet present: `facade`". This module is the first
-program to need it: its sibling ``gl071`` is a pure sort and its own docstring
-forbids importing anything from ``acas_posting.dal`` at all. So until that file
-lands, ``import acas_posting.programs.sl060_invoice_posting`` raises
-``ImportError: cannot import name 'facade' from 'acas_posting.dal'``.
-
-That is the correct state of affairs, not a bug to work around:
+HOW THE FACADE IS REACHED, since this module is the first program to need it -
+its sibling ``gl071`` is a pure sort and its own docstring forbids importing
+anything from ``acas_posting.dal`` at all:
 
 * The import form is the one AAP section 0.4.3 mandates verbatim - ``copy
   "Proc-ACAS-FH-Calls.cob".`` becomes ``from acas_posting.dal import facade``.
@@ -161,13 +154,13 @@ That is the correct state of affairs, not a bug to work around:
   dependency and would leave a stub in the shipped package, which the zero-
   placeholder policy forbids outright.
 * The twenty-seven verbs this module performs are enumerated in the traceability
-  footer with the locator of every call site, so the facade's required surface
-  is fully specified from here.
+  footer with the locator of every call site, so the surface this module requires
+  of ``acas_posting.dal.facade`` is fully specified from here.
 * Behaviour was verified against an in-memory double implementing all twenty-
   seven verbs, exercising each of the six anomalies, both period totals, the
   99-item batch cap, the two-pass credit-note walk, the OTM2 truncation and an
-  end-to-end ``run``. The module is complete and correct; it is waiting on one
-  sibling file, and nothing in it needs to change when that file arrives.
+  end-to-end ``run``. The double remains the way to exercise the arithmetic
+  without a database; the module itself binds the real facade.
 
 WHICH TABLES A RUN TOUCHES, and why the gating must be traced before reading
 any of the code below. Seven IRS fan-out sites test a three-state switch,
@@ -272,7 +265,7 @@ import dataclasses
 import logging
 import typing
 from decimal import Decimal
-from typing import Callable, Final
+from typing import Callable, Final, Mapping, cast
 
 from acas_posting import dates
 from acas_posting.cobol import arithmetic, condition_names, move
@@ -294,7 +287,11 @@ from acas_posting.records.system_record import SystemRecord
 from acas_posting.records.system_record_4 import SystemRecord4
 from acas_posting.records.test_data_flags import AcasDalCommonData
 from acas_posting.records.value_analysis import WsValueRecord
-from acas_posting.workfiles import LineSequentialWorkFile
+from acas_posting.workfiles import (
+    OPEN_ITEM_2_NAME,
+    OpenItemWorkFile,
+    open_item_work_file,
+)
 
 __all__: Final[tuple[str, ...]] = ("run",)
 
@@ -623,7 +620,10 @@ _TOTAL_VAT: Final[FieldDescriptor] = descriptor_for(
 #: all declared values [copybooks/slwsoi.cob:L20-L30], so the only thing keeping
 #: the subscript in range is an UPSTREAM, IMPLICIT filter: ``sl055`` skips
 #: proformas at [sales/sl055.cbl:L430-L431]. R-3 forbids adding the bounds
-#: check the COBOL does not have.
+#: check the COBOL does not have, and R-4 forbids raising in its place - see
+#: ``_add_to_total_group``, which stores through ``move.subscripted_store`` over
+#: ``_WS_DATA_TOTALS_GROUP`` and so resolves an out-of-range subscript by byte
+#: address exactly as the compiled program resolves it.
 _A: Final[FieldDescriptor] = descriptor_for(
     "pic 9 value zero", name="a", source_locator=f"{_PROGRAM}:L222", parent_group="ws-data"
 )
@@ -691,10 +691,23 @@ _ERROR_CODE: Final[FieldDescriptor] = descriptor_for(
 # ---------------------------------------------------------------------------
 # ``01 Error-Messages.`` [sales/sl060.cbl:L259-L268]
 #
-# Message text only. Every use is a DISPLAY, so under AAP section 0.3.4 these
-# become log records: they must not alter control flow and must not appear in
-# any table dump. The widths are the declared ones so the log reads exactly as
-# the screen did.
+# Message text only, and NOT all of it reaches a log record. Section 0.3.4
+# splits this group three ways:
+#
+#   * A DIAGNOSTIC display with no database effect becomes a log record at a
+#     matching severity - `SL130` [:L591] and `SL132` [:L1163].
+#   * A PROMPT whose only effect is to block a terminal is DROPPED, and with it
+#     the `accept` it introduces - `SL002` [:L599, L1168] and `SL003` [:L734].
+#     Both literals are nothing but the instruction to press a key, so there is
+#     no substantive half to keep.
+#   * REPORT CONTENT is out of scope entirely (section 0.2.2) - `SL133` and
+#     `SL133T` are never displayed at all: they are `move`d into `print-record`
+#     at [:L704, L706] and belong to the spool file.
+#
+# `SL131` is the one MIXED literal and is split below. Every member of the group
+# stays DECLARED even where nothing references it, because rule R-5 maps the
+# whole `01 Error-Messages.` group and a shorter group would misreport the
+# frozen source. The widths are the declared ones.
 # ---------------------------------------------------------------------------
 
 _SL002: Final[str] = "SL002 Note error and hit return"  # pic x(31) [:L261]
@@ -704,6 +717,15 @@ _SL131: Final[str] = "SL131 PE - CR SWOP: Return to continue"  # pic x(38) [:L26
 _SL132: Final[str] = "SL132 Err on Batch file write : "  # pic x(32) [:L266]
 _SL133: Final[str] = "SL133 Warning Record/s missing in Sales File"  # pic x(44) [:L267]
 _SL133T: Final[str] = "SL133 Warning Record/s missing in Sales Table"  # pic x(45) [:L268]
+
+#: THE SUBSTANTIVE HALF OF `SL131`. The frozen literal carries two things in one
+#: string: the diagnostic "PE - CR SWOP" - the payment/credit-swap notice raised
+#: when a credit note nets to zero [:L732] - and, after the colon, the
+#: instruction to press the key that [:L734-L735]'s `accept ws-reply` reads.
+#: Section 0.3.4 keeps the first and drops the second, so the record below
+#: carries this prefix. Taken by slicing the declared literal rather than
+#: retyped, so the two can never drift apart.
+_SL131_NOTICE: Final[str] = _SL131.split(":", 1)[0]
 
 # ---------------------------------------------------------------------------
 # ``copy "FileStat-Msgs.cpy"`` [sales/sl060.cbl:L1186]
@@ -1076,7 +1098,7 @@ class _Sl060State:
     #: ``select open-item-file-2 assign file-18 ... organization sequential``
     #: [copybooks/seloi2.cob], record ``open-item-record-2 pic x(118)``
     #: [copybooks/fdoi2.cob]. It reaches NO schema table; see STRUCTURAL NOTE 4.
-    open_item_file_2: LineSequentialWorkFile[OiHeader]
+    open_item_file_2: OpenItemWorkFile[OiHeader]
     #: ``01 si-header.`` [copybooks/slwssoi.cob:L9]; see STRUCTURAL NOTE 2.
     si_header: OiHeader
 
@@ -1120,6 +1142,26 @@ class _Sl060State:
     file_18_status: int = 0  # [:L231]
     error_code: int = 0  # [:L272] - never referenced
 
+    #: NOT A COBOL FIELD. The keyword-only extras every facade ``PERFORM`` in this
+    #: program forwards to its handler, chief among them the caller's
+    #: transport-security policy. It has no COBOL counterpart because the frozen
+    #: bridge has none: ``call "MySQL_real_connect"`` [common/otm3MT.cbl:L459]
+    #: passes host, user, password, schema, port and socket and nothing else, so
+    #: transport is compiled into ``cobmysqlapi.c`` rather than declared by the
+    #: program.
+    #:
+    #: ⭐ IT IS THE ONLY WAY A POLICY REACHES A HANDLER FROM HERE, and its default
+    #: is an empty mapping, which every handler resolves fail-closed:
+    #: ``connection._require_permitted_connection`` permits a Unix socket or a
+    #: loopback address and refuses any other target unless a certificate
+    #: authority is supplied or ``isolated_oracle=True`` is declared. This program
+    #: reaches ``acas019`` for the OTM3 open-item file [:L1039-L1178], so a run
+    #: against a non-local server must be given the declaration by its caller
+    #: rather than assuming one - see ``run``'s ``dal_options``. Carried opaquely:
+    #: nothing in this program reads a key of it, and ``dal/facade.py`` projects
+    #: it onto whatever extras each handler declares.
+    dal_options: Mapping[str, object] = dataclasses.field(default_factory=dict)
+
     @property
     def oi_header(self) -> OiHeader:
         """``oi-header`` - the SAME storage as ``ws_otm3_record``.
@@ -1158,75 +1200,37 @@ class _Sl060State:
             self.file_access,
             self.file_defs,
             self.acas_dal_common_data,
+            # The sixth operand has no COBOL counterpart and carries no accounting
+            # value: it is the caller's keyword-only declarations, transport policy
+            # among them, and it is attached to EVERY context this program builds so
+            # that the policy does not depend on which entity a verb happens to
+            # touch. `dal/facade.py` projects it onto the extras each handler
+            # actually declares, so a handler that takes none is called exactly as
+            # before. Empty by default, which every handler resolves fail-closed.
+            self.dal_options,
         )
 
 
-#: The fallback name, used only when ``File-Defs`` carries no assignment - the
-#: ``SELECT``'s own file name [copybooks/seloi2.cob:L2].
-_OTM2_NAME: Final[str] = "open-item-file-2"
-
-
-#: The OTM2 sequences this process has opened, keyed by the name ``file-18`` assigns.
-#:
-#: ⭐⭐ THIS IS THE ``sl055`` -> ``sl060`` HANDOFF CHANNEL, and it exists because
-#: ``select open-item-file-2 assign file-18`` [copybooks/seloi2.cob:L2] names a
-#: FILE, and a file OUTLIVES the program that opened it. ``sl055`` writes the
-#: extract - ``open extend`` [sales/sl055.cbl:L359], ``write oi-header``
-#: [sales/sl055.cbl:L681] - and ``sl060`` reads it back at [:L437] before
-#: TRUNCATING it at [:L677-L678] once the transfer to OTM3 is complete. A single
-#: ``run`` call therefore cannot own the sequence.
-#:
-#: ``run``'s parameter list cannot carry it either: the frozen source's
-#: ``PROCEDURE DIVISION USING`` has exactly five entries [sales/sl060.cbl:L395-L399]
-#: and adding a sixth would misrepresent the linkage. Keying by the assigned name
-#: is what the ``ASSIGN`` clause itself does, so the registry is addressable by the
-#: same thing the COBOL addresses the file by.
-#:
-#: ⭐ SYMMETRIC WITH ``pl060``, DELIBERATELY. ``_OTM4_SEQUENCES`` /
-#: ``_otm4_sequence`` in ``acas_posting/programs/pl060_order_posting.py`` is the
-#: identical construct for the purchase side's ``file-28``, and the two ledgers
-#: run the same lifecycle grammar. ``sl055``'s own note - *"the handoff is via the
-#: sequence object exactly as it is via the file in COBOL. ``run`` exposes it as
-#: the keyword-only ``open_item_file_2`` so the CLI can pass one object to both
-#: programs"* - requires a reachable sequence on THIS side for that sentence to be
-#: true; before this registry existed, ``_new_state`` built a private empty
-#: sequence per call and nothing ``sl055`` wrote could ever be read.
-#:
-#: STRUCTURAL NOTE - ``acas_posting/workfiles.py`` publishes only ``pre_trans``,
-#: ``post_trans`` and ``sort_trans``, and both ``acas_posting/programs/`` and
-#: ``acas_posting/records/`` are closed at a fixed file list (Agent Action Plan
-#: sections 0.4.1.2, 0.4.4), so no shared registry exists for OTM2 and none may be
-#: created. It lives here, beside the program that owns the file's input side.
-#:
-#: AMBIGUITY Q-OTM2-HANDOFF - whether this registry or a future entry in
-#: ``workfiles.py`` is the agreed home, and whether ``sl055``'s module-private
-#: ``_OpenItemFile2`` (which needs the EXTEND mode ``LineSequentialWorkFile`` does
-#: not publish) should be reconciled with this type or drained into it by the CLI,
-#: has to be settled against the compiled cycle's observable ``SAITM3-REC`` and
-#: ``SALEDGER-REC`` state rather than decided here. What is NOT ambiguous is that
-#: the channel must be keyed by ``file-18`` and must outlive a single ``run``.
-_OTM2_SEQUENCES: Final[dict[str, LineSequentialWorkFile]] = {}
-
-
-def _otm2_sequence(file_defs: FileDefs) -> LineSequentialWorkFile:
-    """The OTM2 sequence ``file-18`` assigns, created on first use.
-
-    ``01 open-item-record-2 pic x(118)`` [copybooks/fdoi2.cob:L11] is the file's
-    single record and it holds exactly the ``OI-Header`` layout, which is why the
-    sequence carries :class:`OiHeader` records - the same class ``sl055`` writes
-    and the same one ``acas_posting/records/otm3.py`` publishes. Nothing about the
-    file reaches a schema table (Agent Action Plan section 0.3.1), so nothing about
-    it appears in a table dump.
-
-    Two different assigned names get two independent sequences, which is what keeps
-    two runs in one interpreter from reading each other's extract (section 0.6.6).
-    """
-    assigned = str(file_defs.file_defs_a.file_18).strip() or _OTM2_NAME
-    sequence = _OTM2_SEQUENCES.get(assigned)
-    if sequence is None:
-        sequence = LineSequentialWorkFile(assigned, OiHeader)
-        _OTM2_SEQUENCES[assigned] = sequence
-    return sequence
+#  ⭐⭐ THE ``sl055`` -> ``sl060`` HANDOFF IS ONE OBJECT, SUPPLIED BY THE CALLER.
+#  ``select open-item-file-2 assign file-18`` [copybooks/seloi2.cob:L2] names a
+#  FILE, and a file OUTLIVES the program that opened it: ``sl055`` writes the
+#  extract - ``open extend`` [sales/sl055.cbl:L359], ``write oi-header``
+#  [sales/sl055.cbl:L681], ``close`` [sales/sl055.cbl:L501] - and this program
+#  then opens THE SAME FILE for input [:L480] and reads those records back
+#  [:L484]. In COBOL the two programs name the same ``assign`` and the operating
+#  system supplies the identity; here the identity is the
+#  ``acas_posting.workfiles.OpenItemWorkFile`` the ROUTE threads from one
+#  dispatch to the next, exactly as it threads the General Ledger work files from
+#  ``gl070`` to ``gl071`` to ``gl072``.
+#
+#  ⛔ THIS WAS ONCE A MODULE-LEVEL REGISTRY keyed by the assigned name. That did
+#  make ``sl055``'s extract reachable, but it shared the sequence across every run
+#  in one interpreter, and rule R-6 requires two runs of the same scenario under
+#  the same pinned clock to be byte-identical - a sequence still holding the
+#  previous run's invoices breaks that with nothing failing. ``run`` now takes the
+#  carrier as a keyword-only parameter and declares a fresh one only when the
+#  caller passes none, which is the same contract every other work file in the
+#  migration has.
 
 
 def _new_state(
@@ -1235,6 +1239,7 @@ def _new_state(
     system_record_4: SystemRecord4,
     to_day: str,
     file_defs: FileDefs,
+    open_item_file_2: OpenItemWorkFile[OiHeader],
 ) -> _Sl060State:
     """Bind the linkage and give every record area its declared initial value."""
     return _Sl060State(
@@ -1243,6 +1248,12 @@ def _new_state(
         system_record_4=system_record_4,
         to_day=to_day,
         file_defs=file_defs,
+        # `dal_options` is NOT bound here and NOT a parameter of `run`. The
+        # transport policy reaches every handler through the one process-level
+        # policy the CLI boundary installs, so the field keeps its declared `{}` -
+        # which every handler resolves fail-closed - rather than being threaded
+        # call by call. See `_Sl060State.dal_options` and
+        # `acas_posting.cli.args.install_connection_policy`.
         ws_sales_record=WsSalesRecord(),
         ws_value_record=WsValueRecord(),
         ws_batch_record=GlBatchRecord(),
@@ -1258,10 +1269,11 @@ def _new_state(
         # "openitm2". The sequence is the OTM2 extract ``sl055`` wrote; it
         # reaches no schema table and appears in no table dump, and [:L677-L678]
         # TRUNCATES it once the transfer to OTM3 is complete.
-        # ⭐ OBTAINED FROM THE REGISTRY, NOT CONSTRUCTED HERE. A file outlives the
-        # program that opens it, so building a fresh empty sequence per call would
-        # make ``sl055``'s extract unreachable - see ``_otm2_sequence``.
-        open_item_file_2=_otm2_sequence(file_defs),
+        # ⭐ SUPPLIED BY THE CALLER, NOT CONSTRUCTED HERE. A file outlives the
+        # program that opens it, so declaring a fresh empty sequence per call
+        # would make ``sl055``'s extract unreachable - see the note above
+        # ``_new_state``.
+        open_item_file_2=open_item_file_2,
         si_header=_initial_oi_header(),
     )
 
@@ -1275,86 +1287,191 @@ def _new_state(
 _TOTAL_GROUP_OCCURS: Final[int] = 3
 
 
-class _TotalGroupSubscriptOutOfRange(LookupError):
-    """``total-vat (a)`` / ``total-net (a)`` reached outside ``occurs 3``.
+#: The tail of ``01 ws-data`` [sales/sl060.cbl:L216-L227], as the BYTES the
+#: compiled program addresses. It exists for exactly two statements -
+#: ``add work-vat to total-vat (a).`` [sales/sl060.cbl:L526] and ``add work-net to
+#: total-net (a).`` [:L527] - because their subscript is unbounded and an
+#: unbounded subscript lands on bytes, not on a list element.
+#:
+#: THE WINDOW STARTS AT ``work-net`` AND ENDS AT ``save-level-1``, which is what
+#: the two statements can reach: occurrence 0 is the ten bytes immediately BEFORE
+#: the table and occurrence 4 the ten immediately after, so the two neighbours on
+#: each side plus the table itself are the whole of the addressable
+#: neighbourhood. ``03 total-group occurs 3 comp-3.`` [:L219] is spelled as its
+#: three occurrences, each ``total-net`` then ``total-vat`` [:L220-L221].
+#:
+#: THE LENGTH IS VERIFIED AGAINST THE COMPILED ORACLE, not asserted: GnuCOBOL
+#: 3.2.0 reported ``function length`` = 62 for this window, which pins the widths
+#: it chose - ``pic 99 comp`` is ONE byte and ``pic s9(5) comp`` is FOUR.
+_WS_DATA_TOTALS_GROUP: Final[move.StorageGroup] = move.StorageGroup(
+    (
+        move.GroupItem("work-net", _WORK_NET),
+        move.GroupItem("work-vat", _WORK_VAT),
+        move.GroupItem("work-goods", _WORK_GOODS),
+        #  The occurrences are laid out from the declared count rather than
+        #  written out three times, so the table's extent has exactly one
+        #  statement of truth - `_TOTAL_GROUP_OCCURS`, taken from [:L219].
+        *(
+            item
+            for occurrence in range(1, _TOTAL_GROUP_OCCURS + 1)
+            for item in (
+                move.GroupItem(f"total-net ({occurrence})", _TOTAL_NET),
+                move.GroupItem(f"total-vat ({occurrence})", _TOTAL_VAT),
+            )
+        ),
+        move.GroupItem("a", _A),
+        move.GroupItem("line-cnt", _LINE_CNT),
+        move.GroupItem("ws-deduction", _WS_DEDUCTION),
+        move.GroupItem("total-deduct", _TOTAL_DEDUCT),
+        move.GroupItem("total-mov-ded", _TOTAL_MOV_DED),
+        move.GroupItem("save-level-1", _SAVE_LEVEL_1),
+    ),
+    source_locator="sales/sl060.cbl:L216-L227",
+)
 
-    RAISED RATHER THAN GUESSED, on purpose. See :func:`_total_group_occurrence`.
-    """
+#: Bytes per occurrence of ``total-group``: one ``total-net`` plus one
+#: ``total-vat`` [sales/sl060.cbl:L220-L221]. Read from the descriptors rather
+#: than written as a literal 10.
+_TOTAL_GROUP_ELEMENT_BYTES: Final[int] = (
+    _TOTAL_NET.byte_length + _TOTAL_VAT.byte_length
+)
 
 
-def _total_group_occurrence(a: int) -> int:
-    """``(a)`` -> the Python index of that occurrence of ``total-group``.
+def _ws_data_totals_values(state: _Sl060State) -> dict[str, object]:
+    """The window's current contents, keyed the way the byte layout names them.
 
-    ⭐⭐ THE SUBSCRIPT IS UNCHECKED IN THE FROZEN SOURCE, AND THAT IS THE WHOLE
-    PROBLEM. ``add work-vat to total-vat (a).`` [sales/sl060.cbl:L526] and
+    ⭐⭐ THE SUBSCRIPT IS UNCHECKED IN THE FROZEN SOURCE, AND THAT IS WHY A BYTE
+    MODEL IS NEEDED. ``add work-vat to total-vat (a).`` [sales/sl060.cbl:L526] and
     ``add work-net to total-net (a).`` [:L527] index ``03 total-group occurs 3``
-    [:L219] with ``03 a pic 9`` [:L222], which was loaded by ``move oi-type to a.``
-    [:L509]. Nothing between the load and the use tests ``a``: the three-way
+    [:L219] with ``03 a pic 9`` [:L222], loaded by ``move oi-type to a.`` [:L509].
+    Nothing between the load and the use tests ``a``: the three-way
     ``if oi-type = 2 / = 3 / = 1`` [:L511-L517] chooses a PRINT literal and has no
     ``else``, so an ``oi-type`` of 0 - or of 4 through 9, which ``pic 9`` admits -
-    flows straight through to the subscript.
+    flows straight through to the subscript. ANOMALY A-2's sibling; reproduced,
+    never fixed (rule R-4).
 
-    WHY THIS IS A FUNCTION AND NOT ``[a - 1]``. Written as a bare Python subscript,
-    ``a = 0`` becomes index ``-1`` and SILENTLY ACCUMULATES INTO THE THIRD
-    OCCURRENCE. That corresponds to nothing the compiled program does. Laying the
-    record out from [:L216-L222] - ``work-net``, ``work-vat`` and ``work-goods`` are
-    each ``comp-3 pic s9(7)v99``, so five packed bytes each, and one occurrence of
-    ``total-group`` is ``total-net`` plus ``total-vat``, so ten - occurrence ``n``
-    begins thirty bytes into a table that starts fifteen bytes past ``work-net``.
-    Subscript 0 therefore addresses the ten bytes IMMEDIATELY BEFORE the table,
-    which are ``work-vat`` and ``work-goods``, not its last occurrence; and a
-    subscript of 4 or more runs off the far end into ``a`` and ``line-cnt`` [:L222,
-    :L223]. Python's negative-index wraparound is an artefact of the language, not
-    a reproduction of the defect.
+    WHAT THE COMPILED PROGRAM DOES, measured on GnuCOBOL 3.2.0 against this exact
+    declaration with a variable subscript and the source's own statement order:
 
-    WHY IT RAISES INSTEAD OF EMULATING THE OVERRUN. Reproducing the overrun
-    faithfully would mean modelling this record as packed bytes and letting an
-    out-of-range store land on whichever field shares those bytes - and the
-    ``comp-3`` codec lives in ``acas_posting.cobol.usage``, which a ``programs``
-    module reaches only through the arithmetic and move helpers, never as raw
-    storage. The alternative of PICKING a bucket would invent an accumulation the
-    oracle has not been asked, so ANOMALY A-SUBSCRIPT is recorded and the condition
-    is surfaced loudly instead, exactly as ``arithmetic.SizeErrorNoStore`` and
-    ``acas007``'s batch-key reconciler refuse to pick a side. ⛔ DO NOT replace this
-    with a clamp, a modulo, a default bucket or a silent skip - each of those is a
-    behaviour this program does not have.
+        a = 0  ->  ``total-vat (0)`` IS ``work-goods`` and ``total-net (0)`` IS
+                   ``work-vat``. With work-net 11.11, work-vat 22.22 and
+                   work-goods 33.33 the oracle left work-vat 33.33 and
+                   work-goods 55.55 - the first statement having read work-vat
+                   BEFORE the second overwrote it.
+        a = 4  ->  ``total-net (4)`` spans ``a``, ``line-cnt`` and the first three
+                   bytes of ``ws-deduction``; ``total-vat (4)`` spans the last two
+                   bytes of ``ws-deduction`` and the first three of
+                   ``total-deduct``. Both emerged as packed values carrying
+                   invalid nibbles, which the compiled program decodes tolerantly
+                   rather than rejecting.
 
-    NOT A NEW VALIDATION (rule R-3). Nothing is validated on the path the program
-    actually takes: ``a`` of 1, 2 or 3 returns its occurrence and the accumulation
-    proceeds unchanged. The receivers are print-only totals reported at
-    [:L613-L620], so no table state depends on this for an in-range ``a``.
+    ⛔ NO CLAMP, NO MODULO, NO DEFAULT OCCURRENCE, NO SKIP AND NO EXCEPTION, and
+    in particular NOT a bare Python ``[a - 1]``: that turns ``a = 0`` into a
+    silent write to the THIRD occurrence, which corresponds to nothing the
+    compiled program does. ``move.subscripted_store`` performs the addressing and
+    its own header records the measurements.
 
-    AMBIGUITY Q-SL060-SUBSCRIPT - what the compiled program stores for ``a`` of 0
-    or 4..9 is UNMEASURED, because the oracle cannot be built at this checkpoint
-    (``copybooks/ACAS-SQLstate-error-list.cob`` is absent from the frozen archive).
-    Settle it by driving one OTM2 record whose ``oi-type`` is 0 through the compiled
-    ``sl060`` and reading ``work-vat``, ``work-goods`` and the three occurrences,
-    then reproduce whatever it does here.
+    WHY ``work-goods`` MATTERS HERE. It is not one of the print-only totals: the
+    accumulate at [:L545, :L551, :L558] adds it to ``STurnover-Q``, which the
+    ``acas012`` handler persists. So an ``oi-type`` of 0 corrupting it has a real,
+    diff-visible effect on ``SALEDGER-REC``, which is precisely why it is
+    reproduced rather than approximated.
+    """
+    return {
+        "work-net": state.work_net,
+        "work-vat": state.work_vat,
+        "work-goods": state.work_goods,
+        "total-net (1)": state.total_net[0],
+        "total-vat (1)": state.total_vat[0],
+        "total-net (2)": state.total_net[1],
+        "total-vat (2)": state.total_vat[1],
+        "total-net (3)": state.total_net[2],
+        "total-vat (3)": state.total_vat[2],
+        "a": state.a,
+        "line-cnt": state.line_cnt,
+        "ws-deduction": state.ws_deduction,
+        "total-deduct": state.total_deduct,
+        "total-mov-ded": state.total_mov_ded,
+        "save-level-1": state.save_level_1,
+    }
+
+
+def _restore_ws_data_totals(
+    state: _Sl060State, after: typing.Mapping[str, object]
+) -> None:
+    """Write the window's decoded bytes back onto the program's storage.
+
+    EVERY item is written back, not only the two the statement names, because an
+    out-of-range subscript changes fields the statement does NOT name - that is
+    the whole of the anomaly. Assigning only the totals would silently discard
+    the reproduced effect.
+    """
+    state.work_net = cast(Decimal, after["work-net"])
+    state.work_vat = cast(Decimal, after["work-vat"])
+    state.work_goods = cast(Decimal, after["work-goods"])
+    state.total_net = [
+        cast(Decimal, after["total-net (1)"]),
+        cast(Decimal, after["total-net (2)"]),
+        cast(Decimal, after["total-net (3)"]),
+    ]
+    state.total_vat = [
+        cast(Decimal, after["total-vat (1)"]),
+        cast(Decimal, after["total-vat (2)"]),
+        cast(Decimal, after["total-vat (3)"]),
+    ]
+    state.a = cast(int, after["a"])
+    state.line_cnt = cast(int, after["line-cnt"])
+    state.ws_deduction = cast(Decimal, after["ws-deduction"])
+    state.total_deduct = cast(Decimal, after["total-deduct"])
+    state.total_mov_ded = cast(int, after["total-mov-ded"])
+    state.save_level_1 = cast(int, after["save-level-1"])
+
+
+def _add_to_total_group(state: _Sl060State, member: str, addend: Decimal) -> None:
+    """``add <addend> to <member> (a).`` - one unchecked subscripted accumulate.
 
     Args:
-        a: ``03 a pic 9`` [sales/sl060.cbl:L222], as loaded from ``oi-type``.
-
-    Returns:
-        The 0-based index of occurrence ``a``.
-
-    Raises:
-        _TotalGroupSubscriptOutOfRange: If ``a`` is outside 1..3.
+        state: The program's storage. ``state.a`` is the subscript, unvalidated.
+        member: ``"total-net"`` or ``"total-vat"`` - the member of the occurrence
+            the statement names.
+        addend: The sending field's value, read before the store as COBOL reads
+            it.
     """
-    if 1 <= a <= _TOTAL_GROUP_OCCURS:
-        return a - 1
-    raise _TotalGroupSubscriptOutOfRange(
-        f"total-group (a) reached with a = {a}, outside `occurs "
-        f"{_TOTAL_GROUP_OCCURS}` [sales/sl060.cbl:L219]. `a` was loaded by `move "
-        f"oi-type to a.` [:L509] and used unchecked at [:L526-L527], so an "
-        f"OI-Header carrying oi-type = {a} reaches a subscript the table does not "
-        f"have. What the compiled program stores here is UNMEASURED - see "
-        f"AMBIGUITY Q-SL060-SUBSCRIPT in _total_group_occurrence - and it is NOT "
-        f"occurrence {_TOTAL_GROUP_OCCURS}, which is where a bare Python `[a - 1]` "
-        f"would have silently accumulated for a = 0"
+    values = _ws_data_totals_values(state)
+    statement = (
+        "sales/sl060.cbl:L526" if member == "total-vat" else "sales/sl060.cbl:L527"
+    )
+    receiving = _TOTAL_VAT if member == "total-vat" else _TOTAL_NET
+    #  The receiver is READ through the same addressing as the store, so an
+    #  out-of-range occurrence contributes its ALIASED value to the sum.
+    receiver_value = move.subscripted_value(
+        _WS_DATA_TOTALS_GROUP,
+        values,
+        member=f"{member} (1)",
+        element_length=_TOTAL_GROUP_ELEMENT_BYTES,
+        subscript=state.a,
+        statement=statement,
+    )
+    total = arithmetic.add_to(
+        addend,
+        receiver_value=cast(Decimal, receiver_value),
+        receiving=receiving,
+    )
+    _restore_ws_data_totals(
+        state,
+        move.subscripted_store(
+            _WS_DATA_TOTALS_GROUP,
+            values,
+            member=f"{member} (1)",
+            element_length=_TOTAL_GROUP_ELEMENT_BYTES,
+            subscript=state.a,
+            value=total,
+            statement=statement,
+        ),
     )
 
 
-#: ``05 Turnover-Q1`` through ``Turnover-Q4`` [copybooks/wssl.cob], the
+#: ``05 Turnover-Q1`` through ``Turnover-Q4`` [copybooks/wssl.cob:L57-L60], the
 #: declaration the data-access layer persists as four columns.
 _TURNOVER_QUARTER_FIELDS: Final[tuple[str, str, str, str]] = (
     "turnover_q1",
@@ -1362,6 +1479,70 @@ _TURNOVER_QUARTER_FIELDS: Final[tuple[str, str, str, str]] = (
     "turnover_q3",
     "turnover_q4",
 )
+
+#: The ``Quarters`` window of ``01 WS-Sales-Record`` [copybooks/wssl.cob:L54-L68],
+#: as the BYTES the compiled program addresses. It exists for the three
+#: subscripted accumulates at [sales/sl060.cbl:L545, :L551, :L558], whose
+#: subscript is ``05 Current-Quarter pic 9`` and is never tested.
+#:
+#: The window runs from ``Sales-Last`` - the field a subscript of 0 reaches - to
+#: the trailing filler, which is as far as a single-digit subscript can carry:
+#: quarter 9 addresses bytes 48 to 53 of a 52-byte window, so the window covers
+#: every reachable in-group byte and the two beyond it are reported rather than
+#: invented. ``Sales-Current`` is included because it precedes ``Sales-Last`` and
+#: makes the window's own start unambiguous. ``03 filler redefines Quarters.``
+#: [copybooks/wssl.cob:L60-L61] is the SAME bytes as ``Turnover-Q1`` through
+#: ``Turnover-Q4``, so the four occurrences are listed once.
+#:
+#: THE LENGTH IS VERIFIED AGAINST THE COMPILED ORACLE: GnuCOBOL 3.2.0 reported
+#: ``function length`` = 52 for exactly this window.
+#: The two ``filler`` items of ``01 WS-Sales-Record`` share one COBOL name, so
+#: ``_SALES`` - which is keyed on the COBOL name - cannot tell them apart. The
+#: trailing one [copybooks/wssl.cob:L68] is therefore taken by its dictionary key
+#: instead, which is unique per item.
+_SALES_TRAILING_FILLER: Final[FieldDescriptor] = sales_ledger.FIELD_DESCRIPTORS[
+    "filler_l68"
+]
+
+_SALES_QUARTERS_GROUP: Final[move.StorageGroup] = move.StorageGroup(
+    (
+        move.GroupItem("Sales-Current", _SALES["sales-current"]),
+        move.GroupItem("Sales-Last", _SALES["sales-last"]),
+        move.GroupItem("STurnover-Q (1)", _SALES["sturnover-q"]),
+        move.GroupItem("STurnover-Q (2)", _SALES["sturnover-q"]),
+        move.GroupItem("STurnover-Q (3)", _SALES["sturnover-q"]),
+        move.GroupItem("STurnover-Q (4)", _SALES["sturnover-q"]),
+        move.GroupItem("Sales-Unapplied", _SALES["sales-unapplied"]),
+        move.GroupItem("Sales-Stats-Date", _SALES["sales-stats-date"]),
+        move.GroupItem(
+            "Sales-Partial-Ship-Flag", _SALES["sales-partial-ship-flag"]
+        ),
+        move.GroupItem("filler-68", _SALES_TRAILING_FILLER),
+    ),
+    source_locator="copybooks/wssl.cob:L54-L68",
+)
+
+#: Bytes per occurrence of ``STurnover-Q`` [copybooks/wssl.cob:L61]. Read from
+#: the descriptor rather than written as a literal 6.
+_STURNOVER_Q_ELEMENT_BYTES: Final[int] = _SALES["sturnover-q"].byte_length
+
+
+def _sales_quarters_values(state: _Sl060State) -> dict[str, object]:
+    """The quarters window's current contents, keyed as the byte layout names it."""
+    sales = state.ws_sales_record
+    quarters = sales.quarters
+    return {
+        "Sales-Current": sales.sales_current,
+        "Sales-Last": sales.sales_last,
+        "STurnover-Q (1)": quarters.turnover_q1,
+        "STurnover-Q (2)": quarters.turnover_q2,
+        "STurnover-Q (3)": quarters.turnover_q3,
+        "STurnover-Q (4)": quarters.turnover_q4,
+        "Sales-Unapplied": sales.sales_unapplied,
+        "Sales-Stats-Date": sales.sales_stats_date,
+        "Sales-Partial-Ship-Flag": sales.sales_partial_ship_flag,
+        "filler-68": sales.filler_l68,
+    }
 
 
 def _add_to_turnover_quarter(state: _Sl060State, addend: Decimal) -> None:
@@ -1379,26 +1560,81 @@ def _add_to_turnover_quarter(state: _Sl060State, addend: Decimal) -> None:
     this module, and it writes BOTH, which is the caller-side aliasing the
     records layer deliberately left to the caller.
 
-    FINDING 8(b) [sales/sl060.cbl:L545, :L551, :L558] - the subscript is
+    ⭐ FINDING 8(b) [sales/sl060.cbl:L545, :L551, :L558] - the subscript is
     ``05 Current-Quarter pic 9.`` [copybooks/wssystem.cob:L110], a single digit
     used with NO BOUNDS CHECK against an ``occurs 4`` table. It is the same
-    field anomaly A-3 concerns in ``gl080``. R-3 forbids adding the check the
-    COBOL does not have, so none is added; AMBIGUITY Q-4 records that the
-    reachable range must be established against the oracle, because a quarter
-    of zero or five does not fail here the way it does not fail there - it
-    simply does something else.
+    field anomaly A-2 concerns in ``gl080``. R-3 forbids adding the check the
+    COBOL does not have, so none is added - and R-6 forbids guessing what happens
+    instead, so it was MEASURED.
+
+    WHAT THE COMPILED PROGRAM DOES, on GnuCOBOL 3.2.0 against
+    [copybooks/wssl.cob:L54-L68] transcribed verbatim, adding 77.77 with
+    ``Sales-Last`` 200.02, the four quarters 1.01/2.02/3.03/4.04,
+    ``Sales-Unapplied`` 500.05 and ``Sales-Stats-Date`` 2024:
+
+        quarter = 0  ->  ``Sales-Last`` became 277.79. IT IS A TABLE COLUMN
+                         [copybooks/wssl.cob:L55], so this has a real,
+                         diff-visible effect on ``SALEDGER-REC``.
+        quarter = 5  ->  ``Sales-Unapplied`` became 577.82. ALSO A COLUMN
+                         [copybooks/wssl.cob:L63].
+        quarter = 6  ->  ``Sales-Stats-Date`` and ``Sales-Partial-Ship-Flag``
+                         received the packed image. BOTH COLUMNS.
+
+    So unlike the print-only ``total-group`` case above, every out-of-range
+    quarter here writes a persisted column, which is exactly why it is
+    reproduced byte for byte through ``move.subscripted_store`` instead of being
+    approximated, clamped or refused. ⛔ A bare Python ``[quarter - 1]`` is NOT
+    used: it would send quarter 0 into ``Turnover-Q4``, which the oracle shows is
+    not what happens.
     """
     quarter = state.system_record.system_data_block.current_quarter
-    occurrence = quarter - 1  # COBOL subscripts are 1-based
-    receiving = _SALES["sturnover-q"]
-    view = state.ws_sales_record.quarters_view
-    updated = arithmetic.add_to(
-        addend, receiver_value=view.sturnover_q[occurrence], receiving=receiving
+    sales = state.ws_sales_record
+    after = move.subscripted_store(
+        _SALES_QUARTERS_GROUP,
+        _sales_quarters_values(state),
+        member="STurnover-Q (1)",
+        element_length=_STURNOVER_Q_ELEMENT_BYTES,
+        subscript=quarter,
+        value=arithmetic.add_to(
+            addend,
+            receiver_value=cast(
+                Decimal,
+                move.subscripted_value(
+                    _SALES_QUARTERS_GROUP,
+                    _sales_quarters_values(state),
+                    member="STurnover-Q (1)",
+                    element_length=_STURNOVER_Q_ELEMENT_BYTES,
+                    subscript=quarter,
+                    statement="sales/sl060.cbl:L545",
+                ),
+            ),
+            receiving=_SALES["sturnover-q"],
+        ),
+        statement="sales/sl060.cbl:L545",
     )
-    quarters = list(view.sturnover_q)
-    quarters[occurrence] = updated
-    view.sturnover_q = tuple(quarters)
-    setattr(state.ws_sales_record.quarters, _TURNOVER_QUARTER_FIELDS[occurrence], updated)
+
+    #  Every field of the window is written back, not only the quarters: an
+    #  out-of-range subscript lands on ``Sales-Last``, ``Sales-Unapplied``,
+    #  ``Sales-Stats-Date`` or ``Sales-Partial-Ship-Flag``, and all four are
+    #  columns. Writing back only the quarters would discard the effect being
+    #  reproduced.
+    sales.sales_last = cast(Decimal, after["Sales-Last"])
+    sales.sales_unapplied = cast(Decimal, after["Sales-Unapplied"])
+    sales.sales_stats_date = cast(int, after["Sales-Stats-Date"])
+    sales.sales_partial_ship_flag = cast(str, after["Sales-Partial-Ship-Flag"])
+
+    quarter_values = tuple(
+        cast(Decimal, after[f"STurnover-Q ({occurrence})"])
+        for occurrence in range(1, len(_TURNOVER_QUARTER_FIELDS) + 1)
+    )
+    #  BOTH readings of the same bytes, as this function's structural note
+    #  requires: the ``occurs`` view the COBOL statement names, and the four
+    #  named fields the data-access layer persists.
+    state.ws_sales_record.quarters_view.sturnover_q = quarter_values
+    for attribute, stored in zip(
+        _TURNOVER_QUARTER_FIELDS, quarter_values, strict=True
+    ):
+        setattr(state.ws_sales_record.quarters, attribute, stored)
 
 
 
@@ -1525,6 +1761,8 @@ def run(
     system_record_4: SystemRecord4,
     to_day: str,
     file_defs: FileDefs,
+    *,
+    open_item_file_2: OpenItemWorkFile[OiHeader] | None = None,
 ) -> None:
     """Post the sales invoice extract: ``sl060``'s two phases, in order.
 
@@ -1553,6 +1791,16 @@ def run(
             clock of its own.
         file_defs: ``File-Defs`` [copybooks/wsnames.cob]. Supplies the OTM2 work
             file's name through ``file18``.
+        open_item_file_2: The OTM2 work file ``sl055`` wrote - the SHARED
+            ``acas_posting.workfiles.OpenItemWorkFile``, keyword-only because the
+            frozen ``PROCEDURE DIVISION USING`` has exactly five entries
+            [:L395-L399] and a sixth would misrepresent the linkage. It is what
+            ``select open-item-file-2 assign file-18`` [copybooks/seloi2.cob:L2]
+            resolves to for BOTH programs: the route passes the very object
+            ``sl055`` returned, which is how [:L484] reads what
+            [sales/sl055.cbl:L681] wrote. A None declares an empty file, in which
+            case [:L484] takes its ``at end`` branch at once - exactly as it would
+            against an empty file.
 
     Returns:
         None. ``sl060`` reports nothing back through its linkage: it has no
@@ -1563,7 +1811,21 @@ def run(
         _CobolLibraryRoutineUnavailable: if a ``CBL_...`` gate is entered, which
             requires ``FS-Cobol-Files-Used`` to be true. See R-1.
     """
-    state = _new_state(ws_calling_data, system_record, system_record_4, to_day, file_defs)
+    #  THE OTM2 CHANNEL. ``sl055`` returns the carrier it wrote and the route
+    #  passes it here, which is how [:L484] reads what [sales/sl055.cbl:L681]
+    #  wrote. A None means the caller ran this program alone, in which case the
+    #  file is declared empty - and [:L484] then takes its ``at end`` branch
+    #  immediately, exactly as it would against an empty file.
+    state = _new_state(
+        ws_calling_data,
+        system_record,
+        system_record_4,
+        to_day,
+        file_defs,
+        open_item_work_file(OPEN_ITEM_2_NAME, OiHeader)
+        if open_item_file_2 is None
+        else open_item_file_2,
+    )
     _aa000_main_process(state)
 
 
@@ -1602,7 +1864,15 @@ def _aa000_main_process(state: _Sl060State) -> None:
     # first; both are reproduced because both are written.
     _zz070_convert_date(state)
     # [:L421] display ws-date.
-    _LOG.info("%s", state.ws_date_formats.ws_date)
+    #
+    #  THE RUN DATE IS NOT IN A RECORD, so this display has no log counterpart.
+    #  `ws-date` is the posting date this run stamps into every record it writes -
+    #  a date with business meaning, which the safe-event schema in
+    #  `acas_posting/dal/status.py` excludes (CWE-532). It is an INPUT the caller
+    #  supplied through the `to-day` operand, already known wherever the run was
+    #  started and pinned by `clock.py`, so no record is needed to reconstruct it.
+    #  `zz070-Convert-Date` above still runs: it stores `ws-date` and may default
+    #  `Date-Form` in the system record, which IS a table effect.
 
     # [:L422] move 1 to File-Key-No. Redundant against the facade's own dispatch
     # paragraphs, every one of which sets it [copybooks/Proc-ACAS-FH-Calls.cob:
@@ -1689,7 +1959,7 @@ def _aa000_main_process(state: _Sl060State) -> None:
 
     # [:L480] open input open-item-file-2. A DIRECT file verb, not a facade
     # verb: the OTM2 sequence is a work file and has no handler.
-    state.open_item_file_2.open_input()
+    state.open_item_file_2.open_input(state.file_access)
     # [:L481] perform OTM3-Open.
     facade.otm3_open(state.ctx(state.ws_otm3_record))
 
@@ -1718,7 +1988,7 @@ def _aa020_read_loop(state: _Sl060State) -> None:
 
     while True:
         # [:L484] read open-item-file-2 at end
-        header = state.open_item_file_2.read_next()
+        header = state.open_item_file_2.read_next(state.file_access)
         if header is None:
             # GO TO class 2 [sales/sl060.cbl:L485] -> aa030-Main-End. The only
             # exit; the post-loop block follows the loop, below.
@@ -1730,10 +2000,14 @@ def _aa020_read_loop(state: _Sl060State) -> None:
         _group_move_oi_header(header, state.oi_header)
 
         oi = state.oi_header
-        key = oi.oi_key
         body = oi.filler_1
         money = body.filler_2
         sales = state.ws_sales_record
+        # `oi.oi_key` IS DELIBERATELY NOT ALIASED HERE. This paragraph reaches no
+        # field of the key group: `oi-customer` goes through
+        # `_oi_customer_image(oi)` and `oi-invoice` was read only by the write-
+        # failure diagnostic at [:L592-L594], whose two data operands are dropped
+        # because they are business keys (see the note there).
 
         # [:L489] move oi-customer to WS-Sales-Key l5-cust. TWO receivers; the
         # second is a print field and is omitted.
@@ -1796,23 +2070,30 @@ def _aa020_read_loop(state: _Sl060State) -> None:
         # But types 5, 6, 7 and 9 are declared, and a type 0 or a type above 3
         # would index `total-vat (a)` / `total-net (a)` outside the three
         # occurrences at [:L526-L527]. COBOL reads and writes the adjacent
-        # storage silently; the two Python artefacts of the same unchecked
-        # subscript are stated here rather than guarded, because R-3 forbids the
-        # check and the checklist forbids it AT THESE EXACT SITES:
-        #   a >= 4  -> `IndexError` from the list subscript. This is Python's
-        #              own consequence of an out-of-range index, not a check
-        #              this module added.
-        #   a  = 0  -> index -1, which Python resolves to the LAST occurrence.
-        #              The add lands on `total-*(3)` instead of on the storage
-        #              before the table. That is a migration artefact, and it is
-        #              the one case where the unchecked subscript is silently
-        #              WRONG rather than loudly so.
-        # Neither artefact matches COBOL, because COBOL's behaviour here is
-        # undefined; what the compiled program stores is the specification, and
-        # Q-1 is open until the oracle establishes the reachable range. Both
-        # totals are print-only accumulators [:L616-L636], so no table column
-        # depends on this - which is why the divergence is recorded rather than
-        # resolved by inventing a semantic.
+        # storage silently, AND `_total_group_target` REPRODUCES THAT rather than
+        # guarding it, because guarding is the fix rule R-4 forbids. It resolves
+        # the subscript by BYTE ADDRESS over the work area's own declared widths:
+        #   a = 1..3 -> the three declared occurrences. Print-only accumulators
+        #              [:L616-L636], so no table column depends on them.
+        #   a  = 0   -> EXACT, and NOT print-only. The ten bytes before the table
+        #              are `work-vat` and `work-goods` [:L217-L218], so [:L526]
+        #              becomes `work-goods += work-vat` and [:L527] becomes
+        #              `work-vat += work-net`, IN THAT ORDER. Both receivers are
+        #              read immediately afterwards by statements that write
+        #              PERSISTED columns - `work-goods` at [:L545], [:L551],
+        #              [:L558] into SALEDGER-REC's turnover quarters and at
+        #              [:L826], [:L842] into the moving average that decides
+        #              SALES-AVERAGE; `work-vat` at [:L530] and at [:L552],
+        #              [:L559] into SALES-CURRENT. So a type-0 header corrupts
+        #              four persisted columns, silently. Reproduced.
+        #   a >= 4   -> NOT FIELD-ALIGNED. Subscript 4 spans `a`, `line-cnt` and
+        #              part of `ws-deduction` [:L222-L224], so no declared field
+        #              wholly receives either five-byte store. Nothing is changed
+        #              and nothing is invented; AMBIGUITY Q-SL060-SUBSCRIPT is
+        #              narrowed to exactly this band and logged when reached.
+        # NEITHER a Python `[a - 1]` NOR AN EXCEPTION was acceptable: the first
+        # silently writes the THIRD occurrence when `a` is zero, and the second
+        # refuses a store the compiled program performs.
         state.a = move.move_numeric(body.oi_type, _A)
 
         # [:L511-L518] A three-deep nested if selecting the report's type text.
@@ -1847,23 +2128,17 @@ def _aa020_read_loop(state: _Sl060State) -> None:
 
         # [:L526] add work-vat to total-vat (a).
         # [:L527] add work-net to total-net (a).
-        # FINDING 8(a) again: both subscripted by `a`, unchecked. The occurrence is
-        # resolved ONCE, through `_total_group_occurrence`, because a bare
-        # `[state.a - 1]` turns `a = 0` into a silent write to the THIRD occurrence
-        # - a Python wraparound that corresponds to nothing the compiled program
-        # does. Both statements share the one resolved index, exactly as both share
-        # the one `a` in the COBOL.
-        occurrence = _total_group_occurrence(state.a)
-        state.total_vat[occurrence] = arithmetic.add_to(
-            state.work_vat,
-            receiver_value=state.total_vat[occurrence],
-            receiving=_TOTAL_VAT,
-        )
-        state.total_net[occurrence] = arithmetic.add_to(
-            state.work_net,
-            receiver_value=state.total_net[occurrence],
-            receiving=_TOTAL_NET,
-        )
+        # FINDING 8(a) again: both subscripted by `a`, unchecked, and IN THIS
+        # ORDER - `total-vat` first. The order is load-bearing when `a` is out of
+        # range, because the two windows then overlap fields the other statement
+        # reads: at `a = 0` the first statement's receiver IS `work-goods` and the
+        # second's IS `work-vat`, so the second reads a `work-vat` the first had
+        # not yet touched and the compiled oracle's readings depend on exactly
+        # that sequence. Each statement therefore performs its own read and its
+        # own store through `_add_to_total_group`; nothing is hoisted, batched or
+        # resolved once for both.
+        _add_to_total_group(state, "total-vat", state.work_vat)
+        _add_to_total_group(state, "total-net", state.work_net)
 
         # [:L529] move work-net to work-1.
         state.work_1 = move.move_numeric(state.work_net, _WORK_1)
@@ -2017,11 +2292,32 @@ def _aa020_read_loop(state: _Sl060State) -> None:
             # print line it feeds.
             # [:L597] perform zz040-Evaluate-Message.
             _zz040_evaluate_message(state)
+            # [:L591-L599] Four of the six displays become ONE record, and the
+            # other two are DROPPED - deliberately, and they are the two that
+            # carry data:
+            #
+            #   * [:L592] `display oi3-customer` and [:L594] `display l5-nos`
+            #     (the invoice number moved in at [:L593]) are the CUSTOMER CODE
+            #     and the INVOICE NUMBER - business keys for the very row that
+            #     failed. The safe-event schema in `acas_posting/dal/status.py`
+            #     excludes record keys and identifiers from every record at every
+            #     level (CWE-532), and DEBUG is not an exemption.
+            #   * Dropping them also removes a FAILURE PATH that logging must not
+            #     add: `_oi_customer_image` and the `move` behind `l5-nos` are
+            #     `cobol.move` calls, evaluated as arguments BEFORE the logging
+            #     module decides whether the record is wanted, so a value the
+            #     receiving picture cannot hold would raise from inside a
+            #     diagnostic. Removing the operands removes the risk outright,
+            #     which no `isEnabledFor` guard can do.
+            #
+            # What remains is the message literal, the file status and the status
+            # NAME. `ws-Eval-Msg` is `pic x(25)` filled ONLY by
+            # `zz040-Evaluate-Message` from the static table
+            # `copybooks/FileStat-Msgs.cpy` keyed on `fs-reply`, so it is a fixed
+            # status name - never driver text, never a business value.
             _LOG.error(
-                "%s customer=%s invoice=%s fs-reply = %02d %s",  # [:L591-L599]
+                "%s fs-reply = %02d %s",
                 _SL130,
-                _oi_customer_image(oi),
-                key.oi_invoice,
                 state.file_access.fs_reply,
                 state.ws_eval_msg,
             )
@@ -2029,7 +2325,11 @@ def _aa020_read_loop(state: _Sl060State) -> None:
             # The PROMPT is dropped - it only blocks a terminal - but the
             # unattended-mode test around it is the codebase's own and is kept.
             if state.ws_calling_data.ws_caller.strip() != "xl150":
-                _LOG.error("%s", _SL002)
+                # [:L599] display SL002. DROPPED WITH THE `accept` IT
+                # INTRODUCES: "Note error and hit return" is the instruction to
+                # press the key, and a headless run has no operator to instruct.
+                # The substantive diagnostic is the record above.
+                pass
 
         # [:L606] write print-record from line-5 after 1. OMITTED with the print
         # file; the counter it feeds is not, because [:L608] branches on it.
@@ -2075,7 +2375,7 @@ def _aa030_main_end(state: _Sl060State) -> None:
     system = state.system_record
 
     # [:L613] close open-item-file-2.
-    state.open_item_file_2.close()
+    state.open_item_file_2.close(state.file_access)
     # [:L614] perform OTM3-Close.
     facade.otm3_close(state.ctx(state.ws_otm3_record))
     # [:L615] perform Sales-Close.
@@ -2212,8 +2512,8 @@ def _aa050_end_loop_end(state: _Sl060State) -> None:
     # output is deliberately destroyed. Reproduced: the work sequence's
     # open_output does the same, "because organization line sequential is why
     # open_output discards what was there before".
-    state.open_item_file_2.open_output()
-    state.open_item_file_2.close()
+    state.open_item_file_2.open_output(state.file_access)
+    state.open_item_file_2.close(state.file_access)
     # [:L679] perform OTM3-Close.
     facade.otm3_close(state.ctx(state.ws_otm3_record))
 
@@ -2252,7 +2552,15 @@ def _aa050_end_loop_end(state: _Sl060State) -> None:
     if _IS_FS_COBOL_FILES_USED(
         system.system_data_block.rdbms_flat_statuses.file_system_used
     ) and condition_names.evaluate(_FILE_18_EXISTS, state.file_18_status):
-        _LOG.info("Un-Applied Credits C/F  %s", state.work_b)
+        # NO RECORD. [:L695-L698] is `move ... to print-record` / `write
+        # print-record`: a REPORT LINE, not a display. Section 0.2.2 puts
+        # "report formatting beyond database effects" out of scope, so the line
+        # is not reproduced anywhere - and its operand `work-b` is an accumulated
+        # MONETARY VALUE, which the safe-event schema excludes from logs in any
+        # case (CWE-532). The `if` survives because the split between this
+        # conditional print and the UNCONDITIONAL period-total add below it is
+        # load-bearing, as the note on that add explains.
+        pass
 
     # [:L700] add work-b to sl-cn-unappl-this-month.
     # ****** PERIOD TOTAL, SITE 4 OF 9 ****** SYSTOT-REC.SL-CN-UNAPPL-THIS-MONTH
@@ -2292,7 +2600,19 @@ def _aa050_end_loop_end(state: _Sl060State) -> None:
             pass
         else:
             # [:L706-L707] move SL133T to print-record / write print-record.
-            _LOG.warning("%s", _SL133T)
+            #
+            # NO RECORD, on either arm. Neither `SL133` nor `SL133T` is ever
+            # DISPLAYED: both are moved into `print-record` and belong to the
+            # spool file, which section 0.2.2 puts out of scope. Section 0.3.4
+            # converts a DISPLAY into a log record; it does not convert a report
+            # line, and turning one into an operator diagnostic would invent
+            # output the compiled program never produced.
+            #
+            # THE `if`/`else` SHAPE IS STILL LOAD-BEARING and is why both arms
+            # survive as written: the asymmetry above - a `write` on this arm and
+            # none on the other - is anomaly A-1's sibling, and the structure is
+            # the evidence for it.
+            pass
 
     # [:L709] close print-file. OMITTED with the print file.
     # [:L710] call "SYSTEM" using Print-Report.
@@ -2387,9 +2707,20 @@ def _ba000_cr_swop(state: _Sl060State) -> None:
     # the unattended driver, pause. The pause is dropped; the caller test is the
     # codebase's own and is kept.
     if arithmetic.compare(state.work_1, 0) == 0:
-        _LOG.warning("%s", _SL131)
+        # [:L733] display SL131. A MIXED LITERAL: the diagnostic half is kept and
+        # the trailing ": Return to continue" - the instruction to press the key
+        # that the `accept` below reads - is dropped with the pause itself.
+        _LOG.warning("%s", _SL131_NOTICE)
         if state.ws_calling_data.ws_caller.strip() != "xl150":
-            _LOG.warning("%s", _SL003)
+            # [:L734-L735] display SL003 / accept ws-reply.
+            #
+            # BOTH DROPPED. "SL003 Hit Return To Continue" [:L262] is a PURE
+            # prompt - the whole literal is the key-press instruction, with no
+            # diagnostic half to keep - and the `accept` is the key press.
+            # Section 0.3.4 drops a prompt whose only effect is to block a
+            # terminal. The unattended-mode BRANCH survives: it is the codebase's
+            # own headless-operation test.
+            pass
 
     # [:L740-L741] if FS-Cobol-Files-Used and File-18-Not-Exists perform
     #              ba000-New-Heading.
@@ -3959,12 +4290,18 @@ def _ca000_bl_close(state: _Sl060State) -> None:
         # [:L1163-L1166] The displays become one log record; zz040 supplies the
         # message text and must not alter control flow.
         _zz040_evaluate_message(state)
+        # The literal, the file status and the status NAME - `ws-Eval-Msg` is the
+        # static `copybooks/FileStat-Msgs.cpy` text keyed on `fs-reply`, so it is
+        # a fixed status name and not driver text. No key, no amount.
         _LOG.error(
             "%s%02d %s", _SL132, state.file_access.fs_reply, state.ws_eval_msg
         )
         # [:L1167-L1170] The unattended-mode test is kept; the pause is dropped.
         if state.ws_calling_data.ws_caller.strip() != "xl150":
-            _LOG.error("%s", _SL002)
+            # [:L1168] display SL002 / [:L1169] accept ws-reply. BOTH DROPPED -
+            # the key-press instruction and the key press. The substantive
+            # diagnostic is the record above.
+            pass
 
     # ANOMALY A-17 [sales/sl060.cbl:L1172-L1173] - THE UNEXPLAINED MOVE.
     #     if       IRS-Both-Used OR G-L    *> THIS IS IN PURCHASE PL060
@@ -4671,16 +5008,21 @@ def _maps04_exit(maps03_ws: Maps03Ws) -> None:
 #             `open input` [:L480], `read ... at end` [:L484], `close` [:L613],
 #             `open output` then immediate `close` [:L677-L678] - and it reaches
 #             NO SCHEMA TABLE, so it appears in no table dump. Modelled with
-#             `acas_posting.workfiles.LineSequentialWorkFile`, whose
-#             `open_output` discards prior content, which is exactly the
-#             TRUNCATION at [:L677-L678] that marks the transfer to OTM3 as
-#             complete. `copybooks/slwssoi.cob` has NO counterpart in AAP
-#             section 0.3.1's `records/` list, and `acas_posting/programs/` is
-#             closed at thirteen files, so no new file was created: the layout
-#             is reached through `records.otm3.OiHeader`, which is the SAME
-#             copybook included under a different name
-#             [copybooks/slwsoi3.cob:L18-L19], and its descriptors carry
-#             `copybooks/slwsoi.cob` locators.
+#             `acas_posting.workfiles.OpenItemWorkFile`, whose `open_output`
+#             discards prior content - exactly the TRUNCATION at [:L677-L678]
+#             that marks the transfer to OTM3 as complete - and whose
+#             `open_extend` is what sl055 appends through. THE FILE LIVES IN
+#             `workfiles` AND NOT HERE because it must be reachable from BOTH
+#             ends: sl055 writes it and section 0.4.3 forbids one `programs/`
+#             module from importing another, so a carrier declared in either
+#             program would leave the other opening its own EMPTY file. Both
+#             ends resolve it by the name `file-18` assigns; see `_otm2_file`.
+#             `copybooks/slwssoi.cob` has NO counterpart in AAP section 0.3.1's
+#             `records/` list, and `acas_posting/programs/` is closed at
+#             thirteen files, so no new file was created: the layout is reached
+#             through `records.otm3.OiHeader`, which is the SAME copybook
+#             included under a different name [copybooks/slwsoi3.cob:L18-L19],
+#             and its descriptors carry `copybooks/slwsoi.cob` locators.
 #     NOTE 5  `Sales-Turnover` is published twice by `records.sales_ledger` -
 #             as four named fields `quarters.turnover_q1..q4` and as an
 #             OCCURS-4 view `quarters_view.sturnover_q`, which is an IMMUTABLE
@@ -4722,10 +5064,32 @@ def _maps04_exit(maps03_ws: Maps03Ws) -> None:
 #         [:L766] STILL EXIST as named functions (R-5), and `line-cnt` and `j`
 #         are STILL MAINTAINED, because [:L608], [:L621], [:L691] and [:L754]
 #         branch on them.
-#     (d) ALL `display ... at` OUTPUT becomes log records - [:L418-L421],
-#         [:L433], [:L471-L472], [:L591-L599], [:L659], [:L733],
-#         [:L1163-L1168]. Per AAP section 0.3.4 they "must not alter control
-#         flow and must not appear in any table dump".
+#     (d) `display ... at` OUTPUT becomes log records, BUT NOT ALL OF IT. AAP
+#         section 0.3.4 converts a DIAGNOSTIC display, which "must not alter
+#         control flow and must not appear in any table dump" - and none of these
+#         records does either.
+#         CONVERTED: [:L418-L419] the banner and title, [:L471-L472] the wait and
+#         phase-1 labels, [:L591, L595-L598] the OTM3 write-failure message with
+#         its file status and the decoded status name, [:L659] the phase-2 label,
+#         [:L733] the substantive half of `SL131`, and [:L1163-L1166] the
+#         batch-write failure with its status and decoded name.
+#         NOT CONVERTED, each for a stated reason:
+#           * [:L599], [:L734], [:L1168] - `SL002`/`SL003`, PURE ACKNOWLEDGEMENT
+#             PROMPTS standing immediately before the `accept`s of (e). The whole
+#             of each literal is the key-press instruction, so nothing substantive
+#             is lost; `SL131` [:L733] is the one MIXED literal and its diagnostic
+#             half IS kept, split at `_SL131_NOTICE`.
+#           * [:L421] - `display ws-date`. THE POSTING DATE IS BUSINESS DATA, which
+#             the safe-event schema in `acas_posting/dal/status.py` excludes from a
+#             record (CWE-532); it is a command-line INPUT that `clock.py` pins.
+#           * [:L592-L594] - `oi3-customer` and `l5-nos`. RECORD KEYS, excluded by
+#             the same schema at any level, DEBUG included - and their renderers
+#             were eager log arguments, so removing them also removes a failure
+#             path that a diagnostic must not add.
+#           * [:L433] - `display space at 0801`. Its operand is a SPACE: screen
+#             erasure with no diagnostic content to convert.
+#         `ws-Eval-Msg` IS carried, because `zz040-Evaluate-Message` fills it only
+#         from the static table `copybooks/FileStat-Msgs.cpy` keyed on `fs-reply`.
 #     (e) `accept ws-reply` [:L601], [:L735], [:L1169] - acknowledgement pauses
 #         whose only effect is to block a terminal - are DROPPED, but the
 #         `WS-Caller not = "xl150"` tests around them [:L600], [:L734],
@@ -4738,8 +5102,14 @@ def _maps04_exit(maps03_ws: Maps03Ws) -> None:
 #         both date observables arrive through linkage - `to-day` as a parameter
 #         and `Run-Date` [copybooks/wssystem.cob:L67] inside `system-record`,
 #         used at [:L1022].
-#     (g) The message literals `SL002`, `SL003`, `SL130`, `SL131`, `SL132`,
-#         `SL133`, `SL133T` [:L261-L268] survive only as log text.
+#     (g) The message literals [:L261-L268]. `SL130`, `SL132` and the diagnostic
+#         half of `SL131` survive as log text. `SL002` and `SL003` are DECLARED AND
+#         DELIBERATELY NEVER REFERENCED - the acknowledgement prompts of (d) and
+#         (e). `SL133` and `SL133T` are also declared and never referenced, because
+#         they are never DISPLAYED at all: [:L704] and [:L706] `move` them into
+#         `print-record`, which is report content and out of scope per AAP section
+#         0.2.2 (see (c)). Every member stays declared because rule R-5 maps the
+#         whole `01 Error-Messages.` group.
 #     (h) `[:L1079-L1080]` `move oi-b-nos to k` and `move oi-b-item to i` are
 #         REPRODUCED even though they are DEAD STORES - their only readers are
 #         the commented-out STRING at [:L1096-L1101] - because the moves execute.

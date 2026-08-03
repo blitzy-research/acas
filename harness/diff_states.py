@@ -419,10 +419,12 @@ no sys.modules entry for that lookup to find.
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import json
 import os
 import sys
+import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -602,7 +604,8 @@ _DIGEST_BLOCK: Final[int] = 1 << 16
 
 # THE VERDICT (rule R-6). Three values, and no others.
 #   0  identical           stdout is EMPTY
-#   1  difference found    the report is on stdout
+#   1  difference found    a value-free summary is on stdout; the values are
+#                          in the 0600 report file the summary names
 #   2  cannot compare      a diagnosis is on stderr
 # Deliberately NOT the 80+ band the sibling harness modules use: they
 # exit 0 for "I did my job", this one exits 0 for "the migration is
@@ -1866,6 +1869,32 @@ def _file_digest(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _manifest_fingerprint(directory: Path | str) -> str:
+    """Return the SHA-256 of a tree's completeness manifest, for the summary.
+
+    THE REASON THIS EXISTS (OBS-016, rule R-6). The manifest is what lets this
+    module claim both trees were captured whole, so the claim is only as good as
+    the reader's ability to check that the manifest quoted in the evidence is the
+    manifest that was actually read. A digest binds the two; a file name does
+    not.
+
+    Args:
+        directory: The published tree.
+
+    Returns:
+        The lower-case hex digest, or a short reason in its place. NEVER raises:
+        a summary line is a diagnostic, and a digest that cannot be taken must
+        not turn a completed comparison into an error. The manifest itself was
+        already read and verified by `_verified_manifest` before this is called,
+        so the failure cases here are narrow.
+    """
+    path = Path(directory) / MANIFEST_FILENAME
+    try:
+        return _file_digest(path)
+    except ManifestError:
+        return "unreadable"
+
+
 def read_manifest(directory: Path | str) -> dict[str, Any] | None:
     """Read a tree's completeness manifest, if it has one.
 
@@ -2534,8 +2563,9 @@ def _render_value_difference(
       replaced atomically by `write_report`, in a directory this module
       creates 0700;
     * STDOUT - a collected container log in the composed recipe - gets
-      `summarise`'s value-free rendering instead, unless there is no report
-      file to point at or `--stdout-detail` was given.
+      `summarise`'s value-free rendering INSTEAD, on every path and with no
+      flag to override it. A run given no `--out` writes the values to a
+      private fallback file rather than to stdout.
 
     Args:
         table: The table.
@@ -2856,10 +2886,21 @@ def _write_text_securely(text: str, target: Path, staging: Path) -> None:
     except BaseException:
         try:
             os.close(descriptor)
-        except OSError:
-            # Already closed by the context manager. Swallowed so the real
-            # failure, re-raised below, is the one the caller sees.
-            pass
+        except OSError as close_error:
+            # NOT SWALLOWED SILENTLY. The expected case is `EBADF`: the
+            # context manager above already closed the descriptor, which is
+            # ordinary and says nothing. Anything else means the descriptor
+            # could not be released, so it is REPORTED - a cleanup failure
+            # that leaves no trace is how a leaked descriptor or a full
+            # filesystem stays invisible. The original failure is still the
+            # one that propagates, because it is re-raised below unchanged.
+            if close_error.errno != errno.EBADF:
+                _warn(
+                    f"could not close the staging descriptor for {staging} "
+                    f"while handling an earlier failure: errno "
+                    f"{close_error.errno} "
+                    f"({os.strerror(close_error.errno or 0)})"
+                )
         staging.unlink(missing_ok=True)
         raise
     os.replace(staging, target)
@@ -2954,6 +2995,43 @@ def invalidate_report(target: Path) -> None:
         ) from exc
 
 
+def _fallback_report_path() -> Path:
+    """Return a private path to hold the report when none was asked for.
+
+    THE REASON THIS EXISTS. A non-empty diff's detail is live accounting data:
+    every differing value beside its primary key. It belongs in a 0600 file and
+    never on stdout, which in the composed recipe is a collected container log.
+    Before this helper, a run given no `--out` put the whole report on stdout
+    instead - the same content this module protects with `O_EXCL`, `O_NOFOLLOW`
+    and mode 0600 when it goes to a file. That inconsistency was the leak; a
+    private file that always exists removes it.
+
+    `tempfile.mkdtemp` is used rather than a path derived from the compared
+    trees, for two reasons: the trees are normalized captures that nothing
+    should write into, and `mkdtemp` creates the directory 0700 by construction
+    with a name no other process can have predicted, so there is no window in
+    which the report is readable by anyone else.
+
+    Returns:
+        A path inside a fresh private directory, named exactly as the composed
+        layout names its report so a reader recognises it.
+
+    Raises:
+        ReportPathError: No private directory could be created, which leaves
+            the values with nowhere safe to go. The caller then prints the
+            value-free summary with no pointer and reports this on stderr; it
+            does NOT fall back to stdout.
+    """
+    try:
+        directory = Path(tempfile.mkdtemp(prefix="acas-diff-"))
+    except OSError as exc:
+        raise ReportPathError(
+            f"could not create a private directory to hold the differing "
+            f"values: {exc}"
+        ) from exc
+    return directory / DIFF_FILENAME
+
+
 def write_report(report: str, path: Path | str) -> Path:
     """Write the report to a file, atomically and privately.
 
@@ -3017,12 +3095,22 @@ def write_report(report: str, path: Path | str) -> Path:
 #    the committed data_dictionary/acas_posting_dictionary.json already - so
 #    the summary tells an operator exactly where to look while disclosing
 #    nothing.
-#  * WHEN NO FILE WAS WRITTEN, stdout keeps the FULL report, because then it
-#    is the only record and censoring it would lose the finding outright. The
-#    summary says which case it is in. This mirrors what
-#    [harness/normalize.py:L3585-L3592] already does with its findings.
-#  * `--stdout-detail` forces the full report onto stdout regardless, for
-#    interactive use where the operator IS the only reader.
+#  * WHEN NO FILE WAS ASKED FOR, one is still written: `_fallback_report_path`
+#    creates a private directory (0700 by construction, from `tempfile.mkdtemp`)
+#    and the report goes there, 0600, exactly as `--out` would have put it.
+#    STDOUT NEVER CARRIES THE VALUES - not on any path, and there is no flag
+#    that makes it. The trade this module used to make, "no file, so keep the
+#    full report on stdout because losing the finding would be worse than the
+#    disclosure", was a false choice: `summarise` already carries the whole
+#    FINDING - which tables, which finding kinds, which columns, how many rows -
+#    and only the differing VALUES stay behind, now in a file that always
+#    exists. If even the fallback cannot be written, the summary is printed
+#    WITHOUT a pointer and the failure is reported on stderr; the verdict and
+#    the exit code are unchanged.
+#  * THE POINTER IS BOUND TO THE BYTES. The summary names the report path AND
+#    its SHA-256, so the file a reader opens is provably the file this verdict
+#    was rendered from (rule R-6), and the same digest can be quoted in
+#    docs/migration/scenario-diff-evidence.md.
 #
 #  WHAT IS NOT CHANGED: `render`, `render_table` and
 #  `_render_value_difference` are untouched, so the report bytes and the
@@ -3036,18 +3124,30 @@ def write_report(report: str, path: Path | str) -> Path:
 _SUMMARY_HEADER: Final[str] = "difference(s) found; values withheld from"
 
 
-def summarise(diff: TreeDiff, *, report_path: Path | None) -> str:
+def summarise(
+    diff: TreeDiff,
+    *,
+    report_path: Path | None,
+    report_digest: str | None = None,
+) -> str:
     """Render a value-free summary of a comparison, for stdout.
 
     Carries no accounting value of any kind: no primary key, no column
     content, no side-by-side figure. Only table names, column names,
     finding kinds and counts, all of which are frozen public metadata.
 
+    THIS IS THE ONLY THING STDOUT EVER CARRIES for a non-empty diff. See THE
+    OPERATOR SUMMARY block above: the values live in the 0600 report file on
+    every path, including the one where no `--out` was given.
+
     Args:
         diff: The finished comparison. Read only; nothing branches on the
             result of this function.
-        report_path: Where the full report was written, or None when it was
-            not written at all.
+        report_path: Where the full report was written, or None when it could
+            not be written at all.
+        report_digest: The report file's SHA-256, which binds the pointer to
+            the bytes a reader will open (rule R-6). None when there is no
+            file, or when it could not be read back.
 
     Returns:
         The summary, one line per differing table plus a header and a
@@ -3114,12 +3214,22 @@ def summarise(diff: TreeDiff, *, report_path: Path | None) -> str:
             parts.append(f"columns={'; '.join(columns)}")
         lines.append(_join(table.table, *parts))
 
-    pointer = (
-        f"the differing values are in {report_path} (mode 0600)"
-        if report_path is not None
-        else "no report file was written, so run again with --report PATH "
-        "or --stdout-detail to see the differing values"
-    )
+    if report_path is None:
+        # The fallback ALSO failed - see main. The finding below is intact;
+        # only the values are gone, and stderr says why.
+        pointer = (
+            "the differing values could NOT be preserved: see the error on "
+            "stderr. Re-run with --out FILE pointing somewhere writable."
+        )
+    elif report_digest is None:
+        pointer = f"the differing values are in {report_path} (mode 0600)"
+    else:
+        # THE POINTER IS BOUND TO THE BYTES (rule R-6, OBS-016's requirement
+        # applied to this artifact as well as to the manifests).
+        pointer = (
+            f"the differing values are in {report_path} (mode 0600, "
+            f"sha256={report_digest})"
+        )
     header = _join(
         f"{diff.total_differences} {_SUMMARY_HEADER} stdout",
         f"tables={len(diff.differing)}/{len(diff.tables)}",
@@ -3178,7 +3288,9 @@ both trees must declare themselves complete
 
 exit codes
   0  identical           stdout is EMPTY - that is the pass condition
-  1  difference found    the report is on stdout
+  1  difference found    a value-free summary is on stdout, naming the
+                         0600 report file that holds the values and its
+                         SHA-256; no value ever reaches stdout
   2  cannot compare      a diagnosis is on stderr; NEVER reported as 0
 
 with --out, a passing run writes a ZERO-BYTE file, so the evidence can
@@ -3344,21 +3456,17 @@ def build_parser() -> argparse.ArgumentParser:
             "removes, so a verdict taken this way is not evidence."
         ),
     )
-    parser.add_argument(
-        "--stdout-detail",
-        action="store_true",
-        help=(
-            "put the FULL report on stdout, including every differing "
-            "value, even when it was also written to a file. By default "
-            "stdout carries a value-free summary in that case and the "
-            "values stay in the 0600 report file, because stdout is a "
-            "collected container log in the composed recipe and the "
-            "values are live accounting data. When no report file is "
-            "written the full report goes to stdout regardless, since it "
-            "is then the only record. The exit code is identical either "
-            "way."
-        ),
-    )
+    #  `--stdout-detail` USED TO BE DECLARED HERE AND IS DELIBERATELY GONE.
+    #  Its whole effect was to put every differing value - live accounting data,
+    #  each beside its primary key - onto stdout, which the composed recipe
+    #  collects as a container log. That is the same content this module
+    #  otherwise protects with `O_EXCL`, `O_NOFOLLOW` and mode 0600, so having a
+    #  flag that published it made the protection optional. There is now no path
+    #  and no option that puts a value on stdout: the detail always goes to a
+    #  0600 file - `--out FILE` when one is named, a private fallback
+    #  directory otherwise - and stdout always carries the value-free summary
+    #  plus that file's path and SHA-256. Nothing in the repository passed the
+    #  flag, so no recipe changes with it.
     parser.add_argument(
         "--quiet",
         action="store_true",
@@ -3526,9 +3634,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     Returns:
         `EX_IDENTICAL` (0) when the two trees are identical, and stdout is
-        left EMPTY; `EX_DIFFERENT` (1) when a real difference was found,
-        with the report on stdout; `EX_ERROR` (2) when the comparison
-        could not be performed, with a diagnosis on stderr.
+        left EMPTY; `EX_DIFFERENT` (1) when a real difference was found, with
+        a value-free summary on stdout naming the 0600 file that holds the
+        values; `EX_ERROR` (2) when the comparison could not be performed,
+        with a diagnosis on stderr.
     """
     global _QUIET
 
@@ -3688,7 +3797,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         + (
             f" (manifests agree on scenario "
             f"{manifests[0].get('scenario')!r}, selector "
-            f"{manifests[0].get('selector')!r})"
+            f"{manifests[0].get('selector')!r}; "
+            f"{LABEL_COBOL} {MANIFEST_FILENAME} "
+            f"sha256={_manifest_fingerprint(left)}, "
+            f"{LABEL_PYTHON} {MANIFEST_FILENAME} "
+            f"sha256={_manifest_fingerprint(right)})"
             if manifests is not None
             else ""
         )
@@ -3727,18 +3840,39 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return EX_IDENTICAL
 
-    # THE ONE PLACE THE VALUES ARE WITHHELD. See THE OPERATOR SUMMARY above
-    # `summarise`: the report file keeps every value and is 0600, while
-    # stdout - a collected container log in the composed recipe - gets a
-    # value-free summary naming the tables, kinds, counts and columns. When
-    # no file was written stdout keeps the full report, because it is then
-    # the only record and losing the finding would be worse than the
-    # disclosure. `--stdout-detail` forces the full report either way. The
-    # exit code below is identical in every case.
-    if report_path is not None and not arguments.stdout_detail:
-        sys.stdout.write(summarise(diff, report_path=report_path))
-    else:
-        sys.stdout.write(report)
+    # THE ONE PLACE THE VALUES ARE WITHHELD, and they are withheld on EVERY
+    # path. See THE OPERATOR SUMMARY above `summarise`: the report file keeps
+    # every value and is 0600, while stdout - a collected container log in the
+    # composed recipe - gets a value-free summary naming the tables, kinds,
+    # counts and columns, the report path, and the report's SHA-256. There is
+    # no flag that puts a value on stdout and no path on which one appears.
+    # The exit code below is identical in every case.
+    if report_path is None:
+        # No `--out` was given, so the values have nowhere to go yet. They
+        # do NOT go to stdout: a private file is created for them instead.
+        try:
+            report_path = _fallback_report_path()
+            write_report(report, report_path)
+        except ReportPathError as exc:
+            # The values are lost, the FINDING is not. Say so plainly and
+            # keep going: the summary below still names every differing
+            # table, kind, column and count, and the verdict is unchanged.
+            print(f"{_PROG}: {exc}", file=sys.stderr)
+            report_path = None
+
+    report_digest: str | None = None
+    if report_path is not None:
+        try:
+            report_digest = _file_digest(report_path)
+        except ManifestError as exc:
+            # The file is there but could not be read back, so the pointer
+            # cannot be bound to its bytes. Reported, not fatal: the verdict
+            # does not depend on the digest.
+            _warn(str(exc))
+
+    sys.stdout.write(
+        summarise(diff, report_path=report_path, report_digest=report_digest)
+    )
     _progress(
         f"{_PROG}: {diff.total_differences} difference(s) across "
         f"{len(diff.differing)} of {len(diff.tables)} table(s). A "
