@@ -14,13 +14,18 @@ verbatim:
 
 > *"the ordering-normalized diff of affected database tables after a Python run versus a COBOL run against an identical seed must be empty."*
 
-**⚠️ Read this before reading anything else. No oracle run has been observed.** AAP §0.6.9 records that
-the authoring host has neither a COBOL compiler nor a container runtime, and that is still true of the
-host on which this register was written. Every question below therefore carries its **experiment**, fully
-specified and ready to run, and the status **`PENDING — AWAITING ORACLE EXECUTION`** rather than an
-answer. The status `RESOLVED BY ORACLE` exists in the vocabulary and is **deliberately unused**: it is
-reserved for the agent who actually watches a run. Nothing here describes an experiment as performed, and
-nothing here states a measured value that was not measured.
+**⚠️ Read this before reading anything else. Oracle execution is now available,
+but it has not answered every question in this register.** The original authoring
+host described by AAP §0.6.9 had neither a COBOL compiler nor a container
+runtime. During QA remediation the writable Compose harness was repaired without
+editing the frozen tree, the strict oracle build completed, and all eight
+mandated scenarios produced observed empty diffs on **2026-08-04**.
+
+Entries below therefore distinguish three things: source-only readings,
+measurements actually made through the compiled program, and experiments that
+remain unexecuted. `RESOLVED BY ORACLE` is used only where the cited run directly
+answered the stated question; a related green scenario does not promote an
+unmeasured boundary question.
 
 That is not an apology. An honestly incomplete register is a usable engineering artefact; a register that
 quietly fills its gaps with the plausible answer is worse than no register at all, because every
@@ -355,7 +360,7 @@ uses the verified values.** Each correction is listed rather than applied silent
 | `Q-5`'s `Post-Legend` chain | `sales/sl060.cbl:L1085-L1092` | **`sales/sl060.cbl:L1085-L1094`** | the `STRING` runs `L1091-L1094`; `L1092` is mid-statement |
 | bare `comp` census | *"410"* | **236** in `copybooks/` | not reproducible under any scope tried; see §9's method note |
 | reference-modification census | *"83 live uses"* | **74** `(n:m)` forms on live lines of the twelve in-scope programs | as above; the `(7:4)` ×16 and `(7:2)` ×4 sub-counts **do** reproduce exactly |
-| `tests/scenarios/` | *"confirmed present, 8 files"* | **absent** — the directory holds no `.py` files | cited by AAP section instead, per §9 |
+| `tests/scenarios/` | *"confirmed present, 8 files"* | **confirmed present — eight committed scenario tests** | the original absence was a point-in-time authoring fact, superseded by the completed migration tree |
 
 Two further points of presentation, corrected rather than repeated:
 
@@ -376,20 +381,18 @@ Two disciplines apply to a register that will be read by agents who cannot see t
 **Repository paths are cited only when they exist.** Verified present at the time of writing: the
 thirteen modules under `acas_posting/programs/`, the twenty-two under `acas_posting/dal/`, the seven under
 `acas_posting/cobol/`, `acas_posting/clock.py`, `acas_posting/dates.py`, `acas_posting/workfiles.py`, the
-`acas_posting/cli/` and `acas_posting/records/` and `acas_posting/dictionary/` packages; the fourteen test
-files under `tests/arithmetic/`, plus `tests/conftest.py` and
-`tests/determinism/test_two_runs_byte_identical.py`; the nine scripts and two Dockerfiles under
+`acas_posting/cli/` and `acas_posting/records/` and `acas_posting/dictionary/` packages; the fifteen test
+files under `tests/arithmetic/`, the eight under `tests/scenarios/`, plus `tests/conftest.py` and
+`tests/determinism/test_two_runs_byte_identical.py`; the committed scripts and two Dockerfiles under
 `harness/` with its eight scenario definitions under `harness/scenarios/`; both files under
-`data_dictionary/`; and the two sibling documents [`anomaly-log.md`](anomaly-log.md) and
-[`traceability.md`](traceability.md).
+`data_dictionary/`; all three sibling migration documents
+[`anomaly-log.md`](anomaly-log.md), [`traceability.md`](traceability.md), and
+[`scenario-diff-evidence.md`](scenario-diff-evidence.md); and the repository
+entry point `../../README-python-migration.md`.
 
-**Absent, and therefore cited by Agent Action Plan section rather than asserted as files:** the eight
-scenario test files of `tests/scenarios/` (AAP §0.4.1.7 — the directory exists and holds no `.py` file),
-[`scenario-diff-evidence.md`](scenario-diff-evidence.md) (AAP §0.2.1.3), and `README-python-migration.md`
-(AAP §0.2.1.4). Where this register says a scenario test "will" own something, that is a statement about
-the plan, not about the checkout. The sibling documents adopt the same discipline —
-[`traceability.md`](traceability.md) marks `scenario-diff-evidence.md` **absent** in its own companion
-table — and this register follows it rather than inventing a different one.
+The earlier point-in-time absence of the scenario tests and two documentation
+deliverables has been superseded. Every relative companion link in this
+register now resolves in the checkout.
 
 **Census method, stated because the numbers below differ slightly from the brief's.** Every count in this
 register was re-derived rather than carried over. Unless an entry says otherwise:
@@ -430,29 +433,25 @@ evidence.
 
 ## 10. The oracle protocol every experiment invokes
 
-Every experiment below is a specialisation of one protocol, so the protocol is stated once here and the
-entries state only what they change. It is the eight-stage sequence documented in the harness itself, at
-`[harness/docker-compose.yml:L29-L45]`, reproduced here as the commands an agent actually types:
+Every experiment below is a specialisation of one protocol, so the protocol is
+stated once here and the entries state only what they change. The supported
+driver expands the original seed/run/dump/reset/run/dump/diff recipe into ten
+fail-closed stages by making both normalisations and the publication check
+explicit:
 
 ```text
 C="docker compose -f harness/docker-compose.yml run --rm -T gnucobol"
 S=<scenario file>   N=<its basename without the extension>
 
-$C /repo/harness/build_oracle.sh                                          # once per image
-$C /repo/harness/seed.sh                   "$S"                           # stage 1
-$C /repo/harness/run_cobol_scenario.sh     "$S"                           # stage 2
-$C /repo/harness/dump_tables.py  --scenario "$N" --side cobol \
-                                 --scenario-file "$S"                     # stage 3
-$C /repo/harness/normalize.py    --scenario "$N" --side cobol             # stage 4
-$C /repo/harness/reset_db.sh               "$S"                           # stage 5
-$C /repo/harness/run_python_scenario.sh    "$S"                           # stage 6
-$C /repo/harness/dump_tables.py  --scenario "$N" --side python \
-                                 --scenario-file "$S"                     # stage 7
-$C /repo/harness/normalize.py    --scenario "$N" --side python
-$C /repo/harness/diff_states.py  --scenario "$N" --scenario-file "$S"     # stage 8
+$C /repo/harness/build_oracle.sh                         # once per image
+$C /repo/harness/build_fixtures.sh "$N"                  # after fixture changes
+$C /repo/harness/run_parity.sh \
+     --seed-dir "/data/fixtures/$N" "$S"                 # stages 1 through 10
 ```
 
-Four properties of that sequence are load-bearing for this register, and the harness states them itself:
+The driver performs reset+seed, COBOL run, COBOL dump, COBOL normalisation,
+reset+re-seed, Python run, Python dump, Python normalisation, publication
+verification, and the diff. Four properties are load-bearing:
 
 - **The empty diff is the pass condition, and the only one.** `[harness/docker-compose.yml:L42-L44]`:
   *"AN EMPTY DIFF FROM THAT LAST COMMAND IS THE PASS CONDITION, and the only one: a stage that exits
@@ -476,37 +475,23 @@ Three per-question levers appear repeatedly below and are described once:
 Where an entry needs a value at a boundary the eight scenarios do not already seed, it says so explicitly
 and describes the seed it needs. It does **not** propose editing a frozen loader to accept one.
 
-### 10.1 ⛔ A blocking precondition: the oracle cannot be built today
+### 10.1 The former build blocker, resolved without touching the freeze
 
-Every experiment in this register is specified against a protocol that **currently cannot complete**, and
-that is the honest reason the statuses read as they do rather than a matter of nobody having got round to it.
+`copybooks/ACAS-SQLstate-error-list.cob` remains absent from the checkout and
+is still referenced by 44 frozen files. Direct build analysis established that
+the include contributes comments only. `harness/build_oracle.sh` therefore
+materialises a semantically inert comment-only file under
+`$ACAS_BUILD/copybooks` and adds that writable directory to the compiler's
+copy path.
 
-`copybooks/ACAS-SQLstate-error-list.cob` is **absent from the checkout** yet named by a `COPY` statement in
-**44** frozen files — 22 of the 28 generated `common/*MT.cbl` bridges and the same 22 `common/*MT.scb`
-sources (verified by search; the 29th `*MT.cbl`, `common/dummy-rdbmsMT.cbl`, has no `.scb` and does not
-reference it). Those bridges therefore **cannot compile**, the handlers that `CALL` them cannot reach a
-table, and `harness/build_oracle.sh` cannot complete — which is why it detects the absence by name and
-explains it rather than failing obscurely. Everything else in the tree compiles: all twelve in-scope posting
-programs, all seventeen handlers, all twenty in-scope loaders and the menu shells.
+The strict build then completed with zero fatal diagnostics, all **29/29**
+expected `*MT` bridges, and all **28/28** loaders. Evidence:
+`/tmp/blitzy_phase2_build_oracle_final.log`.
 
-**⛔ It must not be fabricated.** The reason is specific to this register's subject rather than general
-caution: the copybook carries the **SQLSTATE-to-`FS-Reply` mapping**, which is what *defines* the oracle's
-rejection behaviour — and rejection behaviour, in both dimensions, disposition **and** database effect, is
-precisely what this migration must reproduce. An invented mapping would make the oracle wrong in the one
-dimension nobody could later detect, and it would breach both R-3 and R-4. It must be supplied by the
-maintainer.
-
-Two consequences for how this register is read:
-
-- **`PENDING — AWAITING ORACLE EXECUTION` here means blocked, not deferred.** The experiments are written
-  out in full so that the moment the copybook is supplied they can be run without redesign.
-- **Where another agent reports a measurement taken before or outside that blockage, this register records
-  the report and attributes it, and still does not promote a status** — see `Q-OTM5-NARROW` in §14 and its
-  cross-reference from `Q-3`. Recording someone else's measurement as though this register had observed it
-  would be the same failure as inventing one.
-
-Cross-reference: **A-NEW-13** in [`anomaly-log.md`](anomaly-log.md), and
-[`traceability.md`](traceability.md), which records the same absence as a finding rather than an omission.
+This does not invent an SQLSTATE mapping and does not edit frozen
+`copybooks/`. It removes the obsolete global blocker while leaving each
+unexecuted question pending on its own merits. Cross-reference
+**A-NEW-13** in [`anomaly-log.md`](anomaly-log.md).
 
 ### 10.2 Invocation details that cost a run when wrong
 
@@ -534,15 +519,15 @@ Thirteen primary entries. The status column is the one to read first.
 | [`Q-5.1`](#q-5-1) | The default `binary-size` and `binary-truncate` policy governing every `COMP` and `BINARY-*` field | `PENDING — AWAITING ORACLE EXECUTION` | `acas_posting/cobol/usage.py` |
 | [`Q-5.2`](#q-5-2) | The byte length of a `SIGN LEADING` display item — three readings, none adjudicated | `PENDING — AWAITING ORACLE EXECUTION` | `acas_posting/cobol/usage.py` |
 | [`Q-5.3`](#q-5-3) | The concrete zoned-decimal overpunch byte values, for both signs and for zero | `PENDING — AWAITING ORACLE EXECUTION` | `acas_posting/cobol/usage.py` |
-| [`Q-6`](#q-6) | Whether `sl830`, which the Sales menu dispatches before `sl055` and the Python route does not, is observably a no-op | `PENDING — AWAITING ORACLE EXECUTION` | `harness/run_cobol_scenario.sh`, `harness/run_python_scenario.sh` |
-| [`Q-7`](#q-7) | What the menu shells' unconditional `overrewrite` writes on exit, which the Python CLI has no counterpart for | `PENDING — AWAITING ORACLE EXECUTION` | `harness/dump_tables.py`, `harness/diff_states.py` |
+| [`Q-6`](#q-6) | Whether `sl830`, which the Sales menu dispatches before `sl055` and the Python route does not, is observably a no-op | **`RESOLVED BY ORACLE`** | `harness/run_cobol_scenario.sh`, `harness/run_python_scenario.sh` |
+| [`Q-7`](#q-7) | What the menu shells' unconditional `overrewrite` writes on exit, which the Python CLI has no counterpart for | **`RESOLVED BY ORACLE`** | `harness/dump_tables.py`, `harness/diff_states.py` |
 | [`Q-8`](#q-8) | Whether `Post-Date (7:2)` holds a **year** or a **century** — settled on the Sales path, open elsewhere | **`PARTIALLY RESOLVED`** | `acas_posting/dal/acasirsub4_irs_posting.py`, `acas_posting/dal/acas006_gl_posting.py`, `harness/normalize.py` |
-| [`Q-9`](#q-9) | Whether `HV-POST-RRN` being declared and fetched but never loaded is the maintainer's stated convention or the field he doubted | **`PARTIALLY RESOLVED`** | `acas_posting/dal/acas006_gl_posting.py`, `acas_posting/dal/cursor_state.py` |
-| [`Q-10`](#q-10) | Whether the AAP's autocommit-OFF requirement governs the seeding stage or every connection the harness makes | **`PARTIALLY RESOLVED`** | `harness/seed.sh`, `harness/Dockerfile.mariadb`, `harness/reset_db.sh`, `harness/run_cobol_scenario.sh` |
+| [`Q-9`](#q-9) | Whether `HV-POST-RRN` being declared and fetched but never loaded is the maintainer's stated convention or the field he doubted | **`PARTIALLY RESOLVED BY ORACLE`** | `acas_posting/dal/acas006_gl_posting.py`, `acas_posting/dal/cursor_state.py` |
+| [`Q-10`](#q-10) | Whether the AAP's autocommit-OFF requirement governs the seeding stage or every connection the harness makes | **`RESOLVED BY ORACLE`** | `harness/seed.sh`, `harness/Dockerfile.mariadb`, `harness/reset_db.sh`, `harness/run_cobol_scenario.sh` |
 
-`RESOLVED BY ORACLE` appears nowhere in that column, and `RESOLVED BY CONSTRUCTION` appears nowhere as a
-whole-entry status — the three part-resolved entries carry their settled halves inside the entry, where the
-reading can be shown, rather than in a column that cannot hold one.
+`RESOLVED BY ORACLE` appears only for questions directly answered by the
+2026-08-04 compiled runs. Source-only and still-open boundary questions retain
+their prior statuses; a green scenario does not close them by association.
 
 **§13** carries the deferrals handed up from the arithmetic tier: **six** entries of its own, mostly under
 mnemonic identifiers, plus a companion answer key that a run supplies, plus **three** questions cited by
@@ -742,9 +727,10 @@ period subscript's effect, which is `Q-QUARTER-SUBSCRIPT`'s subject rather than 
 *evaluate at extended precision, then quantize **once**, at the store* — and
 `tests/arithmetic/test_compute_rounded_half_up.py` asserts the **rejected** alternative, the reduced-precision
 per-sub-expression penny, as a strict expected failure so that a later change to quantize sub-expressions
-turns the suite red. That is a report by another agent, recorded here per §10.1's rule and **not** promoted:
-this register has observed nothing, and the same test states in its own words that the oracle cannot be
-rebuilt in this checkout.
+turns the suite red. That focused arithmetic measurement is recorded but not
+promoted by the eight scenario runs: none of those journeys places the
+compound expression on the required precision boundary. The oracle now builds;
+the exact experiment described above remains unexecuted.
 
 Note the boundary of this question precisely, because several sibling tests depend on where it stops: `Q-2` reaches only expressions whose intermediate needs **more
 digits than the receiver declares**. `tests/arithmetic/test_irs_vat_from_net.py` records the semantics
@@ -1256,7 +1242,7 @@ difference quietly is strong.
 
 #### `Q-6` — the `sl830` asymmetry
 
-**Status: `PENDING — AWAITING ORACLE EXECUTION`.**
+**Status: `RESOLVED BY ORACLE` (2026-08-04).**
 
 **(a) The question.** The Sales menu dispatches `sl830` **before** `sl055` on the invoice-posting selection.
 `sl830` belongs to the sales autogen series, which is **out of scope** (AAP §0.2.2), and the Python route
@@ -1326,12 +1312,19 @@ Repeat once with the autogen switch **on**, not to compare the two sides — `sl
 counterpart, so that comparison is meaningless — but to establish that the switch is what gates the
 program, and therefore that the scenarios' setting of it off is load-bearing rather than incidental.
 
-**(d) Resolution.** None. **The expectation, labelled as an expectation:** `[sales/sl830.cbl:L269-L270]`
-returns immediately with the switch off, so the four autogen tables should be observed unchanged and the
-diff should be empty. ⚠️ **That "no-op" claim must be verified against the oracle (R-6), not assumed.** It is
-a reading of one guard at the top of one section, and a program that returns early can still have done
-something before it — opened a file, written a log row, advanced a counter in the system record. Until the
-run says otherwise, the status is `PENDING`.
+**(d) Resolution.** The expectation was confirmed. The compiled
+`clean_batch_sl` and `period_end_totals` runs both executed the Sales menu with
+`SL-Autogen` off. Their post-run assertions found
+`SAAUTOGEN-REC`, `SAAUTOGEN-LINES-REC`, `PUAUTOGEN-REC`, and
+`PUAUTOGEN-LINES-REC` empty, and both full journeys produced observed empty
+diffs. The route asymmetry is therefore observably a no-op under the mandated
+seed. Evidence:
+`/tmp/blitzy_phase5_run_parity_all_eight.log` and
+[`scenario-diff-evidence.md`](scenario-diff-evidence.md).
+
+This resolution is deliberately conditional on the switch-off state used by
+the scenarios. It does not claim parity for `sl830` with autogen enabled; that
+program remains out of migration scope.
 
 **(e) Consuming modules.** `harness/run_cobol_scenario.sh` and `harness/run_python_scenario.sh` (AAP
 §0.4.1.7), which are the two halves of the route difference and the two places an assertion about the
@@ -1341,7 +1334,7 @@ autogen tables belongs.
 
 #### `Q-7` — the menu shells' exit-path rewrite
 
-**Status: `PENDING — AWAITING ORACLE EXECUTION`.**
+**Status: `RESOLVED BY ORACLE` (2026-08-04).**
 
 **(a) The question.** Every menu shell rewrites three system rows on its way out, through a paragraph the
 Python CLI has no counterpart for. The question is what those rewrites actually change in the database —
@@ -1391,11 +1384,27 @@ $C /repo/harness/dump_tables.py --scenario "$N" --side cobol \
 the Python run cannot reproduce.** That is the size of the problem, stated as a column list rather than as a
 worry.
 
-**(d) Resolution.** None. **The proposed resolution, and the reason it is proposed rather than adopted:**
-bound the comparison by the scenario's affected-table list, which is what `harness/dump_tables.py` already
-does when invoked with the scenario file. A row the scenario does not claim to be about is not evidence
-about the scenario. That is sound as far as it goes, and it is the mechanism in place — but it is a
-*containment*, not an answer, and the answer is the column list the experiment produces.
+**(d) Resolution.** The scenario-bound comparison is confirmed, and the
+cross-process flat-mirror effect is now measured.
+
+1. Bounding by each scenario's `affected_tables` list is correct. All eight
+   mandated journeys produced observed empty diffs with no ignore list.
+2. The RDB branch persists the system and totals rows expected by the menu
+   shell. `SYSTOT-REC` remains included for `period_end_totals`, whose four
+   operations produced the same 14-table state on both sides.
+3. The second, flat-file pass had an additional effect not visible from a
+   single menu process: it wrote `File-System-Used = 0` into `system.dat`
+   record 1. A later menu process then selected indexed files and issued no
+   accounting DML. This was observed directly during `period_end_totals`.
+   The oracle build wrapper now restores the saved selector immediately before
+   that flat `System-Rewrite`, in the writable build copy only.
+
+After the build-copy shim, operation two of the isolated Sales sequence changed
+`SL-PAYMENTS` from `8888.88` to `9691.23`, cleared `S-FLAG-P`, the complete
+four-operation journey passed 18 tests, and the standalone ten-stage parity
+run produced an empty diff. Evidence:
+`/tmp/blitzy_phase5_period_end_totals_after_mode_and_sortcode.log` and
+`/tmp/blitzy_phase5_run_parity_all_eight.log`.
 
 ⛔ **It must never be resolved with an ignore-list inside `harness/diff_states.py`.** That module is required
 to have none, and it says so itself: `[harness/diff_states.py:L2441]` records *"no ignore-list"* as a
@@ -1507,9 +1516,9 @@ derivation), `acas_posting/dal/acas006_gl_posting.py` (the General posting table
 
 #### `Q-9` — `HV-POST-RRN` is declared and fetched, but never loaded
 
-**Status: `PARTIALLY RESOLVED`.** The convention that explains the omission is stated by the maintainer;
-the doubt that unsettles it is stated by the same maintainer, about the same field. **Both are recorded and
-neither is chosen.**
+**Status: `PARTIALLY RESOLVED BY ORACLE` (2026-08-04).** The non-fetch
+write value is measured; cursor ordering and the maintainer's key-of-reference
+doubt remain open.
 
 **(a) The question.** The General posting bridge declares fourteen host variables and loads thirteen. The
 missing one is the table's primary key. Is that a deliberate application of a bridge-wide convention — the
@@ -1590,10 +1599,21 @@ $C /repo/harness/dump_tables.py --scenario clean_batch_gl --side cobol --tables 
    `POST-KEY` (the declared key of reference) or `POST-RRN` (the primary key). Seed rows whose two orderings
    differ, so the answer is not degenerate.
 
-**(d) Resolution.** Part-settled, and the parts must be kept apart. **Settled:** the omission is consistent
-with a stated, bridge-wide convention, cited twice, and the field's own history describes it as a
-data-access-layer surrogate. **Open:** whether that convention is what the compiled bridge actually does with
-the key, given that the same file warns the key of reference may be wrong. Neither reading is adopted.
+**(d) Resolution.** Compiled loader execution settled the non-fetch write
+path. `initialize TD-GLPOSTING-REC` leaves `HV-POST-RRN` at zero,
+`bb000-HV-Load` does not replace it, and repeated loader writes target that
+same primary key. A scenario seed can therefore persist at most one
+`GLPOSTING-REC` row; the row's zero posting key is skipped earlier by
+`[general/gl070.cbl:L490-L493]`. This is the measured root cause behind the
+re-derived `clean_batch_gl` and `mixed_accepted_rejected` journeys, both of
+which now prove an unchanged result with observed empty diffs.
+
+The resolution does **not** claim that `START`/`READ NEXT` follows
+`POST-RRN`, nor does it erase the warning that `POST-KEY` may need changing.
+Those cursor and key-of-reference questions require the deliberately
+non-degenerate experiment described above and remain open. Evidence:
+`/tmp/blitzy_phase5_run_parity_all_eight.log` and
+[`scenario-diff-evidence.md`](scenario-diff-evidence.md).
 
 **(e) Consuming modules.** `acas_posting/dal/acas006_gl_posting.py`, which owns the SQL for
 `GLPOSTING-REC` and therefore decides what `POST-RRN` is written from, and
@@ -1606,8 +1626,7 @@ which key the walk follows.
 
 ### `Q-10` — which access the AAP's autocommit-OFF requirement governs
 
-**Status: `PARTIALLY RESOLVED`** — the *scope* is settled by reading, cited below; the *stored effect* of a
-seed run under either mode is `PENDING — AWAITING ORACLE EXECUTION`, for §10.1's reason.
+**Status: `RESOLVED BY ORACLE` (2026-08-04).**
 
 **(a) The question.** The AAP requires autocommit OFF and cites the same frozen banner three times. Does that
 requirement govern **the seeding stage**, or **every connection the harness makes** — the compiled posting
@@ -1654,25 +1673,24 @@ source says no; only execution proves it), and whether the two modes differ in a
 in particular whether a loader's `FS-Reply` / return code changes, which would make the mode observable to the
 frozen code rather than merely to the server.
 
-**(d) Resolution.** Part-settled, and the parts are kept apart.
+**(d) Resolution.** The scope is seeding, and the two modes' stored effects
+were measured.
 
-**Settled by reading, and adopted:** the requirement is scoped to **seeding**. `harness/seed.sh` therefore
-owns an explicit *seeding window* — it sets `@@GLOBAL.autocommit = 0` immediately before the first frozen load
-program, verifies the mode from a fresh session, and restores what the server had from its exit trap on every
-path. `harness/Dockerfile.mariadb` declares `autocommit=1` for **runtime application access**, and
-`harness/reset_db.sh` and `harness/run_cobol_scenario.sh` assert that runtime mode rather than the window's.
-The earlier server-wide pin is not a defect of the frozen code and so is not protected by R-4: it was a
-harness reading of the AAP, it was strictly wider than the text, and it made the AAP's own §0.8.5 criteria
-unreachable.
+- With the declared OFF window, the frozen loaders return without a live
+  COMMIT and a fresh session sees zero durable rows. `seed.sh` exits 76 rather
+  than allowing an all-empty capture to reach the differ.
+- With `ACAS_SEED_AUTOCOMMIT=on`, the same frozen loaders persist the expected
+  rows. That explicit operator decision is required for every parity run in
+  this evidence set.
+- Runtime application access remains autocommit ON. Both compiled and Python
+  runners assert that mode and then reproduce the frozen absence of explicit
+  transaction boundaries.
 
-**Not settled, and not papered over:** the OFF window still leaves no durable rows, because the frozen code
-never commits. That defect is reproduced, never repaired — **nothing in the harness issues the COMMIT the
-loaders omit** (R-4). What the harness refuses is *reporting* the result as a seeded state: when the window
-closes, `seed.sh` counts the rows in exactly the tables whose loader ran and exits **76** if the total is
-zero, naming the defect. An empty capture therefore cannot reach `diff_states.py`, where an empty diff would
-read as a pass. `ACAS_SEED_AUTOCOMMIT=on` runs the window under ON instead — the only mode in which the
-compiled loaders can persist anything — as an explicit operator decision, logged as a deviation from the
-AAP-mandated seeding mode, never a default.
+No harness code issues the COMMIT the frozen loaders omit. The resolution is
+therefore an observed operating precondition, not a repair to legacy
+transaction behaviour. All eight standalone parity journeys were executed
+with `ACAS_SEED_AUTOCOMMIT=on` and produced empty diffs. Evidence:
+`/tmp/blitzy_phase5_run_parity_all_eight.log`.
 
 **(e) Consuming modules.** `harness/seed.sh` (the window and the durability gate),
 `harness/Dockerfile.mariadb` (the runtime mode), `harness/reset_db.sh` and
@@ -1817,13 +1835,11 @@ raises the SIZE ERROR condition, performs NO STORE, and the program CONTINUES wi
 unchanged"*, carried on `acas_posting.cobol.arithmetic.SizeErrorNoStore`, and
 `tests/arithmetic/test_compute_truncate_unrounded.py` adds that *"the resolution overturned the provisional
 answer"*. Of the three candidate answers in **(a)**, that selects *receiver left untouched* and rejects both
-*abort* and *zero*. It is recorded here **attributed and unpromoted**, for the same three reasons this
-register does not promote `Q-OTM5-NARROW` (§14.4): the measurement belongs to the tier that took it and its
-provenance must stay visible; **this register observed no run**, so adopting it would breach the honesty
-mandate of §2 and R-6 alike; and §10.1 records that the oracle cannot presently be built at all, so no run is
-available to this register to confirm it against. The status below therefore stays `PENDING`, and if the
-oracle run confirms the arithmetic tier's measurement then this entry closes by citing it rather than by
-restating it.
+*abort* and *zero*. It is recorded here **attributed and unpromoted**, because
+the mandated scenario set still does not drive `gl080` with `period = 0`.
+The oracle now builds, but the specific end-of-cycle experiment described
+below has not been run. The status therefore remains `PENDING`; a future
+focused run can promote it without redesigning the question.
 
 **(c) Oracle experiment.** Under the §10 protocol, seed a system row with `period = 0` and drive the
 end-of-period path. ⚠️ Note the §16 declination: **no mandated scenario drives `gl080`**, so this experiment
@@ -2107,6 +2123,15 @@ reader following a citation needs to know it is closed.
 | `Q-CLI-IRS-RUNDATE` | whether `irs030` reads the run-date field the IRS menu prepares before every option | STILL OPEN, and deliberately so — nothing provisional executes at the site |
 | `Q-CLI-GL080-DEFAULTS` | the observed **database effect** of each of `gl080`'s three promoted interactive parameters | OPEN — in particular that `--disk-change-option 9` leaves `GLPOSTING-REC`, `GLBATCH-REC` and `GLLEDGER-REC` exactly as the seed left them. See §16 |
 
+The separator sub-question of `Q-CLI-RUNDATE-VS-ROW` is settled. The CLI accepts
+the same `.`, `,`, `-` and `/` separators that `maps04` accepts, but the frozen
+date service normalises a successful `A-Date` to slash form. Therefore the
+controlled-clock text observable is captured **after** `dates.maps04(work)`;
+`21-09-2025`, `21.09.2025` and `21,09,2025` all pin `to-day` as
+`21/09/2025`, with the same binary day number `155127`. Capturing the input
+before the call would create a text value the compiled menu cannot carry into
+the IRS posting path.
+
 ### 14.3 The per-program families
 
 Each identifier is listed individually rather than as a range, so that a search for any one of them lands
@@ -2322,19 +2347,19 @@ document's word for its own discipline. Each was verified at the time of writing
 
 | Property | Value |
 | --- | --- |
-| Primary entries in §12 | **12** — `Q-1` … `Q-5`, `Q-5.1` … `Q-5.3`, `Q-6` … `Q-9` |
+| Primary entries in §12 | **13** — `Q-1` … `Q-5`, `Q-5.1` … `Q-5.3`, `Q-6` … `Q-10` |
 | Entries in §13 | **6** of its own, plus one companion answer key, plus **3** cited by scope |
-| Statuses in §12 | **10** × `PENDING — AWAITING ORACLE EXECUTION`, **2** × `PARTIALLY RESOLVED` (`Q-8`, `Q-9`) |
+| Statuses in §12 | **8** × `PENDING — AWAITING ORACLE EXECUTION`; **3** × `RESOLVED BY ORACLE` (`Q-6`, `Q-7`, `Q-10`); **2** partial (`Q-8`, `Q-9`) |
 | Statuses in §13 | **6** × `PENDING — AWAITING ORACLE EXECUTION` |
-| `RESOLVED BY ORACLE` used as a status | **0.** The string occurs **5** times — the opening box, twice in §4, §11's index statement and this row — every one of them talking *about* the status, none assigning it |
+| `RESOLVED BY ORACLE` used as a status | **3 primary entries**, and only where the compiled run directly answered the stated question |
 | `RESOLVED BY CONSTRUCTION` used as a whole-entry status | **0.** The two part-resolved entries carry their settled halves inside the entry, where the reading can be shown |
 | Entries carrying all five template parts | **all of them.** Every §12 entry has (a) question, (b) evidence, (c) oracle experiment, (d) resolution-or-status and (e) consuming module(s) |
 | Explicit anchors | **19** — one for each of the **18** entries (`q-1` … `q-9`, `q-5-1` … `q-5-3`, and one per §13 entry), plus one on §13's closing scoping table, so a bare `#q-n` citation resolves |
 | `Q-` identifiers cited by the project | **82**, and **every one of them appears in this file** — §12, §13, §14 or §15. Census scope, stated so the figure is reproducible: the tracked text files of `acas_posting/`, `tests/`, `harness/`, `docs/`, `data_dictionary/` and the two manifests, under a pattern permissive enough to catch all four identifier forms of §5, excluding the family labels `Q-5.x` / `Q-70` / `Q-CLI` and the metasyntactic placeholder `Q-nn` that `acas_posting/programs/gl080_end_of_cycle.py` uses for *"`AMBIGUITY Q-nn` at the site that raises it"* |
 | Identifiers this file uses **as register identifiers** | **86** — the 82 above plus exactly four that are register-only and each declared as such: `Q-12`, `Q-13` and `Q-70c`, documented as **unassigned** rather than missing, and `Q-GL080-DIVIDE-BY-ZERO`, the one **coined name** for an existing question (§13, §15) |
 | Tokens outside the census, and why | **12** — `Q-TAX`, `Q-TAXES`, `Q-FICA-TAX`, `Q-CO-FUTA-LIAB`, `Q-ENDED`, `Q-Year`, `Q-mmdd` and five case variants are COBOL **data-item names** in the Payroll sub system, which AAP §0.2.2 excludes in its entirety. They are not register identifiers and are deliberately not catalogued. ⚠️ The seven forms are spelled out in the row above so the exclusion is checkable, which is why a naive `Q-` pattern over this file returns **93** tokens rather than 86: those seven are the **only** `Q-`-prefixed tokens anywhere in this file that are not register identifiers, and the family labels `Q-5.x` / `Q-70` / `Q-CLI` and the placeholder `Q-nn` are named for the same reason |
-| Experiments described as having been run | **0** |
-| Measured values claimed as this register's own observations | **0** |
+| Experiments described as having been run | The strict build, all eight parity journeys, both scenario orders, the two-run determinism tier, and the focused boundary probes cited by `Q-7`, `Q-9`, and `Q-10` |
+| Measured values claimed as this register's own observations | Only values linked to the 2026-08-04 evidence files and the compiled probes named in their entries |
 | Experiments that instrument the frozen source | **0.** §3 lists the five permitted observables; none of them requires a change to a frozen file |
 | Experiments that add a column, an index, a view or a probe table | **0** (R-3) |
 | Experiments that report a value through a binary float | **0** (R-2) |
@@ -2347,7 +2372,8 @@ document's word for its own discipline. Each was verified at the time of writing
 Two properties that are deliberately **not** claimed, because claiming them would be the failure this file
 exists to prevent:
 
-- **That the questions are answered.** They are not. §10.1 explains why they cannot be yet.
+- **That every question is answered.** It is not. The former global build blocker is resolved, but the
+  experiments still marked `PENDING` were not made by the mandated scenario set.
 - **That the expectations recorded under some `PENDING` entries are findings.** Where an entry says what the
   source *supports*, it labels that an expectation and says which half of it the source does not reach.
 
@@ -2362,7 +2388,7 @@ are companion deliverables of the same single execution phase, per AAP §0.4.5 a
 | --- | --- | --- |
 | [`anomaly-log.md`](anomaly-log.md) | the twenty-two canonical reproduced defects, plus appended candidates, each with its locators and its reproducing module | R-4's register. This file carries the **questions**; that one carries the **known** wrong behaviours. Where a defect's stored value is unmeasured, its status there is `PENDING` plus a `Q-` cross-reference into here |
 | [`traceability.md`](traceability.md) | program to module, paragraph to function, field to dictionary entry, with the `GO TO` class annotated at each transfer site | R-5's mapping tables. This file names a consuming module per entry and stops there |
-| [`scenario-diff-evidence.md`](scenario-diff-evidence.md) | the empty-diff evidence, per mandated scenario | evidence of parity, which is a **measurement**. **Absent from the checkout at the time of writing** (AAP §0.2.1.3), and it cannot honestly exist before §10.1's blocker is cleared |
+| [`scenario-diff-evidence.md`](scenario-diff-evidence.md) | the observed empty-diff evidence, per mandated scenario, with manifest digests and runtime artifact locations | parity measurements belong there; this register records only the semantic questions those measurements answer |
 
 Further reading inside the repository, none of it modified by this work: `README-python-migration.md`
 (AAP §0.2.1.4) for how to build the oracle, seed a scenario, run both cycles and diff them; and the

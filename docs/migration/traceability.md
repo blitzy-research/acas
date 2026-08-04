@@ -2039,18 +2039,20 @@ the period-end scenario verifiable by inspecting one table — were verified ind
 | every field maps to a data-dictionary entry | §10 | **Yes** — 1061 entries over 513 columns, 513 host variables, 1001 copybook fields and 46 work-file fields, generated rather than transcribed, with §10.7 accounting for the one-sided remainder |
 | the mapping is recorded as a document | this file | **Yes** |
 
-### 17.2 ⚠️ What this document cites by plan section rather than asserting as an observed file
+### 17.2 Companion and test paths verified after QA remediation
 
-The honesty mandate of §3 forbids asserting that a file exists without having read it. Four cases arose,
-and all four are stated here rather than papered over:
+The point-in-time absences recorded during initial authoring have been
+superseded. Each item below was read in the completed checkout:
 
-| Item | Status in this checkout | How it is cited |
-| --- | --- | --- |
-| `tests/scenarios/` | **absent** — the directory does not exist. `tests/` holds `conftest.py`, `tests/arithmetic/` (fourteen files, all present) and `tests/determinism/test_two_runs_byte_identical.py` | named from **AAP §0.4.1.7** wherever this document refers to the scenario tier; never claimed as observed |
-| `docs/migration/ambiguity-resolutions.md` | **absent** | referred to by name as a **companion deliverable of this same phase**, per AAP §0.4.5 and §0.4.1.7 (§18). The relative link will resolve once the sibling is written; it does not resolve today |
-| `docs/migration/scenario-diff-evidence.md` | **absent** | as above |
-| `harness/scenarios/` | **seven** YAML definitions present — `clean_batch_gl`, `clean_batch_irs`, `clean_batch_pl`, `clean_batch_sl`, `control_total_mismatch`, `empty_batch`, `mixed_accepted_rejected`. The eighth named in AAP §0.3.1, `period_end_totals.yaml`, is **absent** | the seven are stated as present; the eighth is cited from **AAP §0.3.1** and identified as not yet in the checkout |
-| `README-python-migration.md` | **absent** | cited from **AAP §0.4.1.7** in §18 and identified there as not yet present |
+| Item | Status in this checkout |
+| --- | --- |
+| `tests/arithmetic/` | **present — fifteen test files**, including shared-storage and dispatch-boundary coverage |
+| `tests/scenarios/` | **present — eight committed scenario tests** |
+| `tests/determinism/test_two_runs_byte_identical.py` | **present** |
+| `harness/scenarios/` | **present — all eight YAML definitions**, including `period_end_totals.yaml` |
+| `docs/migration/ambiguity-resolutions.md` | **present** |
+| `docs/migration/scenario-diff-evidence.md` | **present** |
+| `README-python-migration.md` | **present at repository root** |
 
 Everything else this document cites was read in this checkout: the twelve programs, the four menus, the
 handlers and bridges named, the copybooks named, `mysql/ACASDB.sql`, the thirteen files of
@@ -2062,19 +2064,15 @@ eight of `acas_posting/cobol/`, the twenty-eight of `acas_posting/records/`, the
 
 ### 17.3 What this document does **not** claim
 
-- **No observed oracle run.** Nothing here reports a compiled-COBOL execution, a database state, a
-  diff result or a measured value. Every statement was established by reading the frozen source and the
-  sibling Python modules. Where a value can only be measured — what an unsigned column stores when a
-  signed field goes negative (§10.5.3), how many alternations a mutually re-dispatching pair performs
-  (§9.4), which record length governs the batch record (**`Q-4`**, the identifier A-15 carries) — the
-  question is cross-referenced to `ambiguity-resolutions.md` under R-6 and left open here. The
-  concrete identifiers this document defers to are **`Q-3`** (§10.5.3), **`Q-4`** (A-15),
-  **`Q-5.2`** (§10.6) and **`Q-SORT-TIE-ORDER`** (§9.3).
-- **No oracle measurement was available when this document was written**, and the reason is itself a
-  recorded finding rather than an omission: `copybooks/ACAS-SQLstate-error-list.cob` is absent from the
-  frozen archive while **44** frozen files name it in a `COPY`, so the affected bridges cannot compile
-  and `harness/build_oracle.sh` cannot complete. [`anomaly-log.md`](anomaly-log.md) carries it as
-  **A-NEW-13**. Every `Q-` above is open for that reason, and none of them is guessed shut here.
+- **This document is not the runtime evidence register.** The strict oracle
+  build and all eight empty scenario diffs are recorded in
+  [`scenario-diff-evidence.md`](scenario-diff-evidence.md); compiled semantic
+  arbitrations are recorded in
+  [`ambiguity-resolutions.md`](ambiguity-resolutions.md). This file continues
+  to own only the R-5 mapping.
+- **A green parity suite does not close every semantic question.** Values that
+  need a boundary-specific experiment — for example `Q-3`, `Q-4`, `Q-5.2`,
+  and `Q-SORT-TIE-ORDER` — remain cross-referenced rather than guessed.
 - **No anomaly is re-described.** Anomalies are cross-referenced by identifier — the sixteen A-1,
   A-2, A-3, A-4, A-5, A-6, A-7, A-8, A-11, A-12, A-13, A-14, A-16, A-17, A-21 and A-22 all appear
   above, and A-15 and A-NEW-13 are named in this section — and [`anomaly-log.md`](anomaly-log.md)
@@ -2096,12 +2094,12 @@ companion deliverables of the same single execution phase, per AAP §0.4.5 and �
 | Document | What it carries | Why it is not here | Present today |
 | --- | --- | --- | --- |
 | [`anomaly-log.md`](anomaly-log.md) | the twenty-two reproduced legacy defects, each with locators, a reproducing module and a locking test where one applies | R-4's register. This document cites `A-` identifiers and stops there | **yes** |
-| `ambiguity-resolutions.md` | each `Q-` question, the oracle experiment run against the compiled program, and the resolution adopted | R-6's arbitration record. This document cross-references a `Q-` identifier rather than pre-empting its answer | not yet — §17.2 |
-| `scenario-diff-evidence.md` | the empty-diff evidence, per mandated scenario | evidence of parity, which is a measurement; this document is a mapping | not yet — §17.2 |
+| [`ambiguity-resolutions.md`](ambiguity-resolutions.md) | each `Q-` question, the oracle experiment, and the resolution where one has been observed | R-6's arbitration record. This document cross-references a `Q-` identifier rather than pre-empting its answer | **yes** |
+| [`scenario-diff-evidence.md`](scenario-diff-evidence.md) | the observed empty-diff evidence, per mandated scenario | evidence of parity, which is a measurement; this document is a mapping | **yes** |
 
-Further reading: `README-python-migration.md` for how to build the oracle, seed a scenario, run both
-cycles and diff them — a fifth deliverable of this same phase, planned at that path by AAP §0.4.1.7 and
-**not yet present in this checkout**; and the maintainer's own `README.TXT` and `Changelog` for the
+Further reading: [`../../README-python-migration.md`](../../README-python-migration.md)
+for how to build the oracle, seed a scenario, run both cycles and diff them;
+and the maintainer's own `README.TXT` and `Changelog` for the
 COBOL system's own history, neither of which this work modifies. One statement in the latter bears
 directly on how this document should be used — `[README.TXT:L50-L53]` records that testing is complete
 for the IRS, Stock and Sales sub systems apart from some reports, while General has not been worked on

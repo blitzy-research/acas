@@ -825,7 +825,7 @@ date_form: 1
 irs_instead: " "
 
 seed:
-  data_dir: irs_clean
+  data_dir: clean_batch_irs
   files:
     - system.dat
     - irsacnts.dat
@@ -836,7 +836,7 @@ seed:
 
 # Flat mirrors of the seed block, required by [harness/seed.sh:L2041] and
 # honoured by [harness/seed.sh:L2054-L2063].
-seed_dir: irs_clean
+seed_dir: clean_batch_irs
 seed_files:
   - system.dat
   - irsacnts.dat
@@ -864,6 +864,8 @@ operations:
 # leaving through one of the three guards. A status that contradicts this is
 # reported as a behavioural difference and the capture is still taken, so the
 # table diff can corroborate it (R-4).
+expected_table_effect: changed
+
 expected_status:
   - 0
 
@@ -1163,7 +1165,7 @@ seed_records:
     # [irs/irs030.cbl:L1636-L1637] and accumulated into the 31 snapshot
     # [irs/irs030.cbl:L1686-L1688].
     - WS-IRS-Batch: "1"
-      WS-IRS-Post-Number: "1"
+      WS-IRS-Post-Number: "1000"
       WS-IRS-Post-Code: "SI"
       WS-IRS-Post-Date: "21/09/25"
       WS-IRS-Post-DR: "1000"
@@ -1177,7 +1179,7 @@ seed_records:
     # takes the third arm of the ladder [irs/irs030.cbl:L1693-L1695] and folds the
     # tax into the CREDIT accumulator [irs/irs030.cbl:L1649-L1650].
     - WS-IRS-Batch: "1"
-      WS-IRS-Post-Number: "2"
+      WS-IRS-Post-Number: "2000"
       WS-IRS-Post-Code: "PI"
       WS-IRS-Post-Date: "21/09/25"
       WS-IRS-Post-DR: "3000"
@@ -1194,7 +1196,7 @@ seed_records:
     # DISCARDED while its tax, which went into the snapshot, survives. That is the
     # anomaly, it is reproduced and never repaired, and this row is what proves it.
     - WS-IRS-Batch: "1"
-      WS-IRS-Post-Number: "3"
+      WS-IRS-Post-Number: "3000"
       WS-IRS-Post-Code: "SI"
       WS-IRS-Post-Date: "21/09/25"
       WS-IRS-Post-DR: "7100"
@@ -1210,7 +1212,7 @@ seed_records:
     # row leaves an UNBALANCED DEBIT and writes NO posting record at all. Adding 9999
     # to the ledger would delete this anomaly from the scenario.
     - WS-IRS-Batch: "1"
-      WS-IRS-Post-Number: "4"
+      WS-IRS-Post-Number: "4000"
       WS-IRS-Post-Code: "PI"
       WS-IRS-Post-Date: "21/09/25"
       WS-IRS-Post-DR: "4000"
@@ -1228,7 +1230,7 @@ seed_records:
     # merely empty. The date is a TEXT field [copybooks/wspost-irs.cob:L18], so this
     # needs no byte-exact escape hatch: it is simply what the field holds.
     - WS-IRS-Batch: "1"
-      WS-IRS-Post-Number: "5"
+      WS-IRS-Post-Number: "5000"
       WS-IRS-Post-Code: "SI"
       WS-IRS-Post-Date: "XX/09/25"
       WS-IRS-Post-DR: "1000"
@@ -1246,7 +1248,7 @@ seed_records:
     # observable. Thirty-three is a real position of the defaults table, which was
     # extended from 32 to 33 for exactly this route [copybooks/irswsdflt.cob:L7].
     - WS-IRS-Batch: "1"
-      WS-IRS-Post-Number: "6"
+      WS-IRS-Post-Number: "6000"
       WS-IRS-Post-Code: "SI"
       WS-IRS-Post-Date: "21/09/25"
       WS-IRS-Post-DR: "1000"

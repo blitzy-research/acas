@@ -3730,15 +3730,16 @@ def declare_connection_policy(
     """State the resolved policy to the handlers that take it no other way.
 
     PUBLISHED, AND NOT ON ANY ROUTE'S CRITICAL PATH. The seventeen handlers split
-    three ways: NINE declare a keyword-only `transport` on their `dispatch` and
+    three ways: ELEVEN declare a keyword-only `transport` on their `dispatch` and
     are reached by `dal_options_for`, carried on every facade context the program
-    builds; THREE - `acas000_system`, `acas007_gl_batch` and
-    `acasirsub1_irs_nominal` - are reached only through a module-level
+    builds; TWO - `acas000_system` and `acasirsub1_irs_nominal` - are reached
+    only through a module-level
     declaration, which is the equivalent of setting a COBOL sub-program's working
     storage before the first `CALL`, exactly what the frozen tree does with the
-    six `RDBMS-*` values [common/acas008.cbl:L558-L563]; and FIVE publish neither
-    mechanism. This function calls the one door `dal/facade.py` publishes over
-    the middle three, so a caller that wants the declaration set on them directly
+    six `RDBMS-*` values [common/acas008.cbl:L558-L563]. `acas007_gl_batch`
+    supports both routes for compatibility. This function calls the one door
+    `dal/facade.py` publishes over the module-level routes, so a caller that wants
+    the declaration set on them directly
     can state it once without knowing which mechanism any handler uses.
 
     NONE OF THAT IS LOAD-BEARING ANY MORE, AND THE REASON MATTERS. The

@@ -600,7 +600,7 @@ date_form: 1
 irs_instead: " "
 
 seed:
-  data_dir: gl_control_total_mismatch
+  data_dir: control_total_mismatch
   files:
     - system.dat
     - ledger.dat
@@ -609,7 +609,7 @@ seed:
 
 # Flat mirrors of the seed block, required by the seeder. The directory name is
 # RELATIVE by contract; its two consumers resolve it against different bases.
-seed_dir: gl_control_total_mismatch
+seed_dir: control_total_mismatch
 seed_files:
   - system.dat
   - ledger.dat
@@ -636,6 +636,8 @@ operations:
 # above switches off. A status that contradicts this declaration is reported as
 # a behavioural difference and the capture is still taken, so the table diff can
 # corroborate it (R-4).
+expected_table_effect: unchanged
+
 expected_status:
   - 5
 

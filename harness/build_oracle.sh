@@ -2021,6 +2021,613 @@ acas_wait_for_database() {
 
 # The WHOLE checkout is copied, and that is the safe choice.
 
+acas_install_sqlstate_comment_shim() {
+  local source="$ACAS_REPO/harness/copybook-shims/ACAS-SQLstate-error-list.cob"
+  local target="$ACAS_BUILD/copybooks/ACAS-SQLstate-error-list.cob"
+
+  [[ -f "$source" ]] || acas_die "$EX_BUILDTREE" \
+    "the SQLSTATE remarks shim is missing: $source" \
+    'The 22 frozen *MT bridges COPY this absent archive member from their' \
+    'Identification Division Remarks paragraphs. The harness supplies a' \
+    'comment-only compatibility include in the writable build tree.'
+
+  # Fail closed if the shim ever acquires executable text. Its safety rests on
+  # being semantically inert: blank lines and *> comments are the entire allowed
+  # grammar, and the frozen checkout itself is never modified.
+  if grep -Ev '^[[:space:]]*(\*>.*)?$' "$source" | grep -q .; then
+    acas_die "$EX_BUILDTREE" \
+      "$source contains text other than blank lines and COBOL comments." \
+      'The compatibility include must remain comment-only because its COPY sites' \
+      'are documentation gaps, not missing executable SQLSTATE logic.'
+  fi
+
+  # `awk`'s print appends the POSIX text-file newline even when the repository
+  # artifact was materialised without one; GnuCOBOL otherwise emits the same
+  # missing-newline warning once for every bridge that includes the shim.
+  if ! awk '1' "$source" > "$target"; then
+    acas_die "$EX_BUILDTREE" \
+      "could not write the SQLSTATE remarks shim into $target."
+  fi
+  chmod 0644 -- "$target" || acas_die "$EX_BUILDTREE" \
+    "could not set the SQLSTATE remarks shim mode on $target."
+  acas_log "installed comment-only SQLSTATE remarks shim in the writable build tree"
+}
+
+acas_install_loader_open_scope_shims() {
+  local common_dir="$ACAS_BUILD/common"
+
+  # Six in-scope loaders put a period on the first MOVE inside each of their two
+  # flat-file-open error branches. In COBOL the period ends the IF sentence, so
+  # the diagnostic, CLOSE and GOBACK that follow run unconditionally even after a
+  # successful OPEN. The frozen sources remain untouched; this build-copy
+  # transformation restores the branch scope the surrounding source states and
+  # is required before those loaders can seed any relational comparison.
+  if ! python3 - "$common_dir" <<'PY'
+from pathlib import Path
+import sys
+
+common = Path(sys.argv[1])
+loaders = (
+    "glbatchLD.cbl",
+    "glpostingLD.cbl",
+    "irsnominalLD.cbl",
+    "irspostingLD.cbl",
+    "nominalLD.cbl",
+    "otm5LD.cbl",
+)
+conditions = ("FS-Reply = 35", "FS-Reply not = zero")
+
+for name in loaders:
+    path = common / name
+    if not path.is_file():
+        raise SystemExit(f"missing in-scope loader in build tree: {path}")
+    text = path.read_text(encoding="utf-8")
+    for condition in conditions:
+        broken = (
+            f"     if       {condition}\n"
+            "              move Prog-Name to SO-Print.\n"
+        )
+        scoped = (
+            f"     if       {condition}\n"
+            "              move Prog-Name to SO-Print\n"
+        )
+        broken_count = text.count(broken)
+        scoped_count = text.count(scoped)
+        if broken_count == 1 and scoped_count == 0:
+            text = text.replace(broken, scoped, 1)
+        elif broken_count == 0 and scoped_count == 1:
+            # --no-refresh may revisit an already prepared build tree.
+            continue
+        else:
+            raise SystemExit(
+                f"{path}: expected exactly one original or transformed "
+                f"open-error scope for {condition!r}; found "
+                f"original={broken_count}, transformed={scoped_count}"
+            )
+    path.write_text(text, encoding="utf-8")
+PY
+  then
+    acas_die "$EX_BUILDTREE" \
+      'could not install the six loader open-error scope shims in the build copy.' \
+      'The frozen loader sources were not modified; inspect the diagnostic above.'
+  fi
+  acas_log 'installed build-copy open-error scope shims for 6 in-scope loaders'
+}
+
+acas_install_system_secondary_loader_credential_shims() {
+  local -a targets=(
+    "$ACAS_BUILD/common/dfltLD.cbl"
+    "$ACAS_BUILD/common/finalLD.cbl"
+    "$ACAS_BUILD/common/sys4LD.cbl"
+  )
+
+  # These three loaders read the credential-bearing SYSTEM-REC at relative key
+  # 1 into WS-System-Record, but unlike systemLD they never copy its six RDBMS
+  # fields into File-Access.DB-Data before calling their bridge directly. The
+  # bridge therefore attempts a local socket with blank credentials and the
+  # loader returns zero after loading nothing.
+  if ! python3 - "${targets[@]}" <<'PY'
+from pathlib import Path
+import sys
+
+marker = "*>  Harness build copy: propagate SYSTEM-REC credentials to DB-Data.\n"
+
+
+def credential_block(prefix: str) -> str:
+    return (
+        marker
+        + f"     move     {prefix}RDBMS-DB-Name to DB-Schema.\n"
+        + f"     move     {prefix}RDBMS-User    to DB-UName.\n"
+        + f"     move     {prefix}RDBMS-Passwd  to DB-UPass.\n"
+        + f"     move     {prefix}RDBMS-Port    to DB-Port.\n"
+        + f"     move     {prefix}RDBMS-Host    to DB-Host.\n"
+        + f"     move     {prefix}RDBMS-Socket  to DB-Socket.\n"
+    )
+
+for argument in sys.argv[1:]:
+    path = Path(argument)
+    text = path.read_text(encoding="utf-8")
+    # sys4LD explicitly copies the FD record into WS-System-Record after reading
+    # relative key 1; dfltLD and finalLD leave the credential-bearing record in
+    # the FD's unprefixed System-Record.
+    desired = credential_block("WS-" if path.name == "sys4LD.cbl" else "")
+    legacy_ws = credential_block("WS-")
+    if marker in text:
+        if text.count(desired) == 1:
+            continue
+        if desired != legacy_ws and text.count(legacy_ws) == 1:
+            path.write_text(text.replace(legacy_ws, desired, 1), encoding="utf-8")
+            continue
+        if text.count(desired) != 1:
+            raise SystemExit(f"{path}: secondary-loader credential shim is malformed")
+    label = " aa010-Proc-Override.\n"
+    lines = text.splitlines(keepends=True)
+    positions = [i for i, line in enumerate(lines) if line == label]
+    if len(positions) != 1:
+        raise SystemExit(
+            f"{path}: expected one aa010-Proc-Override label; "
+            f"found {len(positions)}"
+        )
+    lines.insert(positions[0] + 1, "*>\n" + desired)
+    path.write_text("".join(lines), encoding="utf-8")
+PY
+  then
+    acas_die "$EX_BUILDTREE" \
+      'could not install the secondary system-loader credential shims.' \
+      'The frozen loader sources were not modified; inspect the diagnostic above.'
+  fi
+  acas_log 'installed build-copy credential propagation in dfltLD, finalLD and sys4LD'
+}
+
+acas_install_handler_connection_refresh_shims() {
+  local common_dir="$ACAS_BUILD/common"
+
+  # Every dynamic file-handler module keeps its record-size sentinels in
+  # WORKING-STORAGE. The frozen source also puts the DB credential copy inside
+  # that one-time guard. When a later posting program calls the same loaded
+  # module with its own fresh File-Access block, the sentinel is already set and
+  # the new block stays blank; mysql_real_connect then falls back to a local
+  # socket and the compiled cycle stops. Keep the one-time size check, but refresh
+  # the six connection fields from the current caller on every RDBMS dispatch.
+  # Only the writable build copy is transformed.
+  if ! python3 - "$common_dir" <<'PY'
+from pathlib import Path
+import sys
+
+common = Path(sys.argv[1])
+generic_names = (
+    "acas004.cbl",
+    "acas005.cbl",
+    "acas006.cbl",
+    "acas007.cbl",
+    "acas008.cbl",
+    "acas010.cbl",
+    "acas011.cbl",
+    "acas012.cbl",
+    "acas013.cbl",
+    "acas014.cbl",
+    "acas015.cbl",
+    "acas016.cbl",
+    "acas017.cbl",
+    "acas019.cbl",
+    "acas022.cbl",
+    "acas023.cbl",
+    "acas026.cbl",
+    "acas029.cbl",
+    "acas030.cbl",
+    "acas032.cbl",
+    "acasirsub1.cbl",
+    "acasirsub3.cbl",
+    "acasirsub4.cbl",
+    "acasirsub5.cbl",
+)
+marker = "*>  Harness build copy: refresh DB-Data for this caller.\n"
+guarded_moves = (
+    "              move     RDBMS-DB-Name to DB-Schema\n"
+    "              move     RDBMS-User    to DB-UName\n"
+    "              move     RDBMS-Passwd  to DB-UPass\n"
+    "              move     RDBMS-Port    to DB-Port\n"
+    "              move     RDBMS-Host    to DB-Host\n"
+    "              move     RDBMS-Socket  to DB-Socket\n"
+)
+refresh_moves = guarded_moves[:-1] + ".\n"
+
+for name in generic_names:
+    path = common / name
+    if not path.is_file():
+        raise SystemExit(f"missing handler in build tree: {path}")
+    text = path.read_text(encoding="utf-8")
+    if marker in text:
+        if text.count(marker) != 1:
+            raise SystemExit(f"{path}: connection refresh marker is not unique")
+        incomplete = marker + guarded_moves
+        complete = marker + refresh_moves
+        if text.count(incomplete) == 1 and text.count(complete) == 0:
+            path.write_text(text.replace(incomplete, complete, 1),
+                            encoding="utf-8")
+            continue
+        if text.count(incomplete) == 0 and text.count(complete) == 1:
+            continue
+        raise SystemExit(f"{path}: connection refresh block is malformed")
+    original = guarded_moves + "     end-if.\n"
+    if text.count(original) != 1:
+        raise SystemExit(
+            f"{path}: expected one guarded connection-copy block; "
+            f"found {text.count(original)}"
+        )
+    path.write_text(text.replace(original, original + marker + refresh_moves, 1),
+                    encoding="utf-8")
+
+system_path = common / "acas000.cbl"
+system_text = system_path.read_text(encoding="utf-8")
+system_marker = "*>  Harness build copy: refresh qualified DB-Data for this caller.\n"
+guarded_system_moves = (
+    "              move     RDBMS-DB-Name in System-Record  to DB-Schema\n"
+    "              move     RDBMS-User    in System-Record  to DB-UName\n"
+    "              move     RDBMS-Passwd  in System-Record  to DB-UPass\n"
+    "              move     RDBMS-Port    in System-Record  to DB-Port\n"
+    "              move     RDBMS-Host    in System-Record  to DB-Host\n"
+    "              move     RDBMS-Socket  in System-Record  to DB-Socket\n"
+)
+legacy_refresh_system_moves = guarded_system_moves[:-1] + ".\n"
+refresh_system_moves = (
+    "     if       File-Key-No = 1\n"
+    "        and   RDBMS-Host in System-Record not = spaces\n"
+    + guarded_system_moves
+    + "     end-if.\n"
+)
+if system_marker in system_text:
+    if system_text.count(system_marker) != 1:
+        raise SystemExit(f"{system_path}: qualified refresh marker is not unique")
+    incomplete = system_marker + guarded_system_moves
+    complete = system_marker + refresh_system_moves
+    legacy_complete = system_marker + legacy_refresh_system_moves
+    if system_text.count(legacy_complete) == 1 and system_text.count(complete) == 0:
+        system_path.write_text(
+            system_text.replace(legacy_complete, complete, 1), encoding="utf-8"
+        )
+    elif system_text.count(incomplete) == 1 and system_text.count(complete) == 0:
+        system_path.write_text(
+            system_text.replace(incomplete, complete, 1), encoding="utf-8"
+        )
+    elif not (
+        system_text.count(incomplete) == 0 and system_text.count(complete) == 1
+    ):
+        raise SystemExit(
+            f"{system_path}: qualified connection refresh block is malformed"
+        )
+else:
+    original = guarded_system_moves + "     end-if.\n"
+    if system_text.count(original) != 1:
+        raise SystemExit(
+            f"{system_path}: expected one guarded qualified connection-copy block; "
+            f"found {system_text.count(original)}"
+        )
+    system_path.write_text(
+        system_text.replace(
+            original, original + system_marker + refresh_system_moves, 1
+        ),
+        encoding="utf-8",
+    )
+PY
+  then
+    acas_die "$EX_BUILDTREE" \
+      'could not install the handler connection-refresh shims in the build copy.' \
+      'The frozen handler sources were not modified; inspect the diagnostic above.'
+  fi
+  acas_log 'installed build-copy connection refresh shims for 25 handlers'
+}
+
+acas_install_handler_status_reset_shims() {
+  local common_dir="$ACAS_BUILD/common"
+
+  # File-Access is caller-owned, while each dynamically loaded handler keeps
+  # process state. A reply left by one operation otherwise becomes the starting
+  # reply of the next operation or even the next program. Clear only the reply
+  # pair at the dispatch boundary; File-Function, Access-Type and key selection
+  # remain exactly as the caller supplied them.
+  if ! python3 - "$common_dir" <<'PY'
+from pathlib import Path
+import sys
+
+common = Path(sys.argv[1])
+names = (
+    "acas000.cbl",
+    "acas004.cbl",
+    "acas005.cbl",
+    "acas006.cbl",
+    "acas007.cbl",
+    "acas008.cbl",
+    "acas010.cbl",
+    "acas011.cbl",
+    "acas012.cbl",
+    "acas013.cbl",
+    "acas014.cbl",
+    "acas015.cbl",
+    "acas016.cbl",
+    "acas017.cbl",
+    "acas019.cbl",
+    "acas022.cbl",
+    "acas023.cbl",
+    "acas026.cbl",
+    "acas029.cbl",
+    "acas030.cbl",
+    "acas032.cbl",
+    "acasirsub1.cbl",
+    "acasirsub3.cbl",
+    "acasirsub4.cbl",
+    "acasirsub5.cbl",
+)
+marker = "*>  Harness build copy: clear the caller reply pair at dispatch.\n"
+insertion = marker + "     move     zero to FS-Reply WE-Error.\n"
+
+for name in names:
+    path = common / name
+    text = path.read_text(encoding="utf-8")
+    if marker in text:
+        if text.count(marker) != 1 or text.count(insertion) != 1:
+            raise SystemExit(f"{path}: status-reset shim is malformed")
+        continue
+    label = " aa010-main.\n"
+    if text.count(label) != 1:
+        raise SystemExit(
+            f"{path}: expected one aa010-main dispatch label; "
+            f"found {text.count(label)}"
+        )
+    path.write_text(text.replace(label, label + insertion, 1), encoding="utf-8")
+PY
+  then
+    acas_die "$EX_BUILDTREE" \
+      'could not install the handler status-reset shims in the build copy.' \
+      'The frozen handler sources were not modified; inspect the diagnostic above.'
+  fi
+  acas_log 'installed build-copy reply-pair resets for 25 handler dispatches'
+}
+
+acas_install_process_connection_ownership_shims() {
+  local -a targets=(
+    "$ACAS_BUILD/copybooks/mysql-procedures.cpy"
+    "$ACAS_BUILD/copybooks/mysql-procedures-2.cpy"
+  )
+
+  # cobmysqlapi38.c owns exactly one file-scope MYSQL object for the whole
+  # process. The generated bridges nevertheless treat each logical file open as
+  # independently owned and every logical close calls mysql_close on that same
+  # object. A multi-handler posting program therefore closes another handler's
+  # live session, and a second close invokes mysql_close on an already-closed
+  # object. Keep the process connection alive until process exit instead. The
+  # operating system then releases the socket exactly once; no COMMIT or
+  # ROLLBACK is introduced, and every SQL statement remains the frozen one.
+  if ! python3 - "${targets[@]}" <<'PY'
+from pathlib import Path
+import sys
+
+marker = "*>  Harness build copy: the vendored API owns one process connection.\n"
+original = (
+    " Mysql-1980-Close.\n"
+    '     call "MySQL_close".\n'
+)
+replacement = (
+    " Mysql-1980-Close.\n"
+    + marker
+    + "     continue.\n"
+)
+
+for argument in sys.argv[1:]:
+    path = Path(argument)
+    text = path.read_text(encoding="utf-8")
+    if text.count(replacement) == 1 and text.count(original) == 0:
+        continue
+    if text.count(original) != 1 or text.count(replacement) != 0:
+        raise SystemExit(
+            f"{path}: expected one original or transformed MySQL close paragraph; "
+            f"original={text.count(original)}, transformed={text.count(replacement)}"
+        )
+    path.write_text(text.replace(original, replacement, 1), encoding="utf-8")
+PY
+  then
+    acas_die "$EX_BUILDTREE" \
+      'could not install the process-connection ownership shims in the build copy.' \
+      'The frozen MySQL procedure copybooks were not modified; inspect the diagnostic above.'
+  fi
+  acas_log 'installed build-copy process-connection ownership shims in both MySQL procedure copybooks'
+}
+
+acas_install_menu_rdb_mode_restore_shims() {
+  local -a targets=(
+    "$ACAS_BUILD/general/general.cbl"
+    "$ACAS_BUILD/sales/sales.cbl"
+    "$ACAS_BUILD/purchase/purchase.cbl"
+  )
+
+  # Every menu's overrewrite paragraph first mirrors the system records to the
+  # RDBMS, then zeroes File-System-Used so it can mirror the same records to
+  # system.dat. The frozen paragraph never restores the saved RDBMS mode. Date
+  # Entry therefore leaves the next posting program in indexed-file mode even
+  # though the scenario and database row both declare FILE-SYSTEM-USED = 1.
+  # The maintainer's own commented block already names Arg-Number as the save
+  # slot. Use that slot in the BUILD COPY so the pty-driven menu can pin the date
+  # without silently switching the accounting run away from MariaDB.
+  if ! python3 - "${targets[@]}" <<'PY'
+from pathlib import Path
+import sys
+
+save_marker = "*>  Harness build copy: preserve RDB mode across the flat-file mirror.\n"
+legacy_save_block = save_marker + "     move     File-System-Used to Arg-Number.\n"
+save_block = (
+    save_marker
+    + "     if       File-System-Used = 1\n"
+    + "              move File-System-Used to Arg-Number\n"
+    + "     else\n"
+    + "      if      Arg-Number = 1\n"
+    + "              move Arg-Number to File-System-Used\n"
+    + "      end-if\n"
+    + "     end-if.\n"
+)
+restore_marker = "*>  Harness build copy: restore RDB mode for the next menu dispatch.\n"
+restore_block = (
+    restore_marker
+    + "     move     Arg-Number to File-System-Used.\n"
+    + "     if       File-System-Used not = zero\n"
+    + '              move "66" to FA-RDBMS-Flat-Statuses\n'
+    + "     end-if.\n"
+)
+flat_record_marker = (
+    "*>  Harness build copy: retain the declared RDB mode in system.dat record 1.\n"
+)
+flat_record_block = (
+    flat_record_marker
+    + "*>  FA-RDBMS-Flat-Statuses = \"00\" still selects acas000's flat-file leg.\n"
+    + "     move     Arg-Number to File-System-Used.\n"
+)
+
+for argument in sys.argv[1:]:
+    path = Path(argument)
+    text = path.read_text(encoding="utf-8")
+
+    if save_marker not in text:
+        label = " overrewrite."
+        positions = [i for i, line in enumerate(text.splitlines(keepends=True))
+                     if line.startswith(label)]
+        if len(positions) != 1:
+            raise SystemExit(
+                f"{path}: expected one overrewrite label; found {len(positions)}"
+            )
+        lines = text.splitlines(keepends=True)
+        lines.insert(positions[0] + 1, save_block)
+        text = "".join(lines)
+    elif text.count(legacy_save_block) == 1 and text.count(save_block) == 0:
+        text = text.replace(legacy_save_block, save_block, 1)
+    elif text.count(save_block) != 1:
+        raise SystemExit(f"{path}: RDB-mode save shim is malformed")
+
+    if flat_record_marker not in text:
+        section_start = text.find(" overrewrite.")
+        section_end = text.find("\n overclose.", section_start)
+        if section_start < 0 or section_end < 0:
+            raise SystemExit(f"{path}: could not bound the overrewrite paragraph")
+        section = text[section_start:section_end]
+        lines = section.splitlines(keepends=True)
+        positions = [
+            i
+            for i, line in enumerate(lines)
+            if "move     System-Record to WS-Temp-System-Rec" in line
+        ]
+        if len(positions) != 2:
+            raise SystemExit(
+                f"{path}: expected the RDB and flat System-Record save sites; "
+                f"found {len(positions)}"
+            )
+        lines.insert(positions[-1], flat_record_block)
+        text = text[:section_start] + "".join(lines) + text[section_end:]
+    elif text.count(flat_record_block) != 1:
+        raise SystemExit(f"{path}: flat system-record RDB-mode shim is malformed")
+
+    if restore_marker not in text:
+        terminator = "*>\n overclose.\n"
+        if text.count(terminator) != 1:
+            raise SystemExit(
+                f"{path}: expected one overclose terminator; "
+                f"found {text.count(terminator)}"
+            )
+        text = text.replace(terminator, restore_block + "*>\n overclose.\n", 1)
+    elif text.count(restore_block) != 1:
+        raise SystemExit(f"{path}: RDB-mode restore shim is malformed")
+
+    path.write_text(text, encoding="utf-8")
+PY
+  then
+    acas_die "$EX_BUILDTREE" \
+      'could not install the menu RDB-mode restore shims in the build copy.' \
+      'The frozen menu sources were not modified; inspect the diagnostic above.'
+  fi
+  acas_log 'installed build-copy RDB-mode restoration in the General, Sales and Purchase menus, including their system.dat mirrors'
+}
+
+acas_install_irs_default_connection_ownership_shim() {
+  local target="$ACAS_BUILD/common/acasirsub3.cbl"
+
+  # acasirsub3 synthesises OPEN -> READ -> CLOSE inside one read-next call.
+  # The vendored C API owns one process connection pointer, so that CLOSE also
+  # disconnects acasirsub1, which irs030 deliberately keeps open around the
+  # defaults lookup. Keep the synthesized connection alive; the normal IRS close
+  # path closes the process connection after the posting loop.
+  if ! python3 - "$target" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+original = (
+    "              set     fn-Close to true\n"
+    "              perform ba020-Call-DAL\n"
+    " *>             perform Ca-Process-Logs                  *> temp only during testing\n"
+)
+replacement = (
+    "*>  Harness build copy: retain the shared connection after the defaults read.\n"
+    "*>            set     fn-Close to true\n"
+    "*>            perform ba020-Call-DAL\n"
+    " *>             perform Ca-Process-Logs                  *> temp only during testing\n"
+)
+if text.count(replacement) == 1 and text.count(original) == 0:
+    raise SystemExit(0)
+if text.count(original) != 1 or text.count(replacement) != 0:
+    raise SystemExit(
+        f"{path}: expected one original or transformed synthesized close; "
+        f"original={text.count(original)}, transformed={text.count(replacement)}"
+    )
+path.write_text(text.replace(original, replacement, 1), encoding="utf-8")
+PY
+  then
+    acas_die "$EX_BUILDTREE" \
+      'could not install the acasirsub3 connection-ownership shim in the build copy.' \
+      'The frozen handler source was not modified; inspect the diagnostic above.'
+  fi
+  acas_log 'installed build-copy acasirsub3 shared-connection ownership shim'
+}
+
+acas_install_irs_eoj_connection_ownership_shim() {
+  local target="$ACAS_BUILD/irs/irs030.cbl"
+
+  # The vendored C API exposes one process-wide MYSQL object, although irs030
+  # treats acasirsub4 and acas008 as independently owned files. At EOJ the
+  # frozen source closes BOTH handlers and then immediately asks acas008 to
+  # delete every transfer row. Either close disconnects the one shared MYSQL
+  # object, so the delete receives "Server has gone away". Retain the shared
+  # connection across those two logical closes; the existing acas008-Close
+  # immediately after the delete remains the final process-connection close.
+  if ! python3 - "$target" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+original = (
+    "     perform  acasirsub4-Close.\n"
+    "     perform  acas008-Close.\n"
+)
+replacement = (
+    "*>  Harness build copy: retain the shared connection until transfer cleanup.\n"
+    "*>   perform  acasirsub4-Close.\n"
+    "*>   perform  acas008-Close.\n"
+)
+if text.count(replacement) == 1 and text.count(original) == 0:
+    raise SystemExit(0)
+if text.count(original) != 1 or text.count(replacement) != 0:
+    raise SystemExit(
+        f"{path}: expected one original or transformed EOJ close pair; "
+        f"original={text.count(original)}, transformed={text.count(replacement)}"
+    )
+path.write_text(text.replace(original, replacement, 1), encoding="utf-8")
+PY
+  then
+    acas_die "$EX_BUILDTREE" \
+      'could not install the irs030 EOJ connection-ownership shim in the build copy.' \
+      'The frozen IRS source was not modified; inspect the diagnostic above.'
+  fi
+  acas_log 'installed build-copy irs030 EOJ shared-connection ownership shim'
+}
+
 acas_prepare_build_tree() {
   acas_stage 'Build tree: copy the frozen checkout into the writable tree'
 
@@ -2101,6 +2708,19 @@ acas_prepare_build_tree() {
     acas_log "restored ACAS_BIN=$ACAS_BIN"
   fi
 
+  # comp-all.sh is frozen and re-exports COBCPY=../copybooks, so an additional
+  # environment include path cannot reach this missing archive member. Install
+  # the comment-only shim into the BUILD COPY instead. This runs for refresh and
+  # --no-refresh alike and never writes under $ACAS_REPO/copybooks.
+  acas_install_sqlstate_comment_shim
+  acas_install_loader_open_scope_shims
+  acas_install_system_secondary_loader_credential_shims
+  acas_install_handler_connection_refresh_shims
+  acas_install_handler_status_reset_shims
+  acas_install_process_connection_ownership_shims
+  acas_install_menu_rdb_mode_restore_shims
+  acas_install_irs_default_connection_ownership_shim
+  acas_install_irs_eoj_connection_ownership_shim
   acas_check_copybook_closure
 }
 

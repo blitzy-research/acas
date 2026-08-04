@@ -141,17 +141,51 @@ class WsBatchKey:
 _WS_BATCH_KEY9: Final[FieldDescriptor] = _describe("WS-Batch-Key9")
 
 
-@dataclass(slots=True)
+@dataclass
 class WsBatchKey9:
     """`03 WS-Batch-Key9 redefines WS-Batch-Key` - the same six bytes, as one.
 
     Read the copybook a line at a time and `pic 9(6).` is missed and the field is typed
     wrongly - so the two-line form is recorded here rather than left to be rediscovered.
+    This view owns no independent integer: it is bound to :class:`WsBatchKey`, exactly
+    as a COBOL ``REDEFINES`` names the same storage.
     """
 
     FIELDS: ClassVar[tuple[FieldDescriptor, ...]] = (_WS_BATCH_KEY9,)
 
     ws_batch_key9: int = 0
+
+    def __getattribute__(self, name: str) -> object:
+        """Derive the six-digit field whenever this view has been bound."""
+        if name == "ws_batch_key9":
+            namespace = object.__getattribute__(self, "__dict__")
+            key = namespace.get("_key")
+            if key is not None:
+                return (
+                    int(key.ws_ledger) * 100_000
+                    + int(key.ws_batch_nos)
+                )
+        return object.__getattribute__(self, name)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        """Store the six-digit field into both subordinate grouped fields."""
+        if name == "ws_batch_key9":
+            numeric = int(value)
+            object.__setattr__(self, name, numeric)
+            key = self.__dict__.get("_key")
+            if key is not None:
+                ledger, batch_nos = divmod(numeric, 100_000)
+                key.ws_ledger = ledger
+                key.ws_batch_nos = batch_nos
+            return
+        object.__setattr__(self, name, value)
+
+    def bind(self, key: WsBatchKey) -> None:
+        """Rebind this view to ``key`` without losing either initialized reading."""
+        grouped = int(key.ws_ledger) * 100_000 + int(key.ws_batch_nos)
+        redefined = int(self.ws_batch_key9)
+        object.__setattr__(self, "_key", key)
+        self.ws_batch_key9 = redefined or grouped
 
 
 _DATES: Final[FieldDescriptor] = _describe("Dates")
@@ -332,6 +366,10 @@ class GlBatchRecord:
     # length rather than the field sum governs the record actually read - open question
     # Q-4, arbitrated by the compiled program (rule R-6).
     batch_start: int = 0
+
+    def __post_init__(self) -> None:
+        """Bind the two declared key readings to their one six-byte storage."""
+        self.ws_batch_key9.bind(self.ws_batch_key)
 
 
 def _drift_register() -> tuple[str, ...]:

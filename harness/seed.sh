@@ -2394,6 +2394,14 @@ acas_print_plan() {
 acas_assert_scenario() {
   [[ -n "$ACAS_SEED_SCENARIO" ]] || return 0
 
+  local scenario_real=''
+  scenario_real="$(readlink -f -- "$ACAS_SEED_SCENARIO" 2>/dev/null || true)"
+  [[ -n "$scenario_real" ]] || acas_die "$EX_USAGE" \
+    "the scenario file '$ACAS_SEED_SCENARIO' does not exist." \
+    'The canonical invocation passes a scenario file path; see' \
+    'harness/docker-compose.yml.'
+  ACAS_SEED_SCENARIO="$scenario_real"
+
   [[ -e "$ACAS_SEED_SCENARIO" ]] || acas_die "$EX_USAGE" \
     "the scenario file '$ACAS_SEED_SCENARIO' does not exist." \
     'The canonical invocation passes a scenario file path; see' \
@@ -2613,6 +2621,8 @@ PY
   for name in "${wanted[@]}"; do
     cp -p -- "$seed_dir/$name" "$staging/$name" || acas_die "$EX_FIXTURE" \
       "could not stage $name into $staging."
+    chmod 600 -- "$staging/$name" || acas_die "$EX_FIXTURE" \
+      "could not restrict staged fixture permissions for $staging/$name."
   done
 
   local marker="$staging/$ACAS_FIXTURE_MARKER"
@@ -2625,6 +2635,8 @@ PY
     done
   } >"$marker" || acas_die "$EX_FIXTURE" \
     "could not write the scenario fixture marker $marker."
+  chmod 600 -- "$marker" || acas_die "$EX_FIXTURE" \
+    "could not restrict the scenario fixture marker $marker."
 
   # From here on the loaders read the staged fixture and nothing else.
   ACAS_SEED_DATA_DIR="$staging"

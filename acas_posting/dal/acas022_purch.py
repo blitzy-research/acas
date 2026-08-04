@@ -719,6 +719,60 @@ def _move_to_unsigned_host_variable(value: int, binding: _ColumnBinding) -> int:
     return magnitude % (10**binding.digits)
 
 
+def _bridge_record_value_from_copybook_binary(
+    value: int, binding: _ColumnBinding
+) -> int:
+    """Reinterpret caller bytes through purchMT's incompatible linkage picture.
+
+    `acas022` passes the `binary-char`/`binary-long` fields from
+    [copybooks/wspl.cob:L31-L42] by reference, while `purchMT` receives the same
+    storage as `PIC 99 COMP`/`PIC 9(8) COMP`
+    [common/purchMT.cbl:L344-L355]. The compiled call therefore does not perform
+    a numeric conversion at the boundary: native little-endian binary bytes are
+    observed as high-order-byte-first COMP storage. A later numeric MOVE into the
+    host variable preserves that underlying value, even when its displayed
+    eight-digit picture would omit leading digits.
+    """
+    width = _BINARY_STORAGE_BYTES[binding.copybook_usage]
+    modulus = 1 << (8 * width)
+    caller_bytes = (int(value) % modulus).to_bytes(
+        width, byteorder="little", signed=False
+    )
+    return int.from_bytes(caller_bytes, byteorder="big", signed=False)
+
+
+def _bridge_record_digits(binding: _ColumnBinding) -> int:
+    """Return purchMT's hard-coded receiving picture for a binary caller field."""
+    if binding.copybook_usage == "BINARY-CHAR":
+        # `Purch-Credit pic 99 comp` [common/purchMT.cbl:L344].
+        return 2
+    if binding.copybook_usage == "BINARY-LONG":
+        # Sort code through pay-worst are `pic 9(8) comp`
+        # [common/purchMT.cbl:L345-L355].
+        return 8
+    raise ValueError(
+        f"{binding.column} uses {binding.copybook_usage}, for which purchMT "
+        "declares no hard-coded numeric linkage picture"
+    )
+
+
+def _copybook_binary_value_from_bridge_record(
+    value: int, binding: _ColumnBinding
+) -> int:
+    """Move a fetched host value through purchMT's picture back to caller bytes.
+
+    The host variable first moves into purchMT's unsigned picture, which keeps
+    only that picture's decimal digits [common/purchMT.cbl:L1269-L1280]. The
+    handler's caller then observes the resulting high-order-byte-first COMP bytes
+    through the native little-endian binary declaration in
+    [copybooks/wspl.cob:L31-L42].
+    """
+    width = _BINARY_STORAGE_BYTES[binding.copybook_usage]
+    held = int(value) % (10 ** _bridge_record_digits(binding))
+    bridge_bytes = held.to_bytes(width, byteorder="big", signed=False)
+    return int.from_bytes(bridge_bytes, byteorder="little", signed=True)
+
+
 def _move_to_scaled_host_variable(
     value: Decimal, binding: _ColumnBinding
 ) -> Decimal:
@@ -927,6 +981,10 @@ def bb000_hv_load(purch: WsPurchRecord) -> HostVariables:
         elif binding.kind == "int":
             # ANOMALY N-signloss-twelve for twelve of these [copybooks/wspl.cob:L31-L42]
             # -> [common/purchMT.cbl:L295-L306].
+            if binding.copybook_usage in _BINARY_STORAGE_BYTES:
+                value = _bridge_record_value_from_copybook_binary(
+                    int(value), binding
+                )
             setattr(
                 loaded,
                 binding.field,
@@ -1036,21 +1094,17 @@ def _move_to_record_field(
     if usage == "ALPHANUMERIC":
         return str(value)[: binding.copybook_width].ljust(binding.copybook_width)
     if usage in _BINARY_STORAGE_BYTES:
-        # `binary-char` [copybooks/wspl.cob:L31] and `binary-long`
-        # [copybooks/wspl.cob:L32-L42] carry no picture clause, so the receiving
-        # capacity is the storage width. GnuCOBOL wraps such a store in two's
-        # complement.
+        # The host variable is not moved directly into the copybook field. It first
+        # enters purchMT's hard-coded `PIC 99/9(8) COMP` linkage record and only then
+        # becomes visible through the caller's binary declaration
+        # [common/purchMT.cbl:L344-L355], [copybooks/wspl.cob:L31-L42].
         if binding.copybook_scale:  # pragma: no cover - no scaled binary here
             raise ValueError(
                 f"{binding.column} is declared {usage} with a scale of "
                 f"{binding.copybook_scale} at {binding.citation}; the "
                 f"storage-width wrap models integer binary fields only"
             )
-        modulus = 1 << (8 * _BINARY_STORAGE_BYTES[usage])
-        wrapped = int(value) % modulus
-        if wrapped >= modulus >> 1:
-            wrapped -= modulus
-        return wrapped
+        return _copybook_binary_value_from_bridge_record(int(value), binding)
     if usage in ("DISPLAY", "COMP", "COMP-3"):
         return _store_into_picture_field(value, binding)
     # `03 Purch-Address.` [copybooks/wspl.cob:L23] is a GROUP.

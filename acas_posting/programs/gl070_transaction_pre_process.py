@@ -1139,8 +1139,8 @@ def run(
         only, because `acas007` takes no such argument - so half of this
         program's two tables ran under the caller's declaration and half under
         whatever the data-access layer defaulted to. The connection policy is one
-        decision about one connection (twenty bridges share a single handle), so
-        it belongs to the deployment and is installed once at the entry point
+        deployment decision shared by every handler connection, so it belongs
+        to the deployment and is installed once at the entry point
         through `acas_posting.dal.connection.set_connection_policy`; every open
         this program causes then resolves to that one policy, both tables alike.
         A program module has no business declaring it: the layering of Agent

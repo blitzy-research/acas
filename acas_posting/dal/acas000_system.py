@@ -3565,6 +3565,15 @@ def ba_process_rdbms(
         record: The one buffer, in the caller's chosen reading. Its credentials are
             recovered by :func:`_credential_record`.
     """
+    # Each handler CALL starts with a fresh reply pair. The frozen menu normally
+    # selects the relative-file path, whose operation paragraphs clear these
+    # fields themselves; the migrated CLI must select the RDBMS path instead.
+    # Without this boundary reset, systemMT's `if fs-reply = 10` guard
+    # [common/systemMT.cbl:L925-L929] mistakes an earlier key's EOF for this
+    # call's result and suppresses a valid later SYSTEM-REC read.
+    file_access.fs_reply = int(FsReply.SUCCESS)
+    file_access.we_error = int(WeError.SUCCESS)
+
     ba010_test_ws_rec_size(file_access)
     if ba012_test_ws_rec_size_2(
         _credential_record(record), file_access, dal_common

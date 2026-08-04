@@ -762,7 +762,7 @@ date_form: 1
 irs_instead: " "
 
 seed:
-  data_dir: pl_clean
+  data_dir: clean_batch_pl
   files:
     - system.dat
     - analysis.dat
@@ -775,7 +775,7 @@ seed:
 # relative directory against the directory holding this file. The order here is
 # membership only: the frozen loader order of [common/masterLD.sh:L93-L116] is
 # what actually runs, with the system block first.
-seed_dir: pl_clean
+seed_dir: clean_batch_pl
 seed_files:
   - system.dat
   - analysis.dat
@@ -805,6 +805,8 @@ operations:
 # [purchase/pl055.cbl:L266], [purchase/pl055.cbl:L286]. A status that
 # contradicts this is reported as a behavioural difference and the capture is
 # still taken, so the table diff can corroborate it (R-4).
+expected_table_effect: changed
+
 expected_status:
   - 0
 
@@ -1069,7 +1071,12 @@ seed_records:
       Purch-Stats-Date: "2509"
       Purch-Unapplied: "0.00"
       Purch-Accountno: "12345678"
-      Purch-SortCode: "112233"
+      # purchMT moves this native BINARY-LONG into `PIC 9(08) COMP` before
+      # rendering only the last eight digits [common/purchMT.cbl:L1223,L1423-L1428].
+      # A non-zero six-digit sort code is byte-reinterpreted into a value above the
+      # frozen `mediumint unsigned` column range; zero remains representable and the
+      # posting route never reads this field.
+      Purch-SortCode: "0"
 
   # TWO DOCUMENTS, FIVE ROWS, and NO PROFORMA -- see the asymmetry note above.
   # Item number zero is the HEADER row, because pl055 branches to header analysis on

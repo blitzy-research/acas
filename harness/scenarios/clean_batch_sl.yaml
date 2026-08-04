@@ -811,7 +811,7 @@ date_form: 1
 irs_instead: " "
 
 seed:
-  data_dir: sl_clean
+  data_dir: clean_batch_sl
   files:
     - system.dat
     - analysis.dat
@@ -824,7 +824,7 @@ seed:
 # relative directory against the directory holding this file. The order here is
 # membership only: the frozen loader order of [common/masterLD.sh:L93-L116] is
 # what actually runs, with the system block first.
-seed_dir: sl_clean
+seed_dir: clean_batch_sl
 seed_files:
   - system.dat
   - analysis.dat
@@ -850,6 +850,8 @@ operations:
 # neither sl055 nor sl060 raised a terminate code and both therefore ran. A
 # status that contradicts this is reported as a behavioural difference and the
 # capture is still taken, so the table diff can corroborate it (R-4).
+expected_table_effect: changed
+
 expected_status:
   - 0
 
@@ -1292,11 +1294,14 @@ seed_records:
   # carries a LATE DEDUCTION, so that the deduction apportionment is an add of
   # something rather than an add of zero. The second is an ordinary open account
   # item, present so the credit note has something to swap against and so the
-  # walk has more than one row to order.
+  # walk has more than one row to order. Their invoice numbers deliberately sit
+  # outside the 1..3 invoice.dat range: sl060 phase 1 writes those invoice numbers
+  # into SAITM3-REC before phase 2, so reusing 1 or 2 here makes the supposedly
+  # clean batch hit duplicate primary keys instead of exercising the posting flow.
   openitm3.dat:
     - OI-Nos: "A00100"
       OI-Check: "1"
-      OI-Invoice: "2"
+      OI-Invoice: "10"
       OI-B-Nos: "1"
       OI-B-Item: "1"
       OI-Date: "155127"
@@ -1323,7 +1328,7 @@ seed_records:
       OI-Date-Cleared: "0"
     - OI-Nos: "A00100"
       OI-Check: "1"
-      OI-Invoice: "1"
+      OI-Invoice: "11"
       OI-B-Nos: "1"
       OI-B-Item: "0"
       OI-Date: "155127"

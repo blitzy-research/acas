@@ -1618,6 +1618,14 @@ acas_assert_seed_script() {
 acas_assert_scenario() {
   [[ -n "$ACAS_RESET_SCENARIO" ]] || return 0
 
+  local scenario_real=''
+  scenario_real="$(readlink -f -- "$ACAS_RESET_SCENARIO" 2>/dev/null || true)"
+  [[ -n "$scenario_real" ]] || acas_die "$EX_USAGE" \
+    "the scenario file '$ACAS_RESET_SCENARIO' does not exist." \
+    'The canonical invocation passes a scenario file path; see' \
+    'harness/docker-compose.yml.'
+  ACAS_RESET_SCENARIO="$scenario_real"
+
   [[ -e "$ACAS_RESET_SCENARIO" ]] || acas_die "$EX_USAGE" \
     "the scenario file '$ACAS_RESET_SCENARIO' does not exist." \
     'The canonical invocation passes a scenario file path; see' \

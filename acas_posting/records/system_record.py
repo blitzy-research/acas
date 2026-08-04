@@ -282,7 +282,20 @@ class SystemDataBlock:
 
     cyclea: int = 0
 
-    scycle: int = 0
+    @property
+    def scycle(self) -> int:
+        """Read ``Scycle`` through the bytes owned by ``Cyclea``.
+
+        ``Scycle REDEFINES Cyclea`` [copybooks/wssystem.cob:L62-L63], so the two
+        names are not two values. Keeping one dataclass field also means
+        ``INITIALIZE`` clears the storage once, as the record layout does.
+        """
+        return self.cyclea
+
+    @scycle.setter
+    def scycle(self, value: int) -> None:
+        """Store through the ``Scycle`` view of ``Cyclea``'s byte."""
+        self.cyclea = int(value)
 
     period: int = 0
 

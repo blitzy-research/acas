@@ -62,6 +62,23 @@ acas_bf_die() {
   exit "$code"
 }
 
+acas_bf_secure_tree() {
+  local target="$1" exposed=''
+  [[ -d "$target" ]] || return 0
+
+  # GnuCOBOL's file handler creates SYS-DISPLAY.log and fh-logger.txt itself and
+  # may widen them independently of the shell's umask. The same directory also
+  # holds system.dat, whose record carries the database account. Remove every
+  # group/world permission after each builder run, on both success and failure,
+  # so diagnostic output is never left readable beside credential-bearing data.
+  chmod -R go-rwx -- "$target" || acas_bf_die "$EX_PRECONDITION" \
+    "could not restrict the generated fixture tree to its owner: $target"
+
+  exposed="$(find "$target" -perm /077 -print -quit 2>/dev/null || true)"
+  [[ -z "$exposed" ]] || acas_bf_die "$EX_PRECONDITION" \
+    "a generated fixture artifact is still group/world accessible: $exposed"
+}
+
 acas_bf_usage() {
   cat <<USAGE
 $ACAS_BF_SELF -- build every scenario's declared flat seed files.
@@ -260,6 +277,7 @@ acas_bf_main() {
       --out "$target" \
       --repo "$ACAS_BF_REPO" \
       --modules "$ACAS_BF_MODULES" </dev/null || rc=$?
+    acas_bf_secure_tree "$target"
 
     if (( rc == 0 )); then
       built=$(( built + 1 ))

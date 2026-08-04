@@ -1507,6 +1507,11 @@ def _ba020_process_open(
         ws_no_paragraph=_PARA_BRIDGE_OPEN,
         we_error=int(file_access.we_error),
         transport=transport,
+        # acasirsub3 synthesizes OPEN -> operation -> CLOSE inside one handler
+        # call [common/acasirsub3.cbl:L438-L470]. Its bridge-local SQL handle is
+        # not the still-open acasirsub1 handle that irs030 resumes immediately
+        # afterwards, so the transient sequence must not reuse that process slot.
+        reuse_process_connection=False,
     )
     outcome.apply_to_logging_data(file_access.logging_data)
 
@@ -2308,6 +2313,10 @@ def dispatch(
         )
         logging_data.ws_log_file_no = WS_LOG_FILE_NO_RDB
 
+    # The IRS shell reuses one File-Access block across acasirsub handlers.
+    # Start this CALL with its own reply pair while preserving File-Function,
+    # which is the operation selector consumed below.
+    file_access.fs_reply = int(_status.FsReply.SUCCESS)
     file_access.we_error = int(_status.WeError.SUCCESS)
     logging_data.sql_err = _SQL_ERR_SPACES
     logging_data.sql_msg = _SQL_MSG_SPACES

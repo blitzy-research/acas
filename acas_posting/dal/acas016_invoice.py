@@ -25,6 +25,7 @@ from typing import Any, Final
 
 from acas_posting.dal.connection import (
     ConnectionPolicyError,
+    TransportSecurity,
     execute_statement,
     load_rdb_data_once,
     mysql_1000_open,
@@ -122,6 +123,7 @@ __all__: Final[tuple[str, ...]] = (
     "InvoiceBuffer",
     "linkage_buffer_for",
     "publish_linkage_buffer",
+    "reset_bridge_storage",
     "TdSainvLinesRec",
     "TdSainvoiceRec",
     "WsInvoiceLine",
@@ -1079,6 +1081,9 @@ class InvoiceBuffer:
     ws_sih_test: int = 0
     ws_invoice_record: SInvoiceHeader | None = None
     invoice_line: SilInvoiceLine | None = None
+    # Mirrors of the bridge module's persistent state. They remain public for
+    # compatibility with direct bridge callers, but a fresh linkage buffer no
+    # longer owns or resets the bridge's connection/cursors.
     bridge_state: BridgeState = field(default_factory=lambda: BridgeState())
     connection: object = None
 
@@ -1197,6 +1202,27 @@ class BridgeState:
     def line_cursor(self) -> CursorState:
         """``Most-Cursor-Set-2`` - the ``SAINV-LINES-REC`` cursor [:L334-L336]."""
         return self.cursors.state_for(LINES_TABLE, _LINE_SLOT)
+
+
+_BRIDGE_STATE: BridgeState = BridgeState()
+_BRIDGE_CONNECTION: object = None
+_BRIDGE_TRANSPORT: TransportSecurity | None = None
+_TRANSPORT_NOT_SUPPLIED: Final[object] = object()
+
+
+def reset_bridge_storage(
+    *,
+    transport: TransportSecurity | None = None,
+) -> None:
+    """Discard acas016/slinvoiceMT working storage, as ending the run unit does."""
+    global _BRIDGE_CONNECTION, _BRIDGE_STATE, _BRIDGE_TRANSPORT
+
+    if _BRIDGE_CONNECTION is not None:
+        mysql_1980_close(_BRIDGE_CONNECTION)  # type: ignore[arg-type]
+    _BRIDGE_CONNECTION = None
+    _BRIDGE_STATE = BridgeState()
+    _BRIDGE_TRANSPORT = transport
+    _LINKAGE_BUFFERS.clear()
 
 
 _SIH_ORDER_WIDTH: Final[int] = int(
@@ -2036,6 +2062,7 @@ class _BridgeContext:
     #: ``ba020-Process-Open`` fills ``WS-MYSQL-BASE-NAME`` and its five siblings
     #: [common/slinvoiceMT.cbl:L574-L599].
     system_record: SystemRecord | None = None
+    transport: TransportSecurity | None = None
     #: ``K``/``L`` - the key offset and length the current paragraph selected from
     #: ``KeyOfReference`` [common/slinvoiceMT.cbl:L305-L310]. Held on the context
     #: because the paragraphs genuinely share them.
@@ -2128,7 +2155,10 @@ def ba020_process_open(ctx: _BridgeContext) -> None:
             ctx.system_record,
             ws_no_paragraph=logging_data.ws_no_paragraph,
             we_error=ctx.file_access.we_error,
-            transport=None,
+            transport=ctx.transport,
+            # slinvoiceMT keeps its own SQL state across CALLs. A live handle
+            # owned by another bridge is not that state and must not be reused.
+            reuse_process_connection=False,
         )
     except ConnectionPolicyError as refused:
         # A connection.py policy refusal. Rendered as the COBOL's failed-open status
@@ -2893,6 +2923,7 @@ def slinvoice_mt(
     *,
     connection: object = None,
     system_record: SystemRecord | None = None,
+    transport: TransportSecurity | None = None,
 ) -> FileAccess:
     """``call "slinvoiceMT" using ...`` - the bridge, entered as the handler enters it.
 
@@ -2906,21 +2937,31 @@ def slinvoice_mt(
         dal_common: ``ACAS-DAL-Common-data`` [copybooks/Test-Data-Flags.cob], whose
             ``sw-testing`` gates logging exactly as ``Testing-1`` does.
         invoice: ``WS-Invoice-Record`` - the ONE union buffer serving BOTH tables.
-        connection: The live connection, or ``None`` to have function 1 open one.
+        connection: The live connection, or ``None`` to reuse this bridge's
+            persistent handle.
         system_record: ``System-Record``, needed only by function 1.
+        transport: A per-call declaration, or ``None`` to use the declaration
+            installed on this bridge by :func:`dispatch`.
 
     Returns:
         The same ``file_access`` object, mutated - which is what a COBOL ``CALL BY
             REFERENCE`` does.
     """
-    state = invoice.bridge_state
+    global _BRIDGE_CONNECTION
+
+    state = _BRIDGE_STATE
+    resolved_connection = (
+        _BRIDGE_CONNECTION if connection is None else connection
+    )
+    resolved_transport = _BRIDGE_TRANSPORT if transport is None else transport
     ctx = _BridgeContext(
-        connection=connection,
+        connection=resolved_connection,
         file_access=file_access,
         dal_common=dal_common,
         state=state,
         buffer=invoice,
         system_record=system_record,
+        transport=resolved_transport,
     )
     ba010_initialise(ctx)
     function_code = file_access.file_function
@@ -2949,8 +2990,10 @@ def slinvoice_mt(
         ba060_process_start(ctx)
     else:
         ba100_bad_function(ctx)
-    # The connection the open established travels back on the buffer, because a COBOL
-    # bridge keeps it in the MySQL client's own state across CALLs.
+    # The bridge owns this state across CALLs. Mirror it onto the linkage buffer
+    # for compatibility, but never make a fresh buffer the owner of the handle.
+    _BRIDGE_CONNECTION = ctx.connection
+    invoice.bridge_state = state
     invoice.connection = ctx.connection
     return file_access
 
@@ -3341,6 +3384,7 @@ def ba015_test_ends_handler(ctx: _HandlerContext) -> None:
         ctx.invoice,
         connection=ctx.invoice.connection,
         system_record=ctx.system_record,
+        transport=_BRIDGE_TRANSPORT,
     )
 
 
@@ -3370,6 +3414,8 @@ def dispatch(
     file_access: FileAccess,
     file_defs: FileDefs,
     dal_common: AcasDalCommonData,
+    *,
+    transport: TransportSecurity | None | object = _TRANSPORT_NOT_SUPPLIED,
 ) -> FileAccess:
     """``call "acas016" using ...`` - the handler, entered as its callers enter it.
 
@@ -3387,10 +3433,19 @@ def dispatch(
             carries it; the RDB path does not read it, which is itself recorded as a
             deliberate omission.
         dal_common: ``ACAS-DAL-Common-data`` [copybooks/Test-Data-Flags.cob].
+        transport: The caller's keyword-only transport declaration. Omission
+            preserves the bridge's current declaration; explicit ``None`` clears it.
 
     Returns:
         The same ``file_access``, mutated - a COBOL ``CALL BY REFERENCE``.
     """
+    global _BRIDGE_TRANSPORT
+
+    if transport is not _TRANSPORT_NOT_SUPPLIED:
+        if transport is not None and not isinstance(transport, TransportSecurity):
+            raise TypeError("transport must be TransportSecurity or None")
+        _BRIDGE_TRANSPORT = transport
+
     ctx = _HandlerContext(
         system_record=system,
         invoice=invoice,

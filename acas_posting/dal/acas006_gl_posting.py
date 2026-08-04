@@ -914,20 +914,27 @@ class TdGlpostingRec:
 
 
 def _join_post_key(key: WsPostKey) -> Decimal:
-    """Reproduce ``move WS-Post-Key to HV-POST-KEY`` - the group concatenation.
+    """Reproduce the raw group-to-binary ``MOVE`` into ``HV-POST-KEY``.
 
     ``WS-Post-Key`` is a group of two ``pic 9(5)`` items, ``Batch`` and ``Post-Number``
-    [copybooks/wspost.cob:L14-L16].
+    [copybooks/wspost.cob:L14-L16]. Because the sending operand is a GROUP, COBOL
+    performs an alphanumeric byte move into the eight-byte COMP receiver rather than
+    converting the ten displayed digits numerically. The bridge's 18-digit edit then
+    drops the leading digit of that raw integer before SQL, which is why
+    ``0000100001`` is stored as ``472328296244457520`` by the compiled oracle.
 
     Args:
         key: The record's ``ws_post_key`` group.
 
     Returns:
-        The concatenated key as an exact :class:`~decimal.Decimal`.
+        The exact integer represented by the first eight group bytes, as a
+        :class:`~decimal.Decimal`; the bridge renderer applies the declared 18-digit
+        host-variable edit.
     """
     batch = abs(int(key.batch)) % 100000
     post_number = abs(int(key.post_number)) % 100000
-    return Decimal(f"{batch:05d}{post_number:05d}")
+    group_image = f"{batch:05d}{post_number:05d}".encode("latin-1")
+    return Decimal(int.from_bytes(group_image[:8], byteorder="big", signed=True))
 
 
 def bb000_hv_load(posting: WsPostingRecord) -> TdGlpostingRec:

@@ -203,6 +203,7 @@ ENV_DB_SOCKET: Final[str] = "ACAS_DB_SOCKET"
 ENV_REPO: Final[str] = "ACAS_REPO"
 ENV_OUT: Final[str] = "ACAS_OUT"
 ENV_DATA: Final[str] = "ACAS_DATA"
+ENV_FIXTURES: Final[str] = "ACAS_FIXTURES"
 ENV_BUILD: Final[str] = "ACAS_BUILD"
 ENV_BIN: Final[str] = "ACAS_BIN"
 
@@ -1479,6 +1480,76 @@ def scenario_file(scenario: str) -> Path:
     return SCENARIO_DIR / f"{scenario}.yaml"
 
 
+def scenario_fixture_dir(scenario: str) -> Path:
+    """Return the builder's canonical fixture directory for one scenario.
+
+    `harness/build_fixtures.sh` writes one directory per scenario under
+    `$ACAS_FIXTURES`, falling back to `$ACAS_DATA/fixtures`. The scenario YAML is
+    mounted read-only inside the harness container, so its relative `seed_dir`
+    cannot be the runtime location. Stages 1 and 5 therefore pass this directory
+    explicitly through `--seed-dir`; the scenario's `seed_files` list remains the
+    authority for *which* files are accepted.
+
+    Args:
+        scenario: The scenario name.
+
+    Returns:
+        `$ACAS_FIXTURES/<scenario>` or `$ACAS_DATA/fixtures/<scenario>`.
+
+    Raises:
+        HarnessFaultError: Neither fixture-root environment is available. The
+            message includes the exact build command rather than allowing
+            `seed.sh` to fail later against a path derived from an empty value.
+    """
+    assert_scenario_name(scenario)
+    configured = os.environ.get(ENV_FIXTURES, "").strip()
+    if configured:
+        return Path(configured) / scenario
+
+    data_dir = os.environ.get(ENV_DATA, "").strip()
+    if data_dir:
+        return Path(data_dir) / "fixtures" / scenario
+
+    raise HarnessFaultError(
+        f"cannot locate the built fixture for {scenario!r}: neither "
+        f"${ENV_FIXTURES} nor ${ENV_DATA} is set. Build the fixtures with "
+        f"`harness/build_fixtures.sh {scenario}` and expose its output through "
+        f"{ENV_FIXTURES}, or set {ENV_DATA} so the canonical "
+        f"`$ACAS_DATA/fixtures/{scenario}` location is available."
+    )
+
+
+def scenario_staged_data_dir(scenario: str) -> Path:
+    """Return the scenario-owned data directory created by `seed.sh`.
+
+    The fixture builder's immutable input lives under `fixtures/<scenario>`.
+    `seed.sh` copies only the declared files into a fresh sibling directory
+    `$ACAS_DATA/<scenario>` and points the frozen loaders at that staging area.
+    The runner subprocesses are separate processes, so the loader's exported
+    `ACAS_LEDGERS` cannot leak into them; this helper reconstructs that exact
+    directory for stages 2 and 6 instead of falling back to the ambient
+    `$ACAS_DATA`, where `system.dat` does not live.
+    """
+    assert_scenario_name(scenario)
+    data_dir = os.environ.get(ENV_DATA, "").strip()
+    if not data_dir:
+        raise HarnessFaultError(
+            f"cannot locate the staged data for {scenario!r}: ${ENV_DATA} is "
+            f"unset. Stage 1 writes `$ACAS_DATA/{scenario}` and both run stages "
+            f"must use that same scenario-owned directory."
+        )
+    return Path(data_dir) / scenario
+
+
+def scenario_runtime_environment(scenario: str) -> dict[str, str]:
+    """Build the environment shared by the COBOL and Python run stages."""
+    staged = str(scenario_staged_data_dir(scenario))
+    environment = dict(os.environ)
+    environment[ENV_DATA] = staged
+    environment[ENV_LEDGERS] = staged
+    return environment
+
+
 def scenario_definition(scenario: str) -> Mapping[str, Any]:
     """Load one scenario definition (Agent Action Plan section 0.4.1.7).
 
@@ -1649,11 +1720,14 @@ class StageResult:
     Attributes:
         stage: One of the `STAGE_*` names.
         argv: The exact command line, for the failure message and the record.
-        returncode: The exit status VERBATIM. Never normalised, never clamped - the
-            status is behavioural data for a run stage and a documented diagnosis
-            for every other stage.
+        returncode: The harness stage process's exit status VERBATIM. Never
+            normalised or clamped. Run stages expose their child operation statuses
+            separately because a successful wrapper exits zero after verifying an
+            expected non-zero term code.
         stdout: Everything the stage wrote to stdout.
         stderr: Everything it wrote to stderr.
+        operation_statuses: Ordered `(operation, status)` records emitted by a run
+            stage. Empty for non-run stages and for a run-stage harness failure.
     """
 
     stage: str
@@ -1661,11 +1735,44 @@ class StageResult:
     returncode: int
     stdout: str
     stderr: str
+    operation_statuses: tuple[tuple[str, int], ...] = ()
 
     @property
     def ok(self) -> bool:
         """Whether the stage exited zero."""
         return self.returncode == 0
+
+    def operation_status(self, operation: str) -> int:
+        """Return one driven operation's observed term/process status.
+
+        The COBOL menu process itself returns to its menu after `ws-term-code = 5`
+        [general/general.cbl:L810-L811], while the migrated CLI child exits 5.
+        Both harness wrappers then exit zero when that observed behaviour matches the
+        scenario. The machine-readable `OPERATION_STATUS` record preserves the
+        behavioural value without conflating it with wrapper health.
+
+        Args:
+            operation: One of the seven shared operation names.
+
+        Returns:
+            The status recorded for that operation.
+
+        Raises:
+            HarnessFaultError: The stage recorded none or more than one status for
+                the requested operation.
+        """
+        matches = [
+            status
+            for recorded_operation, status in self.operation_statuses
+            if recorded_operation == operation
+        ]
+        if len(matches) != 1:
+            raise HarnessFaultError(
+                f"stage {self.stage} recorded {len(matches)} OPERATION_STATUS "
+                f"entries for {operation!r}; expected exactly one. Recorded: "
+                f"{self.operation_statuses!r}.\n{self.describe()}"
+            )
+        return matches[0]
 
     def describe(self) -> str:
         """A multi-line description, for a failure message.
@@ -1673,11 +1780,21 @@ class StageResult:
         Returns:
             The stage, its command line, its status and both streams.
         """
+        behavioural = (
+            "\n  operation statuses: "
+            + ", ".join(
+                f"{operation}={status}"
+                for operation, status in self.operation_statuses
+            )
+            if self.operation_statuses
+            else ""
+        )
         return (
             f"stage {self.stage} exited {self.returncode}\n"
             f"  command: {' '.join(self.argv)}\n"
             f"  stdout:\n{_indent(self.stdout)}\n"
             f"  stderr:\n{_indent(self.stderr)}"
+            f"{behavioural}"
         )
 
     def raise_for_status(self) -> StageResult:
@@ -1790,6 +1907,90 @@ def _run_script(
     )
 
 
+_OPERATION_STATUS_PREFIX: Final[str] = "OPERATION_STATUS\t"
+
+
+def _requested_operations(
+    scenario: str,
+    override: str | None,
+    *,
+    all_declared: bool,
+) -> tuple[str, ...]:
+    """Resolve the operations one run-stage invocation drives.
+
+    The oracle runner drives one menu operation per invocation, using the scalar
+    `operation` key. The Python runner can drive the ordered `operations` list used by
+    `period_end_totals`. An explicit override always narrows either side to one.
+    """
+    if override is not None:
+        return (override,)
+
+    definition = scenario_definition(scenario)
+    declared = definition.get("operations") if all_declared else None
+    if (
+        all_declared
+        and isinstance(declared, Sequence)
+        and not isinstance(declared, (str, bytes))
+    ):
+        return tuple(str(item) for item in declared)
+    return (str(definition[SCENARIO_KEY_OPERATION]),)
+
+
+def _attach_operation_statuses(
+    result: StageResult,
+    operations: Sequence[str],
+) -> StageResult:
+    """Attach machine-readable child-operation statuses to a successful run stage.
+
+    Both runners emit one `OPERATION_STATUS<TAB>operation<TAB>status` line after
+    each driven operation. A wrapper failure remains untouched because its own exit
+    status is the diagnosis. A wrapper that exits zero without a complete, ordered
+    set of records is a harness fault: its database capture could otherwise be
+    attributed to an operation whose disposition was never established.
+    """
+    if result.returncode != 0:
+        return result
+
+    observed: list[tuple[str, int]] = []
+    for line in result.stdout.splitlines():
+        record = line.lstrip()
+        if not record.startswith(_OPERATION_STATUS_PREFIX):
+            continue
+        fields = record.split("\t")
+        if len(fields) != 3 or fields[0] != "OPERATION_STATUS":
+            raise HarnessFaultError(
+                f"stage {result.stage} emitted a malformed operation-status record: "
+                f"{line!r}.\n{result.describe()}"
+            )
+        try:
+            status = int(fields[2], 10)
+        except ValueError as exc:
+            raise HarnessFaultError(
+                f"stage {result.stage} emitted a non-integer operation status in "
+                f"{line!r}.\n{result.describe()}"
+            ) from exc
+        observed.append((fields[1], status))
+
+    expected_names = tuple(operations)
+    observed_names = tuple(operation for operation, _ in observed)
+    if observed_names != expected_names:
+        raise HarnessFaultError(
+            f"stage {result.stage} exited zero but recorded operation statuses for "
+            f"{observed_names!r}; expected {expected_names!r} in that order. A run "
+            f"without a complete behavioural disposition cannot attest a capture.\n"
+            f"{result.describe()}"
+        )
+
+    return StageResult(
+        stage=result.stage,
+        argv=result.argv,
+        returncode=result.returncode,
+        stdout=result.stdout,
+        stderr=result.stderr,
+        operation_statuses=tuple(observed),
+    )
+
+
 def _script_absence_note(script: Path) -> str:
     """Explain why a harness script might not be there yet.
 
@@ -1873,6 +2074,7 @@ def seed(
     argv: list[str] = []
     if data_dir is not None:
         argv += ["--data-dir", str(data_dir)]
+    argv += ["--seed-dir", str(scenario_fixture_dir(scenario))]
     if only:
         argv += ["--only", ",".join(only)]
     if dry_run:
@@ -1923,6 +2125,8 @@ def reset(
     argv: list[str] = []
     if schema_only:
         argv.append("--schema-only")
+    else:
+        argv += ["--seed-dir", str(scenario_fixture_dir(scenario))]
     if dry_run:
         argv.append("--dry-run")
     argv.append(str(scenario_file(scenario)))
@@ -1931,10 +2135,30 @@ def reset(
     )
 
 
+def prepare_scenario(scenario: str) -> StageResult:
+    """STAGE 1 - reset the frozen schema and seed the scenario from scratch.
+
+    The canonical driver uses `reset_db.sh` for both stage 1 and stage 5. A bare
+    `seed.sh` at stage 1 leaves rows from whichever scenario ran previously, so
+    duplicate-key rewrites can create a different starting state from stage 5.
+    This wrapper uses the same command and the same built fixture directory as
+    :func:`reset`, but records it under the stage-1 name.
+    """
+    argv = [
+        "--seed-dir",
+        str(scenario_fixture_dir(scenario)),
+        str(scenario_file(scenario)),
+    ]
+    return _run_script(
+        RESET_SCRIPT, argv, stage=STAGE_SEED, timeout=STAGE_TIMEOUT_RESET
+    )
+
+
 def run_cobol(
     scenario: str,
     *,
     operation: str | None = None,
+    log_path: Path | str | None = None,
     dry_run: bool = False,
 ) -> StageResult:
     """STAGE 2 - drive the COMPILED COBOL posting cycle. THE ORACLE SIDE.
@@ -1954,6 +2178,8 @@ def run_cobol(
             canonical recipe does.
         operation: `--operation`; derived from the scenario's own `operation` key when
             omitted.
+        log_path: Optional transcript path. Multi-operation scenarios use one path per
+            menu drive so later operations cannot overwrite earlier oracle evidence.
         dry_run: `--dry-run` - resolve and print the keystroke plan, run every
             precondition, spawn no menu.
 
@@ -1969,11 +2195,113 @@ def run_cobol(
     if operation is not None:
         assert_operation(operation)
         argv += ["--operation", operation]
+    if log_path is not None:
+        argv += ["--log", str(log_path)]
     if dry_run:
         argv.append("--dry-run")
     argv.append(str(scenario_file(scenario)))
-    return _run_script(
-        RUN_COBOL_SCRIPT, argv, stage=STAGE_RUN_COBOL, timeout=STAGE_TIMEOUT_RUN
+    result = _run_script(
+        RUN_COBOL_SCRIPT,
+        argv,
+        stage=STAGE_RUN_COBOL,
+        timeout=STAGE_TIMEOUT_RUN,
+        env=scenario_runtime_environment(scenario),
+    )
+    if dry_run:
+        return result
+    return _attach_operation_statuses(
+        result,
+        _requested_operations(scenario, operation, all_declared=False),
+    )
+
+
+def run_cobol_sequence(
+    scenario: str,
+    operations: Sequence[str],
+    *,
+    paths: ScenarioPaths,
+) -> StageResult:
+    """Drive several oracle menu operations sequentially against one seeded state.
+
+    `period_end_totals` spans Sales and Purchase and therefore cannot be represented
+    by one menu executable. Each operation is driven by the ordinary oracle runner,
+    one at a time and without a reset between them. The first pre-run seed fingerprint
+    and successful run-status attestation are restored after the sequence so the
+    Python side is compared with the state before operation one, not the state before
+    the final menu drive. Each later transcript receives its own path.
+    """
+    requested = tuple(operations)
+    if not requested:
+        raise ValueError("an oracle operation sequence must contain at least one operation")
+    for operation in requested:
+        assert_operation(operation)
+
+    fingerprint_path = paths.run_logs / SEED_FINGERPRINT_COBOL
+    status_path = paths.run_logs / "cobol.run-status"
+    first_fingerprint: bytes | None = None
+    first_status: bytes | None = None
+    results: list[StageResult] = []
+
+    try:
+        for index, operation in enumerate(requested, start=1):
+            log_path = (
+                None
+                if index == 1
+                else paths.run_logs / f"cobol.{index}-{operation}.log"
+            )
+            result = run_cobol(
+                scenario,
+                operation=operation,
+                log_path=log_path,
+            )
+            results.append(result)
+
+            if index == 1 and result.returncode == 0:
+                try:
+                    first_fingerprint = fingerprint_path.read_bytes()
+                    first_status = status_path.read_bytes()
+                except OSError as exc:
+                    raise HarnessFaultError(
+                        f"{scenario}: the first oracle operation completed but its "
+                        f"seed fingerprint or run-status attestation could not be "
+                        f"preserved for the multi-operation sequence: {exc}.\n"
+                        f"{result.describe()}"
+                    ) from exc
+
+            if result.returncode != 0:
+                break
+    finally:
+        if first_fingerprint is not None:
+            fingerprint_path.write_bytes(first_fingerprint)
+            os.chmod(fingerprint_path, 0o600)
+
+    aggregate_status = next(
+        (result.returncode for result in results if result.returncode != 0),
+        0,
+    )
+    if aggregate_status == 0 and first_status is not None:
+        status_path.write_bytes(first_status)
+        os.chmod(status_path, 0o600)
+
+    def joined_stream(attribute: str) -> str:
+        blocks: list[str] = []
+        for operation, result in zip(requested, results, strict=False):
+            stream = str(getattr(result, attribute))
+            blocks.append(f"===== {operation} =====\n{stream}")
+        return "\n".join(blocks)
+
+    statuses = tuple(
+        item
+        for result in results
+        for item in result.operation_statuses
+    )
+    return StageResult(
+        stage=STAGE_RUN_COBOL,
+        argv=("tests/conftest.py:run_cobol_sequence", *requested),
+        returncode=aggregate_status,
+        stdout=joined_stream("stdout"),
+        stderr=joined_stream("stderr"),
+        operation_statuses=statuses,
     )
 
 
@@ -2015,13 +2343,23 @@ def run_python(
     if dry_run:
         argv.append("--dry-run")
     argv.append(str(scenario_file(scenario)))
-    return _run_script(
-        RUN_PYTHON_SCRIPT, argv, stage=STAGE_RUN_PYTHON, timeout=STAGE_TIMEOUT_RUN
+    result = _run_script(
+        RUN_PYTHON_SCRIPT,
+        argv,
+        stage=STAGE_RUN_PYTHON,
+        timeout=STAGE_TIMEOUT_RUN,
+        env=scenario_runtime_environment(scenario),
+    )
+    if dry_run:
+        return result
+    return _attach_operation_statuses(
+        result,
+        _requested_operations(scenario, operation, all_declared=True),
     )
 
 
 def classify_run(result: StageResult, *, operation: str) -> str:
-    """Classify a run stage's exit status into one of the three dispositions.
+    """Classify a run stage and one observed operation into three dispositions.
 
     THE THREE CATEGORIES ARE KEPT DISTINCT, and an UNRECOGNISED code is reported as
     a harness fault rather than quietly treated as either of the others: a status
@@ -2047,24 +2385,22 @@ def classify_run(result: StageResult, *, operation: str) -> str:
             f"stages have documented diagnoses of their own and no term code."
         )
 
-    code = result.returncode
+    # The wrapper status describes whether the harness completed and verified its
+    # own work. It is deliberately separate from the driven operation's status.
+    wrapper_code = result.returncode
+    if wrapper_code != 0:
+        # A bad command line is THIS MODULE'S fault and never behavioural data.
+        if wrapper_code == ARGPARSE_USAGE_EXIT:
+            return DISPOSITION_HARNESS_FAULT
+        if result.stage == STAGE_RUN_COBOL and wrapper_code in RUN_COBOL_FAULT_CODES:
+            return DISPOSITION_HARNESS_FAULT
+        if result.stage == STAGE_RUN_PYTHON and wrapper_code in RUN_PYTHON_FAULT_CODES:
+            return DISPOSITION_HARNESS_FAULT
+        return DISPOSITION_HARNESS_FAULT
+
+    code = result.operation_status(operation)
     if code == 0:
         return DISPOSITION_SUCCESS
-
-    # A bad command line. Reported first, because it is the one category that means
-    # this module made the mistake.
-    if code == ARGPARSE_USAGE_EXIT:
-        return DISPOSITION_HARNESS_FAULT
-
-    # Each runner's own documented band, tested BEFORE the term codes so a script
-    # diagnosing itself is never read as the cycle reporting a disposition. Both bands
-    # are disjoint from every term code, so this test changes no classification - it
-    # states the rule the two stages already obeyed asymmetrically.
-    if result.stage == STAGE_RUN_COBOL and code in RUN_COBOL_FAULT_CODES:
-        return DISPOSITION_HARNESS_FAULT
-    if result.stage == STAGE_RUN_PYTHON and code in RUN_PYTHON_FAULT_CODES:
-        return DISPOSITION_HARNESS_FAULT
-
     if code in TERM_CODES[operation]:
         return DISPOSITION_BEHAVIOURAL
 
@@ -2735,7 +3071,7 @@ def assert_autogen_tables_empty(connection: Any) -> None:
 #  harness/docker-compose.yml publishes. Normalisation appears twice - once per side -
 #  and the "eight-stage" numbering counts it once:
 #
-#      1  harness/seed.sh                 "$S"
+#      1  harness/reset_db.sh             "$S"  (schema + seed)
 #      2  harness/run_cobol_scenario.sh   "$S"
 #      3  harness/dump_tables.py  --scenario N --side cobol  --scenario-file "$S"
 #      4  harness/normalize.py    --scenario N --side cobol
@@ -2858,11 +3194,27 @@ def run_scenario_parity(
     paths = scenario_paths(scenario, out_root=out_dir)
     stages: list[StageResult] = []
 
-    # STAGE 1. A failed seed poisons every downstream comparison, so it raises.
-    stages.append(seed(scenario).raise_for_status())
+    # STAGE 1. Start from a clean schema, then seed. Using seed.sh alone here
+    # would preserve rows from a prior scenario and make stage 1 differ from the
+    # identical reset-and-seed command at stage 5.
+    stages.append(prepare_scenario(scenario).raise_for_status())
 
     # STAGE 2. THE STATUS IS RECORDED, NOT ENFORCED - see the section comment.
-    cobol_run = run_cobol(scenario, operation=operation)
+    # The one multi-operation scenario spans two menu executables, so it is driven as
+    # a sequential series with no reset between operations.
+    requested_operations = _requested_operations(
+        scenario,
+        operation,
+        all_declared=operation is None,
+    )
+    if len(requested_operations) == 1:
+        cobol_run = run_cobol(scenario, operation=requested_operations[0])
+    else:
+        cobol_run = run_cobol_sequence(
+            scenario,
+            requested_operations,
+            paths=paths,
+        )
     stages.append(cobol_run)
 
     # STAGES 3 and 4. Taken WHATEVER stage 2 returned: absence is evidence.
@@ -3190,14 +3542,12 @@ def assert_seed_fingerprints_agree(
 
 
 def expected_exit_status(declared: Sequence[int] | int | None) -> int:
-    """The process exit status a scenario's declared per-operation statuses imply.
+    """The aggregate behavioural status declared per operation.
 
-    A scenario declares `expected_status` PER OPERATION, while a run stage is ONE
-    process with ONE exit status. The two are related by the runners' own rule: a
-    status that contradicts its declaration is reported and the run stops there, and
-    `acas_posting/cli/args.py`'s `exit_status_for(term_code)` surfaces the term code
-    itself - so the process exits with THE FIRST NON-ZERO DECLARED STATUS, and zero
-    when every operation is declared to succeed.
+    A scenario declares `expected_status` PER OPERATION. For concise diagnostics this
+    helper reduces the ordered list to its first non-zero value, or zero when every
+    operation succeeds. The harness wrapper's own process status is not involved:
+    wrappers exit zero after verifying an expected non-zero child term code.
 
     Only two non-zero statuses exist anywhere in the in-scope set: 5, from
     [general/gl070.cbl:L289] via the gate at [general/general.cbl:L810-L811], and 8,
@@ -3224,6 +3574,21 @@ def expected_exit_status(declared: Sequence[int] | int | None) -> int:
             )
         if value != 0:
             return value
+    return 0
+
+
+def observed_exit_status(result: StageResult, operations: Sequence[str]) -> int:
+    """Reduce a run stage's recorded operation statuses in declared order.
+
+    This is the observed counterpart of :func:`expected_exit_status`. It never reads
+    the wrapper process status: `StageResult.returncode` describes harness health,
+    while `operation_statuses` carries the behavioural data whose database effect is
+    still dumped under Agent Action Plan section 0.6.5.
+    """
+    for operation in operations:
+        status = result.operation_status(operation)
+        if status != 0:
+            return status
     return 0
 
 
@@ -3277,25 +3642,6 @@ def assert_declared_run_statuses(
     for operation in operations:
         assert_operation(operation)
 
-    expected = expected_exit_status(declared)
-    checked: tuple[tuple[str, int], ...] = (
-        ((SIDE_COBOL, run.cobol_run.returncode),)
-        if reference_only
-        else (
-            (SIDE_COBOL, run.cobol_run.returncode),
-            (SIDE_PYTHON, run.python_run.returncode),
-        )
-    )
-    for side, code in checked:
-        assert code == expected, (
-            f"{run.scenario}: the {side} run stage exited {code} where the scenario "
-            f"declares {declared!r}, which implies a process status of {expected}.\n"
-            f"  A status that is not the declared one means the run did not reach the "
-            f"disposition this comparison is about, so both sides may be equally "
-            f"unwritten and the diff equally empty. Operations driven: "
-            f"{list(operations)}.\n{run.describe()}"
-        )
-
     dispositions: list[str] = []
     for side, stage in (
         (SIDE_COBOL, run.cobol_run),
@@ -3324,6 +3670,27 @@ def assert_declared_run_statuses(
             f"run to have a disposition at all.\n{stage.describe()}"
         )
         dispositions.append(sorted(seen)[0])
+
+    expected = expected_exit_status(declared)
+    checked_stages: tuple[tuple[str, StageResult], ...] = (
+        ((SIDE_COBOL, run.cobol_run),)
+        if reference_only
+        else (
+            (SIDE_COBOL, run.cobol_run),
+            (SIDE_PYTHON, run.python_run),
+        )
+    )
+    for side, stage in checked_stages:
+        observed = observed_exit_status(stage, operations)
+        assert observed == expected, (
+            f"{run.scenario}: the {side} run observed operation status {observed} "
+            f"where the scenario declares {declared!r}, whose aggregate status is "
+            f"{expected}. The harness wrapper itself exited {stage.returncode}.\n"
+            f"  A behavioural status that is not the declared one means the run did "
+            f"not reach the disposition this comparison is about, so both sides may "
+            f"be equally unwritten and the diff equally empty. Operations driven: "
+            f"{list(operations)}.\n{run.describe()}"
+        )
 
     return (dispositions[0], dispositions[1])
 
@@ -3366,12 +3733,12 @@ def assert_python_reproduced_disposition(
         assert_operation(operation)
 
     expected = expected_exit_status(declared)
-    cobol_code = run.cobol_run.returncode
-    python_code = run.python_run.returncode
+    cobol_code = observed_exit_status(run.cobol_run, operations)
+    python_code = observed_exit_status(run.python_run, operations)
 
     assert python_code == cobol_code, (
-        f"{run.scenario}: BEHAVIOURAL DIVERGENCE - the compiled oracle exited "
-        f"{cobol_code} and the migrated Python cycle exited {python_code} for "
+        f"{run.scenario}: BEHAVIOURAL DIVERGENCE - the compiled oracle observed "
+        f"status {cobol_code} and the migrated Python cycle observed {python_code} for "
         f"operations {list(operations)}.\n"
         f"  The oracle's disposition is the specification (rule R-6), so this is a "
         f"difference in the migrated code, not in the environment. Reproduce the "
@@ -3379,7 +3746,7 @@ def assert_python_reproduced_disposition(
         f"Python side.\n{run.describe()}"
     )
     assert cobol_code == expected, (
-        f"{run.scenario}: both sides exited {cobol_code}, agreeing with each other "
+        f"{run.scenario}: both sides observed {cobol_code}, agreeing with each other "
         f"but not with the declared {declared!r} (implied status {expected}). Two "
         f"sides that equally failed to reach this scenario's disposition agree "
         f"perfectly and prove nothing.\n{run.describe()}"
@@ -4057,4 +4424,3 @@ def data_dictionary_path() -> Path:
         f"Regenerate it with `python -m acas_posting.dictionary.generate`."
     )
     return DATA_DICTIONARY_PATH
-

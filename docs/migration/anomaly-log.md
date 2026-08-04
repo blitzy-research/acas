@@ -165,10 +165,13 @@ AAP §0.4.5, verbatim:
 
 Two commitments follow, and both are kept literally.
 
-**No empty diff is claimed that was not observed, and no experiment is claimed that was not
-performed.** AAP §0.6.9 records that the authoring host has neither a COBOL compiler nor a
-container runtime, so an oracle run could not be observed while this register was written. It was
-not, and nothing here says otherwise.
+**No empty diff is claimed that was not observed, and no experiment is claimed
+that was not performed.** AAP §0.6.9 records the limitations of the original
+authoring host. QA remediation later supplied the writable Compose harness,
+completed the strict build, and observed the eight mandated parity journeys on
+2026-08-04. Only entries carrying an explicit compiled-evidence update rely on
+those runs; all other stored-value questions retain their pending or partial
+status.
 
 **Every locator in this document was verified by direct reading of the frozen source.** That is the
 only evidential claim made. Where the received brief and the Agent Action Plan disagreed with the
@@ -751,6 +754,19 @@ asserted against this exact site, with
 `tests/arithmetic/test_irs_date_component_derivation.py` carrying it as context.
 
 **Status.** REPRODUCED.
+
+**Compiled reachability update (2026-08-04).** The two record-skip sites are
+real, but the loader path available to the mandated RDBMS scenarios cannot
+reach them with independently keyed postings. `bb000-HV-Load` never moves
+`WS-Post-rrn` into `HV-POST-RRN`, so non-fetch writes use the initialised key
+zero. `gl070` then skips that posting earlier at
+`[general/gl070.cbl:L490-L493]`. The `mixed_accepted_rejected` journey was
+therefore re-derived as two batches plus one posting and explicitly proves an
+unchanged result; fabricating six addressable posting rows would test a state
+the compiled loader cannot create. The arithmetic lock on the silent
+disposition remains valid, while
+[`scenario-diff-evidence.md`](scenario-diff-evidence.md) records why the
+scenario does not pretend the sites are reachable.
 
 ### A-14 † — the nominal account located by sequential read
 
@@ -1513,21 +1529,89 @@ at `[general/gl051.cbl:L1101]`, the latter being the `if not truet` inside the c
 is in scope for this migration. The negative condition name is therefore dead, and the program
 expresses its negative case as `not` of the positive one.
 
-**A-NEW-13 — a copybook the frozen archive does not contain.** `copybooks/ACAS-SQLstate-error-list.cob`
-is **absent from the checkout** yet is named by a `COPY` statement in **44** frozen files, the
-majority of them `common/*MT.cbl` bridges. The consequence is direct and is the reason several
-statuses in this register are pending: the affected bridges cannot be compiled, so
-`harness/build_oracle.sh` cannot complete, so no oracle measurement is available at the time of
-writing.
+**A-NEW-13 — a comment-only copybook absent from the frozen archive.**
+`copybooks/ACAS-SQLstate-error-list.cob` is absent from the checkout yet is
+named by a `COPY` statement in 44 frozen files, most of them `common/*MT.cbl`
+bridges. The initial consequence was direct: 22 of 28 required `*MT` bridge
+builds failed.
 
-The copybook **must not be fabricated**. Supplying an invented version would breach R-3 (it adds
-content to the frozen tree) and R-4 (it would decide, silently, behaviour that only the maintainer's
-real file can decide), and it would make every downstream measurement unattributable. It is recorded
-here as a candidate and left to the maintainer. Everything else in the tree compiles: all twelve
-in-scope posting programs, all seventeen handlers, all twenty loaders and the four menu shells.
+**Compiled resolution, observed 2026-08-04.** The include is semantically
+inert. `harness/build_oracle.sh` now materialises a comment-only compatibility
+file at `$ACAS_BUILD/copybooks/ACAS-SQLstate-error-list.cob` and adds that
+writable build directory to the compiler's copy path. It does not create or
+edit anything under frozen `copybooks/`. A strict rebuild completed with zero
+fatal diagnostics and produced all 29 expected `*MT` bridge artifacts and all
+28 loader programs. Evidence:
+`/tmp/blitzy_phase2_build_oracle_final.log`.
 
-This candidate is **appended** as `A-NEW-13` precisely so that `A-NEW-1` through `A-NEW-12`, which
-the reproducing modules already cite, keep their numbers.
+The resolution is intentionally narrower than “invent the missing copybook”:
+only comments are supplied, only in the disposable build tree, and the
+compiler proves that no data item or executable statement was missing. This
+candidate remains `A-NEW-13` so that `A-NEW-1` through `A-NEW-12`, already
+cited by reproducing modules, keep their numbers.
+
+**A-NEW-14 — `GLPOSTING-REC` non-fetch writes collapse onto one primary
+key.** `[common/glpostingMT.cbl:L1053-L1066]` initialises the host-variable
+record and loads thirteen fields, but does not load `HV-POST-RRN`. The SQL
+builder nevertheless uses that field as the relational primary key. Compiled
+loader measurement confirmed the consequence: every non-fetch write targets
+the same key, so a seed can persist at most one posting row. That row's key is
+zero and is then skipped by `[general/gl070.cbl:L490-L493]`.
+
+This is the measured value half of `Q-9` in
+[`ambiguity-resolutions.md`](ambiguity-resolutions.md). It forced the
+`mixed_accepted_rejected` and `clean_batch_gl` scenarios to be re-derived from
+reachable store state. Both now declare `expected_table_effect: unchanged`
+and both produce an observed empty diff. The bridge and schema are frozen;
+the migration reproduces the collapse rather than allocating a replacement
+key.
+
+**A-NEW-15 — the menu's flat mirror persists RDB mode as zero for the next
+process.** Each menu's `overrewrite` first saves the declared RDB mode, then
+sets the flat selector before rewriting the COBOL system file. In the frozen
+source that flat rewrite stores `File-System-Used = 0` into `system.dat`
+record 1. The next menu process begins by forcing the flat leg and reading that
+record, so it silently runs its entire accounting operation against indexed
+files even though MariaDB still holds `FILE-SYSTEM-USED = 1`.
+
+This was observed directly in the four-operation `period_end_totals` journey:
+operation one changed MariaDB; operations two through four displayed success
+but issued no accounting DML. The build wrapper now inserts a build-copy-only
+move of the saved mode immediately before the flat `System-Rewrite` in
+General, Sales, and Purchase. After the shim, the isolated Sales measurement
+changed `SL-PAYMENTS` from `8888.88` to `9691.23` and cleared `S-FLAG-P`,
+then the full journey passed 18/18 tests and an empty parity diff. No frozen
+menu source was edited.
+
+**A-NEW-16 — one process-global MySQL handle makes local CLOSE calls destroy
+unrelated IRS facades.** The vendored `cobmysqlapi38.c` owns one file-scope
+`MYSQL sql, *mysql=&sql;`. `acasirsub3` and the `irs030` end-of-job path issue
+local closes as though each facade owned a separate connection. Compiled
+measurement showed that a preceding default-record read therefore made the
+later `acasirsub1` indexed read report a false key-not-found, and the end-of-job
+closes could kill the transfer delete-all.
+
+The Python DAL now scopes process-owned connections explicitly, and the oracle
+build copy suppresses only the destructive local closes. The `irs030`
+reproduction, including the preceding `acasirsub3` read, is runtime verified in
+`/tmp/blitzy_phase3_f8_irs030_post.log`. The frozen ownership defect is
+preserved as the specification; the shims make the compiled comparison
+executable without pretending the API supplies per-facade handles.
+
+**A-NEW-17 — Purchase linkage reinterprets storage instead of converting the
+numeric value.** `acas022` passes `binary-char` and `binary-long` storage by
+reference, while `purchMT` receives it as `PIC 99 COMP` and
+`PIC 9(8) COMP` `[common/purchMT.cbl:L344-L355]`. Compiled probes measured
+the byte reinterpretation directly. For example, caller `112233` becomes a
+bridge value outside the frozen `mediumint(6) unsigned` sort-code range, and
+the loader reports the database range error while returning zero.
+
+The scenarios do not correct that linkage. `clean_batch_pl` and
+`period_end_totals` pin `Purch-SortCode` to `"0"`, the reachable value that
+survives the frozen boundary. The full Purchase and period-total journeys then
+produce observed empty diffs. The measured conversion table and its consumers
+are recorded in
+[`ambiguity-resolutions.md`](ambiguity-resolutions.md).
 
 ---
 
@@ -1541,18 +1625,24 @@ frozen file at that line in this checkout. Every census figure — the five `ROU
 sources, the numeric and character column censuses, the 24 malformed loader lines, the nine
 `cobmysqlapi.o` link sites, the 44 `COPY` references to the missing copybook — was produced by
 enumeration over the frozen files, not recalled. The `bash -n` failure on `common/masterLD.sh` was
-observed. The fourteen `tests/arithmetic/` files were read to build §11's map, and the tier was run on
-a bare host with no Docker, no MariaDB and no GnuCOBOL. The per-field `anomaly_refs` and
+observed. The fifteen `tests/arithmetic/` files were read to build §11's map, including the
+shared-storage and dispatch-boundary coverage added during QA remediation. The infrastructure-free
+tier was run independently of the Compose stack. The per-field `anomaly_refs` and
 `ambiguity_refs` counts quoted for A-7, A-11, A-12, A-14, A-15 and A-20 were read out of the committed
 `data_dictionary/acas_posting_dictionary.json`.
 
-**What was not.** **No oracle run was observed, and none is claimed.** AAP §0.6.9 records that the
-authoring host has neither a COBOL compiler nor a container runtime, and A-NEW-13 records a missing
-frozen copybook that independently blocks the oracle build. Consequently the four entries marked
-**`PENDING — AWAITING ORACLE EXECUTION`** — A-11, A-15, A-17 and, in part, A-2, A-14 and A-19 — carry
-a `Q-` cross-reference instead of a value. No stored value anywhere in this document is a guess, and
-no `Q-` identifier is invented: each is one already emitted into the dictionary's `ambiguity_refs` by
-`acas_posting/dictionary/generate.py`, or already carried by a sibling module or test.
+**What compiled execution established.** On 2026-08-04 the strict oracle build completed with all
+29 expected `*MT` bridges and 28 loaders. All eight mandated journeys then completed the ten-stage
+protocol with observed empty diffs, and the scenario tier passed 93 tests in both declared and
+reverse file order. The measurements added to A-13 and A-NEW-13 through A-NEW-17 are therefore
+runtime findings, not source-reading predictions. The full evidence and manifest digests are in
+[`scenario-diff-evidence.md`](scenario-diff-evidence.md).
+
+**What remains open.** Compiled execution of the mandated scenarios does not answer every `Q-`
+question. Entries whose exact stored value still depends on an unexecuted boundary experiment keep
+their `PENDING` or partial status in
+[`ambiguity-resolutions.md`](ambiguity-resolutions.md). No value is promoted merely because a
+related journey passed.
 
 **What was corrected.** Fourteen locators from the Agent Action Plan and three claims from the
 received brief did not survive verification. They are listed in §8 and, for the build scripts, in
@@ -1560,9 +1650,10 @@ place at §13.4, §13.5, §13.6 and §13.12. In every case the frozen file decid
 
 **Register integrity.** Twenty-two canonical entries, `A-1` through `A-22`, none missing and none
 renumbered. Fourteen marked test-locked — A-1, A-2, A-3, A-4, A-5, A-7, A-8, A-9, A-10, A-11, A-13,
-A-14, A-19, A-21 — each naming a real test from §11. Thirteen candidates, `A-NEW-1` through
-`A-NEW-13`, in their own section. Thirteen frozen-script and frozen-file defects in §13, recorded and
-deliberately not fixed.
+A-14, A-19, A-21 — each naming a real test from §11. Seventeen candidates, `A-NEW-1` through
+`A-NEW-17`, remain in their own section. Thirteen frozen-script and frozen-file defects in §13 are
+recorded; executable compatibility changes live only in the writable build tree or in the migration
+harness.
 
 **The freeze held.** Creating this document modified no frozen file. `common/*.cbl`, `common/*.scb`,
 `copybooks/*.cob`, `general/*.cbl`, `sales/*.cbl`, `purchase/*.cbl`, `irs/*.cbl`,

@@ -641,6 +641,7 @@ ACAS_PY_DISK_CHANGE=''          # the end-of-cycle disk-change option, 0 or 9
 ACAS_PY_ARCHIVE_PATH=''         # the end-of-cycle archive path override, or empty
 ACAS_PY_PAYMENT_CONFIRM=''      # the payment run-confirm answer, YES or NO
 ACAS_PY_CALLER=''               # WS-Caller override, or empty for the route default
+ACAS_PY_TABLE_EFFECT=''         # changed or unchanged, declared by the scenario
 
 declare -a ACAS_PY_TABLES=()          # the scenario's affected-table list, in order
 declare -a ACAS_PY_REQUESTED_OPS=()   # --operation, repeated
@@ -650,6 +651,7 @@ declare -a ACAS_PY_OBSERVED=()        # the status each operation actually left
 declare -a ACAS_PY_SUMMARY=()         # the closing summary table
 declare -a ACAS_PY_WARN_SUMMARY=()    # non-fatal findings, replayed at the end
 declare -a ACAS_PY_ARGV=()            # out-parameter of the argv builder
+declare -A ACAS_PY_BEFORE_DIGESTS=()  # canonical affected-table digests before run
 ACAS_PY_CAPTURE_DIR=''                # <out-dir>/<scenario>/python
 ACAS_PY_FINGERPRINT=''                # this side's seed fingerprint file
 ACAS_PY_STATUS_FILE=''                # python.run-status -- read by harness/dump_tables.py
@@ -705,6 +707,7 @@ readonly ACAS_PY_SCENARIO_KEYS=(
   archive_path_override
   ws_caller
   affected_tables
+  expected_table_effect
   expected_status
 )
 
@@ -1353,6 +1356,10 @@ SCENARIO KEYS THIS STAGE READS
     affected_tables        The table list that BOUNDS the comparison. Required.
                            Every name must be one of the 22 in-scope tables, and
                            no name may appear twice.
+    expected_table_effect  REQUIRED: "changed" when at least one affected table
+                           must differ after the run, or "unchanged" for a
+                           deliberate empty-batch/rejection journey. Checked
+                           with canonical primary-key-ordered table digests.
     irs_clear_postings     "Y" or "N". REQUIRED for irs_post, and there is no
                            default because the frozen program has none. "Y"
                            removes every row of the IRS transfer table
@@ -2550,6 +2557,19 @@ acas_py_resolve_pinned_values() {
   acas_py_resolve_gating_answers
   acas_py_resolve_tables
 
+  ACAS_PY_TABLE_EFFECT="$(acas_py_scenario_scalar expected_table_effect)"
+  case "$ACAS_PY_TABLE_EFFECT" in
+    changed|unchanged) ;;
+    *)
+      acas_py_die "$EX_SCENARIO" \
+        'the scenario must declare expected_table_effect: changed or unchanged.' \
+        'Use changed when at least one affected table must differ after the run,' \
+        'and unchanged for a deliberate empty-batch or rejected-run journey.' \
+        'The declaration is checked against canonical table digests, not only row' \
+        'counts, so an in-place update is observable.'
+      ;;
+  esac
+
   acas_py_log "run date   = $(acas_py_sanitise_field "$ACAS_PY_RUN_DATE_TEXT")  (date_form $ACAS_PY_DATE_FORM, expected Run-Date $ACAS_PY_RUN_DATE_BINARY)"
   acas_py_note 'the date text is passed through unchanged; its digits are never reordered to match date_form (D-3)'
   case "$ACAS_PY_IRS_INSTEAD" in
@@ -2557,6 +2577,7 @@ acas_py_resolve_pinned_values() {
     'Y') acas_py_log 'IRS fan-out = "Y"      IRS instead of the General Ledger' ;;
     'B') acas_py_log 'IRS fan-out = "B"      IRS as well as the General Ledger' ;;
   esac
+  acas_py_log "table effect = $ACAS_PY_TABLE_EFFECT"
 }
 
 # -----------------------------------------------------------------------------
@@ -3108,6 +3129,9 @@ acas_py_db() {
 import os
 import re
 import sys
+import decimal
+import hashlib
+import json
 
 try:
     import mysql.connector as driver
@@ -3269,6 +3293,65 @@ try:
                     sys.stderr.write(
                         "%s could not be counted (errno %s)\n" % (table, errno)
                     )
+        elif MODE == "digests":
+            schema = (os.environ.get("ACAS_DB_NAME") or "").strip()
+
+            def canonical(value):
+                if isinstance(value, decimal.Decimal):
+                    return {"decimal": format(value, "f")}
+                if isinstance(value, (bytes, bytearray, memoryview)):
+                    return {"bytes": bytes(value).hex()}
+                if value is None or isinstance(value, (int, str)):
+                    return value
+                return {"text": str(value)}
+
+            for table in TABLES:
+                if not IDENTIFIER.match(table):
+                    sys.stderr.write(
+                        "%r is not a plain table name; it cannot be digested.\n"
+                        % table
+                    )
+                    status = 2
+                    break
+                quoted = "`%s`" % table.replace("`", "``")
+                try:
+                    cursor.execute(
+                        "SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE "
+                        "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s "
+                        "AND CONSTRAINT_NAME = 'PRIMARY' ORDER BY ORDINAL_POSITION",
+                        (schema, table),
+                    )
+                    primary = [str(row[0]) for row in cursor.fetchall()]
+                    if not primary:
+                        raise RuntimeError("table has no primary key")
+                    order_by = ", ".join(
+                        "`%s`" % name.replace("`", "``") for name in primary
+                    )
+                    cursor.execute(
+                        "SELECT * FROM %s ORDER BY %s" % (quoted, order_by)
+                    )
+                    columns = [str(item[0]) for item in cursor.description]
+                    rows = [
+                        [canonical(value) for value in row]
+                        for row in cursor.fetchall()
+                    ]
+                    payload = json.dumps(
+                        {"columns": columns, "rows": rows},
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ).encode("utf-8")
+                    digest = hashlib.sha256(payload).hexdigest()
+                    sys.stdout.write(
+                        "%s\t%d\t%s\n" % (table, len(rows), digest)
+                    )
+                except Exception as exc:
+                    errno = getattr(exc, "errno", "unknown")
+                    sys.stdout.write("%s\t-\t-\n" % table)
+                    sys.stderr.write(
+                        "%s could not be digested (errno %s)\n"
+                        % (table, errno)
+                    )
         else:
             sys.stderr.write("unknown mode %r\n" % MODE)
             status = 2
@@ -3359,27 +3442,31 @@ acas_py_assert_database() {
 # refused here, never written: repairing a mis-seeded system record would be this
 # stage inventing state, and the seed is the seed stage's business (R-3).
 #
-# A missing SYSTEM-REC row is NOT this gate's failure to report. The scenario stage
-# and the seed stage both own that, and reporting it twice with two different exit
-# codes would send an operator to the wrong place, so an unreadable value is noted
-# and passed over.
+# A missing or unreadable SYSTEM-REC is fatal here. This is the last pre-run gate:
+# passing it over would let this stage attest a zero-row run as successful even when
+# an earlier seed-stage diagnostic had been missed.
 acas_py_assert_file_system_used() {
-  local rc=0 out='' value=''
-  out="$(acas_py_db system 'FILE-SYSTEM-USED')" || rc=$?
+  local rc=0 out='' value='' cyclea=''
+  out="$(acas_py_db system 'FILE-SYSTEM-USED' 'CYCLEA')" || rc=$?
   if (( rc != 0 )); then
-    acas_py_note "SYSTEM-REC.FILE-SYSTEM-USED could not be read (status $rc), so the flat-file trap is UNCHECKED for this run"
-    return 0
+    acas_py_die "$EX_PRECONDITION" \
+      "SYSTEM-REC could not be read (status $rc)." \
+      'Without its store selector and accounting cycle this stage cannot prove' \
+      'that any migrated database path is reachable, so the run is refused.'
   fi
   local key val
   while IFS=$'\t' read -r key val; do
-    if [[ "$key" == 'FILE-SYSTEM-USED' ]]; then
-      value="$val"
-    fi
+    case "$key" in
+      FILE-SYSTEM-USED) value="$val" ;;
+      CYCLEA)           cyclea="$val" ;;
+    esac
   done <<< "$out"
 
   if [[ "$value" == '-' || -z "$value" ]]; then
-    acas_py_note 'SYSTEM-REC holds no readable FILE-SYSTEM-USED, so the flat-file trap is UNCHECKED here; the scenario and seed stages report a missing system record'
-    return 0
+    acas_py_die "$EX_PRECONDITION" \
+      'SYSTEM-REC holds no readable FILE-SYSTEM-USED.' \
+      'A missing parameter row makes every later success claim vacuous; re-run the' \
+      'reset and seed stages and verify systemLD persisted relative record 1.'
   fi
 
   acas_py_log "FILE-SYSTEM-USED = $(acas_py_render_char "$value")"
@@ -3398,7 +3485,32 @@ acas_py_assert_file_system_used() {
       'reaches this gate would have stopped that side too.' \
       'Fix the seed -- nothing here writes to SYSTEM-REC (R-3).'
   fi
+  if [[ ! "$cyclea" =~ ^[0-9]+$ ]] || (( 10#$cyclea == 0 )); then
+    acas_py_die "$EX_PRECONDITION" \
+      "SYSTEM-REC.CYCLEA must be a non-zero whole number; got $(acas_py_render_char "$cyclea")." \
+      'A zero cycle is diverted to the frozen interactive recovery path and cannot' \
+      'drive a headless posting journey.'
+  fi
+
+  # AUDIT-3: assert the migrated REDEFINES model against the value just read.
+  # SCYCLE has no database column because it is the same byte as CYCLEA.
+  if ! "$ACAS_PY_PYTHON" - "$cyclea" <<'PY'
+import sys
+from acas_posting.records.system_record import SystemDataBlock
+
+block = SystemDataBlock()
+block.cyclea = int(sys.argv[1])
+raise SystemExit(0 if block.scycle == block.cyclea else 1)
+PY
+  then
+    acas_py_die "$EX_ASSERT" \
+      'the migrated SYSTEM-REC model does not preserve Scycle REDEFINES Cyclea.' \
+      'Every posting route compares batch cycle to the Scycle view, so a mismatch' \
+      'would turn the run into a silent no-op.'
+  fi
+  acas_py_log "PASS  SYSTEM-REC Cyclea/Scycle share the loaded value $cyclea"
   acas_py_summary_row 'FILE-SYSTEM-USED' "$(acas_py_render_char "$value")"
+  acas_py_summary_row 'Cyclea/Scycle' "$cyclea"
 }
 
 # acas_py_table_counts <table>...
@@ -3415,6 +3527,41 @@ acas_py_table_counts() {
     'ACAS_TIMEOUT_CLIENT' 'counting rows'
   return "$rc"
 }
+
+
+acas_py_record_before_state() {
+  local rc=0 table count digest total=0
+  ACAS_PY_SQL_OUT=''
+  ACAS_PY_SQL_OUT="$(acas_py_db digests "${ACAS_PY_TABLES[@]}")" || rc=$?
+  if (( rc != 0 )); then
+    acas_py_die "$EX_DATABASE" \
+      "the affected tables could not be fingerprinted before the run (status $rc)." \
+      'A row count alone cannot detect an in-place update, so a run without these' \
+      'canonical digests cannot prove its declared table effect.'
+  fi
+
+  ACAS_PY_BEFORE_DIGESTS=()
+  while IFS=$'\t' read -r table count digest; do
+    [[ -n "$table" ]] || continue
+    if [[ ! "$count" =~ ^[0-9]+$ || ! "$digest" =~ ^[0-9a-f]{64}$ ]]; then
+      acas_py_die "$EX_DATABASE" \
+        "$table has no readable pre-run table fingerprint." \
+        'Every affected table must exist and have a deterministic primary-key' \
+        'ordering before a parity journey can be attributed.'
+    fi
+    ACAS_PY_BEFORE_DIGESTS["$table"]="$digest"
+    total=$(( total + 10#$count ))
+  done <<< "$ACAS_PY_SQL_OUT"
+
+  if (( total == 0 )); then
+    acas_py_die "$EX_PRECONDITION" \
+      'every affected table is empty before the Python run.' \
+      'That is a vacuous starting state: a missing seed, a failed loader or an' \
+      'all-empty database would let a no-op produce an empty diff and a false pass.'
+  fi
+  acas_py_log "PASS  pre-run affected-table state is non-empty ($total row(s)) and canonically fingerprinted"
+}
+
 
 # =============================================================================
 # THE SEED FINGERPRINT
@@ -3463,6 +3610,8 @@ acas_py_seed_fingerprint() {
     [[ -n "$line" ]] || continue
     acas_py_log "  $(printf '%-22s %s' "${line%%$'\t'*}" "${line##*$'\t'}")"
   done <<< "$ACAS_PY_SQL_OUT"
+
+  acas_py_record_before_state
 
   # THE CROSS-CHECK. The oracle-side fingerprint is written by
   # acas_record_seed_fingerprint in [harness/run_cobol_scenario.sh], as the last
@@ -3661,6 +3810,10 @@ acas_py_run_operations() {
 
     ACAS_PY_OBSERVED+=("$rc")
     acas_py_log "  status = $rc (after ${elapsed}s)"
+    # Stable machine-readable behavioural evidence for tests/conftest.py. The
+    # wrapper itself exits zero when every observed status matches the scenario;
+    # this record preserves the child operation's real process status.
+    acas_py_log "$(printf 'OPERATION_STATUS\t%s\t%s' "$operation" "$rc")"
 
     # A bad command line is THIS SCRIPT'S fault and is never a behavioural
     # difference. The migrated argument layer reports one as status 2, which is
@@ -3703,6 +3856,64 @@ acas_py_run_operations() {
 # and that the run is comparable at all. None of them is an opinion about the
 # accounting -- that belongs to the diff stage.
 # =============================================================================
+acas_py_assert_table_effect() {
+  local rc=0 table count digest before changed=0
+  local -A seen=()
+
+  ACAS_PY_SQL_OUT=''
+  ACAS_PY_SQL_OUT="$(acas_py_db digests "${ACAS_PY_TABLES[@]}")" || rc=$?
+  if (( rc != 0 )); then
+    ACAS_PY_ASSERT_FAILURES=$(( ACAS_PY_ASSERT_FAILURES + 1 ))
+    acas_py_warn "FAIL  the affected tables could not be fingerprinted after the run (status $rc)"
+    return
+  fi
+
+  while IFS=$'\t' read -r table count digest; do
+    [[ -n "$table" ]] || continue
+    seen["$table"]=1
+    before="${ACAS_PY_BEFORE_DIGESTS[$table]-}"
+    if [[ ! "$count" =~ ^[0-9]+$ || ! "$digest" =~ ^[0-9a-f]{64}$ || -z "$before" ]]; then
+      ACAS_PY_ASSERT_FAILURES=$(( ACAS_PY_ASSERT_FAILURES + 1 ))
+      acas_py_warn "FAIL  $table has no comparable before/after fingerprint"
+      continue
+    fi
+    if [[ "$digest" == "$before" ]]; then
+      acas_py_log "PASS  $table is byte-state unchanged ($count row(s))"
+    else
+      changed=$(( changed + 1 ))
+      acas_py_log "PASS  $table changed from its recorded pre-run state ($count row(s) after)"
+    fi
+  done <<< "$ACAS_PY_SQL_OUT"
+
+  for table in "${ACAS_PY_TABLES[@]}"; do
+    if [[ -z "${seen[$table]-}" ]]; then
+      ACAS_PY_ASSERT_FAILURES=$(( ACAS_PY_ASSERT_FAILURES + 1 ))
+      acas_py_warn "FAIL  $table is absent from the post-run fingerprint"
+    fi
+  done
+
+  case "$ACAS_PY_TABLE_EFFECT" in
+    changed)
+      if (( changed == 0 )); then
+        ACAS_PY_ASSERT_FAILURES=$(( ACAS_PY_ASSERT_FAILURES + 1 ))
+        acas_py_warn 'FAIL  the scenario declared changed table state, but every affected-table digest is unchanged'
+      else
+        acas_py_log "PASS  declared changed state observed in $changed affected table(s)"
+      fi
+      ;;
+    unchanged)
+      if (( changed != 0 )); then
+        ACAS_PY_ASSERT_FAILURES=$(( ACAS_PY_ASSERT_FAILURES + 1 ))
+        acas_py_warn "FAIL  the scenario declared unchanged table state, but $changed affected table(s) changed"
+      else
+        acas_py_log 'PASS  the deliberate no-op/rejection left every affected table unchanged'
+      fi
+      ;;
+  esac
+  acas_py_summary_row 'declared table effect' "$ACAS_PY_TABLE_EFFECT ($changed changed)"
+}
+
+
 acas_py_assert_after_run() {
   ACAS_PY_CURRENT_STAGE='post-run assertions'
   acas_py_stage 'Stage 6c/8: post-run assertions'
@@ -3716,23 +3927,25 @@ acas_py_assert_after_run() {
   #    zero or as the previous value.
   ACAS_PY_SQL_OUT=''
   acas_py_deadline_prefix "$ACAS_TIMEOUT_CLIENT"
-  ACAS_PY_SQL_OUT="$(acas_py_db system 'RUN-DAT' 'IRS-INSTEAD')" || rc=$?
+  ACAS_PY_SQL_OUT="$(acas_py_db system 'RUN-DAT' 'IRS-INSTEAD' 'CYCLEA')" || rc=$?
   if (( rc != 0 )); then
     ACAS_PY_ASSERT_FAILURES=$(( ACAS_PY_ASSERT_FAILURES + 1 ))
     acas_py_warn "FAIL  the pinned system-record columns could not be read after the run (status $rc)"
   else
-    local run_dat='' irs_after=''
+    local run_dat='' irs_after='' cyclea_after=''
     while IFS=$'\t' read -r key value; do
       case "$key" in
         RUN-DAT)     run_dat="$value" ;;
         IRS-INSTEAD) irs_after="$value" ;;
+        CYCLEA)      cyclea_after="$value" ;;
       esac
     done <<< "$ACAS_PY_SQL_OUT"
 
     if [[ "$run_dat" == "$ACAS_PY_RUN_DATE_BINARY" ]]; then
       acas_py_log "PASS  the system record holds Run-Date $run_dat, as pinned"
     elif [[ "$run_dat" == '-' ]]; then
-      acas_py_note 'the system record holds no row, so the pinned run date cannot be read back; the seed did not load it'
+      ACAS_PY_ASSERT_FAILURES=$(( ACAS_PY_ASSERT_FAILURES + 1 ))
+      acas_py_warn 'FAIL  the SYSTEM-REC row disappeared, so the pinned run date cannot be read back'
     else
       ACAS_PY_ASSERT_FAILURES=$(( ACAS_PY_ASSERT_FAILURES + 1 ))
       acas_py_warn "FAIL  the system record holds Run-Date $(acas_py_render_char "$run_dat") but the scenario pinned $ACAS_PY_RUN_DATE_BINARY"
@@ -3765,12 +3978,31 @@ acas_py_assert_after_run() {
     local observed="${irs_after%% }"
     local pinned="${ACAS_PY_IRS_INSTEAD%% }"
     if [[ "$irs_after" == '-' ]]; then
-      acas_py_note 'the system record holds no row, so the fan-out switch cannot be read back'
+      ACAS_PY_ASSERT_FAILURES=$(( ACAS_PY_ASSERT_FAILURES + 1 ))
+      acas_py_warn 'FAIL  the SYSTEM-REC row disappeared, so the fan-out switch cannot be read back'
     elif [[ "$observed" == "$pinned" ]]; then
       acas_py_log "PASS  the fan-out switch still holds $ACAS_PY_IRS_INSTEAD_SHOWN"
     else
       ACAS_PY_ASSERT_FAILURES=$(( ACAS_PY_ASSERT_FAILURES + 1 ))
       acas_py_warn "FAIL  the fan-out switch changed from $ACAS_PY_IRS_INSTEAD_SHOWN to $(acas_py_render_char "$irs_after") during the run"
+    fi
+
+    if [[ ! "$cyclea_after" =~ ^[0-9]+$ ]] || (( 10#$cyclea_after == 0 )); then
+      ACAS_PY_ASSERT_FAILURES=$(( ACAS_PY_ASSERT_FAILURES + 1 ))
+      acas_py_warn "FAIL  SYSTEM-REC.CYCLEA is not readable and non-zero after the run: $(acas_py_render_char "$cyclea_after")"
+    elif "$ACAS_PY_PYTHON" - "$cyclea_after" <<'PY'
+import sys
+from acas_posting.records.system_record import SystemDataBlock
+
+block = SystemDataBlock()
+block.cyclea = int(sys.argv[1])
+raise SystemExit(0 if block.scycle == block.cyclea else 1)
+PY
+    then
+      acas_py_log "PASS  the post-run Cyclea/Scycle views share $cyclea_after"
+    else
+      ACAS_PY_ASSERT_FAILURES=$(( ACAS_PY_ASSERT_FAILURES + 1 ))
+      acas_py_warn 'FAIL  the post-run SystemDataBlock does not preserve Scycle REDEFINES Cyclea'
     fi
   fi
 
@@ -3816,7 +4048,11 @@ acas_py_assert_after_run() {
     acas_py_log "  $(printf '%-22s %s' "${line%%$'\t'*}" "${line##*$'\t'}")"
   done <<< "$ACAS_PY_SQL_OUT"
 
-  # 4. THE FROZEN CHECKOUT IS UNTOUCHED. The read-only mount is the belt and the
+  # 4. THE DECLARED TABLE EFFECT. Canonical primary-key-ordered digests catch
+  #    in-place updates as well as row-count changes.
+  acas_py_assert_table_effect
+
+  # 5. THE FROZEN CHECKOUT IS UNTOUCHED. The read-only mount is the belt and the
   #    bytecode-writing setting is the braces; this is the proof. Agent Action Plan
   #    section 0.8.1 treats ANY diff to the checkout as a defect "regardless of how
   #    harmless it appears", and an import that created a cache directory inside it

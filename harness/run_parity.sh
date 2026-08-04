@@ -22,11 +22,13 @@
 #     reached: a non-zero stage stops the run at that stage, with the stage named.
 #
 # It is a DRIVER and nothing else. It contains no accounting logic, no SQL, no
-# table names and no scenario knowledge: every stage is one of the five scripts or
-# three tools, invoked exactly as the committed recipe in
-# harness/docker-compose.yml documents, and every decision it makes is "did that
-# exit zero". Anything it appeared to know about a scenario would be a second
-# source of truth for the scenario file.
+# table names and no accounting knowledge. It reads only the scenario basename
+# and its ordered operation names: the basename selects the isolated staged-data
+# directory, and a multi-menu scenario requires one compiled process per declared
+# operation. Every accounting input remains in the scenario file, every stage is
+# one of the committed scripts or tools, and every verdict decision is "did that
+# exit zero". Restating a table, answer or expected value here would create a
+# second source of truth and is forbidden.
 #
 # Strictly sequential (R-3): no stage is backgrounded, no two stages overlap, and
 # exactly one scenario runs at a time.
@@ -57,6 +59,7 @@ readonly EX_PRECONDITION=71   # environment or scenario assertion
 
 ACAS_PARITY_SCENARIO_FILE=''   # the positional argument
 ACAS_PARITY_SCENARIO=''        # its basename without the extension
+ACAS_PARITY_RUNTIME_DATA=''    # staged COBOL files for this scenario only
 ACAS_PARITY_FROM=1             # --from N
 ACAS_PARITY_TO=10              # --to N
 ACAS_PARITY_DRY_RUN=0          # --dry-run
@@ -65,6 +68,7 @@ ACAS_PARITY_SEED_DIR=''        # --seed-dir, forwarded to the two reset stages
 ACAS_PARITY_STAGE_INDEX=0      # the stage being run, for the traps
 ACAS_PARITY_STAGE_NAME=''
 declare -a ACAS_PARITY_SUMMARY=()
+declare -a ACAS_PARITY_OPERATIONS=()
 
 # The ten stages, in the one order that makes the verdict mean anything. Each row
 # is `<number>:<label>', and the body of each is a case arm in acas_parity_run_stage
@@ -283,7 +287,7 @@ acas_parity_parse_args() {
 
 acas_parity_assert_environment() {
   local name missing=0
-  for name in ACAS_REPO ACAS_OUT; do
+  for name in ACAS_REPO ACAS_DATA ACAS_OUT; do
     if [[ -z "${!name-}" ]]; then
       printf 'FATAL: required environment variable %s is unset or empty.\n' "$name" >&2
       missing=1
@@ -312,6 +316,43 @@ acas_parity_assert_environment() {
     "the scenario name must be a plain identifier; got '$ACAS_PARITY_SCENARIO'." \
     'It becomes a directory name under ACAS_OUT, so it may hold only letters,' \
     'digits, underscore and hyphen.'
+
+  # reset_db.sh stages each built fixture below `$ACAS_DATA/<scenario>`. The
+  # Python test protocol supplies that isolated directory to both run stages;
+  # this standalone driver must do the same for both ACAS_DATA and ACAS_LEDGERS
+  # or the compiled menu searches the data-volume root for system.dat while
+  # reset staged it one directory below.
+  ACAS_PARITY_RUNTIME_DATA="${ACAS_DATA%/}/$ACAS_PARITY_SCENARIO"
+
+  local operation_lines
+  operation_lines="$(
+    "$ACAS_PARITY_PYTHON" - "$ACAS_PARITY_SCENARIO_FILE" <<'PY'
+import sys
+from pathlib import Path
+
+import yaml
+
+path = Path(sys.argv[1])
+definition = yaml.safe_load(path.read_text(encoding="utf-8"))
+if not isinstance(definition, dict):
+    raise SystemExit(f"{path}: scenario definition is not a YAML mapping")
+
+operations = definition.get("operations")
+if operations is None:
+    operations = [definition.get("operation")]
+if not isinstance(operations, list) or not operations:
+    raise SystemExit(f"{path}: scenario declares no operation")
+for operation in operations:
+    if not isinstance(operation, str) or not operation:
+        raise SystemExit(f"{path}: operation names must be non-empty strings")
+    print(operation)
+PY
+  )" || acas_parity_die "$EX_PRECONDITION" \
+    "the scenario operation list could not be read from $ACAS_PARITY_SCENARIO_FILE"
+  mapfile -t ACAS_PARITY_OPERATIONS <<< "$operation_lines"
+  (( ${#ACAS_PARITY_OPERATIONS[@]} > 0 )) || acas_parity_die \
+    "$EX_PRECONDITION" \
+    "the scenario declares no operations: $ACAS_PARITY_SCENARIO_FILE"
 
   local script
   for script in reset_db.sh run_cobol_scenario.sh run_python_scenario.sh \
@@ -344,7 +385,11 @@ acas_parity_argv() {
       fi
       ACAS_PARITY_ARGV+=("$S")
       ;;
-    2) ACAS_PARITY_ARGV=("$H/run_cobol_scenario.sh" "$S") ;;
+    2) ACAS_PARITY_ARGV=(
+         'env' "ACAS_DATA=$ACAS_PARITY_RUNTIME_DATA"
+         "ACAS_LEDGERS=$ACAS_PARITY_RUNTIME_DATA"
+         "$H/run_cobol_scenario.sh" '--operation' "${ACAS_PARITY_OPERATIONS[0]}" "$S"
+       ) ;;
     3) ACAS_PARITY_ARGV=(
          "$ACAS_PARITY_PYTHON" "$H/dump_tables.py"
          '--scenario' "$N" '--side' 'cobol' '--scenario-file' "$S"
@@ -353,7 +398,11 @@ acas_parity_argv() {
          "$ACAS_PARITY_PYTHON" "$H/normalize.py"
          '--scenario' "$N" '--side' 'cobol'
        ) ;;
-    6) ACAS_PARITY_ARGV=("$H/run_python_scenario.sh" "$S") ;;
+    6) ACAS_PARITY_ARGV=(
+         'env' "ACAS_DATA=$ACAS_PARITY_RUNTIME_DATA"
+         "ACAS_LEDGERS=$ACAS_PARITY_RUNTIME_DATA"
+         "$H/run_python_scenario.sh" "$S"
+       ) ;;
     7) ACAS_PARITY_ARGV=(
          "$ACAS_PARITY_PYTHON" "$H/dump_tables.py"
          '--scenario' "$N" '--side' 'python' '--scenario-file' "$S"
@@ -371,6 +420,64 @@ acas_parity_argv() {
       acas_parity_die "$EX_USAGE" "there is no stage $stage."
       ;;
   esac
+}
+
+# Stage 2 may span more than one menu process. `period_end_totals` is the one
+# committed example: Sales invoice, Sales cash, Purchase order and Purchase
+# payment run in that exact order against one seeded state. Each ordinary runner
+# invocation owns one menu process, so drive the declared sequence without a
+# reset between operations and preserve operation one's seed fingerprint and
+# successful run-status attestation for the later dump. This mirrors
+# tests/conftest.py::run_cobol_sequence.
+acas_parity_run_cobol_sequence() {
+  local run_logs="$ACAS_OUT/run-logs/$ACAS_PARITY_SCENARIO"
+  local fingerprint="$run_logs/cobol.seed-fingerprint"
+  local status_file="$run_logs/cobol.run-status"
+  local saved_fingerprint saved_status
+  saved_fingerprint="$(mktemp)"
+  saved_status="$(mktemp)"
+  local preserved=0 index=0 operation rc=0 log_path
+  local -a command=()
+
+  for operation in "${ACAS_PARITY_OPERATIONS[@]}"; do
+    index=$((index + 1))
+    command=(
+      'env' "ACAS_DATA=$ACAS_PARITY_RUNTIME_DATA"
+      "ACAS_LEDGERS=$ACAS_PARITY_RUNTIME_DATA"
+      "$ACAS_PARITY_HARNESS/run_cobol_scenario.sh"
+      '--operation' "$operation"
+    )
+    if (( index > 1 )); then
+      log_path="$run_logs/cobol.$index-$operation.log"
+      command+=('--log' "$log_path")
+    fi
+    command+=("$ACAS_PARITY_SCENARIO_FILE")
+
+    acas_parity_log \
+      "operation $index/${#ACAS_PARITY_OPERATIONS[@]}: $(acas_parity_join "${command[@]}")"
+    "${command[@]}"
+    rc=$?
+
+    if (( index == 1 && rc == 0 )); then
+      [[ -f "$fingerprint" && -f "$status_file" ]] || {
+        rm -f "$saved_fingerprint" "$saved_status"
+        acas_parity_die "$EX_PRECONDITION" \
+          'the first oracle operation completed without publishing its seed fingerprint and run-status attestation.'
+      }
+      cp -- "$fingerprint" "$saved_fingerprint"
+      cp -- "$status_file" "$saved_status"
+      preserved=1
+    fi
+    (( rc == 0 )) || break
+  done
+
+  if (( preserved )); then
+    cp -- "$saved_fingerprint" "$fingerprint"
+    cp -- "$saved_status" "$status_file"
+    chmod 600 "$fingerprint" "$status_file"
+  fi
+  rm -f "$saved_fingerprint" "$saved_status"
+  return "$rc"
 }
 
 # Stage 9 is the one stage with no command of its own: it asserts that stages 4
@@ -414,15 +521,24 @@ acas_parity_run_stage() {
     return 0
   fi
 
-  acas_parity_argv "$stage"
-  acas_parity_log "command: $(acas_parity_join "${ACAS_PARITY_ARGV[@]}")"
-
   # `set +e' around exactly one command, so a non-zero status is a value to
   # report rather than an unexpected failure for the ERR trap.
-  set +e
-  "${ACAS_PARITY_ARGV[@]}"
-  rc=$?
-  set -e
+  if [[ "$stage" == '2' ]]; then
+    acas_parity_log "staged data: $ACAS_PARITY_RUNTIME_DATA"
+    acas_parity_log \
+      "declared operations: $(acas_parity_join "${ACAS_PARITY_OPERATIONS[@]}")"
+    set +e
+    acas_parity_run_cobol_sequence
+    rc=$?
+    set -e
+  else
+    acas_parity_argv "$stage"
+    acas_parity_log "command: $(acas_parity_join "${ACAS_PARITY_ARGV[@]}")"
+    set +e
+    "${ACAS_PARITY_ARGV[@]}"
+    rc=$?
+    set -e
+  fi
 
   if (( rc == 0 )); then
     acas_parity_log "stage $stage: exit 0"
@@ -484,6 +600,15 @@ acas_parity_main() {
     fi
 
     if (( ACAS_PARITY_DRY_RUN )); then
+      if [[ "$stage" == '2' ]]; then
+        local operation
+        for operation in "${ACAS_PARITY_OPERATIONS[@]}"; do
+          printf 'stage %-3s env ACAS_DATA=%s ACAS_LEDGERS=%s %s/run_cobol_scenario.sh --operation %s %s\n' \
+            "$stage" "$ACAS_PARITY_RUNTIME_DATA" "$ACAS_PARITY_RUNTIME_DATA" "$ACAS_PARITY_HARNESS" \
+            "$operation" "$ACAS_PARITY_SCENARIO_FILE"
+        done
+        continue
+      fi
       acas_parity_argv "$stage"
       if (( ${#ACAS_PARITY_ARGV[@]} == 0 )); then
         printf 'stage %-3s %-58s (an in-script check, no command)\n' "$stage" "$label"

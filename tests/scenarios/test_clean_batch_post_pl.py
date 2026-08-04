@@ -1177,7 +1177,7 @@ def test_scenario_definition_preconditions(
     )
     seed = definition["seed"]
     assert tuple(seed["files"]) == expected_seed_files
-    assert seed["data_dir"] == "pl_clean"
+    assert seed["data_dir"] == SCENARIO
     # The flat mirrors the seeder itself reads. It resolves a relative directory
     # against the directory holding the definition.
     assert tuple(definition["seed_files"]) == expected_seed_files

@@ -161,14 +161,16 @@ def pin_from_to_day(to_day: str) -> PinnedRunDate:
 
     work.u_date = _move_to_date_text(to_day)
 
-    pinned_to_day = work.u_date
-
 # [L78] move zero to u-bin.
     work.u_bin = 0
 
     dates.maps04(work)
 
-    return PinnedRunDate(to_day=pinned_to_day, run_date=work.u_bin)
+    # `maps04` normalises each accepted separator to "/" while deriving u-bin.
+    # The CLI accepts that same widened input domain, so pin the text observable
+    # from the normalized record rather than retaining a form the frozen menu can
+    # never place in `to-day`.
+    return PinnedRunDate(to_day=work.u_date, run_date=work.u_bin)
 
 
 # REVERSE - BINARY TO TEXT [general/general.cbl:L465-L467], verbatim: 465 move run-date

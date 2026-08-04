@@ -209,11 +209,20 @@ SYSTEM_RELATIVE_RECORDS: Final[dict[str, tuple[str, str, str]]] = {
     "4": ("wssys4.cob", "System-Record-4", "SYSTOT-REC via sys4LD"),
 }
 
-# The three system-record fields filled from the environment and refused in a scenario.
-CREDENTIAL_FIELDS: Final[tuple[str, ...]] = (
-    "RDBMS-DB-Name",
-    "RDBMS-User",
-    "RDBMS-Passwd",
+# The six system-record connection fields filled from the environment and refused in a
+# scenario. The widths are the actual declarations in wssystem.cob rather than the
+# narrower x(12) RDB-Data fields used after the frozen handler copies them.
+CONNECTION_FIELD_BINDINGS: Final[tuple[tuple[str, str, int, bool], ...]] = (
+    ("RDBMS-DB-Name", "ACAS_DB_NAME", 12, True),
+    ("RDBMS-User", "ACAS_DB_USER", 12, True),
+    ("RDBMS-Passwd", "ACAS_DB_PASSWORD", 12, True),
+    ("RDBMS-Host", "ACAS_DB_HOST", 32, True),
+    ("RDBMS-Port", "ACAS_DB_PORT", 5, True),
+    # An empty socket is the frozen TCP-only declaration and is therefore valid.
+    ("RDBMS-Socket", "ACAS_DB_SOCKET", 64, False),
+)
+CREDENTIAL_FIELDS: Final[tuple[str, ...]] = tuple(
+    field for field, _environment, _width, _required in CONNECTION_FIELD_BINDINGS
 )
 
 # A COBOL data name, as this tool is willing to emit it. Deliberately narrow in its
@@ -1428,29 +1437,27 @@ def declared_records(document: dict, name: str) -> list[dict[str, str]]:
 
 
 def credentials_from_env() -> dict[str, str]:
-    """The three system-record credential fields, from the environment only."""
-    values = {
-        "RDBMS-DB-Name": (os.environ.get("ACAS_DB_NAME") or "").strip(),
-        "RDBMS-User": (os.environ.get("ACAS_DB_USER") or "").strip(),
-        "RDBMS-Passwd": os.environ.get("ACAS_DB_PASSWORD") or "",
-    }
-    for field, value in values.items():
-        if not value:
+    """Return all six system-record connection fields from the environment only."""
+    values: dict[str, str] = {}
+    for field, environment, width, required in CONNECTION_FIELD_BINDINGS:
+        raw_value = os.environ.get(environment) or ""
+        value = raw_value if field == "RDBMS-Passwd" else raw_value.strip()
+        if required and not value:
             fail(
                 EX_PRECONDITION,
-                f"{field} has no value: the environment does not supply it.",
-                "The system record carries the account the loaders authenticate with",
-                "[copybooks/wssystem.cob:L137-L139], and it is taken from the",
-                "environment so that no credential is committed. Export",
-                "ACAS_DB_NAME, ACAS_DB_USER and ACAS_DB_PASSWORD.",
+                f"{field} has no value: {environment} does not supply it.",
+                "The system record carries all six connection parameters used by",
+                "the frozen loaders [copybooks/wssystem.cob:L137-L144], and they",
+                "come from the environment so no deployment value is committed.",
             )
-        if len(value) > 12:
+        if len(value) > width:
             fail(
                 EX_PRECONDITION,
-                f"{field} is {len(value)} characters long; the field is pic x(12).",
-                "A longer value is silently truncated and the loaders then fail to",
-                "authenticate [copybooks/wsfnctn.cob:L56-L62].",
+                f"{field} is {len(value)} characters long; the field is pic x({width}).",
+                "A longer value is silently truncated before the frozen loader",
+                "connects [copybooks/wssystem.cob:L137-L144].",
             )
+        values[field] = value
     return values
 
 
@@ -1490,9 +1497,9 @@ def build_one(
                         fail(
                             EX_SCENARIO,
                             f"the scenario declares {reserved}, which is refused.",
-                            "The three credential fields are filled from the",
-                            "environment so that no credential is committed to the",
-                            "repository.",
+                            "The six connection fields are filled from the environment",
+                            "so no credential or deployment endpoint is committed to",
+                            "the repository.",
                         )
                 fields.update(forced)
             elif any(k.lower() in {f.lower() for f in CREDENTIAL_FIELDS} for k in fields):
@@ -1715,7 +1722,7 @@ def main(argv: list[str] | None = None) -> int:
         epilog=(
             "The records live in the scenario file under seed_records, as text, so "
             "that no money figure is ever parsed by YAML into a binary float. The "
-            "three RDBMS credential fields of the system record are filled from the "
+            "six RDBMS connection fields of the system record are filled from the "
             "environment and refused in the scenario file."
         ),
     )

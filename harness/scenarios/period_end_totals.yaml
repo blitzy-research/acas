@@ -959,7 +959,7 @@ date_form: 1
 irs_instead: " "
 
 seed:
-  data_dir: period_end
+  data_dir: period_end_totals
   files:
     - system.dat
     - analysis.dat
@@ -976,7 +976,7 @@ seed:
 # membership only: the frozen loader order of [common/masterLD.sh:L93-L116] is
 # what actually runs, with the system block first -- and within that block
 # sys4LD, the step that loads this scenario's focal table.
-seed_dir: period_end
+seed_dir: period_end_totals
 seed_files:
   - system.dat
   - analysis.dat
@@ -1013,6 +1013,8 @@ operations:
 # [general/gl070.cbl:L289], which this file never runs. A status that
 # contradicts this is reported as a behavioural difference and the capture is
 # still taken, so the table diff can corroborate it (R-4).
+expected_table_effect: changed
+
 expected_status:
   - 0
   - 0
@@ -1484,8 +1486,12 @@ seed_records:
       il-update: " "
       il-Back-Ordered: " "
 
-  # FOUR SALES OPEN ITEMS, one per route sl100 can take. The type is what selects the
-  # route: sl100 discards anything that is not 2, 5 or 6 outright
+  # FOUR SALES OPEN ITEMS, one per route sl100 can take. Their invoice keys start at
+  # 10 because sl060 phase 1 first writes OTM3 rows for invoice headers 1, 2 and 3;
+  # pre-seeding those same keys produces FS-Reply 22 and an acknowledgement loop
+  # instead of the intended four-operation journey. The renumbering preserves key
+  # order and every accounting field. The type is what selects the route: sl100
+  # discards anything that is not 2, 5 or 6 outright
   # [sales/sl100.cbl:L338-L339].
   #   type 2, batch and item BOTH non-zero -> compute-sales-pay
   #     [sales/sl100.cbl:L341-L345], which is the average variant with the INVERTED
@@ -1501,7 +1507,7 @@ seed_records:
   openitm3.dat:
     - OI-Nos: "A00100"
       OI-Check: "1"
-      OI-Invoice: "1"
+      OI-Invoice: "10"
       OI-B-Nos: "9"
       OI-B-Item: "1"
       OI-Date: "155127"
@@ -1528,7 +1534,7 @@ seed_records:
       OI-Date-Cleared: "0"
     - OI-Nos: "A00100"
       OI-Check: "1"
-      OI-Invoice: "2"
+      OI-Invoice: "11"
       OI-B-Nos: "9"
       OI-B-Item: "2"
       OI-Date: "155127"
@@ -1555,7 +1561,7 @@ seed_records:
       OI-Date-Cleared: "0"
     - OI-Nos: "A00100"
       OI-Check: "1"
-      OI-Invoice: "4"
+      OI-Invoice: "13"
       OI-B-Nos: "9"
       OI-B-Item: "3"
       OI-Date: "155127"
@@ -1582,7 +1588,7 @@ seed_records:
       OI-Date-Cleared: "0"
     - OI-Nos: "A00100"
       OI-Check: "1"
-      OI-Invoice: "3"
+      OI-Invoice: "12"
       OI-B-Nos: "9"
       OI-B-Item: "4"
       OI-Date: "155127"
@@ -1642,7 +1648,11 @@ seed_records:
       Purch-Stats-Date: "2509"
       Purch-Unapplied: "234.56"
       Purch-Accountno: "12345678"
-      Purch-SortCode: "112233"
+      # purchMT receives this native BINARY-LONG through `PIC 9(08) COMP`; a
+      # non-zero six-digit value is byte-reinterpreted above the frozen
+      # `mediumint unsigned` range. Zero is representable and this posting route
+      # never reads the sort code.
+      Purch-SortCode: "0"
 
   # THREE PURCHASE DOCUMENTS -- two invoices and one credit note, mirroring the Sales
   # side. NO PROFORMA, deliberately: pl055 has neither a proforma filter nor a pending
@@ -1769,13 +1779,16 @@ seed_records:
   # THREE PURCHASE OPEN ITEMS: an invoice awaiting the cash calculation, a PAYMENT of
   # type 5 so the ninth period total fires [purchase/pl100.cbl:L396], and an OPEN
   # CREDIT NOTE so the eighth fires [purchase/pl060.cbl:L628] and the suppressed
-  # second apportionment pass is exercised. Both the invoice and the credit note carry
-  # LATE DEDUCTIONS. Note the Purchase open-item record carries an order and a
-  # reference where the Sales one carries a description [copybooks/plwsoi.cob].
+  # second apportionment pass is exercised. Their keys start at 10 so pl060 can first
+  # create the OTM5 rows for invoice headers 1 through 3 without a duplicate-key
+  # acknowledgement loop; relative order and accounting content are unchanged. Both
+  # the invoice and the credit note carry LATE DEDUCTIONS. Note the Purchase open-item
+  # record carries an order and a reference where the Sales one carries a description
+  # [copybooks/plwsoi.cob].
   openitm5.dat:
     - OI-Nos: "S00100"
       OI-Check: "1"
-      OI-Invoice: "1"
+      OI-Invoice: "10"
       OI-B-Nos: "8"
       OI-B-Item: "1"
       OI-Date: "155127"
@@ -1803,7 +1816,7 @@ seed_records:
       OI-Date-Cleared: "0"
     - OI-Nos: "S00100"
       OI-Check: "1"
-      OI-Invoice: "2"
+      OI-Invoice: "11"
       OI-B-Nos: "8"
       OI-B-Item: "2"
       OI-Date: "155127"
@@ -1831,7 +1844,7 @@ seed_records:
       OI-Date-Cleared: "0"
     - OI-Nos: "S00100"
       OI-Check: "1"
-      OI-Invoice: "3"
+      OI-Invoice: "12"
       OI-B-Nos: "8"
       OI-B-Item: "3"
       OI-Date: "155127"

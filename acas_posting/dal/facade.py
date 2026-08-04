@@ -234,10 +234,10 @@ def _keyword_extras_accepted_by(target: Callable[..., object]) -> frozenset[str]
     """The keyword-only parameter names ``target`` declares.
 
     Read from the signature rather than transcribed into a table, because the
-    seventeen handler modules do NOT agree on their keyword-only extras - eight
+    seventeen handler modules do NOT agree on their keyword-only extras - eleven
     take ``transport``, two of those also take ``states``, three also take
     ``allow_frozen_placeholder_credentials``, ``acas022_purch`` takes
-    ``purchase_file``, ``acas026_pinvoice`` takes ``context``, and nine take none
+    ``purchase_file``, ``acas026_pinvoice`` takes ``context``, and six take none
     at all. A transcribed table would be a second opinion that could drift from
     the first; a signature cannot.
 
@@ -323,8 +323,8 @@ def _forward(
 # THE ONE SECURITY-POLICY CONTRACT
 # ---------------------------------------------------------------------------
 #
-# `FacadeContext.options` carries a policy to the eight handlers that declare a
-# keyword-only `transport` on their `dispatch`. Four more accept one ONLY through
+# `FacadeContext.options` carries a policy to the eleven handlers that declare a
+# keyword-only `transport` on their `dispatch`. Two more accept one ONLY through
 # a module-level declaration function of their own - the equivalent of setting a
 # sub-program's WORKING-STORAGE before the first `CALL`, which is exactly what
 # their COBOL originals do with the six `RDBMS-*` values
@@ -340,8 +340,8 @@ def _forward(
 #
 # NOT GLOBAL MUTABLE STATE INVENTED BY THE MIGRATION. Each handler's declaration
 # slot already exists, because each COBOL sub-program already has working storage
-# that outlives one `CALL`; this function does not add a slot, it gives the four
-# that can only be reached that way a single, greppable caller.
+# that outlives one `CALL`; this function does not add a slot, it gives the
+# module-level routes a single, greppable caller.
 
 
 #: The handlers whose transport policy is settable ONLY through a module-level
@@ -377,12 +377,12 @@ def declare_connection_policy(
     THE COMPANION OF ``FacadeContext.options``, NOT A SUBSTITUTE FOR IT. Between
     them they cover every handler that can be told a policy at all:
 
-    * eight handlers declare a keyword-only ``transport`` on their ``dispatch``
+    * eleven handlers declare a keyword-only ``transport`` on their ``dispatch``
       and are reached by ``options={"transport": ...}`` on the context;
-    * three are reached only through a module-level declaration and are reached
-      by this function;
-    * ``acas022_purch`` is in the first group;
-    * ``acas005_gl_nominal``, ``acas012_sales``, ``acas016_invoice`` and
+    * ``acas000_system`` and ``acasirsub1_irs_nominal`` are reached only through
+      a module-level declaration and are reached by this function;
+    * ``acas007_gl_batch`` supports both routes for compatibility;
+    * ``acas005_gl_nominal``, ``acas012_sales``, ``acas026_pinvoice`` and
       ``acasirsub4_irs_posting`` publish neither, so they can only ever use the
       fail-closed default - a Unix socket or a loopback address. That is a
       LIMITATION AND IT IS RECORDED AS ONE: those four cannot be pointed at a

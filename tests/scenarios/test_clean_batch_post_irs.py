@@ -2062,39 +2062,29 @@ def test_a5_lost_update_on_vat_control_accounts_reproduced(
 
 @pytest.mark.database
 @pytest.mark.oracle
-def test_psirspost_rec_is_emptied_by_the_clear_answer(
+def test_psirspost_rec_clear_reproduces_the_frozen_high_key_threshold(
     parity: object,
     harness: object,
     scenario_loader: object,
 ) -> None:
-    """The transfer table ends EMPTY on both sides - the only truncation in the eight.
+    """The clear answer reproduces the bridge's bounded predicate on both sides.
 
-    THE MECHANISM. Answering Y at [irs/irs030.cbl:L1720] performs
-    `acas008-Open-Output` [irs/irs030.cbl:L1723] followed by `acas008-Close`
-    [irs/irs030.cbl:L1724]. For this handler an open-for-output with
-    `not FS-Cobol-Files-Used` is CONVERTED INTO A MASS DELETE:
-    [common/acas008.cbl:L313-L319] sets `fn-delete-all` and performs
-    `ba-Process-RDBMS`, and `ba015-Test-Ends.` [common/acas008.cbl:L566] does it again,
-    unguarded, at [common/acas008.cbl:L571-L574]. EVERY ROW OF `PSIRSPOST-REC` GOES.
+    Answering Y at [irs/irs030.cbl:L1720-L1724] still reaches the special
+    open-output route in [common/acas008.cbl:L313-L319]. The bridge does NOT issue an
+    unqualified DELETE, however. It moves 99999 into both five-digit key components
+    [common/slpostingMT.cbl:L849-L851] and deletes only rows whose SQL key is below
+    the resulting text bound, 9999999999 [common/slpostingMT.cbl:L857-L891].
 
-    THAT THE CLEAR WORKS AT ALL IS A DELIBERATE SPECIAL CASE AHEAD OF A GUARD. The same
-    handler refuses four of its published verbs unconditionally at entry
-    [common/acas008.cbl:L299-L307]; the open-output substitution is tested BEFORE that
-    block, which is the only reason this one path reaches the delete-all.
+    F-7 made the six fixture rows independently reachable by assigning distinct post
+    numbers. The frozen group-to-binary move stores each resulting key near
+    472328296244... - well ABOVE 9999999999. Consequently the operator's Y answer is
+    a measured NO-OP for this reachable RDBMS fixture: all six rows remain on both
+    sides. Treating the paragraph name "Delete-ALL" as proof of truncation would assert
+    intended accounting rather than compiled behaviour, violating R-4 and R-6.
 
-    THE CONTRAST IS PRESERVED, NEVER HARMONISED (A-NEW-8):
-    [common/acas007.cbl:L305-L312] carries the same block with
-    `set fn-delete-all to true` COMMENTED OUT at [common/acas007.cbl:L308], so a
-    General-Ledger batch `Open-Output` does NOT truncate `GLBATCH-REC`.
-
-    WHY STAGE 5 OF THE PROTOCOL IS LOAD-BEARING HERE AND NOWHERE ELSE. The oracle run
-    at stage 2 empties this table. Without the drop, schema re-apply and re-seed at
-    stage 5, the Python run at stage 6 would open an already-empty transfer file, read
-    end-of-file immediately at [irs/irs030.cbl:L1620-L1622], post nothing at all - and
-    the two sides would then "agree" about a scenario only one of them ran.
-
-    AN EMPTY TABLE IS AN ABSENCE, and an absence is recorded only by a dump. That is
-    why the protocol dumps whatever the run stages returned.
+    The reset between the two runs remains load-bearing even though this table is
+    retained: the other three affected tables are mutated, and both sides must still
+    begin from the identical six-row transfer fixture.
 
     Args:
         parity: The completed, guarded eight-stage run.
@@ -2110,7 +2100,7 @@ def test_psirspost_rec_is_emptied_by_the_clear_answer(
 
     transfer = _table_diff(parity, "PSIRSPOST-REC")
     assert transfer.is_empty, (
-        f"the two sides disagree about `PSIRSPOST-REC` after the end-of-job clear.\n"
+        f"the two sides disagree about `PSIRSPOST-REC` after the bounded clear.\n"
         f"  COBOL rows {transfer.cobol_row_count}, Python rows "
         f"{transfer.python_row_count}\n"
         f"  missing on the Python side: {list(transfer.missing_in_python)}\n"
@@ -2118,24 +2108,32 @@ def test_psirspost_rec_is_emptied_by_the_clear_answer(
         f"{_render(harness, parity)}"
     )
 
+    definition = scenario_loader(SCENARIO)
+    seed_rows = definition["seed_records"]["postings2irs.dat"]
+    expected_rows = len(seed_rows)
+    delete_bound = 9_999_999_999
+    assert expected_rows > 0, (
+        "HARNESS FAULT: the transfer fixture is empty, so the frozen delete threshold "
+        "cannot be observed."
+    )
+
     for side in ("cobol", "python"):
         dump = _normalised(harness, parity.paths, side, "PSIRSPOST-REC")
-        assert dump["row_count"] == 0, (
-            f"THE TRUNCATION DID NOT HAPPEN on the {side} side: `PSIRSPOST-REC` "
-            f"still holds {dump['row_count']} row(s). Answering Y at "
-            f"[irs/irs030.cbl:L1720] performs `acas008-Open-Output` "
-            f"[irs/irs030.cbl:L1723], which [common/acas008.cbl:L313-L319] converts "
-            f"into a delete-all - and [common/acas008.cbl:L571-L574] does so again "
-            f"unguarded. If this is the Python side, the truncation has been made "
-            f"conditional or dropped; if it is the COBOL side, the run left through "
-            f"one of the three guards before reaching `EOJ-q1` "
-            f"[irs/irs030.cbl:L1715], because `main99-exit.` [irs/irs030.cbl:L1729] "
-            f"sits AFTER it."
+        assert dump["row_count"] == expected_rows, (
+            f"the {side} side retained {dump['row_count']} transfer row(s), expected "
+            f"the fixture's {expected_rows}. The compiled bridge deletes only SQL keys "
+            f"below {delete_bound} [common/slpostingMT.cbl:L849-L891]."
         )
-        assert list(dump["rows"]) == [], (
-            f"the {side} dump of `PSIRSPOST-REC` reports row_count 0 but carries "
-            f"{len(dump['rows'])} row(s). A dump whose count disagrees with its rows "
-            f"is the comparison's exit 2 - a HARNESS FAULT and never a pass."
+        indexed = _rows_by_key(dump)
+        assert len(indexed) == expected_rows, (
+            f"the {side} dump reports {dump['row_count']} transfer rows but indexes "
+            f"{len(indexed)} distinct primary keys."
+        )
+        low_keys = sorted(int(str(key)) for key in indexed if int(str(key)) < delete_bound)
+        assert low_keys == [], (
+            f"the {side} side retained transfer keys below the frozen clear bound "
+            f"{delete_bound}: {low_keys}. Those rows should have matched "
+            f"[common/slpostingMT.cbl:L857-L891]."
         )
 
 

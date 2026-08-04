@@ -1634,6 +1634,14 @@ class PInvoiceContext:
         default_factory=HeaderHostVariables
     )
     line_hv: LineHostVariables = dataclasses.field(default_factory=LineHostVariables)
+    # The caller view declares `ih-order pic x(10)` [copybooks/plwspinv2.cob:L28],
+    # while the bridge view splits those same bytes into a group containing two
+    # numeric fields [copybooks/plwspinv.cob:L17-L27]. Remember the exact incoming
+    # image beside the split view: a group MOVE must preserve nonnumeric bytes until
+    # one of the group's members is explicitly changed.
+    ih_order_group: IhOrder | None = None
+    ih_order_image: str = " " * 10
+    ih_order_components: tuple[str, int, str, int] | None = None
     #: `01 WS-Invoice-Line.` [common/plinvoiceMT.cbl:L362-L379] - the bridge's own line
     #: record, declared separately because the third `REPLACING` clause renamed every
     #: copied `il-` field to `Un-Used-il-` [:L458].
@@ -2160,20 +2168,41 @@ def _group_ih_supplier(ih_nos: str, ih_check: int) -> str:
     return _characters(ih_nos, 6) + _digits(ih_check, 1)
 
 
-def _group_ih_order(
-    ih_freq: str, ih_repeat: int, filler: str, ih_last_date: int
-) -> str:
+def _ih_order_components(group: IhOrder) -> tuple[str, int, str, int]:
+    """Return the four declared members of `05 ih-order.` in byte order."""
+    return (
+        group.ih_freq,
+        int(group.ih_repeat),
+        group.filler_1,
+        int(group.ih_last_date),
+    )
+
+
+def _group_ih_order(group: IhOrder, context: PInvoiceContext) -> str:
     """`move WS-ih-Order to HV-IH-ORDER` [common/plinvoiceMT.cbl:L1458].
 
     NONE of those five members has a host variable or a column: only the enclosing ten
-    bytes reach the database, as `IH-ORDER char(10)`.
+    bytes reach the database, as `IH-ORDER char(10)`. The file view can carry arbitrary
+    characters in those bytes [copybooks/plwspinv2.cob:L28], so rebuilding the image
+    unconditionally from numeric interpretations would change an untouched value.
     """
-    return (
-        _characters(ih_freq, 1)
-        + _digits(ih_repeat, 2)
-        + _characters(filler, 3)
-        + _binary_long_bytes(ih_last_date)
+    components = _ih_order_components(group)
+    if (
+        context.ih_order_group is group
+        and context.ih_order_components == components
+    ):
+        return context.ih_order_image
+
+    image = (
+        _characters(group.ih_freq, 1)
+        + _digits(group.ih_repeat, 2)
+        + _characters(group.filler_1, 3)
+        + _binary_long_bytes(group.ih_last_date)
     )
+    context.ih_order_group = group
+    context.ih_order_image = image
+    context.ih_order_components = components
+    return image
 
 
 def line_from_bodies(
@@ -2249,12 +2278,7 @@ def bb000_hv_load(pinvoice: PInvoiceHeader, context: PInvoiceContext) -> None:
         prime.ih_supplier.ih_nos, prime.ih_supplier.ih_check
     )
     header.hv_ih_dat = _narrow_signed_to_unsigned_host_variable(prime.ih_date, 10)
-    header.hv_ih_order = _group_ih_order(
-        prime.ih_order.ih_freq,
-        prime.ih_order.ih_repeat,
-        prime.ih_order.filler_1,
-        prime.ih_order.ih_last_date,
-    )
+    header.hv_ih_order = _group_ih_order(prime.ih_order, context)
     header.hv_ih_type = prime.ih_type
     header.hv_ih_ref = prime.ih_ref
     header.hv_ih_p_c = sub.ih_fig.ih_p_c
@@ -2300,13 +2324,7 @@ def bb100_unload_hvs(pinvoice: PInvoiceHeader, context: PInvoiceContext) -> None
     prime.ih_supplier.ih_nos = supplier[:6]
     prime.ih_supplier.ih_check = int(supplier[6]) if supplier[6].isdigit() else 0
     prime.ih_date = header.hv_ih_dat
-    order = _characters(header.hv_ih_order, 10)
-    prime.ih_order.ih_freq = order[0]
-    prime.ih_order.ih_repeat = int(order[1:3]) if order[1:3].isdigit() else 0
-    prime.ih_order.filler_1 = order[3:6]
-    prime.ih_order.ih_last_date = int.from_bytes(
-        order[6:10].encode("latin-1"), "big", signed=True
-    )
+    _split_ih_order(header.hv_ih_order, prime.ih_order, context)
     prime.ih_type = header.hv_ih_type
     prime.ih_ref = header.hv_ih_ref
     sub.ih_fig.ih_p_c = header.hv_ih_p_c
@@ -5003,8 +5021,9 @@ def linkage_header_for(
         held = (record, _new_linkage_header())
         _LINKAGE_HEADERS[identity] = held
     header = held[1]
-    _load_header_from_record(record, header)
-    _stage_line_from_record(record, _DEFAULT_CONTEXT if context is None else context)
+    active = _DEFAULT_CONTEXT if context is None else context
+    _load_header_from_record(record, header, active)
+    _stage_line_from_record(record, active)
     return header
 
 
@@ -5108,7 +5127,9 @@ def _stage_line_from_record(record: object, context: PInvoiceContext) -> None:
     )
 
 
-def _load_header_from_record(record: object, header: PInvoiceHeader) -> None:
+def _load_header_from_record(
+    record: object, header: PInvoiceHeader, context: PInvoiceContext
+) -> None:
     """The flat views into the nested record - one description into the other."""
     flat_header = getattr(record, "invoice_header")
     base = getattr(record, "ws_pinvoice_record")
@@ -5125,7 +5146,7 @@ def _load_header_from_record(record: object, header: PInvoiceHeader) -> None:
         prime.ih_supplier.ih_nos = flat_header.ih_supplier.ih_nos
         prime.ih_supplier.ih_check = flat_header.ih_supplier.ih_check
         prime.ih_date = flat_header.ih_date
-        _split_ih_order(flat_header.ih_order, prime.ih_order)
+        _split_ih_order(flat_header.ih_order, prime.ih_order, context)
         prime.ih_type = flat_header.ih_type
         prime.ih_ref = flat_header.ih_ref
         sub.ih_fig.ih_p_c = flat_header.ih_fig.ih_p_c
@@ -5169,12 +5190,7 @@ def _store_record_from_header(
             prime.ih_supplier.ih_nos, prime.ih_supplier.ih_check
         )
         base.invoice_date = prime.ih_date
-        base.inv_order = _group_ih_order(
-            prime.ih_order.ih_freq,
-            prime.ih_order.ih_repeat,
-            prime.ih_order.filler_1,
-            prime.ih_order.ih_last_date,
-        )
+        base.inv_order = _group_ih_order(prime.ih_order, context)
         base.invoice_type = prime.ih_type
 
     flat_header = getattr(record, "invoice_header")
@@ -5184,12 +5200,7 @@ def _store_record_from_header(
         flat_header.ih_supplier.ih_nos = prime.ih_supplier.ih_nos
         flat_header.ih_supplier.ih_check = prime.ih_supplier.ih_check
         flat_header.ih_date = prime.ih_date
-        flat_header.ih_order = _group_ih_order(
-            prime.ih_order.ih_freq,
-            prime.ih_order.ih_repeat,
-            prime.ih_order.filler_1,
-            prime.ih_order.ih_last_date,
-        )
+        flat_header.ih_order = _group_ih_order(prime.ih_order, context)
         flat_header.ih_type = prime.ih_type
         flat_header.ih_ref = prime.ih_ref
         flat_header.ih_fig.ih_p_c = sub.ih_fig.ih_p_c
@@ -5249,8 +5260,10 @@ def _move_to_actual_lines_in_row(value: int) -> int:
     return magnitude % 10**_ACTUAL_LINES_IN_ROW_DIGITS
 
 
-def _split_ih_order(order: str, group: IhOrder) -> None:
-    """Ten characters into ``05 ih-order.``'s four members, byte for byte."""
+def _split_ih_order(
+    order: str, group: IhOrder, context: PInvoiceContext
+) -> None:
+    """Expose ten caller bytes through ``05 ih-order.`` without losing the image."""
     text = _characters(order, 10)
     group.ih_freq = text[0]
     group.ih_repeat = int(text[1:3]) if text[1:3].isdigit() else 0
@@ -5258,3 +5271,6 @@ def _split_ih_order(order: str, group: IhOrder) -> None:
     group.ih_last_date = int.from_bytes(
         text[6:10].encode("latin-1"), "big", signed=True
     )
+    context.ih_order_group = group
+    context.ih_order_image = text
+    context.ih_order_components = _ih_order_components(group)

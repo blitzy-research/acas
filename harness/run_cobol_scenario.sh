@@ -195,6 +195,7 @@ ACAS_RUN_DATE_TEXT=''           # the pinned date, as typed
 ACAS_RUN_DATE_FORM=''           # 1 UK, 2 USA, 3 International
 ACAS_RUN_RUN_DATE=''            # the expected binary Run-Date
 ACAS_RUN_IRS_INSTEAD=''         # the pinned three-state fan-out switch
+ACAS_RUN_OBSERVED_STATUS=0       # term code observed from the driven menu path
 ACAS_RUN_IRS_CLEAR=''           # G-1: irs030's clear-transfer-file answer
 ACAS_RUN_GL080_PROCEED=''       # G-2: gl080's pre-run gate answer
 ACAS_RUN_PAYMENT_CONFIRM=''     # G-3: sl100 / pl100 YES/NO
@@ -3090,10 +3091,9 @@ acas_plan_ack() {
 
 
 # The code is raised inside gl070 on finding a batch left open
-# [general/gl070.cbl:L287-L290].
-
-# and `go to end-report' [general/gl070.cbl:L438-L439] "Type return to exit."
-# and a second accept Both prompts are answered.
+# [general/gl070.cbl:L287-L290]. The diagnostic report has two separate ACCEPTs:
+# its page choice at L421 does NOT carry AUTO, so selecting X requires Return;
+# the end-report acknowledgement at L439 then requires a second Return.
 acas_plan_gl_post_cycle() {
   acas_plan_date_entry
   acas_plan_menu_select
@@ -3106,7 +3106,7 @@ acas_plan_gl_post_cycle() {
     'gl070 Phase 2 banner [general/gl070.cbl:L292]'
 
   # The gate-fired path: gl060a's paginated Batch Status Report.
-  acas_plan_add 2 'gl060a-page' react 'for next screen or' 'X' 12 \
+  acas_plan_add 2 'gl060a-page' react 'for next screen or' 'X\r' 12 \
     'gl060a report paging, reached ONLY when the GL gate fires [general/gl070.cbl:L416-L421]'
   acas_plan_ack 'gl060a-exit' 'Type return to exit.' 4 \
     'gl060a end-of-report acknowledgement [general/gl070.cbl:L435-L439]'
@@ -3178,8 +3178,8 @@ acas_plan_sl_invoice_post() {
   acas_plan_add 2 'sl060-banner' react 'Invoice Posting & Report' '' 2 \
     'sl060 banner [sales/sl060.cbl:L419]'
 
-  acas_plan_ack 'sl-note-error' 'SL002' 6 \
-    'sl055/sl060 error acknowledgement; fires because ws-caller is "sales" [sales/sales.cbl:L481]'
+  acas_plan_add 2 'sl-note-error' react 'SL002' '' 6 \
+    'companion diagnostic only; the specific error anchor sends the acknowledgement so a repeated unchanged SL002 screen cannot consume an extra key [sales/sales.cbl:L481]'
   acas_plan_ack 'sl-continue' 'SL003' 6 \
     'sl060 hit-return-to-continue [sales/sl060.cbl:L262]'
   acas_plan_ack 'sl055-no-anal' 'SL125' 3 \
@@ -3192,6 +3192,8 @@ acas_plan_sl_invoice_post() {
     'sl055 you-will-need-to-update-this [sales/sl055.cbl:L257]'
   acas_plan_ack 'sl055-oi2-write' 'SL121' 3 \
     'sl055 open-item-2 write error [sales/sl055.cbl:L252]'
+  acas_plan_ack 'sl060-otm3-write' 'SL130' 6 \
+    'sl060 open-item-3 write error; match this changing anchor because curses may not redraw the identical SL002 companion prompt [sales/sl060.cbl:L590-L601]'
   acas_plan_ack 'sl060-zero-value' 'SL131' 3 \
     'sl060 zero-value CR swop [sales/sl060.cbl:L265]'
   acas_plan_ack 'sl060-batch-write' 'SL132' 3 \
@@ -3290,7 +3292,7 @@ acas_plan_irs_post() {
   # G-1. LIMIT 2 rather than 1: one legitimate appearance, and one more to
   # catch a rejected answer as a failure rather than as a hang.
   acas_plan_add 2 'irs030-clear' react 'Can I clear the Ledgers Posting' \
-    "$ACAS_RUN_IRS_CLEAR" 2 \
+    "${ACAS_RUN_IRS_CLEAR}\\r" 2 \
     "G-1: clear the transfer file = $ACAS_RUN_IRS_CLEAR; \"Y\" deletes every row of PSIRSPOST-REC [irs/irs030.cbl:L1715-L1724]"
   acas_plan_ack 'irs030-note-counts' 'Note counts and any messages' 2 \
     'pure acknowledgement, no database effect [irs/irs030.cbl:L1725-L1726]'
@@ -3303,6 +3305,12 @@ acas_plan_irs_post() {
     'IRSUB1-31 returned an error [irs/irs030.cbl:L1596-L1600]'
   acas_plan_ack 'irs030-irsub1-32' 'IR03B' 3 \
     'IRSUB1-32 returned an error [irs/irs030.cbl:L1606-L1610]'
+  acas_plan_ack 'irs030-invalid-debit' 'IR032' 6 \
+    'debit account missing after the indexed read; acknowledge the diagnostic before irs030 rejects the whole posting [irs/irs030.cbl:L1627-L1634]'
+  acas_plan_ack 'irs030-invalid-credit' 'IR033' 6 \
+    'credit account missing after the debit rewrite; acknowledge the diagnostic before irs030 preserves the reproduced half-post and continues [irs/irs030.cbl:L1645-L1652]'
+  acas_plan_ack 'irs030-posting-write' 'IR914' 3 \
+    'IRS posting-table write error; acknowledge the diagnostic before irs030 leaves through EOJ [irs/irs030.cbl:L1673-L1678]'
   acas_plan_ack 'irs030-nominal-err' 'IR912' 3 \
     'irsnominalMT error; irs030 acknowledges and gobacks [irs/irs030.cbl:L1437-L1443]'
   acas_plan_ack 'irs030-sy008' 'SY008' 4 \
@@ -4183,6 +4191,7 @@ acas_assert_after_run() {
   acas_stage 'Post-run assertions'
 
   local failures=0
+  ACAS_RUN_OBSERVED_STATUS=0
 
   # 1. The clock actually got pinned.
   local actual
@@ -4257,6 +4266,9 @@ acas_assert_after_run() {
       acas_matched 'gl072-phase4' && gl072_ran='yes'
       if acas_matched 'gl060a-page' || acas_matched 'gl060a-exit'; then
         gate='FIRED'
+        # The report is reached only through gl070's `a = 1` branch, whose next
+        # statement moves 5 to ws-term-code [general/gl070.cbl:L287-L290].
+        ACAS_RUN_OBSERVED_STATUS=5
       fi
       acas_log "GL gate (ws-term-code = 5) $gate  [general/general.cbl:L805-L815]"
       acas_log "  gl071 sort banner seen  : $gl071_ran"
@@ -4301,10 +4313,22 @@ acas_assert_after_run() {
       local rc2=0
       acas_sql_scalar "select count(*) from $(acas_sql_quote_ident 'PSIRSPOST-REC');" || rc2=$?
       if (( rc2 == 0 )); then
-        acas_log "PSIRSPOST-REC now holds $ACAS_SQL_OUT rows"
-        if [[ "$ACAS_RUN_IRS_CLEAR" == 'Y' && "$ACAS_SQL_OUT" != '0' && "$cleared" != 'not asked' ]]; then
-          failures=$((failures + 1))
-          acas_warn "FAIL  the clear answer was Y but PSIRSPOST-REC still holds $ACAS_SQL_OUT rows; acas008 Open-Output should have performed a delete-all [common/acas008.cbl:L313-L318]"
+        local transfer_rows="$ACAS_SQL_OUT"
+        acas_log "PSIRSPOST-REC now holds $transfer_rows rows"
+        if [[ "$ACAS_RUN_IRS_CLEAR" == 'Y' && "$cleared" != 'not asked' ]]; then
+          local eligible_rc=0
+          acas_sql_scalar \
+            "select count(*) from $(acas_sql_quote_ident 'PSIRSPOST-REC') where $(acas_sql_quote_ident 'IRS-POST-KEY') < '9999999999';" \
+            || eligible_rc=$?
+          if (( eligible_rc != 0 )); then
+            failures=$((failures + 1))
+            acas_warn 'FAIL  the rows eligible for the frozen IRS transfer cleanup could not be counted'
+          elif [[ "$ACAS_SQL_OUT" != '0' ]]; then
+            failures=$((failures + 1))
+            acas_warn "FAIL  the clear answer was Y but $ACAS_SQL_OUT PSIRSPOST-REC row(s) below key 9999999999 survived the frozen delete predicate [common/slpostingMT.cbl:L849-L891]"
+          else
+            acas_log "PASS  the frozen clear predicate removed every PSIRSPOST-REC row below key 9999999999; $transfer_rows higher-key row(s) remain by the compiled bridge's measured threshold [common/slpostingMT.cbl:L849-L891]"
+          fi
         fi
       fi
       acas_summary_row 'irs030 clear postings' "$cleared"
@@ -4326,6 +4350,12 @@ acas_assert_after_run() {
       acas_summary_row 'payment confirmation' "answered=$confirmed, value=$ACAS_RUN_PAYMENT_CONFIRM"
       ;;
   esac
+
+  # Machine-readable behavioural evidence for tests/conftest.py. This is the
+  # operation's observed term code, not this harness script's own exit status:
+  # the script exits zero only after the drive and all self-checks complete.
+  acas_log "$(printf 'OPERATION_STATUS\t%s\t%s' \
+    "$ACAS_RUN_OPERATION" "$ACAS_RUN_OBSERVED_STATUS")"
 
   # 5. Row counts for the scenario's own tables.
   if (( ${#ACAS_RUN_TABLES[@]} > 0 )); then

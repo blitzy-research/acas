@@ -120,7 +120,7 @@ date" never meant "no clock", and `clean_batch_irs` pins the same clock as
 THE PROTOCOL THIS FILE RUNS - PYTHON ONLY
 -------------------------------------------------------------------------------
 
-    [run A]  seed  -> run_python -> dump(python) -> normalize -> RELOCATE to runA
+    [run A]  reset -> run_python -> dump(python) -> normalize -> RELOCATE to runA
     [run B]  reset -> run_python -> dump(python) -> normalize -> RELOCATE to runB
              diff(runA, runB)  =>  MUST BE EMPTY
              + a literal byte-for-byte comparison of the two trees
@@ -133,13 +133,15 @@ licenses precisely this: "The compiled oracle exists only under `harness/` and i
 consumed only by `tests/scenarios/*` and `tests/determinism/*` as an out-of-process
 comparison."
 
-RUN B BEGINS FROM A RESET AND RE-SEEDED DATABASE, NEVER A DIRTY ONE. `harness/
-reset_db.sh` re-applies `mysql/ACASDB.sql` VERBATIM - the frozen file already carries
-all 33 `DROP TABLE IF EXISTS`, so re-applying it IS the drop-and-recreate and no DDL
-of this file's own is ever emitted (R-3) - asserts the post-apply state, and then
-re-seeds by delegating to `harness/seed.sh`. Without the reset the test would prove
-only that a second run over an already-posted state is idempotent, which is a
-different and far weaker claim.
+BOTH RUNS BEGIN FROM A RESET AND RE-SEEDED DATABASE, NEVER A DIRTY ONE.
+`harness/reset_db.sh` re-applies `mysql/ACASDB.sql` VERBATIM - the frozen file
+already carries all 33 `DROP TABLE IF EXISTS`, so re-applying it IS the
+drop-and-recreate and no DDL of this file's own is ever emitted (R-3) - asserts
+the post-apply state, and then re-seeds by delegating to `harness/seed.sh`.
+Resetting run A as well as run B makes the determinism tier independent of test
+order and of any prior hand-driven parity journey. Without those resets the test
+could compare a contaminated run against a clean one, or prove only that a second
+run over an already-posted state is idempotent.
 
 WHY THE STAGES ARE COMPOSED HERE RATHER THAN DELEGATED WHOLESALE. `tests/conftest.py`
 also publishes `run_determinism_pair`, which composes the same stages with two
@@ -268,20 +270,23 @@ and still wrong. `is_empty` alone would not notice.
     [copybooks/wssystem.cob:L111-L114], [common/acas007.cbl:L316-L320] and
     [common/acas008.cbl:L313-L319].
 
-    LAYER 3 - THE PINNED-CLOCK WITNESS, GENERAL LEDGER ONLY. At least one
-    `GLBATCH-REC` row holds `POSTED == 155127`. Provenance, verbatim from
-    [general/gl072.cbl:L372-L377]:
+    LAYER 3 - THE DATABASE-BACKED ROUTE-AND-CLOCK WITNESS. The runner must report
+    BOTH `FILE-SYSTEM-USED = 1` from its pre-run `SYSTEM-REC` read and
+    `PASS  the system record holds Run-Date 155127, as pinned` from its post-run
+    readback. The first marker closes channel 1 because the runner refuses the
+    frozen flat-file selector before dispatch; the second closes channel 2 because
+    it is emitted only after reading `RUN-DAT` back from MariaDB and comparing it
+    with the pinned binary date.
 
-        372|  end-batch.
-        375|      move     1  to  cleared-status.
-        376|      move     run-date  to  posted.
-        377|      perform  GL-Batch-Rewrite.
-
-    and `mysql/ACASDB.sql` declares `POSTED` `int(8) unsigned NOT NULL` - an INTEGER
-    column, which `harness/normalize.py`'s date-text job never touches, so 155127
-    appears in the dump verbatim as a JSON integer. THIS ONE ASSERTION CLOSES BOTH
-    VACUITY CHANNELS AT ONCE: it cannot hold if the run never wrote to MySQL, and it
-    cannot hold if the clock degraded to 0.
+    The witness deliberately no longer requires `GLBATCH-REC.POSTED == 155127`.
+    Phase-5 store remeasurement proved that the frozen `bb000-HV-Load` never moves
+    `WS-Post-rrn` to `HV-POST-RRN`; the one reachable RDBMS posting therefore has
+    key zero and is skipped by [general/gl070.cbl:L490-L493]. The faithfully
+    reproduced `clean_batch_gl` journey is consequently an asserted no-op, so
+    [general/gl072.cbl:L372-L377] is unreachable and `POSTED` correctly remains
+    zero. Requiring that unreachable rewrite would reject the measured oracle
+    behaviour rather than guard determinism. The database-backed system-record
+    witness preserves both anti-vacuity protections without inventing a mutation.
 
     LAYER 4 - SEED-FINGERPRINT IDENTITY. `harness/run_python_scenario.sh` writes
     `$ACAS_OUT/run-logs/<scenario>/python.seed-fingerprint` before each run, as one
@@ -293,13 +298,11 @@ and still wrong. `is_empty` alone would not notice.
 A GUARD FAILURE AT ANY LAYER IS A HARNESS FAULT, raised from the fixture, reported as
 a pytest ERROR, and worded so it is unmistakable from a determinism FAILURE.
 
-`SYSTEM-REC` is deliberately NOT used as a witness: it appears in no scenario's
-`affected_tables`, because a census across all twelve in-scope programs found zero
-`System-*` facade verbs. And no witness is invented for the IRS route -
-`GLBATCH-REC` is not among `clean_batch_irs`'s affected tables and the IRS witness
-column is oracle-arbitrated, a matter for `docs/migration/ambiguity-resolutions.md`.
-Layer 3 is therefore expressed as a declarative mapping with only the verified
-General Ledger entry populated, and every other scenario runs layers 1, 2 and 4.
+`SYSTEM-REC` remains outside every scenario's compared `affected_tables`, because a
+census across all twelve in-scope programs found zero `System-*` facade verbs. The
+runner's pre/post database assertions are therefore guard evidence, not an added
+comparison table: they neither alter the structural diff nor invent an IRS result
+column. The same two markers apply to both parametrised scenarios.
 
 -------------------------------------------------------------------------------
 THE ONE REAL NONDETERMINISM RISK
@@ -467,10 +470,11 @@ SCENARIO_KEY_RUN_DATE_BINARY: Final[str] = "run_date_binary"
 #
 #   `clean_batch_gl` IS MANDATORY, for three reasons. Its seed deliberately contains
 #   the four-key sort tie described in the module docstring - the single most valuable
-#   determinism input there is. It is the ONLY route with a verified pinned-clock
-#   witness, [general/gl072.cbl:L376] stamping `GLBATCH-REC.POSTED`. And it runs one
-#   operation with an empty answer map, so nothing about any command-line option
-#   spelling has to be known to drive it.
+#   determinism input there is. Its measured, faithfully reproduced store behaviour
+#   is an asserted no-op, so it proves that the tied stream and unchanged database
+#   state are repeatable rather than assuming a gl072 rewrite that the frozen zero-key
+#   loader anomaly makes unreachable. And it runs one operation with an empty answer
+#   map, so nothing about any command-line option spelling has to be known to drive it.
 #
 #   `clean_batch_irs` EARNS ITS PLACE BY TURNING THE RESET INTO A TEST-ENFORCED
 #   REQUIREMENT. Its run EMPTIES `PSIRSPOST-REC`: [irs/irs030.cbl:L1720-L1724]
@@ -507,28 +511,24 @@ SIDE_PYTHON: Final[str] = "python"
 # would be the added validation R-3 forbids, and byte identity is the whole claim.
 SEED_FINGERPRINT_NAME: Final[str] = "python.seed-fingerprint"
 
-# LAYER 3 - THE PINNED-CLOCK WITNESS, AS DECLARATIVE DATA, with only the verified
-# General Ledger entry populated.
+# LAYER 3 - DATABASE-BACKED WITNESS MARKERS emitted by
+# `harness/run_python_scenario.sh`.
 #
-# `(table, column, expected)`. The General Ledger entry is provenanced verbatim at
-# [general/gl072.cbl:L372-L377] - `move run-date to posted.` at L376 followed by
-# `perform GL-Batch-Rewrite.` - and `mysql/ACASDB.sql` declares `POSTED` as
-# `int(8) unsigned NOT NULL`, an INTEGER column that `harness/normalize.py`'s
-# date-text canonicalisation never touches, so the pinned 155127 appears in the dump
-# verbatim as a JSON integer.
+# The selector marker comes from a pre-run `SYSTEM-REC` query. The runner refuses
+# zero at [harness/run_python_scenario.sh:L3472-L3486], closing the false-pass path
+# where the migrated handlers take the frozen indexed-file leg. The clock marker
+# comes from a post-run `SYSTEM-REC.RUN-DAT` query and is emitted only when the value
+# equals the pinned binary date [harness/run_python_scenario.sh:L3928-L3958].
 #
-# NO WITNESS IS INVENTED FOR THE IRS ROUTE, and the omission is deliberate rather
-# than an oversight. `GLBATCH-REC` is not among `clean_batch_irs`'s affected tables,
-# and which IRS column would carry the run date is an oracle-arbitrated question -
-# a matter for `docs/migration/ambiguity-resolutions.md` (R-6), which does not exist
-# yet and is not this file's to write. `SYSTEM-REC` is not available either: it
-# appears in NO scenario's `affected_tables`, because a census across all twelve
-# in-scope programs found zero `System-*` facade verbs, so `RUN-DAT` cannot be
-# reached. A scenario absent from this mapping therefore runs layers 1, 2 and 4 only,
-# and says so in its own diagnostics rather than silently skipping a check.
-CLOCK_WITNESS: Final[Mapping[str, tuple[str, str, int]]] = {
-    "clean_batch_gl": ("GLBATCH-REC", "POSTED", PINNED_RUN_DATE),
-}
+# These are evidence emitted by database reads, not strings this test uses to infer
+# accounting state. Both must be present in each captured run stream. This remains
+# valid for the faithfully reproduced `clean_batch_gl` no-op, where the frozen
+# zero-key posting anomaly makes [general/gl072.cbl:L372-L377] unreachable and
+# `GLBATCH-REC.POSTED` therefore remains zero.
+FILE_SYSTEM_WITNESS: Final[str] = "FILE-SYSTEM-USED = 1"
+RUN_DATE_WITNESS: Final[str] = (
+    f"PASS  the system record holds Run-Date {PINNED_RUN_DATE}, as pinned"
+)
 
 # THE DETERMINISM AND FREEZE BELT `harness/run_python_scenario.sh` SETS. Asserted
 # here, never duplicated: this file sets none of them and modifies no script.
@@ -622,9 +622,13 @@ class RelocatedRun:
             proof that the representation artefacts have been canonicalised away.
         fingerprint: The snapshotted `python.seed-fingerprint`, taken before the
             NEXT run could overwrite the single path the runner writes it to.
-        run_status: The run stage's exit status, VERBATIM. Never normalised: only
-            three in-scope programs set a term code at all, so a non-zero status is a
-            BEHAVIOURAL result whose database effect must still be captured.
+        wrapper_status: The harness wrapper's exit status. Zero means the wrapper
+            completed its own assertions and emitted a complete operation-status
+            record; it is not the operation disposition.
+        run_status: The single operation's machine-readable status, taken from the
+            `OPERATION_STATUS` record rather than conflated with wrapper health.
+        run_output: The wrapper's complete stdout and stderr, retained so layer 3 can
+            verify its database-backed route-selector and pinned-clock readbacks.
         row_counts: Each affected table's `row_count`, in the scenario's declared
             order.
     """
@@ -632,7 +636,9 @@ class RelocatedRun:
     label: str
     tree: Path
     fingerprint: Path
+    wrapper_status: int
     run_status: int
+    run_output: str
     row_counts: tuple[tuple[str, int], ...]
 
     @property
@@ -871,86 +877,56 @@ def _row_counts(
 
 
 
-def _assert_clock_witness(
-    scenario: str,
-    tree: Path,
-    *,
-    load_dump: Callable[[Path], Mapping[str, Any]],
-) -> None:
-    """LAYER 3 - assert the pinned clock actually reached the database.
+def _assert_clock_witness(run: RelocatedRun) -> None:
+    """LAYER 3 - assert the RDBMS selector and pinned clock were read from MariaDB.
 
-    THIS ONE ASSERTION CLOSES BOTH VACUITY CHANNELS AT ONCE. It cannot hold if the run
-    never wrote to MySQL, because the witnessed row would not be there; and it cannot
-    hold if the clock degraded to zero through anomaly 16, because the witnessed value
-    would be 0 rather than the pinned day number. Two empty dumps are byte-identical
-    and two zero-dated dumps are byte-identical, so without this the file could pass
-    green while proving nothing.
+    The two assertions preserve the original guard's purpose after measured frozen
+    behaviour made the old `GLBATCH-REC.POSTED` premise unreachable:
 
-    GENERAL LEDGER ONLY, BY DESIGN. `CLOCK_WITNESS` holds only the verified entry, so
-    a scenario absent from it - `clean_batch_irs` - relies on layers 1, 2 and 4. The
-    reason is recorded at `CLOCK_WITNESS` and is not an oversight: no non-GL witness
-    column has been arbitrated against the compiled oracle, and inventing one would
-    settle by assumption a question R-6 reserves for
-    `docs/migration/ambiguity-resolutions.md`.
+    * `FILE-SYSTEM-USED = 1` is emitted from the runner's pre-run `SYSTEM-REC`
+      query; zero is refused before dispatch. This closes the indexed-file false-pass
+      channel documented at [copybooks/wssystem.cob:L111-L114] and
+      [common/acas007.cbl:L316-L320].
+    * the Run-Date PASS marker is emitted only after the runner reads `RUN-DAT` back
+      after the operation and observes the pinned 155127. This closes anomaly 16's
+      silent-zero channel [common/maps04.cbl:L146, L154] and
+      [copybooks/Proc-ACAS-Mapser-RDB.cob:L78].
 
     Args:
-        scenario: The scenario just run.
-        tree: Its relocated normalised tree.
-        load_dump: `harness/diff_states.py`'s `load_dump`.
+        run: One completed run and its immutable captured stream.
 
     Raises:
-        AssertionError: The witness table has no row carrying the pinned run date, or
-            the witness column is not in the dump's column list. A HARNESS FAULT
-            raised from the fixture, so a pytest ERROR - it is emphatically not a
-            two-run difference.
+        AssertionError: Either database-backed marker is absent. A HARNESS FAULT
+            raised from the fixture, so a pytest ERROR rather than a two-run
+            determinism difference.
     """
-    witness = CLOCK_WITNESS.get(scenario)
-    if witness is None:
-        # Nothing to assert, and nothing silently skipped either: layers 1, 2 and 4
-        # still ran, and the reason this route has no witness is documented in full at
-        # `CLOCK_WITNESS`.
-        return
-
-    table, column, expected = witness
-    dump = load_dump(tree / f"{table}.json")
-    columns = list(dump["columns"])
-
-    assert column in columns, (
-        f"HARNESS FAULT: `{table}` has no `{column}` column in the {tree.name} "
-        f"dump; its columns are {columns}. mysql/ACASDB.sql declares "
-        f"`{column}` on `{table}`, and the column list is read in schema ordinal "
-        f"order, so its absence means the frozen schema has been altered - which "
-        f"Agent Action Plan section 0.8.1 makes a defect in the migration."
+    assert FILE_SYSTEM_WITNESS in run.run_output, (
+        f"THE RDBMS ROUTE WAS NOT ATTESTED for {run.label} - a HARNESS FAULT, not "
+        f"a determinism failure. The run output does not contain "
+        f"{FILE_SYSTEM_WITNESS!r}.\n"
+        f"  harness/run_python_scenario.sh queries SYSTEM-REC before dispatch and "
+        f"refuses FILE-SYSTEM-USED zero, because [copybooks/wssystem.cob:L111-L114] "
+        f"selects the COBOL indexed-file path at zero and the MySQL path at one; the "
+        f"same gate is visible at [common/acas007.cbl:L316-L320] and "
+        f"[common/acas008.cbl:L313-L319]. Without this marker two deterministic "
+        f"captures could prove only that both runs bypassed the database.\n"
+        f"  wrapper status: {run.wrapper_status}; operation status: {run.run_status}."
     )
-    position = columns.index(column)
-    observed = [row[position] for row in dump["rows"]]
-
-    assert expected in observed, (
-        f"THE PINNED CLOCK DID NOT REACH THE DATABASE - a HARNESS FAULT, not a "
-        f"determinism failure. No `{table}` row in the {tree.name} tree carries "
-        f"`{column}` == {expected}; the {len(observed)} value(s) present are "
-        f"{observed}.\n"
-        f"  Provenance: [general/gl072.cbl:L372-L377] - `end-batch.` at L372, "
-        f"`move 1 to cleared-status.` at L375, `move run-date to posted.` at L376 "
-        f"and `perform GL-Batch-Rewrite.` at L377 - so a posted batch MUST carry "
-        f"the run date it was posted under. mysql/ACASDB.sql declares `{column}` as "
-        f"`int(8) unsigned NOT NULL`, an integer column harness/normalize.py's "
-        f"date-text canonicalisation never touches, so the pinned value appears "
-        f"verbatim as a JSON integer.\n"
-        f"  THIS GUARD EXISTS BECAUSE WITHOUT IT THIS FILE COULD PASS VACUOUSLY. "
-        f"Two likely causes, both of which produce a perfectly deterministic and "
-        f"perfectly worthless run:\n"
-        f"    1. The scenario's `system.file_system_used` is not 1, so every handler "
-        f"took the COBOL indexed-file path and NEVER TOUCHED MySQL - "
-        f"[copybooks/wssystem.cob:L111-L114] declares "
-        f"`88 FS-Cobol-Files-Used value zero`, and the gate is visible at "
-        f"[common/acas007.cbl:L316-L320] and [common/acas008.cbl:L313-L319].\n"
-        f"    2. The pinned date was REJECTED by maps04 and degraded to 0 without "
-        f"raising - anomaly 16, [common/maps04.cbl:L146] and "
-        f"[common/maps04.cbl:L154] falling through without touching the output "
-        f"field, masked by the caller's pre-zero at "
-        f"[copybooks/Proc-ACAS-Mapser-RDB.cob:L78]. A `{column}` of 0 here is that "
-        f"defect, reproduced faithfully and detected deliberately."
+    assert RUN_DATE_WITNESS in run.run_output, (
+        f"THE PINNED CLOCK DID NOT REACH THE DATABASE for {run.label} - a HARNESS "
+        f"FAULT, not a determinism failure. The run output does not contain "
+        f"{RUN_DATE_WITNESS!r}.\n"
+        f"  The runner emits that marker only after reading SYSTEM-REC.RUN-DAT back "
+        f"from MariaDB after the operation and observing {PINNED_RUN_DATE}. A zero "
+        f"would expose anomaly 16: maps04 returns without touching its output at "
+        f"[common/maps04.cbl:L146, L154], masked by the caller's pre-zero at "
+        f"[copybooks/Proc-ACAS-Mapser-RDB.cob:L78].\n"
+        f"  The old GLBATCH-REC.POSTED witness is intentionally not used: measured "
+        f"frozen loader behaviour persists the sole posting under key zero, so "
+        f"[general/gl070.cbl:L490-L493] skips it and the gl072 rewrite at "
+        f"[general/gl072.cbl:L372-L377] is unreachable. Requiring POSTED=155127 "
+        f"would reject the faithfully reproduced no-op instead of protecting this "
+        f"test from vacuity."
     )
 
 
@@ -963,9 +939,8 @@ def _execute_run(
     workspace: Path,
     load_dump: Callable[[Path], Mapping[str, Any]],
     dump_keys: Sequence[str],
-    first: bool,
 ) -> RelocatedRun:
-    """Seed (or reset), run the Python cycle, capture, normalise, and snapshot.
+    """Reset, re-seed, run the Python cycle, capture, normalise, and snapshot.
 
     THE STAGES ARE CALLED, NEVER REIMPLEMENTED. Each one comes from the `protocol`
     fixture, which is what Agent Action Plan section 0.4.3 built it for: "the seed,
@@ -984,8 +959,6 @@ def _execute_run(
         workspace: The test's `tmp_path`, the only place outside `$ACAS_OUT` written.
         load_dump: `harness/diff_states.py`'s `load_dump`.
         dump_keys: `harness/dump_tables.py`'s `DUMP_KEYS`.
-        first: True for run A, which SEEDS; False for run B, which RESETS.
-
     Returns:
         The relocated run.
 
@@ -994,35 +967,32 @@ def _execute_run(
             `raise_for_status`, or the harness modules' own errors. Raised from the
             fixture that calls this, so every one is a pytest ERROR.
     """
-    if first:
-        # STAGE 1. The scenario is BINDING: harness/seed.sh stages this scenario's
-        # declared `seed_files` into a fresh scenario-owned fixture, writes an
-        # identity marker naming the files and their digests, and seeds from exactly
-        # those. It invokes the maintainer's own *LD.cbl loaders and NEVER
-        # common/masterLD.sh, whose header says "THIS SCRIPT HAS NOT YET BEEN TESTED"
-        # [common/masterLD.sh:L4-L5] and which is not valid shell (R-3).
-        protocol.seed(scenario).raise_for_status()
-    else:
-        # STAGE 5, AND IT IS WHAT MAKES THIS TEST MEAN WHAT IT CLAIMS. reset re-applies
-        # mysql/ACASDB.sql VERBATIM - the frozen file already carries all 33
-        # `DROP TABLE IF EXISTS`, so re-applying it IS the drop-and-recreate and no
-        # DDL of this file's own is emitted (R-3) - asserts the post-apply state, and
-        # then RE-SEEDS by delegating to harness/seed.sh with the same scenario
-        # fixture. Run B therefore starts from byte-for-byte the state run A did.
-        #
-        # `clean_batch_irs` turns this from a stylistic instruction into a
-        # test-enforced one: its own run EMPTIES `PSIRSPOST-REC` via
-        # [irs/irs030.cbl:L1720-L1724] performing `acas008-Open-Output`, which
-        # [common/acas008.cbl:L313-L319] converts into a `Delete-All`. Without the
-        # re-seed run B would post nothing at all and layer 2's row-count guard would
-        # fire.
-        protocol.reset(scenario).raise_for_status()
+    # Both runs use the same reset path. It re-applies mysql/ACASDB.sql VERBATIM,
+    # asserts the post-apply state, and delegates to harness/seed.sh with this
+    # scenario's fixture. Run A is therefore isolated from any scenario or manual
+    # parity run that preceded this test, and run B starts from byte-for-byte the
+    # same premise. `clean_batch_irs` makes the second reset observable because its
+    # run consumes the transfer-file input.
+    protocol.reset(scenario).raise_for_status()
 
     # STAGE 6. The status is captured VERBATIM and deliberately not raised on: only
     # three in-scope programs set `WS-Term-Code` at all, so a non-zero status is a
     # BEHAVIOURAL result whose database effect must still be captured. Absence is
     # evidence, and a helper that short-circuited the dump would destroy it.
     run = protocol.run_python(scenario)
+    assert run.returncode == 0, (
+        f"HARNESS FAULT: {label}'s Python wrapper exited {run.returncode}; wrapper "
+        f"health is distinct from operation disposition and must be zero before its "
+        f"OPERATION_STATUS record or database readback can be trusted.\n"
+        f"{run.describe()}"
+    )
+    assert len(run.operation_statuses) == 1, (
+        f"HARNESS FAULT: {label} of {scenario} recorded "
+        f"{len(run.operation_statuses)} operation statuses, expected exactly one for "
+        f"this determinism scenario. Recorded: {run.operation_statuses!r}.\n"
+        f"{run.describe()}"
+    )
+    _operation, operation_status = run.operation_statuses[0]
 
     # STAGE 7 and its normalisation. Both bounded by the scenario's own definition, so
     # the table list comes from the scenario and never from a local restatement (R-4).
@@ -1043,7 +1013,9 @@ def _execute_run(
         label=label,
         tree=tree,
         fingerprint=fingerprint,
-        run_status=run.returncode,
+        wrapper_status=run.returncode,
+        run_status=operation_status,
+        run_output=f"{run.stdout}\n{run.stderr}",
         row_counts=_row_counts(
             tree, tables, load_dump=load_dump, dump_keys=dump_keys
         ),
@@ -1152,7 +1124,6 @@ def determinism_pair(
         workspace=tmp_path,
         load_dump=diff_states.load_dump,
         dump_keys=dump_tables.DUMP_KEYS,
-        first=True,
     )
     second = _execute_run(
         RUN_LABELS[1],
@@ -1162,7 +1133,6 @@ def determinism_pair(
         workspace=tmp_path,
         load_dump=diff_states.load_dump,
         dump_keys=dump_tables.DUMP_KEYS,
-        first=False,
     )
 
     # THE RELOCATION, PROVEN RATHER THAN TRUSTED. Both runs capture under the side
@@ -1304,12 +1274,12 @@ def determinism_pair(
     )
 
     # ------------------------------------------------------------------
-    #  LAYER 3 - THE PINNED-CLOCK WITNESS. Asserted on BOTH runs: a clock that
-    #  degraded on the second run only would otherwise show up as an ordinary
-    #  difference, and the diagnosis would be needlessly hard.
+    #  LAYER 3 - THE DATABASE-BACKED ROUTE-AND-CLOCK WITNESS. Asserted on BOTH
+    #  runs: a selector or clock that degraded on the second run only would otherwise
+    #  show up as an ordinary difference, and the diagnosis would be needlessly hard.
     # ------------------------------------------------------------------
     for run in (first, second):
-        _assert_clock_witness(scenario, run.tree, load_dump=diff_states.load_dump)
+        _assert_clock_witness(run)
 
     # ------------------------------------------------------------------
     #  LAYER 4 - SEED-FINGERPRINT IDENTITY. Proves the seed landed identically before
@@ -1331,12 +1301,12 @@ def determinism_pair(
         f"{second.fingerprint.read_text(encoding='utf-8')}"
         f"  harness/run_python_scenario.sh records the row count of every affected "
         f"table, in the scenario's declared order, immediately before each run. A "
-        f"difference means the re-seed loaded something other than the fixture the "
-        f"first seed staged, so every downstream difference would be unattributable. "
-        f"Autocommit must be OFF while seeding - [common/glbatchLD.cbl:L9-L13]: "
-        f"\"you MUST ensure that autocommit is OFF in the rdb settings\" - and the "
-        f"loaders signal failure through exit codes that must be tested rather than "
-        f"assumed."
+        f"difference means one reset loaded something other than the scenario fixture, "
+        f"so every downstream difference would be unattributable. The frozen loaders "
+        f"have no live COMMIT; the harness therefore requires the explicit "
+        f"`ACAS_SEED_AUTOCOMMIT=on` durability mode and refuses a nominally successful "
+        f"seed that leaves zero rows. Loader exit codes and persisted counts are "
+        f"tested rather than assumed."
     )
 
     # ------------------------------------------------------------------
@@ -1671,8 +1641,9 @@ def test_clock_has_no_real_time_fallback(
     # because the caller pre-zeroes at [copybooks/Proc-ACAS-Mapser-RDB.cob:L78]. THAT
     # IS ANOMALY 16, AND IT IS REPRODUCED, NOT FIXED (R-4). No validation is added
     # here to reject these texts earlier or more loudly (R-3): the point is precisely
-    # that a rejected date is silent, which is why layer 3's witness exists to catch
-    # the resulting zero rather than trusting an exception that never comes.
+    # that a rejected date is silent, which is why layer 3 requires the runner's
+    # post-run database readback marker rather than trusting an exception that never
+    # comes.
     for text in REJECTED_DATE_TEXTS:
         degraded = pinned_clock_factory(text)
         assert degraded.run_date == REJECTED_DATE_RUN_DATE, (
@@ -1933,4 +1904,3 @@ def test_the_dump_order_is_total_and_stable_by_construction(
             f"different columns - and Agent Action Plan section 0.8.1 makes an altered "
             f"schema a defect in the migration."
         )
-

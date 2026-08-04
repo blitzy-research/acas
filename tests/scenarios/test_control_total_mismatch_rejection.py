@@ -1348,8 +1348,11 @@ def test_abort_is_reproduced_as_term_code_five(parity_run, vocabulary) -> None:
                            [general/general.cbl:L810-L811]
 
     so `gl071` and `gl072` never run, and neither does Phase 2 - L290 leaves the
-    mainline before L293. `acas_posting/cli/args.py` surfaces the term code itself as
-    the process exit status, so the abort is observable as exit 5 on both sides.
+    mainline before L293. On the migrated side
+    `acas_posting/cli/args.py` surfaces the term code as child-process exit 5. The
+    compiled menu returns to its menu at [general/general.cbl:L810-L811], so the
+    oracle runner records the same term code from the gate-fired path rather than
+    pretending the menu executable itself exited 5.
 
     THE ABORT IS THE EXPECTED SUCCESS HERE. A reproduced abort that the scenario
     definition predicted is a PASS, so this test does not demand `DISPOSITION_SUCCESS` -
@@ -1388,11 +1391,17 @@ def test_abort_is_reproduced_as_term_code_five(parity_run, vocabulary) -> None:
                 f"code 2 and no harness script uses exit 2, so nothing about the "
                 f"posting cycle was measured.\n{result.describe()}"
             )
+        assert result.returncode == 0, (
+            f"{label}'s harness wrapper exited {result.returncode}, so it did not "
+            f"complete its drive and self-checks. This is a harness fault, not an "
+            f"operation disposition.\n{result.describe()}"
+        )
+        observed = result.operation_status(operation)
         # THE STATUS IS CHECKED BEFORE ITS CLASSIFICATION, deliberately: an exit of 0 is
         # the failure an operator is most likely to hit here, and the diagnosis it needs
         # is the premise explanation below rather than the name of a disposition.
-        assert result.returncode == expected, (
-            f"{label} exited {result.returncode}; the scenario definition predicts "
+        assert observed == expected, (
+            f"{label} observed operation status {observed}; the scenario definition predicts "
             f"{expected}.\n"
             f"  Raise site  [general/gl070.cbl:L289]  move 5 to ws-term-code\n"
             f"  Abort gate  [general/general.cbl:L810-L811]  if ws-term-code = 5 / "
@@ -1412,17 +1421,19 @@ def test_abort_is_reproduced_as_term_code_five(parity_run, vocabulary) -> None:
         # the question was never asked at all.
         disposition = classify_run(result, operation=operation)
         assert disposition == DISPOSITION_BEHAVIOURAL, (
-            f"{label} exited {result.returncode}, which conftest classifies as "
+            f"{label} observed operation status {observed}, which conftest classifies as "
             f"{disposition!r}. On this route the expected disposition is "
             f"{DISPOSITION_BEHAVIOURAL!r} - the reproduced abort, which IS the "
             f"expected success here - and {DISPOSITION_HARNESS_FAULT!r} would mean "
             f"the question was never asked.\n{result.describe()}"
         )
 
-    assert parity_run.cobol_run.returncode == parity_run.python_run.returncode, (
-        f"the two sides reached DIFFERENT terminal dispositions - the oracle exited "
-        f"{parity_run.cobol_run.returncode} and the migrated cycle "
-        f"{parity_run.python_run.returncode}. Plan section 0.8.1 requires a rejected "
+    cobol_status = parity_run.cobol_run.operation_status(operation)
+    python_status = parity_run.python_run.operation_status(operation)
+    assert cobol_status == python_status, (
+        f"the two sides reached DIFFERENT terminal dispositions - the oracle observed "
+        f"{cobol_status} and the migrated cycle observed {python_status}. "
+        f"Plan section 0.8.1 requires a rejected "
         f"transaction to reach the same disposition AND leave the same effect on the "
         f"database; this is the first half of that, and the state tests are the second."
     )

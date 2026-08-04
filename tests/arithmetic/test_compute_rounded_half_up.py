@@ -1807,10 +1807,11 @@ def test_sites_1_and_4_quantize_once_across_a_multiply_then_divide() -> None:
         "per-sub-expression penny of 17.08, and must therefore FAIL. It is a "
         "tripwire, not a wish: if the arithmetic layer is ever changed to quantize "
         "sub-expressions, this xfail turns into an XPASS and strict=True fails the "
-        "suite instead of letting the change pass unnoticed (R-4). The compiled "
-        "oracle cannot be rebuilt in this checkout to re-measure the answer - "
-        "copybooks/ACAS-SQLstate-error-list.cob is absent from the frozen archive - "
-        "so the alternative is recorded here rather than asserted as fact (R-6)."
+        "suite instead of letting the change pass unnoticed (R-4). The strict "
+        "oracle build is now available, but the mandated scenario set does not place "
+        "this compound expression on the precision boundary. The focused capture "
+        "must still be recorded in the ambiguity register before this alternative "
+        "can be retired (R-6)."
     ),
 )
 def test_site_2_does_not_store_the_reduced_precision_penny() -> None:
@@ -2146,10 +2147,10 @@ def test_a_rounded_store_that_overflows_is_silent_and_keeps_low_order_digits() -
         "because ISO leaves the receiver's content undefined when a size error "
         "occurs with no ON SIZE ERROR phrase, and there is no such phrase anywhere "
         "in the twelve in-scope programs, so only the compiled oracle can settle the "
-        "order - and the oracle cannot be rebuilt in this checkout, since "
-        "copybooks/ACAS-SQLstate-error-list.cob is absent from the frozen archive "
-        "(R-6). If the layer is ever changed to the other order this xfail becomes "
-        "an XPASS and strict=True fails the suite (R-4)."
+        "order. The oracle now builds, but no mandated scenario drives this overflow "
+        "boundary, so the focused experiment remains open (R-6). If the layer is "
+        "ever changed to the other order this xfail becomes an XPASS and strict=True "
+        "fails the suite (R-4)."
     ),
 )
 def test_overflowing_rounded_store_does_not_discard_the_carry_before_rounding() -> None:

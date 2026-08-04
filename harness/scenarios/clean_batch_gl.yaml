@@ -541,7 +541,7 @@ date_form: 1
 irs_instead: " "
 
 seed:
-  data_dir: gl_clean
+  data_dir: clean_batch_gl
   files:
     - system.dat
     - ledger.dat
@@ -550,7 +550,7 @@ seed:
 
 # Flat mirrors of the seed block, required by [harness/seed.sh:L2578] and
 # honoured by [harness/seed.sh:L2592].
-seed_dir: gl_clean
+seed_dir: clean_batch_gl
 seed_files:
   - system.dat
   - ledger.dat
@@ -573,6 +573,8 @@ operations:
 # three phases -- batch check and pre-process, sort, then transaction update.
 # A status that contradicts this is reported as a behavioural difference and the
 # capture is still taken, so the table diff can corroborate it (R-4).
+expected_table_effect: unchanged
+
 expected_status:
   - 0
 
@@ -763,6 +765,11 @@ seed_records:
   # [general/gl070.cbl:L495-L533].
   posting.dat:
     - WS-Post-rrn: "1"
+      # The frozen loader stores this ten-byte group through an eighteen-digit
+      # binary host variable. A subsequent SQL fetch cannot produce a numeric
+      # five-byte COBOL batch view, so gl072 takes A-13's silent non-numeric skip.
+      # The migrated side also cannot match the decoded SQL key to batch 1. The
+      # reachable relational effect is therefore a deliberate unchanged no-op.
       Batch: "1"
       Post-Number: "1"
       Post-Code: "GL"

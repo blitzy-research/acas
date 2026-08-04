@@ -2742,6 +2742,16 @@ def read_indexed(file_access: FileAccess, nl: WsIrsnlRecord) -> tuple[int, int]:
         rows, failure = _run_query(file_access, statement, parameters)
         count = state.store_result(rows)
         if count == 0:
+            if _driver_reported_error(failure):
+                # A failed or unissued SELECT is not a qualifying result set
+                # containing zero rows. Preserve the connection/driver status
+                # rather than manufacturing the bridge's clean not-found pair;
+                # this distinction is what prevents a closed shared handle from
+                # masquerading as a missing nominal account.
+                assert failure is not None
+                _apply_driver_status(file_access, failure)
+                _ba998_free(file_access)
+                return (file_access.fs_reply, file_access.we_error)
             # `if WS-MYSQL-Count-Rows = zero` [:L590-L593]. The maintainer's own comment
             # on the 21 is "could also be 23 or 14", so the choice is his.
             _apply_status(file_access, NOT_FOUND_STATUS)
@@ -3255,6 +3265,14 @@ def dispatch(
     """
     del file_defs
 
+    requested_function = int(file_access.file_function)
+    # One File-Access block is shared by the IRS shell's handlers. A reply from
+    # acasirsub3 must not become the starting condition of this call; the bridge
+    # initializes the pair too, but only after this handler's guards and
+    # once-only record-size gate have run.
+    file_access.fs_reply = int(FsReply.SUCCESS)
+    file_access.we_error = int(WeError.SUCCESS)
+
     file_access.logging_data.ws_log_system = WS_LOG_SYSTEM
     file_access.logging_data.ws_log_file_no = WS_LOG_FILE_NO_FLAT
 
@@ -3263,7 +3281,7 @@ def dispatch(
     if rejected is not None:
         return rejected
 
-    open_for_output = file_access.file_function == int(
+    open_for_output = requested_function == int(
         FileFunction.OPEN
     ) and file_access.access_type == int(AccessType.OUTPUT)
     if not open_for_output:
@@ -3289,6 +3307,10 @@ def dispatch(
     if open_for_output:
         status = open_output(system, file_access, nl)
     else:
+        # Helpers above may inspect the shared block but do not own the caller's
+        # operation selection. Reassert it immediately before the bridge
+        # dispatch so a synthesized close from another IRS handler cannot leak.
+        file_access.file_function = requested_function
         status = _bridge_call(system, file_access, nl)
 
     # `ba999-end.` [common/irsnominalMT.cbl:L1179-L1184]::

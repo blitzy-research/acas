@@ -1,7 +1,7 @@
 """The relational connection: the native reimplementation of the handler open path.
 
-Opens and holds the one connection every handler module shares, with its
-credentials taken from the `RDB-Data` block of the file-access record
+Opens and tracks the process's handler connections, with their credentials
+taken from the `RDB-Data` block of the file-access record
 [copybooks/wsfnctn.cob:L56-L63] - schema, user, password, host, socket and port -
 which is where the frozen tree puts them.
 
@@ -1646,21 +1646,22 @@ def _assert_converter_pinned(connection: MySQLConnectionAbstract) -> None:
 
 
 _PROCESS_CONNECTION: MySQLConnectionAbstract | None = None
+_PROCESS_CONNECTIONS: list[MySQLConnectionAbstract] = []
 
 
 def process_connection() -> MySQLConnectionAbstract | None:
-    """Report the one connection this process holds, without touching it.
+    """Report the current reusable process handle, without touching it.
 
     Returns:
-        The one connection object, live or closed, or ``None`` before the first
-            :func:`mysql_1000_open` of the process and after
-            :func:`reset_process_connection`.
+        The handle eligible for reuse by the next ordinary open, live or closed,
+        or ``None`` before the first open, after a transient handle closed, and
+        after :func:`reset_process_connection`.
     """
     return _PROCESS_CONNECTION
 
 
 def reset_process_connection() -> None:
-    """Close the one connection and forget it, so the next open starts clean.
+    """Close every tracked connection so the next open starts clean.
 
     THERE IS NO COBOL COUNTERPART, and that is stated plainly rather than disguised -
     the same position :func:`reset_rdb_data_cache` is in. Nothing in the frozen source
@@ -1668,8 +1669,14 @@ def reset_process_connection() -> None:
     """
     global _PROCESS_CONNECTION  # noqa: PLW0603 - the `MYSQL sql` file-scope struct
 
-    if _PROCESS_CONNECTION is not None:
-        _close_quietly(_PROCESS_CONNECTION)
+    seen: set[int] = set()
+    for connection in tuple(_PROCESS_CONNECTIONS):
+        identity = id(connection)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        _close_quietly(connection)
+    _PROCESS_CONNECTIONS.clear()
     _PROCESS_CONNECTION = None
 
 
@@ -1704,6 +1711,7 @@ def mysql_1000_open(
     we_error: int = WeError.SUCCESS,
     transport: TransportSecurity | None = None,
     allow_frozen_placeholder_credentials: bool | None = None,
+    reuse_process_connection: bool = True,
 ) -> OpenOutcome:
     """Open the connection, as ``Mysql-1000-Open`` does.
 
@@ -1731,6 +1739,10 @@ def mysql_1000_open(
             disposable. ``None`` - the default - resolves to the installed
             process policy; ``False`` states positively that no declaration is
             made, which is what a handler that has not been told anything means.
+        reuse_process_connection: Reconnect the current process handle when one
+            exists. ``False`` gives a synthesized open/read/close sequence its
+            own handle so its close cannot invalidate a different handler's
+            still-open bridge state.
 
     Returns:
         An :class:`OpenOutcome`.
@@ -1812,7 +1824,7 @@ def mysql_1000_open(
         "client_flags": [-ClientFlag.MULTI_STATEMENTS],
     }
 
-    established = _PROCESS_CONNECTION
+    established = _PROCESS_CONNECTION if reuse_process_connection else None
     try:
         if established is None:
             connection = mysql.connector.connect(**driver_arguments)
@@ -1829,7 +1841,10 @@ def mysql_1000_open(
             we_error=we_error,
         )
 
-    _PROCESS_CONNECTION = connection
+    if reuse_process_connection:
+        _PROCESS_CONNECTION = connection
+    if all(connection is not tracked for tracked in _PROCESS_CONNECTIONS):
+        _PROCESS_CONNECTIONS.append(connection)
 
     # Checked on EVERY open, exactly as before this slot existed, so the number of probe
     # statements a run issues does not move.
@@ -1837,8 +1852,15 @@ def mysql_1000_open(
         _assert_converter_pinned(connection)
     except BaseException:
         # The connection is unusable under rule R-2, so it is closed rather than leaked.
-        # `Mysql-1980-Close` is used so the close path stays single-sourced.
-        mysql_1980_close(connection)
+        # This is a forced disposal, not a logical bridge close: reusable bridge
+        # closes intentionally retain the one process connection so a later handler
+        # cannot invalidate another handler's still-live state.
+        _close_quietly(connection)
+        _PROCESS_CONNECTIONS[:] = [
+            tracked for tracked in _PROCESS_CONNECTIONS if tracked is not connection
+        ]
+        if connection is _PROCESS_CONNECTION:
+            _PROCESS_CONNECTION = None
         raise
 
     # A clean open: the paragraph wrote neither `Fs-Reply`, nor `We-Error`, nor `ws-No-
@@ -1949,17 +1971,22 @@ def mysql_1980_close(connection: MySQLConnectionAbstract | None) -> None:
     NO COMMIT PRECEDES THE CLOSE, and none is added.
 
     Args:
-        connection: The connection the calling paragraph believes it is closing, or
-            ``None``. Not used to decide WHAT is closed - see above.
+        connection: The connection the calling paragraph opened, or ``None``. A
+            transient bridge-owned handle is closed immediately. The reusable
+            process handle is retained until :func:`reset_process_connection`,
+            matching the compiled-oracle build shim required by the vendored C
+            API's single file-scope ``MYSQL`` object.
     """
     global _PROCESS_CONNECTION  # noqa: PLW0603 - the `MYSQL sql` file-scope struct
 
-    if _PROCESS_CONNECTION is not None:
-        _close_quietly(_PROCESS_CONNECTION)
-    if connection is not None and connection is not _PROCESS_CONNECTION:
-        # Not the process handle. No frozen counterpart exists, because no bridge can
-        # hold a second connection.
-        _close_quietly(connection)
+    if connection is None or connection is _PROCESS_CONNECTION:
+        mysql_1999_exit()
+        return
+
+    _close_quietly(connection)
+    _PROCESS_CONNECTIONS[:] = [
+        tracked for tracked in _PROCESS_CONNECTIONS if tracked is not connection
+    ]
     mysql_1999_exit()
 
 

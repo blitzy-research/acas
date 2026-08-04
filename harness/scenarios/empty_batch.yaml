@@ -678,7 +678,7 @@ date_form: 1
 irs_instead: " "
 
 seed:
-  data_dir: gl_empty_batch
+  data_dir: empty_batch
   files:
     - system.dat
     - ledger.dat
@@ -689,7 +689,7 @@ seed:
 # is the scenario: posting.dat is a name the frozen loader script recognises
 # [common/masterLD.sh:L109] and is deliberately NOT declared, so GLPOSTING-REC is
 # never loaded and stays as the fresh schema created it.
-seed_dir: gl_empty_batch
+seed_dir: empty_batch
 seed_files:
   - system.dat
   - ledger.dat
@@ -716,6 +716,8 @@ operations:
 # [purchase/pl055.cbl:L266]. A status that contradicts this is reported as a
 # behavioural difference and the capture is still taken, so the table diff can
 # corroborate it (R-4).
+expected_table_effect: unchanged
+
 expected_status:
   - 0
 

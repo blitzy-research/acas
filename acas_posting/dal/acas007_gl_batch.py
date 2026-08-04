@@ -728,11 +728,12 @@ class FlatFileStoreNotMigratedError(RuntimeError):
 
 
 class BatchKeyViewsDisagreeError(ValueError):
-    """Raised when the two readings of the six key bytes contradict each other.
+    """Compatibility error retained for callers of the former reconciliation API.
 
     ``WS-Batch-Key`` [copybooks/wsbatch.cob:L14-L19] and ``WS-Batch-Key9`` [:L20-L21]
     are the SAME SIX BYTES - the second is a ``REDEFINES`` of the first - so in COBOL
-    they cannot disagree.
+    they cannot disagree. The record model now makes that structural, so no production
+    path raises this class.
     """
 
 
@@ -1106,6 +1107,7 @@ class _BridgeWorkingStorage:
 
 _HANDLER: Final[_HandlerWorkingStorage] = _HandlerWorkingStorage()
 _BRIDGE_WS: Final[_BridgeWorkingStorage] = _BridgeWorkingStorage()
+_TRANSPORT_NOT_SUPPLIED: Final[object] = object()
 
 
 def reset_working_storage() -> None:
@@ -1162,13 +1164,11 @@ def declare_connection_policy(
     permits - never a stored value, a status pair, a statement text or a table
     dump (rules R-3, R-4).
 
-    WHY IT IS DECLARED HERE RATHER THAN PASSED. ``glbatch_mt`` takes exactly the
-    bridge's three parameters [common/acas007.cbl:L641-L644] and ``dispatch``
-    exactly the handler's five [:L265-L271]; both are fixed by the Agent Action
-    Plan section 0.4.3 and neither may grow a fourth. A declaration made once,
-    out of band, before the run's first ``fn-Open`` is the only place left, and it
-    matches how the harness genuinely works: one policy for a whole comparison
-    run, not one per file operation.
+    ``glbatch_mt`` still takes exactly the bridge's three positional parameters
+    [common/acas007.cbl:L641-L644], and ``dispatch`` keeps the handler's five
+    positional parameters [:L265-L271]. The facade may additionally forward the
+    caller's keyword-only transport declaration; this function remains the
+    process-level declaration route for callers that configure policy once.
 
     Args:
         transport: The transport declaration. ``None`` - the default - defers to
@@ -1372,35 +1372,19 @@ def batch_key_image(batch: GlBatchRecord) -> str:
 
 
 def synchronise_batch_key_views(batch: GlBatchRecord) -> int:
-    """Reconcile ``WS-Batch-Key`` and ``WS-Batch-Key9`` and return the value.
+    """Return the value shared by ``WS-Batch-Key`` and ``WS-Batch-Key9``.
 
-    ``acas_posting/records/gl_batch.py`` assigns this job here, in the docstring of
-    :class:`~acas_posting.records.gl_batch.WsBatchKey9`.
+    The record model binds both names to one backing key, so this former
+    reconciliation boundary is now an idempotent compatibility function.
 
     Args:
-        batch: The record, mutated in place so both readings agree.
+        batch: The record whose shared six-byte key is read.
 
     Returns:
-        The reconciled six-digit key.
-
-    Raises:
-        BatchKeyViewsDisagreeError: If both readings are non-default and disagree.
+        The six-digit key.
     """
-    grouped = int(batch.ws_batch_key.ws_ledger) * _LEDGER_DIGIT_SCALE + int(
-        batch.ws_batch_key.ws_batch_nos
-    )
-    redefined = int(batch.ws_batch_key9.ws_batch_key9)
-    if grouped and redefined and grouped != redefined:
-        raise BatchKeyViewsDisagreeError(
-            f"WS-Batch-Key reads {grouped:06d} and WS-Batch-Key9 reads "
-            f"{redefined:06d}, but they redefine the same six bytes "
-            f"[copybooks/wsbatch.cob:L14-L21] and so cannot differ. Set one "
-            f"reading and let the acas007 handler derive the other."
-        )
-    value = redefined or grouped
+    value = int(batch.ws_batch_key9.ws_batch_key9)
     batch.ws_batch_key9.ws_batch_key9 = value
-    batch.ws_batch_key.ws_ledger = value // _LEDGER_DIGIT_SCALE
-    batch.ws_batch_key.ws_batch_nos = value % _LEDGER_DIGIT_SCALE
     return value
 
 
@@ -2640,6 +2624,8 @@ def dispatch(
     file_access: FileAccess,
     file_defs: FileDefs,
     dal_common: AcasDalCommonData,
+    *,
+    transport: TransportSecurity | None | object = _TRANSPORT_NOT_SUPPLIED,
 ) -> None:
     """``call "acas007" using ...`` - THE HANDLER'S FIVE PARAMETERS, IN ORDER.
 
@@ -2658,12 +2644,13 @@ def dispatch(
         dal_common: ``ACAS-DAL-Common-data`` [copybooks/Test-Data-Flags.cob]. Its ``SW-
             Testing`` is the ``Testing-1`` logging gate; the copybook default is 1, so
             logging is ON unless a caller clears it.
+        transport: The caller's keyword-only transport declaration. Omission
+            preserves a process-level declaration made through
+            :func:`declare_connection_policy`; an explicit ``None`` clears it.
 
     Raises:
         FlatFileStoreNotMigratedError: When the request reaches a physical verb
             against ``Batch-File`` - omission O-1.
-        BatchKeyViewsDisagreeError: When the two readings of the six key bytes
-            were both set and disagree.
         BridgeCalledOutsideHandlerError: Not reachable through this function,
             which is precisely what it exists to guarantee.
 
@@ -2684,6 +2671,11 @@ def dispatch(
             file_access.file_function = int(FileFunction.READ_INDEXED)
             dispatch(system, batch, file_access, file_defs, dal_common)
     """
+    if transport is not _TRANSPORT_NOT_SUPPLIED:
+        if transport is not None and not isinstance(transport, TransportSecurity):
+            raise TypeError("transport must be TransportSecurity or None")
+        _HANDLER.transport = transport
+
     # LINKAGE residency, not added state.
     previous_system_record = _HANDLER.linkage_system_record
     _HANDLER.linkage_system_record = system
