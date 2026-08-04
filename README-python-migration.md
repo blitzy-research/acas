@@ -1385,15 +1385,24 @@ live ones `[irs/irs030.cbl:L1550]`, `[irs/irs030.cbl:L1561]`; they are logged as
 an anomaly, not resurrected.
 
 **The three moving-average blocks disagree with each other, and must stay that
-way.** One path increments its activity counter before dividing; a second never
-increments the counter at all and additionally guards on the accumulator being
-non-zero, which silently drops the first credit note for a customer; a third
-uses a different guard again and **the opposite divide operand order**. On top
-of that, the accumulator has zero decimal places while the value added into it
-carries two, so pence are discarded on every accumulation and the subsequent
-integer divide discards the remainder as well — a double truncation that has to
-be reproduced by modelling both field widths exactly. **Normalising them into
-one helper would be the single easiest way to fail this migration.**
+way.** The invoice path increments its activity counter before dividing
+`[sales/sl060.cbl:L825-L827]`; the credit-note path in the same program **never
+increments the counter at all** and additionally guards on the accumulator being
+non-zero `[sales/sl060.cbl:L841-L843]`, which silently drops the first credit
+note for a customer; and the cash path in a different program uses a third guard
+and **the opposite divide operand order** — `divide work-b by
+sales-pay-activety` `[sales/sl100.cbl:L511]` against `divide sales-activety into
+work-2` `[sales/sl060.cbl:L827]`.
+
+On top of that the arithmetic truncates twice. The accumulator is declared with
+**zero** decimal places `[sales/sl060.cbl:L206]` while the value added into it
+carries two `[sales/sl060.cbl:L218]`, so pence are discarded on every
+accumulation `[sales/sl060.cbl:L826]`; and the average field is a `binary-long`
+integer `[copybooks/wssl.cob:L49]`, so the divide then discards the remainder as
+well. Reproducing this requires modelling both field widths exactly — an
+implementation that carried two decimals through would diverge from the oracle
+on almost every invoice. **Normalising the three into one helper would be the
+single easiest way to fail this migration.**
 
 **`cobmysqlapi.o` has no build rule in the repository.** See §8.3 step 2. A
 naive build from the compile scripts alone fails at link time with no obvious
