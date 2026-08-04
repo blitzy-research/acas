@@ -1,199 +1,466 @@
-# ACAS Python posting-cycle migration
+# ACAS posting cycle — the Python 3.12 migration
 
-PLEASE READ: this file documents the Python 3.12 migration and its comparison
-harness. The maintainer's own [`README.TXT`](README.TXT), `README.nightly`, and
-[`Changelog`](Changelog) still document the COBOL system and its release
-history. They are evidence and are not edited by this migration.
+PLEASE READ: this file documents the Python 3.12 migration of the ACAS batch
+posting cycle and the compiled-COBOL comparison oracle that arbitrates it. It
+is the only file you need in order to build the oracle, seed a scenario, run
+both cycles, diff the resulting state, run the three test tiers, and find the
+four mandated deliverables.
 
-WARNING: this is a behaviourally exact migration, not a clean-up project. A
-legacy defect reproduced is correct. A legacy defect “fixed” on only the
-Python side is a parity failure.
+It does **not** document the ACAS COBOL system. That is `README.TXT` (with
+`README.nightly` for the nightly builds) and `Changelog`, and none of them is
+edited by this migration — they are the maintainer's own record and this
+migration cross-references them instead. See §15.
 
-## What this is
+WARNING: this is a **behaviourally exact** migration, not a clean-up project,
+and that inverts normal engineering judgement for the whole of it. A legacy
+defect reproduced is correct. A legacy defect "fixed" on the Python side is a
+parity failure, and 14 of the 22 known defects are locked in place by tests
+precisely so that a well-meaning correction turns the suite red rather than
+passing unnoticed. Read §2 (rule R-4) and §14 before changing anything.
 
-`acas_posting` is a Python 3.12 clone of the ACAS batch posting cycle. “Exact”
-has one operational meaning:
+There is **no user rules document for this project**. `review_rules` reports,
+in full, `No user rules provided.` The six binding rules R-1 … R-6 come from
+the Agent Action Plan (AAP) §0.7.2 and are restated in §2 below; where they are
+silent, the work is held to enterprise-standard best practice and nothing has
+been invented to fill the gap.
+
+## Contents
+
+1. [What this is, and what it is not](#1-what-this-is-and-what-it-is-not)
+2. [The six binding rules](#2-the-six-binding-rules)
+3. [What was migrated](#3-what-was-migrated)
+4. [What was excluded, and why](#4-what-was-excluded-and-why)
+5. [Repository layout added by this migration](#5-repository-layout-added-by-this-migration)
+6. [Prerequisites](#6-prerequisites)
+7. [Install](#7-install)
+8. [Building the compiled COBOL oracle — the five-step bootstrap](#8-building-the-compiled-cobol-oracle--the-five-step-bootstrap)
+9. [Seeding a scenario](#9-seeding-a-scenario)
+10. [Running both cycles](#10-running-both-cycles)
+11. [Diffing state — the verification protocol](#11-diffing-state--the-verification-protocol)
+12. [Tests](#12-tests)
+13. [The four mandated deliverables](#13-the-four-mandated-deliverables)
+14. [WARNING: known risks and gotchas](#14-warning-known-risks-and-gotchas)
+15. [Relationship to the maintainer's own documentation](#15-relationship-to-the-maintainers-own-documentation)
+
+---
+
+## 1. What this is, and what it is not
+
+`acas_posting` is a Python 3.12 clone of the ACAS batch posting cycle: the
+sequence that carries entered transaction batches through validation, the
+batch-control gate, posting to the Sales, Purchase and General ledgers
+including the IRS postings the cycle reaches, and the period-total and
+control-account updates that close it.
+
+It is a **clone**, not an improvement. "Exact" has exactly one operational
+meaning here, and every acceptance decision is made against it:
 
 > the ordering-normalized diff of affected database tables after a Python run
 > versus a COBOL run against an identical seed must be empty.
 
-The COBOL remains in the repository, unmodified, serving simultaneously as
-the specification and as the out-of-process comparison oracle. The shipped
-Python package does not require a COBOL compiler or runtime.
+The COBOL remains in the repository, unmodified, serving simultaneously as the
+specification and as the comparison oracle. The two roles are separate in
+practice: the specification is read, and the oracle is run out of process by
+the harness under `harness/` and never by the shipped package.
 
-The migration covers posting, batch, cycle, period, proof, and RDBMS effects.
-It does not reproduce interactive data-entry screens, menu presentation, or
-reports that have no database effect.
+What that buys, and what it costs:
 
-## The six binding rules
+- The Python cycle can replace the COBOL cycle without changing a single
+  posted figure. That is the entire value of the exercise.
+- Nothing is tidied on the way through. Truncation that loses pence still
+  loses pence, a double entry that posts half of itself still posts half of
+  itself, and an account located by sequential read is still located by
+  sequential read. §14 lists the ones most likely to tempt a reader.
+- The shipped package needs **no COBOL compiler and no COBOL runtime**. Only
+  the oracle does.
 
-The rules live in the Agent Action Plan (AAP) §0.7.2. There is no separate
-user-rules document.
+The migration covers posting, batch, cycle, period and proof behaviour and
+every effect either store sees. It does not reproduce the interactive
+data-entry screens, the menus, or report formatting that has no database
+effect — see §4 for the rule that decides each case.
+
+---
+
+## 2. The six binding rules
+
+The rules live in the AAP §0.7.2, retrievable through `review_prompt` rather
+than `review_rules`. Two sentences of the user's own requirements are preserved
+verbatim by the AAP itself (§0.8.2) because paraphrasing loses their force, and
+they are quoted here for the same reason.
+
+On where field metadata comes from:
+
+> "The maintainer's one-way COBOL-to-MySQL bridge defines the authoritative
+> record-layout ↔ table mapping — it is the data dictionary for this
+> migration."
+
+That makes `common/*MT.scb` and `common/*MT.cbl` the source of truth for field
+metadata, **ahead of the copybooks** — §13 gives the three-column proof of why
+that distinction is not academic.
+
+On what counts as correct:
+
+> "There is no test suite: compiled COBOL execution is the behavioral
+> specification, defects included. A defect reproduced is correct; a defect
+> fixed is a failure."
+
+That is the reason the anomaly log and the oracle harness are first-class
+deliverables rather than scaffolding.
 
 ### R-1 — No COBOL at runtime
 
-The shipped `acas_posting` package contains no COBOL subprocess call, FFI, or
-link to `cobmysqlapi.o`. `harness/` is a sibling, not a Python sub-package, and
-the package manifest includes `acas_posting*` only. There is no import path
-from the shipped package to the harness.
+COBOL is the specification for this migration, not a runtime dependency of the
+result.
+
+**Consequence.** The shipped `acas_posting` package contains no subprocess
+call, no foreign-function interface, no linkage to `cobmysqlapi.o` and no
+linkage to the MySQL client library the COBOL side needs. Every COBOL
+construct is reimplemented natively: `acas_posting/cobol/` reimplements
+picture-clause parsing, the six numeric storage classes, the arithmetic verbs,
+`MOVE` truncation, condition-name evaluation and `SORT` key semantics; the
+twenty `acas_posting/dal/acas*.py` modules reimplement each handler-and-bridge
+pair as SQL against the frozen schema; and `acas_posting/dates.py` reimplements
+the date module in full, 1600-12-31 ordinal epoch included, rather than calling
+it `[common/maps04.cbl:L39-L41]`.
+
+`harness/` is a **sibling** of `acas_posting/`, not a sub-package, and
+`pyproject.toml` names an explicit packaging allow-list of `acas_posting` and
+its six sub-packages. There is therefore no import path from the shipped
+package to the harness, and the prohibition is structural rather than a matter
+of discipline.
 
 ### R-2 — Zero binary floating point
 
-All money and quantity arithmetic uses `decimal.Decimal`; binary integer
-fields use Python `int`. `pandas` and `numpy` are prohibited, including in the
-dump comparison. The frozen schema has no `FLOAT`, `DOUBLE`, or `REAL`
-accounting column.
+No accounting value may pass through a binary floating-point type — not in
+computation, not in storage, not in transport.
 
-### R-3 — No new validation, fields, schema changes, or concurrency
+**Consequence.** All monetary and quantity arithmetic runs on
+`decimal.Decimal` with an explicit context: an un-`ROUNDED` COBOL store
+truncates toward zero, and only the five `ROUNDED` sites listed in §14 round.
+Binary integer fields are Python `int`, never `Decimal` and never `float` —
+which is exactly what makes the integer truncation in the moving averages
+reproducible rather than merely described. `pandas` and `numpy` are prohibited
+outright, **including for the harness dump comparison**, which uses ordered row
+sequences instead.
 
-The migration emits no DDL and has no schema migration tool. SQLAlchemy is
-used at Core level only, with explicit statements and connections; there is
-no ORM entity layer. Posting and tests are strictly sequential.
+The frozen schema corroborates the rule from the other end: it contains
+**zero** `FLOAT`, `DOUBLE` and `REAL` columns anywhere, so a float can never
+arrive from the database either. `acas_posting/dal/connection.py` pins the
+driver's converter explicitly rather than relying on its default.
 
-### R-4 — Legacy anomalies are reproduced, never fixed
+### R-3 — No new validations, fields or schema changes; no concurrency
 
-> “There is no test suite: compiled COBOL execution is the behavioral
-> specification, defects included. A defect reproduced is correct; a defect
-> fixed is a failure.”
+**Consequence.** No DDL of any kind is emitted; `mysql/ACASDB.sql` is read and
+never written; there is no Alembic and no other migration tool, because with
+the schema frozen a migration tool has nothing legitimate to do and its
+presence would invite drift. SQLAlchemy is used at **Core level only** —
+`text()` statements on an explicit `Connection` — and there is no ORM entity
+layer and no declarative metadata that could generate schema.
 
-See [`docs/migration/anomaly-log.md`](docs/migration/anomaly-log.md). The
-anomaly-locking tests deliberately fail if a well-meaning change normalises a
-legacy defect away.
+The record modules mirror their copybooks field for field with nothing added,
+preserving even the misnamings. Validation is copied, never extended: the date
+module's six-part reject test is reproduced exactly as written
+`[common/maps04.cbl:L140-L146]`, and the two silent skips in the nominal update
+stay silent `[general/gl072.cbl:L291-L292]`, `[general/gl072.cbl:L306-L307]`.
+
+Execution is strictly sequential. No threads, no `asyncio`, no
+`multiprocessing`, no connection pooling; no parallel test runner and no plugin
+that reorders execution, because posting order is load-bearing and the state
+diff is order-sensitive.
+
+### R-4 — Legacy anomalies reproduced, never fixed
+
+Defects present in the compiled behaviour are part of the specification.
+
+**Consequence.** `docs/migration/anomaly-log.md` carries 22 canonical entries,
+each citing its locator and naming the Python module that reproduces it.
+**Fourteen are locked in by tests** so that a future well-intentioned
+correction fails the suite rather than passing unnoticed. The load-bearing ones
+are reproduced with deliberate care: the missing terminating period stays a
+nested conditional and is explicitly not normalised against its three sibling
+programs; the credit-note average path's missing counter increment is left
+missing; the three mutually inconsistent moving-average guards remain three;
+the unbounded quarter subscript is left unbounded; and the sign lost at the
+bridge is still lost at the bridge.
+
+Frozen-file defects are worked around, never repaired — see the `exit 0`
+warning in §8 and the two reasons in §9.
 
 ### R-5 — Full traceability
 
-Every program maps to a module, every migrated paragraph maps to a function,
-and every field maps to a data-dictionary entry. See
-[`docs/migration/traceability.md`](docs/migration/traceability.md) and
-[`data_dictionary/`](data_dictionary/).
+**Consequence.** `docs/migration/traceability.md` carries three tables:
+program → module for all twelve programs, paragraph → function for every
+migrated section and paragraph with the `GO TO` class annotated at each
+transfer site, and field → dictionary entry. The third is mechanised rather
+than hand-maintained: `acas_posting/dictionary/generate.py` builds
+`data_dictionary/acas_posting_dictionary.json` from the authoritative triple,
+`acas_posting_dictionary.schema.json` validates the result, and
+`acas_posting/dictionary/loader.py` lets every record field cite its dictionary
+key at run time. `acas_posting/dal/facade.py` publishes both the entity-named
+and the handler-named verb vocabularies over one implementation, so a reader
+following either COBOL calling convention finds a correspondingly named Python
+function. Deliberate omissions are recorded **as** omissions.
 
 ### R-6 — Compiled behaviour is the tie-breaker
 
-> “The maintainer's one-way COBOL-to-MySQL bridge defines the authoritative
-> record-layout ↔ table mapping — it is the data dictionary for this
-> migration.”
+Where a semantic question is ambiguous, the compiled program's observed
+behaviour decides it, and each resolution is documented rather than settled
+silently.
 
-Where reading leaves a semantic question open, the compiled program decides.
-See
-[`docs/migration/ambiguity-resolutions.md`](docs/migration/ambiguity-resolutions.md)
-and
-[`docs/migration/scenario-diff-evidence.md`](docs/migration/scenario-diff-evidence.md).
+**Consequence.** `docs/migration/ambiguity-resolutions.md` records each
+question, the experiment run against the oracle, and the resolution adopted;
+`docs/migration/scenario-diff-evidence.md` records the per-scenario evidence.
+The harness exists to make that arbitration mechanically available — a MariaDB
+service at the exact server version the schema was produced by
+`[mysql/ACASDB.sql:L5]`, a GnuCOBOL image at the version the maintainer targets
+`[common/comp-common.sh:L9]`, and the seed, run, dump, normalise and diff tools
+described in §8 to §11.
 
-## What was migrated
+The corollary that matters most in day-to-day work: expected values in the
+arithmetic tier are **captured from the compiled oracle**, never derived by
+reading the COBOL and reasoning about what it ought to produce.
 
-| COBOL program | Python module |
-| --- | --- |
-| `gl051` | `acas_posting/programs/gl051_batch_control_check.py` |
-| `gl070` | `acas_posting/programs/gl070_transaction_pre_process.py` |
-| `gl071` | `acas_posting/programs/gl071_batch_sort.py` |
-| `gl072` | `acas_posting/programs/gl072_transaction_update.py` |
-| `gl080` | `acas_posting/programs/gl080_end_of_cycle.py` |
-| `sl055` | `acas_posting/programs/sl055_invoice_extract_analysis.py` |
-| `sl060` | `acas_posting/programs/sl060_invoice_posting.py` |
-| `sl100` | `acas_posting/programs/sl100_cash_posting.py` |
-| `pl055` | `acas_posting/programs/pl055_order_proof_extract.py` |
-| `pl060` | `acas_posting/programs/pl060_order_posting.py` |
-| `pl100` | `acas_posting/programs/pl100_payment_posting.py` |
-| `irs030` | `acas_posting/programs/irs030_posting.py` |
+---
 
-Two boundaries are partial and must not be widened:
+## 3. What was migrated
 
-- `general/gl051.cbl`: only the control-total gate in `batch-print` §999
-  and `end-batch`, `[general/gl051.cbl:L1096-L1134]`.
-- `irs/irs030.cbl`: only `Ledger-Postings-Add`,
-  `[irs/irs030.cbl:L1569-L1733]`.
+Twelve COBOL programs, one Python module each. The module name carries the
+COBOL program name so that traceability is mechanical rather than a matter of
+memory.
 
-The General Ledger execution order is:
+| COBOL program | Python module | Role in the cycle |
+| --- | --- | --- |
+| `general/gl051.cbl` | `acas_posting/programs/gl051_batch_control_check.py` | Batch proof and the control-total gate — **partial**, see below |
+| `general/gl070.cbl` | `acas_posting/programs/gl070_transaction_pre_process.py` | Phase 1 batch check, Phase 2 transaction pre-process |
+| `general/gl071.cbl` | `acas_posting/programs/gl071_batch_sort.py` | Batch sort into nominal-key order |
+| `general/gl072.cbl` | `acas_posting/programs/gl072_transaction_update.py` | Phase 4 transaction update — posts to the nominal ledger |
+| `general/gl080.cbl` | `acas_posting/programs/gl080_end_of_cycle.py` | Phase 3 transaction deletion, Phase 5 end-of-period |
+| `sales/sl055.cbl` | `acas_posting/programs/sl055_invoice_extract_analysis.py` | Sales invoice extract and analysis-total build |
+| `sales/sl060.cbl` | `acas_posting/programs/sl060_invoice_posting.py` | Sales invoice posting, including the IRS fan-out |
+| `sales/sl100.cbl` | `acas_posting/programs/sl100_cash_posting.py` | Sales cash and receipt posting |
+| `purchase/pl055.cbl` | `acas_posting/programs/pl055_order_proof_extract.py` | Purchase order proof extract |
+| `purchase/pl060.cbl` | `acas_posting/programs/pl060_order_posting.py` | Purchase order posting, including the IRS fan-out |
+| `purchase/pl100.cbl` | `acas_posting/programs/pl100_payment_posting.py` | Purchase payment posting |
+| `irs/irs030.cbl` | `acas_posting/programs/irs030_posting.py` | IRS nominal-ledger posting — **partial**, see below |
+
+Underneath them: 20 data-access modules `acas_posting/dal/acas*.py`, one per
+frozen file handler rather than one per table, because the handlers are not
+one-to-one with tables — `acas000` dispatches to four bridges by key number,
+and both `acas016` and `acas026` own a header table plus a lines table.
+Mirroring the handler boundary keeps the Python module set in exact
+correspondence with the COBOL programs the traceability document has to map.
+
+### The two partial boundaries — do not widen them
+
+Two of the twelve are migrated **only in part**. Both files are otherwise
+dominated by interactive code that is out of scope, so an agent working from
+the file rather than from the stated boundary would migrate several hundred
+lines that must not be migrated.
+
+- **`general/gl051.cbl` — only the control-total gate**: the `batch-print`
+  section §999 and its `end-batch` paragraph,
+  `[general/gl051.cbl:L1096-L1133]`. The paragraph's closing
+  `go to main-exit.` is `[general/gl051.cbl:L1134]`. Everything else in that
+  1282-line program — screen sections, accept loops, the amendment dialogs — is
+  out of scope.
+- **`irs/irs030.cbl` — only `Ledger-Postings-Add`**:
+  `[irs/irs030.cbl:L1569-L1733]`, which is the section that walks the transfer
+  file and updates the IRS nominal ledger. `L1733` is the end of the file. The
+  interactive posting-entry program around it is out of scope, with one
+  exception noted in §4: the end-of-job question that decides whether the
+  transfer file is cleared `[irs/irs030.cbl:L1715-L1724]` gates a database write
+  and therefore becomes a CLI parameter.
+
+The two VAT computes the posting path consumes, in the `Net` and `Gross`
+sections `[irs/irs030.cbl:L1551]`, `[irs/irs030.cbl:L1562]`, are in scope for
+the same reason: the posting path reads their result.
+
+### Phase order, and the labelling quirk
+
+The General Ledger cycle runs in this order:
 
 1. batch check;
 2. transaction pre-process;
 3. sort;
 4. transaction update;
-5. deletion and end-of-period processing.
+5. transaction deletion and end-of-period processing.
 
-The labels in the source are not execution order: deletion is called Phase 3
-but runs after Phase 4.
+The programs label their own phases on screen — "Phase - 1. Batch Check"
+`[general/gl070.cbl:L284]`, "Phase - 2. Transaction Pre-process"
+`[general/gl070.cbl:L292]`, "Phase - 4. Transaction Update"
+`[general/gl072.cbl:L274]`, and both "Phase - 3. Transaction Deletion" and
+"Phase - 5. End of Period Processing" inside `gl080`. **The labels are not
+execution order**: deletion is labelled Phase 3 but executes after Phase 4.
+The module docstrings say so, so that a maintainer reading the label is not
+misled.
 
-## What was excluded
+---
 
-The following remain outside the migration:
+## 4. What was excluded, and why
 
-- all frozen COBOL, bridge, copybook, compile-script, and schema files;
-- interactive data-entry, amendment, setup, and menu programs;
-- report formatting with no database effect;
-- non-posting utilities;
-- the BASIC-family, Payroll, and Stock legacy trees;
-- the eleven out-of-scope tables and eight out-of-scope bridges;
-- schema evolution, new indexes, caching, and concurrency;
-- a web tier, REST API, GUI, message queue, or ORM entity layer.
+Frozen — read as specification, **zero modifications of any kind**:
 
-Presentation code follows three rules:
+- all COBOL under `common/`, `general/`, `sales/`, `purchase/`, `irs/`,
+  `stock/` and `copybooks/`;
+- the bridge programs `common/*MT.scb` and `common/*MT.cbl`;
+- the schema `mysql/ACASDB.sql`;
+- the maintainer's build and load scripts, including `comp-all.sh`,
+  `common/comp-common.sh` and `common/masterLD.sh`;
+- `etc/ld.so.conf.d/gnucobol.conf`, and the three vendored source archives at
+  the repository root.
 
-1. a diagnostic `DISPLAY` with no database effect becomes a log record;
-2. an `ACCEPT` that gates a write becomes an explicit CLI parameter, preserving
-   the COBOL default or lack of default;
-3. an acknowledgement-only pause is dropped, but any control transfer in that
-   error path is retained.
+Out of scope for migration:
 
-## Repository layout added by the migration
+- **Interactive data-entry, amendment, setup and menu programs** —
+  `common/ACAS.cbl`, `general/general.cbl`, `sales/sales.cbl`,
+  `purchase/purchase.cbl`, `irs/irs.cbl`, the `gl000`/`gl0x0`, `sl0x0`,
+  `pl0x0` and `irs0x0` series, all of `general/gl051.cbl` **except** its
+  control-total block, and all of `irs/irs030.cbl` **except**
+  `Ledger-Postings-Add`.
+- **Report formatting beyond database effects**, and the
+  `call "SYSTEM" using Print-Report` spool-out path wherever it appears — it
+  hands a report file to the operating system and touches no table.
+- **Non-posting utilities** — `common/*UNL.cbl` (unload), `common/*RES.cbl`
+  (restore), the table-maker and take-on programs, `common/dummy-rdbmsMT.cbl`,
+  `common/sys002.cbl`, `common/fhlogger.cbl`, `common/ACAS-Sysout.cbl`, and the
+  backup and PDF shell scripts.
+- **Legacy-language artifacts** — `Basic-Code/` in its entirety, `payroll/`
+  including `payroll/Basic-Code/` and `payroll/payroll_schema.sql`, and
+  `home/vince/Installed-SW/`.
+- **Subsystems the posting cycle does not reach** — `stock/`, the sales
+  `sl800` autogen series, the purchase `pl800` series, `common/xl150.cbl`, and
+  the sort-only satellites.
+- **Eleven out-of-scope tables**, present in the frozen schema but never
+  touched by the cycle: `STOCK-REC`, `STOCKAUDIT-REC`, `DELIVERY-REC`,
+  `PUDELINV-REC`, `SADELINV-REC`, `SAAUTOGEN-REC`, `SAAUTOGEN-LINES-REC`,
+  `PUAUTOGEN-REC`, `PUAUTOGEN-LINES-REC`, `PLPAY-REC` and `PLPAY-RECrg01`, with
+  their eight bridges — `auditMT`, `deliveryMT`, `delfolioMT`,
+  `sldelinvnosMT`, `stockMT`, `paymentsMT`, `plautogenMT` and `slautogenMT`.
+  22 in scope plus 11 out of scope accounts for all 33 tables in the schema.
+- **Schema evolution of any kind** — no new tables, columns, indexes,
+  constraints, views, triggers or DDL statements, and no migration tooling.
+- **Concurrency** — no threads, no `asyncio`, no `multiprocessing`, no
+  connection pooling.
+- **New surfaces** — no web tier, no REST API, no GUI, no ORM entity layer, no
+  message queue, no caching layer.
+- **Behaviour changes of any kind**, including bug fixes, added validations,
+  improved error messages and "cleaned up" rounding.
+
+### The three-way rule for presentation code
+
+Screen statements are interleaved with business logic in the same paragraphs
+throughout the frozen source, so removing the presentation layer needs a rule
+rather than a judgement call. This one is applied uniformly, and it explains
+most apparent omissions:
+
+1. **A diagnostic `DISPLAY` with no database effect becomes a log record** at a
+   severity matching the original's intent. It must not alter control flow and
+   must never appear in a table dump.
+2. **An `ACCEPT` that gates a database write becomes an explicit CLI
+   parameter**, with the COBOL default preserved. The clearest case is the
+   end-of-job question in the IRS posting section that decides whether the
+   transfer file is cleared `[irs/irs030.cbl:L1715-L1724]`: answering yes
+   performs an open-output that deletes every row, so the answer is a genuine
+   input to the migrated program rather than decoration.
+3. **An `ACCEPT` that merely pauses for acknowledgement is dropped**, since its
+   only effect is to block a terminal. Where such a prompt sits inside an error
+   path that then transfers control, **the control transfer is preserved** and
+   only the pause is removed.
+
+---
+
+## 5. Repository layout added by this migration
+
+Everything below is **added** at the repository root, alongside the existing
+COBOL directories. **Nothing in the existing tree was relocated, renamed or
+restructured** — a constraint that follows from the freeze on the COBOL source
+and that also keeps the maintainer's own build scripts working unchanged.
 
 ```text
-acas_posting/
-  cli/
-  cobol/
-  dal/
-  dictionary/
-  programs/
-  records/
-  __main__.py
-  clock.py
-  dates.py
-  workfiles.py
-data_dictionary/
-docs/migration/
-harness/
-  scenarios/
+acas_posting/                 the migrated cycle. No COBOL, no subprocess call.
+├── cli/                      7 batch entry points + argv binding
+├── programs/                 the 12 program modules; business logic lives ONLY here
+├── records/                  the record dataclasses, one per copybook
+├── cobol/                    COBOL language semantics; ZERO business logic
+├── dal/                      data access; SQL against the frozen schema, no ORM
+├── dictionary/               the dictionary model, generator and runtime loader
+├── __main__.py               `python -m acas_posting` — the router
+├── clock.py                  the controlled clock: pins to-day AND Run-Date
+├── dates.py                  common/maps04.cbl plus the zz050/zz060/zz070 wrappers
+└── workfiles.py              pretrans.tmp / postrans.tmp as ordered sequences
+
+data_dictionary/              the generated machine-readable dictionary + its JSON Schema
+docs/migration/               traceability, anomaly log, ambiguity resolutions, diff evidence
 tests/
-  arithmetic/
-  determinism/
-  scenarios/
-pyproject.toml
-requirements.txt
-requirements-harness.txt
-requirements-dev.txt
-README-python-migration.md
+├── arithmetic/               unit-level parity. No database, no COBOL, no Docker
+├── scenarios/                end-to-end state parity. Needs the Compose stack
+└── determinism/              two runs under one pinned clock must be byte-identical
+harness/                      the compiled oracle. NEVER on the package import path
+└── scenarios/                one YAML per mandated scenario
+pyproject.toml                requires-python "==3.12.*", pinned deps, pytest config
+requirements.txt              the shipped runtime set, hash-pinned
+requirements-harness.txt      the harness set, hash-pinned
+requirements-dev.txt          the test and build set, hash-pinned
+README-python-migration.md    this file
 ```
 
-Nothing in the existing tree was relocated, renamed, or restructured.
+Three structural decisions in that layout are load-bearing rather than
+stylistic:
 
-### Import boundaries
+- **`harness/` is a sibling, not a sub-package.** The oracle must be reachable
+  by the tests and unreachable from the shipped code. A sibling directory
+  excluded from packaging enforces that structurally (R-1).
+- **`cobol/` holds no business logic and `programs/` holds no numeric
+  primitives.** That split is what makes the arithmetic tier possible: every
+  picture-clause, packed-decimal, truncation and `MOVE` rule can be tested in
+  isolation with no database and no scenario setup, and any parity failure then
+  localises to one layer or the other.
+- **Work files are in-process sequences**, not tables and not temporary files.
+  `pretrans.tmp` and `postrans.tmp` are transient scratch files belonging to
+  `gl071` `[copybooks/wsnames.cob:L15-L16]`, so nothing about them reaches the
+  database and nothing about them appears in a table dump.
 
-| Area | May import | Must not import |
+### Import boundaries — the layering contract
+
+This table is the contract. It keeps the dependency graph acyclic, keeps the
+record layer a leaf, and keeps the harness off the shipped package's import
+path.
+
+| Module group | May import | Must not import |
 | --- | --- | --- |
-| `acas_posting.cobol` | standard library | DAL, CLI, harness |
-| `acas_posting.records` | `acas_posting.cobol` | DAL, CLI, harness |
-| `acas_posting.dal` | records, dictionary, SQLAlchemy Core, MySQL connector | programs, CLI, harness, ORM entities |
-| `acas_posting.programs` | records, COBOL helpers, DAL facades | CLI internals, harness |
-| `acas_posting.cli` | programs, public DAL/record contracts, clock | harness |
-| `tests/arithmetic` | COBOL helpers and records | database internals, harness runtime |
-| `tests/scenarios` | shared protocol fixtures | reimplemented dump/diff logic |
-| `tests/determinism` | shared protocol fixtures, clock, arithmetic | DAL internals, COBOL runtime calls |
+| `acas_posting/cobol/*.py` | `dictionary.loader` only | `records`, `dal`, `programs`, `cli`, `harness` |
+| `acas_posting/records/*.py` | `cobol.field`, `dictionary.loader` | anything else — this layer is a leaf |
+| `acas_posting/dal/acas*.py` | `dal.connection`, `dal.status`, `dal.cursor_state`, one `records` module | `programs`, `cli`, other `dal.acas*`, `harness` |
+| `acas_posting/programs/*.py` | `records`, `dal.facade`, `cobol.arithmetic`, `cobol.move`, `cobol.condition_names`, `dates`, `workfiles` | `cli`, `dal.acas*` directly, `harness` |
+| `acas_posting/cli/*.py` | `programs`, `clock`, `cli.args` | `dal.acas*` directly, `harness` |
+| `tests/arithmetic/*` | `cobol`, `records` | `dal`, any database |
+| `tests/scenarios/*` | `cli`, the shared harness helpers | `dal` internals |
+| `harness/*` | the standard library, `PyYAML`, the driver | `acas_posting` internals other than the CLI |
 
-## Prerequisites
+---
 
-- CPython **3.12**. `pyproject.toml` requires `==3.12.*`; 3.13 is outside
-  the parity evidence. The AAP reference interpreter was 3.12.3 and the current
-  harness run uses 3.12.13. Both use the C `_decimal` implementation; the
-  pure-Python fallback is not accepted for parity evidence.
-- Docker Engine and Compose v2, only for the compiled oracle and the
-  scenario/determinism tiers.
-- `openssl`, if credentials need to be generated.
+## 6. Prerequisites
 
-The arithmetic tier needs no Docker, MariaDB, or GnuCOBOL.
+- **CPython 3.12.** `pyproject.toml` pins `requires-python = "==3.12.*"`, and
+  the pin is deliberately tight. What matters is that this interpreter's
+  `decimal` module is backed by the C `_decimal` implementation (`libmpdec`)
+  rather than the pure-Python fallback: every monetary operation in the cycle
+  passes through it, and truncation behaviour was verified on the interpreter in
+  use rather than assumed. The AAP's reference interpreter was **3.12.3** with
+  `libmpdec` 2.5.1; the interpreter this checkout is exercised on is 3.12.13.
+  Both are C-backed. A pure-Python `decimal` build is not accepted as parity
+  evidence, and 3.13 is outside the evidence entirely.
+- **Docker Engine with Compose v2** — required **only** for the compiled oracle
+  and the scenario and determinism tiers.
+- **`openssl`** or an equivalent, if harness credentials have to be generated.
 
-## Install
+`tests/arithmetic/` needs **no Docker, no MariaDB and no GnuCOBOL**. It imports
+only `acas_posting.cobol` and `acas_posting.records`, touches no database, and
+runs anywhere a 3.12 interpreter runs.
 
-Create an isolated Python environment:
+---
+
+## 7. Install
 
 ```bash
 python3.12 -m venv .venv
@@ -203,91 +470,211 @@ python -m pip install --require-hashes -r requirements-harness.txt
 python -m pip install --require-hashes -r requirements-dev.txt
 ```
 
-For editable development:
+For editable development, which installs the same pins through the manifest:
 
 ```bash
-python -m pip install -e '.[test]'
+python -m pip install --no-build-isolation -e '.[test]'
 ```
 
-The dependency sets are pairwise disjoint and exact:
+The three dependency sets are pairwise disjoint and exact. Every direct
+dependency, with its pin:
 
-- runtime: `mysql-connector-python==26.7.0`,
-  `SQLAlchemy==2.0.51`, `greenlet==3.5.4`,
-  `typing_extensions==4.16.0`;
-- harness: `PyYAML==6.0.3`;
-- test: `pytest==9.1.1`, `pytest-cov==7.1.0`, and their pinned
-  reproducibility dependencies.
+| Set | Package | Pin | Why it is here |
+| --- | --- | --- | --- |
+| runtime | `mysql-connector-python` | `26.7.0` | The only third-party module `acas_posting` imports. Materialises `DECIMAL` as `Decimal` and integer columns as `int`, never as a float (R-2) |
+| runtime | `SQLAlchemy` | `2.0.51` | **Core level only** — `text()` statements on an explicit `Connection`. No ORM entity layer, no declarative metadata, no schema generation (R-3) |
+| runtime | `greenlet` | `3.5.4` | SQLAlchemy's own requirement, pinned for reproducibility. Nothing imports it and nothing calls `create_async_engine` |
+| runtime | `typing_extensions` | `4.16.0` | SQLAlchemy's own requirement, pinned for reproducibility |
+| harness | `PyYAML` | `6.0.3` | Parses the eight scenario definitions under `harness/scenarios/` |
+| dev | `pytest` | `9.1.1` | The test runner |
+| dev | `pytest-cov` | `7.1.0` | Coverage as traceability evidence (R-5), **not** a quality gate |
 
-A version mismatch between a manifest dependency set and its corresponding
-requirements file is a defect.
+`coverage`, `pluggy`, `iniconfig`, `packaging`, `Pygments` and the `setuptools`
+build backend are pinned alongside them in `requirements-dev.txt`.
 
-## Prepare the Compose stack
+Two contracts worth stating because breaking either is a defect rather than a
+preference:
 
-The stack has two services: MariaDB 10.11.7 and the GnuCOBOL 3.2 builder and
-runner. Credentials have no committed defaults.
+- **Pin parity.** `pyproject.toml` and the three `requirements*.txt` files
+  carry identical exact versions. A version that differs between them is a
+  defect, not a variation.
+- **Do not upgrade.** A driver or runtime change can move a stored penny, and
+  the only acceptable proof of equivalence is an empty scenario diff against the
+  compiled oracle. "Checking for newer" is not an improvement here.
+
+Deliberately absent, and not to be added: `pandas` and `numpy` (R-2), any ORM
+entity layer or migration tool (R-3), any async, thread-pool or
+connection-pool helper (R-3), any parallel or randomising pytest plugin, and any
+third-party date library — the date semantics being reproduced belong to a
+specific COBOL program with a non-standard epoch, and a general-purpose library
+would be *more correct than the specification*, which is the one outcome to
+avoid.
+
+---
+
+## 8. Building the compiled COBOL oracle — the five-step bootstrap
+
+### 8.1 Bring up the stack
+
+The stack has two services: MariaDB at the server version the frozen schema was
+produced by, and a GnuCOBOL builder and runner. The repository is mounted
+**read-only** at `/repo`; the writable build tree is a named volume at `/build`.
+No build and no run can therefore modify the frozen COBOL, bridges or schema.
+
+Credentials have **no committed defaults** — every credential variable is
+written `${VAR:?message}`, so an unset value makes Compose refuse to render
+rather than provisioning a predictable account. `CLONE_INDEX` namespaces the
+project, network and volumes so sibling checkouts cannot share one oracle's
+state.
 
 ```bash
+export CLONE_INDEX=001
 export MARIADB_ROOT_PASSWORD="$(openssl rand -base64 24)"
 export ACAS_DB_USER=acas
 export ACAS_DB_PASSWORD="$(openssl rand -base64 9)"
 docker compose -f harness/docker-compose.yml up -d mariadb
 ```
 
-Keep the application user and password within the frozen `pic x(12)` fields.
-A longer value is truncated on the COBOL side and causes the two
-implementations to authenticate differently.
+WARNING: keep the database name, user and password to **12 characters or
+fewer**. `DB-Schema`, `DB-UName` and `DB-UPass` are `pic x(12)` in the frozen
+connection block `[copybooks/wsfnctn.cob:L57-L59]`, so the COBOL side truncates
+a longer value silently while the Python side sends it whole — and the two
+cycles then authenticate differently. The harness refuses an over-long value up
+front rather than letting it surface later as "credentials rejected".
 
-Define the runner shorthand:
+Define the runner shorthand used throughout §8 to §11:
 
 ```bash
 C="docker compose -f harness/docker-compose.yml run --rm -T gnucobol"
 ```
 
-## Build the compiled COBOL oracle
+`-T` is required on every scripted stage: a tty is allocated by default and a
+piped stage would appear to hang.
 
-The supported operator command is:
+### 8.2 Build the oracle
+
+One command:
 
 ```bash
 $C /repo/harness/build_oracle.sh
 ```
 
-For a repeat build that deliberately preserves the existing writable build
-tree:
+To repeat a build while deliberately preserving the existing writable build
+tree, or to resume at a step:
 
 ```bash
 $C /repo/harness/build_oracle.sh --no-refresh
+$C /repo/harness/build_oracle.sh --from 4
+$C /repo/harness/build_oracle.sh --help
 ```
 
-`harness/build_oracle.sh` performs the five-step bootstrap in a writable
-`$ACAS_BUILD`; the repository is mounted read-only:
+### 8.3 What the five steps are
 
-1. unpack the vendored `presql2-latest.zip` as `presql2-package/`;
-2. compile `cobmysqlapi38.c` to `cobmysqlapi.o` with the recovered rule:
+`harness/build_oracle.sh` performs the bootstrap in this order, in a writable
+build copy of the tree. The order is not negotiable — each step produces what
+the next one links against.
 
-   ```bash
-   gcc -I/usr/local/mysql/include \
-     -c cobmysqlapi38.c -o cobmysqlapi.o -fPIC
-   ```
+**Step 1 — unpack the vendored `presql2-latest.zip`.** It expands to
+`presql2-package/`. The archive itself is **never modified in the checkout**;
+it is unpacked inside the container.
 
-   Do not use `old-apis/cobmysqlapi.005.c` or
-   `old-apis/cobmysqlapi3.c`.
-3. build JC preSQL and its helpers using the vendored 1.14f package;
-4. run the maintainer's `common/comp-common.sh` against the writable build
-   copy;
-5. run `comp-all.sh` in the maintainer's order:
-   Common → General → IRS → Purchase → Sales → Stock.
+**Step 2 — compile the bridge's C interface object, `cobmysqlapi.o`.**
 
-The wrapper also installs idempotent build-copy compatibility shims. They
-never edit a frozen source. One example is the missing
-`ACAS-SQLstate-error-list.cob`, which is a comment-only include materialised
-under `$ACAS_BUILD/copybooks`.
+WARNING: this is the step that will otherwise waste your day. Every bridge,
+handler and loader compile links an object file `cobmysqlapi.o` that provides
+the C interface between COBOL and the MySQL client library —
+`[common/comp-common.sh:L26]`, `[common/comp-common.sh:L32]`,
+`[common/comp-common.sh:L34]`, `[common/comp-common.sh:L51]`, 56 compile lines
+in total. **That object file is absent from the checkout, and no rule anywhere
+in the repository builds it.** Following the compile scripts alone, the oracle
+cannot be built at all: the build fails at link time with no obvious cause.
 
-WARNING: the compile scripts are not reliable success signals.
-`common/comp-common.sh` and `comp-all.sh` end in unconditional zero exits.
-The wrapper therefore scans diagnostics, verifies the expected programs,
-handlers, loaders, and `*MT` bridges, and fails closed.
+The rule was recovered from the vendored package, where
+`presql2-package/cobmysqlapi38.sh` consists of exactly one line:
 
-The runtime loader search path is reproduced in this order:
+```bash
+gcc -I/usr/local/mysql/include -c cobmysqlapi38.c -o cobmysqlapi.o -fPIC
+```
+
+The object is then placed in each compile directory, because every frozen
+compile links the bare filename `cobmysqlapi.o` resolved against the current
+directory.
+
+WARNING: the package also ships two **superseded** variants of that C source —
+`presql2-package/old-apis/cobmysqlapi.005.c` and
+`presql2-package/old-apis/cobmysqlapi3.c`. They must **NOT** be used. Only
+`cobmysqlapi38.c` is current.
+
+**Step 3 — build and install the `presql2` translator onto the PATH.** JC
+preSQL **1.14f**. `presql2-package/presql2.sh` is a single line:
+
+```bash
+cobc -x presql2.cbl cobmysqlapi.o -L/usr/local/mysql/lib -lmysqlclient -lz
+```
+
+`presql2-package/bldcopy2.sh` and `presql2-package/prtschema2.sh` follow the
+same pattern, and `presql2-package/ACAS/comp-stockMT.sh` is a worked example
+that compiles a bridge exactly as ACAS does:
+
+```bash
+cobc -m stockMT.COB cobmysqlapi.o -L/usr/local/mysql/lib -lmysqlclient -lz
+```
+
+The build script reproduces that worked example as a toolchain proof before
+proceeding; `--skip-preflight-link` skips it.
+
+WARNING: never invoke `presql2` without redirecting stdin. It prompts
+interactively and will spin. It also truncates its output file *before*
+validating its parameters, which is exactly why the build runs in a copy: doing
+it inside the checkout would zero the 28 generated `common/*MT.cbl` bridges —
+the authoritative record-layout-to-table mapping.
+
+**Step 4 — run the maintainer's `common/comp-common.sh`, unmodified.** It runs
+`presql2` over each `*MT.scb` `[common/comp-common.sh:L25]`, then compiles the
+bridges, the 17 handlers, the loaders and the menu executables, each linking
+`cobmysqlapi.o` with `-I ../copybooks -Wlinkage -L/usr/local/mysql/lib
+-lmysqlclient -lz` `[common/comp-common.sh:L26]`. It also compiles
+`accept_numeric.c` with `-lncursesw` `[common/comp-common.sh:L18]`, so the
+image needs `ncursesw`.
+
+**Step 5 — run `comp-all.sh`, unmodified.** It exports `COBCPY=../copybooks`
+and `COB_COPY_DIR=../copybooks` `[comp-all.sh:L9-L10]`, then compiles the
+sub-systems in the maintainer's own order `[comp-all.sh:L15-L32]`:
+
+```text
+common → general → irs → purchase → sales → stock
+```
+
+### 8.4 Toolchain versions — every one from repository evidence
+
+| Component | Version | Evidence |
+| --- | --- | --- |
+| GnuCOBOL `cobc` | 3.2 final | `[common/comp-common.sh:L9]`, corroborated by `[README.TXT:L53]` |
+| MariaDB server | 10.11.7-MariaDB | `[mysql/ACASDB.sql:L1]`, `[mysql/ACASDB.sql:L5]` |
+| MariaDB Connector/C | 3.3.4 | vendored as `mariadb-connector-c-3.3.4-src.zip` |
+| MySQL Connector/C | 6.1.11 | vendored as `mysql-connector-c-6.1.11-src.tar.gz` |
+| JC preSQL (`presql2`) | 1.14f | vendored as `presql2-latest.zip`; the package's own `README.SVN` states it |
+| Docker Compose | v2 specification | the harness must be runnable in local Docker |
+
+### 8.5 Compiler flags — default arithmetic, and the harness must not alter it
+
+A census of every compile invocation in the repository finds **no `-std=`
+dialect selection**, **no `>>SET ARITHMETIC` directive in any source**, and **no
+`binary-truncate` flag anywhere**. The compiler is therefore invoked with
+default arithmetic, and the migration's truncation and rounding behaviour
+depends on exactly that. **The harness must not change a single `cobc` flag.**
+
+The flags actually used are diagnostic and linkage-related: `-Wlinkage`,
+`-I ../copybooks`, `-m` for dynamically loadable modules, `-x` for executables,
+`-L/usr/local/mysql/lib -lmysqlclient -lz`, `-T` for listings, and
+`-Wno-goto-section`. That last one is worth noticing rather than skipping past:
+the maintainer added it to suppress the warning about inter-section `GO TO`
+`[common/comp-common.sh:L8-L9]`, which confirms that such transfers are
+pervasive and intentional in this codebase rather than incidental.
+
+The MySQL client must be installed under the prefix the frozen scripts expect,
+`/usr/local/mysql`, and the image reproduces the repository's own runtime
+loader search path `[etc/ld.so.conf.d/gnucobol.conf]`, in this order:
 
 ```text
 /usr/local/lib/gnucobol
@@ -296,50 +683,127 @@ The runtime loader search path is reproduced in this order:
 /usr/lib
 ```
 
-The MySQL client prefix must be `/usr/local/mysql`, and the image includes
-ncursesw for `accept_numeric.c`.
+### 8.6 WARNING: the compile scripts are not success signals
 
-## Build scenario fixtures
+`common/comp-common.sh` ends in a bare, unconditional `exit 0`
+`[common/comp-common.sh:L59]`, and `comp-all.sh` does the same
+`[comp-all.sh:L45]` immediately after printing
 
-Fixture records are declared as quoted text in the scenario YAML. The builder
-materialises the actual indexed/relative files through generated COBOL writers
-compiled against the frozen definitions, then reads them back through those
-same definitions.
-
-Build all fixtures:
-
-```bash
-$C /repo/harness/build_fixtures.sh
+```text
+We Are all done but check for any error or warning messages
 ```
 
-Or one scenario:
+`[comp-all.sh:L44]`. Their exit status is therefore **not** a build-success
+signal, and neither `set -e` nor `pipefail` can see a failed compile through
+them. `harness/build_oracle.sh` scans the diagnostics itself, asserts that the
+expected programs, handlers, loaders and `*MT` bridges are all present, and
+fails closed.
+
+These are frozen files. They are **worked around, never fixed** (R-4).
+
+### 8.7 WARNING: one copybook is missing from the frozen archive
+
+`copybooks/ACAS-SQLstate-error-list.cob` is **absent from the checkout** while
+being `COPY`'d by dozens of frozen files, most of them `*MT` bridges. Left
+alone, the majority of bridges fail to compile and the oracle cannot be built.
+
+It is **not fabricated into the frozen tree**, because inventing a frozen source
+file would breach R-3 and R-4. Instead `harness/build_oracle.sh` materialises an
+idempotent, comments-only compatibility include under the writable build copy's
+`copybooks/` directory — `harness/copybook-shims/ACAS-SQLstate-error-list.cob`.
+Every frozen `COPY` site expands it inside the Identification Division's
+Remarks paragraph, before any Data Division begins, so the include changes no
+COBOL behaviour; the executable SQLSTATE handling lives elsewhere and is
+untouched. The checkout's own `copybooks/` directory is never written.
+`docs/migration/ambiguity-resolutions.md` §10.1 records this as a build blocker
+resolved without touching the freeze.
+
+### 8.8 Build the scenario fixtures
+
+The frozen loaders read COBOL flat files, and most of them are `ORGANIZATION
+INDEXED` or `RELATIVE` — on this toolchain an indexed file is a Berkeley DB
+Btree whose on-disk form belongs to the library version the image carries, which
+is measurable rather than assumable. So each scenario declares its **records**
+as text under `seed_records`, and the builder generates a COBOL writer per file,
+compiles it against the frozen copybooks, calls the frozen handler to write,
+then reads every file back through the same definitions and refuses the build
+unless the counts agree. No record layout is restated anywhere.
 
 ```bash
-$C /repo/harness/build_fixtures.sh clean_batch_gl
+$C /repo/harness/build_fixtures.sh                 # all scenarios
+$C /repo/harness/build_fixtures.sh clean_batch_gl  # one scenario
 ```
 
-Generated fixtures, `SYS-DISPLAY.log`, and file-handler logs are restricted to
-their owner. The builder refuses a result with any group/other permission.
+The fixture stage is **not optional**, and it comes second for that reason.
+Generated fixtures and log files are owner-only; the builder refuses a result
+carrying any group or other permission.
 
-### Why `common/masterLD.sh` is not run
+---
 
-There are three independent reasons:
+## 9. Seeding a scenario
 
-1. its header says `THIS SCRIPT HAS NOT YET BEEN TESTED`
-   `[common/masterLD.sh:L4-L5]`, corroborated by the 2025-03-07
-   `Changelog` entry;
-2. all 24 loader lines at L93-L116 omit the separator before `fi`, and
-   `bash -n` rejects the file;
-3. it ends with an interactive `less SYS-DISPLAY.log`.
+Seeding is stage 1 of the protocol. It loads the COBOL flat files into `ACASDB`
+through the maintainer's own frozen `common/*LD.cbl` loader programs, so that
+both cycles start from identical state.
 
-The file is frozen and is not fixed. `harness/seed.sh` reproduces its
-per-file contract instead.
+```bash
+N=clean_batch_gl
+S="/repo/harness/scenarios/$N.yaml"
+$C /repo/harness/seed.sh --seed-dir "/data/fixtures/$N" "$S"
+$C /repo/harness/seed.sh --help
+```
 
-The in-scope loader mapping includes:
+`--seed-dir` exists because a scenario's own `seed_dir` resolves relative to the
+scenario file, which lives inside the **read-only** checkout, so a built fixture
+cannot live there. It says *where*, never *which*: the scenario's `seed_files`
+list stays the sole authority on what must be present.
+
+### 9.1 Why `common/masterLD.sh` is reproduced rather than invoked
+
+The maintainer ships a driver script for exactly this job. The harness
+reproduces its documented per-file contract instead of calling it, for three
+reasons — the second decisive:
+
+1. **Its author marks it untested.** `[common/masterLD.sh:L4-L5]` reads
+   `THIS SCRIPT HAS NOT YET BEEN TESTED` under a row of carets, and the
+   `Changelog` entry dated 2025-03-07 independently confirms it: "Revised
+   scripts masterUNL.sh, masterRES.sh & masterLD and so far only tested
+   masterUNL."
+2. **It cannot execute at all.** All 24 loader lines
+   `[common/masterLD.sh:L93-L116]` are written
+   `if [ -e analysis.dat ];  then analLD fi`, omitting the mandatory `;` or
+   newline before `fi`. `bash -n common/masterLD.sh` rejects the file outright:
+
+   ```text
+   common/masterLD.sh: line 124: syntax error: unexpected end of file
+   ```
+
+3. **It ends interactively**, with `less SYS-DISPLAY.log`, which a scripted
+   stage cannot use.
+
+The file is **frozen and is NOT fixed** — not repaired, not `sed`-ed, not copied
+and patched, not sourced (R-3, R-4). Only its contract is reproduced, in valid
+shell.
+
+### 9.2 The contract that is reproduced
+
+**First the system block, in fixed order, guarded by the existence of
+`system.dat`** `[common/masterLD.sh:L50-L88]`:
+
+```text
+systemLD → sys4LD → finalLD → dfltLD
+```
+
+The order matters because a later loader reads what an earlier one wrote. The
+frozen script aborts on `> 63` after the first three loaders and applies its own
+**tighter** `!= 0` test after `dfltLD` `[common/masterLD.sh:L83]`; both
+behaviours are reproduced as written rather than harmonised.
+
+**Then each flat file is mapped to its loader.** The in-scope subset:
 
 | Flat file | Loader |
 | --- | --- |
-| `system.dat` | `systemLD`, `sys4LD`, `finalLD`, `dfltLD` |
+| `system.dat` | `systemLD`, then `sys4LD`, `finalLD`, `dfltLD` |
 | `batch.dat` | `glbatchLD` |
 | `posting.dat` | `glpostingLD` |
 | `ledger.dat` | `nominalLD` |
@@ -357,211 +821,688 @@ The in-scope loader mapping includes:
 | `openitm3.dat` | `otm3LD` |
 | `openitm5.dat` | `otm5LD` |
 
-The frozen loader status meanings are 128 for unset RDBMS parameters, 64 for
-the RDBMS flag not set, and 16 for a write error; values above 63 abort the
-load. The harness additionally refuses a nominally successful seed that
-persists no rows.
+The frozen script's remaining mappings — `delfolio.dat`, `delinvno.dat`,
+`delivery.dat`, `pay.dat`, `plautogen.dat`, `slautogen.dat`, `staudit.dat`,
+`stockctl.dat` — load the eleven out-of-scope tables listed in §4 and are not
+part of a posting-cycle seed.
 
-## Run both cycles and diff
+### 9.3 Exit-code semantics the harness must check
 
-The recommended command is the fail-closed driver:
+The loaders signal failure through exit codes with documented meanings
+`[common/masterLD.sh:L37-L39]`:
+
+| Code | Meaning |
+| --- | --- |
+| `128` | RDBMS parameters are not set up in the ACAS system parameter file |
+| `64` | the "use RDB" flag is not set |
+| `16` | error writing data to the RDBMS |
+
+**Anything above 63 aborts the load** — the frozen script's own note says as
+much, and admits it never got round to trapping them consistently
+`[common/masterLD.sh:L41]`. `harness/seed.sh` checks them explicitly instead of
+assuming success.
+
+It also adds one non-vacuity gate of its own, which is not a behaviour change
+but a refusal to hand on an empty capture: **a seed that reports success and
+leaves no rows is a failed seed.** The frozen loaders reach no `COMMIT`, so
+inside the seeding window their writes are not durable — a defect of the frozen
+code, reported rather than repaired (R-4). The harness measures the seeded row
+counts when the window closes and fails there, rather than letting an empty
+capture reach a comparison whose pass condition is an empty diff.
+
+### 9.4 Two operational constraints
+
+- **Autocommit must be OFF during seeding.** The batch loader turns it off
+  explicitly `[common/glbatchLD.cbl:L9-L13]` and the seeded state depends on its
+  commit boundaries. `harness/seed.sh` owns that **seeding window**: it sets the
+  mode off, runs the loaders, then restores it. Runtime application access —
+  both cycles, and the reset — runs with autocommit **ON**, the mode
+  `harness/Dockerfile.mariadb` declares; the reset and the COBOL runner each
+  assert it, which is how a still-open seeding window is caught rather than
+  silently changing what a run means.
+- **The loaders must run from the ACAS data directory** holding the COBOL flat
+  files `[common/masterLD.sh:L27-L28]`. The frozen script hard-codes
+  `cd ~/ACAS` `[common/masterLD.sh:L45]`; the harness takes the directory as
+  `--data-dir` instead, and records that as an explicit, documented deviation.
+
+### 9.5 Resetting between the two runs
+
+```bash
+$C /repo/harness/reset_db.sh --seed-dir "/data/fixtures/$N" "$S"
+$C /repo/harness/reset_db.sh --help
+```
+
+`harness/reset_db.sh` applies `mysql/ACASDB.sql` **verbatim** and emits **zero
+DDL of its own** (R-3) — it does not need any, because the frozen dump already
+carries a `DROP TABLE IF EXISTS` before each of its 33 `CREATE TABLE`
+statements, so re-applying the frozen file *is* the drop-and-recreate. The file
+is streamed unfiltered: no `sed`, no `awk`, no `iconv`, no local copy and no
+`--default-character-set` override, so the dump's own charset caveat
+`[mysql/ACASDB.sql:L9-L11]` is preserved rather than "fixed" (R-4).
+
+For the same reason it is worth knowing what the frozen dump does to the session
+it is replayed into, since `harness/Dockerfile.mariadb` applies it as-is:
+`SET NAMES utf8mb4` `[mysql/ACASDB.sql:L16]`, `TIME_ZONE='+00:00'`
+`[mysql/ACASDB.sql:L18]`, `UNIQUE_CHECKS=0` `[mysql/ACASDB.sql:L19]`,
+`FOREIGN_KEY_CHECKS=0` `[mysql/ACASDB.sql:L20]` and
+`SQL_MODE='NO_AUTO_VALUE_ON_ZERO'` `[mysql/ACASDB.sql:L21]`, with every table
+defaulting to `utf8mb3` / `utf8mb3_general_ci`. It never drops the database
+itself: `DROP DATABASE` and `CREATE DATABASE` appear nowhere in the frozen file
+and dropping it would destroy the grants Compose established.
+
+The reset is destructive, so it refuses to run until three gates are satisfied:
+a **distinct administrative account** that is not the application user, a
+**target-scoped consent token** of the form `DESTROY <schema>@<host>:<port>`,
+and a target that is not the frozen checkout. `--dry-run` reports the gates
+instead of enforcing them, and is the way to be told the exact token a target
+needs. Do not weaken them.
+
+---
+
+## 10. Running both cycles
+
+Two runners, one per side of the comparison, driven with identical logical
+inputs:
+
+```bash
+$C /repo/harness/run_cobol_scenario.sh  "$S"    # stage 2: the compiled cycle
+$C /repo/harness/run_python_scenario.sh "$S"    # stage 6: the migrated cycle
+```
+
+Neither runner judges the accounting. Each drives, asserts its own
+preconditions, observes and records; whether the two cycles agree is decided in
+§11 from the two dumps.
+
+`harness/run_cobol_scenario.sh` drives the **menu executables** rather than the
+posting programs, and that is deliberate. None of the twelve in-scope programs
+is a main program: each is a `CALL`ed sub-program whose `PROCEDURE DIVISION
+USING` list is made of group items, `cobcrun` can pass only string arguments,
+and the posting programs are compiled `-m` as loadable modules rather than `-x`
+executables — so no shell can invoke them directly. The four menu executables
+are what construct those parameter blocks and `CALL` the sub-programs. Writing a
+new COBOL driver was rejected outright: the COBOL tree is frozen (R-1, R-4).
+
+### 10.1 The three linkage shapes — there are three, not one
+
+The CLI entry points bind the actual linkage parameters, and the frozen source
+has exactly three distinct shapes:
+
+| Family | `PROCEDURE DIVISION USING` | Evidence |
+| --- | --- | --- |
+| General Ledger | `ws-calling-data`, `system-record`, `to-day`, `file-defs` | `[general/gl070.cbl:L245-L248]` |
+| Sales and Purchase | the same four, plus the fourth system record `system-record-4` | `[sales/sl060.cbl:L395-L399]` |
+| IRS | `IRS-System-Params`, `WS-System-Record`, `File-Defs` | `[irs/irs030.cbl:L552-L554]` |
+
+The IRS shape is **materially different**: it takes **neither the calling-data
+block nor the run date `to-day`**. Collapsing the three into one argument shape
+would misrepresent the interface the migration is supposed to preserve.
+
+### 10.2 The seven routes
+
+`python -m acas_posting` is the router. It mirrors the system-selection menu of
+`common/ACAS.cbl` with no screen output of any kind, and reads no clock.
+
+```bash
+python -m acas_posting general  post-cycle     --help
+python -m acas_posting general  end-of-cycle   --help
+python -m acas_posting sales    invoice-post   --help
+python -m acas_posting sales    cash-post      --help
+python -m acas_posting purchase order-post     --help
+python -m acas_posting purchase payment-post   --help
+python -m acas_posting irs      post           --help
+```
+
+Each route is also directly runnable as
+`python -m acas_posting.cli.<module>`, and the two forms return the same status.
+What each dispatches:
+
+| Route module | Dispatches | Derived from |
+| --- | --- | --- |
+| `cli/gl_post_cycle.py` | `gl070`, the term-code-5 abort gate, `gl071`, `gl072` | `[general/general.cbl:L805-L815]` |
+| `cli/gl_end_of_cycle.py` | `gl080` | `[general/general.cbl:L817-L821]` |
+| `cli/sl_invoice_post.py` | `sl055`, then `sl060` | `[sales/sales.cbl:L756-L768]` |
+| `cli/sl_cash_post.py` | `sl100` | `[sales/sales.cbl:L792-L796]` |
+| `cli/pl_order_post.py` | `pl055`, then `pl060` | `[purchase/purchase.cbl:L752-L762]` |
+| `cli/pl_payment_post.py` | `pl100` | `[purchase/purchase.cbl:L786-L790]` |
+| `cli/irs_post.py` | `irs030`, plus the clear-transfer-file decision as a parameter | `[irs/irs.cbl:L666-L672]` |
+
+The process exit status **is** `WS-Term-Code` itself
+`[copybooks/wscall.cob:L10]`, surfaced unchanged and never re-encoded: `0` when
+the operation completed, `5` when the General Ledger abort gate stopped the
+cycle, above `7` when the operation reported a serious error, and `2` when the
+router refused the selection.
+
+The three ledgers have **three different gates, deliberately not harmonised**:
+General tests `ws-term-code = 5` `[general/general.cbl:L810]`, Sales tests
+`not = zero` `[sales/sales.cbl:L761]`, and Purchase has no gate at all — its
+equivalent lines are commented out in the frozen source
+`[purchase/purchase.cbl:L755-L758]`. Each gate belongs to its own route; the
+router imposes none (R-4).
+
+### 10.3 The abort gate is a hard gate, not a warning
+
+This one changes which tables a run writes, so getting it wrong produces a
+silently different result rather than an error.
+
+A batch left open sets a status condition. `gl070` detects it and raises the
+terminate code — `move 5 to ws-term-code` `[general/gl070.cbl:L289]` — and the
+menu then tests that code and returns to the menu rather than continuing:
+`if ws-term-code = 5 / go to display-menu` `[general/general.cbl:L810-L811]`.
+The effect is that **`gl071` and `gl072` never run at all**, and the database
+effect of the rejection is therefore *the absence* of everything those two
+phases would have written.
+
+`acas_posting/cli/gl_post_cycle.py` reproduces this as a hard phase boundary.
+
+### 10.4 The controlled clock
+
+`acas_posting/clock.py` pins exactly **two** observables and injects them at the
+CLI boundary:
+
+- the text date `to-day pic x(10)`, in **DD/MM/CCYY** form;
+- the binary `Run-Date` `[copybooks/wssystem.cob:L67]`.
+
+Nothing deeper is needed, and over-engineering it would be a mistake. Every
+in-scope posting program contains **zero** clock reads and receives the date
+purely through linkage. The single clock read in the entire call chain lives in
+the menu shell's date-service copybook — `move function current-date to
+wse-date-block` `[copybooks/Proc-ACAS-Mapser-RDB.cob:L72]`, which then builds
+the text date and calls the date module to derive the binary one
+`[copybooks/Proc-ACAS-Mapser-RDB.cob:L79-L80]`. Pinning those two values is
+therefore sufficient to make two runs byte-identical.
+
+The module exposes `PinnedRunDate` with three constructors —
+`pin_from_calendar_date`, `pin_from_to_day` and `pin_from_run_date` — plus
+`verify_pin`, so a pin can be built from whichever observable a scenario
+declares and then cross-checked. **There is no default that resolves to the
+current time**: every route requires its run date as an argument.
+
+### 10.5 Pin the IRS fan-out switch in every scenario
+
+`IRS-Instead` is a single character in the system record, with condition names
+for "IRS instead" and "IRS as well as" — `88 IRS-Used value "Y"` and
+`88 IRS-Both-Used value "B"` `[copybooks/wssystem.cob:L179-L181]`. It is a
+three-state switch, it is tested at three sites in each of the four Sales and
+Purchase posting programs, and **its state changes which tables a run touches**.
+
+Every scenario therefore pins it explicitly. Leaving it at a default would make
+the affected-table list ambiguous, and an ambiguous affected-table list makes
+the diff in §11 unattributable.
+
+A consequence worth stating once: Sales and Purchase batches balance by
+construction, so the **control-total mismatch scenario is
+General-Ledger-specific**. There is no meaningful way to construct an unbalanced
+sales batch.
+
+---
+
+## 11. Diffing state — the verification protocol
+
+### 11.1 The stage order is the evidence
+
+The protocol is a rigid sequence, not an ad-hoc comparison:
+
+```text
+seed → run COBOL → dump → normalize → reset → run Python → dump → normalize → diff
+```
+
+**An empty diff is the pass condition, and the only one.** A stage that exits
+non-zero has produced no evidence, so re-seed rather than carry a partial
+capture forward.
+
+The recommended form is the fail-closed driver, because the ordering *is* the
+evidence: it runs the stages in sequence and aborts at the first non-zero,
+passing that stage's own exit status through verbatim rather than flattening
+every failure into one code.
 
 ```bash
 N=clean_batch_gl
 S="/repo/harness/scenarios/$N.yaml"
-$C /repo/harness/run_parity.sh \
-  --seed-dir "/data/fixtures/$N" \
-  "$S"
+$C /repo/harness/run_parity.sh --seed-dir "/data/fixtures/$N" "$S"
+$C /repo/harness/run_parity.sh --dry-run "$S"     # print the stages, run none
+$C /repo/harness/run_parity.sh --help
 ```
 
-It performs:
+The driver's ten stages, which are the nine-stage protocol above with the reset
+counted on both sides and one publication gate added:
 
-```text
-reset + seed
-run compiled COBOL
-dump COBOL
-normalise COBOL
-reset + re-seed
-run Python
-dump Python
-normalise Python
-verify both manifests
-diff
+| Stage | Command | Job |
+| --- | --- | --- |
+| 1 | `harness/reset_db.sh` | schema, then seed the scenario |
+| 2 | `harness/run_cobol_scenario.sh` | run the compiled COBOL cycle |
+| 3 | `harness/dump_tables.py --side cobol` | capture the COBOL state |
+| 4 | `harness/normalize.py --side cobol` | normalise that capture |
+| 5 | `harness/reset_db.sh` | schema, then **re-seed the same scenario** |
+| 6 | `harness/run_python_scenario.sh` | run the migrated Python cycle |
+| 7 | `harness/dump_tables.py --side python` | capture the Python state |
+| 8 | `harness/normalize.py --side python` | normalise that capture |
+| 9 | — | assert both normalised trees are present and published |
+| 10 | `harness/diff_states.py` | **an empty diff is the pass** |
+
+Stages 1 and 5 are the same command on purpose: the second reset is what makes
+the Python side's *starting* state the COBOL side's starting state rather than
+the COBOL side's *ending* state.
+
+Driving the stages by hand is still supported, and is exactly what the driver
+does:
+
+```bash
+$C /repo/harness/seed.sh --seed-dir "/data/fixtures/$N" "$S"
+$C /repo/harness/run_cobol_scenario.sh "$S"
+$C python3 /repo/harness/dump_tables.py --scenario "$N" --side cobol --scenario-file "$S"
+$C python3 /repo/harness/normalize.py   --scenario "$N" --side cobol
+$C /repo/harness/reset_db.sh --seed-dir "/data/fixtures/$N" "$S"
+$C /repo/harness/run_python_scenario.sh "$S"
+$C python3 /repo/harness/dump_tables.py --scenario "$N" --side python --scenario-file "$S"
+$C python3 /repo/harness/normalize.py   --scenario "$N" --side python
+$C python3 /repo/harness/diff_states.py --scenario "$N" --scenario-file "$S"
 ```
 
-An empty diff is the only pass condition. A non-zero earlier stage produces
-no parity claim.
+`harness/diff_states.py` exits `0` with empty stdout for an empty diff, `1` for
+a real behavioural difference, and `2` when the comparison could not be
+performed at all. It also **refuses** a capture whose run stage did not attest
+success, and refuses a pair that is empty on both sides — so a hand-driven run
+fails closed instead of reporting that two empty captures were identical.
 
-The equivalent manual stages are documented at the top of
-`harness/docker-compose.yml`, but the driver is preferred because it enforces
-order and stops at the first failure.
+### 11.2 Why the dump is trivially deterministic
 
-### Three linkage shapes
+The frozen schema turns out to be exceptionally well behaved for this purpose.
+All **22 in-scope tables have a single-column primary key and zero secondary
+indexes**, and none carries a `TIMESTAMP` column, an `AUTO_INCREMENT` column or
+a column-level `DEFAULT`. The one `AUTO_INCREMENT` in the whole schema belongs
+to `STOCKAUDIT-REC`, which is out of scope.
 
-The runners preserve three distinct call shapes:
-
-- General Ledger:
-  `ws-calling-data, system-record, to-day, file-defs`
-  `[general/gl070.cbl:L245-L248]`;
-- Sales and Purchase: the same plus the fourth system record
-  `[sales/sl060.cbl:L395-L399]`;
-- IRS: `IRS-System-Params, WS-System-Record, File-Defs`, with no
-  calling-data block and no `to-day`
-  `[irs/irs030.cbl:L552-L554]`.
-
-### CLI routes
-
-```text
-python -m acas_posting general post-cycle
-python -m acas_posting general end-of-cycle
-python -m acas_posting sales invoice-post
-python -m acas_posting sales cash-post
-python -m acas_posting purchase order-post
-python -m acas_posting purchase payment-post
-python -m acas_posting irs post
-```
-
-The route modules dispatch:
-
-- `gl_post_cycle.py`: `gl070`, hard term-code-5 gate, `gl071`, `gl072`;
-- `gl_end_of_cycle.py`: `gl080`;
-- `sl_invoice_post.py`: `sl055`, then `sl060`;
-- `sl_cash_post.py`: `sl100`;
-- `pl_order_post.py`: `pl055`, then `pl060`;
-- `pl_payment_post.py`: `pl100`;
-- `irs_post.py`: `irs030`, including the transfer-file clear decision.
-
-A batch left open makes `gl070` set term code 5
-`[general/gl070.cbl:L289]`. The menu returns before `gl071` and `gl072`
-`[general/general.cbl:L810-L811]`. The Python route treats this as a hard
-phase boundary, not a warning.
-
-### Controlled clock
-
-`acas_posting/clock.py` pins exactly two observables at the CLI boundary:
-
-- `to-day pic x(10)` in DD/MM/CCYY form;
-- binary `Run-Date` `[copybooks/wssystem.cob:L67]`.
-
-Every in-scope posting program has zero clock reads. The menu/date-service
-path supplies the values through
-`[copybooks/Proc-ACAS-Mapser-RDB.cob:L72-L80]`. There is no default that
-resolves to the current time.
-
-Every scenario also pins `IRS-Instead` explicitly. Leaving this three-state
-switch implicit would make the affected-table list ambiguous.
-
-## State capture and normalisation
-
-All 22 in-scope tables have a single-column primary key and no secondary
-index. The dump is therefore:
+So the dump is exactly this, per table, and nothing more:
 
 ```sql
 SELECT * FROM `<table>` ORDER BY `<primary-key>`;
 ```
 
-There is no timestamp masking or surrogate-key remapping.
+No tie-breaking logic, no timestamp masking, no surrogate-key remapping.
 
-`harness/normalize.py` has exactly three jobs:
+WARNING: bound a real comparison by the scenario's affected-table list, using
+`--scenario-file`. `dump_tables.py --all-in-scope` and
+`diff_states.py --all-tables` are **debugging aids, not the protocol**: the menu
+shell rewrites `SYSTEM-REC`, `SYSDEFLT-REC` and `SYSTOT-REC` to both stores when
+the operator leaves with `X` `[general/general.cbl:L656-L691]`, and the Python
+command line has no menu and performs no such rewrite — so comparing those
+tables in a scenario that does not affect them produces a **false failure**.
 
-1. trailing ASCII-space canonicalisation for fixed `CHAR` columns;
-2. decimal rendering at the declared scale;
-3. the explicit date-text allow-list.
+### 11.3 What the normaliser does, and what it must not do
 
-It does not make different stored values compare equal. A non-empty diff is a
-real behavioural difference.
+`harness/normalize.py` has exactly three jobs, and each answers a specific
+finding rather than being a general-purpose cleanup:
 
-## Tests
+1. **Canonicalise trailing spaces in fixed-character columns.** This exists
+   because of a genuine width drift: the nominal ledger name is 24 characters in
+   the copybook, becomes a 32-character host variable
+   `[common/nominalMT.cbl:L299]` and lands in a 32-character column
+   `[mysql/ACASDB.sql:L127]`. The value is not corrupted, but the padding
+   differs, and padding is visible in a dump.
+2. **Canonicalise decimal scale rendering**, so a value stored at two decimal
+   places compares equal regardless of how a driver chose to format it.
+3. **Canonicalise the two-digit versus four-digit date text forms** that the
+   schema stores side by side, against an explicit allow-list rather than a
+   permissive pattern.
 
-The arithmetic tier has 15 test files and needs no external service:
+It does **not** make different stored values compare equal. That is the point of
+keeping the list to three: because the normaliser cannot hide a difference, **a
+non-empty diff is always a real behavioural difference and never an artefact of
+the comparison.**
+
+---
+
+## 12. Tests
+
+Three tiers, three markers, two very different infrastructure requirements. The
+markers are registered in `pyproject.toml` under `[tool.pytest.ini_options]` and
+`--strict-markers` is on, so a typo in a marker is an error rather than a silent
+no-op.
+
+| Tier | Files | Marker | Needs |
+| --- | --- | --- | --- |
+| `tests/arithmetic/` | 15 | `arithmetic` | nothing — no Docker, no MariaDB, no GnuCOBOL |
+| `tests/scenarios/` | 8 | `scenario` | the Compose stack and a seeded database |
+| `tests/determinism/` | 1 | `determinism` | the Compose stack |
+
+Two further markers, `database` and `oracle`, record the finer-grained
+requirement — a live MariaDB with the frozen schema applied, and a built
+oracle — for tests that need one but not the other.
+
+### 12.1 The arithmetic tier — runs anywhere
 
 ```bash
 python -m pytest -m arithmetic
 ```
 
-Expected arithmetic values are captured from compiled probes, never derived
-by reading the COBOL and deciding what it ought to do.
+One test file per computation pattern: the field descriptors and the six storage
+classes, `COMP-3` packed decimal, `COMP` binary, `SIGN LEADING` display,
+`MOVE` truncation, un-`ROUNDED` truncation, `ROUNDED` half-up, the two VAT
+formulations, the `gl080` cycle divide, the double-entry explosion, the
+control-total comparison, the ledger-balance accumulation, and the derived IRS
+date components.
 
-The eight scenario files require the Compose stack:
+The methodological rule that governs the whole tier: **expected values are
+captured from the compiled oracle**, never derived by reading the COBOL and
+reasoning about what it should produce. A language change alters evaluation
+semantics in ways code review does not reliably catch, which is precisely why
+the oracle exists.
+
+A minority of these tests reach into one shipped paragraph of
+`acas_posting.programs` or one pure function of `acas_posting.dal`, so that the
+anomalies R-4 requires be **locked** are asserted against the code that ships
+rather than against a re-transcription of it. Those imports happen inside the
+test body behind `pytest.importorskip`, so the tier still collects and runs with
+no database driver installed.
+
+Some tests are marked `xfail(strict=True)` and that is deliberate, not
+technical debt: they assert the *naive* reading of a question the oracle has not
+settled, so if a later change ever makes the naive reading true the test
+**XPASSes and the suite goes red** — which is the signal to go and arbitrate the
+question rather than to quietly adopt an answer.
+
+### 12.2 The scenario tier — the state-parity proof
 
 ```bash
-$C sh -lc 'cd /repo && pytest -m scenario'
+$C sh -lc 'cd /repo && python -m pytest -m scenario'
 ```
 
-The scenarios cover clean GL, Sales, Purchase, and IRS posting; mixed
-accepted/rejected input; period totals; control-total mismatch; and an empty
-batch. The control-total mismatch is General-Ledger-specific because the
-Sales and Purchase batches balance by construction.
+Each of the eight asserts an empty normalised diff for one mandated scenario:
 
-The determinism tier runs two Python cycles from identical seeds and compares
-both structurally and byte for byte:
+| Scenario | Test file |
+| --- | --- |
+| clean batch post, General Ledger | `tests/scenarios/test_clean_batch_post_gl.py` |
+| clean batch post, Sales | `tests/scenarios/test_clean_batch_post_sl.py` |
+| clean batch post, Purchase | `tests/scenarios/test_clean_batch_post_pl.py` |
+| clean batch post, IRS | `tests/scenarios/test_clean_batch_post_irs.py` |
+| mixed accepted and rejected batch | `tests/scenarios/test_mixed_accepted_rejected_batch.py` |
+| period-end totals update | `tests/scenarios/test_period_end_totals_update.py` |
+| control-total mismatch rejection | `tests/scenarios/test_control_total_mismatch_rejection.py` |
+| empty batch | `tests/scenarios/test_empty_batch.py` |
+
+"Clean batch post per ledger" is expanded into four cases because the four
+ledgers exercise materially different code paths. As noted in §10.5, the
+**control-total mismatch case is General-Ledger-specific**, since Sales and
+Purchase batches balance by construction.
+
+### 12.3 The determinism tier
 
 ```bash
-$C sh -lc 'cd /repo && pytest -m determinism'
+$C sh -lc 'cd /repo && python -m pytest -m determinism'
 ```
 
-To run both stack-backed tiers:
+Two Python runs of one scenario under the same pinned clock must produce
+byte-identical dumps. Determinism follows from §10.4 plus §11.2: there is no
+hidden time source, no random seed, and no ordering nondeterminism from a
+secondary index.
+
+Both stack-backed tiers together:
 
 ```bash
-$C sh -lc 'cd /repo && pytest -m "scenario or determinism"'
+$C sh -lc 'cd /repo && python -m pytest -m "scenario or determinism"'
 ```
 
-`pytest-cov` is traceability support, not a quality gate. No coverage
-threshold is enforced.
+Everything a bare host can run, which is the useful form while developing:
 
-## Mandated deliverables
+```bash
+python -m pytest -m "not (scenario or determinism)"
+```
 
-- `data_dictionary/acas_posting_dictionary.json` and its JSON Schema:
-  machine-readable field mapping generated from the copybook, bridge host
-  variable, and `CREATE TABLE` definition. The bridge is authoritative; for
-  example, the IRS posting bridge derives day, month, and year columns that
-  exist in no copybook `[common/irspostingMT.cbl:L982-L987]`.
-- `docs/migration/traceability.md`: program-to-module,
-  paragraph-to-function, and field-to-dictionary mapping.
-- `docs/migration/anomaly-log.md`: the canonical reproduced defects and
-  additional measured candidates.
-- `docs/migration/ambiguity-resolutions.md`: semantic questions and compiled
-  arbitrations.
-- `docs/migration/scenario-diff-evidence.md`: per-scenario observed parity
-  evidence.
+### 12.4 Coverage
 
-## WARNING: known risks and gotchas
+`pytest-cov` is present as **traceability evidence** that every traced module is
+actually exercised (R-5). It is **not a quality gate**: there is deliberately
+no `fail_under` and no `--cov` in `addopts`, because a coverage number never
+decides whether this migration is correct. Only an empty scenario diff does.
 
-- The maintainer states that General had not been exercised since its migration
-  to GnuCOBOL 3.2 final, while Purchase was still under system testing
-  (`README.TXT`, 2025-09-21). General and Purchase expected values therefore
-  come only from the oracle. If the compiled GL cycle behaves surprisingly,
-  the surprise is the specification.
-- Sort order is correctness, not performance. `gl072` performs a sequential
-  nominal-ledger read `[general/gl072.cbl:L408]` and depends on the stream
-  emitted by `gl071`. Do not “optimise” it into a keyed lookup.
-- Unrounded COBOL stores truncate toward zero. `ROUNDED` is exceptional and
-  occurs only at the explicitly traced sites.
-- The moving-average blocks disagree. Do not combine them into a common
-  “clean” helper.
-- `cobmysqlapi.o` has no build rule in the checkout. Use
-  `harness/build_oracle.sh`.
-- `common/masterLD.sh` is untested, syntactically invalid, and interactive.
-  Use `harness/seed.sh` through the supported driver.
-- There is no performance target. No concurrency, cache, or new index may be
-  introduced, and exact decimal arithmetic is intentionally slower than
-  binary floating point.
-- Plaintext database transport is reproduced when explicitly permitted because
-  the compiled program has no stronger policy. The harness reports it every
-  time; production operators should supply an encrypted transport policy where
-  parity with that deployment permits it.
+Execution is never randomised and never parallelised. Posting order is
+load-bearing and the comparison is order-sensitive, so no `xdist`, no
+`pytest-randomly`, and no plugin that reorders collection.
 
-## Relationship to the maintainer's documentation
+---
 
-`README.TXT` is canonical for the COBOL system. `README` is a byte-identical
-duplicate, `README.SVN` points to it, and `README.nightly` describes nightly
-builds. The 2025-09-21 entry calls the system v3.3 pre-final and explicitly
-says testing was not complete.
+## 13. The four mandated deliverables
 
-`Changelog` records the COBOL system's system-level version history, including
-the 2025-09-20 3.3.00 reset. The migration does not append its own history
-there.
+### 13.1 The machine-readable data dictionary
 
-`ACAS-Manuals/` contains the maintainer's ODF manuals. It is also untouched.
-These files document the COBOL system and its history; modifying them would
-misrepresent the maintainer's record.
+- [`data_dictionary/acas_posting_dictionary.json`](data_dictionary/acas_posting_dictionary.json)
+- [`data_dictionary/acas_posting_dictionary.schema.json`](data_dictionary/acas_posting_dictionary.schema.json)
+
+Generated by `acas_posting/dictionary/generate.py` from the **authoritative
+triple**: the copybook picture clause, the bridge host-variable declaration, and
+the `CREATE TABLE` column definition. It currently carries 1061 entries covering
+513 columns, 513 host variables, 1001 copybook fields and 46 work-file fields
+across the 22 in-scope tables and 20 bridges. Regenerate or verify with:
+
+```bash
+python -m acas_posting.dictionary.generate --check
+```
+
+Field metadata is therefore **derived, not transcribed**, which eliminates an
+entire class of error across several hundred fields, and every record field can
+cite its dictionary key at run time through
+`acas_posting/dictionary/loader.py`.
+
+**Why the bridge is authoritative, with the decisive proof.** The internal IRS
+posting table carries three columns — `POST4-DAY`, `POST4-MONTH` and
+`POST4-YEAR` — that have **no counterpart in any copybook**. They exist only
+because the bridge derives them from a date string under a guarded substring
+rule `[common/irspostingMT.cbl:L982-L987]`, and when the guard fails the three
+components stay zero while the raw date text is still stored, producing a row
+that is internally inconsistent. A migration driven from the copybooks alone
+would silently omit three columns of a posting table — and would also miss the
+signed-to-unsigned narrowing that loses a value's sign *at the bridge*, before
+any SQL executes.
+
+### 13.2 Traceability
+
+[`docs/migration/traceability.md`](docs/migration/traceability.md) — three
+tables plus the supporting analysis: program → module for all twelve programs,
+paragraph → function for every migrated section and paragraph with the `GO TO`
+class annotated at each transfer site, and field → dictionary entry. It also
+records the dual-alias facade as a **behavioural** difference rather than merely
+a naming one, the three linkage shapes and the seven routes that bind them, the
+three divergent abort gates, the five rejection classes, and the deliberate
+omissions recorded **as** omissions.
+
+### 13.3 The anomaly log
+
+[`docs/migration/anomaly-log.md`](docs/migration/anomaly-log.md) — 22 canonical
+entries, `A-1` … `A-22`, each with its locator, its sub-system and the Python
+module that reproduces it. **Fourteen are test-locked** and marked with a
+dagger:
+`A-1`, `A-2`, `A-3`, `A-4`, `A-5`, `A-7`, `A-8`, `A-9`, `A-10`, `A-11`, `A-13`,
+`A-14`, `A-19`, `A-21`. They are locked so that a future well-meaning "fix"
+fails the suite. The eight that are not locked are recorded rather than asserted
+because their only observable is a comment, a name or a report line that never
+reaches a table, so no state diff and no arithmetic assertion can see them.
+
+A handful of entries carry a `PENDING` status naming the ambiguity question that
+still governs them. That is honest bookkeeping, not an oversight: the entry
+records what has been measured and what has not.
+
+### 13.4 Ambiguity resolutions and scenario diff evidence
+
+- [`docs/migration/ambiguity-resolutions.md`](docs/migration/ambiguity-resolutions.md)
+  — each semantic question that cannot be settled by reading, the experiment run
+  against the compiled oracle, and the resolution adopted. `Q-1` the date
+  module's reject contract, `Q-2` default arithmetic precision, `Q-3` a negative
+  binary value through an unsigned host variable into an unsigned column, `Q-4`
+  the batch record's length contradiction, `Q-5` the unexplained move, the
+  `Q-5.1` … `Q-5.3` storage-semantics cluster, and the further questions
+  discovered while writing the migration.
+- [`docs/migration/scenario-diff-evidence.md`](docs/migration/scenario-diff-evidence.md)
+  — the per-scenario evidence register, with an explicit verdict vocabulary that
+  distinguishes an observed empty diff from anything merely expected. Nothing
+  that was not observed is presented as observed, in either direction.
+
+---
+
+## 14. WARNING: known risks and gotchas
+
+Read this section before changing anything. Every item below has cost somebody
+time already, and most of them fail *silently*.
+
+**The General Ledger has not been re-tested since the compiler migration.** The
+maintainer says so himself: "I have not had any time to work with General at all
+since it was migrated over to using the GnuCobol compiler (3.2 final) now some
+years back" `[README.TXT:L51-L53]`. The same entry records that "all testing is
+complete for IRS, Stock and Sales apart for some reports"
+`[README.TXT:L50-L51]` while the Purchase ledger "is still undergoing system
+testing" `[README.TXT:L45]`. Since the General Ledger contributes the majority
+of the in-scope programs, expected values for GL scenarios must come **only from
+the oracle** — never from the documentation, and never from reasoning about
+intended behaviour. **If the compiled GL cycle behaves surprisingly, the
+surprise is the specification.**
+
+**Sort order is correctness, not performance.** `gl072` locates the
+nominal-ledger row for a posting with a **sequential** read rather than an
+indexed one `[general/gl072.cbl:L407-L408]`; it finds the correct account only
+because `gl071` has already emitted the transaction stream in nominal-key order.
+Perturb the sort and the program silently posts to the wrong account — no error,
+no diagnostic, wrong balances. This must **not** be "optimised" into an indexed
+read, however obviously faster that would be, and `gl071`'s output ordering is
+asserted directly by a test rather than left to be caught indirectly by a state
+diff.
+
+**Truncation is the default; rounding is the annotated exception.** COBOL
+`COMPUTE` truncates toward zero on store unless `ROUNDED` is written, and across
+the entire in-scope cycle there are exactly **five** `ROUNDED` sites:
+
+| Site | Statement |
+| --- | --- |
+| `[general/gl051.cbl:L791]` | VAT from net |
+| `[general/gl051.cbl:L796]` | VAT from gross |
+| `[general/gl080.cbl:L328]` | the cycle-to-period divide |
+| `[irs/irs030.cbl:L1551]` | VAT from net |
+| `[irs/irs030.cbl:L1562]` | VAT from gross |
+
+Every other store truncates. Getting this backwards would corrupt essentially
+every posted figure, which is why `acas_posting/cobol/arithmetic.py` makes
+truncation the default path and rounding the explicitly annotated exception.
+Two superseded, commented-out variants of the IRS computes survive beside the
+live ones `[irs/irs030.cbl:L1550]`, `[irs/irs030.cbl:L1561]`; they are logged as
+an anomaly, not resurrected.
+
+**The three moving-average blocks disagree with each other, and must stay that
+way.** One path increments its activity counter before dividing; a second never
+increments the counter at all and additionally guards on the accumulator being
+non-zero, which silently drops the first credit note for a customer; a third
+uses a different guard again and **the opposite divide operand order**. On top
+of that, the accumulator has zero decimal places while the value added into it
+carries two, so pence are discarded on every accumulation and the subsequent
+integer divide discards the remainder as well — a double truncation that has to
+be reproduced by modelling both field widths exactly. **Normalising them into
+one helper would be the single easiest way to fail this migration.**
+
+**`cobmysqlapi.o` has no build rule in the repository.** See §8.3 step 2. A
+naive build from the compile scripts alone fails at link time with no obvious
+cause. Use `harness/build_oracle.sh`.
+
+**`copybooks/ACAS-SQLstate-error-list.cob` is missing from the frozen archive.**
+See §8.7. Left alone, most `*MT` bridges fail to compile. It is handled with a
+comments-only shim in the *build copy* and is **not** fabricated into the frozen
+tree.
+
+**The compile scripts always exit 0.** See §8.6. Their status is not a
+build-success signal; scan the diagnostics.
+
+**`common/masterLD.sh` is both untested and syntactically unrunnable.** See
+§9.1. It is frozen and is not fixed; `harness/seed.sh` reproduces its contract.
+
+**Rejections differ in their database effect, and a single generic rejection
+path would fail the migration.** There are five distinct classes: a clean
+rejection that leaves no trace at all `[general/gl072.cbl:L291-L292]`,
+`[general/gl072.cbl:L306-L307]`; a run-aborting rejection whose database effect
+is the *absence* of the later phases (§10.3); a **partial** effect, where the
+IRS debit is rewritten before the credit account is even looked up so a missing
+credit leaves an unbalanced debit and no posting record; a file-abandoning
+rejection that still performs the end-of-job rewrites and closes, so the partial
+state is committed rather than rolled back; and a **permanently failing facade
+verb**, where the transfer-file handler rejects four of its published verbs
+unconditionally at entry so a published `Rewrite` can never succeed. All five
+are reproduced as they are.
+
+**Two silent skips are genuinely silent.** `gl072` skips a posting whose batch
+number is non-numeric `[general/gl072.cbl:L291-L292]` and skips a record whose
+handler returned a specific error `[general/gl072.cbl:L306-L307]` — with no
+message, no counter and no trace. Adding a warning would be an added behaviour
+and therefore a defect (R-3).
+
+**No performance work, by construction.** No performance target is named, and
+the constraints preclude the usual levers: concurrency is forbidden, the schema
+cannot gain an index, no caching layer may be introduced, and statement ordering
+must match the original because the state diff is sensitive to it.
+Exact-decimal arithmetic is inherently slower than binary floating point, **and
+that trade is accepted without qualification.**
+
+**Plaintext database transport is reproduced, and reported every time.** The
+compiled program has no stronger policy, so the migration does not invent one;
+the data-access layer requires the caller to declare the isolated-oracle
+transport explicitly, so it fails closed rather than defaulting to plaintext.
+Operators deploying against something other than the isolated oracle should
+supply an encrypted transport policy where parity with that deployment permits
+it.
+
+### Shell gotchas that cost a session
+
+- Always run a scripted stage with `-T` and redirect stdin from `/dev/null`;
+  piping a Compose stage into `head` or `tail` can hang it.
+- Never invoke `presql2` without redirecting stdin — it prompts and spins.
+- `harness/diff_states.py` accepts only trees whose directory name ends in
+  `.normalized` or `.norm`, so hand-built directory names will be refused.
+
+---
+
+## 15. Relationship to the maintainer's own documentation
+
+The maintainer's documentation is **evidence, not editable prose**. None of it
+is modified by this migration.
+
+- **`README.TXT`** is the canonical document for the COBOL system: its release
+  state, its features and its build and install procedure. It records the
+  release as **v3.3 pre-final** in the entry dated **2025-09-21**, which is
+  candid about its own limits — "This does not mean that all bugs have been
+  found and all testing is complete" `[README.TXT:L39-L40]`. It opens by
+  pointing at its own sibling, "The file README.nightly should also be read if
+  using the last v3.2 code release" `[README.TXT:L1]`, and notes that its
+  entries run newest-first, "Latest changes is at the TOP" `[README.TXT:L6]`.
+- **`README`** is a **byte-identical duplicate** of `README.TXT` — both are
+  14835 bytes and `cmp` reports no difference — and **`README.SVN`** contains
+  only the line "See the file README." Both are noted here so that a reader
+  meeting three similarly named files does not go looking for three different
+  documents. Treat `README.TXT` as the canonical one.
+- **`README.nightly`** documents the nightly builds.
+- **`Changelog`** records the COBOL system's version history at system level:
+  "Record for changes at system level - Also recorded in sub systems Changelog"
+  `[Changelog:L1]`, including the entry dated **2025-09-20**, "3.3.00 Version
+  update and builds reset." **This migration does not append its own history
+  there.**
+- **`ACAS-Manuals/`** holds the maintainer's LibreOffice / ODF manuals, and is
+  likewise untouched.
+
+The reason, in the AAP's own terms: these files "document the COBOL system and
+its version history, and modifying them would misrepresent the maintainer's
+record." Any diff that touches `README.TXT`, `README`, `README.SVN`,
+`README.nightly`, `Changelog`, `comp-all.sh`, `common/`, `copybooks/`,
+`general/`, `sales/`, `purchase/`, `irs/`, `stock/`, `mysql/ACASDB.sql`, `etc/`
+or a vendored archive is a defect in the migration, regardless of how harmless
+it appears.
+
+### This document's history
+
+Latest changes at the TOP, following the maintainer's date-first shape but with
+a neutral attribution, since the migration work is not his.
+
+```text
+2026-08-04   *  ACAS Python migration
+                Rewritten as the operator-facing entry point for the migration:
+                the six binding rules with their practical consequences, the two
+                partial migration boundaries with their line ranges, the three
+                CLI linkage shapes, the five-step oracle bootstrap including the
+                recovered cobmysqlapi.o build rule, the seeding contract and its
+                exit codes, the nine-stage diff protocol, the three test tiers
+                and the four mandated deliverables. Every claim about the frozen
+                COBOL carries a verified [path:locator] citation.
+                No maintainer document was modified.
+```
