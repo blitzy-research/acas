@@ -623,9 +623,39 @@ from __future__ import annotations
 
 import pytest
 
+# The TIER mark, applied to the whole module because every test in it belongs to the
+# tier. THE INFRASTRUCTURE MARKS ARE NOT HERE: `database` and `oracle` are declared per
+# test, on exactly the tests whose fixture closure reaches the harness stack, because
+# several tests in this file read only files on disk and pass on a bare host. A module
+# mark would claim they need a MariaDB and a built oracle, and `-m database` would then
+# select tests that require neither.
 pytestmark = pytest.mark.scenario
 
 SCENARIO = "empty_batch"
+
+# THE TWO TABLES THE SEED FILLS: ledger.dat -> GLLEDGER-REC and batch.dat ->
+# GLBATCH-REC. They must come back WITH ROWS on both sides, because THIS scenario is the
+# one where "both dumps are empty" and "no dump was produced" look identical from the
+# verdict alone - and where an unseeded database would make every claim below true for
+# the wrong reason.
+#
+# `GLPOSTING-REC` IS NOT HERE, AND ITS EMPTINESS IS NOT ASSERTED HERE EITHER. The seed
+# carries no posting.dat at all - see
+# `test_seed_has_exactly_three_files_and_no_posting_dat` -
+# so the table starts empty and an empty batch must leave it that way. Whether it DID is
+# a behavioural claim owned by `test_glposting_rec_is_empty_on_both_sides`, where a
+# Python side that wrote a row is a FAILURE; asserting it in this fixture would report
+# that regression as an ERROR.
+SEEDED_TABLES = (
+    "GLBATCH-REC",
+    "GLLEDGER-REC",
+)
+
+# THE RUNNER'S OWN WORDING for a cross-check it could not make, quoted from
+# [harness/run_python_scenario.sh:L3208]. Matched as a SUBSTRING of the stage-6
+# transcript, so the note's surrounding path and punctuation are free to change; what
+# must not change silently is that an absent oracle-side fingerprint is DECLARED.
+UNVERIFIED_NOTE = "no oracle-side seed fingerprint at"
 
 
 # ---------------------------------------------------------------------------
@@ -680,7 +710,37 @@ def empty_batch_parity(protocol: object) -> object:
             "both dumps are empty" and "no dump was produced" look identical from
             the verdict alone.
     """
-    return protocol.run_scenario_parity(SCENARIO)
+    run = protocol.run_scenario_parity(SCENARIO)
+
+    # THE BOUND. The declared tables, in the declared ORDER - the order the report and
+    # the seed fingerprint are both written in.
+    assert tuple(run.tables) == protocol.affected_tables(SCENARIO), (
+        f"{SCENARIO}: the comparison was bounded by {list(run.tables)} while the "
+        f"scenario declares {list(protocol.affected_tables(SCENARIO))}."
+    )
+
+    # THE ORACLE'S DISPOSITION, plus a harness-fault refusal on BOTH sides. A runner
+    # that exited in its own documented band never ran the cycle, and on THIS scenario
+    # that is indistinguishable from success in the verdict alone. `reference_only`
+    # leaves the Python side's status to `test_run_completes_with_term_code_zero`.
+    protocol.assert_declared_statuses(
+        run,
+        operations=tuple(protocol.definition(SCENARIO)["operations"]),
+        declared=list(protocol.definition(SCENARIO)["expected_status"]),
+        reference_only=True,
+    )
+
+    # THE STARTING STATE WAS RECORDED. `test_seed_fingerprints_agree` reads the same
+    # two files again and asserts the CROSS-CHECK disposition explicitly; this is the
+    # setup-level claim that a fingerprint exists at all and describes the bounded
+    # tables in the bounded order.
+    protocol.assert_seed_fingerprints_agree(run)
+
+    # SOMETHING WAS THERE TO COMPARE. The single most important guard in this file: an
+    # empty batch over an EMPTY DATABASE agrees with itself perfectly.
+    protocol.assert_non_vacuous(run, tables_requiring_rows=SEEDED_TABLES)
+
+    return run
 
 
 # ---------------------------------------------------------------------------
@@ -1010,6 +1070,8 @@ def test_affected_tables_are_in_scope_and_alphabetical(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_empty_batch_state_parity(
     empty_batch_parity: object, harness: object
 ) -> None:
@@ -1051,6 +1113,8 @@ def test_empty_batch_state_parity(
     )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_affected_tables_are_byte_identical_to_the_seed(
     empty_batch_parity: object, harness: object
 ) -> None:
@@ -1146,6 +1210,8 @@ def test_affected_tables_are_byte_identical_to_the_seed(
         )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_glposting_rec_is_empty_on_both_sides(
     empty_batch_parity: object, harness: object
 ) -> None:
@@ -1196,6 +1262,8 @@ def test_glposting_rec_is_empty_on_both_sides(
         )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_batch_disposition_is_whatever_the_oracle_produced(
     empty_batch_parity: object, harness: object
 ) -> None:
@@ -1270,6 +1338,8 @@ def test_batch_disposition_is_whatever_the_oracle_produced(
     )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_no_empty_batch_special_case_was_added(
     empty_batch_parity: object, harness: object
 ) -> None:
@@ -1323,6 +1393,8 @@ def test_no_empty_batch_special_case_was_added(
         )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_run_completes_with_term_code_zero(
     empty_batch_parity: object, protocol: object, scenario_loader: object
 ) -> None:
@@ -1393,6 +1465,8 @@ def test_run_completes_with_term_code_zero(
     )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_diff_exit_contract_is_honoured(
     empty_batch_parity: object, harness: object
 ) -> None:
@@ -1484,6 +1558,8 @@ def test_diff_exit_contract_is_honoured(
         )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_dump_is_wellformed_on_both_sides(
     empty_batch_parity: object, harness: object, frozen_schema: object
 ) -> None:
@@ -1672,6 +1748,8 @@ def test_dump_is_wellformed_on_both_sides(
                         )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_seed_fingerprints_agree(empty_batch_parity: object) -> None:
     """BOTH CYCLES STARTED FROM THE SAME ROW COUNTS - or the run is unattributable.
 
@@ -1696,14 +1774,32 @@ def test_seed_fingerprints_agree(empty_batch_parity: object) -> None:
     hold rows is taken from the dumps instead, in
     `test_affected_tables_are_byte_identical_to_the_seed`.
 
-    THE ORACLE-SIDE FINGERPRINT MAY LEGITIMATELY BE ABSENT. The Python runner
-    treats that as a WEAKER GUARANTEE rather than a fault - it says so plainly and
-    continues - so this test asserts everything that can be asserted and invents
-    no failure the harness itself does not raise.
+    THE ORACLE-SIDE FINGERPRINT MAY LEGITIMATELY BE ABSENT, AND THAT IS ASSERTED
+    RATHER THAN ASSUMED. `harness/run_cobol_scenario.sh` writes no pre-run
+    fingerprint - its own SHA-256 transcript fingerprints come at the END of the
+    run [harness/run_cobol_scenario.sh:L1821] - so the Python runner treats a
+    missing counterpart as a WEAKER GUARANTEE rather than a fault: it emits the
+    note at [harness/run_python_scenario.sh:L3208] and records
+    `seed cross-check = unverified` in its summary, then continues.
+
+    So BOTH dispositions are asserted, and neither is silent:
+
+      * PRESENT - the two files must be byte-identical, AND the runner must NOT
+        have reported the weaker guarantee. A cross-check that happened and a
+        cross-check that was skipped must never look the same.
+      * ABSENT - the runner must have SAID SO on its own transcript. A tolerance
+        nobody declared is indistinguishable from a fingerprint that was silently
+        lost, and it is exactly the second case this test exists to catch.
+
+    An earlier form of this test simply skipped the comparison when the oracle-side
+    file was missing, which meant a lost fingerprint and a deliberately-absent one
+    produced the same green result. Requiring the file instead would assert a
+    contract the harness does not offer, so the disposition is what is asserted.
 
     Args:
         empty_batch_parity: The completed `ParityRun`, whose `paths.run_logs` is
-            the transcript directory both fingerprints live in.
+            the transcript directory both fingerprints live in, and whose
+            `python_run` carries the runner's own transcript.
     """
     run = empty_batch_parity
     run_logs = run.paths.run_logs
@@ -1748,19 +1844,55 @@ def test_seed_fingerprints_agree(empty_batch_parity: object) -> None:
             f"be reported as a starting-state disagreement."
         )
 
-    if cobol_fingerprint.is_file():
-        assert recorded == cobol_fingerprint.read_bytes(), (
-            f"THE TWO SIDES DID NOT START FROM THE SAME SEEDED STATE - a HARNESS "
-            f"FAULT, not a behavioural difference, and the distinction matters "
-            f"because the two look identical in a table diff.\n"
-            f"  python ({python_fingerprint}):\n"
-            f"{recorded.decode('utf-8')}"
-            f"  cobol  ({cobol_fingerprint}):\n"
-            f"{cobol_fingerprint.read_text(encoding='utf-8')}"
-            f"  Nothing about either cycle's behaviour has been measured: they "
-            f"were never given the same starting state. Re-run the reset and "
-            f"seed stages and then both run stages, in the protocol order. "
-            f"Autocommit must be OFF while seeding - "
-            f"[common/glbatchLD.cbl:L9-L13] - and `batch.dat` is loaded by "
-            f"exactly that loader [common/masterLD.sh:L94]."
+    # THE RUNNER'S OWN WORD ON THE CROSS-CHECK, read from the stage-6 transcript.
+    # `acas_py_note` writes to the runner's output, so the note is evidence rather
+    # than inference.
+    transcript = (
+        f"{empty_batch_parity.python_run.stdout}\n"
+        f"{empty_batch_parity.python_run.stderr}"
+    )
+    declared_unverified = UNVERIFIED_NOTE in transcript
+
+    if not cobol_fingerprint.is_file():
+        # ABSENT. Admissible ONLY because the runner declared it. Without this
+        # assertion a fingerprint that was written and then lost would produce
+        # exactly the same green result as one that was never written at all.
+        assert declared_unverified, (
+            f"there is no oracle-side seed fingerprint at {cobol_fingerprint}, and "
+            f"the Python runner DID NOT SAY SO on its transcript.\n"
+            f"  Absence is admissible only as the WEAKER GUARANTEE the runner "
+            f"declares at [harness/run_python_scenario.sh:L3208], which writes "
+            f"{UNVERIFIED_NOTE!r} and records `seed cross-check = unverified`. An "
+            f"undeclared absence is indistinguishable from a fingerprint that was "
+            f"written and then lost, and in THIS scenario - where both dumps are "
+            f"legitimately near-empty - that is the difference between a "
+            f"comparison and no comparison at all.\n"
+            f"  stage 6 transcript:\n{empty_batch_parity.python_run.describe()}"
         )
+        return
+
+    # PRESENT. The runner must have performed the cross-check rather than reported
+    # it skipped: `matched` and `unverified` must never be confusable.
+    assert not declared_unverified, (
+        f"the oracle-side seed fingerprint EXISTS at {cobol_fingerprint}, yet the "
+        f"Python runner reported the weaker guarantee "
+        f"{UNVERIFIED_NOTE!r} on its transcript. The cross-check at "
+        f"[harness/run_python_scenario.sh:L3206-L3216] therefore looked somewhere "
+        f"else, and nothing has actually been cross-checked.\n"
+        f"  stage 6 transcript:\n{empty_batch_parity.python_run.describe()}"
+    )
+    assert recorded == cobol_fingerprint.read_bytes(), (
+        f"THE TWO SIDES DID NOT START FROM THE SAME SEEDED STATE - a HARNESS "
+        f"FAULT, not a behavioural difference, and the distinction matters "
+        f"because the two look identical in a table diff.\n"
+        f"  python ({python_fingerprint}):\n"
+        f"{recorded.decode('utf-8')}"
+        f"  cobol  ({cobol_fingerprint}):\n"
+        f"{cobol_fingerprint.read_text(encoding='utf-8')}"
+        f"  Nothing about either cycle's behaviour has been measured: they "
+        f"were never given the same starting state. Re-run the reset and "
+        f"seed stages and then both run stages, in the protocol order. "
+        f"Autocommit must be OFF while seeding - "
+        f"[common/glbatchLD.cbl:L9-L13] - and `batch.dat` is loaded by "
+        f"exactly that loader [common/masterLD.sh:L94]."
+    )

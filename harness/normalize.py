@@ -1,3 +1,7 @@
+#!/usr/bin/env python3
+# Executable in its own right: the canonical recipe in harness/docker-compose.yml
+# names the three state tools by path, and without this line the kernel refuses
+# the exec and bash falls back to interpreting the file as a shell script.
 """Canonicalise a dump so that only REAL behavioural differences survive.
 
 Stage 4 of the parity protocol. Reads the raw `<TABLE>.json` dumps
@@ -10,7 +14,20 @@ representational rather than behavioural:
 * fixed-character columns are compared without trailing spaces, because the
   bridge widens some fields on the way to the column - a ledger name declared 24
   characters wide becomes a 32-character host variable and a 32-character column
-  [common/nominalMT.cbl:L299], so the padding differs while the value does not;
+  [common/nominalMT.cbl:L299], so the padding differs while the value does not.
+  MEASURED CAVEAT, worth knowing before treating this job as load-bearing:
+  through the driver this harness uses it rarely has anything to do, because
+  MariaDB strips trailing spaces from a `char` column on READ unless
+  `PAD_CHAR_TO_FULL_LENGTH` is set - a value stored as "Zed trailing  " already
+  arrives as "Zed trailing", and "  " already arrives as "". So the padding
+  difference the width drift produces is usually gone before the dump is written.
+  The job is kept, and deliberately: the drift at Agent Action Plan section 0.6.2
+  is real, that server behaviour is a setting rather than a guarantee (and
+  [harness/Dockerfile.mariadb] declines to set the mode either way, because
+  choosing it would make the server a party to the comparison), and a capture
+  taken through any driver or server that DOES preserve padding must still
+  compare equal. It is a guard that mostly finds nothing, which is not the same
+  as a guard that does nothing;
 * decimal columns are rendered at the scale the schema declares, so a value
   stored at two decimal places compares equal however a driver formatted it;
 * date text is rendered in one form, because the schema stores two-digit and
@@ -121,8 +138,13 @@ EXPECTED_TOTAL_COLUMNS: Final[int] = sum(
 
 EXPECTED_SCHEMA_TABLES: Final[int] = 33
 
-# The two sides of the comparison. The path records which one a dump is, never the
-# file's content.
+# The two sides of the comparison. Both the PATH and the MANIFEST record which side a
+# capture is: the path composes <out-dir>/<scenario>/<side>/, and `side` is one of
+# `MANIFEST_KEYS`, inherited here verbatim from the dump manifest along with the run
+# attestation. What carries no side is the per-table dump OBJECT (`DUMP_KEYS`), and those
+# are the only files harness/diff_states.py compares -- so the manifest's copy cannot
+# influence a verdict. Stated in full because an earlier revision of this comment claimed
+# the content never records it, which the manifest contradicts.
 SIDES: Final[tuple[str, ...]] = ("cobol", "python")
 
 # The dump object's key order, identical to harness/dump_tables.py. Asserted on input
@@ -392,7 +414,11 @@ def _make_output_directory(directory: Path) -> None:
     directory.mkdir(parents=True, exist_ok=True, mode=_OUTPUT_DIR_MODE)
 
 MANIFEST_FILENAME: Final[str] = "_manifest.json"
-MANIFEST_VERSION: Final[int] = 1
+# Version 2 added `attestation`, in step with harness/dump_tables.py. A version-1
+# tree is refused rather than read: the point of the key is that its absence cannot
+# be mistaken for a claim, so silently tolerating a manifest that predates it would
+# defeat it.
+MANIFEST_VERSION: Final[int] = 2
 MANIFEST_KEYS: Final[tuple[str, ...]] = (
     "manifest_version",
     "producer",
@@ -400,8 +426,21 @@ MANIFEST_KEYS: Final[tuple[str, ...]] = (
     "scenario",
     "side",
     "selector",
+    "attestation",
     "table_count",
     "tables",
+)
+
+# The attestation's keys, in the order harness/dump_tables.py writes them. This stage
+# CARRIES the object through unread: what the run stage claimed is a fact about the
+# run, not about the canonicalisation, so re-deriving or re-judging it here would let
+# the two stages disagree about one run.
+ATTESTATION_KEYS: Final[tuple[str, ...]] = (
+    "attested",
+    "source",
+    "run_status",
+    "seed_fingerprint_sha256",
+    "detail",
 )
 MANIFEST_STAGE_RAW: Final[str] = "raw"
 MANIFEST_STAGE_NORMALIZED: Final[str] = "normalized"
@@ -2311,6 +2350,7 @@ def build_manifest(
     scenario: str | None = None,
     side: str | None = None,
     selector: str = SELECTOR_INHERITED,
+    attestation: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble this stage's completeness manifest.
 
@@ -2323,6 +2363,9 @@ def build_manifest(
         selector: How the table list was originally chosen, likewise inherited - which
             is what lets the comparison stage report the scope the evidence actually
             has.
+        attestation: What the RUN stage claimed, inherited verbatim. None becomes a
+            recorded refusal rather than an omitted key, so a tree normalised from a
+            waived or absent source manifest cannot pass for an attested one.
 
     Returns:
         The manifest object, keys in `MANIFEST_KEYS` order.
@@ -2343,6 +2386,17 @@ def build_manifest(
         tables.append(
             {"table": table, "row_count": int(row_count), "sha256": digest}
         )
+    if not isinstance(attestation, Mapping):
+        attestation = {
+            "attested": False,
+            "source": None,
+            "run_status": None,
+            "seed_fingerprint_sha256": None,
+            "detail": (
+                "the raw tree carried no usable run attestation, so this "
+                "normalised tree makes no claim about the run it came from."
+            ),
+        }
     return {
         "manifest_version": MANIFEST_VERSION,
         "producer": _PRODUCER,
@@ -2350,6 +2404,9 @@ def build_manifest(
         "scenario": scenario,
         "side": side,
         "selector": selector,
+        # Rebuilt key by key in ATTESTATION_KEYS order, so an inherited object with
+        # its keys in another order cannot change these bytes.
+        "attestation": {key: attestation.get(key) for key in ATTESTATION_KEYS},
         "table_count": len(tables),
         "tables": tables,
     }
@@ -2498,6 +2555,7 @@ def normalize_tree(
             side=_inherit(source_manifest, "side"),
             selector=_inherit(source_manifest, "selector")
             or SELECTOR_INHERITED,
+            attestation=_inherit_attestation(source_manifest),
         )
         staged_manifest = write_manifest(
             manifest, staging / MANIFEST_FILENAME
@@ -2524,6 +2582,27 @@ def _inherit(manifest: Mapping[str, Any] | None, key: str) -> str | None:
         return None
     value = manifest.get(key)
     return value if isinstance(value, str) and value else None
+
+
+def _inherit_attestation(
+    manifest: Mapping[str, Any] | None,
+) -> Mapping[str, Any] | None:
+    """Return the run attestation a source manifest carries, unjudged.
+
+    Args:
+        manifest: The source tree's manifest, or None when the check was waived with
+            --allow-unmanifested.
+
+    Returns:
+        The attestation object when the source carried one, otherwise None - which
+            `build_manifest` turns into an explicit refusal. A waived source manifest
+            therefore cannot yield an attested normalised tree, which is the direction
+            that fails closed.
+    """
+    if manifest is None:
+        return None
+    value = manifest.get("attestation")
+    return value if isinstance(value, Mapping) else None
 
 
 def _reset_staging(staging: Path) -> None:
@@ -2653,7 +2732,7 @@ def _publish_staged(
 # trees.
 
 _REPORT_HEADER: Final[str] = """\
-harness/normalize.py - job 3 date-text findings
+job 3 date-text findings, from [harness/normalize.py]
 
 Every value listed below was passed through UNCHANGED. None was expanded
 from two digits to four, contracted from four to two, re-separated or
@@ -2891,6 +2970,18 @@ the three canonicalisation jobs, and there is no fourth
   1  trailing ASCII spaces in char(n) columns - trailing only, never
      leading, because a COBOL alphanumeric MOVE pads on the RIGHT. The
      bridge itself trims: [common/nominalMT.cbl:L1065-L1067].
+     Through this harness's driver this job usually finds NOTHING to do:
+     MariaDB strips trailing spaces from a char column on read unless
+     PAD_CHAR_TO_FULL_LENGTH is set, and the harness server deliberately
+     does not set that mode either way. Kept regardless -- the width
+     drift it answers is real (AAP 0.6.2), the server behaviour is a
+     setting rather than a guarantee, and a capture taken through a
+     driver or server that DOES preserve padding must still compare
+     equal. A guard that mostly finds nothing is not a guard that does
+     nothing.
+  the manifest's attestation is CARRIED, never re-judged: what the run
+     stage claimed is a fact about the run, and harness/diff_states.py
+     enforces it.
   2  decimal(p,s) values re-rendered at the DECLARED scale. Never two by
      assumption - the schema's scales include 2, 4 and 0. A value with
      more places than its column declares is an ERROR, not something to
@@ -2909,9 +3000,11 @@ the set is the unit, not the file
   the destination is published the same way: staged beside it, stale
   dumps purged, files renamed in, _manifest.json renamed in LAST. So it
   holds either this run's complete set or no manifest - never a mixture.
-  the manifest's scenario, side and selector are INHERITED from the
-  source's, so the two stages of one run cannot claim different
-  identities.
+  the manifest's scenario, side, selector and run attestation are all
+  INHERITED from the source's, so the two stages of one run cannot claim
+  different identities -- and a tree normalised from a waived or absent
+  source manifest inherits NO attestation, which is the direction that
+  fails closed at the comparison stage.
 
 environment
   ACAS_REPO supplies the default --schema, $ACAS_REPO/mysql/ACASDB.sql.
@@ -2997,8 +3090,10 @@ def build_parser() -> argparse.ArgumentParser:
         choices=SIDES,
         help=(
             "which side of the comparison this dump represents. Requires "
-            "--scenario. The side is recorded in the PATH, never in a "
-            "file."
+            "--scenario. It selects the <scenario>/<side>/ path and is also "
+            "carried through into the normalised manifest, inherited verbatim "
+            "from the raw one; the manifests themselves are never compared, so "
+            "recording it cannot affect a verdict."
         ),
     )
     parser.add_argument(

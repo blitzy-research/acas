@@ -8,12 +8,15 @@
 #              or schema.
 #
 #      mariadb    the frozen ACASDB schema, served at the exact server version
-#                 the schema dump was produced by, with autocommit OFF -- the
-#                 mode the Agent Action Plan mandates (sections 0.2.1.1, 0.4.1.7
-#                 and 0.5.2, from [common/glbatchLD.cbl:L9-L13]). The frozen
-#                 COBOL reaches no COMMIT, so under that mode its writes are not
-#                 durable: a defect of the frozen code, reproduced and reported
-#                 rather than repaired (R-4).
+#                 the schema dump was produced by. Runtime application access
+#                 runs with autocommit ON; the OFF mode the Agent Action Plan
+#                 mandates (sections 0.2.1.1, 0.4.1.7 and 0.5.2, from
+#                 [common/glbatchLD.cbl:L9-L13]) is scoped to the SEEDING WINDOW,
+#                 which harness/seed.sh establishes and restores. The frozen
+#                 COBOL reaches no COMMIT, so inside that window its writes are
+#                 not durable: a defect of the frozen code, reproduced and
+#                 reported rather than repaired (R-4) -- seed.sh measures the
+#                 result and fails rather than passing an empty capture on.
 #                 Built from harness/Dockerfile.mariadb.
 #
 #  CREDENTIALS. There are no defaults, and no fallback is committed: every
@@ -31,18 +34,50 @@
 #      C="docker compose -f harness/docker-compose.yml run --rm -T gnucobol"
 #      S=<scenario file>   N=<its basename without the extension>
 #      $C /repo/harness/build_oracle.sh                 once per image
-#      $C /repo/harness/seed.sh                  "$S"
-#      $C /repo/harness/run_cobol_scenario.sh    "$S"
-#      $C /repo/harness/dump_tables.py --scenario "$N" --side cobol \
-#                                      --scenario-file "$S"
-#      $C /repo/harness/normalize.py  --scenario "$N" --side cobol
-#      $C /repo/harness/reset_db.sh              "$S"
+#      $C /repo/harness/build_fixtures.sh                once per scenario change
+#      $C /repo/harness/run_parity.sh --seed-dir /data/fixtures/"$N" "$S"
+#
+#  THE FIXTURE STAGE IS NOT OPTIONAL, and it is second for a reason. The frozen
+#  loaders read Cobol flat files, and fifteen of the seventeen are ORGANIZATION
+#  INDEXED or RELATIVE -- an INDEXED file on this toolchain is a Berkeley DB Btree
+#  whose on-disk form belongs to the library version this image carries, which is
+#  measurable rather than assumable. So the RECORDS are declared as text in each
+#  scenario file under `seed_records', and `build_fixtures.sh' builds the FILES
+#  from them, by generating a Cobol writer per file, compiling it against the
+#  FROZEN copybooks, and calling the FROZEN handler to write -- then reading every
+#  file back through the same definitions and refusing the build unless the counts
+#  agree. Nothing about the layout is restated anywhere.
+#  `--seed-dir' is needed because a scenario's own `seed_dir' resolves relative to
+#  the scenario file, which is inside the READ-ONLY checkout (R-3), so a built
+#  fixture cannot live there. It says WHERE, never WHICH: the scenario's
+#  `seed_files' list stays the sole authority on what must be present. It is
+#  forwarded to BOTH reset stages from one place, so stages 1 and 5 cannot diverge.
+#
+#  run_parity.sh IS THE RECOMMENDED FORM, because the ordering is the evidence:
+#  it runs the ten stages in sequence and ABORTS ON THE FIRST NON-ZERO, so a
+#  later stage cannot render a verdict on a capture an earlier stage never
+#  produced. Driving them by hand is still supported, and is exactly what the
+#  driver does:
+#      $C /repo/harness/seed.sh --seed-dir /data/fixtures/"$N"  "$S"
+#      $C /repo/harness/run_cobol_scenario.sh          "$S"
+#      $C python3 /repo/harness/dump_tables.py --scenario "$N" --side cobol \
+#                                              --scenario-file "$S"
+#      $C python3 /repo/harness/normalize.py   --scenario "$N" --side cobol
+#      $C /repo/harness/reset_db.sh --seed-dir /data/fixtures/"$N"  "$S"
 #  then the Python cycle is driven the same way with `--side python', and finally
-#      $C /repo/harness/diff_states.py --scenario "$N" --scenario-file "$S"
+#      $C python3 /repo/harness/diff_states.py --scenario "$N" --scenario-file "$S"
 #  AN EMPTY DIFF FROM THAT LAST COMMAND IS THE PASS CONDITION, and the only one:
 #  a stage that exits non-zero has produced no evidence, so re-seed rather than
-#  carry a partial capture forward. `-T' is required on every scripted stage,
-#  because a tty is allocated by default and a piped stage would appear to hang.
+#  carry a partial capture forward -- and note that diff_states.py now REFUSES a
+#  capture whose run stage did not attest success, so carrying one forward by
+#  hand fails closed rather than reporting a pass. `-T' is required on every
+#  scripted stage, because a tty is allocated by default and a piped stage would
+#  appear to hang.
+#
+#  The three Python tools carry `#!/usr/bin/env python3' and are executable, so
+#  either form works; `python3 <path>' is written out above because it is the
+#  form that cannot be defeated by a lost executable bit or a filesystem mounted
+#  `noexec'.
 
 name: acas-harness-${CLONE_INDEX:?set CLONE_INDEX to this clone's index (e.g. 002) so the project, network and volumes are namespaced and sibling clones cannot share this oracle's state}
 
@@ -118,27 +153,35 @@ services:
     #  nothing to do with posting logic, and one that would be diagnosed as a
     #  parity defect.
     #
-    #  AUTOCOMMIT IS DELIBERATELY ABSENT HERE. It is configured server-wide
-    #  inside the image, at /etc/mysql/conf.d/99-acas-oracle.cnf, which pins
-    #  `autocommit=0` -- the mode the Agent Action Plan mandates in sections
-    #  0.2.1.1, 0.4.1.7 and 0.5.2, all deriving it from the banner carried by all
-    #  28 `common/*LD.cbl` loaders at [common/glbatchLD.cbl:L9-L13]: "you MUST
-    #  ensure that autocommit is OFF in the rdb settings".
+    #  AUTOCOMMIT IS DELIBERATELY ABSENT HERE, and it is SCOPED rather than
+    #  pinned. The runtime mode is configured server-wide inside the image, at
+    #  /etc/mysql/conf.d/99-acas-oracle.cnf, which declares `autocommit=1`:
+    #  runtime application access -- the compiled posting run, the Python cycle,
+    #  the reset and the dumps -- runs with autocommit ON. The Agent Action Plan's
+    #  OFF requirement is scoped to SEEDING in all three of its provisions
+    #  (0.2.1.1 "the batch loader turns autocommit off", 0.5.2 "autocommit must be
+    #  off DURING SEEDING", 0.4.1.7 "autocommit off TO MATCH THE LOADERS"), all
+    #  deriving it from the banner carried by all 28 `common/*LD.cbl` loaders at
+    #  [common/glbatchLD.cbl:L9-L13]: "you MUST ensure that autocommit is OFF in
+    #  the rdb settings". `harness/seed.sh` owns that window: it sets the mode OFF
+    #  around the frozen loaders and restores ON from its exit trap.
     #
     #  The consequence is recorded, not repaired (R-4): the frozen COBOL never
     #  reaches a COMMIT -- in the 28 load programs every
     #  `perform aa020-Rollback` is commented out and `perform aa030-Commit`
     #  occurs exactly once anywhere, at [common/irsdfltLD.cbl:L437], commented
     #  out too, and the twenty in-scope bridges contain no
-    #  COMMIT / ROLLBACK / START TRANSACTION -- so under the mandated mode every
-    #  COBOL write is discarded at session close. The maintainer recorded the
+    #  COMMIT / ROLLBACK / START TRANSACTION -- so inside the OFF window every
+    #  loader write is discarded at session close. The maintainer recorded the
     #  same observation at [common/analLD.cbl:L442]: "These do not work during
     #  testing with mariadb - Non transactional model or autocommit set ON."
-    #  Nothing here issues the missing COMMIT: a defect fixed is a failure.
+    #  Nothing here or in seed.sh issues the missing COMMIT: a defect fixed is a
+    #  failure. Instead `seed.sh` MEASURES the seeded row counts when its window
+    #  closes and FAILS if the tables are empty, so an empty capture can never
+    #  reach `diff_states.py`, where an empty diff is the pass condition.
     #  The setting is NOT restated here as a `command:` flag: one authority only.
-    #  `harness/seed.sh`, `harness/reset_db.sh` and
-    #  `harness/run_cobol_scenario.sh` each ASSERT it before doing work, so a
-    #  silent regression is caught.
+    #  `harness/reset_db.sh` and `harness/run_cobol_scenario.sh` each ASSERT the
+    #  runtime mode before doing work, so a silent regression is caught.
     # -----------------------------------------------------------------------
     #  CREDENTIALS ARE REQUIRED, NOT DEFAULTED.
     #

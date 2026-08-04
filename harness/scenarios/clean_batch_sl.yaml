@@ -870,3 +870,481 @@ affected_tables:
   - SALEDGER-REC
   - SYSTOT-REC
   - VALUEANAL-REC
+
+# =============================================================================
+# THE SEED RECORDS
+# =============================================================================
+# Built into the declared flat files by harness/make_fixtures.py, which generates
+# a COBOL writer per file, compiles it against the FROZEN copybooks and calls the
+# FROZEN handler to write. Field names below are spelled exactly as the frozen
+# copybook spells them; the builder reads them from the handler's own LINKAGE copy
+# block, with the handler's own REPLACING clauses applied, so a name this file gets
+# wrong is a refusal and never a silent no-op.
+#
+# EVERY VALUE IS A QUOTED STRING (rule R-2). This is the outermost edge of the
+# exactness claim: an unquoted 1234.56 would become a binary float inside the YAML
+# parser before any COBOL saw it. The quoted text is stored by COBOL's own MOVE,
+# so the frozen picture clause decides alignment on the implied decimal point,
+# truncation toward zero and sign placement.
+#
+# WHAT THIS SEED HAS TO ACHIEVE, restated from THE SEED CONTRACT above:
+#   * analysis and value records covering EVERY code the invoice lines reference,
+#     AND BOTH HALVES of each split code, or sl055's indexed reads miss and its
+#     emergency-create path fabricates records instead of reading seeded ones.
+#     The second half matters because sl055 re-reads with va-second blanked
+#     [sales/sl055.cbl:L402-L409] -- so code "AB" needs an "A "-suffixed roll-up
+#     row as well as the "AB" row itself.
+#   * one customer carrying TWO INVOICES AND ONE CREDIT NOTE, with a NON-ZERO
+#     activity count and a NON-ZERO average so that the guard at
+#     [sales/sl060.cbl:L819-L824] takes its reconstituting branch rather than its
+#     zeroing one, and with amounts carrying NON-ZERO PENCE so that the
+#     zero-decimal accumulator [sales/sl060.cbl:L206] actually discards something.
+#     A SEED OF ROUND POUNDS WOULD HIDE ANOMALY A-8 COMPLETELY, which is why every
+#     document amount below ends in something other than 00.
+#   * invoice headers that pass all four of sl055's filters
+#     [sales/sl055.cbl:L426-L438]: ih-test zero marks a header
+#     [sales/sl055.cbl:L370-L371], ih-status "I" so neither pending nor applied,
+#     ih-status-L "L", and ih-update a space so ih-analyised is false.
+#   * one type-4 PROFORMA header, seeded so the skip at
+#     [sales/sl055.cbl:L430-L431] is a DEMONSTRATED skip rather than an assumed
+#     one; its lines must therefore survive into the tables untouched.
+#   * one OPEN credit note in the transfer file, document type 3 and OI-Status
+#     zero so S-Open is true [copybooks/slwsoi.cob:L47-L49], which is what makes
+#     ba000-Cr-Swop run [sales/sl060.cbl:L671-L672] and the fourth period total
+#     non-zero.
+seed_records:
+
+  # Key 1 is the only system row the frozen code reads [common/acas000.cbl].
+  # Level-1 one is what makes G-L true [copybooks/wssystem.cob:L85] -- the
+  # installed-ledger level byte, NOT the fan-out switch. File-System-Used one is
+  # what keeps the run on MySQL [copybooks/wssystem.cob:L111-L115].
+  # system.dat IS FOUR DIFFERENT RECORDS IN ONE RELATIVE FILE, keyed by relative
+  # record number -- [copybooks/selsys.cob] declares it ORGANIZATION RELATIVE with
+  # relative key `rrn', and the four system loaders each go straight to one slot:
+  #   "1"  systemLD [common/systemLD.cbl:L227] -> SYSTEM-REC    (the parameter record)
+  #   "2"  dfltLD   [common/dfltLD.cbl:L221]   -> SYSDEFLT-REC  (wsdflt.cob)
+  #   "3"  finalLD  [common/finalLD.cbl:L221]  -> SYSFINAL-REC  (wsfinal.cob)
+  #   "4"  sys4LD   [common/sys4LD.cbl:L226]   -> SYSTOT-REC    (wssys4.cob)
+  # All four are 1024 bytes, which is why one relative file can hold them, and ALL
+  # FOUR MUST BE PRESENT: masterLD runs every one of those loaders unconditionally
+  # [common/masterLD.sh:L50-L88] and the last is tested against zero rather than 63
+  # [common/masterLD.sh:L83-L86], so an unwritten slot ABORTS the seed. A slot with
+  # nothing to pin is declared as {} and written INITIALIZEd -- which is a statement
+  # about the pre-state rather than an omission.
+  system.dat:
+    "1":
+      - System-Record-Version-Prime: "3"
+        System-Record-Version-Secondary: "2"
+        Vat-Rate-1: "20.00"
+        Vat-Rate-2: "5.00"
+        Vat-Rate-3: "0.00"
+        Cyclea: "1"
+        Period: "1"
+        Run-Date: "155127"
+        File-System-Used: "1"
+        Date-Form: "1"
+        IRS-Instead: " "
+        SL-Autogen: " "
+        PL-Autogen: " "
+        S-Flag-P: "2"
+        P-Flag-P: "2"
+        Pass-Value: "0"
+        Level-1: "1"
+        Level-2: "1"
+        Level-3: "1"
+        Level-4: "1"
+        GL-SL-Sales-Ac: "2000"
+        GL-S-Debtors: "1100"
+        Vat-Ac: "2200"
+        Next-Batch: "1"
+        Next-Post: "1"
+        Sl-Day-Book: "0"
+        SL-Stats-Run: "0"
+        Current-Quarter: "1"
+        Page-Lines: "60"
+
+    # Nothing to pin: the GL defaults record, written INITIALIZEd so the slot EXISTS
+    # for dfltLD to read [copybooks/wsdflt.cob:L14-L19].
+    "2": {}
+    # Nothing to pin: the GL final-accounts record, a pure table of 26 headings
+    # [copybooks/wsfinal.cob:L11]. Written INITIALIZEd so the SLOT EXISTS for finalLD
+    # to read -- and MEASURED consequence, recorded here rather than left to be
+    # rediscovered: INITIALIZE sets an alphanumeric table to spaces, so finalLD's own
+    # test `if Final-Record = spaces' [common/finalLD.cbl:L243] is TRUE and it takes
+    # its "No Data - aborting Terminating nothing to do" path, returning zero and
+    # loading NOTHING. SYSFINAL-REC therefore stays empty, which is precisely the
+    # pre-state this scenario wants: the table is not among affected_tables and no
+    # in-scope program writes it. The slot is still declared, because a slot that does
+    # not exist at all is a read failure rather than a defined empty pre-state.
+    "3": {}
+    # THE PERIOD-TOTALS RECORD, AND IT STARTS FROM A KNOWN NON-ZERO STATE ON PURPOSE.
+    # The nine period-total sites are the sole writers of this record and every one of
+    # them ADDS [copybooks/wssys4.cob:L9-L30]. If the slot started at zero, an
+    # accumulation onto zero and a fresh insert would leave the SAME value and the
+    # comparison could not tell them apart. The two spare fields carry the SALES
+    # prefix inside the PURCHASE group -- anomaly A-20, [copybooks/wssys4.cob:L29-L30]
+    # -- and they are named here exactly as the frozen copybook misnames them.
+    "4":
+      sl-os-bal-last-month: "11111.11"
+      sl-os-bal-this-month: "12222.22"
+      sl-invoices-this-month: "3333.33"
+      sl-credit-notes-this-month: "444.44"
+      sl-variance: "55.55"
+      sl-credit-deductions: "66.66"
+      sl-cn-unappl-this-month: "77.77"
+      sl-payments: "8888.88"
+      sl4-spare1: "0.00"
+      sl4-spare2: "0.00"
+      pl-os-bal-last-month: "9999.99"
+      pl-os-bal-this-month: "10101.01"
+      pl-invoices-this-month: "2121.21"
+      pl-credit-notes-this-month: "232.32"
+      pl-variance: "34.34"
+      pl-credit-deductions: "45.45"
+      pl-cn-unappl-this-month: "56.56"
+      pl-payments: "6767.67"
+      sl4-spare3: "0.00"
+      sl4-spare4: "0.00"
+  # Analysis codes. THREE ROWS FOR TWO CODES, because the split-code roll-up is
+  # real: "AB" and "AC" are the codes the invoice lines carry, and "A " is the
+  # first-character roll-up sl055 re-reads for when va-second is not a space
+  # [sales/sl055.cbl:L402-L409]. Pa-System "S" is the Sales side.
+  analysis.dat:
+    - Pa-System: "S"
+      Pa-First: "A"
+      Pa-Second: "B"
+      Pa-Gl: "2000"
+      Pa-Desc: "Goods for resale"
+      Pa-Print: "ABG"
+    - Pa-System: "S"
+      Pa-First: "A"
+      Pa-Second: "C"
+      Pa-Gl: "2010"
+      Pa-Desc: "Services"
+      Pa-Print: "ACS"
+    - Pa-System: "S"
+      Pa-First: "A"
+      Pa-Second: " "
+      Pa-Gl: "2000"
+      Pa-Desc: "All trading - roll up"
+      Pa-Print: "A  "
+
+  # One value-analysis record per analysis code, INCLUDING the roll-up, for the
+  # same reason. Non-zero opening counts and values so that an accumulation is
+  # distinguishable from a fresh insert -- if these started at zero, a run that
+  # created the row and a run that added to it would leave the same value.
+  value.dat:
+    - va-system: "S"
+      va-first: "A"
+      va-second: "B"
+      va-gl: "2000"
+      va-desc: "Goods for resale"
+      va-print: "ABG"
+      va-t-this: "3"
+      va-t-last: "11"
+      va-t-year: "27"
+      va-v-this: "1234.56"
+      va-v-last: "4321.09"
+      va-v-year: "9876.54"
+    - va-system: "S"
+      va-first: "A"
+      va-second: "C"
+      va-gl: "2010"
+      va-desc: "Services"
+      va-print: "ACS"
+      va-t-this: "2"
+      va-t-last: "5"
+      va-t-year: "13"
+      va-v-this: "543.21"
+      va-v-last: "1111.11"
+      va-v-year: "2222.22"
+    - va-system: "S"
+      va-first: "A"
+      va-second: " "
+      va-gl: "2000"
+      va-desc: "All trading - roll up"
+      va-print: "A  "
+      va-t-this: "5"
+      va-t-last: "16"
+      va-t-year: "40"
+      va-v-this: "1777.77"
+      va-v-last: "5432.20"
+      va-v-year: "12098.76"
+
+  # ONE customer, live, carrying the statistics that make the anomalies visible.
+  # Sales-Activety and Sales-Average are BOTH non-zero, which is the whole point:
+  # the guard [sales/sl060.cbl:L819-L820] then multiplies them back into a total
+  # instead of starting from zero, and the divide that follows
+  # [sales/sl060.cbl:L827] truncates into Sales-Average binary-long
+  # [copybooks/wssl.cob:L49] -- an INTEGER, which is the second of A-8's two
+  # truncations. The first is the accumulator's own zero decimal places.
+  # Sales-Pay-Activety and Sales-Pay-Average are non-zero for the same reason on
+  # the cash route, and Sales-Pay-Worst is a watermark a later payment can raise.
+  salesled.dat:
+    - WS-Sales-Key: "A001001"
+      Sales-Name: "Acme Trading Limited"
+      Sales-Addr1: "17 Long Lane"
+      Sales-Addr2: "Somewhere"
+      Sales-Phone: "01234 567890"
+      Sales-Ext: "0"
+      Sales-Email: "accounts@example.invalid"
+      Sales-Fax: " "
+      Sales-Status: "1"
+      Sales-Late: "0"
+      Sales-Dunning: "0"
+      Email-Invoice: "0"
+      Email-Statement: "0"
+      Email-Letters: "0"
+      Delivery-Tag: "0"
+      Notes-Tag: "0"
+      Sales-Credit: "30"
+      Sales-Discount: "2.50"
+      Sales-Late-Min: "0"
+      Sales-Late-Max: "0"
+      Sales-Limit: "50000"
+      Sales-Activety: "7"
+      Sales-Last-Inv: "155000"
+      Sales-Last-Pay: "155010"
+      Sales-Average: "813"
+      Sales-Pay-Activety: "4"
+      Sales-Pay-Average: "27"
+      Sales-Pay-Worst: "41"
+      Sales-Create-Date: "150000"
+      Sales-Current: "3456.78"
+      Sales-Last: "2345.67"
+      Turnover-Q1: "1111.11"
+      Turnover-Q2: "2222.22"
+      Turnover-Q3: "3333.33"
+      Turnover-Q4: "4444.44"
+      Sales-Stats-Date: "2509"
+      Sales-Unapplied: "0.00"
+      Sales-Partial-Ship-Flag: " "
+
+  # THREE DOCUMENTS, SEVEN ROWS. Item number zero is the HEADER row -- ih-test
+  # overlays Item-Nos and sl055 branches to header analysis on zero
+  # [sales/sl055.cbl:L370-L371] -- and items one upward are the LINE rows. The
+  # header view (ih-*) and the line view (il-*) are REDEFINES of the same 137
+  # bytes [copybooks/slwsinv2.cob:L38], [copybooks/slwsinv2.cob:L92], so a row
+  # sets one view or the other and never both.
+  #   00000001  type 2 INVOICE      header + two lines, codes AB and AC
+  #   00000002  type 3 CREDIT NOTE  header + one line,  code AB
+  #   00000003  type 4 PROFORMA     header + one line -- SKIPPED by
+  #             [sales/sl055.cbl:L430-L431], and seeded precisely so that the skip
+  #             is demonstrated rather than assumed: its rows must come back
+  #             UNTOUCHED, with il-update still a space.
+  # Every net amount carries NON-ZERO PENCE, deliberately: a round-pound seed
+  # would hide A-8's first truncation entirely.
+  invoice.dat:
+    - WS-Invoice-Nos: "1"
+      WS-Item-Nos: "0"
+      ih-nos: "A00100"
+      ih-check: "1"
+      ih-date: "155127"
+      ih-order: "PO-77120"
+      ih-type: "2"
+      ih-ref: "INV-0001"
+      ih-description: "Goods and services September"
+      ih-p-c: "0.00"
+      ih-net: "1234.56"
+      ih-extra: "0.00"
+      ih-carriage: "12.34"
+      ih-vat: "249.38"
+      ih-discount: "0.00"
+      ih-e-vat: "0.00"
+      ih-c-vat: "2.46"
+      ih-status: "I"
+      ih-status-P: " "
+      ih-status-L: "L"
+      ih-status-C: " "
+      ih-status-A: " "
+      ih-status-I: " "
+      ih-lines: "2"
+      ih-deduct-days: "0"
+      ih-deduct-amt: "0.00"
+      ih-deduct-vat: "0.00"
+      ih-days: "30"
+      ih-cr: "0"
+      ih-day-book-flag: " "
+      ih-update: " "
+    - WS-Invoice-Nos: "1"
+      WS-Item-Nos: "1"
+      il-product: "WIDGET-STD"
+      il-pa: "AB"
+      il-qty: "9"
+      il-type: "2"
+      il-description: "Standard widget"
+      il-net: "987.65"
+      il-unit: "109.74"
+      il-discount: "0.00"
+      il-vat: "197.53"
+      il-vat-code: "1"
+      il-update: " "
+      il-Back-Ordered: " "
+    - WS-Invoice-Nos: "1"
+      WS-Item-Nos: "2"
+      il-product: "FITTING-HR"
+      il-pa: "AC"
+      il-qty: "3"
+      il-type: "2"
+      il-description: "Fitting labour"
+      il-net: "246.91"
+      il-unit: "82.31"
+      il-discount: "0.00"
+      il-vat: "49.38"
+      il-vat-code: "1"
+      il-update: " "
+      il-Back-Ordered: " "
+    - WS-Invoice-Nos: "2"
+      WS-Item-Nos: "0"
+      ih-nos: "A00100"
+      ih-check: "1"
+      ih-date: "155127"
+      ih-order: "PO-77121"
+      ih-type: "3"
+      ih-ref: "CRN-0002"
+      ih-description: "Returned widgets"
+      ih-p-c: "0.00"
+      ih-net: "123.45"
+      ih-extra: "0.00"
+      ih-carriage: "0.00"
+      ih-vat: "24.69"
+      ih-discount: "0.00"
+      ih-e-vat: "0.00"
+      ih-c-vat: "0.00"
+      ih-status: "I"
+      ih-status-P: " "
+      ih-status-L: "L"
+      ih-status-C: " "
+      ih-status-A: " "
+      ih-status-I: " "
+      ih-lines: "1"
+      ih-deduct-days: "0"
+      ih-deduct-amt: "0.00"
+      ih-deduct-vat: "0.00"
+      ih-days: "30"
+      ih-cr: "0"
+      ih-day-book-flag: " "
+      ih-update: " "
+    - WS-Invoice-Nos: "2"
+      WS-Item-Nos: "1"
+      il-product: "WIDGET-STD"
+      il-pa: "AB"
+      il-qty: "1"
+      il-type: "3"
+      il-description: "Widget returned faulty"
+      il-net: "123.45"
+      il-unit: "123.45"
+      il-discount: "0.00"
+      il-vat: "24.69"
+      il-vat-code: "1"
+      il-update: " "
+      il-Back-Ordered: " "
+    - WS-Invoice-Nos: "3"
+      WS-Item-Nos: "0"
+      ih-nos: "A00100"
+      ih-check: "1"
+      ih-date: "155127"
+      ih-order: "PO-77122"
+      ih-type: "4"
+      ih-ref: "PFI-0003"
+      ih-description: "Proforma - must be skipped"
+      ih-p-c: "0.00"
+      ih-net: "555.55"
+      ih-extra: "0.00"
+      ih-carriage: "0.00"
+      ih-vat: "111.11"
+      ih-discount: "0.00"
+      ih-e-vat: "0.00"
+      ih-c-vat: "0.00"
+      ih-status: "I"
+      ih-status-P: " "
+      ih-status-L: "L"
+      ih-status-C: " "
+      ih-status-A: " "
+      ih-status-I: " "
+      ih-lines: "1"
+      ih-deduct-days: "0"
+      ih-deduct-amt: "0.00"
+      ih-deduct-vat: "0.00"
+      ih-days: "30"
+      ih-cr: "0"
+      ih-day-book-flag: " "
+      ih-update: " "
+    - WS-Invoice-Nos: "3"
+      WS-Item-Nos: "1"
+      il-product: "WIDGET-PRO"
+      il-pa: "AB"
+      il-qty: "5"
+      il-type: "2"
+      il-description: "Quoted only - not supplied"
+      il-net: "555.55"
+      il-unit: "111.11"
+      il-discount: "0.00"
+      il-vat: "111.11"
+      il-vat-code: "1"
+      il-update: " "
+      il-Back-Ordered: " "
+
+  # TWO open items. The first is the OPEN CREDIT NOTE the contract requires --
+  # OI-Type 3 and OI-Status zero, so S-Open is true
+  # [copybooks/slwsoi.cob:L47-L49] -- which is what makes ba000-Cr-Swop run
+  # [sales/sl060.cbl:L671-L672] and the fourth period total non-zero. It also
+  # carries a LATE DEDUCTION, so that the deduction apportionment is an add of
+  # something rather than an add of zero. The second is an ordinary open account
+  # item, present so the credit note has something to swap against and so the
+  # walk has more than one row to order.
+  openitm3.dat:
+    - OI-Nos: "A00100"
+      OI-Check: "1"
+      OI-Invoice: "2"
+      OI-B-Nos: "1"
+      OI-B-Item: "1"
+      OI-Date: "155127"
+      OI-Type: "3"
+      OI-Description: "Returned widgets"
+      OI-Hold-flag: " "
+      OI-Unapl: " "
+      OI-P-C: "0.00"
+      OI-Net: "123.45"
+      OI-Extra: "0.00"
+      OI-Carriage: "0.00"
+      OI-Vat: "24.69"
+      OI-Discount: "0.00"
+      OI-E-Vat: "0.00"
+      OI-C-Vat: "0.00"
+      OI-Paid: "0.00"
+      OI-Status: "0"
+      OI-Deduct-Days: "14"
+      OI-Deduct-Amt: "6.17"
+      OI-Deduct-Vat: "1.23"
+      OI-Days: "30"
+      OI-Cr: "0"
+      OI-Applied: " "
+      OI-Date-Cleared: "0"
+    - OI-Nos: "A00100"
+      OI-Check: "1"
+      OI-Invoice: "1"
+      OI-B-Nos: "1"
+      OI-B-Item: "0"
+      OI-Date: "155127"
+      OI-Type: "2"
+      OI-Description: "Goods and services Sept"
+      OI-Hold-flag: " "
+      OI-Unapl: " "
+      OI-P-C: "0.00"
+      OI-Net: "1234.56"
+      OI-Extra: "0.00"
+      OI-Carriage: "12.34"
+      OI-Vat: "249.38"
+      OI-Discount: "0.00"
+      OI-E-Vat: "0.00"
+      OI-C-Vat: "2.46"
+      OI-Paid: "0.00"
+      OI-Status: "0"
+      OI-Deduct-Days: "0"
+      OI-Deduct-Amt: "0.00"
+      OI-Deduct-Vat: "0.00"
+      OI-Days: "30"
+      OI-Cr: "0"
+      OI-Applied: " "
+      OI-Date-Cleared: "0"

@@ -27,7 +27,7 @@
 FROM --platform=linux/amd64 mariadb:10.11.7@sha256:27292753bb759cd22be72e3c8192f1259ef47010c8634b5da0bc886845efe9fd
 
 LABEL org.opencontainers.image.title="ACAS posting-cycle oracle - MariaDB" \
-      org.opencontainers.image.description="MariaDB 10.11.7 serving the frozen ACASDB schema with autocommit=0, the mode the Agent Action Plan mandates and the frozen loader banners require, for COBOL-vs-Python posting-cycle parity comparison." \
+      org.opencontainers.image.description="MariaDB 10.11.7 serving the frozen ACASDB schema for COBOL-vs-Python posting-cycle parity comparison. Runtime application access is served with autocommit ON; the Agent Action Plan mandates autocommit OFF for the SEEDING WINDOW, which harness/seed.sh establishes and restores around the frozen loaders." \
       org.opencontainers.image.base.name="docker.io/library/mariadb:10.11.7@sha256:27292753bb759cd22be72e3c8192f1259ef47010c8634b5da0bc886845efe9fd" \
       org.opencontainers.image.base.digest="sha256:27292753bb759cd22be72e3c8192f1259ef47010c8634b5da0bc886845efe9fd" \
       acas.harness.platform="linux/amd64" \
@@ -35,18 +35,51 @@ LABEL org.opencontainers.image.title="ACAS posting-cycle oracle - MariaDB" \
       acas.harness.role="oracle-database" \
       acas.harness.schema.source="mysql/ACASDB.sql" \
       acas.harness.schema.frozen="true" \
-      acas.harness.autocommit="0" \
+      acas.harness.autocommit="1" \
+      acas.harness.autocommit.seeding-window="0" \
+      acas.harness.autocommit.window-authority="harness/seed.sh" \
       acas.harness.cobol.toolchain="absent"
 
 
 # -----------------------------------------------------------------------------
-#  SERVER CONFIGURATION -- autocommit MUST be OFF
+#  SERVER CONFIGURATION -- autocommit IS SCOPED, NOT PINNED
 #
-#  This is the single most important behavioural setting in the image. It is set
-#  to the mode the Agent Action Plan mandates, and the consequence of that mode
-#  is set out in full below because it is counter-intuitive: the frozen code
-#  cannot actually commit under it, so the honest thing is to state that plainly
-#  rather than quietly choose a mode that hides it.
+#  This is the single most important behavioural setting in the image, and the
+#  one place where reading the Agent Action Plan carelessly produces a harness
+#  that cannot work. The setting is therefore SCOPED rather than pinned:
+#
+#      runtime application access   autocommit ON   <- established HERE
+#      the seeding window           autocommit OFF  <- established by seed.sh
+#
+#  WHAT THE AAP ACTUALLY REQUIRES, AND WHERE
+#  -----------------------------------------
+#  Every one of the three provisions scopes the OFF mode to SEEDING, and none of
+#  them mentions runtime application access at all:
+#    * §0.2.1.1, on the seeding contract: "One operational constraint carries
+#      into the harness: the batch loader turns autocommit off
+#      [common/glbatchLD.cbl:L9-L13]" -- a statement about the LOADERS.
+#    * §0.5.2, among the two harness operational constraints: "autocommit must
+#      be **off** DURING SEEDING, because the batch loader sets it off
+#      explicitly [common/glbatchLD.cbl:L9-L13]" -- explicitly scoped.
+#    * §0.4.1.7, on THIS file: "autocommit off TO MATCH THE LOADERS
+#      [common/glbatchLD.cbl:L9-L13]" -- the loaders ARE the seeding stage, and
+#      the citation is the same loader banner as the other two.
+#
+#  An earlier revision of this image read those three provisions as a server-wide
+#  pin and wrote `autocommit=0` into [mysqld]. That is a strictly wider reading
+#  than the text supports, and it had two consequences that made the harness
+#  unable to do its job: there was no ON window anywhere, so runtime application
+#  access ran in a mode the AAP never asked for; and because the frozen code
+#  reaches no COMMIT (measured below), a seed reported success while leaving every
+#  table empty, after which the comparison stage happily diffed two empty
+#  captures and returned the pass condition. Nothing about the migration had been
+#  measured. Scoping the mode to the window the AAP names removes the first
+#  problem; the fail-closed durability gate in `seed.sh` removes the second.
+#
+#  The consequence of the OFF mode is still set out in full below, because it is
+#  counter-intuitive and it still governs the seeding window: the frozen code
+#  cannot commit under it, so the honest thing is to state that plainly rather
+#  than quietly choose a mode that hides it.
 #
 #  WHAT THE LOADER HEADERS SAY
 #  ---------------------------
@@ -102,19 +135,16 @@ LABEL org.opencontainers.image.title="ACAS posting-cycle oracle - MariaDB" \
 #      EXPOSES `MySQL_commit` but never calls it internally, and its
 #      `mysql_real_connect` never alters the session autocommit mode.
 #
-#  WHY autocommit=0 -- THE AAP MANDATES IT
-#  ---------------------------------------
-#  Three separate provisions of the Agent Action Plan require the OFF mode, and
-#  each derives it from the same frozen banner:
-#    * §0.2.1.1, on the seeding contract: "One operational constraint carries
-#      into the harness: the batch loader turns autocommit off
-#      [common/glbatchLD.cbl:L9-L13]".
-#    * §0.4.1.7, on THIS file: "Applies the frozen schema verbatim; autocommit
-#      off to match the loaders [common/glbatchLD.cbl:L9-L13]".
-#    * §0.5.2, among the two harness operational constraints: "autocommit must
-#      be **off** during seeding, because the batch loader sets it off
-#      explicitly [common/glbatchLD.cbl:L9-L13], and the seeded state depends on
-#      its commit boundaries."
+#  WHERE THE OFF MODE APPLIES -- THE SEEDING WINDOW, AND ONLY THERE
+#  ----------------------------------------------------------------
+#  The three AAP provisions quoted at the head of this section all scope the OFF
+#  mode to seeding, and all three cite the same frozen banner. `harness/seed.sh`
+#  is therefore the authority for the window: it sets the mode OFF immediately
+#  before the first frozen loader runs, asserts it inside the window, and restores
+#  ON from its exit trap however the run ends. The window is established with the
+#  administrative account the Compose file already hands the gnucobol service
+#  (ACAS_DB_ADMIN_USER / ACAS_DB_ADMIN_PASSWORD), because SET GLOBAL requires a
+#  privilege the narrowed application grant deliberately does not hold.
 #  The banner itself, verbatim from [common/glbatchLD.cbl:L9-L13]:
 #      *>  This modules uses commit and rollback so *
 #      *>  you MUST ensure that autocommit is OFF   *
@@ -129,8 +159,9 @@ LABEL org.opencontainers.image.title="ACAS posting-cycle oracle - MariaDB" \
 #  `cobmysqlapi38.c` exposes 25 entry points -- MySQL_init, MySQL_real_connect,
 #  MySQL_query, MySQL_commit, MySQL_rollback, MySQL_close and the rest -- and
 #  `MySQL_autocommit` is NOT among them. No COBOL program in the checkout can
-#  change the mode; only server configuration can. That is why this file, and
-#  not any script, is the single authority.
+#  change the mode; only the server's own setting can, which is why the OPERATOR
+#  is addressed and why the window has to be established from outside the frozen
+#  code -- here for runtime access, and by `seed.sh` for the seeding window.
 #
 #  THE NO-COMMIT DEFECT -- PRESERVED, NOT REPAIRED (R-4)
 #  -----------------------------------------------------
@@ -149,11 +180,17 @@ LABEL org.opencontainers.image.title="ACAS posting-cycle oracle - MariaDB" \
 #  nothing reaches. The bridges and handlers are the same -- zero COMMIT,
 #  ROLLBACK or START TRANSACTION anywhere in them.
 #
-#  The consequence, stated plainly: under the mandated mode a loader's rows are
-#  discarded at disconnect, so seeding leaves an EMPTY table set, and a COBOL
-#  posting run likewise leaves nothing. Verified empirically against this exact
-#  base image -- with the server started `--autocommit=0`, an INSERT followed by
-#  a clean disconnect and no COMMIT leaves a fresh session reading ZERO rows.
+#  The consequence, stated plainly: inside the AAP-mandated OFF window a loader's
+#  rows are discarded at disconnect, so the seed leaves an EMPTY table set.
+#  Verified empirically against this exact base image -- with autocommit 0, an
+#  INSERT followed by a clean disconnect and no COMMIT leaves a fresh session
+#  reading ZERO rows; with the runtime mode this file declares, the same INSERT
+#  and disconnect leaves the row in place.
+#
+#  That is why the window is a WINDOW. Widening it to the whole server, as an
+#  earlier revision of this file did, makes the oracle side of every comparison
+#  structurally empty -- and an empty diff is the pass condition, so the harness
+#  would report a clean pass having measured nothing at all.
 #
 #  That is a defect of the frozen code, and R-4 makes it a specification rather
 #  than a bug: "A defect reproduced is correct; a defect fixed is a failure."
@@ -166,28 +203,30 @@ LABEL org.opencontainers.image.title="ACAS posting-cycle oracle - MariaDB" \
 #
 #  This image therefore reproduces the defect and records it. It does NOT:
 #    * issue a COMMIT the frozen loaders omit -- that would repair the defect;
-#    * run the server in a mode the AAP does not sanction, however convenient
-#      that mode would be for producing a non-empty diff -- the AAP is the
-#      frozen source of truth and is aligned to, never reinterpreted;
+#    * widen the AAP's seeding-window requirement into a server-wide pin, which
+#      is what produced a harness whose oracle side could never hold a row;
+#    * narrow it either: `seed.sh` still runs the loaders under OFF, and still
+#      refuses to hand an empty capture to the comparison;
 #    * touch a single line of frozen COBOL.
 #  Anyone reading a scenario diff must therefore read it knowing which side of
 #  the comparison committed: `acas_posting/dal/connection.py` commits per
 #  statement as the bridges' own per-statement model requires, while the
-#  compiled side, under the mandated mode, does not.
+#  compiled side under the OFF window does not -- which is exactly why
+#  `seed.sh` measures the seeded row counts before the protocol may continue.
 #
-#  Set at SERVER level, not per session, so that every client inherits it
-#  identically: the COBOL loaders, the COBOL bridges via `cobmysqlapi.o`, the
+#  Set at SERVER level, not per session, so that every client inherits the same
+#  runtime mode: the COBOL loaders, the COBOL bridges via `cobmysqlapi.o`, the
 #  `mariadb` CLI in `seed.sh` / `reset_db.sh`, and the Python driver in
-#  `dump_tables.py`. A per-session setting would let one side of the diff
-#  differ from the other and turn this image into the comparison artefact that
-#  R-6 forbids.
+#  `dump_tables.py`. Both sides of a diff must see one server, so the only mode
+#  change anywhere in the harness is the seeding window, which is global too and
+#  is closed again before either cycle runs.
 #
-#  Declared EXPLICITLY, and here it is load-bearing rather than merely tidy. The
-#  base image ships no autocommit setting anywhere under /etc/mysql, so the
-#  built-in default of 1 would otherwise apply -- the very mode the AAP forbids.
-#  This declaration is what actually establishes the mandated mode, and it makes
-#  the setting assertable by `seed.sh`, `reset_db.sh` and
-#  `run_cobol_scenario.sh`.
+#  Declared EXPLICITLY rather than left to the base image's built-in default,
+#  even though the value is the same. The base image ships no autocommit setting
+#  anywhere under /etc/mysql, so an implicit default would be an assumption about
+#  an upstream image this harness pins by digest but does not own; and an explicit
+#  declaration is what makes the runtime mode assertable by `reset_db.sh` and
+#  `run_cobol_scenario.sh`, and restorable by `seed.sh` after its window.
 #
 #  Written INTO the image rather than shipped as a separate `harness/my.cnf`:
 #  the harness folder inventory is exactly eleven files plus `scenarios/`, and
@@ -225,13 +264,18 @@ LABEL org.opencontainers.image.title="ACAS posting-cycle oracle - MariaDB" \
 #                                         there are no parallel scenario runs
 #                                         against the shared database
 #
-#  NOTE for downstream scripts: with autocommit=0 no DML statement commits of
-#  its own accord, and the frozen COBOL loaders and bridges reach no COMMIT, so
-#  their writes do not survive session close. That is the AAP-mandated mode and
-#  the reproduced defect described above, not a misconfiguration. `seed.sh`,
-#  `reset_db.sh` and `run_cobol_scenario.sh` ASSERT this mode before doing work
-#  and warn about the durability consequence; none of them ever SETS it, so this
-#  file remains the single authority.
+#  NOTE for downstream scripts, stated as the contract they implement:
+#    * `reset_db.sh` and `run_cobol_scenario.sh` ASSERT the runtime mode (ON) and
+#      never set it. Their work -- the drop and re-apply, and the compiled posting
+#      run -- is runtime application access, which the AAP does not scope OFF.
+#    * `seed.sh` OWNS the seeding window: it sets the mode OFF around the frozen
+#      loaders, asserts it inside the window, and restores ON from its exit trap
+#      however the run ends. It never issues a COMMIT on a loader's behalf.
+#    * Because the frozen loaders reach no COMMIT, that window leaves no durable
+#      rows. `seed.sh` therefore MEASURES the seeded row counts when the window
+#      closes and FAILS rather than reporting a success the tables do not show --
+#      which is what stops an empty capture reaching `diff_states.py`, where an
+#      empty diff is the pass condition.
 # -----------------------------------------------------------------------------
 RUN set -eu; \
     printf '%s\n' \
@@ -239,9 +283,16 @@ RUN set -eu; \
       '# ACAS compiled-COBOL oracle -- server configuration.' \
       '# Generated by harness/Dockerfile.mariadb. Do not edit in a running container.' \
       '#' \
-      '# autocommit=0 is MANDATED by the Agent Action Plan: section 0.2.1.1 (the' \
-      '# seeding contract), section 0.4.1.7 (this file: "autocommit off to match' \
-      '# the loaders") and section 0.5.2 (the harness operational constraints).' \
+      '# autocommit is SCOPED, not pinned:' \
+      '#   runtime application access  ON   <- this file' \
+      '#   the seeding window         OFF  <- harness/seed.sh, around the loaders' \
+      '#' \
+      '# The Agent Action Plan mandates the OFF mode for SEEDING, and all three of' \
+      '# its provisions say so: section 0.2.1.1 ("the batch loader turns autocommit' \
+      '# off"), section 0.5.2 ("autocommit must be off DURING SEEDING") and section' \
+      '# 0.4.1.7 on this file ("autocommit off TO MATCH THE LOADERS" -- the loaders' \
+      '# being the seeding stage). None of them scopes runtime access, so runtime' \
+      '# access is served ON and seed.sh owns the window the AAP names.' \
       '#' \
       '# All three derive it from the loader banner at' \
       '# [common/glbatchLD.cbl:L9-L13], which appears in all 28 common/*LD.cbl:' \
@@ -249,8 +300,8 @@ RUN set -eu; \
       '#    is OFF in the rdb settings. It is as default set ON."' \
       '# The banner instructs the OPERATOR because no COBOL program can do it:' \
       '# the vendored cobmysqlapi38.c exposes MySQL_commit and MySQL_rollback but' \
-      '# NOT MySQL_autocommit, so server configuration is the only lever. Hence' \
-      '# this file is the single authority and no script ever issues SET.' \
+      '# NOT MySQL_autocommit, so the mode can only be established from outside the' \
+      '# frozen code -- here, and by seed.sh for its window.' \
       '#' \
       '# CONSEQUENCE, PRESERVED NOT REPAIRED (R-4): the shipped code never' \
       '# reaches a COMMIT. In all 28 loaders every "perform aa020-Rollback" is' \
@@ -262,18 +313,18 @@ RUN set -eu; \
       '# acasirsub4) and every bridge close path contain zero' \
       '# COMMIT/ROLLBACK/START TRANSACTION.' \
       '#' \
-      '# So under this mandated mode MariaDB discards each COBOL session at' \
-      '# disconnect: seeding leaves no rows and a COBOL posting run leaves none.' \
-      '# The maintainer saw this himself -- [common/analLD.cbl:L442] "These do' \
-      '# not work during testing with mariadb - Non transactional model or' \
-      '# autocommit set ON". R-4 makes that observed behaviour the' \
-      '# specification: a defect reproduced is correct, a defect fixed is a' \
-      '# failure. Nothing here issues the missing COMMIT and nothing overrides' \
-      '# the AAP to obtain a more convenient diff.' \
+      '# So inside the OFF window MariaDB discards each COBOL session at' \
+      '# disconnect and the seed leaves no rows. The maintainer saw this himself' \
+      '# -- [common/analLD.cbl:L442] "These do not work during testing with' \
+      '# mariadb - Non transactional model or autocommit set ON". R-4 makes that' \
+      '# observed behaviour the specification: a defect reproduced is correct, a' \
+      '# defect fixed is a failure. Nothing here or in seed.sh issues the missing' \
+      '# COMMIT; seed.sh measures the result and FAILS instead, so the defect is' \
+      '# reported rather than laundered into an empty diff that reads as a pass.' \
       '#' \
       '# Set server-wide so every client -- COBOL loaders, COBOL bridges via' \
-      '# cobmysqlapi.o, the mariadb CLI, and the Python driver -- inherits it' \
-      '# identically. Both sides of the parity diff must see the same server.' \
+      '# cobmysqlapi.o, the mariadb CLI, and the Python driver -- inherits the' \
+      '# same runtime mode. Both sides of the parity diff must see one server.' \
       '#' \
       '# Nothing else is set here by design: no sql_mode (the dump sets' \
       '# NO_AUTO_VALUE_ON_ZERO per session at [mysql/ACASDB.sql:L21]), no server' \
@@ -282,11 +333,12 @@ RUN set -eu; \
       '# PAD_CHAR_TO_FULL_LENGTH, no durability change, no query logging.' \
       '#' \
       '[mysqld]' \
-      'autocommit=0' \
+      'autocommit=1' \
       > /etc/mysql/conf.d/99-acas-oracle.cnf; \
     chmod 0644 /etc/mysql/conf.d/99-acas-oracle.cnf; \
-    grep -qx 'autocommit=0' /etc/mysql/conf.d/99-acas-oracle.cnf; \
-    ! grep -qx 'autocommit=1' /etc/mysql/conf.d/99-acas-oracle.cnf
+    grep -qx 'autocommit=1' /etc/mysql/conf.d/99-acas-oracle.cnf; \
+    ! grep -qx 'autocommit=0' /etc/mysql/conf.d/99-acas-oracle.cnf; \
+    echo 'OK: runtime autocommit=1 declared; the seeding window is harness/seed.sh.'
 
 #  Repository evidence [mysql/ACASDB.sql:L3], not an operator preference: the
 #  frozen loaders and the generated bridges connect to this database by name.

@@ -1,3 +1,7 @@
+#!/usr/bin/env python3
+# Executable in its own right: the canonical recipe in harness/docker-compose.yml
+# names the three state tools by path, and without this line the kernel refuses
+# the exec and bash falls back to interpreting the file as a shell script.
 """Compare two normalised dumps. AN EMPTY DIFF IS THE PASS CONDITION.
 
 Stage 8 of the parity protocol, and the only arbiter in it. Exit 0 with empty
@@ -133,7 +137,11 @@ NORMALIZED_SUFFIX: Final[str] = NORMALIZED_SUFFIXES[0]
 # imported, following the convention every constant this module already shares with its
 # siblings follows - `DUMP_KEYS`, `IN_SCOPE_TABLES`, `SIDES`, `TEMP_PREFIX`.
 MANIFEST_FILENAME: Final[str] = "_manifest.json"
-MANIFEST_VERSION: Final[int] = 1
+# Version 2 added `attestation`, in step with harness/dump_tables.py and
+# harness/normalize.py. A version-1 tree is REFUSED rather than read: the whole
+# point of that key is that its absence cannot be mistaken for a claim of success,
+# so tolerating a manifest written before it existed would defeat the check.
+MANIFEST_VERSION: Final[int] = 2
 MANIFEST_STAGE_NORMALIZED: Final[str] = "normalized"
 
 # The reserved file-name namespace inside a published tree.
@@ -1414,6 +1422,123 @@ def verify_trees(
     return left_manifest, right_manifest
 
 
+def assert_attested(
+    manifests: tuple[Mapping[str, Any], Mapping[str, Any]],
+) -> None:
+    """Refuse a pair of trees whose run stages did not attest success.
+
+    THE DEFECT THIS CLOSES. The eight stages were operator discipline: every tool
+    reported its own status and no tool looked at the one before it. Against a checkout
+    with no fixtures and no compiled oracle the seed exited 75, the COBOL run 74 and the
+    Python run 69 -- and the dump, normalise and comparison stages then exited 0 apiece
+    and printed "identical, no difference". An empty diff is the ONE documented pass
+    condition (AAP section 0.8.5), so the harness certified the migration exact having
+    compared two empty captures. Both manifests were COMPLETE, so the existing
+    partial-capture defence could not engage: the trees were not partial, the RUNS were
+    absent.
+
+    So each capture now carries what its run stage claimed, and this is where the claim
+    is enforced. Nothing is inferred: a missing run-status file, one belonging to
+    another scenario, or a non-zero status all arrive here as `attested: false` with the
+    reason recorded, and all three are refused.
+
+    Args:
+        manifests: The verified COBOL and Python manifests, in that order.
+
+    Raises:
+        ManifestError: Either side does not attest a successful run.
+    """
+    for label, manifest in zip((LABEL_COBOL, LABEL_PYTHON), manifests):
+        attestation = manifest.get("attestation")
+        if not isinstance(attestation, Mapping):
+            raise ManifestError(
+                f"the {label} tree's {MANIFEST_FILENAME} carries no run "
+                f"attestation, so nothing says the {label} cycle ever ran for "
+                f"this scenario. Re-run the dump stage: harness/dump_tables.py "
+                f"records what the run stage claimed. "
+                f"--allow-unattested waives this and forfeits the claim that "
+                f"the verdict is evidence (rule R-6)."
+            )
+        if attestation.get("attested") is True:
+            continue
+        detail = attestation.get("detail") or "no reason was recorded."
+        raise ManifestError(
+            f"the {label} tree does not attest a successful run, so NO VERDICT "
+            f"CAN BE RENDERED ON IT: {detail} "
+            f"This is refused rather than reported as a pass because an empty "
+            f"diff is the only pass condition the protocol has (Agent Action "
+            f"Plan section 0.8.5), and two captures taken after failed runs "
+            f"produce exactly that. Run the ten stages in order -- "
+            f"harness/run_parity.sh does it and stops at the first failure. "
+            f"--allow-unattested waives this and forfeits the claim that the "
+            f"verdict is evidence (rule R-6)."
+        )
+
+
+def assert_not_all_empty(
+    manifests: tuple[Mapping[str, Any], Mapping[str, Any]],
+    *,
+    expect_empty: bool,
+) -> None:
+    """Refuse a comparison in which every table is empty on BOTH sides.
+
+    A comparison of nothing against nothing is trivially equal, and equality is the
+    pass condition. This is the same failure as an unattested capture arriving by a
+    different route -- a database that was never seeded, a seed whose rows were
+    discarded, a scenario pointed at the wrong schema -- and it is refused for the same
+    reason.
+
+    An individual empty table is perfectly ordinary and is NOT refused: an empty
+    `GLPOSTING-REC` may be exactly what a rejected batch should leave behind. What is
+    refused is a comparison in which nothing anywhere holds a row, unless the scenario
+    itself declares that expectation.
+
+    Args:
+        manifests: The verified COBOL and Python manifests, in that order.
+        expect_empty: The scenario declared `expect_empty_state: true`, so an all-empty
+            capture is its stated outcome and is compared rather than refused.
+
+    Raises:
+        ManifestError: Both sides are wholly empty and the scenario did not declare it.
+    """
+    totals: list[int] = []
+    for manifest in manifests:
+        declared = manifest.get("tables")
+        total = 0
+        if isinstance(declared, list):
+            for entry in declared:
+                if isinstance(entry, Mapping):
+                    count = entry.get("row_count")
+                    if isinstance(count, int):
+                        total += count
+        totals.append(total)
+
+    if any(total > 0 for total in totals):
+        return
+    if expect_empty:
+        _progress(
+            f"{_PROG}: every table is empty on both sides, and the scenario "
+            f"declares expect_empty_state, so the comparison proceeds on that "
+            f"declaration."
+        )
+        return
+
+    raise ManifestError(
+        f"every table is EMPTY on both sides -- {totals[0]} row(s) in the "
+        f"{LABEL_COBOL} capture and {totals[1]} in the {LABEL_PYTHON} one -- so "
+        f"there is nothing to compare and equality here means nothing was "
+        f"measured. Refused rather than reported as a pass: an empty diff is "
+        f"the only pass condition the protocol has (Agent Action Plan section "
+        f"0.8.5). The usual causes are a database that was never seeded, a seed "
+        f"whose rows were discarded before they were committed, or a run that "
+        f"never reached the tables at all. Check the seed stage first: "
+        f"harness/seed.sh measures its own result and exits 76 rather than "
+        f"reporting a seed that is not there. If an all-empty state really is "
+        f"this scenario's expected outcome, declare it in the scenario file "
+        f"with `expect_empty_state: true' so the claim is on the record."
+    )
+
+
 def manifest_tables(manifest: Mapping[str, Any]) -> tuple[str, ...]:
     """Return the table names a manifest declares, in its own order.
 
@@ -1630,6 +1755,67 @@ def _validate_table_selection(tables: Sequence[str]) -> tuple[str, ...]:
 
 # Bounding the comparison by the SCENARIO is the protocol, and the alternative - an
 # ignore-list here - is forbidden by rule R-4.
+
+
+def scenario_expects_empty_state(path: Path | str | None) -> bool:
+    """Report whether a scenario declares that an all-empty end state is its outcome.
+
+    One optional boolean, `expect_empty_state`, read with the same discipline as the
+    affected-table list: nothing else in the scenario is interpreted, and the key's
+    ABSENCE means False, so no existing scenario changes behaviour by omitting it.
+
+    It exists so that the all-empty refusal in `assert_not_all_empty` can be answered by
+    a scenario rather than by a command-line flag: a flag would be a per-invocation
+    decision an operator makes under pressure, while the scenario file is committed
+    evidence of what the run was expected to leave behind.
+
+    Args:
+        path: The scenario definition, or None when the tables were named directly.
+
+    Returns:
+        Whether the scenario declares the expectation.
+
+    Raises:
+        ScenarioFileError: The file cannot be read as a YAML mapping, or the key is
+            present with something other than a boolean.
+    """
+    if path is None:
+        return False
+    try:
+        import yaml
+    except ImportError as exc:  # pragma: no cover - PyYAML is pinned
+        raise ScenarioFileError(
+            "PyYAML is not importable, so a scenario definition cannot be read."
+        ) from exc
+
+    source = Path(path)
+    try:
+        document = yaml.safe_load(source.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise ScenarioFileError(
+            f"could not read the scenario definition {source}: {exc}"
+        ) from exc
+    except yaml.YAMLError as exc:
+        raise ScenarioFileError(
+            f"the scenario definition {source} is not valid YAML: {exc}"
+        ) from exc
+
+    if not isinstance(document, Mapping):
+        raise ScenarioFileError(
+            f"the scenario definition {source} must be a mapping at the top "
+            f"level; got {type(document).__name__}."
+        )
+    if "expect_empty_state" not in document:
+        return False
+    value = document["expect_empty_state"]
+    if not isinstance(value, bool):
+        raise ScenarioFileError(
+            f"expect_empty_state in {source} must be true or false; got "
+            f"{value!r}. It declares that this scenario is expected to leave "
+            f"every affected table empty, which suspends the all-empty "
+            f"refusal, so it is not inferred from a truthy value."
+        )
+    return value
 
 
 def scenario_tables(path: Path | str) -> tuple[str, ...]:
@@ -2411,8 +2597,9 @@ which tables - a selector is REQUIRED
                          evidence (rule R-6).
 
 both trees must declare themselves complete
-  each must carry {MANIFEST_FILENAME}, written LAST by
-  harness/normalize.py, and the two must name the SAME scenario. Every
+  each must carry {MANIFEST_FILENAME}, which
+  [harness/normalize.py] writes LAST, and the two must name the SAME
+  scenario. Every
   declared table must be present with the digest the manifest records, and
   no undeclared dump may be there. This is not bookkeeping: two PARTIAL
   captures can produce an EMPTY diff over the tables that happen to be in
@@ -2421,6 +2608,22 @@ both trees must declare themselves complete
   comparison bounded by another is reported rather than discovered as a
   missing file. --allow-unmanifested waives all of it and forfeits the
   claim that the verdict is evidence.
+
+both captures must attest a successful run, and both must not be empty
+  a manifest carries the run attestation [harness/dump_tables.py] read
+  from the runner's own status record, and a capture that does not attest
+  status 0 is REFUSED. So is a comparison in which every table is empty
+  on BOTH sides. Neither refusal is fussiness: with no fixtures and no
+  compiled oracle the seed, the COBOL run and the Python run all exit
+  non-zero and the dump, normalise and comparison stages then exit 0
+  apiece and report "identical" -- a pass certified over two empty
+  captures. An individual empty table is ordinary and is never refused;
+  a scenario whose expected end state really is all-empty declares
+  `expect_empty_state: true' and is compared on that declaration.
+  --allow-unattested waives both and forfeits the same claim.
+  The ten stages are driven in order by [harness/run_parity.sh], which
+  stops at the first non-zero -- which is the reason neither refusal
+  should ever fire in a protocol run.
 
 exit codes
   0  identical           stdout is EMPTY - that is the pass condition
@@ -2439,8 +2642,9 @@ comparison was completed.
 
 the comparison is EXACT: no tolerance, no epsilon, no case- or
 whitespace-insensitive compare, no numeric coercion, and no ignore-list.
-harness/normalize.py has already canonicalised character padding, decimal
-scale and date text, so anything left is a real behavioural difference.
+By this point [harness/normalize.py] has canonicalised character padding,
+decimal scale and date text, so anything left is a real behavioural
+difference.
 """
 
 
@@ -2545,6 +2749,20 @@ def build_parser() -> argparse.ArgumentParser:
             "stores when the operator leaves the menu with X and the "
             "Python cycle has no menu, so comparing them in a scenario "
             "that does not affect them reports a FALSE FAILURE."
+        ),
+    )
+    parser.add_argument(
+        "--allow-unattested",
+        action="store_true",
+        help=(
+            "compare captures whose run stage did not attest success. NOT THE "
+            "PROTOCOL: harness/dump_tables.py records what the run stage "
+            "claimed, and a capture taken after a failed run supports no "
+            "verdict -- two such captures produce an EMPTY diff, which is the "
+            "pass condition. This flag also waives the refusal of a comparison "
+            "in which every table is empty on both sides. Use only when "
+            "inspecting a broken run by hand, and do not present the verdict as "
+            "evidence (rule R-6)."
         ),
     )
     parser.add_argument(
@@ -2892,6 +3110,32 @@ def main(argv: Sequence[str] | None = None) -> int:
                     f"the SAME --scenario-file to both stages.",
                     file=sys.stderr,
                 )
+                return EX_ERROR
+
+        # THE TWO GATES THAT MAKE THE PASS CONDITION MEAN SOMETHING. Both run only
+        # when the manifests were verified, because both read them.
+        if arguments.allow_unattested:
+            _progress(
+                f"{_PROG}: --allow-unattested - neither capture is being "
+                f"checked against its run status and an all-empty comparison "
+                f"is permitted, so a verdict can be produced from runs that "
+                f"never happened. The verdict below is NOT protocol evidence "
+                f"(rule R-6)."
+            )
+        else:
+            try:
+                assert_attested(manifests)
+                assert_not_all_empty(
+                    manifests,
+                    expect_empty=scenario_expects_empty_state(
+                        arguments.scenario_file
+                    ),
+                )
+            except ManifestError as exc:
+                print(f"{_PROG}: {exc}", file=sys.stderr)
+                return EX_ERROR
+            except ScenarioFileError as exc:
+                print(f"{_PROG}: {exc}", file=sys.stderr)
                 return EX_ERROR
 
     _progress(

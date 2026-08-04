@@ -924,9 +924,15 @@ Required environment (harness/docker-compose.yml supplies all of it):
   ACAS_OUT            writable output area          (volume  /out)
   ACAS_DB_HOST        MariaDB host
   ACAS_DB_PORT        MariaDB port
-  ACAS_DB_NAME        target schema (the .scb BASE= directive names it too)
-  ACAS_DB_USER        MariaDB user
-  ACAS_DB_PASSWORD    MariaDB password (never echoed, never logged)
+  ACAS_DB_NAME        target schema (the .scb BASE= directive names it too);
+                      AT MOST 12 CHARACTERS -- DB-Schema is pic x(12)
+  ACAS_DB_USER        MariaDB user; AT MOST 12 CHARACTERS -- DB-UName is
+                      pic x(12)
+  ACAS_DB_PASSWORD    MariaDB password (never echoed, never logged); AT MOST
+                      12 CHARACTERS -- DB-UPass is pic x(12). A longer value
+                      is silently truncated to its first 12 characters, so it
+                      is refused here rather than surfacing later as
+                      "credentials rejected" [copybooks/wsfnctn.cob:L56-L62]
   ACAS_DB_SOCKET      unix socket path; may legitimately be EMPTY, in which
                       case DBSOCKET=NULL is written, the only spelling the C
                       shim maps to "no socket"
@@ -1003,6 +1009,16 @@ Exit codes:
   71-75 steps 1-5   76 artifact assertions   77 finalisation
   78 an external command exceeded its deadline
   79 presql2-latest.zip failed its digest check or its member audit
+
+Code 67 in particular means the writable build tree could not be prepared, and
+the commonest reason is the provenance guard that stands in front of the
+recursive clear. That clear is admitted for an EMPTY tree, for a tree holding
+DIRECTORIES ONLY at every depth -- which is what the /build volume of the
+shipped Compose topology hands over, and which contains no data by construction
+-- and for a tree this script previously marked as its own. A tree that already
+holds FILES is refused, and the refusal names the first few of them; clear it,
+point ACAS_BUILD elsewhere, pass --no-refresh to build in place, or create the
+marker by hand to say you meant it.
 
 This script NEVER writes to $ACAS_REPO, never modifies a frozen compile script,
 never adds or removes a cobc flag, and never exits 0 unconditionally.
@@ -1173,6 +1189,46 @@ acas_assert_environment() {
     fi
   done
 
+  # THE 32-CHARACTER CEILING ABOVE IS NOT THE TIGHTEST ONE, and the difference
+  # matters. `strncpy(..., 32)' is the width of the C shim's own parameter card;
+  # the COBOL side that ultimately authenticates does not use a 32-byte field for
+  # the schema, the user or the password. `RDB-Data' declares
+  #     DB-Schema pic x(12)   DB-UName pic x(12)   DB-UPass pic x(12)
+  #     DB-Host   pic x(32)   DB-Socket pic x(64)  DB-Port  pic x(5)
+  # [copybooks/wsfnctn.cob:L56-L62], and every bridge STRINGs those fields
+  # `delimited by space' into the null-terminated C arguments it hands to the shim
+  # [common/glbatchMT.cbl:L402-L425]. A 20-character password therefore arrives at
+  # the server as its first 12 characters, silently -- the field cannot hold more,
+  # so there is nothing to warn about at the point of truncation.
+  #
+  # WHY THIS BELONGS IN *THIS* SCRIPT AND NOT ONLY IN THE LATER ONES. This is the
+  # first stage of the protocol, and it accepts exactly the credentials every
+  # later stage uses: [harness/seed.sh], [harness/reset_db.sh],
+  # [harness/run_cobol_scenario.sh] and [harness/run_python_scenario.sh] all refuse
+  # a value wider than 12 for these three names. Accepting one here and refusing it
+  # three stages later wastes a full build and reports the fault far from its
+  # cause. Worse, without this check an over-long credential reaches the readiness
+  # probe, whose refusal is `EX_DATABASE' with the words "credentials rejected" --
+  # true of the server's answer but a misdiagnosis of the cause, which is a width
+  # breach in the harness's own configuration and not a grant problem at all.
+  #
+  # ACAS_DB_HOST, ACAS_DB_SOCKET and ACAS_DB_PORT are deliberately NOT in this
+  # list: their fields are wider than 12, and the 32-character check above already
+  # covers the narrower of each pair.
+  for name in ACAS_DB_NAME ACAS_DB_USER ACAS_DB_PASSWORD; do
+    value="${!name-}"
+    if (( ${#value} > 12 )); then
+      acas_die "$EX_PRECONDITION" \
+        "$name is ${#value} characters long; the RDB-Data field is pic x(12)." \
+        'A longer value is silently truncated into DB-Schema / DB-UName /' \
+        'DB-UPass and the COBOL side then fails to authenticate -- which the' \
+        'readiness probe would report as "credentials rejected", naming the' \
+        'symptom rather than this width breach.' \
+        '[copybooks/wsfnctn.cob:L56-L62]' \
+        '[common/glbatchMT.cbl:L402-L425]'
+    fi
+  done
+
   # Canonicalised AFTER the 32-character width check above, so an over-long
   # value is still rejected on width exactly as before.
   ACAS_DB_PORT="$(( 10#$ACAS_DB_PORT ))"
@@ -1196,11 +1252,13 @@ acas_assert_environment() {
 
 # ⭐ M-08.  THE BUILD TREE'S OWN MARKER.  Written by acas_prepare_build_tree
 # immediately after a successful copy, and required by
-# acas_assert_clearable_build_tree before any recursive clear of a NON-EMPTY
-# directory. It is the one control that distinguishes "this is a build tree this
-# harness made" from "this is a directory that merely satisfies every structural
-# test", and it is what makes a mis-set ACAS_BUILD pointed at someone's populated
-# volume fail closed instead of clearing it.
+# acas_assert_clearable_build_tree before any recursive clear of a directory that
+# HOLDS DATA - that is, one containing a non-directory entry at any depth. A tree
+# that is empty, or that holds only directories and therefore no data at all, is
+# cleared without it. The marker is the one control that distinguishes "this is a
+# build tree this harness made" from "this is a directory that merely satisfies
+# every structural test", and it is what makes a mis-set ACAS_BUILD pointed at
+# someone's populated volume fail closed instead of clearing it.
 readonly ACAS_BUILD_MARKER='.acas-build-oracle-tree'
 
 # Guard a path before it is used as the target of a recursive operation. A
@@ -1337,12 +1395,40 @@ acas_assert_safe_build_path() {
 # precisely that a recursive delete must not proceed on a directory this harness
 # cannot show it created.
 #
-# So the clear is admitted in exactly two states:
-#   * the directory is EMPTY - a first run on a fresh volume, which is what the
-#     Compose stack hands over; or
+# So the clear is admitted in exactly three states, and in no others:
+#   * the directory is EMPTY - nothing whatever below it; or
+#   * the directory holds DIRECTORIES ONLY, at every depth, and therefore not one
+#     byte of anybody's data. This is what the Compose stack actually hands over,
+#     because [harness/Dockerfile.gnucobol] creates /build AND /build/bin in the
+#     image layer so that $ACAS_BIN resolves, and Docker seeds a fresh named
+#     volume from that layer. See the paragraph below; or
 #   * it carries $ACAS_BUILD_MARKER, which only acas_prepare_build_tree writes,
 #     and only after a copy of the frozen checkout has succeeded.
 # Anything else is refused with an exit code and an instruction, never cleared.
+#
+# ⭐ WHY "DIRECTORIES ONLY" IS ADMITTED, AND WHY IT DOES NOT WEAKEN THE RULE.
+# The rule this guard enforces is that no DATA is destroyed in a tree whose
+# provenance the harness cannot establish. A directory with no non-directory
+# entry at any depth contains no data by construction: removing it destroys
+# nothing that any process wrote and nothing that any operator can miss. The
+# earlier form of this guard tested only "is the directory empty", which is a
+# proxy for that property, and the proxy was WRONG for the one topology this
+# harness ships: the image layer contains the empty directory `bin', so the
+# volume Compose hands over is never empty and a first run on a genuinely fresh
+# stack was refused - the failure the QA finding recorded, and one whose message
+# then told the operator to "point ACAS_BUILD at an empty volume -- /build in the
+# shipped Compose topology" when /build WAS that volume. Testing the property
+# itself rather than the proxy admits the shipped topology and still refuses, for
+# example, a volume holding a single stray file. The refusal threshold is one
+# regular file, one symlink, one device node, one socket, one FIFO - anything a
+# process could have written.
+#
+# The test is deliberately `! -type d' rather than `-type f': a symlink is not a
+# directory and must count, because `rm -rf' would remove it, and because a
+# symlink pointing outside the tree is exactly the kind of thing whose presence
+# means "somebody set this up on purpose". An unreadable subdirectory makes
+# `find' report a non-zero status, which is treated as "not provably data-free"
+# rather than as "no entries found", so a permissions problem also fails closed.
 #
 # THE MARKER IS NOT SECURITY, IT IS PROVENANCE. A caller who genuinely wants a
 # populated directory cleared can create the marker by hand, and that is the point:
@@ -1370,15 +1456,79 @@ acas_assert_clearable_build_tree() {
   # an unreadable directory reports as non-empty rather than as empty.
   local entries
   entries="$(find "$path_real" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null || printf 'x')"
-  [[ -z "$entries" ]] || acas_die "$EX_BUILDTREE" \
-    "ACAS_BUILD ($path_real) is not empty and carries no $ACAS_BUILD_MARKER marker." \
+  if [[ -z "$entries" ]]; then
+    acas_log "build tree is empty; clear permitted"
+    return 0
+  fi
+
+  # The provably-data-free case. `find' is run WITHOUT -quit here so that its exit
+  # status is meaningful: a traversal error - an unreadable subdirectory, a path
+  # that vanished mid-walk - yields a non-zero status, and a non-zero status is
+  # treated as "NOT provably data-free" rather than as "no entries found", so a
+  # permissions problem fails closed. The assignment sits in the `if' CONDITION,
+  # which is the errexit-safe way to read a pipeline's status here: `set +e' /
+  # `set -e' around it would briefly disarm the ERR trap installed for the whole
+  # script. Output is bounded with `head -c' because a wildly mis-set ACAS_BUILD
+  # could be pointed at something enormous and only the fact of a file matters.
+  local nondir='' data_free=0
+  if nondir="$(find "$path_real" -mindepth 1 ! -type d -print 2>/dev/null | head -c 4096)"; then
+    if [[ -z "$nondir" ]]; then
+      data_free=1
+    fi
+  fi
+  if (( data_free )); then
+    local dirs
+    dirs="$(find "$path_real" -mindepth 1 -type d 2>/dev/null | wc -l)"
+    acas_log "build tree holds directories only (${dirs} of them) and no file at any depth: it is provably data-free; clear permitted"
+    return 0
+  fi
+
+  acas_die "$EX_BUILDTREE" \
+    "ACAS_BUILD ($path_real) holds files and carries no $ACAS_BUILD_MARKER marker." \
     'This script is about to delete every child of that directory, and it will' \
-    'not do so to a directory it cannot show it created. Either point ACAS_BUILD' \
-    'at an empty volume -- /build in the shipped Compose topology -- or pass' \
-    '--no-refresh to build in place without clearing, or, if you really do mean' \
-    "to clear this tree, create the marker file yourself: touch" \
-    "$path_real/$ACAS_BUILD_MARKER"
-  acas_log "build tree is empty; clear permitted"
+    'not do so to a directory it cannot show it created. An empty tree, or a tree' \
+    'of empty directories such as the /build volume the shipped Compose topology' \
+    'hands over, is cleared without ceremony; a tree that already holds files is' \
+    'not. Either point ACAS_BUILD at a fresh volume, or pass --no-refresh to' \
+    'build in place without clearing, or, if you really do mean to clear this' \
+    "tree, create the marker file yourself: touch $path_real/$ACAS_BUILD_MARKER" \
+    "$(acas_build_tree_occupants "$path_real")"
+}
+
+# The occupant summary the refusal above quotes. It exists so that the operator
+# is told WHAT stopped the clear rather than only that something did: with a
+# stray file the answer is usually obvious once named, and with a populated
+# volume the first few paths identify whose volume it is. Bounded to five paths
+# because the message is a diagnostic, not a listing, and because a mis-set
+# ACAS_BUILD may be pointed at something very large.
+acas_build_tree_occupants() {
+  local path_real="$1"
+  # Named `occupants' rather than the obvious `found': `found' is already used as
+  # a scalar counter by four artifact-census helpers further down, and shellcheck
+  # reports SC2178/SC2128 across the whole file when one name is an array in one
+  # function and a counter in another. The warning is a false positive -- both are
+  # `local' -- but the script is kept shellcheck-clean, so the name gives way.
+  #
+  # THE `|| true' IS LOAD-BEARING, not defensive noise. `head -5' closes its input
+  # after the fifth line, so `sort' takes SIGPIPE and the pipeline exits 141 under
+  # `pipefail'. With the script's `set -E' and its ERR trap that surfaced as
+  # "unexpected failure ... failing command: head -5" printed ABOVE the refusal it
+  # was helping to write - alarming, and about nothing. Testing the pipeline's
+  # status makes the truncation what it is: the intended end of a bounded read.
+  local -a occupants=()
+  local line
+  while IFS= read -r line; do
+    occupants+=( "$line" )
+  done < <(find "$path_real" -mindepth 1 ! -type d -print 2>/dev/null | LC_ALL=C sort | head -5 || true)
+  if (( ${#occupants[@]} == 0 )); then
+    printf '%s' 'the tree could not be traversed to name its occupants (a permissions problem is the usual cause).'
+    return 0
+  fi
+  printf 'first file(s) found: %s' "${occupants[0]}"
+  local i
+  for (( i = 1; i < ${#occupants[@]}; i++ )); do
+    printf ', %s' "${occupants[$i]}"
+  done
 }
 
 # ⭐ M-08.  THE ONE PLACE A BUILD-TREE SCRATCH DIRECTORY IS REMOVED.

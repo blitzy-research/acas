@@ -38,7 +38,16 @@ readonly EX_OK=0
 readonly EX_USAGE=80          # bad command line
 readonly EX_PRECONDITION=81   # environment, output directory or seed.sh assertion
 readonly EX_DATABASE=82       # MariaDB unreachable, or credentials rejected
-readonly EX_AUTOCOMMIT=83     # autocommit is not OFF -- see acas_assert_autocommit
+readonly EX_AUTOCOMMIT=83     # autocommit is not ON -- see acas_assert_autocommit. A
+                              # reset is RUNTIME APPLICATION ACCESS and not seeding, so
+                              # it requires the mode harness/Dockerfile.mariadb
+                              # declares; the Agent Action Plan scopes autocommit-OFF
+                              # to the seeding window, which harness/seed.sh owns.
+                              # (The inverted wording this comment used to carry was
+                              # the whole of QA issue 9 in this file: the code died
+                              # when autocommit was ON while the text said the
+                              # opposite. The --help exit-code table already agreed
+                              # with the code; only this line did not.)
 readonly EX_PRIVILEGE=84      # the account cannot perform the drop and re-apply
 readonly EX_FROZEN=85         # mysql/ACASDB.sql has been MODIFIED -- see §invariants
 readonly EX_APPLY=86          # the client rejected part of the frozen schema
@@ -255,6 +264,9 @@ readonly ACAS_RESET_SCHEMA_NAME_PATTERN='^[A-Za-z_][A-Za-z0-9_$]*$'
 ACAS_RESET_SCHEMA=''             # absolute path to the frozen schema
 ACAS_RESET_SCHEMA_ONLY=0         # --schema-only: apply the schema, skip the seed
 ACAS_RESET_DATA_DIR=''           # --data-dir, forwarded verbatim to seed.sh
+ACAS_RESET_SEED_DIR=''           # --seed-dir, forwarded verbatim to seed.sh. It says
+                                 # WHERE the scenario's declared flat files live, never
+                                 # WHICH are required -- see harness/seed.sh --help.
 ACAS_RESET_DRY_RUN=0             # --dry-run
 ACAS_RESET_SCENARIO=''           # optional positional scenario file
 ACAS_RESET_LOG=''                # $ACAS_OUT/reset/reset.log
@@ -265,6 +277,34 @@ ACAS_RESET_VERIFIED=0            # 1 once every post-apply assertion passed
 ACAS_RESET_SEED_RC=''            # seed.sh's exit status, or '' if not run
 ACAS_RESET_STAGE='startup'       # the stage a trap reports against
 ACAS_RESET_SEED=''               # absolute path to harness/seed.sh
+declare -a ACAS_RESET_SEED_ARGV=()   # out-parameter of acas_compose_seed_argv
+
+# acas_compose_seed_argv -- the ONE place the delegated seed command is built.
+#
+# WHY IT IS A FUNCTION AND NOT TWO COPIES. The command is needed twice, once to RUN and
+# once to PRINT in the dry-run plan, and while it was written out twice the two drifted:
+# --seed-dir was forwarded by the runner and omitted by the plan, so the plan quietly
+# described a different command from the one that would execute. A plan that misreports
+# the command is worse than no plan, and it is the same class of defect as a --help text
+# that disagrees with behaviour. Composing it once makes the two AGREE BY CONSTRUCTION
+# rather than by remembering to edit both.
+acas_compose_seed_argv() {
+  ACAS_RESET_SEED_ARGV=("$ACAS_RESET_SEED")
+  if [[ -n "$ACAS_RESET_DATA_DIR" ]]; then
+    ACAS_RESET_SEED_ARGV+=("--data-dir" "$ACAS_RESET_DATA_DIR")
+  fi
+  # It has to be reachable from HERE and not only from seed.sh directly, because the
+  # ten-stage protocol reaches the seed through this script -- harness/run_parity.sh
+  # stages 1 and 5 are both `reset_db.sh <scenario>' -- so a fixture that could only be
+  # named on seed.sh's own command line would be unusable from the protocol it was built
+  # for.
+  if [[ -n "$ACAS_RESET_SEED_DIR" ]]; then
+    ACAS_RESET_SEED_ARGV+=("--seed-dir" "$ACAS_RESET_SEED_DIR")
+  fi
+  if [[ -n "$ACAS_RESET_SCENARIO" ]]; then
+    ACAS_RESET_SEED_ARGV+=("$ACAS_RESET_SCENARIO")
+  fi
+}
 ACAS_RESET_DB_USER=''            # account used for the drop and re-apply
 ACAS_RESET_DB_PASSWORD=''        # its password -- never printed, never in argv
 ACAS_RESET_CONSENT_ARG=''        # --consent=, overrides ACAS_RESET_CONSENT
@@ -941,6 +981,17 @@ Options:
                       COBOL cycle.
   --data-dir PATH     Directory holding the Cobol flat files, forwarded verbatim
                       to harness/seed.sh. Default $ACAS_DATA.
+  --seed-dir PATH     Where the scenario's declared flat files live, forwarded
+                      verbatim to harness/seed.sh. It says WHERE, never WHICH: the
+                      scenario's own seed_files list remains the sole authority on
+                      what is required. Needed because a scenario's seed_dir resolves
+                      relative to the scenario file, which sits in the READ-ONLY
+                      checkout, so a built fixture cannot live there.
+                      harness/build_fixtures.sh builds every scenario's fixtures from
+                      the seed_records each one declares. Reachable from here and not
+                      only from seed.sh because the ten-stage protocol seeds through
+                      this script -- harness/run_parity.sh stages 1 and 5 are both
+                      reset_db.sh <scenario>.
   --dry-run           Print the plan -- the file to be applied, its asserted
                       invariants, the verification queries and the seed command
                       -- and exit without executing anything or touching the
@@ -1021,7 +1072,7 @@ Also required -- GATE 1, privilege separation, with NO fallback:
 Exit codes:
   0        clean reset and clean re-seed
   80       usage           81  precondition
-  82       database        83  autocommit is not on
+  82       database        83  autocommit is not on (the runtime mode)
   84       privilege      85  mysql/ACASDB.sql has been MODIFIED
   86       schema apply   87  post-apply verification
   88       another reset holds the sequential lock
@@ -1069,6 +1120,21 @@ acas_parse_args() {
           '--data-dir was given an empty path.' \
           'If the default is wanted, omit the flag; harness/seed.sh then uses' \
           'the ACAS_DATA volume instead.'
+        shift
+        ;;
+      --seed-dir)
+        [[ $# -ge 2 ]] || acas_die "$EX_USAGE" '--seed-dir requires a path.'
+        ACAS_RESET_SEED_DIR="$2"
+        [[ -n "$ACAS_RESET_SEED_DIR" ]] || acas_die "$EX_USAGE" \
+          '--seed-dir was given an empty path.' \
+          'If the scenario'"'"'s own seed_dir is wanted, omit the flag.'
+        shift 2
+        ;;
+      --seed-dir=*)
+        ACAS_RESET_SEED_DIR="${1#*=}"
+        [[ -n "$ACAS_RESET_SEED_DIR" ]] || acas_die "$EX_USAGE" \
+          '--seed-dir was given an empty path.' \
+          'If the scenario'"'"'s own seed_dir is wanted, omit the flag.'
         shift
         ;;
       --consent)
@@ -1894,18 +1960,25 @@ acas_wait_for_database() {
 }
 
 # -----------------------------------------------------------------------------
-# Precondition 8 of 9 -- autocommit MUST be OFF, as the Agent Action Plan
-# mandates (sections 0.2.1.1, 0.4.1.7 and 0.5.2, all from the loader banner at
-# [common/glbatchLD.cbl:L9-L13]).
+# Precondition 8 of 9 -- autocommit MUST be ON, because a reset is RUNTIME
+# APPLICATION ACCESS. The Agent Action Plan scopes its autocommit-OFF requirement
+# to SEEDING and to nothing else: section 0.2.1.1 ("the batch loader turns
+# autocommit off"), section 0.5.2 ("autocommit must be off DURING SEEDING") and
+# section 0.4.1.7 ("autocommit off TO MATCH THE LOADERS" -- the loaders being the
+# seeding stage), all from the loader banner at [common/glbatchLD.cbl:L9-L13].
+# harness/seed.sh owns that window, sets it around the frozen load programs, and
+# restores this runtime mode when it closes.
 #
 # ASSERTED, NEVER SET. See the header for the frozen-source proof: the loaders'
 # commit/rollback paragraphs are unreachable and the bridges never commit at all,
-# so under this mandated mode every COBOL write is discarded at session close.
-# That consequence is reported, not repaired (R-4). The setting belongs to the
-# server and has exactly one authority, harness/Dockerfile.mariadb, which writes
-# `autocommit=0` into /etc/mysql/conf.d/99-acas-oracle.cnf. Issuing
+# so inside the seeding window every COBOL write is discarded at session close.
+# That consequence is reported, not repaired (R-4). Finding the mode OFF here
+# means the seeding window is still open -- a seed interrupted before its exit
+# trap ran, or a server configured for the seeding mode server-wide -- and the
+# database would then be one neither cycle can write to. The runtime setting
+# belongs to the server, whose authority is harness/Dockerfile.mariadb; issuing
 # `SET autocommit` here -- even "just for the DDL" -- would create a second
-# authority and change behaviour, which R-3 and R-4 both forbid.
+# authority for it and change behaviour, which R-3 and R-4 both forbid.
 #
 # Read TWICE: once here, before anything is applied, and again after the apply,
 # because the frozen file changes six session variables [mysql/ACASDB.sql:L13-L22]
@@ -1946,25 +2019,29 @@ acas_assert_autocommit() {
   local global="${value%%/*}" session="${value##*/}"
   acas_log "@@GLOBAL.autocommit = $global   @@SESSION.autocommit = $session   ($when)"
 
-  if (( global != 0 || session != 0 )); then
+  if (( global != 1 || session != 1 )); then
     acas_die "$EX_AUTOCOMMIT" \
-      "autocommit is ON (global=$global, session=$session) $when; the reset is REFUSED." \
-      'The Agent Action Plan mandates autocommit OFF in three places -- section' \
-      '0.2.1.1 (the seeding contract), section 0.4.1.7 (on' \
-      'harness/Dockerfile.mariadb: "autocommit off to match the loaders") and' \
-      'section 0.5.2 -- all deriving it from the banner carried by all 28' \
-      'common/*LD.cbl loaders at [common/glbatchLD.cbl:L9-L13]: "you MUST ensure' \
-      'that autocommit is OFF in the rdb settings".' \
-      'Resetting under ON would hand the comparison a database served in a mode' \
-      'the AAP does not sanction, so the oracle would no longer be the thing the' \
-      'AAP specifies.' \
-      'This script deliberately does NOT set the mode: it has exactly one' \
-      'authority, harness/Dockerfile.mariadb, which writes autocommit=0 into' \
-      '/etc/mysql/conf.d/99-acas-oracle.cnf. Start the harness MariaDB service' \
-      'built from that Dockerfile, or set autocommit=0 in the server' \
-      'configuration and restart it.'
+      "autocommit is OFF (global=$global, session=$session) $when; the reset is REFUSED." \
+      'A reset is RUNTIME APPLICATION ACCESS, not seeding, and the Agent Action' \
+      'Plan scopes its autocommit-OFF requirement to seeding in all three of its' \
+      'provisions -- section 0.2.1.1 ("the batch loader turns autocommit off"),' \
+      'section 0.5.2 ("autocommit must be off DURING SEEDING") and section 0.4.1.7' \
+      'on harness/Dockerfile.mariadb ("autocommit off TO MATCH THE LOADERS", the' \
+      'loaders being the seeding stage). harness/seed.sh owns that window and' \
+      'restores this mode when it closes.' \
+      'Finding the mode OFF here means either that the server is configured for' \
+      'the seeding mode server-wide -- which leaves the frozen COBOL unable to' \
+      'persist a single row, since it never reaches a COMMIT -- or that a seed was' \
+      'interrupted before its exit trap could restore the mode. Either way the' \
+      'state this script would hand the comparison is not a state either cycle can' \
+      'write to, so the drop is refused.' \
+      'This script deliberately does NOT set the mode: harness/Dockerfile.mariadb' \
+      'declares autocommit=1 in /etc/mysql/conf.d/99-acas-oracle.cnf for runtime' \
+      'access, and harness/seed.sh is the only place the mode is ever changed.' \
+      'Start the harness MariaDB service built from that Dockerfile, or restore' \
+      'the runtime mode with: set global autocommit = 1'
   fi
-  acas_ok "autocommit is OFF, globally and for this session ($when) -- AAP-mandated"
+  acas_ok "autocommit is ON, globally and for this session ($when) -- the runtime mode; the OFF window belongs to harness/seed.sh"
 }
 
 # Precondition 9 of 9 -- the privileges the FROZEN FILE'S OWN statements need.
@@ -2590,26 +2667,24 @@ acas_verify_reset_state() {
   # 8. Autocommit again, AFTER the apply. The frozen file changes six session
   # variables and restores them at the tail [mysql/ACASDB.sql:L13-L22].
   acas_assert_autocommit 'after the apply'
-  acas_check 'PASS' 'autocommit still 0/0 after the apply'
+  acas_check 'PASS' 'autocommit still 1/1 after the apply'
 
   ACAS_RESET_VERIFIED=1
 }
 
 # STAGE 3 -- DURABILITY IN A FRESH SESSION
 #
-# Durability is the one property the whole comparison rests on, and under the
-# AAP-mandated `autocommit=0` it holds for the SCHEMA but not for COBOL DATA.
-# The two cases must not be conflated:
-#   * DDL is durable either way -- InnoDB commits CREATE TABLE and DROP TABLE
-#     implicitly, regardless of the autocommit mode -- so the schema apply this
-#     stage verifies survives a fresh session, and this script never needs to
-#     change the mode for it. That is what makes the check below meaningful at
-#     all under the mandated mode.
-#   * DML from the frozen COBOL is NOT durable, because the loaders and bridges
-#     reach no COMMIT. Any subsequent re-seed or COBOL posting run therefore
-#     leaves nothing behind. That consequence is reported by the autocommit
-#     assertion and by harness/seed.sh, and is preserved as the frozen code's own
-#     defect (R-4) rather than repaired here.
+# Durability is the one property the whole comparison rests on. Two cases must not
+# be conflated:
+#   * DDL is durable in either autocommit mode -- InnoDB commits CREATE TABLE and
+#     DROP TABLE implicitly -- so the schema apply this stage verifies survives a
+#     fresh session, and this script never needs to change the mode for it.
+#   * DML from the frozen COBOL is NOT durable INSIDE THE SEEDING WINDOW, because
+#     the loaders and bridges reach no COMMIT. A re-seed run inside that window
+#     therefore leaves nothing behind, which is why harness/seed.sh measures the
+#     seeded row counts when the window closes and fails rather than reporting a
+#     success the tables do not show. The defect itself is preserved as the frozen
+#     code's own (R-4) and is never repaired by issuing the missing COMMIT.
 #
 # The schema property is not trusted; it is PROVED. A brand-new client process,
 # hence a brand-new server session, re-counts the tables. If the apply had
@@ -2652,13 +2727,8 @@ acas_reseed() {
 
   acas_stage "Stage 4/4: re-seed via $ACAS_RESET_SEED_SCRIPT"
 
-  local -a argv=("$ACAS_RESET_SEED")
-  if [[ -n "$ACAS_RESET_DATA_DIR" ]]; then
-    argv+=("--data-dir" "$ACAS_RESET_DATA_DIR")
-  fi
-  if [[ -n "$ACAS_RESET_SCENARIO" ]]; then
-    argv+=("$ACAS_RESET_SCENARIO")
-  fi
+  acas_compose_seed_argv
+  local -a argv=("${ACAS_RESET_SEED_ARGV[@]}")
 
   acas_log "running: $(acas_join_words "${argv[@]}")"
   acas_note 'it drives the compiled load programs as external processes only (R-1)'
@@ -2820,24 +2890,20 @@ acas_print_plan() {
     acas_log '4. re-seed        : SKIPPED (--schema-only) -- the database would be left EMPTY'
     acas_log '   NOTE           : the full stage-5 contract is schema PLUS seed'
   else
-    local -a argv=("$ACAS_RESET_SEED")
-    if [[ -n "$ACAS_RESET_DATA_DIR" ]]; then
-      argv+=("--data-dir" "$ACAS_RESET_DATA_DIR")
-    fi
-    if [[ -n "$ACAS_RESET_SCENARIO" ]]; then
-      argv+=("$ACAS_RESET_SCENARIO")
-    fi
-    acas_log "4. re-seed        : $(acas_join_words "${argv[@]}")"
+    acas_compose_seed_argv
+    acas_log "4. re-seed        : $(acas_join_words "${ACAS_RESET_SEED_ARGV[@]}")"
     acas_log '   its status is propagated verbatim (70..73 its own, else a loader rc)'
   fi
 
   acas_log ''
   acas_note 'the MariaDB readiness, autocommit and privilege assertions are NOT performed'
-  acas_note 'in a dry run; a real run refuses to reset unless autocommit is OFF, globally'
-  acas_note 'and for the session, as the Agent Action Plan mandates (sections 0.2.1.1,'
-  acas_note '0.4.1.7 and 0.5.2, from [common/glbatchLD.cbl:L9-L13]). Under that mode the'
-  acas_note 'frozen COBOL, which reaches no COMMIT, leaves no durable rows -- reported'
-  acas_note 'as the reproduced legacy defect (R-4), never repaired here'
+  acas_note 'in a dry run; a real run refuses to reset unless autocommit is ON, globally'
+  acas_note 'and for the session -- the runtime mode, since a reset is runtime application'
+  acas_note 'access and the Agent Action Plan scopes its OFF requirement to seeding'
+  acas_note '(sections 0.2.1.1, 0.4.1.7 and 0.5.2, from [common/glbatchLD.cbl:L9-L13]).'
+  acas_note 'harness/seed.sh owns that window. Inside it the frozen COBOL, which reaches'
+  acas_note 'no COMMIT, leaves no durable rows -- reported as the reproduced legacy defect'
+  acas_note '(R-4), never repaired, and measured by seed.sh rather than assumed'
 }
 
 # MAIN Strictly sequential (R-3). No stage is backgrounded and none is
@@ -2887,7 +2953,7 @@ acas_main() {
   # would be actively misleading. Raising it at the call site keeps the
   # precondition numbering complete AND makes the ERR/EXIT traps name the
   # autocommit gate -- not MariaDB readiness -- as the failing stage.
-  acas_stage 'Preconditions 8/9: autocommit is OFF (AAP-mandated; the frozen COBOL never commits)'
+  acas_stage 'Preconditions 8/9: autocommit is ON (the runtime mode; the OFF seeding window belongs to harness/seed.sh)'
   acas_assert_autocommit 'before the apply'
 
   acas_assert_privileges

@@ -805,6 +805,15 @@ NORMALIZED_SUFFIX: Final[str] = ".normalized"
 DIFF_FILENAME: Final[str] = "diff.txt"
 RUN_LOG_SUBDIR: Final[str] = "run-logs"
 
+# The two pre-run seed fingerprints, written INSIDE `run-logs/` and therefore outside
+# every compared tree. `harness/run_python_scenario.sh` writes the Python side's at
+# its stage 6a and cross-checks the oracle's counterpart when it exists, refusing to
+# proceed if the two disagree - row counts only, one `<TABLE>\t<count>` line per
+# affected table in the scenario's DECLARED order. They are the only record that the
+# two cycles were given the same starting state; see `assert_seed_fingerprints_agree`.
+SEED_FINGERPRINT_PYTHON: Final[str] = "python.seed-fingerprint"
+SEED_FINGERPRINT_COBOL: Final[str] = "cobol.seed-fingerprint"
+
 
 @dataclass(frozen=True)
 class ScenarioPaths:
@@ -1095,11 +1104,13 @@ def _probe_stack() -> StackStatus:
                 f"leave the gate authorising nothing in particular"
             )
 
-        # 7. The server itself, and the AAP-mandated autocommit mode. One
+        # 7. The server itself, and the RUNTIME autocommit mode - ON, per the
+        #    settled half of docs/migration/ambiguity-resolutions.md#q-10; the
+        #    OFF window belongs to harness/seed.sh and to nothing else. One
         #    connection, opened once per session (rule R-3: no pool, no thread).
         try:
             with harness_dump_tables().connect(settings) as connection:
-                assert_autocommit_off(connection)
+                assert_runtime_autocommit_on(connection)
         except Exception as exc:  # noqa: BLE001 - unreachable server is a skip
             missing.append("database")
             detail.append(f"  {type(exc).__name__}: {exc}")
@@ -1294,6 +1305,23 @@ RESET_FAULT_CODES: Final[frozenset[int]] = frozenset(
 )
 RUN_COBOL_FAULT_CODES: Final[frozenset[int]] = frozenset(
     {70, 71, 72, 73, 74, 75, 76, 77, 78, 79}
+)
+
+# The Python runner's OWN band, transcribed from harness/run_python_scenario.sh's
+# `readonly EX_*` block the same way the three above were. Listed for the SAME reason
+# they are: a status in this band is the script diagnosing its own preconditions - a
+# missing module, an unusable database, an option a module does not publish, a seed
+# fingerprint disagreement - and is never a term code.
+#
+# IT CHANGES NO CLASSIFICATION, AND THAT IS THE POINT. The band is disjoint from every
+# term code any operation admits (only 5 and 8 exist anywhere,
+# [general/gl070.cbl:L289], [sales/sl055.cbl:L344], [purchase/pl055.cbl:L286]), so
+# every code in it already fell through `classify_run`'s term-code test to
+# `DISPOSITION_HARNESS_FAULT`. Naming it makes the two run stages symmetrical in the
+# code as well as in behaviour, so a reader no longer has to derive the Python side's
+# disposition from an absence.
+RUN_PYTHON_FAULT_CODES: Final[frozenset[int]] = frozenset(
+    {69, 70, 71, 72, 73, 74, 75, 76, 77, 78}
 )
 
 # The frozen load programs' documented return codes, from
@@ -1813,11 +1841,15 @@ def seed(
     the data directory, and the resulting dump would then be attributed to a scenario
     it was never derived from.
 
-    AUTOCOMMIT MUST BE OFF. `harness/seed.sh` asserts it and exits 73 otherwise,
-    citing the banner every one of the 28 frozen loaders carries at
+    AUTOCOMMIT IS OFF FOR THE SEEDING WINDOW, AND ONLY THERE.
+    `harness/seed.sh` owns that window - it opens it immediately before the first
+    frozen load program, verifies it from a fresh session, restores the runtime
+    mode from its exit trap on every path, and exits 73 if it cannot - citing the
+    banner every one of the 28 frozen loaders carries at
     [common/glbatchLD.cbl:L9-L13]: "This modules uses commit and rollback so you
-    MUST ensure that autocommit is OFF in the rdb settings." The seeded state depends
-    on the loaders' commit boundaries.
+    MUST ensure that autocommit is OFF in the rdb settings." Nothing here sets the
+    mode, and every connection OUTSIDE the window is runtime access with the mode
+    ON: see docs/migration/ambiguity-resolutions.md#q-10 for the scoping.
 
     `ACAS_SEED_STRICT` IS PASSED THROUGH AND NEVER SET HERE. Setting it to 1 OPTS IN
     to aborting on a return code the frozen test tolerates - 1 through 63, of which
@@ -2024,9 +2056,13 @@ def classify_run(result: StageResult, *, operation: str) -> str:
     if code == ARGPARSE_USAGE_EXIT:
         return DISPOSITION_HARNESS_FAULT
 
-    # The runner's own documented band. Only the COBOL runner has one; the Python
-    # runner passes the cycle's status through.
+    # Each runner's own documented band, tested BEFORE the term codes so a script
+    # diagnosing itself is never read as the cycle reporting a disposition. Both bands
+    # are disjoint from every term code, so this test changes no classification - it
+    # states the rule the two stages already obeyed asymmetrically.
     if result.stage == STAGE_RUN_COBOL and code in RUN_COBOL_FAULT_CODES:
+        return DISPOSITION_HARNESS_FAULT
+    if result.stage == STAGE_RUN_PYTHON and code in RUN_PYTHON_FAULT_CODES:
         return DISPOSITION_HARNESS_FAULT
 
     if code in TERM_CODES[operation]:
@@ -2507,34 +2543,69 @@ def assert_dump_wellformed(
             )
 
 
-def assert_autocommit_off(connection: Any) -> None:
-    """Assert autocommit is OFF, globally and for this session.
+def assert_runtime_autocommit_on(connection: Any) -> None:
+    """Assert the RUNTIME autocommit mode is ON, globally and for this session.
 
-    THE MANDATED MODE, and it derives from the banner ALL 28 frozen loaders carry.
-    [common/glbatchLD.cbl:L9-L13] verbatim: "This modules uses commit and rollback so
-    you MUST ensure that autocommit is OFF in the rdb settings. It is as default set
-    ON." The seeded state depends on the loaders' commit boundaries, so seeding under
-    ON would produce durable rows the mandated mode does not and the oracle would no
-    longer be the thing the Agent Action Plan specifies.
+    THE MODE IS SCOPED, NOT PINNED, and the scope is the settled half of
+    [docs/migration/ambiguity-resolutions.md#q-10]. The Agent Action Plan requires
+    autocommit OFF and cites the same frozen banner three times - §0.2.1.1 "the batch
+    loader turns autocommit off", §0.5.2 "autocommit must be off DURING SEEDING", and
+    §0.4.1.7 on `harness/Dockerfile.mariadb` "autocommit off to match the loaders" -
+    and all three provisions name the SEEDING stage in their own words. Every
+    connection this protocol opens outside that window - the compiled posting run, the
+    Python cycle, the reset and the two dumps - is RUNTIME APPLICATION ACCESS and runs
+    with the mode ON.
 
-    THE MODE IS ASSERTED AND NEVER SET. `harness/Dockerfile.mariadb` is the single
-    authority - it writes `autocommit=0` into the server configuration - and
-    `harness/seed.sh` makes the same assertion, exiting 73. A fixture that quietly
-    issued `SET autocommit=0` would make the seeded state depend on the test runner
-    rather than on the frozen contract.
+    WHY THE WIDER READING CANNOT BE THE ONE MEANT: the frozen loaders and bridges
+    reach no COMMIT, so under a server-wide OFF pin nothing either cycle writes
+    survives its own session, every capture is empty, and an empty diff is the
+    protocol's only pass condition (AAP §0.8.5). The wider reading makes the AAP's own
+    validation criteria unsatisfiable. The frozen sources say the same thing:
+    [common/glbatchLD.cbl:L9-L13] is a four-line COMMENT BANNER addressed to the
+    operator, the vendored `cobmysqlapi38.c` exposes `MySQL_commit` and
+    `MySQL_rollback` but NOT `MySQL_autocommit`, and every `perform aa020-Rollback`
+    in all 28 `common/*LD.cbl` loaders is commented out with the single
+    `perform aa030-Commit` anywhere commented out too.
 
-    A REPRODUCED DEFECT WORTH KNOWING WHILE READING A RESULT (rule R-4): under this
-    mode the frozen loaders reach no COMMIT at all - every `perform aa020-Rollback`
-    in all 28 loaders is commented out and the single `perform aa030-Commit` anywhere
-    is commented out too - so their writes are not durable and a table may read EMPTY
-    after a seed that reported success. Nothing here issues the missing COMMIT: a
-    defect fixed is a failure.
+    THE MODE IS ASSERTED AND NEVER SET, exactly as before - only the asserted value
+    changed. `harness/Dockerfile.mariadb` is the single authority for the runtime
+    mode: it declares `autocommit=1` in `/etc/mysql/conf.d/99-acas-oracle.cnf`.
+    `harness/seed.sh` is the ONLY place the mode is ever changed - it opens the
+    seeding window with `@@GLOBAL.autocommit = 0` immediately before the first frozen
+    load program, verifies it from a fresh session, and restores the runtime mode from
+    its exit trap on every path, exiting 73 if it cannot. `harness/reset_db.sh` (83)
+    and `harness/run_cobol_scenario.sh` (73) assert this same runtime mode. A fixture
+    that quietly issued `SET autocommit` would put the test runner in charge of a
+    setting the harness owns.
+
+    ONLY `@@GLOBAL` IS ASSERTED HERE, AND THAT IS DELIBERATE - the server-level value
+    is the one the harness owns and the one Q-10 settles. `@@SESSION` is reported but
+    not required, because on THIS connection it is a property of the Python driver
+    rather than of the server: `mysql-connector-python` defaults `autocommit` to
+    False and issues `SET autocommit = 0` for its own session, so a correctly
+    configured server measures `global=1, session=0` here while the `mariadb` client
+    used by `harness/reset_db.sh` and `harness/run_cobol_scenario.sh` inherits the
+    global and measures `1/1`. Requiring 1 for the session would therefore refuse
+    every correctly configured server. It is safe to leave unrequired for the same
+    reason `harness/dump_tables.py` gives for setting no session state at all: this
+    connection is SELECT-only and is released with `rollback()`, so its autocommit
+    value cannot affect what it reads. The two sides that DO write pin their own mode
+    - the compiled cycle inherits the asserted server mode, and the migrated cycle
+    sets `autocommit: True` explicitly at `acas_posting/dal/connection.py:L1808`,
+    per-statement as the COBOL does, which is why `harness/run_python_scenario.sh`
+    OBSERVES the mode and never refuses on it.
+
+    A REPRODUCED DEFECT WORTH KNOWING WHILE READING A RESULT (rule R-4): inside the
+    seeding window the frozen loaders still reach no COMMIT, so a table may read EMPTY
+    after a seed that reported success. Nothing here issues the missing COMMIT - a
+    defect fixed is a failure; `harness/seed.sh` instead refuses fail-closed (76) when
+    a seed reports success and leaves the tables empty.
 
     Args:
         connection: An open DB-API connection.
 
     Raises:
-        AssertionError: Either setting is not 0.
+        AssertionError: `@@GLOBAL.autocommit` is not 1.
     """
     cursor = connection.cursor()
     try:
@@ -2548,15 +2619,23 @@ def assert_autocommit_off(connection: Any) -> None:
         "`SELECT @@GLOBAL.autocommit, @@SESSION.autocommit`."
     )
     global_setting, session_setting = int(row[0]), int(row[1])
-    assert global_setting == 0 and session_setting == 0, (
-        f"autocommit is ON (global={global_setting}, session={session_setting}); "
-        f"the protocol is REFUSED. The Agent Action Plan mandates autocommit OFF "
-        f"for the seeding window, deriving it from the banner all 28 frozen loaders "
-        f"carry at [common/glbatchLD.cbl:L9-L13]. This assertion never sets the "
-        f"mode: harness/Dockerfile.mariadb is the single authority and writes "
-        f"autocommit=0 into the server configuration. Start the harness MariaDB "
-        f"service built from it, or set autocommit=0 in the server configuration "
-        f"and restart."
+    assert global_setting == 1, (
+        f"the server's RUNTIME autocommit mode is OFF (global={global_setting}, "
+        f"session={session_setting} on this driver's own connection); the protocol "
+        f"is REFUSED. Every connection this protocol opens outside the seeding "
+        f"window is RUNTIME APPLICATION ACCESS, and the Agent Action Plan scopes "
+        f"its autocommit-OFF requirement to seeding in all three of its provisions "
+        f"- sections 0.2.1.1, 0.5.2 and 0.4.1.7 - as recorded in "
+        f"docs/migration/ambiguity-resolutions.md#q-10. Finding the global mode OFF "
+        f"means either that the server is pinned to the seeding mode server-wide, "
+        f"which leaves the frozen COBOL unable to persist a single row because it "
+        f"never reaches a COMMIT, so every capture is empty and an empty diff is "
+        f"the protocol's only pass condition; or that a seed was interrupted before "
+        f"its exit trap could restore the runtime mode. This assertion never sets "
+        f"the mode: harness/Dockerfile.mariadb declares autocommit=1 for runtime "
+        f"access and harness/seed.sh is the only place it is ever changed. Start "
+        f"the harness MariaDB service built from that Dockerfile, or restore the "
+        f"runtime mode with: set global autocommit = 1"
     )
 
 
@@ -2820,6 +2899,496 @@ def run_scenario_parity(
     )
 
 
+# ---------------------------------------------------------------------------
+#  THE THREE NON-VACUITY GUARDS, IN ONE PLACE
+#
+#  AN EMPTY DIFF IS THE PASS CONDITION ONLY WHEN A COMPARISON ACTUALLY HAPPENED
+#  (rule R-6). Three conditions make an empty verdict worthless, and none of them is
+#  visible in the verdict itself:
+#
+#    1. NOTHING WAS THERE TO COMPARE. Two dumps of zero rows are identical, so a seed
+#       that never landed, a `system.file_system_used` of zero sending every handler
+#       to the COBOL indexed-file path [copybooks/wssystem.cob:L112-L114], or a
+#       loader returning 16 under the frozen `-gt 63` tolerance
+#       [common/masterLD.sh:L56] all produce a clean, meaningless pass.
+#    2. THE TWO SIDES STARTED FROM DIFFERENT STATE. Then the differences - or their
+#       absence - belong to the seed and not to the cycles.
+#    3. A RUN DID NOT REACH ITS DECLARED DISPOSITION. A runner that refused a
+#       precondition, or aborted where the scenario expected success, leaves both
+#       sides equally unwritten and the diff equally empty.
+#
+#  tests/determinism/test_two_runs_byte_identical.py already defends the first with
+#  its layer 2 (`assert first.total_rows > 0`) and the second with its layer 4
+#  (a byte comparison of the two fingerprints). The three helpers below are those
+#  arguments, generalised so every scenario makes them from ONE definition instead of
+#  each file re-deriving them - which is what Agent Action Plan section 0.4.3 asks of
+#  this module: "no test reimplements the comparison protocol".
+#
+#  THEY BELONG IN A FIXTURE, NOT A TEST BODY. Every one of them fails for a reason
+#  that means the question was never asked, so raised from a fixture they surface as
+#  a pytest ERROR and stay separable from the FAILURE a real behavioural difference
+#  produces.
+# ---------------------------------------------------------------------------
+
+
+def assert_parity_non_vacuous(
+    run: ParityRun,
+    *,
+    tables_requiring_rows: Sequence[str] = (),
+    tables_requiring_empty: Sequence[str] = (),
+) -> None:
+    """Assert a completed comparison actually compared something.
+
+    FOUR CLAIMS, in the order a failure is most usefully reported:
+
+      1. Every table the scenario bounds the comparison by was dumped ON BOTH SIDES.
+         A table present in one tree and absent from the other has had nothing
+         measured about it, which must never read as agreement.
+      2. The comparison saw at least one row somewhere. Zero rows across every
+         bounded table on both sides is the signature of a seed that never landed or
+         of a run that never reached MySQL.
+      3. Each table the caller names as seeded came back WITH ROWS on both sides.
+      4. Each table the caller names as legitimately empty came back EMPTY on both
+         sides - `empty_batch`'s `GLPOSTING-REC` is the case that exists, and it is
+         why "non-empty" cannot simply be demanded of everything.
+
+    NOTHING HERE JUDGES A VALUE. It counts rows and checks presence, so it can never
+    substitute this module's opinion for the compiled oracle's (rule R-6), and it adds
+    no validation the cycle does not have (rule R-3): the assertions are about the
+    EVIDENCE, not about the accounting.
+
+    Args:
+        run: The completed `ParityRun`.
+        tables_requiring_rows: Tables the scenario's seed fills, which must therefore
+            come back with at least one row on each side.
+        tables_requiring_empty: Tables that must be empty on both sides - either
+            because the scenario seeds nothing into them or because the route
+            legitimately empties them.
+
+    Raises:
+        AssertionError: A claim above does not hold, or a named table is not among
+            the bounded tables at all - a typo there would silently assert nothing.
+    """
+    bounded = tuple(run.tables)
+    by_table = {entry.table: entry for entry in run.tree.tables}
+
+    for name, requested in (
+        ("tables_requiring_rows", tables_requiring_rows),
+        ("tables_requiring_empty", tables_requiring_empty),
+    ):
+        unknown = [table for table in requested if table not in bounded]
+        assert not unknown, (
+            f"{run.scenario}: {name} names {unknown!r}, which the scenario does not "
+            f"bound the comparison by - it bounds it by {list(bounded)}. A table "
+            f"named here but not compared would make this guard assert NOTHING, "
+            f"which is precisely the false pass it exists to prevent."
+        )
+
+    overlap = sorted(set(tables_requiring_rows) & set(tables_requiring_empty))
+    assert not overlap, (
+        f"{run.scenario}: {overlap!r} is required both to hold rows and to be "
+        f"empty. One of the two claims is wrong and neither can be checked."
+    )
+
+    missing = sorted(table for table in bounded if table not in by_table)
+    assert not missing, (
+        f"{run.scenario}: the completed comparison holds no entry for {missing!r} "
+        f"although the scenario bounds it by {list(bounded)}. The bound and the "
+        f"report disagree, so nothing was measured about those tables."
+    )
+
+    for table in bounded:
+        entry = by_table[table]
+        assert entry.in_cobol and entry.in_python, (
+            f"{run.scenario}: {table} was dumped on only one side "
+            f"(cobol={entry.in_cobol}, python={entry.in_python}). A MISSING DUMP IS "
+            f"NOT AN EMPTY DIFF - the capture could not be taken for that side, so "
+            f"the comparison for this table did not happen.\n{run.describe()}"
+        )
+
+    counts = {
+        table: (
+            int(by_table[table].cobol_row_count),
+            int(by_table[table].python_row_count),
+        )
+        for table in bounded
+    }
+    total = sum(cobol + python for cobol, python in counts.values())
+    assert total > 0, (
+        f"{run.scenario}: EVERY BOUNDED TABLE CAME BACK EMPTY ON BOTH SIDES, so the "
+        f"empty diff proves nothing. Row counts (cobol, python): {counts!r}.\n"
+        f"  This is exactly what a seed that never landed, a run that never reached "
+        f"MySQL, or `system.file_system_used: 0` "
+        f"[copybooks/wssystem.cob:L112-L114] produces - and all three are silent in "
+        f"the verdict. Check the seed fingerprints under {run.paths.run_logs} and "
+        f"the two dumps under {run.paths.out_root} before reading any verdict.\n"
+        f"{run.describe()}"
+    )
+
+    for table in tables_requiring_rows:
+        cobol_rows, python_rows = counts[table]
+        assert cobol_rows > 0 and python_rows > 0, (
+            f"{run.scenario}: {table} is seeded by this scenario yet came back "
+            f"EMPTY on at least one side (cobol={cobol_rows}, python={python_rows}). "
+            f"AN EMPTY DIFF OVER AN EMPTY TABLE PROVES NOTHING. All bounded counts "
+            f"(cobol, python): {counts!r}. Check the seed fingerprints under "
+            f"{run.paths.run_logs}.\n{run.describe()}"
+        )
+
+    for table in tables_requiring_empty:
+        cobol_rows, python_rows = counts[table]
+        assert cobol_rows == 0 and python_rows == 0, (
+            f"{run.scenario}: {table} must be EMPTY on both sides and holds "
+            f"cobol={cobol_rows}, python={python_rows}. Either the seed carried rows "
+            f"the scenario does not declare, or the route wrote a table it must not "
+            f"touch.\n{run.describe()}"
+        )
+
+
+@dataclass(frozen=True)
+class SeedFingerprints:
+    """The two sides' pre-run row-count fingerprints, and what they established.
+
+    Attributes:
+        python_path: `run-logs/<scenario>/python.seed-fingerprint`, which
+            `harness/run_python_scenario.sh` writes at its stage 6a.
+        cobol_path: The oracle-side counterpart, or None when it was not written.
+        tables: The table names the fingerprint carried, in the order it carried
+            them - which must be the scenario's declared order.
+        cross_checked: True when both files were present and byte-identical.
+    """
+
+    python_path: Path
+    cobol_path: Path | None
+    tables: tuple[str, ...]
+    cross_checked: bool
+
+
+def assert_seed_fingerprints_agree(
+    run: ParityRun, *, require_cross_check: bool = False
+) -> SeedFingerprints:
+    """Assert the starting state of the comparison was recorded, and cross-checked.
+
+    `harness/run_python_scenario.sh` records the row count of every affected table,
+    one line of `<TABLE>\\t<count>` per table IN THE SCENARIO'S DECLARED ORDER,
+    immediately before the run, and refuses to proceed when an oracle-side
+    fingerprint exists and disagrees. This helper asserts everything that record can
+    establish:
+
+      * it exists, and is not empty;
+      * it carries exactly one line per bounded table, IN THE BOUNDED ORDER - the
+        order is part of the contract, because the two sides compare these files byte
+        for byte and a reordering on one side alone would be reported as a
+        starting-state disagreement;
+      * when the oracle-side file is present the two are byte-identical.
+
+    THE COUNTS THEMSELVES ARE NOT INTERPRETED (rule R-3). Whether a count is
+    plausible is not this module's business; `assert_parity_non_vacuous` takes the
+    corroboration from the dumps instead.
+
+    THE ORACLE-SIDE FILE MAY LEGITIMATELY BE ABSENT, and the caller decides what that
+    means. The Python runner treats it as a weaker guarantee, says so plainly and
+    continues, so this helper reports the disposition through `cross_checked` rather
+    than inventing a failure the harness itself does not raise - unless
+    `require_cross_check` asks for one.
+
+    Args:
+        run: The completed `ParityRun`.
+        require_cross_check: Fail when the oracle-side fingerprint is absent, rather
+            than reporting the weaker guarantee.
+
+    Returns:
+        What the two files established.
+
+    Raises:
+        AssertionError: The Python-side record is absent, empty, of the wrong length
+            or in the wrong order; the two sides disagree; or the cross-check was
+            required and could not be made.
+    """
+    run_logs = run.paths.run_logs
+    python_path = run_logs / SEED_FINGERPRINT_PYTHON
+    cobol_path = run_logs / SEED_FINGERPRINT_COBOL
+
+    assert python_path.is_file(), (
+        f"{run.scenario}: no seed fingerprint at {python_path}. "
+        f"harness/run_python_scenario.sh records it at stage 6a and exits with a "
+        f"precondition status if it cannot, so a completed run without one means THE "
+        f"STARTING STATE OF THE COMPARISON WAS NEVER ESTABLISHED and no verdict from "
+        f"it is attributable.\n{run.describe()}"
+    )
+
+    recorded = python_path.read_bytes()
+    assert recorded, (
+        f"{run.scenario}: the seed fingerprint at {python_path} is EMPTY. It carries "
+        f"one line per affected table, so an empty file means no table was counted."
+    )
+
+    lines = [
+        line
+        for line in recorded.decode("utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(lines) == len(run.tables), (
+        f"{run.scenario}: the seed fingerprint at {python_path} carries "
+        f"{len(lines)} line(s) for {len(run.tables)} bounded table(s):\n"
+        f"{_indent(recorded.decode('utf-8'))}\n"
+        f"  One line per table is the contract, and the count is what the two sides "
+        f"compare."
+    )
+
+    named: list[str] = []
+    for line, table in zip(lines, run.tables, strict=True):
+        # Only the NAME and its POSITION are read. The counts are deliberately left
+        # uninterpreted (rule R-3).
+        recorded_table = line.split("\t")[0].strip()
+        assert recorded_table == table, (
+            f"{run.scenario}: the seed fingerprint at {python_path} names "
+            f"{recorded_table!r} where the scenario bounds the comparison by "
+            f"{table!r} in that position:\n"
+            f"{_indent(recorded.decode('utf-8'))}\n"
+            f"  THE DECLARED ORDER IS PART OF THE CONTRACT: the two sides compare "
+            f"these files byte for byte, so a reordering on one side alone would be "
+            f"reported as a starting-state disagreement."
+        )
+        named.append(recorded_table)
+
+    if cobol_path.is_file():
+        assert recorded == cobol_path.read_bytes(), (
+            f"{run.scenario}: THE TWO SIDES DID NOT START FROM THE SAME SEEDED "
+            f"STATE - a HARNESS FAULT and never a behavioural difference, and the "
+            f"distinction matters because the two look identical in a table diff.\n"
+            f"  python ({python_path}):\n"
+            f"{_indent(recorded.decode('utf-8'))}\n"
+            f"  cobol  ({cobol_path}):\n"
+            f"{_indent(cobol_path.read_text(encoding='utf-8'))}\n"
+            f"  Nothing about either cycle's behaviour has been measured: they were "
+            f"never given the same starting state. Autocommit must be OFF while "
+            f"seeding [common/glbatchLD.cbl:L9-L13]."
+        )
+        return SeedFingerprints(
+            python_path=python_path,
+            cobol_path=cobol_path,
+            tables=tuple(named),
+            cross_checked=True,
+        )
+
+    assert not require_cross_check, (
+        f"{run.scenario}: there is no oracle-side seed fingerprint at "
+        f"{cobol_path}, so the two starting states are UNVERIFIED and this scenario "
+        f"asked for them to be verified. harness/run_python_scenario.sh writes the "
+        f"Python side's at its stage 6a and cross-checks the oracle's when it "
+        f"exists; whatever records the compiled run's starting state must write the "
+        f"counterpart in the same format - `<TABLE>\\t<count>` per table in the "
+        f"scenario's declared order.\n{run.describe()}"
+    )
+    return SeedFingerprints(
+        python_path=python_path,
+        cobol_path=None,
+        tables=tuple(named),
+        cross_checked=False,
+    )
+
+
+def expected_exit_status(declared: Sequence[int] | int | None) -> int:
+    """The process exit status a scenario's declared per-operation statuses imply.
+
+    A scenario declares `expected_status` PER OPERATION, while a run stage is ONE
+    process with ONE exit status. The two are related by the runners' own rule: a
+    status that contradicts its declaration is reported and the run stops there, and
+    `acas_posting/cli/args.py`'s `exit_status_for(term_code)` surfaces the term code
+    itself - so the process exits with THE FIRST NON-ZERO DECLARED STATUS, and zero
+    when every operation is declared to succeed.
+
+    Only two non-zero statuses exist anywhere in the in-scope set: 5, from
+    [general/gl070.cbl:L289] via the gate at [general/general.cbl:L810-L811], and 8,
+    from [sales/sl055.cbl:L344] and [purchase/pl055.cbl:L286].
+
+    Args:
+        declared: The scenario's `expected_status` - a list, a bare integer, or None
+            when the scenario declares none.
+
+    Returns:
+        The implied process exit status; 0 when nothing non-zero is declared.
+
+    Raises:
+        ValueError: A declared entry is not an integer.
+    """
+    if declared is None:
+        return 0
+    values = [declared] if isinstance(declared, int) else list(declared)
+    for value in values:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(
+                f"a declared expected_status entry must be an integer; got "
+                f"{value!r}. The vocabulary is 0, 5 and 8 and nothing else."
+            )
+        if value != 0:
+            return value
+    return 0
+
+
+def assert_declared_run_statuses(
+    run: ParityRun,
+    *,
+    operations: Sequence[str],
+    declared: Sequence[int] | int | None,
+    reference_only: bool = False,
+) -> tuple[str, str]:
+    """Assert the run stages reached the disposition the scenario declared.
+
+    THE THIRD WAY AN EMPTY DIFF MEANS NOTHING. A runner that refused a precondition,
+    or aborted where the scenario expected success, leaves both sides equally
+    unwritten - and the diff equally empty. So the two ACTUAL statuses are read, not
+    the YAML's declaration compared with a local restatement of itself.
+
+    BOTH SIDES ARE ALSO CLASSIFIED, because the three dispositions must stay distinct:
+    a reproduced abort is a BEHAVIOURAL result whose database effect is still
+    evidence, whereas a runner handed a bad command line - `argparse` exit 2 - or one
+    reporting its own precondition band leaves no evidence at all. A harness fault
+    here is refused outright rather than being read as agreement.
+
+    WHICH SIDES THE STATUS EQUALITY COVERS IS A DELIBERATE CHOICE, and it decides
+    whether a wrong status is reported as an ERROR or as a FAILURE. Called from a
+    FIXTURE with `reference_only=True`, this asserts only that THE ORACLE reached the
+    declared disposition - the scenario was set up as declared and there is something
+    to compare - and leaves "the Python side reproduced it" to a test BODY, where a
+    divergence is a behavioural FAILURE attributable to the migrated code rather than
+    a setup error attributable to the environment. Called with the default, it covers
+    both sides, which is right only where no body owns the behavioural claim.
+
+    Args:
+        run: The completed `ParityRun`.
+        operations: The operations the run drove, in order. Each is classified, which
+            is what makes a status admissible for one operation and a fault for
+            another.
+        declared: The scenario's `expected_status`.
+        reference_only: Restrict the status equality to the oracle side. The
+            harness-fault refusal always covers BOTH sides regardless, because a
+            runner that never ran is an environment fault on either side.
+
+    Returns:
+        The two dispositions, `(cobol, python)`.
+
+    Raises:
+        AssertionError: An in-scope actual status differs from the declared one, or
+            either side classified as a harness fault.
+        ValueError: An operation is not one of the seven.
+    """
+    for operation in operations:
+        assert_operation(operation)
+
+    expected = expected_exit_status(declared)
+    checked: tuple[tuple[str, int], ...] = (
+        ((SIDE_COBOL, run.cobol_run.returncode),)
+        if reference_only
+        else (
+            (SIDE_COBOL, run.cobol_run.returncode),
+            (SIDE_PYTHON, run.python_run.returncode),
+        )
+    )
+    for side, code in checked:
+        assert code == expected, (
+            f"{run.scenario}: the {side} run stage exited {code} where the scenario "
+            f"declares {declared!r}, which implies a process status of {expected}.\n"
+            f"  A status that is not the declared one means the run did not reach the "
+            f"disposition this comparison is about, so both sides may be equally "
+            f"unwritten and the diff equally empty. Operations driven: "
+            f"{list(operations)}.\n{run.describe()}"
+        )
+
+    dispositions: list[str] = []
+    for side, stage in (
+        (SIDE_COBOL, run.cobol_run),
+        (SIDE_PYTHON, run.python_run),
+    ):
+        seen = {
+            classify_run(stage, operation=operation) for operation in operations
+        }
+        assert DISPOSITION_HARNESS_FAULT not in seen, (
+            f"{run.scenario}: the {side} run stage classified as a HARNESS FAULT "
+            f"rather than a disposition of the cycle. `argparse` exit "
+            f"{ARGPARSE_USAGE_EXIT} means the command line was wrong; a code in a "
+            f"runner's own band means the script diagnosed itself. Either way the "
+            f"question was never asked and no verdict from this run is "
+            f"attributable.\n{stage.describe()}"
+        )
+        # One disposition per side. A single status can classify differently across
+        # operations ONLY by being a term code for one and not for another - and "not
+        # for another" is exactly `DISPOSITION_HARNESS_FAULT`, which the assertion
+        # above has just refused. So the set is a singleton here whatever
+        # `reference_only` was, and this does not depend on the status equality.
+        assert len(seen) == 1, (
+            f"{run.scenario}: the {side} run stage's status "
+            f"{stage.returncode} classifies as {sorted(seen)} across operations "
+            f"{list(operations)}. A single status must reach ONE disposition for a "
+            f"run to have a disposition at all.\n{stage.describe()}"
+        )
+        dispositions.append(sorted(seen)[0])
+
+    return (dispositions[0], dispositions[1])
+
+
+def assert_python_reproduced_disposition(
+    run: ParityRun,
+    *,
+    operations: Sequence[str],
+    declared: Sequence[int] | int | None,
+) -> str:
+    """Assert the migrated cycle reached the SAME disposition the oracle reached.
+
+    THE BEHAVIOURAL HALF of the status question, and it belongs in a test BODY. The
+    oracle's status is the specification (rule R-6): whatever it exited with is
+    correct by definition, so a Python side that exits differently is a behavioural
+    divergence of the migrated code and must be reported as a FAILURE. Asserting it
+    during setup instead would report a real regression in the posting cycle as an
+    ERROR, making it indistinguishable from a broken environment - which is the exact
+    confusion the fixture/body split exists to prevent.
+
+    The declared status is passed in rather than read here so that the caller states
+    what it expects, and it is checked against the oracle too: agreement between the
+    two sides is necessary but not sufficient, since two sides that both failed to
+    abort would agree perfectly and prove nothing.
+
+    Args:
+        run: The completed `ParityRun`.
+        operations: The operations the run drove, in order.
+        declared: The scenario's `expected_status`, as the caller understands it.
+
+    Returns:
+        The disposition both sides reached.
+
+    Raises:
+        AssertionError: The two sides' statuses differ, or agree on something other
+            than the declared status.
+        ValueError: An operation is not one of the seven.
+    """
+    for operation in operations:
+        assert_operation(operation)
+
+    expected = expected_exit_status(declared)
+    cobol_code = run.cobol_run.returncode
+    python_code = run.python_run.returncode
+
+    assert python_code == cobol_code, (
+        f"{run.scenario}: BEHAVIOURAL DIVERGENCE - the compiled oracle exited "
+        f"{cobol_code} and the migrated Python cycle exited {python_code} for "
+        f"operations {list(operations)}.\n"
+        f"  The oracle's disposition is the specification (rule R-6), so this is a "
+        f"difference in the migrated code, not in the environment. Reproduce the "
+        f"oracle's status - do not adjust the scenario's declaration to match the "
+        f"Python side.\n{run.describe()}"
+    )
+    assert cobol_code == expected, (
+        f"{run.scenario}: both sides exited {cobol_code}, agreeing with each other "
+        f"but not with the declared {declared!r} (implied status {expected}). Two "
+        f"sides that equally failed to reach this scenario's disposition agree "
+        f"perfectly and prove nothing.\n{run.describe()}"
+    )
+
+    disposition = classify_run(run.python_run, operation=operations[0])
+    return disposition
+
+
 # The two output roots a determinism pair uses, composed UNDER `$ACAS_OUT` so that
 # each run keeps the canonical `<scenario>/<side>[.normalized]/` shape and the two
 # never overwrite one another. Only documented flags are used to get there -
@@ -2975,6 +3544,135 @@ def run_determinism_pair(
 
 
 @dataclass(frozen=True)
+class Vocabulary:
+    """The shared vocabulary and the PURE helpers, with no stack requirement.
+
+    THE OTHER HALF OF "conftest IS REACHED THROUGH FIXTURES". `Protocol` gathers the
+    stages, every one of which needs the Compose stack; this gathers what a test can
+    legitimately ask for on a bare host - the operation names both runners share, the
+    term codes, the three dispositions, the scenario keys, the pinned pair - together
+    with the helpers that only read files. Without it a stack-free precondition test
+    would have to import this module to reach a constant, which is exactly the
+    import-mode fragility the house convention exists to avoid.
+
+    Frozen and derived: every field below is the SAME object the stages themselves
+    use, so there is one definition of each and no second authority to drift.
+
+    Attributes:
+        scenarios: The eight scenario names.
+        operations: The seven operations both runners accept, each mapping to
+            `(subsystem, menu key, menu paragraph, locator)`.
+        term_codes: The admissible term codes per operation - only 5 and 8 exist.
+        disposition_success: `classify_run`'s verdict for a clean run.
+        disposition_behavioural: Its verdict for a reproduced abort.
+        disposition_harness_fault: Its verdict for a status nobody may conclude from.
+        argparse_usage_exit: 2 - a bad command line, always a harness fault.
+        sides: `("cobol", "python")`, in the order the report labels them.
+        scenario_keys: The scenario keys the stages read, by name.
+        irs_instead_states: The three states of the fan-out switch
+            [copybooks/wssystem.cob:L179-L181].
+        date_forms: `(UK, USA, International)` as `SYSTEM-REC.DATE-FORM` numbers.
+        autogen_tables: The four automatic-generation tables both runners assert
+            remain empty.
+        pinned_run_date_text: The pinned `to-day`, DD/MM/CCYY.
+        pinned_run_date_binary: The same date as `Run-Date binary-long`.
+        fault: `HarnessFaultError`, so a test can name the class it expects.
+        scenario_file: One scenario's definition PATH, for the rare test that
+            must build a harness command line itself instead of going through a
+            stage helper - a refusal, whose exit 2 the helper maps to a fault.
+        affected_tables: One scenario's bounding list, in declared order.
+        definition: One scenario's parsed YAML.
+        paths: The canonical artifact layout for one scenario.
+        read_dump: One dump object, parsed.
+        assert_dump_wellformed: The structural contract, asserted.
+        diff_trees_directly: A `TreeDiff` between two normalised trees on disk.
+        expected_exit_status: The process status a declared list implies.
+        classify_run: A run stage's disposition. Pure - it reads a captured result.
+        normalize: STAGE 4, which is a FILE-TO-FILE transformation driven in process
+            and needs no database, no COBOL and no Docker. It is published here as
+            well as on `Protocol` for exactly one purpose: a test that publishes
+            synthetic trees to a `tmp_path` and exercises the three-way exit contract
+            end to end must be able to do so ON A BARE HOST.
+        diff: STAGE 8, in process over two normalised trees on disk, and stack-free
+            for the same reason. Its exit-2 mapping to `HarnessFaultError` is part of
+            what such a test asserts.
+    """
+
+    scenarios: tuple[str, ...]
+    operations: Mapping[str, tuple[str, str, str, str]]
+    term_codes: Mapping[str, tuple[int, ...]]
+    disposition_success: str
+    disposition_behavioural: str
+    disposition_harness_fault: str
+    argparse_usage_exit: int
+    sides: tuple[str, str]
+    scenario_keys: Mapping[str, Any]
+    irs_instead_states: tuple[str, str, str]
+    date_forms: tuple[int, int, int]
+    autogen_tables: tuple[str, ...]
+    pinned_run_date_text: str
+    pinned_run_date_binary: int
+    fault: type[HarnessFaultError]
+    scenario_file: Callable[[str], Path]
+    affected_tables: Callable[[str], tuple[str, ...]]
+    definition: Callable[[str], Mapping[str, Any]]
+    paths: Callable[..., ScenarioPaths]
+    read_dump: Callable[..., dict[str, Any]]
+    assert_dump_wellformed: Callable[..., None]
+    diff_trees_directly: Callable[..., Any]
+    expected_exit_status: Callable[..., int]
+    classify_run: Callable[..., str]
+    normalize: Callable[..., StageResult]
+    diff: Callable[..., DiffOutcome]
+
+
+def build_vocabulary() -> Vocabulary:
+    """Assemble the stack-free vocabulary bundle.
+
+    Returns:
+        The bundle, every field pointing at this module's single definition of it.
+    """
+    return Vocabulary(
+        scenarios=SCENARIOS,
+        operations=OPERATIONS,
+        term_codes=TERM_CODES,
+        disposition_success=DISPOSITION_SUCCESS,
+        disposition_behavioural=DISPOSITION_BEHAVIOURAL,
+        disposition_harness_fault=DISPOSITION_HARNESS_FAULT,
+        argparse_usage_exit=ARGPARSE_USAGE_EXIT,
+        sides=(SIDE_COBOL, SIDE_PYTHON),
+        scenario_keys={
+            "run_date_text": SCENARIO_KEY_RUN_DATE_TEXT,
+            "run_date_binary": SCENARIO_KEY_RUN_DATE_BINARY,
+            "date_form": SCENARIO_KEY_DATE_FORM,
+            "irs_instead": SCENARIO_KEY_IRS_INSTEAD,
+            "operation": SCENARIO_KEY_OPERATION,
+            "subsystem": SCENARIO_KEY_SUBSYSTEM,
+            "seed_files": SCENARIO_KEY_SEED_FILES,
+            "irs_clear_postings": SCENARIO_KEY_IRS_CLEAR_POSTINGS,
+            "affected_tables": SCENARIO_KEY_AFFECTED_TABLES,
+        },
+        irs_instead_states=IRS_INSTEAD_STATES,
+        date_forms=(DATE_FORM_UK, DATE_FORM_USA, DATE_FORM_INTL),
+        autogen_tables=AUTOGEN_TABLES,
+        pinned_run_date_text=PINNED_RUN_DATE_TEXT,
+        pinned_run_date_binary=PINNED_RUN_DATE_BINARY,
+        fault=HarnessFaultError,
+        scenario_file=scenario_file,
+        affected_tables=scenario_affected_tables,
+        definition=scenario_definition,
+        paths=scenario_paths,
+        read_dump=read_dump,
+        assert_dump_wellformed=assert_dump_wellformed,
+        diff_trees_directly=diff_trees_directly,
+        expected_exit_status=expected_exit_status,
+        classify_run=classify_run,
+        normalize=normalize,
+        diff=diff,
+    )
+
+
+@dataclass(frozen=True)
 class Protocol:
     """Every protocol stage and both compositions, as one injectable object.
 
@@ -3001,6 +3699,23 @@ class Protocol:
         paths: The canonical layout for one scenario.
         affected_tables: The list a comparison is bounded by.
         definition: One scenario's parsed YAML.
+        assert_non_vacuous: The guard that refuses an empty verdict over empty
+            tables. Called in a FIXTURE, so its failure is a pytest ERROR.
+        assert_seed_fingerprints_agree: The guard that establishes the two sides
+            started from the same seeded state.
+        assert_declared_statuses: The guard that reads the run stages' ACTUAL
+            statuses and classifies them. Called in a FIXTURE with
+            `reference_only=True`, so a mis-set-up scenario is a pytest ERROR.
+        assert_python_reproduced_disposition: The BEHAVIOURAL half of the same
+            question, for a test BODY: the migrated cycle reached the disposition the
+            oracle reached. A divergence here is a FAILURE, not an ERROR.
+        read_dump: One dump object, parsed.
+        assert_dump_wellformed: The structural contract, asserted.
+        diff_trees_directly: A `TreeDiff` between two normalised trees, for an
+            against-the-seed comparison the eight stages do not perform.
+        fault: `HarnessFaultError`, so a test can name the class it expects.
+        vocabulary: The stack-free vocabulary bundle, for a stage-backed test that
+            also needs a constant.
     """
 
     seed: Callable[..., StageResult]
@@ -3016,6 +3731,15 @@ class Protocol:
     paths: Callable[..., ScenarioPaths]
     affected_tables: Callable[[str], tuple[str, ...]]
     definition: Callable[[str], Mapping[str, Any]]
+    assert_non_vacuous: Callable[..., None]
+    assert_seed_fingerprints_agree: Callable[..., SeedFingerprints]
+    assert_declared_statuses: Callable[..., tuple[str, str]]
+    assert_python_reproduced_disposition: Callable[..., str]
+    read_dump: Callable[..., dict[str, Any]]
+    assert_dump_wellformed: Callable[..., None]
+    diff_trees_directly: Callable[..., Any]
+    fault: type[HarnessFaultError]
+    vocabulary: Vocabulary
 
 
 
@@ -3175,8 +3899,9 @@ def db_connection() -> Iterator[Any]:
     thread (rule R-3) - "execution is strictly sequential, matching the
     single-threaded COBOL".
 
-    Skips when the stack is unavailable, and asserts the mandated autocommit mode
-    before yielding, so a test never reads a database seeded under the wrong one.
+    Skips when the stack is unavailable, and asserts the RUNTIME autocommit mode
+    before yielding, so a test never reads a database through a connection whose
+    mode says a seeding window is still open (ambiguity-resolutions.md#q-10).
 
     Yields:
         The open DB-API connection. Released with `rollback()` and closed on exit,
@@ -3185,7 +3910,7 @@ def db_connection() -> Iterator[Any]:
     requires_stack()
     dump_tables = harness_dump_tables()
     with dump_tables.connect() as connection:
-        assert_autocommit_off(connection)
+        assert_runtime_autocommit_on(connection)
         yield connection
 
 
@@ -3263,7 +3988,35 @@ def protocol(require_stack: Callable[[], None]) -> Protocol:
         paths=scenario_paths,
         affected_tables=scenario_affected_tables,
         definition=scenario_definition,
+        assert_non_vacuous=assert_parity_non_vacuous,
+        assert_seed_fingerprints_agree=assert_seed_fingerprints_agree,
+        assert_declared_statuses=assert_declared_run_statuses,
+        assert_python_reproduced_disposition=assert_python_reproduced_disposition,
+        read_dump=read_dump,
+        assert_dump_wellformed=assert_dump_wellformed,
+        diff_trees_directly=diff_trees_directly,
+        fault=HarnessFaultError,
+        vocabulary=build_vocabulary(),
     )
+
+
+@pytest.fixture(scope="session")
+def vocabulary() -> Vocabulary:
+    """The shared vocabulary and the pure helpers. NEEDS NO STACK.
+
+    THE FIXTURE THAT REMOVES THE LAST REASON TO IMPORT THIS MODULE. A stack-free
+    precondition test needs the operation names both runners accept, the term codes,
+    the scenario keys and the pinned pair; reaching them through an `import conftest`
+    binds the whole scenario tier to pytest's default import mode, so collection fails
+    outright under `--import-mode=importlib`. Every one of them arrives here instead.
+
+    Session-scoped, because the bundle is frozen and derived - two per-test copies
+    would be the same object's contents twice over.
+
+    Returns:
+        The bundle.
+    """
+    return build_vocabulary()
 
 
 @pytest.fixture(scope="session")

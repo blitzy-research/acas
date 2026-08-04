@@ -708,9 +708,266 @@ from __future__ import annotations
 
 import pytest
 
+# The TIER mark, applied to the whole module because every test in it belongs to the
+# tier. THE INFRASTRUCTURE MARKS ARE NOT HERE: `database` and `oracle` are declared per
+# test, on exactly the tests whose fixture closure reaches the harness stack, because
+# several tests in this file read only files on disk and pass on a bare host. A module
+# mark would claim they need a MariaDB and a built oracle, and `-m database` would then
+# select tests that require neither.
 pytestmark = pytest.mark.scenario
 
 SCENARIO = "clean_batch_pl"
+
+# The four tables this file reads VALUES out of, named once so the two helpers and the
+# four branch tests cannot drift apart. Every other expected value stays a local of the
+# one test that checks it.
+PURCHASE_LEDGER_TABLE = "PULEDGER-REC"
+OPEN_ITEM_TABLE = "PUITM5-REC"
+VALUE_TABLE = "VALUEANAL-REC"
+ANALYSIS_TABLE = "ANALYSIS-REC"
+
+# The two integer statistics columns A-8, A-9 and A-10 are witnessed in, declared
+# `binary-long` at [copybooks/wspl.cob:L35] and [copybooks/wspl.cob:L38].
+PURCH_ACTIVETY_COLUMN = "PURCH-ACTIVETY"
+PURCH_AVERAGE_COLUMN = "PURCH-AVERAGE"
+
+# The dump file name a table is published to; `<TABLE>.json` with the hyphens the
+# schema spells it with.
+DUMP_SUFFIX = ".json"
+
+
+# ---------------------------------------------------------------------------
+#  THE SHARED EVIDENCE
+#
+#  ONE EIGHT-STAGE RUN PER MODULE, SHARED AS FROZEN EVIDENCE, PREPARED IN A FIXTURE.
+#  The six stack-backed assertions below are six readings of ONE comparison, not six
+#  comparisons, and preparing them here is what keeps pytest's two outcomes separable:
+#  an exception raised in a TEST BODY is reported FAILED whatever its type, while one
+#  raised in a FIXTURE is reported ERROR. Every stage whose failure destroys the
+#  evidence - the seed, the reset, either capture, either normalisation - and the
+#  comparison's own exit 2 raise, so they surface as ERRORS: the question was never
+#  asked. A real behavioural difference reaches a body and fails an `assert`, so it is
+#  a FAILURE. Preparation in a body would collapse the two, and during bring-up - when
+#  seed and reset failures are frequent and expected - would send a reader hunting for
+#  a COBOL-versus-Python divergence that does not exist.
+#
+#  IT ALSO STOPS THE DESTRUCTIVE SEQUENCE RUNNING SIX TIMES. Stage 5 drops and
+#  re-applies all 33 tables; six bodies each driving the protocol meant six seeds, six
+#  oracle runs and six resets for no additional evidence.
+#
+#  FUNCTION-SCOPED WITH A MODULE MEMO, because `protocol` is function-scoped by its own
+#  design (it applies the stack skip per test) and pytest refuses to let a
+#  module-scoped fixture depend on a function-scoped one. The memo is populated ONLY ON
+#  SUCCESS, so a half-completed run is never served to a later test as evidence, and
+#  every test below stays independent of ordering. A `ParityRun` is frozen and all its
+#  collections are tuples, so sharing it is safe; execution is strictly sequential
+#  (R-3), so a plain dict needs no lock.
+# ---------------------------------------------------------------------------
+
+_PARITY_RUNS: dict[str, object] = {}
+
+
+@pytest.fixture
+def parity(protocol: object) -> object:
+    """All eight protocol stages for `clean_batch_pl`, run once and guarded.
+
+    THE FOUR GUARDS ARE HARNESS-FAULT DETECTORS AND NOT BEHAVIOURAL ASSERTIONS. Each
+    catches a condition under which AN EMPTY DIFF WOULD MEAN NOTHING, and not one of
+    them is visible in the verdict itself:
+
+      1. THE BOUND - the comparison must be bounded by the scenario's own
+         `affected_tables:` list, in its declared order, and by nothing else.
+      2. THE STATUSES - both run stages' ACTUAL exit statuses, read and classified. A
+         runner that refused a precondition leaves both sides equally unwritten.
+      3. THE SEED FINGERPRINTS - the two cycles must have started from the same
+         recorded row counts, or the differences (or their absence) belong to the seed.
+      4. NON-VACUITY - the tables this scenario's `seed_files:` fill must come back
+         WITH ROWS on both sides. Two dumps of zero rows are byte-identical, so
+         without this every assertion in this file passes against an entirely
+         unseeded database.
+
+    Args:
+        protocol: `tests/conftest.py`'s protocol object. Requesting it applies the
+            stack skip, so a host with no Docker, MariaDB or built oracle SKIPS with a
+            precise reason naming every missing precondition and never errors.
+
+    Returns:
+        The `ParityRun`: every stage result in execution order, both run stages, the
+        stage-8 verdict and the paths of every artifact.
+
+    Raises:
+        Skipped: The Compose stack is unusable.
+        HarnessFaultError: A stage whose failure destroys the evidence failed, or the
+            comparison could not be performed at all.
+        AssertionError: A guard above failed - also a harness fault.
+    """
+    cached = _PARITY_RUNS.get(SCENARIO)
+    if cached is None:
+        cached = protocol.run_scenario_parity(SCENARIO)
+        _PARITY_RUNS[SCENARIO] = cached
+    run = cached
+
+    # GUARD 1. The list is read by `harness/dump_tables.py`, so the in-scope check and
+    # the ordering are validated in exactly one place.
+    assert run.tables == protocol.affected_tables(SCENARIO), (
+        f"{SCENARIO}: the comparison was bounded by {list(run.tables)} while the "
+        f"scenario declares {list(protocol.affected_tables(SCENARIO))}. The declared "
+        f"ORDER is load-bearing - the report is written in it and so is the seed "
+        f"fingerprint - and the list is the ONLY bounding mechanism."
+    )
+
+    # GUARD 2. The ORACLE's ACTUAL status, against the scenario's own declaration,
+    # plus the harness-fault refusal on BOTH sides. `reference_only` leaves the Python
+    # side's status to `test_python_reproduced_the_oracles_disposition`, so a migrated
+    # cycle that aborts where the oracle succeeded reads as a behavioural FAILURE
+    # rather than as an environment ERROR in every test of this file.
+    protocol.assert_declared_statuses(
+        run,
+        operations=tuple(protocol.definition(SCENARIO)["operations"]),
+        declared=list(protocol.definition(SCENARIO)["expected_status"]),
+        reference_only=True,
+    )
+
+    # GUARD 3. One recorded starting state, shared by both sides.
+    protocol.assert_seed_fingerprints_agree(run)
+
+    # GUARD 4. Something was there to compare. Each table below is named by the
+    # `seed_files:` entry that fills it: analysis.dat -> ANALYSIS-REC, value.dat ->
+    # VALUEANAL-REC, purchled.dat -> PULEDGER-REC, pinvoice.dat -> PUINVOICE-REC and
+    # PUINV-LINES-REC, openitm5.dat -> PUITM5-REC, and system.dat -> SYSTOT-REC through
+    # the four-loader system block [common/masterLD.sh:L51-L87]. GLBATCH-REC,
+    # GLPOSTING-REC and PSIRSPOST-REC are deliberately NOT required to hold rows: the
+    # first two are WRITTEN by pl060's General-Ledger fan-out rather than seeded, and
+    # the third belongs to the IRS fan-out, which `irs_instead` pins off on this route.
+    protocol.assert_non_vacuous(
+        run,
+        tables_requiring_rows=(
+            ANALYSIS_TABLE,
+            "PUINV-LINES-REC",
+            "PUINVOICE-REC",
+            OPEN_ITEM_TABLE,
+            PURCHASE_LEDGER_TABLE,
+            "SYSTOT-REC",
+            VALUE_TABLE,
+        ),
+    )
+
+    return run
+
+
+def _dump_for(parity: object, protocol: object, side: str, table: str) -> dict:
+    """Read one side's NORMALISED dump for one table, asserting it is well formed.
+
+    Delegated to the single definition of the structural contract, whose every failure
+    is an exit-2 condition: the five keys in fixed order and no others, the table in
+    the twenty-two-name allow-list, the primary key among the columns,
+    `row_count == len(rows)`, no ragged row, NO `float` (R-2), no `null`, and no
+    primary-key value twice. Nothing is reimplemented here.
+
+    THE NORMALISED TREE IS READ, NEVER THE RAW ONE. A raw dump still carries the
+    representation artefacts normalisation removes, so a value taken from one would not
+    be evidence.
+
+    Args:
+        parity: The completed run, for its artifact paths.
+        protocol: The protocol bundle, for the reader.
+        side: `cobol` or `python`. Recorded in the PATH and never inside a dump.
+        table: The table name, hyphens included.
+
+    Returns:
+        The parsed dump object.
+    """
+    directory = parity.paths.normalized_dir(side)
+    return protocol.read_dump(directory / f"{table}{DUMP_SUFFIX}")
+
+
+def _column_values(dump: dict, column: str) -> dict:
+    """One column's values, keyed by primary-key VALUE.
+
+    ROWS ALIGN BY KEY VALUE, NEVER BY POSITION - the same rule the differ applies, and
+    the reason `1` and `"1"` are different keys rather than the same one.
+
+    Args:
+        dump: A well-formed dump object.
+        column: The column to project.
+
+    Returns:
+        `{primary-key value: column value}`.
+
+    Raises:
+        AssertionError: The dump does not carry the column. The schema is FROZEN, so a
+            missing column means the dump or the checkout is wrong rather than that the
+            column is optional.
+    """
+    columns = list(dump["columns"])
+    assert column in columns, (
+        f"`{dump['table']}` carries no column named {column!r}; it lists {columns}. "
+        f"mysql/ACASDB.sql is FROZEN (Agent Action Plan section 0.8.1), so this means "
+        f"either the dump or the checkout is wrong."
+    )
+    index = columns.index(column)
+    key_index = columns.index(str(dump["primary_key"]))
+    return {row[key_index]: row[index] for row in dump["rows"]}
+
+
+def _projection_agrees(
+    parity: object, protocol: object, table: str, columns: tuple[str, ...]
+) -> tuple[dict, dict]:
+    """Project the named columns from both sides and require them to AGREE.
+
+    THE OBSERVABLE THIS FILE'S BRANCH TESTS NEEDED. A per-table `is_empty` restates the
+    headline verdict; projecting the columns a branch actually writes and comparing the
+    two projections is evidence about that branch - and it cannot pass over an empty
+    table, because the row-count precondition below refuses one.
+
+    NO VALUE IS PREDICTED. Which value the two sides agree ON is the compiled oracle's
+    to decide (R-6); recomputing one here would substitute this file's arithmetic for
+    the oracle's, and per-field exactness belongs to `tests/arithmetic/` where the
+    expected values are captured from the oracle itself.
+
+    Args:
+        parity: The completed run.
+        protocol: The protocol bundle.
+        table: The table to project from.
+        columns: The columns to compare.
+
+    Returns:
+        The two projections, `(cobol, python)`, keyed by column name.
+
+    Raises:
+        AssertionError: The table is empty on either side, the column lists disagree,
+            the primary keys disagree, or a projected value differs.
+    """
+    cobol_side, python_side = protocol.vocabulary.sides
+    cobol_dump = _dump_for(parity, protocol, cobol_side, table)
+    python_dump = _dump_for(parity, protocol, python_side, table)
+
+    assert cobol_dump["row_count"] > 0 and python_dump["row_count"] > 0, (
+        f"`{table}` is EMPTY on at least one side (cobol="
+        f"{cobol_dump['row_count']}, python={python_dump['row_count']}), so a "
+        f"comparison of its columns agrees about NOTHING. An empty table cannot "
+        f"witness a business branch."
+    )
+    assert list(cobol_dump["columns"]) == list(python_dump["columns"]), (
+        f"`{table}`'s column lists disagree: {list(cobol_dump['columns'])} against "
+        f"{list(python_dump['columns'])}. Rows are POSITIONAL within a dump, so "
+        f"nothing projected from them would align."
+    )
+
+    cobol_projection: dict = {}
+    python_projection: dict = {}
+    for column in columns:
+        cobol_values = _column_values(cobol_dump, column)
+        python_values = _column_values(python_dump, column)
+        assert set(cobol_values) == set(python_values), (
+            f"`{table}`'s primary keys disagree while projecting {column!r}: only on "
+            f"cobol {sorted(set(cobol_values) - set(python_values), key=repr)}; only "
+            f"on python {sorted(set(python_values) - set(cobol_values), key=repr)}."
+        )
+        cobol_projection[column] = cobol_values
+        python_projection[column] = python_values
+
+    return cobol_projection, python_projection
 
 
 # NOTE ON THE ANNOTATIONS BELOW. The module-level block above is fixed by this file's
@@ -1133,7 +1390,9 @@ def test_affected_tables_are_in_scope_and_alphabetical(
     assert "ANALYSIS-REC" in declared
 
 
-def test_clean_batch_post_pl_state_parity(protocol: object, harness: object) -> None:
+@pytest.mark.database
+@pytest.mark.oracle
+def test_clean_batch_post_pl_state_parity(parity: object, harness: object) -> None:
     """THE HEADLINE. Eight stages, and the diff MUST BE EMPTY.
 
     Agent Action Plan section 0.8.5, acceptance criterion 1: seed identically, run the
@@ -1160,10 +1419,16 @@ def test_clean_batch_post_pl_state_parity(protocol: object, harness: object) -> 
     identical" while an absent file says nothing at all, and the evidence document must
     be able to tell those apart.
 
+    THIS BODY HOLDS ONLY THE VERDICT. Every stage and all four harness-fault guards -
+    the bound, both ACTUAL run statuses with their classifications, the two sides' seed
+    fingerprints and non-vacuity - happened in the `parity` fixture, so a harness fault
+    is a pytest ERROR and what is left here is the arbitration, which makes a genuine
+    behavioural difference a pytest FAILURE.
+
     Args:
-        protocol: `tests/conftest.py`'s protocol object. It applies the stack skip
-            itself, so collection always succeeds on a bare host and an unusable stack
-            is a SKIP naming every unmet precondition.
+        parity: The completed, guarded `ParityRun`. The fixture applies the stack skip
+            through `protocol`, so collection always succeeds on a bare host and an
+            unusable stack is a SKIP naming every unmet precondition.
         harness: The three harness modules, for the report renderer. The harness
             tree is NEVER imported as a package; it arrives only through the fixture.
 
@@ -1174,12 +1439,8 @@ def test_clean_batch_post_pl_state_parity(protocol: object, harness: object) -> 
     """
     diff_states = harness.diff_states
 
-    parity = protocol.run_scenario_parity(SCENARIO)
-
-    # The comparison was bounded by the scenario's own list, in the scenario's own
-    # order. Asserted because an unbounded or re-ordered comparison would be a
-    # different experiment from the one this file documents.
-    assert parity.tables == protocol.affected_tables(SCENARIO)
+    # The bound is asserted in the fixture; its SIZE is asserted here because ten is a
+    # fact about this scenario rather than about the protocol.
     assert len(parity.tables) == 10
 
     # THE PASS CONDITION. `render` returns THE EMPTY STRING when the two trees are
@@ -1222,8 +1483,71 @@ def test_clean_batch_post_pl_state_parity(protocol: object, harness: object) -> 
         )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
+def test_python_reproduced_the_oracles_disposition(
+    parity: object, protocol: object
+) -> None:
+    """THE MIGRATED CYCLE EXITED AS THE ORACLE EXITED - the behavioural half.
+
+    Read in a BODY, not in the `parity` fixture, and the split is the point. The
+    oracle's status is the specification (rule R-6), so a Python side that exits
+    differently is a regression in the migrated code - a FAILURE. Asserting it in setup
+    would report that regression as an ERROR in all six of this file's stack-backed
+    tests, where it would look exactly like a MariaDB that never came up. The fixture
+    therefore bounds itself to the oracle with `reference_only=True`, keeping the
+    harness-fault refusal on both sides, and this test compares the two.
+
+    THE DECLARED STATUS IS ASSERTED TOO, because agreement alone is not evidence. The
+    only terminate code reachable on this route is 8, raised at
+    [purchase/pl055.cbl:L286] inside a block whose outermost guard is
+    `if FS-Cobol-Files-Used` [purchase/pl055.cbl:L266]; with the scenario's
+    `file_system_used` pinned to the RDBMS that guard is false and the raise is
+    unreachable, which is what licenses `expected_status` zero. Two sides that both
+    exited 8 would agree perfectly while having posted nothing at all, and the headline
+    empty diff would be two equally unwritten databases.
+
+    Args:
+        parity: The completed eight-stage run, shared by the module.
+        protocol: The stage bundle, for the cross-side guard and the dispositions.
+    """
+    definition = protocol.definition(SCENARIO)
+    operations = tuple(definition["operations"])
+    declared = list(definition["expected_status"])
+
+    disposition = protocol.assert_python_reproduced_disposition(
+        parity, operations=operations, declared=declared
+    )
+    assert disposition == protocol.vocabulary.disposition_success, (
+        f"{SCENARIO}: the migrated cycle classified as {disposition!r} where the only "
+        f"admissible disposition on this route is "
+        f"{protocol.vocabulary.disposition_success!r}. "
+        f"{protocol.vocabulary.disposition_behavioural!r} would mean a terminate code "
+        f"was raised and the posting legs were skipped."
+    )
+
+    # Term code 8 is unreachable here, so its ABSENCE is an assertable fact rather than
+    # an assumption. Read off the real statuses on both sides.
+    unreachable = set()
+    for operation in operations:
+        unreachable |= set(protocol.vocabulary.term_codes[operation])
+    observed = {
+        protocol.vocabulary.sides[0]: parity.cobol_run.returncode,
+        protocol.vocabulary.sides[1]: parity.python_run.returncode,
+    }
+    assert not (unreachable & set(observed.values())), (
+        f"{SCENARIO}: a terminate code from {sorted(unreachable)} appeared in "
+        f"{observed!r}. On this route the raise at [purchase/pl055.cbl:L286] sits "
+        f"behind `if FS-Cobol-Files-Used` [purchase/pl055.cbl:L266], which the "
+        f"scenario's pinned file system makes false - so a terminate code here means "
+        f"the run took a path this scenario does not describe.\n{parity.describe()}"
+    )
+
+
+@pytest.mark.database
+@pytest.mark.oracle
 def test_a1_control_pl060_terminating_period_is_present(
-    protocol: object, harness: object
+    parity: object, protocol: object, harness: object
 ) -> None:
     """A-1's CONTROL. `pl060` HAS the period, so the posting file IS closed.
 
@@ -1289,7 +1613,27 @@ def test_a1_control_pl060_terminating_period_is_present(
     """
     diff_states = harness.diff_states
 
-    parity = protocol.run_scenario_parity(SCENARIO)
+    # THE OBSERVABLE, BEFORE THE VERDICT. A-1's control side is "the posting file WAS
+    # closed", and what a close leaves behind is the written rows themselves. So the
+    # two sides' `GLPOSTING-REC` rows are projected column by column and required to
+    # agree, with a row-count precondition: pl060's fan-out writes this table on this
+    # route [purchase/pl060.cbl:L1032-L1033], so an EMPTY table on either side means
+    # the branch never ran and the control witnesses nothing. That is the difference
+    # between evidence and a restatement of the headline.
+    posting_key = protocol.vocabulary.paths and "POST-KEY"
+    cobol_posting, python_posting = _projection_agrees(
+        parity, protocol, "GLPOSTING-REC", (posting_key, "POST-AMOUNT", "POST-DAT")
+    )
+    assert cobol_posting == python_posting, (
+        f"A-1's CONTROL FAILED on GLPOSTING-REC: the rows pl060's General-Ledger "
+        f"fan-out wrote disagree between the two sides.\n"
+        f"  cobol : {sorted(cobol_posting.items(), key=repr)}\n"
+        f"  python: {sorted(python_posting.items(), key=repr)}\n"
+        f"In pure-GL mode pl060 CLOSES the posting file, because "
+        f"[purchase/pl060.cbl:L1031] carries its terminating period. Whatever the "
+        f"compiled cycle wrote is correct by definition (R-6); do NOT normalise pl060 "
+        f"toward sl060.\n{parity.describe()}"
+    )
 
     # The two tables BL-Close touches, located by name in the comparison's own report
     # order rather than by position.
@@ -1329,8 +1673,10 @@ def test_a1_control_pl060_terminating_period_is_present(
     )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_a_new_1_second_apportionment_pass_never_runs(
-    protocol: object, harness: object
+    parity: object, protocol: object, harness: object
 ) -> None:
     """A-NEW-1. The credit-note SECOND apportionment pass is unreachable.
 
@@ -1380,7 +1726,8 @@ def test_a_new_1_second_apportionment_pass_never_runs(
     are correctly apportioned.
 
     Args:
-        protocol: The protocol object; it applies the stack skip.
+        parity: The completed, guarded `ParityRun`.
+        protocol: The protocol bundle, for the dump reader and the side labels.
         harness: The three harness modules, for the report renderer.
 
     Raises:
@@ -1389,13 +1736,33 @@ def test_a_new_1_second_apportionment_pass_never_runs(
     """
     diff_states = harness.diff_states
 
-    parity = protocol.run_scenario_parity(SCENARIO)
+    # THE OBSERVABLE. A second apportionment pass would show up as further
+    # apportionment on the open-item rows, so the three columns the pass would have
+    # touched are projected from both sides and required to agree - over a table the
+    # precondition inside the helper proves is NOT empty. The four columns are the
+    # apportionment figures themselves: a second pass would have deducted again.
+    cobol_items, python_items = _projection_agrees(
+        parity,
+        protocol,
+        OPEN_ITEM_TABLE,
+        ("OI5-P-C", "OI5-PAID", "OI5-DEDUCT-AMT", "OI5-DEDUCT-VAT"),
+    )
+    assert cobol_items == python_items, (
+        f"A-NEW-1: the two sides disagree about the open-item apportionment "
+        f"columns.\n"
+        f"  cobol : {sorted(cobol_items.items(), key=repr)}\n"
+        f"  python: {sorted(python_items.items(), key=repr)}\n"
+        f"IF THE PYTHON SIDE SHOWS MORE APPORTIONMENT THAN THE COBOL SIDE, THE DEAD "
+        f"SECOND PASS HAS BEEN 'FIXED' AND THAT IS A FAILURE (R-4): the `go to "
+        f"main-end.` at [purchase/pl060.cbl:L820] is unconditional, so the transfer at "
+        f"L821 is dead code and the pass never runs.\n{parity.describe()}"
+    )
 
     by_table = {table.table: table for table in parity.tree.tables}
-    assert "PUITM5-REC" in by_table, (
+    assert OPEN_ITEM_TABLE in by_table, (
         "PUITM5-REC was not compared, so A-NEW-1's single-pass outcome is unwitnessed."
     )
-    open_items = by_table["PUITM5-REC"]
+    open_items = by_table[OPEN_ITEM_TABLE]
 
     assert open_items.is_empty, (
         f"PUITM5-REC diverged, with {open_items.total_differences} finding(s), so the "
@@ -1419,8 +1786,10 @@ def test_a_new_1_second_apportionment_pass_never_runs(
     )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_moving_average_fields_agree(
-    protocol: object, harness: object, frozen_schema: object
+    parity: object, protocol: object, harness: object, frozen_schema: object
 ) -> None:
     """A-8, A-9 and A-10's PURCHASE HALF, witnessed in `PULEDGER-REC`.
 
@@ -1487,7 +1856,8 @@ def test_moving_average_fields_agree(
     `credit-comp` runs once with a counter that was never incremented for it.
 
     Args:
-        protocol: The protocol object; it applies the stack skip.
+        parity: The completed, guarded `ParityRun`.
+        protocol: The protocol bundle, for the dump reader and the side labels.
         harness: The three harness modules, for the renderer and the schema reader.
         frozen_schema: `mysql/ACASDB.sql` parsed into `{table: {column: ColumnType}}`.
             READ, NEVER WRITTEN - Agent Action Plan section 0.8.1 makes any diff against
@@ -1503,8 +1873,10 @@ def test_moving_average_fields_agree(
     # THE STORAGE CLASS IS PART OF THE ANOMALY, so it is asserted from the frozen schema
     # before anything is run. If either column were ever a DECIMAL the double
     # truncation would not occur and A-8 would be silently "fixed" by the schema.
-    for column_name in ("PURCH-ACTIVETY", "PURCH-AVERAGE"):
-        column = normalize.column_type(frozen_schema, "PULEDGER-REC", column_name)
+    for column_name in (PURCH_ACTIVETY_COLUMN, PURCH_AVERAGE_COLUMN):
+        column = normalize.column_type(
+            frozen_schema, PURCHASE_LEDGER_TABLE, column_name
+        )
         assert column.kind == normalize.KIND_INTEGER, (
             f"PULEDGER-REC.{column_name} must be an INTEGER column - it is declared "
             f"`{column.sql_type}` at [mysql/ACASDB.sql:L{column.line}], from "
@@ -1518,19 +1890,53 @@ def test_moving_average_fields_agree(
             f"discarded by construction, which is the first of A-8's two truncations."
         )
 
-    parity = protocol.run_scenario_parity(SCENARIO)
+    # THE VALUES THEMSELVES, READ FROM BOTH SIDES. The declared type above establishes
+    # that the anomaly CAN be reproduced; only the stored values establish that it WAS.
+    # The average and its counter are read TOGETHER and never separately: a wrong
+    # divisor and a wrong dividend can produce the same quotient, and A-9's defect is
+    # precisely the counter that is never incremented, so the pair is what carries the
+    # evidence. The helper refuses an empty ledger, so this cannot pass vacuously.
+    cobol_averages, python_averages = _projection_agrees(
+        parity,
+        protocol,
+        PURCHASE_LEDGER_TABLE,
+        (PURCH_ACTIVETY_COLUMN, PURCH_AVERAGE_COLUMN),
+    )
+    for column_name in (PURCH_ACTIVETY_COLUMN, PURCH_AVERAGE_COLUMN):
+        for key, value in cobol_averages[column_name].items():
+            assert isinstance(value, int) and not isinstance(value, bool), (
+                f"`{PURCHASE_LEDGER_TABLE}`.`{column_name}` row {key!r} arrived from "
+                f"the oracle as {type(value).__name__} ({value!r}). A `binary-long` "
+                f"column [copybooks/wspl.cob:L35, L38] must reach the dump as a JSON "
+                f"INTEGER: carry it as a decimal and A-8's second truncation - the "
+                f"remainder discarded by the divide at [purchase/pl060.cbl:L751] - "
+                f"disappears."
+            )
+        assert cobol_averages[column_name] == python_averages[column_name], (
+            f"`{PURCHASE_LEDGER_TABLE}`.`{column_name}` disagrees between the two "
+            f"sides:\n"
+            f"  cobol : {sorted(cobol_averages[column_name].items(), key=repr)}\n"
+            f"  python: {sorted(python_averages[column_name].items(), key=repr)}\n"
+            f"The most likely cause is a REPAIR rather than a bug: a counter increment "
+            f"added to `credit-comp` (A-9), the extra guard at "
+            f"[purchase/pl060.cbl:L764] dropped, the three guards unified into one "
+            f"helper (A-10), or the integer divide carried at two decimal "
+            f"places (A-8). "
+            f"EVERY ONE OF THOSE IS A FAILURE (R-4). No value is predicted here; which "
+            f"value the two sides agree on is the oracle's to decide (R-6)."
+        )
 
     by_table = {table.table: table for table in parity.tree.tables}
-    assert "PULEDGER-REC" in by_table, (
+    assert PURCHASE_LEDGER_TABLE in by_table, (
         "PULEDGER-REC was not compared, so the Purchase moving average is unwitnessed."
     )
-    ledger = by_table["PULEDGER-REC"]
+    ledger = by_table[PURCHASE_LEDGER_TABLE]
 
     # Name the average columns explicitly when they are among the differences, so the
     # failure message points at A-8, A-9 and A-10 rather than at "a ledger difference".
     # `TableDiff.value_differences` is a tuple of `RowDifference`, each of whose
     # `values` is a tuple of `ValueDifference` carrying the `column` name.
-    average_columns = ("PURCH-ACTIVETY", "PURCH-AVERAGE")
+    average_columns = (PURCH_ACTIVETY_COLUMN, PURCH_AVERAGE_COLUMN)
     implicated = sorted(
         {
             difference.column
@@ -1571,7 +1977,11 @@ def test_moving_average_fields_agree(
     )
 
 
-def test_valueanal_written_by_pl055_only(protocol: object, harness: object) -> None:
+@pytest.mark.database
+@pytest.mark.oracle
+def test_valueanal_written_by_pl055_only(
+    parity: object, protocol: object, harness: object
+) -> None:
     """`VALUEANAL-REC` has ONE writer on this route, and it is `pl055`.
 
     THE VERB CENSUS, which is what makes the claim measured rather than assumed.
@@ -1604,7 +2014,8 @@ def test_valueanal_written_by_pl055_only(protocol: object, harness: object) -> N
     total or checks that the analysis codes balance.
 
     Args:
-        protocol: The protocol object; it applies the stack skip.
+        parity: The completed, guarded `ParityRun`.
+        protocol: The protocol bundle, for the dump reader and the side labels.
         harness: The three harness modules, for the report renderer.
 
     Raises:
@@ -1613,12 +2024,42 @@ def test_valueanal_written_by_pl055_only(protocol: object, harness: object) -> N
     """
     diff_states = harness.diff_states
 
-    parity = protocol.run_scenario_parity(SCENARIO)
+    # THE OBSERVABLE. `pl055`'s value-analysis accumulations land in these columns, so
+    # the two sides' stored figures are projected and compared - over tables the helper
+    # proves hold rows, because `value.dat` and `analysis.dat` are both seeded. A
+    # per-table `is_empty` alone would restate the headline; this reads what pl055
+    # actually wrote.
+    cobol_values, python_values = _projection_agrees(
+        parity,
+        protocol,
+        VALUE_TABLE,
+        ("VA-T-THIS", "VA-T-LAST", "VA-V-THIS", "VA-V-LAST"),
+    )
+    assert cobol_values == python_values, (
+        f"`{VALUE_TABLE}` disagrees between the two sides:\n"
+        f"  cobol : {sorted(cobol_values.items(), key=repr)}\n"
+        f"  python: {sorted(python_values.items(), key=repr)}\n"
+        f"Its ONLY writer on this route is pl055's `Value-Write`/`Value-Rewrite`; "
+        f"pl060 issues ZERO `Value-*` verbs, so the divergence is attributable to "
+        f"pl055 alone. Check the two sign flips at [purchase/pl055.cbl:L376] and "
+        f"[purchase/pl055.cbl:L387] before anything else.\n{parity.describe()}"
+    )
+    cobol_codes, python_codes = _projection_agrees(
+        parity, protocol, ANALYSIS_TABLE, ("PA-GL", "PA-DESC", "PA-PRINT")
+    )
+    assert cobol_codes == python_codes, (
+        f"`{ANALYSIS_TABLE}` disagrees between the two sides:\n"
+        f"  cobol : {sorted(cobol_codes.items(), key=repr)}\n"
+        f"  python: {sorted(python_codes.items(), key=repr)}\n"
+        f"Its only writer here is pl055's `Analysis-Write`, which CREATES a missing "
+        f"code at [purchase/pl055.cbl:L323-L325] rather than failing - so a difference "
+        f"can also mean the two sides saw different seeded codes."
+    )
 
     by_table = {table.table: table for table in parity.tree.tables}
     for table_name, attribution in (
-        ("VALUEANAL-REC", "pl055's Value-Write and Value-Rewrite"),
-        ("ANALYSIS-REC", "pl055's Analysis-Write"),
+        (VALUE_TABLE, "pl055's Value-Write and Value-Rewrite"),
+        (ANALYSIS_TABLE, "pl055's Analysis-Write"),
     ):
         assert table_name in by_table, f"{table_name} was not compared."
         table_diff = by_table[table_name]
@@ -1816,8 +2257,10 @@ def test_diff_exit_contract_is_honoured(harness: object) -> None:
     assert diff_states.NORMALIZED_SUFFIX in tuple(diff_states.NORMALIZED_SUFFIXES)
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_dump_is_wellformed_on_both_sides(
-    protocol: object, harness: object, frozen_schema: object
+    parity: object, harness: object, frozen_schema: object
 ) -> None:
     """Both captures have the shape the protocol guarantees, for all ten tables.
 
@@ -1857,7 +2300,8 @@ def test_dump_is_wellformed_on_both_sides(
     perfectly good capture.
 
     Args:
-        protocol: The protocol object; it applies the stack skip.
+        parity: The completed, guarded `ParityRun`. Prepared in the fixture, so a stage
+            fault is an ERROR rather than a malformed-dump FAILURE.
         harness: The three harness modules.
         frozen_schema: `mysql/ACASDB.sql` parsed into `{table: {column: ColumnType}}`.
             READ, NEVER WRITTEN.
@@ -1871,7 +2315,6 @@ def test_dump_is_wellformed_on_both_sides(
     dump_tables = harness.dump_tables
     normalize = harness.normalize
 
-    parity = protocol.run_scenario_parity(SCENARIO)
     paths = parity.paths
 
     for table in parity.tables:

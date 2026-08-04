@@ -31,7 +31,8 @@ readonly EX_OK=0
 readonly EX_USAGE=70
 readonly EX_PRECONDITION=71
 readonly EX_DATABASE=72
-readonly EX_AUTOCOMMIT=73  # autocommit is not OFF -- the AAP-mandated mode
+readonly EX_AUTOCOMMIT=73  # autocommit is not ON -- i.e. the seeding window
+                           # harness/seed.sh owns is still open
 readonly EX_ORACLE=74      # a compiled artifact is missing -> build_oracle.sh
 readonly EX_SCENARIO=75    # the scenario file is missing or malformed
 readonly EX_DRIVE=76       # the pty driver timed out, spun, or hit a refusal
@@ -172,6 +173,16 @@ ACAS_RUN_LOG_OPEN=0
 ACAS_RUN_LOCK=''                # the sequential-run lock, removed by the EXIT trap
 ACAS_RUN_PLAN_FILE=''           # the resolved keystroke plan, beside the log
 ACAS_RUN_RESULT_FILE=''         # the driver's machine-readable outcome record
+ACAS_RUN_FINGERPRINT=''         # cobol.seed-fingerprint -- read by the Python side
+ACAS_RUN_STATUS_FILE=''         # cobol.run-status -- read by harness/dump_tables.py
+# The status a SIGNAL handler decided on, and the pty driver's pid while it runs.
+# Both exist because of the same problem: bash runs the EXIT trap when this shell is
+# terminated by a signal, but `$?' at that moment is the status of the last command
+# that COMPLETED -- routinely zero -- so the run-status record claimed success for a
+# run that was killed. The handler records the real status here and the writer
+# prefers it. See acas_on_signal.
+ACAS_RUN_SIGNAL_STATUS=0
+ACAS_RUN_DRIVER_PID=0
 ACAS_RUN_DRY_RUN=0              # --dry-run
 ACAS_RUN_ROTATE_FH_LOG=1        # rotation is the DEFAULT; --no-rotate-fh-log opts out
 ACAS_RUN_FH_ROTATED=''          # where fh-logger.txt was moved to, if it was
@@ -781,6 +792,90 @@ acas_release_lock() {
   fi
 }
 
+# ⭐ THE PER-SIDE RUN-STATUS RECORD, written from the EXIT trap.
+#
+# [harness/dump_tables.py] records an ATTESTATION in the dump manifest and
+# [harness/diff_states.py] refuses to compare two captures unless both sides
+# attest that their run actually succeeded. That closes the silent pass in which
+# the run stage failed, the capture stage found the tables empty, and the diff
+# then reported "identical" -- a clean pass over two empty directories. The
+# attestation has to come from the side that KNOWS the status, which is this
+# script, and it has to be written on EVERY path, which is why it lives in the
+# EXIT trap rather than at the end of acas_main.
+#
+# FORMAT -- a four-field TSV, one field per line, in the order dump_tables.py
+# declares:
+#     scenario<TAB><name>
+#     side<TAB>cobol
+#     status<TAB><this script's exit status>
+#     seed_fingerprint_sha256<TAB><digest, or empty if none was recorded>
+# The digest is a POINTER to the fingerprint, not a substitute for it: the
+# cross-check compares the fingerprints themselves, and this lets a capture be
+# tied to the starting state it was taken from.
+#
+# It must not raise and must not change the exit status. It runs from the EXIT
+# trap, where a failure of its own would replace the real diagnosis with a
+# confusing one, so every step is best-effort and reported rather than fatal.
+# shellcheck disable=SC2317  # reached only through the EXIT trap installed below,
+# which shellcheck cannot follow; the body is live and runs on every exit path.
+acas_write_run_status() {
+  local status="$1"
+
+  # ⭐ A DRY RUN ATTESTS NOTHING, AND MUST NOT BE ABLE TO. `--dry-run' validates
+  # every precondition and prints the plan without spawning the menu, then exits 0
+  # -- and a bare status 0 is exactly what [harness/dump_tables.py] reads as "the
+  # run succeeded". Left alone, a dry run would attest a capture of a database the
+  # cycle never touched, which is the same silent pass the attestation exists to
+  # close, arriving by a different door.
+  #
+  # The record is REMOVED rather than merely not written, because a REAL record from
+  # an earlier run of the same scenario would otherwise survive and go on attesting
+  # whatever capture is taken next. The path is resolved here rather than taken on
+  # trust, for the case where a dry run failed before stage 3 named it.
+  if (( ACAS_RUN_DRY_RUN )); then
+    local dry_target="$ACAS_RUN_STATUS_FILE"
+    if [[ -z "$dry_target" && -n "$ACAS_RUN_SCENARIO" && -n "${ACAS_OUT-}" ]]; then
+      dry_target="$ACAS_OUT/run-logs/$ACAS_RUN_SCENARIO/cobol.run-status"
+    fi
+    if [[ -n "$dry_target" && ! -L "$dry_target" ]]; then
+      rm -f -- "$dry_target" 2>/dev/null || true
+    fi
+    printf 'note: --dry-run drove nothing, so no run-status record is written and a\n' >&2
+    printf '      capture taken now would be reported as unattested. Any record an\n' >&2
+    printf '      earlier run of this scenario left has been removed.\n' >&2
+    return 0
+  fi
+
+  [[ -n "$ACAS_RUN_STATUS_FILE" ]] || return 0
+  [[ -f "$ACAS_RUN_STATUS_FILE" && ! -L "$ACAS_RUN_STATUS_FILE" ]] || return 0
+
+  # A signal handler's decision outranks `$?'. See acas_on_signal for why: bash runs
+  # the EXIT trap after a fatal signal with `$?' holding the status of the last
+  # command that completed, which is usually zero, so trusting it here would attest
+  # a killed run as a successful one.
+  if (( ACAS_RUN_SIGNAL_STATUS != 0 )); then
+    status="$ACAS_RUN_SIGNAL_STATUS"
+  fi
+
+  local digest=''
+  if [[ -f "$ACAS_RUN_FINGERPRINT" && ! -L "$ACAS_RUN_FINGERPRINT" ]]; then
+    digest="$(sha256sum -- "$ACAS_RUN_FINGERPRINT" 2>/dev/null | cut -d' ' -f1)" || digest=''
+  fi
+
+  {
+    printf 'scenario\t%s\n' "$ACAS_RUN_SCENARIO"
+    printf 'side\tcobol\n'
+    printf 'status\t%s\n' "$status"
+    printf 'seed_fingerprint_sha256\t%s\n' "$digest"
+  } >"$ACAS_RUN_STATUS_FILE" 2>/dev/null || {
+    printf 'WARNING: could not write the run-status record to %s; the capture stage\n' \
+      "$ACAS_RUN_STATUS_FILE" >&2
+    printf '         will treat this run as unattested, which is the safe direction.\n' >&2
+    return 0
+  }
+  return 0
+}
+
 # shellcheck disable=SC2317  # reached only through the EXIT trap installed below,
 # which shellcheck cannot follow; the body is live and is exercised by every
 # non-zero exit path.
@@ -788,6 +883,10 @@ acas_on_exit() {
   local status="$1"
   # FIRST, unconditionally, and before the status is even examined.
   acas_release_lock
+  # SECOND, also unconditionally: the run-status record must exist for a success
+  # and for every failure, because its whole purpose is to let a later stage
+  # distinguish the two.
+  acas_write_run_status "$status"
   if (( status == 0 )); then
     return 0
   fi
@@ -807,6 +906,59 @@ acas_on_exit() {
   acas_tee "harness/run_cobol_scenario.sh exiting with status $status (driven=$ACAS_RUN_DRIVEN)"
 }
 trap 'acas_on_exit "$?"' EXIT
+
+# ⭐ SIGNALS -- AND WHY THE DEFAULT DISPOSITION WAS NOT GOOD ENOUGH.
+#
+# With no handler installed, a SIGTERM terminates this shell and bash still runs the
+# EXIT trap on the way out -- but `$?' at that moment is the status of the last
+# command that COMPLETED, which during a long drive is routinely ZERO. The
+# run-status record therefore said `status 0' for a run somebody had killed, and
+# [harness/dump_tables.py] read that as a successful run and attested a capture of a
+# database the cycle had only partly written. That is the identical silent pass the
+# attestation exists to close, arriving through the one door nobody watches. The
+# handler records the real status, and acas_write_run_status prefers it.
+#
+# IT ALSO STOPS THE DRIVER, which the default disposition did not. On the
+# wall-clock-deadline path `timeout' signals the whole process group, so the pty
+# driver and the compiled menu both get TERM and the driver's own handler flushes the
+# transcript. On a MANUAL kill of this script only this pid is signalled, so the
+# driver, the menu it spawned, and every write that menu still had to make were left
+# running -- while this script's EXIT trap released the sequential run lock, so the
+# next run could start against a database an orphan was still writing to. Signalling
+# the driver here makes the two interruption paths behave the same: the driver
+# flushes its evidence, the menu goes with it, and the lock is released only once
+# nothing is still writing.
+#
+# 128+signum is the status a shell reports for a signalled child, so a caller sees
+# the same encoding it would have seen without a handler.
+# shellcheck disable=SC2317  # reached only through the signal traps installed below.
+acas_on_signal() {
+  local status="$1" name="$2"
+  ACAS_RUN_SIGNAL_STATUS="$status"
+  printf '\nharness/run_cobol_scenario.sh received %s; stopping.\n' "$name" >&2
+  if (( ACAS_RUN_DRIVER_PID > 0 )) && kill -0 "$ACAS_RUN_DRIVER_PID" 2>/dev/null; then
+    printf 'Signalling the pty driver (pid %s) so it flushes its transcript and the\n' \
+      "$ACAS_RUN_DRIVER_PID" >&2
+    printf 'compiled menu stops with it.\n' >&2
+    kill -TERM "$ACAS_RUN_DRIVER_PID" 2>/dev/null || true
+    # Bounded, because a handler must not become the hang it is cleaning up after.
+    # The driver's own deadline wrapper escalates to KILL, so nothing survives this
+    # indefinitely even if the wait gives up first.
+    local waited=0
+    while kill -0 "$ACAS_RUN_DRIVER_PID" 2>/dev/null && (( waited < 10 )); do
+      sleep 1
+      waited=$(( waited + 1 ))
+    done
+    if kill -0 "$ACAS_RUN_DRIVER_PID" 2>/dev/null; then
+      printf 'The driver has not stopped after %ss; its own deadline wrapper will KILL it.\n' \
+        "$waited" >&2
+    fi
+  fi
+  exit "$status"
+}
+trap 'acas_on_signal 130 SIGINT' INT
+trap 'acas_on_signal 143 SIGTERM' TERM
+trap 'acas_on_signal 129 SIGHUP' HUP
 
 
 acas_usage() {
@@ -968,17 +1120,51 @@ EXIT CODES
     70  usage error -- including a malformed ACAS_TIMEOUT_* budget
     71  a precondition failed
     72  the database is unreachable or the schema is absent
-    73  autocommit is off -- the frozen COBOL never reaches a COMMIT, so its
-        writes would be discarded at session close
+    73  autocommit is off -- the seeding window is still open, and the frozen
+        COBOL never reaches a COMMIT, so this run's writes would be discarded at
+        session close and the capture would be empty
     74  a compiled artifact is missing -- run harness/build_oracle.sh
-    75  the scenario file is missing or malformed
+    75  the scenario file is missing, unreadable, does not parse as a YAML
+        mapping, or is incomplete. The parse check is deliberately separate from
+        the value extraction, so a malformed document is reported as a malformed
+        document rather than as "no operation was named" -- which points at the
+        command line when the fault is in the file. [harness/seed.sh] and
+        [harness/run_python_scenario.sh] report the same fault the same way.
     76  the driver timed out, spun, or saw a screen refusal
     77  a post-run assertion failed
     78  a bounded command overran its deadline. Distinct from 76: 76 is the
         driver's own verdict about a screen, 78 means a deadline expired and
-        the command was killed, so no verdict was reached at all.
+        the command was killed, so no verdict was reached at all. The pty
+        driver preserves its evidence on this path: it flushes the transcript
+        and its outcome record from a signal handler before it goes, and the
+        record then carries an `interrupted' line saying why, so the screen the
+        cycle had reached is still readable afterwards.
     79  insufficient free space for the frozen fh-logger. Nothing was run and
         the database was not contacted.
+
+ARTIFACTS, all under $ACAS_OUT/run-logs/<scenario>/ and all mode 0600, none of
+them inside any tree the diff stage compares:
+    cobol.log               the pty transcript, escape sequences stripped
+    cobol.plan              the resolved keystroke plan
+    cobol.result            the driver's machine-readable outcome record
+    cobol.seed-fingerprint  the row count of every table the scenario names, in
+                            the scenario's declared order, recorded immediately
+                            before the drive. [harness/run_python_scenario.sh]
+                            compares its own counts with this file and refuses
+                            to proceed if they differ, so the two cycles cannot
+                            silently be handed different starting states. Any
+                            fingerprint left by an earlier run is removed at the
+                            start of this one, so "absent" always means "this
+                            run did not get that far".
+    cobol.run-status        scenario, side, this script's exit status and the
+                            digest of the fingerprint. Written from the EXIT
+                            trap, so it exists for every termination path.
+                            [harness/dump_tables.py] records it as an
+                            attestation in the dump manifest and
+                            [harness/diff_states.py] refuses to compare two
+                            captures unless both sides attest success -- which
+                            is what stops a failed run from being reported as
+                            an empty, and therefore "identical", diff.
 
 This script never exits 0 unconditionally. The frozen build scripts do --
 [comp-all.sh:L45] and [common/comp-common.sh:L59] -- and they are NOT fixed;
@@ -1268,6 +1454,92 @@ acas_scenario_default() {
 
 
 # STAGE 1 -- resolve the scenario, the operation and the subsystem.
+# ⭐ IS THE FILE ACTUALLY YAML?  The extractor above is a deliberate awk reader and
+# stays one: it needs no dependency, it reads exactly the flat scalars this script
+# consumes, and replacing it with a parser would be a change with no benefit. But a
+# reader that only LOOKS FOR keys cannot distinguish "the document is fine and the
+# key is absent" from "the document is not a document at all", and the difference
+# matters to the operator. A file with a tab-indented block, an unclosed quote or a
+# duplicated key yielded no `operation:' and this script then died EX_USAGE=70 "no
+# operation was named. Give --operation, or an operation: key in the scenario
+# file." -- advice that is useless, because the key is right there in the file and
+# is not the problem. [harness/seed.sh] and [harness/run_python_scenario.sh] both
+# parse with PyYAML and both report a parse failure as such; this makes the third
+# script agree with them, on the same exit code, so one malformed scenario produces
+# one diagnosis wherever the protocol first touches it.
+#
+# The validity check and the extraction are deliberately SEPARATE. This asserts the
+# document is a YAML mapping and nothing more; awk still reads every value. So the
+# check cannot change which value any key resolves to, and cannot silently start
+# accepting a document the awk reader would have read differently.
+#
+# PyYAML absent is NOT fatal here. It is a hard requirement of the seed stage,
+# which cannot bind a scenario without it, but this stage's own reader does not
+# need it -- so a missing parser degrades to the previous behaviour and says so,
+# rather than refusing to run a scenario it could have run.
+acas_assert_scenario_parses() {
+  local rc=0 report
+  acas_deadline_prefix "$ACAS_TIMEOUT_CLIENT"
+  report="$("${ACAS_DEADLINE_ARGV[@]}" python3 - "$ACAS_RUN_SCENARIO_FILE" 2>&1 <<'PY'
+"""Assert that a scenario file is a YAML mapping.
+
+Exit 0 it is, 3 it is not (unreadable, malformed, or not a mapping at the top
+level), 6 PyYAML is unavailable so nothing was checked.
+"""
+
+import sys
+
+try:
+    import yaml
+except ImportError:
+    sys.stderr.write('PyYAML is not installed\n')
+    raise SystemExit(6)
+
+path = sys.argv[1]
+try:
+    with open(path, 'r', encoding='utf-8') as handle:
+        document = yaml.safe_load(handle)
+except OSError as error:
+    sys.stderr.write('cannot read %s: %s\n' % (path, error))
+    raise SystemExit(3)
+except yaml.YAMLError as error:
+    detail = str(error).replace('\n', ' ')
+    sys.stderr.write('%s is not valid YAML: %s\n' % (path, detail))
+    raise SystemExit(3)
+
+if document is None:
+    sys.stderr.write('%s is empty\n' % path)
+    raise SystemExit(3)
+if not isinstance(document, dict):
+    sys.stderr.write('%s does not contain a YAML mapping at the top level; '
+                     'it parsed as %s\n' % (path, type(document).__name__))
+    raise SystemExit(3)
+PY
+  )" || rc=$?
+
+  case "$rc" in
+    0)
+      acas_log 'verified: the scenario file parses as a YAML mapping'
+      ;;
+    6)
+      acas_note 'PyYAML is not installed, so the scenario file was NOT checked for validity; the awk reader below will simply find no keys if it is malformed'
+      ;;
+    *)
+      acas_die "$EX_SCENARIO" \
+        'the scenario file could not be parsed as a YAML mapping.' \
+        "  scenario file: $ACAS_RUN_SCENARIO_FILE" \
+        "  reported: ${report:-<no output>}" \
+        'Every value this script reads -- the operation, the subsystem, the pinned' \
+        'run date, the switches and the affected-table list -- comes from that file,' \
+        'so a document that does not parse yields no values at all and the failure' \
+        'would otherwise surface as "no operation was named", which points at the' \
+        'command line rather than at the file. Fix the YAML and re-run.' \
+        '[harness/seed.sh] and [harness/run_python_scenario.sh] report the same' \
+        'fault the same way, so all three stages agree.'
+      ;;
+  esac
+}
+
 acas_resolve_scenario() {
   ACAS_RUN_CURRENT_STAGE='resolving the scenario'
   acas_stage 'Stage 1/8: scenario, operation and subsystem'
@@ -1278,6 +1550,7 @@ acas_resolve_scenario() {
       'Pass the path of a scenario definition file.'
     [[ -r "$ACAS_RUN_SCENARIO_FILE" ]] || acas_die "$EX_SCENARIO" \
       "scenario file is not readable: $ACAS_RUN_SCENARIO_FILE"
+    acas_assert_scenario_parses
   fi
 
   if [[ -z "$ACAS_RUN_SCENARIO" ]]; then
@@ -1811,17 +2084,110 @@ acas_open_log() {
   ACAS_RUN_PLAN_FILE="$plan"
   ACAS_RUN_RESULT_FILE="$result"
 
+  # ⭐ THE STALE-FINGERPRINT WINDOW, CLOSED HERE AND NOT LATER.
+  # cobol.seed-fingerprint is written by acas_record_seed_fingerprint, immediately
+  # before the drive; [harness/run_python_scenario.sh] reads it and REFUSES to
+  # compare if the two sides started from different row counts. If this run dies
+  # before that stage -- a missing artifact, a database refusal -- a fingerprint
+  # left over from an EARLIER parity run would still be sitting at that name, and
+  # the Python side would compare against a starting state that has nothing to do
+  # with this attempt. So the name is emptied at the first moment the run-logs
+  # directory is known good, which makes "absent" mean "this run did not get that
+  # far" and never "some previous run's counts".
+  ACAS_RUN_FINGERPRINT="$dir/cobol.seed-fingerprint"
+  if [[ -e "$ACAS_RUN_FINGERPRINT" || -L "$ACAS_RUN_FINGERPRINT" ]]; then
+    rm -f -- "$ACAS_RUN_FINGERPRINT" 2>/dev/null || acas_die "$EX_PRECONDITION" \
+      "a previous seed fingerprint could not be removed: $ACAS_RUN_FINGERPRINT" \
+      'Leaving it in place would let the Python side cross-check this run against' \
+      "another run's starting state."
+    acas_note 'removed the seed fingerprint left by an earlier run at this name'
+  fi
+
+  # The per-side run-status record. Written by the EXIT trap, so it exists for
+  # EVERY termination path and carries this run's real status.
+  ACAS_RUN_STATUS_FILE="$dir/cobol.run-status"
+  acas_create_private_file "$ACAS_RUN_STATUS_FILE" "the run-status record"
+
   # No timestamp in this header, by design.
   acas_tee "harness/run_cobol_scenario.sh -- scenario $ACAS_RUN_SCENARIO, operation $ACAS_RUN_OPERATION"
   acas_stage 'Stage 3/8: transcript'
   acas_log "transcript = $ACAS_RUN_LOG"
   acas_log "plan       = $ACAS_RUN_PLAN_FILE"
   acas_log "outcome    = $ACAS_RUN_RESULT_FILE"
-  acas_note 'all three are OUTSIDE the compared tree, so they cannot perturb a state diff'
-  acas_note 'their SHA-256 fingerprints come at the END of the run, not here: two of the'
-  acas_note 'three are still empty at this point and the third is still being appended to,'
-  acas_note 'so a digest taken now would identify nothing an operator could later check'
-  acas_note '(rule R-6)'
+  acas_log "run status = $ACAS_RUN_STATUS_FILE"
+  acas_log "fingerprint= $ACAS_RUN_FINGERPRINT (written just before the drive)"
+  acas_note 'all five are OUTSIDE the compared tree, so they cannot perturb a state diff'
+  acas_note 'their SHA-256 fingerprints come at the END of the run, not here: all but the'
+  acas_note 'transcript are still empty at this point and the transcript is still being'
+  acas_note 'appended to, so a digest taken now would identify nothing an operator could'
+  acas_note 'later check (rule R-6)'
+}
+
+# =============================================================================
+# THE PRE-RUN SEED FINGERPRINT -- the oracle half of a cross-check that had none
+#
+# [harness/run_python_scenario.sh] records the row count of every table its
+# scenario names, in the order the scenario names them, and then compares its
+# record with `$ACAS_OUT/run-logs/<scenario>/cobol.seed-fingerprint'. NOTHING wrote
+# that file. The cross-check was therefore unreachable: every Python run reported
+# "seed cross-check: unverified -- no oracle-side fingerprint", and the guarantee
+# it exists to give -- that the two cycles were handed the same starting state --
+# was never once actually checked. The consequence is the expensive one: a re-seed
+# that quietly loaded a different fixture produces a diff full of real differences
+# with no indication that the seed, not the cycle, was the cause.
+#
+# This is the missing writer. The FORMAT IS A CONTRACT, because the far side
+# compares with `cmp -s' -- byte for byte, not field by field:
+#     <table><TAB><count>\n     one line per table, no header, no trailing blank
+# in the scenario's declared order, with a single hyphen in place of the count for
+# a table that cannot be counted. That is exactly what the Python side's `counts'
+# mode emits, so the two records are comparable without either side normalising the
+# other. Row counts only -- all integers, no monetary value anywhere near this file
+# (R-2) -- and it lives under run-logs/, outside every compared tree, so it can
+# never be diffed as though it were posted data (R-6).
+#
+# WHY THIS SIDE DOES NOT ITSELF COMPARE. In protocol order the compiled run is
+# first and the Python run second, so at this moment there is nothing to compare
+# against: any python.seed-fingerprint present belongs to a previous parity run and
+# a different seeding. Keeping ONE authority for the comparison -- the side that
+# runs second -- is what stops a leftover file from manufacturing a failure. What
+# this side owes the protocol is an honest record of its own starting state, and
+# that is all it writes.
+acas_record_seed_fingerprint() {
+  ACAS_RUN_CURRENT_STAGE='recording the pre-run seed fingerprint'
+  acas_stage 'Stage 8a/8: the pre-run seed fingerprint'
+
+  if (( ${#ACAS_RUN_TABLES[@]} == 0 )); then
+    acas_warn 'no affected-table list, so no seed fingerprint is recorded and the Python side will report the cross-check as unverified'
+    return 0
+  fi
+
+  acas_create_private_file "$ACAS_RUN_FINGERPRINT" 'the seed fingerprint'
+
+  local table rc lines=''
+  for table in "${ACAS_RUN_TABLES[@]}"; do
+    rc=0
+    acas_sql_scalar "select count(*) from $(acas_sql_quote_ident "$table");" || rc=$?
+    if (( rc == 0 )) && [[ "$ACAS_SQL_OUT" =~ ^[0-9]+$ ]]; then
+      lines+="$table"$'\t'"$ACAS_SQL_OUT"$'\n'
+    else
+      # A hyphen, and not a zero: "this table could not be counted" is a
+      # different fact from "this table is empty", and the far side must be able
+      # to tell them apart. The Python side spells the same case the same way.
+      lines+="$table"$'\t''-'$'\n'
+      acas_warn "$table could not be counted for the seed fingerprint$([[ -n "$ACAS_SQL_DIAG" ]] && printf ': %s' "$(acas_diag_summary "$ACAS_SQL_DIAG")")"
+    fi
+  done
+
+  printf '%s' "$lines" >"$ACAS_RUN_FINGERPRINT" || acas_die "$EX_PRECONDITION" \
+    "the seed fingerprint could not be written: $ACAS_RUN_FINGERPRINT"
+  acas_log "seed fingerprint = $ACAS_RUN_FINGERPRINT"
+  local line
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    acas_log "  $(printf '%-22s %s' "${line%%$'\t'*}" "${line##*$'\t'}")"
+  done <<<"$lines"
+  acas_note 'the Python side compares its own counts with this file and refuses to proceed if they differ; this side records and does not compare, because in protocol order it runs first'
 }
 
 # STAGE 5 -- the compiled oracle.
@@ -2213,18 +2579,25 @@ acas_assert_database() {
       'stands and never migrated.'
   fi
 
-  # Autocommit must be OFF: that is the frozen transaction contract the Agent
-  # Action Plan mandates -- section 0.2.1.1 (the seeding contract), section
-  # 0.4.1.7 (on harness/Dockerfile.mariadb: "autocommit off to match the
-  # loaders") and section 0.5.2 -- all deriving it from the banner carried by all
-  # 28 common/*LD.cbl loaders at [common/glbatchLD.cbl:L9-L13]: "you MUST ensure
-  # that autocommit is OFF in the rdb settings".
+  # Autocommit must be ON here, and the reason is a scoping one rather than a
+  # preference. The Agent Action Plan mandates OFF for SEEDING and says so in all
+  # three of its provisions -- section 0.2.1.1 ("the batch loader turns autocommit
+  # off"), section 0.5.2 ("autocommit must be off DURING SEEDING") and section
+  # 0.4.1.7 on harness/Dockerfile.mariadb ("autocommit off TO MATCH THE LOADERS",
+  # the loaders being the seeding stage) -- all deriving it from the banner carried
+  # by all 28 common/*LD.cbl loaders at [common/glbatchLD.cbl:L9-L13]: "you MUST
+  # ensure that autocommit is OFF in the rdb settings".
+  #
+  # A POSTING RUN IS NOT SEEDING. It is runtime application access, which the AAP
+  # never scopes OFF, so it runs in the mode harness/Dockerfile.mariadb declares
+  # for runtime access. harness/seed.sh owns the OFF window, opens it around the
+  # frozen load programs and restores this mode when it closes.
   #
   # The banner addresses the OPERATOR because no COBOL program can act on it: the
   # vendored `cobmysqlapi38.c' exposes MySQL_commit and MySQL_rollback but NOT
-  # MySQL_autocommit. Server configuration is the only lever, which is why the
-  # setting has exactly one authority, harness/Dockerfile.mariadb, and why this
-  # script ASSERTS and NEVER SETS it.
+  # MySQL_autocommit. Only the server's setting can establish the mode, which is
+  # why this script ASSERTS and NEVER SETS it -- the runtime authority is
+  # harness/Dockerfile.mariadb and the window authority is harness/seed.sh.
   #
   # CONSEQUENCE, PRESERVED NOT REPAIRED (R-4): the frozen code reaches no COMMIT.
   # Every `perform aa020-Rollback' in all 28 loaders is commented out (78 sites,
@@ -2235,13 +2608,17 @@ acas_assert_database() {
   # twenty in-scope bridges, in the in-scope handlers and on every bridge close
   # path.
   #
-  # So MariaDB opens an implicit transaction on this run's first DML statement and
-  # discards it at disconnect: the compiled posting run leaves NO durable rows.
-  # That is the frozen code's own defect, and R-4 makes it the specification --
-  # "a defect reproduced is correct; a defect fixed is a failure". This script
-  # warns about it below and proceeds; it does not issue the missing COMMIT and
-  # does not demand a mode the AAP does not sanction in order to obtain a
-  # more convenient diff.
+  # Under the runtime mode each statement the bridges issue lands on its own,
+  # which is exactly the per-statement model the bridges were written for -- what
+  # is absent is any transaction BOUNDARY, so a run that fails part-way through a
+  # double entry leaves the completed half in place instead of rolling it back.
+  # That is the frozen code's own defect and R-4 makes it the specification --
+  # "a defect reproduced is correct; a defect fixed is a failure" -- so this script
+  # warns about it below and proceeds, issuing neither the missing COMMIT nor the
+  # missing ROLLBACK. Were this run driven inside the seeding window instead, the
+  # implicit transaction MariaDB opens on its first DML statement would be
+  # discarded at disconnect and the capture would be empty, which is why the mode
+  # is asserted rather than assumed.
   rc=0
   acas_sql_scalar 'select concat_ws(0x2f, @@GLOBAL.autocommit + 0, @@SESSION.autocommit + 0);' || rc=$?
   (( rc == 0 )) || acas_die "$EX_DATABASE" \
@@ -2258,26 +2635,39 @@ acas_assert_database() {
     'could not parse the autocommit settings.' \
     "client returned: $ACAS_SQL_OUT"
   acas_log "autocommit (global/session) = $autocommit"
-  if [[ "$autocommit" != '0/0' ]]; then
+  if [[ "$autocommit" != '1/1' ]]; then
     acas_die "$EX_AUTOCOMMIT" \
-      "autocommit must be OFF; the server reports $autocommit (global/session)." \
-      'The Agent Action Plan mandates OFF in three places -- sections 0.2.1.1,' \
-      '0.4.1.7 and 0.5.2 -- all from the banner carried by all 28' \
-      'common/*LD.cbl loaders at [common/glbatchLD.cbl:L9-L13]: "you MUST ensure' \
-      'that autocommit is OFF in the rdb settings".' \
-      'Running the oracle under ON would drive the compiled cycle in a mode the' \
-      'AAP does not sanction, so its state would not be the frozen contract this' \
-      'harness exists to capture.' \
-      'harness/Dockerfile.mariadb writes autocommit=0 into' \
-      '/etc/mysql/conf.d/99-acas-oracle.cnf and is the single authority; this' \
-      'script only asserts it. Start the harness MariaDB service built from that' \
-      'Dockerfile, or set autocommit=0 in the server configuration and restart.'
+      "autocommit must be ON for the compiled cycle; the server reports $autocommit (global/session)." \
+      'A posting run is RUNTIME APPLICATION ACCESS, not seeding. The Agent Action' \
+      'Plan scopes its autocommit-OFF requirement to seeding in all three of its' \
+      'provisions -- section 0.2.1.1 ("the batch loader turns autocommit off"),' \
+      'section 0.5.2 ("autocommit must be off DURING SEEDING") and section 0.4.1.7' \
+      'on harness/Dockerfile.mariadb ("autocommit off TO MATCH THE LOADERS", the' \
+      'loaders being the seeding stage) -- all from the banner carried by all 28' \
+      'common/*LD.cbl loaders at [common/glbatchLD.cbl:L9-L13]. harness/seed.sh' \
+      'owns that window and restores this mode when it closes.' \
+      'Driving the compiled cycle with autocommit OFF would be worse than' \
+      'unsanctioned: the frozen code reaches no COMMIT, so every posting it made' \
+      'would be discarded at session close, the capture would be EMPTY, and an' \
+      'empty diff is the only pass condition the protocol has -- the run would' \
+      'certify' \
+      'the migration exact having posted nothing.' \
+      'Finding the mode OFF means the seeding window is still open: a seed' \
+      'interrupted before its exit trap ran, or a server configured for the' \
+      'seeding mode server-wide. harness/Dockerfile.mariadb declares autocommit=1' \
+      'in /etc/mysql/conf.d/99-acas-oracle.cnf for runtime access; this script only' \
+      'asserts it. Start the harness MariaDB service built from that Dockerfile,' \
+      'or restore the runtime mode with: set global autocommit = 1'
   fi
 
   # The reproduced defect, restated where it bites. A WARNING, not a refusal:
   # R-4 requires the frozen behaviour, so refusing would be refusing the
-  # specification.
-  acas_warn 'the frozen COBOL reaches no COMMIT, so under this AAP-mandated mode this posting run leaves NO durable rows: in all 28 common/*LD.cbl loaders every "perform aa020-Rollback" is commented out (78 sites, none live) and "perform aa030-Commit" occurs exactly once anywhere, at [common/irsdfltLD.cbl:L437], commented out too, while the twenty in-scope bridges, the in-scope handlers and every bridge close path contain zero COMMIT/ROLLBACK/START TRANSACTION. The maintainer recorded the same observation at [common/analLD.cbl:L442] ("These do not work during testing with mariadb - Non transactional model or autocommit set ON"). This is the reproduced legacy defect (R-4); nothing here issues the missing COMMIT, because a defect fixed is a failure.'
+  # specification. Under the runtime mode asserted above the statements the
+  # bridges issue do land, one per statement, exactly as the bridges' own
+  # per-statement model expects -- what remains absent is any transaction
+  # BOUNDARY, so a half-posted double entry stays half-posted rather than rolling
+  # back, which is the frozen behaviour the anomaly log records.
+  acas_warn 'the frozen COBOL reaches no COMMIT and no ROLLBACK: in all 28 common/*LD.cbl loaders every "perform aa020-Rollback" is commented out (78 sites, none live) and "perform aa030-Commit" occurs exactly once anywhere, at [common/irsdfltLD.cbl:L437], commented out too, while the twenty in-scope bridges, the in-scope handlers and every bridge close path contain zero COMMIT/ROLLBACK/START TRANSACTION. The maintainer recorded the same observation at [common/analLD.cbl:L442] ("These do not work during testing with mariadb - Non transactional model or autocommit set ON"), and [common/glbatchLD.cbl:L386] notes the server is "as normally ... set to autocommit". So this run has NO transaction boundaries: a failure part-way through a double entry leaves the completed half in place. That is the reproduced legacy defect (R-4); nothing here issues the missing COMMIT or the missing ROLLBACK, because a defect fixed is a failure.'
 
   # There must BE a system record. Without it the menu cannot start, and an
   # empty result would otherwise make every column check below vacuously pass.
@@ -3060,6 +3450,15 @@ acas_drive() {
   acas_deadline_prefix "$ACAS_TIMEOUT_DRIVE"
   local drive_started="$SECONDS"
   set +e
+  # ⭐ STARTED IN THE BACKGROUND AND WAITED FOR, RATHER THAN RUN IN THE FOREGROUND.
+  # Nothing about the drive itself changes -- the deadline wrapper, the arguments and
+  # the here-document are identical, and `wait' yields exactly the status the
+  # foreground form did. What changes is that the pid is KNOWN while the drive is in
+  # progress, which is what lets acas_on_signal stop the driver when this script is
+  # killed instead of leaving it, and the compiled menu it spawned, running against
+  # the database after the run lock has been released. It also means the driver gets
+  # its TERM on the manual-kill path, so its own handler flushes the transcript there
+  # too and the evidence guarantee is not limited to the wall-clock-deadline path.
   "${ACAS_DEADLINE_ARGV[@]}" python3 - \
     "$ACAS_RUN_PLAN_FILE" \
     "$ACAS_RUN_LOG" \
@@ -3069,7 +3468,8 @@ acas_drive() {
     "$ACAS_RUN_ROWS" \
     "$ACAS_RUN_COLS" \
     "$ACAS_RUN_TIMEOUT" \
-    <<'PY'
+    <<'PY' &
+import atexit
 import fcntl
 import os
 import pty
@@ -3232,6 +3632,137 @@ matches = []          # (step, kind) in the order they were seen
 offset = 0            # search position in the cleaned stream
 child_status = None
 failure = None        # (code, headline, detail...)
+interrupted = None    # why the drive ended early, if it did
+
+# --- the evidence writer, installed BEFORE the first byte is read ------------
+# WRITING THE EVIDENCE, WITHOUT FOLLOWING A LINK  (CWE-59, CWE-367)
+#
+# acas_create_private_file already created both of these as regular files at mode
+# 0600 and refused a symlink at each name -- but that was moments ago, before the
+# whole posting cycle was driven. `open(path, 'a')` and `open(path, 'w')` both
+# FOLLOW a symlink, and 'w' TRUNCATES what it finds, so anything able to replace
+# either name during the drive would redirect this write and read the pty
+# transcript of an entire accounting run. O_NOFOLLOW closes that window at the
+# only moment it is actually open.
+#
+# O_CREAT is deliberately absent: both files MUST already exist, because the shell
+# created them. If one has vanished, that is a fact worth reporting rather than
+# papering over with a fresh file.
+#
+# ⭐ WHY THIS IS A FUNCTION, REGISTERED EARLY, RATHER THAN A BLOCK AT THE END.
+# The evidence used to be written by straight-line code AFTER the read loop, which
+# meant it was written only when the loop finished. It never finished on the one
+# path where the transcript matters most: the outer wall-clock deadline sends this
+# process SIGTERM, the default disposition kills it, and the run then reported
+# "the driver exceeded its deadline" while leaving cobol.log with no trace of the
+# child's output and cobol.result at zero bytes -- so the operator was told a
+# screen never arrived and given nothing whatever to see WHICH screen the cycle
+# had reached. Every byte needed to answer that is already in `raw'; only the
+# write was missing.
+#
+# Three arrival paths are covered, and they are three because no one of them
+# covers the others:
+#   * atexit           -- normal return, sys.exit(), and an unhandled exception
+#   * SIGTERM/INT/HUP  -- the outer deadline, a Ctrl-C, a lost terminal. None of
+#                         these runs atexit on its own: the default disposition
+#                         terminates the process outright
+#   * an explicit call at the end of the happy path, so the ordinary run does not
+#                         depend on interpreter shutdown ordering at all
+# The function is idempotent through `_evidence_written', so the belt and the
+# braces cannot double-append the transcript.
+#
+# It must not raise. It runs from a signal handler and from interpreter shutdown,
+# and an exception raised there would replace a partial-evidence problem with a
+# confusing traceback and a different exit status.
+_NOFOLLOW = getattr(os, 'O_NOFOLLOW', 0)
+_evidence_written = False
+
+
+def _reopen(path, append):
+    """Reopen a file the shell already created, refusing to follow a symlink."""
+    flags = os.O_WRONLY | _NOFOLLOW | (os.O_APPEND if append else os.O_TRUNC)
+    return os.fdopen(os.open(path, flags), 'w', encoding='utf-8')
+
+
+def write_evidence():
+    """Write the transcript and the outcome record. Idempotent; never raises."""
+    global _evidence_written
+    if _evidence_written:
+        return
+    _evidence_written = True
+    try:
+        transcript = clean(bytes(raw)).decode('utf-8', 'replace')
+        with _reopen(log_path, True) as handle:
+            handle.write('\n==> pty transcript (escape sequences stripped)\n')
+            handle.write(transcript)
+            if not transcript.endswith('\n'):
+                handle.write('\n')
+            if interrupted is not None:
+                handle.write('==> TRANSCRIPT IS PARTIAL: %s\n' % interrupted)
+            handle.write('==> end of transcript\n')
+    except (OSError, ValueError) as exc:
+        sys.stderr.write('driver: could not write the transcript to %s: %s\n'
+                         % (log_path, exc))
+    try:
+        with _reopen(result_path, False) as handle:
+            handle.write('child_exit\t%s\n'
+                         % ('' if child_status is None else child_status))
+            handle.write('raw_bytes\t%d\n' % len(raw))
+            if interrupted is not None:
+                handle.write('interrupted\t%s\n' % interrupted)
+            for step, kind in matches:
+                handle.write('matched\t%s\t%s\n' % (step, kind))
+            if failure is not None:
+                handle.write('failed\t%s\t%s\n' % (failure[0], failure[1]))
+                for detail in failure[2:]:
+                    handle.write('detail\t%s\n' % detail)
+    except (OSError, ValueError) as exc:
+        sys.stderr.write('driver: could not write the outcome record to %s: %s\n'
+                         % (result_path, exc))
+
+
+atexit.register(write_evidence)
+
+_SIGNAL_NAMES = {
+    signal.SIGTERM: 'SIGTERM',
+    signal.SIGINT: 'SIGINT',
+    signal.SIGHUP: 'SIGHUP',
+}
+
+
+def _on_signal(signum, _frame):
+    """Preserve the evidence, stop the child, and leave.
+
+    `os._exit' rather than `sys.exit': this runs in a signal handler, so the
+    fewer interpreter mechanisms involved the better, and the evidence has
+    already been written by the line above it. 128+signum is the conventional
+    encoding a shell would report for a signalled child; the outer `timeout'
+    substitutes its own 124 on the deadline path, which is what
+    acas_assert_not_timed_out keys on.
+    """
+    global interrupted
+    interrupted = 'the driver received %s -- the transcript below stops where the ' \
+                  'signal arrived, and the run did NOT complete' \
+                  % _SIGNAL_NAMES.get(signum, str(signum))
+    # Best effort, and deliberately only ever this one pid: leaving the compiled
+    # menu attached to a pty nobody is reading would hold the run lock's promise
+    # of sequential execution open long after this process is gone.
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        pass
+    write_evidence()
+    os._exit(128 + signum)
+
+
+for _signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+    try:
+        signal.signal(_signum, _on_signal)
+    except (OSError, ValueError):
+        # A disposition that cannot be installed is not worth failing the drive
+        # for; the atexit path still covers the ordinary exits.
+        sys.stderr.write('driver: could not install a handler for %s\n'
+                         % _SIGNAL_NAMES.get(_signum, str(_signum)))
 
 
 def reap(block=False):
@@ -3445,45 +3976,14 @@ except OSError:
     pass
 
 # --- write the evidence ------------------------------------------------------
-# WRITING THE EVIDENCE, WITHOUT FOLLOWING A LINK  (CWE-59, CWE-367)
-#
-# acas_create_private_file already created both of these as regular files at mode
-# 0600 and refused a symlink at each name -- but that was minutes ago, before the
-# whole posting cycle was driven. `open(path, 'a')` and `open(path, 'w')` both
-# FOLLOW a symlink, and 'w' TRUNCATES what it finds, so anything able to replace
-# either name during the drive would redirect this write and read the pty
-# transcript of an entire accounting run. O_NOFOLLOW closes that window at the
-# only moment it is actually open.
-#
-# O_CREAT is deliberately absent: both files MUST already exist, because the shell
-# created them. If one has vanished, that is a fact worth failing on rather than
-# papering over with a fresh file.
-_NOFOLLOW = getattr(os, 'O_NOFOLLOW', 0)
-
-
-def _reopen(path, append):
-    """Reopen a file the shell already created, refusing to follow a symlink."""
-    flags = os.O_WRONLY | _NOFOLLOW | (os.O_APPEND if append else os.O_TRUNC)
-    return os.fdopen(os.open(path, flags), 'w', encoding='utf-8')
-
-
-transcript = clean(bytes(raw)).decode('utf-8', 'replace')
-with _reopen(log_path, True) as handle:
-    handle.write('\n==> pty transcript (escape sequences stripped)\n')
-    handle.write(transcript)
-    if not transcript.endswith('\n'):
-        handle.write('\n')
-    handle.write('==> end of transcript\n')
-
-with _reopen(result_path, False) as handle:
-    handle.write('child_exit\t%s\n' % ('' if child_status is None else child_status))
-    handle.write('raw_bytes\t%d\n' % len(raw))
-    for step, kind in matches:
-        handle.write('matched\t%s\t%s\n' % (step, kind))
-    if failure is not None:
-        handle.write('failed\t%s\t%s\n' % (failure[0], failure[1]))
-        for detail in failure[2:]:
-            handle.write('detail\t%s\n' % detail)
+# The writer, its O_NOFOLLOW discipline and the three arrival paths that reach it
+# are all defined next to the state they serialise, immediately after the pty was
+# forked -- see the block headed "the evidence writer, installed BEFORE the first
+# byte is read". Calling it explicitly here keeps the ordinary run independent of
+# interpreter-shutdown ordering; the call is idempotent, so the atexit
+# registration and the signal handlers remain the safety net they are meant to be
+# rather than a second writer.
+write_evidence()
 
 if failure is not None:
     sys.stderr.write('driver: %s\n' % failure[1])
@@ -3492,16 +3992,91 @@ if failure is not None:
     sys.exit(failure[0])
 sys.exit(0)
 PY
+  ACAS_RUN_DRIVER_PID=$!
+  wait "$ACAS_RUN_DRIVER_PID"
   rc=$?
+  ACAS_RUN_DRIVER_PID=0
   set -e
 
   # A deadline expiry is separated from every driver-defined status BEFORE the
   # caller classifies it.
   local drive_elapsed=$(( SECONDS - drive_started ))
+  if acas_is_timeout_status "$rc" "$drive_elapsed" "$ACAS_TIMEOUT_DRIVE"; then
+    # The deadline is the ONE failure path on which the driver is killed rather
+    # than returning, so it is also the one on which the operator most needs to be
+    # told that the evidence survived. The driver's signal handler flushes both
+    # artifacts before it goes; this reports them, and quotes the last screen it
+    # managed to read, because "which screen did the cycle reach" is the only
+    # question a drive timeout ever raises.
+    acas_report_partial_drive_evidence
+  fi
   acas_assert_not_timed_out "$rc" "$drive_elapsed" "$ACAS_TIMEOUT_DRIVE" \
     'ACAS_TIMEOUT_DRIVE' 'driving the compiled menu'
 
   return "$rc"
+}
+
+# Announce what the interrupted driver left behind. Read-only, and deliberately
+# tolerant: it runs immediately before a die, so a missing or unreadable artifact
+# must not replace the timeout diagnosis with a different failure.
+acas_report_partial_drive_evidence() {
+  local reason='' bytes='' matched=0 line kind rest
+  if [[ -r "$ACAS_RUN_RESULT_FILE" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      kind="${line%%$'\t'*}"
+      rest="${line#*$'\t'}"
+      case "$kind" in
+        interrupted) reason="$rest" ;;
+        raw_bytes)   bytes="$rest" ;;
+        matched)     matched=$(( matched + 1 )) ;;
+      esac
+    done <"$ACAS_RUN_RESULT_FILE"
+  fi
+  if [[ -n "$reason" ]]; then
+    acas_log "the driver recorded why it stopped: $reason"
+  fi
+  if [[ -n "$bytes" ]]; then
+    acas_log "partial evidence preserved: ${bytes} byte(s) read from the pty, ${matched} plan step(s) matched"
+  else
+    acas_warn "the driver left no outcome record at $ACAS_RUN_RESULT_FILE, so how far the cycle got cannot be established from this run"
+    return 0
+  fi
+  acas_log "  transcript      = $ACAS_RUN_LOG"
+  acas_log "  outcome record  = $ACAS_RUN_RESULT_FILE"
+  # The last few non-blank lines OF THE TRANSCRIPT identify the screen the cycle
+  # was sitting on. Bounded, because this is a pointer into the evidence and not a
+  # second copy of it.
+  #
+  # ⭐ THE TRANSCRIPT REGION IS EXTRACTED, NOT THE FILE'S TAIL. cobol.log is the
+  # whole run log: this script's own lines go into it through acas_tee, and the
+  # driver APPENDS the pty transcript to the same file. Reading the tail therefore
+  # quotes whatever this function has just finished logging -- the excerpt ends up
+  # echoing itself, and the one thing the operator wanted, the child's last screen,
+  # is nowhere in it. So the region between the driver's own two markers is
+  # extracted instead, and the LAST such region, because --no-rotate-fh-log and a
+  # re-run against the same log can leave earlier ones above it.
+  if [[ -r "$ACAS_RUN_LOG" ]]; then
+    local -a tailed=()
+    while IFS= read -r line; do
+      [[ -n "${line// /}" ]] || continue
+      tailed+=("$line")
+    done < <(awk '
+      /^==> pty transcript/ { collecting = 1; count = 0; delete buffer; next }
+      /^==> end of transcript/ { collecting = 0; next }
+      /^==> TRANSCRIPT IS PARTIAL/ { next }
+      collecting { buffer[++count] = $0 }
+      END { start = count - 5; if (start < 1) start = 1
+            for (i = start; i <= count; i++) print buffer[i] }
+    ' "$ACAS_RUN_LOG" 2>/dev/null || true)
+    if (( ${#tailed[@]} > 0 )); then
+      acas_log 'the last screen text the driver read before it was stopped:'
+      for line in "${tailed[@]}"; do
+        acas_log "  | $line"
+      done
+    else
+      acas_note 'the transcript holds no screen text, so the child produced no output at all before it was stopped'
+    fi
+  fi
 }
 
 
@@ -3631,8 +4206,18 @@ acas_assert_after_run() {
 
   local irs_after
   if irs_after="$(acas_system_column 'IRS-INSTEAD')"; then
+    # ⭐ BOTH SIDES OF THE COMPARISON ARE STRIPPED, not just the one read back.
+    # `IRS-INSTEAD' is `pic x' and its General-Ledger-only value is a single SPACE.
+    # The column is CHAR(1) and MariaDB strips a trailing space from a CHAR on read,
+    # so the value comes back EMPTY; stripping only that side and comparing it with
+    # the scenario's unstripped `" "' reported "FAIL SYSTEM-REC.IRS-INSTEAD changed
+    # from ' ' to ''" on every General Ledger run, for a switch nothing had touched.
+    # Stage 6 already compares the SEEDED value this way -- it derives
+    # seeded_irs_trimmed and compares trimmed against trimmed -- so this is the
+    # post-run half of a rule the pre-run half was already following.
     irs_after="${irs_after// /}"
-    if [[ "$irs_after" == "$ACAS_RUN_IRS_INSTEAD" ]]; then
+    local irs_pinned="${ACAS_RUN_IRS_INSTEAD// /}"
+    if [[ "$irs_after" == "$irs_pinned" ]]; then
       acas_log "PASS  SYSTEM-REC.IRS-INSTEAD = '$irs_after', unchanged"
     else
       failures=$((failures + 1))
@@ -4002,6 +4587,10 @@ acas_main() {
   acas_assert_database
   acas_assert_data_dir
   acas_build_plan
+
+  # LAST before the drive, so the counts it records are the state the compiled
+  # cycle is actually handed, with nothing between them.
+  acas_record_seed_fingerprint
 
   local rc=0
   acas_drive || rc=$?

@@ -657,3 +657,198 @@ affected_tables:
   - GLBATCH-REC
   - GLLEDGER-REC
   - GLPOSTING-REC
+
+# =============================================================================
+# THE SEED RECORDS
+# =============================================================================
+# The flat files this scenario declares above are BUILT from the records below by
+# harness/make_fixtures.py, which generates a COBOL writer per file, compiles it
+# against the FROZEN copybooks, and calls the FROZEN handler to do the writing.
+# The record layouts are therefore not restated here and cannot drift from them.
+#
+# EVERY VALUE IS A QUOTED STRING. That is rule R-2 operating at the outermost
+# edge of the system: an unquoted 1200.00 would be parsed by YAML into a binary
+# float before any COBOL ever saw it, and the whole migration's exactness claim
+# would be lost in the fixture rather than in the code. The quoted text is moved
+# into the frozen field by COBOL's own MOVE, so the picture clause performs the
+# store -- alignment on the implied decimal point, truncation toward zero, sign
+# placement -- exactly as it does for the compiled programs.
+#
+# WHAT THIS PARTICULAR SEED HAS TO ACHIEVE, restated from the analysis above so
+# that a reader changing a value can see what it would break: ONE General Ledger
+# batch, in the pinned cycle, WITH Batch-Status ZERO so that Status-Open is true
+# [copybooks/wsbatch.cob:L25-L27]. Phase one's detector then fires
+# [general/gl070.cbl:L314-L315], the mainline raises five
+# [general/gl070.cbl:L289], the menu gate diverts [general/general.cbl:L810-L811]
+# and gl071 and gl072 never run at all. If Bcycle did not equal cyclea the cycle
+# filter would discard the batch first [general/gl070.cbl:L312-L313], the
+# detector would never fire, and the scenario would report zero while LOOKING
+# like a Python-versus-COBOL disagreement -- so the two values below are pinned
+# to each other on purpose.
+#
+# THE MISMATCH ITSELF IS SEEDED AS ALREADY-DETECTED STATE, not re-derived here.
+# gl051's control-total gate is what leaves a batch open: it adds actual VAT into
+# actual gross BEFORE testing equality against the entered gross
+# [general/gl051.cbl:L1109-L1118]. This scenario drives gl_post_cycle and not the
+# proof step, so the seed presents the state that gate produces -- an entered
+# gross that DISAGREES with the actual gross the postings add up to, and the
+# batch consequently left open. Entered 1200.00 against an actual 1250.00 is that
+# disagreement, and Actual-Gross and Actual-Vat carry what the gate computed.
+seed_records:
+
+  # Key 1 is the only system row the frozen code reads [common/acas000.cbl].
+  # File-System-Used must be 1: a zero sends the whole run to Cobol flat files
+  # and leaves every in-scope table untouched, which on this scenario would look
+  # identical to a correct abort [copybooks/wssystem.cob:L111-L115].
+  # system.dat IS FOUR DIFFERENT RECORDS IN ONE RELATIVE FILE, keyed by relative
+  # record number -- [copybooks/selsys.cob] declares it ORGANIZATION RELATIVE with
+  # relative key `rrn', and the four system loaders each go straight to one slot:
+  #   "1"  systemLD [common/systemLD.cbl:L227] -> SYSTEM-REC    (the parameter record)
+  #   "2"  dfltLD   [common/dfltLD.cbl:L221]   -> SYSDEFLT-REC  (wsdflt.cob)
+  #   "3"  finalLD  [common/finalLD.cbl:L221]  -> SYSFINAL-REC  (wsfinal.cob)
+  #   "4"  sys4LD   [common/sys4LD.cbl:L226]   -> SYSTOT-REC    (wssys4.cob)
+  # All four are 1024 bytes, which is why one relative file can hold them, and ALL
+  # FOUR MUST BE PRESENT: masterLD runs every one of those loaders unconditionally
+  # [common/masterLD.sh:L50-L88] and the last is tested against zero rather than 63
+  # [common/masterLD.sh:L83-L86], so an unwritten slot ABORTS the seed. A slot with
+  # nothing to pin is declared as {} and written INITIALIZEd -- which is a statement
+  # about the pre-state rather than an omission.
+  system.dat:
+    "1":
+      - System-Record-Version-Prime: "3"
+        System-Record-Version-Secondary: "2"
+        Vat-Rate-1: "20.00"
+        Vat-Rate-2: "5.00"
+        Vat-Rate-3: "0.00"
+        Cyclea: "1"
+        Period: "1"
+        Run-Date: "155127"
+        File-System-Used: "1"
+        Date-Form: "1"
+        IRS-Instead: " "
+        SL-Autogen: " "
+        PL-Autogen: " "
+        S-Flag-P: "2"
+        P-Flag-P: "2"
+        Pass-Value: "0"
+        Level-1: "1"
+        Level-2: "1"
+        Level-3: "1"
+        Level-4: "1"
+
+    # Nothing to pin: the GL defaults record. Written INITIALIZEd so the slot EXISTS
+    # for dfltLD to read. Note this is NOT the IRS defaults record -- the copybook
+    # says so itself, its account field being COMP here and DISPLAY there
+    # [copybooks/wsdflt.cob:L6-L7].
+    "2": {}
+    # Nothing to pin: the GL final-accounts record, a pure table of 26 headings
+    # [copybooks/wsfinal.cob:L11]. Written INITIALIZEd so the SLOT EXISTS for finalLD
+    # to read -- and MEASURED consequence, recorded here rather than left to be
+    # rediscovered: INITIALIZE sets an alphanumeric table to spaces, so finalLD's own
+    # test `if Final-Record = spaces' [common/finalLD.cbl:L243] is TRUE and it takes
+    # its "No Data - aborting Terminating nothing to do" path, returning zero and
+    # loading NOTHING. SYSFINAL-REC therefore stays empty, which is precisely the
+    # pre-state this scenario wants: the table is not among affected_tables and no
+    # in-scope program writes it. The slot is still declared, because a slot that does
+    # not exist at all is a read failure rather than a defined empty pre-state.
+    "3": {}
+    # The period-totals record. Written INITIALIZEd: no operation on this route
+    # writes a period total -- all nine sites are in the Sales and Purchase programs
+    # -- so a zero pre-state is the honest one here, and the slot must still exist
+    # for sys4LD to read.
+    "4": {}
+  # Four nominal accounts carrying KNOWN NON-ZERO balances. That is deliberate
+  # and it is the whole positive evidence of this scenario: the abort means these
+  # rows must come back BYTE-IDENTICAL, and an unchanged non-zero balance proves
+  # far more than an unchanged zero, which a run that never opened the table
+  # would also produce. The name field is the width drift the normaliser exists
+  # for -- pic x(24) [copybooks/wsledger.cob:L27] against char(32)
+  # [mysql/ACASDB.sql:L127].
+  ledger.dat:
+    - WS-Ledger-Nos: "1000"
+      Ledger-PC: "0"
+      Ledger-Type: "1"
+      Ledger-Place: " "
+      Ledger-Level: "1"
+      Ledger-Name: "Bank current account"
+      Ledger-Balance: "4321.09"
+      Ledger-Last: "4000.00"
+    - WS-Ledger-Nos: "2000"
+      Ledger-PC: "0"
+      Ledger-Type: "1"
+      Ledger-Place: " "
+      Ledger-Level: "1"
+      Ledger-Name: "Sales revenue"
+      Ledger-Balance: "-8765.43"
+      Ledger-Last: "-8000.00"
+    - WS-Ledger-Nos: "2200"
+      Ledger-PC: "0"
+      Ledger-Type: "1"
+      Ledger-Place: " "
+      Ledger-Level: "1"
+      Ledger-Name: "VAT control"
+      Ledger-Balance: "-1234.56"
+      Ledger-Last: "-1200.00"
+    - WS-Ledger-Nos: "3000"
+      Ledger-PC: "0"
+      Ledger-Type: "1"
+      Ledger-Place: " "
+      Ledger-Level: "1"
+      Ledger-Name: "Untouched control"
+      Ledger-Balance: "999.99"
+      Ledger-Last: "999.99"
+
+  # THE ONE BATCH, AND THE ONE FIELD THAT MATTERS: Batch-Status zero, so
+  # Status-Open is true. Everything else is set to be unremarkable so that the
+  # scenario is about the open status and about nothing else. Cleared-Status zero
+  # keeps Waiting true, which is what makes it certain that the ABORT is what
+  # stopped the run rather than phase two's own rejector
+  # [general/gl070.cbl:L460-L463] -- a batch that was both open AND non-waiting
+  # would be discarded by two independent mechanisms and the scenario could not
+  # say which one it had tested.
+  batch.dat:
+    - WS-Ledger: "1"
+      WS-Batch-Nos: "1"
+      Items: "1"
+      Batch-Status: "0"
+      Cleared-Status: "0"
+      Bcycle: "1"
+      Entered: "155127"
+      Proofed: "155127"
+      Posted: "0"
+      Stored: "0"
+      Input-Gross: "1200.00"
+      Input-Vat: "200.00"
+      Actual-Gross: "1250.00"
+      Actual-Vat: "250.00"
+      Description: "Control total mismatch"
+      bDefault: "0"
+      Convention: "DR"
+      Batch-Def-AC: "1000"
+      Batch-Def-PC: "0"
+      Batch-Def-Code: "GL"
+      Batch-Def-Vat: " "
+      Batch-Start: "1"
+
+  # The posting whose totals disagree with the batch header: 1000.00 net plus
+  # 250.00 of VAT is an actual gross of 1250.00 against the 1200.00 entered.
+  # It is seeded so that GLPOSTING-REC has a row which MUST come back untouched
+  # -- the abort means gl070 phase two never pre-processes it
+  # [general/gl070.cbl:L290] and gl072 never runs, so neither the row nor any
+  # ledger balance may move.
+  posting.dat:
+    - WS-Post-rrn: "1"
+      Batch: "1"
+      Post-Number: "1"
+      Post-Code: "GL"
+      Post-Date: "21/09/25"
+      Post-DR: "1000"
+      DR-PC: "0"
+      Post-CR: "2000"
+      CR-PC: "0"
+      Post-Amount: "1000.00"
+      Post-Legend: "Invoice 0002 net of VAT"
+      Vat-AC: "2200"
+      Vat-PC: "0"
+      Post-Vat-Side: "CR"
+      Vat-Amount: "250.00"

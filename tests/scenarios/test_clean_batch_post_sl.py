@@ -539,6 +539,12 @@ import pytest
 # that it requires the Compose stack. Nothing here re-registers it and this file adds no
 # `pytest.ini`, no `markers =` and no `pytest_configure`. Selectable as
 # `pytest -m scenario` and `pytest -m "scenario or determinism"`.
+# The TIER mark, applied to the whole module because every test in it belongs to the
+# tier. THE INFRASTRUCTURE MARKS ARE NOT HERE: `database` and `oracle` are declared per
+# test, on exactly the tests whose fixture closure reaches the harness stack, because
+# several tests in this file read only files on disk and pass on a bare host. A module
+# mark would claim they need a MariaDB and a built oracle, and `-m database` would then
+# select tests that require neither.
 pytestmark = pytest.mark.scenario
 
 # THE SCENARIO THIS FILE IS. One per `tests/scenarios/test_*.py`, defined at
@@ -756,6 +762,27 @@ IRS_TRANSFER_TABLE: Final[str] = "PSIRSPOST-REC"
 # the module docstring; a divergence here is A REAL SIGNAL and is never suppressed.
 PERIOD_TOTALS_TABLE: Final[str] = "SYSTOT-REC"
 
+# THE SEVEN TABLES THE SEED ITSELF FILLS, each named by the `seed_files:` entry that
+# fills it: analysis.dat -> ANALYSIS-REC, value.dat -> VALUEANAL-REC, salesled.dat ->
+# SALEDGER-REC, invoice.dat -> SAINVOICE-REC and SAINV-LINES-REC, openitm3.dat ->
+# SAITM3-REC, and system.dat -> SYSTOT-REC through the four-loader system block
+# [common/masterLD.sh:L51-L87]. These must come back WITH ROWS or the empty diff this
+# file's headline test celebrates is two empty databases agreeing.
+#
+# THE OTHER THREE AFFECTED TABLES ARE DELIBERATELY ABSENT from this tuple. GLBATCH-REC,
+# GLPOSTING-REC and PSIRSPOST-REC are WRITTEN BY THE RUN rather than seeded, and A-1 is
+# precisely the claim that `GLPOSTING-REC` may legitimately stay empty here - requiring
+# rows in it would assert the opposite of what [sales/sl060.cbl:L1172-L1178] does.
+SEEDED_TABLES: Final[tuple[str, ...]] = (
+    "ANALYSIS-REC",
+    "SAINV-LINES-REC",
+    "SAINVOICE-REC",
+    "SAITM3-REC",
+    "SALEDGER-REC",
+    "SYSTOT-REC",
+    "VALUEANAL-REC",
+)
+
 # THE FOUR AUTOMATIC-GENERATION TABLES. Named so the assertion can be made, and each one
 # cross-checked against `harness/dump_tables.py`'s own `OUT_OF_SCOPE` set so that THE
 # HARNESS REMAINS THE AUTHORITY on what is out of scope and this tuple cannot drift into
@@ -867,6 +894,17 @@ def parity(protocol: Any) -> Any:
     precise, multi-line reason naming every missing precondition - it never errors at
     collection.
 
+    FOUR GUARDS RUN HERE, and each closes a way AN EMPTY DIFF CAN MEAN NOTHING:
+
+      1. THE BOUND - the comparison covered the declared tables in the declared order.
+      2. THE ORACLE'S DISPOSITION - its ACTUAL exit status, plus a harness-fault
+         classification on BOTH sides. A runner that exited in its own documented band
+         or on `argparse` usage exit 2 never ran the cycle, and that must read as an
+         ERROR here rather than as a behavioural FAILURE downstream.
+      3. THE SEED FINGERPRINTS - both sides started from the same recorded row counts.
+      4. NON-VACUITY - the seven tables the seed fills came back WITH ROWS. Every
+         assertion in this file holds vacuously against 33 empty tables without it.
+
     Args:
         protocol: Every protocol stage and both compositions, from `tests/conftest.py`.
             `protocol.run_scenario_parity` is what Agent Action Plan section 0.4.3 built
@@ -886,7 +924,37 @@ def parity(protocol: Any) -> Any:
     if cached is None:
         cached = protocol.run_scenario_parity(SCENARIO)
         _PARITY_RUNS[SCENARIO] = cached
-    return cached
+    run = cached
+
+    # GUARD 1. The comparison was bounded by the tables the scenario declares, in the
+    # declared ORDER - the report is written in it and so is the seed fingerprint.
+    assert run.tables == protocol.affected_tables(SCENARIO), (
+        f"{SCENARIO}: the comparison was bounded by {list(run.tables)} while the "
+        f"scenario declares {list(protocol.affected_tables(SCENARIO))}."
+    )
+
+    # GUARD 2. THE ORACLE REACHED THE DECLARED DISPOSITION, and NEITHER side is a
+    # harness fault. The harness-fault refusal is why this belongs in a fixture: a
+    # runner that exits in its own documented band, or on `argparse` usage exit 2,
+    # never asked the question at all, and the headline test below would otherwise
+    # report that as a behavioural FAILURE. `reference_only` leaves the Python side's
+    # status to that test, which owns it and says so under its own name.
+    protocol.assert_declared_statuses(
+        run,
+        operations=(OPERATION,),
+        declared=list(protocol.definition(SCENARIO)[KEY_EXPECTED_STATUS]),
+        reference_only=True,
+    )
+
+    # GUARD 3. Both sides started from the same recorded seeded state - row counts, one
+    # line per affected table in the declared order, compared as bytes.
+    protocol.assert_seed_fingerprints_agree(run)
+
+    # GUARD 4. SOMETHING WAS THERE TO COMPARE. Without this, every assertion below
+    # holds just as well against 33 empty tables.
+    protocol.assert_non_vacuous(run, tables_requiring_rows=SEEDED_TABLES)
+
+    return run
 
 
 @pytest.fixture
@@ -1925,6 +1993,8 @@ def test_diff_exit_contract_is_honoured(harness: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_clean_batch_post_sl_state_parity(
     parity: Any,
     definition: Mapping[str, Any],
@@ -2062,6 +2132,8 @@ def test_clean_batch_post_sl_state_parity(
     )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_a1_missing_period_gl_posting_close_not_executed(
     parity: Any,
     harness: Any,
@@ -2259,6 +2331,8 @@ def test_a1_missing_period_gl_posting_close_not_executed(
     )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_moving_average_fields_agree(
     parity: Any,
     harness: Any,
@@ -2496,6 +2570,8 @@ def test_moving_average_fields_agree(
         )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_sign_narrowing_at_the_bridge_agrees(
     parity: Any,
     harness: Any,
@@ -2635,6 +2711,8 @@ def test_sign_narrowing_at_the_bridge_agrees(
             )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_dump_is_wellformed_on_both_sides(
     parity: Any,
     harness: Any,

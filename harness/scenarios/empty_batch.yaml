@@ -737,3 +737,173 @@ affected_tables:
   - GLBATCH-REC
   - GLLEDGER-REC
   - GLPOSTING-REC
+
+# =============================================================================
+# THE SEED RECORDS
+# =============================================================================
+# Built into the declared flat files by harness/make_fixtures.py, which generates
+# a COBOL writer per file, compiles it against the FROZEN copybooks and calls the
+# FROZEN handler to write. The layouts are not restated here and cannot drift.
+#
+# EVERY VALUE IS A QUOTED STRING (rule R-2): an unquoted 999.99 would be parsed
+# by YAML into a binary float before any COBOL saw it. COBOL's own MOVE performs
+# the store, so the frozen picture clause decides alignment, truncation and sign.
+#
+# WHAT THIS SEED HAS TO ACHIEVE: one General Ledger batch, closed and waiting, in
+# the pinned cycle, WITH NO POSTINGS AT ALL -- and posting.dat is consequently
+# absent from the declared set above, so glpostingLD is never run and
+# GLPOSTING-REC stays exactly as the fresh schema created it
+# [common/masterLD.sh:L94] shows the existence guard that makes an undeclared
+# file simply not load.
+# Closed is what keeps the abort gate SHUT: an open batch would set the flag at
+# [general/gl070.cbl:L314-L315], raise five at [general/gl070.cbl:L289] and turn
+# this scenario into control_total_mismatch. Waiting and GL-Batch are what get it
+# PAST phase two's rejector [general/gl070.cbl:L460-L463], so the empty pass is
+# an empty pass through the real path and not a rejection wearing its clothes.
+# Items is zero and Batch-Start is zero because there is genuinely nothing in it;
+# the four unsigned packed money fields are zero for the same reason
+# [copybooks/wsbatch.cob:L41-L44].
+#
+# ONE HONEST OBSERVATION ABOUT WHAT THIS SCENARIO ACTUALLY EXERCISES, recorded
+# because a reader will otherwise think a field is missing. gl072's end-of-data
+# path performs end-account and then end-batch UNCONDITIONALLY
+# [general/gl072.cbl:L286-L289], and each of those has exactly one database
+# effect -- a nominal rewrite [general/gl072.cbl:L382] and a batch rewrite
+# preceded by two stamps [general/gl072.cbl:L375-L377]. On a run whose work file
+# is empty, both fire against buffers nothing has read. WHAT THEY LEAVE IN THE
+# TWO TABLES IS FOR THE ORACLE TO STATE AND FOR THE PYTHON SIDE TO MATCH; this
+# file does not predict it, and the seed is not arranged to make it tidy
+# (rule R-4).
+seed_records:
+
+  # Key 1 is the only system row the frozen code reads [common/acas000.cbl].
+  # File-System-Used must be 1: a zero would send the run to Cobol flat files and
+  # leave every table untouched, which in a scenario whose expected result IS
+  # "almost nothing changed" is the most dangerous false pass available
+  # [copybooks/wssystem.cob:L111-L115].
+  # system.dat IS FOUR DIFFERENT RECORDS IN ONE RELATIVE FILE, keyed by relative
+  # record number -- [copybooks/selsys.cob] declares it ORGANIZATION RELATIVE with
+  # relative key `rrn', and the four system loaders each go straight to one slot:
+  #   "1"  systemLD [common/systemLD.cbl:L227] -> SYSTEM-REC    (the parameter record)
+  #   "2"  dfltLD   [common/dfltLD.cbl:L221]   -> SYSDEFLT-REC  (wsdflt.cob)
+  #   "3"  finalLD  [common/finalLD.cbl:L221]  -> SYSFINAL-REC  (wsfinal.cob)
+  #   "4"  sys4LD   [common/sys4LD.cbl:L226]   -> SYSTOT-REC    (wssys4.cob)
+  # All four are 1024 bytes, which is why one relative file can hold them, and ALL
+  # FOUR MUST BE PRESENT: masterLD runs every one of those loaders unconditionally
+  # [common/masterLD.sh:L50-L88] and the last is tested against zero rather than 63
+  # [common/masterLD.sh:L83-L86], so an unwritten slot ABORTS the seed. A slot with
+  # nothing to pin is declared as {} and written INITIALIZEd -- which is a statement
+  # about the pre-state rather than an omission.
+  system.dat:
+    "1":
+      - System-Record-Version-Prime: "3"
+        System-Record-Version-Secondary: "2"
+        Vat-Rate-1: "20.00"
+        Vat-Rate-2: "5.00"
+        Vat-Rate-3: "0.00"
+        Cyclea: "1"
+        Period: "1"
+        Run-Date: "155127"
+        File-System-Used: "1"
+        Date-Form: "1"
+        IRS-Instead: " "
+        SL-Autogen: " "
+        PL-Autogen: " "
+        S-Flag-P: "2"
+        P-Flag-P: "2"
+        Pass-Value: "0"
+        Level-1: "1"
+        Level-2: "1"
+        Level-3: "1"
+        Level-4: "1"
+
+    # Nothing to pin: the GL defaults record. Written INITIALIZEd so the slot EXISTS
+    # for dfltLD to read. Note this is NOT the IRS defaults record -- the copybook
+    # says so itself, its account field being COMP here and DISPLAY there
+    # [copybooks/wsdflt.cob:L6-L7].
+    "2": {}
+    # Nothing to pin: the GL final-accounts record, a pure table of 26 headings
+    # [copybooks/wsfinal.cob:L11]. Written INITIALIZEd so the SLOT EXISTS for finalLD
+    # to read -- and MEASURED consequence, recorded here rather than left to be
+    # rediscovered: INITIALIZE sets an alphanumeric table to spaces, so finalLD's own
+    # test `if Final-Record = spaces' [common/finalLD.cbl:L243] is TRUE and it takes
+    # its "No Data - aborting Terminating nothing to do" path, returning zero and
+    # loading NOTHING. SYSFINAL-REC therefore stays empty, which is precisely the
+    # pre-state this scenario wants: the table is not among affected_tables and no
+    # in-scope program writes it. The slot is still declared, because a slot that does
+    # not exist at all is a read failure rather than a defined empty pre-state.
+    "3": {}
+    # The period-totals record. Written INITIALIZEd: no operation on this route
+    # writes a period total -- all nine sites are in the Sales and Purchase programs
+    # -- so a zero pre-state is the honest one here, and the slot must still exist
+    # for sys4LD to read.
+    "4": {}
+  # Accounts with KNOWN NON-ZERO balances, which the description above names as
+  # this scenario's primary positive evidence: an unchanged non-zero balance
+  # proves something, an unchanged zero proves almost nothing. Four rows rather
+  # than one so that the sequential nominal read [general/gl072.cbl:L407-L408]
+  # has somewhere to go wrong if the Python side advances a cursor it should not.
+  ledger.dat:
+    - WS-Ledger-Nos: "1000"
+      Ledger-PC: "0"
+      Ledger-Type: "1"
+      Ledger-Place: " "
+      Ledger-Level: "1"
+      Ledger-Name: "Bank current account"
+      Ledger-Balance: "4321.09"
+      Ledger-Last: "4000.00"
+    - WS-Ledger-Nos: "2000"
+      Ledger-PC: "0"
+      Ledger-Type: "1"
+      Ledger-Place: " "
+      Ledger-Level: "1"
+      Ledger-Name: "Sales revenue"
+      Ledger-Balance: "-8765.43"
+      Ledger-Last: "-8000.00"
+    - WS-Ledger-Nos: "2200"
+      Ledger-PC: "0"
+      Ledger-Type: "1"
+      Ledger-Place: " "
+      Ledger-Level: "1"
+      Ledger-Name: "VAT control"
+      Ledger-Balance: "-1234.56"
+      Ledger-Last: "-1200.00"
+    - WS-Ledger-Nos: "3000"
+      Ledger-PC: "0"
+      Ledger-Type: "1"
+      Ledger-Place: " "
+      Ledger-Level: "1"
+      Ledger-Name: "Untouched control"
+      Ledger-Balance: "999.99"
+      Ledger-Last: "999.99"
+
+  # The empty batch. WS-Ledger 1 makes GL-Batch true, Batch-Status 1 makes
+  # Status-Closed true, Cleared-Status 0 makes Waiting true -- the three
+  # conditions phase two tests [general/gl070.cbl:L460-L463] -- and Bcycle equals
+  # cyclea so the cycle filter admits it [general/gl070.cbl:L457-L458]. Posted is
+  # zero on the way in because stamping it is gl072's job
+  # [general/gl072.cbl:L376] and a pre-stamped value would hide whether that
+  # happened.
+  batch.dat:
+    - WS-Ledger: "1"
+      WS-Batch-Nos: "1"
+      Items: "0"
+      Batch-Status: "1"
+      Cleared-Status: "0"
+      Bcycle: "1"
+      Entered: "155127"
+      Proofed: "155127"
+      Posted: "0"
+      Stored: "0"
+      Input-Gross: "0.00"
+      Input-Vat: "0.00"
+      Actual-Gross: "0.00"
+      Actual-Vat: "0.00"
+      Description: "Empty batch"
+      bDefault: "0"
+      Convention: "DR"
+      Batch-Def-AC: "1000"
+      Batch-Def-PC: "0"
+      Batch-Def-Code: "GL"
+      Batch-Def-Vat: " "
+      Batch-Start: "0"

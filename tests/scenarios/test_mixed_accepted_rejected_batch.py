@@ -490,9 +490,27 @@ from __future__ import annotations
 
 import pytest
 
+# The TIER mark, applied to the whole module because every test in it belongs to the
+# tier. THE INFRASTRUCTURE MARKS ARE NOT HERE: `database` and `oracle` are declared per
+# test, on exactly the tests whose fixture closure reaches the harness stack, because
+# several tests in this file read only files on disk and pass on a bare host. A module
+# mark would claim they need a MariaDB and a built oracle, and `-m database` would then
+# select tests that require neither.
 pytestmark = pytest.mark.scenario
 
 SCENARIO = "mixed_accepted_rejected"
+
+# THE THREE TABLES THE SEED FILLS, each named by the `seed_files:` entry that fills it:
+# ledger.dat -> GLLEDGER-REC, batch.dat -> GLBATCH-REC, posting.dat -> GLPOSTING-REC.
+# All three of this scenario's affected tables are seeded, which is what makes the
+# rejection evidence readable: A-13's two SILENT SKIPS are claims that specific rows
+# were NOT posted, and "not posted" is indistinguishable from "never present" unless the
+# tables came back with rows.
+SEEDED_TABLES = (
+    "GLBATCH-REC",
+    "GLLEDGER-REC",
+    "GLPOSTING-REC",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -590,6 +608,36 @@ def parity(protocol: object, _parity_cache: dict[str, object]) -> object:
     if run is None:
         run = protocol.run_scenario_parity(SCENARIO)
         _parity_cache["run"] = run
+
+    # THE COMPARISON WAS BOUNDED BY THE DECLARED TABLES, IN THE DECLARED ORDER. The
+    # order is load-bearing: the report is written in it and so is the seed fingerprint.
+    assert tuple(run.tables) == protocol.affected_tables(SCENARIO), (
+        f"{SCENARIO}: the comparison was bounded by {list(run.tables)} while the "
+        f"scenario declares {list(protocol.affected_tables(SCENARIO))}."
+    )
+
+    # THE ORACLE REACHED THE DECLARED DISPOSITION, and NEITHER side is a harness fault.
+    # `reference_only` keeps the Python side's status a behavioural question owned by a
+    # test body, while the fault refusal - a runner exiting in its own documented band,
+    # or on `argparse` usage exit 2 - stays here where it reads as an ERROR.
+    protocol.assert_declared_statuses(
+        run,
+        operations=tuple(protocol.definition(SCENARIO)["operations"]),
+        declared=list(protocol.definition(SCENARIO)["expected_status"]),
+        reference_only=True,
+    )
+
+    # BOTH SIDES STARTED FROM THE SAME RECORDED SEEDED STATE. Row counts only, one line
+    # per affected table in the declared order, compared as bytes. Stage 5 drops and
+    # re-applies all 33 tables and re-seeds between the two runs, so this is the claim
+    # that the reset actually restored the state the oracle had started from.
+    protocol.assert_seed_fingerprints_agree(run)
+
+    # SOMETHING WAS THERE TO COMPARE. Every assertion in this file - and especially the
+    # two SILENT-SKIP claims, which are assertions about rows that must NOT have moved -
+    # holds just as well against three empty tables without this.
+    protocol.assert_non_vacuous(run, tables_requiring_rows=SEEDED_TABLES)
+
     return run
 
 
@@ -1051,6 +1099,8 @@ def test_affected_tables_are_in_scope_and_alphabetical(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_mixed_accepted_rejected_state_parity(parity: object, harness: object) -> None:
     """THE HEADLINE - an EMPTY ordering-normalised diff for `mixed_accepted_rejected`.
 
@@ -1097,6 +1147,8 @@ def test_mixed_accepted_rejected_state_parity(parity: object, harness: object) -
     )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_a13_non_numeric_batch_number_skipped_silently(
     parity: object, normalized_dumps: object, harness: object
 ) -> None:
@@ -1187,6 +1239,8 @@ def test_a13_non_numeric_batch_number_skipped_silently(
     )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_a13_we_error_999_record_skipped_silently(
     parity: object, normalized_dumps: object, column_by_key: object, harness: object
 ) -> None:
@@ -1293,6 +1347,8 @@ def test_a13_we_error_999_record_skipped_silently(
 
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_skipped_postings_do_not_perturb_sequential_nominal_cursor(
     parity: object, normalized_dumps: object, column_by_key: object, harness: object
 ) -> None:
@@ -1430,6 +1486,8 @@ def test_skipped_postings_do_not_perturb_sequential_nominal_cursor(
     )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_accepted_batch_is_stamped_cleared_and_posted(
     parity: object, normalized_dumps: object, column_by_key: object, harness: object
 ) -> None:
@@ -1519,6 +1577,8 @@ def test_accepted_batch_is_stamped_cleared_and_posted(
     )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_unwaiting_batch_is_not_stamped(
     parity: object, normalized_dumps: object, harness: object
 ) -> None:
@@ -1602,6 +1662,8 @@ def test_unwaiting_batch_is_not_stamped(
 
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_glposting_rec_is_an_unchanged_witness(
     parity: object, normalized_dumps: object, harness: object
 ) -> None:
@@ -1696,6 +1758,8 @@ def test_glposting_rec_is_an_unchanged_witness(
     )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_diff_exit_contract_is_honoured(parity: object, harness: object) -> None:
     """THE THREE-WAY EXIT CONTRACT of stage 8, verified rather than assumed.
 
@@ -1804,6 +1868,8 @@ def test_diff_exit_contract_is_honoured(parity: object, harness: object) -> None
         )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_dump_is_wellformed_on_both_sides(
     normalized_dumps: object, harness: object, frozen_schema: object
 ) -> None:

@@ -522,7 +522,7 @@ choice: they compose the output path and nothing else, so they appear in both fo
 
 ## 11. The register — index
 
-Twelve primary entries. The status column is the one to read first.
+Thirteen primary entries. The status column is the one to read first.
 
 | id | Question | Status | Consuming module(s) |
 | --- | --- | --- | --- |
@@ -538,9 +538,10 @@ Twelve primary entries. The status column is the one to read first.
 | [`Q-7`](#q-7) | What the menu shells' unconditional `overrewrite` writes on exit, which the Python CLI has no counterpart for | `PENDING — AWAITING ORACLE EXECUTION` | `harness/dump_tables.py`, `harness/diff_states.py` |
 | [`Q-8`](#q-8) | Whether `Post-Date (7:2)` holds a **year** or a **century** — settled on the Sales path, open elsewhere | **`PARTIALLY RESOLVED`** | `acas_posting/dal/acasirsub4_irs_posting.py`, `acas_posting/dal/acas006_gl_posting.py`, `harness/normalize.py` |
 | [`Q-9`](#q-9) | Whether `HV-POST-RRN` being declared and fetched but never loaded is the maintainer's stated convention or the field he doubted | **`PARTIALLY RESOLVED`** | `acas_posting/dal/acas006_gl_posting.py`, `acas_posting/dal/cursor_state.py` |
+| [`Q-10`](#q-10) | Whether the AAP's autocommit-OFF requirement governs the seeding stage or every connection the harness makes | **`PARTIALLY RESOLVED`** | `harness/seed.sh`, `harness/Dockerfile.mariadb`, `harness/reset_db.sh`, `harness/run_cobol_scenario.sh` |
 
 `RESOLVED BY ORACLE` appears nowhere in that column, and `RESOLVED BY CONSTRUCTION` appears nowhere as a
-whole-entry status — the two part-resolved entries carry their settled halves inside the entry, where the
+whole-entry status — the three part-resolved entries carry their settled halves inside the entry, where the
 reading can be shown, rather than in a column that cannot hold one.
 
 **§13** carries the deferrals handed up from the arithmetic tier: **six** entries of its own, mostly under
@@ -1598,6 +1599,85 @@ the key, given that the same file warns the key of reference may be wrong. Neith
 `GLPOSTING-REC` and therefore decides what `POST-RRN` is written from, and
 `acas_posting/dal/cursor_state.py`, which owns the `START` / `READ NEXT` emulation and therefore decides
 which key the walk follows.
+
+---
+
+<a id="q-10"></a>
+
+### `Q-10` — which access the AAP's autocommit-OFF requirement governs
+
+**Status: `PARTIALLY RESOLVED`** — the *scope* is settled by reading, cited below; the *stored effect* of a
+seed run under either mode is `PENDING — AWAITING ORACLE EXECUTION`, for §10.1's reason.
+
+**(a) The question.** The AAP requires autocommit OFF and cites the same frozen banner three times. Does that
+requirement govern **the seeding stage**, or **every connection the harness makes** — the compiled posting
+run, the Python cycle, the reset and the dumps as well? The two readings are not interchangeable: the frozen
+loaders and bridges reach no COMMIT, so under the wider reading nothing either cycle writes can survive its
+own session, every capture is empty, and an empty diff is the protocol's only pass condition (AAP §0.8.5). The
+wider reading therefore makes the AAP's own validation criteria unsatisfiable, which is by itself a reason to
+ask which reading was meant rather than to assume.
+
+**(b) Evidence.** All three provisions scope the requirement to seeding, in their own words:
+
+| AAP provision | What it says | Scope it names |
+| --- | --- | --- |
+| §0.2.1.1, the seeding contract | "One operational constraint carries into the harness: the batch loader turns autocommit off `[common/glbatchLD.cbl:L9-L13]`" | the **loader** |
+| §0.5.2, harness operational constraints | "autocommit must be **off** during seeding, because the batch loader sets it off explicitly `[common/glbatchLD.cbl:L9-L13]`, and the seeded state depends on its commit boundaries" | **seeding**, explicitly |
+| §0.4.1.7, on `harness/Dockerfile.mariadb` | "Applies the frozen schema verbatim; autocommit off to match the loaders `[common/glbatchLD.cbl:L9-L13]`" | "**to match the loaders**" — the loaders being the seeding stage |
+
+Two frozen-source facts bear on the premise the AAP gives for the requirement, and both are measured rather
+than assumed:
+
+- **The loader does not "set it off".** `[common/glbatchLD.cbl:L9-L13]` is a four-line *comment banner*
+  addressed to the operator, and the vendored C interface confirms it cannot be anything else: the 25 entry
+  points `cobmysqlapi38.c` exposes include `MySQL_commit` and `MySQL_rollback` and **not**
+  `MySQL_autocommit`, and its `mysql_real_connect` call never alters the session mode. No COBOL program in
+  the checkout can change the setting.
+- **There are no "commit boundaries" for a seeded state to depend on.** Every `perform aa020-Rollback` in all
+  28 `common/*LD.cbl` loaders is commented out, and `perform aa030-Commit` occurs exactly once anywhere — at
+  `[common/irsdfltLD.cbl:L437]`, commented out too. `[common/systemLD.cbl]` declares both paragraphs, at
+  L406 and L420, with no `perform` site at all. The maintainer recorded the consequence himself beside the
+  dead paragraphs: `[common/glbatchLD.cbl:L453]` and `[common/analLD.cbl:L442]` "These do not work during
+  testing with mariadb - Non transactional model or autocommit set ON", and `[common/glbatchLD.cbl:L386]`
+  "otherwise as normally it is set to autocommit !!!!!".
+
+**(c) Oracle experiment.** Under the §10 protocol, once §10.1's blocker is cleared, seed one scenario twice
+and read the row counts back from a **fresh** session each time:
+
+```text
+ACAS_SEED_AUTOCOMMIT=off  harness/seed.sh  "$S"   # the AAP-mandated seeding mode
+ACAS_SEED_AUTOCOMMIT=on   harness/seed.sh  "$S"   # the mode the compiled loaders require
+```
+
+What a run settles that reading cannot: whether a loader leaves **any** row behind under the OFF window (the
+source says no; only execution proves it), and whether the two modes differ in anything beyond durability —
+in particular whether a loader's `FS-Reply` / return code changes, which would make the mode observable to the
+frozen code rather than merely to the server.
+
+**(d) Resolution.** Part-settled, and the parts are kept apart.
+
+**Settled by reading, and adopted:** the requirement is scoped to **seeding**. `harness/seed.sh` therefore
+owns an explicit *seeding window* — it sets `@@GLOBAL.autocommit = 0` immediately before the first frozen load
+program, verifies the mode from a fresh session, and restores what the server had from its exit trap on every
+path. `harness/Dockerfile.mariadb` declares `autocommit=1` for **runtime application access**, and
+`harness/reset_db.sh` and `harness/run_cobol_scenario.sh` assert that runtime mode rather than the window's.
+The earlier server-wide pin is not a defect of the frozen code and so is not protected by R-4: it was a
+harness reading of the AAP, it was strictly wider than the text, and it made the AAP's own §0.8.5 criteria
+unreachable.
+
+**Not settled, and not papered over:** the OFF window still leaves no durable rows, because the frozen code
+never commits. That defect is reproduced, never repaired — **nothing in the harness issues the COMMIT the
+loaders omit** (R-4). What the harness refuses is *reporting* the result as a seeded state: when the window
+closes, `seed.sh` counts the rows in exactly the tables whose loader ran and exits **76** if the total is
+zero, naming the defect. An empty capture therefore cannot reach `diff_states.py`, where an empty diff would
+read as a pass. `ACAS_SEED_AUTOCOMMIT=on` runs the window under ON instead — the only mode in which the
+compiled loaders can persist anything — as an explicit operator decision, logged as a deviation from the
+AAP-mandated seeding mode, never a default.
+
+**(e) Consuming modules.** `harness/seed.sh` (the window and the durability gate),
+`harness/Dockerfile.mariadb` (the runtime mode), `harness/reset_db.sh` and
+`harness/run_cobol_scenario.sh` (both assert the runtime mode), and `harness/diff_states.py`, which refuses an
+all-empty comparison so that the same failure cannot arrive by another route.
 
 ---
 

@@ -589,6 +589,12 @@ from __future__ import annotations
 
 import pytest
 
+# The TIER mark, applied to the whole module because every test in it belongs to the
+# tier. THE INFRASTRUCTURE MARKS ARE NOT HERE: `database` and `oracle` are declared per
+# test, on exactly the tests whose fixture closure reaches the harness stack, because
+# several tests in this file read only files on disk and pass on a bare host. A module
+# mark would claim they need a MariaDB and a built oracle, and `-m database` would then
+# select tests that require neither.
 pytestmark = pytest.mark.scenario
 
 SCENARIO = "control_total_mismatch"
@@ -605,13 +611,17 @@ SCENARIO = "control_total_mismatch"
 #  them, which is exactly the kind of quiet incoherence this migration exists to rule
 #  out. One run, one body of evidence, many questions asked of it.
 #
-#  They import from `tests/conftest.py` INSIDE the fixture body rather than requesting
-#  the function-scoped `protocol` fixture, because a module-scoped fixture may not
-#  depend on a function-scoped one. The import is function-local so that module scope
-#  stays exactly as specified: the docstring, `__future__`, `pytest`, `pytestmark` and
-#  `SCENARIO`. NOTHING here imports `harness` or reaches a harness path directly (R-1);
-#  the harness modules are only ever the `harness` fixture's three explicitly-loaded
-#  modules.
+#  FUNCTION-SCOPED WITH A MODULE MEMO, WHICH DELIVERS THE SAME ONE-RUN GUARANTEE
+#  WITHOUT IMPORTING `tests/conftest.py`. A module-scoped fixture may not depend on the
+#  function-scoped `protocol` fixture, and reaching the stages by importing that module
+#  instead binds the whole scenario tier to pytest's default import mode - under
+#  `--import-mode=importlib` there is no top-level `conftest` module and collection
+#  fails outright. So the run is memoised in the private mapping below, populated ONLY
+#  ON SUCCESS: whichever test executes first performs the eight stages and every later
+#  one is handed the same frozen `ParityRun`, which keeps the tests independent of
+#  ordering while still describing ONE run. NOTHING here imports `harness` or reaches a
+#  harness path directly (R-1); the harness modules are only ever the `harness`
+#  fixture's three explicitly-loaded modules.
 #
 #  STRICTLY SEQUENTIAL (R-3). One database, one stage at a time, in the protocol's own
 #  order. No thread, no asyncio, no connection pool, no parallel runner and no
@@ -619,8 +629,12 @@ SCENARIO = "control_total_mismatch"
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(scope="module")
-def parity_run():
+_PARITY_RUNS: dict[str, object] = {}
+_SEED_BASELINES: dict[str, object] = {}
+
+
+@pytest.fixture
+def parity_run(protocol):
     """All eight protocol stages for `control_total_mismatch`, run once.
 
     Skips - never fails - when the harness Compose stack is unusable, so that
@@ -640,18 +654,63 @@ def parity_run():
     distinction the whole file rests on: "could not compare" must never read as "no
     differences".
 
+    FOUR GUARDS ARE APPLIED HERE, and every one of them catches a condition under
+    which AN EMPTY DIFF WOULD MEAN NOTHING:
+
+      1. THE BOUND - the comparison must be bounded by the scenario's own three tables,
+         in the declared order, and by nothing else.
+      2. THE DECLARED STATUSES - both run stages' ACTUAL exit statuses, read and
+         classified. On this route the declared status is 5, so this guard also proves
+         the abort actually happened rather than being assumed; the behavioural claim
+         about term code 5 is separately asserted in a test BODY, where a divergence
+         between the two sides is reported as a FAILURE.
+      3. THE SEED FINGERPRINTS - both sides started from the same recorded row counts.
+      4. NON-VACUITY - the tables this scenario seeds must come back WITH ROWS. This is
+         the guard this scenario needed most: its whole claim is that NOTHING MOVED, and
+         "nothing moved" is indistinguishable from "nothing was ever there" without it.
+
+    Args:
+        protocol: `tests/conftest.py`'s stage bundle. Requesting it applies the stack
+            skip before any stage can run.
+
     Returns:
         The `ParityRun`: every stage in order, both run results, the stage-8 verdict
         and the paths of every artifact.
     """
-    from conftest import requires_stack, run_scenario_parity
+    cached = _PARITY_RUNS.get(SCENARIO)
+    if cached is None:
+        cached = protocol.run_scenario_parity(SCENARIO)
+        _PARITY_RUNS[SCENARIO] = cached
+    run = cached
 
-    requires_stack()
-    return run_scenario_parity(SCENARIO)
+    assert run.tables == protocol.affected_tables(SCENARIO), (
+        f"{SCENARIO}: the comparison was bounded by {list(run.tables)} while the "
+        f"scenario declares {list(protocol.affected_tables(SCENARIO))}. The declared "
+        f"order is load-bearing - the seed fingerprint is written in it."
+    )
+    #  `reference_only` keeps the ORACLE's status here and leaves the Python side to
+    #  `test_abort_is_reproduced_as_term_code_five`. An oracle that did not abort means
+    #  the seeded batch was not the unbalanced one and there is nothing to compare - a
+    #  setup ERROR. A Python side that does not abort where the oracle did is a
+    #  behavioural regression in the migrated gate, and must read as a FAILURE.
+    protocol.assert_declared_statuses(
+        run,
+        operations=(protocol.definition(SCENARIO)["operation"],),
+        declared=list(protocol.definition(SCENARIO)["expected_status"]),
+        reference_only=True,
+    )
+    protocol.assert_seed_fingerprints_agree(run)
+    #  `batch.dat`, `ledger.dat` and `posting.dat` are all seeded on this route, so all
+    #  three bounded tables must come back with rows. An empty GLBATCH-REC would make
+    #  "the batch remained open and unstamped" and "there was no batch at all" the same
+    #  observation - and the second proves nothing.
+    protocol.assert_non_vacuous(run, tables_requiring_rows=run.tables)
+
+    return run
 
 
-@pytest.fixture(scope="module")
-def seed_baseline(parity_run):
+@pytest.fixture
+def seed_baseline(protocol, parity_run):
     """The PRISTINE SEEDED STATE of this scenario's three tables, for the absence proof.
 
     Asserting that the two sides AGREE is necessary but not sufficient here: two sides
@@ -676,6 +735,8 @@ def seed_baseline(parity_run):
     differ's two fixed labels would otherwise mislead.
 
     Args:
+        protocol: The stage bundle, reached through the fixture so this file imports
+            nothing from `tests/conftest.py`.
         parity_run: The completed protocol run, which this fixture must follow.
 
     Returns:
@@ -686,13 +747,18 @@ def seed_baseline(parity_run):
         HarnessFaultError: The reset, the dump or the normalisation failed, so there is
             no baseline and therefore no absence proof.
     """
-    from conftest import SIDE_COBOL, dump, normalize, reset, scenario_paths
+    cached = _SEED_BASELINES.get(SCENARIO)
+    if cached is not None:
+        return cached
 
+    side = protocol.vocabulary.sides[0]
     baseline_root = parity_run.paths.out_root / "seed-baseline"
-    reset(SCENARIO).raise_for_status()
-    dump(SCENARIO, SIDE_COBOL, out_dir=baseline_root).raise_for_status()
-    normalize(SCENARIO, SIDE_COBOL, out_dir=baseline_root).raise_for_status()
-    return scenario_paths(SCENARIO, out_root=baseline_root)
+    protocol.reset(SCENARIO).raise_for_status()
+    protocol.dump(SCENARIO, side, out_dir=baseline_root).raise_for_status()
+    protocol.normalize(SCENARIO, side, out_dir=baseline_root).raise_for_status()
+    captured = protocol.paths(SCENARIO, out_root=baseline_root)
+    _SEED_BASELINES[SCENARIO] = captured
+    return captured
 
 
 # ---------------------------------------------------------------------------
@@ -712,7 +778,7 @@ def seed_baseline(parity_run):
 
 
 def test_scenario_definition_preconditions(
-    scenario_loader, in_scope_table_names, pinned_clock
+    scenario_loader, in_scope_table_names, pinned_clock, vocabulary
 ) -> None:
     """Every precondition that decides whether an empty diff will MEAN anything.
 
@@ -732,14 +798,12 @@ def test_scenario_definition_preconditions(
         in_scope_table_names: The 22 in-scope names, read from the harness (R-4).
         pinned_clock: The project-wide pinned run date, both observables.
     """
-    from conftest import (
-        IRS_INSTEAD_GL_ONLY,
-        OPERATIONS,
-        PINNED_RUN_DATE_BINARY,
-        PINNED_RUN_DATE_TEXT,
-        SCENARIO_KEY_AFFECTED_TABLES,
-        scenario_affected_tables,
-    )
+    IRS_INSTEAD_GL_ONLY = vocabulary.irs_instead_states[0]
+    OPERATIONS = vocabulary.operations
+    PINNED_RUN_DATE_BINARY = vocabulary.pinned_run_date_binary
+    PINNED_RUN_DATE_TEXT = vocabulary.pinned_run_date_text
+    SCENARIO_KEY_AFFECTED_TABLES = vocabulary.scenario_keys["affected_tables"]
+    scenario_affected_tables = vocabulary.affected_tables
 
     definition = scenario_loader(SCENARIO)
 
@@ -928,7 +992,7 @@ def test_scenario_definition_preconditions(
     assert "answers" not in definition
 
 
-def test_scenario_is_general_ledger_only(scenario_loader) -> None:
+def test_scenario_is_general_ledger_only(scenario_loader, vocabulary) -> None:
     """The subsystem pin, asserted alone, because no other value is expressible.
 
     Sales and Purchase batches balance BY CONSTRUCTION: the entered and the actual
@@ -942,7 +1006,7 @@ def test_scenario_is_general_ledger_only(scenario_loader) -> None:
     Args:
         scenario_loader: Conftest's definition reader.
     """
-    from conftest import OPERATIONS
+    OPERATIONS = vocabulary.operations
 
     definition = scenario_loader(SCENARIO)
     subsystem = definition["subsystem"]
@@ -972,7 +1036,7 @@ def test_scenario_is_general_ledger_only(scenario_loader) -> None:
     )
 
 
-def test_expected_term_code_is_five(scenario_loader) -> None:
+def test_expected_term_code_is_five(scenario_loader, vocabulary) -> None:
     """Terminate code 5, asserted alone: the only non-zero expectation in the whole set.
 
     Raised at [general/gl070.cbl:L289] - `move 5 to ws-term-code` - when Phase 1 found a
@@ -994,7 +1058,7 @@ def test_expected_term_code_is_five(scenario_loader) -> None:
     Args:
         scenario_loader: Conftest's definition reader.
     """
-    from conftest import TERM_CODES
+    TERM_CODES = vocabulary.term_codes
 
     definition = scenario_loader(SCENARIO)
     operation = definition["operation"]
@@ -1021,7 +1085,7 @@ def test_expected_term_code_is_five(scenario_loader) -> None:
 
 
 def test_affected_tables_are_in_scope_and_alphabetical(
-    scenario_loader, in_scope_table_names, harness
+    scenario_loader, in_scope_table_names, harness, vocabulary
 ) -> None:
     """Three tables, alphabetical, in scope, each with its single-column primary key.
 
@@ -1040,10 +1104,8 @@ def test_affected_tables_are_in_scope_and_alphabetical(
         in_scope_table_names: The 22 in-scope names, ascending.
         harness: The three explicitly-loaded harness modules.
     """
-    from conftest import scenario_affected_tables
-
     definition = scenario_loader(SCENARIO)
-    tables = scenario_affected_tables(SCENARIO)
+    tables = vocabulary.affected_tables(SCENARIO)
 
     assert tuple(definition["affected_tables"]) == tables, (
         "the declared list and the list conftest resolves must be the same, in the "
@@ -1227,6 +1289,8 @@ def test_vat_is_added_before_the_comparison_is_documented(repo_root) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_control_total_mismatch_state_parity(parity_run, harness) -> None:
     """THE HEADLINE. An empty ordering-normalised diff across the three bounded tables.
 
@@ -1267,7 +1331,9 @@ def test_control_total_mismatch_state_parity(parity_run, harness) -> None:
     )
 
 
-def test_abort_is_reproduced_as_term_code_five(parity_run) -> None:
+@pytest.mark.database
+@pytest.mark.oracle
+def test_abort_is_reproduced_as_term_code_five(parity_run, vocabulary) -> None:
     """BOTH sides must reach the same terminal disposition, and it must be the abort.
 
     THE FOUR-LINK CHAIN, each link verified in this checkout:
@@ -1300,16 +1366,13 @@ def test_abort_is_reproduced_as_term_code_five(parity_run) -> None:
     Args:
         parity_run: The completed eight-stage run.
     """
-    from conftest import (
-        ARGPARSE_USAGE_EXIT,
-        DISPOSITION_BEHAVIOURAL,
-        DISPOSITION_HARNESS_FAULT,
-        HarnessFaultError,
-        classify_run,
-        scenario_definition,
-    )
+    ARGPARSE_USAGE_EXIT = vocabulary.argparse_usage_exit
+    DISPOSITION_BEHAVIOURAL = vocabulary.disposition_behavioural
+    DISPOSITION_HARNESS_FAULT = vocabulary.disposition_harness_fault
+    HarnessFaultError = vocabulary.fault
+    classify_run = vocabulary.classify_run
 
-    definition = scenario_definition(SCENARIO)
+    definition = vocabulary.definition(SCENARIO)
     operation = definition["operation"]
     expected = definition["expected_status"][0]
 
@@ -1365,7 +1428,11 @@ def test_abort_is_reproduced_as_term_code_five(parity_run) -> None:
     )
 
 
-def test_gl071_and_gl072_never_ran(parity_run, seed_baseline, harness) -> None:
+@pytest.mark.database
+@pytest.mark.oracle
+def test_gl071_and_gl072_never_ran(
+    parity_run, seed_baseline, harness, vocabulary
+) -> None:
     """THE ABSENCE ASSERTION, AND THE HEART OF THIS FILE.
 
     Plan section 0.6.5, on a run-aborting rejection: "The database effect is therefore
@@ -1402,7 +1469,7 @@ def test_gl071_and_gl072_never_ran(parity_run, seed_baseline, harness) -> None:
         seed_baseline: The pristine seeded state, captured after it.
         harness: The three harness modules, for the report renderer.
     """
-    from conftest import diff_trees_directly
+    diff_trees_directly = vocabulary.diff_trees_directly
 
     tables = parity_run.tables
 
@@ -1449,8 +1516,10 @@ def test_gl071_and_gl072_never_ran(parity_run, seed_baseline, harness) -> None:
     )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_batch_remains_open_and_unstamped(
-    parity_run, seed_baseline, harness
+    parity_run, seed_baseline, harness, vocabulary
 ) -> None:
     """`GLBATCH-REC`'s status and posted columns agree on both sides and with the seed.
 
@@ -1486,7 +1555,7 @@ def test_batch_remains_open_and_unstamped(
         seed_baseline: The pristine seeded state.
         harness: The three harness modules, for `load_dump` and the table map.
     """
-    from conftest import assert_dump_wellformed
+    assert_dump_wellformed = vocabulary.assert_dump_wellformed
 
     table = "GLBATCH-REC"
     specification = harness.dump_tables.table_spec(table)
@@ -1549,8 +1618,10 @@ def test_batch_remains_open_and_unstamped(
     )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_diagnostic_display_has_no_database_effect(
-    parity_run, seed_baseline, harness
+    parity_run, seed_baseline, harness, vocabulary
 ) -> None:
     """`perform gl060a` is a LOG RECORD on the Python side, and invisible in every dump.
 
@@ -1584,7 +1655,7 @@ def test_diagnostic_display_has_no_database_effect(
         seed_baseline: The pristine seeded state.
         harness: The three harness modules.
     """
-    from conftest import diff_trees_directly
+    diff_trees_directly = vocabulary.diff_trees_directly
 
     # STRUCTURAL PROOF 1 - the transcripts are outside both compared trees.
     run_logs = parity_run.paths.run_logs
@@ -1636,7 +1707,11 @@ def test_diagnostic_display_has_no_database_effect(
     )
 
 
-def test_diff_exit_contract_is_honoured(parity_run, harness, tmp_path) -> None:
+@pytest.mark.database
+@pytest.mark.oracle
+def test_diff_exit_contract_is_honoured(
+    parity_run, harness, tmp_path, vocabulary
+) -> None:
     """THE THREE-WAY EXIT CONTRACT, and the one conflation that must never happen.
 
         0  the two trees are identical, and stdout is EMPTY - zero bytes    PASS
@@ -1666,10 +1741,8 @@ def test_diff_exit_contract_is_honoured(parity_run, harness, tmp_path) -> None:
         tmp_path: An empty directory, standing in for an output root that holds no
             trees - the provocation for exit 2.
     """
-    from conftest import (
-        HarnessFaultError,
-        diff,
-    )
+    HarnessFaultError = vocabulary.fault
+    diff = vocabulary.diff
 
     diff_states = harness.diff_states
     assert (
@@ -1712,8 +1785,10 @@ def test_diff_exit_contract_is_honoured(parity_run, harness, tmp_path) -> None:
     )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_dump_is_wellformed_on_both_sides(
-    parity_run, harness, frozen_schema
+    parity_run, harness, frozen_schema, vocabulary
 ) -> None:
     """Every dump on both sides has the shape the protocol guarantees.
 
@@ -1740,7 +1815,8 @@ def test_dump_is_wellformed_on_both_sides(
         harness: The three harness modules.
         frozen_schema: `mysql/ACASDB.sql` parsed into the column-type map, read only.
     """
-    from conftest import assert_dump_wellformed, read_dump
+    assert_dump_wellformed = vocabulary.assert_dump_wellformed
+    read_dump = vocabulary.read_dump
 
     for side_label, tree in (
         ("cobol", parity_run.paths.cobol_normalized),

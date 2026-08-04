@@ -1,3 +1,8 @@
+#!/usr/bin/env python3
+# Executable in its own right: the canonical recipe in harness/docker-compose.yml
+# names the three state tools by path, and without this line the kernel refuses
+# the exec, bash treats the file as a shell script, and the plain-text lines of
+# this docstring become commands -- one of which is a destructive reset.
 """Deterministic state capture: `SELECT * FROM <table> ORDER BY <primary key>`.
 
 Stages 3 and 7 of the parity protocol. Writes one JSON file per table, holding
@@ -188,19 +193,22 @@ credential the bridge cannot hold would make the two sides connect as
 different users, and two dumps taken as different users are not
 comparable.
 
-NO SESSION STATE IS SET. `harness/Dockerfile.mariadb` pins autocommit
-at SERVER level precisely so that every client inherits the same value
-identically - the COBOL loaders, the bridges through `cobmysqlapi.o`,
-the `mariadb` client in `seed.sh` and `reset_db.sh`, and the Python
-driver here - and warns that a per-session setting "would let one side
-of the diff differ from the other". This module therefore sets no
-`autocommit`, no `sql_mode`, no `charset`, no collation and no
-`PAD_CHAR_TO_FULL_LENGTH`: it reads the server as configured. Being
-`SELECT`-only, the autocommit value cannot affect its output either way.
-Under the pinned `autocommit=1` each `SELECT` is its own read rather
-than one long snapshot, which is equally deterministic here because
-execution is strictly sequential and nothing writes to the schema while
-a dump is in progress - the run has finished before the dump starts.
+NO SESSION STATE IS SET. `harness/Dockerfile.mariadb` declares the
+RUNTIME autocommit mode at SERVER level precisely so that every client
+inherits the same value identically - the COBOL loaders, the bridges
+through `cobmysqlapi.o`, the `mariadb` client in `seed.sh` and
+`reset_db.sh`, and the Python driver here - and warns that a per-session
+setting "would let one side of the diff differ from the other". The one
+mode change anywhere in the harness is the seeding window `seed.sh` opens
+around the frozen load programs and closes again, so a dump never runs
+inside it. This module therefore sets no `autocommit`, no `sql_mode`, no
+`charset`, no collation and no `PAD_CHAR_TO_FULL_LENGTH`: it reads the
+server as configured. Being `SELECT`-only, the autocommit value cannot
+affect its output either way. Under the declared runtime `autocommit=1`
+each `SELECT` is its own read rather than one long snapshot, which is
+equally deterministic here because execution is strictly sequential and
+nothing writes to the schema while a dump is in progress - the run has
+finished before the dump starts.
 The connection is still released with a write-free `rollback()`, never
 a commit, so the module cannot alter state even if the server were
 reconfigured.
@@ -410,13 +418,19 @@ ACAS_DB_READ_TIMEOUT and ACAS_DB_WRITE_TIMEOUT, none of which may be 0.
 
 FURTHER READING
 ===============
-    mysql/ACASDB.sql             the frozen schema; the source of the
-                                 table, key and column inventory
-    harness/docker-compose.yml   the eight stages and the environment
-    harness/reset_db.sh          the same invariants, from the database
-                                 side
-    harness/normalize.py         the three canonicalisation jobs
-    harness/diff_states.py       the comparison; empty is the pass
+Each path below is written in the house citation form, in brackets. That is
+not decoration: a bare path at the start of a line is a runnable command to
+any shell that ends up reading this file, and one of these is a destructive
+reset. The shebang above is what stops that happening; the brackets are
+what make it harmless if it ever does.
+
+    [mysql/ACASDB.sql]            the frozen schema; the source of the
+                                  table, key and column inventory
+    [harness/docker-compose.yml]  the eight stages and the environment
+    [harness/reset_db.sh]         the same invariants, from the database
+                                  side
+    [harness/normalize.py]        the three canonicalisation jobs
+    [harness/diff_states.py]      the comparison; empty is the pass
 
 The migration anomaly log and the per-scenario diff evidence, both written
 at a later boundary, are built from this pipeline's output.
@@ -581,20 +595,22 @@ credential the bridge cannot hold would make the two sides connect as
 different users, and two dumps taken as different users are not
 comparable.
 
-NO SESSION STATE IS SET. `harness/Dockerfile.mariadb` pins autocommit
-at SERVER level precisely so that every client inherits the same value
-identically - the COBOL loaders, the bridges through `cobmysqlapi.o`,
-the `mariadb` client in `seed.sh` and `reset_db.sh`, and the Python
-driver here - and warns that a per-session setting "would let one side
-of the diff differ from the other". This module therefore sets no
-`autocommit`, no `sql_mode`, no `charset`, no collation and no
-`PAD_CHAR_TO_FULL_LENGTH`: it reads the server as configured. Being
-`SELECT`-only, the autocommit value cannot affect its output either way.
-Under the pinned `autocommit=0` the session's SELECTs share one implicit
-read transaction rather than each standing alone, which is equally
-deterministic here - and if anything more so - because
-execution is strictly sequential and nothing writes to the schema while
-a dump is in progress - the run has finished before the dump starts.
+NO SESSION STATE IS SET. `harness/Dockerfile.mariadb` declares the
+RUNTIME autocommit mode at SERVER level precisely so that every client
+inherits the same value identically - the COBOL loaders, the bridges
+through `cobmysqlapi.o`, the `mariadb` client in `seed.sh` and
+`reset_db.sh`, and the Python driver here - and warns that a per-session
+setting "would let one side of the diff differ from the other". The one
+mode change anywhere in the harness is the seeding window `seed.sh` opens
+around the frozen load programs and closes again, so a dump never runs
+inside it. This module therefore sets no `autocommit`, no `sql_mode`, no
+`charset`, no collation and no `PAD_CHAR_TO_FULL_LENGTH`: it reads the
+server as configured. Being `SELECT`-only, the autocommit value cannot
+affect its output either way. Under the declared runtime `autocommit=1`
+each `SELECT` is its own read rather than one long snapshot, which is
+equally deterministic here because execution is strictly sequential and
+nothing writes to the schema while a dump is in progress - the run has
+finished before the dump starts.
 The connection is still released with a write-free `rollback()`, never
 a commit, so the module cannot alter state even if the server were
 reconfigured.
@@ -684,9 +700,10 @@ Execution is strictly sequential."
     `UPDATE`, `DELETE`, `CREATE`, `DROP`, `ALTER` or `TRUNCATE`, creates
     no temporary table or view, and runs no `ANALYZE TABLE`. The single
     transaction-control statement it issues is a write-free `rollback()`,
-    which releases the read-only transaction the server opens under the
-    pinned `autocommit=0`. It writes nothing either way, because this
-    module only ever reads.
+    which releases any read-only transaction the server may have opened.
+    It writes nothing either way, because this module only ever reads, and
+    under the declared runtime `autocommit=1` there is usually no
+    transaction open for it to release at all.
   * ONE connection, no pool. Tables are dumped one after another in a
     plain loop. There is no thread, no event loop, no process pool and no
     synchronisation primitive anywhere in this file.
@@ -805,13 +822,19 @@ ACAS_DB_READ_TIMEOUT and ACAS_DB_WRITE_TIMEOUT, none of which may be 0.
 
 FURTHER READING
 ===============
-    mysql/ACASDB.sql             the frozen schema; the source of the
-                                 table, key and column inventory
-    harness/docker-compose.yml   the eight stages and the environment
-    harness/reset_db.sh          the same invariants, from the database
-                                 side
-    harness/normalize.py         the three canonicalisation jobs
-    harness/diff_states.py       the comparison; empty is the pass
+Each path below is written in the house citation form, in brackets. That is
+not decoration: a bare path at the start of a line is a runnable command to
+any shell that ends up reading this file, and one of these is a destructive
+reset. The shebang above is what stops that happening; the brackets are
+what make it harmless if it ever does.
+
+    [mysql/ACASDB.sql]            the frozen schema; the source of the
+                                  table, key and column inventory
+    [harness/docker-compose.yml]  the eight stages and the environment
+    [harness/reset_db.sh]         the same invariants, from the database
+                                  side
+    [harness/normalize.py]        the three canonicalisation jobs
+    [harness/diff_states.py]      the comparison; empty is the pass
 
 The migration anomaly log and the per-scenario diff evidence, both written
 at a later boundary, are built from this pipeline's output.
@@ -913,8 +936,17 @@ EXPECTED_TOTAL_COLUMNS: Final[int] = sum(
     spec.column_count for spec in IN_SCOPE.values()
 )
 
-# The two sides of the comparison; the dump's path, never its content, records which one
-# it is.
+# The two sides of the comparison. Two things record which side a capture is, and the
+# distinction matters because only one of them can reach a verdict:
+#   - the PATH composes it, as <out-dir>/<scenario>/<side>/, and
+#   - the MANIFEST states it, because `side` is one of `MANIFEST_KEYS` and the run
+#     attestation is matched against it (`read_run_attestation`).
+# What carries no side at all is the per-table dump OBJECT: `DUMP_KEYS` is exactly
+# table/primary_key/columns/row_count/rows, and those files are the only ones
+# harness/diff_states.py compares. So recording the side in the manifest cannot
+# influence a verdict, which is why it is safe to record it there and misleading to
+# claim -- as an earlier revision of this comment and of the --help text did -- that
+# nothing but the path knows it.
 SIDES: Final[tuple[str, ...]] = ("cobol", "python")
 
 # The dump object's key order. Fixed, and asserted by `write_dump` before anything is
@@ -1743,9 +1775,9 @@ def connect(
 
     On exit the connection is released with `rollback()` and closed.
     `rollback` rather than `commit` because this module only ever reads:
-    rolling back writes nothing, and it releases the read-only transaction
-    the server opens under the pinned `autocommit=0`. Being SELECT-only,
-    there is never anything to discard.
+    rolling back writes nothing, and it releases any read-only transaction
+    the server may have opened. Being SELECT-only, there is never anything
+    to discard, whichever autocommit mode the server serves.
 
     Args:
         settings: Where to connect. Resolved from `env` when omitted.
@@ -1926,9 +1958,10 @@ def _query(
                     f"expires on a SELECT usually means the row is held by "
                     f"a lock an earlier stage left open - "
                     f"[common/glbatchLD.cbl:L9-L13] requires autocommit OFF "
-                    f"for seeding, which the harness server pins - so check "
-                    f"that the seed stage released its locks before raising "
-                    f"the budget."
+                    f"for seeding, which harness/seed.sh scopes to a window "
+                    f"around the frozen load programs - so check that the "
+                    f"seed stage closed that window and released its locks "
+                    f"before raising the budget."
                 ) from exc
             raise
     finally:
@@ -2348,12 +2381,12 @@ def dump_tables(
     """Capture several tables, one after another on the one connection.
 
     STRICTLY SEQUENTIAL (rule R-3): a plain loop, in the order given, on
-    one connection. No thread, no pool, no batching. Under the
-    `autocommit=0` that `harness/Dockerfile.mariadb` pins at server level
-    the tables are read inside one implicit read transaction, which is at
-    least as consistent as reading each alone: the posting run has
-    completed before the dump starts and nothing else writes to the
-    schema, so no table can change between reads.
+    one connection. No thread, no pool, no batching. Under the runtime
+    `autocommit=1` that `harness/Dockerfile.mariadb` declares at server
+    level each table is read on its own, which is as consistent here as one
+    implicit read transaction would be: the posting run has completed
+    before the dump starts and nothing else writes to the schema, so no
+    table can change between reads.
 
     Args:
         connection: An open DB-API connection.
@@ -2602,8 +2635,10 @@ def write_dump(dump: Mapping[str, Any], path: Path | str) -> Path:
 # The manifest's file name.
 MANIFEST_FILENAME: Final[str] = "_manifest.json"
 
-# Bumped only if the manifest's SHAPE changes.
-MANIFEST_VERSION: Final[int] = 1
+# Bumped only if the manifest's SHAPE changes. Version 2 added `attestation`; a
+# version-1 tree is refused rather than read, because the whole point of the key is
+# that its ABSENCE cannot be mistaken for a pass.
+MANIFEST_VERSION: Final[int] = 2
 
 # The manifest's keys, in the order they are written. Fixed, like `DUMP_KEYS`, because
 # the order is part of the byte-identical guarantee.
@@ -2614,9 +2649,53 @@ MANIFEST_KEYS: Final[tuple[str, ...]] = (
     "scenario",
     "side",
     "selector",
+    "attestation",
     "table_count",
     "tables",
 )
+
+# =============================================================================
+# THE RUN ATTESTATION -- WHY A CAPTURE HAS TO CARRY ONE
+#
+# The eight stages were operator discipline and nothing more: each tool exited
+# with its own status and no tool ever looked at what the stage before it had
+# done. Run the protocol against a checkout with no fixtures and no compiled
+# oracle and every stage still "worked" -- seed exited 75, the COBOL run exited
+# 74, the Python run exited 69, and the dump, normalise and diff stages then
+# exited 0 apiece and printed "identical - 3 table(s) compared, no difference".
+# An empty diff is the ONE documented pass condition (AAP section 0.8.5), so the
+# harness certified the migration exact having compared two empty captures.
+#
+# The fix is to make the capture carry a claim about the run it came from. Each
+# runner writes `<side>.run-status' beside its log when it finishes, this module
+# reads it and records what it found, `normalize.py' carries it through, and
+# `diff_states.py' refuses a pair that does not attest success. Nothing here
+# INFERS success: a missing file, an unreadable one or a non-zero status all
+# produce `attested: false', which is the fail-closed direction.
+#
+# The file is TSV, one `key<TAB>value' per line, and only these keys are read:
+#     scenario                 the scenario the run was for
+#     side                     cobol | python
+#     status                   the runner's own exit status, as an integer
+#     seed_fingerprint_sha256  digest of the pre-run seed fingerprint, or empty
+# Unknown keys are ignored, so a runner may record more without breaking this.
+# =============================================================================
+RUN_STATUS_DIRNAME: Final[str] = "run-logs"
+RUN_STATUS_SUFFIX: Final[str] = ".run-status"
+
+# The attestation's own keys, fixed for the same reason `MANIFEST_KEYS` is.
+ATTESTATION_KEYS: Final[tuple[str, ...]] = (
+    "attested",
+    "source",
+    "run_status",
+    "seed_fingerprint_sha256",
+    "detail",
+)
+
+# At most this many bytes are read from a run-status file. It holds four short
+# lines; anything larger is not the file this module is looking for, and reading
+# it whole would be an unbounded read of an operator-supplied path.
+_RUN_STATUS_MAX_BYTES: Final[int] = 64 * 1024
 
 # What this module writes into `stage`, and the selector vocabulary. Both are fixed
 # strings so a downstream check can compare them exactly.
@@ -2663,6 +2742,144 @@ def file_digest(path: Path | str) -> str:
     return digest.hexdigest()
 
 
+def unattested(detail: str) -> dict[str, Any]:
+    """Return an attestation that claims nothing, with the reason it claims nothing.
+
+    Used wherever a run status could not be established. There is deliberately no
+    "unknown" third state: a capture either attests a successful run or it does not,
+    because `diff_states.py` has to decide whether to render a verdict on it.
+
+    Args:
+        detail: Why no claim is made, in a form an operator can act on.
+
+    Returns:
+        An attestation object, keys in `ATTESTATION_KEYS` order.
+    """
+    return {
+        "attested": False,
+        "source": None,
+        "run_status": None,
+        "seed_fingerprint_sha256": None,
+        "detail": detail,
+    }
+
+
+def run_status_path(
+    out_root: Path | str, scenario: str, side: str
+) -> Path:
+    """Return where the runner for `side` records the outcome of `scenario`.
+
+    Both runners write beside their transcript, under `<out>/run-logs/<scenario>/`,
+    which is deliberately OUTSIDE `<out>/<scenario>/` so that nothing they write can
+    land in a compared tree.
+
+    Args:
+        out_root: `$ACAS_OUT`, or whatever `--out-dir` named.
+        scenario: The scenario name.
+        side: `cobol` or `python`.
+
+    Returns:
+        The path of the run-status file. It may not exist.
+    """
+    return (
+        Path(out_root) / RUN_STATUS_DIRNAME / scenario / f"{side}{RUN_STATUS_SUFFIX}"
+    )
+
+
+def read_run_attestation(
+    out_root: Path | str | None, scenario: str | None, side: str | None
+) -> dict[str, Any]:
+    """Read the run-status file this capture belongs to and judge it.
+
+    `attested` is True only when a file exists, parses, names THIS scenario and side,
+    and records status 0. Every other outcome is a refusal with a reason - including a
+    file that is absent, which is the ordinary case when the dump is run out of order.
+
+    Args:
+        out_root: The output root, or None for the `--out DIR` layout.
+        scenario: The scenario name, or None.
+        side: `cobol` or `python`, or None.
+
+    Returns:
+        An attestation object, keys in `ATTESTATION_KEYS` order. Never raises: a dump
+            must still be publishable when the run stage left nothing behind, because
+            the refusal has to travel WITH the capture rather than replace it.
+    """
+    if out_root is None or scenario is None or side is None:
+        return unattested(
+            "this dump was taken with --out, which names a directory outright and "
+            "carries no scenario or side, so the run it belongs to cannot be "
+            "identified. Use --scenario NAME --side SIDE for a capture that is "
+            "meant to be compared."
+        )
+
+    path = run_status_path(out_root, scenario, side)
+    try:
+        if not path.is_file():
+            return unattested(
+                f"no run-status file at {path}, so nothing attests that the "
+                f"{side} run of {scenario} completed. harness/"
+                f"run_{'cobol' if side == 'cobol' else 'python'}_scenario.sh "
+                f"writes it when it finishes; a dump taken before the run, or "
+                f"after a run that was killed outright, has none."
+            )
+        with open(path, "rb") as handle:
+            raw = handle.read(_RUN_STATUS_MAX_BYTES + 1)
+    except OSError as exc:
+        return unattested(f"could not read the run-status file {path}: {exc}")
+
+    if len(raw) > _RUN_STATUS_MAX_BYTES:
+        return unattested(
+            f"the run-status file {path} is larger than "
+            f"{_RUN_STATUS_MAX_BYTES} bytes, so it is not the four-line record "
+            f"a runner writes."
+        )
+
+    fields: dict[str, str] = {}
+    for line in raw.decode("utf-8", "replace").splitlines():
+        if "\t" not in line:
+            continue
+        key, _, value = line.partition("\t")
+        fields[key.strip()] = value.strip()
+
+    recorded_scenario = fields.get("scenario", "")
+    recorded_side = fields.get("side", "")
+    recorded_status = fields.get("status", "")
+    fingerprint = fields.get("seed_fingerprint_sha256", "") or None
+
+    if recorded_scenario != scenario or recorded_side != side:
+        return unattested(
+            f"the run-status file {path} names scenario "
+            f"{recorded_scenario or '<absent>'!r} side "
+            f"{recorded_side or '<absent>'!r}, and this dump is "
+            f"{scenario!r}/{side!r}. It belongs to a different run, so it "
+            f"attests nothing about this one."
+        )
+
+    try:
+        status = int(recorded_status)
+    except ValueError:
+        return unattested(
+            f"the run-status file {path} records status "
+            f"{recorded_status or '<absent>'!r}, which is not an integer."
+        )
+
+    if status != 0:
+        return unattested(
+            f"the {side} run of {scenario} exited {status}, so it produced no "
+            f"evidence. {path} records it. Re-run the stage; a capture taken "
+            f"after a failed run cannot support a verdict."
+        )
+
+    return {
+        "attested": True,
+        "source": str(path),
+        "run_status": 0,
+        "seed_fingerprint_sha256": fingerprint,
+        "detail": None,
+    }
+
+
 def build_manifest(
     entries: Sequence[tuple[str, int, str]],
     *,
@@ -2671,6 +2888,7 @@ def build_manifest(
     scenario: str | None = None,
     side: str | None = None,
     selector: str = SELECTOR_INHERITED,
+    attestation: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble a completeness manifest.
 
@@ -2681,6 +2899,8 @@ def build_manifest(
         scenario: The scenario this tree belongs to, or None.
         side: `cobol` or `python`, or None.
         selector: How the table list was chosen.
+        attestation: What the run stage claimed, as `read_run_attestation` returns.
+            Omitted means "no claim", which is recorded as such rather than left out.
 
     Returns:
         The manifest object, keys in `MANIFEST_KEYS` order.
@@ -2706,6 +2926,11 @@ def build_manifest(
         tables.append(
             {"table": table, "row_count": int(row_count), "sha256": digest}
         )
+    if attestation is None:
+        attestation = unattested(
+            "no run attestation was supplied to build_manifest, so this tree "
+            "makes no claim about the run it came from."
+        )
     return {
         "manifest_version": MANIFEST_VERSION,
         "producer": producer,
@@ -2713,6 +2938,9 @@ def build_manifest(
         "scenario": scenario,
         "side": side,
         "selector": selector,
+        # Rebuilt key by key in ATTESTATION_KEYS order rather than passed through,
+        # so a caller cannot introduce a key order that breaks byte-identity.
+        "attestation": {key: attestation.get(key) for key in ATTESTATION_KEYS},
         "table_count": len(tables),
         "tables": tables,
     }
@@ -2791,6 +3019,7 @@ def publish_dumps(
     scenario: str | None = None,
     side: str | None = None,
     selector: str = SELECTOR_INHERITED,
+    attestation: Mapping[str, Any] | None = None,
 ) -> tuple[Path, ...]:
     """Publish a whole set of dumps, staged, with a manifest written last.
 
@@ -2806,6 +3035,8 @@ def publish_dumps(
             identity.
         side: `cobol` or `python`.
         selector: How the table list was chosen, recorded in the manifest.
+        attestation: What the run stage claimed, recorded verbatim in the manifest so
+            that the refusal travels with the capture rather than replacing it.
 
     Returns:
         The published paths - the `<TABLE>.json` files in the order written, then the
@@ -2850,6 +3081,7 @@ def publish_dumps(
             scenario=scenario,
             side=side,
             selector=selector,
+            attestation=attestation,
         )
         staged_manifest = write_manifest(
             manifest, staging / MANIFEST_FILENAME
@@ -3234,7 +3466,10 @@ def build_parser() -> argparse.ArgumentParser:
         choices=SIDES,
         help=(
             "which side of the comparison this dump represents. Requires "
-            "--scenario. The side is recorded in the PATH, never in a file."
+            "--scenario. It selects the <scenario>/<side>/ path AND is recorded "
+            "in the manifest, where the run attestation is matched against it; "
+            "the manifests themselves are never compared, so recording it "
+            "cannot affect a verdict."
         ),
     )
     parser.add_argument(
@@ -3472,14 +3707,46 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"harness/dump_tables.py: {exc}", file=sys.stderr)
         return EX_USAGE
 
-    destination = dump_path(
-        out, tables[0], scenario=scenario, side=side
-    ).parent
+    try:
+        destination = dump_path(
+            out, tables[0], scenario=scenario, side=side
+        ).parent
+    except ValueError as exc:
+        # The layout rules live in `dump_path`, and this is the one call that reaches
+        # them from outside the guarded block above. Left uncaught it escaped as a
+        # traceback with status 1 -- outside this tool's documented codes, and printing
+        # internal file and line detail -- for an input the sibling tools refuse
+        # cleanly. It is a usage error, and it says so.
+        print(f"harness/dump_tables.py: {exc}", file=sys.stderr)
+        return EX_USAGE
     try:
         _assert_output_writable(destination, env)
     except DumpPathError as exc:
         print(f"harness/dump_tables.py: {exc}", file=sys.stderr)
         return EX_WRITE
+
+    # WHAT THE RUN STAGE CLAIMED, read BEFORE the database is touched so that the
+    # answer is on the record whether or not the dump goes on to succeed. A refusal is
+    # not fatal here: it is recorded in the manifest and `diff_states.py` enforces it,
+    # because the operator dumping a failed run needs the capture to inspect and only
+    # the VERDICT has to fail closed.
+    attestation = read_run_attestation(
+        out if (scenario is not None and side is not None) else None,
+        scenario,
+        side,
+    )
+    if attestation["attested"]:
+        _progress(
+            f"harness/dump_tables.py: run attestation OK - "
+            f"{attestation['source']} records status 0 for {side}/{scenario}"
+        )
+    else:
+        _progress(
+            f"harness/dump_tables.py: NOT ATTESTED - {attestation['detail']} "
+            f"The capture is still written, and it carries that refusal: "
+            f"harness/diff_states.py will not render a verdict on it without "
+            f"--allow-unattested."
+        )
 
     try:
         settings = connection_settings(env)
@@ -3514,6 +3781,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     scenario=scenario,
                     side=side,
                     selector=selector,
+                    attestation=attestation,
                 )
             )
     except DumpTimeoutError as exc:

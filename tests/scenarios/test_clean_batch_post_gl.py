@@ -301,14 +301,208 @@ from __future__ import annotations
 
 import pytest
 
-import conftest
-
+# The TIER mark, applied to the whole module because every test in it belongs to the
+# tier. THE INFRASTRUCTURE MARKS ARE NOT HERE: `database` and `oracle` are declared per
+# test, on exactly the tests whose fixture closure reaches the harness stack, because
+# several tests in this file read only files on disk and pass on a bare host. A module
+# mark would claim they need a MariaDB and a built oracle, and `-m database` would then
+# select tests that require neither.
 pytestmark = pytest.mark.scenario
 
 SCENARIO = "clean_batch_gl"
 
+# NOTHING HERE IMPORTS `tests/conftest.py`. Everything shared arrives through
+# FIXTURES - `vocabulary` for the stack-free vocabulary and the pure helpers,
+# `protocol` for the eight stages, `harness` for the three harness modules,
+# `scenario_loader` for the parsed definition, `pinned_clock` for the pinned pair and
+# `frozen_schema` for the declared column types. That is the house convention across
+# this tree, and it is not cosmetic: a module-scope `import conftest` binds the whole
+# scenario tier to pytest's default import mode, so a run under
+# `--import-mode=importlib` fails at COLLECTION and takes every other scenario file
+# down with it.
+#
+# EVERY EXPECTED VALUE THIS FILE CHECKS AGAINST IS EITHER A LOCAL BELOW OR ARRIVES
+# THROUGH `vocabulary`, so there is no second authority to drift out of step with the
+# scenario YAML.
 
-def test_scenario_definition_preconditions(pinned_clock) -> None:
+# The three tables this scenario bounds the comparison by, in the declared order, and
+# the two the seed fills. `GLPOSTING-REC` is the UNCHANGED WITNESS - `gl072` issues
+# eight facade verbs and not one is a `GL-Posting-*` verb - so it is deliberately not
+# among the tables required to hold rows by the non-vacuity guard: `posting.dat` does
+# seed it, but the claim this file makes about it is asserted per value, against a
+# separate capture of the seed, in `test_glposting_rec_is_an_unchanged_witness`.
+BATCH_TABLE = "GLBATCH-REC"
+LEDGER_TABLE = "GLLEDGER-REC"
+POSTING_TABLE = "GLPOSTING-REC"
+
+# The tables that MUST come back with rows on both sides, or an empty diff over them
+# proves nothing at all.
+SEEDED_TABLES = (BATCH_TABLE, LEDGER_TABLE, POSTING_TABLE)
+
+# This scenario drives exactly one operation, and declares one status for it.
+OPERATION = "gl_post_cycle"
+EXPECTED_STATUS = 0
+
+# The only term code reachable on this route [general/gl070.cbl:L289], consumed by the
+# hard gate at [general/general.cbl:L810-L811].
+TERM_CODE_OPEN_BATCH = 5
+
+
+# ---------------------------------------------------------------------------
+#  THE SHARED EVIDENCE, AND WHY IT IS A FIXTURE
+#
+#  EVERY STAGE AND EVERY GUARD HAPPENS HERE, so that the two outcomes pytest can
+#  report stay separable:
+#
+#    * a stage whose failure destroys the evidence - the seed, the reset, either
+#      capture, either normalisation - and the comparison's own exit 2 raise
+#      `HarnessFaultError`. Raised from a FIXTURE, pytest reports an ERROR: the
+#      question was never asked.
+#    * a genuine behavioural difference reaches the test body and fails an `assert`,
+#      so pytest reports a FAILURE: the question was asked and answered.
+#
+#  In pytest an exception raised in a TEST BODY is reported FAILED whatever its type,
+#  so preparation performed in a body destroys that distinction - and during bring-up,
+#  when seed and reset failures are frequent, it sends a reader hunting for a
+#  COBOL-versus-Python divergence that does not exist.
+#
+#  FUNCTION-SCOPED WITH A MODULE MEMO. The `protocol` fixture is function-scoped by
+#  its own design, because it applies the stack skip per test, and pytest refuses to
+#  let a module-scoped fixture depend on a function-scoped one. So the completed run
+#  is memoised in the private mapping below - populated ONLY ON SUCCESS, so a
+#  half-completed run is never served to a later test as though it were evidence -
+#  which leaves every test below independent of ordering while performing the
+#  destructive seed / run / reset / re-run sequence exactly ONCE rather than four
+#  times. A `ParityRun` is frozen and all of its collections are tuples, so sharing it
+#  is safe. Execution is strictly sequential (R-3), so a plain dict needs no lock.
+# ---------------------------------------------------------------------------
+
+_PARITY_RUNS: dict[str, object] = {}
+_SEED_CAPTURES: dict[str, object] = {}
+
+
+@pytest.fixture
+def parity(protocol, vocabulary):
+    """All eight protocol stages for `clean_batch_gl`, run once and guarded.
+
+    THE FOUR GUARDS BELOW ARE HARNESS-FAULT DETECTORS, NOT BEHAVIOURAL ASSERTIONS.
+    Each catches a condition under which an EMPTY DIFF WOULD MEAN NOTHING, and none
+    of them is visible in the verdict:
+
+      1. THE BOUND. The comparison must be bounded by the scenario's own
+         `affected_tables:` list, in its declared order, and by nothing else.
+      2. THE STATUSES. Both run stages' ACTUAL exit statuses are read and classified.
+         A run that aborted where this scenario expects success leaves both sides
+         equally unwritten and the diff equally empty.
+      3. THE SEED FINGERPRINTS. The two cycles must have started from the same
+         recorded row counts, or the differences - or their absence - belong to the
+         seed rather than to the cycles.
+      4. NON-VACUITY. The tables this scenario seeds must come back WITH ROWS on both
+         sides. Two dumps of zero rows are identical, so without this the headline
+         passes against an entirely unseeded database.
+
+    Args:
+        protocol: Every protocol stage and both compositions, from `tests/conftest.py`.
+            Requesting it applies the stack skip, so a host with no Docker, no MariaDB
+            and no built oracle SKIPS with a precise reason and never errors.
+        vocabulary: The stack-free vocabulary, for the operation name's own check.
+
+    Returns:
+        The `ParityRun`: every stage result in execution order, both run stages, the
+        stage-8 verdict and the paths of every artifact.
+
+    Raises:
+        Skipped: The Compose stack is unusable.
+        HarnessFaultError: A stage whose failure destroys the evidence failed, or the
+            comparison could not be performed at all. A pytest ERROR, never a pass.
+        AssertionError: A guard above failed - also a harness fault.
+    """
+    assert OPERATION in vocabulary.operations, (
+        f"{SCENARIO} drives {OPERATION!r}, which is not one of the seven operations "
+        f"both runners share: {', '.join(vocabulary.operations)}."
+    )
+
+    cached = _PARITY_RUNS.get(SCENARIO)
+    if cached is None:
+        cached = protocol.run_scenario_parity(SCENARIO)
+        _PARITY_RUNS[SCENARIO] = cached
+    run = cached
+
+    # GUARD 1 - the bound, in the declared order.
+    assert run.tables == protocol.affected_tables(SCENARIO), (
+        f"{SCENARIO}: the comparison was bounded by {list(run.tables)} while the "
+        f"scenario declares {list(protocol.affected_tables(SCENARIO))}. The declared "
+        f"ORDER is load-bearing: the report is written in it and so is the seed "
+        f"fingerprint."
+    )
+
+    # GUARD 2 - the ORACLE's ACTUAL status, and both sides' classifications. Bounded
+    # to the reference side on purpose: an oracle that did not run the cycle to
+    # completion means this scenario was never set up as declared, which is a setup
+    # ERROR, while a Python side that diverges from the oracle is a behavioural
+    # regression and is reported as a FAILURE by
+    # `test_python_reproduced_the_oracles_disposition`.
+    protocol.assert_declared_statuses(
+        run,
+        operations=(OPERATION,),
+        declared=list(protocol.definition(SCENARIO)["expected_status"]),
+        reference_only=True,
+    )
+
+    # GUARD 3 - the two sides started from the same recorded state.
+    protocol.assert_seed_fingerprints_agree(run)
+
+    # GUARD 4 - something was actually there to compare.
+    protocol.assert_non_vacuous(run, tables_requiring_rows=SEEDED_TABLES)
+
+    return run
+
+
+@pytest.fixture
+def seed_baseline(protocol, parity, tmp_path_factory):
+    """A THIRD tree: this scenario's PRISTINE SEEDED STATE, for the absence proof.
+
+    Two sides that had both posted a witness table would agree perfectly and the diff
+    would still be empty, so agreement alone cannot prove that a table was left
+    untouched. What makes absence provable is a capture of the seed itself, taken
+    through the same dump and normalisation stages so that the comparison against it
+    is like for like.
+
+    IT RUNS AFTER THE PARITY RUN, DELIBERATELY. The eight stages end with the Python
+    side's state in the database; re-seeding here would destroy the state the parity
+    run's own dumps were taken from - the dumps are already on disk, so nothing is
+    lost - and leaves the database in the pristine seeded state this capture describes.
+
+    Args:
+        protocol: The protocol stages.
+        parity: The completed run, so the ordering above is enforced by pytest rather
+            than by convention.
+        tmp_path_factory: For an output root of its own, so the capture can never
+            overwrite either side of the comparison.
+
+    Returns:
+        The `ScenarioPaths` of the baseline capture; its `cobol_normalized` tree is
+        the seeded state.
+
+    Raises:
+        HarnessFaultError: The seed, the dump or the normalisation failed. A pytest
+            ERROR: without a trustworthy baseline the absence proof cannot be made.
+    """
+    cached = _SEED_CAPTURES.get(SCENARIO)
+    if cached is not None:
+        return cached
+
+    baseline_root = tmp_path_factory.mktemp("gl-seed-baseline")
+    side = protocol.vocabulary.sides[0]
+    protocol.seed(SCENARIO).raise_for_status()
+    protocol.dump(SCENARIO, side, out_dir=baseline_root).raise_for_status()
+    protocol.normalize(SCENARIO, side, out_dir=baseline_root).raise_for_status()
+    captured = protocol.paths(SCENARIO, out_root=baseline_root)
+    _SEED_CAPTURES[SCENARIO] = captured
+    return captured
+
+
+def test_scenario_definition_preconditions(pinned_clock, vocabulary) -> None:
     """Assert the preconditions that make this scenario's verdict mean anything.
 
     Each one closes a real FALSE-PASS hole, each is cheap, and none needs the stack.
@@ -317,14 +511,18 @@ def test_scenario_definition_preconditions(pinned_clock) -> None:
 
     Args:
         pinned_clock: The project-wide pinned run date. The fixture itself asserts
-            that the pair equals `PINNED_RUN_DATE_TEXT` and `PINNED_RUN_DATE_BINARY`,
-            so referencing it is how the pinned values reach this test without a
-            literal being retyped anywhere.
+            that the pair equals the project's pinned text and binary observables, so
+            referencing it is how the pinned values reach this test without a literal
+            being retyped anywhere.
+        vocabulary: `tests/conftest.py`'s stack-free bundle - the seven operations
+            both runners share, the admissible term codes, the scenario keys the
+            stages read, the fan-out states, the date forms and the pinned pair. It
+            arrives as a FIXTURE so that this file imports nothing from that module.
 
     Raises:
         AssertionError: A precondition does not hold.
     """
-    definition = conftest.scenario_definition(SCENARIO)
+    definition = vocabulary.definition(SCENARIO)
 
     # The scenario names itself, and the operation is one of the seven both runners
     # share. `subsystem` is DERIVED from the operation rather than re-declared here:
@@ -333,11 +531,11 @@ def test_scenario_definition_preconditions(pinned_clock) -> None:
     # docstring.
     assert definition["name"] == SCENARIO
     operation = definition["operation"]
-    assert operation in conftest.OPERATIONS, (
+    assert operation in vocabulary.operations, (
         f"{SCENARIO} declares operation {operation!r}, which is not one of the "
-        f"seven the two runners share: {', '.join(conftest.OPERATIONS)}."
+        f"seven the two runners share: {', '.join(vocabulary.operations)}."
     )
-    subsystem, _menu_key, _paragraph, _locator = conftest.OPERATIONS[operation]
+    subsystem, _menu_key, _paragraph, _locator = vocabulary.operations[operation]
     assert definition["subsystem"] == subsystem
     # One operation, declared as an ordered sequence. The Python runner reads this
     # key as a flat sequence of operation NAMES and prefers it over the singular
@@ -351,7 +549,7 @@ def test_scenario_definition_preconditions(pinned_clock) -> None:
     # [general/gl070.cbl:L289], the hard gate at [general/general.cbl:L810-L811] did
     # not fire, and all three phases ran.
     assert list(definition["expected_status"]) == [0]
-    assert 0 not in conftest.TERM_CODES[operation], (
+    assert 0 not in vocabulary.term_codes[operation], (
         "zero must not be an admissible term code, or 'no abort' and 'aborted' "
         "would be indistinguishable in the expected status."
     )
@@ -360,7 +558,7 @@ def test_scenario_definition_preconditions(pinned_clock) -> None:
     # `if FS-Cobol-Files-Used` blocks [sales/sl055.cbl:L326],
     # [purchase/pl055.cbl:L266], so with file_system_used 1 neither is reachable at
     # all. `expected_status: 0` here is therefore provable rather than assumed.
-    assert conftest.TERM_CODES[operation] == (5,)
+    assert vocabulary.term_codes[operation] == (5,)
 
     # -------------------------------------------------------------------------
     # THE FALSE-PASS TRAP. [copybooks/wssystem.cob:L111-L114]:
@@ -394,8 +592,8 @@ def test_scenario_definition_preconditions(pinned_clock) -> None:
     # VISIBLE IN A DUMP, and none of the twelve in-scope programs contains a clock
     # read. Pinning these two is what makes two runs byte-identical.
     clock = definition["clock"]
-    assert clock["to_day"] == conftest.PINNED_RUN_DATE_TEXT
-    assert clock["run_date"] == conftest.PINNED_RUN_DATE_BINARY
+    assert clock["to_day"] == vocabulary.pinned_run_date_text
+    assert clock["run_date"] == vocabulary.pinned_run_date_binary
     assert (clock["to_day"], clock["run_date"]) == (
         pinned_clock.to_day,
         pinned_clock.run_date,
@@ -406,8 +604,8 @@ def test_scenario_definition_preconditions(pinned_clock) -> None:
     # The flat mirrors the COBOL runner reads with its top-level-scalar reader must
     # carry the same values as the grouped block, or the two sides are pinned
     # differently and the diff is meaningless.
-    assert definition[conftest.SCENARIO_KEY_RUN_DATE_TEXT] == clock["to_day"]
-    assert definition[conftest.SCENARIO_KEY_RUN_DATE_BINARY] == clock["run_date"]
+    assert definition[vocabulary.scenario_keys["run_date_text"]] == clock["to_day"]
+    assert definition[vocabulary.scenario_keys["run_date_binary"]] == clock["run_date"]
 
     # THE IRS FAN-OUT SWITCH, PINNED EXPLICITLY. [copybooks/wssystem.cob:L179-L181]:
     #     179         05  IRS-Instead     pic x.
@@ -419,11 +617,12 @@ def test_scenario_definition_preconditions(pinned_clock) -> None:
     # is pinned rather than defaulted. A YAML space maps to the CLI token "N" while
     # the column still stores a space, and normalisation job 1 trims that to the
     # empty string on BOTH sides - correct, because it is applied identically.
-    assert system[conftest.SCENARIO_KEY_IRS_INSTEAD] in conftest.IRS_INSTEAD_STATES
-    assert system[conftest.SCENARIO_KEY_IRS_INSTEAD] == conftest.IRS_INSTEAD_GL_ONLY
+    irs_instead_key = vocabulary.scenario_keys["irs_instead"]
+    assert system[irs_instead_key] in vocabulary.irs_instead_states
+    assert system[irs_instead_key] == vocabulary.irs_instead_states[0]
     assert (
-        definition[conftest.SCENARIO_KEY_IRS_INSTEAD]
-        == system[conftest.SCENARIO_KEY_IRS_INSTEAD]
+        definition[vocabulary.scenario_keys["irs_instead"]]
+        == system[vocabulary.scenario_keys["irs_instead"]]
     )
 
     # THE ACCOUNTING CYCLE. [copybooks/wssystem.cob:L62-L64]:
@@ -446,10 +645,10 @@ def test_scenario_definition_preconditions(pinned_clock) -> None:
 
     # The date presentation form, pinned in both the grouped block and its flat
     # mirror. UK dd/mm/yyyy, which is the form `to-day pic x(10)` carries above.
-    assert system[conftest.SCENARIO_KEY_DATE_FORM] == conftest.DATE_FORM_UK
+    assert system[vocabulary.scenario_keys["date_form"]] == vocabulary.date_forms[0]
     assert (
-        definition[conftest.SCENARIO_KEY_DATE_FORM]
-        == system[conftest.SCENARIO_KEY_DATE_FORM]
+        definition[vocabulary.scenario_keys["date_form"]]
+        == system[vocabulary.scenario_keys["date_form"]]
     )
 
     # THE SEED CONTRACT - four flat files, each a name the frozen loader script
@@ -458,7 +657,7 @@ def test_scenario_definition_preconditions(pinned_clock) -> None:
     # [common/masterLD.sh:L103]; batch.dat to glbatchLD [common/masterLD.sh:L94];
     # posting.dat to glpostingLD [common/masterLD.sh:L109]. The remaining three map
     # one-to-one onto the affected tables.
-    seed_files = tuple(definition[conftest.SCENARIO_KEY_SEED_FILES])
+    seed_files = tuple(definition[vocabulary.scenario_keys["seed_files"]])
     assert set(seed_files) == {
         "system.dat",
         "ledger.dat",
@@ -494,7 +693,7 @@ def test_scenario_definition_preconditions(pinned_clock) -> None:
     # payment_post_confirm, gl080_proceed and disk_change_option belong to the IRS,
     # payment and end-of-cycle routes, and none of them is on this path.
     for answer_key in (
-        conftest.SCENARIO_KEY_IRS_CLEAR_POSTINGS,
+        vocabulary.scenario_keys["irs_clear_postings"],
         "payment_post_confirm",
         "gl080_proceed",
         "disk_change_option",
@@ -506,7 +705,7 @@ def test_scenario_definition_preconditions(pinned_clock) -> None:
         )
 
 
-def test_affected_tables_are_in_scope_and_alphabetical(harness) -> None:
+def test_affected_tables_are_in_scope_and_alphabetical(harness, vocabulary) -> None:
     """Assert the affected-table list is exactly the three, in the declared order.
 
     THIS LIST IS THE ONLY THING THAT BOUNDS THE COMPARISON. There is no ignore-list,
@@ -524,17 +723,20 @@ def test_affected_tables_are_in_scope_and_alphabetical(harness) -> None:
         harness: The three harness Python modules, loaded by explicit file path
             (R-1). `IN_SCOPE` and every primary key are read from
             `harness/dump_tables.py` and are never re-declared here.
+        vocabulary: The stack-free bundle. `affected_tables` delegates the reading and
+            the in-scope check to `harness/dump_tables.py`, so the list is validated
+            in exactly one place.
 
     Raises:
         AssertionError: The list is not the expected three, is not ascending, or
             names something that is not an in-scope table.
     """
-    tables = conftest.scenario_affected_tables(SCENARIO)
+    tables = vocabulary.affected_tables(SCENARIO)
 
     # GLBATCH-REC  - rewritten by gl072's end-batch [general/gl072.cbl:L372-L377].
     # GLLEDGER-REC - rewritten by gl072's end-account [general/gl072.cbl:L379-L382].
     # GLPOSTING-REC- READ ONLY on this route, and listed so the diff PROVES it.
-    assert tables == ("GLBATCH-REC", "GLLEDGER-REC", "GLPOSTING-REC")
+    assert tables == (BATCH_TABLE, LEDGER_TABLE, POSTING_TABLE)
 
     # Ascending, which is both the declared order and the fingerprint order.
     assert list(tables) == sorted(tables)
@@ -583,7 +785,7 @@ def test_affected_tables_are_in_scope_and_alphabetical(harness) -> None:
     # because [sales/sales.cbl:L759] dispatches the out-of-scope sl830 on the COBOL
     # side only. Both runners assert after their run that all four are still empty;
     # that assertion lives in the runners, not here.
-    for autogen in conftest.AUTOGEN_TABLES:
+    for autogen in vocabulary.autogen_tables:
         assert autogen not in tables
 
 
@@ -625,7 +827,9 @@ def test_affected_tables_are_in_scope_and_alphabetical(harness) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_clean_batch_post_gl_state_parity(harness) -> None:
+@pytest.mark.database
+@pytest.mark.oracle
+def test_clean_batch_post_gl_state_parity(parity, harness) -> None:
     """THE HEADLINE. Drive all eight protocol stages and demand an EMPTY diff.
 
     The eight stages, in the exact order, and none skipped:
@@ -674,60 +878,24 @@ def test_clean_batch_post_gl_state_parity(harness) -> None:
     SPECIFICATION - no expected value for this scenario may be derived from
     documentation or from reasoning about intent.
 
+    THE BODY HOLDS ONLY THE VERDICT. Every stage, and all four harness-fault guards -
+    the bound, both ACTUAL run statuses with their classifications, the two sides'
+    seed fingerprints and non-vacuity - happened in the `parity` fixture, so a harness
+    fault is a pytest ERROR while what is left here is the arbitration, and a genuine
+    behavioural difference is a pytest FAILURE. The two can then never be confused,
+    which is the whole point of the split: exit 2 must never read as "no differences".
+
     Args:
+        parity: The completed, guarded `ParityRun`.
         harness: The three harness Python modules (R-1), for `render`.
 
     Raises:
         Skipped: The harness Compose stack is not usable; the reason names every
             missing precondition.
-        HarnessFaultError: A stage whose failure destroys the evidence failed, or a
-            run stage returned a status nobody has classified.
         AssertionError: The two normalised trees differ - a real behavioural
             difference between the compiled COBOL and the migrated cycle.
     """
-    conftest.requires_stack()
-
-    definition = conftest.scenario_definition(SCENARIO)
-    operation = definition["operation"]
-    expected_status = list(definition["expected_status"])
-
-    run = conftest.run_scenario_parity(SCENARIO)
-
-    # The comparison was bounded by the scenario's own list, in its own order.
-    assert run.tables == conftest.scenario_affected_tables(SCENARIO)
-
-    # A HARNESS FAULT IS RAISED, NEVER ASSERTED. `classify_run` reports an
-    # unrecognised status as a fault rather than quietly treating it as either of the
-    # other two, because a status nobody has classified is a status nobody should
-    # draw a conclusion from.
-    for label, stage_result in (
-        (conftest.SIDE_COBOL, run.cobol_run),
-        (conftest.SIDE_PYTHON, run.python_run),
-    ):
-        disposition = conftest.classify_run(stage_result, operation=operation)
-        if disposition == conftest.DISPOSITION_HARNESS_FAULT:
-            raise conftest.HarnessFaultError(
-                f"the {label} run stage could not be judged:\n"
-                f"{stage_result.describe()}\n"
-                f"  A harness fault means the question was never asked, so there "
-                f"is no evidence to compare - `argparse` exit "
-                f"{conftest.ARGPARSE_USAGE_EXIT} in particular means the runner "
-                f"built a bad command line. It is reported as an error and never "
-                f"as a behavioural difference."
-            )
-
-    # AN OBSERVED STATUS THAT CONTRADICTS THE SCENARIO IS A BEHAVIOURAL DIFFERENCE.
-    # The dump has already been taken by this point, so the table diff below still
-    # corroborates whatever actually happened.
-    observed = [run.cobol_run.returncode, run.python_run.returncode]
-    assert observed == expected_status * 2, (
-        f"the two runs ended {observed} where {SCENARIO} expects "
-        f"{expected_status} for each side. The term-code mapping is the identity, "
-        f"so 5 means gl070 raised the open-batch abort "
-        f"[general/gl070.cbl:L289] and the hard gate "
-        f"[general/general.cbl:L810-L811] stopped the cycle before gl071 and gl072 "
-        f"ever ran.\n{run.describe()}"
-    )
+    run = parity
 
     # THE PASS CONDITION, and the only one. `TreeDiff.is_empty` is a single cheap
     # question over a frozen dataclass; `render` reproduces the per-table findings
@@ -758,10 +926,14 @@ def test_clean_batch_post_gl_state_parity(harness) -> None:
 #    EXISTS`, 0 real `ALTER TABLE`, 0 `CREATE INDEX`, 0 `CREATE DATABASE`, 0
 #    `USE`, 0 `INSERT INTO`, 0 `FLOAT`/`DOUBLE`/`REAL`, 0 `TIMESTAMP`.
 #
-#    AUTOCOMMIT MUST BE OFF WHILE SEEDING, asserted as `0, 0` by
-#    `conftest.assert_autocommit_off` and by harness/seed.sh, and SET by
-#    harness/Dockerfile.mariadb alone. The batch loader says so itself,
-#    [common/glbatchLD.cbl:L9-L12] verbatim:
+#    AUTOCOMMIT MUST BE OFF WHILE SEEDING, AND ONLY THERE. harness/seed.sh owns
+#    that window and is the only place the mode is ever changed; every connection
+#    outside it is runtime access, asserted as `1, 1` by
+#    `conftest.assert_runtime_autocommit_on`, by harness/reset_db.sh and by
+#    harness/run_cobol_scenario.sh, with harness/Dockerfile.mariadb declaring the
+#    runtime mode. The scoping is the settled half of
+#    docs/migration/ambiguity-resolutions.md#q-10. The batch loader's banner is
+#    what the requirement derives from, [common/glbatchLD.cbl:L9-L12] verbatim:
 #        9  *>  This modules uses commit and rollback so *
 #       10  *>  you MUST ensure that autocommit is OFF   *
 #       11  *>   in the rdb settings. It is as default   *
@@ -791,7 +963,61 @@ def test_clean_batch_post_gl_state_parity(harness) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_diff_exit_contract_is_honoured(tmp_path, harness, frozen_schema) -> None:
+@pytest.mark.database
+@pytest.mark.oracle
+def test_python_reproduced_the_oracles_disposition(parity, protocol) -> None:
+    """THE MIGRATED CYCLE EXITED AS THE ORACLE EXITED - the behavioural half.
+
+    Read here, in a BODY, and deliberately not in the `parity` fixture. The oracle's
+    status is the specification (rule R-6): whatever the compiled cycle exited with is
+    correct by definition, so a Python side that exits differently is a regression in
+    the migrated code. Asserting it during setup would report that regression as an
+    ERROR in every test of this file, where it would be indistinguishable from a
+    MariaDB that never came up - so the fixture bounds itself to the oracle side with
+    `reference_only=True` and this test owns the comparison.
+
+    Both statuses matter beyond agreeing. `gl_post_cycle` is the one operation with a
+    term code - 5, the open-batch abort raised at [general/gl070.cbl:L289] and gated at
+    [general/general.cbl:L810-L811] - so a clean batch exiting 5 would mean the three
+    phases never all ran, `gl071` and `gl072` posted nothing, and the empty diff this
+    file's headline test celebrates would be two equally unposted databases. Hence the
+    declared status is asserted too, not just the equality.
+
+    Args:
+        parity: The completed eight-stage run.
+        protocol: The stage bundle, for the cross-side guard and the dispositions.
+    """
+    declared = list(protocol.definition(SCENARIO)["expected_status"])
+    assert declared == [EXPECTED_STATUS] * len(declared), (
+        f"{SCENARIO}: the scenario declares {declared!r} where this file states "
+        f"{EXPECTED_STATUS} for every operation. The two must not drift apart - a "
+        f"local restatement that no longer matches the scenario file would let this "
+        f"test pass against a route it is not describing."
+    )
+
+    disposition = protocol.assert_python_reproduced_disposition(
+        parity, operations=(OPERATION,), declared=declared
+    )
+    assert disposition == protocol.vocabulary.disposition_success, (
+        f"{SCENARIO}: the migrated cycle classified as {disposition!r}. On a CLEAN "
+        f"batch every phase runs to completion, so the only admissible disposition is "
+        f"{protocol.vocabulary.disposition_success!r}; "
+        f"{protocol.vocabulary.disposition_behavioural!r} here would mean term code "
+        f"{TERM_CODE_OPEN_BATCH} was raised and the posting phases were skipped."
+    )
+    assert TERM_CODE_OPEN_BATCH not in (
+        parity.cobol_run.returncode,
+        parity.python_run.returncode,
+    ), (
+        f"{SCENARIO}: term code {TERM_CODE_OPEN_BATCH} appeared on a route whose "
+        f"batch is balanced and closed. It is the OPEN-BATCH abort, and it stops the "
+        f"cycle before `gl071` and `gl072` run at all.\n{parity.describe()}"
+    )
+
+
+def test_diff_exit_contract_is_honoured(
+    tmp_path, harness, frozen_schema, vocabulary, capsys
+) -> None:
     """The THREE-WAY exit contract: 0 is a pass, 1 is a failure, 2 IS NEVER A PASS.
 
         0  the trees are identical, and stdout is EMPTY - zero bytes, not a banner
@@ -820,6 +1046,15 @@ def test_diff_exit_contract_is_honoured(tmp_path, harness, frozen_schema) -> Non
         harness: The three harness Python modules (R-1).
         frozen_schema: The parsed `mysql/ACASDB.sql`, READ AND NEVER WRITTEN. It
             supplies every column name and declared type, so nothing is invented.
+        vocabulary: The stack-free bundle. NEEDS NO STACK IS THE POINT: stages 4 and 8
+            are file-to-file transformations driven in process, so the whole three-way
+            contract is exercised on a bare host against trees this test publishes
+            into its own `tmp_path`.
+        capsys: The two streams of the two REFUSALS, which are driven through
+            `diff_states.main` directly rather than through the `diff` helper: the
+            helper maps exit 2 to a harness fault by design, and here a refusal is
+            the expected outcome, so the streams have to be read where they are
+            written.
 
     Raises:
         AssertionError: An exit status, a stdout stream or a verdict did not match
@@ -829,8 +1064,34 @@ def test_diff_exit_contract_is_honoured(tmp_path, harness, frozen_schema) -> Non
     normalize = harness.normalize
     diff_states = harness.diff_states
 
-    tables = conftest.scenario_affected_tables(SCENARIO)
-    paths = conftest.scenario_paths(SCENARIO, out_root=tmp_path)
+    tables = vocabulary.affected_tables(SCENARIO)
+    paths = vocabulary.paths(SCENARIO, out_root=tmp_path)
+
+    def attest(side: str, *, status: int = 0) -> None:
+        """Write the run-status record the dump stage reads its attestation from.
+
+        A capture carries what its RUN stage claimed, and the comparison stage
+        refuses a pair that claims nothing: two captures taken after failed runs
+        are trivially equal, and equality is the pass condition, so the harness
+        would otherwise certify parity having compared nothing. The exit contract
+        under test here is the contract for a comparison that IS permitted to
+        happen, so each synthetic side is given a synthetic attestation - written
+        through the tool's own path helper rather than a hand-built path, so the
+        two cannot drift.
+
+        Args:
+            side: `cobol` or `python`.
+            status: The run status to record. 0 attests success.
+        """
+        target = dump_tables.run_status_path(tmp_path, SCENARIO, side)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            f"scenario\t{SCENARIO}\n"
+            f"side\t{side}\n"
+            f"status\t{status}\n"
+            f"seed_fingerprint_sha256\t\n",
+            encoding="utf-8",
+        )
 
     def publish(side: str, *, bend: bool) -> None:
         """Publish one synthetic side, then canonicalise it through stage 4.
@@ -882,13 +1143,77 @@ def test_diff_exit_contract_is_honoured(tmp_path, harness, frozen_schema) -> Non
             scenario=SCENARIO,
             side=side,
             selector=dump_tables.SELECTOR_SCENARIO_FILE,
+            # Read through the tool's own reader, so what lands in the manifest is
+            # what a real run would put there rather than a literal this test made
+            # up about the manifest's shape.
+            attestation=dump_tables.read_run_attestation(
+                tmp_path, SCENARIO, side
+            ),
         )
-        conftest.normalize(SCENARIO, side, out_dir=tmp_path).raise_for_status()
+        vocabulary.normalize(SCENARIO, side, out_dir=tmp_path).raise_for_status()
+
+    # ---- EXIT 2: NEITHER SIDE ATTESTS A RUN -- refused before any compare ----
+    # The order matters: this is asserted BEFORE the attestations are written, so
+    # the refusal is measured on captures that never claimed anything, which is the
+    # state a dump taken out of order actually leaves behind.
+    publish(vocabulary.sides[0], bend=False)
+    publish(vocabulary.sides[1], bend=False)
+    # `main` is driven directly here rather than through the `diff` helper, which maps
+    # exit 2 to a harness fault by design: a refusal is the EXPECTED outcome of this
+    # case, and going through the helper would report the very thing being asserted
+    # as an error.
+    refusal_argv = [
+        "--scenario",
+        SCENARIO,
+        "--quiet",
+        "--out-dir",
+        str(tmp_path),
+        "--scenario-file",
+        str(vocabulary.scenario_file(SCENARIO)),
+    ]
+    capsys.readouterr()
+    unattested_status = diff_states.main(refusal_argv)
+    unattested_streams = capsys.readouterr()
+    assert unattested_status == diff_states.EX_ERROR, (
+        f"a capture whose run stage attests nothing must be REFUSED with "
+        f"{diff_states.EX_ERROR}, never compared: two captures taken after failed "
+        f"runs are trivially equal, and equality is the pass condition. It exited "
+        f"{unattested_status}."
+    )
+    assert unattested_streams.out == "", (
+        f"a refusal writes its diagnosis to stderr and leaves stdout EMPTY, so an "
+        f"empty stdout can never be read as a pass on its own. It wrote "
+        f"{unattested_streams.out!r}."
+    )
+    assert "attest" in unattested_streams.err.lower(), (
+        f"the refusal must say WHY, naming the missing attestation. stderr was "
+        f"{unattested_streams.err!r}."
+    )
+
+    # ---- EXIT 2: A RUN THAT FAILED IS NOT A RUN --------------------------
+    attest(vocabulary.sides[0], status=0)
+    attest(vocabulary.sides[1], status=69)
+    publish(vocabulary.sides[0], bend=False)
+    publish(vocabulary.sides[1], bend=False)
+    capsys.readouterr()
+    failed_run_status = diff_states.main(refusal_argv)
+    failed_run_streams = capsys.readouterr()
+    assert failed_run_status == diff_states.EX_ERROR, (
+        f"a capture taken after a run that exited non-zero must be REFUSED with "
+        f"{diff_states.EX_ERROR}. It exited {failed_run_status}."
+    )
+    assert "69" in failed_run_streams.err, (
+        f"the refusal must name the status the run actually exited with, so an "
+        f"operator is not left guessing which side failed. stderr was "
+        f"{failed_run_streams.err!r}."
+    )
 
     # ---- EXIT 0: identical, and NOT ONE BYTE on stdout -------------------
-    publish(conftest.SIDE_COBOL, bend=False)
-    publish(conftest.SIDE_PYTHON, bend=False)
-    identical = conftest.diff(SCENARIO, out_dir=tmp_path)
+    attest(vocabulary.sides[0])
+    attest(vocabulary.sides[1])
+    publish(vocabulary.sides[0], bend=False)
+    publish(vocabulary.sides[1], bend=False)
+    identical = vocabulary.diff(SCENARIO, out_dir=tmp_path)
     assert identical.result.returncode == diff_states.EX_IDENTICAL
     assert identical.is_empty is True
     assert identical.result.stdout == "", (
@@ -903,8 +1228,8 @@ def test_diff_exit_contract_is_honoured(tmp_path, harness, frozen_schema) -> Non
     assert identical.report.stat().st_size == 0
 
     # ---- EXIT 1: one differing value is a real behavioural difference -----
-    publish(conftest.SIDE_PYTHON, bend=True)
-    different = conftest.diff(SCENARIO, out_dir=tmp_path)
+    publish(vocabulary.sides[1], bend=True)
+    different = vocabulary.diff(SCENARIO, out_dir=tmp_path)
     assert different.result.returncode == diff_states.EX_DIFFERENT
     assert different.is_empty is False
     assert different.tree.total_differences == 1
@@ -924,8 +1249,8 @@ def test_diff_exit_contract_is_honoured(tmp_path, harness, frozen_schema) -> Non
     for member in sorted(paths.python_normalized.iterdir()):
         member.unlink()
     paths.python_normalized.rmdir()
-    with pytest.raises(conftest.HarnessFaultError) as raised:
-        conftest.diff(SCENARIO, out_dir=tmp_path)
+    with pytest.raises(vocabulary.fault) as raised:
+        vocabulary.diff(SCENARIO, out_dir=tmp_path)
     assert str(diff_states.EX_ERROR) in str(raised.value)
     # AND THE STALE ZERO-BYTE REPORT IS GONE. The comparison invalidates the
     # accepted output the moment the path is known and before a single dump is read,
@@ -974,7 +1299,9 @@ def test_diff_exit_contract_is_honoured(tmp_path, harness, frozen_schema) -> Non
 # ---------------------------------------------------------------------------
 
 
-def test_dump_is_wellformed_on_both_sides(frozen_schema) -> None:
+@pytest.mark.database
+@pytest.mark.oracle
+def test_dump_is_wellformed_on_both_sides(parity, protocol, frozen_schema) -> None:
     """Assert both sides' dumps have the shape the protocol guarantees.
 
     A malformed dump is exit 2 territory - the comparison could not be performed -
@@ -1012,6 +1339,10 @@ def test_dump_is_wellformed_on_both_sides(frozen_schema) -> None:
     false pass this check exists to prevent.
 
     Args:
+        parity: The completed, guarded `ParityRun` - produced in the fixture, so a
+            stage fault here is an ERROR and not a malformed-dump FAILURE.
+        protocol: The protocol bundle, for the single definition of the structural
+            contract. Nothing about the shape is restated in this file.
         frozen_schema: The parsed `mysql/ACASDB.sql`, read and never written.
 
     Raises:
@@ -1019,23 +1350,25 @@ def test_dump_is_wellformed_on_both_sides(frozen_schema) -> None:
         AssertionError: A dump is malformed, or its column list disagrees with the
             frozen schema.
     """
-    conftest.requires_stack()
-
-    run = conftest.run_scenario_parity(SCENARIO)
+    run = parity
 
     for side, tree in (
-        (conftest.SIDE_COBOL, run.paths.cobol_normalized),
-        (conftest.SIDE_PYTHON, run.paths.python_normalized),
+        (protocol.vocabulary.sides[0], run.paths.cobol_normalized),
+        (protocol.vocabulary.sides[1], run.paths.python_normalized),
     ):
         for table in run.tables:
             path = tree / f"{table}.json"
-            dump = conftest.read_dump(path)
-            conftest.assert_dump_wellformed(
+            dump = protocol.read_dump(path)
+            protocol.assert_dump_wellformed(
                 dump, where=f"{side} {table} ({path})", schema=frozen_schema
             )
 
 
-def test_glposting_rec_is_an_unchanged_witness(tmp_path) -> None:
+@pytest.mark.database
+@pytest.mark.oracle
+def test_glposting_rec_is_an_unchanged_witness(
+    parity, seed_baseline, protocol
+) -> None:
     """`GLPOSTING-REC` must be untouched - by BOTH sides, and against the seed.
 
     THE MEASURED CENSUS BEHIND THIS TEST. gl072 issues exactly eight facade verbs -
@@ -1066,32 +1399,27 @@ def test_glposting_rec_is_an_unchanged_witness(tmp_path) -> None:
     so in those two comparisons `cobol` means THE SEED and `python` means the
     post-run state; that is stated rather than papered over.
 
+    BOTH CAPTURES HAPPEN IN FIXTURES. The parity run and the seed baseline are
+    prepared by `parity` and `seed_baseline`, so a failure to seed, dump or normalise
+    is a pytest ERROR - during bring-up those failures are frequent, and reported from
+    a body they would read as "the posting table was written", which is the opposite
+    of what happened.
+
     Args:
-        tmp_path: A private root for the seed capture, kept away from the parity
-            run's own output so neither can overwrite the other.
+        parity: The completed, guarded `ParityRun`.
+        seed_baseline: The pristine seeded capture, under its own output root so that
+            neither it nor the parity run can overwrite the other.
+        protocol: The protocol bundle, for `diff_trees_directly` and the side labels.
 
     Raises:
         Skipped: The harness Compose stack is not usable.
         HarnessFaultError: A capture stage failed, so there is no evidence.
         AssertionError: The posting table was written by one of the two cycles.
     """
-    conftest.requires_stack()
-
-    witness = "GLPOSTING-REC"
-    assert witness in conftest.scenario_affected_tables(SCENARIO)
-
-    # THE SEED CAPTURE, taken first and through the protocol's own stages. The
-    # `cobol` label here names the seeded state, not the oracle's output.
-    conftest.seed(SCENARIO).raise_for_status()
-    conftest.dump(SCENARIO, conftest.SIDE_COBOL, out_dir=tmp_path).raise_for_status()
-    conftest.normalize(
-        SCENARIO, conftest.SIDE_COBOL, out_dir=tmp_path
-    ).raise_for_status()
-    seeded = conftest.scenario_paths(SCENARIO, out_root=tmp_path).cobol_normalized
-
-    # `run_scenario_parity` re-seeds at stage 1 from the same scenario fixture, so
-    # the capture above and the two runs below all start from the same state.
-    run = conftest.run_scenario_parity(SCENARIO)
+    run = parity
+    witness = POSTING_TABLE
+    assert witness in run.tables
+    seeded = seed_baseline.cobol_normalized
 
     # CLAIM 1 - the two sides agree about the posting table.
     table_diff = next(
@@ -1112,10 +1440,10 @@ def test_glposting_rec_is_an_unchanged_witness(tmp_path) -> None:
 
     # CLAIM 2 - neither side changed it AT ALL, measured against the seed.
     for label, produced in (
-        (conftest.SIDE_COBOL, run.paths.cobol_normalized),
-        (conftest.SIDE_PYTHON, run.paths.python_normalized),
+        (protocol.vocabulary.sides[0], run.paths.cobol_normalized),
+        (protocol.vocabulary.sides[1], run.paths.python_normalized),
     ):
-        against_seed = conftest.diff_trees_directly(seeded, produced, (witness,))
+        against_seed = protocol.diff_trees_directly(seeded, produced, (witness,))
         assert against_seed.is_empty, (
             f"the {label} run changed {witness}, which no in-scope program of the "
             f"gl_post_cycle route writes. In this comparison the report's `cobol` "
@@ -1124,7 +1452,9 @@ def test_glposting_rec_is_an_unchanged_witness(tmp_path) -> None:
         )
 
 
-def test_batch_is_stamped_cleared_and_posted(frozen_schema) -> None:
+@pytest.mark.database
+@pytest.mark.oracle
+def test_batch_is_stamped_cleared_and_posted(parity, protocol, frozen_schema) -> None:
     """The two columns `end-batch` stamps must AGREE BETWEEN THE TWO SIDES.
 
     `[general/gl072.cbl:L372-L377]` verbatim:
@@ -1153,6 +1483,8 @@ def test_batch_is_stamped_cleared_and_posted(frozen_schema) -> None:
     rather than fixed.
 
     Args:
+        parity: The completed, guarded `ParityRun`.
+        protocol: The protocol bundle, for the dump reader and the side labels.
         frozen_schema: The parsed `mysql/ACASDB.sql`, used only to confirm the two
             columns exist and to locate them by name rather than by position.
 
@@ -1160,9 +1492,7 @@ def test_batch_is_stamped_cleared_and_posted(frozen_schema) -> None:
         Skipped: The harness Compose stack is not usable.
         AssertionError: The two sides disagree about either stamped column.
     """
-    conftest.requires_stack()
-
-    table = "GLBATCH-REC"
+    table = BATCH_TABLE
     stamped = ("CLEARED-STATUS", "POSTED")
     for column in stamped:
         assert column in frozen_schema[table], (
@@ -1170,7 +1500,7 @@ def test_batch_is_stamped_cleared_and_posted(frozen_schema) -> None:
             f"schema and this assertion have drifted apart."
         )
 
-    run = conftest.run_scenario_parity(SCENARIO)
+    run = parity
 
     def stamps(tree) -> dict[object, tuple[object, ...]]:
         """Read the two stamped columns of every row, keyed by primary-key VALUE.
@@ -1182,8 +1512,10 @@ def test_batch_is_stamped_cleared_and_posted(frozen_schema) -> None:
             `{primary-key value: (CLEARED-STATUS, POSTED)}`. Keyed by VALUE and never
             by position, exactly as the differ aligns rows.
         """
-        dump = conftest.read_dump(tree / f"{table}.json")
-        conftest.assert_dump_wellformed(dump, where=str(tree), schema=frozen_schema)
+        dump = protocol.read_dump(tree / f"{table}.json")
+        protocol.assert_dump_wellformed(
+            dump, where=str(tree), schema=frozen_schema
+        )
         columns = list(dump["columns"])
         key_index = columns.index(dump["primary_key"])
         wanted = [columns.index(column) for column in stamped]

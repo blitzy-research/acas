@@ -690,7 +690,7 @@ every test that does begins with the precise skip the `protocol` fixture provide
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Final
 
 import pytest
@@ -701,6 +701,12 @@ import pytest
 # Nothing here re-registers it, and this file adds no `pytest.ini`, no `markers =`, no
 # `pytest_configure` and no `pytest_collection_modifyitems`. Selectable as
 # `pytest -m scenario` and `pytest -m "scenario or determinism"`.
+# The TIER mark, applied to the whole module because every test in it belongs to the
+# tier. THE INFRASTRUCTURE MARKS ARE NOT HERE: `database` and `oracle` are declared per
+# test, on exactly the tests whose fixture closure reaches the harness stack, because
+# several tests in this file read only files on disk and pass on a bare host. A module
+# mark would claim they need a MariaDB and a built oracle, and `-m database` would then
+# select tests that require neither.
 pytestmark = pytest.mark.scenario
 
 # The scenario this file owns, and the stem of `harness/scenarios/<name>.yaml`.
@@ -920,6 +926,24 @@ AFFECTED_TABLES: Final[tuple[str, ...]] = (
     "GLBATCH-REC",
     "GLPOSTING-REC",
     "PSIRSPOST-REC",
+    "PUINV-LINES-REC",
+    "PUINVOICE-REC",
+    "PUITM5-REC",
+    "PULEDGER-REC",
+    "SAINV-LINES-REC",
+    "SAINVOICE-REC",
+    "SAITM3-REC",
+    "SALEDGER-REC",
+    "SYSTOT-REC",
+    "VALUEANAL-REC",
+)
+
+# The tables this scenario's `seed_files:` fill, and which must therefore come back
+# WITH ROWS on both sides. Named here because the non-vacuity guard in the fixture and
+# the three site tests below both depend on the same claim. GLBATCH-REC, GLPOSTING-REC
+# and PSIRSPOST-REC are absent deliberately - see GUARD 5 in the fixture.
+SEEDED_TABLES: Final[tuple[str, ...]] = (
+    "ANALYSIS-REC",
     "PUINV-LINES-REC",
     "PUINVOICE-REC",
     "PUITM5-REC",
@@ -1236,6 +1260,150 @@ def _table_diff(run: Any, table: str) -> Any:
     )
 
 
+#: The `SYSTOT-REC` column each of the nine write sites accumulates into, spelled as
+#: [mysql/ACASDB.sql:L1378-L1397] spells it. THE OBSERVABLE PER SITE: the sites live in
+#: the frozen COBOL and cannot be watched directly, but every one of them lands in
+#: exactly one of these columns, so reading the column IS reading the site's effect.
+SITE_COLUMNS: Final[Mapping[int, str]] = {
+    1: "SL-INVOICES-THIS-MONTH",
+    2: "SL-CREDIT-NOTES-THIS-MONTH",
+    3: "SL-CREDIT-DEDUCTIONS",
+    4: "SL-CN-UNAPPL-THIS-MONTH",
+    5: "SL-PAYMENTS",
+    6: "PL-INVOICES-THIS-MONTH",
+    7: "PL-CREDIT-NOTES-THIS-MONTH",
+    8: "PL-CN-UNAPPL-THIS-MONTH",
+    9: "PL-PAYMENTS",
+}
+
+#: The two `SYSTEM-REC` columns the one-shot posting latches occupy, and the value a
+#: cleared latch holds. [sales/sl100.cbl:L474] `move zero to S-Flag-P.` and
+#: [purchase/pl100.cbl:L465] `move zero to P-Flag-P.`, reproduced in
+#: acas_posting/programs/sl100_cash_posting.py and pl100_payment_posting.py, and
+#: persisted by `overrewrite`'s key-1 `System-Rewrite`
+#: [general/general.cbl:L656-L663].
+LATCH_COLUMNS: Final[tuple[str, str]] = ("S-FLAG-P", "P-FLAG-P")
+LATCH_CLEARED: Final[int] = 0
+SYSTEM_TABLE: Final[str] = "SYSTEM-REC"
+SYSTEM_RECORD_KEY: Final[int] = 1
+
+
+def _systot_projection(
+    run: Any, protocol: Any, columns: Sequence[str]
+) -> tuple[Mapping[str, Mapping[Any, Any]], Mapping[str, Mapping[Any, Any]]]:
+    """Project named `SYSTOT-REC` columns from BOTH normalised captures.
+
+    THIS IS WHAT GIVES EACH SITE TEST AN OBSERVABLE OF ITS OWN. A per-table `is_empty`
+    restates the headline verdict; reading the column a site accumulates into is
+    evidence about that site - and it cannot pass over an absent row, because the row
+    count is asserted first.
+
+    NO FIGURE IS PREDICTED (R-6). Which value the two sides agree on is the compiled
+    oracle's to decide; this returns both projections so the caller can require only
+    that they agree.
+
+    Args:
+        run: The completed `ParityRun`.
+        protocol: The protocol bundle, for the dump reader and the side labels.
+        columns: The columns to project.
+
+    Returns:
+        `(cobol, python)`, each `{column: {primary-key value: stored value}}`.
+
+    Raises:
+        AssertionError: The focal table is empty on either side, the column lists
+            disagree, the primary keys disagree, or a column is absent from a capture.
+    """
+    cobol_side, python_side = protocol.vocabulary.sides
+    dumps = {}
+    for side in (cobol_side, python_side):
+        path = run.paths.normalized_dir(side) / f"{FOCAL_TABLE}.json"
+        dump = protocol.read_dump(path)
+        assert int(dump["row_count"]) > 0, (
+            f"{SCENARIO}: `{FOCAL_TABLE}` is EMPTY on the {side} side, so every "
+            f"period-total claim in this file would agree about NOTHING. The totals "
+            f"record is seeded by `sys4LD` from system.dat "
+            f"[common/masterLD.sh:L51-L87] and only ever REWRITTEN by the nine sites, "
+            f"so an absent row means the seed never landed or the run never reached "
+            f"MySQL - `system.file_system_used` must be "
+            f"{FILE_SYSTEM_USED_MYSQL} [copybooks/wssystem.cob:L112-L114]."
+        )
+        dumps[side] = dump
+
+    assert list(dumps[cobol_side]["columns"]) == list(dumps[python_side]["columns"]), (
+        f"{SCENARIO}: `{FOCAL_TABLE}`'s column lists disagree - "
+        f"{list(dumps[cobol_side]['columns'])} against "
+        f"{list(dumps[python_side]['columns'])}. Rows are POSITIONAL within a dump, so "
+        f"nothing projected from them would align."
+    )
+
+    projections: list[dict[str, dict[Any, Any]]] = []
+    for side in (cobol_side, python_side):
+        dump = dumps[side]
+        names = list(dump["columns"])
+        key_index = names.index(str(dump["primary_key"]))
+        projection: dict[str, dict[Any, Any]] = {}
+        for column in columns:
+            assert column in names, (
+                f"{SCENARIO}: `{FOCAL_TABLE}` carries no column named {column!r} on "
+                f"the {side} side; it lists {names}. mysql/ACASDB.sql is FROZEN, so "
+                f"this means the dump or the checkout is wrong."
+            )
+            index = names.index(column)
+            projection[column] = {
+                row[key_index]: row[index] for row in dump["rows"]
+            }
+        projections.append(projection)
+
+    assert projections[0].keys() == projections[1].keys()
+    for column in columns:
+        only_in_cobol = set(projections[0][column]) - set(projections[1][column])
+        only_in_python = set(projections[1][column]) - set(projections[0][column])
+        assert set(projections[0][column]) == set(projections[1][column]), (
+            f"{SCENARIO}: `{FOCAL_TABLE}`'s primary keys disagree while projecting "
+            f"{column!r}: only on {cobol_side} "
+            f"{sorted(only_in_cobol, key=repr)}; "
+            f"only on {python_side} "
+            f"{sorted(only_in_python, key=repr)}."
+        )
+    return projections[0], projections[1]
+
+
+def _assert_sites_agree(
+    run: Any, protocol: Any, sites: Sequence[int]
+) -> Mapping[str, Mapping[Any, Any]]:
+    """Require the named sites' receiving columns to AGREE between the two sides.
+
+    Args:
+        run: The completed `ParityRun`.
+        protocol: The protocol bundle.
+        sites: The write-site numbers, keys of `SITE_COLUMNS`.
+
+    Returns:
+        The oracle-side projection, so a caller can report the values it agreed on.
+
+    Raises:
+        AssertionError: A projected column differs, or the row is absent.
+    """
+    columns = tuple(SITE_COLUMNS[site] for site in sites)
+    cobol, python = _systot_projection(run, protocol, columns)
+    for site, column in zip(sites, columns, strict=True):
+        locator = next(
+            entry[1] for entry in PERIOD_TOTAL_WRITE_SITES if entry[0] == site
+        )
+        assert cobol[column] == python[column], (
+            f"{SCENARIO}: `{FOCAL_TABLE}`.`{column}` - the receiver of write site "
+            f"{site} [{locator}] - disagrees between the two sides:\n"
+            f"  cobol : {sorted(cobol[column].items(), key=repr)}\n"
+            f"  python: {sorted(python[column].items(), key=repr)}\n"
+            f"  NO FIGURE IS PREDICTED HERE. The two sides must agree; which value "
+            f"they agree ON is the oracle's to decide (R-6). Do NOT 'correct' a total "
+            f"and do NOT add an allowance - record the finding in {DOC_EVIDENCE} and "
+            f"arbitrate it against the compiled run."
+        )
+    return cobol
+
+
 def _verdict(run: Any, harness_modules: Any, *, bearing: str = "") -> str:
     """Render a completed parity run as a failure message.
 
@@ -1387,17 +1555,50 @@ def parity(
     )
 
     cached = _PARITY_MEMO.get(SCENARIO)
-    if cached is not None:
-        return cached
+    if cached is None:
+        # STAGES 1 to 8, in order, one at a time, on one database (R-3). The helper
+        # raises on every stage whose failure destroys the evidence and records the two
+        # run stages' statuses rather than enforcing them.
+        cached = protocol.run_scenario_parity(SCENARIO)
+        # Memoised only on success, so a half-completed run is never served to a later
+        # test as though it were evidence.
+        _PARITY_MEMO[SCENARIO] = cached
+    run = cached
 
-    # STAGES 1 to 8, in order, one at a time, on one database (R-3). The helper raises
-    # on every stage whose failure destroys the evidence and records the two run
-    # stages' statuses rather than enforcing them.
-    run = protocol.run_scenario_parity(SCENARIO)
+    # GUARD 3 - BOTH RUN STAGES' ACTUAL STATUSES, READ AND CLASSIFIED. This is the only
+    # scenario with FOUR operations inside one run stage, and the runners stop at the
+    # first operation whose status contradicts its declaration - so an abort or a
+    # refused precondition in operation 2, 3 or 4 would leave the later legs unposted,
+    # both sides equally unwritten, and the diff equally empty. The declared statuses
+    # are read from the scenario file; nothing here restates them.
+    # `reference_only` bounds this guard to the ORACLE side. An oracle that did not
+    # complete all four operations means the scenario was never set up as declared - a
+    # setup ERROR - whereas a Python side that diverges from it is a behavioural
+    # regression, reported as a FAILURE by
+    # `test_both_run_statuses_are_the_declared_ones` below.
+    protocol.assert_declared_statuses(
+        run,
+        operations=OPERATION_ORDER,
+        declared=list(_sequence(definition, KEY_EXPECTED_STATUS)),
+        reference_only=True,
+    )
 
-    # Memoised only on success, so a half-completed run is never served to a later
-    # test as though it were evidence.
-    _PARITY_MEMO[SCENARIO] = run
+    # GUARD 4 - THE TWO SIDES STARTED FROM THE SAME RECORDED STATE. Row counts only,
+    # one line per affected table in the declared order, compared as bytes.
+    protocol.assert_seed_fingerprints_agree(run)
+
+    # GUARD 5 - NON-VACUITY. Every table this scenario's `seed_files:` fill must come
+    # back WITH ROWS on both sides, or an empty diff over empty tables proves nothing:
+    # analysis.dat -> ANALYSIS-REC, value.dat -> VALUEANAL-REC, salesled.dat ->
+    # SALEDGER-REC, invoice.dat -> SAINVOICE-REC and SAINV-LINES-REC, openitm3.dat ->
+    # SAITM3-REC, purchled.dat -> PULEDGER-REC, pinvoice.dat -> PUINVOICE-REC and
+    # PUINV-LINES-REC, openitm5.dat -> PUITM5-REC, and system.dat -> SYSTOT-REC through
+    # the four-loader system block [common/masterLD.sh:L51-L87]. THE FOCAL TABLE IS
+    # AMONG THEM, which is what stops the three site tests below asserting over an
+    # absent row. GLBATCH-REC, GLPOSTING-REC and PSIRSPOST-REC are deliberately not
+    # required: the first two are WRITTEN by the pure-General-Ledger fan-out rather than
+    # seeded, and the third is only opened and closed on this route.
+    protocol.assert_non_vacuous(run, tables_requiring_rows=SEEDED_TABLES)
 
     # The two views of one comparison must agree. `run_scenario_parity` already raises
     # if the stage's exit status and its `TreeDiff` disagree; this states the invariant
@@ -1971,6 +2172,8 @@ def test_affected_tables_are_in_scope_and_alphabetical(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_period_end_totals_state_parity(parity: Any, harness: Any) -> None:
     """THE HEADLINE. The ordering-normalised diff must be EMPTY.
 
@@ -2041,7 +2244,156 @@ def test_period_end_totals_state_parity(parity: Any, harness: Any) -> None:
     )
 
 
-def test_systot_rec_reflects_the_nine_write_sites(parity: Any, harness: Any) -> None:
+@pytest.mark.database
+@pytest.mark.oracle
+def test_both_run_statuses_are_the_declared_ones(parity: Any, protocol: Any) -> None:
+    """BOTH SIDES' ACTUAL EXIT STATUSES, read from the run rather than from the YAML.
+
+    THE FOUR-OPERATION SCENARIO IS THE ONE WHERE THIS MATTERS MOST. All four operations
+    run inside a single stage 2 and a single stage 6, with no dump between them, and the
+    runners stop at the first operation whose status contradicts its declaration - so an
+    abort, a refused `Flag-P` latch or a runner precondition in operation 2, 3 or 4
+    leaves the later legs unposted, both sides equally unwritten and THE DIFF EQUALLY
+    EMPTY. Comparing the scenario file's declaration with a constant of this file's own
+    would not notice any of that; only the observed statuses do.
+
+    BOTH SIDES ARE ALSO CLASSIFIED, so the three dispositions stay distinct: `argparse`
+    exit 2 means the runner built a bad command line, a code in a runner's own band
+    means the script diagnosed itself, and either way the question was never asked.
+    Sales and Purchase have term code 8 available [sales/sl055.cbl:L344],
+    [purchase/pl055.cbl:L286] - both inside `if FS-Cobol-Files-Used` blocks, so
+    unreachable at `file_system_used: 1` - and the two cash routes have none at all,
+    which is why 0 is provable here rather than merely expected.
+
+    The fixture makes the same assertion as one of its guards, before any verdict is
+    read; this test states it under its own name so that a status deviation is
+    attributable at a glance rather than only inside a fixture error.
+
+    Args:
+        parity: The completed eight-stage run.
+        protocol: The protocol bundle, for `assert_declared_statuses`.
+    """
+    declared = list(_sequence(protocol.definition(SCENARIO), KEY_EXPECTED_STATUS))
+    assert declared == list(EXPECTED_STATUS), (
+        f"{SCENARIO}: the scenario declares {declared!r} where this file's folder "
+        f"specification names {list(EXPECTED_STATUS)!r}."
+    )
+
+    dispositions = protocol.assert_declared_statuses(
+        parity, operations=OPERATION_ORDER, declared=declared
+    )
+
+    observed = (parity.cobol_run.returncode, parity.python_run.returncode)
+    assert observed == (0, 0), (
+        f"{SCENARIO}: the two run stages exited {observed}. Every one of the four "
+        f"operations is declared to succeed, and `exit_status_for(term_code)` returns "
+        f"the term code itself, so anything non-zero means an operation did not run to "
+        f"completion and the later legs posted nothing.\n{parity.describe()}"
+    )
+    assert dispositions == (
+        protocol.vocabulary.disposition_success,
+        protocol.vocabulary.disposition_success,
+    ), (
+        f"{SCENARIO}: the two run stages classified as {dispositions!r}; both must be "
+        f"{protocol.vocabulary.disposition_success!r} on this route."
+    )
+
+
+@pytest.mark.database
+@pytest.mark.oracle
+def test_both_flag_p_latches_are_cleared_by_the_run(
+    parity: Any, db_connection: Any, protocol: Any
+) -> None:
+    """THE TWO ONE-SHOT LATCHES ARE CLEARED - observed in the database, not inferred.
+
+    `[sales/sl100.cbl:L474]` is `move zero to S-Flag-P.` and
+    `[purchase/pl100.cbl:L465]` is `move zero to P-Flag-P.`; both are `SYSTEM-REC`
+    columns [copybooks/wssystem.cob:L226] and [copybooks/wssystem.cob:L206], and the
+    menu's `overrewrite` paragraph is their sole writer to the store - key 1,
+    `System-Rewrite` [general/general.cbl:L656-L663] - which the migrated cycle
+    reproduces through `acas_posting/cli/args.py`'s `overrewrite`. So the cleared
+    latches are a REAL, STORED consequence of operations 2 and 4 having posted.
+
+    WHY IT CANNOT BE OBSERVED THROUGH THE DIFF, AND WHY THAT IS DELIBERATE.
+    `SYSTEM-REC` is on NO scenario's affected-table list: the menu shells rewrite it on
+    every exit whereas a Python entry point has no menu, which is the recorded
+    persistence question the evidence document carries. Bounding a comparison by it
+    would report that asymmetry as a posting difference. The `db_connection` fixture
+    exists for exactly this case - a fact that matters and cannot be bounded - and this
+    is the one test that needs it.
+
+    WHAT IS OBSERVABLE IS THE PYTHON SIDE, AND THE FILE SAYS SO RATHER THAN IMPLYING
+    IT. Stage 5 drops, re-applies the frozen schema and re-seeds BEFORE stage 6, so by
+    the time the protocol finishes the database holds the state the MIGRATED cycle left.
+    The oracle's own latch values are therefore not recoverable after the fact from this
+    run; that limitation is stated here and the oracle-side claim is left to the
+    seeded-value precondition and to the two payment columns, which no-op if either
+    latch failed its gate.
+
+    Args:
+        parity: The completed eight-stage run, so the observation happens AFTER stage 6
+            and pytest enforces the ordering rather than a comment.
+        db_connection: One open read-only connection to the same database the run used.
+            Autocommit is asserted OFF before it is yielded.
+        protocol: The protocol bundle, for the scenario's own seeded latch values.
+
+    Raises:
+        Skipped: The Compose stack is unusable.
+        AssertionError: A latch was not cleared, or the system row is absent.
+    """
+    seeded = _block(protocol.definition(SCENARIO), KEY_SYSTEM)
+    assert (seeded[SYS_S_FLAG_P], seeded[SYS_P_FLAG_P]) == (
+        FLAG_P_POSTING_READY,
+        FLAG_P_POSTING_READY,
+    ), (
+        f"{SCENARIO}: the scenario seeds the latches as "
+        f"{(seeded[SYS_S_FLAG_P], seeded[SYS_P_FLAG_P])!r}; both must be "
+        f"{FLAG_P_POSTING_READY} or operations 2 and 4 post nothing and there is no "
+        f"clearing to observe."
+    )
+
+    columns = ", ".join(f"`{column}`" for column in LATCH_COLUMNS)
+    cursor = db_connection.cursor()
+    try:
+        cursor.execute(
+            f"select {columns} from `{SYSTEM_TABLE}` "
+            f"where `SYSTEM-REC-KEY` = %s",
+            (SYSTEM_RECORD_KEY,),
+        )
+        rows = cursor.fetchall()
+    finally:
+        cursor.close()
+
+    assert len(rows) == 1, (
+        f"{SCENARIO}: `{SYSTEM_TABLE}` holds {len(rows)} row(s) for key "
+        f"{SYSTEM_RECORD_KEY} after the run. system.dat seeds exactly one, and without "
+        f"it the cleared latches cannot be observed at all."
+    )
+
+    observed = dict(zip(LATCH_COLUMNS, rows[0], strict=True))
+    for column, locator in zip(
+        LATCH_COLUMNS,
+        ("sales/sl100.cbl:L474", "purchase/pl100.cbl:L465"),
+        strict=True,
+    ):
+        value = observed[column]
+        assert int(value) == LATCH_CLEARED, (
+            f"{SCENARIO}: `{SYSTEM_TABLE}`.`{column}` is {value!r} after the migrated "
+            f"cycle ran; it must be {LATCH_CLEARED}, because [{locator}] moves zero "
+            f"into it once the posting completes and `overrewrite`'s key-1 "
+            f"`System-Rewrite` [general/general.cbl:L656-L663] persists it. A latch "
+            f"still holding {FLAG_P_POSTING_READY} means the posting section returned "
+            f"through its gate without posting - the two payment sites 5 "
+            f"[sales/sl100.cbl:L404] and 9 [purchase/pl100.cbl:L396] would then be "
+            f"lost, and the diff would still be empty. Observed: {observed!r}."
+        )
+
+
+@pytest.mark.database
+@pytest.mark.oracle
+def test_systot_rec_reflects_the_nine_write_sites(
+    parity: Any, protocol: Any, harness: Any
+) -> None:
     """`SYSTOT-REC` must be IDENTICAL on both sides - the nine sites, one table.
 
     Agent Action Plan section 0.6.4 names the nine period-total write sites as "the sole
@@ -2085,6 +2437,26 @@ def test_systot_rec_reflects_the_nine_write_sites(parity: Any, harness: Any) -> 
         parity: The completed eight-stage run.
         harness: The three harness Python modules, for the deterministic renderer.
     """
+    #  THE NINE OBSERVABLES, READ BEFORE THE VERDICT IS ASKED FOR. Each site
+    #  accumulates into exactly one `SYSTOT-REC` column, so reading all nine columns on
+    #  both sides is how "all nine write paths are represented" becomes a measurement
+    #  rather than a claim about this file's own constants. The helper refuses an absent
+    #  row, so the nine cannot be asserted over a table that was never seeded.
+    assert sorted(SITE_COLUMNS) == [
+        entry[0] for entry in PERIOD_TOTAL_WRITE_SITES
+    ], (
+        f"{SCENARIO}: the site-to-column map and the write-site table name different "
+        f"sites - {sorted(SITE_COLUMNS)} against "
+        f"{[entry[0] for entry in PERIOD_TOTAL_WRITE_SITES]}. One of the two is wrong "
+        f"and neither is authoritative alone."
+    )
+    agreed = _assert_sites_agree(parity, protocol, sorted(SITE_COLUMNS))
+    assert len(agreed) == len(PERIOD_TOTAL_WRITE_SITES), (
+        f"{SCENARIO}: {len(agreed)} of the {len(PERIOD_TOTAL_WRITE_SITES)} "
+        f"period-total columns were read; all nine must be, or the claim that every "
+        f"write path is represented is not measured."
+    )
+
     diff = _table_diff(parity, FOCAL_TABLE)
     sites = "; ".join(
         f"site {number} [{locator}] -> {field} ({guard})"
@@ -2128,7 +2500,11 @@ def test_systot_rec_reflects_the_nine_write_sites(parity: Any, harness: Any) -> 
     )
 
 
-def test_unconditional_totals_adds_are_reproduced(parity: Any, harness: Any) -> None:
+@pytest.mark.database
+@pytest.mark.oracle
+def test_unconditional_totals_adds_are_reproduced(
+    parity: Any, protocol: Any, harness: Any
+) -> None:
     """The two adds that sit OUTSIDE their guarded print blocks, reproduced not aligned.
 
     THE TWO SITES, verbatim from the frozen source:
@@ -2165,6 +2541,7 @@ def test_unconditional_totals_adds_are_reproduced(parity: Any, harness: Any) -> 
 
     Args:
         parity: The completed eight-stage run.
+        protocol: The protocol bundle, for the dump reader and the side labels.
         harness: The three harness Python modules, for the deterministic renderer.
     """
     sites = tuple(
@@ -2178,6 +2555,15 @@ def test_unconditional_totals_adds_are_reproduced(parity: Any, harness: Any) -> 
         f"outside the guarded print block immediately above it; losing them from the "
         f"table would lose the reason this test exists."
     )
+
+    #  THE TWO OBSERVABLES THIS TEST OWNS, read from both captures before the verdict:
+    #  `SL-CN-UNAPPL-THIS-MONTH` and `PL-CN-UNAPPL-THIS-MONTH`, the receivers of the two
+    #  adds that sit outside their guarded print blocks. Under
+    #  `file_system_used: 1` the print blocks never run WHILE THESE ADDS STILL DO, so
+    #  these two columns are the whole reason the focal table changes at all on this
+    #  route - and reading them is what makes this test evidence rather than a third
+    #  restatement of the headline.
+    _assert_sites_agree(parity, protocol, UNCONDITIONAL_TOTAL_SITES)
 
     diff = _table_diff(parity, FOCAL_TABLE)
     described = "; ".join(
@@ -2199,7 +2585,11 @@ def test_unconditional_totals_adds_are_reproduced(parity: Any, harness: Any) -> 
     )
 
 
-def test_two_receiver_payment_adds_are_reproduced(parity: Any, harness: Any) -> None:
+@pytest.mark.database
+@pytest.mark.oracle
+def test_two_receiver_payment_adds_are_reproduced(
+    parity: Any, protocol: Any, harness: Any
+) -> None:
     """The two `ADD` statements with TWO receivers each, reproduced and never split.
 
     THE TWO SITES, verbatim and side by side:
@@ -2233,6 +2623,7 @@ def test_two_receiver_payment_adds_are_reproduced(parity: Any, harness: Any) -> 
 
     Args:
         parity: The completed eight-stage run.
+        protocol: The protocol bundle, for the dump reader and the side labels.
         harness: The three harness Python modules, for the deterministic renderer.
     """
     sites = tuple(
@@ -2245,6 +2636,13 @@ def test_two_receiver_payment_adds_are_reproduced(parity: Any, harness: Any) -> 
         f"{TWO_RECEIVER_TOTAL_SITES!r}, the two that accumulate into two receivers in "
         f"one ADD."
     )
+
+    #  THE TWO OBSERVABLES THIS TEST OWNS: `SL-PAYMENTS` and `PL-PAYMENTS`, the second
+    #  receiver of each two-receiver `ADD`. They are also the two columns the promoted
+    #  confirmation and the two `Flag-P` latches gate, so reading them is what turns
+    #  "operations 2 and 4 posted" from a precondition about the YAML into an
+    #  observation about the run.
+    _assert_sites_agree(parity, protocol, TWO_RECEIVER_TOTAL_SITES)
 
     diff = _table_diff(parity, FOCAL_TABLE)
     described = "; ".join(
@@ -2267,6 +2665,8 @@ def test_two_receiver_payment_adds_are_reproduced(parity: Any, harness: Any) -> 
     )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_invoice_headers_are_stamped_on_both_ledgers(
     parity: Any, harness: Any
 ) -> None:
@@ -2323,6 +2723,8 @@ def test_invoice_headers_are_stamped_on_both_ledgers(
         )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_open_items_are_rewritten_on_both_ledgers(parity: Any, harness: Any) -> None:
     """The open-item files agree after both cash programs walk and rewrite them.
 
@@ -2408,6 +2810,8 @@ def test_open_items_are_rewritten_on_both_ledgers(parity: Any, harness: Any) -> 
         )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_deduction_analysis_tables_agree(parity: Any, harness: Any) -> None:
     """The deduction analysis agrees - site 3 and the value-file path it opens.
 
@@ -2457,6 +2861,8 @@ def test_deduction_analysis_tables_agree(parity: Any, harness: Any) -> None:
         )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_general_ledger_fan_out_tables_agree(parity: Any, harness: Any) -> None:
     """The General Ledger batch, posting and transfer tables agree in pure-GL mode.
 
@@ -2507,6 +2913,8 @@ def test_general_ledger_fan_out_tables_agree(parity: Any, harness: Any) -> None:
         )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_dump_is_wellformed_on_both_sides(
     parity: Any, harness: Any, frozen_schema: Mapping[str, Mapping[str, Any]]
 ) -> None:

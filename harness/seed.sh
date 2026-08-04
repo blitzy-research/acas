@@ -16,8 +16,13 @@
 #     sys4LD, finalLD, dfltLD -- a later loader reads what an earlier one wrote.
 #   * loader exit codes above 63 ABORT the load rather than being logged, with
 #     distinct codes for unset RDBMS parameters, an unset database flag and a
-#     write error, and autocommit must be OFF because the batch loader turns it
-#     off explicitly [common/glbatchLD.cbl:L9-L13].
+#     write error, and the load programs run inside a SEEDING WINDOW this script
+#     opens with autocommit OFF and closes again, because the Agent Action Plan
+#     scopes that mode to seeding [common/glbatchLD.cbl:L9-L13]. Runtime
+#     application access keeps the mode harness/Dockerfile.mariadb declares, ON.
+#   * a seed that reports success and leaves NO rows is a FAILED seed: the frozen
+#     loaders never commit, so the window's result is MEASURED before it can be
+#     handed to a comparison whose pass condition is an empty diff.
 
 set -Eeuo pipefail
 
@@ -35,9 +40,14 @@ readonly EX_OK=0
 readonly EX_USAGE=70          # bad command line
 readonly EX_PRECONDITION=71   # environment, directory or loader assertion
 readonly EX_DATABASE=72       # MariaDB unreachable, or credentials rejected
-readonly EX_AUTOCOMMIT=73     # autocommit is not OFF -- see acas_assert_autocommit
+readonly EX_AUTOCOMMIT=73     # the seeding window's autocommit mode could not be
+                              # established or asserted -- see
+                              # acas_open_seed_autocommit_window
 readonly EX_TIMEOUT=74        # a load program or client exceeded its deadline
 readonly EX_FIXTURE=75        # the scenario's declared seed files are not staged
+readonly EX_NOT_DURABLE=76    # the loaders reported success and left NO rows --
+                              # the reproduced no-COMMIT defect, refused rather
+                              # than passed on to a comparison (R-4 + R-6)
 
 # Finite deadlines. Every external process this script spawns runs under one:
 # the 20 compiled load programs and every MariaDB client invocation.
@@ -137,6 +147,26 @@ ACAS_SQL_DIAG=''               # last client diagnostic, for error messages
 # Empty until `acas_seed_note_sysout_baseline' has run.
 ACAS_SEED_SYSOUT_BASELINE=''
 ACAS_SEED_FIXTURE_DIR=''       # scenario fixture staged by acas_stage_scenario_seed
+ACAS_SEED_DIR_OVERRIDE=''      # --seed-dir: WHERE the declared files live. It never
+                               # changes WHICH files are required -- the scenario's
+                               # own seed_files list remains the sole authority on
+                               # that -- so an override can relocate a fixture but
+                               # cannot quietly seed a different one.
+
+# THE SEEDING WINDOW. The Agent Action Plan scopes autocommit OFF to SEEDING and
+# to nothing else -- section 0.2.1.1 ("the batch loader turns autocommit off"),
+# section 0.5.2 ("autocommit must be off DURING SEEDING") and section 0.4.1.7
+# ("autocommit off TO MATCH THE LOADERS", the loaders being this stage). This
+# script therefore OWNS that window: it sets the mode before the first loader and
+# restores whatever the server had before, however the run ends. Runtime
+# application access -- the compiled posting run, the Python cycle, the reset and
+# the dumps -- is left in the mode harness/Dockerfile.mariadb declares, which is
+# ON. Nothing here ever issues a COMMIT on a loader's behalf (R-4).
+ACAS_SEED_WINDOW_TARGET=0      # the mode the loaders run under: 0 unless opted out
+ACAS_SEED_WINDOW_OPEN=0        # 1 once the window has been entered
+ACAS_SEED_WINDOW_RESTORE=''    # @@GLOBAL.autocommit as it was BEFORE the window
+ACAS_SEED_WINDOW_SET=0         # 1 if this script actually issued SET GLOBAL
+declare -a ACAS_SEED_RAN_TABLES=()   # tables whose loader ran, for the durability gate
 declare -a ACAS_SEED_ONLY=()         # --only, validated loader names
 declare -a ACAS_SEED_SUMMARY=()      # the final table, one row per loader
 declare -a ACAS_SEED_WARN_SUMMARY=() # non-fatal findings, replayed at the end
@@ -578,6 +608,15 @@ trap 'acas_on_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
 # shellcheck disable=SC2317  # reached only through the EXIT trap installed below.
 acas_on_exit() {
   local status="$1"
+
+  # THE WINDOW IS CLOSED FIRST, and on every path. If this script opened the
+  # seeding window and then died -- a loader abort, a deadline, a signal -- the
+  # server must not be left in the seeding mode, because the next stage is
+  # runtime application access and would then run in a mode the AAP does not
+  # scope to it. The call is idempotent and does nothing if the mode was never
+  # changed, so a successful run that already closed the window pays nothing.
+  acas_close_seed_autocommit_window || true
+
   if (( status == 0 )); then
     return 0
   fi
@@ -643,6 +682,28 @@ Options:
   --data-dir PATH     Directory holding the Cobol flat files. Default $ACAS_DATA.
                       The frozen script hard-codes `cd ~/ACAS'
                       [common/masterLD.sh:L45,L27-L28]; this is deviation D2.
+  --seed-dir PATH     Read the scenario's declared flat files from PATH instead of
+                      from the directory its own `seed_dir' resolves to. Requires a
+                      scenario, since without one there is nothing to relocate.
+
+                      IT EXISTS BECAUSE THE DECLARED DIRECTORY CANNOT BE WHERE THE
+                      FILES ARE BUILT. `seed_dir' resolves relative to the directory
+                      holding the scenario file, which in the shipped Compose
+                      topology is inside the checkout -- and the checkout is mounted
+                      READ-ONLY because it is frozen specification (R-3). So a built
+                      fixture lives under the data volume and this option says where.
+
+                      IT CHANGES WHERE, NEVER WHAT. The scenario's `seed_files' list
+                      remains the sole authority on which files are required: every
+                      declared name is still checked for presence and readability,
+                      system.dat is still mandatory, the staged fixture is still
+                      fresh, and the identity marker still records every file with
+                      its SHA-256. An override can relocate a fixture; it cannot
+                      quietly seed a different one.
+
+                      harness/make_fixtures.py builds a scenario's files from its own
+                      `seed_records' declaration, and harness/build_fixtures.sh
+                      builds every scenario's in one non-interactive command.
   --only LIST         Comma-separated loader names to run, for debugging. Each
                       must be one of the 20 in-scope loaders. The 8 out-of-scope
                       loaders are rejected by name.
@@ -710,9 +771,12 @@ ACAS_TIMEOUT_GRACE seconds later, and only ever that one child:
 Exit codes:
   0        clean seed
   70       usage        71  precondition
-  72       database     73  autocommit is not on
+  72       database     73  the seeding window's autocommit mode could not be
+                            established or verified
   74       a load program or client exceeded its deadline
   75       the scenario's declared seed files could not be staged
+  76       every load program reported success and the tables are EMPTY -- the
+           reproduced no-COMMIT defect, refused rather than passed to a diff
   anything else  a LOADER's own return code, propagated verbatim as the frozen
                  script does with `exit $rc' [common/masterLD.sh:L59,L68,L77,L86]:
                  128 params not set up, 64 RDB not set up, 16 rdb write error
@@ -720,7 +784,22 @@ Exit codes:
 
 This script emits no DDL, adds no validation of the flat files beyond the
 existence test the frozen script performs, runs the loaders strictly one at a
-time, writes nothing under $ACAS_REPO, and never sets autocommit.
+time, and writes nothing under $ACAS_REPO.
+
+AUTOCOMMIT: this script owns the SEEDING WINDOW and nothing else. The Agent
+Action Plan scopes autocommit OFF to seeding in all three of its provisions
+(0.2.1.1, 0.5.2 "during seeding", 0.4.1.7 "to match the loaders"), so the mode is
+set OFF immediately before the first load program, verified from a fresh session,
+and restored to whatever the server had -- ON, as harness/Dockerfile.mariadb
+declares for runtime application access -- when the last one finishes, and from
+the exit trap on every failure path. SET GLOBAL needs the administrative account
+harness/docker-compose.yml already supplies (ACAS_DB_ADMIN_USER,
+ACAS_DB_ADMIN_PASSWORD); without it the required mode is asserted rather than
+established, which is the older, weaker behaviour and is reported as such.
+Because the frozen loaders reach no COMMIT, the window leaves no durable rows:
+the seeded row counts are therefore MEASURED when the window closes and an empty
+result exits 76 instead of reporting a success the tables do not show. No COMMIT
+is ever issued on a loader's behalf (R-4).
 USAGE
 }
 
@@ -787,6 +866,15 @@ acas_parse_args() {
         ACAS_SEED_DATA_DIR="${1#*=}"
         shift
         ;;
+      --seed-dir)
+        [[ $# -ge 2 ]] || acas_die "$EX_USAGE" '--seed-dir requires a path.'
+        ACAS_SEED_DIR_OVERRIDE="$2"
+        shift 2
+        ;;
+      --seed-dir=*)
+        ACAS_SEED_DIR_OVERRIDE="${1#*=}"
+        shift
+        ;;
       --only)
         [[ $# -ge 2 ]] || acas_die "$EX_USAGE" '--only requires a comma-separated loader list.'
         only_raw="$2"
@@ -829,6 +917,17 @@ acas_parse_args() {
     ACAS_SEED_SCENARIO="$1"
     shift
   done
+
+  # --seed-dir relocates A SCENARIO'S declared files, so without a scenario there is
+  # nothing for it to relocate. Refused rather than ignored: silently accepting an
+  # option that cannot take effect is how a seed comes from somewhere other than
+  # where the operator believes it did.
+  if [[ -n "$ACAS_SEED_DIR_OVERRIDE" && -z "$ACAS_SEED_SCENARIO" ]]; then
+    acas_die "$EX_USAGE" \
+      '--seed-dir was given without a scenario.' \
+      'It relocates the files a SCENARIO declares, so it has no meaning on its own.' \
+      'Name a scenario file, or use --data-dir to point at flat files directly.'
+  fi
 
   # Note the test is on `only_given', NOT on `only_raw' being non-empty.
   if (( only_given )); then
@@ -1231,9 +1330,34 @@ acas_assert_transport_policy() {
   return 0
 }
 
+# acas_sql_quote_ident <value> Emits a backquoted SQL identifier, doubling any
+# embedded backtick, and emitting the delimiters itself so that no call site is
+# left writing its own pair around an unescaped value. Identical to the helper
+# harness/reset_db.sh declares, because both scripts name the same 22 frozen
+# tables and both must quote them the same way -- every ACAS table name contains
+# a hyphen, so an unquoted identifier is a syntax error rather than a subtlety.
+acas_sql_quote_ident() {
+  local value="$1"
+  # The delimiter is held in a variable rather than written into the format
+  # string.
+  local bq='`'
+  printf '%s%s%s' "$bq" "${value//"$bq"/"$bq$bq"}" "$bq"
+}
+
 # A single scalar query, credential-safe.
 acas_sql_scalar() {
-  local sql="$1"
+  acas_sql_scalar_as "$ACAS_DB_USER" "$ACAS_DB_PASSWORD" "$1"
+}
+
+# The same query as a NAMED account. The seeding window is the only caller that
+# needs an account other than the application one: SET GLOBAL requires a
+# privilege the narrowed application grant deliberately does not hold, and
+# widening that grant to obtain it would be a worse trade than passing the
+# administrative credential the Compose file already supplies to this service.
+# The password never reaches an argument vector -- MYSQL_PWD only, exactly as the
+# application path does -- so `ps` cannot show it either way.
+acas_sql_scalar_as() {
+  local sql_user="$1" sql_password="$2" sql="$3"
   ACAS_SQL_OUT=''
   ACAS_SQL_DIAG=''
 
@@ -1266,18 +1390,18 @@ acas_sql_scalar() {
       fi
       argv+=(
         "--host=$ACAS_DB_HOST" "--port=$ACAS_DB_PORT"
-        "--user=$ACAS_DB_USER" '--batch' '--skip-column-names'
+        "--user=$sql_user" '--batch' '--skip-column-names'
         "--database=$ACAS_DB_NAME" "--execute=$sql"
       )
       rc=0
       started="$SECONDS"
-      out="$(MYSQL_PWD="$ACAS_DB_PASSWORD" "${argv[@]}" 2>/dev/null)" || rc=$?
+      out="$(MYSQL_PWD="$sql_password" "${argv[@]}" 2>/dev/null)" || rc=$?
       elapsed=$(( SECONDS - started ))
       if (( rc == 0 )); then
         ACAS_SQL_OUT="$out"
         return 0
       fi
-      ACAS_SQL_DIAG="$(MYSQL_PWD="$ACAS_DB_PASSWORD" "${argv[@]}" 2>&1 || true)"
+      ACAS_SQL_DIAG="$(MYSQL_PWD="$sql_password" "${argv[@]}" 2>&1 || true)"
       if acas_is_timeout_status "$rc" "$elapsed" "$ACAS_TIMEOUT_CLIENT"; then
         ACAS_SQL_DIAG="$client did not answer within ${ACAS_TIMEOUT_CLIENT}s and was terminated (raise ACAS_TIMEOUT_CLIENT). $ACAS_SQL_DIAG"
       fi
@@ -1358,12 +1482,13 @@ acas_wait_for_database() {
         ;;
       3)
         acas_die "$EX_DATABASE" \
-          'no mariadb or mysql client binary is available, so the autocommit setting cannot be verified.' \
-          'That verification is not optional: the 28 load programs declare' \
-          'commit and rollback paragraphs but never reach them (every' \
-          '"perform aa020-Rollback" is commented out and "aa030-Commit" has no' \
-          'perform site at all), so seeding with autocommit OFF would leave an' \
-          'EMPTY database and every downstream diff would be untrustworthy.' \
+          'no mariadb or mysql client binary is available, so the seeding window cannot be established or verified.' \
+          'Neither step is optional: the 28 load programs declare commit and' \
+          'rollback paragraphs but never reach them (every "perform' \
+          'aa020-Rollback" is commented out and "aa030-Commit" has no perform' \
+          'site at all), so a seed inside the AAP-mandated OFF window leaves an' \
+          'EMPTY database -- which this script has to MEASURE rather than assume,' \
+          'or every downstream diff would be untrustworthy.' \
           'harness/Dockerfile.gnucobol installs mariadb-client for exactly this;' \
           'run inside the gnucobol service image.'
         ;;
@@ -1403,18 +1528,23 @@ acas_wait_for_database() {
   done
 }
 
-# Precondition 8 of 8 -- autocommit MUST be OFF, as the Agent Action Plan
-# mandates for the seeding window.
+# Precondition 8 of 8 -- open the SEEDING WINDOW with autocommit OFF, as the
+# Agent Action Plan mandates for seeding.
 #
-# ASSERTED, NEVER SET. The setting belongs to the server and is configured once,
-# by harness/Dockerfile.mariadb, which writes `autocommit=0' into
-# /etc/mysql/conf.d/99-acas-oracle.cnf. harness/docker-compose.yml deliberately
-# does not repeat it -- one authority only -- and records that this script
-# asserts it. Issuing `SET autocommit' here would create a second authority and
-# make the seeded state depend on which script ran last. It is also impossible
-# for the loaders themselves to do: the vendored cobmysqlapi38.c exposes
-# MySQL_commit and MySQL_rollback but NOT MySQL_autocommit, so no COBOL program
-# in the checkout can change the mode.
+# ESTABLISHED HERE, AND ONLY FOR THE WINDOW. The runtime mode belongs to the
+# server and is configured once, by harness/Dockerfile.mariadb, which writes
+# `autocommit=1' into /etc/mysql/conf.d/99-acas-oracle.cnf for runtime application
+# access. harness/docker-compose.yml deliberately does not repeat it -- one
+# authority for the runtime mode -- and records that this script owns the window.
+# The window is the ONE mode change anywhere in the harness, it is scoped to the
+# frozen load programs, and it is restored on every exit path, so the seeded state
+# cannot come to depend on which script ran last.
+#
+# The loaders cannot do it themselves: the vendored cobmysqlapi38.c exposes
+# MySQL_commit and MySQL_rollback but NOT MySQL_autocommit, so no COBOL program in
+# the checkout can change the mode -- which is why the banner at
+# [common/glbatchLD.cbl:L9-L13] addresses the OPERATOR, and why this script acts
+# on the operator's behalf rather than merely complaining about the mode it finds.
 #
 # WHY OFF -- THE AAP REQUIRES IT
 # ------------------------------
@@ -1471,11 +1601,20 @@ acas_wait_for_database() {
 #
 # The `+ 0' coercion is required, not cosmetic: autocommit is a boolean system
 # variable and renders as ON/OFF in a string context, not as 1/0.
-acas_assert_autocommit() {
-  acas_stage 'Preconditions 8/8: autocommit must be OFF (AAP-mandated)'
+# Read `@@GLOBAL.autocommit/@@SESSION.autocommit' as two integers, or die.
+# Sets ACAS_SEED_AC_GLOBAL and ACAS_SEED_AC_SESSION.
+ACAS_SEED_AC_GLOBAL=''
+ACAS_SEED_AC_SESSION=''
+# Read as the APPLICATION account, deliberately: reading a system variable needs
+# no privilege, and the mode that matters is the one the load programs will see,
+# which is the mode this account sees.
+acas_read_autocommit() {
+  ACAS_SEED_AC_GLOBAL=''
+  ACAS_SEED_AC_SESSION=''
 
   local rc=0
-  acas_sql_scalar 'select concat_ws(0x2f, @@GLOBAL.autocommit + 0, @@SESSION.autocommit + 0)' || rc=$?
+  acas_sql_scalar \
+    'select concat_ws(0x2f, @@GLOBAL.autocommit + 0, @@SESSION.autocommit + 0)' || rc=$?
   if (( rc != 0 )); then
     acas_die "$EX_DATABASE" \
       'could not read the autocommit setting from the server.' \
@@ -1484,8 +1623,7 @@ acas_assert_autocommit() {
 
   # Take the last line that looks like the answer, so a stray client advisory
   # can never be mistaken for the value.
-  local value=''
-  local line
+  local value='' line
   while IFS= read -r line; do
     if [[ "$line" =~ ^[0-9]+/[0-9]+$ ]]; then
       value="$line"
@@ -1496,33 +1634,219 @@ acas_assert_autocommit() {
     'the server did not return a readable autocommit setting.' \
     "Received: ${ACAS_SQL_OUT:-<empty>}"
 
-  local global="${value%%/*}" session="${value##*/}"
-  acas_log "@@GLOBAL.autocommit = $global   @@SESSION.autocommit = $session"
+  ACAS_SEED_AC_GLOBAL="${value%%/*}"
+  ACAS_SEED_AC_SESSION="${value##*/}"
+}
 
-  if (( global != 0 || session != 0 )); then
-    acas_die "$EX_AUTOCOMMIT" \
-      "autocommit is ON (global=$global, session=$session); seeding is REFUSED." \
-      'The Agent Action Plan mandates autocommit OFF for the seeding window in' \
-      'three places -- section 0.2.1.1 (the seeding contract), section 0.4.1.7' \
-      '(harness/Dockerfile.mariadb: "autocommit off to match the loaders") and' \
-      'section 0.5.2 -- all deriving it from the banner carried by all 28' \
-      'common/*LD.cbl loaders at [common/glbatchLD.cbl:L9-L13]: "you MUST ensure' \
-      'that autocommit is OFF in the rdb settings".' \
-      'Seeding under ON would produce durable rows the mandated mode does not,' \
-      'so the seeded state would depend on the server rather than on the frozen' \
-      'contract, and the oracle would no longer be the thing the AAP specifies.' \
-      'This script deliberately does NOT set the mode: it has exactly one' \
-      'authority, harness/Dockerfile.mariadb, which writes autocommit=0 into' \
-      '/etc/mysql/conf.d/99-acas-oracle.cnf. Start the harness MariaDB service' \
-      'built from that Dockerfile, or set autocommit=0 in the server' \
-      'configuration and restart it.'
+# =============================================================================
+# THE SEEDING WINDOW -- autocommit OFF, AND ONLY HERE
+#
+# The Agent Action Plan mandates autocommit OFF for SEEDING, and scopes it there
+# in all three of its provisions: section 0.2.1.1 (the seeding contract, "the
+# batch loader turns autocommit off"), section 0.5.2 ("autocommit must be off
+# DURING SEEDING") and section 0.4.1.7 (harness/Dockerfile.mariadb, "autocommit
+# off TO MATCH THE LOADERS" -- the loaders being this stage). All three cite the
+# banner carried by the 28 common/*LD.cbl loaders at [common/glbatchLD.cbl:L9-L13]:
+# "you MUST ensure that autocommit is OFF in the rdb settings".
+#
+# An earlier revision of this harness read that as a server-wide pin and only
+# ASSERTED the mode. Two things went wrong with it, and the second is fatal to
+# the protocol rather than untidy:
+#   * runtime application access -- the compiled posting run, the Python cycle,
+#     the reset, the dumps -- was forced into a mode the AAP never scopes to it;
+#   * because the frozen loaders reach no COMMIT, a seed reported success while
+#     leaving every table empty, and the comparison stage then diffed two empty
+#     captures and returned the pass condition, having measured nothing.
+# So the mode is a WINDOW: opened here, closed the moment the loaders are done,
+# and restored by the exit trap however this script ends. What the window CANNOT
+# do is make the frozen loaders durable -- that is their defect, not this
+# script's, and acas_assert_seed_durability refuses to hide it.
+#
+# ACAS_SEED_AUTOCOMMIT=on runs the window under ON instead. It is a DEVIATION
+# from the AAP-mandated mode, is recorded as such in the log, and exists because
+# it is the only mode in which the frozen loaders can persist a row at all --
+# arbitrated against compiled behaviour under R-6 and written up in
+# docs/migration/ambiguity-resolutions.md. The default is the AAP's mode.
+# =============================================================================
+acas_open_seed_autocommit_window() {
+  acas_stage 'Preconditions 8/8: the seeding window (autocommit OFF -- AAP-mandated)'
+
+  # The requested window mode, validated here rather than where it is used.
+  local requested="${ACAS_SEED_AUTOCOMMIT-}"
+  case "${requested,,}" in
+    ''|off|0|false|no)
+      ACAS_SEED_WINDOW_TARGET=0
+      ;;
+    on|1|true|yes)
+      ACAS_SEED_WINDOW_TARGET=1
+      ;;
+    *)
+      acas_die "$EX_USAGE" \
+        "ACAS_SEED_AUTOCOMMIT must be 'off' (the AAP-mandated default) or 'on'; got '$requested'." \
+        'It selects the autocommit mode the frozen load programs run under, and' \
+        'nothing else; runtime application access is unaffected either way.'
+      ;;
+  esac
+
+  acas_read_autocommit
+  local before_global="$ACAS_SEED_AC_GLOBAL" before_session="$ACAS_SEED_AC_SESSION"
+  acas_log "before the window: @@GLOBAL.autocommit = $before_global   @@SESSION.autocommit = $before_session"
+  ACAS_SEED_WINDOW_RESTORE="$before_global"
+
+  if (( ACAS_SEED_WINDOW_TARGET == 1 )); then
+    acas_warn 'ACAS_SEED_AUTOCOMMIT=on: this seeding window runs with autocommit ON, which DEVIATES from the mode the Agent Action Plan mandates for seeding (sections 0.2.1.1, 0.4.1.7 and 0.5.2). It is the only mode in which the frozen loaders can leave a durable row -- every "perform aa030-Commit" and "perform aa020-Rollback" in all 28 common/*LD.cbl loaders is commented out and the vendored cobmysqlapi38.c never calls mysql_autocommit -- so it is offered as an explicit operator decision, recorded here and in docs/migration/ambiguity-resolutions.md, never as a default.'
   fi
-  acas_log 'verified: autocommit is OFF, globally and for this session (AAP-mandated)'
 
-  # The reproduced defect, restated at the moment it becomes relevant. This is a
-  # WARNING and not a refusal: R-4 requires the frozen behaviour, and refusing
-  # here would be refusing the specification.
-  acas_warn 'the frozen loaders reach no COMMIT, so under this AAP-mandated mode their writes are NOT durable: the tables may read EMPTY after a seed that reports success. Measured across the frozen tree -- every "perform aa020-Rollback" in all 28 common/*LD.cbl loaders is commented out (78 sites, none live) and "perform aa030-Commit" occurs exactly once anywhere, at [common/irsdfltLD.cbl:L437], commented out as well; [common/systemLD.cbl] declares both paragraphs at L406 and L420 with no perform site at all. This is the reproduced legacy defect (R-4), not a fault in this script -- the maintainer recorded the same observation at [common/analLD.cbl:L442] ("These do not work during testing with mariadb - Non transactional model or autocommit set ON"). Nothing here issues the missing COMMIT, because a defect fixed is a failure.'
+  # Already in the requested mode? Then nothing is set, and nothing will be
+  # restored -- the common case when an operator has configured the server for it.
+  if (( before_global == ACAS_SEED_WINDOW_TARGET )); then
+    ACAS_SEED_WINDOW_OPEN=1
+    ACAS_SEED_WINDOW_SET=0
+    acas_log "the server already serves autocommit=$ACAS_SEED_WINDOW_TARGET globally; no change was made"
+  else
+    # SET GLOBAL needs an administrative account. Compose hands this service one
+    # (ACAS_DB_ADMIN_USER / ACAS_DB_ADMIN_PASSWORD, the same pair reset_db.sh
+    # requires); without it the mode can only be asserted, not established.
+    if [[ -z "${ACAS_DB_ADMIN_USER-}" || -z "${ACAS_DB_ADMIN_PASSWORD-}" ]]; then
+      acas_die "$EX_AUTOCOMMIT" \
+        "the seeding window needs autocommit=$ACAS_SEED_WINDOW_TARGET globally and the server serves $before_global." \
+        'No administrative account is available to establish it:' \
+        'ACAS_DB_ADMIN_USER and ACAS_DB_ADMIN_PASSWORD are unset, and SET GLOBAL' \
+        'requires a privilege the narrowed application grant deliberately does' \
+        'not hold (harness/Dockerfile.mariadb grants ACAS_DB_USER only DELETE,' \
+        'INSERT, SELECT and UPDATE).' \
+        'Either export the administrative pair -- harness/docker-compose.yml' \
+        'already supplies it to the gnucobol service -- or configure the server' \
+        "for autocommit=$ACAS_SEED_WINDOW_TARGET yourself before seeding."
+      fi
+    local rc=0
+    acas_sql_scalar_as "$ACAS_DB_ADMIN_USER" "$ACAS_DB_ADMIN_PASSWORD" \
+      "set global autocommit = $ACAS_SEED_WINDOW_TARGET" || rc=$?
+    if (( rc != 0 )); then
+      acas_die "$EX_AUTOCOMMIT" \
+        "could not set the seeding window's autocommit mode to $ACAS_SEED_WINDOW_TARGET." \
+        "$(acas_diag_summary "$ACAS_SQL_DIAG")" \
+        'The administrative account must hold SUPER (or SET USER privileges) on' \
+        'this server. harness/docker-compose.yml supplies root for the purpose.'
+    fi
+    # The window is claimed only AFTER the SET has succeeded, so the exit trap
+    # never restores a mode this script did not change.
+    ACAS_SEED_WINDOW_OPEN=1
+    ACAS_SEED_WINDOW_SET=1
+    acas_log "SET GLOBAL autocommit = $ACAS_SEED_WINDOW_TARGET  (window opened; $before_global will be restored)"
+  fi
+
+  # Verified from a NEW session, because a global change does not reach sessions
+  # that are already open -- including this script's own client invocations, each
+  # of which is a fresh connection.
+  acas_read_autocommit
+  acas_log "inside the window: @@GLOBAL.autocommit = $ACAS_SEED_AC_GLOBAL   @@SESSION.autocommit = $ACAS_SEED_AC_SESSION"
+  if (( ACAS_SEED_AC_GLOBAL != ACAS_SEED_WINDOW_TARGET || ACAS_SEED_AC_SESSION != ACAS_SEED_WINDOW_TARGET )); then
+    acas_die "$EX_AUTOCOMMIT" \
+      "the seeding window is not in the required mode: wanted $ACAS_SEED_WINDOW_TARGET/$ACAS_SEED_WINDOW_TARGET, the server reports $ACAS_SEED_AC_GLOBAL/$ACAS_SEED_AC_SESSION (global/session)." \
+      'Something else is setting the mode for new sessions -- an init_connect' \
+      'statement or a second configuration file under /etc/mysql. The load' \
+      'programs would then run in a mode this script cannot vouch for, so they' \
+      'are not started.'
+  fi
+  acas_log "verified: the seeding window runs with autocommit=$ACAS_SEED_WINDOW_TARGET, globally and per session"
+
+  if (( ACAS_SEED_WINDOW_TARGET == 0 )); then
+    # The reproduced defect, restated at the moment it becomes relevant. A
+    # WARNING here and a REFUSAL later: R-4 forbids issuing the COMMIT the frozen
+    # code omits, and R-6 forbids passing the result off as evidence, so the run
+    # continues and acas_assert_seed_durability judges the outcome.
+    acas_warn 'the frozen loaders reach no COMMIT, so inside this AAP-mandated window their writes are NOT durable: the tables may read EMPTY after a seed that reports success. Measured across the frozen tree -- every "perform aa020-Rollback" in all 28 common/*LD.cbl loaders is commented out (78 sites, none live) and "perform aa030-Commit" occurs exactly once anywhere, at [common/irsdfltLD.cbl:L437], commented out as well; [common/systemLD.cbl] declares both paragraphs at L406 and L420 with no perform site at all. This is the reproduced legacy defect (R-4), not a fault in this script -- the maintainer recorded the same observation at [common/analLD.cbl:L442] ("These do not work during testing with mariadb - Non transactional model or autocommit set ON"). Nothing here issues the missing COMMIT, because a defect fixed is a failure; instead the seeded row counts are MEASURED when the window closes and an empty result is refused rather than reported as a success.'
+  fi
+}
+
+# Close the window and put back what was there. Idempotent, and safe to call from
+# the exit trap: it does nothing unless this script actually changed the mode.
+acas_close_seed_autocommit_window() {
+  (( ACAS_SEED_WINDOW_OPEN )) || return 0
+  if (( ! ACAS_SEED_WINDOW_SET )); then
+    ACAS_SEED_WINDOW_OPEN=0
+    return 0
+  fi
+  ACAS_SEED_WINDOW_OPEN=0
+
+  local target="$ACAS_SEED_WINDOW_RESTORE"
+  [[ "$target" =~ ^[0-9]+$ ]] || target=1
+
+  local rc=0
+  acas_sql_scalar_as "${ACAS_DB_ADMIN_USER-}" "${ACAS_DB_ADMIN_PASSWORD-}" \
+    "set global autocommit = $target" || rc=$?
+  if (( rc != 0 )); then
+    # Reported, never fatal: this runs from the exit trap, where replacing the
+    # real exit status with a cleanup failure would hide the actual outcome.
+    acas_warn "could not restore @@GLOBAL.autocommit to $target after the seeding window; runtime application access may still be in the window's mode. Set it back with: set global autocommit = $target"
+    return 0
+  fi
+  ACAS_SEED_WINDOW_SET=0
+  acas_log "SET GLOBAL autocommit = $target  (seeding window closed; runtime mode restored)"
+}
+
+# =============================================================================
+# THE DURABILITY GATE -- a seed that leaves no rows is a FAILED seed
+#
+# The frozen loaders reach no COMMIT, so inside the AAP-mandated window they
+# report success and leave nothing behind. That is the reproduced defect (R-4) and
+# it is not repaired here. What is refused is passing the RESULT off as a seeded
+# state: an empty capture on the oracle side produces an empty diff, and an empty
+# diff is the single documented pass condition (AAP section 0.8.5), so a harness
+# that continued would report the migration exact having compared nothing.
+#
+# Only the tables whose loader actually RAN are measured -- a scenario that seeds
+# four files is not expected to fill the other twelve tables.
+# =============================================================================
+acas_assert_seed_durability() {
+  acas_stage 'The durability gate: the seeded state must actually be there'
+
+  if (( ${#ACAS_SEED_RAN_TABLES[@]} == 0 )); then
+    acas_log 'no load program ran, so there is no seeded state to measure'
+    return 0
+  fi
+
+  local -a measured=()
+  local table rc total=0 count
+  for table in "${ACAS_SEED_RAN_TABLES[@]}"; do
+    rc=0
+    acas_sql_scalar "select count(*) from $(acas_sql_quote_ident "$table");" || rc=$?
+    if (( rc != 0 )); then
+      acas_die "$EX_DATABASE" \
+        "could not count $table to confirm the seed reached the database." \
+        "$(acas_diag_summary "$ACAS_SQL_DIAG")"
+    fi
+    count="${ACAS_SQL_OUT##*$'\n'}"
+    [[ "$count" =~ ^[0-9]+$ ]] || count=0
+    measured+=("$table:$count")
+    acas_log "$(printf '%-34s %s row(s)' "$table" "$count")"
+    total=$(( total + count ))
+  done
+
+  if (( total > 0 )); then
+    acas_log "verified: the seed is present -- $total row(s) across ${#ACAS_SEED_RAN_TABLES[@]} table(s)"
+    return 0
+  fi
+
+  acas_die "$EX_NOT_DURABLE" \
+    "every load program reported success and the database holds NO rows in any of the ${#ACAS_SEED_RAN_TABLES[@]} table(s) they write." \
+    'This is the reproduced no-COMMIT defect, not a fault in this script: inside' \
+    'the AAP-mandated seeding window MariaDB discards each session at disconnect,' \
+    'and the frozen loaders never commit -- every "perform aa020-Rollback" in all' \
+    '28 common/*LD.cbl loaders is commented out (78 sites, none live) and' \
+    '"perform aa030-Commit" occurs exactly once anywhere, at' \
+    '[common/irsdfltLD.cbl:L437], commented out too. The maintainer recorded the' \
+    'same observation at [common/analLD.cbl:L442].' \
+    'NOTHING HERE ISSUES THE MISSING COMMIT (R-4). What is refused is reporting a' \
+    'seed that is not there: an empty oracle capture yields an EMPTY DIFF, and an' \
+    'empty diff is the only pass condition the protocol has (AAP section 0.8.5),' \
+    'so a run that continued would certify the migration exact having compared' \
+    'nothing at all.' \
+    'To seed under the mode the compiled loaders actually require, re-run with' \
+    'ACAS_SEED_AUTOCOMMIT=on. That deviates from the AAP-mandated seeding mode,' \
+    'is logged as a deviation, and is written up as an R-6 arbitration in' \
+    'docs/migration/ambiguity-resolutions.md.'
 }
 
 
@@ -1550,6 +1874,102 @@ acas_rc_meaning() {
   esac
 }
 
+# =============================================================================
+# TERMINAL BYTES ARE NOT EVIDENCE
+#
+# The frozen load programs are curses programs: [common/glbatchLD.cbl] and its 27
+# siblings write through `display ... at' against a screen section, and ncurses
+# emits its escape sequences whether the far end is a terminal or a pipe. Relayed
+# verbatim, the seed log ends up holding bytes such as
+# `\x1b[?1049h\x1b[22;0;0t\x1b[1;24r' interleaved with the diagnostics that
+# actually matter, which makes the one artifact an operator reads after a failed
+# seed both terminal-dependent and unsearchable.
+#
+# So the stream is filtered, with the SAME expression the pty driver in
+# harness/run_cobol_scenario.sh already uses for its transcript -- one rule for
+# terminal output across the harness rather than two that can drift apart. Only
+# presentation bytes are removed: every printable character the loader wrote
+# survives untouched, so a message, a return code or an SQLSTATE can still be
+# read out of the log verbatim.
+#
+# Streamed line by line and flushed on every line, so `tee' shows a long load
+# live rather than in one block at the end, and a killed loader still leaves
+# everything it had already written.
+# =============================================================================
+#
+# The program is held in a variable and passed with `-c' rather than fed on
+# stdin: a heredoc would BECOME the filter's stdin and consume the very stream it
+# is meant to read. The assignment's heredoc is consumed once, when this script is
+# read, so the function itself spawns nothing but the interpreter.
+ACAS_SEED_FILTER_PY="$(cat <<'PY'
+import re
+import sys
+
+# CSI / OSC / character-set selection / two-byte escapes, then the control bytes
+# ncurses uses for cursor movement within a line. Identical to the pty driver's
+# expression in harness/run_cobol_scenario.sh.
+ANSI = re.compile(
+    rb'\x1b\[[0-9;?]*[a-zA-Z]'              # CSI ... final byte
+    rb'|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)'  # OSC ... BEL or ST
+    rb'|\x1b[()][A-Za-z0-9]'                # character set selection
+    rb'|\x1b[=>NOM78]'                      # keypad / charset / misc two-byte
+    rb'|\x1b\([B0]'                         # G0 designation
+    rb'|[\x00\x07\x0e\x0f\r]'               # NUL, BEL, SO, SI, CR
+)
+WHITESPACE = re.compile(rb'[ \t\x0b\x0c]+')
+
+source = sys.stdin.buffer
+target = sys.stdout.buffer
+for line in source:
+    text = ANSI.sub(b' ', line)
+    text = text.replace(b'\x08', b'')       # backspace: the accept redraws
+    # Collapse runs of blanks, which a screen-positioned display produces by the
+    # dozen, then drop a line that carried nothing but positioning.
+    text = WHITESPACE.sub(b' ', text).strip()
+    if not text:
+        continue
+    target.write(text + b'\n')
+    target.flush()
+PY
+)"
+readonly ACAS_SEED_FILTER_PY
+
+acas_filter_terminal_bytes() {
+  python3 -u -c "$ACAS_SEED_FILTER_PY"
+}
+
+# acas_note_ran_tables <table-spec> Remembers which tables a loader that has just
+# run was supposed to fill, so the durability gate can measure exactly those and
+# nothing else. The spec is the fourth field of a mapping entry and may name two
+# tables joined by ` + ' -- slinvoiceLD and plinvoiceLD each load a header table
+# and a lines table. Duplicates are dropped: sys4LD, finalLD and dfltLD all read
+# the same flat file but write different tables, and two scenarios may name one
+# table twice.
+acas_note_ran_tables() {
+  local spec="$1" table known
+  while [[ -n "$spec" ]]; do
+    if [[ "$spec" == *' + '* ]]; then
+      table="${spec%% + *}"
+      spec="${spec#* + }"
+    else
+      table="$spec"
+      spec=''
+    fi
+    # Trim, defensively: the entry text is authored by hand in this file.
+    table="${table#"${table%%[![:space:]]*}"}"
+    table="${table%"${table##*[![:space:]]}"}"
+    [[ -n "$table" ]] || continue
+    local seen=0
+    for known in ${ACAS_SEED_RAN_TABLES[@]+"${ACAS_SEED_RAN_TABLES[@]}"}; do
+      if [[ "$known" == "$table" ]]; then
+        seen=1
+        break
+      fi
+    done
+    (( seen )) || ACAS_SEED_RAN_TABLES+=("$table")
+  done
+}
+
 # acas_invoke_loader <loader> Runs one load program, sequentially, in the
 # foreground (R-3): no `&', no `xargs -P', no job control anywhere in this
 # script.
@@ -1558,11 +1978,17 @@ acas_invoke_loader() {
   ACAS_SEED_CURRENT_LOADER="$loader"
   ACAS_SEED_LAST_RC=0
 
-  # UNDER A DEADLINE, and stdin detached.
+  # UNDER A DEADLINE, and stdin detached. The loader's output passes through
+  # acas_filter_terminal_bytes before it reaches the console or the evidence log:
+  # the load programs are curses programs and write ncurses escape sequences even
+  # to a pipe, and a terminal-dependent byte stream is not evidence (R-6).
+  # PIPESTATUS[0] is still the LOADER's status -- the filter is downstream of it
+  # and cannot mask it.
   local started elapsed
   acas_deadline_prefix "$ACAS_TIMEOUT_LOADER"
   started="$SECONDS"
-  if "${ACAS_DEADLINE_ARGV[@]}" "$loader" </dev/null 2>&1 | tee -a "$ACAS_SEED_LOG"; then
+  if "${ACAS_DEADLINE_ARGV[@]}" "$loader" </dev/null 2>&1 \
+       | acas_filter_terminal_bytes | tee -a "$ACAS_SEED_LOG"; then
     ACAS_SEED_LAST_RC=0
   else
     ACAS_SEED_LAST_RC=${PIPESTATUS[0]}
@@ -1695,6 +2121,7 @@ acas_seed_system_block() {
 
     acas_log "$ACAS_S_LOADER  <- $ACAS_SEED_SYSTEM_FLAT_FILE  -> $ACAS_S_TABLE  [common/masterLD.sh:$ACAS_S_LOCATOR]"
     acas_invoke_loader "$ACAS_S_LOADER"
+    acas_note_ran_tables "$ACAS_S_TABLE"
 
     # rc=$? ; JOBSTATUS=$rc -- assigned after EVERY loader, including a
     # successful one, exactly as the frozen script does at
@@ -1730,6 +2157,7 @@ acas_seed_mappings() {
 
     acas_log "$ACAS_E_LOADER  <- $ACAS_E_FLAT  -> $ACAS_E_TABLE  [common/masterLD.sh:$ACAS_E_LOCATOR]"
     acas_invoke_loader "$ACAS_E_LOADER"
+    acas_note_ran_tables "$ACAS_E_TABLE"
     ACAS_SEED_JOBSTATUS="$ACAS_SEED_LAST_RC"
     acas_abort_on_rc "$ACAS_SEED_LAST_RC" "$ACAS_E_LOADER" "$ACAS_E_FLAT" \
       'gt63' "$ACAS_E_LOCATOR" 'mapping'
@@ -1952,13 +2380,15 @@ acas_print_plan() {
   acas_log "return codes : frozen -- \`-gt 63' [common/masterLD.sh:L41]; dfltLD \`!= 0' [L83]"
   acas_log "strict opt-in: ACAS_SEED_STRICT=${ACAS_SEED_STRICT:-<unset>}; unset = frozen"
   acas_log "             : tolerance plus the post-seed gate, 1 = fail fast (D5)"
-  acas_note 'the MariaDB readiness and autocommit assertions are NOT performed in a'
-  acas_note 'dry run; a real run refuses to seed unless autocommit is OFF, globally'
-  acas_note 'and for the session, as the Agent Action Plan mandates for the seeding'
-  acas_note 'window (sections 0.2.1.1, 0.4.1.7 and 0.5.2, from the banner at'
-  acas_note '[common/glbatchLD.cbl:L9-L13]). A real run then WARNS that the frozen'
-  acas_note 'loaders reach no COMMIT, so their writes are not durable under that'
-  acas_note 'mode -- the reproduced legacy defect (R-4), never repaired here'
+  acas_note 'the MariaDB readiness check, the seeding window and the durability gate are'
+  acas_note 'NOT performed in a dry run. A real run opens a window with autocommit OFF,'
+  acas_note 'globally and for the session, as the Agent Action Plan mandates for seeding'
+  acas_note '(sections 0.2.1.1, 0.4.1.7 and 0.5.2, from the banner at'
+  acas_note '[common/glbatchLD.cbl:L9-L13]), restores the runtime mode when the last'
+  acas_note 'loader finishes, and WARNS that the frozen loaders reach no COMMIT so their'
+  acas_note 'writes are not durable inside it -- the reproduced legacy defect (R-4),'
+  acas_note 'never repaired here. A real run then MEASURES the seeded rows and exits 76'
+  acas_note 'rather than reporting a success the tables do not show'
 }
 
 acas_assert_scenario() {
@@ -2116,11 +2546,36 @@ PY
   (( ${#wanted[@]} > 0 )) || acas_die "$EX_FIXTURE" \
     'the scenario parser produced no seed file names (internal invariant).'
 
+  # --seed-dir RELOCATES the fixture, and it exists because the scenario's own
+  # `seed_dir' cannot be where the files are built. That key resolves RELATIVE TO
+  # THE DIRECTORY HOLDING THE SCENARIO FILE, which in the shipped Compose topology
+  # is inside the checkout -- and the checkout is mounted READ-ONLY because it is
+  # frozen specification (R-3). Nothing may write a built fixture there, so the
+  # builder writes it under the data volume and this option says where.
+  # WHAT IT DOES NOT DO: it does not change WHICH files are required. The declared
+  # seed_files list is still the sole authority, every name is still checked for
+  # presence and readability below, system.dat is still mandatory, and the identity
+  # marker still records every file with its digest. An override can therefore
+  # relocate a fixture but cannot quietly seed a different one.
+  if [[ -n "$ACAS_SEED_DIR_OVERRIDE" ]]; then
+    local override_real=''
+    override_real="$(readlink -f -- "$ACAS_SEED_DIR_OVERRIDE" 2>/dev/null || true)"
+    [[ -n "$override_real" ]] || acas_die "$EX_FIXTURE" \
+      "--seed-dir '$ACAS_SEED_DIR_OVERRIDE' could not be resolved." \
+      'It must name an existing directory holding the declared flat files.'
+    acas_log "--seed-dir overrides the scenario's own seed_dir"
+    acas_log "  scenario declared: $seed_dir"
+    acas_log "  reading instead  : $override_real"
+    acas_note "the declared seed_files list is unchanged by the override; every name below is still required"
+    seed_dir="$override_real"
+  fi
+
   [[ -d "$seed_dir" ]] || acas_die "$EX_FIXTURE" \
     "the scenario's seed directory does not exist: $seed_dir." \
     "  scenario: $scenario_real" \
-    'Create it holding the flat files the scenario declares, or set seed_dir in' \
-    'the scenario to where they live.'
+    'Create it holding the flat files the scenario declares, or pass --seed-dir to' \
+    'where they live. harness/make_fixtures.py builds them from the scenario'"'"'s own' \
+    'seed_records declaration, and harness/build_fixtures.sh builds all of them.'
 
   acas_in_list 'system.dat' "${wanted[@]}" || acas_die "$EX_FIXTURE" \
     "the scenario does not declare system.dat among its seed files." \
@@ -2249,7 +2704,7 @@ acas_main() {
   fi
 
   acas_wait_for_database
-  acas_assert_autocommit
+  acas_open_seed_autocommit_window
 
   # BEFORE the first loader, so the completion report can bound itself to what
   # this run appended rather than replaying an append-only file (deviation D6).
@@ -2257,6 +2712,12 @@ acas_main() {
 
   acas_seed_system_block
   acas_seed_mappings
+
+  # The window closes the moment the last frozen loader has run, and BEFORE the
+  # durability gate measures the result: the gate reads the database as runtime
+  # application access reads it, which is the mode the next stage will use.
+  acas_close_seed_autocommit_window
+  acas_assert_seed_durability
   acas_report_out_of_scope
 
   acas_stage 'Completion  [common/masterLD.sh:L119-L123]'

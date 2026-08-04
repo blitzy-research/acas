@@ -689,9 +689,32 @@ from __future__ import annotations
 
 import pytest
 
+# The TIER mark, applied to the whole module because every test in it belongs to the
+# tier. THE INFRASTRUCTURE MARKS ARE NOT HERE: `database` and `oracle` are declared per
+# test, on exactly the tests whose fixture closure reaches the harness stack, because
+# several tests in this file read only files on disk and pass on a bare host. A module
+# mark would claim they need a MariaDB and a built oracle, and `-m database` would then
+# select tests that require neither.
 pytestmark = pytest.mark.scenario
 
 SCENARIO = "clean_batch_irs"
+
+# THE THREE TABLES THIS SCENARIO'S SEED FILLS AND THE RUN LEAVES POPULATED, each named
+# by the `seed_files:` entry that fills it: irsdflt.dat -> IRSDFLT-REC, irsacnts.dat ->
+# IRSNL-REC, irspost.dat -> IRSPOSTING-REC. They must come back WITH ROWS on both sides
+# or every assertion in this file holds just as well against four empty tables.
+#
+# `PSIRSPOST-REC` IS DELIBERATELY NOT HERE even though postings2irs.dat seeds it. The
+# end-of-job answer is pinned "Y", so the route DELETES EVERY ROW of it
+# [irs/irs030.cbl:L1720-L1723] via [common/acas008.cbl:L313-L319, L571-L574]. Whether
+# that truncation actually happened is a BEHAVIOURAL claim owned by
+# `test_psirspost_rec_is_emptied_by_the_clear_answer`, where a Python side that failed
+# to empty it is a FAILURE; asserting it here would report that regression as an ERROR.
+SEEDED_TABLES = (
+    "IRSDFLT-REC",
+    "IRSNL-REC",
+    "IRSPOSTING-REC",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1082,6 +1105,26 @@ def parity(
             f"taken, because absence is evidence, but the run's own status cannot be "
             f"read as a verdict."
         )
+
+    # ------------------------------------------------------------------
+    #  GUARD 6 - BOTH SIDES STARTED FROM THE SAME RECORDED SEEDED STATE. Row counts
+    #  only, one line per affected table in the declared order, compared as bytes.
+    #  Stage 5 drops and re-applies all 33 tables and re-seeds between the two runs,
+    #  so "the same state" is a claim about that reset having worked - and on THIS
+    #  route it is load-bearing twice over, because the oracle run at stage 2 empties
+    #  the transfer table and a failed reset would leave the Python run walking
+    #  nothing.
+    # ------------------------------------------------------------------
+    protocol.assert_seed_fingerprints_agree(run)
+
+    # ------------------------------------------------------------------
+    #  GUARD 7 - SOMETHING WAS THERE TO COMPARE. Guard 1 rules out the flag that
+    #  sends the whole run to indexed files, but a seed that never landed produces
+    #  exactly the same empty-and-agreeing dumps with the flag set correctly. This
+    #  counts rows and nothing else, so it can neither judge a value nor add
+    #  validation the cycle does not have (R-3, R-6).
+    # ------------------------------------------------------------------
+    protocol.assert_non_vacuous(run, tables_requiring_rows=SEEDED_TABLES)
 
     return run
 
@@ -1677,6 +1720,8 @@ def test_diff_exit_contract_is_honoured(harness: object) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_clean_batch_post_irs_state_parity(
     parity: object,
     harness: object,
@@ -1739,6 +1784,8 @@ def test_clean_batch_post_irs_state_parity(
     )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_a4_half_posted_double_entry_reproduced(
     parity: object,
     harness: object,
@@ -1852,6 +1899,8 @@ def test_a4_half_posted_double_entry_reproduced(
     )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_a5_lost_update_on_vat_control_accounts_reproduced(
     parity: object,
     harness: object,
@@ -2011,6 +2060,8 @@ def test_a5_lost_update_on_vat_control_accounts_reproduced(
         )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_psirspost_rec_is_emptied_by_the_clear_answer(
     parity: object,
     harness: object,
@@ -2088,6 +2139,8 @@ def test_psirspost_rec_is_emptied_by_the_clear_answer(
         )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_a6_rewrite_verb_can_never_succeed(
     parity: object,
     harness: object,
@@ -2167,6 +2220,8 @@ def test_a6_rewrite_verb_can_never_succeed(
     )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_a7_partial_date_component_derivation_is_dumped_as_stored(
     parity: object,
     harness: object,
@@ -2280,6 +2335,8 @@ def test_a7_partial_date_component_derivation_is_dumped_as_stored(
         )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_irsdflt_rec_is_a_readonly_witness(
     parity: object,
     harness: object,
@@ -2358,6 +2415,8 @@ def test_irsdflt_rec_is_a_readonly_witness(
     )
 
 
+@pytest.mark.database
+@pytest.mark.oracle
 def test_dump_is_wellformed_on_both_sides(
     parity: object,
     harness: object,

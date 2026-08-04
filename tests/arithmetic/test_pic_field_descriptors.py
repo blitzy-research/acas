@@ -142,6 +142,28 @@ from acas_posting.dictionary import loader, model
 
 pytestmark = pytest.mark.arithmetic
 
+# A SNAPSHOT OF THE IMPORT GRAPH the instant this module finished importing, taken at
+# module scope precisely because it must be taken THEN and not later. R-1's claim is
+# about what THIS TIER pulls in, and the arithmetic tier is the one that "touches
+# neither COBOL nor a database" (Technical Specification section 0.7.2). Live
+# `sys.modules` inside a test body measures something else entirely: the scenario and
+# determinism tiers load a database driver and `harness/*` quite legitimately - section
+# 0.4.3 puts both on the harness side - so whenever one of their tests has already run
+# in the same process, an absolute check on live residency fails for a reason that has
+# nothing to do with this tier. That made the guard below ORDER-DEPENDENT: green in the
+# default alphabetical order and red under `pytest tests/scenarios tests/arithmetic`,
+# which is a property of the run and not of the code under test.
+#
+# The snapshot is safe as well as sufficient: no test module in this suite, and not
+# `tests/conftest.py`, imports a driver, PyYAML or the harness at module scope - every
+# one of them is loaded lazily inside a fixture - so at the moment this module is
+# imported none of the forbidden names can be resident however the files were ordered.
+#
+# `tests/arithmetic/test_comp3_packed_decimal.py` takes the same snapshot for the same
+# reason, and `tests/arithmetic/test_comp_binary.py` demonstrates the stronger form in a
+# FRESH INTERPRETER; between them the tier keeps both readings of the property.
+_MODULES_PRESENT_AT_IMPORT: Final[frozenset[str]] = frozenset(sys.modules)
+
 
 #  THE DEFENSIVE KEY RESOLVER  (R-5)
 #
@@ -2144,10 +2166,19 @@ def test_tier_touches_no_database_and_no_oracle() -> None:
 
     R-2: `numpy` and `pandas` compute in binary floating point by default, which is
     prohibited outright for accounting work, so neither may be present either.
+
+    MEASURED AT THIS MODULE'S IMPORT, NOT AT ITS RUN. `_MODULES_PRESENT_AT_IMPORT` is
+    the snapshot; live `sys.modules` is deliberately NOT consulted. A scenario test that
+    has already run in the same process has legitimately loaded a driver and the
+    harness, so an absolute check on live residency would report THE RUN ORDER as an
+    R-1 violation - which is a false failure, and was one: the guard used to pass under
+    `pytest tests` and fail under `pytest tests/scenarios tests/arithmetic`. What R-1
+    constrains is this tier's own import surface, and that is exactly what the snapshot
+    holds.
     """
     # spec: Technical Specification section 0.7.2 R-1 - "tests/arithmetic/* touch
     #       neither COBOL nor a database"; R-2 excludes pandas and numpy by name.
-    loaded = set(sys.modules)
+    loaded = _MODULES_PRESENT_AT_IMPORT
 
     assert "sqlalchemy" not in loaded
     assert "mysql.connector" not in loaded
@@ -2160,6 +2191,21 @@ def test_tier_touches_no_database_and_no_oracle() -> None:
     assert not any(name.startswith("acas_posting.dal") for name in loaded)
     assert not any(name.startswith("acas_posting.programs") for name in loaded)
     assert not any(name.startswith("acas_posting.cli") for name in loaded)
+
+    # THE SNAPSHOT ITSELF MUST BE REAL. A snapshot taken too early - before this
+    # module's own imports had run - would hold almost nothing and every assertion
+    # above would pass vacuously, which is precisely the failure mode the rest of this
+    # suite is being hardened against.
+    assert "acas_posting.cobol.picture" in loaded, (
+        "the import snapshot does not contain this module's own dependency "
+        "`acas_posting.cobol.picture`, so it was taken before the imports it is "
+        "supposed to describe. Every assertion above would then hold vacuously."
+    )
+    assert "acas_posting.dictionary.loader" in loaded, (
+        "the import snapshot does not contain `acas_posting.dictionary.loader`, which "
+        "this module imports at line 141. The snapshot must be taken AFTER the module "
+        "import block, not before it."
+    )
 
 
 #  GROUP 12  -  THE COMMITTED DICTIONARY AGAINST ITS COMMITTED JSON SCHEMA

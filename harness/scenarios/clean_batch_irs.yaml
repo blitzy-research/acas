@@ -891,3 +891,368 @@ affected_tables:
   - IRSNL-REC
   - IRSPOSTING-REC
   - PSIRSPOST-REC
+
+# =============================================================================
+# THE SEED RECORDS
+# =============================================================================
+# Built into the declared flat files by harness/make_fixtures.py, which generates a
+# COBOL writer per file, compiles it against the FROZEN copybooks and calls the
+# FROZEN handler to write. Field names are spelled exactly as the frozen copybook
+# spells them, with the handler's own REPLACING clauses applied, and the builder
+# reads them from those definitions itself -- so a name this file gets wrong is a
+# refusal and never a silent no-op.
+#
+# EVERY VALUE IS A QUOTED STRING (rule R-2). COBOL's own MOVE performs the store,
+# so the frozen picture clause decides alignment, truncation toward zero and sign
+# placement -- and on this route the sign placement is not incidental: the transfer
+# record's two money fields are `sign leading' DISPLAY
+# [copybooks/wspost-irs.cob:L21], [copybooks/wspost-irs.cob:L25] and the internal
+# posting record's are `sign is leading' [copybooks/irswspost.cob:L14],
+# [copybooks/irswspost.cob:L18]. Two spellings of the same thing, both preserved.
+#
+# A TABLE FIELD IS DECLARED AS A LIST OF at/value ENTRIES, because the IRS defaults
+# record is nothing but a table -- one `Def-Group occurs 33'
+# [copybooks/irswsdflt.cob:L8-L12] -- and the posting section reaches into it by
+# position [irs/irs030.cbl:L1594], [irs/irs030.cbl:L1604]. The builder bounds-checks
+# every index against the OCCURS clause, because writing past a table is the one
+# fixture mistake a read-back would not reveal.
+#
+# WHAT THIS SEED HAS TO ACHIEVE, item by item from THE SEED CONTRACT above. Each is
+# realised by a specific row below and the rows are commented with which:
+#   A. the happy path -- one clean posting whose debit and credit accounts both
+#      exist, without which nothing demonstrates the section working;
+#   B. tax routed to BOTH control accounts, so both arms of the ladder at
+#      [irs/irs030.cbl:L1685-L1699] fire;
+#   C. one posting whose OWN debit account IS a control account, so A-5's LOST
+#      UPDATE manifests: the section snapshots both control accounts BEFORE the loop
+#      [irs/irs030.cbl:L1602], [irs/irs030.cbl:L1612] and rewrites them FROM THOSE
+#      SNAPSHOTS at end of job [irs/irs030.cbl:L1704-L1708], so the in-loop rewrite
+#      of the same account is discarded;
+#   D. one posting whose CREDIT account is ABSENT from the ledger, so A-4's
+#      HALF-POST occurs: the debit is rewritten [irs/irs030.cbl:L1641] before the
+#      credit account is even looked up [irs/irs030.cbl:L1644-L1646], leaving an
+#      unbalanced debit and no posting record at all;
+#   E. one posting whose DATE TEXT fails a component guard, so A-7's internally
+#      inconsistent row lands in the dump: the bridge derives day, month and year by
+#      guarded substring [common/irspostingMT.cbl:L982-L987] and leaves a component
+#      ZERO while still storing the raw text;
+#   F. one posting whose tax-account code is OUTSIDE the four the ladder recognises,
+#      so the missing final branch is exercised -- the amount is accumulated
+#      NOWHERE, which is reproduced behaviour and not a defect to be fixed.
+# NOTHING BELOW IS TIDIED to make the run come out neatly (rule R-4).
+seed_records:
+
+  # Key 1 is the only system row the frozen code reads [common/acas000.cbl].
+  # Next-Post is the counter the section allocates internal posting keys from,
+  # incrementing it per row [irs/irs030.cbl:L1669-L1670], so it is pinned WELL ABOVE
+  # the key seeded into irspost.dat to guarantee no collision -- which the seed
+  # contract requires explicitly.
+  # system.dat IS FOUR DIFFERENT RECORDS IN ONE RELATIVE FILE, keyed by relative
+  # record number -- [copybooks/selsys.cob] declares it ORGANIZATION RELATIVE with
+  # relative key `rrn', and the four system loaders each go straight to one slot:
+  #   "1"  systemLD [common/systemLD.cbl:L227] -> SYSTEM-REC    (the parameter record)
+  #   "2"  dfltLD   [common/dfltLD.cbl:L221]   -> SYSDEFLT-REC  (wsdflt.cob)
+  #   "3"  finalLD  [common/finalLD.cbl:L221]  -> SYSFINAL-REC  (wsfinal.cob)
+  #   "4"  sys4LD   [common/sys4LD.cbl:L226]   -> SYSTOT-REC    (wssys4.cob)
+  # All four are 1024 bytes, which is why one relative file can hold them, and ALL
+  # FOUR MUST BE PRESENT: masterLD runs every one of those loaders unconditionally
+  # [common/masterLD.sh:L50-L88] and the last is tested against zero rather than 63
+  # [common/masterLD.sh:L83-L86], so an unwritten slot ABORTS the seed. A slot with
+  # nothing to pin is declared as {} and written INITIALIZEd -- which is a statement
+  # about the pre-state rather than an omission.
+  system.dat:
+    "1":
+      - System-Record-Version-Prime: "3"
+        System-Record-Version-Secondary: "2"
+        Vat-Rate-1: "20.00"
+        Vat-Rate-2: "5.00"
+        Vat-Rate-3: "0.00"
+        Cyclea: "1"
+        Period: "1"
+        Run-Date: "155127"
+        File-System-Used: "1"
+        Date-Form: "1"
+        IRS-Instead: " "
+        SL-Autogen: " "
+        PL-Autogen: " "
+        S-Flag-P: "2"
+        P-Flag-P: "2"
+        Pass-Value: "0"
+        IRS-Pass-Value: "0"
+        Level-1: "1"
+        Level-2: "1"
+        Level-3: "1"
+        Level-4: "1"
+        Next-Post: "100"
+        Current-Quarter: "1"
+        Page-Lines: "60"
+
+    # Nothing to pin: the GL defaults record. Written INITIALIZEd so the slot EXISTS
+    # for dfltLD to read. Note this is NOT the IRS defaults record -- the copybook
+    # says so itself, its account field being COMP here and DISPLAY there
+    # [copybooks/wsdflt.cob:L6-L7].
+    "2": {}
+    # Nothing to pin: the GL final-accounts record, a pure table of 26 headings
+    # [copybooks/wsfinal.cob:L11]. Written INITIALIZEd so the SLOT EXISTS for finalLD
+    # to read -- and MEASURED consequence, recorded here rather than left to be
+    # rediscovered: INITIALIZE sets an alphanumeric table to spaces, so finalLD's own
+    # test `if Final-Record = spaces' [common/finalLD.cbl:L243] is TRUE and it takes
+    # its "No Data - aborting Terminating nothing to do" path, returning zero and
+    # loading NOTHING. SYSFINAL-REC therefore stays empty, which is precisely the
+    # pre-state this scenario wants: the table is not among affected_tables and no
+    # in-scope program writes it. The slot is still declared, because a slot that does
+    # not exist at all is a read failure rather than a defined empty pre-state.
+    "3": {}
+    # The period-totals record. Written INITIALIZEd: no operation on this route
+    # writes a period total -- all nine sites are in the Sales and Purchase programs
+    # -- so a zero pre-state is the honest one here, and the slot must still exist
+    # for sys4LD to read.
+    "4": {}
+  # SIX accounts, and the SEVENTH IS DELIBERATELY MISSING. Every read on this route
+  # moves zero into the sub-nominal before reading [irs/irs030.cbl:L1595],
+  # [irs/irs030.cbl:L1605], [irs/irs030.cbl:L1627], [irs/irs030.cbl:L1645], so every
+  # account below is seeded at sub-nominal zero and NL-Type "O" makes Owner true
+  # [copybooks/irswsnl.cob:L12-L14].
+  #   01000  bank            debit side of the clean posting
+  #   02000  sales revenue   credit side of the clean posting
+  #   03000  purchases       a second pair, so more than one account moves
+  #   04000  office costs    the debit side of the A-4 posting, which DOES move
+  #   07100  input tax       named by default 31 -- MUST exist or the run aborts
+  #                          having written nothing [irs/irs030.cbl:L1596-L1601]
+  #   07200  output tax      named by default 32 -- same [irs/irs030.cbl:L1606-L1611]
+  # 09999 IS ABSENT ON PURPOSE. It is the credit account of the A-4 posting, and its
+  # absence is what makes the half-post happen. DO NOT ADD IT.
+  # Opening accumulators are NON-ZERO so that an accumulation is distinguishable
+  # from a fresh insert, and 07100 additionally carries a non-zero debit so that
+  # A-5's discarded in-loop rewrite is visible as a value that did NOT move.
+  irsacnts.dat:
+    - NL-Owning: "1000"
+      NL-Sub-Nominal: "0"
+      NL-Type: "O"
+      NL-Name: "Bank current account"
+      NL-DR: "4321.09"
+      NL-CR: "1111.11"
+      NL-AC: " "
+    - NL-Owning: "2000"
+      NL-Sub-Nominal: "0"
+      NL-Type: "O"
+      NL-Name: "Sales revenue"
+      NL-DR: "222.22"
+      NL-CR: "8765.43"
+      NL-AC: " "
+    - NL-Owning: "3000"
+      NL-Sub-Nominal: "0"
+      NL-Type: "O"
+      NL-Name: "Purchases"
+      NL-DR: "5678.90"
+      NL-CR: "333.33"
+      NL-AC: " "
+    - NL-Owning: "4000"
+      NL-Sub-Nominal: "0"
+      NL-Type: "O"
+      NL-Name: "Office costs"
+      NL-DR: "777.01"
+      NL-CR: "0.00"
+      NL-AC: " "
+    - NL-Owning: "7100"
+      NL-Sub-Nominal: "0"
+      NL-Type: "O"
+      NL-Name: "Input tax control"
+      NL-DR: "1234.56"
+      NL-CR: "0.00"
+      NL-AC: " "
+    - NL-Owning: "7200"
+      NL-Sub-Nominal: "0"
+      NL-Type: "O"
+      NL-Name: "Output tax control"
+      NL-DR: "0.00"
+      NL-CR: "2345.67"
+      NL-AC: " "
+
+  # ONE defaults record holding the whole 33-entry table. Only the entries this
+  # route reads are declared; the rest are left as INITIALIZE left them, which is
+  # zero and space -- the same state the frozen loaders produce for an unset field,
+  # and the reason every column of the frozen schema can be NOT NULL.
+  # ENTRIES 31 AND 32 ARE THE LOAD-BEARING ONES and both name accounts that EXIST in
+  # irsacnts.dat above. If either did not, the run would leave through a guard having
+  # written nothing and the scenario would degenerate into a comparison of two empty
+  # outcomes -- a false pass, not a failure.
+  irsdflt.dat:
+    - Def-Acs:
+        - at: "1"
+          value: "1000"
+        - at: "2"
+          value: "2000"
+        - at: "3"
+          value: "3000"
+        - at: "31"
+          value: "7100"
+        - at: "32"
+          value: "7200"
+      Def-Codes:
+        - at: "1"
+          value: "BK"
+        - at: "2"
+          value: "SA"
+        - at: "3"
+          value: "PU"
+        - at: "31"
+          value: "VI"
+        - at: "32"
+          value: "VO"
+      Def-Vat:
+        - at: "1"
+          value: "N"
+        - at: "2"
+          value: "O"
+        - at: "3"
+          value: "O"
+        - at: "31"
+          value: "N"
+        - at: "32"
+          value: "N"
+
+  # ONE final-accounts record, so the pre-state of every IRS table is DEFINED rather
+  # than accidental. This table is deliberately NOT in affected_tables and is not
+  # dumped -- see WHY IRSFINAL-REC IS ABSENT above -- but seeding it is still part of
+  # the contract, because an undefined pre-state is a difference waiting to happen.
+  irsfinal.dat:
+    - ar1-1: "Sales"
+      ar1-2: "Cost of sales"
+      ar1-3: "Gross profit"
+      ar1-4: "Office costs"
+      ar1-5: "Net profit"
+      ar2-1: "1"
+      ar2-2: "2"
+      ar2-3: "3"
+      ar2-4: "4"
+      ar2-5: "5"
+      ar3: "5"
+
+  # ONE pre-existing internal posting, at a key WELL BELOW the counter the run
+  # allocates from, so it cannot collide with anything the run writes. Its presence
+  # is what turns the IRSPOSTING-REC comparison into growth from a KNOWN BASE rather
+  # than growth from nothing. Its date text is well formed, so its three derived
+  # components are all non-zero -- which is what makes row E's zeroed component
+  # legible as a difference rather than as the table's normal state.
+  irspost.dat:
+    - Post-Key: "1"
+      Post-Code: "OB"
+      Post-Date: "01/09/25"
+      Post-DR: "1000"
+      Post-CR: "2000"
+      Post-Amount: "500.00"
+      Post-Legend: "Opening internal posting"
+      Vat-AC-Def: "0"
+      Post-Vat-Side: "  "
+      Vat-Amount: "0.00"
+
+  # THE HEART OF THE FIXTURE. Six transfer records, one per lettered requirement
+  # above. The key is WS-IRS-Batch plus WS-IRS-Post-Number
+  # [copybooks/wspost-irs.cob:L14-L16]; the file is SEQUENTIAL, so the order below is
+  # the order the section walks them in, and the order matters because A-5's lost
+  # update depends on row C being processed BEFORE the end-of-job snapshot rewrite.
+  # THE TWO TAX FORMULATIONS ARE BOTH REPRESENTED: rows A and C carry tax computed
+  # FROM NET at one fifth of the amount, and rows B and E carry tax computed FROM
+  # GROSS at one sixth -- the two rounded computes at [irs/irs030.cbl:L1551] and
+  # [irs/irs030.cbl:L1562]. Amounts carry non-zero pence throughout so a truncation
+  # has something to discard.
+  postings2irs.dat:
+    # A -- THE HAPPY PATH. Both accounts exist; tax routes to control 31 on the
+    # credit side, so it is folded into the DEBIT accumulator
+    # [irs/irs030.cbl:L1636-L1637] and accumulated into the 31 snapshot
+    # [irs/irs030.cbl:L1686-L1688].
+    - WS-IRS-Batch: "1"
+      WS-IRS-Post-Number: "1"
+      WS-IRS-Post-Code: "SI"
+      WS-IRS-Post-Date: "21/09/25"
+      WS-IRS-Post-DR: "1000"
+      WS-IRS-Post-CR: "2000"
+      WS-IRS-Post-Amount: "1234.57"
+      WS-IRS-Post-Legend: "A clean balanced posting"
+      WS-IRS-Vat-AC-Def: "31"
+      WS-IRS-Post-Vat-Side: "CR"
+      WS-IRS-Vat-Amount: "246.91"
+    # B -- THE OTHER CONTROL ACCOUNT, and the other tax side. Code 32 with side DR
+    # takes the third arm of the ladder [irs/irs030.cbl:L1693-L1695] and folds the
+    # tax into the CREDIT accumulator [irs/irs030.cbl:L1649-L1650].
+    - WS-IRS-Batch: "1"
+      WS-IRS-Post-Number: "2"
+      WS-IRS-Post-Code: "PI"
+      WS-IRS-Post-Date: "21/09/25"
+      WS-IRS-Post-DR: "3000"
+      WS-IRS-Post-CR: "1000"
+      WS-IRS-Post-Amount: "876.55"
+      WS-IRS-Post-Legend: "Purchase to the other control"
+      WS-IRS-Vat-AC-Def: "32"
+      WS-IRS-Post-Vat-Side: "DR"
+      WS-IRS-Vat-Amount: "146.09"
+    # C -- A-5, THE LOST UPDATE. Its DEBIT ACCOUNT IS 7100, WHICH IS CONTROL 31.
+    # The section rewrites 7100 in the loop [irs/irs030.cbl:L1641] and then rewrites
+    # it AGAIN at end of job from the snapshot it took BEFORE the loop
+    # [irs/irs030.cbl:L1602], [irs/irs030.cbl:L1704-L1705] -- so this row's debit is
+    # DISCARDED while its tax, which went into the snapshot, survives. That is the
+    # anomaly, it is reproduced and never repaired, and this row is what proves it.
+    - WS-IRS-Batch: "1"
+      WS-IRS-Post-Number: "3"
+      WS-IRS-Post-Code: "SI"
+      WS-IRS-Post-Date: "21/09/25"
+      WS-IRS-Post-DR: "7100"
+      WS-IRS-Post-CR: "2000"
+      WS-IRS-Post-Amount: "333.37"
+      WS-IRS-Post-Legend: "Debit lands on control 31"
+      WS-IRS-Vat-AC-Def: "31"
+      WS-IRS-Post-Vat-Side: "CR"
+      WS-IRS-Vat-Amount: "66.67"
+    # D -- A-4, THE HALF-POST. Its CREDIT ACCOUNT 9999 IS ABSENT from irsacnts.dat,
+    # ON PURPOSE. The debit to 4000 is rewritten first, then the credit lookup fails
+    # and the section jumps back to the loop [irs/irs030.cbl:L1644-L1652] -- so this
+    # row leaves an UNBALANCED DEBIT and writes NO posting record at all. Adding 9999
+    # to the ledger would delete this anomaly from the scenario.
+    - WS-IRS-Batch: "1"
+      WS-IRS-Post-Number: "4"
+      WS-IRS-Post-Code: "PI"
+      WS-IRS-Post-Date: "21/09/25"
+      WS-IRS-Post-DR: "4000"
+      WS-IRS-Post-CR: "9999"
+      WS-IRS-Post-Amount: "99.99"
+      WS-IRS-Post-Legend: "Credit account does not exist"
+      WS-IRS-Vat-AC-Def: "0"
+      WS-IRS-Post-Vat-Side: "  "
+      WS-IRS-Vat-Amount: "0.00"
+    # E -- A-7, THE INCONSISTENT ROW. The DAY POSITION OF THE DATE TEXT IS NOT
+    # NUMERIC, so the bridge's first guard fails and the derived day column stays
+    # ZERO while the raw text is still stored [common/irspostingMT.cbl:L982-L984].
+    # The month and year positions ARE numeric, so those two components are derived
+    # normally -- which is what makes the row internally inconsistent rather than
+    # merely empty. The date is a TEXT field [copybooks/wspost-irs.cob:L18], so this
+    # needs no byte-exact escape hatch: it is simply what the field holds.
+    - WS-IRS-Batch: "1"
+      WS-IRS-Post-Number: "5"
+      WS-IRS-Post-Code: "SI"
+      WS-IRS-Post-Date: "XX/09/25"
+      WS-IRS-Post-DR: "1000"
+      WS-IRS-Post-CR: "2000"
+      WS-IRS-Post-Amount: "555.53"
+      WS-IRS-Post-Legend: "Day position is not numeric"
+      WS-IRS-Vat-AC-Def: "32"
+      WS-IRS-Post-Vat-Side: "CR"
+      WS-IRS-Vat-Amount: "92.59"
+    # F -- THE LADDER'S MISSING FINAL BRANCH. Tax-account code 33 is neither zero nor
+    # 31 nor 32, so it passes the zero test at [irs/irs030.cbl:L1682-L1683] and then
+    # falls off the end of the four-arm ladder [irs/irs030.cbl:L1685-L1699] WITHOUT
+    # BEING ACCUMULATED ANYWHERE. The tax simply vanishes. That is reproduced
+    # behaviour, not a defect to repair, and it is seeded so the reproduction is
+    # observable. Thirty-three is a real position of the defaults table, which was
+    # extended from 32 to 33 for exactly this route [copybooks/irswsdflt.cob:L7].
+    - WS-IRS-Batch: "1"
+      WS-IRS-Post-Number: "6"
+      WS-IRS-Post-Code: "SI"
+      WS-IRS-Post-Date: "21/09/25"
+      WS-IRS-Post-DR: "1000"
+      WS-IRS-Post-CR: "3000"
+      WS-IRS-Post-Amount: "77.77"
+      WS-IRS-Post-Legend: "Tax code outside the ladder"
+      WS-IRS-Vat-AC-Def: "33"
+      WS-IRS-Post-Vat-Side: "CR"
+      WS-IRS-Vat-Amount: "15.55"

@@ -430,6 +430,12 @@ from acas_posting.cobol import arithmetic
 # Compose stack. Nothing here re-registers it, and this file adds no `pytest.ini` and no
 # `markers =` of its own. Selectable as `pytest -m determinism` and
 # `pytest -m "scenario or determinism"`.
+# The TIER mark, applied to the whole module because every test in it belongs to the
+# tier. THE INFRASTRUCTURE MARKS ARE NOT HERE: `database` and `oracle` are declared per
+# test, on exactly the tests whose fixture closure reaches the harness stack, because
+# several tests in this file read only files on disk and pass on a bare host. A module
+# mark would claim they need a MariaDB and a built oracle, and `-m database` would then
+# select tests that require neither.
 pytestmark = pytest.mark.determinism
 
 
@@ -1222,6 +1228,46 @@ def determinism_pair(
     )
 
     # ------------------------------------------------------------------
+    #  LAYER 2a - THE PAIR REACHED THE SCENARIO'S DECLARED DISPOSITION AT ALL.
+    #
+    #  `run_status` was RECORDED by `_execute_run` and, until this guard existed, never
+    #  READ - it appeared only inside other layers' failure messages. That left a THIRD
+    #  way for this file to pass vacuously, beside the two empty dumps layer 2 rules
+    #  out: TWO RUNS THAT BOTH REFUSED are byte-identical too, and layer 2 cannot catch
+    #  them, because the SEEDED rows are counted either way.
+    #
+    #  ONLY RUN A IS CHECKED HERE, and the bound is deliberate. Run A is the reference
+    #  run: if IT did not reach the declared disposition then this pair was never driven
+    #  as the scenario describes, which is a SETUP failure like every other guard in
+    #  this fixture and reads as a pytest ERROR. Whether RUN B agrees with run A is the
+    #  determinism property itself, so it is asserted in the test BODY, where a
+    #  divergence reads as a FAILURE attributable to the migrated cycle - see
+    #  comparison 0 of `test_two_python_runs_are_byte_identical`.
+    #
+    #  Checking both runs here instead would make that body assertion DEAD: the implied
+    #  status is a single value, so any divergence between the two runs necessarily
+    #  means one of them missed it, and this guard would always fire first. A guard that
+    #  makes another assertion unreachable is the vacuity problem wearing a different
+    #  hat.
+    # ------------------------------------------------------------------
+    declared_status = definition.get("expected_status")
+    implied_status = 0
+    if isinstance(declared_status, list):
+        implied_status = next(
+            (int(v) for v in declared_status if int(v) != 0), 0
+        )
+    elif isinstance(declared_status, int):
+        implied_status = int(declared_status)
+    assert first.run_status == implied_status, (
+        f"{RUN_LABELS[0]} of {scenario} exited {first.run_status} where the scenario "
+        f"declares {declared_status!r}, implying {implied_status}.\n"
+        f"  A run that did not reach the declared disposition wrote nothing this "
+        f"comparison is about, and TWO such runs are byte-identical: layer 2 below "
+        f"cannot tell them apart from two runs that posted, because the seeded rows "
+        f"are counted either way."
+    )
+
+    # ------------------------------------------------------------------
     #  LAYER 2 - CONTENT NON-VACUITY. Two EMPTY dumps are also byte-identical.
     # ------------------------------------------------------------------
     assert first.total_rows > 0, (
@@ -1326,6 +1372,8 @@ def determinism_pair(
 @pytest.mark.parametrize(
     "determinism_pair", DETERMINISM_SCENARIOS, indirect=True, ids=DETERMINISM_SCENARIOS
 )
+@pytest.mark.database
+@pytest.mark.oracle
 def test_two_python_runs_are_byte_identical(
     determinism_pair: DeterminismEvidence,
 ) -> None:
@@ -1366,6 +1414,29 @@ def test_two_python_runs_are_byte_identical(
         determinism_pair: Two completed runs, guarded and compared.
     """
     evidence = determinism_pair
+
+    # ------------------------------------------------------------------
+    #  COMPARISON 0 - THE TWO EXIT STATUSES, BEFORE THE DUMPS. Both stages are
+    #  `run_python`, so a disagreement between them is nondeterminism in the migrated
+    #  cycle - the very property under test - and it is asserted HERE, in a body, so
+    #  that it reads as a FAILURE rather than as the setup ERROR the fixture's layer-2a
+    #  guard raises for a pair that agreed on the WRONG status. A cycle whose exit
+    #  status varies between two identical runs is non-deterministic even if its dumps
+    #  happen to match.
+    # ------------------------------------------------------------------
+    assert evidence.first.run_status == evidence.second.run_status, (
+        f"THE PYTHON POSTING CYCLE IS NOT DETERMINISTIC: two runs of scenario "
+        f"{evidence.scenario!r} under the identical pinned clock exited "
+        f"DIFFERENTLY - {RUN_LABELS[0]} {evidence.first.run_status}, "
+        f"{RUN_LABELS[1]} {evidence.second.run_status}.\n"
+        f"  THE COBOL ORACLE WAS NOT EXECUTED: both stages are the migrated Python "
+        f"cycle (R-1), started from the same re-seeded state and handed the same "
+        f"pinned pair (to-day={evidence.pin.to_day!r}, "
+        f"Run-Date={evidence.pin.run_date}), so the difference is in the migrated "
+        f"code and nowhere else. Two runs that took different exit paths are not two "
+        f"runs of the same thing, so the dumps below are not evidence until this "
+        f"holds."
+    )
 
     # ------------------------------------------------------------------
     #  COMPARISON 1 - STRUCTURAL. `TreeDiff.is_empty` is the pass condition.

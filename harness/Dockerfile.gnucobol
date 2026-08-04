@@ -649,19 +649,34 @@ RUN set -eu; \
 #      /out    dumps, normalised dumps and diff evidence.
 #  /build/bin exists so that ACAS_BIN resolves; see the environment block.
 #
-#  THESE ARE EMPTY MOUNT POINTS, AND /build IS EMPTY UNTIL build_oracle.sh RUNS.
-#  This layer creates the four directories and nothing else. It deliberately does
-#  NOT pre-populate /build with a copy of the tree: the copy is made at run time
-#  from the read-only mount, so that what gets compiled is the checkout the
-#  operator actually mounted rather than whatever was baked into the image (R-6 --
-#  the arbiter must correspond to the commit under test, not to the build date).
+#  THESE MOUNT POINTS CARRY NO DATA, AND /build CARRIES NO FILE UNTIL
+#  build_oracle.sh RUNS. This layer creates the four directories, plus the one
+#  nested directory `/build/bin', and nothing else -- not one regular file. It
+#  deliberately does NOT pre-populate /build with a copy of the tree: the copy is
+#  made at run time from the read-only mount, so that what gets compiled is the
+#  checkout the operator actually mounted rather than whatever was baked into the
+#  image (R-6 -- the arbiter must correspond to the commit under test, not to the
+#  build date).
+#
+#  BE PRECISE ABOUT `bin'. Because this layer creates /build/bin, Docker seeds a
+#  fresh named volume from a layer in which /build is NOT strictly empty -- it
+#  holds one empty directory. That distinction is load-bearing for
+#  `build_oracle.sh': its clearable-build-tree guard admits an empty tree, a tree
+#  of directories only (which is exactly what this layer hands over, and which by
+#  construction contains no data), or a tree it previously marked as its own. An
+#  earlier form of that guard tested only for strict emptiness and consequently
+#  refused every first run on a genuinely fresh stack. Either half of the pair may
+#  be changed -- this layer may stop creating `bin', or the guard may keep
+#  admitting a directories-only tree -- but a change that leaves the guard
+#  demanding strict emptiness while this layer creates a subdirectory reinstates
+#  that failure, so the two must be read together.
 #
 #  ONE CONSEQUENCE MUST BE STATED HERE, BECAUSE IT IS EASY TO GET WRONG. WORKDIR
 #  is /build, so a RELATIVE invocation such as
 #      docker compose run --rm -T gnucobol harness/build_oracle.sh
 #  resolves to /build/harness/build_oracle.sh -- which does not exist on a fresh
-#  stack, nor after `docker compose down -v`, because /build is an empty named
-#  volume until the bootstrap copies the tree into it. The very first command of
+#  stack, nor after `docker compose down -v`, because /build holds no harness
+#  script until the bootstrap copies the tree into it. The very first command of
 #  the protocol would fail with a file-not-found, before any script could explain
 #  why. EVERY harness script is therefore invoked BY ABSOLUTE PATH from the
 #  read-only mount, `/repo/harness/<script>`, and the canonical invocations in
