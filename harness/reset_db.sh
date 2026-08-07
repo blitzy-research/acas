@@ -3,7 +3,8 @@
 # re-apply the frozen mysql/ACASDB.sql VERBATIM, and re-seed through
 # harness/seed.sh. Run `--help' for the options, the gates and the exit codes.
 #
-#     seed -> run(COBOL) -> dump -> normalize -> RESET -> run(Python) -> dump -> diff
+#     seed -> run(COBOL) -> dump -> normalise -> RE-SEED -> run(Python) -> dump
+#     -> normalise -> verify published -> diff
 #
 # Both cycles must start from byte-for-byte the same seeded state, because the
 # acceptance condition is an EMPTY diff between the two dumps. An inexact reset
@@ -60,8 +61,23 @@ readonly EX_FIXTURE=91        # the re-seed did not reuse the scenario's staged 
 # This script streams 33 `DROP TABLE IF EXISTS` + 33 `CREATE TABLE` pairs at
 # whatever server the environment names.
 readonly ACAS_RESET_REQUIRED_SCHEMA='ACASDB'
-readonly ACAS_RESET_SENTINEL_SCHEMA='acas_harness_disposable'
-readonly ACAS_RESET_SENTINEL_TABLE='disposability_marker'
+# THE DISPOSABILITY MARKER IS A SERVER SETTING, NOT A SCHEMA (finding F-43).
+# It used to be `acas_harness_disposable.disposability_marker', a table created by
+# harness/Dockerfile.mariadb with CREATE DATABASE, CREATE TABLE and INSERT -- and
+# this script REQUIRED it, which made that DDL load-bearing. Rule R-3 admits no
+# added DDL of any kind, so the proof is now `report_host', a MariaDB variable
+# settable only from a configuration file inside the image. Same property, no
+# schema: a stock MariaDB leaves it EMPTY, so the marker can only be seen on a
+# server started from the harness image, and this server is nobody's replica so the
+# variable has no other effect.
+#
+# MEASURED (rule R-6): `version_comment' was the first choice and mariadbd 10.11.7
+# REFUSES IT in an option file -- "unknown variable 'version_comment=...'" -- and
+# will not start, so that marker could never be read at all. `report_host' was
+# accepted on the same probe. The image now proves its own option file startable at
+# BUILD time, so this variable and that file cannot drift apart again.
+readonly ACAS_RESET_DISPOSABLE_MARKER='ACAS-harness-disposable-oracle'
+readonly ACAS_RESET_DISPOSABLE_VARIABLE='report_host'
 readonly -a ACAS_RESET_CANONICAL_HOSTS=(mariadb 127.0.0.1 localhost ::1)
 
 # The scenario-fixture marker harness/seed.sh writes when it stages a
@@ -267,6 +283,8 @@ ACAS_RESET_DATA_DIR=''           # --data-dir, forwarded verbatim to seed.sh
 ACAS_RESET_SEED_DIR=''           # --seed-dir, forwarded verbatim to seed.sh. It says
                                  # WHERE the scenario's declared flat files live, never
                                  # WHICH are required -- see harness/seed.sh --help.
+                                 # DEFAULTED when a scenario is named and the option is
+                                 # not -- see acas_resolve_fixture_root.
 ACAS_RESET_DRY_RUN=0             # --dry-run
 ACAS_RESET_SCENARIO=''           # optional positional scenario file
 ACAS_RESET_LOG=''                # $ACAS_OUT/reset/reset.log
@@ -313,6 +331,12 @@ ACAS_RESET_TARGET_AUTHORISED=0   # 1 once all three destructive gates passed
 ACAS_RESET_SCHEMA_LITERAL=''     # the schema as a safe SQL literal, incl. quotes
 ACAS_RESET_ACKNOWLEDGE=''        # --acknowledge-destructive: the named target
 ACAS_RESET_ACK_USED=0            # 1 once an acknowledgement has been honoured
+ACAS_RESET_FIXTURE_DIGEST=''     # sha256 of the staged fixture marker (F-22)
+# The parity attempt this reset belongs to, so the two reset stages of ONE attempt can
+# be required to have seeded identical bytes while a LATER attempt is free to seed
+# something else (F-22, F-37). Empty for a hand invocation, which is not part of an
+# attempt and therefore binds nothing.
+ACAS_RESET_RUN_ID="${ACAS_PARITY_RUN_ID:-}"
 declare -a ACAS_RESET_GATE_PROBLEMS=()  # destructive-gate failures, reported together
 declare -a ACAS_RESET_TLS_VARIANTS=()   # permitted client transports, most secure first
 ACAS_SQL_OUT=''                  # last successful query result
@@ -486,6 +510,103 @@ with open(sys.argv[1], 'rb') as handle:
         digest.update(block)
 sys.stdout.write(digest.hexdigest())
 PY
+}
+
+# acas_file_sha256 <path>
+#   The digest of one file, printed bare, for a value this script PUBLISHES rather
+#   than merely reports: the staged fixture marker's digest is what binds both
+#   cycles to the same seeded bytes (finding F-22). Unlike acas_diag_sha256 this one
+#   FAILS when it cannot produce a digest, because a missing digest here would
+#   silently remove the binding rather than degrade a diagnostic.
+# ⭐ EVERY EVIDENCE LEAF IS PUBLISHED BY RENAME, NEVER BY REDIRECTION (finding F-26)
+#
+# acas_create_private_file above closes the CREATE race: it refuses a symlink and
+# creates under `set -C', which is O_EXCL. It does not close the WRITE race, and the
+# write is where the evidence actually appears. Every artifact this script publishes
+# -- the run-status record, the per-operation dispositions, the seed fingerprint --
+# used to be written with a plain `>' redirection into a path that had been checked
+# for a symlink EARLIER. Between the check and the write, the name can be replaced;
+# `>' follows a symlink and truncates whatever it points at (CWE-59), and a reader
+# arriving mid-write sees a TRUNCATED record, which for an attestation file means a
+# capture is either unattested or attested by half a record.
+#
+# So content is written into a private temporary file in the SAME DIRECTORY -- same
+# filesystem, so the rename cannot fail with EXDEV -- and then renamed over the
+# target. `mv' is rename(2): the target either holds the whole previous content or
+# the whole new content, never a mixture, and renaming ONTO a symlink replaces the
+# LINK rather than writing through it.
+#
+# Reads content from STDIN, so the caller composes the record in one place:
+#     { printf ...; printf ...; } | acas_publish_atomic "$target" 'the run status'
+#
+# NEVER dies. Every caller is either the EXIT trap or a final-report step, where an
+# abort would replace a real verdict with a plumbing failure; it warns and returns
+# non-zero so the caller can say plainly that the artifact is missing -- and a
+# missing attestation is read downstream as UNATTESTED, which is the safe direction.
+acas_publish_atomic() {
+  local target="$1" what="${2:-an evidence artifact}"
+  local dir base tmp
+
+  if [[ -z "$target" ]]; then
+    printf 'WARNING: %s has no resolved path, so it was not published.\n' "$what" >&2
+    return 1
+  fi
+
+  dir="${target%/*}"
+  [[ "$dir" != "$target" ]] || dir='.'
+  base="${target##*/}"
+  tmp="$dir/.$base.tmp.$$"
+
+  if [[ ! -d "$dir" ]]; then
+    printf 'WARNING: the directory for %s does not exist: %s\n' "$what" "$dir" >&2
+    return 1
+  fi
+
+  # A leftover temporary from a killed run is removed by name; it is ours, it is
+  # inside a 0700 directory, and it is not the target.
+  [[ -e "$tmp" || -L "$tmp" ]] && rm -f -- "$tmp" 2>/dev/null
+
+  # O_EXCL: refuses an existing name, including a symlink, rather than following it.
+  if ! (set -C; : >"$tmp") 2>/dev/null; then
+    printf 'WARNING: could not create a private temporary for %s at %s\n' "$what" "$tmp" >&2
+    return 1
+  fi
+  chmod 600 -- "$tmp" 2>/dev/null || true
+
+  if ! cat >"$tmp" 2>/dev/null; then
+    printf 'WARNING: could not write %s into %s\n' "$what" "$tmp" >&2
+    rm -f -- "$tmp" 2>/dev/null || true
+    return 1
+  fi
+
+  if ! mv -f -- "$tmp" "$target" 2>/dev/null; then
+    printf 'WARNING: could not publish %s to %s\n' "$what" "$target" >&2
+    rm -f -- "$tmp" 2>/dev/null || true
+    return 1
+  fi
+  return 0
+}
+
+
+acas_file_sha256() {
+  local path="$1" digest=''
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    digest="$(sha256sum -- "$path")" || return 1
+    printf '%s' "${digest%% *}"
+    return 0
+  fi
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "$path" <<'DIGEST'
+import hashlib
+import sys
+
+digest = hashlib.sha256()
+with open(sys.argv[1], 'rb') as handle:
+    for block in iter(lambda: handle.read(1 << 16), b''):
+        digest.update(block)
+sys.stdout.write(digest.hexdigest())
+DIGEST
 }
 
 # acas_diag_persist <raw>
@@ -747,6 +868,70 @@ acas_list_or_none() {
   acas_join_words "$@"
 }
 
+# ---------------------------------------------------------------------------
+#  THE TARGET, DESCRIBED WITHOUT NAMING IT (finding F-39)
+#
+#  This script's transcripts are retained evidence: they are read by operators,
+#  attached to reports and, on the Python side, replayed to a container log. A line
+#  reading `acas@mariadb:3306/ACASDB` puts the deployment's topology and the database
+#  ACCOUNT NAME into all of that, which is half of a credential and a map of the
+#  network for anybody who reads it (CWE-532). Nothing downstream needs the names:
+#  what a reader needs is WHICH KIND of target this was, and whether two runs used
+#  the SAME one.
+#
+#  So the transcript carries a CATEGORY and a stable FINGERPRINT. The category is
+#  derived from the host alone and is the same vocabulary
+#  `acas_posting/dal/connection.py` uses. The fingerprint is the first twelve hex
+#  digits of a SHA-256 over `host:port/schema` - never the password and never the
+#  account name, neither of which is in the digest at all - so two runs against one
+#  target print the same value and a run against a different target prints a
+#  different one, while the value itself discloses no name. The full values remain in the environment, where the tools that
+#  need them read them.
+# ---------------------------------------------------------------------------
+acas_target_category() {
+  local host="${ACAS_DB_HOST-}" socket="${ACAS_DB_SOCKET-}"
+
+  if [[ -n "$socket" && "$socket" != '0' && "$socket" != 'null' && "$socket" != 'NULL' ]]; then
+    printf 'local-socket'
+    return 0
+  fi
+  case "${host,,}" in
+    ''|localhost|127.0.0.1|::1|'[::1]') printf 'loopback-tcp' ;;
+    mariadb|mysql|db)                   printf 'container-network' ;;
+    *)                                  printf 'network-tcp' ;;
+  esac
+}
+
+acas_target_fingerprint() {
+  local raw digest
+
+  # The ACCOUNT IS DELIBERATELY NOT IN THE DIGEST. Two reasons, both load-bearing.
+  # The digest identifies the TARGET, so harness/seed.sh (which connects as the
+  # application account) and harness/reset_db.sh (which connects as the admin
+  # account) print the SAME fingerprint for the same database -- which is exactly
+  # what makes two transcripts comparable. And an account name that is never an
+  # input can never be recovered from the output, not even by a reader who can
+  # enumerate candidate names.
+  raw="${ACAS_DB_HOST-}:${ACAS_DB_PORT-}/${ACAS_DB_NAME-}"
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    digest="$(printf '%s' "$raw" | sha256sum 2>/dev/null)" || digest=''
+  elif command -v python3 >/dev/null 2>&1; then
+    digest="$(printf '%s' "$raw" | python3 -c 'import hashlib,sys; sys.stdout.write(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())' 2>/dev/null)" || digest=''
+  else
+    digest=''
+  fi
+  digest="${digest%% *}"
+  printf '%s' "${digest:0:12}"
+}
+
+# The one line every stage prints instead of the topology: a category, a
+# fingerprint, and nothing that names anything.
+acas_target_description() {
+  printf '%s target#%s' \
+    "$(acas_target_category)" "$(acas_target_fingerprint)"
+}
+
 # Membership test over elements passed by value, so the arrays stay readonly.
 acas_in_list() {
   local needle="$1"
@@ -902,9 +1087,11 @@ acas_usage() {
   cat <<'USAGE'
 harness/reset_db.sh -- drop, re-apply the frozen ACASDB schema verbatim, re-seed.
 
-Stage 5 of the eight-stage parity protocol:
+Stages 1 and 5 of the TEN-stage parity protocol. The canonical stage list is
+harness/parity_stages.sh; print it with `harness/run_parity.sh --print-stages'.
 
-    seed -> run(COBOL) -> dump -> normalize -> RESET -> run(Python) -> dump -> diff
+    seed -> run(COBOL) -> dump -> normalise -> RE-SEED -> run(Python) -> dump
+    -> normalise -> verify published -> diff
 
 Both cycles must start from byte-for-byte the same seeded state, or the diff they
 produce means nothing. This script restores that state:
@@ -984,13 +1171,20 @@ Options:
   --seed-dir PATH     Where the scenario's declared flat files live, forwarded
                       verbatim to harness/seed.sh. It says WHERE, never WHICH: the
                       scenario's own seed_files list remains the sole authority on
-                      what is required. Needed because a scenario's seed_dir resolves
-                      relative to the scenario file, which sits in the READ-ONLY
-                      checkout, so a built fixture cannot live there.
-                      harness/build_fixtures.sh builds every scenario's fixtures from
-                      the seed_records each one declares. Reachable from here and not
-                      only from seed.sh because the ten-stage protocol seeds through
-                      this script -- harness/run_parity.sh stages 1 and 5 are both
+                      what is required.
+                      DEFAULTED, and rarely needed: with a scenario named and this
+                      option omitted, it resolves to the CANONICAL FIXTURE ROOT --
+                      $ACAS_FIXTURES if set, otherwise $ACAS_DATA/fixtures -- plus the
+                      scenario name, which is exactly where harness/build_fixtures.sh
+                      writes. Pass it only for a fixture built somewhere else.
+                      A default is necessary rather than convenient: a scenario's own
+                      seed_dir resolves relative to the scenario file, which sits in
+                      the READ-ONLY checkout, so a built fixture can never live there,
+                      and an omission used to fail only AFTER all 33 tables had been
+                      dropped and re-applied.
+                      Reachable from here and not only from seed.sh because the
+                      ten-stage protocol seeds through this script --
+                      harness/run_parity.sh stages 1 and 5 are both
                       reset_db.sh <scenario>.
   --dry-run           Print the plan -- the file to be applied, its asserted
                       invariants, the verification queries and the seed command
@@ -1011,12 +1205,15 @@ Disposability -- what this script demands before it destroys anything:
     1. ACAS_DB_NAME is exactly ACASDB -- the only schema the frozen dump defines.
     2. ACAS_DB_HOST is one this harness provisions: mariadb, 127.0.0.1,
        localhost or ::1.
-    3. The server carries acas_harness_disposable.disposability_marker, which is
-       created by harness/Dockerfile.mariadb and therefore exists ONLY in an
-       image this harness built. Proof by PRESENCE of a marker, not by absence of
-       production data: an empty staging database and an empty production
-       database are indistinguishable, so a heuristic would fail OPEN. This fails
-       CLOSED.
+    3. The server reports report_host beginning ACAS-harness-disposable-oracle,
+       which harness/Dockerfile.mariadb declares in a configuration file inside
+       the image and which therefore exists ONLY on a server started from an image
+       this harness built. It is a SERVER SETTING and not a schema: no CREATE
+       DATABASE, CREATE TABLE or INSERT is issued anywhere for it (rule R-3, and
+       finding F-43, which is why the earlier marker TABLE is gone). Proof by
+       PRESENCE of a marker, not by absence of production data: an empty staging
+       database and an empty production database are indistinguishable, so a
+       heuristic would fail OPEN. This fails CLOSED.
     4. ACASDB holds no table outside the frozen 33 -- an extra table means the
        schema is shared with something that is about to lose the schema around it.
   Any of these failing REFUSES the run (90) unless --acknowledge-destructive (or
@@ -1261,12 +1458,22 @@ acas_assert_environment() {
     acas_die "$EX_PRECONDITION" \
       "ACAS_DB_PORT must be numeric; got '$ACAS_DB_PORT'."
   fi
-  if (( 10#$ACAS_DB_PORT < 1 || 10#$ACAS_DB_PORT > 65535 )); then
+  # THE RANGE IS THE FROZEN CARRIER'S, 1..9999, NOT THE TCP RANGE.
+  # `LK-Port-Number pic x(4)' [common/acas-get-params.cbl:L158] and
+  # `01 Ws-Mysql-Port-Number pic x(4)' [copybooks/mysql-variables.cpy:L91] are
+  # FOUR characters, and every bridge STRINGs DB-Port into the second of them
+  # [common/glpostingMT.cbl:L410-L413]. So a five-digit port reaches the compiled
+  # cycle TRUNCATED - 13306 becomes 1330 - while this script would probe and drive
+  # the untruncated one, and the two sides of the comparison would be talking to
+  # different servers. Refused here rather than truncated silently.
+  if (( 10#$ACAS_DB_PORT < 1 || 10#$ACAS_DB_PORT > 9999 )); then
     acas_die "$EX_PRECONDITION" \
-      "ACAS_DB_PORT must be between 1 and 65535; got '$ACAS_DB_PORT'." \
-      'A value outside the range reaches the TCP probe and the client as an' \
-      'out-of-range port, which fails with a cause that names neither the' \
-      'variable nor the value.'
+      "ACAS_DB_PORT must be between 1 and 9999; got '$ACAS_DB_PORT'." \
+      'The frozen carrier holds FOUR characters - LK-Port-Number pic x(4)' \
+      '[common/acas-get-params.cbl:L158] and Ws-Mysql-Port-Number pic x(4)' \
+      '[copybooks/mysql-variables.cpy:L91] - so a five-digit port would reach' \
+      'the compiled cycle truncated while this script used the whole value.' \
+      'harness/docker-compose.yml publishes 3306, which is what the stack uses.'
   fi
   # CANONICALISED, and this matters beyond tidiness: the consent token embeds
   # the port verbatim, so `03306` and `3306` would demand two different tokens
@@ -1299,8 +1506,14 @@ acas_assert_environment() {
 
   acas_log "ACAS_REPO   = $ACAS_REPO (read-only checkout; the specification)"
   acas_log "ACAS_OUT    = $ACAS_OUT"
-  acas_log "database    = ${ACAS_RESET_DB_USER}@${ACAS_DB_HOST}:${ACAS_DB_PORT}/${ACAS_DB_NAME}"
-  acas_log "the drop and re-apply run as the ADMIN account ${ACAS_RESET_DB_USER}, not as ${ACAS_DB_USER}"
+  # A CATEGORY and a FINGERPRINT, never the topology (F-39). What a reader of
+  # this transcript needs from the next line is which KIND of target was reset and
+  # whether it was the same one another transcript reset -- not its name.
+  acas_log "database    = $(acas_target_description)"
+  # The ROLE distinction is the whole point of the line, and the role is what is
+  # printed: the two account NAMES add nothing a reader can act on.
+  acas_log 'the drop and re-apply run as the ADMIN account, deliberately NOT as the application account'
+  acas_note 'no account name, host, port or schema is printed: the transcript is retained evidence'
   if (( ACAS_RESET_SCHEMA_ONLY )); then
     acas_note '--schema-only: harness/seed.sh will NOT be run, so its variables are not required'
   fi
@@ -1436,7 +1649,7 @@ acas_authorise_destructive_target() {
   fi
 
   ACAS_RESET_TARGET_AUTHORISED=1
-  acas_ok "destructive target authorised: ${ACAS_DB_NAME}@${ACAS_DB_HOST}:${ACAS_DB_PORT} as ${ACAS_RESET_DB_USER}"
+  acas_ok "destructive target authorised: $(acas_target_description) as the admin account"
   acas_check 'PASS' 'destructive-target gates: distinct admin account, target-scoped consent, disposable schema and host'
 }
 
@@ -1632,6 +1845,44 @@ acas_assert_scenario() {
     'harness/docker-compose.yml.'
   [[ -f "$ACAS_RESET_SCENARIO" && -r "$ACAS_RESET_SCENARIO" ]] || acas_die "$EX_USAGE" \
     "the scenario '$ACAS_RESET_SCENARIO' is not a readable file."
+
+  acas_resolve_fixture_root
+}
+
+# -----------------------------------------------------------------------------
+# THE CANONICAL FIXTURE ROOT, DEFAULTED RATHER THAN DEMANDED
+#
+# A scenario's own `seed_dir' resolves relative to the scenario FILE, which sits in
+# the checkout, and the checkout is mounted read-only because it is frozen
+# specification (R-3). So a built fixture can never live where the scenario points,
+# and an omitted --seed-dir used to leave harness/seed.sh resolving a path inside the
+# read-only tree -- AFTER this script had already dropped and re-applied all 33
+# tables. Defaulting removes that way of composing the protocol wrongly.
+#
+# ONE RULE, THREE DERIVATIONS. harness/build_fixtures.sh WRITES the fixtures and owns
+# the rule -- its `ACAS_BF_OUT' default is the single statement of it. This script and
+# harness/run_parity.sh derive it identically for the shell side, and
+# tests/conftest.py's scenario_fixture_dir() for the pytest side;
+# tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py asserts that the
+# three agree, because a comment would not keep them in step.
+#
+# ONLY WITH A SCENARIO. Without one this script re-seeds from the ambient data
+# directory and there is no scenario name to append, so nothing is defaulted.
+acas_resolve_fixture_root() {
+  [[ -z "$ACAS_RESET_SEED_DIR" ]] || return 0
+  [[ -n "$ACAS_RESET_SCENARIO" ]] || return 0
+
+  local stem="${ACAS_RESET_SCENARIO##*/}"
+  stem="${stem%.*}"
+  [[ "$stem" =~ ^[A-Za-z0-9_-]+$ ]] || acas_die "$EX_USAGE" \
+    "the scenario name '$stem' is not a plain identifier." \
+    'It names the fixture directory, so it may hold only letters, digits,' \
+    'underscore and hyphen.'
+
+  local root="${ACAS_FIXTURES:-}"
+  [[ -n "$root" ]] || root="${ACAS_DATA:-/data}"/fixtures
+  ACAS_RESET_SEED_DIR="${root%/}/$stem"
+  acas_note "fixture root (canonical, --seed-dir not stated): $ACAS_RESET_SEED_DIR"
 }
 
 
@@ -1659,11 +1910,27 @@ acas_target_is_local() {
   return 1
 }
 
+# ONE KEY, ONE CLOSED SET, AND UNRECOGNISED TEXT IS REFUSED.
+# `1|true|yes|on' is affirmative and `|0|false|no|off' is negative, matched
+# case-insensitively; the identical set lives in
+# acas_posting/cli/rdbms_params.py as AFFIRMATIVE_SPELLINGS / NEGATIVE_SPELLINGS
+# and is read there by read_declared_flag, so one exported value cannot mean two
+# different things to the two halves of the harness. Anything else STOPS the run
+# rather than resolving to either answer: the value governs whether a credential
+# and every posted figure may cross a network in the clear, and only the operator
+# who typed it knows what was meant. The message never echoes the value.
 acas_plaintext_declared() {
-  case "${ACAS_DB_ALLOW_PLAINTEXT-}" in
+  local declared="${ACAS_DB_ALLOW_PLAINTEXT-}"
+  case "${declared,,}" in
     1|true|yes|on) return 0 ;;
+    ''|0|false|no|off) return 1 ;;
   esac
-  return 1
+  acas_die "$EX_USAGE" \
+    'ACAS_DB_ALLOW_PLAINTEXT is set to a value this contract does not recognise.' \
+    'Use 1, true, yes or on for yes; 0, false, no or off for no; or leave it' \
+    'unset. The same closed set is read by harness/build_oracle.sh,' \
+    'harness/seed.sh, harness/reset_db.sh, harness/run_cobol_scenario.sh,' \
+    'harness/run_python_scenario.sh and acas_posting/cli/rdbms_params.py.'
 }
 
 # Decide, ONCE and BEFORE ANYTHING CONNECTS, which client transports this
@@ -1865,8 +2132,12 @@ try:
 except ValueError:
     print(f"port is not an integer: {sys.argv[2]!r}", file=sys.stderr)
     sys.exit(2)
-if not 1 <= port <= 65535:
-    print(f"port out of range 1..65535: {port}", file=sys.stderr)
+# 1..9999 is the FROZEN CARRIER's range: LK-Port-Number pic x(4)
+# [common/acas-get-params.cbl:L158] and Ws-Mysql-Port-Number pic x(4)
+# [copybooks/mysql-variables.cpy:L91] hold four characters, so a five-digit port
+# would be probed here in full and truncated inside the compiled cycle.
+if not 1 <= port <= 9999:
+    print(f"port out of range 1..9999 (the frozen pic x(4) carrier): {port}", file=sys.stderr)
     sys.exit(2)
 try:
     with socket.create_connection((host, port), timeout=5):
@@ -1890,11 +2161,14 @@ acas_wait_for_database() {
   (( auth_grace > timeout )) && auth_grace="$timeout"
 
   local interval=3 elapsed=0
-  acas_log "waiting up to ${timeout}s for ${ACAS_DB_HOST}:${ACAS_DB_PORT}"
+  acas_log "waiting up to ${timeout}s for $(acas_target_description)"
   while ! acas_db_tcp_probe; do
     if (( elapsed >= timeout )); then
       acas_die "$EX_DATABASE" \
-        "MariaDB at ${ACAS_DB_HOST}:${ACAS_DB_PORT} did not accept a TCP connection within ${timeout}s." \
+        "the $(acas_target_description) database did not accept a TCP connection within ${timeout}s." \
+        'The host and port are deliberately not printed (F-39): read them from' \
+        'ACAS_DB_HOST and ACAS_DB_PORT in this environment, which is where this' \
+        'script reads them from too.' \
         'Nothing can be reset without it. Start the service' \
         '(docker compose -f harness/docker-compose.yml up -d mariadb), wait for' \
         'its healthcheck, or raise ACAS_DB_WAIT_TIMEOUT.'
@@ -1914,7 +2188,7 @@ acas_wait_for_database() {
     acas_sql_scalar 'select 1' || rc=$?
     case "$rc" in
       0)
-        acas_log "authenticated as ${ACAS_RESET_DB_USER} against ${ACAS_DB_NAME}"
+        acas_log "authenticated as the admin account against $(acas_target_description)"
         acas_log "client pinned : ${ACAS_SQL_CLIENT} ${ACAS_SQL_TLS_FLAG:-(TLS negotiated normally)}"
         return 0
         ;;
@@ -1975,14 +2249,18 @@ acas_wait_for_database() {
 # section 0.4.1.7 ("autocommit off TO MATCH THE LOADERS" -- the loaders being the
 # seeding stage), all from the loader banner at [common/glbatchLD.cbl:L9-L13].
 # harness/seed.sh owns that window, sets it around the frozen load programs, and
-# restores this runtime mode when it closes.
+# restores this runtime mode when it closes. WHICH mode the window runs is that
+# script's own R-6 arbitration and was measured: ON by default, because it is the
+# only mode in which the frozen loaders leave a durable row, with the AAP-literal
+# OFF selectable through ACAS_SEED_AUTOCOMMIT=off. Nothing here depends on the
+# choice -- this precondition is about the mode OUTSIDE the window.
 #
 # ASSERTED, NEVER SET. See the header for the frozen-source proof: the loaders'
 # commit/rollback paragraphs are unreachable and the bridges never commit at all,
-# so inside the seeding window every COBOL write is discarded at session close.
-# That consequence is reported, not repaired (R-4). Finding the mode OFF here
-# means the seeding window is still open -- a seed interrupted before its exit
-# trap ran, or a server configured for the seeding mode server-wide -- and the
+# so under the AAP-literal OFF window every COBOL write is discarded at session
+# close. That consequence is reported, not repaired (R-4). Finding the mode OFF
+# here means a seeding window is still open -- a seed interrupted before its exit
+# trap ran, or a server configured for autocommit off server-wide -- and the
 # database would then be one neither cycle can write to. The runtime setting
 # belongs to the server, whose authority is harness/Dockerfile.mariadb; issuing
 # `SET autocommit` here -- even "just for the DDL" -- would create a second
@@ -2036,9 +2314,9 @@ acas_assert_autocommit() {
       'section 0.5.2 ("autocommit must be off DURING SEEDING") and section 0.4.1.7' \
       'on harness/Dockerfile.mariadb ("autocommit off TO MATCH THE LOADERS", the' \
       'loaders being the seeding stage). harness/seed.sh owns that window and' \
-      'restores this mode when it closes.' \
+      'restores this mode when it closes, whichever mode the window ran.' \
       'Finding the mode OFF here means either that the server is configured for' \
-      'the seeding mode server-wide -- which leaves the frozen COBOL unable to' \
+      'autocommit off server-wide -- which leaves the frozen COBOL unable to' \
       'persist a single row, since it never reaches a COMMIT -- or that a seed was' \
       'interrupted before its exit trap could restore the mode. Either way the' \
       'state this script would hand the comparison is not a state either cycle can' \
@@ -2049,7 +2327,7 @@ acas_assert_autocommit() {
       'Start the harness MariaDB service built from that Dockerfile, or restore' \
       'the runtime mode with: set global autocommit = 1'
   fi
-  acas_ok "autocommit is ON, globally and for this session ($when) -- the runtime mode; the OFF window belongs to harness/seed.sh"
+  acas_ok "autocommit is ON, globally and for this session ($when) -- the runtime mode; the seeding window, whatever mode it runs, belongs to harness/seed.sh"
 }
 
 # Precondition 9 of 9 -- the privileges the FROZEN FILE'S OWN statements need.
@@ -2119,7 +2397,7 @@ acas_assert_privileges() {
       'file, which would leave a half-applied schema and poison every diff.'
   fi
 
-  acas_ok "all $(acas_join_words "${ACAS_RESET_REQUIRED_PRIVILEGES[@]}") held by ${ACAS_RESET_DB_USER}"
+  acas_ok "all $(acas_join_words "${ACAS_RESET_REQUIRED_PRIVILEGES[@]}") held by the admin account"
 }
 
 
@@ -2154,6 +2432,19 @@ acas_report_client_output() {
 # somebody else's database.
 
 # The acknowledgement must equal `user@host:port/schema' for THIS invocation.
+# THE ONE PLACE THE TARGET IS STILL NAMED, AND WHY (finding F-39)
+#
+# Everything a run RETAINS as evidence prints acas_target_description instead of a
+# topology triple. This function is the exception, and it is deliberate: the
+# destructive acknowledgement is matched against this EXACT string
+# (see acas_target_acknowledged), so a refusal that would not print it would be a
+# refusal an operator cannot satisfy without reading this source -- a safety gate
+# nobody can pass is a safety gate that gets bypassed another way. Its two callers
+# are therefore both TERMINAL: the usage error for a malformed
+# --acknowledge-destructive, and acas_refuse_target. Neither runs on a successful
+# reset, so no retained transcript of a completed run contains this string.
+#
+# Anything that logs on the success path must call acas_target_description.
 acas_reset_target_label() {
   local user="${ACAS_RESET_DB_USER:-${ACAS_DB_ADMIN_USER:-${ACAS_DB_USER:-<unset>}}}"
   printf '%s@%s:%s/%s' \
@@ -2204,33 +2495,37 @@ acas_assert_disposable_static() {
   if [[ "$ACAS_DB_NAME" != "$ACAS_RESET_REQUIRED_SCHEMA" ]]; then
     if (( ! acknowledged )); then
       acas_refuse_target \
-        "ACAS_DB_NAME is '$ACAS_DB_NAME', not '$ACAS_RESET_REQUIRED_SCHEMA'." \
+        "ACAS_DB_NAME does not name '$ACAS_RESET_REQUIRED_SCHEMA'; the configured" \
+        "value is not printed (F-39) -- it is $(acas_target_description)." \
         "The frozen $ACAS_RESET_SCHEMA_RELPATH defines exactly one database, and" \
         "this script can only apply that file. A schema named anything else is" \
         'not the database this harness owns.'
     fi
-    acas_warn "acknowledged: resetting '$ACAS_DB_NAME' rather than $ACAS_RESET_REQUIRED_SCHEMA."
+    acas_warn "acknowledged: resetting $(acas_target_description) rather than $ACAS_RESET_REQUIRED_SCHEMA."
   fi
 
   if ! acas_in_list "$ACAS_DB_HOST" "${ACAS_RESET_CANONICAL_HOSTS[@]}"; then
     if (( ! acknowledged )); then
       acas_refuse_target \
-        "ACAS_DB_HOST is '$ACAS_DB_HOST', which is not a host this harness provisions." \
+        "ACAS_DB_HOST is not a host this harness provisions; the configured value" \
+        "is not printed (F-39) -- the target is $(acas_target_description)." \
         "Canonical hosts: $(acas_join_words "${ACAS_RESET_CANONICAL_HOSTS[@]}")." \
         'The first is the harness/docker-compose.yml service name; the others' \
         'reach a container published on this machine. A remote host is exactly' \
         'the case that must not be destroyed by accident.'
     fi
-    acas_warn "acknowledged: resetting on the non-canonical host '$ACAS_DB_HOST'."
+    acas_warn "acknowledged: resetting on a non-canonical host: $(acas_target_description)."
   fi
 
   if (( acknowledged )); then
     ACAS_RESET_ACK_USED=1
-    acas_note "the destructive acknowledgement names this exact target: $(acas_reset_target_label)"
+    acas_note "the destructive acknowledgement names this exact target: $(acas_target_description)"
   fi
 
-  acas_log "target schema  = $ACAS_DB_NAME (required: $ACAS_RESET_REQUIRED_SCHEMA)"
-  acas_log "target host    = $ACAS_DB_HOST"
+  acas_log "target         = $(acas_target_description)"
+  acas_log "required schema= $ACAS_RESET_REQUIRED_SCHEMA (a constant of this script, not of the deployment)"
+  acas_log "schema matches = $( [[ "$ACAS_DB_NAME" == "$ACAS_RESET_REQUIRED_SCHEMA" ]] && printf 'yes' || printf 'no (acknowledged)' )"
+  acas_log "host canonical = $( acas_in_list "$ACAS_DB_HOST" "${ACAS_RESET_CANONICAL_HOSTS[@]}" && printf 'yes' || printf 'no (acknowledged)' )"
   acas_check 'PASS' 'target identity accepted before any database contact'
 }
 
@@ -2242,29 +2537,36 @@ acas_assert_disposable_server() {
     acknowledged=1
   fi
 
-  # 3. THE SENTINEL. A marker schema created by harness/Dockerfile.mariadb,
-  # which exists nowhere except in an image this harness built.
-  local sentinel_rows='' rc=0
-  acas_sql_value "select count(*) from information_schema.TABLES where TABLE_SCHEMA = $(acas_sql_quote "$ACAS_RESET_SENTINEL_SCHEMA") and TABLE_NAME = $(acas_sql_quote "$ACAS_RESET_SENTINEL_TABLE")" \
-    || rc=$?
+  # 3. THE DISPOSABILITY MARKER. A SERVER SETTING declared by
+  # harness/Dockerfile.mariadb, readable back with one query, and present on no
+  # server this harness did not build. NOT a table and NOT a schema: rule R-3
+  # admits no added DDL, and a reset gate that required some made the violation
+  # load-bearing (finding F-43).
+  local marker='' rc=0
+  acas_sql_value "select @@${ACAS_RESET_DISPOSABLE_VARIABLE}" || rc=$?
   if (( rc == 0 )); then
-    sentinel_rows="$ACAS_SQL_OUT"
+    marker="$ACAS_SQL_OUT"
   fi
 
-  if (( rc != 0 )) || [[ "$sentinel_rows" != '1' ]]; then
+  if (( rc != 0 )) || [[ "$marker" != "$ACAS_RESET_DISPOSABLE_MARKER"* ]]; then
     if (( ! acknowledged )); then
       acas_refuse_target \
-        "this server does not carry the harness disposability sentinel." \
-        "  expected: ${ACAS_RESET_SENTINEL_SCHEMA}.${ACAS_RESET_SENTINEL_TABLE}" \
-        "  found:    ${sentinel_rows:-<query failed>}" \
-        'That sentinel is created by harness/Dockerfile.mariadb and exists only' \
-        'in an image this harness built, so its ABSENCE means this is not the' \
+        "this server does not declare itself a harness-owned disposable target." \
+        "  variable: @@${ACAS_RESET_DISPOSABLE_VARIABLE}" \
+        "  expected: ${ACAS_RESET_DISPOSABLE_MARKER}..." \
+        "  found:    ${marker:-<query failed>}" \
+        'That declaration is written into the server configuration by' \
+        'harness/Dockerfile.mariadb and exists only on a server started from an' \
+        'image this harness built, so its ABSENCE means this is not the' \
         'harness'"'"'s throwaway server. Start the harness service instead:' \
-        '    docker compose -f harness/docker-compose.yml up -d mariadb'
+        '    docker compose -f harness/docker-compose.yml up -d mariadb' \
+        'If this IS a disposable target that predates the marker, rebuild the' \
+        'image rather than acknowledging past the gate:' \
+        '    docker compose -f harness/docker-compose.yml build mariadb'
     fi
-    acas_warn 'acknowledged: the harness disposability sentinel is absent from this server.'
+    acas_warn 'acknowledged: this server does not declare itself a harness-owned disposable target.'
   else
-    acas_ok "disposability sentinel present: ${ACAS_RESET_SENTINEL_SCHEMA}.${ACAS_RESET_SENTINEL_TABLE}"
+    acas_ok "disposability declared by the server: @@${ACAS_RESET_DISPOSABLE_VARIABLE} = ${ACAS_RESET_DISPOSABLE_MARKER}"
   fi
 
   # The server family, recorded rather than enforced.
@@ -2294,13 +2596,13 @@ acas_assert_disposable_server() {
   if (( ${#unexpected[@]} )); then
     if (( ! acknowledged )); then
       acas_refuse_target \
-        "$ACAS_DB_NAME holds ${#unexpected[@]} table(s) the frozen schema does not define." \
+        "the target holds ${#unexpected[@]} table(s) the frozen schema does not define." \
         "  unexpected: $(acas_join_words "${unexpected[@]}")" \
         'The frozen dump defines 33 tables and drops exactly those. A table' \
         'outside that set means this schema is shared with something else, and' \
         'that something else is about to lose the schema around it.'
     fi
-    acas_warn "acknowledged: $ACAS_DB_NAME holds ${#unexpected[@]} table(s) outside the frozen 33."
+    acas_warn "acknowledged: the target holds ${#unexpected[@]} table(s) outside the frozen 33."
   else
     acas_ok "no table outside the frozen ${ACAS_RESET_EXPECT_TABLES} is present"
   fi
@@ -2787,11 +3089,19 @@ acas_assert_reseed_used_fixture() {
   stem="${ACAS_RESET_SCENARIO##*/}"
   stem="${stem%.*}"
 
+  # ⭐ NO DATA DIRECTORY IS A REFUSAL, NOT A WARNING (finding F-46). This used to
+  # warn and return SUCCESS, so a reset that could not prove which fixture the
+  # re-seed drew from reported itself as bound to the scenario anyway -- and the two
+  # cycles could then start from different premises with nothing saying so. A
+  # scenario reset that cannot locate the fixture has not done what it claims.
   local base="${ACAS_RESET_DATA_DIR:-${ACAS_DATA:-}}"
   if [[ -z "$base" ]]; then
-    acas_warn "cannot locate the scenario fixture: neither --data-dir nor ACAS_DATA is set, so the marker for '$stem' cannot be confirmed"
-    acas_check 'WARN' "scenario fixture for '$stem' unconfirmed (no data directory known)"
-    return 0
+    acas_die "$EX_FIXTURE" \
+      "cannot locate the scenario fixture for '$stem': neither --data-dir nor" \
+      'ACAS_DATA is set, so the marker harness/seed.sh leaves cannot be read and' \
+      'this reset cannot prove WHICH seed the two cycles are about to compare' \
+      'from. Pass --data-dir, or set ACAS_DATA -- harness/docker-compose.yml sets' \
+      'it to /data for the gnucobol service.'
   fi
 
   marker="$base/$stem/$ACAS_RESET_FIXTURE_MARKER"
@@ -2807,11 +3117,132 @@ acas_assert_reseed_used_fixture() {
       'those files exist.'
   fi
 
-  local files
-  files="$(awk -F'\t' '$1 == "files" { print $2 }' -- "$marker" 2>/dev/null || true)"
-  acas_ok "re-seed used the '$stem' scenario fixture (${files:-?} declared file(s))"
-  acas_check 'PASS' "re-seed bound to scenario '$stem' (${files:-?} file(s))"
+  # ⭐ THE MARKER'S EXACT SHAPE IS VALIDATED, NOT ITS EXISTENCE (finding F-22). A
+  # file count alone cannot tell two fixtures apart: two scenarios with the same
+  # number of files, or one fixture rebuilt from different records, produce the same
+  # count and a different seeded state. The marker carries a `file<TAB>name<TAB>sha256'
+  # row per staged file [harness/seed.sh], so this reads the whole of it, requires the
+  # scenario name to match, requires the row count to equal the declared count, and
+  # requires every digest to be a full SHA-256. Its own digest is then published as
+  # ACAS_RESET_FIXTURE_DIGEST, which is what both runners bind into their run-status
+  # records so the two sides can be proved to have started from the SAME BYTES.
+  local recorded_scenario recorded_count row_count bad_digests
+  # READ THROUGH A REDIRECTION, NOT AS AN AWK OPERAND -- see the note at the
+  # matching gate in harness/seed.sh. mawk reads `--` as a filename, so the
+  # `awk '...' -- "$file"` form these four lines used returned NOTHING and the gate
+  # silently saw an empty marker.
+  recorded_scenario="$(awk -F'\t' '$1 == "scenario" { print $2; exit }' < "$marker" 2>/dev/null || true)"
+  recorded_count="$(awk -F'\t' '$1 == "files" { print $2; exit }' < "$marker" 2>/dev/null || true)"
+  row_count="$(awk -F'\t' '$1 == "file" { n++ } END { print n + 0 }' < "$marker" 2>/dev/null || true)"
+  bad_digests="$(awk -F'\t' '$1 == "file" && $3 !~ /^[0-9a-f]{64}$/ { print $2 }' < "$marker" 2>/dev/null || true)"
+
+  if [[ "$recorded_scenario" != "$stem" ]]; then
+    acas_die "$EX_FIXTURE" \
+      "the fixture marker at $marker names scenario '${recorded_scenario:-<absent>}'," \
+      "and this reset is for '$stem'. It belongs to a different scenario, so it" \
+      'proves nothing about this one.'
+  fi
+  if [[ ! "$recorded_count" =~ ^[0-9]+$ ]] || (( recorded_count == 0 )); then
+    acas_die "$EX_FIXTURE" \
+      "the fixture marker at $marker records a file count of" \
+      "'${recorded_count:-<absent>}', which is not a positive whole number." \
+      'A fixture of no files cannot seed anything, and an unreadable count cannot' \
+      'be checked against the rows below it.'
+  fi
+  if (( row_count != recorded_count )); then
+    acas_die "$EX_FIXTURE" \
+      "the fixture marker at $marker records $recorded_count file(s) but carries" \
+      "$row_count digest row(s). The marker is incomplete or was written by an" \
+      'interrupted stage, so the seed it describes cannot be identified.'
+  fi
+  if [[ -n "$bad_digests" ]]; then
+    acas_die "$EX_FIXTURE" \
+      "the fixture marker at $marker carries a row whose digest is not a" \
+      'SHA-256:' "  $bad_digests" \
+      'Every staged file must be identified by its full content digest; a row' \
+      'without one cannot bind the two sides to the same bytes.'
+  fi
+
+  ACAS_RESET_FIXTURE_DIGEST="$(acas_file_sha256 "$marker")"
+  acas_ok "re-seed used the '$stem' scenario fixture ($recorded_count declared file(s), every digest present)"
+  acas_check 'PASS' "re-seed bound to scenario '$stem' ($recorded_count file(s), marker sha256 ${ACAS_RESET_FIXTURE_DIGEST:0:16}...)"
   acas_log "fixture marker = $marker"
+  acas_log "fixture marker sha256 = ${ACAS_RESET_FIXTURE_DIGEST:-<unavailable>}"
+
+  acas_publish_seed_identity "$stem" "$recorded_count"
+}
+
+# ⭐ THE EXACT SEED IDENTITY, PUBLISHED WHERE BOTH RUNNERS CAN BIND IT (finding F-22)
+#
+# The two runners each recorded a "seed fingerprint" that was a list of TABLE ROW
+# COUNTS, and harness/diff_states.py compared those. Row counts are not an identity:
+# two seedings with the same shape and DIFFERENT VALUES compare equal, so the two legs
+# of a parity run could start from different money and the protocol would say the
+# starting states matched. The one artifact that IS an identity already exists --
+# harness/seed.sh stages a marker carrying a SHA-256 per seeded file -- and until now
+# nothing bound it to anything.
+#
+# So this publishes the marker's own digest, once, where both runners read it:
+#     <ACAS_OUT>/run-logs/<scenario>/seed-identity
+# and each runner records it in its run-status record, and
+# harness/dump_tables.py requires it, and harness/diff_states.py requires the two
+# sides to carry the SAME one before it compares a single row.
+#
+# THE SECOND RESET OF ONE ATTEMPT MUST SEED THE SAME BYTES. Stage 1 seeds for the
+# COBOL leg and stage 5 seeds for the Python leg, and the entire claim of the protocol
+# is that both legs started from byte-for-byte the same state. So a second reset
+# carrying the SAME run id and a DIFFERENT digest is refused here, where the refusal
+# still costs nothing -- rather than discovered at the diff, where it would look like
+# an accounting difference. A reset with a DIFFERENT run id is a different attempt and
+# replaces the record freely.
+acas_publish_seed_identity() {
+  local stem="$1" files="$2"
+  local dir="$ACAS_OUT/run-logs/$stem"
+  local target="$dir/seed-identity"
+
+  [[ -n "$ACAS_RESET_FIXTURE_DIGEST" ]] || return 0
+
+  mkdir -p -- "$dir" 2>/dev/null || {
+    acas_warn "the seed identity could not be published: $dir is not creatable." \
+      'The capture stage will report the run as unattested, which is the safe direction.'
+    return 0
+  }
+  chmod 700 -- "$dir" 2>/dev/null || true
+
+  if [[ -f "$target" && ! -L "$target" && -n "$ACAS_RESET_RUN_ID" ]]; then
+    local prior_run='' prior_digest='' key value
+    while IFS=$'\t' read -r key value; do
+      case "$key" in
+        run_id)                prior_run="$value" ;;
+        fixture_marker_sha256) prior_digest="$value" ;;
+      esac
+    done <"$target"
+    if [[ "$prior_run" == "$ACAS_RESET_RUN_ID" && -n "$prior_digest" \
+          && "$prior_digest" != "$ACAS_RESET_FIXTURE_DIGEST" ]]; then
+      acas_die "$EX_FIXTURE" \
+        'this attempt has already seeded a DIFFERENT fixture for this scenario.' \
+        "  attempt        : $ACAS_RESET_RUN_ID" \
+        "  already seeded : $prior_digest" \
+        "  seeding now    : $ACAS_RESET_FIXTURE_DIGEST" \
+        'The two legs of a parity run must start from byte-for-byte the same state --' \
+        'that is the whole claim the empty diff is evidence for. Two different fixtures' \
+        'within one attempt cannot support it, and the difference would surface at the' \
+        'diff looking exactly like an accounting difference.' \
+        'Rebuild the fixture once, then run the protocol from stage 1.'
+    fi
+  fi
+
+  {
+    printf 'scenario\t%s\n' "$stem"
+    printf 'run_id\t%s\n' "$ACAS_RESET_RUN_ID"
+    printf 'fixture_marker_sha256\t%s\n' "$ACAS_RESET_FIXTURE_DIGEST"
+    printf 'files\t%s\n' "$files"
+  } | acas_publish_atomic "$target" 'the seed identity' || {
+    acas_warn 'the seed identity could not be published; the capture stage will report the run as unattested.'
+    return 0
+  }
+  acas_log "seed identity  = $target"
+  return 0
 }
 
 ACAS_RESET_REPORTED=0
@@ -2840,13 +3271,13 @@ acas_seed_report() {
   # Recorded in the report, not merely in a warning, because a reset that
   # proceeded past the disposability gate on an operator's acknowledgement did
   # NOT satisfy the gate -- and evidence produced from it has to carry that.
-  acas_log "target                : $(acas_reset_target_label)"
+  acas_log "target                : $(acas_target_description)"
   if (( ACAS_RESET_ACK_USED )); then
     acas_log "disposability         : OVERRIDDEN by an explicit acknowledgement"
     printf '\nNOTE: this reset proceeded under --acknowledge-destructive, so one or more\n'
     printf '      disposability proofs did not hold. See the findings above.\n'
   else
-    acas_log 'disposability         : proved (canonical target, sentinel present)'
+    acas_log 'disposability         : proved (canonical target, server marker present, consent token matched)'
   fi
 
   acas_log "run log               : ${ACAS_RESET_LOG:-<not opened>}"
@@ -2871,8 +3302,9 @@ acas_print_plan() {
 
   acas_log ''
   acas_log "1. apply, verbatim : $ACAS_RESET_SCHEMA"
-  acas_log "   to database     : ${ACAS_DB_NAME} (named explicitly -- the file has no USE statement)"
-  acas_log "   as              : ${ACAS_RESET_DB_USER}@${ACAS_DB_HOST}:${ACAS_DB_PORT}"
+  acas_log "   to database     : $(acas_target_description) (named explicitly on the client"
+  acas_log '                     command line -- the frozen file has no USE statement)'
+  acas_log '   as              : the ADMIN account, not the application account'
   acas_log "   client          : ${ACAS_SQL_CLIENT:-resolved at run time (mariadb, else mysql)}"
   acas_log '   how             : streamed on stdin, unfiltered -- no sed, no awk, no iconv,'
   acas_log '                     no local copy, no --default-character-set override, no --force'
@@ -2923,8 +3355,9 @@ acas_main() {
   # every deadline.
   acas_resolve_deadlines
 
-  printf 'harness/reset_db.sh -- stage 5 of the eight-stage parity protocol\n'
-  printf '  seed -> run(COBOL) -> dump -> normalize -> RESET -> run(Python) -> dump -> diff\n'
+  printf 'harness/reset_db.sh -- stages 1 and 5 of the ten-stage parity protocol\n'
+  printf '  seed -> run(COBOL) -> dump -> normalise -> RE-SEED -> run(Python) -> dump\n'
+  printf '  -> normalise -> verify published -> diff\n'
   printf 'Drops and re-applies the FROZEN mysql/ACASDB.sql verbatim, then re-seeds, so the\n'
   printf 'Python cycle starts from byte-for-byte the state the COBOL cycle started from.\n'
   printf 'The drop lives in the frozen file itself, so this script emits no DDL (R-3).\n'
@@ -2961,7 +3394,7 @@ acas_main() {
   # would be actively misleading. Raising it at the call site keeps the
   # precondition numbering complete AND makes the ERR/EXIT traps name the
   # autocommit gate -- not MariaDB readiness -- as the failing stage.
-  acas_stage 'Preconditions 8/9: autocommit is ON (the runtime mode; the OFF seeding window belongs to harness/seed.sh)'
+  acas_stage 'Preconditions 8/9: autocommit is ON (the runtime mode; the seeding window belongs to harness/seed.sh)'
   acas_assert_autocommit 'before the apply'
 
   acas_assert_privileges

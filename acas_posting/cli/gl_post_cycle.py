@@ -37,83 +37,6 @@ be diffed line for line. This is NOT the five-parameter Sales and Purchase shape
 [irs/irs030.cbl:L552-L554]; neither applies here.
 
 THE ABORT GATE IS HARD, NOT A WARNING
-Agent Action Plan section 0.6.4, verbatim: "The Python CLI must reproduce this as
-a **hard gate between phases, not as a warning**."
-
-The chain is four links long and crosses three programs:
-
-    1. phase 1 of `gl070` raises a detector flag on meeting a batch left OPEN in
-       the current accounting cycle          [general/gl070.cbl:L314-L315]
-    2. `menu-input2.` tests the flag, runs the open-batch report and stores `5`
-       into `WS-Term-Code`                   [general/gl070.cbl:L287-L290]
-    3. `load00.` hands control back WITHOUT tripping its own gate, because that
-       gate is `if ws-term-code > 7` and 5 is not greater than 7
-                                             [general/general.cbl:L720-L721]
-    4. `load08.` tests `if ws-term-code = 5 go to display-menu.`
-                                             [general/general.cbl:L810-L811]
-
-**The effect is that `gl071` and `gl072` never run at all.** Not "run with a
-warning" - not run. The database effect of the abort is the ABSENCE of everything
-those two phases would have written, so an entry point that logged the condition
-and carried on would post a batch the frozen system refuses to post.
-
-The exact value matters twice over, which is why nobody may "simplify" it: below
-five and `load08.` stops matching, above seven and `load00.` diverts to
-`overrewrite.` instead. And `general/general.cbl:L714` clears `WS-Term-Code`
-before EVERY dispatch, so no code is ever carried from one phase into the next.
-
-THE PHASE NUMBERING IS NOT THE EXECUTION ORDER
-==============================================
-The programs label their own phases on screen, and Agent Action Plan section
-0.6.4 asks that the labels be preserved "so a maintainer is not misled":
-
-    phase 1  batch check              `gl070`  [general/gl070.cbl:L284]
-    phase 2  transaction pre-process  `gl070`  [general/gl070.cbl:L292]
-    (sort)                            `gl071`  [general/gl071.cbl:L170]
-    phase 4  transaction update       `gl072`  [general/gl072.cbl:L274]
-    phase 3  transaction deletion     `gl080`  [general/gl080.cbl:L319]
-    phase 5  end of period            `gl080`  [general/gl080.cbl:L336]
-
-So **deletion is labelled phase 3 but executes after phase 4**, and the numbering
-is not sequential with execution. Phases 3 and 5 are NOT dispatched from here:
-`gl080` is `load09.` [general/general.cbl:L817-L821] and belongs to the sibling
-entry point `acas_posting/cli/gl_end_of_cycle.py`.
-
-THE SORT ORDER IS LOAD-BEARING - THE MOST FRAGILE THING IN THE CYCLE
-====================================================================
-`gl072` locates the nominal-ledger account for each posting with a SEQUENTIAL
-read-next rather than an indexed read [general/gl072.cbl:L407-L408], and there is
-no error path at all. It finds the right account ONLY because `gl071` has already
-emitted the stream in nominal-key order, sorting on
-`(sort-batch, sort-ac, sort-pc, sort-post)` [general/gl071.cbl:L172-L176]. Agent
-Action Plan section 0.6.4: "Any change in sort stability or key composition
-produces silent misposting - no error, no diagnostic, wrong balances."
-
-Two consequences bind this module. The three phases run **in this order, in one
-process, strictly sequentially** - never reordered, never parallelised (rule
-R-3). And the three phases share ONE work-file container, because `pre-trans` and
-`post-trans` [copybooks/wsnames.cob:L15-L16] are how they communicate: `gl070`
-writes `pre_trans`, `gl071` sorts it into `post_trans`, `gl072` posts from
-`post_trans`. See `_CycleWorkFiles`.
-
-WHAT IS DELIBERATELY NOT HERE
-=============================
-No screen output of any kind. The menu's own `display-menu` redraw, its
-`accept-loop`, its `go to load01 ... depending on z` dispatch table and its
-`overrewrite` persistence of the system records are all omitted, and each
-omission is recorded in the traceability footer rather than left to be noticed
-(Agent Action Plan section 0.4.3). The programs' phase banners belong to
-`acas_posting.programs` and are not duplicated here.
-
-Example:
-    Run the cycle for the 21st of September 2025, General Ledger only::
-
-        python -m acas_posting.cli.gl_post_cycle \\
-            --run-date 21/09/2025 --irs-instead " "
-
-    The exit status is `WS-Term-Code` itself: 0 when all three phases ran, 5 when
-    the abort gate fired, and the reported code when a phase failed seriously.
-=======
 =====================================
 Agent Action Plan section 0.6.4, verbatim: "The Python CLI must reproduce this as
 a **hard gate between phases, not as a warning**."
@@ -184,12 +107,24 @@ belong to `acas_posting.programs` and are not duplicated here.
 
 WHAT IS HERE AND USED TO BE OMITTED. `overrewrite`'s persistence of the system
 records IS reproduced, on the one arm the frozen `load00.` reaches it from -
-`if ws-term-code > 7 / go to overrewrite` [general/general.cbl:L720-L721]. The
-paragraph itself lives once, in `acas_posting.cli.args`, and this route performs
-it; the state it persists is loaded by the same module before the first dispatch.
+`if ws-term-code > 7 / go to overrewrite` [general/general.cbl:L720-L721] - and
+once more at the quit, reproducing [general/general.cbl:L595-L596]; the two
+guards are mutually exclusive, so a run performs it exactly once. The paragraph
+itself lives once, in `acas_posting.cli.args`, and the state it persists is loaded
+by the same module before the first dispatch. Its RDB arm
+[general/general.cbl:L656-L672] - open key 1, rewrite keys 1, 2 and 4 in that
+order, then close - is reproduced in full, so `SYSTEM-REC`, `SYSDEFLT-REC` and
+`SYSTOT-REC` are persisted exactly as a menu dispatch persists them. What remains
+unreproduced is only the SECOND leg: the same three rewrites against the ISAM
+parameter file at [general/general.cbl:L676-L691], which has no counterpart
+because the migration has a single store. That residue is carried as
+`Q-CLI-OVERREWRITE-SECOND-LEG` rather than described as an omission of the whole
+paragraph.
 
 Example:
-    Run the cycle for the 21st of September 2025, General Ledger only::
+    Run the cycle for the 21st of September 2025, General Ledger only. This
+    WRITES - it posts, and it persists the system records afterwards - so point
+    it only at a disposable schema::
 
         python -m acas_posting.cli.gl_post_cycle \\
             --run-date 21/09/2025 --irs-instead " "
@@ -302,7 +237,6 @@ def load00(
     *,
     menu_state: args.MenuState,
     work_files: _CycleWorkFiles | None = None,
-    transport: object = None,
 ) -> _Disposition:
     """`load00.` [general/general.cbl:L711-L721] - dispatch one program.
 
@@ -329,12 +263,15 @@ def load00(
             program against work files of its own, which is what a single
             standalone dispatch wants and what every program module's own
             `work_files=None` default already means. IT IS THE ONLY KEYWORD THIS
-            FUNCTION FORWARDS: none of the three callees declares any other, so
-            offering one would raise `TypeError` before the dispatch. The
-            operator's transport declaration reaches the handlers through the
-            process-level policy `args.install_connection_policy` installs while
-            the linkage is bound, not call by call - see the comment at the
-            dispatch.
+            FUNCTION FORWARDS, AND THE ONLY ONE IT ACCEPTS BEYOND `menu_state`:
+            none of the three callees declares any other, so offering one would
+            raise `TypeError` before the dispatch. A `transport` parameter was
+            declared here once and neither read nor forwarded - no caller supplied
+            it and no callee accepts it - so it is gone again (finding F-03, the
+            recurrence of B2-F5). The operator's transport declaration reaches the
+            handlers through the process-level policy
+            `args.install_connection_policy` installs while the linkage is bound,
+            not call by call - see the comment at the dispatch.
 
     Returns:
         `_Disposition.SERIOUS_ERROR` when the callee reported `> 7`, in which case
@@ -383,8 +320,8 @@ def load00(
     #  no fifth, its bridge having no transport policy to pass
     #  [copybooks/mysql-procedures.cpy:L72-L77]. What carries the declaration
     #  instead is the ONE process-level policy `args.install_connection_policy`
-    #  installs while the linkage is bound, from `--db-tls-*` and the deployment
-    #  contract, so every handler any phase reaches observes it without being told.
+    #  installs while the linkage is bound, from the deployment contract alone,
+    #  so every handler any phase reaches observes it without being told.
     #  That is the same mechanism the other six routes use; `gl_end_of_cycle.py`
     #  differs only because `gl080.run` DOES declare `dal_options`, and even there
     #  the route leaves it unset for exactly this reason.
@@ -627,16 +564,20 @@ def _build_parser() -> argparse.ArgumentParser:
     # dispatching menu is the General Ledger one, so that is the default identity.
     args.add_calling_data_arguments(parser, default_caller=args.WS_CALLER_GENERAL)
     args.add_gl_linkage_arguments(parser)
-    #  THE TRANSPORT DECLARATION - one contract, published on every route
-    #  (`args.add_transport_security_arguments`). No COBOL counterpart: the frozen
-    #  bridge's connect passes six values and no transport policy at all
+    #  THE TRANSPORT DECLARATION IS NOT AN OPTION ON THIS ROUTE, AND MUST NOT
+    #  BECOME ONE. The frozen `CALL` publishes the linkage operands and the write
+    #  gating answers, and nothing else; the frozen bridge's connect passes six
+    #  values and no transport policy at all
     #  [copybooks/mysql-procedures.cpy:L72-L77], transport being compiled into
-    #  `cobmysqlapi.c`, so the migration must decide it and the operator is the
-    #  only party that knows. Stating NOTHING leaves the deployment contract to
-    #  decide, which is what makes the migrated cycle behave as the compiled one
-    #  (rule R-3); it decides no posted figure, so it cannot make two runs of one
-    #  scenario differ (rule R-6).
-    args.add_transport_security_arguments(parser)
+    #  `cobmysqlapi.c`. A `--db-tls-*` or `--db-allow-plaintext` option here would
+    #  add a program input and two refusal outcomes the compiled program has not
+    #  got, which rule R-3 forbids - and a certificate path on a command line is a
+    #  process-listing leak besides. Deployment security is resolved ONCE, outside
+    #  the accounting path, from the same contract the six connection parameters
+    #  come from: `args.install_connection_policy` reads it through
+    #  `cli/rdbms_params.resolve_transport_policy` while the linkage is bound, and
+    #  every handler observes the installed policy without being told. It decides
+    #  no posted figure, so it cannot make two runs of one scenario differ (R-6).
     #  Diagnostics only: no COBOL counterpart, no database effect. Shared with
     #  the other six routes so the level policy has one spelling.
     args.add_log_level_argument(parser)

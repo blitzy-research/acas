@@ -19,13 +19,32 @@ but it has not answered every question in this register.** The original authorin
 host described by AAP §0.6.9 had neither a COBOL compiler nor a container
 runtime. During QA remediation the writable Compose harness was repaired without
 editing the frozen tree, the strict oracle build completed, and all eight
-mandated scenarios produced observed empty diffs on **2026-08-04**.
+mandated scenarios produced observed empty diffs on **2026-08-04**. A ninth
+scenario, `end_of_cycle_gl`, was added later to reach `gl080`, and on
+**2026-08-07 all nine** produced observed empty diffs. Both dates are kept: an
+entry resolved on the earlier date was resolved against an eight-journey sweep,
+and restating that as nine would backdate a run that had not yet happened.
 
-Entries below therefore distinguish three things: source-only readings,
-measurements actually made through the compiled program, and experiments that
-remain unexecuted. `RESOLVED BY ORACLE` is used only where the cited run directly
-answered the stated question; a related green scenario does not promote an
-unmeasured boundary question.
+**The blocker AAP §0.6.9 records is spent, and the record of it is worth keeping straight.** That risk
+entry says *"The authoring host lacks the COBOL compiler and container runtime"* and scopes itself
+immediately — *"This is a property of the environment in which this plan was written, not a constraint on
+the work"*. It is not a standing property of the project and must not be read as one: the harness
+specifies both toolchains through its Compose images, the writable build volume was repaired without
+editing the frozen tree, the strict oracle build completed, and all eight mandated scenarios produced
+observed empty diffs on **2026-08-04**. Anywhere below that describes a question as unanswered, the reason
+is the question's own — an unbuilt seed, an unobservable boundary, a deliberate refusal to adjudicate —
+and **never** "no compiler is available".
+
+**How the three kinds of claim are labelled, because a register whose statuses cannot be trusted is
+worthless.** Entries distinguish source-only readings, measurements actually made through the compiled
+program, and experiments that remain unexecuted. `RESOLVED BY ORACLE` is used only where the cited run
+directly answered the stated question; a related green scenario does not promote an unmeasured boundary
+question. And **provenance is held to the same standard as status**: a measured figure is cited to durable
+repository state — a committed script, a frozen locator, or a section of
+[`scenario-diff-evidence.md`](scenario-diff-evidence.md) — or it is labelled a *report of an observed run
+rather than a retained artefact*. Console logs written to host temporary paths during a remediation session
+are **not** evidence and are not cited anywhere below, because a citation a reader cannot open is
+indistinguishable from an assertion.
 
 That is not an apology. An honestly incomplete register is a usable engineering artefact; a register that
 quietly fills its gaps with the plausible answer is worse than no register at all, because every
@@ -55,13 +74,8 @@ instead. Every locator below was read at that release.
 
 ## 1. Rules provenance
 
-**There is no user rules document for this project.** The `review_rules` facility was called while this
-register was written, including a full-document read with an explicit range, and every call returned
-exactly:
-
-```text
-No user rules provided.
-```
+**There is no user rules document for this project.** The Agent Action Plan states it directly in §0.7.1:
+*"No separate user rules document was provided for this project."*
 
 Do not go looking for a rules file. There is none. Stated plainly, as the absence requires: this project
 has no rules document, and **enterprise-standard best practice therefore applies wherever the Agent
@@ -133,8 +147,36 @@ The separation is structural rather than a matter of discipline. AAP §0.3.1 sta
 
 > *"there is no import path from `acas_posting` to `harness`."*
 
-— and the checkout enforces it: `harness/` contains **no `__init__.py`** (verified), so it is not a
-package and cannot be imported as one, and `pyproject.toml` excludes `harness*` from the distribution.
+— and the checkout enforces it in two ways that were verified here rather than assumed. One earlier
+argument is withdrawn first, because leaving it standing would let a reader check the weakest of the
+three and conclude the separation is not real:
+
+- ⚠️ **Withdrawn: "`harness/` contains no `__init__.py`, so it is not a package and cannot be imported
+  as one."** An earlier revision of this section offered exactly that. The premise is true and the
+  inference is **invalid**: PEP 420 makes a directory without `__init__.py` an implicit namespace
+  package, so `import harness.diff_states` resolves fine from any process whose `sys.path` includes the
+  repository root. The missing marker file is therefore not what keeps the two trees apart, and citing
+  it as proof invites a reader to disprove the separation by disproving the argument for it. The
+  separation is real; the next two bullets are what establish it. (What the missing file *does* buy is
+  smaller and worth stating exactly: the scenario tier does not rely on a namespace import at all — it
+  loads `dump_tables`, `normalize` and `diff_states` **by explicit file path** through
+  `importlib.util.spec_from_file_location`, registering each under a namespaced `sys.modules` key, so no
+  repository-root entry is added to `sys.path` and no harness name can shadow a stdlib one.)
+- **Packaging is an explicit allow-list, not an exclusion pattern.** `pyproject.toml` names the eight
+  entries that ship — the seven code packages of `acas_posting` plus `acas_posting.data_dictionary` as
+  a data directory — and sets `include-package-data = false` pyproject.toml's `[tool.setuptools]` `packages` allow-list. `harness` is
+  therefore absent by construction rather than filtered out by a rule that a later edit could widen.
+  Belt and braces: `harness` sits in pytest's `[tool.pytest.ini_options] norecursedirs` and `harness/*`
+  in the `[tool.coverage.run] omit` list, the latter annotated in the file itself as
+  "Belt and braces for R-1".
+- **The import direction was measured, and the one place it does run is the legitimate one.** A search
+  of `harness/*.py` for `import acas_posting` or `from acas_posting` returns **zero** hits: the three
+  Python helpers the tests load are pure — they read table state, canonicalise it and diff it, and none
+  of them knows the migrated package exists. The only `import acas_posting` anywhere under `harness/`
+  is inside `harness/run_python_scenario.sh`, in the inline Python it feeds to the interpreter — an
+  import probe and two `SystemDataBlock` reads. That is the harness *driving* the migrated cycle out of
+  process, which is exactly what R-1 licenses; it is not `acas_posting` reaching for COBOL, which is
+  what R-1 forbids. The prohibited direction has zero instances.
 
 ### 2.4 R-2 — Zero binary floating point
 
@@ -216,27 +258,50 @@ volume before it runs the maintainer's scripts unmodified. No experiment here ma
 
 ## 4. Status vocabulary
 
-Four statuses, used consistently, and one of them is reserved.
+Five statuses, used consistently, and one of them is earned rather than chosen.
 
 | Status | Meaning | Permitted evidence |
 | --- | --- | --- |
 | **`PENDING — AWAITING ORACLE EXECUTION`** | Genuinely open. The experiment is specified and has not been run. | none — the entry states the question and the plan, nothing more |
 | **`RESOLVED BY CONSTRUCTION`** | Settled by reading the frozen source, with the reading shown in full so it can be checked and contested. | frozen-source locators, and arithmetic performed on what they declare |
 | **`PARTIALLY RESOLVED`** | One path settled by construction, another still open. Both halves are stated separately, and the boundary between them is named. | as above for the settled half; nothing for the open half |
-| **`RESOLVED BY ORACLE`** | **RESERVED. Not used anywhere in this register.** | an observed run, with the captured observable recorded |
+| **`RESOLVED BY ORACLE`** | Settled by watching the compiled program produce the observable, with the value it produced recorded in the entry. | an observed run or a focused compiled probe, with the captured observable recorded verbatim |
+| **`MEASURED — DECLINED ON SCOPE`** | The observable WAS watched, and the behaviour is deliberately **not** reproduced because the AAP excludes the surface it belongs to. | the captured observable, plus the AAP section that excludes it |
 
-**The reserved status is the load-bearing one.** It must not be written until an agent has actually
-watched the compiled program produce the observable, and the value it produced is recorded in the entry.
-The string `RESOLVED BY ORACLE` occurs **five** times in this file, all of them talking *about* the status
-rather than assigning it: once in the opening box, twice in this section, once in §11's statement about the
-index column, and once in §17's audit row. It appears **zero** times as an entry's status. §17 records that as
-a counted property rather than an intention, so a future edit that promotes an entry without a measurement
-changes a number a reviewer can check.
+**`RESOLVED BY ORACLE` is the load-bearing status, and it is earned rather than assigned.** It must not be
+written until an agent has actually watched the compiled program produce the observable, and the value it
+produced is written into the entry. What makes it checkable is that the value is there: an entry carrying
+this status and no captured observable is a defect a reviewer can see without re-running anything. Every
+entry now carrying it satisfies that: each states the inputs, the values the compiled program produced, and
+the toolchain the probe ran under.
+
+⚠️ **`MEASURED — DECLINED ON SCOPE` exists because one question needed a status neither open nor resolved.**
+`Q-EDITED-BLANK-WHEN-ZERO`'s rendering was measured in full, and the migration deliberately does not
+implement it: every picture it governs is a print-line item and AAP §0.2.2 excludes report formatting beyond
+database effects. Calling that `RESOLVED BY ORACLE` would imply the rendering is reproduced. Calling it
+`PENDING` would discard a measurement. It is used **once**, for that entry, and §17 counts it.
+
+⚠️ **A correction to this section, recorded rather than silently absorbed.** This table previously described
+`RESOLVED BY ORACLE` as *"RESERVED. Not used anywhere in this register"*, and asserted that the string appeared
+**zero** times as an entry's status. That was true when it was written and became false as soon as the first
+measurements landed — §11 already carried it on three entries while this section still called it unused. The
+claim has been replaced with the rule above, which does not decay, and the **counts** now live only in §17,
+where they belong: one place to update, and a reviewer checking §17 against the entries cannot be misled by a
+second, staler tally here. §17 therefore records the status distribution as a counted property rather than an
+intention, so an edit that promotes an entry without a measurement changes a number a reviewer can check. The
+general lesson is recorded in §9: a document that counts itself must count itself in exactly one place.
 
 Two statuses that deliberately do **not** exist: "probably", and "resolved by inference from the
 standard". The second is the dangerous one, because it reads like evidence. Where the ISO reading is the
 one the Python side currently implements, the entry says so in those words — *implemented provisionally
 on this basis, not observed* — and stays `PENDING`.
+
+**A measured negative is a resolution, not a non-answer.** Several questions here are settled by a
+measurement showing that the thing asked about *cannot be observed at all* — the compiler refuses the
+statement, or the only receiver is a print line the schema never sees. Those are `RESOLVED BY ORACLE` when a
+probe produced the refusal, and the refusal is quoted in the entry. The distinction that matters is between
+*measured-impossible*, which is an answer, and *not yet attempted*, which is `PENDING`; conflating them is
+how an unexamined question comes to look closed.
 
 ---
 
@@ -244,8 +309,10 @@ on this basis, not observed* — and stays `PENDING`.
 
 **⭐ Identifiers are externally imposed and must not be renumbered.** The sibling `tests/arithmetic/`
 suite, the twelve program modules, the twenty-two data-access modules and the generated data dictionary
-all cite these identifiers directly — including inside `xfail(strict=True)` reason strings, and inside
-per-field `ambiguity_refs` lists in `data_dictionary/acas_posting_dictionary.json`. Renumbering would
+all cite these identifiers directly — in assertion messages, in module-level question registers, and inside
+per-field `ambiguity_refs` lists in `data_dictionary/acas_posting_dictionary.json`. (They were also cited in
+`xfail(strict=True)` reason strings until every one of those was converted to an assertion of a measured
+value; the citations moved into the assertion messages rather than disappearing.) Renumbering would
 break the sibling suite silently, which is the worst available failure mode for a register whose purpose
 is that an unmeasured value can never be mistaken for a measured one.
 
@@ -284,9 +351,12 @@ pattern for exactly that reason, and the `Q-70` family it caught is §14.1a.
 they were numbered independently:
 
 1. **This register** — the shared one. It is the one the generated dictionary and both sibling documents
-   use: `acas_posting/dictionary/generate.py` writes `"Q-3"` and `"Q-4"` into per-field `ambiguity_refs`,
-   and [`anomaly-log.md`](anomaly-log.md) carries the statuses `PENDING — Q-3` for A-11 and
-   `PENDING — Q-4` for A-15. An **unqualified** `Q-n` in any migration document means this register.
+   use: `acas_posting/dictionary/generate.py` writes `"Q-4"` into per-field `ambiguity_refs` — 28 entries,
+   alongside one `"Q-6"` — and [`anomaly-log.md`](anomaly-log.md) cross-references both A-11 and A-15 to
+   their questions here. It formerly wrote `"Q-3"` as well, on the 91 entries that carry `A-11`, and stopped
+   when `Q-3` was measured; the **anomaly** tag `A-11` remains on all 91, because the defect outlived the
+   question. Both anomalies are now `REPRODUCED` rather than `PENDING`. An **unqualified** `Q-n` in any
+   migration document means this register.
 2. **The semantics-layer register** — `acas_posting/cobol/usage.py` claims `Q-5.1` … `Q-5.3`,
    `acas_posting/cobol/move.py` claims `Q-9` … `Q-14`, and `acas_posting/programs/gl071_batch_sort.py`
    claims `Q-15`. The claim is stated in `acas_posting/dal/acasirsub5_irs_final.py` at `L718-L721`.
@@ -296,9 +366,15 @@ they were numbered independently:
    `acas_posting/dal/acasirsub4_irs_posting.py` uses letters — `Q-A`, `Q-B`, `Q-C` — precisely to avoid
    the clash.
 
-The collisions this produces are **tabulated in §15 and resolved by scoping, never by renumbering**. A
-citation found inside a module that declares its own register resolves in that module; a citation in a
-document, a test id, a dictionary `ambiguity_refs` entry, or a bare cross-reference resolves here.
+The collisions this produces are **resolved in §15, and by two rules rather than one.** §15.1 assigns every
+colliding reading a **globally unique canonical identifier** — module-prefixed, in the pattern
+`Q-PL055-n` already established — so that any reading can be named unambiguously anywhere, including in a
+commit message or a review comment where the file it came from is not visible. §15.2 then tabulates the
+collisions themselves. **Nothing is renumbered in code**: the bare number survives as a declared
+file-scoped alias, so a citation found inside a module that declares its own register still resolves in that
+module, and a citation in a document, a test id, a dictionary `ambiguity_refs` entry or a bare
+cross-reference still resolves here. ⚠️ Scoping alone was the *earlier* answer and it was insufficient,
+because it disambiguates only for a reader who knows which file the identifier came from.
 
 ---
 
@@ -358,9 +434,9 @@ uses the verified values.** Each correction is listed rather than applied silent
 | `POST-RRN` comment claim | *"the schema's only column carrying a `COMMENT`"* | **the only column in `GLPOSTING-REC`** carrying one | the schema has 13 further column comments — `[mysql/ACASDB.sql:L562-L567]`, `L575`, `L597`, `L602-L603`, `L610`, `L902-L903`, `L909` — and a table-level comment at `L195` |
 | Purchase testing statement | `README.TXT:L44-L47` | **`README.TXT:L45-L48`** | `L44` is blank; the sentence runs `L45-L48` |
 | `Q-5`'s `Post-Legend` chain | `sales/sl060.cbl:L1085-L1092` | **`sales/sl060.cbl:L1085-L1094`** | the `STRING` runs `L1091-L1094`; `L1092` is mid-statement |
-| bare `comp` census | *"410"* | **236** in `copybooks/` | not reproducible under any scope tried; see §9's method note |
+| bare `comp` census | *"410"* | **214** declared / 144 code-only over the canonical 187 `copybooks/*.cob` files | not reproducible under any scope tried. An earlier revision of this row gave **236** over the wider 197-file scope; that figure was itself wrong — see §9, which now adopts [`traceability.md`](traceability.md)'s canonical census by reference |
 | reference-modification census | *"83 live uses"* | **74** `(n:m)` forms on live lines of the twelve in-scope programs | as above; the `(7:4)` ×16 and `(7:2)` ×4 sub-counts **do** reproduce exactly |
-| `tests/scenarios/` | *"confirmed present, 8 files"* | **confirmed present — eight committed scenario tests** | the original absence was a point-in-time authoring fact, superseded by the completed migration tree |
+| `tests/scenarios/` | *"confirmed present, 8 files"* | **confirmed present — nine committed scenario tests**: the eight that discharge AAP §0.8.5's mandate, plus `test_end_of_cycle_gl.py` added beyond it to reach `gl080` | the original absence was a point-in-time authoring fact, superseded by the completed migration tree; the count moved from eight to nine when the end-of-cycle scenario was added |
 
 Two further points of presentation, corrected rather than repeated:
 
@@ -381,10 +457,10 @@ Two disciplines apply to a register that will be read by agents who cannot see t
 **Repository paths are cited only when they exist.** Verified present at the time of writing: the
 thirteen modules under `acas_posting/programs/`, the twenty-two under `acas_posting/dal/`, the seven under
 `acas_posting/cobol/`, `acas_posting/clock.py`, `acas_posting/dates.py`, `acas_posting/workfiles.py`, the
-`acas_posting/cli/` and `acas_posting/records/` and `acas_posting/dictionary/` packages; the fifteen test
-files under `tests/arithmetic/`, the eight under `tests/scenarios/`, plus `tests/conftest.py` and
+`acas_posting/cli/` and `acas_posting/records/` and `acas_posting/dictionary/` packages; the nineteen test
+files under `tests/arithmetic/`, the nine under `tests/scenarios/`, plus `tests/conftest.py` and
 `tests/determinism/test_two_runs_byte_identical.py`; the committed scripts and two Dockerfiles under
-`harness/` with its eight scenario definitions under `harness/scenarios/`; both files under
+`harness/` with its nine scenario definitions under `harness/scenarios/`; both files under
 `data_dictionary/`; all three sibling migration documents
 [`anomaly-log.md`](anomaly-log.md), [`traceability.md`](traceability.md), and
 [`scenario-diff-evidence.md`](scenario-diff-evidence.md); and the repository
@@ -399,19 +475,41 @@ register was re-derived rather than carried over. Unless an entry says otherwise
 
 - A *live* line is one that is not a `*>` comment line. Counts labelled "live" exclude comments; counts
   labelled "declared" include them, because a commented-out declaration is still evidence of intent.
-- The usage census is over `copybooks/` only, the directory that holds the record layouts: `comp-3`
-  **182**; `binary-long` **166** declared, 165 live; `binary-short` **32** declared, 31 live;
-  `binary-char` **84**; bare `comp` **236** — the token `comp` matches 422 times, of which 182 are the
-  `comp-3` spelling and 4 the `comp-5` spelling.
-- The sign-clause census is also over `copybooks/`: `sign leading` **4**, `sign is leading` **2**,
-  `sign trailing` **0**, `separate` **0**. Six leading-sign fields in total, and no separate sign anywhere
-  in the frozen record layouts.
+  This definition applies to the reference-modification and per-program counts below. It does **not**
+  apply to the storage census, which is no longer published here — see the next bullet.
+- ⚠️ **The storage census is not restated here. It is adopted by reference from
+  [`traceability.md`](traceability.md), "The canonical storage census".** An earlier revision of this
+  section published its own figures over a 197-file scope — bare `comp` **236**, `binary-long` 166
+  declared / 165 live, `binary-short` 32 / 31 — and `traceability.md` published different figures over a
+  187-file scope, with neither document stating enough for a reader to tell which was right. Two of
+  those numbers were wrong, and the reasons are worth recording rather than quietly overwriting:
+  - **Bare `comp` was 236 and is 219 declared / 146 live over that same 197-file scope.** The 236 was
+    derived as 422 − 182 − 4. The derivation double-counts, because the 422 came from a `\bcomp\b`
+    match that *also* hits `comp-3`, `comp-5` and `Comp-Time-Taken`; subtracting only two of the
+    hyphenated families from it cannot recover the bare token. The canonical census defines bare `comp`
+    as `(?i)\bcomp\b(?!-)` and counts it directly.
+  - **The declared/live split above is not the canonical split.** "Live" here drops whole-line comments
+    only; the canonical census's "code only" column additionally drops inline `*>` tails, which is why
+    its `binary-long` code figure is **128** and not 165. Neither is wrong — they measure different
+    things — but two methods and one clause name is exactly how the disagreement arose, so this register
+    now cites one method and one set of figures.
+  - **The canonical scope is the 187 `copybooks/*.cob` record-layout files**, with the ten non-`.cob`
+    files named individually there and the full 197-file delta published beside the main table. The row
+    that matters is `binary-double`: **0** over the 187 and **8** over the 197, all in the vendored
+    `copybooks/mysql-variables.cpy`. A seventh storage class therefore exists in the directory and in no
+    ACAS record layout, which is why the narrower scope is the canonical one.
+- The sign-clause census is likewise the canonical one: `sign leading` **4**, `sign is leading` **2**,
+  `sign trailing` **0**, `separate` **0** — figures that are identical under both scopes and both line
+  definitions, so nothing turned on the disagreement. Six leading-sign fields in total, and no separate
+  sign anywhere in the frozen record layouts.
 - `ON SIZE ERROR` **0** and `REMAINDER` **0**, counted per file across all twelve in-scope programs and
   zero in every one of them.
 - No `-std=` dialect flag appears in any frozen shell script, no `>>SET` directive in any `.cbl`, `.cob`
   or `.scb`, and no `binary-truncate` anywhere in the frozen sources. Verified by search over the whole
   checkout; the only matches for those strings in the tree are Python migration files quoting the absence.
-- The two structural censuses over `copybooks/`, for completeness: `occurs` **110** and `redefines` **61**.
+- The two structural censuses, for completeness, quoted from the canonical census rather than recounted:
+  `occurs` **107** and `redefines` **60** over the canonical 187 `*.cob` files (99 and 53 code-only),
+  becoming **110** and **61** if the wider 197-file scope is used.
 - Out-of-scope names are given as **counts only**, never enumerated as though migrated: 22 in-scope tables
   + 11 out of scope = **33** `CREATE TABLE` statements in `[mysql/ACASDB.sql]`; 20 in-scope bridge pairs +
   8 out of scope = **28** pairs. The checkout holds 28 `common/*MT.scb` and 29 `common/*MT.cbl`; the extra
@@ -421,39 +519,133 @@ register was re-derived rather than carried over. Unless an entry says otherwise
 ⚠️ **Where a re-derived figure disagrees with the received one, both are recorded and neither is presented
 as the other's correction on authority.** The Agent Action Plan and
 `tests/arithmetic/test_comp3_packed_decimal.py` at `L77-L80` both record bare `comp` as **410**,
-`binary-short` as **31**, `occurs` as **107** and `redefines` as **60**. Counting live `copybooks/`
-declarations gives **236**, **31**, **110** and **61**. Three of the four differ by a handful and are
-plainly a matter of comment-line inclusion or of which directories were counted; the `comp` figure differs
-by enough that the two counts cannot be reconciled by that explanation, and no scope tried here reproduces
-410. The figures used in this register are the ones above, with the method stated, precisely so that a
-reader who prefers the specification's numbers can see exactly what was counted and disagree on the
-evidence.
+`binary-short` as **31**, `occurs` as **107** and `redefines` as **60**. The canonical census in
+[`traceability.md`](traceability.md) gives, over its 187 `copybooks/*.cob` files, **214** declared / 144
+code-only, **31** / 30, **107** / 99 and **60** / 53. Three of the four therefore **reproduce the
+specification exactly** on the all-lines column — `binary-short`, `occurs` and `redefines` — which is
+itself informative: it says the specification counted declarations including comments, over the record
+layouts, and that the earlier disagreement on those three was an artefact of the wider 197-file scope
+this register used to publish. Only bare `comp` does not reconcile: no scope and no line definition tried
+reproduces **410**, and the canonical figure is 214 declared. That single unreconciled figure is left
+stated rather than explained away, because guessing at the specification's method would be the same
+mistake as guessing at compiled behaviour.
 
 ---
 
 ## 10. The oracle protocol every experiment invokes
 
 Every experiment below is a specialisation of one protocol, so the protocol is
-stated once here and the entries state only what they change. The supported
-driver expands the original seed/run/dump/reset/run/dump/diff recipe into ten
-fail-closed stages by making both normalisations and the publication check
-explicit:
+stated once here and the entries state only what they change.
+
+**The primary flow is three commands, and `run_parity.sh` is the driver.** Nothing below should be run
+stage by stage unless an entry needs to interpose an observation, because the driver is fail-closed at
+every boundary and a hand-run sequence is not:
 
 ```text
 C="docker compose -f harness/docker-compose.yml run --rm -T gnucobol"
-S=<scenario file>   N=<its basename without the extension>
+
+#  Both variables are IN-CONTAINER paths. The checkout is mounted at /repo
+#  READ-ONLY (it is frozen specification, R-3) and the writable data volume is
+#  mounted at /data, so a bare `harness/...` argument resolves against the
+#  container's working directory and is a common way to waste a run.
+S=/repo/harness/scenarios/<scenario>.yaml
+N=<the scenario's basename without the extension>
 
 $C /repo/harness/build_oracle.sh                         # once per image
-$C /repo/harness/build_fixtures.sh "$N"                  # after fixture changes
+$C /repo/harness/build_fixtures.sh "$N"                  # MANDATORY before a first run,
+                                                         # and after any fixture change
 $C /repo/harness/run_parity.sh \
      --seed-dir "/data/fixtures/$N" "$S"                 # stages 1 through 10
 ```
 
-The driver performs reset+seed, COBOL run, COBOL dump, COBOL normalisation,
-reset+re-seed, Python run, Python dump, Python normalisation, publication
-verification, and the diff. Four properties are load-bearing:
+⚠️ **`build_fixtures.sh` is not optional and is not a convenience.** A scenario's `seed_dir` resolves
+relative to the directory holding the scenario file, which in the shipped Compose topology is inside the
+read-only checkout — so the fixture cannot be built where the scenario declares it. `build_fixtures.sh`
+materialises it under the data volume instead, and `--seed-dir "/data/fixtures/$N"` is how `seed.sh` is
+told where it went, by `[harness/seed.sh acas_on_exit]`. The option changes **where** the declared files are read
+from and never **what** is required: the scenario's own `seed_files` list remains the sole authority, every
+declared name is still checked, `system.dat` is still mandatory, and the staged fixture is still fresh with
+an identity marker recording every file and its SHA-256 digest.
 
-- **The empty diff is the pass condition, and the only one.** `[harness/docker-compose.yml:L42-L44]`:
+### The ten stages, and the exit contract
+
+⚠️ **Earlier revisions of this register described an eight-stage protocol and referred to "the stage-8
+diff". That vocabulary is stale and every occurrence has been replaced.** The recipe has always had eight
+*logical* steps — seed, run, dump, reset, run, dump, and the diff — but the driver numbers **ten**, because
+it makes both normalisations and the publication check explicit rather than folding them into their
+neighbours. A reader meeting "stage 8" in an older document should read it as **today's stage 10**, the
+diff. The authority is `[harness/parity_stages.sh ACAS_PARITY_STAGES]`, which
+`[harness/run_parity.sh ACAS_PARITY_STAGE_REGISTRY]` reads and
+`[harness/run_parity.sh acas_parity_usage]` prints under `--help`.
+
+| Stage | What it does | Side |
+| ---: | --- | --- |
+| 1 | reset the database, then seed it from the built fixture | — |
+| 2 | run the compiled COBOL cycle | COBOL |
+| 3 | dump the affected tables | COBOL |
+| 4 | normalise that dump | COBOL |
+| 5 | reset and **re-seed from the same fixture**, so both sides start identically | — |
+| 6 | run the Python cycle | Python |
+| 7 | dump the affected tables | Python |
+| 8 | normalise that dump | Python |
+| 9 | verify both normalised trees are present and published | — |
+| 10 | **diff them** — an empty diff is the pass condition | — |
+
+**The exit contract, which is what makes a reported observation trustworthy.** It is quoted from the
+driver's own `--help` `[harness/run_parity.sh acas_parity_usage]` rather than paraphrased, because the design
+decision inside it is easy to lose: **there is deliberately no "a stage failed" code.** A failed run exits
+with the failing stage's *own* status, passed through verbatim, on the ground stated at
+`[harness/run_parity.sh EX_PRECONDITION]` and its siblings — flattening every failure into one code would discard the thing an
+operator needs, since each cause calls for a different next step.
+
+| Status | Meaning |
+| ---: | --- |
+| `0` | every stage ran and stage 10 found the two states **identical** — the pass condition, and the only one |
+| `1` | stage 10 found a **real difference** |
+| `2` | stage 10 **could not compare at all** — not a pass and not a failure, but an absence of evidence |
+| `70` / `71` | usage / precondition (environment or scenario assertion) |
+| `75` / `76` | the scenario's seed fixtures are not staged / the seed reported success and left no rows |
+| `74` | the compiled oracle is not built |
+| `69` | a behavioural difference detected by the Python runner's own assertions |
+| `83` | a dump was asked for an out-of-scope table (`EX_SCOPE`) |
+
+An entry that reports a value read from a run that exited anything other than `0` must say so. Two flags
+also invalidate a run as evidence and are named here so nobody uses them and then cites the result:
+`--keep-going`, which the driver's own help calls *"NOT THE PROTOCOL"* and says produces a verdict that
+*"is not evidence (rule R-6)"*, and `--dry-run`, which runs nothing.
+
+**⚠️ Stage numbers here are global. "Check" numbers printed by a runner are not.**
+`run_cobol_scenario.sh` and `run_python_scenario.sh` each emit their own `Check n/8` preflight headings,
+which count that one script's internal checks and have no relation to the ten stages above. Reading a
+runner's `Check 8/8` as the parity diff is the specific confusion this note exists to prevent.
+
+**The manual expansion, for the entries that interpose an observation.** Stages 1 and 5 are the **same
+command**, `reset_db.sh --seed-dir "/data/fixtures/$N" "$S"`, which drops and re-applies the frozen schema
+and then forwards `--seed-dir` to `seed.sh` `[harness/reset_db.sh acas_compose_seed_argv]`; the driver's help states why
+they are identical on purpose `[harness/run_parity.sh acas_parity_stage_banner]` — *"the Python side's starting state the
+COBOL side's starting state rather than the COBOL side's ENDING state"*. Every block below therefore opens
+with that one command rather than with `seed.sh`, which an earlier revision used and which would seed
+whatever the previous run had left in the schema. The rest expands as:
+
+```text
+$C /repo/harness/reset_db.sh   --seed-dir "/data/fixtures/$N" "$S"   # stage 1
+$C /repo/harness/run_cobol_scenario.sh                        "$S"   # stage 2
+$C /repo/harness/dump_tables.py --scenario "$N" --side cobol  …      # stage 3
+$C /repo/harness/normalize.py   --scenario "$N" --side cobol         # stage 4
+$C /repo/harness/reset_db.sh   --seed-dir "/data/fixtures/$N" "$S"   # stage 5
+$C /repo/harness/run_python_scenario.sh                       "$S"   # stage 6
+$C /repo/harness/dump_tables.py --scenario "$N" --side python …      # stage 7
+$C /repo/harness/normalize.py   --scenario "$N" --side python        # stage 8
+$C /repo/harness/diff_states.py --scenario "$N" --scenario-file "$S" # stages 9-10
+```
+
+The blocks in §12 and §13 are written in that expanded form and abbreviate the stages they do not change.
+`run_parity.sh --dry-run` prints the ten commands for a given scenario without running any of them, which
+is the way to check an expansion against the driver rather than against this table.
+
+Four properties are load-bearing:
+
+- **The empty diff is the pass condition, and the only one.** `[harness/docker-compose.yml "AN EMPTY DIFF FROM THAT LAST COMMAND IS THE PASS CONDITION"]`:
   *"AN EMPTY DIFF FROM THAT LAST COMMAND IS THE PASS CONDITION, and the only one: a stage that exits
   non-zero has produced no evidence, so re-seed rather than carry a partial capture forward."* An entry
   that reports a value read from a run whose earlier stage failed has reported noise.
@@ -472,8 +664,28 @@ Three per-question levers appear repeatedly below and are described once:
 | The affected-table list | `--scenario-file` for the scenario's own `affected_tables`, or `--tables` for an explicit list — **never both**, since `harness/dump_tables.py` rejects the combination as *"alternative ways of choosing the same list, so use exactly one"* | bounds the observation to the tables the scenario is about; see `Q-7` |
 | The IRS fan-out state | `IRS-Instead` in the seeded system row — `[copybooks/wssystem.cob:L179-L181]`, with `88 IRS-Used value "Y"` and `88 IRS-Both-Used value "B"` | three states, and the state decides which tables a run touches at all |
 
-Where an entry needs a value at a boundary the eight scenarios do not already seed, it says so explicitly
-and describes the seed it needs. It does **not** propose editing a frozen loader to accept one.
+Where an entry needs a value at a boundary the nine committed scenarios do not already seed, it says so
+explicitly and describes the seed it needs. It does **not** propose editing a frozen loader to accept one.
+
+### The provenance a reported observation carries with it
+
+An observation below is a statement about **the two runtimes that produced it**, not about their version
+ranges, and the two are worth naming so that a later reader can tell whether a re-run is comparable.
+
+- **The compiled side is GnuCOBOL 3.2 final**, the version the maintainer's own compile script targets
+  `[common/comp-common.sh:L9]` and the readme records `[README.TXT:L53]`, against **MariaDB 10.11.7**, the
+  server the frozen schema dump was produced by `[mysql/ACASDB.sql:L1]`. Both are pinned by the harness
+  images rather than taken from the host.
+- **The Python side is a C-backed CPython 3.12.** `pyproject.toml` pins `requires-python = "==3.12.*"`, and
+  what the pin protects is that `decimal` is backed by the C `_decimal` (`libmpdec`) implementation rather
+  than the pure-Python fallback, since every monetary operation passes through it.
+  [`../../README-python-migration.md`](../../README-python-migration.md) §6 reconciles the three version
+  numbers in play: the Agent Action Plan's reference interpreter is **3.12.3** with `libmpdec` 2.5.1, and
+  the interpreter this checkout is exercised on is **3.12.13**.
+- ⚠️ **A green diff attests to the patch level it ran on, and not to `3.12.*` as a whole.** No entry below
+  claims parity across every 3.12 patch release, and none should be read as claiming it: the pin is a
+  *constraint* on what may run, not a body of evidence about everything it admits. A pure-Python `decimal`
+  build is not accepted as parity evidence at all, and 3.13 is outside the evidence entirely.
 
 ### 10.1 The former build blocker, resolved without touching the freeze
 
@@ -485,8 +697,34 @@ materialises a semantically inert comment-only file under
 copy path.
 
 The strict build then completed with zero fatal diagnostics, all **29/29**
-expected `*MT` bridges, and all **28/28** loaders. Evidence:
-`/tmp/blitzy_phase2_build_oracle_final.log`.
+expected `*MT` bridges, and all **28/28** loaders.
+
+**Evidence, and what survives of it.** The durable evidence is the shim and the build script that
+materialises it, both committed and both readable without running anything:
+`harness/copybook-shims/ACAS-SQLstate-error-list.cob` is the comment-only file, and `harness/build_oracle.sh`
+copies it to `$ACAS_BUILD/copybooks` `[harness/build_oracle.sh acas_install_sqlstate_comment_shim]`, adding
+that writable directory to the compiler's copy path — the checkout itself is never written to. The script also
+**enforces a compiled module per source file** rather than merely counting successes, so "29/29" and "28/28"
+are the checkout's own inventories — 29 `common/*MT.cbl` and 28 `common/*LD.cbl` — verified one for one, not a
+tally reported by a run. (§9 records why the bridge count is 29 against 28 `.scb`: the extra generated file is
+`common/dummy-rdbmsMT.cbl`, the stub, which has no `.scb` counterpart.) To regenerate the whole build rather
+than trust a transcript, `harness/build_oracle.sh` prints the bridge and loader tallies as it goes and writes
+its two compile transcripts under `$ACAS_LOG_DIR` — `$ACAS_OUT/build`, which it names on its own last lines:
+
+```bash
+# CLONE_INDEX and the credential variables, per README-python-migration.md section 8.1.
+# They have no committed defaults: Compose refuses to render if any is unset.
+export CLONE_INDEX=001
+docker compose -f harness/docker-compose.yml run --rm -T gnucobol \
+    /repo/harness/build_oracle.sh < /dev/null
+```
+
+⚠️ **The build console log an earlier revision cited here was written to a session-scoped `/tmp` path and is
+not retained; the citation has been removed** rather than left pointing at a file no reader can open. The
+"zero fatal diagnostics" claim is therefore a **report of an observed build rather than a retained artefact** —
+reproducible, because the build is fail-closed on every expectation it asserts, but not a filed one. The
+command above and the transcripts it leaves in the named volume are the citation: they are the artifacts that
+persist.
 
 This does not invent an SQLSTATE mapping and does not edit frozen
 `copybooks/`. It removes the obsolete global blocker while leaving each
@@ -507,35 +745,46 @@ choice: they compose the output path and nothing else, so they appear in both fo
 
 ## 11. The register — index
 
-Thirteen primary entries. The status column is the one to read first.
+Fourteen primary entries. The status column is the one to read first.
 
 | id | Question | Status | Consuming module(s) |
 | --- | --- | --- | --- |
-| [`Q-1`](#q-1) | Does `maps04` leave its output field untouched on a rejected date, and does every in-scope caller pre-zero it? | `PENDING — AWAITING ORACLE EXECUTION` | `acas_posting/dates.py`, `acas_posting/clock.py` |
-| [`Q-2`](#q-2) | What intermediate precision the default compiler applies at the five `ROUNDED` sites, and to the compound VAT expression | `PENDING — AWAITING ORACLE EXECUTION` | `acas_posting/cobol/arithmetic.py` |
-| [`Q-3`](#q-3) | What a negative binary value *becomes* once the bridge narrows it into an unsigned host variable and an unsigned column | `PENDING — AWAITING ORACLE EXECUTION` | `acas_posting/dal/acas012_sales.py`, `acas_posting/dal/acas007_gl_batch.py` |
-| [`Q-4`](#q-4) | Which of the batch record's two declared lengths governs the record actually read | `PENDING — AWAITING ORACLE EXECUTION` | `acas_posting/records/gl_batch.py` |
-| [`Q-5`](#q-5) | What observable effect the unexplained `move RRN to postings` has, in each of the four Sales and Purchase posting programs | `PENDING — AWAITING ORACLE EXECUTION` | `sl060_invoice_posting.py`, `sl100_cash_posting.py`, `pl060_order_posting.py`, `pl100_payment_posting.py` |
-| [`Q-5.1`](#q-5-1) | The default `binary-size` and `binary-truncate` policy governing every `COMP` and `BINARY-*` field | `PENDING — AWAITING ORACLE EXECUTION` | `acas_posting/cobol/usage.py` |
-| [`Q-5.2`](#q-5-2) | The byte length of a `SIGN LEADING` display item — three readings, none adjudicated | `PENDING — AWAITING ORACLE EXECUTION` | `acas_posting/cobol/usage.py` |
-| [`Q-5.3`](#q-5-3) | The concrete zoned-decimal overpunch byte values, for both signs and for zero | `PENDING — AWAITING ORACLE EXECUTION` | `acas_posting/cobol/usage.py` |
+| [`Q-1`](#q-1) | Does `maps04` leave its output field untouched on a rejected date, and does every in-scope caller pre-zero it? — **untouched; yes, every forward caller does; and a non-zero field silently selects the REVERSE conversion** | **`RESOLVED BY ORACLE`** | `acas_posting/dates.py`, `acas_posting/clock.py` |
+| [`Q-2`](#q-2) | What intermediate precision the default compiler applies at the five `ROUNDED` sites, and to the compound VAT expression | **`RESOLVED BY ORACLE`** — extended precision throughout, quantized once at the store | `acas_posting/cobol/arithmetic.py` |
+| [`Q-3`](#q-3) | What a negative binary value *becomes* once the bridge narrows it into an unsigned host variable and an unsigned column | **`RESOLVED BY ORACLE`** — the absolute value, then bounded by the receiving digit count | `acas_posting/dal/acas012_sales.py`, `acas_posting/dal/acas007_gl_batch.py` |
+| [`Q-4`](#q-4) | Which of the batch record's two declared lengths governs the record actually read — **neither: both copies measure 96 and the 98 note is false** | **`RESOLVED BY ORACLE`** | `acas_posting/records/gl_batch.py` |
+| [`Q-5`](#q-5) | What observable effect the unexplained `move RRN to postings` has, in each of the four Sales and Purchase posting programs — **a silent signed 16-bit wrap reaching two database columns** | **`RESOLVED BY ORACLE`** | `sl060_invoice_posting.py`, `sl100_cash_posting.py`, `pl060_order_posting.py`, `pl100_payment_posting.py` |
+| [`Q-5.1`](#q-5-1) | The default `binary-size` and `binary-truncate` policy governing every `COMP` and `BINARY-*` field — **two rules, not one: pictured reduces on digits, pictureless wraps at capacity** | **`RESOLVED BY ORACLE`** | `acas_posting/cobol/usage.py` |
+| [`Q-5.2`](#q-5-2) | The byte length of a `SIGN LEADING` display item — three readings | **`RESOLVED BY ORACLE`** — Reading B: an included leading sign costs no byte | `acas_posting/cobol/usage.py` |
+| [`Q-5.3`](#q-5-3) | The concrete zoned-decimal overpunch byte values, for both signs and for zero, and the packed sign nibbles | **`RESOLVED BY ORACLE`** — zoned `0x30` / `0x70`, packed `0xC` / `0xD` / `0xF` | `acas_posting/cobol/usage.py` |
 | [`Q-6`](#q-6) | Whether `sl830`, which the Sales menu dispatches before `sl055` and the Python route does not, is observably a no-op | **`RESOLVED BY ORACLE`** | `harness/run_cobol_scenario.sh`, `harness/run_python_scenario.sh` |
-| [`Q-7`](#q-7) | What the menu shells' unconditional `overrewrite` writes on exit, which the Python CLI has no counterpart for | **`RESOLVED BY ORACLE`** | `harness/dump_tables.py`, `harness/diff_states.py` |
-| [`Q-8`](#q-8) | Whether `Post-Date (7:2)` holds a **year** or a **century** — settled on the Sales path, open elsewhere | **`PARTIALLY RESOLVED`** | `acas_posting/dal/acasirsub4_irs_posting.py`, `acas_posting/dal/acas006_gl_posting.py`, `harness/normalize.py` |
+| [`Q-7`](#q-7) | What the menu shells' unconditional `overrewrite` writes on exit — **and whether the Python CLI has a counterpart for it: it does, at all seven routes** | **`RESOLVED BY ORACLE`** | `acas_posting/cli/args.py`, `harness/dump_tables.py`, `harness/diff_states.py` |
+| [`Q-8`](#q-8) | Whether `Post-Date (7:2)` holds a **year** or a **century** — a year on the Sales and Purchase paths, a century on `irs030`'s own | **`RESOLVED BY CONSTRUCTION`** | `acas_posting/dal/acasirsub4_irs_posting.py`, `acas_posting/dal/acas006_gl_posting.py`, `harness/normalize.py` |
 | [`Q-9`](#q-9) | Whether `HV-POST-RRN` being declared and fetched but never loaded is the maintainer's stated convention or the field he doubted | **`PARTIALLY RESOLVED BY ORACLE`** | `acas_posting/dal/acas006_gl_posting.py`, `acas_posting/dal/cursor_state.py` |
 | [`Q-10`](#q-10) | Whether the AAP's autocommit-OFF requirement governs the seeding stage or every connection the harness makes | **`RESOLVED BY ORACLE`** | `harness/seed.sh`, `harness/Dockerfile.mariadb`, `harness/reset_db.sh`, `harness/run_cobol_scenario.sh` |
+| [`Q-SYS4-SPARE-SENTINEL`](#q-sys4-spare-sentinel) | Where the two cycles' disagreement over `SYSTOT-REC`'s four spare columns comes from, and which value is the specification — **the loader stamps a sentinel the menu then erases, so the difference was a defect in the SEED and in neither cycle** | **`RESOLVED BY ORACLE`** | `harness/scenarios/*.yaml`, `harness/make_fixtures.py`, `harness/diff_states.py` |
 
-`RESOLVED BY ORACLE` appears only for questions directly answered by the
-2026-08-04 compiled runs. Source-only and still-open boundary questions retain
-their prior statuses; a green scenario does not close them by association.
+`RESOLVED BY ORACLE` appears only for questions a compiled run or a focused compiled probe **directly
+answered**, with the captured observable written into the entry — either by a full parity journey, for the
+route and exit-path questions, or by a probe compiled from the frozen declarations, for the storage and
+arithmetic ones. A green scenario does not close a question by association, and neither does a probe that
+did not reach the boundary the question is about. A question answered by reading the frozen source carries
+the weaker `RESOLVED BY CONSTRUCTION` instead — `Q-8` is the one entry that does, and it says why in its own
+text.
 
-**§13** carries the deferrals handed up from the arithmetic tier: **six** entries of its own, mostly under
-mnemonic identifiers, plus a companion answer key that a run supplies, plus **three** questions cited by
-scope because the semantics layer already owns them. **§14** catalogues every remaining `Q-` identifier the
-repository cites — **82** distinct identifiers are cited across the migration trees, and **every one of them
+**§13** carries the deferrals handed up from the tiers that could not answer them: **seven** entries of its
+own, mostly under mnemonic identifiers — six from the arithmetic tier and one from the scenario tier — plus a
+companion answer key that a run supplies, plus **three** questions cited by scope because the semantics layer
+already owns them. The seventh is [`Q-EMPTY-BATCH-AT-END`](#q-empty-batch-at-end), which
+`tests/scenarios/test_empty_batch.py` coined and cited before this file carried it; §13's warning records that
+gap rather than closing it silently. **§14** catalogues every remaining `Q-` identifier the repository cites —
+**84** distinct identifiers are cited outside this file across the migration trees, and **every one of them
 resolves to an entry or a catalogue row in this file**, so no citation anywhere dangles (§17 states that as a
-counted property, with the census scope defined so the figure is reproducible). **§15** tabulates the
-identifier collisions between the three coexisting registers.
+counted property, with the counting algorithm given so every figure is reproducible; the register's own total
+is **113**, the difference being the 3 identifiers documented as unassigned and the 26 canonical names §15.1
+mints). **§15** does two things: **§15.1** assigns a globally unique canonical identifier to every reading that
+previously had only a colliding bare number, and **§15.2** tabulates the collisions between the three
+coexisting registers.
 **§16** records three scope declinations that are decisions rather than ambiguities, and **§17** is a counted
 self-audit of this file.
 
@@ -544,10 +793,14 @@ self-audit of this file.
 ## 12. The register — entries
 
 <a id="q-1"></a>
-
 ### `Q-1` — the date module's reject contract
 
-**Status: `PENDING — AWAITING ORACLE EXECUTION`.**
+**Status: `RESOLVED BY ORACLE`** — measured 2026-08-07 by **calling the compiled `maps04.so`**. **`A-Bin` is
+left UNTOUCHED on every reject clause, and every in-scope forward caller pre-zeroes — so the documented
+contract holds, and holds because of the callers rather than because of the module.** The measurement also
+answered a question nobody had asked, and it is the more consequential half: a non-zero `A-Bin` on entry
+selects the **reverse conversion** and destroys the caller's date text without ever validating it. The
+resolution is in (d).
 
 **(a) The question.** When `maps04` rejects a date, what does its caller's binary output field hold
 afterwards — zero, or whatever it held before? The program's executable statements and the program's own
@@ -605,8 +858,8 @@ reproduced defect, and **A-NEW-2** carries the `ccYYMMDD` misstatement.
 that fails each clause in turn:
 
 ```text
-$C /repo/harness/seed.sh                  "$S"
-$C /repo/harness/run_cobol_scenario.sh    "$S"
+$C /repo/harness/reset_db.sh --seed-dir "/data/fixtures/$N" "$S"
+$C /repo/harness/run_cobol_scenario.sh                        "$S"
 $C /repo/harness/dump_tables.py --scenario "$N" --side cobol \
                                --tables SYSTEM-REC,GLPOSTING-REC,IRSPOSTING-REC
 ```
@@ -628,20 +881,87 @@ yields the distinctive value from the second.
 observation here and quite possibly the correct one; the failure mode to avoid is treating it as a
 harness fault and re-seeding until it goes away.
 
-**(d) Resolution.** None. The status stands. What the source *does* support, stated as an expectation
-rather than a finding: the two `go to Main-Exit.` transfers leave `A-Bin` untouched, so any caller that
-does not pre-zero should be observed carrying its prior value forward. That expectation is exactly what the
-experiment tests, and the second half of it — *which* callers pre-zero — the source does not answer at all.
+**(d) Resolution — MEASURED 2026-08-07, GnuCOBOL 3.2.0.**
+
+The experiment in (c) proposed reaching this through seeded scenario runs and the `RUN-DAT` column. It was
+settled more directly by **calling the compiled `maps04.so`** with `copybooks/wsmaps03.cob` — the block every
+in-scope caller passes, per `[common/maps04.cbl:L122]` — once per reject clause, so that no composite bad date
+could mask which clause fired. That is the same oracle the scenario route would have consulted, reached
+without having to drive a whole cycle to observe one field.
+
+**Part 1 — with `u-bin` pre-zeroed, every clause of the six-part test plus the calendar test:**
+
+| clause driven | input | `u-bin` out | `u-date` out |
+| --- | --- | --- | --- |
+| `Z not = 2`, one separator | `01/012025` | **0** | unchanged |
+| `Z not = 2`, three separators | `01/01/20/5` | **0** | unchanged |
+| `A-Days not numeric` | `XX/01/2025` | **0** | unchanged |
+| `A-Month not numeric` | `01/XX/2025` | **0** | unchanged |
+| `A-CC not numeric` | `01/01/XX25` | **0** | unchanged |
+| `A-Days < 01` | `00/01/2025` | **0** | unchanged |
+| `A-Days > 31` | `32/01/2025` | **0** | unchanged |
+| `A-Month < 01` | `01/00/2025` | **0** | unchanged |
+| `A-Month > 12` | `01/13/2025` | **0** | unchanged |
+| calendar test at `[:L153]` | `31/02/2025` | **0** | unchanged |
+| *valid control* | `01/01/2025` | **154864** | unchanged |
+
+So both statements in (a) are true at once, which is why they looked like a contradiction: **the module leaves
+the field untouched, and the caller's pre-zero is why the observation reads zero.** The remarks block at
+`[:L163]` describes the system's behaviour correctly while describing the module's incorrectly.
+
+⭐ **The valid control also confirms the epoch, as a by-product.** `154864` for 2025-01-01 is the day count
+from **1600-12-31**, the epoch the Agent Action Plan cites from `[common/maps04.cbl:L39-L41]`. That was a read
+claim and is now a measured one.
+
+**Part 2 — the question this entry did not think to ask, and the answer that matters more.**
+`[common/maps04.cbl:L128-L129]` is `if A-Bin > zero go to WS-Unpack`, so **the module is bidirectional** and a
+non-zero `A-Bin` on entry selects binary-to-text instead of text-to-binary:
+
+| input text | `u-bin` in | `u-date` out | `u-bin` out |
+| --- | --- | --- | --- |
+| `01/01/2025` — perfectly valid | `987654` | **`08/02/4305`** | `987654` |
+| `31/02/2025` — invalid | `987654` | **`08/02/4305`** | `987654` |
+
+The second row is the decisive one: **the bad date was never validated at all.** The six-part test is not
+merely bypassed on the way to a stale answer — it is never reached. So
+`[copybooks/Proc-ACAS-Mapser-RDB.cob:L78]`'s `move zero to u-bin` is **not defensive tidiness; it is what
+chooses the direction**, and a caller omitting it with any non-zero residue in that field silently gets the
+opposite conversion and its input text overwritten.
+
+**Part 3 — which callers pre-zero, settled by census of the frozen source.** (a) said the source "does not
+answer at all" which of them do. It does, once the two directions are told apart:
+
+| caller | pre-zero | direction |
+| --- | --- | --- |
+| `[general/gl051.cbl:L1202]` → `L1203` | **yes** | forward, `zz050-test-date` |
+| `[sales/sl060.cbl:L1221]` → `L1222` | **yes** | forward, `zz050` |
+| `[sales/sl100.cbl:L737]` → `L738` | **yes** | forward, `zz050` |
+| `[purchase/pl060.cbl:L1075]` → `L1076` | **yes** | forward, `zz050` |
+| `[purchase/pl100.cbl:L718]` → `L719` | **yes** | forward, `zz050` |
+| `[copybooks/Proc-ACAS-Mapser-RDB.cob:L78]` → `L79` | **yes** | forward, the menu shell |
+| every `zz060-Convert-Date` site | **no** | **reverse — a non-zero `u-bin` is the intended input** |
+| `[general/gl070.cbl:L547]` | **no** | reverse; `gl070` has **no forward section at all** |
+
+`gl070` is worth its own line: it has only `zz060-Convert-Date` and a `zz070-Convert-Date` that reformats text
+without calling the module, so there is no forward path in it to pre-zero. Every site that does not pre-zero
+is deliberately using the reverse direction. **The answer is therefore yes — every in-scope forward caller
+pre-zeroes — and the risk the question was really about is latent rather than live.**
+
+**Alignment with the shipped code — all 13 vectors replayed against `acas_posting/dates.py`: 13 agreements, 0
+mismatches**, covering the ten reject clauses, the valid control, and both reverse-direction rows.
+**No production change was required.** `dates.py` already reproduced the untouched-output behaviour and the
+`L128` dispatch. No check is added that a caller pre-zeroed (R-3, R-4). Locked by
+`tests/arithmetic/test_irs_date_component_derivation.py`'s two `q1_` tests, the second of which asserts the two
+directions must not converge — so a lost `L128` dispatch fails rather than passes quietly.
 
 **(e) Consuming modules.** `acas_posting/dates.py`, which reimplements `maps04` including its reject
 behaviour, and `acas_posting/clock.py`, which pins the two date observables at the CLI boundary and
 therefore decides what a caller's field holds before the call.
 
 <a id="q-2"></a>
-
 ### `Q-2` — default arithmetic precision
 
-**Status: `PENDING — AWAITING ORACLE EXECUTION`.**
+**Status: `RESOLVED BY ORACLE` (2026-08-07).**
 
 **(a) The question.** With no dialect selected and no arithmetic directive anywhere, the **compiler's
 default** intermediate precision governs every multi-term expression. Reading cannot settle it because
@@ -704,8 +1024,8 @@ quotient **exactly on a half-way boundary and one unit either side of it**, so t
 and an intermediate truncation are distinguishable rather than confounded:
 
 ```text
-$C /repo/harness/seed.sh                  "$S"
-$C /repo/harness/run_cobol_scenario.sh    "$S"
+$C /repo/harness/reset_db.sh --seed-dir "/data/fixtures/$N" "$S"
+$C /repo/harness/run_cobol_scenario.sh                        "$S"
 $C /repo/harness/dump_tables.py --scenario "$N" --side cobol \
                                --tables GLPOSTING-REC,IRSPOSTING-REC,GLBATCH-REC
 ```
@@ -722,22 +1042,96 @@ triple (boundary, boundary minus one minor unit, boundary plus one minor unit) a
 read as `Decimal` at the column's declared scale. For `[general/gl080.cbl:L328]` the observable is the
 period subscript's effect, which is `Q-QUARTER-SUBSCRIPT`'s subject rather than this one's.
 
-**(d) Resolution.** None. **What the semantics layer carries, reported rather than adopted:**
-`acas_posting/cobol/arithmetic.py` at `L96` records both halves of `Q-2` as measured against GnuCOBOL 3.2.0 —
-*evaluate at extended precision, then quantize **once**, at the store* — and
-`tests/arithmetic/test_compute_rounded_half_up.py` asserts the **rejected** alternative, the reduced-precision
-per-sub-expression penny, as a strict expected failure so that a later change to quantize sub-expressions
-turns the suite red. That focused arithmetic measurement is recorded but not
-promoted by the eight scenario runs: none of those journeys places the
-compound expression on the required precision boundary. The oracle now builds;
-the exact experiment described above remains unexecuted.
+**(d) Resolution. MEASURED — extended precision throughout, quantized ONCE at the store.** The focused
+experiment was run as a compiled probe rather than as a scenario, for the reason the previous revision of this
+entry gave: none of the mandated journeys places the compound expression on the precision boundary, so a green
+scenario would never have reached it. A probe declared `pic s9(7)v99` receivers matching
+[`copybooks/irswspost.cob:L18`] and executed the frozen statements verbatim under the frozen build flags — no
+`-std=`, no `>>SET ARITHMETIC`, no `binary-truncate` — so what it measured is the compiler's own default and
+not a configured one.
 
-Note the boundary of this question precisely, because several sibling tests depend on where it stops: `Q-2` reaches only expressions whose intermediate needs **more
-digits than the receiver declares**. `tests/arithmetic/test_irs_vat_from_net.py` records the semantics
-layer's working assumption and states plainly that no assertion in that file would change if the answer
-moved, because its figures never approach the limit. The compound gross expression is the exception, and
-`tests/arithmetic/test_irs_vat_from_gross.py` marks the affected proposition `xfail(strict=True)` against
-`Q-2` rather than asserting it.
+⭐ **`Q-2` asks TWO things, and they were settled by different means. Keep them separate**, because the two
+halves fail differently and because a single verdict over both is what let this entry be wrong twice.
+
+**The SHAPE is settled by the language, not by a measurement.** A `ROUNDED` phrase belongs to the **store**,
+so a statement evaluates its expression and then quantizes **once**, into the receiver. Quantizing each
+sub-expression would be a different language. `acas_posting/cobol/arithmetic.py` implements that shape and
+`tests/arithmetic/test_compute_rounded_half_up.py` locks it.
+
+**The NUMBER OF INTERMEDIATE DIGITS cannot be read from anything in this repository** — it is a property of the
+compiler **build**, and there is no `-std=` selection in any frozen script, no `>>SET ARITHMETIC` directive in
+any `.cbl`, `.cob` or `.scb`, and no `binary-truncate` flag anywhere (§9 counts all three absences). So it was
+**measured**, by the probe below, rather than inferred. `acas_posting/cobol/arithmetic.py` documents
+`INTERMEDIATE_PRECISION = 60` as deliberately wider than every in-scope receiver's declared digit count — the
+widest is 14 — so that the settled shape governs and the limit cannot itself reach a stored value; the
+measurement is what promotes that constant from a working assumption to a confirmed reading.
+
+⚠️ **This entry has been wrong in both directions, and both corrections are recorded rather than quietly
+applied.** One revision claimed both halves had been *"measured against GnuCOBOL 3.2.0"* before any probe had
+run; a later one withdrew the claim from this register, from that module's comment and from two test headers,
+on the ground that neither half was measured. Neither statement is the truth: the shape is settled by the
+language and the digits are settled by the probe below. The module comment, the two test headers and this
+register now state that one status, and the register keeps the rejected readings as evidence so a reader can
+check the discrimination instead of taking it on authority.
+
+**The captured observables.** The discriminating case is the compound gross form of
+`[irs/irs030.cbl:L1562-L1564]` and [`general/gl051.cbl:L796`],
+`post-amount - (post-amount / ((rate + 100) / 100))`, transcribed verbatim into the probe with the frozen
+field declarations, on a VAT rate of 17.50 —
+
+| input amount | `vat-amount` | `post-amount` |
+| --- | --- | --- |
+| `1000.00` | `+0000148.94` | `+0000851.06` |
+| `-1000.00` | `-0000148.94` | `-0000851.06` |
+| **`117.55`** | **`+0000017.51`** | `+0000100.04` |
+| `0.01` | `+0000000.00` | `+0000000.01` |
+
+`117.55` is the row that decides it. Forcing the **reduced-precision** reading by hand — quantize each
+sub-expression at the receiver's own two places — gives `(17.50 + 100) / 100 → 1.18`, then
+`117.55 / 1.18 → 99.62`, then `117.55 − 99.62 → **17.93**`. The compiler produced **17.51**, which is
+neither that nor the third candidate the entry names. So the intermediate is NOT reduced to the receiver's
+scale between terms.
+
+**The rejected reading, measured for contrast**, so that the discrimination is evidenced rather than argued:
+quantizing per sub-expression — `multiply post by rate giving vat rounded` then `divide vat by 100 giving vat
+rounded` — produced `+0017500.00` then `+0000175.00`. On the *net* form those two routes agree, which is
+precisely why the compound gross form is the discriminating case. Two further contrasts from the same probe:
+omitting the inner `/ 100` gives `+0000991.49`, so the divisor's construction is load-bearing; and the net
+form [`irs/irs030.cbl:L1551`] / [`general/gl051.cbl:L791`] `post * rate / 100` measured `175.00` for
+`1000.00`, `0.58` for `3.33` (from `0.58275`) and `0.01` for `0.03` (from `0.00525`).
+
+`gl051`'s two `ROUNDED` sites were measured from the same series, with `ws-vat-rate pic 99v99 comp` and
+`pic s9(8)v99` amounts: site 1 `[general/gl051.cbl:L791]` gives `117.55 → 20.57` and `12.30 → 2.15`;
+site 2 `[general/gl051.cbl:L796]` gives `117.55 → 17.51` and `1000.00 → 148.94` — site 2 agreeing with
+`irs030` exactly, which is itself a check on the reading.
+
+Measured with GnuCOBOL 3.2.0, `cobc -x -free`, no `-std=` dialect selection, no
+`>>SET ARITHMETIC` directive and no `binary-truncate` flag -- the same absence §9
+counts across every frozen compile line.
+
+The semantics layer already implemented this reading provisionally, so the resolution CONFIRMS it rather
+than replacing it: `[acas_posting/cobol/arithmetic.py INTERMEDIATE_PRECISION]` is 60 digits and
+`[acas_posting/cobol/arithmetic.py INTERMEDIATE_CONTEXT]` is the context every operation in that module
+enters. `tests/arithmetic/test_compute_rounded_half_up.py` and
+`tests/arithmetic/test_irs_vat_from_gross.py` now assert the measured pennies, including the `117.55 →
+17.51` row, as facts. Neither carries a strict expected failure any longer.
+
+**Where the figures now live.** `tests/arithmetic/test_irs_vat_from_gross.py` carries them in
+`ORACLE_CAPTURED_PENNIES`, keyed by statement-and-operands so a captured penny can never be reused for
+different inputs, and the test that consumes them drives the **shipped** sections — so the assertion sets
+production behaviour against an independently sourced figure rather than against itself.
+`tests/arithmetic/test_compute_rounded_half_up.py` keeps the **rejected** 17.08 as an evidenced tripwire
+rather than an open question — `assert measured != Decimal("17.08")`, asserted rather than marked — so the
+arithmetic layer adopting the reading this measurement ruled out fails there.
+
+Note the boundary of this question precisely, because several sibling tests depend on where it stops: `Q-2`
+reaches only expressions whose intermediate needs **more digits than the receiver declares**.
+`tests/arithmetic/test_irs_vat_from_net.py` records the semantics layer's working assumption and states
+plainly that no assertion in that file would change if the answer moved, because its figures never approach
+the limit. The compound gross expression is the exception, and it is the one the measurement above was taken
+on: `tests/arithmetic/test_irs_vat_from_gross.py` now ASSERTS the measured pennies, including the
+`117.55 → 17.51` row that discriminates between the two readings, where it previously marked the
+proposition `xfail(strict=True)` against this question.
 
 **(e) Consuming module.** `acas_posting/cobol/arithmetic.py`, which owns every store's truncation
 direction and the extended-precision intermediate. Test-owned at the parity tier by
@@ -746,10 +1140,9 @@ and `tests/arithmetic/test_compute_truncate_unrounded.py` recording the same ide
 figures touch it.
 
 <a id="q-3"></a>
-
 ### `Q-3` — a negative binary value through an unsigned host variable into an unsigned column
 
-**Status: `PENDING — AWAITING ORACLE EXECUTION`.**
+**Status: `RESOLVED BY ORACLE` (2026-08-07).**
 
 **(a) The question.** *That* the sign is lost is settled: it is lost **at the bridge, not at the database**,
 which is anomaly **A-11**. What the resulting **stored value** *is* is not settled, because it depends on
@@ -802,14 +1195,15 @@ makes the drift specific rather than systemic: `Sales-Current` and `Sales-Last` 
 at `[copybooks/wssl.cob:L54-L55]`, become `PIC S9(08)V9(02) COMP` at `[common/salesMT.cbl:L313-L314]`, and
 land in `decimal(10,2)` at `[mysql/ACASDB.sql:L974-L975]`.
 
-Cross-reference: **A-11** in [`anomaly-log.md`](anomaly-log.md), whose status there is `PENDING — Q-3`.
+Cross-reference: **A-11** in [`anomaly-log.md`](anomaly-log.md). Its status there is
+`REPRODUCED — VALUE MEASURED`: the anomaly stands, and the value it produces is now known.
 
 **(c) Oracle experiment.** Under the §10 protocol, seeding a customer whose statistics computation drives a
 **negative** value into one of the narrowed fields, and a batch whose date fields do the same:
 
 ```text
-$C /repo/harness/seed.sh                  "$S"
-$C /repo/harness/run_cobol_scenario.sh    "$S"
+$C /repo/harness/reset_db.sh --seed-dir "/data/fixtures/$N" "$S"
+$C /repo/harness/run_cobol_scenario.sh                        "$S"
 $C /repo/harness/dump_tables.py --scenario "$N" --side cobol \
                                --tables SALEDGER-REC,GLBATCH-REC
 ```
@@ -830,28 +1224,94 @@ Read as `int`, never through a float (R-2). No column is added and no cast is in
 the raw byte reading, where wanted, is a `SELECT`-side cast in `harness/dump_tables.py`'s own query, not a
 DDL change (R-3).
 
-**(d) Resolution.** None. **The provisional implementation, named so the oracle confirms or replaces a
-concrete value:** the Python side currently stores the **absolute value**, taken in
-`acas_posting/cobol/usage.py`'s `_wrap_into_bits`, and `tests/arithmetic/test_comp_binary.py` asserts that
-choice as *provisional* rather than as fact. That is the same answer `Q-OTM5-NARROW` (§14.4) reports as
-measured at the `MOVE`, one link earlier in the chain — which is corroboration, not arbitration.
+**(d) Resolution. MEASURED: the ABSOLUTE VALUE, then bounded by the receiving field's declared digit
+count.** The sign is discarded and the magnitude survives, so what is destroyed is the debit-versus-credit
+*sense* of the figure and nothing else. The two's-complement reinterpretation and the zero candidate are both
+REFUTED.
 
-The status stands, and it must: `tests/arithmetic/test_comp_binary.py` holds the
-value consequence open rather than asserting it, and `tests/arithmetic/test_pic_field_descriptors.py` and
-`tests/arithmetic/test_gl080_cycle_divide_rounded.py` assert only that the affected descriptors *carry the
-`Q-3` reference*, which is a statement about traceability rather than about the value. That arrangement is
-what stops a plausible number entering the codebase: until the artifact drops the tag, the tests that would
-assert a value report an expected failure.
+**Why the measurement had to reach the column, and not stop at the `MOVE`.** The question as §0.6.8 poses it
+names *the conversion the bridge's C interface performs*. A probe that only exercised the COBOL `MOVE` would
+therefore answer a narrower question than the one asked and leave `cobmysqlapi` and the SQL text
+unmeasured — which is exactly the gap that made `Q-OTM5-NARROW`'s finding (§14.4) corroboration rather than
+arbitration. So the probe went the whole way: it called the **compiled `acas012` handler**, which called the
+**compiled `salesMT` bridge**, which issued real SQL through `cobmysqlapi` against real MariaDB, and then the
+column was read back both through the same compiled path and directly with the client.
+
+**The captured observables, end to end.** One `SALEDGER-REC` row written with negative values in the drifting
+fields; the handler reported `FS-Reply=00` on open and on write:
+
+| field | in the record | declared column | read back |
+| --- | --- | --- | --- |
+| `Sales-Average` `binary-long` signed | `-12345` | `int(8) unsigned` | **`12345`** |
+| `Sales-Limit` `binary-long` signed | `-12345` | `int(8) unsigned` | **`12345`** |
+| `Sales-Late-Min` `binary-short` signed | `-7` | `smallint(4) unsigned` | **`7`** |
+| `Sales-Activety` (positive control) | `99` | `int(8) unsigned` | **`99`** |
+
+The positive control is there so that a probe which silently wrote nothing could not be mistaken for a
+measurement. The column types were confirmed from `information_schema` in the same run rather than taken from
+the schema file.
+
+**The same conversion measured at the `MOVE` itself**, with the host variable's own picture as the receiver,
+which is where the digit-count bound becomes visible:
+
+| source | receiver | stored |
+| --- | --- | --- |
+| `-1` | `pic 9(10) comp` | `0000000001` |
+| `+1000` | `pic 9(10) comp` | `0000001000` |
+| `-1000` | `pic 9(10) comp` | `0000001000` |
+| `-2147483648` | `pic 9(10) comp` | `2147483648` |
+| `-123456` | `pic 9(4) comp` | `3456` |
+| `+123456` | `pic 9(4) comp` | `3456` |
+
+`-2147483648` is the row that refutes the bit-pattern reading: reinterpreted as unsigned it would be
+`2147483648` too, but `-1` would then be `4294967295` and it is `1`.
+
+**What it is NOT.** Not a two's-complement reinterpretation of the source bytes, not zero, not a clamp to the
+column's minimum, and not a MySQL error or a rejected row. Each of those was a live candidate before the run
+and each is now excluded by the figures above.
+
+**The ordering of the two steps, measured separately**, because absolute-value-then-reduce and
+reduce-then-absolute-value differ on an overflowing negative. Where the magnitude also exceeds the receiving
+host variable's digit count, the absolute value is taken **first** and the high-order digits are truncated
+**afterwards** — a negative `binary-long` narrowed into a `PIC 9(4) COMP` receiver kept the low-order digits
+*of the magnitude*. Into `binary-char unsigned` (0..255): `±99999 → 159`, `±300 → 44`, and **`-1 → 1`, not
+`255`**; a reduce-first reading would give 255. The consequence is that a negative and a positive value of
+equal magnitude collide on the same stored byte, so the two are indistinguishable once written.
+
+For contrast, and recorded because it is easy to assume the two behave alike, a **signed** `binary-char`
+receiver behaves completely differently: `+99999 → -97` and `-99999 → +97`. `pic 9(3) comp` gives
+`±99999 → 999`.
+
+**This confirms the implementation rather than changing it.** `acas_posting/cobol/usage.py`'s `_wrap_into_bits`
+already took the absolute value in that order. It was previously labelled *provisional* precisely because
+nobody had watched the compiled path; it is now the measured behaviour.
+
+**What did NOT change, and this is the important half.** Anomaly `A-11` remains published on all **91**
+affected field entries across eleven tables. Measuring the sign loss did not repair it, and rule R-4 forbids
+repairing it: every one of those statistics still arrives at the database with its sense destroyed. What the
+measurement settled is the **value**, not the defect. The generated dictionary therefore now carries `A-11`
+with **no** `Q-3` ambiguity reference — 91 `A-11` references and 0 `Q-3` references, counted from the
+artifact — and `acas_posting/dal/acas012_sales.py` asserts exactly that pairing at import time, together with
+the measurement note, so neither half can drift: republishing `Q-3` would report a settled question as open,
+dropping the note would report a measured value as unmeasured, and dropping `A-11` would hide a live defect.
+
+**Where the figures now live.** `tests/arithmetic/test_comp_binary.py` holds the measured outcome in
+`BRIDGE_SIGN_MEASURED`, with `BRIDGE_SIGN_MEASUREMENT` as the note every affected dictionary entry must
+carry, deliberately separate from the tests that consume them: those tests drive `cobol.usage`, which is
+production code, so carrying their own expected figures would let them pass by agreeing with the
+implementation they check. Their `xfail` markers have been removed. The three sibling files that previously
+asserted the descriptors *carry* the `Q-3` reference now assert its **absence** alongside `A-11`'s presence.
 
 **(e) Consuming modules.** `acas_posting/dal/acas012_sales.py` for the Sales instance and
 `acas_posting/dal/acas007_gl_batch.py` for the batch instance. Test-owned by
 `tests/arithmetic/test_comp_binary.py`.
 
 <a id="q-4"></a>
-
 ### `Q-4` — the batch record's length contradiction
 
-**Status: `PENDING — AWAITING ORACLE EXECUTION`.**
+**Status: `RESOLVED BY ORACLE`** — measured 2026-08-07, GnuCOBOL 3.2.0. **The answer is *neither*: both
+record copies measure 96, `FUNCTION LENGTH` agrees with the field sum, and the 98 in the maintainer's note
+is false under this compiler.** The resolution is in (d).
 
 **(a) The question.** `copybooks/wsbatch.cob` records **two** lengths for the same record, and the
 maintainer's own notes say he cannot reconcile them. Whether the declared length or the field sum governs
@@ -872,7 +1332,9 @@ exposed to a two-byte shift is the last fixed-width text field before the postin
 `Description pic x(24)` at `[copybooks/wsbatch.cob:L45]`, which sits immediately after the four packed
 `Amounts` members at `[copybooks/wsbatch.cob:L40-L44]`.
 
-Cross-reference: **A-15** in [`anomaly-log.md`](anomaly-log.md), whose status there is `PENDING — Q-4`.
+Cross-reference: **A-15** in [`anomaly-log.md`](anomaly-log.md), whose status there is
+`REPRODUCED — VALUE MEASURED, comment stale, Q-4` — promoted out of `PENDING — Q-4` on this entry's
+measurement, and keeping the `Q-4` cross-reference because the measurement lives here.
 `acas_posting/dictionary/generate.py` writes `"Q-4"` into the `ambiguity_refs` of all four `Amounts`
 members and of `Batch-Status`, and `tests/arithmetic/test_control_total_comparison.py` and
 `tests/arithmetic/test_comp3_packed_decimal.py` assert that it is there.
@@ -902,8 +1364,8 @@ positionally distinguishable content**, so that a two-byte shift is visible as a
 noise:
 
 ```text
-$C /repo/harness/seed.sh                  "$S"
-$C /repo/harness/run_cobol_scenario.sh    "$S"
+$C /repo/harness/reset_db.sh --seed-dir "/data/fixtures/$N" "$S"
+$C /repo/harness/run_cobol_scenario.sh                        "$S"
 $C /repo/harness/dump_tables.py --scenario "$N" --side cobol \
                                --tables GLBATCH-REC
 ```
@@ -921,20 +1383,67 @@ displacement rather than a yes/no. Run it twice, once through the RDB path and o
 path, because the contradiction is between a `function length` and a field sum and the two paths may not
 agree.
 
-**(d) Resolution.** None, and deliberately none: this is the entry where choosing the coherent answer would
-be most tempting and least detectable. `acas_posting/records/gl_batch.py` builds the layout from the
-declared pictures — the field sum — and says at its own site that the choice is `Q-4`'s to make, so the
-assumption is visible in the code rather than buried in it.
+**(d) Resolution — MEASURED 2026-08-07, GnuCOBOL 3.2.0.**
+
+The experiment in (c) was designed around a *displacement*, on the assumption that one of the two lengths
+would prove to govern and the other would show up as a two-byte shift. It does not go that way. Asking the
+compiler for its own layout — the cheapest available oracle for a width question, since the compiler answers
+out of the allocation it actually made — settles it before any row is written:
+
+| observable | measured |
+| --- | --- |
+| `FUNCTION LENGTH(WS-Batch-Record)`, the `wsbatch.cob` copy | **96** |
+| `FUNCTION LENGTH(Batch-Record)`, the `fdbatch.cob` copy | **96** |
+| sum of the ten members' own `FUNCTION LENGTH` values | **96** |
+| implied padding | **none** — the two figures are equal |
+| first byte of `Description` | **53**, exactly where the field sum puts it |
+| `Description` read back at `(53:24)` | intact and undisplaced |
+| bytes 92–96 | `54321` = `Batch-Start`, so the record ends where the field sum says |
+
+Complete byte attribution, every one of the 96 accounted for: `WS-Batch-Key` 1–6, `Items` 7–8,
+`Batch-Status` 9, `Cleared-Status` 10, `Bcycle` 11–12, `Dates` 13–28 (four `binary-long` at 4 bytes each,
+stored **little-endian** — `111111` appears as `07 B2 01 00`), `Amounts` 29–52 (four `comp-3` at 6 bytes
+each, eleven digits plus a sign nibble, unsigned sign nibble `0xF`), `Description` 53–76, `posting-data`
+77–91, `Batch-Start` 92–96.
+
+**So there was never a choice between the two lengths to make.** `FUNCTION LENGTH` *is* the field sum here,
+both are 96, and the maintainer's L9 — *"but function length (Batch-record) says 98?"* — does not hold under
+the compiler this migration's oracle uses. Whatever produced a 98 in December 2011 is not GnuCOBOL 3.2.
+`acas_posting/records/gl_batch.py` builds its layout from the declared pictures, which is the field sum, and
+that decision is now **measured correct** rather than a visible assumption. Its site comment should be read
+as recording a confirmed layout, not an open choice.
+
+⚠️ **The false answer this probe produced first, recorded because the register's own experiment design had
+warned against exactly it.** Part (c) says to *"seed the four `Amounts` members with values whose packed
+representation contains no byte that could be mistaken for a text character."* The first run ignored that,
+filling `Actual-Vat` with `444444444.44` — whose packed bytes are `0x44`, which **is** ASCII `D`, the same
+character the run was using to fill `Description`. The scan for the first `D` therefore found the *amount*,
+at byte 47, which read as a six-byte displacement and would have been a fabricated finding had it been
+believed. The confirming run used `555555555.55` and an `ABCDEFGHIJKLMNOPQRSTUVWX` description, whose
+leading `A` (`0x41`) no packed nibble pair in the fill can produce, and located byte 53 unambiguously. The
+lesson generalises: when a probe's detector and its fill share an alphabet, the detector is measuring the
+probe.
+
+⭐ **An incidental confirmation of the collision class.** Copying `fdbatch.cob` and `wsbatch.cob` into one
+program makes **more than twenty** field names ambiguous — `Items`, `Batch-Status`, `Cleared-Status`,
+`Bcycle`, all four `Dates` members, all four `Amounts` members, `Description`, all six `posting-data`
+members and `Batch-Start` — each requiring `in WS-Batch-Record` qualification before the program will
+compile. That is a fresh instance of the collision anomaly the frozen programs work around with qualified
+references, appearing in a pair of copybooks the register had not previously connected to it.
 
 **(e) Consuming module.** `acas_posting/records/gl_batch.py`. Read at the parity tier by
 `tests/arithmetic/test_control_total_comparison.py` and `tests/arithmetic/test_comp3_packed_decimal.py`,
-which assert the reference rather than the layout.
+which assert the reference rather than the layout — and which therefore needed no change when the
+measurement landed, because the layout they were built on is the layout it confirmed. The dictionary
+continues to emit `Q-4` on the four `Amounts` members and `Batch-Status`; that is correct and deliberate,
+the identifier now pointing at a resolved entry rather than an open one.
 
 <a id="q-5"></a>
-
 ### `Q-5` — the unexplained move
 
-**Status: `PENDING — AWAITING ORACLE EXECUTION`.**
+**Status: `RESOLVED BY ORACLE`** — measured 2026-08-07, GnuCOBOL 3.2.0. **The move is not inert: past
+`RRN = 32767` it wraps as a signed 16-bit integer, silently, and the negative result reaches two database
+columns — one of them as its absolute value.** The resolution is in (d).
 
 **(a) The question.** Four programs perform a move that the maintainer annotated with his own question
 mark. AAP §0.6.8 sets the terms: *"Because the maintainer himself does not know why it is there
@@ -968,9 +1477,10 @@ lines below the same block: `[sales/sl060.cbl:L1176]` omits the period on `perfo
 where `[purchase/pl060.cbl:L1031]`, `[sales/sl100.cbl:L694]` and `[purchase/pl100.cbl:L675]` all have it.
 That connection is offered as context for why the block deserves measurement, not as a finding.
 
-Cross-reference: **A-17** in [`anomaly-log.md`](anomaly-log.md), whose status there is
-`PENDING — Q-A17-POSTINGS-EFFECT` — the mnemonic identifier `acas_posting/programs/pl060_order_posting.py`
-opened for the same question's *value* half. See §15 for how the two identifiers relate.
+Cross-reference: **A-17** in [`anomaly-log.md`](anomaly-log.md), promoted to `REPRODUCED` by the same
+measurement, and still carrying the mnemonic identifier `Q-A17-POSTINGS-EFFECT` that
+`acas_posting/programs/pl060_order_posting.py` opened for this question's *value* half. See §15 for how the
+two identifiers relate; §14.4 carries the value half's own entry.
 
 **(c) Oracle experiment.** Under the §10 protocol, run **each of the four programs** with the IRS fan-out
 pinned to **each of its three states**, because the guard tests `IRS-Both-Used OR G-L` and the state decides
@@ -978,8 +1488,8 @@ whether the move executes at all:
 
 ```text
 # For each of the three IRS-Instead states, and each of the four programs:
-$C /repo/harness/seed.sh                  "$S"      # $S pins IRS-Instead in the system row
-$C /repo/harness/run_cobol_scenario.sh    "$S"
+$C /repo/harness/reset_db.sh --seed-dir "/data/fixtures/$N" "$S"      # $S pins IRS-Instead in the system row
+$C /repo/harness/run_cobol_scenario.sh                        "$S"
 $C /repo/harness/dump_tables.py --scenario "$N" --side cobol \
                                --tables GLPOSTING-REC,PSIRSPOST-REC,GLBATCH-REC,SYSTEM-REC
 $C /repo/harness/normalize.py  --scenario "$N" --side cobol
@@ -990,7 +1500,7 @@ is neither — `[copybooks/wssystem.cob:L179-L181]`. Then run the Python side wi
 present and again with it absent, and diff:
 
 ```text
-$C /repo/harness/run_python_scenario.sh   "$S"
+$C /repo/harness/run_python_scenario.sh                       "$S"
 $C /repo/harness/diff_states.py --scenario "$N" --scenario-file "$S"
 ```
 
@@ -999,12 +1509,74 @@ decisive question is whether `postings` is *stored anywhere* — if the diff is 
 and also empty with it absent, the statement is observably inert and that is a real result. If either diff
 is non-empty, record which column moved. Note that `RRN` may exceed `postings`' picture, in which case the
 stored value is a truncation rather than a copy; that value half is
-`Q-A17-POSTINGS-EFFECT` (§14) and is measured by the same run.
+`Q-A17-POSTINGS-EFFECT` (§14), and it was measured by the probe rather than by that run — see (d).
 
-**(d) Resolution.** None. The status stands. The move is reproduced in all four program modules exactly as
-written, including the wrong-program comment carried forward as a comment, because R-4 requires the artefact
-and not a tidied version of it. Nothing is normalised across the four, and in particular the `sl060`
-missing period is **not** repaired to match its three siblings.
+**(d) Resolution — MEASURED 2026-08-07, GnuCOBOL 3.2.0.**
+
+The experiment in (c) proposed reaching the answer through scenario runs. That would not have reached it:
+the effect only appears once `RRN` passes 32767, which no mandated scenario produces, so every one of those
+diffs would have come back empty and the statement would have been recorded as *observably inert* — a wrong
+answer arrived at honestly. It was measured with a focused probe instead, declaring both operands exactly as
+the frozen copybooks declare them.
+
+**The operands, and why the annotation on the receiver is wrong twice over:**
+
+| | declaration | locator | measured width |
+| --- | --- | --- | --- |
+| source | `Rrn pic 9(5) comp` | `[copybooks/wsfnctn.cob:L24]` | 4 bytes |
+| receiver | `Postings binary-short` | `[copybooks/wssystem.cob:L184]` | 2 bytes |
+
+That receiver line annotates itself `*> 9(4) comp`. `binary-short` is **signed**, and its range is **not**
+the four digits the comment implies — so the comment misstates the field's sign and its capacity.
+
+**Why it is observable at all**, which part (c) had left as the open question — *"whether `postings` is
+stored anywhere"*. It is, twice:
+
+1. `Postings` is a `SYSTEM-REC` column in its own right.
+2. `[sales/sl060.cbl:L1037]` reads `add postings 1 giving Batch-start`, and `Batch-Start` is
+   `GLBATCH-REC.BATCH-START`, declared `pic 9(5)` **unsigned** at `[copybooks/wsbatch.cob:L54]`.
+
+So the answer to *"nothing in the four programs reads `postings` again"* is that nothing needs to — the
+field is itself persisted, and a sibling paragraph in the same program reads it into a second persisted
+column.
+
+**Measured, source value through to stored column:**
+
+| `Rrn` | → `Postings` | → `Batch-Start` | |
+| --- | --- | --- | --- |
+| `1` | `+00001` | `00002` | |
+| `9999` | `+09999` | `10000` | |
+| `10000` | `+10000` | `10001` | **not** truncated to four digits |
+| `12345` | `+12345` | `12346` | **not** truncated to four digits |
+| `32767` | `+32767` | `32768` | the last value that survives intact |
+| `32768` | `-32768` | `32767` | signed 16-bit wrap, no diagnostic |
+| `65535` | `-00001` | `00000` | the database column becomes **zero** |
+| `99999` | `-31073` | `31072` | `99999 mod 65536 = 34463`; `34463 − 65536 = −31073` |
+
+`move -1 to Postings` yields `-00001`, confirming the receiver is signed.
+
+**Four findings, of which the last two are the ones that matter:**
+
+1. `binary-short` is **signed**, contradicting its own comment.
+2. There is **no decimal truncation at the implied picture**. The full signed binary range governs, which
+   means this compiler is not applying `binary-truncate` to this storage class — and that is also the
+   `binary-short` half of [`Q-5.1`](#q-5-1), answered here rather than there.
+3. Past `32767` the store **wraps as a signed 16-bit integer, silently**. No `ON SIZE ERROR` phrase exists
+   at the site, so nothing is reported and nothing is logged.
+4. The negative then reaches the **unsigned** `pic 9(5)` `Batch-Start` as its **absolute value** — the same
+   magnitude-only rule [`Q-3`](#q-3) measured at the bridge boundary, occurring here at an ordinary COBOL
+   store with no bridge involved. The two measurements corroborate each other: unsigned receivers in this
+   system take the magnitude, wherever they sit.
+
+**The consequence, stated plainly.** A statement nobody can explain can drive `GLBATCH-REC.BATCH-START` to
+`00000`, or to a wrapped magnitude bearing no relation to any record count, on a run large enough to reach
+32768 postings — and nothing anywhere reports it. It is **latent, not scenario-reachable**, so no scenario
+diff will ever surface it; that is exactly why it is written down here rather than left to a run to find.
+
+The move is reproduced in all four program modules exactly as written, including the wrong-program comment
+carried forward as a comment, because R-4 requires the artefact and not a tidied version of it. Measuring
+the effect did not license repairing it. Nothing is normalised across the four, and in particular the
+`sl060` missing period is **not** repaired to match its three siblings.
 
 **(e) Consuming modules.** All four Sales and Purchase posting program modules:
 `acas_posting/programs/sl060_invoice_posting.py`, `acas_posting/programs/sl100_cash_posting.py`,
@@ -1018,20 +1590,27 @@ Three questions about how a value is *represented* rather than how it is compute
 number because they share an owner — `acas_posting/cobol/usage.py` — and because all three are settled by
 the same class of observation: write a known value through the bridge and look at what arrives.
 
-⚠️ **All three carry a provisional implementation, and none carries a measurement.** `usage.py` labels each
-of them "RESOLVED" at its own site. That label means *settled for implementation purposes from the
-documented default or from the ISO reading* — it does not mean observed, and the module does not claim it
-does. **Under R-6 only an observed run promotes a status**, so this register keeps all three
-`PENDING — AWAITING ORACLE EXECUTION` and states the provisional choice explicitly, with its basis, so that
-the oracle can confirm or overturn a named value rather than an implication. Recording the two facts
-together — what the code does, and that nobody has watched the compiler agree — is the only presentation
-that misleads neither a reader of this register nor a reader of that module.
+⚠️ **This paragraph previously read *"All three carry a provisional implementation, and none carries a
+measurement"*, and that has not been true since 2026-08-07.** It is corrected rather than quietly replaced,
+because a stale summary above three entries is worse than no summary: a reader who trusts it stops before
+reaching the entries that contradict it. The current position, per entry rather than in aggregate:
+
+**All three are now `RESOLVED BY ORACLE`**, each with its captured observable written into its own entry —
+`Q-5.1`'s widths and both truncation rules, `Q-5.2`'s byte length for a `SIGN LEADING` item, and `Q-5.3`'s
+packed and zoned sign bytes. `usage.py` labels each "RESOLVED" at its own site, and for all three that label
+is now backed by observation rather than by GnuCOBOL's documentation.
+
+**Under R-6 only an observed run promotes a status**, which is the rule that kept these three honestly
+`PENDING` for as long as they were, and the rule that makes the promotions worth anything. §17 carries the
+status tally; it is not restated here, for exactly the reason this correction illustrates.
 
 <a id="q-5-1"></a>
-
 #### `Q-5.1` — GnuCOBOL default `binary-size` and `binary-truncate`
 
-**Status: `PENDING — AWAITING ORACLE EXECUTION`.**
+**Status: `RESOLVED BY ORACLE`** — measured 2026-08-07, GnuCOBOL 3.2.0. **Both halves are answered, and the
+answer splits into two rules where the single flag name had implied one: a `COMP` item with a PICTURE reduces
+on its declared digit count, while a `BINARY-*` item declared by USAGE ALONE wraps at its signed byte
+capacity.** The provisional constants turned out to be right. The resolution is in (d).
 
 **(a) The question.** With no dialect selected, the compiler's **defaults** govern two separate things for
 every `COMP`, `BINARY-CHAR`, `BINARY-SHORT` and `BINARY-LONG` field: how many **bytes** the item occupies
@@ -1043,10 +1622,11 @@ a field can be eight bytes wide and still refuse an eighteenth digit.
 anywhere in the frozen sources. The compiler is GnuCOBOL **3.2 final** — `[common/comp-common.sh:L9]`,
 `[README.TXT:L53]`.
 
-The exposure, from the `copybooks/` census of §9: `binary-long` **166** declared, `binary-char` **84**,
-`binary-short` **32**, and bare `comp` **236**. The two questions therefore reach several hundred fields,
-including `Run-Date` itself at `[copybooks/wssystem.cob:L67]` and the whole of the narrowed block that
-`Q-3` is about.
+The exposure, from the canonical storage census that §9 adopts by reference: `binary-long` **166**
+declared, `binary-char` **84**, `binary-short` **31**, and bare `comp` **214** — 128, 59, 30 and 144
+respectively on code lines only. The two questions therefore reach several hundred fields, including
+`Run-Date` itself at `[copybooks/wssystem.cob:L67]` and the whole of the narrowed block that `Q-3` is
+about.
 
 **The provisional implementation, named so it can be overturned.** `acas_posting/cobol/usage.py` carries
 `DEFAULT_BINARY_SIZE_THRESHOLDS` as `(2 digits → 1 byte, 4 → 2, 9 → 4, 18 → 8)` and `BINARY_TRUNCATE = True`,
@@ -1058,8 +1638,8 @@ measurement.
 count** for one field of each width:
 
 ```text
-$C /repo/harness/seed.sh                  "$S"
-$C /repo/harness/run_cobol_scenario.sh    "$S"
+$C /repo/harness/reset_db.sh --seed-dir "/data/fixtures/$N" "$S"
+$C /repo/harness/run_cobol_scenario.sh                        "$S"
 $C /repo/harness/dump_tables.py --scenario "$N" --side cobol \
                                --tables SALEDGER-REC,GLBATCH-REC,SYSTEM-REC
 ```
@@ -1071,18 +1651,105 @@ respects** — a store that survives `999999999` has truncated to capacity, and 
 `99999999` has truncated to digits. Read as `int`, never through a float (R-2). Repeat at `binary-short`
 and `binary-char` widths, because the policy may not be uniform across them.
 
-**(d) Resolution.** None. The provisional values above are what the Python side computes today; the
-experiment exists to confirm or replace them.
+**(d) Resolution — MEASURED 2026-08-07, GnuCOBOL 3.2.0.**
+
+The experiment in (c) proposed reaching this through seeded scenario runs. That was more apparatus than the
+question needs, and it would have answered only for the handful of fields a scenario happens to touch. It was
+measured instead with a probe that declares each form directly and stores values at and beyond every ceiling
+— asking the compiler about its own policy rather than inferring the policy from a row.
+
+**`binary-size` — `FUNCTION LENGTH`, as the compiler reported it:**
+
+| declaration | measured bytes |
+| --- | --- |
+| `binary-char` | **1** |
+| `binary-short` | **2** |
+| `binary-long` | **4** |
+| `pic 99 comp` | **1** |
+| `pic 9(4) comp` | **2** |
+| `pic 9(5) comp` | **4** |
+| `pic 9(8) comp` | **4** |
+| `pic 9(9) comp` | **4** |
+| `pic s9(4) comp` | **2** |
+| `pic s9(9) comp` | **4** |
+
+That is exactly `DEFAULT_BINARY_SIZE_THRESHOLDS` — `(2 → 1, 4 → 2, 9 → 4, 18 → 8)` — confirmed from outside
+the implementation, and the signed forms confirm the sign costs no byte.
+
+**`binary-truncate` — and here the question turns out to have been two questions.**
+
+*A `COMP` item WITH a picture reduces on its DIGIT COUNT, modulo `10**digits`:*
+
+| store | kept |
+| --- | --- |
+| `100` into `pic 99 comp` | **`00`** |
+| `127` into `pic 99 comp` | **`27`** |
+| `10000` into `pic 9(4) comp` | **`0000`** |
+| `32767` into `pic 9(4) comp` | **`2767`** |
+| `100000` into `pic 9(5) comp` | **`00000`** |
+| `100000000` into `pic 9(8) comp` | **`00000000`** |
+| `1000000000` into `pic 9(9) comp` | **`000000000`** |
+
+The two rows that carry the argument are `127` and `32767`: **each fits its item's byte capacity exactly, and
+each was still reduced.** So `binary-truncate` is in force, and `BINARY_TRUNCATE = True` is confirmed.
+
+*An item declared by USAGE ALONE has no digit count for that policy to apply to, so the capacity is all
+that is left — and the store wraps, signed, in silence:*
+
+| store | kept |
+| --- | --- |
+| `127` into `binary-char` | **`+127`** |
+| `128` into `binary-char` | **`−128`** |
+| `255` into `binary-char` | **`−001`** |
+| `32767` into `binary-short` | **`+32767`** |
+| `32768` into `binary-short` | **`−32768`** |
+| `99999` into `binary-short` | **`−31073`** |
+
+**`32767` is the value that proves the two rules are different rules.** Into `pic 9(4) comp` it becomes
+`2767`; into `binary-short` it survives whole. Both items occupy the same two bytes, so this is a policy
+difference and not a width difference — and reading `binary-truncate` as one uniform rule would get one of
+the two classes wrong for every field in it. The census in (b) shows neither class is rare: **236** bare
+`comp` declarations against **282** pictureless `binary-*` ones (`binary-long` 166, `binary-char` 84,
+`binary-short` 32).
+
+*And a third confirmation of the magnitude rule, arriving unlooked-for:*
+
+| store | kept |
+| --- | --- |
+| `−1` into `pic 9(4) comp` | **`0001`** |
+| `−9999` into `pic 9(4) comp` | **`9999`** |
+
+An unsigned receiver takes the **magnitude**. [`Q-3`](#q-3) measured that at the bridge boundary and
+[`Q-5`](#q-5) measured it at `add postings 1 giving Batch-start`; this is a bare `MOVE` with neither a bridge
+nor an `ADD` involved. Three independent sightings of one rule, which is what lets it be stated as the
+system's behaviour rather than as a property of one code path.
+
+**Alignment with the shipped code — checked, not assumed.** All **24** captured vectors were replayed against
+`acas_posting/cobol/usage.py`: **24 agreements, 0 mismatches**, across `byte_length`, `coerce` on pictured
+and pictureless forms, the magnitude rule, and `value_domain`. **No production change was required.** What
+changed is the standing of the values: they were transcribed from documentation and are now observed. The
+constants are additionally pinned from outside by `tests/arithmetic/test_comp_binary.py` GROUP 12, whose
+vectors are copies of the compiled output rather than recomputations — so a drift in `usage.py` breaks them,
+which a test deriving its expectation from the same constants could not do. Non-vacuity was verified by
+flipping `BINARY_TRUNCATE` in-process: `pic 9(4) comp ← 32767` moved from `2767` to `32767` and the vector
+rejected it.
+
+⚠️ **One piece of bookkeeping this closed.** `usage.py` labelled Q-5.1 "RESOLVED" at its own site, and
+`test_comp_binary.py` called the constants "the measured policy", while this register carried the question as
+`PENDING` — a three-way disagreement in which the register was right and the other two were ahead of their
+evidence. Both of those wordings have been corrected in place, with the correction visible rather than
+silent, because the distance between *documented* and *observed* is precisely what R-6 exists to police.
 
 **(e) Consuming module.** `acas_posting/cobol/usage.py`. Test-owned by
-`tests/arithmetic/test_comp_binary.py`, which records the absence census in its own header and marks the
-propositions that depend on the answer rather than asserting them.
+`tests/arithmetic/test_comp_binary.py`, which records the absence census in its own header, asserts the two
+policy constants in GROUP 10, and holds the twenty-four captured vectors in GROUP 12. Since the measurement
+those propositions are asserted rather than marked — there is no longer an unmeasured default for any of them
+to depend on.
 
 <a id="q-5-2"></a>
-
 #### `Q-5.2` — the byte length of a `SIGN LEADING` display item
 
-**Status: `PENDING — AWAITING ORACLE EXECUTION`.**
+**Status: `RESOLVED BY ORACLE` (2026-08-07).**
 
 **(a) The question.** Does a `SIGN LEADING` display item, written **without** `SEPARATE`, occupy the same
 number of bytes as its digits, or one byte more? Reading cannot settle it because the **best in-repo
@@ -1132,8 +1799,8 @@ R-4 forbids.
 sign and read the representation back:
 
 ```text
-$C /repo/harness/seed.sh                  "$S"
-$C /repo/harness/run_cobol_scenario.sh    "$S"
+$C /repo/harness/reset_db.sh --seed-dir "/data/fixtures/$N" "$S"
+$C /repo/harness/run_cobol_scenario.sh                        "$S"
 $C /repo/harness/dump_tables.py --scenario "$N" --side cobol \
                                --tables PSIRSPOST-REC,IRSPOSTING-REC
 ```
@@ -1151,11 +1818,49 @@ in `harness/dump_tables.py`'s own query, never by adding a column or a generated
 byte ahead of the digits; Reading B predicts the leading digit's own byte carrying the sign in its zone
 nibble. Record the byte sequence verbatim for all three seeds.
 
-**(d) Resolution.** None, and it must stay none: `tests/arithmetic/test_sign_leading_display.py` refuses to
-assert either width as fact and holds the question open with a strict expected failure, so that whichever
-way the oracle settles it the suite reacts rather than silently agreeing. Note that the byte account of
-`Q-4`'s Sibling 2 does **not** depend on this answer — neither money field carries a `sign leading` clause in
-the *current* declaration, and the ten bytes each occupies is corroborated by Reading C.
+**(d) Resolution. MEASURED: Reading B — the width is `digits`, and an included leading sign spends no byte.**
+Reading A — digits plus one — is refuted.
+
+The experiment described above routes through the bridge and needs a scenario that drives the four
+leading-sign fields. A far shorter route reaches the same answer with less that can go wrong: **ask the
+compiler what the item's length is.** `FUNCTION LENGTH` is evaluated by the compiler against its own storage
+layout, so it reports the width the compiled program actually uses, without a seed, a bridge, a column or a
+cast standing between the question and the answer.
+
+| declaration | `FUNCTION LENGTH` |
+| --- | --- |
+| `pic s9(7)v99 sign is leading` | **9** |
+| `pic s9(7)v99 sign is leading separate` | **10** |
+| `pic s9(7)v99` (default, trailing included) | **9** |
+| `pic s9(7)v99 sign is trailing separate` | **10** |
+
+The four rows together are the argument, not just the first. An INCLUDED sign — leading or trailing — costs
+nothing, and only `SEPARATE` buys a byte of its own. The byte dump shows where the sign goes: `move -12.34`
+puts `p` (0x70) in byte 1 and the digits `0`..`4` in bytes 2 to 9; `move +12.34` puts `0` (0x30) in byte 1. So
+the sign is OVERPUNCHED onto the leading digit, which is why it costs nothing — and `separate` appears
+**zero** times in the frozen record layouts (§9), so the ten-byte row is a control rather than a case the
+migration has to carry. That is Reading B, the ISO overpunch reading implemented at
+`[acas_posting/cobol/usage.py byte_length]`. **Reading A, `digits + 1` = 10, is measured FALSE.**
+
+Measured with GnuCOBOL 3.2.0, `cobc -x -free`, no `-std=` dialect selection, no
+`>>SET ARITHMETIC` directive and no `binary-truncate` flag — the same absence §9
+counts across every frozen compile line.
+
+**What the measurement does NOT settle, stated so the entry does not overclaim.** It does not explain the
+maintainer's own byte accounting at [`copybooks/wspost.cob:L6-L7`] — *"98 bytes"* then *"96 bytes … (leading
+sign removed)"*, two fields and two bytes. That arithmetic remains inconsistent with a nine-byte leading-sign
+field, and this register records the inconsistency rather than resolving it: the *width the compiler uses* is
+now known; *what the maintainer was counting* is not, and no reading of the frozen source recovers it. Rule
+R-4's discipline applies to comments as much as to code — the contradiction stands.
+
+`[acas_posting/cobol/usage.py byte_length]` already implemented Reading B, so this confirms the layer rather
+than changing it. `tests/arithmetic/test_sign_leading_display.py` now asserts the width and the overpunch
+bytes as facts and carries **no** strict expected failure: the refuted reading is asserted against directly,
+which is a louder failure than an unexpected pass and needs no marker to stay honest.
+
+The byte account of `Q-4`'s Sibling 2 does **not** depend on this answer — neither money field carries a
+`sign leading` clause in the *current* declaration, and the ten bytes each occupies is corroborated by
+Reading C.
 
 **(e) Consuming module.** `acas_posting/cobol/usage.py`. Test-owned by
 `tests/arithmetic/test_sign_leading_display.py`;
@@ -1163,10 +1868,12 @@ the *current* declaration, and the ten bytes each occupies is corroborated by Re
 *position* and *spelling* only, never `byte_length`.
 
 <a id="q-5-3"></a>
-
 #### `Q-5.3` — the overpunch and packed-decimal byte values
 
-**Status: `PENDING — AWAITING ORACLE EXECUTION`.**
+**Status: `RESOLVED BY ORACLE` (2026-08-07)** — both halves. An earlier revision of this entry read
+`PARTIALLY RESOLVED BY ORACLE`, on the ground that the probe series had read zoned bytes and never a
+`COMP-3` item's; the packed half was measured afterwards by the `REDEFINES`-and-`FUNCTION ORD` probe
+recorded in (d), which reads all twelve nibbles, so the qualification no longer applies.
 
 **(a) The question.** What concrete byte does a zoned `DISPLAY` digit carry for a positive sign, for a
 negative sign, and for zero — and, in the packed case, which nibble carries the sign and what value does it
@@ -1220,8 +1927,60 @@ convention from an unsigned one, and it is the one most likely to differ from th
 Capture the bytes as integers or as a hex string — never through a float, and never through a text decode
 that could normalise a high-bit byte (R-2).
 
-**(d) Resolution.** None. The provisional tables above are what the Python side uses today, and they are
-named here so the oracle confirms or replaces a concrete value rather than an implication.
+**(d) Resolution. MEASURED — both halves, all three signs, and from a single run.** The transcribed tables
+above are **confirmed**, and the zero convention that was singled out as the case most likely to differ is
+measured rather than inferred.
+
+The experiment described above routes through the bridge and needs a scenario that drives the leading-sign
+money fields. A shorter route reaches the same bytes with less between the question and the answer: declare
+each representation exactly as the frozen copybooks declare it, `REDEFINES` it as `pic x(n)`, and read every
+byte with `FUNCTION ORD`. Both halves were driven in one program, which is what §(c) asks for — a discrepancy
+between them cannot then be blamed on a difference between runs. Measured with GnuCOBOL 3.2.0,
+`cobc -x -free`, no `-std=` dialect selection, no `>>SET ARITHMETIC` directive and no `binary-truncate`
+flag — the same absence §9 counts across every frozen compile line.
+
+**The packed half** — `pic s9(8)v99 comp-3` as [`copybooks/wsledger.cob:L28`] declares `Ledger-Balance`, and
+`pic 9(9)v99 comp-3` as [`copybooks/wsbatch.cob:L40-L44`] groups its amounts. Six bytes, twelve nibbles,
+digits followed by the sign nibble in the low nibble of the last byte:
+
+| value | nibbles | sign nibble |
+| --- | --- | --- |
+| signed `+1234.56` | `0 0 0 0 0 1 2 3 4 5 6 C` | **`0xC`** |
+| signed `-1234.56` | `0 0 0 0 0 1 2 3 4 5 6 D` | **`0xD`** |
+| signed `0.00` | `0 0 0 0 0 0 0 0 0 0 0 C` | **`0xC`** — a zero in a **signed** field carries the POSITIVE nibble |
+| unsigned `1234.56` | `0 0 0 0 0 1 2 3 4 5 6 F` | **`0xF`** |
+| unsigned `0.00` | `0 0 0 0 0 0 0 0 0 0 0 F` | **`0xF`** |
+
+**The zoned half** — `pic s9(8)v99` DISPLAY, ten bytes, one per digit:
+
+| value | bytes | sign-carrying byte |
+| --- | --- | --- |
+| `+1.00` | `30 30 30 30 30 30 30 31 30 30` | **`0x30`** |
+| `-1.00` | `30 30 30 30 30 30 30 31 30 70` | **`0x70`** |
+| `0.00` | `30 30 30 30 30 30 30 30 30 30` | **`0x30`** — again the positive form |
+
+The same values were reached independently on a `pic s9(7)v99 sign is leading` item, where the sign is
+overpunched onto the LEADING digit rather than the trailing one: `move -12.34` puts `p` (0x70) in the
+sign-bearing byte, `move +12.34` puts `0` (0x30) there, and every non-sign digit byte is `0x30` plus the
+digit in both cases. Two declarations, two sign positions, one pair of zone values.
+
+**So `PACKED_SIGN_POSITIVE = 0xC`, `PACKED_SIGN_NEGATIVE = 0xD`, `PACKED_SIGN_UNSIGNED = 0xF`,
+`ZONED_POSITIVE_ZONE = 0x30` and `ZONED_NEGATIVE_ZONE = 0x70`**, all as
+`[acas_posting/cobol/usage.py PACKED_SIGN_POSITIVE]` and `[acas_posting/cobol/usage.py ZONED_POSITIVE_ZONE]`
+already transcribed them. The module's "RESOLVED" label at those lines meant *settled-for-implementation*; it
+is now settled by observation, and the entry says which.
+
+**The zero convention is the part that was genuinely open**, and it is worth stating on its own because
+`Q-70f` depends on it: a zero stored in a **signed** field carries the POSITIVE sign form in both
+representations. That is why negating a zero leaves the bytes unchanged — there is no negative-zero encoding
+to move to — and it is the measurement `Q-70f` cites.
+
+**And the sign has to ARRIVE BY ARITHMETIC for that to hold, which a negative literal does not.** On the
+leading-sign item: `move 0.00` gives `0`; `compute x = 0.00 * -1` gives `0`; `multiply zero by -1 giving x`
+gives `0`; but the LITERAL `move -0.00` gives `p`. For contrast, `move 12.34` then `multiply by -1` gives
+`t` (0x74) — the negative zone over the digit 4. The distinction is load-bearing rather than academic
+because every in-scope negation is arithmetic and none is a literal: `[general/gl070.cbl:L517]` and
+`[general/gl070.cbl:L530]` are `multiply pre-amount by -1`.
 
 **(e) Consuming module.** `acas_posting/cobol/usage.py`. Test-owned by
 `tests/arithmetic/test_sign_leading_display.py` for the zoned half and
@@ -1239,7 +1998,6 @@ for a reason that has nothing to do with the migration's correctness, and the te
 difference quietly is strong.
 
 <a id="q-6"></a>
-
 #### `Q-6` — the `sl830` asymmetry
 
 **Status: `RESOLVED BY ORACLE` (2026-08-04).**
@@ -1292,35 +2050,81 @@ differ in route, and the Python side must not be "corrected" to make them match 
 `sl055 → sl060` and the Purchase CLI dispatches `pl055 → pl060`, which is symmetric in Python precisely
 because the COBOL is asymmetric and the asymmetric part is out of scope.
 
-**(c) Oracle experiment.** Under the §10 protocol, run the Sales invoice-posting scenario on both sides with
-the autogen switch off, and bound the observation by the autogen tables:
+**(c) Oracle experiment.** Under the §10 protocol, run the Sales invoice-posting scenario on both sides
+with the autogen switch off:
 
 ```text
-$C /repo/harness/seed.sh                  harness/scenarios/clean_batch_sl.yaml
-$C /repo/harness/run_cobol_scenario.sh    harness/scenarios/clean_batch_sl.yaml
-$C /repo/harness/dump_tables.py --scenario clean_batch_sl --side cobol \
-       --tables SAAUTOGEN-REC,SAAUTOGEN-LINES-REC,PUAUTOGEN-REC,PUAUTOGEN-LINES-REC
+S=/repo/harness/scenarios/clean_batch_sl.yaml
+N=clean_batch_sl
+
+$C /repo/harness/run_parity.sh --seed-dir "/data/fixtures/$N" "$S"
 ```
 
-**The observable is that all four autogen tables are still empty after the COBOL run**, and empty again
-after the Python run. The four tables are never seeded, never appear on any scenario's affected-table list,
-and are named here **only** as tables asserted to remain empty — they are out of scope and nothing in the
-migration writes them. Then run the scenario end to end and confirm the stage-8 diff is empty, which is the
-statement that `sl830`'s presence on one side changed nothing anywhere.
+⚠️ **The autogen observation is NOT made with `dump_tables.py`, and cannot be.** An earlier revision of
+this entry proposed `dump_tables.py --scenario clean_batch_sl --side cobol --tables
+SAAUTOGEN-REC,SAAUTOGEN-LINES-REC,PUAUTOGEN-REC,PUAUTOGEN-LINES-REC`. **That command exits 83 without
+dumping anything.** All four tables are among the eleven AAP §0.2.2 lists as out of scope, and
+`harness/dump_tables.py` raises `TableNotInScopeError` for every one of them
+`[harness/dump_tables.py TableNotInScopeError]`, mapped to `EX_SCOPE = 83` `[harness/dump_tables.py EX_SCOPE]`, with the
+message stating the reason: *"dumping one would compare state the migration does not produce."* That
+refusal is correct behaviour, not a limitation to work around — the diff is defined over the in-scope
+tables, and a dump that reached outside them would compare state no scenario declares.
+
+**The mechanism that does make the observation is a row-count probe inside each runner, and it already
+exists.** It is a `count(*)`, not a dump, so it never enters the normalised trees and never reaches
+`diff_states.py`:
+
+| Side | Tables probed | Where | Disposition |
+| --- | --- | --- | --- |
+| COBOL | `SAAUTOGEN-REC`, `SAAUTOGEN-LINES-REC` — the Sales pair only, since only the Sales menu calls `sl830` | `[harness/run_cobol_scenario.sh ACAS_RUN_AUTOGEN_TABLES]` declares them; `[harness/run_cobol_scenario.sh acas_assert_after_run]` probes them, and only when the subsystem is `sales` | 0 rows ⇒ `PASS … sl830 was a no-op`; non-zero ⇒ a counted assertion failure, because autogen being in use makes the run non-comparable. A table that cannot be counted is *noted*, not failed |
+| Python | all four, including the Purchase pair | `[harness/run_python_scenario.sh ACAS_PY_AUTOGEN_TABLES]` declares them; `[harness/run_python_scenario.sh acas_py_assert_after_run]` probes them through `acas_py_table_counts` | same three-way disposition, with the comment inside `[harness/run_python_scenario.sh acas_py_assert_after_run]` naming this as what makes the route asymmetry safe to live with rather than merely asserted in prose |
+
+There is also a **pre-run gate** on the COBOL side that makes the switch-off state binding rather than
+hoped for: `[harness/run_cobol_scenario.sh acas_assert_database]` reads `SYSTEM-REC.SL-AUTOGEN` before the run and
+dies if it is `"Y"`, on the ground that the Sales invoice path would then be non-deterministic.
+
+**So the observable is two-part.** First, the probes above report 0 rows on both sides. Second, the
+scenario's own stage-10 diff over its declared affected tables is empty. Together they say that `sl830`'s
+presence on one side changed nothing anywhere — the first for the tables it would have written, the second
+for the tables the migration does write.
 
 Repeat once with the autogen switch **on**, not to compare the two sides — `sl830` has no Python
 counterpart, so that comparison is meaningless — but to establish that the switch is what gates the
 program, and therefore that the scenarios' setting of it off is load-bearing rather than incidental.
 
-**(d) Resolution.** The expectation was confirmed. The compiled
-`clean_batch_sl` and `period_end_totals` runs both executed the Sales menu with
-`SL-Autogen` off. Their post-run assertions found
-`SAAUTOGEN-REC`, `SAAUTOGEN-LINES-REC`, `PUAUTOGEN-REC`, and
-`PUAUTOGEN-LINES-REC` empty, and both full journeys produced observed empty
-diffs. The route asymmetry is therefore observably a no-op under the mandated
-seed. Evidence:
-`/tmp/blitzy_phase5_run_parity_all_eight.log` and
-[`scenario-diff-evidence.md`](scenario-diff-evidence.md).
+**(d) Resolution.** The expectation was confirmed. The compiled `clean_batch_sl` and `period_end_totals`
+runs both executed the Sales menu with `SL-Autogen` off — the pre-run gate above would have refused them
+otherwise. The two sides probe different-sized sets, deliberately: the COBOL runner's
+`[harness/run_cobol_scenario.sh ACAS_RUN_AUTOGEN_TABLES]` names the Sales pair `SAAUTOGEN-REC` and
+`SAAUTOGEN-LINES-REC`, because `sl830` is the only autogen program the compiled route can reach, while the
+Python runner's `[harness/run_python_scenario.sh ACAS_PY_AUTOGEN_TABLES]` names all **four**, Purchase pair
+included, because the Python route reaches none of them and can therefore afford the wider assertion. Both
+probes found their tables empty, and both full journeys then produced observed empty final-diff stages. The
+route asymmetry is therefore observably a no-op under the mandated seed.
+
+**Evidence, and what survives of it.** The durable per-scenario artifacts the run itself writes — the retained
+`verdict.json` and `parity-result` of the `clean_batch_sl` and `period_end_totals` runs, the two normalised
+trees, and the post-run assertion lines in the stage log under `$ACAS_OUT/run-logs/<scenario>/cobol.log`,
+inside this clone's `acas-harness-<CLONE_INDEX>-out` volume — together with
+[`scenario-diff-evidence.md`](scenario-diff-evidence.md), whose §10.2 (`clean_batch_sl`) and §10.6
+(`period_end_totals`) carry each run's affected-table list, manifest fingerprint and diff outcome. Regenerate
+the whole sweep rather than trusting any path:
+
+```bash
+export CLONE_INDEX=001      # plus the credential variables, per README section 8.1
+for s in harness/scenarios/*.yaml; do
+  docker compose -f harness/docker-compose.yml run --rm -T gnucobol \
+      /repo/harness/run_parity.sh "/repo/$s" < /dev/null
+done
+```
+
+⚠️ Earlier revisions cited a session-scoped `/tmp` log here. That file does not outlive the session that
+produced it, so the citation has been removed rather than left as a path a reader cannot open, and it is
+replaced by the command above and the volume-backed artifacts, both of which do survive. Anything in this
+paragraph that the evidence register does not itself record — the per-table probe results specifically — is a
+**report of an observed run rather than a retained artefact**, and is labelled as such wherever this register
+quotes one. Re-running the two scenarios under the §10 protocol reproduces the probe lines verbatim, since
+both runners emit them unconditionally.
 
 This resolution is deliberately conditional on the switch-off state used by
 the scenarios. It does not claim parity for `sl830` with autogen enabled; that
@@ -1331,7 +2135,6 @@ program remains out of migration scope.
 autogen tables belongs.
 
 <a id="q-7"></a>
-
 #### `Q-7` — the menu shells' exit-path rewrite
 
 **Status: `RESOLVED BY ORACLE` (2026-08-04).**
@@ -1361,7 +2164,58 @@ The same shape appears in the other two menus: `[sales/sales.cbl:L628]` with its
 can hold. The two branches are **exhaustive**, and `load000` therefore performs `overrewrite`
 unconditionally. There is no path through a menu dispatch that skips it.
 
-**The Python CLI does none of this.** It has no menu, so it has no exit path to hang the paragraph off.
+**⭐ CORRECTED — the Python CLI DOES reproduce this, and that is what closed the question.** An earlier form
+of this entry read *"the Python CLI does none of this: it has no menu, so it has no exit path to hang the
+paragraph off"*. That was true of an earlier tree and is **false of this one** — verified by reading the
+shipped code, not inferred. A single-operation process has exactly one exit, so
+`acas_posting/cli/args.py`'s `overrewrite` runs the RDB arm once per process:
+
+| Route family | Where | Keys rewritten |
+| --- | --- | --- |
+| General — `gl_post_cycle`, `gl_end_of_cycle` | `acas_posting/cli/args.py`'s `overrewrite`, called from `` `acas_posting/cli/gl_post_cycle.py load00` `` and `` `acas_posting/cli/gl_post_cycle.py main` ``, and from `` `acas_posting/cli/gl_end_of_cycle.py load00` `` and `` `acas_posting/cli/gl_end_of_cycle.py main` `` | **1, then 2, then 4** — `general_menu_state()` carries both a defaults record and a totals record |
+| Sales and Purchase — `sl_invoice_post`, `sl_cash_post`, `pl_order_post`, `pl_payment_post` | the same `overrewrite`, through each route's own wrapper | **1, then 4** — `slpl_menu_state()` carries a totals record and no defaults record |
+| IRS — `irs_post` | **not** `overrewrite`. `irs/irs.cbl` has no such paragraph — verified by search — so the route reproduces that menu's `EOJ.` instead, in `acas_posting/cli/args.py`'s `eoj_persist_irs_system_data` | **1 alone**, and it **re-reads key 1 first** `[irs/irs.cbl:L759-L762]`, so the rewrite discards every in-memory change outside the IRS block |
+
+So the per-route divergence in the table above comes out of one implementation without a special case — key 1
+unconditionally, key 2 only when the route loaded the defaults record, key 4 only when it loaded the totals
+record — and **every one of the seven routes rewrites `SYSTEM-REC` under key 1**. The two shapes are preserved
+as two shapes rather than harmonised (R-4), and the absence of a term-code gate on the IRS route is recorded in
+`acas_posting/cli/irs_post.py`'s module docstring under the heading *"THERE IS NO TERM-CODE GATE ON THIS
+ROUTE - AND THAT IS REPRODUCED, NOT LOST"*. One deliberate divergence is recorded at the site: the frozen RDB
+arm is guarded by `File-System-Used NOT = zero` at `[general/general.cbl:L657]` while the Python arm is
+**unconditional**, because that gate selects between two stores and the migration has one — `args.py` states
+this in `overrewrite`'s own docstring rather than hiding it.
+
+**What this does to the question.** It removes the asymmetry the question was originally about: the COBOL side
+no longer carries parameter-table writes the Python side cannot produce. It does **not** make the rewrites
+unobservable, so the comparison still has to reach them — and it does, twice over.
+
+⭐ **`SYSTEM-REC` IS DUMPED, WITH EXACTLY TWO CELLS WITHHELD, AND FINGERPRINTED AS WELL.** The row is one of
+the 22 in-scope tables every capture covers, so all its columns are compared by value with two named
+exceptions: `harness/dump_tables.py`'s `REDACTED_COLUMNS` replaces `RDBMS-PASSWD`
+`[copybooks/wssystem.cob:L139]` and `PASS-WORD` with `REDACTED_VALUE` in `render_value`, the one funnel every
+captured cell passes through. That is applied identically on both sides and keyed by `(table, column)`
+constants, so the redaction cannot itself manufacture a difference, and it costs only what it says: two
+credential columns are no longer compared by value. Both legs of a run connect with the **same** credentials
+and the builder fills those columns from the same environment for both, so they could not have carried a
+behavioural difference of the migrated cycle. Bounding the whole table out — the alternative that was
+considered and rejected — would have removed the leak and taken 167 genuinely-written columns with it, and a
+bound drawn that way cannot reveal a difference in what it excludes.
+
+On top of the dump, **both runners fingerprint the row before and after every run**, and
+`` `tests/conftest.py assert_system_record_parity` `` compares the two sides' post-run digests. The digest is a
+sha256 over the canonical primary-key-ordered dump and therefore covers all 169 columns, credentials included,
+without being the dump — so the two cells the capture withholds are still compared, as part of a hash that
+leaks nothing. ⭐ The second reason for treating the row carefully is recorded rather than overclaimed: its
+content depends on what the route DID — the run-date stamp, the IRS allocator, the one-shot latches, and
+`Date-Form` `[copybooks/wssystem.cob:L127]`, which the frozen date sections write back — so a scenario's
+declared effect could in principle be coupled to fields the scenario does not reason about. **Measured: the
+digest holds on all four scenarios that declare `unchanged` and moves on every one that declares `changed`** —
+taken over the eight scenarios that existed when the measurement was taken, which is all four `unchanged`
+ones, the ninth declaring `changed` and moving the row by construction. So the coupling is theoretical today;
+the row is declared on every scenario's
+`affected_tables` for that reason, and the fingerprint comparison is what would catch a persistence regression
+even if a future scenario's declaration were wrong.
 
 **(c) Oracle experiment.** Under the §10 protocol, with the observation bounded by the scenario's own
 affected-table list rather than by everything:
@@ -1371,9 +2225,16 @@ $C /repo/harness/dump_tables.py --scenario "$N" --side cobol --scenario-file "$S
 ```
 
 `harness/dump_tables.py` reads the scenario's `affected_tables` list from the YAML and dumps exactly those
-tables; `harness/scenarios/clean_batch_gl.yaml` declares its list at `L585`. Run the full eight stages for
-each of the four clean-batch scenarios, then **also** dump the three system tables outside the affected list,
-as a separate observation, and compare them against the seed:
+tables; `harness/scenarios/clean_batch_gl.yaml` declares it under its own
+`affected_tables:` key. Run **all ten stages** — `harness/run_parity.sh --print-stages` lists them, and
+`harness/parity_stages.sh` is where they are defined — for
+each of the four clean-batch scenarios, then **also** dump the three system tables as a separate observation
+and compare them against the seed. ⚠️ That second dump was originally described as covering "the three system
+tables outside the affected list", and it no longer is: `clean_batch_gl` now declares `SYSTEM-REC` and
+`SYSDEFLT-REC` among its five, `clean_batch_sl` and `clean_batch_pl` declare `SYSTEM-REC` and `SYSTOT-REC`
+among their eleven, and `clean_batch_irs` declares `SYSTEM-REC` among its five — so the second dump now
+overlaps the first deliberately, and what it adds is the comparison **against the seed** rather than against
+the other side:
 
 ```text
 $C /repo/harness/dump_tables.py --scenario "$N" --side cobol \
@@ -1388,10 +2249,14 @@ worry.
 cross-process flat-mirror effect is now measured.
 
 1. Bounding by each scenario's `affected_tables` list is correct. All eight
-   mandated journeys produced observed empty diffs with no ignore list.
+   mandated journeys produced observed empty diffs with no ignore list on
+   2026-08-04, and all **nine** committed journeys did so on 2026-08-07.
 2. The RDB branch persists the system and totals rows expected by the menu
    shell. `SYSTOT-REC` remains included for `period_end_totals`, whose four
-   operations produced the same 14-table state on both sides.
+   operations produced the same **15**-table state on both sides. ⚠️ That figure
+   read "14" until this revision: `SYSTEM-REC` was added to this scenario's
+   affected-table list when the menu-persisted mutation was brought inside the
+   comparison, and the prose count was not moved with it.
 3. The second, flat-file pass had an additional effect not visible from a
    single menu process: it wrote `File-System-Used = 0` into `system.dat`
    record 1. A later menu process then selected indexed files and issued no
@@ -1402,13 +2267,52 @@ cross-process flat-mirror effect is now measured.
 After the build-copy shim, operation two of the isolated Sales sequence changed
 `SL-PAYMENTS` from `8888.88` to `9691.23`, cleared `S-FLAG-P`, the complete
 four-operation journey passed 18 tests, and the standalone ten-stage parity
-run produced an empty diff. Evidence:
-`/tmp/blitzy_phase5_period_end_totals_after_mode_and_sortcode.log` and
-`/tmp/blitzy_phase5_run_parity_all_eight.log`.
+run produced an empty diff.
+
+**Evidence, and what survives of it.** The durable per-scenario artifacts the run itself writes — the retained
+`verdict.json` and `parity-result` of the `period_end_totals` run, the two normalised trees, and the
+`SL-PAYMENTS` before-and-after values in the stage log under
+`$ACAS_OUT/run-logs/period_end_totals/cobol.log`, inside this clone's `acas-harness-<CLONE_INDEX>-out`
+volume — together with [`scenario-diff-evidence.md`](scenario-diff-evidence.md) §10.6, which carries
+`period_end_totals`' four operations, its affected-table list including `SYSTOT-REC`, its manifest fingerprint
+and its empty diff. The build-copy shim relied on above is durable and readable in committed code: it lives in
+`harness/build_oracle.sh` at `acas_install_sqlstate_comment_shim` and writes only into `$ACAS_BUILD`, never
+into the checkout. Regenerate the whole sweep rather than trusting any path:
+
+```bash
+export CLONE_INDEX=001      # plus the credential variables, per README section 8.1
+for s in harness/scenarios/*.yaml; do
+  docker compose -f harness/docker-compose.yml run --rm -T gnucobol \
+      /repo/harness/run_parity.sh "/repo/$s" < /dev/null
+done
+```
+
+⚠️ Earlier revisions cited session-scoped `/tmp` logs here — two of them. Those files do not outlive the
+session that produced them, so the citations have been removed rather than left as paths a reader cannot open,
+and they are replaced by the command above and the volume-backed artifacts, both of which do survive. The
+specific figures in the paragraph above (`8888.88 → 9691.23`, the cleared `S-FLAG-P`, "18 tests") are
+therefore a **report of an observed run rather than a retained artefact**, and are labelled as such wherever
+this register quotes one: the durable claim is the empty diff the evidence register records, and re-running
+`period_end_totals` under the §10 protocol reproduces the figures.
+
+⭐ **UPDATE — the bound has since been WIDENED, and resolution point 1 above is superseded.** Point 1 read
+"bounding by each scenario's `affected_tables` list is correct". That was sound only while the Python side
+produced no system-row writes. Now that every route reproduces the menu's exit-time rewrite — six through
+`args.overrewrite` and `irs_post` through `args.eoj_persist_irs_system_data` — the system rows are
+**comparable on both sides**, and bounding them out costs evidence rather than buying safety: a bound drawn
+from what a scenario *expects* to move cannot reveal a difference in anything it did not expect to move, so a
+scenario could report an empty diff while the run date, the allocators, the flags, the defaults or the period
+totals differed. The canonical capture and diff are therefore bounded at **all 22 in-scope tables**
+(`--all-in-scope`), which `harness/run_parity.sh` passes at the capture, compare and re-capture stages and
+`tests/conftest.py` passes from `dump` and `diff`. `affected_tables` is retained as the scenario's **declared
+effect**, asserted against `expected_table_effect` within each side, which is a different comparison and
+remains correct. The observed empty diffs recorded in `docs/migration/scenario-diff-evidence.md` §8 under the
+**narrower** bound are kept there as the earlier register, exactly as measured, because an empty diff over 3,
+4, 10 or 14 tables does not establish one over 22.
 
 ⛔ **It must never be resolved with an ignore-list inside `harness/diff_states.py`.** That module is required
-to have none, and it says so itself: `[harness/diff_states.py:L2441]` records *"no ignore-list"* as a
-property of the comparison, and `[harness/diff_states.py:L1632]` names an ignore-list as **forbidden by rule
+to have none, and it says so itself: `[harness/diff_states.py summarise]` records *"no ignore-list"* as a
+property of the comparison, and `[harness/diff_states.py resolve_tables]` names an ignore-list as **forbidden by rule
 R-4**. The distinction matters and is not pedantic: choosing which tables a scenario is *about* is scoping,
 declared in the scenario and reviewable there; teaching the differ to overlook a difference it found is
 suppression, invisible at the point of use, and it would silently swallow a real regression in the same
@@ -1416,8 +2320,8 @@ column later.
 
 ⚠️ **An honest overlap, stated plainly rather than buried.** `SYSTOT-REC` **is** genuinely in scope for the
 `period_end_totals` scenario — it is that scenario's focal table, declared as such at
-`[harness/scenarios/period_end_totals.yaml:L592]`, because the nine period-total write sites are its sole
-writers. So for one of the eight scenarios the containment above does **not** apply: the table the menu
+`[harness/scenarios/period_end_totals.yaml "SYSTOT-REC IS THE FOCAL TABLE, AND IT CARRIES A RECORDED CAVEAT (R-4, R-6)"]`, because the nine period-total write sites are its sole
+writers. So for one of the nine committed scenarios the containment above does **not** apply: the table the menu
 rewrites on exit is the table the scenario exists to compare. That scenario cannot be made safe by scoping,
 and its diff depends on this question's answer.
 
@@ -1426,11 +2330,11 @@ distinct, and catalogued in §14: `Q-CLI-OVERREWRITE` and `Q-CLI-OVERREWRITE-SEC
 the Python CLI should reproduce the paragraph at all.
 
 <a id="q-8"></a>
-
 #### `Q-8` — `Post-Date (7:2)`: a year, or a century?
 
-**Status: `PARTIALLY RESOLVED`.** The Sales path is settled **by construction**; any caller that truncates
-instead is open.
+**Status: `RESOLVED BY CONSTRUCTION` (2026-08-07).** The Sales and Purchase paths compose a **year**; `irs/irs030.cbl`'s
+own conversion path truncates and therefore stores a **century**. The callers do **not** agree, and the
+divergence is reproduced rather than repaired.
 
 **(a) The question.** The linkage date is `to-day pic x(10)` in **DD/MM/CCYY** form. `Post-Date` is
 `pic x(8)` at `[copybooks/wspost.cob:L18]`. And the bridge derives a **year** from characters 7 and 8 of it,
@@ -1486,8 +2390,8 @@ with a pinned run date whose century and year differ visibly — `21/09/2025` gi
 `"25"`, which cannot be confused:
 
 ```text
-$C /repo/harness/seed.sh                  "$S"
-$C /repo/harness/run_cobol_scenario.sh    "$S"
+$C /repo/harness/reset_db.sh --seed-dir "/data/fixtures/$N" "$S"
+$C /repo/harness/run_cobol_scenario.sh                        "$S"
 $C /repo/harness/dump_tables.py --scenario "$N" --side cobol \
                                --tables IRSPOSTING-REC,GLPOSTING-REC,PSIRSPOST-REC
 ```
@@ -1497,9 +2401,45 @@ $C /repo/harness/dump_tables.py --scenario "$N" --side cobol \
 `POST4-DAT = "21/09/20"` is the truncating route. Record the pair for every caller, not a single
 representative one — the whole question is whether the callers agree.
 
-**(d) Resolution.** Part-settled. The **Sales** path holds the year, by construction, from
-`[sales/sl060.cbl:L1071-L1072]`. Whether **every** in-scope caller uses the composing route rather than a
-truncating move is **open** and must be arbitrated by the oracle.
+**(d) Resolution. `RESOLVED BY CONSTRUCTION` — and the answer is NO, the callers do not agree.**
+
+The open half was *whether every in-scope caller uses the composing route rather than a truncating move.* That
+is a question about **which statements exist**, and a census of the frozen source answers it with evidence of
+exactly the same kind an oracle run would produce — the statements are either there or they are not. So the
+census was taken, over every site in the in-scope programs that writes `Post-Date pic x(8)`
+[`copybooks/irswspost.cob:L11`]:
+
+| site | statement | what lands in bytes 7–8 |
+| --- | --- | --- |
+| [`sales/sl060.cbl:L1071-L1072`] | `move u-date (1:6) to post-date (1:6).` then `move u-date (9:2) to post-date (7:2).` | **YEAR** — composed deliberately |
+| [`purchase/pl060.cbl:L937-L938`] | identical to the Sales path | **YEAR** |
+| [`irs/irs030.cbl:L1341`] | `move u-date to post-date.` | **CENTURY** |
+| [`irs/irs030.cbl:L789`] | `move run-date to post-date.` | pass-through — `run-date` is `pic x(8)` [`copybooks/irswssystem.cob:L14`] |
+| [`irs/irs030.cbl:L1662`] | `move WS-IRS-Post-Date to post-date.` | pass-through — `x(8)` to `x(8)`, carrying whatever `sl060`/`pl060` stored |
+
+**The third row is the answer.** `u-date` is `pic x(10)` [`copybooks/wsmaps03.cob:L7`] and `post-date` is
+`pic x(8)`, so a plain alphanumeric `MOVE` **truncates on the right** and bytes seven and eight receive the
+`CC` of `CCYY` — the century. Nobody chose that; it is a width mismatch. And because both windows are numeric,
+both satisfy the bridge's third guard [`common/irspostingMT.cbl:L986-L987`], so `POST4-YEAR` is populated
+either way and no row is left with a tell-tale zero component.
+
+**Why this needed no compiled run, stated so the status is not mistaken for a shortcut.** The question reduces
+to the widths of two data items and the truncation rule for an alphanumeric `MOVE`. Both widths are declared
+in frozen copybooks and quoted above; the truncation rule is the one this migration already measured and locked
+in `tests/arithmetic/test_move_truncation.py`. An oracle run would print the same `DD/MM/CC` these declarations
+require. Per §4's vocabulary that is `RESOLVED BY CONSTRUCTION`, not `RESOLVED BY ORACLE`, and the entry claims
+the weaker of the two on purpose.
+
+**Not repaired (R-3, R-4).** No caller is corralled onto one composition, no range is checked and no century is
+restored. `tests/arithmetic/test_irs_date_component_derivation.py` carries the census as
+`Q25_COMPOSITION_SITES` and asserts the divergence — that a 2025 date yields `25` on the Sales path and `20`
+on the truncating one — so the disagreement is locked in place rather than described. Its `xfail` marker has
+been removed, because the proposition it held open (that every caller composes the window alike) is now
+answered: it is false.
+
+**The bite, which the sibling assertion keeps.** For a date whose century and year coincide the stored row
+cannot say which reading produced it — a stored `20` is a legitimate year in 2020 and a century in 2025, and
+the row carries no flag either way.
 
 **A consequence that is settled, and is a constraint rather than a question.** `harness/normalize.py`
 canonicalises date **rendering only**. It must **never expand two digits to four, nor contract four to two**.
@@ -1513,7 +2453,6 @@ derivation), `acas_posting/dal/acas006_gl_posting.py` (the General posting table
 `tests/arithmetic/test_irs_date_component_derivation.py`.
 
 <a id="q-9"></a>
-
 #### `Q-9` — `HV-POST-RRN` is declared and fetched, but never loaded
 
 **Status: `PARTIALLY RESOLVED BY ORACLE` (2026-08-04).** The non-fetch
@@ -1582,9 +2521,12 @@ stated more confidently would have adjudicated a question the author of both sta
 what the primary key holds and what a cursor walk returns:
 
 ```text
-$C /repo/harness/seed.sh                  harness/scenarios/clean_batch_gl.yaml
-$C /repo/harness/run_cobol_scenario.sh    harness/scenarios/clean_batch_gl.yaml
-$C /repo/harness/dump_tables.py --scenario clean_batch_gl --side cobol --tables GLPOSTING-REC
+S=/repo/harness/scenarios/clean_batch_gl.yaml
+N=clean_batch_gl
+
+$C /repo/harness/reset_db.sh --seed-dir "/data/fixtures/$N" "$S"
+$C /repo/harness/run_cobol_scenario.sh                        "$S"
+$C /repo/harness/dump_tables.py --scenario "$N" --side cobol --tables GLPOSTING-REC
 ```
 
 **Three observables, and all three are needed:**
@@ -1611,9 +2553,28 @@ which now prove an unchanged result with observed empty diffs.
 The resolution does **not** claim that `START`/`READ NEXT` follows
 `POST-RRN`, nor does it erase the warning that `POST-KEY` may need changing.
 Those cursor and key-of-reference questions require the deliberately
-non-degenerate experiment described above and remain open. Evidence:
-`/tmp/blitzy_phase5_run_parity_all_eight.log` and
-[`scenario-diff-evidence.md`](scenario-diff-evidence.md).
+non-degenerate experiment described above and remain open.
+
+**Evidence, and what survives of it.** The durable per-scenario artifacts the run itself writes — the retained
+`verdict.json` of every scenario, the two normalised trees and the stage log under
+`$ACAS_OUT/run-logs/<scenario>/`, inside this clone's `acas-harness-<CLONE_INDEX>-out` volume — together with
+[`scenario-diff-evidence.md`](scenario-diff-evidence.md), whose §10.1 (`clean_batch_gl`) and §10.5
+(`mixed_accepted_rejected`) carry the affected-table list, manifest fingerprint and diff outcome that bear
+directly on this entry. Regenerate the whole sweep rather than trusting any path:
+
+```bash
+export CLONE_INDEX=001      # plus the credential variables, per README section 8.1
+for s in harness/scenarios/*.yaml; do
+  docker compose -f harness/docker-compose.yml run --rm -T gnucobol \
+      /repo/harness/run_parity.sh "/repo/$s" < /dev/null
+done
+```
+
+⚠️ Earlier revisions cited a session-scoped `/tmp` log here. The console log of the driving session went to a
+host temporary path and does **not** outlive the session that produced it, so it is not cited: it has been
+replaced by the command above and the volume-backed artifacts, both of which do survive. And the durable claim
+is narrower than a log would have suggested — the two empty diffs the register records, plus the `HV-POST-RRN`
+mechanism above, which is readable in the frozen bridge without running anything at all.
 
 **(e) Consuming modules.** `acas_posting/dal/acas006_gl_posting.py`, which owns the SQL for
 `GLPOSTING-REC` and therefore decides what `POST-RRN` is written from, and
@@ -1623,7 +2584,6 @@ which key the walk follows.
 ---
 
 <a id="q-10"></a>
-
 ### `Q-10` — which access the AAP's autocommit-OFF requirement governs
 
 **Status: `RESOLVED BY ORACLE` (2026-08-04).**
@@ -1660,37 +2620,101 @@ than assumed:
   testing with mariadb - Non transactional model or autocommit set ON", and `[common/glbatchLD.cbl:L386]`
   "otherwise as normally it is set to autocommit !!!!!".
 
-**(c) Oracle experiment.** Under the §10 protocol, once §10.1's blocker is cleared, seed one scenario twice
-and read the row counts back from a **fresh** session each time:
+**(c) Oracle experiment.** Seed one scenario twice under the §10 protocol and read the row counts back from
+a **fresh** session each time:
 
 ```text
-ACAS_SEED_AUTOCOMMIT=off  harness/seed.sh  "$S"   # the AAP-mandated seeding mode
-ACAS_SEED_AUTOCOMMIT=on   harness/seed.sh  "$S"   # the mode the compiled loaders require
+ACAS_SEED_AUTOCOMMIT=off  harness/reset_db.sh --seed-dir "$F" "$S"   # the AAP-literal window
+                          harness/reset_db.sh --seed-dir "$F" "$S"   # the canonical mode -- NO FLAG NEEDED
 ```
 
-What a run settles that reading cannot: whether a loader leaves **any** row behind under the OFF window (the
-source says no; only execution proves it), and whether the two modes differ in anything beyond durability —
-in particular whether a loader's `FS-Reply` / return code changes, which would make the mode observable to the
-frozen code rather than merely to the server.
+Two things a run settles that reading cannot: whether a loader leaves **any** row behind under the OFF window
+(the source says no; only execution proves it), and whether the two modes differ in anything beyond
+durability — in particular whether a loader's `FS-Reply` / return code changes, which would make the mode
+observable to the frozen code rather than merely to the server.
 
-**(d) Resolution.** The scope is seeding, and the two modes' stored effects
-were measured.
+**(d) Resolution — MEASURED.** The scope is seeding, and both modes were run against the compiled loaders.
 
-- With the declared OFF window, the frozen loaders return without a live
-  COMMIT and a fresh session sees zero durable rows. `seed.sh` exits 76 rather
-  than allowing an all-empty capture to reach the differ.
-- With `ACAS_SEED_AUTOCOMMIT=on`, the same frozen loaders persist the expected
-  rows. That explicit operator decision is required for every parity run in
-  this evidence set.
-- Runtime application access remains autocommit ON. Both compiled and Python
-  runners assert that mode and then reproduce the frozen absence of explicit
-  transaction boundaries.
+| seeding window | the seven loaders' return codes | rows a **fresh** session sees | `reset_db.sh` exit |
+| --- | --- | --- | --- |
+| `off` (AAP-literal) | all seven **0**, i.e. success | **0** in all seven seeded tables | **76** |
+| `on` | all seven **0**, i.e. success | `SYSTEM-REC` 1, `SYSTOT-REC` 1, `GLBATCH-REC` 1, `GLLEDGER-REC` 4, `GLPOSTING-REC` 1 — 8 rows across 7 tables | **0** |
+
+Both halves of the question are answered:
+
+- **OFF cannot seed at all.** Seven load programs report success and the database holds nothing, so
+  `seed.sh`'s durability gate exits 76 rather than letting an all-empty capture reach the differ, where it
+  would have produced the protocol's only pass condition (AAP §0.8.5) having measured nothing.
+- **The mode is invisible to the frozen code.** The loader return codes are *identical* under both windows,
+  so the choice is observable only to the server. It changes no behaviour the migration is reproducing.
+
+**⭐ THE DEFAULT FOLLOWS FROM THE MEASUREMENT.** `ACAS_SEED_AUTOCOMMIT` unset now means **on** — the measured
+durable mode — because a shipped default must not be a mode the script itself proves always fails. It is a
+deterministic protocol input rather than a ritual every caller has to remember; the previous arrangement left
+the standard documented invocation exiting 76 with no tracked caller selecting the working mode. `off` remains
+selectable, is the AAP-literal reading, and **reproduces the frozen no-COMMIT defect end to end** — which is
+precisely what exit 76 reports, and why the mode is kept rather than removed (R-4).
+
+Runtime application access remains autocommit ON. Both runners assert that mode and then reproduce the frozen
+absence of explicit transaction boundaries. No harness code issues the COMMIT the frozen loaders omit: the
+resolution is an observed operating precondition, not a repair to legacy transaction behaviour.
+
+`tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py::test_the_seeding_window_defaults_to_the_measured_durable_mode`
+asserts the default against the shipped script, so a revert to the always-failing mode fails the suite.
+
+⭐ **Why the default was moved, and why that is faithful rather than a liberty.**
+The AAP's requirement rests entirely on `[common/glbatchLD.cbl:L9-L13]`, and that
+citation is an *operator banner*, not code — evidence (b) establishes that no COBOL
+program in the checkout can change the setting at all. The maintainer then
+**superseded his own banner inside the same frozen files**: at
+`[common/glbatchLD.cbl:L386-L387]`, "We will Rollback on any errors but Mysql has to
+be set up to do it otherwise as normally it is set to autocommit !!!!!", and at
+`[common/glbatchLD.cbl:L453]` (repeated in all 28 loaders), "These do not work during
+testing with mariadb - Non transactional model or autocommit set ON" — and commented
+out every call site, leaving 77 dead references and not one live `perform`. The banner
+even concedes the server default at its own L11-L12: "It is as default set ON."
+
+So the banner is a stale comment that the code and the maintainer's later notes both
+contradict. Rule R-6 makes compiled behaviour the arbiter, and compiled behaviour is
+unambiguous: under OFF the loaders persist nothing. Defaulting to a mode in which the
+oracle cannot be seeded would make the AAP's own acceptance criterion (§0.8.5, an
+empty diff over a real comparison) unreachable, and would leave the canonical driver
+guaranteed to exit 76. **This is a divergence from the letter of AAP §0.2.1.1, §0.5.2
+and §0.4.1.7, recorded as such**, taken in service of the AAP's own validation
+requirement rather than against it. Nothing here fixes the legacy defect — the missing
+COMMIT is still missing, and `acas_assert_seed_durability` still refuses to hide it.
+
+**Measured on the live stack when the default was moved** (all three from one session):
+
+| Invocation | Window selected | Outcome |
+| --- | --- | --- |
+| `seed.sh` with **no flag** | autocommit ON, canonical | **exit 0** — "the seed is present — 9 row(s) across 7 table(s)" |
+| `reset_db.sh` with `ACAS_SEED_AUTOCOMMIT=off` | autocommit OFF, AAP-literal | **exit 76** — "every load program reported success and the database holds NO rows in any of the 7 table(s) they write"; the reset then reports the schema applied and the seed absent |
+| `reset_db.sh` with **no flag** | autocommit ON, canonical | **exit 0** — 33 tables recreated, all empty before the seed, then "the seed is present — 8 row(s) across 7 table(s)" |
+
+Every scenario in the harness was then driven end to end under the canonical mode and
+produced an empty diff. Regenerate that evidence rather than trusting a log path:
+`harness/run_parity.sh <scenario>` writes its verdict and diff under
+`$ACAS_OUT/<scenario>/`, and the retained run log under `$ACAS_OUT/run-logs/<scenario>/`.
+
 
 No harness code issues the COMMIT the frozen loaders omit. The resolution is
 therefore an observed operating precondition, not a repair to legacy
-transaction behaviour. All eight standalone parity journeys were executed
-with `ACAS_SEED_AUTOCOMMIT=on` and produced empty diffs. Evidence:
-`/tmp/blitzy_phase5_run_parity_all_eight.log`.
+transaction behaviour. Every standalone parity journey — all **nine** — was
+executed under the durable seeding window and produced an empty diff.
+
+**Evidence, and what survives of it.** Two durable records, both in the repository, and one thing that is
+not. The **mechanism** is readable in committed code: `harness/seed.sh` selects the durable window when
+`ACAS_SEED_AUTOCOMMIT` is unset, and an explicit `ACAS_SEED_AUTOCOMMIT=off` reaches the AAP-literal window,
+where the stage exits **76** rather than seeding silently — so the *"a fresh session sees zero durable rows"*
+behaviour is reproducible by setting the variable and does not rest on a log. The **outcome** is recorded in
+[`scenario-diff-evidence.md`](scenario-diff-evidence.md), which carries all nine journeys with their manifest
+fingerprints and diff outcomes, each `parity-result` claiming `identical`. To regenerate either rather than
+trust a path, run `harness/run_parity.sh <scenario>`, which writes its verdict and diff under
+`$ACAS_OUT/<scenario>/` and its run log under `$ACAS_OUT/run-logs/<scenario>/` on the harness `out` volume.
+⚠️ **The console log an earlier revision cited here is not retained and the citation has been removed**; the
+transcript quoted in the table above is a **report of an observed run rather than a retained artefact**, and
+is labelled as such wherever this register quotes one.
 
 **(e) Consuming modules.** `harness/seed.sh` (the window and the durability gate),
 `harness/Dockerfile.mariadb` (the runtime mode), `harness/reset_db.sh` and
@@ -1699,12 +2723,94 @@ all-empty comparison so that the same failure cannot arrive by another route.
 
 ---
 
-## 13. Deferrals handed up from the arithmetic tier
+<a id="q-sys4-spare-sentinel"></a>
 
-The parity tier reached a class of question it cannot answer and would not be honest to guess: **what the
+#### `Q-SYS4-SPARE-SENTINEL` — the loader stamps a sentinel the menu then erases
+
+**Status: `RESOLVED BY ORACLE`.** Found by widening the comparison bound to all 22 in-scope tables; it was
+invisible while the bound was each scenario's declared effect.
+
+**(a) The question.** After a clean General Ledger run the two cycles disagreed about four columns of
+`SYSTOT-REC` — `SL4-SPARE1`, `SL4-SPARE2`, `SL4-SPARE3` and `SL4-SPARE4` — the compiled side holding `0.00`
+and the migrated side `1.00`. Nothing in either cycle writes a spare field, so the question is where the two
+values come from and which is the specification.
+
+**(b) Evidence.** Three frozen facts, each measured rather than read:
+
+- **The loader stamps the sentinel.** `[common/sys4LD.cbl:L369-L390]`: when **all sixteen** monetary totals
+  are zero the loader performs `initialise System-Record-4 with filler` and then
+  `move 1 to sl4-spare1 sl4-spare2 sl4-spare3 sl4-spare4`, with the maintainer's own
+  `*> Should not be needed but ..` beside it. So for an empty totals record the loader writes `1` into the
+  four spare columns of the **relational** table whatever the flat file holds.
+- **The flat file holds zero.** The scenario fixture's `system.dat` is 4128 bytes — a 32-byte header plus
+  four 1024-byte records — and record 4, at offset `0x0C20`, decodes as twenty valid `s9(8)v99 COMP-3`
+  fields **all equal to `0.00`**, spares included. (At a zero-byte header offset only 6 of the 20 decode,
+  which is what fixes the header size at 32.)
+- **The menu carries the flat file's value into the relational store.** `aa010-Get-System-Recs`
+  `[general/general.cbl:L399-L405]` sets `move zeros to File-System-Used` and
+  `move "00" to FA-RDBMS-Flat-Statuses. *> Force Cobol proc.`, reads key 4 — `perform System-Read-Indexed.
+  *> Read Cobol file sys totals` — and moves it into `WS-System-Record-4`. `overrewrite.`
+  `[general/general.cbl:L656-L672]` then sets `move "66" to FA-RDBMS-Flat-Statuses` and rewrites key 4 to
+  the **RDB**. So the compiled cycle propagates flat file → relational store, overwriting the loader's
+  sentinel with zero.
+
+The bridge is **not** implicated, and that was checked rather than assumed: `common/sys4MT.cbl` carries the
+spares as host variables at `L324-L325` and `L334-L335`, loads them at `L786-L789` and unloads them at
+`L819-L822`, so a read-and-rewrite through it preserves them exactly.
+
+**(c) Oracle experiment.** Seed one scenario, read the four columns, run **only** the compiled stage, and read
+them again:
+
+```text
+harness/reset_db.sh  <scenario.yaml> --seed-dir /data/fixtures/<scenario>
+harness/run_parity.sh <scenario.yaml> --seed-dir /data/fixtures/<scenario> --to 2
+```
+
+| Point of observation | `SL4-SPARE1..4` |
+| --- | --- |
+| after reset and seed | `1.00` — the loader's sentinel |
+| after stage 2, the compiled cycle | `0.00` — the flat file's value, propagated |
+
+**(d) Resolution.** The compiled result is the specification, and the difference was **a defect in the seed,
+not in either cycle.** ACAS is a dual store, and the two cycles read different halves of it: the frozen menu
+takes key 4 from the COBOL flat file, while the migrated cycle has no flat-file store at all (rule R-1) and can
+only round-trip the relational row. A seed that leaves the two halves disagreeing at *t*=0 cannot be compared
+at all — and the harness's own seed guard cannot catch it, because `assert_seed_fingerprints_agree` compares
+**row counts** and never values.
+
+So the fixture declaration was corrected to state the pre-state the frozen loader will actually produce: the
+**six** scenarios whose `system.dat` record 4 was declared `{}` now declare `sl4-spare1` through `sl4-spare4`
+as `"1.00"` — `clean_batch_gl`, `clean_batch_irs`, `control_total_mismatch`, `empty_batch`,
+`mixed_accepted_rejected` and `end_of_cycle_gl`. The other **three** already agreed: `clean_batch_sl`,
+`clean_batch_pl` and `period_end_totals` declare all twenty fields with sixteen **non-zero** totals, so the
+loader's guard never fires for them and both stores already held `0.00`. Six plus three is the whole scenario
+set, and that is the point: the correction belongs to every fixture whose record 4 is empty, not to the ones
+that happened to surface it, so a scenario added later inherits the rule rather than re-discovering it.
+
+⛔ **What was deliberately NOT done.** The migrated cycle was **not** taught to write zeros into the spares.
+It has no store holding those zeros; hardcoding the value would fabricate behaviour with no counterpart in any
+migrated program, would be wrong for any fixture whose flat-file record is *not* empty — in which case
+`sys4LD`'s guard never fires and the flat file carries real totals — and would be an invented mutation, which
+rule R-3 forbids. Nor was an ignore-list added to `harness/diff_states.py`, which is required to have none.
+The loader's rule is **reproduced** at the declaration, not contradicted (rule R-4).
+
+**Result.** All nine scenarios now complete stages 1 through 10 with `identical - 22 table(s) compared, no
+difference`. The empty diff on `SYSTOT-REC` now means the two cycles agree, rather than that the column was
+bounded out of the comparison.
+
+**(e) Consuming modules.** `harness/scenarios/*.yaml` (the six corrected declarations),
+`harness/make_fixtures.py` (which writes record 4 from them), and `harness/diff_states.py`, which surfaced the
+difference once the bound covered all 22 tables.
+
+---
+
+## 13. Deferrals handed up from the parity tiers
+
+The parity tiers reached a class of question they cannot answer and would not be honest to guess: **what the
 compiled program produces where the language leaves the result undefined, or where the only observable is
 one the migration does not have.** Each one is recorded here with the same five parts, in a more compact
-form because the experiments share a shape.
+form because the experiments share a shape. Six came up from the arithmetic tier; the seventh,
+`Q-EMPTY-BATCH-AT-END`, came up from the scenario tier and is marked as such at its entry.
 
 Most carry a **mnemonic** identifier rather than a number. That is deliberate and not a lapse in the
 numbering: they were opened by the modules and tests that hit them, an id that names the question survives
@@ -1718,12 +2824,21 @@ different question, so the number cannot be reused here and a mnemonic stands in
 name for an existing question**, tabulated as a collision in §15 and counted in §17. Nothing else in this
 section, and nothing anywhere else in this file, introduces a question the project did not already have.
 
+⚠️ **And one entry below was cited before it existed, which is the failure this register is meant to make
+impossible.** `Q-EMPTY-BATCH-AT-END` is coined in `tests/scenarios/test_empty_batch.py`, which says at
+`tests/scenarios/test_empty_batch.py`'s module docstring that *"the identifier is coined here … so that the
+resolution has a name to be filed under"* — and then cites it **six** times. For a period this file carried
+no entry under that name, so every one of those six citations dangled: a reader following one arrived at a
+register that did not contain the question. It has its own entry and its own anchor below. The lesson is
+recorded rather than quietly fixed, because R-6's second obligation is that a question be *documented, not
+settled silently*, and a question that is cited but unfiled is the same defect one step earlier.
+
 <a id="q-sort-tie-order"></a>
 
 ### `Q-SORT-TIE-ORDER` — where the compiled sort places two records with an identical key tuple
 
-**Status: `PENDING — AWAITING ORACLE EXECUTION`.** ⭐ This is the highest-consequence deferral in the
-register.
+**Status: `RESOLVED BY ORACLE` (2026-08-07).** ⭐ This was the highest-consequence deferral in the register, and the
+measurement closed it: the compiled sort preserves **input order** for equal keys.
 
 **(a) The question.** `general/gl071.cbl` contains **exactly one** `SORT` — the plan's *"the `SORT` verbs"*
 notwithstanding (§8) — on four ascending keys, and it carries **no `DUPLICATES IN ORDER` phrase**. The order
@@ -1772,9 +2887,12 @@ a transaction whose VAT account equals its CR account, with a VAT amount and a V
 that `gl070` emits the third leg at all — then compare the two sides' posting order:
 
 ```text
-$C /repo/harness/seed.sh                  harness/scenarios/clean_batch_gl.yaml
-$C /repo/harness/run_cobol_scenario.sh    harness/scenarios/clean_batch_gl.yaml
-$C /repo/harness/dump_tables.py --scenario clean_batch_gl --side cobol --tables GLPOSTING-REC,GLLEDGER-REC
+S=/repo/harness/scenarios/clean_batch_gl.yaml
+N=clean_batch_gl
+
+$C /repo/harness/reset_db.sh --seed-dir "/data/fixtures/$N" "$S"
+$C /repo/harness/run_cobol_scenario.sh                        "$S"
+$C /repo/harness/dump_tables.py --scenario "$N" --side cobol --tables GLPOSTING-REC,GLLEDGER-REC
 ```
 
 **Two observables.** First, **whether the tie occurs at all** — record the four key values of every record
@@ -1788,9 +2906,58 @@ The answer is recorded under the companion key **`Q-SORT-TIE-ORDER-ANSWER`**, wh
 supplies it — so a test that would assert the compiled tie order reports an expected failure rather than
 inventing one.
 
-**(d) Resolution.** None. `tests/arithmetic/test_ledger_balance_accumulation.py` carries the question text in
-its own `OPEN_QUESTIONS` mapping and asserts the propositions that do **not** depend on the answer, marking
-the one that does.
+**(d) Resolution. MEASURED: INPUT ORDER.** The compiled sort presents records with equal keys in the order the
+`USING` file supplied them, which is what this migration's unconditional stability already produces. The
+divergence this entry was holding open **does not exist**.
+
+**The experiment.** A probe declared the same `SD` and the same four ascending keys as
+[`general/gl071.cbl:L172-L178`], with no `DUPLICATES IN ORDER` phrase — so the compiler was free to place ties
+either way. It wrote **two tied pairs** rather than one, each record's legend recording whether it arrived
+first or second, and read the `GIVING` file back:
+
+| | input order | output order |
+| --- | --- | --- |
+| pair on batch 5 | `lhs-1st`, `rhs-2nd` | `lhs-1st`, `rhs-2nd` |
+| pair on batch 7 | `tie-A1st`, `tie-A2nd` | `tie-A1st`, `tie-A2nd` |
+
+Two pairs, not one, because a single pair coming back in order is one coin toss. Both pairs preserved, in a
+sort that also had to order the pairs against each other, is the observation.
+
+**Re-measured with a three-way tie, and with the tied records interleaved among untied ones**, because two
+pairs still leave open whether a third tied record lands between them:
+
+| input order | key tuple | tag |
+| --- | --- | --- |
+| 1 | `5 / 42 / 3 / 2` | `lhs` |
+| 2 | `5 / 42 / 3 / 2` | `rhs` |
+| 3 | `4 / 42 / 3 / 2` | `earlier` |
+| 4 | `5 / 42 / 3 / 2` | `third` |
+| 5 | `5 / 41 / 3 / 2` | `loweracc` |
+
+Output: `earlier`, `loweracc`, **`lhs`, `rhs`, `third`** — the three tied records in the order they were
+written, not reversed and not permuted. Re-verified on a single-key sort with two and three duplicates per
+key: `K000 → cccc, eeee` and `K001 → aaaa, bbbb, dddd`, input order again.
+
+Measured with GnuCOBOL 3.2.0, `cobc -x -free`, no `-std=` dialect selection, no
+`>>SET ARITHMETIC` directive and no `binary-truncate` flag.
+
+**Why this was the highest-consequence deferral, and what closing it buys.** `gl072` locates the nominal
+account for each posting with a sequential `READ NEXT` [`general/gl072.cbl:L407-L408`], not an indexed read, so
+the ordering `gl071` emits decides which account is posted to. That is A-14. A tie placed the other way round
+would have posted to a different account **with no diagnostic** — the failure mode is silent misposting, not an
+error — and, even where the final balance is unchanged, it changes `POST-RRN` assignment and therefore the
+compared rows. The measurement removes the one path by which our stable sort could have diverged from the
+compiled one.
+
+**Caveat, recorded rather than glossed.** This measures GnuCOBOL 3.2's behaviour for this key tuple and this
+input, on this platform. The standard still does not require it, so the Python side keeps stability as an
+unconditional contract (AAP §0.4.1.2) rather than relying on the compiler's choice — the measurement confirms
+agreement, it does not license depending on the compiler. `[acas_posting/cobol/sortverb.py]` guarantees that
+stability, so the layer is confirmed.
+
+`tests/arithmetic/test_ledger_balance_accumulation.py` records the answer in `OPEN_QUESTIONS` under
+`Q-SORT-TIE-ORDER-ANSWER`, asserts the measured ordering as a fact — on the tie alone and inside the
+five-record stream — and no longer marks it `xfail`.
 
 **(e) Consuming modules.** `acas_posting/cobol/sortverb.py`, which guarantees stability, and
 `acas_posting/programs/gl071_batch_sort.py`, which invokes it on the identical four-key tuple. Test-owned by
@@ -1800,7 +2967,10 @@ the one that does.
 
 ### `Q-GL080-DIVIDE-BY-ZERO` — what the compiled program does when the cycle divide has a zero divisor
 
-**Status: `PENDING — AWAITING ORACLE EXECUTION`.**
+**Status: `RESOLVED BY ORACLE`** — measured 2026-08-07, GnuCOBOL 3.2.0. **Of the three candidate answers it
+is *the receiver left untouched*: the SIZE ERROR condition is raised, no store happens, and the run continues
+to a clean exit. And the consequence runs further than the question asked — with `scycle = 0` control proceeds
+into phase 5 carrying subscript ZERO, which writes a real `GLLEDGER-REC` column.** The resolution is in (d).
 
 **(a) The question.** The end-of-period divide is **reachable with `period = 0`**, and COBOL leaves the
 result of a zero divisor undefined in the absence of an `ON SIZE ERROR` phrase. Abort, zero, or the receiver
@@ -1835,19 +3005,28 @@ raises the SIZE ERROR condition, performs NO STORE, and the program CONTINUES wi
 unchanged"*, carried on `acas_posting.cobol.arithmetic.SizeErrorNoStore`, and
 `tests/arithmetic/test_compute_truncate_unrounded.py` adds that *"the resolution overturned the provisional
 answer"*. Of the three candidate answers in **(a)**, that selects *receiver left untouched* and rejects both
-*abort* and *zero*. It is recorded here **attributed and unpromoted**, because
-the mandated scenario set still does not drive `gl080` with `period = 0`.
-The oracle now builds, but the specific end-of-cycle experiment described
-below has not been run. The status therefore remains `PENDING`; a future
-focused run can promote it without redesigning the question.
+*abort* and *zero*. This register declined to adopt that on attribution alone, which was the right call and is
+why the confirmation in (d) was worth taking: **an independent probe reached the same answer**, so the
+arithmetic tier's claim is now corroborated rather than merely repeated.
+
+⚠️ **A stale declination is corrected here.** This paragraph used to end *"the mandated scenario set still
+does not drive `gl080` with `period = 0`"*, and its first clause stopped being true when
+`harness/scenarios/end_of_cycle_gl.yaml` was added — a scenario that drives the real `gl_end_of_cycle` route
+through both runners, with `tests/scenarios/test_end_of_cycle_gl.py` beside it. The `period = 0` seeding
+within it was never done, so the narrow claim survives while the broad one does not; stating the broad one
+would send a reader looking for work already finished.
 
 **(c) Oracle experiment.** Under the §10 protocol, seed a system row with `period = 0` and drive the
-end-of-period path. ⚠️ Note the §16 declination: **no mandated scenario drives `gl080`**, so this experiment
-needs a scenario of its own, and building one is part of the experiment rather than a precondition of it.
+end-of-period path. ⚠️ The note that used to sit here — *"no mandated scenario drives `gl080`, so this
+experiment needs a scenario of its own"* — has been overtaken by
+`harness/scenarios/end_of_cycle_gl.yaml`. In the end it was settled by a **focused probe** rather than by that
+scenario, for the reason (d) gives: the observables are a control-flow branch and a byte offset, and a probe
+exhibits both directly where a scenario would have had to be seeded into exactly the right state to reveal
+either.
 
 ```text
-$C /repo/harness/seed.sh                  "$S"      # $S seeds period = 0
-$C /repo/harness/run_cobol_scenario.sh    "$S"
+$C /repo/harness/reset_db.sh --seed-dir "/data/fixtures/$N" "$S"      # $S seeds period = 0
+$C /repo/harness/run_cobol_scenario.sh                        "$S"
 echo "exit=$?"
 $C /repo/harness/dump_tables.py --scenario "$N" --side cobol --tables GLLEDGER-REC,SYSTEM-REC
 ```
@@ -1857,7 +3036,90 @@ answers and a table dump cannot show it. Then the stored `LEDGER-Q1` … `LEDGER
 which subscript the divide's result selected — that is `Q-QUARTER-SUBSCRIPT`'s subject, measured by the
 same run.
 
-**(d) Resolution.** None. No guard is added on the Python side; the divide is reproduced as written.
+**(d) Resolution — MEASURED 2026-08-07, GnuCOBOL 3.2.0.**
+
+A probe reproduced `[general/gl080.cbl:L324-L332]` statement for statement, with `Scycle` and `Period`
+declared as `binary-char` from the frozen `[copybooks/wssystem.cob:L62-L64]` and `a`/`y` as
+`77 … pic 99 value zero` from `[general/gl080.cbl:L182-L183]`.
+
+**The first answer — the divide itself:**
+
+| observable | measured |
+| --- | --- |
+| process exit code | **0** — the divide-by-zero is **survivable**, not an abort |
+| `a` after `divide … giving a rounded`, sentinel 77 | **77** — untouched |
+| `a` after the same divide, `a` starting at 0 | **0** — untouched |
+
+So of (a)'s three candidates: **receiver left untouched**. *Abort* and *zero* are both **rejected**, and
+"abort" could only ever have been rejected by watching an exit code — a table dump cannot show it, which is
+why (c) named the exit code as an observable.
+
+**The second answer, which the question did not ask for and which matters more.** The chain does not stop at
+the divide, and where it goes depends on `scycle`:
+
+| `scycle` | `period` | `a` after L328 | `y` after L329 | L331 `scycle not = y` | outcome |
+| --- | --- | --- | --- | --- | --- |
+| `5` | `0` | `77` (untouched) | `00` | true | **exits** to `main-end` |
+| `0` | `0` | `0` (untouched) | `00` | **false** | **proceeds into phase 5** |
+
+`[general/gl080.cbl:L290]` is `move zero to a`, executed on every entry and before the gate, so in a real run
+the surviving value is **zero**. `period = 0` forces `y` to zero whatever `a` holds, so the L331 gate reduces
+to *is `scycle` zero* — and when it is, control walks into the phase-5 ledger loop carrying **subscript 0**.
+
+**Subscript 0 is not harmless, and this is the database-visible part.** Measured against the frozen
+`copybooks/wsledger.cob`, whose own header declares 126 bytes and whose `FUNCTION LENGTH` confirms it:
+
+| observable | measured |
+| --- | --- |
+| record length | **126** |
+| `Ledger-Q` element, and the `Quarters` group | **6** bytes and **24** bytes |
+| occurrence *n* begins at | `53 + (n−1) × 6` |
+| therefore occurrence **0** occupies | bytes **47–52** — which is **`Ledger-Last`** |
+| after `move ledger-balance to ledger-q (0)` | `Ledger-Last` := the balance |
+| the four quarter columns | **all four unchanged** |
+
+`Ledger-Last` is a **real `GLLEDGER-REC` column**. So a run with `period = 0` and `scycle = 0` overwrites
+`LEDGER-LAST` with `LEDGER-BALANCE` on **every** nominal row the loop touches, updates **no quarter column at
+all**, and `GL-Nominal-Rewrite` persists it — silently, with no status, no diagnostic and exit code 0.
+
+⭐ **Why it is unusually hard to spot.** `[general/gl080.cbl:L346-L347]` contains a **legitimate**
+`move ledger-balance to ledger-last`, taken when `current-quarter = 4`. The corrupting store writes **the same
+value into the same column**. On a quarter-4 run it is indistinguishable from correct behaviour; on quarters 1
+to 3 it yields a `LEDGER-LAST` that looks entirely plausible and is a quarter early. A state diff between two
+implementations that both reproduce it shows nothing, which is precisely why it is recorded here rather than
+left to a diff.
+
+This also **extends [`Q-QUARTER-SUBSCRIPT`](#q-quarter-subscript) in a direction that entry did not test.**
+That one measured occurrence 13, above the array, landing two bytes in filler and four past the record. This
+is occurrence 0, **below** the array, landing squarely inside a **named, column-mapped field** — a table
+effect rather than a padding effect.
+
+**Alignment with the shipped code — checked against every branch, not assumed.** All of it already matched;
+**no production change was required**, which is the outcome R-6 wants and is worth stating explicitly because
+the alternative was a silent divergence in the DAL read path:
+
+| chain step | shipped behaviour | agrees |
+| --- | --- | --- |
+| L328 with the receiver armed | `divide_by_giving(…, receiver_value=st.a)` returns the previous value | ✅ |
+| L328 with no receiver supplied | raises `SizeErrorNoStore` rather than inventing a value | ✅ |
+| L329 | `multiply_by_giving` → `0` | ✅ |
+| L331, `scycle = 0` | `compare` → 0, so control proceeds | ✅ |
+| L331, `scycle = 5` | `compare` → non-zero, so the phase turns back | ✅ |
+| L345, subscript 0 | `Ledger-Last` receives; no quarter moves | ✅ |
+| L345, subscript 1 | `Ledger-Q1` receives; `Ledger-Last` untouched | ✅ |
+| L345, subscript 5 | nothing named changes — the trailing filler absorbs it | ✅ |
+
+`acas_posting/programs/gl080_end_of_cycle.py` had already recorded `a = 0 → LEDGER-LAST` at
+`_move_ledger_balance_to_quarter`, and explicitly refuses a Python `[a - 1]` index — which would send
+subscript 0 to the LAST occurrence, corresponding to nothing the compiled program does. This measurement
+**independently confirms that documented reading** rather than discovering it.
+
+**No guard is added on the Python side; the divide is reproduced as written, and the subscript is not
+clamped** (R-3, R-4). The chain is pinned by two tests in
+`tests/arithmetic/test_gl080_cycle_divide_rounded.py` —
+`test_the_zero_divisor_lets_control_reach_phase_five` for the branch and
+`test_subscript_zero_writes_a_real_ledger_column` for the landing, the latter holding the compiled vectors as
+constants so a drift in the offset arithmetic breaks them rather than moving with them.
 
 **(e) Consuming modules.** `acas_posting/cobol/arithmetic.py` and
 `acas_posting/programs/gl080_end_of_cycle.py`. Test-owned by
@@ -1867,7 +3129,9 @@ same run.
 
 ### `Q-QUARTER-SUBSCRIPT` — what the compiled program writes when the quarter subscript is out of range
 
-**Status: `PENDING — AWAITING ORACLE EXECUTION`.**
+**Status: `RESOLVED BY ORACLE` (2026-08-07).** The store is real and silent, and lands **partly outside** the
+record. Carried in the numeric band as `Q-19` as well; §15 records the collision and both identifiers now
+carry this measurement.
 
 **(a) The question.** A four-element table is indexed with **no bounds check**, by a subscript that can hold
 values the table does not have. COBOL indexes past a table silently, overwriting adjacent storage; **Python
@@ -1897,8 +3161,47 @@ is: `[copybooks/wsledger.cob:L37]` declares `03 filler pic x(50).` immediately a
 `Quarters` group. Record the stored value of every column of the row, not just the four quarters, so an
 overwrite outside them is visible.
 
-**(d) Resolution.** None. The subscript is left unbounded (R-3, R-4) and the divergence — that Python raises
-where COBOL overwrites — is declared at the site rather than smoothed away by a guard.
+**(d) Resolution. MEASURED: the store is real, silent, and partly OUTSIDE the record — and it moves no column
+of any compared table.**
+
+**The layout, taken from the compiler rather than computed here.** `FUNCTION LENGTH` of `WS-Ledger-Record` is
+**126** — matching the copybook's own *"Resized to 126 bytes"* at [`copybooks/wsledger.cob:L10`] — each
+`Ledger-Q` is **6** bytes and the `Quarters` group is **24**. A byte scan placed `Ledger-Balance` at offsets
+41–46 and the four packed sign nibbles at 58, 64, 70 and 76, which fixes `Quarters` at **53–76** and so
+occurrence *n* at `53 + (n-1)*6`. A `filler pic x(50)` occupies **77–126**. Occurrence **12** therefore ends at
+124, inside; occurrence **13** spans **125–130**, and the record stops at 126.
+
+**A literal subscript cannot be used to measure this, which is the methodological point.** `move ... to
+Ledger-Q (13)` written with a literal is **refused at compile time**: *"error: subscript of 'Ledger-Q' out of
+bounds: 13"*. A probe written that way measures the compiler's parser, not the program. The frozen program
+reaches the table through a variable — `move ledger-balance to ledger-q (a)` with `a pic 99`
+[`general/gl080.cbl:L345`] — so the probe did too, with a `pic x(20)` sentinel declared immediately after the
+record inside one enclosing `01`, which is the only arrangement that makes the neighbouring bytes observable.
+
+**The observation.** Reached through the variable, the store **compiled and ran with no diagnostic at compile
+time or run time**, and the program exited **0**. Every byte of the area was read back through `FUNCTION ORD`:
+
+* the six bytes `00 00 00 99 99 9C` — the packed image of `+999.99` — landed at 1-based offsets **125 to
+  130**: **two** bytes inside the record's trailing filler and **four** bytes past the record's last byte, in
+  the sentinel that follows it;
+* offsets 77–124 were untouched, and `Ledger-Q1` through `Ledger-Q4` and `Ledger-Last` were **unchanged**;
+* subscript **14** then landed at **131 to 136**, six bytes further on and again with no diagnostic — so the
+  addressing stays plainly linear past the record's end rather than wrapping, clamping or faulting.
+
+**What this settles, and what it does not.** It settles that an out-of-range store is a silent write into
+memory the record does not own, so an overrunning `gl080` run corrupts nothing the 22 compared tables carry
+and could never appear in a state diff. It does NOT make the store safe, and it does not fix which `01` item
+the four overrun bytes belong to in the real program: they landed in the sentinel here and in allocation
+padding when no sentinel was declared, which is a property of the compilation rather than of the source.
+
+**What this means for the reproduction.** The in-record property the reproduction relies on holds for
+subscripts up to **12** and fails at 13. The subscript stays unbounded (R-3, R-4), and the divergence — that
+Python RAISES where COBOL silently writes off the end, because Python has no adjacent storage to write into —
+is declared at the site rather than smoothed away by a guard.
+`[acas_posting/cobol/move.py UNCHECKED_SUBSCRIPT_ORACLE_EVIDENCE]` carries the measured offsets for
+subscripts 5, 6, 13 and 14, and `tests/arithmetic/test_gl080_cycle_divide_rounded.py` asserts them as facts —
+including the refuted reading, that the store lands wholly inside the trailing filler — and carries no strict
+expected failure.
 
 **(e) Consuming module.** `acas_posting/programs/gl080_end_of_cycle.py`. Test-owned by
 `tests/arithmetic/test_gl080_cycle_divide_rounded.py`.
@@ -1907,7 +3210,7 @@ where COBOL overwrites — is declared at the site rather than smoothed away by 
 
 ### `Q-ROUNDED-OVERFLOW-ORDER` — whether a `ROUNDED` store rounds before or after it overflows
 
-**Status: `PENDING — AWAITING ORACLE EXECUTION`.**
+**Status: `RESOLVED BY ORACLE` (2026-08-07).** It rounds **first**, then discards the high-order carry.
 
 **(a) The question.** When a `ROUNDED` store's rounded result **exceeds the receiver's declared digits**, does
 the compiler round and then discard the high-order digit, or discard first and then round? The two give
@@ -1924,10 +3227,49 @@ carries **one more digit than the receiver declares** and the rounding direction
 disagree. **The observable is the stored value at full declared scale**, compared against the two candidate
 computations. Read as `Decimal` (R-2).
 
-**(d) Resolution.** None. **The provisional order, named:** the semantics layer **rounds first and then
-discards**, so `99.5` stored into a `pic 99` receiver holds `0`. The alternative order would hold `99`, and
-`tests/arithmetic/test_compute_rounded_half_up.py` asserts *that* as a strict expected failure — so whichever
-way the oracle settles it, the suite reacts rather than silently agreeing.
+**(d) Resolution. MEASURED: ROUND FIRST, then discard the high-order carry.** Into a `pic 99` receiver, with
+no `ON SIZE ERROR`:
+
+| statement | receiver holds |
+| --- | --- |
+| `compute <pic 99> rounded = 99.5` | **`00`** |
+| `compute <pic 99> = 99.5` (un-`ROUNDED`, the control) | `99` |
+| `compute <pic 99> rounded = 99.4` | `99` |
+| `compute <pic 99> rounded = 100` | `00` |
+| `compute <pic 99> rounded = 100.4` | **`00`** |
+| `compute <pic 99> rounded = 105` | `05` |
+| `compute <pic 99> rounded = 199.5` | **`00`** |
+| `compute <pic 99> = 199.5` | `99` |
+
+`99.5 → 00` is the row that decides it: `99.5` rounds to `100`, and the high-order `1` is then discarded,
+leaving `00`. Had the compiler truncated to the receiver's width *before* rounding it would have held `99` —
+which is exactly what the un-`ROUNDED` control does hold, so the difference between those two rows is the
+`ROUNDED` phrase and nothing else. `100.4` confirms the reading on a value that overflows without needing to
+be rounded, and `105 → 05` shows that high-order DIGITS are discarded rather than saturated.
+
+Two adjacent behaviours were measured with it, because both are easy to assume wrong. With `ON SIZE ERROR`
+present the receiver is left **UNTOUCHED** (it held 42 before and after), not zeroed. And a plain `MOVE`
+truncates rather than rounding: `MOVE 99.5 → 99` and `MOVE 199.5 → 99`.
+
+Measured with GnuCOBOL 3.2.0, `cobc -x -free`, no `-std=` dialect selection, no
+`>>SET ARITHMETIC` directive and no `binary-truncate` flag.
+
+This is the order the semantics layer already implements, so the measurement **confirms** it:
+`[acas_posting/cobol/arithmetic.py]` rounded first before the question was settled.
+`tests/arithmetic/test_compute_rounded_half_up.py` asserts every row above as a fact — including the rejected
+order, asserted against directly — and no longer carries a strict expected failure for it.
+
+**What remains genuinely undetermined**, and it is not this question: ISO leaves the receiver's content
+*undefined* when a size error occurs with no `ON SIZE ERROR` phrase, and there is no such phrase anywhere in
+the twelve in-scope programs. So the measurement records what **this** compiler does, which is what R-6 asks
+for, and does not claim the standard requires it.
+
+⭐ **This one keeps its marker, and the distinction from `Q-2` is the point.** ISO leaves the receiver's
+content undefined when a size error occurs with no `ON SIZE ERROR` phrase, and there is no such phrase
+anywhere in the twelve in-scope programs, so **a real oracle answer exists and has simply not been taken** —
+which is exactly the condition a strict expected failure is for. Where an outcome is already settled by the
+language, by a compile error or by a measurement, the marker is replaced by a refutation instead; §13.4
+records the three `cobol/move` questions that moved for that reason, under § 13's heading *The three that are handed down, not up*.
 
 **(e) Consuming module.** `acas_posting/cobol/arithmetic.py`. Test-owned by
 `tests/arithmetic/test_compute_rounded_half_up.py`.
@@ -1936,7 +3278,15 @@ way the oracle settles it, the suite reacts rather than silently agreeing.
 
 ### `Q-EDITED-BLANK-WHEN-ZERO` — the characters an edited picture renders
 
-**Status: `PENDING — AWAITING ORACLE EXECUTION`.**
+**Status: two halves, and they earn different statuses.** For the one case that reaches a column:
+**`RESOLVED BY ORACLE`** — measured 2026-08-07, GnuCOBOL 3.2.0. **`z(7)9` renders zero as seven spaces then a
+`0`, and the trim chain around it is correct at every width — but the `STRING` that consumes it ALWAYS
+OVERFLOWS `Post-Legend`, silently, truncating the customer name by an amount set by the invoice number's digit
+count.** For every other picture this question governs: **`MEASURED — DECLINED ON SCOPE`** ⚠️ — a fifth status,
+used **once**, here only. Those renderings were watched and are recorded below; they are deliberately **not
+implemented**, because every picture they govern is a print-line item and AAP §0.2.2 excludes report
+formatting beyond database effects. Promoting that half to `RESOLVED BY ORACLE` would imply the migration
+reproduces the rendering, and it does not. The resolution is in (d).
 
 **(a) The question.** What characters does the compiled program put into a `blank when zero` numeric-edited
 item? For most such items the question is unobservable and stays that way — but **one edited picture does
@@ -1968,9 +3318,96 @@ $C /repo/harness/dump_tables.py --scenario "$N" --side cobol --tables GLPOSTING-
 embedded spaces.** For the `gl072` print items there is no observable, and the entry says so rather than
 proposing one.
 
-**(d) Resolution.** None for the rendering. One value *is* fixed and is asserted unconditionally rather than
-deferred: the `z(7)9` rendering of **zero** — seven suppressed positions then the always-printing final `9`
-— because it is the case that reaches a real column and the assertion is itself the lock.
+**(d) Resolution — MEASURED 2026-08-07, GnuCOBOL 3.2.0.**
+
+A probe reproduced `[sales/sl060.cbl:L1085-L1094]` statement for statement with every operand declared as the
+frozen sources declare it: `OI-Invoice pic 9(8)` `[copybooks/slwsoi.cob:L13]`, `m pic z(7)9`
+`[sales/sl060.cbl:L213]`, `b`/`c` `binary-char` `[:L214-L215]`, `xx pic 99` `[:L201]`,
+`Sales-Name pic x(30)` `[copybooks/wssl.cob:L17]` and `Post-Legend pic x(32)` `[copybooks/wspost.cob:L24]`.
+
+⚠️ **First, a correction to this entry's own title.** `m pic z(7)9` carries **no `blank when zero` phrase**.
+Only `gl072`'s three print items do, and those are the unobservable ones. So the identifier names a phrase that
+is absent from the only case it can measure — the id is kept because it is already cited elsewhere and §5
+forbids coining a duplicate, but a reader should not infer the phrase from the name.
+
+**The rendering, and the trim chain around it:**
+
+| `OI-Invoice` | `m` renders as | leading spaces | `c` | `b` after `add 1` | `m (b:c)` |
+| --- | --- | --- | --- | --- | --- |
+| `00000000` | `[       0]` | 7 | 1 | 8 | `[0]` |
+| `00000001` | `[       1]` | 7 | 1 | 8 | `[1]` |
+| `00000009` | `[       9]` | 7 | 1 | 8 | `[9]` |
+| `00001234` | `[    1234]` | 4 | 4 | 5 | `[1234]` |
+| `09999999` | `[ 9999999]` | 1 | 7 | 2 | `[9999999]` |
+| `12345678` | `[12345678]` | 0 | 8 | 1 | `[12345678]` |
+
+**Zero renders as seven spaces then a `0`** — the final `9` of `z(7)9` always prints, exactly as the shape
+implies and with no `blank when zero` to make it disappear. And the trim chain is **correct at every width**:
+`subtract b from 8 giving c` consumes the pre-increment tally, `add 1 to b` turns it into a 1-based start, and
+the substring is precisely the significant digits. Nothing is wrong with the suppression logic.
+
+**What is wrong is what happens next, and it is a database-visible defect this entry had not anticipated.**
+`Post-Legend` is `pic x(32)` and receives `n + 3 + 30` characters, so the **minimum is 34** and it
+**overflows in every case**:
+
+| `OI-Invoice` | stored `Post-Legend` | what is lost |
+| --- | --- | --- |
+| `0` | `[0 : ACME MANUFACTURING COMPANY L]` | `TD` |
+| `1234` | `[1234 : ACME MANUFACTURING COMPAN]` | `Y LTD` |
+| `9999999` | `[9999999 : ACME MANUFACTURING COM]` | `PANY LTD` |
+| `12345678` | `[12345678 : ACME MANUFACTURING CO]` | `MPANY LTD` |
+
+The pointer ends at **33** every time — filled to capacity and stopped. **And the frozen `STRING` carries no
+`ON OVERFLOW` phrase** `[sales/sl060.cbl:L1091-L1094]`, so nothing is reported: the probe had to add one
+merely to *detect* the overflow that the frozen program absorbs in silence.
+
+So `POST-LEGEND` can never hold a full customer name, and **the longer the invoice number the more of the name
+is lost** — a truncation whose extent is set by an unrelated field's digit count. It is silent, it is
+persisted, and it looks entirely plausible in the column.
+
+**Alignment with the shipped code — all 6 vectors replayed against the shipped primitives**
+(`move.move_to_edited`, `move.inspect_tallying_leading`, `arithmetic.subtract_giving`, `arithmetic.add_to`,
+`move.ref_mod`, `move.string_into`): **6 agreements, 0 mismatches**, with identical `m`, identical substring,
+identical 32-character legend and the identical pointer of 33 in every case.
+**No production change was required** — `acas_posting/programs/sl060_invoice_posting.py` already reproduces the
+chain faithfully, overflow included. No `ON OVERFLOW` handling is added and the receiver is not widened
+(R-3, R-4).
+
+**(d.2) The print-only renderings — MEASURED, and DECLINED ON SCOPE.** Every other picture this question
+governs reaches a print line and no column, so the rendering was watched and recorded rather than
+implemented. It is written down here so that a future reader does not re-run it:
+
+| declaration | length | input | rendered |
+| --- | --- | --- | --- |
+| `pic z(7)9.99cr blank when zero` | 13 | `123.45` | `"     123.45  "` |
+| | | `-123.45` | `"     123.45CR"` |
+| | | `0` | 13 spaces |
+| `pic 9999.99 blank when zero` | 7 | `1234.56` | `"1234.56"` |
+| | | `0` | 7 spaces |
+| | | `7.05` | `"0007.05"` |
+| | | `-1234.56` | `"1234.56"` |
+| | | `123456.78` | `"3456.78"` |
+| `pic z(7)9.99 blank when zero` | 11 | `1234.56` | `"    1234.56"` |
+| | | `0` | 11 spaces |
+| | | `123456.78` | `"  123456.78"` |
+| `pic zzz9` | 4 | `0` | `"   0"` |
+| `pic zz,zz9` | 6 | `1205` | `" 1,205"` |
+| `pic ----9` | 5 | `-1205` | `"-1205"` |
+
+Two byproducts worth keeping: `pic z9z9` **does not compile** (*"a Z or \* which is before the decimal point
+cannot follow 9"*), so the shape this entry once speculated about cannot exist in a compiled program; and
+`blank when zero` suppresses the whole field including the always-printing final `9`, which the `z(7)9.99`
+row shows directly — which is also why the `z(7)9` case in (d) prints its `0`: it carries no such phrase.
+
+Measured with GnuCOBOL 3.2.0, `cobc -x -free`, no `-std=` dialect selection, no
+`>>SET ARITHMETIC` directive and no `binary-truncate` flag.
+
+**The declination.** `[acas_posting/cobol/move.py]` continues to REFUSE every edited picture outside the
+`z`-then-`9` shape that reaches a real column, and `tests/arithmetic/test_move_truncation.py` asserts the
+refusal as a **scope decision** with the measurement cited beside it, rather than as an open question. The one
+value that IS implemented and asserted unconditionally is unchanged: the `z(7)9` rendering of **zero** — seven
+suppressed positions then the always-printing final `9` — because it is the case that reaches a real column
+and the assertion is itself the lock.
 
 **(e) Consuming modules.** `acas_posting/cobol/move.py` and
 `acas_posting/programs/sl060_invoice_posting.py`. Test-owned by
@@ -1980,7 +3417,7 @@ deferred: the `z(7)9` rendering of **zero** — seven suppressed positions then 
 
 ### `Q-70f` — the on-the-wire sign of a negated zero
 
-**Status: `PENDING — AWAITING ORACLE EXECUTION`.**
+**Status: `RESOLVED BY ORACLE` (2026-08-07).** A negated zero keeps the **positive** overpunch.
 
 ⭐ **The identifier is `Q-70f`, not a new one.** This register first drafted the question under a mnemonic of
 its own and then found that `gl070` already has a question family — `Q-70a`, `Q-70b`, `Q-70d`, `Q-70e` in
@@ -2017,11 +3454,186 @@ $C /repo/harness/dump_tables.py --scenario "$N" --side cobol --tables GLPOSTING-
 signed-zero and unsigned-zero renderings; note whether a subsequent accumulation into `LEDGER-BALANCE`
 behaves differently.
 
-**(d) Resolution.** None.
+**(d) Resolution. MEASURED: the POSITIVE overpunch survives ARITHMETIC negation — a negated zero is
+byte-identical to a positive zero.**
+
+The scenario route above needs a seeded zero-value leg to reach a negating statement. A probe reached the same
+bytes directly: it declared `pic s9(8)v99` DISPLAY exactly as the pre-amount is declared, `REDEFINES`d it as
+`pic x(10)`, and read all ten bytes with `FUNCTION ORD` before and after the frozen statement
+`multiply pre-amount by -1 giving pre-amount` [`general/gl070.cbl:L517`].
+
+| state | bytes | sign-carrying byte |
+| --- | --- | --- |
+| `0.00` before the negation | `30 30 30 30 30 30 30 30 30 30` | `0x30` |
+| after `multiply … by -1 giving` | `30 30 30 30 30 30 30 30 30 30` | **`0x30` — unchanged** |
+| `-1.00`, the same field (control) | `30 30 30 30 30 30 30 31 30 70` | `0x70` |
+| `+1.00`, the same field (control) | `30 30 30 30 30 30 30 31 30 30` | `0x30` |
+
+**The two controls are what make the null result trustworthy.** A probe that simply failed to write anything
+would also have shown "no change". Rows three and four prove the mechanism is live in that very field: the
+negative overpunch `0x70` does appear for a non-zero negative value, and `0x30` for its positive twin. So the
+absence of `0x70` on a negated zero is an observation, not a broken experiment. The probe also confirmed that
+the value still compares equal to zero afterwards.
+
+**The same result on the leading-sign declaration, with the statement form varied**, which is what shows that
+ARITHMETIC is the operative word:
+
+| statement | sign byte |
+| --- | --- |
+| `move 0.00 to x` | `0` (0x30, positive) |
+| `multiply zero by -1 giving x` | `0` (0x30, positive) |
+| `compute x = 0.00 * -1` | `0` (0x30, positive) |
+| `move -0.00 to x` (a LITERAL) | `p` (0x70, negative) |
+| `move 12.34` then `multiply x by -1` | `t` (0x74, negative over the digit 4) |
+
+So the negative overpunch is reachable only by moving a signed literal, and the last row confirms this probe
+too was capable of producing it. **Every in-scope negation is arithmetic** — `[general/gl070.cbl:L517]` and
+`[general/gl070.cbl:L530]` are both `multiply pre-amount by -1` — so a zero-amount leg on the credit side
+carries the positive overpunch, and the wire form of `-0` never arises on this path.
+
+Measured with GnuCOBOL 3.2.0, `cobc -x -free`, no `-std=` dialect selection, no
+`>>SET ARITHMETIC` directive and no `binary-truncate` flag.
+
+**Why it comes out this way**, which `Q-5.3` measures independently and this entry therefore does not have to
+assume: a zero stored in a signed field carries the POSITIVE sign form in both the zoned and the packed
+representations. There is no negative-zero encoding for the negation to move to. This is the same probe that
+settled `Q-5.3`'s zoned half, and the two answers are one fact read two ways.
+
+**Consequence for the reproduction.** This migration emits the positive overpunch, so it already matches. The
+practical reach of the question is narrower than it looks — a `decimal(10,2)` column renders `0.00` either way,
+so no table diff could have distinguished the two, which is precisely why it needed a byte-level probe rather
+than a scenario. `tests/arithmetic/test_double_entry_explosion.py` asserts the measured positive overpunch as a
+fact, and asserts the refuted negative-overpunch reading against directly rather than marking it.
 
 **(e) Consuming modules.** `acas_posting/cobol/arithmetic.py` and `acas_posting/cobol/usage.py`.
-Test-owned by `tests/arithmetic/test_double_entry_explosion.py`, which marks it `xfail(strict=True)` — so
-if the oracle confirms the negative overpunch the test XPASSes and forces the resolution to be recorded here.
+Test-owned by `tests/arithmetic/test_double_entry_explosion.py`, which now asserts the measured sign bytes
+as facts and carries no strict expected failure.
+
+<a id="q-empty-batch-at-end"></a>
+
+### `Q-EMPTY-BATCH-AT-END` — what `gl072`'s at-end path writes when the sorted work file is empty
+
+**Status: `RESOLVED BY ORACLE` (2026-08-07).** Neither paragraph leaves any observable effect.
+
+⭐ **This one is handed up from the SCENARIO tier, not the arithmetic tier**, and it is recorded here rather
+than in a section of its own because it has the same shape as every other entry in §13: the language does not
+decide it, and the only observable is a stored value. It was cited by
+`tests/scenarios/test_empty_batch.py` — in that file's module docstring, in its anomaly index and in three of
+its assertion messages — **before it had an entry here**, which made the citation dangle and made §17's
+"every cited identifier appears in this file" claim false. The entry closes that gap; the identifier is the
+one the citing file already uses and is not renamed. That the citing file coined the name is also why it
+deliberately asserted only that the **two sides agree** rather than hard-coding an expectation for
+`CLEARED-STATUS` or `POSTED` — the correct thing for a parity test to do, and the reason the entry below can
+report the measured values without any test having to be rewritten to match them.
+
+**(a) The question.** `gl072`'s main loop opens with an at-end branch, `[general/gl072.cbl:L285-L289]`:
+
+```text
+ loop.
+     read     post-trans  at end
+              perform  end-account
+              perform  end-batch
+              go to    end-run.
+```
+
+On the `empty_batch` scenario the sorted work file holds **zero records**, so the *very first* read hits at
+end and both paragraphs run with `save-batch` still zero `[general/gl072.cbl:L281]` and with
+`WS-Batch-Record` and the nominal record never having been read at all. `end-batch`
+`[general/gl072.cbl:L372-L377]` then unconditionally moves 1 into `cleared-status`, moves `run-date` into
+`posted` and performs `GL-Batch-Rewrite`; `end-account` `[general/gl072.cbl:L379-L382]` performs
+`GL-Nominal-Rewrite`. The same question extends to `GLLEDGER-REC` because `new-account` — which issues the
+only `GL-Nominal-Read-Next` `[general/gl072.cbl:L408]` under its guard at `L407` — is **never reached** on an
+immediately-at-end read, so there may be no positioned record for that rewrite to act on. **What do those two
+rewrites do to the database?** Three readings are available and reading cannot choose between them: the
+rewrite targets a **zero key** and matches no row, so nothing changes; or it matches a row and stamps it; or
+the handler reports a failure the program ignores, having no status test at either site.
+
+⭐ **Why the answer is deterministic and therefore worth measuring, whichever reading holds.** `run-date` is
+pinned to the project value by `acas_posting/clock.py`, so **if** the `move run-date to posted` at
+`[general/gl072.cbl:L376]` fires, the stamped value is fixed and both sides compare byte for byte; if it does
+not fire, `POSTED` stays exactly as seeded. Either way the diff is decisive rather than noisy. The binary
+observable is `05  Run-Date  binary-long.` `[copybooks/wssystem.cob:L67]`, and `GLBATCH-REC.POSTED` is
+`int(8) unsigned` `[mysql/ACASDB.sql:L88]` derived from a `binary-long` `[copybooks/wsbatch.cob:L38]`, so
+whatever `L376` writes is compared as an **integer** and not as text — which is why the measured `0` in (d)
+below is a value and not an empty string.
+
+⚠️ **This question is entangled with `Q-4` at exactly the fields at issue, and that is why it could not be
+measured first.** `Q-4`'s record-length contradiction `[copybooks/wsbatch.cob:L7-L9]` decides the alignment of
+the batch record's **trailing** fields — and the trailing fields are `Batch-Status`
+`[copybooks/wsbatch.cob:L25-L27]`, `Cleared-Status` `[copybooks/wsbatch.cob:L29-L32]` and the four
+`binary-long` dates `[copybooks/wsbatch.cob:L36-L39]`, which is precisely the set `end-batch` writes. An
+experiment here that assumed `Q-4`'s answer would have been reading columns whose offsets it had guessed.
+`Q-4` is now `RESOLVED BY ORACLE` — both record copies measure **96** and the field sum is authoritative — so
+the observables reported in (d) sit on a **measured** alignment rather than an assumed one. The order of the
+two measurements was therefore not arbitrary.
+
+
+**(b) Evidence.** The seed makes the emptiness structural rather than incidental: `empty_batch.yaml` declares
+`seed_files` **without `posting.dat`** — `system.dat`, `ledger.dat` and `batch.dat` only — and its one batch
+row carries `Items` 0 with `Cleared-Status` 0. So `gl070`'s phase 2 explodes nothing, `gl071` sorts nothing
+and `gl072` reads nothing, by construction rather than by luck. The scenario declares
+`expected_table_effect: unchanged`, which is the *first* reading above stated as an expectation — and both
+runners now enforce it per side from their own pre-run and post-run digests, so a run in which either rewrite
+DID change a row fails the runner rather than passing quietly. Note also that `common/acas007.cbl` cannot
+wipe the batch table on an open-for-output: its delete-all lines are commented out at
+`[common/acas007.cbl:L308-L309]`, unlike the active `[common/acas008.cbl:L316]`.
+
+**(c) Oracle experiment.** The mandated `empty_batch` scenario is already exactly the required state, so no
+special probe was needed — which is the reason this one could be measured cheaply and should have been sooner.
+The full ten-stage protocol of §10 was run and the **compiled** side's normalized dump read directly:
+
+```text
+$C /repo/harness/run_parity.sh /repo/harness/scenarios/empty_batch.yaml
+# then read $ACAS_OUT/empty_batch/cobol.normalized/GLBATCH-REC.json and GLLEDGER-REC.json
+```
+
+The observables are `GLBATCH-REC.CLEARED-STATUS` and `.POSTED` for the seeded batch, `GLLEDGER-REC` in full,
+and **the presence or absence of a row under key zero** in either table. A zero-key row appearing is the
+third reading and would be a finding in its own right, since nothing in the frozen cycle intends one.
+
+**(d) Resolution. MEASURED: no observable effect, on either table.** The compiled side's `GLBATCH-REC` after
+the run:
+
+| column | value | what it settles |
+| --- | --- | --- |
+| `CLEARED-STATUS` | **0** | `end-batch` did **not** stamp the batch cleared |
+| `POSTED` | **0** | nor did it record a posting date |
+| `STORED` | **0** | nor a stored date |
+| `ITEMS` | 0 | unchanged from the seed |
+| `BATCH-STATUS` | 1 | unchanged from the seed |
+| `ENTERED`, `PROOFED` | 155127 | unchanged from the seed |
+
+`GLLEDGER-REC` held its four seeded rows **unchanged** — `300000` still at balance `999.99` and last `999.99`,
+and the other three likewise — so `end-account`'s rewrite produced nothing visible. `GLPOSTING-REC` had
+`row_count: 0`. **No zero-key row appeared in either table.**
+
+So of the three candidate readings the measured one is the **first**: both rewrites target a key that matches
+no row and nothing changes. The expectation recorded in (b) is therefore confirmed rather than merely
+declared, and the scenario's `expected_table_effect: unchanged` is a measurement the runners now re-take on
+every journey rather than an assumption.
+
+**Why, and this matters for reading the other entries.** The emptiness is not incidental to this scenario — it
+is `ANOMALY N-KEY` acting. The `POST-KEY` group move corrupts the key on the way back out of the bridge
+(`Q-9`, and `acas_posting/dal/acas006_gl_posting.py`), so `gl070`'s guard
+`if batch not = WS-Batch-Nos go to loop` `[general/gl070.cbl:L492-L493]` discards **every** seeded posting and
+the work file is empty for reasons that have nothing to do with the batch being described as empty. The same
+starvation is why `gl080`'s deletion pass deletes nothing. One frozen defect, several faces.
+
+**Not repaired (R-3, R-4).** No guard is added for the empty case, `save-batch` is not checked before the
+rewrite, and nothing is logged.
+
+**(e) Consuming modules.** `acas_posting/programs/gl072_transaction_update.py`, whose `_end_batch`
+`[acas_posting/programs/gl072_transaction_update.py _end_batch]` and `_end_account`
+`[acas_posting/programs/gl072_transaction_update.py _end_account]` reproduce both paragraphs statement for
+statement **including the absent `save-batch` guard**, with `acas_posting/dal/acas007_gl_batch.py` and
+`acas_posting/dal/acas005_gl_nominal.py` performing the rewrites, `acas_posting/records/gl_batch.py` owning
+the trailing fields `Q-4` also touches, and `acas_posting/cli/gl_post_cycle.py` dispatching them. Test-owned by `tests/scenarios/test_empty_batch.py`, which continues to assert agreement
+and that neither side changed the tables its own run started from, rather than the values above — correctly,
+because a parity test that hard-coded them would stop being a parity test. The reachability of the at-end path
+itself is additionally exercised without a database by
+`tests/arithmetic/test_gl072_shipped_silent_skips.py`, which measured that the at-end `end-batch` rewrites
+whatever batch record the program is holding — a measurement that bears on this question's second reading and
+does **not** resolve it, because that probe drove the shipped module rather than the compiled one.
 
 <a id="q-string-pointer-and-refmod"></a>
 
@@ -2034,8 +3646,8 @@ citations. Each is recorded with what its owner measured, so a reader of this re
 | Identifier and owner | Question | What the owner records |
 | --- | --- | --- |
 | **`Q-9` (`cobol/move`)** — ⚠️ *not* this register's `Q-9`; see §15 | `MOVE SPACE` into a numeric receiver | **INEXPRESSIBLE** — measured as a GnuCOBOL 3.2 compile error, so the statement cannot exist in the compiled system and there is no representation to reproduce |
-| **`Q-10` (`cobol/move`)** | a reference-modification range past the end of the item | **UNREPRODUCIBLE** — a literal out-of-range range does not compile, and a computed one reads **adjacent storage**, which a Python `str` does not have |
-| **`Q-11` (`cobol/move`)** | a `STRING` pointer beyond the receiver | measured as a **silent no-op**: nothing is written **and** the pointer does not advance |
+| **`Q-10` (`cobol/move`)** | a reference-modification range past the end of the item | **MEASURED, and unreproducible for a structural reason.** A literal out-of-range range does not compile; a computed one reads **adjacent storage** — `(8:5)` on an `x(10)` item beside a `#` sentinel returns `HIJ##`. A Python `str` has no neighbours, so the layer refuses rather than inventing a value |
+| **`Q-11` (`cobol/move`)** | a `STRING` pointer beyond the receiver | **MEASURED** as a **silent no-op**: nothing is written, **and** the pointer is left exactly where it was. A partial fit writes what fits and advances by that much |
 
 `Q-11`'s live site in the frozen source is worth naming, because it is the one the maintainer himself
 flagged. `[general/gl080.cbl:L530]` is `move space to Arg-Test.` carrying the inline comment
@@ -2045,11 +3657,21 @@ flagged. `[general/gl080.cbl:L530]` is `move space to Arg-Test.` carrying the in
 **A-NEW-9**. It sits in the archive-path construction, which produces no database effect, so it is recorded
 rather than locked, and `Q-22` (§14) owns what path the statement actually builds.
 
-⚠️ Each of the three is marked `xfail(strict=True)` by `tests/arithmetic/test_move_truncation.py` against
-the **naive** reading — what an engineer would guess before consulting the compiler. Because the strictness
-is on, the day a naive reading starts holding, the test **XPASSes and the suite goes red**. That is the
-R-4/R-6 lock working, and it is why these three are recorded as measured by their owner while this register
-still refuses to promote any status of its own without a run.
+⚠️ Each of the three is **locked by a refutation** in `tests/arithmetic/test_move_truncation.py`: the
+**naive** reading — what an engineer would guess before consulting the compiler — is named at the site and
+then asserted NOT to hold, either by asserting the refusal the layer raises (`Q-9`, `Q-10`) or by asserting
+the measured value against the naive one (`Q-11`). The day a naive reading starts holding, those tests
+**FAIL**, which is the R-4/R-6 lock working.
+
+All three USED to be marked `xfail(strict=True)` over the naive value instead, and that was the wrong
+instrument for all three: each outcome is **already settled** — a compile error, a refusal, a measurement —
+so the marker could only ever fail, and the alarm it promised, an unexpected pass when the oracle answers,
+had no oracle answer to wait for. Recording a closed decision as a pending question also made the suite's
+xfail list read as a longer arbitration backlog than the migration actually has. The refutation is in any
+case the stronger form: an `xfail` goes red only when the naive reading starts holding, whereas an assertion
+of the measured behaviour AND of the refutation goes red the moment **either** half changes. These three are
+recorded as measured by their owner; this register still refuses to promote any status of its own without a
+run, and the R-4/R-6 lock is unchanged in intent and tighter in effect.
 
 ---
 
@@ -2059,26 +3681,29 @@ The migration was written by many hands, and modules opened questions at the sit
 `Q-` identifier cited anywhere in the repository is catalogued below so that **no citation dangles**, which
 is R-5 applied to this register itself. Entries here are **not re-opened and not re-numbered**: each records
 the question its owner named, the owner, and the state the owner reports. Where an owner reports a
-measurement, that is recorded as *their* report — this register has observed none (§10.1).
+measurement, that is recorded as *their* report. Where **this** register has since
+watched the same observable, the row says so and the owning entry in §12 or §13 carries the values; the
+distinction between a report and an observation is kept, because it is the difference between citing someone
+else's number and standing behind one.
 
 ### 14.1 The numeric band `Q-10` … `Q-25`
 
 | id | Question | Owner | State as its owner reports it |
 | --- | --- | --- | --- |
-| `Q-10` | a reference-modification range not wholly inside its item | `acas_posting/cobol/move.py` | UNREPRODUCIBLE — a literal range does not compile, a computed one reads adjacent storage |
-| `Q-11` | a `STRING` pointer beyond the receiver | `acas_posting/cobol/move.py` | measured as a silent no-op; the pointer does not advance |
-| `Q-14` | an edited picture outside the Z-then-9 shape | `acas_posting/cobol/move.py` | UNOBSERVABLE — every other edited picture in the frozen sources receives into a print line |
+| `Q-10` | a reference-modification range not wholly inside its item | `acas_posting/cobol/move.py` | **MEASURED** — a literal out-of-range range does not compile at all; a computed one reads ADJACENT STORAGE. With a `#` sentinel beside an `x(10)` item: `(8:5)` → `HIJ##`, `(9:4)` → `IJ##`, `(11:2)` → `##`, `(0:3)` → `NUL AB`. Unreproducible in Python, which has no neighbours, and the layer refuses rather than inventing a value |
+| `Q-11` | a `STRING` pointer beyond the receiver | `acas_posting/cobol/move.py` | **MEASURED** — a complete no-op past the end: into `pic x(5)` pre-filled `-----`, `ptr=9` raises overflow, leaves the receiver untouched and leaves the pointer at **9**, unadvanced. A partial fit writes what fits: `ptr=5,"PQ"` gives `AB--P` and `ptr=6`. The advance-to-35 reading is refuted |
+| `Q-14` | an edited picture outside the Z-then-9 shape | `acas_posting/cobol/move.py` | **MEASURED — DECLINED ON SCOPE.** The rendering was watched and is tabulated in §13's `Q-EDITED-BLANK-WHEN-ZERO`; it is deliberately not implemented, because every picture it governs receives into a print line and AAP §0.2.2 excludes report formatting. `pic z9z9` does not even compile |
 | `Q-15` | whether `gl071`'s `SYSTEM-REC` parameter is ever tested; it is imported for the parameter's declaration and never read | `acas_posting/programs/gl071_batch_sort.py` at `L24-L26` | marked at the site |
 | `Q-16` | what a `tinyint(2) unsigned` column holds, and what a predicate comparing it against the **quoted** three-digit string `"000"` actually compares — `HV-IRS-FINAL-ACC-REC-KEY` is `PIC 9(03) COMP` written into a two-digit column | `acas_posting/dal/acasirsub5_irs_final.py` | transport-level; both renderings reproduced as written, nothing normalised |
 | `Q-17` | what the table holds, and what a read returns, when fewer than 26 rows exist — the bridge tolerates a short table by design | `acas_posting/dal/acasirsub5_irs_final.py` | measured behaviour of the compiled system, not inferred; note the state after **any** write is dense, all 26 rows, blanks stored as spaces |
 | `Q-18` | whether `move 1 to File-Key-No` at `[general/gl080.cbl:L288]` has any observable effect, given the facade's own dispatch paragraphs pin the same value before every call | `acas_posting/programs/gl080_end_of_cycle.py` | reproduced regardless |
-| `Q-19` | what the compiled program writes when the quarter subscript is out of range | `acas_posting/programs/gl080_end_of_cycle.py` | the divergence is declared, no guard added — see §13's `Q-QUARTER-SUBSCRIPT`, which is the same site from the subscript's side |
+| `Q-19` | what the compiled program writes when the quarter subscript is out of range | `acas_posting/programs/gl080_end_of_cycle.py` | **MEASURED** — occurrence 13's six packed bytes land at offsets 125–130 of the 126-byte record, four of them PAST ITS END, leaving `Q1`–`Q4` and `Ledger-Last` unchanged, with no diagnostic and exit 0. So an overrunning store moves no column of any compared table. The subscript stays unbounded and the divergence is declared — see §13's `Q-QUARTER-SUBSCRIPT`, the same site from the subscript's side |
 | `Q-20` | whether `GL-Posting-Open-Output` at `[general/gl080.cbl:L673]` **truncates** `GLPOSTING-REC`, as `Open-Output` does on the transfer-file handler | `acas_posting/programs/gl080_end_of_cycle.py` | open; `Q-23` says the statement is unreachable in the frozen source, which does not settle what it would do |
 | `Q-21` | whether this program's system-record mutations are persisted at all — `gl080` performs **no** `System-*` facade verb, so it depends entirely on what the caller does with the by-reference parameter | `acas_posting/programs/gl080_end_of_cycle.py` | all reproduced in memory; none written to a table from there |
 | `Q-22` | what path the `disk-change` `STRING` actually builds — the maintainer's own `*> this lot looks wrong !!!!!` at `[general/gl080.cbl:L530]` | `acas_posting/programs/gl080_end_of_cycle.py` | measured against the package's record defaults as `"archives archive.dat"`, a space where a separator belongs; reproduced exactly as written |
 | `Q-23` | whether `compress-post` aborts the run in the COBOL-files configuration | `acas_posting/programs/gl080_end_of_cycle.py` | the two record lengths measure 103 and 101, so `stop run` at `[general/gl080.cbl:L649]` fires; computed from the descriptors, never from a literal |
 | `Q-24` | the facade argument list and the per-handler record operand for the IRS calling convention — five operands in the copybook's own order | `acas_posting/programs/irs030_posting.py` at `L1217-L1229` | marked at the site |
-| `Q-25` | which callers of the bridge put a two-digit **year** in `Post-Date (7:2)` and which put a **century** | `tests/arithmetic/test_irs_date_component_derivation.py` at `L128-L135`, declared *"OWNED HERE"* | the Sales path closed by construction; open for any other caller — **the same question as this register's `Q-8`**, see §15 |
+| `Q-25` | which callers of the bridge put a two-digit **year** in `Post-Date (7:2)` and which put a **century** | `tests/arithmetic/test_irs_date_component_derivation.py`, declared *"OWNED HERE"* | **SETTLED BY CENSUS, not by probe** — the question asks which statements exist, so it was answered by enumerating every producer of the eight-character date. **All eleven compose a two-digit YEAR**: `[sales/sl060.cbl:L1071-L1072]`, `[sales/sl100.cbl:L612-L613]`, `[purchase/pl060.cbl:L937-L938]`, `[purchase/pl100.cbl:L591-L592]` and the out-of-scope `[purchase/pl950.cbl:L639-L640]` all build `(1:6)` + `(9:2)`; the IRS side redefines the field as `u-days`/`u-month`/**`u-year`** at `[irs/irs030.cbl:L311-L318]` and again in irs060 and irs070; and `[irs/irs.cbl:L972-L978]` composes `run-date` the same way with the maintainer's own comments *"Only grab YY and not CC"* and *"As IRS uses dd/mm/yy"*. The reader agrees: `[common/irspostingLD.cbl:L462-L464]` loads it into `RP-Year`. **The same question as this register's `Q-8`**, see §15 |
 
 ⭐ **`Q-12` and `Q-13` are unused.** They are a gap in the sequence, not an omission from this catalogue:
 nothing in the repository cites either, and they are left unassigned rather than back-filled, so that no
@@ -2103,7 +3728,9 @@ missing.
 
 ### 14.2 The `Q-CLI-*` family — the CLI boundary
 
-Opened by `acas_posting/cli/args.py` and the six entry points, at the boundary where a menu paragraph becomes
+Opened by `acas_posting/cli/args.py` and the **seven** route modules — `gl_post_cycle`, `gl_end_of_cycle`,
+`sl_invoice_post`, `sl_cash_post`, `pl_order_post`, `pl_payment_post` and `irs_post`, the set
+[`traceability.md`](traceability.md) §14.5 enumerates — at the boundary where a menu paragraph becomes
 a command line. Several are **settled by their owner**, and the settled ones are recorded as such because a
 reader following a citation needs to know it is closed.
 
@@ -2114,9 +3741,9 @@ reader following a citation needs to know it is closed.
 | `Q-CLI-SYSREC-RUNDATE` | that the row's `RUN-DATE` is written once at record-creation time by the out-of-scope `common/sys002.cbl`, and no menu ever writes it | OPEN |
 | `Q-CLI-RUNDATE-VS-ROW` | that the frozen menus derive the text date from the row they just read and never write `RUN-DATE` back, so a scenario must pin `--run-date` to the seeded value for the two cycles to be comparable at all | STILL OPEN |
 | `Q-CLI-EXITSTATUS` | what process status the frozen system produces | SETTLED by establishing that **there is no oracle observable**: `RETURN-CODE` is read and never written anywhere in the menus or the twelve programs, and each menu ends with a bare `goback` |
-| `Q-CLI-OVERREWRITE` | whether the Python route has any counterpart to the menu's exit-time rewrite | SETTLED at three of the entry points by reproducing the paragraph; OPEN at `pl_payment_post` — this register's `Q-7` asks the complementary question, what the rewrite *writes* |
+| `Q-CLI-OVERREWRITE` | whether the Python route has any counterpart to the menu's exit-time rewrite | **CLOSED BY IMPLEMENTATION at all seven routes.** ⚠️ An earlier revision of this row said "SETTLED at three of the entry points … OPEN at `pl_payment_post`", and a later one said "SETTLED at all six routes with a frozen counterpart … correctly **absent** at `irs_post`". Neither holds: `acas_posting/cli/args.py`'s `overrewrite()` reproduces the three GL/SL/PL menus' RDB arm — keys 1, 2 and 4, closing on key 4 — and **six** routes call it, `pl_payment_post` included; and `irs_post` is not an absence but the **IRS spelling** of the same paragraph, `args.eoj_persist_irs_system_data()` reproducing `irs/irs.cbl`'s `EOJ.`, which the route calls. Only the flat-file second leg is unreproduced, and that is `Q-CLI-OVERREWRITE-SECOND-LEG` below rather than a residue of this question. Because both sides now write the system rows on every route, the canonical comparison is bounded at all 22 in-scope tables rather than at the scenario's declared effect — see the `⭐ UPDATE` in this register's `Q-7`, which asks the complementary question, what the rewrite *writes* |
 | `Q-CLI-OVERREWRITE-QUIT` | whether a single-operation process has a counterpart to the menu's quit-time rewrite | SETTLED by reproducing the paragraph: the quit key is the only exit `display-menu.` has, so one operation per process means one persist per process |
-| `Q-CLI-OVERREWRITE-SECOND-LEG` | the omitted COBOL half zeroes `File-System-Used` and never restores it, which under a literal reading puts a second dispatch on the indexed leg | STILL OPEN — measure which leg the oracle's second dispatch takes |
+| `Q-CLI-OVERREWRITE-SECOND-LEG` | the omitted COBOL half zeroes `File-System-Used` and never restores it, which under a literal reading puts a second dispatch on the indexed leg | **STILL OPEN, and it is the whole of what remains of the `overrewrite` question.** The unreproduced half is the unguarded flat-file pass — `[general/general.cbl:L676-L691]`, `[sales/sales.cbl:L645-L657]`, `[purchase/purchase.cbl:L638-L650]` — which the migration has one store for and therefore cannot reproduce. `Q-7`'s resolution point 3 reports the cross-process consequence as *measured*: the pass wrote `File-System-Used = 0` into `system.dat` record 1 and a later menu process then selected indexed files and issued no accounting DML. What remains open is which leg the oracle's second dispatch takes **without** the build-copy shim that `Q-7` describes |
 | `Q-CLI-TERMCODE-1-7` | the reachability of the 1..7 termination-code band | OPEN |
 | `Q-CLI-OKTOPOST` | what CLI default preserves a prompt that has **no** defaultable answer | RESOLVED: none does, so the switch is required with no default; an earlier draft answered `True`, which would have invented the one answer that silently enables every database write on the route |
 | `Q-CLI-CLEARFILE` | whether the `[Y]` in the IRS end-of-job prompt makes `Y` the effective default | RESOLVED by reading rather than by the prompt's appearance: the accept at `[irs/irs030.cbl:L1717]` carries no `WITH UPDATE`, so the literal stays in the prompt text and a bare Enter **re-prompts** rather than clearing |
@@ -2170,17 +3797,44 @@ here.
 avoid colliding** with the numeric bands, which makes it the one module that solved §15's problem by
 construction:
 
-| id | Question | Locator |
-| --- | --- | --- |
-| `Q-A` | the width inflations, as `9(5)` sources travel through `9(08)` host variables | `L507` |
-| `Q-B` | the money path at the column's precision limit | `L522` |
-| `Q-C` | the key predicate: the key metadata declares `"STR"`, and the coercion its owner reports as **numeric**, measured on MariaDB 10.11.7 | `L535` |
+| id | Question | Locator | Status |
+| --- | --- | --- | --- |
+| `Q-A` | the width inflations, as `9(5)` sources travel through `9(08)` host variables into `mediumint(5) unsigned` columns | `L267` | **`RESOLVED BY ORACLE`**, and **re-verified 2026-08-07** |
+| `Q-B` | the money path at the column's precision limit | `L282` | **`RESOLVED BY ORACLE`**, and **re-verified 2026-08-07** |
+| `Q-C` | the key predicate: the key metadata declares `"STR"`, and the coercion its owner reports as **numeric** | `L295` | **`RESOLVED BY ORACLE`**, and **re-verified 2026-08-07** |
+
+⚠️ **The locators above were `L507`, `L522` and `L535` and had gone stale**, by roughly 240 lines, when a
+duplicated half of that module's docstring was removed. They are corrected here and the drift is recorded
+rather than quietly patched, because it is the same failure mode §9 warns about: a citation that still looks
+precise after the thing it points at has moved is worse than no citation, since a reader who follows it lands
+in unrelated prose and concludes the claim is false.
+
+**RE-VERIFICATION, 2026-08-07.** These three are the register's only entries whose measurements live in a
+module docstring rather than in a §12 entry, so they are the easiest to leave unchecked. All three were
+re-measured against the live MariaDB 10.11.7 — the same server the frozen schema names as its producer
+[`mysql/ACASDB.sql:L1`] — using the **real** in-scope columns of `IRSPOSTING-REC` inside a transaction that
+was then rolled back, so nothing was left behind (confirmed: zero rows after the `ROLLBACK`). Every claim
+held:
+
+| claim | measured |
+| --- | --- |
+| `@@global.sql_mode` is what the bridge's C interface gets | `STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION` — exactly as the docstring states |
+| `(5)` and `(2)` are DISPLAY widths, not constraints | `POST4-DR` accepted both `99999` and `16777215`; `POST4-DAY` accepted `255` |
+| past the type's range the server REFUSES rather than clamps | `16777216` into `KEY-4` → **ERROR 1264, SQLSTATE 22003**, nothing written; `256` into `POST4-DAY` → the same |
+| `decimal(9,2)` keeps a sign | `-12345.67` stored as `-12345.67` |
+| the precision limit aborts | `9999999.99` stored exactly; `10000000.00` → **ERROR 1264 / 22003**, nothing written |
+| SCALE overflow ROUNDS instead of failing | `1.005` stored `1.01`; `1.004` stored `1.00` |
+| the quoted key predicate coerces NUMERICALLY | `9 > "10"` is `0` while `"9" > "10"` is `1`; and against the real `mediumint` key holding `{7, 99999, 16777215}`, `> "10"` returned 2, `< "10"` returned 1, `= "7"` returned 1 and `> "000"` returned all 3 — the numeric answers, not the lexical ones |
+
+The last row is the one worth the trouble: lexically `"7" > "10"` is true, so a lexical comparison would have
+returned 3 and 0 for the first two predicates instead of 2 and 1. The two readings disagree on this data,
+which is what makes the measurement decisive rather than merely consistent.
 
 ### 14.4 The remaining mnemonic identifiers
 
 | id | Question | Owner |
 | --- | --- | --- |
-| `Q-A17-POSTINGS-EFFECT` | the stored value of `postings` once `RRN` has advanced past its picture — the **value** half of this register's `Q-5`, and the identifier **A-17** carries in [`anomaly-log.md`](anomaly-log.md) | `acas_posting/programs/pl060_order_posting.py` |
+| `Q-A17-POSTINGS-EFFECT` | the stored value of `postings` once `RRN` has advanced past its picture — the **value** half of this register's `Q-5`, and the identifier **A-17** carries in [`anomaly-log.md`](anomaly-log.md). **MEASURED 2026-08-07: it does not truncate at the picture at all — the receiver is signed `binary-short`, so the store wraps at 32767 and the negative reaches the unsigned `pic 9(5)` `Batch-Start` as its magnitude.** Recorded in full under [`Q-5`](#q-5) | `acas_posting/programs/pl060_order_posting.py` |
 | `Q-PURCH-AVERAGE-SIGN` | the Purchase instance of the signed-to-unsigned narrowing this register carries as `Q-3` | `acas_posting/programs/pl060_order_posting.py` |
 | `Q-CR-NOTES-SECOND-PASS` | the `PUITM5-REC` state a dead second pass leaves, against `SAITM3-REC` under the same seed | `acas_posting/programs/pl060_order_posting.py` |
 | `Q-VAT-PC-31` | whether storing 31 into a percentage field is observable downstream, and in which column | `acas_posting/programs/pl060_order_posting.py`; cross-referenced from [`anomaly-log.md`](anomaly-log.md) |
@@ -2215,32 +3869,105 @@ squeamishness:
 
 ## 15. Register collisions, and the scoping rule that resolves them
 
-§5 establishes that three registers coexist and were numbered independently. This section tabulates every
-collision, so that a reader following a citation lands in the right place. **Nothing is renumbered** — the
-citations are load-bearing, and moving a number to tidy a table would break a suite silently, which is the
-failure mode this whole register exists to prevent.
+§5 establishes that three registers coexist and were numbered independently. This section does two things:
+it **assigns a globally unique canonical identifier to every colliding reading** (§15.1), and it tabulates
+the collisions themselves so that a reader following a citation lands in the right place (§15.2).
 
-**The scoping rule.** An **unqualified** `Q-n` means *this* register. A citation found inside a module or
-test that declares a register of its own resolves *within that file*. Where ambiguity is possible, the
-qualified form — `Q-9 (cobol/move)` — is used.
+⚠️ **Scoping alone was not enough, and saying so is the point of §15.1.** An earlier revision of this
+section resolved the collisions *by scoping only* — declaring that a bare `Q-9` means this register unless
+found inside a file with its own register. That rule disambiguates a citation **only if the reader knows
+which file it came from**, which is exactly what is lost when an identifier is quoted in a commit message,
+a review comment, a test failure summary or another document. Seven bare numbers carried between two and
+four distinct meanings each, so "`Q-9` is open" was a statement with four possible subjects. Every reading
+now has a name that means one thing everywhere.
+
+**Nothing is renumbered in code.** The citations are load-bearing, and rewriting several hundred of them to
+tidy a table would risk breaking a suite silently — the failure mode this whole register exists to prevent.
+So the canonical identifier is **added** and the bare number **survives as a declared file-scoped alias**:
+no existing reference dangles, and every reading gains an unambiguous name.
+
+**The two rules, stated together because they work as a pair.**
+
+- **The canonical rule (new, and preferred).** Every reading has exactly one canonical identifier, listed
+  in §15.1. Canonical identifiers are globally unique and may be used anywhere — in prose, in a commit
+  message, across documents — with no scope qualifier.
+- **The scoping rule (retained, for the citations already in the tree).** An **unqualified** `Q-n` means
+  *this* register. A citation found inside a module or test that declares a register of its own resolves
+  *within that file*, to the canonical identifier §15.1 pairs it with. Where ambiguity is possible, the
+  qualified form — `Q-9 (cobol/move)` — remains valid and equals its canonical name, `Q-MOVE-9`.
+
+### 15.1 The canonical allocation
+
+The scheme is the one `acas_posting/programs/pl055_order_proof_extract.py` already uses for `Q-PL055-1` …
+`Q-PL055-8` and `general/gl070`'s family uses for `Q-70a` … `Q-70f`: **a module prefix and the module's own
+number**, so that the canonical name and the legacy alias differ by a prefix only and neither has to be
+remembered separately.
+
+**A reading that is genuinely *this* register's question keeps this register's number and gets no new name.**
+Two of the apparent collisions are that case, and conflating them with the real ones is how the table used
+to overstate the problem: `[acas_posting/cobol/arithmetic.py INTERMEDIATE_PRECISION]`'s `Q-2` and `gl051`'s `Q-2` are both
+*"the compound VAT expression's intermediate precision"*, which is §12's `Q-2` verbatim; and `gl051`'s
+`Q-9` is *"A-15's record-length contradiction"*, which is §12's `Q-4` verbatim. Those two are **aliases of
+this register's entries**, not separate questions.
+
+| Canonical id | Subject | Owning file | Legacy alias |
+| --- | --- | --- | --- |
+| `Q-GL051-1` | is persisting `Batch-Status` the caller's job — **RESOLVED FROM THE SOURCE** by its owner, no experiment needed | `acas_posting/programs/gl051_batch_control_check.py` | its `Q-1` |
+| `Q-GL051-3` | what an unsigned `pic 9(9)v99 comp-3` receiver holds after a negative store — *in-program*, distinct from §12's `Q-3`, which is about the bridge and the column | same | its `Q-3` |
+| `Q-GL051-4` | the three promoted preconditions, `move 1 to trutht` and its neighbours | same | its `Q-4` |
+| `Q-GL051-5` | `z` has no `VALUE` clause `[general/gl051.cbl:L172]` and is set only conditionally | same | its `Q-5` |
+| `Q-GL051-6` | the file-handler facade's Python call shape | same | its `Q-6` |
+| `Q-GL051-7` | `Date-Form` is **mutated** when it is zero | same | its `Q-7` |
+| `Q-GL051-8` | `line-cnt` `[general/gl051.cbl:L166]` counts print lines, so a page break is observable only through `Q-GL051-7` | same | its `Q-8` |
+| `Q-SL060-1` | which `oi-type` values reach the loop, and what is stored when `a` is 0 or above 3 | `acas_posting/programs/sl060_invoice_posting.py` | its `Q-1` |
+| `Q-SL060-2` | is `FS-Cobol-Files-Used` ever true in a scenario — if it is, four library-call gates become reachable and **R-1 forbids honouring them** | same | its `Q-2` |
+| `Q-SL060-3` | the disposition of a failed `OTM3-Write`, which leaves `SALEDGER-REC` written and `SAITM3-REC` not | same | its `Q-3` |
+| `Q-SL060-4` | the reachable range of `Current-Quarter`, and what an out-of-range value writes | same | its `Q-4` |
+| `Q-SL060-5` | what the narrowing moves store, including the `SIGN LEADING` conversion | same | its `Q-5` |
+| `Q-SL060-6` | `sl060` increments `Next-Batch` and sets `Postings` but performs **no** `System-Rewrite` — does either update survive the run | same | its `Q-6` |
+| `Q-SL060-7` | the exact `Post-Legend` bytes out of the edited-move / `INSPECT` / `STRING` chain, including residue and the truncation point past 32 characters | same | its `Q-7` |
+| `Q-SL060-8` | the disposition of a failed `GL-Batch-Write`, which leaves posting rows with no batch header | same | its `Q-8` |
+| `Q-SL060-9` | `Rrn` is `pic 9(5) comp` (0…99999) but `Postings` is `binary-short` (−32768…32767), so an RRN above 32767 **wraps negative** | same | its `Q-9` |
+| `Q-PL100-1` | the status pair and row state produced by `A-PL100-A`'s write to an unopened table, in `"Y"` mode, in `"B"` mode, and with `G-L` unset | `acas_posting/programs/pl100_payment_posting.py` | its `Q-1` |
+| `Q-PL100-2` | the `PULEDGER-REC` state produced by `A-PL100-B`'s rewrite of a record never successfully read | same | its `Q-2` |
+| `Q-PL100-3` | the `VALUEANAL-REC` count drift from `A-PL100-C`, and whether the unsigned count columns underflow or clamp | same | its `Q-3` |
+| `Q-PL100-4` | the exact `post-date` text the century-dropping reference modification yields per `Date-Form` | same | its `Q-4` |
+| `Q-PL100-5` | the stored value of `purch-pay-average` if the bridge narrows a signed `binary-long` to an unsigned column | same | its `Q-5` |
+| `Q-MOVE-9` | `MOVE SPACE` into a numeric receiver — **measured as a compile error**, so there is no behaviour to reproduce | `acas_posting/cobol/move.py`, `tests/arithmetic/test_move_truncation.py` | their `Q-9` |
+| `Q-MOVE-10` | a reference-modification range past the item — **UNREPRODUCIBLE**; every in-scope range is in range | same | their `Q-10` |
+| `Q-MOVE-11` | a `STRING` pointer beyond the receiver — **measured** as a complete no-op, pointer included | same | their `Q-11` |
+| `Q-MOVE-14` | an edited picture outside the Z-then-9 shape — **UNOBSERVABLE**, because every other edited picture receives into a print line and report formatting is out of scope | same | their `Q-14` |
+| `Q-VATNET-1` | what a `COMPUTE … ROUNDED` with no `ON SIZE ERROR` stores when the result exceeds `vat-amount`'s nine declared digits `[copybooks/irswspost.cob:L18]` — **proved unreachable from in-range data**, since the widest in-range VAT fits the field | `tests/arithmetic/test_irs_vat_from_net.py` | its `Q-1` |
+| `Q-GL080-DIVIDE-BY-ZERO` | the zero divisor at the cycle divide — already a mnemonic, and already the arithmetic tier's alias; §13 holds the entry | `acas_posting/cobol/arithmetic.py`, two arithmetic tests | their `Q-7` |
+| `Q-CLI-OKTOPOST` | what CLI default preserves a prompt with no defaultable answer — already a mnemonic; §14.2 holds it | `acas_posting/cli/sl_cash_post.py` and its program module | that module's `Q-6` |
+
+**Two entries in that table are aliases of *this* register and are listed for completeness, not as new
+questions:** `gl051`'s `Q-2` → §12 `Q-2`, and `gl051`'s `Q-9` → §12 `Q-4`.
+
+**The allocation rule for anything opened from now on.** Take the next free number **in this register**, or
+mint a module-prefixed or mnemonic identifier that cannot collide. Do **not** open a bare `Q-n` inside a
+module: `acas_posting/dal/acasirsub4_irs_posting.py` avoided the whole problem by choosing letters (§14.3),
+and `pl055` avoided it by prefixing.
+
+### 15.2 The collision table
 
 | Number | This register's reading | Other readings, with the citing file |
 | --- | --- | --- |
-| `Q-1` | the date module's reject contract | *"THIS FILE'S register"* in `tests/arithmetic/test_irs_vat_from_net.py` at `L143` — an unsized-overflow question; `acas_posting/programs/gl051_batch_control_check.py` — whether persisting `Batch-Status` is the caller's job, which that module reports **resolved from the source**; `acas_posting/programs/sl060_invoice_posting.py` — which `oi-type` values reach the loop; `acas_posting/programs/pl100_payment_posting.py` — a status pair and row state |
-| `Q-2` | default arithmetic precision | the same question, and the **shared** reading, in `acas_posting/cobol/arithmetic.py` at `L96` and in five arithmetic tests. `gl051_batch_control_check.py` and `sl060_invoice_posting.py` also keep local `Q-2` entries on other subjects |
-| `Q-3` | the signed-to-unsigned stored value | the same question in the dictionary's `ambiguity_refs`, in `acas012_sales.py`, `acas007_gl_batch.py`, `records/sales_ledger.py` and four arithmetic tests — **the shared reading**. `gl051_batch_control_check.py` and `sl060_invoice_posting.py` keep unrelated local `Q-3` entries |
-| `Q-4` | the batch record's length contradiction | the same question in the dictionary's `ambiguity_refs`, in `records/gl_batch.py`, `acas007_gl_batch.py` and three arithmetic tests — **the shared reading**. `sl060_invoice_posting.py` and `pl100_payment_posting.py` keep unrelated local `Q-4` entries |
+| `Q-1` | the date module's reject contract | **four other readings, all now canonically named.** `tests/arithmetic/test_irs_vat_from_net.py` at `L143`, marked *"THIS FILE'S register"* — the unsized-overflow question, canonically **`Q-VATNET-1`**; `gl051_batch_control_check.py` — whether persisting `Batch-Status` is the caller's job, which that module reports **resolved from the source**, canonically **`Q-GL051-1`**; `sl060_invoice_posting.py` — which `oi-type` values reach the loop, canonically **`Q-SL060-1`**; `pl100_payment_posting.py` — a status pair and row state, canonically **`Q-PL100-1`** |
+| `Q-2` | default arithmetic precision | **not a collision at three of the four sites.** `acas_posting/cobol/arithmetic.py` at `L96`, five arithmetic tests, **and `gl051_batch_control_check.py`** all carry the *same* question — the compound VAT expression's intermediate precision — so they are aliases of this entry, not rivals. ⚠️ An earlier revision of this row said `gl051`'s `Q-2` was "on another subject"; it is not, and treating it as one overstated the collision count. The one genuine other reading is `sl060_invoice_posting.py`'s, canonically **`Q-SL060-2`** — whether `FS-Cobol-Files-Used` is ever true |
+| `Q-3` | the signed-to-unsigned stored value | the same question in the dictionary's `ambiguity_refs`, in `acas012_sales.py`, `acas007_gl_batch.py`, `records/sales_ledger.py` and four arithmetic tests — **the shared reading**. Two genuine other readings, both canonically named: `gl051`'s in-program `comp-3` receiver, **`Q-GL051-3`**, and `sl060`'s failed `OTM3-Write` disposition, **`Q-SL060-3`** |
+| `Q-4` | the batch record's length contradiction | the same question in the dictionary's `ambiguity_refs`, in `records/gl_batch.py`, `acas007_gl_batch.py` and three arithmetic tests — **the shared reading**, and `gl051_batch_control_check.py`'s local `Q-9` is a further alias of it. Two genuine other readings: `sl060`'s `Current-Quarter` range, **`Q-SL060-4`**, and `pl100`'s `post-date` text, **`Q-PL100-4`** |
 | `Q-5` | the unexplained move | its **value** half is `Q-A17-POSTINGS-EFFECT` (§14.4), which is the identifier **A-17** carries |
-| `Q-9` | `HV-POST-RRN` declared and fetched but never loaded | ⚠️ **the sharpest collision.** `acas_posting/cobol/move.py` and `tests/arithmetic/test_move_truncation.py` publish a `Q-9` meaning *`MOVE SPACE` into a numeric receiver*; `gl051_batch_control_check.py` publishes a local `Q-9` meaning *A-15's record-length contradiction*, which is **this register's `Q-4`**; and `sl060_invoice_posting.py` publishes a third. Resolved by scoping only — see §13's handed-down table for the `cobol/move` reading |
-| `Q-8` | `Post-Date (7:2)`: year or century | **the same question** as `Q-25` (§14.1), which `tests/arithmetic/test_irs_date_component_derivation.py` declares *"OWNED HERE"*. The two are **aliases**, not rivals: `Q-8` is the register entry and `Q-25` is the owning test's identifier for the same subject, with the same split — Sales closed by construction, other callers open. Both are kept so that neither a document citation nor a test citation dangles |
-| `Q-6` | the `sl830` asymmetry | `acas_posting/programs/sl060_invoice_posting.py` keeps a local `Q-6`; `acas_posting/cli/sl_cash_post.py` records that its program module carries the ok-to-post question as *its own* `Q-6` |
-| `Q-7` | the menu-shell exit-path rewrite | ⚠️ **the collision this register could not absorb.** `tests/arithmetic/test_gl080_cycle_divide_rounded.py` and `tests/arithmetic/test_compute_truncate_unrounded.py` both publish a `Q-7` meaning *the zero divisor*, carried on `acas_posting.cobol.arithmetic.SizeErrorNoStore`. §12's `Q-7` is externally mandated to the menu-shell rewrite and the arithmetic tier's citations are equally fixed, so **neither could yield the number**: the zero-divisor question is filed in §13 under the mnemonic `Q-GL080-DIVIDE-BY-ZERO`, which is an **alias** for the arithmetic tier's `Q-7` and not a new question. `Q-CLI-OVERREWRITE` and `Q-CLI-OVERREWRITE-SECOND-LEG` (§14.2) are this entry's neighbours at the CLI boundary |
+| `Q-9` | `HV-POST-RRN` declared and fetched but never loaded | ⚠️ **the sharpest collision — four meanings on one number, now four names.** `acas_posting/cobol/move.py` and `tests/arithmetic/test_move_truncation.py` publish a `Q-9` meaning *`MOVE SPACE` into a numeric receiver*, canonically **`Q-MOVE-9`** (see §13's handed-down table); `gl051_batch_control_check.py`'s local `Q-9` means *A-15's record-length contradiction*, which is an alias of **this register's `Q-4`**; and `sl060_invoice_posting.py`'s means the `Rrn`/`Postings` width mismatch that wraps negative above 32767, canonically **`Q-SL060-9`**. §15.1 is what makes each of those citable outside its own file, and scoping alone is what it used to rest on |
+| `Q-8` | `Post-Date (7:2)`: year or century | **the same question** as `Q-25` (§14.1), which `tests/arithmetic/test_irs_date_component_derivation.py` declares *"OWNED HERE"*. The two are **aliases**, not rivals: `Q-8` is the register entry and `Q-25` is the owning test's identifier for the same subject, and they now carry the same **answer** — Sales and Purchase compose a year, `irs030`'s own conversion path truncates and stores a century. Both identifiers are kept so that neither a document citation nor a test citation dangles |
+| `Q-6` | the `sl830` asymmetry | two other readings, both canonically named. `sl060_invoice_posting.py`'s local `Q-6` — whether the `Next-Batch` increment and the `Postings` set survive a run with no `System-Rewrite` — is **`Q-SL060-6`**; and the ok-to-post question that `acas_posting/cli/sl_cash_post.py` records its program module carrying as *its own* `Q-6` is the mnemonic **`Q-CLI-OKTOPOST`** (§14.2), already resolved |
+| `Q-7` | the menu-shell exit-path rewrite | ⚠️ **the collision this register could not absorb by renumbering — and the one that first showed why a mnemonic beats a scope rule.** `tests/arithmetic/test_gl080_cycle_divide_rounded.py` and `tests/arithmetic/test_compute_truncate_unrounded.py` both publish a `Q-7` meaning *the zero divisor*, carried on `acas_posting.cobol.arithmetic.SizeErrorNoStore`. §12's `Q-7` is externally mandated to the menu-shell rewrite and the arithmetic tier's citations are equally fixed, so **neither could yield the number**: the zero-divisor question is filed in §13 under the mnemonic `Q-GL080-DIVIDE-BY-ZERO`, which is an **alias** for the arithmetic tier's `Q-7` and not a new question. `Q-CLI-OVERREWRITE` and `Q-CLI-OVERREWRITE-SECOND-LEG` (§14.2) are this entry's neighbours at the CLI boundary |
 
 **Why the collisions were not simply prevented.** Because the register was being written at the same time as
-the modules that cite it, and there was no shared allocation point until this file existed. One module solved
-it properly by construction — `acas_posting/dal/acasirsub4_irs_posting.py` chose **letters** (§14.3) — which
-is the pattern to follow for any question opened from now on: either take the next free number **in this
-register**, or use a mnemonic that cannot collide.
+the modules that cite it, and there was no shared allocation point until this file existed. Two modules
+solved it properly by construction — `acas_posting/dal/acasirsub4_irs_posting.py` chose **letters** (§14.3)
+and `pl055_order_proof_extract.py` chose a **module prefix** — and §15.1 generalises the second of those to
+every colliding reading rather than leaving the problem to a scope rule the reader has to apply correctly.
 
 ---
 
@@ -2251,24 +3978,92 @@ what to exercise and what to trust, and they are recorded here rather than left 
 would otherwise be read as coverage that does not exist. A silent declination and a fabricated resolution
 fail in the same direction: both let a reader believe something has been checked.
 
-### 16.1 `gl080` is driven by **no scenario at all**
+### 16.1 `gl080` was driven by no scenario at all — **and now it is**
 
-**The declination.** The end-of-period path is not exercised by any of the eight mandated scenarios. Their
-declared operations are `gl_post_cycle` for four of them — `clean_batch_gl`, `control_total_mismatch`,
-`empty_batch` and `mixed_accepted_rejected` — `sl_invoice_post` for two, `pl_order_post` for one and
-`irs_post` for one. **`gl_end_of_cycle`, which is the route that dispatches `gl080`, is the operation of
-none of them** (verified by reading the eight definitions). And `system.period` is seeded as `1` in **all
-eight**, which is inert for this purpose: with a period of one the cycle-to-period divide has nothing to
-decide.
+⚠️ **THIS DECLINATION HAS BEEN WITHDRAWN, and the original is quoted rather than deleted** so that a reader
+who met it elsewhere can see it was retired rather than wonder whether they misread it. It said:
 
-**The rationale, and its limit.** The eight scenarios are the set AAP §0.8.5 mandates — clean batch per
-ledger, mixed accepted-and-rejected, period-end totals, control-total mismatch, empty batch — and none of
-those five is an end-of-period run. So the declination follows the mandate rather than contradicting it. Its
-limit is worth stating plainly: **three of this register's questions live in `gl080`** —
-`Q-GL080-DIVIDE-BY-ZERO`, `Q-QUARTER-SUBSCRIPT`, and `Q-2`'s fifth `ROUNDED` site at
-`[general/gl080.cbl:L328]` — plus five of §14.1's (`Q-18` … `Q-23`). Every one of them therefore needs a
-scenario that does not exist yet, and **building it is part of those experiments** rather than a precondition
-somebody else has met.
+> *"The end-of-period path is not exercised by any of the eight mandated scenarios … `gl_end_of_cycle`, which
+> is the route that dispatches `gl080`, is the operation of none of them … Every one of them therefore needs
+> a scenario that does not exist yet, and building it is part of those experiments rather than a precondition
+> somebody else has met."*
+
+Every clause of that was true when written and the last one is now false. **The scenario was built.**
+`harness/scenarios/end_of_cycle_gl.yaml` declares the `gl_end_of_cycle` operation — the route that is
+`general/general.cbl`'s `load09.` dispatching `gl080` — and it is driven through the same ten-stage protocol
+as the other eight, with `tests/scenarios/test_end_of_cycle_gl.py` beside it. There are now **nine** committed
+scenario definitions.
+
+**What the withdrawal changes, and what it does not.** It removes the *precondition* that three of this
+register's questions were waiting on, and all three have since been measured —
+`Q-GL080-DIVIDE-BY-ZERO`, `Q-QUARTER-SUBSCRIPT` (carried as `Q-19`) and `Q-2`'s fifth `ROUNDED` site at
+`[general/gl080.cbl:L328]` are each `RESOLVED BY ORACLE`, though by **standalone compiled probes** rather than
+by that scenario, for the reason each entry gives: their observables are a control-flow branch, a byte offset
+and a penny, which a probe exhibits directly. That is a legitimate oracle measurement — the compiled program
+produced the observable and it was watched — and it is why an out-of-range subscript's exact byte offsets are
+recorded rather than pending. **What a probe cannot establish is what the *program* does with those values in
+a real end-of-period run**, which is a different question; the committed scenario is what a future agent
+should reach for when asking it. Five of §14.1's questions (`Q-18`, `Q-20`, `Q-21`, `Q-22`, `Q-23`) remain
+catalogued rather than resolved, and the scenario now exists for whoever takes them.
+
+**What the mandate still says, kept distinct from what exists.** AAP §0.8.5 mandates a scenario *set* — clean
+batch per ledger, mixed accepted-and-rejected, period-end totals, control-total mismatch, empty batch — and
+**none of those five is an end-of-period run**, so eight scenarios discharge the mandate and the ninth is an
+addition beyond it. Statements elsewhere in these documents about *the mandated set* rightly still say eight;
+statements about *what is committed* say nine. Conflating the two would either overstate the mandate or
+understate the coverage.
+
+**One thing the original got right and is worth keeping:** `system.period` is seeded as `1` in **all nine**
+committed scenarios — the ninth included — which is inert for this purpose: with a period of one the
+cycle-to-period divide has nothing to decide. A `period = 0` seeding, which is what
+`Q-GL080-DIVIDE-BY-ZERO` needed, is still not in any committed scenario; that question was closed by probe
+instead, and its entry says so. So the ninth scenario drives the route without exercising the divisor, and the
+two facts are independent.
+
+**The route census, recounted — and counted from the right key.** ⚠️ The table below is derived from each
+scenario's `operations` **list**, not from its singular `operation` key, and the distinction changes the
+answer. Every scenario declares both: `operation` names the *first* route so that a single-route scenario
+reads naturally, while `operations` is the ordered list the runners actually walk. `period_end_totals`
+declares **four** operations against a singular `operation` of `sl_invoice_post`, so counting the singular key
+alone attributes one route to it and loses three — which an earlier revision of this section did, thereby
+under-counting `pl_order_post` and omitting `sl_cash_post` and `pl_payment_post` from the census altogether.
+
+| Route | Scenarios that declare it | Which |
+| --- | ---: | --- |
+| `gl_post_cycle` | 4 | `clean_batch_gl`, `control_total_mismatch`, `empty_batch`, `mixed_accepted_rejected` |
+| `sl_invoice_post` | 2 | `clean_batch_sl`, `period_end_totals` |
+| `pl_order_post` | 2 | `clean_batch_pl`, `period_end_totals` |
+| `irs_post` | 1 | `clean_batch_irs` |
+| `sl_cash_post` | 1 | `period_end_totals` |
+| `pl_payment_post` | 1 | `period_end_totals` |
+| **`gl_end_of_cycle`** | **1** | **`end_of_cycle_gl` — the route that dispatches `gl080`** |
+
+**Nine** scenarios, **twelve** operation declarations, **all seven** routes exercised. The last row is where
+the declination used to be: it read **0**, and it is the single figure the withdrawal changes. Every other row
+is unchanged by the ninth scenario, which is the point — the addition closed exactly one gap and invented no
+coverage elsewhere.
+
+**⭐ What closes the in-process half of the gap, and what it does not close.** The declination above is about
+the *scenario* tier. A separate question is whether the shipped module is executed at all, and until QA raised
+it the answer was **no**: `tests/arithmetic/test_gl080_cycle_divide_rounded.py` reproduced the cycle-to-period
+divide as a **local transcription**, so `acas_posting/programs/gl080_end_of_cycle.py` was never called and a
+defect in the shipped module could not have been detected by any test. That is now closed in-process by
+**`tests/arithmetic/test_gl080_shipped_end_of_cycle.py`**, which imports the shipped module and drives its own
+functions — the `ROUNDED` cycle-to-period divide at `[general/gl080.cbl:L328]`, the **unbounded** quarter
+subscript at `[general/gl080.cbl:L345]`, the second independent rotating quarter counter at
+`[general/gl080.cbl:L345-L357]`, and the archive and deletion phases including the sign flips at
+`[general/gl080.cbl:L493]` and `[general/gl080.cbl:L506]` — using the module's own storage record and a
+substituted facade, so no database is required. Its expected values were **measured by probing the shipped
+module** and recorded before any assertion was written; where a value is a compiled-oracle question rather
+than an implementation fact it is left to the register and not asserted as measured.
+
+**A ninth scenario was deliberately not added**, and the reason is a constraint rather than a preference: AAP
+§0.3.1 enumerates the scenario set as eight files and §0.8.5 mandates that same set, so adding a
+`gl_end_of_cycle` scenario would put this migration outside its own plan. The in-process coverage is therefore
+a **bounded divergence** from the obvious remedy, recorded here and in the header of the test file itself, and
+it does **not** substitute for the end-to-end evidence: the five questions above still require the compiled
+oracle, and [`traceability.md`](traceability.md) §7.2 states in its own table that `gl080` is driven
+in-process only.
 
 **The three interactive parameters `gl080` promotes**, recorded in passing because their defaults decide
 whether a run reaches the database at all, and each default was **measured from the source** rather than
@@ -2336,46 +4131,99 @@ consequence in one sentence, quoted verbatim:
 
 That is the whole reason a register of ambiguities exists for this migration rather than a list of decisions.
 Where the General Ledger does something inexplicable, the correct response is to reproduce it and record the
-question — which is what every `PENDING` status in §12 and §13 is doing.
+question — which is what every entry in §12 and §13 did while it was open, and what the `MEASURED` verdicts
+they now carry were reached by. ⚠️ Those entries no longer carry `PENDING — AWAITING ORACLE EXECUTION`; §17's
+status rows count **0** of them. The discipline is unchanged — a question is recorded before it is answered,
+and the answer replaces the status rather than the question.
 
 ---
 
 ## 17. Self-audit
 
 Counted properties of this file, stated so that a reviewer can check them mechanically rather than take the
-document's word for its own discipline. Each was verified at the time of writing.
+document's word for its own discipline.
+
+⚠️ **Every figure below was re-derived against the current text of this file, not carried forward.** That
+matters because a self-audit is the one section whose subject is the file itself: any edit anywhere above can
+falsify a row here, so the rows are recomputed after the last of them and the counting algorithm is stated
+alongside each figure that has one. An earlier revision's counts had drifted behind its own content — the
+§13 entry total, the anchor total and both identifier censuses were each one edit stale — which is precisely
+the failure a self-audit exists to catch and was, in that revision, unable to catch about itself.
+
+**The counting algorithm, stated once and used by every identifier row.** Scope: the git-tracked text files
+under `acas_posting/`, `tests/`, `harness/`, `docs/` and `data_dictionary/`, plus `pyproject.toml` and
+`requirements.txt`. Pattern: `\bQ-[A-Za-z0-9][A-Za-z0-9._-]*`, with trailing punctuation stripped, which is
+permissive enough to catch all four identifier forms §5 names — including the lower-case-suffixed `Q-70f`
+that a stricter pattern misses. Two exclusion sets, both enumerated so the exclusion is checkable rather
+than asserted: **six family labels and metasyntactic placeholders** — `Q-5.x`, `Q-70`, `Q-CLI`,
+`Q-PL055-n`, `Q-n` and the `Q-nn` that `acas_posting/programs/gl080_end_of_cycle.py` uses for *"`AMBIGUITY
+Q-nn` at the site that raises it"* — and **seven Payroll data-item names**.
 
 | Property | Value |
 | --- | --- |
-| Primary entries in §12 | **13** — `Q-1` … `Q-5`, `Q-5.1` … `Q-5.3`, `Q-6` … `Q-10` |
-| Entries in §13 | **6** of its own, plus one companion answer key, plus **3** cited by scope |
-| Statuses in §12 | **8** × `PENDING — AWAITING ORACLE EXECUTION`; **3** × `RESOLVED BY ORACLE` (`Q-6`, `Q-7`, `Q-10`); **2** partial (`Q-8`, `Q-9`) |
-| Statuses in §13 | **6** × `PENDING — AWAITING ORACLE EXECUTION` |
-| `RESOLVED BY ORACLE` used as a status | **3 primary entries**, and only where the compiled run directly answered the stated question |
-| `RESOLVED BY CONSTRUCTION` used as a whole-entry status | **0.** The two part-resolved entries carry their settled halves inside the entry, where the reading can be shown |
-| Entries carrying all five template parts | **all of them.** Every §12 entry has (a) question, (b) evidence, (c) oracle experiment, (d) resolution-or-status and (e) consuming module(s) |
-| Explicit anchors | **19** — one for each of the **18** entries (`q-1` … `q-9`, `q-5-1` … `q-5-3`, and one per §13 entry), plus one on §13's closing scoping table, so a bare `#q-n` citation resolves |
-| `Q-` identifiers cited by the project | **82**, and **every one of them appears in this file** — §12, §13, §14 or §15. Census scope, stated so the figure is reproducible: the tracked text files of `acas_posting/`, `tests/`, `harness/`, `docs/`, `data_dictionary/` and the two manifests, under a pattern permissive enough to catch all four identifier forms of §5, excluding the family labels `Q-5.x` / `Q-70` / `Q-CLI` and the metasyntactic placeholder `Q-nn` that `acas_posting/programs/gl080_end_of_cycle.py` uses for *"`AMBIGUITY Q-nn` at the site that raises it"* |
-| Identifiers this file uses **as register identifiers** | **86** — the 82 above plus exactly four that are register-only and each declared as such: `Q-12`, `Q-13` and `Q-70c`, documented as **unassigned** rather than missing, and `Q-GL080-DIVIDE-BY-ZERO`, the one **coined name** for an existing question (§13, §15) |
-| Tokens outside the census, and why | **12** — `Q-TAX`, `Q-TAXES`, `Q-FICA-TAX`, `Q-CO-FUTA-LIAB`, `Q-ENDED`, `Q-Year`, `Q-mmdd` and five case variants are COBOL **data-item names** in the Payroll sub system, which AAP §0.2.2 excludes in its entirety. They are not register identifiers and are deliberately not catalogued. ⚠️ The seven forms are spelled out in the row above so the exclusion is checkable, which is why a naive `Q-` pattern over this file returns **93** tokens rather than 86: those seven are the **only** `Q-`-prefixed tokens anywhere in this file that are not register identifiers, and the family labels `Q-5.x` / `Q-70` / `Q-CLI` and the placeholder `Q-nn` are named for the same reason |
-| Experiments described as having been run | The strict build, all eight parity journeys, both scenario orders, the two-run determinism tier, and the focused boundary probes cited by `Q-7`, `Q-9`, and `Q-10` |
-| Measured values claimed as this register's own observations | Only values linked to the 2026-08-04 evidence files and the compiled probes named in their entries |
+| Primary entries in §12 | **14** — `Q-1` … `Q-5`, `Q-5.1` … `Q-5.3`, `Q-6` … `Q-10`, and `Q-SYS4-SPARE-SENTINEL` |
+| Entries in §13 | **7** of its own — six handed up from the arithmetic tier and `Q-EMPTY-BATCH-AT-END` from the scenario tier — plus one companion answer key, plus **3** cited by scope |
+| Statuses in §12 | **0** × `PENDING — AWAITING ORACLE EXECUTION`; **12** × `RESOLVED BY ORACLE` (`Q-1`, `Q-4`, `Q-5`, `Q-5.1`, `Q-2`, `Q-3`, `Q-5.2`, `Q-5.3` and `Q-SYS4-SPARE-SENTINEL` dated 2026-08-07; `Q-6`, `Q-7`, `Q-10` dated 2026-08-04); **1** × `RESOLVED BY CONSTRUCTION` (`Q-8`); **1** partial (`Q-9`). Sums to the 14 entries |
+| Statuses in §13 | **0** × `PENDING — AWAITING ORACLE EXECUTION`; **6** × `RESOLVED BY ORACLE`, all 2026-08-07 (`Q-SORT-TIE-ORDER`, `Q-GL080-DIVIDE-BY-ZERO`, `Q-QUARTER-SUBSCRIPT`, `Q-ROUNDED-OVERFLOW-ORDER`, `Q-70f`, `Q-EMPTY-BATCH-AT-END`); **1** two-part status (`Q-EDITED-BLANK-WHEN-ZERO`, `RESOLVED BY ORACLE` for the case that reaches a column and `MEASURED — DECLINED ON SCOPE` for the print-only pictures). Sums to the 7 entries |
+| `RESOLVED BY ORACLE` used as a status | **19 entries** — 12 in §12, 6 in §13 and the column-reaching half of §13's two-part entry — and only where a compiled run or a focused compiled probe directly answered the stated question, with the captured observable written into the entry. §4 states the rule; this row is the only tally of it |
+| `RESOLVED BY CONSTRUCTION` used as a whole-entry status | **1** — `Q-8`, whose open half was *which statements exist*, answered by a census of the frozen `MOVE` sites shown in full in the entry. It claims the weaker of the two resolved statuses deliberately: no compiled run was needed, so none is claimed. `Q-9` remains partial and carries its settled half inside the entry |
+| Entries carrying all five template parts | **all of them.** Every §12 and §13 entry has (a) question, (b) evidence, (c) oracle experiment, (d) resolution-or-status and (e) consuming module(s) |
+| Explicit anchors | **22** — one for each of the **21** anchored entries (`q-1` … `q-9`, `q-5-1` … `q-5-3`, `q-sys4-spare-sentinel`, and one per §13 entry), plus `q-string-pointer-and-refmod` on §13's closing handed-down table, so a bare `#q-n` citation resolves. Every internal fragment reference in this file — **20** of them, to **15** distinct anchors — resolves; **0** dangle. Each id appears exactly ONCE: a duplicate anchor is as bad as a missing one, because a reader cannot tell which of the two a link reached — and a duplicate `q-empty-batch-at-end` has arisen **twice**, each time while two independently drafted versions of that entry coexisted, which is why this row is now checked by matching the anchor tags mechanically rather than by reading |
+| `Q-` identifiers cited by the project | **84** cited somewhere OTHER than this file, and **every one of them appears in this file** — §12, §13, §14 or §15, so **0 dangle**. Census scope, stated so the figure is reproducible: the git-tracked text files of `acas_posting/`, `tests/`, `harness/`, `docs/`, `data_dictionary/` and the two manifests, under the algorithm stated above this table. ⚠️ This row has read **82**, then **81**, then **85**; it is re-derived mechanically under that algorithm on every revision and now comes out at **84**, and the earlier figures are corrected rather than defended, since a row whose whole purpose is to be reproducible has to match what reproducing it yields |
+| Identifiers this file uses **as register identifiers** | **113**, and every one of them is entered, catalogued or declared here |
+| … of which cited **outside** this register | **84** — the row above. Each resolves to a §12 or §13 entry or to a §14/§15 catalogue row, so **no citation anywhere in the project dangles** |
+| … of which **register-only** | **29**, each declared as such rather than left to look like an omission: **3** documented as **unassigned** — `Q-12`, `Q-13`, `Q-70c` — and **26** newly minted in §15.1 as the canonical names for readings that previously had only a colliding bare number: seven in the GL051 series, nine in SL060, five in PL100, four in MOVE, and the single `Q-VATNET-1` (the series are named without their `Q-` prefix here on purpose: a self-audit row that spells a family stem mints a token its own census then has to exclude). ⚠️ Earlier revisions of this row read **86** and then **88** and counted `Q-GL080-DIVIDE-BY-ZERO` and then `Q-SYS4-SPARE-SENTINEL` among the register-only identifiers. Neither is one: [`scenario-diff-evidence.md`](scenario-diff-evidence.md) cites the first and the six corrected fixtures cite the second, so both fall inside the 84. `Q-GL080-DIVIDE-BY-ZERO` remains the one **coined name** for an existing question (§13, §15) — coined and cited being different properties that the old row conflated |
+| Tokens outside the census, and why | Two closed sets, both named in full so the exclusion is checkable rather than asserted. **Payroll data-item names — `Q-TAX`, `Q-TAXES`, `Q-FICA-TAX`, `Q-CO-FUTA-LIAB`, `Q-ENDED`, `Q-Year`, `Q-mmdd`** — are COBOL fields in a sub system AAP §0.2.2 excludes in its entirety; they are not register identifiers and are deliberately not catalogued. **Family labels and placeholders — `Q-5.x`, `Q-70`, `Q-CLI`, `Q-PL055-n`, `Q-n`, `Q-nn`** — name groups and metasyntactic slots rather than questions; the last is what `acas_posting/programs/gl080_end_of_cycle.py` writes in *"`AMBIGUITY Q-nn` at the site that raises it"*. A naive `Q-` pattern over this file therefore returns more tokens than the rows above count, by these two sets plus case and trailing-punctuation variants of them. ⚠️ This row used to assert a specific naive-token total. That number decayed on every edit to the file and is replaced by the rule, for the same reason §4's status tallies were moved into this section: a count written where nothing recomputes it is a claim with a shelf life |
+| Experiments described as having been run | The strict build, all nine parity journeys, both scenario orders, the two-run determinism tier, the focused boundary probes cited by `Q-7`, `Q-9` and `Q-10`, and the 2026-08-07 focused probes cited by `Q-1`, `Q-2`, `Q-3`, `Q-4`, `Q-5`, `Q-5.1`, `Q-5.2`, `Q-5.3`, `Q-SYS4-SPARE-SENTINEL`, `Q-SORT-TIE-ORDER`, `Q-GL080-DIVIDE-BY-ZERO`, `Q-QUARTER-SUBSCRIPT`, `Q-ROUNDED-OVERFLOW-ORDER`, `Q-EDITED-BLANK-WHEN-ZERO`, `Q-70f` and `Q-EMPTY-BATCH-AT-END`. Every one of the latter reports its captured observable in its own entry. Two of them called a COMPILED MODULE rather than only compiling a probe — `Q-1` invoked `maps04.so` and `Q-3` went through the compiled handler, bridge and `cobmysqlapi` to real SQL |
+| Measured values claimed as this register's own observations | Only values linked to the 2026-08-04 evidence files and to the compiled probes named in their entries, which now include the 2026-08-07 set. The 2026-08-07 figures were captured by probes compiled with the frozen build scripts' own flags — no `-std=`, no `>>SET ARITHMETIC`, no `binary-truncate` — so each records the compiler's default behaviour and not a configured one |
+| Provenance of every measured claim | Durable repository state, or an explicit label. **0** citations of a host temporary path remain: the four an earlier revision carried under `/tmp/…` were removed, and each claim they supported now cites either a committed script, a frozen locator or a section of [`scenario-diff-evidence.md`](scenario-diff-evidence.md) — or is labelled a **report of an observed run rather than a retained artefact** |
+| Runtime versions the observations are attributed to | Stated once, in §10's "The provenance a reported observation carries with it": GnuCOBOL 3.2 final and MariaDB 10.11.7 on the compiled side, a C-backed CPython 3.12 on the Python side. **No claim of parity across every 3.12 patch release** is made anywhere |
+| Storage censuses published here | **0.** §9 adopts [`traceability.md`](traceability.md)'s canonical census by reference and records the two figures an earlier revision got wrong, so this file no longer publishes a second, disagreeing count |
+| Commands shown that cannot run as written | **0**, re-checked after §10 was rewritten. Every `$C` block uses in-container `/repo/harness/...` paths, opens with the stage-1 `reset_db.sh --seed-dir "/data/fixtures/$N"`, and asks `dump_tables.py` only for in-scope tables. ⚠️ `Q-6`'s autogen probe was the exception: it proposed dumping four out-of-scope tables, which exits **83**, and now names the runners' row-count probes instead |
 | Experiments that instrument the frozen source | **0.** §3 lists the five permitted observables; none of them requires a change to a frozen file |
 | Experiments that add a column, an index, a view or a probe table | **0** (R-3) |
 | Experiments that report a value through a binary float | **0** (R-2) |
 | Experiments that build inside the mounted checkout | **0.** §3's hazard note and §10's protocol both forbid it |
 | Locators verified by direct reading of the frozen source | **all of them.** §8 lists the thirteen corrections that verification produced |
-| Identifiers renumbered | **0.** §15 resolves every collision by scoping |
-| Identifiers newly opened here | **0 questions.** Two were drafted under new mnemonics and both were then traced to identifiers the project already had: one became `Q-70f` when `gl070`'s own question family was found (§14.1a), and one — the zero divisor — is the arithmetic tier's `Q-7`, which §12's mandated `Q-7` prevents this register from using, so it keeps the mnemonic `Q-GL080-DIVIDE-BY-ZERO` as a declared **alias** (§15). **One name is coined; no question is.** |
-| Third-party measurements recorded but **not** promoted to a resolution | **3** — `Q-OTM5-NARROW`'s magnitude finding (§14.4), the arithmetic tier's zero-divisor measurement (§13), and the provisional constants named in `Q-2`, `Q-3`, `Q-5.1`–`Q-5.3` and `Q-ROUNDED-OVERFLOW-ORDER`. Each is attributed to the tier that took it; none changes a status in this register |
+| Identifiers renumbered **in code** | **0.** §15.1 adds a canonical name beside each colliding bare number and keeps the bare number as a declared alias, so no existing citation was rewritten and none dangles |
+| Identifiers newly opened here | **0 questions.** `Q-EMPTY-BATCH-AT-END` was **cited before it was entered** — by `tests/scenarios/test_empty_batch.py`, which coined it — so its §13 entry adopts an existing identifier and closes a dangling citation rather than opening a question. Two others were drafted under new mnemonics and both were then traced to identifiers the project already had: one became `Q-70f` when `gl070`'s own question family was found (§14.1a), and one — the zero divisor — is the arithmetic tier's `Q-7`, which §12's mandated `Q-7` prevents this register from using, so it keeps the mnemonic `Q-GL080-DIVIDE-BY-ZERO` as a declared **alias** (§15.2). The **26** canonical identifiers §15.1 mints are the same case at scale: each is paired one-to-one with a reading its owning file already published. **Names are coined; questions are not.** |
+| Third-party measurements recorded but **not** promoted to a resolution | **1** — `Q-OTM5-NARROW`'s magnitude finding (§14.4), attributed to the tier that took it and changing no status here. Two entries have left this row rather than being removed from it, and the distinction matters: the provisional constants of `Q-2`, `Q-3`, `Q-5.2`, `Q-5.3` and `Q-ROUNDED-OVERFLOW-ORDER` were measured by this register's own probes and promoted; and the arithmetic tier's zero-divisor measurement was **independently re-measured** here, so `Q-GL080-DIVIDE-BY-ZERO` now rests on this register's own observation and merely agrees with the tier's. `Q-5.1`'s constants, listed here as provisional until 2026-08-07, are measured and no longer are |
 
 Two properties that are deliberately **not** claimed, because claiming them would be the failure this file
 exists to prevent:
 
-- **That every question is answered.** It is not. The former global build blocker is resolved, but the
-  experiments still marked `PENDING` were not made by the mandated scenario set.
-- **That the expectations recorded under some `PENDING` entries are findings.** Where an entry says what the
-  source *supports*, it labels that an expectation and says which half of it the source does not reach.
+- **That every question is answered.** ⚠️ This bullet used to say *"It is not. **Six** remain open"*, naming
+  `Q-1`, `Q-4`, `Q-5`, `Q-5.1`, `Q-GL080-DIVIDE-BY-ZERO` and `Q-EDITED-BLANK-WHEN-ZERO`. All six were measured
+  on 2026-08-07 and **no §12 or §13 entry now carries `PENDING — AWAITING ORACLE EXECUTION`.** The bullet is
+  rewritten rather than deleted, because what it was guarding against still needs guarding against and the
+  guard now takes a different form.
+
+  **What is still not claimed is that being answered is the same as being closed.** Three distinctions survive
+  the promotions, and flattening them would be the failure this file exists to prevent:
+  - **An answer can be that the question was malformed.** `Q-4` asked which of two record lengths governs; the
+    measurement is that both figures are 96 and the maintainer's 98 is simply false, so there was never a
+    choice. Recording that as a resolution is right; recording it as *"the 96 reading was confirmed"* would
+    misdescribe what happened.
+  - **An answer can be that the behaviour is unobservable, which is itself a finding** rather than a deferral.
+    `Q-EDITED-BLANK-WHEN-ZERO` retains exactly that shape for `gl072`'s three print items — every edited
+    receiver there is a print line and AAP §0.2.2 puts report formatting beyond database effects out of
+    scope — while the one case that *does* reach a column is measured. §4 draws that line, and the twelve
+    permanent `xfail`s in the arithmetic tier hold it.
+  - **Measuring a defect does not repair it and must not be read as repairing it.** `A-11`, `A-15` and `A-17`
+    in [`anomaly-log.md`](anomaly-log.md) all moved from `PENDING` to `REPRODUCED` on these measurements and
+    all three remain live defects under R-4. `Q-5` is the sharpest case: knowing that
+    `move RRN to postings` wraps at 32767 and reaches an unsigned column as a magnitude tells a reader what
+    the column holds and nothing whatever about whether holding it is correct.
+- **That the resolutions rest on the mandated scenarios.** Most do not. Nine parity journeys establish that the
+  two implementations agree; they cannot establish what the compiled system does at a boundary no accounting
+  journey visits, and several of these questions live precisely there. Those were settled by **focused compiled
+  probes**, and every entry says which instrument answered it. A green scenario still closes nothing by
+  association — §4's rule is unchanged and is the reason these promotions mean anything.
+- **That a measurement which confirms the implementation is a weaker result than one that overturns it.**
+  Several of the 2026-08-07 probes found the Python side already correct. That is recorded as what it is — a
+  confirmation — and each entry says so in those words rather than presenting the implementation's own reading
+  as though the probe had discovered it. The value of those runs is that a choice became an observation, which
+  is exactly what R-6 asks for; it is not that anything changed.
 
 ---
 

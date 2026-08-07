@@ -539,7 +539,7 @@ def _init01__acpt_xrply(state: _Pl100State) -> None:
 
     if _is_g_l(state):
         _bl_open(state)
-    # NOTE (FINDING F-17), and it is the outer frame A-NEW-5 sits inside: `bl-open` runs
+    # NOTE (FINDING F-17), and it is the outer frame A-PL100-A sits inside: `bl-open` runs
     # ONLY under `G-L`, and so do `bl-write` [L409-L410] and `bl-close` [L454-L455].
 
     state.j = movelib.move_figurative(movelib.ZERO, _D_J)
@@ -622,7 +622,7 @@ def _init01__cust_update(state: _Pl100State) -> None:
     if state.file_access.fs_reply == FsReply.INVALID_KEY_ON_START:
         state.ws_reply = movelib.move("X", _D_WS_REPLY)
 
-    # ANOMALY A-NEW-6 [purchase/pl100.cbl:L356-L361] and [purchase/pl100.cbl:L405] - an
+    # ANOMALY A-PL100-B [purchase/pl100.cbl:L356-L361] and [purchase/pl100.cbl:L405] - an
     # unknown supplier is NEVER CREATED.
     if _alpha_eq(state.ws_reply, "X", _D_WS_REPLY):
         state.l5_name = movelib.move("Supplier Unknown", _D_PURCH_NAME)
@@ -731,7 +731,7 @@ def _init01__cust_update(state: _Pl100State) -> None:
         state.otm5.filler_1.oi_approp, _D_OI_PAID, sending_field=_D_OI_APPROP
     )
     # [L405] perform Purch-Rewrite. *> rewrite purch-record. UNCONDITIONAL - see ANOMALY
-    # A-NEW-6 above.
+    # A-PL100-B above.
     facade.purch_rewrite(state.ctx(state.purch))
 
     if _is_g_l(state):
@@ -776,7 +776,7 @@ def _init01__main_end(state: _Pl100State) -> None:
     state.t_deduct = arithmetic.add_to(
         state.j_deduct, receiver_value=state.t_deduct, receiving=_D_T_DEDUCT
     )
-    # [L449] if t-deduct not = zero ANOMALY A-NEW-7 [purchase/pl100.cbl:L449] - the
+    # [L449] if t-deduct not = zero ANOMALY A-PL100-C [purchase/pl100.cbl:L449] - the
     # ENTIRE value-analysis reversal is gated on `t-deduct` ALONE.
     if arithmetic.compare(state.t_deduct, 0) != 0:
         facade.value_open(state.ctx(state.value))
@@ -1006,7 +1006,7 @@ def _restate_ws_batch_key9(batch: GlBatchRecord) -> None:
 
 
 def _bl_open(state: _Pl100State) -> None:
-    """``bl-open section.`` [purchase/pl100.cbl:L541-L572] - batch allocation, AND A-NEW-5.
+    """``bl-open section.`` [purchase/pl100.cbl:L541-L572] - batch allocation, AND A-PL100-A.
 
     Allocates the next purchase batch number, stamps the batch header from the
     controlled run date, seeds the posting relative-record number - and then opens the
@@ -1067,7 +1067,7 @@ def _bl_open(state: _Pl100State) -> None:
         state._gl.postings, 1, receiving=_D_BATCH_START
     )
 
-    # ANOMALY A-NEW-5 [purchase/pl100.cbl:L566-L570] - a mutually exclusive IF/ELSE
+    # ANOMALY A-PL100-A [purchase/pl100.cbl:L566-L570] - a mutually exclusive IF/ELSE
     # where every sibling program uses two independent IFs, and `if irs-used` omits IRS-
     # Both-Used.
     if _is_irs_used(state):
@@ -1184,7 +1184,7 @@ def _bl_write(state: _Pl100State) -> None:
 
     # [L629-L645] the IRS fan-out write. Predicate `irs-used or IRS-Both-Used` -
     # INCONSISTENT with [L566], which tests `irs-used` ALONE, which is defect (a) of
-    # A-NEW-5.
+    # A-PL100-A.
     if _is_irs_used(state) or _is_irs_both_used(state):
         _key_image, _ = movelib.string_into(
             " " * (_D_POST_BATCH.byte_length + _D_POST_NUMBER.byte_length),
@@ -1248,7 +1248,7 @@ def _bl_write(state: _Pl100State) -> None:
             sending_field=_D_VAT_AMOUNT,
         )
         # [L644] perform SPL-Posting-Write. *> write irs-posting-record In "B" mode the
-        # table was never opened - A-NEW-5 defect (a), AMBIGUITY Q-1.
+        # table was never opened - A-PL100-A defect (a), AMBIGUITY Q-1.
         facade.spl_posting_write(state.ctx(state.irs_posting))
 
     # [L646-L647] if IRS-Both-Used or G-L *> (As set in params) Predicate INCONSISTENT
@@ -1313,11 +1313,11 @@ def _bl_close(state: _Pl100State) -> None:
     # IT MUST STAY PRESENT.
     if _is_irs_used(state) or _is_irs_both_used(state):
         # [L675] perform SPL-Posting-Close. *> close irs-post-file May close a file `bl-
-        # open` never opened - see A-NEW-5.
+        # open` never opened - see A-PL100-A.
         facade.spl_posting_close(state.ctx(state.irs_posting))
     if _is_irs_both_used(state) or _is_g_l(state):
         # [L677] perform GL-Posting-Close. *> close posting-file Likewise may close a
-        # file `bl-open` never opened - see A-NEW-5.
+        # file `bl-open` never opened - see A-PL100-A.
         facade.gl_posting_close(state.ctx(state.posting))
 
     _bl_close__main_exit(state)
@@ -1695,17 +1695,31 @@ def run(
 # ANOMALIES REPRODUCED (R-4: "a defect reproduced is correct; a defect fixed
 # is a failure").  EIGHT sites, each carrying a locator and `DO NOT FIX`.
 # --------------------------------------------------------------------------
-#   A-NEW-5  [L566-L570]  in _bl_open - a MUTUALLY EXCLUSIVE `IF ... ELSE`
+#   A-PL100-A  [L566-L570]  in _bl_open - a MUTUALLY EXCLUSIVE `IF ... ELSE`
 #            where every sibling uses two independent `IF`s, `irs-used` tested
 #            WITHOUT `IRS-Both-Used`, and NO open-output fallback.  Writes to
 #            unopened tables in BOTH IRS modes.  Control:
-#            [purchase/pl060.cbl:L907-L920].  UNREGISTERED - discovered here.
-#   A-NEW-6  [L356-L361], [L405]  in _init01__cust_update - no supplier is
+#            [purchase/pl060.cbl:L907-L920].  Discovered here and now REGISTERED
+#            under this name in docs/migration/anomaly-log.md section 15.
+#   A-PL100-B  [L356-L361], [L405]  in _init01__cust_update - no supplier is
 #            ever created (no `Purch-Write` exists in the program), yet
 #            `Purch-Rewrite` is issued unconditionally.  Control:
 #            [purchase/pl060.cbl:L436-L440], [purchase/pl060.cbl:L515-L519].
-#   A-NEW-7  [L449]  in _init01__main_end - the whole deduction reversal is
+#            REGISTERED under this name.
+#   A-PL100-C  [L449]  in _init01__main_end - the whole deduction reversal is
 #            gated on `t-deduct` ALONE, so `n-deduct` can drift permanently.
+#            REGISTERED under this name.
+#
+#   THE RENAME, STATED ONCE SO A GREP FOR THE OLD NUMBER LANDS SOMEWHERE. The three
+#   candidates above used to carry bare `A-NEW-5`, `A-NEW-6` and `A-NEW-7`, numbers
+#   allocated in this file alone.  The project register in
+#   docs/migration/anomaly-log.md had independently allocated those same three
+#   numbers to unrelated defects - A-NEW-5 to "Purchase has no abort gate at all",
+#   A-NEW-6 to the reachable gl080 divide-by-zero and A-NEW-7 to a comment naming a
+#   field that does not exist - so one token meant two things depending on which file
+#   a reader was in.  The register keeps its numbers, these three take globally unique
+#   names, and the old-to-new map is published in that register:
+#   A-NEW-5 -> A-PL100-A, A-NEW-6 -> A-PL100-B, A-NEW-7 -> A-PL100-C.
 #   A-1      [L675]  in _bl_close - THE CONTROL CASE: the period IS present,
 #            so [L676] is a SIBLING `if` and `GL-Posting-Close` IS reached in
 #            pure-GL mode.  The defective sibling is [sales/sl060.cbl:L1176].
@@ -1784,7 +1798,7 @@ def run(
 #        `to-day` never reaches the posting record at all.  Verified at run
 #        time: oi-date 155000 -> post-date "17/05/25" for a run of 31/12/2025.
 #   F-16 [L653-L655]  the 99-item cap re-performs `bl-open`, so every reopen
-#        repeats A-NEW-5 in full.
+#        repeats A-PL100-A in full.
 #   F-17 [L316-L317], [L409-L410], [L454-L455]  ALL THREE `bl-*` sections are
 #        gated on `G-L` ALONE, consistently, so with `G-L` unset none of them
 #        runs and the IRS fan-out inside `bl-write` NEVER EXECUTES - the IRS
@@ -1804,11 +1818,11 @@ def run(
 # AMBIGUITIES referred to the compiled oracle (R-6).  Five sites, each marked
 # `# AMBIGUITY Q-n` at its location.
 # --------------------------------------------------------------------------
-#   Q-1  _bl_open  - the status pair and row state produced by A-NEW-5's write
+#   Q-1  _bl_open  - the status pair and row state produced by A-PL100-A's write
 #        to an unopened table, in "Y" mode, in "B" mode, and with `G-L` unset.
 #   Q-2  _init01__cust_update - the `PULEDGER-REC` state produced by
-#        A-NEW-6's rewrite of a record that was never successfully read.
-#   Q-3  _init01__main_end - the `VALUEANAL-REC` count drift from A-NEW-7, and
+#        A-PL100-B's rewrite of a record that was never successfully read.
+#   Q-3  _init01__main_end - the `VALUEANAL-REC` count drift from A-PL100-C, and
 #        whether the unsigned count columns underflow or clamp.
 #   Q-4  _bl_write - the exact `post-date` text the century-dropping
 #        reference modification at [L591-L592] yields per `Date-Form`.
@@ -1883,7 +1897,7 @@ def run(
 #        of `analise-deductions`.
 #   O-9  Absent facade verbs, stated so a reader does not expect them: NO
 #        `GL-Posting-Open-Output`, NO `SPL-Posting-Open-Output` (that absence
-#        IS A-NEW-5 defect (c)), NO `Purch-Write` (that absence IS A-NEW-6),
+#        IS A-PL100-A defect (c)), NO `Purch-Write` (that absence IS A-PL100-B),
 #        NO `OTM5-Start` and NO `set fn-*` anywhere - the OTM5 walk is purely
 #        sequential from the top, with no cursor positioning at all.
 #   O-10 NO WORK FILE.  pl100 declares no `seloi4`/`fdoi4` and no

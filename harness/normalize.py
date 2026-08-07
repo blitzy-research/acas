@@ -33,9 +33,13 @@ representational rather than behavioural:
 * date text is rendered in one form, because the schema stores two-digit and
   four-digit year spellings side by side.
 
-The eight stages in order are at [harness/docker-compose.yml:L16-L26], and
-the two passes this module performs at [harness/docker-compose.yml:L147]
-and [harness/docker-compose.yml:L153].
+The ten stages are defined in [harness/parity_stages.sh] and published by
+[harness/run_parity.sh] through `--print-stages`; the Compose recipe restates
+them at [harness/docker-compose.yml "STAGES."]. This module owns two of them:
+stage 4 normalises the COBOL dump and stage 8 the Python dump. The AAP's eight
+logical stages (section 0.3.2) map onto those ten by making both normalisations
+and the publication check explicit rather than implied; "stage 8" in any older
+prose means today's stage 10, the diff.
 
 It reads one directory of `<TABLE>.json` files, as `dump_tables.py` wrote
 them, and writes one directory of `<TABLE>.json` files with the same shape
@@ -316,10 +320,10 @@ _NORMALIZED_SUFFIX: Final[str] = ".normalized"
 _REPORT_SUBDIR: Final[str] = "normalize"
 _REPORT_FILENAME: Final[str] = "date-text-findings.txt"
 
-# The defaulted report file is named for the source directory - so the recipe's two
-# invocations harness/docker-compose.yml and [L273] produce `cobol-date-text-
-# findings.txt` and `python-date-text-findings.txt` rather than one overwriting the
-# other, and both sides' questions reach the oracle.
+# The defaulted report file is named for the source directory - so the two invocations
+# the harness/docker-compose.yml "STAGES." recipe makes, stages 4 and 8, produce
+# `cobol-date-text-findings.txt` and `python-date-text-findings.txt` rather than one
+# overwriting the other, and both sides' questions reach the oracle.
 _REPORT_LABEL_RE: Final[re.Pattern[str]] = re.compile(r"[0-9A-Za-z]+")
 _REPORT_DEFAULT_LABEL: Final[str] = "dump"
 
@@ -414,11 +418,11 @@ def _make_output_directory(directory: Path) -> None:
     directory.mkdir(parents=True, exist_ok=True, mode=_OUTPUT_DIR_MODE)
 
 MANIFEST_FILENAME: Final[str] = "_manifest.json"
-# Version 2 added `attestation`, in step with harness/dump_tables.py. A version-1
-# tree is refused rather than read: the point of the key is that its absence cannot
-# be mistaken for a claim, so silently tolerating a manifest that predates it would
-# defeat it.
-MANIFEST_VERSION: Final[int] = 2
+# Version 2 added `attestation`; version 3 added `provenance` and widened
+# `attestation`, in step with harness/dump_tables.py. An older tree is refused rather
+# than read: the point of these keys is that their absence cannot be mistaken for a
+# claim, so silently tolerating a manifest that predates them would defeat them.
+MANIFEST_VERSION: Final[int] = 3
 MANIFEST_KEYS: Final[tuple[str, ...]] = (
     "manifest_version",
     "producer",
@@ -426,6 +430,7 @@ MANIFEST_KEYS: Final[tuple[str, ...]] = (
     "scenario",
     "side",
     "selector",
+    "provenance",
     "attestation",
     "table_count",
     "tables",
@@ -437,10 +442,49 @@ MANIFEST_KEYS: Final[tuple[str, ...]] = (
 # the two stages disagree about one run.
 ATTESTATION_KEYS: Final[tuple[str, ...]] = (
     "attested",
+    "disposition",
     "source",
+    "run_id",
     "run_status",
+    "wrapper_status",
+    "behavioural",
+    "assert_failures",
     "seed_fingerprint_sha256",
+    "seed_marker_sha256",
+    "operations",
     "detail",
+)
+
+# =============================================================================
+# PROVENANCE AND LINEAGE (findings F-34, F-36)
+#
+# The provenance block is CARRIED THROUGH from the raw manifest for the same reason the
+# attestation is: what a capture was taken from is a fact about the capture, and
+# re-deriving it here would let two stages disagree about one run.
+#
+# One field is NOT carried, and it is the point of this comment.
+# `source_manifest_sha256' is the digest of the manifest THIS TREE WAS DERIVED FROM,
+# and only this stage can know it. Without it there was NO LINEAGE AT ALL between a raw
+# tree and its normalised form: this tool could be pointed at raw tree A and publish a
+# normalised tree whose manifest inherited A's scenario, side and attestation, and
+# nothing in the result recorded WHICH raw bytes it canonicalised. A re-run of the
+# dump stage between the two normalisations, a hand edit of a dump, a --src pointing at
+# the other side's tree -- each produced a normalised tree that looked exactly right
+# and described a capture it was not made from.
+#
+# So the digest of the source manifest is recorded here and REQUIRED downstream:
+# harness/diff_states.py refuses a normalised tree whose recorded lineage does not
+# match the raw manifest beside it.
+# =============================================================================
+PROVENANCE_KEYS: Final[tuple[str, ...]] = (
+    "run_id",
+    "scenario_file",
+    "scenario_file_sha256",
+    "frozen_schema_sha256",
+    "producer_sha256",
+    "python_version",
+    "command",
+    "source_manifest_sha256",
 )
 MANIFEST_STAGE_RAW: Final[str] = "raw"
 MANIFEST_STAGE_NORMALIZED: Final[str] = "normalized"
@@ -2350,6 +2394,7 @@ def build_manifest(
     scenario: str | None = None,
     side: str | None = None,
     selector: str = SELECTOR_INHERITED,
+    provenance: Mapping[str, Any] | None = None,
     attestation: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble this stage's completeness manifest.
@@ -2388,15 +2433,21 @@ def build_manifest(
         )
     if not isinstance(attestation, Mapping):
         attestation = {
+            key: None for key in ATTESTATION_KEYS
+        } | {
             "attested": False,
-            "source": None,
-            "run_status": None,
-            "seed_fingerprint_sha256": None,
+            # `unknown` rather than a fault: nothing here has seen a status, so
+            # nothing here can say which kind of nothing it was. The vocabulary is
+            # harness/dump_tables.py's, and every other key stays at the `None` the
+            # comprehension above set, so the object carries the full key set.
+            "disposition": "unknown",
             "detail": (
                 "the raw tree carried no usable run attestation, so this "
                 "normalised tree makes no claim about the run it came from."
             ),
         }
+    if not isinstance(provenance, Mapping):
+        provenance = {key: None for key in PROVENANCE_KEYS}
     return {
         "manifest_version": MANIFEST_VERSION,
         "producer": _PRODUCER,
@@ -2404,6 +2455,9 @@ def build_manifest(
         "scenario": scenario,
         "side": side,
         "selector": selector,
+        # Rebuilt key by key in PROVENANCE_KEYS order, so an inherited object with its
+        # keys in another order cannot change these bytes.
+        "provenance": {key: provenance.get(key) for key in PROVENANCE_KEYS},
         # Rebuilt key by key in ATTESTATION_KEYS order, so an inherited object with
         # its keys in another order cannot change these bytes.
         "attestation": {key: attestation.get(key) for key in ATTESTATION_KEYS},
@@ -2483,8 +2537,21 @@ def normalize_tree(
         )
 
     source_manifest: Mapping[str, Any] | None = None
+    # ⭐ THE LINEAGE DIGEST IS TAKEN FROM THE BYTES ON DISK (finding F-36), not from a
+    # re-serialisation of the parsed object, so it identifies exactly what this stage
+    # read and exactly what harness/diff_states.py will re-hash to check it.
+    source_manifest_digest: str | None = None
     if require_manifest:
         source_manifest = assert_tree_complete(source)
+        try:
+            source_manifest_digest = file_digest(source / MANIFEST_FILENAME)
+        except (OSError, ValueError) as exc:
+            raise ManifestError(
+                f"the source manifest {source / MANIFEST_FILENAME} could not be "
+                f"hashed: {exc}. Its digest is the lineage this normalised tree "
+                f"records, and without it the result cannot say which raw capture it "
+                f"was made from."
+            ) from exc
     else:
         _progress(
             f"harness/normalize.py: --allow-unmanifested - {source} is "
@@ -2548,6 +2615,44 @@ def normalize_tree(
                 f"{len(canonical['columns']):>3} column(s)  canonicalised"
             )
 
+        # ⭐ THE INPUT MUST STILL BE THE INPUT (finding F-36).
+        #
+        # The lineage digest was taken before a single dump was read. Everything since
+        # then - discovering the tables, reading each one, canonicalising it, staging it
+        # - has been reading files out of the source tree, and stage 3 can republish
+        # that tree while this stage is walking it. If it did, this normalisation is a
+        # MIXTURE of two captures: some tables from the capture whose manifest was read
+        # and some from the one that replaced it. A mixture is indistinguishable from a
+        # clean capture afterwards, and it can produce an empty diff.
+        #
+        # So the manifest is re-hashed here, after all the reading and before anything
+        # is published, and a change is refused. This is the check that makes
+        # `source_manifest_sha256` a verified fact rather than a value this stage
+        # asserted about itself.
+        if require_manifest and source_manifest_digest is not None:
+            try:
+                recheck = file_digest(source / MANIFEST_FILENAME)
+            except (OSError, ValueError) as exc:
+                raise ManifestError(
+                    f"the source manifest {source / MANIFEST_FILENAME} could not be "
+                    f"re-read after this stage finished reading the dumps: {exc}. It "
+                    f"is re-hashed to prove the raw capture did not change while it "
+                    f"was being normalised, and a result that cannot prove that is "
+                    f"not evidence (rule R-6)."
+                ) from exc
+            if recheck != source_manifest_digest:
+                raise ManifestError(
+                    f"the raw capture {source} CHANGED while it was being "
+                    f"normalised: its {MANIFEST_FILENAME} hashed "
+                    f"{source_manifest_digest} when this stage began and {recheck} "
+                    f"now. The tables read since then may come from two different "
+                    f"captures, and a normalised tree mixing two captures is "
+                    f"indistinguishable from a clean one afterwards - it can produce "
+                    f"an EMPTY DIFF, which is the pass condition. Nothing is "
+                    f"published. Re-run the dump stage for this side and normalise "
+                    f"again, with no other stage writing into {source}."
+                )
+
         # Identity is INHERITED from the source's manifest, never invented here.
         manifest = build_manifest(
             entries,
@@ -2555,6 +2660,9 @@ def normalize_tree(
             side=_inherit(source_manifest, "side"),
             selector=_inherit(source_manifest, "selector")
             or SELECTOR_INHERITED,
+            provenance=_inherit_provenance(
+                source_manifest, source_manifest_sha256=source_manifest_digest
+            ),
             attestation=_inherit_attestation(source_manifest),
         )
         staged_manifest = write_manifest(
@@ -2582,6 +2690,40 @@ def _inherit(manifest: Mapping[str, Any] | None, key: str) -> str | None:
         return None
     value = manifest.get(key)
     return value if isinstance(value, str) and value else None
+
+
+def _inherit_provenance(
+    manifest: Mapping[str, Any] | None,
+    *,
+    source_manifest_sha256: str | None,
+) -> Mapping[str, Any] | None:
+    """Return the source's provenance with THIS stage's lineage stamped into it.
+
+    Every field is carried through unchanged except `source_manifest_sha256`, which only
+    this stage can know: it is the digest of the manifest the normalised tree was
+    DERIVED from. See PROVENANCE KEYS above for why its absence made a normalised tree
+    unattributable (finding F-36).
+
+    Args:
+        manifest: The source tree's manifest, or None when the check was waived with
+            --allow-unmanifested.
+        source_manifest_sha256: The digest of that manifest's bytes, or None when there
+            was no manifest to hash - which yields a tree with no lineage, and
+            harness/diff_states.py refuses one.
+
+    Returns:
+        The provenance object to publish, or None when the source carried none.
+    """
+    if manifest is None:
+        return {
+            key: None for key in PROVENANCE_KEYS
+        } | {"source_manifest_sha256": source_manifest_sha256}
+    value = manifest.get("provenance")
+    carried = dict(value) if isinstance(value, Mapping) else {
+        key: None for key in PROVENANCE_KEYS
+    }
+    carried["source_manifest_sha256"] = source_manifest_sha256
+    return carried
 
 
 def _inherit_attestation(
@@ -2959,7 +3101,7 @@ _EPILOGUE: Final[str] = """\
 layouts
   --src DIR [--dst DIR]        (--in / --out are the same two options)
       reads DIR/<TABLE>.json, writes DIR.normalized/<TABLE>.json unless
-      --dst is given. The committed eight-stage recipe passes both:
+      --dst is given. The committed ten-stage recipe passes both:
       `--in /out/cobol --out /out/cobol.norm`   (harness/docker-compose.yml)
   --scenario NAME --side {cobol|python} [--out-dir DIR]
       reads  <DIR>/<NAME>/<side>/<TABLE>.json
@@ -3044,8 +3186,8 @@ def build_parser() -> argparse.ArgumentParser:
             "Canonicalise a table-state dump so that only real "
             "behavioural differences survive: fixed-char trailing "
             "spaces, decimal scale rendering, and the two-digit versus "
-            "four-digit date text forms. Stage 4 of the eight-stage "
-            "parity protocol."
+            "four-digit date text forms. Stages 4 and 8 of the ten-stage "
+            "parity protocol - the COBOL dump and the Python dump respectively."
         ),
         epilog=_EPILOGUE,
     )

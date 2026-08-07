@@ -6,7 +6,7 @@
 # posting operations run back to back across both trading ledgers so that all
 # NINE period-total write sites fire in one seeded state, and the focal table
 # is SYSTOT-REC. The eight the protocol expects, per Agent Action Plan section
-# 0.8.5 and [harness/docker-compose.yml:L329-L331], are: clean_batch_gl,
+# 0.8.5 and [harness/docker-compose.yml "STAGES."], are: clean_batch_gl,
 # clean_batch_sl, clean_batch_pl, clean_batch_irs, mixed_accepted_rejected,
 # period_end_totals, control_total_mismatch, empty_batch. This file replicates
 # the canonical shape of harness/scenarios/clean_batch_gl.yaml and is, in its
@@ -52,7 +52,7 @@
 # FOR SIMULTANEOUS EXECUTION OF ANY KIND, and no halt rule between steps is
 # relied on: an operation that must not run is simply not listed.
 #
-# KEYS APPEAR IN A FIXED ORDER, identically in all eight scenario files, and
+# KEYS APPEAR IN A FIXED ORDER, identically in all nine scenario files, and
 # the file is UTF-8, ASCII-only, LF-terminated, two-space indented and free of
 # tabs. It carries no wall-clock reading, no host identity, no process id, no
 # random value and no absolute host path, so two captures of one scenario are
@@ -157,16 +157,18 @@ description: |
   This file drives two, and the oracle-side runner cross-checks the file's
   subsystem against the subsystem of the operation it was actually asked to
   run, refusing the pair when they disagree
-  [harness/run_cobol_scenario.sh:L1336-L1341]. Its own operation map sends
+  [harness/run_cobol_scenario.sh acas_select_operation]. Its own operation map sends
   sl_invoice_post and sl_cash_post to the Sales menu and pl_order_post and
   pl_payment_post to the Purchase menu, so NO SINGLE NAME IS TRUE FOR ALL FOUR
   OPERATIONS: naming either menu would make two of the four invocations fail
   on a cross-check rather than on anything behavioural. The empty scalar is
   the only value that is true for a file spanning two menus, and the guard
   reads it as "the file does not say", so the subsystem comes from the
-  operation being run -- which is exactly right, since the runner takes one
-  operation per invocation. The key is kept, rather than dropped, so that the
-  key set stays identical across all eight files. Nothing else reads it: the
+  operation being run -- which is exactly right, because the runner re-selects
+  the operation before each drive and every subsystem-dependent value follows
+  that selection: the menu executable, the pinned 24x80 geometry, the keystroke
+  plan and the date-entry program. The key is kept, rather than dropped, so that
+  the key set stays identical across all eight files. Nothing else reads it: the
   Python runner derives the subsystem from its own operation map, and the
   seeder, the reset step, the capture step, the normaliser and the diff step
   never look at it.
@@ -216,7 +218,7 @@ description: |
   flag, the cycle, the date form, the fan-out switch and the autogen switch,
   and stops there. It is closed here, by the seed contract, and nowhere else.
 
-  ANOMALY A-NEW-5 -- THE DECISIVE, INDEPENDENT REASON irs_instead IS A SPACE
+  ANOMALY A-PL100-A -- THE DECISIVE, INDEPENDENT REASON irs_instead IS A SPACE
   The plan already requires the fan-out switch to be pinned explicitly so that
   the affected-table list is unambiguous. On THIS scenario's routes there is a
   second and stronger reason, and it is a defect: in pl100 the OPEN of the
@@ -240,7 +242,11 @@ description: |
       opens exactly what it writes.
   So any value other than a space makes this scenario incoherent before it
   reproduces anything, and the defect is REPRODUCED rather than repaired
-  (rule R-4). It is entry A-NEW-5 of docs/migration/anomaly-log.md. The same
+  (rule R-4). It is entry A-PL100-A of docs/migration/anomaly-log.md section
+  15, registered under that globally unique name because the register's own
+  A-NEW-5 is a different defect entirely -- "Purchase has no abort gate at
+  all" -- and the two used to share one number. The old-to-new map is in that
+  section. The same
   paragraph also supplies the batch defaults "DR", "PL" and "I"
   [purchase/pl100.cbl:L561-L563], the A-17 read-back
   [purchase/pl100.cbl:L564], the record-number move
@@ -458,16 +464,31 @@ description: |
     purch-comp [purchase/pl060.cbl:L740] does increment, at
     [purchase/pl060.cbl:L749], before adding [purchase/pl060.cbl:L750] and
     dividing [purchase/pl060.cbl:L751].
-    A-10 IS THE FACT THAT THE THREE GUARDS DISAGREE, and the third instance
-    also inverts the divide. compute-sales-pay [sales/sl100.cbl:L497] exits
-    early on a cleared date of zero [sales/sl100.cbl:L500-L501], computes the
-    interval [sales/sl100.cbl:L503-L504], then guards on a SINGLE condition
-    [sales/sl100.cbl:L506] where the other two guard on a pair, and its divide
-    reads divide work-b by sales-pay-activety [sales/sl100.cbl:L511] where the
-    others read divide activety into work-2 -- the OPPOSITE OPERAND ORDER for
-    the same intent. The increment is at [sales/sl100.cbl:L510] and the exit
-    at [sales/sl100.cbl:L516]. Its Purchase mirror is the same shape:
-    [purchase/pl100.cbl:L497-L498] and [purchase/pl100.cbl:L500-L502].
+    A-10 IS THE FACT THAT THE THREE GUARDS DISAGREE. That is the whole of it,
+    and it is worth being exact because the divide is easy to misread as a
+    second divergence and is not one. compute-sales-pay [sales/sl100.cbl:L497]
+    exits early on a cleared date of zero [sales/sl100.cbl:L500-L501], computes
+    an INTERVAL rather than a money amount [sales/sl100.cbl:L503-L504], and then
+    guards on a SINGLE condition, if sales-pay-activety not = zero
+    [sales/sl100.cbl:L506], where the other two guard on a PAIR -- activety and
+    average both non-zero -- with an explicit else move zero
+    [sales/sl060.cbl:L819-L824]. Here the else is instead expressed as a
+    preceding move zero to work-b [sales/sl100.cbl:L504]. The increment is at
+    [sales/sl100.cbl:L510], before the divide, as in ba000-Sales-Comp and unlike
+    ba000-Credit-Comp which never increments at all; the exit is at
+    [sales/sl100.cbl:L516].
+    THE DIVIDE IS SPELLED DIFFERENTLY AND COMPUTES THE SAME VALUE. divide work-b
+    by sales-pay-activety giving sales-pay-average [sales/sl100.cbl:L511] and
+    divide sales-activety into work-2 giving sales-average
+    [sales/sl060.cbl:L827] BOTH compute accumulator / counter: INTO names the
+    divisor first and BY names the dividend first, so the two forms are
+    equivalent and neither inverts the other. The difference is textual, it is
+    transcribed for traceability, and it carries NO arithmetic consequence --
+    calling it an inverted divide would assert a behavioural difference that
+    does not exist. What does differ, and what the parity claim rests on, is the
+    guard and the counter handling above.
+    Its Purchase mirror is the same shape: [purchase/pl100.cbl:L497-L498] and
+    [purchase/pl100.cbl:L500-L502].
   So the seed must make all five reachable, and a run whose seed leaves any of
   them latent has not tested the parity claim over it.
 
@@ -614,29 +635,71 @@ description: |
   two branches, term code below eight [sales/sales.cbl:L708-L709] and above
   seven [sales/sales.cbl:L710-L712], are exhaustive over a two-digit field;
   the Purchase equivalents are [purchase/purchase.cbl:L701-L702] and
-  [purchase/purchase.cbl:L703-L704]. The headless Python entry points have no
-  menu and do none of it.
-  SO SYSTOT-REC PARITY DEPENDS ON THE MIGRATED ENTRY POINTS REPRODUCING THAT
-  KEY-FOUR REWRITE. THIS IS THE SCENARIO WHERE THAT OVERLAP IS UNAVOIDABLE:
-  every other definition can leave the question latent, and this one cannot,
-  because the totals record is the very thing it exists to compare. It is the
-  unavoidable overlap of harness deviation D-4, it is recorded honestly here
-  rather than papered over, and it is arbitrated against the compiled oracle in
+  [purchase/purchase.cbl:L703-L704]. AND THE MIGRATED ENTRY POINTS REPRODUCE THAT
+  PARAGRAPH rather than skipping it, WHICH IS WHY THIS SCENARIO CAN BE COMPARED AT
+  ALL. They have no menu, but the paragraph's RDB arm is not a menu concern -- it is
+  the only part of a menu with a database effect -- so it lives in
+  acas_posting/cli/args.py as overrewrite() and every one of the four routes this
+  file drives performs it. `slpl_menu_state' carries the totals record precisely so
+  that key 4 is rewritten, and key 1 is rewritten unconditionally, so both cycles
+  reach both writes. Keys one, two and four are rewritten in the frozen order and the
+  close is issued on key four, exactly as [general/general.cbl:L656-L672] does it;
+  the Sales and Purchase two-key set falls out of the same implementation because the
+  defaults record is simply absent from those menus' state. The two call sites -- the
+  `> 7' arm of load000 and the quit -- are guarded mutually exclusively, so a run
+  performs the paragraph exactly ONCE.
+  WHAT THE MIGRATION DOES NOT REPRODUCE is the SECOND leg: the same rewrites against
+  the ISAM parameter file at [general/general.cbl:L676-L691],
+  [sales/sales.cbl:L645-L657] and [purchase/purchase.cbl:L638-L650], because there is
+  one store and not two. That residue is carried as Q-CLI-OVERREWRITE-SECOND-LEG and
+  it is the only half still open.
+  SO SYSTOT-REC PARITY DEPENDS ON THAT KEY-FOUR REWRITE, WHICH IS IN PLACE, AND THIS
+  IS THE SCENARIO WHERE THE OVERLAP IS UNAVOIDABLE: every other definition can leave
+  the question latent, and this one cannot, because the totals record is the very
+  thing it exists to compare -- which is why SYSTOT-REC is on the affected-table
+  list. It is the unavoidable overlap of harness deviation D-4, it is recorded
+  honestly here rather than papered over, and it is arbitrated against the compiled
+  oracle in
   docs/migration/ambiguity-resolutions.md.
+  KEY ONE IS COVERED TWICE -- BY THE DUMP AND BY A DIGEST OF IT. SYSTEM-REC is on this
+  file's affected-table list and in every capture, with exactly two of its 169 columns
+  withheld: `RDBMS-PASSWD char(12)' [copybooks/wssystem.cob:L139] and `PASS-WORD',
+  replaced on BOTH sides by harness/dump_tables.py's REDACTED_COLUMNS inside
+  render_value, because a dump is SELECT * and a capture is committed evidence. The
+  other 167 are compared by value. Both runners ALSO record a canonical digest of the
+  row before and after their dispatch and tests/conftest.py compares the two post-run
+  digests, which is a parity check over all 169 columns including those two -- a sha256
+  of the canonical dump is not the dump.
+  THE OBJECTION TO DECLARING THE ROW WAS MEASURED, NOT ARGUED. Its content depends on
+  what the route DID -- the run-date stamp, the IRS allocator, the one-shot latches, and
+  `Date-Form', itself a SYSTEM-REC column [copybooks/wssystem.cob:L127] the frozen date
+  sections write back -- so declaring it could in principle tie expected_table_effect to
+  fields no scenario reasons about. It does not: the digest HOLDS on all four scenarios
+  declaring `unchanged' and MOVES on every one declaring `changed'. This file declares
+  `changed', and the row is one of the things that moves.
   IT IS NOT, AND MAY NEVER BE, RESOLVED WITH AN IGNORE-LIST IN THE DIFF STAGE.
   That stage is required to have no ignore-list, no tolerance list and no
-  known-difference allowance: the comparison is bounded by this file's
-  affected-table list and by nothing else. Suppressing a column there would
-  turn the one table this scenario is named after into the one table it does
-  not actually check.
-  FOR THE SAME REASON SYSTEM-REC, SYSDEFLT-REC AND SYSFINAL-REC ARE EXCLUDED
-  from the list. The menu rewrites the system record on every dispatch, and
-  these routes change it in memory in places a reader will notice -- anomaly
-  A-17's move [sales/sl060.cbl:L1173] among them -- so comparing it would
-  produce a guaranteed FALSE FAILURE that is an artefact of the harness rather
-  than a behavioural difference. The defaults and final-accounts records are
-  excluded on the same ground, and are additionally not written by either
-  trading menu at all.
+  known-difference allowance: the comparison is bounded by ALL 22 IN-SCOPE
+  TABLES, and this file's affected-table list is the scenario's DECLARED EFFECT
+  rather than the bound. Suppressing a column there would turn the one table
+  this scenario is named after into the one table it does not actually check.
+  SYSTEM-REC IS LISTED, and in this scenario it earns its place more than
+  anywhere else: four operations run in order, each mutating the system record
+  in memory -- anomaly A-17's move [sales/sl060.cbl:L1173] among them -- and each
+  trading menu persists it on exit [sales/sales.cbl:L628-L657],
+  [purchase/purchase.cbl:L621-L651], which the headless Python routes reproduce
+  through args.overrewrite. Four sequential mutations are exactly the shape in
+  which a lost or doubled update hides, and it can only be observed if the table
+  is compared. Whether the two sides agree was MEASURED, not presumed (rule
+  R-6): both end with a byte-identical row, all 169 columns.
+  SYSDEFLT-REC AND SYSFINAL-REC REMAIN ABSENT FROM THE DECLARED LIST, on a
+  ground that does not apply to SYSTEM-REC: neither trading menu rewrites them
+  -- both exits touch keys 1 and 4 only, with no key-2 rewrite, unlike the
+  General menu, which acas_posting/cli/args.py::overrewrite reproduces by
+  writing key 2 only when the route loaded the defaults record -- and no
+  statement on any of these four routes changes their content. They are still
+  read and diffed, because the bound is all 22 in-scope tables, so they are
+  expected to match their seeded values on both sides.
 
   gl_end_of_cycle IS DELIBERATELY NOT APPENDED TO THIS SCENARIO
   Appending the end-of-cycle operation was considered and DECLINED, on six
@@ -654,14 +717,26 @@ description: |
     THREE. gl080 WRITES NO PERIOD TOTAL. Searching general/gl080.cbl for any
     of the nine target fields returns nothing, so the append would add no
     tenth site and could not strengthen the claim.
-    FOUR. gl080's OWN STATE CHANGES CANNOT BE PERSISTED BY THE PYTHON SIDE. It
+    FOUR. THIS SCENARIO'S AFFECTED-TABLE LIST WOULD HAVE TO GROW BY THREE. gl080
     mutates the accounting cycle at [general/gl080.cbl:L334],
     [general/gl080.cbl:L360] and [general/gl080.cbl:L363], and the quarter
     counter at [general/gl080.cbl:L355] and [general/gl080.cbl:L357], the
     latter being [copybooks/wssystem.cob:L110] -- all inside the system
-    record, which the census above shows nothing in scope persists. Comparing
-    a run whose principal effect cannot be written would be an unavoidable
-    divergence dressed up as a test.
+    record -- and separately stamps GLBATCH-REC and rewrites GLLEDGER-REC.
+    Appending it would mean this file bounded fifteen tables for the totals
+    claim and three more for an unrelated one.
+      CORRECTION, RECORDED RATHER THAN OVERWRITTEN. This ground previously read
+      "gl080's OWN STATE CHANGES CANNOT BE PERSISTED BY THE PYTHON SIDE",
+      arguing that comparing them would be "an unavoidable divergence dressed
+      up as a test". THAT WAS WRONG, and measurement is what showed it (rule
+      R-6). The system record IS persisted on both sides: the menu exit does it
+      at [general/general.cbl:L656-L692] and the headless route reproduces that
+      same paragraph as args.overrewrite in
+      acas_posting/cli/gl_end_of_cycle.py. The end_of_cycle_gl scenario
+      compares SYSTEM-REC and finds the cycle advance and the quarter wrap
+      byte-identical on the two sides. The ground is corrected rather than
+      deleted because a reader who acted on the old claim would have concluded
+      the comparison was impossible.
     FIVE. ITS ARCHIVE PATH WOULD PUT A HOST FILESYSTEM PATH INTO A SCENARIO
     FILE. The archiving walk enters disk-change [general/gl080.cbl:L519],
     reaches accept-option [general/gl080.cbl:L542], accepts a single digit
@@ -672,17 +747,26 @@ description: |
     character is a space [general/gl080.cbl:L556-L557]. Pinning a path here
     would carry a host identity into a file that is required to have none
     (rule R-6).
-    SIX. THE TWO ANOMALIES THAT WOULD JUSTIFY THE APPEND ALREADY HAVE A HOME.
+    SIX. THE ANOMALIES THAT WOULD JUSTIFY THE APPEND HAVE A HOME ELSEWHERE.
     A-2, the unbounded quarter subscript -- computed by a rounded divide at
     [general/gl080.cbl:L328] and then used as an array subscript with NO bounds
-    check at [general/gl080.cbl:L345] -- and A-3, the second and independent
-    rotating quarter counter at [general/gl080.cbl:L355-L357], belong to the
-    arithmetic parity suite, which is where the plan puts them.
-  CONSEQUENCE, STATED HONESTLY: gl_end_of_cycle therefore appears in NO
-  scenario file in this directory, and period is consequently an INERT value
-  in all eight of them -- it is carried because it is part of the seeded system
-  record and because the key set is uniform, not because any listed operation
-  divides by it.
+    check at [general/gl080.cbl:L345] -- stays in the arithmetic parity suite,
+    because driving an out-of-range subscript through the COMPILED oracle would
+    be a write into adjacent storage whose effect is undefined. A-3, the second
+    and independent rotating quarter counter at [general/gl080.cbl:L355-L357],
+    is now pinned in TABLE STATE by end_of_cycle_gl, which seeds the counter and
+    the subscript to disagree and observes that the subscript writes Q1 while
+    the counter writes Ledger-Last and leaves Q4 alone.
+  CONSEQUENCE, STATED HONESTLY AND CORRECTED: gl_end_of_cycle is NOT appended to
+  THIS file, and the six grounds above are why. It is not absent from the
+  directory: harness/scenarios/end_of_cycle_gl.yaml drives it, with its own
+  affected-table list and its own tests, which is the resolution these six
+  grounds pointed towards rather than an argument against covering gl080 at all.
+  `period` remains an INERT value HERE -- carried because it is part of the
+  seeded system record and because the key set is uniform, not because any
+  operation listed in THIS file divides by it -- and it is emphatically not
+  inert in end_of_cycle_gl, where `divide scycle by period giving a rounded` is
+  what selects the quarter.
 
   THE SEED CONTRACT -- WHAT EACH OF THE NINE FLAT FILES MUST CARRY
   The seeder reproduces the frozen loader contract of
@@ -802,16 +886,41 @@ description: |
     boundaries.
 
   THE ACCEPTANCE PROTOCOL
-  Build the oracle, seed, run the COMPILED cycle -- FOUR invocations of the
-  oracle-side runner, one per operation, IN THE DECLARED ORDER -- capture the
-  affected tables, normalise, reset and re-seed, run the PYTHON cycle over the
-  same list, capture, normalise, and diff. The diff must be EMPTY. That is the
-  pass condition and the evidence is recorded in
+  TEN stages, in this order, one scenario at a time and nothing
+  alongside it. harness/parity_stages.sh is the single registry and
+  `harness/run_parity.sh --print-stages' prints it, so this list is a restatement
+  and never the authority:
+    1 reset the schema and seed the scenario
+    2 run the compiled COBOL cycle
+    3 dump the COBOL state
+    4 normalise the COBOL dump
+    5 reset the schema and RE-SEED THE SAME SCENARIO -- the same fixture bytes, so
+      the Python cycle starts from the state the COBOL cycle started from and not
+      the state it left
+    6 run the migrated Python cycle
+    7 dump the Python state
+    8 normalise the Python dump
+    9 verify both captures are published -- BEFORE a single row is compared,
+      because two PARTIAL captures can produce an empty diff and so pass a
+      comparison that compared nothing
+    10 diff the two normalised trees
+  harness/build_oracle.sh and harness/build_fixtures.sh come before stage 1 and are
+  not stages: the first runs once per image, the second once per change to a
+  scenario's seed records.
+  FOR THIS SCENARIO, stages 2 and 6 each drive FOUR OPERATIONS IN THE DECLARED
+  ORDER inside ONE invocation of their runner. Both runners resolve the ordered
+  `operations:' list and drive every entry sequentially, re-selecting the
+  operation -- and with it the menu, the executable and the keystroke plan --
+  before each one. There is no dump between the four, because the scenario's
+  subject is the state the whole declared sequence produces.
+  The diff must be EMPTY. That is the pass condition and the evidence is
+  recorded in
   docs/migration/scenario-diff-evidence.md.
   WHAT AN EMPTY DIFF PROVES HERE, SPECIFICALLY: that all nine period-total
   accumulations landed on IDENTICAL VALUES in SYSTOT-REC -- through the A-8
   double truncation, through the A-9 missing increments on both credit-note
-  paths, through A-10's three disagreeing guards and inverted divide, and
+  paths, through A-10's three disagreeing guards -- whose third instance spells
+  its divide the other way round and computes the same value -- and
   through the two write sites that add unconditionally where a reader would
   expect them to be guarded. It also proves the two ledgers' own tables agree,
   that the transfer table came back exactly as seeded, and that the four
@@ -822,8 +931,14 @@ description: |
   makes the second leg comparable to the first at all -- without it operations
   2 and 4 would post nothing on the second leg and the diff would be empty for
   the wrong reason.
-  Forward reference: docs/migration/ and the scenario test suite do not exist
-  yet; they arrive with the deliverables that consume this file.
+  This file's consumers are all present in the checkout:
+  the four documents under docs/migration/, the eight modules under
+  tests/scenarios/ (one per scenario), and harness/run_python_scenario.sh.
+  The seed FLAT FILES are deliberately not in the
+  checkout: the records are declared above under seed_records and
+  harness/build_fixtures.sh builds the files from them inside the image, because
+  fifteen of the seventeen frozen loaders read ORGANIZATION INDEXED or RELATIVE
+  files whose on-disk form belongs to the Berkeley DB version that image carries.
 
   THE CONSUMER CONTRACT -- WHY SOME VALUES APPEAR UNDER TWO KEYS
   This file serves consumers with two different reading strategies, so a few
@@ -853,16 +968,16 @@ description: |
   nested block under this key is refused outright. THIS FILE IS THE ONLY ONE
   WITH MORE THAN ONE ITEM IN IT. expected_status is a flat sequence of whole
   process statuses matching it POSITIONALLY, one per operation, and the
-  singular operation key names the FIRST of them for the oracle-side reader,
-  which takes one operation per invocation. The scenario NAME is published
+  singular operation key names the FIRST of them as a fallback that neither
+  runner reaches while this list is present. The scenario NAME is published
   once, as name, and the COBOL runner falls back to this file's own basename,
   so the two agree by construction: name equals period_end_totals equals the
   file stem.
   ANSWER KEYS ARE SEMANTIC and are never a copy of a command-line option
   spelling, because the option spellings belong to the entry points and are
   discovered from them rather than guessed here. THIS FILE PROMOTES ONE ANSWER,
-  payment_post_confirm, AND IT COVERS BOTH CASH ROUTES: the runners are
-  invoked per operation, both cash programs ask the same question, and both
+  payment_post_confirm, AND IT COVERS BOTH CASH ROUTES: one invocation drives
+  all four operations, both cash programs ask the same question, and both
   refuse to proceed without an answer, so one key answers both. Its value must
   be YES or NO and there is NO DEFAULT, because the frozen programs have none
   -- each blanks the reply field immediately before accepting it
@@ -903,7 +1018,7 @@ description: |
   the installed-ledger level byte at [copybooks/wssystem.cob:L85], NOT on the
   fan-out switch at [copybooks/wssystem.cob:L179-L181], which is the
   correction that produced the two-field statement of pure General Ledger mode
-  above and that makes anomaly A-NEW-5 legible.
+  above and that makes anomaly A-PL100-A legible.
   THE FROZEN SOURCE IS READ AND NEVER EDITED: any diff under common,
   copybooks, general, sales, purchase, irs, stock or mysql is a defect in the
   migration however harmless it looks.
@@ -912,7 +1027,7 @@ description: |
 # THE ONE KEY WHOSE VALUE DIFFERS IN KIND FROM ITS SEVEN SIBLINGS. This
 # scenario spans TWO menus, and the oracle-side runner refuses a file whose
 # subsystem disagrees with the subsystem of the operation it was asked to run
-# [harness/run_cobol_scenario.sh:L1336-L1341]. Its map sends sl_invoice_post
+# [harness/run_cobol_scenario.sh acas_select_operation]. Its map sends sl_invoice_post
 # and sl_cash_post to the Sales menu and pl_order_post and pl_payment_post to
 # the Purchase menu, so no single name is true for all four operations and
 # naming either menu would fail two of the four invocations on a cross-check
@@ -923,10 +1038,22 @@ description: |
 # nothing but that one cross-check reads it.
 subsystem: ""
 
-# Read by the oracle-side runner as the default for its --operation option,
-# which takes ONE operation per invocation. It names the FIRST of the four
-# below; the other three are supplied per invocation, in the declared order.
-# The Python runner prefers the ordered `operations:' list and runs all four.
+# THE COMPATIBILITY KEY, AND THE LOWEST-PRECEDENCE ONE. Both runners resolve
+# the ordered `operations:' list below and drive every entry, in that order, in
+# ONE invocation; both fall back to this singular key only when no list is
+# present. So for this file it is read by NEITHER runner, and it names the first
+# operation purely so that a reader who follows the fallback path arrives at a
+# coherent single-operation run rather than at nothing.
+#
+# It is kept, rather than dropped, so the key set stays identical across all
+# nine scenario files -- eight of which declare exactly one operation and are
+# therefore indifferent to which key supplies it.
+#
+# The precedence is identical on both sides -- repeated --operation first, then
+# `operations:', then this key -- at [harness/run_cobol_scenario.sh
+# acas_resolve_operations] and [harness/run_python_scenario.sh
+# acas_py_resolve_scenario], so one file cannot resolve to different lists on the
+# two legs of a comparison.
 operation: sl_invoice_post
 
 clock:
@@ -953,8 +1080,10 @@ system:
 # Flat mirrors of the two system values the COBOL runner reads directly. The
 # fan-out switch must be PRESENT even though its value is a space: that space
 # is what selects the General Ledger alone [copybooks/wssystem.cob:L179-L181]
-# and, on this route, what makes anomaly A-NEW-5 coherent at all
-# [purchase/pl100.cbl:L566-L570].
+# and, on this route, what makes anomaly A-PL100-A coherent at all
+# [purchase/pl100.cbl:L566-L570].  A-PL100-A was formerly numbered A-NEW-5 in
+# pl100_payment_posting.py alone; the register's A-NEW-5 is an unrelated
+# defect, so this one now carries a globally unique name.
 date_form: 1
 irs_instead: " "
 
@@ -1034,6 +1163,22 @@ expected_status:
 # SEMANTIC and is deliberately not a copy of the entry points' option spelling.
 payment_post_confirm: "YES"
 
+# WHAT `affected_tables` IS, AND WHAT IT IS NOT
+#
+# It is the DECLARED EFFECT of this scenario: the tables the runners assert
+# changed or unchanged against `expected_table_effect`, in the order declared.
+#
+# It is NOT the bound of the comparison. The capture and the diff are bounded by
+# ALL 22 IN-SCOPE TABLES -- `harness/dump_tables.py --all-in-scope` at stages 3
+# and 7 and `harness/diff_states.py --all-in-scope` at stage 10, which
+# `harness/run_parity.sh` and `tests/conftest.py` both pass. A bound drawn from
+# what a scenario EXPECTS to move cannot show a difference in anything it did not
+# expect to move, and an empty diff is the single pass condition (AAP section
+# 0.8.5). In particular both cycles perform the menu's own `overrewrite.'
+# [general/general.cbl:L656-L672], which rewrites SYSTEM-REC under key 1,
+# SYSDEFLT-REC under key 2 and SYSTOT-REC under key 4 -- reproduced by
+# `acas_posting/cli/args.py::overrewrite' -- so those rows are compared on both
+# sides rather than omitted.
 affected_tables:
   - ANALYSIS-REC
   - GLBATCH-REC
@@ -1047,6 +1192,7 @@ affected_tables:
   - SAINVOICE-REC
   - SAITM3-REC
   - SALEDGER-REC
+  - SYSTEM-REC
   - SYSTOT-REC
   - VALUEANAL-REC
 
@@ -1086,8 +1232,10 @@ affected_tables:
 #     type-6 row on the Sales side so the else-branch at
 #     [sales/sl100.cbl:L405-L410] is covered rather than assumed; and a type-2 row
 #     carrying a non-zero batch number AND item, which is what sends sl100 into
-#     compute-sales-pay [sales/sl100.cbl:L341-L345] -- the variant with the INVERTED
-#     divide operand order, anomaly A-10.
+#     compute-sales-pay [sales/sl100.cbl:L341-L345] -- the variant with the SINGLE
+#     guard, anomaly A-10. Its divide is spelled BY rather than INTO and computes the
+#     same accumulator / counter value, so the guard is the divergence and the operand
+#     order is not.
 #   * LATE DEDUCTIONS on the open items, so the apportionment adds something rather
 #     than adding zero.
 # NOTHING BELOW IS ARRANGED TO MAKE THE TOTALS COME OUT TIDY (rule R-4).
@@ -1494,8 +1642,10 @@ seed_records:
   # discards anything that is not 2, 5 or 6 outright
   # [sales/sl100.cbl:L338-L339].
   #   type 2, batch and item BOTH non-zero -> compute-sales-pay
-  #     [sales/sl100.cbl:L341-L345], which is the average variant with the INVERTED
-  #     divide operand order [sales/sl100.cbl:L506], [sales/sl100.cbl:L511] -- A-10.
+  #     [sales/sl100.cbl:L341-L345], which is the average variant with the SINGLE
+  #     guard [sales/sl100.cbl:L506] where the other two guard on a pair -- A-10. Its
+  #     divide [sales/sl100.cbl:L511] is spelled BY rather than INTO and computes the
+  #     same accumulator / counter value, so the operand order is not a divergence.
   #   type 5, OPEN, batch and item non-zero -> THE NINTH... no, the FIFTH period
   #     total: add oi-paid to t-paid sl-payments [sales/sl100.cbl:L404].
   #   type 6 -> the else-branch [sales/sl100.cbl:L405-L410], which adds to the

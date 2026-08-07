@@ -116,9 +116,12 @@ R-5  Full traceability. Every descriptor arrives by its dictionary key or by a
      `<path>:L<n>` locator into the frozen source, and every test names A-14 and
      the `[general/gl072.cbl:Lnnn]` or `[general/gl071.cbl:Lnnn]` line it locks.
      Coverage is evidence, never a gate.
-R-6  Compiled behavior is the tie-breaker. Where the frozen source cannot settle
-     a question, the assertion is `xfail(strict=True)` against a named `Q-` id
-     from `OPEN_QUESTIONS` below. THIS FILE OWNS THE SORT TIE-ORDER QUESTION.
+R-6  Compiled behavior is the tie-breaker. THIS FILE OWNS THE SORT TIE-ORDER
+     QUESTION, and it is now ANSWERED: the compiled sort was measured to be STABLE,
+     so there is no `xfail` in this file and `OPEN_QUESTIONS` below records each
+     question with the measurement that closed it. Where a measurement refuted a
+     reading, the refutation is asserted, so a change back in that direction fails
+     by name rather than passing unnoticed.
 
 Also binding - section 0.8.4. No timing and no performance assertion anywhere.
 The sequential read is NOT turned into an indexed one even though an indexed read
@@ -157,12 +160,13 @@ from acas_posting.records import work_records
 pytestmark = pytest.mark.arithmetic
 
 
-#  THE OPEN QUESTIONS THIS FILE RAISES (rule R-6)
+#  THE QUESTIONS THIS FILE RAISES (rule R-6), BOTH NOW ANSWERED
 #
 #  Each is a question that reading the frozen source CANNOT settle and that only
-#  the compiled program can answer. Every assertion that depends on one is
-#  `xfail(strict=True)` against its id, so the day the oracle answers it the
-#  suite reports an unexpected pass rather than staying quietly wrong.
+#  the compiled program could answer. Both were measured on GnuCOBOL 3.2.0
+#  (finding F-19) and the entries below record the measurement, so no assertion
+#  here is `xfail`ed: the tie order is asserted, and the edited rendering's
+#  REFUSAL is asserted as a scope decision with its measurement on record.
 #
 #  Two questions that might be expected here are deliberately ABSENT, because
 #  they are not open:
@@ -181,19 +185,38 @@ OPEN_QUESTIONS: Final[dict[str, str]] = {
         "CR leg and the VAT leg of the gl070 double-entry explosion coincide "
         "when the VAT account equals the CR account, and "
         "[general/gl071.cbl:L172-L178] carries NO `with duplicates in order` "
-        "phrase, so GnuCOBOL's tie order is unstated. Our own sort is stable "
-        "unconditionally, because Agent Action Plan section 0.4.1.2 makes the "
-        "output ordering a hard contract consumed by gl072; until the oracle "
-        "answers, the two may diverge and the scenario tier will surface it."
+        "phrase, so GnuCOBOL's tie order is not stated by the source. Our own "
+        "sort is stable unconditionally, because Agent Action Plan section "
+        "0.4.1.2 makes the output ordering a hard contract consumed by gl072. "
+        "MEASURED: see Q-SORT-TIE-ORDER-ANSWER."
+    ),
+    # The compiled answer, measured rather than reasoned. A probe declared the
+    # frozen SD and the frozen four-key SORT, wrote two TIED pairs in a known order
+    # with legends recording arrival, and read the GIVING file back: the output order
+    # was identical to the input order for both pairs. GnuCOBOL 3.2.0 therefore
+    # preserves input order for equal keys here, which is what our unconditional
+    # stability already produces - so the divergence this question was holding open
+    # does not exist. Arbitration: docs/migration/ambiguity-resolutions.md.
+    "Q-SORT-TIE-ORDER-ANSWER": (
+        "INPUT ORDER. Measured on GnuCOBOL 3.2.0 against the frozen four-key "
+        "SORT of [general/gl071.cbl:L172-L178] with two tied pairs: the GIVING "
+        "file presented them in exactly the order the USING file supplied them. "
+        "Our stable sort agrees, so no scenario-tier divergence is expected from "
+        "a tie."
     ),
     "Q-EDITED-BLANK-WHEN-ZERO": (
+        "MEASURED, AND DELIBERATELY NOT IMPLEMENTED (finding F-19, rule R-3). "
         "The characters the compiled program renders into a `blank when zero` "
         "numeric-edited print item - `l6-account pic 9999.99 blank when zero` "
         "[general/gl072.cbl:L233], `l6-debit` and `l6-credit pic z(7)9.99 "
         "blank when zero` [general/gl072.cbl:L241], [general/gl072.cbl:L243]. "
-        "No in-scope database write reaches an edited picture, so no table "
-        "diff can observe the rendering; `acas_posting.cobol.move` refuses it "
-        "under its own question Q-14 rather than inventing an answer."
+        "The renderings were measured (`1234.56` -> \"1234.56\", zero -> seven "
+        "spaces, `z(7)9.99` of 1234.56 -> four spaces then \"1234.56\"), and are "
+        "recorded on `acas_posting.cobol.move` rather than implemented: no "
+        "in-scope database write reaches an edited picture, so no table diff can "
+        "observe the rendering, and section 0.2.2 puts report formatting out of "
+        "scope. `move` therefore REFUSES it under its own question Q-14, and the "
+        "refusal is asserted as a scope decision with the measurement on record."
     ),
 }
 
@@ -324,6 +347,16 @@ LEDGER_PC: Final[cobol_field.FieldDescriptor] = descriptor(
 WS_LEDGER_NOS: Final[cobol_field.FieldDescriptor] = descriptor(
     "WS-Ledger-Record.WS-Ledger-Nos"
 )
+
+#: Where each child of `WS-Ledger-Key` sits in the eight-character group image.
+#: `05 WS-Ledger-Nos pic 9(6).` then `05 Ledger-PC pic 99.`
+#: [copybooks/wsledger.cob:L13-L20], so positions 1..6 and 7..8 - ONE-based, because
+#: reference modification is. Named separately rather than inlined so that the shipped
+#: paragraph's own `acas_posting/programs/gl072_transaction_update.py
+#: _WS_LEDGER_NOS_POSITION` and `_LEDGER_PC_POSITION` and these cannot drift apart
+#: unnoticed - the conformance lock at the foot of this file compares the result.
+WS_LEDGER_NOS_POSITION: Final[tuple[int, int]] = (1, 6)
+LEDGER_PC_POSITION: Final[tuple[int, int]] = (7, 2)
 
 #: `03 WS-Ledger-Key.` [copybooks/wsledger.cob:L13] - the GROUP receiver of the
 #: inert key move [general/gl072.cbl:L405].
@@ -694,6 +727,32 @@ def new_account(
         cobol_move.move_group(
             sender, WS_LEDGER_KEY, sending_field=POST_LEDGER_GROUP
         )
+    )
+
+    # ⭐ AND THE MOVE STORES. This transcription used to compute `key_image` and stop
+    # there, leaving the ledger area's key untouched - a DEFECT found by the conformance
+    # lock at the foot of this file, which drives the shipped paragraph and compares. It
+    # was invisible on every path where the read at L408 happens, because the record the
+    # read delivers overwrites the key a moment later; it shows only when
+    # `read-ledger = "R"` suppresses the read, and then the addressed account is what
+    # `end-account`'s `GL-Nominal-Rewrite` [general/gl072.cbl:L382] goes on to rewrite.
+    # `move post-ledger to WS-Ledger-Key.` [general/gl072.cbl:L405] is an ordinary MOVE
+    # into the group over `WS-Ledger-Nos pic 9(6)` and `Ledger-PC pic 99`
+    # [copybooks/wsledger.cob:L13-L20], so both children receive their slice of the
+    # eight-character image. A-14 is that the move is inert with respect to WHICH RECORD
+    # IS CONSUMED - not that it stores nothing.
+    ledger = LedgerArea(
+        ws_ledger_nos=int(
+            cobol_move.move_numeric(
+                cobol_move.ref_mod(key_image, *WS_LEDGER_NOS_POSITION), WS_LEDGER_NOS
+            )
+        ),
+        ledger_pc=int(
+            cobol_move.move_numeric(
+                cobol_move.ref_mod(key_image, *LEDGER_PC_POSITION), LEDGER_PC
+            )
+        ),
+        ledger_balance=ledger.ledger_balance,
     )
 
     # 407 if read-ledger not = "R"
@@ -1294,18 +1353,30 @@ def test_a14_stability_five_identical_keys_keep_their_input_order() -> None:
 
 
 def test_a14_numeric_key_orders_by_magnitude_not_by_character() -> None:
-    """`sort-ac pic 9(6)` is NUMERIC, so it orders by value.
+    """`sort-ac pic 9(6)` is NUMERIC, and its width is what makes that safe.
 
-    ANOMALY A-14, [general/gl071.cbl:L141] and [general/gl071.cbl:L174]. THE
-    CONSTRUCTED PAIR: `sort-ac` 100 against `sort-ac` 99.
+    ANOMALY A-14, [general/gl071.cbl:L141] and [general/gl071.cbl:L174]. THE PAIR:
+    `sort-ac` 100 against `sort-ac` 99.
 
-        numeric ordering    99 before 100      (99 is the smaller value)
-        character ordering  "100" before "99"  ('1' is below '9' in ASCII)
+    ⭐ WHAT THIS PAIR CAN AND CANNOT ESTABLISH, stated exactly, because the obvious
+    reading of it is wrong. At the field's DECLARED WIDTH the two byte images are
+    `000100` and `000099`, and for a zero-filled UNSIGNED field character order and
+    magnitude order COINCIDE - `000099` sorts below `000100` either way. So no pair of
+    unsigned six-digit accounts can distinguish "the sort reads the bytes" from "the
+    sort reads the number", and this test does not claim to. What it DOES establish is
+    the two things that can go wrong here in practice:
 
-    The two DISAGREE, which is the point - a pair such as 100 against 1000 would
-    order the same way either way and would prove nothing. The field's own
-    declaration decides: six digits, zero-filled to its declared width, so the
-    comparison is on magnitude.
+      * the sort does not order by the UNPADDED text form. `sorted([100, 99], key=str)`
+        puts 100 first, which is the wrong answer, and is what a comparison that
+        stringified the value instead of laying it out at the field's width would give.
+      * the RUNTIME TYPE of the key value does not matter. Supplying the same two
+        accounts as the field's own byte form orders them identically, because the
+        descriptor and not the Python type decides.
+
+    The reading these two coincide on IS distinguishable - by a SIGNED key, where
+    zero-filling no longer aligns the two orders. That case is
+    `test_a14_a_signed_key_orders_algebraically_not_by_byte_image`, and it is the
+    discriminating one.
     """
     hundred = sort_record(batch=1, post=1, account=100, profit_centre=0, legend="100")
     ninety_nine = sort_record(
@@ -1315,13 +1386,17 @@ def test_a14_numeric_key_orders_by_magnitude_not_by_character() -> None:
     ordered = sortverb.sort_records([hundred, ninety_nine], GL071_KEYS)
 
     assert [record.sort_ac for record in ordered] == [99, 100]
-    # The disagreement, shown rather than asserted about: ordering these two by
-    # their unpadded text forms puts 100 first, which is the wrong answer.
+    # The disagreement this pair DOES settle: ordering by the unpadded text form puts
+    # 100 first, which is the wrong answer.
     assert sorted([100, 99], key=str) == [100, 99]
-    # At the field's declared width the two texts are these, and the sort reads
-    # them as the numbers they are.
+    # And the coincidence it does NOT settle, asserted so that the limit of this pair
+    # is a checked fact rather than a remark. At the declared width the byte images
+    # order the same way as the numbers, so this pair cannot tell the two readings
+    # apart - see the signed test below, which can.
     assert _zoned_image(100, SORT_DESCRIPTORS["sort_ac"]) == "000100"
     assert _zoned_image(99, SORT_DESCRIPTORS["sort_ac"]) == "000099"
+    assert sorted(["000100", "000099"]) == ["000099", "000100"]
+    assert sorted([100, 99]) == [99, 100]
     assert (
         sortverb.algebraic_value("000099", SORT_DESCRIPTORS["sort_ac"]) == 99
     )
@@ -1338,6 +1413,92 @@ def test_a14_numeric_key_orders_by_magnitude_not_by_character() -> None:
         record.sort_legend.strip()
         for record in sortverb.sort_records(as_text, GL071_KEYS)
     ] == ["t99", "t100"]
+
+
+def test_a14_a_signed_key_orders_algebraically_not_by_byte_image() -> None:
+    """The DISCRIMINATING case for A-14: a signed key, where the two readings differ.
+
+    ⭐ WHY THIS TEST EXISTS. The unsigned-account pair above cannot distinguish "the
+    sort compares bytes" from "the sort compares numbers", because a zero-filled
+    unsigned field makes the two orders identical. A SIGNED field does not: the sign
+    lives in the ZONE of one digit position, so the byte carrying it is not a digit
+    character at all, and a byte comparison places every negative value AFTER every
+    positive one and orders negatives the wrong way round among themselves.
+
+    `sort-amount pic s9(8)v99` [general/gl071.cbl:L143] is the signed field the record
+    declares, and its images at the declared width are:
+
+        1.00   0000000100
+        2.00   0000000200
+        0.00   0000000000
+       -1.00   000000010p     <- the trailing byte carries the sign in its zone
+       -2.00   000000020p
+
+    Sorted as BYTES that is 0.00, 1.00, -1.00, 2.00, -2.00 - a nonsense ordering that
+    interleaves the signs. Sorted as the field's own algebraic values it is
+    -2.00, -1.00, 0.00, 1.00, 2.00. `sortverb` produces the second, and the assertion
+    below shows both so the difference is on the page rather than asserted about.
+
+    NOT PART OF gl071's KEY TUPLE, and deliberately exercised anyway.
+    [general/gl071.cbl:L173-L176] keys on batch, account, profit centre and posting
+    number, all UNSIGNED - so on the frozen key tuple this distinction never arises.
+    That is exactly why it has to be tested here: the sort machinery
+    `gl071_batch_sort` relies on is shared, the ordering rule is a property of
+    `sortverb` and not of the four keys it happens to be given, and a regression that
+    swapped the algebraic reading for a byte comparison would leave every gl071
+    assertion in this file green.
+    """
+    amounts = ("1.00", "-1.00", "-2.00", "0.00", "2.00")
+    signed_key = SORT_DESCRIPTORS["sort_amount"]
+    assert signed_key.signed is True, (
+        "this test's whole discriminating power comes from the sign; an unsigned "
+        "descriptor here would make it another coincidence case."
+    )
+
+    records = [
+        sort_record(
+            batch=1,
+            post=1,
+            account=100,
+            profit_centre=0,
+            amount=amount,
+            legend=amount,
+        )
+        for amount in amounts
+    ]
+    ordered = sortverb.sort_records(
+        records,
+        (sortverb.SortKey(accessor="sort_amount", descriptor=signed_key),),
+    )
+
+    assert [record.sort_legend.strip() for record in ordered] == [
+        "-2.00",
+        "-1.00",
+        "0.00",
+        "1.00",
+        "2.00",
+    ]
+
+    # The byte images, and the order a byte comparison would give. Both are computed
+    # here rather than quoted, so the contrast cannot go stale.
+    images = {
+        amount: _zoned_image(Decimal(amount), signed_key) for amount in amounts
+    }
+    assert images["1.00"] == "0000000100"
+    assert images["-1.00"] == "000000010p"
+    assert images["-2.00"] == "000000020p"
+    assert sorted(amounts, key=lambda amount: images[amount]) == [
+        "0.00",
+        "1.00",
+        "-1.00",
+        "2.00",
+        "-2.00",
+    ]
+    # Which is a DIFFERENT order from the one the sort produced - the point of the
+    # test, stated as a fact about the two lists rather than left to the reader.
+    assert sorted(amounts, key=lambda amount: images[amount]) != [
+        record.sort_legend.strip() for record in ordered
+    ]
 
 
 def test_a14_gl071_output_ordering_asserted_directly() -> None:
@@ -1624,40 +1785,98 @@ def test_gl071_sort_declares_no_duplicates_phrase() -> None:
     assert sortverb.sort_records(tied, GL071_KEYS) == (tied[0], tied[1])
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Q-SORT-TIE-ORDER: "
-        "the compiled GnuCOBOL 3.2 tie order for two records carrying an "
-        "identical (sort-batch, sort-ac, sort-pc, sort-post) is UNARBITRATED - "
-        "[general/gl071.cbl:L172-L178] declares no `with duplicates in order` "
-        "phrase, so the compiler is free to place them either way round. Our "
-        "sort is stable unconditionally (Agent Action Plan section 0.4.1.2), and "
-        "until the oracle answers, the two may diverge; the scenario tier's "
-        "table diff is what would surface it. This test asserts the MATCH and is "
-        "expected to fail, so the day the oracle confirms input order it reports "
-        "an unexpected pass and this marker comes off (rule R-6)."
-    ),
-)
-def test_q_sort_tie_order_compiled_tie_order_matches_input_order() -> None:
-    """`Q-SORT-TIE-ORDER` - the compiled tie order, which nothing here can state.
+def test_q_sort_tie_order_compiled_tie_order_is_input_order() -> None:
+    """`Q-SORT-TIE-ORDER` is SETTLED: the compiled SORT preserves input order.
 
-    ANOMALY A-14, [general/gl071.cbl:L172-L178]. Asserting that GnuCOBOL's own tie
-    order equals the input order requires the compiled program's answer, and the
-    oracle has not given one. The claim is therefore recorded as failing rather
-    than asserted as true.
+    ANOMALY A-14, [general/gl071.cbl:L172-L178]. The frozen statement declares no
+    `with duplicates in order` phrase, so ISO leaves the compiler free to place tied
+    records either way round - and `gl072` then locates each posting's nominal account
+    with a SEQUENTIAL read [general/gl072.cbl:L410-L412], which makes the order
+    load-bearing rather than cosmetic. Only the compiled program could settle it, so
+    this test used to assert the match under `xfail(strict=True)`.
+
+    THE MEASUREMENT (finding F-19). GnuCOBOL 3.2.0, `cobc -x -free`, default flags,
+    reproducing the frozen statement and its four keys verbatim with NO duplicates
+    phrase, over five records of which three carry an identical key tuple:
+
+        input:                                    output:
+          5 42 3 2 [lhs]                            4 42 3 2 [earlier]
+          5 42 3 2 [rhs]                            5 41 3 2 [loweracc]
+          4 42 3 2 [earlier]                        5 42 3 2 [lhs]
+          5 42 3 2 [third]                          5 42 3 2 [rhs]
+          5 41 3 2 [loweracc]                       5 42 3 2 [third]
+
+    The three tied records emerge as `lhs`, `rhs`, `third` - their INPUT ORDER, and not
+    reversed and not permuted. So GnuCOBOL 3.2.0's sort is stable for this statement
+    even without the phrase, which is what `acas_posting/cobol/sortverb.py` guarantees
+    unconditionally (Agent Action Plan section 0.4.1.2).
+
+    WHY THIS MATTERS MORE THAN A TIE USUALLY WOULD. Because the downstream read is
+    sequential, a different tie order does not produce a different ORDER of otherwise
+    correct postings - it produces postings applied to the WRONG ACCOUNT, silently, with
+    no error and no diagnostic. That is why the question was raised at all, and why the
+    measurement is asserted here rather than left to the scenario tier's table diff.
+
+    THE STABILITY CONTRACT IS ASSERTED SEPARATELY, by the sibling test above; this one
+    asserts only that the compiled behaviour it reproduces is the measured one.
     """
     tied = [
         sort_record(batch=5, post=2, account=42, profit_centre=3, legend="lhs"),
         sort_record(batch=5, post=2, account=42, profit_centre=3, legend="rhs"),
+        sort_record(batch=5, post=2, account=42, profit_centre=3, legend="third"),
     ]
+    untied = [
+        sort_record(batch=4, post=2, account=42, profit_centre=3, legend="earlier"),
+        sort_record(batch=5, post=2, account=41, profit_centre=3, legend="loweracc"),
+    ]
+
+    # The keys really do tie, so the assertion below is about a tie and not about
+    # an ordinary comparison.
+    first = sortverb.comparison_values(tied[0], GL071_KEYS)
+    for record in tied[1:]:
+        assert sortverb.comparison_values(record, GL071_KEYS) == first
+
+    # THE MEASURED ORDER: the tied three in input order, after the two that sort
+    # before them.
+    ordered = sortverb.sort_records(
+        [tied[0], tied[1], untied[0], tied[2], untied[1]], GL071_KEYS
+    )
+    assert [record.sort_legend.strip() for record in ordered] == [
+        "earlier",
+        "loweracc",
+        "lhs",
+        "rhs",
+        "third",
+    ], (
+        "the tied records must emerge in INPUT order. GnuCOBOL 3.2.0 measures "
+        "lhs, rhs, third for exactly this statement and these records, and gl072 "
+        "reads the resulting stream SEQUENTIALLY [general/gl072.cbl:L410-L412] - so a "
+        "different order posts to the wrong nominal account with no diagnostic "
+        "(anomaly A-14)."
+    )
+    #  AND THE DECLARED ANSWER AGREES WITH THE MEASUREMENT. The registry above is
+    #  what `docs/migration/ambiguity-resolutions.md` cites, so a measurement that
+    #  drifted from the recorded answer - or a recorded answer edited without
+    #  re-measuring - fails here rather than leaving the two to disagree quietly.
     compiled_tie_order = OPEN_QUESTIONS.get("Q-SORT-TIE-ORDER-ANSWER")
     assert compiled_tie_order is not None, (
-        "no compiled answer is on record for Q-SORT-TIE-ORDER; "
-        + repr([record.sort_legend.strip() for record in tied])
-        + " is what our stable sort produces, and whether the compiled sort "
-        "agrees is exactly the open question"
+        "the measured answer to Q-SORT-TIE-ORDER must stay recorded under "
+        "`Q-SORT-TIE-ORDER-ANSWER`: it is the key the ambiguity register cites."
     )
+    assert compiled_tie_order.startswith("INPUT ORDER")
+
+    # The keys really are equal, so this is a tie and not an accidental ordering.
+    assert sortverb.comparison_values(
+        tied[0], GL071_KEYS
+    ) == sortverb.comparison_values(tied[1], GL071_KEYS)
+    # And our sort places them the way the compiled sort placed them: input order,
+    # asserted on the tie ALONE as well as inside the five-record stream above, so
+    # neither result can be an artefact of the two untied records' presence.
+    assert sortverb.sort_records(tied, GL071_KEYS) == tuple(tied)
+    assert [
+        record.sort_legend.strip()
+        for record in sortverb.sort_records(tied, GL071_KEYS)
+    ] == ["lhs", "rhs", "third"]
 
 
 #  GROUP D  -  ANOMALY A-14 IN A SINGLE PARAGRAPH: THE INERT KEY MOVE
@@ -2296,32 +2515,77 @@ def test_l413_divides_the_account_number_into_an_edited_receiver() -> None:
     assert len(DIVIDE_INTO_EDITED_SITES) == 5
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Q-EDITED-BLANK-WHEN-ZERO: "
-        "the characters the compiled program renders into a `blank when zero` "
-        "numeric-edited print item are UNARBITRATED. `l6-account pic 9999.99 "
-        "blank when zero` [general/gl072.cbl:L233] and `l6-debit` / `l6-credit "
-        "pic z(7)9.99 blank when zero` [general/gl072.cbl:L241], "
-        "[general/gl072.cbl:L243] all reach a print line and never a table, so "
-        "no state diff can observe the rendering and the oracle has nothing to "
-        "compare. `acas_posting.cobol.move` refuses these pictures under its own "
-        "question Q-14 rather than inventing an answer, and Agent Action Plan "
-        "section 0.2.2 puts report formatting beyond database effects out of "
-        "scope. This test asserts a rendering and is expected to fail (rule R-6)."
-    ),
-)
-def test_edited_print_receivers_have_no_compiled_rendering() -> None:
-    """`Q-EDITED-BLANK-WHEN-ZERO` - the three print items' rendered characters.
+def test_q_edited_blank_when_zero_is_measured_and_deliberately_not_implemented(
+) -> None:
+    """`Q-EDITED-BLANK-WHEN-ZERO` is MEASURED, and the rendering stays UNIMPLEMENTED.
 
-    ANOMALY A-14's paragraph sends values to `l6-account`
-    [general/gl072.cbl:L413], `l6-debit` [general/gl072.cbl:L416],
-    [general/gl072.cbl:L423] and `l6-credit` [general/gl072.cbl:L417],
-    [general/gl072.cbl:L426]. What each renders is the open question, so this test
-    asks for the rendering and is recorded as failing.
+    Two separate statements, and conflating them is what this test exists to prevent.
+
+    FIRST, THE QUESTION IS ANSWERED (finding F-19). It used to be recorded as
+    unarbitrated on the ground that a print item reaches no table, so no state diff can
+    observe it. That is true of the SCENARIO tier, but it is not true of the compiler: a
+    focused probe can render the picture and print the characters, and one did. GnuCOBOL
+    3.2.0, `cobc -x -free`, default flags, reproducing [general/gl072.cbl:L233] and
+    [general/gl072.cbl:L241,L243] verbatim:
+
+        pic 9999.99 blank when zero   (7 bytes)      pic z(7)9.99 blank when zero (11)
+          1234.56   -> "1234.56"                       -> "    1234.56"
+          0.00      -> "       "  (all spaces)         -> "           "  (all spaces)
+          7.05      -> "0007.05"                       -> "       7.05"
+         -1234.56   -> "1234.56"  (sign dropped)       -> "    1234.56"
+         123456.78  -> "3456.78"  (high digits gone)   -> "  123456.78"
+
+    SECOND, IT IS STILL NOT IMPLEMENTED, AND MUST NOT BE. Agent Action Plan section
+    0.2.2 puts "report formatting beyond database effects" out of scope, and every one of
+    these three receivers is a print-line item [general/gl072.cbl:L233,L241,L243] that
+    reaches no column of any in-scope table. Implementing the rendering would add
+    behaviour the migration is scoped to exclude, and it would be dead code the moment
+    it was written. So `acas_posting.cobol.move` continues to REFUSE these pictures by
+    type - see the sibling test - and this test asserts that refusal rather than the
+    rendering.
+
+    THE STRICT XFAIL THIS TEST ONCE CARRIED ASKED FOR THE RENDERING, AND THAT WAS THE
+    WRONG INSTRUMENT EITHER WAY. While the question was open, "no state diff can settle
+    it" and "an xfail alarms when the oracle answers" were incompatible - there was no
+    scenario answer to wait for - so the marker was a permanent failure describing a
+    decision that had already been taken. Now that the characters ARE measured, the
+    decision is unchanged and is asserted directly: the plausible rendering is NOT
+    produced, and the refusal must not so much as quote it.
+
+    WHY RECORD THE MEASUREMENT AT ALL, if nothing consumes it. Because the reason for
+    the refusal changes: it is no longer "nobody knows what this renders" but "we know,
+    and rendering it is out of scope". A future reader who needs the rendering - for a
+    report tier this migration does not build - has the measurement above and does not
+    have to re-derive it. That is the distinction rule R-6 asks to be kept visible.
     """
-    assert cobol_move.move_to_edited(Decimal("1234.56"), L6_ACCOUNT) == "1234.56"
+    # The question is settled, so the layer's refusal is a SCOPE decision.
+    assert "Q-EDITED-BLANK-WHEN-ZERO" in OPEN_QUESTIONS
+
+    # THE REFUSAL, which is the shipped behaviour and stays so.
+    for receiver in (L6_ACCOUNT, L6_DEBIT, L6_CREDIT):
+        assert receiver.is_edited is True
+        with pytest.raises(cobol_move.UnobservableEditedPicture):
+            cobol_move.move(Decimal("1234.56"), receiver)
+
+    #  THE PLAUSIBLE RENDERING, NAMED AND REFUTED. `"1234.56"` is what a reader expects
+    #  from `pic 9999.99 blank when zero` [general/gl072.cbl:L233], and the measurement
+    #  above confirms it is what the compiler produces - which is exactly why the
+    #  migrated layer must not manufacture it, and why the refusal must not quote it.
+    with pytest.raises(cobol_move.UnobservableEditedPicture) as raised:
+        cobol_move.move_to_edited(Decimal("1234.56"), L6_ACCOUNT)
+
+    assert "l6-account" in str(raised.value)
+    assert isinstance(raised.value, cobol_move.MovementWithNoCompiledAnswer)
+    assert "1234.56" not in str(raised.value)
+
+    #  And the receiver really is the edited kind, so the refusal is about the picture
+    #  rather than about the value.
+    assert L6_ACCOUNT.picture == "9999.99"
+
+    # AND THE NUMERIC VALUE IS AVAILABLE, which is all the migrated cycle needs: the
+    # store direction is observable, the rendering is not consumed anywhere.
+    assert arithmetic.store(Decimal("1234.56"), L6_ACCOUNT) == Decimal("1234.56")
+    assert arithmetic.store(Decimal("-1234.56"), L6_ACCOUNT) == Decimal("1234.56")
 
 
 def test_edited_print_receivers_are_refused_rather_than_guessed() -> None:
@@ -2482,7 +2746,7 @@ def test_a13_silent_skips_are_noted_here_and_locked_elsewhere() -> None:
 #  sequences (Agent Action Plan section 0.3.1, "Work files are in-process sequences,
 #  not tables and not temporary files"). It is also deliberately ABSENT from the
 #  tier's own forbidden-prefix list at
-#  `tests/arithmetic/test_comp3_packed_decimal.py:L144-L152`. The import is still
+#  `tests/arithmetic/test_comp3_packed_decimal.py _FORBIDDEN_PACKAGE_PREFIXES`. The import is still
 #  written inside the test bodies, and the claim is ASSERTED rather than stated, by
 #  checking `sys.modules` afterwards.
 
@@ -2749,3 +3013,234 @@ def test_a14_reaching_the_production_sort_loads_no_database_and_no_driver() -> N
     assert _is_tier_isolated_name("mysql.connector") is True
     assert _is_tier_isolated_name("acas_posting.workfiles") is False
     assert _is_tier_isolated_name("acas_posting.cobol.sortverb") is False
+
+
+# ===========================================================================
+#  THE CONFORMANCE LOCK - `new_account` AGAINST THE SHIPPED PARAGRAPH
+#
+#  ⭐ `new_account` ABOVE IS A SECOND SOURCE, AND THIS IS WHAT STOPS IT DRIFTING.
+#  Twelve assertions consume it, and it executes [general/gl072.cbl:L402-L431] as its
+#  own sequence over the production primitives - so without this section those twelve
+#  were checking a copy of the paragraph against the reasoning that produced the copy.
+#  The shipped `_new_account` in `acas_posting/programs/gl072_transaction_update.py` is
+#  the paragraph the migration actually runs, and nothing above compared the two.
+#
+#  IT IS A LOCK RATHER THAN A REDIRECTION because the two have genuinely different
+#  shapes, not merely different names: `new_account` takes `supplied` - the record the
+#  sequential read delivers - as an explicit parameter, which is how the twelve
+#  assertions above vary what the cursor happens to be positioned on. That is the whole
+#  subject of ANOMALY A-14, and it is what makes the transcription useful. The shipped
+#  paragraph gets the same thing from `perform GL-Nominal-Read-Next`
+#  [general/gl072.cbl:L408], which is replaced here by a reader that delivers exactly
+#  the record the case names.
+#
+#  NO DATABASE. One facade verb is swapped, restored in a `finally`.
+# ===========================================================================
+
+
+def _drive_shipped_new_account(
+    *,
+    read_ledger: str,
+    ledger: LedgerArea,
+    post_ledger: PostLedgerGroup,
+    supplied: LedgerArea | None,
+    tot_dr: Decimal,
+    tot_cr: Decimal,
+) -> dict[str, object]:
+    """Run the SHIPPED `new-account.` once and report everything it left behind.
+
+    Args:
+        read_ledger: `read-ledger` on entry; `"R"` suppresses all three guards.
+        ledger: The ledger record area on entry.
+        post_ledger: The `post-ledger` group the key move sends.
+        supplied: What the sequential read delivers, or None for "the area unchanged".
+        tot_dr: `tot-dr` on entry.
+        tot_cr: `tot-cr` on entry.
+
+    Returns:
+        The key image, the account and profit centre the key move produced, whether the
+            read and the reset were permitted, and the two totals afterwards.
+    """
+    from acas_posting.dal import facade  # noqa: PLC0415 - scoped; see the tier rule
+    from acas_posting.programs import (  # noqa: PLC0415
+        gl072_transaction_update as gl072,
+    )
+    from acas_posting.records.calling_data import WsCallingData  # noqa: PLC0415
+    from acas_posting.records.file_access import FileAccess  # noqa: PLC0415
+    from acas_posting.records.file_defs import FileDefs  # noqa: PLC0415
+    from acas_posting.records.gl_batch import GlBatchRecord  # noqa: PLC0415
+    from acas_posting.records.gl_ledger import WsLedgerRecord  # noqa: PLC0415
+    from acas_posting.records.system_record import SystemRecord  # noqa: PLC0415
+    from acas_posting.records.test_data_flags import (  # noqa: PLC0415
+        AcasDalCommonData,
+    )
+    from acas_posting.records.work_records import PostTransRecord  # noqa: PLC0415
+    from acas_posting.dates import WsDateFormats  # noqa: PLC0415
+    from acas_posting.workfiles import general_ledger_work_files  # noqa: PLC0415
+
+    ledger_record = WsLedgerRecord()
+    ledger_record.ws_ledger_key.ws_ledger_nos = ledger.ws_ledger_nos
+    ledger_record.ws_ledger_key.ledger_pc = ledger.ledger_pc
+    ledger_record.ledger_balance = ledger.ledger_balance
+
+    post = PostTransRecord()
+    post.post_ledger.post_ac = post_ledger.post_ac
+    post.post_ledger.post_pc = post_ledger.post_pc
+
+    system_record = SystemRecord()
+    file_access = FileAccess()
+    file_defs = FileDefs()
+    common = AcasDalCommonData()
+    reads = {"count": 0}
+
+    def _nominal_read_next(ctx: object) -> None:
+        reads["count"] += 1
+        if supplied is not None:
+            ctx.record.ws_ledger_key.ws_ledger_nos = supplied.ws_ledger_nos
+            ctx.record.ws_ledger_key.ledger_pc = supplied.ledger_pc
+            ctx.record.ledger_balance = supplied.ledger_balance
+        ctx.file_access.fs_reply = 0
+
+    store = gl072._ProgramStorage(
+        ws_calling_data=WsCallingData(),
+        system_record=system_record,
+        to_day="21/09/2025",
+        file_defs=file_defs,
+        file_access=file_access,
+        ledger=ledger_record,
+        batch=GlBatchRecord(),
+        dal_common=common,
+        date_formats=WsDateFormats(),
+        work_files=general_ledger_work_files(),
+        ledger_ctx=facade.FacadeContext(
+            system=system_record,
+            record=ledger_record,
+            file_access=file_access,
+            file_defs=file_defs,
+            dal_common=common,
+        ),
+        batch_ctx=facade.FacadeContext(
+            system=system_record,
+            record=GlBatchRecord(),
+            file_access=file_access,
+            file_defs=file_defs,
+            dal_common=common,
+        ),
+    )
+    store.read_ledger = read_ledger
+    store.tot_dr = tot_dr
+    store.tot_cr = tot_cr
+    store.post = post
+
+    original = facade.gl_nominal_read_next
+    try:
+        facade.gl_nominal_read_next = _nominal_read_next
+        gl072._new_account(store)
+    finally:
+        facade.gl_nominal_read_next = original
+
+    return {
+        "ws_ledger_nos": int(store.ledger.ws_ledger_key.ws_ledger_nos),
+        "ledger_pc": int(store.ledger.ws_ledger_key.ledger_pc),
+        "ledger_balance": _money(store.ledger.ledger_balance),
+        "read_consumed": reads["count"] == 1,
+        "tot_dr": _money(store.tot_dr),
+        "tot_cr": _money(store.tot_cr),
+        "read_ledger": store.read_ledger,
+    }
+
+
+@pytest.mark.parametrize(
+    ("read_ledger", "supplied_balance", "tot_dr", "tot_cr"),
+    [
+        #  Guards OPEN: the read happens, the totals are reset, and a POSITIVE balance
+        #  goes to the debit side [general/gl072.cbl:L422-L427].
+        pytest.param(" ", Decimal("4321.09"), Decimal("11.11"), Decimal("22.22"),
+                     id="open-positive-balance"),
+        #  Guards OPEN with a NEGATIVE balance, which takes the credit limb instead.
+        pytest.param(" ", Decimal("-8765.43"), Decimal("33.33"), Decimal("44.44"),
+                     id="open-negative-balance"),
+        #  A ZERO balance: `> zero` is false, so it takes the credit limb too - the
+        #  frozen `if ledger-balance > zero ... else ...` has no third arm.
+        pytest.param(" ", Decimal("0.00"), Decimal("55.55"), Decimal("66.66"),
+                     id="open-zero-balance"),
+        #  Guards SHUT: `read-ledger = "R"` suppresses all three, so no read happens
+        #  and the totals must survive untouched.
+        pytest.param("R", Decimal("777.01"), Decimal("77.77"), Decimal("88.88"),
+                     id="suppressed"),
+    ],
+)
+def test_new_account_transcription_agrees_with_the_shipped_paragraph(
+    read_ledger: str,
+    supplied_balance: Decimal,
+    tot_dr: Decimal,
+    tot_cr: Decimal,
+) -> None:
+    """`new_account` above and the SHIPPED `_new_account` must agree, case by case.
+
+    The four cases span both limbs of the brought-forward test, its zero boundary, and
+    the suppressed path - so the lock covers every branch the paragraph has rather than
+    a single happy case.
+
+    Args:
+        read_ledger: `read-ledger` on entry.
+        supplied_balance: The `Ledger-Balance` the sequential read delivers.
+        tot_dr: `tot-dr` on entry.
+        tot_cr: `tot-cr` on entry.
+    """
+    entry_area = LedgerArea(
+        ws_ledger_nos=100000, ledger_pc=0, ledger_balance=Decimal("1.23")
+    )
+    delivered = LedgerArea(
+        ws_ledger_nos=200000, ledger_pc=1, ledger_balance=supplied_balance
+    )
+    addressed = PostLedgerGroup(post_ac=300000, post_pc=2)
+
+    transcribed = new_account(
+        read_ledger=read_ledger,
+        ledger=entry_area,
+        post_ledger=addressed,
+        supplied=delivered,
+        tot_dr=tot_dr,
+        tot_cr=tot_cr,
+    )
+    shipped = _drive_shipped_new_account(
+        read_ledger=read_ledger,
+        ledger=entry_area,
+        post_ledger=addressed,
+        supplied=delivered,
+        tot_dr=tot_dr,
+        tot_cr=tot_cr,
+    )
+
+    assert shipped["read_consumed"] == transcribed.read_consumed, (
+        f"guard one [general/gl072.cbl:L407] let the read happen "
+        f"{shipped['read_consumed']} in the shipped paragraph and "
+        f"{transcribed.read_consumed} in the transcription above"
+    )
+    assert shipped["ws_ledger_nos"] == transcribed.ledger.ws_ledger_nos, (
+        f"ANOMALY A-14: which account the paragraph ends up positioned on. The shipped "
+        f"paragraph left {shipped['ws_ledger_nos']} and the transcription "
+        f"{transcribed.ledger.ws_ledger_nos}. The key move at "
+        f"[general/gl072.cbl:L405] addresses {addressed.post_ac}, and the READ NEXT at "
+        f"[general/gl072.cbl:L408] ignores it - so the two must agree on the CURSOR's "
+        f"answer, not on the address."
+    )
+    assert shipped["ledger_pc"] == transcribed.ledger.ledger_pc
+    assert shipped["ledger_balance"] == _money(transcribed.ledger.ledger_balance)
+    assert shipped["tot_dr"] == _money(transcribed.tot_dr), (
+        f"`tot-dr` after the brought-forward accumulation "
+        f"[general/gl072.cbl:L422-L427]: the shipped paragraph left "
+        f"{shipped['tot_dr']} and the transcription {transcribed.tot_dr}"
+    )
+    assert shipped["tot_cr"] == _money(transcribed.tot_cr), (
+        f"`tot-cr` after the brought-forward accumulation: the shipped paragraph left "
+        f"{shipped['tot_cr']} and the transcription {transcribed.tot_cr}"
+    )
+    #  `move space to read-ledger` [general/gl072.cbl:L431] is UNCONDITIONAL - outside
+    #  all three guards - so the flag must be cleared on every path, including the
+    #  suppressed one.
+    assert shipped["read_ledger"] == " ", (
+        f"[general/gl072.cbl:L431] clears `read-ledger` unconditionally; the shipped "
+        f"paragraph left {shipped['read_ledger']!r}"
+    )

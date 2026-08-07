@@ -5,7 +5,7 @@
 # posting route, and the CONTROL HALF of the anomaly A-1 evidence pair. Its
 # shape is the canonical one defined by harness/scenarios/clean_batch_gl.yaml
 # and followed by harness/scenarios/clean_batch_sl.yaml: the same top-level
-# keys, in the same order, so that all eight scenario files read as one family.
+# keys, in the same order, so that all nine scenario files read as one family.
 # Where this file CANNOT mirror its Sales twin, the difference is the evidence
 # rather than an inconsistency, and every such place is named in the
 # description below with the frozen locator that forces it.
@@ -33,7 +33,7 @@
 # column, an index or a constraint. operations is a strictly ordered list and
 # its steps run one at a time, matching the single-threaded COBOL.
 #
-# KEYS APPEAR IN A FIXED ORDER, identically in all eight scenario files, and
+# KEYS APPEAR IN A FIXED ORDER, identically in all nine scenario files, and
 # the file is UTF-8, ASCII-only, LF-terminated, two-space indented and free of
 # tabs. It carries no wall-clock reading, no host identity, no process id, no
 # random value and no absolute host path, so two captures of one scenario are
@@ -168,7 +168,7 @@ description: |
        divergences below. The field is
        05  PL-Autogen  pic x  value space  at [copybooks/wssystem.cob:L209],
        which the maintainer marks NOT USED YET. It is pinned anyway so that
-       all eight scenario files share one system block and so the asymmetry is
+       all nine scenario files share one system block and so the asymmetry is
        recorded from the Purchase side as well as the Sales side.
   The remaining four are INERT on this route and are present only so that the
   seeded system record is fully determined:
@@ -365,9 +365,15 @@ description: |
   A-10 is the wider finding that the same idiom carries THREE MUTUALLY
   INCONSISTENT GUARDS across the codebase: [sales/sl060.cbl:L819],
   [sales/sl060.cbl:L835] and [sales/sl100.cbl:L506] -- and the third one also
-  INVERTS THE DIVIDE OPERAND ORDER, divide work-b by sales-pay-activety
+  increments AFTER the add [sales/sl100.cbl:L509-L510] rather than before, and
+  returns early on a zero cleared date [sales/sl100.cbl:L500-L501]. Its divide
+  is SPELLED the other way round, divide work-b by sales-pay-activety
   [sales/sl100.cbl:L511] against divide purch-activety into work-2 here, and
-  increments AFTER the add [sales/sl100.cbl:L509-L510] rather than before.
+  computes the SAME quotient: DIVIDE X INTO Y GIVING Z is Z = Y / X and DIVIDE Y
+  BY X GIVING Z is Z = Y / X, so both are accumulator over counter. Calling it
+  an inverted divide would claim a behavioural difference that is not there and
+  would send a reader looking for a reciprocal; the real divergence is the
+  guards and the counter handling.
   Purchase contributes two of the guard variants, at
   [purchase/pl060.cbl:L743] and [purchase/pl060.cbl:L758-L764]. All are
   preserved as they are; folding them into one helper would be the single
@@ -527,11 +533,40 @@ description: |
   IT IS NOT AND MUST NOT BE RESOLVED BY AN IGNORE-LIST. harness/diff_states.py
   is required to carry none, and adding one would convert a real behavioural
   difference into a silent pass, which rule R-4 forbids outright.
-  SYSTEM-REC, SYSDEFLT-REC and SYSFINAL-REC are EXCLUDED from the list for the
-  same reason, and they differ from SYSTOT-REC in one way that settles it: no
-  statement on this route changes their content at all, so listing them would
-  add a caveat without adding evidence. SYSTOT-REC earns its place because
-  three statements on this route DO change it.
+  SYSTEM-REC IS LISTED. It is mutated on this route -- the allocator increment,
+  A-17's counterpart move, and pl060's own in-memory changes to the row: P-Flag-I
+  and P-Flag-A [purchase/pl060.cbl:L974-L978] and the Oi-5-Flag latch -- and the
+  Purchase menu persists it on exit [purchase/purchase.cbl:L621-L651], which the
+  headless Python route reproduces through args.overrewrite. So what each cycle
+  leaves in that row is a real behavioural claim, not an input echoed back.
+  Whether the two agree was MEASURED rather than presumed (rule R-6): both sides
+  end with a byte-identical row, all 169 columns. It is listed for the same
+  reason SYSTOT-REC is -- statements on this route change it, and an unlisted
+  table is an unverified one, because the comparison is bounded by all 22
+  in-scope tables, and this list is the scenario's DECLARED EFFECT rather than
+  the bound.
+
+  TWO CELLS OF SYSTEM-REC ARE WITHHELD FROM THE CAPTURE, AND ONLY TWO.
+  `RDBMS-Passwd pic x(12)' [copybooks/wssystem.cob:L139] and the frozen schema's
+  shorter PASS-WORD column are the database's own password as seeded, and a dump
+  is SELECT *, so harness/dump_tables.py's REDACTED_COLUMNS replaces exactly
+  those two cells, on BOTH sides, with one fixed marker -- which is why this file
+  declares neither field. The row is still dumped and still diffed, every other
+  column byte for byte, so this is not an ignore-list, and withholding a secret
+  symmetrically cannot conceal a difference in anything the cycle computes.
+  THE ROW IS ALSO FINGERPRINTED, ON EVERY SCENARIO AND ON BOTH SIDES:
+  acas_resolve_fingerprint_tables appends it when a scenario has not declared it,
+  and tests/conftest.py's `assert_system_record_parity' compares the two sides'
+  post-run digests -- all 169 columns, the credential included, leaking nothing
+  because a sha256 of a canonical dump is not the dump.
+
+  SYSDEFLT-REC and SYSFINAL-REC remain unlisted, and they differ from the two
+  above in the way that settles it: no statement on this route changes their
+  content at all -- the Purchase menu exit rewrites keys 1 and 4 only
+  [purchase/purchase.cbl:L621-L634] with no key-2 rewrite, and key 3 has no
+  writer anywhere -- so listing them would add a caveat without adding evidence.
+  Both are nevertheless inside the 22-table bound, so if anything ever did write
+  one of them the diff would say so.
 
   TERM CODE 8 IS UNREACHABLE HERE, WHICH IS WHAT LICENSES expected_status ZERO
   The only terminate code either program on this route can raise is eight, and
@@ -672,13 +707,28 @@ description: |
   specification (R-6).
 
   THE ACCEPTANCE PROTOCOL
-  Nine stages, in this order, one scenario at a time and nothing alongside it:
-  harness/build_oracle.sh once per image, then harness/seed.sh, then
-  harness/run_cobol_scenario.sh, then harness/dump_tables.py with --side cobol,
-  then harness/normalize.py, then harness/reset_db.sh, then
-  harness/run_python_scenario.sh, then harness/dump_tables.py with
-  --side python, then harness/normalize.py again, and finally
-  harness/diff_states.py. AN EMPTY DIFF IS THE PASS CONDITION AND THE ONLY ONE.
+  TEN stages, in this order, one scenario at a time and nothing
+  alongside it. harness/parity_stages.sh is the single registry and
+  `harness/run_parity.sh --print-stages' prints it, so this list is a restatement
+  and never the authority:
+    1 reset the schema and seed the scenario
+    2 run the compiled COBOL cycle
+    3 dump the COBOL state
+    4 normalise the COBOL dump
+    5 reset the schema and RE-SEED THE SAME SCENARIO -- the same fixture bytes, so
+      the Python cycle starts from the state the COBOL cycle started from and not
+      the state it left
+    6 run the migrated Python cycle
+    7 dump the Python state
+    8 normalise the Python dump
+    9 verify both captures are published -- BEFORE a single row is compared,
+      because two PARTIAL captures can produce an empty diff and so pass a
+      comparison that compared nothing
+    10 diff the two normalised trees
+  harness/build_oracle.sh and harness/build_fixtures.sh come before stage 1 and are
+  not stages: the first runs once per image, the second once per change to a
+  scenario's seed records.
+  AN EMPTY DIFF IS THE PASS CONDITION AND THE ONLY ONE.
   A stage that exits non-zero has produced no evidence, so the correct response
   is to re-seed rather than to carry a partial capture forward. The result is
   recorded per scenario in docs/migration/scenario-diff-evidence.md, and the
@@ -825,6 +875,22 @@ expected_status:
 # which is a different operation. Leaving all four unstated is what keeps this
 # scenario's inputs exactly the inputs the frozen cycle takes.
 
+# WHAT `affected_tables` IS, AND WHAT IT IS NOT
+#
+# It is the DECLARED EFFECT of this scenario: the tables the runners assert
+# changed or unchanged against `expected_table_effect`, in the order declared.
+#
+# It is NOT the bound of the comparison. The capture and the diff are bounded by
+# ALL 22 IN-SCOPE TABLES -- `harness/dump_tables.py --all-in-scope` at stages 3
+# and 7 and `harness/diff_states.py --all-in-scope` at stage 10, which
+# `harness/run_parity.sh` and `tests/conftest.py` both pass. A bound drawn from
+# what a scenario EXPECTS to move cannot show a difference in anything it did not
+# expect to move, and an empty diff is the single pass condition (AAP section
+# 0.8.5). In particular both cycles perform the menu's own `overrewrite.'
+# [general/general.cbl:L656-L672], which rewrites SYSTEM-REC under key 1,
+# SYSDEFLT-REC under key 2 and SYSTOT-REC under key 4 -- reproduced by
+# `acas_posting/cli/args.py::overrewrite' -- so those rows are compared on both
+# sides rather than omitted.
 affected_tables:
   - ANALYSIS-REC
   - GLBATCH-REC
@@ -834,6 +900,7 @@ affected_tables:
   - PUINVOICE-REC
   - PUITM5-REC
   - PULEDGER-REC
+  - SYSTEM-REC
   - SYSTOT-REC
   - VALUEANAL-REC
 

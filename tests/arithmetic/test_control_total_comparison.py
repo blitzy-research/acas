@@ -119,28 +119,36 @@ practice and invents nothing.
       `<path>:L<n>` locator into the declaration it was built from.
   R-6 Compiled behaviour is the tie-breaker. Nothing here is expected because
       reading the COBOL suggests it; every figure is either transcribed from a
-      frozen line or measured against the migrated semantics layer, which is in
-      turn tied to GnuCOBOL 3.2.0.
+      frozen line or read out of the migrated semantics layer. Where that layer's
+      own answer rests on an open question the question is named, and this file
+      claims no measurement of its own.
 
 THE OPEN QUESTIONS THAT BEAR ON THESE FIELDS. The generated dictionary attaches
 `Q-4` to all four `Amounts` members and to `Batch-Status`: that is the batch
 record's declared-length contradiction, anomaly `A-15`
 [copybooks/wsbatch.cob:L7-L9], which this file RECORDS and does not settle - its
-primary lock lives in `test_pic_field_descriptors.py`. Two further questions were
-settled by MEASUREMENT rather than by reading, and are therefore asserted directly
-rather than marked as expected failures:
+primary lock lives in `test_pic_field_descriptors.py`. Two further questions bear
+on the figures below, and NEITHER is claimed as measured - what makes them
+assertable is that the SHIPPED LAYER'S OWN ANSWER is what this file imports and
+therefore what it may assert:
 
-  * the value a signed figure takes in an unsigned receiver. Measured on GnuCOBOL
-    3.2.0 and recorded at `acas_posting/dal/acas029_otm5.py` - the magnitude
-    survives and the sign is discarded, NOT a two's-complement reinterpretation.
-    The same question at the bridge boundary is `Q-3`, anomaly `A-11`.
-  * the direction of an un-`ROUNDED` store and the precision of the intermediate
-    it truncates from - question `Q-2`, measured, and carried by
-    `acas_posting/cobol/arithmetic.py`.
+  * the value a signed figure takes in an unsigned WORKING-STORAGE receiver. The
+    shipped layer keeps the magnitude and discards the sign - not a two's-complement
+    reinterpretation - and `acas_posting/dal/acas029_otm5.py` carries the same
+    treatment at the bridge. Whether the compiled bridge agrees is `Q-3`, anomaly
+    `A-11`, and it is PENDING: `test_comp_binary.py` carries that question as a
+    strict expected failure, and nothing here contradicts it, because the store
+    asserted below is into working storage rather than through the bridge.
+  * the direction of an un-`ROUNDED` store, settled BY THE LANGUAGE - truncation
+    toward zero - and the precision of the intermediate it truncates from, which is
+    question `Q-2`'s open half and is unmeasured. Both are carried by
+    `acas_posting/cobol/arithmetic.py`; no figure below can reach the open half,
+    because every operand and every receiver here is a two-place decimal.
 
-Because both were measured, neither may be written as a strict expected failure: a
-strict `xfail` whose assertion passes is itself a failure, and asserting a value
-this project has already measured as an expectation-to-fail would be a fiction.
+Because the shipped behaviour of both is settled, neither may be written as a
+strict expected failure: a strict `xfail` whose assertion passes is itself a
+failure, and asserting what the imported layer demonstrably does as an
+expectation-to-fail would be a fiction.
 
 TWO FIGURES WHERE THE SPECIFICATION AND THE COMMITTED CODE DIFFER, stated openly
 because a reader comparing the two will notice, and because a test may only assert
@@ -170,6 +178,7 @@ each test below transcribes the frozen lines itself.
 from __future__ import annotations
 
 import contextlib
+import importlib
 import decimal
 import sys
 import types
@@ -1070,9 +1079,10 @@ def test_a_negative_post_amount_loses_its_sign_in_the_unsigned_receiver() -> Non
     `add post-amount to actual-gross.` [general/gl051.cbl:L1063] sends it into
     `05  Actual-Gross    pic 9(9)v99.` [copybooks/wsbatch.cob:L41-L44], which carries
     no `S` and so has no room for a sign. THE SIGN IS DISCARDED AND THE MAGNITUDE
-    SURVIVES - measured on GnuCOBOL 3.2.0 and recorded in
-    `acas_posting/dal/acas029_otm5.py`, where the same question at the bridge
-    boundary is anomaly A-11's open question Q-3.
+    SURVIVES - the shipped store path's own behaviour, and the same treatment
+    `acas_posting/dal/acas029_otm5.py` applies at the bridge. Whether the COMPILED
+    bridge agrees is anomaly A-11's question Q-3, which is pending; the store
+    asserted here is into working storage, so it does not turn on that answer.
 
     Rule R-3 forbids turning this into a validation and rule R-4 forbids repairing
     it: nothing is raised, nothing is clamped and nothing is warned about. A batch
@@ -1598,12 +1608,35 @@ def test_every_field_the_gate_touches_carries_dictionary_provenance() -> None:
 #  which pulls the MySQL driver in transitively, so a module-scope import would
 #  leave `acas_posting.dal.*` and `mysql.*` resident and break the three
 #  tier-isolation assertions this suite carries
-#  (`test_comp3_packed_decimal.py:L1536`, `test_comp_binary.py:L2036`,
-#  `test_pic_field_descriptors.py:L2134`), two of which read LIVE `sys.modules`. So
-#  the import happens INSIDE the test bodies, behind `pytest.importorskip` so a
-#  driver-free host SKIPS this section rather than failing, and the loader deletes
-#  every tier-isolation-prefixed name it added in a `finally`. The pattern is the one
-#  `tests/conftest.py:L423-L483` already uses for the harness modules.
+#  (`test_comp3_packed_decimal.py test_the_packed_carrier_follows_the_scale_and_is_never_binary`,
+#  `test_comp_binary.py test_q3_an_overflowing_negative_store_lands_on_its_magnitudes_byte`,
+#  `test_pic_field_descriptors.py test_no_single_winner_view_exists_on_drift_entry_or_descriptor`),
+#  two of which read LIVE `sys.modules`. So
+#  the import happens INSIDE the test bodies -- MANDATORY, never behind
+#  `pytest.importorskip`, because a skipped anomaly lock is indistinguishable from an
+#  absent one and the driver is a hard dependency -- and the loader deletes every
+#  tier-isolation-prefixed name it added in a `finally`. The pattern is the one
+#  `tests/conftest.py _load_harness_module` already uses for the harness modules.
+#
+#  THE IMPORT IS MANDATORY, NOT SKIPPABLE. An earlier revision used
+#  `pytest.importorskip`, so a driver-free host skipped this section silently. That
+#  was wrong twice over: `mysql-connector-python==26.7.0` is a HARD
+#  `[project.dependencies]` entry and a hard `requirements.txt` pin, so the guarded
+#  state cannot arise for an installed package; and the control-total ordering
+#  asserted below is the gate the Agent Action Plan section 0.6.4 calls load-bearing,
+#  which must fail loudly rather than vanish into a skip line.
+#  `importlib.import_module` is used instead, and nothing is memoised: a cached module
+#  is already resident, so the purge would remove nothing and the isolation claim
+#  would be about a module that had never left.
+#
+#  IT IS NOT BEHIND `pytest.importorskip`, and that is deliberate. A skip reads as
+#  green, so a gl051 that cannot be imported at all - a syntax error, a circular
+#  import, a renamed symbol in a module it imports - used to turn this whole section
+#  into a pass. The pinned MySQL driver is a hard requirement of `requirements.txt`,
+#  so its absence is a broken environment and not a supported configuration; the
+#  `ImportError` is allowed to reach pytest as the failure it is. Nor is the module
+#  MEMOISED: a cached module is already resident, so the purge would remove nothing
+#  and the isolation guarantee would be a statement about a module that never left.
 #
 #  NO DATABASE IS TOUCHED. `_end_batch(storage, linkage)` reads and writes seven
 #  in-memory record dataclasses; it opens no connection and issues no verb. The
@@ -1626,10 +1659,6 @@ _TIER_ISOLATION_PREFIXES: Final[tuple[str, ...]] = (
     "yaml",
 )
 
-#: The shipped module once imported. A plain dict, so it is inspectable and a failed
-#: import is never memoised.
-_SHIPPED_MODULE_CACHE: dict[str, types.ModuleType] = {}
-
 _GL051_MODULE: Final[str] = "acas_posting.programs.gl051_batch_control_check"
 
 
@@ -1645,34 +1674,78 @@ def _is_tier_isolated_name(name: str) -> bool:
 def _shipped_gl051() -> Iterator[types.ModuleType]:
     """Import `gl051_batch_control_check` for one test, leaving no trace.
 
+    ⭐ THE IMPORT IS NOT OPTIONAL, AND IT IS NOT MEMOISED. Both of those are the point.
+
+    NOT OPTIONAL. `pytest.importorskip` stood here, and it turned the one failure this
+    section exists to catch into a PASS. A shipped module that cannot be imported at
+    all - a syntax error, a circular import, a name it imports that no longer exists -
+    produced a SKIP, and a skipped test reads as green. The pinned MySQL driver the
+    reason text blamed is a hard requirement of `requirements.txt`, so its absence is a
+    broken environment and not a supported configuration.
+
+    NOT MEMOISED. A cached module is ALREADY RESIDENT in `sys.modules`, so the purge in
+    the `finally` had nothing to remove and every "leaves no driver loaded" claim
+    downstream was a statement about a module that had never left. So this asserts the
+    name is ABSENT on the way in - which is what establishes that the previous exit
+    purged it - and RESIDENT while the body runs, and on the way out removes every
+    tier-isolated name the import added and asserts the residue is empty.
+
     Yields:
         The shipped module.
 
     Raises:
-        Skipped: Through `pytest.importorskip`, when the pinned MySQL driver is
-            absent - which is what keeps the rest of the tier runnable on a bare
-            host (rule R-1).
+        AssertionError: The name was already resident on the way in, or did not become
+            resident, or survived the purge.
+        ImportError: The module could not be imported. NOT converted into a skip:
+            `mysql-connector-python==26.7.0` is a HARD `[project.dependencies]`
+            entry and a hard `requirements.txt` pin, so an installed package always has
+            it, and the assertions this loader serves are anomaly locks rule R-4
+            requires - a lock that can disappear into a skip line is not a lock.
     """
-    cached = _SHIPPED_MODULE_CACHE.get(_GL051_MODULE)
-    if cached is not None:
-        yield cached
-        return
-
+    #  EVICT FIRST, so the import below really runs the module's top-level code and the
+    #  purge in the `finally` really removes what it added. Eviction rather than a "must
+    #  be absent on the way in" assertion, because this tier's own helpers legitimately
+    #  import program modules in function scope to drive the SHIPPED paragraphs, and an
+    #  absence assertion would make the two remediations exclude each other - the claim
+    #  would then depend on file order, which is the fragility it exists to remove.
+    for resident in sorted(
+        (name for name in sys.modules if _is_tier_isolated_name(name)), reverse=True
+    ):
+        del sys.modules[resident]
+    assert _GL051_MODULE not in sys.modules, (
+        f"{_GL051_MODULE} survived the eviction above, so its top-level code will NOT "
+        f"re-execute and the purge on the way out would remove nothing - which is what "
+        f"the tier-isolation assertions in test_comp3_packed_decimal.py, "
+        f"test_comp_binary.py and test_pic_field_descriptors.py rest on."
+    )
     before = frozenset(sys.modules)
+    completed = False
     try:
-        module = pytest.importorskip(
-            _GL051_MODULE,
-            reason=(
-                f"{_GL051_MODULE} could not be imported - without the pinned MySQL "
-                f"driver this section skips and the rest of the tier still runs"
-            ),
+        module = importlib.import_module(_GL051_MODULE)
+        assert sys.modules.get(_GL051_MODULE) is module, (
+            f"{_GL051_MODULE} did not become resident under its own name, so nothing about "
+            f"a fresh import has been established."
         )
-        _SHIPPED_MODULE_CACHE[_GL051_MODULE] = module
         yield module
+        completed = True
     finally:
-        for name in sorted(set(sys.modules) - before, reverse=True):
+        added = set(sys.modules) - before
+        for name in sorted(added, reverse=True):
             if _is_tier_isolated_name(name):
                 del sys.modules[name]
+        residue = sorted(
+            name
+            for name in set(sys.modules) - before
+            if _is_tier_isolated_name(name)
+        )
+        #  Only when the body itself succeeded, so a real failure is never masked by a
+        #  second assertion about housekeeping.
+        if completed:
+            assert not residue, (
+                f"importing {_GL051_MODULE} left {residue} resident after the purge, so "
+                f"this tier no longer runs without a database driver and the three "
+                f"isolation assertions would fail depending only on file order."
+            )
 
 
 def _shipped_linkage(gl051: types.ModuleType) -> object:
@@ -1869,15 +1942,34 @@ def test_the_shipped_gate_keeps_its_two_early_dispositions() -> None:
 def test_the_shipped_gate_leaves_no_driver_loaded() -> None:
     """Rule R-1 holds even though this section reaches a program module.
 
-    The loader purges every tier-isolation-prefixed name it added, so nothing
-    forbidden is resident by the time a later test in the tier inspects
-    `sys.modules`.
+    ⭐ AND THE IMPORT REALLY HAPPENS, which is what makes the claim worth making. The
+    loader used to memoise, so this guard imported nothing: the module was already
+    resident from an earlier test, the purge removed nothing, and "leaves no driver
+    loaded" was a statement about a module that had never left. The loader no longer
+    caches, so each `with` below performs a genuine import - asserted INSIDE the block
+    by reading live `sys.modules` - and the delta afterwards is a real measurement of
+    what the purge removed.
     """
     before = frozenset(n for n in sys.modules if _is_tier_isolated_name(n))
 
+    assert _GL051_MODULE not in sys.modules, (
+        f"{_GL051_MODULE} was resident BEFORE this guard imported it, so the import "
+        f"below would be a no-op and the purge would remove nothing."
+    )
     with _shipped_gl051() as gl051:
         assert gl051.__name__ == _GL051_MODULE
         assert callable(gl051._end_batch)
+        #  DURING: without this half, an import that silently did nothing would still
+        #  satisfy the delta check below.
+        assert sys.modules.get(_GL051_MODULE) is gl051
+        assert any(
+            _is_tier_isolated_name(name) and name not in before
+            for name in sys.modules
+        ), (
+            "importing the gate added no tier-isolated name at all, so either it was "
+            "already loaded or it does not reach the data-access layer."
+        )
+    assert _GL051_MODULE not in sys.modules, "the gate survived its loader's purge."
 
     # Measured as the DELTA this guard's own action is responsible for, rather than
     # as absolute residency. The loader's contract - the one this docstring states -
@@ -1899,4 +1991,3 @@ def test_the_shipped_gate_leaves_no_driver_loaded() -> None:
     assert _is_tier_isolated_name("mysql.connector") is True
     assert _is_tier_isolated_name("acas_posting.database") is False
     assert _is_tier_isolated_name("acas_posting.cobol.condition_names") is False
-

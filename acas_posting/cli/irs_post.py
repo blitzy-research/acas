@@ -172,8 +172,9 @@ to reach `programs`, `clock` and `cli.args`, and bars it from `dal.acas*`. This
 module reaches `cli.args`, `programs.irs030_posting` and - for the single name
 `FacadeGoback` - `dal.facade`, and nothing else in the package: the record
 dataclasses are `args`' business, the clock is reached
-through `args.bind_irs_linkage`, and the three linkage records travel as one
-`args.IrsLinkage` so that no record module has to be named here. `dal.facade` is
+through `args.bind_irs_route`, and the three linkage records travel as one
+`args.IrsLinkage` - carried, with the pre-dispatch snapshot, on one
+`args.IrsRouteBinding` - so that no record module has to be named here. `dal.facade` is
 the layer's published seam and is what the bar on `dal.acas*` leaves open; no
 handler module is named here and no SQL is reachable from here. There is no
 COBOL at runtime and no path from here to `harness/` (rule R-1); the harness
@@ -342,15 +343,20 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # Shape 3's linkage options: the required `--run-date`, and nothing else.
     args.add_irs_linkage_arguments(parser)
-    #  THE TRANSPORT DECLARATION - one contract, published on every route
-    #  (`args.add_transport_security_arguments`). No COBOL counterpart: the frozen
-    #  bridge's connect passes six values and no transport policy at all
+    #  THE TRANSPORT DECLARATION IS NOT AN OPTION ON THIS ROUTE, AND MUST NOT
+    #  BECOME ONE. The frozen `CALL` publishes the linkage operands and the write
+    #  gating answers, and nothing else; the frozen bridge's connect passes six
+    #  values and no transport policy at all
     #  [copybooks/mysql-procedures.cpy:L72-L77], transport being compiled into
-    #  `cobmysqlapi.c`, so the migration must decide it and the operator is the
-    #  only party that knows. Stating NOTHING is the fail-closed policy - loopback
-    #  and Unix sockets only - not an absent one. It decides no posted figure, so
-    #  it cannot make two runs of one scenario differ (R-6).
-    args.add_transport_security_arguments(parser)
+    #  `cobmysqlapi.c`. A `--db-tls-*` or `--db-allow-plaintext` option here would
+    #  add a program input and two refusal outcomes the compiled program has not
+    #  got, which rule R-3 forbids - and a certificate path on a command line is a
+    #  process-listing leak besides. Deployment security is resolved ONCE, outside
+    #  the accounting path, from the same contract the six connection parameters
+    #  come from: `args.install_connection_policy` reads it through
+    #  `cli/rdbms_params.resolve_transport_policy` while the linkage is bound, and
+    #  every handler observes the installed policy without being told. It decides
+    #  no posted figure, so it cannot make two runs of one scenario differ (R-6).
 
     parser.add_argument(
         _CLEAR_POSTING_FILE_OPTION,
@@ -402,7 +408,7 @@ def main_loop_option_4(
             [irs/irs.cbl:L668-L671] - `IRS-System-Params`
             [copybooks/irswssystem.cob:L13], `WS-System-Record`
             [copybooks/wssystem.cob], `File-Defs` [copybooks/wsnames.cob:L13]. Build it
-            with `args.bind_irs_linkage`.
+            with `args.bind_irs_route`.
         clear_posting_file: the answer to the end-of-job question
             [irs/irs030.cbl:L1715-L1724]. KEYWORD-ONLY and REQUIRED, with no
             default anywhere on the path from argv to here - THE FROZEN PROMPT HAS
@@ -540,7 +546,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         configure_logging(namespace.log_level)
 
     #  THE ONE AND ONLY BINDING, AND THE ONE AND ONLY CLOCK INJECTION.
-    #  `bind_irs_linkage` resolves the pinned pair from `--run-date` through
+    #  `bind_irs_route` resolves the pinned pair from `--run-date` through
     #  `acas_posting.clock`, writes the binary `Run-Date`
     #  [copybooks/wssystem.cob:L67] into `WS-System-Record` and the
     #  eight-character `dd/mm/yy` form [copybooks/irswssystem.cob:L14] into
@@ -589,7 +595,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     menu_state = args.irs_menu_state()
 
     try:
-        linkage = args.bind_irs_linkage(namespace, menu_state=menu_state)
+        #  ONE BIND, ONE KEY-1 LOAD, ONE `zz090` (finding F-01). The binder returns
+        #  both halves of what the frozen menu holds at its `CALL`: the three
+        #  operands and the snapshot its single `zz090-Set-Up-IRS-System-Data`
+        #  [irs/irs.cbl:L556] captured. Re-taking the snapshot here meant a second
+        #  remap over a second key-1 traversal, with its own store traffic, its own
+        #  log records and its own failure path - none of which the frozen menu has.
+        binding = args.bind_irs_route(namespace, menu_state=menu_state)
+        linkage = binding.linkage
 
         #  Determinism evidence, read back off the bound records rather than
         #  re-derived, so the transcript reports what was actually bound. Both
@@ -602,19 +615,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             linkage.irs_system_params.run_date,
         )
 
-        #  [irs/irs.cbl:L556] `perform zz090-Set-Up-IRS-System-Data.` has already
-        #  run inside the binder, unconditionally, as the frozen menu performs it -
-        #  but the SNAPSHOT it produces is not a linkage operand, so it is taken
-        #  again here, from the records the binder returned, and held for `zz095`.
-        #  Taking it twice is harmless and exact: `zz090` is a pure remap of the
-        #  loaded ACAS record onto the IRS one, so the second pass writes the same
-        #  values the first did and the snapshot it returns is the state BEFORE the
-        #  dispatch, which is precisely what `zz095` must compare against. The
-        #  maintainer's own reminder at [irs/irs.cbl:L556] is "dont forget to run
-        #  zz095 after".
-        snapshot = args.zz090_set_up_irs_system_data(
-            linkage.irs_system_params, linkage.ws_system_record
-        )
+        #  [irs/irs.cbl:L556] `perform zz090-Set-Up-IRS-System-Data.` ran inside the
+        #  binder, once, as the frozen menu performs it once - and the SNAPSHOT that
+        #  one pass captured travels beside the linkage on `IrsRouteBinding`. It is
+        #  the state BEFORE the dispatch, which is precisely what `zz095` must
+        #  compare against; the maintainer's own reminder at [irs/irs.cbl:L556] is
+        #  "dont forget to run zz095 after".
+        #
+        #  `menu_state` is always supplied above, so the binder always performed
+        #  `zz090` and the snapshot is always present. The check is the one line that
+        #  proves it rather than assuming it, because `eoj_persist_irs_system_data`
+        #  cannot decide "only where changed" without it.
+        snapshot = binding.pre_dispatch_snapshot
+        if snapshot is None:  # pragma: no cover - menu_state is never None here
+            raise AssertionError(
+                "bind_irs_route returned no zz090 snapshot for a route that "
+                "supplied menu_state; zz095 [irs/irs.cbl:L1011-L1029] compares "
+                "against it and cannot run without it"
+            )
 
         main_loop_option_4(
             linkage, clear_posting_file=namespace.clear_posting_file
@@ -664,7 +682,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except args.RdbmsParamError as error:
         #  THE EXACT TYPE IS CAUGHT, NOT `ValueError` (finding CLI-09). The
         #  deployment contract for the six connection parameters is resolved
-        #  inside `bind_irs_linkage`, before the store is opened, so a failure
+        #  inside `bind_irs_route`, before the store is opened, so a failure
         #  here has touched nothing: no database contacted, no file opened, no
         #  program entered. Catching the base class would also swallow a genuine
         #  defect - a bad namespace attribute, a malformed record - and report it
@@ -987,7 +1005,7 @@ if __name__ == "__main__":
 #
 # OUT-OF-SCOPE FINDING, RECORDED AND NOT ACTED ON  -  `File-System-Used`
 # [copybooks/wssystem.cob:L112-L113]. Observed while validating this route with a
-# real invocation: the record `args.bind_irs_linkage` hands over carries the
+# real invocation: the record `args.bind_irs_route` hands over carries the
 # copybook's own declared default of ZERO, which is the `88 FS-Cobol-Files-Used`
 # condition, so a live run reaches the data-access layer's Cobol flat-file leg
 # rather than its RDB leg. That layer's own docstring states the model it was
@@ -1020,7 +1038,7 @@ if __name__ == "__main__":
 # AMBIGUITIES RAISED BY THIS MODULE  (rule R-6)  -  three, each marked in place
 # at the code it governs, and each to be recorded in
 # docs/migration/ambiguity-resolutions.md.
-#   Q-CLI-IRS-RUNDATE  in `main`, at the `bind_irs_linkage` call. Whether irs030
+#   Q-CLI-IRS-RUNDATE  in `main`, at the `bind_irs_route` call. Whether irs030
 #     observes `IRS-System-Params.run-date pic x(8)` at all, and if so what value
 #     the option "4" route presents it with, given that
 #     `zz090-Proc-Run-Date.` [irs/irs.cbl:L972-L978] is performed on the option

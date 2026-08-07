@@ -66,8 +66,10 @@ import contextlib
 import importlib.util
 import io
 import os
+import re
 import subprocess
 import sys
+import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -130,7 +132,8 @@ del _missing_landmarks
 # distribution at all.
 HARNESS_DIR: Final[Path] = REPO_ROOT / "harness"
 
-# The eight scenario definitions (Agent Action Plan section 0.4.1.7). Created by
+# The scenario definitions (Agent Action Plan section 0.4.1.7 mandates eight; a
+# ninth, end_of_cycle_gl, covers gl080 - see SCENARIOS). Created by
 # another agent; absence is reported, never worked around.
 SCENARIO_DIR: Final[Path] = HARNESS_DIR / "scenarios"
 
@@ -171,6 +174,16 @@ SEED_SCRIPT: Final[Path] = HARNESS_DIR / "seed.sh"
 RESET_SCRIPT: Final[Path] = HARNESS_DIR / "reset_db.sh"
 RUN_COBOL_SCRIPT: Final[Path] = HARNESS_DIR / "run_cobol_scenario.sh"
 RUN_PYTHON_SCRIPT: Final[Path] = HARNESS_DIR / "run_python_scenario.sh"
+
+#: The protocol driver. Read here only for `--print-stages`, which publishes the
+#: canonical stage registry (finding F-16); the tests compose the stages themselves
+#: rather than driving this script, so that a stage's status is available individually.
+PARITY_SCRIPT: Final[Path] = HARNESS_DIR / "run_parity.sh"
+
+#: The canonical stage registry, sourced by the driver and both runners. Read through
+#: `PARITY_SCRIPT --print-stages` rather than parsed directly, so this module depends
+#: on the published interface and not on the file's shell syntax.
+STAGE_REGISTRY_SCRIPT: Final[Path] = HARNESS_DIR / "parity_stages.sh"
 
 # ---------------------------------------------------------------------------
 #  SECTION 2  -  THE ENVIRONMENT CONTRACT
@@ -237,6 +250,41 @@ ENV_DB_ADMIN_PASSWORD: Final[str] = "ACAS_DB_ADMIN_PASSWORD"
 # override the frozen tolerance, and hard-coding tolerance would remove the
 # operator's ability to bisect a seed (R-3, R-4).
 ENV_SEED_STRICT: Final[str] = "ACAS_SEED_STRICT"
+
+# ⭐ THE ONE RUN ID EVERY STAGE OF ONE PROTOCOL RUN CARRIES (finding F-37).
+#
+# `harness/run_parity.sh` mints one of these and exports it before stage 1, which is
+# how all ten of its stages come to agree; both runners read it, and
+# `harness/dump_tables.py` records it into each capture's provenance. When it is
+# ABSENT each runner derives its own `local-<hex>` id instead - so a protocol composed
+# stage by stage, as `run_scenario_parity` composes it, gave the two sides two
+# DIFFERENT ids and `harness/diff_states.py` then refused the pair outright, because
+# PROVENANCE_MUST_MATCH names `run_id' and two captures of different runs are not two
+# sides of one comparison. `harness/reset_db.sh` publishes the seed identity under the
+# same id and `acas_read_seed_identity` DISCARDS a record staged by another attempt,
+# so an unbound protocol also lost the seed marker that F-22 requires to be equal.
+# Binding it here is therefore not a convenience: it is what makes the composed
+# protocol and the driven one the same protocol.
+ENV_PARITY_RUN_ID: Final[str] = "ACAS_PARITY_RUN_ID"
+
+# The prefix this module mints under. `harness/run_parity.sh` uses `parity-` and a
+# hand-invoked runner uses `local-`, so a third prefix keeps the composed protocol
+# distinguishable in a retained artifact without any tool having to special-case it:
+# nothing validates the prefix, only the shape `^[A-Za-z0-9._-]{1,64}$`.
+RUN_ID_PREFIX: Final[str] = "pytest-"
+# THE ACCEPTANCE MODE. Set it to any of the affirmative spellings below and an
+# unusable stack becomes a FAILURE instead of a skip, so that an acceptance run
+# cannot report green having skipped the entire oracle tier. UNSET, the default,
+# keeps the skip, which is what lets `pytest -m arithmetic` succeed on a host with
+# no Docker, no MariaDB and no GnuCOBOL - the direct test of the three-tier design.
+#
+# It changes only the DISPOSITION of a missing precondition and never what counts as
+# one: the enumerated list in `_probe_stack` is the same either way.
+ENV_REQUIRE_ORACLE: Final[str] = "ACAS_REQUIRE_ORACLE"
+
+#: The spellings `ENV_REQUIRE_ORACLE` accepts as "yes". Anything else, including an
+#: empty value, leaves the default skip in place.
+_AFFIRMATIVE: Final[frozenset[str]] = frozenset({"1", "true", "yes", "on"})
 
 # The five variables `connection_settings` requires to be present and non-empty.
 # ACAS_DB_SOCKET may be empty - that means connect over TCP - but the harness
@@ -384,16 +432,31 @@ def assert_exact_numeric(value: object, *, where: str) -> None:
 # ---------------------------------------------------------------------------
 #  SECTION 4  -  THE HARNESS MODULE LOADER  (rule R-1)
 #
-#  THE SINGLE MOST IMPORTANT MECHANICAL FACT IN THIS FILE: harness/ IS NOT A
-#  PYTHON PACKAGE. It carries no __init__.py and must never gain one, and
-#  pyproject.toml's [tool.setuptools] `packages` allow-list names only the seven
-#  acas_posting packages plus the generated data directory. There is therefore
-#  DELIBERATELY no import path from the shipped package to the compiled oracle.
+#  THE SINGLE MOST IMPORTANT MECHANICAL FACT IN THIS FILE: nothing the SHIPPED
+#  package imports can reach harness/. That is enforced by pyproject.toml's
+#  [tool.setuptools] `packages` allow-list, which names only the seven
+#  acas_posting packages plus the generated data directory, with
+#  include-package-data = false; harness is absent by construction rather than
+#  filtered out. There is therefore DELIBERATELY no import path from the shipped
+#  package to the compiled oracle (R-1).
 #
-#  A PACKAGE-STYLE IMPORT IS WRONG AND FAILS AT COLLECTION: naming `harness` as a
-#  module and reaching a submodule through it cannot work, because the directory is
-#  not a package. The three modules are loaded BY EXPLICIT FILE PATH instead, and
-#  that is the only mechanism this module uses.
+#  ONE ARGUMENT IS DELIBERATELY NOT MADE HERE, BECAUSE IT IS FALSE. An earlier
+#  revision of this comment said a package-style import "FAILS AT COLLECTION ...
+#  because the directory is not a package". It does not fail. PEP 420 makes a
+#  directory without __init__.py an implicit NAMESPACE package, and the documented
+#  run command is `python -m pytest`, which puts the invocation directory on
+#  sys.path[0] -- so `import harness.normalize` resolves from the repository root
+#  and returns harness/normalize.py. That was measured in this checkout, not
+#  assumed. The absence of __init__.py is consequently NOT the enforcement
+#  mechanism; the allow-list above is.
+#
+#  A PACKAGE-STYLE IMPORT IS NEVERTHELESS NOT USED, and the reason is positive
+#  rather than a claim about what cannot work. Loading BY EXPLICIT FILE PATH is
+#  independent of sys.path, of the invocation directory and of whether the
+#  repository root happens to be importable, so the fixtures behave identically
+#  under `python -m pytest`, under a bare `pytest`, and from any cwd. It also lets
+#  each module be registered under a NAMESPACED sys.modules key (see below), which
+#  a namespace import cannot do. That is the only mechanism this module uses.
 #
 #  LOADING IS LAZY AND CHEAP. None of the three touches Docker, MariaDB or
 #  GnuCOBOL at import: harness/normalize.py and harness/diff_states.py are pure,
@@ -512,7 +575,7 @@ def harness_normalize() -> ModuleType:
 
 
 def harness_diff_states() -> ModuleType:
-    """The `harness/diff_states.py` module - protocol stage 8 (rule R-1).
+    """The `harness/diff_states.py` module - protocol stage 10 (rule R-1).
 
     Loaded by explicit file path, like its two siblings, because harness/ is not a
     Python package. Its verdict is the pass condition of Agent Action Plan section
@@ -533,7 +596,7 @@ def harness_diff_states() -> ModuleType:
 class HarnessModules:
     """The three harness Python modules, loaded and ready (rule R-1).
 
-    The three that implement stages 3, 4, 7 and 8 of the eight-stage parity protocol
+    The three that implement stages 3, 4, 7, 8 and 10 of the ten-stage parity protocol
     the canonical recipe in harness/docker-compose.yml publishes. Each is loaded by
     explicit file path, never imported as a package.
 
@@ -544,7 +607,7 @@ class HarnessModules:
     Attributes:
         dump_tables: `harness/dump_tables.py` - stages 3 and 7.
         normalize: `harness/normalize.py` - stage 4.
-        diff_states: `harness/diff_states.py` - stage 8.
+        diff_states: `harness/diff_states.py` - stage 10.
     """
 
     dump_tables: ModuleType
@@ -621,8 +684,14 @@ def frozen_schema_map() -> Mapping[str, Mapping[str, Any]]:
 #
 #  TWO OBSERVABLES, AND ONLY TWO. Agent Action Plan section 0.1.1: every one of the
 #  twelve in-scope posting programs contains ZERO clock reads - the date arrives
-#  purely through linkage - and the single read in the whole call chain is in the
-#  menu shell's date-service copybook [copybooks/Proc-ACAS-Mapser-RDB.cob:L72-L80].
+#  purely through linkage. That zero, and not any claim about how many reads the
+#  system holds, is what makes two observables sufficient. The reads themselves are
+#  MANY and all outside the migrated surface: the menu shells' shared date-service
+#  copybook [copybooks/Proc-ACAS-Mapser-RDB.cob:L72-L80] holds one, each of the four
+#  menu shells holds one of its own - [general/general.cbl:L371],
+#  [sales/sales.cbl:L323], [purchase/purchase.cbl:L318], [irs/irs.cbl:L480] - and
+#  `tests/determinism/test_two_runs_byte_identical.py` carries the full fourteen-site
+#  census, `accept ... from date` and `from time` included.
 #  So the controlled clock pins exactly these and nothing deeper:
 #
 #    1. THE TEXT DATE, `to-day pic x(10)` in DD/MM/CCYY form. It is the 3rd
@@ -632,7 +701,13 @@ def frozen_schema_map() -> Mapping[str, Mapping[str, Any]]:
 #       `using IRS-System-Params, WS-System-Record, File-Defs`.
 #    2. THE BINARY RUN DATE, declared `05  Run-Date        binary-long.` at
 #       [copybooks/wssystem.cob:L67]. It is a real SYSTEM-REC column
-#       (`RUN-DAT int(8) unsigned`) and is therefore VISIBLE IN A TABLE DUMP.
+#       (`RUN-DAT int(8) unsigned`), and it reaches the EVIDENCE by four independent
+#       routes: SYSTEM-REC is itself one of the 22 dumped tables, so the column is
+#       compared by value; every date column the cycle stamps in the other tables derives
+#       from it (`GLBATCH-REC.POSTED` [general/gl072.cbl:L376], `GLPOSTING-REC.POST-DAT`,
+#       `PSIRSPOST-REC.IRS-POST-DAT`); both runners read the column back after the run
+#       and refuse a value other than the pin; and both fingerprint SYSTEM-REC before
+#       and after. A drifting clock therefore cannot pass unseen.
 #
 #  NOTHING MORE IS BUILT. There is no Clock protocol, no ABC, no
 #  production-versus-test pair, no monkeypatch hook, no global singleton and no
@@ -721,8 +796,9 @@ def pinned_clock_from_calendar(calendar_date: date) -> acas_clock.PinnedRunDate:
     """Pin both observables from an injected calendar date (rule R-6).
 
     A thin factory over `acas_posting.clock.pin_from_calendar_date`, which
-    reproduces [copybooks/Proc-ACAS-Mapser-RDB.cob:L72-L80] with its one clock read
-    replaced by this argument.
+    reproduces [copybooks/Proc-ACAS-Mapser-RDB.cob:L72-L80] with that copybook's
+    clock read replaced by this argument. It is the date service's read, not the
+    system's only one - see SECTION 5's note.
 
     Args:
         calendar_date: The run date to pin. INJECTED - there is no default and no
@@ -806,14 +882,73 @@ NORMALIZED_SUFFIX: Final[str] = ".normalized"
 DIFF_FILENAME: Final[str] = "diff.txt"
 RUN_LOG_SUBDIR: Final[str] = "run-logs"
 
-# The two pre-run seed fingerprints, written INSIDE `run-logs/` and therefore outside
-# every compared tree. `harness/run_python_scenario.sh` writes the Python side's at
-# its stage 6a and cross-checks the oracle's counterpart when it exists, refusing to
-# proceed if the two disagree - row counts only, one `<TABLE>\t<count>` line per
-# affected table in the scenario's DECLARED order. They are the only record that the
-# two cycles were given the same starting state; see `assert_seed_fingerprints_agree`.
+# The pre-run and post-run state fingerprints, written INSIDE `run-logs/` and
+# therefore outside every compared tree.
+#
+# ONE LINE PER AFFECTED TABLE, IN THE SCENARIO'S DECLARED ORDER, AND THREE FIELDS:
+#
+#     <TABLE>\t<row count>\t<sha256 of the canonical dump>
+#
+# THE DIGEST IS THE THIRD FIELD AND IT IS WHAT MAKES THE RECORD MEAN ANYTHING. A row
+# count alone cannot tell two different seeds apart: swap one balance, alter one
+# status, load a different fixture with the same shape, and the counts agree while the
+# starting states do not - and then every downstream difference, or its absence, is
+# unattributable. The digest is taken by `harness/table_digest.py` over the canonical
+# text `harness/dump_tables.py` itself writes, so it covers EVERY BOUNDED TABLE AND
+# EVERY ROW at the declared scale, and BOTH SIDES COMPUTE IT WITH THE SAME PROGRAM -
+# which is the only way two independently produced digests can be compared byte for
+# byte at all.
+#
+# Both runners write the pre-run record immediately before dispatch and the post-run
+# record immediately after it. The pre-run pair proves the two cycles were handed the
+# same starting state (`assert_seed_fingerprints_agree`); the pre-run against post-run
+# comparison proves a run CHANGED something, which is what stops two no-ops passing a
+# determinism or an empty-batch claim (`assert_tables_unchanged_by_run`).
 SEED_FINGERPRINT_PYTHON: Final[str] = "python.seed-fingerprint"
 SEED_FINGERPRINT_COBOL: Final[str] = "cobol.seed-fingerprint"
+#  ⭐ THE MENU-PERSISTED PARAMETER ROW. `overrewrite' rewrites SYSTEM-REC key 1 on
+#  all four subsystems - [general/general.cbl:L656-L672], [sales/sales.cbl:L628-L641],
+#  [purchase/purchase.cbl:L621-L634], [irs/irs.cbl:L759-L774] - and the migrated
+#  command line REPRODUCES that paragraph [acas_posting/cli/args.py]. Both cycles
+#  therefore write it on every route.
+#
+#  IT IS ON EVERY SCENARIO'S AFFECTED-TABLE LIST AND IN EVERY CAPTURE, and the one
+#  problem a dump does have is solved where it arises rather than by dropping the table.
+#  The row carries `RDBMS-PASSWD char(12)' [copybooks/wssystem.cob:L139] and `PASS-WORD',
+#  and a capture is committed evidence, so `harness/dump_tables.py' withholds exactly
+#  those two cells through `REDACTED_COLUMNS' inside `render_value' - keyed by
+#  (table, column), applied identically on both sides, and therefore incapable of
+#  producing a difference of its own. The other 167 columns are compared by value.
+#  Bounding the whole table out instead would have taken those 167 with it, and a bound
+#  drawn that way cannot reveal a difference in what it excludes.
+#
+#  The second-order worry was MEASURED rather than assumed: the row's content depends on
+#  what the route DID - the run-date stamp, the IRS allocator, the one-shot latches, and
+#  `Date-Form', itself a SYSTEM-REC column [copybooks/wssystem.cob:L127] that the frozen
+#  date sections write back - so declaring it could in principle tie a scenario's effect
+#  claim to fields it does not reason about. It does not: the digest moves on exactly the
+#  five scenarios declaring `changed' and holds on the four declaring `unchanged'.
+#
+#  So both runners ALSO FINGERPRINT it, appended after the declared order, and this
+#  module compares the two sides' records. That is a second, independent parity check over
+#  all 169 columns, credentials included, with nothing to leak: a sha256 of the canonical
+#  dump is not the dump, so even the two withheld cells are compared.
+#  `assert_system_record_parity` is the assertion; `assert_tables_unchanged_by_run`
+#  reads the same records for the mutation witness.
+PARAMETER_TABLE: Final[str] = "SYSTEM-REC"
+POST_FINGERPRINT_PYTHON: Final[str] = "python.post-fingerprint"
+POST_FINGERPRINT_COBOL: Final[str] = "cobol.post-fingerprint"
+
+#: The three tab-separated fields of one fingerprint line.
+FINGERPRINT_FIELDS: Final[int] = 3
+
+#: What a fingerprint field holds when the table could not be read at all. A hyphen
+#: and never a zero: "this table could not be counted" is a different fact from "this
+#: table is empty", and both runners spell the unreadable case this way.
+FINGERPRINT_UNREADABLE: Final[str] = "-"
+
+#: The length of a SHA-256 in lower-case hexadecimal.
+DIGEST_LENGTH: Final[int] = 64
 
 
 @dataclass(frozen=True)
@@ -941,7 +1076,7 @@ def output_root(env: Mapping[str, str] | None = None) -> Path:
             f"{ENV_OUT} is not set, so there is nowhere to write the scenario "
             f"evidence. harness/docker-compose.yml sets it to /out for the "
             f"gnucobol service, backed by a named volume. It is deliberately not "
-            f"defaulted: the eight-stage protocol's output IS the evidence, and "
+            f"defaulted: the ten-stage protocol's output IS the evidence, and "
             f"evidence written to an unnamed location cannot be cited."
         )
     return Path(value).resolve()
@@ -1005,6 +1140,220 @@ class StackStatus:
 _STACK_STATUS: StackStatus | None = None
 
 
+#: The four compiled menu executables the COBOL side drives, each built by the
+#: maintainer's own per-directory script and living at `$ACAS_BUILD/<name>/<name>`.
+#: The runner asserts the same four [harness/run_cobol_scenario.sh, check 5/8]; this
+#: is the same list, checked BEFORE a scenario destroys the database rather than in
+#: the middle of one.
+ORACLE_MENUS: Final[tuple[str, ...]] = ("general", "sales", "purchase", "irs")
+
+#: One dynamically loadable handler module per in-scope table family. `cobc -m`
+#: produces `<name>.so`, and the menus `CALL` them by name through `$COB_LIBRARY_PATH`,
+#: so a menu that exists without these loads and then fails at the first read. Four
+#: representative handlers rather than all seventeen: they span the four families the
+#: posting cycle reaches (system, general ledger, sales/purchase, IRS), so any of them
+#: missing means the handler build did not complete.
+ORACLE_HANDLER_MODULES: Final[tuple[str, ...]] = (
+    "acas000",
+    "acas006",
+    "acas012",
+    "acasirsub1",
+)
+
+#: The shim supplying the copybook the frozen archive does not carry. Without it the
+#: bridge programs do not compile at all, so its absence explains an otherwise
+#: mystifying build failure and is worth naming separately.
+SQLSTATE_SHIM: Final[Path] = (
+    HARNESS_DIR / "copybook-shims" / "ACAS-SQLstate-error-list.cob"
+)
+
+#: `harness/build_oracle.sh`'s completion marker. Its presence says the build tree is
+#: the one that script produced rather than a directory that happens to exist.
+ORACLE_BUILD_MARKER: Final[str] = ".acas-build-oracle-tree"
+
+#: `harness/build_fixtures.sh`'s publish-last manifest. It is written LAST, so its
+#: presence is what distinguishes a complete fixture from a partial one - which is
+#: exactly why `harness/seed.sh` requires it too.
+FIXTURE_MANIFEST: Final[str] = ".acas-fixture-manifest"
+
+
+def _probe_compiled_oracle(
+    missing: list[str], detail: list[str]
+) -> None:
+    """Check that the compiled COBOL oracle exists, appending any faults.
+
+    Rule R-6 makes the compiled program the behavioural specification, so a scenario
+    tier with no compiled program has nothing to compare against. Every fault is
+    appended rather than raised, matching `_probe_stack`'s collect-everything
+    contract: one skip message must tell the operator everything that is missing.
+
+    Args:
+        missing: The machine-readable fault list, appended to in place.
+        detail: The human-readable lines, appended to in place.
+    """
+    build_root_name = (os.environ.get(ENV_BUILD) or "").strip()
+    if not build_root_name:
+        missing.append(f"env:{ENV_BUILD}")
+        detail.append(
+            f"  {ENV_BUILD} is unset or blank, so the compiled oracle cannot be "
+            f"located. It names the build tree harness/build_oracle.sh writes and "
+            f"harness/docker-compose.yml mounts"
+        )
+        return
+
+    build_root = Path(build_root_name)
+    if not build_root.is_dir():
+        missing.append(f"dir:{ENV_BUILD}")
+        detail.append(
+            f"  {ENV_BUILD} names {build_root}, which is not a directory: the "
+            f"oracle has never been built here. Run "
+            f"`harness/build_oracle.sh` inside the gnucobol service"
+        )
+        return
+
+    # The build script's own marker. Its absence does not by itself prove the
+    # artifacts are missing, so it is reported as detail alongside whatever else is
+    # found rather than short-circuiting the rest of the probe.
+    if not (build_root / ORACLE_BUILD_MARKER).exists():
+        missing.append("oracle:build-marker")
+        detail.append(
+            f"  {build_root / ORACLE_BUILD_MARKER} is absent, so this tree was not "
+            f"published by harness/build_oracle.sh. Even if artifacts are present "
+            f"they cannot be attributed to a completed build"
+        )
+
+    absent_menus: list[str] = []
+    not_executable: list[str] = []
+    for name in ORACLE_MENUS:
+        candidate = build_root / name / name
+        if not candidate.exists():
+            absent_menus.append(str(candidate))
+        elif not os.access(candidate, os.X_OK):
+            not_executable.append(str(candidate))
+    if absent_menus:
+        missing.append("oracle:menus")
+        detail.append(
+            f"  {len(absent_menus)} of {len(ORACLE_MENUS)} compiled menu "
+            f"executable(s) are absent: {', '.join(absent_menus)}. Every in-scope "
+            f"posting program is a CALLed sub-program with group-item linkage and "
+            f"cannot be invoked from a shell, so the menus ARE the oracle's "
+            f"entry points (Agent Action Plan section 0.1.1)"
+        )
+    if not_executable:
+        missing.append("oracle:menus-not-executable")
+        detail.append(
+            f"  compiled menu(s) present but not executable: "
+            f"{', '.join(not_executable)}"
+        )
+
+    # The handler modules. `cobc -m` writes `<name>.so`; the menus resolve them by
+    # name at run time, so a missing module is a failure at the first table read
+    # rather than at start-up - which is why it is checked here.
+    absent_modules = [
+        name
+        for name in ORACLE_HANDLER_MODULES
+        if not _find_oracle_module(build_root, name)
+    ]
+    if absent_modules:
+        missing.append("oracle:handler-modules")
+        detail.append(
+            f"  {len(absent_modules)} representative handler module(s) could not "
+            f"be found under {build_root}: "
+            f"{', '.join(f'{name}.so' for name in absent_modules)}. The menus CALL "
+            f"these by name through $COB_LIBRARY_PATH, so without them the oracle "
+            f"starts and then fails at its first table read"
+        )
+
+    # The copybook shim. Named separately because its absence produces a compile
+    # error in the bridges that looks nothing like "a copybook is missing".
+    if not SQLSTATE_SHIM.is_file():
+        missing.append("oracle:sqlstate-shim")
+        detail.append(
+            f"  {SQLSTATE_SHIM} is absent. The frozen archive does not carry that "
+            f"copybook, and every common/*MT bridge COPYs it, so no bridge can be "
+            f"compiled without the shim"
+        )
+
+
+def _find_oracle_module(build_root: Path, name: str) -> Path | None:
+    """Locate one dynamically loadable handler module under the build tree.
+
+    `harness/build_oracle.sh` follows the maintainer's own per-directory layout, so a
+    module may sit at the tree root or under the directory its source came from. Both
+    are accepted: this probe establishes that the module was BUILT, and the runner and
+    `$COB_LIBRARY_PATH` own where it is looked up from.
+
+    Args:
+        build_root: `$ACAS_BUILD`.
+        name: The module's program-id, for example `acas006`.
+
+    Returns:
+        The path found, or None.
+    """
+    candidates = [build_root / f"{name}.so", build_root / "common" / f"{name}.so"]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    # A single non-recursive sweep of the immediate subdirectories, so an unexpected
+    # but legitimate layout is accepted without walking an arbitrarily deep tree.
+    try:
+        for entry in sorted(build_root.iterdir()):
+            if entry.is_dir():
+                candidate = entry / f"{name}.so"
+                if candidate.is_file():
+                    return candidate
+    except OSError:
+        return None
+    return None
+
+
+def _probe_built_fixtures(
+    missing: list[str], detail: list[str]
+) -> None:
+    """Check that every scenario's fixture has been built, appending any faults.
+
+    Stages 1 and 5 pass `--seed-dir` into `harness/reset_db.sh`, which drops and
+    re-applies the frozen schema before it discovers the fixture is not there. So an
+    unbuilt fixture destroys the database and then fails - and it fails identically
+    for every scenario, which makes the whole tier look broken. Checked once, here.
+
+    Args:
+        missing: The machine-readable fault list, appended to in place.
+        detail: The human-readable lines, appended to in place.
+    """
+    try:
+        roots = {scenario: scenario_fixture_dir(scenario) for scenario in SCENARIOS}
+    except HarnessFaultError as exc:
+        missing.append("fixtures:root")
+        detail.append(f"  {exc}")
+        return
+
+    unbuilt = sorted(
+        scenario for scenario, root in roots.items() if not root.is_dir()
+    )
+    incomplete = sorted(
+        scenario
+        for scenario, root in roots.items()
+        if root.is_dir() and not (root / FIXTURE_MANIFEST).is_file()
+    )
+    if unbuilt:
+        missing.append("fixtures:unbuilt")
+        detail.append(
+            f"  {len(unbuilt)} of {len(SCENARIOS)} scenario fixture(s) have not "
+            f"been built: {', '.join(unbuilt)}. Build them with "
+            f"`harness/build_fixtures.sh` (all scenarios) or "
+            f"`harness/build_fixtures.sh <scenario>`"
+        )
+    if incomplete:
+        missing.append("fixtures:incomplete")
+        detail.append(
+            f"  {len(incomplete)} fixture director(ies) exist but carry no "
+            f"{FIXTURE_MANIFEST}: {', '.join(incomplete)}. The manifest is written "
+            f"LAST, so its absence means the build did not finish and the contents "
+            f"cannot be trusted - harness/seed.sh refuses them for the same reason"
+        )
+
+
 def _probe_stack() -> StackStatus:
     """Check every precondition the scenario and determinism tiers need.
 
@@ -1041,8 +1390,8 @@ def _probe_stack() -> StackStatus:
     if not SCENARIO_DIR.is_dir():
         missing.append("scenarios")
         detail.append(
-            f"  {SCENARIO_DIR} is absent, so no scenario can be read; the eight "
-            f"definitions bound every comparison"
+            f"  {SCENARIO_DIR} is absent, so no scenario can be read; a scenario "
+            f"definition is what bounds every comparison"
         )
 
     # 3. The writable output area.
@@ -1081,15 +1430,35 @@ def _probe_stack() -> StackStatus:
             )
 
     # 6. The database environment, resolved by the single authority.
+    #
+    #    ⭐ ONLY THE ENUMERATED EXTERNAL-UNAVAILABILITY CONDITIONS ARE SKIPS, and the
+    #    narrowing is the whole point. A blanket `except Exception` here turned every
+    #    repository defect into a skip: a signature change in
+    #    `connection_settings`, a `TypeError` from a renamed keyword, an `ImportError`
+    #    from a broken harness module, a parser defect - each one made the WHOLE R-6
+    #    tier green-with-skips, which is indistinguishable from a bare host and is the
+    #    most expensive failure mode a test suite has. So `dump_tables`'s own
+    #    `ConnectionConfigError` - which is what an absent or malformed `ACAS_DB_*`
+    #    environment raises, and which carries the authoritative message - is a skip,
+    #    an absent script is a skip, and EVERYTHING ELSE PROPAGATES. Raised out of
+    #    `_probe_stack` it surfaces as a pytest ERROR from the fixture, which is what
+    #    a defect in this repository must look like.
     settings = None
+    dump_tables_module = None
     try:
-        settings = harness_dump_tables().connection_settings(os.environ)
+        dump_tables_module = harness_dump_tables()
     except FileNotFoundError as exc:
         missing.append("script:dump_tables.py")
         detail.append(f"  {exc}")
-    except Exception as exc:  # noqa: BLE001 - any resolution failure is a skip
-        missing.append("env:ACAS_DB_*")
-        detail.append(f"  {exc}")
+
+    if dump_tables_module is not None:
+        try:
+            settings = dump_tables_module.connection_settings(os.environ)
+        except dump_tables_module.ConnectionConfigError as exc:
+            # The single authority's own diagnosis of an unusable environment. Its
+            # message names the variable and what it wanted, so nothing is added.
+            missing.append("env:ACAS_DB_*")
+            detail.append(f"  {exc}")
 
     if settings is not None:
         expected_consent = reset_consent_token(settings)
@@ -1109,12 +1478,46 @@ def _probe_stack() -> StackStatus:
         #    settled half of docs/migration/ambiguity-resolutions.md#q-10; the
         #    OFF window belongs to harness/seed.sh and to nothing else. One
         #    connection, opened once per session (rule R-3: no pool, no thread).
+        #
+        #    ⭐ AGAIN ENUMERATED, AND FOR THE SAME REASON. The four conditions below
+        #    are the ways an EXTERNAL server can be unavailable to this process, and
+        #    each is a legitimate skip. `AssertionError` is deliberately NOT among
+        #    them: `assert_runtime_autocommit_on` failing means the server is
+        #    reachable but configured in a way the protocol cannot use, which is a
+        #    stack DEFECT rather than a stack absence, and it must be seen. Anything
+        #    unlisted - a TypeError from a changed signature, an AttributeError from a
+        #    renamed constant - propagates and becomes a pytest ERROR.
         try:
-            with harness_dump_tables().connect(settings) as connection:
+            with dump_tables_module.connect(settings) as connection:
                 assert_runtime_autocommit_on(connection)
-        except Exception as exc:  # noqa: BLE001 - unreachable server is a skip
+        except (
+            dump_tables_module.ConnectionConfigError,
+            dump_tables_module.InsecureTransportError,
+            dump_tables_module.DriverUnavailableError,
+            dump_tables_module.DumpTimeoutError,
+            dump_tables_module.DumpError,
+            OSError,
+        ) as exc:
             missing.append("database")
             detail.append(f"  {type(exc).__name__}: {exc}")
+
+    # 8. THE COMPILED ORACLE ITSELF (finding F-38).
+    #
+    #    THE DEFECT THIS CLOSES. Everything above establishes that the harness can
+    #    REACH its inputs; none of it established that the thing being compared
+    #    against exists. Against a checkout whose oracle had never been built, every
+    #    check above passed, the tier declared itself available, and the failure
+    #    surfaced as harness/run_cobol_scenario.sh exiting 74 in the middle of a test
+    #    that had already reset and re-seeded the database. That is the worst place to
+    #    discover it: the diagnosis is buried in a subprocess transcript and the
+    #    database has been destroyed for nothing. A missing oracle is a precondition,
+    #    so it is reported as one - with the command that builds it.
+    _probe_compiled_oracle(missing, detail)
+
+    # 9. THE BUILT FIXTURES. Same argument: stages 1 and 5 pass --seed-dir into the
+    #    reset script, and a fixture root that was never built makes the FIRST
+    #    destructive stage fail. Checked here, before anything is dropped.
+    _probe_built_fixtures(missing, detail)
 
     if not missing:
         return StackStatus(available=True, reason=None, missing=())
@@ -1147,20 +1550,45 @@ def stack_status() -> StackStatus:
     return _STACK_STATUS
 
 
-def requires_stack() -> None:
-    """Skip the calling test unless the harness stack is usable.
+def oracle_is_required() -> bool:
+    """Is this an ACCEPTANCE run, in which a skipped oracle tier is a failure?
 
-    A SKIP AND NOT A HARD FAILURE, deliberately: it is what lets
+    Returns:
+        True when `ACAS_REQUIRE_ORACLE` carries an affirmative spelling.
+    """
+    return (os.environ.get(ENV_REQUIRE_ORACLE) or "").strip().lower() in _AFFIRMATIVE
+
+
+def requires_stack() -> None:
+    """Skip - or, in acceptance mode, FAIL - unless the harness stack is usable.
+
+    A SKIP AND NOT A HARD FAILURE BY DEFAULT, deliberately: it is what lets
     `pytest -m arithmetic` succeed on a host with no Docker, no MariaDB and no
     GnuCOBOL, which is the direct test of the three-tier design. The reason names
     every missing precondition, so an operator is not told one thing at a time.
 
+    ⭐ AND AN ACCEPTANCE MODE, because "green with 63 skips" and "green having
+    proved the parity claim" must not look alike to whoever reads the run. With
+    `ACAS_REQUIRE_ORACLE` set, an unusable stack FAILS with the same reason text, so
+    a run that was supposed to exercise the oracle cannot silently decline to. The
+    two dispositions differ; the enumerated conditions in `_probe_stack` do not.
+
     Raises:
-        Skipped: pytest's own skip exception, when a precondition is missing.
+        Skipped: pytest's own skip exception, when a precondition is missing and the
+            acceptance mode is off.
+        AssertionError: When a precondition is missing and `ACAS_REQUIRE_ORACLE` is
+            set.
     """
     status = stack_status()
-    if not status.available:
-        pytest.skip(status.reason or "the harness Compose stack is not usable")
+    if status.available:
+        return
+    reason = status.reason or "the harness Compose stack is not usable"
+    if oracle_is_required():
+        raise AssertionError(
+            f"{ENV_REQUIRE_ORACLE} is set, so the oracle tier may not be skipped, "
+            f"and it cannot run:\n{reason}"
+        )
+    pytest.skip(reason)
 
 
 def reset_consent_token(settings: Any) -> str:
@@ -1193,15 +1621,26 @@ def reset_consent_token(settings: Any) -> str:
 #  SECTION 7  -  SCENARIO DEFINITIONS AND THE OPERATION VOCABULARY
 # ---------------------------------------------------------------------------
 
-# THE EIGHT SCENARIOS, one per tests/scenarios/test_*.py, each at
-# harness/scenarios/<name>.yaml. Agent Action Plan section 0.8.5 mandates the set,
-# expanding "clean batch post per ledger" into four cases because the four ledgers
-# exercise materially different code paths.
+# THE NINE SCENARIOS, one per tests/scenarios/test_*.py, each at
+# harness/scenarios/<name>.yaml. Agent Action Plan section 0.8.5 mandates eight of
+# them, expanding "clean batch post per ledger" into four cases because the four
+# ledgers exercise materially different code paths.
 #
 # `control_total_mismatch` IS GENERAL-LEDGER-SPECIFIC. Agent Action Plan section
 # 0.6.4: Sales and Purchase batches "balance by construction ... there is no
 # meaningful way to construct an unbalanced sales batch". There is deliberately no
 # SL or PL variant, and no helper here implies one is possible.
+#
+# `end_of_cycle_gl` IS THE NINTH, AND IT IS ADDITIVE RATHER THAN A SUBSTITUTION. The
+# mandated eight drive the posting cycle, the two trading ledgers and the IRS
+# fan-out, and not one of them runs `gl080` - so posting deletion, batch stamping,
+# the nominal-ledger quarter rollover and the cycle advance had no state comparison
+# behind them at all, even though `gl080` is one of the twelve in-scope programs and
+# owns the only one of the five `ROUNDED` stores a scenario can reach
+# [general/gl080.cbl:L328]. It drives the real `gl_end_of_cycle` route, which both
+# runners already supported. Adding a scenario is permitted: section 0.8.5 states
+# the set that MUST be covered, not a ceiling, and section 0.2.1.2 scopes
+# `harness/scenarios/*.yaml` and `tests/scenarios/test_*.py` by trailing wildcard.
 SCENARIOS: Final[tuple[str, ...]] = (
     "clean_batch_gl",
     "clean_batch_sl",
@@ -1211,6 +1650,7 @@ SCENARIOS: Final[tuple[str, ...]] = (
     "period_end_totals",
     "control_total_mismatch",
     "empty_batch",
+    "end_of_cycle_gl",
 )
 
 # THE SEVEN OPERATIONS, identical in both runners, mapped to the Python module and
@@ -1314,16 +1754,24 @@ RUN_COBOL_FAULT_CODES: Final[frozenset[int]] = frozenset(
 # missing module, an unusable database, an option a module does not publish, a seed
 # fingerprint disagreement - and is never a term code.
 #
-# IT CHANGES NO CLASSIFICATION, AND THAT IS THE POINT. The band is disjoint from every
-# term code any operation admits (only 5 and 8 exist anywhere,
-# [general/gl070.cbl:L289], [sales/sl055.cbl:L344], [purchase/pl055.cbl:L286]), so
-# every code in it already fell through `classify_run`'s term-code test to
-# `DISPOSITION_HARNESS_FAULT`. Naming it makes the two run stages symmetrical in the
-# code as well as in behaviour, so a reader no longer has to derive the Python side's
-# disposition from an absence.
+# 69 IS DELIBERATELY NOT IN THIS SET (finding F-14).
+#
+# harness/run_python_scenario.sh declares 69 as `EX_BEHAVIOUR`: the runner drove the
+# cycle to completion and found that an operation's OBSERVED disposition contradicted
+# the one the scenario declared. That is the single most important finding the whole
+# protocol can produce - a real behavioural difference between the migrated cycle and
+# its specification - and it was being classified as a HARNESS FAULT, which reads as
+# "the test rig is broken" and is reported as an error rather than a failure. A
+# migration defect was therefore indistinguishable from a missing environment
+# variable. 69 now classifies as `DISPOSITION_BEHAVIOURAL` and reaches the test body,
+# where it FAILS.
 RUN_PYTHON_FAULT_CODES: Final[frozenset[int]] = frozenset(
-    {69, 70, 71, 72, 73, 74, 75, 76, 77, 78}
+    {70, 71, 72, 73, 74, 75, 76, 77, 78}
 )
+
+#: `EX_BEHAVIOUR` from harness/run_python_scenario.sh. The wrapper completed; an
+#: operation's observed status contradicted its declared one. Never a harness fault.
+RUN_PYTHON_BEHAVIOURAL_EXIT: Final[int] = 69
 
 # The frozen load programs' documented return codes, from
 # [common/masterLD.sh:L37-L39] verbatim, each traced to its site in
@@ -1490,6 +1938,16 @@ def scenario_fixture_dir(scenario: str) -> Path:
     explicitly through `--seed-dir`; the scenario's `seed_files` list remains the
     authority for *which* files are accepted.
 
+    THE RULE IS STATED ONCE, BY THE PRODUCER, and derived identically in three
+    places: `harness/build_fixtures.sh`'s `ACAS_BF_OUT` default owns it,
+    `harness/run_parity.sh`'s `acas_parity_resolve_fixture_root` derives it for the
+    standalone driver, and this function derives it for the pytest protocol.
+    `test_shared_storage_and_dispatch_boundaries.py` measures all three against one
+    environment and fails if any pair disagrees, because a comment would not keep
+    them in step. The one deliberate difference: the builder falls back to `/data`
+    as a last resort because it can be run outside Compose, while both readers
+    would rather refuse than guess - hence the `HarnessFaultError` below.
+
     Args:
         scenario: The scenario name.
 
@@ -1542,12 +2000,72 @@ def scenario_staged_data_dir(scenario: str) -> Path:
 
 
 def scenario_runtime_environment(scenario: str) -> dict[str, str]:
-    """Build the environment shared by the COBOL and Python run stages."""
+    """Build the environment shared by the COBOL and Python run stages.
+
+    Copied from `os.environ`, so a run id bound by `bound_run_id` reaches both
+    runners without either helper having to know about it.
+    """
     staged = str(scenario_staged_data_dir(scenario))
     environment = dict(os.environ)
     environment[ENV_DATA] = staged
     environment[ENV_LEDGERS] = staged
     return environment
+
+
+def mint_run_id() -> str:
+    """Mint one run id for one protocol run.
+
+    Shaped to satisfy the runners' own validation, `^[A-Za-z0-9._-]{1,64}$`, so an
+    artifact published under it is indistinguishable in form from one published by
+    `harness/run_parity.sh`.
+
+    Returns:
+        A fresh id, for example `pytest-3f9c1a04b7e24d61`.
+    """
+    return f"{RUN_ID_PREFIX}{uuid.uuid4().hex[:16]}"
+
+
+@contextlib.contextmanager
+def bound_run_id(run_id: str | None = None) -> Iterator[str]:
+    """Bind one run id into the environment for the duration of a protocol run.
+
+    THE STAGES ARE SEPARATE PROCESSES, and each of them derives its own identity when
+    none is supplied. That is correct for a hand invocation and wrong for a protocol:
+    the two sides must be provably two halves of ONE attempt before a verdict may be
+    rendered on them (findings F-22, F-37, F-45). `harness/run_parity.sh` achieves this
+    by exporting the id before its first stage; this does the same for the protocol
+    composed in this module, and every stage helper inherits `os.environ`, so no helper
+    signature changes and a test that drives a single stage is unaffected.
+
+    RESTORED ON EXIT, including on an exception, so one test can never leak its run id
+    into the next. A pre-existing value is honoured rather than overwritten when
+    `run_id` is None, which is what lets an outer driver own the id.
+
+    Args:
+        run_id: The id to bind. A fresh one is minted when None, unless the
+            environment already carries one, which is then reused.
+
+    Yields:
+        The id that is bound for the duration.
+    """
+    if run_id is None:
+        run_id = os.environ.get(ENV_PARITY_RUN_ID) or mint_run_id()
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", run_id):
+        raise ValueError(
+            f"a run id must match ^[A-Za-z0-9._-]{{1,64}}$ - the shape both runners "
+            f"validate before they will accept one - and {run_id!r} does not. An id "
+            f"the runners reject would abort stage 2 rather than binding anything."
+        )
+
+    previous = os.environ.get(ENV_PARITY_RUN_ID)
+    os.environ[ENV_PARITY_RUN_ID] = run_id
+    try:
+        yield run_id
+    finally:
+        if previous is None:
+            os.environ.pop(ENV_PARITY_RUN_ID, None)
+        else:
+            os.environ[ENV_PARITY_RUN_ID] = previous
 
 
 def scenario_definition(scenario: str) -> Mapping[str, Any]:
@@ -1578,7 +2096,8 @@ def scenario_definition(scenario: str) -> Mapping[str, Any]:
     if not path.is_file():
         raise FileNotFoundError(
             f"the scenario definition {scenario!r} was expected at {path} and is "
-            f"not there. The eight definitions - {', '.join(SCENARIOS)} - are an "
+            f"not there. The {len(SCENARIOS)} definitions - {', '.join(SCENARIOS)} - "
+            f"are an "
             f"Agent Action Plan section 0.4.1.7 deliverable, and every comparison "
             f"is bounded by one: an unbounded dump is refused rather than "
             f"defaulted."
@@ -1604,24 +2123,58 @@ def scenario_definition(scenario: str) -> Mapping[str, Any]:
 
 
 def scenario_affected_tables(scenario: str) -> tuple[str, ...]:
-    """One scenario's affected-table list, in the order it declares them.
+    """One scenario's DECLARED EFFECT, in the order it declares them.
 
-    THIS IS HOW A COMPARISON IS BOUNDED, and the only way. Two structural
-    asymmetries exist between the two sides and neither is a migration defect:
+    THIS IS NOT HOW THE COMPARISON IS BOUNDED. It is the list the runners assert
+    changed or unchanged against `expected_table_effect`. The capture and the diff
+    are bounded by ALL 22 in-scope tables - `in_scope_tables()`, passed as
+    `--all-in-scope` by `dump` and `diff` - because a bound drawn from what a
+    scenario EXPECTS to move cannot show a difference in anything it did not expect
+    to move, and an empty diff is the single pass condition (Agent Action Plan
+    section 0.8.5).
+
+    Four facts about the two sides shape the declared lists, and none of them is a
+    migration defect:
 
       1. The menu shell's exit path runs `overrewrite`, persisting SYSTEM-REC
          (key 1), SYSDEFLT-REC (key 2) and SYSTOT-REC (key 4)
-         [general/general.cbl:L656-L691], and `load000` does it on EVERY call. The
-         Python command line has no menu and never does this.
-      2. sl830 runs only on the COBOL side [sales/sales.cbl:L759].
+         [general/general.cbl:L656-L691], and `load000` does it on EVERY call.
+         `acas_posting/cli/args.py`'s `overrewrite` is its migrated counterpart and
+         every one of the seven routes calls it, so KEY 1 IS WRITTEN ON BOTH SIDES.
+         Key 2 is General-only; SL/PL write keys 1 and 4; IRS writes key 1 alone.
+         The asymmetry that once justified a narrower bound therefore no longer
+         exists.
+      2. SYSTEM-REC is dumped and compared like every other in-scope table, and its
+         TWO CREDENTIAL COLUMNS are rendered as a constant rather than captured -
+         `harness/dump_tables.py`'s `REDACTED_COLUMNS`, applied in the one funnel
+         every captured cell passes through and keyed by `(table, column)` so it is
+         identical on both sides. A capture is `SELECT *` and a capture is evidence a
+         human reads, and `RDBMS-PASSWD char(12)` [copybooks/wssystem.cob:L139] and
+         `PASS-WORD char(4)` have no business in it. Bounding the whole row out would
+         have removed the leak by removing 168 columns the two cycles genuinely
+         write - the run-date stamp, the IRS allocator, the one-shot latches,
+         `Date-Form`, itself a SYSTEM-REC column [copybooks/wssystem.cob:L127] the
+         frozen date sections write back - from every diff.
+      3. The row is ALSO fingerprinted, before and after each run and on both sides,
+         so a change is witnessed even where the diff is empty:
+         `assert_system_record_parity` compares the two post-run digests and
+         `assert_tables_unchanged_by_run` reads the same records for the mutation
+         witness. MEASURED, so the fragility objection is on record rather than
+         asserted: the digest moves on exactly the scenarios declaring `changed` and
+         holds on those declaring `unchanged`, so counting the row toward
+         `expected_table_effect` falsifies no claim today.
+      4. sl830 runs only on the COBOL side [sales/sales.cbl:L759], so the four
+         autogen tables are never seeded and never listed; the scenarios that could
+         reach it pin `sl_autogen` so it cannot, which is an input decision rather
+         than a bound, and both runners assert after the run that all four are still
+         empty.
 
-    So comparing those tables in a scenario that does not affect them reports a
-    FALSE FAILURE. THE RESOLUTION IS TO BOUND, NEVER TO IGNORE: there is no
-    ignore-list, no tolerance-list and no "known difference" allowance anywhere in
-    the diff path. Note that SYSTOT-REC IS genuinely in scope for
-    `period_end_totals` - Agent Action Plan section 0.6.4 names nine period-total
-    write sites, "the sole writers of the totals record" - so it is never blanket
-    excluded.
+    THERE IS STILL NO IGNORING, ONLY BOUNDING: no ignore-list, no tolerance-list and
+    no "known difference" allowance exists anywhere in the diff path, and the one
+    value substitution is a REDACTION applied to both sides of the same comparison.
+    Note that SYSTOT-REC IS genuinely in scope for `period_end_totals` - Agent Action
+    Plan section 0.6.4 names nine period-total write sites, "the sole writers of the
+    totals record" - so it is never blanket excluded.
 
     Delegates the reading and the in-scope check to `harness/dump_tables.py`'s
     `scenario_tables`, so the list is validated exactly once (rule R-4).
@@ -1688,6 +2241,14 @@ STAGE_TIMEOUT_RUN: Final[int] = 3600
 
 # The protocol stage names, used in every `StageResult` and every failure message so
 # a reader can place a finding in the sequence at a glance.
+#
+# THE NUMBERING IS THE CANONICAL ONE (finding F-16). The protocol has TEN stages,
+# defined once in harness/parity_stages.sh and published by
+# `harness/run_parity.sh --print-stages`. These names previously numbered the second
+# normalisation `7b` and the comparison `8`, which described an EIGHT-stage protocol
+# that had not been the one driven for some time - so a stage number in a test failure
+# named a different stage from the same number in a driver transcript. They now agree,
+# and `parity_stage_registry` reads the registry so a test can prove they still do.
 STAGE_SEED: Final[str] = "1-seed"
 STAGE_RUN_COBOL: Final[str] = "2-run-cobol"
 STAGE_DUMP_COBOL: Final[str] = "3-dump-cobol"
@@ -1695,8 +2256,101 @@ STAGE_NORMALIZE_COBOL: Final[str] = "4-normalize-cobol"
 STAGE_RESET: Final[str] = "5-reset"
 STAGE_RUN_PYTHON: Final[str] = "6-run-python"
 STAGE_DUMP_PYTHON: Final[str] = "7-dump-python"
-STAGE_NORMALIZE_PYTHON: Final[str] = "7b-normalize-python"
-STAGE_DIFF: Final[str] = "8-diff"
+STAGE_NORMALIZE_PYTHON: Final[str] = "8-normalize-python"
+STAGE_VERIFY_PUBLISHED: Final[str] = "9-verify-published"
+STAGE_DIFF: Final[str] = "10-diff"
+
+#: Every stage name above, in protocol order, so a consumer can iterate the sequence
+#: without re-listing it.
+STAGE_NAMES: Final[tuple[str, ...]] = (
+    STAGE_SEED,
+    STAGE_RUN_COBOL,
+    STAGE_DUMP_COBOL,
+    STAGE_NORMALIZE_COBOL,
+    STAGE_RESET,
+    STAGE_RUN_PYTHON,
+    STAGE_DUMP_PYTHON,
+    STAGE_NORMALIZE_PYTHON,
+    STAGE_VERIFY_PUBLISHED,
+    STAGE_DIFF,
+)
+
+
+_STAGE_REGISTRY: list[tuple[int, str]] | None = None
+
+
+def parity_stage_registry() -> tuple[tuple[int, str], ...]:
+    """Return the canonical stage registry, `(number, label)` in protocol order.
+
+    THE ONE PLACE THE PROTOCOL'S SHAPE IS DEFINED (finding F-16) is
+    harness/parity_stages.sh, and `harness/run_parity.sh --print-stages` is how it is
+    published. Reading it here rather than restating it is what stops this module's
+    prose drifting from the protocol it composes - which is exactly what had happened:
+    this file described EIGHT stages while the driver drove ten.
+
+    Memoised per session: it is a subprocess, and the answer cannot change mid-run.
+
+    Returns:
+        The registry rows. Empty when the driver could not be run, which a caller
+        treats as "cannot check" rather than as a failure - `pytest -m arithmetic`
+        must succeed on a host with no harness at all.
+    """
+    global _STAGE_REGISTRY
+    if _STAGE_REGISTRY is not None:
+        return tuple(_STAGE_REGISTRY)
+
+    rows: list[tuple[int, str]] = []
+    if PARITY_SCRIPT.is_file() and os.access(PARITY_SCRIPT, os.X_OK):
+        try:
+            completed = subprocess.run(  # noqa: S603 - a fixed, repo-local path
+                [str(PARITY_SCRIPT), "--print-stages"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                stdin=subprocess.DEVNULL,
+                check=False,
+                cwd=REPO_ROOT,
+            )
+        except (OSError, subprocess.SubprocessError):
+            completed = None
+        if completed is not None and completed.returncode == 0:
+            for line in completed.stdout.splitlines():
+                if not line.strip():
+                    continue
+                number, _, label = line.partition("\t")
+                try:
+                    rows.append((int(number, 10), label))
+                except ValueError:
+                    # A row this module cannot parse is reported by the test that
+                    # checks the registry, not swallowed into a partial answer.
+                    rows = []
+                    break
+
+    _STAGE_REGISTRY = rows
+    return tuple(rows)
+
+
+def stage_number(stage: str) -> int:
+    """Return the protocol stage number encoded in one stage name.
+
+    Args:
+        stage: One of `STAGE_NAMES`, for example `"6-run-python"`.
+
+    Returns:
+        The number, for example 6.
+
+    Raises:
+        ValueError: The name does not begin with a number, which would mean a stage
+            constant had been written in a shape nothing can place in the sequence.
+    """
+    number, _, _ = stage.partition("-")
+    try:
+        return int(number, 10)
+    except ValueError as exc:
+        raise ValueError(
+            f"the stage name {stage!r} does not begin with its protocol stage "
+            f"number, so a reader cannot place it in the sequence."
+        ) from exc
 
 
 class HarnessFaultError(RuntimeError):
@@ -1936,20 +2590,152 @@ def _requested_operations(
     return (str(definition[SCENARIO_KEY_OPERATION]),)
 
 
+#: The per-operation status artifact each runner publishes beside its transcript,
+#: named `<side>.operation-status`. THE AUTHORITY for what each driven operation
+#: actually did (finding F-13): the transcript line is a diagnostic that a `--quiet`
+#: mode or a redirected stream can lose, whereas this file is published atomically at
+#: mode 0600 and carries the run id, so it can be attributed to an attempt.
+OPERATION_STATUS_SUFFIX: Final[str] = ".operation-status"
+
+
+def read_operation_status_artifact(
+    scenario: str,
+    side: str,
+    *,
+    out_dir: Path | str | None = None,
+) -> tuple[tuple[str, int], ...] | None:
+    """Read one side's published per-operation statuses, in declared order.
+
+    THE RECORD SHAPE, published by both runners:
+
+        scenario<TAB><name>
+        side<TAB>cobol|python
+        run_id<TAB><id>
+        operations<TAB><count>
+        operation<TAB><index><TAB><name><TAB><status>     x count
+
+    Args:
+        scenario: The scenario name.
+        side: `cobol` or `python`.
+        out_dir: The output root; `$ACAS_OUT` when omitted.
+
+    Returns:
+        The ordered `(operation, status)` pairs, or None when the file is absent -
+        which is not by itself a fault, because a hand-driven run legitimately has
+        none and the caller decides whether it needed one.
+
+    Raises:
+        HarnessFaultError: The file exists but is malformed, or its rows are not a
+            complete ordered set. A published artifact that cannot be read is worse
+            than an absent one: it looks like evidence.
+    """
+    assert_scenario_name(scenario)
+    assert_side(side)
+    paths = scenario_paths(scenario, out_root=out_dir)
+    path = paths.run_logs / f"{side}{OPERATION_STATUS_SUFFIX}"
+    if not path.is_file():
+        return None
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise HarnessFaultError(
+            f"the {side} operation-status artifact {path} exists but could not be "
+            f"read: {exc}. It is what says what each driven operation actually did, "
+            f"so a capture cannot be attributed without it."
+        ) from exc
+
+    declared: int | None = None
+    rows: list[tuple[int, str, int]] = []
+    for number, line in enumerate(text.splitlines(), start=1):
+        if not line.strip():
+            continue
+        fields = line.split("\t")
+        key = fields[0]
+        if key == "operations" and len(fields) == 2:
+            try:
+                declared = int(fields[1], 10)
+            except ValueError as exc:
+                raise HarnessFaultError(
+                    f"{path}:{number}: the operation count {fields[1]!r} is not an "
+                    f"integer."
+                ) from exc
+        elif key == "operation":
+            if len(fields) != 4:
+                raise HarnessFaultError(
+                    f"{path}:{number}: an operation record must carry index, name "
+                    f"and status; got {line!r}."
+                )
+            try:
+                rows.append((int(fields[1], 10), fields[2], int(fields[3], 10)))
+            except ValueError as exc:
+                raise HarnessFaultError(
+                    f"{path}:{number}: a non-integer index or status in {line!r}."
+                ) from exc
+
+    if declared is None:
+        raise HarnessFaultError(
+            f"{path} declares no operation count, so there is no way to tell a "
+            f"complete record from a truncated one."
+        )
+    if len(rows) != declared:
+        raise HarnessFaultError(
+            f"{path} declares {declared} operation(s) but carries {len(rows)} "
+            f"record(s). A partial set cannot establish the dispositions this "
+            f"capture belongs to."
+        )
+    if [index for index, _, _ in rows] != list(range(1, declared + 1)):
+        raise HarnessFaultError(
+            f"{path} carries operation indices "
+            f"{[index for index, _, _ in rows]!r}; expected 1..{declared} in order. "
+            f"The order is the order they were driven in, and it matters."
+        )
+    return tuple((name, status) for _, name, status in rows)
+
+
 def _attach_operation_statuses(
     result: StageResult,
     operations: Sequence[str],
+    *,
+    scenario: str | None = None,
+    side: str | None = None,
+    out_dir: Path | str | None = None,
 ) -> StageResult:
-    """Attach machine-readable child-operation statuses to a successful run stage.
+    """Attach machine-readable child-operation statuses to a run stage.
 
-    Both runners emit one `OPERATION_STATUS<TAB>operation<TAB>status` line after
-    each driven operation. A wrapper failure remains untouched because its own exit
-    status is the diagnosis. A wrapper that exits zero without a complete, ordered
-    set of records is a harness fault: its database capture could otherwise be
-    attributed to an operation whose disposition was never established.
+    THE STRUCTURED ARTIFACT IS THE AUTHORITY (finding F-13). Each runner publishes
+    `<side>.operation-status` carrying one row per declared operation; the transcript
+    also carries an `OPERATION_STATUS<TAB>operation<TAB>status` line per operation, and
+    when both are present they must AGREE - a disagreement means one of the two was
+    written by a different run and is a fault, not something to pick a winner from.
+
+    A NON-ZERO WRAPPER NO LONGER SKIPS THIS (finding F-14). It used to return
+    immediately, on the reasoning that the wrapper's own status was the diagnosis. But
+    the one status where that is most wrong is `EX_BEHAVIOUR` (69): the wrapper is
+    saying an operation's observed disposition contradicted its declared one, and the
+    per-operation statuses are precisely what identify WHICH operation and WHAT it did.
+    Returning early discarded them at the only moment they mattered.
+
+    Args:
+        result: The run stage's result.
+        operations: The operations that were requested, in order.
+        scenario: The scenario, so the published artifact can be located. When None
+            the transcript is the only source, which is the pre-artifact behaviour.
+        side: `cobol` or `python`, for the same reason.
+        out_dir: The output root; `$ACAS_OUT` when omitted.
+
+    Returns:
+        The result with `operation_statuses` populated.
+
+    Raises:
+        HarnessFaultError: The records are malformed, incomplete, out of order, or
+            the artifact and the transcript disagree.
     """
-    if result.returncode != 0:
-        return result
+    published: tuple[tuple[str, int], ...] | None = None
+    if scenario is not None and side is not None:
+        published = read_operation_status_artifact(
+            scenario, side, out_dir=out_dir
+        )
 
     observed: list[tuple[str, int]] = []
     for line in result.stdout.splitlines():
@@ -1972,11 +2758,29 @@ def _attach_operation_statuses(
         observed.append((fields[1], status))
 
     expected_names = tuple(operations)
-    observed_names = tuple(operation for operation, _ in observed)
-    if observed_names != expected_names:
+
+    # THE TWO SOURCES MUST AGREE. When they do not, one of them belongs to another
+    # run, and choosing either would attribute this capture to a disposition it may
+    # not have had.
+    if published is not None and observed and tuple(published) != tuple(observed):
         raise HarnessFaultError(
-            f"stage {result.stage} exited zero but recorded operation statuses for "
-            f"{observed_names!r}; expected {expected_names!r} in that order. A run "
+            f"stage {result.stage} published operation statuses {published!r} but "
+            f"its transcript records {tuple(observed)!r}. The two disagree, so one "
+            f"of them was written by a different run and neither can be trusted to "
+            f"describe this capture.\n{result.describe()}"
+        )
+
+    resolved: tuple[tuple[str, int], ...] = published or tuple(observed)
+    resolved_names = tuple(operation for operation, _ in resolved)
+
+    # A WRAPPER THAT SUCCEEDED MUST ACCOUNT FOR EVERY OPERATION. A wrapper that
+    # failed need not: it may have stopped partway, and the artifact then records
+    # `not-run` for the operations it never reached - which is information, not a
+    # fault. So completeness is required only of a clean run.
+    if result.returncode == 0 and resolved_names != expected_names:
+        raise HarnessFaultError(
+            f"stage {result.stage} exited zero but accounted for operations "
+            f"{resolved_names!r}; expected {expected_names!r} in that order. A run "
             f"without a complete behavioural disposition cannot attest a capture.\n"
             f"{result.describe()}"
         )
@@ -1987,7 +2791,7 @@ def _attach_operation_statuses(
         returncode=result.returncode,
         stdout=result.stdout,
         stderr=result.stderr,
-        operation_statuses=tuple(observed),
+        operation_statuses=resolved,
     )
 
 
@@ -2160,6 +2964,7 @@ def run_cobol(
     operation: str | None = None,
     log_path: Path | str | None = None,
     dry_run: bool = False,
+    out_dir: Path | str | None = None,
 ) -> StageResult:
     """STAGE 2 - drive the COMPILED COBOL posting cycle. THE ORACLE SIDE.
 
@@ -2182,6 +2987,8 @@ def run_cobol(
             menu drive so later operations cannot overwrite earlier oracle evidence.
         dry_run: `--dry-run` - resolve and print the keystroke plan, run every
             precondition, spawn no menu.
+        out_dir: The output root, so the runner's published per-operation status
+            artifact can be read; `$ACAS_OUT` when omitted.
 
     Returns:
         The captured result. Codes 70 to 79 are the script's own diagnoses; 74 in
@@ -2191,10 +2998,19 @@ def run_cobol(
     Raises:
         ValueError: `operation` is given and is not one of the seven.
     """
+    # ⭐ BOTH SIDES DRIVE THE SAME ORDERED LIST (finding F-12). `all_declared=True`
+    # here is the whole fix: the oracle runner used to be asked for ONE operation
+    # while the Python runner was asked for every operation the scenario declares, so
+    # `period_end_totals` drove four operations on one side and one on the other and
+    # the comparison was between two different amounts of work. The runner now accepts
+    # a repeated `--operation` and drives them in order in a single invocation, so the
+    # list is simply passed through.
+    requested = _requested_operations(
+        scenario, operation, all_declared=operation is None
+    )
     argv: list[str] = []
-    if operation is not None:
-        assert_operation(operation)
-        argv += ["--operation", operation]
+    for name in requested:
+        argv += ["--operation", name]
     if log_path is not None:
         argv += ["--log", str(log_path)]
     if dry_run:
@@ -2211,98 +3027,30 @@ def run_cobol(
         return result
     return _attach_operation_statuses(
         result,
-        _requested_operations(scenario, operation, all_declared=False),
+        requested,
+        scenario=scenario,
+        side=SIDE_COBOL,
+        out_dir=out_dir,
     )
 
 
-def run_cobol_sequence(
-    scenario: str,
-    operations: Sequence[str],
-    *,
-    paths: ScenarioPaths,
-) -> StageResult:
-    """Drive several oracle menu operations sequentially against one seeded state.
-
-    `period_end_totals` spans Sales and Purchase and therefore cannot be represented
-    by one menu executable. Each operation is driven by the ordinary oracle runner,
-    one at a time and without a reset between them. The first pre-run seed fingerprint
-    and successful run-status attestation are restored after the sequence so the
-    Python side is compared with the state before operation one, not the state before
-    the final menu drive. Each later transcript receives its own path.
-    """
-    requested = tuple(operations)
-    if not requested:
-        raise ValueError("an oracle operation sequence must contain at least one operation")
-    for operation in requested:
-        assert_operation(operation)
-
-    fingerprint_path = paths.run_logs / SEED_FINGERPRINT_COBOL
-    status_path = paths.run_logs / "cobol.run-status"
-    first_fingerprint: bytes | None = None
-    first_status: bytes | None = None
-    results: list[StageResult] = []
-
-    try:
-        for index, operation in enumerate(requested, start=1):
-            log_path = (
-                None
-                if index == 1
-                else paths.run_logs / f"cobol.{index}-{operation}.log"
-            )
-            result = run_cobol(
-                scenario,
-                operation=operation,
-                log_path=log_path,
-            )
-            results.append(result)
-
-            if index == 1 and result.returncode == 0:
-                try:
-                    first_fingerprint = fingerprint_path.read_bytes()
-                    first_status = status_path.read_bytes()
-                except OSError as exc:
-                    raise HarnessFaultError(
-                        f"{scenario}: the first oracle operation completed but its "
-                        f"seed fingerprint or run-status attestation could not be "
-                        f"preserved for the multi-operation sequence: {exc}.\n"
-                        f"{result.describe()}"
-                    ) from exc
-
-            if result.returncode != 0:
-                break
-    finally:
-        if first_fingerprint is not None:
-            fingerprint_path.write_bytes(first_fingerprint)
-            os.chmod(fingerprint_path, 0o600)
-
-    aggregate_status = next(
-        (result.returncode for result in results if result.returncode != 0),
-        0,
-    )
-    if aggregate_status == 0 and first_status is not None:
-        status_path.write_bytes(first_status)
-        os.chmod(status_path, 0o600)
-
-    def joined_stream(attribute: str) -> str:
-        blocks: list[str] = []
-        for operation, result in zip(requested, results, strict=False):
-            stream = str(getattr(result, attribute))
-            blocks.append(f"===== {operation} =====\n{stream}")
-        return "\n".join(blocks)
-
-    statuses = tuple(
-        item
-        for result in results
-        for item in result.operation_statuses
-    )
-    return StageResult(
-        stage=STAGE_RUN_COBOL,
-        argv=("tests/conftest.py:run_cobol_sequence", *requested),
-        returncode=aggregate_status,
-        stdout=joined_stream("stdout"),
-        stderr=joined_stream("stderr"),
-        operation_statuses=statuses,
-    )
+# `run_cobol_sequence` WAS HERE, AND IS GONE (finding F-12).
+#
+# It existed because harness/run_cobol_scenario.sh read only the SINGULAR `operation:`
+# key, so a scenario declaring several - `period_end_totals` spans Sales and Purchase
+# and declares four - could not be driven in one invocation. This helper drove the
+# runner once per operation and then COPIED the first drive's seed fingerprint and
+# run-status attestation back over the last one's, so that the Python side would be
+# compared against the state before operation one. The cost was that operations two
+# onward had NO ATTESTED DISPOSITION at all: their statuses were concatenated into a
+# synthetic result, and the published run-status record described only operation one.
+#
+# The runner now accepts a repeated `--operation`, resolves the ordered list itself
+# (repeated flags, then the `operations:` list, then the singular key), drives them one
+# at a time in a single invocation against one seeded state, and publishes an ordered
+# per-operation status row for every one of them. So `run_cobol` passes the whole list
+# through and there is nothing left to work around: no second transcript path, no
+# fingerprint restoration, and no copy-back.
 
 
 def run_python(
@@ -2310,6 +3058,7 @@ def run_python(
     *,
     operation: str | None = None,
     dry_run: bool = False,
+    out_dir: Path | str | None = None,
 ) -> StageResult:
     """STAGE 6 - drive the MIGRATED PYTHON posting cycle.
 
@@ -2327,6 +3076,8 @@ def run_python(
         scenario: The scenario, passed as the positional scenario file.
         operation: `--operation`; derived from the scenario when omitted.
         dry_run: `--dry-run`.
+        out_dir: The output root, so the runner's published per-operation status
+            artifact can be read; `$ACAS_OUT` when omitted.
 
     Returns:
         The captured result.
@@ -2354,7 +3105,10 @@ def run_python(
         return result
     return _attach_operation_statuses(
         result,
-        _requested_operations(scenario, operation, all_declared=True),
+        _requested_operations(scenario, operation, all_declared=operation is None),
+        scenario=scenario,
+        side=SIDE_PYTHON,
+        out_dir=out_dir,
     )
 
 
@@ -2392,6 +3146,15 @@ def classify_run(result: StageResult, *, operation: str) -> str:
         # A bad command line is THIS MODULE'S fault and never behavioural data.
         if wrapper_code == ARGPARSE_USAGE_EXIT:
             return DISPOSITION_HARNESS_FAULT
+        # ⭐ EX_BEHAVIOUR IS A BEHAVIOURAL FINDING, NOT A BROKEN RIG (finding F-14).
+        # The wrapper ran the cycle and measured a contradiction; that is data. It is
+        # classified before the fault bands so a future edit to those bands cannot
+        # silently reabsorb it.
+        if (
+            result.stage == STAGE_RUN_PYTHON
+            and wrapper_code == RUN_PYTHON_BEHAVIOURAL_EXIT
+        ):
+            return DISPOSITION_BEHAVIOURAL
         if result.stage == STAGE_RUN_COBOL and wrapper_code in RUN_COBOL_FAULT_CODES:
             return DISPOSITION_HARNESS_FAULT
         if result.stage == STAGE_RUN_PYTHON and wrapper_code in RUN_PYTHON_FAULT_CODES:
@@ -2405,6 +3168,83 @@ def classify_run(result: StageResult, *, operation: str) -> str:
         return DISPOSITION_BEHAVIOURAL
 
     return DISPOSITION_HARNESS_FAULT
+
+
+def assert_wrapper_completed(result: StageResult, *, label: str | None = None) -> None:
+    """Assert a run stage's WRAPPER completed, and diagnose 69 as behavioural.
+
+    ⭐ WHY THIS IS NOT `assert result.returncode == 0` WITH A MESSAGE (finding F-14).
+    Every non-zero wrapper status means the runner did not finish its drive and its
+    self-checks, so a test that needs a complete run must refuse them all. But they do
+    not all mean the same thing, and exactly one of them is the most valuable finding
+    the protocol can produce: `EX_BEHAVIOUR` = 69 means the cycle RAN and an operation's
+    observed disposition CONTRADICTED the one its scenario declares. Reporting that as
+    "a harness fault" tells an operator to go and look at their environment when what
+    they should be looking at is the migrated code.
+
+    So the refusal is the same and the DIAGNOSIS differs, and it differs by reading
+    :func:`classify_run` rather than by a second transcription of the bands.
+
+    ⛔ 69 STILL FAILS HERE, and must. This helper is called from test BODIES, so the
+    behavioural difference is reported as a pytest FAILURE attributable to the cycle -
+    which is the whole point of keeping 69 out of `RUN_PYTHON_FAULT_CODES` and out of
+    the fixtures' `raise_for_status` path.
+
+    Args:
+        result: A `run_cobol` or `run_python` stage result.
+        label: How to name the side in the message. Defaults to the stage name.
+
+    Raises:
+        AssertionError: The wrapper exited non-zero, with the diagnosis its status
+            earns.
+        ValueError: `result` is not a run stage.
+    """
+    if result.stage not in {STAGE_RUN_COBOL, STAGE_RUN_PYTHON}:
+        raise ValueError(
+            f"assert_wrapper_completed describes a run stage; got {result.stage!r}."
+        )
+    if result.returncode == 0:
+        return
+
+    named = label or result.stage
+    if (
+        result.stage == STAGE_RUN_PYTHON
+        and result.returncode == RUN_PYTHON_BEHAVIOURAL_EXIT
+    ):
+        raise AssertionError(
+            f"{named} exited {RUN_PYTHON_BEHAVIOURAL_EXIT} (EX_BEHAVIOUR), which is A "
+            f"BEHAVIOURAL DIFFERENCE and NOT a harness fault: the runner drove the "
+            f"cycle to completion and found that an operation's observed disposition "
+            f"contradicted the one the scenario declares. The capture was still taken, "
+            f"so the diff stage can corroborate. Read the per-operation statuses in "
+            f"the run-status artifact - the migrated cycle is what to examine here, "
+            f"not the environment.\n{result.describe()}"
+        )
+    if result.returncode == ARGPARSE_USAGE_EXIT:
+        raise AssertionError(
+            f"{named} exited {ARGPARSE_USAGE_EXIT}, which in this family means THE "
+            f"RUNNER BUILT A BAD COMMAND LINE. Nothing about the posting cycle was "
+            f"measured.\n{result.describe()}"
+        )
+    band = (
+        RUN_COBOL_FAULT_CODES
+        if result.stage == STAGE_RUN_COBOL
+        else RUN_PYTHON_FAULT_CODES
+    )
+    placement = (
+        "That status is in the script's own documented precondition band"
+        if result.returncode in band
+        else (
+            "That status is not a documented status of that runner at all - its band "
+            f"is {sorted(band)} - so it is a fault by exclusion"
+        )
+    )
+    raise AssertionError(
+        f"{named}'s harness wrapper exited {result.returncode}, so it did not complete "
+        f"its drive and self-checks. {placement}, which makes this a "
+        f"{DISPOSITION_HARNESS_FAULT} and not an operation disposition: nothing about "
+        f"the posting cycle was measured.\n{result.describe()}"
+    )
 
 
 
@@ -2441,8 +3281,9 @@ def classify_run(result: StageResult, *, operation: str) -> str:
 #      never by position, and the two labels are `cobol` and `python`, never left
 #      and right.
 #    * THERE IS NO IGNORE-LIST, NO TOLERANCE-LIST AND NO "KNOWN DIFFERENCE"
-#      ALLOWANCE anywhere below. Bounding is done by the scenario's affected-table
-#      list and by nothing else.
+#      ALLOWANCE anywhere below. Bounding is done by the 22 in-scope tables, which is
+#      the protocol; a scenario's affected-table list is its DECLARED EFFECT, asserted
+#      against separately, and is never a way to overlook a difference.
 #    * NOTHING HERE CORRECTS OBSERVED BEHAVIOUR (rule R-4). No null is coalesced, no
 #      missing row is defaulted, no row or column is re-ordered for legibility, and
 #      nothing is trimmed beyond harness/normalize.py's own job 1. A helper that
@@ -2527,16 +3368,23 @@ def dump(
     zero secondary indexes, no TIMESTAMP column, no AUTO_INCREMENT and (with one
     documented exception the harness allows for by name) no column-level default.
 
-    THE SELECTION IS ALWAYS BOUNDED. `harness/dump_tables.py` REFUSES an unbounded
-    run rather than defaulting to all 22, and this wrapper passes the scenario's own
-    definition file as the selector so the list comes from the scenario itself. Pass
-    `tables` only to narrow one table by hand while debugging.
+    THE SELECTION IS ALWAYS BOUNDED, AND THE BOUND IS ALL 22 IN-SCOPE TABLES.
+    `harness/dump_tables.py` REFUSES an unbounded run rather than defaulting, and this
+    wrapper passes `--all-in-scope`, which is the protocol. It is NOT the scenario's
+    `affected_tables`: both cycles perform the menu's own `overrewrite.`
+    [general/general.cbl:L656-L672] - SYSTEM-REC under key 1, SYSDEFLT-REC under key 2
+    and SYSTOT-REC under key 4, reproduced by `acas_posting/cli/args.py::overrewrite` -
+    so a capture bounded by what a scenario EXPECTS to move could report an empty diff
+    while the run date, the allocators, the flags, the defaults or the period totals
+    differed. An empty diff is the single pass condition (Agent Action Plan section
+    0.8.5), so its scope has to be everything the cycle can persist. Pass `tables` only
+    to narrow one table by hand while debugging.
 
     Args:
         scenario: The scenario name, which also composes the output path.
         side: `cobol` or `python`. Recorded in the PATH, never in a file.
-        tables: An explicit `--tables` list. When omitted the scenario's
-            `affected_tables` is used, which is the protocol.
+        tables: An explicit `--tables` list, for narrowing one table by hand. When
+            omitted all 22 in-scope tables are captured, which is the protocol.
         out_dir: `--out-dir`; `$ACAS_OUT` when omitted.
 
     Returns:
@@ -2545,8 +3393,6 @@ def dump(
 
     Raises:
         ValueError: `side` is not one of the two, or `scenario` is not a plain name.
-        FileNotFoundError: The scenario definition is absent and no `tables` was
-            given.
     """
     assert_side(side)
     assert_scenario_name(scenario)
@@ -2555,15 +3401,79 @@ def dump(
     if out_dir is not None:
         argv += ["--out-dir", str(out_dir)]
     if tables is None:
-        path = scenario_file(scenario)
-        if not path.is_file():
-            scenario_definition(scenario)  # raises with the full diagnosis
-        argv += ["--scenario-file", str(path)]
+        argv.append("--all-in-scope")
     else:
         argv += ["--tables", ",".join(tables)]
 
     stage = STAGE_DUMP_COBOL if side == SIDE_COBOL else STAGE_DUMP_PYTHON
     return _drive_harness_main(harness_dump_tables(), argv, stage=stage)
+
+
+def verify_published(
+    scenario: str,
+    *,
+    out_dir: Path | str | None = None,
+) -> StageResult:
+    """STAGE 9 - assert both normalised captures declare themselves complete.
+
+    THE STAGE THAT STOPS TWO PARTIAL CAPTURES PASSING. Two trees missing the same
+    tables produce an EMPTY DIFF over the tables they both happen to hold, and an empty
+    diff is the one pass condition the protocol has (Agent Action Plan section 0.8.5).
+    `harness/normalize.py` writes its manifest LAST, so the manifest's presence is what
+    says the stage finished; `harness/diff_states.py`'s `verify_trees` additionally
+    requires the two manifests to agree on scenario, on side, on run identity and on
+    the exact seeded bytes (findings F-22, F-45).
+
+    Performed here as its own recorded stage rather than left implicit inside the
+    comparison, so a test can see that it ran and a failure names stage 9 rather than
+    arriving as a comparison error (finding F-16). `harness/run_parity.sh` does the
+    same thing at the same point.
+
+    Args:
+        scenario: The scenario name.
+        out_dir: The output root; `$ACAS_OUT` when omitted.
+
+    Returns:
+        The stage result: `returncode` 0 when both captures verify, 2 with the
+        diagnosis on `stderr` when they do not. The status is RETURNED rather than
+        raised so a caller may inspect it; `run_scenario_parity` calls
+        `raise_for_status` on it, because a comparison over unverified captures is not
+        evidence.
+    """
+    assert_scenario_name(scenario)
+    paths = scenario_paths(scenario, out_root=out_dir)
+    left = paths.normalized_dir(SIDE_COBOL)
+    right = paths.normalized_dir(SIDE_PYTHON)
+    argv = (
+        "tests/conftest.py:verify_published",
+        f"--cobol={left}",
+        f"--python={right}",
+    )
+    diff_states = harness_diff_states()
+    try:
+        manifests = diff_states.verify_trees(left, right)
+    except Exception as exc:  # noqa: BLE001 - every refusal is reported identically
+        return StageResult(
+            stage=STAGE_VERIFY_PUBLISHED,
+            argv=argv,
+            returncode=diff_states.EX_ERROR,
+            stdout="",
+            stderr=f"{type(exc).__name__}: {exc}\n",
+        )
+    return StageResult(
+        stage=STAGE_VERIFY_PUBLISHED,
+        argv=argv,
+        returncode=0,
+        stdout=(
+            f"both captures are published and agree: scenario "
+            f"{manifests[0].get('scenario')!r}, "
+            f"{len(diff_states.manifest_tables(manifests[0]))} table(s) declared on "
+            f"the {SIDE_COBOL} side and "
+            f"{len(diff_states.manifest_tables(manifests[1]))} on the "
+            f"{SIDE_PYTHON} side\n"
+        ),
+        stderr="",
+    )
 
 
 def normalize(
@@ -2647,7 +3557,7 @@ def diff(
     out_dir: Path | str | None = None,
     max_differences: int | None = None,
 ) -> DiffOutcome:
-    """STAGE 8 - compare the two normalised trees. AN EMPTY DIFF IS THE PASS.
+    """STAGE 10 - compare the two normalised trees. AN EMPTY DIFF IS THE PASS.
 
     THE THREE-WAY EXIT CONTRACT, and the one conflation that must never happen:
 
@@ -2671,8 +3581,14 @@ def diff(
 
     Args:
         scenario: The scenario name.
-        tables: An explicit table list, in report order. The scenario's
-            `affected_tables` by default, which is the protocol.
+        tables: An explicit table list, in report order, for narrowing one table by
+            hand. By default all 22 in-scope tables are compared - `--all-in-scope`,
+            which is the protocol - and the scenario file is passed alongside it so the
+            declared-effect gate that refuses an all-empty comparison still applies.
+            The scenario's own `affected_tables` is NOT the comparison bound: both
+            cycles perform `overrewrite.` [general/general.cbl:L656-L672], so a
+            comparison narrowed to a scenario's expected effect could report an empty
+            diff while a system row differed.
         out_dir: `--out-dir`; `$ACAS_OUT` when omitted.
         max_differences: `--max-differences`. It truncates the REPORT only: the true
             total is always printed and truncation NEVER changes the exit code.
@@ -2695,7 +3611,11 @@ def diff(
         path = scenario_file(scenario)
         if not path.is_file():
             scenario_definition(scenario)
-        argv += ["--scenario-file", str(path)]
+        #  `--all-in-scope` OUTRANKS the scenario's own list and bounds the
+        #  comparison at 22 tables; the scenario file is still passed because
+        #  `diff_states.py` reads it for the gate that refuses an all-empty
+        #  comparison against a scenario that declares a changed effect.
+        argv += ["--all-in-scope", "--scenario-file", str(path)]
     else:
         argv += ["--tables", ",".join(tables)]
     if max_differences is not None:
@@ -2715,7 +3635,9 @@ def diff(
 
     paths = scenario_paths(scenario, out_root=out_dir)
     resolved_tables = (
-        tuple(tables) if tables is not None else scenario_affected_tables(scenario)
+        tuple(tables)
+        if tables is not None
+        else tuple(diff_states.IN_SCOPE_TABLES)
     )
     tree = diff_states.diff_trees(
         paths.cobol_normalized, paths.python_normalized, resolved_tables
@@ -2879,6 +3801,362 @@ def assert_dump_wellformed(
             )
 
 
+# ---------------------------------------------------------------------------
+#  THE THREE-WAY EXIT CONTRACT OF STAGE 8, IN ONE PLACE
+#
+#  A TEST THAT TREATED "COULD NOT COMPARE" AS "NO DIFFERENCES" IS THE SINGLE WORST
+#  BUG AVAILABLE IN THIS TREE, and rule R-6 makes an empty diff the pass condition
+#  ONLY when a comparison actually happened. Every scenario file therefore wants to
+#  assert the contract - and four of them used to do it by asserting module constants
+#  and building their own dataclasses, which passes whatever the comparison does.
+#
+#  So the contract is exercised HERE, ONCE, against the SHIPPED comparison: trees are
+#  published through the dump stage's own writer, canonicalised by the real
+#  normalisation stage and compared by `harness/diff_states.py` itself. It needs no
+#  Compose stack, no oracle and no database - stages 4 and 8 are file-to-file
+#  transformations driven in process - so every scenario file can call it on a bare
+#  host.
+#
+#  IT ASSERTS NOTHING WHATEVER ABOUT THE MIGRATION, and none is claimed: the trees
+#  are synthetic, built from the frozen schema's own column lists. It is the
+#  COMPARISON that is under test, not either cycle.
+#
+#  Agent Action Plan section 0.4.3 puts it here rather than in a shared test helper:
+#  "tests/conftest.py provides the pinned-clock fixture and the seed/dump/normalize/
+#  diff helpers so that no test reimplements the comparison protocol", and this file
+#  is the only shared surface the tree is permitted.
+# ---------------------------------------------------------------------------
+
+
+def assert_diff_exit_contract(
+    scenario: str,
+    *,
+    out_dir: Path | str,
+    harness: HarnessModules,
+    schema: Mapping[str, Mapping[str, Any]],
+    vocabulary: Vocabulary,
+    readouterr: Callable[[], Any],
+) -> None:
+    """Exercise stage 8's THREE-WAY exit contract against the real comparison.
+
+        0  the trees are identical, and stdout is EMPTY - zero bytes, not a banner
+           and not "no differences found"                                 -> PASS
+        1  a real behavioural difference, with a deterministic report   -> FAILURE
+        2  THE COMPARISON COULD NOT BE PERFORMED - an unattested capture, a capture
+           taken after a failed run, or a missing tree                     -> ERROR
+
+    Every case is driven end to end: two synthetic sides are published with
+    `harness/dump_tables.py`'s own writer, normalised by `harness/normalize.py` and
+    compared by `harness/diff_states.py`. The two refusals are driven through
+    `diff_states.main` directly, because the `diff` helper maps exit 2 to a harness
+    fault by design and here a refusal is the expected outcome.
+
+    Args:
+        scenario: The scenario the synthetic trees are published under. The trees
+            themselves cover ALL 22 IN-SCOPE TABLES, because that is the bound the
+            comparison is given; see the note at `tables` below.
+        out_dir: A private output root - a test's `tmp_path` - so `$ACAS_OUT` is
+            neither read nor needed and nothing is written into a compared tree.
+        harness: The three harness modules (rule R-1).
+        schema: The parsed `mysql/ACASDB.sql`, READ AND NEVER WRITTEN. It supplies
+            every column name and declared type, so nothing is invented.
+        vocabulary: The stack-free bundle, for the side labels, the scenario file and
+            the normalise and diff stages.
+        readouterr: `capsys.readouterr`, so the two refusals' streams can be read
+            where they are written.
+
+    Raises:
+        AssertionError: An exit status, a stdout stream or a verdict did not match the
+            contract.
+    """
+    assert_scenario_name(scenario)
+    root = Path(out_dir)
+    dump_tables = harness.dump_tables
+    normalize_module = harness.normalize
+    diff_states = harness.diff_states
+
+    #  ⭐ ALL 22 IN-SCOPE TABLES, because that is the bound the diff stage is GIVEN:
+    #  `vocabulary.diff` drives `harness/diff_states.py --all-in-scope`. Fabricating
+    #  only the scenario's declared effect would make the two synthetic captures and the
+    #  comparison disagree about their scope, and the comparison REFUSES that with exit
+    #  2 - correctly, since two partial captures can be trivially equal over whatever
+    #  they both happen to hold. The declared effect is asserted elsewhere; what this
+    #  helper exercises is the exit contract under the real bound.
+    tables = tuple(dump_tables.IN_SCOPE)
+    paths = vocabulary.paths(scenario, out_root=root)
+
+    #  THE DECLARED OPERATIONS, read from the scenario's own definition, because the
+    #  record carries ONE disposition per operation and a record that named a different
+    #  number would be refused before any comparison happened.
+    operations = tuple(vocabulary.definition(scenario)["operations"])
+    #  A syntactically valid digest, so the two provenance fields are present and
+    #  well-formed. Its VALUE means nothing here: these are synthetic sides, and what is
+    #  being exercised is the exit contract rather than a seed identity.
+    synthetic_digest = "0" * 64
+
+    def attest(side: str, *, status: int = 0) -> None:
+        """Write the run-status record the dump stage reads its attestation from.
+
+        A capture carries what its RUN stage claimed, and the comparison stage refuses
+        a pair that claims nothing: two captures taken after failed runs are trivially
+        equal, and equality is the pass condition, so the harness would otherwise
+        certify parity having compared nothing. Written through the tool's own path
+        helper rather than a hand-built path, so the two cannot drift.
+
+        ⭐ EVERY REQUIRED KEY IS WRITTEN, and the set is asserted against
+        `harness/dump_tables.py`'s own `RUN_STATUS_REQUIRED_KEYS` rather than
+        transcribed: the record must carry the run identity, the wrapper's own status,
+        both seed digests and one `operation_status` row per declared operation, or the
+        comparison refuses it for the WRONG reason and the case below would pass while
+        measuring nothing.
+
+        Args:
+            side: `cobol` or `python`.
+            status: The status the run stage claimed for this side.
+        """
+        fields = {
+            "scenario": scenario,
+            "side": side,
+            "run_id": f"{scenario}-0001",
+            "status": str(status),
+            "wrapper_status": str(status),
+            "seed_fingerprint_sha256": synthetic_digest,
+            "seed_marker_sha256": synthetic_digest,
+            "operations": str(len(operations)),
+        }
+        missing = sorted(dump_tables.RUN_STATUS_REQUIRED_KEYS - fields.keys())
+        assert not missing, (
+            f"the synthetic run-status record omits {missing}, which "
+            f"harness/dump_tables.py requires - the comparison would refuse it for a "
+            f"reason this contract is not about."
+        )
+        lines = [f"{key}\t{value}" for key, value in fields.items()]
+        lines += [
+            f"operation_status\t{index}\t{operation}\t{status}"
+            for index, operation in enumerate(operations, start=1)
+        ]
+        target = dump_tables.run_status_path(root, scenario, side)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def publish(side: str, *, bend: bool, identify: bool = True) -> None:
+        """Publish one synthetic side, then canonicalise it through stage 4.
+
+        Args:
+            side: `cobol` or `python`.
+            bend: Alter exactly one non-key value of the first table, so the two sides
+                differ in exactly one column of exactly one row.
+            identify: Record the run id in the manifest's provenance. False models a
+                dump taken by hand, out of order, with no attempt to belong to - which
+                is what the first case below is about. The comparison has a DIFFERENT
+                refusal for each: a capture carrying an identity but no attestation is
+                refused by the attestation gate, and one carrying neither is refused by
+                the identity gate first. Both are exit 2; the case that asserts the
+                attestation wording therefore withholds the identity.
+        """
+        dumps: dict[str, dict[str, Any]] = {}
+        for table in tables:
+            columns = normalize_module.schema_columns(schema, table)
+            specification = dump_tables.IN_SCOPE[table]
+            row: list[Any] = []
+            for column in columns:
+                declared = normalize_module.column_type(schema, table, column)
+                if declared.kind == normalize_module.KIND_INTEGER:
+                    row.append(0)
+                elif declared.kind == normalize_module.KIND_DECIMAL:
+                    # A DECIMAL reaches a dump as a canonical JSON STRING at the
+                    # column's declared scale, never as a JSON number (rule R-2).
+                    row.append("0")
+                else:
+                    row.append("")
+            key_index = list(columns).index(specification.primary_key)
+            row[key_index] = 1 if isinstance(row[key_index], int) else "1"
+            if bend and table == tables[0]:
+                victims = [
+                    index for index in range(len(columns)) if index != key_index
+                ]
+                assert victims, (
+                    f"{table} has only its primary-key column, so no non-key value "
+                    f"can be altered to produce a difference."
+                )
+                victim = victims[0]
+                row[victim] = 7 if isinstance(row[victim], int) else "7"
+            # Built from the dump stage's OWN key vocabulary, in its own fixed order,
+            # so the five-key shape is never transcribed by hand.
+            dumps[table] = dict(
+                zip(
+                    dump_tables.DUMP_KEYS,
+                    (table, specification.primary_key, list(columns), 1, [row]),
+                    strict=True,
+                )
+            )
+        dump_tables.publish_dumps(
+            dumps,
+            root,
+            scenario=scenario,
+            side=side,
+            selector=dump_tables.SELECTOR_ALL_IN_SCOPE,
+            #  THE RUN IDENTITY REACHES THE MANIFEST, or the comparison refuses the pair
+            #  for want of one (finding F-37): a verdict that cannot state which attempt
+            #  it is about is a verdict about an unidentified pair of captures. The id is
+            #  the one `attest` wrote, so the record and the manifest agree.
+            provenance=dump_tables.build_provenance(
+                run_id=f"{scenario}-0001" if identify else None,
+                scenario_file=vocabulary.scenario_file(scenario),
+                repository=REPO_ROOT,
+                command=["assert_diff_exit_contract", scenario, side],
+            ),
+            # Read through the tool's own reader, so what lands in the manifest is
+            # what a real run would put there rather than a literal about its shape.
+            attestation=dump_tables.read_run_attestation(root, scenario, side),
+        )
+        vocabulary.normalize(scenario, side, out_dir=root).raise_for_status()
+
+    cobol_side, python_side = vocabulary.sides[0], vocabulary.sides[1]
+
+    # ---- EXIT 2: NEITHER SIDE ATTESTS A RUN -- refused before any compare ----
+    # Asserted BEFORE the attestations are written, so the refusal is measured on
+    # captures that never claimed anything - the state a dump taken out of order
+    # actually leaves behind.
+    publish(cobol_side, bend=False, identify=False)
+    publish(python_side, bend=False, identify=False)
+    refusal_argv = [
+        "--scenario",
+        scenario,
+        "--quiet",
+        "--out-dir",
+        str(root),
+        "--scenario-file",
+        str(vocabulary.scenario_file(scenario)),
+    ]
+    readouterr()
+    unattested_status = diff_states.main(refusal_argv)
+    unattested_streams = readouterr()
+    assert unattested_status == diff_states.EX_ERROR, (
+        f"a capture whose run stage attests nothing must be REFUSED with "
+        f"{diff_states.EX_ERROR}, never compared: two captures taken after failed "
+        f"runs are trivially equal, and equality is the pass condition. It exited "
+        f"{unattested_status}."
+    )
+    assert unattested_streams.out == "", (
+        f"a refusal writes its diagnosis to stderr and leaves stdout EMPTY, so an "
+        f"empty stdout can never be read as a pass on its own. It wrote "
+        f"{unattested_streams.out!r}."
+    )
+    assert "attest" in unattested_streams.err.lower(), (
+        f"the refusal must say WHY, naming the missing attestation. stderr was "
+        f"{unattested_streams.err!r}."
+    )
+
+    # ---- EXIT 2: A RUN NOBODY MAY CONCLUDE FROM IS NOT A RUN --------------
+    #  ⭐ THE STATUS HERE IS A HARNESS FAULT, NOT MERELY NON-ZERO, and the distinction
+    #  is the whole of finding F-13. `BEHAVIOURAL_RUN_STATUS` - 69 - is a REPRODUCED
+    #  abort, which is comparable BY DESIGN: the term-code-5 chain is correct compiled
+    #  behaviour and the state it leaves is exactly what must be diffed. So a case built
+    #  on 69 would assert the opposite of the contract. What is refused is a status the
+    #  harness cannot vouch for, and the fault status is taken from the vocabulary's own
+    #  classification rather than written as a literal.
+    fault_status = 71
+    #  Asserted against the comparison's OWN disposition model, so the choice of status
+    #  is evidenced rather than assumed.
+    assert (
+        dump_tables.DISPOSITION_BEHAVIOURAL in dump_tables.COMPARABLE_DISPOSITIONS
+    ), "a reproduced abort is comparable, which is why it is not the status used here"
+    assert (
+        dump_tables.DISPOSITION_HARNESS_FAULT
+        not in dump_tables.COMPARABLE_DISPOSITIONS
+    )
+    attest(cobol_side, status=0)
+    attest(python_side, status=fault_status)
+    fault_attestation = dump_tables.read_run_attestation(root, scenario, python_side)
+    assert fault_attestation["disposition"] == dump_tables.DISPOSITION_HARNESS_FAULT, (
+        f"status {fault_status} must read back as a harness fault for this case to be "
+        f"about an uncomparable capture at all; it read "
+        f"{fault_attestation['disposition']!r}."
+    )
+    publish(cobol_side, bend=False)
+    publish(python_side, bend=False)
+    readouterr()
+    failed_run_status = diff_states.main(refusal_argv)
+    failed_run_streams = readouterr()
+    assert failed_run_status == diff_states.EX_ERROR, (
+        f"a capture taken after a run the harness cannot vouch for must be REFUSED "
+        f"with {diff_states.EX_ERROR}. It exited {failed_run_status}."
+    )
+    assert failed_run_streams.out == "", (
+        f"a refusal writes its diagnosis to stderr and leaves stdout EMPTY. It wrote "
+        f"{failed_run_streams.out!r}."
+    )
+    assert paths.python_normalized.name in failed_run_streams.err, (
+        f"the refusal must name the capture it refused, so an operator is not left "
+        f"guessing which side failed. stderr was {failed_run_streams.err!r}."
+    )
+    #  ⭐ AND THE STATUS IS RECORDED VERBATIM IN THE CAPTURE, which is the substantive
+    #  half of this case: the run stage's own number survives into the manifest, so the
+    #  refusal is traceable to what actually happened rather than to a generic fault.
+    #  Asserted on the manifest rather than on the refusal's wording, because a
+    #  harness-fault attestation deliberately carries NO seed identity and no run id -
+    #  `read_run_attestation` withholds both - so the comparison refuses at the seed-
+    #  identity gate before it reaches the status. Both gates are exit 2, and which one
+    #  speaks first is the comparison's business, not this contract's.
+    refused_manifest = diff_states.read_manifest(paths.python_normalized)
+    assert refused_manifest is not None
+    refused_attestation = refused_manifest["attestation"]
+    assert refused_attestation["attested"] is False
+    assert refused_attestation["run_status"] == fault_status
+    assert refused_attestation["disposition"] == dump_tables.DISPOSITION_HARNESS_FAULT
+
+    # ---- EXIT 0: identical, and NOT ONE BYTE on stdout -------------------
+    attest(cobol_side)
+    attest(python_side)
+    publish(cobol_side, bend=False)
+    publish(python_side, bend=False)
+    identical = vocabulary.diff(scenario, out_dir=root)
+    assert identical.result.returncode == diff_states.EX_IDENTICAL
+    assert identical.is_empty is True
+    assert identical.result.stdout == "", (
+        f"an identical comparison must write ZERO BYTES to stdout - not a banner, "
+        f'not "no differences found" - because the empty stream is itself the pass '
+        f"signal. It wrote {identical.result.stdout!r}."
+    )
+    # A PASSING RUN WRITES A ZERO-BYTE REPORT, deliberately: the evidence document
+    # must distinguish "compared, and identical" from "never compared", and an
+    # existing empty file says the first while an absent file says nothing at all.
+    assert identical.report.is_file()
+    assert identical.report.stat().st_size == 0
+
+    # ---- EXIT 1: one differing value is a real behavioural difference -----
+    publish(python_side, bend=True)
+    different = vocabulary.diff(scenario, out_dir=root)
+    assert different.result.returncode == diff_states.EX_DIFFERENT
+    assert different.is_empty is False
+    assert different.tree.total_differences == 1
+    # Stdout carries a value-free summary; the values themselves go to the 0600
+    # report. Either way the stream is NOT empty, so exit 1 can never be mistaken
+    # for exit 0.
+    assert different.result.stdout != ""
+    report = diff_states.render(different.tree)
+    assert tables[0] in report
+    # The two labels are `cobol` and `python`, never left and right.
+    assert diff_states.LABEL_COBOL in report
+    assert diff_states.LABEL_PYTHON in report
+
+    # ---- EXIT 2: the comparison could not be performed -> RAISED ----------
+    # An absent tree is the most dangerous input the comparison can be given, because
+    # "nothing to compare" and "nothing differs" are one keystroke apart.
+    for member in sorted(paths.python_normalized.iterdir()):
+        member.unlink()
+    paths.python_normalized.rmdir()
+    with pytest.raises(vocabulary.fault) as raised:
+        vocabulary.diff(scenario, out_dir=root)
+    assert str(diff_states.EX_ERROR) in str(raised.value)
+    # AND THE STALE ZERO-BYTE REPORT IS GONE. The comparison invalidates the accepted
+    # output the moment the path is known and before a single dump is read, so a
+    # report surviving an error path can never be mistaken for proof that this run
+    # passed.
+    assert not paths.diff_report.exists()
+
+
 def assert_runtime_autocommit_on(connection: Any) -> None:
     """Assert the RUNTIME autocommit mode is ON, globally and for this session.
 
@@ -2906,10 +4184,16 @@ def assert_runtime_autocommit_on(connection: Any) -> None:
     THE MODE IS ASSERTED AND NEVER SET, exactly as before - only the asserted value
     changed. `harness/Dockerfile.mariadb` is the single authority for the runtime
     mode: it declares `autocommit=1` in `/etc/mysql/conf.d/99-acas-oracle.cnf`.
-    `harness/seed.sh` is the ONLY place the mode is ever changed - it opens the
-    seeding window with `@@GLOBAL.autocommit = 0` immediately before the first frozen
-    load program, verifies it from a fresh session, and restores the runtime mode from
-    its exit trap on every path, exiting 73 if it cannot. `harness/reset_db.sh` (83)
+    `harness/seed.sh` is the ONLY place the mode is ever changed - it opens a seeding
+    window immediately before the first frozen load program, verifies the mode from a
+    fresh session, and restores the runtime mode from its exit trap on every path,
+    exiting 73 if it cannot. WHICH mode that window runs is `seed.sh`'s own R-6
+    arbitration and was MEASURED against the compiled loaders: `@@GLOBAL.autocommit =
+    1` is its default because it is the only mode in which they leave a durable row,
+    and `ACAS_SEED_AUTOCOMMIT=off` selects the AAP-literal `0`, under which seven
+    loaders report success, the tables read empty and `seed.sh` exits 76. The loader
+    return codes are identical under both, so the mode is invisible to the frozen
+    code. Either way the window is closed before this assertion is ever reached. `harness/reset_db.sh` (83)
     and `harness/run_cobol_scenario.sh` (73) assert this same runtime mode. A fixture
     that quietly issued `SET autocommit` would put the test runner in charge of a
     setting the harness owns.
@@ -2927,15 +4211,15 @@ def assert_runtime_autocommit_on(connection: Any) -> None:
     connection is SELECT-only and is released with `rollback()`, so its autocommit
     value cannot affect what it reads. The two sides that DO write pin their own mode
     - the compiled cycle inherits the asserted server mode, and the migrated cycle
-    sets `autocommit: True` explicitly at `acas_posting/dal/connection.py:L1808`,
+    sets `autocommit: True` explicitly at `acas_posting/dal/connection.py mysql_1000_open`,
     per-statement as the COBOL does, which is why `harness/run_python_scenario.sh`
     OBSERVES the mode and never refuses on it.
 
-    A REPRODUCED DEFECT WORTH KNOWING WHILE READING A RESULT (rule R-4): inside the
-    seeding window the frozen loaders still reach no COMMIT, so a table may read EMPTY
+    A REPRODUCED DEFECT WORTH KNOWING WHILE READING A RESULT (rule R-4): the frozen
+    loaders reach no COMMIT, so under the AAP-literal OFF window a table reads EMPTY
     after a seed that reported success. Nothing here issues the missing COMMIT - a
     defect fixed is a failure; `harness/seed.sh` instead refuses fail-closed (76) when
-    a seed reports success and leaves the tables empty.
+    a seed reports success and leaves the tables empty, whichever mode was selected.
 
     Args:
         connection: An open DB-API connection.
@@ -3067,19 +4351,30 @@ def assert_autogen_tables_empty(connection: Any) -> None:
 # ---------------------------------------------------------------------------
 #  SECTION 10  -  THE COMPOSED PROTOCOL
 #
-#  THE EIGHT STAGES, IN THE EXACT ORDER, transcribed from the canonical recipe
-#  harness/docker-compose.yml publishes. Normalisation appears twice - once per side -
-#  and the "eight-stage" numbering counts it once:
+#  THE TEN STAGES, IN THE EXACT ORDER. The order and the numbering are NOT restated
+#  here as fact - they are DEFINED in harness/parity_stages.sh and published by
+#  `harness/run_parity.sh --print-stages`, which `parity_stage_registry` reads and a
+#  test asserts these constants against (finding F-16). Each side is normalised as its
+#  own stage; the second normalisation used to be numbered `7b` so that the protocol
+#  could be called eight-stage, which made a stage number in a test message name a
+#  different stage from the same number in a driver transcript:
 #
-#      1  harness/reset_db.sh             "$S"  (schema + seed)
-#      2  harness/run_cobol_scenario.sh   "$S"
-#      3  harness/dump_tables.py  --scenario N --side cobol  --scenario-file "$S"
-#      4  harness/normalize.py    --scenario N --side cobol
-#      5  harness/reset_db.sh             "$S"
-#      6  harness/run_python_scenario.sh  "$S"
-#      7  harness/dump_tables.py  --scenario N --side python --scenario-file "$S"
-#      7b harness/normalize.py    --scenario N --side python
-#      8  harness/diff_states.py  --scenario N --scenario-file "$S"
+#       1  harness/reset_db.sh             "$S"  (schema + seed)
+#       2  harness/run_cobol_scenario.sh   "$S"  (every declared operation, in order)
+#       3  harness/dump_tables.py  --scenario N --side cobol  --scenario-file "$S"
+#       4  harness/normalize.py    --scenario N --side cobol
+#       5  harness/reset_db.sh             "$S"  (the SAME fixture bytes)
+#       6  harness/run_python_scenario.sh  "$S"
+#       7  harness/dump_tables.py  --scenario N --side python --scenario-file "$S"
+#       8  harness/normalize.py    --scenario N --side python
+#       9  both captures declare themselves complete   (an in-driver check)
+#      10  harness/diff_states.py  --scenario N --scenario-file "$S"
+#
+#  The Agent Action Plan's EIGHT logical stages (section 0.3.2) become these ten by
+#  numbering both normalisations and the publication check instead of folding them in,
+#  so where older prose in this repository says "stage 8" of the protocol it means
+#  today's stage 10. Separately, the runners print their own `Check n/8' headings;
+#  those are each script's internal preflight checks and are NOT protocol stages.
 #
 #  Agent Action Plan section 0.8.5: "seed identically through the maintainer's load
 #  programs, run the compiled cycle, dump the affected tables ordering-normalised,
@@ -3092,6 +4387,32 @@ def assert_autogen_tables_empty(connection: Any) -> None:
 #  is evidence, and short-circuiting the dump would destroy it for
 #  `control_total_mismatch` and `mixed_accepted_rejected`. Every OTHER stage's
 #  failure does destroy the evidence, so those raise.
+#
+#  ⭐ ONE MULTI-OPERATION PROTOCOL, SYMMETRIC ON BOTH SIDES. Stages 2 and 6 drive the
+#  scenario's OWN ordered `operations` list - not its scalar `operation` key - so the
+#  two sides do the same work in the same order. `period_end_totals` is the one
+#  committed example, with four operations:
+#
+#    * NO RESET BETWEEN OPERATIONS. The claim is cumulative: operation 2 rewrites the
+#      ledger rows operation 1 created, and re-seeding in between would measure four
+#      unrelated runs instead of one journey.
+#    * ONE STATUS PER OPERATION. Each side emits an `OPERATION_STATUS` record per
+#      operation and `_attach_operation_statuses` refuses a wrapper that exits zero
+#      without the complete ordered set, so no capture can be attributed to an
+#      operation whose disposition was never established.
+#    * ONE DUMP PER SIDE, after the last operation. Stages 3 and 7 run once.
+#    * THE ORACLE SIDE SPANS SEVERAL MENU PROCESSES because one compiled menu drives
+#      one subsystem, and `period_end_totals` reaches two of them. That is handled
+#      INSIDE one runner invocation, not by invoking the runner once per operation:
+#      `harness/run_cobol_scenario.sh` takes a repeatable `--operation`, selects the
+#      menu for each in turn, and publishes one disposition per operation (finding
+#      F-12). The earlier arrangement - one invocation per operation, with operation
+#      one's records copied back over the last one's - left operations 2..n with no
+#      attested disposition at all, and it is gone; the pre-run fingerprint is taken
+#      ONCE before operation one and the post-run fingerprint ONCE after the last,
+#      which is exactly the span the journey covers.
+#    * AND THE SYMMETRY IS ASSERTED, not assumed: after stage 6 the two recorded
+#      operation lists are compared, and a disagreement is a harness fault.
 # ---------------------------------------------------------------------------
 
 
@@ -3101,14 +4422,21 @@ class ParityRun:
 
     Attributes:
         scenario: The scenario name.
-        tables: The affected-table list the comparison was bounded by, in the
-            scenario's own order.
+        tables: The list the comparison was bounded by: ALL 22 in-scope tables,
+            not the scenario's declared `affected_tables`. Both cycles perform
+            `overrewrite.` [general/general.cbl:L656-L672], so a comparison
+            narrowed to a scenario's expected effect could report an empty diff
+            while a system row differed.
         stages: Every stage result in execution order, including the two run stages
             whose non-zero status is behavioural data rather than an error.
         cobol_run: The oracle run's result, for a test asserting on its status.
         python_run: The migrated cycle's run result.
-        outcome: The stage-8 verdict.
+        outcome: The stage-10 verdict.
         paths: Where every artifact of this run lives.
+        run_id: The one id bound through all ten stages (finding F-37). Every artifact
+            this run published records it, and stage 10 refused the pair unless both
+            captures carried this exact value - so it is the handle a reader uses to
+            find this run's evidence and to prove the two captures are one attempt.
     """
 
     scenario: str
@@ -3118,6 +4446,7 @@ class ParityRun:
     python_run: StageResult
     outcome: DiffOutcome
     paths: ScenarioPaths
+    run_id: str = ""
 
     @property
     def is_empty(self) -> bool:
@@ -3148,6 +4477,16 @@ class ParityRun:
         return "\n".join(blocks)
 
 
+#: One completed :class:`ParityRun` per distinct request, for the lifetime of the
+#: session. The key is `(scenario, operation, out_dir-as-text, max_differences)` - every
+#: argument that changes what the protocol does. See the long comment inside
+#: :func:`run_scenario_parity` for why sharing one run per request is a coherence
+#: requirement of the scenario tier rather than a performance optimisation.
+_PARITY_RUN_CACHE: dict[
+    tuple[str, str | None, str | None, int | None], "ParityRun"
+] = {}
+
+
 def run_scenario_parity(
     scenario: str,
     *,
@@ -3155,7 +4494,7 @@ def run_scenario_parity(
     out_dir: Path | str | None = None,
     max_differences: int | None = None,
 ) -> ParityRun:
-    """Run all eight protocol stages for one scenario and return the verdict.
+    """Run all ten protocol stages for one scenario and return the verdict.
 
     THIS IS THE HELPER THAT MAKES "no test reimplements the comparison protocol"
     TRUE (Agent Action Plan section 0.4.3). A scenario test reads:
@@ -3173,7 +4512,7 @@ def run_scenario_parity(
         operation: `--operation` for both runners; each derives it from the
             scenario's own `operation` key when omitted.
         out_dir: The output root; `$ACAS_OUT` when omitted.
-        max_differences: Passed to stage 8. It truncates the report only and never
+        max_differences: Passed to stage 10. It truncates the report only and never
             changes the verdict.
 
     Returns:
@@ -3190,31 +4529,123 @@ def run_scenario_parity(
     if operation is not None:
         assert_operation(operation)
 
-    tables = scenario_affected_tables(scenario)
+    # ⭐ ONE RUN PER DISTINCT REQUEST, FOR THE WHOLE SESSION. Keyed on every argument
+    # that changes what the protocol does, so two callers asking different questions
+    # still get their own runs and two callers asking the SAME question get the SAME
+    # answer. `out_dir` is normalised to a string because a caller may pass either a
+    # `Path` or a `str` for the same directory.
+    #
+    # WHY THIS IS A CORRECTNESS FIX AND NOT A SPEED ONE, which matters because Agent
+    # Action Plan section 0.8.4 sets no performance target and forbids optimising for
+    # one. A scenario module's assertions are each a claim about ONE run: "the diff is
+    # empty", "this batch was not stamped in that run", "the report the verdict came
+    # from says so". A file that re-ran the protocol per test let nine tests reason
+    # about nine different runs and then report agreement between them, which is a
+    # quiet incoherence rather than nine independent confirmations - and if two of
+    # those runs ever disagreed, the file would still be green. Sharing one run is what
+    # makes the file's own narrative true. Most of the scenario modules already
+    # memoised in module-level state to get this; doing it HERE means all nine get it,
+    # and no future module has to remember.
+    #
+    # NOTHING READS THE LIVE DATABASE THROUGH A CACHED RUN. Every artifact of a
+    # completed run is on disk - both dumps, both normalised trees, the diff report -
+    # and that is what the assertions read. The one fixture that does go back to the
+    # database, `seed_baseline`, resets it deliberately and is itself memoised.
+    # tests/determinism/ does not come through here at all: it drives `reset`,
+    # `run_python`, `dump` and `normalize` directly, precisely because it needs two
+    # runs, so this cache cannot collapse the two runs a determinism claim compares.
+    #
+    # STRICTLY SEQUENTIAL still (R-3): this is a plain dict on one thread, with no lock
+    # because there is nothing to race.
+    cache_key = (
+        scenario,
+        operation,
+        None if out_dir is None else str(out_dir),
+        max_differences,
+    )
+    cached = _PARITY_RUN_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    #  THE COMPARISON BOUND IS ALL 22 IN-SCOPE TABLES, not the scenario's declared
+    #  `affected_tables`. The declared list remains the runners' own
+    #  changed/unchanged assertion; it is not the evidence bound, because a bound
+    #  drawn from what a scenario EXPECTS to move cannot show a difference in
+    #  anything it did not expect to move.
+    tables = in_scope_tables()
     paths = scenario_paths(scenario, out_root=out_dir)
     stages: list[StageResult] = []
 
+    # ⭐ ONE RUN ID, BOUND BEFORE STAGE 1 AND HELD TO STAGE 10 (finding F-37).
+    #
+    # This is what makes the composed protocol the SAME protocol as the driven one.
+    # Without it every stage is a separate process that mints its own identity, the
+    # two sides end up carrying two different ids, and stage 10 refuses the pair -
+    # correctly, because PROVENANCE_MUST_MATCH names `run_id' and an empty diff
+    # between two captures of different runs says nothing about the migration. It is
+    # bound around stage 1 rather than stage 2 because `harness/reset_db.sh` publishes
+    # the seed identity under this id and `acas_read_seed_identity` DISCARDS a record
+    # staged by a different attempt, which would strand the seed marker that F-22
+    # requires to be present and equal on both sides.
+    with bound_run_id() as run_id:
+        return _run_scenario_parity_stages(
+            scenario,
+            operation=operation,
+            out_dir=out_dir,
+            max_differences=max_differences,
+            tables=tables,
+            paths=paths,
+            stages=stages,
+            run_id=run_id,
+        )
+
+
+def _run_scenario_parity_stages(
+    scenario: str,
+    *,
+    operation: str | None,
+    out_dir: Path | str | None,
+    max_differences: int | None,
+    tables: tuple[str, ...],
+    paths: ScenarioPaths,
+    stages: list[StageResult],
+    run_id: str,
+) -> ParityRun:
+    """Drive the ten stages with one run id already bound.
+
+    Split out of `run_scenario_parity` so the binding is a single `with` around the
+    whole protocol rather than an indent of every stage, which keeps each stage
+    comment where a reader expects it.
+
+    Args:
+        scenario: The scenario name, already validated.
+        operation: `--operation` for both runners, or None for every declared one.
+        out_dir: The output root, or None for `$ACAS_OUT`.
+        max_differences: Passed to stage 10; truncates the report only.
+        tables: The scenario's affected-table list.
+        paths: The resolved artifact paths.
+        stages: The list to append each stage result to.
+        run_id: The bound run id, recorded on the returned run.
+
+    Returns:
+        The complete run.
+
+    Raises:
+        HarnessFaultError: A stage whose failure destroys the evidence failed.
+    """
     # STAGE 1. Start from a clean schema, then seed. Using seed.sh alone here
     # would preserve rows from a prior scenario and make stage 1 differ from the
     # identical reset-and-seed command at stage 5.
     stages.append(prepare_scenario(scenario).raise_for_status())
 
     # STAGE 2. THE STATUS IS RECORDED, NOT ENFORCED - see the section comment.
-    # The one multi-operation scenario spans two menu executables, so it is driven as
-    # a sequential series with no reset between operations.
-    requested_operations = _requested_operations(
-        scenario,
-        operation,
-        all_declared=operation is None,
-    )
-    if len(requested_operations) == 1:
-        cobol_run = run_cobol(scenario, operation=requested_operations[0])
-    else:
-        cobol_run = run_cobol_sequence(
-            scenario,
-            requested_operations,
-            paths=paths,
-        )
+    #
+    # ONE INVOCATION, WHATEVER THE COUNT (finding F-12). `operation` is passed through
+    # unchanged - None means "every operation the scenario declares" - and the runner
+    # resolves the ordered list itself. `period_end_totals` spans two menu executables
+    # and the runner drives all four of its operations one at a time against one
+    # seeded state, publishing an ordered status row for each.
+    cobol_run = run_cobol(scenario, operation=operation, out_dir=out_dir)
     stages.append(cobol_run)
 
     # STAGES 3 and 4. Taken WHATEVER stage 2 returned: absence is evidence.
@@ -3227,20 +4658,57 @@ def run_scenario_parity(
     stages.append(reset(scenario).raise_for_status())
 
     # STAGE 6. Same treatment as stage 2: exit 5 and exit 8 are term codes.
-    python_run = run_python(scenario, operation=operation)
+    python_run = run_python(scenario, operation=operation, out_dir=out_dir)
     stages.append(python_run)
 
-    # STAGES 7 and 7b.
+    # ⭐ THE TWO SIDES MUST HAVE DRIVEN THE SAME WORK, IN THE SAME ORDER - asserted
+    # from what each run stage RECORDED rather than from what this function asked for.
+    # The one multi-operation scenario is driven as one Python invocation over its
+    # declared list and as a series of oracle invocations over the same list, and the
+    # two shapes are only comparable if the ordered set of operations they actually
+    # reported is identical. When it is not - a runner that derived its own list from
+    # the scalar `operation` key, a sequence that stopped early, a declared list read
+    # in a different order - the two captures describe DIFFERENT WORK, and a diff
+    # between them is meaningless whichever way it comes out. That is a HARNESS FAULT
+    # and it is raised here, before stages 7 and 8 can turn it into a verdict.
+    #
+    # Only successful wrappers are compared: a non-zero wrapper status is already a
+    # diagnosis of its own, and a run that stopped at the first contradicted status
+    # legitimately reports fewer operations than it was given.
+    if cobol_run.returncode == 0 and python_run.returncode == 0:
+        cobol_ops = tuple(name for name, _ in cobol_run.operation_statuses)
+        python_ops = tuple(name for name, _ in python_run.operation_statuses)
+        if cobol_ops != python_ops:
+            raise HarnessFaultError(
+                f"{scenario}: THE TWO SIDES DID NOT DRIVE THE SAME OPERATIONS. The "
+                f"oracle reported {cobol_ops!r} and the migrated cycle reported "
+                f"{python_ops!r}; the scenario declares "
+                f"{tuple(requested_operations)!r}. A comparison of two states "
+                f"produced by different work measures nothing - and an EMPTY diff "
+                f"from it is the most misleading outcome available, because it looks "
+                f"exactly like parity. Both sides take the scenario's own ordered "
+                f"`operations` list, with no reset between operations and one dump "
+                f"per side.\n{cobol_run.describe()}\n{python_run.describe()}"
+            )
+
+    # STAGES 7 and 8.
     stages.append(dump(scenario, SIDE_PYTHON, out_dir=out_dir).raise_for_status())
     stages.append(
         normalize(scenario, SIDE_PYTHON, out_dir=out_dir).raise_for_status()
     )
 
-    # STAGE 8. Exit 2 raises inside `diff`; exit 1 returns a non-empty TreeDiff.
+    # STAGE 9. BOTH CAPTURES MUST DECLARE THEMSELVES COMPLETE before a single row is
+    # compared, which the driver performs as an in-script check and this helper
+    # performs in process (finding F-16: the composed protocol has the same ten stages
+    # as the driven one, or a stage number here means something else than it does
+    # there). It is recorded as its own stage so that a test can see it ran.
+    stages.append(verify_published(scenario, out_dir=out_dir).raise_for_status())
+
+    # STAGE 10. Exit 2 raises inside `diff`; exit 1 returns a non-empty TreeDiff.
     outcome = diff(scenario, out_dir=out_dir, max_differences=max_differences)
     stages.append(outcome.result)
 
-    return ParityRun(
+    completed = ParityRun(
         scenario=scenario,
         tables=tables,
         stages=tuple(stages),
@@ -3248,7 +4716,10 @@ def run_scenario_parity(
         python_run=python_run,
         outcome=outcome,
         paths=paths,
+        run_id=run_id,
     )
+    _PARITY_RUN_CACHE[cache_key] = completed
+    return completed
 
 
 # ---------------------------------------------------------------------------
@@ -3398,64 +4869,199 @@ def assert_parity_non_vacuous(
 
 
 @dataclass(frozen=True)
+class TableFingerprint:
+    """One table's recorded state: how many rows, and a digest of every one of them.
+
+    Attributes:
+        table: The table name, as the scenario declared it.
+        row_count: The row count, or None when the table could not be read.
+        digest: The lower-case hex SHA-256 of the canonical dump
+            `harness/dump_tables.py` writes for that table, or None when the table
+            could not be read. `harness/table_digest.py` is the sole producer, and
+            both sides invoke it, so two digests are comparable by construction.
+    """
+
+    table: str
+    row_count: int | None
+    digest: str | None
+
+    @property
+    def readable(self) -> bool:
+        """Was the table readable when the record was taken?"""
+        return self.row_count is not None and self.digest is not None
+
+
+def read_fingerprint(path: Path | str) -> tuple[TableFingerprint, ...]:
+    """Parse one fingerprint file into its per-table records.
+
+    THE FORMAT IS A CONTRACT, because the two sides compare these files byte for
+    byte: one `<TABLE>\\t<count>\\t<digest>` line per fingerprinted table - the
+    scenario's bounded tables in its declared order, then `SYSTEM-REC` - with no
+    header and no trailing blank line. A table that could not be read carries `-`
+    in both value fields.
+
+    THE PARSE IS STRUCTURAL ONLY. It reads the three fields and checks their shape;
+    it draws no conclusion from a count or a digest, which is the caller's business
+    (rule R-3).
+
+    Args:
+        path: The fingerprint file.
+
+    Returns:
+        One record per line, in file order.
+
+    Raises:
+        AssertionError: A line does not carry exactly three fields, or a value field
+            is neither the unreadable marker nor a well-formed count/digest.
+        OSError: The file could not be read.
+    """
+    target = Path(path)
+    records: list[TableFingerprint] = []
+    for number, line in enumerate(
+        target.read_text(encoding="utf-8").splitlines(), start=1
+    ):
+        if not line.strip():
+            continue
+        fields = line.split("\t")
+        assert len(fields) == FINGERPRINT_FIELDS, (
+            f"{target}:{number} carries {len(fields)} tab-separated field(s) where "
+            f"the contract is {FINGERPRINT_FIELDS} - "
+            f"`<TABLE>\\t<count>\\t<digest>`:\n"
+            f"{_indent(line)}\n"
+            f"  A two-field line is the SUPERSEDED counts-only form. A count alone "
+            f"cannot tell two different seeds apart, so a record without its digest "
+            f"establishes nothing about the starting state and must not be read as "
+            f"though it did."
+        )
+        table, count_field, digest_field = (field.strip() for field in fields)
+        if count_field == FINGERPRINT_UNREADABLE:
+            assert digest_field == FINGERPRINT_UNREADABLE, (
+                f"{target}:{number} marks {table!r} unreadable in its count field "
+                f"but carries {digest_field!r} as its digest. A table that could not "
+                f"be read has neither, and the two fields must agree about it."
+            )
+            records.append(TableFingerprint(table=table, row_count=None, digest=None))
+            continue
+        assert count_field.isdigit(), (
+            f"{target}:{number} records {count_field!r} as {table!r}'s row count; a "
+            f"count is a whole number of rows, or `{FINGERPRINT_UNREADABLE}` when "
+            f"the table could not be read."
+        )
+        assert len(digest_field) == DIGEST_LENGTH and all(
+            character in "0123456789abcdef" for character in digest_field
+        ), (
+            f"{target}:{number} records {digest_field!r} as {table!r}'s digest; a "
+            f"digest is {DIGEST_LENGTH} lower-case hexadecimal characters - the "
+            f"SHA-256 harness/table_digest.py takes over the canonical dump - or "
+            f"`{FINGERPRINT_UNREADABLE}`."
+        )
+        records.append(
+            TableFingerprint(
+                table=table, row_count=int(count_field, 10), digest=digest_field
+            )
+        )
+    return tuple(records)
+
+
+@dataclass(frozen=True)
 class SeedFingerprints:
-    """The two sides' pre-run row-count fingerprints, and what they established.
+    """The two sides' pre-run state fingerprints, and what they established.
 
     Attributes:
         python_path: `run-logs/<scenario>/python.seed-fingerprint`, which
             `harness/run_python_scenario.sh` writes at its stage 6a.
-        cobol_path: The oracle-side counterpart, or None when it was not written.
+        cobol_path: The oracle-side counterpart, written by
+            `harness/run_cobol_scenario.sh` immediately before it drives the menu.
         tables: The table names the fingerprint carried, in the order it carried
             them - which must be the scenario's declared order.
-        cross_checked: True when both files were present and byte-identical.
+        records: The Python side's per-table records, digests included.
+        cross_checked: True when both files were present and byte-identical. It can
+            no longer be False on a returned value: the cross-check is required, and
+            a missing counterpart fails instead of being reported as weaker.
     """
 
     python_path: Path
-    cobol_path: Path | None
+    cobol_path: Path
     tables: tuple[str, ...]
+    records: tuple[TableFingerprint, ...]
     cross_checked: bool
 
 
+def fingerprinted_tables(run: ParityRun) -> tuple[str, ...]:
+    """The table order both runners write into their state records.
+
+    The scenario's own bounded tables, in the scenario's declared order, then
+    `SYSTEM-REC` when the scenario does not already bound it - which is the order
+    `acas_resolve_fingerprint_tables` and `acas_py_resolve_fingerprint_tables` build,
+    and it is appended rather than sorted in so that the declared order stays exactly
+    as the scenario wrote it and the two sides' records stay byte-comparable.
+
+    READ FROM THE SCENARIO, NOT FROM `run.tables`. Those are two different lists in
+    this protocol and conflating them fails every scenario: `run.tables` is the
+    22-table COMPARISON bound the capture and the diff cover, while the runners
+    fingerprint the scenario's own `affected_tables` - the DECLARED effect - because
+    that is the list whose seeded state the two sides cross-check.
+
+    Args:
+        run: The completed `ParityRun`, for its scenario name.
+
+    Returns:
+        The expected record order.
+    """
+    declared = scenario_affected_tables(run.scenario)
+    if PARAMETER_TABLE in declared:
+        return declared
+    return (*declared, PARAMETER_TABLE)
+
+
 def assert_seed_fingerprints_agree(
-    run: ParityRun, *, require_cross_check: bool = False
+    run: ParityRun, *, require_cross_check: bool = True
 ) -> SeedFingerprints:
-    """Assert the starting state of the comparison was recorded, and cross-checked.
+    """Assert BOTH sides recorded the same starting state, rows and values included.
 
-    `harness/run_python_scenario.sh` records the row count of every affected table,
-    one line of `<TABLE>\\t<count>` per table IN THE SCENARIO'S DECLARED ORDER,
-    immediately before the run, and refuses to proceed when an oracle-side
-    fingerprint exists and disagrees. This helper asserts everything that record can
-    establish:
+    Each runner records, immediately before it dispatches, one
+    `<TABLE>\\t<count>\\t<digest>` line per affected table IN THE SCENARIO'S DECLARED
+    ORDER, and the Python runner refuses to proceed when the oracle-side record
+    disagrees. This helper asserts everything those two records establish:
 
-      * it exists, and is not empty;
-      * it carries exactly one line per bounded table, IN THE BOUNDED ORDER - the
-        order is part of the contract, because the two sides compare these files byte
-        for byte and a reordering on one side alone would be reported as a
-        starting-state disagreement;
-      * when the oracle-side file is present the two are byte-identical.
+      * BOTH exist, and neither is empty. The oracle side is required, not optional:
+        a comparison whose starting state was recorded on one side only has not had
+        its starting state established at all, and every verdict taken from it - most
+        dangerously an EMPTY one - is unattributable.
+      * each carries exactly one line per FINGERPRINTED table, in that order - the
+        scenario's declared tables, which include `SYSTEM-REC`, the parameter row the
+        menu exit persists on every route, with that row appended after the declared
+        order only on the fallback path where a scenario omits it - with all three
+        fields well formed. The order is part of the contract because the
+        two sides are compared byte for byte, so a reordering on one side alone would
+        read as a starting-state disagreement.
+      * EVERY BOUNDED TABLE CARRIES A DIGEST OVER EVERY ONE OF ITS ROWS. This is the
+        claim a row count cannot make. Two seeds that differ in one balance, one
+        status byte or one date have identical counts, and the diff that follows -
+        or the empty diff that follows - belongs to the seed rather than to either
+        cycle. The digest is taken by `harness/table_digest.py` over the canonical
+        text `harness/dump_tables.py` writes, by the same program on both sides.
+      * the two files are BYTE-IDENTICAL.
 
-    THE COUNTS THEMSELVES ARE NOT INTERPRETED (rule R-3). Whether a count is
-    plausible is not this module's business; `assert_parity_non_vacuous` takes the
-    corroboration from the dumps instead.
-
-    THE ORACLE-SIDE FILE MAY LEGITIMATELY BE ABSENT, and the caller decides what that
-    means. The Python runner treats it as a weaker guarantee, says so plainly and
-    continues, so this helper reports the disposition through `cross_checked` rather
-    than inventing a failure the harness itself does not raise - unless
-    `require_cross_check` asks for one.
+    THE COUNTS AND DIGESTS ARE NOT INTERPRETED (rule R-3). Whether a count is
+    plausible is not this module's business; `assert_parity_non_vacuous` takes that
+    corroboration from the dumps, and `assert_tables_unchanged_by_run` compares the
+    pre-run record against the post-run one.
 
     Args:
         run: The completed `ParityRun`.
-        require_cross_check: Fail when the oracle-side fingerprint is absent, rather
-            than reporting the weaker guarantee.
+        require_cross_check: Kept in the signature, and defaulted to True, so that
+            the requirement is visible at every call site rather than implied. Passing
+            False asks for the Python-side record to be validated on its own, which is
+            a strictly weaker claim and is never what a parity test wants; it exists
+            for a caller diagnosing a half-completed run.
 
     Returns:
         What the two files established.
 
     Raises:
-        AssertionError: The Python-side record is absent, empty, of the wrong length
-            or in the wrong order; the two sides disagree; or the cross-check was
-            required and could not be made.
+        AssertionError: Either record is absent, empty, of the wrong length, in the
+            wrong order or missing a digest; or the two sides disagree.
     """
     run_logs = run.paths.run_logs
     python_path = run_logs / SEED_FINGERPRINT_PYTHON
@@ -3472,73 +5078,287 @@ def assert_seed_fingerprints_agree(
     recorded = python_path.read_bytes()
     assert recorded, (
         f"{run.scenario}: the seed fingerprint at {python_path} is EMPTY. It carries "
-        f"one line per affected table, so an empty file means no table was counted."
+        f"one line per affected table, so an empty file means no table was recorded."
     )
 
-    lines = [
-        line
-        for line in recorded.decode("utf-8").splitlines()
-        if line.strip()
-    ]
-    assert len(lines) == len(run.tables), (
+    expected_order = fingerprinted_tables(run)
+    records = read_fingerprint(python_path)
+    assert len(records) == len(expected_order), (
         f"{run.scenario}: the seed fingerprint at {python_path} carries "
-        f"{len(lines)} line(s) for {len(run.tables)} bounded table(s):\n"
+        f"{len(records)} line(s) for {len(expected_order)} fingerprinted table(s) "
+        f"{list(expected_order)}:\n"
         f"{_indent(recorded.decode('utf-8'))}\n"
-        f"  One line per table is the contract, and the count is what the two sides "
-        f"compare."
+        f"  One line per table is the contract - the scenario's bounded tables in "
+        f"declared order, then {PARAMETER_TABLE}, the parameter row the menu exit "
+        f"persists - and both sides compare these files byte for byte."
     )
 
     named: list[str] = []
-    for line, table in zip(lines, run.tables, strict=True):
-        # Only the NAME and its POSITION are read. The counts are deliberately left
-        # uninterpreted (rule R-3).
-        recorded_table = line.split("\t")[0].strip()
-        assert recorded_table == table, (
+    for record, table in zip(records, expected_order, strict=True):
+        assert record.table == table, (
             f"{run.scenario}: the seed fingerprint at {python_path} names "
-            f"{recorded_table!r} where the scenario bounds the comparison by "
+            f"{record.table!r} where the fingerprinted order has "
             f"{table!r} in that position:\n"
             f"{_indent(recorded.decode('utf-8'))}\n"
             f"  THE DECLARED ORDER IS PART OF THE CONTRACT: the two sides compare "
             f"these files byte for byte, so a reordering on one side alone would be "
             f"reported as a starting-state disagreement."
         )
-        named.append(recorded_table)
-
-    if cobol_path.is_file():
-        assert recorded == cobol_path.read_bytes(), (
-            f"{run.scenario}: THE TWO SIDES DID NOT START FROM THE SAME SEEDED "
-            f"STATE - a HARNESS FAULT and never a behavioural difference, and the "
-            f"distinction matters because the two look identical in a table diff.\n"
-            f"  python ({python_path}):\n"
-            f"{_indent(recorded.decode('utf-8'))}\n"
-            f"  cobol  ({cobol_path}):\n"
-            f"{_indent(cobol_path.read_text(encoding='utf-8'))}\n"
-            f"  Nothing about either cycle's behaviour has been measured: they were "
-            f"never given the same starting state. Autocommit must be OFF while "
-            f"seeding [common/glbatchLD.cbl:L9-L13]."
+        assert record.readable, (
+            f"{run.scenario}: the seed fingerprint at {python_path} could not record "
+            f"{table!r} at all - it carries the unreadable marker "
+            f"{FINGERPRINT_UNREADABLE!r}. A fingerprinted table that cannot be read "
+            f"before the run has had nothing established about its starting state, "
+            f"and an empty diff over it would mean nothing."
         )
+        named.append(record.table)
+
+    if not require_cross_check:
         return SeedFingerprints(
             python_path=python_path,
             cobol_path=cobol_path,
             tables=tuple(named),
-            cross_checked=True,
+            records=records,
+            cross_checked=False,
         )
 
-    assert not require_cross_check, (
+    assert cobol_path.is_file() and cobol_path.stat().st_size > 0, (
         f"{run.scenario}: there is no oracle-side seed fingerprint at "
-        f"{cobol_path}, so the two starting states are UNVERIFIED and this scenario "
-        f"asked for them to be verified. harness/run_python_scenario.sh writes the "
-        f"Python side's at its stage 6a and cross-checks the oracle's when it "
-        f"exists; whatever records the compiled run's starting state must write the "
-        f"counterpart in the same format - `<TABLE>\\t<count>` per table in the "
-        f"scenario's declared order.\n{run.describe()}"
+        f"{cobol_path}, so THE TWO STARTING STATES ARE UNVERIFIED and the comparison "
+        f"cannot be attributed to either cycle. harness/run_cobol_scenario.sh writes "
+        f"it immediately before it drives the compiled menu, in the same format and "
+        f"the same declared order as the Python side's - "
+        f"`<TABLE>\\t<count>\\t<digest>` per table - and both digests come from "
+        f"harness/table_digest.py. An absent or empty file means the oracle run did "
+        f"not reach the stage that records it, which is a HARNESS FAULT and never a "
+        f"behavioural difference.\n{run.describe()}"
+    )
+
+    assert recorded == cobol_path.read_bytes(), (
+        f"{run.scenario}: THE TWO SIDES DID NOT START FROM THE SAME SEEDED "
+        f"STATE - a HARNESS FAULT and never a behavioural difference, and the "
+        f"distinction matters because the two look identical in a table diff.\n"
+        f"  python ({python_path}):\n"
+        f"{_indent(recorded.decode('utf-8'))}\n"
+        f"  cobol  ({cobol_path}):\n"
+        f"{_indent(cobol_path.read_text(encoding='utf-8'))}\n"
+        f"  A DIFFERING DIGEST WITH EQUAL COUNTS IS THE CASE THIS RECORD EXISTS FOR: "
+        f"the same number of rows carrying different values. Nothing about either "
+        f"cycle's behaviour has been measured - they were never given the same "
+        f"starting state. Autocommit must be OFF while seeding "
+        f"[common/glbatchLD.cbl:L9-L13]."
     )
     return SeedFingerprints(
         python_path=python_path,
-        cobol_path=None,
+        cobol_path=cobol_path,
         tables=tuple(named),
-        cross_checked=False,
+        records=records,
+        cross_checked=True,
     )
+
+
+def assert_system_record_parity(run: ParityRun) -> tuple[TableFingerprint, TableFingerprint]:
+    """Assert the two cycles left `SYSTEM-REC` in the SAME state after their runs.
+
+    THIS IS THE SECOND OF TWO BOUNDS ON THE PARAMETER ROW, and it is the one the table
+    diff cannot make on its own. `overrewrite` rewrites key 1 on all four subsystems and
+    the migrated command line reproduces it, so both cycles write the row on every route;
+    the IRS route additionally copies its advanced posting allocator into it before
+    persisting. A regression in any of that once produced an EMPTY diff, because the
+    table was outside every bound.
+
+    The FIRST bound is the dump: `SYSTEM-REC` is one of the 22 in-scope tables and is on
+    every scenario's declared list, so 167 of its 169 columns are compared by value. The
+    two it does not compare by value are credentials - `harness/dump_tables.py`'s
+    `REDACTED_COLUMNS` withholds `RDBMS-PASSWD` and `PASS-WORD` inside `render_value`,
+    identically on both sides, because a dump is `SELECT *` and a capture is committed
+    evidence.
+
+    THIS is the second bound, and it reaches the two the dump withholds: comparing the two
+    sides' post-run digests covers all 169 columns, credentials included, and leaks
+    nothing, because a sha256 of the canonical dump is not the dump. The credential
+    columns are filled from the environment by the builder and are identical for both
+    sides of one run, so they cannot manufacture a difference; anything that does differ
+    is a difference in what the two cycles wrote.
+
+    Args:
+        run: The completed `ParityRun`.
+
+    Returns:
+        The oracle-side and Python-side post-run records for the parameter row, in
+        that order, so a caller can state what it observed.
+
+    Raises:
+        AssertionError: A record is missing or unreadable, or the two sides disagree.
+    """
+    run_logs = run.paths.run_logs
+    sides: dict[str, TableFingerprint] = {}
+    for side, name in (
+        (SIDE_COBOL, POST_FINGERPRINT_COBOL),
+        (SIDE_PYTHON, POST_FINGERPRINT_PYTHON),
+    ):
+        path = run_logs / name
+        assert path.is_file() and path.stat().st_size > 0, (
+            f"{run.scenario}: the {side} side wrote no post-run state record at "
+            f"{path}. Both runners write one immediately after their dispatch, so an "
+            f"absent record means the run did not reach that stage - a HARNESS FAULT. "
+            f"Without it the parameter row keeps only the bound the dump gives it, and "
+            f"the two withheld credential cells are compared by nothing at all.\n"
+            f"{run.describe()}"
+        )
+        found = {record.table: record for record in read_fingerprint(path)}
+        record = found.get(PARAMETER_TABLE)
+        assert record is not None, (
+            f"{run.scenario}: {PARAMETER_TABLE} is absent from the {side} side's "
+            f"post-run record at {path}. Both runners record it on every scenario, "
+            f"whether the scenario declares it or not, precisely because the digest is "
+            f"the only thing that compares its two withheld credential cells."
+        )
+        assert record.readable, (
+            f"{run.scenario}: {PARAMETER_TABLE} could not be read on the {side} side "
+            f"after its run, so nothing has been established about the parameter row "
+            f"the menu exit persists."
+        )
+        sides[side] = record
+
+    cobol_record, python_record = sides[SIDE_COBOL], sides[SIDE_PYTHON]
+    assert (cobol_record.row_count, cobol_record.digest) == (
+        python_record.row_count,
+        python_record.digest,
+    ), (
+        f"{run.scenario}: THE TWO CYCLES LEFT {PARAMETER_TABLE} IN DIFFERENT STATES.\n"
+        f"  cobol : {cobol_record.row_count} row(s), digest {cobol_record.digest}\n"
+        f"  python: {python_record.row_count} row(s), digest {python_record.digest}\n"
+        f"  Both sides persist key 1 on this route - `overrewrite` in the menu shell "
+        f"and the paragraph the command line reproduces - so this is a BEHAVIOURAL "
+        f"DIFFERENCE in what they wrote, not a harness artefact. The likeliest "
+        f"causes are the key order (1, then 2, then 4 - the reverse of the load's), "
+        f"the close issued against key 4 rather than key 1, the write-back into "
+        f"`Date-Form` the frozen date sections perform, and on the IRS route the "
+        f"advanced posting allocator. The digest covers all 169 columns, so the "
+        f"difference is somewhere in the row; dump the table by hand to locate it - "
+        f"the capture deliberately does not carry it, because the row holds a "
+        f"credential.\n{run.describe()}"
+    )
+    return cobol_record, python_record
+
+
+def assert_tables_unchanged_by_run(
+    run: ParityRun,
+    *,
+    unchanged: Sequence[str] = (),
+    changed: Sequence[str] = (),
+) -> None:
+    """Compare each side's PRE-run record against its POST-run record, per table.
+
+    THE QUESTION THIS ANSWERS IS "DID THE RUN DO ANYTHING?", and no table diff can
+    answer it. A diff compares the two SIDES to each other; two runs that did nothing
+    at all agree perfectly. So each runner records the same canonical digest again
+    immediately after its dispatch, and the two records together say, per table,
+    whether that table's rows changed - on each side independently.
+
+    Both sides are asserted, and separately, because a claim that holds on one side
+    only is not the claim: "byte-identical to the seed" and "this run mutated
+    something" are properties of a CYCLE, and there are two cycles.
+
+    Args:
+        run: The completed `ParityRun`.
+        unchanged: Tables whose rows must be identical before and after the run, on
+            both sides. Use it for the read-only tables of a route: the claim is that
+            the run did not touch them, which is stronger and more useful than the
+            claim that the two sides agree about them.
+        changed: Tables at least one of which must differ before and after the run,
+            on both sides - a MUTATION WITNESS. Passing several names asserts that at
+            least one of them changed, which is what a route with several possible
+            landing places needs; passing one asserts that one changed.
+
+    Raises:
+        AssertionError: A record is missing, unreadable, or contradicts the claim.
+        OSError: A fingerprint file could not be read.
+    """
+    if not unchanged and not changed:
+        raise ValueError(
+            "assert_tables_unchanged_by_run needs at least one table to assert "
+            "about; a call that claims nothing would read as evidence."
+        )
+
+    run_logs = run.paths.run_logs
+    for side, before_name, after_name in (
+        (SIDE_COBOL, SEED_FINGERPRINT_COBOL, POST_FINGERPRINT_COBOL),
+        (SIDE_PYTHON, SEED_FINGERPRINT_PYTHON, POST_FINGERPRINT_PYTHON),
+    ):
+        before_path = run_logs / before_name
+        after_path = run_logs / after_name
+        for path in (before_path, after_path):
+            assert path.is_file() and path.stat().st_size > 0, (
+                f"{run.scenario}: the {side} side has no state record at {path}. "
+                f"Both runners write one immediately before their dispatch and one "
+                f"immediately after it, so an absent record means the run did not "
+                f"reach the stage that writes it - a HARNESS FAULT. Without both, "
+                f"whether the run changed anything cannot be established at all.\n"
+                f"{run.describe()}"
+            )
+
+        before = {record.table: record for record in read_fingerprint(before_path)}
+        after = {record.table: record for record in read_fingerprint(after_path)}
+
+        for table in unchanged:
+            first, second = before.get(table), after.get(table)
+            assert first is not None and second is not None, (
+                f"{run.scenario}: {table} is absent from the {side} side's "
+                f"{'pre' if first is None else 'post'}-run record. It is bounded by "
+                f"the scenario, so both records must carry it."
+            )
+            assert first.readable and second.readable, (
+                f"{run.scenario}: {table} could not be read on the {side} side "
+                f"either before or after the run, so nothing about it has been "
+                f"established."
+            )
+            assert (first.row_count, first.digest) == (
+                second.row_count,
+                second.digest,
+            ), (
+                f"{run.scenario}: {table} CHANGED on the {side} side, and this "
+                f"route must not touch it.\n"
+                f"  before: {first.row_count} row(s), digest {first.digest}\n"
+                f"  after:  {second.row_count} row(s), digest {second.digest}\n"
+                f"  The digest covers every row at its declared scale, so this is a "
+                f"real change of stored values and not a representation artefact. A "
+                f"row count that did not move does not exonerate the table: an "
+                f"in-place rewrite leaves the count alone.\n{run.describe()}"
+            )
+
+        if changed:
+            witnesses = []
+            for table in changed:
+                first, second = before.get(table), after.get(table)
+                assert first is not None and second is not None, (
+                    f"{run.scenario}: {table} is absent from the {side} side's "
+                    f"{'pre' if first is None else 'post'}-run record, so it cannot "
+                    f"witness that the run did anything."
+                )
+                assert first.readable and second.readable, (
+                    f"{run.scenario}: {table} could not be read on the {side} side, "
+                    f"so it cannot witness that the run did anything."
+                )
+                if (first.row_count, first.digest) != (
+                    second.row_count,
+                    second.digest,
+                ):
+                    witnesses.append(table)
+            assert witnesses, (
+                f"{run.scenario}: THE {side.upper()} RUN CHANGED NOTHING. None of "
+                f"{list(changed)} differs between the pre-run and post-run records, "
+                f"so the run was a no-op over every table that was supposed to move. "
+                f"TWO NO-OPS ARE BYTE-IDENTICAL AND SO ARE THEIR DUMPS: without this "
+                f"witness an empty diff, or two byte-identical determinism runs, "
+                f"would prove only that neither side did anything. The likeliest "
+                f"causes are a seed that never landed, a route that returned through "
+                f"a gate, or `system.file_system_used` not selecting the RDB path "
+                f"[copybooks/wssystem.cob:L111-L114].\n"
+                f"  pre-run record:  {before_path}\n"
+                f"  post-run record: {after_path}\n{run.describe()}"
+            )
 
 
 def expected_exit_status(declared: Sequence[int] | int | None) -> int:
@@ -3590,6 +5410,60 @@ def observed_exit_status(result: StageResult, operations: Sequence[str]) -> int:
         if status != 0:
             return status
     return 0
+
+
+def assert_operations_driven(
+    run: ParityRun,
+    *,
+    operations: Sequence[str],
+) -> None:
+    """Assert BOTH sides drove exactly these operations, in exactly this order.
+
+    ⭐ THE TWO-SIDED CLAIM, ASSERTED WHERE A READER LOOKS FOR IT (finding F-12). The
+    protocol compares one COBOL run against one Python run, and that comparison means
+    nothing unless the two runs drove THE SAME ORDERED LIST. One scenario -
+    `period_end_totals` - declares four operations spanning two menu executables, and
+    the oracle side used to be driven one operation at a time by a separate helper while
+    the Python side ran all four. The diff was then between a one-operation state and a
+    four-operation state, and its verdict was meaningless in either direction.
+
+    Both runners now resolve the ordered list from the scenario itself and publish one
+    status row per operation, in order, so the claim is CHECKABLE - and this asserts it
+    rather than leaving it to be implied by `StageResult.operation_status` raising deep
+    inside another helper.
+
+    THE ORDER IS PART OF THE CLAIM, not decoration: `period_end_totals`' operation 3
+    sets flags operation 4 reads [purchase/pl060.cbl:L373-L375], and there is exactly
+    one dump per side, so the dump attributes the CUMULATIVE effect of the sequence.
+
+    Args:
+        run: The completed `ParityRun`.
+        operations: The operations the scenario declares, in declared order.
+
+    Raises:
+        AssertionError: Either side recorded a different set, a different order, or a
+            different count.
+        ValueError: An operation is not one of the seven.
+    """
+    expected = tuple(operations)
+    for operation in expected:
+        assert_operation(operation)
+
+    for side, stage in (
+        (SIDE_COBOL, run.cobol_run),
+        (SIDE_PYTHON, run.python_run),
+    ):
+        recorded = tuple(name for name, _status in stage.operation_statuses)
+        assert recorded == expected, (
+            f"{run.scenario}: the {side} run recorded operation statuses for "
+            f"{list(recorded)} where the scenario declares {list(expected)}. THE TWO "
+            f"SIDES MUST DRIVE THE SAME ORDERED LIST or the comparison is between two "
+            f"different amounts of work and its verdict means nothing in either "
+            f"direction - an empty diff most of all. A short list means the runner "
+            f"drove fewer operations than the scenario declares; a reordered one means "
+            f"a later operation ran before the state it reads was written.\n"
+            f"{stage.describe()}"
+        )
 
 
 def assert_declared_run_statuses(
@@ -3817,11 +5691,13 @@ def run_determinism_pair(
 ) -> DeterminismRun:
     """Run the migrated cycle TWICE from the same seed and compare the two states.
 
-    Composed from the individual stages - seed, run, dump, normalize, reset, seed,
-    run, dump, normalize, compare - WITHOUT the COBOL side, which is the composition
-    tests/determinism/ needs. Both runs use the same scenario, so both receive the
-    same pinned run date through linkage; that pin is returned so a test can assert
-    it rather than assume it.
+    Composed from the individual stages - RESET-AND-SEED, run, dump, normalize, then
+    RESET-AND-SEED, run, dump, normalize, compare - WITHOUT the COBOL side, which is
+    the composition tests/determinism/ needs. The reset is what makes the two runs
+    comparable, and it happens before BOTH of them by the same command; see the loop
+    below. Both runs use the same scenario, so both receive the same pinned run date
+    through linkage; that pin is returned so a test can assert it rather than assume
+    it.
 
     WHY PINNING TWO OBSERVABLES IS SUFFICIENT: every one of the twelve in-scope
     programs contains ZERO clock reads, there is no random seed anywhere in the
@@ -3851,7 +5727,10 @@ def run_determinism_pair(
     if operation is not None:
         assert_operation(operation)
 
-    tables = scenario_affected_tables(scenario)
+    #  As the parity driver: two runs of one scenario are compared over ALL 22
+    #  in-scope tables, so a determinism claim covers everything the cycle can
+    #  persist rather than only the tables the scenario expected to move.
+    tables = in_scope_tables()
     definition = scenario_definition(scenario)
 
     # The scenario's own declared run date, so the pin returned is the pin the runs
@@ -3868,16 +5747,37 @@ def run_determinism_pair(
 
     stages: list[StageResult] = []
     runs: list[StageResult] = []
-    for index, side_root in enumerate((first_root, second_root)):
-        # A fresh seed before EACH run, so the second starts from byte-for-byte the
-        # state the first did. The first pass seeds directly; the second resets, which
-        # re-applies the frozen schema verbatim and re-seeds from the same fixture.
-        if index == 0:
-            stages.append(seed(scenario).raise_for_status())
-        else:
-            stages.append(reset(scenario).raise_for_status())
+    for side_root in (first_root, second_root):
+        # ⭐ THE SAME COMMAND BEFORE BOTH LEGS (finding F-21), AND BEFORE THE FIRST.
+        # This used to `seed` the first leg and `reset` the second, and the two are NOT
+        # the same starting state: a bare seed leaves behind whatever the previously
+        # executed scenario wrote and relies on duplicate-key rewrites, while a reset
+        # re-applies the frozen schema verbatim first. So leg one could begin from rows
+        # leg two never saw, and a difference between the legs would then belong to the
+        # seeding and not to the cycle - in a helper whose entire purpose is to prove
+        # the cycle is deterministic. Worse, the two legs could AGREE because a
+        # duplicate-key rewrite happened to converge. Both legs now reset and re-seed
+        # from the one built fixture, which is also exactly what stages 1 and 5 of the
+        # parity protocol do, and `prepare_scenario` is `reset_db.sh` under the stage-1
+        # name - the identical command `reset` issues - so the two starting states are
+        # produced by one code path rather than two.
+        #
+        # THIS IS THE ISOLATION, AND IT IS WHY NO FINAL CLEANUP FOLLOWS. Every run of
+        # this helper and of `run_scenario_parity` begins by dropping the schema,
+        # re-applying `mysql/ACASDB.sql` verbatim and re-seeding the scenario's own
+        # fixture, so nothing a previous run left can reach a later one. A trailing
+        # teardown would delete the very artifacts an operator reads after a failure
+        # and would still not be a substitute for resetting at the start (rule R-3
+        # keeps this sequential, so there is no concurrent writer to guard against).
+        stages.append(reset(scenario).raise_for_status())
 
-        run = run_python(scenario, operation=operation)
+        # ⭐ EVERY ARTIFACT OF THIS LEG LIVES IN THIS LEG'S ROOT (finding F-21). The
+        # dump and the normalisation were already per-leg, but the RUN published its
+        # transcript, its run-status record and its per-operation statuses into the
+        # canonical run-logs root - so leg two overwrote leg one's attestation, and the
+        # dump of leg one was attested by the run of leg two. Passing the leg's own
+        # root keeps the attestation with the capture it belongs to.
+        run = run_python(scenario, operation=operation, out_dir=side_root)
         stages.append(run)
         runs.append(run)
 
@@ -3894,6 +5794,59 @@ def run_determinism_pair(
     second_normalized = scenario_paths(
         scenario, out_root=second_root
     ).python_normalized
+
+    # ⭐ NEITHER LEG MAY BE UNATTESTED (finding F-21). `diff_trees_directly` compares
+    # two directories and asks nothing of them, which is right for its own purpose and
+    # wrong here: two captures taken after runs that never happened are trivially
+    # equal, and equality is what this helper reports as determinism. So each leg's
+    # published manifest is required to exist and to ATTEST its run before the
+    # comparison, using the comparison tool's own reader rather than a check invented
+    # here. The manifests also carry the seed identity, which must be the same digest
+    # on both legs - the whole claim is that one seeded state produced two identical
+    # results.
+    diff_states = harness_diff_states()
+    leg_manifests: list[Mapping[str, Any]] = []
+    for label, tree_dir in (
+        (DETERMINISM_LABELS[0], first_normalized),
+        (DETERMINISM_LABELS[1], second_normalized),
+    ):
+        try:
+            manifest = diff_states.read_manifest(tree_dir)
+        except Exception as exc:  # noqa: BLE001 - any read failure is a fault
+            raise HarnessFaultError(
+                f"{scenario}: the {label} leg's normalised capture {tree_dir} could "
+                f"not be read for its completeness manifest: {exc}."
+            ) from exc
+        if manifest is None:
+            raise HarnessFaultError(
+                f"{scenario}: the {label} leg's normalised capture {tree_dir} carries "
+                f"no manifest, so it does not declare itself complete. Two partial "
+                f"captures can be identical over the tables they both hold, and this "
+                f"helper reports identity as determinism - so it is refused (R-6)."
+            )
+        attestation = manifest.get("attestation")
+        if not isinstance(attestation, Mapping) or attestation.get("attested") is not True:
+            detail = (
+                attestation.get("detail")
+                if isinstance(attestation, Mapping)
+                else "no attestation block"
+            )
+            raise HarnessFaultError(
+                f"{scenario}: the {label} leg does not attest a successful run, so "
+                f"there is nothing to claim determinism about: "
+                f"{detail or 'no reason recorded'}."
+            )
+        leg_manifests.append(manifest)
+
+    first_seed = leg_manifests[0]["attestation"].get("seed_marker_sha256")
+    second_seed = leg_manifests[1]["attestation"].get("seed_marker_sha256")
+    if first_seed != second_seed:
+        raise HarnessFaultError(
+            f"{scenario}: the two determinism legs were seeded from DIFFERENT "
+            f"fixtures ({first_seed!r} and {second_seed!r}). Determinism is the claim "
+            f"that ONE seeded state produces two identical results, so two different "
+            f"seeded states make the comparison meaningless whatever it reports."
+        )
 
     tree = diff_trees_directly(first_normalized, second_normalized, tables)
 
@@ -3926,7 +5879,7 @@ class Vocabulary:
     use, so there is one definition of each and no second authority to drift.
 
     Attributes:
-        scenarios: The eight scenario names.
+        scenarios: The scenario names, in `SCENARIOS` order.
         operations: The seven operations both runners accept, each mapping to
             `(subsystem, menu key, menu paragraph, locator)`.
         term_codes: The admissible term codes per operation - only 5 and 8 exist.
@@ -3941,6 +5894,13 @@ class Vocabulary:
         date_forms: `(UK, USA, International)` as `SYSTEM-REC.DATE-FORM` numbers.
         autogen_tables: The four automatic-generation tables both runners assert
             remain empty.
+        parameter_table: `SYSTEM-REC`, the ONE in-scope table BOTH cycles write on
+            EVERY route (`args.overrewrite` rewrites key 1 unconditionally) and
+            which NO scenario names in `affected_tables`, because a dump is
+            `SELECT *` and the record carries `RDBMS-PASSWD char(12)`. It is
+            bounded by FINGERPRINT instead - see `assert_system_record_parity`.
+            Published on this STACK-FREE bundle as well as on `Protocol` because
+            the test that asserts the bounding list's shape takes no stack.
         pinned_run_date_text: The pinned `to-day`, DD/MM/CCYY.
         pinned_run_date_binary: The same date as `Run-Date binary-long`.
         fault: `HarnessFaultError`, so a test can name the class it expects.
@@ -3955,12 +5915,20 @@ class Vocabulary:
         diff_trees_directly: A `TreeDiff` between two normalised trees on disk.
         expected_exit_status: The process status a declared list implies.
         classify_run: A run stage's disposition. Pure - it reads a captured result.
+        assert_wrapper_completed: A run stage's WRAPPER health, asserted with the
+            diagnosis its status earns - 69 reads as a behavioural difference and not
+            as a broken rig (finding F-14).
         normalize: STAGE 4, which is a FILE-TO-FILE transformation driven in process
             and needs no database, no COBOL and no Docker. It is published here as
             well as on `Protocol` for exactly one purpose: a test that publishes
             synthetic trees to a `tmp_path` and exercises the three-way exit contract
             end to end must be able to do so ON A BARE HOST.
-        diff: STAGE 8, in process over two normalised trees on disk, and stack-free
+        assert_diff_exit_contract: STAGE 10's THREE-WAY exit contract, exercised
+            against the SHIPPED comparison on synthetic trees the caller publishes
+            into its own `tmp_path`. Stack-free, and the ONE definition of the
+            contract: four scenario files used to assert it against module constants
+            and hand-built dataclasses, which passes whatever the comparison does.
+        diff: STAGE 10, in process over two normalised trees on disk, and stack-free
             for the same reason. Its exit-2 mapping to `HarnessFaultError` is part of
             what such a test asserts.
     """
@@ -3977,6 +5945,7 @@ class Vocabulary:
     irs_instead_states: tuple[str, str, str]
     date_forms: tuple[int, int, int]
     autogen_tables: tuple[str, ...]
+    parameter_table: str
     pinned_run_date_text: str
     pinned_run_date_binary: int
     fault: type[HarnessFaultError]
@@ -3989,8 +5958,10 @@ class Vocabulary:
     diff_trees_directly: Callable[..., Any]
     expected_exit_status: Callable[..., int]
     classify_run: Callable[..., str]
+    assert_wrapper_completed: Callable[..., None]
     normalize: Callable[..., StageResult]
     diff: Callable[..., DiffOutcome]
+    assert_diff_exit_contract: Callable[..., None]
 
 
 def build_vocabulary() -> Vocabulary:
@@ -4022,6 +5993,7 @@ def build_vocabulary() -> Vocabulary:
         irs_instead_states=IRS_INSTEAD_STATES,
         date_forms=(DATE_FORM_UK, DATE_FORM_USA, DATE_FORM_INTL),
         autogen_tables=AUTOGEN_TABLES,
+        parameter_table=PARAMETER_TABLE,
         pinned_run_date_text=PINNED_RUN_DATE_TEXT,
         pinned_run_date_binary=PINNED_RUN_DATE_BINARY,
         fault=HarnessFaultError,
@@ -4034,8 +6006,10 @@ def build_vocabulary() -> Vocabulary:
         diff_trees_directly=diff_trees_directly,
         expected_exit_status=expected_exit_status,
         classify_run=classify_run,
+        assert_wrapper_completed=assert_wrapper_completed,
         normalize=normalize,
         diff=diff,
+        assert_diff_exit_contract=assert_diff_exit_contract,
     )
 
 
@@ -4059,27 +6033,51 @@ class Protocol:
         normalize: Stage 4, and again after 7.
         reset: Stage 5.
         run_python: Stage 6 - the migrated cycle.
-        diff: Stage 8; its `DiffOutcome.is_empty` is the pass condition.
+        diff: Stage 10; its `DiffOutcome.is_empty` is the pass condition.
         run_scenario_parity: All eight, in order.
         run_determinism_pair: Two Python runs, compared.
         classify_run: Success, behavioural difference or harness fault.
+        assert_wrapper_completed: A run stage's wrapper health, asserted from a
+            test BODY so that an `EX_BEHAVIOUR` wrapper reads as a behavioural
+            FAILURE rather than as a broken rig (finding F-14).
         paths: The canonical layout for one scenario.
         affected_tables: The list a comparison is bounded by.
         definition: One scenario's parsed YAML.
+        in_scope_tables: THE CANONICAL COMPARISON BOUND - all 22 in-scope tables,
+            ascending. This, not `affected_tables`, is what `dump` and `diff` cover,
+            because a bound drawn from what a scenario EXPECTS to move cannot reveal
+            a difference in anything it did not expect to move.
         assert_non_vacuous: The guard that refuses an empty verdict over empty
             tables. Called in a FIXTURE, so its failure is a pytest ERROR.
         assert_seed_fingerprints_agree: The guard that establishes the two sides
-            started from the same seeded state.
+            started from the same seeded state - rows AND values, cross-checked.
+        assert_tables_unchanged_by_run: The guard that establishes whether a run
+            changed a table at all, per side, from the pre-run and post-run records.
+        assert_system_record_parity: The parity claim no table diff can make - that
+            the two cycles left the menu-persisted parameter row in the same state.
+            No scenario dumps `SYSTEM-REC`, because the row carries a credential
+            column, so this comparison of the two post-run digests is the only bound
+            it has.
+        fingerprinted_tables: The table order both runners write into their state
+            records - the bounded tables as declared, then `SYSTEM-REC`.
+        read_fingerprint: One state record, parsed into its per-table digests.
+        assert_diff_exit_contract: The three-way exit contract of stage 8, exercised
+            against the real comparison on trees the caller publishes. Needs no
+            stack.
         assert_declared_statuses: The guard that reads the run stages' ACTUAL
             statuses and classifies them. Called in a FIXTURE with
             `reference_only=True`, so a mis-set-up scenario is a pytest ERROR.
+        assert_operations_driven: Both run stages drove the SAME ORDERED operation
+            list, which is what makes their comparison mean anything at all
+            (finding F-12). Called in a FIXTURE: a short or reordered list means the
+            runner drove something other than the scenario, a pytest ERROR.
         assert_python_reproduced_disposition: The BEHAVIOURAL half of the same
             question, for a test BODY: the migrated cycle reached the disposition the
             oracle reached. A divergence here is a FAILURE, not an ERROR.
         read_dump: One dump object, parsed.
         assert_dump_wellformed: The structural contract, asserted.
         diff_trees_directly: A `TreeDiff` between two normalised trees, for an
-            against-the-seed comparison the eight stages do not perform.
+            against-the-seed comparison the ten stages do not perform.
         fault: `HarnessFaultError`, so a test can name the class it expects.
         vocabulary: The stack-free vocabulary bundle, for a stage-backed test that
             also needs a constant.
@@ -4095,12 +6093,22 @@ class Protocol:
     run_scenario_parity: Callable[..., ParityRun]
     run_determinism_pair: Callable[..., DeterminismRun]
     classify_run: Callable[..., str]
+    assert_wrapper_completed: Callable[..., None]
     paths: Callable[..., ScenarioPaths]
     affected_tables: Callable[[str], tuple[str, ...]]
+    in_scope_tables: Callable[[], tuple[str, ...]]
     definition: Callable[[str], Mapping[str, Any]]
     assert_non_vacuous: Callable[..., None]
     assert_seed_fingerprints_agree: Callable[..., SeedFingerprints]
+    assert_tables_unchanged_by_run: Callable[..., None]
+    assert_system_record_parity: Callable[
+        ..., tuple[TableFingerprint, TableFingerprint]
+    ]
+    fingerprinted_tables: Callable[..., tuple[str, ...]]
+    read_fingerprint: Callable[..., tuple[TableFingerprint, ...]]
+    assert_diff_exit_contract: Callable[..., None]
     assert_declared_statuses: Callable[..., tuple[str, str]]
+    assert_operations_driven: Callable[..., None]
     assert_python_reproduced_disposition: Callable[..., str]
     read_dump: Callable[..., dict[str, Any]]
     assert_dump_wellformed: Callable[..., None]
@@ -4270,6 +6278,21 @@ def db_connection() -> Iterator[Any]:
     before yielding, so a test never reads a database through a connection whose
     mode says a seeding window is still open (ambiguity-resolutions.md#q-10).
 
+    ⭐ WHAT THIS IS NOT FOR, AND WHY NO TEST CURRENTLY USES IT. This reads the LIVE
+    SHARED database AT THE MOMENT THE TEST RUNS. It is therefore NOT evidence about a
+    completed run: `run_scenario_parity` is CACHED, its stage 5 drops, re-applies the
+    frozen schema and re-seeds BETWEEN the two sides, and every scenario in the suite
+    shares one database - so by the time a test executes, the row it reads may be the
+    freshly seeded one, the migrated cycle's, or another scenario's. A test that wants
+    a fact about one side of one run must take it from that side's OWN captured stream:
+    both runners read the values they can only observe live - the pinned `RUN-DAT`, the
+    fan-out switch, the two one-shot posting latches - in their post-run assertion
+    stage and print them into their capture, where they are immutable and attributable.
+    `tests/scenarios/test_period_end_totals_update.py`'s latch assertion was moved off
+    this fixture onto those markers for exactly that reason. This fixture remains
+    published for a genuine live-state question, which is a different kind of question
+    from "what did that run leave behind".
+
     Yields:
         The open DB-API connection. Released with `rollback()` and closed on exit,
         because this path only ever reads.
@@ -4352,12 +6375,20 @@ def protocol(require_stack: Callable[[], None]) -> Protocol:
         run_scenario_parity=run_scenario_parity,
         run_determinism_pair=run_determinism_pair,
         classify_run=classify_run,
+        assert_wrapper_completed=assert_wrapper_completed,
         paths=scenario_paths,
         affected_tables=scenario_affected_tables,
+        in_scope_tables=in_scope_tables,
         definition=scenario_definition,
         assert_non_vacuous=assert_parity_non_vacuous,
         assert_seed_fingerprints_agree=assert_seed_fingerprints_agree,
+        assert_tables_unchanged_by_run=assert_tables_unchanged_by_run,
+        assert_system_record_parity=assert_system_record_parity,
+        fingerprinted_tables=fingerprinted_tables,
+        read_fingerprint=read_fingerprint,
+        assert_diff_exit_contract=assert_diff_exit_contract,
         assert_declared_statuses=assert_declared_run_statuses,
+        assert_operations_driven=assert_operations_driven,
         assert_python_reproduced_disposition=assert_python_reproduced_disposition,
         read_dump=read_dump,
         assert_dump_wellformed=assert_dump_wellformed,

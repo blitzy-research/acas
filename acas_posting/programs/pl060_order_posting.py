@@ -1466,7 +1466,7 @@ def _purch_quarters_values(ws: _Ws) -> dict[str, object]:
 def _add_to_pturnover_q(ws: _Ws, quarter: int, value: Decimal) -> None:
     """``add work-goods to pturnover-q (current-quarter)`` - one subscripted accumulate.
 
-    ANOMALY A-NEW-4 [purchase/pl060.cbl:L484], [purchase/pl060.cbl:L490],
+    ANOMALY A-PL060-C [purchase/pl060.cbl:L484], [purchase/pl060.cbl:L490],
     [purchase/pl060.cbl:L497] - ``current-quarter`` is used as a subscript into a table
     of ``occurs 4`` with NO bounds check whatsoever, exactly as the quarter subscript at
     [general/gl080.cbl:L345] is used unchecked (anomaly A-2). Nothing in this program
@@ -1634,7 +1634,7 @@ def _init01__loop(ws: _Ws) -> None:
         # ``work-vat``, so the second reads a ``work-vat`` the first has already
         # changed. Each statement therefore takes its own trip through
         # ``_add_to_total_group``; nothing is hoisted, batched or reordered.
-        # See A-NEW-3 and finding F7 - ``a`` comes from ``oi-type``, which is 4
+        # See A-PL060-B and finding F7 - ``a`` comes from ``oi-type``, which is 4
         # for a purchase proforma [copybooks/plwsoi.cob:L28].
         _add_to_total_group(ws, "total-vat", ws.work_vat)
         _add_to_total_group(ws, "total-net", ws.work_net)
@@ -1951,7 +1951,7 @@ def _init01__end_loop_end(ws: _Ws) -> None:
         receiving=_D_PL_CN_UNAPPL,
     )
 
-    # ANOMALY A-NEW-2 [purchase/pl060.cbl:L630-L635] - the period at [L635] closes BOTH
+    # ANOMALY A-PL060-A [purchase/pl060.cbl:L630-L635] - the period at [L635] closes BOTH
     # ``if``s, so ``write print-record after 3`` belongs to the ``else`` arm alone. In
     # ``FS-Cobol-Files-Used`` (flat-file) mode ``PL133`` is moved into ``print-record``
     # and NEVER WRITTEN; only the RDBMS-mode message ``PL133T`` is printed. The Sales twin
@@ -1966,7 +1966,7 @@ def _init01__end_loop_end(ws: _Ws) -> None:
         # line.  Narrating the missing ``write`` would additionally invent an operator
         # diagnostic for a defect the compiled program reports in no way at all, which is
         # the opposite of reproducing it.  BOTH ARMS SURVIVE AS WRITTEN, because their
-        # asymmetry IS anomaly A-NEW-2 and the structure is its evidence.
+        # asymmetry IS anomaly A-PL060-A and the structure is its evidence.
         if _IS_FS_COBOL_FILES_USED(  # [L631]
             ws.system_record.system_data_block.rdbms_flat_statuses.file_system_used
         ):
@@ -3147,22 +3147,36 @@ def _zz070_convert_date__zz070_exit(ws: _Ws) -> None:
 #   A-21    [L966-L967], [L971], [L984-L985]  three qualified references forced by
 #                    field-name collisions across ``wspost.cob``, ``wspost-irs.cob`` and
 #                    ``wssystem.cob``.                     -> _bl_write
-#   A-NEW-1 [L819-L821]  UNREGISTERED, and the highest-value discovery in this file. A lost
+#   A-NEW-1 [L819-L821]  REGISTERED as A-NEW-1 in docs/migration/anomaly-log.md section
+#                    15, which records the SAME defect under the SAME identifier - the one
+#                    number on which this file and the register agree. A lost
 #                    ``invalid key`` conditional makes [L820] unconditional and [L821]
 #                    dead, so THE CREDIT-NOTE SECOND APPORTIONMENT PASS NEVER EXECUTES.
 #                    ``sl060``'s equivalent [sales/sl060.cbl:L908] DOES execute.
 #                                                          -> _cr_notes__end_loop
-#   A-NEW-2 [L630-L635]  UNREGISTERED. The ``write`` sits in the ``else`` arm only, so
-#                    ``PL133`` is moved into ``print-record`` and never written in
-#                    ``FS-Cobol-Files-Used`` mode. Mirrors
-#                    [sales/sl060.cbl:L702-L707].          -> _init01__end_loop_end
-#   A-NEW-3 [L450], [L467-L468]  UNREGISTERED. ``a`` is set from ``oi-type`` with no range
+#   A-PL060-A [L630-L635]  REGISTERED. Formerly numbered A-NEW-2 in this file only, which
+#                    collided with a different A-NEW-2 in the register; renamed to a
+#                    globally unique identifier and registered under it. The ``write``
+#                    sits in the ``else`` arm only, so ``PL133`` is moved into
+#                    ``print-record`` and never written in ``FS-Cobol-Files-Used`` mode.
+#                    Mirrors [sales/sl060.cbl:L702-L707].  -> _init01__end_loop_end
+#   A-PL060-B [L450], [L467-L468]  REGISTERED. Formerly A-NEW-3 in this file only.
+#                    ``a`` is set from ``oi-type`` with no range
 #                    check and used to subscript ``total-group occurs 3``.
 #                                                          -> _init01__loop
-#   A-NEW-4 [L484], [L490], [L497]  UNREGISTERED. ``current-quarter`` subscripts
+#   A-PL060-C [L484], [L490], [L497]  REGISTERED. Formerly A-NEW-4 in this file only.
+#                    ``current-quarter`` subscripts
 #                    ``pturnover-q occurs 4`` unchecked, exactly as
 #                    [general/gl080.cbl:L345] (anomaly A-2) does.
 #                                                          -> _add_to_pturnover_q
+#
+#   THE RENAME, STATED ONCE SO A GREP FOR THE OLD NUMBER LANDS SOMEWHERE. Three of the
+#   four candidates above used to carry bare ``A-NEW-<n>`` numbers allocated in this
+#   file alone. The project register in docs/migration/anomaly-log.md had independently
+#   allocated the same numbers to unrelated defects, so the same token meant two things
+#   depending on which file a reader was in. The register keeps its numbers, this file's
+#   three take globally unique names, and the old-to-new map is published in that
+#   register: A-NEW-2 -> A-PL060-A, A-NEW-3 -> A-PL060-B, A-NEW-4 -> A-PL060-C.
 #
 # ===========================================================================
 # 6. FINDINGS - observations that are not registered anomalies
@@ -3234,8 +3248,8 @@ def _zz070_convert_date__zz070_exit(ws: _Ws) -> None:
 #
 #   Q-FACADE-SHAPE            the exact parameter shape each facade verb declares
 #   Q-FILE-DEFS-SHAPE         ``File-Defs`` versus ``File-Defs-A`` at the handler boundary
-#   Q-QUARTER-SUBSCRIPT       the effect of a ``current-quarter`` outside 1..4 (A-NEW-4),
-#                             and of an ``oi-type`` outside 1..3 on ``(a)`` (A-NEW-3)
+#   Q-QUARTER-SUBSCRIPT       the effect of a ``current-quarter`` outside 1..4 (A-PL060-C),
+#                             and of an ``oi-type`` outside 1..3 on ``(a)`` (A-PL060-B)
 #   Q-PURCH-AVERAGE-SIGN      the value stored when the bridge narrows a signed
 #                             ``binary-long`` into an unsigned host variable and column,
 #                             as anomaly A-11 documents for [common/salesMT.cbl:L305-L312]

@@ -28,13 +28,8 @@ that release.
 
 ## 1. Rules provenance
 
-**There is no user rules document for this project.** The `review_rules` facility was called twice
-while this document was written, the second time as a full-document read with an explicit range, and
-both calls returned exactly:
-
-```text
-No user rules provided.
-```
+**There is no user rules document for this project.** The Agent Action Plan states it directly in §0.7.1:
+*"No separate user rules document was provided for this project."*
 
 Do not go looking for a rules file. There is none. Stated plainly, as the absence requires: this
 project has no rules document, and **enterprise-standard best practice therefore applies wherever
@@ -92,14 +87,22 @@ COBOL locator below is cited **as specification**. AAP §0.7.4 **C-1** states th
 > *"compiled COBOL is confined to `harness/`, invoked only as an out-of-process comparison and seeding utility by the test suites, and never appears on any import path or code path of `acas_posting/`."*
 
 and AAP §0.3.1 states the structural consequence: *"there is no import path from `acas_posting` to
-`harness`."* Three proofs of that were verified in this checkout rather than assumed:
+`harness`."* Two proofs of that were verified in this checkout rather than assumed, and one earlier
+argument is withdrawn:
 
-- `harness/` contains **no `__init__.py`**, so it is not an importable package.
-- A search of `harness/*.py` for `import acas_posting` or `from acas_posting` returns **zero** hits,
-  so the harness does not reach into the package either.
 - `pyproject.toml` declares packaging as an explicit **allow-list** of eight entries — the seven
   code packages of `acas_posting` plus `acas_posting.data_dictionary` as a data directory — with
-  `include-package-data = false`. `harness` is excluded by construction, not by pattern.
+  `include-package-data = false`, both under `[tool.setuptools]`. `harness` is
+  excluded by construction, not by a pattern that could later be widened. Belt and braces:
+  `harness` is in pytest's `[tool.pytest.ini_options] norecursedirs` and `harness/*` in the coverage
+  `[tool.coverage.run] omit` list.
+- A search of `harness/*.py` for `import acas_posting` or `from acas_posting` returns **zero** hits,
+  so the dependency does not run in the other direction either. Measured, not asserted.
+- ⚠️ **One argument is deliberately withdrawn: the absence of `harness/__init__.py` proves nothing.**
+  An earlier revision of this section offered it as the first proof. It is invalid — PEP 420 makes a
+  directory without `__init__.py` an implicit namespace package, so `import harness.diff_states`
+  would resolve from a process rooted at the repository. The isolation is real and the two proofs
+  above establish it; the missing marker file does not.
 
 ### 2.3 R-2 — Zero binary floating point
 
@@ -246,7 +249,7 @@ were taken with `wc -l` in this checkout and total **10,495**.
 
 | COBOL program | Lines | Python module | Migration boundary |
 | --- | --- | --- | --- |
-| `general/gl051.cbl` | 1282 | `acas_posting/programs/gl051_batch_control_check.py` | **PARTIAL** — the control-total gate only: `batch-print` §999, spanning `[general/gl051.cbl:L999-L1166]`, of which `end-batch` L1096-L1134 is the gate; plus `net.` L788, `gross.` L793 and `get-description.` L799, whose two `ROUNDED` VAT computes (L791, L796) and destructive `subtract` (L797) the gate consumes |
+| `general/gl051.cbl` | 1282 | `acas_posting/programs/gl051_batch_control_check.py` | **PARTIAL** — the control-total gate: `batch-print` §999, spanning `[general/gl051.cbl:L999-L1166]`, of which `end-batch` L1096-L1134 is the gate; plus the **seven arithmetic fragments AAP §0.4.1.2 names by locator**, all in `gl050c` §496 and none of them reachable from the gate — `net.` L788 (`ROUNDED` L791), `gross.` L793 (`ROUNDED` L796 then the destructive un-`ROUNDED` `subtract` L797), `accept-date.` L582 (the scaling divides L604, L607), `accept-amount.` L650 (the scaling multiplies L654, L657) and `get-description.` L799 (the fifth multiply L803) |
 | `general/gl070.cbl` | 612 | `acas_posting/programs/gl070_transaction_pre_process.py` | Whole posting path — Phase 1 (`gl071a` §300) and Phase 2 (`gl071b` §444 with `gl071b-pre-process` §477) |
 | `general/gl071.cbl` | 182 | `acas_posting/programs/gl071_batch_sort.py` | Whole program. A pure sort: **zero `GO TO`**, **zero `MOVE`**, **zero arithmetic verbs**, **no sections at all**, and the only in-scope program that copies **no** facade copybook and touches **no** table |
 | `general/gl072.cbl` | 498 | `acas_posting/programs/gl072_transaction_update.py` | Whole program — Phase 4 |
@@ -260,9 +263,25 @@ were taken with `wc -l` in this checkout and total **10,495**.
 | `irs/irs030.cbl` | 1733 | `acas_posting/programs/irs030_posting.py` | **PARTIAL** — `Ledger-Postings-Add` §1569, spanning `[irs/irs030.cbl:L1569-L1730]`; plus `Net` §1544 and `Gross` §1556, whose two `ROUNDED` VAT computes (L1551, L1562-L1563) the posting path consumes |
 
 `acas_posting/programs/` is closed at exactly **13** files — the twelve above plus `__init__.py` —
-verified by listing the directory. Every one of the twelve exposes precisely one public symbol,
-`run`, and its positional parameters preserve the COBOL `PROCEDURE DIVISION USING` order exactly;
-§14 gives the three shapes.
+verified by listing the directory. Every one of the twelve exposes exactly one **callable** entry
+point, `run`, whose positional parameters preserve the COBOL `PROCEDURE DIVISION USING` order
+exactly; §14 gives the three shapes.
+
+⚠️ **"One callable entry point" is not "one exported symbol", and one module proves the difference.**
+`acas_posting/programs/gl080_end_of_cycle.py`'s `__all__` declares
+`__all__ = ("DiskChangeOptionNotAcceptable", "run")` — two names, because the module also publishes
+the exception type it raises when the disk-change option is neither of the two values the frozen
+input loop accepts (`general/gl080.cbl:L548-L549`). Its class is at
+`[acas_posting/programs/gl080_end_of_cycle.py DiskChangeOptionNotAcceptable]`, and it is raised in place of the frozen
+paragraph's interactive re-prompt, which has no headless equivalent — the re-prompt's effect is that
+nothing below `general/gl080.cbl:L406` runs at all, and refusing is the only disposition that keeps
+the database effect inside the set the frozen program can produce. It is exported so that a caller
+reaching `run` directly can distinguish that refusal from any other `ValueError`; **no committed
+caller catches it today**, because `acas_posting/cli/gl_end_of_cycle.py` restricts
+`--disk-change-option` to `{0, 9}` and an out-of-range command line therefore fails at argparse
+first. Every other one of the twelve declares `__all__ = ("run",)`, verified by reading all thirteen
+files. The distinction is recorded rather than smoothed away because an earlier revision of this
+section said "precisely one public symbol", which a reader could check in one grep and find false.
 
 ### 7.1 The two partial boundaries are narrow, and both files are dominated by out-of-scope code
 
@@ -298,6 +317,61 @@ the in-scope `Ledger-Postings-Add`. COBOL resolves an unqualified paragraph refe
 containing section first, so the four `go to Input-Loop` statements at L1634, L1652, L1683 and L1700
 all target **L1619**. The Python function is `_input_loop`, private to
 `acas_posting/programs/irs030_posting.py`, and the out-of-scope twin has no counterpart at all.
+
+### 7.2 Which test drives each module, and at which tier
+
+R-5 asks that every program map to a module. A map alone does not show the module was ever
+**executed**, so this table records where each one is driven, measured in this checkout rather
+than predicted — by scanning `tests/` for imports of `acas_posting.programs.*` and by reading the
+`Modules exercised` line of each scenario in
+[`scenario-diff-evidence.md`](scenario-diff-evidence.md) §10.
+
+Two tiers, and the distinction is load-bearing because only one of them runs everywhere:
+
+- **Arithmetic tier — in-process, and runs on a bare host.** The test imports the shipped module
+  and calls its own functions. Needs only `data_dictionary/acas_posting_dictionary.json`.
+- **Scenario tier — out-of-process through the real CLI, and SKIPS without the Compose stack.**
+  The runner drives `python -m acas_posting`, so the module executes as it does in production.
+
+| Python module | Driven in-process by | Driven out-of-process by | Both tiers? |
+| --- | --- | --- | --- |
+| `gl051_batch_control_check.py` | `tests/arithmetic/test_control_total_comparison.py` — drives `_end_batch` | **no scenario at all** | in-process only |
+| `gl070_transaction_pre_process.py` | — | `clean_batch_gl`, `mixed_accepted_rejected` | scenario only |
+| `gl071_batch_sort.py` | — | `clean_batch_gl`, `mixed_accepted_rejected` | scenario only |
+| `gl072_transaction_update.py` | `tests/arithmetic/test_gl072_shipped_silent_skips.py` — drives both silent-skip branches | `clean_batch_gl`, `mixed_accepted_rejected` | **both** |
+| `gl080_end_of_cycle.py` | `tests/arithmetic/test_gl080_shipped_end_of_cycle.py` — drives the `ROUNDED` divide, the unbounded subscript, the rotating counter, and the archive and deletion phases | **no scenario at all** | in-process only |
+| `sl055_invoice_extract_analysis.py` | — | `clean_batch_sl`, `period_end_totals` | scenario only |
+| `sl060_invoice_posting.py` | `tests/arithmetic/test_compute_truncate_unrounded.py` — drives `_ba000_sales_comp` and `_ba000_credit_comp` | `clean_batch_sl`, `period_end_totals` | **both** |
+| `sl100_cash_posting.py` | `tests/arithmetic/test_compute_truncate_unrounded.py` — drives `_compute_sales_pay` | `period_end_totals` | **both** |
+| `pl055_order_proof_extract.py` | — | `clean_batch_pl`, `period_end_totals` | scenario only |
+| `pl060_order_posting.py` | `tests/arithmetic/test_compute_truncate_unrounded.py` — drives `_purch_comp` and `_credit_comp` | `clean_batch_pl`, `period_end_totals` | **both** |
+| `pl100_payment_posting.py` | `tests/arithmetic/test_compute_truncate_unrounded.py` — drives `_init01__compute_purch_pay` | `period_end_totals` | **both** |
+| `irs030_posting.py` | `tests/arithmetic/test_irs_vat_from_net.py`, `tests/arithmetic/test_irs_vat_from_gross.py` — drive `Net` and `Gross` | `clean_batch_irs` | **both** |
+
+⭐ **Two modules are driven by no scenario, and the reason differs in each case.**
+
+`gl051_batch_control_check.py` has no command-line entry point at all — §7.1 records why: neither
+`load08.` nor `load09.` names `gl051`, so it is a library function. Its gate is therefore reachable
+only in-process, which is what `test_control_total_comparison.py` does.
+
+`gl080_end_of_cycle.py` **does** have a route — `acas_posting/cli/gl_end_of_cycle.py`, the
+`gl_end_of_cycle` operation — but **no scenario declares that operation**, so nothing drives it
+end-to-end. AAP §0.3.1 and §0.8.5 fix the scenario set at exactly eight and none of the eight is an
+end-of-cycle journey, so a ninth was **not** added; the gap is closed at the arithmetic tier
+instead, in-process against the shipped module. This is recorded as a bounded divergence in the
+header of `tests/arithmetic/test_gl080_shipped_end_of_cycle.py` and in
+[`ambiguity-resolutions.md`](ambiguity-resolutions.md) §16.1.
+
+⭐ **Four modules are driven only by the stack-bound tier**, and the honest consequence is stated
+rather than glossed: on a host without the Compose stack, `gl070`, `gl071`, `sl055` and `pl055` are
+**imported** — transitively, because `tests/arithmetic/test_cli_seams_and_failure_paths.py` imports
+the seven `acas_posting/cli/` route modules, and importing all seven pulls in eleven of the twelve
+program modules — but **none of their own functions is called**. Import proves the module parses and
+that its own imports resolve; it does not exercise its logic. What closes that gap is the scenario
+tier, and the evidence for it is the per-scenario empty diff in
+[`scenario-diff-evidence.md`](scenario-diff-evidence.md) §10, not this table.
+
+---
 
 ---
 
@@ -415,9 +489,30 @@ order, the Python function that carries it, and the `GO TO` sites inside it with
 | `end-batch.` | `L1096` | `_end_batch` | L1100, L1103, L1134 **C3** → `main-exit` |
 | `get-description.` | `L1136` | `_batch_print_get_description` | — |
 | `main-exit.   exit section.` | `L1166` | `_batch_print_main_exit` | — |
-| `net.` | `L788` | consumed by `_end_batch` via `acas_posting/cobol/arithmetic.py`; the `ROUNDED` compute is at L791 | — |
-| `gross.` | `L793` | as above; `ROUNDED` compute L796, destructive `subtract` L797 | — |
-| `get-description.` | `L799` | the `gl050c` twin, distinct from the L1136 paragraph | — |
+
+The five paragraph fragments below are the arithmetic AAP §0.4.1.2 names for this module. Every one of
+them sits in `gl050c` §496, which §7.1 puts outside the boundary, and a census of every `perform`
+between L999 and L1166 confirms **none is reachable from the gate** — so each function is present and
+**has no caller inside the module**. They are reproduced anyway because the plan names them by
+locator, and because §0.6.1's five-`ROUNDED`-site census counts L791 and L796: shipping three of five
+would falsify both the census and R-2.
+
+| COBOL paragraph | Locator | Python function | Statements carried |
+| --- | --- | --- | --- |
+| `net.` | `L788` | `_net` | **`ROUNDED` site 1 of 5** — `compute vat-amount rounded = post-amount * ws-vat-rate / 100.` L791 |
+| `gross.` | `L793` | `_gross` | **`ROUNDED` site 2 of 5** L796, then the un-`ROUNDED` destructive `subtract vat-amount from post-amount.` L797 |
+| `accept-date.` | `L582` | `_accept_date_scale_out` | the two scaling `divide … giving acc-ok` at L604 and L607, with the `array-pc` moves L605, L608. ⚠️ The `if convention = "DR"` block is the **last statement of `accept-date.`**, not the first of `get-account.` L610, even though L615 consumes it |
+| `accept-amount.` | `L650` | `_accept_amount_scale_in` | the two scaling `multiply account-in by 100` at L654 and L657, with the `dr-pc`/`cr-pc` moves L655, L658 |
+| `get-description.` | `L799` | `_gl050c_get_description_scale` | the fifth scaling multiply, `multiply account-in by 100 giving WS-Ledger-Nos.` L803. The `gl050c` twin of the in-scope L1136 paragraph — see §9.6 — and the only one of the two that scales |
+
+⭐ `acc-ok` `[general/gl051.cbl:L233]` and `account-in` `[general/gl051.cbl:L178]` are **two fields
+with one picture**, `pic 9(4)v99`, and the divides store into `acc-ok`. `move acc-ok to account-in.`
+`[general/gl051.cbl:L615]` carries the value across in a later paragraph — and in between, the
+out-of-scope `accept-account.` `[general/gl051.cbl:L464-L472]` may overwrite it, because `acc-ok`
+**redefines** `ws-account-work` `[general/gl051.cbl:L229-L233]` and the `accept … update` at
+`[general/gl051.cbl:L470]` writes that group's two fields. The divide therefore PRE-FILLS the field the
+operator is shown. `_WorkingStorage` declares both `acc_ok` and `account_in`, because collapsing them
+would fuse three frozen statements into two.
 
 The gate itself, in the order the frozen source performs it: `if z = 99` L1099-L1100 → exit;
 `if not truet` L1101-L1103 → status 0 and exit; the report moves L1105-L1108; **`add actual-vat to
@@ -983,11 +1078,31 @@ being transcribed by eye."* And AAP §0.3.3 states the payoff: *"Field metadata 
 not transcribed, which eliminates an entire class of transcription error across several hundred
 fields."*
 
-Accordingly, this section does **not** reproduce several hundred field rows in Markdown. Doing so
-would be transcription by eye — precisely the failure the directive forbids — and the table would
-diverge from the code the first time a locator changed. Instead, the field-to-entry mapping *is* the
-generated artifact, and this section is its specification and its index: what an entry contains, how
-many there are, what the three source layers are, and how to resolve a field to its entry.
+**The mapping is enumerated in full, entry by entry, in Appendix A of this document** — all **1061**
+of them, every dictionary key with its copybook or program-source field, its bridge host variable, its
+SQL column, its one-sided state, its drift and derivation, its A- and Q- references, and a locator for
+each of the three layers. R-5 requires that *every* field map to a dictionary entry and that the
+mapping be *recorded as a document*; counts and worked examples do not discharge "every", so the
+enumeration is here rather than described.
+
+⚠️ **And it is still not transcription by eye, which is the constraint that made an earlier revision of
+this section refuse to enumerate at all.** That refusal reasoned that reproducing several hundred rows
+in Markdown would be exactly the hand-copying AAP §0.8.1 forbids. The reasoning was sound about
+hand-copying and wrong about the conclusion: **Appendix A is rendered mechanically from
+`data_dictionary/acas_posting_dictionary.json`**, which is itself generated from the frozen copybooks,
+the frozen bridges and the frozen schema by `acas_posting/dictionary/generate.py`. Nobody read a
+picture clause and typed it into a table. The authority remains the generated artifact — the appendix is
+a *rendering* of it, and the artifact stays the thing a program reads — so the property AAP §0.3.3
+promises still holds: "field metadata is therefore derived, not transcribed."
+
+**How to check the appendix against its source, without trusting either.** `python -m
+acas_posting.dictionary.generate --check` re-derives the JSON from the frozen sources and reports
+agreement without writing; the appendix's own row counts and its per-table column counts are then
+checkable against that artifact's `coverage` block. If the two ever disagree, the artifact is right and
+the appendix is stale.
+
+This section remains the *specification* of what the enumeration contains: what an entry holds, how
+many there are, what the source layers are, and how to resolve a field to its entry.
 
 - **The artifact:** `data_dictionary/acas_posting_dictionary.json`, generated and committed.
 - **Its schema:** `data_dictionary/acas_posting_dictionary.schema.json`, which validates it.
@@ -1057,7 +1172,7 @@ frozen sources independently:
 | Host variables covered | **513** | one per in-scope column |
 | Copybook fields covered | **1001** | includes groups, redefines and filler, which have no column |
 | Program-source work-file fields | **46** | the `pre-trans` / `post-trans` records, declared in `gl070` and `gl071` rather than in a copybook |
-| Entries | **1061** | 513 column-anchored plus the one-sided entries of §10.7 |
+| Entries | **1061** | 513 column-anchored plus 548 with no column; every one of the 1061 is enumerated in Appendix A, §A.1 and §A.2 respectively |
 
 `mysql/ACASDB.sql` is **1459** lines. It contains **33** `CREATE TABLE` statements and **33**
 `DROP TABLE IF EXISTS` statements — so re-applying the file *is* the drop-and-recreate — together with
@@ -1294,13 +1409,35 @@ Class 5 is why the Sales and Purchase statistics fields are Python `int` rather 
 truncation on divide is *integer* truncation, which is exactly what makes the moving-average defect of
 **A-8** reproducible. Getting that one wrong would silently improve the arithmetic.
 
-**The census.** Counted over all 187 files of `copybooks/` with the method stated so it is
-reproducible: a regex per clause, applied twice — once to every line, and once to each line with any
-`*>` comment tail removed. The all-lines figure includes the maintainer's inline annotations (many
-`binary-long` declarations carry a `*> 9(8) comp.` note, which is why the two columns differ).
+### The canonical storage census
+
+⚠️ **THIS IS THE PROJECT'S ONE CANONICAL CENSUS OF THE FROZEN RECORD LAYOUTS, and it is canonical
+because two documents used to publish different figures without either stating enough for a reader to
+tell which was right.** The scope and the algorithm are therefore given in full, before the numbers.
+
+**The file set: the 187 `copybooks/*.cob` files.** `copybooks/` holds **197** files in total — 187
+`*.cob`, 8 `*.cpy`, 1 `*.ws` and 1 `*.pl`. The ten non-`.cob` files are the vendored MySQL, curses and
+file-status helpers (`mysql-variables.cpy`, `mysql-procedures.cpy`, `mysql-procedures-2.cpy`,
+`MySQL-SQLCA.cpy`, `screenio.cpy`, `FileStat-Msgs.cpy`, `FileStat-Msgs-2.cpy`, `selprint-2.cpy`) plus a
+Perl script and a worksheet (`an-accept.pl`, `an-accept.ws`). **None of them is an ACAS record layout**,
+which is why the canonical scope is the 187 and not the 197. The 197-file delta is published below
+rather than hidden, so a reader who counts differently can reconcile instead of disagreeing.
+
+**The algorithm, stated so the numbers are reproducible.** One regex per clause, applied twice:
+
+- **All lines** — every line of every file, matched case-insensitively. This column includes the
+  maintainer's inline annotations, which is why it exceeds the other: many `binary-long` declarations
+  carry a `*> 9(8) comp.` note.
+- **Code only** — the same regex after dropping (a) every whole-line comment, meaning a line whose
+  first non-blank characters are `*>` or whose column 7 is `*`, and (b) any inline `*>` tail from the
+  remaining lines.
+- **Bare `comp`** means the regex `(?i)\bcomp\b(?!-)` — the token standing alone. This is the one
+  definition that has to be spelled out, because `\bcomp\b` on its own also matches `comp-3`,
+  `comp-5` and `Comp-Time-Taken`, and subtracting the hyphenated forms from that looser total is how a
+  sibling document arrived at a figure this census does not reproduce.
 
 | Clause | All lines | Code only |
-| --- | --- | --- |
+| --- | ---: | ---: |
 | `comp-3` | 182 | 177 |
 | `comp` (bare) | 214 | 144 |
 | `binary-long` | 166 | 128 |
@@ -1311,9 +1448,34 @@ reproducible: a regex per clause, applied twice — once to every line, and once
 | `sign leading` | 4 | 4 |
 | `sign is leading` | 2 | 2 |
 
-And **zero** occurrences, in code or in comment, of every clause that would introduce a seventh
-class: `comp-1`, `comp-2`, `comp-5`, `binary-double`, `sign trailing`, `sign separate`, `justified`,
-blank-when-zero, `PIC A`, and `P` scaling. Zero code-line trailing `V` as well.
+And **zero** occurrences over the 187, in code or in comment, of every clause that would introduce a
+seventh storage class: `comp-1`, `comp-2`, `comp-5`, `binary-double`, `sign trailing`, `sign separate`,
+`justified`, blank-when-zero, `PIC A`, and `P` scaling. Zero code-line trailing `V` as well.
+
+**The 197-file delta, in full, so that a wider count is a reconciliation and not a contradiction.**
+Widening the scope to every file under `copybooks/` changes exactly six figures, and every one of the
+additions comes from the single vendored file `copybooks/mysql-variables.cpy`:
+
+| Clause | 187 `*.cob` | 197 all files | Where the difference comes from |
+| --- | ---: | ---: | --- |
+| `comp` (bare) | 214 / 144 | **219 / 146** | five more declarations in the vendored MySQL helpers |
+| `binary-short` | 31 / 30 | **32 / 31** | one more |
+| `occurs` | 107 / 99 | **110 / 102** | three more |
+| `redefines` | 60 / 53 | **61 / 54** | one more |
+| `comp-5` | 0 / 0 | **4 / 0** | `copybooks/mysql-variables.cpy`, comments only |
+| `binary-double` | 0 / 0 | **8 / 8** | `copybooks/mysql-variables.cpy` |
+
+⚠️ **The `binary-double` row is the one that matters**, and it is the reason the narrower scope is the
+right one: a seventh storage class *does* appear once `copybooks/` is read whole, but it appears only in
+a vendored MySQL helper that no in-scope record layout uses and no migrated program reaches. The
+six-class model of the table above is correct for the ACAS record layouts and would be wrong if stated
+over the wider set without this note.
+
+**Where a sibling figure disagrees.** `[docs/migration/ambiguity-resolutions.md]` previously published
+bare `comp` as **236** over the 197-file scope, derived as 422 − 182 − 4. That derivation
+double-counts: the 422 came from the looser `\bcomp\b`, which matches hyphenated forms this census
+excludes by construction. The correct figure for that scope is **219 / 146**, as the delta table above
+gives. That document now adopts this census by reference rather than publishing a second one.
 
 ⭐ **One clause, two spellings, six fields, three files.** `sign leading` appears at
 `[copybooks/fdpost-irs.cob:L20]`, `[copybooks/fdpost-irs.cob:L24]`, `[copybooks/wspost-irs.cob:L21]`
@@ -1332,8 +1494,10 @@ program decides, so the descriptor records which reading is in force and the que
 ### 10.7 What is deliberately **not** a column-anchored entry
 
 1001 copybook fields are covered but only 513 columns exist, so roughly half of the copybook surface
-has no column. Those fields are still entries — the artifact marks them `one_sided: true` — and the
-reasons are recorded rather than left as an unexplained gap:
+has no column. Those fields are still entries — the artifact marks them `one_sided: true`, **and all
+548 of them are enumerated in §A.2 of Appendix A**, grouped by the file that declares them. This
+section gives the *reasons* the group exists, so that a reader meeting one of those rows understands
+why it has no column instead of reading the blank as an omission:
 
 - **Group items.** `01 WS-Posting-Record.` `[copybooks/wspost.cob:L12]` and `03 WS-Post-Key.` L14 are
   addressable in COBOL but are not columns. The artifact's `is_group` and `parent_group` members carry
@@ -1405,6 +1569,28 @@ L56-L62 supplying the six connection fields `DB-Schema`, `DB-UName`, `DB-UPass`,
 
 ---
 
+## 10a. Four files the plan covers by wildcard, and the artifact boundary
+
+Traceability cuts both ways: a reader must be able to account for every file in the tree, not only
+find a module for every program. Four delivered files are reached by the AAP's **trailing wildcards**
+rather than by a per-file table, so they are named here rather than left to be discovered.
+
+| File | The wildcard that covers it | What it is for | Ships in the wheel? |
+|---|---|---|---|
+| `acas_posting/cli/rdbms_params.py` | §0.2.1.2 *"Package and entry points: … `acas_posting/cli/*.py`"*, repeated in the §0.4.4 pattern table | The `RDB-Data` connection block `[copybooks/wsfnctn.cob:L57-L64]` and its **carrier widths**: `DB-Port` reaches the bridges through a four-character carrier `[common/acas-get-params.cbl:L158]`, `[copybooks/mysql-variables.cpy:L91]`, while the stored width is five `[copybooks/wssystem.cob:L142]` | **Yes** — it is a CLI module, which is what the wildcard designates |
+| `harness/build_fixtures.sh` | §0.2.1.2 *"Oracle harness: `harness/*`"* | Compiles a per-file COBOL writer and calls the frozen handler, because most seeded files are `ORGANIZATION INDEXED` and their on-disk form belongs to the image's library version — measurable, not assumable | No |
+| `harness/make_fixtures.py` | §0.2.1.2 *"Oracle harness: `harness/*`"* | Generates that writer from each scenario's `seed_records`, so **no record layout is restated by hand** | No |
+| `harness/run_parity.sh` | §0.2.1.2 *"Oracle harness: `harness/*`"* | The fail-closed ten-stage driver; it also owns the oracle-provenance gate and the canonical-target refusals | No |
+
+**Measured boundary.** Building the wheel and listing its entries shows only `acas_posting/` and its
+`dist-info`: no `harness/`, no `tests/`, no `.cbl`/`.cob`/`.scb`, no `.sql`. That is R-1 enforced
+structurally rather than by convention — there is no import path from the shipped package to the
+oracle. `acas_posting.data_dictionary` appears in the wheel as a **data directory**, not an importable
+package: it carries no module, is mapped from the top-level `data_dictionary/` by
+`[tool.setuptools.package-dir]`, and is reached only through `importlib.resources`.
+`include-package-data = false`, and the two dictionary artifacts are named file by file rather than by
+glob, so no stray file in the checkout can reach the distribution.
+
 ## 11. Deliberate omissions, recorded **as** omissions
 
 AAP §0.1.1 and §0.4.3 require these be visible rather than accidental, *"so that a reader comparing
@@ -1444,13 +1630,14 @@ lower case where the other five write `Print-Report`.
 
 ### 11.3 The unused facade stub blocks, which map to nothing
 
-Three of the twelve programs declare a block of one-byte stubs whose only purpose is to satisfy the
+**Four** of the twelve programs declare a block of one-byte stubs whose only purpose is to satisfy the
 linker: the facade copybook references every entity's record, so a program that uses only some of
 them must still declare the rest. Quoting AAP §0.4.3: *"Python has no equivalent need, so the block
 maps to nothing."*
 
 | Program | Block | Span | Live stubs | Commented out — i.e. actually in use |
 | --- | --- | --- | --- | --- |
+| `gl051` | `01  Dummies-4-Unused-ACAS-FH-Calls.` `[general/gl051.cbl:L136]`, annotated `*> Call blk at zz080-ACAS-Calls` | L136-L156 | 16 | **four**: `Default-Record` L137, `WS-Ledger-Record` L140, `WS-Posting-Record` L141, `WS-Batch-Record` L142 |
 | `gl072` | `01  Dummies-4-Unused-ACAS-FH-Calls.` `[general/gl072.cbl:L135]`, annotated `*> Call blk at zz080-ACAS-Calls` | L135-L155 | 17 | **three**: `Default-Record` L136, `WS-Ledger-Record` L139, `WS-Batch-Record` L141 |
 | `gl080` | `01  Dummies-4-Unused-ACAS-FH-Calls.` `[general/gl080.cbl:L194]`, same annotation | L194-L214 | 16 | **four**: `Default-Record` L195, `WS-Ledger-Record` L198, `WS-Posting-Record` L199, `WS-Batch-Record` L200 |
 | `irs030` | `01  Dummies-For-Unused-FH-Calls.` `[irs/irs030.cbl:L291]`, annotated `*> IRS call blk at zz100-ACAS-IRS-Calls` | L291-L296 | **one** | **four**: `WS-IRSNL-Record` L292, `WS-IRS-Default-Record` L293, `Posting-Record` L294, `WS-IRS-Posting-Record` L295 |
@@ -1737,12 +1924,38 @@ exception — `[irs/irs.cbl:L470]` is `procedure division.` with **no** `USING`,
 ⭐ **"No run date" never meant "no clock".** Parameter 2 still carries `Run-Date binary-long` at
 `[copybooks/wssystem.cob:L67]`, so the IRS route pins one date observable rather than two.
 `acas_posting/clock.py` publishes `PinnedRunDate`, `pin_from_calendar_date`, `pin_from_to_day`,
-`pin_from_run_date` and `verify_pin`, which covers both cases from a single injected value. The one
-clock read in the whole call chain is in the menu shell's date-service copybook, and it produces
-exactly the two observables: `move function current-date to wse-date-block.`
+`pin_from_run_date` and `verify_pin`, which covers both cases from a single injected value. The read
+the clock module reproduces is the date service's, and it produces exactly the two observables:
+`move function current-date to wse-date-block.`
 `[copybooks/Proc-ACAS-Mapser-RDB.cob:L72]`, then `move u-date to to-day.`
 `[copybooks/Proc-ACAS-Mapser-RDB.cob:L77]` and `move u-bin to run-date.`
 `[copybooks/Proc-ACAS-Mapser-RDB.cob:L80]`, with the pre-zeroing of §9.7 in between at L78.
+
+⚠️ **THE CLOCK-READ CENSUS, CORRECTED — that copybook read is not the only one.** An earlier revision
+of this section called it "the one clock read in the whole call chain", following the Agent Action
+Plan's phrasing at §0.1.1. The Plan's *conclusion* is exactly right and nothing in the design changes;
+its arithmetic is not. Measured over the frozen tree:
+
+- **Zero clock reads in all twelve in-scope posting programs.** `function current-date` appears in none
+  of `gl051`, `gl070`, `gl071`, `gl072`, `gl080`, `sl055`, `sl060`, `sl100`, `pl055`, `pl060`, `pl100`
+  or `irs030`; each receives the date purely through linkage. **That zero, not any count of reads
+  elsewhere, is what makes pinning two observables at the CLI boundary sufficient.**
+- **Six `function current-date` reads in the cycle's own call chain**, all in out-of-scope code: the
+  shared date-service copybook `[copybooks/Proc-ACAS-Mapser-RDB.cob:L72]`, one in each of the four menu
+  shells — `[general/general.cbl:L371]`, `[sales/sales.cbl:L323]`, `[purchase/purchase.cbl:L318]`,
+  `[irs/irs.cbl:L480]` — and one in the system selector `[common/ACAS.cbl:L353]`. Counting
+  `accept … from date` and `accept … from time` as well, the census over those six files is
+  **fourteen** ambient reads; `tests/determinism/test_two_runs_byte_identical.py` publishes it site by
+  site.
+- **Further reads exist outside that chain**, in programs no scenario reaches:
+  `[common/ACAS-Sysout.cbl:L107]`, `[common/fhlogger.cbl:L219]`, `[common/auditLD2.cbl:L192]` and L389,
+  `[common/makesqltable-free.cbl:L81]` and L320, `[common/makesqltable-original.cbl:L78]` and L303, and
+  `[stock/stock.cbl:L302]`. They are named so that a reader who greps and finds them does not conclude
+  the census was wrong.
+
+The same corrected census is carried by
+[`anomaly-log.md`](anomaly-log.md) at A-16 and by the CLI modules' own clock-contract sections, so the
+four places a reader might land all agree.
 
 Python: `run(irs_system_params, ws_system_record, file_defs, *, clear_posting_file, …)` — the extra
 keyword-only argument being the gated prompt of §11.5.
@@ -2036,23 +2249,35 @@ the period-end scenario verifiable by inspecting one table — were verified ind
 | the `GO TO` class is annotated at every transfer site | §9.1, §9.3 | **Yes** — **206 sites**, each placed in the paragraph that contains it and carrying its class; the four-class census is published in §9.1 and the `C1`…`C4` shorthand is defined there |
 | each Class-4 site carries an equivalence argument | §9.4 | **Yes** — **16** C4 sites, one walked in full and every other classified by where its target's own transfer goes |
 | the `PERFORM … THRU` sites are individually hand-verified | §9.5 | **Yes** — nine live sites in two spellings, listed one per row, with the in-boundary subset identified |
-| every field maps to a data-dictionary entry | §10 | **Yes** — 1061 entries over 513 columns, 513 host variables, 1001 copybook fields and 46 work-file fields, generated rather than transcribed, with §10.7 accounting for the one-sided remainder |
+| every field maps to a data-dictionary entry | §10 **and Appendix A** | **Yes — and now enumerated rather than counted.** Appendix A lists **all 1061 entries**, one row each: 513 that reach a column, grouped by their 22 tables and ordered by schema column ordinal, and 548 that declare no column, grouped by their 66 declaring files. Every row carries the copybook or program-source field, the bridge host variable, the SQL column, the one-sided flag, drift, derivation, storage class, A-/Q- references and a locator per layer. Rendered mechanically from `data_dictionary/acas_posting_dictionary.json`, so it is derived and not transcribed; §10.7 still accounts for the one-sided remainder in prose |
 | the mapping is recorded as a document | this file | **Yes** |
 
 ### 17.2 Companion and test paths verified after QA remediation
 
 The point-in-time absences recorded during initial authoring have been
-superseded. Each item below was read in the completed checkout:
+superseded. Each item below was read in the completed checkout, and every count
+was taken from the tree rather than carried forward:
 
 | Item | Status in this checkout |
 | --- | --- |
-| `tests/arithmetic/` | **present — fifteen test files**, including shared-storage and dispatch-boundary coverage |
-| `tests/scenarios/` | **present — eight committed scenario tests** |
+| `tests/arithmetic/` | **present — nineteen test files**, including the shared-storage, dispatch-boundary, tier-import, deployment-contract and cross-file-reference coverage added during QA remediation, and the three that drive shipped program and CLI modules in-process: `test_gl080_shipped_end_of_cycle.py`, `test_gl072_shipped_silent_skips.py` and `test_cli_seams_and_failure_paths.py`. §7.2 records which module each one drives |
+| `tests/scenarios/` | **present — nine scenario tests**, the eight that discharge AAP §0.8.5's mandate plus `test_end_of_cycle_gl.py` |
 | `tests/determinism/test_two_runs_byte_identical.py` | **present** |
-| `harness/scenarios/` | **present — all eight YAML definitions**, including `period_end_totals.yaml` |
+| `harness/scenarios/` | **present — 9 YAML definitions**, including `period_end_totals.yaml` and `end_of_cycle_gl.yaml` |
 | `docs/migration/ambiguity-resolutions.md` | **present** |
 | `docs/migration/scenario-diff-evidence.md` | **present** |
 | `README-python-migration.md` | **present at repository root** |
+
+⚠️ **Two of those rows read "eight" until this revision, and the correction is the
+point of the subsection rather than an embarrassment to it.** A ninth scenario —
+`harness/scenarios/end_of_cycle_gl.yaml`, with `tests/scenarios/test_end_of_cycle_gl.py`
+beside it — was added during QA remediation to drive `gl_end_of_cycle` and therefore
+`gl080`, which no earlier scenario reached. The count in a hand-maintained inventory
+decays the moment the tree moves, which is exactly the failure this subsection exists
+to catch, and it caught itself late. **Note the distinction the new rows keep:** AAP
+§0.8.5 mandates a scenario *set*, and that mandate is still discharged by eight; the
+ninth is an addition beyond the mandate, not a rewriting of it. Statements about the
+mandate rightly still say eight.
 
 Everything else this document cites was read in this checkout: the twelve programs, the four menus, the
 handlers and bridges named, the copybooks named, `mysql/ACASDB.sql`, the thirteen files of
@@ -2062,10 +2287,48 @@ eight of `acas_posting/cobol/`, the twenty-eight of `acas_posting/records/`, the
 `acas_posting/dates.py`, `acas_posting/workfiles.py`, `acas_posting/__main__.py`, `pyproject.toml`, and
 [`anomaly-log.md`](anomaly-log.md).
 
-### 17.3 What this document does **not** claim
+### 17.3 Test artefacts added during QA remediation, named so R-5 covers them
+
+R-5 requires that the mapping be *recorded*, and a test that locks a mapping is part
+of that record. The artefacts below were added after this document was first written,
+so they are named here rather than left discoverable only by reading the suite. Every
+name was read out of the file it lives in.
+
+**`tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py`** carries numbered
+sections. Those added during remediation:
+
+| Section | What it locks |
+| --- | --- |
+| §17 | what the harness **generates** versus what it **reuses** — the provenance boundary |
+| §18 | **withdrawn**, and deliberately left in place as a withdrawn marker rather than renumbered: the `gl051` control-total gate is driven by `test_control_total_comparison.py` instead |
+| §19 | `gl072`'s two silent skips, driven against the migrated loop — and the derivation of why **no seed can reach either**, which is `A-NEW-18`/`N-KEY` |
+| §20 | **A-6**, locked at the handler where it lives: the migrated `acas008` is called once per refused verb and must return the measured `WE-Error 988` / `FS-Reply 99` pair |
+| §21 | the **tier-import contract** — that the arithmetic tier imports only the semantics and records tiers, bounded so the assertion cannot pass vacuously |
+| §22 | the **`POST-KEY` round trip**, measured and pinned — the byte-level half of `A-NEW-18`/`N-KEY` |
+| §23 | the **citation contract**: every `[path:Lnnn]` in this migration's own files must resolve to a line that exists |
+
+⚠️ **§23 bounds what it can prove, and the bound matters when reading any locator in
+these documents.** It checks that a cited path exists and that the cited line is
+within that file. It cannot check that the line *says what the surrounding prose
+claims*, so an off-by-one inside a valid range passes. Two such errors were found by
+hand during this revision — `HV-POST-KEY` cited at `[common/glpostingMT.cbl:L282]`,
+which is `HV-POST-RRN`; the declaration is at `[common/glpostingMT.cbl:L283]` — and
+both were corrected. Semantic spot-checking of load-bearing locators therefore remains
+manual work that §23 narrows rather than replaces.
+
+**Other tests added during remediation**, with the question or anomaly each closes:
+
+| Test | Locks |
+| --- | --- |
+| `test_comp_binary.py` GROUP 12, six tests | `Q-5.1` as measured: a **pictured** `COMP` store reduces on **digits**, a **pictureless** `BINARY-*` item wraps at its signed **byte capacity**, and the two are **not the same rule** |
+| `test_gl080_cycle_divide_rounded.py`, four tests | `Q-GL080-DIVIDE-BY-ZERO` — that the zero divisor is reachable and **stores nothing**, that the guard can pre-empt it, that control still **reaches Phase 5**, and that subscript zero writes `Ledger-Last`, a **real `GLLEDGER-REC` column** |
+| `test_irs_date_component_derivation.py`, two `Q-1` tests | that a rejected date leaves the binary field **untouched**, and that a **non-zero** binary field selects the **reverse** conversion — the second being the direction nobody had asked about |
+| `tests/scenarios/test_end_of_cycle_gl.py`, eleven tests | the ninth scenario: `gl_end_of_cycle` state parity plus the preconditions that stop an early return from masquerading as a match |
+
+### 17.4 What this document does **not** claim
 
 - **This document is not the runtime evidence register.** The strict oracle
-  build and all eight empty scenario diffs are recorded in
+  build and the empty scenario diffs — nine of them as of this revision — are recorded in
   [`scenario-diff-evidence.md`](scenario-diff-evidence.md); compiled semantic
   arbitrations are recorded in
   [`ambiguity-resolutions.md`](ambiguity-resolutions.md). This file continues
@@ -2108,3 +2371,1570 @@ in-scope programs. A mapping is not a measurement: where this document says a pa
 it says so because the source says so, and where the compiled General Ledger disagrees with the source,
 the compiled behaviour is the specification and the disagreement belongs in
 `ambiguity-resolutions.md`.
+
+---
+
+## Appendix A — the complete field → dictionary-entry enumeration
+
+**This appendix discharges R-5's "every field maps to a data-dictionary entry" by enumeration rather
+than by count.** Every one of the **1061** entries in
+`data_dictionary/acas_posting_dictionary.json` appears below exactly once: **513** that reach a column
+in the frozen schema, in §A.1, grouped by their **22** in-scope tables and ordered within each table by
+the column ordinal the schema declares; and **548** that declare no column, in §A.2, grouped by the
+**66** files that declare them. 513 + 548 = 1061, which is the artifact's own
+`coverage.entry_count`.
+
+**Provenance, stated before the tables so that no row is mistaken for hand-written.** These rows are
+**rendered mechanically** from the committed JSON artifact. That artifact is in turn generated by
+`acas_posting/dictionary/generate.py` from the three authoritative layers — the frozen copybook
+picture clauses, the frozen bridges' host-variable declarations, and the frozen `CREATE TABLE`
+statements of `mysql/ACASDB.sql` — which is the ordering AAP §0.8.1 mandates under "Data dictionary
+first". No field's metadata was read off a source and typed in here. To confirm the artifact is itself
+current, run:
+
+```bash
+python -m acas_posting.dictionary.generate --check
+```
+
+which re-derives it from the frozen sources and reports agreement without writing. **If this appendix
+and that artifact ever disagree, the artifact is right and this appendix is stale.**
+
+### How to read a row
+
+| Column | What it holds |
+| --- | --- |
+| **Dictionary key** | the entry's key, `TABLE-NAME.COLUMN-NAME` for a column-bearing entry and `RECORD-NAME.FIELD-NAME` for a record-only one. This is the exact string `acas_posting.dictionary.loader.get_entry` takes |
+| **Copybook / program-source field** | the COBOL declaration: name, level, picture, usage, signedness and sign position, `OCCURS`, `REDEFINES`, group and `FILLER` flags, then its `path:line` locator. `**absent**` means the field exists in the bridge and the schema but in **no** copybook — the case AAP §0.1.1 uses to argue the bridge is authoritative |
+| **Bridge host variable** | the generated bridge's `01`-level host variable: name, picture, signedness, and whether the bridge's load and unload paragraphs actually move it. `NOT loaded` is load-bearing rather than trivia — see `GLPOSTING-REC.POST-RRN` |
+| **SQL column** | name, declared type, unsignedness and primary-key flag, with its line in `mysql/ACASDB.sql` |
+| **One-sided** | **yes** when at least one of the four layers does not declare this field. The generator flags it; nothing is inferred here |
+| **Drift · derivation · storage** | where the layers disagree (signedness, usage, digits, scale, character length, name), how a bridge-only column is computed and under what guard, and which Python storage class carries the value |
+| **A- / Q-** | the anomaly and ambiguity identifiers the generator attached to this entry. `A-` resolves in [`anomaly-log.md`](anomaly-log.md) and `Q-` in [`ambiguity-resolutions.md`](ambiguity-resolutions.md) |
+
+### What the enumeration makes checkable that a count could not
+
+Three claims elsewhere in this document are now verifiable by reading rows rather than by trusting a
+sentence, and each is worth locating before scrolling:
+
+- **A-11's sign loss at the bridge.** `SALEDGER-REC.SALES-AVERAGE` in §A.1 shows `BINARY-LONG · signed`
+  in the copybook, `9(10) · unsigned` in the host variable and `int(8) unsigned` in the column, with
+  `drift: signedness, usage` and refs `A-11`, `Q-3`. The sign is gone before any SQL runs.
+- **A-12's width drift.** `GLLEDGER-REC.LEDGER-NAME` shows `x(24)` against `X(32)` against `char(32)`,
+  with `drift: character_length` and ref `A-12` — the drift that makes the dump normaliser's
+  trailing-space job necessary.
+- **A-7's bridge-only columns.** `IRSPOSTING-REC.POST4-DAY` shows `**absent**` in the copybook column,
+  `one_sided: yes`, and `derivation: BRIDGE_DERIVED guarded on ...` — three columns of a posting table
+  that a copybook-driven migration would have silently omitted.
+
+### A.1 The 513 entries that reach a column, by table
+
+Each block is one in-scope table. The row order is the column ordinal the frozen schema declares,
+so a reader walking a `CREATE TABLE` statement and a block side by side stays in step.
+
+#### `ANALYSIS-REC` — 4 columns · bridge `analMT` · handler `acas015` · facade `Analysis`
+
+| # | Dictionary key | Copybook / program-source field | Bridge host variable | SQL column | One-sided | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | :---: | --- | --- |
+| 1 | `ANALYSIS-REC.PA-CODE` | `WS-Pa-Code` · lvl 03 · GROUP · group `[copybooks/wsanal.cob:L10]` | `HV-PA-CODE` · `X(3)` · unsigned · loaded/unloaded `[common/analMT.cbl:L283]` | `PA-CODE` · `char(3)` · **PK** `[mysql/ACASDB.sql:L32]` | no | drift: name; derivation: GROUP_CONCATENATION | — |
+| 2 | `ANALYSIS-REC.PA-GL` | `Pa-Gl` · lvl 03 · `9(6)` · DISPLAY `[copybooks/wsanal.cob:L15]` | `HV-PA-GL` · `9(08)` · unsigned · loaded/unloaded `[common/analMT.cbl:L284]` | `PA-GL` · `mediumint(6) unsigned` · unsigned `[mysql/ACASDB.sql:L33]` | no | drift: usage, digits; storage: INT | — |
+| 3 | `ANALYSIS-REC.PA-DESC` | `Pa-Desc` · lvl 03 · `x(24)` `[copybooks/wsanal.cob:L16]` | `HV-PA-DESC` · `X(24)` · unsigned · loaded/unloaded `[common/analMT.cbl:L285]` | `PA-DESC` · `char(24)` `[mysql/ACASDB.sql:L34]` | no | storage: STR | — |
+| 4 | `ANALYSIS-REC.PA-PRINT` | `Pa-Print` · lvl 03 · `xxx` `[copybooks/wsanal.cob:L17]` | `HV-PA-PRINT` · `X(3)` · unsigned · loaded/unloaded `[common/analMT.cbl:L286]` | `PA-PRINT` · `char(3)` `[mysql/ACASDB.sql:L35]` | no | storage: STR | — |
+
+#### `GLBATCH-REC` — 21 columns · bridge `glbatchMT` · handler `acas007` · facade `GL-Batch`
+
+| # | Dictionary key | Copybook / program-source field | Bridge host variable | SQL column | One-sided | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | :---: | --- | --- |
+| 5 | `GLBATCH-REC.BATCH-KEY` | `WS-Batch-Key9` · lvl 03 · `9(6)` · DISPLAY · redefines `WS-Batch-Key` `[copybooks/wsbatch.cob:L20]` | `HV-BATCH-KEY` · `9(08)` · unsigned · loaded/unloaded `[common/glbatchMT.cbl:L282]` | `BATCH-KEY` · `mediumint(6) unsigned` · unsigned · **PK** `[mysql/ACASDB.sql:L81]` | no | drift: usage, digits, name; derivation: REDEFINES_ALTERNATIVE; storage: INT | `A-15`, `Q-4` |
+| 6 | `GLBATCH-REC.ITEMS` | `Items` · lvl 03 · `99` · DISPLAY `[copybooks/wsbatch.cob:L23]` | `HV-ITEMS` · `9(03)` · unsigned · loaded/unloaded `[common/glbatchMT.cbl:L283]` | `ITEMS` · `tinyint(2) unsigned` · unsigned `[mysql/ACASDB.sql:L82]` | no | drift: usage, digits; storage: INT | `A-15`, `Q-4` |
+| 7 | `GLBATCH-REC.BATCH-STATUS` | `Batch-Status` · lvl 03 · `9` · DISPLAY `[copybooks/wsbatch.cob:L25]` | `HV-BATCH-STATUS` · `9(03)` · unsigned · loaded/unloaded `[common/glbatchMT.cbl:L284]` | `BATCH-STATUS` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L83]` | no | drift: usage, digits; storage: INT | `A-15`, `Q-4` |
+| 8 | `GLBATCH-REC.CLEARED-STATUS` | `Cleared-Status` · lvl 03 · `9` · DISPLAY `[copybooks/wsbatch.cob:L29]` | `HV-CLEARED-STATUS` · `9(03)` · unsigned · loaded/unloaded `[common/glbatchMT.cbl:L285]` | `CLEARED-STATUS` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L84]` | no | drift: usage, digits; storage: INT | `A-15`, `Q-4` |
+| 9 | `GLBATCH-REC.BCYCLE` | `Bcycle` · lvl 03 · `99` · DISPLAY `[copybooks/wsbatch.cob:L34]` | `HV-BCYCLE` · `9(03)` · unsigned · loaded/unloaded `[common/glbatchMT.cbl:L286]` | `BCYCLE` · `tinyint(2) unsigned` · unsigned `[mysql/ACASDB.sql:L85]` | no | drift: usage, digits; storage: INT | `A-15`, `Q-4` |
+| 10 | `GLBATCH-REC.ENTERED` | `Entered` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wsbatch.cob:L36]` | `HV-ENTERED` · `9(10)` · unsigned · loaded/unloaded `[common/glbatchMT.cbl:L287]` | `ENTERED` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L86]` | no | drift: signedness, usage; storage: INT | `A-11`, `A-15`, `Q-3`, `Q-4` |
+| 11 | `GLBATCH-REC.PROOFED` | `Proofed` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wsbatch.cob:L37]` | `HV-PROOFED` · `9(10)` · unsigned · loaded/unloaded `[common/glbatchMT.cbl:L288]` | `PROOFED` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L87]` | no | drift: signedness, usage; storage: INT | `A-11`, `A-15`, `Q-3`, `Q-4` |
+| 12 | `GLBATCH-REC.POSTED` | `Posted` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wsbatch.cob:L38]` | `HV-POSTED` · `9(10)` · unsigned · loaded/unloaded `[common/glbatchMT.cbl:L289]` | `POSTED` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L88]` | no | drift: signedness, usage; storage: INT | `A-11`, `A-15`, `Q-3`, `Q-4` |
+| 13 | `GLBATCH-REC.STORED` | `Stored` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wsbatch.cob:L39]` | `HV-STORED` · `9(10)` · unsigned · loaded/unloaded `[common/glbatchMT.cbl:L290]` | `STORED` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L89]` | no | drift: signedness, usage; storage: INT | `A-11`, `A-15`, `Q-3`, `Q-4` |
+| 14 | `GLBATCH-REC.INPUT-GROSS` | `Input-Gross` · lvl 05 · `9(9)v99` · COMP-3 `[copybooks/wsbatch.cob:L41]` | `HV-INPUT-GROSS` · `9(12)V9(02)` · unsigned · loaded/unloaded `[common/glbatchMT.cbl:L291]` | `INPUT-GROSS` · `decimal(14,2) unsigned` · unsigned `[mysql/ACASDB.sql:L90]` | no | drift: usage, digits; storage: DECIMAL | `A-15`, `Q-4` |
+| 15 | `GLBATCH-REC.INPUT-VAT` | `Input-Vat` · lvl 05 · `9(9)v99` · COMP-3 `[copybooks/wsbatch.cob:L42]` | `HV-INPUT-VAT` · `9(12)V9(02)` · unsigned · loaded/unloaded `[common/glbatchMT.cbl:L292]` | `INPUT-VAT` · `decimal(14,2) unsigned` · unsigned `[mysql/ACASDB.sql:L91]` | no | drift: usage, digits; storage: DECIMAL | `A-15`, `Q-4` |
+| 16 | `GLBATCH-REC.ACTUAL-GROSS` | `Actual-Gross` · lvl 05 · `9(9)v99` · COMP-3 `[copybooks/wsbatch.cob:L43]` | `HV-ACTUAL-GROSS` · `9(12)V9(02)` · unsigned · loaded/unloaded `[common/glbatchMT.cbl:L293]` | `ACTUAL-GROSS` · `decimal(14,2) unsigned` · unsigned `[mysql/ACASDB.sql:L92]` | no | drift: usage, digits; storage: DECIMAL | `A-15`, `Q-4` |
+| 17 | `GLBATCH-REC.ACTUAL-VAT` | `Actual-Vat` · lvl 05 · `9(9)v99` · COMP-3 `[copybooks/wsbatch.cob:L44]` | `HV-ACTUAL-VAT` · `9(12)V9(02)` · unsigned · loaded/unloaded `[common/glbatchMT.cbl:L294]` | `ACTUAL-VAT` · `decimal(14,2) unsigned` · unsigned `[mysql/ACASDB.sql:L93]` | no | drift: usage, digits; storage: DECIMAL | `A-15`, `Q-4` |
+| 18 | `GLBATCH-REC.DESCRIPTION` | `Description` · lvl 03 · `x(24)` `[copybooks/wsbatch.cob:L45]` | `HV-DESCRIPTION` · `X(24)` · unsigned · loaded/unloaded `[common/glbatchMT.cbl:L295]` | `DESCRIPTION` · `char(24)` `[mysql/ACASDB.sql:L94]` | no | storage: STR | `A-15`, `Q-4` |
+| 19 | `GLBATCH-REC.BDEFAULT` | `bDefault` · lvl 05 · `99` · DISPLAY `[copybooks/wsbatch.cob:L48]` | `HV-BDEFAULT` · `9(03)` · unsigned · loaded/unloaded `[common/glbatchMT.cbl:L296]` | `BDEFAULT` · `tinyint(2) unsigned` · unsigned `[mysql/ACASDB.sql:L95]` | no | drift: usage, digits; storage: INT | `A-15`, `Q-4` |
+| 20 | `GLBATCH-REC.CONVENTION` | `Convention` · lvl 05 · `xx` `[copybooks/wsbatch.cob:L49]` | `HV-CONVENTION` · `X(2)` · unsigned · loaded/unloaded `[common/glbatchMT.cbl:L297]` | `CONVENTION` · `char(2)` `[mysql/ACASDB.sql:L96]` | no | storage: STR | `A-15`, `Q-4` |
+| 21 | `GLBATCH-REC.BATCH-DEF-AC` | `Batch-Def-AC` · lvl 05 · `9(6)` · DISPLAY `[copybooks/wsbatch.cob:L50]` | `HV-BATCH-DEF-AC` · `9(08)` · unsigned · loaded/unloaded `[common/glbatchMT.cbl:L298]` | `BATCH-DEF-AC` · `mediumint(6) unsigned` · unsigned `[mysql/ACASDB.sql:L97]` | no | drift: usage, digits; storage: INT | `A-15`, `Q-4` |
+| 22 | `GLBATCH-REC.BATCH-DEF-PC` | `Batch-Def-PC` · lvl 05 · `99` · DISPLAY `[copybooks/wsbatch.cob:L51]` | `HV-BATCH-DEF-PC` · `9(03)` · unsigned · loaded/unloaded `[common/glbatchMT.cbl:L299]` | `BATCH-DEF-PC` · `tinyint(2) unsigned` · unsigned `[mysql/ACASDB.sql:L98]` | no | drift: usage, digits; storage: INT | `A-15`, `Q-4` |
+| 23 | `GLBATCH-REC.BATCH-DEF-CODE` | `Batch-Def-Code` · lvl 05 · `xx` `[copybooks/wsbatch.cob:L52]` | `HV-BATCH-DEF-CODE` · `X(2)` · unsigned · loaded/unloaded `[common/glbatchMT.cbl:L300]` | `BATCH-DEF-CODE` · `char(2)` `[mysql/ACASDB.sql:L99]` | no | storage: STR | `A-15`, `Q-4` |
+| 24 | `GLBATCH-REC.BATCH-DEF-VAT` | `Batch-Def-Vat` · lvl 05 · `x` `[copybooks/wsbatch.cob:L53]` | `HV-BATCH-DEF-VAT` · `X(1)` · unsigned · loaded/unloaded `[common/glbatchMT.cbl:L301]` | `BATCH-DEF-VAT` · `char(1)` `[mysql/ACASDB.sql:L100]` | no | storage: STR | `A-15`, `Q-4` |
+| 25 | `GLBATCH-REC.BATCH-START` | `Batch-Start` · lvl 03 · `9(5)` · DISPLAY `[copybooks/wsbatch.cob:L54]` | `HV-BATCH-START` · `9(08)` · unsigned · loaded/unloaded `[common/glbatchMT.cbl:L302]` | `BATCH-START` · `mediumint(5) unsigned` · unsigned `[mysql/ACASDB.sql:L101]` | no | drift: usage, digits; storage: INT | `A-15`, `Q-4` |
+
+#### `GLLEDGER-REC` — 11 columns · bridge `nominalMT` · handler `acas005` · facade `GL-Nominal`
+
+| # | Dictionary key | Copybook / program-source field | Bridge host variable | SQL column | One-sided | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | :---: | --- | --- |
+| 26 | `GLLEDGER-REC.LEDGER-KEY` | `WS-Ledger-Key9` · lvl 03 · `9(8)` · DISPLAY · redefines `WS-Ledger-Key` `[copybooks/wsledger.cob:L21]` | `HV-LEDGER-KEY` · `9(10)` · unsigned · loaded/unloaded `[common/nominalMT.cbl:L295]` | `LEDGER-KEY` · `int(8) unsigned` · unsigned · **PK** `[mysql/ACASDB.sql:L123]` | no | drift: usage, digits, name; derivation: REDEFINES_ALTERNATIVE; storage: INT | — |
+| 27 | `GLLEDGER-REC.LEDGER-TYPE` | `Ledger-Type` · lvl 03 · `9` · DISPLAY `[copybooks/wsledger.cob:L23]` | `HV-LEDGER-TYPE` · `9(03)` · unsigned · loaded/unloaded `[common/nominalMT.cbl:L296]` | `LEDGER-TYPE` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L124]` | no | drift: usage, digits; storage: INT | — |
+| 28 | `GLLEDGER-REC.LEDGER-PLACE` | `Ledger-Place` · lvl 03 · `x` `[copybooks/wsledger.cob:L24]` | `HV-LEDGER-PLACE` · `X(1)` · unsigned · loaded/unloaded `[common/nominalMT.cbl:L297]` | `LEDGER-PLACE` · `char(1)` `[mysql/ACASDB.sql:L125]` | no | storage: STR | — |
+| 29 | `GLLEDGER-REC.LEDGER-LEVEL` | `Ledger-Level` · lvl 03 · `9` · DISPLAY `[copybooks/wsledger.cob:L25]` | `HV-LEDGER-LEVEL` · `9(03)` · unsigned · loaded/unloaded `[common/nominalMT.cbl:L298]` | `LEDGER-LEVEL` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L126]` | no | drift: usage, digits; storage: INT | — |
+| 30 | `GLLEDGER-REC.LEDGER-NAME` | `Ledger-Name` · lvl 03 · `x(24)` `[copybooks/wsledger.cob:L27]` | `HV-LEDGER-NAME` · `X(32)` · unsigned · loaded/unloaded `[common/nominalMT.cbl:L299]` | `LEDGER-NAME` · `char(32)` `[mysql/ACASDB.sql:L127]` | no | drift: character_length; storage: STR | `A-12` |
+| 31 | `GLLEDGER-REC.LEDGER-BALANCE` | `Ledger-Balance` · lvl 03 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wsledger.cob:L28]` | `HV-LEDGER-BALANCE` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/nominalMT.cbl:L300]` | `LEDGER-BALANCE` · `decimal(10,2)` `[mysql/ACASDB.sql:L128]` | no | drift: usage; storage: DECIMAL | — |
+| 32 | `GLLEDGER-REC.LEDGER-LAST` | `Ledger-Last` · lvl 03 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wsledger.cob:L29]` | `HV-LEDGER-LAST` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/nominalMT.cbl:L301]` | `LEDGER-LAST` · `decimal(10,2)` `[mysql/ACASDB.sql:L129]` | no | drift: usage; storage: DECIMAL | — |
+| 33 | `GLLEDGER-REC.LEDGER-Q1` | `Ledger-Q1` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wsledger.cob:L31]` | `HV-LEDGER-Q1` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/nominalMT.cbl:L302]` | `LEDGER-Q1` · `decimal(10,2)` `[mysql/ACASDB.sql:L130]` | no | drift: usage; storage: DECIMAL | — |
+| 34 | `GLLEDGER-REC.LEDGER-Q2` | `Ledger-Q2` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wsledger.cob:L32]` | `HV-LEDGER-Q2` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/nominalMT.cbl:L303]` | `LEDGER-Q2` · `decimal(10,2)` `[mysql/ACASDB.sql:L131]` | no | drift: usage; storage: DECIMAL | — |
+| 35 | `GLLEDGER-REC.LEDGER-Q3` | `Ledger-Q3` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wsledger.cob:L33]` | `HV-LEDGER-Q3` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/nominalMT.cbl:L304]` | `LEDGER-Q3` · `decimal(10,2)` `[mysql/ACASDB.sql:L132]` | no | drift: usage; storage: DECIMAL | — |
+| 36 | `GLLEDGER-REC.LEDGER-Q4` | `Ledger-Q4` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wsledger.cob:L34]` | `HV-LEDGER-Q4` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/nominalMT.cbl:L305]` | `LEDGER-Q4` · `decimal(10,2)` `[mysql/ACASDB.sql:L133]` | no | drift: usage; storage: DECIMAL | — |
+
+#### `GLPOSTING-REC` — 14 columns · bridge `glpostingMT` · handler `acas006` · facade `GL-Posting`
+
+| # | Dictionary key | Copybook / program-source field | Bridge host variable | SQL column | One-sided | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | :---: | --- | --- |
+| 37 | `GLPOSTING-REC.POST-RRN` | `WS-Post-rrn` · lvl 03 · `9(5)` · DISPLAY `[copybooks/wspost.cob:L13]` | `HV-POST-RRN` · `9(08)` · unsigned · NOT loaded/NOT unloaded `[common/glpostingMT.cbl:L282]` | `POST-RRN` · `mediumint(5) unsigned` · unsigned · **PK** `[mysql/ACASDB.sql:L155]` | no | drift: usage, digits, name; storage: INT | `Q-6` |
+| 38 | `GLPOSTING-REC.POST-KEY` | `WS-Post-Key` · lvl 03 · GROUP · group `[copybooks/wspost.cob:L14]` | `HV-POST-KEY` · `9(18)` · unsigned · loaded/unloaded `[common/glpostingMT.cbl:L283]` | `POST-KEY` · `bigint(10) unsigned` · unsigned `[mysql/ACASDB.sql:L156]` | no | drift: name; derivation: GROUP_CONCATENATION | — |
+| 39 | `GLPOSTING-REC.POST-CODE` | `Post-Code` · lvl 03 · `xx` `[copybooks/wspost.cob:L17]` | `HV-POST-CODE` · `X(2)` · unsigned · loaded/unloaded `[common/glpostingMT.cbl:L284]` | `POST-CODE` · `char(2)` `[mysql/ACASDB.sql:L157]` | no | storage: STR | — |
+| 40 | `GLPOSTING-REC.POST-DAT` | `Post-Date` · lvl 03 · `x(8)` `[copybooks/wspost.cob:L18]` | `HV-POST-DAT` · `X(8)` · unsigned · loaded/unloaded `[common/glpostingMT.cbl:L285]` | `POST-DAT` · `char(8)` `[mysql/ACASDB.sql:L158]` | no | drift: name; storage: STR | — |
+| 41 | `GLPOSTING-REC.POST-DR` | `Post-DR` · lvl 03 · `9(6)` · DISPLAY `[copybooks/wspost.cob:L19]` | `HV-POST-DR` · `9(08)` · unsigned · loaded/unloaded `[common/glpostingMT.cbl:L286]` | `POST-DR` · `mediumint(6) unsigned` · unsigned `[mysql/ACASDB.sql:L159]` | no | drift: usage, digits; storage: INT | — |
+| 42 | `GLPOSTING-REC.DR-PC` | `DR-PC` · lvl 03 · `99` · DISPLAY `[copybooks/wspost.cob:L20]` | `HV-DR-PC` · `9(03)` · unsigned · loaded/unloaded `[common/glpostingMT.cbl:L287]` | `DR-PC` · `tinyint(2) unsigned` · unsigned `[mysql/ACASDB.sql:L160]` | no | drift: usage, digits; storage: INT | — |
+| 43 | `GLPOSTING-REC.POST-CR` | `Post-CR` · lvl 03 · `9(6)` · DISPLAY `[copybooks/wspost.cob:L21]` | `HV-POST-CR` · `9(08)` · unsigned · loaded/unloaded `[common/glpostingMT.cbl:L288]` | `POST-CR` · `mediumint(6) unsigned` · unsigned `[mysql/ACASDB.sql:L161]` | no | drift: usage, digits; storage: INT | — |
+| 44 | `GLPOSTING-REC.CR-PC` | `CR-PC` · lvl 03 · `99` · DISPLAY `[copybooks/wspost.cob:L22]` | `HV-CR-PC` · `9(03)` · unsigned · loaded/unloaded `[common/glpostingMT.cbl:L289]` | `CR-PC` · `tinyint(2) unsigned` · unsigned `[mysql/ACASDB.sql:L162]` | no | drift: usage, digits; storage: INT | — |
+| 45 | `GLPOSTING-REC.POST-AMOUNT` | `Post-Amount` · lvl 03 · `s9(8)v99` · DISPLAY · signed · sign TRAILING_INCLUDED `[copybooks/wspost.cob:L23]` | `HV-POST-AMOUNT` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/glpostingMT.cbl:L290]` | `POST-AMOUNT` · `decimal(10,2)` `[mysql/ACASDB.sql:L163]` | no | drift: usage; storage: DECIMAL | — |
+| 46 | `GLPOSTING-REC.POST-LEGEND` | `Post-Legend` · lvl 03 · `x(32)` `[copybooks/wspost.cob:L24]` | `HV-POST-LEGEND` · `X(32)` · unsigned · loaded/unloaded `[common/glpostingMT.cbl:L291]` | `POST-LEGEND` · `char(32)` `[mysql/ACASDB.sql:L164]` | no | storage: STR | — |
+| 47 | `GLPOSTING-REC.VAT-AC` | `Vat-AC` · lvl 03 · `9(6)` · DISPLAY `[copybooks/wspost.cob:L25]` | `HV-VAT-AC` · `9(08)` · unsigned · loaded/unloaded `[common/glpostingMT.cbl:L292]` | `VAT-AC` · `mediumint(6) unsigned` · unsigned `[mysql/ACASDB.sql:L165]` | no | drift: usage, digits; storage: INT | — |
+| 48 | `GLPOSTING-REC.VAT-PC` | `Vat-PC` · lvl 03 · `99` · DISPLAY `[copybooks/wspost.cob:L26]` | `HV-VAT-PC` · `9(03)` · unsigned · loaded/unloaded `[common/glpostingMT.cbl:L293]` | `VAT-PC` · `tinyint(2) unsigned` · unsigned `[mysql/ACASDB.sql:L166]` | no | drift: usage, digits; storage: INT | — |
+| 49 | `GLPOSTING-REC.POST-VAT-SIDE` | `Post-Vat-Side` · lvl 03 · `xx` `[copybooks/wspost.cob:L27]` | `HV-POST-VAT-SIDE` · `X(2)` · unsigned · loaded/unloaded `[common/glpostingMT.cbl:L294]` | `POST-VAT-SIDE` · `char(2)` `[mysql/ACASDB.sql:L167]` | no | storage: STR | — |
+| 50 | `GLPOSTING-REC.VAT-AMOUNT` | `Vat-Amount` · lvl 03 · `s9(8)v99` · DISPLAY · signed · sign TRAILING_INCLUDED `[copybooks/wspost.cob:L28]` | `HV-VAT-AMOUNT` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/glpostingMT.cbl:L295]` | `VAT-AMOUNT` · `decimal(10,2)` `[mysql/ACASDB.sql:L168]` | no | drift: usage; storage: DECIMAL | — |
+
+#### `IRSDFLT-REC` — 4 columns · bridge `irsdfltMT` · handler `acasirsub3` · facade `IRS defaults`
+
+| # | Dictionary key | Copybook / program-source field | Bridge host variable | SQL column | One-sided | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | :---: | --- | --- |
+| 51 | `IRSDFLT-REC.DEF-REC-KEY` | **absent** | `HV-DEF-REC-KEY` · `9(03)` · unsigned · loaded/unloaded `[common/irsdfltMT.cbl:L324]` | `DEF-REC-KEY` · `tinyint(2) unsigned` · unsigned · **PK** `[mysql/ACASDB.sql:L190]` | **yes** | derivation: BRIDGE_DERIVED | — |
+| 52 | `IRSDFLT-REC.DEF-ACS` | `Def-Acs` · lvl 05 · `9(5)` · DISPLAY `[copybooks/irswsdflt.cob:L10]` | `HV-DEF-ACS` · `9(05)` · unsigned · loaded/unloaded `[common/irsdfltMT.cbl:L325]` | `DEF-ACS` · `decimal(5,0) unsigned` · unsigned `[mysql/ACASDB.sql:L191]` | no | drift: usage; derivation: BRIDGE_DERIVED guarded on `if Def-Acs (A) numeric`; storage: INT | — |
+| 53 | `IRSDFLT-REC.DEF-CODES` | `Def-Codes` · lvl 05 · `xx` `[copybooks/irswsdflt.cob:L11]` | `HV-DEF-CODES` · `X(2)` · unsigned · loaded/unloaded `[common/irsdfltMT.cbl:L326]` | `DEF-CODES` · `char(2)` `[mysql/ACASDB.sql:L192]` | no | storage: STR | — |
+| 54 | `IRSDFLT-REC.DEF-VAT` | `Def-Vat` · lvl 05 · `x` `[copybooks/irswsdflt.cob:L12]` | `HV-DEF-VAT` · `X(1)` · unsigned · loaded/unloaded `[common/irsdfltMT.cbl:L327]` | `DEF-VAT` · `char(1)` `[mysql/ACASDB.sql:L193]` | no | storage: STR | — |
+
+#### `IRSFINAL-REC` — 3 columns · bridge `irsfinalMT` · handler `acasirsub5` · facade `IRS final`
+
+| # | Dictionary key | Copybook / program-source field | Bridge host variable | SQL column | One-sided | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | :---: | --- | --- |
+| 55 | `IRSFINAL-REC.IRS-FINAL-ACC-REC-KEY` | **absent** | `HV-IRS-FINAL-ACC-REC-KEY` · `9(03)` · unsigned · loaded/unloaded `[common/irsfinalMT.cbl:L172]` | `IRS-FINAL-ACC-REC-KEY` · `tinyint(2) unsigned` · unsigned · **PK** `[mysql/ACASDB.sql:L215]` | **yes** | derivation: BRIDGE_DERIVED | — |
+| 56 | `IRSFINAL-REC.IRS-AR1` | `ar1` · lvl 05 · `x(24)` · occurs 26 `[copybooks/irswsfinal.cob:L36]` | `HV-IRS-AR1` · `X(24)` · unsigned · loaded/unloaded `[common/irsfinalMT.cbl:L173]` | `IRS-AR1` · `char(24)` `[mysql/ACASDB.sql:L216]` | no | drift: name; derivation: REDEFINES_ALTERNATIVE; storage: STR | — |
+| 57 | `IRSFINAL-REC.IRS-AR2` | `ar2` · lvl 05 · `x` · occurs 26 `[copybooks/irswsfinal.cob:L66]` | `HV-IRS-AR2` · `X(1)` · unsigned · loaded/unloaded `[common/irsfinalMT.cbl:L174]` | `IRS-AR2` · `char(1)` `[mysql/ACASDB.sql:L217]` | no | drift: name; derivation: REDEFINES_ALTERNATIVE; storage: STR | — |
+
+#### `IRSNL-REC` — 15 columns · bridge `irsnominalMT` · handler `acasirsub1` · facade `IRS nominal`
+
+| # | Dictionary key | Copybook / program-source field | Bridge host variable | SQL column | One-sided | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | :---: | --- | --- |
+| 58 | `IRSNL-REC.KEY-1` | `NL-Key` · lvl 03 · GROUP · group `[copybooks/irswsnl.cob:L9]` | `HV-KEY-1` · `9(18)` · unsigned · loaded/unloaded `[common/irsnominalMT.cbl:L195]` | `KEY-1` · `bigint(10) unsigned` · unsigned · **PK** `[mysql/ACASDB.sql:L239]` | no | drift: name; derivation: GROUP_CONCATENATION | — |
+| 59 | `IRSNL-REC.TIPE` | `NL-Type` · lvl 03 · `x` `[copybooks/irswsnl.cob:L12]` | `HV-TIPE` · `X(1)` · unsigned · loaded/unloaded `[common/irsnominalMT.cbl:L196]` | `TIPE` · `char(1)` `[mysql/ACASDB.sql:L240]` | no | drift: name; storage: STR | — |
+| 60 | `IRSNL-REC.NL-NAME` | `NL-Name` · lvl 05 · `x(24)` `[copybooks/irswsnl.cob:L16]` | `HV-NL-NAME` · `X(24)` · unsigned · loaded/unloaded `[common/irsnominalMT.cbl:L197]` | `NL-NAME` · `char(24)` `[mysql/ACASDB.sql:L241]` | no | derivation: BRIDGE_DERIVED guarded on `if NL-Pointer numeric and NL-Pointer > zero`; storage: STR | — |
+| 61 | `IRSNL-REC.DR` | `NL-DR` · lvl 05 · `9(8)v99` · COMP `[copybooks/irswsnl.cob:L17]` | `HV-DR` · `9(08)V9(02)` · unsigned · loaded/unloaded `[common/irsnominalMT.cbl:L198]` | `DR` · `decimal(10,2) unsigned` · unsigned `[mysql/ACASDB.sql:L242]` | no | drift: name; derivation: BRIDGE_DERIVED guarded on `if NL-Pointer numeric and NL-Pointer > zero`; storage: DECIMAL | — |
+| 62 | `IRSNL-REC.CR` | `NL-CR` · lvl 05 · `9(8)v99` · COMP `[copybooks/irswsnl.cob:L18]` | `HV-CR` · `9(08)V9(02)` · unsigned · loaded/unloaded `[common/irsnominalMT.cbl:L199]` | `CR` · `decimal(10,2) unsigned` · unsigned `[mysql/ACASDB.sql:L243]` | no | drift: name; derivation: BRIDGE_DERIVED guarded on `if NL-Pointer numeric and NL-Pointer > zero`; storage: DECIMAL | — |
+| 63 | `IRSNL-REC.DR-LAST-01` | `NL-DR-Last` · lvl 05 · `9(8)v99` · COMP · occurs 4 `[copybooks/irswsnl.cob:L19]` | `HV-DR-LAST-01` · `9(08)V9(02)` · unsigned · loaded/unloaded `[common/irsnominalMT.cbl:L200]` | `DR-LAST-01` · `decimal(10,2) unsigned` · unsigned `[mysql/ACASDB.sql:L244]` | no | drift: name; derivation: BRIDGE_DERIVED guarded on `if NL-Pointer numeric and NL-Pointer > zero`; storage: DECIMAL | — |
+| 64 | `IRSNL-REC.CR-LAST-01` | `NL-CR-Last` · lvl 05 · `9(8)v99` · COMP · occurs 4 `[copybooks/irswsnl.cob:L20]` | `HV-CR-LAST-01` · `9(08)V9(02)` · unsigned · loaded/unloaded `[common/irsnominalMT.cbl:L201]` | `CR-LAST-01` · `decimal(10,2) unsigned` · unsigned `[mysql/ACASDB.sql:L245]` | no | drift: name; derivation: BRIDGE_DERIVED guarded on `if NL-Pointer numeric and NL-Pointer > zero`; storage: DECIMAL | — |
+| 65 | `IRSNL-REC.DR-LAST-02` | `NL-DR-Last` · lvl 05 · `9(8)v99` · COMP · occurs 4 `[copybooks/irswsnl.cob:L19]` | `HV-DR-LAST-02` · `9(08)V9(02)` · unsigned · loaded/unloaded `[common/irsnominalMT.cbl:L202]` | `DR-LAST-02` · `decimal(10,2) unsigned` · unsigned `[mysql/ACASDB.sql:L246]` | no | drift: name; derivation: BRIDGE_DERIVED guarded on `if NL-Pointer numeric and NL-Pointer > zero`; storage: DECIMAL | — |
+| 66 | `IRSNL-REC.CR-LAST-02` | `NL-CR-Last` · lvl 05 · `9(8)v99` · COMP · occurs 4 `[copybooks/irswsnl.cob:L20]` | `HV-CR-LAST-02` · `9(08)V9(02)` · unsigned · loaded/unloaded `[common/irsnominalMT.cbl:L203]` | `CR-LAST-02` · `decimal(10,2) unsigned` · unsigned `[mysql/ACASDB.sql:L247]` | no | drift: name; derivation: BRIDGE_DERIVED guarded on `if NL-Pointer numeric and NL-Pointer > zero`; storage: DECIMAL | — |
+| 67 | `IRSNL-REC.DR-LAST-03` | `NL-DR-Last` · lvl 05 · `9(8)v99` · COMP · occurs 4 `[copybooks/irswsnl.cob:L19]` | `HV-DR-LAST-03` · `9(08)V9(02)` · unsigned · loaded/unloaded `[common/irsnominalMT.cbl:L204]` | `DR-LAST-03` · `decimal(10,2) unsigned` · unsigned `[mysql/ACASDB.sql:L248]` | no | drift: name; derivation: BRIDGE_DERIVED guarded on `if NL-Pointer numeric and NL-Pointer > zero`; storage: DECIMAL | — |
+| 68 | `IRSNL-REC.CR-LAST-03` | `NL-CR-Last` · lvl 05 · `9(8)v99` · COMP · occurs 4 `[copybooks/irswsnl.cob:L20]` | `HV-CR-LAST-03` · `9(08)V9(02)` · unsigned · loaded/unloaded `[common/irsnominalMT.cbl:L205]` | `CR-LAST-03` · `decimal(10,2) unsigned` · unsigned `[mysql/ACASDB.sql:L249]` | no | drift: name; derivation: BRIDGE_DERIVED guarded on `if NL-Pointer numeric and NL-Pointer > zero`; storage: DECIMAL | — |
+| 69 | `IRSNL-REC.DR-LAST-04` | `NL-DR-Last` · lvl 05 · `9(8)v99` · COMP · occurs 4 `[copybooks/irswsnl.cob:L19]` | `HV-DR-LAST-04` · `9(08)V9(02)` · unsigned · loaded/unloaded `[common/irsnominalMT.cbl:L206]` | `DR-LAST-04` · `decimal(10,2) unsigned` · unsigned `[mysql/ACASDB.sql:L250]` | no | drift: name; derivation: BRIDGE_DERIVED guarded on `if NL-Pointer numeric and NL-Pointer > zero`; storage: DECIMAL | — |
+| 70 | `IRSNL-REC.CR-LAST-04` | `NL-CR-Last` · lvl 05 · `9(8)v99` · COMP · occurs 4 `[copybooks/irswsnl.cob:L20]` | `HV-CR-LAST-04` · `9(08)V9(02)` · unsigned · loaded/unloaded `[common/irsnominalMT.cbl:L207]` | `CR-LAST-04` · `decimal(10,2) unsigned` · unsigned `[mysql/ACASDB.sql:L251]` | no | drift: name; derivation: BRIDGE_DERIVED guarded on `if NL-Pointer numeric and NL-Pointer > zero`; storage: DECIMAL | — |
+| 71 | `IRSNL-REC.AC` | `NL-AC` · lvl 05 · `x` `[copybooks/irswsnl.cob:L21]` | `HV-AC` · `X(1)` · unsigned · loaded/unloaded `[common/irsnominalMT.cbl:L208]` | `AC` · `char(1)` `[mysql/ACASDB.sql:L252]` | no | drift: name; derivation: BRIDGE_DERIVED guarded on `if NL-Pointer numeric and NL-Pointer > zero`; storage: STR | — |
+| 72 | `IRSNL-REC.REC-POINTER` | `NL-Pointer` · lvl 05 · `9(5)` · DISPLAY `[copybooks/irswsnl.cob:L23]` | `HV-REC-POINTER` · `9(08)` · unsigned · loaded/unloaded `[common/irsnominalMT.cbl:L209]` | `REC-POINTER` · `mediumint(5) unsigned` · unsigned `[mysql/ACASDB.sql:L253]` | no | drift: usage, digits, name; derivation: REDEFINES_ALTERNATIVE guarded on `if NL-Pointer numeric and NL-Pointer > zero`; storage: INT | — |
+
+#### `IRSPOSTING-REC` — 13 columns · bridge `irspostingMT` · handler `acasirsub4` · facade `IRS posting`
+
+| # | Dictionary key | Copybook / program-source field | Bridge host variable | SQL column | One-sided | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | :---: | --- | --- |
+| 73 | `IRSPOSTING-REC.KEY-4` | `Post-Key` · lvl 03 · `9(5)` · DISPLAY `[copybooks/irswspost.cob:L9]` | `HV-KEY-4` · `9(08)` · unsigned · loaded/unloaded `[common/irspostingMT.cbl:L174]` | `KEY-4` · `mediumint(5) unsigned` · unsigned · **PK** `[mysql/ACASDB.sql:L275]` | no | drift: usage, digits, name; storage: INT | — |
+| 74 | `IRSPOSTING-REC.POST4-CODE` | `Post-Code` · lvl 03 · `xx` `[copybooks/irswspost.cob:L10]` | `HV-POST4-CODE` · `X(2)` · unsigned · loaded/unloaded `[common/irspostingMT.cbl:L175]` | `POST4-CODE` · `char(2)` `[mysql/ACASDB.sql:L276]` | no | drift: name; storage: STR | — |
+| 75 | `IRSPOSTING-REC.POST4-DAT` | `Post-Date` · lvl 03 · `x(8)` `[copybooks/irswspost.cob:L11]` | `HV-POST4-DAT` · `X(8)` · unsigned · loaded/unloaded `[common/irspostingMT.cbl:L176]` | `POST4-DAT` · `char(8)` `[mysql/ACASDB.sql:L277]` | no | drift: name; storage: STR | — |
+| 76 | `IRSPOSTING-REC.POST4-DAY` | **absent** | `HV-POST4-DAY` · `9(03)` · unsigned · loaded/NOT unloaded `[common/irspostingMT.cbl:L177]` | `POST4-DAY` · `tinyint(2) unsigned` · unsigned `[mysql/ACASDB.sql:L278]` | **yes** | derivation: BRIDGE_DERIVED guarded on `if Post-Date (1:2) numeric` | `A-7` |
+| 77 | `IRSPOSTING-REC.POST4-MONTH` | **absent** | `HV-POST4-MONTH` · `9(03)` · unsigned · loaded/NOT unloaded `[common/irspostingMT.cbl:L178]` | `POST4-MONTH` · `tinyint(2) unsigned` · unsigned `[mysql/ACASDB.sql:L279]` | **yes** | derivation: BRIDGE_DERIVED guarded on `if Post-Date (4:2) numeric` | `A-7` |
+| 78 | `IRSPOSTING-REC.POST4-YEAR` | **absent** | `HV-POST4-YEAR` · `9(03)` · unsigned · loaded/NOT unloaded `[common/irspostingMT.cbl:L179]` | `POST4-YEAR` · `tinyint(2) unsigned` · unsigned `[mysql/ACASDB.sql:L280]` | **yes** | derivation: BRIDGE_DERIVED guarded on `if Post-Date (7:2) numeric` | `A-7` |
+| 79 | `IRSPOSTING-REC.POST4-DR` | `Post-DR` · lvl 03 · `9(5)` · DISPLAY `[copybooks/irswspost.cob:L12]` | `HV-POST4-DR` · `9(08)` · unsigned · loaded/unloaded `[common/irspostingMT.cbl:L180]` | `POST4-DR` · `mediumint(5) unsigned` · unsigned `[mysql/ACASDB.sql:L281]` | no | drift: usage, digits, name; storage: INT | — |
+| 80 | `IRSPOSTING-REC.POST4-CR` | `Post-CR` · lvl 03 · `9(5)` · DISPLAY `[copybooks/irswspost.cob:L13]` | `HV-POST4-CR` · `9(08)` · unsigned · loaded/unloaded `[common/irspostingMT.cbl:L181]` | `POST4-CR` · `mediumint(5) unsigned` · unsigned `[mysql/ACASDB.sql:L282]` | no | drift: usage, digits, name; storage: INT | — |
+| 81 | `IRSPOSTING-REC.POST4-AMOUNT` | `Post-Amount` · lvl 03 · `s9(7)v99` · DISPLAY · signed · sign LEADING_INCLUDED `[copybooks/irswspost.cob:L14]` | `HV-POST4-AMOUNT` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/irspostingMT.cbl:L182]` | `POST4-AMOUNT` · `decimal(9,2)` `[mysql/ACASDB.sql:L283]` | no | drift: usage, name; storage: DECIMAL | — |
+| 82 | `IRSPOSTING-REC.POST4-LEGEND` | `Post-Legend` · lvl 03 · `x(32)` `[copybooks/irswspost.cob:L15]` | `HV-POST4-LEGEND` · `X(32)` · unsigned · loaded/unloaded `[common/irspostingMT.cbl:L183]` | `POST4-LEGEND` · `char(32)` `[mysql/ACASDB.sql:L284]` | no | drift: name; storage: STR | — |
+| 83 | `IRSPOSTING-REC.VAT-AC-DEF4` | `Vat-AC-Def` · lvl 03 · `99` · DISPLAY `[copybooks/irswspost.cob:L16]` | `HV-VAT-AC-DEF4` · `9(03)` · unsigned · loaded/unloaded `[common/irspostingMT.cbl:L184]` | `VAT-AC-DEF4` · `tinyint(2) unsigned` · unsigned `[mysql/ACASDB.sql:L285]` | no | drift: usage, digits, name; storage: INT | — |
+| 84 | `IRSPOSTING-REC.POST4-VAT-SIDE` | `Post-Vat-Side` · lvl 03 · `xx` `[copybooks/irswspost.cob:L17]` | `HV-POST4-VAT-SIDE` · `X(2)` · unsigned · loaded/unloaded `[common/irspostingMT.cbl:L185]` | `POST4-VAT-SIDE` · `char(2)` `[mysql/ACASDB.sql:L286]` | no | drift: name; storage: STR | — |
+| 85 | `IRSPOSTING-REC.VAT-AMOUNT4` | `Vat-Amount` · lvl 03 · `s9(7)v99` · DISPLAY · signed · sign LEADING_INCLUDED `[copybooks/irswspost.cob:L18]` | `HV-VAT-AMOUNT4` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/irspostingMT.cbl:L186]` | `VAT-AMOUNT4` · `decimal(9,2)` `[mysql/ACASDB.sql:L287]` | no | drift: usage, name; storage: DECIMAL | — |
+
+#### `PSIRSPOST-REC` — 10 columns · bridge `slpostingMT` · handler `acas008` · facade `SPL-Posting`
+
+| # | Dictionary key | Copybook / program-source field | Bridge host variable | SQL column | One-sided | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | :---: | --- | --- |
+| 86 | `PSIRSPOST-REC.IRS-POST-KEY` | `WS-IRS-Post-Key` · lvl 03 · GROUP · group `[copybooks/wspost-irs.cob:L14]` | `HV-IRS-POST-KEY` · `S9(18)` · signed · loaded/unloaded `[common/slpostingMT.cbl:L266]` | `IRS-POST-KEY` · `bigint(11)` · **PK** `[mysql/ACASDB.sql:L367]` | no | drift: name; derivation: GROUP_CONCATENATION | — |
+| 87 | `PSIRSPOST-REC.IRS-POST-CODE` | `WS-IRS-Post-Code` · lvl 03 · `xx` `[copybooks/wspost-irs.cob:L17]` | `HV-IRS-POST-CODE` · `X(2)` · unsigned · loaded/unloaded `[common/slpostingMT.cbl:L267]` | `IRS-POST-CODE` · `char(2)` `[mysql/ACASDB.sql:L368]` | no | drift: name; storage: STR | — |
+| 88 | `PSIRSPOST-REC.IRS-POST-DAT` | `WS-IRS-Post-Date` · lvl 03 · `x(8)` `[copybooks/wspost-irs.cob:L18]` | `HV-IRS-POST-DAT` · `X(8)` · unsigned · loaded/unloaded `[common/slpostingMT.cbl:L268]` | `IRS-POST-DAT` · `char(8)` `[mysql/ACASDB.sql:L369]` | no | drift: name; storage: STR | — |
+| 89 | `PSIRSPOST-REC.IRS-POST-DR` | `WS-IRS-Post-DR` · lvl 03 · `9(5)` · DISPLAY `[copybooks/wspost-irs.cob:L19]` | `HV-IRS-POST-DR` · `9(10)` · unsigned · loaded/unloaded `[common/slpostingMT.cbl:L269]` | `IRS-POST-DR` · `int(5) unsigned` · unsigned `[mysql/ACASDB.sql:L370]` | no | drift: usage, digits, name; storage: INT | — |
+| 90 | `PSIRSPOST-REC.IRS-POST-CR` | `WS-IRS-Post-CR` · lvl 03 · `9(5)` · DISPLAY `[copybooks/wspost-irs.cob:L20]` | `HV-IRS-POST-CR` · `9(10)` · unsigned · loaded/unloaded `[common/slpostingMT.cbl:L270]` | `IRS-POST-CR` · `int(5) unsigned` · unsigned `[mysql/ACASDB.sql:L371]` | no | drift: usage, digits, name; storage: INT | — |
+| 91 | `PSIRSPOST-REC.IRS-POST-AMOUNT` | `WS-IRS-Post-Amount` · lvl 03 · `s9(7)v99` · DISPLAY · signed · sign LEADING_INCLUDED `[copybooks/wspost-irs.cob:L21]` | `HV-IRS-POST-AMOUNT` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/slpostingMT.cbl:L271]` | `IRS-POST-AMOUNT` · `decimal(9,2)` `[mysql/ACASDB.sql:L372]` | no | drift: usage, name; storage: DECIMAL | — |
+| 92 | `PSIRSPOST-REC.IRS-POST-LEGEND` | `WS-IRS-Post-Legend` · lvl 03 · `x(32)` `[copybooks/wspost-irs.cob:L22]` | `HV-IRS-POST-LEGEND` · `X(32)` · unsigned · loaded/unloaded `[common/slpostingMT.cbl:L272]` | `IRS-POST-LEGEND` · `char(32)` `[mysql/ACASDB.sql:L373]` | no | drift: name; storage: STR | — |
+| 93 | `PSIRSPOST-REC.IRS-VAT-AC-DEF` | `WS-IRS-Vat-AC-Def` · lvl 03 · `99` · DISPLAY `[copybooks/wspost-irs.cob:L23]` | `HV-IRS-VAT-AC-DEF` · `9(03)` · unsigned · loaded/unloaded `[common/slpostingMT.cbl:L273]` | `IRS-VAT-AC-DEF` · `tinyint(2) unsigned` · unsigned `[mysql/ACASDB.sql:L374]` | no | drift: usage, digits, name; storage: INT | — |
+| 94 | `PSIRSPOST-REC.IRS-POST-VAT-SIDE` | `WS-IRS-Post-Vat-Side` · lvl 03 · `xx` `[copybooks/wspost-irs.cob:L24]` | `HV-IRS-POST-VAT-SIDE` · `X(2)` · unsigned · loaded/unloaded `[common/slpostingMT.cbl:L274]` | `IRS-POST-VAT-SIDE` · `char(2)` `[mysql/ACASDB.sql:L375]` | no | drift: name; storage: STR | — |
+| 95 | `PSIRSPOST-REC.IRS-VAT-AMOUNT` | `WS-IRS-Vat-Amount` · lvl 03 · `s9(7)v99` · DISPLAY · signed · sign LEADING_INCLUDED `[copybooks/wspost-irs.cob:L25]` | `HV-IRS-VAT-AMOUNT` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/slpostingMT.cbl:L275]` | `IRS-VAT-AMOUNT` · `decimal(9,2)` `[mysql/ACASDB.sql:L376]` | no | drift: usage, name; storage: DECIMAL | — |
+
+#### `PUINV-LINES-REC` — 14 columns · bridge `plinvoiceMT` · handler `acas026` · facade `PInvoice`
+
+| # | Dictionary key | Copybook / program-source field | Bridge host variable | SQL column | One-sided | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | :---: | --- | --- |
+| 96 | `PUINV-LINES-REC.IL-LINE-KEY` | `il-Key` · lvl 05 · GROUP · group `[copybooks/plwspinv.cob:L67]` | `HV1-IL-LINE-KEY` · `X(10)` · unsigned · loaded/unloaded `[common/plinvoiceMT.cbl:L426]` | `IL-LINE-KEY` · `char(10)` · **PK** `[mysql/ACASDB.sql:L511]` | no | drift: name; derivation: GROUP_CONCATENATION | — |
+| 97 | `PUINV-LINES-REC.IL-INVOICE` | `il-invoice` · lvl 07 · `9(8)` · DISPLAY `[copybooks/plwspinv.cob:L68]` | `HV1-IL-INVOICE` · `9(10)` · unsigned · loaded/NOT unloaded `[common/plinvoiceMT.cbl:L427]` | `IL-INVOICE` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L512]` | no | drift: usage, digits; storage: INT | — |
+| 98 | `PUINV-LINES-REC.IL-LINE` | `il-line` · lvl 07 · `99` · DISPLAY `[copybooks/plwspinv.cob:L69]` | `HV1-IL-LINE` · `9(03)` · unsigned · loaded/unloaded `[common/plinvoiceMT.cbl:L428]` | `IL-LINE` · `tinyint(2) unsigned` · unsigned `[mysql/ACASDB.sql:L513]` | no | drift: usage, digits; storage: INT | — |
+| 99 | `PUINV-LINES-REC.IL-PRODUCT` | `il-product` · lvl 05 · `x(13)` `[copybooks/plwspinv.cob:L70]` | `HV1-IL-PRODUCT` · `X(13)` · unsigned · loaded/unloaded `[common/plinvoiceMT.cbl:L429]` | `IL-PRODUCT` · `char(13)` `[mysql/ACASDB.sql:L514]` | no | storage: STR | — |
+| 100 | `PUINV-LINES-REC.IL-PA` | `il-pa` · lvl 05 · `xx` `[copybooks/plwspinv.cob:L71]` | `HV1-IL-PA` · `X(2)` · unsigned · loaded/unloaded `[common/plinvoiceMT.cbl:L430]` | `IL-PA` · `char(2)` `[mysql/ACASDB.sql:L515]` | no | storage: STR | — |
+| 101 | `PUINV-LINES-REC.IL-QTY` | `il-qty` · lvl 05 · BINARY-SHORT · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv.cob:L73]` | `HV1-IL-QTY` · `9(05)` · unsigned · loaded/unloaded `[common/plinvoiceMT.cbl:L431]` | `IL-QTY` · `smallint(6) unsigned` · unsigned `[mysql/ACASDB.sql:L516]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 102 | `PUINV-LINES-REC.IL-TYPE` | `il-type` · lvl 05 · `x` `[copybooks/plwspinv.cob:L74]` | `HV1-IL-TYPE` · `X(1)` · unsigned · loaded/unloaded `[common/plinvoiceMT.cbl:L432]` | `IL-TYPE` · `char(1)` `[mysql/ACASDB.sql:L517]` | no | storage: STR | — |
+| 103 | `PUINV-LINES-REC.IL-DESCRIPTION` | `il-description` · lvl 05 · `x(24)` `[copybooks/plwspinv.cob:L75]` | `HV1-IL-DESCRIPTION` · `X(24)` · unsigned · loaded/unloaded `[common/plinvoiceMT.cbl:L433]` | `IL-DESCRIPTION` · `char(24)` `[mysql/ACASDB.sql:L518]` | no | storage: STR | — |
+| 104 | `PUINV-LINES-REC.IL-NET` | `il-net` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv.cob:L77]` | `HV1-IL-NET` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/plinvoiceMT.cbl:L434]` | `IL-NET` · `decimal(9,2)` `[mysql/ACASDB.sql:L519]` | no | drift: usage; storage: DECIMAL | — |
+| 105 | `PUINV-LINES-REC.IL-UNIT` | `il-unit` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv.cob:L78]` | `HV1-IL-UNIT` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/plinvoiceMT.cbl:L435]` | `IL-UNIT` · `decimal(9,2)` `[mysql/ACASDB.sql:L520]` | no | drift: usage; storage: DECIMAL | — |
+| 106 | `PUINV-LINES-REC.IL-DISCOUNT` | `il-discount` · lvl 05 · `99v99` · COMP `[copybooks/plwspinv.cob:L79]` | `HV1-IL-DISCOUNT` · `9(02)V9(02)` · unsigned · loaded/unloaded `[common/plinvoiceMT.cbl:L436]` | `IL-DISCOUNT` · `decimal(4,2) unsigned` · unsigned `[mysql/ACASDB.sql:L521]` | no | storage: DECIMAL | — |
+| 107 | `PUINV-LINES-REC.IL-VAT` | `il-vat` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv.cob:L80]` | `HV1-IL-VAT` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/plinvoiceMT.cbl:L437]` | `IL-VAT` · `decimal(9,2)` `[mysql/ACASDB.sql:L522]` | no | drift: usage; storage: DECIMAL | — |
+| 108 | `PUINV-LINES-REC.IL-VAT-CODE` | `il-vat-code` · lvl 05 · `9` · DISPLAY `[copybooks/plwspinv.cob:L81]` | `HV1-IL-VAT-CODE` · `9(03)` · unsigned · loaded/unloaded `[common/plinvoiceMT.cbl:L438]` | `IL-VAT-CODE` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L523]` | no | drift: usage, digits; storage: INT | — |
+| 109 | `PUINV-LINES-REC.IL-UPDATE` | `il-update` · lvl 05 · `x` `[copybooks/plwspinv.cob:L82]` | `HV1-IL-UPDATE` · `X(1)` · unsigned · loaded/unloaded `[common/plinvoiceMT.cbl:L439]` | `IL-UPDATE` · `char(1)` `[mysql/ACASDB.sql:L524]` | no | storage: STR | — |
+
+#### `PUINVOICE-REC` — 30 columns · bridge `plinvoiceMT` · handler `acas026` · facade `PInvoice`
+
+| # | Dictionary key | Copybook / program-source field | Bridge host variable | SQL column | One-sided | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | :---: | --- | --- |
+| 110 | `PUINVOICE-REC.PINVOICE-KEY` | `WS-Invoice-Key` · lvl 05 · GROUP · group `[copybooks/plwspinv.cob:L10]` | `HV-PINVOICE-KEY` · `X(10)` · unsigned · loaded/NOT unloaded `[common/plinvoiceMT.cbl:L391]` | `PINVOICE-KEY` · `char(10)` · **PK** `[mysql/ACASDB.sql:L546]` | no | drift: name; derivation: GROUP_CONCATENATION | — |
+| 111 | `PUINVOICE-REC.IH-INVOICE` | `ih-Invoice` · lvl 07 · `9(8)` · DISPLAY `[copybooks/plwspinv.cob:L11]` | `HV-IH-INVOICE` · `9(10)` · unsigned · loaded/unloaded `[common/plinvoiceMT.cbl:L392]` | `IH-INVOICE` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L547]` | no | drift: usage, digits; storage: INT | — |
+| 112 | `PUINVOICE-REC.IH-TEST` | `ih-Test` · lvl 07 · `99` · DISPLAY `[copybooks/plwspinv.cob:L12]` | `HV-IH-TEST` · `9(03)` · unsigned · loaded/unloaded `[common/plinvoiceMT.cbl:L393]` | `IH-TEST` · `tinyint(2) unsigned` · unsigned `[mysql/ACASDB.sql:L548]` | no | drift: usage, digits; storage: INT | — |
+| 113 | `PUINVOICE-REC.IH-SUPPLIER` | `ih-Supplier` · lvl 05 · GROUP · group `[copybooks/plwspinv.cob:L13]` | `HV-IH-SUPPLIER` · `X(7)` · unsigned · loaded/unloaded `[common/plinvoiceMT.cbl:L394]` | `IH-SUPPLIER` · `char(7)` `[mysql/ACASDB.sql:L549]` | no | derivation: GROUP_CONCATENATION | — |
+| 114 | `PUINVOICE-REC.IH-DAT` | `ih-Date` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv.cob:L16]` | `HV-IH-DAT` · `9(10)` · unsigned · loaded/unloaded `[common/plinvoiceMT.cbl:L395]` | `IH-DAT` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L550]` | no | drift: signedness, usage, name; storage: INT | `A-11`, `Q-3` |
+| 115 | `PUINVOICE-REC.IH-ORDER` | `ih-order` · lvl 05 · GROUP · group `[copybooks/plwspinv.cob:L17]` | `HV-IH-ORDER` · `X(10)` · unsigned · loaded/unloaded `[common/plinvoiceMT.cbl:L396]` | `IH-ORDER` · `char(10)` `[mysql/ACASDB.sql:L551]` | no | derivation: GROUP_CONCATENATION | — |
+| 116 | `PUINVOICE-REC.IH-TYPE` | `ih-Type` · lvl 05 · `9` · DISPLAY `[copybooks/plwspinv.cob:L28]` | `HV-IH-TYPE` · `9(03)` · unsigned · loaded/unloaded `[common/plinvoiceMT.cbl:L397]` | `IH-TYPE` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L552]` | no | drift: usage, digits; storage: INT | — |
+| 117 | `PUINVOICE-REC.IH-REF` | `ih-Ref` · lvl 05 · `x(10)` `[copybooks/plwspinv.cob:L29]` | `HV-IH-REF` · `X(10)` · unsigned · loaded/unloaded `[common/plinvoiceMT.cbl:L398]` | `IH-REF` · `char(10)` `[mysql/ACASDB.sql:L553]` | no | storage: STR | — |
+| 118 | `PUINVOICE-REC.IH-P-C` | `ih-p-c` · lvl 07 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv.cob:L32]` | `HV-IH-P-C` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/plinvoiceMT.cbl:L399]` | `IH-P-C` · `decimal(9,2)` `[mysql/ACASDB.sql:L554]` | no | drift: usage; storage: DECIMAL | — |
+| 119 | `PUINVOICE-REC.IH-NET` | `ih-net` · lvl 07 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv.cob:L33]` | `HV-IH-NET` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/plinvoiceMT.cbl:L400]` | `IH-NET` · `decimal(9,2)` `[mysql/ACASDB.sql:L555]` | no | drift: usage; storage: DECIMAL | — |
+| 120 | `PUINVOICE-REC.IH-EXTRA` | `ih-extra` · lvl 07 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv.cob:L34]` | `HV-IH-EXTRA` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/plinvoiceMT.cbl:L401]` | `IH-EXTRA` · `decimal(9,2)` `[mysql/ACASDB.sql:L556]` | no | drift: usage; storage: DECIMAL | — |
+| 121 | `PUINVOICE-REC.IH-CARRIAGE` | `ih-carriage` · lvl 07 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv.cob:L35]` | `HV-IH-CARRIAGE` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/plinvoiceMT.cbl:L402]` | `IH-CARRIAGE` · `decimal(9,2)` `[mysql/ACASDB.sql:L557]` | no | drift: usage; storage: DECIMAL | — |
+| 122 | `PUINVOICE-REC.IH-VAT` | `ih-vat` · lvl 07 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv.cob:L36]` | `HV-IH-VAT` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/plinvoiceMT.cbl:L403]` | `IH-VAT` · `decimal(9,2)` `[mysql/ACASDB.sql:L558]` | no | drift: usage; storage: DECIMAL | — |
+| 123 | `PUINVOICE-REC.IH-DISCOUNT` | `ih-discount` · lvl 07 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv.cob:L37]` | `HV-IH-DISCOUNT` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/plinvoiceMT.cbl:L404]` | `IH-DISCOUNT` · `decimal(9,2)` `[mysql/ACASDB.sql:L559]` | no | drift: usage; storage: DECIMAL | — |
+| 124 | `PUINVOICE-REC.IH-E-VAT` | `ih-e-vat` · lvl 07 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv.cob:L38]` | `HV-IH-E-VAT` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/plinvoiceMT.cbl:L405]` | `IH-E-VAT` · `decimal(9,2)` `[mysql/ACASDB.sql:L560]` | no | drift: usage; storage: DECIMAL | — |
+| 125 | `PUINVOICE-REC.IH-C-VAT` | `ih-c-vat` · lvl 07 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv.cob:L39]` | `HV-IH-C-VAT` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/plinvoiceMT.cbl:L406]` | `IH-C-VAT` · `decimal(9,2)` `[mysql/ACASDB.sql:L561]` | no | drift: usage; storage: DECIMAL | — |
+| 126 | `PUINVOICE-REC.IH-STATUS` | `ih-status` · lvl 05 · `x` `[copybooks/plwspinv.cob:L40]` | `HV-IH-STATUS` · `X(1)` · unsigned · loaded/unloaded `[common/plinvoiceMT.cbl:L407]` | `IH-STATUS` · `char(1)` `[mysql/ACASDB.sql:L562]` | no | storage: STR | — |
+| 127 | `PUINVOICE-REC.IH-STATUS-A` | **absent** | `HV-IH-STATUS-A` · `X(1)` · unsigned · NOT loaded/NOT unloaded `[common/plinvoiceMT.cbl:L408]` | `IH-STATUS-A` · `char(1)` `[mysql/ACASDB.sql:L563]` | **yes** | derivation: BRIDGE_DERIVED | — |
+| 128 | `PUINVOICE-REC.IH-STATUS-C` | **absent** | `HV-IH-STATUS-C` · `X(1)` · unsigned · NOT loaded/NOT unloaded `[common/plinvoiceMT.cbl:L409]` | `IH-STATUS-C` · `char(1)` `[mysql/ACASDB.sql:L564]` | **yes** | derivation: BRIDGE_DERIVED | — |
+| 129 | `PUINVOICE-REC.IH-STATUS-I` | **absent** | `HV-IH-STATUS-I` · `X(1)` · unsigned · NOT loaded/NOT unloaded `[common/plinvoiceMT.cbl:L410]` | `IH-STATUS-I` · `char(1)` `[mysql/ACASDB.sql:L565]` | **yes** | derivation: BRIDGE_DERIVED | — |
+| 130 | `PUINVOICE-REC.IH-STATUS-L` | **absent** | `HV-IH-STATUS-L` · `X(1)` · unsigned · NOT loaded/NOT unloaded `[common/plinvoiceMT.cbl:L411]` | `IH-STATUS-L` · `char(1)` `[mysql/ACASDB.sql:L566]` | **yes** | derivation: BRIDGE_DERIVED | — |
+| 131 | `PUINVOICE-REC.IH-STATUS-P` | **absent** | `HV-IH-STATUS-P` · `X(1)` · unsigned · NOT loaded/NOT unloaded `[common/plinvoiceMT.cbl:L412]` | `IH-STATUS-P` · `char(1)` `[mysql/ACASDB.sql:L567]` | **yes** | derivation: BRIDGE_DERIVED | — |
+| 132 | `PUINVOICE-REC.IH-DEDUCT-DAYS` | `ih-deduct-days` · lvl 05 · BINARY-CHAR · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv.cob:L45]` | `HV-IH-DEDUCT-DAYS` · `9(03)` · unsigned · loaded/unloaded `[common/plinvoiceMT.cbl:L413]` | `IH-DEDUCT-DAYS` · `tinyint(3) unsigned` · unsigned `[mysql/ACASDB.sql:L568]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 133 | `PUINVOICE-REC.IH-DEDUCT-AMT` | `ih-deduct-amt` · lvl 05 · `999v99` · COMP `[copybooks/plwspinv.cob:L46]` | `HV-IH-DEDUCT-AMT` · `9(03)V9(02)` · unsigned · loaded/unloaded `[common/plinvoiceMT.cbl:L414]` | `IH-DEDUCT-AMT` · `decimal(5,2) unsigned` · unsigned `[mysql/ACASDB.sql:L569]` | no | storage: DECIMAL | — |
+| 134 | `PUINVOICE-REC.IH-DEDUCT-VAT` | `ih-deduct-vat` · lvl 05 · `999v99` · COMP `[copybooks/plwspinv.cob:L47]` | `HV-IH-DEDUCT-VAT` · `9(03)V9(02)` · unsigned · loaded/unloaded `[common/plinvoiceMT.cbl:L415]` | `IH-DEDUCT-VAT` · `decimal(5,2) unsigned` · unsigned `[mysql/ACASDB.sql:L570]` | no | storage: DECIMAL | — |
+| 135 | `PUINVOICE-REC.IH-DAYS` | `ih-days` · lvl 05 · BINARY-CHAR · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv.cob:L48]` | `HV-IH-DAYS` · `9(03)` · unsigned · loaded/unloaded `[common/plinvoiceMT.cbl:L416]` | `IH-DAYS` · `tinyint(3) unsigned` · unsigned `[mysql/ACASDB.sql:L571]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 136 | `PUINVOICE-REC.IH-CR` | `ih-cr` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv.cob:L49]` | `HV-IH-CR` · `9(10)` · unsigned · loaded/unloaded `[common/plinvoiceMT.cbl:L417]` | `IH-CR` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L572]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 137 | `PUINVOICE-REC.IH-LINES` | `ih-lines` · lvl 05 · BINARY-CHAR · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv.cob:L44]` | `HV-IH-LINES` · `9(03)` · unsigned · loaded/unloaded `[common/plinvoiceMT.cbl:L418]` | `IH-LINES` · `tinyint(2) unsigned` · unsigned `[mysql/ACASDB.sql:L573]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 138 | `PUINVOICE-REC.IH-DAY-BOOK-FLAG` | `ih-day-book-flag` · lvl 05 · `x` `[copybooks/plwspinv.cob:L50]` | `HV-IH-DAY-BOOK-FLAG` · `X(1)` · unsigned · loaded/unloaded `[common/plinvoiceMT.cbl:L419]` | `IH-DAY-BOOK-FLAG` · `char(1)` `[mysql/ACASDB.sql:L574]` | no | storage: STR | — |
+| 139 | `PUINVOICE-REC.IH-UPDATE` | `ih-update` · lvl 05 · `x` `[copybooks/plwspinv.cob:L52]` | `HV-IH-UPDATE` · `X(1)` · unsigned · loaded/unloaded `[common/plinvoiceMT.cbl:L420]` | `IH-UPDATE` · `char(1)` `[mysql/ACASDB.sql:L575]` | no | storage: STR | — |
+
+#### `PUITM5-REC` — 29 columns · bridge `otm5MT` · handler `acas029` · facade `OTM5`
+
+| # | Dictionary key | Copybook / program-source field | Bridge host variable | SQL column | One-sided | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | :---: | --- | --- |
+| 140 | `PUITM5-REC.OI5-KEY` | `oi5-key` · lvl 03 · GROUP · group `[copybooks/plwsoi5B.cob:L13]` | `HV-OI5-KEY` · `X(15)` · unsigned · loaded/NOT unloaded `[common/otm5MT.cbl:L304]` | `OI5-KEY` · `char(15)` · **PK** `[mysql/ACASDB.sql:L597]` | no | derivation: GROUP_CONCATENATION | — |
+| 141 | `PUITM5-REC.OI5-SUPPLIER` | `OI-Supplier` · lvl 07 · GROUP · group `[copybooks/plwsoi.cob:L15]` | `HV-OI5-SUPPLIER` · `X(7)` · unsigned · loaded/unloaded `[common/otm5MT.cbl:L305]` | `OI5-SUPPLIER` · `char(7)` `[mysql/ACASDB.sql:L598]` | no | drift: name; derivation: GROUP_CONCATENATION | — |
+| 142 | `PUITM5-REC.OI5-INVOICE` | `OI-Invoice` · lvl 05 · `9(8)` · DISPLAY `[copybooks/plwsoi.cob:L18]` | `HV-OI5-INVOICE` · `9(10)` · unsigned · loaded/unloaded `[common/otm5MT.cbl:L306]` | `OI5-INVOICE` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L599]` | no | drift: usage, digits, name; storage: INT | — |
+| 143 | `PUITM5-REC.OI5-DAT` | `OI-Date` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/plwsoi.cob:L19]` | `HV-OI5-DAT` · `9(10)` · unsigned · loaded/unloaded `[common/otm5MT.cbl:L307]` | `OI5-DAT` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L600]` | no | drift: signedness, usage, name; storage: INT | `A-11`, `Q-3` |
+| 144 | `PUITM5-REC.OI5-BATCH` | `OI-Batch` · lvl 03 · GROUP · group `[copybooks/plwsoi.cob:L20]` | `HV-OI5-BATCH` · `X(8)` · unsigned · loaded/NOT unloaded `[common/otm5MT.cbl:L308]` | `OI5-BATCH` · `char(8)` `[mysql/ACASDB.sql:L601]` | no | drift: name; derivation: GROUP_CONCATENATION | — |
+| 145 | `PUITM5-REC.OI5-BATCH-NOS` | `OI-B-Nos` · lvl 05 · `9(5)` · COMP `[copybooks/plwsoi.cob:L21]` | `HV-OI5-BATCH-NOS` · `X(5)` · unsigned · loaded/unloaded `[common/otm5MT.cbl:L309]` | `OI5-BATCH-NOS` · `char(5)` `[mysql/ACASDB.sql:L602]` | no | drift: usage, name; storage: INT | — |
+| 146 | `PUITM5-REC.OI5-BATCH-ITEM` | `OI-B-Item` · lvl 05 · `999` · COMP `[copybooks/plwsoi.cob:L22]` | `HV-OI5-BATCH-ITEM` · `X(3)` · unsigned · loaded/unloaded `[common/otm5MT.cbl:L310]` | `OI5-BATCH-ITEM` · `char(3)` `[mysql/ACASDB.sql:L603]` | no | drift: usage, name; storage: INT | — |
+| 147 | `PUITM5-REC.OI5-TYPE` | `OI-Type` · lvl 03 · `9` · DISPLAY `[copybooks/plwsoi.cob:L23]` | `HV-OI5-TYPE` · `X(1)` · unsigned · loaded/unloaded `[common/otm5MT.cbl:L311]` | `OI5-TYPE` · `char(1)` `[mysql/ACASDB.sql:L604]` | no | drift: usage, name; storage: INT | — |
+| 148 | `PUITM5-REC.OI5-REF` | `OI-ref` · lvl 03 · `x(10)` `[copybooks/plwsoi.cob:L36]` | `HV-OI5-REF` · `X(10)` · unsigned · loaded/unloaded `[common/otm5MT.cbl:L312]` | `OI5-REF` · `char(10)` `[mysql/ACASDB.sql:L605]` | no | drift: name; storage: STR | — |
+| 149 | `PUITM5-REC.OI5-ORDER` | `OI-order` · lvl 03 · `x(10)` `[copybooks/plwsoi.cob:L37]` | `HV-OI5-ORDER` · `X(10)` · unsigned · loaded/unloaded `[common/otm5MT.cbl:L313]` | `OI5-ORDER` · `char(10)` `[mysql/ACASDB.sql:L606]` | no | drift: name; storage: STR | — |
+| 150 | `PUITM5-REC.OI5-HOLD-FLAG` | `OI-hold-flag` · lvl 03 · `x` `[copybooks/plwsoi.cob:L38]` | `HV-OI5-HOLD-FLAG` · `X(1)` · unsigned · loaded/unloaded `[common/otm5MT.cbl:L314]` | `OI5-HOLD-FLAG` · `char(1)` `[mysql/ACASDB.sql:L607]` | no | drift: name; storage: STR | — |
+| 151 | `PUITM5-REC.OI5-UNAPL` | `OI-unapl` · lvl 03 · `x` `[copybooks/plwsoi.cob:L40]` | `HV-OI5-UNAPL` · `X(1)` · unsigned · loaded/unloaded `[common/otm5MT.cbl:L315]` | `OI5-UNAPL` · `char(1)` `[mysql/ACASDB.sql:L608]` | no | drift: name; storage: STR | — |
+| 152 | `PUITM5-REC.OI5-P-C` | `OI-P-C` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwsoi.cob:L42]` | `HV-OI5-P-C` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/otm5MT.cbl:L316]` | `OI5-P-C` · `decimal(9,2)` `[mysql/ACASDB.sql:L609]` | no | drift: usage, name; storage: DECIMAL | — |
+| 153 | `PUITM5-REC.OI5-NET` | `OI-Net` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwsoi.cob:L43]` | `HV-OI5-NET` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/otm5MT.cbl:L317]` | `OI5-NET` · `decimal(9,2)` `[mysql/ACASDB.sql:L610]` | no | drift: usage, name; storage: DECIMAL | — |
+| 154 | `PUITM5-REC.OI5-EXTRA` | `OI-Extra` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwsoi.cob:L46]` | `HV-OI5-EXTRA` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/otm5MT.cbl:L318]` | `OI5-EXTRA` · `decimal(9,2)` `[mysql/ACASDB.sql:L611]` | no | drift: usage, name; storage: DECIMAL | — |
+| 155 | `PUITM5-REC.OI5-CARRIAGE` | `OI-Carriage` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwsoi.cob:L47]` | `HV-OI5-CARRIAGE` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/otm5MT.cbl:L319]` | `OI5-CARRIAGE` · `decimal(9,2)` `[mysql/ACASDB.sql:L612]` | no | drift: usage, name; storage: DECIMAL | — |
+| 156 | `PUITM5-REC.OI5-VAT` | `OI-Vat` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwsoi.cob:L48]` | `HV-OI5-VAT` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/otm5MT.cbl:L320]` | `OI5-VAT` · `decimal(9,2)` `[mysql/ACASDB.sql:L613]` | no | drift: usage, name; storage: DECIMAL | — |
+| 157 | `PUITM5-REC.OI5-DISCOUNT` | `OI-Discount` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwsoi.cob:L49]` | `HV-OI5-DISCOUNT` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/otm5MT.cbl:L321]` | `OI5-DISCOUNT` · `decimal(9,2)` `[mysql/ACASDB.sql:L614]` | no | drift: usage, name; storage: DECIMAL | — |
+| 158 | `PUITM5-REC.OI5-E-VAT` | `OI-E-Vat` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwsoi.cob:L50]` | `HV-OI5-E-VAT` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/otm5MT.cbl:L322]` | `OI5-E-VAT` · `decimal(9,2)` `[mysql/ACASDB.sql:L615]` | no | drift: usage, name; storage: DECIMAL | — |
+| 159 | `PUITM5-REC.OI5-C-VAT` | `OI-C-Vat` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwsoi.cob:L51]` | `HV-OI5-C-VAT` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/otm5MT.cbl:L323]` | `OI5-C-VAT` · `decimal(9,2)` `[mysql/ACASDB.sql:L616]` | no | drift: usage, name; storage: DECIMAL | — |
+| 160 | `PUITM5-REC.OI5-PAID` | `OI-Paid` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwsoi.cob:L52]` | `HV-OI5-PAID` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/otm5MT.cbl:L324]` | `OI5-PAID` · `decimal(9,2)` `[mysql/ACASDB.sql:L617]` | no | drift: usage, name; storage: DECIMAL | — |
+| 161 | `PUITM5-REC.OI5-STATUS` | `OI-Status` · lvl 03 · `9` · DISPLAY `[copybooks/plwsoi.cob:L53]` | `HV-OI5-STATUS` · `X(1)` · unsigned · loaded/unloaded `[common/otm5MT.cbl:L325]` | `OI5-STATUS` · `char(1)` `[mysql/ACASDB.sql:L618]` | no | drift: usage, name; storage: INT | — |
+| 162 | `PUITM5-REC.OI5-DEDUCT-DAYS` | `OI-Deduct-Days` · lvl 03 · BINARY-CHAR · signed · sign IMPLICIT_BINARY `[copybooks/plwsoi.cob:L56]` | `HV-OI5-DEDUCT-DAYS` · `9(03)` · unsigned · loaded/unloaded `[common/otm5MT.cbl:L326]` | `OI5-DEDUCT-DAYS` · `tinyint(3) unsigned` · unsigned `[mysql/ACASDB.sql:L619]` | no | drift: signedness, usage, name; storage: INT | `A-11`, `Q-3` |
+| 163 | `PUITM5-REC.OI5-DEDUCT-AMT` | `OI-Deduct-Amt` · lvl 03 · `s999v99` · COMP · signed · sign IMPLICIT_BINARY `[copybooks/plwsoi.cob:L57]` | `HV-OI5-DEDUCT-AMT` · `S9(03)V9(02)` · signed · loaded/unloaded `[common/otm5MT.cbl:L327]` | `OI5-DEDUCT-AMT` · `decimal(5,2)` `[mysql/ACASDB.sql:L620]` | no | drift: name; storage: DECIMAL | — |
+| 164 | `PUITM5-REC.OI5-DEDUCT-VAT` | `OI-Deduct-Vat` · lvl 03 · `s999v99` · COMP · signed · sign IMPLICIT_BINARY `[copybooks/plwsoi.cob:L58]` | `HV-OI5-DEDUCT-VAT` · `S9(03)V9(02)` · signed · loaded/unloaded `[common/otm5MT.cbl:L328]` | `OI5-DEDUCT-VAT` · `decimal(5,2)` `[mysql/ACASDB.sql:L621]` | no | drift: name; storage: DECIMAL | — |
+| 165 | `PUITM5-REC.OI5-DAYS` | `OI-Days` · lvl 03 · BINARY-CHAR · signed · sign IMPLICIT_BINARY `[copybooks/plwsoi.cob:L59]` | `HV-OI5-DAYS` · `9(03)` · unsigned · loaded/unloaded `[common/otm5MT.cbl:L329]` | `OI5-DAYS` · `tinyint(3) unsigned` · unsigned `[mysql/ACASDB.sql:L622]` | no | drift: signedness, usage, name; storage: INT | `A-11`, `Q-3` |
+| 166 | `PUITM5-REC.OI5-CR` | `OI-CR` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/plwsoi.cob:L60]` | `HV-OI5-CR` · `S9(10)` · signed · loaded/unloaded `[common/otm5MT.cbl:L330]` | `OI5-CR` · `int(8)` `[mysql/ACASDB.sql:L623]` | no | drift: usage, name; storage: INT | — |
+| 167 | `PUITM5-REC.OI5-APPLIED` | `OI-Applied` · lvl 03 · `x` `[copybooks/plwsoi.cob:L61]` | `HV-OI5-APPLIED` · `X(1)` · unsigned · loaded/unloaded `[common/otm5MT.cbl:L331]` | `OI5-APPLIED` · `char(1)` `[mysql/ACASDB.sql:L624]` | no | drift: name; storage: STR | — |
+| 168 | `PUITM5-REC.OI5-DATE-CLEARED` | `OI-Date-Cleared` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/plwsoi.cob:L62]` | `HV-OI5-DATE-CLEARED` · `9(10)` · unsigned · loaded/unloaded `[common/otm5MT.cbl:L332]` | `OI5-DATE-CLEARED` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L625]` | no | drift: signedness, usage, name; storage: INT | `A-11`, `Q-3` |
+
+#### `PULEDGER-REC` — 29 columns · bridge `purchMT` · handler `acas022` · facade `Purch`
+
+| # | Dictionary key | Copybook / program-source field | Bridge host variable | SQL column | One-sided | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | :---: | --- | --- |
+| 169 | `PULEDGER-REC.PURCH-KEY` | `WS-Purch-Key` · lvl 03 · `x(7)` `[copybooks/wspl.cob:L14]` | `HV-PURCH-KEY` · `X(7)` · unsigned · loaded/unloaded `[common/purchMT.cbl:L285]` | `PURCH-KEY` · `char(7)` · **PK** `[mysql/ACASDB.sql:L647]` | no | drift: name; storage: STR | — |
+| 170 | `PULEDGER-REC.PURCH-STATUS` | `Purch-Status` · lvl 03 · `9` · DISPLAY `[copybooks/wspl.cob:L18]` | `HV-PURCH-STATUS` · `9(03)` · unsigned · loaded/unloaded `[common/purchMT.cbl:L286]` | `PURCH-STATUS` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L648]` | no | drift: usage, digits; storage: INT | — |
+| 171 | `PULEDGER-REC.PURCH-NOTES-TAG` | `Purch-Notes-Tag` · lvl 03 · `9` · DISPLAY `[copybooks/wspl.cob:L21]` | `HV-PURCH-NOTES-TAG` · `9(03)` · unsigned · loaded/unloaded `[common/purchMT.cbl:L287]` | `PURCH-NOTES-TAG` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L649]` | no | drift: usage, digits; storage: INT | — |
+| 172 | `PULEDGER-REC.PURCH-NAME` | `Purch-Name` · lvl 03 · `x(30)` `[copybooks/wspl.cob:L22]` | `HV-PURCH-NAME` · `X(30)` · unsigned · loaded/unloaded `[common/purchMT.cbl:L288]` | `PURCH-NAME` · `char(30)` `[mysql/ACASDB.sql:L650]` | no | storage: STR | — |
+| 173 | `PULEDGER-REC.PURCH-ADDRESS` | `Purch-Address` · lvl 03 · GROUP · group `[copybooks/wspl.cob:L23]` | `HV-PURCH-ADDRESS` · `X(96)` · unsigned · loaded/unloaded `[common/purchMT.cbl:L289]` | `PURCH-ADDRESS` · `char(96)` `[mysql/ACASDB.sql:L651]` | no | derivation: GROUP_CONCATENATION | — |
+| 174 | `PULEDGER-REC.PURCH-PHONE` | `Purch-Phone` · lvl 03 · `x(13)` `[copybooks/wspl.cob:L26]` | `HV-PURCH-PHONE` · `X(13)` · unsigned · loaded/unloaded `[common/purchMT.cbl:L290]` | `PURCH-PHONE` · `char(13)` `[mysql/ACASDB.sql:L652]` | no | storage: STR | — |
+| 175 | `PULEDGER-REC.PURCH-EXT` | `Purch-Ext` · lvl 03 · `x(4)` `[copybooks/wspl.cob:L27]` | `HV-PURCH-EXT` · `X(4)` · unsigned · loaded/unloaded `[common/purchMT.cbl:L291]` | `PURCH-EXT` · `char(4)` `[mysql/ACASDB.sql:L653]` | no | storage: STR | — |
+| 176 | `PULEDGER-REC.PURCH-FAX` | `Purch-Fax` · lvl 03 · `x(13)` `[copybooks/wspl.cob:L28]` | `HV-PURCH-FAX` · `X(13)` · unsigned · loaded/unloaded `[common/purchMT.cbl:L292]` | `PURCH-FAX` · `char(13)` `[mysql/ACASDB.sql:L654]` | no | storage: STR | — |
+| 177 | `PULEDGER-REC.PURCH-EMAIL` | `Purch-Email` · lvl 03 · `x(30)` `[copybooks/wspl.cob:L29]` | `HV-PURCH-EMAIL` · `X(30)` · unsigned · loaded/unloaded `[common/purchMT.cbl:L293]` | `PURCH-EMAIL` · `char(30)` `[mysql/ACASDB.sql:L655]` | no | storage: STR | — |
+| 178 | `PULEDGER-REC.PURCH-DISCOUNT` | `Purch-Discount` · lvl 03 · `99v99` · COMP `[copybooks/wspl.cob:L30]` | `HV-PURCH-DISCOUNT` · `9(02)V9(02)` · unsigned · loaded/unloaded `[common/purchMT.cbl:L294]` | `PURCH-DISCOUNT` · `decimal(4,2) unsigned` · unsigned `[mysql/ACASDB.sql:L656]` | no | storage: DECIMAL | — |
+| 179 | `PULEDGER-REC.PURCH-CREDIT` | `Purch-Credit` · lvl 03 · BINARY-CHAR · signed · sign IMPLICIT_BINARY `[copybooks/wspl.cob:L31]` | `HV-PURCH-CREDIT` · `9(08)` · unsigned · loaded/unloaded `[common/purchMT.cbl:L295]` | `PURCH-CREDIT` · `mediumint(2) unsigned` · unsigned `[mysql/ACASDB.sql:L657]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 180 | `PULEDGER-REC.PURCH-SORTCODE` | `Purch-SortCode` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wspl.cob:L32]` | `HV-PURCH-SORTCODE` · `9(08)` · unsigned · loaded/unloaded `[common/purchMT.cbl:L296]` | `PURCH-SORTCODE` · `mediumint(6) unsigned` · unsigned `[mysql/ACASDB.sql:L658]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 181 | `PULEDGER-REC.PURCH-ACCOUNTNO` | `Purch-Accountno` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wspl.cob:L33]` | `HV-PURCH-ACCOUNTNO` · `9(10)` · unsigned · loaded/unloaded `[common/purchMT.cbl:L297]` | `PURCH-ACCOUNTNO` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L659]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 182 | `PULEDGER-REC.PURCH-LIMIT` | `Purch-Limit` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wspl.cob:L34]` | `HV-PURCH-LIMIT` · `9(10)` · unsigned · loaded/unloaded `[common/purchMT.cbl:L298]` | `PURCH-LIMIT` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L660]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 183 | `PULEDGER-REC.PURCH-ACTIVETY` | `Purch-Activety` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wspl.cob:L35]` | `HV-PURCH-ACTIVETY` · `9(10)` · unsigned · loaded/unloaded `[common/purchMT.cbl:L299]` | `PURCH-ACTIVETY` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L661]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 184 | `PULEDGER-REC.PURCH-LAST-INV` | `Purch-Last-inv` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wspl.cob:L36]` | `HV-PURCH-LAST-INV` · `9(10)` · unsigned · loaded/unloaded `[common/purchMT.cbl:L300]` | `PURCH-LAST-INV` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L662]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 185 | `PULEDGER-REC.PURCH-LAST-PAY` | `Purch-Last-pay` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wspl.cob:L37]` | `HV-PURCH-LAST-PAY` · `9(10)` · unsigned · loaded/unloaded `[common/purchMT.cbl:L301]` | `PURCH-LAST-PAY` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L663]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 186 | `PULEDGER-REC.PURCH-AVERAGE` | `Purch-Average` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wspl.cob:L38]` | `HV-PURCH-AVERAGE` · `9(10)` · unsigned · loaded/unloaded `[common/purchMT.cbl:L302]` | `PURCH-AVERAGE` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L664]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 187 | `PULEDGER-REC.PURCH-CREATE-DAT` | `Purch-Create-Date` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wspl.cob:L39]` | `HV-PURCH-CREATE-DAT` · `9(10)` · unsigned · loaded/unloaded `[common/purchMT.cbl:L303]` | `PURCH-CREATE-DAT` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L665]` | no | drift: signedness, usage, name; storage: INT | `A-11`, `Q-3` |
+| 188 | `PULEDGER-REC.PURCH-PAY-ACTIVETY` | `Purch-Pay-Activety` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wspl.cob:L40]` | `HV-PURCH-PAY-ACTIVETY` · `9(10)` · unsigned · loaded/unloaded `[common/purchMT.cbl:L304]` | `PURCH-PAY-ACTIVETY` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L666]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 189 | `PULEDGER-REC.PURCH-PAY-AVERAGE` | `Purch-Pay-Average` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wspl.cob:L41]` | `HV-PURCH-PAY-AVERAGE` · `9(10)` · unsigned · loaded/unloaded `[common/purchMT.cbl:L305]` | `PURCH-PAY-AVERAGE` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L667]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 190 | `PULEDGER-REC.PURCH-PAY-WORST` | `Purch-Pay-Worst` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wspl.cob:L42]` | `HV-PURCH-PAY-WORST` · `9(10)` · unsigned · loaded/unloaded `[common/purchMT.cbl:L306]` | `PURCH-PAY-WORST` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L668]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 191 | `PULEDGER-REC.PURCH-CURRENT` | `Purch-Current` · lvl 03 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wspl.cob:L43]` | `HV-PURCH-CURRENT` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/purchMT.cbl:L307]` | `PURCH-CURRENT` · `decimal(10,2)` `[mysql/ACASDB.sql:L669]` | no | drift: usage; storage: DECIMAL | — |
+| 192 | `PULEDGER-REC.PURCH-LAST` | `Purch-Last` · lvl 03 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wspl.cob:L44]` | `HV-PURCH-LAST` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/purchMT.cbl:L308]` | `PURCH-LAST` · `decimal(10,2)` `[mysql/ACASDB.sql:L670]` | no | drift: usage; storage: DECIMAL | — |
+| 193 | `PULEDGER-REC.TURNOVER-Q1` | `Turnover-q1` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wspl.cob:L46]` | `HV-TURNOVER-Q1` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/purchMT.cbl:L309]` | `TURNOVER-Q1` · `decimal(10,2)` `[mysql/ACASDB.sql:L671]` | no | drift: usage; storage: DECIMAL | — |
+| 194 | `PULEDGER-REC.TURNOVER-Q2` | `Turnover-q2` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wspl.cob:L47]` | `HV-TURNOVER-Q2` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/purchMT.cbl:L310]` | `TURNOVER-Q2` · `decimal(10,2)` `[mysql/ACASDB.sql:L672]` | no | drift: usage; storage: DECIMAL | — |
+| 195 | `PULEDGER-REC.TURNOVER-Q3` | `Turnover-q3` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wspl.cob:L48]` | `HV-TURNOVER-Q3` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/purchMT.cbl:L311]` | `TURNOVER-Q3` · `decimal(10,2)` `[mysql/ACASDB.sql:L673]` | no | drift: usage; storage: DECIMAL | — |
+| 196 | `PULEDGER-REC.TURNOVER-Q4` | `Turnover-q4` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wspl.cob:L49]` | `HV-TURNOVER-Q4` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/purchMT.cbl:L312]` | `TURNOVER-Q4` · `decimal(10,2)` `[mysql/ACASDB.sql:L674]` | no | drift: usage; storage: DECIMAL | — |
+| 197 | `PULEDGER-REC.PURCH-UNAPPLIED` | `Purch-Unapplied` · lvl 03 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wspl.cob:L52]` | `HV-PURCH-UNAPPLIED` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/purchMT.cbl:L313]` | `PURCH-UNAPPLIED` · `decimal(10,2)` `[mysql/ACASDB.sql:L675]` | no | drift: usage; storage: DECIMAL | — |
+
+#### `SAINV-LINES-REC` — 14 columns · bridge `slinvoiceMT` · handler `acas016` · facade `Invoice`
+
+| # | Dictionary key | Copybook / program-source field | Bridge host variable | SQL column | One-sided | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | :---: | --- | --- |
+| 198 | `SAINV-LINES-REC.IL-LINE-KEY` | `sil-Key` · lvl 05 · GROUP · group `[copybooks/slwsinv.cob:L82]` | `HV1-IL-LINE-KEY` · `X(10)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L427]` | `IL-LINE-KEY` · `char(10)` · **PK** `[mysql/ACASDB.sql:L810]` | no | drift: name; derivation: GROUP_CONCATENATION | — |
+| 199 | `SAINV-LINES-REC.IL-INVOICE` | `sil-invoice` · lvl 07 · `9(8)` · DISPLAY `[copybooks/slwsinv.cob:L83]` | `HV1-IL-INVOICE` · `9(10)` · unsigned · loaded/NOT unloaded `[common/slinvoiceMT.cbl:L428]` | `IL-INVOICE` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L811]` | no | drift: usage, digits, name; storage: INT | — |
+| 200 | `SAINV-LINES-REC.IL-LINE` | `sil-line` · lvl 07 · `99` · DISPLAY `[copybooks/slwsinv.cob:L84]` | `HV1-IL-LINE` · `9(03)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L429]` | `IL-LINE` · `tinyint(2) unsigned` · unsigned `[mysql/ACASDB.sql:L812]` | no | drift: usage, digits, name; storage: INT | — |
+| 201 | `SAINV-LINES-REC.IL-PRODUCT` | `sil-product` · lvl 05 · `x(13)` `[copybooks/slwsinv.cob:L85]` | `HV1-IL-PRODUCT` · `X(13)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L430]` | `IL-PRODUCT` · `char(13)` `[mysql/ACASDB.sql:L813]` | no | drift: name; storage: STR | — |
+| 202 | `SAINV-LINES-REC.IL-PA` | `sil-pa` · lvl 05 · `xx` `[copybooks/slwsinv.cob:L86]` | `HV1-IL-PA` · `X(2)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L431]` | `IL-PA` · `char(2)` `[mysql/ACASDB.sql:L814]` | no | drift: name; storage: STR | — |
+| 203 | `SAINV-LINES-REC.IL-QTY` | `sil-qty` · lvl 05 · BINARY-SHORT · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv.cob:L87]` | `HV1-IL-QTY` · `9(05)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L432]` | `IL-QTY` · `smallint(6) unsigned` · unsigned `[mysql/ACASDB.sql:L815]` | no | drift: signedness, usage, name; storage: INT | `A-11`, `Q-3` |
+| 204 | `SAINV-LINES-REC.IL-TYPE` | `sil-type` · lvl 05 · `x` `[copybooks/slwsinv.cob:L88]` | `HV1-IL-TYPE` · `X(1)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L433]` | `IL-TYPE` · `char(1)` `[mysql/ACASDB.sql:L816]` | no | drift: name; storage: STR | — |
+| 205 | `SAINV-LINES-REC.IL-DESCRIPTION` | `sil-description` · lvl 05 · `x(32)` `[copybooks/slwsinv.cob:L89]` | `HV1-IL-DESCRIPTION` · `X(32)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L434]` | `IL-DESCRIPTION` · `char(32)` `[mysql/ACASDB.sql:L817]` | no | drift: name; storage: STR | — |
+| 206 | `SAINV-LINES-REC.IL-NET` | `sil-net` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv.cob:L90]` | `HV1-IL-NET` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/slinvoiceMT.cbl:L435]` | `IL-NET` · `decimal(9,2)` `[mysql/ACASDB.sql:L818]` | no | drift: usage, name; storage: DECIMAL | — |
+| 207 | `SAINV-LINES-REC.IL-UNIT` | `sil-unit` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv.cob:L91]` | `HV1-IL-UNIT` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/slinvoiceMT.cbl:L436]` | `IL-UNIT` · `decimal(9,2)` `[mysql/ACASDB.sql:L819]` | no | drift: usage, name; storage: DECIMAL | — |
+| 208 | `SAINV-LINES-REC.IL-DISCOUNT` | `sil-discount` · lvl 05 · `99v99` · COMP `[copybooks/slwsinv.cob:L92]` | `HV1-IL-DISCOUNT` · `9(02)V9(02)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L437]` | `IL-DISCOUNT` · `decimal(4,2) unsigned` · unsigned `[mysql/ACASDB.sql:L820]` | no | drift: name; storage: DECIMAL | — |
+| 209 | `SAINV-LINES-REC.IL-VAT` | `sil-vat` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv.cob:L93]` | `HV1-IL-VAT` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/slinvoiceMT.cbl:L438]` | `IL-VAT` · `decimal(9,2)` `[mysql/ACASDB.sql:L821]` | no | drift: usage, name; storage: DECIMAL | — |
+| 210 | `SAINV-LINES-REC.IL-VAT-CODE` | `sil-vat-code` · lvl 05 · `9` · DISPLAY `[copybooks/slwsinv.cob:L94]` | `HV1-IL-VAT-CODE` · `9(03)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L439]` | `IL-VAT-CODE` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L822]` | no | drift: usage, digits, name; storage: INT | — |
+| 211 | `SAINV-LINES-REC.IL-UPDATE` | `sil-update` · lvl 05 · `x` `[copybooks/slwsinv.cob:L95]` | `HV1-IL-UPDATE` · `X(1)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L440]` | `IL-UPDATE` · `char(1)` `[mysql/ACASDB.sql:L823]` | no | drift: name; storage: STR | — |
+
+#### `SAINVOICE-REC` — 31 columns · bridge `slinvoiceMT` · handler `acas016` · facade `Invoice`
+
+| # | Dictionary key | Copybook / program-source field | Bridge host variable | SQL column | One-sided | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | :---: | --- | --- |
+| 212 | `SAINVOICE-REC.SINVOICE-KEY` | `WS-Invoice-Key` · lvl 03 · GROUP · group `[copybooks/slwsinv.cob:L20]` | `HV-SINVOICE-KEY` · `X(10)` · unsigned · loaded/NOT unloaded `[common/slinvoiceMT.cbl:L391]` | `SINVOICE-KEY` · `char(10)` · **PK** `[mysql/ACASDB.sql:L845]` | no | drift: name; derivation: GROUP_CONCATENATION | — |
+| 213 | `SAINVOICE-REC.IH-INVOICE` | `sih-invoice` · lvl 05 · `9(8)` · DISPLAY `[copybooks/slwsinv.cob:L21]` | `HV-IH-INVOICE` · `9(10)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L392]` | `IH-INVOICE` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L846]` | no | drift: usage, digits, name; storage: INT | — |
+| 214 | `SAINVOICE-REC.IH-TEST` | `sih-test` · lvl 05 · `99` · DISPLAY `[copybooks/slwsinv.cob:L22]` | `HV-IH-TEST` · `9(03)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L393]` | `IH-TEST` · `tinyint(2) unsigned` · unsigned `[mysql/ACASDB.sql:L847]` | no | drift: usage, digits, name; storage: INT | — |
+| 215 | `SAINVOICE-REC.IH-CUSTOMER` | `sih-customer` · lvl 03 · GROUP · group `[copybooks/slwsinv.cob:L23]` | `HV-IH-CUSTOMER` · `X(7)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L394]` | `IH-CUSTOMER` · `char(7)` `[mysql/ACASDB.sql:L848]` | no | drift: name; derivation: GROUP_CONCATENATION | — |
+| 216 | `SAINVOICE-REC.IH-DAT` | `sih-date` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv.cob:L26]` | `HV-IH-DAT` · `9(10)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L395]` | `IH-DAT` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L849]` | no | drift: signedness, usage, name; storage: INT | `A-11`, `Q-3` |
+| 217 | `SAINVOICE-REC.IH-ORDER` | `sih-order` · lvl 03 · `x(10)` `[copybooks/slwsinv.cob:L27]` | `HV-IH-ORDER` · `X(10)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L396]` | `IH-ORDER` · `char(10)` `[mysql/ACASDB.sql:L850]` | no | drift: name; storage: STR | — |
+| 218 | `SAINVOICE-REC.IH-TYPE` | `sih-type` · lvl 03 · `9` · DISPLAY `[copybooks/slwsinv.cob:L39]` | `HV-IH-TYPE` · `9(03)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L397]` | `IH-TYPE` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L851]` | no | drift: usage, digits, name; storage: INT | — |
+| 219 | `SAINVOICE-REC.IH-REF` | `sih-ref` · lvl 03 · `x(10)` `[copybooks/slwsinv.cob:L40]` | `HV-IH-REF` · `X(10)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L398]` | `IH-REF` · `char(10)` `[mysql/ACASDB.sql:L852]` | no | drift: name; storage: STR | — |
+| 220 | `SAINVOICE-REC.IH-DESCRIPTION` | `sih-description` · lvl 03 · `x(32)` `[copybooks/slwsinv.cob:L42]` | `HV-IH-DESCRIPTION` · `X(32)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L399]` | `IH-DESCRIPTION` · `char(32)` `[mysql/ACASDB.sql:L853]` | no | drift: name; storage: STR | — |
+| 221 | `SAINVOICE-REC.IH-P-C` | `sih-p-c` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv.cob:L44]` | `HV-IH-P-C` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/slinvoiceMT.cbl:L400]` | `IH-P-C` · `decimal(9,2)` `[mysql/ACASDB.sql:L854]` | no | drift: usage, name; storage: DECIMAL | — |
+| 222 | `SAINVOICE-REC.IH-NET` | `sih-net` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv.cob:L45]` | `HV-IH-NET` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/slinvoiceMT.cbl:L401]` | `IH-NET` · `decimal(9,2)` `[mysql/ACASDB.sql:L855]` | no | drift: usage, name; storage: DECIMAL | — |
+| 223 | `SAINVOICE-REC.IH-EXTRA` | `sih-extra` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv.cob:L46]` | `HV-IH-EXTRA` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/slinvoiceMT.cbl:L402]` | `IH-EXTRA` · `decimal(9,2)` `[mysql/ACASDB.sql:L856]` | no | drift: usage, name; storage: DECIMAL | — |
+| 224 | `SAINVOICE-REC.IH-CARRIAGE` | `sih-carriage` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv.cob:L47]` | `HV-IH-CARRIAGE` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/slinvoiceMT.cbl:L403]` | `IH-CARRIAGE` · `decimal(9,2)` `[mysql/ACASDB.sql:L857]` | no | drift: usage, name; storage: DECIMAL | — |
+| 225 | `SAINVOICE-REC.IH-VAT` | `sih-vat` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv.cob:L48]` | `HV-IH-VAT` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/slinvoiceMT.cbl:L404]` | `IH-VAT` · `decimal(9,2)` `[mysql/ACASDB.sql:L858]` | no | drift: usage, name; storage: DECIMAL | — |
+| 226 | `SAINVOICE-REC.IH-DISCOUNT` | `sih-discount` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv.cob:L49]` | `HV-IH-DISCOUNT` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/slinvoiceMT.cbl:L405]` | `IH-DISCOUNT` · `decimal(9,2)` `[mysql/ACASDB.sql:L859]` | no | drift: usage, name; storage: DECIMAL | — |
+| 227 | `SAINVOICE-REC.IH-E-VAT` | `sih-e-vat` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv.cob:L50]` | `HV-IH-E-VAT` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/slinvoiceMT.cbl:L406]` | `IH-E-VAT` · `decimal(9,2)` `[mysql/ACASDB.sql:L860]` | no | drift: usage, name; storage: DECIMAL | — |
+| 228 | `SAINVOICE-REC.IH-C-VAT` | `sih-c-vat` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv.cob:L51]` | `HV-IH-C-VAT` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/slinvoiceMT.cbl:L407]` | `IH-C-VAT` · `decimal(9,2)` `[mysql/ACASDB.sql:L861]` | no | drift: usage, name; storage: DECIMAL | — |
+| 229 | `SAINVOICE-REC.IH-STATUS` | `sih-status` · lvl 03 · `x` `[copybooks/slwsinv.cob:L52]` | `HV-IH-STATUS` · `X(1)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L408]` | `IH-STATUS` · `char(1)` `[mysql/ACASDB.sql:L862]` | no | drift: name; storage: STR | — |
+| 230 | `SAINVOICE-REC.IH-STATUS-P` | `sih-status-P` · lvl 03 · `x` `[copybooks/slwsinv.cob:L56]` | `HV-IH-STATUS-P` · `X(1)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L409]` | `IH-STATUS-P` · `char(1)` `[mysql/ACASDB.sql:L863]` | no | drift: name; storage: STR | — |
+| 231 | `SAINVOICE-REC.IH-STATUS-L` | `sih-status-L` · lvl 03 · `x` `[copybooks/slwsinv.cob:L57]` | `HV-IH-STATUS-L` · `X(1)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L410]` | `IH-STATUS-L` · `char(1)` `[mysql/ACASDB.sql:L864]` | no | drift: name; storage: STR | — |
+| 232 | `SAINVOICE-REC.IH-STATUS-C` | `sih-status-C` · lvl 03 · `x` `[copybooks/slwsinv.cob:L58]` | `HV-IH-STATUS-C` · `X(1)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L411]` | `IH-STATUS-C` · `char(1)` `[mysql/ACASDB.sql:L865]` | no | drift: name; storage: STR | — |
+| 233 | `SAINVOICE-REC.IH-STATUS-A` | `sih-status-A` · lvl 03 · `x` `[copybooks/slwsinv.cob:L59]` | `HV-IH-STATUS-A` · `X(1)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L412]` | `IH-STATUS-A` · `char(1)` `[mysql/ACASDB.sql:L866]` | no | drift: name; storage: STR | — |
+| 234 | `SAINVOICE-REC.IH-STATUS-I` | `sih-status-I` · lvl 03 · `x` `[copybooks/slwsinv.cob:L60]` | `HV-IH-STATUS-I` · `X(1)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L413]` | `IH-STATUS-I` · `char(1)` `[mysql/ACASDB.sql:L867]` | no | drift: name; storage: STR | — |
+| 235 | `SAINVOICE-REC.IH-DEDUCT-DAYS` | `sih-deduct-days` · lvl 03 · BINARY-CHAR · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv.cob:L62]` | `HV-IH-DEDUCT-DAYS` · `9(03)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L414]` | `IH-DEDUCT-DAYS` · `tinyint(3) unsigned` · unsigned `[mysql/ACASDB.sql:L868]` | no | drift: signedness, usage, name; storage: INT | `A-11`, `Q-3` |
+| 236 | `SAINVOICE-REC.IH-DEDUCT-AMT` | `sih-deduct-amt` · lvl 03 · `999v99` · COMP `[copybooks/slwsinv.cob:L63]` | `HV-IH-DEDUCT-AMT` · `9(03)V9(02)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L415]` | `IH-DEDUCT-AMT` · `decimal(5,2) unsigned` · unsigned `[mysql/ACASDB.sql:L869]` | no | drift: name; storage: DECIMAL | — |
+| 237 | `SAINVOICE-REC.IH-DEDUCT-VAT` | `sih-deduct-vat` · lvl 03 · `999v99` · COMP `[copybooks/slwsinv.cob:L64]` | `HV-IH-DEDUCT-VAT` · `9(03)V9(02)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L416]` | `IH-DEDUCT-VAT` · `decimal(5,2) unsigned` · unsigned `[mysql/ACASDB.sql:L870]` | no | drift: name; storage: DECIMAL | — |
+| 238 | `SAINVOICE-REC.IH-DAYS` | `sih-days` · lvl 03 · BINARY-CHAR · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv.cob:L65]` | `HV-IH-DAYS` · `9(03)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L417]` | `IH-DAYS` · `tinyint(3) unsigned` · unsigned `[mysql/ACASDB.sql:L871]` | no | drift: signedness, usage, name; storage: INT | `A-11`, `Q-3` |
+| 239 | `SAINVOICE-REC.IH-CR` | `sih-cr` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv.cob:L66]` | `HV-IH-CR` · `9(10)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L418]` | `IH-CR` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L872]` | no | drift: signedness, usage, name; storage: INT | `A-11`, `Q-3` |
+| 240 | `SAINVOICE-REC.IH-LINES` | `sih-lines` · lvl 03 · BINARY-CHAR · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv.cob:L61]` | `HV-IH-LINES` · `9(03)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L419]` | `IH-LINES` · `tinyint(2) unsigned` · unsigned `[mysql/ACASDB.sql:L873]` | no | drift: signedness, usage, name; storage: INT | `A-11`, `Q-3` |
+| 241 | `SAINVOICE-REC.IH-DAY-BOOK-FLAG` | `sih-day-book-flag` · lvl 03 · `x` `[copybooks/slwsinv.cob:L67]` | `HV-IH-DAY-BOOK-FLAG` · `X(1)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L420]` | `IH-DAY-BOOK-FLAG` · `char(1)` `[mysql/ACASDB.sql:L874]` | no | drift: name; storage: STR | — |
+| 242 | `SAINVOICE-REC.IH-UPDATE` | `sih-update` · lvl 03 · `x` `[copybooks/slwsinv.cob:L69]` | `HV-IH-UPDATE` · `X(1)` · unsigned · loaded/unloaded `[common/slinvoiceMT.cbl:L421]` | `IH-UPDATE` · `char(1)` `[mysql/ACASDB.sql:L875]` | no | drift: name; storage: STR | — |
+
+#### `SAITM3-REC` — 28 columns · bridge `otm3MT` · handler `acas019` · facade `OTM3`
+
+| # | Dictionary key | Copybook / program-source field | Bridge host variable | SQL column | One-sided | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | :---: | --- | --- |
+| 243 | `SAITM3-REC.OI3-KEY` | `OI3-Key` · lvl 03 · GROUP · group `[copybooks/slwsoi3.cob:L12]` | `HV-OI3-KEY` · `X(15)` · unsigned · loaded/NOT unloaded `[common/otm3MT.cbl:L302]` | `OI3-KEY` · `char(15)` · **PK** `[mysql/ACASDB.sql:L897]` | no | derivation: GROUP_CONCATENATION | — |
+| 244 | `SAITM3-REC.OI3-CUSTOMER` | `OI-Customer` · lvl 03 · GROUP · group `[copybooks/slwsoi.cob:L10]` | `HV-OI3-CUSTOMER` · `X(7)` · unsigned · loaded/unloaded `[common/otm3MT.cbl:L303]` | `OI3-CUSTOMER` · `char(7)` `[mysql/ACASDB.sql:L898]` | no | drift: name; derivation: GROUP_CONCATENATION | — |
+| 245 | `SAITM3-REC.OI3-INVOICE` | `OI-Invoice` · lvl 03 · `9(8)` · DISPLAY `[copybooks/slwsoi.cob:L13]` | `HV-OI3-INVOICE` · `9(10)` · unsigned · loaded/unloaded `[common/otm3MT.cbl:L304]` | `OI3-INVOICE` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L899]` | no | drift: usage, digits, name; storage: INT | — |
+| 246 | `SAITM3-REC.OI3-DAT` | `OI-Date` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/slwsoi.cob:L15]` | `HV-OI3-DAT` · `9(10)` · unsigned · loaded/unloaded `[common/otm3MT.cbl:L305]` | `OI3-DAT` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L900]` | no | drift: signedness, usage, name; storage: INT | `A-11`, `Q-3` |
+| 247 | `SAITM3-REC.OI3-BATCH` | `OI-Batch` · lvl 03 · GROUP · group `[copybooks/slwsoi.cob:L16]` | `HV-OI3-BATCH` · `X(8)` · unsigned · loaded/NOT unloaded `[common/otm3MT.cbl:L306]` | `OI3-BATCH` · `char(8)` `[mysql/ACASDB.sql:L901]` | no | drift: name; derivation: GROUP_CONCATENATION | — |
+| 248 | `SAITM3-REC.OI3-BATCH-NOS` | `OI-B-Nos` · lvl 05 · `9(5)` · COMP `[copybooks/slwsoi.cob:L17]` | `HV-OI3-BATCH-NOS` · `X(5)` · unsigned · loaded/unloaded `[common/otm3MT.cbl:L307]` | `OI3-BATCH-NOS` · `char(5)` `[mysql/ACASDB.sql:L902]` | no | drift: usage, name; storage: INT | — |
+| 249 | `SAITM3-REC.OI3-BATCH-ITEM` | `OI-B-Item` · lvl 05 · `999` · COMP `[copybooks/slwsoi.cob:L18]` | `HV-OI3-BATCH-ITEM` · `X(3)` · unsigned · loaded/unloaded `[common/otm3MT.cbl:L308]` | `OI3-BATCH-ITEM` · `char(3)` `[mysql/ACASDB.sql:L903]` | no | drift: usage, name; storage: INT | — |
+| 250 | `SAITM3-REC.OI3-TYPE` | `OI-Type` · lvl 03 · `9` · DISPLAY `[copybooks/slwsoi.cob:L19]` | `HV-OI3-TYPE` · `X(1)` · unsigned · loaded/unloaded `[common/otm3MT.cbl:L309]` | `OI3-TYPE` · `char(1)` `[mysql/ACASDB.sql:L904]` | no | drift: usage, name; storage: INT | — |
+| 251 | `SAITM3-REC.OI3-DESCRIPTION` | `OI-Description` · lvl 03 · `x(25)` `[copybooks/slwsoi.cob:L32]` | `HV-OI3-DESCRIPTION` · `X(32)` · unsigned · loaded/unloaded `[common/otm3MT.cbl:L310]` | `OI3-DESCRIPTION` · `char(32)` `[mysql/ACASDB.sql:L905]` | no | drift: character_length, name; storage: STR | `A-12` |
+| 252 | `SAITM3-REC.OI3-HOLD-FLAG` | `OI-Hold-flag` · lvl 03 · `x` `[copybooks/slwsoi.cob:L33]` | `HV-OI3-HOLD-FLAG` · `X(1)` · unsigned · loaded/unloaded `[common/otm3MT.cbl:L311]` | `OI3-HOLD-FLAG` · `char(1)` `[mysql/ACASDB.sql:L906]` | no | drift: name; storage: STR | — |
+| 253 | `SAITM3-REC.OI3-UNAPL` | `OI-Unapl` · lvl 03 · `x` `[copybooks/slwsoi.cob:L34]` | `HV-OI3-UNAPL` · `X(1)` · unsigned · loaded/unloaded `[common/otm3MT.cbl:L312]` | `OI3-UNAPL` · `char(1)` `[mysql/ACASDB.sql:L907]` | no | drift: name; storage: STR | — |
+| 254 | `SAITM3-REC.OI3-P-C` | `OI-P-C` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsoi.cob:L36]` | `HV-OI3-P-C` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/otm3MT.cbl:L313]` | `OI3-P-C` · `decimal(9,2)` `[mysql/ACASDB.sql:L908]` | no | drift: usage, name; storage: DECIMAL | — |
+| 255 | `SAITM3-REC.OI3-NET` | `OI-Net` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsoi.cob:L37]` | `HV-OI3-NET` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/otm3MT.cbl:L314]` | `OI3-NET` · `decimal(9,2)` `[mysql/ACASDB.sql:L909]` | no | drift: usage, name; storage: DECIMAL | — |
+| 256 | `SAITM3-REC.OI3-EXTRA` | `OI-Extra` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsoi.cob:L40]` | `HV-OI3-EXTRA` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/otm3MT.cbl:L315]` | `OI3-EXTRA` · `decimal(9,2)` `[mysql/ACASDB.sql:L910]` | no | drift: usage, name; storage: DECIMAL | — |
+| 257 | `SAITM3-REC.OI3-CARRIAGE` | `OI-Carriage` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsoi.cob:L41]` | `HV-OI3-CARRIAGE` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/otm3MT.cbl:L316]` | `OI3-CARRIAGE` · `decimal(9,2)` `[mysql/ACASDB.sql:L911]` | no | drift: usage, name; storage: DECIMAL | — |
+| 258 | `SAITM3-REC.OI3-VAT` | `OI-Vat` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsoi.cob:L42]` | `HV-OI3-VAT` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/otm3MT.cbl:L317]` | `OI3-VAT` · `decimal(9,2)` `[mysql/ACASDB.sql:L912]` | no | drift: usage, name; storage: DECIMAL | — |
+| 259 | `SAITM3-REC.OI3-DISCOUNT` | `OI-Discount` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsoi.cob:L43]` | `HV-OI3-DISCOUNT` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/otm3MT.cbl:L318]` | `OI3-DISCOUNT` · `decimal(9,2)` `[mysql/ACASDB.sql:L913]` | no | drift: usage, name; storage: DECIMAL | — |
+| 260 | `SAITM3-REC.OI3-E-VAT` | `OI-E-Vat` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsoi.cob:L44]` | `HV-OI3-E-VAT` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/otm3MT.cbl:L319]` | `OI3-E-VAT` · `decimal(9,2)` `[mysql/ACASDB.sql:L914]` | no | drift: usage, name; storage: DECIMAL | — |
+| 261 | `SAITM3-REC.OI3-C-VAT` | `OI-C-Vat` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsoi.cob:L45]` | `HV-OI3-C-VAT` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/otm3MT.cbl:L320]` | `OI3-C-VAT` · `decimal(9,2)` `[mysql/ACASDB.sql:L915]` | no | drift: usage, name; storage: DECIMAL | — |
+| 262 | `SAITM3-REC.OI3-PAID` | `OI-Paid` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsoi.cob:L46]` | `HV-OI3-PAID` · `S9(07)V9(02)` · signed · loaded/unloaded `[common/otm3MT.cbl:L321]` | `OI3-PAID` · `decimal(9,2)` `[mysql/ACASDB.sql:L916]` | no | drift: usage, name; storage: DECIMAL | — |
+| 263 | `SAITM3-REC.OI3-STATUS` | `OI-Status` · lvl 03 · `9` · DISPLAY `[copybooks/slwsoi.cob:L47]` | `HV-OI3-STATUS` · `X(1)` · unsigned · loaded/unloaded `[common/otm3MT.cbl:L322]` | `OI3-STATUS` · `char(1)` `[mysql/ACASDB.sql:L917]` | no | drift: usage, name; storage: INT | — |
+| 264 | `SAITM3-REC.OI3-DEDUCT-DAYS` | `OI-Deduct-Days` · lvl 03 · BINARY-CHAR · signed · sign IMPLICIT_BINARY `[copybooks/slwsoi.cob:L50]` | `HV-OI3-DEDUCT-DAYS` · `9(03)` · unsigned · loaded/unloaded `[common/otm3MT.cbl:L323]` | `OI3-DEDUCT-DAYS` · `tinyint(3) unsigned` · unsigned `[mysql/ACASDB.sql:L918]` | no | drift: signedness, usage, name; storage: INT | `A-11`, `Q-3` |
+| 265 | `SAITM3-REC.OI3-DEDUCT-AMT` | `OI-Deduct-Amt` · lvl 03 · `s999v99` · COMP · signed · sign IMPLICIT_BINARY `[copybooks/slwsoi.cob:L51]` | `HV-OI3-DEDUCT-AMT` · `S9(03)V9(02)` · signed · loaded/unloaded `[common/otm3MT.cbl:L324]` | `OI3-DEDUCT-AMT` · `decimal(5,2)` `[mysql/ACASDB.sql:L919]` | no | drift: name; storage: DECIMAL | — |
+| 266 | `SAITM3-REC.OI3-DEDUCT-VAT` | `OI-Deduct-Vat` · lvl 03 · `s999v99` · COMP · signed · sign IMPLICIT_BINARY `[copybooks/slwsoi.cob:L52]` | `HV-OI3-DEDUCT-VAT` · `S9(03)V9(02)` · signed · loaded/unloaded `[common/otm3MT.cbl:L325]` | `OI3-DEDUCT-VAT` · `decimal(5,2)` `[mysql/ACASDB.sql:L920]` | no | drift: name; storage: DECIMAL | — |
+| 267 | `SAITM3-REC.OI3-DAYS` | `OI-Days` · lvl 03 · BINARY-CHAR · signed · sign IMPLICIT_BINARY `[copybooks/slwsoi.cob:L53]` | `HV-OI3-DAYS` · `9(03)` · unsigned · loaded/unloaded `[common/otm3MT.cbl:L326]` | `OI3-DAYS` · `tinyint(3) unsigned` · unsigned `[mysql/ACASDB.sql:L921]` | no | drift: signedness, usage, name; storage: INT | `A-11`, `Q-3` |
+| 268 | `SAITM3-REC.OI3-CR` | `OI-Cr` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/slwsoi.cob:L54]` | `HV-OI3-CR` · `S9(10)` · signed · loaded/unloaded `[common/otm3MT.cbl:L327]` | `OI3-CR` · `int(8)` `[mysql/ACASDB.sql:L922]` | no | drift: usage, name; storage: INT | — |
+| 269 | `SAITM3-REC.OI3-APPLIED` | `OI-Applied` · lvl 03 · `x` `[copybooks/slwsoi.cob:L55]` | `HV-OI3-APPLIED` · `X(1)` · unsigned · loaded/unloaded `[common/otm3MT.cbl:L328]` | `OI3-APPLIED` · `char(1)` `[mysql/ACASDB.sql:L923]` | no | drift: name; storage: STR | — |
+| 270 | `SAITM3-REC.OI3-DATE-CLEARED` | `OI-Date-Cleared` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/slwsoi.cob:L56]` | `HV-OI3-DATE-CLEARED` · `9(10)` · unsigned · loaded/unloaded `[common/otm3MT.cbl:L329]` | `OI3-DATE-CLEARED` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L924]` | no | drift: signedness, usage, name; storage: INT | `A-11`, `Q-3` |
+
+#### `SALEDGER-REC` — 37 columns · bridge `salesMT` · handler `acas012` · facade `Sales`
+
+| # | Dictionary key | Copybook / program-source field | Bridge host variable | SQL column | One-sided | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | :---: | --- | --- |
+| 271 | `SALEDGER-REC.SALES-KEY` | `WS-Sales-Key` · lvl 03 · `x(7)` `[copybooks/wssl.cob:L13]` | `HV-SALES-KEY` · `X(7)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L285]` | `SALES-KEY` · `char(7)` · **PK** `[mysql/ACASDB.sql:L946]` | no | drift: name; storage: STR | — |
+| 272 | `SALEDGER-REC.SALES-NAME` | `Sales-Name` · lvl 03 · `x(30)` `[copybooks/wssl.cob:L17]` | `HV-SALES-NAME` · `X(30)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L286]` | `SALES-NAME` · `char(30)` `[mysql/ACASDB.sql:L947]` | no | storage: STR | — |
+| 273 | `SALEDGER-REC.SALES-ADDRESS` | `Sales-Address` · lvl 03 · GROUP · group `[copybooks/wssl.cob:L18]` | `HV-SALES-ADDRESS` · `X(96)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L287]` | `SALES-ADDRESS` · `char(96)` `[mysql/ACASDB.sql:L948]` | no | derivation: GROUP_CONCATENATION | — |
+| 274 | `SALEDGER-REC.SALES-PHONE` | `Sales-Phone` · lvl 03 · `x(13)` `[copybooks/wssl.cob:L21]` | `HV-SALES-PHONE` · `X(13)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L288]` | `SALES-PHONE` · `char(13)` `[mysql/ACASDB.sql:L949]` | no | storage: STR | — |
+| 275 | `SALEDGER-REC.SALES-EXT` | `Sales-Ext` · lvl 03 · `x(4)` `[copybooks/wssl.cob:L22]` | `HV-SALES-EXT` · `X(4)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L289]` | `SALES-EXT` · `char(4)` `[mysql/ACASDB.sql:L950]` | no | storage: STR | — |
+| 276 | `SALEDGER-REC.SALES-EMAIL` | `Sales-Email` · lvl 03 · `x(30)` `[copybooks/wssl.cob:L23]` | `HV-SALES-EMAIL` · `X(30)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L290]` | `SALES-EMAIL` · `char(30)` `[mysql/ACASDB.sql:L951]` | no | storage: STR | — |
+| 277 | `SALEDGER-REC.SALES-FAX` | `Sales-Fax` · lvl 03 · `x(13)` `[copybooks/wssl.cob:L24]` | `HV-SALES-FAX` · `X(13)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L291]` | `SALES-FAX` · `char(13)` `[mysql/ACASDB.sql:L952]` | no | storage: STR | — |
+| 278 | `SALEDGER-REC.SALES-STATUS` | `Sales-Status` · lvl 03 · `9` · DISPLAY `[copybooks/wssl.cob:L25]` | `HV-SALES-STATUS` · `9(03)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L292]` | `SALES-STATUS` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L953]` | no | drift: usage, digits; storage: INT | — |
+| 279 | `SALEDGER-REC.SALES-LATE` | `Sales-Late` · lvl 03 · `9` · DISPLAY `[copybooks/wssl.cob:L28]` | `HV-SALES-LATE` · `9(03)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L293]` | `SALES-LATE` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L954]` | no | drift: usage, digits; storage: INT | — |
+| 280 | `SALEDGER-REC.SALES-DUNNING` | `Sales-Dunning` · lvl 03 · `9` · DISPLAY `[copybooks/wssl.cob:L30]` | `HV-SALES-DUNNING` · `9(03)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L294]` | `SALES-DUNNING` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L955]` | no | drift: usage, digits; storage: INT | — |
+| 281 | `SALEDGER-REC.EMAIL-INVOICE` | `Email-Invoice` · lvl 03 · `9` · DISPLAY `[copybooks/wssl.cob:L32]` | `HV-EMAIL-INVOICE` · `9(03)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L295]` | `EMAIL-INVOICE` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L956]` | no | drift: usage, digits; storage: INT | — |
+| 282 | `SALEDGER-REC.EMAIL-STATEMENT` | `Email-Statement` · lvl 03 · `9` · DISPLAY `[copybooks/wssl.cob:L34]` | `HV-EMAIL-STATEMENT` · `9(03)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L296]` | `EMAIL-STATEMENT` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L957]` | no | drift: usage, digits; storage: INT | — |
+| 283 | `SALEDGER-REC.EMAIL-LETTERS` | `Email-Letters` · lvl 03 · `9` · DISPLAY `[copybooks/wssl.cob:L36]` | `HV-EMAIL-LETTERS` · `9(03)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L297]` | `EMAIL-LETTERS` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L958]` | no | drift: usage, digits; storage: INT | — |
+| 284 | `SALEDGER-REC.DELIVERY-TAG` | `Delivery-Tag` · lvl 03 · `9` · DISPLAY `[copybooks/wssl.cob:L38]` | `HV-DELIVERY-TAG` · `9(03)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L298]` | `DELIVERY-TAG` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L959]` | no | drift: usage, digits; storage: INT | — |
+| 285 | `SALEDGER-REC.NOTES-TAG` | `Notes-Tag` · lvl 03 · `9` · DISPLAY `[copybooks/wssl.cob:L39]` | `HV-NOTES-TAG` · `9(03)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L299]` | `NOTES-TAG` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L960]` | no | drift: usage, digits; storage: INT | — |
+| 286 | `SALEDGER-REC.SALES-CREDIT` | `Sales-Credit` · lvl 03 · `99` · DISPLAY `[copybooks/wssl.cob:L41]` | `HV-SALES-CREDIT` · `9(03)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L300]` | `SALES-CREDIT` · `tinyint(2) unsigned` · unsigned `[mysql/ACASDB.sql:L961]` | no | drift: usage, digits; storage: INT | — |
+| 287 | `SALEDGER-REC.SALES-DISCOUNT` | `Sales-Discount` · lvl 03 · `99v99` · COMP `[copybooks/wssl.cob:L42]` | `HV-SALES-DISCOUNT` · `9(02)V9(02)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L301]` | `SALES-DISCOUNT` · `decimal(4,2) unsigned` · unsigned `[mysql/ACASDB.sql:L962]` | no | storage: DECIMAL | — |
+| 288 | `SALEDGER-REC.SALES-LATE-MIN` | `Sales-Late-Min` · lvl 03 · BINARY-SHORT · signed · sign IMPLICIT_BINARY `[copybooks/wssl.cob:L43]` | `HV-SALES-LATE-MIN` · `9(05)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L302]` | `SALES-LATE-MIN` · `smallint(4) unsigned` · unsigned `[mysql/ACASDB.sql:L963]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 289 | `SALEDGER-REC.SALES-LATE-MAX` | `Sales-Late-Max` · lvl 03 · BINARY-SHORT · signed · sign IMPLICIT_BINARY `[copybooks/wssl.cob:L44]` | `HV-SALES-LATE-MAX` · `9(05)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L303]` | `SALES-LATE-MAX` · `smallint(4) unsigned` · unsigned `[mysql/ACASDB.sql:L964]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 290 | `SALEDGER-REC.SALES-LIMIT` | `Sales-Limit` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssl.cob:L45]` | `HV-SALES-LIMIT` · `9(10)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L304]` | `SALES-LIMIT` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L965]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 291 | `SALEDGER-REC.SALES-ACTIVETY` | `Sales-Activety` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssl.cob:L46]` | `HV-SALES-ACTIVETY` · `9(10)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L305]` | `SALES-ACTIVETY` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L966]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 292 | `SALEDGER-REC.SALES-LAST-INV` | `Sales-Last-Inv` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssl.cob:L47]` | `HV-SALES-LAST-INV` · `9(10)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L306]` | `SALES-LAST-INV` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L967]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 293 | `SALEDGER-REC.SALES-LAST-PAY` | `Sales-Last-Pay` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssl.cob:L48]` | `HV-SALES-LAST-PAY` · `9(10)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L307]` | `SALES-LAST-PAY` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L968]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 294 | `SALEDGER-REC.SALES-AVERAGE` | `Sales-Average` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssl.cob:L49]` | `HV-SALES-AVERAGE` · `9(10)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L308]` | `SALES-AVERAGE` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L969]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 295 | `SALEDGER-REC.SALES-PAY-ACTIVETY` | `Sales-Pay-Activety` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssl.cob:L50]` | `HV-SALES-PAY-ACTIVETY` · `9(10)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L309]` | `SALES-PAY-ACTIVETY` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L970]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 296 | `SALEDGER-REC.SALES-PAY-AVERAGE` | `Sales-Pay-Average` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssl.cob:L51]` | `HV-SALES-PAY-AVERAGE` · `9(10)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L310]` | `SALES-PAY-AVERAGE` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L971]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 297 | `SALEDGER-REC.SALES-PAY-WORST` | `Sales-Pay-Worst` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssl.cob:L52]` | `HV-SALES-PAY-WORST` · `9(10)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L311]` | `SALES-PAY-WORST` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L972]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 298 | `SALEDGER-REC.SALES-CREATE-DAT` | `Sales-Create-Date` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssl.cob:L53]` | `HV-SALES-CREATE-DAT` · `9(10)` · unsigned · loaded/unloaded `[common/salesMT.cbl:L312]` | `SALES-CREATE-DAT` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L973]` | no | drift: signedness, usage, name; storage: INT | `A-11`, `Q-3` |
+| 299 | `SALEDGER-REC.SALES-CURRENT` | `Sales-Current` · lvl 03 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssl.cob:L54]` | `HV-SALES-CURRENT` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/salesMT.cbl:L313]` | `SALES-CURRENT` · `decimal(10,2)` `[mysql/ACASDB.sql:L974]` | no | drift: usage; storage: DECIMAL | — |
+| 300 | `SALEDGER-REC.SALES-LAST` | `Sales-Last` · lvl 03 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssl.cob:L55]` | `HV-SALES-LAST` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/salesMT.cbl:L314]` | `SALES-LAST` · `decimal(10,2)` `[mysql/ACASDB.sql:L975]` | no | drift: usage; storage: DECIMAL | — |
+| 301 | `SALEDGER-REC.TURNOVER-Q1` | `Turnover-Q1` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssl.cob:L57]` | `HV-TURNOVER-Q1` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/salesMT.cbl:L315]` | `TURNOVER-Q1` · `decimal(10,2)` `[mysql/ACASDB.sql:L976]` | no | drift: usage; storage: DECIMAL | — |
+| 302 | `SALEDGER-REC.TURNOVER-Q2` | `Turnover-Q2` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssl.cob:L58]` | `HV-TURNOVER-Q2` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/salesMT.cbl:L316]` | `TURNOVER-Q2` · `decimal(10,2)` `[mysql/ACASDB.sql:L977]` | no | drift: usage; storage: DECIMAL | — |
+| 303 | `SALEDGER-REC.TURNOVER-Q3` | `Turnover-Q3` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssl.cob:L59]` | `HV-TURNOVER-Q3` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/salesMT.cbl:L317]` | `TURNOVER-Q3` · `decimal(10,2)` `[mysql/ACASDB.sql:L978]` | no | drift: usage; storage: DECIMAL | — |
+| 304 | `SALEDGER-REC.TURNOVER-Q4` | `Turnover-Q4` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssl.cob:L60]` | `HV-TURNOVER-Q4` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/salesMT.cbl:L318]` | `TURNOVER-Q4` · `decimal(10,2)` `[mysql/ACASDB.sql:L979]` | no | drift: usage; storage: DECIMAL | — |
+| 305 | `SALEDGER-REC.SALES-UNAPPLIED` | `Sales-Unapplied` · lvl 03 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssl.cob:L63]` | `HV-SALES-UNAPPLIED` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/salesMT.cbl:L319]` | `SALES-UNAPPLIED` · `decimal(10,2)` `[mysql/ACASDB.sql:L980]` | no | drift: usage; storage: DECIMAL | — |
+| 306 | `SALEDGER-REC.SALES-STATS-DATE` | `Sales-Stats-Date` · lvl 03 · `9(4)` · DISPLAY `[copybooks/wssl.cob:L64]` | `HV-SALES-STATS-DATE` · `X(4)` · unsigned · NOT loaded/NOT unloaded `[common/salesMT.cbl:L320]` | `SALES-STATS-DATE` · `char(4)` `[mysql/ACASDB.sql:L981]` | no | drift: usage; storage: INT | — |
+| 307 | `SALEDGER-REC.SALES-PARTIAL-SHIP-FLAG` | `Sales-Partial-Ship-Flag` · lvl 03 · `x` `[copybooks/wssl.cob:L65]` | `HV-SALES-PARTIAL-SHIP-FLAG` · `X(1)` · unsigned · NOT loaded/NOT unloaded `[common/salesMT.cbl:L321]` | `SALES-PARTIAL-SHIP-FLAG` · `char(1)` `[mysql/ACASDB.sql:L982]` | no | storage: STR | — |
+
+#### `SYSDEFLT-REC` — 4 columns · bridge `dfltMT` · handler `acas000` · facade `System defaults`
+
+| # | Dictionary key | Copybook / program-source field | Bridge host variable | SQL column | One-sided | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | :---: | --- | --- |
+| 308 | `SYSDEFLT-REC.DEF-REC-KEY` | **absent** | `HV-DEF-REC-KEY` · `9(03)` · unsigned · loaded/unloaded `[common/dfltMT.cbl:L316]` | `DEF-REC-KEY` · `tinyint(2) unsigned` · unsigned · **PK** `[mysql/ACASDB.sql:L1139]` | **yes** | derivation: BRIDGE_DERIVED | — |
+| 309 | `SYSDEFLT-REC.DEF-ACS` | `Def-Acs` · lvl 05 · `9(4)v99` · COMP `[copybooks/wsdflt.cob:L16]` | `HV-DEF-ACS` · `9(04)V9(02)` · unsigned · loaded/unloaded `[common/dfltMT.cbl:L317]` | `DEF-ACS` · `decimal(6,2) unsigned` · unsigned `[mysql/ACASDB.sql:L1140]` | no | derivation: BRIDGE_DERIVED guarded on `if Def-Acs (A) numeric`; storage: DECIMAL | — |
+| 310 | `SYSDEFLT-REC.DEF-CODES` | `Def-Codes` · lvl 05 · `xx` `[copybooks/wsdflt.cob:L17]` | `HV-DEF-CODES` · `X(2)` · unsigned · loaded/unloaded `[common/dfltMT.cbl:L318]` | `DEF-CODES` · `char(2)` `[mysql/ACASDB.sql:L1141]` | no | storage: STR | — |
+| 311 | `SYSDEFLT-REC.DEF-VAT` | `Def-Vat` · lvl 05 · `x` `[copybooks/wsdflt.cob:L18]` | `HV-DEF-VAT` · `X(1)` · unsigned · loaded/unloaded `[common/dfltMT.cbl:L319]` | `DEF-VAT` · `char(1)` `[mysql/ACASDB.sql:L1142]` | no | storage: STR | — |
+
+#### `SYSFINAL-REC` — 2 columns · bridge `finalMT` · handler `acas000` · facade `System final`
+
+| # | Dictionary key | Copybook / program-source field | Bridge host variable | SQL column | One-sided | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | :---: | --- | --- |
+| 312 | `SYSFINAL-REC.FINAL-ACC-REC-KEY` | **absent** | `HV-FINAL-ACC-REC-KEY` · `9(03)` · unsigned · loaded/unloaded `[common/finalMT.cbl:L314]` | `FINAL-ACC-REC-KEY` · `tinyint(2) unsigned` · unsigned · **PK** `[mysql/ACASDB.sql:L1164]` | **yes** | derivation: BRIDGE_DERIVED | — |
+| 313 | `SYSFINAL-REC.AR1` | `ar1` · lvl 03 · `x(16)` · occurs 26 `[copybooks/wsfinal.cob:L11]` | `HV-AR1` · `X(16)` · unsigned · loaded/unloaded `[common/finalMT.cbl:L315]` | `AR1` · `char(16)` `[mysql/ACASDB.sql:L1165]` | no | storage: STR | — |
+
+#### `SYSTEM-REC` — 169 columns · bridge `systemMT` · handler `acas000` · facade `System`
+
+| # | Dictionary key | Copybook / program-source field | Bridge host variable | SQL column | One-sided | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | :---: | --- | --- |
+| 314 | `SYSTEM-REC.SYSTEM-REC-KEY` | **absent** | `HV-SYSTEM-REC-KEY` · `9(03)` · unsigned · loaded/NOT unloaded `[common/systemMT.cbl:L324]` | `SYSTEM-REC-KEY` · `tinyint(1) unsigned` · unsigned · **PK** `[mysql/ACASDB.sql:L1187]` | **yes** | derivation: BRIDGE_DERIVED | — |
+| 315 | `SYSTEM-REC.SYSTEM-RECORD-VERSION-PRIME` | `System-Record-Version-Prime` · lvl 05 · BINARY-CHAR · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L53]` | `HV-SYSTEM-RECORD-VERSION-PRIME` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L325]` | `SYSTEM-RECORD-VERSION-PRIME` · `tinyint(2) unsigned` · unsigned `[mysql/ACASDB.sql:L1188]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 316 | `SYSTEM-REC.SYSTEM-RECORD-VERSION-SECONDAR` | `System-Record-Version-Secondary` · lvl 05 · BINARY-CHAR · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L54]` | `HV-SYSTEM-RECORD-VERSION-SECON` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L326]` | `SYSTEM-RECORD-VERSION-SECONDAR` · `tinyint(2) unsigned` · unsigned `[mysql/ACASDB.sql:L1189]` | no | drift: signedness, usage, name; storage: INT | `A-11`, `Q-3` |
+| 317 | `SYSTEM-REC.VAT-RATE-1` | `Vat-Rate-1` · lvl 07 · `99v99` · COMP `[copybooks/wssystem.cob:L56]` | `HV-VAT-RATE-1` · `9(02)V9(02)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L327]` | `VAT-RATE-1` · `decimal(4,2) unsigned` · unsigned `[mysql/ACASDB.sql:L1190]` | no | storage: DECIMAL | — |
+| 318 | `SYSTEM-REC.VAT-RATE-2` | `Vat-Rate-2` · lvl 07 · `99v99` · COMP `[copybooks/wssystem.cob:L57]` | `HV-VAT-RATE-2` · `9(02)V9(02)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L328]` | `VAT-RATE-2` · `decimal(4,2) unsigned` · unsigned `[mysql/ACASDB.sql:L1191]` | no | storage: DECIMAL | — |
+| 319 | `SYSTEM-REC.VAT-RATE-3` | `Vat-Rate-3` · lvl 07 · `99v99` · COMP `[copybooks/wssystem.cob:L58]` | `HV-VAT-RATE-3` · `9(02)V9(02)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L329]` | `VAT-RATE-3` · `decimal(4,2) unsigned` · unsigned `[mysql/ACASDB.sql:L1192]` | no | storage: DECIMAL | — |
+| 320 | `SYSTEM-REC.VAT-RATE-4` | `Vat-Rate-4` · lvl 07 · `99v99` · COMP `[copybooks/wssystem.cob:L59]` | `HV-VAT-RATE-4` · `9(02)V9(02)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L330]` | `VAT-RATE-4` · `decimal(4,2) unsigned` · unsigned `[mysql/ACASDB.sql:L1193]` | no | storage: DECIMAL | — |
+| 321 | `SYSTEM-REC.VAT-RATE-5` | `Vat-Rate-5` · lvl 07 · `99v99` · COMP `[copybooks/wssystem.cob:L60]` | `HV-VAT-RATE-5` · `9(02)V9(02)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L331]` | `VAT-RATE-5` · `decimal(4,2) unsigned` · unsigned `[mysql/ACASDB.sql:L1194]` | no | storage: DECIMAL | — |
+| 322 | `SYSTEM-REC.CYCLEA` | `Cyclea` · lvl 05 · BINARY-CHAR · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L62]` | `HV-CYCLEA` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L332]` | `CYCLEA` · `tinyint(2) unsigned` · unsigned `[mysql/ACASDB.sql:L1195]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 323 | `SYSTEM-REC.PERIOD` | `Period` · lvl 05 · BINARY-CHAR · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L64]` | `HV-PERIOD` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L333]` | `PERIOD` · `tinyint(2) unsigned` · unsigned `[mysql/ACASDB.sql:L1196]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 324 | `SYSTEM-REC.PAGE-LINES` | `Page-Lines` · lvl 05 · BINARY-CHAR `[copybooks/wssystem.cob:L65]` | `HV-PAGE-LINES` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L334]` | `PAGE-LINES` · `tinyint(3) unsigned` · unsigned `[mysql/ACASDB.sql:L1197]` | no | drift: usage; storage: INT | — |
+| 325 | `SYSTEM-REC.NEXT-INVOICE` | `Next-Invoice` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L66]` | `HV-NEXT-INVOICE` · `9(10)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L335]` | `NEXT-INVOICE` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L1198]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 326 | `SYSTEM-REC.RUN-DAT` | `Run-Date` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L67]` | `HV-RUN-DAT` · `9(10)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L336]` | `RUN-DAT` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L1199]` | no | drift: signedness, usage, name; storage: INT | `A-11`, `Q-3` |
+| 327 | `SYSTEM-REC.START-DAT` | `Start-Date` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L68]` | `HV-START-DAT` · `9(10)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L337]` | `START-DAT` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L1200]` | no | drift: signedness, usage, name; storage: INT | `A-11`, `Q-3` |
+| 328 | `SYSTEM-REC.END-DAT` | `End-Date` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L69]` | `HV-END-DAT` · `9(10)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L338]` | `END-DAT` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L1201]` | no | drift: signedness, usage, name; storage: INT | `A-11`, `Q-3` |
+| 329 | `SYSTEM-REC.SUSER` | `Suser` · lvl 05 · GROUP · group `[copybooks/wssystem.cob:L70]` | `HV-SUSER` · `X(32)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L339]` | `SUSER` · `char(32)` `[mysql/ACASDB.sql:L1202]` | no | derivation: GROUP_CONCATENATION | — |
+| 330 | `SYSTEM-REC.USER-CODE` | `User-Code` · lvl 05 · `x(32)` `[copybooks/wssystem.cob:L72]` | `HV-USER-CODE` · `X(32)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L340]` | `USER-CODE` · `char(32)` `[mysql/ACASDB.sql:L1203]` | no | storage: STR | — |
+| 331 | `SYSTEM-REC.ADDRESS-1` | `Address-1` · lvl 05 · `x(24)` `[copybooks/wssystem.cob:L73]` | `HV-ADDRESS-1` · `X(24)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L341]` | `ADDRESS-1` · `char(24)` `[mysql/ACASDB.sql:L1204]` | no | storage: STR | — |
+| 332 | `SYSTEM-REC.ADDRESS-2` | `Address-2` · lvl 05 · `x(24)` `[copybooks/wssystem.cob:L74]` | `HV-ADDRESS-2` · `X(24)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L342]` | `ADDRESS-2` · `char(24)` `[mysql/ACASDB.sql:L1205]` | no | storage: STR | — |
+| 333 | `SYSTEM-REC.ADDRESS-3` | `Address-3` · lvl 05 · `x(24)` `[copybooks/wssystem.cob:L75]` | `HV-ADDRESS-3` · `X(24)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L343]` | `ADDRESS-3` · `char(24)` `[mysql/ACASDB.sql:L1206]` | no | storage: STR | — |
+| 334 | `SYSTEM-REC.ADDRESS-4` | `Address-4` · lvl 05 · `x(24)` `[copybooks/wssystem.cob:L76]` | `HV-ADDRESS-4` · `X(24)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L344]` | `ADDRESS-4` · `char(24)` `[mysql/ACASDB.sql:L1207]` | no | storage: STR | — |
+| 335 | `SYSTEM-REC.POST-CODE` | `Post-Code` · lvl 05 · `x(12)` `[copybooks/wssystem.cob:L77]` | `HV-POST-CODE` · `X(12)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L345]` | `POST-CODE` · `char(12)` `[mysql/ACASDB.sql:L1208]` | no | storage: STR | — |
+| 336 | `SYSTEM-REC.COMPANY-EMAIL` | `Company-Email` · lvl 05 · `x(30)` `[copybooks/wssystem.cob:L146]` | `HV-COMPANY-EMAIL` · `X(30)` · unsigned · NOT loaded/NOT unloaded `[common/systemMT.cbl:L346]` | `COMPANY-EMAIL` · `char(30)` `[mysql/ACASDB.sql:L1209]` | no | storage: STR | — |
+| 337 | `SYSTEM-REC.COUNTRY` | `Country` · lvl 05 · `x(24)` `[copybooks/wssystem.cob:L78]` | `HV-COUNTRY` · `X(24)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L347]` | `COUNTRY` · `char(24)` `[mysql/ACASDB.sql:L1210]` | no | storage: STR | — |
+| 338 | `SYSTEM-REC.PRINT-SPOOL-NAME` | `Print-Spool-Name` · lvl 05 · `x(48)` `[copybooks/wssystem.cob:L79]` | `HV-PRINT-SPOOL-NAME` · `X(48)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L348]` | `PRINT-SPOOL-NAME` · `char(48)` `[mysql/ACASDB.sql:L1211]` | no | storage: STR | — |
+| 339 | `SYSTEM-REC.PASS-VALUE` | `Pass-Value` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L82]` | `HV-PASS-VALUE` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L349]` | `PASS-VALUE` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1212]` | no | drift: usage, digits; storage: INT | — |
+| 340 | `SYSTEM-REC.LEVEL-1` | `Level-1` · lvl 07 · `9` · DISPLAY `[copybooks/wssystem.cob:L84]` | `HV-LEVEL-1` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L350]` | `LEVEL-1` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1213]` | no | drift: usage, digits; storage: INT | — |
+| 341 | `SYSTEM-REC.LEVEL-2` | `Level-2` · lvl 07 · `9` · DISPLAY `[copybooks/wssystem.cob:L86]` | `HV-LEVEL-2` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L351]` | `LEVEL-2` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1214]` | no | drift: usage, digits; storage: INT | — |
+| 342 | `SYSTEM-REC.LEVEL-3` | `Level-3` · lvl 07 · `9` · DISPLAY `[copybooks/wssystem.cob:L88]` | `HV-LEVEL-3` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L352]` | `LEVEL-3` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1215]` | no | drift: usage, digits; storage: INT | — |
+| 343 | `SYSTEM-REC.LEVEL-4` | `Level-4` · lvl 07 · `9` · DISPLAY `[copybooks/wssystem.cob:L90]` | `HV-LEVEL-4` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L353]` | `LEVEL-4` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1216]` | no | drift: usage, digits; storage: INT | — |
+| 344 | `SYSTEM-REC.LEVEL-5` | `Level-5` · lvl 07 · `9` · DISPLAY `[copybooks/wssystem.cob:L92]` | `HV-LEVEL-5` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L354]` | `LEVEL-5` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1217]` | no | drift: usage, digits; storage: INT | — |
+| 345 | `SYSTEM-REC.LEVEL-6` | `Level-6` · lvl 07 · `9` · DISPLAY `[copybooks/wssystem.cob:L95]` | `HV-LEVEL-6` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L355]` | `LEVEL-6` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1218]` | no | drift: usage, digits; storage: INT | — |
+| 346 | `SYSTEM-REC.PASS-WORD` | `Pass-Word` · lvl 05 · `x(4)` `[copybooks/wssystem.cob:L97]` | `HV-PASS-WORD` · `X(4)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L356]` | `PASS-WORD` · `char(4)` `[mysql/ACASDB.sql:L1219]` | no | storage: STR | — |
+| 347 | `SYSTEM-REC.HOST` | `Host` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L98]` | `HV-HOST` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L357]` | `HOST` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1220]` | no | drift: usage, digits; storage: INT | — |
+| 348 | `SYSTEM-REC.OP-SYSTEM` | `Op-System` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L100]` | `HV-OP-SYSTEM` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L358]` | `OP-SYSTEM` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1221]` | no | drift: usage, digits; storage: INT | — |
+| 349 | `SYSTEM-REC.CURRENT-QUARTER` | `Current-Quarter` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L110]` | `HV-CURRENT-QUARTER` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L359]` | `CURRENT-QUARTER` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1222]` | no | drift: usage, digits; storage: INT | — |
+| 350 | `SYSTEM-REC.FILE-SYSTEM-USED` | `File-System-Used` · lvl 07 · `9` · DISPLAY `[copybooks/wssystem.cob:L112]` | `HV-FILE-SYSTEM-USED` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L360]` | `FILE-SYSTEM-USED` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1223]` | no | drift: usage, digits; storage: INT | — |
+| 351 | `SYSTEM-REC.FILE-DUPLICATES-IN-USE` | `File-Duplicates-In-Use` · lvl 07 · `9` · DISPLAY `[copybooks/wssystem.cob:L123]` | `HV-FILE-DUPLICATES-IN-USE` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L361]` | `FILE-DUPLICATES-IN-USE` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1224]` | no | drift: usage, digits; storage: INT | — |
+| 352 | `SYSTEM-REC.MAPS-SER` | `Maps-Ser` · lvl 05 · GROUP · group `[copybooks/wssystem.cob:L125]` | `HV-MAPS-SER` · `X(6)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L362]` | `MAPS-SER` · `char(6)` `[mysql/ACASDB.sql:L1225]` | no | derivation: GROUP_CONCATENATION | — |
+| 353 | `SYSTEM-REC.DATE-FORM` | `Date-Form` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L128]` | `HV-DATE-FORM` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L363]` | `DATE-FORM` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1226]` | no | drift: usage, digits; storage: INT | — |
+| 354 | `SYSTEM-REC.DATA-CAPTURE-USED` | `Data-Capture-Used` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L133]` | `HV-DATA-CAPTURE-USED` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L364]` | `DATA-CAPTURE-USED` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1227]` | no | drift: usage, digits; storage: INT | — |
+| 355 | `SYSTEM-REC.RDBMS-DB-NAME` | `RDBMS-DB-Name` · lvl 05 · `x(12)` `[copybooks/wssystem.cob:L137]` | `HV-RDBMS-DB-NAME` · `X(12)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L365]` | `RDBMS-DB-NAME` · `char(12)` `[mysql/ACASDB.sql:L1228]` | no | storage: STR | — |
+| 356 | `SYSTEM-REC.RDBMS-USER` | `RDBMS-User` · lvl 05 · `x(12)` `[copybooks/wssystem.cob:L138]` | `HV-RDBMS-USER` · `X(12)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L366]` | `RDBMS-USER` · `char(12)` `[mysql/ACASDB.sql:L1229]` | no | storage: STR | — |
+| 357 | `SYSTEM-REC.RDBMS-PASSWD` | `RDBMS-Passwd` · lvl 05 · `x(12)` `[copybooks/wssystem.cob:L139]` | `HV-RDBMS-PASSWD` · `X(12)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L367]` | `RDBMS-PASSWD` · `char(12)` `[mysql/ACASDB.sql:L1230]` | no | storage: STR | — |
+| 358 | `SYSTEM-REC.RDBMS-PORT` | `RDBMS-Port` · lvl 05 · `x(5)` `[copybooks/wssystem.cob:L142]` | `HV-RDBMS-PORT` · `X(5)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L368]` | `RDBMS-PORT` · `char(5)` `[mysql/ACASDB.sql:L1231]` | no | storage: STR | — |
+| 359 | `SYSTEM-REC.RDBMS-HOST` | `RDBMS-Host` · lvl 05 · `x(32)` `[copybooks/wssystem.cob:L143]` | `HV-RDBMS-HOST` · `X(32)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L369]` | `RDBMS-HOST` · `char(32)` `[mysql/ACASDB.sql:L1232]` | no | storage: STR | — |
+| 360 | `SYSTEM-REC.RDBMS-SOCKET` | `RDBMS-Socket` · lvl 05 · `x(64)` `[copybooks/wssystem.cob:L144]` | `HV-RDBMS-SOCKET` · `X(64)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L370]` | `RDBMS-SOCKET` · `char(64)` `[mysql/ACASDB.sql:L1233]` | no | storage: STR | — |
+| 361 | `SYSTEM-REC.VAT-REG-NUMBER` | `VAT-Reg-Number` · lvl 05 · `x(11)` `[copybooks/wssystem.cob:L140]` | `HV-VAT-REG-NUMBER` · `X(11)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L371]` | `VAT-REG-NUMBER` · `char(11)` `[mysql/ACASDB.sql:L1234]` | no | storage: STR | — |
+| 362 | `SYSTEM-REC.PARAM-RESTRICT` | `Param-Restrict` · lvl 05 · `x` `[copybooks/wssystem.cob:L141]` | `HV-PARAM-RESTRICT` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L372]` | `PARAM-RESTRICT` · `char(1)` `[mysql/ACASDB.sql:L1235]` | no | storage: STR | — |
+| 363 | `SYSTEM-REC.STATS-DATE-PERIOD` | `Stats-Date-Period` · lvl 05 · `9(4)` · DISPLAY `[copybooks/wssystem.cob:L145]` | `HV-STATS-DATE-PERIOD` · `X(4)` · unsigned · NOT loaded/NOT unloaded `[common/systemMT.cbl:L373]` | `STATS-DATE-PERIOD` · `char(4)` `[mysql/ACASDB.sql:L1236]` | no | drift: usage; storage: INT | — |
+| 364 | `SYSTEM-REC.P-C` | `P-C` · lvl 05 · `x` `[copybooks/wssystem.cob:L151]` | `HV-P-C` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L374]` | `P-C` · `char(1)` `[mysql/ACASDB.sql:L1237]` | no | storage: STR | — |
+| 365 | `SYSTEM-REC.P-C-GROUPED` | `P-C-Grouped` · lvl 05 · `x` `[copybooks/wssystem.cob:L154]` | `HV-P-C-GROUPED` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L375]` | `P-C-GROUPED` · `char(1)` `[mysql/ACASDB.sql:L1238]` | no | storage: STR | — |
+| 366 | `SYSTEM-REC.P-C-LEVEL` | `P-C-Level` · lvl 05 · `x` `[copybooks/wssystem.cob:L156]` | `HV-P-C-LEVEL` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L376]` | `P-C-LEVEL` · `char(1)` `[mysql/ACASDB.sql:L1239]` | no | storage: STR | — |
+| 367 | `SYSTEM-REC.COMPS` | `Comps` · lvl 05 · `x` `[copybooks/wssystem.cob:L158]` | `HV-COMPS` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L377]` | `COMPS` · `char(1)` `[mysql/ACASDB.sql:L1240]` | no | storage: STR | — |
+| 368 | `SYSTEM-REC.COMPS-ACTIVE` | `Comps-Active` · lvl 05 · `x` `[copybooks/wssystem.cob:L160]` | `HV-COMPS-ACTIVE` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L378]` | `COMPS-ACTIVE` · `char(1)` `[mysql/ACASDB.sql:L1241]` | no | storage: STR | — |
+| 369 | `SYSTEM-REC.M-V` | `M-V` · lvl 05 · `x` `[copybooks/wssystem.cob:L162]` | `HV-M-V` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L379]` | `M-V` · `char(1)` `[mysql/ACASDB.sql:L1242]` | no | storage: STR | — |
+| 370 | `SYSTEM-REC.ARCH` | `Arch` · lvl 05 · `x` `[copybooks/wssystem.cob:L164]` | `HV-ARCH` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L380]` | `ARCH` · `char(1)` `[mysql/ACASDB.sql:L1243]` | no | storage: STR | — |
+| 371 | `SYSTEM-REC.TRANS-PRINT` | `Trans-Print` · lvl 05 · `x` `[copybooks/wssystem.cob:L166]` | `HV-TRANS-PRINT` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L381]` | `TRANS-PRINT` · `char(1)` `[mysql/ACASDB.sql:L1244]` | no | storage: STR | — |
+| 372 | `SYSTEM-REC.TRANS-PRINTED` | `Trans-Printed` · lvl 05 · `x` `[copybooks/wssystem.cob:L168]` | `HV-TRANS-PRINTED` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L382]` | `TRANS-PRINTED` · `char(1)` `[mysql/ACASDB.sql:L1245]` | no | storage: STR | — |
+| 373 | `SYSTEM-REC.HEADER-LEVEL` | `Header-Level` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L170]` | `HV-HEADER-LEVEL` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L383]` | `HEADER-LEVEL` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1246]` | no | drift: usage, digits; storage: INT | — |
+| 374 | `SYSTEM-REC.SALES-RANGE` | `Sales-Range` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L171]` | `HV-SALES-RANGE` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L384]` | `SALES-RANGE` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1247]` | no | drift: usage, digits; storage: INT | — |
+| 375 | `SYSTEM-REC.PURCHASE-RANGE` | `Purchase-Range` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L172]` | `HV-PURCHASE-RANGE` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L385]` | `PURCHASE-RANGE` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1248]` | no | drift: usage, digits; storage: INT | — |
+| 376 | `SYSTEM-REC.VAT` | `Vat` · lvl 05 · `x` `[copybooks/wssystem.cob:L173]` | `HV-VAT` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L386]` | `VAT` · `char(1)` `[mysql/ACASDB.sql:L1249]` | no | storage: STR | — |
+| 377 | `SYSTEM-REC.BATCH-ID` | `Batch-Id` · lvl 05 · `x` `[copybooks/wssystem.cob:L175]` | `HV-BATCH-ID` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L387]` | `BATCH-ID` · `char(1)` `[mysql/ACASDB.sql:L1250]` | no | storage: STR | — |
+| 378 | `SYSTEM-REC.LEDGER-2ND-INDEX` | `Ledger-2nd-Index` · lvl 05 · `x` `[copybooks/wssystem.cob:L177]` | `HV-LEDGER-2ND-INDEX` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L388]` | `LEDGER-2ND-INDEX` · `char(1)` `[mysql/ACASDB.sql:L1251]` | no | storage: STR | — |
+| 379 | `SYSTEM-REC.IRS-INSTEAD` | `IRS-Instead` · lvl 05 · `x` `[copybooks/wssystem.cob:L179]` | `HV-IRS-INSTEAD` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L389]` | `IRS-INSTEAD` · `char(1)` `[mysql/ACASDB.sql:L1252]` | no | storage: STR | — |
+| 380 | `SYSTEM-REC.LEDGER-SEC` | `Ledger-Sec` · lvl 05 · BINARY-SHORT · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L182]` | `HV-LEDGER-SEC` · `9(05)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L390]` | `LEDGER-SEC` · `smallint(4) unsigned` · unsigned `[mysql/ACASDB.sql:L1253]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 381 | `SYSTEM-REC.UPDATES` | `Updates` · lvl 05 · BINARY-SHORT · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L183]` | `HV-UPDATES` · `9(05)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L391]` | `UPDATES` · `smallint(4) unsigned` · unsigned `[mysql/ACASDB.sql:L1254]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 382 | `SYSTEM-REC.POSTINGS` | `Postings` · lvl 05 · BINARY-SHORT · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L184]` | `HV-POSTINGS` · `9(05)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L392]` | `POSTINGS` · `smallint(4) unsigned` · unsigned `[mysql/ACASDB.sql:L1255]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 383 | `SYSTEM-REC.NEXT-BATCH` | `Next-Batch` · lvl 05 · BINARY-SHORT · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L185]` | `HV-NEXT-BATCH` · `9(05)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L393]` | `NEXT-BATCH` · `smallint(4) unsigned` · unsigned `[mysql/ACASDB.sql:L1256]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 384 | `SYSTEM-REC.EXTRA-CHARGE-AC` | `Extra-Charge-Ac` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L186]` | `HV-EXTRA-CHARGE-AC` · `9(10)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L394]` | `EXTRA-CHARGE-AC` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L1257]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 385 | `SYSTEM-REC.VAT-AC` | `Vat-Ac` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L187]` | `HV-VAT-AC` · `9(10)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L395]` | `VAT-AC` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L1258]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 386 | `SYSTEM-REC.PRINT-SPOOL-NAME2` | `Print-Spool-Name2` · lvl 05 · `x(48)` `[copybooks/wssystem.cob:L188]` | `HV-PRINT-SPOOL-NAME2` · `X(48)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L396]` | `PRINT-SPOOL-NAME2` · `char(48)` `[mysql/ACASDB.sql:L1259]` | no | storage: STR | — |
+| 387 | `SYSTEM-REC.NEXT-FOLIO` | `Next-Folio` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L193]` | `HV-NEXT-FOLIO` · `9(10)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L397]` | `NEXT-FOLIO` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L1260]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 388 | `SYSTEM-REC.BL-PAY-AC` | `BL-Pay-Ac` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L194]` | `HV-BL-PAY-AC` · `9(10)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L398]` | `BL-PAY-AC` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L1261]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 389 | `SYSTEM-REC.P-CREDITORS` | `P-Creditors` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L195]` | `HV-P-CREDITORS` · `9(10)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L399]` | `P-CREDITORS` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L1262]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 390 | `SYSTEM-REC.BL-PURCH-AC` | `BL-Purch-Ac` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L196]` | `HV-BL-PURCH-AC` · `9(10)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L400]` | `BL-PURCH-AC` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L1263]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 391 | `SYSTEM-REC.GL-BL-PAY-AC` | `GL-BL-Pay-Ac` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L280]` | `HV-GL-BL-PAY-AC` · `9(10)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L401]` | `GL-BL-PAY-AC` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L1264]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 392 | `SYSTEM-REC.GL-P-CREDITORS` | `GL-P-Creditors` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L281]` | `HV-GL-P-CREDITORS` · `9(10)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L402]` | `GL-P-CREDITORS` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L1265]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 393 | `SYSTEM-REC.GL-BL-PURCH-AC` | `GL-BL-Purch-Ac` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L282]` | `HV-GL-BL-PURCH-AC` · `9(10)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L403]` | `GL-BL-PURCH-AC` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L1266]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 394 | `SYSTEM-REC.GL-SL-PAY-AC` | `GL-SL-Pay-Ac` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L283]` | `HV-GL-SL-PAY-AC` · `9(10)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L404]` | `GL-SL-PAY-AC` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L1267]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 395 | `SYSTEM-REC.GL-S-DEBTORS` | `GL-S-Debtors` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L284]` | `HV-GL-S-DEBTORS` · `9(10)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L405]` | `GL-S-DEBTORS` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L1268]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 396 | `SYSTEM-REC.GL-SL-SALES-AC` | `GL-SL-Sales-Ac` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L285]` | `HV-GL-SL-SALES-AC` · `9(10)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L406]` | `GL-SL-SALES-AC` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L1269]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 397 | `SYSTEM-REC.BL-END-CYCLE-DAT` | `BL-End-Cycle-Date` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L197]` | `HV-BL-END-CYCLE-DAT` · `9(10)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L407]` | `BL-END-CYCLE-DAT` · `int(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1270]` | no | drift: signedness, usage, name; storage: INT | `A-11`, `Q-3` |
+| 398 | `SYSTEM-REC.BL-NEXT-BATCH` | `BL-Next-Batch` · lvl 05 · BINARY-SHORT · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L198]` | `HV-BL-NEXT-BATCH` · `9(05)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L408]` | `BL-NEXT-BATCH` · `smallint(4) unsigned` · unsigned `[mysql/ACASDB.sql:L1271]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 399 | `SYSTEM-REC.AGE-TO-PAY` | `Age-To-Pay` · lvl 05 · BINARY-CHAR · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L199]` | `HV-AGE-TO-PAY` · `9(05)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L409]` | `AGE-TO-PAY` · `smallint(4) unsigned` · unsigned `[mysql/ACASDB.sql:L1272]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 400 | `SYSTEM-REC.PURCHASE-LEDGER` | `Purchase-Ledger` · lvl 05 · `x` `[copybooks/wssystem.cob:L200]` | `HV-PURCHASE-LEDGER` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L410]` | `PURCHASE-LEDGER` · `char(1)` `[mysql/ACASDB.sql:L1273]` | no | storage: STR | — |
+| 401 | `SYSTEM-REC.PL-DELIM` | `PL-Delim` · lvl 05 · `x` `[copybooks/wssystem.cob:L202]` | `HV-PL-DELIM` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L411]` | `PL-DELIM` · `char(1)` `[mysql/ACASDB.sql:L1274]` | no | storage: STR | — |
+| 402 | `SYSTEM-REC.ENTRY-LEVEL` | `Entry-Level` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L203]` | `HV-ENTRY-LEVEL` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L412]` | `ENTRY-LEVEL` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1275]` | no | drift: usage, digits; storage: INT | — |
+| 403 | `SYSTEM-REC.P-FLAG-A` | `P-Flag-A` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L204]` | `HV-P-FLAG-A` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L413]` | `P-FLAG-A` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1276]` | no | drift: usage, digits; storage: INT | — |
+| 404 | `SYSTEM-REC.P-FLAG-I` | `P-Flag-I` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L205]` | `HV-P-FLAG-I` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L414]` | `P-FLAG-I` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1277]` | no | drift: usage, digits; storage: INT | — |
+| 405 | `SYSTEM-REC.P-FLAG-P` | `P-Flag-P` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L206]` | `HV-P-FLAG-P` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L415]` | `P-FLAG-P` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1278]` | no | drift: usage, digits; storage: INT | — |
+| 406 | `SYSTEM-REC.PL-STOCK-LINK` | `PL-Stock-Link` · lvl 05 · `x` `[copybooks/wssystem.cob:L207]` | `HV-PL-STOCK-LINK` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L416]` | `PL-STOCK-LINK` · `char(1)` `[mysql/ACASDB.sql:L1279]` | no | storage: STR | — |
+| 407 | `SYSTEM-REC.PRINT-SPOOL-NAME3` | `Print-Spool-Name3` · lvl 05 · `x(48)` `[copybooks/wssystem.cob:L208]` | `HV-PRINT-SPOOL-NAME3` · `X(48)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L417]` | `PRINT-SPOOL-NAME3` · `char(48)` `[mysql/ACASDB.sql:L1280]` | no | storage: STR | — |
+| 408 | `SYSTEM-REC.PL-AUTOGEN` | `PL-Autogen` · lvl 05 · `x` `[copybooks/wssystem.cob:L209]` | `HV-PL-AUTOGEN` · `X(1)` · unsigned · NOT loaded/NOT unloaded `[common/systemMT.cbl:L418]` | `PL-AUTOGEN` · `char(1)` `[mysql/ACASDB.sql:L1281]` | no | storage: STR | — |
+| 409 | `SYSTEM-REC.PL-NEXT-REC` | `PL-Next-Rec` · lvl 05 · BINARY-SHORT `[copybooks/wssystem.cob:L210]` | `HV-PL-NEXT-REC` · `9(05)` · unsigned · NOT loaded/NOT unloaded `[common/systemMT.cbl:L419]` | `PL-NEXT-REC` · `smallint(4) unsigned` · unsigned `[mysql/ACASDB.sql:L1282]` | no | drift: usage; storage: INT | — |
+| 410 | `SYSTEM-REC.SALES-LEDGER` | `Sales-Ledger` · lvl 05 · `x` `[copybooks/wssystem.cob:L216]` | `HV-SALES-LEDGER` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L420]` | `SALES-LEDGER` · `char(1)` `[mysql/ACASDB.sql:L1283]` | no | storage: STR | — |
+| 411 | `SYSTEM-REC.SL-DELIM` | `SL-Delim` · lvl 05 · `x` `[copybooks/wssystem.cob:L218]` | `HV-SL-DELIM` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L421]` | `SL-DELIM` · `char(1)` `[mysql/ACASDB.sql:L1284]` | no | storage: STR | — |
+| 412 | `SYSTEM-REC.OI-3-FLAG` | `Oi-3-Flag` · lvl 05 · `x` `[copybooks/wssystem.cob:L219]` | `HV-OI-3-FLAG` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L422]` | `OI-3-FLAG` · `char(1)` `[mysql/ACASDB.sql:L1285]` | no | storage: STR | — |
+| 413 | `SYSTEM-REC.CUST-FLAG` | `Cust-Flag` · lvl 05 · `x` `[copybooks/wssystem.cob:L220]` | `HV-CUST-FLAG` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L423]` | `CUST-FLAG` · `char(1)` `[mysql/ACASDB.sql:L1286]` | no | storage: STR | — |
+| 414 | `SYSTEM-REC.OI-5-FLAG` | `Oi-5-Flag` · lvl 05 · `x` `[copybooks/wssystem.cob:L221]` | `HV-OI-5-FLAG` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L424]` | `OI-5-FLAG` · `char(1)` `[mysql/ACASDB.sql:L1287]` | no | storage: STR | — |
+| 415 | `SYSTEM-REC.S-FLAG-OI-3` | `S-Flag-Oi-3` · lvl 05 · `x` `[copybooks/wssystem.cob:L222]` | `HV-S-FLAG-OI-3` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L425]` | `S-FLAG-OI-3` · `char(1)` `[mysql/ACASDB.sql:L1288]` | no | storage: STR | — |
+| 416 | `SYSTEM-REC.FULL-INVOICING` | `Full-Invoicing` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L223]` | `HV-FULL-INVOICING` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L426]` | `FULL-INVOICING` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1289]` | no | drift: usage, digits; storage: INT | — |
+| 417 | `SYSTEM-REC.S-FLAG-A` | `S-Flag-A` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L224]` | `HV-S-FLAG-A` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L427]` | `S-FLAG-A` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1290]` | no | drift: usage, digits; storage: INT | — |
+| 418 | `SYSTEM-REC.S-FLAG-I` | `S-Flag-I` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L225]` | `HV-S-FLAG-I` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L428]` | `S-FLAG-I` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1291]` | no | drift: usage, digits; storage: INT | — |
+| 419 | `SYSTEM-REC.S-FLAG-P` | `S-Flag-P` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L226]` | `HV-S-FLAG-P` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L429]` | `S-FLAG-P` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1292]` | no | drift: usage, digits; storage: INT | — |
+| 420 | `SYSTEM-REC.SL-DUNNING` | `SL-Dunning` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L227]` | `HV-SL-DUNNING` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L430]` | `SL-DUNNING` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1293]` | no | drift: usage, digits; storage: INT | — |
+| 421 | `SYSTEM-REC.SL-CHARGES` | `SL-Charges` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L228]` | `HV-SL-CHARGES` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L431]` | `SL-CHARGES` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1294]` | no | drift: usage, digits; storage: INT | — |
+| 422 | `SYSTEM-REC.SL-OWN-NOS` | `Sl-Own-Nos` · lvl 05 · `x` `[copybooks/wssystem.cob:L229]` | `HV-SL-OWN-NOS` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L432]` | `SL-OWN-NOS` · `char(1)` `[mysql/ACASDB.sql:L1295]` | no | storage: STR | — |
+| 423 | `SYSTEM-REC.SL-STATS-RUN` | `SL-Stats-Run` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L230]` | `HV-SL-STATS-RUN` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L433]` | `SL-STATS-RUN` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1296]` | no | drift: usage, digits; storage: INT | — |
+| 424 | `SYSTEM-REC.SL-DAY-BOOK` | `Sl-Day-Book` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L231]` | `HV-SL-DAY-BOOK` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L434]` | `SL-DAY-BOOK` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1297]` | no | drift: usage, digits; storage: INT | — |
+| 425 | `SYSTEM-REC.INVOICER` | `invoicer` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L232]` | `HV-INVOICER` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L435]` | `INVOICER` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1298]` | no | drift: usage, digits; storage: INT | — |
+| 426 | `SYSTEM-REC.EXTRA-DESC` | `Extra-Desc` · lvl 05 · `x(14)` `[copybooks/wssystem.cob:L237]` | `HV-EXTRA-DESC` · `X(14)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L436]` | `EXTRA-DESC` · `char(14)` `[mysql/ACASDB.sql:L1299]` | no | storage: STR | — |
+| 427 | `SYSTEM-REC.EXTRA-TYPE` | `Extra-Type` · lvl 05 · `x` `[copybooks/wssystem.cob:L238]` | `HV-EXTRA-TYPE` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L437]` | `EXTRA-TYPE` · `char(1)` `[mysql/ACASDB.sql:L1300]` | no | storage: STR | — |
+| 428 | `SYSTEM-REC.EXTRA-PRINT` | `Extra-Print` · lvl 05 · `x` `[copybooks/wssystem.cob:L241]` | `HV-EXTRA-PRINT` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L438]` | `EXTRA-PRINT` · `char(1)` `[mysql/ACASDB.sql:L1301]` | no | storage: STR | — |
+| 429 | `SYSTEM-REC.SL-STOCK-LINK` | `SL-Stock-Link` · lvl 05 · `x` `[copybooks/wssystem.cob:L242]` | `HV-SL-STOCK-LINK` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L439]` | `SL-STOCK-LINK` · `char(1)` `[mysql/ACASDB.sql:L1302]` | no | storage: STR | — |
+| 430 | `SYSTEM-REC.SL-STOCK-AUDIT` | `SL-Stock-Audit` · lvl 05 · `x` `[copybooks/wssystem.cob:L243]` | `HV-SL-STOCK-AUDIT` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L440]` | `SL-STOCK-AUDIT` · `char(1)` `[mysql/ACASDB.sql:L1303]` | no | storage: STR | — |
+| 431 | `SYSTEM-REC.SL-LATE-PER` | `SL-Late-Per` · lvl 05 · `99v99` · COMP `[copybooks/wssystem.cob:L245]` | `HV-SL-LATE-PER` · `9(02)V9(02)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L441]` | `SL-LATE-PER` · `decimal(4,2) unsigned` · unsigned `[mysql/ACASDB.sql:L1304]` | no | storage: DECIMAL | — |
+| 432 | `SYSTEM-REC.SL-DISC` | `SL-Disc` · lvl 05 · `99v99` · COMP `[copybooks/wssystem.cob:L246]` | `HV-SL-DISC` · `9(02)V9(02)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L442]` | `SL-DISC` · `decimal(4,2) unsigned` · unsigned `[mysql/ACASDB.sql:L1305]` | no | storage: DECIMAL | — |
+| 433 | `SYSTEM-REC.EXTRA-RATE` | `Extra-Rate` · lvl 05 · `99v99` · COMP `[copybooks/wssystem.cob:L247]` | `HV-EXTRA-RATE` · `9(02)V9(02)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L443]` | `EXTRA-RATE` · `decimal(4,2) unsigned` · unsigned `[mysql/ACASDB.sql:L1306]` | no | storage: DECIMAL | — |
+| 434 | `SYSTEM-REC.SL-DAYS-1` | `SL-Days-1` · lvl 05 · BINARY-CHAR · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L248]` | `HV-SL-DAYS-1` · `9(05)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L444]` | `SL-DAYS-1` · `smallint(3) unsigned` · unsigned `[mysql/ACASDB.sql:L1307]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 435 | `SYSTEM-REC.SL-DAYS-2` | `SL-Days-2` · lvl 05 · BINARY-CHAR · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L249]` | `HV-SL-DAYS-2` · `9(05)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L445]` | `SL-DAYS-2` · `smallint(3) unsigned` · unsigned `[mysql/ACASDB.sql:L1308]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 436 | `SYSTEM-REC.SL-DAYS-3` | `SL-Days-3` · lvl 05 · BINARY-CHAR · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L250]` | `HV-SL-DAYS-3` · `9(05)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L446]` | `SL-DAYS-3` · `smallint(3) unsigned` · unsigned `[mysql/ACASDB.sql:L1309]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 437 | `SYSTEM-REC.SL-CREDIT` | `SL-Credit` · lvl 05 · BINARY-CHAR · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L251]` | `HV-SL-CREDIT` · `9(05)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L447]` | `SL-CREDIT` · `smallint(3) unsigned` · unsigned `[mysql/ACASDB.sql:L1310]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 438 | `SYSTEM-REC.SL-MIN` | `SL-Min` · lvl 05 · BINARY-SHORT · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L253]` | `HV-SL-MIN` · `9(05)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L448]` | `SL-MIN` · `smallint(4) unsigned` · unsigned `[mysql/ACASDB.sql:L1311]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 439 | `SYSTEM-REC.SL-MAX` | `SL-Max` · lvl 05 · BINARY-SHORT · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L254]` | `HV-SL-MAX` · `9(05)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L449]` | `SL-MAX` · `smallint(4) unsigned` · unsigned `[mysql/ACASDB.sql:L1312]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 440 | `SYSTEM-REC.PF-RETENTION` | `PF-Retention` · lvl 05 · BINARY-SHORT · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L255]` | `HV-PF-RETENTION` · `9(05)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L450]` | `PF-RETENTION` · `smallint(4) unsigned` · unsigned `[mysql/ACASDB.sql:L1313]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 441 | `SYSTEM-REC.FIRST-SL-BATCH` | `First-Sl-Batch` · lvl 05 · BINARY-SHORT · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L256]` | `HV-FIRST-SL-BATCH` · `9(05)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L451]` | `FIRST-SL-BATCH` · `smallint(4) unsigned` · unsigned `[mysql/ACASDB.sql:L1314]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 442 | `SYSTEM-REC.FIRST-SL-INV` | `First-Sl-Inv` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L257]` | `HV-FIRST-SL-INV` · `9(10)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L452]` | `FIRST-SL-INV` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L1315]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 443 | `SYSTEM-REC.SL-LIMIT` | `SL-Limit` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L258]` | `HV-SL-LIMIT` · `9(10)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L453]` | `SL-LIMIT` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L1316]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 444 | `SYSTEM-REC.SL-PAY-AC` | `SL-Pay-Ac` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L259]` | `HV-SL-PAY-AC` · `9(10)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L454]` | `SL-PAY-AC` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L1317]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 445 | `SYSTEM-REC.S-DEBTORS` | `S-Debtors` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L260]` | `HV-S-DEBTORS` · `9(10)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L455]` | `S-DEBTORS` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L1318]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 446 | `SYSTEM-REC.SL-SALES-AC` | `SL-Sales-Ac` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L261]` | `HV-SL-SALES-AC` · `9(10)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L456]` | `SL-SALES-AC` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L1319]` | no | drift: signedness, usage; storage: INT | `A-11`, `Q-3` |
+| 447 | `SYSTEM-REC.S-END-CYCLE-DAT` | `S-End-Cycle-Date` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L262]` | `HV-S-END-CYCLE-DAT` · `9(10)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L457]` | `S-END-CYCLE-DAT` · `int(8) unsigned` · unsigned `[mysql/ACASDB.sql:L1320]` | no | drift: signedness, usage, name; storage: INT | `A-11`, `Q-3` |
+| 448 | `SYSTEM-REC.SL-COMP-HEAD-PICK` | `SL-Comp-Head-Pick` · lvl 05 · `x` `[copybooks/wssystem.cob:L263]` | `HV-SL-COMP-HEAD-PICK` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L458]` | `SL-COMP-HEAD-PICK` · `char(1)` `[mysql/ACASDB.sql:L1321]` | no | storage: STR | — |
+| 449 | `SYSTEM-REC.SL-COMP-HEAD-INV` | `SL-Comp-Head-Inv` · lvl 05 · `x` `[copybooks/wssystem.cob:L265]` | `HV-SL-COMP-HEAD-INV` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L459]` | `SL-COMP-HEAD-INV` · `char(1)` `[mysql/ACASDB.sql:L1322]` | no | storage: STR | — |
+| 450 | `SYSTEM-REC.SL-COMP-HEAD-STAT` | `SL-Comp-Head-Stat` · lvl 05 · `x` `[copybooks/wssystem.cob:L267]` | `HV-SL-COMP-HEAD-STAT` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L460]` | `SL-COMP-HEAD-STAT` · `char(1)` `[mysql/ACASDB.sql:L1323]` | no | storage: STR | — |
+| 451 | `SYSTEM-REC.SL-COMP-HEAD-LETS` | `SL-Comp-Head-Lets` · lvl 05 · `x` `[copybooks/wssystem.cob:L269]` | `HV-SL-COMP-HEAD-LETS` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L461]` | `SL-COMP-HEAD-LETS` · `char(1)` `[mysql/ACASDB.sql:L1324]` | no | storage: STR | — |
+| 452 | `SYSTEM-REC.SL-VAT-PRINTED` | `SL-VAT-Printed` · lvl 05 · `x` `[copybooks/wssystem.cob:L271]` | `HV-SL-VAT-PRINTED` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L462]` | `SL-VAT-PRINTED` · `char(1)` `[mysql/ACASDB.sql:L1325]` | no | storage: STR | — |
+| 453 | `SYSTEM-REC.SL-INVOICE-LINES` | `SL-Invoice-Lines` · lvl 05 · `99` · DISPLAY `[copybooks/wssystem.cob:L273]` | `HV-SL-INVOICE-LINES` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L463]` | `SL-INVOICE-LINES` · `tinyint(2) unsigned` · unsigned `[mysql/ACASDB.sql:L1326]` | no | drift: usage, digits; storage: INT | — |
+| 454 | `SYSTEM-REC.SL-AUTOGEN` | `SL-Autogen` · lvl 05 · `x` `[copybooks/wssystem.cob:L274]` | `HV-SL-AUTOGEN` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L464]` | `SL-AUTOGEN` · `char(1)` `[mysql/ACASDB.sql:L1327]` | no | storage: STR | — |
+| 455 | `SYSTEM-REC.SL-NEXT-REC` | `SL-Next-Rec` · lvl 05 · BINARY-SHORT `[copybooks/wssystem.cob:L275]` | `HV-SL-NEXT-REC` · `S9(05)` · signed · loaded/unloaded `[common/systemMT.cbl:L465]` | `SL-NEXT-REC` · `smallint(4)` `[mysql/ACASDB.sql:L1328]` | no | drift: signedness, usage; storage: INT | — |
+| 456 | `SYSTEM-REC.STK-ABREV-REF` | `Stk-Abrev-Ref` · lvl 05 · `x(6)` `[copybooks/wssystem.cob:L291]` | `HV-STK-ABREV-REF` · `X(6)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L466]` | `STK-ABREV-REF` · `char(6)` `[mysql/ACASDB.sql:L1329]` | no | storage: STR | — |
+| 457 | `SYSTEM-REC.STK-DEBUG` | `Stk-Debug` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L292]` | `HV-STK-DEBUG` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L467]` | `STK-DEBUG` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1330]` | no | drift: usage, digits; storage: INT | — |
+| 458 | `SYSTEM-REC.STK-MANU-USED` | `Stk-Manu-Used` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L293]` | `HV-STK-MANU-USED` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L468]` | `STK-MANU-USED` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1331]` | no | drift: usage, digits; storage: INT | — |
+| 459 | `SYSTEM-REC.STK-OE-USED` | `Stk-OE-Used` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L294]` | `HV-STK-OE-USED` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L469]` | `STK-OE-USED` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1332]` | no | drift: usage, digits; storage: INT | — |
+| 460 | `SYSTEM-REC.STK-AUDIT-USED` | `Stk-Audit-Used` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L295]` | `HV-STK-AUDIT-USED` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L470]` | `STK-AUDIT-USED` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1333]` | no | drift: usage, digits; storage: INT | — |
+| 461 | `SYSTEM-REC.STK-MOV-AUDIT` | `Stk-Mov-Audit` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L296]` | `HV-STK-MOV-AUDIT` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L471]` | `STK-MOV-AUDIT` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1334]` | no | drift: usage, digits; storage: INT | — |
+| 462 | `SYSTEM-REC.STK-PERIOD-CUR` | `Stk-Period-Cur` · lvl 05 · `x` `[copybooks/wssystem.cob:L297]` | `HV-STK-PERIOD-CUR` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L472]` | `STK-PERIOD-CUR` · `char(1)` `[mysql/ACASDB.sql:L1335]` | no | storage: STR | — |
+| 463 | `SYSTEM-REC.STK-PERIOD-DAT` | `Stk-Period-dat` · lvl 05 · `x` `[copybooks/wssystem.cob:L298]` | `HV-STK-PERIOD-DAT` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L473]` | `STK-PERIOD-DAT` · `char(1)` `[mysql/ACASDB.sql:L1336]` | no | storage: STR | — |
+| 464 | `SYSTEM-REC.STOCK-CONTROL` | `Stock-Control` · lvl 05 · `x` `[copybooks/wssystem.cob:L300]` | `HV-STOCK-CONTROL` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L474]` | `STOCK-CONTROL` · `char(1)` `[mysql/ACASDB.sql:L1337]` | no | storage: STR | — |
+| 465 | `SYSTEM-REC.STK-AVERAGING` | `Stk-Averaging` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L302]` | `HV-STK-AVERAGING` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L475]` | `STK-AVERAGING` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1338]` | no | drift: usage, digits; storage: INT | — |
+| 466 | `SYSTEM-REC.STK-ACTIVITY-REP-RUN` | `Stk-Activity-Rep-Run` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L304]` | `HV-STK-ACTIVITY-REP-RUN` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L476]` | `STK-ACTIVITY-REP-RUN` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1339]` | no | drift: usage, digits; storage: INT | — |
+| 467 | `SYSTEM-REC.STK-PAGE-LINES` | `Stk-Page-Lines` · lvl 05 · BINARY-CHAR `[copybooks/wssystem.cob:L306]` | `HV-STK-PAGE-LINES` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L477]` | `STK-PAGE-LINES` · `tinyint(4) unsigned` · unsigned `[mysql/ACASDB.sql:L1340]` | no | drift: usage; storage: INT | — |
+| 468 | `SYSTEM-REC.STK-AUDIT-NO` | `Stk-Audit-No` · lvl 05 · BINARY-CHAR `[copybooks/wssystem.cob:L307]` | `HV-STK-AUDIT-NO` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L478]` | `STK-AUDIT-NO` · `tinyint(4) unsigned` · unsigned `[mysql/ACASDB.sql:L1341]` | no | drift: usage; storage: INT | — |
+| 469 | `SYSTEM-REC.CLIENT` | `Client` · lvl 05 · `x(24)` `[copybooks/wssystem.cob:L310]` | `HV-CLIENT` · `X(24)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L479]` | `CLIENT` · `char(24)` `[mysql/ACASDB.sql:L1342]` | no | storage: STR | — |
+| 470 | `SYSTEM-REC.NEXT-POST` | `Next-Post` · lvl 05 · `9(5)` · DISPLAY `[copybooks/wssystem.cob:L311]` | `HV-NEXT-POST` · `9(08)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L480]` | `NEXT-POST` · `mediumint(5) unsigned` · unsigned `[mysql/ACASDB.sql:L1343]` | no | drift: usage, digits; storage: INT | — |
+| 471 | `SYSTEM-REC.VAT1` | `vat1` · lvl 07 · `99v99` · DISPLAY `[copybooks/wssystem.cob:L313]` | `HV-VAT1` · `9(02)V9(02)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L481]` | `VAT1` · `decimal(4,2) unsigned` · unsigned `[mysql/ACASDB.sql:L1344]` | no | drift: usage; storage: DECIMAL | — |
+| 472 | `SYSTEM-REC.VAT2` | `vat2` · lvl 07 · `99v99` · DISPLAY `[copybooks/wssystem.cob:L314]` | `HV-VAT2` · `9(02)V9(02)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L482]` | `VAT2` · `decimal(4,2) unsigned` · unsigned `[mysql/ACASDB.sql:L1345]` | no | drift: usage; storage: DECIMAL | — |
+| 473 | `SYSTEM-REC.VAT3` | `vat3` · lvl 07 · `99v99` · DISPLAY `[copybooks/wssystem.cob:L315]` | `HV-VAT3` · `9(02)V9(02)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L483]` | `VAT3` · `decimal(4,2) unsigned` · unsigned `[mysql/ACASDB.sql:L1346]` | no | drift: usage; storage: DECIMAL | — |
+| 474 | `SYSTEM-REC.IRS-PASS-VALUE` | `IRS-Pass-Value` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L318]` | `HV-IRS-PASS-VALUE` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L484]` | `IRS-PASS-VALUE` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1347]` | no | drift: usage, digits; storage: INT | — |
+| 475 | `SYSTEM-REC.SAVE-SEQU` | `Save-Sequ` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L319]` | `HV-SAVE-SEQU` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L485]` | `SAVE-SEQU` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1348]` | no | drift: usage, digits; storage: INT | — |
+| 476 | `SYSTEM-REC.SYSTEM-WORK-GROUP` | `System-Work-Group` · lvl 05 · `x(18)` `[copybooks/wssystem.cob:L320]` | `HV-SYSTEM-WORK-GROUP` · `X(18)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L486]` | `SYSTEM-WORK-GROUP` · `char(18)` `[mysql/ACASDB.sql:L1349]` | no | storage: STR | — |
+| 477 | `SYSTEM-REC.PL-APP-CREATED` | `PL-App-Created` · lvl 05 · `x` `[copybooks/wssystem.cob:L321]` | `HV-PL-APP-CREATED` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L487]` | `PL-APP-CREATED` · `char(1)` `[mysql/ACASDB.sql:L1350]` | no | storage: STR | — |
+| 478 | `SYSTEM-REC.PL-APPROP-AC` | `PL-Approp-AC` · lvl 07 · `9(5)` · DISPLAY `[copybooks/wssystem.cob:L325]` | `HV-PL-APPROP-AC` · `9(08)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L488]` | `PL-APPROP-AC` · `mediumint(5) unsigned` · unsigned `[mysql/ACASDB.sql:L1351]` | no | drift: usage, digits; derivation: REDEFINES_ALTERNATIVE; storage: INT | — |
+| 479 | `SYSTEM-REC.1ST-TIME-FLAG` | `1st-Time-Flag` · lvl 05 · `9` · DISPLAY `[copybooks/wssystem.cob:L326]` | `HV-1ST-TIME-FLAG` · `9(03)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L489]` | `1ST-TIME-FLAG` · `tinyint(1) unsigned` · unsigned `[mysql/ACASDB.sql:L1352]` | no | drift: usage, digits; storage: INT | — |
+| 480 | `SYSTEM-REC.PL-APPROP-AC6` | `PL-Approp-AC6` · lvl 05 · `9(6)` · DISPLAY `[copybooks/wssystem.cob:L322]` | `HV-PL-APPROP-AC6` · `9(08)` · unsigned · NOT loaded/NOT unloaded `[common/systemMT.cbl:L490]` | `PL-APPROP-AC6` · `mediumint(6) unsigned` · unsigned `[mysql/ACASDB.sql:L1353]` | no | drift: usage, digits; storage: INT | — |
+| 481 | `SYSTEM-REC.SL-BO-FLAG` | `SL-BO-Flag` · lvl 05 · `x` `[copybooks/wssystem.cob:L276]` | `HV-SL-BO-FLAG` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L491]` | `SL-BO-FLAG` · `char(1)` `[mysql/ACASDB.sql:L1354]` | no | storage: STR | — |
+| 482 | `SYSTEM-REC.STK-BO-ACTIVE` | `Stk-BO-Active` · lvl 05 · `x` `[copybooks/wssystem.cob:L305]` | `HV-STK-BO-ACTIVE` · `X(1)` · unsigned · loaded/unloaded `[common/systemMT.cbl:L492]` | `STK-BO-ACTIVE` · `char(1)` `[mysql/ACASDB.sql:L1355]` | no | storage: STR | — |
+
+#### `SYSTOT-REC` — 21 columns · bridge `sys4MT` · handler `acas000` · facade `System totals`
+
+| # | Dictionary key | Copybook / program-source field | Bridge host variable | SQL column | One-sided | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | :---: | --- | --- |
+| 483 | `SYSTOT-REC.LEDGER-TOTALS-REC-KEY` | **absent** | `HV-LEDGER-TOTALS-REC-KEY` · `9(03)` · unsigned · loaded/NOT unloaded `[common/sys4MT.cbl:L315]` | `LEDGER-TOTALS-REC-KEY` · `tinyint(1) unsigned` · unsigned · **PK** `[mysql/ACASDB.sql:L1377]` | **yes** | derivation: BRIDGE_DERIVED | — |
+| 484 | `SYSTOT-REC.SL-OS-BAL-LAST-MONTH` | `sl-os-bal-last-month` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssys4.cob:L10]` | `HV-SL-OS-BAL-LAST-MONTH` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/sys4MT.cbl:L316]` | `SL-OS-BAL-LAST-MONTH` · `decimal(10,2)` `[mysql/ACASDB.sql:L1378]` | no | drift: usage; storage: DECIMAL | — |
+| 485 | `SYSTOT-REC.SL-OS-BAL-THIS-MONTH` | `sl-os-bal-this-month` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssys4.cob:L11]` | `HV-SL-OS-BAL-THIS-MONTH` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/sys4MT.cbl:L317]` | `SL-OS-BAL-THIS-MONTH` · `decimal(10,2)` `[mysql/ACASDB.sql:L1379]` | no | drift: usage; storage: DECIMAL | — |
+| 486 | `SYSTOT-REC.SL-INVOICES-THIS-MONTH` | `sl-invoices-this-month` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssys4.cob:L12]` | `HV-SL-INVOICES-THIS-MONTH` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/sys4MT.cbl:L318]` | `SL-INVOICES-THIS-MONTH` · `decimal(10,2)` `[mysql/ACASDB.sql:L1380]` | no | drift: usage; storage: DECIMAL | — |
+| 487 | `SYSTOT-REC.SL-CREDIT-NOTES-THIS-MONTH` | `sl-credit-notes-this-month` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssys4.cob:L13]` | `HV-SL-CREDIT-NOTES-THIS-MONTH` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/sys4MT.cbl:L319]` | `SL-CREDIT-NOTES-THIS-MONTH` · `decimal(10,2)` `[mysql/ACASDB.sql:L1381]` | no | drift: usage; storage: DECIMAL | — |
+| 488 | `SYSTOT-REC.SL-VARIANCE` | `sl-variance` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssys4.cob:L14]` | `HV-SL-VARIANCE` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/sys4MT.cbl:L320]` | `SL-VARIANCE` · `decimal(10,2)` `[mysql/ACASDB.sql:L1382]` | no | drift: usage; storage: DECIMAL | — |
+| 489 | `SYSTOT-REC.SL-CREDIT-DEDUCTIONS` | `sl-credit-deductions` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssys4.cob:L15]` | `HV-SL-CREDIT-DEDUCTIONS` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/sys4MT.cbl:L321]` | `SL-CREDIT-DEDUCTIONS` · `decimal(10,2)` `[mysql/ACASDB.sql:L1383]` | no | drift: usage; storage: DECIMAL | — |
+| 490 | `SYSTOT-REC.SL-CN-UNAPPL-THIS-MONTH` | `sl-cn-unappl-this-month` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssys4.cob:L16]` | `HV-SL-CN-UNAPPL-THIS-MONTH` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/sys4MT.cbl:L322]` | `SL-CN-UNAPPL-THIS-MONTH` · `decimal(10,2)` `[mysql/ACASDB.sql:L1384]` | no | drift: usage; storage: DECIMAL | — |
+| 491 | `SYSTOT-REC.SL-PAYMENTS` | `sl-payments` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssys4.cob:L17]` | `HV-SL-PAYMENTS` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/sys4MT.cbl:L323]` | `SL-PAYMENTS` · `decimal(10,2)` `[mysql/ACASDB.sql:L1385]` | no | drift: usage; storage: DECIMAL | — |
+| 492 | `SYSTOT-REC.SL4-SPARE1` | `sl4-spare1` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssys4.cob:L18]` | `HV-SL4-SPARE1` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/sys4MT.cbl:L324]` | `SL4-SPARE1` · `decimal(10,2)` `[mysql/ACASDB.sql:L1386]` | no | drift: usage; storage: DECIMAL | — |
+| 493 | `SYSTOT-REC.SL4-SPARE2` | `sl4-spare2` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssys4.cob:L19]` | `HV-SL4-SPARE2` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/sys4MT.cbl:L325]` | `SL4-SPARE2` · `decimal(10,2)` `[mysql/ACASDB.sql:L1387]` | no | drift: usage; storage: DECIMAL | — |
+| 494 | `SYSTOT-REC.PL-OS-BAL-LAST-MONTH` | `pl-os-bal-last-month` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssys4.cob:L21]` | `HV-PL-OS-BAL-LAST-MONTH` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/sys4MT.cbl:L326]` | `PL-OS-BAL-LAST-MONTH` · `decimal(10,2)` `[mysql/ACASDB.sql:L1388]` | no | drift: usage; storage: DECIMAL | — |
+| 495 | `SYSTOT-REC.PL-OS-BAL-THIS-MONTH` | `pl-os-bal-this-month` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssys4.cob:L22]` | `HV-PL-OS-BAL-THIS-MONTH` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/sys4MT.cbl:L327]` | `PL-OS-BAL-THIS-MONTH` · `decimal(10,2)` `[mysql/ACASDB.sql:L1389]` | no | drift: usage; storage: DECIMAL | — |
+| 496 | `SYSTOT-REC.PL-INVOICES-THIS-MONTH` | `pl-invoices-this-month` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssys4.cob:L23]` | `HV-PL-INVOICES-THIS-MONTH` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/sys4MT.cbl:L328]` | `PL-INVOICES-THIS-MONTH` · `decimal(10,2)` `[mysql/ACASDB.sql:L1390]` | no | drift: usage; storage: DECIMAL | — |
+| 497 | `SYSTOT-REC.PL-CREDIT-NOTES-THIS-MONTH` | `pl-credit-notes-this-month` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssys4.cob:L24]` | `HV-PL-CREDIT-NOTES-THIS-MONTH` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/sys4MT.cbl:L329]` | `PL-CREDIT-NOTES-THIS-MONTH` · `decimal(10,2)` `[mysql/ACASDB.sql:L1391]` | no | drift: usage; storage: DECIMAL | — |
+| 498 | `SYSTOT-REC.PL-VARIANCE` | `pl-variance` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssys4.cob:L25]` | `HV-PL-VARIANCE` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/sys4MT.cbl:L330]` | `PL-VARIANCE` · `decimal(10,2)` `[mysql/ACASDB.sql:L1392]` | no | drift: usage; storage: DECIMAL | — |
+| 499 | `SYSTOT-REC.PL-CREDIT-DEDUCTIONS` | `pl-credit-deductions` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssys4.cob:L26]` | `HV-PL-CREDIT-DEDUCTIONS` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/sys4MT.cbl:L331]` | `PL-CREDIT-DEDUCTIONS` · `decimal(10,2)` `[mysql/ACASDB.sql:L1393]` | no | drift: usage; storage: DECIMAL | — |
+| 500 | `SYSTOT-REC.PL-CN-UNAPPL-THIS-MONTH` | `pl-cn-unappl-this-month` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssys4.cob:L27]` | `HV-PL-CN-UNAPPL-THIS-MONTH` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/sys4MT.cbl:L332]` | `PL-CN-UNAPPL-THIS-MONTH` · `decimal(10,2)` `[mysql/ACASDB.sql:L1394]` | no | drift: usage; storage: DECIMAL | — |
+| 501 | `SYSTOT-REC.PL-PAYMENTS` | `pl-payments` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssys4.cob:L28]` | `HV-PL-PAYMENTS` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/sys4MT.cbl:L333]` | `PL-PAYMENTS` · `decimal(10,2)` `[mysql/ACASDB.sql:L1395]` | no | drift: usage; storage: DECIMAL | — |
+| 502 | `SYSTOT-REC.SL4-SPARE3` | `sl4-spare3` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssys4.cob:L29]` | `HV-SL4-SPARE3` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/sys4MT.cbl:L334]` | `SL4-SPARE3` · `decimal(10,2)` `[mysql/ACASDB.sql:L1396]` | no | drift: usage; storage: DECIMAL | `A-20` |
+| 503 | `SYSTOT-REC.SL4-SPARE4` | `sl4-spare4` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wssys4.cob:L30]` | `HV-SL4-SPARE4` · `S9(08)V9(02)` · signed · loaded/unloaded `[common/sys4MT.cbl:L335]` | `SL4-SPARE4` · `decimal(10,2)` `[mysql/ACASDB.sql:L1397]` | no | drift: usage; storage: DECIMAL | `A-20` |
+
+#### `VALUEANAL-REC` — 10 columns · bridge `valueMT` · handler `acas013` · facade `Value`
+
+| # | Dictionary key | Copybook / program-source field | Bridge host variable | SQL column | One-sided | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | :---: | --- | --- |
+| 504 | `VALUEANAL-REC.VA-CODE` | `va-code` · lvl 03 · GROUP · group `[copybooks/wsval.cob:L10]` | `HV-VA-CODE` · `X(3)` · unsigned · loaded/unloaded `[common/valueMT.cbl:L287]` | `VA-CODE` · `char(3)` · **PK** `[mysql/ACASDB.sql:L1419]` | no | derivation: GROUP_CONCATENATION | — |
+| 505 | `VALUEANAL-REC.VA-GL` | `va-gl` · lvl 03 · `9(6)` · DISPLAY `[copybooks/wsval.cob:L15]` | `HV-VA-GL` · `9(08)` · unsigned · loaded/unloaded `[common/valueMT.cbl:L288]` | `VA-GL` · `mediumint(6) unsigned` · unsigned `[mysql/ACASDB.sql:L1420]` | no | drift: usage, digits; storage: INT | — |
+| 506 | `VALUEANAL-REC.VA-DESC` | `va-desc` · lvl 03 · `x(24)` `[copybooks/wsval.cob:L16]` | `HV-VA-DESC` · `X(24)` · unsigned · loaded/unloaded `[common/valueMT.cbl:L289]` | `VA-DESC` · `char(24)` `[mysql/ACASDB.sql:L1421]` | no | storage: STR | — |
+| 507 | `VALUEANAL-REC.VA-PRINT` | `va-print` · lvl 03 · `xxx` `[copybooks/wsval.cob:L17]` | `HV-VA-PRINT` · `X(3)` · unsigned · loaded/unloaded `[common/valueMT.cbl:L290]` | `VA-PRINT` · `char(3)` `[mysql/ACASDB.sql:L1422]` | no | storage: STR | — |
+| 508 | `VALUEANAL-REC.VA-T-THIS` | `va-t-this` · lvl 03 · `9(5)` · COMP `[copybooks/wsval.cob:L18]` | `HV-VA-T-THIS` · `9(08)` · unsigned · loaded/unloaded `[common/valueMT.cbl:L291]` | `VA-T-THIS` · `mediumint(5) unsigned` · unsigned `[mysql/ACASDB.sql:L1423]` | no | drift: digits; storage: INT | — |
+| 509 | `VALUEANAL-REC.VA-T-LAST` | `va-t-last` · lvl 03 · `9(5)` · COMP `[copybooks/wsval.cob:L19]` | `HV-VA-T-LAST` · `9(08)` · unsigned · loaded/unloaded `[common/valueMT.cbl:L292]` | `VA-T-LAST` · `mediumint(5) unsigned` · unsigned `[mysql/ACASDB.sql:L1424]` | no | drift: digits; storage: INT | — |
+| 510 | `VALUEANAL-REC.VA-T-YEAR` | `va-t-year` · lvl 03 · `9(5)` · COMP `[copybooks/wsval.cob:L20]` | `HV-VA-T-YEAR` · `9(08)` · unsigned · loaded/unloaded `[common/valueMT.cbl:L293]` | `VA-T-YEAR` · `mediumint(5) unsigned` · unsigned `[mysql/ACASDB.sql:L1425]` | no | drift: digits; storage: INT | — |
+| 511 | `VALUEANAL-REC.VA-V-THIS` | `va-v-this` · lvl 03 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wsval.cob:L21]` | `HV-VA-V-THIS` · `9(08)V9(02)` · unsigned · loaded/unloaded `[common/valueMT.cbl:L294]` | `VA-V-THIS` · `decimal(10,2) unsigned` · unsigned `[mysql/ACASDB.sql:L1426]` | no | drift: signedness, usage; storage: DECIMAL | `A-11`, `Q-3` |
+| 512 | `VALUEANAL-REC.VA-V-LAST` | `va-v-last` · lvl 03 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wsval.cob:L22]` | `HV-VA-V-LAST` · `9(08)V9(02)` · unsigned · loaded/unloaded `[common/valueMT.cbl:L295]` | `VA-V-LAST` · `decimal(10,2) unsigned` · unsigned `[mysql/ACASDB.sql:L1427]` | no | drift: signedness, usage; storage: DECIMAL | `A-11`, `Q-3` |
+| 513 | `VALUEANAL-REC.VA-V-YEAR` | `va-v-year` · lvl 03 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/wsval.cob:L23]` | `HV-VA-V-YEAR` · `9(08)V9(02)` · unsigned · loaded/unloaded `[common/valueMT.cbl:L296]` | `VA-V-YEAR` · `decimal(10,2) unsigned` · unsigned `[mysql/ACASDB.sql:L1428]` | no | drift: signedness, usage; storage: DECIMAL | `A-11`, `Q-3` |
+
+### A.2 The 548 entries that declare no column, by declaring file
+
+These are the record-layout entries with no relational counterpart: group items, `FILLER`s,
+`REDEFINES` views, condition-name carriers, and the fields of records the cycle passes through
+linkage or a work file rather than through a table. Every one is `one_sided: true`, and each is
+here because R-5 says *every* field maps to an entry — not every field that happens to reach SQL.
+
+#### `copybooks/wsanal.cob` — 5 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 1 | `WS-Analysis-Record.WS-Analysis-Record` | `WS-Analysis-Record` · lvl 01 · GROUP · group `[copybooks/wsanal.cob:L9]` | copybook | — | — |
+| 2 | `WS-Analysis-Record.Pa-System` | `Pa-System` · lvl 05 · `x` `[copybooks/wsanal.cob:L11]` | copybook | storage: STR | — |
+| 3 | `WS-Analysis-Record.Pa-Group` | `Pa-Group` · lvl 05 · GROUP · group `[copybooks/wsanal.cob:L12]` | copybook | — | — |
+| 4 | `WS-Analysis-Record.Pa-First` | `Pa-First` · lvl 07 · `x` `[copybooks/wsanal.cob:L13]` | copybook | storage: STR | — |
+| 5 | `WS-Analysis-Record.Pa-Second` | `Pa-Second` · lvl 07 · `x` `[copybooks/wsanal.cob:L14]` | copybook | storage: STR | — |
+
+#### `copybooks/wsbatch.cob` — 7 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 6 | `WS-Batch-Record.WS-Batch-Record` | `WS-Batch-Record` · lvl 01 · GROUP · group `[copybooks/wsbatch.cob:L13]` | copybook | — | `A-15`, `Q-4` |
+| 7 | `WS-Batch-Record.WS-Batch-Key` | `WS-Batch-Key` · lvl 03 · GROUP · group `[copybooks/wsbatch.cob:L14]` | copybook | — | `A-15`, `Q-4` |
+| 8 | `WS-Batch-Record.WS-Ledger` | `WS-Ledger` · lvl 05 · `9` · DISPLAY `[copybooks/wsbatch.cob:L15]` | copybook | storage: INT | `A-15`, `Q-4` |
+| 9 | `WS-Batch-Record.WS-Batch-Nos` | `WS-Batch-Nos` · lvl 05 · `9(5)` · DISPLAY `[copybooks/wsbatch.cob:L19]` | copybook | storage: INT | `A-15`, `Q-4` |
+| 10 | `WS-Batch-Record.Dates` | `Dates` · lvl 03 · GROUP · group `[copybooks/wsbatch.cob:L35]` | copybook | — | `A-15`, `Q-4` |
+| 11 | `WS-Batch-Record.Amounts` | `Amounts` · lvl 03 · GROUP · group `[copybooks/wsbatch.cob:L40]` | copybook | — | `A-15`, `Q-4` |
+| 12 | `WS-Batch-Record.posting-data` | `posting-data` · lvl 03 · GROUP · group `[copybooks/wsbatch.cob:L47]` | copybook | — | `A-15`, `Q-4` |
+
+#### `copybooks/wsledger.cob` — 12 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 13 | `WS-Ledger-Record.WS-Ledger-Record` | `WS-Ledger-Record` · lvl 01 · GROUP · group `[copybooks/wsledger.cob:L12]` | copybook | — | — |
+| 14 | `WS-Ledger-Record.WS-Ledger-Key` | `WS-Ledger-Key` · lvl 03 · GROUP · group `[copybooks/wsledger.cob:L13]` | copybook | — | — |
+| 15 | `WS-Ledger-Record.WS-Ledger-Nos` | `WS-Ledger-Nos` · lvl 05 · `9(6)` · DISPLAY `[copybooks/wsledger.cob:L14]` | copybook | storage: INT | — |
+| 16 | `WS-Ledger-Record.filler#16` | `filler` · lvl 05 · GROUP · redefines `WS-Ledger-Nos` · group · FILLER `[copybooks/wsledger.cob:L16]` | copybook | — | — |
+| 17 | `WS-Ledger-Record.Ledger-n` | `Ledger-n` · lvl 07 · `9(4)` · DISPLAY `[copybooks/wsledger.cob:L17]` | copybook | storage: INT | — |
+| 18 | `WS-Ledger-Record.Ledger-s` | `Ledger-s` · lvl 07 · `9(2)` · DISPLAY `[copybooks/wsledger.cob:L18]` | copybook | storage: INT | — |
+| 19 | `WS-Ledger-Record.Ledger-PC` | `Ledger-PC` · lvl 05 · `9(2)` · DISPLAY `[copybooks/wsledger.cob:L20]` | copybook | storage: INT | — |
+| 20 | `WS-Ledger-Record.filler#26` | `filler` · lvl 03 · `x(5)` · FILLER `[copybooks/wsledger.cob:L26]` | copybook | storage: STR | — |
+| 21 | `WS-Ledger-Record.Quarters` | `Quarters` · lvl 03 · GROUP · group `[copybooks/wsledger.cob:L30]` | copybook | — | — |
+| 22 | `WS-Ledger-Record.filler#35` | `filler` · lvl 03 · GROUP · redefines `Quarters` · group · FILLER `[copybooks/wsledger.cob:L35]` | copybook | — | — |
+| 23 | `WS-Ledger-Record.Ledger-Q` | `Ledger-Q` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY · occurs 4 `[copybooks/wsledger.cob:L36]` | copybook | storage: DECIMAL | — |
+| 24 | `WS-Ledger-Record.filler#37` | `filler` · lvl 03 · `x(50)` · FILLER `[copybooks/wsledger.cob:L37]` | copybook | storage: STR | — |
+
+#### `copybooks/wspost.cob` — 3 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 25 | `WS-Posting-Record.WS-Posting-Record` | `WS-Posting-Record` · lvl 01 · GROUP · group `[copybooks/wspost.cob:L12]` | copybook | — | — |
+| 26 | `WS-Posting-Record.Batch` | `Batch` · lvl 05 · `9(5)` · DISPLAY `[copybooks/wspost.cob:L15]` | copybook | storage: INT | — |
+| 27 | `WS-Posting-Record.Post-Number` | `Post-Number` · lvl 05 · `9(5)` · DISPLAY `[copybooks/wspost.cob:L16]` | copybook | storage: INT | — |
+
+#### `copybooks/irswsdflt.cob` — 2 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 28 | `Default-Record.Default-Record#8` | `Default-Record` · lvl 01 · GROUP · group `[copybooks/irswsdflt.cob:L8]` | copybook | — | — |
+| 29 | `Default-Record.Def-Group#9` | `Def-Group` · lvl 03 · GROUP · occurs 33 · group `[copybooks/irswsdflt.cob:L9]` | copybook | — | — |
+
+#### `copybooks/irswsfinal.cob` — 58 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 30 | `Final-Record.Final-Record#7` | `Final-Record` · lvl 01 · GROUP · group `[copybooks/irswsfinal.cob:L7]` | copybook | — | — |
+| 31 | `Final-Record.ar1-fields` | `ar1-fields` · lvl 03 · GROUP · group `[copybooks/irswsfinal.cob:L8]` | copybook | — | — |
+| 32 | `Final-Record.ar1-1` | `ar1-1` · lvl 05 · `x(24)` `[copybooks/irswsfinal.cob:L9]` | copybook | storage: STR | — |
+| 33 | `Final-Record.ar1-2` | `ar1-2` · lvl 05 · `x(24)` `[copybooks/irswsfinal.cob:L10]` | copybook | storage: STR | — |
+| 34 | `Final-Record.ar1-3` | `ar1-3` · lvl 05 · `x(24)` `[copybooks/irswsfinal.cob:L11]` | copybook | storage: STR | — |
+| 35 | `Final-Record.ar1-4` | `ar1-4` · lvl 05 · `x(24)` `[copybooks/irswsfinal.cob:L12]` | copybook | storage: STR | — |
+| 36 | `Final-Record.ar1-5` | `ar1-5` · lvl 05 · `x(24)` `[copybooks/irswsfinal.cob:L13]` | copybook | storage: STR | — |
+| 37 | `Final-Record.ar1-6` | `ar1-6` · lvl 05 · `x(24)` `[copybooks/irswsfinal.cob:L14]` | copybook | storage: STR | — |
+| 38 | `Final-Record.ar1-7` | `ar1-7` · lvl 05 · `x(24)` `[copybooks/irswsfinal.cob:L15]` | copybook | storage: STR | — |
+| 39 | `Final-Record.ar1-8` | `ar1-8` · lvl 05 · `x(24)` `[copybooks/irswsfinal.cob:L16]` | copybook | storage: STR | — |
+| 40 | `Final-Record.ar1-9` | `ar1-9` · lvl 05 · `x(24)` `[copybooks/irswsfinal.cob:L17]` | copybook | storage: STR | — |
+| 41 | `Final-Record.ar1-10` | `ar1-10` · lvl 05 · `x(24)` `[copybooks/irswsfinal.cob:L18]` | copybook | storage: STR | — |
+| 42 | `Final-Record.ar1-11` | `ar1-11` · lvl 05 · `x(24)` `[copybooks/irswsfinal.cob:L19]` | copybook | storage: STR | — |
+| 43 | `Final-Record.ar1-12` | `ar1-12` · lvl 05 · `x(24)` `[copybooks/irswsfinal.cob:L20]` | copybook | storage: STR | — |
+| 44 | `Final-Record.ar1-13` | `ar1-13` · lvl 05 · `x(24)` `[copybooks/irswsfinal.cob:L21]` | copybook | storage: STR | — |
+| 45 | `Final-Record.ar1-14` | `ar1-14` · lvl 05 · `x(24)` `[copybooks/irswsfinal.cob:L22]` | copybook | storage: STR | — |
+| 46 | `Final-Record.ar1-15` | `ar1-15` · lvl 05 · `x(24)` `[copybooks/irswsfinal.cob:L23]` | copybook | storage: STR | — |
+| 47 | `Final-Record.ar1-16` | `ar1-16` · lvl 05 · `x(24)` `[copybooks/irswsfinal.cob:L24]` | copybook | storage: STR | — |
+| 48 | `Final-Record.ar1-17` | `ar1-17` · lvl 05 · `x(24)` `[copybooks/irswsfinal.cob:L25]` | copybook | storage: STR | — |
+| 49 | `Final-Record.ar1-18` | `ar1-18` · lvl 05 · `x(24)` `[copybooks/irswsfinal.cob:L26]` | copybook | storage: STR | — |
+| 50 | `Final-Record.ar1-19` | `ar1-19` · lvl 05 · `x(24)` `[copybooks/irswsfinal.cob:L27]` | copybook | storage: STR | — |
+| 51 | `Final-Record.ar1-20` | `ar1-20` · lvl 05 · `x(24)` `[copybooks/irswsfinal.cob:L28]` | copybook | storage: STR | — |
+| 52 | `Final-Record.ar1-21` | `ar1-21` · lvl 05 · `x(24)` `[copybooks/irswsfinal.cob:L29]` | copybook | storage: STR | — |
+| 53 | `Final-Record.ar1-22` | `ar1-22` · lvl 05 · `x(24)` `[copybooks/irswsfinal.cob:L30]` | copybook | storage: STR | — |
+| 54 | `Final-Record.ar1-23` | `ar1-23` · lvl 05 · `x(24)` `[copybooks/irswsfinal.cob:L31]` | copybook | storage: STR | — |
+| 55 | `Final-Record.ar1-24` | `ar1-24` · lvl 05 · `x(24)` `[copybooks/irswsfinal.cob:L32]` | copybook | storage: STR | — |
+| 56 | `Final-Record.ar1-25` | `ar1-25` · lvl 05 · `x(24)` `[copybooks/irswsfinal.cob:L33]` | copybook | storage: STR | — |
+| 57 | `Final-Record.ar1-26` | `ar1-26` · lvl 05 · `x(24)` `[copybooks/irswsfinal.cob:L34]` | copybook | storage: STR | — |
+| 58 | `Final-Record.filler#35` | `filler` · lvl 03 · GROUP · redefines `ar1-fields` · group · FILLER `[copybooks/irswsfinal.cob:L35]` | copybook | — | — |
+| 59 | `Final-Record.ar2-fields` | `ar2-fields` · lvl 03 · GROUP · group `[copybooks/irswsfinal.cob:L38]` | copybook | — | — |
+| 60 | `Final-Record.ar2-1` | `ar2-1` · lvl 05 · `x` `[copybooks/irswsfinal.cob:L39]` | copybook | storage: STR | — |
+| 61 | `Final-Record.ar2-2` | `ar2-2` · lvl 05 · `x` `[copybooks/irswsfinal.cob:L40]` | copybook | storage: STR | — |
+| 62 | `Final-Record.ar2-3` | `ar2-3` · lvl 05 · `x` `[copybooks/irswsfinal.cob:L41]` | copybook | storage: STR | — |
+| 63 | `Final-Record.ar2-4` | `ar2-4` · lvl 05 · `x` `[copybooks/irswsfinal.cob:L42]` | copybook | storage: STR | — |
+| 64 | `Final-Record.ar2-5` | `ar2-5` · lvl 05 · `x` `[copybooks/irswsfinal.cob:L43]` | copybook | storage: STR | — |
+| 65 | `Final-Record.ar2-6` | `ar2-6` · lvl 05 · `x` `[copybooks/irswsfinal.cob:L44]` | copybook | storage: STR | — |
+| 66 | `Final-Record.ar2-7` | `ar2-7` · lvl 05 · `x` `[copybooks/irswsfinal.cob:L45]` | copybook | storage: STR | — |
+| 67 | `Final-Record.ar2-8` | `ar2-8` · lvl 05 · `x` `[copybooks/irswsfinal.cob:L46]` | copybook | storage: STR | — |
+| 68 | `Final-Record.ar2-9` | `ar2-9` · lvl 05 · `x` `[copybooks/irswsfinal.cob:L47]` | copybook | storage: STR | — |
+| 69 | `Final-Record.ar2-10` | `ar2-10` · lvl 05 · `x` `[copybooks/irswsfinal.cob:L48]` | copybook | storage: STR | — |
+| 70 | `Final-Record.ar2-11` | `ar2-11` · lvl 05 · `x` `[copybooks/irswsfinal.cob:L49]` | copybook | storage: STR | — |
+| 71 | `Final-Record.ar2-12` | `ar2-12` · lvl 05 · `x` `[copybooks/irswsfinal.cob:L50]` | copybook | storage: STR | — |
+| 72 | `Final-Record.ar2-13` | `ar2-13` · lvl 05 · `x` `[copybooks/irswsfinal.cob:L51]` | copybook | storage: STR | — |
+| 73 | `Final-Record.ar2-14` | `ar2-14` · lvl 05 · `x` `[copybooks/irswsfinal.cob:L52]` | copybook | storage: STR | — |
+| 74 | `Final-Record.ar2-15` | `ar2-15` · lvl 05 · `x` `[copybooks/irswsfinal.cob:L53]` | copybook | storage: STR | — |
+| 75 | `Final-Record.ar2-16` | `ar2-16` · lvl 05 · `x` `[copybooks/irswsfinal.cob:L54]` | copybook | storage: STR | — |
+| 76 | `Final-Record.ar2-17` | `ar2-17` · lvl 05 · `x` `[copybooks/irswsfinal.cob:L55]` | copybook | storage: STR | — |
+| 77 | `Final-Record.ar2-18` | `ar2-18` · lvl 05 · `x` `[copybooks/irswsfinal.cob:L56]` | copybook | storage: STR | — |
+| 78 | `Final-Record.ar2-19` | `ar2-19` · lvl 05 · `x` `[copybooks/irswsfinal.cob:L57]` | copybook | storage: STR | — |
+| 79 | `Final-Record.ar2-20` | `ar2-20` · lvl 05 · `x` `[copybooks/irswsfinal.cob:L58]` | copybook | storage: STR | — |
+| 80 | `Final-Record.ar2-21` | `ar2-21` · lvl 05 · `x` `[copybooks/irswsfinal.cob:L59]` | copybook | storage: STR | — |
+| 81 | `Final-Record.ar2-22` | `ar2-22` · lvl 05 · `x` `[copybooks/irswsfinal.cob:L60]` | copybook | storage: STR | — |
+| 82 | `Final-Record.ar2-23` | `ar2-23` · lvl 05 · `x` `[copybooks/irswsfinal.cob:L61]` | copybook | storage: STR | — |
+| 83 | `Final-Record.ar2-24` | `ar2-24` · lvl 05 · `x` `[copybooks/irswsfinal.cob:L62]` | copybook | storage: STR | — |
+| 84 | `Final-Record.ar2-25` | `ar2-25` · lvl 05 · `x` `[copybooks/irswsfinal.cob:L63]` | copybook | storage: STR | — |
+| 85 | `Final-Record.ar2-26` | `ar2-26` · lvl 05 · `x` `[copybooks/irswsfinal.cob:L64]` | copybook | storage: STR | — |
+| 86 | `Final-Record.filler#65` | `filler` · lvl 03 · GROUP · redefines `ar2-fields` · group · FILLER `[copybooks/irswsfinal.cob:L65]` | copybook | — | — |
+| 87 | `Final-Record.ar3` | `ar3` · lvl 03 · `x(5)` `[copybooks/irswsfinal.cob:L68]` | copybook | storage: STR | — |
+
+#### `copybooks/irswsnl.cob` — 5 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 88 | `NL-Record.NL-Record` | `NL-Record` · lvl 01 · GROUP · group `[copybooks/irswsnl.cob:L8]` | copybook | — | — |
+| 89 | `NL-Record.NL-Owning` | `NL-Owning` · lvl 05 · `9(5)` · DISPLAY `[copybooks/irswsnl.cob:L10]` | copybook | storage: INT | — |
+| 90 | `NL-Record.NL-Sub-Nominal` | `NL-Sub-Nominal` · lvl 05 · `9(5)` · DISPLAY `[copybooks/irswsnl.cob:L11]` | copybook | storage: INT | — |
+| 91 | `NL-Record.NL-Data` | `NL-Data` · lvl 03 · GROUP · group `[copybooks/irswsnl.cob:L15]` | copybook | — | — |
+| 92 | `NL-Record.filler` | `filler` · lvl 03 · GROUP · redefines `NL-Data` · group · FILLER `[copybooks/irswsnl.cob:L22]` | copybook | — | — |
+
+#### `copybooks/irswspost.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 93 | `Posting-Record.Posting-Record` | `Posting-Record` · lvl 01 · GROUP · group `[copybooks/irswspost.cob:L8]` | copybook | — | — |
+
+#### `copybooks/wspost-irs.cob` — 3 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 94 | `WS-IRS-Posting-Record.WS-IRS-Posting-Record` | `WS-IRS-Posting-Record` · lvl 01 · GROUP · group `[copybooks/wspost-irs.cob:L13]` | copybook | — | — |
+| 95 | `WS-IRS-Posting-Record.WS-IRS-Batch` | `WS-IRS-Batch` · lvl 05 · `9(5)` · DISPLAY `[copybooks/wspost-irs.cob:L15]` | copybook | storage: INT | — |
+| 96 | `WS-IRS-Posting-Record.WS-IRS-Post-Number` | `WS-IRS-Post-Number` · lvl 05 · `9(5)` · DISPLAY `[copybooks/wspost-irs.cob:L16]` | copybook | storage: INT | — |
+
+#### `copybooks/plwspinv.cob` — 14 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 97 | `PInvoice-Header.PInvoice-Header` | `PInvoice-Header` · lvl 01 · GROUP · group `[copybooks/plwspinv.cob:L8]` | copybook | — | — |
+| 98 | `PInvoice-Header.ih-prime` | `ih-prime` · lvl 03 · GROUP · group `[copybooks/plwspinv.cob:L9]` | copybook | — | — |
+| 99 | `PInvoice-Header.ih-Nos` | `ih-Nos` · lvl 07 · `x(6)` `[copybooks/plwspinv.cob:L14]` | copybook | storage: STR | — |
+| 100 | `PInvoice-Header.ih-Check` | `ih-Check` · lvl 07 · `9` · DISPLAY `[copybooks/plwspinv.cob:L15]` | copybook | storage: INT | — |
+| 101 | `PInvoice-Header.ih-Freq` | `ih-Freq` · lvl 07 · `x` `[copybooks/plwspinv.cob:L18]` | copybook | storage: STR | — |
+| 102 | `PInvoice-Header.ih-Repeat` | `ih-Repeat` · lvl 07 · `99` · DISPLAY `[copybooks/plwspinv.cob:L25]` | copybook | storage: INT | — |
+| 103 | `PInvoice-Header.filler` | `filler` · lvl 07 · `xxx` · FILLER `[copybooks/plwspinv.cob:L26]` | copybook | storage: STR | — |
+| 104 | `PInvoice-Header.ih-Last-Date` | `ih-Last-Date` · lvl 07 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv.cob:L27]` | copybook | storage: INT | — |
+| 105 | `PInvoice-Header.ih-sub-prime` | `ih-sub-prime` · lvl 03 · GROUP · group `[copybooks/plwspinv.cob:L30]` | copybook | — | — |
+| 106 | `PInvoice-Header.ih-Fig` | `ih-Fig` · lvl 05 · GROUP · group `[copybooks/plwspinv.cob:L31]` | copybook | — | — |
+| 107 | `Pinvoice-Bodies.Pinvoice-Bodies` | `Pinvoice-Bodies` · lvl 01 · GROUP · group `[copybooks/plwspinv.cob:L65]` | copybook | — | — |
+| 108 | `Pinvoice-Bodies.invoice-line` | `invoice-line` · lvl 03 · GROUP · occurs 40 · group `[copybooks/plwspinv.cob:L66]` | copybook | — | — |
+| 109 | `Pinvoice-Bodies.filler#72` | `filler` · lvl 05 · `xx` · FILLER `[copybooks/plwspinv.cob:L72]` | copybook | storage: STR | — |
+| 110 | `Pinvoice-Bodies.filler#76` | `filler` · lvl 05 · `xx` · FILLER `[copybooks/plwspinv.cob:L76]` | copybook | storage: STR | — |
+
+#### `copybooks/plwspinv2.cob` — 54 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 111 | `WS-PInvoice-Record.WS-PInvoice-Record` | `WS-PInvoice-Record` · lvl 01 · GROUP · group `[copybooks/plwspinv2.cob:L10]` | copybook | — | — |
+| 112 | `WS-PInvoice-Record.Invoice-Key` | `Invoice-Key` · lvl 03 · GROUP · group `[copybooks/plwspinv2.cob:L11]` | copybook | — | — |
+| 113 | `WS-PInvoice-Record.Invoice-Nos` | `Invoice-Nos` · lvl 05 · `9(8)` · DISPLAY `[copybooks/plwspinv2.cob:L12]` | copybook | storage: INT | — |
+| 114 | `WS-PInvoice-Record.Item-Nos` | `Item-Nos` · lvl 05 · `99` · DISPLAY `[copybooks/plwspinv2.cob:L13]` | copybook | storage: INT | — |
+| 115 | `WS-PInvoice-Record.Invoice-Supplier` | `Invoice-Supplier` · lvl 03 · `x(7)` `[copybooks/plwspinv2.cob:L14]` | copybook | storage: STR | — |
+| 116 | `WS-PInvoice-Record.Invoice-Date` | `Invoice-Date` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv2.cob:L15]` | copybook | storage: INT | — |
+| 117 | `WS-PInvoice-Record.Inv-Order` | `Inv-Order` · lvl 03 · `x(10)` `[copybooks/plwspinv2.cob:L16]` | copybook | storage: STR | — |
+| 118 | `WS-PInvoice-Record.Invoice-Type` | `Invoice-Type` · lvl 03 · `9` · DISPLAY `[copybooks/plwspinv2.cob:L17]` | copybook | storage: INT | — |
+| 119 | `WS-PInvoice-Record.filler#18` | `filler` · lvl 03 · `x(10)` · FILLER `[copybooks/plwspinv2.cob:L18]` | copybook | storage: STR | — |
+| 120 | `WS-PInvoice-Record.filler#19` | `filler` · lvl 03 · `x(58)` · FILLER `[copybooks/plwspinv2.cob:L19]` | copybook | storage: STR | — |
+| 121 | `Invoice-Header.Invoice-Header#21` | `Invoice-Header` · lvl 01 · GROUP · redefines `WS-PInvoice-Record` · group `[copybooks/plwspinv2.cob:L21]` | copybook | — | — |
+| 122 | `Invoice-Header.ih-invoice#22` | `ih-invoice` · lvl 03 · `9(8)` · DISPLAY `[copybooks/plwspinv2.cob:L22]` | copybook | storage: INT | — |
+| 123 | `Invoice-Header.ih-test#23` | `ih-test` · lvl 03 · `99` · DISPLAY `[copybooks/plwspinv2.cob:L23]` | copybook | storage: INT | — |
+| 124 | `Invoice-Header.ih-supplier` | `ih-supplier` · lvl 03 · GROUP · group `[copybooks/plwspinv2.cob:L24]` | copybook | — | — |
+| 125 | `Invoice-Header.ih-nos#25` | `ih-nos` · lvl 05 · `x(6)` `[copybooks/plwspinv2.cob:L25]` | copybook | storage: STR | — |
+| 126 | `Invoice-Header.ih-check#26` | `ih-check` · lvl 05 · `9` · DISPLAY `[copybooks/plwspinv2.cob:L26]` | copybook | storage: INT | — |
+| 127 | `Invoice-Header.ih-date#27` | `ih-date` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv2.cob:L27]` | copybook | storage: INT | — |
+| 128 | `Invoice-Header.ih-order#28` | `ih-order` · lvl 03 · `x(10)` `[copybooks/plwspinv2.cob:L28]` | copybook | storage: STR | — |
+| 129 | `Invoice-Header.ih-type#29` | `ih-type` · lvl 03 · `9` · DISPLAY `[copybooks/plwspinv2.cob:L29]` | copybook | storage: INT | — |
+| 130 | `Invoice-Header.ih-ref#30` | `ih-ref` · lvl 03 · `x(10)` `[copybooks/plwspinv2.cob:L30]` | copybook | storage: STR | — |
+| 131 | `Invoice-Header.ih-fig#31` | `ih-fig` · lvl 03 · GROUP · group `[copybooks/plwspinv2.cob:L31]` | copybook | — | — |
+| 132 | `Invoice-Header.ih-p-c#32` | `ih-p-c` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv2.cob:L32]` | copybook | storage: DECIMAL | — |
+| 133 | `Invoice-Header.ih-net#33` | `ih-net` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv2.cob:L33]` | copybook | storage: DECIMAL | — |
+| 134 | `Invoice-Header.ih-extra#34` | `ih-extra` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv2.cob:L34]` | copybook | storage: DECIMAL | — |
+| 135 | `Invoice-Header.ih-carriage#35` | `ih-carriage` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv2.cob:L35]` | copybook | storage: DECIMAL | — |
+| 136 | `Invoice-Header.ih-vat#36` | `ih-vat` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv2.cob:L36]` | copybook | storage: DECIMAL | — |
+| 137 | `Invoice-Header.ih-discount#37` | `ih-discount` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv2.cob:L37]` | copybook | storage: DECIMAL | — |
+| 138 | `Invoice-Header.ih-e-vat#38` | `ih-e-vat` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv2.cob:L38]` | copybook | storage: DECIMAL | — |
+| 139 | `Invoice-Header.ih-c-vat#39` | `ih-c-vat` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv2.cob:L39]` | copybook | storage: DECIMAL | — |
+| 140 | `Invoice-Header.ih-status#40` | `ih-status` · lvl 03 · `x` `[copybooks/plwspinv2.cob:L40]` | copybook | storage: STR | — |
+| 141 | `Invoice-Header.ih-lines#44` | `ih-lines` · lvl 03 · BINARY-CHAR · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv2.cob:L44]` | copybook | storage: INT | — |
+| 142 | `Invoice-Header.ih-deduct-days#45` | `ih-deduct-days` · lvl 03 · BINARY-CHAR · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv2.cob:L45]` | copybook | storage: INT | — |
+| 143 | `Invoice-Header.ih-deduct-amt#46` | `ih-deduct-amt` · lvl 03 · `999v99` · COMP `[copybooks/plwspinv2.cob:L46]` | copybook | storage: DECIMAL | — |
+| 144 | `Invoice-Header.ih-deduct-vat#47` | `ih-deduct-vat` · lvl 03 · `999v99` · COMP `[copybooks/plwspinv2.cob:L47]` | copybook | storage: DECIMAL | — |
+| 145 | `Invoice-Header.ih-days#48` | `ih-days` · lvl 03 · BINARY-CHAR · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv2.cob:L48]` | copybook | storage: INT | — |
+| 146 | `Invoice-Header.ih-cr#49` | `ih-cr` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv2.cob:L49]` | copybook | storage: INT | — |
+| 147 | `Invoice-Header.ih-day-book-flag#50` | `ih-day-book-flag` · lvl 03 · `x` `[copybooks/plwspinv2.cob:L50]` | copybook | storage: STR | — |
+| 148 | `Invoice-Header.ih-update#52` | `ih-update` · lvl 03 · `x` `[copybooks/plwspinv2.cob:L52]` | copybook | storage: STR | — |
+| 149 | `Invoice-Line.Invoice-Line#56` | `Invoice-Line` · lvl 01 · GROUP · redefines `WS-PInvoice-Record` · group `[copybooks/plwspinv2.cob:L56]` | copybook | — | — |
+| 150 | `Invoice-Line.il-invoice#57` | `il-invoice` · lvl 03 · `9(8)` · DISPLAY `[copybooks/plwspinv2.cob:L57]` | copybook | storage: INT | — |
+| 151 | `Invoice-Line.il-line#58` | `il-line` · lvl 03 · `99` · DISPLAY `[copybooks/plwspinv2.cob:L58]` | copybook | storage: INT | — |
+| 152 | `Invoice-Line.il-product#59` | `il-product` · lvl 03 · `x(13)` `[copybooks/plwspinv2.cob:L59]` | copybook | storage: STR | — |
+| 153 | `Invoice-Line.il-pa#60` | `il-pa` · lvl 03 · `xx` `[copybooks/plwspinv2.cob:L60]` | copybook | storage: STR | — |
+| 154 | `Invoice-Line.filler#61` | `filler` · lvl 03 · `xx` · FILLER `[copybooks/plwspinv2.cob:L61]` | copybook | storage: STR | — |
+| 155 | `Invoice-Line.il-qty#62` | `il-qty` · lvl 03 · BINARY-SHORT · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv2.cob:L62]` | copybook | storage: INT | — |
+| 156 | `Invoice-Line.il-type#63` | `il-type` · lvl 03 · `x` `[copybooks/plwspinv2.cob:L63]` | copybook | storage: STR | — |
+| 157 | `Invoice-Line.il-description#64` | `il-description` · lvl 03 · `x(24)` `[copybooks/plwspinv2.cob:L64]` | copybook | storage: STR | — |
+| 158 | `Invoice-Line.filler#65` | `filler` · lvl 03 · `xx` · FILLER `[copybooks/plwspinv2.cob:L65]` | copybook | storage: STR | — |
+| 159 | `Invoice-Line.il-net#66` | `il-net` · lvl 03 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv2.cob:L66]` | copybook | storage: DECIMAL | — |
+| 160 | `Invoice-Line.il-unit#67` | `il-unit` · lvl 03 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv2.cob:L67]` | copybook | storage: DECIMAL | — |
+| 161 | `Invoice-Line.il-discount#68` | `il-discount` · lvl 03 · `99v99` · COMP `[copybooks/plwspinv2.cob:L68]` | copybook | storage: DECIMAL | — |
+| 162 | `Invoice-Line.il-vat#69` | `il-vat` · lvl 03 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/plwspinv2.cob:L69]` | copybook | storage: DECIMAL | — |
+| 163 | `Invoice-Line.il-vat-code#70` | `il-vat-code` · lvl 03 · `9` · DISPLAY `[copybooks/plwspinv2.cob:L70]` | copybook | storage: INT | — |
+| 164 | `Invoice-Line.il-update#71` | `il-update` · lvl 03 · `x` `[copybooks/plwspinv2.cob:L71]` | copybook | storage: STR | — |
+
+#### `copybooks/plwsoi.cob` — 7 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 165 | `OI-Header.OI-Header#12` | `OI-Header` · lvl 01 · GROUP · group `[copybooks/plwsoi.cob:L12]` | copybook | — | — |
+| 166 | `OI-Header.OI-Key` | `OI-Key` · lvl 03 · GROUP · group `[copybooks/plwsoi.cob:L13]` | copybook | — | — |
+| 167 | `OI-Header.OI-Customer` | `OI-Customer` · lvl 05 · GROUP · group `[copybooks/plwsoi.cob:L14]` | copybook | — | — |
+| 168 | `OI-Header.OI-Nos#16` | `OI-Nos` · lvl 09 · `X(6)` `[copybooks/plwsoi.cob:L16]` | copybook | storage: STR | — |
+| 169 | `OI-Header.OI-Check#17` | `OI-Check` · lvl 09 · `9` · DISPLAY `[copybooks/plwsoi.cob:L17]` | copybook | storage: INT | — |
+| 170 | `OI-Header.filler#41` | `filler` · lvl 03 · GROUP · group · FILLER `[copybooks/plwsoi.cob:L41]` | copybook | — | — |
+| 171 | `OI-Header.OI-Approp#44` | `OI-Approp` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY · redefines `OI-Net` `[copybooks/plwsoi.cob:L44]` | copybook | storage: DECIMAL | — |
+
+#### `copybooks/plwsoi5B.cob` — 6 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 172 | `WS-OTM5-Record.WS-OTM5-Record` | `WS-OTM5-Record` · lvl 01 · `x(113)` `[copybooks/plwsoi5B.cob:L10]` | copybook | storage: STR | — |
+| 173 | `Open-Item-Record-5.Open-Item-Record-5` | `Open-Item-Record-5` · lvl 01 · GROUP · redefines `WS-OTM5-Record` · group `[copybooks/plwsoi5B.cob:L12]` | copybook | — | — |
+| 174 | `Open-Item-Record-5.oi5-supplier` | `oi5-supplier` · lvl 05 · `x(7)` `[copybooks/plwsoi5B.cob:L14]` | copybook | storage: STR | — |
+| 175 | `Open-Item-Record-5.oi5-invoice` | `oi5-invoice` · lvl 05 · `9(8)` · DISPLAY `[copybooks/plwsoi5B.cob:L15]` | copybook | storage: INT | — |
+| 176 | `Open-Item-Record-5.oi5-date` | `oi5-date` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/plwsoi5B.cob:L16]` | copybook | storage: INT | — |
+| 177 | `Open-Item-Record-5.filler` | `filler` · lvl 03 · `x(94)` · FILLER `[copybooks/plwsoi5B.cob:L17]` | copybook | storage: STR | — |
+
+#### `copybooks/plwsoi5C.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 178 | `Open-Item-Record-5.oi5-key` | `oi5-key` · lvl 03 · GROUP · group `[copybooks/plwsoi5C.cob:L13]` | copybook | — | — |
+
+#### `copybooks/wspl.cob` — 8 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 179 | `WS-Purch-Record.WS-Purch-Record` | `WS-Purch-Record` · lvl 01 · GROUP · group `[copybooks/wspl.cob:L13]` | copybook | — | — |
+| 180 | `WS-Purch-Record.Purch-Addr1` | `Purch-Addr1` · lvl 05 · `x(48)` `[copybooks/wspl.cob:L24]` | copybook | storage: STR | — |
+| 181 | `WS-Purch-Record.Purch-Addr2` | `Purch-Addr2` · lvl 05 · `x(48)` `[copybooks/wspl.cob:L25]` | copybook | storage: STR | — |
+| 182 | `WS-Purch-Record.Quarters` | `Quarters` · lvl 03 · GROUP · group `[copybooks/wspl.cob:L45]` | copybook | — | — |
+| 183 | `WS-Purch-Record.filler#50` | `filler` · lvl 03 · GROUP · redefines `Quarters` · group · FILLER `[copybooks/wspl.cob:L50]` | copybook | — | — |
+| 184 | `WS-Purch-Record.PTurnover-q` | `PTurnover-q` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY · occurs 4 `[copybooks/wspl.cob:L51]` | copybook | storage: DECIMAL | — |
+| 185 | `WS-Purch-Record.Purch-Stats-Date` | `Purch-Stats-Date` · lvl 03 · `9(4)` · DISPLAY `[copybooks/wspl.cob:L53]` | copybook | storage: INT | — |
+| 186 | `WS-Purch-Record.filler#54` | `filler` · lvl 03 · `x(12)` · FILLER `[copybooks/wspl.cob:L54]` | copybook | storage: STR | — |
+
+#### `copybooks/slwsinv.cob` — 14 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 187 | `SInvoice-Header.SInvoice-Header` | `SInvoice-Header` · lvl 01 · GROUP · group `[copybooks/slwsinv.cob:L18]` | copybook | — | — |
+| 188 | `SInvoice-Header.sih-prime` | `sih-prime` · lvl 02 · GROUP · group `[copybooks/slwsinv.cob:L19]` | copybook | — | — |
+| 189 | `SInvoice-Header.sih-nos` | `sih-nos` · lvl 05 · `x(6)` `[copybooks/slwsinv.cob:L24]` | copybook | storage: STR | — |
+| 190 | `SInvoice-Header.sih-check` | `sih-check` · lvl 05 · `9` · DISPLAY `[copybooks/slwsinv.cob:L25]` | copybook | storage: INT | — |
+| 191 | `SInvoice-Header.filler#28` | `filler` · lvl 03 · GROUP · redefines `sih-order` · group · FILLER `[copybooks/slwsinv.cob:L28]` | copybook | — | — |
+| 192 | `SInvoice-Header.sih-Freq` | `sih-Freq` · lvl 05 · `x` `[copybooks/slwsinv.cob:L29]` | copybook | storage: STR | — |
+| 193 | `SInvoice-Header.sih-Repeat` | `sih-Repeat` · lvl 05 · `99` · DISPLAY `[copybooks/slwsinv.cob:L36]` | copybook | storage: INT | — |
+| 194 | `SInvoice-Header.filler#37` | `filler` · lvl 05 · `xxx` · FILLER `[copybooks/slwsinv.cob:L37]` | copybook | storage: STR | — |
+| 195 | `SInvoice-Header.sih-Last-Date` | `sih-Last-Date` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv.cob:L38]` | copybook | storage: INT | — |
+| 196 | `SInvoice-Header.Sih-Sub-Prime` | `Sih-Sub-Prime` · lvl 02 · GROUP · group `[copybooks/slwsinv.cob:L41]` | copybook | — | — |
+| 197 | `SInvoice-Header.sih-fig` | `sih-fig` · lvl 03 · GROUP · group `[copybooks/slwsinv.cob:L43]` | copybook | — | — |
+| 198 | `SInvoice-Bodies.SInvoice-Bodies` | `SInvoice-Bodies` · lvl 01 · GROUP · group `[copybooks/slwsinv.cob:L80]` | copybook | — | — |
+| 199 | `SInvoice-Bodies.Invoice-Line` | `Invoice-Line` · lvl 03 · GROUP · occurs 40 · group `[copybooks/slwsinv.cob:L81]` | copybook | — | — |
+| 200 | `SInvoice-Bodies.sil-Back-Ordered` | `sil-Back-Ordered` · lvl 05 · `x` `[copybooks/slwsinv.cob:L97]` | copybook | storage: STR | — |
+
+#### `copybooks/slwsinv2.cob` — 66 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 201 | `Invoice-Record.Invoice-Record` | `Invoice-Record` · lvl 01 · GROUP · group `[copybooks/slwsinv2.cob:L27]` | copybook | — | — |
+| 202 | `Invoice-Record.Invoice-Key` | `Invoice-Key` · lvl 03 · GROUP · group `[copybooks/slwsinv2.cob:L28]` | copybook | — | — |
+| 203 | `Invoice-Record.Invoice-Nos` | `Invoice-Nos` · lvl 05 · `9(8)` · DISPLAY `[copybooks/slwsinv2.cob:L29]` | copybook | storage: INT | — |
+| 204 | `Invoice-Record.Item-Nos` | `Item-Nos` · lvl 05 · `99` · DISPLAY `[copybooks/slwsinv2.cob:L30]` | copybook | storage: INT | — |
+| 205 | `Invoice-Record.Invoice-Customer` | `Invoice-Customer` · lvl 03 · `x(7)` `[copybooks/slwsinv2.cob:L31]` | copybook | storage: STR | — |
+| 206 | `Invoice-Record.Invoice-Date` | `Invoice-Date` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv2.cob:L32]` | copybook | storage: INT | — |
+| 207 | `Invoice-Record.Filler` | `Filler` · lvl 03 · `x(10)` · FILLER `[copybooks/slwsinv2.cob:L33]` | copybook | storage: STR | — |
+| 208 | `Invoice-Record.Invoice-Type` | `Invoice-Type` · lvl 03 · `9` · DISPLAY `[copybooks/slwsinv2.cob:L34]` | copybook | storage: INT | — |
+| 209 | `Invoice-Record.filler#35` | `filler` · lvl 03 · `x(10)` · FILLER `[copybooks/slwsinv2.cob:L35]` | copybook | storage: STR | — |
+| 210 | `Invoice-Record.filler#36` | `filler` · lvl 03 · `x(95)` · FILLER `[copybooks/slwsinv2.cob:L36]` | copybook | storage: STR | — |
+| 211 | `Invoice-Header.Invoice-Header#38` | `Invoice-Header` · lvl 01 · GROUP · redefines `Invoice-Record` · group `[copybooks/slwsinv2.cob:L38]` | copybook | — | — |
+| 212 | `Invoice-Header.ih-prime` | `ih-prime` · lvl 02 · GROUP · group `[copybooks/slwsinv2.cob:L39]` | copybook | — | — |
+| 213 | `Invoice-Header.ih-invoice#40` | `ih-invoice` · lvl 03 · `9(8)` · DISPLAY `[copybooks/slwsinv2.cob:L40]` | copybook | storage: INT | — |
+| 214 | `Invoice-Header.ih-test#41` | `ih-test` · lvl 03 · `99` · DISPLAY `[copybooks/slwsinv2.cob:L41]` | copybook | storage: INT | — |
+| 215 | `Invoice-Header.ih-customer` | `ih-customer` · lvl 03 · GROUP · group `[copybooks/slwsinv2.cob:L42]` | copybook | — | — |
+| 216 | `Invoice-Header.ih-nos#43` | `ih-nos` · lvl 05 · `x(6)` `[copybooks/slwsinv2.cob:L43]` | copybook | storage: STR | — |
+| 217 | `Invoice-Header.ih-check#44` | `ih-check` · lvl 05 · `9` · DISPLAY `[copybooks/slwsinv2.cob:L44]` | copybook | storage: INT | — |
+| 218 | `Invoice-Header.ih-date#45` | `ih-date` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv2.cob:L45]` | copybook | storage: INT | — |
+| 219 | `Invoice-Header.ih-order#46` | `ih-order` · lvl 03 · `x(10)` `[copybooks/slwsinv2.cob:L46]` | copybook | storage: STR | — |
+| 220 | `Invoice-Header.filler#47` | `filler` · lvl 03 · GROUP · redefines `ih-order` · group · FILLER `[copybooks/slwsinv2.cob:L47]` | copybook | — | — |
+| 221 | `Invoice-Header.ih-Freq` | `ih-Freq` · lvl 05 · `x` `[copybooks/slwsinv2.cob:L48]` | copybook | storage: STR | — |
+| 222 | `Invoice-Header.ih-Repeat` | `ih-Repeat` · lvl 05 · `99` · DISPLAY `[copybooks/slwsinv2.cob:L55]` | copybook | storage: INT | — |
+| 223 | `Invoice-Header.filler#56` | `filler` · lvl 05 · `xxx` · FILLER `[copybooks/slwsinv2.cob:L56]` | copybook | storage: STR | — |
+| 224 | `Invoice-Header.ih-Last-Date` | `ih-Last-Date` · lvl 05 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv2.cob:L57]` | copybook | storage: INT | — |
+| 225 | `Invoice-Header.ih-type#58` | `ih-type` · lvl 03 · `9` · DISPLAY `[copybooks/slwsinv2.cob:L58]` | copybook | storage: INT | — |
+| 226 | `Invoice-Header.ih-ref#59` | `ih-ref` · lvl 03 · `x(10)` `[copybooks/slwsinv2.cob:L59]` | copybook | storage: STR | — |
+| 227 | `Invoice-Header.ih-sub-prime` | `ih-sub-prime` · lvl 02 · GROUP · group `[copybooks/slwsinv2.cob:L60]` | copybook | — | — |
+| 228 | `Invoice-Header.ih-description` | `ih-description` · lvl 03 · `x(32)` `[copybooks/slwsinv2.cob:L61]` | copybook | storage: STR | — |
+| 229 | `Invoice-Header.ih-fig#62` | `ih-fig` · lvl 03 · GROUP · group `[copybooks/slwsinv2.cob:L62]` | copybook | — | — |
+| 230 | `Invoice-Header.ih-p-c#63` | `ih-p-c` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv2.cob:L63]` | copybook | storage: DECIMAL | — |
+| 231 | `Invoice-Header.ih-net#64` | `ih-net` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv2.cob:L64]` | copybook | storage: DECIMAL | — |
+| 232 | `Invoice-Header.ih-extra#65` | `ih-extra` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv2.cob:L65]` | copybook | storage: DECIMAL | — |
+| 233 | `Invoice-Header.ih-carriage#66` | `ih-carriage` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv2.cob:L66]` | copybook | storage: DECIMAL | — |
+| 234 | `Invoice-Header.ih-vat#67` | `ih-vat` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv2.cob:L67]` | copybook | storage: DECIMAL | — |
+| 235 | `Invoice-Header.ih-discount#68` | `ih-discount` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv2.cob:L68]` | copybook | storage: DECIMAL | — |
+| 236 | `Invoice-Header.ih-e-vat#69` | `ih-e-vat` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv2.cob:L69]` | copybook | storage: DECIMAL | — |
+| 237 | `Invoice-Header.ih-c-vat#70` | `ih-c-vat` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv2.cob:L70]` | copybook | storage: DECIMAL | — |
+| 238 | `Invoice-Header.ih-status#71` | `ih-status` · lvl 03 · `x` `[copybooks/slwsinv2.cob:L71]` | copybook | storage: STR | — |
+| 239 | `Invoice-Header.ih-status-P` | `ih-status-P` · lvl 03 · `x` `[copybooks/slwsinv2.cob:L75]` | copybook | storage: STR | — |
+| 240 | `Invoice-Header.ih-status-L` | `ih-status-L` · lvl 03 · `x` `[copybooks/slwsinv2.cob:L76]` | copybook | storage: STR | — |
+| 241 | `Invoice-Header.ih-status-C` | `ih-status-C` · lvl 03 · `x` `[copybooks/slwsinv2.cob:L77]` | copybook | storage: STR | — |
+| 242 | `Invoice-Header.ih-status-A` | `ih-status-A` · lvl 03 · `x` `[copybooks/slwsinv2.cob:L78]` | copybook | storage: STR | — |
+| 243 | `Invoice-Header.ih-status-I` | `ih-status-I` · lvl 03 · `x` `[copybooks/slwsinv2.cob:L79]` | copybook | storage: STR | — |
+| 244 | `Invoice-Header.ih-lines#80` | `ih-lines` · lvl 03 · BINARY-CHAR · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv2.cob:L80]` | copybook | storage: INT | — |
+| 245 | `Invoice-Header.ih-deduct-days#81` | `ih-deduct-days` · lvl 03 · BINARY-CHAR · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv2.cob:L81]` | copybook | storage: INT | — |
+| 246 | `Invoice-Header.ih-deduct-amt#82` | `ih-deduct-amt` · lvl 03 · `999v99` · COMP `[copybooks/slwsinv2.cob:L82]` | copybook | storage: DECIMAL | — |
+| 247 | `Invoice-Header.ih-deduct-vat#83` | `ih-deduct-vat` · lvl 03 · `999v99` · COMP `[copybooks/slwsinv2.cob:L83]` | copybook | storage: DECIMAL | — |
+| 248 | `Invoice-Header.ih-days#84` | `ih-days` · lvl 03 · BINARY-CHAR · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv2.cob:L84]` | copybook | storage: INT | — |
+| 249 | `Invoice-Header.ih-cr#85` | `ih-cr` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv2.cob:L85]` | copybook | storage: INT | — |
+| 250 | `Invoice-Header.ih-day-book-flag#86` | `ih-day-book-flag` · lvl 03 · `x` `[copybooks/slwsinv2.cob:L86]` | copybook | storage: STR | — |
+| 251 | `Invoice-Header.ih-update#88` | `ih-update` · lvl 03 · `x` `[copybooks/slwsinv2.cob:L88]` | copybook | storage: STR | — |
+| 252 | `Invoice-Line.Invoice-Line#91` | `Invoice-Line` · lvl 01 · GROUP · redefines `Invoice-Record` · group `[copybooks/slwsinv2.cob:L91]` | copybook | — | — |
+| 253 | `Invoice-Line.il-invoice#92` | `il-invoice` · lvl 05 · `9(8)` · DISPLAY `[copybooks/slwsinv2.cob:L92]` | copybook | storage: INT | — |
+| 254 | `Invoice-Line.il-line#93` | `il-line` · lvl 05 · `99` · DISPLAY `[copybooks/slwsinv2.cob:L93]` | copybook | storage: INT | — |
+| 255 | `Invoice-Line.il-product#94` | `il-product` · lvl 05 · `x(13)` `[copybooks/slwsinv2.cob:L94]` | copybook | storage: STR | — |
+| 256 | `Invoice-Line.il-pa#95` | `il-pa` · lvl 05 · `xx` `[copybooks/slwsinv2.cob:L95]` | copybook | storage: STR | — |
+| 257 | `Invoice-Line.il-qty#96` | `il-qty` · lvl 05 · BINARY-SHORT · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv2.cob:L96]` | copybook | storage: INT | — |
+| 258 | `Invoice-Line.il-type#97` | `il-type` · lvl 05 · `x` `[copybooks/slwsinv2.cob:L97]` | copybook | storage: STR | — |
+| 259 | `Invoice-Line.il-description#98` | `il-description` · lvl 05 · `x(32)` `[copybooks/slwsinv2.cob:L98]` | copybook | storage: STR | — |
+| 260 | `Invoice-Line.il-net#99` | `il-net` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv2.cob:L99]` | copybook | storage: DECIMAL | — |
+| 261 | `Invoice-Line.il-unit#100` | `il-unit` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv2.cob:L100]` | copybook | storage: DECIMAL | — |
+| 262 | `Invoice-Line.il-discount#101` | `il-discount` · lvl 05 · `99v99` · COMP `[copybooks/slwsinv2.cob:L101]` | copybook | storage: DECIMAL | — |
+| 263 | `Invoice-Line.il-vat#102` | `il-vat` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY `[copybooks/slwsinv2.cob:L102]` | copybook | storage: DECIMAL | — |
+| 264 | `Invoice-Line.il-vat-code#103` | `il-vat-code` · lvl 05 · `9` · DISPLAY `[copybooks/slwsinv2.cob:L103]` | copybook | storage: INT | — |
+| 265 | `Invoice-Line.il-update#104` | `il-update` · lvl 05 · `x` `[copybooks/slwsinv2.cob:L104]` | copybook | storage: STR | — |
+| 266 | `Invoice-Line.il-Back-Ordered` | `il-Back-Ordered` · lvl 05 · `x` `[copybooks/slwsinv2.cob:L106]` | copybook | storage: STR | — |
+
+#### `copybooks/slwsoi.cob` — 7 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 267 | `OI-Header.OI-Header#8` | `OI-Header` · lvl 01 · GROUP · group `[copybooks/slwsoi.cob:L8]` | copybook | — | — |
+| 268 | `OI-Header.OI-key` | `OI-key` · lvl 02 · GROUP · group `[copybooks/slwsoi.cob:L9]` | copybook | — | — |
+| 269 | `OI-Header.OI-Nos#11` | `OI-Nos` · lvl 05 · `x(6)` `[copybooks/slwsoi.cob:L11]` | copybook | storage: STR | — |
+| 270 | `OI-Header.OI-Check#12` | `OI-Check` · lvl 05 · `9` · DISPLAY `[copybooks/slwsoi.cob:L12]` | copybook | storage: INT | — |
+| 271 | `OI-Header.filler#14` | `filler` · lvl 02 · GROUP · group · FILLER `[copybooks/slwsoi.cob:L14]` | copybook | — | — |
+| 272 | `OI-Header.filler#35` | `filler` · lvl 03 · GROUP · group · FILLER `[copybooks/slwsoi.cob:L35]` | copybook | — | — |
+| 273 | `OI-Header.OI-Approp#38` | `OI-Approp` · lvl 05 · `s9(7)v99` · COMP-3 · signed · sign IMPLICIT_BINARY · redefines `OI-Net` `[copybooks/slwsoi.cob:L38]` | copybook | storage: DECIMAL | — |
+
+#### `copybooks/slwsoi3.cob` — 6 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 274 | `WS-OTM3-Record.WS-OTM3-Record` | `WS-OTM3-Record` · lvl 01 · `x(118)` `[copybooks/slwsoi3.cob:L9]` | copybook | storage: STR | — |
+| 275 | `Open-Item-Record-3.Open-Item-Record-3` | `Open-Item-Record-3` · lvl 01 · GROUP · redefines `WS-OTM3-Record` · group `[copybooks/slwsoi3.cob:L11]` | copybook | — | — |
+| 276 | `Open-Item-Record-3.OI3-Customer` | `OI3-Customer` · lvl 05 · `x(7)` `[copybooks/slwsoi3.cob:L13]` | copybook | storage: STR | — |
+| 277 | `Open-Item-Record-3.OI3-Invoice` | `OI3-Invoice` · lvl 05 · `9(8)` · DISPLAY `[copybooks/slwsoi3.cob:L14]` | copybook | storage: INT | — |
+| 278 | `Open-Item-Record-3.OI3-Date` | `OI3-Date` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/slwsoi3.cob:L15]` | copybook | storage: INT | — |
+| 279 | `Open-Item-Record-3.filler` | `filler` · lvl 03 · `x(99)` · FILLER `[copybooks/slwsoi3.cob:L16]` | copybook | storage: STR | — |
+
+#### `copybooks/wssl.cob` — 8 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 280 | `WS-Sales-Record.WS-Sales-Record` | `WS-Sales-Record` · lvl 01 · GROUP · group `[copybooks/wssl.cob:L12]` | copybook | — | — |
+| 281 | `WS-Sales-Record.Sales-Addr1` | `Sales-Addr1` · lvl 05 · `x(48)` `[copybooks/wssl.cob:L19]` | copybook | storage: STR | — |
+| 282 | `WS-Sales-Record.Sales-Addr2` | `Sales-Addr2` · lvl 05 · `x(48)` `[copybooks/wssl.cob:L20]` | copybook | storage: STR | — |
+| 283 | `WS-Sales-Record.filler#40` | `filler` · lvl 03 · `xxx` · FILLER `[copybooks/wssl.cob:L40]` | copybook | storage: STR | — |
+| 284 | `WS-Sales-Record.Quarters` | `Quarters` · lvl 03 · GROUP · group `[copybooks/wssl.cob:L56]` | copybook | — | — |
+| 285 | `WS-Sales-Record.filler#61` | `filler` · lvl 03 · GROUP · redefines `Quarters` · group · FILLER `[copybooks/wssl.cob:L61]` | copybook | — | — |
+| 286 | `WS-Sales-Record.STurnover-Q` | `STurnover-Q` · lvl 05 · `s9(8)v99` · COMP-3 · signed · sign IMPLICIT_BINARY · occurs 4 `[copybooks/wssl.cob:L62]` | copybook | storage: DECIMAL | — |
+| 287 | `WS-Sales-Record.filler#68` | `filler` · lvl 03 · `x(5)` · FILLER `[copybooks/wssl.cob:L68]` | copybook | storage: STR | — |
+
+#### `copybooks/wsdflt.cob` — 3 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 288 | `Default-Record.Default-Record#14` | `Default-Record` · lvl 01 · GROUP · group `[copybooks/wsdflt.cob:L14]` | copybook | — | — |
+| 289 | `Default-Record.Def-Group#15` | `Def-Group` · lvl 03 · GROUP · occurs 33 · group `[copybooks/wsdflt.cob:L15]` | copybook | — | — |
+| 290 | `Default-Record.filler` | `filler` · lvl 03 · `x(793)` · FILLER `[copybooks/wsdflt.cob:L19]` | copybook | storage: STR | — |
+
+#### `copybooks/wsfinal.cob` — 2 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 291 | `Final-Record.Final-Record#10` | `Final-Record` · lvl 01 · GROUP · group `[copybooks/wsfinal.cob:L10]` | copybook | — | — |
+| 292 | `Final-Record.filler#12` | `filler` · lvl 03 · `x(608)` · FILLER `[copybooks/wsfinal.cob:L12]` | copybook | storage: STR | — |
+
+#### `copybooks/wssystem.cob` — 31 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 293 | `System-Record.System-Record` | `System-Record` · lvl 01 · GROUP · group `[copybooks/wssystem.cob:L48]` | copybook | — | — |
+| 294 | `System-Record.System-Data-Block` | `System-Data-Block` · lvl 03 · GROUP · group `[copybooks/wssystem.cob:L52]` | copybook | — | — |
+| 295 | `System-Record.Vat-Rates` | `Vat-Rates` · lvl 05 · GROUP · group `[copybooks/wssystem.cob:L55]` | copybook | — | — |
+| 296 | `System-Record.Vat-Rate` | `Vat-Rate` · lvl 05 · `99v99` · COMP · occurs 5 · redefines `Vat-Rates` `[copybooks/wssystem.cob:L61]` | copybook | storage: DECIMAL | — |
+| 297 | `System-Record.Scycle` | `Scycle` · lvl 05 · BINARY-CHAR · signed · sign IMPLICIT_BINARY · redefines `cyclea` `[copybooks/wssystem.cob:L63]` | copybook | storage: INT | — |
+| 298 | `System-Record.Usera` | `Usera` · lvl 07 · `x(32)` `[copybooks/wssystem.cob:L71]` | copybook | storage: STR | — |
+| 299 | `System-Record.Phone-No` | `Phone-No` · lvl 05 · `x(12)` `[copybooks/wssystem.cob:L80]` | copybook | storage: STR | — |
+| 300 | `System-Record.FILLER#81` | `FILLER` · lvl 05 · `x(20)` · FILLER `[copybooks/wssystem.cob:L81]` | copybook | storage: STR | — |
+| 301 | `System-Record.Level` | `Level` · lvl 05 · GROUP · group `[copybooks/wssystem.cob:L83]` | copybook | — | — |
+| 302 | `System-Record.RDBMS-Flat-Statuses` | `RDBMS-Flat-Statuses` · lvl 05 · GROUP · group `[copybooks/wssystem.cob:L111]` | copybook | — | — |
+| 303 | `System-Record.Maps-Ser-xx` | `Maps-Ser-xx` · lvl 07 · `xx` `[copybooks/wssystem.cob:L126]` | copybook | storage: STR | — |
+| 304 | `System-Record.Maps-Ser-nn` | `Maps-Ser-nn` · lvl 07 · BINARY-SHORT · signed · sign IMPLICIT_BINARY `[copybooks/wssystem.cob:L127]` | copybook | storage: INT | — |
+| 305 | `System-Record.General-Ledger-Block` | `General-Ledger-Block` · lvl 03 · GROUP · group `[copybooks/wssystem.cob:L150]` | copybook | — | — |
+| 306 | `System-Record.Purchase-Ledger-Block` | `Purchase-Ledger-Block` · lvl 03 · GROUP · group `[copybooks/wssystem.cob:L192]` | copybook | — | — |
+| 307 | `System-Record.FILLER#211` | `FILLER` · lvl 05 · `x(7)` · FILLER `[copybooks/wssystem.cob:L211]` | copybook | storage: STR | — |
+| 308 | `System-Record.Sales-Ledger-Block` | `Sales-Ledger-Block` · lvl 03 · GROUP · group `[copybooks/wssystem.cob:L215]` | copybook | — | — |
+| 309 | `System-Record.FILLER#252` | `FILLER` · lvl 05 · BINARY-SHORT · signed · sign IMPLICIT_BINARY · FILLER `[copybooks/wssystem.cob:L252]` | copybook | storage: INT | — |
+| 310 | `System-Record.SL-BO-Default` | `SL-BO-Default` · lvl 05 · `x` `[copybooks/wssystem.cob:L277]` | copybook | storage: STR | — |
+| 311 | `System-Record.FILLER#278` | `FILLER` · lvl 05 · `X(14)` · FILLER `[copybooks/wssystem.cob:L278]` | copybook | storage: STR | — |
+| 312 | `System-Record.Stock-Control-Block` | `Stock-Control-Block` · lvl 03 · GROUP · group `[copybooks/wssystem.cob:L290]` | copybook | — | — |
+| 313 | `System-Record.FILLER#299` | `FILLER` · lvl 05 · `x` · FILLER `[copybooks/wssystem.cob:L299]` | copybook | storage: STR | — |
+| 314 | `System-Record.FILLER#308` | `FILLER` · lvl 05 · `x(68)` · FILLER `[copybooks/wssystem.cob:L308]` | copybook | storage: STR | — |
+| 315 | `System-Record.IRS-Entry-Block` | `IRS-Entry-Block` · lvl 03 · GROUP · group `[copybooks/wssystem.cob:L309]` | copybook | — | — |
+| 316 | `System-Record.Vat-Rates2` | `Vat-Rates2` · lvl 05 · GROUP · group `[copybooks/wssystem.cob:L312]` | copybook | — | — |
+| 317 | `System-Record.Vat-Group` | `Vat-Group` · lvl 05 · GROUP · redefines `Vat-Rates2` · group `[copybooks/wssystem.cob:L316]` | copybook | — | — |
+| 318 | `System-Record.Vat-Psent` | `Vat-Psent` · lvl 07 · `99v99` · DISPLAY · occurs 3 `[copybooks/wssystem.cob:L317]` | copybook | storage: DECIMAL | — |
+| 319 | `System-Record.FILLER#323` | `FILLER` · lvl 05 · GROUP · redefines `PL-Approp-AC6` · group · FILLER `[copybooks/wssystem.cob:L323]` | copybook | — | — |
+| 320 | `System-Record.FILLER#324` | `FILLER` · lvl 07 · `9` · DISPLAY · FILLER `[copybooks/wssystem.cob:L324]` | copybook | storage: INT | — |
+| 321 | `System-Record.FILLER#327` | `FILLER` · lvl 05 · `x(59)` · FILLER `[copybooks/wssystem.cob:L327]` | copybook | storage: STR | — |
+| 322 | `System-Record.IRS-Data-Block` | `IRS-Data-Block` · lvl 03 · GROUP · redefines `IRS-Entry-Block` · group `[copybooks/wssystem.cob:L328]` | copybook | — | — |
+| 323 | `System-Record.FILLER-Dummy4` | `FILLER-Dummy4` · lvl 05 · `x(128)` `[copybooks/wssystem.cob:L329]` | copybook | storage: STR | — |
+
+#### `copybooks/wssys4.cob` — 4 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 324 | `System-Record-4.System-Record-4` | `System-Record-4` · lvl 01 · GROUP · group `[copybooks/wssys4.cob:L8]` | copybook | — | — |
+| 325 | `System-Record-4.Sales-Ledger-Data` | `Sales-Ledger-Data` · lvl 03 · GROUP · group `[copybooks/wssys4.cob:L9]` | copybook | — | — |
+| 326 | `System-Record-4.Purchase-Ledger-Data` | `Purchase-Ledger-Data` · lvl 03 · GROUP · group `[copybooks/wssys4.cob:L20]` | copybook | — | — |
+| 327 | `System-Record-4.filler` | `filler` · lvl 03 · `x(904)` · FILLER `[copybooks/wssys4.cob:L31]` | copybook | storage: STR | — |
+
+#### `copybooks/wsval.cob` — 5 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 328 | `WS-Value-Record.WS-Value-Record` | `WS-Value-Record` · lvl 01 · GROUP · group `[copybooks/wsval.cob:L9]` | copybook | — | — |
+| 329 | `WS-Value-Record.va-system` | `va-system` · lvl 05 · `x` `[copybooks/wsval.cob:L11]` | copybook | storage: STR | — |
+| 330 | `WS-Value-Record.va-group` | `va-group` · lvl 05 · GROUP · group `[copybooks/wsval.cob:L12]` | copybook | — | — |
+| 331 | `WS-Value-Record.va-first` | `va-first` · lvl 07 · `x` `[copybooks/wsval.cob:L13]` | copybook | storage: STR | — |
+| 332 | `WS-Value-Record.va-second` | `va-second` · lvl 07 · `x` `[copybooks/wsval.cob:L14]` | copybook | storage: STR | — |
+
+#### `copybooks/Test-Data-Flags.cob` — 4 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 333 | `ACAS-DAL-Common-data.ACAS-DAL-Common-data` | `ACAS-DAL-Common-data` · lvl 01 · GROUP · group `[copybooks/Test-Data-Flags.cob:L6]` | copybook | — | — |
+| 334 | `ACAS-DAL-Common-data.SW-Testing` | `SW-Testing` · lvl 03 · `9` · DISPLAY `[copybooks/Test-Data-Flags.cob:L10]` | copybook | storage: INT | — |
+| 335 | `ACAS-DAL-Common-data.SW-Testing-2` | `SW-Testing-2` · lvl 03 · `9` · DISPLAY `[copybooks/Test-Data-Flags.cob:L15]` | copybook | storage: INT | — |
+| 336 | `ACAS-DAL-Common-data.Log-File-Rec-Written` | `Log-File-Rec-Written` · lvl 03 · `9(6)` · DISPLAY `[copybooks/Test-Data-Flags.cob:L18]` | copybook | storage: INT | — |
+
+#### `copybooks/file00.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 337 | `File-Defs.file-0` | `file-0` · lvl 03 · `x(532)` `[copybooks/file00.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file02.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 338 | `File-Defs.file-2` | `file-2` · lvl 03 · `x(532)` `[copybooks/file02.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file03.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 339 | `File-Defs.file-3` | `file-3` · lvl 03 · `x(532)` `[copybooks/file03.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file04.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 340 | `File-Defs.file-4` | `file-4` · lvl 03 · `x(532)` `[copybooks/file04.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file05.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 341 | `File-Defs.file-5` | `file-5` · lvl 03 · `x(532)` `[copybooks/file05.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file06.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 342 | `File-Defs.file-6` | `file-6` · lvl 03 · `x(532)` `[copybooks/file06.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file07.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 343 | `File-Defs.file-7` | `file-7` · lvl 03 · `x(532)` `[copybooks/file07.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file08.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 344 | `File-Defs.file-8` | `file-8` · lvl 03 · `x(532)` `[copybooks/file08.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file09.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 345 | `File-Defs.file-9` | `file-9` · lvl 03 · `x(532)` `[copybooks/file09.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file10.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 346 | `File-Defs.file-10` | `file-10` · lvl 03 · `x(532)` `[copybooks/file10.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file11.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 347 | `File-Defs.file-11` | `file-11` · lvl 03 · `x(532)` `[copybooks/file11.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file12.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 348 | `File-Defs.file-12` | `file-12` · lvl 03 · `x(532)` `[copybooks/file12.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file13.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 349 | `File-Defs.file-13` | `file-13` · lvl 03 · `x(532)` `[copybooks/file13.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file14.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 350 | `File-Defs.file-14` | `file-14` · lvl 03 · `x(532)` `[copybooks/file14.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file15.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 351 | `File-Defs.file-15` | `file-15` · lvl 03 · `x(532)` `[copybooks/file15.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file16.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 352 | `File-Defs.file-16` | `file-16` · lvl 03 · `x(532)` `[copybooks/file16.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file17.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 353 | `File-Defs.file-17` | `file-17` · lvl 03 · `x(532)` `[copybooks/file17.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file18.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 354 | `File-Defs.file-18` | `file-18` · lvl 03 · `x(532)` `[copybooks/file18.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file19.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 355 | `File-Defs.file-19` | `file-19` · lvl 03 · `x(532)` `[copybooks/file19.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file20.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 356 | `File-Defs.file-20` | `file-20` · lvl 03 · `x(532)` `[copybooks/file20.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file21.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 357 | `File-Defs.file-21` | `file-21` · lvl 03 · `x(532)` `[copybooks/file21.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file22.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 358 | `File-Defs.file-22` | `file-22` · lvl 03 · `x(532)` `[copybooks/file22.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file23.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 359 | `File-Defs.file-23` | `file-23` · lvl 03 · `x(532)` `[copybooks/file23.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file24.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 360 | `File-Defs.file-24` | `file-24` · lvl 03 · `x(532)` `[copybooks/file24.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file26.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 361 | `File-Defs.file-26` | `file-26` · lvl 03 · `x(532)` `[copybooks/file26.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file27.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 362 | `File-Defs.file-27` | `file-27` · lvl 03 · `x(532)` `[copybooks/file27.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file28.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 363 | `File-Defs.file-28` | `file-28` · lvl 03 · `x(532)` `[copybooks/file28.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file29.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 364 | `File-Defs.file-29` | `file-29` · lvl 03 · `x(532)` `[copybooks/file29.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file30.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 365 | `File-Defs.file-30` | `file-30` · lvl 03 · `x(532)` `[copybooks/file30.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file31.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 366 | `File-Defs.file-31` | `file-31` · lvl 03 · `x(532)` `[copybooks/file31.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file32.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 367 | `File-Defs.file-32` | `file-32` · lvl 03 · `x(532)` `[copybooks/file32.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/file33.cob` — 1 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 368 | `File-Defs.file-33` | `file-33` · lvl 03 · `x(532)` `[copybooks/file33.cob:L1]` | copybook | storage: STR | — |
+
+#### `copybooks/irswssystem.cob` — 28 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 369 | `system-record.system-record` | `system-record` · lvl 01 · GROUP · group `[copybooks/irswssystem.cob:L13]` | copybook | — | — |
+| 370 | `system-record.run-date` | `run-date` · lvl 03 · `x(8)` `[copybooks/irswssystem.cob:L14]` | copybook | storage: STR | — |
+| 371 | `system-record.suser` | `suser` · lvl 03 · `x(24)` `[copybooks/irswssystem.cob:L15]` | copybook | storage: STR | — |
+| 372 | `system-record.client` | `client` · lvl 03 · `x(24)` `[copybooks/irswssystem.cob:L16]` | copybook | storage: STR | — |
+| 373 | `system-record.address-1` | `address-1` · lvl 03 · `x(24)` `[copybooks/irswssystem.cob:L17]` | copybook | storage: STR | — |
+| 374 | `system-record.address-2` | `address-2` · lvl 03 · `x(24)` `[copybooks/irswssystem.cob:L18]` | copybook | storage: STR | — |
+| 375 | `system-record.address-3` | `address-3` · lvl 03 · `x(24)` `[copybooks/irswssystem.cob:L19]` | copybook | storage: STR | — |
+| 376 | `system-record.address-4` | `address-4` · lvl 03 · `x(24)` `[copybooks/irswssystem.cob:L20]` | copybook | storage: STR | — |
+| 377 | `system-record.start-date` | `start-date` · lvl 03 · `x(8)` `[copybooks/irswssystem.cob:L21]` | copybook | storage: STR | — |
+| 378 | `system-record.end-date` | `end-date` · lvl 03 · `x(8)` `[copybooks/irswssystem.cob:L22]` | copybook | storage: STR | — |
+| 379 | `system-record.system-ops` | `system-ops` · lvl 03 · `x` `[copybooks/irswssystem.cob:L23]` | copybook | storage: STR | — |
+| 380 | `system-record.pass-word` | `pass-word` · lvl 03 · `x(4)` `[copybooks/irswssystem.cob:L24]` | copybook | storage: STR | — |
+| 381 | `system-record.next-post` | `next-post` · lvl 03 · `9(5)` · DISPLAY `[copybooks/irswssystem.cob:L25]` | copybook | storage: INT | — |
+| 382 | `system-record.vat-rates` | `vat-rates` · lvl 03 · GROUP · group `[copybooks/irswssystem.cob:L26]` | copybook | — | — |
+| 383 | `system-record.vat` | `vat` · lvl 05 · `99v99` · DISPLAY `[copybooks/irswssystem.cob:L27]` | copybook | storage: DECIMAL | — |
+| 384 | `system-record.vat2` | `vat2` · lvl 05 · `99v99` · DISPLAY `[copybooks/irswssystem.cob:L28]` | copybook | storage: DECIMAL | — |
+| 385 | `system-record.vat3` | `vat3` · lvl 05 · `99v99` · DISPLAY `[copybooks/irswssystem.cob:L29]` | copybook | storage: DECIMAL | — |
+| 386 | `system-record.vat-group` | `vat-group` · lvl 03 · GROUP · redefines `vat-rates` · group `[copybooks/irswssystem.cob:L30]` | copybook | — | — |
+| 387 | `system-record.vat-psent` | `vat-psent` · lvl 05 · `99v99` · DISPLAY · occurs 3 `[copybooks/irswssystem.cob:L31]` | copybook | storage: DECIMAL | — |
+| 388 | `system-record.pass-value` | `pass-value` · lvl 03 · `9` · DISPLAY `[copybooks/irswssystem.cob:L32]` | copybook | storage: INT | — |
+| 389 | `system-record.save-sequ` | `save-sequ` · lvl 03 · `9` · DISPLAY `[copybooks/irswssystem.cob:L33]` | copybook | storage: INT | — |
+| 390 | `system-record.system-work-group` | `system-work-group` · lvl 03 · `x(18)` `[copybooks/irswssystem.cob:L34]` | copybook | storage: STR | — |
+| 391 | `system-record.PL-App-Created` | `PL-App-Created` · lvl 03 · `x` `[copybooks/irswssystem.cob:L35]` | copybook | storage: STR | — |
+| 392 | `system-record.PL-Approp-AC` | `PL-Approp-AC` · lvl 03 · `9(5)` · DISPLAY `[copybooks/irswssystem.cob:L36]` | copybook | storage: INT | — |
+| 393 | `system-record.Print-Spool-Name` | `Print-Spool-Name` · lvl 03 · `x(32)` `[copybooks/irswssystem.cob:L37]` | copybook | storage: STR | — |
+| 394 | `system-record.First-Time-FLag` | `First-Time-FLag` · lvl 03 · `9` · DISPLAY `[copybooks/irswssystem.cob:L38]` | copybook | storage: INT | — |
+| 395 | `system-record.filler#39` | `filler` · lvl 03 · `9(7)` · DISPLAY · FILLER `[copybooks/irswssystem.cob:L39]` | copybook | storage: INT | — |
+| 396 | `system-record.filler#40` | `filler` · lvl 03 · `x` · FILLER `[copybooks/irswssystem.cob:L40]` | copybook | storage: STR | — |
+
+#### `copybooks/wscall.cob` — 8 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 397 | `WS-Calling-Data.WS-Calling-Data` | `WS-Calling-Data` · lvl 01 · GROUP · group `[copybooks/wscall.cob:L6]` | copybook | — | — |
+| 398 | `WS-Calling-Data.WS-Called` | `WS-Called` · lvl 03 · `x(8)` `[copybooks/wscall.cob:L7]` | copybook | storage: STR | — |
+| 399 | `WS-Calling-Data.WS-Caller` | `WS-Caller` · lvl 03 · `x(8)` `[copybooks/wscall.cob:L8]` | copybook | storage: STR | — |
+| 400 | `WS-Calling-Data.WS-Del-Link` | `WS-Del-Link` · lvl 03 · `x(8)` `[copybooks/wscall.cob:L9]` | copybook | storage: STR | — |
+| 401 | `WS-Calling-Data.WS-Term-Code` | `WS-Term-Code` · lvl 03 · `99` · DISPLAY `[copybooks/wscall.cob:L10]` | copybook | storage: INT | — |
+| 402 | `WS-Calling-Data.WS-Process-Func` | `WS-Process-Func` · lvl 03 · `9` · DISPLAY `[copybooks/wscall.cob:L12]` | copybook | storage: INT | — |
+| 403 | `WS-Calling-Data.WS-Sub-Function` | `WS-Sub-Function` · lvl 03 · `9` · DISPLAY `[copybooks/wscall.cob:L13]` | copybook | storage: INT | — |
+| 404 | `WS-Calling-Data.WS-CD-Args` | `WS-CD-Args` · lvl 03 · `x(13)` `[copybooks/wscall.cob:L14]` | copybook | storage: STR | — |
+
+#### `copybooks/wsfnctn.cob` — 41 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 405 | `File-Access.File-Access` | `File-Access` · lvl 01 · GROUP · group `[copybooks/wsfnctn.cob:L22]` | copybook | — | — |
+| 406 | `File-Access.We-Error` | `We-Error` · lvl 03 · `999` · DISPLAY `[copybooks/wsfnctn.cob:L23]` | copybook | storage: INT | — |
+| 407 | `File-Access.Rrn` | `Rrn` · lvl 03 · `9(5)` · COMP `[copybooks/wsfnctn.cob:L24]` | copybook | storage: INT | — |
+| 408 | `File-Access.Fs-Reply` | `Fs-Reply` · lvl 03 · `99` · DISPLAY `[copybooks/wsfnctn.cob:L25]` | copybook | storage: INT | — |
+| 409 | `File-Access.s1` | `s1` · lvl 03 · `x` `[copybooks/wsfnctn.cob:L26]` | copybook | storage: STR | — |
+| 410 | `File-Access.Curs` | `Curs` · lvl 03 · `9(4)` · DISPLAY `[copybooks/wsfnctn.cob:L27]` | copybook | storage: INT | — |
+| 411 | `File-Access.filler#28` | `filler` · lvl 03 · GROUP · redefines `Curs` · group · FILLER `[copybooks/wsfnctn.cob:L28]` | copybook | — | — |
+| 412 | `File-Access.Lin` | `Lin` · lvl 05 · `99` · DISPLAY `[copybooks/wsfnctn.cob:L29]` | copybook | storage: INT | — |
+| 413 | `File-Access.Cole` | `Cole` · lvl 05 · `99` · DISPLAY `[copybooks/wsfnctn.cob:L30]` | copybook | storage: INT | — |
+| 414 | `File-Access.Curs2` | `Curs2` · lvl 03 · `9(4)` · DISPLAY `[copybooks/wsfnctn.cob:L31]` | copybook | storage: INT | — |
+| 415 | `File-Access.filler#32` | `filler` · lvl 03 · GROUP · redefines `Curs2` · group · FILLER `[copybooks/wsfnctn.cob:L32]` | copybook | — | — |
+| 416 | `File-Access.Lin2` | `Lin2` · lvl 05 · `99` · DISPLAY `[copybooks/wsfnctn.cob:L33]` | copybook | storage: INT | — |
+| 417 | `File-Access.Col2` | `Col2` · lvl 05 · `99` · DISPLAY `[copybooks/wsfnctn.cob:L34]` | copybook | storage: INT | — |
+| 418 | `File-Access.ACAS-Path` | `ACAS-Path` · lvl 03 · `x(525)` `[copybooks/wsfnctn.cob:L38]` | copybook | storage: STR | — |
+| 419 | `File-Access.Path-Work` | `Path-Work` · lvl 03 · `x(525)` `[copybooks/wsfnctn.cob:L39]` | copybook | storage: STR | — |
+| 420 | `File-Access.FS-Action` | `FS-Action` · lvl 03 · `x(22)` `[copybooks/wsfnctn.cob:L41]` | copybook | storage: STR | — |
+| 421 | `File-Access.Logging-Data` | `Logging-Data` · lvl 03 · GROUP · group `[copybooks/wsfnctn.cob:L44]` | copybook | — | — |
+| 422 | `File-Access.Accept-Reply` | `Accept-Reply` · lvl 05 · `x` `[copybooks/wsfnctn.cob:L45]` | copybook | storage: STR | — |
+| 423 | `File-Access.File-Key-No` | `File-Key-No` · lvl 05 · `9` · DISPLAY `[copybooks/wsfnctn.cob:L46]` | copybook | storage: INT | — |
+| 424 | `File-Access.ws-Log-System` | `ws-Log-System` · lvl 05 · `9` · DISPLAY `[copybooks/wsfnctn.cob:L47]` | copybook | storage: INT | — |
+| 425 | `File-Access.ws-No-Paragraph` | `ws-No-Paragraph` · lvl 05 · `999` · DISPLAY `[copybooks/wsfnctn.cob:L48]` | copybook | storage: INT | — |
+| 426 | `File-Access.SQL-Err` | `SQL-Err` · lvl 05 · `x(5)` `[copybooks/wsfnctn.cob:L49]` | copybook | storage: STR | — |
+| 427 | `File-Access.SQL-Msg` | `SQL-Msg` · lvl 05 · `x(512)` `[copybooks/wsfnctn.cob:L50]` | copybook | storage: STR | — |
+| 428 | `File-Access.SQL-State` | `SQL-State` · lvl 05 · `x(5)` `[copybooks/wsfnctn.cob:L51]` | copybook | storage: STR | — |
+| 429 | `File-Access.WS-File-Key` | `WS-File-Key` · lvl 05 · `x(64)` `[copybooks/wsfnctn.cob:L52]` | copybook | storage: STR | — |
+| 430 | `File-Access.WS-Log-Where` | `WS-Log-Where` · lvl 05 · `x(231)` `[copybooks/wsfnctn.cob:L53]` | copybook | storage: STR | — |
+| 431 | `File-Access.WS-Log-File-No` | `WS-Log-File-No` · lvl 05 · `99` · DISPLAY `[copybooks/wsfnctn.cob:L54]` | copybook | storage: INT | — |
+| 432 | `File-Access.WS-Count-Rows` | `WS-Count-Rows` · lvl 05 · `9(7)` · DISPLAY `[copybooks/wsfnctn.cob:L55]` | copybook | storage: INT | — |
+| 433 | `File-Access.RDB-Data` | `RDB-Data` · lvl 03 · GROUP · group `[copybooks/wsfnctn.cob:L56]` | copybook | — | — |
+| 434 | `File-Access.DB-Schema` | `DB-Schema` · lvl 05 · `x(12)` `[copybooks/wsfnctn.cob:L57]` | copybook | storage: STR | — |
+| 435 | `File-Access.DB-UName` | `DB-UName` · lvl 05 · `x(12)` `[copybooks/wsfnctn.cob:L58]` | copybook | storage: STR | — |
+| 436 | `File-Access.DB-UPass` | `DB-UPass` · lvl 05 · `x(12)` `[copybooks/wsfnctn.cob:L59]` | copybook | storage: STR | — |
+| 437 | `File-Access.DB-Host` | `DB-Host` · lvl 05 · `x(32)` `[copybooks/wsfnctn.cob:L60]` | copybook | storage: STR | — |
+| 438 | `File-Access.DB-Socket` | `DB-Socket` · lvl 05 · `x(64)` `[copybooks/wsfnctn.cob:L61]` | copybook | storage: STR | — |
+| 439 | `File-Access.DB-Port` | `DB-Port` · lvl 05 · `x(5)` `[copybooks/wsfnctn.cob:L62]` | copybook | storage: STR | — |
+| 440 | `File-Access.Main-Record-Move-Flag` | `Main-Record-Move-Flag` · lvl 03 · `9` · DISPLAY `[copybooks/wsfnctn.cob:L66]` | copybook | storage: INT | — |
+| 441 | `File-Access.FA-RDBMS-Flat-Statuses` | `FA-RDBMS-Flat-Statuses` · lvl 03 · GROUP · group `[copybooks/wsfnctn.cob:L72]` | copybook | — | — |
+| 442 | `File-Access.FA-File-System-Used` | `FA-File-System-Used` · lvl 07 · `9` · DISPLAY `[copybooks/wsfnctn.cob:L73]` | copybook | storage: INT | — |
+| 443 | `File-Access.FA-File-Duplicates-In-Use` | `FA-File-Duplicates-In-Use` · lvl 07 · `9` · DISPLAY `[copybooks/wsfnctn.cob:L82]` | copybook | storage: INT | — |
+| 444 | `File-Access.File-Function` | `File-Function` · lvl 03 · `99` · DISPLAY `[copybooks/wsfnctn.cob:L88]` | copybook | storage: INT | — |
+| 445 | `File-Access.Access-Type` | `Access-Type` · lvl 03 · `9` · DISPLAY `[copybooks/wsfnctn.cob:L107]` | copybook | storage: INT | — |
+
+#### `copybooks/wsmaps03.cob` — 25 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 446 | `maps03-ws.maps03-ws` | `maps03-ws` · lvl 01 · GROUP · group `[copybooks/wsmaps03.cob:L6]` | copybook | — | — |
+| 447 | `maps03-ws.u-date` | `u-date` · lvl 03 · `x(10)` `[copybooks/wsmaps03.cob:L7]` | copybook | storage: STR | — |
+| 448 | `maps03-ws.u-UK` | `u-UK` · lvl 03 · GROUP · redefines `u-date` · group `[copybooks/wsmaps03.cob:L8]` | copybook | — | — |
+| 449 | `maps03-ws.u-days` | `u-days` · lvl 05 · `99` · DISPLAY `[copybooks/wsmaps03.cob:L9]` | copybook | storage: INT | — |
+| 450 | `maps03-ws.filler#10` | `filler` · lvl 05 · `x` · FILLER `[copybooks/wsmaps03.cob:L10]` | copybook | storage: STR | — |
+| 451 | `maps03-ws.u-month` | `u-month` · lvl 05 · `99` · DISPLAY `[copybooks/wsmaps03.cob:L11]` | copybook | storage: INT | — |
+| 452 | `maps03-ws.filler#12` | `filler` · lvl 05 · `x` · FILLER `[copybooks/wsmaps03.cob:L12]` | copybook | storage: STR | — |
+| 453 | `maps03-ws.u-year` | `u-year` · lvl 05 · GROUP · group `[copybooks/wsmaps03.cob:L13]` | copybook | — | — |
+| 454 | `maps03-ws.u-cc` | `u-cc` · lvl 07 · `99` · DISPLAY `[copybooks/wsmaps03.cob:L14]` | copybook | storage: INT | — |
+| 455 | `maps03-ws.u-yy` | `u-yy` · lvl 07 · `99` · DISPLAY `[copybooks/wsmaps03.cob:L15]` | copybook | storage: INT | — |
+| 456 | `maps03-ws.u-USA` | `u-USA` · lvl 03 · GROUP · redefines `u-date` · group `[copybooks/wsmaps03.cob:L16]` | copybook | — | — |
+| 457 | `maps03-ws.u-usa-month` | `u-usa-month` · lvl 05 · `99` · DISPLAY `[copybooks/wsmaps03.cob:L17]` | copybook | storage: INT | — |
+| 458 | `maps03-ws.filler#18` | `filler` · lvl 05 · `x` · FILLER `[copybooks/wsmaps03.cob:L18]` | copybook | storage: STR | — |
+| 459 | `maps03-ws.u-usa-days` | `u-usa-days` · lvl 05 · `99` · DISPLAY `[copybooks/wsmaps03.cob:L19]` | copybook | storage: INT | — |
+| 460 | `maps03-ws.filler#20` | `filler` · lvl 05 · `x` · FILLER `[copybooks/wsmaps03.cob:L20]` | copybook | storage: STR | — |
+| 461 | `maps03-ws.filler#21` | `filler` · lvl 05 · `x(4)` · FILLER `[copybooks/wsmaps03.cob:L21]` | copybook | storage: STR | — |
+| 462 | `maps03-ws.u-Intl` | `u-Intl` · lvl 03 · GROUP · redefines `u-date` · group `[copybooks/wsmaps03.cob:L22]` | copybook | — | — |
+| 463 | `maps03-ws.u-intl-year` | `u-intl-year` · lvl 05 · GROUP · group `[copybooks/wsmaps03.cob:L23]` | copybook | — | — |
+| 464 | `maps03-ws.u-intl-cc` | `u-intl-cc` · lvl 07 · `99` · DISPLAY `[copybooks/wsmaps03.cob:L24]` | copybook | storage: INT | — |
+| 465 | `maps03-ws.u-intl-yy` | `u-intl-yy` · lvl 07 · `99` · DISPLAY `[copybooks/wsmaps03.cob:L25]` | copybook | storage: INT | — |
+| 466 | `maps03-ws.filler#26` | `filler` · lvl 05 · `x` · FILLER `[copybooks/wsmaps03.cob:L26]` | copybook | storage: STR | — |
+| 467 | `maps03-ws.u-intl-month` | `u-intl-month` · lvl 05 · `99` · DISPLAY `[copybooks/wsmaps03.cob:L27]` | copybook | storage: INT | — |
+| 468 | `maps03-ws.filler#28` | `filler` · lvl 05 · `x` · FILLER `[copybooks/wsmaps03.cob:L28]` | copybook | storage: STR | — |
+| 469 | `maps03-ws.u-intl-days` | `u-intl-days` · lvl 05 · `99` · DISPLAY `[copybooks/wsmaps03.cob:L29]` | copybook | storage: INT | — |
+| 470 | `maps03-ws.u-bin` | `u-bin` · lvl 03 · BINARY-LONG · signed · sign IMPLICIT_BINARY `[copybooks/wsmaps03.cob:L30]` | copybook | storage: INT | — |
+
+#### `copybooks/wsnames.cob` — 32 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 471 | `File-Defs.File-Defs` | `File-Defs` · lvl 01 · GROUP · group `[copybooks/wsnames.cob:L13]` | copybook | — | — |
+| 472 | `File-Defs.file-defs-a` | `file-defs-a` · lvl 02 · GROUP · group `[copybooks/wsnames.cob:L14]` | copybook | — | — |
+| 473 | `File-Defs.pre-trans-name` | `pre-trans-name` · lvl 03 · `x(532)` `[copybooks/wsnames.cob:L15]` | copybook | storage: STR | — |
+| 474 | `File-Defs.post-trans-name` | `post-trans-name` · lvl 03 · `x(532)` `[copybooks/wsnames.cob:L16]` | copybook | storage: STR | — |
+| 475 | `File-Defs.file-34` | `file-34` · lvl 03 · `x(532)` `[copybooks/wsnames.cob:L51]` | copybook | storage: STR | — |
+| 476 | `File-Defs.file-35` | `file-35` · lvl 03 · `x(532)` `[copybooks/wsnames.cob:L52]` | copybook | storage: STR | — |
+| 477 | `File-Defs.file-36` | `file-36` · lvl 03 · `x(532)` `[copybooks/wsnames.cob:L53]` | copybook | storage: STR | — |
+| 478 | `File-Defs.file-37` | `file-37` · lvl 03 · `x(532)` `[copybooks/wsnames.cob:L54]` | copybook | storage: STR | — |
+| 479 | `File-Defs.file-38` | `file-38` · lvl 03 · `x(532)` `[copybooks/wsnames.cob:L55]` | copybook | storage: STR | — |
+| 480 | `File-Defs.file-39` | `file-39` · lvl 03 · `x(532)` `[copybooks/wsnames.cob:L58]` | copybook | storage: STR | — |
+| 481 | `File-Defs.file-40` | `file-40` · lvl 03 · `x(532)` `[copybooks/wsnames.cob:L59]` | copybook | storage: STR | — |
+| 482 | `File-Defs.file-41` | `file-41` · lvl 03 · `x(532)` `[copybooks/wsnames.cob:L60]` | copybook | storage: STR | — |
+| 483 | `File-Defs.file-42` | `file-42` · lvl 03 · `x(532)` `[copybooks/wsnames.cob:L61]` | copybook | storage: STR | — |
+| 484 | `File-Defs.file-43` | `file-43` · lvl 03 · `x(532)` `[copybooks/wsnames.cob:L62]` | copybook | storage: STR | — |
+| 485 | `File-Defs.file-44` | `file-44` · lvl 03 · `x(532)` `[copybooks/wsnames.cob:L63]` | copybook | storage: STR | — |
+| 486 | `File-Defs.file-45` | `file-45` · lvl 03 · `x(532)` `[copybooks/wsnames.cob:L64]` | copybook | storage: STR | — |
+| 487 | `File-Defs.file-46` | `file-46` · lvl 03 · `x(532)` `[copybooks/wsnames.cob:L65]` | copybook | storage: STR | — |
+| 488 | `File-Defs.file-47` | `file-47` · lvl 03 · `x(532)` `[copybooks/wsnames.cob:L66]` | copybook | storage: STR | — |
+| 489 | `File-Defs.file-48` | `file-48` · lvl 03 · `x(532)` `[copybooks/wsnames.cob:L67]` | copybook | storage: STR | — |
+| 490 | `File-Defs.file-49` | `file-49` · lvl 03 · `x(532)` `[copybooks/wsnames.cob:L69]` | copybook | storage: STR | — |
+| 491 | `File-Defs.file-50` | `file-50` · lvl 03 · `x(532)` `[copybooks/wsnames.cob:L70]` | copybook | storage: STR | — |
+| 492 | `File-Defs.file-51` | `file-51` · lvl 03 · `x(532)` `[copybooks/wsnames.cob:L71]` | copybook | storage: STR | — |
+| 493 | `File-Defs.file-52` | `file-52` · lvl 03 · `x(532)` `[copybooks/wsnames.cob:L72]` | copybook | storage: STR | — |
+| 494 | `File-Defs.file-53` | `file-53` · lvl 03 · `x(532)` `[copybooks/wsnames.cob:L73]` | copybook | storage: STR | — |
+| 495 | `File-Defs.file-54` | `file-54` · lvl 03 · `x(532)` `[copybooks/wsnames.cob:L74]` | copybook | storage: STR | — |
+| 496 | `File-Defs.file-55` | `file-55` · lvl 03 · `x(532)` `[copybooks/wsnames.cob:L75]` | copybook | storage: STR | — |
+| 497 | `File-Defs.file-56` | `file-56` · lvl 03 · `x(532)` `[copybooks/wsnames.cob:L76]` | copybook | storage: STR | — |
+| 498 | `File-Defs.file-57` | `file-57` · lvl 03 · `x(532)` `[copybooks/wsnames.cob:L78]` | copybook | storage: STR | — |
+| 499 | `File-Defs.filler` | `filler` · lvl 02 · GROUP · redefines `file-defs-a` · group · FILLER `[copybooks/wsnames.cob:L80]` | copybook | — | — |
+| 500 | `File-Defs.System-File-Names` | `System-File-Names` · lvl 03 · `x(532)` · occurs 58 `[copybooks/wsnames.cob:L81]` | copybook | storage: STR | — |
+| 501 | `File-Defs.File-Defs-Count` | `File-Defs-Count` · lvl 02 · BINARY-SHORT · signed · sign IMPLICIT_BINARY `[copybooks/wsnames.cob:L82]` | copybook | storage: INT | — |
+| 502 | `File-Defs.File-Defs-os-Delimiter` | `File-Defs-os-Delimiter` · lvl 02 · `x` `[copybooks/wsnames.cob:L83]` | copybook | storage: STR | — |
+
+#### `general/gl070.cbl` — 9 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 503 | `pre-trans-record.pre-trans-record#108` | `pre-trans-record` · lvl 01 · GROUP · group `[general/gl070.cbl:L108]` | program_source | — | — |
+| 504 | `pre-trans-record.pre-batch#109` | `pre-batch` · lvl 03 · `9(5)` · DISPLAY `[general/gl070.cbl:L109]` | program_source | storage: INT | — |
+| 505 | `pre-trans-record.pre-post#110` | `pre-post` · lvl 03 · `9(5)` · DISPLAY `[general/gl070.cbl:L110]` | program_source | storage: INT | — |
+| 506 | `pre-trans-record.pre-code#111` | `pre-code` · lvl 03 · `xx` `[general/gl070.cbl:L111]` | program_source | storage: STR | — |
+| 507 | `pre-trans-record.pre-date#112` | `pre-date` · lvl 03 · `x(8)` `[general/gl070.cbl:L112]` | program_source | storage: STR | — |
+| 508 | `pre-trans-record.pre-ac#113` | `pre-ac` · lvl 03 · `9(6)` · DISPLAY `[general/gl070.cbl:L113]` | program_source | storage: INT | — |
+| 509 | `pre-trans-record.pre-pc#114` | `pre-pc` · lvl 03 · `99` · DISPLAY `[general/gl070.cbl:L114]` | program_source | storage: INT | — |
+| 510 | `pre-trans-record.pre-amount#115` | `pre-amount` · lvl 03 · `s9(8)v99` · DISPLAY · signed · sign TRAILING_INCLUDED `[general/gl070.cbl:L115]` | program_source | storage: DECIMAL | — |
+| 511 | `pre-trans-record.pre-legend#116` | `pre-legend` · lvl 03 · `x(32)` `[general/gl070.cbl:L116]` | program_source | storage: STR | — |
+
+#### `general/gl071.cbl` — 27 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 512 | `pre-trans-record.pre-trans-record#112` | `pre-trans-record` · lvl 01 · GROUP · group `[general/gl071.cbl:L112]` | program_source | — | — |
+| 513 | `pre-trans-record.pre-batch#113` | `pre-batch` · lvl 03 · `9(5)` · DISPLAY `[general/gl071.cbl:L113]` | program_source | storage: INT | — |
+| 514 | `pre-trans-record.pre-post#114` | `pre-post` · lvl 03 · `9(5)` · DISPLAY `[general/gl071.cbl:L114]` | program_source | storage: INT | — |
+| 515 | `pre-trans-record.pre-code#115` | `pre-code` · lvl 03 · `xx` `[general/gl071.cbl:L115]` | program_source | storage: STR | — |
+| 516 | `pre-trans-record.pre-date#116` | `pre-date` · lvl 03 · `x(8)` `[general/gl071.cbl:L116]` | program_source | storage: STR | — |
+| 517 | `pre-trans-record.pre-ac#117` | `pre-ac` · lvl 03 · `9(6)` · DISPLAY `[general/gl071.cbl:L117]` | program_source | storage: INT | — |
+| 518 | `pre-trans-record.pre-pc#118` | `pre-pc` · lvl 03 · `99` · DISPLAY `[general/gl071.cbl:L118]` | program_source | storage: INT | — |
+| 519 | `pre-trans-record.pre-amount#119` | `pre-amount` · lvl 03 · `s9(8)v99` · DISPLAY · signed · sign TRAILING_INCLUDED `[general/gl071.cbl:L119]` | program_source | storage: DECIMAL | — |
+| 520 | `pre-trans-record.pre-legend#120` | `pre-legend` · lvl 03 · `x(32)` `[general/gl071.cbl:L120]` | program_source | storage: STR | — |
+| 521 | `post-trans-record.post-trans-record#124` | `post-trans-record` · lvl 01 · GROUP · group `[general/gl071.cbl:L124]` | program_source | — | `A-14` |
+| 522 | `post-trans-record.post-batch#125` | `post-batch` · lvl 03 · `9(5)` · DISPLAY `[general/gl071.cbl:L125]` | program_source | storage: INT | `A-14` |
+| 523 | `post-trans-record.post-post#126` | `post-post` · lvl 03 · `9(5)` · DISPLAY `[general/gl071.cbl:L126]` | program_source | storage: INT | `A-14` |
+| 524 | `post-trans-record.post-code#127` | `post-code` · lvl 03 · `xx` `[general/gl071.cbl:L127]` | program_source | storage: STR | `A-14` |
+| 525 | `post-trans-record.post-date#128` | `post-date` · lvl 03 · `x(8)` `[general/gl071.cbl:L128]` | program_source | storage: STR | `A-14` |
+| 526 | `post-trans-record.post-ac#129` | `post-ac` · lvl 03 · `9(6)` · DISPLAY `[general/gl071.cbl:L129]` | program_source | storage: INT | `A-14` |
+| 527 | `post-trans-record.post-pc#130` | `post-pc` · lvl 03 · `99` · DISPLAY `[general/gl071.cbl:L130]` | program_source | storage: INT | `A-14` |
+| 528 | `post-trans-record.post-amount#131` | `post-amount` · lvl 03 · `s9(8)v99` · DISPLAY · signed · sign TRAILING_INCLUDED `[general/gl071.cbl:L131]` | program_source | storage: DECIMAL | `A-14` |
+| 529 | `post-trans-record.post-legend#132` | `post-legend` · lvl 03 · `x(32)` `[general/gl071.cbl:L132]` | program_source | storage: STR | `A-14` |
+| 530 | `sort-trans-record.sort-trans-record` | `sort-trans-record` · lvl 01 · GROUP · group `[general/gl071.cbl:L136]` | program_source | — | `A-14` |
+| 531 | `sort-trans-record.sort-batch` | `sort-batch` · lvl 03 · `9(5)` · DISPLAY `[general/gl071.cbl:L137]` | program_source | storage: INT | `A-14` |
+| 532 | `sort-trans-record.sort-post` | `sort-post` · lvl 03 · `9(5)` · DISPLAY `[general/gl071.cbl:L138]` | program_source | storage: INT | `A-14` |
+| 533 | `sort-trans-record.sort-code` | `sort-code` · lvl 03 · `xx` `[general/gl071.cbl:L139]` | program_source | storage: STR | `A-14` |
+| 534 | `sort-trans-record.sort-date` | `sort-date` · lvl 03 · `x(8)` `[general/gl071.cbl:L140]` | program_source | storage: STR | `A-14` |
+| 535 | `sort-trans-record.sort-ac` | `sort-ac` · lvl 03 · `9(6)` · DISPLAY `[general/gl071.cbl:L141]` | program_source | storage: INT | `A-14` |
+| 536 | `sort-trans-record.sort-pc` | `sort-pc` · lvl 03 · `99` · DISPLAY `[general/gl071.cbl:L142]` | program_source | storage: INT | `A-14` |
+| 537 | `sort-trans-record.sort-amount` | `sort-amount` · lvl 03 · `s9(8)v99` · DISPLAY · signed · sign TRAILING_INCLUDED `[general/gl071.cbl:L143]` | program_source | storage: DECIMAL | `A-14` |
+| 538 | `sort-trans-record.sort-legend` | `sort-legend` · lvl 03 · `x(32)` `[general/gl071.cbl:L144]` | program_source | storage: STR | `A-14` |
+
+#### `general/gl072.cbl` — 10 entries
+
+| # | Dictionary key | Field | Presence | Drift · derivation · storage | A- / Q- |
+| ---: | --- | --- | --- | --- | --- |
+| 539 | `post-trans-record.post-trans-record#110` | `post-trans-record` · lvl 01 · GROUP · group `[general/gl072.cbl:L110]` | program_source | — | `A-14` |
+| 540 | `post-trans-record.post-batch#111` | `post-batch` · lvl 03 · `9(5)` · DISPLAY `[general/gl072.cbl:L111]` | program_source | storage: INT | `A-14` |
+| 541 | `post-trans-record.post-post#112` | `post-post` · lvl 03 · `9(5)` · DISPLAY `[general/gl072.cbl:L112]` | program_source | storage: INT | `A-14` |
+| 542 | `post-trans-record.post-code#113` | `post-code` · lvl 03 · `xx` `[general/gl072.cbl:L113]` | program_source | storage: STR | `A-14` |
+| 543 | `post-trans-record.post-date#114` | `post-date` · lvl 03 · `x(8)` `[general/gl072.cbl:L114]` | program_source | storage: STR | `A-14` |
+| 544 | `post-trans-record.post-ledger` | `post-ledger` · lvl 03 · GROUP · group `[general/gl072.cbl:L115]` | program_source | — | `A-14` |
+| 545 | `post-trans-record.post-ac#116` | `post-ac` · lvl 05 · `9(6)` · DISPLAY `[general/gl072.cbl:L116]` | program_source | storage: INT | `A-14` |
+| 546 | `post-trans-record.post-pc#117` | `post-pc` · lvl 05 · `99` · DISPLAY `[general/gl072.cbl:L117]` | program_source | storage: INT | `A-14` |
+| 547 | `post-trans-record.post-amount#118` | `post-amount` · lvl 03 · `s9(8)v99` · DISPLAY · signed · sign TRAILING_INCLUDED `[general/gl072.cbl:L118]` | program_source | storage: DECIMAL | `A-14` |
+| 548 | `post-trans-record.post-legend#119` | `post-legend` · lvl 03 · `x(32)` `[general/gl072.cbl:L119]` | program_source | storage: STR | `A-14` |

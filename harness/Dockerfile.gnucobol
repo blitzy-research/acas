@@ -482,6 +482,15 @@ RUN set -eu; \
     cobc -x presql2.cbl cobmysqlapi.o -L/usr/local/mysql/lib -lmysqlclient -lz; \
     install -m 0755 presql2 /usr/local/bin/presql2; \
     \
+    echo '--- provenance: name the SOURCE each published artifact was built from ---'; \
+    sha256sum cobmysqlapi38.c | cut -d" " -f1 \
+      > "${ACAS_LIB_DIR}/cobmysqlapi.o.source-sha256"; \
+    chmod 0644 "${ACAS_LIB_DIR}/cobmysqlapi.o.source-sha256"; \
+    sha256sum presql2.cbl | cut -d" " -f1 \
+      > /usr/local/bin/presql2.source-sha256; \
+    chmod 0644 /usr/local/bin/presql2.source-sha256; \
+    cat "${ACAS_LIB_DIR}/cobmysqlapi.o.source-sha256" /usr/local/bin/presql2.source-sha256; \
+    \
     echo '--- STEP 3 (sibling): [presql2-latest.zip:presql2-package/bldcopy2.sh] -- note the space after -L ---'; \
     cobc -x bldcopy2.cbl cobmysqlapi.o -L /usr/local/mysql/lib -lmysqlclient; \
     install -m 0755 bldcopy2 /usr/local/bin/bldcopy2; \
@@ -496,6 +505,10 @@ RUN set -eu; \
       || { echo 'FATAL: presql2 is not on the PATH; [common/comp-common.sh:L25] invokes it to translate every *MT.scb.' >&2; exit 1; }; \
     command -v bldcopy2 > /dev/null \
       || { echo 'FATAL: bldcopy2 is not on the PATH.' >&2; exit 1; }; \
+    test -s "${ACAS_LIB_DIR}/cobmysqlapi.o.source-sha256" \
+      || { echo "FATAL: ${ACAS_LIB_DIR}/cobmysqlapi.o.source-sha256 was not written. Without it harness/build_oracle.sh step 2 cannot show which cobmysqlapi38.c the published object came from, so it refuses to reuse the object and recompiles it on every run." >&2; exit 1; }; \
+    test -s /usr/local/bin/presql2.source-sha256 \
+      || { echo 'FATAL: /usr/local/bin/presql2.source-sha256 was not written. Without it harness/build_oracle.sh step 3 cannot show which presql2.cbl the published translator came from, so it refuses to reuse it and rebuilds it on every run.' >&2; exit 1; }; \
     \
     echo '--- linkage evidence: presql2 resolves libcob and the client library ---'; \
     ldd /usr/local/bin/presql2 > /tmp/presql2-ldd.txt; \
@@ -588,14 +601,12 @@ RUN set -eu; \
     echo 'OK: end-to-end toolchain proven, and INDEXED file I/O verified working.'
 
 
-COPY requirements.txt requirements-harness.txt requirements-dev.txt /opt/acas-harness/
+COPY requirements.txt /opt/acas-harness/
 
 RUN set -eu; \
     echo '--- installing the locked Python set, every artifact hash-verified ---'; \
     python3 -m pip install --no-cache-dir --break-system-packages --require-hashes \
-        -r /opt/acas-harness/requirements.txt \
-        -r /opt/acas-harness/requirements-harness.txt \
-        -r /opt/acas-harness/requirements-dev.txt; \
+        -r /opt/acas-harness/requirements.txt; \
     \
     echo '--- interpreter identity (must be CPython 3.12.x) ---'; \
     python3 --version; \

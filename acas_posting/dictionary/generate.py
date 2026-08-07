@@ -2082,8 +2082,13 @@ _NOTE_NO_COPYBOOK: Final[str] = (
 _NOTE_SIGN_LOST: Final[str] = (
     "Signed in the copybook and unsigned in the bridge host variable, so a negative "
     "value loses its sign at the bridge, before any SQL runs, and not at the database. "
-    "What is stored in that case can only be measured by running the compiled program, "
-    "so it is recorded as an open question rather than guessed."
+    "MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is "
+    "stored, and it is then truncated to the host variable's digit count rather than "
+    "wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores "
+    "2147483648, and -123456 into a four-digit unsigned host variable stores 3456, "
+    "which is what +123456 stores too. So the sign is discarded and the magnitude "
+    "survives; the debit-versus-credit sense of the statistic is gone, which is "
+    "anomaly A-11 and is reproduced rather than corrected."
 )
 _NOTE_SIGN_REVERSED: Final[str] = (
     "The views disagree on signedness; each is recorded exactly as it is declared and "
@@ -2355,9 +2360,25 @@ def _notes_and_refs(root: Path, draft: _EntryDraft,
             add("NO_COPYBOOK", _NOTE_NO_COPYBOOK)
         if draft.drift.signedness and copybook is not None:
             if copybook.signed and not view.signed:
+                # Q-3 IS NO LONGER OPEN and is therefore no longer recorded as an
+                # ambiguity (finding F-19). The compiled oracle was asked directly
+                # what a negative value becomes in an unsigned host variable, and it
+                # answered: the absolute value, truncated to the receiving digit
+                # count. The note above carries the measurement.
+                #
+                # A-11 STAYS. The ambiguity was "what value results"; the ANOMALY is
+                # "the sign is lost before SQL runs", and that is a reproduced defect
+                # (rule R-4), not a question. Dropping it because the question was
+                # answered would delete the finding along with the uncertainty.
                 add("SIGN_LOST", _NOTE_SIGN_LOST)
+                # A-11 stays: the sign loss is a reproduced defect, and measuring it
+                # did not repair it. Q-3 does NOT stay - it was the question of WHAT
+                # the unsigned column ends up holding, and that has been measured
+                # end to end through the compiled bridge (absolute value, then
+                # high-order truncation if the magnitude overflows). Rule R-6 makes
+                # the measurement the answer, so continuing to publish Q-3 on these
+                # entries would misreport a settled question as an open one.
                 anomalies.append("A-11")
-                ambiguities.append("Q-3")
             else:
                 add("SIGN_REVERSED", _NOTE_SIGN_REVERSED)
         if not view.loaded_from_record:

@@ -354,19 +354,49 @@ if len(MONEY_COLUMNS) != 7:  # pragma: no cover - guards a frozen fact
     )
 
 
-# Every one of the eleven A-11 columns must also carry the dictionary's own ambiguity
-# tag Q-3, because Agent Action Plan 0.6.8 makes the stored value of a negative-through-
-# unsigned a question the compiled oracle had to settle.
-_A11_WITHOUT_Q3: Final[tuple[str, ...]] = tuple(
+# Every one of the eleven A-11 columns must carry the dictionary's anomaly tag A-11.
+#
+# IT NO LONGER REQUIRES THE AMBIGUITY TAG Q-3, AND MUST NOT. Agent Action Plan section
+# 0.6.8 listed the stored value of a negative-through-unsigned as a question for the
+# compiled oracle, and while it was open this guard required the tag so that no reader
+# could mistake the implemented answer for a measured one. THE ORACLE HAS SINCE ANSWERED
+# IT - see the `Q-3` entry of `AMBIGUITIES` in acas_posting/dal/acas007_gl_batch.py, and
+# the corroborating measurement recorded in the SIGN_LOST note that
+# acas_posting/dictionary/generate.py writes into every one of these entries: GnuCOBOL
+# 3.2.0 stores the ABSOLUTE VALUE, bounded by the receiving field's digit count.
+#
+# So requiring the tag would now require the artifact to publish a question that is
+# settled, which is the opposite of what rule R-6 asks for. What is required instead is
+# that the MEASUREMENT be on record: the anomaly tag, because the sign loss is a
+# reproduced defect (rule R-4) and stays whatever the value turns out to be, and the
+# note that carries the measured answer.
+_SIGN_LOSS_MEASUREMENT: Final[str] = "MEASURED against GnuCOBOL"
+
+_A11_UNRECORDED: Final[tuple[str, ...]] = tuple(
     name
     for name in SIGN_LOSS_COLUMNS
-    if "Q-3" not in ENTRIES[name].ambiguity_refs
-    or "A-11" not in ENTRIES[name].anomaly_refs
+    if "A-11" not in ENTRIES[name].anomaly_refs
+    or not any(
+        _SIGN_LOSS_MEASUREMENT in note for note in ENTRIES[name].notes
+    )
 )
-if _A11_WITHOUT_Q3:  # pragma: no cover - guards a frozen fact
+if _A11_UNRECORDED:  # pragma: no cover - guards a frozen fact
     raise AssertionError(
-        "every sign-loss column must carry both anomaly A-11 and ambiguity "
-        f"Q-3 in the data dictionary; these do not: {_A11_WITHOUT_Q3}"
+        f"every sign-loss column must carry anomaly A-11 and the compiled "
+        f"measurement of what an unsigned host variable stores for a negative "
+        f"value; these do not: {_A11_UNRECORDED}. Regenerate the dictionary with "
+        f"`python -m acas_posting.dictionary.generate`."
+    )
+
+_A11_STILL_OPEN: Final[tuple[str, ...]] = tuple(
+    name for name in SIGN_LOSS_COLUMNS if "Q-3" in ENTRIES[name].ambiguity_refs
+)
+if _A11_STILL_OPEN:  # pragma: no cover - guards a frozen fact
+    raise AssertionError(
+        f"Q-3 is RESOLVED - GnuCOBOL 3.2.0 stores the absolute value, bounded by "
+        f"the receiving digit count - so no entry may still publish it as an open "
+        f"ambiguity; these do: {_A11_STILL_OPEN}. The sign loss itself remains on "
+        f"record as anomaly A-11."
     )
 
 

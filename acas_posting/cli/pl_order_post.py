@@ -477,16 +477,20 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     args.add_calling_data_arguments(parser, default_caller=args.WS_CALLER_PURCHASE)
     args.add_slpl_linkage_arguments(parser)
-    #  THE TRANSPORT DECLARATION - one contract, published on every route
-    #  (`args.add_transport_security_arguments`). No COBOL counterpart: the frozen
-    #  bridge's connect passes six values and no transport policy at all
+    #  THE TRANSPORT DECLARATION IS NOT AN OPTION ON THIS ROUTE, AND MUST NOT
+    #  BECOME ONE. The frozen `CALL` publishes the linkage operands and the write
+    #  gating answers, and nothing else; the frozen bridge's connect passes six
+    #  values and no transport policy at all
     #  [copybooks/mysql-procedures.cpy:L72-L77], transport being compiled into
-    #  `cobmysqlapi.c`, so the migration must decide it and the operator is the
-    #  only party that knows. Stating NOTHING leaves the deployment contract to
-    #  decide, which is what makes the migrated cycle behave as the compiled one
-    #  (rule R-3); it decides no posted figure, so it cannot make two runs of one
-    #  scenario differ (rule R-6).
-    args.add_transport_security_arguments(parser)
+    #  `cobmysqlapi.c`. A `--db-tls-*` or `--db-allow-plaintext` option here would
+    #  add a program input and two refusal outcomes the compiled program has not
+    #  got, which rule R-3 forbids - and a certificate path on a command line is a
+    #  process-listing leak besides. Deployment security is resolved ONCE, outside
+    #  the accounting path, from the same contract the six connection parameters
+    #  come from: `args.install_connection_policy` reads it through
+    #  `cli/rdbms_params.resolve_transport_policy` while the linkage is bound, and
+    #  every handler observes the installed policy without being told. It decides
+    #  no posted figure, so it cannot make two runs of one scenario differ (R-6).
     #  Diagnostics only: no COBOL counterpart, no database effect. Shared with
     #  the other six routes so the level policy has one spelling.
     args.add_log_level_argument(parser)

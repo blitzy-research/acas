@@ -2,7 +2,7 @@
 question is settled ONLY by running the compiled oracle.
 
 Scenario `empty_batch`, subsystem `general`, operation `gl_post_cycle`, declared
-terminal status `expected_status: [0]`. It drives the eight-stage parity protocol
+terminal status `expected_status: [0]`. It drives the ten-stage parity protocol
 and asserts an EMPTY ordering-normalised diff across three bounded tables.
 
 THERE IS NO USER RULES DOCUMENT FOR THIS PROJECT. `review_rules` reports that none
@@ -167,7 +167,8 @@ pre-processed."
 `Bcycle` MUST EQUAL `system.cyclea`, or both filters skip the batch and the run
 touches nothing at all - which in THIS scenario is nearly indistinguishable from
 the intended outcome, making it a peculiarly silent trap. The pin is asserted;
-`system.period: 1` is inert here, because no scenario drives `gl_end_of_cycle`.
+`system.period: 1` is inert here, because only `gl_end_of_cycle` reads it and
+this route never reaches gl080. The `end_of_cycle_gl` scenario is where it acts.
 
 -------------------------------------------------------------------------------
 THE CENTRAL OPEN QUESTION - RESOLVED BY THE ORACLE, NEVER BY READING
@@ -195,9 +196,13 @@ posted, or does it rewrite nothing meaningful, or rewrite a zero-key record? THA
 QUESTION IS NOT ANSWERED HERE. No test below hard-codes an expectation for
 `CLEARED-STATUS` or `POSTED`; each asserts only that THE TWO SIDES AGREE. The
 question is carried as ambiguity `Q-EMPTY-BATCH-AT-END` in
-docs/migration/ambiguity-resolutions.md - the identifier is coined here, in the
-descriptive form that document already uses for `Q-SORT-TIE-ORDER` and
-`Q-A17-POSTINGS-EFFECT`, so that the resolution has a name to be filed under.
+docs/migration/ambiguity-resolutions.md, section 13 - the identifier was coined
+here, in the descriptive form that document already uses for `Q-SORT-TIE-ORDER`
+and `Q-A17-POSTINGS-EFFECT`, and the register now carries the entry it names:
+three readings of what the two at-end rewrites do to a zero key, the observable
+that separates them, and the note that this scenario's declared
+`expected_table_effect: unchanged` is the FIRST reading stated as an expectation
+rather than a resolution.
 
 The same question extends to `GLLEDGER-REC`, because `end-account`
 [general/gl072.cbl:L379-L382] performs `GL-Nominal-Rewrite` at L382 - and
@@ -340,21 +345,33 @@ defect. `test_no_empty_batch_special_case_was_added` is consequently a
 BEHAVIOURAL assertion over the dumps and not a source scan.
 
 -------------------------------------------------------------------------------
-THE EIGHT-STAGE PROTOCOL, DRIVEN THROUGH THE ONE HELPER
+THE TEN-STAGE PROTOCOL, DRIVEN THROUGH THE ONE HELPER
 -------------------------------------------------------------------------------
 
-    1  seed.sh                     5  reset_db.sh
-    2  run_cobol_scenario.sh       6  run_python_scenario.sh
-    3  dump --side cobol           7  dump --side python
-    4  normalize.py                8  diff_states.py
+    1  reset_db.sh + seed.sh    6  run_python_scenario.sh
+    2  run_cobol_scenario.sh    7  dump --side python
+    3  dump --side cobol        8  normalize.py
+    4  normalize.py             9  verify both captures published
+    5  reset_db.sh + seed.sh   10  diff_states.py
 
-`harness/run_python_scenario.sh` performs stage 7 itself unless `--no-dump` is
-given, and never runs `normalize.py` or `diff_states.py`. Agent Action Plan
-section 0.4.3 requires that "no test reimplements the comparison protocol", so
-every stage above is composed exactly once, in tests/conftest.py, and reached
-here through the `protocol` fixture. NOTHING BELOW WRITES ITS OWN COMPARISON.
+EIGHT LOGICAL STAGES, TEN NUMBERED ONES. Agent Action Plan section 0.3.2 fixes the
+order as "seed, run, dump, normalize, reset, run, dump, diff" - eight. The driver
+`harness/run_parity.sh` numbers ten, reading the list from
+`harness/parity_stages.sh`, because it makes BOTH normalisations and the publication
+check explicit rather than implied. Nothing was added to the protocol; where older
+prose says "stage 8" it means today's stage 10, the diff. The runners' own
+`Check n/8' headings are their internal preflight checks and are not protocol
+stages.
 
-THE THREE-WAY EXIT CONTRACT OF STAGE 8, and the one conflation that must never
+Neither runner performs stage 7, and neither runs `normalize.py` or
+`diff_states.py`. Capture ownership is single and it is the protocol's: stage 7 is
+invoked AFTER the runner has exited, which is the only moment at which the run
+status the capture's attestation carries is final. Agent Action Plan section 0.4.3
+requires that "no test reimplements the comparison protocol", so every stage above
+is composed exactly once, in tests/conftest.py, and reached here through the
+`protocol` fixture. NOTHING BELOW WRITES ITS OWN COMPARISON.
+
+THE THREE-WAY EXIT CONTRACT OF STAGE 10, and the one conflation that must never
 happen:
 
     0  the trees are identical, and stdout is EMPTY - zero bytes, not a banner
@@ -409,12 +426,15 @@ not
 BOUNDING, NEVER IGNORING
 -------------------------------------------------------------------------------
 
-THE COMPARISON IS BOUNDED BY THE SCENARIO'S OWN `affected_tables` LIST AND BY
-NOTHING ELSE. There is no ignore-list, no tolerance-list and no "known
-difference" allowance anywhere in the diff path, and none is added here.
+THE COMPARISON IS BOUNDED BY ALL 22 IN-SCOPE TABLES, WHICH IS THE PROTOCOL. The
+scenario's own `affected_tables` list is its DECLARED EFFECT, asserted against
+separately; it is not the bound, because a bound drawn from what a scenario
+expects to move cannot reveal a difference in anything it did not. There is no
+ignore-list, no tolerance-list and no "known difference" allowance anywhere in
+the diff path, and none is added here.
 
-Three tables, alphabetically, and the order is part of the contract because the
-seed fingerprint is written in it:
+The three DECLARED tables, alphabetically, in the order the seed fingerprint is
+written in:
 
     GLBATCH-REC     carries the ANSWER to the central open question above
     GLLEDGER-REC    proves no balance moved - or records whatever
@@ -422,22 +442,41 @@ seed fingerprint is written in it:
                     actually did
     GLPOSTING-REC   the UNCHANGED WITNESS, additionally empty in the seed
 
-Why the system tables are absent is bounding and not ignoring. The menu shell's
-exit path persists three of them on the way out [general/general.cbl:L656-L691]:
+Why the system tables are absent from the DECLARED EFFECT list - they are still
+inside the 22-table comparison. The menu shell's exit path persists three of them
+on the way out [general/general.cbl:L656-L672]:
 
     656  overrewrite.
     657       if       File-System-Used NOT = zero
     664                move     2 to File-Key-No       <- KEY 2, SYSDEFLT-REC
     667                move     4 to File-Key-No       <- KEY 4, SYSTOT-REC
 
-with key 1 at L659-L663. The Python command line has no menu and never does this.
-Sales and Purchase persist keys 1 and 4 only, never key 2, on every `load000`
-call [sales/sales.cbl:L628-L657] with [sales/sales.cbl:L659-L660] and
-[purchase/purchase.cbl:L621-L650] with [purchase/purchase.cbl:L652-L653]. A
-census over all twelve in-scope programs finds ZERO `System-*` facade verbs, so
-`SYSTEM-REC`, `SYSDEFLT-REC`, `SYSFINAL-REC` and `SYSTOT-REC` appear on no
-scenario list - while `SYSTOT-REC` remains genuinely in scope for
-`period_end_totals`, which is why nothing is ever blanket-excluded.
+with key 1 at L659-L663, and BOTH SIDES REACH IT: `acas_posting/cli/args.py`'s
+`overrewrite` is called by every one of the seven routes, so key 1 is written on
+both sides of every scenario and these rows are comparable rather than excluded.
+Sales and Purchase persist keys 1 and 4 only, never
+key 2, on every `load000` call [sales/sales.cbl:L628-L657] with
+[sales/sales.cbl:L659-L660] and [purchase/purchase.cbl:L621-L650] with
+[purchase/purchase.cbl:L652-L653]. A census over all twelve in-scope PROGRAMS
+finds ZERO `System-*` facade verbs, so no migrated program persists a system
+record - only the menu-exit path does. `SYSFINAL-REC` appears on
+no scenario list because nothing on either side writes it; `SYSTOT-REC`
+remains genuinely in scope for `period_end_totals`, which is why nothing is ever
+blanket-excluded; and `SYSTEM-REC` is DUMPED WITH EXACTLY TWO CELLS WITHHELD -
+`RDBMS-PASSWD char(12)` [copybooks/wssystem.cob:L139] and the frozen schema's
+shorter `PASS-WORD`, replaced on BOTH sides by `harness/dump_tables.py`'s
+`REDACTED_COLUMNS` because a dump is `SELECT *` and a capture is committed
+evidence. Every other column is compared byte for byte, so this is not an
+ignore-list. THE OBVIOUS OBJECTION WAS TESTED AND DOES NOT HOLD: the row's
+content depends on what the route did - including `Date-Form`, which the frozen
+date sections write back [copybooks/wssystem.cob:L127] - so it is reasonable to
+fear that comparing it would tie THIS scenario's
+`expected_table_effect: unchanged` to fields it does not reason about. Measured,
+the digest is UNCHANGED here and on every other scenario declaring `unchanged`,
+because the exit rewrite writes back the value it loaded. Both runners digest the
+row before and after every run besides, and
+`protocol.assert_system_record_parity` compares the two sides' post-run digests
+over all 169 columns - the credential included, with nothing to leak.
 
 The four autogen tables - `SAAUTOGEN-REC`, `SAAUTOGEN-LINES-REC`,
 `PUAUTOGEN-REC`, `PUAUTOGEN-LINES-REC` - are never seeded and never listed; both
@@ -652,7 +691,7 @@ SEEDED_TABLES = (
 )
 
 # THE RUNNER'S OWN WORDING for a cross-check it could not make, quoted from
-# [harness/run_python_scenario.sh:L3208]. Matched as a SUBSTRING of the stage-6
+# [harness/run_python_scenario.sh acas_py_seed_fingerprint]. Matched as a SUBSTRING of the stage-6
 # transcript, so the note's surrounding path and punctuation are free to change; what
 # must not change silently is that an absent oracle-side fingerprint is DECLARED.
 UNVERIFIED_NOTE = "no oracle-side seed fingerprint at"
@@ -668,21 +707,38 @@ UNVERIFIED_NOTE = "no oracle-side seed fingerprint at"
 #
 #  THE ERROR-VERSUS-FAILURE MAPPING IS DELIVERED BY DOING THE WORK HERE. Every
 #  stage whose failure destroys the evidence - the seed, the reset, either
-#  capture, either normalisation - and a stage-8 status of 2 raise
+#  capture, either normalisation - and a stage-10 status of 2 raise
 #  `HarnessFaultError` inside tests/conftest.py; raised from a fixture, pytest
 #  reports that as an ERROR. A real behavioural difference reaches the test body
 #  and fails an `assert`, so it is a FAILURE. That is the three-way contract of
 #  the module docstring, realised structurally rather than by convention.
 #
-#  Function-scoped, deliberately. A module-scoped fixture cannot request the
-#  function-scoped `protocol`, and the two alternatives are both worse: importing
-#  tests/conftest.py directly would break the house convention that conftest is
-#  reached through FIXTURES and never imported - which is what keeps R-1's
-#  structural boundary structural - and memoising the run in module-level state
-#  would let two tests in one session mean different things by "the diff". Agent
-#  Action Plan section 0.8.4 sets no performance target and forbids optimising
-#  for one, so each test is given its own complete, self-consistent run. Runs are
-#  strictly sequential (R-3); nothing here is parallel.
+#  Function-scoped, deliberately, and that is NOT the same as re-running the
+#  protocol per test. A module-scoped fixture cannot request the function-scoped
+#  `protocol`, and `protocol` must stay function-scoped so that a bare host gets a
+#  precise SKIP rather than a collection error - so this fixture is function-scoped
+#  and the RUN behind it is shared.
+#
+#  ⭐ THE SHARING LIVES IN `run_scenario_parity` ITSELF, AND THE COMMENT THAT USED TO
+#  BE HERE HAD THE ARGUMENT BACKWARDS. It said that memoising "would let two tests in
+#  one session mean different things by the diff", and the truth is the reverse:
+#  memoising is what makes every test in this file mean the SAME thing by it. Nine
+#  tests each running their own protocol were nine separate runs, and every assertion
+#  here is a claim about ONE of them - "the diff is empty", "the term code was zero in
+#  that run", "the report the verdict came from says so". If two of those nine runs had
+#  ever disagreed, this file would still have been green, because no assertion compared
+#  a run to another run. That is a quiet incoherence, not nine independent
+#  confirmations; independence of runs is the determinism tier's claim to make, and it
+#  makes it explicitly, twice, in tests/determinism/.
+#
+#  So the protocol now runs ONCE per distinct request for the whole session, cached in
+#  `tests/conftest.py`'s `_PARITY_RUN_CACHE`. The seven sibling scenario modules had
+#  each already reached for module-level state to get this; putting it in the helper
+#  means this file gets it without its own cache and no future module has to remember.
+#  Agent Action Plan section 0.8.4 sets no performance target and forbids optimising
+#  for one - and this is not that: it is what makes the file's own narrative true, with
+#  the run time falling out as a side effect. Runs are strictly sequential (R-3);
+#  nothing here is parallel.
 #
 #  The injected objects are annotated `object` because their precise
 #  tests/conftest.py types cannot be named without a module-level import of that
@@ -692,7 +748,7 @@ UNVERIFIED_NOTE = "no oracle-side seed fingerprint at"
 
 @pytest.fixture
 def empty_batch_parity(protocol: object) -> object:
-    """Run all eight protocol stages for `empty_batch` and return the verdict.
+    """Run all ten protocol stages for `empty_batch` and return the verdict.
 
     Args:
         protocol: tests/conftest.py's `Protocol` stage bundle. It applies the
@@ -700,7 +756,7 @@ def empty_batch_parity(protocol: object) -> object:
 
     Returns:
         The `ParityRun`: every stage result in execution order, both run stages,
-        the stage-8 `DiffOutcome` and the artifact paths. `is_empty` is the pass
+        the stage-10 `DiffOutcome` and the artifact paths. `is_empty` is the pass
         condition and `tree` names what differed.
 
     Raises:
@@ -714,15 +770,33 @@ def empty_batch_parity(protocol: object) -> object:
 
     # THE BOUND. The declared tables, in the declared ORDER - the order the report and
     # the seed fingerprint are both written in.
-    assert tuple(run.tables) == protocol.affected_tables(SCENARIO), (
-        f"{SCENARIO}: the comparison was bounded by {list(run.tables)} while the "
-        f"scenario declares {list(protocol.affected_tables(SCENARIO))}."
+    assert tuple(run.tables) == tuple(protocol.in_scope_tables()), (
+        f"{SCENARIO}: the comparison was bounded by {list(run.tables)}, but the "
+        f"protocol bounds it by ALL 22 IN-SCOPE TABLES, "
+        f"{list(protocol.in_scope_tables())}. A narrower bound cannot reveal a "
+        f"difference in anything the scenario did not expect to move - including the "
+        f"system rows `overrewrite` writes on BOTH sides "
+        f"[general/general.cbl:L656-L672]."
+    )
+    #  The scenario's `affected_tables` is its DECLARED EFFECT, not the bound. It must be
+    #  a subset of the bound, or something the scenario claims to change went uncompared.
+    assert set(protocol.affected_tables(SCENARIO)) <= set(run.tables), (
+        f"{SCENARIO}: declares an effect on "
+        f"{sorted(set(protocol.affected_tables(SCENARIO)) - set(run.tables))!r}, which the comparison never covered."
     )
 
     # THE ORACLE'S DISPOSITION, plus a harness-fault refusal on BOTH sides. A runner
     # that exited in its own documented band never ran the cycle, and on THIS scenario
     # that is indistinguishable from success in the verdict alone. `reference_only`
     # leaves the Python side's status to `test_run_completes_with_term_code_zero`.
+    #  BOTH SIDES DROVE THE SAME ORDERED OPERATION LIST (finding F-12). The
+    #  comparison below is between one COBOL run and one Python run, and it means
+    #  nothing unless the two drove the same work in the same order - an empty diff
+    #  between a short run and a full one being the most dangerous false pass this tier
+    #  can produce. Both runners resolve the list from the scenario itself and publish
+    #  one status row per operation, so it is checked rather than assumed.
+    protocol.assert_operations_driven(run, operations=tuple(protocol.definition(SCENARIO)["operations"]))
+
     protocol.assert_declared_statuses(
         run,
         operations=tuple(protocol.definition(SCENARIO)["operations"]),
@@ -878,11 +952,11 @@ def test_scenario_definition_preconditions(
         f"[copybooks/wsbatch.cob:L34] matching nothing."
     )
 
-    # Inert on this route: no scenario drives `gl_end_of_cycle`, which is the only
-    # operation that consumes the period. Asserted so the pin stays visible.
+    # Inert on this route: only `gl_end_of_cycle` consumes the period and this route
+    # never reaches gl080. Asserted so the pin stays visible.
     assert system["period"] == 1, (
         f"system.period is {system['period']!r}. It is inert here - only "
-        f"gl_end_of_cycle consumes it, and no scenario drives that operation - "
+        f"gl_end_of_cycle consumes it, and this route never reaches it - "
         f"but it is pinned so two runs cannot differ in it."
     )
 
@@ -1037,12 +1111,26 @@ def test_affected_tables_are_in_scope_and_alphabetical(
     definition = scenario_loader(SCENARIO)
     tables = list(definition["affected_tables"])
 
-    assert tables == ["GLBATCH-REC", "GLLEDGER-REC", "GLPOSTING-REC"], (
-        f"the affected-table list is {tables!r}. The General Ledger posting "
-        f"cycle can touch exactly these three: gl072's eight facade verbs reach "
-        f"the batch and the nominal ledger [general/gl072.cbl:L276-L277, L377, "
-        f"L382, L408, L441-L442, L454] and gl070 reads the posting file "
-        f"[general/gl070.cbl:L481, L486, L466]."
+    assert tables == [
+        "GLBATCH-REC",
+        "GLLEDGER-REC",
+        "GLPOSTING-REC",
+        "SYSDEFLT-REC",
+        "SYSTEM-REC",
+    ], (
+        f"the affected-table list is {tables!r}. Three tables the General Ledger "
+        f"posting cycle can touch - gl072's eight facade verbs reach the batch and "
+        f"the nominal ledger [general/gl072.cbl:L276-L277, L377, L382, L408, "
+        f"L441-L442, L454] and gl070 reads the posting file "
+        f"[general/gl070.cbl:L481, L486, L466] - plus two menu-persisted ones.\n"
+        f"SYSDEFLT-REC and SYSTEM-REC are the two menu-persisted tables MEASURED "
+        f"comparable - the General menu exit rewrites keys 1, 2 and 4 "
+        f"[general/general.cbl:L656-L692] and keys 1 and 2 come back byte-identical "
+        f"on both sides. Key 4, SYSTOT-REC, is the one that cannot be compared: the "
+        f"menu sources it from the COBOL flat file alone "
+        f"[general/general.cbl:L402-L404], the RDB read being commented out at "
+        f"L434-L436, so its exit returns sys4LD's four-spare sentinel "
+        f"[common/sys4LD.cbl:L368-L390] from 1.00 to 0.00."
     )
     assert tables == sorted(tables), (
         f"the affected-table list {tables!r} is not alphabetical. The order is "
@@ -1112,41 +1200,108 @@ def test_empty_batch_state_parity(
         f"{run.describe()}"
     )
 
+    #  AND THE PASS IS WHAT A PASS LOOKS LIKE, on THIS run's real trees. The exit
+    #  contract itself is exercised on synthetic trees by
+    #  `test_diff_exit_contract_is_honoured`, which needs no stack; these assertions are
+    #  about the run that just happened, and they belong here because this is the test
+    #  that owns it. On this scenario in particular an absent report and a zero-byte one
+    #  are the difference that matters: the expected outcome is that nothing changed, so
+    #  "compared, and identical" and "never compared" produce the same findings and only
+    #  the artifacts distinguish them.
+    diff_states = harness.diff_states
+    result = run.outcome.result
+    assert result.returncode == diff_states.EX_IDENTICAL, (
+        f"stage 10 returned {result.returncode} while its own TreeDiff reports "
+        f"is_empty={run.tree.is_empty} with {run.tree.total_differences} finding(s). "
+        f"Both come from the same comparison over the same two trees, so a "
+        f"disagreement means the trees changed between the two reads.\n"
+        f"{result.describe()}"
+    )
+    assert result.stdout == "", (
+        f"a passing comparison wrote {len(result.stdout)} byte(s) to stdout: "
+        f"{result.stdout!r}. Status 0 means identical AND SILENT - zero bytes, not a "
+        f"banner - so that an operator can test for emptiness rather than parse a "
+        f"message."
+    )
+    assert diff_states.render(run.tree) == "", (
+        f"the report renders as {diff_states.render(run.tree)!r} on an empty "
+        f"comparison. Agent Action Plan section 0.8.5 makes the empty string the "
+        f"rendering of two identical trees."
+    )
+    assert run.outcome.report.is_file(), (
+        f"no report was written at {run.outcome.report}. A PASSING run writes a "
+        f"ZERO-BYTE file deliberately: an existing empty file says 'compared, and "
+        f"identical', while an absent file says nothing at all - which in this "
+        f"scenario is the difference that matters."
+    )
+    assert run.outcome.report.stat().st_size == 0, (
+        f"the report at {run.outcome.report} is "
+        f"{run.outcome.report.stat().st_size} byte(s) although the comparison found "
+        f"nothing. A pass writes zero bytes."
+    )
+
 
 @pytest.mark.database
 @pytest.mark.oracle
 def test_affected_tables_are_byte_identical_to_the_seed(
-    empty_batch_parity: object, harness: object
+    empty_batch_parity: object, harness: object, protocol: object
 ) -> None:
-    """NO SPURIOUS ROW, NO DROPPED ROW - and the seed demonstrably landed.
+    """BYTE-IDENTICAL TO THE SEED - compared against the seed, not against the other run.
 
-    The folder requirement asks that the affected tables come back "byte-identical
-    to the seed - no spurious row, no counter bump, no status change". IT CARRIES
-    ONE EXPLICIT CAVEAT, and the caveat is the whole subtlety of this scenario:
-    whatever `gl072`'s at-end branch legitimately performed - `end-account` then
-    `end-batch` [general/gl072.cbl:L286-L289] - IS NOT A SPURIOUS CHANGE. It is
-    the specification. So this test asserts "no change beyond whatever the
-    compiled cycle itself performed, and the two sides agree exactly", and NEVER
-    a predicted value.
+    ⭐ WHAT THIS TEST USED TO COMPARE, AND WHY THAT WAS NOT ITS OWN TITLE. Its name
+    claims the affected tables came back byte-identical TO THE SEED; every assertion it
+    made compared the two POST-RUN trees to each other. Those are different claims, and
+    the weaker one is satisfied by outcomes the stronger one rejects: two cycles that
+    both stamped the empty batch agree perfectly, and two cycles that both inserted the
+    same spurious row agree perfectly. Neither is byte-identical to anything.
 
-    What it adds beyond the headline is the structural half of that claim, stated
-    per table: the two sides agree on the row count, and the tables the seed
-    filled came back WITH ROWS. The second half is the corroboration that an
-    empty verdict here is real rather than vacuous - a run that never connected
-    would leave every table at zero and still diff clean.
+    SO THE SEED COMPARISON IS MADE FIRST, AND IT IS A REAL ONE. Both runners record a
+    canonical primary-key-ordered digest of every bounded table immediately BEFORE their
+    dispatch and again immediately AFTER it. `assert_tables_unchanged_by_run` compares a
+    side's own two records, per table, so the question it answers is "did THIS cycle
+    change this table" - which no side-to-side diff can answer at all. Both sides are
+    asserted, and separately, because "unchanged by the run" is a property of a CYCLE and
+    there are two cycles.
+
+    THE ONE CAVEAT THE FOLDER REQUIREMENT CARRIES IS STILL HONOURED, and it is the whole
+    subtlety of this scenario: whatever `gl072`'s at-end branch legitimately performed -
+    `end-account` then `end-batch` [general/gl072.cbl:L286-L289] - would not be a
+    spurious change but the specification. The scenario declares
+    `expected_table_effect: unchanged`, which is the reading that those two rewrites
+    target a ZERO KEY and match no row; that reading is an EXPECTATION and is filed as
+    ambiguity `Q-EMPTY-BATCH-AT-END` in docs/migration/ambiguity-resolutions.md, with the
+    three readings and the observable set out in full. If the oracle takes a different
+    one, THIS ASSERTION IS WHERE IT SURFACES - and the resolution is to record the
+    measurement and reproduce it, never to weaken this back to a side-to-side comparison.
+    Nothing here predicts `CLEARED-STATUS` or `POSTED`.
+
+    THE SIDE-TO-SIDE STRUCTURAL CLAIMS FOLLOW, per table: no spurious row, no dropped
+    row, matching row counts and column lists, no differing value. And the corroboration
+    that the verdict is not vacuous - the tables the seed filled came back WITH ROWS,
+    because a run that never connected would leave every table at zero and still diff
+    clean.
 
     Args:
         empty_batch_parity: The completed `ParityRun`.
         harness: The three harness modules (R-1).
+        protocol: The protocol bundle, for the per-side seed comparison. It is the ONE
+            implementation of that comparison; nothing here reads a digest file itself.
     """
     run = empty_batch_parity
+
+    # ---- THE CLAIM IN THE TEST'S NAME, ASSERTED FIRST -------------------------
+    # Every bounded table, on each side, must carry the same row count and the same
+    # digest after the run as before it. This is the seed comparison; everything below
+    # it is the side-to-side structural detail.
+    protocol.assert_tables_unchanged_by_run(run, unchanged=tuple(run.tables))
+
     by_table = {entry.table: entry for entry in run.tree.tables}
 
     assert sorted(by_table) == sorted(run.tables), (
-        f"the comparison covered {sorted(by_table)!r} but the scenario bounds it "
-        f"to {sorted(run.tables)!r}. Bounding is done by the affected-table list "
-        f"and by nothing else - there is no ignore-list anywhere in the diff "
-        f"path - so a table missing from the verdict was never compared."
+        f"the comparison covered {sorted(by_table)!r} but it is bounded by "
+        f"{sorted(run.tables)!r} - all 22 in-scope tables. There is no ignore-list "
+        f"anywhere in the diff path, so a table missing from the verdict was never "
+        f"compared."
     )
 
     for table in run.tables:
@@ -1465,97 +1620,86 @@ def test_run_completes_with_term_code_zero(
     )
 
 
-@pytest.mark.database
-@pytest.mark.oracle
+#  NO `database` OR `oracle` MARK, DELIBERATELY. This test used to consume the real
+#  ten-stage run, which needed both; it now drives synthetic trees through the shipped
+#  comparison in process, so it executes on a bare host. Leaving the marks on would SKIP
+#  the contract in exactly the environments where nothing else checks it.
 def test_diff_exit_contract_is_honoured(
-    empty_batch_parity: object, harness: object
+    tmp_path, harness, frozen_schema, vocabulary, capsys
 ) -> None:
-    """The three-way exit contract of stage 8, asserted rather than assumed.
+    """The THREE-WAY exit contract: 0 is a pass, 1 is a failure, 2 IS NEVER A PASS.
 
-        0  identical, and stdout is EMPTY - zero bytes, not a banner
-        1  a real behavioural difference, with a deterministic report
-        2  THE COMPARISON COULD NOT BE PERFORMED - an ERROR, never a pass
+        0  the trees are identical, and stdout is EMPTY - zero bytes, not a banner
+           and not "no differences found"                                 -> PASS
+        1  a real behavioural difference, with a deterministic report   -> FAILURE
+        2  THE COMPARISON COULD NOT BE PERFORMED - a missing tree, a capture that
+           attests nothing, a capture taken after a failed run           -> ERROR
 
-    IN THIS SCENARIO THE 0-VERSUS-2 DISTINCTION IS EXISTENTIAL. "Both dumps are
-    empty" and "no dump was produced" look identical from the verdict alone, so a
-    status of 2 read as a pass would turn a broken harness into a green run.
-    Status 2 cannot reach this test body at all: tests/conftest.py raises
-    `HarnessFaultError` for it, and because that happens inside the fixture pytest
-    reports an ERROR. This test asserts the remaining half of the contract - that
-    the status the comparison returned and the verdict it computed agree, and that
-    a pass really does write zero bytes.
+    A TEST THAT TREATED "COULD NOT COMPARE" AS "NO DIFFERENCES" IS THE SINGLE WORST BUG
+    AVAILABLE IN THIS TREE, so the mapping is exercised rather than trusted. Rule R-6
+    makes an empty diff the pass condition ONLY when a comparison actually happened.
 
-    The zero-byte report is deliberate rather than incidental: an existing empty
-    `diff.txt` says "compared, and identical", while an absent file says nothing
-    at all, and the per-scenario evidence in
-    docs/migration/scenario-diff-evidence.md cites the file.
+    ⭐ DRIVEN THROUGH THE SHIPPED COMPARISON, AND THROUGH ONE IMPLEMENTATION.
+    `tests/conftest.py`'s `assert_diff_exit_contract` publishes two synthetic sides with
+    `harness/dump_tables.py`'s own writer, canonicalises them with `harness/normalize.py`
+    and compares them with `harness/diff_states.py` - once for each of the four cases.
+    THIS FILE USED TO ASSERT THE CONTRACT AGAINST MODULE CONSTANTS AND HAND-BUILT
+    `TreeDiff` DATACLASSES, which passes whatever the comparison actually does: three
+    integers being distinct says nothing about what the tool exits with, and a dataclass
+    built in the test reports whatever the test put in it. The constants are still
+    checked here, but only as a cheap corroboration of a contract the helper has just
+    exercised end to end, over THIS scenario's own bound. It matters
+    particularly here, because an empty batch's expected outcome is an empty diff -
+    exactly what a comparison that never happened also produces. Only the exit status
+    tells them apart, which is why it is exercised rather than assumed.
+
+    IT ASSERTS NOTHING WHATEVER ABOUT THE MIGRATION. The trees are SYNTHETIC, built from
+    the frozen schema's own column lists, so the machinery under test is the shipped
+    machinery - but a verdict taken from a hand-built tree is not protocol evidence, and
+    none is claimed. That is also why this test needs no Compose stack and no compiled
+    oracle: it executes on a bare host.
 
     Args:
-        empty_batch_parity: The completed `ParityRun`.
-        harness: The three harness modules (R-1).
-    """
-    run = empty_batch_parity
-    diff_states = harness.diff_states
-    result = run.outcome.result
+        tmp_path: A private output root, so `$ACAS_OUT` is neither read nor needed and
+            nothing is written into a compared tree.
+        harness: The three harness Python modules (R-1).
+        frozen_schema: The parsed `mysql/ACASDB.sql`, READ AND NEVER WRITTEN. It supplies
+            every column name and declared type, so nothing is invented.
+        vocabulary: The STACK-FREE bundle. Stages 4 and 8 are file-to-file
+            transformations driven in process, which is what lets the whole contract be
+            exercised on a bare host; it also publishes the helper.
+        capsys: The two refusals' streams, which the helper drives through
+            `diff_states.main` directly - the `diff` helper maps exit 2 to a harness
+            fault by design, and here a refusal is the expected outcome.
 
-    assert result.returncode != diff_states.EX_ERROR, (
-        f"stage 8 returned {diff_states.EX_ERROR}, meaning THE COMPARISON COULD "
-        f"NOT BE PERFORMED, and it reached the test body instead of being raised "
-        f"as a harness fault. That is the one conflation this tree forbids "
-        f"outright.\n{result.describe()}"
+    Raises:
+        AssertionError: An exit status, a stdout stream or a verdict did not match the
+            contract.
+    """
+    vocabulary.assert_diff_exit_contract(
+        SCENARIO,
+        out_dir=tmp_path,
+        harness=harness,
+        schema=frozen_schema,
+        vocabulary=vocabulary,
+        readouterr=capsys.readouterr,
     )
-    assert result.returncode in (
+
+    # THE THREE STATUSES REMAIN DISTINCT AND KEEP THEIR DOCUMENTED VALUES. Cheap, and
+    # worth stating separately: the helper above proved what the tool DOES, and this
+    # proves the numbers a reader of the evidence document will see are the numbers this
+    # file names. Collapsing "could not compare" into either of the other two is how a
+    # false pass is manufactured.
+    diff_states = harness.diff_states
+    observed = (
         diff_states.EX_IDENTICAL,
         diff_states.EX_DIFFERENT,
-    ), (
-        f"stage 8 returned {result.returncode}, which is none of the three "
-        f"documented statuses {diff_states.EX_IDENTICAL}, "
-        f"{diff_states.EX_DIFFERENT} or {diff_states.EX_ERROR}. An unclassified "
-        f"status is a status nobody should draw a conclusion from.\n"
-        f"{result.describe()}"
+        diff_states.EX_ERROR,
     )
-
-    expected_status = (
-        diff_states.EX_IDENTICAL
-        if run.tree.is_empty
-        else diff_states.EX_DIFFERENT
+    assert observed == (0, 1, 2), (
+        f"the exit contract's three statuses must be 0, 1 and 2 in that order; the "
+        f"comparison declares {observed!r}."
     )
-    assert result.returncode == expected_status, (
-        f"stage 8 returned {result.returncode} while its own TreeDiff reports "
-        f"is_empty={run.tree.is_empty} with {run.tree.total_differences} "
-        f"finding(s). Both come from the same comparison over the same two trees, "
-        f"so a disagreement means the trees changed between the two reads."
-    )
-
-    rendered = diff_states.render(run.tree)
-    if run.tree.is_empty:
-        assert result.stdout == "", (
-            f"a passing comparison wrote {len(result.stdout)} byte(s) to stdout: "
-            f"{result.stdout!r}. Status 0 means identical AND SILENT - zero "
-            f"bytes, not a banner - so that an operator can test for emptiness "
-            f"rather than parse a message."
-        )
-        assert rendered == "", (
-            f"the report renders as {rendered!r} on an empty comparison. Agent "
-            f"Action Plan section 0.8.5 makes the empty string the rendering of "
-            f"two identical trees."
-        )
-        assert run.outcome.report.is_file(), (
-            f"no report was written at {run.outcome.report}. A PASSING run "
-            f"writes a ZERO-BYTE file deliberately: an existing empty file says "
-            f"'compared, and identical', while an absent file says nothing at "
-            f"all - which in this scenario is the difference that matters."
-        )
-        assert run.outcome.report.stat().st_size == 0, (
-            f"the report at {run.outcome.report} is "
-            f"{run.outcome.report.stat().st_size} byte(s) although the "
-            f"comparison found nothing. A pass writes zero bytes."
-        )
-    else:
-        assert rendered != "", (
-            f"stage 8 reported {run.tree.total_differences} finding(s) but "
-            f"rendered nothing. A difference with no report cannot be acted on."
-        )
 
 
 @pytest.mark.database
@@ -1655,20 +1799,34 @@ def test_dump_is_wellformed_on_both_sides(
             key_type = normalize.column_type(
                 frozen_schema, table, dump["primary_key"]
             )
-            assert key_type.kind == normalize.KIND_INTEGER, (
-                f"{where}: the primary key {dump['primary_key']!r} is declared "
-                f"{key_type.sql_type!r} at [mysql/ACASDB.sql:L{key_type.line}]. "
-                f"All three tables this scenario bounds key on an integer "
-                f"column, so an ordering check on their keys is total."
-            )
-            for key in keys:
-                assert isinstance(key, int) and not isinstance(key, bool), (
-                    f"{where}: the primary-key value {key!r} serialised as "
-                    f"{type(key).__name__} although the column is "
-                    f"{key_type.sql_type!r}. Rows are aligned on this value and "
-                    f"`1` is not `\"1\"`, so a type drift silently un-aligns "
-                    f"every row."
-                )
+            #  THE KEY'S DECLARED TYPE DECIDES WHAT TO ASSERT, because the
+            #  comparison is bounded by all 22 in-scope tables and they do NOT all key
+            #  on an integer: `ANALYSIS-REC.PA-CODE` is `char(3)`
+            #  [mysql/ACASDB.sql:L32]. This scenario's three DECLARED tables happen to
+            #  key on integers, which is why an earlier form of this assertion demanded
+            #  it of everything. What matters to a dump's wellformedness is that the
+            #  serialised key MATCHES ITS DECLARED COLUMN TYPE - `1` is not `"1"` and a
+            #  drift either way silently un-aligns every row - so that is what is
+            #  asserted, for every table, against the schema rather than against a
+            #  scenario-specific expectation.
+            if key_type.kind == normalize.KIND_INTEGER:
+                for key in keys:
+                    assert isinstance(key, int) and not isinstance(key, bool), (
+                        f"{where}: the primary-key value {key!r} serialised as "
+                        f"{type(key).__name__} although the column is "
+                        f"{key_type.sql_type!r}. Rows are aligned on this value and "
+                        f"`1` is not `\"1\"`, so a type drift silently un-aligns "
+                        f"every row."
+                    )
+            else:
+                for key in keys:
+                    assert isinstance(key, str), (
+                        f"{where}: the primary-key value {key!r} serialised as "
+                        f"{type(key).__name__} although the column is "
+                        f"{key_type.sql_type!r} at "
+                        f"[mysql/ACASDB.sql:L{key_type.line}]. Rows are aligned on "
+                        f"this value, so a type drift silently un-aligns every row."
+                    )
             assert keys == sorted(keys), (
                 f"{where}: the rows are not in primary-key-ascending order - "
                 f"{keys!r}. The capture is `SELECT * FROM <table> ORDER BY "
@@ -1750,7 +1908,9 @@ def test_dump_is_wellformed_on_both_sides(
 
 @pytest.mark.database
 @pytest.mark.oracle
-def test_seed_fingerprints_agree(empty_batch_parity: object) -> None:
+def test_seed_fingerprints_agree(
+    empty_batch_parity: object, protocol: object
+) -> None:
     """BOTH CYCLES STARTED FROM THE SAME ROW COUNTS - or the run is unattributable.
 
     THE SECOND OF THE TWO DEFENCES against an empty diff that means nothing.
@@ -1766,20 +1926,23 @@ def test_seed_fingerprints_agree(empty_batch_parity: object) -> None:
     at all. It converts a whole class of silent false failures into a correctly
     attributed error.
 
-    The fingerprints are row counts only, all integers, so they introduce no
-    decimal of their own (R-2), and both live under `run-logs/` - OUTSIDE every
-    compared tree - so neither can leak into a capture (R-6). They are compared
-    AS BYTES and never parsed: interpreting the counts here would be the added
-    validation R-3 forbids, and the corroboration that the seeded tables actually
-    hold rows is taken from the dumps instead, in
+    Each fingerprint line carries a table name, a ROW COUNT and a SHA-256 of that
+    table's canonical primary-key-ordered dump - integers and hex text only, so
+    they introduce no decimal of their own (R-2) - and both files live under
+    `run-logs/`, OUTSIDE every compared tree, so neither can leak into a capture
+    (R-6). The digest is what makes the record decisive: EQUAL COUNTS WITH
+    DIFFERENT VALUES is precisely the disagreement a count-only record cannot see.
+    They are compared AS BYTES and never parsed: interpreting them here would be
+    the added validation R-3 forbids, and the corroboration that the seeded tables
+    actually hold rows is taken from the dumps instead, in
     `test_affected_tables_are_byte_identical_to_the_seed`.
 
     THE ORACLE-SIDE FINGERPRINT MAY LEGITIMATELY BE ABSENT, AND THAT IS ASSERTED
     RATHER THAN ASSUMED. `harness/run_cobol_scenario.sh` writes no pre-run
     fingerprint - its own SHA-256 transcript fingerprints come at the END of the
-    run [harness/run_cobol_scenario.sh:L1821] - so the Python runner treats a
+    run [harness/run_cobol_scenario.sh acas_run_fingerprint_transcript] - so the Python runner treats a
     missing counterpart as a WEAKER GUARANTEE rather than a fault: it emits the
-    note at [harness/run_python_scenario.sh:L3208] and records
+    note at [harness/run_python_scenario.sh acas_py_seed_fingerprint] and records
     `seed cross-check = unverified` in its summary, then continues.
 
     So BOTH dispositions are asserted, and neither is silent:
@@ -1796,10 +1959,26 @@ def test_seed_fingerprints_agree(empty_batch_parity: object) -> None:
     produced the same green result. Requiring the file instead would assert a
     contract the harness does not offer, so the disposition is what is asserted.
 
+    ⭐ THE RECORD CARRIES ONE MORE LINE THAN THE SCENARIO BOUNDS, and that is the
+    contract rather than a discrepancy. Both runners append the PARAMETER ROW,
+    `SYSTEM-REC`, to the bounded tables - it is the one in-scope table BOTH cycles
+    write on EVERY route (ambiguity `Q-7`), so leaving it wholly unobserved would be
+    a real coverage hole, while adding it to `affected_tables` is impossible: a dump
+    is `SELECT *` and `RDBMS-PASSWD char(12)` [copybooks/wssystem.cob:L139] is one of
+    its 169 columns. The expected order is therefore taken from
+    `protocol.fingerprinted_tables`, which is the same order
+    `acas_py_resolve_fingerprint_tables` builds, rather than restated here - a second
+    copy of that rule is how the two silently drift apart (R-4).
+
     Args:
         empty_batch_parity: The completed `ParityRun`, whose `paths.run_logs` is
             the transcript directory both fingerprints live in, and whose
             `python_run` carries the runner's own transcript.
+        protocol: The stage bundle, read only for `fingerprinted_tables` - the
+            scenario's DECLARED EFFECT in declared order, plus the parameter row. The
+            fingerprint carries one line per declared table, not one per COMPARED
+            table: the comparison is bounded by all 22 in-scope tables, while this
+            record holds the seeded state of the tables the scenario declares.
     """
     run = empty_batch_parity
     run_logs = run.paths.run_logs
@@ -1822,14 +2001,25 @@ def test_seed_fingerprints_agree(empty_batch_parity: object) -> None:
     lines = [
         line for line in recorded.decode("utf-8").splitlines() if line.strip()
     ]
-    assert len(lines) == len(run.tables), (
+    #  PER DECLARED EFFECT, NOT PER COMPARISON BOUND. The runner fingerprints the
+    #  scenario's own `affected_tables` in declared order, plus the parameter row when
+    #  the scenario has not already declared it; `run.tables` is the 22-table bound the
+    #  capture and the diff cover, so comparing against THAT would demand a line for
+    #  every in-scope table. `protocol.fingerprinted_tables` is the protocol's own
+    #  authority for the order, so this test cannot drift away from what the runners
+    #  actually write.
+    expected_tables = protocol.fingerprinted_tables(run)
+    assert len(lines) == len(expected_tables), (
         f"the seed fingerprint at {python_fingerprint} carries {len(lines)} "
-        f"line(s) for {len(run.tables)} affected table(s):\n"
+        f"line(s) where the contract is {len(expected_tables)} - this scenario's "
+        f"DECLARED tables, plus the parameter row when it is not already among them, "
+        f"and NOT the {len(run.tables)} tables the comparison is bounded by:\n"
         f"{recorded.decode('utf-8')}"
-        f"  One line per table is the contract, and the count is what the two "
-        f"sides compare."
+        f"  One line per declared table is the contract, and the count is what the "
+        f"two sides compare. The comparison itself covers all "
+        f"{len(run.tables)} in-scope tables."
     )
-    for line, table in zip(lines, run.tables):
+    for line, table in zip(lines, expected_tables):
         # One line per table, the table name first, tab-separated from its count.
         # Only the NAME and its position are read; the counts are never
         # interpreted here (R-3) - the corroboration that the seeded tables hold
@@ -1837,7 +2027,7 @@ def test_seed_fingerprints_agree(empty_batch_parity: object) -> None:
         recorded_table = line.split("\t")[0]
         assert recorded_table == table, (
             f"the seed fingerprint at {python_fingerprint} names "
-            f"{recorded_table!r} where the scenario names {table!r}:\n"
+            f"{recorded_table!r} where the record order names {table!r}:\n"
             f"{recorded.decode('utf-8')}"
             f"  THE DECLARED ORDER IS PART OF THE CONTRACT. The two sides compare "
             f"these files byte for byte, so a reordering on one side alone would "
@@ -1861,7 +2051,7 @@ def test_seed_fingerprints_agree(empty_batch_parity: object) -> None:
             f"there is no oracle-side seed fingerprint at {cobol_fingerprint}, and "
             f"the Python runner DID NOT SAY SO on its transcript.\n"
             f"  Absence is admissible only as the WEAKER GUARANTEE the runner "
-            f"declares at [harness/run_python_scenario.sh:L3208], which writes "
+            f"declares at [harness/run_python_scenario.sh acas_py_seed_fingerprint], which writes "
             f"{UNVERIFIED_NOTE!r} and records `seed cross-check = unverified`. An "
             f"undeclared absence is indistinguishable from a fingerprint that was "
             f"written and then lost, and in THIS scenario - where both dumps are "
@@ -1877,7 +2067,7 @@ def test_seed_fingerprints_agree(empty_batch_parity: object) -> None:
         f"the oracle-side seed fingerprint EXISTS at {cobol_fingerprint}, yet the "
         f"Python runner reported the weaker guarantee "
         f"{UNVERIFIED_NOTE!r} on its transcript. The cross-check at "
-        f"[harness/run_python_scenario.sh:L3206-L3216] therefore looked somewhere "
+        f"[harness/run_python_scenario.sh acas_py_seed_fingerprint] therefore looked somewhere "
         f"else, and nothing has actually been cross-checked.\n"
         f"  stage 6 transcript:\n{empty_batch_parity.python_run.describe()}"
     )
@@ -1895,4 +2085,85 @@ def test_seed_fingerprints_agree(empty_batch_parity: object) -> None:
         f"Autocommit must be OFF while seeding - "
         f"[common/glbatchLD.cbl:L9-L13] - and `batch.dat` is loaded by "
         f"exactly that loader [common/masterLD.sh:L94]."
+    )
+
+
+@pytest.mark.database
+@pytest.mark.oracle
+def test_system_record_parity_by_digest_as_well_as_by_dump(empty_batch_parity: object, protocol: object) -> None:
+    """THE PARAMETER ROW IS BOUNDED TWICE - by the dump, and by a digest of it.
+
+    WHAT THIS CLOSES. An earlier draft kept `SYSTEM-REC` off every scenario's
+    `affected_tables` and justified that by claiming no side writes it. That claim is
+    FALSE:
+    `acas_posting/cli/args.py`'s `overrewrite` reproduces
+    [general/general.cbl:L656-L672] and every one of the seven routes calls it, so the
+    parameter row is written on BOTH sides of every scenario. Until this assertion
+    existed, a regression in that persistence produced an EMPTY DIFF and a green run.
+
+    WHICH KEYS THIS ROUTE WRITES, ON A RUN THAT POSTS NOTHING. `gl_post_cycle` binds
+    `general_menu_state`, so `overrewrite` rewrites KEY 1, KEY 2 and KEY 4 even though
+    the cycle found no eligible batch and wrote no posting. THAT IS THE POINT: a run
+    that is a no-op over the three tables this scenario reasons about is NOT necessarily a
+    no-op over the parameter row, so this scenario's `expected_table_effect: unchanged`
+    is a claim about the row too. It was MEASURED rather than assumed: the frozen
+    `Date-Form` write-back [copybooks/wssystem.cob:L127] does not move the row's digest on
+    any of the four scenarios that declare `unchanged`, so the row is declared, dumped and
+    compared like any other, and the digest this test reads is a second, independent bound
+    on the same persistence.
+
+    IT IS DUMPED, WITH EXACTLY TWO CELLS WITHHELD. `SYSTEM-REC` is one of the 22
+    in-scope tables every capture covers, so 167 of its 169 columns are compared by value
+    like any other table's. The two exceptions are credentials - `RDBMS-PASSWD char(12)`
+    [copybooks/wssystem.cob:L139] and `PASS-WORD` - and a capture is evidence that gets
+    committed, so `harness/dump_tables.py`'s `REDACTED_COLUMNS` replaces those two cells
+    with a fixed marker inside `render_value`, the one funnel every captured cell passes
+    through. That is keyed by `(table, column)` and applied identically on both sides, so
+    it cannot itself produce a difference. Bounding the whole table out instead - the
+    alternative that was considered and rejected - removes the leak and takes 167
+    genuinely-written columns with it, and a bound drawn that way cannot reveal a
+    difference in what it excludes.
+
+    AND BOTH RUNNERS FINGERPRINT IT ANYWAY, before and after every run, which is what
+    this test compares. A sha256 over the canonical primary-key-ordered dump covers all
+    169 columns, credentials included, without being the dump - so the two withheld cells
+    are still compared, inside a hash that leaks nothing. The credential columns come from
+    the environment and are identical for both sides of one run, so they cannot
+    manufacture a difference; anything that does differ is a difference in what the two
+    cycles wrote. MEASURED, so the second-order worry is stated with its limit: the row's
+    content depends on what the route DID - the run-date stamp, the IRS allocator, the
+    one-shot latches, and `Date-Form`, which the frozen date sections write back
+    [copybooks/wssystem.cob:L127] - and the digest HOLDS on all four scenarios that
+    declare `unchanged` and MOVES on every one that declares `changed`. That was measured
+    over the eight scenarios that existed when the measurement was taken, which is all
+    four `unchanged` ones; the ninth, `end_of_cycle_gl`, declares `changed` and moves the
+    row by construction, Phase 5 advancing the cycle and rotating the quarter counter.
+    So declaring the row falsifies no effect claim; the digest is the belt to the dump's
+    braces.
+
+    Args:
+        empty_batch_parity: The completed, guarded run. The assertion needs its
+            artifact layout, and taking the fixture is what orders this test after the
+            two run stages rather than a comment claiming it.
+        protocol: The protocol bundle. `assert_system_record_parity` is the ONE
+            implementation of this comparison and lives in `tests/conftest.py`; nothing
+            here reads a fingerprint file itself.
+
+    Raises:
+        Skipped: The harness Compose stack is not usable.
+        AssertionError: A post-run record is missing or unreadable (a harness fault), or
+            the two cycles left the parameter row in different states (a behavioural
+            difference the table diff cannot see).
+    """
+    cobol_record, python_record = protocol.assert_system_record_parity(empty_batch_parity)
+
+    # STATE WHAT WAS OBSERVED, so the test is not merely "the helper did not raise".
+    # A zero-row parameter row would mean the seed never loaded system.dat, in which
+    # case both sides agree on nothing at all and the digests would match vacuously.
+    assert cobol_record.row_count == python_record.row_count == 1, (
+        f"{SCENARIO}: the parameter row holds {cobol_record.row_count} row(s) on the "
+        f"oracle side and {python_record.row_count} on the migrated side. system.dat "
+        f"seeds EXACTLY ONE row for key 1, and two empty tables carry the same digest - "
+        f"so without this check the parity claim above could pass on a database that "
+        f"was never seeded."
     )

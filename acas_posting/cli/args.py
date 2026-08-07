@@ -134,6 +134,7 @@ question Q-CLI-IRS-RUNDATE. Without `--run-date` this module would have to read
 a live clock (R-6) or leave both fields unpinned (R-3, R-4).
 
 WHAT THIS MODULE MAY AND MAY NOT IMPORT
+=======================================
 MAY, and does: the standard library, `acas_posting.clock`, its sibling
 `acas_posting.cli.rdbms_params`, the record modules whose dataclasses the three
 shapes are built from, the `MOVE` implementation `acas_posting.cobol.move`, and
@@ -270,141 +271,6 @@ R-4 Legacy behaviour is reproduced, never corrected. Agent Action Plan section
 R-5 Full traceability - see the mandatory footer.
 R-6 Compiled behaviour is the tie-breaker, so the clock is injected and the
     three genuinely open questions are marked in place rather than guessed.
-=======
-=======================================
-MAY, and does: the standard library, `acas_posting.clock`, its sibling
-`acas_posting.cli.rdbms_params`, the five record modules whose dataclasses the
-three shapes are built from, and the `MOVE` implementation
-`acas_posting.cobol.move`. Together with that sibling this is the ONLY part of
-`acas_posting/cli/` permitted to import the record layer, precisely because
-section 0.4.1.1 assigns it the job of binding "the system records"; the seven
-entry-point modules of this package construct their linkage through here.
-
-The sibling import is intra-package and acyclic: `rdbms_params` imports one
-record module and nothing else of this package, and `acas_posting/cli/__init__.py`
-imports no submodule at all, so there is no cycle to create.
-
-`acas_posting.cobol.move` belongs on that list, and an earlier draft of this file
-put it on the other one. The import table of section 0.4.3 bars
-`acas_posting/cli/` from the data-access handlers - "Must not import:
-`dal.acas*`" - and from nothing else in the semantics package, while section
-0.1.2, transformation rule 11, requires a `MOVE` between unlike pictures to go
-through "Sending-field-to-receiving-field rules, not assignment". argv is the one
-place in the migrated cycle where a string of arbitrary length meets a `PIC X(8)`
-receiving field, so this is precisely where rule 11 has to be applied. The edge
-is acyclic: `acas_posting.cobol.move` reaches only `cobol.arithmetic`,
-`cobol.usage`, `cobol.field` and `dictionary.model`, and none of those reaches
-`acas_posting.cli`.
-
-MAY NOT, and does not: the program layer, the data-access layer including its
-facade, the dictionary package and the work-file module. One consequence worth
-stating because it looks like an omission:
-
-  * `MOVE` receiving-field semantics ARE applied to the seven `WS-Calling-Data`
-    fields, through `acas_posting/cobol/move.py`, because argv is the one place
-    in the migrated cycle where a string of arbitrary length meets a `PIC X(8)`
-    receiving field. What is deliberately NOT re-plumbed is named in the footer.
-    `rdbms_params` pads each connection value to its receiving `pic x(n)` width
-    with a local helper instead - the same accommodation
-    `acas_posting/dal/connection.py` already makes, and for the same layering
-    reason.
-  * the system records are BOUND here and LOADED elsewhere. This module fills
-    the three pinnable fields and the six connection fields; the other 160
-    columns of `SYSTEM-REC`, the whole of `SYSTOT-REC` and the whole of
-    `IRS-System-Params` come from the store, read by
-    `aa010_get_system_recs` below - the migrated menu boundary - and handed to
-    the three binders as keyword arguments. Recorded as Q-CLI-SYSREC-LOAD, and
-    settled there; a binder called WITHOUT them still builds declared-default
-    records, which is what a caller inspecting a linkage shape without a database
-    wants.
-
-THE SIX CONNECTION FIELDS ARE THE ONE EXCEPTION TO "DECLARED DEFAULTS"
-=====================================================================
-`RDBMS-DB-Name`, `RDBMS-User`, `RDBMS-Passwd`, `RDBMS-Port`, `RDBMS-Host` and
-`RDBMS-Socket` [copybooks/wssystem.cob:L137-L144] are filled from the deployment
-contract by `acas_posting/cli/rdbms_params.py`, which reproduces the frozen
-`common/acas-get-params.cbl` and the six `MOVE` statements every load program
-performs after calling it [common/glbatchLD.cbl:L262-L267].
-
-They cannot be left at their declared defaults, because those defaults are the
-copybook's own placeholders - the literal user `"ACAS-User"` and the literal
-password `"PaSsWoRd"` - and `SYSTEM-REC` is the ONLY carrier by which a
-connection parameter reaches the data-access layer
-[common/acas008.cbl:L558-L563]. A run built purely at declared defaults would
-therefore not reach the database the operator provisioned.
-
-No CLI option is added for any of the six: the frozen counterpart takes its
-values from a source outside the command line, so this one does too. The closed
-list of two settable `SYSTEM-REC` options stays closed, and a password never
-appears in argv.
-
-RECEIVING-FIELD SEMANTICS ARE APPLIED, NOT SKIPPED
-==================================================
-Every write into `01 WS-Calling-Data` [copybooks/wscall.cob:L6-L14] is a `MOVE`
-through `acas_posting.cobol.move.move`, carrying the RECEIVING FIELD'S OWN
-descriptor. The descriptor is fetched by attribute name from
-`acas_posting.records.calling_data.descriptor_for`, imported here under the
-local alias `calling_data_record`, so the picture comes from the generated data
-dictionary and is never transcribed in this file (rule R-5, and the "data
-dictionary first" directive of section 0.8.1). The call sites need know nothing
-about field categories, because `move` dispatches on the receiver.
-
-What that buys is the behaviour the frozen copybook declares rather than
-Python's assignment: `move "gl070" to ws-called` leaves EIGHT characters in a
-`PIC X(8)` field, not five; an over-long `--ws-cd-args` loses its tail at
-thirteen instead of widening the field; and a value moved into
-`WS-Term-Code pic 99` or `WS-Process-Func pic 9` lands at the declared digit
-count. Nothing is checked and nothing is reported on the way in (rule R-3): a
-`MOVE` pads and truncates silently, and that silence is the whole of what the
-COBOL does.
-
-NO IMPORT-TIME SIDE EFFECTS
-Importing this module binds names and evaluates a handful of pure in-memory
-dataclass constructions, and has no other observable effect. It builds no
-parser, configures no logging, opens no file, connection or directory, reads
-nothing from its surroundings, starts nothing, and cannot fail for an
-environmental reason. That is a hard requirement rather than a preference: the
-scenario test suites import this package, and a module that did work at import
-would make their arithmetic tier's "runs anywhere" promise untrue.
-
-Stated precisely, because the connection binding above could be read as
-contradicting it: the ENVIRONMENT IS READ ONLY WHEN A BINDER IS CALLED, never at
-import. `bind_rdbms_connection` is imported here but not invoked here, and it
-accepts an explicit `env` mapping, so a test can drive every binder without
-touching the real environment. The three public binders CAN therefore now fail
-for an environmental reason - deliberately, because a run that cannot reach the
-provisioned database must stop before it writes - while importing this module
-still cannot.
-
-THE RULES THAT BIND THIS FILE
-=============================
-`review_rules` reports NO user rules document for this project, so the binding
-constraints are the Agent Action Plan's own six (section 0.7.2):
-
-R-1 No COBOL at run time. Nothing here spawns a child process, loads a foreign
-    library or reaches the GnuCOBOL toolchain, and there is no import path from
-    this package to the compiled comparison oracle. No option selects, invokes
-    or compares against that oracle either - the oracle's own scripts drive
-    these entry points from outside, never the reverse.
-R-2 Zero binary floating point. `WS-Term-Code` is an `int` (from `pic 99`),
-    `to-day` is a `str`, `Run-Date` is an `int` and the IRS `run-date` is a
-    `str`. No binary-radix numeric type appears anywhere in this module, in a
-    signature, an option type or a computation.
-R-3 No added validation, no added field, no schema change, no concurrency.
-    Nothing here judges a run date, extends a record or reaches a database, and
-    execution is strictly sequential - there is no worker, pool or event loop
-    to configure and no option that would create one. The six connection fields
-    the binders fill already exist in [copybooks/wssystem.cob:L137-L144], so no
-    field is added; the width and blank checks that guard them live in
-    `rdbms_params` and apply to DEPLOYMENT CONFIGURATION rather than to any
-    accounting value, which that module argues at length.
-R-4 Legacy behaviour is reproduced, never corrected. Agent Action Plan section
-    0.8.2, verbatim: "A defect reproduced is correct; a defect fixed is a
-    failure." Each reproduction below carries its COBOL locator in a comment,
-    as section 0.7.4 C-4 requires.
-R-5 Full traceability - see the mandatory footer.
-R-6 Compiled behaviour is the tie-breaker, so the clock is injected and the
-    three genuinely open questions are marked in place rather than guessed.
 """
 
 from __future__ import annotations
@@ -416,9 +282,13 @@ from collections.abc import Callable, Mapping
 from typing import Final, NamedTuple
 
 from acas_posting import clock, dates
+from acas_posting.cli import rdbms_params
 from acas_posting.cli.rdbms_params import (
+    TRANSPORT_ALLOW_PLAINTEXT_VARIABLE,
+    TRANSPORT_CA_VARIABLE,
     RdbmsParamError,
     bind_rdbms_connection,
+    read_declared_flag,
     resolve_transport_policy,
 )
 from acas_posting.cobol import move as cobol_move
@@ -492,6 +362,9 @@ __all__: Final[tuple[str, ...]] = (
     "GlLinkage",
     "SlPlLinkage",
     "IrsLinkage",
+    #  The IRS route's carrier for the ONE `zz090` pass: the three `CALL`
+    #  operands plus the snapshot that pass captured (finding F-01).
+    "IrsRouteBinding",
     # ---- the menu shell's own WORKING-STORAGE and its acas000 traffic ------
     "MenuState",
     "IrsSystemSnapshot",
@@ -521,6 +394,7 @@ __all__: Final[tuple[str, ...]] = (
     "bind_gl_linkage",
     "bind_slpl_linkage",
     "bind_irs_linkage",
+    "bind_irs_route",
     "bind_rdbms_connection",
     "install_connection_policy",
     "resolve_clock",
@@ -559,10 +433,6 @@ __all__: Final[tuple[str, ...]] = (
     #  no transport policy at all [copybooks/mysql-procedures.cpy:L72-L77], so
     #  the migration has to decide it, and the caller is the only party that
     #  knows. See the section headed THE TRANSPORT-SECURITY DECLARATION.
-    "TLS_CA_VARIABLE",
-    "ALLOW_PLAINTEXT_VARIABLE",
-    "add_transport_security_arguments",
-    "bind_transport_security",
     "dal_options_for",
     "declare_connection_policy",
     # ---- the boundary: expected failures, and stated destructive intent ----
@@ -899,6 +769,37 @@ class IrsLinkage(NamedTuple):
     irs_system_params: IrsSystemParams
     ws_system_record: SystemRecord
     file_defs: FileDefs
+
+
+class IrsRouteBinding(NamedTuple):
+    """Everything `irs/irs.cbl` has in hand when it reaches its `CALL "irs030"`.
+
+    TWO MEMBERS, AND THE SPLIT IS THE FROZEN MENU'S OWN. `linkage` is the three
+    operands the `CALL` passes [irs/irs.cbl:L668-L671] and nothing else, so
+    `IrsLinkage` stays exactly the shape of that statement. `pre_dispatch_snapshot`
+    is the menu's OWN WORKING-STORAGE - the seven `WS-` values `zz090` captures
+    "Holds current values from prog. start" [irs/irs.cbl:L353-L359] - which `zz095`
+    later compares the returned record against [irs/irs.cbl:L1011-L1029]. It is not
+    a linkage operand and is not passed to `irs030`.
+
+    ⭐ WHY THE SNAPSHOT IS RETURNED RATHER THAN RE-TAKEN.  `zz090-Set-Up-IRS-System-
+    Data` is performed ONCE in the frozen menu, at [irs/irs.cbl:L556], and it both
+    fills `IRS-System-Params` and captures the snapshot in that one pass. A route
+    that performed it a second time to obtain the snapshot would traverse file-key 1
+    again and re-run the whole remap - extra store traffic, extra log records and an
+    extra failure path that the frozen menu does not have (finding F-01). So the one
+    pass publishes both halves, and the route reads the snapshot off this carrier.
+
+    Attributes:
+        linkage: the three `CALL` operands, in COBOL parameter order.
+        pre_dispatch_snapshot: what `zz090` captured, or `None` when the caller
+            supplied no `menu_state` - in which case `zz090` is not performed at
+            all, exactly as a caller that never reaches [irs/irs.cbl:L556] would
+            leave it. A route that needs `zz095` always supplies `menu_state`.
+    """
+
+    linkage: IrsLinkage
+    pre_dispatch_snapshot: IrsSystemSnapshot | None
 
 
 class MenuState(NamedTuple):
@@ -1376,42 +1277,8 @@ FS_MYSQL_USED: Final[int] = 1
 #  by all seven routes through the three linkage binders.
 
 
-def _stated_transport_security(
-    namespace: argparse.Namespace | None,
-    env: Mapping[str, str] | None,
-) -> TransportSecurity | None:
-    """Return the operator's own transport declaration, or None if there is none.
-
-    `add_transport_security_arguments` is composed by every route, so a parsed
-    namespace normally carries the four options; a caller that built its own
-    namespace, or a route that omitted them, carries none. Only a namespace with
-    at least one of them stated is treated as a declaration, so an operator who
-    said nothing still gets the deployment contract rather than an empty policy
-    that would silently outrank it.
-
-    Args:
-        namespace: the parsed arguments, or None.
-        env: the environment `bind_transport_security` falls back to.
-
-    Returns:
-        The declared policy, or None when nothing was declared on the command
-        line.
-    """
-    if namespace is None:
-        return None
-    stated = any(
-        getattr(namespace, name, None) not in (None, False)
-        for name in ("db_tls_ca", "db_tls_cert", "db_tls_key", "db_allow_plaintext")
-    )
-    if not stated:
-        return None
-    return bind_transport_security(namespace, environ=env)
-
-
 def install_connection_policy(
     env: Mapping[str, str] | None = None,
-    *,
-    namespace: argparse.Namespace | None = None,
 ) -> dal_connection.ConnectionPolicy:
     """Install the ONE connection policy of the run. THE policy boundary.
 
@@ -1445,39 +1312,42 @@ def install_connection_policy(
     Idempotent: called once per bound linkage, and installing the same resolved
     policy twice is indistinguishable from installing it once.
 
-    THE OPERATOR MAY STILL DECLARE ONE ON THE COMMAND LINE, and when a route
-    published `add_transport_security_arguments` the parsed namespace is passed
-    here so that declaration WINS over the deployment contract. Precedence is
-    therefore command line, then contract, then nothing - and "nothing" leaves
-    the migrated cycle behaving exactly as the compiled one does. Without this
-    the published options would be a knob that does nothing, which is worse than
-    no knob because it invites the wrong conclusion.
+    THE DEPLOYMENT CONTRACT IS THE ONLY SOURCE, and there is no command-line
+    override. A route that published `--db-tls-*` and `--db-allow-plaintext`
+    would be adding a program input and two refusal outcomes the compiled program
+    has not got (rule R-3), which is why the options were withdrawn and why this
+    function takes no namespace. Precedence is therefore contract, then nothing -
+    and "nothing" is a fail-closed policy rather than an absent one: a loopback
+    address or a Unix socket connects, and any other target is refused until the
+    deployment states either a CA bundle or the isolated-oracle declaration.
 
     Args:
         env: The mapping the declaration is resolved from, passed through to
             `rdbms_params.resolve_transport_policy`. The process environment when
             omitted, which is the case in a real run. This module never reaches
             that environment itself - the adapter does, and only when called.
-        namespace: The parsed arguments, when the calling route published the
-            transport options. `None`, or a namespace carrying none of them,
-            leaves the contract as the only source.
 
     Returns:
         The policy installed, so that a caller can report or assert on it. It is
         also retrievable from `dal.connection.connection_policy()`.
-
-    Raises:
-        ValueError: from `bind_transport_security`, when the operator gave
-            `--db-tls-cert` without `--db-tls-key` or the reverse.
     """
-    stated = _stated_transport_security(namespace, env)
-    if stated is not None:
-        policy = dal_connection.ConnectionPolicy(transport=stated)
-        dal_connection.set_connection_policy(policy)
-        return policy
-
     declaration = resolve_transport_policy(env)
 
+    #  ⭐ THERE IS NOTHING TO OVERLAY: THE CONTRACT IS THE WHOLE DECLARATION.
+    #  An earlier revision published `--db-tls-ca`, `--db-tls-cert`, `--db-tls-key`
+    #  and `--db-allow-plaintext`, and this function then returned
+    #  `ConnectionPolicy(transport=stated)` the moment any of them was typed - which
+    #  SILENTLY DROPPED the three refusal-and-allowance knobs and the three driver
+    #  deadlines, so an operator who typed `--db-allow-plaintext` on a deployment
+    #  that had asked for `ACAS_DB_REQUIRE_TLS=1` got neither the refusal it asked
+    #  for nor any notice that the request had been discarded. Merging the two
+    #  field by field was one remediation for that; WITHDRAWING THE OPTION SURFACE
+    #  is the stronger one, and it is the one this module carries: adding a program
+    #  input and two refusal outcomes the compiled program has not got is itself a
+    #  behaviour change (rule R-3), and a certificate path on a command line is a
+    #  process-listing leak. With no option surface there is no second side to
+    #  merge, so the contract is read ONCE, here, and cannot be annulled from argv.
+    #
     #  A `TransportSecurity` is built only when the deployment actually declared
     #  something. Passing `None` is not the same as passing an instance at its
     #  defaults would be if this ever gained a third state: `None` means "no
@@ -1505,6 +1375,12 @@ def install_connection_policy(
         allow_frozen_placeholder_credentials=(
             declaration.allow_frozen_placeholder_credentials
         ),
+        #  The three driver deadlines, carried from the same contract so that the
+        #  policy the data-access layer reads is the whole of the deployment's
+        #  declaration and not the transport half of it (finding F-05).
+        connect_timeout_seconds=declaration.connect_timeout_seconds,
+        read_timeout_seconds=declaration.read_timeout_seconds,
+        write_timeout_seconds=declaration.write_timeout_seconds,
     )
     dal_connection.set_connection_policy(policy)
     return policy
@@ -1725,8 +1601,9 @@ def _apply_cli_pins(
     #  entry points establishes the deployment's declaration before any handler
     #  can open anything, and no handler has to be told about it. See
     #  `install_connection_policy` for why it is not an argparse option and why
-    #  its empty default leaves the migrated cycle behaving as the compiled one.
-    install_connection_policy(env, namespace=ns)
+    #  an undeclared deployment gets a fail-closed policy rather than an absent
+    #  one.
+    install_connection_policy(env)
 
     #  [copybooks/wssystem.cob:L67] `05 Run-Date binary-long.` - an `int`, never
     #  a binary-radix numeric type (rule R-2), and from the pinned clock only:
@@ -2570,7 +2447,7 @@ def overrewrite(
 #  accidental - see `zz090_set_up_irs_system_data`.
 _IRS_SUSER: Final = FieldDescriptor.from_dictionary_key("system-record.suser")
 #  The key carries the copybook's OWN capitalisation - `03  Print-Spool-Name`
-#  [copybooks/irswssystem.cob:L44] - because dictionary lookup folds no case. Its
+#  [copybooks/irswssystem.cob:L37] - because dictionary lookup folds no case. Its
 #  two neighbours here are lower case in the same copybook, `03  suser`
 #  [copybooks/irswssystem.cob:L15] and `03  system-ops`
 #  [copybooks/irswssystem.cob:L23], and the inconsistency is the source's.
@@ -2611,7 +2488,7 @@ def zz090_set_up_irs_system_data(
       [copybooks/irswssystem.cob:L15]. Eight characters are lost off the right.
     * `move ACAS-Print-Spool-Name to Print-Spool-Name` - `pic x(48)`
       [copybooks/wssystem.cob:L79] into `pic x(32)`
-      [copybooks/irswssystem.cob:L44]. Sixteen characters lost.
+      [copybooks/irswssystem.cob:L37]. Sixteen characters lost.
 
     Both go through the MOVE layer with the RECEIVING field's own descriptor, so
     the truncation is the COBOL rule's rather than Python's slicing, and a
@@ -2698,7 +2575,7 @@ def zz090_set_up_irs_system_data(
     #       `PL-Approp-AC` is the FIVE-digit item inside the redefinition of the
     #       six-digit `PL-Approp-AC6` [copybooks/wssystem.cob:L322-L325] - "loose
     #       leading char for IRS". The IRS side is `pic 9(5)`
-    #       [copybooks/irswssystem.cob:L43], so the five-digit reading is the one
+    #       [copybooks/irswssystem.cob:L36], so the five-digit reading is the one
     #       that matches and the six-digit one is deliberately not used.
     irs_system_params.pl_approp_ac = irs_block.filler_323.pl_approp_ac
     irs_system_params.first_time_flag = irs_block.first_time_flag
@@ -3142,12 +3019,12 @@ def bind_slpl_linkage(
     )
 
 
-def bind_irs_linkage(
+def bind_irs_route(
     ns: argparse.Namespace,
     *,
     menu_state: MenuState | None = None,
     env: Mapping[str, str] | None = None,
-) -> IrsLinkage:
+) -> IrsRouteBinding:
     """Bind Shape 3 - the three-parameter IRS shape.
 
     No `called` keyword, because there is no `WS-Called` to fill: Shape 3 has no
@@ -3168,18 +3045,11 @@ def bind_irs_linkage(
             second argument - the maintainer's own `*> ACAS system rec.` at
             [irs/irs.cbl:L669] - so the connection fields reach the IRS route by
             exactly the same carrier as the other two shapes.
-        system_record: as `bind_gl_linkage`. The IRS shell reads it under file-key
-            1 and reads NOTHING ELSE - `move 1 to File-Key-No. perform
-            acas000-Read-Indexed.` [irs/irs.cbl:L511-L512] - which is the third of
-            the three divergent `aa010` shapes.
-        irs_system_params: the `IRS-System-Params` the caller has already built by
-            `zz090-Set-Up-IRS-System-Data` [irs/irs.cbl:L907-L997] out of that
-            loaded record, through `acas_posting.cli.menu_state`. `None` builds one
-            at its declared defaults, which carries `Next-Post` zero and would
-            allocate posting keys from zero - see finding CLI-04. Either way the
-            eight-character run date below is written into it here, because that is
-            what `zz090-Proc-Run-Date.` [irs/irs.cbl:L972-L978] does and the pinned
-            clock is this layer's business.
+
+    THE SIGNATURE IS THE THREE ARGUMENTS ABOVE AND NOTHING ELSE. Neither
+    `WS-System-Record` nor `IRS-System-Params` is a parameter: both are BUILT
+    here, for the reason the next paragraph gives, and an earlier revision of
+    this docstring documented them as if a caller could supply them.
 
     BOTH RECORDS ARE BUILT HERE, NOT PASSED IN. `WS-System-Record` is the ACAS
     system record the IRS shell reads under file-key 1 and NOTHING ELSE - `move 1
@@ -3194,50 +3064,28 @@ def bind_irs_linkage(
     clock is this layer's business.
 
     ⭐ BINDING IS NOT THE WHOLE OF SHAPE 3, AND MUST NOT BE MISTAKEN FOR IT.
-    What this function returns is the three records at their DECLARED DEFAULTS
-    plus whatever argv supplies - which leaves `IRS-System-Params.Next-Post`, the
-    POSTING-KEY ALLOCATOR `irs030` numbers each posting from, at ZERO. The frozen
-    menu never calls `irs030` with the record in that state: between the bind and
-    the dispatch it performs `aa010-Get-System-Recs` [irs/irs.cbl:L507-L551] to
-    load the seeded `SYSTEM-REC` row and then `zz090-Set-Up-IRS-System-Data`
-    [irs/irs.cbl:L556] to copy the allocator and seventeen other fields across.
-    Both are performed for a caller that supplies `menu_state` - which every
-    route does - by `aa010_get_system_recs`, whose key set comes from the
-    `irs_menu_state()` block and is therefore key 1 alone, and by
-    `zz090_set_up_irs_system_data`.  A caller that passes no `menu_state` gets
-    neither. A caller that binds Shape 3 and dispatches without
-    them allocates posting keys from zero and collides with the seed.
-
-    ⭐ BINDING IS NOT THE WHOLE OF SHAPE 3, AND MUST NOT BE MISTAKEN FOR IT.
-    What this function returns is the three records at their DECLARED DEFAULTS
-    plus whatever argv supplies - which leaves `IRS-System-Params.Next-Post`, the
-    POSTING-KEY ALLOCATOR `irs030` numbers each posting from, at ZERO. The frozen
-    menu never calls `irs030` with the record in that state: between the bind and
-    the dispatch it performs `aa010-Get-System-Recs` [irs/irs.cbl:L507-L551] to
-    load the seeded `SYSTEM-REC` row and then `zz090-Set-Up-IRS-System-Data`
-    [irs/irs.cbl:L556] to copy the allocator and seventeen other fields across.
-    Both are the ROUTE's work, not argv binding's, so they live in
-    `aa010_get_system_recs_irs` and `zz090_set_up_irs_system_data` and are called
-    from `cli/irs_post.main`. A caller that binds Shape 3 and dispatches without
-    them allocates posting keys from zero and collides with the seed.
-
-    ⭐ BINDING IS NOT THE WHOLE OF SHAPE 3, AND MUST NOT BE MISTAKEN FOR IT.
-    What this function returns is the three records at their DECLARED DEFAULTS
-    plus whatever argv supplies - which leaves `IRS-System-Params.Next-Post`, the
-    POSTING-KEY ALLOCATOR `irs030` numbers each posting from, at ZERO. The frozen
-    menu never calls `irs030` with the record in that state: between the bind and
-    the dispatch it performs `aa010-Get-System-Recs` [irs/irs.cbl:L507-L551] to
-    load the seeded `SYSTEM-REC` row and then `zz090-Set-Up-IRS-System-Data`
-    [irs/irs.cbl:L556] to copy the allocator and seventeen other fields across.
-    Both are the ROUTE's work, not argv binding's, so they live in
-    `aa010_get_system_recs_irs` and `zz090_set_up_irs_system_data` and are called
-    from `cli/irs_post.main`. A caller that binds Shape 3 and dispatches without
-    them allocates posting keys from zero and collides with the seed.
+    Bound WITHOUT a `menu_state` this returns the three records at their DECLARED
+    DEFAULTS plus whatever argv supplies - which leaves `IRS-System-Params.Next-
+    Post`, the POSTING-KEY ALLOCATOR `irs030` numbers each posting from, at ZERO.
+    The frozen menu never calls `irs030` with the record in that state: between the
+    bind and the dispatch it performs `aa010-Get-System-Recs`
+    [irs/irs.cbl:L507-L551] to load the seeded `SYSTEM-REC` row and then
+    `zz090-Set-Up-IRS-System-Data` [irs/irs.cbl:L556] to copy the allocator and
+    seventeen other fields across. Both are performed here for a caller that
+    supplies `menu_state` - which every route does - by `aa010_get_system_recs`,
+    whose key set comes from the `irs_menu_state()` block and is therefore key 1
+    alone, and by `zz090_set_up_irs_system_data`. EACH RUNS EXACTLY ONCE, as the
+    frozen menu performs each exactly once (finding F-01). A caller that binds
+    Shape 3 and dispatches without them allocates posting keys from zero and
+    collides with the seed.
 
     Returns:
-        The three arguments in COBOL parameter order [irs/irs.cbl:L668-L671], at
-        their declared defaults except for what argv and the environment supply.
-        NOT yet carrying the seeded system row - see the note above.
+        An `IrsRouteBinding`: the three arguments in COBOL parameter order
+        [irs/irs.cbl:L668-L671], together with the snapshot the one
+        `zz090_set_up_irs_system_data` pass captured. Given a `menu_state` the
+        linkage carries the SEEDED system row and the filled `IRS-System-Params`;
+        without one it carries their declared defaults plus what argv and the
+        environment supply, and the snapshot is `None` - see the note above.
 
     Raises:
         AttributeError: as `bind_gl_linkage`.
@@ -3258,13 +3106,15 @@ def bind_irs_linkage(
         placeholder triple without a declaration at the call site.
 
     Note:
-        THE SNAPSHOT `zz095` NEEDS IS NOT RETURNED HERE, and deliberately. It is
-        not a linkage operand - `IrsLinkage` carries the three the frozen `CALL`
-        passes and nothing else - so the route performs
-        `zz090_set_up_irs_system_data` itself when it needs the snapshot, which is
-        also how irs/irs.cbl reads: `perform zz090-Set-Up-IRS-System-Data.`
-        [irs/irs.cbl:L556] is its own statement, with the maintainer's reminder
-        "dont forget to run zz095 after".
+        THE SNAPSHOT `zz095` NEEDS TRAVELS BESIDE THE LINKAGE, NOT INSIDE IT.
+        `IrsLinkage` carries the three operands the frozen `CALL` passes and
+        nothing else, so the snapshot is the second member of `IrsRouteBinding`
+        rather than a fourth operand. It is the snapshot THIS function's single
+        `zz090_set_up_irs_system_data` pass captured: the frozen menu performs
+        that section once, at [irs/irs.cbl:L556], with the maintainer's reminder
+        "dont forget to run zz095 after", and taking it a second time to obtain
+        the snapshot would traverse file-key 1 again and add store traffic, log
+        records and a failure path the frozen menu has not got (finding F-01).
     """
     pinned = resolve_clock(ns.run_date)
     ws_system_record = _bind_system_record(ns, pinned, env=env)
@@ -3292,11 +3142,22 @@ def bind_irs_linkage(
     #  `irs_run_date_x8`. The two agree by construction rather than by luck, which
     #  is why both are kept - the pre-load line still serves a caller that
     #  supplies no `menu_state`.
+    #
+    #  ⭐ ONCE. The load and the remap each run exactly once here, and the snapshot
+    #  `zz090` captures on that one pass is returned rather than re-taken (finding
+    #  F-01): this block used to appear twice, so every IRS run traversed file-key 1
+    #  twice, discarded the first loaded record and ran the remap on the second -
+    #  and `cli/irs_post.py` then performed a third remap purely to obtain the
+    #  snapshot. The frozen menu performs `aa010-Get-System-Recs` once
+    #  [irs/irs.cbl:L507] and `zz090-Set-Up-IRS-System-Data` once [irs/irs.cbl:L556].
+    pre_dispatch_snapshot: IrsSystemSnapshot | None = None
     if menu_state is not None:
         aa010_get_system_recs(
             ws_system_record, menu_state, file_defs, ns, pinned, env=env
         )
-        zz090_set_up_irs_system_data(irs_system_params, ws_system_record)
+        pre_dispatch_snapshot = zz090_set_up_irs_system_data(
+            irs_system_params, ws_system_record
+        )
 
     #  [irs/irs.cbl:L972-L978] `zz090-Proc-Run-Date.` - the eight-character IRS
     #  form, century dropped.
@@ -3319,37 +3180,66 @@ def bind_irs_linkage(
     #  the clock pinned (rule R-6).
     irs_system_params.run_date = irs_run_date_x8(pinned.to_day)
 
-    ws_system_record = _bind_system_record(ns, pinned, env=env)
-    file_defs = FileDefs()
+    #  ⭐ ONE MENU LOAD, AND ONLY ONE. The bind / `FileDefs()` /
+    #  `aa010_get_system_recs` / `zz090` sequence above used to appear a SECOND
+    #  time here, which made every IRS bind open the system store, read key 1 and
+    #  close it TWICE - a handler sequence the frozen menu performs once
+    #  [irs/irs.cbl:L494-L519] - discard the first `SYSTEM-REC` it had just built,
+    #  and acquire a second point at which the same read can fail. The frozen menu
+    #  runs `aa005-Open-System.`, `aa010-Get-System-Recs.` and then
+    #  `zz090-Set-Up-IRS-System-Data.` once each before any option is dispatched,
+    #  and that is what the block above reproduces. The separate operation the
+    #  route still needs is the `zz095` SNAPSHOT, and it is not a linkage operand:
+    #  `zz090_set_up_irs_system_data` returns it, so a caller that needs it calls
+    #  that paragraph itself - which is how [irs/irs.cbl:L556] reads, with the
+    #  maintainer's own reminder "dont forget to run zz095 after".
 
-    #  [irs/irs.cbl:L494-L519] `aa005-Open-System.` then
-    #  `aa010-Get-System-Recs.` - KEY 1 ONLY on this route, so `menu_state`
-    #  carries no totals record and no defaults record and `aa010_get_system_recs`
-    #  reads neither.
-    #
-    #  [irs/irs.cbl:L556] `perform zz090-Set-Up-IRS-System-Data.` - performed
-    #  here rather than left to the caller because it is unconditional in the
-    #  frozen menu and because it OVERWRITES `IRS-System-Params.Run-Date` from the
-    #  loaded row. The value it writes equals the line above: `_apply_cli_pins`
-    #  has already re-pinned the binary `Run-Date` from `--run-date`, and
-    #  `zz090-Proc-Run-Date` converts that same binary through the same
-    #  `irs_run_date_x8`. The two agree by construction rather than by luck, which
-    #  is why both are kept - the pre-load line still serves a caller that
-    #  supplies no `menu_state`.
-    if menu_state is not None:
-        aa010_get_system_recs(
-            ws_system_record, menu_state, file_defs, ns, pinned, env=env
-        )
-        zz090_set_up_irs_system_data(irs_system_params, ws_system_record)
-
-    return IrsLinkage(
-        irs_system_params=irs_system_params,
-        #  The binary Run-Date on this route is NOT ambiguous: the ACAS system
-        #  record is the second linkage argument, with the maintainer's own
-        #  comment `*> ACAS system rec.` at [irs/irs.cbl:L669].
-        ws_system_record=ws_system_record,
-        file_defs=file_defs,
+    return IrsRouteBinding(
+        linkage=IrsLinkage(
+            irs_system_params=irs_system_params,
+            #  The binary Run-Date on this route is NOT ambiguous: the ACAS system
+            #  record is the second linkage argument, with the maintainer's own
+            #  comment `*> ACAS system rec.` at [irs/irs.cbl:L669].
+            ws_system_record=ws_system_record,
+            file_defs=file_defs,
+        ),
+        pre_dispatch_snapshot=pre_dispatch_snapshot,
     )
+
+
+def bind_irs_linkage(
+    ns: argparse.Namespace,
+    *,
+    menu_state: MenuState | None = None,
+    env: Mapping[str, str] | None = None,
+) -> IrsLinkage:
+    """Bind Shape 3 and return only the three `CALL` operands.
+
+    The linkage half of `bind_irs_route`, for a caller that has no `zz095` to
+    perform - a program-level test, or a route that only needs the three operands.
+    ONE implementation, so the two cannot drift: this delegates rather than
+    repeating the bind, the key-1 load or the `zz090` remap (finding F-01).
+
+    Args:
+        ns: as `bind_irs_route`.
+        menu_state: as `bind_irs_route`.
+        env: as `bind_irs_route`.
+
+    Returns:
+        The three arguments in COBOL parameter order [irs/irs.cbl:L668-L671].
+
+    Raises:
+        AttributeError: as `bind_irs_route`.
+        rdbms_params.RdbmsParamError: as `bind_irs_route`.
+        SystemRecordUnavailableError: as `bind_irs_route`.
+        acas_posting.dal.facade.FacadeGoback: as `bind_irs_route`.
+
+    Note:
+        A CALLER THAT NEEDS THE SNAPSHOT MUST USE `bind_irs_route`. Discarding it
+        here and re-taking it with a second `zz090_set_up_irs_system_data` is the
+        traversal finding F-01 removed.
+    """
+    return bind_irs_route(ns, menu_state=menu_state, env=env).linkage
 
 
 # FAITHFUL HELPERS (section 8.6 of this module's brief) Each of the five reproduces ONE
@@ -3517,30 +3407,52 @@ def irs_run_date_x8(to_day: str) -> str:
 #
 #  - no certificate, no key, no verification mode. Transport is compiled into
 #  `cobmysqlapi.c` and is therefore not something the COBOL can be asked about,
-#  which means the migration has to decide it somewhere. `dal/connection.py`
-#  decides it FAIL-CLOSED: a Unix socket or a loopback address is permitted, and
-#  any other target is refused unless the caller supplies a certificate
-#  authority or declares that the target is the isolated parity harness.
+#  which means the migration has to decide it somewhere.
 #
-#  ⭐ WHY THE DECLARATION BELONGS HERE, AT THE PROCESS BOUNDARY.
+#  ⭐ WHAT `dal/connection.py` ACTUALLY DOES, STATED AS IT IS (finding F-06).
+#  A Unix socket, a loopback address and a certificate-verified session are
+#  PERMITTED SILENTLY. A non-local unencrypted target with no declaration is
+#  REPORTED - one warning naming no host, no account and no schema - AND
+#  PERMITTED. It is not refused, and this text used to say it was. The reason it is
+#  not is rule R-3: `Mysql-1000-Open` has exactly two outcomes, it connects or it
+#  reports `(FS-Reply 99, We-Error 911)` [copybooks/mysql-procedures.cpy:L127-L128],
+#  and it inspects neither where the server is nor whose credentials it was handed -
+#  so a refusal on the parity path would be a disposition the compiled program has
+#  not got (finding M-06, recorded at `dal.connection.audit_connection_policy`).
+#
+#  REFUSAL IS AVAILABLE AND IT IS OPT-IN. Setting
+#  `rdbms_params.TRANSPORT_REQUIRE_ENCRYPTION_VARIABLE` turns that report into
+#  `InsecureTransportError` before the connect, and the deployment contract carries
+#  it to `install_connection_policy` on every route. Declaring
+#  `--db-allow-plaintext` (or the contract's isolated-oracle variable) does not
+#  annul it: the two are merged, not chosen between.
+#
+#  ⭐ WHY THE DECLARATION BELONGS TO THE DEPLOYMENT AND NOT TO THE ROUTE.
 #  The refusal is only useful if a legitimate operator has a way to say what
-#  they meant, and there is exactly one place that knows: the person who typed
-#  the command. Before this section existed there was no such place, so the
+#  they meant, and there is exactly one place that may say it: the deployment
+#  contract, read once at the process boundary. Before this section existed the
 #  knowledge leaked downwards - one handler decided for itself that every
 #  connection it opened was an isolated-oracle connection, which silently
 #  granted plaintext to WHATEVER host `RDBMS-Host` happened to name while the
 #  other nineteen handlers failed closed (CWE-319, CWE-295). The fix is not a
-#  better default; it is a single declaration, made once, by the caller, and
-#  carried unchanged to every handler that can honour it.
+#  better default; it is a single declaration, resolved once, and carried
+#  unchanged to every handler that can honour it.
 #
-#  THE ENVIRONMENT SPELLINGS ARE THE HARNESS'S OWN, NOT NEW ONES.
-#  `harness/build_oracle.sh` and `harness/seed.sh` already refuse a non-local
-#  target unless `ACAS_DB_TLS_CA` names a readable PEM bundle or
-#  `ACAS_DB_ALLOW_PLAINTEXT` is set, and `harness/docker-compose.yml` documents
-#  both. Reading the same two variables makes the shell half and the Python half
-#  of the harness obey ONE contract rather than two that can disagree; the
-#  command line takes precedence over both, so a scenario can always be pinned
-#  explicitly.
+#  IT IS NOT AN ARGPARSE OPTION, AND WAS WITHDRAWN FROM THE SEVEN ROUTES.
+#  Publishing `--db-tls-ca`, `--db-tls-cert`, `--db-tls-key` and
+#  `--db-allow-plaintext` on the migrated commands added a program input and two
+#  refusal outcomes the compiled program has not got, which rule R-3 forbids: the
+#  frozen `CALL` passes the linkage operands and the write-gating answers and
+#  nothing else. A certificate path in argv is also a process-listing leak. So
+#  deployment security lives entirely in the contract, beside the six connection
+#  parameters, and `cli/rdbms_params.py` is the ONE resolver.
+#
+#  ONE SPELLING PER DECLARATION, SHARED WITH THE SHELL HALF OF THE HARNESS.
+#  `harness/build_oracle.sh`, `harness/seed.sh` and `harness/docker-compose.yml`
+#  refuse a non-local target unless `ACAS_DB_TLS_CA` names a readable PEM bundle
+#  or `ACAS_DB_ALLOW_PLAINTEXT` is declared. `cli/rdbms_params.py` reads those
+#  same names, so the shell half and the Python half of the harness obey ONE
+#  contract rather than two that can disagree.
 #
 #  R-6 IS NOT AT RISK. A transport policy decides whether a connect is
 #  PERMITTED; it never changes a posted figure, a status, a statement or a write
@@ -3563,138 +3475,51 @@ def irs_run_date_x8(to_day: str) -> str:
 #  layer that declares them, which is a different thing from a policy object
 #  that has no COBOL field at all.
 
-#: `ACAS_DB_TLS_CA` - the PEM bundle the server certificate must chain to.
-#: The spelling is `harness/build_oracle.sh`'s [harness/build_oracle.sh:L1697]
-#: and `harness/seed.sh`'s [harness/seed.sh:L1401].
-TLS_CA_VARIABLE: Final[str] = "ACAS_DB_TLS_CA"
-
-#: `ACAS_DB_ALLOW_PLAINTEXT` - the harness's explicit isolated-network
-#: declaration [harness/build_oracle.sh:L1716-L1719]. Any non-empty value other
-#: than `0` declares it, matching the shell scripts' own reading.
-ALLOW_PLAINTEXT_VARIABLE: Final[str] = "ACAS_DB_ALLOW_PLAINTEXT"
-
-
-def add_transport_security_arguments(parser: argparse.ArgumentParser) -> None:
-    """Add the four transport-security options every route shares.
-
-    Composed by every entry point, including the ones whose programs reach no
-    handler that declares a transport policy: a declaration that is accepted
-    everywhere and honoured where it applies is one an operator can make without
-    knowing the handler inventory, and `dal/facade.py` projects it onto whatever
-    extras each handler actually declares.
-
-    Args:
-        parser: the parser to add the options to. Mutated in place.
-    """
-    parser.add_argument(
-        "--db-tls-ca",
-        metavar="PEM",
-        default=None,
-        help=(
-            "Certificate-authority bundle the server's certificate is verified "
-            "against. Supplying it turns on TLS with BOTH certificate and "
-            "host-name verification, which is what makes it protection rather "
-            f"than decoration. Falls back to ${TLS_CA_VARIABLE}, the same "
-            "variable harness/build_oracle.sh and harness/seed.sh read, so the "
-            "shell and Python halves of the harness obey one contract."
-        ),
-    )
-    parser.add_argument(
-        "--db-tls-cert",
-        metavar="PEM",
-        default=None,
-        help=(
-            "Client certificate, when the server requires one. Must be given "
-            "together with --db-tls-key; either alone is refused, because a "
-            "certificate cannot authenticate without its private key."
-        ),
-    )
-    parser.add_argument(
-        "--db-tls-key",
-        metavar="PEM",
-        default=None,
-        help="Private key for --db-tls-cert. Must be given together with it.",
-    )
-    parser.add_argument(
-        "--db-allow-plaintext",
-        action="store_true",
-        default=False,
-        help=(
-            "Declare that the target is the isolated parity harness - a private "
-            "container network whose server has no TLS material at all - and "
-            "that an unprotected connection to it is intended. WITHOUT this, or "
-            "--db-tls-ca, a non-local target is REFUSED: the credentials of "
-            "copybooks/wssystem.cob:L138-L139 and every posted figure would "
-            "otherwise cross the network in the clear. Grants nothing else, and "
-            "in particular does not admit the frozen placeholder credentials, "
-            f"which have their own declaration. Falls back to "
-            f"${ALLOW_PLAINTEXT_VARIABLE}."
-        ),
-    )
+#  THE TWO VARIABLE NAMES ARE `cli/rdbms_params.py`'s, AND ONLY ITS.
+#  `TRANSPORT_CA_VARIABLE` and `TRANSPORT_ALLOW_PLAINTEXT_VARIABLE` are declared
+#  there, next to the six connection-parameter names, and `resolve_transport_policy`
+#  is the one function that reads them. Two constants and a second reader used to
+#  sit here as well, which is how the installed policy came to consult a different
+#  variable from the one the shell scripts and the Compose file export - the
+#  declaration was made and silently lost. There is now one name per declaration
+#  and one resolver, so that cannot recur.
 
 
-def bind_transport_security(
-    namespace: argparse.Namespace,
-    *,
+def _transport_from_contract(
     environ: Mapping[str, str] | None = None,
 ) -> TransportSecurity:
-    """Resolve the operator's transport declaration into one policy object.
+    """Resolve the deployment's transport declaration into one policy object.
 
-    Precedence is command line, then environment, then nothing - and "nothing"
-    is the fail-closed policy, never an absent one.
+    THE ONLY SOURCE IS THE CONTRACT. There is no command-line override and no
+    namespace argument: see the section comment above for why publishing one on a
+    migrated route would violate rule R-3.
 
     Args:
-        namespace: the parsed arguments. Options this function reads may be
-            absent, in which case the environment is consulted; that is what
-            lets a route compose only the options it wants to publish.
-        environ: the environment to read the two fallbacks from. Defaults to the
-            process environment. Injectable so a test pins it, which is also
-            what keeps this function free of an implicit ambient input.
+        environ: the mapping to resolve from. The process environment when
+            omitted. Injectable so a test pins it, which is also what keeps this
+            function free of an implicit ambient input.
 
     Returns:
-        The policy. Every field at its default means loopback and Unix sockets
-        only, which is what a caller who said nothing gets.
+        The policy. Every field at its default - which is what an environment
+        declaring nothing resolves to - means loopback and Unix sockets only,
+        because `dal/connection.py` is fail-closed for anything else.
 
     Raises:
-        ValueError: `--db-tls-cert` was given without `--db-tls-key`, or the
-            reverse. Refused here, at the boundary, so the message names the
-            option the operator typed rather than the field the data-access
-            layer sees. `dal/connection.py` refuses the same combination again
-            at the connect, because a policy built by any other caller must be
-            checked too.
+        ValueError: the contract named a client certificate without its private
+            key, or the reverse. `rdbms_params` refuses that pairing at the
+            boundary and `dal/connection.py` refuses it again at the connect,
+            because a policy built by any other caller must be checked too.
     """
-    source = os.environ if environ is None else environ
-
-    ca_file = getattr(namespace, "db_tls_ca", None) or source.get(
-        TLS_CA_VARIABLE
-    )
-    certificate_file = getattr(namespace, "db_tls_cert", None)
-    key_file = getattr(namespace, "db_tls_key", None)
-
-    #  The shell scripts treat any value other than empty and `0` as the
-    #  declaration [harness/build_oracle.sh:L1716]; read the same way here so
-    #  one exported variable cannot mean two different things.
-    declared = source.get(ALLOW_PLAINTEXT_VARIABLE, "").strip()
-    allow_plaintext = bool(getattr(namespace, "db_allow_plaintext", False)) or (
-        declared not in {"", "0"}
-    )
-
-    if bool(certificate_file) != bool(key_file):
-        raise ValueError(
-            "--db-tls-cert and --db-tls-key must be given together: a client "
-            "certificate cannot authenticate without its private key"
-        )
-
+    declaration = resolve_transport_policy(environ)
     return TransportSecurity(
-        ca_file=ca_file or None,
-        certificate_file=certificate_file or None,
-        key_file=key_file or None,
-        isolated_oracle=allow_plaintext,
+        ca_file=declaration.ca_file,
+        certificate_file=declaration.certificate_file,
+        key_file=declaration.key_file,
+        isolated_oracle=declaration.isolated_oracle,
     )
 
 
 def dal_options_for(
-    namespace: argparse.Namespace,
     *,
     environ: Mapping[str, str] | None = None,
 ) -> Mapping[str, object]:
@@ -3707,23 +3532,21 @@ def dal_options_for(
     honour it - without the route needing to know which those are.
 
     Args:
-        namespace: the parsed arguments.
-        environ: as `bind_transport_security`.
+        environ: as `_transport_from_contract`.
 
     Returns:
         A mapping carrying the transport policy under the key the handlers
         declare it by. Never empty: the policy is always stated, and when the
-        operator declared nothing it is the fail-closed one, which is a
+        deployment declared nothing it is the fail-closed one, which is a
         statement rather than an omission.
 
     Raises:
-        ValueError: as `bind_transport_security`.
+        ValueError: as `_transport_from_contract`.
     """
-    return {"transport": bind_transport_security(namespace, environ=environ)}
+    return {"transport": _transport_from_contract(environ)}
 
 
 def declare_connection_policy(
-    namespace: argparse.Namespace,
     *,
     environ: Mapping[str, str] | None = None,
 ) -> TransportSecurity:
@@ -3753,8 +3576,7 @@ def declare_connection_policy(
     declaration made explicitly as well.
 
     Args:
-        namespace: the parsed arguments.
-        environ: as `bind_transport_security`.
+        environ: as `_transport_from_contract`.
 
     Returns:
         The policy that was declared, so the caller can pass the SAME object to
@@ -3762,9 +3584,9 @@ def declare_connection_policy(
         two answers.
 
     Raises:
-        ValueError: as `bind_transport_security`.
+        ValueError: as `_transport_from_contract`.
     """
-    policy = bind_transport_security(namespace, environ=environ)
+    policy = _transport_from_contract(environ)
     facade.declare_connection_policy(transport=policy)
     return policy
 
@@ -4250,8 +4072,8 @@ def require_stated(
 #     COBOL `MOVE` would leave one space. The two are the same STATE -
 #     `is_irs_used` and `is_irs_both_used` are both false for either, so the
 #     fan-out reads off - and the sibling harness writes the empty form itself
-#     [harness/run_cobol_scenario.sh:L1785-L1787], trimming a supplied space to it
-#     [harness/run_cobol_scenario.sh:L1770]. Padding it here would apply `MOVE`
+#     [harness/run_cobol_scenario.sh acas_resolve_pinned_values], trimming a supplied space to it
+#     [harness/run_cobol_scenario.sh acas_resolve_pinned_values]. Padding it here would apply `MOVE`
 #     semantics to a record this module has declared it binds at its declared
 #     defaults.
 #

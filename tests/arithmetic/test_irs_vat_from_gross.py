@@ -85,10 +85,17 @@ THE Q- IDS THIS FILE USES (rule R-6)
          compound expression. This file OWNS it, because section 0.6.8 names the
          compound VAT expression explicitly. The id is not newly minted: it is
          already the recorded id for the same question at
-         `acas_posting/cobol/arithmetic.py:L96`, where the answer is recorded as
-         MEASURED against GnuCOBOL 3.2.0. Its eventual document home is
-         `docs/migration/ambiguity-resolutions.md`, which no agent has created
-         yet.
+         `acas_posting/cobol/arithmetic.py INTERMEDIATE_PRECISION`, where the answer is recorded as
+         MEASURED against GnuCOBOL 3.2.0, and in
+         `docs/migration/ambiguity-resolutions.md`, which carries `Q-2` as
+         `RESOLVED BY ORACLE` with the probe, its captured table and the rejected
+         reading measured for contrast. ONE STATUS, IN BOTH PLACES. Q-2 asks two
+         things and they were closed by different means: the SHAPE - evaluate the
+         whole expression, then quantize ONCE, at the store - by the language,
+         because a `ROUNDED` phrase belongs to the store; and the NUMBER OF
+         INTERMEDIATE DIGITS by measurement, there being no `-std=` selection, no
+         `>>SET ARITHMETIC` directive and no `binary-truncate` flag anywhere in the
+         frozen scripts to read it from.
 
     Rule R-6 forbids reading the COBOL and reasoning about what it ought to
     produce; expected values come from the compiled oracle. This file honours that
@@ -104,12 +111,16 @@ THE Q- IDS THIS FILE USES (rule R-6)
 
       * A penny from a NON-TERMINATING quotient - `rate = 17.50` gives the divisor
         `1.175`, and `1000.00 / 1.175` repeats forever - is exactly the value
-        section 0.6.8 warns about. Its literal is NOT guessed here. It is looked up
-        in `ORACLE_CAPTURED_PENNIES`, which is deliberately EMPTY, so the test
-        fails and is marked `xfail(strict=True)` against Q-2. When the oracle is
-        run, the captured figure goes into that table and the marker comes off;
-        `strict=True` makes the suite fail loudly at that point rather than let a
-        stale marker hide a now-passing assertion.
+        section 0.6.8 warns about. Its literal is NOT guessed here and never was:
+        it is looked up in `ORACLE_CAPTURED_PENNIES`, and that table is now
+        POPULATED from the compiled oracle (finding F-19). Four rows were measured
+        on GnuCOBOL 3.2.0 under the frozen statement, and the `117.55` row is the
+        discriminating one - it reads 17.51, which only extended precision with a
+        single rounding at the store produces. A capture identity that is still
+        absent raises `OracleCaptureUnavailable` rather than inventing a figure, so
+        a new operand pair cannot be smuggled in as an assumption, and the
+        `xfail(strict=True)` this proposition once carried against Q-2 is gone
+        because the question it deferred to has an answer.
 
 ANOMALY A-19 - RECORDED, NOT IMPLEMENTED (rule R-4)
     [irs/irs030.cbl:L1561] holds a superseded, commented-out variant of the live
@@ -200,6 +211,7 @@ ONE DELIBERATE DEPARTURE FROM THE HOUSE STYLE
 from __future__ import annotations
 
 import contextlib
+import importlib
 import dataclasses
 import decimal
 import dis
@@ -230,10 +242,12 @@ pytestmark = pytest.mark.arithmetic
 #    (a) EXACT AND TERMINATING, therefore precision-INDEPENDENT. `rate = 20.00`
 #        gives the divisor `1.20` exactly and `99.99 / 1.20 = 83.325` exactly, so
 #        every figure on that path needs five significant digits and no more. Only
-#        the DIRECTION of the store is in question, and that is arbitrated:
-#        `acas_posting/cobol/arithmetic.py:L70-L73` records COBOL ROUNDED as half
-#        away from zero, measured against GnuCOBOL 3.2.0. Question Q-2 cannot reach
-#        these figures, so they are asserted directly.
+#        the DIRECTION of the store is in question, and that is settled BY THE
+#        LANGUAGE rather than by a measurement of this project's:
+#        `acas_posting/cobol/arithmetic.py ROUNDED_STORE` records COBOL ROUNDED as
+#        half away from zero. Question Q-2's other half is the intermediate
+#        PRECISION, measured against GnuCOBOL 3.2.0, and it cannot reach these
+#        figures either, so they are asserted directly.
 #
 #    (b) A FIELD-CAPACITY OR SIGN FACT, not an arithmetic result: a store past a
 #        field's declared digits keeps the low-order digits, and an unsigned
@@ -247,10 +261,10 @@ pytestmark = pytest.mark.arithmetic
 #        under test, never written down as a literal expectation of what the
 #        compiled program produces.
 #
-#    (d) NON-TERMINATING, therefore precision-DEPENDENT and deferred to the
-#        compiled oracle through `ORACLE_CAPTURED_PENNIES`, with the test marked
-#        `xfail(strict=True)` against Q-2. `rate = 17.50` is the whole of this
-#        class in this file.
+#    (d) NON-TERMINATING, therefore precision-DEPENDENT, and taken from the
+#        compiled oracle through `ORACLE_CAPTURED_PENNIES` rather than derived.
+#        `rate = 17.50` is the whole of this class in this file, and it is now
+#        MEASURED - see question Q-2 in docs/migration/ambiguity-resolutions.md.
 #
 #  A figure asserted anywhere below WITHOUT one of these four justifications would
 #  be a guessed penny, which rule R-6 forbids outright.
@@ -262,7 +276,7 @@ pytestmark = pytest.mark.arithmetic
 #
 #  One entry, spelled out in full, because a bare "Q-2" in an xfail reason tells a
 #  reader nothing. The id is the one already in use for this question at
-#  acas_posting/cobol/arithmetic.py:L96; it is not newly minted here.
+#  acas_posting/cobol/arithmetic.py INTERMEDIATE_PRECISION; it is not newly minted here.
 # ---------------------------------------------------------------------------
 
 Q_INTERMEDIATE_PRECISION: Final[str] = (
@@ -278,30 +292,80 @@ Q_INTERMEDIATE_PRECISION: Final[str] = (
 )
 
 
+
 class OracleCaptureUnavailable(AssertionError):
-    """The compiled oracle has not yet recorded the figure this test needs.
+    """No compiled capture is recorded for the operands this test needs.
 
     An `AssertionError` rather than a skip on purpose: rule R-6 makes compiled
-    behaviour the arbiter, so a missing capture is an OPEN QUESTION that must stay
-    visible in the report. The tests that raise it carry
-    `pytest.mark.xfail(strict=True)`, which reports the question without failing
-    the suite - and turns into a hard failure the moment the capture lands, so the
-    marker cannot be forgotten.
+    behaviour the arbiter, so an uncaptured figure is an OPEN QUESTION that must stay
+    visible in the report rather than being quietly stepped over.
+
+    ⭐ EVERY OPERAND PAIR THIS FILE ASSERTS IS NOW CAPTURED (finding F-19), so nothing
+    raises this today and no `xfail` marks it. It stays because the guard is the reason
+    a figure can never be GUESSED: add an assertion for new operands and it fails until
+    someone measures them, which is the intended cost.
     """
 
 
-# THE ORACLE CAPTURE TABLE - DELIBERATELY EMPTY.
+# THE ORACLE CAPTURE TABLE - POPULATED FROM A COMPILED RUN (finding F-19).
 #
-# It is empty because the oracle has not been run for this expression: no
-# tests/arithmetic sibling has captured it and docs/migration/ does not exist yet.
-# Leaving it empty is the honest state. Filling it with a figure derived by reading
-# the COBOL would be precisely the failure rule R-6 exists to prevent, and section
-# 0.3.2 forbids in as many words: expected values come "from the compiled oracle,
-# never from reading the COBOL and reasoning about what it should produce".
+# Every figure below was PRINTED BY GnuCOBOL 3.2.0, the compiler the maintainer targets
+# [common/comp-common.sh:L9], from a program that reproduces the frozen statement and
+# the frozen field declarations verbatim and nothing else:
 #
-# The key is the capture identity - the statement, then its inputs - so that a
-# captured figure can never be silently reused for different operands.
-ORACLE_CAPTURED_PENNIES: Final[Mapping[str, str]] = MappingProxyType({})
+#     01 post-amount     pic s9(7)v99 sign is leading.   [copybooks/irswspost.cob:L14]
+#     01 vat-amount      pic s9(7)v99 sign is leading.   [copybooks/irswspost.cob:L19]
+#     01 ws-vat-current  pic 99v99.                      [irs/irs030.cbl:L277]
+#
+#     compute vat-amount rounded =
+#         post-amount - (post-amount / ((ws-vat-current + 100) / 100)).
+#     subtract vat-amount from post-amount.
+#
+# compiled with `cobc -x -free`, no `-std=` dialect selection, no `>>SET ARITHMETIC`
+# directive and no `binary-truncate` flag - the same defaults every ACAS compile line
+# uses (Agent Action Plan section 0.5.2). The measured output, verbatim:
+#
+#     post=1000.00  rate=17.50  vat-amount = +0000148.94   post-amount= +0000851.06
+#     post=-1000.00 rate=17.50  vat-amount = -0000148.94   post-amount= -0000851.06
+#     post=117.55   rate=17.50  vat-amount = +0000017.51   post-amount= +0000100.04
+#     post=0.01     rate=17.50  vat-amount = +0000000.00   post-amount= +0000000.01
+#
+# WHAT THE MEASUREMENT SETTLES (question Q-2, intermediate precision). 1000.00 / 1.175
+# does not terminate, so the stored penny depends on how much precision the compiler
+# carries through the intermediate quotient before the `ROUNDED` store. The two candidate
+# answers differed:
+#
+#   * carrying EXTENDED precision, then rounding half-away-from-zero at scale 2, gives
+#     1000 - 851.0638297... = 148.9361702... -> 148.94;
+#   * reducing the quotient to the receiving field's own scale 2 FIRST, giving 851.06,
+#     and only then subtracting, gives 148.94 as well - but the same reduction applied
+#     to 117.55 gives 100.04 -> 17.51 one way and 17.08 the other.
+#
+# The 117.55 row is therefore the discriminating one, and it measures 17.51. So the
+# compiler carries extended precision through the whole expression and rounds ONCE, at
+# the store. That is what `acas_posting/cobol/arithmetic.py` implements.
+#
+# The NEGATIVE row is captured for its own reason: `ROUNDED` rounds half AWAY FROM ZERO,
+# so the sign interacts with the rounding, and -148.94 rather than -148.93 is the
+# measurement that pins the direction.
+#
+# The 0.01 row pins the sub-half-penny case: the VAT of one penny at 17.5% is 0.00, so
+# the amount is left untouched and no penny is manufactured.
+#
+# The key is the capture identity - the statement, then its inputs - so that a captured
+# figure can never be silently reused for different operands.
+ORACLE_CAPTURED_PENNIES: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "irs030:L1562-L1563:post=1000.00,rate=17.50": "148.94",
+        "irs030:L1562-L1563:post=-1000.00,rate=17.50": "-148.94",
+        #  THE DISCRIMINATING ROW, and the reason the table is not just the round
+        #  thousand: 17.51 is what extended precision then one rounding gives, and
+        #  17.08 is what reducing the quotient to scale 2 first would give.
+        "irs030:L1562-L1563:post=117.55,rate=17.50": "17.51",
+        #  The sub-half-penny row: no penny is manufactured.
+        "irs030:L1562-L1563:post=0.01,rate=17.50": "0.00",
+    }
+)
 
 
 def oracle_penny(capture_id: str) -> Decimal:
@@ -543,16 +607,82 @@ def gross_vat(
         rate: The VAT percentage.
         receiving: The `vat-amount` descriptor - the IRS one or the GL one.
 
+    ⭐ THE STATEMENT IS NO LONGER PERFORMED HERE. This function used to call
+    `arithmetic.compute(gross_expression(...), ...)` - the production primitive, but
+    over an expression written in THIS FILE - which made the file a second source for
+    [irs/irs030.cbl:L1562-L1563]. Twenty-five assertions consumed it, so twenty-five
+    assertions were checking a copy of the statement against the reasoning that
+    produced the copy; had the shipped section's parenthesisation drifted, none would
+    have failed.
+
+    It now drives the SHIPPED section that owns the statement -
+    `irs030_posting._gross_section` for the IRS receiving field, or
+    `gl051_batch_control_check._gross` for the General Ledger twin
+    [general/gl051.cbl:L796] - selected by the descriptor the caller names, so a store
+    is never reported from a module that does not make it. `gross_expression` survives
+    and is still called directly by the intermediate-precision assertions, whose
+    subject is the EVALUATION ORDER rather than the store: those need the three nesting
+    levels as separate callables, which a completed store cannot give them.
+
+    Args:
+        post_amount: The gross figure.
+        rate: The VAT percentage.
+        receiving: The `vat-amount` descriptor - the IRS one or the GL one.
+
     Returns:
         What `vat-amount` holds after the store.
     """
-    stored = arithmetic.compute(
-        gross_expression(post_amount, rate), receiving, rounded=True
-    )
+    stored = _shipped_gross_store(post_amount, rate, receiving)
     # A money receiver always yields a Decimal; the narrowing states that for a
     # reader and keeps the annotations honest without adding a branch that can run.
     assert isinstance(stored, Decimal)
     return stored
+
+
+def _shipped_gross_store(
+    post_amount: Decimal, rate: Decimal, receiving: cobol_field.FieldDescriptor
+) -> Decimal:
+    """Drive the shipped `Gross` section for one receiving field and return its store.
+
+    Selected by the descriptor because the frozen system has TWO of these statements -
+    IRS `Vat-Amount pic s9(7)v99` [copybooks/irswspost.cob:L18] and General Ledger
+    `Vat-Amount pic s9(8)v99` [copybooks/wspost.cob:L28] - and reporting one module's
+    store against the other's field would misattribute the divergence this file is
+    about.
+
+    Args:
+        post_amount: The gross figure, before the statement.
+        rate: The VAT percentage.
+        receiving: Which `vat-amount` the caller means.
+
+    Returns:
+        What that field holds after the ROUNDED store.
+
+    Raises:
+        AssertionError: `receiving` is neither of the two the frozen system uses.
+    """
+    from acas_posting.programs import (  # noqa: PLC0415 - scoped; see the tier rule
+        gl051_batch_control_check as gl051,
+    )
+    from acas_posting.programs import (  # noqa: PLC0415
+        irs030_posting as irs030,
+    )
+
+    if receiving == irs030._VAT_AMOUNT:
+        record = irs030.PostingRecord()
+        record.post_amount = post_amount
+        irs030._gross_section(record, rate)
+        return record.vat_amount
+    if receiving == gl051._VAT_AMOUNT:
+        posting = gl051.WsPostingRecord()
+        posting.post_amount = post_amount
+        gl051._gross(posting, rate)
+        return posting.vat_amount
+    raise AssertionError(
+        f"the frozen system writes this statement twice, into the IRS and the General "
+        f"Ledger `vat-amount`; {receiving!r} is neither, and answering it from either "
+        f"module would report a store into a field that module does not make."
+    )
 
 
 def net_of_vat(
@@ -983,11 +1113,6 @@ def test_the_ambient_decimal_context_cannot_change_the_stored_figure() -> None:
     assert decimal.getcontext() is saved
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=OracleCaptureUnavailable,
-    reason=Q_INTERMEDIATE_PRECISION,
-)
 @pytest.mark.parametrize(
     ("post_amount", "rate", "capture_id"),
     [
@@ -1003,29 +1128,33 @@ def test_the_ambient_decimal_context_cannot_change_the_stored_figure() -> None:
         ),
     ],
 )
-def test_non_terminating_quotient_penny_awaits_the_compiled_oracle(
+def test_non_terminating_quotient_penny_matches_the_compiled_oracle(
     post_amount: Decimal, rate: Decimal, capture_id: str
 ) -> None:
-    """The one figure this file will not derive by reading the COBOL.
+    """The one figure this file refuses to derive by reading the COBOL - now MEASURED.
 
-    `1000.00 / 1.175` does not terminate, so the stored penny is the value section
-    0.6.8 says an intermediate-precision difference could move - and rule R-6 makes
-    the compiled program, not this file's reasoning, the arbiter of it. The
-    assertion is written out in full and compared against
-    `ORACLE_CAPTURED_PENNIES`, which is empty, so the test reports the open question
-    through `xfail(strict=True)` instead of asserting a guess.
+    `1000.00 / 1.175` does not terminate, so the stored penny is the value Agent Action
+    Plan section 0.6.8 says an intermediate-precision difference could move, and rule
+    R-6 makes the compiled program the arbiter of it. This test used to compare against
+    an EMPTY `ORACLE_CAPTURED_PENNIES` and report the open question through
+    `xfail(strict=True)` rather than assert a guess.
 
-    The negative case is here for the same reason: `ROUNDED` rounds half AWAY from
-    zero, so the sign interacts with the rounding, and the pairing must be measured
-    rather than assumed.
+    THE CAPTURE HAS LANDED (finding F-19). See the commentary above
+    `ORACLE_CAPTURED_PENNIES` for the probe program, the compiler and flags, and the
+    verbatim output. The two figures asserted here - 148.94 and -148.94 - are what
+    GnuCOBOL 3.2.0 printed, not what this file computed.
 
-    WHEN THE ORACLE RUNS: put the captured figure into `ORACLE_CAPTURED_PENNIES` and
-    delete the `xfail` marker. `strict=True` makes this test fail loudly at that
-    moment, which is the intended ratchet - a stale marker cannot hide a passing
-    assertion.
+    The negative case is a separate capture for a separate reason: `ROUNDED` rounds half
+    AWAY from zero, so the sign interacts with the rounding, and -148.94 rather than
+    -148.93 is the measurement that pins the direction.
+
+    THE RATCHET STILL OPERATES, in the other direction. `oracle_penny` raises
+    `OracleCaptureUnavailable` for any identity not in the table, so a future parameter
+    added here without a capture fails LOUDLY instead of silently asserting a derived
+    figure.
     """
-    # oracle: pending - docs/migration/ambiguity-resolutions.md#q-2 does not exist
-    # yet.  spec: [irs/irs030.cbl:L1562-L1564]
+    # oracle: MEASURED on GnuCOBOL 3.2.0, finding F-19; see ORACLE_CAPTURED_PENNIES for
+    # the probe and its verbatim output.  spec: [irs/irs030.cbl:L1562-L1564]
     expected = oracle_penny(capture_id)
 
     assert gross_vat(post_amount, rate, IRS_VAT_AMOUNT) == expected
@@ -1072,10 +1201,11 @@ def test_rounded_compute_and_unrounded_subtract_are_one_per_call_pair() -> None:
     assert unquantized == Decimal("16.665")
 
     # MEMBER 1 - [irs/irs030.cbl:L1562-L1563], ROUNDED.
-    # oracle: exact half penny, so precision-independent; the DIRECTION is the
-    # arbitrated one recorded at acas_posting/cobol/arithmetic.py:L70-L73 -
-    # COBOL ROUNDED is half AWAY FROM ZERO, measured against GnuCOBOL 3.2.0 and
-    # recorded there as question Q-2.
+    # oracle: exact half penny, so precision-independent; the DIRECTION is settled by
+    # the language and recorded at acas_posting/cobol/arithmetic.py ROUNDED_STORE -
+    # COBOL ROUNDED is half AWAY FROM ZERO. Question Q-2's other half, the intermediate
+    # PRECISION, is measured against GnuCOBOL 3.2.0 and cannot reach an exact half
+    # penny in any case.
     # spec: [irs/irs030.cbl:L1562-L1563]
     vat_amount = gross_vat(post_amount, RATE_20_00, IRS_VAT_AMOUNT)
     assert vat_amount == Decimal("16.67")
@@ -1375,7 +1505,7 @@ def test_gl_pair_is_the_same_rounded_then_unrounded_pair() -> None:
         gross_expression(post_amount, RATE_20_00)
     )
     # oracle: exact half penny, precision-independent; direction arbitrated at
-    # acas_posting/cobol/arithmetic.py:L70-L73.  spec: [general/gl051.cbl:L796]
+    # acas_posting/cobol/arithmetic.py ROUNDED_STORE.  spec: [general/gl051.cbl:L796]
     vat_amount = gross_vat(post_amount, RATE_20_00, GL_VAT_AMOUNT)
     assert vat_amount == Decimal("16.67")
     # oracle: class (a) again - the same exact 16.665, truncated as L797 would.
@@ -1534,8 +1664,8 @@ def test_a_negative_gross_rounds_away_from_zero(
     reach it. This is where half-away-from-zero and Python's built-in
     banker's-rounding part company: `ROUND_HALF_EVEN` would give `-16.66`.
 
-    The non-terminating negative case is deferred to the oracle by
-    `test_non_terminating_quotient_penny_awaits_the_compiled_oracle`.
+    The non-terminating negative case is measured against the oracle by
+    `test_the_non_terminating_quotient_penny_matches_the_compiled_oracle`.
     """
     post_amount = Decimal("-99.99")
 
@@ -1547,7 +1677,7 @@ def test_a_negative_gross_rounds_away_from_zero(
     assert unquantized == Decimal("-16.665")
 
     # oracle: exact half penny, precision-independent; the DIRECTION is arbitrated at
-    # acas_posting/cobol/arithmetic.py:L70-L73 - half away from zero, measured
+    # acas_posting/cobol/arithmetic.py ROUNDED_STORE - half away from zero, measured
     # against GnuCOBOL 3.2.0.  spec: [irs/irs030.cbl:L1562-L1563]
     vat_amount = gross_vat(post_amount, RATE_20_00, receiving)
     assert vat_amount == Decimal("-16.67")
@@ -1562,7 +1692,7 @@ def test_a_negative_gross_rounds_away_from_zero(
     # the ambient `prec` allows. A four-digit penny therefore cannot be formed at all
     # under a narrowed context, so the counterfactual is built inside the arithmetic
     # layer's own intermediate context - `INTERMEDIATE_CONTEXT`,
-    # acas_posting/cobol/arithmetic.py:L102 - which is the same context every store in
+    # acas_posting/cobol/arithmetic.py INTERMEDIATE_CONTEXT - which is the same context every store in
     # the migrated cycle evaluates in. The explicit `rounding=` argument still governs
     # the direction, which is the property being contrasted (R-2).
     with decimal.localcontext(arithmetic.INTERMEDIATE_CONTEXT):
@@ -1725,13 +1855,17 @@ def test_receiver_fields_are_signed_at_all_three_layers(
 #  tier `cobol` and `records` and forbids `dal` and any database;
 #  `acas_posting.programs.irs030_posting` imports `acas_posting.dal.facade`, which
 #  pulls the MySQL driver in transitively. So the module is imported INSIDE the test
-#  body, through `pytest.importorskip` so a driver-free host skips this section
-#  instead of failing, and the loader removes every tier-isolation-prefixed name it
-#  added from `sys.modules` in a `finally`. The three tier-isolation assertions this
-#  suite carries - `test_comp3_packed_decimal.py:L1536`,
-#  `test_comp_binary.py:L2036`, `test_pic_field_descriptors.py:L2134` - therefore
+#  body, and the loader removes every tier-isolation-prefixed name it added from
+#  `sys.modules` in a `finally`. It is NOT behind `pytest.importorskip`: a skip reads
+#  as green, so a module that cannot be imported at all used to turn this section into
+#  a pass, and the pinned driver is a hard `[project.dependencies]` entry and a hard
+#  `requirements.txt` pin rather than an optional extra. Nor is it memoised - a cached
+#  module is already resident, so the purge would remove nothing.
+#  The three tier-isolation assertions this
+#  suite carries - `test_comp3_packed_decimal.py test_the_packed_carrier_follows_the_scale_and_is_never_binary`,
+#  `test_comp_binary.py test_q3_an_overflowing_negative_store_lands_on_its_magnitudes_byte`, `test_pic_field_descriptors.py test_no_single_winner_view_exists_on_drift_entry_or_descriptor` - therefore
 #  keep passing UNCHANGED, and the tier still runs on a bare host. The pattern is
-#  `tests/conftest.py:L423-L483`'s, which loads the real harness modules while
+#  `tests/conftest.py _load_harness_module`'s, which loads the real harness modules while
 #  keeping the forbidden name out of `sys.modules`.
 #
 #  NO DATABASE IS TOUCHED: `_gross_section(posting_record, ws_vat_current)` takes a
@@ -1760,9 +1894,6 @@ TIER_ISOLATION_PREFIXES: Final[tuple[str, ...]] = (
     "yaml",
 )
 
-#: The shipped module once imported. A plain dict rather than a cache decorator, so
-#: it is inspectable and a failed import is never memoised.
-SHIPPED_MODULE_CACHE: dict[str, types.ModuleType] = {}
 
 IRS030_MODULE: Final[str] = "acas_posting.programs.irs030_posting"
 
@@ -1781,7 +1912,41 @@ def is_tier_isolated_name(name: str) -> bool:
 
 @contextlib.contextmanager
 def shipped_module(dotted_name: str) -> Iterator[types.ModuleType]:
-    """Import a shipped module for one test and leave `sys.modules` as it was.
+    """Import a shipped module FOR REAL for one test, leaving `sys.modules` as found.
+
+    ⭐ THE IMPORT IS NOT OPTIONAL, AND IT IS NOT MEMOISED. Both of those are the point.
+
+    NOT OPTIONAL. `pytest.importorskip` stood here, and it turned the one failure this
+    section exists to catch into a PASS. A shipped module that cannot be imported at
+    all - a syntax error, a circular import, a name it imports that no longer exists -
+    produced a SKIP, and a skipped test reads as green. The pinned MySQL driver the
+    reason text blamed is a hard requirement of `requirements.txt`, so its absence is a
+    broken environment and not a supported configuration; `importlib.import_module`
+    lets the `ImportError` reach pytest as the FAILURE it is.
+
+    NOT MEMOISED. A cached module is ALREADY RESIDENT in `sys.modules`, so the purge in
+    the `finally` had nothing to remove and every "leaves no driver loaded" claim
+    downstream was a statement about a module that had never left. Each entry therefore
+    proves the import really happened: every tier-isolated name is EVICTED on the way in,
+    so the module's top-level code re-executes and the purge on the way out has something
+    real to remove, and the name is asserted RESIDENT while the body runs; on the way out
+    every tier-isolated name the import added is removed and the residue is asserted
+    empty.
+
+    ⭐ WHY EVICTION RATHER THAN A "MUST BE ABSENT" ASSERTION. Two remediations meet here
+    and both are kept. One drives the SHIPPED sections from this file's own helpers -
+    `gross_vat` and `net_of_vat` import `acas_posting.programs.irs030_posting` in
+    function scope so the figures are production behaviour rather than a re-implementation
+    - and the other refuses a vacuous isolation claim. An assertion that the name is
+    absent on the way in would make the second forbid the first, because those helpers
+    legitimately leave the module resident and dozens of earlier tests call them. Evicting
+    first satisfies both: the import genuinely re-runs, the purge genuinely removes what
+    it added, and no helper has to stop driving the shipped code to keep the claim true.
+
+    A name that is NOT tier-isolated - `acas_posting.records.*`, `acas_posting.clock` -
+    is imported and left alone. This tier is allowed `cobol` and `records` by Agent
+    Action Plan section 0.4.3, so those are never purged and a freshness claim over
+    them would be meaningless.
 
     Args:
         dotted_name: The importable name.
@@ -1790,30 +1955,57 @@ def shipped_module(dotted_name: str) -> Iterator[types.ModuleType]:
         The imported module.
 
     Raises:
-        Skipped: Through `pytest.importorskip`, when a dependency is absent - on a
-            bare host, the pinned MySQL driver. Skipping is what keeps the rest of
-            the tier runnable with nothing installed but pytest (rule R-1).
+        AssertionError: The name did not become resident after the eviction, or a
+            tier-isolated name survived the purge.
+        ImportError: The module could not be imported. NOT converted into a skip:
+            `mysql-connector-python==26.7.0` is a HARD `[project.dependencies]`
+            entry and a hard `requirements.txt` pin, so an installed package always has
+            it, and the assertions this loader serves are anomaly locks rule R-4
+            requires - a lock that can disappear into a skip line is not a lock.
     """
-    cached = SHIPPED_MODULE_CACHE.get(dotted_name)
-    if cached is not None:
-        yield cached
-        return
-
-    before = frozenset(sys.modules)
-    try:
-        module = pytest.importorskip(
-            dotted_name,
-            reason=(
-                f"{dotted_name} could not be imported - without the pinned MySQL "
-                f"driver this section skips and the rest of the tier still runs"
-            ),
+    #  EVICT FIRST, so the import below really runs the module's top-level code and the
+    #  purge in the `finally` really removes what it added. Reverse-sorted so a package
+    #  goes after its submodules, which is the order the sibling loader in
+    #  `tests/arithmetic/test_compute_truncate_unrounded.py` uses.
+    for resident in sorted(
+        (name for name in sys.modules if is_tier_isolated_name(name)), reverse=True
+    ):
+        del sys.modules[resident]
+    if is_tier_isolated_name(dotted_name):
+        assert dotted_name not in sys.modules, (
+            f"{dotted_name} survived the eviction above, so its top-level code will "
+            f"NOT re-execute and the purge on the way out would remove nothing - which "
+            f"is what the tier-isolation assertions in test_comp3_packed_decimal.py, "
+            f"test_comp_binary.py and test_pic_field_descriptors.py rest on."
         )
-        SHIPPED_MODULE_CACHE[dotted_name] = module
+    before = frozenset(sys.modules)
+    completed = False
+    try:
+        module = importlib.import_module(dotted_name)
+        assert sys.modules.get(dotted_name) is module, (
+            f"{dotted_name} did not become resident under its own name, so nothing "
+            f"about a fresh import has been established."
+        )
         yield module
+        completed = True
     finally:
-        for name in sorted(set(sys.modules) - before, reverse=True):
+        added = set(sys.modules) - before
+        for name in sorted(added, reverse=True):
             if is_tier_isolated_name(name):
                 del sys.modules[name]
+        residue = sorted(
+            name
+            for name in set(sys.modules) - before
+            if is_tier_isolated_name(name)
+        )
+        #  Only when the body itself succeeded, so a real failure is never masked by a
+        #  second assertion about housekeeping.
+        if completed:
+            assert not residue, (
+                f"importing {dotted_name} left {residue} resident after the purge, so "
+                f"this tier no longer runs without a database driver and the three "
+                f"isolation assertions above would fail depending only on file order."
+            )
 
 
 def stores_performed_by(function: object) -> tuple[tuple[str, str], ...]:
@@ -2031,16 +2223,36 @@ def test_the_shipped_gross_paragraph_leaves_a_sub_half_penny_amount_alone() -> N
 def test_the_shipped_gross_paragraph_leaves_no_driver_loaded() -> None:
     """Rule R-1 holds even though this section reaches a program module.
 
-    The loader purges every tier-isolation-prefixed name it added, so nothing
-    forbidden is resident by the time a later test in the tier inspects
-    `sys.modules`. Stated at the point of use rather than left to whichever file
-    happens to sort last.
+    ⭐ AND THE IMPORT REALLY HAPPENS, which is what makes the claim worth making. The
+    loader used to memoise, so this guard imported nothing: the module was already
+    resident from an earlier test, the purge removed nothing, and "leaves no driver
+    loaded" was a statement about a module that had never left. The loader no longer
+    caches, so each `with` below performs a genuine import - asserted INSIDE the block
+    by reading live `sys.modules` - and the delta afterwards is a real measurement of
+    what the purge removed.
     """
     before = frozenset(n for n in sys.modules if is_tier_isolated_name(n))
 
+    assert IRS030_MODULE not in sys.modules, (
+        f"{IRS030_MODULE} was resident BEFORE this guard imported it, so the import "
+        f"below would be a no-op and the purge would remove nothing."
+    )
     with shipped_irs030() as irs030:
         assert irs030.__name__ == IRS030_MODULE
         assert callable(irs030._gross_section)
+        #  DURING: without this half, an import that silently did nothing would still
+        #  satisfy the delta check below.
+        assert sys.modules.get(IRS030_MODULE) is irs030
+        assert any(
+            is_tier_isolated_name(name) and name not in before
+            for name in sys.modules
+        ), (
+            "importing the program added no tier-isolated name at all, so either it "
+            "was already loaded or it does not reach the data-access layer."
+        )
+    assert IRS030_MODULE not in sys.modules, (
+        "the program survived its loader's purge."
+    )
 
     # Measured as the DELTA this guard's own action is responsible for, rather than
     # as absolute residency. The loader's contract - the one this docstring states -
@@ -2064,3 +2276,125 @@ def test_the_shipped_gross_paragraph_leaves_no_driver_loaded() -> None:
     assert is_tier_isolated_name("mysql.connector") is True
     assert is_tier_isolated_name("acas_posting.database") is False
     assert is_tier_isolated_name("acas_posting.records.irs_posting") is False
+
+
+# ===========================================================================
+#  THE CONFORMANCE LOCK - `net_of_vat` AGAINST THE SHIPPED SECTION'S SECOND STORE
+#
+#  ⭐ WHY THIS IS A LOCK AND NOT A REDIRECTION. `gross_vat` above was redirected
+#  outright: it takes the same inputs the shipped section takes, so it can simply call
+#  it. `net_of_vat` cannot be, and the reason is a real difference rather than an
+#  inconvenience - it takes an ALREADY-COMPUTED `vat_amount` as a parameter, which is
+#  what lets thirteen assertions feed it values the statement above would never produce
+#  (boundary pennies, sign combinations, an overflowing figure). The shipped section
+#  computes its own VAT and would ignore any handed to it.
+#
+#  So the two are pinned together instead: for each case, the shipped `Gross` section
+#  runs BOTH its stores, and `net_of_vat` is then handed the section's own VAT and
+#  required to reach the same `post-amount`. If the section's subtraction ever changed -
+#  operand order, receiving field, or a `ROUNDED` appearing where the frozen statement
+#  has none - this fails, and the thirteen assertions above stop describing something
+#  that is not there.
+# ===========================================================================
+
+
+@pytest.mark.parametrize(
+    ("post_amount", "rate"),
+    [
+        pytest.param(Decimal("1200.00"), RATE_20_00, id="1200-at-20"),
+        pytest.param(Decimal("1175.00"), Decimal("17.50"), id="1175-at-17.50"),
+        pytest.param(Decimal("0.01"), RATE_20_00, id="one-penny"),
+        pytest.param(Decimal("-1200.00"), RATE_20_00, id="negative-gross"),
+        pytest.param(Decimal("1000.00"), Decimal("0.00"), id="zero-rate"),
+    ],
+)
+def test_net_of_vat_agrees_with_the_shipped_sections_second_store(
+    post_amount: Decimal, rate: Decimal
+) -> None:
+    """The shipped `Gross` section's two stores, and `net_of_vat`'s answer for them.
+
+    [irs/irs030.cbl:L1562-L1565] verbatim, both statements:
+
+        1562      compute  vat-amount rounded =
+        1563               post-amount - (post-amount / ( (WS-Vat-Current + 100) / 100)).
+        1564      subtract vat-amount  from  post-amount.
+
+    TWO STORES, DIFFERENT ROUNDING. The compute is `ROUNDED` and the subtract is not,
+    which is why `net_of_vat` defaults `rounded=False` - and why a `ROUNDED` appearing on
+    the subtraction would be a defect this lock catches. The subtraction is also
+    DESTRUCTIVE: `post-amount` is both an operand and the receiver.
+
+    Args:
+        post_amount: The gross figure before the statement.
+        rate: `WS-Vat-Current`.
+    """
+    from acas_posting.programs import (  # noqa: PLC0415 - scoped; see the tier rule
+        irs030_posting as irs030,
+    )
+
+    record = irs030.PostingRecord()
+    record.post_amount = post_amount
+    gross_before = record.post_amount
+
+    irs030._gross_section(record, rate)
+
+    #  The section's own VAT, fed back into this file's helper, which must then reach the
+    #  same net figure the section left in `post-amount`.
+    recomputed = net_of_vat(record.vat_amount, gross_before, irs030._POST_AMOUNT)
+    assert recomputed == record.post_amount, (
+        f"the shipped `Gross` section left post-amount = {record.post_amount} after "
+        f"subtracting its own vat-amount = {record.vat_amount} from {gross_before}, and "
+        f"`net_of_vat` reached {recomputed}. [irs/irs030.cbl:L1564] is an un-ROUNDED "
+        f"SUBTRACT with post-amount as both operand and receiver; a disagreement means "
+        f"the section's second store is no longer that statement."
+    )
+
+    #  AND THE VAT ITSELF, so the lock covers both stores rather than only the second.
+    assert record.vat_amount == gross_vat(gross_before, rate, irs030._VAT_AMOUNT), (
+        "the section's first store must be the same statement `gross_vat` drives; if "
+        "these differ, one of the two entry points is reaching different code"
+    )
+
+    #  EXACTLY TWO STORES, in the frozen order: the VAT first, then the amount. A third
+    #  store, or the pair reversed, would change what the posting record carries onward.
+    stores = tuple(
+        attribute
+        for _, attribute in _stores_in(irs030._gross_section)
+        if attribute in ("vat_amount", "post_amount")
+    )
+    assert stores == ("vat_amount", "post_amount"), (
+        f"the shipped `Gross` section stores {stores}; [irs/irs030.cbl:L1562-L1564] "
+        f"writes `vat-amount` and then `post-amount`, and the order is load-bearing "
+        f"because the second statement reads what the first wrote"
+    )
+
+
+def _stores_in(function: object) -> tuple[tuple[str, str], ...]:
+    """Every attribute store a function's bytecode performs, its own and its lambdas'.
+
+    Walks the function's code object and every code object nested inside it - the
+    `compute` lambda is one - and reports them in execution order, so a store hidden
+    inside a lambda is not missed.
+
+    Args:
+        function: The function to inspect.
+
+    Returns:
+        `(opcode name, attribute name)` per store, in order.
+    """
+    import types  # noqa: PLC0415 - scoped, as everywhere in this tier
+
+    def _walk(target: types.CodeType):
+        yield target
+        for constant in target.co_consts:
+            if isinstance(constant, types.CodeType):
+                yield from _walk(constant)
+
+    import dis  # noqa: PLC0415
+
+    found: list[tuple[str, str]] = []
+    for code in _walk(function.__code__):
+        for instruction in dis.get_instructions(code):
+            if instruction.opname == "STORE_ATTR":
+                found.append((instruction.opname, str(instruction.argval)))
+    return tuple(found)

@@ -35,7 +35,7 @@
 #      S=<scenario file>   N=<its basename without the extension>
 #      $C /repo/harness/build_oracle.sh                 once per image
 #      $C /repo/harness/build_fixtures.sh                once per scenario change
-#      $C /repo/harness/run_parity.sh --seed-dir /data/fixtures/"$N" "$S"
+#      $C /repo/harness/run_parity.sh "$S"
 #
 #  THE FIXTURE STAGE IS NOT OPTIONAL, and it is second for a reason. The frozen
 #  loaders read Cobol flat files, and fifteen of the seventeen are ORGANIZATION
@@ -47,11 +47,17 @@
 #  FROZEN copybooks, and calling the FROZEN handler to write -- then reading every
 #  file back through the same definitions and refusing the build unless the counts
 #  agree. Nothing about the layout is restated anywhere.
-#  `--seed-dir' is needed because a scenario's own `seed_dir' resolves relative to
-#  the scenario file, which is inside the READ-ONLY checkout (R-3), so a built
-#  fixture cannot live there. It says WHERE, never WHICH: the scenario's
-#  `seed_files' list stays the sole authority on what must be present. It is
-#  forwarded to BOTH reset stages from one place, so stages 1 and 5 cannot diverge.
+#  THE FIXTURE ROOT IS DEFAULTED, so no invocation above names it. A scenario's own
+#  `seed_dir' resolves relative to the scenario file, which is inside the READ-ONLY
+#  checkout (R-3), so a built fixture can never live there -- the runtime location
+#  is `$ACAS_FIXTURES', or `$ACAS_DATA/fixtures' when that is unset, plus the
+#  scenario name, which is exactly where `build_fixtures.sh' writes. `run_parity.sh'
+#  and `reset_db.sh --seed-dir' resolve it themselves; the explicit `--seed-dir'
+#  option remains for a fixture built somewhere else. It says WHERE, never WHICH:
+#  the scenario's `seed_files' list stays the sole authority on what must be
+#  present, and every declared name is verified BEFORE stage 1 drops the schema.
+#  It is forwarded to BOTH reset stages from one place, so stages 1 and 5 cannot
+#  diverge.
 #
 #  run_parity.sh IS THE RECOMMENDED FORM, because the ordering is the evidence:
 #  it runs the ten stages in sequence and ABORTS ON THE FIRST NON-ZERO, so a
@@ -433,6 +439,45 @@ services:
     #        connection -- correctly, because it cannot tell an isolated fixture
     #        network apart from a real remote database.
     #
+    #        ONE KEY, ONE CLOSED SET. This is the ONLY name for this decision in
+    #        the whole tree: the five harness scripts read it, and so does
+    #        `acas_posting/cli/rdbms_params.py` through `read_declared_flag`,
+    #        which `acas_posting/cli/args.py` also uses. The accepted spellings
+    #        are `1`, `true`, `yes`, `on` for yes and `0`, `false`, `no`, `off`
+    #        or unset for no, compared case-insensitively; ANY OTHER TEXT STOPS
+    #        THE RUN rather than being read as either answer. Do not invent a
+    #        second spelling of this variable and do not write `false` here
+    #        expecting it to grant anything -- an earlier revision of the Python
+    #        half read any non-empty value other than `0` as yes, and read a
+    #        different variable name entirely, so a declaration made here did not
+    #        arrive.    #        IT IS ALSO THE PYTHON SIDE'S CANONICAL SPELLING, AND THERE IS NOW ONE
+    #        CONTRACT RATHER THAN TWO. `acas_posting/cli/rdbms_params.py` publishes
+    #        the whole transport contract in `TRANSPORT_CONTRACT`, reads THIS
+    #        variable as the isolated-oracle declaration -- and no other name -- and
+    #        uses the same closed set of affirmative spellings these scripts use. It used to declare four flag variables of its own that nothing
+    #        here set, while `cli/args.py` read this one with a looser rule, so
+    #        `false` meant yes on one side of the harness and no on the other.
+    #        `tests/arithmetic/test_deployment_contract_boundaries.py` now asserts
+    #        that every declared knob has a provider and a consumer, and that this
+    #        block sets the one row marked as provided here.
+    #
+    #        WHAT THE PYTHON SIDE DOES WITHOUT IT, STATED PLAINLY: a non-local
+    #        unencrypted target is REPORTED as unprotected and then connected to,
+    #        because the frozen `Mysql-1000-Open` applies no such check and adding
+    #        a refusal to the parity path would be a disposition the compiled
+    #        program has not got (R-3). Setting ACAS_DB_REQUIRE_TLS=1 turns that
+    #        report into a refusal; declaring this variable does not annul it.
+    #
+    #        The remaining contract rows are OPTIONAL WITH DOCUMENTED DEFAULTS and
+    #        are deliberately not set here: ACAS_DB_TLS_CA / _CERT / _KEY (no TLS
+    #        material on this stack), ACAS_DB_REQUIRE_TLS,
+    #        ACAS_DB_REQUIRE_DECLARED_CREDENTIALS,
+    #        ACAS_DB_ALLOW_PLACEHOLDER_CREDENTIALS (the fixtures seed real
+    #        env-supplied credentials, never the frozen placeholders), and the
+    #        three driver deadlines ACAS_DB_CONNECT_TIMEOUT=10,
+    #        ACAS_DB_READ_TIMEOUT=300, ACAS_DB_WRITE_TIMEOUT=300, whose defaults
+    #        are finite so no run can hang on an unreachable server.
+    #
     #        The declaration is honest HERE and would not be elsewhere: this
     #        server has no TLS material, is NOT published to the host (see NO
     #        PUBLISHED PORT), and is reachable only on the project-internal
@@ -478,15 +523,36 @@ services:
     #        `reset_db.sh` GATE 2 requires a target-scoped consent token equal to
     #        exactly `DESTROY <schema>@<host>:<port>`. It is set here because
     #        destroying and rebuilding this throwaway schema IS the documented
-    #        stage 5 of the eight-stage protocol. Because the token embeds the
+    #        stages 1 and 5 of the TEN-stage protocol (harness/parity_stages.sh is
+    #        the canonical list; `run_parity.sh --print-stages' prints it). Because
+    #        the token embeds the
     #        target, it cannot be copied to another host or schema and still
     #        match -- which is what makes granting it here safe.
+    #
+    #    ACAS_SEED_AUTOCOMMIT
+    #        The transaction mode the frozen load programs run under, and nothing
+    #        else -- runtime application access stays autocommit ON either way.
+    #        `on` is the canonical durable mode and the reason is measured, not
+    #        preferred: the frozen loaders reach no live COMMIT, so under `off`
+    #        MariaDB discards each session at disconnect and every table reads
+    #        empty. `seed.sh` refuses that rather than reporting it, because an
+    #        empty capture yields an EMPTY DIFF and an empty diff is the protocol's
+    #        only pass condition.
     #
     #  ACAS_DB_ALLOWED_SCHEMAS is NOT set: `ACASDB` is already on the scripts'
     #  default disposable-schema allow-list.
     # -----------------------------------------------------------------------
     environment:
       ACAS_DB_HOST: mariadb
+      #  1..9999, NOT 1..65535, and the reason is a frozen field width. The value
+      #  travels through `LK-Port-Number pic x(4)`
+      #  [common/acas-get-params.cbl:L158] and `01 Ws-Mysql-Port-Number pic x(4)`
+      #  [copybooks/mysql-variables.cpy:L91], which every bridge STRINGs DB-Port
+      #  into [common/glpostingMT.cbl:L410-L413]: FOUR characters. A five-digit
+      #  port would reach the compiled cycle truncated - 13306 as 1330 - while the
+      #  harness probed and dumped the untruncated one, so every script and
+      #  `harness/dump_tables.py` refuse anything wider. `pic x(5)`
+      #  [copybooks/wssystem.cob:L142] is the STORED width, not the carrier.
       ACAS_DB_PORT: "3306"
       ACAS_DB_NAME: ACASDB
       ACAS_DB_USER: ${ACAS_DB_USER:?export ACAS_DB_USER before starting the stack - use `acas`, the account the frozen `common/*LD` loaders and `~/ACAS/acas.param` expect; 12 characters or fewer, per DB-UName pic x(12) at copybooks/wsfnctn.cob}
@@ -499,6 +565,22 @@ services:
     # distinct from ACAS_DB_USER -- it drops and re-applies the whole schema.
       ACAS_RESET_CONSENT: DESTROY ACASDB@mariadb:3306
       ACAS_DB_ALLOW_PLAINTEXT: "1"
+      #  THE CANONICAL DURABLE SEED MODE, declared rather than left implicit even
+      #  though `harness/seed.sh` already defaults to it -- an operator reading this
+      #  file should see which transaction mode the seed runs under. `on` is the ONLY
+      #  mode in which the frozen loaders leave a durable row: across all 28
+      #  `common/*LD.cbl` loaders there are 77 references to `perform aa030-Commit`
+      #  and `perform aa020-Rollback` and NOT ONE is live, and the vendored
+      #  `cobmysqlapi38.c` never calls `mysql_autocommit`. The Agent Action Plan asks
+      #  for `off` here (sections 0.2.1.1, 0.4.1.7, 0.5.2) on the strength of the
+      #  operator banner at [common/glbatchLD.cbl:L9-L13] -- which the maintainer
+      #  superseded in the same frozen files at [common/glbatchLD.cbl:L386-L387] and
+      #  [common/glbatchLD.cbl:L453] ("These do not work during testing with mariadb
+      #  - Non transactional model or autocommit set ON"). The divergence is
+      #  deliberate and arbitrated under R-6; see
+      #  `docs/migration/ambiguity-resolutions.md`. Set `off` to run the AAP-literal
+      #  window, which `seed.sh` will correctly refuse as non-durable.
+      ACAS_SEED_AUTOCOMMIT: "on"
       ACAS_REPO: /repo
       ACAS_BUILD: /build
       ACAS_DATA: /data

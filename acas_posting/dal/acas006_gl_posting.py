@@ -937,6 +937,95 @@ def _join_post_key(key: WsPostKey) -> Decimal:
     return Decimal(int.from_bytes(group_image[:8], byteorder="big", signed=True))
 
 
+#: The two spaces the group receiver is padded with, MEASURED.
+#:
+#: ``WS-Post-Key`` is ten bytes and ``HV-POST-KEY`` is an eight-byte ``COMP`` item, so
+#: the alphanumeric move into the group leaves two bytes over. A probe read all ten
+#: after the move and the last two were ``0x20`` - space, the alphanumeric pad - not
+#: zero, not left unchanged, and not the low-order bytes of anything.
+_POST_KEY_GROUP_PAD: Final[bytes] = b"\x20\x20"
+
+#: The eight bytes an eight-byte ``COMP`` item occupies.
+_POST_KEY_HOST_BYTES: Final[int] = 8
+
+
+def _split_post_key(hv_post_key: Decimal) -> tuple[int, int]:
+    """Reproduce the raw binary-to-group ``MOVE`` out of ``HV-POST-KEY``.
+
+    ``move HV-POST-KEY to WS-Post-Key.`` [common/glpostingMT.cbl:L1085]. The receiver is
+    a GROUP [copybooks/wspost.cob:L14-L16], so COBOL performs an ALPHANUMERIC move: the
+    sending ``PIC 9(18) COMP`` item's eight storage bytes are copied into the group's
+    first eight bytes and the remaining two are space-filled. Nothing is converted
+    numerically on the way, which is what makes this the mirror of
+    :func:`_join_post_key` rather than its inverse.
+
+    ⭐ MEASURED, AND IT IS NEITHER OF THE TWO READINGS THE MIGRATION CONSIDERED. The
+    open question was whether the group takes the FIRST ten decimal digits of the host
+    variable or the LAST ten. It takes neither: it takes eight BYTES. A probe declared
+    both operands exactly as the frozen sources declare them, set the host variable to
+    ``472328296244457520`` - the value the compiled bridge stores for a
+    ``0000100001`` key, so the value a fetch really returns - performed the frozen move
+    and read all ten group bytes with ``FUNCTION ORD``:
+
+    ==========================  ==========================================
+    group bytes after the move  ``06 8E 0C 15 3B 04 30 30 20 20``
+    ``Batch``                   ``0x06 8E 0C 15 3B`` - **NOT NUMERIC**
+    ``Post-Number``             ``0x04 30 30 20 20`` - **NOT NUMERIC**
+    first ten decimal digits    ``4723282962`` - does not match
+    last ten decimal digits     ``6244457520`` - does not match
+    ==========================  ==========================================
+
+    The previous implementation took the last ten decimal digits and split them, giving
+    a batch of ``62444`` - a perfectly legitimate five-digit batch number, which is
+    precisely why it was wrong in a way no green scenario would have shown. The compiled
+    program produces bytes that cannot be a batch number at all, so the guard
+    ``if batch not = WS-Batch-Nos go to loop`` [general/gl070.cbl:L492-L493] discards
+    every posting; a reproduction that yields ``62444`` would MATCH on a run that seeded
+    batch 62444 and post where the frozen system posts nothing. That is ANOMALY N-KEY,
+    and this function is where it is reproduced rather than repaired (R-4).
+
+    WHY THE NUMERIC VALUE IS COMPUTED BY LOW NIBBLE. The record models these two fields
+    as ``int`` because the copybook declares them ``pic 9(5)`` DISPLAY, so the bytes
+    have to be read as COBOL reads them. COBOL's zoned read is tolerant: the digit of
+    each byte is its LOW NIBBLE, accumulated base ten, with no validity check. Applied
+    to ``Batch`` that gives ``6, 14, 12, 5, 11`` and therefore ``75261`` - and the
+    compiled program agrees: an exhaustive comparison of ``Batch`` against every value
+    in ``0..99999`` matched ``75261`` and nothing else, while ``= 1``, ``= 62444`` and
+    ``= ZERO`` were all false. No check is added and no error is raised (R-3).
+
+    The rule is stated here rather than imported because
+    ``acas_posting.cobol`` is outside this module's dependency set (section 0.4.3);
+    ``tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py`` asserts that
+    this function agrees with ``acas_posting.cobol.usage.decode`` so the two cannot
+    drift apart.
+
+    Args:
+        hv_post_key: The host variable a fetch has just populated, carrying the column's
+            eighteen-digit value.
+
+    Returns:
+        The ``Batch`` and ``Post-Number`` values the group holds after the move, read
+        with COBOL's own tolerant zoned semantics.
+    """
+    # The COMP item's storage image. `signed=True` mirrors `_join_post_key`, which built
+    # the same eight bytes with the same signedness, so a load and an unload of one
+    # in-memory value round-trip exactly - measured.
+    stored = int(hv_post_key)
+    image = stored.to_bytes(
+        _POST_KEY_HOST_BYTES, byteorder="big", signed=stored < 0
+    )
+    group_image = image + _POST_KEY_GROUP_PAD
+
+    def zoned(chunk: bytes) -> int:
+        """Read one ``pic 9(5)`` DISPLAY field, tolerantly, as COBOL does."""
+        magnitude = 0
+        for byte in chunk:
+            magnitude = magnitude * 10 + (byte & 0x0F)
+        return magnitude
+
+    return zoned(group_image[:5]), zoned(group_image[5:10])
+
+
 def bb000_hv_load(posting: WsPostingRecord) -> TdGlpostingRec:
     """``bb000-HV-Load Section.`` [common/glpostingMT.cbl:L1045].
 
@@ -1017,9 +1106,9 @@ def bb100_unload_hvs(
     # ANOMALY N-UNLOAD: no `move HV-POST-RRN to WS-Post-rrn` exists
     # [common/glpostingMT.cbl:L1083-L1097], so ws_post_rrn keeps the zero above.
 
-    joined = f"{int(host_variables.hv_post_key) % 10**10:010d}"
-    posting.ws_post_key.batch = int(joined[:5])
-    posting.ws_post_key.post_number = int(joined[5:])
+    batch, post_number = _split_post_key(host_variables.hv_post_key)
+    posting.ws_post_key.batch = batch
+    posting.ws_post_key.post_number = post_number
     posting.post_code = _unloaded(host_variables, "POST-CODE")
     posting.post_date = _unloaded(host_variables, "POST-DAT")
     posting.post_dr = _unloaded(host_variables, "POST-DR")

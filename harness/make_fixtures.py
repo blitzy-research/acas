@@ -6,7 +6,7 @@
 """Materialise a scenario's declared flat seed files, non-interactively.
 
 WHY THIS EXISTS
-The eight scenario definitions under [harness/scenarios] each declare the flat files
+The nine scenario definitions under [harness/scenarios] each declare the flat files
 they seed from, and the checkout ships none of them: every invocation of
 [harness/seed.sh] therefore refused with its fixture exit code, and the parity
 protocol could not reach its first stage. The frozen loaders read those files, so the
@@ -664,6 +664,50 @@ def read_layout(
 # =============================================================================
 # GENERATING A WRITER
 # =============================================================================
+def refuse_unplaceable_text(text: str, *, what: str, code: int) -> None:
+    """Refuse text that cannot be placed inside a generated COBOL literal.
+
+    ⭐ ONE RULE, STATED ONCE. Everything this tool interpolates into generated source
+    -- a declared VALUE, a declared raw byte image, an output path -- is going into
+    source that is then COMPILED AND RUN, so all of it has to survive the same two
+    hazards, and until now each site spelled the rule for itself:
+
+      * a double quote CLOSES the literal, and whatever follows it becomes generated
+        COBOL rather than data. That is arbitrary statements from an input;
+      * any control character ends or corrupts the line. A newline is the obvious one
+        and was the only one three of the four sites checked, but a carriage return
+        does it too, and NUL and DEL make the emitted source undiagnosable.
+
+    Neither is escaped. There is no escaping that makes arbitrary text safe inside a
+    fixed-format-descended literal, and an escape that half-works is worse than a
+    refusal because it fails silently at compile time instead of loudly here.
+
+    Args:
+        text: The text about to be interpolated.
+        what: What it is, for the diagnosis.
+        code: The exit status to fail with -- declaration inputs and command-line
+            inputs are different faults and get different statuses.
+    """
+    if '"' in text:
+        fail(
+            code,
+            f"{what} contains a double quote: {text!r}.",
+            "It is interpolated into a COBOL alphanumeric literal in source this tool",
+            "compiles and runs, so a quote would close the literal and leave the",
+            "remainder as generated COBOL. It is refused rather than escaped.",
+        )
+    for index, character in enumerate(text):
+        if ord(character) < 0x20 or ord(character) == 0x7F:
+            fail(
+                code,
+                f"{what} contains a control character (0x{ord(character):02X}) at "
+                f"offset {index}: {text!r}.",
+                "It is interpolated into generated COBOL source, where a line break",
+                "ends the line and starts another one, and where a NUL or a DEL makes",
+                "the emitted source undiagnosable. Refused rather than escaped.",
+            )
+
+
 def cobol_literal(kind: str, value: str, field: str) -> str:
     """A COBOL literal for a declared text value, checked against the field's kind."""
     if kind == "numeric":
@@ -676,16 +720,66 @@ def cobol_literal(kind: str, value: str, field: str) -> str:
         # Emitted verbatim: COBOL aligns it on the receiving field's implied decimal
         # point and truncates toward zero, which is the frozen store semantics.
         return value
-    if '"' in value:
-        fail(
-            EX_DECLARATION,
-            f"the value for {field} contains a double quote, which this tool refuses.",
-            "It is interpolated into generated COBOL source, so it is refused rather",
-            "than escaped.",
-        )
-    if "\n" in value or "\r" in value:
-        fail(EX_DECLARATION, f"the value for {field} spans lines, which is refused.")
+    refuse_unplaceable_text(
+        value, what=f"the value for {field}", code=EX_DECLARATION
+    )
     return f'"{value}"'
+
+
+#: The longest path this tool will interpolate into a generated COBOL literal.
+#: A COBOL alphanumeric literal has a maximum length and a source line has a fixed
+#: area; a path long enough to need continuation would produce source that either
+#: does not compile or -- worse -- compiles with the tail silently dropped, so it is
+#: refused. The frozen file-name field it is moved into is itself bounded:
+#: `wsnames.cob' declares each as `pic x(n)', so a path past that is not usable by
+#: the loaders either.
+COBOL_PATH_LITERAL_MAX: Final[int] = 160
+
+
+def cobol_path_literal(path: str, *, what: str) -> str:
+    """Return `path` as a COBOL alphanumeric literal, or refuse it.
+
+    ⭐ EVERY PATH THIS TOOL PUTS INTO GENERATED COBOL COMES THROUGH HERE. The output
+    directory arrives on the command line, each seed file's path is derived from it,
+    and the result is interpolated into four `move "<path>" to <field>.' statements
+    and two comment lines of source that is then COMPILED AND RUN. Declared VALUES
+    were already held to this standard; the paths were the gap, and they are the input
+    an operator supplies directly.
+    The quote-and-control-character rule itself lives in `refuse_unplaceable_text' so
+    that this function and the two declared-value paths cannot drift apart -- they
+    previously spelled it three different ways, and only this one covered a carriage
+    return, a NUL or a DEL. What this function adds on top of the shared rule is the
+    LENGTH budget, which applies to a path (it is derived, and can be arbitrarily
+    long) but not to a declared raw value (it must equal its field's width exactly).
+    A comment line is checked by the same rule: `*>' cannot execute anything, but a
+    newline inside one still ends the comment and hands the remainder to the compiler.
+
+    Args:
+        path: The path to interpolate.
+        what: What it is, for the diagnosis - e.g. `the --out directory`.
+
+    Returns:
+        The path unchanged, once it has been shown to be placeable. It is returned
+        WITHOUT quotes because the two call sites need different framing -- a `move'
+        statement supplies its own pair, a `*>' comment wants none -- and because a
+        caller that forgets the quotes generates COBOL that fails to compile, which
+        is a loud failure rather than a silent one.
+    """
+    if not path:
+        fail(EX_PRECONDITION, f"{what} is empty, and it has to name a file.")
+    # The shared rule -- the same one every declared VALUE and raw byte image is held
+    # to -- under the command-line status, because a path is what the operator typed.
+    refuse_unplaceable_text(path, what=what, code=EX_PRECONDITION)
+    if len(path) > COBOL_PATH_LITERAL_MAX:
+        fail(
+            EX_PRECONDITION,
+            f"{what} is {len(path)} characters, past the "
+            f"{COBOL_PATH_LITERAL_MAX} this tool will place in a COBOL literal.",
+            "A longer literal would need continuation, and source that needs it",
+            "either fails to compile or compiles with the tail dropped. Choose a",
+            "shorter --out directory.",
+        )
+    return path
 
 
 def moves_for(
@@ -730,6 +824,49 @@ def moves_for(
         literal = cobol_literal(kind, value, declared)
         owner = layout.qualifier(name, record)
         lines.append(f"     move     {literal} to {declared} in {owner}")
+    return lines
+
+
+def connection_accepts_for(
+    layout: Layout, record: str, bindings: dict[str, str]
+) -> list[str]:
+    """The six connection fields, accepted from the environment at RUN time.
+
+    ⭐ WHY `ACCEPT ... FROM ENVIRONMENT` AND NOT `MOVE "..."` (finding F-31). The
+    values reach the same fields with the same bytes either way, but a `MOVE` puts
+    them in the GENERATED SOURCE, where a kept build directory or an echoed compiler
+    diagnostic publishes the database account. `ACCEPT` names the variable and reads
+    it when the writer runs, so the source is credential-free and can be kept,
+    listed or attached to a bug report without redaction.
+
+    The statement form is the literal-name one - `accept <item> from environment
+    "NAME"` - which GnuCOBOL 3.2 accepts directly. Every field is preceded by
+    `initialize <record>`, so a variable that is absent or empty leaves the field at
+    spaces, which is exactly what an empty `RDBMS-Socket` means
+    [copybooks/wssystem.cob:L137-L144] and what the frozen TCP-only declaration
+    carries.
+
+    Args:
+        layout: the parameter record's layout, for the declared spelling and owner
+            of each field.
+        record: the record the fields belong to, for qualification.
+        bindings: field name to environment variable name, as
+            `credentials_from_env` returned it - so the names emitted are the ones
+            whose presence and width that function has already checked, and there is
+            no second list to drift.
+
+    Returns:
+        One `accept` line per connection field, in declaration order.
+    """
+    lines: list[str] = []
+    for field, _environment, _width, _required in CONNECTION_FIELD_BINDINGS:
+        environment = bindings[field]
+        _kind, declared = layout.classify(field)
+        owner = layout.qualifier(field, record)
+        lines.append(
+            f"     accept   {declared} in {owner} from environment "
+            f'"{environment}"'
+        )
     return lines
 
 
@@ -815,12 +952,11 @@ def table_moves_for(
                     f"the raw value for {declared} entry {index} must be a quoted "
                     f"string of exactly {width} character(s).",
                 )
-            if '"' in text or "\n" in text or "\r" in text:
-                fail(
-                    EX_DECLARATION,
-                    f"the raw value for {declared} entry {index} carries a quote or a "
-                    "line break, which is refused rather than escaped.",
-                )
+            refuse_unplaceable_text(
+                text,
+                what=f"the raw value for {declared} entry {index}",
+                code=EX_DECLARATION,
+            )
             lines.append(
                 f'     move     "{text}" to {declared} ({index}) (1:{width})'
             )
@@ -875,13 +1011,9 @@ def raw_move_for(
             EX_DECLARATION,
             f"the raw value for {name} in {where} must be a quoted string.",
         )
-    if '"' in text or "\n" in text or "\r" in text:
-        fail(
-            EX_DECLARATION,
-            f"the raw value for {name} in {where} carries a quote or a line break.",
-            "It is interpolated into generated COBOL source, so it is refused rather",
-            "than escaped.",
-        )
+    refuse_unplaceable_text(
+        text, what=f"the raw value for {name} in {where}", code=EX_DECLARATION
+    )
     declared, width = layout.raw_target(name)
     if len(text) != width:
         fail(
@@ -926,7 +1058,7 @@ def writer_via_handler(
             "*>  GENERATED by harness/make_fixtures.py. Not committed, not frozen, and",
             "*>  never edited by hand: rebuild it by re-running the builder.",
             "*>",
-            f"*>  Writes {path}",
+            f'*>  Writes {cobol_path_literal(path, what="the seed file path")}',
             f"*>  through the frozen handler {handler}, whose own LINKAGE copy block is",
             "*>  reproduced verbatim below so that the record name and every picture",
             "*>  clause are the handler's, not this generator's.",
@@ -952,7 +1084,8 @@ def writer_via_handler(
             "*>",
             "     move     zero to File-System-Used",
             "                      FA-File-System-Used.",
-            f'     move     "{path}" to {defs_field}.',
+            f'     move     "{cobol_path_literal(path, what="the seed file path")}"'
+            f" to {defs_field}.",
             "     set      fn-open to true.",
             "     set      fn-output to true.",
             f'     perform  fx-call.',
@@ -1030,7 +1163,8 @@ def writer_for_system(
             "*>",
             "*>  GENERATED by harness/make_fixtures.py. Not committed, not frozen.",
             "*>",
-            f"*>  Writes {path} using the frozen select and FD every loader uses for it.",
+            f'*>  Writes {cobol_path_literal(path, what="the seed file path")} '
+            "using the frozen select and FD every loader uses for it.",
             "*>",
             "       environment division.",
             "       configuration section.",
@@ -1054,7 +1188,8 @@ def writer_for_system(
             "       procedure division.",
             " fx-main section.",
             " fx-000-start.",
-            f'     move     "{path}" to {defs_field}.',
+            f'     move     "{cobol_path_literal(path, what="the seed file path")}"'
+            f" to {defs_field}.",
             "     open     output system-file.",
             "     if       fs-reply not = zero",
             '              display "acasfxsys: open output failed, fs-reply = " fs-reply',
@@ -1157,7 +1292,8 @@ def reader_via_handler(
             " fx-000-start.",
             "     move     zero to File-System-Used",
             "                      FA-File-System-Used.",
-            f'     move     "{path}" to {defs_field}.',
+            f'     move     "{cobol_path_literal(path, what="the seed file path")}"'
+            f" to {defs_field}.",
             "     set      fn-open to true.",
             "     set      fn-input to true.",
             "     perform  fx-call.",
@@ -1208,7 +1344,8 @@ def reader_for_system(*, defs_field: str, path: str) -> str:
             "       procedure division.",
             " fx-main section.",
             " fx-000-start.",
-            f'     move     "{path}" to {defs_field}.',
+            f'     move     "{cobol_path_literal(path, what="the seed file path")}"'
+            f" to {defs_field}.",
             "     open     input system-file.",
             "     if       fs-reply not = zero",
             '              display "acasfxsysrd: open input failed, fs-reply = " fs-reply',
@@ -1437,7 +1574,25 @@ def declared_records(document: dict, name: str) -> list[dict[str, str]]:
 
 
 def credentials_from_env() -> dict[str, str]:
-    """Return all six system-record connection fields from the environment only."""
+    """Validate all six connection fields and return the ENVIRONMENT NAME of each.
+
+    ⭐ THE VALUES ARE VALIDATED HERE AND EMITTED NOWHERE (finding F-31). This used to
+    return the values, which `moves_for` then wrote into the generated COBOL as
+    `move "PaSsWoRd" to RDBMS-Passwd' - so a build kept for diagnosis, or a compiler
+    diagnostic echoing the offending line, published the database account. The
+    generated writer now performs `accept RDBMS-Passwd from environment
+    "ACAS_DB_PASSWORD"' instead, which reaches the same field with the same bytes at
+    RUN time and leaves nothing in the source.
+
+    The width and presence checks stay HERE rather than moving into the generated
+    program, because a refusal a human can read beats a truncation a COBOL move
+    performs silently - and `pic x(12)` is what the frozen loader passes on
+    [copybooks/wssystem.cob:L137-L144].
+
+    Returns:
+        The field name mapped to the ENVIRONMENT VARIABLE NAME it is accepted from -
+        never to its value.
+    """
     values: dict[str, str] = {}
     for field, environment, width, required in CONNECTION_FIELD_BINDINGS:
         raw_value = os.environ.get(environment) or ""
@@ -1457,7 +1612,7 @@ def credentials_from_env() -> dict[str, str]:
                 "A longer value is silently truncated before the frozen loader",
                 "connects [copybooks/wssystem.cob:L137-L144].",
             )
-        values[field] = value
+        values[field] = environment
     return values
 
 
@@ -1484,6 +1639,9 @@ def build_one(
     records = [] if name == "system.dat" else declared_records(document, name)
 
     if name == "system.dat":
+        #  Validated here, emitted nowhere: the return value is the map of field to
+        #  ENVIRONMENT VARIABLE NAME, and the check that each is present and fits its
+        #  `pic x(n)` happens on this call (finding F-31).
         forced = credentials_from_env()
         declared_blocks = system_blocks(document)
         rendered: dict[str, list[str]] = {}
@@ -1501,7 +1659,6 @@ def build_one(
                             "so no credential or deployment endpoint is committed to",
                             "the repository.",
                         )
-                fields.update(forced)
             elif any(k.lower() in {f.lower() for f in CREDENTIAL_FIELDS} for k in fields):
                 fail(
                     EX_SCENARIO,
@@ -1514,6 +1671,15 @@ def build_one(
                 fields,
                 where=f"seed_records[system.dat][{key}] ({purpose})",
             )
+            if key == "1":
+                #  APPENDED AFTER THE DECLARED MOVES, so an `initialize' followed by
+                #  the scenario's own fields is followed by the environment's six -
+                #  the same order the old literal MOVEs occupied, with no value in
+                #  the source (finding F-31). `forced` holds the VARIABLE NAMES and
+                #  has already refused an absent or over-wide value.
+                rendered[key].extend(
+                    connection_accepts_for(layout, record, forced)
+                )
         records = [fields for fields in declared_blocks.values() if fields]
         source = writer_for_system(
             defs_field=defs_field, path=str(target), records=rendered
@@ -1712,6 +1878,108 @@ def report_fields(repo: Path, name: str) -> None:
         sys.stdout.write(f"    -        NOT SETTABLE       {key}: {layout.excluded[key]}\n")
 
 
+#: The marker a `--work` directory must carry when it is not the default
+#: `<out>/.build` (finding F-28). Written by this tool for a directory that is empty,
+#: and required thereafter, so a work root cannot be a path that happens to exist.
+WORK_ROOT_MARKER: Final[str] = ".acas-harness-work-root"
+
+
+def assert_work_directory(
+    work: Path, *, repo: Path, out: Path, explicit: bool
+) -> None:
+    """Refuse a work directory that could overwrite something that matters.
+
+    ⭐ WHY THIS EXISTS (finding F-28). `--work` was accepted unchecked, and this tool
+    WRITES GENERATED COBOL into it and compiles there. Pointed at the checkout it
+    would create programs inside frozen specification directories; pointed at a
+    populated directory it would litter, and `harness/build_fixtures.sh` removes the
+    default one recursively. Two directions of containment are checked, because both
+    are wrong: the work directory must not be inside the checkout, AND the checkout
+    must not be inside the work directory.
+
+    THE DEFAULT IS EXEMPT FROM THE MARKER, NOT FROM THE CONTAINMENT. `<out>/.build`
+    is created by this tool underneath a directory `build_fixtures.sh` has already
+    claimed, so requiring a second marker there would be ceremony; an explicitly
+    named root has no such provenance and must carry one.
+
+    Args:
+        work: The resolved work directory, already created.
+        repo: The frozen checkout.
+        out: The resolved output directory.
+        explicit: True when `--work` named it, False for the default.
+
+    Raises:
+        SystemExit: Through `fail`, with `EX_PRECONDITION`.
+    """
+    resolved = work.resolve()
+
+    if resolved == repo or str(resolved).startswith(f"{repo}{os.sep}"):
+        fail(
+            EX_PRECONDITION,
+            f"the work directory {resolved} is inside the frozen checkout {repo}.",
+            "This tool writes generated COBOL there and compiles it; the checkout is",
+            "read-only specification and nothing here may write to it (R-3).",
+        )
+    if str(repo).startswith(f"{resolved}{os.sep}"):
+        fail(
+            EX_PRECONDITION,
+            f"the frozen checkout {repo} is inside the work directory {resolved}.",
+            "A work root above the checkout puts the specification inside a directory",
+            "this tool and harness/build_fixtures.sh treat as disposable.",
+        )
+    if resolved == Path(resolved.anchor) or len(resolved.parts) <= 2:
+        fail(
+            EX_PRECONDITION,
+            f"refusing {resolved} as a work directory: it is a filesystem or",
+            "top-level directory. Name a directory created for the purpose.",
+        )
+    home = Path.home()
+    if resolved == home:
+        fail(
+            EX_PRECONDITION,
+            f"refusing the home directory {resolved} as a work directory.",
+        )
+
+    if not explicit:
+        #  The default `<out>/.build`, underneath a root build_fixtures.sh claimed.
+        return
+
+    if resolved == out or str(resolved).startswith(f"{out}{os.sep}"):
+        #  Inside the fixture root this run is publishing into: same provenance as
+        #  the default, so the marker is not demanded.
+        return
+
+    marker = resolved / WORK_ROOT_MARKER
+    if marker.is_file():
+        return
+
+    existing = [entry for entry in resolved.iterdir()]
+    if existing:
+        fail(
+            EX_PRECONDITION,
+            f"refusing {resolved} as a work directory: it holds content this tool",
+            "did not create and carries no harness marker.",
+            f"  first entry found: {existing[0]}",
+            f"  expected marker  : {marker}",
+            "Generated programs are written and compiled here, so a directory whose",
+            "provenance cannot be established is not used. Point --work at an empty",
+            "directory, or create the marker deliberately.",
+        )
+    try:
+        marker.write_text(
+            "# harness/make_fixtures.py work root.\n"
+            "# Generated COBOL is written and compiled here; delete this file to\n"
+            "# revoke that.\n",
+            encoding="utf-8",
+        )
+        marker.chmod(0o600)
+    except OSError as exc:
+        fail(
+            EX_PRECONDITION,
+            f"could not claim the work directory by writing {marker}: {exc}",
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="make_fixtures.py",
@@ -1758,7 +2026,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--work",
         default=None,
-        help="where the generated programs are compiled (default <out>/.build)",
+        help="where the generated programs are compiled (default <out>/.build). A "
+        "directory OUTSIDE the checkout, with the checkout not inside it, and - "
+        "unless it is under --out - either empty or carrying the "
+        f"{WORK_ROOT_MARKER} marker this tool writes for an empty one.",
     )
     parser.add_argument(
         "--quiet", action="store_true", help="report only failures"
@@ -1827,6 +2098,19 @@ def main(argv: list[str] | None = None) -> int:
             "The checkout is read-only specification and nothing here may write to it.",
         )
 
+    # ⭐ CHECKED HERE AS WELL AS AT EVERY INTERPOLATION SITE, and the difference is
+    # which failure the operator gets. Each seed file's path is derived from this
+    # directory and lands in a COBOL literal in source this tool compiles and runs, so
+    # `cobol_path_literal' refuses a quote, a control character or an over-long path
+    # at each site. That refusal names a generated line; this one names `--out', which
+    # is what the operator actually typed. The longest file name adds to the length,
+    # so the budget is measured against the worst case rather than the directory.
+    longest = max(len(name) for name in SEED_FILES)
+    cobol_path_literal(
+        f"{resolved_out}{os.sep}{'x' * longest}",
+        what="the --out directory, plus the longest seed file name it will hold,",
+    )
+
     if shutil.which("cobc") is None:
         fail(
             EX_PRECONDITION,
@@ -1840,6 +2124,7 @@ def main(argv: list[str] | None = None) -> int:
         work.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         fail(EX_PRECONDITION, f"the work directory could not be created: {exc}")
+    assert_work_directory(work, repo=repo, out=resolved_out, explicit=bool(args.work))
 
     modules_dir: Path | None = None
     candidate = Path(args.modules) / "common"

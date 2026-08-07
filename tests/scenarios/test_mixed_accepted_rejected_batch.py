@@ -3,7 +3,7 @@
 Scenario `mixed_accepted_rejected`; subsystem `general`; operation `gl_post_cycle`; the
 declared term code is zero. ONE closed, proofed General Ledger batch posts exactly as it
 does on the reference happy path while OTHER transactions IN THE SAME RUN are abandoned
-without a trace. The eight protocol stages are driven for it and an EMPTY
+without a trace. The ten protocol stages are driven for it and an EMPTY
 ordering-normalised diff is asserted -- Agent Action Plan section 0.8.5, criterion 1.
 
 An empty diff proves three things here at once, and no single-transaction test can prove
@@ -255,15 +255,37 @@ appear in any dump. The COBOL menu's exit path rewrites the system records on le
     L664                move     2 to File-Key-No       <- KEY 2, SYSDEFLT-REC
     L667                move     4 to File-Key-No       <- KEY 4, SYSTOT-REC
 
-and the headless Python entry point has no menu and never does this. Sales and Purchase
-persist keys 1 and 4 only, never key 2 [sales/sales.cbl:L636],
-[purchase/purchase.cbl:L629], which is why `SYSDEFLT-REC` is on no scenario's list at
-all. A census across all twelve in-scope programs finds NO `System-*` facade verb in any
-of them, so none of `SYSTEM-REC`, `SYSDEFLT-REC`, `SYSFINAL-REC` or `SYSTOT-REC` belongs
-on this scenario's list; comparing one would be a guaranteed FALSE FAILURE that is an
-artefact of the harness. THAT IS BOUNDING, NOT IGNORING: there is no ignore-list, no
-tolerance-list and no "known difference" allowance anywhere in the diff path, and
-bounding is done by the scenario's affected-table list and by nothing else.
+and BOTH SIDES REACH THAT PARAGRAPH: `acas_posting/cli/args.py`'s `overrewrite` is its
+migrated counterpart and every one of the seven routes calls it, so KEY 1 IS WRITTEN ON
+BOTH SIDES OF EVERY SCENARIO. Sales and Purchase persist keys 1 and 4 only, never key 2
+[sales/sales.cbl:L636], [purchase/purchase.cbl:L629], and the reproduction inherits that
+divergence by writing key 2 only when the route loaded the defaults record; the IRS route
+persists key 1 alone. A census across all twelve in-scope PROGRAMS finds NO `System-*`
+facade verb in any of them, so no migrated program persists these tables - only the
+menu-exit path does, on both sides.
+
+`SYSTEM-REC` AND `SYSDEFLT-REC` ARE ON THIS SCENARIO'S DECLARED EFFECT LIST, measured
+byte-identical on the two sides rather than presumed to diverge. Two of `SYSTEM-REC`'s
+169 columns are withheld from the capture and only two: `RDBMS-PASSWD char(12)`
+[copybooks/wssystem.cob:L139] and the frozen schema's shorter `PASS-WORD` are replaced on
+BOTH sides by `harness/dump_tables.py`'s `REDACTED_COLUMNS`, because a dump is `SELECT *`
+and a capture is committed evidence. Every other column is compared byte for byte, so
+that is redaction and not an ignore-list. THE COUPLING OBJECTION WAS MEASURED: the row's
+content depends on what the route DID - the run-date stamp, the IRS allocator, the
+latches, and `Date-Form`, which the frozen date sections write back
+[copybooks/wssystem.cob:L127] - so counting it toward `expected_table_effect` could in
+principle couple this scenario's effect claim to fields it does not reason about. Across
+the committed scenarios the digest moves on exactly those declaring `changed` and holds
+on those declaring `unchanged`, so it does not. The row is FINGERPRINTED besides, before
+and after every run, and `protocol.assert_system_record_parity` compares the two sides'
+post-run digests over all 169 columns - the credential included, with nothing to leak.
+
+THE LIST IS NOT THE COMPARISON BOUND. The capture and the diff are bounded at ALL 22
+IN-SCOPE TABLES (`--all-in-scope`), so a difference in any of these rows IS caught rather
+than bounded away - which is the point, since a bound drawn from what a scenario expects
+to move could report an empty diff while the run date, the allocators, the flags, the
+defaults or the period totals differed. AND THERE IS STILL NO IGNORING: no ignore-list, no
+tolerance-list and no "known difference" allowance exists anywhere in the diff path.
 
 A-15 -- THE BATCH RECORD'S DECLARED LENGTH CONTRADICTION
 [copybooks/wsbatch.cob:L7-L9] carries the maintainer's own three consecutive comments:
@@ -299,33 +321,66 @@ between this scenario and that one is A SINGLE SEEDED FIELD, `Batch-Status`, and
 it wrong silently converts this file into a duplicate of
 `tests/scenarios/test_control_total_mismatch_rejection.py`.
 
-The seed the scenario declares therefore carries THREE General Ledger batches, arranged
-by key, all with `Bcycle` equal to `system.cyclea` [copybooks/wsbatch.cob:L34]:
+THE SEED THE SCENARIO ACTUALLY DECLARES, read out of `seed_records` rather than
+described from intent, and asserted by `test_scenario_definition_preconditions` so that
+this description cannot drift away from the fixture:
 
-  BATCH A, lowest key -- `WS-Ledger = 1` so `88 GL-Batch`
-    [copybooks/wsbatch.cob:L15-L16] is true; `Batch-Status = 1` so `88 Status-Closed`
-    [copybooks/wsbatch.cob:L25-L27] is true; `Cleared-Status = 0` so `88 Waiting`
-    [copybooks/wsbatch.cob:L29-L30] is true. THIS IS THE BATCH THAT POSTS.
-  BATCH B, middle key -- General Ledger, closed, and `Cleared-Status` NOT zero: 1 for
-    Processed or 2 for Archived [copybooks/wsbatch.cob:L29-L32]. THIS SINGLE FIELD IS
-    THE TRIGGER FOR SKIP (b) at [general/gl072.cbl:L458-L459].
-  BATCH C, highest key -- closed and waiting, exactly like A.
+  `batch.dat`, TWO General Ledger batches, both with `Bcycle` equal to `system.cyclea`
+    [copybooks/wsbatch.cob:L34]:
+      BATCH 1, key 100001 -- `WS-Ledger = 1` so `88 GL-Batch`
+        [copybooks/wsbatch.cob:L15-L16] is true; `Batch-Status = 1` so `88 Status-Closed`
+        [copybooks/wsbatch.cob:L25-L27] is true; `Cleared-Status = 0` so `88 Waiting`
+        [copybooks/wsbatch.cob:L29-L30] is true; `Items` 1; `Posted` 0. THIS IS THE
+        BATCH THAT POSTS.
+      BATCH 2, key 100002 -- General Ledger, closed, `Cleared-Status = 1` so `88
+        Processed` [copybooks/wsbatch.cob:L31] is true and `88 Waiting` is false;
+        `Items` 0. IT IS THE NOT-WAITING BATCH, and it has NO POSTINGS.
+  `posting.dat`, ONE row -- batch 1, `Post-Amount` 1000.00 with `Vat-Amount` 200.00 on
+    the CR side and `Vat-AC` 2200, which is the shape gl070's double-entry explosion
+    would write all THREE legs from [general/gl070.cbl:L495-L533] with the VAT gate at
+    [general/gl070.cbl:L521-L523] taken.
+  `ledger.dat`, FIVE nominal accounts across four account numbers and two profit
+    centres - 1000/0, 1000/1, 2000/0, 2200/0 and 3000/0.
 
-and `posting.dat` carries three kinds of row, interleaved between kind-one rows that
-target DIFFERENT nominal accounts so that a mishandled cursor surfaces in `GLLEDGER-REC`
-rather than hiding:
+⭐ WHAT THIS FIXTURE REACHES, AND WHAT IT DOES NOT - AND THE ANSWER IS SMALLER THAN THE
+SEED SUGGESTS. Compiled measurement recorded as `Q-9` in
+docs/migration/ambiguity-resolutions.md established that the bridge's host-variable load
+NEVER LOADS `HV-POST-RRN`, THE TABLE'S PRIMARY KEY [mysql/ACASDB.sql:L169], so a seeded
+posting is persisted under key ZERO - and [general/gl070.cbl:L490-L491], `if WS-Post-Key = zero / go to loop.`, skips it
+before the explosion. THE WORK FILE IS THEREFORE EMPTY: the three-leg explosion is not
+reached, gl072 reads nothing, `end-batch`'s stamp is not reached for either batch, no
+balance moves, and the run is a NO-OP over all three bounded tables. That is why the
+scenario declares `expected_table_effect: unchanged` and why
+docs/migration/scenario-diff-evidence.md section 10.5 records the observed journey as an
+empty diff over an unchanged state. It is the SPECIFICATION and it is reproduced, not
+corrected (R-4, R-6): a migrated cycle that loaded the RRN and posted the batch would be
+a defect FIXED, which
+`test_the_run_reproduced_the_measured_no_op_rather_than_posting` is written to catch.
 
-  KIND ONE, postable -- rows of batch A and of batch C, spanning at least two nominal
-    accounts and at least two profit centres, at least one WITH VAT so the third leg is
-    written and at least one WITHOUT so the OR-gate at [general/gl070.cbl:L521-L523] is
-    covered.
-  KIND TWO, aimed at skip (a) -- a row whose batch number is written non-numerically.
-  KIND THREE, the consequence of batch B -- batch B's own postings, which gl070 never
-    pre-processes, so the rejection is visible as `GLPOSTING-REC` rows that produced no
-    ledger movement at all.
+WHAT THE SEED SHAPE IS STILL FOR, given that. It is what makes the no-op ATTRIBUTABLE
+rather than accidental: the batch passes every filter phase two applies, the posting
+carries VAT and two profit centres, and five nominal accounts stand ready - so when
+nothing moves, the only remaining explanation is the zero key, and the assertions can say
+so. A fixture that failed a filter would leave three candidate explanations and prove
+none of them.
 
-`ledger.dat` carries THREE OR MORE nominal accounts, so that gl071's ordering is
-genuinely load-bearing and the A-13 / A-14 interaction is testable rather than vacuous.
+IT ALSO DOES NOT REACH EITHER SILENT SKIP. Skip (a) needs a non-numeric `post-batch`,
+which cannot survive `POST-KEY bigint(10) unsigned` [mysql/ACASDB.sql:L156]; skip (b)
+needs a POSTING that reaches gl072 at all, and none does. An earlier form of this
+docstring described a three-batch, three-posting-kind fixture aimed squarely at both
+skips. That fixture is not what `seed_records` declares - and it could not be, because
+the store can address only ONE posting primary key while `HV-POST-RRN` goes unloaded, so
+a fixture invented to exhibit a path the store cannot reach would be evidence of nothing
+(section 10.5 of the evidence document says exactly that). Describing one that does not
+exist made two tests in this file read as anomaly locks when they were end-state
+agreement checks over a run in which neither skip occurred.
+
+BOTH SKIPS ARE DRIVEN AT THE UNIT LEVEL INSTEAD, against the SHIPPED program:
+`tests/arithmetic/test_gl072_shipped_silent_skips.py` drives
+`acas_posting/programs/gl072_transaction_update.py` through each branch with a fake
+facade and asserts a POSITIVE WITNESS for each - no batch lookup at all for skip (a), the
+lookup pair `[7, 7]` with no nominal read for skip (b) - plus the absence of any effect
+and of any counter. What this file adds is the end state, and it says so.
 
 THE PHASE-2 EXTRA-STATUS FILTER MUST BE SATISFIED FOR BATCH A. Pass 2 filters again,
 [general/gl070.cbl:L460-L463] verbatim:
@@ -335,13 +390,14 @@ THE PHASE-2 EXTRA-STATUS FILTER MUST BE SATISFIED FOR BATCH A. Pass 2 filters ag
     L462             or not gl-batch
     L463                go to  loop.
 
-Batch A must be closed AND waiting AND a GL batch or it is never pre-processed at all.
-Batch B fails this filter -- it is `not waiting` -- which is exactly why its postings
-reach the stream only because `posting.dat` references it directly. And `Bcycle` must
-equal `system.cyclea` or the cycle filters at [general/gl070.cbl:L312-L313] and
-[general/gl070.cbl:L457-L458] skip the batch and the run ends with nothing posted, a
-SILENT FAILURE OF THE PREMISE that the `file_system_used` assertion below is the guard
-against.
+Batch 1 must be closed AND waiting AND a GL batch or it is never pre-processed at all.
+Batch 2 fails this filter -- it is `not waiting` -- and it has no postings either way.
+And `Bcycle` must equal `system.cyclea` or the cycle filters at
+[general/gl070.cbl:L312-L313] and [general/gl070.cbl:L457-L458] skip the batch too. Both
+conditions are asserted from the definition below, because they are what makes the
+measured no-op attributable to the ZERO POSTING KEY rather than to a batch the filters
+rejected -- two very different reasons for an unchanged table, and only one of them is
+the anomaly this scenario reproduces.
 
 WHY THE DECLARED TERM CODE OF ZERO IS PROVABLE RATHER THAN HOPEFUL
 Only three in-scope programs set `WS-Term-Code` at all: gl070 sets 5
@@ -424,7 +480,7 @@ extends it:
     [copybooks/wsbatch.cob:L36-L39]. So [general/gl072.cbl:L376]'s stamp writes an
     INTEGER and job 3 leaves it alone.
 
-THE THREE-WAY EXIT CONTRACT OF STAGE 8
+THE THREE-WAY EXIT CONTRACT OF STAGE 10
   0  the trees are identical, and stdout is EMPTY -- zero bytes, not a banner  -> PASS
   1  a real behavioural difference, with a deterministic report                ->
   FAILURE
@@ -506,10 +562,14 @@ SCENARIO = "mixed_accepted_rejected"
 # rejection evidence readable: A-13's two SILENT SKIPS are claims that specific rows
 # were NOT posted, and "not posted" is indistinguishable from "never present" unless the
 # tables came back with rows.
+BATCH_TABLE = "GLBATCH-REC"
+LEDGER_TABLE = "GLLEDGER-REC"
+POSTING_TABLE = "GLPOSTING-REC"
+
 SEEDED_TABLES = (
-    "GLBATCH-REC",
-    "GLLEDGER-REC",
-    "GLPOSTING-REC",
+    BATCH_TABLE,
+    LEDGER_TABLE,
+    POSTING_TABLE,
 )
 
 
@@ -542,7 +602,7 @@ def _parity_cache() -> dict[str, object]:
     """A module-lifetime holder for the one parity run this file's assertions read.
 
     WHY A CACHE AT ALL, AND WHY IT IS SHAPED LIKE THIS. The eleven assertions below are
-    eleven statements about ONE eight-stage run's evidence, exactly as
+    eleven statements about ONE ten-stage run's evidence, exactly as
     `tests/determinism/test_two_runs_byte_identical.py` makes two comparisons about one
     run pair. Running the protocol once per assertion would seed, drive the compiled
     oracle, dump, reset, drive the Python cycle, dump and compare nine separate times
@@ -566,16 +626,26 @@ def _parity_cache() -> dict[str, object]:
 
 @pytest.fixture
 def parity(protocol: object, _parity_cache: dict[str, object]) -> object:
-    """Drive all eight protocol stages for this scenario ONCE, and return the verdict.
+    """Drive all ten protocol stages for this scenario ONCE, and return the verdict.
 
     THE STAGES ARE CALLED, NEVER REIMPLEMENTED. `protocol.run_scenario_parity` composes
     them in the mandated order and is the single definition of the protocol (Agent
     Action Plan section 0.4.3), so no test here reimplements the comparison:
 
-        1  seed.sh                 5  reset_db.sh
-        2  run_cobol_scenario.sh   6  run_python_scenario.sh
-        3  dump --side cobol       7  dump --side python
-        4  normalize.py            8  diff_states.py
+        1  reset_db.sh + seed.sh    6  run_python_scenario.sh
+        2  run_cobol_scenario.sh    7  dump --side python
+        3  dump --side cobol        8  normalize.py
+        4  normalize.py             9  verify both captures published
+        5  reset_db.sh + seed.sh   10  diff_states.py
+
+    EIGHT LOGICAL STAGES, TEN NUMBERED ONES. Agent Action Plan section 0.3.2 fixes the
+    order as "seed, run, dump, normalize, reset, run, dump, diff" - eight. The driver
+    `harness/run_parity.sh` numbers ten, reading the list from
+    `harness/parity_stages.sh`, because it makes BOTH normalisations and the publication
+    check explicit rather than implied. Nothing was added to the protocol; where older
+    prose says "stage 8" it means today's stage 10, the diff. The runners' own
+    `Check n/8' headings are their internal preflight checks and are not protocol
+    stages.
 
     STAGES 3 AND 4 ARE TAKEN WHATEVER STAGE 2 RETURNED, and 7 whatever 6 returned.
     Absence is evidence, and for this scenario it is the ONLY evidence the rejected
@@ -592,10 +662,10 @@ def parity(protocol: object, _parity_cache: dict[str, object]) -> object:
         applies
             the stack skip guard itself, so a host with no Docker, no MariaDB and no
             built GnuCOBOL oracle SKIPS with a precise reason and never errors.
-        _parity_cache: The module-lifetime holder, so the eight stages run once.
+        _parity_cache: The module-lifetime holder, so the ten stages run once.
 
     Returns:
-        The `ParityRun`: every stage result in order, both run results, the stage-8
+        The `ParityRun`: every stage result in order, both run results, the stage-10
         verdict and the paths of every artifact.
 
     Raises:
@@ -611,15 +681,33 @@ def parity(protocol: object, _parity_cache: dict[str, object]) -> object:
 
     # THE COMPARISON WAS BOUNDED BY THE DECLARED TABLES, IN THE DECLARED ORDER. The
     # order is load-bearing: the report is written in it and so is the seed fingerprint.
-    assert tuple(run.tables) == protocol.affected_tables(SCENARIO), (
-        f"{SCENARIO}: the comparison was bounded by {list(run.tables)} while the "
-        f"scenario declares {list(protocol.affected_tables(SCENARIO))}."
+    assert tuple(run.tables) == tuple(protocol.in_scope_tables()), (
+        f"{SCENARIO}: the comparison was bounded by {list(run.tables)}, but the "
+        f"protocol bounds it by ALL 22 IN-SCOPE TABLES, "
+        f"{list(protocol.in_scope_tables())}. A narrower bound cannot reveal a "
+        f"difference in anything the scenario did not expect to move - including the "
+        f"system rows `overrewrite` writes on BOTH sides "
+        f"[general/general.cbl:L656-L672]."
+    )
+    #  The scenario's `affected_tables` is its DECLARED EFFECT, not the bound. It must be
+    #  a subset of the bound, or something the scenario claims to change went uncompared.
+    assert set(protocol.affected_tables(SCENARIO)) <= set(run.tables), (
+        f"{SCENARIO}: declares an effect on "
+        f"{sorted(set(protocol.affected_tables(SCENARIO)) - set(run.tables))!r}, which the comparison never covered."
     )
 
     # THE ORACLE REACHED THE DECLARED DISPOSITION, and NEITHER side is a harness fault.
     # `reference_only` keeps the Python side's status a behavioural question owned by a
     # test body, while the fault refusal - a runner exiting in its own documented band,
     # or on `argparse` usage exit 2 - stays here where it reads as an ERROR.
+    #  BOTH SIDES DROVE THE SAME ORDERED OPERATION LIST (finding F-12). The
+    #  comparison below is between one COBOL run and one Python run, and it means
+    #  nothing unless the two drove the same work in the same order - an empty diff
+    #  between a short run and a full one being the most dangerous false pass this tier
+    #  can produce. Both runners resolve the list from the scenario itself and publish
+    #  one status row per operation, so it is checked rather than assumed.
+    protocol.assert_operations_driven(run, operations=tuple(protocol.definition(SCENARIO)["operations"]))
+
     protocol.assert_declared_statuses(
         run,
         operations=tuple(protocol.definition(SCENARIO)["operations"]),
@@ -627,10 +715,15 @@ def parity(protocol: object, _parity_cache: dict[str, object]) -> object:
         reference_only=True,
     )
 
-    # BOTH SIDES STARTED FROM THE SAME RECORDED SEEDED STATE. Row counts only, one line
-    # per affected table in the declared order, compared as bytes. Stage 5 drops and
-    # re-applies all 33 tables and re-seeds between the two runs, so this is the claim
-    # that the reset actually restored the state the oracle had started from.
+    # BOTH SIDES STARTED FROM THE SAME RECORDED SEEDED STATE. One line per bounded
+    # table in the declared order plus the parameter row, each line carrying the table
+    # name, its ROW COUNT and a SHA-256 of its canonical primary-key-ordered dump -
+    # produced for both sides by the one producer, harness/table_digest.py. The digest is
+    # what makes the claim mean something: equal counts with different VALUES is exactly
+    # the case a count-only record could not see, and it is the case a reset that
+    # restored the wrong rows would produce. Stage 5 drops and re-applies all 33 tables
+    # and re-seeds between the two runs, so this is the claim that the reset actually
+    # restored the state the oracle had started from.
     protocol.assert_seed_fingerprints_agree(run)
 
     # SOMETHING WAS THERE TO COMPARE. Every assertion in this file - and especially the
@@ -690,7 +783,7 @@ def normalized_dumps(parity: object, harness: object) -> dict[str, dict[str, obj
 def column_by_key() -> object:
     """A reader that projects one dump column into `{primary key: value}`.
 
-    A LOCALISER, NOT A COMPARATOR. The authoritative comparison is stage 8 and there is
+    A LOCALISER, NOT A COMPARATOR. The authoritative comparison is stage 10 and there is
     exactly one of it; this exists so that a NAMED assertion can say which column
     carries the property it is about - `CLEARED-STATUS`, `POSTED`, `LEDGER-BALANCE` -
     instead of restating the verdict. It performs no comparison, applies no tolerance
@@ -795,9 +888,11 @@ def test_scenario_definition_preconditions(
     `cyclea` MUST BE NON-ZERO [copybooks/wssystem.cob:L62], and every seeded batch's
     `Bcycle` [copybooks/wsbatch.cob:L34] must equal it, or the cycle filters at
     [general/gl070.cbl:L312-L313] and [general/gl070.cbl:L457-L458] skip the batch and
-    the run posts nothing at all. `period` is INERT in all eight scenarios, because
-    `gl_end_of_cycle` appears in no scenario file: appending it was considered and
-    DECLINED on six recorded grounds, and the decision is oracle-reversible in
+    the run posts nothing at all. `period` is INERT on this route,
+    because only `gl_end_of_cycle` consumes it. That operation IS driven, by the
+    `end_of_cycle_gl` scenario, which is where the period boundary and the quarter
+    rollover are observed; appending it to THIS scenario was considered and
+    DECLINED on six recorded grounds, and that decision is oracle-reversible in
     `docs/migration/ambiguity-resolutions.md` rather than re-litigated.
 
     NO MONETARY OR QUANTITY VALUE IS READ FROM THE YAML AND NONE COULD BE (R-2): YAML
@@ -944,14 +1039,14 @@ def test_scenario_definition_preconditions(
         f"posts nothing - a silent failure of this scenario's premise rather than a "
         f"finding."
     )
-    # DECLARED AND INERT: no scenario drives gl_end_of_cycle, so nothing reads `period`
-    # on this route. Its presence is asserted; its value is not interpreted, because
+    # DECLARED AND INERT: this route never reaches gl080, so nothing reads `period`
+    # here. The scenario that does drive it is `end_of_cycle_gl`. Its presence is asserted; its value is not interpreted, because
     # interpreting a declared value and judging it would be the added validation R-3
     # forbids.
     assert type(system["period"]) is int, (
         f"`period` is a whole number; the definition carries a "
         f"{type(system['period']).__name__}. It is INERT on this route - gl080 is the "
-        f"only reader [copybooks/wssystem.cob:L64] and no scenario drives it."
+        f"only reader [copybooks/wssystem.cob:L64] and this route never reaches it."
     )
 
     # 3.6 THE SEED FILES - EXACTLY FOUR, in the loader order the frozen script fixes.
@@ -999,22 +1094,89 @@ def test_scenario_definition_preconditions(
         f"consumers and not of the definition."
     )
 
-    # 3.7 THE SEED'S STRUCTURAL INTENT, as far as the definition can express it. The
-    # rest - a CLOSED, WAITING, GL batch A; a batch B that is NOT waiting; postings of
-    # all three kinds; at least two accounts and two profit centres; at least one
-    # posting with VAT and one without - lives in the flat files under the seed
-    # directory, which are a separate deliverable. It is documented in this module's
-    # docstring so the fixture's intent is not lost, and the assertions that can see it
-    # are test_skipped_postings_do_not_perturb_sequential_nominal_cursor's vacuity guard
-    # and the empty diff itself.
+    # 3.7 THE SEED'S ACTUAL SHAPE, READ OUT OF `seed_records` AND ASSERTED. This module's
+    # docstring describes the fixture in prose; these assertions are what stop the prose
+    # from describing a fixture that is not there. An earlier draft claimed three batches
+    # and three kinds of posting row, which `seed_records` has never declared - and that
+    # discrepancy is exactly what let two tests in this file read as anomaly locks while
+    # the branches they name were never reached. Every number below is read from the
+    # definition, so extending the fixture fails here first and the prose gets updated
+    # with it.
     assert "batch.dat" in expected_files and "posting.dat" in expected_files, (
-        "the batch and posting files are what carry the three batches and the three "
-        "kinds of posting row; without both, neither silent skip can be reached."
+        "the batch and posting files are what carry the batches and the postings; "
+        "without both there is nothing for gl070's two passes to select."
+    )
+    records = definition["seed_records"]
+    batches = records["batch.dat"]
+    postings = records["posting.dat"]
+    accounts = records["ledger.dat"]
+
+    waiting = [row for row in batches if int(row["Cleared-Status"]) == 0]
+    unwaiting = [row for row in batches if int(row["Cleared-Status"]) != 0]
+    assert len(waiting) == 1 and len(unwaiting) == 1, (
+        f"this scenario is MIXED, so `batch.dat` must declare exactly one WAITING batch "
+        f"and exactly one NOT-WAITING batch [copybooks/wsbatch.cob:L29-L32]; it declares "
+        f"{len(waiting)} waiting and {len(unwaiting)} not waiting. Without both, the "
+        f"file is a duplicate of the clean-batch scenario."
+    )
+    assert all(int(row["Batch-Status"]) == 1 for row in batches), (
+        f"every declared batch must be CLOSED [copybooks/wsbatch.cob:L25-L27]: an OPEN "
+        f"batch makes gl070 raise term code 5 [general/gl070.cbl:L287-L290] and the "
+        f"whole cycle aborts, which is the control-total-mismatch scenario and not this "
+        f"one. Statuses: {[row['Batch-Status'] for row in batches]!r}."
+    )
+    assert all(int(row["WS-Ledger"]) == 1 for row in batches), (
+        f"every declared batch must be a GL batch [copybooks/wsbatch.cob:L15-L16] or "
+        f"phase 2's filter [general/gl070.cbl:L460-L463] drops it. Ledgers: "
+        f"{[row['WS-Ledger'] for row in batches]!r}."
+    )
+
+    # THE POSTINGS BELONG TO THE WAITING BATCH ONLY, and that is why neither silent skip
+    # is reachable here - stated as an assertion so the docstring's claim is enforced
+    # rather than trusted. A posting added for the not-waiting batch would make skip (b)
+    # reachable, and this assertion is where that change announces itself.
+    waiting_key = waiting[0]["WS-Batch-Nos"]
+    unwaiting_key = unwaiting[0]["WS-Batch-Nos"]
+    assert {str(row["Batch"]) for row in postings} == {str(waiting_key)}, (
+        f"`posting.dat` declares postings for batch(es) "
+        f"{sorted({str(row['Batch']) for row in postings})!r}; on this fixture they all "
+        f"belong to the WAITING batch {str(waiting_key)!r}. If a posting is ever added "
+        f"for the NOT-WAITING batch {str(unwaiting_key)!r}, skip (b) at "
+        f"[general/gl072.cbl:L306-L307] becomes reachable end to end - update this "
+        f"assertion, this module's docstring and the two A-13 tests together, because "
+        f"all three describe what the fixture reaches."
+    )
+    assert all(str(row["Batch"]).isdigit() for row in postings), (
+        f"every declared posting's batch number is numeric, which is why skip (a) at "
+        f"[general/gl072.cbl:L291-L292] is not reachable here either: "
+        f"{[str(row['Batch']) for row in postings]!r}. `POST-KEY` is "
+        f"`bigint(10) unsigned` [mysql/ACASDB.sql:L156], so a non-numeric batch number "
+        f"cannot reach gl072 through the database path at all."
+    )
+    assert any(
+        row.get("Vat-AC") not in (None, "", "0")
+        and str(row.get("Vat-Amount", "0")).strip("0.") != ""
+        for row in postings
+    ), (
+        f"at least one posting must carry BOTH a non-zero VAT account and a non-zero "
+        f"VAT amount - the shape the OR-gate at [general/gl070.cbl:L521-L523] would "
+        f"take to write gl070's third leg. It is not reached on this fixture, because "
+        f"the posting is persisted under key zero and skipped at "
+        f"[general/gl070.cbl:L490-L491] (`Q-9`); the shape is asserted so that the "
+        f"measured no-op is attributable to THAT and not to a posting that would have "
+        f"been uninteresting anyway. Declared: "
+        f"{[(row.get('Vat-AC'), row.get('Vat-Amount')) for row in postings]!r}."
+    )
+    assert len({(row["WS-Ledger-Nos"], row["Ledger-PC"]) for row in accounts}) >= 3, (
+        f"`ledger.dat` must declare at least three distinct nominal keys, so that the "
+        f"balances the run leaves ALONE are several rather than one and an unchanged "
+        f"`GLLEDGER-REC` is a substantive observation. Declared: "
+        f"{sorted({(row['WS-Ledger-Nos'], row['Ledger-PC']) for row in accounts})!r}."
     )
 
 
 def test_affected_tables_are_in_scope_and_alphabetical(
-    scenario_loader: object, in_scope_table_names: object
+    scenario_loader: object, in_scope_table_names: object, vocabulary: object
 ) -> None:
     """The comparison is bounded by exactly three tables, alphabetical, all in scope.
 
@@ -1047,13 +1209,27 @@ def test_affected_tables_are_in_scope_and_alphabetical(
     declared = list(scenario_loader(SCENARIO)["affected_tables"])
     in_scope = tuple(in_scope_table_names)
 
-    assert declared == ["GLBATCH-REC", "GLLEDGER-REC", "GLPOSTING-REC"], (
+    assert declared == [
+        "GLBATCH-REC",
+        "GLLEDGER-REC",
+        "GLPOSTING-REC",
+        "SYSDEFLT-REC",
+        "SYSTEM-REC",
+    ], (
         f"this scenario bounds the comparison to the two tables gl072's two Rewrites "
         f"mutate - GLBATCH-REC [general/gl072.cbl:L377] and GLLEDGER-REC "
-        f"[general/gl072.cbl:L382] - plus GLPOSTING-REC as the unchanged witness; it "
-        f"declares {declared!r}."
+        f"[general/gl072.cbl:L382] - plus GLPOSTING-REC as the unchanged witness and "
+        f"the two menu-persisted tables; it declares {declared!r}.\n"
+        f"SYSDEFLT-REC and SYSTEM-REC are the two menu-persisted tables MEASURED "
+        f"comparable - the General menu exit rewrites keys 1, 2 and 4 "
+        f"[general/general.cbl:L656-L692] and keys 1 and 2 come back byte-identical "
+        f"on both sides. Key 4, SYSTOT-REC, is the one that cannot be compared: the "
+        f"menu sources it from the COBOL flat file alone "
+        f"[general/general.cbl:L402-L404], the RDB read being commented out at "
+        f"L434-L436, so its exit returns sys4LD's four-spare sentinel "
+        f"[common/sys4LD.cbl:L368-L390] from 1.00 to 0.00."
     )
-    assert len(declared) == len(set(declared)) == 3, (
+    assert len(declared) == len(set(declared)) == 5, (
         f"the affected-table list must name three distinct tables; got {declared!r}. A "
         f"repeated name would be dumped and compared twice and would double-count "
         f"every finding for it."
@@ -1072,20 +1248,56 @@ def test_affected_tables_are_in_scope_and_alphabetical(
             f"name."
         )
 
-    # BOUNDING, NEVER IGNORING. The system tables are absent because a census across all
-    # twelve in-scope programs finds no `System-*` facade verb in any of them, while the
-    # COBOL menu rewrites three of them on the way out [general/general.cbl:L656-L667]
-    # and the headless Python entry point has no menu; comparing one would be a
-    # guaranteed false failure. That is a bound, and there is no ignore-list, no
+    # BOUNDING, NEVER IGNORING - AND WHICH SYSTEM TABLE FALLS WHERE WAS MEASURED
+    # RATHER THAN REASONED (rule R-6). No migrated PROGRAM persists a system table - a
+    # census across all twelve finds no `System-*` facade verb in any of them. The
+    # MENU-EXIT path does [general/general.cbl:L656-L667], and BOTH SIDES REACH IT:
+    # `acas_posting/cli/args.py`'s `overrewrite` is called by every one of the seven
+    # routes, so key 1 is written on both sides of every scenario. That was ONCE taken
+    # to mean every system table had to be excluded as a guaranteed false failure. It
+    # was wrong for two of them: SYSTEM-REC and SYSDEFLT-REC come back byte-identical
+    # on the two sides, so both are bounded IN above - which matters here, because a
+    # mixed batch that silently advanced an allocator would otherwise leave no trace
+    # anywhere. Two of SYSTEM-REC's 169 columns are withheld from the capture and only
+    # two - `RDBMS-PASSWD char(12)` [copybooks/wssystem.cob:L139] and the frozen
+    # schema's shorter `PASS-WORD`, replaced on BOTH sides by
+    # `harness/dump_tables.py`'s `REDACTED_COLUMNS` because a dump is `SELECT *` - and
+    # the row is fingerprinted before and after every run besides, which
+    # `protocol.assert_system_record_parity` compares across the two sides over all
+    # 169 columns including those two.
+    for compared in ("SYSTEM-REC", "SYSDEFLT-REC"):
+        assert compared in declared, (
+            f"{compared!r} is menu-persisted AND measured comparable, so it must be "
+            f"bounded rather than excluded: with it absent, a system-record change "
+            f"this route did not intend could not be observed at all."
+        )
+
+    # THE TWO THAT REMAIN OUT, each for its own reason. SYSTOT-REC because the menu
+    # sources System-Record-4 from the COBOL FLAT FILE alone
+    # [general/general.cbl:L402-L404] - the RDB read is commented out at L434-L436 -
+    # and rewrites it into the RDB on exit, so with only the RDB seeded that exit
+    # returns sys4LD's four-spare sentinel [common/sys4LD.cbl:L368-L390] from 1.00 to
+    # 0.00; measured, exactly SL4-SPARE1..4 differ. SYSFINAL-REC because nothing
+    # writes it on this route at all. There is still no ignore-list, no
     # tolerance-list and no "known difference" allowance anywhere in the diff path.
-    for excluded in ("SYSTEM-REC", "SYSDEFLT-REC", "SYSFINAL-REC", "SYSTOT-REC"):
+    for excluded in ("SYSFINAL-REC", "SYSTOT-REC"):
         assert excluded not in declared, (
             f"{excluded!r} must not be bounded into this scenario: nothing on the "
-            f"gl070 -> gl071 -> gl072 route issues a System facade verb, while "
-            f"[general/general.cbl:L656-L667] rewrites keys 1, 2 and 4 on leaving the "
-            f"menu and the Python entry point never does. Its exclusion is BOUNDING, "
-            f"not ignoring."
+            f"gl070 -> gl071 -> gl072 route issues a System facade verb, and the "
+            f"menu-exit rewrite of keys 1, 2 and 4 happens on BOTH sides "
+            f"[general/general.cbl:L656-L667], [acas_posting/cli/args.py overrewrite]. "
+            f"For SYSTOT-REC the menu's flat-file-sourced key-4 rewrite would differ "
+            f"for reasons the migration does not own. Its exclusion from the DECLARED "
+            f"EFFECT is BOUNDING, not ignoring - every one of the 22 in-scope tables is "
+            f"still compared, and the parameter row is fingerprinted besides."
         )
+    # The parameter row's name reaches this stack-free test through the vocabulary, so
+    # the claim cannot drift away from what the runners actually digest. It IS declared
+    # here: this scenario's two silent skips leave no trace anywhere else, so every
+    # bound that can be drawn is worth drawing, and the row is compared with exactly its
+    # two credential cells redacted.
+    assert vocabulary.parameter_table == "SYSTEM-REC"
+    assert vocabulary.parameter_table in declared
 
 
 
@@ -1130,7 +1342,7 @@ def test_mixed_accepted_rejected_state_parity(parity: object, harness: object) -
     `docs/migration/scenario-diff-evidence.md`.
 
     Args:
-        parity: The completed eight-stage run.
+        parity: The completed ten-stage run.
         harness: The three harness modules, for `render`, reached through conftest.
     """
     assert parity.is_empty, (
@@ -1145,6 +1357,53 @@ def test_mixed_accepted_rejected_state_parity(parity: object, harness: object) -
         f"{harness.diff_states.render(parity.tree)}\n"
         f"{parity.describe()}"
     )
+
+    #  AND THE PASS IS WHAT A PASS LOOKS LIKE, on THIS run's real trees. The exit
+    #  contract itself is exercised on synthetic trees by
+    #  `test_diff_exit_contract_is_honoured`, which needs no stack; these assertions are
+    #  about the run that just happened, and they belong here because this is the test
+    #  that owns it.
+    diff_states = harness.diff_states
+    status = parity.outcome.result.returncode
+    assert status in {diff_states.EX_IDENTICAL, diff_states.EX_DIFFERENT}, (
+        f"stage 10 exited {status}, which is neither 0 nor 1. Exit "
+        f"{diff_states.EX_ERROR} means THE COMPARISON COULD NOT BE PERFORMED and is "
+        f"mapped to a harness fault - a pytest ERROR - before this test runs, so "
+        f"seeing it here would mean the mapping had been bypassed and a non-comparison "
+        f"was about to be read as a verdict."
+    )
+    assert (status == diff_states.EX_IDENTICAL) is parity.is_empty, (
+        f"stage 10 exited {status} while its TreeDiff reports "
+        f"is_empty={parity.is_empty} ({parity.tree.total_differences} finding(s)). "
+        f"Both views come from the same diff_trees over the same two trees, so a "
+        f"disagreement means the trees changed between two reads and NEITHER view can "
+        f"be trusted."
+    )
+    rendered = diff_states.render(parity.tree)
+    assert (rendered == "") is parity.is_empty, (
+        f"`render` must return the EMPTY STRING exactly when the trees are identical "
+        f"(Agent Action Plan section 0.8.5); is_empty={parity.is_empty} and it "
+        f"returned {len(rendered)} character(s)."
+    )
+    report = parity.outcome.report
+    assert report.is_file(), (
+        f"the report {report} was not written. It is written on EVERY path, and its "
+        f"presence is what distinguishes 'compared, and identical' from 'never "
+        f"compared' - an absent file says nothing at all, so the per-scenario evidence "
+        f"in docs/migration/scenario-diff-evidence.md would have nothing to cite."
+    )
+    if parity.is_empty:
+        assert report.stat().st_size == 0, (
+            f"the trees are identical, so {report} must be ZERO BYTES; it holds "
+            f"{report.stat().st_size} byte(s). A passing comparison writes no "
+            f"findings, and a banner in the report file would make an empty diff "
+            f"indistinguishable from a small one."
+        )
+        assert parity.outcome.result.stdout == "", (
+            f"the trees are identical, so stage 10 must print NOT ONE BYTE on stdout; "
+            f"it printed {parity.outcome.result.stdout!r}. The pass condition is an "
+            f"empty diff, and an empty diff is announced by silence."
+        )
 
 
 @pytest.mark.database
@@ -1166,20 +1425,37 @@ def test_a13_non_numeric_batch_number_skipped_silently(
     makes a failure - and it would additionally be observable in a log a reviewer might
     diff.
 
-    WHAT IS ASSERTED, AND WHY IT IS PHRASED AS AGREEMENT. Skip (a)'s reachability
-    through the database path is an ORACLE ARBITRATION and not an assumption:
-    `post-batch pic 9(5)` [general/gl072.cbl:L111] is filled by gl070 at
-    [general/gl070.cbl:L495] from a group
-    that the frozen schema holds as ONE numeric column, `POST-KEY bigint(10) unsigned`
-    [mysql/ACASDB.sql:L156], carried as `HV-POST-KEY PIC 9(18) COMP`
-    [common/glpostingMT.cbl:L283] and moved in and out as a group
-    [common/glpostingMT.cbl:L1054], [common/glpostingMT.cbl:L1085]. So a non-numeric
-    batch number written into the seed may be COERCED before it ever reaches gl072, and
-    whether the branch is taken at all is a question about compiled behaviour. Under R-6
-    the only honest assertion is that BOTH SIDES DID THE SAME THING, whatever that was -
-    which is exactly what is asserted: the bounded tables agree completely, no row
-    exists on one side and not the other, and the source rows in `GLPOSTING-REC` are
-    byte-identical across the two runs.
+    ⭐ WHAT THIS TEST DOES NOT PROVE, STATED BEFORE WHAT IT DOES. IT DOES NOT PROVE THE
+    BRANCH EXECUTED. `post-batch pic 9(5)` [general/gl072.cbl:L111] is filled by gl070 at
+    [general/gl070.cbl:L495] from a group that the frozen schema holds as ONE NUMERIC
+    column, `POST-KEY bigint(10) unsigned` [mysql/ACASDB.sql:L156], carried as
+    `HV-POST-KEY PIC 9(18) COMP` [common/glpostingMT.cbl:L283] and moved in and out as a
+    group [common/glpostingMT.cbl:L1054], [common/glpostingMT.cbl:L1085]. A non-numeric
+    batch number therefore cannot reach the database at all through this path, and THIS
+    SCENARIO'S FIXTURE DOES NOT CARRY ONE: `posting.dat` declares a single row, batch 1,
+    with a numeric key. So the guard at L291-L292 is NOT TAKEN on this route, and a test
+    asserting only that the two sides agree would read as a reproduction of the anomaly
+    while proving nothing about it.
+
+    WHERE THE BRANCH IS ACTUALLY DRIVEN, so that the pair of claims is complete.
+    `tests/arithmetic/test_gl072_shipped_silent_skips.py` drives the SHIPPED
+    `acas_posting/programs/gl072_transaction_update.py` with a work-file record whose
+    `post-batch` is `'1234X'` - reachable because the shipped line-sequential work file
+    is TEXT and `acas_posting.cobol.move.is_numeric_class` answers False for it - and
+    asserts a POSITIVE WITNESS that the branch ran: the facade recorded NO batch lookup
+    at all, which only the L291-L292 arm produces. It also asserts the skip left no
+    effect, and that no counter was incremented. That file owns reachability; this one
+    owns the end-state agreement.
+
+    WHAT IS ASSERTED HERE, AND WHY IT IS PHRASED AS AGREEMENT. The bounded tables agree
+    completely, no row exists on one side and not the other, and the source rows in
+    `GLPOSTING-REC` are byte-identical across the two runs. Under R-6 that is the only
+    honest end-state claim available for a guard whose taking is not observable in any
+    table: it says the two cycles disposed of every record identically, whatever each
+    did. THE DISCRIMINATION - that both cycles reproduced the MEASURED NO-OP rather than
+    posting the batch a reader of the seed would expect them to post - is asserted by
+    `test_the_run_reproduced_the_measured_no_op_rather_than_posting` below, because
+    agreement alone is satisfied by two cycles that both posted.
 
     The arbitration is recorded in `docs/migration/ambiguity-resolutions.md` under the
     scenario file's own heading SKIP (a) AND ITS REACHABILITY, and the seed DECLARES the
@@ -1262,9 +1538,26 @@ def test_a13_we_error_999_record_skipped_silently(
 
     `88 Waiting value 0` sits on `Cleared-Status` [copybooks/wsbatch.cob:L29-L30], with
     `88 Processed value 1` and `88 Archived value 2` beside it
-    [copybooks/wsbatch.cob:L31-L32]. BATCH B IS SEEDED WITH `Cleared-Status` NOT ZERO,
-    so it is `not waiting`, so `we-error` becomes 999 and EVERY POSTING REFERENCING
-    BATCH B VANISHES SILENTLY at L306-L307. One seeded field is the entire mechanism.
+    [copybooks/wsbatch.cob:L31-L32]. BATCH B IS SEEDED WITH `Cleared-Status` = 1, so it
+    is `not waiting`, so any posting referencing it would set `we-error` to 999 and
+    vanish silently at L306-L307. One seeded field is the entire mechanism.
+
+    ⭐ AND ON THIS FIXTURE THE MECHANISM IS NOT FIRED, WHICH THIS TEST SAYS RATHER THAN
+    IMPLIES. `get-batch` is performed only from `headings` [general/gl072.cbl:L346], and
+    `headings` is reached only for a batch that has a record in the sorted work file.
+    Batch B is seeded with `Items` 0 and `posting.dat` declares NO row for it, so gl072
+    never performs `get-batch` for batch B, never sets the sentinel, and never reaches
+    L306-L307 on this route. An earlier form of this test read as a reproduction of skip
+    (b); it was an end-state agreement claim over a run in which the skip never occurred.
+
+    WHERE THE BRANCH IS ACTUALLY DRIVEN. `tests/arithmetic/test_gl072_shipped_silent_skips.py`
+    drives the SHIPPED `acas_posting/programs/gl072_transaction_update.py` against a
+    not-waiting batch and asserts a POSITIVE WITNESS that the sentinel arm ran - the
+    facade recorded the two batch lookups `[7, 7]` and NO `gl_nominal_read_next` at all,
+    a signature only L306-L307 produces. It also records the measured consequence that
+    the at-end `end-batch` still rewrites the held batch record, so a run that posted
+    nothing still moves `GLBATCH-REC`. That file owns reachability; this one owns the
+    end-state agreement, and neither claims the other's ground.
 
     A THIRD SILENT PATH shares the sentinel: [general/gl072.cbl:L348-L349] inside
     `headings` abandons the HEADINGS rather than the RECORD. Its disposition differs, so
@@ -1337,14 +1630,179 @@ def test_a13_we_error_999_record_skipped_silently(
         "declares ledger.dat with three or more nominal accounts - and not a finding."
     )
     assert len(batch[sides[0]]["rows"]) >= 2, (
-        f"GLBATCH-REC holds {len(batch[sides[0]]['rows'])} row(s). Skip (b) needs at "
-        f"least a WAITING batch and a NOT-WAITING one in the same run, and the "
-        f"scenario declares three - A closed and waiting, B closed and not waiting, C "
-        f"closed and waiting [copybooks/wsbatch.cob:L25-L32]. Fewer makes this file a "
-        f"duplicate of the clean-batch scenario rather than a mixed one, which is a "
-        f"HARNESS FAULT in the seed."
+        f"GLBATCH-REC holds {len(batch[sides[0]]['rows'])} row(s). This scenario needs "
+        f"at least a WAITING batch and a NOT-WAITING one in the same run, and "
+        f"`batch.dat` declares exactly two - batch 1 closed and waiting with one "
+        f"posting, batch 2 closed and NOT waiting with none "
+        f"[copybooks/wsbatch.cob:L25-L32]. Fewer makes this file a duplicate of the "
+        f"clean-batch scenario rather than a mixed one, which is a HARNESS FAULT in the "
+        f"seed."
     )
 
+
+
+@pytest.mark.database
+@pytest.mark.oracle
+def test_the_run_reproduced_the_measured_no_op_rather_than_posting(
+    parity: object,
+    normalized_dumps: object,
+    protocol: object,
+    scenario_loader: object,
+    harness: object,
+) -> None:
+    """THE DISCRIMINATION, AND IT POINTS THE OPPOSITE WAY FROM INTUITION.
+
+    ⭐ WHY THIS TEST EXISTS. Every other assertion in this file is an AGREEMENT claim:
+    the two sides' tables must match. Agreement is necessary and it is not sufficient,
+    because TWO CYCLES THAT BOTH DID THE SAME THING AGREE PERFECTLY WHATEVER THAT THING
+    WAS. This test is the one that says WHICH thing, and it names a value.
+
+    ⭐ AND THE VALUE IS "NOTHING CHANGED", WHICH IS NOT WHAT THE SEED PREDICTS. Batch 1
+    is seeded `Cleared-Status` 0 - the condition name `Waiting`
+    [copybooks/wsbatch.cob:L29-L30] - closed, a GL batch, with `Bcycle` equal to the
+    pinned `Cyclea`, so phase two's filter [general/gl070.cbl:L460-L463] DOES select it,
+    and a reader reasoning from the seed would expect `end-batch` to stamp it. THE
+    COMPILED CYCLE DOES NOT. Compiled measurement recorded as `Q-9` in
+    docs/migration/ambiguity-resolutions.md established that the bridge's host-variable
+    never loads `HV-POST-RRN`, the table's primary key [mysql/ACASDB.sql:L169], so the one
+    seeded posting is persisted under key ZERO - and [general/gl070.cbl:L490-L491],
+    `if WS-Post-Key = zero / go to loop.`, skips it. The work file is empty, gl072 reads
+    nothing, and the run is a no-op over all three bounded tables. The scenario declares
+    `expected_table_effect: unchanged` for exactly that reason, and
+    docs/migration/scenario-diff-evidence.md section 10.5 records the observed journey.
+
+    SO THE DISCRIMINATION IS AGAINST A CYCLE THAT "FIXED" Q-9. A migrated cycle that
+    loaded the RRN into the key, posted the batch and stamped it would produce a
+    perfectly self-consistent database and would satisfy every agreement assertion in
+    this file - and it would be a FAILURE, because a defect fixed is a failure (R-4).
+    This test fails for it, and for nothing else fails. It is deliberately NOT written
+    the other way round: an earlier draft of it asserted `CLEARED-STATUS` 1 and
+    `POSTED` = the pinned run date on the waiting batch, which is what the frozen
+    statements [general/gl072.cbl:L375-L376] say unconditionally AND is unreachable on
+    this fixture - it would have demanded the repair rather than the reproduction, which
+    is precisely inverted (R-6).
+
+    IT ASSERTS TWO THINGS.
+
+    ONE - NEITHER CYCLE CHANGED ANY BOUNDED TABLE, per side and independently. Both
+    runners record a canonical per-table digest immediately BEFORE their dispatch and
+    again immediately AFTER it, so `assert_tables_unchanged_by_run` can ask "did THIS
+    cycle change this table" - a question no side-to-side diff can answer, and the
+    question the scenario's declared effect is an answer to.
+
+    TWO - BOTH BATCH ROWS ARE BYTE-IDENTICAL TO THEIR SEEDED VALUES, compared against
+    `seed_records` rather than against the other side. The waiting batch's `POSTED` must
+    still be 0 and its `CLEARED-STATUS` still 0; the not-waiting batch must be untouched
+    too. Comparing against the SEED rather than across the sides is what makes this a
+    statement about what the cycles did rather than about whether they agreed.
+
+    WHAT IT STILL DOES NOT PROVE. It does not prove either silent skip executed; this
+    fixture cannot reach them, for the reasons the module docstring gives, and
+    `tests/arithmetic/test_gl072_shipped_silent_skips.py` drives both branches against
+    the shipped program instead.
+
+    Args:
+        parity: The completed, guarded run. Its artifact layout carries the pre-run and
+            post-run state records this test reads.
+        normalized_dumps: Both sides' normalised dumps, shape already asserted.
+        protocol: The protocol bundle, for the per-side pre/post comparison.
+        scenario_loader: The definition, for the seeded values claim two compares to.
+        harness: The three harness modules, for the side labels and for `render`.
+
+    Raises:
+        Skipped: The Compose stack is unusable.
+        AssertionError: A cycle changed a bounded table, or a batch row moved off its
+            seeded value - either of which means the migrated cycle posted where the
+            compiled one does not.
+    """
+    sides = tuple(harness.dump_tables.SIDES)
+
+    # ---- ONE: neither cycle changed any bounded table ---------------------------
+    protocol.assert_tables_unchanged_by_run(parity, unchanged=tuple(parity.tables))
+
+    # ---- TWO: both batch rows still carry their seeded values --------------------
+    records = scenario_loader(SCENARIO)["seed_records"]
+    batches = records["batch.dat"]
+
+    def batch_key(row: object) -> int:
+        """Compose one seeded batch row's `BATCH-KEY`.
+
+        `03 WS-Batch-Key` is `05 WS-Ledger pic 9` followed by `05 WS-Batch-Nos pic 9(5)`
+        and is redefined as `WS-Batch-Key9 pic 9(6)` [copybooks/wsbatch.cob:L14-L21]; the
+        bridge moves that redefinition, an ELEMENTARY numeric item, into
+        `HV-BATCH-KEY PIC 9(08) COMP` [common/glbatchMT.cbl:L1069]. So the SQL key is the
+        two components concatenated at their declared widths and read as a number - which
+        is why this composition is safe here where `POST-KEY` is not (`Q-9`).
+
+        Args:
+            row: One `batch.dat` record from `seed_records`.
+
+        Returns:
+            The `BATCH-KEY` value the dump will carry for that row.
+        """
+        return int(f"{int(row['WS-Ledger']):01d}{int(row['WS-Batch-Nos']):05d}")
+
+    integer_columns = (
+        ("ITEMS", "Items"),
+        ("BATCH-STATUS", "Batch-Status"),
+        ("CLEARED-STATUS", "Cleared-Status"),
+        ("BCYCLE", "Bcycle"),
+        ("ENTERED", "Entered"),
+        ("PROOFED", "Proofed"),
+        ("POSTED", "Posted"),
+        ("STORED", "Stored"),
+    )
+
+    for side in sides:
+        dump = normalized_dumps[side][BATCH_TABLE]
+        columns = list(dump["columns"])
+        key_index = columns.index(dump["primary_key"])
+        indexed = {int(row[key_index]): row for row in dump["rows"]}
+
+        assert len(indexed) == len(batches), (
+            f"the {side} dump of `{BATCH_TABLE}` carries {len(indexed)} row(s) and the "
+            f"seed declares {len(batches)}. Nothing on the gl070 -> gl071 -> gl072 route "
+            f"writes or deletes a batch - the four verbs are Open, Read-Next, Rewrite "
+            f"and Close - so the count cannot legally move."
+        )
+
+        for seeded in batches:
+            key = batch_key(seeded)
+            assert key in indexed, (
+                f"the {side} dump of `{BATCH_TABLE}` carries no row for BATCH-KEY "
+                f"{key}. Keys present: {sorted(indexed)!r}."
+            )
+            observed = dict(zip(columns, indexed[key], strict=True))
+            waiting = int(seeded["Cleared-Status"]) == 0
+            role = "WAITING" if waiting else "NOT-WAITING"
+            for column, field in integer_columns:
+                assert int(observed[column]) == int(seeded[field]), (
+                    f"the {side} cycle changed `{BATCH_TABLE}`.`{column}` on the {role} "
+                    f"batch {key}: the seed declares {seeded[field]!r} and the dump "
+                    f"carries {observed[column]!r}.\n"
+                    f"  THE MEASURED BEHAVIOUR IS THAT NEITHER BATCH MOVES. The one "
+                    f"seeded posting is persisted under key ZERO because the bridge "
+                    f"never loads `HV-POST-RRN`, its primary key (ambiguity `Q-9`), "
+                    f"so [general/gl070.cbl:L490-L491] skips it, the work file is "
+                    f"empty and gl072's `end-batch` [general/gl072.cbl:L372-L377] is "
+                    f"never reached for either batch.\n"
+                    f"  IF `CLEARED-STATUS` IS NOW 1 AND `POSTED` NOW HOLDS THE PINNED "
+                    f"RUN DATE, THE MIGRATED CYCLE HAS FIXED `Q-9` - it loaded the RRN, "
+                    f"found the posting and posted the batch. That is a defect FIXED, "
+                    f"and a defect fixed is a failure (R-4). Reproduce the frozen "
+                    f"host-variable load instead, and if the oracle's own behaviour has "
+                    f"changed, re-measure it and update `Q-9`, this scenario's "
+                    f"`expected_table_effect` and "
+                    f"docs/migration/scenario-diff-evidence.md together.\n"
+                    f"{harness.diff_states.render(parity.tree)}"
+                )
+            assert observed["DESCRIPTION"].rstrip() == seeded["Description"].rstrip(), (
+                f"the {side} cycle changed `{BATCH_TABLE}`.`DESCRIPTION` on the {role} "
+                f"batch {key}: the seed declares {seeded['Description']!r} and the dump "
+                f"carries {observed['DESCRIPTION']!r}. Nothing on this route writes that "
+                f"column at all - `end-batch` touches `cleared-status` and `posted` "
+                f"only [general/gl072.cbl:L375-L376]."
+            )
 
 
 @pytest.mark.database
@@ -1488,10 +1946,21 @@ def test_skipped_postings_do_not_perturb_sequential_nominal_cursor(
 
 @pytest.mark.database
 @pytest.mark.oracle
-def test_accepted_batch_is_stamped_cleared_and_posted(
+def test_batch_stamp_columns_agree_on_both_sides(
     parity: object, normalized_dumps: object, column_by_key: object, harness: object
 ) -> None:
-    """`end-batch` stamps the accepted batch, and BOTH SIDES AGREE ON THE STAMP.
+    """`end-batch`'s two stamp columns AGREE ON BOTH SIDES.
+
+    ⭐ RENAMED, BECAUSE THE OLD NAME ASSERTED SOMETHING MEASUREMENT REFUTED. This test
+    was called `test_accepted_batch_is_stamped_cleared_and_posted` and opened by
+    saying "`end-batch` stamps the accepted batch". NO BATCH IS STAMPED BY THIS RUN.
+    The body was always framed as agreement and so always passed, which is exactly the
+    trap: a reader took the name for a finding. What the run actually does, measured,
+    is under ANOMALY N-KEY in `harness/scenarios/mixed_accepted_rejected.yaml`, and the
+    unchanged-relative-to-the-seed facts are asserted by
+    `test_every_bounded_row_is_unchanged_relative_to_the_declared_seed` below. This
+    test keeps its agreement claim, which remains worth making, and no longer claims a
+    stamp.
 
     [general/gl072.cbl:L372-L377] verbatim:
 
@@ -1506,8 +1975,10 @@ def test_accepted_batch_is_stamped_cleared_and_posted(
     produce a batch marked posted with an unclosed final account", which is why the
     order is stated here even though the observable is the stamp rather than the order.
 
-    FRAMED AS AGREEMENT, NOT AS A VALUE. This test does NOT assert that `CLEARED-STATUS`
-    is 1 or that `POSTED` equals the pinned run date. It asserts that whatever the
+    FRAMED AS AGREEMENT, NOT AS A VALUE - and the measurement vindicates the framing
+    rather than excusing it. This test does NOT assert that `CLEARED-STATUS` is 1 or
+    that `POSTED` equals the pinned run date, and it is now known that neither is true:
+    the run leaves both columns exactly as seeded. It asserts that whatever the
     compiled cycle wrote, the Python cycle wrote the same - which is the R-4 and R-6
     framing and the only one available: the maintainer records that he has not worked
     with General at all since it was migrated to the current compiler
@@ -1661,6 +2132,252 @@ def test_unwaiting_batch_is_not_stamped(
     )
 
 
+# ---------------------------------------------------------------------------
+#  THE SEED-RELATIVE PROBE  -  what distinguishes a skip from a posting
+#
+#  ⭐ EVERY OTHER ASSERTION IN THIS FILE COMPARES THE TWO SIDES TO EACH OTHER, AND
+#  THAT IS NOT ENOUGH ON ITS OWN. Two implementations that both do nothing agree
+#  perfectly, so side-to-side agreement cannot tell "correctly skipped" from "never
+#  posted anything". The three tests below compare each side to THE DECLARED SEED
+#  instead, read out of the scenario file itself, which is the only reference that
+#  can make the distinction. They are the probe facts the run's absence needs.
+#
+#  WHY THE EXPECTED ANSWER IS "UNCHANGED", AND WHY THAT IS NOT A WEAK CLAIM. Under
+#  ANOMALY N-KEY - derived and measured in the scenario file, and locked against the
+#  migrated code by tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py
+#  section 19 - the POST-KEY a seeded posting row carries cannot be decoded back
+#  into its batch number, so gl070 discards the row at
+#  [general/gl070.cbl:L492-L493] and pretrans.tmp is left ZERO BYTES long. Nothing
+#  reaches gl072, nothing posts, and every bounded row must therefore still hold its
+#  seeded value. Asserting that EXACTLY is what turns an unexplained empty diff into
+#  a measured statement about where the run stopped.
+# ---------------------------------------------------------------------------
+
+
+def _declared_batch_rows(definition: object) -> dict[int, dict[str, str]]:
+    """Index the scenario's declared `batch.dat` records by their composed BATCH-KEY.
+
+    `WS-Batch-Key` is `WS-Ledger pic 9` followed by `WS-Batch-Nos pic 9(5)`
+    [copybooks/wsbatch.cob:L14-L19], redefined as `WS-Batch-Key9 pic 9(6)`
+    [copybooks/wsbatch.cob:L20-L21], and that six-digit composition is what the schema
+    holds as `BATCH-KEY`. Composed here rather than hard-coded so that changing a
+    declared batch number cannot leave this file asserting against a stale key.
+
+    Args:
+        definition: The parsed scenario document.
+
+    Returns:
+        `{BATCH-KEY: declared field mapping}`.
+    """
+    rows = definition["seed_records"]["batch.dat"]
+    return {
+        int(f"{int(row['WS-Ledger'])}{int(row['WS-Batch-Nos']):05d}"): row
+        for row in rows
+    }
+
+
+@pytest.mark.database
+@pytest.mark.oracle
+def test_no_work_record_is_emitted_so_nothing_can_post(
+    parity: object, normalized_dumps: object, column_by_key: object, harness: object,
+    scenario_loader: object,
+) -> None:
+    """ANOMALY N-KEY's consequence, asserted against the seed: NO BATCH IS STAMPED.
+
+    THE DISTINGUISHING FACT. `end-batch` is the only writer of `CLEARED-STATUS` and
+    `POSTED` [general/gl072.cbl:L375-L377], and it is reached only for a batch that a
+    work record named. If a work record had been emitted for the waiting batch, that
+    batch's `CLEARED-STATUS` would be 1 and its `POSTED` would be the pinned run date.
+    Both columns are asserted here to hold THEIR SEEDED VALUES on both sides, which
+    says the work file was empty far more precisely than an empty diff can.
+
+    THE SEEDED VALUES ARE READ FROM THE SCENARIO FILE, not restated. So a future edit
+    that changes a declared value cannot leave this test passing against the old one,
+    and a future change that makes the cycle actually post will fail HERE - loudly,
+    naming the column - instead of silently turning the file's narrative false again.
+
+    Args:
+        parity: The completed ten-stage run, for the failure report.
+        normalized_dumps: Both sides' normalised dumps.
+        column_by_key: The projector, keyed on `BATCH-KEY`.
+        harness: The harness modules, for the side labels and `render`.
+        scenario_loader: Loads the parsed scenario document, for the declared seed.
+    """
+    declared = _declared_batch_rows(scenario_loader(SCENARIO))
+    assert declared, "the scenario declares no batch.dat records - a HARNESS FAULT"
+
+    for side in harness.dump_tables.SIDES:
+        dump = normalized_dumps[side]["GLBATCH-REC"]
+        for column, field_name in (
+            ("CLEARED-STATUS", "Cleared-Status"),
+            ("POSTED", "Posted"),
+        ):
+            observed = column_by_key(dump, column)
+            assert set(observed) == set(declared), (
+                f"GLBATCH-REC on the {side} side carries keys {sorted(observed)!r} "
+                f"and the scenario declares {sorted(declared)!r}. The route issues no "
+                f"batch write and no batch delete, so the key set must be the seed's."
+            )
+            for key, seeded_row in declared.items():
+                expected = int(seeded_row[field_name])
+                assert int(observed[key]) == expected, (
+                    f"GLBATCH-REC.{column} for BATCH-KEY {key} is "
+                    f"{observed[key]!r} on the {side} side and the scenario seeded "
+                    f"{expected!r}. A CHANGED value means gl072 reached `end-batch` "
+                    f"for a work record [general/gl072.cbl:L375-L377] - which ANOMALY "
+                    f"N-KEY says it cannot, because gl070 discards every seeded "
+                    f"posting row at [general/gl070.cbl:L492-L493] and leaves "
+                    f"pretrans.tmp zero bytes long. Either the frozen bridge's "
+                    f"POST-KEY handling has changed or this scenario's narrative is "
+                    f"now wrong; re-measure before adjusting either.\n"
+                    f"{harness.diff_states.render(parity.tree)}"
+                )
+
+
+@pytest.mark.database
+@pytest.mark.oracle
+def test_every_bounded_row_is_unchanged_relative_to_the_declared_seed(
+    parity: object, normalized_dumps: object, column_by_key: object, harness: object,
+    scenario_loader: object,
+) -> None:
+    """THE NOMINAL BALANCES ARE UNCHANGED RELATIVE TO THE SEED, on both sides.
+
+    `LEDGER-BALANCE` is the one column the whole posting cycle exists to move -
+    `add post-amount to ledger-balance` [general/gl072.cbl:L331] - so its seeded value
+    surviving the run is the sharpest possible statement that no transaction posted.
+    Asserted per account against the declared `ledger.dat` value, on each side
+    separately, so neither side can be excused by the other's agreement.
+
+    ⭐ ONE SEEDED VALUE IS DELIBERATELY NEGATIVE AND ITS STORED FORM IS NOT. Account
+    2000 is declared `-8765.43` and the column holds `8765.43`, which is ANOMALY
+    N-EDIT and not a defect in this comparison: the bridge renders through
+    `01 WS-MYSQL-EDIT PIC -Z(18)9.9(9)` whose sign occupies position 1, while every
+    digit window it slices starts at position 3 or later, so the sign is
+    STRUCTURALLY UNREACHABLE and never rendered. The comparison is therefore made on
+    the ABSOLUTE value, and the sign loss is asserted as itself rather than tolerated
+    silently - a future bridge that started rendering the sign would fail the second
+    assertion below and force this note to be re-measured.
+
+    Args:
+        parity: The completed run, for the failure report.
+        normalized_dumps: Both sides' normalised dumps.
+        column_by_key: The projector, keyed on `LEDGER-KEY`.
+        harness: The harness modules.
+        scenario_loader: Loads the parsed scenario document.
+    """
+    import decimal
+
+    declared = {
+        int(f"{int(row['WS-Ledger-Nos']):06d}{int(row['Ledger-PC']):02d}"): row
+        for row in scenario_loader(SCENARIO)["seed_records"]["ledger.dat"]
+    }
+    assert declared, "the scenario declares no ledger.dat records - a HARNESS FAULT"
+    signed_declarations = tuple(
+        key
+        for key, row in declared.items()
+        if decimal.Decimal(row["Ledger-Balance"]) < 0
+    )
+    assert signed_declarations, (
+        "at least one declared balance must be NEGATIVE, or the N-EDIT sign note "
+        "below is untested and the fixture has lost a property it was built for"
+    )
+
+    for side in harness.dump_tables.SIDES:
+        dump = normalized_dumps[side]["GLLEDGER-REC"]
+        observed = column_by_key(dump, "LEDGER-BALANCE")
+        assert set(observed) == set(declared), (
+            f"GLLEDGER-REC on the {side} side carries keys {sorted(observed)!r} and "
+            f"the scenario declares {sorted(declared)!r}. gl072 issues no nominal "
+            f"write and no nominal delete, so the key set must be the seed's."
+        )
+        for key, seeded_row in declared.items():
+            seeded = decimal.Decimal(seeded_row["Ledger-Balance"])
+            got = decimal.Decimal(str(observed[key]))
+            assert got == abs(seeded), (
+                f"GLLEDGER-REC.LEDGER-BALANCE for LEDGER-KEY {key} is {got} on the "
+                f"{side} side; the scenario seeded {seeded} and ANOMALY N-EDIT means "
+                f"the bridge stores its ABSOLUTE value. A different figure means "
+                f"`add post-amount to ledger-balance` [general/gl072.cbl:L331] ran, "
+                f"which ANOMALY N-KEY says it cannot for a seeded posting row. "
+                f"Re-measure before adjusting this test.\n"
+                f"{harness.diff_states.render(parity.tree)}"
+            )
+        for key in signed_declarations:
+            assert decimal.Decimal(str(observed[key])) >= 0, (
+                f"LEDGER-KEY {key} was seeded negative and the column holds "
+                f"{observed[key]!r}. ANOMALY N-EDIT says the bridge's edit field can "
+                f"never render the sign [common/nominalMT.cbl:L232]; a negative value "
+                f"here means it now can, and every citation of N-EDIT in this "
+                f"repository must be re-measured."
+            )
+
+
+@pytest.mark.database
+@pytest.mark.oracle
+def test_the_two_seeded_batches_are_rejected_for_two_different_reasons(
+    parity: object, harness: object, scenario_loader: object
+) -> None:
+    """THE MIXTURE THIS SCENARIO ACTUALLY EXHIBITS, asserted on the seed itself.
+
+    The file's name promises a mixture and its measured content delivers one - but a
+    mixture of BATCH DISPOSITIONS rather than of posted and skipped transactions, for
+    the frozen-code reason ANOMALY N-KEY records. This test pins the property that
+    makes the two batches genuinely different inputs, so a future edit cannot quietly
+    collapse them into two copies of the same case and leave the scenario's name
+    unearned:
+
+      - one batch is `88 Waiting` [copybooks/wsbatch.cob:L30], so gl070's phase-two
+        filter ADMITS it [general/gl070.cbl:L457-L462] and it is discarded one layer
+        lower, by the key guard;
+      - the other is NOT waiting, so the same filter REJECTS it, and it never reaches
+        the key guard at all.
+
+    Both are `88 Status-Closed` [copybooks/wsbatch.cob:L27], which is what stops
+    gl070's phase-one check raising the terminate code and aborting the run
+    [general/gl070.cbl:L312-L313] - that path is `control_total_mismatch`'s subject,
+    not this one.
+
+    Args:
+        parity: The completed run, so this test is part of the same evidence.
+        harness: The harness modules, unused for comparison and taken for symmetry
+            with the file's other tests.
+        scenario_loader: Loads the parsed scenario document.
+    """
+    definition = scenario_loader(SCENARIO)
+    declared = _declared_batch_rows(definition)
+    cleared = {key: int(row["Cleared-Status"]) for key, row in declared.items()}
+
+    waiting = sorted(key for key, value in cleared.items() if value == 0)
+    not_waiting = sorted(key for key, value in cleared.items() if value != 0)
+
+    assert waiting, (
+        f"no declared batch is Waiting, so gl070's phase-two filter admits nothing "
+        f"and the run is vacuous rather than mixed. Cleared-Status by key: {cleared!r}"
+    )
+    assert not_waiting, (
+        f"no declared batch is other than Waiting, so every batch takes the same path "
+        f"and the scenario's name is unearned. Cleared-Status by key: {cleared!r}"
+    )
+    assert all(int(row["Batch-Status"]) == 1 for row in declared.values()), (
+        f"every declared batch must be Status-Closed, or gl070's phase-one check "
+        f"raises the terminate code and aborts before phase two "
+        f"[general/gl070.cbl:L312-L313] - which is a different scenario's subject. "
+        f"Declared Batch-Status: "
+        f"{ {k: v['Batch-Status'] for k, v in declared.items()} !r}"
+    )
+    assert all(
+        int(row["Bcycle"]) == int(definition["seed_records"]["system.dat"]["1"][0]["Cyclea"])
+        for row in declared.values()
+    ), (
+        "every declared batch must carry the system's own cycle, or gl070's cycle "
+        "filter [general/gl070.cbl:L309-L310] rejects it before the disposition "
+        "filter is reached and the mixture above is never evaluated"
+    )
+    assert parity.is_empty, (
+        "this test is part of the parity evidence and must not render a verdict on a "
+        "run that did not agree"
+    )
+
 
 @pytest.mark.database
 @pytest.mark.oracle
@@ -1758,114 +2475,87 @@ def test_glposting_rec_is_an_unchanged_witness(
     )
 
 
-@pytest.mark.database
-@pytest.mark.oracle
-def test_diff_exit_contract_is_honoured(parity: object, harness: object) -> None:
-    """THE THREE-WAY EXIT CONTRACT of stage 8, verified rather than assumed.
+#  NO `database` OR `oracle` MARK, DELIBERATELY. This test used to consume the real
+#  ten-stage run, which needed both; it now drives synthetic trees through the shipped
+#  comparison in process, so it executes on a bare host. Leaving the marks on would SKIP
+#  the contract in exactly the environments where nothing else checks it.
+def test_diff_exit_contract_is_honoured(
+    tmp_path, harness, frozen_schema, vocabulary, capsys
+) -> None:
+    """The THREE-WAY exit contract: 0 is a pass, 1 is a failure, 2 IS NEVER A PASS.
 
-        0  the trees are identical, and stdout is EMPTY - zero bytes, not a banner  PASS
-        1  a real behavioural difference, with a deterministic report            FAILURE
-        2  THE COMPARISON COULD NOT BE PERFORMED                                   ERROR
+        0  the trees are identical, and stdout is EMPTY - zero bytes, not a banner
+           and not "no differences found"                                 -> PASS
+        1  a real behavioural difference, with a deterministic report   -> FAILURE
+        2  THE COMPARISON COULD NOT BE PERFORMED - a missing tree, a capture that
+           attests nothing, a capture taken after a failed run           -> ERROR
 
-    "A test that treats 'could not compare' as 'no differences' is the single worst bug
-    available in this tree." Exit 2 covers a missing tree, a missing table file, a
-    malformed dump, a shape mismatch, a `float` in the input, a duplicate primary key, a
-    wrong key order, `row_count != len(rows)`, a ragged row and a `null` - and it CANNOT
-    reach this body at all, because `tests/conftest.py` maps it to a harness fault that
-    surfaces as a pytest ERROR before the fixture returns. That is asserted structurally
-    below: the observed status is proved to be one of the two that a completed
-    comparison can produce.
+    A TEST THAT TREATED "COULD NOT COMPARE" AS "NO DIFFERENCES" IS THE SINGLE WORST BUG
+    AVAILABLE IN THIS TREE, so the mapping is exercised rather than trusted. Rule R-6
+    makes an empty diff the pass condition ONLY when a comparison actually happened.
 
-    THE ZERO-BYTE PASS IS PART OF THE CONTRACT, not a detail. `harness/diff_states.py`
-    writes the report to `diff.txt` on EVERY path and then, when the trees are
-    identical, prints NOT ONE BYTE on stdout; the report file is written as ZERO BYTES
-    rather than omitted, because the evidence document must distinguish "compared, and
-    identical" from "never compared" - an existing empty file says the first, an absent
-    file says nothing at all. `render` returning the empty string is the same statement
-    made in process.
+    ⭐ DRIVEN THROUGH THE SHIPPED COMPARISON, AND THROUGH ONE IMPLEMENTATION.
+    `tests/conftest.py`'s `assert_diff_exit_contract` publishes two synthetic sides with
+    `harness/dump_tables.py`'s own writer, canonicalises them with `harness/normalize.py`
+    and compares them with `harness/diff_states.py` - once for each of the four cases.
+    THIS FILE USED TO ASSERT THE CONTRACT AGAINST MODULE CONSTANTS AND HAND-BUILT
+    `TreeDiff` DATACLASSES, which passes whatever the comparison actually does: three
+    integers being distinct says nothing about what the tool exits with, and a dataclass
+    built in the test reports whatever the test put in it. The constants are still
+    checked here, but only as a cheap corroboration of a contract the helper has just
+    exercised end to end, over THIS scenario's own three-table bound.
+    It matters particularly here, where the two silent skips leave NO message, NO
+    counter and no trace [general/gl072.cbl:L289-L290, L303-L304], so the diff is the
+    only instrument that can see them and a comparison that refused to run must never
+    read as agreement.
 
-    THE STATUS AND THE FINDINGS ARE CROSS-CHECKED. Both come from the same `diff_trees`
-    over the same two trees, so a disagreement between them would mean the trees changed
-    between two reads and neither view could be trusted; `tests/conftest.py` raises a
-    harness fault in that case, and the equivalence is re-stated here as an assertion so
-    the contract is visible where it is relied on.
+    IT ASSERTS NOTHING WHATEVER ABOUT THE MIGRATION. The trees are SYNTHETIC, built from
+    the frozen schema's own column lists, so the machinery under test is the shipped
+    machinery - but a verdict taken from a hand-built tree is not protocol evidence, and
+    none is claimed. That is also why this test needs no Compose stack and no compiled
+    oracle: it executes on a bare host.
 
     Args:
-        parity: The completed run, for the stage-8 result and the report path.
-        harness: The three harness modules, for the exit constants and for `render`.
-    """
-    diff_states = harness.diff_states
+        tmp_path: A private output root, so `$ACAS_OUT` is neither read nor needed and
+            nothing is written into a compared tree.
+        harness: The three harness Python modules (R-1).
+        frozen_schema: The parsed `mysql/ACASDB.sql`, READ AND NEVER WRITTEN. It supplies
+            every column name and declared type, so nothing is invented.
+        vocabulary: The STACK-FREE bundle. Stages 4 and 8 are file-to-file
+            transformations driven in process, which is what lets the whole contract be
+            exercised on a bare host; it also publishes the helper.
+        capsys: The two refusals' streams, which the helper drives through
+            `diff_states.main` directly - the `diff` helper maps exit 2 to a harness
+            fault by design, and here a refusal is the expected outcome.
 
-    # THE CONSTANTS ARE THE CONTRACT, read from the module that defines them rather than
-    # restated as literals that could drift away from it.
+    Raises:
+        AssertionError: An exit status, a stdout stream or a verdict did not match the
+            contract.
+    """
+    vocabulary.assert_diff_exit_contract(
+        SCENARIO,
+        out_dir=tmp_path,
+        harness=harness,
+        schema=frozen_schema,
+        vocabulary=vocabulary,
+        readouterr=capsys.readouterr,
+    )
+
+    # THE THREE STATUSES REMAIN DISTINCT AND KEEP THEIR DOCUMENTED VALUES. Cheap, and
+    # worth stating separately: the helper above proved what the tool DOES, and this
+    # proves the numbers a reader of the evidence document will see are the numbers this
+    # file names. Collapsing "could not compare" into either of the other two is how a
+    # false pass is manufactured.
+    diff_states = harness.diff_states
     observed = (
         diff_states.EX_IDENTICAL,
         diff_states.EX_DIFFERENT,
         diff_states.EX_ERROR,
     )
     assert observed == (0, 1, 2), (
-        f"the three-way exit contract is 0 identical, 1 different, 2 "
-        f"could-not-compare; harness/diff_states.py declares {observed!r}."
+        f"the exit contract's three statuses must be 0, 1 and 2 in that order; the "
+        f"comparison declares {observed!r}."
     )
-
-    status = parity.outcome.result.returncode
-    assert status in {diff_states.EX_IDENTICAL, diff_states.EX_DIFFERENT}, (
-        f"stage 8 exited {status}, which is neither 0 nor 1. Exit "
-        f"{diff_states.EX_ERROR} means THE COMPARISON COULD NOT BE PERFORMED and is "
-        f"mapped to a harness fault - a pytest ERROR - before this test runs, so "
-        f"seeing it here would mean the mapping had been bypassed and a non-comparison "
-        f"was about to be read as a verdict."
-    )
-    assert (status == diff_states.EX_IDENTICAL) is parity.is_empty, (
-        f"stage 8 exited {status} while its TreeDiff reports "
-        f"is_empty={parity.is_empty} ({parity.tree.total_differences} finding(s)). "
-        f"Both views come from the same diff_trees over the same two trees, so a "
-        f"disagreement means the trees changed between two reads and NEITHER view can "
-        f"be trusted."
-    )
-
-    rendered = diff_states.render(parity.tree)
-    assert (rendered == "") is parity.is_empty, (
-        f"`render` must return the EMPTY STRING exactly when the trees are identical "
-        f"(Agent Action Plan section 0.8.5); is_empty={parity.is_empty} and it "
-        f"returned {len(rendered)} character(s)."
-    )
-
-    report = parity.outcome.report
-    assert report.is_file(), (
-        f"the report {report} was not written. It is written on EVERY path, and its "
-        f"presence is what distinguishes 'compared, and identical' from 'never "
-        f"compared' - an absent file says nothing at all, so the per-scenario evidence "
-        f"in docs/migration/scenario-diff-evidence.md would have nothing to cite."
-    )
-    if parity.is_empty:
-        assert report.stat().st_size == 0, (
-            f"the trees are identical, so {report} must be ZERO BYTES; it holds "
-            f"{report.stat().st_size} byte(s). A passing comparison writes no "
-            f"findings, and a banner in the report file would make an empty diff "
-            f"indistinguishable from a small one."
-        )
-        assert parity.outcome.result.stdout == "", (
-            f"the trees are identical, so stage 8 must print NOT ONE BYTE on stdout; "
-            f"it printed {parity.outcome.result.stdout!r}. The pass condition is an "
-            f"empty diff, and an empty diff is announced by silence."
-        )
-
-    # THE TWO RUN STAGES ARE CLASSIFIED, NEVER CONFLATED WITH THE COMPARISON. A run that
-    # aborts behaviourally still leaves the state the specification says it should, and
-    # that state is still dumped and still compared; a runner handed a bad command line
-    # leaves no evidence at all. This scenario declares term code zero, so both runs are
-    # expected to succeed - but the classification is asserted rather than the raw
-    # status, so the three categories stay distinct.
-    for run in (parity.cobol_run, parity.python_run):
-        assert run.returncode == 0, (
-            f"{run.stage} exited {run.returncode}; this scenario declares term code "
-            f"zero, which states that gl070 did NOT raise the open-batch abort at "
-            f"[general/gl070.cbl:L289] and that the cycle therefore ran all three "
-            f"phases. A non-zero status here means the run either aborted - in which "
-            f"case this scenario has drifted into control_total_mismatch's rejection "
-            f"class - or the runner faulted.\n{run.describe()}"
-        )
 
 
 @pytest.mark.database
@@ -2025,3 +2715,78 @@ def test_dump_is_wellformed_on_both_sides(
                             f"difference."
                         )
 
+
+@pytest.mark.database
+@pytest.mark.oracle
+def test_system_record_parity_by_digest_as_well_as_by_dump(parity: object, protocol: object) -> None:
+    """THE PARAMETER ROW IS BOUNDED TWICE - by the dump, and by a digest of it.
+
+    WHAT THIS CLOSES. An earlier draft kept `SYSTEM-REC` off every scenario's
+    `affected_tables` and justified that by claiming no side writes it. That claim is
+    FALSE:
+    `acas_posting/cli/args.py`'s `overrewrite` reproduces
+    [general/general.cbl:L656-L672] and every one of the seven routes calls it, so the
+    parameter row is written on BOTH sides of every scenario. Until this assertion
+    existed, a regression in that persistence produced an EMPTY DIFF and a green run.
+
+    WHICH KEYS THIS ROUTE WRITES. `gl_post_cycle` binds `general_menu_state`, which
+    carries both the defaults record and the totals record, so `overrewrite` rewrites
+    KEY 1, KEY 2 and KEY 4 - the same three the COBOL General menu writes
+    [general/general.cbl:L659, L664, L667]. This scenario's two silent skips leave no
+    trace anywhere else, so every bound that can be drawn is worth drawing.
+
+    IT IS DUMPED, WITH EXACTLY TWO CELLS WITHHELD. `SYSTEM-REC` is one of the 22
+    in-scope tables every capture covers, so 167 of its 169 columns are compared by value
+    like any other table's. The two exceptions are credentials - `RDBMS-PASSWD char(12)`
+    [copybooks/wssystem.cob:L139] and `PASS-WORD` - and a capture is evidence that gets
+    committed, so `harness/dump_tables.py`'s `REDACTED_COLUMNS` replaces those two cells
+    with a fixed marker inside `render_value`, the one funnel every captured cell passes
+    through. That is keyed by `(table, column)` and applied identically on both sides, so
+    it cannot itself produce a difference. Bounding the whole table out instead - the
+    alternative that was considered and rejected - removes the leak and takes 167
+    genuinely-written columns with it, and a bound drawn that way cannot reveal a
+    difference in what it excludes.
+
+    AND BOTH RUNNERS FINGERPRINT IT ANYWAY, before and after every run, which is what
+    this test compares. A sha256 over the canonical primary-key-ordered dump covers all
+    169 columns, credentials included, without being the dump - so the two withheld cells
+    are still compared, inside a hash that leaks nothing. The credential columns come from
+    the environment and are identical for both sides of one run, so they cannot
+    manufacture a difference; anything that does differ is a difference in what the two
+    cycles wrote. MEASURED, so the second-order worry is stated with its limit: the row's
+    content depends on what the route DID - the run-date stamp, the IRS allocator, the
+    one-shot latches, and `Date-Form`, which the frozen date sections write back
+    [copybooks/wssystem.cob:L127] - and the digest HOLDS on all four scenarios that
+    declare `unchanged` and MOVES on every one that declares `changed`. That was measured
+    over the eight scenarios that existed when the measurement was taken, which is all
+    four `unchanged` ones; the ninth, `end_of_cycle_gl`, declares `changed` and moves the
+    row by construction, Phase 5 advancing the cycle and rotating the quarter counter.
+    So declaring the row falsifies no effect claim; the digest is the belt to the dump's
+    braces.
+
+    Args:
+        parity: The completed, guarded run. The assertion needs its
+            artifact layout, and taking the fixture is what orders this test after the
+            two run stages rather than a comment claiming it.
+        protocol: The protocol bundle. `assert_system_record_parity` is the ONE
+            implementation of this comparison and lives in `tests/conftest.py`; nothing
+            here reads a fingerprint file itself.
+
+    Raises:
+        Skipped: The harness Compose stack is not usable.
+        AssertionError: A post-run record is missing or unreadable (a harness fault), or
+            the two cycles left the parameter row in different states (a behavioural
+            difference the table diff cannot see).
+    """
+    cobol_record, python_record = protocol.assert_system_record_parity(parity)
+
+    # STATE WHAT WAS OBSERVED, so the test is not merely "the helper did not raise".
+    # A zero-row parameter row would mean the seed never loaded system.dat, in which
+    # case both sides agree on nothing at all and the digests would match vacuously.
+    assert cobol_record.row_count == python_record.row_count == 1, (
+        f"{SCENARIO}: the parameter row holds {cobol_record.row_count} row(s) on the "
+        f"oracle side and {python_record.row_count} on the migrated side. system.dat "
+        f"seeds EXACTLY ONE row for key 1, and two empty tables carry the same digest - "
+        f"so without this check the parity claim above could pass on a database that "
+        f"was never seeded."
+    )

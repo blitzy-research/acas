@@ -60,7 +60,7 @@ R-5, full traceability. Every catalogued field arrives through its TABLE-QUALIFI
 
 R-6, compiled behaviour is the tie-breaker. Every expected value carries a
     provenance comment. The three exact byte strings below are the layout of
-    ambiguity-register question Q-5.3, which `acas_posting/cobol/usage.py:L94`
+    ambiguity-register question Q-5.3, which `acas_posting/cobol/usage.py ZONED_POSITIVE_ZONE`
     records as RESOLVED and whose arbitrated constants that module owns
     (`PACKED_SIGN_POSITIVE`, `PACKED_SIGN_NEGATIVE`, `PACKED_SIGN_UNSIGNED`, and the
     two-digits-per-byte nibble placement). The ambiguity register itself,
@@ -165,8 +165,8 @@ _ACAS_MODULES_THIS_FILE_IMPORTS: Final[frozenset[str]] = frozenset(
 #  THE AMBIGUITY THIS FILE'S BYTE LITERALS BELONG TO  (rule R-6)
 
 # Named once so that every citation below leads to the same register entry and none
-# is retyped. `acas_posting/cobol/usage.py:L94` records this id as RESOLVED and owns
-# the arbitrated constants; `acas_posting/cobol/sortverb.py:L75` cites the same id.
+# is retyped. `acas_posting/cobol/usage.py ZONED_POSITIVE_ZONE` records this id as RESOLVED and owns
+# the arbitrated constants; `acas_posting/cobol/sortverb.py _ZONE_POSITIVE` cites the same id.
 PACKED_LAYOUT_QUESTION: Final[str] = "Q-5.3"
 
 # The width rule - a digit count rounded up to whole bytes at two digits per byte -
@@ -616,7 +616,7 @@ def test_packed_width_is_ceil_of_digits_plus_one_over_two(
     [copybooks/wsbatch.cob:L41] the same width as `Ledger-Balance`
     [copybooks/wsledger.cob:L28] despite carrying one more digit.
 
-    Provenance: the rule is `acas_posting/cobol/usage.py:L424`, which computes it as
+    Provenance: the rule is `acas_posting/cobol/usage.py byte_length`, which computes it as
     integer arithmetic. This test recomputes it the same way rather than by rounding
     a real quotient up, because a digit count must never travel through binary
     floating point (R-2).
@@ -637,9 +637,9 @@ def test_packed_width_ignores_scale_and_signedness(
     item is unsigned, as `pic 9(9)v99` under a packed group is
     [copybooks/wsbatch.cob:L40-L41].
 
-    Provenance: `acas_posting/cobol/usage.py:L369-L370` states the rule - an implied
+    Provenance: `acas_posting/cobol/usage.py byte_length` states the rule - an implied
     decimal point occupies no byte, so scale does not enter the width arithmetic -
-    and `acas_posting/cobol/usage.py:L380-L381` states that signedness never changes
+    and `acas_posting/cobol/usage.py byte_length` states that signedness never changes
     a width. This test holds both to it across all four in-scope digit counts (R-5).
     """
     for scale in (0, 2):
@@ -730,7 +730,7 @@ def test_catalogued_packed_field_matches_its_copybook_declaration(
 def test_the_three_packed_sign_nibbles_are_c_d_and_f() -> None:
     """The three sign nibbles are `0xC`, `0xD` and `0xF`, and they are distinct.
 
-    Provenance: `acas_posting/cobol/usage.py:L89-L91`, the arbitrated constants of
+    Provenance: `acas_posting/cobol/usage.py PACKED_SIGN_POSITIVE`, the arbitrated constants of
     ambiguity-register question Q-5.3, which that module's line 94 records as
     RESOLVED. A nibble is four bits, so each must fit in one.
     """
@@ -753,7 +753,7 @@ def test_signed_positive_packed_value_carries_the_c_sign_nibble() -> None:
 
     Provenance: the byte string is the layout of question Q-5.3, cited above and
     recorded RESOLVED by the module that owns the constants
-    (`acas_posting/cobol/usage.py:L94`). The structural facts - six bytes, and the
+    (`acas_posting/cobol/usage.py ZONED_POSITIVE_ZONE`). The structural facts - six bytes, and the
     sign in the LOW nibble of the LAST byte - follow from that module's published
     contract and are asserted outright.
     """
@@ -1242,7 +1242,7 @@ def test_a8_truncation_one_zero_scale_packed_accumulator_discards_the_pence() ->
 
 
 # The precision the migrated arithmetic layer evaluates its own intermediates at,
-# `INTERMEDIATE_PRECISION` at `acas_posting/cobol/arithmetic.py:L97`. Repeated as a
+# `INTERMEDIATE_PRECISION` at `acas_posting/cobol/arithmetic.py INTERMEDIATE_PRECISION`. Repeated as a
 # literal rather than imported, so that this file's import contract - asserted exactly
 # by `_ACAS_MODULES_THIS_FILE_IMPORTS` - stays the five modules the tier allows.
 _INTERMEDIATE_PRECISION_MIRRORED_FROM_THE_ARITHMETIC_LAYER: Final[int] = 60
@@ -1373,7 +1373,7 @@ def test_high_order_digits_are_discarded_silently_on_overflow() -> None:
     which is exactly what the COBOL does, there being no `ON SIZE ERROR` anywhere in
     the in-scope set to reproduce (R-3).
 
-    Provenance: the reduction is `acas_posting/cobol/usage.py:L621-L624`, which takes
+    Provenance: the reduction is `acas_posting/cobol/usage.py _reduce_units`, which takes
     the magnitude modulo ten to the declared digit count and reapplies the sign.
     """
     work_2 = _work_2_descriptor()

@@ -40,8 +40,12 @@ OBSERVABLE 2 - THE BINARY RUN DATE. Declared verbatim at
         05  Run-Date        binary-long. *> 9(8) comp.
 
 set at [copybooks/Proc-ACAS-Mapser-RDB.cob:L80] - `move u-bin to run-date.` It is a
-REAL `SYSTEM-REC` column (`RUN-DAT int(8) unsigned`) and is therefore VISIBLE IN A
-TABLE DUMP, which is exactly why pinning it is load-bearing rather than cosmetic.
+REAL `SYSTEM-REC` column (`RUN-DAT int(8) unsigned`), so it is compared by value in the
+dump of that row - and on top of that, EVERY DATE COLUMN THE CYCLE STAMPS IN THE OTHER
+TABLES DERIVES FROM IT - `GLBATCH-REC.POSTED` [general/gl072.cbl:L376],
+`GLPOSTING-REC.POST-DAT`, `PSIRSPOST-REC.IRS-POST-DAT`. That is why pinning it is
+load-bearing rather than cosmetic, and why the runner also reads the column itself back
+after the run.
 
 Pinned project-wide: text "21/09/2025", binary `Run-Date` 155127. The epoch is
 1600-12-31, which the maintainer flags at [common/maps04.cbl:L39-L41] as making the
@@ -49,8 +53,11 @@ module "NOT usable within IRS as is"; `date(1600, 12, 31).toordinal()` is 584388
 day 1 is 1601-01-01 and `run_date = toordinal() - 584388`. Verified:
 `date(2025, 9, 21).toordinal()` is 739515 and 739515 - 584388 = 155127.
 
-The one clock read `acas_posting/clock.py` reproduces, verbatim from the source
-[copybooks/Proc-ACAS-Mapser-RDB.cob:L72-L80]:
+The clock read `acas_posting/clock.py` reproduces is the date service's, verbatim from
+the source [copybooks/Proc-ACAS-Mapser-RDB.cob:L72-L80]. It is NOT the system's only
+read - the corrected census further down counts fourteen - and what this tier depends
+on is the ZERO count inside the twelve migrated programs rather than a single read
+anywhere:
 
      72|      move     function current-date to wse-date-block.
      73|      move     "00/00/0000" to u-date.
@@ -88,8 +95,15 @@ enumeration in fact lists fourteen, so only its total was wrong:
     copybooks/Proc-ACAS-Mapser-RDB.cob    L72
 
 By construct: six `move function current-date`, four `accept ... from date`, four
-`accept ... from time`. EVERY ONE is in a menu shell or in the shared date-service
-copybook, and a grep for `function current-date` over all twelve in-scope programs -
+`accept ... from time`. EVERY ONE OF THE FOURTEEN is in a menu shell or in the shared
+date-service copybook - that is the census's scope, the posting cycle's own call
+chain. Outside that chain the frozen tree holds further `function current-date` reads,
+all in programs no scenario reaches: [common/ACAS-Sysout.cbl:L107],
+[common/fhlogger.cbl:L219], [common/auditLD2.cbl:L192] and L389,
+[common/makesqltable-free.cbl:L81] and L320,
+[common/makesqltable-original.cbl:L78] and L303, and [stock/stock.cbl:L302]. They are
+named so that a grepper who finds them does not conclude the census was wrong. A grep
+for `function current-date` over all twelve in-scope programs -
 gl051, gl070, gl071, gl072, gl080, sl055, sl060, sl100, pl055, pl060, pl100,
 irs030 - returns ZERO for each. So the Plan's phrasing is imprecise while its
 conclusion is exactly right, and the two-observable design is sound.
@@ -226,11 +240,12 @@ JSON strings at the declared scale and integers as JSON integers. Rows align by
 primary-key VALUE and never by position.
 
 -------------------------------------------------------------------------------
-THE VACUITY ARGUMENT, AND THE FOUR-LAYER GUARD
+THE VACUITY ARGUMENT, AND THE SIX-LAYER GUARD
 -------------------------------------------------------------------------------
 
-TWO EMPTY DUMPS ARE ALSO BYTE-IDENTICAL, so a bare `is_empty` assertion has two
-independent ways to pass while proving nothing. Both are closed.
+TWO EMPTY DUMPS ARE ALSO BYTE-IDENTICAL, and so are two runs that did nothing at
+all - so a bare `is_empty` assertion has three independent ways to pass while
+proving nothing. All three are closed.
 
 CHANNEL 1 - THE STACK SILENTLY NEVER WROTE TO MySQL.
 [copybooks/wssystem.cob:L111-L114], verbatim:
@@ -258,6 +273,18 @@ equal zero". The contract holds only because the caller pre-zeroes at
 WITHOUT RAISING - and a run under `Run-Date = 0` is still perfectly deterministic,
 and still wrong. `is_empty` alone would not notice.
 
+CHANNEL 3 - BOTH RUNS DID NOTHING, OR BOTH DID THE SAME WRONG THING.
+The dumps can be non-empty, the selector can be 1, the clock can land, both runs
+can exit with the declared status - and the route can still have written NOTHING,
+because every row in the dump was put there by the seed. Two such runs agree
+perfectly, and so do two runs that both mutate a table the scenario declares the
+route leaves alone. Nothing in channels 1 and 2 is violated in either case. Closed
+by LAYER 2b, which compares a run's own pre-run state record with its own post-run
+record and holds the result against the scenario's declared `expected_table_effect`
+- the effect being asserted in whichever direction the scenario declares, because
+for a scenario whose measured behaviour IS a no-op, demanding a mutation would
+demand the repair of a reproduced defect (R-4).
+
     LAYER 1 - STRUCTURAL PRESENCE. Both trees carry a complete manifest whose
     recorded digests match the files on disk and whose scenario identities agree
     (`verify_trees`); every affected table has a dump in BOTH trees; each dump passes
@@ -269,6 +296,35 @@ and still wrong. `is_empty` alone would not notice.
     `system.file_system_used: 1` as the likeliest cause and citing
     [copybooks/wssystem.cob:L111-L114], [common/acas007.cbl:L316-L320] and
     [common/acas008.cbl:L313-L319].
+
+    LAYER 2a - THE PAIR REACHED THE DECLARED DISPOSITION AT ALL. Run A's recorded
+    operation status equals the status the scenario declares. Two runs that both
+    REFUSED are byte-identical too, and layer 2 cannot catch them because the seeded
+    rows are counted either way. Run A only - whether run B agrees is the determinism
+    property itself and is asserted in the test body, so that a divergence reads as a
+    FAILURE attributable to the cycle rather than as a setup ERROR.
+
+    LAYER 2b - THE PER-RUN EFFECT WITNESS. Layer 2 counts the rows in the dump, and
+    the SEEDED rows are among them, so it passes for a run that wrote nothing at
+    all. This layer compares run A's OWN pre-run state record with its OWN post-run
+    record, per bounded table, and holds the result against the scenario's own
+    `expected_table_effect`. It is the ONLY layer that asks whether a run did
+    anything - CHANNEL 3, and the one the other layers structurally cannot see, since
+    two runs that both did nothing are byte-identical, and so are two runs that both
+    did the same wrong thing.
+
+    It is driven by the DECLARATION and never by an unconditional demand for a
+    mutation. `clean_batch_irs` declares `changed`, so at least one bounded table's
+    row count or digest must move - that is the vacuity the review named. But
+    `clean_batch_gl` declares `unchanged`, and that no-op is the MEASURED behaviour
+    (section 10.1 of the evidence document; ambiguity `Q-9`), so there the witness is
+    the converse: nothing may move. Demanding a mutation on both would require the
+    migrated cycle to REPAIR a reproduced defect, which is the inversion R-4 forbids.
+
+    Run A only, and the reason is the same one LAYER 2a gives: if run A conformed and
+    run B did not, the two trees differ and the body reports that as a determinism
+    FAILURE with a full diff. Asserting this on run B too would misfile that as a
+    setup ERROR.
 
     LAYER 3 - THE DATABASE-BACKED ROUTE-AND-CLOCK WITNESS. The runner must report
     BOTH `FILE-SYSTEM-USED = 1` from its pre-run `SYSTEM-REC` read and
@@ -290,19 +346,30 @@ and still wrong. `is_empty` alone would not notice.
 
     LAYER 4 - SEED-FINGERPRINT IDENTITY. `harness/run_python_scenario.sh` writes
     `$ACAS_OUT/run-logs/<scenario>/python.seed-fingerprint` before each run, as one
-    `<TABLE> <count>` line per affected table in the scenario's declared order,
-    integers only. Both snapshots must exist and be identical, which proves the seed
-    landed identically before either run INDEPENDENTLY OF THE DUMPS - and catches a
-    seeding difference that would otherwise masquerade as a determinism failure.
+    `<TABLE><TAB><row count><TAB><sha256>` line per bounded table plus the parameter
+    row, in the scenario's declared order - the digest being the SHA-256 of that
+    table's canonical primary-key-ordered dump, so two seeds carrying different VALUES
+    at the same ROW COUNTS do not agree. Both snapshots must exist and be identical,
+    which proves the seed landed identically before either run INDEPENDENTLY OF THE
+    DUMPS - and catches a seeding difference that would otherwise masquerade as a
+    determinism failure. Compared as BYTES and never parsed; layer 2b, which must know
+    WHICH table moved, is the one place the fields are read.
 
 A GUARD FAILURE AT ANY LAYER IS A HARNESS FAULT, raised from the fixture, reported as
 a pytest ERROR, and worded so it is unmistakable from a determinism FAILURE.
 
-`SYSTEM-REC` remains outside every scenario's compared `affected_tables`, because a
-census across all twelve in-scope programs found zero `System-*` facade verbs. The
-runner's pre/post database assertions are therefore guard evidence, not an added
-comparison table: they neither alter the structural diff nor invent an IRS result
-column. The same two markers apply to both parametrised scenarios.
+`SYSTEM-REC` is on every scenario's compared `affected_tables`, and it has to be:
+`acas_posting/cli/args.py`'s `overrewrite` rewrites key 1 on every one of the seven
+routes, exactly as the menu shells do, so a determinism claim that left the row out would
+be a claim about the tables the run happened to touch rather than about the run. The two
+credential cells it carries - `RDBMS-PASSWD char(12)` [copybooks/wssystem.cob:L139] and
+`PASS-WORD` - are withheld from the capture by `harness/dump_tables.py`'s
+`REDACTED_COLUMNS`, identically on both runs, so they can neither leak nor manufacture a
+byte difference; both runners FINGERPRINT the row before and after every run as well, so
+even those two cells are compared. The runner's pre/post database assertions are
+therefore guard evidence, not an added comparison table: they neither alter the
+structural diff nor invent an IRS result column. The same two markers apply to both
+parametrised scenarios.
 
 -------------------------------------------------------------------------------
 THE ONE REAL NONDETERMINISM RISK
@@ -416,6 +483,7 @@ import decimal
 import filecmp
 import hashlib
 import inspect
+import json
 import re
 import shutil
 from collections.abc import Callable, Mapping, Sequence
@@ -464,6 +532,18 @@ PINNED_RUN_DATE: Final[int] = 155127
 SCENARIO_KEY_RUN_DATE_TEXT: Final[str] = "run_date_text"
 SCENARIO_KEY_RUN_DATE_BINARY: Final[str] = "run_date_binary"
 
+# The scenario's own declaration of what its route does to the BOUNDED tables -
+# `changed` or `unchanged`. LAYER 2b asserts it PER RUN, and reads it from the
+# definition rather than restating it, because a local copy would drift from the YAML
+# and from `harness/run_python_scenario.sh`, which asserts the same property per side
+# from the same two records (R-4). The two determinism scenarios deliberately differ
+# here: `clean_batch_irs` declares `changed`, so a mutation is available to be
+# witnessed; `clean_batch_gl` declares `unchanged`, and that no-op is MEASURED - see
+# ambiguity `Q-9` - so the witness there is that nothing moved.
+SCENARIO_KEY_TABLE_EFFECT: Final[str] = "expected_table_effect"
+TABLE_EFFECT_CHANGED: Final[str] = "changed"
+TABLE_EFFECT_UNCHANGED: Final[str] = "unchanged"
+
 # THE TWO SCENARIOS, AND NO MORE. Agent Action Plan section 0.8.5 mandates eight
 # scenarios for `tests/scenarios/`; determinism needs only the two that carry
 # independent evidence, and a third would multiply stack time for no additional proof.
@@ -501,24 +581,51 @@ SCENARIO_SUFFIX: Final[str] = ".yaml"
 RUN_LABELS: Final[tuple[str, str]] = ("runA", "runB")
 NORMALIZED_SUFFIX: Final[str] = ".normalized"
 
+# The provenance file every normalised tree carries, mirroring
+# `harness/diff_states.py`'s `MANIFEST_FILENAME`. Named here as a module constant, in
+# the same style as the suffix above, because the byte comparison in the test BODY has
+# to exclude it and the tool module is bound inside the fixture rather than at module
+# scope. A test asserts the two spellings agree, so this cannot drift.
+MANIFEST_FILENAME: Final[str] = "_manifest.json"
+
 # The side both runs capture under. ONE value, deliberately: the side is recorded in
 # the PATH and never inside a dump, which is why the relocation below is mandatory.
 SIDE_PYTHON: Final[str] = "python"
 
 # The pre-run seed fingerprint `harness/run_python_scenario.sh` writes at its stage
-# 6a, under `run-logs/` and therefore OUTSIDE any compared tree. Row counts only, all
-# integers (R-2). It is compared BYTE-FOR-BYTE and never parsed: interpreting it here
-# would be the added validation R-3 forbids, and byte identity is the whole claim.
+# 6a, under `run-logs/` and therefore OUTSIDE any compared tree. One line per bounded
+# table plus the parameter row, each carrying the table name, its ROW COUNT and a
+# SHA-256 of its canonical primary-key-ordered dump - integers and hex text, no decimal
+# of its own (R-2). It is compared BYTE-FOR-BYTE and never parsed: interpreting it here
+# would be the added validation R-3 forbids, and byte identity is the whole claim. The
+# digest is why the claim is decisive: two runs seeded from different VALUES at the same
+# ROW COUNTS would agree on a count-only record.
 SEED_FINGERPRINT_NAME: Final[str] = "python.seed-fingerprint"
+
+# The POST-run record the same runner writes at its stage 6c, in the same directory and
+# the same three-field form. It is what LAYER 2b needs: comparing a run's own BEFORE
+# with its own AFTER answers "did THIS run change anything", which is the one question
+# no other layer can ask. A side-to-side or run-to-run comparison cannot substitute for
+# it, because two runs that both changed nothing agree perfectly - and so do two runs
+# that both changed the same thing.
+POST_FINGERPRINT_NAME: Final[str] = "python.post-fingerprint"
+
+# The ONE program that computes a table digest, for either side and for either of the
+# two records. Named here so the stack-free contract test can assert that neither runner
+# grew a second, inline definition of "the digest": two definitions is how a pre-run and
+# a post-run record - or an oracle-side and a Python-side record - silently stop being
+# comparable while every individual assertion still passes.
+TABLE_DIGEST_PRODUCER: Final[str] = "table_digest.py"
 
 # LAYER 3 - DATABASE-BACKED WITNESS MARKERS emitted by
 # `harness/run_python_scenario.sh`.
 #
 # The selector marker comes from a pre-run `SYSTEM-REC` query. The runner refuses
-# zero at [harness/run_python_scenario.sh:L3472-L3486], closing the false-pass path
-# where the migrated handlers take the frozen indexed-file leg. The clock marker
-# comes from a post-run `SYSTEM-REC.RUN-DAT` query and is emitted only when the value
-# equals the pinned binary date [harness/run_python_scenario.sh:L3928-L3958].
+# zero at [harness/run_python_scenario.sh acas_py_assert_file_system_used], closing
+# the false-pass path where the migrated handlers take the frozen indexed-file leg.
+# The clock marker comes from a post-run `SYSTEM-REC.RUN-DAT` query and is emitted
+# only when the value equals the pinned binary date
+# [harness/run_python_scenario.sh acas_py_assert_after_run].
 #
 # These are evidence emitted by database reads, not strings this test uses to infer
 # accounting state. Both must be present in each captured run stream. This remains
@@ -622,6 +729,8 @@ class RelocatedRun:
             proof that the representation artefacts have been canonicalised away.
         fingerprint: The snapshotted `python.seed-fingerprint`, taken before the
             NEXT run could overwrite the single path the runner writes it to.
+        post_fingerprint: The snapshotted `python.post-fingerprint`, the same record
+            taken AFTER this run's dispatch. The pair is what layer 2b reads.
         wrapper_status: The harness wrapper's exit status. Zero means the wrapper
             completed its own assertions and emitted a complete operation-status
             record; it is not the operation disposition.
@@ -636,6 +745,7 @@ class RelocatedRun:
     label: str
     tree: Path
     fingerprint: Path
+    post_fingerprint: Path
     wrapper_status: int
     run_status: int
     run_output: str
@@ -734,33 +844,46 @@ def _relocate(source: Path, destination: Path) -> Path:
 
 
 def _snapshot_fingerprint(source: Path, destination: Path) -> Path:
-    """Snapshot one run's pre-run seed fingerprint, before the next run replaces it.
+    """Snapshot one of a run's two state records, before the next run replaces it.
 
-    `harness/run_python_scenario.sh` writes it to
-    `$ACAS_OUT/run-logs/<scenario>/python.seed-fingerprint` at its stage 6a, and
-    `run_python` takes no output-root argument, so BOTH runs write that one path. This
-    is the interposition point layer 4 needs, and the reason this file composes the
-    individual stages rather than delegating the whole pair to one helper.
+    `harness/run_python_scenario.sh` writes BOTH records under
+    `$ACAS_OUT/run-logs/<scenario>/` - `python.seed-fingerprint` at its stage 6a, before
+    the dispatch, and `python.post-fingerprint` after it - and `run_python` takes no
+    output-root argument, so BOTH RUNS WRITE THOSE TWO PATHS. That collision is the
+    reason this file composes the individual stages rather than delegating the whole
+    pair to one helper: without an interposition after each run, run B's records would
+    be the only ones on disk and every claim about run A would silently be a claim
+    about run B.
+
+    Each record is one line per bounded table plus the parameter row, three
+    TAB-separated fields written by the single producer `harness/table_digest.py`. Layer
+    4 compares run A's PRE-run record with run B's PRE-run record as bytes, proving the
+    two runs started alike. Layer 2b compares ONE run's PRE-run record with its OWN
+    post-run record, proving what that run did.
 
     Args:
-        source: The runner's fingerprint path.
+        source: The runner's record path.
         destination: Where to keep it, beside the run's relocated tree.
 
     Returns:
         `destination`.
 
     Raises:
-        AssertionError: The runner wrote no fingerprint. A harness fault: without it
-            the two starting states are unverified, and a seeding difference would
-            masquerade as a determinism failure.
+        AssertionError: The runner wrote no such record. A harness fault: without the
+            pre-run record the two starting states are unverified, and a seeding
+            difference would masquerade as a determinism failure; without the post-run
+            record neither run's effect can be witnessed, and two runs that both did
+            nothing would report a clean PASS.
     """
     assert source.is_file(), (
         f"HARNESS FAULT, not a determinism failure: harness/run_python_scenario.sh "
-        f"wrote no seed fingerprint at {source}. Its stage 6a records the row count "
-        f"of every affected table before the run, and without it the two runs' "
-        f"starting states cannot be shown to have been identical - so a seeding "
-        f"difference would be reported as nondeterminism, which is a false failure "
-        f"that costs a day to find."
+        f"wrote no state record at {source}. It writes the pre-run record at its stage "
+        f"6a and the post-run record after the dispatch, each carrying the row count "
+        f"and canonical digest of every bounded table. Without the pre-run record the "
+        f"two runs' starting states cannot be shown to have been identical, so a "
+        f"seeding difference would be reported as nondeterminism; without the post-run "
+        f"record neither run's effect on the tables can be witnessed at all. Both are "
+        f"false results that cost a day to find."
     )
     shutil.copyfile(source, destination)
     return destination
@@ -877,6 +1000,210 @@ def _row_counts(
 
 
 
+def _parse_state_record(path: Path, *, where: str) -> dict[str, tuple[int, str]]:
+    """Parse one state record into `{table: (row_count, digest)}`.
+
+    THE FORMAT IS A CONTRACT AND IT HAS ONE PRODUCER. `harness/table_digest.py` writes
+    every state record on both sides, one line per table, three TAB-separated fields:
+    the table name, its row count, and the lower-case hex SHA-256 of the canonical
+    primary-key-ordered dump. Layer 4 compares two such files as BYTES and never parses
+    them, which is right for the question it asks. Layer 2b asks a different question -
+    WHICH tables moved - and cannot avoid reading the fields.
+
+    A table whose row count and digest are both `-` was UNREADABLE when the record was
+    taken; it is carried through as unreadable so the caller can refuse rather than
+    silently treat it as unchanged.
+
+    Args:
+        path: The snapshotted record.
+        where: A label for the failure message.
+
+    Returns:
+        `{table: (row_count, digest)}` for every readable line.
+
+    Raises:
+        AssertionError: A line is not three fields, or a table appears twice, or the
+            record carries an unreadable table.
+    """
+    parsed: dict[str, tuple[int, str]] = {}
+    text = path.read_text(encoding="utf-8")
+    for number, line in enumerate(text.splitlines(), start=1):
+        if not line.strip():
+            continue
+        fields = line.split("\t")
+        assert len(fields) == 3, (
+            f"HARNESS FAULT: {where} line {number} of {path} is not the three fields "
+            f"harness/table_digest.py writes - table, row count, sha256. It reads "
+            f"{line!r}. A record whose shape is not the contract cannot be read at "
+            f"all, and guessing at it would be the added validation R-3 forbids."
+        )
+        table, count, digest = (field.strip() for field in fields)
+        assert table not in parsed, (
+            f"HARNESS FAULT: {where} names {table!r} twice in {path}. Each table is "
+            f"digested once, so a repeat means the record was appended to rather than "
+            f"written, and which line describes the run is no longer decidable."
+        )
+        assert count != "-" and digest != "-", (
+            f"HARNESS FAULT: {where} records {table!r} as UNREADABLE in {path} "
+            f"(count {count!r}, digest {digest!r}). A table that could not be read "
+            f"establishes nothing about whether the run changed it, and treating an "
+            f"unreadable table as unchanged is exactly the false pass this layer "
+            f"exists to prevent."
+        )
+        assert count.isdigit(), (
+            f"HARNESS FAULT: {where} records {table!r} with row count {count!r} in "
+            f"{path}, which is not a whole number."
+        )
+        assert len(digest) == 64 and all(
+            character in "0123456789abcdef" for character in digest
+        ), (
+            f"HARNESS FAULT: {where} records {table!r} with digest {digest!r} in "
+            f"{path}, which is not a 64-character lower-case hex SHA-256."
+        )
+        parsed[table] = (int(count), digest)
+    assert parsed, (
+        f"HARNESS FAULT: {where} at {path} is empty. Both records carry one line per "
+        f"bounded table plus the parameter row, so an empty file means the runner did "
+        f"not reach the stage that writes it."
+    )
+    return parsed
+
+
+def _assert_effect_witness(
+    run: RelocatedRun,
+    *,
+    scenario: str,
+    tables: Sequence[str],
+    declared_effect: str,
+) -> tuple[str, ...]:
+    """LAYER 2b - assert THIS run did to the bounded tables what the scenario declares.
+
+    ⭐ THE GAP THIS CLOSES, AND WHY THE OTHER FOUR LAYERS CANNOT. Layer 1 proves the
+    trees are present and well formed. Layer 2 proves run A's tables are not all empty -
+    but the SEEDED rows are counted, so it passes for a run that wrote nothing. Layer 2a
+    proves run A reached the declared exit status - but a no-op exits zero. Layer 3
+    proves the runner read the selector and the pinned clock out of MariaDB - which a
+    run that then wrote nothing also does. Layer 4 proves both runs STARTED from the
+    same state. NOT ONE OF THEM ASKS WHETHER EITHER RUN CHANGED ANYTHING, and two runs
+    that both changed nothing are byte-identical - which is the vacuity channel the
+    review named against the `clean_batch_irs` case, whose declared effect is `changed`
+    and where a mutation therefore IS available to be witnessed.
+
+    THE CLAIM IS TAKEN FROM THE SCENARIO, NEVER INVENTED HERE. Each definition declares
+    `expected_table_effect`, and both runners already assert it per side from these same
+    two records - but a runner asserts it for ONE dispatch and cannot know it is being
+    driven twice. This layer re-asserts it for the reference run of the determinism
+    pair, whose own records the fixture has snapshotted out of the way; the caller
+    applies it to run A only, and the comment at the call site gives the reason:
+
+      `changed`   - at least one bounded table's `(row_count, digest)` pair must DIFFER
+                    between this run's pre-run and post-run record. `clean_batch_irs`
+                    is this case: its route posts to the IRS nominal ledger and writes
+                    the internal posting table.
+      `unchanged` - every bounded table's pair must be IDENTICAL. `clean_batch_gl` is
+                    this case, and the no-op is MEASURED rather than assumed - see
+                    docs/migration/scenario-diff-evidence.md section 10.1, which records
+                    TWO independent reasons. The first is the route itself: the scenario
+                    seeds a CLOSED batch, and phase two applies a stricter filter than
+                    phase one - `if status-open / or not waiting / or not gl-batch /
+                    go to loop` - which rejects it. The second is ambiguity `Q-9`:
+                    `bb000-HV-Load` [common/glpostingMT.cbl:L1053-L1066] never loads
+                    `HV-POST-RRN` [common/glpostingMT.cbl:L282], the table's primary key
+                    [mysql/ACASDB.sql:L169], so a seed persists at most one posting row
+                    and that row's zero posting key is skipped at
+                    [general/gl070.cbl:L490-L491]. Asserting the declared no-op per run
+                    is not "inventing a mutation" - it is refusing to let a run that
+                    mutated something pass as the reproduction of a run that does not.
+
+    Args:
+        run: One completed run, carrying both snapshotted state records.
+        scenario: The scenario name, for the message.
+        tables: Its bounded tables, in declared order. The parameter row appears in the
+            records too and is deliberately not read here: its content depends on what
+            the route did - including the `Date-Form` write-back
+            [copybooks/wssystem.cob:L127] - so reading it would tie each scenario's
+            effect claim to fields it does not reason about. Both runners exclude it from
+            the declared effect for the same reason.
+        declared_effect: The scenario's own `expected_table_effect`.
+
+    Returns:
+        The bounded tables whose pair moved, in declared order.
+
+    Raises:
+        AssertionError: The record is malformed or absent, a bounded table is missing
+            from either record, or the run's effect contradicts the declaration.
+    """
+    before = _parse_state_record(
+        run.fingerprint, where=f"{run.label}'s pre-run record"
+    )
+    after = _parse_state_record(
+        run.post_fingerprint, where=f"{run.label}'s post-run record"
+    )
+
+    moved: list[str] = []
+    for table in tables:
+        assert table in before and table in after, (
+            f"HARNESS FAULT: {scenario} bounds the comparison to {table}, but "
+            f"{run.label}'s "
+            f"{'pre' if table not in before else 'post'}-run record does not carry it. "
+            f"Both records are written from the scenario's own table list, so an "
+            f"absence means the record was taken against a different bound."
+        )
+        if before[table] != after[table]:
+            moved.append(table)
+
+    if declared_effect == TABLE_EFFECT_CHANGED:
+        assert moved, (
+            f"{run.label} of {scenario} CHANGED NOTHING, and the scenario declares "
+            f"`expected_table_effect: changed`.\n"
+            f"  Every bounded table carries the same row count and the same digest "
+            f"before and after the dispatch: "
+            f"{ {table: before[table] for table in tables} !r}.\n"
+            f"  THIS IS THE VACUITY CHANNEL THE OTHER LAYERS CANNOT SEE. Two runs that "
+            f"both wrote nothing are byte-identical, so `is_empty` would report a "
+            f"PASS; layer 2 counts the SEEDED rows and passes too; the run exits zero "
+            f"and reads the pinned clock, so layers 2a and 3 pass; and layer 4 only "
+            f"proves both runs started alike. A determinism claim over a route that "
+            f"did nothing establishes nothing about the migrated cycle.\n"
+            f"  Look first at whether the route reached its posting section at all - "
+            f"the run exited {run.run_status} - and then at the seed, whose "
+            f"fingerprint is at {run.fingerprint}."
+        )
+    elif declared_effect == TABLE_EFFECT_UNCHANGED:
+        assert not moved, (
+            f"{run.label} of {scenario} CHANGED {moved!r}, and the scenario declares "
+            f"`expected_table_effect: unchanged`.\n"
+            + "".join(
+                f"  {table}: before {before[table]!r}, after {after[table]!r}\n"
+                for table in moved
+            )
+            + f"  THE DECLARED NO-OP IS THE MEASURED BEHAVIOUR AND IS REPRODUCED, NOT "
+            f"CORRECTED (R-4, R-6). Its per-scenario reasons are recorded in "
+            f"docs/migration/scenario-diff-evidence.md section 10; for "
+            f"`clean_batch_gl` they are the closed batch that phase two's stricter "
+            f"filter rejects, and ambiguity `Q-9` - `bb000-HV-Load` "
+            f"[common/glpostingMT.cbl:L1053-L1066] never loads `HV-POST-RRN` "
+            f"[common/glpostingMT.cbl:L282], the table's primary key "
+            f"[mysql/ACASDB.sql:L169], so a seed persists at most one posting row and "
+            f"that row's zero posting key is skipped at "
+            f"[general/gl070.cbl:L490-L491], before the explosion.\n"
+            f"  A run that DID change a bounded table has either repaired that defect "
+            f"or found a second writer. Either way, RE-MEASURE AGAINST THE COMPILED "
+            f"ORACLE and update the ambiguity register, this scenario's "
+            f"`expected_table_effect` and the evidence document together - do not "
+            f"relax this assertion, and do not 'fix' the migrated cycle to make the "
+            f"table move."
+        )
+    else:
+        raise AssertionError(
+            f"HARNESS FAULT: {scenario} declares `expected_table_effect: "
+            f"{declared_effect!r}`, which is neither `changed` nor `unchanged`. The "
+            f"runners accept only those two, so this layer has no claim to assert and "
+            f"refuses rather than passing."
+        )
+    return tuple(moved)
+
+
 def _assert_clock_witness(run: RelocatedRun) -> None:
     """LAYER 3 - assert the RDBMS selector and pinned clock were read from MariaDB.
 
@@ -980,12 +1307,13 @@ def _execute_run(
     # BEHAVIOURAL result whose database effect must still be captured. Absence is
     # evidence, and a helper that short-circuited the dump would destroy it.
     run = protocol.run_python(scenario)
-    assert run.returncode == 0, (
-        f"HARNESS FAULT: {label}'s Python wrapper exited {run.returncode}; wrapper "
-        f"health is distinct from operation disposition and must be zero before its "
-        f"OPERATION_STATUS record or database readback can be trusted.\n"
-        f"{run.describe()}"
-    )
+    #  WRAPPER HEALTH, DIAGNOSED BY CATEGORY (finding F-14). Wrapper health is distinct
+    #  from operation disposition and must be zero before this leg's OPERATION_STATUS
+    #  record or database readback can be trusted - but the two reasons it can be
+    #  non-zero are not the same finding: 69 is `EX_BEHAVIOUR`, the cycle ran and
+    #  contradicted its scenario, while the runner's own band means it faulted before
+    #  measuring anything. The helper reports whichever it was.
+    protocol.assert_wrapper_completed(run, label=f"{label}'s Python run")
     assert len(run.operation_statuses) == 1, (
         f"HARNESS FAULT: {label} of {scenario} recorded "
         f"{len(run.operation_statuses)} operation statuses, expected exactly one for "
@@ -994,8 +1322,9 @@ def _execute_run(
     )
     _operation, operation_status = run.operation_statuses[0]
 
-    # STAGE 7 and its normalisation. Both bounded by the scenario's own definition, so
-    # the table list comes from the scenario and never from a local restatement (R-4).
+    # STAGE 7 and its normalisation. Both bounded by ALL 22 IN-SCOPE TABLES, which is
+    # the protocol, and the list comes from the harness inventory rather than from a
+    # local restatement (R-4).
     protocol.dump(scenario, SIDE_PYTHON).raise_for_status()
     protocol.normalize(scenario, SIDE_PYTHON).raise_for_status()
 
@@ -1008,11 +1337,18 @@ def _execute_run(
         paths.run_logs / SEED_FINGERPRINT_NAME,
         workspace / f"{label}.{SEED_FINGERPRINT_NAME}",
     )
+    # The POST-run record needs the same interposition for the same reason: the runner
+    # writes it to one path and the next run replaces it.
+    post_fingerprint = _snapshot_fingerprint(
+        paths.run_logs / POST_FINGERPRINT_NAME,
+        workspace / f"{label}.{POST_FINGERPRINT_NAME}",
+    )
 
     return RelocatedRun(
         label=label,
         tree=tree,
         fingerprint=fingerprint,
+        post_fingerprint=post_fingerprint,
         wrapper_status=run.returncode,
         run_status=operation_status,
         run_output=f"{run.stdout}\n{run.stderr}",
@@ -1061,10 +1397,14 @@ def determinism_pair(
             snapshots live here.
         protocol: Every stage, from `tests/conftest.py`. It applies the stack skip
             guard itself, so a bare host SKIPS with a precise reason and never errors.
-        harness: The three harness modules, loaded by explicit file path. NEVER
-            `import harness` - there is no `harness/__init__.py` and `pyproject.toml`
-            excludes `harness*` from packaging, which is the structural enforcement of
-            R-1.
+        harness: The three harness modules, loaded by explicit file path - never
+            `import harness`. The structural enforcement of R-1 is `pyproject.toml`'s
+            `[tool.setuptools] packages` ALLOW-LIST, which names only the seven
+            `acas_posting` packages plus the generated data directory and sets
+            `include-package-data = false`, so `harness` is absent by construction.
+            The absence of `harness/__init__.py` is NOT the enforcement: PEP 420 would
+            make a namespace import resolve anyway. Explicit-path loading is used
+            because it is independent of `sys.path` and of the invocation directory.
         scenario_loader: The scenario definition, parsed with `yaml.safe_load`.
         pinned_clock: The project-wide pinned pair, already asserted by
             `tests/conftest.py` to be the text `21/09/2025` and the binary 155127.
@@ -1167,7 +1507,15 @@ def determinism_pair(
     # own check and is the strongest single structural assertion available: a tree that
     # over-declares, under-declares or whose bytes have moved since publication is
     # refused here rather than diffed.
-    diff_states.verify_trees(first.tree, second.tree)
+    #
+    # `same_side=True` SELECTS THE DETERMINISM CONTRACT, which is the mirror image of
+    # the parity one and is not a relaxation of it. The parity mode requires the two
+    # sides to DIFFER and their run ids to MATCH; both captures here are the Python
+    # cycle, so it requires the sides to MATCH and the run ids to DIFFER - the second
+    # of which the parity mode never checked, and which is what refuses one capture
+    # compared against itself. One scenario definition, one frozen schema and one seed
+    # marker are still required, exactly as in parity mode.
+    diff_states.verify_trees(first.tree, second.tree, same_side=True)
 
     # The same set of filenames on both sides. A table file present in one tree and
     # absent from the other is a harness fault - the comparison cannot be performed -
@@ -1274,6 +1622,53 @@ def determinism_pair(
     )
 
     # ------------------------------------------------------------------
+    #  LAYER 2b - THE PER-RUN EFFECT WITNESS. Layer 2 counts rows in the dump and
+    #  therefore counts the SEEDED ones, so it passes for a run that wrote nothing at
+    #  all. This layer compares each run's OWN pre-run record with its OWN post-run
+    #  record and holds the result against the scenario's own `expected_table_effect`.
+    #
+    #  It is the only layer that asks whether either run DID anything. Two runs that
+    #  both did nothing are byte-identical; so are two runs that both did the same
+    #  wrong thing. Neither is caught by layers 1, 2, 2a, 3 or 4.
+    #
+    #  DRIVEN BY THE DECLARATION, NEVER BY AN UNCONDITIONAL DEMAND FOR A MUTATION. A
+    #  blanket "require a mutation" would fail `clean_batch_gl`, whose no-op is the
+    #  measured behaviour recorded in section 10.1 of the evidence document and at
+    #  ambiguity `Q-9`, and which is reproduced rather than corrected (R-4, R-6). For
+    #  that scenario the witness is the converse and is just as informative: a run that
+    #  moved a bounded table has departed from the compiled oracle.
+    #
+    #  ONLY RUN A IS CHECKED, for precisely the reason LAYER 2a gives above, and NOT
+    #  for the reason LAYER 3 gives below. Run A is the reference run: if IT did not do
+    #  what the scenario declares, the pair was never driven as described and that is a
+    #  SETUP fault. But if run A conformed and RUN B did not, the two normalised trees
+    #  DIFFER, and the honest diagnosis is that the migrated cycle is NONDETERMINISTIC
+    #  - a FAILURE attributable to the cycle, reported by comparison 0 in the test body
+    #  with a full table-level diff. Asserting this layer on run B as well would
+    #  pre-empt that with a pytest ERROR and misfile a real determinism failure as a
+    #  harness fault. Layer 3 is different: a degraded selector or clock leaves the
+    #  trees ABLE to agree, so nothing in the body would catch it.
+    #
+    #  Run A alone still closes every vacuity channel this layer exists for. Two runs
+    #  that both did nothing are byte-identical - and if both did nothing then RUN A
+    #  did nothing, so this guard fires. The same holds for two runs that both mutated
+    #  a table the scenario declares unchanged.
+    # ------------------------------------------------------------------
+    declared_effect = definition.get(SCENARIO_KEY_TABLE_EFFECT)
+    assert isinstance(declared_effect, str), (
+        f"HARNESS FAULT: {scenario} declares no `{SCENARIO_KEY_TABLE_EFFECT}` (got "
+        f"{declared_effect!r}). Both runners read that key to assert per side what the "
+        f"route does to the bounded tables, and without it this layer has no claim to "
+        f"hold the run against - so a run that silently stopped writing would pass."
+    )
+    _assert_effect_witness(
+        first,
+        scenario=scenario,
+        tables=tables,
+        declared_effect=declared_effect,
+    )
+
+    # ------------------------------------------------------------------
     #  LAYER 3 - THE DATABASE-BACKED ROUTE-AND-CLOCK WITNESS. Asserted on BOTH
     #  runs: a selector or clock that degraded on the second run only would otherwise
     #  show up as an ordinary difference, and the diagnosis would be needlessly hard.
@@ -1286,8 +1681,10 @@ def determinism_pair(
     #  EITHER run, independently of the dumps - so a seeding difference is diagnosed as
     #  a seeding difference instead of masquerading as nondeterminism.
     #
-    #  Compared as BYTES and never parsed: the file is row counts only, all integers,
-    #  and interpreting it here would be the added validation R-3 forbids.
+    #  Compared as BYTES and never parsed: each line is a table name, a row count and a
+    #  SHA-256 of that table's canonical dump, and interpreting them here would be the
+    #  added validation R-3 forbids. The digest is what makes a byte comparison
+    #  sufficient - equal counts over different values would pass a count-only record.
     # ------------------------------------------------------------------
     assert filecmp.cmp(first.fingerprint, second.fingerprint, shallow=False), (
         f"THE TWO RUNS DID NOT START FROM THE SAME SEEDED STATE - a HARNESS FAULT, "
@@ -1303,10 +1700,10 @@ def determinism_pair(
         f"table, in the scenario's declared order, immediately before each run. A "
         f"difference means one reset loaded something other than the scenario fixture, "
         f"so every downstream difference would be unattributable. The frozen loaders "
-        f"have no live COMMIT; the harness therefore requires the explicit "
-        f"`ACAS_SEED_AUTOCOMMIT=on` durability mode and refuses a nominally successful "
-        f"seed that leaves zero rows. Loader exit codes and persisted counts are "
-        f"tested rather than assumed."
+        f"have no live COMMIT; the harness therefore seeds under autocommit ON - the "
+        f"canonical durable mode, the default, needing no flag - and refuses a "
+        f"nominally successful seed that leaves zero rows. Loader exit codes and "
+        f"persisted counts are tested rather than assumed."
     )
 
     # ------------------------------------------------------------------
@@ -1319,7 +1716,9 @@ def determinism_pair(
     #  verdict would not be evidence. harness/diff_states.py independently refuses two
     #  paths that resolve to one directory, calling it a false pass.
     # ------------------------------------------------------------------
-    tree_diff = diff_states.diff_trees(first.tree, second.tree, tables)
+    tree_diff = diff_states.diff_trees(
+        first.tree, second.tree, tables, same_side=True
+    )
 
     return DeterminismEvidence(
         scenario=scenario,
@@ -1449,12 +1848,22 @@ def test_two_python_runs_are_byte_identical(
     )
 
     # ------------------------------------------------------------------
-    #  COMPARISON 2 - LITERAL BYTES.
+    #  COMPARISON 2 - LITERAL BYTES, OVER THE DUMPS.
     #
-    #  Every file in both trees, not only the affected-table dumps: `_manifest.json`
-    #  carries each table's row count and sha256, so comparing it is a compact
-    #  cross-check on the whole capture, and it holds no timestamp and no absolute path
-    #  that could make it differ for a benign reason.
+    #  EVERY TABLE DUMP, and deliberately NOT `_manifest.json`. The obligation quoted
+    #  above is that two runs "produce byte-identical DUMPS", and the manifest is not a
+    #  dump - it is the provenance OF one. Since finding F-34 expanded it, it records
+    #  this run's `run_id`, the exact `command` that produced it and the digest of the
+    #  manifest it was normalised from, so two runs' manifests MUST differ: the
+    #  same-side contract selected in the fixture requires the two run ids to be
+    #  DIFFERENT, and a byte comparison that included them would demand the opposite of
+    #  the guard that proves these are two runs at all. The two requirements would be
+    #  mutually unsatisfiable, and the test would be unpassable for a correct cycle.
+    #
+    #  THE MANIFEST IS STILL COMPARED, on the part of it that is state rather than
+    #  provenance - see COMPARISON 3. Skipping it outright would drop the row-count and
+    #  per-file-digest cross-check the earlier version of this comparison was really
+    #  relying on.
     #
     #  This is where a serialisation-level difference is caught. The structural diff
     #  reads parsed JSON, so it would report two dumps with different key order,
@@ -1462,7 +1871,17 @@ def test_two_python_runs_are_byte_identical(
     #  claim being proven is byte-identity, not value-identity.
     # ------------------------------------------------------------------
     differing_bytes: list[str] = []
-    for name in evidence.filenames:
+    dump_filenames = tuple(
+        name for name in evidence.filenames if name != MANIFEST_FILENAME
+    )
+    assert dump_filenames, (
+        f"scenario {evidence.scenario!r} produced a normalised tree holding nothing "
+        f"but {MANIFEST_FILENAME}, so there is no dump to compare "
+        f"byte-for-byte and "
+        f"the obligation would pass having compared nothing. Affected tables: "
+        f"{', '.join(evidence.tables)}."
+    )
+    for name in dump_filenames:
         left = evidence.first.tree / name
         right = evidence.second.tree / name
         if not filecmp.cmp(left, right, shallow=False):
@@ -1499,6 +1918,50 @@ def test_two_python_runs_are_byte_identical(
         f"agreement does not discharge the obligation."
     )
 
+    # ------------------------------------------------------------------
+    #  COMPARISON 3 - THE MANIFEST'S STATE, WITHOUT ITS PROVENANCE.
+    #
+    #  The manifest is excluded from COMPARISON 2 because its provenance MUST differ
+    #  between two runs. Its `tables' block must not: it records each table's name, row
+    #  count and dump digest, and two runs of one scenario that captured different row
+    #  counts or different digests are not deterministic however the bytes of the dumps
+    #  happen to compare. This keeps the cross-check the earlier comparison relied on
+    #  while dropping only the fields whose difference is the point of recording them.
+    #
+    #  The provenance is asserted to DIFFER as well, because a pair that agreed on
+    #  `run_id' would be one capture read twice - the false pass the fixture's
+    #  same-side contract exists to refuse - and asserting it here means the obligation
+    #  cannot be discharged by comparing a tree with itself.
+    # ------------------------------------------------------------------
+    left_manifest = json.loads(
+        (evidence.first.tree / MANIFEST_FILENAME).read_text(encoding="utf-8")
+    )
+    right_manifest = json.loads(
+        (evidence.second.tree / MANIFEST_FILENAME).read_text(encoding="utf-8")
+    )
+
+    assert left_manifest["tables"] == right_manifest["tables"], (
+        f"THE PYTHON POSTING CYCLE IS NOT DETERMINISTIC: two runs of scenario "
+        f"{evidence.scenario!r} under the identical pinned clock published DIFFERENT "
+        f"table blocks in {MANIFEST_FILENAME}, so they disagree about a row "
+        f"count or "
+        f"a dump digest.\n"
+        f"  {RUN_LABELS[0]}: {left_manifest['tables']}\n"
+        f"  {RUN_LABELS[1]}: {right_manifest['tables']}\n"
+        f"  The COBOL oracle was not executed (R-1), so this is a difference in the "
+        f"migrated cycle. DO NOT MAKE IT PASS BY NORMALISING IT (R-4, inverted)."
+    )
+
+    left_run = left_manifest["provenance"]["run_id"]
+    right_run = right_manifest["provenance"]["run_id"]
+    assert left_run and right_run and left_run != right_run, (
+        f"the two captures of scenario {evidence.scenario!r} carry run ids "
+        f"{left_run!r} and {right_run!r}. They must both be present and must DIFFER: "
+        f"two captures under one run id are one capture read twice, a tree always "
+        f"equals itself, and the byte comparison above would then pass whatever the "
+        f"migrated cycle did. This is asserted in the body rather than left to the "
+        f"fixture so that the false pass is named as a FAILURE of the obligation."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1863,7 +2326,7 @@ def test_the_dump_order_is_total_and_stable_by_construction(
         definition = repo_root / SCENARIO_DIR_NAME / f"{scenario}{SCENARIO_SUFFIX}"
         assert definition.is_file(), (
             f"the scenario definition {definition} is absent, so the table list it "
-            f"bounds every comparison with cannot be read. The eight definitions "
+            f"bounds every comparison with cannot be read. The scenario definitions "
             f"under harness/scenarios/ are what make a comparison bounded rather "
             f"than unbounded."
         )
@@ -1903,4 +2366,240 @@ def test_the_dump_order_is_total_and_stable_by_construction(
             f"a width disagreement means the two sides of any comparison are aligning "
             f"different columns - and Agent Action Plan section 0.8.1 makes an altered "
             f"schema a defect in the migration."
+        )
+
+
+def test_the_effect_witness_discriminates_a_no_op_from_a_posting_run(
+    tmp_path: Path,
+) -> None:
+    """LAYER 2b's own logic, proven on a bare host - because the layer itself cannot be.
+
+    ⭐ WHY THIS TEST HAS TO EXIST. Layer 2b lives inside `determinism_pair`, which is
+    marked `database`/`oracle` and SKIPS without the Compose stack. So on a bare host
+    the guard that closes channel 3 is never executed, and a guard that has never run
+    is indistinguishable from one that cannot fire. This test drives
+    `_assert_effect_witness` directly over SYNTHETIC state records - no database, no
+    runner, no scenario - so its discrimination is established wherever pytest runs.
+
+    THE SIX CASES, AND WHAT EACH WOULD CATCH IN PRODUCTION:
+
+      1. `changed` declared, a digest moved   -> PASSES. The `clean_batch_irs` shape.
+      2. `changed` declared, NOTHING moved    -> FAILS. THE VACUITY THE REVIEW NAMED:
+         both runs did nothing, the trees agree, and every other layer passes.
+      3. `unchanged` declared, nothing moved  -> PASSES. The `clean_batch_gl` shape,
+         whose no-op is the measured behaviour (evidence document section 10.1).
+      4. `unchanged` declared, a digest moved -> FAILS. A cycle that REPAIRED the
+         reproduced defect, which R-4 makes a failure and not an improvement.
+      5. A row count that moved while the digest did not, and the converse -> BOTH
+         count as movement. The pair is the unit; a run that deleted one row and
+         inserted another could hold either field still on its own.
+      6. An unreadable table, a malformed line, a missing bounded table, and an
+         unrecognised declared effect -> ALL refuse. An unreadable table establishes
+         nothing about whether the run changed it, and silently reading it as
+         unchanged is precisely the false pass this layer exists to prevent.
+
+    Args:
+        tmp_path: Where the synthetic records are written.
+    """
+    digest_a = "a" * 64
+    digest_b = "b" * 64
+
+    def record(path_name: str, rows: dict[str, tuple[str, str]]) -> Path:
+        target = tmp_path / path_name
+        target.write_text(
+            "".join(
+                f"{table}\t{count}\t{digest}\n" for table, (count, digest) in rows.items()
+            ),
+            encoding="utf-8",
+        )
+        return target
+
+    def run(label: str, before: Path, after: Path) -> RelocatedRun:
+        return RelocatedRun(
+            label=label,
+            tree=tmp_path,
+            fingerprint=before,
+            post_fingerprint=after,
+            wrapper_status=0,
+            run_status=0,
+            run_output="",
+            row_counts=(("T1", 1),),
+        )
+
+    tables = ("T1", "T2")
+    seeded = {"T1": ("1", digest_a), "T2": ("2", digest_a)}
+
+    # CASE 1 and CASE 3 - the declaration is met, in each direction.
+    unmoved = record("unmoved.after", dict(seeded))
+    seed_1 = record("case1.before", dict(seeded))
+    moved_digest = record("case1.after", {**seeded, "T2": ("2", digest_b)})
+    assert _assert_effect_witness(
+        run("runA", seed_1, moved_digest),
+        scenario="synthetic",
+        tables=tables,
+        declared_effect=TABLE_EFFECT_CHANGED,
+    ) == ("T2",), "a moved digest on one bounded table must be reported as movement"
+    seed_3 = record("case3.before", dict(seeded))
+    assert (
+        _assert_effect_witness(
+            run("runA", seed_3, unmoved),
+            scenario="synthetic",
+            tables=tables,
+            declared_effect=TABLE_EFFECT_UNCHANGED,
+        )
+        == ()
+    ), "an unchanged pair on every bounded table must report no movement"
+
+    # CASE 2 - THE VACUITY. `changed` declared and the run did nothing at all.
+    seed_2 = record("case2.before", dict(seeded))
+    with pytest.raises(AssertionError, match="CHANGED NOTHING"):
+        _assert_effect_witness(
+            run("runA", seed_2, unmoved),
+            scenario="synthetic",
+            tables=tables,
+            declared_effect=TABLE_EFFECT_CHANGED,
+        )
+
+    # CASE 4 - the converse. `unchanged` declared and something moved.
+    seed_4 = record("case4.before", dict(seeded))
+    with pytest.raises(AssertionError, match=r"CHANGED \['T2'\]"):
+        _assert_effect_witness(
+            run("runA", seed_4, moved_digest),
+            scenario="synthetic",
+            tables=tables,
+            declared_effect=TABLE_EFFECT_UNCHANGED,
+        )
+
+    # CASE 5 - a moved ROW COUNT alone is movement too. The pair is the unit.
+    seed_5 = record("case5.before", dict(seeded))
+    moved_count = record("case5.after", {**seeded, "T1": ("2", digest_a)})
+    assert _assert_effect_witness(
+        run("runA", seed_5, moved_count),
+        scenario="synthetic",
+        tables=tables,
+        declared_effect=TABLE_EFFECT_CHANGED,
+    ) == ("T1",), (
+        "a row count that moved while the digest did not must still be movement: a "
+        "digest is of the canonical dump text, and treating the count as noise would "
+        "let an insert-plus-delete pass as a no-op"
+    )
+
+    # CASE 6 - every refusal. None of these may be read as `unchanged`.
+    unreadable = record("unreadable.after", {"T1": ("1", digest_a), "T2": ("-", "-")})
+    with pytest.raises(AssertionError, match="UNREADABLE"):
+        _assert_effect_witness(
+            run("runA", record("case6a.before", dict(seeded)), unreadable),
+            scenario="synthetic",
+            tables=tables,
+            declared_effect=TABLE_EFFECT_UNCHANGED,
+        )
+
+    malformed = tmp_path / "malformed.after"
+    malformed.write_text("T1\t1\n", encoding="utf-8")
+    with pytest.raises(AssertionError, match="not the three fields"):
+        _assert_effect_witness(
+            run("runA", record("case6b.before", dict(seeded)), malformed),
+            scenario="synthetic",
+            tables=tables,
+            declared_effect=TABLE_EFFECT_UNCHANGED,
+        )
+
+    short_digest = tmp_path / "short.after"
+    short_digest.write_text("T1\t1\tabc\n", encoding="utf-8")
+    with pytest.raises(AssertionError, match="lower-case hex SHA-256"):
+        _assert_effect_witness(
+            run("runA", record("case6c.before", dict(seeded)), short_digest),
+            scenario="synthetic",
+            tables=tables,
+            declared_effect=TABLE_EFFECT_UNCHANGED,
+        )
+
+    partial = record("partial.after", {"T1": ("1", digest_a)})
+    with pytest.raises(AssertionError, match="does not carry it"):
+        _assert_effect_witness(
+            run("runA", record("case6d.before", dict(seeded)), partial),
+            scenario="synthetic",
+            tables=tables,
+            declared_effect=TABLE_EFFECT_UNCHANGED,
+        )
+
+    empty = tmp_path / "empty.after"
+    empty.write_text("", encoding="utf-8")
+    with pytest.raises(AssertionError, match="is empty"):
+        _assert_effect_witness(
+            run("runA", record("case6e.before", dict(seeded)), empty),
+            scenario="synthetic",
+            tables=tables,
+            declared_effect=TABLE_EFFECT_UNCHANGED,
+        )
+
+    with pytest.raises(AssertionError, match="neither `changed` nor `unchanged`"):
+        _assert_effect_witness(
+            run("runA", record("case6f.before", dict(seeded)), unmoved),
+            scenario="synthetic",
+            tables=tables,
+            declared_effect="maybe",
+        )
+
+    duplicated = tmp_path / "duplicated.after"
+    duplicated.write_text(
+        f"T1\t1\t{digest_a}\nT1\t1\t{digest_a}\n", encoding="utf-8"
+    )
+    with pytest.raises(AssertionError, match="twice"):
+        _assert_effect_witness(
+            run("runA", record("case6g.before", dict(seeded)), duplicated),
+            scenario="synthetic",
+            tables=tables,
+            declared_effect=TABLE_EFFECT_UNCHANGED,
+        )
+
+
+def test_both_runners_persist_a_post_run_state_record(repo_root: Path) -> None:
+    """LAYER 2b's INPUT exists, asserted against both runner scripts as text.
+
+    The layer reads `python.post-fingerprint`, and a layer whose input is never written
+    fails as a harness fault at the first stack run rather than at review. This reads
+    both scripts READ-ONLY and asserts four things about each: the record's name, that
+    it is written under `run-logs/` and therefore outside every compared tree, that a
+    stale copy is removed rather than inherited, and that the digest comes from the one
+    canonical producer rather than from a second inline definition.
+
+    BOTH SIDES, not merely the Python one. The oracle runner writes the same record so
+    that `tests/conftest.py`'s `assert_tables_unchanged_by_run` can be pointed at either
+    side; a record written on one side only would silently make every cross-side
+    before/after claim a claim about Python alone.
+
+    Args:
+        repo_root: The repository root, from which both harness scripts are READ.
+    """
+    for script_name, variable, record_name in (
+        (RUN_PYTHON_SCRIPT_NAME, "ACAS_PY_POST_FINGERPRINT", "python.post-fingerprint"),
+        ("run_cobol_scenario.sh", "ACAS_RUN_POST_FINGERPRINT", "cobol.post-fingerprint"),
+    ):
+        script = repo_root / "harness" / script_name
+        assert script.is_file(), (
+            f"harness/{script_name} is absent from {script}, so the post-run state "
+            f"record layer 2b reads has no producer at all."
+        )
+        text = script.read_text(encoding="utf-8")
+        assert record_name in text, (
+            f"harness/{script_name} never names {record_name!r}. LAYER 2b compares a "
+            f"run's own pre-run record with that file, and without it the only "
+            f"question the other layers cannot ask - did this run change anything - "
+            f"goes unasked, so two runs that both did nothing report a clean PASS."
+        )
+        assert f"{variable}=" in text, (
+            f"harness/{script_name} never assigns {variable}, so the record's path is "
+            f"never resolved and the write is silently skipped."
+        )
+        assert "run_logs_dir" in text or "run-logs" in text, (
+            f"harness/{script_name} does not place its state records under run-logs/. "
+            f"A record written inside a compared tree would be DIFFED as though it "
+            f"were posted data (R-6)."
+        )
+        assert TABLE_DIGEST_PRODUCER in text, (
+            f"harness/{script_name} does not invoke {TABLE_DIGEST_PRODUCER}. The "
+            f"three-field record has exactly ONE producer so that the pre-run and "
+            f"post-run records, and both sides, are comparable at all; a second "
+            f"inline definition of 'the digest' is how the two silently drift apart."
         )

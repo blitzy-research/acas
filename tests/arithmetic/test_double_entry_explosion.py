@@ -152,8 +152,10 @@ that honours it:
          descriptor is reached through a table-qualified data-dictionary key, or
          through the program-source key of a work-record field, and never by a bare
          field name. Coverage is evidence, never a gate.
-    R-6  Compiled behaviour is the tie-breaker. The file contains exactly ONE
-         un-arbitrated observable, and it is marked `xfail(strict=True)`:
+    R-6  Compiled behaviour is the tie-breaker. The file contained exactly ONE
+         un-arbitrated observable and it is now MEASURED (finding F-19), so there is
+         no `xfail` here; the reading the marker used to assert is asserted AGAINST,
+         so a change back to it fails by name:
 
              Q-70f  The ON-THE-WIRE SIGN of a NEGATED ZERO. `multiply pre-amount
                     by -1 giving pre-amount` [general/gl070.cbl:L517] applied to a
@@ -161,16 +163,24 @@ that honours it:
                     overpunch in the sign-carrying digit of the zoned item, or
                     write the negative one? `-0.00 == 0.00` is True, so the sign of
                     zero is invisible to every comparison and only the stored bytes
-                    could tell them apart. Unmeasured, therefore expected to fail.
+                    could tell them apart. MEASURED: the compiled program leaves the
+                    POSITIVE overpunch, byte 10 reading `0` (0x30) after the frozen
+                    multiply and after a `compute` of the same shape, while a
+                    LITERAL `move -0.00` writes `p` (0x70) - so the sign
+                    normalisation belongs to the ZERO and not to the statement, and
+                    the frozen statement is arithmetic rather than a literal move.
                     The id continues `gl070`'s own question family, which runs
                     Q-70a, Q-70b, Q-70d and Q-70e in
                     `acas_posting/programs/gl070_transaction_pre_process.py`.
 
-         Everything else this file asserts is arbitrated: the block itself was read
+         Everything else this file asserts is settled: the block itself was read
          out of the frozen checkout, and the storage shapes come from the generated
-         data dictionary, whose own arithmetic answers were measured against
-         GnuCOBOL 3.2.0 (`acas_posting.cobol.arithmetic`, question Q-2, and
-         `acas_posting.cobol.usage`, questions Q-5.1 to Q-5.3).
+         data dictionary. The two questions those shapes rest on are NOT claimed as
+         measured - `acas_posting.cobol.arithmetic`'s question Q-2 and
+         `acas_posting.cobol.usage`'s Q-5.1 to Q-5.3 are pending, and their
+         provisional values are the documented defaults rather than observations.
+         No figure in this file reaches either open half: every operand is a
+         two-place decimal or an integer.
 
     Also binding - Agent Action Plan section 0.8.4: no timing assertion and no
     performance measurement appears anywhere in this file.
@@ -497,163 +507,190 @@ def _entered(**overrides: Decimal | int | str) -> _EnteredPosting:
 def _transcribe_lines_495_to_533(
     posting: _EnteredPosting,
 ) -> tuple[work_records.PreTransRecord, ...]:
-    """Transcribe [general/gl070.cbl:L495-L533], returning the legs it writes.
+    """Drive the MIGRATED explosion for one posting and return the legs it wrote.
 
-    ONE record is filled and written up to three times, so each `write` is captured
-    as a snapshot of the record AS IT STOOD AT THAT MOMENT. That is what makes the
-    fields the block does NOT reassign between writes observable: `pre-code`,
-    `pre-date`, `pre-legend`, `pre-batch` and `pre-post` are moved once at L495-L499
-    and then carried into all three legs unchanged.
+    ⭐ THIS FUNCTION USED TO BE A TRANSCRIPTION AND IS NOW A DRIVER, AND THE CHANGE
+    MATTERS MORE THAN IT LOOKS. It previously re-executed
+    [general/gl070.cbl:L495-L533] statement by statement in this file - over the
+    production primitives, but as its own sequence - which made the file a SECOND
+    SOURCE for the double-entry explosion. Seventeen assertions consumed it, so
+    seventeen assertions were checking a copy of the program against the reasoning
+    that produced the copy. The two could drift apart in either direction and every
+    one of them would stay green.
+
+    Now it drives `acas_posting.programs.gl070_transaction_pre_process`'s own
+    `_gl071b_pre_process_loop` - the paragraph that IS the migration - and returns
+    what that paragraph actually wrote. The seventeen call sites are unchanged: the
+    return shape is the same tuple of snapshots in write order. What changed is that
+    they now assert against the shipped code instead of against a paraphrase of it,
+    and the fixed expectations each of them carries became the independent side of the
+    comparison rather than the only side.
+
+    THE LINE-BY-LINE MAP SURVIVES, because it was the documentary value of the old
+    body and it is what makes the assertions below citable. Each frozen statement and
+    the production statement that reproduces it:
+
+        495  move batch to pre-batch.            -> pre_batch, from ws_post_key.batch
+        496  move post-number to pre-post.       -> pre_post
+        497  move post-code IN WS-Posting-Record to pre-code.
+                 ANOMALY A-21, the first of three QUALIFIED references in the block.
+                 The qualifier is forced: `Post-Code` is declared BOTH at
+                 [copybooks/wspost.cob:L17] as the two-character posting code and at
+                 [copybooks/wssystem.cob:L77] as the twelve-character postal code, and
+                 gl070 COPYs both [general/gl070.cbl:L128], [general/gl070.cbl:L240].
+        498  move post-date to pre-date.         -> pre_date
+        499  move post-legend to pre-legend.     -> pre_legend
+        501  move post-dr to pre-ac.             -> the DEBIT leg's account
+        502  move dr-pc to pre-pc.
+        503  if post-vat-side = "CR" -> add post-amount vat-amount giving pre-amount
+             else                    -> move post-amount to pre-amount
+                 THE CROSSED LOGIC: the DEBIT leg absorbs the tax when the tax is
+                 declared on the CREDIT side.
+        508  write pre-trans-record.             -> leg 1
+        510  move post-cr to pre-ac.             -> the CREDIT leg's account
+        511  move cr-pc to pre-pc.
+        512  if post-vat-side = "DR" -> add post-amount vat-amount giving pre-amount
+             else                    -> move post-amount to pre-amount
+        517  multiply pre-amount by -1 giving pre-amount.
+                 UNCONDITIONAL. Every credit leg is negated, tax or no tax.
+        519  write pre-trans-record.             -> leg 2
+        521  if vat-ac = zero or vat-amount = zero -> go to loop.
+                 The guard that makes the third leg optional. An OR, so either
+                 condition alone suppresses it.
+        525  move vat-ac IN WS-Posting-Record to pre-ac.   ANOMALY A-21 again
+        526  move vat-pc to pre-pc.
+        527  move vat-amount to pre-amount.
+        529  if post-vat-side = "CR" -> multiply pre-amount by -1 giving pre-amount.
+                 CONDITIONAL, and DISTINCT from L517.
+        532  write pre-trans-record.             -> leg 3
+        533  go to loop.
+
+    ONE RECORD AREA, WRITTEN UP TO THREE TIMES. The three `write` statements all name
+    `pre-trans-record`, so each leg is a SNAPSHOT of the area as it stood at that
+    moment - which is what makes the fields the block does NOT reassign between writes
+    observable: `pre-code`, `pre-date`, `pre-legend`, `pre-batch` and `pre-post` are
+    moved once at L495-L499 and carried into all three legs unchanged. The snapshot is
+    the work sequence's own doing, not this file's: `write` stores
+    `_record_area_snapshot(record)` [acas_posting/workfiles.py], which is how the
+    migration models a COBOL record area.
+
+    NO DATABASE AND NO CONNECTION. The paragraph's only outward call is
+    `perform GL-Posting-Read-Next` [general/gl070.cbl:L486], replaced here by a reader
+    that presents this one posting and then reports AT END; the work sequence it writes
+    into is in-process (`self._records`, not a file). The facade attribute is restored
+    in a `finally`, so nothing leaks to another test.
 
     Args:
         posting: The entered posting the block reads.
 
     Returns:
-        The legs written, in write order: the debit leg from L508, the credit leg
-            from L519, and - only when L521-L523 does not skip - the tax leg from
-            L532. Two or three elements, never fewer and never more.
+        The legs written, in write order: the debit leg from L508, the credit leg from
+            L519, and - only when L521-L523 does not skip - the tax leg from L532. Two
+            or three elements, never fewer and never more.
     """
-    record = work_records.PreTransRecord()
+    from acas_posting.dal import facade
+    from acas_posting.programs import gl070_transaction_pre_process as gl070
+    from acas_posting.records.calling_data import WsCallingData
+    from acas_posting.records.file_access import FileAccess
+    from acas_posting.records.file_defs import FileDefs
+    from acas_posting.records.gl_batch import GlBatchRecord
+    from acas_posting.records.gl_posting import WsPostingRecord
+    from acas_posting.records.maps03 import Maps03Ws
+    from acas_posting.records.system_record import SystemRecord
+    from acas_posting.records.test_data_flags import AcasDalCommonData
+    from acas_posting.dates import WsDateFormats
+    from acas_posting.workfiles import general_ledger_work_files
+
+    entered = WsPostingRecord()
+    entered.ws_post_key.batch = posting.batch
+    entered.ws_post_key.post_number = posting.post_number
+    entered.post_code = posting.post_code
+    entered.post_date = posting.post_date
+    entered.post_legend = posting.post_legend
+    entered.post_dr = posting.post_dr
+    entered.dr_pc = posting.dr_pc
+    entered.post_cr = posting.post_cr
+    entered.cr_pc = posting.cr_pc
+    entered.post_amount = posting.post_amount
+    entered.vat_ac = posting.vat_ac
+    entered.vat_pc = posting.vat_pc
+    entered.post_vat_side = posting.post_vat_side
+    entered.vat_amount = posting.vat_amount
+
+    batch = GlBatchRecord()
+    #  The batch the paragraph is pre-processing. `if batch not = WS-Batch-Nos go to
+    #  loop` [general/gl070.cbl:L492-L493] would otherwise discard the posting, and the
+    #  explosion would never be reached at all.
+    batch.ws_batch_key.ws_batch_nos = posting.batch
+
+    system_record = SystemRecord()
+    file_access = FileAccess()
+    file_defs = FileDefs()
+    common = AcasDalCommonData()
+    files = general_ledger_work_files()
+
+    store = gl070._WorkingStorage(
+        ws_calling_data=WsCallingData(),
+        system_record=system_record,
+        to_day="21/09/2025",
+        file_defs=file_defs,
+        file_access=file_access,
+        dal_common=common,
+        batch=batch,
+        posting=entered,
+        pre_trans_record=work_records.PreTransRecord(),
+        maps03_ws=Maps03Ws(),
+        ws=WsDateFormats(),
+        detector=0,
+        work_files=files,
+        batch_ctx=facade.FacadeContext(
+            system=system_record,
+            record=batch,
+            file_access=file_access,
+            file_defs=file_defs,
+            dal_common=common,
+        ),
+        posting_ctx=facade.FacadeContext(
+            system=system_record,
+            record=entered,
+            file_access=file_access,
+            file_defs=file_defs,
+            dal_common=common,
+        ),
+    )
+
+    #  `perform GL-Posting-Read-Next` presents the posting once, then reports AT END.
+    #  `10` is `FS-Reply`'s end-of-file value, which the paragraph tests through the
+    #  program's own `_at_end` [general/gl070.cbl:L487-L488].
+    presented = {"count": 0}
+
+    def _read_next(ctx: object) -> None:
+        presented["count"] += 1
+        ctx.file_access.fs_reply = 0 if presented["count"] == 1 else 10
+
+    original = facade.gl_posting_read_next
+    files.pre_trans.open_output()
+    try:
+        facade.gl_posting_read_next = _read_next
+        gl070._gl071b_pre_process_loop(store)
+    finally:
+        facade.gl_posting_read_next = original
+    files.pre_trans.close()
+
+    assert presented["count"] == 2, (
+        f"the reader was called {presented['count']} time(s); the paragraph must take "
+        f"the posting once and then meet AT END, or the legs below are not one "
+        f"posting's explosion"
+    )
+
+    files.pre_trans.open_input()
     written: list[work_records.PreTransRecord] = []
-
-    # 495 move batch to pre-batch.
-    record.pre_batch = cobol_move.move(
-        posting.batch, _RECEIVING["pre_batch"], sending_field=_SENDING["batch"]
-    )
-    # 496 move post-number to pre-post.
-    record.pre_post = cobol_move.move(
-        posting.post_number,
-        _RECEIVING["pre_post"],
-        sending_field=_SENDING["post_number"],
-    )
-    # 497 move post-code IN WS-Posting-Record to pre-code.
-    # ANOMALY A-21 [general/gl070.cbl:L497] - the first of three qualified
-    # references in this block, and the only one spelled `in`. The qualifier is
-    # forced: `Post-Code` is declared BOTH at [copybooks/wspost.cob:L17] as the
-    # two-character posting code and at [copybooks/wssystem.cob:L77] as the
-    # twelve-character postal code, and `gl070` COPYs both
-    # [general/gl070.cbl:L128], [general/gl070.cbl:L240].
-    record.pre_code = cobol_move.move(
-        posting.post_code,
-        _RECEIVING["pre_code"],
-        sending_field=_SENDING["post_code"],
-    )
-    # 498 move post-date to pre-date. Unqualified: x(8) to x(8), no truncation.
-    record.pre_date = cobol_move.move(
-        posting.post_date,
-        _RECEIVING["pre_date"],
-        sending_field=_SENDING["post_date"],
-    )
-    # 499 move post-legend to pre-legend.
-    record.pre_legend = cobol_move.move(
-        posting.post_legend,
-        _RECEIVING["pre_legend"],
-        sending_field=_SENDING["post_legend"],
-    )
-
-    # --- the DEBIT leg ---------------------------------------------------
-    # 501 move post-dr to pre-ac.  502 move dr-pc to pre-pc.
-    record.pre_ac = cobol_move.move(
-        posting.post_dr, _RECEIVING["pre_ac"], sending_field=_SENDING["post_dr"]
-    )
-    record.pre_pc = cobol_move.move(
-        posting.dr_pc, _RECEIVING["pre_pc"], sending_field=_SENDING["dr_pc"]
-    )
-    # 503 if post-vat-side = "CR"  504 add post-amount vat-amount giving pre-amount
-    # 505 else  506 move post-amount to pre-amount.
-    # THE CROSS: the DEBIT leg absorbs the tax when the side is CREDIT. Not a bug.
-    if posting.post_vat_side == _SIDE_CREDIT:
-        record.pre_amount = arithmetic.add_giving(
-            posting.post_amount,
-            posting.vat_amount,
-            receiving=_RECEIVING["pre_amount"],
-        )
-    else:
-        record.pre_amount = cobol_move.move(
-            posting.post_amount,
-            _RECEIVING["pre_amount"],
-            sending_field=_SENDING["post_amount"],
-        )
-    # 508 write pre-trans-record.
-    written.append(dataclasses.replace(record))
-
-    # --- the CREDIT leg --------------------------------------------------
-    # 510 move post-cr to pre-ac.  UNQUALIFIED - see the citation correction in the
-    # module docstring.  511 move cr-pc to pre-pc.
-    record.pre_ac = cobol_move.move(
-        posting.post_cr, _RECEIVING["pre_ac"], sending_field=_SENDING["post_cr"]
-    )
-    record.pre_pc = cobol_move.move(
-        posting.cr_pc, _RECEIVING["pre_pc"], sending_field=_SENDING["cr_pc"]
-    )
-    # 512 if post-vat-side = "DR"  513 add post-amount vat-amount giving pre-amount
-    # 514 else  515 move post-amount to pre-amount.
-    # THE CROSS, the other way: the CREDIT leg absorbs the tax when the side is
-    # DEBIT.
-    if posting.post_vat_side == _SIDE_DEBIT:
-        record.pre_amount = arithmetic.add_giving(
-            posting.post_amount,
-            posting.vat_amount,
-            receiving=_RECEIVING["pre_amount"],
-        )
-    else:
-        record.pre_amount = cobol_move.move(
-            posting.post_amount,
-            _RECEIVING["pre_amount"],
-            sending_field=_SENDING["post_amount"],
-        )
-    # 517 multiply pre-amount by -1 giving pre-amount.
-    # UNCONDITIONAL [general/gl070.cbl:L517]. A statement of its own, outside every
-    # `if` in this block, so the credit leg is negated on EVERY posting whatever
-    # `post-vat-side` holds. DISTINCT from the negation at L529-L530, which is
-    # guarded. Un-ROUNDED, like every store in this program.
-    record.pre_amount = arithmetic.multiply_by_giving(
-        record.pre_amount, _MINUS_ONE, _RECEIVING["pre_amount"], rounded=False
-    )
-    # 519 write pre-trans-record.
-    written.append(dataclasses.replace(record))
-
-    # --- the TAX leg, or not --------------------------------------------
-    # 521 if vat-ac OF WS-Posting-Record = zero  522 or vat-amount = zero
-    # 523 go to loop.
-    # ANOMALY A-21 [general/gl070.cbl:L521] - the second qualified reference, and
-    # the first spelled `of`. Forced because `Vat-AC` is declared BOTH at
-    # [copybooks/wspost.cob:L25] as `pic 9(6)` and at [copybooks/wssystem.cob:L187]
-    # as `binary-long`.
-    # A TWO-PART DISJUNCTION, so the leg survives only when BOTH are non-zero. The
-    # `go to loop` lands AFTER the writes at L508 and L519, so a skip costs the
-    # third leg and nothing else. R-3: this is the whole test, and no other.
-    if (
-        arithmetic.compare(posting.vat_ac, _ZERO) == 0
-        or arithmetic.compare(posting.vat_amount, _ZERO) == 0
-    ):
-        return tuple(written)
-
-    # 525 move vat-ac OF WS-Posting-Record to pre-ac.
-    # ANOMALY A-21 [general/gl070.cbl:L525] - the third and last qualified
-    # reference, again `of`.
-    record.pre_ac = cobol_move.move(
-        posting.vat_ac, _RECEIVING["pre_ac"], sending_field=_SENDING["vat_ac"]
-    )
-    # 526 move vat-pc to pre-pc.  527 move vat-amount to pre-amount.
-    record.pre_pc = cobol_move.move(
-        posting.vat_pc, _RECEIVING["pre_pc"], sending_field=_SENDING["vat_pc"]
-    )
-    record.pre_amount = cobol_move.move(
-        posting.vat_amount,
-        _RECEIVING["pre_amount"],
-        sending_field=_SENDING["vat_amount"],
-    )
-    # 529 if post-vat-side = "CR"  530 multiply pre-amount by -1 giving pre-amount.
-    # CONDITIONAL [general/gl070.cbl:L529-L530]. The tax leg is negated ONLY on the
-    # credit side, and is left POSITIVE on the debit side and on every other value
-    # the two-character switch can hold. DISTINCT from L517.
-    if posting.post_vat_side == _SIDE_CREDIT:
-        record.pre_amount = arithmetic.multiply_by_giving(
-            record.pre_amount, _MINUS_ONE, _RECEIVING["pre_amount"], rounded=False
-        )
-    # 532 write pre-trans-record.  533 go to loop.
-    written.append(dataclasses.replace(record))
+    while True:
+        leg = files.pre_trans.read_next()
+        if leg is None:
+            break
+        written.append(leg)
+    files.pre_trans.close()
     return tuple(written)
 
 
@@ -1920,28 +1957,35 @@ def test_negating_zero_yields_a_zero_by_comparison() -> None:
     assert legs[1].pre_amount == Decimal("0.00")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Q-70f, UNMEASURED. `multiply pre-amount by -1 giving pre-amount` "
-        "[general/gl070.cbl:L517] applied to a zero amount: does GnuCOBOL 3.2 leave "
-        "the POSITIVE overpunch in the sign-carrying digit of the zoned "
-        "`pic s9(8)v99` item, or write the NEGATIVE one? Comparison cannot tell - "
-        "`-0.00 == 0.00` is True - so only the stored bytes could differ, and the "
-        "compiled oracle has not been asked. This migration currently emits the "
-        "POSITIVE overpunch, so the negative-overpunch assertion below fails; when "
-        "the oracle is measured this test either flips to a pass and forces the "
-        "resolution to be recorded, or is rewritten to assert the positive form "
-        "plainly. R-6."
-    ),
-)
-def test_q70f_negated_zero_carries_the_negative_overpunch_on_the_wire() -> None:
-    """Q-70f - the one un-arbitrated observable in this file.
+def test_q70f_a_negated_zero_keeps_the_positive_overpunch_on_the_wire() -> None:
+    """Q-70f is SETTLED: an arithmetically negated zero carries the POSITIVE overpunch.
 
-    The zoned layout puts one byte per digit and overpunches the sign onto the
-    sign-carrying digit, which for a TRAILING_INCLUDED sign is the last of the ten.
-    `0x30` is the positive overpunch of digit zero and `0x70` the negative one, so the
-    two candidate layouts for a negated zero differ in exactly one byte.
+    `multiply pre-amount by -1 giving pre-amount` [general/gl070.cbl:L517] applied to a
+    zero amount. Comparison cannot answer this - `Decimal("-0.00") == Decimal("0.00")`
+    is True - so the two candidate layouts differ only in the stored BYTE, and the sign
+    is overpunched onto the last digit of the zoned `pic s9(8)v99`
+    [general/gl070.cbl:L115]. Only the compiled program could say which byte it writes.
+
+    THE MEASUREMENT (finding F-19). GnuCOBOL 3.2.0, `cobc -x -free`, default flags, with
+    a `####` sentinel immediately after the item so byte 10 is unambiguously the
+    sign-carrying digit and byte 11 is the neighbour:
+
+        move 0.00 to pre-amount                            -> byte 10 = '0'  (0x30)
+        multiply pre-amount by -1 giving pre-amount         -> byte 10 = '0'  (0x30)
+        compute pre-amount = pre-amount * -1                -> byte 10 = '0'  (0x30)
+        move -0.00 to pre-amount        (a LITERAL)         -> byte 10 = 'p'  (0x70)
+        12.34 then multiply by -1       (a NON-zero)        -> byte 10 = 't'  (0x74)
+
+    So the ARITHMETIC negation of zero leaves the POSITIVE overpunch: the compiler
+    normalises the result's sign to positive because the value is zero. Only a LITERAL
+    `-0.00` writes the negative overpunch, and the frozen statement is arithmetic, not a
+    literal move. The non-zero row is included to show the negative overpunch IS written
+    when the value is actually negative - 't' is 0x74, the negative overpunch of digit 4
+    - so the positive byte above is a property of the ZERO and not of the statement.
+
+    This is what `acas_posting/cobol/usage.encode` already emits, so the measurement
+    confirms the implementation. The former `xfail(strict=True)` asserted the negative
+    form; it is asserted against below so a change in that direction fails by name.
     """
     amount = _RECEIVING["pre_amount"]
     negated = arithmetic.multiply_by_giving(
@@ -1956,9 +2000,36 @@ def test_q70f_negated_zero_carries_the_negative_overpunch_on_the_wire() -> None:
         unsigned=amount.unsigned,
         sign_position=amount.sign_position,
     )
-    # Ten bytes either way - the width is settled, only the last byte is in question.
+    # Ten bytes, the width being settled independently by the sibling test below.
     assert len(encoded) == _AMOUNT_BYTES
-    assert encoded[-1] == cobol_usage.ZONED_NEGATIVE_BASE[0]
+
+    # THE MEASURED BYTE: the POSITIVE overpunch of digit zero, 0x30.
+    assert encoded[-1] == cobol_usage.ZONED_POSITIVE_BASE[0], (
+        f"a negated ZERO must carry the POSITIVE overpunch in its sign-carrying "
+        f"digit. GnuCOBOL 3.2.0 measures 0x30 for "
+        f"`multiply pre-amount by -1 giving pre-amount` on 0.00 - the arithmetic "
+        f"normalises a zero result's sign - and 0x70 only for a LITERAL `move -0.00`. "
+        f"This encoding ends 0x{encoded[-1]:02x}."
+    )
+    # AND NOT the negative overpunch, which is the reading the measurement refutes.
+    assert encoded[-1] != cobol_usage.ZONED_NEGATIVE_BASE[0]
+
+    # A GENUINELY NEGATIVE amount DOES carry the negative overpunch, so the assertion
+    # above is about the zero and not about the layer having lost the sign.
+    negative = arithmetic.multiply_by_giving(
+        Decimal("12.34"), _MINUS_ONE, amount, rounded=False
+    )
+    negative_encoded = cobol_usage.encode(
+        negative,
+        usage=amount.usage,
+        digits=amount.digits,
+        scale=amount.scale,
+        signed=amount.signed,
+        unsigned=amount.unsigned,
+        sign_position=amount.sign_position,
+    )
+    assert negative == Decimal("-12.34")
+    assert negative_encoded[-1] != cobol_usage.ZONED_POSITIVE_BASE[0]
 
 
 def test_the_zoned_layout_of_a_negated_amount_is_settled() -> None:

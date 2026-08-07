@@ -121,10 +121,25 @@ R-6 Compiled behaviour is the tie-breaker. No clock, environment, random or
     identity source is read here; the three open questions are marked in place
     rather than guessed.
 
-Invocation, as `harness/run_python_scenario.sh` performs it::
+Invocation, as `harness/run_python_scenario.sh` performs it.
+`--ok-to-post/--no-ok-to-post` is REQUIRED, not optional: the parser has no
+default for it, so omitting both switches exits 2 with "the following arguments
+are required". Both answers are therefore spelled out rather than shown as a
+bracketed extra::
 
+    # DECLINES. Reproduces the "NO" branch [purchase/pl100.cbl:L308-L309],
+    # which transfers to menu-exit [purchase/pl100.cbl:L467] before the first
+    # open at [purchase/pl100.cbl:L313], so the run has no database effect
+    # whatsoever.
     python -m acas_posting.cli.pl_payment_post --run-date 21/09/2025 \\
-        --irs-instead ' ' [--no-ok-to-post]
+        --irs-instead ' ' --no-ok-to-post
+
+    # PROCEEDS. WARNING - THIS ONE WRITES. Every database write in the route is
+    # gated on this switch, and the menu's `overrewrite` persistence of
+    # SYSTEM-REC and SYSTOT-REC runs after the dispatch either way. Point it
+    # only at a disposable schema.
+    python -m acas_posting.cli.pl_payment_post --run-date 21/09/2025 \\
+        --irs-instead ' ' --ok-to-post
 
 `pyproject.toml` declares no `[project.scripts]`, so the module form is the
 entry point.
@@ -277,15 +292,20 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     args.add_calling_data_arguments(parser, default_caller=args.WS_CALLER_PURCHASE)
     args.add_slpl_linkage_arguments(parser)
-    #  THE TRANSPORT DECLARATION - one contract, published on every route
-    #  (`args.add_transport_security_arguments`). No COBOL counterpart: the frozen
-    #  bridge's connect passes six values and no transport policy at all
+    #  THE TRANSPORT DECLARATION IS NOT AN OPTION ON THIS ROUTE, AND MUST NOT
+    #  BECOME ONE. The frozen `CALL` publishes the linkage operands and the write
+    #  gating answers, and nothing else; the frozen bridge's connect passes six
+    #  values and no transport policy at all
     #  [copybooks/mysql-procedures.cpy:L72-L77], transport being compiled into
-    #  `cobmysqlapi.c`, so the migration must decide it and the operator is the
-    #  only party that knows. Stating NOTHING is the fail-closed policy - loopback
-    #  and Unix sockets only - not an absent one. It decides no posted figure, so
-    #  it cannot make two runs of one scenario differ (R-6).
-    args.add_transport_security_arguments(parser)
+    #  `cobmysqlapi.c`. A `--db-tls-*` or `--db-allow-plaintext` option here would
+    #  add a program input and two refusal outcomes the compiled program has not
+    #  got, which rule R-3 forbids - and a certificate path on a command line is a
+    #  process-listing leak besides. Deployment security is resolved ONCE, outside
+    #  the accounting path, from the same contract the six connection parameters
+    #  come from: `args.install_connection_policy` reads it through
+    #  `cli/rdbms_params.resolve_transport_policy` while the linkage is bound, and
+    #  every handler observes the installed policy without being told. It decides
+    #  no posted figure, so it cannot make two runs of one scenario differ (R-6).
     _add_run_confirmation_argument(parser)
     #  Diagnostics only: no COBOL counterpart, no database effect. Shared with
     #  the other six routes so the level policy has one spelling.
@@ -871,10 +891,18 @@ if __name__ == "__main__":
 #                      or "NO") for both halves of the comparison. Marked at
 #                      `_add_run_confirmation_argument`. The program module records
 #                      the same resolution.
-#   Q-CLI-OVERREWRITE  OPEN. `overrewrite`'s persistence of SYSTEM-REC key 1 and
-#                      SYSTOT-REC key 4 is omitted with the menus, so which of
-#                      `pl100`'s writes never reach a table - and whether a
-#                      scenario diff shows it - must be measured. Marked at the
+#   Q-CLI-OVERREWRITE  CLOSED BY IMPLEMENTATION. `overrewrite`'s RDB arm
+#                      [purchase/purchase.cbl:L621-L634] - keys 1 and 4, this
+#                      menu writing two where General writes three - IS
+#                      reproduced, by `args.overrewrite`, and this module
+#                      performs it on both `load000` branches. So `pl100`'s
+#                      period-total write to `SYSTOT-REC` DOES reach a table and
+#                      the question no longer needs measuring. What is still
+#                      open is only the second leg, the same rewrites against
+#                      the ISAM parameter file at
+#                      [purchase/purchase.cbl:L638-L650], which has no
+#                      counterpart because the migration has one store; that
+#                      residue is `Q-CLI-OVERREWRITE-SECOND-LEG`. Marked at the
 #                      `< 8` branch in `load000`.
 #   Q-CLI-EXITSTATUS   SETTLED UPSTREAM, in `args.exit_status_for`, which
 #                      establishes that there is no oracle observable to consult:

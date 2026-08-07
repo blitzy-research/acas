@@ -12,6 +12,32 @@ each receives the date through linkage. Pinning at this boundary is therefore
 sufficient to make two runs of one scenario byte-identical, which is what R-6
 requires.
 
+THE AMBIENT-READ CENSUS, MEASURED IN THE FROZEN TREE
+====================================================
+Four CLI modules cite this census, so it is recorded here once rather than
+restated in each. The frozen call chain holds FOURTEEN ambient date and time
+reads across SIX files, and EVERY ONE of them is in an out-of-scope menu shell
+or in the date-service copybook those shells COPY - not one is in any of the
+twelve in-scope posting programs:
+
+    six  `move function current-date to wse-date-block`
+         [common/ACAS.cbl:L353], [general/general.cbl:L371],
+         [sales/sales.cbl:L323], [purchase/purchase.cbl:L318],
+         [irs/irs.cbl:L480], [copybooks/Proc-ACAS-Mapser-RDB.cob:L72]
+    four `accept wsb-time from time`
+         [common/ACAS.cbl:L470], [general/general.cbl:L551],
+         [sales/sales.cbl:L520], [purchase/purchase.cbl:L514]
+    four `accept wsa-date from date`
+         [common/ACAS.cbl:L478], [general/general.cbl:L559],
+         [sales/sales.cbl:L528], [purchase/purchase.cbl:L522]
+
+The one that bears on a posting run is
+[copybooks/Proc-ACAS-Mapser-RDB.cob:L72-L80], which is the block this module
+reproduces; the eight `accept` reads feed screen headings and a spool file name
+and reach no table. Agent Action Plan section 0.1.1 makes the same point in
+round numbers - "The single read in the whole call chain lives in the menu
+shell's date-service copybook" - and this census is that claim measured.
+
 Published: TO_DAY_SEED, PinnedRunDate, pin_from_calendar_date, pin_from_to_day,
 pin_from_run_date, verify_pin.
 """

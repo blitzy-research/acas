@@ -18,13 +18,19 @@ Layout
     dal/            data access against the frozen MySQL schema
     dictionary/     the data dictionary model, generator and loader
 
-The layers below `acas_posting` are populated progressively, and every one of
-them listed above is now complete: `clock.py`, `dates.py`, `workfiles.py`, all
-nine `cli/` modules, all twelve `programs/` modules, `records/`, `cobol/`, all
-twenty-one `dal/` modules and `dictionary/`. What remains outstanding is outside
-this package: the migration documents under `docs/migration/`, the test suites
-under `tests/`, the scenario definitions under `harness/scenarios/` and
-`README-python-migration.md`. Nothing in this module depends on any of them.
+Every layer listed above is complete, and so is everything outside this package
+that the migration owes. Inside: `clock.py`, `dates.py`, `workfiles.py`, the ten
+`cli/` modules (`__init__`, `args`, `rdbms_params` and the seven route entry
+points), the thirteen `programs/` modules (`__init__` and the twelve migrated
+programs), the twenty-eight `records/` modules, the eight `cobol/` modules, the
+twenty-two `dal/` modules and the four `dictionary/` modules. Outside: the four
+migration documents under `docs/migration/` - `traceability.md`,
+`anomaly-log.md`, `ambiguity-resolutions.md` and `scenario-diff-evidence.md` -
+the thirty files under `tests/` across the arithmetic, scenario and
+determinism tiers, the nine scenario definitions under `harness/scenarios/`,
+and `README-python-migration.md` at the repository root. Nothing in this module
+depends on any of them, which is why this list is a statement of repository
+state and never a precondition of import.
 
 The generated data dictionary is the field-level authority for every record
 module, and it lives in two places: a committed repository sibling and a copy

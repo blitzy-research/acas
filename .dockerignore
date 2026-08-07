@@ -77,8 +77,6 @@
 #
 #      mysql/ACASDB.sql                   [harness/Dockerfile.mariadb:L301]
 #      requirements.txt                   [harness/Dockerfile.gnucobol]
-#      requirements-harness.txt           [harness/Dockerfile.gnucobol]
-#      requirements-dev.txt               [harness/Dockerfile.gnucobol]
 #      presql2-latest.zip                 [harness/Dockerfile.gnucobol]
 #      mariadb-connector-c-3.3.4-src.zip  [harness/Dockerfile.gnucobol]
 #
@@ -324,7 +322,5 @@ docker-compose.*.override.yml
 # =============================================================================
 !mysql/ACASDB.sql
 !requirements.txt
-!requirements-harness.txt
-!requirements-dev.txt
 !presql2-latest.zip
 !mariadb-connector-c-3.3.4-src.zip

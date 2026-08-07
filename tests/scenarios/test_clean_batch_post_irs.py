@@ -1,11 +1,11 @@
 """IRS CLEAN-BATCH STATE PARITY — THE ONLY SCENARIO THAT TRUNCATES A TABLE.
 
 Scenario `clean_batch_irs`, subsystem `irs`, operation `irs_post`. It drives the
-eight-stage parity protocol and asserts an EMPTY ordering-normalised table diff
+ten-stage parity protocol and asserts an EMPTY ordering-normalised table diff
 between the compiled COBOL oracle and the migrated Python cycle, bounded by the four
 tables the scenario declares.
 
-It is the most dangerous of the eight scenario files, for three reasons that all
+It is the most dangerous of the scenario files, for three reasons that all
 belong to the same route:
 
   1. Its end-of-job answer DELETES EVERY ROW of the Sales-and-Purchase-to-IRS
@@ -49,12 +49,13 @@ schema rather than assumed: every in-scope table has a SINGLE-COLUMN primary key
 secondary index, no `TIMESTAMP` column, no `AUTO_INCREMENT` column and no
 column-level `DEFAULT`, so `SELECT * FROM <table> ORDER BY <primary key>` is a total
 and stable order with no tie-breaking, no timestamp masking and no surrogate-key
-remapping. The four tables here:
+remapping. The five tables here:
 
     IRSDFLT-REC      4 columns, primary key DEF-REC-KEY
     IRSNL-REC       15 columns, primary key KEY-1
     IRSPOSTING-REC  13 columns, primary key KEY-4
     PSIRSPOST-REC   10 columns, primary key IRS-POST-KEY
+    SYSTEM-REC     169 columns, primary key SYSTEM-REC-KEY
 
 -------------------------------------------------------------------------------
 THE MIGRATION BOUNDARY, WHICH IS NARROW AND MUST BE STATED
@@ -91,9 +92,10 @@ IRS-wide idiom rather than a peculiarity of this program.
 IT STILL REQUIRES A PINNED RUN DATE, and "no run date" never meant "no clock":
 parameter 2 is the ordinary ACAS system record, which carries
 `05  Run-Date        binary-long.` at [copybooks/wssystem.cob:L67] — a real
-`SYSTEM-REC` column and therefore visible in a table dump. The entry point's
-run-date option is consequently required on this route as well; its spelling belongs
-to the entry point and is discovered from it by the runner, never written here.
+`SYSTEM-REC` column, read back by both runners after the run and carried into
+`IRSPOSTING-REC`'s date columns, which ARE dumped. The entry point's run-date option is
+consequently required on this route as well; its spelling belongs to the entry point and
+is discovered from it by the runner, never written here.
 
 `IRS-System-Params` IS A DIFFERENT, MUCH SMALLER RECORD from
 `copybooks/wssystem.cob`. [irs/irs.cbl:L392] carries
@@ -430,14 +432,23 @@ depending on which alias set the caller used, which is a behavioral difference a
 not merely a naming one."
 
 -------------------------------------------------------------------------------
-THE EIGHT-STAGE PROTOCOL, AND WHY STAGE 5 MATTERS MORE HERE THAN ANYWHERE
+THE TEN-STAGE PROTOCOL, AND WHY STAGE 5 MATTERS MORE HERE THAN ANYWHERE
 -------------------------------------------------------------------------------
 
-    1  seed.sh                  5  reset_db.sh
-    2  run_cobol_scenario.sh    6  run_python_scenario.sh
-    3  dump --side cobol        7  dump --side python
-    4  normalize.py             7b normalize.py
-                                8  diff_states.py
+    1  reset_db.sh + seed.sh    6  run_python_scenario.sh
+    2  run_cobol_scenario.sh    7  dump --side python
+    3  dump --side cobol        8  normalize.py
+    4  normalize.py             9  verify both captures published
+    5  reset_db.sh + seed.sh   10  diff_states.py
+
+EIGHT LOGICAL STAGES, TEN NUMBERED ONES. Agent Action Plan section 0.3.2 fixes the
+order as "seed, run, dump, normalize, reset, run, dump, diff" - eight. The driver
+`harness/run_parity.sh` numbers ten, reading the list from
+`harness/parity_stages.sh`, because it makes BOTH normalisations and the publication
+check explicit rather than implied. Nothing was added to the protocol; where older
+prose says "stage 8" it means today's stage 10, the diff. The runners' own
+`Check n/8' headings are their internal preflight checks and are not protocol
+stages.
 
 STAGE 5 IS LOAD-BEARING ON THIS ROUTE IN A WAY IT IS NOT ELSEWHERE. The COBOL run at
 stage 2 EMPTIES `PSIRSPOST-REC`. Without the drop, schema re-apply and re-seed at
@@ -445,7 +456,7 @@ stage 5, the Python run at stage 6 would start from an emptied transfer file, wa
 nothing, and post nothing — and the two sides would then "agree" about a scenario
 neither of them actually ran.
 
-Not one of those stages is reimplemented here. `tests/conftest.py` composes all eight
+Not one of those stages is reimplemented here. `tests/conftest.py` composes all ten
 in order and hands them over as the `protocol` fixture, which is the whole reason
 that file exists (Agent Action Plan section 0.4.3: "so that no test reimplements the
 comparison protocol"). Every assertion below reads finished evidence.
@@ -487,13 +498,30 @@ BOUNDING, NEVER IGNORING
 -------------------------------------------------------------------------------
 
 THERE IS NO IGNORE-LIST, NO TOLERANCE-LIST AND NO "KNOWN DIFFERENCE" ALLOWANCE
-anywhere in this file. Bounding is the scenario's affected-table list, and only that.
+anywhere in this file. The COMPARISON covers all 22 in-scope tables on every scenario;
+the scenario's affected-table list is its DECLARED EFFECT, asserted per side, and is not
+the bound.
 
-  * A census across all twelve in-scope programs found ZERO `System-*` facade verbs,
-    so `SYSTEM-REC`, `SYSDEFLT-REC`, `SYSFINAL-REC` and `SYSTOT-REC` are on no
-    scenario's list. `irs/irs.cbl` has no `overrewrite` equivalent on the option-"4"
-    branch, so this route carries none of the Sales and Purchase system-record
-    asymmetry either, and `SYSTOT-REC` genuinely is not written.
+  * A census across all twelve in-scope PROGRAMS found ZERO `System-*` facade verbs,
+    so no migrated program persists a system record. `SYSDEFLT-REC`, `SYSFINAL-REC`
+    and `SYSTOT-REC` are on no DECLARED-EFFECT list for THIS route because nothing on
+    either side of it writes them: `irs/irs.cbl` has no `overrewrite` equivalent on the
+    option-"4" branch, and `acas_posting/cli/args.py`'s `irs_menu_state` carries neither
+    the defaults record nor the totals record, so the migrated IRS route persists KEY 1
+    ALONE. They are still DUMPED and still COMPARED, as all 22 are - a table nobody
+    writes is a table whose rows must not move, which is a claim worth making.
+  * `SYSTEM-REC` IS DECLARED, AND THAT IS THE DECISION. Key 1 IS written on this route -
+    `args.overrewrite` rewrites it unconditionally, and this scenario's own advanced
+    allocator value is what it carries - so the row belongs on the declared-effect list
+    and it is on it. The one problem a dump does have is solved where it arises:
+    `RDBMS-PASSWD char(12)` [copybooks/wssystem.cob:L139] and `PASS-WORD` are two of its
+    169 columns and a dump is `SELECT *`, so `harness/dump_tables.py`'s
+    `REDACTED_COLUMNS` withholds exactly those two cells, identically on both sides, and
+    the other 167 - including everything the frozen date sections write back
+    [copybooks/wssystem.cob:L127] - are compared by value. Both runners FINGERPRINT the
+    row before and after every run as well, and `protocol.assert_system_record_parity`
+    compares the two sides' post-run digests over all 169 columns, so even the two
+    withheld cells are bounded - without putting a credential in the evidence.
   * `next-post` [copybooks/irswssystem.cob:L25] lives in a flat parameter file with
     no bridge and no table, so its increment at [irs/irs030.cbl:L1671] is
     structurally invisible. Bounding by the absence of a table is not an ignore.
@@ -550,9 +578,20 @@ directive." They are distinguished and never collapsed.
      [irs/irs030.cbl:L1635, L1641] with the [irs/irs030.cbl:L1648-L1652] skip, and
      A-5's snapshots [irs/irs030.cbl:L1602, L1612] overwritten at
      [irs/irs030.cbl:L1704-L1708].
-  4. FILE-ABANDONING REJECTION. EXERCISED — [irs/irs030.cbl:L1673-L1678] jumps to
-     `EOJ`, which still performs both snapshot rewrites and both closes, so the
-     partial state is COMMITTED.
+  4. FILE-ABANDONING REJECTION. ⭐ NOT EXERCISED ON THIS FIXTURE, and the claim is
+     withdrawn rather than qualified. [irs/irs030.cbl:L1673-L1678] jumps to `EOJ` on
+     `we-error not = zero` after `perform acasirsub4-Write`, and `EOJ` still performs
+     both snapshot rewrites and both closes — so IF it fired, the partial state would be
+     COMMITTED, which is what makes the class distinct. It cannot fire here: the write
+     is a plain `INSERT` into `IRSPOSTING-REC` and the only failure this fixture could
+     produce is a DUPLICATE KEY, but the allocator starts at `Next-Post` 100
+     [copybooks/irswssystem.cob:L25] and `irspost.dat` seeds exactly ONE internal
+     posting, key 1, so the five keys this run allocates — 100 through 104 — cannot
+     collide with anything. `test_scenario_definition_preconditions` asserts that
+     arithmetic from the definition, so the withdrawal is a MEASURED fact about the
+     fixture rather than a concession. Making the class reachable would mean seeding an
+     internal posting whose key falls inside the allocator's band, which changes what
+     `IRSPOSTING-REC` is bounded to prove and is not this scenario's job.
   5. PERMANENTLY FAILING FACADE VERB. EXERCISED — [common/acas008.cbl:L299-L307].
 
 Every assertion establishes THE SAME DISPOSITION AND THE SAME DATABASE EFFECT on
@@ -754,10 +793,11 @@ def _declared_tables(definition: object) -> tuple:
             return tuple(str(name) for name in declared)
     raise AssertionError(
         f"HARNESS FAULT: {SCENARIO} declares neither 'affected_tables' nor "
-        f"'affected-tables'. That list is how a comparison is BOUNDED, and "
-        f"bounding is done by it and by nothing else - there is no ignore-list, no "
-        f"tolerance-list and no known-difference allowance anywhere in the diff "
-        f"path."
+        f"'affected-tables'. That list is the scenario's DECLARED EFFECT, which the "
+        f"runners assert against; the comparison itself is bounded by all 22 "
+        f"in-scope tables. Both are required, and neither is an ignore-list - there "
+        f"is no ignore-list, no tolerance-list and no known-difference allowance "
+        f"anywhere in the diff path."
     )
 
 
@@ -925,7 +965,7 @@ def _render(harness: object, parity: object) -> str:
 # ---------------------------------------------------------------------------
 #  THE SHARED EVIDENCE
 #
-#  Eight stages, in order, ONCE. Every guard layer lives in the fixture, so a
+#  Ten stages, in order, ONCE. Every guard layer lives in the fixture, so a
 #  HARNESS FAULT is reported as a pytest ERROR and what is left in each test body is
 #  the VERDICT, so a genuine behavioural difference is reported as a pytest FAILURE.
 #  The two can never be confused, which is the whole point of the split.
@@ -940,7 +980,7 @@ def parity(
     pinned_clock: object,
     harness: object,
 ) -> object:
-    """The completed eight-stage parity run for this scenario, guarded.
+    """The completed ten-stage parity run for this scenario, guarded.
 
     RUN ONCE PER SESSION, AND SHARED. Eleven assertions in this file interrogate one
     comparison from different angles, and re-driving the compiled oracle for each of
@@ -971,7 +1011,7 @@ def parity(
 
     Returns:
         The `ParityRun`: every stage result in execution order, both run stages, the
-        stage-8 outcome and the artifact paths. `is_empty` is the pass condition.
+        stage-10 outcome and the artifact paths. `is_empty` is the pass condition.
 
     Raises:
         Skipped: The Compose stack is unusable. A SKIP and never an error.
@@ -1058,7 +1098,7 @@ def parity(
     run = memo.get(SCENARIO)
     if run is None:
         # ------------------------------------------------------------------
-        #  ALL EIGHT STAGES, IN ORDER, ONCE. Nothing about the protocol is
+        #  ALL TEN STAGES, IN ORDER, ONCE. Nothing about the protocol is
         #  reimplemented here. STAGE 5 IS LOAD-BEARING ON THIS ROUTE: the oracle run
         #  at stage 2 EMPTIES PSIRSPOST-REC, so without the drop, schema re-apply and
         #  re-seed the Python run at stage 6 would start from an emptied transfer
@@ -1068,19 +1108,28 @@ def parity(
         memo[SCENARIO] = run
 
     # ------------------------------------------------------------------
-    #  GUARD 4 - THE COMPARISON WAS ACTUALLY BOUNDED, and by the scenario's own list
-    #  in the scenario's own ORDER. The order is load-bearing rather than cosmetic:
-    #  the comparison reports in declared order, and the Python-side runner
-    #  fingerprints the seeded row counts one table per line in that same order, so a
-    #  disagreement is a harness fault and never a behavioural difference.
+    #  GUARD 4 - THE COMPARISON WAS ACTUALLY BOUNDED, and by ALL 22 IN-SCOPE TABLES,
+    #  which is the protocol. A bound drawn from the scenario's declared effect cannot
+    #  reveal a difference in anything the scenario did not expect to move - including
+    #  the system rows `overrewrite` writes on BOTH sides
+    #  [general/general.cbl:L656-L672]. The scenario's own declared list is checked
+    #  separately, as a SUBSET, so nothing it claims to change goes uncompared.
     # ------------------------------------------------------------------
-    assert tuple(run.tables) == tables, (
-        f"HARNESS FAULT: the comparison was bounded by {list(run.tables)} while "
-        f"{SCENARIO} declares {list(tables)}. The declared ORDER is load-bearing."
+    assert tuple(run.tables) == tuple(protocol.in_scope_tables()), (
+        f"HARNESS FAULT: the comparison was bounded by {list(run.tables)} while the "
+        f"protocol bounds it by all 22 in-scope tables, "
+        f"{list(protocol.in_scope_tables())}."
     )
     assert run.tables, (
         f"HARNESS FAULT: {SCENARIO} bounded the comparison by no tables at all. An "
         f"unbounded or empty comparison is not a comparison."
+    )
+    #  The scenario's declared effect must be a SUBSET of the bound, or something it
+    #  claims to change was never compared.
+    assert set(tables) <= set(run.tables), (
+        f"HARNESS FAULT: {SCENARIO} declares an effect on "
+        f"{sorted(set(tables) - set(run.tables))!r}, which the comparison never "
+        f"covered."
     )
 
     # ------------------------------------------------------------------
@@ -1105,6 +1154,40 @@ def parity(
             f"taken, because absence is evidence, but the run's own status cannot be "
             f"read as a verdict."
         )
+
+    # ------------------------------------------------------------------
+    #  GUARD 5b - THE OBSERVED DISPOSITION MATCHES THE ONE THE SCENARIO DECLARED
+    #  (finding F-48).
+    #
+    #  Guard 5 above establishes that neither run stage was a HARNESS FAULT, which is
+    #  a different and much weaker claim: it says the runner did its job, not that the
+    #  cycle reached the disposition this scenario says it should reach. Every other
+    #  scenario test carries this guard; this one was the only one of the eight that
+    #  did not, so `clean_batch_irs` was the one route on which a cycle could have
+    #  aborted with a status the scenario never declared and still been compared -
+    #  and if the abort happened identically on both sides, the diff would have been
+    #  EMPTY and the run reported as parity.
+    #
+    #  `reference_only=True` for the same reason the other tests use it: an ORACLE
+    #  that did not reach its declared disposition means this scenario was never set
+    #  up as declared, which is a setup error, while a PYTHON side that diverges from
+    #  the oracle is a behavioural regression and is reported as a failure by the
+    #  test that compares the two dispositions.
+    # ------------------------------------------------------------------
+    #  BOTH SIDES DROVE THE SAME ORDERED OPERATION LIST (finding F-12). The
+    #  comparison below is between one COBOL run and one Python run, and it means
+    #  nothing unless the two drove the same work in the same order - an empty diff
+    #  between a short run and a full one being the most dangerous false pass this tier
+    #  can produce. Both runners resolve the list from the scenario itself and publish
+    #  one status row per operation, so it is checked rather than assumed.
+    protocol.assert_operations_driven(run, operations=(operation,))
+
+    protocol.assert_declared_statuses(
+        run,
+        operations=(operation,),
+        declared=list(definition["expected_status"]),
+        reference_only=True,
+    )
 
     # ------------------------------------------------------------------
     #  GUARD 6 - BOTH SIDES STARTED FROM THE SAME RECORDED SEEDED STATE. Row counts
@@ -1323,9 +1406,9 @@ def test_scenario_definition_preconditions(
 
     # 3.5 A light check here; the full one is
     # `test_affected_tables_are_in_scope_and_alphabetical`.
-    assert len(declared) == 4, (
-        f"{SCENARIO} must bound the comparison by exactly the four tables the verb "
-        f"census justifies; it declares {list(declared)}."
+    assert len(declared) == 5, (
+        f"{SCENARIO} must bound the comparison by exactly five tables - the four the "
+        f"verb census justifies plus SYSTEM-REC; it declares {list(declared)}."
     )
 
     # THE EXPECTED STATUS IS STRUCTURAL, NOT MERELY EXPECTED. `irs030` has no
@@ -1343,6 +1426,50 @@ def test_scenario_definition_preconditions(
         f"because `main99-exit.` [irs/irs030.cbl:L1729] sits after `EOJ-q1.` "
         f"[irs/irs030.cbl:L1715]. It declares "
         f"{definition.get('expected_status')!r}."
+    )
+
+    # ⭐ 3.5b THE ALLOCATOR CANNOT COLLIDE, WHICH IS WHY REJECTION CLASS 4 IS NOT
+    # REACHED. `move next-post to post-key.` [irs/irs030.cbl:L1670] then `add 1 to
+    # next-post.` [irs/irs030.cbl:L1671] allocate one internal posting key per transfer
+    # row that reaches the write, and `perform acasirsub4-Write`
+    # [irs/irs030.cbl:L1672-L1678] jumps to `EOJ` if the write reports any error. The
+    # write is an INSERT, so the only failure this fixture could produce is a DUPLICATE
+    # KEY - and the module docstring's rejection-class table says class 4 is NOT
+    # exercised here. This is the assertion behind that statement: every key the
+    # allocator can hand out lies strictly above every key the seed already occupies, so
+    # no collision is possible and the claim is withdrawn on measured grounds rather than
+    # asserted without support.
+    # `seed_records["system.dat"]` is keyed by the four RELATIVE RECORD numbers the
+    # frozen loader block writes - 1 for the system record, 2 for the defaults, 3 for
+    # final and 4 for the totals [common/masterLD.sh:L51-L87] - and each value is a LIST
+    # of records. `Next-Post` lives in relative record 1, so the search walks the blocks
+    # rather than assuming a shape, and fails loudly if the field moves.
+    system_blocks = definition["seed_records"]["system.dat"]
+    next_post = None
+    for block in system_blocks.values():
+        for record in block if isinstance(block, list) else [block]:
+            if isinstance(record, dict) and "Next-Post" in record:
+                next_post = int(record["Next-Post"])
+    assert next_post is not None, (
+        "`system.dat` must declare `Next-Post`, the counter "
+        "[copybooks/irswssystem.cob:L25] the section allocates internal posting keys "
+        "from; without it the allocator's band is unknown and rejection class 4's "
+        "reachability cannot be stated either way."
+    )
+    seeded_internal = [int(row["Post-Key"]) for row in
+                       definition["seed_records"]["irspost.dat"]]
+    transfer_rows = len(definition["seed_records"]["postings2irs.dat"])
+    allocated = range(next_post, next_post + transfer_rows)
+    assert not set(allocated) & set(seeded_internal), (
+        f"the allocator would hand out keys {allocated.start}..{allocated.stop - 1} "
+        f"(`Next-Post` {next_post}, and at most {transfer_rows} transfer rows reach the "
+        f"write) and `irspost.dat` already occupies {sorted(seeded_internal)!r}. They "
+        f"OVERLAP, so `perform acasirsub4-Write` [irs/irs030.cbl:L1672] could fail on a "
+        f"duplicate key and jump to `EOJ` [irs/irs030.cbl:L1673-L1678] - which would "
+        f"make rejection class 4 reachable. That is not a fault, but this file's "
+        f"rejection-class table states the class is NOT exercised: update the table, and "
+        f"add the assertions that observe the committed partial state, before changing "
+        f"this fixture."
     )
 
     # 3.6 THE SIX SEED FILES, and the frozen loader each is mapped to.
@@ -1403,9 +1530,14 @@ def test_affected_tables_are_in_scope_and_alphabetical(
     in_scope_table_names: object,
     harness: object,
 ) -> None:
-    """Exactly four tables, alphabetical, all in scope - and `IRSFINAL-REC` ABSENT.
+    """Exactly five tables, alphabetical, all in scope - and `IRSFINAL-REC` ABSENT.
 
     NEEDS NO STACK.
+
+    FOUR ARE JUSTIFIED BY A MEASURED VERB CENSUS, and the fifth, SYSTEM-REC, by
+    measured comparability: the IRS menu exit rewrites key 1 after
+    zz095-Restore-IRS-System-Data, so the Next-Post allocator is persisted there and
+    nowhere else, and both sides end byte-identical (rule R-6).
 
     THE FOUR ARE JUSTIFIED BY A MEASURED VERB CENSUS over
     `Ledger-Postings-Add`, not by inference:
@@ -1431,7 +1563,7 @@ def test_affected_tables_are_in_scope_and_alphabetical(
     THE DECLARED ORDER IS LOAD-BEARING, not cosmetic: the comparison reports in the
     scenario's declared order and the Python-side runner fingerprints the seeded row
     counts one table per line in that same order, so a disagreement between the two is
-    a harness fault. Alphabetical is the convention all eight scenario files share.
+    a harness fault. Alphabetical is the convention every scenario file shares.
 
     THE ELEVEN OUT-OF-SCOPE TABLES ARE NEVER DUMPED, and the frozen column counts are
     checked against the schema as a cheap, strong tripwire on schema tampering - the
@@ -1453,9 +1585,15 @@ def test_affected_tables_are_in_scope_and_alphabetical(
         "IRSNL-REC",
         "IRSPOSTING-REC",
         "PSIRSPOST-REC",
+        "SYSTEM-REC",
     ), (
-        f"{SCENARIO} must bound the comparison by exactly the four tables the verb "
-        f"census justifies, in alphabetical order; it declares {list(declared)}."
+        f"{SCENARIO} must bound the comparison by exactly these five, in alphabetical "
+        f"order; it declares {list(declared)}. Four are justified by the verb census. "
+        f"SYSTEM-REC is the fifth and it matters most HERE: the IRS menu exit rewrites "
+        f"key 1 [irs/irs.cbl:L755-L775] AFTER performing zz095-Restore-IRS-System-Data, "
+        f"so the Next-Post allocator this run advances is persisted through that path "
+        f"and nowhere else. An allocator that drifted, or a key reused, would show in "
+        f"this row and in no other. Measured byte-identical on both sides (rule R-6)."
     )
     assert list(declared) == sorted(declared), (
         f"the affected-table list must be alphabetical: {list(declared)}. The order "
@@ -1589,132 +1727,89 @@ def test_clear_posting_file_answer_is_pinned(scenario_loader: object) -> None:
     )
 
 
-def test_diff_exit_contract_is_honoured(harness: object) -> None:
-    """Exit 2 is an ERROR, exit 1 a FAILURE, exit 0 a pass with ZERO BYTES.
-
-    NEEDS NO STACK: the three statuses are module constants and the report renderer is
-    a pure function, so the contract is asserted without a database, an oracle or a
-    comparison.
+def test_diff_exit_contract_is_honoured(
+    tmp_path, harness, frozen_schema, vocabulary, capsys
+) -> None:
+    """The THREE-WAY exit contract: 0 is a pass, 1 is a failure, 2 IS NEVER A PASS.
 
         0  the trees are identical, and stdout is EMPTY - zero bytes, not a banner
-        1  a real behavioural difference, with a deterministic report
-        2  THE COMPARISON COULD NOT BE PERFORMED
+           and not "no differences found"                                 -> PASS
+        1  a real behavioural difference, with a deterministic report   -> FAILURE
+        2  THE COMPARISON COULD NOT BE PERFORMED - a missing tree, a capture that
+           attests nothing, a capture taken after a failed run           -> ERROR
 
-    A TEST THAT TREATED "COULD NOT COMPARE" AS "NO DIFFERENCES" WOULD BE THE SINGLE
-    WORST BUG AVAILABLE IN THIS TREE, and rule R-6 makes an empty diff the pass
-    condition only when a comparison ACTUALLY HAPPENED. `tests/conftest.py` maps exit
-    2 to a harness fault, which surfaces as a pytest ERROR; the `parity` fixture in
-    this file therefore cannot return at all when the comparison failed, and no
-    assertion below it can be reached by that path.
+    A TEST THAT TREATED "COULD NOT COMPARE" AS "NO DIFFERENCES" IS THE SINGLE WORST BUG
+    AVAILABLE IN THIS TREE, so the mapping is exercised rather than trusted. Rule R-6
+    makes an empty diff the pass condition ONLY when a comparison actually happened.
 
-    A ONE-SIDED TABLE IS A DIFFERENCE, NEVER A REASON TO SKIP THE TABLE, and so is a
-    row present on one side only. Both are asserted here on synthetic findings,
-    because on this route BOTH of the scenario's most distinctive effects are
-    ABSENCES: A-4's missing `IRSPOSTING-REC` row and the truncation of
-    `PSIRSPOST-REC`.
+    ⭐ DRIVEN THROUGH THE SHIPPED COMPARISON, AND THROUGH ONE IMPLEMENTATION.
+    `tests/conftest.py`'s `assert_diff_exit_contract` publishes two synthetic sides with
+    `harness/dump_tables.py`'s own writer, canonicalises them with `harness/normalize.py`
+    and compares them with `harness/diff_states.py` - once for each of the four cases.
+    THIS FILE USED TO ASSERT THE CONTRACT AGAINST MODULE CONSTANTS AND HAND-BUILT
+    `TreeDiff` DATACLASSES, which passes whatever the comparison actually does: three
+    integers being distinct says nothing about what the tool exits with, and a dataclass
+    built in the test reports whatever the test put in it. The constants are still
+    checked here, but only as a cheap corroboration of a contract the helper has just
+    exercised end to end, over THIS scenario's own bound. It matters
+    particularly here, where BOTH of the route's most distinctive effects are
+    ABSENCES - A-4's missing `IRSPOSTING-REC` row and the bounded transfer clear - so
+    a one-sided table and a one-sided row must each be a FINDING and never a reason
+    to drop the table from the comparison.
 
-    ONE DISTINCTION MATTERS AND IS NOT BLURRED. A one-sided table is a FINDING when the
-    comparison was able to look at both trees; a REQUESTED table whose dump FILE is
-    absent is exit 2 instead - a stage that did not run rather than a behavioural
-    difference - because a dump file exists for every table that was dumped whatever
-    its row count, an empty table still carrying `"row_count": 0`. So an emptied
-    `PSIRSPOST-REC` is an EMPTY DUMP and never a missing one, and the two conditions
-    can never be confused.
+    IT ASSERTS NOTHING WHATEVER ABOUT THE MIGRATION. The trees are SYNTHETIC, built from
+    the frozen schema's own column lists, so the machinery under test is the shipped
+    machinery - but a verdict taken from a hand-built tree is not protocol evidence, and
+    none is claimed. That is also why this test needs no Compose stack and no compiled
+    oracle: it executes on a bare host.
 
     Args:
-        harness: The three harness modules, for the statuses and the renderer.
-    """
-    diff_states = harness.diff_states
+        tmp_path: A private output root, so `$ACAS_OUT` is neither read nor needed and
+            nothing is written into a compared tree.
+        harness: The three harness Python modules (R-1).
+        frozen_schema: The parsed `mysql/ACASDB.sql`, READ AND NEVER WRITTEN. It supplies
+            every column name and declared type, so nothing is invented.
+        vocabulary: The STACK-FREE bundle. Stages 4 and 8 are file-to-file
+            transformations driven in process, which is what lets the whole contract be
+            exercised on a bare host; it also publishes the helper.
+        capsys: The two refusals' streams, which the helper drives through
+            `diff_states.main` directly - the `diff` helper maps exit 2 to a harness
+            fault by design, and here a refusal is the expected outcome.
 
-    assert diff_states.EX_IDENTICAL == 0, (
-        f"identical trees must exit 0; the comparison uses "
-        f"{diff_states.EX_IDENTICAL}."
+    Raises:
+        AssertionError: An exit status, a stdout stream or a verdict did not match the
+            contract.
+    """
+    vocabulary.assert_diff_exit_contract(
+        SCENARIO,
+        out_dir=tmp_path,
+        harness=harness,
+        schema=frozen_schema,
+        vocabulary=vocabulary,
+        readouterr=capsys.readouterr,
     )
-    assert diff_states.EX_DIFFERENT == 1, (
-        f"a behavioural difference must exit 1; the comparison uses "
-        f"{diff_states.EX_DIFFERENT}."
-    )
-    assert diff_states.EX_ERROR == 2, (
-        f"a comparison that could not be performed must exit 2; the comparison uses "
-        f"{diff_states.EX_ERROR}. That status is what `tests/conftest.py` maps to a "
-        f"harness fault, and therefore to a pytest ERROR rather than a pass."
-    )
-    assert len({
+
+    # THE THREE STATUSES REMAIN DISTINCT AND KEEP THEIR DOCUMENTED VALUES. Cheap, and
+    # worth stating separately: the helper above proved what the tool DOES, and this
+    # proves the numbers a reader of the evidence document will see are the numbers this
+    # file names. Collapsing "could not compare" into either of the other two is how a
+    # false pass is manufactured.
+    diff_states = harness.diff_states
+    observed = (
         diff_states.EX_IDENTICAL,
         diff_states.EX_DIFFERENT,
         diff_states.EX_ERROR,
-    }) == 3, (
-        "the three statuses must be distinct. Collapsing 'could not compare' into "
-        "either of the other two is how a false pass is manufactured."
     )
-
-    # A comparison of nothing at all: identical, and the report is ZERO BYTES. An
-    # existing empty report says "compared, and identical"; an absent one says nothing.
-    identical = diff_states.TreeDiff(tables=())
-    assert identical.is_empty, "a comparison with no findings must report itself empty."
-    assert identical.total_differences == 0, (
-        f"a comparison with no findings must count zero; it counts "
-        f"{identical.total_differences}."
-    )
-    assert diff_states.render(identical) == "", (
-        "a passing comparison must render the EMPTY STRING - zero bytes, not a "
-        "banner. Agent Action Plan section 0.8.5 makes the empty diff the pass."
-    )
-
-    # A MISSING ROW IS A DIFFERENCE. Modelled on A-4's disposition: the oracle wrote
-    # an IRSPOSTING-REC row that the Python side did not, or the reverse.
-    missing_row = diff_states.TreeDiff(
-        tables=(
-            diff_states.TableDiff(
-                table="IRSPOSTING-REC",
-                primary_key="KEY-4",
-                missing_in_python=(1,),
-            ),
-        )
-    )
-    assert not missing_row.is_empty, (
-        "a row the oracle produced and the migrated cycle did not IS a difference. "
-        "A-4's whole observable effect is a missing `IRSPOSTING-REC` row, so a "
-        "comparison that reported an absence as agreement would hide the anomaly this "
-        "scenario exists to lock."
-    )
-    assert missing_row.total_differences >= 1, (
-        f"a one-sided key must count at least one finding; it counts "
-        f"{missing_row.total_differences}."
-    )
-    assert diff_states.render(missing_row) != "", (
-        "a difference must render a non-empty report, or the evidence document would "
-        "record a finding it cannot show."
-    )
-
-    # A ONE-SIDED TABLE IS ALSO A DIFFERENCE. Modelled on the truncation: if one side
-    # produced no dump for the transfer table at all, that is a finding and never a
-    # reason to drop the table from the comparison.
-    one_sided = diff_states.TreeDiff(
-        tables=(
-            diff_states.TableDiff(
-                table="PSIRSPOST-REC",
-                primary_key="IRS-POST-KEY",
-                in_python=False,
-            ),
-        )
-    )
-    assert one_sided.tables[0].table_missing, (
-        "a table absent from one of the two trees must be reported as missing."
-    )
-    assert not one_sided.is_empty, (
-        "a one-sided table IS a difference, never a reason to skip the table."
-    )
-    assert diff_states.render(one_sided) != "", (
-        "a one-sided table must appear in the report, or the finding could not be "
-        "cited as evidence."
+    assert observed == (0, 1, 2), (
+        f"the exit contract's three statuses must be 0, 1 and 2 in that order; the "
+        f"comparison declares {observed!r}."
     )
 
 
 # ---------------------------------------------------------------------------
 #  THE VERDICT - REQUIRES THE COMPOSE STACK
 #
-#  Everything below reads the finished evidence of ONE completed eight-stage run. The
+#  Everything below reads the finished evidence of ONE completed ten-stage run. The
 #  `parity` fixture applies the stack skip guard, so a bare host SKIPS with a precise
 #  reason and never errors.
 # ---------------------------------------------------------------------------
@@ -1756,7 +1851,7 @@ def test_clean_batch_post_irs_state_parity(
     subtract at [irs/irs030.cbl:L1564] having become rounded.
 
     Args:
-        parity: The completed, guarded eight-stage run.
+        parity: The completed, guarded ten-stage run.
         harness: The three harness modules, for the report renderer.
     """
     assert parity.is_empty, (
@@ -1823,7 +1918,7 @@ def test_a4_half_posted_double_entry_reproduced(
     [irs/irs030.cbl:L1654-L1655].
 
     Args:
-        parity: The completed, guarded eight-stage run.
+        parity: The completed, guarded ten-stage run.
         harness: The three harness modules, for reading the normalised dumps.
     """
     from decimal import Decimal  # noqa: PLC0415 - see the module docstring on R-2
@@ -1954,7 +2049,7 @@ def test_a5_lost_update_on_vat_control_accounts_reproduced(
     implementations left the same values in the same two accounts.
 
     Args:
-        parity: The completed, guarded eight-stage run.
+        parity: The completed, guarded ten-stage run.
         harness: The three harness modules, for reading the normalised dumps.
     """
     ledger = _table_diff(parity, "IRSNL-REC")
@@ -2087,7 +2182,7 @@ def test_psirspost_rec_clear_reproduces_the_frozen_high_key_threshold(
     begin from the identical six-row transfer fixture.
 
     Args:
-        parity: The completed, guarded eight-stage run.
+        parity: The completed, guarded ten-stage run.
         harness: The three harness modules, for reading the normalised dumps.
         scenario_loader: Loads the scenario definition, to confirm the pinned answer.
     """
@@ -2142,6 +2237,7 @@ def test_psirspost_rec_clear_reproduces_the_frozen_high_key_threshold(
 def test_a6_rewrite_verb_can_never_succeed(
     parity: object,
     harness: object,
+    protocol: object,
 ) -> None:
     """A-6: the state reflects the ENTRY GUARD, not an update - identically both sides.
 
@@ -2157,18 +2253,50 @@ def test_a6_rewrite_verb_can_never_succeed(
     [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L163], so a caller invoking it ALWAYS
     fails, every time, for every record.
 
-    THIS IS A STATE-LEVEL ASSERTION AND NOTHING MORE. The status pair itself is a value
-    returned to a caller rather than a table state, so the mechanics of `WE-Error 988`
-    and `FS-Reply 99` belong to the data-access layer's own tests, where
-    `acas_posting/dal/acas008_spl_posting.py` reproduces the guard and returns the same
-    pair rather than performing an update. `docs/migration/anomaly-log.md` records A-6
-    as NOT test-locked for exactly that reason.
+    WHAT THIS TEST PROVES, STATED EXACTLY. It proves a STATE fact: the transfer table
+    is byte-identical before and after each cycle's run, on each side independently, and
+    the two sides agree about it. It does NOT prove that the verb was invoked and
+    refused - a run that never reached the verb would leave exactly the same state, and
+    so would a migrated handler that silently did nothing, or raised, or returned a
+    DIFFERENT failure pair. The status pair is a value returned to a caller rather than
+    a table state, so it cannot be seen from here.
 
-    WHAT THE STATE CAN SHOW. The only outcome the always-failing verb can produce is NO
-    CHANGE. So the transfer table must carry no evidence of an in-place update on
-    either side: after the end-of-job clear it is empty on both, and neither side may
-    have retained a row the other did not. A migrated re-write verb that quietly
-    SUCCEEDED would show up as surviving or altered rows on one side alone.
+    THE PAIR IS THEREFORE LOCKED WHERE IT LIVES, by
+    `tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py` section 20, which
+    calls `acas_posting/dal/acas008_spl_posting.py`'s `aa010_main` once per refused verb
+    and requires `WE-Error 988` with `FS-Reply 99`, drives the published verbs through
+    BOTH vocabularies, and proves by sabotage that no connection is attempted.
+
+    THOSE TWO NUMBERS WERE MEASURED, NOT READ. A COBOL driver compiled against the
+    frozen copybooks called the COMPILED `acas008` with its own linkage in its own
+    order [common/acas008.cbl:L278-L284], once for each of `read-indexed` (4),
+    `re-write` (7), `delete` (8) and `start` (9); GnuCOBOL 3.2 answered `988` and `99`
+    every time. It also answered the CONTRAST: `read-next` (2), which the `evaluate`
+    does not name, passed the guard and went on into the handler's real work - so the
+    pair belongs to THIS GUARD and is not what `acas008` says whenever anything goes
+    wrong. No connection was needed for any of it, which is itself part of the finding:
+    the guard returns before any code that would want one.
+
+    WHERE THE VERB ITSELF IS LOCKED, so that the pair of claims is complete. The status
+    pair is a value returned to a caller rather than a table state, so it belongs to the
+    data-access layer's tests, and it IS locked there:
+    `tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py` INVOKES all four
+    refused functions - read-indexed (4), re-write (7), start (9) and delete (8) -
+    through BOTH published alias sets, asserts `WE-Error 988` with `FS-Reply 99` on each,
+    asserts the record is unchanged, and sabotages the handler's connection opener to
+    prove the guard returns BEFORE any database work. The register entry for A-6 names
+    those locks. This file supplies the state half; that file supplies the mechanism
+    half; neither claims the other's ground.
+
+    WHAT THE STATE CAN SHOW, AND WHAT THE MEASURED CLEAR ACTUALLY DOES. The only outcome
+    the always-failing verb can produce is NO CHANGE - and on this fixture the
+    end-of-job clear is a measured NO-OP too, because the frozen group move stores each
+    key near 3472328296244457776, far above the bridge's 9999999999 bound
+    [common/slpostingMT.cbl:L849-L891]. So the transfer table survives the run intact on
+    BOTH sides, which is what makes a before-and-after comparison possible at all: had
+    the clear emptied it, "no evidence of an update" would have been true of any
+    behaviour whatsoever and this test would have asserted nothing. It is compared
+    against its OWN PRE-RUN state, per side, and not merely across the two sides.
 
     THE ONE VERB THAT DOES REACH THE DATABASE ON THIS HANDLER is the open-output
     special case, and only because [common/acas008.cbl:L313-L319] is tested BEFORE the
@@ -2176,9 +2304,19 @@ def test_a6_rewrite_verb_can_never_succeed(
     re-write cannot, and it is reproduced rather than tidied (R-4).
 
     Args:
-        parity: The completed, guarded eight-stage run.
+        parity: The completed, guarded ten-stage run.
         harness: The three harness modules, for reading the normalised dumps.
+        protocol: The protocol bundle, for the before-and-after state comparison that
+            makes this assertion non-vacuous.
     """
+    # ⭐ THE NON-VACUITY GUARD, AND THE STRONGEST CLAIM HERE. Each side's PRE-run digest
+    # of the transfer table is compared against its OWN POST-run digest. A table diff
+    # compares the two SIDES, and two cycles that both mutated the table identically
+    # would agree perfectly; this comparison instead asks "did this cycle change the
+    # table at all", separately for each cycle, and the answer must be no. That is the
+    # only state signature an unconditionally refused re-write can leave.
+    protocol.assert_tables_unchanged_by_run(parity, unchanged=("PSIRSPOST-REC",))
+
     transfer = _table_diff(parity, "PSIRSPOST-REC")
 
     assert transfer.is_empty, (
@@ -2206,6 +2344,15 @@ def test_a6_rewrite_verb_can_never_succeed(
         f"end-of-job mass delete [irs/irs030.cbl:L1723], so the counts cannot legally "
         f"differ."
     )
+    # And the fixture is genuinely there to be compared. A zero-row table would satisfy
+    # every assertion above vacuously, and the pre/post comparison as well.
+    assert transfer.cobol_row_count > 0, (
+        f"`PSIRSPOST-REC` is EMPTY on both sides, so nothing above has been "
+        f"established: an empty table is unchanged by any behaviour and identical to "
+        f"any other empty table. The scenario seeds six transfer rows and the frozen "
+        f"clear cannot reach them [common/slpostingMT.cbl:L849-L891], so an empty "
+        f"table here is a seeding or clear-bound regression, not an A-6 result."
+    )
 
     # The internal posting table is the one the transfer rows are copied INTO
     # [irs/irs030.cbl:L1661-L1673]. If a re-write of the transfer file had succeeded on
@@ -2223,6 +2370,7 @@ def test_a6_rewrite_verb_can_never_succeed(
 def test_a7_partial_date_component_derivation_is_dumped_as_stored(
     parity: object,
     harness: object,
+    scenario_loader: object,
 ) -> None:
     """A-7: the three bridge-derived date components agree, partial zeros included.
 
@@ -2263,10 +2411,45 @@ def test_a7_partial_date_component_derivation_is_dumped_as_stored(
     `move WS-IRS-Post-Date to post-date` [irs/irs030.cbl:L1662]. So a partially
     derivable date reaches the bridge only if the seed put one in the transfer file.
 
+    THE FIXTURE CARRIES THE PARTIAL ROW DELIBERATELY, AND ITS ABSENCE IS A FAILURE.
+    `postings2irs.dat` seeds post number 5000 with `WS-IRS-Post-Date` `"XX/09/25"`,
+    legend "Day position is not numeric": the day guard at
+    [common/irspostingMT.cbl:L982-L983] cannot fire while the month and year guards can,
+    so exactly one component stays at zero beside intact text. That row is REACHABLE -
+    the missing-credit-account path at [irs/irs030.cbl:L1647-L1652] ends in
+    `go to Input-Loop`, so post 4000's absent account 9999 skips ONE record and does not
+    end the walk. An earlier form of this test SKIPPED when no partial row was observed,
+    which turned both a fixture regression and a fixed anomaly into a green run; it now
+    fails, and its message distinguishes the two causes.
+
     Args:
-        parity: The completed, guarded eight-stage run.
+        parity: The completed, guarded ten-stage run.
         harness: The three harness modules, for reading the normalised dumps.
+        scenario_loader: Loads the scenario definition, so the seeded partial date is
+            named from the fixture rather than assumed.
     """
+    # THE FIXTURE PRECONDITION, READ FROM THE DEFINITION. Asserted before the dumps, so
+    # a fixture that stopped carrying a non-numeric date component is reported as such
+    # rather than as an anomaly that stopped reproducing.
+    seed_rows = scenario_loader(SCENARIO)["seed_records"]["postings2irs.dat"]
+    seeded_partials = tuple(
+        row
+        for row in seed_rows
+        if not all(
+            str(row["WS-IRS-Post-Date"])[offset : offset + 2].isdigit()
+            for offset in (0, 3, 6)
+        )
+    )
+    assert seeded_partials, (
+        f"{SCENARIO}'s transfer fixture carries no posting whose date text fails one of "
+        f"the three bridge guards [common/irspostingMT.cbl:L982-L987], so A-7's PARTIAL "
+        f"derivation cannot be exercised by this scenario at all. The fixture is "
+        f"supposed to carry post 5000 with `WS-IRS-Post-Date` 'XX/09/25'. Dates "
+        f"seeded: "
+        f"{[str(row['WS-IRS-Post-Date']) for row in seed_rows]!r}. This is a FIXTURE "
+        f"REGRESSION, not an anomaly that stopped reproducing."
+    )
+
     posting = _table_diff(parity, "IRSPOSTING-REC")
     assert posting.is_empty, (
         f"A-7 IS NOT REPRODUCED: the two sides disagree about `IRSPOSTING-REC`.\n"
@@ -2319,18 +2502,49 @@ def test_a7_partial_date_component_derivation_is_dumped_as_stored(
         if text.strip() and any(int(str(value)) == 0 for value in components):
             partial_rows += 1
 
-    # A partially-derived row is what the fixture is built to produce, and its absence
-    # is reported rather than passed over in silence: without one, this assertion has
-    # confirmed parity but has not exercised the anomaly.
-    if partial_rows == 0:
-        pytest.skip(
-            f"{SCENARIO} produced no `IRSPOSTING-REC` row with a zero derived "
-            f"component beside non-blank `POST4-DAT`, so A-7's PARTIAL derivation was "
-            f"not exercised. Parity across the {len(indexed['cobol'])} posting row(s) "
-            f"was asserted and holds. To exercise the anomaly the seed fixture must "
-            f"carry one posting whose date text fails a bridge guard "
-            f"[common/irspostingMT.cbl:L982-L987]."
-        )
+    # ⭐ A MISSING PARTIAL ROW IS A FAILURE, NOT A SKIP. This was a `pytest.skip` and
+    # that was wrong: a skip is for something the ENVIRONMENT cannot provide, and this
+    # is something the FIXTURE is built to provide. The parity loop above holds
+    # trivially for rows whose three components all derived cleanly, so without a
+    # partially-derived row present this test has confirmed nothing about A-7. The
+    # fixture precondition at the top of this function has already established that the
+    # SEED carries such a row - posting 5000, declared with
+    # `WS-IRS-Post-Date: "XX/09/25"` for exactly this purpose, a day whose two
+    # characters are not numeric so the first of the three bridge guards
+    # [common/irspostingMT.cbl:L982] cannot fire while the raw text is still stored -
+    # and the branch IS reached today, measured by running this scenario in the harness
+    # container and observing that this test passes rather than skips. So reaching here
+    # with none observed means the row did not survive the run in that state, which is
+    # precisely the disappearance a skip would hide.
+    assert partial_rows > 0, (
+        f"{SCENARIO} produced no `IRSPOSTING-REC` row with a zero derived component "
+        f"beside non-blank `POST4-DAT`, so A-7's PARTIAL derivation was NOT exercised - "
+        f"and the parity assertions above are therefore vacuous with respect to the "
+        f"anomaly, however many rows they compared "
+        f"({len(indexed['cobol'])} posting row(s)).\n"
+        f"\n"
+        f"  THE FIXTURE IS BUILT TO PRODUCE ONE. `harness/scenarios/{SCENARIO}.yaml` "
+        f"declares a transfer record whose `WS-IRS-Post-Date` begins `XX`, so the "
+        f"DAY guard [common/irspostingMT.cbl:L982] cannot fire and `POST4-DAY` must "
+        f"stay zero while `POST4-DAT` still carries the text. The seed's own "
+        f"partially-derivable dates are "
+        f"{[str(row['WS-IRS-Post-Date']) for row in seeded_partials]!r}, each failing "
+        f"at least one of the three guards at [common/irspostingMT.cbl:L982-L987], and "
+        f"post 4000's missing credit account only skips ONE record "
+        f"([irs/irs030.cbl:L1647-L1652] ends in `go to Input-Loop`), so the row is "
+        f"reachable.\n"
+        f"\n"
+        f"  SO ONE OF THREE THINGS HAPPENED, AND ALL THREE ARE FAILURES: both sides "
+        f"completed the partial derivation, which means A-7 HAS BEEN FIXED and a defect "
+        f"fixed is a failure (rule R-4); or the row was refused rather than stored, "
+        f"which the guards' absent `else` forbids; or the transfer walk ended before "
+        f"reaching post 5000, which makes the whole scenario shorter than it claims. "
+        f"Read the normalised `IRSPOSTING-REC` dumps under "
+        f"{parity.paths.run_logs.parent} to see which. Re-measure against the compiled "
+        f"oracle before adjusting this assertion, and do NOT weaken it back to a skip: "
+        f"a branch the fixture is supposed to reach and does not is a REGRESSION in the "
+        f"fixture, not a property of the host."
+    )
 
 
 @pytest.mark.database
@@ -2372,7 +2586,7 @@ def test_irsdflt_rec_is_a_readonly_witness(
     from 256 to 264 bytes that added default 33 for `irs030` itself.
 
     Args:
-        parity: The completed, guarded eight-stage run.
+        parity: The completed, guarded ten-stage run.
         harness: The three harness modules, for reading the normalised dumps.
     """
     defaults = _table_diff(parity, "IRSDFLT-REC")
@@ -2449,7 +2663,7 @@ def test_dump_is_wellformed_on_both_sides(
     every load, and why every column of the frozen schema can be `NOT NULL`.
 
     Args:
-        parity: The completed, guarded eight-stage run.
+        parity: The completed, guarded ten-stage run.
         harness: The three harness modules, for the reader and the column order.
         frozen_schema: The parsed frozen schema, `{table: {column: ColumnType}}`, read
             from `mysql/ACASDB.sql` - read, never written (Agent Action Plan section
@@ -2568,3 +2782,83 @@ def test_dump_is_wellformed_on_both_sides(
                             f"`{declared.sql_type}` "
                             f"[mysql/ACASDB.sql:L{declared.line}]."
                         )
+
+
+@pytest.mark.database
+@pytest.mark.oracle
+def test_system_record_parity_by_digest_as_well_as_by_dump(parity: object, protocol: object) -> None:
+    """THE PARAMETER ROW IS BOUNDED TWICE - by the dump, and by a digest of it.
+
+    WHAT THIS CLOSES. An earlier draft kept `SYSTEM-REC` off every scenario's
+    `affected_tables` and justified that by claiming no side writes it. That claim is
+    FALSE:
+    `acas_posting/cli/args.py`'s `overrewrite` reproduces
+    [general/general.cbl:L656-L672] and every one of the seven routes calls it, so the
+    parameter row is written on BOTH sides of every scenario. Until this assertion
+    existed, a regression in that persistence produced an EMPTY DIFF and a green run.
+
+    WHICH KEYS THIS ROUTE WRITES, AND WHY THIS SCENARIO NEEDS IT MOST. `irs_post` binds
+    `irs_menu_state`, which carries NEITHER the defaults record nor the totals record,
+    so `overrewrite` rewrites KEY 1 ALONE - the narrowest of the three shapes. That one
+    key is the whole of this route's system persistence, and it is where the ADVANCED
+    POSTING ALLOCATOR lands: `next-post` [copybooks/irswssystem.cob:L25] is incremented
+    at [irs/irs030.cbl:L1671] and the entry point persists the advanced value. Without
+    this assertion the allocator's advance is observable NOWHERE - the transfer table is
+    cleared, `next-post` has no column of its own, and the diff cannot reach the row it
+    is written into.
+
+    IT IS DUMPED, WITH EXACTLY TWO CELLS WITHHELD. `SYSTEM-REC` is one of the 22
+    in-scope tables every capture covers, so 167 of its 169 columns are compared by value
+    like any other table's. The two exceptions are credentials - `RDBMS-PASSWD char(12)`
+    [copybooks/wssystem.cob:L139] and `PASS-WORD` - and a capture is evidence that gets
+    committed, so `harness/dump_tables.py`'s `REDACTED_COLUMNS` replaces those two cells
+    with a fixed marker inside `render_value`, the one funnel every captured cell passes
+    through. That is keyed by `(table, column)` and applied identically on both sides, so
+    it cannot itself produce a difference. Bounding the whole table out instead - the
+    alternative that was considered and rejected - removes the leak and takes 167
+    genuinely-written columns with it, and a bound drawn that way cannot reveal a
+    difference in what it excludes.
+
+    AND BOTH RUNNERS FINGERPRINT IT ANYWAY, before and after every run, which is what
+    this test compares. A sha256 over the canonical primary-key-ordered dump covers all
+    169 columns, credentials included, without being the dump - so the two withheld cells
+    are still compared, inside a hash that leaks nothing. The credential columns come from
+    the environment and are identical for both sides of one run, so they cannot
+    manufacture a difference; anything that does differ is a difference in what the two
+    cycles wrote. MEASURED, so the second-order worry is stated with its limit: the row's
+    content depends on what the route DID - the run-date stamp, the IRS allocator, the
+    one-shot latches, and `Date-Form`, which the frozen date sections write back
+    [copybooks/wssystem.cob:L127] - and the digest HOLDS on all four scenarios that
+    declare `unchanged` and MOVES on every one that declares `changed`. That was measured
+    over the eight scenarios that existed when the measurement was taken, which is all
+    four `unchanged` ones; the ninth, `end_of_cycle_gl`, declares `changed` and moves the
+    row by construction, Phase 5 advancing the cycle and rotating the quarter counter.
+    So declaring the row falsifies no effect claim; the digest is the belt to the dump's
+    braces.
+
+    Args:
+        parity: The completed, guarded run. The assertion needs its
+            artifact layout, and taking the fixture is what orders this test after the
+            two run stages rather than a comment claiming it.
+        protocol: The protocol bundle. `assert_system_record_parity` is the ONE
+            implementation of this comparison and lives in `tests/conftest.py`; nothing
+            here reads a fingerprint file itself.
+
+    Raises:
+        Skipped: The harness Compose stack is not usable.
+        AssertionError: A post-run record is missing or unreadable (a harness fault), or
+            the two cycles left the parameter row in different states (a behavioural
+            difference the table diff cannot see).
+    """
+    cobol_record, python_record = protocol.assert_system_record_parity(parity)
+
+    # STATE WHAT WAS OBSERVED, so the test is not merely "the helper did not raise".
+    # A zero-row parameter row would mean the seed never loaded system.dat, in which
+    # case both sides agree on nothing at all and the digests would match vacuously.
+    assert cobol_record.row_count == python_record.row_count == 1, (
+        f"{SCENARIO}: the parameter row holds {cobol_record.row_count} row(s) on the "
+        f"oracle side and {python_record.row_count} on the migrated side. system.dat "
+        f"seeds EXACTLY ONE row for key 1, and two empty tables carry the same digest - "
+        f"so without this check the parity claim above could pass on a database that "
+        f"was never seeded."
+    )

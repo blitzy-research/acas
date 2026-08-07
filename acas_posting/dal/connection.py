@@ -73,6 +73,9 @@ __all__: Final[tuple[str, ...]] = (
     "AcasConverter",
     "BinaryFloatingPointError",
     "ConnectionPolicy",
+    "DEFAULT_CONNECT_TIMEOUT_SECONDS",
+    "DEFAULT_READ_TIMEOUT_SECONDS",
+    "DEFAULT_WRITE_TIMEOUT_SECONDS",
     "ConnectionPolicyError",
     "ConverterPinningError",
     "FrozenPlaceholderCredentialsError",
@@ -700,6 +703,24 @@ class InsecureTransportError(ConnectionPolicyError):
     """
 
 
+#: THE THREE DRIVER DEADLINES, IN SECONDS, AND WHY THEY ARE FINITE BY DEFAULT
+#: (finding F-05). ``mysql_real_connect`` is called by the frozen bridge with no
+#: option set on the handle [copybooks/mysql-procedures.cpy:L72-L77], so the
+#: compiled program waits forever on an unreachable or wedged server. The
+#: migrated cycle is a headless batch process whose runs are compared: a wait
+#: that never ends produces no different table state, only a run that cannot be
+#: told apart from a slow one. So every open, read and write is bounded, and the
+#: deployment may raise or lower each through
+#: `acas_posting.cli.rdbms_params.TRANSPORT_CONNECT_TIMEOUT_VARIABLE` and its two
+#: siblings. The values are the same ones that module publishes as its defaults;
+#: they are restated here rather than imported because the data-access layer must
+#: not depend on the entry-point layer (Agent Action Plan section 0.4.3), and
+#: `tests/` asserts the two definitions agree.
+DEFAULT_CONNECT_TIMEOUT_SECONDS: Final[int] = 10
+DEFAULT_READ_TIMEOUT_SECONDS: Final[int] = 300
+DEFAULT_WRITE_TIMEOUT_SECONDS: Final[int] = 300
+
+
 @dataclass(frozen=True, slots=True)
 class TransportSecurity:
     """The caller's declaration about how the connection may cross the network.
@@ -848,12 +869,63 @@ class ConnectionPolicy:
             satisfies ``require_declared_placeholder_credentials``. The harness
             declares this; a production deployment should not need to, because
             its row carries real credentials.
+        connect_timeout_seconds: The driver's connect deadline, in whole seconds.
+            FINITE, AND THERE IS NO SPELLING FOR "NONE" (finding F-05). The frozen
+            C interface sets no option on the handle at all
+            [copybooks/mysql-procedures.cpy:L72-L77], so an unreachable server
+            blocks the compiled program forever; reproducing that in a headless
+            batch process yields no different table state, only a run that never
+            returns and that outside the harness's own deadline cannot be told
+            apart from a long one. Resolved from
+            ``rdbms_params.TRANSPORT_CONNECT_TIMEOUT_VARIABLE``.
+        read_timeout_seconds: The driver's per-read deadline, in whole seconds.
+            Resolved from ``rdbms_params.TRANSPORT_READ_TIMEOUT_VARIABLE``.
+        write_timeout_seconds: The driver's per-write deadline, in whole seconds.
+            Resolved from ``rdbms_params.TRANSPORT_WRITE_TIMEOUT_VARIABLE``.
     """
 
     transport: TransportSecurity | None = None
     require_encrypted_transport: bool = False
     require_declared_placeholder_credentials: bool = False
     allow_frozen_placeholder_credentials: bool = False
+    connect_timeout_seconds: int = DEFAULT_CONNECT_TIMEOUT_SECONDS
+    read_timeout_seconds: int = DEFAULT_READ_TIMEOUT_SECONDS
+    write_timeout_seconds: int = DEFAULT_WRITE_TIMEOUT_SECONDS
+
+    def driver_deadlines(self) -> dict[str, int]:
+        """Return the three deadline keywords for ``mysql.connector.connect``.
+
+        Returns:
+            ``connection_timeout``, ``read_timeout`` and ``write_timeout``, in
+            seconds - the three keywords the installed connector publishes
+            (verified against ``mysql.connector.constants.DEFAULT_CONFIGURATION``
+            of mysql-connector-python 26.7.0). Merged into the connect arguments
+            by :func:`mysql_1000_open`; they bound how long a call WAITS and
+            change nothing it reads or writes (rules R-3, R-6).
+
+        Raises:
+            ValueError: A deadline is not a positive whole number of seconds. A
+                policy that names an unbounded or negative budget is refused
+                rather than quietly replaced, because the whole point of the field
+                is that the wait is bounded.
+        """
+        deadlines = {
+            "connection_timeout": self.connect_timeout_seconds,
+            "read_timeout": self.read_timeout_seconds,
+            "write_timeout": self.write_timeout_seconds,
+        }
+        for keyword, seconds in deadlines.items():
+            if not isinstance(seconds, int) or isinstance(seconds, bool):
+                raise ValueError(
+                    f"ConnectionPolicy.{keyword} must be a whole number of "
+                    f"seconds; it is {seconds!r}"
+                )
+            if seconds <= 0:
+                raise ValueError(
+                    f"ConnectionPolicy.{keyword} must be positive and finite; "
+                    f"it is {seconds}"
+                )
+        return deadlines
 
     def declared_transport(self) -> TransportSecurity:
         """Return the transport declaration to apply when a caller made none.
@@ -906,13 +978,24 @@ def set_connection_policy(policy: ConnectionPolicy) -> None:
             f"{type(policy).__name__}"
         )
     _CONNECTION_POLICY = policy
-    #  DEBUG, and it names no host, no account and no schema - the policy's own
-    #  fields are paths and booleans, never a credential (CWE-532).
+    #  DEBUG, AND IT CARRIES NO PATH. `%r` of a `TransportSecurity` renders the
+    #  CA bundle, the client certificate and THE PRIVATE KEY's filesystem paths,
+    #  which is a filesystem-layout disclosure in a log the operator did not
+    #  choose to make (CWE-532) - and a private key's location is the last thing
+    #  a diagnostic should volunteer. What a reader of this line actually needs is
+    #  WHETHER each was declared and what shape of protection results, so that is
+    #  what it says: three booleans and the policy's two switches. The connect
+    #  itself logs the stable category from `transport_category`, which is derived
+    #  from the shape of the target rather than from anybody's identity.
+    declared = policy.transport
     _LOG.debug(
-        "connection policy installed: transport=%r require_encrypted_transport=%s "
+        "connection policy installed: ca_declared=%s client_certificate_declared=%s "
+        "isolated_oracle_declared=%s require_encrypted_transport=%s "
         "require_declared_placeholder_credentials=%s "
         "allow_frozen_placeholder_credentials=%s",
-        policy.transport,
+        declared is not None and bool(declared.ca_file),
+        declared is not None and bool(declared.certificate_file),
+        declared is not None and bool(declared.isolated_oracle),
         policy.require_encrypted_transport,
         policy.require_declared_placeholder_credentials,
         policy.allow_frozen_placeholder_credentials,
@@ -1101,9 +1184,15 @@ def _require_permitted_connection(
             or the target is not local, is neither verified nor declared an
             isolated oracle, AND the installed policy sets
             ``require_encrypted_transport``.
-    """
-    concerns: list[str] = []
 
+    Note:
+        ONE RETURN CONTRACT, AND IT IS `None` (finding F-04). This function used
+        to carry a vestigial `concerns` list from before `audit_connection_policy`
+        existed, returning an always-empty tuple from three branches and a bare
+        `return` from a fourth while its only caller ignored the value. The
+        reporting API is `audit_connection_policy`, which returns the findings; this
+        one is a guard and returns nothing.
+    """
     if (
         carries_frozen_placeholder_rdbms_credentials(system_record)
         and not allow_frozen_placeholder_credentials
@@ -1139,10 +1228,10 @@ def _require_permitted_connection(
         )
 
     if _target_is_local(parameters):
-        return tuple(concerns)
+        return
 
     if transport.verifies_the_server():
-        return tuple(concerns)
+        return
 
     if transport.isolated_oracle:
         # Logged without the host, the account or the schema.
@@ -1177,7 +1266,7 @@ def _require_permitted_connection(
         "and verify, or ConnectionPolicy(require_encrypted_transport=True) to "
         "refuse instead"
     )
-    return tuple(concerns)
+    return
 
 
 def audit_connection_policy(
@@ -1555,28 +1644,36 @@ def _db_error_status(
     )
 
 
-def _assert_converter_pinned(connection: MySQLConnectionAbstract) -> None:
-    """Verify the pinned converter is really in force on a live connection.
+#: The connections whose converter has already been probed, held by identity so a
+#: reused connection is probed ONCE. A `set` of ids would outlive the objects; the
+#: connections themselves are already tracked for the lifetime of the process in
+#: `_PROCESS_CONNECTIONS`, and this list holds the same references, so nothing is
+#: kept alive that was not already.
+_CONVERTER_PROBED: list[MySQLConnectionAbstract] = []
 
-    Rule R-2 names this file for pinning the converter "rather than relying on the
-    default".
+#: Whether the STATIC half of the R-2 guarantee has been checked in this process.
+#: It examines class attributes only, so once is exactly as strong as every time.
+_CONVERTER_HOOKS_CHECKED: bool = False
 
-    Args:
-        connection: A connection that has just been opened.
+
+def _assert_converter_hooks_pinned() -> None:
+    """Check the STATIC half of rule R-2: the hooks the converter class overrides.
+
+    ⭐ NO DATABASE, AND ONCE PER PROCESS. This half compares class attributes -
+    `AcasConverter`'s hooks against `MySQLConverter`'s - so its answer cannot
+    differ between two connections or between two calls, and running it on every
+    handler open bought nothing. It is separated from the live probe so that the
+    statement count a run issues is decided by how many CONNECTIONS it opens and
+    not by how many handlers it opens them through.
 
     Raises:
-        ConverterPinningError: On any drift. The caller closes the connection before
-            letting this leave :func:`mysql_1000_open`.
+        ConverterPinningError: A hook this file exists to replace still resolves
+            to the driver's own implementation.
     """
-    converter = getattr(connection, "converter", None)
-    if not isinstance(converter, AcasConverter):
-        raise ConverterPinningError(
-            "rule R-2: the ACAS numeric converter is not in force - the "
-            f"connection is using {type(converter).__name__!r}. Every "
-            "connection must be opened with converter_class=AcasConverter so "
-            "that no accounting value passes through a binary floating-point "
-            "type in transport."
-        )
+    global _CONVERTER_HOOKS_CHECKED  # noqa: PLW0603 - the one process-wide flag
+
+    if _CONVERTER_HOOKS_CHECKED:
+        return
 
     base = conversion.MySQLConverter
     for field_type, hook in (
@@ -1590,6 +1687,45 @@ def _assert_converter_pinned(connection: MySQLConnectionAbstract) -> None:
                 "own implementation, so that type would be converted by the "
                 "default this file exists to replace."
             )
+    _CONVERTER_HOOKS_CHECKED = True
+
+
+def _assert_converter_pinned(connection: MySQLConnectionAbstract) -> None:
+    """Verify the pinned converter is really in force on a live connection.
+
+    Rule R-2 names this file for pinning the converter "rather than relying on the
+    default".
+
+    ⭐ ONCE PER PHYSICAL CONNECTION, NOT ONCE PER HANDLER OPEN. The converter is
+    an attribute of the connection and the probe reads three casts from the
+    server; neither answer can change while a connection is open, so re-running it
+    for every `fn-Open` added one round trip per handler - twenty in a full cycle -
+    and one more place a migration-only exception could surface in a paragraph
+    whose frozen counterpart has exactly two outcomes
+    [copybooks/mysql-procedures.cpy:L127-L128]. A connection that has been probed
+    is remembered, and a reused process connection is therefore probed once.
+
+    Args:
+        connection: A connection that has just been opened.
+
+    Raises:
+        ConverterPinningError: On any drift. The caller closes the connection before
+            letting this leave :func:`mysql_1000_open`.
+    """
+    _assert_converter_hooks_pinned()
+
+    if any(connection is probed for probed in _CONVERTER_PROBED):
+        return
+
+    converter = getattr(connection, "converter", None)
+    if not isinstance(converter, AcasConverter):
+        raise ConverterPinningError(
+            "rule R-2: the ACAS numeric converter is not in force - the "
+            f"connection is using {type(converter).__name__!r}. Every "
+            "connection must be opened with converter_class=AcasConverter so "
+            "that no accounting value passes through a binary floating-point "
+            "type in transport."
+        )
 
     with execute_statement(connection, CONVERTER_PROBE_STATEMENT) as cursor:
         probe = cursor.fetchone()
@@ -1644,6 +1780,28 @@ def _assert_converter_pinned(connection: MySQLConnectionAbstract) -> None:
             "in-scope char columns would not compare as text in a state diff."
         )
 
+    #  RECORDED LAST, so a connection is remembered only once it has PASSED. A
+    #  failing connection is closed by the caller and never reaches here, which is
+    #  why nothing has to be removed from this list on the failure path.
+    _CONVERTER_PROBED.append(connection)
+
+
+def forget_converter_probe(connection: MySQLConnectionAbstract) -> None:
+    """Forget that one connection was probed, so a successor is probed again.
+
+    Called by :func:`reset_process_connection` and :func:`close_all_connections`
+    when a connection leaves the process's hands. A driver may hand the same
+    object back for a later `connect`, and a re-connected handle is a NEW session
+    whose converter has not been observed.
+
+    Args:
+        connection: The connection being discarded. Not being on the list is
+            fine - a connection that failed its probe was never recorded.
+    """
+    _CONVERTER_PROBED[:] = [
+        probed for probed in _CONVERTER_PROBED if probed is not connection
+    ]
+
 
 _PROCESS_CONNECTION: MySQLConnectionAbstract | None = None
 _PROCESS_CONNECTIONS: list[MySQLConnectionAbstract] = []
@@ -1676,6 +1834,10 @@ def reset_process_connection() -> None:
             continue
         seen.add(identity)
         _close_quietly(connection)
+        #  A discarded handle's converter observation is discarded with it: the
+        #  driver may hand the same object back for a later `connect`, and that is
+        #  a new session whose converter has not been seen.
+        forget_converter_probe(connection)
     _PROCESS_CONNECTIONS.clear()
     _PROCESS_CONNECTION = None
 
@@ -1817,6 +1979,11 @@ def mysql_1000_open(
     # the frozen source does.
     driver_arguments: dict[str, Any] = {
         **parameters,
+        #  THE THREE FINITE DEADLINES (finding F-05), from the one installed
+        #  policy, so a route that declared them in the deployment contract gets
+        #  them on every open this process makes. They bound how long a call
+        #  WAITS; no statement, status pair or stored value moves because of them.
+        **policy.driver_deadlines(),
         "autocommit": True,
         # RULE R-2, WHICH NAMES THIS FILE. The converter is pinned explicitly rather
         # than left to the driver's default.
@@ -1846,8 +2013,11 @@ def mysql_1000_open(
     if all(connection is not tracked for tracked in _PROCESS_CONNECTIONS):
         _PROCESS_CONNECTIONS.append(connection)
 
-    # Checked on EVERY open, exactly as before this slot existed, so the number of probe
-    # statements a run issues does not move.
+    # ONCE PER PHYSICAL CONNECTION. The class-level half of the R-2 guarantee is
+    # checked once per process and the live probe once per connection, so the number
+    # of statements a run issues is decided by how many connections it opens rather
+    # than by how many handlers open them - a full cycle opened twenty and probed
+    # twenty times over one reused session. See `_assert_converter_pinned`.
     try:
         _assert_converter_pinned(connection)
     except BaseException:
@@ -1856,6 +2026,7 @@ def mysql_1000_open(
         # closes intentionally retain the one process connection so a later handler
         # cannot invalidate another handler's still-live state.
         _close_quietly(connection)
+        forget_converter_probe(connection)
         _PROCESS_CONNECTIONS[:] = [
             tracked for tracked in _PROCESS_CONNECTIONS if tracked is not connection
         ]

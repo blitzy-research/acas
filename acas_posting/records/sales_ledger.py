@@ -155,8 +155,10 @@ FIELD_DESCRIPTORS: Final[Mapping[str, FieldDescriptor]] = MappingProxyType(
 
 The disagreement between the three layers is reached from a descriptor by `drift()`, and
 its registered references by `anomaly_refs()` and `ambiguity_refs()`. For the eleven
-narrowed binary fields those answer `('A-11',)` and `('Q-3',)`; for the money fields
-they answer `()`.
+narrowed binary fields those answer `('A-11',)` and `()` - the anomaly is published
+because the sign loss is reproduced rather than repaired, and no ambiguity is
+published because question `Q-3`, what the unsigned column then holds, has been
+measured on the compiled oracle. For the money fields both answer `()`.
 """
 
 
@@ -391,7 +393,9 @@ class WsSalesRecord:
     sales_discount: Decimal = _ZERO_MONEY
 
     # Every one is signed at the copybook and unsigned from the bridge onwards
-    # [common/salesMT.cbl:L302-L312] - anomaly A-11, open question Q-3.
+    # [common/salesMT.cbl:L302-L312] - anomaly A-11. Question Q-3, what the unsigned
+    # column then holds, is MEASURED: the absolute value, magnitude first and any
+    # high-order truncation second.
     sales_late_min: int = 0
 
     sales_late_max: int = 0

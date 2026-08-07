@@ -161,10 +161,56 @@ readonly -a ACAS_RUN_AUTOGEN_TABLES=(SAAUTOGEN-REC SAAUTOGEN-LINES-REC)
 # would leave a different and non-deterministic state -- and NOT an ignore-list
 # in the diff tool.
 
+# The ONE scenario parser, shared with harness/run_python_scenario.sh (F-32).
+# Resolved from THIS script's own location rather than from ACAS_REPO, so the reader
+# that ships beside this runner is the reader it uses -- a pair that cannot be
+# mismatched by an environment variable. The `case' is not decoration: invoked by a
+# bare name from its own directory, BASH_SOURCE holds no slash at all and stripping
+# a trailing component would yield this script's own name as the directory.
+case "${BASH_SOURCE[0]}" in
+  */*) ACAS_RUN_SELF_DIR="${BASH_SOURCE[0]%/*}" ;;
+  *)   ACAS_RUN_SELF_DIR='.' ;;
+esac
+readonly ACAS_RUN_SELF_DIR
+readonly ACAS_RUN_SCENARIO_READER="$ACAS_RUN_SELF_DIR/scenario_stream.py"
+
+# THE CANONICAL STAGE REGISTRY (finding F-16). The parity protocol's ten stages are
+# defined in harness/parity_stages.sh and nowhere else, so this script's statement of
+# where it sits in that protocol cannot drift from the protocol actually driven. It was
+# duplicated here as prose, and the prose had gone stale claiming EIGHT stages.
+readonly ACAS_RUN_STAGE_REGISTRY="$ACAS_RUN_SELF_DIR/parity_stages.sh"
+if [[ -r "$ACAS_RUN_STAGE_REGISTRY" ]]; then
+  # shellcheck source=harness/parity_stages.sh
+  . "$ACAS_RUN_STAGE_REGISTRY"
+else
+  printf '%s: the canonical stage registry is missing: %s\n' \
+    "$0" "$ACAS_RUN_STAGE_REGISTRY" >&2
+  printf '  The parity protocol'"'"'s stages are defined there and nowhere else.\n' >&2
+  exit 71
+fi
+
 ACAS_RUN_SCENARIO=''            # scenario NAME
 ACAS_RUN_SCENARIO_FILE=''       # scenario YAML path
-ACAS_RUN_SUBSYSTEM=''           # --subsystem, or derived from --operation
-ACAS_RUN_OPERATION=''           # --operation
+ACAS_RUN_SUBSYSTEM=''           # the subsystem of the operation being driven
+# What --subsystem asked for, kept separate from the resolved value. The resolved
+# one changes per operation; the request is a constraint on every one of them, so it
+# must survive being resolved.
+ACAS_RUN_SUBSYSTEM_REQUESTED=''
+ACAS_RUN_OPERATION=''           # the operation currently being driven
+# The sentinel that means "declared, but never driven". Deliberately NOT zero: zero
+# is a real term code, and a slot left at zero would attest a clean disposition for
+# an operation that never ran (F-13). It is outside the two-digit range of
+# WS-Term-Code [copybooks/wscall.cob:L10], so it can never collide with one.
+readonly ACAS_RUN_OP_NOT_RUN='not-run'
+# THE ORDERED OPERATION LIST (finding F-12). This runner drives EVERY operation the
+# scenario declares, in the declared order, in ONE invocation -- see
+# acas_resolve_operations for why one-per-invocation could not attest the run.
+declare -a ACAS_RUN_OPS=()
+# Its observed disposition, one entry per ACAS_RUN_OPS entry, same index. This is
+# the operation's own term code, NOT this script's exit status (finding F-13).
+declare -a ACAS_RUN_OP_STATUS=()
+# Which of ACAS_RUN_OPS is being driven right now, 0-based; -1 before the first.
+ACAS_RUN_OP_INDEX=-1
 ACAS_RUN_TIMEOUT=120            # per-prompt timeout, seconds
 ACAS_RUN_LOG=''                 # $ACAS_OUT/run-logs/<scenario>/cobol.log
 # Whether the transcript file actually EXISTS and is writable yet, as distinct
@@ -174,7 +220,24 @@ ACAS_RUN_LOCK=''                # the sequential-run lock, removed by the EXIT t
 ACAS_RUN_PLAN_FILE=''           # the resolved keystroke plan, beside the log
 ACAS_RUN_RESULT_FILE=''         # the driver's machine-readable outcome record
 ACAS_RUN_FINGERPRINT=''         # cobol.seed-fingerprint -- read by the Python side
+ACAS_RUN_POST_FINGERPRINT=''    # cobol.post-fingerprint -- the same record, after the drive
 ACAS_RUN_STATUS_FILE=''         # cobol.run-status -- read by harness/dump_tables.py
+# cobol.operation-status -- ONE record per declared operation, carrying that
+# operation's own observed disposition. Separate from the run-status record because
+# WRAPPER HEALTH and PER-OPERATION DISPOSITION are different facts (finding F-13).
+ACAS_RUN_OP_STATUS_FILE=''
+# One identity for one attempt, bound through every stage (F-37). Supplied by
+# harness/run_parity.sh via --run-id or ACAS_PARITY_RUN_ID; derived locally when a
+# hand invocation supplies neither.
+ACAS_RUN_RUN_ID="${ACAS_PARITY_RUN_ID:-}"
+# The staged fixture marker digest this run was seeded from, read from the record
+# harness/reset_db.sh publishes. The EXACT seed identity (F-22).
+ACAS_RUN_SEED_IDENTITY=''
+# This script's own directory, so its siblings -- harness/table_digest.py, the
+# single canonical state-digest producer both sides invoke -- are found relative to
+# this file rather than through $PATH or a guessed checkout layout. Resolved once,
+# here, because $0 is not reliable after a `cd'.
+ACAS_RUN_HARNESS_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # The status a SIGNAL handler decided on, and the pty driver's pid while it runs.
 # Both exist because of the same problem: bash runs the EXIT trap when this shell is
 # terminated by a signal, but `$?' at that moment is the status of the last command
@@ -202,6 +265,12 @@ ACAS_RUN_PAYMENT_CONFIRM=''     # G-3: sl100 / pl100 YES/NO
 ACAS_SQL_OUT=''                 # last successful scalar query result
 ACAS_SQL_DIAG=''                # last client diagnostic, for error messages
 declare -a ACAS_RUN_TABLES=()          # the scenario's affected-table list
+# The fingerprint list -- the affected tables, plus the menu-persisted parameter row on
+# the fallback path where a scenario has not declared it. See
+# acas_resolve_fingerprint_tables for why SYSTEM-REC is dumped AND fingerprinted on
+# every scenario.
+declare -a ACAS_RUN_FINGERPRINT_TABLES=()
+readonly ACAS_RUN_PARAMETER_TABLE='SYSTEM-REC'
 declare -a ACAS_RUN_SUMMARY=()         # the closing summary table
 declare -a ACAS_RUN_WARN_SUMMARY=()    # non-fatal findings, replayed at the end
 declare -a ACAS_RUN_TLS_VARIANTS=()
@@ -424,6 +493,72 @@ acas_join_words() {
 }
 
 # Membership test over an array passed by name, so the arrays stay readonly.
+# ---------------------------------------------------------------------------
+#  THE TARGET, DESCRIBED WITHOUT NAMING IT (finding F-39)
+#
+#  This script's transcripts are retained evidence: they are read by operators,
+#  attached to reports and, on the Python side, replayed to a container log. A line
+#  reading `acas@mariadb:3306/ACASDB` puts the deployment's topology and the database
+#  ACCOUNT NAME into all of that, which is half of a credential and a map of the
+#  network for anybody who reads it (CWE-532). Nothing downstream needs the names:
+#  what a reader needs is WHICH KIND of target this was, and whether two runs used
+#  the SAME one.
+#
+#  So the transcript carries a CATEGORY and a stable FINGERPRINT. The category is
+#  derived from the host alone and is the same vocabulary
+#  `acas_posting/dal/connection.py` uses. The fingerprint is the first twelve hex
+#  digits of a SHA-256 over `host:port/schema` - never the password and never the
+#  account name, neither of which is in the digest at all - so two runs against one
+#  target print the same value and a run against a different target prints a
+#  different one, while the value itself discloses no name. The full values remain in the environment, where the tools that
+#  need them read them.
+# ---------------------------------------------------------------------------
+acas_target_category() {
+  local host="${ACAS_DB_HOST-}" socket="${ACAS_DB_SOCKET-}"
+
+  if [[ -n "$socket" && "$socket" != '0' && "$socket" != 'null' && "$socket" != 'NULL' ]]; then
+    printf 'local-socket'
+    return 0
+  fi
+  case "${host,,}" in
+    ''|localhost|127.0.0.1|::1|'[::1]') printf 'loopback-tcp' ;;
+    mariadb|mysql|db)                   printf 'container-network' ;;
+    *)                                  printf 'network-tcp' ;;
+  esac
+}
+
+acas_target_fingerprint() {
+  local raw digest
+
+  # The ACCOUNT IS DELIBERATELY NOT IN THE DIGEST. Two reasons, both load-bearing.
+  # The digest identifies the TARGET, so harness/seed.sh (which connects as the
+  # application account) and harness/reset_db.sh (which connects as the admin
+  # account) print the SAME fingerprint for the same database -- which is exactly
+  # what makes two transcripts comparable. And an account name that is never an
+  # input can never be recovered from the output, not even by a reader who can
+  # enumerate candidate names.
+  raw="${ACAS_DB_HOST-}:${ACAS_DB_PORT-}/${ACAS_DB_NAME-}"
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    digest="$(printf '%s' "$raw" | sha256sum 2>/dev/null)" || digest=''
+  elif command -v python3 >/dev/null 2>&1; then
+    digest="$(printf '%s' "$raw" | python3 -c 'import hashlib,sys; sys.stdout.write(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())' 2>/dev/null)" || digest=''
+  else
+    digest=''
+  fi
+  digest="${digest%% *}"
+  printf '%s' "${digest:0:12}"
+}
+
+# The one line every stage prints instead of the topology: a category, a
+# fingerprint, and nothing that names anything.
+acas_target_description() {
+  printf '%s target#%s' \
+    "$(acas_target_category)" "$(acas_target_fingerprint)"
+}
+
+# acas_assert_outside_repo <label> <path> Nothing this script writes may land
+# inside $ACAS_REPO.
 acas_in_list() {
   local needle="$1"
   shift
@@ -432,6 +567,65 @@ acas_in_list() {
     if [[ "$element" == "$needle" ]]; then
       return 0
     fi
+  done
+  return 1
+}
+
+# EVERY ONCE-PER-RUN GATE ASKS THE WHOLE LIST, NOT THE SELECTION (F-12)
+#
+# Three kinds of check in this script run exactly ONCE, before the first drive:
+# the pinned-value gates in acas_resolve_pinned_values, the database
+# preconditions in acas_assert_database, and the fh-logger rotation. At that
+# point ACAS_RUN_OPERATION holds the FIRST operation of the list, because
+# acas_resolve_operations deliberately leaves it selected so that nothing between
+# resolution and the drive loop sees an incoherent operation/subsystem pair.
+#
+# So a once-per-run check keyed on ACAS_RUN_OPERATION asks about operation 1 and
+# silently says nothing about operations 2..n. period_end_totals declares
+# sl_invoice_post, sl_cash_post, pl_order_post, pl_payment_post -- and the two
+# cash routes are the ones that need an answer to a prompt with no default. The
+# measured consequence was a run that drove operation 1 cleanly and then hung on
+# sl100's YES/NO prompt until the reactive budget ran out, exit 76.
+#
+# These three predicates are the fix, and they are deliberately pure: none of
+# them touches ACAS_RUN_OPERATION or ACAS_RUN_SUBSYSTEM, so a gate can ask about
+# any operation without disturbing the selected one.
+
+# acas_ops_include <operation>
+# True when <operation> appears anywhere in the resolved ordered list.
+acas_ops_include() {
+  local wanted="$1" op
+  (( ${#ACAS_RUN_OPS[@]} > 0 )) || return 1
+  for op in "${ACAS_RUN_OPS[@]}"; do
+    [[ "$op" == "$wanted" ]] && return 0
+  done
+  return 1
+}
+
+# acas_op_subsystem <operation>
+# Echo the menu that dispatches <operation>, read from the same frozen map
+# acas_select_operation reads. Returns non-zero for an unmapped name rather than
+# echoing a guess.
+acas_op_subsystem() {
+  local wanted="$1" entry rest
+  for entry in "${ACAS_RUN_OPERATION_MAP[@]}"; do
+    if [[ "${entry%%:*}" == "$wanted" ]]; then
+      rest="${entry#*:}"
+      printf '%s\n' "${rest%%:*}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# acas_ops_use_subsystem <subsystem>
+# True when ANY declared operation is dispatched by <subsystem>'s menu.
+acas_ops_use_subsystem() {
+  local wanted="$1" op mapped
+  (( ${#ACAS_RUN_OPS[@]} > 0 )) || return 1
+  for op in "${ACAS_RUN_OPS[@]}"; do
+    mapped="$(acas_op_subsystem "$op")" || continue
+    [[ "$mapped" == "$wanted" ]] && return 0
   done
   return 1
 }
@@ -538,6 +732,118 @@ acas_create_private_file() {
   fi
   chmod 600 -- "$path" 2>/dev/null || acas_die "$EX_PRECONDITION" \
     "could not restrict $what to mode 600: $path"
+}
+
+# =============================================================================
+#  THE RUN ID -- ONE IDENTITY FOR ONE ATTEMPT (finding F-37)
+#
+#  Every artifact of the parity protocol used to be written to a CANONICAL path and
+#  nothing else: run-logs/<scenario>/<side>.log, <side>.run-status,
+#  <side>.seed-fingerprint. Two attempts at one scenario therefore wrote to the same
+#  names, and harness/run_parity.sh's --from/--to made that reachable on purpose:
+#  stages 1..5 of one attempt and stages 6..10 of another produce a verdict over
+#  artifacts that were never part of the same run, and nothing in the evidence says
+#  so.
+#
+#  So one identity is bound through every stage. It arrives from the driver
+#  (--run-id, or ACAS_PARITY_RUN_ID), which is how all ten stages come to agree; when
+#  neither is given -- a hand invocation -- one is derived locally so that the field
+#  is never empty and never guessed at by a reader.
+#
+#  It is deliberately NOT derived from the clock. Rule R-6 makes the run
+#  reproducible, and finding F-41 keeps wall-clock readings out of retained
+#  evidence; a timestamped identity would put one back into every record. The kernel
+#  UUID source is used when it is readable, and the process id plus one shell random
+#  otherwise -- neither of which says when the run happened.
+# =============================================================================
+acas_derive_run_id() {
+  local uuid=''
+  if [[ -r /proc/sys/kernel/random/uuid ]]; then
+    read -r uuid < /proc/sys/kernel/random/uuid 2>/dev/null || uuid=''
+    uuid="${uuid//-/}"
+  fi
+  if [[ -n "$uuid" ]]; then
+    printf 'local-%s' "${uuid:0:16}"
+  else
+    printf 'local-%s-%s' "$$" "$RANDOM"
+  fi
+}
+
+acas_assert_run_id() {
+  [[ "$$ACAS_RUN_RUN_ID" =~ ^[A-Za-z0-9._-]{1,64}$ ]] || acas_die "$EX_USAGE" \
+    "the run id must be 1 to 64 characters of letters, digits, dot, underscore or hyphen." \
+    "  got: $(acas_sanitise_field "$ACAS_RUN_RUN_ID")" \
+    'It becomes part of a file name and is published in every evidence record, so it' \
+    'has to be a plain identifier.'
+}
+
+# ⭐ EVERY EVIDENCE LEAF IS PUBLISHED BY RENAME, NEVER BY REDIRECTION (finding F-26)
+#
+# acas_create_private_file above closes the CREATE race: it refuses a symlink and
+# creates under `set -C', which is O_EXCL. It does not close the WRITE race, and the
+# write is where the evidence actually appears. Every artifact this script publishes
+# -- the run-status record, the per-operation dispositions, the seed fingerprint --
+# used to be written with a plain `>' redirection into a path that had been checked
+# for a symlink EARLIER. Between the check and the write, the name can be replaced;
+# `>' follows a symlink and truncates whatever it points at (CWE-59), and a reader
+# arriving mid-write sees a TRUNCATED record, which for an attestation file means a
+# capture is either unattested or attested by half a record.
+#
+# So content is written into a private temporary file in the SAME DIRECTORY -- same
+# filesystem, so the rename cannot fail with EXDEV -- and then renamed over the
+# target. `mv' is rename(2): the target either holds the whole previous content or
+# the whole new content, never a mixture, and renaming ONTO a symlink replaces the
+# LINK rather than writing through it.
+#
+# Reads content from STDIN, so the caller composes the record in one place:
+#     { printf ...; printf ...; } | acas_publish_atomic "$target" 'the run status'
+#
+# NEVER dies. Every caller is either the EXIT trap or a final-report step, where an
+# abort would replace a real verdict with a plumbing failure; it warns and returns
+# non-zero so the caller can say plainly that the artifact is missing -- and a
+# missing attestation is read downstream as UNATTESTED, which is the safe direction.
+acas_publish_atomic() {
+  local target="$1" what="${2:-an evidence artifact}"
+  local dir base tmp
+
+  if [[ -z "$target" ]]; then
+    printf 'WARNING: %s has no resolved path, so it was not published.\n' "$what" >&2
+    return 1
+  fi
+
+  dir="${target%/*}"
+  [[ "$dir" != "$target" ]] || dir='.'
+  base="${target##*/}"
+  tmp="$dir/.$base.tmp.$$"
+
+  if [[ ! -d "$dir" ]]; then
+    printf 'WARNING: the directory for %s does not exist: %s\n' "$what" "$dir" >&2
+    return 1
+  fi
+
+  # A leftover temporary from a killed run is removed by name; it is ours, it is
+  # inside a 0700 directory, and it is not the target.
+  [[ -e "$tmp" || -L "$tmp" ]] && rm -f -- "$tmp" 2>/dev/null
+
+  # O_EXCL: refuses an existing name, including a symlink, rather than following it.
+  if ! (set -C; : >"$tmp") 2>/dev/null; then
+    printf 'WARNING: could not create a private temporary for %s at %s\n' "$what" "$tmp" >&2
+    return 1
+  fi
+  chmod 600 -- "$tmp" 2>/dev/null || true
+
+  if ! cat >"$tmp" 2>/dev/null; then
+    printf 'WARNING: could not write %s into %s\n' "$what" "$tmp" >&2
+    rm -f -- "$tmp" 2>/dev/null || true
+    return 1
+  fi
+
+  if ! mv -f -- "$tmp" "$target" 2>/dev/null; then
+    printf 'WARNING: could not publish %s to %s\n' "$what" "$target" >&2
+    rm -f -- "$tmp" 2>/dev/null || true
+    return 1
+  fi
+  return 0
 }
 
 
@@ -819,31 +1125,105 @@ acas_release_lock() {
 # confusing one, so every step is best-effort and reported rather than fatal.
 # shellcheck disable=SC2317  # reached only through the EXIT trap installed below,
 # which shellcheck cannot follow; the body is live and runs on every exit path.
+# ⭐ WRAPPER HEALTH AND PER-OPERATION DISPOSITION ARE DIFFERENT FACTS (finding F-13)
+#
+# This script's exit status answers "did the harness do its job?" -- it drove the
+# menu, the prompts appeared where the plan said they would, the post-run assertions
+# held. It does NOT answer "what did the compiled cycle decide?", and it never can,
+# because a term-code-5 abort is CORRECT compiled behaviour
+# [general/gl070.cbl:L287-L290] and the harness that observed it did its job
+# perfectly. Conflating the two is how a scenario whose whole subject is a rejection
+# came to be asserted through a wrapper exit code.
+#
+# Before this, the only machine-readable statement of an operation's disposition was
+# an `OPERATION_STATUS' line inside the pty TRANSCRIPT -- a file that also contains
+# every screen the menu drew, so reading it means pattern-matching a log. That line
+# is KEPT, because tests/conftest.py parses it and because a reader of the
+# transcript should be able to see the disposition in place. This artifact is the
+# structured statement of the same facts:
+#
+#   scenario   <TAB> <name>
+#   side       <TAB> cobol
+#   operations <TAB> <count>
+#   operation  <TAB> <index, 1-based> <TAB> <name> <TAB> <observed status>
+#   ...one `operation' record per DECLARED operation, in declared order...
+#
+# An operation that was declared but never driven carries the sentinel
+# `not-run' rather than a number. That distinction is the whole point: zero is a
+# real term code, so a slot defaulting to zero would attest a clean disposition for
+# an operation that never happened.
+acas_publish_operation_status() {
+  [[ -n "$ACAS_RUN_OP_STATUS_FILE" ]] || return 0
+
+  # A dry run drives nothing, so it has no disposition to publish and must not
+  # appear to have one. The record is left as the empty file stage 3 created:
+  # zero `operation' records for a non-zero declared count is self-evidently not a
+  # complete run, which is exactly what a reader should conclude.
+  if (( ACAS_RUN_DRY_RUN )); then
+    acas_note '--dry-run drove nothing, so the per-operation status record stays empty'
+    return 0
+  fi
+
+  local index rendered
+  {
+    printf 'scenario\t%s\n' "$ACAS_RUN_SCENARIO"
+    printf 'side\tcobol\n'
+    printf 'run_id\t%s\n' "$ACAS_RUN_RUN_ID"
+    printf 'operations\t%s\n' "${#ACAS_RUN_OPS[@]}"
+    for index in "${!ACAS_RUN_OPS[@]}"; do
+      rendered="${ACAS_RUN_OP_STATUS[$index]-$ACAS_RUN_OP_NOT_RUN}"
+      printf 'operation\t%s\t%s\t%s\n' \
+        "$(( index + 1 ))" "${ACAS_RUN_OPS[$index]}" "$rendered"
+    done
+  } | acas_publish_atomic "$ACAS_RUN_OP_STATUS_FILE" 'the per-operation status record' \
+    || return 0
+
+  acas_log 'per-operation dispositions (the operations own status, NOT this script exit code):'
+  for index in "${!ACAS_RUN_OPS[@]}"; do
+    acas_log "$(printf '  %d. %-16s status %s' \
+      "$(( index + 1 ))" "${ACAS_RUN_OPS[$index]}" "${ACAS_RUN_OP_STATUS[$index]-$ACAS_RUN_OP_NOT_RUN}")"
+  done
+  return 0
+}
+
 acas_write_run_status() {
   local status="$1"
 
-  # ⭐ A DRY RUN ATTESTS NOTHING, AND MUST NOT BE ABLE TO. `--dry-run' validates
-  # every precondition and prints the plan without spawning the menu, then exits 0
-  # -- and a bare status 0 is exactly what [harness/dump_tables.py] reads as "the
-  # run succeeded". Left alone, a dry run would attest a capture of a database the
-  # cycle never touched, which is the same silent pass the attestation exists to
-  # close, arriving by a different door.
+  # ⭐ A DRY RUN ATTESTS NOTHING, AND WRITES NOTHING -- INCLUDING NOT DELETING.
+  # `--dry-run' validates every precondition and prints the plan without spawning the
+  # menu, then exits 0, and a bare status 0 is exactly what
+  # [harness/dump_tables.py] reads as "the run succeeded". So no record is written
+  # here, which is the whole of what this branch has to do.
   #
-  # The record is REMOVED rather than merely not written, because a REAL record from
-  # an earlier run of the same scenario would otherwise survive and go on attesting
-  # whatever capture is taken next. The path is resolved here rather than taken on
-  # trust, for the case where a dry run failed before stage 3 named it.
+  # AN EARLIER REVISION DELETED ANY EXISTING RECORD, and the reasoning was sound as
+  # far as it went: a real record from a previous run of the same scenario survives,
+  # and would go on attesting whatever capture is taken next. But `rm' is a WRITE,
+  # and it destroys the most expensive artifact in the tree -- the evidence that a
+  # completed run produced. A mode that promises to touch nothing cannot keep a
+  # hidden exception, and the exception it kept was the worst one available.
+  #
+  # So the hazard is REPORTED instead. That is the honest half of the trade: it
+  # leaves the operator's own artifact alone and tells them exactly what taking a
+  # capture now would attest. [harness/run_python_scenario.sh] does the same, for the
+  # same reason -- one model of `--dry-run' across the harness, not two.
+  #
+  # The path is resolved here rather than taken on trust, for the case where a dry
+  # run failed before stage 3 named it.
   if (( ACAS_RUN_DRY_RUN )); then
     local dry_target="$ACAS_RUN_STATUS_FILE"
     if [[ -z "$dry_target" && -n "$ACAS_RUN_SCENARIO" && -n "${ACAS_OUT-}" ]]; then
       dry_target="$ACAS_OUT/run-logs/$ACAS_RUN_SCENARIO/cobol.run-status"
     fi
-    if [[ -n "$dry_target" && ! -L "$dry_target" ]]; then
-      rm -f -- "$dry_target" 2>/dev/null || true
+    printf 'note: --dry-run drove nothing, so no run-status record is written and\n' >&2
+    printf '      nothing on disk was created, changed or removed.\n' >&2
+    if [[ -n "$dry_target" && -f "$dry_target" && ! -L "$dry_target" ]]; then
+      printf 'WARNING: a run-status record from an EARLIER run of this scenario is still\n' >&2
+      printf '         present, and it has been left exactly as it was:\n' >&2
+      printf '           %s\n' "$dry_target" >&2
+      printf '         A capture taken by hand now would carry THAT run attestation, not\n' >&2
+      printf '         this dry run. Re-run without --dry-run, or remove the record\n' >&2
+      printf '         yourself, before taking one.\n' >&2
     fi
-    printf 'note: --dry-run drove nothing, so no run-status record is written and a\n' >&2
-    printf '      capture taken now would be reported as unattested. Any record an\n' >&2
-    printf '      earlier run of this scenario left has been removed.\n' >&2
     return 0
   fi
 
@@ -863,13 +1243,28 @@ acas_write_run_status() {
     digest="$(sha256sum -- "$ACAS_RUN_FINGERPRINT" 2>/dev/null | cut -d' ' -f1)" || digest=''
   fi
 
+  # `status' is retained under its original name because every existing reader
+  # requires it, and it is now stated for what it always was: WRAPPER HEALTH. It is
+  # published beside `wrapper_status', an explicit alias, and beside the ordered
+  # per-operation dispositions -- so a reader can no longer take one for the other
+  # without saying so (finding F-13).
+  local index rendered
   {
     printf 'scenario\t%s\n' "$ACAS_RUN_SCENARIO"
     printf 'side\tcobol\n'
+    printf 'run_id\t%s\n' "$ACAS_RUN_RUN_ID"
     printf 'status\t%s\n' "$status"
+    printf 'wrapper_status\t%s\n' "$status"
     printf 'seed_fingerprint_sha256\t%s\n' "$digest"
-  } >"$ACAS_RUN_STATUS_FILE" 2>/dev/null || {
-    printf 'WARNING: could not write the run-status record to %s; the capture stage\n' \
+    printf 'seed_marker_sha256\t%s\n' "$ACAS_RUN_SEED_IDENTITY"
+    printf 'operations\t%s\n' "${#ACAS_RUN_OPS[@]}"
+    for index in "${!ACAS_RUN_OPS[@]}"; do
+      rendered="${ACAS_RUN_OP_STATUS[$index]-$ACAS_RUN_OP_NOT_RUN}"
+      printf 'operation_status\t%s\t%s\t%s\n' \
+        "$(( index + 1 ))" "${ACAS_RUN_OPS[$index]}" "$rendered"
+    done
+  } | acas_publish_atomic "$ACAS_RUN_STATUS_FILE" 'the run-status record' || {
+    printf 'WARNING: the run-status record at %s was not published; the capture stage\n' \
       "$ACAS_RUN_STATUS_FILE" >&2
     printf '         will treat this run as unattested, which is the safe direction.\n' >&2
     return 0
@@ -896,6 +1291,11 @@ acas_on_exit() {
       "$status" >&2
     printf 'was driven, so the database may hold a PARTIAL result. Run harness/reset_db.sh\n' >&2
     printf 'and harness/seed.sh before drawing any conclusion from a state diff.\n' >&2
+    if (( ACAS_RUN_OP_INDEX >= 0 && ${#ACAS_RUN_OPS[@]} > 1 )); then
+      printf 'It was driving operation %s of %s (%s) when it stopped, so operations\n' \
+        "$(( ACAS_RUN_OP_INDEX + 1 ))" "${#ACAS_RUN_OPS[@]}" "$ACAS_RUN_OPERATION" >&2
+      printf 'before it had already completed and their effects are in the database too.\n' >&2
+    fi
     if (( ACAS_RUN_LOG_OPEN )); then
       printf 'The pty transcript is at: %s\n' "$ACAS_RUN_LOG" >&2
     fi
@@ -969,8 +1369,18 @@ acas_usage() {
   cat <<'USAGE_EOF'
 harness/run_cobol_scenario.sh -- drive the COMPILED ACAS Cobol posting cycle.
 
-Stage 2 of the eight-stage parity protocol:
-    seed -> run(COBOL) -> dump -> normalize -> reset -> run(Python) -> dump -> diff
+Stage 2 of the TEN-stage parity protocol harness/run_parity.sh drives:
+    reset+seed -> run(COBOL) -> dump -> normalise -> reset+re-seed ->
+    run(Python) -> dump -> normalise -> verify published -> diff
+The canonical stage list is harness/parity_stages.sh; print it with
+`harness/run_parity.sh --print-stages'. The AAP's eight logical stages
+(section 0.3.2) become those ten by making both normalisations and the
+publication check explicit.
+⭐ STAGE IS NOT CHECK. The numbered `Check n/8' headings this script prints below
+are its OWN preflight checks, eight of them, and they are NOT protocol stages.
+They are spelled `Check' rather than `Stage' or `Step' precisely so the two
+countings cannot be confused: `Check 8/8' is the keystroke plan, not the parity
+diff, which is protocol stage 10 and belongs to harness/diff_states.py.
 
 This is the ORACLE side. It drives the four compiled MENU executables over a
 pty, because every in-scope posting program is a CALLed sub-program with
@@ -986,10 +1396,13 @@ OPTIONS
                           which exists for the canonical invocation in
                           harness/docker-compose.yml.
     --subsystem NAME       One of: general sales purchase irs.
-                          Optional -- it is derived from --operation, and is
-                          cross-checked when both are given.
-    --operation NAME       One of the seven operations of the posting cycle,
-                          named as acas_posting/cli/ names them:
+                          Optional -- it is derived from each operation, and is
+                          cross-checked against EVERY operation to be driven. A
+                          scenario spanning two menus cannot be constrained with
+                          it at all.
+    --operation NAME       REPEATABLE, and driven in the order given. One of the
+                          seven operations of the posting cycle, named as
+                          acas_posting/cli/ names them:
                               gl_post_cycle      general, load08 via "H"
                               gl_end_of_cycle    general, load09 via "I"
                               sl_invoice_post    sales,    load07 via "G"
@@ -997,6 +1410,18 @@ OPTIONS
                               pl_order_post      purchase, load08 via "H"
                               pl_payment_post    purchase, load12 via "L"
                               irs_post           irs,      option "4" then "66"
+                          When it is not given, the operations come from the
+                          scenario file's ordered `operations:' list, or failing
+                          that from its singular `operation:' key -- the same
+                          precedence harness/run_python_scenario.sh applies, so
+                          both sides of the comparison resolve one list from one
+                          file. EVERY declared operation is driven, in order, in
+                          this single invocation, and each one's own observed
+                          disposition is published to
+                          <run-logs>/<scenario>/cobol.operation-status. That
+                          record, and NOT this script's exit status, is what says
+                          what the compiled cycle decided: the exit status is
+                          wrapper health.
     --timeout SECONDS      Per-PROMPT timeout. Default 120. Must be > 0 and
                           finite: every interaction in this script is a hang
                           risk, and a hang is worse than a failure because it
@@ -1020,7 +1445,7 @@ OPTIONS
     --rotate-fh-log        Move fh-logger.txt aside BEFORE the run. This is the
                           DEFAULT; the flag is accepted for compatibility. The log
                           is MOVED, never truncated, to
-                          $ACAS_OUT/run-logs/<scenario>/fh-logger.<op>.txt.NNN --
+                          $ACAS_OUT/run-logs/<scenario>/fh-logger.pre-run.txt.NNN --
                           outside every compared tree, numbered so nothing is ever
                           overwritten. The logging switch itself is frozen on at
                           [copybooks/Test-Data-Flags.cob] `SW-Testing value 1'
@@ -1148,15 +1573,31 @@ them inside any tree the diff stage compares:
     cobol.log               the pty transcript, escape sequences stripped
     cobol.plan              the resolved keystroke plan
     cobol.result            the driver's machine-readable outcome record
-    cobol.seed-fingerprint  the row count of every table the scenario names, in
-                            the scenario's declared order, recorded immediately
-                            before the drive. [harness/run_python_scenario.sh]
-                            compares its own counts with this file and refuses
-                            to proceed if they differ, so the two cycles cannot
-                            silently be handed different starting states. Any
-                            fingerprint left by an earlier run is removed at the
-                            start of this one, so "absent" always means "this
-                            run did not get that far".
+    cobol.seed-fingerprint  one <table><TAB><row count><TAB><sha256> line per
+                            table the scenario names, in its declared order --
+                            which includes SYSTEM-REC, the parameter row the menu
+                            exit persists on every route. That row is dumped like
+                            any other, with its two credential cells withheld by
+                            [harness/dump_tables.py], and fingerprinted here as
+                            well because a digest compares even those. Recorded
+                            immediately before the drive. The digest is
+                            taken over the canonical dump by
+                            [harness/table_digest.py], the SAME producer the
+                            Python side invokes, and it is what makes the record
+                            mean anything: two seeds differing in one balance
+                            have identical row counts.
+                            [harness/run_python_scenario.sh] compares its own
+                            record with this file and refuses to proceed if they
+                            differ, so the two cycles cannot silently be handed
+                            different starting states. Any fingerprint left by an
+                            earlier run is removed at the start of this one, so
+                            "absent" always means "this run did not get that
+                            far".
+    cobol.post-fingerprint  the same record, taken immediately AFTER the drive.
+                            The pair answers a question no table diff can: did
+                            this run change anything? Two runs that did nothing
+                            agree perfectly, so without it a no-op could satisfy
+                            a parity or a determinism claim.
     cobol.run-status        scenario, side, this script's exit status and the
                             digest of the fingerprint. Written from the EXIT
                             trap, so it exists for every termination path.
@@ -1201,20 +1642,32 @@ acas_parse_args() {
         ;;
       --subsystem)
         [[ $# -ge 2 ]] || acas_die "$EX_USAGE" '--subsystem requires a name.'
-        ACAS_RUN_SUBSYSTEM="$2"
+        ACAS_RUN_SUBSYSTEM_REQUESTED="$2"
         shift 2
         ;;
       --subsystem=*)
-        ACAS_RUN_SUBSYSTEM="${1#*=}"
+        ACAS_RUN_SUBSYSTEM_REQUESTED="${1#*=}"
         shift
         ;;
+      # ⭐ REPEATABLE, and in the order given (F-12). It matches
+      # harness/run_python_scenario.sh's own --operation exactly, so a caller can
+      # drive both sides of the comparison with the same argument list.
       --operation)
         [[ $# -ge 2 ]] || acas_die "$EX_USAGE" '--operation requires a name.'
-        ACAS_RUN_OPERATION="$2"
+        ACAS_RUN_OPS+=("$2")
         shift 2
         ;;
       --operation=*)
-        ACAS_RUN_OPERATION="${1#*=}"
+        ACAS_RUN_OPS+=("${1#*=}")
+        shift
+        ;;
+      --run-id)
+        [[ $# -ge 2 ]] || acas_die "$EX_USAGE" '--run-id requires an identifier.'
+        ACAS_RUN_RUN_ID="$2"
+        shift 2
+        ;;
+      --run-id=*)
+        ACAS_RUN_RUN_ID="${1#*=}"
         shift
         ;;
       --timeout)
@@ -1295,154 +1748,222 @@ acas_parse_args() {
     'failure.'
 }
 
-# Read with pure shell rather than a YAML parser.
+# =============================================================================
+# THE SCENARIO DOCUMENT -- READ BY THE SAME PARSER THE PYTHON RUNNER USES
+#
+# ⭐ ONE PARSER, NOT TWO (finding F-32)
+#
+# This section used to be three hand-written `awk' programs. They recognised a
+# top-level `key:' line with no leading whitespace, stripped an unquoted trailing
+# comment, unquoted a value and collected a block or flow list -- and they were
+# careful, well-commented and wrong for the job, because the job is not "read a
+# few scalars". The job is: RECEIVE EXACTLY WHAT THE OTHER SIDE OF THE COMPARISON
+# RECEIVED. harness/run_python_scenario.sh read the same file with PyYAML. Two
+# readers over one document, on a protocol whose entire premise is that both legs
+# are handed identical inputs, is a correctness defect and not a matter of taste:
+#
+#   * an anchor and an alias (`&batch' / `*batch') are values to a parser and
+#     literal text to a line matcher;
+#   * a merge key (`<<:') expands to real keys for one side and to nothing for the
+#     other;
+#   * a flow mapping (`{a: 1}') is a block for one and a scalar for the other;
+#   * a block scalar (`description: |') is one value for one side and a stream of
+#     unrecognised lines for the other;
+#   * a key written twice is a hard error to the parser and last-one-wins to awk;
+#   * a tab-indented list is a parse failure to one and invisible to the other.
+#
+# In every one of those cases the protocol would still have produced a verdict, and
+# the verdict would have been about two different scenarios. Worse, PyYAML was
+# treated as OPTIONAL here -- a missing parser "degraded" to the awk reader -- so
+# the divergence was reachable by having one package uninstalled.
+#
+# So the parser lives in harness/scenario_stream.py, both runners invoke it, and it
+# is a HARD REQUIREMENT: status 3 (no PyYAML) is a refusal, not a degradation.
+# The accessor names below are unchanged, so every call site reads exactly as it
+# did; only what is underneath them changed.
+#
+# The stream is TAB-delimited, one record per line, in document order:
+#     K <TAB> key                 present at top level, whatever its value
+#     S <TAB> key <TAB> value     a scalar
+#     L <TAB> key <TAB> value     one list item, in file order
+#     G <TAB> key                 a nested block, RECORDED and not read
+# =============================================================================
 
+# `_' and `-' are interchangeable in a key name: every key is normalised to `_' on
+# both sides of the lookup, which is the same tolerance the Python runner and the
+# capture stage extend.
+declare -A ACAS_RUN_YAML_PRESENT=()
+declare -A ACAS_RUN_YAML_SCALAR=()
+declare -A ACAS_RUN_YAML_LIST=()
+declare -A ACAS_RUN_YAML_GROUP=()
 
-# acas_scenario_scalar <key> Prints the value, or nothing if the key is absent.
-acas_scenario_scalar() {
-  local key="$1"
-  [[ -n "$ACAS_RUN_SCENARIO_FILE" ]] || return 0
-  awk -v want="$key" '
-    # Strip a trailing comment that is not inside quotes.
-    function decomment(s,   i, c, q, out) {
-      q = ""
-      out = ""
-      for (i = 1; i <= length(s); i++) {
-        c = substr(s, i, 1)
-        if (q != "") {
-          if (c == q) { q = "" }
-          out = out c
-          continue
-        }
-        if (c == "\"" || c == "'\''") { q = c; out = out c; continue }
-        if (c == "#") { break }
-        out = out c
-      }
-      return out
-    }
-    function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
-    function norm(s) { gsub(/-/, "_", s); return s }
-    function unquote(s) {
-      if (length(s) >= 2) {
-        if (substr(s, 1, 1) == "\"" && substr(s, length(s), 1) == "\"") {
-          return substr(s, 2, length(s) - 2)
-        }
-        if (substr(s, 1, 1) == "'\''" && substr(s, length(s), 1) == "'\''") {
-          return substr(s, 2, length(s) - 2)
-        }
-      }
-      return s
-    }
-    BEGIN { target = norm(want) }
-    # Top level only: no leading whitespace before the key.
-    /^[A-Za-z_][A-Za-z0-9_-]*[ \t]*:/ {
-      line = decomment($0)
-      name = line
-      sub(/[ \t]*:.*$/, "", name)
-      if (norm(trim(name)) != target) { next }
-      value = line
-      sub(/^[^:]*:[ \t]*/, "", value)
-      value = trim(value)
-      if (value == "") { next }          # a list header, not a scalar
-      print unquote(value)
-      exit
-    }
-  ' "$ACAS_RUN_SCENARIO_FILE"
+# The keys THIS runner reads. A scenario legitimately carries more -- the nested
+# `clock:', `system:' and `seed:' blocks that document the seeded state, and the
+# `seed_dir:'/`seed_files:' pair harness/seed.sh reads -- and a block under a key
+# this runner never reads is left alone, exactly as the Python runner leaves it. A
+# block under a key it DOES read is refused, because that value would read as empty
+# and change the run without saying so: for the fan-out switch
+# [copybooks/wssystem.cob:L179-L181], or for the affected-table list that BOUNDS
+# the comparison, silence is the most expensive failure available here.
+readonly ACAS_RUN_SCENARIO_KEYS=(
+  scenario
+  name
+  subsystem
+  operation
+  operations
+  run_date_text
+  run_date_binary
+  date_form
+  irs_instead
+  irs_clear_postings
+  payment_post_confirm
+  gl080_proceed
+  disk_change_option
+  archive_path_override
+  ws_caller
+  affected_tables
+  expected_table_effect
+  expected_status
+)
+
+# Emit the stream for one file. Stdin is detached: the reader takes a path and must
+# never be able to wait on a terminal.
+acas_scenario_stream() {
+  [[ -f "$ACAS_RUN_SCENARIO_READER" ]] || {
+    printf 'the shared scenario reader is missing: %s\n' "$ACAS_RUN_SCENARIO_READER" >&2
+    printf 'It is harness/scenario_stream.py and it ships beside this script; both\n' >&2
+    printf 'runners read every scenario through it so that one document cannot mean\n' >&2
+    printf 'two things (F-32).\n' >&2
+    return 4
+  }
+  acas_deadline_prefix "$ACAS_TIMEOUT_CLIENT"
+  "${ACAS_DEADLINE_ARGV[@]}" python3 "$ACAS_RUN_SCENARIO_READER" "$1" < /dev/null
 }
 
-# acas_scenario_has_key <key> True when the key appears at top level at all,
-# whatever its value.
+# Read the document into the four arrays. Any failure is FATAL: this stage takes
+# the operation, the subsystem, the pinned clock, every answer and the
+# affected-table list from that document, so a document it could not read is a run
+# with no inputs.
+acas_read_scenario() {
+  local file="$1" rc=0 stream='' started elapsed
+  started="$SECONDS"
+  stream="$(acas_scenario_stream "$file")" || rc=$?
+  elapsed=$(( SECONDS - started ))
+  acas_assert_not_timed_out "$rc" "$elapsed" "$ACAS_TIMEOUT_CLIENT" \
+    ACAS_TIMEOUT_CLIENT 'reading the scenario file'
+
+  case "$rc" in
+    0) : ;;
+    3)
+      acas_die "$EX_SCENARIO" \
+        'PyYAML is not importable by this interpreter, so the scenario cannot be read.' \
+        'This is a REFUSAL and not a degradation. This script used to fall back to a' \
+        'hand-written reader when the parser was missing -- which meant the two legs' \
+        'of the comparison could read one document by two different rules, decided by' \
+        'which packages happened to be installed. A verdict reached that way is about' \
+        'two different scenarios.' \
+        '  install it: pip install PyYAML==6.0.3 (the version requirements.txt pins,' \
+        '  also reachable as the pyproject extra: pip install "acas-posting[harness]")' \
+        '  or run this stage inside the harness image, which already carries it.'
+      ;;
+    4)
+      acas_die "$EX_SCENARIO" \
+        "the scenario file could not be read: $file" \
+        'The reader printed the reason above.'
+      ;;
+    5)
+      acas_die "$EX_SCENARIO" \
+        "the scenario file is not a usable YAML document: $file" \
+        'The reader printed the reason above. It requires a mapping at top level' \
+        'whose values are scalars, flat lists of scalars, or nested blocks it records' \
+        'without reading. A real number is refused outright: no scenario value is a' \
+        'real number and rule R-2 forbids binary floating point from entering the' \
+        'comparison by accident.' \
+        'The nine scenario definitions live under harness/scenarios/.'
+      ;;
+    *)
+      acas_die "$EX_SCENARIO" \
+        "the shared scenario reader exited $rc, which is not one of its documented statuses." \
+        "  file: $file" \
+        '  documented: 0 read, 3 no PyYAML, 4 unreadable, 5 not a usable document.'
+      ;;
+  esac
+
+  local kind key value
+  while IFS=$'\t' read -r kind key value; do
+    case "$kind" in
+      '') continue ;;
+      K)  ACAS_RUN_YAML_PRESENT["$key"]=1 ;;
+      G)  ACAS_RUN_YAML_GROUP["$key"]=1 ;;
+      S)  ACAS_RUN_YAML_SCALAR["$key"]="$value" ;;
+      L)
+        if [[ -n "${ACAS_RUN_YAML_LIST[$key]+set}" ]]; then
+          ACAS_RUN_YAML_LIST["$key"]="${ACAS_RUN_YAML_LIST[$key]}"$'\n'"$value"
+        else
+          ACAS_RUN_YAML_LIST["$key"]="$value"
+        fi
+        ;;
+      *)
+        acas_die "$EX_SCENARIO" \
+          "the scenario reader emitted an unrecognised record kind '$(acas_sanitise_field "$kind")'."
+        ;;
+    esac
+  done <<< "$stream"
+
+  acas_assert_scenario_shape
+  acas_log 'scenario read by harness/scenario_stream.py -- the same parser the Python runner uses'
+}
+
+# Refused HERE, in the main shell, where a refusal can still stop the run: the
+# accessors are called inside command substitutions, where an exit would end only
+# the subshell and the run would carry on with an empty value -- exactly the
+# silence this check exists to prevent.
+acas_assert_scenario_shape() {
+  (( ${#ACAS_RUN_YAML_GROUP[@]} > 0 )) || return 0
+  local key
+  for key in "${!ACAS_RUN_YAML_GROUP[@]}"; do
+    if acas_in_list "$key" "${ACAS_RUN_SCENARIO_KEYS[@]}"; then
+      acas_die "$EX_SCENARIO" \
+        "the scenario declares '$(acas_sanitise_field "$key")' as a nested block, and this runner reads that key." \
+        '  A key this runner reads must carry a scalar, or a flat list of scalars, so' \
+        '  that what the author wrote is what the run receives. As a block it would' \
+        '  read as empty and change the run without saying so.' \
+        '  State the value at top level; a block under a key this runner does not' \
+        '  read -- clock, system, seed -- is perfectly fine and is left alone.'
+    fi
+  done
+}
+
+# True when the key appeared at top level at all, whatever its value. Needed
+# because an EMPTY value is meaningful for the fan-out switch and must never be
+# confused with the key having been forgotten [copybooks/wssystem.cob:L179-L181].
 acas_scenario_has_key() {
-  local key="$1"
-  [[ -n "$ACAS_RUN_SCENARIO_FILE" ]] || return 1
-  awk -v want="$key" '
-    function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
-    function norm(s) { gsub(/-/, "_", s); return s }
-    BEGIN { target = norm(want); found = 0 }
-    /^[A-Za-z_][A-Za-z0-9_-]*[ \t]*:/ {
-      name = $0
-      sub(/[ \t]*:.*$/, "", name)
-      if (norm(trim(name)) == target) { found = 1; exit }
-    }
-    END { exit (found ? 0 : 1) }
-  ' "$ACAS_RUN_SCENARIO_FILE"
+  [[ -n "${ACAS_RUN_YAML_PRESENT[${1//-/_}]+set}" ]]
 }
 
+# The scalar value, or nothing when the key is absent or carries a list.
+acas_scenario_scalar() {
+  local key="${1//-/_}"
+  if [[ -n "${ACAS_RUN_YAML_SCALAR[$key]+set}" ]]; then
+    printf '%s' "${ACAS_RUN_YAML_SCALAR[$key]}"
+  fi
+}
+
+# The list items, one per line, in file order. A single scalar where a list was
+# expected is emitted as a one-item list rather than silently dropped -- the same
+# tolerance the Python runner extends, so one scenario file serves both.
 acas_scenario_list() {
-  local key="$1"
-  [[ -n "$ACAS_RUN_SCENARIO_FILE" ]] || return 0
-  awk -v want="$key" '
-    function decomment(s,   i, c, q, out) {
-      q = ""
-      out = ""
-      for (i = 1; i <= length(s); i++) {
-        c = substr(s, i, 1)
-        if (q != "") {
-          if (c == q) { q = "" }
-          out = out c
-          continue
-        }
-        if (c == "\"" || c == "'\''") { q = c; out = out c; continue }
-        if (c == "#") { break }
-        out = out c
-      }
-      return out
-    }
-    function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
-    function norm(s) { gsub(/-/, "_", s); return s }
-    function unquote(s) {
-      if (length(s) >= 2) {
-        if (substr(s, 1, 1) == "\"" && substr(s, length(s), 1) == "\"") {
-          return substr(s, 2, length(s) - 2)
-        }
-        if (substr(s, 1, 1) == "'\''" && substr(s, length(s), 1) == "'\''") {
-          return substr(s, 2, length(s) - 2)
-        }
-      }
-      return s
-    }
-    BEGIN { inlist = 0; target = norm(want) }
-    {
-      line = decomment($0)
-      # A new top-level key ends any list we were collecting.
-      if (line ~ /^[A-Za-z_][A-Za-z0-9_-]*[ \t]*:/) {
-        name = line
-        sub(/[ \t]*:.*$/, "", name)
-        value = line
-        sub(/^[^:]*:[ \t]*/, "", value)
-        value = trim(value)
-        if (norm(trim(name)) == target) {
-          if (value == "") { inlist = 1; next }
-          # Inline flow list.
-          if (substr(value, 1, 1) == "[") {
-            gsub(/^\[/, "", value)
-            gsub(/\][ \t]*$/, "", value)
-            n = split(value, parts, ",")
-            for (i = 1; i <= n; i++) {
-              item = unquote(trim(parts[i]))
-              if (item != "") { print item }
-            }
-            exit
-          }
-          # A single scalar where a list was expected: emit it as a one-item
-          # list rather than silently dropping it.
-          print unquote(value)
-          exit
-        }
-        if (inlist) { exit }
-        next
-      }
-      if (!inlist) { next }
-      item = trim(line)
-      if (item == "") { next }
-      if (substr(item, 1, 1) != "-") { exit }
-      sub(/^-[ \t]*/, "", item)
-      item = unquote(trim(item))
-      if (item != "") { print item }
-    }
-  ' "$ACAS_RUN_SCENARIO_FILE"
+  local key="${1//-/_}"
+  if [[ -n "${ACAS_RUN_YAML_LIST[$key]+set}" ]]; then
+    printf '%s\n' "${ACAS_RUN_YAML_LIST[$key]}"
+    return 0
+  fi
+  if [[ -n "${ACAS_RUN_YAML_SCALAR[$key]+set}" && -n "${ACAS_RUN_YAML_SCALAR[$key]}" ]]; then
+    printf '%s\n' "${ACAS_RUN_YAML_SCALAR[$key]}"
+  fi
 }
 
+# The scalar value, or the fallback when it is absent or empty.
 acas_scenario_default() {
   local value
   value="$(acas_scenario_scalar "$1")"
@@ -1455,95 +1976,16 @@ acas_scenario_default() {
 
 
 # STAGE 1 -- resolve the scenario, the operation and the subsystem.
-# ⭐ IS THE FILE ACTUALLY YAML?  The extractor above is a deliberate awk reader and
-# stays one: it needs no dependency, it reads exactly the flat scalars this script
-# consumes, and replacing it with a parser would be a change with no benefit. But a
-# reader that only LOOKS FOR keys cannot distinguish "the document is fine and the
-# key is absent" from "the document is not a document at all", and the difference
-# matters to the operator. A file with a tab-indented block, an unclosed quote or a
-# duplicated key yielded no `operation:' and this script then died EX_USAGE=70 "no
-# operation was named. Give --operation, or an operation: key in the scenario
-# file." -- advice that is useless, because the key is right there in the file and
-# is not the problem. [harness/seed.sh] and [harness/run_python_scenario.sh] both
-# parse with PyYAML and both report a parse failure as such; this makes the third
-# script agree with them, on the same exit code, so one malformed scenario produces
-# one diagnosis wherever the protocol first touches it.
 #
-# The validity check and the extraction are deliberately SEPARATE. This asserts the
-# document is a YAML mapping and nothing more; awk still reads every value. So the
-# check cannot change which value any key resolves to, and cannot silently start
-# accepting a document the awk reader would have read differently.
-#
-# PyYAML absent is NOT fatal here. It is a hard requirement of the seed stage,
-# which cannot bind a scenario without it, but this stage's own reader does not
-# need it -- so a missing parser degrades to the previous behaviour and says so,
-# rather than refusing to run a scenario it could have run.
-acas_assert_scenario_parses() {
-  local rc=0 report
-  acas_deadline_prefix "$ACAS_TIMEOUT_CLIENT"
-  report="$("${ACAS_DEADLINE_ARGV[@]}" python3 - "$ACAS_RUN_SCENARIO_FILE" 2>&1 <<'PY'
-"""Assert that a scenario file is a YAML mapping.
-
-Exit 0 it is, 3 it is not (unreadable, malformed, or not a mapping at the top
-level), 6 PyYAML is unavailable so nothing was checked.
-"""
-
-import sys
-
-try:
-    import yaml
-except ImportError:
-    sys.stderr.write('PyYAML is not installed\n')
-    raise SystemExit(6)
-
-path = sys.argv[1]
-try:
-    with open(path, 'r', encoding='utf-8') as handle:
-        document = yaml.safe_load(handle)
-except OSError as error:
-    sys.stderr.write('cannot read %s: %s\n' % (path, error))
-    raise SystemExit(3)
-except yaml.YAMLError as error:
-    detail = str(error).replace('\n', ' ')
-    sys.stderr.write('%s is not valid YAML: %s\n' % (path, detail))
-    raise SystemExit(3)
-
-if document is None:
-    sys.stderr.write('%s is empty\n' % path)
-    raise SystemExit(3)
-if not isinstance(document, dict):
-    sys.stderr.write('%s does not contain a YAML mapping at the top level; '
-                     'it parsed as %s\n' % (path, type(document).__name__))
-    raise SystemExit(3)
-PY
-  )" || rc=$?
-
-  case "$rc" in
-    0)
-      acas_log 'verified: the scenario file parses as a YAML mapping'
-      ;;
-    6)
-      acas_note 'PyYAML is not installed, so the scenario file was NOT checked for validity; the awk reader below will simply find no keys if it is malformed'
-      ;;
-    *)
-      acas_die "$EX_SCENARIO" \
-        'the scenario file could not be parsed as a YAML mapping.' \
-        "  scenario file: $ACAS_RUN_SCENARIO_FILE" \
-        "  reported: ${report:-<no output>}" \
-        'Every value this script reads -- the operation, the subsystem, the pinned' \
-        'run date, the switches and the affected-table list -- comes from that file,' \
-        'so a document that does not parse yields no values at all and the failure' \
-        'would otherwise surface as "no operation was named", which points at the' \
-        'command line rather than at the file. Fix the YAML and re-run.' \
-        '[harness/seed.sh] and [harness/run_python_scenario.sh] report the same' \
-        'fault the same way, so all three stages agree.'
-      ;;
-  esac
-}
-
+# The document is read by harness/scenario_stream.py (see THE SCENARIO DOCUMENT
+# above), so there is no separate "is this really YAML?" check any more: a document
+# that does not parse produces no values at all and acas_read_scenario refuses it
+# with the SAME exit code harness/seed.sh and harness/run_python_scenario.sh use for
+# the same fault, so one malformed scenario produces one diagnosis wherever the
+# protocol first touches it.
 acas_resolve_scenario() {
   ACAS_RUN_CURRENT_STAGE='resolving the scenario'
-  acas_stage 'Stage 1/8: scenario, operation and subsystem'
+  acas_stage 'Check 1/8: scenario, operation and subsystem'
 
   if [[ -n "$ACAS_RUN_SCENARIO_FILE" ]]; then
     [[ -f "$ACAS_RUN_SCENARIO_FILE" ]] || acas_die "$EX_SCENARIO" \
@@ -1551,7 +1993,7 @@ acas_resolve_scenario() {
       'Pass the path of a scenario definition file.'
     [[ -r "$ACAS_RUN_SCENARIO_FILE" ]] || acas_die "$EX_SCENARIO" \
       "scenario file is not readable: $ACAS_RUN_SCENARIO_FILE"
-    acas_assert_scenario_parses
+    acas_read_scenario "$ACAS_RUN_SCENARIO_FILE"
   fi
 
   if [[ -z "$ACAS_RUN_SCENARIO" ]]; then
@@ -1569,28 +2011,120 @@ acas_resolve_scenario() {
     'It becomes a directory name under ACAS_OUT, so it may hold only letters,' \
     'digits, underscore and hyphen.'
 
-  # The operation, then the subsystem it implies.
-  if [[ -z "$ACAS_RUN_OPERATION" ]]; then
-    ACAS_RUN_OPERATION="$(acas_scenario_scalar operation)"
-  fi
-  [[ -n "$ACAS_RUN_OPERATION" ]] || acas_die "$EX_USAGE" \
-    'no operation was named.' \
-    'Give --operation, or an operation: key in the scenario file.' \
-    "The seven operations are: $(acas_join_words "${ACAS_RUN_OPERATIONS[@]}")."
-  acas_in_list "$ACAS_RUN_OPERATION" "${ACAS_RUN_OPERATIONS[@]}" || acas_die "$EX_USAGE" \
-    "unknown operation '$ACAS_RUN_OPERATION'." \
-    "The seven operations are: $(acas_join_words "${ACAS_RUN_OPERATIONS[@]}")." \
-    'The set is identical to the seven entry points under acas_posting/cli/, so' \
-    'the two sides of the comparison stay trivially comparable.'
+  [[ -n "$ACAS_RUN_RUN_ID" ]] || ACAS_RUN_RUN_ID="$(acas_derive_run_id)"
+  acas_assert_run_id
 
-  local entry name mapped_subsystem
-  # A colon separator IS safe for this array, unlike ACAS_RUN_FORBIDDEN, and
-  # the difference is worth stating so the two conventions do not look
-  # arbitrary.
+  acas_resolve_operations
+
+  acas_log "scenario   = $ACAS_RUN_SCENARIO"
+  if [[ -n "$ACAS_RUN_SCENARIO_FILE" ]]; then
+    acas_log "definition = $ACAS_RUN_SCENARIO_FILE"
+  else
+    acas_note 'no scenario file given; every pinned value must come from an option'
+  fi
+  acas_log "operations = $(acas_join_words "${ACAS_RUN_OPS[@]}")  (driven in this order, one at a time)"
+
+  local index op
+  for index in "${!ACAS_RUN_OPS[@]}"; do
+    op="${ACAS_RUN_OPS[$index]}"
+    acas_select_operation "$op"
+    acas_log "$(printf '  %d. %-16s %-9s menu %-6s %s  [%s]' \
+      "$(( index + 1 ))" "$op" "$ACAS_RUN_SUBSYSTEM" \
+      "'$ACAS_RUN_MENU_KEY'" "$ACAS_RUN_PARAGRAPH" "$ACAS_RUN_PARAGRAPH_LOCATOR")"
+  done
+  # Leave the FIRST operation selected, so anything between here and the drive loop
+  # that reads ACAS_RUN_OPERATION or ACAS_RUN_SUBSYSTEM sees a coherent pair.
+  acas_select_operation "${ACAS_RUN_OPS[0]}"
+}
+
+# ⭐ EVERY DECLARED OPERATION, IN THE DECLARED ORDER, IN ONE INVOCATION (F-12)
+#
+# This runner used to read the SINGULAR `operation:' key and nothing else, so a
+# scenario declaring four ordered operations -- period_end_totals does, and it is
+# the scenario whose whole subject is that all nine period-total write sites fire --
+# could only be driven one operation per invocation. harness/run_parity.sh worked
+# around that by invoking this script four times and then COPYING the first
+# invocation's seed fingerprint and run-status record over the last one's, because
+# only one record could exist per side. The consequence was precise and bad:
+# operations 2, 3 and 4 had NO ATTESTED DISPOSITION AT ALL. Their term codes were
+# never recorded, so nothing downstream could tell a clean run of four operations
+# from a clean run of one followed by three that aborted.
+#
+# The ordering is not presentation. period_end_totals' own definition states why:
+# operation 3 conditions state that operation 4 reads [purchase/pl060.cbl:L373-L375],
+# operations 1 and 3 establish the ledger rows that 2 and 4 rewrite, and anomaly
+# A-17's write [sales/sl060.cbl:L1173] is read back as a batch start in a LATER
+# operation [purchase/pl100.cbl:L564]. Reordering the list changes what that read
+# returns.
+#
+# Precedence is identical to harness/run_python_scenario.sh's, so the two sides
+# cannot resolve different lists from one file: repeated --operation first, then the
+# file's ordered `operations:' list, then its singular `operation:' key.
+acas_resolve_operations() {
+  local candidate
+
+  if (( ${#ACAS_RUN_OPS[@]} == 0 )); then
+    while IFS= read -r candidate; do
+      [[ -n "$candidate" ]] && ACAS_RUN_OPS+=("$candidate")
+    done < <(acas_scenario_list operations)
+  fi
+  if (( ${#ACAS_RUN_OPS[@]} == 0 )); then
+    candidate="$(acas_scenario_scalar operation)"
+    [[ -n "$candidate" ]] && ACAS_RUN_OPS+=("$candidate")
+  fi
+  (( ${#ACAS_RUN_OPS[@]} > 0 )) || acas_die "$EX_USAGE" \
+    'no operation was named.' \
+    'Give --operation (repeatable), or an operations: list in the scenario file,' \
+    'or its singular operation: key.' \
+    "The seven operations are: $(acas_join_words "${ACAS_RUN_OPERATIONS[@]}")."
+
+  local op index seen_subsystem=''
+  for index in "${!ACAS_RUN_OPS[@]}"; do
+    op="${ACAS_RUN_OPS[$index]}"
+    acas_in_list "$op" "${ACAS_RUN_OPERATIONS[@]}" || acas_die "$EX_USAGE" \
+      "unknown operation '$(acas_sanitise_field "$op")' at position $(( index + 1 ))." \
+      "The seven operations are: $(acas_join_words "${ACAS_RUN_OPERATIONS[@]}")." \
+      'The set is identical to the seven entry points under acas_posting/cli/, so' \
+      'the two sides of the comparison stay trivially comparable.'
+    # Resolves the menu mapping and refuses an operation whose subsystem
+    # contradicts --subsystem or the scenario's own subsystem: key.
+    acas_select_operation "$op"
+    seen_subsystem="$ACAS_RUN_SUBSYSTEM"
+
+    if [[ "$ACAS_RUN_SCENARIO" == *control_total_mismatch* && "$seen_subsystem" != 'general' ]]; then
+      acas_die "$EX_USAGE" \
+        'the control_total_mismatch scenario is General-Ledger-specific.' \
+        "Operation '$op' is dispatched by the $seen_subsystem menu." \
+        'Sales and Purchase batches balance by construction, so an unbalanced batch' \
+        'cannot meaningfully be built for them; the control-total gate that this' \
+        'scenario exercises lives in the General Ledger batch proof at' \
+        '[general/gl051.cbl:L1109-L1118].'
+    fi
+  done
+
+  # One status slot per operation, pre-set to the sentinel that means "this
+  # operation was never driven". It is NOT zero: zero is a real term code and would
+  # attest a clean disposition for an operation that never ran (F-13).
+  ACAS_RUN_OP_STATUS=()
+  for index in "${!ACAS_RUN_OPS[@]}"; do
+    ACAS_RUN_OP_STATUS+=("$ACAS_RUN_OP_NOT_RUN")
+  done
+}
+
+# acas_select_operation <name>
+# Make <name> the operation being driven: resolve its subsystem, menu letter and
+# dispatch paragraph from the frozen map, and refuse any disagreement with
+# --subsystem or with the scenario's own subsystem: key. Called once per operation
+# during resolution and again immediately before each drive, so that every
+# subsystem-dependent value -- the executable, the menu geometry, the plan builder
+# -- is the one belonging to the operation about to run.
+acas_select_operation() {
+  local wanted="$1" entry name rest mapped_subsystem=''
+
   for entry in "${ACAS_RUN_OPERATION_MAP[@]}"; do
     name="${entry%%:*}"
-    if [[ "$name" == "$ACAS_RUN_OPERATION" ]]; then
-      local rest="${entry#*:}"
+    if [[ "$name" == "$wanted" ]]; then
+      rest="${entry#*:}"
       mapped_subsystem="${rest%%:*}"
       rest="${rest#*:}"
       ACAS_RUN_MENU_KEY="${rest%%:*}"
@@ -1600,51 +2134,61 @@ acas_resolve_scenario() {
       break
     fi
   done
-  [[ -n "${mapped_subsystem:-}" ]] || acas_die "$EX_USAGE" \
-    "internal: operation '$ACAS_RUN_OPERATION' has no menu mapping."
+  [[ -n "$mapped_subsystem" ]] || acas_die "$EX_USAGE" \
+    "internal: operation '$(acas_sanitise_field "$wanted")' has no menu mapping."
 
-  # A scenario file may name the subsystem too. Every source must agree: a
-  # silent override is exactly how a run ends up driving the wrong menu.
+  # A scenario file may name the subsystem too. Every source must agree: a silent
+  # override is exactly how a run ends up driving the wrong menu. An EMPTY
+  # subsystem: key means "the file does not say", which is what period_end_totals
+  # carries because it spans two menus -- so no single name could be true for all
+  # four of its operations.
   local scenario_subsystem
   scenario_subsystem="$(acas_scenario_scalar subsystem)"
   if [[ -n "$scenario_subsystem" && "$scenario_subsystem" != "$mapped_subsystem" ]]; then
     acas_die "$EX_SCENARIO" \
-      "the scenario file's subsystem does not match its operation." \
-      "operation '$ACAS_RUN_OPERATION' is dispatched by the $mapped_subsystem menu," \
-      "but the file says subsystem '$scenario_subsystem'."
+      "the scenario file's subsystem does not match one of its operations." \
+      "operation '$wanted' is dispatched by the $mapped_subsystem menu," \
+      "but the file says subsystem '$(acas_sanitise_field "$scenario_subsystem")'." \
+      'A file that spans two menus must leave subsystem: empty; naming either one' \
+      'would make the operations of the other fail here rather than behaviourally.'
   fi
-  if [[ -n "$ACAS_RUN_SUBSYSTEM" && "$ACAS_RUN_SUBSYSTEM" != "$mapped_subsystem" ]]; then
+  if [[ -n "$ACAS_RUN_SUBSYSTEM_REQUESTED" && "$ACAS_RUN_SUBSYSTEM_REQUESTED" != "$mapped_subsystem" ]]; then
     acas_die "$EX_USAGE" \
-      "--subsystem does not match --operation." \
-      "operation '$ACAS_RUN_OPERATION' is dispatched by the $mapped_subsystem menu," \
-      "but --subsystem said '$ACAS_RUN_SUBSYSTEM'."
+      '--subsystem does not match one of the operations to be driven.' \
+      "operation '$wanted' is dispatched by the $mapped_subsystem menu," \
+      "but --subsystem said '$(acas_sanitise_field "$ACAS_RUN_SUBSYSTEM_REQUESTED")'." \
+      'A scenario spanning two menus cannot be constrained with --subsystem at all.'
   fi
+
+  ACAS_RUN_OPERATION="$wanted"
   ACAS_RUN_SUBSYSTEM="$mapped_subsystem"
   acas_in_list "$ACAS_RUN_SUBSYSTEM" "${ACAS_RUN_SUBSYSTEMS[@]}" || acas_die "$EX_USAGE" \
     "internal: unknown subsystem '$ACAS_RUN_SUBSYSTEM'."
 
-  if [[ "$ACAS_RUN_SCENARIO" == *control_total_mismatch* && "$ACAS_RUN_SUBSYSTEM" != 'general' ]]; then
-    acas_die "$EX_USAGE" \
-      "the control_total_mismatch scenario is General-Ledger-specific." \
-      "It was requested for subsystem '$ACAS_RUN_SUBSYSTEM'." \
-      'Sales and Purchase batches balance by construction, so an unbalanced batch' \
-      'cannot meaningfully be built for them; the control-total gate that this' \
-      'scenario exercises lives in the General Ledger batch proof at' \
-      '[general/gl051.cbl:L1109-L1118].'
-  fi
+  # The executable follows the subsystem, ALWAYS, and is set here so it cannot
+  # drift from it (F-12). It used to be assigned once in acas_assert_oracle, which
+  # runs before the drive loop, so a scenario spanning two menus drove every
+  # operation with the FIRST operation's menu. MEASURED: period_end_totals'
+  # operation 3 is pl_order_post, and the run launched /build/sales/sales and sent
+  # the purchase menu letter "H" -- which on the Sales menu is (H) Payment Input,
+  # so the run landed in SL080's interactive data-entry screen and never came back.
+  # No diagnostic said the wrong program had been started; the only symptom was a
+  # timeout at a screen the plan does not answer.
+  acas_resolve_executable
+}
 
-  acas_log "scenario   = $ACAS_RUN_SCENARIO"
-  if [[ -n "$ACAS_RUN_SCENARIO_FILE" ]]; then
-    acas_log "definition = $ACAS_RUN_SCENARIO_FILE"
+# acas_resolve_executable
+# $ACAS_BUILD/<subsystem>/<subsystem>, the `cobc -x' menu the maintainer's own
+# per-directory script builds. Left EMPTY while ACAS_BUILD is still unset, because
+# acas_resolve_scenario runs before acas_assert_environment and a half-formed path
+# would be worse than no path: acas_assert_oracle re-derives it once the
+# environment contract has been asserted, and the drive loop re-derives it again
+# for every operation.
+acas_resolve_executable() {
+  if [[ -n "${ACAS_BUILD:-}" ]]; then
+    ACAS_RUN_EXECUTABLE="$ACAS_BUILD/$ACAS_RUN_SUBSYSTEM/$ACAS_RUN_SUBSYSTEM"
   else
-    acas_note 'no scenario file given; every pinned value must come from an option'
-  fi
-  acas_log "operation  = $ACAS_RUN_OPERATION"
-  acas_log "subsystem  = $ACAS_RUN_SUBSYSTEM"
-  if [[ "$ACAS_RUN_SUBSYSTEM" == 'irs' ]]; then
-    acas_log "menu path  = option '$ACAS_RUN_MENU_KEY' then run option '66'  [$ACAS_RUN_PARAGRAPH_LOCATOR]"
-  else
-    acas_log "menu path  = letter '$ACAS_RUN_MENU_KEY' -> $ACAS_RUN_PARAGRAPH  [$ACAS_RUN_PARAGRAPH_LOCATOR]"
+    ACAS_RUN_EXECUTABLE=''
   fi
 }
 
@@ -1653,7 +2197,7 @@ acas_resolve_scenario() {
 # happens to be whatever the database currently holds (R-6).
 acas_resolve_pinned_values() {
   ACAS_RUN_CURRENT_STAGE='resolving the pinned scenario values'
-  acas_stage 'Stage 4/8: pinned run date, date form and switches'
+  acas_stage 'Check 4/8: pinned run date, date form and switches'
 
   ACAS_RUN_DATE_TEXT="$(acas_scenario_scalar run_date_text)"
   [[ -n "$ACAS_RUN_DATE_TEXT" ]] || acas_die "$EX_SCENARIO" \
@@ -1738,7 +2282,7 @@ acas_resolve_pinned_values() {
       ;;
   esac
 
-  if [[ "$ACAS_RUN_OPERATION" == 'irs_post' ]]; then
+  if acas_ops_include 'irs_post'; then
     ACAS_RUN_IRS_CLEAR="$(acas_scenario_scalar irs_clear_postings)"
     [[ -n "$ACAS_RUN_IRS_CLEAR" ]] || acas_die "$EX_SCENARIO" \
       'the scenario does not answer irs030 end-of-job question.' \
@@ -1760,7 +2304,7 @@ acas_resolve_pinned_values() {
     esac
   fi
 
-  if [[ "$ACAS_RUN_OPERATION" == 'gl_end_of_cycle' ]]; then
+  if acas_ops_include 'gl_end_of_cycle'; then
     ACAS_RUN_GL080_PROCEED="$(acas_scenario_default gl080_proceed 'Y')"
     ACAS_RUN_GL080_PROCEED="${ACAS_RUN_GL080_PROCEED^^}"
     case "$ACAS_RUN_GL080_PROCEED" in
@@ -1789,7 +2333,7 @@ acas_resolve_pinned_values() {
   # neither programs/sl100_cash_posting.run nor
   # programs/pl100_payment_posting.run carries a default for it. Both legs of the
   # comparison therefore take the answer from the scenario and neither invents it.
-  if [[ "$ACAS_RUN_OPERATION" == 'sl_cash_post' || "$ACAS_RUN_OPERATION" == 'pl_payment_post' ]]; then
+  if acas_ops_include 'sl_cash_post' || acas_ops_include 'pl_payment_post'; then
     ACAS_RUN_PAYMENT_CONFIRM="$(acas_scenario_scalar payment_post_confirm)"
     [[ -n "$ACAS_RUN_PAYMENT_CONFIRM" ]] || acas_die "$EX_SCENARIO" \
       'the scenario does not answer the payment-posting confirmation.' \
@@ -1824,11 +2368,14 @@ acas_resolve_pinned_values() {
       acas_die "$EX_SCENARIO" \
         'the scenario does not list its affected tables.' \
         'Add an affected_tables: key -- the same key harness/dump_tables.py reads.' \
-        'It is required, not optional: leaving the menu with "X" rewrites SYSTEM-REC' \
-        'and SYSTOT-REC, plus SYSDEFLT-REC in the General menu only' \
-        '[general/general.cbl:L656-L692] vs [sales/sales.cbl:L628-L657], which the' \
-        'Python side never does, so the comparison MUST be bounded by an explicit' \
-        'per-scenario list rather than by an ignore-list in diff_states.py.'
+        'It is required, not optional: it is the DECLARED EFFECT this script asserts' \
+        'against after the run. The comparison itself is bounded by all 22 in-scope' \
+        'tables, because leaving the menu with "X" rewrites SYSTEM-REC and SYSTOT-REC,' \
+        'plus SYSDEFLT-REC in the General menu only [general/general.cbl:L656-L672]' \
+        'vs [sales/sales.cbl:L628-L657], and the Python side REPRODUCES that in' \
+        'acas_posting/cli/args.py::overrewrite -- so those rows are comparable and' \
+        'must not be bounded away. Neither list is an ignore-list; diff_states.py' \
+        'has none.'
     fi
     acas_note 'no affected-table list available; post-run table assertions will be skipped'
   else
@@ -1844,6 +2391,7 @@ acas_resolve_pinned_values() {
       ACAS_RUN_TABLES+=("$table")
     done
   fi
+  acas_resolve_fingerprint_tables
 
   acas_log "run date   = $ACAS_RUN_DATE_TEXT  (date_form $ACAS_RUN_DATE_FORM)"
   acas_log "expected SYSTEM-REC.RUN-DAT = $ACAS_RUN_RUN_DATE"
@@ -1862,7 +2410,7 @@ acas_resolve_pinned_values() {
     acas_log "affected tables ($((${#ACAS_RUN_TABLES[@]}))) = $(acas_join_words "${ACAS_RUN_TABLES[@]}")"
   fi
 
-  if [[ "$ACAS_RUN_OPERATION" == 'irs_post' && ${#ACAS_RUN_TABLES[@]} -gt 0 ]]; then
+  if acas_ops_include 'irs_post' && (( ${#ACAS_RUN_TABLES[@]} > 0 )); then
     acas_in_list 'PSIRSPOST-REC' "${ACAS_RUN_TABLES[@]}" || acas_die "$EX_SCENARIO" \
       'an irs_post scenario must list PSIRSPOST-REC in affected_tables.' \
       "irs_clear_postings is '$ACAS_RUN_IRS_CLEAR', and that answer changes the" \
@@ -1872,10 +2420,68 @@ acas_resolve_pinned_values() {
 }
 
 
+
+# =============================================================================
+# ⭐ SYSTEM-REC IS DECLARED, DUMPED AND FINGERPRINTED ON EVERY SCENARIO.
+#
+# The menu exit persists it. `overrewrite' rewrites key 1 on all four subsystems --
+# [general/general.cbl:L656-L672], [sales/sales.cbl:L628-L641],
+# [purchase/purchase.cbl:L621-L634], [irs/irs.cbl:L759-L774] -- and the migrated
+# command line reproduces that paragraph rather than skipping it
+# [acas_posting/cli/args.py]. So SYSTEM-REC is written by BOTH cycles on every route,
+# and a difference in what they write is a real behavioural difference. Leaving it
+# outside every bound is what let a system-state regression produce an empty diff.
+#
+# It is therefore on every scenario's affected-table list and in every capture. The one
+# problem a dump does have is solved where it arises rather than by dropping the table:
+#
+#   1. THE ROW CARRIES TWO CREDENTIALS. `RDBMS-PASSWD char(12)' [mysql/ACASDB.sql] is a
+#      SYSTEM-REC column [copybooks/wssystem.cob:L139], and so is `PASS-WORD'. A dump is
+#      `SELECT *' and a capture is committed evidence, so harness/dump_tables.py
+#      withholds exactly those two cells -- `REDACTED_COLUMNS' applied inside
+#      `render_value', keyed by (table, column), identical on both sides and therefore
+#      incapable of producing a difference of its own. The other 167 columns are compared
+#      by value. Bounding the whole table out instead would have taken those 167 with it,
+#      and a bound drawn that way cannot reveal a difference in what it excludes.
+#
+#   2. THE EFFECT CLAIM IS NOT, IN FACT, COUPLED TO FIELDS NO SCENARIO REASONS ABOUT.
+#      `expected_table_effect: unchanged' is the whole assertion of the empty-batch and
+#      rejection scenarios -- that the journey touched NOTHING -- and SYSTEM-REC's content
+#      does depend on what the route DID: the run-date stamp, the IRS allocator, the
+#      one-shot latches, and `Date-Form', which the frozen date sections write back
+#      [copybooks/wssystem.cob:L127]. So the objection was MEASURED rather than argued:
+#      the row's digest HOLDS on all four scenarios declaring `unchanged' and MOVES on
+#      every one declaring `changed'. That was measured over the eight scenarios that
+#      existed when the measurement was taken, which is all four `unchanged' ones; the
+#      ninth, end_of_cycle_gl, declares `changed' and moves the row by construction,
+#      Phase 5 advancing the cycle and rotating the quarter counter. Declaring the row
+#      falsifies no effect claim, and reason 1 is handled by redaction not exclusion.
+#
+# The fingerprint is kept ANYWAY, because it gives what a dump cannot: the seed
+# cross-check proves both sides STARTED from the same 169-column row, the pre/post pair
+# proves whether each side CHANGED it, and tests/conftest.py compares the two sides'
+# post-run digests -- a second, independent parity check over every column INCLUDING the
+# two the capture withholds, with nothing to leak, because a sha256 of the canonical dump
+# is not the dump. A scenario that declares the row gets it fingerprinted in its declared
+# position; one that does not gets it appended after the declared order, so the two sides'
+# records stay byte-comparable either way.
+# =============================================================================
+acas_resolve_fingerprint_tables() {
+  ACAS_RUN_FINGERPRINT_TABLES=()
+  if (( ${#ACAS_RUN_TABLES[@]} == 0 )); then
+    return 0
+  fi
+  ACAS_RUN_FINGERPRINT_TABLES=("${ACAS_RUN_TABLES[@]}")
+  if ! acas_in_list "$ACAS_RUN_PARAMETER_TABLE" "${ACAS_RUN_FINGERPRINT_TABLES[@]}"; then
+    ACAS_RUN_FINGERPRINT_TABLES+=("$ACAS_RUN_PARAMETER_TABLE")
+  fi
+  acas_log "fingerprinted tables ($((${#ACAS_RUN_FINGERPRINT_TABLES[@]}))) = $(acas_join_words "${ACAS_RUN_FINGERPRINT_TABLES[@]}")"
+}
+
 # STAGE 3 -- the environment contract.
 acas_assert_environment() {
   ACAS_RUN_CURRENT_STAGE='asserting the environment contract'
-  acas_stage 'Stage 2/8: environment'
+  acas_stage 'Check 2/8: environment'
 
   local name
   for name in "${ACAS_RUN_REQUIRED_ENV_NONEMPTY[@]}"; do
@@ -1908,12 +2514,22 @@ acas_assert_environment() {
   # THE RANGE, not merely the character class.
   [[ "$ACAS_DB_PORT" =~ ^[0-9]+$ ]] || acas_die "$EX_PRECONDITION" \
     "ACAS_DB_PORT must be numeric; got '$(acas_sanitise_field "$ACAS_DB_PORT")'."
-  if (( 10#$ACAS_DB_PORT < 1 || 10#$ACAS_DB_PORT > 65535 )); then
+  # THE RANGE IS THE FROZEN CARRIER'S, 1..9999, NOT THE TCP RANGE.
+  # `LK-Port-Number pic x(4)' [common/acas-get-params.cbl:L158] and
+  # `01 Ws-Mysql-Port-Number pic x(4)' [copybooks/mysql-variables.cpy:L91] are
+  # FOUR characters, and every bridge STRINGs DB-Port into the second of them
+  # [common/glpostingMT.cbl:L410-L413]. So a five-digit port reaches the compiled
+  # cycle TRUNCATED - 13306 becomes 1330 - while this script would probe and drive
+  # the untruncated one, and the two sides of the comparison would be talking to
+  # different servers. Refused here rather than truncated silently.
+  if (( 10#$ACAS_DB_PORT < 1 || 10#$ACAS_DB_PORT > 9999 )); then
     acas_die "$EX_PRECONDITION" \
-      "ACAS_DB_PORT must be between 1 and 65535; got '$ACAS_DB_PORT'." \
-      'A value outside the range reaches the TCP probe and the client as an' \
-      'out-of-range port, which fails with a cause that names neither the' \
-      'variable nor the value.'
+      "ACAS_DB_PORT must be between 1 and 9999; got '$ACAS_DB_PORT'." \
+      'The frozen carrier holds FOUR characters - LK-Port-Number pic x(4)' \
+      '[common/acas-get-params.cbl:L158] and Ws-Mysql-Port-Number pic x(4)' \
+      '[copybooks/mysql-variables.cpy:L91] - so a five-digit port would reach' \
+      'the compiled cycle truncated while this script used the whole value.' \
+      'harness/docker-compose.yml publishes 3306, which is what the stack uses.'
   fi
   # Canonicalised so the port this script reports, probes and hands the client
   # is one value rather than several spellings of it.
@@ -2004,7 +2620,13 @@ acas_assert_environment() {
   acas_log "ACAS_DATA  = $(acas_sanitise_field "$ACAS_DATA") (working directory for the run)"
   acas_log "ACAS_OUT   = $(acas_sanitise_field "$ACAS_OUT")"
   acas_log "ACAS_BIN   = $(acas_sanitise_field "$ACAS_BIN")"
-  acas_log "database   = $(acas_sanitise_field "$ACAS_DB_NAME") on $(acas_sanitise_field "$ACAS_DB_HOST"):$ACAS_DB_PORT as $(acas_sanitise_field "$ACAS_DB_USER")"
+  # A CATEGORY and a FINGERPRINT, never the topology (F-39). This transcript is
+  # retained evidence and is replayed to a container log, so the schema, host, port
+  # and ACCOUNT NAME are deliberately absent from it. The fingerprint is the same
+  # value harness/seed.sh, harness/reset_db.sh and harness/build_oracle.sh print for
+  # one target, so two transcripts of one protocol run are still comparable.
+  acas_log "database   = $(acas_target_description)"
+  acas_note 'no account name, host, port or schema is printed: the transcript is retained evidence'
   acas_note 'the database password is never logged, never placed in argv and never written to disk'
 }
 
@@ -2088,35 +2710,52 @@ acas_open_log() {
   # ⭐ THE STALE-FINGERPRINT WINDOW, CLOSED HERE AND NOT LATER.
   # cobol.seed-fingerprint is written by acas_record_seed_fingerprint, immediately
   # before the drive; [harness/run_python_scenario.sh] reads it and REFUSES to
-  # compare if the two sides started from different row counts. If this run dies
+  # compare if the two sides started from different STATES -- rows and values both,
+  # since each line carries a digest of the canonical dump. If this run dies
   # before that stage -- a missing artifact, a database refusal -- a fingerprint
   # left over from an EARLIER parity run would still be sitting at that name, and
   # the Python side would compare against a starting state that has nothing to do
   # with this attempt. So the name is emptied at the first moment the run-logs
   # directory is known good, which makes "absent" mean "this run did not get that
-  # far" and never "some previous run's counts".
+  # far" and never "some previous run's state". The post-run record is emptied with
+  # it, for the same reason and in the same loop.
   ACAS_RUN_FINGERPRINT="$dir/cobol.seed-fingerprint"
-  if [[ -e "$ACAS_RUN_FINGERPRINT" || -L "$ACAS_RUN_FINGERPRINT" ]]; then
-    rm -f -- "$ACAS_RUN_FINGERPRINT" 2>/dev/null || acas_die "$EX_PRECONDITION" \
-      "a previous seed fingerprint could not be removed: $ACAS_RUN_FINGERPRINT" \
-      'Leaving it in place would let the Python side cross-check this run against' \
-      "another run's starting state."
-    acas_note 'removed the seed fingerprint left by an earlier run at this name'
-  fi
+  ACAS_RUN_POST_FINGERPRINT="$dir/cobol.post-fingerprint"
+  local stale
+  for stale in "$ACAS_RUN_FINGERPRINT" "$ACAS_RUN_POST_FINGERPRINT"; do
+    if [[ -e "$stale" || -L "$stale" ]]; then
+      rm -f -- "$stale" 2>/dev/null || acas_die "$EX_PRECONDITION" \
+        "a previous state fingerprint could not be removed: $stale" \
+        'Leaving it in place would let the Python side cross-check this run against' \
+        "another run's starting state."
+      acas_note "removed the state fingerprint left by an earlier run at $stale"
+    fi
+  done
 
   # The per-side run-status record. Written by the EXIT trap, so it exists for
   # EVERY termination path and carries this run's real status.
   ACAS_RUN_STATUS_FILE="$dir/cobol.run-status"
   acas_create_private_file "$ACAS_RUN_STATUS_FILE" "the run-status record"
 
+  # ⭐ INVALIDATED AT STARTUP, NOT MERELY WRITTEN AT THE END (F-13, F-23). Created
+  # empty here, which is a record with NO `operation' line in it, so a reader that
+  # requires one operation record per declared operation cannot mistake a previous
+  # run's dispositions for this run's. The real content is published by
+  # acas_publish_operation_status after the last operation has been driven.
+  ACAS_RUN_OP_STATUS_FILE="$dir/cobol.operation-status"
+  acas_create_private_file "$ACAS_RUN_OP_STATUS_FILE" 'the per-operation status record'
+
   # No timestamp in this header, by design.
-  acas_tee "harness/run_cobol_scenario.sh -- scenario $ACAS_RUN_SCENARIO, operation $ACAS_RUN_OPERATION"
-  acas_stage 'Stage 3/8: transcript'
+  acas_tee "harness/run_cobol_scenario.sh -- scenario $ACAS_RUN_SCENARIO, operations $(acas_join_words "${ACAS_RUN_OPS[@]}")"
+  acas_stage 'Check 3/8: transcript'
   acas_log "transcript = $ACAS_RUN_LOG"
   acas_log "plan       = $ACAS_RUN_PLAN_FILE"
   acas_log "outcome    = $ACAS_RUN_RESULT_FILE"
-  acas_log "run status = $ACAS_RUN_STATUS_FILE"
+  acas_log "run id     = $ACAS_RUN_RUN_ID"
+  acas_log "run status = $ACAS_RUN_STATUS_FILE (WRAPPER health)"
+  acas_log "op status  = $ACAS_RUN_OP_STATUS_FILE (each operation's OWN disposition)"
   acas_log "fingerprint= $ACAS_RUN_FINGERPRINT (written just before the drive)"
+  acas_log "post-print = $ACAS_RUN_POST_FINGERPRINT (written just after it)"
   acas_note 'all five are OUTSIDE the compared tree, so they cannot perturb a state diff'
   acas_note 'their SHA-256 fingerprints come at the END of the run, not here: all but the'
   acas_note 'transcript are still empty at this point and the transcript is still being'
@@ -2125,76 +2764,201 @@ acas_open_log() {
 }
 
 # =============================================================================
-# THE PRE-RUN SEED FINGERPRINT -- the oracle half of a cross-check that had none
+# THE STATE FINGERPRINTS -- the oracle half of a cross-check that had none
 #
-# [harness/run_python_scenario.sh] records the row count of every table its
-# scenario names, in the order the scenario names them, and then compares its
-# record with `$ACAS_OUT/run-logs/<scenario>/cobol.seed-fingerprint'. NOTHING wrote
-# that file. The cross-check was therefore unreachable: every Python run reported
-# "seed cross-check: unverified -- no oracle-side fingerprint", and the guarantee
-# it exists to give -- that the two cycles were handed the same starting state --
-# was never once actually checked. The consequence is the expensive one: a re-seed
-# that quietly loaded a different fixture produces a diff full of real differences
-# with no indication that the seed, not the cycle, was the cause.
+# [harness/run_python_scenario.sh] records the state of every table its scenario
+# names and compares its record with this side's. That cross-check was once
+# unreachable, because nothing wrote this side's file: every Python run reported
+# "seed cross-check: unverified", and the guarantee it exists to give -- that the
+# two cycles were handed the same starting state -- was never actually checked.
+# The consequence is the expensive one: a re-seed that quietly loaded a different
+# fixture produces a diff full of real differences with no indication that the
+# seed, not the cycle, was the cause.
 #
-# This is the missing writer. The FORMAT IS A CONTRACT, because the far side
-# compares with `cmp -s' -- byte for byte, not field by field:
-#     <table><TAB><count>\n     one line per table, no header, no trailing blank
-# in the scenario's declared order, with a single hyphen in place of the count for
-# a table that cannot be counted. That is exactly what the Python side's `counts'
-# mode emits, so the two records are comparable without either side normalising the
-# other. Row counts only -- all integers, no monetary value anywhere near this file
-# (R-2) -- and it lives under run-logs/, outside every compared tree, so it can
-# never be diffed as though it were posted data (R-6).
+# ⭐ A ROW COUNT WAS NOT ENOUGH, AND THAT IS WHY THIS RECORD CARRIES A DIGEST.
+# Two seeds that differ in one balance, one status byte or one date have
+# IDENTICAL row counts. The counts-only form therefore certified a starting state
+# it had not established, and an empty diff taken after it meant nothing. Each
+# line now carries three fields:
+#
+#     <table><TAB><row count><TAB><sha256 of the canonical dump>
+#
+# in the scenario's declared order, with a single hyphen in BOTH value fields for
+# a table that cannot be read -- a hyphen and never a zero, because "could not be
+# read" is a different fact from "is empty" and the far side must tell them apart.
+# The format is a contract: the far side compares with `cmp -s', byte for byte,
+# not field by field.
+#
+# ⭐ AND BOTH SIDES COMPUTE IT WITH THE SAME PROGRAM. [harness/table_digest.py]
+# takes the digest over the canonical dump text [harness/dump_tables.py] itself
+# writes, through its published `serialise_dump'. Two independently produced
+# digests are comparable only if one implementation produced them: a digest taken
+# by the mysql client here and by the driver there would differ on formatting
+# alone and would report a starting-state disagreement on every run. Invoking
+# that one producer from both sides is the only design that works, and it reaches
+# no COBOL (R-1) -- it is a Python program, run out of process, exactly as the
+# dump stage is.
+#
+# Row counts and digests only. No monetary value goes near this file, and it
+# lives under run-logs/, outside every compared tree, so it can never be diffed
+# as though it were posted data (R-2, R-6).
 #
 # WHY THIS SIDE DOES NOT ITSELF COMPARE. In protocol order the compiled run is
 # first and the Python run second, so at this moment there is nothing to compare
-# against: any python.seed-fingerprint present belongs to a previous parity run and
-# a different seeding. Keeping ONE authority for the comparison -- the side that
-# runs second -- is what stops a leftover file from manufacturing a failure. What
-# this side owes the protocol is an honest record of its own starting state, and
-# that is all it writes.
-acas_record_seed_fingerprint() {
-  ACAS_RUN_CURRENT_STAGE='recording the pre-run seed fingerprint'
-  acas_stage 'Stage 8a/8: the pre-run seed fingerprint'
+# against: any python.seed-fingerprint present belongs to a previous parity run
+# and a different seeding. Keeping ONE authority for the comparison -- the side
+# that runs second -- is what stops a leftover file from manufacturing a failure.
+# What this side owes the protocol is an honest record of its own state, and that
+# is what it writes: one before the drive, and one after it.
+# ⭐ THE EXACT SEED IDENTITY, READ AND CARRIED (finding F-22)
+#
+# "Seed fingerprint" on this side is a list of TABLE ROW COUNTS, and that is not an
+# identity: two seedings with the same shape and different values compare equal, so the
+# two legs of a parity run could start from different money and the protocol would
+# report that their starting states matched. harness/seed.sh already stages a marker
+# carrying a SHA-256 per seeded file, and harness/reset_db.sh publishes that marker's
+# own digest to <ACAS_OUT>/run-logs/<scenario>/seed-identity. This reads it, and
+# records it in the run-status record, where harness/dump_tables.py requires it and
+# harness/diff_states.py requires the two sides to agree.
+#
+# ABSENCE IS NOT FATAL HERE, and that is deliberate rather than lax: a run driven by
+# hand, without the reset stage, legitimately has no seed identity, and refusing it
+# would make the runner unusable for exactly the debugging it is most needed for. The
+# refusal belongs downstream, where the CAPTURE is required to carry one before it can
+# support a verdict -- fail-closed at the point the claim is made rather than at the
+# point the work is done.
+#
+# A run id that does NOT match is a different matter: it means the seed on disk was
+# staged by another attempt, so the identity would be a lie about this one. That is
+# discarded rather than recorded.
+acas_read_seed_identity() {
+  local path="$ACAS_OUT/run-logs/$ACAS_RUN_SCENARIO/seed-identity"
+  local key value recorded_run='' recorded_digest='' recorded_scenario=''
 
-  if (( ${#ACAS_RUN_TABLES[@]} == 0 )); then
-    acas_warn 'no affected-table list, so no seed fingerprint is recorded and the Python side will report the cross-check as unverified'
+  ACAS_RUN_SEED_IDENTITY=''
+  [[ -f "$path" && ! -L "$path" ]] || {
+    acas_note "no seed identity at $path; this capture will be reported as carrying no exact seed identity"
+    return 0
+  }
+  while IFS=$'\t' read -r key value; do
+    case "$key" in
+      scenario)              recorded_scenario="$value" ;;
+      run_id)                recorded_run="$value" ;;
+      fixture_marker_sha256) recorded_digest="$value" ;;
+    esac
+  done <"$path"
+
+  if [[ "$recorded_scenario" != "$ACAS_RUN_SCENARIO" ]]; then
+    acas_warn "the seed identity at $path names scenario '$recorded_scenario', not '$ACAS_RUN_SCENARIO'; it is discarded."
+    return 0
+  fi
+  if [[ -n "$ACAS_RUN_RUN_ID" && -n "$recorded_run" && "$recorded_run" != "$ACAS_RUN_RUN_ID" ]]; then
+    acas_warn "the seed identity at $path was staged by attempt '$recorded_run', not '$ACAS_RUN_RUN_ID'; it is discarded." \
+      'Recording it would make this capture claim a seed it was not given.'
+    return 0
+  fi
+  [[ "$recorded_digest" =~ ^[0-9a-f]{64}$ ]] || {
+    acas_warn "the seed identity at $path carries no SHA-256; it is discarded."
+    return 0
+  }
+
+  ACAS_RUN_SEED_IDENTITY="$recorded_digest"
+  acas_log "seed identity = ${ACAS_RUN_SEED_IDENTITY:0:16}... (the staged fixture marker digest)"
+  return 0
+}
+
+acas_write_state_fingerprint() {
+  local target="$1" label="$2"
+
+  if (( ${#ACAS_RUN_FINGERPRINT_TABLES[@]} == 0 )); then
+    acas_warn "no affected-table list, so no $label is recorded and the Python side will report the cross-check as unverified"
     return 0
   fi
 
-  acas_create_private_file "$ACAS_RUN_FINGERPRINT" 'the seed fingerprint'
+  acas_create_private_file "$target" "the $label"
 
-  local table rc lines=''
-  for table in "${ACAS_RUN_TABLES[@]}"; do
-    rc=0
-    acas_sql_scalar "select count(*) from $(acas_sql_quote_ident "$table");" || rc=$?
-    if (( rc == 0 )) && [[ "$ACAS_SQL_OUT" =~ ^[0-9]+$ ]]; then
-      lines+="$table"$'\t'"$ACAS_SQL_OUT"$'\n'
-    else
-      # A hyphen, and not a zero: "this table could not be counted" is a
-      # different fact from "this table is empty", and the far side must be able
-      # to tell them apart. The Python side spells the same case the same way.
-      lines+="$table"$'\t''-'$'\n'
-      acas_warn "$table could not be counted for the seed fingerprint$([[ -n "$ACAS_SQL_DIAG" ]] && printf ': %s' "$(acas_diag_summary "$ACAS_SQL_DIAG")")"
-    fi
-  done
+  # The digest producer is a sibling of this script, so it is found relative to
+  # this file rather than through $PATH or a guessed checkout layout.
+  local producer="$ACAS_RUN_HARNESS_DIR/table_digest.py"
+  [[ -f "$producer" ]] || acas_die "$EX_PRECONDITION" \
+    "the canonical state-digest producer is missing: $producer" \
+    'Both sides must compute their fingerprints with the same program, or the two' \
+    'records cannot be compared. It is a sibling of this script.'
 
-  printf '%s' "$lines" >"$ACAS_RUN_FINGERPRINT" || acas_die "$EX_PRECONDITION" \
-    "the seed fingerprint could not be written: $ACAS_RUN_FINGERPRINT"
-  acas_log "seed fingerprint = $ACAS_RUN_FINGERPRINT"
+  acas_have python3 || acas_die "$EX_PRECONDITION" \
+    'python3 is not on PATH, so no state fingerprint can be taken.' \
+    'harness/table_digest.py is the single canonical digest producer for both' \
+    'sides of the comparison. It reaches no COBOL (R-1).'
+
+  local out rc=0
+  acas_deadline_prefix "$ACAS_TIMEOUT_CLIENT"
+  out="$("${ACAS_DEADLINE_ARGV[@]}" python3 "$producer" -- "${ACAS_RUN_FINGERPRINT_TABLES[@]}" 2>&1)" || rc=$?
+  # Exit 1 means at least one table could not be read; the record is still
+  # complete, still ordered and still comparable, so it is written and the
+  # unreadable tables are reported. Anything else is fatal: an empty or partial
+  # record would certify a starting state nobody established.
+  if (( rc != 0 && rc != 1 )); then
+    acas_die "$EX_DATABASE" \
+      "the $label could not be taken (status $rc)." \
+      "$(acas_diag_summary "$out")" \
+      'A comparison whose starting state cannot be established is not a' \
+      'comparison, so this is refused rather than recorded as unknown.'
+  fi
+
+  # Only the well-formed record lines are kept: the producer writes its per-table
+  # diagnoses to stderr, which was merged above so an operator sees them, and a
+  # diagnosis inside the record would be compared as though it were state.
+  local lines=''
   local line
   while IFS= read -r line; do
+    [[ "$line" =~ ^[A-Za-z0-9_-]+$'\t'([0-9]+|-)$'\t'([0-9a-f]{64}|-)$ ]] || continue
+    lines+="$line"$'\n'
+  done <<<"$out"
+
+  [[ -n "$lines" ]] || acas_die "$EX_DATABASE" \
+    "the $label came back empty." \
+    "$(acas_diag_summary "$out")" \
+    'One line per affected table is the contract.'
+
+  printf '%s' "$lines" >"$target" || acas_die "$EX_PRECONDITION" \
+    "the $label could not be written: $target"
+  acas_log "$label = $target"
+  while IFS= read -r line; do
     [[ -n "$line" ]] || continue
-    acas_log "  $(printf '%-22s %s' "${line%%$'\t'*}" "${line##*$'\t'}")"
+    acas_log "  $(printf '%-22s %-8s %s' \
+      "${line%%$'\t'*}" \
+      "$(printf '%s' "$line" | cut -f2)" \
+      "$(printf '%s' "$line" | cut -f3)")"
   done <<<"$lines"
-  acas_note 'the Python side compares its own counts with this file and refuses to proceed if they differ; this side records and does not compare, because in protocol order it runs first'
+  if (( rc == 1 )); then
+    acas_warn "at least one table could not be digested for the $label; its line carries the hyphen markers and the reason is above"
+  fi
+  return 0
+}
+
+acas_record_seed_fingerprint() {
+  ACAS_RUN_CURRENT_STAGE='recording the pre-run state fingerprint'
+  acas_stage 'Check 8a/8: the pre-run state fingerprint'
+
+  # The EXACT identity first, then the per-table digests (F-22). The digests remain
+  # because they are the cross-check the two runners exchange; the identity is what
+  # actually binds the two legs to the same seeded BYTES rather than to the same shape.
+  acas_read_seed_identity
+  acas_write_state_fingerprint "$ACAS_RUN_FINGERPRINT" 'seed fingerprint'
+  acas_note 'the Python side compares its own record with this file and refuses to proceed if they differ; this side records and does not compare, because in protocol order it runs first'
+}
+
+acas_record_post_fingerprint() {
+  ACAS_RUN_CURRENT_STAGE='recording the post-run state fingerprint'
+  acas_stage 'Check 8c/8: the post-run state fingerprint'
+  acas_write_state_fingerprint "$ACAS_RUN_POST_FINGERPRINT" 'post-run fingerprint'
+  acas_note 'the pre-run and post-run records together answer a question no table diff can: did this run CHANGE anything? Two runs that did nothing at all agree perfectly, so without this a no-op could satisfy a parity or a determinism claim'
 }
 
 # STAGE 5 -- the compiled oracle.
 acas_assert_oracle() {
   ACAS_RUN_CURRENT_STAGE='asserting the compiled oracle'
-  acas_stage 'Stage 5/8: compiled artifacts'
+  acas_stage 'Check 5/8: compiled artifacts'
 
   # The four menu executables, each built with `cobc -x' by the maintainer's
   # own per-directory script.
@@ -2221,36 +2985,62 @@ acas_assert_oracle() {
     acas_log "$(printf '%-9s %-14s %s' "$subsystem" "$present" "[$locator]")"
   done
 
-  ACAS_RUN_EXECUTABLE="$ACAS_BUILD/$ACAS_RUN_SUBSYSTEM/$ACAS_RUN_SUBSYSTEM"
-  if [[ ! -x "$ACAS_RUN_EXECUTABLE" ]]; then
-    acas_die "$EX_ORACLE" \
-      "the $ACAS_RUN_SUBSYSTEM menu executable is missing or not executable." \
-      "expected: $ACAS_RUN_EXECUTABLE" \
-      'Run harness/build_oracle.sh first. It performs the five-step bootstrap,' \
-      'including the build rule for cobmysqlapi.o that the repository itself does' \
-      'not contain -- every bridge, handler and loader links that object at' \
-      '[common/comp-common.sh:L26] and following, yet no rule anywhere in the' \
-      'checkout builds it, so a naive build fails at link time with no obvious cause.' \
-      'Note also that the frozen build scripts end with an unconditional exit 0' \
-      '-- [comp-all.sh:L45], [common/comp-common.sh:L59] -- so their exit status is' \
-      'NOT a success signal and the artifacts must be checked by name, as here.'
-  fi
+  # ⭐ EVERY SUBSYSTEM THE OPERATION LIST REACHES, NOT JUST ONE (F-12). A scenario
+  # may span two menus -- period_end_totals spans Sales and Purchase -- and this run
+  # drives all of its operations, so a menu missing for operation 3 must be a
+  # refusal HERE, before anything is written, and not a failure discovered after
+  # operations 1 and 2 have already posted.
+  local -a needed_subsystems=()
+  local op
+  for op in "${ACAS_RUN_OPS[@]}"; do
+    acas_select_operation "$op"
+    if ! acas_in_list "$ACAS_RUN_SUBSYSTEM" "${needed_subsystems[@]}"; then
+      needed_subsystems+=("$ACAS_RUN_SUBSYSTEM")
+    fi
+  done
+  acas_select_operation "${ACAS_RUN_OPS[0]}"
+
+  local needed candidate
+  for needed in "${needed_subsystems[@]}"; do
+    candidate="$ACAS_BUILD/$needed/$needed"
+    if [[ ! -x "$candidate" ]]; then
+      acas_die "$EX_ORACLE" \
+        "the $needed menu executable is missing or not executable." \
+        "expected: $candidate" \
+        "It is required because this run drives: $(acas_join_words "${ACAS_RUN_OPS[@]}")." \
+        'Run harness/build_oracle.sh first. It performs the five-step bootstrap,' \
+        'including the build rule for cobmysqlapi.o that the repository itself does' \
+        'not contain -- every bridge, handler and loader links that object at' \
+        '[common/comp-common.sh:L26] and following, yet no rule anywhere in the' \
+        'checkout builds it, so a naive build fails at link time with no obvious cause.' \
+        'Note also that the frozen build scripts end with an unconditional exit 0' \
+        '-- [comp-all.sh:L45], [common/comp-common.sh:L59] -- so their exit status is' \
+        'NOT a success signal and the artifacts must be checked by name, as here.'
+    fi
+  done
+  # Re-derived rather than assigned, so there is exactly ONE expression anywhere
+  # in this script that turns a subsystem into an executable path. This call makes
+  # the value correct for the operation selected right now; the drive loop calls
+  # acas_select_operation, and so this, again for each operation in turn (F-12).
+  acas_resolve_executable
   if (( missing )); then
-    acas_warn "not every menu executable is built; only $ACAS_RUN_SUBSYSTEM is needed for this operation"
+    acas_warn "not every menu executable is built; this run needs $(acas_join_words "${needed_subsystems[@]}")"
   fi
 
-  # The `-m' modules this subsystem's menu will dynamically load.
+  # The `-m' modules the menus of EVERY needed subsystem will dynamically load.
   local -a modules=()
-  case "$ACAS_RUN_SUBSYSTEM" in
-    general)  modules=("${ACAS_RUN_GENERAL_MODULES[@]}") ;;
-    sales)    modules=("${ACAS_RUN_SALES_MODULES[@]}") ;;
-    purchase) modules=("${ACAS_RUN_PURCHASE_MODULES[@]}") ;;
-    irs)      modules=("${ACAS_RUN_IRS_MODULES[@]}") ;;
-  esac
-  # Sales additionally loads sl830 before sl055 [sales/sales.cbl:L759-L760].
-  if [[ "$ACAS_RUN_SUBSYSTEM" == 'sales' ]]; then
-    modules+=(sl830)
-  fi
+  for needed in "${needed_subsystems[@]}"; do
+    case "$needed" in
+      general)  modules+=("${ACAS_RUN_GENERAL_MODULES[@]}") ;;
+      sales)    modules+=("${ACAS_RUN_SALES_MODULES[@]}") ;;
+      purchase) modules+=("${ACAS_RUN_PURCHASE_MODULES[@]}") ;;
+      irs)      modules+=("${ACAS_RUN_IRS_MODULES[@]}") ;;
+    esac
+    # Sales additionally loads sl830 before sl055 [sales/sales.cbl:L759-L760].
+    if [[ "$needed" == 'sales' ]]; then
+      modules+=(sl830)
+    fi
+  done
 
   local -a absent=()
   local module
@@ -2356,11 +3146,27 @@ acas_target_is_local() {
   return 1
 }
 
+# ONE KEY, ONE CLOSED SET, AND UNRECOGNISED TEXT IS REFUSED.
+# `1|true|yes|on' is affirmative and `|0|false|no|off' is negative, matched
+# case-insensitively; the identical set lives in
+# acas_posting/cli/rdbms_params.py as AFFIRMATIVE_SPELLINGS / NEGATIVE_SPELLINGS
+# and is read there by read_declared_flag, so one exported value cannot mean two
+# different things to the two halves of the harness. Anything else STOPS the run
+# rather than resolving to either answer: the value governs whether a credential
+# and every posted figure may cross a network in the clear, and only the operator
+# who typed it knows what was meant. The message never echoes the value.
 acas_plaintext_declared() {
-  case "${ACAS_DB_ALLOW_PLAINTEXT:-}" in
+  local declared="${ACAS_DB_ALLOW_PLAINTEXT-}"
+  case "${declared,,}" in
     1|true|yes|on) return 0 ;;
+    ''|0|false|no|off) return 1 ;;
   esac
-  return 1
+  acas_die "$EX_USAGE" \
+    'ACAS_DB_ALLOW_PLAINTEXT is set to a value this contract does not recognise.' \
+    'Use 1, true, yes or on for yes; 0, false, no or off for no; or leave it' \
+    'unset. The same closed set is read by harness/build_oracle.sh,' \
+    'harness/seed.sh, harness/reset_db.sh, harness/run_cobol_scenario.sh,' \
+    'harness/run_python_scenario.sh and acas_posting/cli/rdbms_params.py.'
 }
 
 # Decide, ONCE and BEFORE ANYTHING CONNECTS, which client transports this
@@ -2433,12 +3239,12 @@ acas_assert_table_name() {
   fi
 }
 
-# acas_sql_quote <value> -> 'value', escaped, WITH its own delimiters. ONE
-# implementation, two published names: acas_sql_quote_literal, declared with
-# the SAFE SQL COMPOSITION block above, is the implementation.
-acas_sql_quote() {
-  acas_sql_quote_literal "${1-}"
-}
+# ONE PUBLIC SPELLING FOR EACH JOB, and no alias. A value literal is quoted by
+# acas_sql_quote_literal, declared with the SAFE SQL COMPOSITION block above, and
+# an identifier by acas_sql_quote_ident below. A second published name for the
+# literal quoter used to sit here; nothing called it, ShellCheck reported it as
+# unreachable (SC2317), and a spelling that exists but is never used is a place a
+# later edit can quote a value the other way round without anyone noticing.
 
 # acas_sql_quote_ident <value> -> `value` with embedded backticks doubled.
 acas_sql_quote_ident() {
@@ -2514,8 +3320,12 @@ try:
 except ValueError:
     print(f"port is not an integer: {sys.argv[2]!r}", file=sys.stderr)
     sys.exit(2)
-if not 1 <= port <= 65535:
-    print(f"port out of range 1..65535: {port}", file=sys.stderr)
+# 1..9999 is the FROZEN CARRIER's range: LK-Port-Number pic x(4)
+# [common/acas-get-params.cbl:L158] and Ws-Mysql-Port-Number pic x(4)
+# [copybooks/mysql-variables.cpy:L91] hold four characters, so a five-digit port
+# would be probed here in full and truncated inside the compiled cycle.
+if not 1 <= port <= 9999:
+    print(f"port out of range 1..9999 (the frozen pic x(4) carrier): {port}", file=sys.stderr)
     sys.exit(2)
 try:
     with socket.create_connection((host, port), timeout=5):
@@ -2540,7 +3350,7 @@ acas_system_column() {
 # STAGE 6 -- the database.
 acas_assert_database() {
   ACAS_RUN_CURRENT_STAGE='asserting the database'
-  acas_stage 'Stage 6/8: database, schema and the two silent-pass traps'
+  acas_stage 'Check 6/8: database, schema and the two silent-pass traps'
 
   acas_db_tcp_probe || acas_die "$EX_DATABASE" \
     "cannot reach $ACAS_DB_HOST:$ACAS_DB_PORT." \
@@ -2680,8 +3490,9 @@ acas_assert_database() {
   if [[ "$ACAS_SQL_OUT" == '0' ]]; then
     acas_die "$EX_PRECONDITION" \
       'SYSTEM-REC is empty: the database has not been seeded.' \
-      'Run harness/seed.sh for this scenario first. It is stage 1 of the eight-stage' \
-      'protocol and this is stage 2; running out of order compares nothing.' \
+      'Run harness/seed.sh for this scenario first. It is part of stage 1 of the' \
+      'ten-stage protocol and this is stage 2; running out of order compares' \
+      'nothing.' \
       'Note that the checkout ships no *.dat files, so the scenario seed data has to' \
       'be authored -- see the per-file contract at [common/masterLD.sh:L44-L115],' \
       'which harness/seed.sh reproduces rather than invokes.'
@@ -2768,7 +3579,7 @@ acas_assert_database() {
       'that adjusted the state it is about to measure would not be an oracle.'
   fi
 
-  if [[ "$ACAS_RUN_SUBSYSTEM" == 'sales' ]]; then
+  if acas_ops_use_subsystem 'sales'; then
     local sl_autogen
     sl_autogen="$(acas_system_column 'SL-AUTOGEN')" || acas_die "$EX_DATABASE" \
       'could not read SYSTEM-REC.SL-AUTOGEN.' \
@@ -2793,13 +3604,22 @@ acas_assert_database() {
   fi
 
   # The payment proof flag. sl100 and pl100 post NOTHING unless it is 2.
-  local flag_column='' flag_locator=''
-  case "$ACAS_RUN_OPERATION" in
-    sl_cash_post)    flag_column='S-FLAG-P'; flag_locator='sales/sl100.cbl:L296-L301' ;;
-    pl_payment_post) flag_column='P-FLAG-P'; flag_locator='purchase/pl100.cbl:L288-L293' ;;
-  esac
-  if [[ -n "$flag_column" ]]; then
-    local flag
+  #
+  # Checked for EVERY declared cash route, because this function runs ONCE and
+  # the selected operation is still the FIRST of the list (see acas_ops_include).
+  # period_end_totals declares sl_cash_post second and pl_payment_post fourth, so
+  # keying this on the selection skipped BOTH -- and an unproofed flag is exactly
+  # the silent pass this check exists to catch: the program displays "Payments Not
+  # Proofed", waits for a keystroke and goes to menu-exit, so the run looks clean
+  # and writes nothing.
+  local flag_entry flag_rest flag_column flag_locator flag
+  for flag_entry in \
+      'sl_cash_post:S-FLAG-P:sales/sl100.cbl:L296-L301' \
+      'pl_payment_post:P-FLAG-P:purchase/pl100.cbl:L288-L293'; do
+    acas_ops_include "${flag_entry%%:*}" || continue
+    flag_rest="${flag_entry#*:}"
+    flag_column="${flag_rest%%:*}"
+    flag_locator="${flag_rest#*:}"
     flag="$(acas_system_column "$flag_column")" || acas_die "$EX_DATABASE" \
       "could not read SYSTEM-REC.$flag_column." \
       "$(acas_diag_summary "$ACAS_SQL_DIAG")"
@@ -2812,7 +3632,7 @@ acas_assert_database() {
         'The run would therefore appear to succeed while writing nothing. Seed the' \
         'flag as 2, which is the state the proof step leaves behind.'
     fi
-  fi
+  done
 
   # The Cobol reads its OWN credentials out of system.dat, not out of this
   # environment: SYSTEM-REC carries RDBMS-DB-NAME, RDBMS-USER, RDBMS-PASSWD,
@@ -2833,7 +3653,7 @@ acas_assert_database() {
 # STAGE 7 -- the data directory: system.dat and the file-handler log
 acas_assert_data_dir() {
   ACAS_RUN_CURRENT_STAGE='asserting the data directory'
-  acas_stage 'Stage 7/8: data directory'
+  acas_stage 'Check 7/8: data directory'
 
   # system.dat MUST exist, and must not be empty. Paragraph `Open-System'
   # [general/general.cbl:L385-L396] forces the Cobol path, opens key 1, and on
@@ -2992,7 +3812,12 @@ acas_rotate_fh_log() {
     "could not create the fh-logger rotation directory: $dest_dir"
 
   local rotated
-  rotated="$(acas_fh_rotation_target "$dest_dir" "fh-logger.${ACAS_RUN_OPERATION}.txt")"
+  # Named after the RUN, not after an operation. The rotation happens exactly
+  # once, before the first drive, so for a four-operation scenario a name taken
+  # from the selected operation would claim a per-operation rotation that does
+  # not happen -- and would attribute the PREVIOUS run's log to this run's first
+  # operation (F-12).
+  rotated="$(acas_fh_rotation_target "$dest_dir" 'fh-logger.pre-run.txt')"
 
   # Bounded: this can be a cross-device copy of a very large file.
   acas_deadline_prefix "$ACAS_TIMEOUT_ROTATE"
@@ -3329,11 +4154,12 @@ acas_plan_irs_post() {
 # Build the plan for the resolved operation.
 acas_build_plan() {
   ACAS_RUN_CURRENT_STAGE='building the keystroke plan'
-  acas_stage 'Stage 8/8: keystroke plan'
+  acas_stage 'Check 8/8: keystroke plan'
 
-  # The plan file was already created safely at stage 3 (acas_open_transcript),
-  # but stage 8 runs five stages later and this line EMPTIES it before the
-  # builders append to it.
+  # The plan file was already created safely at Step 3 (acas_open_transcript),
+  # but this is Step 8 -- five of this script's own preflight steps later -- so
+  # this line EMPTIES it before the builders append to it.  Step numbers here are
+  # local to this script; the protocol's ten stages are in harness/run_parity.sh.
   acas_create_private_file "$ACAS_RUN_PLAN_FILE" 'the keystroke plan'
   acas_plan_forbidden
 
@@ -3416,6 +4242,30 @@ acas_print_plan() {
 acas_drive() {
   ACAS_RUN_CURRENT_STAGE='driving the compiled menu over a pty'
   acas_stage "Driving: $ACAS_RUN_SUBSYSTEM menu, operation $ACAS_RUN_OPERATION"
+
+  # THE EXECUTABLE AND THE OPERATION MUST AGREE, CHECKED HERE (F-12)
+  #
+  # Asserted at the drive rather than trusted, because the failure it catches is
+  # silent: a menu letter is a single character and every menu accepts one, so
+  # sending the purchase letter to the sales menu selects a DIFFERENT, valid
+  # option and the run proceeds into a program the plan was not written for.
+  # MEASURED before this check existed: "H" -- pl_order_post's letter -- reached
+  # the Sales menu's (H) Payment Input and sat in SL080's data-entry screen until
+  # the reactive budget expired. The only evidence was a timeout.
+  [[ -n "$ACAS_RUN_EXECUTABLE" ]] || acas_die "$EX_ORACLE" \
+    "internal: no menu executable is resolved for operation '$ACAS_RUN_OPERATION'."
+  [[ "$ACAS_RUN_EXECUTABLE" == */"$ACAS_RUN_SUBSYSTEM"/"$ACAS_RUN_SUBSYSTEM" ]] || \
+    acas_die "$EX_ORACLE" \
+      "internal: the resolved executable does not belong to this operation's menu." \
+      "operation  = $ACAS_RUN_OPERATION ($ACAS_RUN_SUBSYSTEM menu)" \
+      "executable = $ACAS_RUN_EXECUTABLE" \
+      'A menu letter is one character and every menu accepts one, so driving the' \
+      'wrong menu selects a different valid option instead of failing.'
+  [[ -x "$ACAS_RUN_EXECUTABLE" ]] || acas_die "$EX_ORACLE" \
+    "the $ACAS_RUN_SUBSYSTEM menu executable is missing or not executable." \
+    "expected: $ACAS_RUN_EXECUTABLE" \
+    'Run harness/build_oracle.sh first.'
+
   acas_log "executable = $ACAS_RUN_EXECUTABLE"
   acas_log "geometry   = ${ACAS_RUN_ROWS}x${ACAS_RUN_COLS} (pinned, not 'at least')"
   acas_log "per-prompt timeout = ${ACAS_RUN_TIMEOUT}s"
@@ -4093,6 +4943,16 @@ acas_report_drive_failure() {
   local -a details=()
   local line kind rest
 
+  # WHICH operation failed, when there is more than one. Without this a four-operation
+  # scenario reported "the drive failed" and left the reader to work out from the
+  # transcript which of the four menus it had been in (F-12).
+  if (( ACAS_RUN_OP_INDEX >= 0 && ${#ACAS_RUN_OPS[@]} > 1 )); then
+    details+=("failed during operation $(( ACAS_RUN_OP_INDEX + 1 )) of ${#ACAS_RUN_OPS[@]}: $ACAS_RUN_OPERATION ($ACAS_RUN_SUBSYSTEM menu)")
+    if (( ACAS_RUN_OP_INDEX > 0 )); then
+      details+=("        operations 1..$ACAS_RUN_OP_INDEX had already been driven, so the database holds their effects")
+    fi
+  fi
+
   # The driver already wrote its own diagnosis; replay it so the transcript and
   # the console agree.
   if [[ -f "$ACAS_RUN_RESULT_FILE" ]]; then
@@ -4237,6 +5097,34 @@ acas_assert_after_run() {
     acas_warn 'FAIL  could not read SYSTEM-REC.IRS-INSTEAD after the run'
   fi
 
+  # 3. THE TWO ONE-SHOT POSTING LATCHES, OBSERVED AND EMITTED RATHER THAN JUDGED.
+  # `S-Flag-P' [copybooks/wssystem.cob:L226] and `P-Flag-P'
+  # [copybooks/wssystem.cob:L206] are the gates sl100 and pl100 clear once they have
+  # posted -- `move zero to S-Flag-P.' [sales/sl100.cbl:L474] and `move zero to
+  # P-Flag-P.' [purchase/pl100.cbl:L465] -- and the menu's key-1 `System-Rewrite'
+  # [general/general.cbl:L656-L663] is their only writer to the store.
+  #
+  # ⭐ WHY THIS IS EMITTED HERE RATHER THAN LEFT TO A TEST'S OWN QUERY. The dump of
+  # `SYSTEM-REC' is a comparison artifact, written under the diff tree and read by the
+  # diff stage; a test that wants ONE latch value as a number, attributable to ONE side
+  # of ONE operation, would otherwise have to query the LIVE database
+  # after the fact -- long after the protocol's own reset-and-reseed had replaced the
+  # state this run left, and after any other scenario sharing the same database had
+  # run. Reading it HERE, in the seconds after the operation, and printing it into
+  # this run's captured stream makes it EVIDENCE OF THIS RUN: immutable, attributable
+  # to one side, and impossible to confuse with a later run's state. It is an
+  # OBSERVATION and deliberately not an assertion, because what a cleared latch means
+  # is scenario-specific and belongs to the scenario's own test.
+  local latch latch_value
+  for latch in 'S-FLAG-P' 'P-FLAG-P'; do
+    if latch_value="$(acas_system_column "$latch")"; then
+      acas_log "ONE-SHOT-LATCH $latch = $latch_value"
+    else
+      failures=$((failures + 1))
+      acas_warn "FAIL  could not read SYSTEM-REC.$latch after the run"
+    fi
+  done
+
   if [[ "$ACAS_RUN_SUBSYSTEM" == 'sales' ]]; then
     local table rc rows
     for table in "${ACAS_RUN_AUTOGEN_TABLES[@]}"; do
@@ -4258,7 +5146,8 @@ acas_assert_after_run() {
   fi
 
   # 4. Report which branch each divergent gate took. This is OBSERVATION, and
-  # it is deliberately not an assertion.
+  # it is deliberately not an assertion. (The latch report above is the same kind of
+  # record: observed, emitted, and judged only by the scenario that cares.)
   case "$ACAS_RUN_OPERATION" in
     gl_post_cycle)
       local gl071_ran='no' gl072_ran='no' gate='did NOT fire'
@@ -4477,8 +5366,14 @@ acas_run_report() {
   acas_stage 'Summary'
 
   acas_summary_row 'scenario' "$ACAS_RUN_SCENARIO"
-  acas_summary_row 'operation' "$ACAS_RUN_OPERATION"
-  acas_summary_row 'subsystem' "$ACAS_RUN_SUBSYSTEM"
+  acas_summary_row 'operations' "$(acas_join_words "${ACAS_RUN_OPS[@]}")"
+  local sindex srendered summary_ops=''
+  for sindex in "${!ACAS_RUN_OPS[@]}"; do
+    srendered="${ACAS_RUN_OP_STATUS[$sindex]-$ACAS_RUN_OP_NOT_RUN}"
+    summary_ops+="${summary_ops:+, }${ACAS_RUN_OPS[$sindex]}=$srendered"
+  done
+  acas_summary_row 'observed statuses' "$summary_ops"
+  acas_summary_row 'subsystem' "$ACAS_RUN_SUBSYSTEM (of the last operation driven)"
   if [[ "$ACAS_RUN_SUBSYSTEM" == 'irs' ]]; then
     acas_summary_row 'menu path' "option $ACAS_RUN_MENU_KEY then run option 66"
   else
@@ -4516,7 +5411,7 @@ acas_run_report() {
   #  to be checkable by someone who was not here when it ran.
   #
   #  WHICH ARTIFACT IS FINAL DECIDES WHERE ITS DIGEST GOES. The plan is written
-  #  once, in stage 4 [L3256]; the outcome record only while the cycle is being
+  #  once, by acas_build_plan; the outcome record only while the cycle is being
   #  driven. Both are settled by now, so both are summary rows -- and because the
   #  rows are replayed through acas_log, the transcript ends up carrying their
   #  fingerprints as well as the console. The TRANSCRIPT itself is deliberately
@@ -4548,18 +5443,19 @@ acas_run_report() {
   else
     printf '\nThe compiled cycle ran for scenario %s.\n' "$ACAS_RUN_SCENARIO"
 
-    # The next-step commands CARRY THE SELECTOR. Every one of them passes the
-    # same affected-table list the scenario declares.
-    printf '\nNext steps -- each one bounded by the scenario'"'"'s affected_tables list:\n'
-    printf '  harness/dump_tables.py --scenario %s --side cobol --scenario-file %s\n' \
-      "$ACAS_RUN_SCENARIO" "$ACAS_RUN_SCENARIO_FILE"
+    # The next-step commands CARRY THE SELECTOR. Every capture passes
+    # --all-in-scope, which is the protocol bound; the diff additionally passes
+    # --scenario-file so the declared effect is still gated.
+    printf '\nNext steps -- each capture bounded by all 22 in-scope tables:\n'
+    printf '  harness/dump_tables.py --scenario %s --side cobol --all-in-scope\n' \
+      "$ACAS_RUN_SCENARIO"
     printf '  harness/normalize.py   --scenario %s --side cobol\n' "$ACAS_RUN_SCENARIO"
     printf '  harness/reset_db.sh %s\n' "$ACAS_RUN_SCENARIO_FILE"
     printf '  harness/run_python_scenario.sh --scenario %s\n' "$ACAS_RUN_SCENARIO"
-    printf '  harness/dump_tables.py --scenario %s --side python --scenario-file %s\n' \
-      "$ACAS_RUN_SCENARIO" "$ACAS_RUN_SCENARIO_FILE"
+    printf '  harness/dump_tables.py --scenario %s --side python --all-in-scope\n' \
+      "$ACAS_RUN_SCENARIO"
     printf '  harness/normalize.py   --scenario %s --side python\n' "$ACAS_RUN_SCENARIO"
-    printf '  harness/diff_states.py --scenario %s --scenario-file %s\n' \
+    printf '  harness/diff_states.py --scenario %s --all-in-scope --scenario-file %s\n' \
       "$ACAS_RUN_SCENARIO" "$ACAS_RUN_SCENARIO_FILE"
     printf 'The empty diff from that last command is the pass condition (AAP 0.8.5).\n'
   fi
@@ -4616,27 +5512,72 @@ acas_main() {
   acas_assert_oracle
   acas_assert_database
   acas_assert_data_dir
-  acas_build_plan
 
-  # LAST before the drive, so the counts it records are the state the compiled
+  # LAST before the first drive, so the counts it records are the state the compiled
   # cycle is actually handed, with nothing between them.
   acas_record_seed_fingerprint
 
-  local rc=0
-  acas_drive || rc=$?
-  if (( rc != 0 )); then
-    acas_report_drive_failure "$rc"
-  fi
+  # ⭐ ONE PASS PER DECLARED OPERATION, IN ORDER (F-12)
+  #
+  # Each iteration selects the operation, builds ITS keystroke plan for ITS menu,
+  # drives it, runs the post-run assertions, and records the operation's OWN
+  # observed disposition in ACAS_RUN_OP_STATUS at this index. The loop is strictly
+  # sequential -- no concurrency anywhere, matching the single-threaded COBOL (R-3)
+  # -- and it stops at the first WRAPPER fault, because a wrapper fault means the
+  # harness cannot vouch for what it just did. A BEHAVIOURAL disposition is not a
+  # wrapper fault and does not stop the loop: the term-code-5 abort chain
+  # [general/gl070.cbl:L287-L290] is correct compiled behaviour, and the operations
+  # after it must still be driven so that the state the Python side is compared
+  # against is the state the whole declared sequence produces (F-13, F-17).
+  local index op rc=0
+  for index in "${!ACAS_RUN_OPS[@]}"; do
+    op="${ACAS_RUN_OPS[$index]}"
+    ACAS_RUN_OP_INDEX="$index"
+    acas_select_operation "$op"
 
-  if (( ACAS_RUN_DRY_RUN )); then
-    acas_run_report
-    exit "$EX_OK"
-  fi
+    if (( ${#ACAS_RUN_OPS[@]} > 1 )); then
+      acas_stage "$(printf 'Operation %d of %d: %s (%s menu)' \
+        "$(( index + 1 ))" "${#ACAS_RUN_OPS[@]}" "$op" "$ACAS_RUN_SUBSYSTEM")"
+    fi
 
-  acas_assert_after_run
+    acas_build_plan
+
+    rc=0
+    acas_drive || rc=$?
+    if (( rc != 0 )); then
+      # Terminal: acas_report_drive_failure dies.
+      acas_report_drive_failure "$rc"
+    fi
+
+    if (( ACAS_RUN_DRY_RUN )); then
+      # A dry run prints the plan for every operation and drives none of them, so
+      # there is nothing to assert and no disposition to record.
+      continue
+    fi
+
+    acas_assert_after_run
+    ACAS_RUN_OP_STATUS["$index"]="$ACAS_RUN_OBSERVED_STATUS"
+  done
+  ACAS_RUN_OP_INDEX=-1
+
+  # Published BEFORE the report, and before the EXIT trap writes the run-status
+  # record, so that both carry the same per-operation dispositions.
+  acas_publish_operation_status
+
+
+  # IMMEDIATELY AFTER THE DRIVE AND ITS PER-OPERATION ASSERTIONS, and before the
+  # report: the pre-run and post-run records together are the only evidence that this
+  # run CHANGED anything, and a table diff cannot supply it - two runs that did
+  # nothing at all agree perfectly. `acas_assert_after_run` is NOT repeated here: the
+  # multi-operation loop above takes it once per operation, which is where the
+  # disposition of each belongs.
+  acas_record_post_fingerprint
+
   acas_run_report
 
-  # Explicitly the success code, reached only after every assertion passed.
+  # Explicitly the success code, reached only after every operation was driven and
+  # every assertion passed. It is WRAPPER HEALTH and nothing else: what each
+  # operation actually did is in the operation-status artifact (F-13).
   exit "$EX_OK"
 }
 

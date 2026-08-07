@@ -127,7 +127,7 @@ Consequences, both of which this file states as assertions rather than as claims
 
   * The intermediate precision is NOT load-bearing here. The semantics layer numbers
     that question Q-2 and records it MEASURED at 60 digits against GnuCOBOL 3.2.0
-    `[acas_posting/cobol/arithmetic.py:L96]`. Since 13 is far below 60 - and would be
+    `[acas_posting/cobol/arithmetic.py INTERMEDIATE_PRECISION]`. Since 13 is far below 60 - and would be
     far below any plausible answer - no assertion in this file would change if Q-2's
     measured answer changed. There is therefore nothing here to mark `xfail` against
     Q-2, and marking one would be worse than useless: the assertion passes, so a
@@ -149,7 +149,7 @@ time it names one:
          raised, that what is stored is inside the field's declared domain, that the
          low-order digits are the ones kept, and that the discarded part is a whole
          multiple of the field's capacity. No monetary constant is asserted for it.
-    Q-2  (the semantics layer's register, `[acas_posting/cobol/arithmetic.py:L96]`)
+    Q-2  (the semantics layer's register, `[acas_posting/cobol/arithmetic.py INTERMEDIATE_PRECISION]`)
          The default arithmetic precision, one of the five oracle-arbitration
          questions in Agent Action Plan section 0.6.8. MEASURED at 60. Shown above,
          and asserted in test 4, not to be load-bearing here.
@@ -173,6 +173,7 @@ nothing else. Run it from the repository root.
 from __future__ import annotations
 
 import contextlib
+import importlib
 import dataclasses
 import decimal
 import dis
@@ -197,7 +198,7 @@ pytestmark = pytest.mark.arithmetic
 #  rule R-5 makes the dictionary the only sanctioned source of a frozen field's
 #  picture, scale, signedness and carrier - and because
 #  `FieldDescriptor.for_working_storage`, which earlier drafts of this suite were
-#  written against, NO LONGER EXISTS: `acas_posting/cobol/field.py:L533-L534`
+#  written against, NO LONGER EXISTS: `acas_posting/cobol/field.py _require_dictionary_provenance`
 #  records its removal, leaving `from_dictionary_key` as the one door.
 #
 #  The keys are exact and case-sensitive. A near miss - `IRSPOSTING-REC.VAT-AMOUNT`
@@ -403,6 +404,36 @@ def _irs_net_vat(
     there is no descriptor here that a store could target the amount through.
     `test_the_net_sequence_never_writes_post_amount` asserts that structurally.
 
+    ⭐ THE FORMULA IS NO LONGER WRITTEN HERE. This function used to evaluate
+    `post_amount * rate / 100` itself, over the production primitive but as its own
+    expression, which made this file a SECOND SOURCE for the statement it is about:
+    nineteen assertions consumed it, and every one was checking a copy of the compute
+    against the reasoning that produced the copy. If the shipped section were ever
+    changed - the operand order altered, the `ROUNDED` dropped, the divisor moved - not
+    one of them would have noticed.
+
+    It now calls `_net_section` in `acas_posting/programs/irs030_posting.py`, which is
+    the migration of `Net section.` [irs/irs030.cbl:L1544-L1551], and returns what that
+    section stored. The nineteen call sites are unchanged and their fixed expectations
+    became the independent side of the comparison rather than the only side.
+
+    THE `rounded=False` PATH IS THE ONE EXCEPTION, and it is marked as such rather than
+    hidden: no shipped code computes this expression un-`ROUNDED`, because the statement
+    is written `ROUNDED` and there is nothing to drive. That path therefore still
+    evaluates the expression directly, and it exists for exactly one caller - the test
+    that computes the same inputs both ways to prove the direction is observable. It is
+    a CONTRAST, not a claim about the migration, and it is the only place in this file
+    where a formula is written test-side.
+
+    THE TWIN IS DRIVEN TOO, BY THE RECEIVING FIELD. This file's subject is that the
+    same statement appears twice in the frozen system with DIFFERENT receiving fields -
+    the IRS `Vat-Amount pic s9(7)v99` [copybooks/irswspost.cob:L18] and the General
+    Ledger `Vat-Amount pic s9(8)v99` [copybooks/wspost.cob:L28] - so several assertions
+    ask for the GL field on purpose. Each field is answered by ITS OWN shipped section:
+    the IRS one by `irs030_posting._net_section` and the GL one by
+    `gl051_batch_control_check._net`, which is [general/gl051.cbl:L791]. A field that is
+    neither is refused rather than answered from the wrong module.
+
     Args:
         post_amount: What `post-amount` holds, as the field holds it.
         rate: What the rate item holds, as the field holds it.
@@ -416,8 +447,35 @@ def _irs_net_vat(
     Returns:
         What the VAT field holds after the single store.
     """
-    return arithmetic.compute(
-        lambda: post_amount * rate / 100, vat_field, rounded=rounded
+    if not rounded:
+        #  The CONTRAST path - see the docstring. No shipped code to drive.
+        return arithmetic.compute(
+            lambda: post_amount * rate / 100, vat_field, rounded=False
+        )
+
+    with _shipped_irs030_posting() as irs030:
+        if vat_field == irs030._VAT_AMOUNT:
+            record = irs030.PostingRecord()
+            record.post_amount = post_amount
+            irs030._net_section(record, rate)
+            return record.vat_amount
+
+    with _shipped_module(_GL051_MODULE) as gl051:
+        if vat_field == gl051._VAT_AMOUNT:
+            #  `_net` [general/gl051.cbl:L791] writes `vat-amount` on the GL posting
+            #  record. Same one-statement shape, different receiving picture, which is
+            #  the divergence several assertions in this file exist to show.
+            posting = gl051.WsPostingRecord()
+            posting.post_amount = post_amount
+            gl051._net(posting, rate)
+            return posting.vat_amount
+
+    raise AssertionError(
+        f"this helper answers for the two receiving fields the frozen system actually "
+        f"uses - the IRS `Vat-Amount` [copybooks/irswspost.cob:L18] and the General "
+        f"Ledger one [copybooks/wspost.cob:L28] - each from its own shipped section. It "
+        f"was asked for {vat_field!r}, which is neither, and answering it from either "
+        f"module would report a store into a field that module does not make."
     )
 
 
@@ -675,46 +733,72 @@ def test_net_leaves_post_amount_byte_identical(
 
 
 def test_the_net_sequence_never_writes_post_amount() -> None:
-    """No code path in the transcribed statement can reach `post-amount`.
+    """No code path in the SHIPPED `Net` section can reach `post-amount`.
 
-    The tested unit is a sequence of `arithmetic` calls rather than a program module,
-    so "it has no path that writes the amount" is asserted about the code object
-    itself: the global names the function body references, and the fields it is
-    handed. This is what makes the post-condition in the previous test a property of
-    the TRANSCRIPTION and not merely of the six pairs it was run with.
+    ⭐ ASSERTED ABOUT THE SHIPPED SECTION, NOT ABOUT A HELPER IN THIS FILE. It used to
+    inspect `_irs_net_vat.__code__`, which was this file's own transcription of the
+    statement - so it proved that the TRANSCRIPTION had no path to the amount and said
+    nothing at all about the migration. `_irs_net_vat` now drives
+    `irs030_posting._net_section`, so the claim is made where it belongs: the global
+    names the SHIPPED section's body references, and the stores its bytecode performs.
 
     Reproduces the absence at [irs/irs030.cbl:L1551-L1553]. The statement the `Gross`
     section adds at [irs/irs030.cbl:L1564] uses a SUBTRACT verb; no subtract verb is
-    reachable from here.
+    reachable from `Net`.
     """
-    code = _irs_net_vat.__code__
+    with _shipped_irs030_posting() as irs030:
+        code = irs030._net_section.__code__
 
-    # The body references exactly two global names: the arithmetic module, and the one
-    # verb it calls. No `store`, no `subtract_from`, no `subtract_giving`.
-    assert code.co_names == ("arithmetic", "compute")
-    for subtract_verb in ("subtract_from", "subtract_giving"):
-        assert subtract_verb not in code.co_names
-        # Named in the module's public surface, so a typo here would go unnoticed.
-        assert subtract_verb in arithmetic.__all__
+        # The section calls ONE arithmetic verb and no other. `compute` stores once, at
+        # the end, which is the whole of [irs/irs030.cbl:L1551].
+        assert "compute" in code.co_names
+        for subtract_verb in ("subtract_from", "subtract_giving"):
+            assert subtract_verb not in code.co_names, (
+                f"the shipped `Net` section references {subtract_verb!r}; "
+                f"[irs/irs030.cbl:L1544-L1551] has no SUBTRACT and the one at "
+                f"[irs/irs030.cbl:L1564] belongs to `Gross`"
+            )
+            # Named in the module's public surface, so a typo here would go unnoticed.
+            assert subtract_verb in arithmetic.__all__
 
-    # Exactly one `FieldDescriptor` reaches the function, and it is the receiving VAT
-    # field. There is no descriptor for `post-amount` in scope, so no store could
-    # target it even by mistake. Annotations are strings here because of
-    # `from __future__ import annotations`, which is why this reads as a name test.
-    annotations = dict(_irs_net_vat.__annotations__)
-    annotations.pop("return")
-    descriptor_parameters = tuple(
-        name
-        for name, annotation in annotations.items()
-        if "FieldDescriptor" in annotation
-    )
-    assert descriptor_parameters == ("vat_field",)
-    assert annotations["post_amount"] == "Decimal"
+        # AND IT WRITES ONLY `vat-amount`. `_stores_performed_by` walks the section's
+        # bytecode and every code object nested in it - the `compute` lambda is one -
+        # so a store into `post_amount` anywhere inside would appear here.
+        stored = {attribute for _, attribute in _stores_performed_by(irs030._net_section)}
+        assert "post_amount" not in stored, (
+            f"the shipped `Net` section stores into {sorted(stored)}; "
+            f"[irs/irs030.cbl:L1544-L1551] leaves `post-amount` alone and only `Gross` "
+            f"[irs/irs030.cbl:L1564-L1565] writes it back"
+        )
 
-    # And the parameter list is what the docstring says it is, in the statement's own
-    # left-to-right order: the amount, the rate, the receiving field.
-    parameter_names = code.co_varnames[: code.co_argcount + code.co_kwonlyargcount]
-    assert parameter_names == ("post_amount", "rate", "vat_field", "rounded")
+        # Annotations are strings here because of `from __future__ import
+        # annotations`, which is why this reads as a name test.
+        annotations = dict(irs030._net_section.__annotations__)
+        annotations.pop("return", None)
+
+        # NO `FieldDescriptor` REACHES THE SECTION AT ALL, which is a stronger form of
+        # the old claim than the transcription could make. The receiving field is the
+        # module's own `_VAT_AMOUNT` constant, so a caller cannot redirect the store by
+        # passing a different descriptor - there is no parameter to pass one through.
+        descriptor_parameters = tuple(
+            name
+            for name, annotation in annotations.items()
+            if "FieldDescriptor" in annotation
+        )
+        assert descriptor_parameters == (), (
+            f"the shipped `Net` section takes {descriptor_parameters} as descriptors; "
+            f"it should take none and use its own `_VAT_AMOUNT`, so that the receiving "
+            f"field is fixed by the module rather than chosen by a caller"
+        )
+
+        # And the parameter list is the section's linkage, in the statement's own
+        # left-to-right order: the record that carries `post-amount`, then the rate.
+        parameter_names = code.co_varnames[: code.co_argcount + code.co_kwonlyargcount]
+        assert parameter_names == ("posting_record", "ws_vat_current"), (
+            f"the shipped `Net` section's parameters are {parameter_names}; "
+            f"[irs/irs030.cbl:L1544-L1551] reads `post-amount` off the posting record "
+            f"and `WS-Vat-Current` from working storage, and nothing else"
+        )
 
 
 def test_net_quantizes_exactly_once_at_the_rounded_store() -> None:
@@ -729,7 +813,7 @@ def test_net_quantizes_exactly_once_at_the_rounded_store() -> None:
     This test also settles question Q-2 for this file. Q-2 - the default arithmetic
     precision, one of the five oracle-arbitration questions of Agent Action Plan
     section 0.6.8 - is recorded MEASURED at 60 digits against GnuCOBOL 3.2.0
-    [acas_posting/cobol/arithmetic.py:L96]. The assertions below show that the widest
+    [acas_posting/cobol/arithmetic.py INTERMEDIATE_PRECISION]. The assertions below show that the widest
     expression this statement can evaluate needs 13 significant digits, so no penny in
     this file depends on Q-2's answer and nothing here is marked `xfail` against it.
     """
@@ -1007,13 +1091,25 @@ def test_anomaly_a19_is_recorded_and_not_implemented() -> None:
     for ambiguity_ref in (_Q_UNSIZED_OVERFLOW, _Q_INTERMEDIATE_PRECISION):
         assert model.AMBIGUITY_REF_PATTERN.fullmatch(ambiguity_ref) is not None
 
-    # ONE variant is implemented: the live statement. The transcription calls exactly
-    # one arithmetic verb, so there is no second formula hiding behind a branch.
-    assert _irs_net_vat.__code__.co_names == ("arithmetic", "compute")
-    # The live statement's rate reaches the formula as a parameter, which is how the
-    # dead line's `vat` and the live line's `WS-Vat-Current` stay distinguishable: the
-    # transcription hard-codes neither.
-    assert "rate" in _irs_net_vat.__code__.co_varnames
+    # ONE variant is implemented: the live statement. Asserted about the SHIPPED
+    # section rather than about a helper in this file, for the reason
+    # `test_the_net_sequence_never_writes_post_amount` gives - the superseded variant
+    # would have to be implemented in the MIGRATION to matter, and that is where it is
+    # now shown not to be.
+    with _shipped_irs030_posting() as irs030:
+        assert "compute" in irs030._net_section.__code__.co_names
+        # The live statement's rate reaches the section as a PARAMETER, which is how the
+        # dead line's `vat` and the live line's `WS-Vat-Current` stay distinguishable:
+        # the shipped section hard-codes neither field name.
+        assert "ws_vat_current" in irs030._net_section.__code__.co_varnames
+        # And exactly one store, into the VAT field. A second implemented variant would
+        # need a second store or a branch, and there is neither.
+        stores = _stores_performed_by(irs030._net_section)
+        assert [attribute for _, attribute in stores] == ["vat_amount"], (
+            f"the shipped `Net` section performs {stores}; A-19 is that the superseded "
+            f"variant [irs/irs030.cbl:L1550] is a COMMENT, so the migration must "
+            f"implement exactly one formula with exactly one store"
+        )
 
 
 def test_the_gl_net_paragraph_also_leaves_post_amount_byte_identical() -> None:
@@ -1275,21 +1371,29 @@ def test_an_overflow_is_silent_and_keeps_the_low_order_digits() -> None:
 #  transitively - so importing it at module scope here would leave
 #  `acas_posting.dal.*` and `mysql.*` resident in `sys.modules` and would break the
 #  three tier-isolation assertions this suite already carries
-#  (`tests/arithmetic/test_comp3_packed_decimal.py:L1536`,
-#  `tests/arithmetic/test_comp_binary.py:L2036`,
-#  `tests/arithmetic/test_pic_field_descriptors.py:L2134`), two of which read LIVE
+#  (`tests/arithmetic/test_comp3_packed_decimal.py test_the_packed_carrier_follows_the_scale_and_is_never_binary`,
+#  `tests/arithmetic/test_comp_binary.py test_q3_an_overflowing_negative_store_lands_on_its_magnitudes_byte`,
+#  `tests/arithmetic/test_pic_field_descriptors.py test_no_single_winner_view_exists_on_drift_entry_or_descriptor`), two of which read LIVE
 #  `sys.modules`.
 #
 #  So the module is imported INSIDE the test body through
 #  `_shipped_irs030_posting()`, which
-#    * uses `pytest.importorskip`, so a host with no driver installed SKIPS this
-#      section and the rest of the tier still runs on a bare machine, which is the
-#      property those three assertions exist to protect;
-#    * memoises the module object, so the import happens at most once per session;
+#    * uses `importlib.import_module`, MANDATORY rather than skippable: an earlier
+#      revision used `pytest.importorskip`, and a skip reads as green, so a module
+#      that cannot be imported at all turned this section into a pass.
+#      `mysql-connector-python==26.7.0` is a HARD `[project.dependencies]` entry and a
+#      hard `requirements.txt` pin, so the guarded state cannot arise for an installed
+#      package, its absence is a broken environment rather than a configuration, and
+#      an anomaly lock that can vanish into a skip line is not a lock (rule R-4);
+#    * does NOT memoise it. A cached module is already resident, so the purge below
+#      would remove nothing and the isolation claim would be about a module that had
+#      never left. Each entry EVICTS every tier-isolated name first, which is what
+#      makes the import re-execute, and asserts the name resident while the body runs;
 #    * removes, in `finally`, exactly the newly-added `sys.modules` names that match
-#      the tier-isolation prefixes, so nothing forbidden is left resident and all
-#      three assertions keep passing UNCHANGED and unweakened.
-#  The pattern is the one `tests/conftest.py:L423-L483` already uses for the harness
+#      the tier-isolation prefixes, and asserts the residue is empty, so nothing
+#      forbidden is left resident and all three assertions keep passing UNCHANGED and
+#      unweakened - whatever order the files run in.
+#  The pattern is the one `tests/conftest.py _load_harness_module` already uses for the harness
 #  modules: load the real thing, keep the forbidden name out of `sys.modules`.
 #
 #  NO DATABASE IS TOUCHED. `_net_section(posting_record, ws_vat_current)` takes a
@@ -1321,11 +1425,16 @@ _TIER_ISOLATION_PREFIXES: Final[tuple[str, ...]] = (
     "yaml",
 )
 
-#: The shipped module, once imported. A plain dict rather than `functools.lru_cache`
-#: so the cache is inspectable and a failed import is never memoised.
-_SHIPPED_MODULE_CACHE: dict[str, types.ModuleType] = {}
 
 _IRS030_MODULE: Final[str] = "acas_posting.programs.irs030_posting"
+
+#: The module that owns the General Ledger TWIN of the same statement,
+#: [general/gl051.cbl:L791]. Named here because `_irs_net_vat` answers for the GL
+#: receiving field from this module rather than from the IRS one - the two sections
+#: differ only in the rate item's name and in the receiving picture, and reporting a
+#: GL store from the IRS section would misattribute the divergence this file exists
+#: to show.
+_GL051_MODULE: Final[str] = "acas_posting.programs.gl051_batch_control_check"
 
 
 def _is_tier_isolated_name(name: str) -> bool:
@@ -1342,44 +1451,93 @@ def _is_tier_isolated_name(name: str) -> bool:
 
 @contextlib.contextmanager
 def _shipped_module(dotted_name: str) -> Iterator[types.ModuleType]:
-    """Import a shipped module for the duration of one test, leaving no trace.
+    """Import a shipped module FOR REAL for one test, leaving `sys.modules` as found.
+
+    ⭐ THE IMPORT IS NOT OPTIONAL, AND IT IS NOT MEMOISED. Both of those are the point.
+
+    NOT OPTIONAL. `pytest.importorskip` stood here, and it turned the one failure this
+    section exists to catch into a PASS. A shipped module that cannot be imported at
+    all - a syntax error, a circular import, a name it imports that no longer exists -
+    produced a SKIP, and a skipped test reads as green. The pinned MySQL driver the
+    reason text blamed is a hard requirement of `requirements.txt`, so its absence is a
+    broken environment and not a supported configuration; `importlib.import_module`
+    lets the `ImportError` reach pytest as the FAILURE it is.
+
+    NOT MEMOISED. A cached module is ALREADY RESIDENT in `sys.modules`, so the purge in
+    the `finally` had nothing to remove and every "leaves no driver loaded" claim
+    downstream was a statement about a module that had never left. Each entry therefore
+    proves the import really happened: a tier-isolated name must be ABSENT on the way
+    in - which is what establishes that the previous exit purged it - and RESIDENT while
+    the body runs; on the way out every tier-isolated name the import added is removed
+    and the residue is asserted empty.
+
+    A name that is NOT tier-isolated - `acas_posting.records.*`, `acas_posting.clock` -
+    is imported and left alone. This tier is allowed `cobol` and `records` by Agent
+    Action Plan section 0.4.3, so those are never purged and a freshness claim over
+    them would be meaningless.
 
     Args:
-        dotted_name: The importable name, e.g. `acas_posting.programs.irs030_posting`.
+        dotted_name: The importable name.
 
     Yields:
         The imported module.
 
     Raises:
-        Skipped: Via `pytest.importorskip`, when the module cannot be imported
-            because a dependency is absent - which on a bare host means the MySQL
-            driver. Skipping rather than failing is what keeps the tier runnable
-            with nothing installed but pytest.
+        AssertionError: The name did not become resident after the eviction, or a
+            tier-isolated name survived the purge.
+        ImportError: The module could not be imported. NOT converted into a skip:
+            `mysql-connector-python==26.7.0` is a HARD `[project.dependencies]`
+            entry and a hard `requirements.txt` pin, so an installed package always has
+            it, and the assertions this loader serves are anomaly locks rule R-4
+            requires - a lock that can disappear into a skip line is not a lock.
     """
-    cached = _SHIPPED_MODULE_CACHE.get(dotted_name)
-    if cached is not None:
-        # Already imported and already purged from `sys.modules`; the module object
-        # is still live because this cache holds it, so nothing needs re-importing.
-        yield cached
-        return
-
-    before = frozenset(sys.modules)
-    try:
-        module = pytest.importorskip(
-            dotted_name,
-            reason=(
-                f"{dotted_name} could not be imported - on a host without the "
-                f"pinned MySQL driver this section is skipped and the rest of the "
-                f"arithmetic tier still runs (rule R-1)"
-            ),
+    #  EVICT FIRST, so the import below really runs the module's top-level code and the
+    #  purge in the `finally` really removes what it added. Nothing is memoised: a
+    #  cached module is ALREADY RESIDENT, so the purge would remove nothing and the
+    #  isolation claim would be about a module that had never left. Eviction rather than
+    #  a "must be absent on the way in" assertion, because this tier's own helpers
+    #  legitimately import program modules in function scope to drive the SHIPPED
+    #  paragraphs, and an absence assertion would make the two remediations exclude each
+    #  other. Reverse-sorted so a package goes after its submodules.
+    for resident in sorted(
+        (name for name in sys.modules if _is_tier_isolated_name(name)), reverse=True
+    ):
+        del sys.modules[resident]
+    if _is_tier_isolated_name(dotted_name):
+        assert dotted_name not in sys.modules, (
+            f"{dotted_name} survived the eviction above, so its top-level code will "
+            f"NOT re-execute and the purge on the way out would remove nothing - which "
+            f"is what the tier-isolation assertions in test_comp3_packed_decimal.py, "
+            f"test_comp_binary.py and test_pic_field_descriptors.py rest on."
         )
-        _SHIPPED_MODULE_CACHE[dotted_name] = module
+    before = frozenset(sys.modules)
+    completed = False
+    try:
+        module = importlib.import_module(dotted_name)
+        assert sys.modules.get(dotted_name) is module, (
+            f"{dotted_name} did not become resident under its own name, so nothing "
+            f"about a fresh import has been established."
+        )
         yield module
+        completed = True
     finally:
-        # Deepest names first, so a package is unregistered after its submodules.
-        for name in sorted(set(sys.modules) - before, reverse=True):
+        added = set(sys.modules) - before
+        for name in sorted(added, reverse=True):
             if _is_tier_isolated_name(name):
                 del sys.modules[name]
+        residue = sorted(
+            name
+            for name in set(sys.modules) - before
+            if _is_tier_isolated_name(name)
+        )
+        #  Only when the body itself succeeded, so a real failure is never masked by a
+        #  second assertion about housekeeping.
+        if completed:
+            assert not residue, (
+                f"importing {dotted_name} left {residue} resident after the purge, so "
+                f"this tier no longer runs without a database driver and the three "
+                f"isolation assertions above would fail depending only on file order."
+            )
 
 
 def _shipped_irs030_posting() -> contextlib.AbstractContextManager[types.ModuleType]:
@@ -1653,4 +1811,3 @@ def test_the_shipped_net_paragraph_is_driven_without_leaving_a_driver_loaded() -
     assert _is_tier_isolated_name("mysql.connector") is True
     assert _is_tier_isolated_name("acas_posting.database") is False
     assert _is_tier_isolated_name("acas_posting.cobol.arithmetic") is False
-

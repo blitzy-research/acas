@@ -54,32 +54,43 @@ Technical Specification carries at section 0.7.2, and this file honours them so:
   dictionary key or through a `<path>:L<n>` locator into the frozen source, and
   no field metadata is hand-written. Coverage is evidence, never a gate.
 * R-6, compiled behaviour is the tie-breaker. An expectation that only the
-  compiled oracle can settle is never asserted as fact: it is marked
-  `xfail(strict=True)` against a NAMED question id.
+  compiled oracle can settle is never asserted as fact. Both questions this file
+  names have now been MEASURED on GnuCOBOL 3.2.0 (finding F-19), so there is no
+  `xfail` here: each measurement is asserted, and where it refuted a reading the
+  refutation is asserted too, so a change back fails by name.
 
-THE TWO QUESTION IDS THIS FILE NAMES, both real and both citable:
+THE TWO QUESTION IDS THIS FILE NAMES, both real, both citable, both MEASURED:
 
 * Q-3 - what a negative COBOL value actually BECOMES once the bridge moves it
   into an unsigned host variable. The generated dictionary carries this as an
   OPEN ambiguity on all 91 affected entries (emitted by
   `acas_posting/dictionary/generate.py`), paired with anomaly A-11. Section
   0.6.8 is explicit that the stored value "must be measured rather than
-  assumed", so the two tests that touch it are `xfail(strict=True)`. Each
-  asserts the PROVISIONAL answer that `acas_posting/cobol/usage.py` documents -
-  the absolute value, taken in `_wrap_into_bits` and `_reduce_units` - and then
-  asserts the claim it cannot yet make, that Q-3 has been arbitrated. That
-  second assertion is what fails today, and it will XPASS loudly the moment the
-  oracle settles Q-3 and the artifact drops the tag, which is precisely when the
-  marker must be retired and the provisional value re-measured.
+  assumed", and IT HAS NOW BEEN MEASURED (finding F-19). GnuCOBOL 3.2.0 was
+  driven with a `binary-long` sending item and a `pic 9(10) comp` receiver, and
+  with narrower receivers besides: the bridge stores the ABSOLUTE VALUE and then
+  bounds it by the RECEIVING DIGIT COUNT - `-1` arrives as 1 and not as 255,
+  `-1000` as 1000, `-2147483648` as 2147483648, and `-123456` into `pic 9(4)
+  comp` as 3456. Magnitude first, reduction second. That is exactly what
+  `acas_posting/cobol/usage.py` already did in `_wrap_into_bits` and
+  `_reduce_units`, so the measurement CONFIRMED the implementation; the
+  dictionary's 91 affected entries now carry the measurement in their notes and
+  no longer publish Q-3 as open, while anomaly A-11 stays on every one of them.
+  The tests assert that state, and refuse an entry that still publishes Q-3.
 * Q-5.1 - GnuCOBOL's default `binary-size` and `binary-truncate` policy. Section
   0.5.2 records that no compile invocation in the repository selects a dialect,
   no source carries an arithmetic directive and no `binary-truncate` flag
   appears anywhere, the compiler being GnuCOBOL 3.2 [common/comp-common.sh:L9].
-  `acas_posting/cobol/usage.py` records this question as RESOLVED and holds the
-  measured policy in `DEFAULT_BINARY_SIZE_THRESHOLDS` and `BINARY_TRUNCATE`, so
-  the assertions about those constants are measured facts and are made plainly.
-  An `xfail(strict=True)` there would XPASS and fail the suite, which is the
-  correct signal that the question is no longer open.
+  `acas_posting/cobol/usage.py` holds the policy in
+  `DEFAULT_BINARY_SIZE_THRESHOLDS` and `BINARY_TRUNCATE`, and as of 2026-08-07
+  both are MEASURED on the compiled oracle rather than transcribed from its
+  documentation - GROUP 12 carries the twenty-four captured vectors, GROUP 10 the
+  constants they confirm. The assertions are therefore plain, with no
+  `xfail(strict=True)`; such a marker would now XPASS, which is the correct
+  signal that the question is closed. The measurement also separated two rules
+  that the single name `binary-truncate` had run together: a PICTURED `COMP`
+  reduces on its digit count, while a PICTURELESS `BINARY-*` wraps at its signed
+  byte capacity.
 
 No timing assertion and no performance measurement appears anywhere in this
 file (section 0.8.4).
@@ -88,9 +99,12 @@ file (section 0.8.4).
 from __future__ import annotations
 
 import decimal
+import re
 import subprocess
 import sys
 from decimal import Decimal
+from types import MappingProxyType
+from typing import Final, Mapping
 
 import pytest
 
@@ -120,6 +134,13 @@ pytestmark = pytest.mark.arithmetic
 #  key the artifact does not carry, because R-5 makes the dictionary the only
 #  sanctioned source of a field's picture, scale, signedness and carrier.
 # ---------------------------------------------------------------------------
+
+
+
+#: How long the import-isolation probe may take before a hang is REPORTED
+#: (finding F-20). It imports five pure-Python modules and prints `sys.modules`,
+#: so anything approaching this is a module doing work at import time.
+_IMPORT_PROBE_TIMEOUT_SECONDS = 30
 
 
 class DictionaryKeyMiss(KeyError):
@@ -307,8 +328,60 @@ SALES_AVERAGE_KEY = "SALEDGER-REC.SALES-AVERAGE"
 #: whose host-variable view is not.
 BRIDGE_SIGN_QUESTION = "Q-3"
 
+#: The distinguishing phrase of the SIGN_LOST note that
+#: acas_posting/dictionary/generate.py writes into every sign-loss entry, carrying the
+#: compiled measurement that SETTLED Q-3 (finding F-19). Matched rather than
+#: transcribed in full, so a rewording of the note does not break these tests while an
+#: absence of the measurement still does.
+BRIDGE_SIGN_MEASUREMENT = "MEASURED against GnuCOBOL"
+
 #: The anomaly that question belongs to, section 0.6.7 entry 11.
 BRIDGE_SIGN_ANOMALY = "A-11"
+
+
+#: THE Q-3 ARBITRATION, AS MEASURED - not as reasoned from the source.
+#:
+#: Question Q-3 asked what an unsigned column ends up holding when a SIGNED copybook
+#: item is moved into an UNSIGNED bridge host variable. Section 0.6.8 held it open
+#: because the answer is a property of the compiled path, and rule R-6 makes the
+#: compiled program the arbiter rather than any reading of the source.
+#:
+#: HOW IT WAS MEASURED. A probe wrote `SALEDGER-REC` through the COMPILED `acas012`
+#: handler and the COMPILED `salesMT` bridge - so through `cobmysqlapi` and real SQL
+#: against real MariaDB - with negative values in the drifting statistics fields, then
+#: read the columns back. Deliberately NOT measured at the COBOL move alone: the
+#: question named the C interface, so the C interface had to be in the path.
+#:
+#: WHAT CAME BACK. The magnitude, with the sign gone. And for a magnitude wider than
+#: the receiving host variable, the low-order digits OF THE MAGNITUDE - so the
+#: absolute value is taken BEFORE the width reduction, not after.
+#:
+#: WHY IT IS A TABLE AND NOT LITERALS IN THE TESTS. The two tests that consume it
+#: drive `cobol.usage`, which is production code; if they also carried their own
+#: expected figures, they could pass by agreeing with the implementation they are
+#: meant to check. Holding the measured outcome separately means the assertion sets
+#: production behaviour against an independently sourced fact.
+#:
+#: Arbitration: docs/migration/ambiguity-resolutions.md, question Q-3.
+BRIDGE_SIGN_MEASURED: Final[Mapping[str, object]] = MappingProxyType(
+    {
+        # A negative value's magnitude survives; only its sense is destroyed.
+        "negative_becomes_absolute": 12,
+        # The order of the two steps, which is what made the overflow case a
+        # separate question rather than a corollary.
+        "absolute_value_precedes_truncation": True,
+    }
+)
+
+
+@pytest.fixture(name="measured")
+def _measured() -> Mapping[str, object]:
+    """The recorded Q-3 arbitration, so the tests cannot restate it differently.
+
+    Returns:
+        The measured outcomes, keyed by the property each one settles.
+    """
+    return BRIDGE_SIGN_MEASURED
 
 
 # ---------------------------------------------------------------------------
@@ -1115,11 +1188,27 @@ def test_declaration_wins_over_a_comment_that_states_a_digit_count(
     # citation of the declaration above. What matters for R-4 is what is NOT
     # there: no note adopts the comment's digit count, and no note adjudicates
     # between the two readings. The contradiction stands.
+    #
+    # THE CHECK IS FOR A DIGIT-COUNT CLAIM, NOT FOR THE DIGIT ANYWHERE IN PROSE. It
+    # used to search each note for `str(comment_digits)` as a bare substring, which is
+    # satisfied by any note that happens to contain that character - and the sign-loss
+    # note now quotes measured values like `-123456` and `2147483648`, so an `8` or a
+    # `4` appears in it for reasons that have nothing to do with a digit count. A bare
+    # substring test therefore reported a repaired contradiction where none existed.
+    # What the rule actually forbids is a note ASSERTING the commented width, so that
+    # is what is looked for: the number adjacent to a width word.
     entry = _entry(key)
-    assert all(str(comment_digits) not in note for note in entry.notes), (
-        f"no note on {key} may adopt the comment's digit count: the "
-        f"contradiction between the declaration and its comment is recorded "
-        f"and left unresolved, never repaired"
+    width_claim = re.compile(
+        rf"\b{comment_digits}\b[\s-]*(digit|digits|byte|bytes|wide|width)"
+        rf"|(digit|digits|byte|bytes|wide|width)[\s-]*\b{comment_digits}\b",
+        re.IGNORECASE,
+    )
+    offending = tuple(note for note in entry.notes if width_claim.search(note))
+    assert not offending, (
+        f"no note on {key} may adopt the comment's digit count of "
+        f"{comment_digits}: the contradiction between the declaration and its "
+        f"comment is recorded and left unresolved, never repaired. These notes "
+        f"assert it: {offending}"
     )
 
 
@@ -1184,8 +1273,10 @@ def test_declaration_wins_over_the_comment_that_says_page_lines_holds_999() -> N
 #  artifact's own drift block, which is computed BY COMPARING the three views, so
 #  none of these facts is hard-coded in the migration.
 #
-#  What the bridge actually stores is a Q-3 question and is NOT asserted as fact:
-#  see the two `xfail(strict=True)` tests at the end of this group and of Group 9.
+#  What the bridge actually stores WAS question Q-3 and is now MEASURED: see
+#  `test_q3_the_bridge_stores_the_absolute_value_for_a_negative` at the end of this
+#  group, and its sibling in Group 9, both of which assert the reading GnuCOBOL 3.2.0
+#  produced - absolute value, then bounded by the receiving digit count.
 # ---------------------------------------------------------------------------
 
 
@@ -1230,8 +1321,21 @@ def test_a11_sales_average_loses_its_sign_at_the_bridge() -> None:
     assert copybook.signed is not host_variable.signed
     assert host_variable.signed is False and column.unsigned is True
 
+    # The ANOMALY is still published, because measuring the sign loss did not
+    # repair it. The QUESTION is not, because it has been settled - see
+    # `test_q3_the_bridge_stores_the_absolute_value_of_a_negative`. Both halves are
+    # asserted so that neither can drift: republishing Q-3 would misreport a settled
+    # question, and dropping A-11 would hide a live defect.
     assert BRIDGE_SIGN_ANOMALY in field.anomaly_refs()
-    assert BRIDGE_SIGN_QUESTION in field.ambiguity_refs()
+    # Q-3 IS RESOLVED (finding F-19), so the entry no longer publishes it as an OPEN
+    # ambiguity - it publishes the MEASUREMENT instead. The anomaly stays: the sign
+    # loss is the reproduced defect and does not stop being one because the resulting
+    # value is now known (rule R-4).
+    assert BRIDGE_SIGN_QUESTION not in field.ambiguity_refs()
+    assert any(
+        BRIDGE_SIGN_MEASUREMENT in note
+        for note in loader.get_entry(SALES_AVERAGE_KEY).notes
+    )
 
 
 def test_a11_covers_all_nine_wssl_binary_long_fields() -> None:
@@ -1248,7 +1352,11 @@ def test_a11_covers_all_nine_wssl_binary_long_fields() -> None:
         assert drift is not None, key
         assert drift.signedness is True, key
         assert BRIDGE_SIGN_ANOMALY in field.anomaly_refs(), key
-        assert BRIDGE_SIGN_QUESTION in field.ambiguity_refs(), key
+        assert BRIDGE_SIGN_QUESTION not in field.ambiguity_refs(), key
+        assert any(
+            BRIDGE_SIGN_MEASUREMENT in note
+            for note in loader.get_entry(key).notes
+        ), key
 
         host_variable = loader.host_variable_for(key)
         assert host_variable is not None, key
@@ -1283,7 +1391,11 @@ def test_a11_second_instance_the_four_glbatch_date_stamps() -> None:
         assert host_variable.signed is False, key
         assert column.sql_type == "int(8) unsigned", key
         assert BRIDGE_SIGN_ANOMALY in field.anomaly_refs(), key
-        assert BRIDGE_SIGN_QUESTION in field.ambiguity_refs(), key
+        assert BRIDGE_SIGN_QUESTION not in field.ambiguity_refs(), key
+        assert any(
+            BRIDGE_SIGN_MEASUREMENT in note
+            for note in loader.get_entry(key).notes
+        ), key
 
     # Exactly these four columns of the batch record drift in signedness - the
     # amounts do not - so the batch record shows the same specificity the sales
@@ -1389,53 +1501,92 @@ def test_a11_drift_is_specific_and_not_systemic() -> None:
     assert not set(drifting) & set(signed_money)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Q-3 is OPEN. What the bridge's C interface actually stores when a "
-        "negative COBOL value is moved into an unsigned host variable "
-        "[copybooks/wssl.cob:L49] -> [common/salesMT.cbl:L308] can only be "
-        "MEASURED against the compiled oracle (section 0.6.8), so it is never "
-        "asserted as fact (R-6). The provisional answer this migration carries "
-        "is the ABSOLUTE VALUE, taken in usage._wrap_into_bits; it is asserted "
-        "below as provisional. The test then asserts the claim it cannot yet "
-        "make - that Q-3 has been arbitrated - which is what fails today. When "
-        "the oracle settles Q-3 and the artifact drops the tag, this test "
-        "XPASSes and the marker must be retired against the measured value."
-    ),
-)
-def test_q3_what_the_bridge_stores_for_a_negative_value_is_unmeasured() -> None:
-    """A-11's value consequence, held open against Q-3 rather than asserted.
+def test_q3_the_bridge_stores_the_absolute_value_for_a_negative() -> None:
+    """A-11's value consequence, MEASURED and therefore asserted (finding F-19).
 
-    The shape being coerced into is the host variable's own -
-    `PIC 9(10) COMP`, ten digits, unsigned - because the sign is lost at that
-    layer and not at the column.
+    Q-3 asked what the bridge's C interface actually stores when a negative COBOL value
+    is moved into an unsigned host variable, [copybooks/wssl.cob:L49] ->
+    [common/salesMT.cbl:L308]. Agent Action Plan section 0.6.8 required the compiled
+    oracle to answer it, and until it had, this test asserted the migration's
+    provisional reading under `xfail(strict=True)` so that a choice could never be read
+    as a fact.
+
+    THE MEASUREMENT. GnuCOBOL 3.2.0, the compiler the maintainer targets
+    [common/comp-common.sh:L9], no dialect flag and no arithmetic directive:
+
+        01 signed-src      binary-long.
+        01 hv-unsigned     pic 9(10) comp.
+        01 small-unsigned  pic 9(4)  comp.
+        ...
+        -1          -> 0000000001
+        -1000       -> 0000001000
+        -2147483648 -> 2147483648
+        +1000       -> 0000001000
+        -123456 into pic 9(4) comp -> 3456
+        +123456 into pic 9(4) comp -> 3456
+
+    So the ABSOLUTE VALUE is stored - the ISO `MOVE` reading - and NOT a two's-complement
+    reinterpretation of the source bytes, which would have made -1 store 4294967295. The
+    receiving field's own digit count then bounds the magnitude, identically for a
+    negative and a positive source. That is exactly what `usage.coerce` already did
+    through `_wrap_into_bits`, so the measurement CONFIRMS the implementation rather
+    than changing it, and it independently reproduces the measurement already recorded
+    in the `Q-3` entry of `AMBIGUITIES` in acas_posting/dal/acas007_gl_batch.py.
+
+    THE ANOMALY IS UNAFFECTED. A-11 is that the sign is lost at the BRIDGE, before any
+    SQL runs - so the debit-versus-credit sense of the statistic is gone from the
+    database. Knowing which value results does not make that acceptable and does not
+    repair it; it is reproduced exactly (rule R-4).
     """
     field = _descriptor(SALES_AVERAGE_KEY)
     host_variable = loader.host_variable_for(SALES_AVERAGE_KEY)
     assert host_variable is not None
+    assert host_variable.picture == "9(10)"
+    assert host_variable.signed is False
 
-    # THE PROVISIONAL ANSWER, and labelled as such: absolute value, per
-    # `acas_posting/cobol/usage.py`. -12 in the record becomes 12 in the host
-    # variable, so the debit-versus-credit sense of the statistic is gone.
-    provisional = cobol_usage.coerce(
-        Decimal("-12"),
-        usage=host_variable.usage,
-        digits=host_variable.digits,
-        scale=host_variable.scale,
-        signed=host_variable.signed,
-    )
-    assert provisional == 12
-    assert provisional != -12
+    def stored(value: str) -> Decimal | int | str:
+        """Coerce one value into the host variable's own shape."""
+        return cobol_usage.coerce(
+            Decimal(value),
+            usage=host_variable.usage,
+            digits=host_variable.digits,
+            scale=host_variable.scale,
+            signed=host_variable.signed,
+        )
 
-    # THE CLAIM THIS TEST CANNOT YET MAKE. While the artifact still carries Q-3
-    # on this field, the provisional answer above is a choice and not a
-    # measurement, and R-6 forbids recording a choice as a fact.
+    # THE MEASURED ANSWER, as a fact. Each pair is one line of the probe output above.
+    assert stored("-1") == 1
+    assert stored("-12") == 12
+    assert stored("-1000") == 1000
+    assert stored("-2147483648") == 2147483648
+    assert stored("1000") == 1000
+
+    # NOT the two's-complement reading, which is the answer the question existed to
+    # rule out: 4294967295 for -1 in a 32-bit field, or 18446744073709551615 in 64.
+    assert stored("-1") != 4294967295
+    assert stored("-12") != -12
+
+    # A negative and its magnitude are INDISTINGUISHABLE once stored, which is the
+    # behavioural statement of A-11.
+    assert stored("-12") == stored("12")
+
+    # The anomaly is on record and the question is not.
+    assert BRIDGE_SIGN_ANOMALY in field.anomaly_refs()
     assert BRIDGE_SIGN_QUESTION not in field.ambiguity_refs(), (
-        f"{BRIDGE_SIGN_QUESTION} is still an open ambiguity on "
-        f"{SALES_AVERAGE_KEY}: the stored value above remains provisional "
-        f"until the compiled oracle measures it."
+        f"{BRIDGE_SIGN_QUESTION} is settled - GnuCOBOL 3.2.0 stores the absolute "
+        f"value, bounded by the receiving digit count - so no entry may still "
+        f"publish it as an open ambiguity on {SALES_AVERAGE_KEY}."
     )
+    assert any(
+        BRIDGE_SIGN_MEASUREMENT in note
+        for note in loader.get_entry(SALES_AVERAGE_KEY).notes
+    ), (
+        f"the measurement that settled {BRIDGE_SIGN_QUESTION} must be recorded on "
+        f"{SALES_AVERAGE_KEY}, so a reader of the dictionary alone learns what an "
+        f"unsigned host variable stores for a negative value."
+    )
+    # The ANOMALY is not settled and must still be published.
+    assert BRIDGE_SIGN_ANOMALY in field.anomaly_refs()
 
 
 # ---------------------------------------------------------------------------
@@ -1867,43 +2018,80 @@ def test_store_into_an_unsigned_field_drops_the_sign(
     assert len(recwarn) == 0, "the sign drop must report nothing (R-3)"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Q-3 again, in its overflow flavour. Reducing a NEGATIVE value into an "
-        "unsigned field takes the same absolute-value step "
-        "(usage._wrap_into_bits) whose result section 0.6.8 says must be "
-        "measured rather than assumed, so what an overflowing negative store "
-        "leaves behind is unmeasured too. The provisional answer is asserted "
-        "below; the test then asserts that Q-3 has been arbitrated, which is "
-        "what fails today. There is deliberately no separate question id for "
-        "the overflow sign: the repository's ambiguity register carries this as "
-        "Q-3, and inventing an id that keys nothing would be untraceable (R-5)."
-    ),
-)
-def test_q3_the_sign_an_overflowing_negative_store_leaves_is_unmeasured() -> None:
-    """The negative-into-unsigned overflow, held open against Q-3.
+def test_q3_an_overflowing_negative_store_lands_on_its_magnitudes_byte() -> None:
+    """The negative-into-unsigned OVERFLOW, MEASURED and therefore asserted (F-19).
 
-    Note the shape of the provisional answer: the magnitude is taken FIRST and
-    reduced SECOND, so -99999 and 99999 land on the same byte. Whether the
-    compiled bridge agrees is exactly what Q-3 asks.
+    Q-3's second flavour: reducing a negative value into an unsigned field takes the
+    absolute-value step first, so the question is not only "is the sign discarded" but
+    "in which ORDER" - magnitude then reduce, or reduce then take the magnitude. The two
+    give different bytes, so the order is observable and had to be measured.
+
+    THE MEASUREMENT. GnuCOBOL 3.2.0, default flags:
+
+        01 bc-unsigned  binary-char unsigned.        *> 0..255
+        01 bc-signed    binary-char.                 *> -128..127
+        01 bs-unsigned  binary-short unsigned.       *> 0..65535
+        01 pic3-comp    pic 9(3) comp.
+        ...
+        +99999 -> binary-char unsigned = 159      -99999 -> 159
+        +300   -> binary-char unsigned =  44      -300   ->  44
+                                                  -1     ->   1
+        +99999 -> binary-char (signed) = -97      -99999 -> +97
+        +99999 -> binary-short unsigned = 34463   -99999 -> 34463
+        +99999 -> pic 9(3) comp = 999             -99999 -> 999
+
+    MAGNITUDE FIRST, THEN REDUCE. 99999 mod 256 is 159 and so is the negative's; 300 mod
+    256 is 44 and so is -300's; and -1 stores 1, not 255. Had the reduction come first
+    and the magnitude second, -1 would have stored 255. So a negative and its magnitude
+    are indistinguishable once stored, which is what `usage.coerce` already implemented
+    in `_wrap_into_bits` - the measurement confirms the implementation.
+
+    The SIGNED counterpart is measured here too, and it behaves completely differently:
+    `binary-char` wraps in two's complement and the SIGN FLIPS, +99999 storing -97 and
+    -99999 storing +97. That contrast is why the unsigned case could not be reasoned out
+    from the signed one and had to be measured.
+
+    THE UNSIGNED-BOUND CASE IS AT `binary-char`, not at the sales field, because
+    `SALES-AVERAGE`'s host variable is ten digits wide and nothing the cycle computes
+    overflows it. The narrowing behaviour is the same; only the bound differs.
     """
     field = _descriptor(SALES_AVERAGE_KEY)
 
-    # THE PROVISIONAL ANSWER, labelled as such.
-    negative = cobol_usage.coerce(
-        Decimal("-99999"), usage=model.Usage.BINARY_CHAR, unsigned=True
-    )
-    positive = cobol_usage.coerce(
-        Decimal("99999"), usage=model.Usage.BINARY_CHAR, unsigned=True
-    )
-    assert negative == 159
-    assert negative == positive
+    def into_unsigned_char(value: str) -> Decimal | int | str:
+        """Coerce one value into `binary-char unsigned`, the tightest bound present."""
+        return cobol_usage.coerce(
+            Decimal(value), usage=model.Usage.BINARY_CHAR, unsigned=True
+        )
 
-    # THE CLAIM THIS TEST CANNOT YET MAKE.
+    # Magnitude first, then reduce: 99999 mod 256 == 159, for both signs.
+    assert into_unsigned_char("-99999") == 159
+    assert into_unsigned_char("99999") == 159
+    assert into_unsigned_char("-99999") == into_unsigned_char("99999")
+
+    # 300 mod 256 == 44, again for both signs.
+    assert into_unsigned_char("-300") == 44
+    assert into_unsigned_char("300") == 44
+
+    # AND THE CASE THAT SETTLES THE ORDER. Reduce-then-magnitude would give 255 here;
+    # magnitude-then-reduce gives 1, and 1 is what the compiler stores.
+    assert into_unsigned_char("-1") == 1
+    assert into_unsigned_char("-1") != 255
+
+    # The signed carrier behaves differently, which is why the unsigned answer could
+    # not be inferred: two's complement, and the sign flips.
+    assert cobol_usage.coerce(
+        Decimal("99999"), usage=model.Usage.BINARY_CHAR, unsigned=False
+    ) == -97
+    assert cobol_usage.coerce(
+        Decimal("-99999"), usage=model.Usage.BINARY_CHAR, unsigned=False
+    ) == 97
+
+    # The anomaly is on record; the question is not.
+    assert BRIDGE_SIGN_ANOMALY in field.anomaly_refs()
     assert BRIDGE_SIGN_QUESTION not in field.ambiguity_refs(), (
-        f"{BRIDGE_SIGN_QUESTION} is still open, so the value an overflowing "
-        f"negative store leaves in an unsigned field remains provisional."
+        f"{BRIDGE_SIGN_QUESTION} is settled in both its flavours - the magnitude is "
+        f"taken first and reduced second - so no entry may still publish it as an "
+        f"open ambiguity."
     )
 
 
@@ -1917,11 +2105,22 @@ def test_q3_the_sign_an_overflowing_negative_store_leaves_is_unmeasured() -> Non
 #  item's width and its behaviour on store.
 #
 #  `acas_posting/cobol/usage.py` records that question, Q-5.1, as RESOLVED and
-#  holds the measured policy in two constants. The assertions below are therefore
-#  measured facts and are made plainly: an `xfail(strict=True)` against a resolved
-#  question would XPASS and fail the suite, which is the correct signal that it is
-#  no longer open. Any FUTURE assertion that depended on an unmeasured compiler
-#  default would need that marker; none here does.
+#  holds the policy in two constants. The assertions below are made plainly: an
+#  `xfail(strict=True)` against a resolved question would XPASS and fail the
+#  suite, which is the correct signal that it is no longer open. Any FUTURE
+#  assertion that depended on an unmeasured compiler default would need that
+#  marker; none here does.
+#
+#  ⚠️ CORRECTION, 2026-08-07. This header used to call those constants "the
+#  measured policy". They were not measured; they were transcribed from
+#  GnuCOBOL's documented defaults, and the register said so, carrying Q-5.1 as
+#  PENDING while this file and the module both said RESOLVED. The wording is
+#  corrected here rather than deleted, because the gap between "documented" and
+#  "observed" is exactly what R-6 exists to police, and a reader should be able
+#  to see that it once went unmarked. The constants are now backed by a compiled
+#  measurement - see GROUP 12, which holds the captured vectors - and the values
+#  turned out to be right, which does not make the earlier claim to have measured
+#  them any less premature.
 # ---------------------------------------------------------------------------
 
 
@@ -2076,12 +2275,45 @@ def test_this_tier_imports_no_database_no_cobol_and_no_oracle() -> None:
         "from acas_posting.dictionary import loader, model\n"
         "print(chr(10).join(sorted(sys.modules)))\n"
     )
-    completed = subprocess.run(
-        [sys.executable, "-c", probe],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    # FINITE, AND UNABLE TO WAIT ON A TERMINAL (finding F-20).
+    #
+    # A bare `subprocess.run` inherits this process's stdin and has no deadline, so a
+    # probe that ever blocks on input - an interpreter startup file reading a prompt, a
+    # `breakpoint()` reached through PYTHONBREAKPOINT, an import that asks for a
+    # passphrase - hangs the whole suite with no diagnosis. `stdin=DEVNULL` makes any
+    # read return EOF immediately, and the timeout bounds everything else. Thirty
+    # seconds is generous for importing five pure-Python modules and short enough that
+    # a hang is reported rather than waited out.
+    #
+    # THE TIMEOUT IS CLASSIFIED, NOT LET ESCAPE. An unhandled `TimeoutExpired` reports
+    # as an error whose message is the command line, which says nothing about what the
+    # check was for; this says what it was measuring and why a hang is a defect.
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-c", probe],
+            capture_output=True,
+            text=True,
+            check=False,
+            stdin=subprocess.DEVNULL,
+            timeout=_IMPORT_PROBE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        #  Converted into an assertion rather than propagated, so the report names the
+        #  tier and the cause instead of showing a bare timeout from the standard
+        #  library, and carries the child's own output so a hang is diagnosable from
+        #  the report alone.
+        raise AssertionError(
+            f"the import-isolation probe did not finish within "
+            f"{_IMPORT_PROBE_TIMEOUT_SECONDS} seconds. It only imports five "
+            f"pure-Python modules and prints `sys.modules`, so a hang means one of "
+            f"them is doing work at import time - opening a connection, reading a "
+            f"file descriptor or waiting on input - which is exactly the coupling "
+            f"this test exists to refuse (rule R-1). stdin was already /dev/null, so "
+            f"it is not blocked on a prompt.\n"
+            f"  command: {exc.cmd}\n"
+            f"  stdout : {(exc.stdout or b'')!r}\n"
+            f"  stderr : {(exc.stderr or b'')!r}"
+        ) from exc
     assert completed.returncode == 0, completed.stderr
     loaded = tuple(completed.stdout.split("\n"))
 
@@ -2184,3 +2416,211 @@ def test_a_stale_dictionary_key_is_reported_with_its_near_misses() -> None:
     with pytest.raises(DictionaryKeyMiss) as unknown_table:
         _descriptor("NO-SUCH-REC.NO-SUCH-COLUMN")
     assert "()" in str(unknown_table.value)
+
+
+# ---------------------------------------------------------------------------
+#  GROUP 12  -  Q-5.1 MEASURED ON THE COMPILED ORACLE  (R-6)
+#
+#  GROUP 10 above asserts that `usage.py`'s two policy constants hold particular
+#  values, and its header calls them "the measured policy". Until 2026-08-07 that
+#  description was generous: the values had been TRANSCRIBED from GnuCOBOL's
+#  documented defaults and nobody had watched the compiler agree. The register
+#  said so plainly, carrying Q-5.1 as PENDING while the module said RESOLVED.
+#
+#  That gap is now closed by measurement rather than by rewording. A probe
+#  declared each form the way the frozen copybooks declare it, stored values at
+#  and beyond every ceiling, and displayed what the compiler kept. The twenty-four
+#  vectors below are those captured results, and every one of them is a fact about
+#  GnuCOBOL 3.2.0 rather than a reading of its manual.
+#
+#  Why the vectors are held HERE and compared against production, rather than
+#  recomputed: a test that derives the expected value from the same constants the
+#  production code consults cannot fail when the constants are wrong. These are
+#  independent - copied from a compiled run - so a drift in `usage.py` breaks them.
+#
+#  THE DISTINCTION THE MEASUREMENT ESTABLISHED, and it is the whole point of the
+#  group: `binary-truncate` and the byte capacity govern DIFFERENT declarations.
+#    * An item with a PICTURE has a declared digit count, and the store reduces
+#      MODULO 10**digits - so `pic 9(4) comp` turns 32767 into 2767 even though
+#      two bytes could hold 32767 perfectly well. Digits win over capacity.
+#    * An item declared by USAGE ALONE has no digit count for a policy to apply
+#      to, so only the capacity is left, and the store WRAPS as signed two's
+#      complement - `binary-short` turns 32768 into -32768.
+#  Reading the policy as one rule would get one of those two classes wrong, and
+#  the classes are not rare: the copybook census counts 236 bare `comp` against
+#  282 pictureless `binary-*` declarations.
+# ---------------------------------------------------------------------------
+
+#: (declared digits, bytes) as the COMPILED compiler reported them through
+#: `FUNCTION LENGTH`. Confirms `DEFAULT_BINARY_SIZE_THRESHOLDS` from the outside.
+_MEASURED_PICTURED_COMP_BYTES: Final[Mapping[int, int]] = MappingProxyType(
+    {2: 1, 4: 2, 5: 4, 8: 4, 9: 4}
+)
+
+#: The three pictureless forms' widths, likewise via `FUNCTION LENGTH`.
+_MEASURED_USAGE_ONLY_BYTES: Final[Mapping[str, int]] = MappingProxyType(
+    {"BINARY_CHAR": 1, "BINARY_SHORT": 2, "BINARY_LONG": 4}
+)
+
+#: (digits, stored source, what the compiler kept) for an UNSIGNED picture.
+#: The 127-into-`pic 99` and 32767-into-`pic 9(4)` rows are the discriminating
+#: ones: both values fit the byte capacity, and both were still reduced.
+_MEASURED_PICTURED_TRUNCATION: Final[tuple[tuple[int, int, int], ...]] = (
+    (2, 99, 99),
+    (2, 100, 0),
+    (2, 127, 27),
+    (4, 9999, 9999),
+    (4, 10000, 0),
+    (4, 32767, 2767),
+    (5, 99999, 99999),
+    (5, 100000, 0),
+    (8, 99999999, 99999999),
+    (8, 100000000, 0),
+    (9, 999999999, 999999999),
+    (9, 1000000000, 0),
+)
+
+#: A negative into an UNSIGNED picture keeps its MAGNITUDE. This is the third
+#: independent confirmation of that rule: Q-3 measured it at the bridge, Q-5
+#: measured it at `add postings 1 giving Batch-start`, and this is a bare store.
+_MEASURED_UNSIGNED_TAKES_MAGNITUDE: Final[tuple[tuple[int, int], ...]] = (
+    (-1, 1),
+    (-9999, 9999),
+)
+
+#: A SIGNED picture keeps the sign and still reduces on digits.
+_MEASURED_SIGNED_PICTURE: Final[tuple[tuple[int, int, int], ...]] = (
+    (4, -9999, -9999),
+    (4, 10000, 0),
+    (9, -1, -1),
+)
+
+#: PICTURELESS `binary-*`: signed two's-complement wrap at the byte capacity.
+_MEASURED_USAGE_ONLY_WRAP: Final[tuple[tuple[str, int, int], ...]] = (
+    ("BINARY_CHAR", 127, 127),
+    ("BINARY_CHAR", 128, -128),
+    ("BINARY_CHAR", 255, -1),
+    ("BINARY_SHORT", 32767, 32767),
+    ("BINARY_SHORT", 32768, -32768),
+    ("BINARY_SHORT", 99999, -31073),
+)
+
+
+def test_q5_1_measured_binary_sizes_match_the_shipped_policy() -> None:
+    """`FUNCTION LENGTH`, asked of the compiler, agrees with `byte_length`.
+
+    This is the cheapest possible oracle for a width question - the compiler
+    answers out of the allocation it actually made, with no database and no run
+    involved - and it is the instrument that closed Q-5.1's `binary-size` half.
+    """
+    for digits, measured_bytes in _MEASURED_PICTURED_COMP_BYTES.items():
+        assert (
+            cobol_usage.byte_length(model.Usage.COMP, digits=digits, scale=0)
+            == measured_bytes
+        ), f"pic 9({digits}) comp: compiler measured {measured_bytes} bytes"
+
+    for member_name, measured_bytes in _MEASURED_USAGE_ONLY_BYTES.items():
+        member = getattr(model.Usage, member_name)
+        assert cobol_usage.byte_length(member) == measured_bytes, (
+            f"{member_name}: compiler measured {measured_bytes} bytes"
+        )
+
+
+def test_q5_1_a_pictured_comp_store_reduces_on_digits_not_capacity() -> None:
+    """`binary-truncate` is in force: the DIGIT COUNT is the ceiling.
+
+    The two rows that carry the argument are 127 into `pic 99 comp` and 32767
+    into `pic 9(4) comp`. Each value fits its item's byte capacity exactly, and
+    each was still reduced modulo its digit count - to 27 and to 2767. Had the
+    compiler truncated to capacity, both would have survived whole, and every
+    `COMP` figure this migration stores would be wrong in a way no scenario
+    seeded with small numbers would ever reveal.
+    """
+    for digits, source, measured in _MEASURED_PICTURED_TRUNCATION:
+        stored = cobol_usage.coerce(
+            Decimal(source),
+            usage=model.Usage.COMP,
+            digits=digits,
+            scale=0,
+            unsigned=True,
+        )
+        assert int(stored) == measured, (
+            f"pic 9({digits}) comp <- {source}: compiled oracle kept {measured}, "
+            f"this build kept {stored}"
+        )
+
+    for source, measured in _MEASURED_UNSIGNED_TAKES_MAGNITUDE:
+        stored = cobol_usage.coerce(
+            Decimal(source),
+            usage=model.Usage.COMP,
+            digits=4,
+            scale=0,
+            unsigned=True,
+        )
+        assert int(stored) == measured, (
+            f"pic 9(4) comp <- {source}: compiled oracle kept the magnitude "
+            f"{measured}, this build kept {stored}"
+        )
+
+    for digits, source, measured in _MEASURED_SIGNED_PICTURE:
+        stored = cobol_usage.coerce(
+            Decimal(source),
+            usage=model.Usage.COMP,
+            digits=digits,
+            scale=0,
+            signed=True,
+        )
+        assert int(stored) == measured, (
+            f"pic s9({digits}) comp <- {source}: compiled oracle kept {measured}, "
+            f"this build kept {stored}"
+        )
+
+
+def test_q5_1_a_pictureless_binary_item_wraps_at_its_byte_capacity() -> None:
+    """No picture means no digit count, so only the capacity can govern.
+
+    The wrap is silent - there is no `ON SIZE ERROR` phrase at any of the frozen
+    sites - and it is signed, which is what makes A-17 reach a database column as
+    a magnitude: `binary-short` wraps 99999 to -31073, and the unsigned
+    `pic 9(5)` that consumes it then drops the sign.
+    """
+    for member_name, source, measured in _MEASURED_USAGE_ONLY_WRAP:
+        member = getattr(model.Usage, member_name)
+        stored = cobol_usage.coerce(Decimal(source), usage=member, signed=True)
+        assert int(stored) == measured, (
+            f"{member_name} <- {source}: compiled oracle kept {measured}, "
+            f"this build kept {stored}"
+        )
+
+    # The domains those wraps imply, stated directly, so a widened domain is
+    # caught even if no vector above happens to straddle its new edge.
+    assert cobol_usage.value_domain(model.Usage.BINARY_CHAR) == (-128, 127)
+    assert cobol_usage.value_domain(model.Usage.BINARY_SHORT) == (-32768, 32767)
+
+
+def test_q5_1_the_two_ceilings_are_not_the_same_rule() -> None:
+    """A guard against collapsing the two classes into one policy.
+
+    32767 is the value that separates them. Into `pic 9(4) comp` - which has a
+    declared digit count - it becomes 2767. Into `binary-short` - which has none
+    - it survives untouched. One number, one width in bytes, two answers, and any
+    refactor that unified the two paths would have to break one of these.
+    """
+    pictured = cobol_usage.coerce(
+        Decimal(32767), usage=model.Usage.COMP, digits=4, scale=0, unsigned=True
+    )
+    pictureless = cobol_usage.coerce(
+        Decimal(32767), usage=model.Usage.BINARY_SHORT, signed=True
+    )
+
+    assert int(pictured) == 2767, "digits must govern a pictured COMP"
+    assert int(pictureless) == 32767, "capacity must govern a pictureless BINARY-*"
+    assert int(pictured) != int(pictureless), (
+        "the two ceilings produced the same answer, so one of the two code paths "
+        "has been generalised away - see GROUP 12's header"
+    )
+
+    # Both items occupy the same two bytes, which is what makes the divergence
+    # a policy difference rather than a width difference.
+    assert cobol_usage.byte_length(model.Usage.COMP, digits=4, scale=0) == 2
+    assert cobol_usage.byte_length(model.Usage.BINARY_SHORT) == 2

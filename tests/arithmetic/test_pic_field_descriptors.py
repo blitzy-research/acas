@@ -86,18 +86,25 @@ HOW THE SIX RULES BIND HERE
          reasoning about them. Running the compiled program cannot change what a picture
          clause says, so there is nothing here for an oracle to arbitrate.
 
-         Where a question about a STORED VALUE genuinely is open, this file asserts only
-         that the open question is RECORDED and never what its answer is:
+         Where a question about a STORED VALUE arises, this file asserts what the
+         dictionary RECORDS about it and never a value of its own:
 
              Q-3  what a negative binary value becomes once it has passed through an
-                  unsigned host variable into an unsigned column
+                  unsigned host variable into an unsigned column. MEASURED on GnuCOBOL
+                  3.2.0 (finding F-19): the absolute value, then bounded by the
+                  receiving digit count. The 91 affected entries now carry that
+                  measurement in their notes and no longer publish `Q-3` in
+                  `ambiguity_refs()`, while anomaly `A-11` stays on every one - and
+                  this file asserts exactly that state.
              Q-4  which of the batch record's two declared lengths governs the record
-                  that is actually read
+                  that is actually read. STILL OPEN, and asserted through
+                  `ambiguity_refs()` alone.
 
-         Both are asserted through `ambiguity_refs()` alone. Consequently this file
-         carries NO expected-failure marker: one would have to stand in for a value
-         nobody has measured, and no such value is asserted here. Section 0.8.4 also
-         applies - there is no timing assertion and no performance measurement anywhere.
+         Consequently this file carries NO expected-failure marker: for `Q-4` one would
+         have to stand in for a value nobody has measured, and no such value is asserted
+         here; for `Q-3` the measurement is on record and is asserted plainly. Section
+         0.8.4 also applies - there is no timing assertion and no performance
+         measurement anywhere.
 
 WHERE THIS FILE DIVERGES FROM ITS OWN BRIEF, AND WHY
     The brief for this file was written against an earlier shape of the API and three of
@@ -105,7 +112,7 @@ WHERE THIS FILE DIVERGES FROM ITS OWN BRIEF, AND WHY
     because a test must bind to the module it tests:
 
       * `FieldDescriptor.for_working_storage` no longer exists - see the note at
-        [acas_posting/cobol/field.py:L533-L534]. A program-local field is therefore
+        [acas_posting/cobol/field.py _require_dictionary_provenance]. A program-local field is therefore
         described through `picture.descriptor_for`, which is precisely the route
         `FieldDescriptor.__post_init__` names for a bare `<path>:L<n>` locator.
       * Two keys in the brief are near misses: `SYSTEM-REC.RUN-DATE` is really
@@ -1045,9 +1052,12 @@ def test_a11_signed_binary_long_narrowed_to_unsigned_at_the_bridge() -> None:
     The copybook declares a signed 32-bit item; the host variable is `PIC 9(10) COMP`,
     unsigned; the column is `int(8) unsigned`. A negative value therefore loses its sign
     AT THE BRIDGE, before any SQL runs, and not at the database. What it becomes instead
-    is the open question Q-3, which only running the compiled program can settle -
-    so this test asserts that the drift and the question are both recorded, and
-    asserts no stored value.
+    was question Q-3, and only running the compiled program could settle it. It has
+    been run (finding F-19): the bridge stores the ABSOLUTE VALUE, bounded by the
+    receiving digit count. So this test asserts that the drift is recorded, that the
+    measurement is in the entry's notes and that `Q-3` is no longer published as open -
+    and it still asserts no stored value of its own, because the stored value belongs to
+    `tests/arithmetic/test_comp_binary.py`, which owns the measurement.
     """
     # spec: [copybooks/wssl.cob:L49]
     #           03  Sales-Average      binary-long. *> 9(8) comp
@@ -1066,7 +1076,15 @@ def test_a11_signed_binary_long_narrowed_to_unsigned_at_the_bridge() -> None:
     assert "A-11" in descriptor.anomaly_refs()
     # R-6: the stored value of a negative is NOT asserted - only that the question is on
     # the register.
-    assert "Q-3" in descriptor.ambiguity_refs()
+    # Q-3 IS RESOLVED (finding F-19): GnuCOBOL 3.2.0 stores the ABSOLUTE VALUE,
+    # bounded by the receiving digit count. So the entry no longer publishes it as
+    # an OPEN question - it publishes the measurement - while anomaly A-11, the
+    # sign loss itself, stays exactly as it was (rule R-4).
+    assert "Q-3" not in descriptor.ambiguity_refs()
+    assert any(
+        "MEASURED against GnuCOBOL" in note
+        for note in loader.get_entry(descriptor.dictionary_key).notes
+    )
     assert drift.details != ()
 
 
@@ -1147,7 +1165,15 @@ def test_a11_second_instance_in_the_batch_date_group(
     assert drift is not None
     assert drift.signedness is True
     assert "A-11" in descriptor.anomaly_refs()
-    assert "Q-3" in descriptor.ambiguity_refs()
+    # Q-3 IS RESOLVED (finding F-19): GnuCOBOL 3.2.0 stores the ABSOLUTE VALUE,
+    # bounded by the receiving digit count. So the entry no longer publishes it as
+    # an OPEN question - it publishes the measurement - while anomaly A-11, the
+    # sign loss itself, stays exactly as it was (rule R-4).
+    assert "Q-3" not in descriptor.ambiguity_refs()
+    assert any(
+        "MEASURED against GnuCOBOL" in note
+        for note in loader.get_entry(descriptor.dictionary_key).notes
+    )
 
     # The host variable really is the unsigned one the locator names.
     assert entry.bridge_host_variable is not None
@@ -1456,7 +1482,7 @@ def test_a_descriptor_with_neither_a_key_nor_a_locator_cannot_be_built() -> None
     one provenance or the other - which is itself the point: there is no route to an
     untraceable descriptor.
     """
-    # spec: the invariant at [acas_posting/cobol/field.py:L191-L206]
+    # spec: the invariant at [acas_posting/cobol/field.py MissingProvenanceError]
     with pytest.raises(cobol_field.MissingProvenanceError, match="work-2"):
         cobol_field.FieldDescriptor(
             name="work-2",
@@ -1542,7 +1568,7 @@ def test_a_well_formed_locator_is_accepted(well_formed: str) -> None:
 #  decides posted figures just as a record field's does.
 #
 #  `FieldDescriptor.for_working_storage` no longer exists - see the note at
-#  [acas_posting/cobol/field.py:L533-L534] - so these are minted by the picture
+#  [acas_posting/cobol/field.py _require_dictionary_provenance] - so these are minted by the picture
 #  parser, which is the route `__post_init__` names for a bare locator. The
 #  locator is MANDATORY.
 
@@ -2246,7 +2272,7 @@ def test_tier_touches_no_database_and_no_oracle() -> None:
 
 
 #: The repository root, derived from THIS FILE's location rather than from the process
-#: working directory. `tests/conftest.py:L99` derives `REPO_ROOT` the same way and for
+#: working directory. `tests/conftest.py REPO_ROOT` derives `REPO_ROOT` the same way and for
 #: the same reason: the working directory is the caller's business, and a suite that
 #: only passes when it is invoked from one particular directory is not a property of
 #: the code under test. `tests/arithmetic/<this file>` is two levels below the root.

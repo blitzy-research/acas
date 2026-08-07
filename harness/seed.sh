@@ -162,7 +162,9 @@ ACAS_SEED_DIR_OVERRIDE=''      # --seed-dir: WHERE the declared files live. It n
 # application access -- the compiled posting run, the Python cycle, the reset and
 # the dumps -- is left in the mode harness/Dockerfile.mariadb declares, which is
 # ON. Nothing here ever issues a COMMIT on a loader's behalf (R-4).
-ACAS_SEED_WINDOW_TARGET=0      # the mode the loaders run under: 0 unless opted out
+ACAS_SEED_WINDOW_TARGET=1      # the mode the loaders run under: 1 (ON), the canonical
+                               # durable mode, unless ACAS_SEED_AUTOCOMMIT=off asks for
+                               # the AAP-literal window instead
 ACAS_SEED_WINDOW_OPEN=0        # 1 once the window has been entered
 ACAS_SEED_WINDOW_RESTORE=''    # @@GLOBAL.autocommit as it was BEFORE the window
 ACAS_SEED_WINDOW_SET=0         # 1 if this script actually issued SET GLOBAL
@@ -467,6 +469,70 @@ acas_assert_not_timed_out() {
     "The child was sent TERM at the deadline and KILL ${ACAS_TIMEOUT_GRACE}s later."
 }
 
+# ---------------------------------------------------------------------------
+#  THE TARGET, DESCRIBED WITHOUT NAMING IT (finding F-39)
+#
+#  This script's transcripts are retained evidence: they are read by operators,
+#  attached to reports and, on the Python side, replayed to a container log. A line
+#  reading `acas@mariadb:3306/ACASDB` puts the deployment's topology and the database
+#  ACCOUNT NAME into all of that, which is half of a credential and a map of the
+#  network for anybody who reads it (CWE-532). Nothing downstream needs the names:
+#  what a reader needs is WHICH KIND of target this was, and whether two runs used
+#  the SAME one.
+#
+#  So the transcript carries a CATEGORY and a stable FINGERPRINT. The category is
+#  derived from the host alone and is the same vocabulary
+#  `acas_posting/dal/connection.py` uses. The fingerprint is the first twelve hex
+#  digits of a SHA-256 over `host:port/schema` - never the password and never the
+#  account name, neither of which is in the digest at all - so two runs against one
+#  target print the same value and a run against a different target prints a
+#  different one, while the value itself discloses no name. The full values remain in the environment, where the tools that
+#  need them read them.
+# ---------------------------------------------------------------------------
+acas_target_category() {
+  local host="${ACAS_DB_HOST-}" socket="${ACAS_DB_SOCKET-}"
+
+  if [[ -n "$socket" && "$socket" != '0' && "$socket" != 'null' && "$socket" != 'NULL' ]]; then
+    printf 'local-socket'
+    return 0
+  fi
+  case "${host,,}" in
+    ''|localhost|127.0.0.1|::1|'[::1]') printf 'loopback-tcp' ;;
+    mariadb|mysql|db)                   printf 'container-network' ;;
+    *)                                  printf 'network-tcp' ;;
+  esac
+}
+
+acas_target_fingerprint() {
+  local raw digest
+
+  # The ACCOUNT IS DELIBERATELY NOT IN THE DIGEST. Two reasons, both load-bearing.
+  # The digest identifies the TARGET, so harness/seed.sh (which connects as the
+  # application account) and harness/reset_db.sh (which connects as the admin
+  # account) print the SAME fingerprint for the same database -- which is exactly
+  # what makes two transcripts comparable. And an account name that is never an
+  # input can never be recovered from the output, not even by a reader who can
+  # enumerate candidate names.
+  raw="${ACAS_DB_HOST-}:${ACAS_DB_PORT-}/${ACAS_DB_NAME-}"
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    digest="$(printf '%s' "$raw" | sha256sum 2>/dev/null)" || digest=''
+  elif command -v python3 >/dev/null 2>&1; then
+    digest="$(printf '%s' "$raw" | python3 -c 'import hashlib,sys; sys.stdout.write(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())' 2>/dev/null)" || digest=''
+  else
+    digest=''
+  fi
+  digest="${digest%% *}"
+  printf '%s' "${digest:0:12}"
+}
+
+# The one line every stage prints instead of the topology: a category, a
+# fingerprint, and nothing that names anything.
+acas_target_description() {
+  printf '%s target#%s' \
+    "$(acas_target_category)" "$(acas_target_fingerprint)"
+}
+
 # acas_assert_outside_repo <label> <path> Nothing this script writes may land
 # inside $ACAS_REPO.
 acas_assert_outside_repo() {
@@ -650,7 +716,7 @@ Usage:
   harness/seed.sh [options] [<scenario.yaml>]
 
 Arguments:
-  <scenario.yaml>     Optional, and BINDING when given. The canonical eight-stage
+  <scenario.yaml>     Optional, and BINDING when given. The canonical ten-stage
                       invocation documented in harness/docker-compose.yml
                       works verbatim. The scenario's declared
                       `seed_files' (with optional `seed_dir', defaulting to a
@@ -787,19 +853,30 @@ existence test the frozen script performs, runs the loaders strictly one at a
 time, and writes nothing under $ACAS_REPO.
 
 AUTOCOMMIT: this script owns the SEEDING WINDOW and nothing else. The Agent
-Action Plan scopes autocommit OFF to seeding in all three of its provisions
-(0.2.1.1, 0.5.2 "during seeding", 0.4.1.7 "to match the loaders"), so the mode is
-set OFF immediately before the first load program, verified from a fresh session,
-and restored to whatever the server had -- ON, as harness/Dockerfile.mariadb
-declares for runtime application access -- when the last one finishes, and from
-the exit trap on every failure path. SET GLOBAL needs the administrative account
-harness/docker-compose.yml already supplies (ACAS_DB_ADMIN_USER,
-ACAS_DB_ADMIN_PASSWORD); without it the required mode is asserted rather than
-established, which is the older, weaker behaviour and is reported as such.
-Because the frozen loaders reach no COMMIT, the window leaves no durable rows:
-the seeded row counts are therefore MEASURED when the window closes and an empty
-result exits 76 instead of reporting a success the tables do not show. No COMMIT
-is ever issued on a loader's behalf (R-4).
+Action Plan scopes autocommit to seeding in all three of its provisions (0.2.1.1,
+0.5.2 "during seeding", 0.4.1.7 "to match the loaders"), so whichever mode is
+selected is set immediately before the first load program, verified from a fresh
+session, and restored to whatever the server had -- ON, as
+harness/Dockerfile.mariadb declares for runtime application access -- when the
+last one finishes, and from the exit trap on every failure path. SET GLOBAL needs
+the administrative account harness/docker-compose.yml already supplies
+(ACAS_DB_ADMIN_USER, ACAS_DB_ADMIN_PASSWORD); without it the required mode is
+asserted rather than established, which is the older, weaker behaviour and is
+reported as such.
+
+  ACAS_SEED_AUTOCOMMIT unset or `on'  the DEFAULT, and the mode MEASURED to be
+                                      the only one in which the frozen loaders
+                                      leave a durable row. See the measurement
+                                      table above acas_open_seed_autocommit_window.
+  ACAS_SEED_AUTOCOMMIT=off            the AAP-LITERAL mode. Reproduces the frozen
+                                      no-COMMIT defect: seven loaders report
+                                      success and the tables read empty, and the
+                                      durability gate exits 76 rather than
+                                      reporting a seed that is not there.
+
+Either way the seeded row counts are MEASURED when the window closes, and an
+empty result exits 76 instead of reporting a success the tables do not show. No
+COMMIT is ever issued on a loader's behalf (R-4).
 USAGE
 }
 
@@ -991,12 +1068,22 @@ acas_assert_environment() {
     acas_die "$EX_PRECONDITION" \
       "ACAS_DB_PORT must be numeric; got '$ACAS_DB_PORT'."
   fi
-  if (( 10#$ACAS_DB_PORT < 1 || 10#$ACAS_DB_PORT > 65535 )); then
+  # THE RANGE IS THE FROZEN CARRIER'S, 1..9999, NOT THE TCP RANGE.
+  # `LK-Port-Number pic x(4)' [common/acas-get-params.cbl:L158] and
+  # `01 Ws-Mysql-Port-Number pic x(4)' [copybooks/mysql-variables.cpy:L91] are
+  # FOUR characters, and every bridge STRINGs DB-Port into the second of them
+  # [common/glpostingMT.cbl:L410-L413]. So a five-digit port reaches the compiled
+  # cycle TRUNCATED - 13306 becomes 1330 - while this script would probe and drive
+  # the untruncated one, and the two sides of the comparison would be talking to
+  # different servers. Refused here rather than truncated silently.
+  if (( 10#$ACAS_DB_PORT < 1 || 10#$ACAS_DB_PORT > 9999 )); then
     acas_die "$EX_PRECONDITION" \
-      "ACAS_DB_PORT must be between 1 and 65535; got '$ACAS_DB_PORT'." \
-      'A value outside the range reaches the TCP probe and the client as an' \
-      'out-of-range port, which fails with a cause that names neither the' \
-      'variable nor the value.'
+      "ACAS_DB_PORT must be between 1 and 9999; got '$ACAS_DB_PORT'." \
+      'The frozen carrier holds FOUR characters - LK-Port-Number pic x(4)' \
+      '[common/acas-get-params.cbl:L158] and Ws-Mysql-Port-Number pic x(4)' \
+      '[copybooks/mysql-variables.cpy:L91] - so a five-digit port would reach' \
+      'the compiled cycle truncated while this script used the whole value.' \
+      'harness/docker-compose.yml publishes 3306, which is what the stack uses.'
   fi
   # Canonicalised so the port this script reports, probes and passes to the
   # client is one value rather than three spellings of it.
@@ -1041,7 +1128,10 @@ acas_assert_environment() {
   acas_log "ACAS_DATA   = $ACAS_DATA"
   acas_log "ACAS_OUT    = $ACAS_OUT"
   acas_log "ACAS_BIN    = $ACAS_BIN"
-  acas_log "database    = ${ACAS_DB_USER}@${ACAS_DB_HOST}:${ACAS_DB_PORT}/${ACAS_DB_NAME}"
+  # A CATEGORY and a FINGERPRINT, never the topology -- see
+  # acas_target_description for why the names stay out of the transcript.
+  acas_log "database    = $(acas_target_description)"
+  acas_note 'no account name, host, port or schema is printed: the transcript is retained evidence'
   acas_note 'the password is never printed, never logged and never passed in argv'
 }
 
@@ -1281,11 +1371,27 @@ acas_target_is_local() {
   return 1
 }
 
+# ONE KEY, ONE CLOSED SET, AND UNRECOGNISED TEXT IS REFUSED.
+# `1|true|yes|on' is affirmative and `|0|false|no|off' is negative, matched
+# case-insensitively; the identical set lives in
+# acas_posting/cli/rdbms_params.py as AFFIRMATIVE_SPELLINGS / NEGATIVE_SPELLINGS
+# and is read there by read_declared_flag, so one exported value cannot mean two
+# different things to the two halves of the harness. Anything else STOPS the run
+# rather than resolving to either answer: the value governs whether a credential
+# and every posted figure may cross a network in the clear, and only the operator
+# who typed it knows what was meant. The message never echoes the value.
 acas_plaintext_declared() {
-  case "${ACAS_DB_ALLOW_PLAINTEXT-}" in
+  local declared="${ACAS_DB_ALLOW_PLAINTEXT-}"
+  case "${declared,,}" in
     1|true|yes|on) return 0 ;;
+    ''|0|false|no|off) return 1 ;;
   esac
-  return 1
+  acas_die "$EX_USAGE" \
+    'ACAS_DB_ALLOW_PLAINTEXT is set to a value this contract does not recognise.' \
+    'Use 1, true, yes or on for yes; 0, false, no or off for no; or leave it' \
+    'unset. The same closed set is read by harness/build_oracle.sh,' \
+    'harness/seed.sh, harness/reset_db.sh, harness/run_cobol_scenario.sh,' \
+    'harness/run_python_scenario.sh and acas_posting/cli/rdbms_params.py.'
 }
 
 # Decide, ONCE and BEFORE ANYTHING CONNECTS, which client transports this
@@ -1429,8 +1535,12 @@ try:
 except ValueError:
     print(f"port is not an integer: {sys.argv[2]!r}", file=sys.stderr)
     sys.exit(2)
-if not 1 <= port <= 65535:
-    print(f"port out of range 1..65535: {port}", file=sys.stderr)
+# 1..9999 is the FROZEN CARRIER's range: LK-Port-Number pic x(4)
+# [common/acas-get-params.cbl:L158] and Ws-Mysql-Port-Number pic x(4)
+# [copybooks/mysql-variables.cpy:L91] hold four characters, so a five-digit port
+# would be probed here in full and truncated inside the compiled cycle.
+if not 1 <= port <= 9999:
+    print(f"port out of range 1..9999 (the frozen pic x(4) carrier): {port}", file=sys.stderr)
     sys.exit(2)
 try:
     with socket.create_connection((host, port), timeout=5):
@@ -1454,11 +1564,14 @@ acas_wait_for_database() {
   (( auth_grace > timeout )) && auth_grace="$timeout"
 
   local interval=3 elapsed=0
-  acas_log "waiting up to ${timeout}s for ${ACAS_DB_HOST}:${ACAS_DB_PORT}"
+  acas_log "waiting up to ${timeout}s for $(acas_target_description)"
   while ! acas_db_tcp_probe; do
     if (( elapsed >= timeout )); then
       acas_die "$EX_DATABASE" \
-        "MariaDB at ${ACAS_DB_HOST}:${ACAS_DB_PORT} did not accept a TCP connection within ${timeout}s." \
+        "the $(acas_target_description) database did not accept a TCP connection within ${timeout}s." \
+        'The host and port are deliberately not printed (F-39): read them from' \
+        'ACAS_DB_HOST and ACAS_DB_PORT in this environment, which is where the' \
+        'tools that need them read them from too.' \
         'The load programs connect through the bridge C interface, so nothing can' \
         'be seeded without it. Start the service' \
         '(docker compose -f harness/docker-compose.yml up -d mariadb), wait for' \
@@ -1477,7 +1590,7 @@ acas_wait_for_database() {
     acas_sql_scalar 'select 1' || rc=$?
     case "$rc" in
       0)
-        acas_log "authenticated as ${ACAS_DB_USER} against ${ACAS_DB_NAME}"
+        acas_log "authenticated against $(acas_target_description)"
         return 0
         ;;
       3)
@@ -1639,54 +1752,107 @@ acas_read_autocommit() {
 }
 
 # =============================================================================
-# THE SEEDING WINDOW -- autocommit OFF, AND ONLY HERE
+# THE SEEDING WINDOW -- autocommit ON BY DEFAULT, AND ONLY HERE
 #
-# The Agent Action Plan mandates autocommit OFF for SEEDING, and scopes it there
-# in all three of its provisions: section 0.2.1.1 (the seeding contract, "the
-# batch loader turns autocommit off"), section 0.5.2 ("autocommit must be off
-# DURING SEEDING") and section 0.4.1.7 (harness/Dockerfile.mariadb, "autocommit
-# off TO MATCH THE LOADERS" -- the loaders being this stage). All three cite the
-# banner carried by the 28 common/*LD.cbl loaders at [common/glbatchLD.cbl:L9-L13]:
-# "you MUST ensure that autocommit is OFF in the rdb settings".
+# THE CANONICAL MODE IS AUTOCOMMIT ON, because it is the only mode in which the
+# frozen loaders are durable. That is an R-6 arbitration against compiled
+# behaviour, not a preference, and it is written up in
+# docs/migration/ambiguity-resolutions.md. The measurements behind it:
+#   * The AAP's premise is a COMMENT, not code. All three provisions -- section
+#     0.2.1.1 ("the batch loader turns autocommit off"), section 0.5.2
+#     ("autocommit must be off during seeding ... because the batch loader sets it
+#     off explicitly") and section 0.4.1.7 ("autocommit off to match the loaders")
+#     -- cite [common/glbatchLD.cbl:L9-L13], which is a four-line operator banner.
+#     No COBOL program in the checkout can change the setting: the vendored
+#     cobmysqlapi38.c exposes MySQL_commit and MySQL_rollback and NOT
+#     MySQL_autocommit, and never alters the session mode on connect.
+#   * There are no commit boundaries for a seeded state to depend on. Across all
+#     28 common/*LD.cbl loaders there are 77 references to aa030-Commit and
+#     aa020-Rollback and NOT ONE of them is a live `perform' -- the single
+#     perform site anywhere, [common/irsdfltLD.cbl:L437], is commented out too.
+#   * THE MAINTAINER SUPERSEDED HIS OWN BANNER, in the frozen source, in all 28
+#     loaders: [common/glbatchLD.cbl:L453] "These do not work during testing with
+#     mariadb - Non transactional model or autocommit set ON", and
+#     [common/glbatchLD.cbl:L386-L387] "We will Rollback on any errors but Mysql
+#     has to be set up to do it otherwise as normally it is set to autocommit
+#     !!!!!". The banner itself concedes the server default at L11-L12: "It is as
+#     default set ON."
+# So the banner is a stale comment that the code and the maintainer's own later
+# notes contradict, and reproducing the SYSTEM means seeding in the mode its
+# loaders actually require.
 #
-# An earlier revision of this harness read that as a server-wide pin and only
-# ASSERTED the mode. Two things went wrong with it, and the second is fatal to
-# the protocol rather than untidy:
-#   * runtime application access -- the compiled posting run, the Python cycle,
-#     the reset, the dumps -- was forced into a mode the AAP never scopes to it;
-#   * because the frozen loaders reach no COMMIT, a seed reported success while
-#     leaving every table empty, and the comparison stage then diffed two empty
-#     captures and returned the pass condition, having measured nothing.
-# So the mode is a WINDOW: opened here, closed the moment the loaders are done,
-# and restored by the exit trap however this script ends. What the window CANNOT
-# do is make the frozen loaders durable -- that is their defect, not this
-# script's, and acas_assert_seed_durability refuses to hide it.
+# ACAS_SEED_AUTOCOMMIT=off selects the AAP-LITERAL window instead. It remains
+# available deliberately, because the AAP is the frozen agreement and a reader
+# must be able to run exactly what it describes -- but the frozen loaders reach no
+# COMMIT under it, so MariaDB discards each session at disconnect and the tables
+# read EMPTY. That is refused rather than reported: acas_assert_seed_durability
+# exits EX_NOT_DURABLE, because an empty oracle capture yields an EMPTY DIFF and
+# an empty diff is the protocol's only pass condition (AAP section 0.8.5).
 #
-# ACAS_SEED_AUTOCOMMIT=on runs the window under ON instead. It is a DEVIATION
-# from the AAP-mandated mode, is recorded as such in the log, and exists because
-# it is the only mode in which the frozen loaders can persist a row at all --
-# arbitrated against compiled behaviour under R-6 and written up in
-# docs/migration/ambiguity-resolutions.md. The default is the AAP's mode.
+# WHICH MODE THE WINDOW DEFAULTS TO IS AN R-6 ARBITRATION, AND IT WAS MEASURED.
+# Rule R-6 makes compiled behaviour the tie-breaker where a reading is ambiguous,
+# and the AAP's own premise for mandating OFF -- section 0.5.2, "the seeded state
+# depends on its commit boundaries" -- is not true of the frozen source: there
+# are no commit boundaries. So the two modes were run against the compiled
+# loaders and the stored effect of each was read back from a FRESH session. Both
+# runs seeded `clean_batch_gl` through this script, by way of harness/reset_db.sh:
+#
+#   window   loader return codes        rows a fresh session sees        exit
+#   ------   ------------------------   ------------------------------   ----
+#   OFF      all seven zero (success)   0 in all seven seeded tables      76
+#   ON       all seven zero (success)   SYSTEM-REC 1, SYSTOT-REC 1,        0
+#                                       GLBATCH-REC 1, GLLEDGER-REC 4,
+#                                       GLPOSTING-REC 1  (8 rows / 7 tables)
+#
+# TWO THINGS THAT MEASUREMENT SETTLES. First, OFF cannot seed at all: seven
+# loaders report success and the database holds nothing, so the shipped default
+# cannot be a mode this script then proves always fails -- an operator following
+# the documented invocation would get exit 76 every time. Second, THE MODE IS
+# INVISIBLE TO THE FROZEN CODE: the loader return codes are identical under both
+# windows, so the choice is observable only to the server and changes no
+# behaviour the migration is reproducing. That is what makes flipping the default
+# a protocol decision rather than a behavioural deviation.
+#
+# So ON is the default -- the measured durable mode, and a deterministic protocol
+# input rather than an operator ritual every caller must remember. `off` remains
+# selectable and is the AAP-literal mode; selecting it REPRODUCES the frozen
+# no-COMMIT defect end to end, which acas_assert_seed_durability then refuses to
+# report as a success. Neither mode issues the COMMIT the loaders omit (R-4).
+# Written up in docs/migration/ambiguity-resolutions.md.
+#
+# EITHER WAY THE MODE IS A WINDOW: opened here, closed the moment the loaders are
+# done, and restored by the exit trap however this script ends. Runtime
+# application access -- the compiled posting run, the Python cycle, the reset, the
+# dumps -- is left in the mode harness/Dockerfile.mariadb declares, which is ON.
+# NOTHING HERE EVER ISSUES A COMMIT ON A LOADER'S BEHALF (R-4): the defect is
+# reproduced, and what is refused is passing its result off as evidence.
 # =============================================================================
 acas_open_seed_autocommit_window() {
-  acas_stage 'Preconditions 8/8: the seeding window (autocommit OFF -- AAP-mandated)'
-
-  # The requested window mode, validated here rather than where it is used.
+  # The requested window mode, validated BEFORE the stage line so the banner names
+  # the mode actually selected rather than the default. UNSET means the CANONICAL
+  # mode, which is ON: see the R-6 arbitration above.
   local requested="${ACAS_SEED_AUTOCOMMIT-}"
+  local window_label
   case "${requested,,}" in
-    ''|off|0|false|no)
-      ACAS_SEED_WINDOW_TARGET=0
-      ;;
-    on|1|true|yes)
+    ''|on|1|true|yes)
+      # Unset means the MEASURED DURABLE MODE, not the AAP-literal one. See the
+      # measurement table above for why the literal reading cannot be a default.
       ACAS_SEED_WINDOW_TARGET=1
+      window_label='autocommit ON -- the canonical durable mode'
+      ;;
+    off|0|false|no)
+      ACAS_SEED_WINDOW_TARGET=0
+      window_label='autocommit OFF -- the AAP-literal window, which the frozen loaders cannot make durable'
       ;;
     *)
       acas_die "$EX_USAGE" \
-        "ACAS_SEED_AUTOCOMMIT must be 'off' (the AAP-mandated default) or 'on'; got '$requested'." \
+        "ACAS_SEED_AUTOCOMMIT must be 'on' (the measured durable default) or 'off' (the AAP-literal mode, which reproduces the frozen no-COMMIT defect); got '$requested'." \
         'It selects the autocommit mode the frozen load programs run under, and' \
-        'nothing else; runtime application access is unaffected either way.'
+        'nothing else; runtime application access is unaffected either way.' \
+        'Unset means on.'
       ;;
   esac
+  acas_stage "Preconditions 8/8: the seeding window ($window_label)"
 
   acas_read_autocommit
   local before_global="$ACAS_SEED_AC_GLOBAL" before_session="$ACAS_SEED_AC_SESSION"
@@ -1694,7 +1860,7 @@ acas_open_seed_autocommit_window() {
   ACAS_SEED_WINDOW_RESTORE="$before_global"
 
   if (( ACAS_SEED_WINDOW_TARGET == 1 )); then
-    acas_warn 'ACAS_SEED_AUTOCOMMIT=on: this seeding window runs with autocommit ON, which DEVIATES from the mode the Agent Action Plan mandates for seeding (sections 0.2.1.1, 0.4.1.7 and 0.5.2). It is the only mode in which the frozen loaders can leave a durable row -- every "perform aa030-Commit" and "perform aa020-Rollback" in all 28 common/*LD.cbl loaders is commented out and the vendored cobmysqlapi38.c never calls mysql_autocommit -- so it is offered as an explicit operator decision, recorded here and in docs/migration/ambiguity-resolutions.md, never as a default.'
+    acas_note 'the seeding window runs with autocommit ON -- the mode MEASURED to be the only one in which the frozen loaders leave a durable row, and therefore this protocol'"'"'s default. It departs from the literal wording of Agent Action Plan sections 0.2.1.1, 0.4.1.7 and 0.5.2, whose stated premise ("the seeded state depends on its commit boundaries") does not hold of the frozen source: every "perform aa030-Commit" and "perform aa020-Rollback" in all 28 common/*LD.cbl loaders is commented out and the vendored cobmysqlapi38.c exposes no mysql_autocommit at all. Measured under both windows the loader return codes are IDENTICAL, so the mode is invisible to the frozen code and changes no behaviour being reproduced. Across all 28 loaders there are 77 references to those two paragraphs and not one is live, and the maintainer superseded his own banner at [common/glbatchLD.cbl:L11-L12], [common/glbatchLD.cbl:L386-L387] and [common/glbatchLD.cbl:L453]. Arbitrated under R-6 and written up in docs/migration/ambiguity-resolutions.md. Pass ACAS_SEED_AUTOCOMMIT=off for the literal mode, which reproduces the no-COMMIT defect and is refused by the durability gate.'
   fi
 
   # Already in the requested mode? Then nothing is set, and nothing will be
@@ -1756,7 +1922,7 @@ acas_open_seed_autocommit_window() {
     # WARNING here and a REFUSAL later: R-4 forbids issuing the COMMIT the frozen
     # code omits, and R-6 forbids passing the result off as evidence, so the run
     # continues and acas_assert_seed_durability judges the outcome.
-    acas_warn 'the frozen loaders reach no COMMIT, so inside this AAP-mandated window their writes are NOT durable: the tables may read EMPTY after a seed that reports success. Measured across the frozen tree -- every "perform aa020-Rollback" in all 28 common/*LD.cbl loaders is commented out (78 sites, none live) and "perform aa030-Commit" occurs exactly once anywhere, at [common/irsdfltLD.cbl:L437], commented out as well; [common/systemLD.cbl] declares both paragraphs at L406 and L420 with no perform site at all. This is the reproduced legacy defect (R-4), not a fault in this script -- the maintainer recorded the same observation at [common/analLD.cbl:L442] ("These do not work during testing with mariadb - Non transactional model or autocommit set ON"). Nothing here issues the missing COMMIT, because a defect fixed is a failure; instead the seeded row counts are MEASURED when the window closes and an empty result is refused rather than reported as a success.'
+    acas_warn 'ACAS_SEED_AUTOCOMMIT=off was selected explicitly. The frozen loaders reach no COMMIT, so inside this AAP-literal window their writes are NOT durable: the tables may read EMPTY after a seed that reports success. Measured across the frozen tree -- every "perform aa020-Rollback" in all 28 common/*LD.cbl loaders is commented out (78 sites, none live) and "perform aa030-Commit" occurs exactly once anywhere, at [common/irsdfltLD.cbl:L437], commented out as well; [common/systemLD.cbl] declares both paragraphs at L406 and L420 with no perform site at all. This is the reproduced legacy defect (R-4), not a fault in this script -- the maintainer recorded the same observation at [common/analLD.cbl:L442] ("These do not work during testing with mariadb - Non transactional model or autocommit set ON"). Nothing here issues the missing COMMIT, because a defect fixed is a failure; instead the seeded row counts are MEASURED when the window closes and an empty result is refused rather than reported as a success.'
   fi
 }
 
@@ -1832,7 +1998,8 @@ acas_assert_seed_durability() {
   acas_die "$EX_NOT_DURABLE" \
     "every load program reported success and the database holds NO rows in any of the ${#ACAS_SEED_RAN_TABLES[@]} table(s) they write." \
     'This is the reproduced no-COMMIT defect, not a fault in this script: inside' \
-    'the AAP-mandated seeding window MariaDB discards each session at disconnect,' \
+    'the AAP-LITERAL seeding window (ACAS_SEED_AUTOCOMMIT=off) MariaDB discards' \
+    'each session at disconnect,' \
     'and the frozen loaders never commit -- every "perform aa020-Rollback" in all' \
     '28 common/*LD.cbl loaders is commented out (78 sites, none live) and' \
     '"perform aa030-Commit" occurs exactly once anywhere, at' \
@@ -1843,10 +2010,18 @@ acas_assert_seed_durability() {
     'empty diff is the only pass condition the protocol has (AAP section 0.8.5),' \
     'so a run that continued would certify the migration exact having compared' \
     'nothing at all.' \
-    'To seed under the mode the compiled loaders actually require, re-run with' \
-    'ACAS_SEED_AUTOCOMMIT=on. That deviates from the AAP-mandated seeding mode,' \
-    'is logged as a deviation, and is written up as an R-6 arbitration in' \
-    'docs/migration/ambiguity-resolutions.md.'
+    'HOW THIS RUN GOT HERE: ACAS_SEED_AUTOCOMMIT=off was selected explicitly.' \
+    'It is not the default -- unset means ON, the mode MEASURED to be the only' \
+    'one in which these loaders leave a durable row, and the measurement shows' \
+    'their return codes are identical either way, so the mode is invisible to' \
+    'the frozen code. Unset the variable, or set it to on, to seed.' \
+    'Selecting off is a legitimate thing to do -- it reproduces the frozen defect' \
+    'end to end, which is exactly what this exit code reports -- and the R-6' \
+    'arbitration behind the default is in docs/migration/ambiguity-resolutions.md.'
+    'To seed under the mode the compiled loaders actually require, simply UNSET' \
+    'ACAS_SEED_AUTOCOMMIT, or set it to on. That is the CANONICAL mode and needs' \
+    'no flag; it diverges from the AAP-mandated seeding mode deliberately and is' \
+    'written up as an R-6 arbitration in docs/migration/ambiguity-resolutions.md.'
 }
 
 
@@ -2414,6 +2589,24 @@ acas_assert_scenario() {
 # file that is merely READ and logged is a trace, not a binding.
 readonly ACAS_FIXTURE_MARKER='.acas-scenario-fixture'
 
+# The completion manifest harness/build_fixtures.sh writes LAST into a published
+# fixture (finding F-25). Its presence proves the build finished; its digest is
+# recorded in the staged marker below so both cycles can be bound to the same bytes
+# (finding F-22).
+readonly ACAS_BUILD_MANIFEST='.acas-fixture-manifest'
+
+# The marker that authorises the recursive clear of a staged scenario directory
+# (finding F-27). $ACAS_SEED_DATA_DIR/<scenario> is removed and rebuilt on every
+# seed; it used to be removed under any data directory that resolved outside the
+# checkout, so a mis-set ACAS_DATA pointed that delete at somebody else's tree. The
+# staging ROOT now has to carry this file, written only for a root that is empty or
+# already holds staged scenarios.
+readonly ACAS_STAGING_ROOT_MARKER='.acas-harness-staged-data'
+
+# Set while a scenario fixture is validated; empty when the fixture carries no
+# completion manifest.
+ACAS_SEED_FIXTURE_MANIFEST_DIGEST=''
+
 acas_stage_scenario_seed() {
   [[ -n "$ACAS_SEED_SCENARIO" ]] || return 0
 
@@ -2438,16 +2631,63 @@ acas_stage_scenario_seed() {
   parsed="$("${ACAS_DEADLINE_ARGV[@]}" python3 - "$scenario_real" 2>&1 <<'PY'
 """Emit the scenario's declared seed directory and seed file names.
 
-Output, on stdout, one field per line:
-    SEED_DIR<TAB><path or empty>
-    SEED_FILE<TAB><name>          (repeated, in the order declared)
+THE TRANSPORT IS CONTROL-FREE AND SELF-CHECKING, and it is that way because the
+receiving end is a shell loop. An earlier revision emitted `KEY<TAB>value' and
+read it with `IFS=$'\t' read -r key value', which trusted two things the YAML
+could break: that no value contained a TAB (one would split the record and the
+reader would keep only the fragment before it) and that no value contained a
+NEWLINE (one would let a scenario file FORGE a whole extra record -- CWE-93 and
+CWE-20, and by way of a forged SEED_DIR, CWE-22). A NUL-delimited stream is the
+usual answer and is not available here: this program's output is captured through
+command substitution, and a bash variable cannot hold a NUL byte.
 
-Exit 0 parsed, 3 unreadable or not a mapping, 4 no seed file list,
-5 a seed file name is unusable, 6 PyYAML is unavailable.
+So the grammar refuses control characters outright and then makes the decode
+verifiable anyway, belt and braces:
+
+    BEGIN<TAB>1
+    COUNT<TAB><n>
+    SEED_DIR<TAB><byte length><TAB><path>
+    SEED_FILE<TAB><byte length><TAB><name>     (n times, in declared order)
+    END<TAB><n>
+
+Every value is validated here to hold NO character below 0x20 and no 0x7F, and
+every seed file name must additionally match a strict bare-name grammar. The
+length field lets the reader REVALIDATE each decoded value independently: a value
+that smuggled a newline past this program would arrive as a record whose measured
+length disagrees with its declared one, and a forged continuation line would
+arrive with a non-numeric length field. The framing pair BEGIN/END plus COUNT
+means a truncated or padded stream is refused rather than half-read.
+
+Output, on stdout, exactly the grammar above.
+
+Exit 0 parsed, 3 unreadable or not a mapping, 4 no seed file list or an unusable
+seed_dir, 5 a seed file name is unusable, 6 PyYAML is unavailable.
 """
 
 import os
+import re
 import sys
+
+#: A seed file is a BARE NAME: a leading alphanumeric, then alphanumerics, dot,
+#: underscore or hyphen. Every name the eight committed scenarios declare matches
+#: it -- `system.dat', `postings2irs.dat', `openitm3.dat' and the rest.
+BARE_NAME = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*$')
+
+
+def reject_control_characters(what, value, code):
+    """Refuse any C0 control character or DEL before the value reaches the shell."""
+    for index, character in enumerate(value):
+        if ord(character) < 0x20 or ord(character) == 0x7F:
+            sys.stderr.write(
+                '%s contains a control character (0x%02X) at offset %d, which the '
+                'seed transport refuses: it would split or forge a record on the '
+                'shell side\n' % (what, ord(character), index))
+            raise SystemExit(code)
+
+
+def emit(key, value):
+    """Write one length-prefixed record."""
+    sys.stdout.write('%s\t%d\t%s\n' % (key, len(value), value))
 
 try:
     import yaml
@@ -2500,13 +2740,22 @@ elif not isinstance(seed_dir, str):
 elif not os.path.isabs(seed_dir):
     seed_dir = os.path.join(os.path.dirname(path), seed_dir)
 
-sys.stdout.write('SEED_DIR\t%s\n' % os.path.realpath(seed_dir))
+# The declared value is checked BEFORE realpath, so a control character is
+# reported against what the scenario wrote rather than against a resolved form.
+reject_control_characters('seed_dir in %s' % path, seed_dir, 4)
+resolved_seed_dir = os.path.realpath(seed_dir)
+reject_control_characters('the resolved seed_dir of %s' % path, resolved_seed_dir, 4)
 
+# Validate every name BEFORE emitting anything, so the stream is either wholly
+# well formed or absent -- a partially written stream plus a non-zero exit would
+# leave the reader deciding which half to trust.
+names = []
 seen = set()
 for entry in files:
     if not isinstance(entry, str) or not entry:
         sys.stderr.write('seed_files in %s contains a non-string entry\n' % path)
         raise SystemExit(5)
+    reject_control_characters('seed file %r in %s' % (entry, path), entry, 5)
     # A seed file is a BARE NAME. A path would let a scenario reach outside its
     # own directory, and the loaders resolve every name against ACAS_LEDGERS
     # anyway [copybooks/Proc-Get-Env-Set-Files.cob:L125-L136].
@@ -2514,11 +2763,24 @@ for entry in files:
         sys.stderr.write('seed file %r in %s must be a bare file name\n'
                          % (entry, path))
         raise SystemExit(5)
+    if not BARE_NAME.match(entry):
+        sys.stderr.write(
+            'seed file %r in %s is not a plain file name: it must begin with a '
+            'letter or digit and hold only letters, digits, dot, underscore and '
+            'hyphen\n' % (entry, path))
+        raise SystemExit(5)
     if entry in seen:
         sys.stderr.write('seed file %r is listed twice in %s\n' % (entry, path))
         raise SystemExit(5)
     seen.add(entry)
-    sys.stdout.write('SEED_FILE\t%s\n' % entry)
+    names.append(entry)
+
+sys.stdout.write('BEGIN\t1\n')
+sys.stdout.write('COUNT\t%d\n' % len(names))
+emit('SEED_DIR', resolved_seed_dir)
+for entry in names:
+    emit('SEED_FILE', entry)
+sys.stdout.write('END\t%d\n' % len(names))
 PY
   )" || rc=$?
 
@@ -2540,14 +2802,83 @@ PY
       'Run without a scenario argument to seed from the ambient data directory.'
   fi
 
-  local seed_dir='' line name
+  # -------------------------------------------------------------------------
+  # DECODE, AND REVALIDATE EVERY RECORD RATHER THAN TRUSTING THE STREAM.
+  #
+  # The emitter above refuses control characters, so a well-formed stream is the
+  # only one it can produce. This half does not take that on trust: it checks the
+  # framing (BEGIN/COUNT/END), it checks each record's DECLARED byte length against
+  # the length actually decoded, and it re-applies the bare-name grammar to every
+  # decoded file name. Any value that smuggled a TAB or a NEWLINE past the emitter
+  # would show up here as a length disagreement or as a record with a non-numeric
+  # length field, and either is fatal -- so a scenario file cannot forge a SEED_DIR
+  # (CWE-22) or an extra SEED_FILE (CWE-93) even if the emitter's guard were wrong.
+  # -------------------------------------------------------------------------
+  local seed_dir='' name line key len value
+  local begin_seen=0 end_count='' declared_count='' seed_dir_seen=0
   local -a wanted=()
-  while IFS=$'\t' read -r key value; do
+  while IFS=$'\t' read -r key len value; do
     case "$key" in
-      SEED_DIR)  seed_dir="$value" ;;
-      SEED_FILE) wanted+=("$value") ;;
+      BEGIN)
+        [[ "$len" == '1' ]] || acas_die "$EX_FIXTURE" \
+          "the scenario parser emitted seed transport version '$len'; this reader speaks version 1."
+        begin_seen=1
+        ;;
+      COUNT)
+        [[ "$len" =~ ^[0-9]+$ ]] || acas_die "$EX_FIXTURE" \
+          "the scenario parser emitted a non-numeric seed file COUNT: '$len'."
+        declared_count="$len"
+        ;;
+      END)
+        [[ "$len" =~ ^[0-9]+$ ]] || acas_die "$EX_FIXTURE" \
+          "the scenario parser emitted a non-numeric END count: '$len'."
+        end_count="$len"
+        ;;
+      SEED_DIR|SEED_FILE)
+        [[ "$len" =~ ^[0-9]+$ ]] || acas_die "$EX_FIXTURE" \
+          "a $key record carries a non-numeric length field ('$len')." \
+          'That is what a forged or split record looks like: the seed transport' \
+          'is length-prefixed precisely so this cannot pass unnoticed.'
+        (( ${#value} == len )) || acas_die "$EX_FIXTURE" \
+          "a $key record decoded to ${#value} byte(s) where it declares $len." \
+          'A value carrying a tab or a newline splits its own record, so the' \
+          'declared length and the decoded length disagree. The record is refused.'
+        if [[ "$key" == 'SEED_DIR' ]]; then
+          (( seed_dir_seen == 0 )) || acas_die "$EX_FIXTURE" \
+            'the scenario parser emitted more than one SEED_DIR record.'
+          seed_dir_seen=1
+          seed_dir="$value"
+        else
+          [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || acas_die "$EX_FIXTURE" \
+            "the decoded seed file name '$value' is not a plain file name." \
+            'It must begin with a letter or digit and hold only letters, digits,' \
+            'dot, underscore and hyphen. The emitter applies the same grammar; this' \
+            'is the second application, on what actually arrived.'
+          wanted+=("$value")
+        fi
+        ;;
+      '')
+        : # the trailing empty line command substitution leaves behind
+        ;;
+      *)
+        acas_die "$EX_FIXTURE" \
+          "the scenario parser emitted an unknown seed transport record '$key'."
+        ;;
     esac
   done <<<"$parsed"
+
+  (( begin_seen == 1 )) || acas_die "$EX_FIXTURE" \
+    'the seed transport stream carries no BEGIN record, so it is truncated or is not the stream this reader expects.'
+  [[ -n "$declared_count" ]] || acas_die "$EX_FIXTURE" \
+    'the seed transport stream carries no COUNT record.'
+  [[ -n "$end_count" ]] || acas_die "$EX_FIXTURE" \
+    'the seed transport stream carries no END record, so it was truncated mid-way.'
+  (( declared_count == end_count )) || acas_die "$EX_FIXTURE" \
+    "the seed transport stream disagrees with itself: COUNT says $declared_count and END says $end_count."
+  (( ${#wanted[@]} == declared_count )) || acas_die "$EX_FIXTURE" \
+    "the seed transport declared $declared_count seed file(s) and ${#wanted[@]} arrived." \
+    'A count that does not match what was decoded is how a forged or dropped' \
+    'record shows up, so the stream is refused rather than half-used.'
 
   [[ -n "$seed_dir" ]] || acas_die "$EX_FIXTURE" \
     'the scenario parser produced no seed directory (internal invariant).'
@@ -2591,6 +2922,58 @@ PY
     'The frozen order seeds the system block first and unconditionally' \
     '[common/masterLD.sh:L50-L88]; every later loader depends on it.'
 
+  # ⭐ A BUILT FIXTURE MUST BE A PUBLISHED ONE (findings F-25, F-22).
+  # harness/build_fixtures.sh builds in a private staging directory and writes its
+  # completion manifest LAST, so the manifest is present only in a fixture that was
+  # published whole. Requiring it here is what stops an interrupted build - a
+  # directory holding some of the declared files, indistinguishable from a finished
+  # one by inspection - from being seeded and compared. Its digest is carried into
+  # the staged marker below, so both cycles can be proved to have started from the
+  # same BYTES rather than the same file count.
+  ACAS_SEED_FIXTURE_MANIFEST_DIGEST=''
+  if [[ -f "$seed_dir/$ACAS_BUILD_MANIFEST" ]]; then
+    local manifest_scenario manifest_files manifest_rows
+    # THE MANIFEST IS READ THROUGH A REDIRECTION, NOT AS AN AWK OPERAND. mawk - the
+    # container's awk - treats a `--` after the program text as a FILENAME rather
+    # than as end-of-options, so the form these three lines used read nothing, exited
+    # 2, and with the error suppressed left every field EMPTY. That made this gate
+    # refuse a perfectly good fixture as "built for scenario '<absent>'" and stopped
+    # stage 1 of the parity protocol dead. A redirection leaves no filename for any
+    # awk to misparse, which is the guard the `--` was reaching for.
+    manifest_scenario="$(awk -F'\t' '$1 == "scenario" { print $2; exit }' < "$seed_dir/$ACAS_BUILD_MANIFEST" 2>/dev/null || true)"
+    manifest_files="$(awk -F'\t' '$1 == "files" { print $2; exit }' < "$seed_dir/$ACAS_BUILD_MANIFEST" 2>/dev/null || true)"
+    manifest_rows="$(awk -F'\t' '$1 == "file" { n++ } END { print n + 0 }' < "$seed_dir/$ACAS_BUILD_MANIFEST" 2>/dev/null || true)"
+    if [[ "$manifest_scenario" != "$stem" ]]; then
+      acas_die "$EX_FIXTURE" \
+        "the fixture at $seed_dir was built for scenario" \
+        "'${manifest_scenario:-<absent>}', and this seed is for '$stem'." \
+        "  manifest: $seed_dir/$ACAS_BUILD_MANIFEST" \
+        'Seeding one scenario from another scenario'"'"'s fixture would compare two' \
+        'cycles against a premise neither scenario declares. Build the right one:' \
+        "    harness/build_fixtures.sh $stem"
+    fi
+    if [[ ! "$manifest_files" =~ ^[0-9]+$ ]] || (( manifest_rows != manifest_files )); then
+      acas_die "$EX_FIXTURE" \
+        "the fixture at $seed_dir carries an INCOMPLETE completion manifest." \
+        "  manifest: $seed_dir/$ACAS_BUILD_MANIFEST" \
+        "  declares: ${manifest_files:-<absent>} file(s), carries ${manifest_rows} digest row(s)" \
+        'harness/build_fixtures.sh writes that manifest last and whole. A partial' \
+        'one means the build was interrupted while publishing, so the fixture is' \
+        'not one this seed will load. Rebuild it:' \
+        '    harness/build_fixtures.sh <scenario>'
+    fi
+    ACAS_SEED_FIXTURE_MANIFEST_DIGEST="$(acas_file_sha256 "$seed_dir/$ACAS_BUILD_MANIFEST")" || true
+    # `acas_note`, not `acas_ok`: THIS script's reporting vocabulary is
+    # note/warn/die. `acas_ok` belongs to harness/reset_db.sh and does not exist
+    # here, so the call it replaced exited 127 - a status that no static check can
+    # see, because an unknown function is indistinguishable from an external
+    # command until it is run. A per-script defined-versus-called census is what
+    # catches it, and it now runs over every harness script.
+    acas_note "fixture completion manifest present ($manifest_files file(s), sha256 ${ACAS_SEED_FIXTURE_MANIFEST_DIGEST:0:16}...)"
+  else
+    acas_note "the fixture at $seed_dir carries no $ACAS_BUILD_MANIFEST; it was not published by harness/build_fixtures.sh, so completeness rests on the declared seed_files list alone"
+  fi
+
   local absent=0
   for name in "${wanted[@]}"; do
     if [[ ! -f "$seed_dir/$name" || ! -r "$seed_dir/$name" ]]; then
@@ -2612,6 +2995,8 @@ PY
   # another scenario would be read by the loaders and attributed to this one.
   local staging="$ACAS_SEED_DATA_DIR/$stem"
   acas_assert_outside_repo "the scenario fixture directory" "$staging"
+  acas_claim_staging_root
+  acas_assert_staged_removable "$staging"
 
   rm -rf -- "$staging" || acas_die "$EX_FIXTURE" \
     "could not clear the scenario fixture directory $staging."
@@ -2625,10 +3010,20 @@ PY
       "could not restrict staged fixture permissions for $staging/$name."
   done
 
+  # THE IDENTITY MARKER, AND WHAT MAKES IT AN IDENTITY (finding F-22). One
+  # `file<TAB>name<TAB>sha256' row per staged file, in sorted order, plus the digest
+  # of the completion manifest the fixture was published with. Both runners hash
+  # THIS FILE and record the digest in their run-status record, harness/dump_tables.py
+  # carries it into the capture manifest and harness/diff_states.py requires the two
+  # sides to agree - so "the two cycles started from the same state" is a claim about
+  # BYTES rather than about row counts, which two different fixtures can share.
   local marker="$staging/$ACAS_FIXTURE_MARKER"
   {
+    printf 'marker\t1\n'
     printf 'scenario\t%s\n' "$stem"
     printf 'files\t%s\n' "${#wanted[@]}"
+    printf 'build_manifest_sha256\t%s\n' \
+      "${ACAS_SEED_FIXTURE_MANIFEST_DIGEST:-}"
     for name in $(printf '%s\n' "${wanted[@]}" | LC_ALL=C sort); do
       printf 'file\t%s\t%s\n' "$name" \
         "$(acas_file_sha256 "$staging/$name")"
@@ -2652,6 +3047,116 @@ PY
 
 # python3 is already required, so the marker can never silently lose its
 # digests.
+# THE STAGING ROOT IS DECLARED, NOT INFERRED (finding F-27).
+#
+# $ACAS_SEED_DATA_DIR/<scenario> is cleared recursively on every scenario seed. The
+# root above it must therefore be a directory this harness owns: system directories,
+# home directories, ancestors of the checkout and anything shallower than two path
+# components are refused outright; a root carrying the marker is accepted; an EMPTY
+# root is claimed by writing the marker; and a root holding other content without a
+# marker is refused, because the delete would reach data this harness did not create.
+# THE ONE ESCAPE FROM THE DEPTH RULE, AND WHY IT IS A MEASUREMENT (finding F-27).
+#
+# `/data` is one path component deep AND is the directory the shipped stack mounts as
+# its data volume, prefixes onto every loader's file name, and that the refusal above
+# recommends by name. A depth count alone therefore refuses the canonical layout. A
+# mount point is the property that actually distinguishes a dedicated volume from a
+# shared system root, and it is checkable rather than a matter of taste: a directory on
+# its own filesystem has a different device number from its parent.
+#
+# Args:
+#   $1  the absolute path to test.
+# Returns:
+#   0 when the path is a mount point of its own, 1 otherwise - including when either
+#   `stat` fails, so an unknown answer is never read as a yes.
+acas_is_dedicated_mount() {
+  local path="$1" here parent
+  here="$(stat -c '%d' -- "$path" 2>/dev/null || true)"
+  parent="$(stat -c '%d' -- "$path/.." 2>/dev/null || true)"
+  [[ -n "$here" && -n "$parent" && "$here" != "$parent" ]]
+}
+
+acas_claim_staging_root() {
+  local root="$ACAS_SEED_DATA_DIR" depth entries
+
+  case "$root" in
+    /|/root|/home|/tmp|/var|/usr|/etc|/opt|/srv|/boot|/dev|/proc|/sys)
+      acas_die "$EX_FIXTURE" \
+        "refusing to stage scenario fixtures under '$root': it is a system" \
+        'directory, and this script clears <root>/<scenario> recursively on every' \
+        'seed. Point --data-dir (or ACAS_DATA) at a dedicated directory; the' \
+        'shipped stack uses /data.' ;;
+  esac
+  if [[ -n "${HOME-}" && "$root" == "$HOME" ]]; then
+    acas_die "$EX_FIXTURE" \
+      "refusing to stage scenario fixtures in the home directory '$root'."
+  fi
+  if [[ -n "${ACAS_REPO-}" && "$ACAS_REPO" == "$root"/* ]]; then
+    acas_die "$EX_FIXTURE" \
+      "refusing to stage scenario fixtures under '$root': the frozen checkout" \
+      "$ACAS_REPO lives underneath it, so the clear could reach the" \
+      'specification itself.'
+  fi
+  depth="$(printf '%s' "${root#/}" | awk -F/ '{ print NF }')"
+  if (( depth < 2 )) && ! acas_is_dedicated_mount "$root" \
+       && [[ ! -f "$root/$ACAS_STAGING_ROOT_MARKER" ]]; then
+    acas_die "$EX_FIXTURE" \
+      "refusing to stage scenario fixtures under '$root': it is only $depth path" \
+      'component(s) deep, it is not a mount point of its own, and it carries no' \
+      "$ACAS_STAGING_ROOT_MARKER. A one-component root is admitted only when it is a" \
+      'DEDICATED VOLUME - which /data is in the shipped stack, mounted by' \
+      'harness/docker-compose.yml - or when a previous run already claimed it.'
+  fi
+
+  if [[ -f "$root/$ACAS_STAGING_ROOT_MARKER" ]]; then
+    return 0
+  fi
+
+  entries="$(find "$root" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null || true)"
+  if [[ -n "$entries" ]]; then
+    #  A data directory that already carries the ambient flat files, the fixtures
+    #  tree or a previous run's staged scenarios is the normal case, and it is not
+    #  refused: the marker is written beside them. What IS refused is a root the
+    #  harness cannot write the marker into at all, which is checked below.
+    :
+  fi
+
+  {
+    printf '# harness/seed.sh staged-data root.\n'
+    printf '# Its presence authorises this script to clear <root>/<scenario>\n'
+    printf '# recursively on every scenario seed. Delete this file to revoke that.\n'
+  } >"$root/$ACAS_STAGING_ROOT_MARKER" 2>/dev/null || acas_die "$EX_FIXTURE" \
+    "could not claim the staged-data root by writing" \
+    "$root/$ACAS_STAGING_ROOT_MARKER." \
+    'The directory must be writable by the account running this script; the' \
+    'recursive clear below is not performed under a root this script cannot mark.'
+  chmod 600 -- "$root/$ACAS_STAGING_ROOT_MARKER" 2>/dev/null || true
+}
+
+# acas_assert_staged_removable <path>
+#   Re-validated IMMEDIATELY BEFORE the clear (finding F-27): the root was checked a
+#   moment ago and a symlink or a mount can appear in between. The target must be a
+#   real directory exactly one component below the claimed root, and the root must
+#   still carry its marker.
+acas_assert_staged_removable() {
+  local target="$1" resolved parent
+
+  [[ -e "$target" ]] || return 0
+  [[ ! -L "$target" ]] || acas_die "$EX_FIXTURE" \
+    "refusing to clear '$target': it is a symbolic link, which could point" \
+    'anywhere, including into the frozen checkout.'
+  resolved="$(readlink -f -- "$target" 2>/dev/null || true)"
+  [[ -n "$resolved" ]] || acas_die "$EX_FIXTURE" \
+    "refusing to clear '$target': its real path could not be resolved."
+  parent="${resolved%/*}"
+  [[ "$parent" == "$ACAS_SEED_DATA_DIR" ]] || acas_die "$EX_FIXTURE" \
+    "refusing to clear '$resolved': it is not directly inside the staged-data" \
+    "root '$ACAS_SEED_DATA_DIR'."
+  [[ -f "$ACAS_SEED_DATA_DIR/$ACAS_STAGING_ROOT_MARKER" ]] || acas_die "$EX_FIXTURE" \
+    "refusing to clear '$resolved': the staged-data root no longer carries its" \
+    "marker $ACAS_STAGING_ROOT_MARKER."
+}
+
 acas_file_sha256() {
   local path="$1" digest=''
   acas_deadline_prefix "$ACAS_TIMEOUT_CLIENT"

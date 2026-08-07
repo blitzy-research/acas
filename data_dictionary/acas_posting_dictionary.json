@@ -3445,14 +3445,13 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11",
         "A-15"
       ],
       "ambiguity_refs": [
-        "Q-3",
         "Q-4"
       ]
     },
@@ -3543,14 +3542,13 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11",
         "A-15"
       ],
       "ambiguity_refs": [
-        "Q-3",
         "Q-4"
       ]
     },
@@ -3641,14 +3639,13 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11",
         "A-15"
       ],
       "ambiguity_refs": [
-        "Q-3",
         "Q-4"
       ]
     },
@@ -3739,14 +3736,13 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11",
         "A-15"
       ],
       "ambiguity_refs": [
-        "Q-3",
         "Q-4"
       ]
     },
@@ -16992,14 +16988,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "PUINV-LINES-REC.IL-TYPE",
@@ -22126,14 +22120,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "PUINVOICE-REC.IH-ORDER",
@@ -23701,14 +23693,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "PUINVOICE-REC.IH-DEDUCT-AMT",
@@ -23971,14 +23961,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "PUINVOICE-REC.IH-CR",
@@ -24067,14 +24055,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "PUINVOICE-REC.IH-LINES",
@@ -24163,14 +24149,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "PUINVOICE-REC.IH-DAY-BOOK-FLAG",
@@ -24733,14 +24717,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "PUITM5-REC.OI5-BATCH",
@@ -26499,14 +26481,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "PUITM5-REC.OI5-DEDUCT-AMT",
@@ -26774,14 +26754,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "PUITM5-REC.OI5-CR",
@@ -27050,14 +27028,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "OI-Header.OI-Header#12",
@@ -28849,14 +28825,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "PULEDGER-REC.PURCH-SORTCODE",
@@ -28945,14 +28919,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "PULEDGER-REC.PURCH-ACCOUNTNO",
@@ -29041,14 +29013,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "PULEDGER-REC.PURCH-LIMIT",
@@ -29137,14 +29107,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "PULEDGER-REC.PURCH-ACTIVETY",
@@ -29233,14 +29201,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "PULEDGER-REC.PURCH-LAST-INV",
@@ -29329,14 +29295,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "PULEDGER-REC.PURCH-LAST-PAY",
@@ -29425,14 +29389,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "PULEDGER-REC.PURCH-AVERAGE",
@@ -29521,14 +29483,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "PULEDGER-REC.PURCH-CREATE-DAT",
@@ -29618,14 +29578,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "PULEDGER-REC.PURCH-PAY-ACTIVETY",
@@ -29714,14 +29672,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "PULEDGER-REC.PURCH-PAY-AVERAGE",
@@ -29810,14 +29766,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "PULEDGER-REC.PURCH-PAY-WORST",
@@ -29906,14 +29860,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "PULEDGER-REC.PURCH-CURRENT",
@@ -31539,14 +31491,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SAINV-LINES-REC.IL-TYPE",
@@ -37405,14 +37355,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SAINVOICE-REC.IH-ORDER",
@@ -39148,14 +39096,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SAINVOICE-REC.IH-DEDUCT-AMT",
@@ -39423,14 +39369,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SAINVOICE-REC.IH-CR",
@@ -39520,14 +39464,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SAINVOICE-REC.IH-LINES",
@@ -39617,14 +39559,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SAINVOICE-REC.IH-DAY-BOOK-FLAG",
@@ -40189,14 +40129,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SAITM3-REC.OI3-BATCH",
@@ -41861,14 +41799,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SAITM3-REC.OI3-DEDUCT-AMT",
@@ -42136,14 +42072,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SAITM3-REC.OI3-CR",
@@ -42412,14 +42346,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "OI-Header.OI-Header#8",
@@ -44817,14 +44749,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SALEDGER-REC.SALES-LATE-MAX",
@@ -44913,14 +44843,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SALEDGER-REC.SALES-LIMIT",
@@ -45009,14 +44937,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SALEDGER-REC.SALES-ACTIVETY",
@@ -45105,14 +45031,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SALEDGER-REC.SALES-LAST-INV",
@@ -45201,14 +45125,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SALEDGER-REC.SALES-LAST-PAY",
@@ -45297,14 +45219,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SALEDGER-REC.SALES-AVERAGE",
@@ -45393,14 +45313,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SALEDGER-REC.SALES-PAY-ACTIVETY",
@@ -45489,14 +45407,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SALEDGER-REC.SALES-PAY-AVERAGE",
@@ -45585,14 +45501,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SALEDGER-REC.SALES-PAY-WORST",
@@ -45681,14 +45595,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SALEDGER-REC.SALES-CREATE-DAT",
@@ -45778,14 +45690,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SALEDGER-REC.SALES-CURRENT",
@@ -48008,14 +47918,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.SYSTEM-RECORD-VERSION-SECONDAR",
@@ -48105,14 +48013,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.VAT-RATE-1",
@@ -48646,14 +48552,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.PERIOD",
@@ -48742,14 +48646,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.PAGE-LINES",
@@ -48927,14 +48829,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.RUN-DAT",
@@ -49024,14 +48924,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.START-DAT",
@@ -49121,14 +49019,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.END-DAT",
@@ -49218,14 +49114,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.SUSER",
@@ -54119,14 +54013,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.UPDATES",
@@ -54215,14 +54107,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.POSTINGS",
@@ -54311,14 +54201,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.NEXT-BATCH",
@@ -54407,14 +54295,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.EXTRA-CHARGE-AC",
@@ -54503,14 +54389,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.VAT-AC",
@@ -54599,14 +54483,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.PRINT-SPOOL-NAME2",
@@ -54782,14 +54664,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.BL-PAY-AC",
@@ -54878,14 +54758,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.P-CREDITORS",
@@ -54974,14 +54852,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.BL-PURCH-AC",
@@ -55070,14 +54946,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.GL-BL-PAY-AC",
@@ -55166,14 +55040,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.GL-P-CREDITORS",
@@ -55262,14 +55134,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.GL-BL-PURCH-AC",
@@ -55358,14 +55228,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.GL-SL-PAY-AC",
@@ -55454,14 +55322,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.GL-S-DEBTORS",
@@ -55550,14 +55416,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.GL-SL-SALES-AC",
@@ -55646,14 +55510,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.BL-END-CYCLE-DAT",
@@ -55743,14 +55605,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.BL-NEXT-BATCH",
@@ -55839,14 +55699,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.AGE-TO-PAY",
@@ -55935,14 +55793,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.PURCHASE-LEDGER",
@@ -59096,14 +58952,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.SL-DAYS-2",
@@ -59192,14 +59046,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.SL-DAYS-3",
@@ -59288,14 +59140,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.SL-CREDIT",
@@ -59384,14 +59234,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.SL-MIN",
@@ -59480,14 +59328,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.SL-MAX",
@@ -59576,14 +59422,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.PF-RETENTION",
@@ -59672,14 +59516,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.FIRST-SL-BATCH",
@@ -59768,14 +59610,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.FIRST-SL-INV",
@@ -59864,14 +59704,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.SL-LIMIT",
@@ -59960,14 +59798,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.SL-PAY-AC",
@@ -60056,14 +59892,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.S-DEBTORS",
@@ -60152,14 +59986,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.SL-SALES-AC",
@@ -60248,14 +60080,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.S-END-CYCLE-DAT",
@@ -60345,14 +60175,12 @@
       "derivation": null,
       "cobol_python_storage": "INT",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "SYSTEM-REC.SL-COMP-HEAD-PICK",
@@ -68124,14 +67952,12 @@
       "derivation": null,
       "cobol_python_storage": "DECIMAL",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "VALUEANAL-REC.VA-V-LAST",
@@ -68220,14 +68046,12 @@
       "derivation": null,
       "cobol_python_storage": "DECIMAL",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "VALUEANAL-REC.VA-V-YEAR",
@@ -68316,14 +68140,12 @@
       "derivation": null,
       "cobol_python_storage": "DECIMAL",
       "notes": [
-        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. What is stored in that case can only be measured by running the compiled program, so it is recorded as an open question rather than guessed."
+        "Signed in the copybook and unsigned in the bridge host variable, so a negative value loses its sign at the bridge, before any SQL runs, and not at the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is stored, and it is then truncated to the host variable's digit count rather than wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned host variable stores 3456, which is what +123456 stores too. So the sign is discarded and the magnitude survives; the debit-versus-credit sense of the statistic is gone, which is anomaly A-11 and is reproduced rather than corrected."
       ],
       "anomaly_refs": [
         "A-11"
       ],
-      "ambiguity_refs": [
-        "Q-3"
-      ]
+      "ambiguity_refs": []
     },
     {
       "key": "WS-Value-Record.WS-Value-Record",

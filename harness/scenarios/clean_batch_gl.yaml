@@ -4,10 +4,10 @@
 # SCENARIO clean_batch_gl -- the reference happy path of the General Ledger
 # posting cycle, and the CANONICAL SHAPE the other seven scenario definitions
 # under harness/scenarios/ replicate. The eight the protocol expects, per Agent
-# Action Plan section 0.8.5 and [harness/docker-compose.yml:L329-L331], are:
+# Action Plan section 0.8.5 and [harness/docker-compose.yml "STAGES."], are:
 # clean_batch_gl, clean_batch_sl, clean_batch_pl, clean_batch_irs,
 # mixed_accepted_rejected, period_end_totals, control_total_mismatch,
-# empty_batch. This file is the one [harness/docker-compose.yml:L332] names as
+# empty_batch. This file is the one [harness/docker-compose.yml "STAGES."] names as
 # the canonical invocation's scenario.
 #
 # THIS FILE IS INERT DATA (rule R-1, no COBOL at runtime). It carries no shell
@@ -33,7 +33,7 @@
 # column, an index or a constraint. operations is a strictly ordered list and
 # its steps run one at a time, matching the single-threaded COBOL.
 #
-# KEYS APPEAR IN A FIXED ORDER, identically in all eight scenario files, and
+# KEYS APPEAR IN A FIXED ORDER, identically in all nine scenario files, and
 # the file is UTF-8, ASCII-only, LF-terminated, two-space indented and free of
 # tabs. It carries no wall-clock reading, no host identity, no process id, no
 # random value and no absolute host path, so two captures of one scenario are
@@ -45,12 +45,38 @@ name: clean_batch_gl
 description: |
   PURPOSE
   One closed, proofed General Ledger batch, sitting in the pinned accounting
-  cycle, is posted end to end through gl070 -> gl071 -> gl072, and the
-  resulting GLBATCH-REC and GLLEDGER-REC state must match the compiled COBOL
-  oracle byte for byte after normalisation. This is the reference happy path:
-  nothing is rejected, nothing aborts, and the empty normalised diff is the
-  only pass condition [harness/docker-compose.yml:L349-L350].
+  cycle, is driven end to end through gl070 -> gl071 -> gl072, and the resulting
+  state must match the compiled COBOL oracle byte for byte after normalisation.
+  The abort gate stays shut -- nothing is rejected, nothing aborts, all three
+  phases run, and the term code is zero -- and the empty normalised diff over
+  all 22 in-scope tables is the only pass condition
+  [harness/docker-compose.yml "AN EMPTY DIFF FROM THAT LAST COMMAND IS THE PASS CONDITION"].
 
+  WHAT THIS SCENARIO DOES **NOT** DEMONSTRATE -- READ THIS BEFORE CITING IT
+  It does not demonstrate a ledger balance moving. The measured relational
+  effect is an UNCHANGED no-op, which is why `expected_table_effect' below is
+  `unchanged' and why GLLEDGER-REC comes back all zero on BOTH sides.
+  The cause is frozen and is not this harness's to fix: the compiled bridge
+  loads thirteen host variables but never loads HV-POST-RRN
+  [common/glpostingMT.cbl:L1053-L1066], and POST-RRN is the table primary key
+  [mysql/ACASDB.sql:L155,L169], so every non-fetch loader write targets the same
+  initial value and a seed can persist AT MOST ONE GLPOSTING-REC row. That row's
+  posting key does not survive the round trip in a form gl070 will accept -- the
+  ten-byte group WS-Post-Key is moved into an eighteen-digit binary host
+  variable, HV-POST-KEY PIC 9(18) COMP [common/glpostingMT.cbl:L283], over the
+  maintainer's own recorded doubt about that very field, *> WARNING POST-KEY MAY
+  WELL NEED CHANGING TO POST-RRN [common/glpostingMT.cbl:L229] -- so the posting
+  is skipped and no leg is ever exploded.
+  Reproducing that no-op is CORRECT (R-4: a defect reproduced is correct, a
+  defect fixed is a failure), and the empty diff here is a real parity result
+  about a real code path. But it is NOT evidence that GL posting arithmetic
+  agrees, and it must never be cited as such. The GL double-entry explosion and
+  ledger accumulation are held instead by the arithmetic tier --
+  tests/arithmetic/test_double_entry_explosion.py and
+  test_ledger_balance_accumulation.py -- and the shortfall against Agent Action
+  Plan section 0.8.5's "clean batch post per ledger" is recorded in
+  docs/migration/scenario-diff-evidence.md and
+  docs/migration/ambiguity-resolutions.md (Q-4 sibling, resolution (d)).
   PYTHON MODULES EXERCISED (rule R-5, full traceability)
     acas_posting/programs/gl070_transaction_pre_process.py   from general/gl070.cbl
     acas_posting/programs/gl071_batch_sort.py                from general/gl071.cbl
@@ -127,10 +153,10 @@ description: |
        are the field's ONLY ones: there is no third value and in particular no
        N. A pic x cannot hold an empty string, so a space is the more faithful
        spelling of the General-Ledger-only state, and the COBOL runner says so
-       itself at [harness/run_cobol_scenario.sh:L1913-L1922] before stripping
+       itself at [harness/run_cobol_scenario.sh acas_resolve_pinned_values] before stripping
        spaces so that both spellings converge.
   The remaining four are INERT on this General Ledger route and are present
-  only so that all eight scenario files share one system block and so the
+  only so that all nine scenario files share one system block and so the
   seeded system record is fully determined:
     period -- the cycles-per-quarter divisor, used only by gl080
       [copybooks/wssystem.cob:L64].
@@ -171,16 +197,85 @@ description: |
   block spanning [general/gl072.cbl:L135-L155] that exists purely to satisfy
   the linker and that maps to nothing at all in Python. It is listed anyway so
   that the dump PROVES it identical to seed rather than leaving it unobserved.
-  Three tables are named, and the system tables are deliberately NOT among
-  them: leaving the COBOL menu rewrites SYSTEM-REC and SYSTOT-REC, plus
-  SYSDEFLT-REC in the General menu, at [general/general.cbl:L656-L691], and
-  the headless Python entry point has no menu and never does. Comparing any of
-  them would produce a guaranteed FALSE FAILURE that is an artefact of the
-  harness rather than a behavioural difference -- which is exactly the
-  reasoning [harness/run_cobol_scenario.sh:L2042-L2046] gives for requiring an
-  explicit per-scenario list instead of an ignore-list in the differ. A census
-  across all twelve in-scope programs finds no System facade verb in any of
-  them, so no in-scope program persists those records.
+  THE MENU-PERSISTED TABLES, AND HOW EACH OF THEM IS OBSERVED
+  Leaving the COBOL menu with "X" rewrites SYSTEM-REC and SYSTOT-REC, plus
+  SYSDEFLT-REC in the General menu only, at [general/general.cbl:L656-L691].
+  The headless Python entry point has no menu, but it does NOT skip that
+  paragraph: acas_posting/cli/args.py's `overrewrite' rewrites key 1 always,
+  key 2 when a defaults record is present and key 4 when a totals record is,
+  which is the General menu's three-key set and the Sales and Purchase two-key
+  set. So this is not a one-sided write, and which of those rows can be
+  compared is a question about state and not about intent -- it was MEASURED
+  rather than assumed (rule R-6).
+
+  SYSTEM-REC AND SYSDEFLT-REC ARE COMPARED, AND ARE LISTED HERE AS THIS
+  SCENARIO'S DECLARED EFFECT. Both sides end this scenario with byte-identical
+  rows -- all 169 SYSTEM-REC columns included -- because the exit rewrite of
+  those two writes back what it loaded. Leaving them out, as this list
+  previously did, meant that a real program-level mutation of the system record
+  could not be observed at all: the comparison is bounded by all 22 in-scope
+  tables, and this list is the scenario's DECLARED EFFECT rather than the bound.
+
+  TWO CELLS OF SYSTEM-REC ARE WITHHELD FROM THE CAPTURE, AND ONLY TWO.
+  `RDBMS-Passwd pic x(12)' [copybooks/wssystem.cob:L139] and the frozen
+  schema's shorter PASS-WORD column are the database's own password as seeded,
+  and a dump is SELECT *, so a capture of the row would carry a credential into
+  committed diff evidence. harness/dump_tables.py's REDACTED_COLUMNS replaces
+  exactly those two cells, on BOTH sides, with one fixed marker -- which is why
+  this file declares neither field. That is not an ignore-list: the row is still
+  dumped and still diffed, every other column byte for byte, and withholding a
+  secret symmetrically cannot conceal a difference in anything the cycle
+  computes. An ignore-list in the diff stage remains forbidden outright.
+
+  AND THE ROW IS FINGERPRINTED AS WELL, ON EVERY SCENARIO AND ON BOTH SIDES.
+  acas_resolve_fingerprint_tables appends SYSTEM-REC to the fingerprint list
+  when a scenario has not declared it, so the pre/post digest pair exists
+  everywhere; tests/conftest.py's `assert_system_record_parity' compares the two
+  sides' post-run digests, which covers all 169 columns including the credential
+  and leaks nothing, because a sha256 of a canonical dump is not the dump.
+  MEASURED, so the limit is on record: across the committed scenarios the row's
+  digest moves on exactly those declaring `changed' and holds on those declaring
+  `unchanged', which is why this scenario can both list it and claim `unchanged'.
+
+  SYSTOT-REC IS NOT PART OF THIS SCENARIO'S DECLARED EFFECT, THOUGH IT IS STILL
+  COMPARED. The bound is all 22 in-scope tables, not this list, so the row is
+  read and diffed on both sides; what it is not is an effect this General route
+  declares. The reason it once could not be compared at all is a specific
+  property of the frozen code rather than a tolerance, and the seed now settles
+  it. The menu loads System-Record-4 from
+  the COBOL FLAT FILE and from nowhere else -- [general/general.cbl:L402-L404]
+  -- because the RDB read that would have accompanied it is COMMENTED OUT at
+  [general/general.cbl:L434-L436]. It then rewrites that flat-sourced copy
+  into the RDB on the way out [general/general.cbl:L667-L669]. This harness
+  seeds the RDB through the frozen loaders and has no flat key-4 record, so
+  the exit overwrites whatever the RDB held. What it overwrites is not
+  nothing: sys4LD stamps 1 into all four spare fields whenever every real
+  total is zero -- "See if we have an empty record, lets make sure it is
+  initialised" at [common/sys4LD.cbl:L368-L390] -- so a key-4 seed that
+  declared nothing came back carrying 1.00 in SL4-SPARE1..4 while the menu exit
+  returned them to 0.00, and exactly those four columns differed. THE SEED IS
+  WHAT WAS MADE CONSISTENT: this file's key-4 records now DECLARE
+  sl4-spare1..4 = "1.00" explicitly, which is what the frozen loader would have
+  stamped anyway, so the menu exit writes back what it loaded and the row
+  compares clean inside the 22-table bound. The alternative -- teaching the
+  migrated cycle to write those zeros -- would have fabricated behaviour with no
+  frozen counterpart. Nothing in scope is being hidden -- all nine period-total
+  write sites are in the Sales and Purchase programs [sales/sl055.cbl:L675] and
+  its eight siblings, none of which runs here -- so a General run has no
+  SYSTOT-REC behaviour of its own to observe. The Sales, Purchase and
+  period-end scenarios DO list it, and it compares clean there because their
+  key-4 seeds carry non-zero totals and so never trip the loader's sentinel.
+
+  SYSFINAL-REC IS COMPARED AND DECLARED BY NOTHING, on a stronger ground than
+  either of those: key 3 has no writer anywhere on this route, so listing it
+  would add a caveat without adding evidence. It is still inside the 22-table
+  bound, so if anything ever did write it the diff would say so.
+
+  A census across all twelve in-scope programs finds no System facade verb in
+  any of them: the SL/PL programs mutate System-Record-4 through linkage and
+  the MENU SHELL is what persists it, which is why the fourth linkage parameter
+  exists at all [sales/sl060.cbl:L395-L399]. That census is true and worth
+  stating, but it never licensed leaving the row unobserved.
 
   THE ABORT GATE THIS SCENARIO MUST NOT TRIP
   Phase one walks the batch file and raises the terminate code if it finds any
@@ -340,7 +435,7 @@ description: |
   absolute path. Its two consumers resolve it against different bases, which is
   a property of the consumers and not of this file: the COBOL-side seeder joins
   a relative name to the directory holding this scenario file
-  [harness/seed.sh:L2592-L2597] and stages the declared files into a fresh
+  [harness/seed.sh acas_stage_scenario_seed] and stages the declared files into a fresh
   scenario-owned fixture, while the Python side reads it as a subdirectory of
   the harness data directory. The flat files themselves are a separate
   deliverable and are deliberately NOT created in this directory.
@@ -436,20 +531,43 @@ description: |
   arbitration is recorded in docs/migration/ambiguity-resolutions.md.
 
   THE ACCEPTANCE PROTOCOL
-  Build the oracle, then, in this exact order and with no stage skipped:
-  seed, run the COBOL cycle, dump the affected tables, normalise, reset and
-  re-seed from the same fixture, run the Python cycle, dump, normalise, and
-  diff. The canonical command sequence is spelled out at
-  [harness/docker-compose.yml:L332-L347]. AN EMPTY NORMALISED DIFF IS THE ONLY
+  TEN stages, in this order, one scenario at a time and nothing
+  alongside it. harness/parity_stages.sh is the single registry and
+  `harness/run_parity.sh --print-stages' prints it, so this list is a restatement
+  and never the authority:
+    1 reset the schema and seed the scenario
+    2 run the compiled COBOL cycle
+    3 dump the COBOL state
+    4 normalise the COBOL dump
+    5 reset the schema and RE-SEED THE SAME SCENARIO -- the same fixture bytes, so
+      the Python cycle starts from the state the COBOL cycle started from and not
+      the state it left
+    6 run the migrated Python cycle
+    7 dump the Python state
+    8 normalise the Python dump
+    9 verify both captures are published -- BEFORE a single row is compared,
+      because two PARTIAL captures can produce an empty diff and so pass a
+      comparison that compared nothing
+    10 diff the two normalised trees
+  harness/build_oracle.sh and harness/build_fixtures.sh come before stage 1 and are
+  not stages: the first runs once per image, the second once per change to a
+  scenario's seed records.
+  The canonical command sequence is spelled out at
+  [harness/docker-compose.yml "STAGES."]. AN EMPTY NORMALISED DIFF IS THE ONLY
   PASS CONDITION; a stage that exits non-zero has produced no evidence rather
   than weaker evidence, so the protocol is restarted from the seed rather than
-  carried forward [harness/docker-compose.yml:L349-L352]. The per-scenario
+  carried forward [harness/docker-compose.yml "AN EMPTY DIFF FROM THAT LAST COMMAND IS THE PASS CONDITION"]. The per-scenario
   outcome is recorded in docs/migration/scenario-diff-evidence.md.
   Two runs of this scenario under the same pinned clock must additionally
   produce byte-identical dumps; that is what the determinism suite asserts.
-  Forward reference: docs/migration/ and the scenario test suite do not exist
-  yet, nor does the Python-side runner script; they arrive with the deliverables
-  that consume this file.
+  This file's consumers are all present in the checkout:
+  the four documents under docs/migration/, the eight modules under
+  tests/scenarios/ (one per scenario), and harness/run_python_scenario.sh.
+  The seed FLAT FILES are deliberately not in the
+  checkout: the records are declared above under seed_records and
+  harness/build_fixtures.sh builds the files from them inside the image, because
+  fifteen of the seventeen frozen loaders read ORGANIZATION INDEXED or RELATIVE
+  files whose on-disk form belongs to the Berkeley DB version that image carries.
 
   THE CONSUMER CONTRACT -- WHY SOME VALUES APPEAR UNDER TWO KEYS
   This file serves consumers with two different reading strategies, so a few
@@ -465,16 +583,18 @@ description: |
     operations[0].operation and operation
   The reason is measured, not assumed. The COBOL runner reads this file with a
   plain reader that accepts TOP-LEVEL KEYS ONLY, with no leading whitespace
-  before the key [harness/run_cobol_scenario.sh:L1605-L1606], and it requires
-  run_date_text [harness/run_cobol_scenario.sh:L1855-L1867],
-  run_date_binary [harness/run_cobol_scenario.sh:L1869-L1880], date_form
-  [harness/run_cobol_scenario.sh:L1884-L1894], irs_instead as a key that must
+  before the key [harness/run_cobol_scenario.sh acas_read_scenario], and it requires
+  run_date_text [harness/run_cobol_scenario.sh acas_resolve_pinned_values],
+  run_date_binary [harness/run_cobol_scenario.sh acas_resolve_pinned_values], date_form
+  [harness/run_cobol_scenario.sh acas_resolve_pinned_values], irs_instead as a key that must
   be PRESENT even when its value is a space
-  [harness/run_cobol_scenario.sh:L1911-L1937] and affected_tables
-  [harness/run_cobol_scenario.sh:L2033-L2062]. The seeder requires seed_files
-  and honours seed_dir [harness/seed.sh:L2578-L2597], and the dumper reads the
+  [harness/run_cobol_scenario.sh acas_resolve_pinned_values] and affected_tables
+  [harness/run_cobol_scenario.sh acas_resolve_pinned_values]. The seeder requires seed_files
+  and honours seed_dir [harness/seed.sh acas_stage_scenario_seed], and the dumper reads the
   affected-table list with a full YAML parser. A nested-only file would be
   silently invisible to the first two and the protocol could not start.
+  The dump and the diff are NOT bounded by affected_tables: both are driven with
+  --all-in-scope, all 22 tables, for the reason recorded above that key.
   The grouped blocks are the documented shape and carry the four system values
   that have no flat consumer at all -- file_system_used, cyclea, period,
   sl_autogen, pl_autogen, s_flag_p and p_flag_p are assertions about the SEEDED
@@ -510,9 +630,9 @@ description: |
 
 subsystem: general
 
-# Read by [harness/run_cobol_scenario.sh:L1763] as the default for its
+# Read by [harness/run_cobol_scenario.sh acas_resolve_operations] as the default for its
 # --operation option; the operation-to-menu-key map is at
-# [harness/run_cobol_scenario.sh:L249].
+# [harness/run_cobol_scenario.sh ACAS_RUN_OPERATION_MAP].
 operation: gl_post_cycle
 
 clock:
@@ -520,7 +640,7 @@ clock:
   run_date: 155127
 
 # Flat mirrors of the clock block, required by
-# [harness/run_cobol_scenario.sh:L1855] and [harness/run_cobol_scenario.sh:L1869].
+# [harness/run_cobol_scenario.sh acas_resolve_pinned_values] and [harness/run_cobol_scenario.sh acas_resolve_pinned_values].
 run_date_text: "21/09/2025"
 run_date_binary: 155127
 
@@ -536,7 +656,7 @@ system:
   p_flag_p: 2
 
 # Flat mirrors of the two system values the COBOL runner reads directly:
-# [harness/run_cobol_scenario.sh:L1884] and [harness/run_cobol_scenario.sh:L1911].
+# [harness/run_cobol_scenario.sh acas_resolve_pinned_values] and [harness/run_cobol_scenario.sh acas_resolve_pinned_values].
 date_form: 1
 irs_instead: " "
 
@@ -548,8 +668,8 @@ seed:
     - batch.dat
     - posting.dat
 
-# Flat mirrors of the seed block, required by [harness/seed.sh:L2578] and
-# honoured by [harness/seed.sh:L2592].
+# Flat mirrors of the seed block, required by [harness/seed.sh acas_stage_scenario_seed] and
+# honoured by [harness/seed.sh acas_stage_scenario_seed].
 seed_dir: clean_batch_gl
 seed_files:
   - system.dat
@@ -573,6 +693,31 @@ operations:
 # three phases -- batch check and pre-process, sort, then transaction update.
 # A status that contradicts this is reported as a behavioural difference and the
 # capture is still taken, so the table diff can corroborate it (R-4).
+# WHAT THE RUN MUST DO TO THE AFFECTED TABLES, asserted by the Python-side runner
+# from canonical primary-key-ordered digests taken before and after the dispatch.
+#
+# `unchanged' IS THE MEASURED VALUE, AND IT IS NOT WHAT A READER OF THE SEED WOULD
+# PREDICT. The waiting batch is seeded Cleared-Status 0 with Bcycle equal to the
+# pinned Cyclea, so phase two DOES select it, and a reader reasoning from the seed
+# alone would expect gl072's end-batch to stamp Cleared-Status and Posted
+# [general/gl072.cbl:L373-L377] and end-account to rewrite the nominal balances
+# [general/gl072.cbl:L379-L382]. THAT IS NOT WHAT THE COMPILED CYCLE DOES. Compiled
+# measurement recorded as `Q-9' in docs/migration/ambiguity-resolutions.md
+# established that the bridge's host-variable load never moves WS-Post-rrn into
+# HV-POST-RRN, the table's primary key, so a seeded posting is persisted under key ZERO -- and
+# [general/gl070.cbl:L490-L491], `if WS-Post-Key = zero / go to loop.', skips it. The
+# work file is therefore empty, gl072 reads nothing, the end-batch rewrite is
+# unreachable and POSTED stays zero. The 2026-08-04 journey observed exactly that;
+# docs/migration/scenario-diff-evidence.md records it per scenario.
+#
+# SO THE NO-OP IS THE SPECIFICATION AND IS REPRODUCED, NOT CORRECTED (R-4, R-6).
+# Declaring `changed' here would demand that the migrated cycle FIX Q-9: it would
+# fail against a faithful reproduction and pass only against a repaired one, which is
+# precisely inverted. The risk `changed' would have guarded against -- that a total
+# no-op, an unlanded seed, or a FILE-SYSTEM-USED sending the run to flat files could
+# satisfy this scenario -- is guarded instead by the runner's own pre-dispatch refusal
+# of FILE-SYSTEM-USED zero, by the seed fingerprint agreement, and by the scenario
+# test's non-vacuity assertions on the dumped row counts.
 expected_table_effect: unchanged
 
 expected_status:
@@ -584,10 +729,28 @@ expected_status:
 # path. Leaving them unstated is what keeps this scenario's inputs exactly the
 # inputs the frozen cycle takes.
 
+# WHAT `affected_tables` IS, AND WHAT IT IS NOT
+#
+# It is the DECLARED EFFECT of this scenario: the tables the runners assert
+# changed or unchanged against `expected_table_effect`, in the order declared.
+#
+# It is NOT the bound of the comparison. The capture and the diff are bounded by
+# ALL 22 IN-SCOPE TABLES -- `harness/dump_tables.py --all-in-scope` at stages 3
+# and 7 and `harness/diff_states.py --all-in-scope` at stage 10, which
+# `harness/run_parity.sh` and `tests/conftest.py` both pass. A bound drawn from
+# what a scenario EXPECTS to move cannot show a difference in anything it did not
+# expect to move, and an empty diff is the single pass condition (AAP section
+# 0.8.5). In particular both cycles perform the menu's own `overrewrite.'
+# [general/general.cbl:L656-L672], which rewrites SYSTEM-REC under key 1,
+# SYSDEFLT-REC under key 2 and SYSTOT-REC under key 4 -- reproduced by
+# `acas_posting/cli/args.py::overrewrite' -- so those rows are compared on both
+# sides rather than omitted.
 affected_tables:
   - GLBATCH-REC
   - GLLEDGER-REC
   - GLPOSTING-REC
+  - SYSDEFLT-REC
+  - SYSTEM-REC
 
 # =============================================================================
 # THE SEED RECORDS
@@ -687,7 +850,43 @@ seed_records:
     # writes a period total -- all nine sites are in the Sales and Purchase programs
     # -- so a zero pre-state is the honest one here, and the slot must still exist
     # for sys4LD to read.
-    "4": {}
+    "4":
+      # THE FOUR SPARE FIELDS ARE DECLARED AS 1.00, AND THAT IS NOT A VALUE THIS
+      # SCENARIO CHOSE -- IT IS THE FROZEN LOADER'S OWN RULE, RESTATED SO THE TWO
+      # STORES AGREE. [common/sys4LD.cbl:L369-L390]: when ALL SIXTEEN monetary
+      # totals are zero -- exactly the pre-state above -- the loader performs
+      # `initialise System-Record-4 with filler' and then
+      # `move 1 to sl4-spare1 sl4-spare2 sl4-spare3 sl4-spare4', carrying the
+      # maintainer's own `*> Should not be needed but ..' beside it. So the loader
+      # writes 1.00 into SYSTOT-REC's four spare columns whatever this flat file
+      # says.
+      #
+      # LEAVING THEM UNDECLARED MADE THE SEED INTERNALLY INCONSISTENT: the flat
+      # file held 0.00 while the RDB held the loader's 1.00. That matters because
+      # ACAS is a DUAL STORE and the two cycles read different halves of it. The
+      # frozen menu reads key 4 from the COBOL FLAT FILE -- `move "00" to
+      # FA-RDBMS-Flat-Statuses. *> Force Cobol proc.' then `perform
+      # System-Read-Indexed. *> Read Cobol file sys totals'
+      # [general/general.cbl:L399-L405] -- and then writes it to the RDB in
+      # `overrewrite.' [general/general.cbl:L656-L672], so it PROPAGATED the flat
+      # file's 0.00 over the loader's 1.00. The migrated cycle has no flat-file
+      # store at all (rule R-1), reads key 4 from the RDB and faithfully preserved
+      # 1.00. Two stores that disagree at t=0 cannot be compared, and the harness's
+      # seed-fingerprint guard cannot catch it because it compares ROW COUNTS only.
+      #
+      # Declaring them here fixes the SEED, not either cycle. Nothing is added to
+      # the COBOL or the Python path (rules R-3, R-4), the loader's rule is
+      # reproduced rather than contradicted, and an empty diff on SYSTOT-REC now
+      # means the two cycles agree rather than that the difference was bounded out.
+      # The sixteen totals stay zero, which is this route's honest pre-state, so
+      # the loader's guard still fires exactly as it did before.
+      # Filed as ambiguity `Q-SYS4-SPARE-SENTINEL` in
+      # docs/migration/ambiguity-resolutions.md, which carries the probe that
+      # measured the propagation and the reason the fix belongs to the SEED.
+      sl4-spare1: "1.00"
+      sl4-spare2: "1.00"
+      sl4-spare3: "1.00"
+      sl4-spare4: "1.00"
   # Four nominal-ledger accounts: the debit and credit sides of the batch's single
   # double entry, the VAT control account the third leg posts to, and one untouched
   # account so the diff has a row that must NOT move. gl072 finds each of these by

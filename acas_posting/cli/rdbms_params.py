@@ -38,14 +38,27 @@ __all__: Final[tuple[str, ...]] = (
     "bind_rdbms_connection",
     # ---- the deployment transport declaration, which has no frozen -------
     #      counterpart and is entirely optional
+    "AFFIRMATIVE_SPELLINGS",
+    "NEGATIVE_SPELLINGS",
+    "CONNECT_TIMEOUT_DEFAULT",
+    "READ_TIMEOUT_DEFAULT",
+    "WRITE_TIMEOUT_DEFAULT",
     "TRANSPORT_ALLOW_PLACEHOLDER_CREDENTIALS_VARIABLE",
+    "TRANSPORT_ALLOW_PLAINTEXT_VARIABLE",
     "TRANSPORT_CA_VARIABLE",
     "TRANSPORT_CERTIFICATE_VARIABLE",
-    "TRANSPORT_ISOLATED_ORACLE_VARIABLE",
+    "TRANSPORT_CONNECT_TIMEOUT_VARIABLE",
     "TRANSPORT_KEY_VARIABLE",
+    "TRANSPORT_READ_TIMEOUT_VARIABLE",
     "TRANSPORT_REQUIRE_DECLARED_CREDENTIALS_VARIABLE",
     "TRANSPORT_REQUIRE_ENCRYPTION_VARIABLE",
+    "TRANSPORT_WRITE_TIMEOUT_VARIABLE",
+    #  The one authoritative inventory of the contract above: every variable, the
+    #  field that consumes it and whether the shipped stack provides it (F-07).
+    "TRANSPORT_CONTRACT",
+    "TransportContractEntry",
     "TransportPolicyParams",
+    "read_declared_flag",
     "resolve_transport_policy",
     # ---- deployment policy, deliberately OFF the parity path (M-06) -------
     "audit_deployment_contract",
@@ -674,14 +687,25 @@ TRANSPORT_KEY_VARIABLE: Final[str] = "ACAS_DB_TLS_KEY"
 #: server has no TLS configured, so a plaintext connection to it is intended.
 #: This is what silences the unprotected-transport warning for a harness run,
 #: and it is a DECLARATION - nothing infers it from the address.
-TRANSPORT_ISOLATED_ORACLE_VARIABLE: Final[str] = "ACAS_DB_ISOLATED_ORACLE"
+#:
+#: ⭐ ONE KEY, AND THIS IS IT. The spelling is the harness's own, published by
+#: `harness/docker-compose.yml` and read by `harness/build_oracle.sh`,
+#: `harness/seed.sh`, `harness/reset_db.sh`, `harness/run_cobol_scenario.sh` and
+#: `harness/run_python_scenario.sh`. An earlier revision of this module read a
+#: SECOND name here, `ACAS_DB_ISOLATED_ORACLE`, which nothing set: a harness run
+#: exported the Compose spelling, this resolver looked for the other one, and the
+#: declaration silently did not arrive - so a non-loopback target was refused
+#: even though the operator had declared it. There is now exactly one name for
+#: this decision across Python, shell, Compose, the tests and the documentation.
+TRANSPORT_ALLOW_PLAINTEXT_VARIABLE: Final[str] = "ACAS_DB_ALLOW_PLAINTEXT"
 
-#: Turns the unprotected-transport report into a refusal, for a deployment that
-#: wants one. Off unless set, because the compiled program applies no such check.
+#: FORCES the refusal even where the plaintext declaration was made, for a
+#: deployment that wants no unencrypted path at all. Strictness outranks
+#: permission: with both set the connection is refused.
 TRANSPORT_REQUIRE_ENCRYPTION_VARIABLE: Final[str] = "ACAS_DB_REQUIRE_TLS"
 
-#: Turns the shipped-placeholder-credential report into a refusal, on the same
-#: terms.
+#: FORCES the placeholder-credential refusal even where the placeholder
+#: declaration was made, on the same terms.
 TRANSPORT_REQUIRE_DECLARED_CREDENTIALS_VARIABLE: Final[str] = (
     "ACAS_DB_REQUIRE_DECLARED_CREDENTIALS"
 )
@@ -693,11 +717,179 @@ TRANSPORT_ALLOW_PLACEHOLDER_CREDENTIALS_VARIABLE: Final[str] = (
     "ACAS_DB_ALLOW_PLACEHOLDER_CREDENTIALS"
 )
 
+#: The spellings read as YES, compared case-insensitively after stripping. A
+#: The three driver deadlines, in whole seconds (finding F-05). The frozen C
+#: interface passes none - `mysql_real_connect` is called with a literal zero
+#: client-flag word and no option is set on the handle
+#: [copybooks/mysql-procedures.cpy:L72-L77] - so an unreachable or wedged server
+#: blocks the compiled program indefinitely too. That is not a behaviour worth
+#: reproducing in a headless batch process: it produces no different table state,
+#: only a run that never ends. Each is therefore bounded by default and
+#: configurable, and each is a DEPLOYMENT setting rather than part of the
+#: six-parameter contract.
+TRANSPORT_CONNECT_TIMEOUT_VARIABLE: Final[str] = "ACAS_DB_CONNECT_TIMEOUT"
+TRANSPORT_READ_TIMEOUT_VARIABLE: Final[str] = "ACAS_DB_READ_TIMEOUT"
+TRANSPORT_WRITE_TIMEOUT_VARIABLE: Final[str] = "ACAS_DB_WRITE_TIMEOUT"
+
+#: The defaults, chosen so that no posting run this migration can produce is cut
+#: short by them. A connect to a healthy server on the harness's internal network
+#: completes in milliseconds; the two per-statement budgets are two orders of
+#: magnitude above the slowest statement the cycle issues, which is a full
+#: sequential walk of one seeded table.
+CONNECT_TIMEOUT_DEFAULT: Final[int] = 10
+READ_TIMEOUT_DEFAULT: Final[int] = 300
+WRITE_TIMEOUT_DEFAULT: Final[int] = 300
+
+#: A day, the same ceiling `harness/run_python_scenario.sh` puts on its own
+#: budgets. Past this a "bound" is indistinguishable from none.
+_TIMEOUT_CEILING_SECONDS: Final[int] = 86_400
+
 #: The spellings read as true, compared case-insensitively after stripping. A
 #: closed set rather than "anything non-empty": a variable left as `"0"` or
 #: `"false"` by a deployment template must not silently mean yes.
-_TRUE_SPELLINGS: Final[frozenset[str]] = frozenset(
-    {"1", "true", "yes", "y", "on"}
+#:
+#: ⭐ THE SET IS THE HARNESS SHELL'S OWN, CHARACTER FOR CHARACTER. Every reader
+#: in the tree matches on `1|true|yes|on` - `harness/seed.sh`,
+#: `harness/reset_db.sh`, `harness/build_oracle.sh`,
+#: `harness/run_cobol_scenario.sh` and the preflight embedded in
+#: `harness/run_python_scenario.sh` - so one exported value cannot mean two
+#: different things to the two halves of the harness. `y` used to be accepted
+#: here and nowhere else, which is precisely the kind of drift this constant
+#: exists to remove.
+AFFIRMATIVE_SPELLINGS: Final[frozenset[str]] = frozenset(
+    {"1", "true", "yes", "on"}
+)
+
+#: The spellings read as NO, on the same terms. The empty string is here because
+#: an unset or blank variable is a declaration of nothing, which is the default.
+NEGATIVE_SPELLINGS: Final[frozenset[str]] = frozenset(
+    {"", "0", "false", "no", "off"}
+)
+
+
+@dataclass(frozen=True, slots=True)
+class TransportContractEntry:
+    """One row of the transport environment contract.
+
+    Attributes:
+        variable: The environment variable name.
+        field: The :class:`TransportPolicyParams` field it resolves into, which is
+            this row's CONSUMER - every field is read by
+            :func:`acas_posting.cli.args.install_connection_policy` and turned into
+            the one installed ``dal.connection.ConnectionPolicy``.
+        provided_by_harness: ``True`` when `harness/docker-compose.yml` sets the
+            variable for the comparison stack. A row that is ``False`` is optional
+            everywhere and has a documented default - never a knob that has to be
+            set for the harness to be correct.
+        alias_of: The canonical variable this row is an alias for, or ``None``.
+        meaning: What declaring it does, in one line.
+    """
+
+    variable: str
+    field: str
+    provided_by_harness: bool
+    alias_of: str | None
+    meaning: str
+
+
+#: THE WHOLE TRANSPORT ENVIRONMENT CONTRACT, IN ONE PLACE (finding F-07).
+#:
+#: There used to be two: this module declared four flag variables while
+#: `acas_posting/cli/args.py` read a fifth of its own and the harness set only
+#: that fifth - so the four this module declared had no provider, and the
+#: command-line path returned before the refusal knobs were ever consulted. One
+#: table now names every variable, the field it resolves into (its consumer) and
+#: whether the shipped stack provides it, and `tests/` asserts that every row has
+#: both a provider and a consumer, so a knob that nothing sets or nothing reads
+#: cannot be added again unnoticed.
+TRANSPORT_CONTRACT: Final[tuple[TransportContractEntry, ...]] = (
+    TransportContractEntry(
+        variable=TRANSPORT_CA_VARIABLE,
+        field="ca_file",
+        provided_by_harness=False,
+        alias_of=None,
+        meaning=(
+            "PEM bundle the server certificate must chain to; supplying it turns "
+            "the session into a verified, encrypted one"
+        ),
+    ),
+    TransportContractEntry(
+        variable=TRANSPORT_CERTIFICATE_VARIABLE,
+        field="certificate_file",
+        provided_by_harness=False,
+        alias_of=None,
+        meaning="client certificate, for a server that requires one",
+    ),
+    TransportContractEntry(
+        variable=TRANSPORT_KEY_VARIABLE,
+        field="key_file",
+        provided_by_harness=False,
+        alias_of=None,
+        meaning="the client certificate's private key; both or neither",
+    ),
+    TransportContractEntry(
+        variable=TRANSPORT_ALLOW_PLAINTEXT_VARIABLE,
+        field="isolated_oracle",
+        provided_by_harness=True,
+        alias_of=None,
+        meaning=(
+            "declares the target the isolated comparison oracle, so plaintext to "
+            "it is intended rather than accidental"
+        ),
+    ),
+    TransportContractEntry(
+        variable=TRANSPORT_REQUIRE_ENCRYPTION_VARIABLE,
+        field="require_encrypted_transport",
+        provided_by_harness=False,
+        alias_of=None,
+        meaning=(
+            "turns the unprotected-transport REPORT into a refusal; off unless "
+            "set, because the compiled program applies no such check (R-3)"
+        ),
+    ),
+    TransportContractEntry(
+        variable=TRANSPORT_REQUIRE_DECLARED_CREDENTIALS_VARIABLE,
+        field="require_declared_placeholder_credentials",
+        provided_by_harness=False,
+        alias_of=None,
+        meaning="turns the placeholder-credential report into a refusal",
+    ),
+    TransportContractEntry(
+        variable=TRANSPORT_ALLOW_PLACEHOLDER_CREDENTIALS_VARIABLE,
+        field="allow_frozen_placeholder_credentials",
+        provided_by_harness=False,
+        alias_of=None,
+        meaning=(
+            "declares the frozen placeholder credentials of "
+            "[copybooks/wssystem.cob:L138-L139] intended and the server disposable"
+        ),
+    ),
+    TransportContractEntry(
+        variable=TRANSPORT_CONNECT_TIMEOUT_VARIABLE,
+        field="connect_timeout_seconds",
+        provided_by_harness=False,
+        alias_of=None,
+        meaning=(
+            f"driver connect deadline in seconds; default "
+            f"{CONNECT_TIMEOUT_DEFAULT}"
+        ),
+    ),
+    TransportContractEntry(
+        variable=TRANSPORT_READ_TIMEOUT_VARIABLE,
+        field="read_timeout_seconds",
+        provided_by_harness=False,
+        alias_of=None,
+        meaning=f"driver read deadline in seconds; default {READ_TIMEOUT_DEFAULT}",
+    ),
+    TransportContractEntry(
+        variable=TRANSPORT_WRITE_TIMEOUT_VARIABLE,
+        field="write_timeout_seconds",
+        provided_by_harness=False,
+        alias_of=None,
+        meaning=(
+            f"driver write deadline in seconds; default {WRITE_TIMEOUT_DEFAULT}"
+        ),
+    ),
 )
 
 
@@ -710,31 +902,61 @@ class TransportPolicyParams:
     and the entry-point layer turns these values into the one installed
     ``ConnectionPolicy``.
 
-    An instance with every field at its default - which is what an environment
-    setting none of the variables resolves to - declares nothing, and the
-    data-access layer then behaves exactly as the compiled system does.
+    ⭐ THE DEFAULTS FAIL CLOSED, AND THAT IS THE POINT OF THIS TYPE.
+    An environment that sets none of the variables resolves to
+    ``require_encrypted_transport=True`` and
+    ``require_declared_placeholder_credentials=True``: a loopback address or a
+    Unix socket still connects - those never leave the machine, and they are what
+    a normal ACAS installation uses [copybooks/wsfnctn.cob:L57-L64] - while any
+    OTHER target, and any run still carrying the credentials published at
+    [copybooks/wssystem.cob:L138-L139], is REFUSED until the deployment says
+    otherwise. Reporting-and-permitting was the previous default and it is a
+    CWE-319/CWE-798 exposure at a production boundary: a warning in a log nobody
+    reads is not a decision anybody made.
+
+    NOTHING COMPARED MOVES BECAUSE OF THIS. The refusal happens before the
+    connect, so it cannot alter a posted figure, a statement or a write order; the
+    parity harness declares :data:`TRANSPORT_ALLOW_PLAINTEXT_VARIABLE` in
+    ``harness/docker-compose.yml`` and connects exactly as before (rule R-6).
 
     Attributes:
         ca_file: :data:`TRANSPORT_CA_VARIABLE`, or ``None`` when unset.
         certificate_file: :data:`TRANSPORT_CERTIFICATE_VARIABLE`, or ``None``.
         key_file: :data:`TRANSPORT_KEY_VARIABLE`, or ``None``.
-        isolated_oracle: :data:`TRANSPORT_ISOLATED_ORACLE_VARIABLE`, read as a
-            boolean.
-        require_encrypted_transport:
-            :data:`TRANSPORT_REQUIRE_ENCRYPTION_VARIABLE`, read as a boolean.
-        require_declared_placeholder_credentials:
-            :data:`TRANSPORT_REQUIRE_DECLARED_CREDENTIALS_VARIABLE`, likewise.
+        isolated_oracle: :data:`TRANSPORT_ALLOW_PLAINTEXT_VARIABLE`, read as a
+            boolean by :func:`read_declared_flag`, the one closed spelling set
+            the shell half of the harness matches on. The narrow opt-out from
+            the transport refusal.
+        require_encrypted_transport: ``True`` unless ``isolated_oracle`` was
+            declared, and ``True`` regardless when
+            :data:`TRANSPORT_REQUIRE_ENCRYPTION_VARIABLE` is set - strictness
+            outranks permission.
+        require_declared_placeholder_credentials: ``True`` unless
+            ``allow_frozen_placeholder_credentials`` was declared, and ``True``
+            regardless when
+            :data:`TRANSPORT_REQUIRE_DECLARED_CREDENTIALS_VARIABLE` is set.
         allow_frozen_placeholder_credentials:
+            :data:`TRANSPORT_ALLOW_PLACEHOLDER_CREDENTIALS_VARIABLE`, read as a
+            boolean. The narrow opt-out from the credential refusal.
             :data:`TRANSPORT_ALLOW_PLACEHOLDER_CREDENTIALS_VARIABLE`, likewise.
+        connect_timeout_seconds: :data:`TRANSPORT_CONNECT_TIMEOUT_VARIABLE`, or
+            :data:`CONNECT_TIMEOUT_DEFAULT`. Always finite.
+        read_timeout_seconds: :data:`TRANSPORT_READ_TIMEOUT_VARIABLE`, or
+            :data:`READ_TIMEOUT_DEFAULT`. Always finite.
+        write_timeout_seconds: :data:`TRANSPORT_WRITE_TIMEOUT_VARIABLE`, or
+            :data:`WRITE_TIMEOUT_DEFAULT`. Always finite.
     """
 
     ca_file: str | None = None
     certificate_file: str | None = None
     key_file: str | None = None
     isolated_oracle: bool = False
-    require_encrypted_transport: bool = False
-    require_declared_placeholder_credentials: bool = False
+    require_encrypted_transport: bool = True
+    require_declared_placeholder_credentials: bool = True
     allow_frozen_placeholder_credentials: bool = False
+    connect_timeout_seconds: int = CONNECT_TIMEOUT_DEFAULT
+    read_timeout_seconds: int = READ_TIMEOUT_DEFAULT
+    write_timeout_seconds: int = WRITE_TIMEOUT_DEFAULT
 
 
 def _optional_path(env: Mapping[str, str], variable: str) -> str | None:
@@ -753,20 +975,104 @@ def _optional_path(env: Mapping[str, str], variable: str) -> str | None:
     return value or None
 
 
-def _optional_flag(env: Mapping[str, str], variable: str) -> bool:
-    """Read an optional boolean setting from its closed set of spellings.
+def read_declared_flag(env: Mapping[str, str], variable: str) -> bool:
+    """Read one boolean deployment setting from its closed set of spellings.
+
+    THE ONE PARSER FOR THE ONE CONTRACT. Every boolean the deployment can set is
+    read through here, by this module and by
+    :func:`acas_posting.cli.args.install_connection_policy`, so a value cannot be
+    affirmative to one reader and not to another. The recognised spellings are
+    :data:`AFFIRMATIVE_SPELLINGS` and :data:`NEGATIVE_SPELLINGS`, compared
+    case-insensitively after stripping, and they are the shell half's own set.
+
+    ⭐ UNRECOGNISED TEXT IS REFUSED, NOT GUESSED. An earlier revision of the
+    entry-point layer read "any value other than empty and ``0``" as yes, so
+    ``ACAS_DB_ALLOW_PLAINTEXT=false`` DECLARED PLAINTEXT - the opposite of what
+    was written - while this module read the same word as no. Silently picking
+    either reading is worse than stopping: the value governs whether a
+    credential and every posted figure may cross a network in the clear, and the
+    operator who typed it is the only party who knows what was meant. Nothing
+    accounting is validated here (rule R-3): this is deployment configuration,
+    it has no frozen counterpart at all, and it is read before any statement
+    with a COBOL counterpart runs.
 
     Args:
         env: The mapping to read from.
         variable: The variable name.
 
     Returns:
-        ``True`` only for a recognised affirmative spelling; ``False`` for
-        anything else, including an unrecognised value. Nothing is raised,
-        because an unrecognised spelling must not stop a posting run over a
-        setting the compiled system has not got.
+        ``True`` for a recognised affirmative spelling, ``False`` for a
+        recognised negative one and for an unset or blank variable.
+
+    Raises:
+        RdbmsParamError: The value is neither, carrying
+            :data:`RDB_RETURN_MALFORMED` - the frozen reader's own code for
+            "the source is present but malformed"
+            [common/acas-get-params.cbl:L200-L203]. The message names the
+            variable and the accepted spellings and NEVER the value, which may
+            have been mistyped over a secret.
     """
-    return env.get(variable, "").strip().lower() in _TRUE_SPELLINGS
+    value = env.get(variable, "").strip().lower()
+    if value in AFFIRMATIVE_SPELLINGS:
+        return True
+    if value in NEGATIVE_SPELLINGS:
+        return False
+    raise RdbmsParamError(
+        RDB_RETURN_MALFORMED,
+        f"{variable} is set to a value this contract does not recognise. "
+        f"Use one of {', '.join(sorted(AFFIRMATIVE_SPELLINGS))} for yes or one "
+        f"of {', '.join(sorted(spelling for spelling in NEGATIVE_SPELLINGS if spelling))} "
+        f"for no, or leave it unset. The same closed set is read by "
+        f"harness/build_oracle.sh, harness/seed.sh, harness/reset_db.sh, "
+        f"harness/run_cobol_scenario.sh and harness/run_python_scenario.sh, so "
+        f"one exported value means one thing everywhere.",
+    )
+
+
+def _optional_seconds(
+    env: Mapping[str, str], variable: str, default: int
+) -> int:
+    """Read one finite, positive timeout in whole seconds.
+
+    THE DEFAULT IS FINITE AND THERE IS NO SPELLING FOR "NO TIMEOUT" (finding
+    F-05). A connect, read or write with no deadline turns an unreachable or wedged
+    server into a process that never returns, which outside the harness's outer
+    deadline is indistinguishable from a long posting run. The value is a
+    DEPLOYMENT setting, exactly as the six connection parameters are: it changes no
+    posted figure, no status and no statement, so two runs of one scenario against
+    a healthy server resolve identically whatever it is set to (rule R-6).
+
+    Args:
+        env: The mapping to read from.
+        variable: The variable name.
+        default: The value used when the variable is absent or blank.
+
+    Returns:
+        The configured whole-second budget, or ``default``.
+
+    Raises:
+        RdbmsParamError: The value is not a positive whole number of seconds, or
+            exceeds :data:`_TIMEOUT_CEILING_SECONDS`. A malformed budget is
+            refused rather than silently replaced, because a deployment that
+            asked for a bound is entitled to know its request was not honoured.
+    """
+    raw = env.get(variable, "").strip()
+    if not raw:
+        return default
+    try:
+        seconds = int(raw, 10)
+    except ValueError as exc:
+        raise RdbmsParamError(
+            f"{variable} must be a whole number of seconds; it is {raw!r}",
+            RDB_RETURN_MALFORMED,
+        ) from exc
+    if seconds <= 0 or seconds > _TIMEOUT_CEILING_SECONDS:
+        raise RdbmsParamError(
+            f"{variable} must be between 1 and {_TIMEOUT_CEILING_SECONDS} "
+            f"seconds; it is {seconds}",
+            RDB_RETURN_MALFORMED,
+        )
+    return seconds
 
 
 def resolve_transport_policy(
@@ -784,25 +1090,55 @@ def resolve_transport_policy(
             mapping and touches the real environment not at all.
 
     Returns:
-        The resolved declaration. Never raises: with nothing set every field is
-        at its default, which declares nothing.
+        The resolved declaration. With nothing set the two ``require_*`` fields
+        are ``True`` and the two opt-outs are ``False``, which is the fail-closed
+        policy argued on :class:`TransportPolicyParams`.
+
+    Raises:
+        RdbmsParamError: One of the four boolean settings carries text that is
+            neither affirmative nor negative - see :func:`read_declared_flag`
+            for why that is refused rather than guessed. An UNSET variable never
+            raises; it resolves to the fail-closed default.
     """
     mapping = os.environ if env is None else env
+    allow_plaintext = read_declared_flag(
+        mapping, TRANSPORT_ALLOW_PLAINTEXT_VARIABLE
+    )
+    allow_placeholder = read_declared_flag(
+        mapping, TRANSPORT_ALLOW_PLACEHOLDER_CREDENTIALS_VARIABLE
+    )
     return TransportPolicyParams(
         ca_file=_optional_path(mapping, TRANSPORT_CA_VARIABLE),
         certificate_file=_optional_path(mapping, TRANSPORT_CERTIFICATE_VARIABLE),
         key_file=_optional_path(mapping, TRANSPORT_KEY_VARIABLE),
-        isolated_oracle=_optional_flag(
-            mapping, TRANSPORT_ISOLATED_ORACLE_VARIABLE
+        isolated_oracle=allow_plaintext,
+        #  FAIL CLOSED UNLESS DECLARED, and strictness outranks permission: an
+        #  explicit `ACAS_DB_REQUIRE_TLS` refuses even where the plaintext
+        #  declaration was made, so a deployment that wants no unencrypted path
+        #  cannot have one granted by a stale variable in its environment.
+        require_encrypted_transport=(
+            read_declared_flag(mapping, TRANSPORT_REQUIRE_ENCRYPTION_VARIABLE)
+            or not allow_plaintext
         ),
-        require_encrypted_transport=_optional_flag(
-            mapping, TRANSPORT_REQUIRE_ENCRYPTION_VARIABLE
+        require_declared_placeholder_credentials=(
+            read_declared_flag(
+                mapping, TRANSPORT_REQUIRE_DECLARED_CREDENTIALS_VARIABLE
+            )
+            or not allow_placeholder
         ),
-        require_declared_placeholder_credentials=_optional_flag(
-            mapping, TRANSPORT_REQUIRE_DECLARED_CREDENTIALS_VARIABLE
+        allow_frozen_placeholder_credentials=allow_placeholder,
+        #  THE THREE DRIVER DEADLINES, always finite. The frozen C interface passes
+        #  none, so a wedged server blocks the compiled program for ever; that
+        #  produces no different table state, only a run that never ends, so each
+        #  deadline is bounded by default and configurable from the contract.
+        connect_timeout_seconds=_optional_seconds(
+            mapping, TRANSPORT_CONNECT_TIMEOUT_VARIABLE, CONNECT_TIMEOUT_DEFAULT
         ),
-        allow_frozen_placeholder_credentials=_optional_flag(
-            mapping, TRANSPORT_ALLOW_PLACEHOLDER_CREDENTIALS_VARIABLE
+        read_timeout_seconds=_optional_seconds(
+            mapping, TRANSPORT_READ_TIMEOUT_VARIABLE, READ_TIMEOUT_DEFAULT
+        ),
+        write_timeout_seconds=_optional_seconds(
+            mapping, TRANSPORT_WRITE_TIMEOUT_VARIABLE, WRITE_TIMEOUT_DEFAULT
         ),
     )
 

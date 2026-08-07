@@ -59,6 +59,43 @@ readonly ACAS_REQUIRED_COBC_VERSION='3.2'
 readonly ACAS_PRESQL2_SHA256_EXPECTED='638db9530d2fe008fbb46cf8600b9406f6f780c9fc59d0e0c94e868b4d615475'
 readonly ACAS_PRESQL2_ARCHIVE_ROOT='presql2-package'
 
+# =============================================================================
+# THE FOUR MEMBER DIGESTS -- SO THAT A REUSED PACKAGE IS AS PROVABLE AS AN UNPACKED
+# ONE
+#
+# ⭐ WHAT THIS CLOSES. Step 1 verified the vendored archive's digest and then audited
+# it member by member -- but ONLY on the branch that unpacks it. The other branch
+# reuses an already-unpacked directory, and that branch is the DEFAULT: the image
+# unpacks to /opt/presql2-package at build time, so an ordinary run never reached the
+# digest check at all. `ACAS_PRESQL2_PACKAGE=DIR' then let any directory take its
+# place. Between them, the two decided WHAT THE ORACLE IS -- step 2 compiles
+# `cobmysqlapi38.c' from that directory and links the result into every bridge, and
+# step 3 compiles `presql2.cbl' into the translator that generates every bridge's
+# SQL -- with nothing verifying either file.
+#
+# So the four members every later step depends on carry their own pinned digests, and
+# they are verified on BOTH branches. These are properties of the pinned archive
+# above rather than independent choices: extract it and hash the members and you get
+# exactly these. Replacing the archive means updating five constants, not one, and
+# that is the point -- each one names a file whose content decides what gets built.
+# =============================================================================
+readonly ACAS_PRESQL2_MEMBER_DIGESTS=(
+  'cobmysqlapi38.c:7c6055d90c96ae472ca9439eb94825743913d7f9d43fb79a15ef677f2fab01be'
+  'cobmysqlapi38.sh:33dbc2558870ee3c672006fffc217505a59f2e331b5130035af988d03d39f6d6'
+  'presql2.cbl:c42791cf4d9be038959280c4c8151e4eda268a3daf003e625d003f277263e986'
+  'presql2.sh:976d2ed231eb5a57a7ac2363e5b57ce842355db9acf685da1cc4461dd615ba17'
+)
+
+# The provenance sidecar a pre-built cobmysqlapi.o must carry to be reused. A
+# compiled object's digest is NOT reproducible -- it depends on the compiler, its
+# flags and the host -- so it cannot be pinned, and pinning it would be a fiction.
+# What CAN be established is the digest of the source it was compiled from, and
+# whatever builds the object records it here. An object without this record is not
+# reused: step 2 compiles its own from the source it has just verified, which is
+# always available, so refusing costs one gcc invocation and buys a provable chain
+# from the pinned archive to every linked bridge.
+readonly ACAS_COBMYSQLAPI_PROVENANCE_SUFFIX='.source-sha256'
+
 # Finite deadlines -- every external command this script spawns runs under one.
 readonly ACAS_TIMEOUT_MAX=86400     # 24h -- an upper bound on any single budget
 ACAS_TIMEOUT_GRACE="${ACAS_TIMEOUT_GRACE-}"               # resolved by acas_resolve_deadlines
@@ -298,6 +335,72 @@ acas_join_re() {
   printf '%s' "$*"
 }
 
+# ---------------------------------------------------------------------------
+#  THE TARGET, DESCRIBED WITHOUT NAMING IT (finding F-39)
+#
+#  This script's transcripts are retained evidence: they are read by operators,
+#  attached to reports and, on the Python side, replayed to a container log. A line
+#  reading `acas@mariadb:3306/ACASDB` puts the deployment's topology and the database
+#  ACCOUNT NAME into all of that, which is half of a credential and a map of the
+#  network for anybody who reads it (CWE-532). Nothing downstream needs the names:
+#  what a reader needs is WHICH KIND of target this was, and whether two runs used
+#  the SAME one.
+#
+#  So the transcript carries a CATEGORY and a stable FINGERPRINT. The category is
+#  derived from the host alone and is the same vocabulary
+#  `acas_posting/dal/connection.py` uses. The fingerprint is the first twelve hex
+#  digits of a SHA-256 over `host:port/schema` - never the password and never the
+#  account name, neither of which is in the digest at all - so two runs against one
+#  target print the same value and a run against a different target prints a
+#  different one, while the value itself discloses no name. The full values remain in the environment, where the tools that
+#  need them read them.
+# ---------------------------------------------------------------------------
+acas_target_category() {
+  local host="${ACAS_DB_HOST-}" socket="${ACAS_DB_SOCKET-}"
+
+  if [[ -n "$socket" && "$socket" != '0' && "$socket" != 'null' && "$socket" != 'NULL' ]]; then
+    printf 'local-socket'
+    return 0
+  fi
+  case "${host,,}" in
+    ''|localhost|127.0.0.1|::1|'[::1]') printf 'loopback-tcp' ;;
+    mariadb|mysql|db)                   printf 'container-network' ;;
+    *)                                  printf 'network-tcp' ;;
+  esac
+}
+
+acas_target_fingerprint() {
+  local raw digest
+
+  # The ACCOUNT IS DELIBERATELY NOT IN THE DIGEST. Two reasons, both load-bearing.
+  # The digest identifies the TARGET, so harness/seed.sh (which connects as the
+  # application account) and harness/reset_db.sh (which connects as the admin
+  # account) print the SAME fingerprint for the same database -- which is exactly
+  # what makes two transcripts comparable. And an account name that is never an
+  # input can never be recovered from the output, not even by a reader who can
+  # enumerate candidate names.
+  raw="${ACAS_DB_HOST-}:${ACAS_DB_PORT-}/${ACAS_DB_NAME-}"
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    digest="$(printf '%s' "$raw" | sha256sum 2>/dev/null)" || digest=''
+  elif command -v python3 >/dev/null 2>&1; then
+    digest="$(printf '%s' "$raw" | python3 -c 'import hashlib,sys; sys.stdout.write(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())' 2>/dev/null)" || digest=''
+  else
+    digest=''
+  fi
+  digest="${digest%% *}"
+  printf '%s' "${digest:0:12}"
+}
+
+# The one line every stage prints instead of the topology: a category, a
+# fingerprint, and nothing that names anything.
+acas_target_description() {
+  printf '%s target#%s' \
+    "$(acas_target_category)" "$(acas_target_fingerprint)"
+}
+
+# acas_assert_outside_repo <label> <path> Nothing this script writes may land
+# inside $ACAS_REPO.
 # Join the remaining arguments with single spaces for human-readable output.
 acas_join_words() {
   local IFS=' '
@@ -477,13 +580,28 @@ acas_run_deadline() {
 
   acas_deadline_prefix "$budget"
 
+  # STDIN IS CLOSED FOR EVERY DELEGATED CHILD (finding F-30)
+  #
+  # This script is run non-interactively -- from harness/docker-compose.yml, from a
+  # `docker compose run -T', from tests/conftest.py -- and it delegates to programs
+  # that WILL read stdin if it is a terminal or a pipe that never closes. presql2
+  # prompts on a parameter it cannot resolve; cobc reads a program from stdin when
+  # given `-' ; a mariadb client with no --execute reads statements from stdin
+  # forever. Any of those turns a build into a hang whose only visible symptom is
+  # the deadline firing minutes later with a timeout classification that says
+  # nothing about the real cause.
+  #
+  # `< /dev/null' makes every one of them see immediate EOF, so a program that
+  # wanted input fails fast and says what it wanted. The deadlines stay exactly as
+  # they were: they remain the fallback for a child that genuinely spins without
+  # reading anything.
   local started rc=0 elapsed
   started="$SECONDS"
   if [[ "$workdir" == '-' ]]; then
-    "${ACAS_DEADLINE_ARGV[@]}" "$@" || rc=$?
+    "${ACAS_DEADLINE_ARGV[@]}" "$@" < /dev/null || rc=$?
   else
     # `exec' so the subshell process BECOMES timeout.
-    ( cd "$workdir" && exec "${ACAS_DEADLINE_ARGV[@]}" "$@" ) || rc=$?
+    ( cd "$workdir" && exec "${ACAS_DEADLINE_ARGV[@]}" "$@" ) < /dev/null || rc=$?
   fi
   elapsed=$(( SECONDS - started ))
 
@@ -502,7 +620,7 @@ acas_file_sha256() {
   acas_deadline_prefix "$ACAS_TIMEOUT_PROBE"
 
   if acas_have sha256sum; then
-    digest="$("${ACAS_DEADLINE_ARGV[@]}" sha256sum -- "$path")" || return 1
+    digest="$("${ACAS_DEADLINE_ARGV[@]}" sha256sum -- "$path" < /dev/null)" || return 1
     printf '%s' "${digest%% *}"
     return 0
   fi
@@ -564,6 +682,93 @@ acas_assert_archive_digest() {
       'agree.'
   fi
   acas_log "archive digest verified: sha256 $actual"
+}
+
+# acas_pinned_member_digest <member-name> Echo the digest ACAS_PRESQL2_MEMBER_DIGESTS
+# pins for one member of the vendored archive. Fails when the member is not pinned,
+# so a caller can never silently compare against an empty expectation.
+acas_pinned_member_digest() {
+  local wanted="$1" entry
+  for entry in "${ACAS_PRESQL2_MEMBER_DIGESTS[@]}"; do
+    if [[ "${entry%%:*}" == "$wanted" ]]; then
+      printf '%s' "${entry#*:}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# -----------------------------------------------------------------------------
+# PROVENANCE FOR A REUSED BUILD PRODUCT
+#
+# Steps 2 and 3 each prefer an artifact something else already built -- the object at
+# ACAS_COBMYSQLAPI_OBJ, and whatever `presql2' the PATH resolves. Both are reused
+# because rebuilding them costs time the parity runs do not need to spend, and in the
+# shipped image both were built by harness/Dockerfile.gnucobol from the same pinned
+# archive this script verifies.
+#
+# What could not be checked is WHICH source they came from. A compiled artifact's own
+# digest is not reproducible -- it moves with the compiler, its flags, its libraries
+# and the host -- so pinning it would be a fiction that failed on every machine but
+# one. What IS stable is the digest of the SOURCE it was compiled from, so whatever
+# builds one of these artifacts records that digest in a sidecar beside it, and these
+# two helpers write and read it. An artifact with no sidecar, or with one naming a
+# different source, is not trusted: the caller rebuilds from the source step 1 has
+# just verified.
+# -----------------------------------------------------------------------------
+
+# acas_record_artifact_provenance <artifact> <source-digest> Best effort by design:
+# the sidecar is an optimisation for the NEXT run, and failing to write it must never
+# fail a build that has otherwise succeeded (the artifact directory may be read-only,
+# and frequently is).
+acas_record_artifact_provenance() {
+  local artifact="$1" digest="$2"
+  local sidecar="${artifact}${ACAS_COBMYSQLAPI_PROVENANCE_SUFFIX}"
+
+  if printf '%s\n' "$digest" > "$sidecar" 2>/dev/null; then
+    acas_log "recorded provenance: $sidecar -> $digest"
+    return 0
+  fi
+  acas_note "provenance for $artifact could not be recorded at $sidecar (not writable); the next run will rebuild rather than reuse"
+  return 0
+}
+
+# acas_artifact_provenance_holds <artifact> <expected-source-digest> <source-name>
+# <what>  0 when <artifact> carries a sidecar naming <expected-source-digest>. Warns
+# and returns 1 otherwise -- never dies, because every caller has a working
+# alternative: build its own from the verified source.
+acas_artifact_provenance_holds() {
+  local artifact="$1" expected="$2" source_name="$3" what="$4"
+  local sidecar="${artifact}${ACAS_COBMYSQLAPI_PROVENANCE_SUFFIX}"
+  local recorded=''
+
+  if [[ ! -f "$sidecar" ]]; then
+    acas_warn \
+      "$artifact carries no provenance record, so it will NOT be reused." \
+      "  expected a sidecar at: $sidecar" \
+      "  naming the sha256 of:  $source_name" \
+      "$what, so it decides what the oracle IS -- and an artifact whose source" \
+      'cannot be named cannot be shown to be the one this checkout pins. Rebuilding' \
+      'it from the source step 1 has just verified costs one compile and makes the' \
+      'chain from the pinned archive to the built oracle provable end to end.'
+    return 1
+  fi
+
+  # First whitespace-delimited token, so a `sha256sum'-style line works too.
+  read -r recorded _ < "$sidecar" || recorded=''
+  recorded="${recorded,,}"
+
+  if [[ "$recorded" != "${expected,,}" ]]; then
+    acas_warn \
+      "$artifact was built from a different $source_name, so it will NOT be reused." \
+      "  its sidecar names: ${recorded:-<empty>}" \
+      "  this checkout pins: $expected" \
+      'Rebuilding from the verified source rather than trusting the mismatch.'
+    return 1
+  fi
+
+  acas_log "provenance verified: $artifact was built from $source_name sha256 $recorded"
+  return 0
 }
 
 # acas_extract_audited_zip <archive> <destination> <expected-root> Extract
@@ -946,8 +1151,17 @@ Optional environment:
                              Rejected credentials are a configuration error,
                              not a readiness state, so they are NOT retried for
                              the full timeout
-  ACAS_PRESQL2_PACKAGE=DIR   reuse an already-unpacked preSQL package
-  ACAS_COBMYSQLAPI_OBJ=FILE  reuse an already-compiled cobmysqlapi.o
+  ACAS_PRESQL2_PACKAGE=DIR   reuse an already-unpacked preSQL package. DIR is
+                             not taken on trust: the four members later steps
+                             compile -- cobmysqlapi38.c, cobmysqlapi38.sh,
+                             presql2.cbl, presql2.sh -- are hashed and must match
+                             the digests pinned in this script, whichever branch
+                             step 1 takes
+  ACAS_COBMYSQLAPI_OBJ=FILE  reuse an already-compiled cobmysqlapi.o. Reused only
+                             when FILE.source-sha256 names the pinned
+                             cobmysqlapi38.c digest. Without that record the
+                             object is rebuilt from the verified source rather
+                             than trusted -- one gcc invocation
   ACAS_PRESQL2_DBNAME=NAME   schema presql2 connects to (default
                              information_schema; see acas_write_presql2_param)
   ACAS_MYSQL_PREFIX=DIR      checked for agreement with the frozen literal
@@ -956,7 +1170,13 @@ Optional environment:
                              SHA-256 is HEX instead of the digest pinned in this
                              script. Announced as a warning and replayed in the
                              closing summary: the archive decides what the
-                             oracle is, so redefining it is never silent
+                             oracle is, so redefining it is never silent. It
+                             admits the archive's IDENTITY only -- the four
+                             member digests are still enforced, so a genuine
+                             replacement means updating
+                             ACAS_PRESQL2_MEMBER_DIGESTS as well. That is
+                             deliberate: this variable cannot become a way to
+                             feed unpinned C or COBOL into the oracle
 
 Finite deadlines. Every external command that compiles, extracts, copies in
 bulk, installs, or talks to the database runs under one, and there is
@@ -1003,6 +1223,16 @@ and 3, so an unverified archive means an unverified oracle):
                              package. Must be 64 lowercase hex digits.
                              harness/Dockerfile.gnucobol unpacks the same
                              archive and its declared digest must agree
+  The pinned archive digest stays authoritative regardless of which branch step
+  1 takes. Whether the archive is unpacked here or an already-unpacked directory
+  is reused via ACAS_PRESQL2_PACKAGE, the four members steps 2 and 3 compile are
+  hashed against ACAS_PRESQL2_MEMBER_DIGESTS. A build product reused instead of
+  rebuilt -- the object at ACAS_COBMYSQLAPI_OBJ, or a `presql2' already on the
+  PATH -- must carry a NAME.source-sha256 sidecar naming the pinned digest of
+  the source it came from; a compiled artifact's own digest moves with the
+  compiler and the host, so the source digest is the only honest thing to pin.
+  An artifact that cannot name its source is rebuilt from the source step 1 has
+  just verified, never trusted.
 
 Exit codes:
   0 success   64 usage   65 precondition   66 database   67 build tree
@@ -1164,12 +1394,22 @@ acas_assert_environment() {
   fi
   # THE RANGE, not merely the character class -- and here the consequence is
   # worse than a failed connection.
-  if (( 10#$ACAS_DB_PORT < 1 || 10#$ACAS_DB_PORT > 65535 )); then
+  # THE RANGE IS THE FROZEN CARRIER'S, 1..9999, NOT THE TCP RANGE.
+  # `LK-Port-Number pic x(4)' [common/acas-get-params.cbl:L158] and
+  # `01 Ws-Mysql-Port-Number pic x(4)' [copybooks/mysql-variables.cpy:L91] are
+  # FOUR characters, and every bridge STRINGs DB-Port into the second of them
+  # [common/glpostingMT.cbl:L410-L413]. So a five-digit port reaches the compiled
+  # cycle TRUNCATED - 13306 becomes 1330 - while this script would probe and drive
+  # the untruncated one, and the two sides of the comparison would be talking to
+  # different servers. Refused here rather than truncated silently.
+  if (( 10#$ACAS_DB_PORT < 1 || 10#$ACAS_DB_PORT > 9999 )); then
     acas_die "$EX_PRECONDITION" \
-      "ACAS_DB_PORT must be between 1 and 65535; got '$ACAS_DB_PORT'." \
-      'It is written verbatim into presql2.param and converted with atoi(), which' \
-      'has no error return [presql2-latest.zip:presql2-package/cobmysqlapi38.c:L511], so an' \
-      'out-of-range value becomes an arbitrary port rather than an error.'
+      "ACAS_DB_PORT must be between 1 and 9999; got '$ACAS_DB_PORT'." \
+      'The frozen carrier holds FOUR characters - LK-Port-Number pic x(4)' \
+      '[common/acas-get-params.cbl:L158] and Ws-Mysql-Port-Number pic x(4)' \
+      '[copybooks/mysql-variables.cpy:L91] - so a five-digit port would reach' \
+      'the compiled cycle truncated while this script used the whole value.' \
+      'harness/docker-compose.yml publishes 3306, which is what the stack uses.'
   fi
 
   # Every card written into presql2.param is copied with strncpy(..., 32) at
@@ -1241,12 +1481,18 @@ acas_assert_environment() {
   acas_log "ACAS_BUILD = $ACAS_BUILD (writable build tree; every artifact lands here)"
   acas_log "ACAS_DATA  = $ACAS_DATA"
   acas_log "ACAS_OUT   = $ACAS_OUT"
-  acas_log "database   = ${ACAS_DB_USER}@${ACAS_DB_HOST}:${ACAS_DB_PORT}/${ACAS_DB_NAME}"
+  # A CATEGORY and a FINGERPRINT, never the topology (F-39). See
+  # acas_target_description: the transcript of a build is retained evidence, and a
+  # topology triple in it is a map of the deployment plus half a credential.
+  acas_log "database   = $(acas_target_description)"
   if [[ -n "${ACAS_DB_SOCKET-}" ]]; then
-    acas_log "unix socket = ${ACAS_DB_SOCKET}"
+    # The PRESENCE of a socket is what changes behaviour downstream (it makes the
+    # target local, which acas_target_category already reports); the PATH does not.
+    acas_log 'unix socket = present (the path is not printed; DBSOCKET takes it from the environment)'
   else
     acas_log 'unix socket = (empty; DBSOCKET=NULL will be written -- TCP only)'
   fi
+  acas_note 'no account name, host, port or schema is printed: the transcript is retained evidence'
   acas_note 'the password is never printed, never logged and never passed in argv'
 }
 
@@ -1307,8 +1553,9 @@ acas_assert_safe_build_path() {
   # exception below accepts ANY dedicated mount point that is not a distribution
   # directory, and harness/docker-compose.yml mounts THREE such volumes on this
   # service - `acas_build:/build', `acas_data:/data' and `acas_out:/out'
-  # [harness/docker-compose.yml:L869-L871] - all four paths being exported as
-  # environment variables side by side [:L1024-L1027]. So a single mistyped or
+  # [harness/docker-compose.yml "/repo is READ-ONLY"] - all four paths being
+  # exported as environment variables side by side, under that file's
+  # "ENVIRONMENT -- the canonical ACAS_* contract" heading. So a single mistyped or
   # copy-pasted assignment, `ACAS_BUILD=$ACAS_DATA', passed every guard and then
   # had its children recursively deleted: the seeded fixtures, or the evidence a
   # completed comparison had just written.
@@ -1630,7 +1877,7 @@ acas_assert_toolchain() {
   deadline=("${ACAS_DEADLINE_ARGV[@]}")
 
   local cobc_line
-  cobc_line="$("${deadline[@]}" cobc --version 2>&1 | head -n 1)"
+  cobc_line="$("${deadline[@]}" cobc --version < /dev/null 2>&1 | head -n 1)"
   if [[ ! "$cobc_line" =~ ^cobc\ \(GnuCOBOL\)\ ${ACAS_REQUIRED_COBC_VERSION}(\.[0-9]+)*$ ]]; then
     acas_die "$EX_PRECONDITION" \
       "cobc does not report GnuCOBOL ${ACAS_REQUIRED_COBC_VERSION}." \
@@ -1743,11 +1990,27 @@ acas_target_is_local() {
   return 1
 }
 
+# ONE KEY, ONE CLOSED SET, AND UNRECOGNISED TEXT IS REFUSED.
+# `1|true|yes|on' is affirmative and `|0|false|no|off' is negative, matched
+# case-insensitively; the identical set lives in
+# acas_posting/cli/rdbms_params.py as AFFIRMATIVE_SPELLINGS / NEGATIVE_SPELLINGS
+# and is read there by read_declared_flag, so one exported value cannot mean two
+# different things to the two halves of the harness. Anything else STOPS the run
+# rather than resolving to either answer: the value governs whether a credential
+# and every posted figure may cross a network in the clear, and only the operator
+# who typed it knows what was meant. The message never echoes the value.
 acas_plaintext_declared() {
-  case "${ACAS_DB_ALLOW_PLAINTEXT-}" in
+  local declared="${ACAS_DB_ALLOW_PLAINTEXT-}"
+  case "${declared,,}" in
     1|true|yes|on) return 0 ;;
+    ''|0|false|no|off) return 1 ;;
   esac
-  return 1
+  acas_die "$EX_USAGE" \
+    'ACAS_DB_ALLOW_PLAINTEXT is set to a value this contract does not recognise.' \
+    'Use 1, true, yes or on for yes; 0, false, no or off for no; or leave it' \
+    'unset. The same closed set is read by harness/build_oracle.sh,' \
+    'harness/seed.sh, harness/reset_db.sh, harness/run_cobol_scenario.sh,' \
+    'harness/run_python_scenario.sh and acas_posting/cli/rdbms_params.py.'
 }
 
 # Decide, ONCE and BEFORE ANYTHING CONNECTS, which client transports this
@@ -1778,7 +2041,7 @@ acas_assert_transport_policy() {
 
   if [[ -z "$ca" ]]; then
     acas_die "$EX_PRECONDITION" \
-      "the target ${ACAS_DB_HOST}:${ACAS_DB_PORT} is not local and no verified TLS is configured." \
+      "the target ($(acas_target_description)) is not local and no verified TLS is configured." \
       'The credentialed probe authenticates with the same account presql2 uses, so' \
       'the connection must be protected. Either set ACAS_DB_TLS_CA to the PEM' \
       'bundle the server certificate chains to, or -- if this really is an isolated' \
@@ -1808,8 +2071,12 @@ try:
 except ValueError:
     print(f"port is not an integer: {sys.argv[2]!r}", file=sys.stderr)
     sys.exit(2)
-if not 1 <= port <= 65535:
-    print(f"port out of range 1..65535: {port}", file=sys.stderr)
+# 1..9999 is the FROZEN CARRIER's range: LK-Port-Number pic x(4)
+# [common/acas-get-params.cbl:L158] and Ws-Mysql-Port-Number pic x(4)
+# [copybooks/mysql-variables.cpy:L91] hold four characters, so a five-digit port
+# would be probed here in full and truncated inside the compiled cycle.
+if not 1 <= port <= 9999:
+    print(f"port out of range 1..9999 (the frozen pic x(4) carrier): {port}", file=sys.stderr)
     sys.exit(2)
 try:
     with socket.create_connection((host, port), timeout=5):
@@ -1865,7 +2132,7 @@ acas_db_credentialed_probe() {
         out=''
         rc=0
         started="$SECONDS"
-        out="$(MYSQL_PWD="$ACAS_DB_PASSWORD" "${argv[@]}" 2>&1)" || rc=$?
+        out="$(MYSQL_PWD="$ACAS_DB_PASSWORD" "${argv[@]}" < /dev/null 2>&1)" || rc=$?
         elapsed=$(( SECONDS - started ))
         if (( rc == 0 )); then
           return 0
@@ -1902,7 +2169,7 @@ acas_db_credentialed_probe() {
         out=''
         rc=0
         started="$SECONDS"
-        out="$(MYSQL_PWD="$ACAS_DB_PASSWORD" "${argv[@]}" 2>&1)" || rc=$?
+        out="$(MYSQL_PWD="$ACAS_DB_PASSWORD" "${argv[@]}" < /dev/null 2>&1)" || rc=$?
         elapsed=$(( SECONDS - started ))
         if (( rc == 0 )); then
           return 0
@@ -1935,11 +2202,13 @@ acas_wait_for_database() {
   fi
 
   local interval=3 elapsed=0
-  acas_log "waiting up to ${timeout}s for ${ACAS_DB_HOST}:${ACAS_DB_PORT} to accept connections"
+  acas_log "waiting up to ${timeout}s for $(acas_target_description) to accept connections"
   while ! acas_db_tcp_probe; do
     if (( elapsed >= timeout )); then
       acas_die "$EX_DATABASE" \
-        "MariaDB at ${ACAS_DB_HOST}:${ACAS_DB_PORT} did not accept a TCP connection within ${timeout}s." \
+        "the $(acas_target_description) database did not accept a TCP connection within ${timeout}s." \
+        'The host and port are deliberately not printed (F-39): read them from' \
+        'ACAS_DB_HOST and ACAS_DB_PORT in this environment.' \
         'Step 4 cannot run without it: [common/comp-common.sh:L25] invokes presql2,' \
         'which opens a live connection at [presql2-latest.zip:presql2-package/presql2.cbl:L784].' \
         'Start the service (docker compose -f harness/docker-compose.yml up -d mariadb)' \
@@ -1966,9 +2235,9 @@ acas_wait_for_database() {
     case "$rc" in
       0)
         if (( elapsed == 0 )); then
-          acas_log "authenticated as ${ACAS_DB_USER} against ${ACAS_PRESQL2_DBNAME:-information_schema} -- server is ready"
+          acas_log "authenticated against $(acas_target_description), probe schema ${ACAS_PRESQL2_DBNAME:-information_schema} -- server is ready"
         else
-          acas_log "authenticated as ${ACAS_DB_USER} after a further ${elapsed}s"
+          acas_log "authenticated against $(acas_target_description) after a further ${elapsed}s"
         fi
         return 0
         ;;
@@ -1980,14 +2249,15 @@ acas_wait_for_database() {
       2)
         if (( denied_for >= auth_grace )); then
           acas_die "$EX_DATABASE" \
-            "MariaDB at ${ACAS_DB_HOST}:${ACAS_DB_PORT} REJECTED the credentials for user '${ACAS_DB_USER}'." \
+            "the $(acas_target_description) database REJECTED the credentials it was given." \
             "The server is alive and accepting connections, so this is a credential" \
             "or grant problem, not a readiness problem -- waiting longer will not fix it." \
             "presql2 authenticates with exactly these values via read_params" \
             '[presql2-latest.zip:presql2-package/cobmysqlapi38.c:L114-L176], so step 4 would fail on every' \
             "one of the 28 bridges in [common/comp-common.sh:L25]." \
-            "Check ACAS_DB_USER and ACAS_DB_PASSWORD, and that the user is granted" \
-            "access to ${ACAS_PRESQL2_DBNAME:-information_schema} and ${ACAS_DB_NAME}." \
+            "Check ACAS_DB_USER and ACAS_DB_PASSWORD in this environment -- neither is" \
+            "printed here (F-39) -- and that the account is granted access to" \
+            "${ACAS_PRESQL2_DBNAME:-information_schema} and to the target schema." \
             "$(acas_diag_summary "$ACAS_DB_PROBE_DIAG")"
         fi
         if (( denied_for == 0 )); then
@@ -2862,14 +3132,45 @@ acas_step1_unpack_presql2() {
     acas_log "unpacked to $ACAS_PRESQL2_DIR"
   fi
 
-  # The four members every later step depends on.
-  local required
-  for required in cobmysqlapi38.c cobmysqlapi38.sh presql2.cbl presql2.sh; do
+  # -------------------------------------------------------------------------
+  # THE FOUR MEMBERS EVERY LATER STEP DEPENDS ON, PRESENT *AND* VERIFIED.
+  #
+  # Present was never enough. Step 2 compiles `cobmysqlapi38.c' and links the object
+  # into every bridge, handler and loader; step 3 compiles `presql2.cbl' into the
+  # translator that generates every bridge's SQL. Those two files decide what the
+  # oracle IS, and the oracle is the specification this whole migration is measured
+  # against -- so a run that reused a directory nothing had verified could not say
+  # what it had measured against.
+  #
+  # Verified on BOTH branches deliberately: the reuse branch above is the DEFAULT in
+  # the shipped image, so a check that ran only after an unpack would almost never
+  # run. See the ACAS_PRESQL2_MEMBER_DIGESTS declaration.
+  # -------------------------------------------------------------------------
+  local entry required expected actual
+  for entry in "${ACAS_PRESQL2_MEMBER_DIGESTS[@]}"; do
+    required="${entry%%:*}"
+    expected="${entry#*:}"
     [[ -f "$ACAS_PRESQL2_DIR/$required" ]] || acas_die "$EX_STEP1" \
       "$ACAS_PRESQL2_DIR/$required is missing." \
       'Steps 2 and 3 are built from these four files.'
+    actual="$(acas_file_sha256 "$ACAS_PRESQL2_DIR/$required")" || acas_die "$EX_STEP1" \
+      "could not hash $ACAS_PRESQL2_DIR/$required."
+    if [[ "$actual" != "$expected" ]]; then
+      acas_die "$EX_ARCHIVE" \
+        "$ACAS_PRESQL2_DIR/$required is not the member the pinned archive carries." \
+        "  expected: $expected" \
+        "  measured: $actual" \
+        'This file is compiled into the oracle -- cobmysqlapi38.c becomes the object' \
+        'linked into every bridge, presql2.cbl becomes the translator that generates' \
+        'every bridge'"'"'s SQL -- so the oracle would not be the system the checkout' \
+        'describes, and every parity verdict drawn from it would be measured against' \
+        'something else.' \
+        'If the archive was deliberately replaced, update both' \
+        'ACAS_PRESQL2_SHA256_EXPECTED and ACAS_PRESQL2_MEMBER_DIGESTS.'
+    fi
+    acas_log "verified: $required sha256 $actual"
   done
-  acas_log 'verified: cobmysqlapi38.c, cobmysqlapi38.sh, presql2.cbl and presql2.sh are present'
+  acas_log 'verified: all four members match the digests the pinned archive carries'
 
   # Two coexisting version strings. BOTH are true and NEITHER is resolved: the
   # package README records one, the translator's own WORKING-STORAGE another.
@@ -2884,10 +3185,29 @@ acas_step1_unpack_presql2() {
 acas_step2_build_cobmysqlapi() {
   acas_banner 2 'compile cobmysqlapi.o with the recovered build rule'
 
+  # The digest step 1 pinned and verified for the C source this object must come
+  # from. Every reuse decision below is measured against it.
+  local c_digest
+  c_digest="$(acas_pinned_member_digest 'cobmysqlapi38.c')" || acas_die "$EX_STEP2" \
+    'cobmysqlapi38.c is not pinned in ACAS_PRESQL2_MEMBER_DIGESTS.' \
+    'That array is what makes a reused object provable; do not remove entries from it.'
+
   local published="${ACAS_COBMYSQLAPI_OBJ:-/usr/local/lib/acas/cobmysqlapi.o}"
-  if [[ -s "$published" ]]; then
+  if [[ -s "$published" ]] \
+     && acas_artifact_provenance_holds "$published" "$c_digest" 'cobmysqlapi38.c' \
+          'The object is linked into every bridge, handler and loader'; then
     ACAS_COBMYSQLAPI_SRC="$published"
-    acas_log "reusing the object harness/Dockerfile.gnucobol already built: $published"
+    #  Say WHOSE object it is, not just that one was found. Crediting
+    #  harness/Dockerfile.gnucobol for an object that arrived by a redirected
+    #  ACAS_COBMYSQLAPI_OBJ would misstate provenance in the build log, and the
+    #  attestation this run publishes has to agree with what the log claims.
+    if [[ "$published" == "$ACAS_CANONICAL_COBMYSQLAPI_OBJ" ]]; then
+      acas_log "reusing the object harness/Dockerfile.gnucobol built from the vendored source: $published"
+    else
+      acas_log "reusing an OPERATOR-SUPPLIED object of unestablished origin: $published"
+      acas_log "  (ACAS_COBMYSQLAPI_OBJ points away from $ACAS_CANONICAL_COBMYSQLAPI_OBJ;"
+      acas_log '   this build will be attested as unable to produce evidence)'
+    fi
   else
     [[ -n "$ACAS_PRESQL2_DIR" && -f "$ACAS_PRESQL2_DIR/cobmysqlapi38.c" ]] \
       || acas_die "$EX_STEP2" \
@@ -2917,6 +3237,7 @@ acas_step2_build_cobmysqlapi() {
       '[presql2-latest.zip:presql2-package/cobmysqlapi38.sh]'
     ACAS_COBMYSQLAPI_SRC="$workdir/cobmysqlapi.o"
     acas_log "built $ACAS_COBMYSQLAPI_SRC ($(wc -c < "$ACAS_COBMYSQLAPI_SRC") bytes)"
+    acas_record_artifact_provenance "$ACAS_COBMYSQLAPI_SRC" "$c_digest"
   fi
 
   # SIX copies, one per compile directory.
@@ -2936,12 +3257,26 @@ acas_step2_build_cobmysqlapi() {
 acas_step3_build_presql2() {
   acas_banner 3 'build and install the presql2 translator'
 
-  if acas_have presql2; then
-    acas_log "presql2 is already on the PATH: $(command -v presql2)"
+  # The translator rewrites every common/*MT.scb into the common/*MT.cbl that is
+  # actually compiled, which means it AUTHORS the SQL every bridge issues. A reused
+  # one is therefore held to the same standard as the object in step 2: it is trusted
+  # only when it can name the presql2.cbl it was built from.
+  local cbl_digest
+  cbl_digest="$(acas_pinned_member_digest 'presql2.cbl')" || acas_die "$EX_STEP3" \
+    'presql2.cbl is not pinned in ACAS_PRESQL2_MEMBER_DIGESTS.' \
+    'That array is what makes a reused translator provable; do not remove entries from it.'
+
+  local existing=''
+  acas_have presql2 && existing="$(command -v presql2)"
+
+  if [[ -n "$existing" ]] \
+     && acas_artifact_provenance_holds "$existing" "$cbl_digest" 'presql2.cbl' \
+          'The translator generates the SQL inside every bridge'; then
+    acas_log "presql2 is already on the PATH: $existing"
   else
     [[ -n "$ACAS_PRESQL2_DIR" && -f "$ACAS_PRESQL2_DIR/presql2.cbl" ]] \
       || acas_die "$EX_STEP3" \
-        'presql2 is not on the PATH and the unpacked package is unavailable.' \
+        'presql2 cannot be trusted or is absent, and the unpacked package is unavailable.' \
         'Run step 1 first (omit --from/--only, or use --from 1).'
     [[ -n "$ACAS_COBMYSQLAPI_SRC" && -s "$ACAS_COBMYSQLAPI_SRC" ]] \
       || acas_die "$EX_STEP3" \
@@ -2975,13 +3310,27 @@ acas_step3_build_presql2() {
     [[ -s "$workdir/presql2" ]] || acas_die "$EX_STEP3" \
       "cobc reported success but $workdir/presql2 was not produced." \
       '[presql2-latest.zip:presql2-package/presql2.sh]'
-    acas_run_deadline "$ACAS_TIMEOUT_PROBE" ACAS_TIMEOUT_PROBE \
-      'installing presql2' "$EX_STEP3" - \
-      -- install -m 0755 "$workdir/presql2" /usr/local/bin/presql2 \
-      || acas_die "$EX_STEP3" \
-      'could not install presql2 into /usr/local/bin.' \
-      'Root privileges are required, or place it on the PATH yourself.'
-    acas_log 'installed /usr/local/bin/presql2'
+    # Installing into /usr/local/bin is preferred, because the frozen
+    # [common/comp-common.sh:L25] invokes `presql2' by name. It is NOT required: the
+    # runtime account is deliberately unprivileged, and a rebuild triggered by a
+    # missing provenance record must not need root that the build never needed
+    # before. Prepending the freshly built copy to PATH resolves the same name for
+    # every child process, which is all the frozen script asks of it.
+    if acas_run_deadline "$ACAS_TIMEOUT_PROBE" ACAS_TIMEOUT_PROBE \
+         'installing presql2' "$EX_STEP3" - \
+         -- install -m 0755 "$workdir/presql2" /usr/local/bin/presql2; then
+      acas_log 'installed /usr/local/bin/presql2'
+      acas_record_artifact_provenance /usr/local/bin/presql2 "$cbl_digest"
+    else
+      PATH="$workdir:$PATH"
+      export PATH
+      acas_warn \
+        'could not install presql2 into /usr/local/bin (root is required there).' \
+        "Using the copy just built instead: $workdir/presql2" \
+        'It is first on PATH, so [common/comp-common.sh:L25] resolves this one by' \
+        'name for the rest of this run.'
+      acas_record_artifact_provenance "$workdir/presql2" "$cbl_digest"
+    fi
 
     # bldcopy2 is built for completeness.
     if [[ -f "$ACAS_PRESQL2_DIR/bldcopy2.cbl" ]] && ! acas_have bldcopy2; then
@@ -2998,7 +3347,7 @@ acas_step3_build_presql2() {
           && exec "${ACAS_DEADLINE_ARGV[@]}" \
                env "COBCPY=$workdir" "COB_COPY_DIR=$workdir" \
                cobc -x bldcopy2.cbl cobmysqlapi.o -L /usr/local/mysql/lib -lmysqlclient
-      ) || bldcopy_rc=$?
+      ) < /dev/null || bldcopy_rc=$?
       bldcopy_elapsed=$(( SECONDS - bldcopy_started ))
       if acas_is_timeout_status "$bldcopy_rc" "$bldcopy_elapsed" "$ACAS_TIMEOUT_COMPILE"; then
         acas_warn \
@@ -3113,8 +3462,16 @@ acas_write_presql2_param() {
   } >> "$target" || acas_die "$EX_STEP4" "could not write $target."
 
   acas_log "wrote $target (0600, six cards in the order read_params requires)"
-  acas_log "  DBHOST=${ACAS_DB_HOST}  DBUSER=${ACAS_DB_USER}  DBPASSWD=<redacted>"
-  acas_log "  DBNAME=${dbname}  DBPORT=${ACAS_DB_PORT}  DBSOCKET=${socket}"
+  # The CARD NAMES and their PRESENCE are what a reader has to be able to check --
+  # read_params is positional, so a missing or reordered card is the failure mode.
+  # The VALUES are the deployment's identity and are not printed (F-39): the file
+  # itself is 0600 and is shredded by the EXIT trap, and the values come from the
+  # environment, where anyone entitled to them already has them.
+  acas_log '  cards: DBHOST DBUSER DBPASSWD DBNAME DBPORT DBSOCKET (all six, in that order)'
+  acas_log "  target: $(acas_target_description)"
+  acas_log "  DBNAME card: ${dbname} (the presql2 probe schema -- see DEVIATION 3 of 6)"
+  acas_log "  DBSOCKET card: $( [[ "$socket" == 'NULL' ]] && printf 'NULL (TCP only)' || printf 'a socket path (not printed)' )"
+  acas_note 'no host, account name or socket path is printed: the transcript is retained evidence'
   acas_note 'it is shredded and unlinked by the EXIT trap, on every exit path'
 }
 
@@ -3294,13 +3651,17 @@ acas_step4_comp_common() {
   local rc=0 started elapsed
   acas_deadline_prefix "$ACAS_TIMEOUT_BUILD"
   started="$SECONDS"
+  # `< /dev/null' -- see acas_run_deadline for why every delegated child gets it
+  # (F-30). It matters most HERE: this frozen script invokes presql2 28 times
+  # [common/comp-common.sh:L25] and presql2 prompts for a parameter it cannot
+  # resolve, so an inherited stdin turns the longest step in the build into a hang.
   (
     cd "$common_dir" \
       && exec "${ACAS_DEADLINE_ARGV[@]}" \
            env "COBCPY=$ACAS_BUILD/copybooks" \
                "COB_COPY_DIR=$ACAS_BUILD/copybooks" \
                bash ./comp-common.sh
-  ) 2>&1 | tee -a "$log" || rc=$?
+  ) < /dev/null 2>&1 | tee -a "$log" || rc=$?
   elapsed=$(( SECONDS - started ))
 
   # `pipefail' is set, so rc is the subshell's status whenever tee succeeded.
@@ -3351,9 +3712,12 @@ acas_step5_comp_all() {
   local rc=0 started elapsed
   acas_deadline_prefix "$ACAS_TIMEOUT_BUILD"
   started="$SECONDS"
+  # `< /dev/null' -- see acas_run_deadline (F-30). comp-all.sh compiles every
+  # application directory, so a single cobc that decides to read stdin would stall
+  # the whole step.
   (
     cd "$ACAS_BUILD" && exec "${ACAS_DEADLINE_ARGV[@]}" bash ./comp-all.sh
-  ) 2>&1 | tee -a "$log" || rc=$?
+  ) < /dev/null 2>&1 | tee -a "$log" || rc=$?
   elapsed=$(( SECONDS - started ))
 
   acas_assert_not_timed_out "$rc" "$elapsed" "$ACAS_TIMEOUT_BUILD" \
@@ -3506,7 +3870,7 @@ acas_finalise() {
   if acas_have ldconfig; then
     # Under a deadline like everything else.
     acas_deadline_prefix "$ACAS_TIMEOUT_PROBE"
-    if "${ACAS_DEADLINE_ARGV[@]}" ldconfig 2>/dev/null; then
+    if "${ACAS_DEADLINE_ARGV[@]}" ldconfig < /dev/null 2>/dev/null; then
       acas_log 'refreshed the shared-library cache (ldconfig)'
     else
       acas_warn 'ldconfig failed (root privileges are usually required); the compiled modules may not resolve libmysqlclient at run time.'
@@ -3541,6 +3905,230 @@ acas_finalise() {
   acas_log "  $COB_LIBRARY_PATH"
   acas_note 'exported for this process only; harness/docker-compose.yml sets the same'
   acas_note 'value for the service, so the runners inherit it independently'
+}
+
+# =============================================================================
+# THE PROVENANCE ATTESTATION
+#
+# WHAT DEFINES THE BEHAVIOURAL ORACLE MUST BE A REVIEWED SOURCE CHANGE, NEVER
+# AMBIENT CONFIGURATION. Two of this script's own options can substitute the
+# bytes the oracle is built from:
+#
+#   ACAS_PRESQL2_SHA256=HEX  accepts a REPLACEMENT presql2-latest.zip whose digest
+#                            is not the pinned ACAS_PRESQL2_SHA256_EXPECTED, and
+#                            the preSQL translator is what turns every *MT.scb into
+#                            the *MT.cbl bridge that is actually compiled.
+#   ACAS_COBMYSQLAPI_OBJ=F   reuses an ALREADY-COMPILED cobmysqlapi.o instead of
+#                            building it from the source vendored in that package.
+#                            Every bridge, handler and loader links it, and the
+#                            package also ships two SUPERSEDED variants that must
+#                            not be used (old-apis/cobmysqlapi.005.c and
+#                            old-apis/cobmysqlapi3.c), so a renamed old API or an
+#                            arbitrary prebuilt object could silently define the
+#                            supposed specification.
+#
+# Both remain available, because a build is a thing one debugs. What they must not
+# do is silently produce EVIDENCE. So every full build publishes what it was
+# actually built from, and `harness/run_parity.sh` reads that file and refuses to
+# run the compiled cycle when an override was used or when the compiled modules no
+# longer match the ones the attestation covers.
+#
+# WRITTEN ONLY AFTER A FULL FIVE-STEP SEQUENCE, from acas_main -- a partial or
+# --only run leaves no attestation at all, which is the honest outcome: a
+# half-built tree has no provenance to state.
+#
+# The format is deliberately flat TAB-separated text rather than JSON: it is read
+# by a shell script with `while IFS=', so it needs no parser and cannot fail on a
+# quoting subtlety at the exact moment it is meant to be establishing trust.
+# =============================================================================
+readonly ACAS_ATTESTATION_VERSION='1'
+readonly ACAS_ATTESTATION_BASENAME='oracle-attestation.txt'
+
+#  THE CANONICAL cobmysqlapi.o PATH, and why merely being SET is not an override.
+#  `harness/Dockerfile.gnucobol' exports ACAS_COBMYSQLAPI_OBJ=/usr/local/lib/acas/
+#  cobmysqlapi.o [harness/Dockerfile.gnucobol:L990] and builds the object THERE,
+#  from the vendored source, with the recovered rule verbatim: `gcc
+#  -I/usr/local/mysql/include -c cobmysqlapi38.c -o cobmysqlapi.o -fPIC'
+#  [harness/Dockerfile.gnucobol:L478] then `install -m 0644' to that path
+#  [harness/Dockerfile.gnucobol:L479].
+#  That is reviewed provenance -- AAP section 0.5.2 recovered exactly this rule from
+#  the vendored package -- so the variable pointing THERE is the NORMAL case and
+#  step 2 simply reuses the object rather than recompiling it. What must be flagged
+#  is the variable pointing SOMEWHERE ELSE: an object of unknown origin, which is
+#  the route by which a build of one of the two SUPERSEDED C sources the archive
+#  also ships -- presql2-package/old-apis/cobmysqlapi.005.c and .../cobmysqlapi3.c,
+#  alongside the current presql2-package/cobmysqlapi38.c that is the one actually
+#  used -- would reach the link line without anyone noticing. The image probes for
+#  the first of those two so that old-apis/ is known to exist and be left unused
+#  [harness/Dockerfile.gnucobol:L457-L458].
+readonly ACAS_CANONICAL_COBMYSQLAPI_OBJ='/usr/local/lib/acas/cobmysqlapi.o'
+
+# The digest of the compiled module set, computed the same way here and in
+# run_parity.sh: every *.so under the six build directories, sorted by path, each
+# hashed, and the whole listing hashed again. This is what BINDS the attestation to
+# the artifacts -- replacing a single .so after the build invalidates it.
+#
+# WHAT IT IS NOT: evidence of a reproducible build. Three consecutive clean builds
+# of this tree were measured and produced three different set digests, because cobc
+# embeds build-varying material in the C it generates. The value therefore proves
+# only that the modules on disk NOW are the ones this attestation was written about
+# -- which is exactly what the consumer needs, since it is about to execute them --
+# and it must never be quoted as showing that two builds agree.
+acas_module_set_digest() {
+  local dir
+  {
+    for dir in "${ACAS_COMPILE_DIRS[@]}"; do
+      find "$ACAS_BUILD/$dir" -maxdepth 1 -type f -name '*.so' -print 2>/dev/null
+    done
+  } | LC_ALL=C sort | while IFS= read -r module; do
+    sha256sum "$module" 2>/dev/null || printf 'UNREADABLE  %s\n' "$module"
+  done | sha256sum | cut -d' ' -f1
+}
+
+acas_module_set_count() {
+  local dir total=0 n
+  for dir in "${ACAS_COMPILE_DIRS[@]}"; do
+    n="$(find "$ACAS_BUILD/$dir" -maxdepth 1 -type f -name '*.so' 2>/dev/null | wc -l)"
+    total=$(( total + n ))
+  done
+  printf '%s' "$total"
+}
+
+acas_file_digest() {
+  local path="$1"
+  if [[ -f "$path" ]]; then
+    sha256sum "$path" | cut -d' ' -f1
+  else
+    printf 'ABSENT'
+  fi
+}
+
+acas_publish_attestation() {
+  acas_stage 'Post-build: the provenance attestation'
+
+  local target="$ACAS_BUILD/$ACAS_ATTESTATION_BASENAME"
+  local archive="$ACAS_REPO/presql2-latest.zip"
+
+  # WAS EITHER IDENTITY OVERRIDDEN? Recorded as a fact, not as a judgement -- the
+  # refusal belongs to the consumer, so that this script stays usable for debugging.
+  local digest_override='no' object_redirected='no'
+  [[ -n "${ACAS_PRESQL2_SHA256-}" ]] && digest_override='yes'
+  if [[ -n "${ACAS_COBMYSQLAPI_OBJ-}" &&
+        "${ACAS_COBMYSQLAPI_OBJ}" != "$ACAS_CANONICAL_COBMYSQLAPI_OBJ" ]]; then
+    object_redirected='yes'
+  fi
+
+  #  WHERE THE OBJECT ACTUALLY CAME FROM, recorded as a fact rather than a verdict.
+  #  Only two values are legitimate: the image built it from the vendored source, or
+  #  step 2 compiled it from the vendored source during this run.
+  local object_provenance='unknown'
+  case "${ACAS_COBMYSQLAPI_SRC-}" in
+    "$ACAS_CANONICAL_COBMYSQLAPI_OBJ")
+      object_provenance='image-built-from-vendored-source' ;;
+    "$ACAS_BUILD/.acas-cobmysqlapi/cobmysqlapi.o")
+      object_provenance='compiled-from-vendored-source-this-run' ;;
+    '') object_provenance='unresolved' ;;
+    *)  object_provenance='operator-supplied' ;;
+  esac
+
+  #  THE ARCHIVE MUST MATCH ITS PIN, checked independently of the override variable
+  #  so that a substituted archive is caught even when nobody set anything. This is
+  #  belt-and-braces: step 1 already asserts it, but the attestation must be able to
+  #  stand alone as evidence without the reader having to trust that step 1 ran.
+  local archive_matches_pin='no'
+  [[ "$(acas_file_digest "$archive")" == "$ACAS_PRESQL2_SHA256_EXPECTED" ]] &&
+    archive_matches_pin='yes'
+
+  local overrides='no'
+  if [[ "$digest_override" == 'yes' || "$object_redirected" == 'yes' ||
+        "$archive_matches_pin" == 'no' ||
+        "$object_provenance" == 'operator-supplied' ||
+        "$object_provenance" == 'unresolved' ]]; then
+    overrides='yes'
+  fi
+
+  local cobc_version cc_version
+  cobc_version="$(cobc --version 2>/dev/null | head -1)"
+  cc_version="$(cc --version 2>/dev/null | head -1)"
+  [[ -n "$cobc_version" ]] || cobc_version='UNKNOWN'
+  [[ -n "$cc_version" ]] || cc_version='UNKNOWN'
+
+  #  THE TOOLCHAIN BY DIGEST AS WELL AS BY VERSION STRING. A version string is what
+  #  a compiler chooses to say about itself; the digest is what it IS. Two builds can
+  #  both report `cobc (GnuCOBOL) 3.2.0' from different binaries, so recording only
+  #  the string would leave the attestation unable to distinguish them. These are
+  #  recorded, not re-verified at parity time: stage 2 executes the already-compiled
+  #  modules and never invokes a compiler, so the value that BINDS the run is
+  #  module-set-sha256 above. The digests are here so the evidence can be audited
+  #  after the fact -- which is the whole point of an attestation.
+  local cobc_path cc_path
+  cobc_path="$(command -v cobc 2>/dev/null || true)"
+  cc_path="$(command -v cc 2>/dev/null || true)"
+
+  local module_digest module_count
+  module_digest="$(acas_module_set_digest)"
+  module_count="$(acas_module_set_count)"
+
+  {
+    printf 'attestation-version	%s
+' "$ACAS_ATTESTATION_VERSION"
+    printf 'built-at-utc	%s
+' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    printf 'presql2-archive	%s
+' "$archive"
+    printf 'presql2-sha256	%s
+' "$(acas_file_digest "$archive")"
+    printf 'presql2-pinned-sha256	%s
+' "$ACAS_PRESQL2_SHA256_EXPECTED"
+    printf 'presql2-digest-override	%s
+' "$digest_override"
+    printf 'cobmysqlapi-object	%s
+' "${ACAS_COBMYSQLAPI_SRC:-UNKNOWN}"
+    printf 'cobmysqlapi-sha256	%s
+' "$(acas_file_digest "${ACAS_COBMYSQLAPI_SRC-}")"
+    printf 'cobmysqlapi-redirected	%s
+' "$object_redirected"
+    printf 'cobmysqlapi-provenance	%s
+' "$object_provenance"
+    printf 'presql2-matches-pin	%s
+' "$archive_matches_pin"
+    printf 'cobc-version	%s
+' "$cobc_version"
+    printf 'cobc-path	%s
+' "${cobc_path:-UNKNOWN}"
+    printf 'cobc-sha256	%s
+' "$(acas_file_digest "$cobc_path")"
+    printf 'cc-version	%s
+' "$cc_version"
+    printf 'cc-path	%s
+' "${cc_path:-UNKNOWN}"
+    printf 'cc-sha256	%s
+' "$(acas_file_digest "$cc_path")"
+    printf 'module-count	%s
+' "$module_count"
+    printf 'module-set-sha256	%s
+' "$module_digest"
+    printf 'overrides-used	%s
+' "$overrides"
+  } > "$target" || acas_die "$EX_FINALISE" \
+    "the provenance attestation could not be written to $target." \
+    'Without it harness/run_parity.sh will refuse to run the compiled cycle,' \
+    'because an oracle that cannot say what it was built from cannot arbitrate.'
+
+  chmod 0444 "$target" 2>/dev/null || true
+
+  acas_log "attestation:  $target"
+  acas_log "  presql2 archive     $(acas_file_digest "$archive")"
+  acas_log "  pinned digest       $ACAS_PRESQL2_SHA256_EXPECTED"
+  acas_log "  cobmysqlapi.o       $(acas_file_digest "${ACAS_COBMYSQLAPI_SRC-}")"
+  acas_log "  toolchain           $cobc_version / $cc_version"
+  acas_log "  modules             $module_count (*.so), set digest $module_digest"
+  if [[ "$overrides" == 'yes' ]]; then
+    acas_warn "THIS ORACLE CANNOT PRODUCE EVIDENCE: its identity was not established from the reviewed sources alone (presql2-digest-override=$digest_override, presql2-matches-pin=$archive_matches_pin, cobmysqlapi-redirected=$object_redirected, cobmysqlapi-provenance=$object_provenance). The attestation records that and harness/run_parity.sh will refuse to run the compiled cycle against this build. Rebuild without ACAS_PRESQL2_SHA256, and without pointing ACAS_COBMYSQLAPI_OBJ anywhere other than $ACAS_CANONICAL_COBMYSQLAPI_OBJ. To replace either legitimately, make it a REVIEWED SOURCE CHANGE -- update the vendored archive and ACAS_PRESQL2_SHA256_EXPECTED together in the same commit."
+  else
+    acas_log "  provenance          $object_provenance"
+    acas_log '  overrides           none -- this oracle may produce evidence'
+  fi
 }
 
 acas_count_files() {
@@ -3625,6 +4213,7 @@ acas_main() {
   if (( ACAS_ONLY_STEP == 0 && ACAS_START_STEP == 1 )); then
     acas_assert_artifacts
     acas_finalise
+    acas_publish_attestation
     acas_print_summary
   else
     acas_stage 'Partial run: artifact assertions and finalisation skipped'

@@ -184,6 +184,20 @@ _IRS_WE_ERROR_RECORD_NOT_FOUND: Final[int] = 2
 _IR031: Final[str] = "IR031 No Ledger Posting file found. Process Aborted"
 _IR032: Final[str] = "IR032 Invalid key 1 = "
 _IR033: Final[str] = "IR033 Invalid key 2 = "
+
+#: What stands where the frozen program displayed the account number. IR032 and
+#: IR033 each end in "= " because the frozen source displays the message and then
+#: the account beside it [irs/irs030.cbl:L1631-L1632], [irs/irs030.cbl:L1649-L1650].
+#: The message identifier is kept exactly, and a FIXED literal takes the value's
+#: place so that a reader sees a value was withheld rather than a log truncated.
+#: It is a compile-time constant of this migration, which is what the safe-event
+#: schema in `dal/status.py` permits; the account identifier itself it forbids at
+#: every level (CWE-532).
+#  A redacted-tail rendering ("...45") was also written for this line; total
+#  withholding supersedes it, because the safe-event schema bars an account
+#  identifier at EVERY level and a tail is still part of one. The value stays in
+#  IRSPOSTING-REC and in the dump, so nothing an auditor needs is lost.
+_ACCOUNT_WITHHELD: Final[str] = "<withheld: see dal/status.py safe-event schema>"
 _IR03A: Final[str] = "IR03A IRSUB1-31 returns "
 _IR03B: Final[str] = "IR03B IRSUB1-32 returns "
 _IR914: Final[str] = "IR914 Error on irspostingMT processing, FS-Reply = "
@@ -195,6 +209,8 @@ _VAT_AC_SALES: Final[int] = 32
 
 _DEF_ACS_SUBSCRIPT_31: Final[int] = _VAT_AC_PURCHASE - 1
 _DEF_ACS_SUBSCRIPT_32: Final[int] = _VAT_AC_SALES - 1
+
+
 
 # The debit and credit legs both test the transfer record's VAT side, and each adds the
 # VAT to THE OPPOSITE LEG's accumulator - see the reproduction sites.
@@ -593,7 +609,19 @@ def _input_loop(ws: _WorkingStorage) -> None:
             )
             == 0
         ):
-            _LOG.error("%s%s", _IR032, ws.ws_irs_posting_record.ws_irs_post_dr)
+            #  THE ACCOUNT NUMBER IS NOT LOGGED, AND ITS ABSENCE IS DELIBERATE.
+            #  The frozen program displays IR032 and then `WS-IRS-Post-DR`
+            #  [irs/irs030.cbl:L1631-L1632], but a screen a clerk is standing at
+            #  is not a log file: `dal/status.py`'s safe-event schema forbids "an
+            #  account / batch / posting / invoice / customer / supplier
+            #  identifier" at EVERY level (CWE-532), and a posting run's log
+            #  outlives the run and travels. The DISPOSITION is unchanged - the
+            #  message identifier and the clean skip below are exactly the frozen
+            #  ones - and the identifier is recoverable from IRSPOSTING-REC, which
+            #  the run leaves in place. Agent Action Plan section 0.3.4 governs:
+            #  a diagnostic with no database effect becomes a log record, and this
+            #  one alters no control flow and reaches no table.
+            _LOG.error("%s%s", _IR032, _ACCOUNT_WITHHELD)
             # 1633 accept WS-Reply at 2340 - pause, dropped 1634 go to Input-Loop. GO TO
             # class 1 - loop back. CLEAN SKIP.
             continue
@@ -652,7 +680,14 @@ def _input_loop(ws: _WorkingStorage) -> None:
             )
             == 0
         ):
-            _LOG.error("%s%s", _IR033, ws.ws_irs_posting_record.ws_irs_post_cr)
+            #  As IR032 above: the message identifier only. The frozen display of
+            #  `WS-IRS-Post-CR` [irs/irs030.cbl:L1649-L1650] is an account
+            #  identifier, which the safe-event schema in `dal/status.py` bars from
+            #  a log record at every level (CWE-532). The half-posted double entry
+            #  this skip leaves behind - anomaly A-4 - is unaffected: the debit has
+            #  already been rewritten and the `continue` below is the frozen
+            #  `go to Input-Loop`.
+            _LOG.error("%s%s", _IR033, _ACCOUNT_WITHHELD)
             # 1651 accept WS-Reply at 2340 - pause, dropped 1652 go to Input-Loop. GO TO
             # class 1 - loop back.
             continue

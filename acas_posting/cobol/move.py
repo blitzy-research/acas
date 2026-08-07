@@ -56,6 +56,7 @@ __all__: Final[tuple[str, ...]] = (
     "MOVE_CENSUS",
     "MOVE_STATEMENT_CENSUS",
     "REFERENCE_MODIFICATION_CENSUS",
+    "REFERENCE_MODIFICATION_OVERRUN_ORACLE_EVIDENCE",
     "SPACE",
     "SPACES",
     "PACKED_RECEIVER_READ_ORACLE_EVIDENCE",
@@ -172,6 +173,14 @@ class ReferenceModificationOutOfRange(MovementWithNoCompiledAnswer):
 
     "error: length of 'leg' out of bounds: 4" - so a literal range that runs past its
     item cannot exist in the compiled system.
+
+    A COMPUTED one can, and it was measured: it yields the characters inside the item
+    followed by the bytes of whatever storage follows - `"25##"` for `(7:4)` on an
+    eight-character item with a `#`-filled neighbour. See
+    :data:`REFERENCE_MODIFICATION_OVERRUN_ORACLE_EVIDENCE`. A Python `str` has no
+    neighbour, so there is no value to return and refusing is the honest reproduction;
+    returning the inside characters alone would invent an answer the compiled system
+    never gives.
     """
 
 
@@ -253,6 +262,38 @@ REFERENCE_MODIFICATION_CENSUS: Final[
     (7, 2, 4),
     (1, 1, 3),
     (1, 22, 1),
+)
+
+#: ⭐ WHAT A RANGE THAT IS NOT WHOLLY INSIDE ITS ITEM ACTUALLY YIELDS - MEASURED
+#: (question Q-10, rule R-6). Two readings were possible and they are not close: the
+#: range might yield only the characters that ARE inside the item, or it might yield the
+#: full requested length by continuing into the storage that follows. GnuCOBOL 3.2.0 was
+#: driven with `post-date pic x(8)` holding `"21/09/25"` and a `pic x(10)` sentinel
+#: filled with `#` declared IMMEDIATELY AFTER it in the same group - the only arrangement
+#: in which the neighbouring bytes are observable at all:
+#:
+#:     a LITERAL `post-date (7:4)`     -> DOES NOT COMPILE. "error: length of
+#:                                        'post-date' out of bounds: 4", cobc exit 1.
+#:                                        So a literal overrun cannot exist in the
+#:                                        compiled system at all.
+#:     a COMPUTED `(off:len)`, 7 and 4 -> "25##". Four characters: the two inside the
+#:                                        item followed by TWO BYTES OF THE NEIGHBOUR,
+#:                                        read back individually as 0x23.
+#:     a COMPUTED `(off:len)`, 9 and 2 -> "##". Wholly outside, wholly the neighbour's.
+#:     a COMPUTED `(off:len)`, 7 and 2 -> "25". In range, for contrast.
+#:
+#: So the "characters that are inside it" reading is REFUTED, and the value the compiled
+#: program produces depends on storage a Python `str` does not have. That is why
+#: :class:`ReferenceModificationOutOfRange` REFUSES rather than returning a prefix:
+#: returning "25" would be inventing an answer the compiled system never gives, and
+#: clamping the range would be a validation (rules R-3, R-4). Each entry is
+#: `(offset, length, item width, what the compiled program yielded)`.
+REFERENCE_MODIFICATION_OVERRUN_ORACLE_EVIDENCE: Final[
+    tuple[tuple[int, int, int, str], ...]
+] = (
+    (7, 4, 8, "25## - two characters of the item, then two bytes of the neighbour"),
+    (9, 2, 8, "## - wholly the neighbour's bytes"),
+    (7, 2, 8, "25 - in range, and the only one of the three that is reproducible"),
 )
 
 #: Accepted spelling to figurative constant, with the count of that exact spelling in
@@ -1140,6 +1181,34 @@ def is_numeric_class(
 # flow is preserved: the in-group bytes are written exactly, and the overflow is
 # reported as a log record with no effect on control flow. Section 0.3.4's rule
 # for a diagnostic that has no database effect is what licenses the log record.
+#
+# ⭐ HOW FAR "NOT REPRODUCIBLE" ACTUALLY EXTENDS - MEASURED, so that the boundary
+# is a reading and not a hedge (question Q-19). The 126-byte ledger record was
+# transcribed with a `pic x(20)` sentinel declared immediately after it INSIDE one
+# enclosing `01`, which is the only arrangement that makes the neighbouring bytes
+# observable, and the store was executed THROUGH A VARIABLE subscript - `move
+# 999.99 to ledger-q (a)` with `a = 13`, exactly as [general/gl080.cbl:L345]
+# reaches it. The literal form `ledger-q (13)` cannot be used to measure this at
+# all: cobc refuses it at compile time ("error: subscript of 'Ledger-Q' out of
+# bounds: 13"), so a probe written that way measures the parser rather than the
+# program. Every byte of the area was then read back one at a time through
+# `function ord`:
+#
+#     the six bytes 00 00 00 99 99 9C - the packed image of +999.99 - landed at
+#     1-based offsets 125 through 130, i.e. TWO bytes inside the record's trailing
+#     `filler pic x(50)` and FOUR bytes past the record's last byte, in the
+#     sentinel that follows it;
+#     `Ledger-Q1` through `Ledger-Q4` were UNCHANGED, and so was `Ledger-Last`;
+#     the program printed its own "survived the store" line and exited 0, with no
+#     runtime message of any kind.
+#
+# Subscript 14 was then stored and landed at offsets 131 through 136, six bytes
+# further on, again with no diagnostic - so the addressing stays plainly linear
+# past the record's end rather than wrapping, clamping or faulting. What remains
+# genuinely unknowable from the frozen source is only WHICH `01` item the four
+# overrun bytes belong to in the real program, because that is the compiler's
+# allocation; the two facts this layer needs - that control flow continues and
+# that NO column of `GLLEDGER-REC` changes - are measured, not assumed.
 
 
 #: Every reading taken from the compiled oracle, kept beside the code that
@@ -1153,12 +1222,28 @@ def is_numeric_class(
 #: `Quarters` window of `copybooks/wssl.cob` [copybooks/wssl.cob:L54-L66], and
 #: `function length` of each group was read back to pin the widths GnuCOBOL
 #: chose: `pic 99 comp` is ONE byte, `pic s9(5) comp` is FOUR, and
-#: `pic s9(7)v99 comp-3` is FIVE.
+#: `pic s9(7)v99 comp-3` is FIVE. The ledger probe also read back
+#: `function length` of the record itself as 126 and of one occurrence as 6, so
+#: the offsets in the two past-the-record entries below are the compiler's own
+#: arithmetic rather than this file's.
 UNCHECKED_SUBSCRIPT_ORACLE_EVIDENCE: Final[tuple[tuple[str, int, str], ...]] = (
     # `move ledger-balance to ledger-q (a)`; WS-Ledger-Record is 126 bytes.
     ("general/gl080.cbl:L345", 0, "Ledger-Last [copybooks/wsledger.cob:L29] - A COLUMN"),
     ("general/gl080.cbl:L345", 5, "bytes 1-6 of the trailing filler x(50) - no column"),
     ("general/gl080.cbl:L345", 6, "bytes 7-12 of the trailing filler x(50) - no column"),
+    (
+        "general/gl080.cbl:L345",
+        13,
+        "bytes 49-50 of the trailing filler x(50) and FOUR bytes past the "
+        "record's 126th, in the following 01 item - no column, no diagnostic, "
+        "exit 0, and Ledger-Q1..Q4 and Ledger-Last all unchanged",
+    ),
+    (
+        "general/gl080.cbl:L345",
+        14,
+        "six bytes wholly past the record's 126th, six further on than "
+        "subscript 13 - the addressing stays linear, it does not wrap or clamp",
+    ),
     # `add work-vat to total-vat (a)` then `add work-net to total-net (a)`;
     # sl060's `01 ws-data` measures 62 bytes.
     ("sales/sl060.cbl:L526", 0, "work-goods [sales/sl060.cbl:L218]"),

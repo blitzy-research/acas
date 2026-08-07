@@ -1,8 +1,6 @@
 """ACAS file-handler status protocol and operation vocabulary.
 
 WHAT THIS MODULE OWNS
-Two things, for the whole migrated cycle:
-=======
 =====================
 Three things, for the whole migrated cycle:
 

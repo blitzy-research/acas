@@ -55,7 +55,6 @@ name. Agent Action Plan section 0.6.4 asks for the labels to be preserved
 below infers an ordering from a phase number.
 
 THE PHASE DRIVER, VERBATIM  [general/gl080.cbl:L306-L337]
-=========================================================
     306      display  "Phase - 1.  Batch Check" ...
     307      perform  gl080a.
     308      if       a = 1
@@ -83,7 +82,6 @@ L165], so archiving and deletion are mutually exclusive - one `perform` or the
 other, never both, and never neither.
 
 `gl080b` AND `gl080c` HAVE IDENTICAL DATABASE EFFECTS
-=====================================================
 This is the key insight for reading a table dump of this program, and it is
 easy to miss because the two sections look nothing alike. Both walk the batch
 file filtered on the accounting cycle, delete EVERY posting belonging to the
@@ -111,7 +109,6 @@ and does NOT zero `batch-start`. Three differences in three lines, all
 preserved.
 
 THE TABLE EFFECT IS NARROWER THAN THE PROGRAM IS LARGE
-======================================================
 Only three things in this whole program reach a table:
 
     1. `GL-Posting-Delete`, once per posting, in BOTH the archive path
@@ -129,7 +126,6 @@ five sections' worth of screen handling, path building and diagnostics - has no
 database effect at all.
 
 Q-23  `compress-post` CANNOT REACH ITS OWN LOOPS IN THE FROZEN SOURCE
-=====================================================================
 Two independent gates stand in front of `loop1` [general/gl080.cbl:L654], and
 in the frozen source EVERY configuration is stopped by one of them.
 
@@ -188,7 +184,6 @@ that if the compiled oracle reports something else the code follows the
 dictionary and not this note. Logged as question Q-23.
 
 THE FALL-THROUGH IN `compress-post`, AND WHY IT MATTERS
-=======================================================
 `file-error.` [general/gl080.cbl:L688] ends at [general/gl080.cbl:L697] with a
 `display` and NO transfer of control, so it FALLS STRAIGHT THROUGH into
 `loop2-end.` [general/gl080.cbl:L699]:
@@ -213,7 +208,6 @@ that preserves execution order" makes each of the four sites an explicit
 two-call sequence, and each carries its own equivalence proof below.
 
 TWO INTERACTIVE PROMPTS GATE DATABASE WRITES
-============================================
 Agent Action Plan section 0.3.4, verbatim: "Accept prompts that gate a database
 write become explicit CLI parameters with the COBOL default preserved." Two of
 this program's five `accept` statements do exactly that.
@@ -258,7 +252,6 @@ PRESERVED: `go to main-end` [general/gl080.cbl:L313], `stop run`
 [general/gl080.cbl:L649], and the fall-through at [general/gl080.cbl:L697].
 
 ONE VARIABLE, THREE UNRELATED PURPOSES
-======================================
 `77 a pic 99 value zero.` [general/gl080.cbl:L183] is used for three things
 that have nothing to do with each other, and the sharing is OBSERVABLE:
 
@@ -283,7 +276,6 @@ improvement.
 used only at [general/gl080.cbl:L329] and [general/gl080.cbl:L331].
 
 THE DETECTOR IS NOT `gl070`'S
-=============================
     `gl070`  [general/gl070.cbl:L314-L315]   if status-open
                                                 move 1 to a.
     `gl080a` [general/gl080.cbl:L384-L386]   if not status-closed
@@ -301,7 +293,6 @@ the cycle, `gl080` sets NO term code at all - it simply displays and returns
 [general/gl080.cbl:L313], [general/gl080.cbl:L366].
 
 THE ABORT CHAIN DOES NOT REACH THIS PROGRAM
-===========================================
 The menu dispatches `gl080` from `load09.` [general/general.cbl:L817-L820],
 which moves the program name and then `go to load00.` - a transfer, not a
 `perform`. `load00.` [general/general.cbl:L711-L722] zeroes `ws-term-code`
@@ -315,7 +306,6 @@ main-end` transfers [general/gl080.cbl:L313], [general/gl080.cbl:L326],
 [general/gl080.cbl:L332], and one `stop run` [general/gl080.cbl:L649].
 
 TWO FLAT FILES THAT ARE NOT SCHEMA TABLES AND NOT THE CYCLE'S WORK FILES
-========================================================================
     138  select  archive    assign  file-2   access sequential  status fs-reply
                             organization line sequential.
     143  select  work-file  assign  file-21  access sequential
@@ -348,7 +338,6 @@ sequences below therefore store their status INTO the shared `File-Access`
 record, which is what a FILE STATUS clause does.
 
 RULES THIS MODULE IS HELD TO
-============================
 There is NO user rules document for this project - `review_rules` reports "No
 user rules provided", verified this session. The six binding rules live in the
 Agent Action Plan section 0.7.2 and are answered here one by one; where the
@@ -426,7 +415,6 @@ below reaches for an ambient time source. Six questions are logged for
 arbitration against the compiled program; see AMBIGUITIES.
 
 WHAT THIS MODULE MAY IMPORT
-===========================
 `gl080` carries TWELVE `COPY` statements. Their translation, in file order:
 
     envdiv.cob                 L131   omitted, representation only
@@ -465,7 +453,6 @@ after the called program - therefore DOES NOT OCCUR in this module, and no date
 validation or binary conversion is called from here.
 
 AMBIGUITIES, FOR ARBITRATION AGAINST COMPILED BEHAVIOUR  (rule R-6)
-===================================================================
 Six questions cannot be settled by reading the source. Each is annotated
 `AMBIGUITY Q-nn` at the site that raises it, and each takes the next free
 number in the migration's shared register, which stood at Q-17.
@@ -477,11 +464,21 @@ number in the migration's shared register, which stood at Q-17.
           facade pins the same value - so the program's own move is either
           redundant or it matters to a verb that does not re-pin it. Reproduced
           regardless.
-    Q-19  WHAT THE COMPILED PROGRAM DOES WHEN THE QUARTER SUBSCRIPT IS OUT OF
-          RANGE. See anomaly A-2 at `_gl080_main_loop`. COBOL indexes past a
-          four-element table silently, overwriting adjacent storage; Python
-          cannot do that. The divergence is declared rather than papered over,
-          and no guard is added.
+    Q-19  WHAT THE COMPILED PROGRAM WRITES WHEN THE QUARTER SUBSCRIPT RUNS PAST
+          THE RECORD - ANSWERED ON THE ORACLE (rule R-6). See anomaly A-2 at
+          `_gl080_main_loop`. The subscript is EMULATED by byte offset rather than
+          validated, so `a = 1..4` reach the two `Quarters` views, `a = 5..12`
+          reach the trailing `filler pic x(50)` [copybooks/wsledger.cob:L37] which
+          carries no column, and `a = 0`/`-1` reach the two packed items declared
+          before `Quarters`. For `a >= 13` the store runs beyond the 126th byte,
+          and GnuCOBOL 3.2.0 was driven with the record transcribed and a sentinel
+          item declared immediately after it: `move 999.99 to ledger-q (13)` put
+          the six packed bytes at offsets 125 through 130 - two in the filler, four
+          in the sentinel - left every quarter field and `Ledger-Last` UNCHANGED,
+          printed no diagnostic and exited 0. An overrunning run therefore moves
+          NONE of the 22 compared tables, so storing the in-record part and logging
+          the remainder is the whole behaviour. No guard is added and nothing is
+          clamped.
     Q-20  WHETHER `GL-Posting-Open-Output` [general/gl080.cbl:L673] TRUNCATES
           `GLPOSTING-REC`. `Open-Output` on the transfer-file handler means
           "delete every row" [common/acas008.cbl:L313-L319], and if `acas006`
@@ -513,7 +510,6 @@ number in the migration's shared register, which stood at Q-17.
           lengths measure 103 and 101, so `stop run` [general/gl080.cbl:L649]
           fires. The comparison is computed from the descriptors, never from a
           literal, so the code follows the dictionary.
-=======
 ===========================================================
 `gl080` displays five phase labels of its own, MEASURED at these lines:
 
@@ -978,16 +974,20 @@ number in the migration's shared register, which stood at Q-17.
           redundant or it matters to a verb that does not re-pin it. Reproduced
           regardless.
     Q-19  WHAT THE COMPILED PROGRAM WRITES WHEN THE QUARTER SUBSCRIPT RUNS PAST
-          THE RECORD. See anomaly A-2 at `_gl080_main_loop`. The subscript is
-          EMULATED by byte offset rather than validated, so `a = 1..4` reach the
-          two `Quarters` views, `a = 5..12` reach the trailing `filler pic x(50)`
-          [copybooks/wsledger.cob:L37] which carries no column, and `a = 0`/`-1`
-          reach the two packed items declared before `Quarters`. What is NOT
-          determined by the layout is `a >= 13`, which runs beyond the 126th byte
-          into storage belonging to no table: the part that still lands inside the
-          record is stored and the remainder is logged. Measure on the oracle
-          whether an overrunning run moves any of the 22 compared tables. No guard
-          is added and nothing is clamped.
+          THE RECORD - ANSWERED ON THE ORACLE (rule R-6). See anomaly A-2 at
+          `_gl080_main_loop`. The subscript is EMULATED by byte offset rather than
+          validated, so `a = 1..4` reach the two `Quarters` views, `a = 5..12`
+          reach the trailing `filler pic x(50)` [copybooks/wsledger.cob:L37] which
+          carries no column, and `a = 0`/`-1` reach the two packed items declared
+          before `Quarters`. For `a >= 13` the store runs beyond the 126th byte,
+          and GnuCOBOL 3.2.0 was driven with the record transcribed and a sentinel
+          item declared immediately after it: `move 999.99 to ledger-q (13)` put
+          the six packed bytes at offsets 125 through 130 - two in the filler, four
+          in the sentinel - left every quarter field and `Ledger-Last` UNCHANGED,
+          printed no diagnostic and exited 0. An overrunning run therefore moves
+          NONE of the 22 compared tables, so storing the in-record part and logging
+          the remainder is the whole behaviour. No guard is added and nothing is
+          clamped.
     Q-20  WHETHER `GL-Posting-Open-Output` [general/gl080.cbl:L673] TRUNCATES
           `GLPOSTING-REC`. `Open-Output` on the transfer-file handler means
           "delete every row" [common/acas008.cbl:L313-L319], and if `acas006`
@@ -1009,7 +1009,7 @@ number in the migration's shared register, which stood at Q-17.
           menu shell rewrites the record in `overrewrite.`
           [general/general.cbl:L656-L692], reached from `load00.` on the
           serious-error arm [general/general.cbl:L720-L721], and
-          `acas_posting/cli/menu_state.general_overrewrite` reproduces it. Nothing
+          `acas_posting.cli.args.overrewrite` reproduces it. Nothing
           about this program changes: the write belongs to the boundary, not here
           (rule R-3).
     Q-22  WHAT PATH THE `disk-change` `STRING` ACTUALLY BUILDS. The maintainer
@@ -1945,11 +1945,16 @@ def _gl080_main_loop(st: _Gl080Storage) -> None:
         # Python indexes backwards from the end, and that is a third behaviour
         # belonging to neither language.
         #
-        # AMBIGUITY Q-19 - WHAT THE COMPILED PROGRAM WRITES PAST THE RECORD END.
-        # From `a = 13` the store runs beyond the 126th byte into WORKING-STORAGE
-        # that belongs to no table, so the part that lands inside the record is
-        # reproduced and the remainder is reported as a log line. Measure on the
-        # oracle whether an overrunning run moves any compared table.
+        # AMBIGUITY Q-19 - WHAT THE COMPILED PROGRAM WRITES PAST THE RECORD END,
+        # NOW MEASURED (rule R-6). From `a = 13` the store runs beyond the 126th
+        # byte into WORKING-STORAGE that belongs to no table. Driving GnuCOBOL
+        # 3.2.0 with the record transcribed and a sentinel item declared
+        # immediately after it put the six packed bytes at offsets 125 through
+        # 130 - two in the trailing filler, four in the sentinel - left
+        # `Ledger-Q1` through `Ledger-Q4` and `Ledger-Last` UNCHANGED, printed no
+        # diagnostic and exited 0. So an overrunning run moves NO compared table,
+        # and the reproduction below is complete for every observable: the
+        # in-record bytes are written and the overrun is reported as a log line.
         _move_ledger_balance_to_quarter(st)
 
         # 346 if current-quarter = 4 ANOMALY A-3 [general/gl080.cbl:L345-L357] - TWO
@@ -2134,15 +2139,26 @@ def _move_ledger_balance_to_quarter(st: _Gl080Storage) -> None:
     [general/gl080.cbl:L325] forbids `scycle < period`, but they are resolved
     rather than special-cased so that the emulation carries no bound of its own.
 
-    ⚠ AMBIGUITY Q-19, NARROWED. What the compiled program writes past the end of
-    the record is not defined by the record layout: GnuCOBOL compiled without
-    bounds checking - and no compile line in this repository passes any such flag -
-    stores into whatever WORKING-STORAGE follows, which belongs to no table and is
-    therefore invisible to the comparison. This function reproduces the part of
-    the store that lands inside the record and records the overrun as a log line;
-    measure on the oracle whether an overrunning run changes any of the 22
-    compared tables, and record the arbitration in
-    docs/migration/ambiguity-resolutions.md (rule R-6).
+    ⭐ AMBIGUITY Q-19, ANSWERED ON THE ORACLE (rule R-6). What the compiled
+    program writes past the end of the record is not defined by the record layout:
+    GnuCOBOL compiled without bounds checking - and no compile line in this
+    repository passes any such flag - stores into whatever WORKING-STORAGE follows.
+    That was measured rather than left open. The 126-byte record was transcribed
+    with a `pic x(20)` sentinel declared immediately after it inside one enclosing
+    `01`, `move 999.99 to ledger-q (13)` was executed, and every byte was read back
+    through `function ord`: the six packed bytes `00 00 00 99 99 9C` landed at
+    1-based offsets 125 through 130 - two in the trailing filler, FOUR in the
+    sentinel past the record's last byte - `Ledger-Q1` through `Ledger-Q4` and
+    `Ledger-Last` were UNCHANGED, no diagnostic was printed, and the program exited
+    0. Subscript 14 landed six bytes further on, so the addressing stays linear
+    rather than wrapping or clamping.
+
+    The consequence for this function is that its reproduction is COMPLETE for
+    every observable: an overrunning run changes NONE of the 22 compared tables,
+    so writing the in-record bytes and reporting the overrun as a log line is the
+    whole of the behaviour. What is still undecidable from the frozen source is
+    only WHICH `01` item receives the overrun bytes in the real program, because
+    that is the compiler's allocation and it reaches no table either way.
 
     ⭐ AN OUT-OF-RANGE SUBSCRIPT DOES NOT RAISE. IT STORES SOMEWHERE, AND WHERE IS
     DERIVABLE. This function previously refused the store with a `ValueError`,
@@ -2173,13 +2189,14 @@ def _move_ledger_balance_to_quarter(st: _Gl080Storage) -> None:
                     [general/gl080.cbl:L331] then agrees, so `a` walks 5, 6, 7, 8,
                     10, 11, 12 as the cycles advance. `a = 9` alone is unreachable
                     because the guard tests it.
-        a >= 13     bytes 125 onward, at or past the record's end. GENUINELY
-                    UNMEASURABLE FROM THE SOURCE - the store lands in whatever
-                    storage the compiler placed after the record area, which
-                    depends on its allocation and not on any declaration. Nothing
-                    is guessed: all eleven columns are left unchanged, the
-                    condition is logged, and AMBIGUITY Q-19 records it as a
-                    question only the oracle can answer.
+        a >= 13     bytes 125 onward, at or past the record's end. MEASURED on
+                    the oracle: the store happens, the program continues and
+                    exits 0 with no diagnostic, and NO quarter field and no
+                    `Ledger-Last` changes - so all eleven columns are left
+                    unchanged, which is exactly what this function does. The one
+                    thing still not derivable from the source is which `01` item
+                    the overrun bytes belong to, and no column binds them either
+                    way. AMBIGUITY Q-19, answered; see the note below.
 
     WHY BOTH VIEWS ARE WRITTEN for the in-record cases. In COBOL `Ledger-Q (a)`
     and `Ledger-Q1` through `Ledger-Q4` ARE THE SAME BYTES
@@ -2224,13 +2241,14 @@ def _move_ledger_balance_to_quarter(st: _Gl080Storage) -> None:
                     [general/gl080.cbl:L331] then agrees, so `a` walks 5, 6, 7, 8,
                     10, 11, 12 as the cycles advance. `a = 9` alone is unreachable
                     because the guard tests it.
-        a >= 13     bytes 125 onward, at or past the record's end. GENUINELY
-                    UNMEASURABLE FROM THE SOURCE - the store lands in whatever
-                    storage the compiler placed after the record area, which
-                    depends on its allocation and not on any declaration. Nothing
-                    is guessed: all eleven columns are left unchanged, the
-                    condition is logged, and AMBIGUITY Q-19 records it as a
-                    question only the oracle can answer.
+        a >= 13     bytes 125 onward, at or past the record's end. MEASURED on
+                    the oracle: the store happens, the program continues and
+                    exits 0 with no diagnostic, and NO quarter field and no
+                    `Ledger-Last` changes - so all eleven columns are left
+                    unchanged, which is exactly what this function does. The one
+                    thing still not derivable from the source is which `01` item
+                    the overrun bytes belong to, and no column binds them either
+                    way. AMBIGUITY Q-19, answered; see the note below.
 
     WHY BOTH VIEWS ARE WRITTEN for the in-record cases. In COBOL `Ledger-Q (a)`
     and `Ledger-Q1` through `Ledger-Q4` ARE THE SAME BYTES
@@ -2293,15 +2311,26 @@ def _move_ledger_balance_to_quarter(st: _Gl080Storage) -> None:
     [general/gl080.cbl:L325] forbids `scycle < period`, but they are resolved
     rather than special-cased so that the emulation carries no bound of its own.
 
-    ⚠ AMBIGUITY Q-19, NARROWED. What the compiled program writes past the end of
-    the record is not defined by the record layout: GnuCOBOL compiled without
-    bounds checking - and no compile line in this repository passes any such flag -
-    stores into whatever WORKING-STORAGE follows, which belongs to no table and is
-    therefore invisible to the comparison. This function reproduces the part of
-    the store that lands inside the record and records the overrun as a log line;
-    measure on the oracle whether an overrunning run changes any of the 22
-    compared tables, and record the arbitration in
-    docs/migration/ambiguity-resolutions.md (rule R-6).
+    ⭐ AMBIGUITY Q-19, ANSWERED ON THE ORACLE (rule R-6). What the compiled
+    program writes past the end of the record is not defined by the record layout:
+    GnuCOBOL compiled without bounds checking - and no compile line in this
+    repository passes any such flag - stores into whatever WORKING-STORAGE follows.
+    That was measured rather than left open. The 126-byte record was transcribed
+    with a `pic x(20)` sentinel declared immediately after it inside one enclosing
+    `01`, `move 999.99 to ledger-q (13)` was executed, and every byte was read back
+    through `function ord`: the six packed bytes `00 00 00 99 99 9C` landed at
+    1-based offsets 125 through 130 - two in the trailing filler, FOUR in the
+    sentinel past the record's last byte - `Ledger-Q1` through `Ledger-Q4` and
+    `Ledger-Last` were UNCHANGED, no diagnostic was printed, and the program exited
+    0. Subscript 14 landed six bytes further on, so the addressing stays linear
+    rather than wrapping or clamping.
+
+    The consequence for this function is that its reproduction is COMPLETE for
+    every observable: an overrunning run changes NONE of the 22 compared tables,
+    so writing the in-record bytes and reporting the overrun as a log line is the
+    whole of the behaviour. What is still undecidable from the frozen source is
+    only WHICH `01` item receives the overrun bytes in the real program, because
+    that is the compiler's allocation and it reaches no table either way.
 
     Args:
         st: The program's storage. `st.a` is the subscript and

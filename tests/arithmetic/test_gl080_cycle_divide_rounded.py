@@ -120,19 +120,29 @@ Specification carries in section 0.7.2, and this file honours them as follows.
        the anomaly and the source line it locks. Coverage is evidence, never a
        gate.
   R-6  Compiled behaviour is the tie-breaker. Every expected value carries a
-       provenance comment. The one question the compiled program has NOT yet
-       answered is marked `xfail(strict=True)` against its register id, so it
-       fails loudly the moment it becomes answerable.
+       provenance comment. NO question in this file is unanswered any more and
+       there is no `xfail` in it: `Q-19`, the last one, was measured on GnuCOBOL
+       3.2.0 and is asserted below against the reading the strict `xfail` used to
+       assert against, so a reversal fails by name.
 
 THE AMBIGUITY REGISTER IDS CITED HERE, none of them invented by this file:
 
-  Q-2   the intermediate precision and the direction of a `ROUNDED` store, both
-        measured on GnuCOBOL 3.2.0 and recorded in `acas_posting/cobol/
-        arithmetic.py`.
+  Q-2   the intermediate precision of a multi-term expression, and the direction
+        of a `ROUNDED` store, both carried by `acas_posting/cobol/arithmetic.py`.
+        THE TWO HALVES HAVE DIFFERENT STANDING and this file does not conflate
+        them. The DIRECTION is settled by the language: COBOL `ROUNDED` rounds half
+        away from zero, and the shipped layer does. The NUMBER OF INTERMEDIATE
+        DIGITS is a property of the compiler build, is UNMEASURED, and the register
+        keeps Q-2 pending on it. No figure in this file depends on the open half:
+        every quotient here lands in a two-digit receiver, so sixty working digits
+        and any plausible compiler default agree.
   Q-3   a signed copybook item narrowed to an unsigned host variable and an
         unsigned column, so the sign is lost AT THE BRIDGE. Carried by
-        `SYSTEM-REC.CYCLEA` and `SYSTEM-REC.PERIOD` together with anomaly A-11,
-        and asserted here as an open question, unadjudicated.
+        `SYSTEM-REC.CYCLEA` and `SYSTEM-REC.PERIOD` together with anomaly A-11.
+        MEASURED: the bridge stores the ABSOLUTE VALUE, then bounds it by the
+        receiving digit count - `-1` arrives as 1, not as 255 - so `ambiguity_refs`
+        is now empty on those entries while `A-11` stays, and this file asserts
+        that rather than the former open state.
   Q-5   the zoned and binary store policy - the overpunch byte values, the
         default `binary-size` and `binary-truncate` settings - measured and
         recorded in `acas_posting/cobol/usage.py`.
@@ -143,10 +153,15 @@ THE AMBIGUITY REGISTER IDS CITED HERE, none of them invented by this file:
         rather than deferred, because a strict `xfail` on an answered question
         would itself fail.
   Q-19  what the compiled program writes when the quarter subscript runs PAST
-        THE RECORD'S END. Narrowed by `acas_posting/programs/
-        gl080_end_of_cycle.py` to occurrences 13 and above; everything inside
-        the record is already measured. This is the single `xfail(strict=True)`
-        in the file.
+        THE RECORD'S END. MEASURED and no longer open: occurrence 13's six
+        packed bytes land at offsets 125 through 130 of a 126-byte record - four
+        of them past its end, in the storage that follows - every quarter field
+        and `Ledger-Last` are left unchanged, no diagnostic is printed and the
+        program exits 0. So an overrunning run moves NONE of the 22 compared
+        tables. The reading is asserted in
+        `test_a2_an_out_of_record_subscript_stores_past_the_record_and_moves_no_column`
+        and recorded on
+        `acas_posting.cobol.move.UNCHECKED_SUBSCRIPT_ORACLE_EVIDENCE`.
 
 WHAT THIS FILE DOES NOT TOUCH. `MOVE` semantics belong to `acas_posting/cobol/
 move.py` and to the `MOVE`-truncation test file, so the three `move` statements
@@ -418,12 +433,104 @@ _TRAILING_FILLER: Final[int] = _LEDGER_FILLER.byte_length
 #: declared ones plus as many whole strides as the trailing filler absorbs.
 #: Occurrences 5 through this bound overwrite filler that carries no MySQL
 #: column, so they are silent and have no table effect; occurrence zero lands on
-#: `Ledger-Last`, which IS a column. Both bands are already measured - see
-#: `acas_posting/programs/gl080_end_of_cycle.py` - and only what lies beyond this
-#: bound is still question Q-19.
+#: `Ledger-Last`, which IS a column. All three bands are measured - see
+#: `acas_posting/cobol/move.UNCHECKED_SUBSCRIPT_ORACLE_EVIDENCE` for the readings
+#: and `acas_posting/programs/gl080_end_of_cycle.py` for the reproduction.
 _LAST_IN_RECORD_OCCURRENCE: Final[int] = (
     _OCCURRENCES + _TRAILING_FILLER // _STRIDE
 )
+
+
+def _record_byte_length() -> int:
+    """Sum `WS-Ledger-Record`'s own storage out of the dictionary (R-5).
+
+    The oracle reading that settles question Q-19 is expressed in BYTE OFFSETS
+    within the record, so the record's width has to come from the layout itself or
+    the assertion would only be checking one typed-in number against another. A
+    `redefines` subtree is skipped because it occupies no storage of its own -
+    `WS-Ledger-Key9`, the `Ledger-n`/`Ledger-s` pair and the `Ledger-Q` `occurs`
+    view are all alternative views of bytes already counted
+    [copybooks/wsledger.cob:L12-L37] - and a group item is skipped because its
+    children carry its width.
+
+    A SUM is order-independent, which is why this function computes only the
+    total: the dictionary lists a record's column-bound fields before its
+    record-only fields, so its entry order is NOT declaration order and cannot be
+    used to place an item inside the record. `_QUARTERS_FIRST_BYTE` is derived
+    from the tail instead.
+
+    Returns:
+        The record's total byte length.
+    """
+    entries = loader.entries_for_copybook_record(_LEDGER_RECORD)
+    entries += loader.entries_for_table("GLLEDGER-REC")
+
+    #  Keep the FIRST appearance of each distinct copybook item so that the table
+    #  view and the record view of one field are not counted twice. The ENTRY KEY
+    #  is kept beside its copybook field, because two of this record's items are
+    #  both named `filler` and only the key tells them apart.
+    seen: set[str] = set()
+    ordered: list[tuple[str, model.CopybookField]] = []
+    for entry in entries:
+        copybook = entry.copybook
+        if copybook is None:
+            continue
+        marker = f"{copybook.source}|{copybook.name}|{copybook.level}"
+        if marker in seen:
+            continue
+        seen.add(marker)
+        ordered.append((entry.key, copybook))
+
+    total = 0
+    redefined: set[str] = set()
+    for key, copybook in ordered:
+        if copybook.level == "01":
+            continue
+        #  The `redefines` test comes FIRST, and deliberately: an alternative view
+        #  is frequently a GROUP - `filler redefines WS-Ledger-Nos` and `filler
+        #  redefines Quarters` both are - and skipping it as a group without
+        #  remembering it would let its children be counted as storage of their
+        #  own. Reversing these two tests inflates the record from 126 to 156.
+        if copybook.redefines is not None:
+            redefined.add(copybook.name)
+            continue
+        if copybook.parent_group is not None and copybook.parent_group in redefined:
+            continue
+        if copybook.is_group:
+            continue
+        width = cobol_field.FieldDescriptor.from_dictionary_key(key).byte_length
+        total += width * (copybook.occurs or 1)
+    return total
+
+
+#: `WS-Ledger-Record`'s total width, derived. The oracle read `function length`
+#: of the same record back as 126, and of one occurrence as 6, which is what makes
+#: the derivation and the measurement comparable at all.
+_RECORD_BYTES: Final[int] = _record_byte_length()
+
+#: The 1-based offset of `Quarters`' first byte, derived FROM THE TAIL rather than
+#: from a traversal: `Quarters` is followed by exactly one item, the trailing
+#: `filler pic x(50)` [copybooks/wsledger.cob:L36-L37], so the four occurrences
+#: end where the filler begins. The oracle's own byte census put `Quarters` at 53
+#: through 76 of 126, which this reproduces without transcribing either number.
+_QUARTERS_FIRST_BYTE: Final[int] = (
+    _RECORD_BYTES - _TRAILING_FILLER - _OCCURRENCES * _STRIDE + 1
+)
+
+
+def _last_byte_of_occurrence_in_record(occurrence: int) -> int:
+    """The 1-based offset, within the record, of an occurrence's LAST byte.
+
+    Args:
+        occurrence: The subscript `a` holds at [general/gl080.cbl:L345],
+            unchecked - which is the whole of anomaly A-2.
+
+    Returns:
+        Where the six stored bytes end, counted from the record's first byte. A
+            value greater than the record's width is the overrun the oracle
+            measured landing in the storage that follows.
+    """
+    return _QUARTERS_FIRST_BYTE + _first_byte_of_occurrence(occurrence) + _STRIDE - 1
 
 
 def _first_byte_of_occurrence(occurrence: int) -> int:
@@ -516,12 +623,32 @@ def _end_of_period(
     the loop uses it as a subscript. Reorder any two of those and the program
     means something else.
 
-    ⛔ `incoming_a` IS A PARAMETER AND IS NEVER INITIALISED HERE. `77 a pic 99
-    value zero.` [general/gl080.cbl:L183] is initialised ONCE, when the module is
-    loaded, and `gl080` leaves through `goback` [general/gl080.cbl:L366], so a
-    second call sees what the first left. Setting `a` to zero inside this
-    function would make [general/gl080.cbl:L324] dead code and would delete the
-    only observable the `ROUNDED` keyword actually moves.
+    ⛔ `incoming_a` IS A PARAMETER AND IS NEVER INITIALISED HERE, because the slice
+    this function transcribes begins at L324 and `a` is READ there before L328
+    writes it. Setting `a` to zero inside this function would make
+    [general/gl080.cbl:L324] dead code and would delete the only observable the
+    `ROUNDED` keyword actually moves.
+
+    THE JUSTIFICATION THIS PARAGRAPH USED TO GIVE WAS WRONG, and it is corrected
+    rather than quietly rewritten because a reader who believed it would draw the
+    wrong conclusion about a second invocation. It said `77 a pic 99 value zero.`
+    [general/gl080.cbl:L183] "is initialised ONCE, when the module is loaded, and
+    `gl080` leaves through `goback` [general/gl080.cbl:L366], so a second call sees
+    what the first left". `move zero to a.` [general/gl080.cbl:L290] refutes that:
+    `a` is zeroed on EVERY entry, so no value survives a `goback` into the next
+    call. What survives of the point is narrower and still the reason for the
+    parameter - within ONE run, `a` carries state from `gl080a`
+    [general/gl080.cbl:L386] into the gate at L324.
+
+    WHICH INCOMING VALUES THE SHIPPED PROGRAM CAN ACTUALLY PRESENT is therefore
+    just one: ZERO. L290 zeroes it, the only other writer before the gate is
+    `move 1 to a` inside `gl080a`, and a `1` there means batches are outstanding and
+    leaves through `main-end` at [general/gl080.cbl:L307-L313] before the gate is
+    reached at all. `a = 9` is UNREACHABLE at L324. The frozen program still tests
+    for it, so the branch is reproduced (R-4) and this function is how it is
+    exercised - as a source-level branch rather than a reachable state. The
+    conformance section at the foot of this file pins this function against the
+    shipped program for the state it CAN present, so the two cannot drift.
 
     The three `move` statements are recorded rather than performed, for the
     reason the module docstring gives: `MOVE` semantics are `acas_posting/cobol/
@@ -703,9 +830,11 @@ def test_scycle_cyclea_and_period_are_signed_one_byte_binary_items(
 
     Provenance: `binary-char` [copybooks/wssystem.cob:L62-L64] with no UNSIGNED
     keyword, so the width is one byte and the domain is a signed byte's. The
-    default `binary-size` and `binary-truncate` policy behind those two figures
-    was measured on GnuCOBOL 3.2.0 and is recorded in
-    `acas_posting/cobol/usage.py` as question Q-5.
+    default `binary-size` and `binary-truncate` policy behind those two figures is
+    the DOCUMENTED GnuCOBOL default, transcribed into
+    `acas_posting/cobol/usage.py` rather than observed - the register keeps it
+    pending as question Q-5.1 and names the provisional values so that the oracle
+    can confirm or overturn a stated figure.
     """
     assert descriptor.dictionary_key is not None
     assert descriptor.source_locator == locator
@@ -841,7 +970,11 @@ def test_the_binary_char_declaration_governs_and_nothing_is_adjudicated() -> Non
         assert drift.usage is True
         assert any("Signedness disagrees" in detail for detail in drift.details)
         assert descriptor.anomaly_refs() == ("A-11",)
-        assert descriptor.ambiguity_refs() == ("Q-3",)
+        # Q-3 RESOLVED (finding F-19), so the tuple is now empty: the measurement
+        # is carried in the entry notes and A-11 remains in anomaly_refs.
+        assert descriptor.ambiguity_refs() == ()
+        assert any("MEASURED against GnuCOBOL" in note
+                   for note in loader.get_entry(descriptor.dictionary_key).notes)
 
     #  The redefines view has no bridge and no column, so it cannot disagree with
     #  anything: its drift record exists but every flag is clear, and it carries
@@ -1463,9 +1596,10 @@ def test_a2_the_quarter_table_is_bounded_at_four() -> None:
     one occurrence is as wide as `Ledger-Last` [copybooks/wsledger.cob:L29], which
     is the field immediately before the table, and the trailing
     `filler pic x(50)` [copybooks/wsledger.cob:L37] absorbs eight whole
-    occurrences after it. Both bands are measured - see
-    `acas_posting/programs/gl080_end_of_cycle.py` - and only what lies past them
-    is still question Q-19.
+    occurrences after it. All three bands are measured - the two in-record ones
+    and the overrun that was question Q-19 - see
+    `acas_posting.cobol.move.UNCHECKED_SUBSCRIPT_ORACLE_EVIDENCE` for the readings
+    and `acas_posting/programs/gl080_end_of_cycle.py` for the reproduction.
     """
     assert _LEDGER_Q.occurs == _OCCURRENCES == 4
     assert _STRIDE == 6
@@ -1597,7 +1731,10 @@ def test_a2_subscript_zero_needs_a_negative_period(census: _Census) -> None:
     assert period_entry.bridge_host_variable.signed is False
     assert period_entry.column is not None
     assert period_entry.column.unsigned is True
-    assert period_entry.ambiguity_refs == ("Q-3",)
+    # Q-3 RESOLVED (finding F-19); the measurement is in the notes and the anomaly
+    # reference is unchanged.
+    assert period_entry.ambiguity_refs == ()
+    assert any("MEASURED against GnuCOBOL" in note for note in period_entry.notes)
 
 
 def test_a2_the_store_is_blind_to_the_subscript() -> None:
@@ -1647,44 +1784,132 @@ def test_a2_the_store_is_blind_to_the_subscript() -> None:
     assert walked.subscripts == (27, 27, 27)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "AMBIGUITY Q-19, still open. Occurrences past 12 begin at or beyond the "
-        "126th byte of WS-Ledger-Record [copybooks/wsledger.cob:L12-L37], so the "
-        "layout does not say what they overwrite - the compiled program stores "
-        "into whatever the compiler placed after the record area, and no compile "
-        "line in this repository enables bounds checking. The in-record bands are "
-        "already measured; this one has to be measured on the oracle and recorded "
-        "in docs/migration/ambiguity-resolutions.md (R-6). Nothing is guessed "
-        "here and no bound is added (R-3, R-4): the assertion below states the "
-        "in-record property that the reproduction relies on for subscripts up to "
-        "12, and it fails for 13 precisely because the answer is not yet known. "
-        "It will fail as an unexpected pass the moment the question is answered, "
-        "which is the intended alarm."
-    ),
-)
-def test_a2_an_out_of_record_subscript_has_no_destination_in_the_layout() -> None:
-    """ANOMALY A-2 past the record's end - [general/gl080.cbl:L345], Q-19.
+def test_a2_an_out_of_record_subscript_stores_past_the_record_and_moves_no_column() -> (
+    None
+):
+    """Q-19 is SETTLED: the store runs past byte 126 and changes NO column.
 
-    Subscript 13 is reachable exactly as 5 through 12 are: `Period = 1` and
-    `Scycle = 13` passes the guard, passes the gate, and stores at an offset
-    thirteen occurrences into a four-element table. The store is real; where it
-    lands is not describable from `copybooks/wsledger.cob`.
+    ANOMALY A-2 past the record's end - [general/gl080.cbl:L345]. Subscript 13 is
+    reachable exactly as 5 through 12 are: `Period = 1` and `Scycle = 13` passes
+    the guard at [general/gl080.cbl:L324-L326], passes the gate at
+    [general/gl080.cbl:L331], and stores at an offset thirteen occurrences into a
+    four-element table. The store is real. Where it lands is not describable from
+    `copybooks/wsledger.cob`, which is why this was the file's one open question -
+    and it is a question only the compiled program could answer.
+
+    THREE THINGS ARE SETTLED BY THE LAYOUT ARITHMETIC ALONE, and no measurement can
+    change them: the subscript is REACHED, it is not clamped, and its last byte falls
+    PAST the record's trailing filler, so the destination is outside
+    `WS-Ledger-Record` [copybooks/wsledger.cob:L12-L37] altogether. What the layout
+    could NOT say is what the compiled program overwrites once it stores there, and
+    no compile line in this repository enables bounds checking - so that half was
+    measured on the oracle (rule R-6).
+
+    THE MEASUREMENT (finding F-19). GnuCOBOL 3.2.0, `cobc -x -free`, default
+    flags - no dialect selection, no `>>SET ARITHMETIC`, no bounds-checking flag,
+    matching every compile line in this repository. `WS-Ledger-Record` was
+    transcribed field for field with a `pic x(20)` sentinel declared IMMEDIATELY
+    AFTER it inside one enclosing `01`, because that is the only arrangement in
+    which the bytes beyond the record are observable at all; `function length` was
+    read back as 126 for the record and 6 for one occurrence; and each byte of the
+    area was read individually through `function ord` after the store:
+
+        move 999.99 to ledger-q (13)
+            -> the six packed bytes 00 00 00 99 99 9C landed at 1-based offsets
+               125 through 130: TWO inside the trailing `filler pic x(50)` and
+               FOUR past the record's last byte, in the sentinel that follows it
+            -> Ledger-Q1, Ledger-Q2, Ledger-Q3, Ledger-Q4 UNCHANGED
+            -> Ledger-Last UNCHANGED
+            -> no runtime message of any kind, and the program exited 0
+        move 888.88 to ledger-q (14)
+            -> offsets 131 through 136, six further on, again silently: the
+               addressing stays plainly LINEAR past the record rather than
+               wrapping, clamping or faulting
+        move 555.55 to ledger-q (5)
+            -> the first six bytes of the trailing filler, and Q1..Q4 still
+               unchanged - the in-record band, re-confirmed in the same run
+
+    WHAT THAT SETTLES, and what it does not. It settles both facts the migration
+    needs: control flow CONTINUES, and `GLLEDGER-REC` - eleven columns, none of
+    them the trailing filler - is UNTOUCHED, so an overrunning run moves none of
+    the 22 compared tables. What stays undecidable from the frozen source is only
+    which `01` item receives the four overrun bytes in the real program, because
+    that is the compiler's allocation rather than a declaration; no column binds
+    them either way, so the answer cannot change a diff.
+    `acas_posting/programs/gl080_end_of_cycle.py` therefore stores the in-record
+    part, logs the overrun, and does NOT raise - and the log record is licensed by
+    section 0.3.4's rule for a diagnostic with no database effect.
+
+    ⛔ NO BOUND IS ADDED HERE OR ANYWHERE (rules R-3, R-4). The former
+    `xfail(strict=True)` asserted the opposite of the reading below - that the
+    store still lands inside the record - which the layout arithmetic refutes
+    outright and which `test_a2_the_subscript_bands` already asserts the negation
+    of unconditionally, so the marker could only ever fail and its promised
+    "unexpected pass when the question is answered" could never happen. A change
+    back in that direction now fails by name instead.
+
+    Every offset asserted below is DERIVED: the record's width is summed from the
+    dictionary and `Quarters`' position is computed from the tail, and both agree
+    with the oracle's own `function length` and byte census.
     """
+    subscript = _LAST_IN_RECORD_OCCURRENCE + 1
+    assert subscript == 13
+
+    #  The subscript is reached with the gate open, and the pass completes: no
+    #  clamp, no truncated loop, no exception.
     reached = _end_of_period(
         incoming_a=_A_NOT_ARMED,
-        scycle=_LAST_IN_RECORD_OCCURRENCE + 1,
+        scycle=subscript,
         period=1,
         balances=(Decimal("5.00"),),
     )
     assert reached.gate_passed is True
-    assert reached.subscripts == (_LAST_IN_RECORD_OCCURRENCE + 1,)
+    assert reached.subscripts == (subscript,)
 
-    #  THE OPEN QUESTION: does that store still land inside the record?
-    assert (
-        _bytes_past_the_table(_LAST_IN_RECORD_OCCURRENCE + 1) <= _TRAILING_FILLER
-    )
+    #  NOT CLAMPED - the reproduction stores where the subscript says, exactly as the
+    #  frozen program does. A migration that folded the subscript back into the table
+    #  would repair anomaly A-2, which rule R-4 forbids.
+    assert reached.subscripts[0] > _OCCURRENCES
+
+    #  THE DERIVED GEOMETRY, against the oracle's own readings.
+    assert _RECORD_BYTES == 126
+    assert _QUARTERS_FIRST_BYTE == 53
+    assert _QUARTERS_FIRST_BYTE + _first_byte_of_occurrence(1) == 53
+    assert _last_byte_of_occurrence_in_record(_OCCURRENCES) == 76
+
+    #  THE MEASURED ANSWER: occurrence 13 occupies offsets 125 through 130, so it
+    #  STRADDLES the record's end - two bytes in, four bytes out.
+    first_byte = _QUARTERS_FIRST_BYTE + _first_byte_of_occurrence(subscript)
+    last_byte = _last_byte_of_occurrence_in_record(subscript)
+    assert (first_byte, last_byte) == (125, 130)
+    assert first_byte <= _RECORD_BYTES < last_byte
+    assert last_byte - _RECORD_BYTES == 4
+    assert _STRIDE - (last_byte - _RECORD_BYTES) == 2
+
+    #  This is the reading the strict xfail used to assert against, stated so the
+    #  reversal is explicit rather than merely absent: the store does NOT stay
+    #  inside the record.
+    past = _bytes_past_the_table(subscript)
+    assert past > _TRAILING_FILLER
+
+    #  And the last IN-record occurrence is the boundary, not an approximation of it:
+    #  one lower still fits, so 13 is exactly where the layout runs out.
+    assert _bytes_past_the_table(_LAST_IN_RECORD_OCCURRENCE) <= _TRAILING_FILLER
+    assert past - _bytes_past_the_table(_LAST_IN_RECORD_OCCURRENCE) == _STRIDE
+
+    #  Occurrence 14 lands WHOLLY outside, six bytes further on. Linear, not
+    #  wrapped: had it wrapped it would have re-entered the table.
+    beyond = subscript + 1
+    beyond_first = _QUARTERS_FIRST_BYTE + _first_byte_of_occurrence(beyond)
+    assert (beyond_first, _last_byte_of_occurrence_in_record(beyond)) == (131, 136)
+    assert beyond_first > _RECORD_BYTES
+    assert beyond_first - first_byte == _STRIDE
+
+    #  And the neighbouring band is unaffected by any of it: occurrence 5 through
+    #  12 still land wholly inside the filler, which is what makes them silent.
+    for inside in range(_OCCURRENCES + 1, _LAST_IN_RECORD_OCCURRENCE + 1):
+        assert _last_byte_of_occurrence_in_record(inside) <= _RECORD_BYTES
+        assert _bytes_past_the_table(inside) > 0
 
 
 # ---------------------------------------------------------------------------
@@ -2014,11 +2239,16 @@ def test_the_signed_quotient_drops_its_sign_on_store_into_a() -> None:
     SIGN-DROPPED value - 3 * -2 = -6 - and loses its own sign in turn, arriving as
     6, so the gate compares 5 against 6 and turns the phase back.
 
-    Provenance: the zoned store policy, question Q-5, measured on GnuCOBOL 3.2.0
-    and recorded in `acas_posting/cobol/usage.py`. Note this is the store into
+    Provenance: the zoned store policy, question Q-5.1, whose provisional values
+    are transcribed from the documented GnuCOBOL default into
+    `acas_posting/cobol/usage.py` and are pending measurement. Note this is the
+    store into
     WORKING STORAGE and is a separate matter from the sign lost at the bridge on
-    the way to an unsigned column, which is anomaly A-11 and question Q-3 and stays
-    unadjudicated.
+    the way to an unsigned column, which is anomaly A-11 and question Q-3. Q-3 has
+    since been MEASURED - the unsigned column keeps the ABSOLUTE VALUE, magnitude
+    first and then high-order truncation - so the two now agree on the rule and
+    differ only in where it is applied. A-11 remains an anomaly regardless, because
+    knowing what the column holds does not make holding it correct (R-4).
 
     ANOMALY A-2 [general/gl080.cbl:L328], [general/gl080.cbl:L345]: dropping the
     sign is what turns a negative quotient into a SMALL POSITIVE SUBSCRIPT rather
@@ -2051,8 +2281,8 @@ def test_add_one_to_scycle_is_an_unrounded_store_that_wraps_silently() -> None:
     `Scycle ... binary-char` [copybooks/wssystem.cob:L63], so the increment is an
     integer store into one signed byte and the top of the domain wraps to the
     bottom in silence. Provenance for the wrap: the default `binary-size` and
-    `binary-truncate` policy, measured on GnuCOBOL 3.2.0 and recorded as question
-    Q-5 in `acas_posting/cobol/usage.py`.
+    `binary-truncate` policy, transcribed from the documented GnuCOBOL default into
+    `acas_posting/cobol/usage.py` and pending measurement as question Q-5.1.
 
     Reproduced, not repaired: raising here would abort a phase the compiled program
     completes (R-3, R-4).
@@ -2145,9 +2375,13 @@ def test_the_ambient_decimal_context_cannot_change_the_result() -> None:
 
     It comes back as 68, because every verb enters its own
     `INTERMEDIATE_CONTEXT` - sixty significant digits, and the direction of a store
-    fixed by the descriptor rather than by the context. Both figures were measured
-    on GnuCOBOL 3.2.0 and are recorded as question Q-2 in
-    `acas_posting/cobol/arithmetic.py`.
+    fixed by the descriptor rather than by the context. Both are the shipped
+    layer's own, and what this test establishes is that neither moves when the
+    ambient context does. The sixty digits are a WORKING ASSUMPTION documented at
+    `acas_posting/cobol/arithmetic.py`'s `INTERMEDIATE_PRECISION`, chosen to exceed
+    every in-scope receiver; the compiler's own default is question Q-2 and is
+    still pending, and it cannot reach these two figures, which need eight digits
+    between them.
 
     THE AMBIENT CONTEXT IS THE ONLY GLOBAL THIS FILE TOUCHES, it is touched only
     here, and it is put back in a `finally` so that a failure inside the block
@@ -2193,3 +2427,420 @@ def test_the_ambient_decimal_context_cannot_change_the_result() -> None:
     assert arithmetic.divide_by_giving(12345678, 7, _A, rounded=True) == 68
     assert arithmetic.multiply_by_giving(9, 2, _Y) == 18
     assert arithmetic.compare(1234567, 1234568) == -1
+
+
+# ===========================================================================
+# GROUP N - THE CONFORMANCE LOCK: `_end_of_period` AGAINST THE SHIPPED PROGRAM
+#
+# ⭐ WHY THIS SECTION EXISTS. Every assertion above consumes `_end_of_period`, which
+# executes [general/gl080.cbl:L324-L363] as its own sequence over the production
+# primitives. That is a SECOND SOURCE for the end-of-period logic: the shipped
+# `acas_posting/programs/gl080_end_of_cycle.py` runs the same statements, and nothing
+# above compares the two. They could drift apart in either direction - a fix applied to
+# one and not the other, or a "tidy-up" of either - and all forty-seven assertions would
+# stay green while the file's claim to describe the migration quietly became false.
+#
+# The sibling file test_double_entry_explosion.py had the same shape and was resolved by
+# DELETING its transcription and driving the production paragraph instead. That is the
+# better fix and it is not available here, for a reason worth stating rather than
+# glossing: gl070's explosion is one paragraph reachable through one stubbed read, while
+# gl080's end-of-period slice sits in the middle of `gl080-Main` behind the confirm gate,
+# `gl080a`, the archiving branch, `gl080c` and `compress-post`. Reaching it means driving
+# the whole program - which is exactly what this section does, ONCE per case, through the
+# module's public `run` contract, and then requires the two to agree.
+#
+# WHAT THE PRODUCTION PATH CANNOT PRESENT, stated so the transcription's remaining role
+# is honest rather than assumed:
+#
+#   - `a = 9` at the gate is UNREACHABLE. `move zero to a` [general/gl080.cbl:L290] runs
+#     on every entry, and the only other writer before the gate is
+#     `move 1 to a` [general/gl080.cbl:L386] inside `gl080a`. So `a` is 0 or 1 there and
+#     never 9. The frozen program still tests `if a = 9` [general/gl080.cbl:L324], so the
+#     branch is reproduced (R-4) and `_end_of_period` is how it is exercised - but it is
+#     exercised as a SOURCE-LEVEL branch, not as a reachable state.
+#   - `a = 1` at the gate ABORTS BEFORE IT. `gl080a` setting `a` to 1 means batches are
+#     outstanding, and [general/gl080.cbl:L307-L313] leaves through `main-end` on that
+#     alone. So the gate only ever sees `a = 0`.
+#
+# Those two facts also correct something this file used to assert. `_end_of_period`'s
+# docstring said `a` "is initialised ONCE, when the module is loaded, and gl080 leaves
+# through goback, so a second call sees what the first left". [general/gl080.cbl:L290]
+# refutes that: `a` is zeroed on every entry. What survives of the point is narrower and
+# still worth making - `a` is READ at L324 before L328 writes it, so within one run it
+# carries state from `gl080a` into the gate.
+#
+# NO DATABASE. Every facade verb is replaced by a recorder; the nominal reader presents
+# a fixed list of balances and then reports AT END, which is what the frozen loop's
+# `at end go to loop-end` [general/gl080.cbl:L343-L344] responds to.
+# ===========================================================================
+
+
+def _drive_shipped_gl080(
+    *,
+    scycle: int,
+    period: int,
+    current_quarter: int,
+    balances: tuple[Decimal, ...],
+) -> dict[str, object]:
+    """Run the SHIPPED `gl080` end to end and report what its end-of-period pass did.
+
+    Args:
+        scycle: `Scycle` on the system record [copybooks/wssystem.cob:L63].
+        period: `Period` [copybooks/wssystem.cob:L64].
+        current_quarter: `Current-Quarter` [copybooks/wssystem.cob:L110].
+        balances: The `Ledger-Balance` of each row the nominal reader presents.
+
+    Returns:
+        `a`, `y`, `scycle`, `current_quarter` as the run left them, plus the quarter
+            subscript actually written per row and the `Ledger-Last` writes observed.
+    """
+    from acas_posting.dal import facade
+    from acas_posting.programs import gl080_end_of_cycle as gl080
+    from acas_posting.records.calling_data import WsCallingData
+    from acas_posting.records.file_access import FileAccess
+    from acas_posting.records.file_defs import FileDefs
+    from acas_posting.records.system_record import SystemRecord
+    from acas_posting.records.test_data_flags import AcasDalCommonData
+
+    system_record = SystemRecord()
+    system_record.system_data_block.scycle = scycle
+    system_record.system_data_block.period = period
+    system_record.system_data_block.current_quarter = current_quarter
+    #  `88 Archiving value "Y"` [copybooks/wssystem.cob:L165]: anything else sends
+    #  [general/gl080.cbl:L315-L320] down the deletion branch instead, which is the
+    #  branch this case wants because archiving would open a sequential archive file.
+    system_record.general_ledger_block.arch = "N"
+    #  `88 FS-Cobol-Files-Used value zero` / `88 FS-MySql-Used value 1`
+    #  [copybooks/wssystem.cob:L112-L114]. ONE is the RDB mode, and it is required
+    #  rather than cosmetic: `compress-post` leaves immediately on
+    #  `if not FS-Cobol-Files-Used` [general/gl080.cbl:L632-L635], and with the default
+    #  zero it instead reaches the record-length check at [general/gl080.cbl:L643-L649]
+    #  and stops the run - which is the frozen program's own behaviour for a COBOL
+    #  indexed store the migration does not have.
+    system_record.system_data_block.rdbms_flat_statuses.file_system_used = 1
+
+    #  Every balance presented in turn, then AT END. `10` is FS-Reply's end-of-file.
+    presented = {"index": 0}
+    quarter_writes: list[int] = []
+    ledger_last_writes: list[Decimal] = []
+
+    def _nominal_read_next(ctx: object) -> None:
+        index = presented["index"]
+        if index >= len(balances):
+            ctx.file_access.fs_reply = 10
+            return
+        presented["index"] = index + 1
+        ctx.record.ledger_balance = balances[index]
+        ctx.file_access.fs_reply = 0
+
+    def _nominal_rewrite(ctx: object) -> None:
+        #  WHICH occurrence the pass stored into, read back off the record rather than
+        #  inferred: exactly one quarter differs from its seeded zero after the store.
+        #  `05 Ledger-Q occurs 4` [copybooks/wsledger.cob:L36] is carried as a
+        #  sequence, and it is read positionally with `start=1` because COBOL
+        #  subscripts are ONE-based - turning them into Python indices here would be
+        #  the very `a - 1` mistake ANOMALY A-2's reproduction exists to avoid.
+        quarters = tuple(ctx.record.quarters_table.ledger_q)
+        quarter_writes.extend(
+            ordinal
+            for ordinal, value in enumerate(quarters, start=1)
+            if value != Decimal("0.00")
+        )
+        if ctx.record.ledger_last != Decimal("0.00"):
+            ledger_last_writes.append(ctx.record.ledger_last)
+        ctx.file_access.fs_reply = 0
+
+    def _silent(ctx: object) -> None:
+        ctx.file_access.fs_reply = 10 if _silent.at_end else 0
+
+    _silent.at_end = True
+
+    swapped: dict[str, object] = {}
+    verbs = {
+        "gl_nominal_read_next": _nominal_read_next,
+        "gl_nominal_rewrite": _nominal_rewrite,
+    }
+    for name in (
+        "gl_batch_open",
+        "gl_batch_open_input",
+        "gl_batch_read_next",
+        "gl_batch_rewrite",
+        "gl_batch_close",
+        "gl_nominal_open",
+        "gl_nominal_close",
+        "gl_posting_open",
+        "gl_posting_open_input",
+        "gl_posting_open_output",
+        "gl_posting_read_next",
+        "gl_posting_write",
+        "gl_posting_delete",
+        "gl_posting_close",
+    ):
+        verbs.setdefault(name, _silent)
+
+    try:
+        for name, replacement in verbs.items():
+            swapped[name] = getattr(facade, name)
+            setattr(facade, name, replacement)
+        gl080.run(
+            WsCallingData(),
+            system_record,
+            "21/09/2025",
+            FileDefs(),
+            file_access=FileAccess(),
+            dal_common=AcasDalCommonData(),
+            run_confirmed=True,
+        )
+    finally:
+        for name, original in swapped.items():
+            setattr(facade, name, original)
+
+    return {
+        "scycle": int(system_record.system_data_block.scycle),
+        "current_quarter": int(system_record.system_data_block.current_quarter),
+        "quarter_writes": tuple(quarter_writes),
+        "ledger_last_writes": tuple(ledger_last_writes),
+        "rows_presented": presented["index"],
+    }
+
+
+@pytest.mark.parametrize(
+    ("scycle", "period", "current_quarter", "balances"),
+    [
+        #  Exactly divisible, so the gate at L331 passes and the quarter pass runs.
+        #  12 / 3 = 4 -> subscript 4, the last occurrence of `occurs 4`.
+        pytest.param(12, 3, 4, (Decimal("4321.09"),), id="12-over-3-quarter-4"),
+        #  3 / 3 = 1 -> subscript 1, and `current-quarter` is not 4 so `Ledger-Last`
+        #  is left alone. The A-3 divergence in its visible form.
+        pytest.param(3, 3, 1, (Decimal("117.53"),), id="3-over-3-quarter-1"),
+        #  NOT exactly divisible: 7 / 3 rounds to 2, 2 * 3 = 6, 7 != 6, so L331 leaves
+        #  and nothing is stored at all.
+        pytest.param(7, 3, 2, (Decimal("777.01"),), id="7-over-3-gate-fails"),
+        #  scycle < period, so the L324-L326 guard pre-empts the divide entirely.
+        pytest.param(2, 3, 1, (Decimal("500.00"),), id="scycle-below-period"),
+        #  More than one row, so the subscript is shown to be per-pass and not per-row.
+        pytest.param(
+            12,
+            12,
+            4,
+            (Decimal("100.00"), Decimal("200.00")),
+            id="two-rows-one-subscript",
+        ),
+    ],
+)
+def test_the_transcription_agrees_with_the_shipped_program(
+    scycle: int, period: int, current_quarter: int, balances: tuple[Decimal, ...]
+) -> None:
+    """`_end_of_period` and the SHIPPED gl080 must agree, case by case.
+
+    This is what stops the transcription above from being an independent second source.
+    `incoming_a` is 0 because that is the only value the production path can present at
+    the gate - see the section comment - so the two are compared on exactly the states
+    the shipped program can actually be in.
+
+    Args:
+        scycle: The accounting cycle.
+        period: The period length.
+        current_quarter: The system record's own rotating counter.
+        balances: The nominal balances the reader presents.
+    """
+    transcribed = _end_of_period(
+        incoming_a=0,
+        scycle=scycle,
+        period=period,
+        current_quarter=current_quarter,
+        balances=balances,
+    )
+    shipped = _drive_shipped_gl080(
+        scycle=scycle,
+        period=period,
+        current_quarter=current_quarter,
+        balances=balances,
+    )
+
+    assert shipped["scycle"] == transcribed.scycle, (
+        f"`add 1 to scycle` [general/gl080.cbl:L334] left {shipped['scycle']} in the "
+        f"shipped program and {transcribed.scycle} in the transcription above"
+    )
+    assert shipped["current_quarter"] == transcribed.current_quarter, (
+        f"the rotating counter [general/gl080.cbl:L355-L357] left "
+        f"{shipped['current_quarter']} in the shipped program and "
+        f"{transcribed.current_quarter} in the transcription above"
+    )
+    assert shipped["quarter_writes"] == transcribed.subscripts, (
+        f"`move ledger-balance to ledger-q (a)` [general/gl080.cbl:L345] stored into "
+        f"occurrence(s) {shipped['quarter_writes']} in the shipped program and "
+        f"{transcribed.subscripts} in the transcription above. ANOMALY A-2 is that "
+        f"this subscript is the ROUNDED quotient used with no bounds test; the two "
+        f"sources must agree on it or one of them has been 'fixed' (R-4)."
+    )
+    assert shipped["ledger_last_writes"] == transcribed.ledger_last_writes, (
+        f"`move ledger-balance to ledger-last` [general/gl080.cbl:L346-L347] fired for "
+        f"{shipped['ledger_last_writes']} in the shipped program and "
+        f"{transcribed.ledger_last_writes} in the transcription above. ANOMALY A-3 is "
+        f"that this consults `Current-Quarter` and not `a`."
+    )
+    #  The reader is exhausted only on the paths that reach the loop, which is itself a
+    #  claim about the gate: a pre-empted or failed gate must present NO rows.
+    expected_rows = len(balances) if transcribed.gate_passed else 0
+    assert shipped["rows_presented"] == expected_rows, (
+        f"the shipped program presented {shipped['rows_presented']} nominal row(s) and "
+        f"the transcription says the gate {'passed' if transcribed.gate_passed else 'did not pass'}, "
+        f"which implies {expected_rows}"
+    )
+
+
+# ---------------------------------------------------------------------------
+#  THE ZERO DIVISOR'S DATABASE CONSEQUENCE, MEASURED END TO END  (Q-7, R-6)
+#
+#  The section above establishes that the zero divisor is reachable and stores
+#  nothing. That is where the analysis used to stop, and stopping there hides the
+#  part that reaches a table. Measured on the compiled oracle 2026-08-07, the
+#  chain runs on past the divide:
+#
+#    L290  move zero to a                     a is 0 on every entry
+#    L324  if a = 9 or scycle < period        0 = 9 false; 0 < 0 false -> NOT taken
+#    L328  divide scycle by period giving a   SIZE ERROR, NO STORE, a stays 0,
+#          rounded                            and the RUN CONTINUES (exit 0)
+#    L329  multiply a by period giving y      0 * 0 -> y = 0
+#    L331  if scycle not = y go to main-end   0 not= 0 is FALSE -> NOT taken
+#    L334  add 1 to scycle
+#    L345  move ledger-balance to             subscript 0, on every ledger row
+#          ledger-q (a)
+#
+#  So `period = 0` with `scycle = 0` does not merely fail to store a quotient - it
+#  walks into phase 5 carrying subscript ZERO, and subscript zero is not harmless.
+#  Measured against the frozen 126-byte `copybooks/wsledger.cob`: occurrence 0
+#  occupies bytes 47-52, which is `Ledger-Last` - a REAL `GLLEDGER-REC` COLUMN.
+#  Every row the loop touches therefore gets `LEDGER-LAST` overwritten with
+#  `LEDGER-BALANCE`, gets NO quarter column updated at all, and is then persisted
+#  by `GL-Nominal-Rewrite`.
+#
+#  ⭐ WHY IT IS PARTICULARLY HARD TO SPOT, and the reason it is worth a section of
+#  its own: [general/gl080.cbl:L346-L347] contains a LEGITIMATE
+#  `move ledger-balance to ledger-last`, taken when `current-quarter = 4`. The
+#  corrupting store writes THE SAME VALUE INTO THE SAME COLUMN. On a quarter-4 run
+#  it is invisible; on quarters 1 to 3 it produces a `LEDGER-LAST` that looks
+#  entirely plausible and is a quarter early. No diagnostic, no status, no abort.
+#
+#  ⛔ NOTHING IS GUARDED. `scycle = 5` escapes through the L331 gate and
+#  `scycle = 0` does not, and both outcomes are asserted rather than prevented.
+# ---------------------------------------------------------------------------
+
+#: What the compiled oracle kept, per subscript, starting from
+#: balance 11.11 / last 22.22 / quarters 33.33, 44.44, 55.55, 66.66. Copied from
+#: the probe output, NOT recomputed from the layout - so a drift in the offset
+#: arithmetic breaks these rather than moving with it.
+_MEASURED_SUBSCRIPT_LANDINGS: Final[
+    tuple[tuple[int, str, tuple[str, str, str, str]], ...]
+] = (
+    (0, "11.11", ("33.33", "44.44", "55.55", "66.66")),
+    (1, "22.22", ("11.11", "44.44", "55.55", "66.66")),
+    (5, "22.22", ("33.33", "44.44", "55.55", "66.66")),
+)
+
+
+def test_the_zero_divisor_lets_control_reach_phase_five() -> None:
+    """`scycle = 0` passes the L331 gate; `scycle = 5` does not.
+
+    This is the fact the no-store assertion above does not reach. Once the divide
+    has declined to store, `y` is computed from the UNCHANGED `a` - and when
+    `period` is zero, `y` is zero whatever `a` holds. The gate then compares
+    `scycle` against zero, so the phase turns back for every non-zero cycle and
+    proceeds for a zero one. A run with `scycle = 0, period = 0` therefore enters
+    the phase-5 ledger loop, which is where the table effect happens.
+
+    The shipped primitives are driven directly, with the receiving field's
+    previous value handed in the way `gl080` hands it
+    [general/gl080.cbl:L328 -> the module's `receiver_value=st.a`], rather than the
+    transcription being consulted - the point is what the production layer does.
+    """
+    #  L328 with the receiver armed, as the shipped module calls it: no store.
+    for scycle, previous in ((0, 0), (5, 77), (0, 77)):
+        kept = arithmetic.divide_by_giving(
+            scycle, 0, _A, rounded=True, receiver_value=previous
+        )
+        assert kept == previous, (
+            f"scycle={scycle} / period=0 must leave the receiver at {previous}; "
+            f"the compiled oracle left it untouched"
+        )
+
+    #  L329, then the L331 gate, for the two cycles that decide the branch.
+    for scycle, reaches_phase_five in ((0, True), (5, False), (1, False)):
+        a_after = arithmetic.divide_by_giving(
+            scycle, 0, _A, rounded=True, receiver_value=0
+        )
+        y_after = arithmetic.multiply_by_giving(a_after, 0, _Y, rounded=False)
+        assert y_after == 0, "period = 0 forces y to zero whatever `a` holds"
+        gate_passes = arithmetic.compare(scycle, y_after) == 0
+        assert gate_passes is reaches_phase_five, (
+            f"scycle={scycle}, period=0: the L331 gate "
+            f"{'must pass' if reaches_phase_five else 'must turn the phase back'}"
+        )
+
+    #  And the subscript phase 5 would carry in the reachable case is ZERO - the
+    #  value L290 put there, which L328 declined to replace.
+    assert (
+        arithmetic.divide_by_giving(0, 0, _A, rounded=True, receiver_value=0) == 0
+    )
+
+
+def test_subscript_zero_writes_a_real_ledger_column() -> None:
+    """Subscript 0 lands on `Ledger-Last`, and no quarter column moves.
+
+    Driven through the SHIPPED store primitive over the shipped record group, so
+    the assertion is about `acas_posting` rather than about a layout recomputed
+    here. The expected values are the compiled oracle's, captured against the
+    frozen `copybooks/wsledger.cob` whose own header declares 126 bytes.
+
+    Subscript 1 is included as the in-range control - it must move `Ledger-Q1` and
+    leave `Ledger-Last` alone - and subscript 5 as the harmless out-of-range
+    control, landing in the trailing `03 filler pic x(50)`
+    [copybooks/wsledger.cob:L37], which carries no column.
+
+    ⛔ A Python `[a - 1]` would make subscript 0 the LAST occurrence, which
+    corresponds to nothing the compiled program does; `Ledger-Q4` staying at
+    66.66 in the first row below is what rules that out.
+    """
+    from acas_posting.cobol import move
+    from acas_posting.programs import gl080_end_of_cycle as gl080
+    from acas_posting.records.gl_ledger import WsLedgerRecord
+
+    for subscript, expected_last, expected_quarters in _MEASURED_SUBSCRIPT_LANDINGS:
+        record = WsLedgerRecord()
+        record.ledger_balance = Decimal("11.11")
+        record.ledger_last = Decimal("22.22")
+        for occurrence, seeded in enumerate(
+            ("33.33", "44.44", "55.55", "66.66"), start=1
+        ):
+            setattr(record.quarters, f"ledger_q{occurrence}", Decimal(seeded))
+
+        after = move.subscripted_store(
+            gl080._LEDGER_RECORD_GROUP,
+            gl080._ledger_record_values(record),
+            member="Ledger-Q (1)",
+            element_length=gl080._LEDGER_Q_ELEMENT_BYTES,
+            subscript=subscript,
+            value=move.move(
+                record.ledger_balance, gl080._LEDGER_Q, sending_field=gl080._LEDGER_BALANCE
+            ),
+            statement="general/gl080.cbl:L345",
+        )
+
+        assert after["Ledger-Last"] == Decimal(expected_last), (
+            f"subscript {subscript}: the compiled oracle left Ledger-Last at "
+            f"{expected_last}"
+        )
+        for occurrence, expected in enumerate(expected_quarters, start=1):
+            assert after[f"Ledger-Q ({occurrence})"] == Decimal(expected), (
+                f"subscript {subscript}: the compiled oracle left "
+                f"Ledger-Q ({occurrence}) at {expected}"
+            )
+
+    #  The two claims that make the finding a finding rather than an offset note:
+    #  subscript 0 reaches a COLUMN, and it reaches it INSTEAD of any quarter.
+    zero_case = dict(zip(("subscript", "last", "quarters"), _MEASURED_SUBSCRIPT_LANDINGS[0]))
+    assert zero_case["last"] == "11.11", "subscript 0 must receive the balance"
+    assert zero_case["quarters"] == ("33.33", "44.44", "55.55", "66.66"), (
+        "subscript 0 must leave every quarter untouched"
+    )

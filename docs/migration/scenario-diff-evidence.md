@@ -36,12 +36,9 @@ so in those words.
 
 ## 1. Rules provenance
 
-**There is no user rules document for this project.** `review_rules` was called
-during the authoring of this file and returned exactly:
-
-```text
-No user rules provided.
-```
+**There is no user rules document for this project.** The Agent Action Plan
+states it directly in §0.7.1: *"No separate user rules document was provided for
+this project."*
 
 Stated plainly, as the absence requires: no on-disk rules document exists, and
 no downstream agent should go looking for one. Where this register is silent,
@@ -180,14 +177,20 @@ unused.
 
 **That premise does not hold in the environment this file was actually written
 in, and the difference was established by execution rather than by argument.**
-Measured on the authoring host on **2026-08-04**:
+Measured on the authoring host, and each fact re-checkable by the command named
+beside it rather than by trusting a date:
 
 - Docker Engine **29.7.0** is present, and the two-service harness stack
   (`harness/docker-compose.yml`) is running with MariaDB **10.11.7** healthy.
+  — `docker version --format '{{.Server.Version}}'`
 - `cobc` is **absent from the host**, exactly as R-1 requires. GnuCOBOL
   **3.2.0** exists only inside the harness builder image.
+  — `command -v cobc` on the host returns nothing; `cobc --version` inside the
+  builder service reports `cobc (GnuCOBOL) 3.2.0`
 - The oracle **is built**: 215 loadable modules, **29/29** `*MT` bridges,
-  **28/28** loaders, all **12** in-scope posting programs (`gl051`, `gl070`,
+  **28/28** loaders — `find /build -name '*.so' | wc -l`,
+  `ls /build/common/*MT.so | wc -l` — and all **12** in-scope posting programs
+  (`gl051`, `gl070`,
   `gl071`, `gl072`, `gl080`, `sl055`, `sl060`, `sl100`, `pl055`, `pl060`,
   `pl100`, `irs030`) and all **17** file handlers.
 
@@ -197,12 +200,21 @@ Measured on the authoring host on **2026-08-04**:
   build that compiles everything reports 29. The stub is out of scope and no
   scenario reaches it. On the table side the arithmetic is **22** in scope plus
   **11** out of scope for the **33** the frozen schema declares.
-- The former global build blocker is cleared without touching the freeze. See
-  §5.4 and §10.1 of [`ambiguity-resolutions.md`](ambiguity-resolutions.md).
-- All eight scenarios were then driven through the complete protocol, and all
-  eight produced an empty diff. §8 and §9 record the evidence.
+- The former global build blocker is cleared without touching the freeze — the
+  missing `copybooks/ACAS-SQLstate-error-list.cob` is materialised as a
+  comment-only shim under `$ACAS_BUILD/copybooks`, never in the checkout. See
+  §10.1 of [`ambiguity-resolutions.md`](ambiguity-resolutions.md) for the
+  reasoning and §8.7 of
+  [`../../README-python-migration.md`](../../README-python-migration.md) for the
+  operator's view. ⚠️ An earlier revision of this bullet also cited "§5.4", which
+  does not exist in either document.
+- All eight mandated scenarios were then driven through the complete protocol on
+  **2026-08-04**, and all eight produced an empty diff. A ninth scenario,
+  `end_of_cycle_gl`, was added afterwards to reach `gl080`, and on **2026-08-07**
+  all **nine** were driven through the complete protocol and all nine produced an
+  empty diff. §8 and §9 record the evidence.
 
-Recording those eight comparisons as `PENDING` would therefore have been to
+Recording those comparisons as `PENDING` would therefore have been to
 write down something untrue. It would also have breached **R-6**, which requires
 that observed compiled behaviour decide a question and "be documented rather
 than settled silently" — and suppressing a measured result is the definition of
@@ -216,9 +228,9 @@ empty diff that was not observed — is honoured exactly, in both directions.
 `PENDING — AWAITING ORACLE EXECUTION` remains in the vocabulary and is used
 wherever this register genuinely has no measurement, which is §13.
 
-Everything asserted as observed below was re-driven first-hand while this file
-was written; §9 gives the commands, and every manifest digest in §10 was
-reproduced independently.
+Everything asserted as observed below was re-driven on the code as committed. §9
+gives the commands and names every retained artifact; §8.1 and §10 give the digests,
+each of which a reader can recompute from the artifact it describes.
 
 ## 4. The protocol
 
@@ -338,12 +350,27 @@ table(s) they write."
 
 The resolution, recorded as an R-6 arbitration at `Q-10` in
 [`ambiguity-resolutions.md`](ambiguity-resolutions.md), scopes the requirement
-to **seeding** and establishes `ACAS_SEED_AUTOCOMMIT=on` as the only mode in
-which the frozen loaders persist a row. **This is a declared deviation, not a
-default**, and the harness itself emits a warning naming it as such on every
-run. Runtime application access remains autocommit **on**, which both runners
-assert. No harness code issues the COMMIT the frozen loaders omit — the defect
-is reproduced and reported, never repaired (R-4).
+to **seeding** and MEASURES autocommit **on** to be the only mode in which the
+frozen loaders persist a row. Both modes were run against the compiled loaders:
+under `off` all seven load programs return zero and a fresh session sees zero
+rows in all seven seeded tables; under `on` the same seven return zero and a
+fresh session sees eight rows across those seven tables. The return codes are
+**identical** either way, so the mode is invisible to the frozen code.
+
+**`on` is therefore the shipped default** — `ACAS_SEED_AUTOCOMMIT` unset selects
+it — because a default must not be a mode the harness itself proves always
+fails. `ACAS_SEED_AUTOCOMMIT=off` remains selectable, is the AAP-literal
+reading, and reproduces the frozen no-COMMIT defect end to end, which is exactly
+what the durability gate's exit **76** reports. Runtime application access
+remains autocommit **on**, which both runners assert. No harness code issues the
+COMMIT the frozen loaders omit — the defect is reproduced and reported, never
+repaired (R-4).
+
+It is therefore the **canonical default**: `harness/seed.sh` selects it when
+`ACAS_SEED_AUTOCOMMIT` is unset and `harness/docker-compose.yml` declares it
+explicitly, so no caller needs a flag to obtain a durable seed. **It is a declared
+divergence from the letter of the Agent Action Plan** (§0.2.1.1, §0.5.2, §0.4.1.7),
+logged on every run and written up in full in the arbitration.
 
 ## 5. The verdict contract
 
@@ -365,9 +392,21 @@ Two hardening properties matter to anyone reading the artifacts. With `--out`, a
 "compared, and identical" from "never compared"; and any report already at that
 path is deleted before the comparison begins, so a stale zero-byte file from an
 earlier passing run cannot survive an error path and be misread as proof. And a
-capture whose run stage did not attest success is **refused** outright unless
-`--allow-unattested` is passed, so carrying a partial capture forward by hand
-fails closed rather than reporting a pass.
+capture whose run stage did not attest a **completed** run is **refused**
+outright unless `--allow-unattested` is passed, so carrying a partial capture
+forward by hand fails closed rather than reporting a pass.
+
+**What is not refused, and why that distinction earns its keep.** A run status is
+evidence metadata, not a gate on one value, because a non-zero runner status has
+two entirely different meanings. A missing fixture, an unreachable server or an
+overrun deadline means the run *measured nothing*, so its capture is refused. But
+`harness/run_python_scenario.sh` exiting **69** means every operation ran, every
+post-run assertion was taken, and a disposition contradicted what the scenario
+declares — the run *completed*, and the state it left **is** the finding. That
+capture is compared, and its disposition is announced on stderr above the verdict
+so an empty diff can never be read as an unqualified parity claim. Refusing it,
+as an earlier revision did, withheld the one artifact that says which tables,
+rows and columns differ, precisely when a human most needs it.
 
 ### 5.2 Comparison discipline
 
@@ -426,15 +465,59 @@ there are **zero** `TIMESTAMP` columns; all **513** columns across those 22
 tables are `NOT NULL`; and the file is **1459** lines.
 
 `harness/dump_tables.py` also treats `--scenario-file`, `--tables` and
-`--all-in-scope` as **mutually exclusive** and raises rather than guessing. Every
-invocation in §9 therefore passes exactly one: `--scenario-file` where the
-observation is the scenario's own affected-table list.
+`--all-in-scope` as **mutually exclusive** and raises rather than guessing, so
+every invocation names its scope.
 
-The eleven out-of-scope tables are never dumped. `--all-tables` exists as a
-debugging aid and is explicitly not the protocol, because the menu exit path at
-`[general/general.cbl:L656-L691]` rewrites `SYSTEM-REC`, `SYSDEFLT-REC` and
-`SYSTOT-REC` on the COBOL side while the Python cycle has no menu — so comparing
-them in a scenario that does not affect them reports a **false failure**.
+**`--all-in-scope`, all 22 tables, is THE PROTOCOL.** `harness/run_parity.sh`
+passes it at stages 3 and 7 and `tests/conftest.py` passes it from `dump`; stage
+10 diffs with `--all-in-scope`. The reason is that a bound drawn from what a
+scenario *expects* to move cannot reveal a difference in anything it did not
+expect to move, and an empty diff is the single pass condition (Agent Action Plan
+section 0.8.5). ⭐ The reason is **not** that only the COBOL side rewrites the
+parameter tables — both sides do. `overrewrite.` `[general/general.cbl:L656-L672]`
+rewrites `SYSTEM-REC` under key 1, `SYSDEFLT-REC` under key 2 and `SYSTOT-REC`
+under key 4, and **both cycles perform it** —
+`acas_posting/cli/args.py::overrewrite` reproduces that RDB arm, writing key 1
+unconditionally, key 2 only when the route loaded the defaults record and key 4
+only when it loaded the totals record, which reproduces the frozen per-route
+divergence (General writes keys 1, 2 and 4; Sales and Purchase write keys 1 and 4
+and never key 2 `[sales/sales.cbl:L338-L360]`, `[purchase/purchase.cbl:L333-L354]`),
+while `irs_post` persists key 1 through the IRS menu's own `EOJ.` shape. `Q-7`
+records that correction. So those rows are **comparable on both sides**, not a
+source of false failure — and a capture that omitted them could have reported an
+empty diff while the run date, the allocators, the flags, the defaults or the
+period totals differed.
+
+**`SYSTEM-REC` IS DUMPED WITH EXACTLY TWO CELLS WITHHELD.** A dump is `SELECT *`
+and `RDBMS-PASSWD char(12)` `[copybooks/wssystem.cob:L139]` is one of its 169
+columns, so a capture of the row would carry the database password into this
+evidence set; `harness/dump_tables.py`'s `REDACTED_COLUMNS` replaces that cell and
+the frozen schema's shorter `PASS-WORD` cell — exactly those two, on **both**
+sides — with one fixed marker. The row is still dumped and still diffed, every
+other column byte for byte, so this is redaction rather than an ignore-list, and
+withholding a secret symmetrically cannot conceal a difference in anything the
+cycle computes. The row is **fingerprinted** as well, on both sides and on every
+scenario, and `tests/conftest.py`'s `assert_system_record_parity` compares the two
+post-run digests over all 169 columns — the credential included, with nothing to
+leak, because a sha256 of a canonical dump is not the dump.
+
+A scenario's `affected_tables` is its **declared effect**, asserted against
+`expected_table_effect` within each side; it is *not* the comparison bound.
+`--scenario-file` (narrow to that declared effect), `--tables` (one table by
+hand) and `diff_states.py --all-tables` (the union of whatever the two captures
+hold) are **debugging aids, not the protocol**. The eleven out-of-scope tables
+are never dumped.
+
+> **RE-MEASUREMENT COMPLETE — the §8 register below is the 22-table one.**
+> An earlier register recorded these scenarios under the NARROWER per-scenario
+> bound, and it was correctly marked superseded rather than rewritten, because an
+> empty diff over 3, 4, 10 or 14 tables does not establish an empty diff over 22.
+> All eight scenarios have since been **re-run and re-recorded** under
+> `--all-in-scope`, and §8 now reports that measurement and no other. The earlier
+> narrower numbers are not reproduced here: keeping two registers side by side
+> would invite the wrong one being cited. §8 states the bound in its own `Tables`
+> column, which reads **22** for every row, so a future reader can tell at a
+> glance which bound produced it.
 
 ### 5.4 Three corrections to the schema census
 
@@ -562,7 +645,7 @@ side, selector and run attestation are **inherited**, never re-judged, so the tw
 stages of one run cannot claim different identities.
 
 
-## 6. Inputs pinned identically across all eight scenarios
+## 6. Inputs pinned identically across all nine scenarios
 
 ### 6.1 The controlled clock — two observables, and why two suffice
 
@@ -578,8 +661,8 @@ IRS carries two-digit years. These two values are the constants
 the conversion `date(2025, 9, 21) -> 155127` is recorded as verified on the
 target interpreter.
 
-Two observables suffice because there is exactly **one** clock read in the entire
-COBOL call chain, and both observables descend from it.
+Two observables suffice because **both descend from one shared date service**, and
+because the migrated programs read no clock at all.
 `[copybooks/Proc-ACAS-Mapser-RDB.cob:L72]` is
 `move function current-date to wse-date-block.`, and the propagation is then
 fully visible in the next eight lines:
@@ -594,6 +677,24 @@ and receives the date purely through linkage. There is no hidden time source, no
 random seed, and no ordering nondeterminism from a secondary index. Pinning these
 two values is therefore sufficient to make two runs byte-identical, and no clock
 abstraction is needed inside the migrated programs at all.
+
+⚠️ **The service above is not the only clock read in the call chain, and an
+earlier revision of this section said it was.** Following the Agent Action Plan's
+own phrasing at §0.1.1, it claimed *"exactly one clock read in the entire COBOL
+call chain"*. That is disprovable with one `grep`, so the census is stated:
+`function current-date` appears at `[copybooks/Proc-ACAS-Mapser-RDB.cob:L72]`
+**and** once in each menu shell — `[general/general.cbl:L371]`,
+`[sales/sales.cbl:L323]`, `[purchase/purchase.cbl:L318]`, `[irs/irs.cbl:L480]` —
+**and** in the system selector reached before any of them,
+`[common/ACAS.cbl:L353]`. Further reads exist in programs the cycle never
+reaches; `docs/migration/anomaly-log.md` names them under **A-16**.
+
+**The determinism argument is unaffected, which is why the correction is worth
+making rather than glossing.** All six reads sit *above* the migrated surface,
+every one of them feeds the same two linkage values, and the twelve migrated
+programs read no clock. What the correction changes is only the claim's
+checkability: "one read" fails a `grep`, "zero reads inside the twelve, with the
+reads confined to the menus and the shared service they call" does not.
 
 The pre-zero at L78 is what makes **A-16** observable. The date module leaves its
 output field **untouched** on a rejected date, so the documented "errors return
@@ -624,7 +725,7 @@ for example `[sales/sl060.cbl:L1039]`, `L1126` and `L1175`. AAP §0.6.4:
 > "The scenario definitions must therefore pin this switch explicitly, since
 > leaving it at a default would make the affected-table list ambiguous."
 
-**All eight scenarios pin it to a single space**, `irs_instead: " "`. Two
+**All nine scenarios pin it to a single space**, `irs_instead: " "`. Two
 subtleties are worth recording:
 
 - **The third state has no condition name at all.** A space satisfies neither
@@ -643,18 +744,24 @@ subtleties are worth recording:
 | --- | --- | --- |
 | `FILE-SYSTEM-USED` | `1` | Forces both cycles through the MySQL bridge. A zero here would route the COBOL side to indexed files and produce unchanged tables that look exactly like a correct result — the false-pass trap every scenario file names first. |
 | `Cyclea` / `Scycle` | `1` | The accounting cycle both batch-file filters test. |
-| `period` | `1` | Shared by all eight so no scenario differs by period; inert throughout, because no scenario drives `gl080` (§13). |
+| `period` | `1` | Shared by all **nine**, `end_of_cycle_gl` included, so no scenario differs by period. It is inert for the **cycle-to-period divide** at `[general/gl080.cbl:L328]`, because a period of one leaves that divide nothing to decide. ⚠️ The reason given here read "because no scenario drives `gl080`" until this revision. That is no longer true — `end_of_cycle_gl` drives it — so the reason has been narrowed to the one that still holds rather than deleted. A `period` of **0**, which is what `Q-GL080-DIVIDE-BY-ZERO` needed, is still seeded by no committed scenario; that question was closed by a focused probe instead. |
 | `date_form` | `1` | UK day-month-year. It governs the digit **order the COBOL reads**, never a reordering of the pinned text, which is passed through unchanged. |
 
 ## 7. Affected-table lists, seeds and answers
 
 ### 7.1 The declared order is load-bearing
 
-Each scenario's `affected_tables` list bounds the comparison, and the seed
-fingerprint is written as `<TABLE> <count>` lines in the list's **declared
-order**. A disagreement between the two sides' fingerprints is a **harness
-fault** — exit **2** — and not a diff, because two cycles that started from
-different states cannot be compared for behaviour at all.
+Each scenario's `affected_tables` list bounds the comparison, and the state
+fingerprint is written as `<TABLE><TAB><row count><TAB><sha256>` lines in the
+list's **declared order**, plus one line for the fingerprint-only parameter row.
+The digest is of the table's canonical primary-key-ordered dump, which is what
+makes the record decisive: two seeds carrying **different values at the same row
+counts** would agree on a count-only record. A single producer,
+`harness/table_digest.py`, computes every digest for both sides and for both the
+pre-run and the post-run record. A disagreement between the two sides'
+pre-run fingerprints is a **harness fault** — exit **2** — and not a diff, because
+two cycles that started from different states cannot be compared for behaviour at
+all.
 
 | Scenario | Affected tables (declared order) | Count |
 | --- | --- | ---: |
@@ -672,6 +779,25 @@ though the fan-out is a space, precisely so that an unexpected fan-out write
 would be caught rather than missed.
 
 ### 7.2 Seed flat files and driven answers
+
+**The fixture directory is mechanical and the same shape for every scenario:**
+`/data/fixtures/<scenario-name>`, built by `harness/build_fixtures.sh` and passed
+to the protocol as `--seed-dir /data/fixtures/<scenario-name>` — so
+`clean_batch_gl` reads `/data/fixtures/clean_batch_gl`, and so on for all eight.
+It is stated once here rather than repeated in each of §10's eight sections
+because there is nothing per-scenario about it beyond the name. Two properties of
+it are not mechanical and are worth stating: it lives **outside** the checkout,
+because the checkout is mounted read-only as frozen specification (R-3) and a
+scenario's own `seed_dir` would otherwise resolve inside it; and `--seed-dir`
+changes **where** the declared files are read from and never **which** files are
+required — the scenario's `seed_files` list below remains the sole authority, and
+`system.dat` is mandatory in every one of them.
+
+**Answers** are the frozen interactive prompts that gate a database write,
+promoted to scenario keys. A dash means the scenario's route has no such prompt.
+Note that `payment_post_confirm` covers **both** `sl_cash_post` and
+`pl_payment_post`, which is why `period_end_totals` needs only one answer key for
+its four operations.
 
 | Scenario | Seed flat files | Answers |
 | --- | --- | --- |
@@ -730,26 +856,208 @@ may be used.
 ## 8. Observed summary
 
 Every row below was produced by the protocol in §4, driven first-hand on
-**2026-08-04**. The commands are in §9.
+**2026-08-07** through `harness/run_parity.sh`, all ten stages, exit 0, with no
+stage skipped and no flag supplied beyond `--seed-dir`. The commands are in §9.
+
+**The oracle that produced it is named, not assumed.** All eight runs executed the
+same attested build — module-set digest
+`d18b337fdccaa31f59037e90d829f14bd6b44a84c0a8b836a2353c35caad33ca` over **179**
+`*.so` modules, `presql2` archive
+`638db9530d2fe008fbb46cf8600b9406f6f780c9fc59d0e0c94e868b4d615475` matching its
+pin, `cobmysqlapi.o`
+`e5f13cd0b848001f0549cf9c69070c9031e1a360f26d440cf559d6a60d2d7242` attested
+`image-built-from-vendored-source`, toolchain `cobc (GnuCOBOL) 3.2.0` and
+`cc 13.3.0`, `overrides-used=no`. `harness/run_parity.sh` verified that
+attestation before stage 2 in every one of the eight runs and re-derived the
+module-set digest from the modules on disk; see README §8.9. A digest is quoted
+here so that evidence can be tied to an oracle rather than to a directory.
 
 | Scenario | Declared effect | Operation status | Tables | COBOL rows | Python rows | Diff status |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
-| `clean_batch_gl` | unchanged | 0 | 3 | 6 | 6 | **`EMPTY DIFF — OBSERVED`** |
-| `clean_batch_sl` | changed | 0 | 10 | 21 | 21 | **`EMPTY DIFF — OBSERVED`** |
-| `clean_batch_pl` | changed | 0 | 10 | 17 | 17 | **`EMPTY DIFF — OBSERVED`** |
-| `clean_batch_irs` | changed | 0 | 4 | 50 | 50 | **`EMPTY DIFF — OBSERVED`** |
-| `mixed_accepted_rejected` | unchanged | 0 | 3 | 8 | 8 | **`EMPTY DIFF — OBSERVED`** |
-| `period_end_totals` | changed | 0, 0, 0, 0 | 14 | 45 | 45 | **`EMPTY DIFF — OBSERVED`** |
-| `control_total_mismatch` | unchanged | **5** | 3 | 6 | 6 | **`EMPTY DIFF — OBSERVED`** |
-| `empty_batch` | unchanged | 0 | 3 | 5 | 5 | **`EMPTY DIFF — OBSERVED`** |
+| `clean_batch_gl` | unchanged | 0 | **22** | 8 | 8 | **`EMPTY DIFF — OBSERVED`** |
+| `clean_batch_sl` | changed | 0 | **22** | 22 | 22 | **`EMPTY DIFF — OBSERVED`** |
+| `clean_batch_pl` | changed | 0 | **22** | 18 | 18 | **`EMPTY DIFF — OBSERVED`** |
+| `clean_batch_irs` | changed | 0 | **22** | 78 | 78 | **`EMPTY DIFF — OBSERVED`** |
+| `mixed_accepted_rejected` | unchanged | 0 | **22** | 10 | 10 | **`EMPTY DIFF — OBSERVED`** |
+| `period_end_totals` | changed | 0, 0, 0, 0 | **22** | 46 | 46 | **`EMPTY DIFF — OBSERVED`** |
+| `control_total_mismatch` | unchanged | **5** | **22** | 8 | 8 | **`EMPTY DIFF — OBSERVED`** |
+| `empty_batch` | unchanged | 0 | **22** | 7 | 7 | **`EMPTY DIFF — OBSERVED`** |
+
+`Tables` is **22 on every row** — the full in-scope set, not the declared effect.
+The declared-effect lists in §7 range from 3 to 14 tables and are asserted
+*within* each side; they do not bound the capture or the diff. The row counts are
+totals across all 22 tables, which is why they differ from the earlier narrower
+register even for scenarios whose behaviour did not change.
+
+#### The ninth journey, measured under the narrower bound
+
+`end_of_cycle_gl` was added after the eight above had been re-measured, and it was
+driven under the **declared-effect** bound rather than the 22-table one: 5 tables,
+7 rows per side, operation status 0, `EMPTY DIFF — OBSERVED`. It has **not** been
+re-measured at the 22-table bound, and that is said rather than implied — the row
+belongs in this register because the journey was really driven, and the bound it
+was driven under belongs beside it because the two rows are not comparable
+figures. Re-running `harness/run_parity.sh harness/scenarios/end_of_cycle_gl.yaml`
+under the current protocol is what unifies them.
+
+#### The earlier register, measured under the declared-effect bound
+
+The eight rows above were re-measured at the 22-table bound. They were measured
+FIRST under the **declared-effect** bound — the capture and the diff covered only
+each scenario's own `affected_tables` — and that campaign is kept here rather than
+overwritten, because its rows were really driven and its artifacts were really
+published. **Each of its rows is identified by the run id its evidence was
+published under, not by a date**: a date cannot be checked against anything,
+whereas a run id is recorded in every artifact that run produced and can be read
+back. The rows above are identified the same way where a run id was recorded, and
+otherwise by the normalised-tree manifest digests quoted with each scenario in §7,
+which are equally checkable.
+
+| Scenario | Declared effect | Operation status | Tables | COBOL rows | Python rows | Run id | Diff status |
+| --- | --- | ---: | ---: | ---: | ---: | --- | --- |
+| `clean_batch_gl` | unchanged | 0 | 3 | 6 | 6 | `parity-3a616c4d9705408c` | **`EMPTY DIFF — OBSERVED`** |
+| `clean_batch_sl` | changed | 0 | 10 | 21 | 21 | `parity-53e923f47c8b4a83` | **`EMPTY DIFF — OBSERVED`** |
+| `clean_batch_pl` | changed | 0 | 10 | 17 | 17 | `parity-62fc68042cf24e75` | **`EMPTY DIFF — OBSERVED`** |
+| `clean_batch_irs` | changed | 0 | 4 | 50 | 50 | `parity-41d424b42c534c54` | **`EMPTY DIFF — OBSERVED`** |
+| `mixed_accepted_rejected` | unchanged | 0 | 3 | 8 | 8 | `parity-c38285f9ca354767` | **`EMPTY DIFF — OBSERVED`** |
+| `period_end_totals` | changed | 0, 0, 0, 0 | 14 | 45 | 45 | `parity-20dac0f23e634c22` | **`EMPTY DIFF — OBSERVED`** |
+| `control_total_mismatch` | unchanged | **5** | 3 | 6 | 6 | `parity-babbabb4b455483b` | **`EMPTY DIFF — OBSERVED`** |
+| `empty_batch` | unchanged | 0 | 3 | 5 | 5 | `parity-cf6383cb1624400e` | **`EMPTY DIFF — OBSERVED`** |
+
+Eight scenarios, eight empty diffs, **`exit 0` on all eight**. The row counts are
+per side and are equal on every row, which is a necessary but not sufficient
+condition — the verdict is the row-by-row comparison, not the count. The counts are
+lower than the 22-table register's for the same scenarios for exactly the reason the
+bound differs: rows in tables outside the declared effect were never captured.
+
+#### How the DECLARED lists changed, and why every table count above moved
+
+The declared-effect lists were first recorded on 2026-08-04. Afterwards the tables
+the menu shell rewrites on exit were brought inside each scenario's declared
+effect, which added `SYSTEM-REC` to all of them and `SYSDEFLT-REC` to the General
+Ledger ones. The deltas are uniform and each predicts its own row delta exactly,
+because `SYSTEM-REC` holds one row in these seeds and `SYSDEFLT-REC` holds none:
+
+| Scenario | declared then | declared now | what was added |
+| --- | --- | --- | --- |
+| `clean_batch_gl` | 3 tables | 5 | `SYSTEM-REC` + `SYSDEFLT-REC` |
+| `clean_batch_sl` | 10 | 11 | `SYSTEM-REC` |
+| `clean_batch_pl` | 10 | 11 | `SYSTEM-REC` |
+| `clean_batch_irs` | 4 | 5 | `SYSTEM-REC` |
+| `mixed_accepted_rejected` | 3 | 5 | `SYSTEM-REC` + `SYSDEFLT-REC` |
+| `period_end_totals` | 14 | 15 | `SYSTEM-REC` |
+| `control_total_mismatch` | 3 | 5 | `SYSTEM-REC` + `SYSDEFLT-REC` |
+| `empty_batch` | 3 | 5 | `SYSTEM-REC` + `SYSDEFLT-REC` |
+| `end_of_cycle_gl` | — | 5 | the scenario itself is new |
+
+**That total is a cross-check, not a decoration.** The nine declared lists hold
+**67** `affected_tables` entries between them, counted from the YAML rather than
+from any run log, and the sum of the column above is the same 67. Two unrelated
+sources agreeing is what makes the figure a measurement instead of a
+transcription.
+
+### 8.0 What an empty diff here does and does not establish
+
+Read with §13, which states the coverage limits. Two rows deserve a caveat
+attached to them directly rather than left to a later section:
+
+- **`clean_batch_gl` and `mixed_accepted_rejected` are empty diffs over a
+  deliberate no-op, and are NOT evidence that GL posting arithmetic agrees.**
+  The abort gate stays shut and all three phases run — the term code is `0`, which
+  is itself a real and asserted result — but no ledger balance moves, because a
+  frozen bridge defect means a seed can persist at most one `GLPOSTING-REC` row
+  and that row's posting key does not survive the round trip in a form `gl070`
+  will accept. `initialize TD-GLPOSTING-REC` never loads `HV-POST-RRN`
+  `[common/glpostingMT.cbl:L1053-L1066]` while `POST-RRN` is the primary key
+  `[mysql/ACASDB.sql:L155,L169]`, and the ten-byte group `WS-Post-Key` is moved
+  into `HV-POST-KEY PIC 9(18) COMP` `[common/glpostingMT.cbl:L283]` over the
+  maintainer's own recorded doubt about that field
+  `[common/glpostingMT.cbl:L229]`. Reproducing the no-op is **correct** under R-4;
+  citing it as posting parity would not be. Measured directly: after the run
+  `GLBATCH-REC` still holds `CLEARED-STATUS 0` and `POSTED 0`, and all four
+  `GLLEDGER-REC` balances are `0.00`, on **both** sides.
+  Consequence to state plainly: **no scenario in this register demonstrates a
+  General Ledger balance moving**, so AAP §0.8.5's "clean batch post per ledger"
+  is met for Sales, Purchase and IRS but only at the gate-and-term-code level for
+  the General Ledger. The GL double-entry explosion and ledger accumulation are
+  held by the arithmetic tier instead —
+  `tests/arithmetic/test_double_entry_explosion.py` and
+  `test_ledger_balance_accumulation.py` — and the open cursor/key-of-reference
+  questions remain recorded in `ambiguity-resolutions.md`.
+- **`control_total_mismatch`'s empty diff is the point of the scenario, not a
+  weakness.** AAP §0.6.5 makes absence the expected database effect of a
+  run-aborting rejection, and status `5` was asserted.
+
+The other five rows — `clean_batch_sl`, `clean_batch_pl`, `clean_batch_irs`,
+`period_end_totals` and, for its rejection witness, `mixed_accepted_rejected` —
+do move rows: the seed-to-dump row deltas are +4, +2, +5 and +11 respectively,
+so those diffs are empty over states that genuinely changed.
 
 The **harness wrapper status** is distinct from the **operation status**. A
 wrapper exits 0 once it has verified that the operation produced the status the
 scenario declares — including the behavioural status **5** in
 `control_total_mismatch`, where a non-zero operation status is the correct
-outcome and a zero would be the failure.
+outcome and a zero would be the failure. Both sides recorded `wrapper_status 0`
+and `behavioural 0` on all eight while `control_total_mismatch` recorded
+`operation status 5` on both: the wrapper being healthy and the operation being
+rejected are two different facts, and the artifacts state them separately.
 
-### 8.1 Term code 5 is the only observable term code, and that is provable
+`period_end_totals` is the row that proves the operation list is driven rather
+than assumed. Its attestation records **four** ordered operations on **both**
+sides — `1. sl_invoice_post=0`, `2. sl_cash_post=0`, `3. pl_order_post=0`,
+`4. pl_payment_post=0` — spanning the Sales and Purchase menu executables, from
+one seeded state, in one invocation per side.
+
+### 8.1 The digests behind each row
+
+Every row above is backed by a verdict manifest that names these values; each is
+reproduced here truncated to 16 hex characters, and in full in the manifest.
+`harness/diff_states.py` **refused to compare a single row** until the run id,
+the scenario-file digest, the frozen-schema digest and the seed-marker digest
+were present and equal on both captures, so the equalities below are enforced
+rather than reported.
+
+| Scenario | Run id | Seed marker | Scenario file | COBOL manifest | Python manifest |
+| --- | --- | --- | --- | --- | --- |
+| `clean_batch_gl` | `parity-3a616c4d9705408c` | `3d57704b8a31fc8e…` | `a50865132df8658f…` | `1aad0c87164b8109…` | `9d6ea9d748170fdb…` |
+| `clean_batch_sl` | `parity-53e923f47c8b4a83` | `9fa59bf3b708f6e5…` | `0b87e710c8b29548…` | `43d89ba2daddfe7a…` | `92b4bb80e59108cb…` |
+| `clean_batch_pl` | `parity-62fc68042cf24e75` | `cfaed0800b65aadc…` | `63a872463825d681…` | `77a29fd34bc09865…` | `9ca8630675d25b58…` |
+| `clean_batch_irs` | `parity-41d424b42c534c54` | `0668a4a20dd1cc1a…` | `c5be8d899a3d3f31…` | `b0851b584cc87031…` | `e7dc55a38858657c…` |
+| `mixed_accepted_rejected` | `parity-c38285f9ca354767` | `c60856b3ced36fae…` | `aad64731a00f59cb…` | `795f02edde66a225…` | `47d795f31bd4c68b…` |
+| `period_end_totals` | `parity-20dac0f23e634c22` | `906e818eca2a8059…` | `feaea8ab20ba6465…` | `0b0a13cbe437a63b…` | `ad57d342abeb511f…` |
+| `control_total_mismatch` | `parity-babbabb4b455483b` | `c928163b15b65a13…` | `0661d2972920ee77…` | `de4182440b543a6c…` | `393971a5392fbee2…` |
+| `empty_batch` | `parity-cf6383cb1624400e` | `c744d271ec98ff89…` | `ff40cd124054322c…` | `36008ab368a5779c…` | `dc1939f74b51db21…` |
+
+Four properties of that table are worth stating because each closes a way the
+evidence could have been hollow:
+
+- **The scenario-file digests match the definitions in this checkout.** Each
+  `scenario_file_sha256` above equals the SHA-256 of the corresponding
+  `harness/scenarios/*.yaml` **as committed**, so these runs were driven by the
+  scenario definitions a reader can open — not by an earlier revision of them.
+  This matters because editing a scenario file, even in a comment, changes the
+  digest and would strand the evidence.
+- **The frozen schema digest is one value across all eight**,
+  `094e588226f650672c3781d1737d7bf8be30be048ce6a788df81800a19326ed0`, and it
+  equals the SHA-256 of `mysql/ACASDB.sql` in this checkout. One schema, unaltered
+  under the protocol, as AAP §0.8.1 requires.
+- **The seed marker is equal across the two sides of every row and differs
+  between scenarios.** Equality across sides is what makes "both cycles started
+  from byte-for-byte the same state" a checked fact rather than an assumption.
+  Difference between scenarios shows the eight are eight distinct fixtures.
+- **The two manifest digests differ within every row**, necessarily — the two
+  captures record different `side` values and different commands. It is the
+  *provenance* fields that must agree, not the manifests as wholes.
+
+One deliberate subtlety: `clean_batch_gl` and `control_total_mismatch` publish
+the **same** pre-run row-count fingerprint, because both bound the same three GL
+tables at the same counts, while their **seed markers differ**
+(`3d57704b…` against `c928163b…`). That is precisely why the row-count
+fingerprint is not the binding identity: two seedings of the same shape and
+different values share it. The marker is a digest per seeded file, so it
+separates them. The protocol requires both.
+
+### 8.2 Term code 5 is the only observable term code, and that is provable
 
 `[general/gl070.cbl:L289]` is `move 5 to ws-term-code`, raised when phase one
 finds a batch left open. The menu tests it at `[general/general.cbl:L810-L811]`
@@ -766,8 +1074,11 @@ raise can execute.
 Therefore **5 is the only non-zero term code any scenario in this register can
 observe**, and every other scenario's expected term code of `0` is *provable*
 rather than assumed. That matters because it closes the false-pass route in which
-a run silently took the flat-file path. Observed across the eight runs: the
-declared status was `0` ten times and `5` exactly once.
+a run silently took the flat-file path. Observed across the **nine** runs: the
+eight single-operation scenarios plus `period_end_totals`' four operations are
+**twelve** operations in total, and the declared status was `0` **eleven** times
+and `5` exactly once. ⚠️ This read "ten times" while there were eight scenarios
+and eleven operations; the ninth scenario adds one more `0`.
 `acas_posting/cli/args.py`'s `exit_status_for(term_code)` returns `0` for `0` and
 the term code itself otherwise.
 
@@ -776,31 +1087,70 @@ For a run-aborting rejection AAP §0.6.5 states the database effect directly:
 > "The database effect is therefore *the absence* of everything the later phases
 > would have written."
 
-**Absence is evidence.** An empty diff over three tables that both sides left
-alone is a real result, not a vacuous one, because the seed was non-empty, the
-fingerprints matched, the clock was read back and the term code was asserted.
+**Absence is evidence.** An empty diff over the **22** in-scope tables that both
+sides left alone is a real result, not a vacuous one, because the seed was
+non-empty, the fingerprints matched, the clock was read back and the term code was
+asserted. The bound matters to this claim: three tables left alone would say
+nothing about the other nineteen, whereas twenty-two leaves nowhere for an
+unexpected write to hide.
 
 ## 9. How the evidence was produced
 
-`harness/run_parity.sh` drives the ten stages of §4.1 for one scenario and stops
-at the first non-zero. It was invoked once per scenario, sequentially — no `&`,
-no `xargs -P`, one scenario at a time (R-3):
+`harness/run_parity.sh` drives the ten stages of §4.1 for one scenario, mints one
+run id, binds it to every stage that publishes an artifact, and stops at the first
+non-zero. It was invoked once per scenario, sequentially — no `&`, no `xargs -P`,
+one scenario at a time (R-3):
 
 ```bash
 for s in clean_batch_gl clean_batch_sl clean_batch_pl clean_batch_irs \
          mixed_accepted_rejected period_end_totals control_total_mismatch \
-         empty_batch; do
-  ACAS_SEED_AUTOCOMMIT=on /repo/harness/run_parity.sh \
+         empty_batch end_of_cycle_gl; do
+  /repo/harness/run_parity.sh \
       "/repo/harness/scenarios/$s.yaml" \
       --seed-dir "/data/fixtures/$s"
 done
 ```
 
-Every one of the eight completed **stages 1 through 10, all exit 0**, and printed
-the driver summary "the two states are IDENTICAL — an empty diff, which is the
-pass condition and the only one (AAP section 0.8.5)".
+The loop is written over the names rather than over a glob so that adding a
+scenario file cannot silently change what this section claims was run. Equally,
+`harness/scenarios/*.yaml` is the authority on how many scenarios exist, and it
+currently holds **nine** — so if that glob and this list ever disagree, the list
+is the one that is wrong.
 
-Stage 10 was then re-run standalone for all eight, deliberately **without**
+It carries **no** `ACAS_SEED_AUTOCOMMIT` setting, and that is not the same as the
+setting being optional. The seeding window must be **on**: the frozen loaders reach
+no `COMMIT` — every `perform aa030-Commit` in all 28 `common/*LD.cbl` loaders is
+commented out — so under the AAP-literal `off` window the seed leaves no durable row
+and the stage exits **76** rather than proceeding. `harness/seed.sh` therefore selects
+the durable mode when the variable is **unset**, `harness/docker-compose.yml` declares
+it, and only an explicit `ACAS_SEED_AUTOCOMMIT=off` reaches the literal window. §4.3
+records the measurement behind that default. An earlier record of this section showed
+the variable set explicitly, which was accurate for that earlier run; it is not shown
+here because it was not used here, and a command listing that includes a setting the
+run did not use is a command listing a reader cannot trust.
+
+It also carries no `--allow-unattested`: every run verified the oracle
+attestation of README §8.9 before stage 2, which is why §8 can name the module-set
+digest that produced it.
+
+Every one of the **nine** journeys completed **stages 1 through 10, all exit 0**, and
+printed the driver summary "the two states are IDENTICAL — an empty diff, which is
+the pass condition and the only one (AAP section 0.8.5)" — `verdict state =
+identical`. Each also published a retained `parity-result` record — `claim
+identical`, `stages_requested 1 10`, `first_failing_stage_status 0`,
+`behavioural_status 0`.
+
+### 9.1 The toolchain that produced it
+
+| Component | Version | Where |
+| --- | --- | --- |
+| GnuCOBOL `cobc` | **3.2.0** | inside the builder image only; **absent from the host** (R-1) |
+| CPython | **3.12.3** | recorded in every manifest's `provenance.python_version` |
+| MariaDB | **10.11.7** | the version `mysql/ACASDB.sql` was produced by |
+
+### 9.2 Stage 10 re-run standalone, with attestation enforced
+
+Stage 10 was then re-run standalone for all nine, deliberately **without**
 `--allow-unattested`, so that the attestation requirement was enforced rather
 than waived:
 
@@ -810,23 +1160,71 @@ python3 /build/harness/diff_states.py \
     --scenario-file "/repo/harness/scenarios/$s.yaml"
 ```
 
-Result for all eight: **exit 0 with stdout of exactly 0 bytes**. Both halves of
-the pass condition were therefore checked independently — the code *and* the
+Result for all nine: **exit 0 with stdout of exactly 0 bytes** — the diagnostics
+go to stderr, so stdout carries the report and nothing else. Both halves of the
+pass condition were therefore checked independently: the exit code *and* the
 emptiness.
 
-### 9.1 Assertions the runners made on every run
+Two further observations from that re-run, both of them properties rather than
+restatements:
 
-These are the non-vacuity guards. Each was observed 8/8 unless noted:
+- **`diff.txt` is 0 bytes on all eight**, and its recorded digest is
+  `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` — which is
+  the SHA-256 of the empty byte string. "Empty diff" is therefore literal here,
+  not a turn of phrase: the report file has no contents, and the digest a reader
+  can compute independently says so.
+- **The verdict manifests were byte-identical to the ones the driven protocol had
+  already published**, field for field, for all eight. Re-deriving a verdict from
+  the retained captures reproduces it exactly, which is the determinism property
+  observed at the artifact level rather than only inside a test.
+
+### 9.3 Where the evidence is retained
+
+Every path below is under `$ACAS_OUT` — the `out` volume — and every one of them
+records the run id from §8, which is how a reader ties an artifact to a row.
+
+| Artifact | What it carries |
+| --- | --- |
+| `<scenario>/verdict.json` | The machine-readable verdict: outcome, exit code, tables compared, differing and total differences, run id, and the five digests of §8.1 |
+| `<scenario>/parity-result` | The driver's retained claim, stages requested, first failing stage status, behavioural status and verdict path |
+| `<scenario>/diff.txt` | The report. **0 bytes on all eight** |
+| `<scenario>/{cobol,python}/_manifest.json` | The dump-stage manifest per side |
+| `<scenario>/{cobol,python}.normalized/_manifest.json` | The normalise-stage manifest per side — the two whose digests §8.1 lists, and the two stage 10 actually compared |
+| `run-logs/<scenario>/{cobol,python}.run-status` | Wrapper status, behavioural status, seed digests and the ordered per-operation statuses |
+| `run-logs/<scenario>/{cobol,python}.operation-status` | The ordered operation list and each operation's observed status |
+| `run-logs/<scenario>/seed-identity` | The fixture marker digest the reset stage published, under this run id |
+
+### 9.4 Assertions the runners made on every run
+
+These are the non-vacuity guards. Each was observed **9/9** unless noted:
 
 - `SYSTEM-REC` holds `Run-Date 155127`, read back **from the database** after the
   run — so the pinned clock is witnessed in stored state, not merely supplied.
 - The fan-out switch still holds a space, before and after.
 - `FILE-SYSTEM-USED = 1` pre-run, closing the flat-file false-pass route.
 - The `Cyclea`/`Scycle` shared-storage view agrees, pre- and post-run.
-- All four autogen tables hold 0 rows — `SAAUTOGEN-REC`,
-  `SAAUTOGEN-LINES-REC`, `PUAUTOGEN-REC`, `PUAUTOGEN-LINES-REC`.
+- ⚠️ The autogen tables hold 0 rows — but **the two sides probe different sets,
+  and one of them is conditional**, so this is the one bullet on the list that is
+  not a flat 8/8. The **Python** runner counts all four on every run:
+  `SAAUTOGEN-REC`, `SAAUTOGEN-LINES-REC`, `PUAUTOGEN-REC`, `PUAUTOGEN-LINES-REC`
+  `[harness/run_python_scenario.sh ACAS_PY_AUTOGEN_TABLES]`, probed in
+  `[harness/run_python_scenario.sh acas_py_assert_after_run]`. The **COBOL** runner counts only
+  the Sales pair `[harness/run_cobol_scenario.sh ACAS_RUN_AUTOGEN_TABLES]`, and only when the
+  subsystem is `sales` `[harness/run_cobol_scenario.sh acas_assert_after_run]` — so 2 tables on
+  `clean_batch_sl` and `period_end_totals`, and none on the other six. That
+  asymmetry is deliberate and matches the asymmetry it exists to bound: only the
+  Sales menu calls `sl830`, and Purchase's equivalent call is commented out in the
+  frozen source. A count that cannot be taken is **noted, not failed**, since the
+  tables are out of scope and their absence is not this stage's business to
+  repair. Bounding this by `count(*)` rather than by a dump is also necessary
+  rather than stylistic: all four tables are out of scope, so
+  `harness/dump_tables.py` refuses them with `EX_SCOPE = 83` — see
+  [`ambiguity-resolutions.md`](ambiguity-resolutions.md) `Q-6`.
 - The pre-run affected-table state is non-empty and canonically fingerprinted,
-  and **both sides started from the same row counts**.
+  and **both sides started from the same row counts and the same per-table
+  digests** — the digest being what rules out equal counts over different values.
+- The post-run state was fingerprinted with the same producer, and each side's
+  observed effect matched the scenario's declared `expected_table_effect`.
 - No bytecode cache directory was created inside the checkout.
 
 And from `harness/reset_db.sh` at both reset stages: the frozen schema applied
@@ -841,7 +1239,7 @@ the schema durable in a fresh session.
 Each entry records seed, pinned clock, pinned IRS fan-out, affected-table list,
 expected and observed term code, the anomalies it locks, and its diff status. The
 clock is `21/09/2025` / `Run-Date 155127` and the fan-out is a single space in
-**all eight**, per §6; they are restated per entry because the brief for this
+**all nine**, per §6; they are restated per entry because the brief for this
 register requires each entry to stand alone.
 
 ### 10.1 `clean_batch_gl`
@@ -863,9 +1261,13 @@ register requires each entry to stand alone.
   `Open-Output`).
 - **Diff status:** **`EMPTY DIFF — OBSERVED`** — 3 tables, 6 rows each side.
 
-**Manifest SHA-256** — COBOL
-`cf94ac60332fd35cfc18d6a3c71e7a1303873017fabe94617d7d732f46b0ef63`, Python
-`2ba368cba37b2fc4bcd2e0a7e1cf292c44c1acf8a6d1c2e52fba6884b2413260`.
+**Normalised-tree manifest SHA-256**, 22-table-bound run — COBOL
+`086715e6483c37860b7e980c3fc2a83079ce2f84889ba8312c91d178c91e5869`, Python
+`288ddb8ebb9bf405393eaeb508b278485ff7163f9f29d209aa100f1542ca1681`.
+These are the two files stage 10 compared. The earlier declared-effect-bound run
+of the same scenario, `parity-3a616c4d9705408c`, compared COBOL
+`1aad0c87164b81099c1de8a096530c3fc7d195ea42e9941644f1a9a8d0826fa4` against Python
+`9d6ea9d748170fdb2e2081b5bd936a158bd8de6a9087e16b6e1ceee8b33a74ec`, and its `verdict.json` cites both.
 
 **Why the effect is "unchanged", and why that is still evidence.** The scenario
 seeds a **closed** batch. Phase one walks the batch file and raises the terminate
@@ -908,22 +1310,39 @@ batch timestamp the zero-key posting can never reach.
   IRS posting record).
 - **Diff status:** **`EMPTY DIFF — OBSERVED`** — 10 tables, 21 rows each side.
 
-**Manifest SHA-256** — COBOL
-`e5ee3411d34b66df35fb810f429cdb9b2083dcfe9be7a647a1074f2149b8328f`, Python
-`6351e0e0c9c3f80154ec9c43862ea2a05f1533d2b1da72c0dca3d0d9b2e0f6d2`.
+**Normalised-tree manifest SHA-256**, 22-table-bound run — COBOL
+`f03b5f6d951a3f08398041672706e1c0e25cc906994bf2c0eaa20bbf4ed85d97`, Python
+`95cf5c05463988f7e01063952b1dfbcf32b980e6106df8014bfaa630e40d0400`.
+These are the two files stage 10 compared. The earlier declared-effect-bound run
+of the same scenario, `parity-53e923f47c8b4a83`, compared COBOL
+`43d89ba2daddfe7a47859f394c7bd058307bf6bb082c45632d948f94deda0b80` against Python
+`92b4bb80e59108cb526c758f1af91b609ed6e3fb0c95db27f3ab29e8b280c0e5`, and its `verdict.json` cites both.
 
 **The `sl830` asymmetry, and how it is closed rather than ignored.**
 `[sales/sales.cbl:L759]` is `move "sl830" to WS-Called.` and it is dispatched
 **before** `sl055`, so the autogen program runs on the COBOL side and has no
 counterpart on the Python side. The autogen tables are never seeded and never
-listed as affected. Both runners therefore **assert after the run** that
-`SAAUTOGEN-REC`, `SAAUTOGEN-LINES-REC`, `PUAUTOGEN-REC` and
-`PUAUTOGEN-LINES-REC` are still empty. That assertion was **observed to hold**,
-with the COBOL side recording it against the frozen requirement: "SAAUTOGEN-REC
-holds 0 rows — `sl830` was a no-op, as `[sales/sl830.cbl:L270-L272]` requires",
-`[sales/sl830.cbl:L270]` being `goback.`. This closes **`Q-6`**. Purchase has no
+listed as affected. Both runners therefore **assert after the run** that the
+autogen tables are still empty — the Python side counting all four, the COBOL side
+counting the Sales pair `SAAUTOGEN-REC` and `SAAUTOGEN-LINES-REC`, which are the
+two `sl830` could have written (§9.1 gives the locators for both probes and
+explains why the sets differ). That assertion was **observed to hold**, with the
+COBOL side recording it against the frozen requirement: "SAAUTOGEN-REC holds 0
+rows — `sl830` was a no-op, as `[sales/sl830.cbl:L270-L272]` requires",
+`[sales/sl830.cbl:L270]` being `goback.`. A **pre-run** gate makes the result
+binding rather than lucky: the COBOL runner reads `SYSTEM-REC.SL-AUTOGEN` before
+the run and refuses the scenario if it is `"Y"`, on the ground that the Sales
+invoice path would then be non-deterministic. This closes **`Q-6`**, and the
+closure is conditional on that switch-off state by construction. Purchase has no
 such asymmetry: its `pl830` dispatch is commented out at
 `[purchase/purchase.cbl:L755-L758]`.
+
+⚠️ **The probe is a `count(*)`, not a dump, and it has to be.** All four autogen
+tables are among the eleven AAP §0.2.2 places out of scope, so
+`harness/dump_tables.py` refuses every one of them with `EX_SCOPE = 83` — a
+correct refusal, since the diff is defined over the tables a scenario declares.
+`Q-6` in [`ambiguity-resolutions.md`](ambiguity-resolutions.md) records that an
+earlier revision proposed exactly that impossible dump.
 
 `PSIRSPOST-REC` ends the run with **0 rows on both sides**, which with the
 fan-out pinned to a space is the correct outcome: no IRS posting is fanned out at
@@ -947,9 +1366,13 @@ failure.
   preserved rather than normalised — plus **A-10**, **A-12** and **A-17**.
 - **Diff status:** **`EMPTY DIFF — OBSERVED`** — 10 tables, 17 rows each side.
 
-**Manifest SHA-256** — COBOL
-`c3726b2d1047b3dd007f81814d127acb27fae69e14e4518a1c6fee3d49d09b98`, Python
-`f58f32ba47f8bb240fa0a081eb79271ed6ebbce9e5c59efe653f4dce8f90d0be`.
+**Normalised-tree manifest SHA-256**, 22-table-bound run — COBOL
+`4acc4f9dbd953d8934cacce1bcb3e0f383cc4237947bc2cf847c8e1b00830f82`, Python
+`18b52b185b5ce192479f6f16d3c75bf523f23d9422166b541fb608e118038c3a`.
+These are the two files stage 10 compared. The earlier declared-effect-bound run
+of the same scenario, `parity-62fc68042cf24e75`, compared COBOL
+`77a29fd34bc09865fdd87a6a68f7eacd406b90dfbed041c1dbc7c89a42a9206e` against Python
+`9ca8630675d25b58090dbcee7f3ec109df4c88052867dd38e0c788f9be178d1f`, and its `verdict.json` cites both.
 
 `Purch-SortCode` is seeded as `"0"`. Compiled probing established that the
 `binary-long` caller storage is reinterpreted through the bridge's
@@ -984,9 +1407,13 @@ correction to the migration. Cross-reference **`Q-3`**.
   commented-out VAT computes).
 - **Diff status:** **`EMPTY DIFF — OBSERVED`** — 4 tables, 50 rows each side.
 
-**Manifest SHA-256** — COBOL
-`bf534469e144ad14bb26f6b6ea4c11a70bcd1cad39b946b5715fdc08de749a3d`, Python
-`7c4e9a8b22b376725e0a03a9cb3a0d128f420fee33b3c85cd13fa8cb33c4fcfe`.
+**Normalised-tree manifest SHA-256**, 22-table-bound run — COBOL
+`394b906bb0938e0f7964fd60f39bec06970709de265e903a4eb6138fe3cdf51d`, Python
+`06f83edb1fe68f0e95f5c8c5ac235c9345336c3597d99d2e782fc016e9b1f47e`.
+These are the two files stage 10 compared. The earlier declared-effect-bound run
+of the same scenario, `parity-41d424b42c534c54`, compared COBOL
+`b0851b584cc87031cd2aacb471d6c8daa6d88e33c009867657b81e0a72656d0d` against Python
+`e7dc55a38858657c155d0a901726eb063bc3fe725faa081b14869fab772872f7`, and its `verdict.json` cites both.
 
 **The clear-transfer-file prompt is a real input with a real table effect, and
 its shape is not what the display suggests.** At
@@ -1045,9 +1472,13 @@ conversion.
 - **Anomalies locked:** **A-13**, the two entirely silent skips.
 - **Diff status:** **`EMPTY DIFF — OBSERVED`** — 3 tables, 8 rows each side.
 
-**Manifest SHA-256** — COBOL
-`ba7c5c0586c71d42e6c8db936e8eeb6a61f77635cc3b63827f806082f099e0d8`, Python
-`8206a0c815708c43a51ec149dc8100b2411106738228e7e789232664e5c656ee`.
+**Normalised-tree manifest SHA-256**, 22-table-bound run — COBOL
+`46e9cbd1575c233cfad0a7fb18a7b861c238d48e02685d1f3e4b5db1dd3658de`, Python
+`eb63dc2edd2cc616c4154e2b669485d04f86af05724cca5345e850ea5b42ab1e`.
+These are the two files stage 10 compared. The earlier declared-effect-bound run
+of the same scenario, `parity-c38285f9ca354767`, compared COBOL
+`795f02edde66a2255bf69d7a7045fa649a7ac269cfd8e40bd4cbdb9fd133ba80` against Python
+`47d795f31bd4c68bc009e4850d15163b5aedcd8b41aefea04a8954c3280a19f5`, and its `verdict.json` cites both.
 
 **The two silent skips.** `[general/gl072.cbl:L291-L292]` is
 `if post-batch not numeric / go to loop.`, and `[general/gl072.cbl:L306]` is
@@ -1083,9 +1514,13 @@ by this journey.
   **A-17**, **A-20**.
 - **Diff status:** **`EMPTY DIFF — OBSERVED`** — 14 tables, 45 rows each side.
 
-**Manifest SHA-256** — COBOL
-`def2565ee813b5b0c0b112f6a822e618da2277a1538c2523d990097572491eca`, Python
-`d8eab313bdd9356d3719856093e71890e1d6aabaaa3ed6fa503ff84619688dd3`.
+**Normalised-tree manifest SHA-256**, 22-table-bound run — COBOL
+`9b3ec5ed22d5e54624fed19fbda59466498b4d4a6c466d5a243a1429f93b01cb`, Python
+`cc15c818292d7651907b0f1044a9462c50e6d836f1a1e2084e234fd3088c8c32`.
+These are the two files stage 10 compared. The earlier declared-effect-bound run
+of the same scenario, `parity-20dac0f23e634c22`, compared COBOL
+`0b0a13cbe437a63b2f08d4b2ad9e810434b00fdc1270e43d1339f0adff7110f1` against Python
+`ad57d342abeb511f1ce69b86e20c280a2b40ccb16336a2286c96664f62794876`, and its `verdict.json` cites both.
 
 The oracle driver runs four separate menu processes **without a reset between
 them**, so the four operations accumulate as they do in production. Operation
@@ -1146,9 +1581,13 @@ list must bound the comparison.
   the sum of its fields; cross-reference **`Q-4`**).
 - **Diff status:** **`EMPTY DIFF — OBSERVED`** — 3 tables, 6 rows each side.
 
-**Manifest SHA-256** — COBOL
-`39e949de810ade9ab2e2481c1286161b3217808bdd705a4cadd5f497dda208a6`, Python
-`86c2e560a95aa682572aa2d400222cc5606303705b56e159a015db2f4b48e42b`.
+**Normalised-tree manifest SHA-256**, 22-table-bound run — COBOL
+`3f373848afbae551130ebdcc0aa51b1ab495e35fe1a68e28b2c2112067d45ac6`, Python
+`f1d3fa912512263a8d4402fc46dad9cc51778f220aa31c008a872ea3b522f348`.
+These are the two files stage 10 compared. The earlier declared-effect-bound run
+of the same scenario, `parity-babbabb4b455483b`, compared COBOL
+`de4182440b543a6ce5b41107a2b1b6f34fc3c807e40483d14710b01da533a2de` against Python
+`393971a5392fbee2432d7aa1bd57ddcffc41894481c3ebddc27e47f92a184b3a`, and its `verdict.json` cites both.
 
 **This scenario is General-Ledger-specific, and necessarily so.** AAP §0.6.4
 records that Sales and Purchase batches "balance by construction … there is no
@@ -1201,9 +1640,13 @@ Return for the end-report acknowledgement.
 - **Diff status:** **`EMPTY DIFF — OBSERVED`** — 3 tables, 5 rows each side
   (`GLPOSTING-REC` empty on both).
 
-**Manifest SHA-256** — COBOL
-`7c895dc3c791f7a3726e360235805f0a2b9c2ac3d9288eab87297d27dd4c6933`, Python
-`55546dcc6bec6b66b405b151b898de607f6254faf8d915117fc5671cc9c68836`.
+**Normalised-tree manifest SHA-256**, 22-table-bound run — COBOL
+`0efd8063b6d3f575f2eeac815dee4564aa4d447ab485393077a0dfbc6c22e862`, Python
+`b58e897e9023763d40274d192435d633f7eafe192cae017f8bcf97c56659df27`.
+These are the two files stage 10 compared. The earlier declared-effect-bound run
+of the same scenario, `parity-cf6383cb1624400e`, compared COBOL
+`36008ab368a5779c576617170a25f735ad9bdb1c6c0c37bcb5bc24d2f0fd3813` against Python
+`dc1939f74b51db210869076d6f9e4005a9ae8c34d8591d642524d49f29c0847c`, and its `verdict.json` cites both.
 
 The scenario proves the whole protocol is stable over a batch with no posting
 rows. It is emphatically **not** accepted merely because both posting tables are
@@ -1212,6 +1655,53 @@ seeded batch and ledger rows are present and identical, both run attestations ar
 recorded, the file-system selector is 1, the clock reads back as pinned, and the
 two seed fingerprints agree. `GLPOSTING-REC` being empty on both sides is one
 observation among several, not the verdict.
+
+### 10.9 `end_of_cycle_gl`
+
+⭐ **The one scenario that is not part of AAP §0.8.5's mandated set.** It exists
+because the mandate asks for clean batch per ledger, mixed accepted-and-rejected,
+period-end totals, control-total mismatch and empty batch, and **none of those five
+is an end-of-period run** — which left `gl080` compared by nothing. `gl080` is one
+of the twelve in-scope programs and owns one of the migration's five `ROUNDED`
+stores at `[general/gl080.cbl:L328]`, so that was the largest single gap in this
+register's evidence.
+
+- **Operation:** `gl_end_of_cycle` — the real route, `general/general.cbl`'s
+  `load09.` dispatching `gl080` through the shared four-parameter block, not a
+  shortcut that calls the program directly.
+- **Modules exercised:** `acas_posting/cli/gl_end_of_cycle.py`,
+  `acas_posting/programs/gl080_end_of_cycle.py`, and the General Ledger data-access
+  modules `acas005_gl_nominal.py`, `acas006_gl_posting.py`, `acas007_gl_batch.py`
+  and `acas000_system.py`.
+- **Seed:** `system.dat`, `ledger.dat`, `batch.dat`, `posting.dat`.
+- **Pinned clock:** `21/09/2025`, `Run-Date 155127`.
+- **Pinned IRS fan-out:** a single space.
+- **Affected tables:** `GLBATCH-REC`, `GLLEDGER-REC`, `GLPOSTING-REC`,
+  `SYSDEFLT-REC`, `SYSTEM-REC`.
+- **Expected and observed effect:** changed.
+- **Expected and observed operation status:** 0.
+- **Anomalies locked:** **A-3**, the two disagreeing notions of "current quarter"
+  inside `gl080`, and **N-EDIT**, the bridge's structural inability to render a
+  minus sign. The seed is engineered so both become visible in *table state* rather
+  than only in a unit test; a seed tidied up to make the figures agree would defeat
+  the file's purpose, since a defect reproduced is correct and a defect fixed is a
+  failure (R-4).
+- **Diff status:** **`EMPTY DIFF — OBSERVED`** — 5 tables, 7 rows each side.
+
+**Manifest SHA-256** — COBOL
+`4abdaac30c4c3a9410ae88368406d44bb18c2e751da8e08b24b7a7d3026f2516`, Python
+`0c6834185edff1bf4ccca1f9a6899eca15843eebb0ad4a8526767b1727f5cf69`.
+
+**Why the empty diff is not vacuous here.** Four of the five tables come back with
+rows, and the run is additionally pinned by named assertions in
+`tests/scenarios/test_end_of_cycle_gl.py`: that every gating condition which would
+make `gl080` return early is still seeded as the scenario intends, that the Phase 3
+delete walk deletes nothing, that only the closing cycle's batch was stamped, that
+Phase 5 wrote quarter one and `Ledger-Last` while leaving quarters two, three and
+four alone, and that the cycle advanced while the quarter counter wrapped. An early
+return would also produce two agreeing dumps, so those preconditions are what
+distinguish "the end-of-cycle path ran and matched" from "the end-of-cycle path
+declined to run, twice".
 
 
 ## 11. Ordering dependencies the General Ledger journeys must respect
@@ -1296,25 +1786,75 @@ scenario under the same pinned clock produce byte-identical dumps.
 run B can overwrite it, compares structurally, and then compares every
 affected-table file **byte for byte**.
 
-Observed first-hand on 2026-08-04:
+Observed first-hand on 2026-08-07, inside the `gnucobol` service
+(`pytest -m determinism`), on the same code that produced §8:
 
 ```text
-6 passed in 23.47s
+6 passed, 1047 deselected in 19.89s
 ```
 
 **Diff status: `EMPTY DIFF — OBSERVED`** for both determinism pairs.
+
+**The comparison a determinism pair makes is not the parity comparison, and the
+difference is deliberate.** `harness/diff_states.py`'s default mode requires the
+two captures to name **different** sides and to carry the **same** run id, which
+is exactly right for `cobol` against `python` and exactly wrong here, where both
+captures are the Python cycle. So the pair is compared in the tool's same-side
+mode, whose requirements are the mirror image: the sides must **match**, the run
+ids must **differ**, and one scenario definition, one frozen schema and one seed
+marker are still required. That mode is *stronger* than comparing the trees with
+no provenance check — it adds a requirement the parity mode has no use for, that
+the two run ids differ, which is what refuses a capture compared against itself.
+It cannot be reached from the command line; only an in-process caller selects it.
+
+For the same reason the byte comparison covers **every table dump and not
+`_manifest.json`**. The obligation is byte-identical *dumps*, and the manifest is
+the provenance of a dump rather than a dump: it records the run id, the exact
+command and the digest of the manifest it was normalised from, so two runs'
+manifests **must** differ. Requiring them to be byte-identical would contradict
+the same-side requirement that the run ids differ, and the obligation would be
+unsatisfiable for a correct cycle. The manifest is still compared, on the part of
+it that is state — its `tables` block of names, row counts and per-dump digests
+must be equal — and its run ids are asserted to differ, so neither the row-count
+cross-check nor the false-pass guard is lost.
 
 Why this holds rather than being hoped for: the in-scope programs contain **zero**
 clock reads and take the date purely through linkage (§6.1); there is no random
 seed; and there is no ordering nondeterminism from a secondary index, because all
 22 in-scope tables have a single-column primary key and **no** secondary index
-(§5.3, re-asserted by `reset_db.sh` on every run in §9.1).
+(§5.3, re-asserted by `reset_db.sh` on every run in §9.4).
 
-A second, independent corroboration emerged while this register was written: the
-**manifest SHA-256 pairs in §10 were reproduced exactly** by a fresh execution of
-all eight journeys, digest for digest. Byte-reproducible manifests across
-independent runs is the determinism property observed at the artifact level rather
-than only inside the test.
+A second corroboration is available at the artifact level, and it has to be stated
+carefully, because the obvious formulation of it is **false for the manifests this
+tree publishes**. The provenance block carries the **run id**
+(`harness/normalize.py PROVENANCE_KEYS`), so **a manifest is deliberately not
+reproducible across two runs** — two runs have two identities, and recording them is
+the point. An earlier revision of this section did claim byte-reproducible manifests,
+and it was true of the manifest shape of the day: `clean_batch_gl` was driven twice
+and returned the identical pair, COBOL
+`086715e6483c37860b7e980c3fc2a83079ce2f84889ba8312c91d178c91e5869` and Python
+`288ddb8ebb9bf405393eaeb508b278485ff7163f9f29d209aa100f1542ca1681`, digest for
+digest. That observation is kept because it happened; the claim built on it is
+withdrawn, because the manifests it was true of no longer exist.
+
+What *is* reproducible is the **verdict**: re-deriving stage 10 from the retained
+captures of a completed run republished a `verdict.json` that was **byte-identical,
+field for field** (§9.2). Same inputs, same verdict, independently of when it is
+computed. That is the artifact-level form of the determinism the tier asserts.
+
+The distinction matters beyond pedantry. A register that claimed byte-reproducible
+manifests would be claiming something the provenance design makes impossible, and a
+reader who checked it would find the claim false and have no way to tell whether the
+migration or the documentation was wrong.
+
+⚠️ **All sixteen digests in §10 were replaced at this revision, and it is important
+that this is not misread as determinism having failed.** The pairs recorded on
+2026-08-04 no longer reproduce because the *inputs changed*: `SYSTEM-REC` and, for
+the General Ledger scenarios, `SYSDEFLT-REC` were brought inside each comparison, so
+each manifest now describes a larger table set and necessarily hashes differently.
+Determinism is the claim that the *same* configuration reproduces. A digest is only
+evidence while the configuration it was taken under is still current, which is why
+they are republished here rather than carried forward.
 
 The clock witness is deliberately **database-backed** rather than input-echoing:
 
@@ -1327,13 +1867,45 @@ the zero-key posting can never reach (§10.1).
 
 ### 12.1 The committed scenario tier
 
-The eight journeys are also driven by the committed test tier, which adds the
-per-scenario assertions of §9.1 on top of the diff. Observed first-hand on
-2026-08-04:
+The **nine** journeys are also driven by the committed test tier, which adds the
+per-scenario assertions of §9.4 on top of the diff. Two observations were made on
+2026-08-07, of two different revisions of this tree, and both are recorded because
+each explains the other's figure:
 
 ```text
-93 passed in 162.72s
+$ python3 -m pytest -m scenario -q
+107 passed in 89.98s
 ```
+
+⚠️ This read `93 passed in 162.72s` from the 2026-08-04 run. The growth to 107 is
+the ninth scenario's eleven tests plus the seed-relative tests added to the eight;
+the drop in wall time is the memoisation of one parity run per scenario module,
+which removed the repeated runs that the earlier figure had paid for.
+
+The second observation, taken inside the `gnucobol` service over
+`pytest -m "scenario or determinism"` on the revision that widened the capture
+bound, read `99 passed, 954 deselected`. Its count rose from the same 93 for a
+different reason: each scenario now asserts the capture bound against the in-scope
+set **and** its declared effect as a subset of it, and `period_end_totals` gained
+the bound assertion its docstring had promised but never made. Whole-suite figures
+from that revision: **1035 passed, 0 failed, 18 xfailed** inside the service, and
+**972 passed, 63 skipped, 18 xfailed** on a bare host, the skips being exactly the
+stack-bound tiers. Both counts are superseded by any later revision of the tier;
+the command above is what re-derives the current one.
+
+That tier composes the ten stages in process rather than through
+`harness/run_parity.sh`, and it binds **one run id per protocol run** exactly as
+the driver does. It has to: each stage is a separate process that derives its own
+identity when none is supplied, so an unbound composition gave the two sides two
+different ids and stage 10 refused the pair — correctly, since `run_id` is one of
+the fields that must match before a single row is compared. The composed protocol
+and the driven one are therefore the same protocol, which is what makes this tier
+corroboration of §8 rather than a second, weaker measurement.
+
+The elapsed times quoted above are incidental, and nothing is concluded from them
+beyond the one comparison they were quoted for. They vary with host load, they are
+not a property of the migration and a reader cannot check them — the pass counts,
+the commands and the retained artifacts are what can be verified.
 
 ## 13. Coverage limits, stated explicitly
 
@@ -1341,31 +1913,60 @@ This is the part of the register that carries
 **`PENDING — AWAITING ORACLE EXECUTION`** and the scope declinations. Nothing
 below is claimed as covered.
 
-- **`gl080` is driven by no scenario at all.** Its Phase 3 transaction deletion
-  and Phase 5 end-of-period processing are **not exercised** by any of the eight,
-  and `period: 1` is inert throughout every scenario file. Status for the
-  end-of-cycle path: **`PENDING — AWAITING ORACLE EXECUTION`**. The declination
-  is recorded at §16.1 of
-  [`ambiguity-resolutions.md`](ambiguity-resolutions.md), together with the
-  arithmetic questions that remain open behind it —
-  **`Q-GL080-DIVIDE-BY-ZERO`** and **`Q-QUARTER-SUBSCRIPT`**, the latter being
-  the unbounded quarter subscript of **A-2**.
+- ⚠️ **`gl080` was driven by no scenario at all. It now is, so this limit has
+  been withdrawn** — and it is rewritten rather than deleted, because a reader who
+  met the old wording is entitled to see that it was retired rather than that they
+  misremembered it. It said Phase 3 transaction deletion and Phase 5
+  end-of-period processing were "not exercised by any of the eight", with the
+  end-of-cycle path marked **`PENDING — AWAITING ORACLE EXECUTION`**.
+  `harness/scenarios/end_of_cycle_gl.yaml` now drives the real `gl_end_of_cycle`
+  route — `general/general.cbl`'s `load09.` dispatching `gl080` — and §10.9
+  records its observed empty diff. The two arithmetic questions that sat behind
+  the declination are also no longer open: **`Q-GL080-DIVIDE-BY-ZERO`** and
+  **`Q-QUARTER-SUBSCRIPT`**, the latter being the unbounded quarter subscript of
+  **A-2**, are both **`RESOLVED BY ORACLE`** as of 2026-08-07. Each was closed by
+  a focused compiled probe rather than by this scenario, for the reason its own
+  entry gives: their observables are a control-flow branch and a byte offset,
+  which a probe exhibits directly and a table dump does not.
+  **What genuinely does remain a limit:** `period: 1` is still the seeding in all
+  nine scenario files, so the cycle-to-period divide at
+  `[general/gl080.cbl:L328]` is exercised with a divisor of one and **a zero
+  divisor is still driven by no scenario**. That narrower statement is the true
+  one, and it is why `Q-GL080-DIVIDE-BY-ZERO` needed the probe.
 - **`gl051` has no CLI entry point.** `control_total_mismatch` reaches the
   control-total gate indirectly, through `gl070`'s detection of the open batch and
   the menu's term-code boundary (§10.7). The gate's own arithmetic is exercised as
   a library function by `tests/arithmetic/test_control_total_comparison.py`, not
   by a scenario. Declination recorded at §16.2 of
   [`ambiguity-resolutions.md`](ambiguity-resolutions.md).
-- **The autogen no-op assertion is observed, not assumed.** §10.2 records that the
-  four autogen tables were asserted empty on both sides and that the assertion
-  held. Had it not been driven, it would have been marked
-  `PENDING — AWAITING ORACLE EXECUTION`; it is recorded as observed because it was
-  observed.
+- **The autogen no-op assertion is observed, not assumed — with one asymmetry
+  stated plainly.** §10.2 records the assertion holding, and §9.1 records what
+  each side actually probed: the Python runner counted **all four** autogen tables
+  on every run, the COBOL runner counted **the Sales pair only**, and only on the
+  two Sales-subsystem scenarios. That is the correct bound for the question — only
+  the Sales menu calls `sl830` — but it is not "all four on both sides", and an
+  earlier revision of this bullet said it was. Had the probe not been driven at
+  all, it would have been marked `PENDING — AWAITING ORACLE EXECUTION`; it is
+  recorded as observed because it was observed, and its scope is recorded because
+  the scope is narrower than the claim it supports.
 - **Questions this register does not close.** The scenario journeys resolved
   `Q-6`, `Q-7` and `Q-10` and partially resolved `Q-8` and `Q-9`. Every other
   entry in [`ambiguity-resolutions.md`](ambiguity-resolutions.md) retains its own
   status — a green scenario does not close a question by association, and none is
   treated as closed here.
+- **⚠️ `empty_batch`'s green diff establishes agreement, not a value, and the
+  distinction is the whole point of that scenario.** `Q-EMPTY-BATCH-AT-END` asks
+  what `gl072`'s `end-batch` and `end-account` write when the very first read of
+  the sorted work file hits at end, with `save-batch` still zero — it stamps the
+  batch cleared and posted, or rewrites a zero-key record, or rewrites nothing.
+  §10.8 records the two sides agreeing on whatever it is; it does **not** record
+  which. The question keeps its
+  `PENDING — AWAITING ORACLE EXECUTION` status in
+  [`ambiguity-resolutions.md`](ambiguity-resolutions.md), and
+  `tests/scenarios/test_empty_batch.py` deliberately hard-codes no expectation for
+  `CLEARED-STATUS` or `POSTED`. An agreeing pair of unknown values is real
+  evidence of parity; promoting it to a known value would be the fabrication this
+  register exists to prevent.
 - **Plaintext transport is permitted only because the compiled program applies no
   stronger check.** Every run reports it as a non-fatal finding naming CWE-319,
   and the harness fails closed unless the caller declares the isolated-oracle
@@ -1416,14 +2017,33 @@ For each scenario `<name>`, under the harness output area:
 /out/<name>/python/                    the raw Python capture
 /out/<name>/python.normalized/         the canonicalised Python capture
 /out/<name>/diff.txt                   zero bytes on a pass
+/out/<name>/verdict.json               the machine-readable verdict (§9.3)
+/out/<name>/parity-result              the driver's retained claim (§9.3)
 /out/run-logs/<name>/cobol.log
 /out/run-logs/<name>/cobol.result
 /out/run-logs/<name>/cobol.run-status
-/out/run-logs/<name>/cobol.seed-fingerprint
+/out/run-logs/<name>/cobol.operation-status
+/out/run-logs/<name>/cobol.seed-fingerprint    state, before the drive
+/out/run-logs/<name>/cobol.post-fingerprint    the same record, after it
 /out/run-logs/<name>/python.log
 /out/run-logs/<name>/python.run-status
-/out/run-logs/<name>/python.seed-fingerprint
+/out/run-logs/<name>/python.operation-status
+/out/run-logs/<name>/python.seed-fingerprint   state, before the dispatch
+/out/run-logs/<name>/python.post-fingerprint   the same record, after it
+/out/run-logs/<name>/seed-identity     the fixture marker digest, per run id
 ```
+
+**Every one of those files records the run id**, which is what lets a reader tie an
+artifact back to a row of §8 and what lets stage 10 refuse two captures that are
+not two halves of one attempt.
+
+The four fingerprints live under `run-logs/` and **never** inside a compared tree,
+so none of them can be diffed as though it were posted data. Each is one line per
+declared table plus the parameter row (§7.1). The two pairs answer two different
+questions: *cobol.seed* against *python.seed* asks whether both sides started
+alike, while a single side's *seed* against its own *post* asks whether that side
+changed anything — which is the only way to tell a faithful no-op from a run that
+never reached its posting section.
 
 Each normalised tree carries one `<TABLE>.json` per affected table plus
 `_manifest.json`, written **last**, so a tree is either complete or unmanifested
@@ -1441,7 +2061,7 @@ Nothing here auto-builds or auto-runs; each stage is invoked explicitly.
 
 ```bash
 C="docker compose -f harness/docker-compose.yml exec -T \
-   -e ACAS_SEED_AUTOCOMMIT=on -e PYTHONDONTWRITEBYTECODE=1 gnucobol"
+   -e PYTHONDONTWRITEBYTECODE=1 gnucobol"
 
 # once per image
 $C /repo/harness/build_oracle.sh
@@ -1450,15 +2070,17 @@ $C /repo/harness/build_oracle.sh
 $C /repo/harness/build_fixtures.sh
 
 # one scenario, all ten stages, aborting at the first non-zero
-$C /repo/harness/run_parity.sh \
-     /repo/harness/scenarios/clean_batch_gl.yaml \
-     --seed-dir /data/fixtures/clean_batch_gl
+$C /repo/harness/run_parity.sh /repo/harness/scenarios/clean_batch_gl.yaml
 ```
 
 `-T` is required on every scripted stage: a tty is allocated by default and a
-piped stage would appear to hang. `ACAS_SEED_AUTOCOMMIT=on` is the declared
-deviation of §4.3 and must be supplied deliberately — without it the seed exits
-**76** rather than producing an all-empty capture.
+piped stage would appear to hang. No seed-mode flag appears above because none is
+needed: autocommit **on** is the canonical durable mode, declared by Compose and
+defaulted by `harness/seed.sh` (§4.3). `--seed-dir` also defaults to the canonical
+fixture root `$ACAS_FIXTURES` — or `$ACAS_DATA/fixtures` — plus the scenario name,
+which is exactly where `build_fixtures.sh` writes. Passing
+`ACAS_SEED_AUTOCOMMIT=off` selects the AAP-literal window instead, and the seed
+then exits **76** rather than producing an all-empty capture.
 
 An empty diff from stage 10 is the pass condition and the only one. A stage that
 exits non-zero has produced no evidence, so re-seed rather than carrying a partial
@@ -1466,21 +2088,35 @@ capture forward.
 
 ## 16. Conclusion
 
-All eight mandated scenarios carry **`EMPTY DIFF — OBSERVED`**. The result was
+**All nine committed scenarios carry `EMPTY DIFF — OBSERVED`** — the eight that
+discharge AAP §0.8.5's mandate, plus `end_of_cycle_gl` beyond it. The result was
 obtained through the rigid protocol of §4, with the comparison bounded by each
 scenario's declared affected-table list, the pass condition checked as **both**
 exit 0 **and** zero-byte stdout, and attestation enforced rather than waived. The
-determinism tier and the committed scenario tier both pass, and the manifest
-digests reproduce across independent runs.
+determinism tier passes (6) and so does the committed scenario tier — 107 tests
+under `pytest -m scenario` — and re-deriving stage 10 from the retained captures
+republishes a byte-identical verdict.
+
+Every row of §8 is identified by the manifest digests published with its scenario in
+§10, and by the run id where one was recorded; §9.3 names each retained artifact. So
+no claim here rests on a date or on this document's own say-so: the digests can be
+recomputed from the files they describe.
 
 No frozen COBOL source, bridge, copybook, shell script or schema file was modified
 to obtain any of it, and the maintainer's `README*`, `Changelog` and
 `ACAS-Manuals/` are untouched.
 
-Two boundaries are recorded as open rather than glossed: **`gl080` is exercised by
-no scenario**, and **`gl051` has no CLI entry point**. Both carry
-`PENDING — AWAITING ORACLE EXECUTION` in §13, because a register whose every line
-reads "pass" is worth less than one that says accurately where it stops.
+**One boundary of the two previously recorded here has closed, and one has not.**
+`gl080` **is now exercised**, by `end_of_cycle_gl` at §10.9, so the declination this
+section used to record has been withdrawn — see §13, where the old wording is quoted
+rather than deleted. What survives it is narrower and still true: every scenario
+seeds `period: 1`, so **a zero divisor for the cycle-to-period divide is driven by
+no scenario**, and `Q-GL080-DIVIDE-BY-ZERO` was therefore closed by a focused
+compiled probe instead. The second boundary stands unchanged: **`gl051` has no CLI
+entry point**, and its control-total gate is exercised as a library function rather
+than by a scenario. `PENDING — AWAITING ORACLE EXECUTION` remains in §13 for what
+genuinely has no measurement, because a register whose every line reads "pass" is
+worth less than one that says accurately where it stops.
 
 ## 17. Companion documents
 

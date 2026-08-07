@@ -18,6 +18,7 @@ what is reproduced: the divergence is in when the computation happens, not in
 which way round it divides.
 
 THE SOURCE IS FROZEN
+====================
 `sales/sales.cbl` and `sales/sl100.cbl` are read-only specification. Agent
 Action Plan section 0.8.1 is unambiguous: "Any diff touching `common/*.cbl`,
 `common/*.scb`, `copybooks/*.cob`, `general/*.cbl`, `sales/*.cbl`,
@@ -152,187 +153,6 @@ The menu's screen output, its `display-menu` paragraph and its
 not migrated, and neither is the `menu-return.` banner block
 [sales/sl100.cbl:L303-L308]. Diagnostics that have no database effect become log
 records that cannot alter control flow and cannot appear in a table dump. The
-`overrewrite` persistence of the two system records and the pre-run backup
-spool-out are omitted for reasons recorded in the footer.
-
-RULES
-=====
-R-1  No COBOL at runtime. Nothing here creates a child process, launches a shell,
-     loads a shared object, binds a foreign function or names the compiler, the
-     module runner, the SQL translator or the bridge's C interface object; and
-     nothing imports the comparison-oracle tree, of which Agent Action Plan
-     section 0.7.2 says there "is no import path from the shipped package". The
-     COBOL above is quoted as specification, never executed.
-R-2  Zero binary floating point. This module handles exactly three value kinds
-     and not one of them is a binary fraction: `ok_to_post` is `bool`,
-     `WS-Term-Code` is `int` because `pic 99` [copybooks/wscall.cob:L10] is two
-     unsigned digits, and `to-day` is `str`. No monetary or quantity value
-     passes through here at all - every one of them lives in the program module.
-R-3  No new validations, fields or schema changes; no concurrency. No option
-     validates anything the COBOL does not, no field is added to any record, no
-     SQL is emitted, and execution is strictly sequential: one dispatch, in
-     order, on the calling thread.
-R-4  Legacy anomalies reproduced, never fixed. Every reproduction site below
-     carries a comment citing its COBOL locator, per Agent Action Plan section
-     0.7.4 C-4. Reproduced here: the absent gate on `load11`; the `< 8` and
-     `> 7` thresholds and the fact that they are two separate statements; the
-     per-dispatch reset of `WS-Term-Code`; the dead `"sl100"` whitelist entry;
-     and the Sales `perform overrewrite` / `goback` mechanism where Purchase
-     writes `go to overrewrite`.
-R-5  Full traceability. One named function per migrated paragraph, `load000` and
-     `load11`, each keeping the COBOL's own name; a `# GO TO class N` annotation
-     at every transfer site; and the mandatory footer.
-R-6  Compiled behaviour is the tie-breaker. This module reads no wall clock, no
-     monotonic clock, no entropy source, no unique-identifier generator and no
-     process environment - it imports neither `datetime` nor `time` nor `os`, so
-     there is nothing for such a read to be spelled with. The run date enters
-     only as the required `--run-date`. Open questions are marked `# AMBIGUITY`
-     with the experiment that settles them.
-
-A NOTE ON THE PROSE ABOVE, which is deliberate and should not be "tidied". The
-literal spellings of the constructs R-1, R-2 and R-6 forbid are absent from this
-file, this documentation included, so that the mandated audit greps return a
-count of zero rather than a page of prose asserting the constructs' absence. The
-same convention is followed in `acas_posting/programs/sl100_cash_posting.py` for
-the affirmative rounding keyword. Each construct is named by what it does
-instead, which is unambiguous and greppable in the other direction.
-
-Invocation, for reference::
-
-    python -m acas_posting.cli.sl_cash_post --run-date 21/09/2025 --irs-instead B
-
-The scenario runner script in the comparison-oracle tree invokes the entry points
-as modules exactly like this; `pyproject.toml` declares no `[project.scripts]`,
-so there is no console script to install.
-=======
-====================
-`sales/sales.cbl` and `sales/sl100.cbl` are read-only specification. Agent
-Action Plan section 0.8.1 is unambiguous: "Any diff touching `common/*.cbl`,
-`common/*.scb`, `copybooks/*.cob`, `general/*.cbl`, `sales/*.cbl`,
-`purchase/*.cbl`, `irs/*.cbl` or `mysql/ACASDB.sql` is a defect in the
-migration, regardless of how harmless it appears." Nothing here edits either.
-
-THERE IS NO USER RULES DOCUMENT
-===============================
-`review_rules` returns exactly "No user rules provided." - there is no on-disk
-rules document for this project and none should be looked for. The six binding
-rules R-1 ... R-6 live in the Agent Action Plan itself, section 0.7.2, and are
-treated as binding. Where the plan is silent, enterprise-standard best practice
-applies; no rule has been invented to fill the gap. How this module honours
-each is recorded under RULES below.
-
-DISPATCH GOES THROUGH `load000.`, NOT `load00.`
-===============================================
-`load11` transfers to `load000.` [sales/sales.cbl:L698-L712], the FIVE-parameter
-dispatch paragraph:
-
-    L701       move     zero to ws-term-code.
-    L702       call     ws-called using ws-calling-data
-    L703                                System-Record
-    L704                                WS-System-Record-4
-    L705                                to-day
-    L706                                file-defs
-    L707       end-call
-    L708       if       ws-term-code < 8  *> for sl055 & 060, xl150
-    L709                perform overrewrite.
-    L710       if       ws-term-code > 7      *> Got a serious (reported) error
-    L711                perform overrewrite
-    L712                goback.
-
-This is easy to get wrong, and getting it wrong would bind the wrong linkage
-shape. The Sales menu also has a FOUR-parameter `load00.`
-[sales/sales.cbl:L677-L692] whose whitelist names `"sl100"` explicitly
-[sales/sales.cbl:L688] - but nothing ever routes `sl100` through `load00`, so
-that whitelist entry is dead code. It is recorded as an anomaly and left alone
-(R-4); see OMISSIONS in the footer.
-
-The linkage shape is therefore Shape 2 of the migration's three, and it has
-FIVE parameters: `procedure division using ws-calling-data, system-record,
-system-record-4, to-day, file-defs.` [sales/sl100.cbl:L272-L276]. The caller
-spells the third one `WS-System-Record-4` [sales/sales.cbl:L704] and the callee
-spells its own `system-record-4` [sales/sl100.cbl:L274]; both spellings are
-preserved rather than reconciled. See CORRECTION 1 in the footer for why "four"
-appears in one planning document.
-
-`load11` HAS NO GATE, AND THAT IS DELIBERATE
-============================================
-Three gate forms coexist in these menu shells and they must stay different
-(R-4). The router's job is to keep them apart, not to harmonise them:
-
-    General Ledger posting cycle   `if ws-term-code = 5` - the abort gate
-    Sales invoice posting          `if ws-term-code not = zero`
-                                   [sales/sales.cbl:L761-L762, L765-L766]
-    Sales PAYMENT posting          none at all - this module
-    Purchase order posting         none at all
-
-`load11` is two statements: set the callee, transfer. There is nothing to gate,
-because there is only one dispatch on this route and a gate exists to decide
-whether the NEXT one happens. Reaching `load000.` by `go to` [L796] rather than
-by `perform` reinforces it: control never comes back to `load11`, so no code can
-follow the dispatch, and none does.
-
-The reason no gate is needed also holds at the value level. `sl100` never writes
-`WS-Term-Code` at all - a census of the frozen program finds no reference to the
-field - so on this route the code is still the zero that L701 moved into it when
-L708 and L710 test it. Only three of the twelve in-scope programs ever set it:
-`gl070` to 5 [general/gl070.cbl:L289], `sl055` to 8 [sales/sl055.cbl:L344] and
-`pl055` to 8 [purchase/pl055.cbl:L286]. The `> 7` branch is consequently
-unreachable on this route in practice. It is implemented anyway, faithfully,
-because the branch is in the paragraph being migrated and its absence would be
-a behaviour change rather than a simplification.
-
-THE RUN-CONFIRM IS PROMOTED TO A PARAMETER
-==========================================
-`sl100` opens with an interactive confirm that gates every database write
-[sales/sl100.cbl:L310-L319]:
-
-    L311       display  "OK to Post Payment Transactions (YES/NO) ? [   ]"
-    L313       move     spaces to wx-reply.
-    L314       accept   wx-reply at 1256 with foreground-color 6 update.
-    L315       move     function upper-case (wx-reply) to wx-reply.
-    L316       if       wx-reply = "NO"
-    L317                go to menu-exit.
-    L318       if       wx-reply not = "YES"
-    L319                go to acpt-xrply.
-
-Agent Action Plan section 0.3.4: "Accept prompts that gate a database write
-become explicit CLI parameters with the COBOL default preserved." This one
-plainly gates every write - `"NO"` transfers to `menu-exit.`
-[sales/sl100.cbl:L476-L477], which is `exit program.`, and it does so BEFORE the
-first `perform OTM3-Open` at [sales/sl100.cbl:L321], so nothing whatsoever is
-written - which is why it becomes `--ok-to-post` / `--no-ok-to-post` here rather
-than being dropped.
-
-There is, however, no default in the COBOL to preserve. `wx-reply` is declared
-`pic xxx value spaces` [sales/sl100.cbl:L167] and L313 moves spaces into it
-again immediately before the accept, and spaces are neither `"NO"` nor `"YES"`,
-so a blank answer re-prompts at L318-L319 rather than resolving. Only `"YES"`
-proceeds. The switch therefore defaults to posting - see AMBIGUITY
-Q-CLI-OKTOPOST at the constant that carries the default - and an explicit
-opt-out reproduces the `"NO"` transfer, which the program module itself
-performs.
-
-THE CONTROLLED CLOCK
-====================
-The run date arrives only as the required `--run-date` and is pinned before any
-program is entered, which is what makes two runs of one scenario byte-identical
-(Agent Action Plan section 0.8.5, rule R-6). Nothing in this module reads a
-clock, and neither does `sl100`: all twelve in-scope programs receive the date
-purely through linkage, and the single clock read in the whole call chain is in
-the menu shell's date-service copybook
-[copybooks/Proc-ACAS-Mapser-RDB.cob:L72-L80], which is out of scope. Both
-observables - the text `to-day pic x(10)` and the binary `Run-Date`
-[copybooks/wssystem.cob:L67] - are pinned from that one argument by
-`args.bind_slpl_linkage`, which delegates to `args.resolve_clock` and thence to
-`acas_posting.clock`.
-
-PRESENTATION IS GONE
-====================
-The menu's screen output, its `display-menu` paragraph and its
-`go to load01 ... depending on z` dispatch table [sales/sales.cbl:L662-L670] are
-not migrated, and neither is the `menu-return.` banner block
-[sales/sl100.cbl:L303-L308]. Diagnostics that have no database effect become log
-records that cannot alter control flow and cannot appear in a table dump. The
 pre-run backup spool-out is omitted for the reasons recorded in the footer. The
 `overrewrite` persistence of the two system records IS reproduced - by
 `args.overrewrite`, performed from both arms of `load000` - because `sl100`
@@ -382,9 +202,22 @@ same convention is followed in `acas_posting/programs/sl100_cash_posting.py` for
 the affirmative rounding keyword. Each construct is named by what it does
 instead, which is unambiguous and greppable in the other direction.
 
-Invocation, for reference::
+Invocation, for reference. `--ok-to-post/--no-ok-to-post` is REQUIRED - the
+parser has no default for it, so an otherwise complete command line that omits
+it exits 2 with "the following arguments are required" - and the two answers do
+different things, so both forms are given rather than one with the flag elided::
 
-    python -m acas_posting.cli.sl_cash_post --run-date 21/09/2025 --irs-instead B
+    # DECLINES. Reproduces the "NO" branch [sales/sl100.cbl:L316-L317], which
+    # transfers to menu-exit before the first open at [sales/sl100.cbl:L321], so
+    # the run has no database effect whatsoever.
+    python -m acas_posting.cli.sl_cash_post --run-date 21/09/2025 \\
+        --irs-instead B --no-ok-to-post
+
+    # PROCEEDS. WARNING - THIS ONE WRITES. Every database write in the route is
+    # gated on this switch, and the menu's `overrewrite` persistence runs after
+    # the dispatch either way. Point it only at a disposable schema.
+    python -m acas_posting.cli.sl_cash_post --run-date 21/09/2025 \\
+        --irs-instead B --ok-to-post
 
 The scenario runner script in the comparison-oracle tree invokes the entry points
 as modules exactly like this; `pyproject.toml` declares no `[project.scripts]`,
@@ -777,15 +610,20 @@ def _build_parser() -> argparse.ArgumentParser:
     # The shared fragments, composed rather than reimplemented.
     args.add_calling_data_arguments(parser, default_caller=args.WS_CALLER_SALES)
     args.add_slpl_linkage_arguments(parser)
-    #  THE TRANSPORT DECLARATION - one contract, published on every route
-    #  (`args.add_transport_security_arguments`). No COBOL counterpart: the frozen
-    #  bridge's connect passes six values and no transport policy at all
+    #  THE TRANSPORT DECLARATION IS NOT AN OPTION ON THIS ROUTE, AND MUST NOT
+    #  BECOME ONE. The frozen `CALL` publishes the linkage operands and the write
+    #  gating answers, and nothing else; the frozen bridge's connect passes six
+    #  values and no transport policy at all
     #  [copybooks/mysql-procedures.cpy:L72-L77], transport being compiled into
-    #  `cobmysqlapi.c`, so the migration must decide it and the operator is the
-    #  only party that knows. Stating NOTHING is the fail-closed policy - loopback
-    #  and Unix sockets only - not an absent one. It decides no posted figure, so
-    #  it cannot make two runs of one scenario differ (R-6).
-    args.add_transport_security_arguments(parser)
+    #  `cobmysqlapi.c`. A `--db-tls-*` or `--db-allow-plaintext` option here would
+    #  add a program input and two refusal outcomes the compiled program has not
+    #  got, which rule R-3 forbids - and a certificate path on a command line is a
+    #  process-listing leak besides. Deployment security is resolved ONCE, outside
+    #  the accounting path, from the same contract the six connection parameters
+    #  come from: `args.install_connection_policy` reads it through
+    #  `cli/rdbms_params.resolve_transport_policy` while the linkage is bound, and
+    #  every handler observes the installed policy without being told. It decides
+    #  no posted figure, so it cannot make two runs of one scenario differ (R-6).
 
     #  THE RUN-CONFIRM, OWNED HERE. It is specific to `sl100`
     #  [sales/sl100.cbl:L310-L319], so `cli/args.py` must not carry it: a shared

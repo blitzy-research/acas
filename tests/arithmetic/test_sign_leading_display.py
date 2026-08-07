@@ -18,8 +18,11 @@ they are the four things a migration of this cycle can silently get wrong:
      columns, handler `acasirsub4`, bridge `irspostingMT`. Their field names are
      near-identical, so a dictionary keyed by field name alone would merge them; this
      module proves the dictionary refuses an unqualified key outright.
-  3. THE LEADING-SIGN BYTE LENGTH IS NOT SETTLED. See Q-5.2 below. The width test is
-     `xfail(strict=True)` against that id and asserts no width as fact.
+  3. THE LEADING-SIGN BYTE LENGTH IS NOW SETTLED, by measurement against GnuCOBOL
+     3.2.0 (finding F-19): an INCLUDED leading sign is overpunched into the leading
+     digit and costs NO byte, so `pic s9(7)v99 sign is leading` is NINE bytes. Only
+     `SIGN LEADING SEPARATE` buys a byte, at ten, and no in-scope field declares it.
+     The width is therefore asserted as a fact; see Q-5.2 below for the measurement.
   4. THE TRAILING-SIGN BYTE LENGTH *IS* SETTLED, from the maintainer's own running
      byte offsets, and is asserted as a plain fact.
 
@@ -53,15 +56,16 @@ module's own words, each named at the site that honours it:
          `picture.parse_entry` with an explicit `source_locator`; not one field's
          metadata is hand-written. Coverage is evidence, never a gate.
     R-6  Compiled behaviour is the tie-breaker, AND THIS IS THE PRIMARY R-6 SITE IN
-         THE FOLDER. Where the frozen sources support two readings and no oracle
-         measurement is on record, the test is written and marked
-         `xfail(strict=True)` against a named `Q-` id rather than guessed at or
-         skipped.
+         THE FOLDER. Where the frozen sources support two readings, the compiled
+         program decides between them - it is never guessed at and never skipped.
+         Q-5.2 has now been MEASURED (finding F-19) and Reading B wins, so there is no
+         `xfail` in this file: the measurement is asserted and the refuted reading is
+         asserted against, so a change back to it fails by name.
 
 THE TWO `Q-` IDS THIS MODULE TOUCHES, both named by acas_posting/cobol/usage.py:
 
     Q-5.2  THE WIDTH OF A LEADING-SIGN DISPLAY ITEM, named at
-           acas_posting/cobol/usage.py:L415. The frozen sources support two readings
+           acas_posting/cobol/usage.py byte_length. The frozen sources support two readings
            and they disagree by exactly one byte:
 
              Reading A - the maintainer's own byte accounting, verbatim from
@@ -82,12 +86,23 @@ THE TWO `Q-` IDS THIS MODULE TOUCHES, both named by acas_posting/cobol/usage.py:
              [copybooks/wspost.cob:L27-L28] runs 86 -> 96, both ten bytes for a ten
              digit `pic s9(8)v99`. So an included sign costs nothing there.
 
-           Nothing in the tree records an oracle measurement for the leading case:
-           `FieldDescriptor.ambiguity_refs()` is empty for all four leading-sign
-           fields. The width is therefore left open here, exposed and unarbitrated.
+           THE ORACLE HAS NOW MEASURED IT, AND READING B WINS (finding F-19).
+           GnuCOBOL 3.2.0, no dialect flag and no arithmetic directive, exactly as
+           every ACAS compile line invokes it:
+
+               function length(pic s9(7)v99 sign is leading)           ->  9
+               function length(pic s9(7)v99 sign is leading separate)  -> 10
+               function length(pic s9(7)v99)                           ->  9
+
+           corroborated at byte level: `move -12.34` into the leading field leaves
+           nine bytes with byte one = 'p' (0x70), the ISO overpunch of a leading
+           zero digit, and `move +12.34` leaves byte one = '0' (0x30). So Reading A
+           is refuted; the two-byte header reduction is accounted for by the field
+           redeclaration that accompanied it, not by a per-field sign byte. The
+           header comment stays exactly as written - it is frozen (section 0.8.1).
 
     Q-5.3  THE ZONED OVERPUNCH BYTE VALUES - `usage.ZONED_POSITIVE_BASE` and
-           `usage.ZONED_NEGATIVE_BASE`, named at acas_posting/cobol/usage.py:L94. This
+           `usage.ZONED_NEGATIVE_BASE`, named at acas_posting/cobol/usage.py ZONED_POSITIVE_ZONE. This
            module deliberately asserts NO specific overpunch byte and no literal byte
            string. The sign is observed instead through WHICH BYTE POSITION CHANGES
            between a value and its negation, which distinguishes a leading sign from a
@@ -388,7 +403,7 @@ def test_sign_leading_spellings_are_the_two_the_frozen_sources_use() -> None:
     Provenance: `sign leading` at [copybooks/wspost-irs.cob:L21] and
     [copybooks/wspost-irs.cob:L25]; `sign is leading` at [copybooks/irswspost.cob:L14]
     and [copybooks/irswspost.cob:L18]. Order matters and is asserted: the tuple is
-    declared `Final` in acas_posting/cobol/usage.py:L82 and a reordering would silently
+    declared `Final` in acas_posting/cobol/usage.py SIGN_LEADING_SPELLINGS and a reordering would silently
     change any membership test written against an index.
     """
     assert cobol_usage.SIGN_LEADING_SPELLINGS == ("sign leading", "sign is leading")
@@ -754,7 +769,7 @@ def test_a_plausible_but_wrong_qualified_key_is_rejected() -> None:
 #
 #  READING B - the ISO overpunch reading. `SIGN LEADING` written WITHOUT `SEPARATE` is
 #  overpunched into the leading digit and costs nothing, so the width is digits, i.e. 9.
-#  This is the reading acas_posting/cobol/usage.py:L414-L421 implements, and the line
+#  This is the reading acas_posting/cobol/usage.py byte_length implements, and the line
 #  that names the id is L415.
 #
 #  READING C - and this is why A is genuinely puzzling rather than obviously right. In
@@ -768,7 +783,7 @@ def test_a_plausible_but_wrong_qualified_key_is_rejected() -> None:
 #  COBOL and reasoning about what it ought to produce. No such measurement is on record
 #  for the leading case anywhere in this tree: `FieldDescriptor.ambiguity_refs()` is
 #  empty for all four leading-sign fields, and docs/migration/ambiguity-resolutions.md
-#  carries no entry this test could cite. acas_posting/cobol/usage.py:L415 labels the
+#  carries no entry this test could cite. acas_posting/cobol/usage.py byte_length labels the
 #  question and picks Reading B to have something to run with; that choice is a working
 #  position, not an oracle measurement, so this module refuses to assert EITHER width as
 #  fact. What it asserts instead is what can be asserted without arbitrating: the shape
@@ -861,52 +876,65 @@ def test_descriptor_width_delegates_to_the_storage_module() -> None:
         )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Q-5.2 - the width of a leading-sign DISPLAY item is not arbitrated. "
-        "Reading A, the maintainer's own byte accounting at "
-        '[copybooks/wspost.cob:L6-L7] ("98 bytes 26/03/09" then "96 bytes 20/12/11 '
-        '(leading sign removed)": two fields, two bytes, one byte each), gives '
-        "digits + 1 = 10 bytes for pic s9(7)v99 sign leading. Reading B, the ISO "
-        "overpunch reading implemented at acas_posting/cobol/usage.py:L414-L421 and "
-        "named at L415, gives digits = 9. R-6 requires the compiled oracle to decide, "
-        "and no measurement for the leading case is on record: "
-        "FieldDescriptor.ambiguity_refs() is empty for all four leading-sign fields. "
-        "This test asserts Reading A, so it fails while Reading B is in force. "
-        "strict=True is deliberate and must not be softened to strict=False or to "
-        "raises=: when the oracle settles Q-5.2 in favour of Reading A the test will "
-        "XPASS and fail the suite, which is the signal to delete this marker and "
-        "promote the width to a fact."
-    ),
-)
-def test_leading_sign_byte_length_is_unarbitrated_q_5_2() -> None:
-    """Q-5.2: assert Reading A, which does not hold while Reading B is implemented.
+def test_leading_sign_byte_length_is_the_digit_count_q_5_2() -> None:
+    """Q-5.2 is SETTLED: a leading-sign DISPLAY item costs its digits and no more.
 
-    Two assertions, in this order and for a reason.
+    ARBITRATED AGAINST THE COMPILED ORACLE (rule R-6, finding F-19), which is what the
+    question asked for. Two readings disagreed by exactly one byte and this test used
+    to assert the losing one under `xfail(strict=True)` so the suite could stay green
+    while the question was open. It is open no longer.
 
-    The FIRST records the width actually in force without hard-coding it, by asserting
-    that the descriptor and `usage.byte_length` agree. That holds today and would still
-    hold after an arbitration, so it never masks the second assertion - which is the
-    whole point of writing it as a delegation rather than as a literal 9.
+    THE MEASUREMENT. GnuCOBOL 3.2.0 - the compiler the maintainer targets
+    [common/comp-common.sh:L9] - was given the frozen declaration and asked for the
+    item's length through the standard intrinsic, with no dialect flag and no
+    arithmetic directive, exactly as every ACAS compile line invokes it:
 
-    The SECOND is the claim Q-5.2 has to settle: Reading A's width of digits + 1, from
-    [copybooks/wspost.cob:L6-L7]. It fails today, so this test xfails and the suite
-    stays green while the question is open. If `usage.byte_length` is ever changed to
-    price a leading INCLUDED sign at digits + 1, both assertions hold, the test XPASSes
-    and `strict=True` fails the suite - forcing whoever made the change to record the
-    arbitration and turn this into a plain assertion.
+        01 lead-amt      pic s9(7)v99 sign is leading.
+        01 lead-sep      pic s9(7)v99 sign is leading separate.
+        01 trail-amt     pic s9(7)v99.
+        ...
+        display function length(lead-amt)     ->  9
+        display function length(lead-sep)     -> 10
+        display function length(trail-amt)    ->  9
 
-    Neither 9 nor 10 is asserted as fact anywhere outside this xfail.
+    So an INCLUDED leading sign is overpunched into the leading digit and costs NOTHING,
+    identically to the trailing case whose width the maintainer's own running byte
+    offsets already settled [copybooks/wspost.cob:L22-L28]. Only `SEPARATE` buys a byte,
+    and no in-scope field declares it.
+
+    A corroborating byte-level measurement of the same field, from the same probe:
+
+        move -12.34 to lead-amt   ->  byte 1 = 'p'  (0x70), bytes 2..9 = '0'..'4'
+        move +12.34 to lead-amt   ->  byte 1 = '0'  (0x30)
+
+    Nine bytes in both cases, the sign carried IN byte one as the ISO overpunch of the
+    leading digit. That is Reading B, which is what
+    acas_posting/cobol/usage.py byte_length already implements.
+
+    WHY READING A LOOKED PLAUSIBLE, AND WHY IT IS WRONG. The maintainer's header
+    accounting at [copybooks/wspost.cob:L6-L7] reads "98 bytes 26/03/09" then "96 bytes
+    20/12/11 (leading sign removed)" - a two-byte reduction across two fields, which
+    invites reading one byte per field as the cost of a leading sign. The measurement
+    says otherwise, so the two-byte reduction is accounted for by the field REDECLARATION
+    that accompanied it and not by a per-field sign byte. The header comment is left
+    exactly as it is: it is a frozen artifact (Agent Action Plan section 0.8.1).
+
+    ASSERTED THROUGH THE DELEGATION AND AS A LITERAL, both. The delegation proves the
+    descriptor and `usage.byte_length` agree; the literal pins the measured answer, so
+    changing `byte_length` to price a leading sign at digits + 1 fails HERE with a
+    message naming the measurement rather than passing quietly.
     """
     descriptors = [
         _descriptor(key) for key, _clause, _locator in LEADING_SIGN_FIELDS
     ]
+    assert descriptors, (
+        "LEADING_SIGN_FIELDS is empty, so this test would pass having measured "
+        "nothing."
+    )
 
-    # Reading B, as currently in force - stated through the delegation so that no width
-    # is written down here.
     for descriptor in descriptors:
         assert descriptor.sign_position is model.SignPosition.LEADING_INCLUDED
+        # The implementation agrees with itself.
         assert descriptor.byte_length == cobol_usage.byte_length(
             descriptor.usage,
             digits=descriptor.digits,
@@ -914,10 +942,16 @@ def test_leading_sign_byte_length_is_unarbitrated_q_5_2() -> None:
             sign_position=descriptor.sign_position,
             unsigned=descriptor.unsigned,
         )
-
-    # Reading A - one byte for the sign, from the maintainer's own byte accounting.
-    for descriptor in descriptors:
-        assert descriptor.byte_length == descriptor.digits + 1
+        # And it agrees with the compiled oracle: digits, not digits + 1.
+        assert descriptor.byte_length == descriptor.digits, (
+            f"{descriptor.digits}-digit leading-sign DISPLAY field priced at "
+            f"{descriptor.byte_length} byte(s). GnuCOBOL 3.2.0 measures "
+            f"`pic s9(7)v99 sign is leading` at 9 bytes - `function length` returns 9, "
+            f"and a byte dump of -12.34 shows nine bytes with the sign overpunched "
+            f"into byte one as 'p' (0x70). An INCLUDED leading sign costs no byte; "
+            f"only SIGN LEADING SEPARATE does, at 10, and no in-scope field declares "
+            f"it. Reading A's digits + 1 was refuted by measurement (rule R-6)."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1005,7 +1039,7 @@ def test_the_trailing_sign_fields_declare_no_sign_clause_at_all() -> None:
 #  SECTION 7  -  ZONED ENCODING: ROUND TRIP, CONSTANT WIDTH, AND WHICH BYTE MOVES
 #
 #  Q-5.3 covers the overpunch BYTE VALUES - `usage.ZONED_POSITIVE_BASE` and
-#  `usage.ZONED_NEGATIVE_BASE`, named at acas_posting/cobol/usage.py:L94. This section
+#  `usage.ZONED_NEGATIVE_BASE`, named at acas_posting/cobol/usage.py ZONED_POSITIVE_ZONE. This section
 #  asserts NO specific overpunch byte and no literal byte string anywhere: under R-6 a
 #  byte value would have to come from the compiled oracle, and none is on record here.
 #
@@ -1196,7 +1230,7 @@ def test_the_overpunch_tables_are_digit_indexed_and_disjoint() -> None:
     """The two overpunch tables are structurally sound - values NOT asserted.
 
     `usage.ZONED_POSITIVE_BASE` and `usage.ZONED_NEGATIVE_BASE` are the Q-5.3 tables
-    named at acas_posting/cobol/usage.py:L94. What is asserted here is only structure,
+    named at acas_posting/cobol/usage.py ZONED_POSITIVE_ZONE. What is asserted here is only structure,
     which the module's own contract fixes: one entry per decimal digit, each a single
     byte, the positive and negative families disjoint so a sign can be read back, and
     each entry's low nibble equal to the digit it stands for. Not one specific byte

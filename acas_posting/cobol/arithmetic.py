@@ -93,7 +93,36 @@ def _rounding(rounded: bool) -> str:
 
 
 # How many significant digits an intermediate result carries before the single quantize
-# at the store. Q-2 asked two things and both were MEASURED against GnuCOBOL 3.2.0.
+# at the store.
+#
+# ⭐ Q-2 ASKS TWO THINGS, AND BOTH ARE NOW MEASURED. Keep them separate anyway, because
+# this constant is the one place the difference is expressible and because they were
+# settled by different means.
+#
+#   THE SHAPE IS SETTLED BY THE LANGUAGE: a `ROUNDED` phrase belongs to the STORE, so a
+#   statement evaluates its expression and then quantizes ONCE, into the receiver.
+#   Quantizing each sub-expression would be a different language. That is what this
+#   module implements and what `tests/arithmetic/test_compute_rounded_half_up.py` locks.
+#
+#   THE NUMBER OF INTERMEDIATE DIGITS CANNOT BE READ FROM THIS REPOSITORY - it is a
+#   property of the compiler BUILD, and there is no `-std=` selection in any frozen
+#   script, no `>>SET ARITHMETIC` directive in any `.cbl`, `.cob` or `.scb`, and no
+#   `binary-truncate` flag anywhere. So it was MEASURED against GnuCOBOL 3.2.0 with a
+#   compiled probe rather than inferred: the compound gross form of
+#   `[irs/irs030.cbl:L1562-L1564]` and `[general/gl051.cbl:L796]` on 117.55 at a 17.50
+#   rate stores 17.51, where the reduced-precision reading - quantizing each
+#   sub-expression at the receiver's own two places - gives 17.93. The intermediate is
+#   therefore NOT reduced to the receiver's scale between terms.
+#   `docs/migration/ambiguity-resolutions.md` carries the probe, its captured table and
+#   the rejected reading measured for contrast, under `Q-2` as RESOLVED BY ORACLE; this
+#   comment and that register state one status.
+#
+# 60 IS DELIBERATELY WIDE, SO THE SHAPE GOVERNS RATHER THAN THE LIMIT. It exceeds every
+# in-scope receiver's declared digit count by a wide margin - the widest is 14 - so no
+# in-scope figure can reach it. The one expression deep enough for a single intermediate
+# digit to move a penny is the compound gross form named above, and that is exactly the
+# figure the measurement was taken on; `tests/arithmetic/test_irs_vat_from_gross.py`
+# now asserts the captured pennies rather than marking the proposition.
 INTERMEDIATE_PRECISION: Final[int] = 60
 # EVERY `decimal` operation in this module runs inside a copy of this context, entered
 # with `decimal.localcontext`.

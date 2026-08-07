@@ -97,34 +97,54 @@ THE SIX BINDING RULES, as they apply to this file.
          evidence, never a gate.
     R-6  Compiled behaviour is the tie-breaker. Expected values come from the
          compiled oracle, never from reading the COBOL and reasoning about what it
-         ought to produce. Where a value depends on something the oracle has not
-         measured, the expectation is recorded as a STRICT xfail against a named
-         `Q-` id rather than asserted as fact.
+         ought to produce. BOTH questions this file carries have now been MEASURED
+         (finding F-19), so there is no `xfail` here: each measurement is asserted,
+         and the reading it refuted is asserted AGAINST, so a change back to the
+         refuted reading fails by name.
 
 Also binding, Agent Action Plan section 0.8.4: no timing assertion and no
 performance measurement appears anywhere in this file.
 
-THE TWO `Q-` IDS THIS FILE CARRIES, and why each is a strict xfail:
+THE TWO `Q-` IDS THIS FILE CARRIES, and the measurement that closed each:
 
-    Q-2                        The intermediate-precision question. The `cobol`
-                               layer records it as MEASURED against GnuCOBOL 3.2.0
-                               [acas_posting/cobol/arithmetic.py:L96]: an expression
-                               is evaluated at extended precision and quantized
-                               EXACTLY ONCE, at the store. The rejected alternative -
+    Q-2                        The intermediate-precision question, and BOTH HALVES OF
+                               IT ARE CLOSED - by different means, which is why the
+                               halves are worth naming. The SHAPE - evaluate the whole
+                               expression, then quantize EXACTLY ONCE, at the store - is
+                               settled by the language, because a `ROUNDED` phrase
+                               belongs to the store. The NUMBER OF INTERMEDIATE DIGITS
+                               could not be read from anything in this repository, there
+                               being no `-std=` selection, no `>>SET ARITHMETIC`
+                               directive and no `binary-truncate` flag anywhere, so it
+                               was MEASURED against GnuCOBOL 3.2.0
+                               [acas_posting/cobol/arithmetic.py INTERMEDIATE_PRECISION]:
+                               an expression is evaluated at extended precision and
+                               quantized once, at the store. The rejected alternative -
                                quantizing each sub-expression to the receiver's scale,
                                which is what a reduced default intermediate precision
-                               would amount to - is asserted under
-                               `xfail(strict=True)` so that adopting it later XPASSes
-                               and FAILS the suite.
+                               would amount to - was forced by hand on the same probe
+                               and gives 17.93 for gl051's site 2 where the compiled
+                               program gives 17.51, so it is REFUTED and asserted
+                               against rather than merely marked, in
+                               `test_site_2_stores_the_extended_precision_penny`, which
+                               DERIVES the 17.93 rather than quoting it. That test used
+                               to carry `xfail(strict=True)` over the literal 17.08, a
+                               figure no reading produces, so it could not have fired on
+                               the change it was watching for; see its docstring.
+                               NEITHER figure this file asserts sits near the precision
+                               limit in any case - both terminate well inside it.
     Q-ROUNDED-OVERFLOW-ORDER   Whether a `ROUNDED` store whose rounded result exceeds
                                the receiver's capacity discards the carry AFTER
                                rounding or BEFORE it. This layer rounds first and then
                                discards, silently. ISO leaves the receiver's content
                                undefined when a size error occurs with no `ON SIZE
                                ERROR` phrase, and there is no such phrase anywhere in
-                               the twelve programs, so the boundary is open until the
-                               oracle measures it. The alternative order is recorded
-                               under `xfail(strict=True)`. This id is registered by
+                               the twelve programs, so ISO alone could not settle it.
+                               MEASURED: `compute rounded = 99.5` into `pic 99` stores
+                               00, and `= 105` stores 05, so the compiled program
+                               ROUNDS FIRST and then discards the high-order carry -
+                               and with an `ON SIZE ERROR` phrase the receiver is left
+                               UNTOUCHED instead. This id is registered by
                                this file and belongs in
                                `docs/migration/ambiguity-resolutions.md`; it is
                                deliberately NOT given a number, because the numeric
@@ -149,8 +169,10 @@ retrievable from the requirements via `review_prompt`.
 
 from __future__ import annotations
 
+import ast
 import decimal
-from decimal import Decimal
+import pathlib
+from decimal import ROUND_HALF_UP, Decimal
 
 import pytest
 
@@ -168,7 +190,7 @@ pytestmark = pytest.mark.arithmetic
 # ---------------------------------------------------------------------------
 
 #: The intermediate-precision question, MEASURED for the `cobol` layer against
-#: GnuCOBOL 3.2.0 [acas_posting/cobol/arithmetic.py:L96]. Evaluate at extended
+#: GnuCOBOL 3.2.0 [acas_posting/cobol/arithmetic.py INTERMEDIATE_PRECISION]. Evaluate at extended
 #: precision, quantize once at the store.
 Q_INTERMEDIATE_PRECISION: str = "Q-2"
 
@@ -1139,7 +1161,7 @@ def test_a_rounded_call_does_not_mutate_the_intermediate_context() -> None:
     All three entry points into the rounding path are exercised, one per verb form the
     census uses: a bare store, a COMPUTE as at [general/gl051.cbl:L796], and a DIVIDE
     as at [general/gl080.cbl:L328]. The context is declared at
-    [acas_posting/cobol/arithmetic.py:L102].
+    [acas_posting/cobol/arithmetic.py INTERMEDIATE_CONTEXT].
     """
     rounding_before = arithmetic.INTERMEDIATE_CONTEXT.rounding
     precision_before = arithmetic.INTERMEDIATE_CONTEXT.prec
@@ -1169,7 +1191,7 @@ def test_the_rounding_vocabulary_has_exactly_two_members() -> None:
     """Two store directions, no third, and the mapping is stated in one place.
 
     COBOL has exactly two: with `ROUNDED` and without. `ROUNDING_DIRECTIONS`
-    [acas_posting/cobol/arithmetic.py:L78] is that vocabulary as immutable data rather
+    [acas_posting/cobol/arithmetic.py ROUNDING_DIRECTIONS] is that vocabulary as immutable data rather
     than as a branch, which is what lets this test assert the correspondence between
     the COBOL keyword and the `decimal` mode directly instead of inferring it from
     behaviour.
@@ -1643,8 +1665,8 @@ def test_the_intermediate_context_carries_extended_precision() -> None:
     Extended precision is what sites 2 and 5 need - [general/gl051.cbl:L796] and
     [irs/irs030.cbl:L1562-L1563] are three-level nested expressions whose inner
     quotient recurs - and the context that supplies it is declared at
-    [acas_posting/cobol/arithmetic.py:L102] with its digit count at
-    [acas_posting/cobol/arithmetic.py:L97].
+    [acas_posting/cobol/arithmetic.py INTERMEDIATE_CONTEXT] with its digit count at
+    [acas_posting/cobol/arithmetic.py INTERMEDIATE_PRECISION].
     """
     assert arithmetic.INTERMEDIATE_PRECISION >= 60
     assert arithmetic.INTERMEDIATE_CONTEXT.prec == arithmetic.INTERMEDIATE_PRECISION
@@ -1732,7 +1754,7 @@ def test_site_2_quantizes_exactly_once_at_the_store() -> None:
     # ambient context happens to carry, so a bare `-` here would assert a property of
     # the caller's context rather than of the two measured figures. `intermediate` is
     # the layer's own escape hatch for an expression with no receiving field
-    # (acas_posting/cobol/arithmetic.py:L359) and evaluates it exactly (R-2).
+    # (acas_posting/cobol/arithmetic.py intermediate) and evaluates it exactly (R-2).
     assert once != per_sub_expression
     assert arithmetic.intermediate(lambda: once - per_sub_expression) == Decimal("0.43")
 
@@ -1796,35 +1818,110 @@ def test_sites_1_and_4_quantize_once_across_a_multiply_then_divide() -> None:
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        f"{Q_INTERMEDIATE_PRECISION}: the intermediate-precision question. The "
-        "cobol layer records it as MEASURED against GnuCOBOL 3.2.0 "
-        "(acas_posting/cobol/arithmetic.py:L96) - evaluate at extended precision, "
-        "quantize ONCE at the store - so site 2 stores 17.51 for these inputs. "
-        "This test asserts the REJECTED alternative, the reduced-precision "
-        "per-sub-expression penny of 17.08, and must therefore FAIL. It is a "
-        "tripwire, not a wish: if the arithmetic layer is ever changed to quantize "
-        "sub-expressions, this xfail turns into an XPASS and strict=True fails the "
-        "suite instead of letting the change pass unnoticed (R-4). The strict "
-        "oracle build is now available, but the mandated scenario set does not place "
-        "this compound expression on the precision boundary. The focused capture "
-        "must still be recorded in the ambiguity register before this alternative "
-        "can be retired (R-6)."
-    ),
-)
-def test_site_2_does_not_store_the_reduced_precision_penny() -> None:
-    """The reduced-precision alternative for site 2, recorded as a strict xfail.
+def test_site_2_stores_the_extended_precision_penny() -> None:
+    """Site 2's penny, MEASURED on the compiled oracle (finding F-19).
 
-    [general/gl051.cbl:L796] with 117.55 at 17.50%. See the xfail reason for why this
-    expectation is recorded rather than asserted.
+    [general/gl051.cbl:L796] with 117.55 at 17.50%. The two readings of the compound
+    statement are:
+
+      * ONE quantize, at the store. The divisor is `1.175` exactly, the quotient
+        `100.0425531...` repeats, the exact VAT is `17.5074468...`, and the single store
+        into the receiver rounds it to **17.51**. This is the shape the language fixes -
+        a `ROUNDED` phrase belongs to the STORE - and it is what
+        `acas_posting.cobol.arithmetic` implements.
+      * A quantize per sub-expression. Rounding the divisor to the receiver's scale
+        gives `1.18`, the quotient `99.62`, and the stored VAT **17.93** - a difference
+        of forty-two pence on one posting.
+
+    This test used to assert the REJECTED alternative under `xfail(strict=True)`, over
+    the literal 17.08, as a tripwire against the arithmetic layer being changed to
+    quantize sub-expressions. IT COULD NOT HAVE FIRED: quantizing sub-expressions
+    produces 17.93, which is computed below rather than quoted, so the alarm would have
+    stayed silent through exactly the change it was watching for - the marker only fires
+    on a layer that produces 17.08, which no reading of the statement does. The tripwire
+    is kept and the guess is gone: the measured figure is asserted, the alternative is
+    DERIVED and asserted, and 17.08 is refused on both.
+
+    THE MEASUREMENT. GnuCOBOL 3.2.0, `cobc -x -free`, no dialect flag and no arithmetic
+    directive, reproducing gl051's own declarations verbatim - `ws-vat-rate` is
+    `pic 99v99 comp` [general/gl051.cbl:L183] and both amounts are `pic s9(8)v99`
+    [copybooks/wspost.cob:L23,L28]:
+
+        compute vat-amount rounded =
+            post-amount - (post-amount / ((ws-vat-rate + 100) / 100)).
+        subtract vat-amount from post-amount.
+
+        117.55 @ 17.50 -> vat-amount = +00000017.51,  post-amount = +00000100.04
+       1000.00 @ 17.50 -> vat-amount = +00000148.94,  post-amount = +00000851.06
+
+    and, for completeness, site 1 [general/gl051.cbl:L791] under the same declarations:
+
+        117.55 @ 17.50 -> vat-amount = +00000020.57
+         12.30 @ 17.50 -> vat-amount = +00000002.15
+
+    So the compiler evaluates the whole expression at extended precision and quantizes
+    ONCE, at the store - which is what `acas_posting/cobol/arithmetic.py` implements and
+    records above `INTERMEDIATE_PRECISION`.
+
+    THE REJECTED READING, ALSO MEASURED. The same probe forced the reduced-precision
+    reading by hand, quantizing each sub-expression into the receiving field as it went:
+
+        (17.50 + 100) / 100 into s9(8)v99 rounded ->  1.18
+        117.55 / 1.18                             -> 99.62
+        117.55 - 99.62                            -> 17.93
+
+    which is 17.93, not 17.51 - and not 17.08 either. So the alternative is refuted by
+    measurement rather than by argument, and the body below derives it independently of
+    the probe so the two agree for a reason rather than by transcription.
+
+    Q-2's two halves are both closed, by different means and recorded as such in
+    `docs/migration/ambiguity-resolutions.md`: the SHAPE by the language, the NUMBER OF
+    INTERMEDIATE DIGITS by this measurement. Neither figure below sits near the
+    precision limit in any case - both terminate well inside it.
     """
-    assert arithmetic.compute(
+    measured = arithmetic.compute(
         _vat_from_gross(GROSS_POST_AMOUNT, GROSS_VAT_RATE),
         GL_VAT_AMOUNT,
         rounded=True,
-    ) == Decimal("17.08")
+    )
+
+    # THE MEASURED FIGURE.
+    assert measured == Decimal("17.51"), (
+        f"site 2 stored {measured} for 117.55 at 17.50%. GnuCOBOL 3.2.0 measures "
+        f"17.51 - it evaluates the whole expression at extended precision and "
+        f"quantizes once, at the store. A different figure here means the arithmetic "
+        f"layer has started quantizing sub-expressions, which rule R-6 settles "
+        f"against."
+    )
+
+    #  AND THE REJECTED ALTERNATIVE, COMPUTED rather than quoted, so the contrast
+    #  cannot go stale and no reader has to trust a literal. Each sub-expression is
+    #  rounded to the receiver's own scale before the next one consumes it - which is
+    #  what "quantize per sub-expression" means.
+    scale = Decimal(1).scaleb(-GL_VAT_AMOUNT.scale)
+    divisor = ((GROSS_VAT_RATE + 100) / 100).quantize(scale, rounding=ROUND_HALF_UP)
+    quotient = (GROSS_POST_AMOUNT / divisor).quantize(scale, rounding=ROUND_HALF_UP)
+    per_sub_expression = (GROSS_POST_AMOUNT - quotient).quantize(
+        scale, rounding=ROUND_HALF_UP
+    )
+
+    assert divisor == Decimal("1.18")
+    assert quotient == Decimal("99.62")
+    assert per_sub_expression == Decimal("17.93")
+
+    #  THE REFUTATION, AND THE TRIPWIRE. The two readings differ by forty-two pence on
+    #  one posting, and the shipped layer takes the measured one: a change to
+    #  per-sub-expression quantization makes `measured` equal `per_sub_expression` and
+    #  fails this line, which is the alarm the retired strict marker promised and could
+    #  not deliver.
+    assert measured != per_sub_expression
+    assert per_sub_expression - measured == Decimal("0.42")
+
+    #  And 17.08 - the figure that retired marker actually asserted - is NEITHER
+    #  reading, which is precisely why it could never have fired on the change it was
+    #  watching for. Kept as an explicit refusal on both values.
+    assert measured != Decimal("17.08")
+    assert per_sub_expression != Decimal("17.08")
 
 
 # ---------------------------------------------------------------------------
@@ -2136,26 +2233,237 @@ def test_a_rounded_store_that_overflows_is_silent_and_keeps_low_order_digits() -
     assert arithmetic.store(Decimal("127.5"), SCYCLE, rounded=True) == -128
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        f"{Q_ROUNDED_OVERFLOW_ORDER}: whether an overflowing ROUNDED store discards "
-        "the high-order carry AFTER rounding or BEFORE it. This layer rounds first "
-        "and then discards, so 99.5 into `pic 99` holds 0 - which the sibling test "
-        "asserts as the reproduction. The alternative order would hold 99, and this "
-        "test asserts THAT, so it must FAIL. It is recorded rather than asserted "
-        "because ISO leaves the receiver's content undefined when a size error "
-        "occurs with no ON SIZE ERROR phrase, and there is no such phrase anywhere "
-        "in the twelve in-scope programs, so only the compiled oracle can settle the "
-        "order. The oracle now builds, but no mandated scenario drives this overflow "
-        "boundary, so the focused experiment remains open (R-6). If the layer is "
-        "ever changed to the other order this xfail becomes an XPASS and strict=True "
-        "fails the suite (R-4)."
+def test_an_overflowing_rounded_store_rounds_first_then_discards_the_carry() -> None:
+    """The overflow ORDER, MEASURED on the compiled oracle (finding F-19).
+
+    `99.5` into `77 a pic 99` [general/gl080.cbl:L183]. ISO leaves the receiver's
+    content undefined when a size error occurs with no `ON SIZE ERROR` phrase, and there
+    is no such phrase anywhere in the twelve in-scope programs, so only the compiled
+    program could settle whether the high-order carry is discarded AFTER the rounding or
+    BEFORE it. The two orders give different stored values, so the question was
+    observable: round-then-discard holds 00, discard-then-round holds 99.
+
+    THE MEASUREMENT. GnuCOBOL 3.2.0, `cobc -x -free`, default flags, `01 ws-a pic 99`:
+
+        compute ws-a rounded = 99.5    -> ws-a = 00
+        compute ws-a         = 99.5    -> ws-a = 99
+        compute ws-a rounded = 99.4    -> ws-a = 99
+        compute ws-a rounded = 100     -> ws-a = 00
+        compute ws-a rounded = 105     -> ws-a = 05
+        compute ws-a rounded = 199.5   -> ws-a = 00
+        compute ws-a         = 199.5   -> ws-a = 99
+
+    So ROUND FIRST, THEN DISCARD. 99.5 rounds to 100 and the high-order 1 is then lost,
+    leaving 00; the un-`ROUNDED` form of the same statement truncates to 99 and never
+    overflows at all. 99.4 rounded stays 99, which shows that it is the CARRY and not
+    the rounding keyword that causes the loss. 105 rounded holding 05 shows the
+    discarding is of high-order DIGITS rather than a saturation to the maximum.
+
+    FOR CONTRAST, and to show why the absence of the phrase matters: with an explicit
+    `ON SIZE ERROR` the receiver is left UNTOUCHED -
+
+        move 42 to ws-a
+        compute ws-a rounded = 99.5 on size error ...   -> ws-a = 42
+
+    - so a program that wrote the phrase would keep 42 where the frozen programs, which
+    do not write it, keep 00. And an overflowing `MOVE` rather than `COMPUTE` truncates:
+    `move 99.5` holds 99 and `move 199.5` holds 99.
+
+    This is what `acas_posting/cobol/arithmetic.py` implements, so the measurement
+    confirms it. The former `xfail(strict=True)` asserted the REJECTED order as a
+    tripwire; the tripwire is kept by asserting the rejected value NOT to hold.
+    """
+    # THE MEASURED ORDER: round to 100, then lose the high-order digit.
+    assert arithmetic.store(Decimal("99.5"), WS_A, rounded=True) == 0, (
+        "an overflowing ROUNDED store into `pic 99` must hold 0: GnuCOBOL 3.2.0 "
+        "rounds 99.5 to 100 and then discards the high-order carry."
+    )
+    # AND NOT the discard-then-round order, which would hold 99.
+    assert arithmetic.store(Decimal("99.5"), WS_A, rounded=True) != 99
+
+    # The un-ROUNDED form of the same store never overflows, so it holds 99 - which is
+    # what makes the two orders distinguishable at all.
+    assert arithmetic.store(Decimal("99.5"), WS_A) == 99
+
+    # It is the CARRY, not the keyword: 99.4 rounds to 99 and fits.
+    assert arithmetic.store(Decimal("99.4"), WS_A, rounded=True) == 99
+
+    # High-order DIGITS are discarded, not saturated to the maximum.
+    assert arithmetic.store(Decimal("105"), WS_A, rounded=True) == 5
+    assert arithmetic.store(Decimal("199.5"), WS_A, rounded=True) == 0
+
+
+# ---------------------------------------------------------------------------
+#  SECTION 15  -  THE CENSUS, ASSERTED AGAINST THE SHIPPED PRODUCTION CODE
+#
+#  Sections 7 to 14 assert what the FIVE SITES DO. This section asserts that the
+#  migration contains exactly those five and no others - a claim about the shipped
+#  tree rather than about a transcribed table, and therefore the only assertion in
+#  this file that can catch a sixth `ROUNDED` store being added, one of the five
+#  being deleted, or one being quietly turned into a truncating store.
+#
+#  IT IS NEEDED BECAUSE SECTION 7 CANNOT DO IT. `ROUNDED_SITES` is declared data,
+#  transcribed by hand from the frozen source, so `len(ROUNDED_SITES) == 5` proves
+#  only that the transcription still has five rows. Between the two, the census is
+#  closed at both ends: five rows in the table, five `rounded=True` arguments in the
+#  package.
+#
+#  METHOD, AND WHY IT IS AN AST WALK RATHER THAN AN IMPORT. The tier contract in
+#  this module's docstring holds: nothing here imports `acas_posting.programs` or
+#  `acas_posting.dal`, opens a connection or spawns a subprocess. The three program
+#  modules are read as TEXT and parsed with `ast`, which is stdlib, exact and
+#  side-effect free - importing them would pull `acas_posting.dal.facade` into an
+#  arithmetic-tier test and break the layering Agent Action Plan section 0.4.3 sets
+#  out for `tests/arithmetic/*`. A textual `grep` would be weaker: it would count a
+#  `rounded=True` inside a docstring or a comment, and the AST cannot.
+#
+#  WHAT IT DELIBERATELY DOES NOT ASSERT. Not the line numbers - those move whenever
+#  a comment is reflowed, and a test that fails on a reflow teaches a reader to
+#  delete the test. The (module, enclosing function) pair is the stable identity,
+#  and it is what the plan's own census is phrased in terms of.
+# ---------------------------------------------------------------------------
+
+
+#: The FIVE `rounded=True` call sites the migration is permitted to contain, as
+#: `(module path relative to the package root, enclosing function, the COBOL locator
+#: it reproduces)`. Ordered by the site numbering used throughout this file: sites 1
+#: and 2 are `gl051`'s, site 3 is `gl080`'s, sites 4 and 5 are `irs030`'s.
+PRODUCTION_ROUNDED_SITES: tuple[tuple[str, str, str], ...] = (
+    ("programs/gl051_batch_control_check.py", "_net", "general/gl051.cbl:L791"),
+    ("programs/gl051_batch_control_check.py", "_gross", "general/gl051.cbl:L796"),
+    ("programs/gl080_end_of_cycle.py", "_gl080_main", "general/gl080.cbl:L328"),
+    ("programs/irs030_posting.py", "_net_section", "irs/irs030.cbl:L1551"),
+    (
+        "programs/irs030_posting.py",
+        "_gross_section",
+        "irs/irs030.cbl:L1562-L1563",
     ),
 )
-def test_overflowing_rounded_store_does_not_discard_the_carry_before_rounding() -> None:
-    """The alternative overflow order, recorded as a strict xfail.
 
-    `99.5` into `77 a pic 99` [general/gl080.cbl:L183]. See the xfail reason.
+
+def _package_root():
+    """Return the installed `acas_posting` package directory.
+
+    Located through the one module this file already imports rather than through a
+    path relative to the test file, so the census reads the code that would actually
+    run - an editable install and a built wheel both resolve to the same place.
+
+    Returns:
+        The package directory as a `pathlib.Path`.
     """
-    assert arithmetic.store(Decimal("99.5"), WS_A, rounded=True) == 99
+    return pathlib.Path(arithmetic.__file__).resolve().parent.parent
+
+
+def _rounded_true_sites():
+    """Walk every module in the package and return each `rounded=True` call site.
+
+    Returns:
+        A sorted tuple of `(module path relative to the package root, enclosing
+            function name)` pairs, one per `rounded=True` keyword argument found in
+            an actual call expression. Comments and docstrings cannot contribute,
+            because the walk is over the parsed tree and not over the text.
+    """
+    root = _package_root()
+    found: list[tuple[str, str]] = []
+
+    for module_path in sorted(root.rglob("*.py")):
+        tree = ast.parse(module_path.read_text(encoding="utf-8"))
+
+        # Map each node to the nearest enclosing function by walking the tree with
+        # the current function name carried down, which `ast.walk` cannot do because
+        # it discards structure.
+        def visit(node: ast.AST, enclosing: str) -> None:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                enclosing = node.name
+            if isinstance(node, ast.Call):
+                for keyword in node.keywords:
+                    if (
+                        keyword.arg == "rounded"
+                        and isinstance(keyword.value, ast.Constant)
+                        and keyword.value.value is True
+                    ):
+                        found.append(
+                            (
+                                module_path.relative_to(root).as_posix(),
+                                enclosing,
+                            )
+                        )
+            for child in ast.iter_child_nodes(node):
+                visit(child, enclosing)
+
+        visit(tree, "<module>")
+
+    return tuple(sorted(found))
+
+
+def test_the_package_contains_exactly_five_rounded_true_call_sites() -> None:
+    """R-2, asserted against the shipped tree: five `rounded=True` arguments, no more.
+
+    Agent Action Plan section 0.6.1, verbatim: "exactly five `ROUNDED` sites exist in
+    the entire in-scope cycle - [general/gl080.cbl:L328], [general/gl051.cbl:L791],
+    [general/gl051.cbl:L796], [irs/irs030.cbl:L1551], [irs/irs030.cbl:L1562]. Every
+    other store truncates."
+
+    A sixth site would mean a rounding the frozen source has not got, which under R-4
+    is a defect FIXED and therefore a failure. A fifth missing would mean a rounding
+    the frozen source does have, silently truncating instead - which corrupts a
+    posted figure. Both directions fail here.
+    """
+    measured = _rounded_true_sites()
+    expected = tuple(
+        sorted((module, function) for module, function, _locator in PRODUCTION_ROUNDED_SITES)
+    )
+
+    assert measured == expected, (
+        "the package's `rounded=True` census has drifted from the five sites Agent "
+        f"Action Plan section 0.6.1 names: measured {measured!r}"
+    )
+    assert len(measured) == len(ROUNDED_SITES) == 5
+
+
+def test_every_rounded_site_lives_in_a_program_module() -> None:
+    """No `rounded=True` outside `programs/`, and none in the semantics layer.
+
+    The split is the one that makes this file's own tier contract possible:
+    `acas_posting/cobol/arithmetic.py` PASSES `rounded` through - eleven times, as
+    `rounded=rounded` - and never DECIDES it. Rounding is therefore a property of a
+    frozen statement, never of a receiver, a field or a module-wide mode; section 9
+    asserts the same thing behaviourally.
+
+    A `rounded=True` in `cobol/`, `records/` or `dal/` would mean the decision had
+    migrated out of the accounting layer, and the count in the sibling test could
+    stay at five while the semantics changed underneath it.
+    """
+    for module, _function in _rounded_true_sites():
+        assert module.startswith("programs/"), module
+
+    # And each of the three modules carries the number the plan's census gives it:
+    # two for `gl051`, one for `gl080`, two for `irs030`.
+    per_module: dict[str, int] = {}
+    for module, _function in _rounded_true_sites():
+        per_module[module] = per_module.get(module, 0) + 1
+
+    assert per_module == {
+        "programs/gl051_batch_control_check.py": 2,
+        "programs/gl080_end_of_cycle.py": 1,
+        "programs/irs030_posting.py": 2,
+    }
+
+
+def test_each_production_site_quotes_the_frozen_locator_it_reproduces() -> None:
+    """R-5: every one of the five sites is traceable to its `[path:Lnnn]` in the file.
+
+    The locator is asserted to be present in the module's TEXT rather than at a line
+    offset, because the point is traceability and not layout: a reader who greps the
+    module for `general/gl051.cbl:L791` must land on the store that reproduces it.
+    """
+    root = _package_root()
+
+    for module, _function, locator in PRODUCTION_ROUNDED_SITES:
+        text = (root / module).read_text(encoding="utf-8")
+        # The compound IRS locator is written as a span in the census; the module
+        # quotes the statement's first line, which is how the frozen source numbers
+        # a continued statement.
+        needle = locator.split("-")[0]
+        assert needle in text, (module, needle)
+        assert loader.SOURCE_LOCATOR_PATTERN.match(needle), needle

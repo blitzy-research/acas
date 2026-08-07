@@ -576,7 +576,9 @@ WRITE_ONLY_COLUMNS: Final[Mapping[str, str]] = MappingProxyType(
 
 #: The six fields whose sign is destroyed at the bridge boundary, before any SQL
 #: executes - the Agent Action Plan anomaly 11 family, and dictionary anomaly reference
-#: ``A-11`` with open ambiguity ``Q-3``.
+#: ``A-11``. The QUESTION of what the unsigned column then holds - ``Q-3`` - has been
+#: measured on the compiled oracle and is no longer published as open; the ANOMALY
+#: stays, because the lost debit-versus-credit sense was not restored by measuring it.
 SIGN_LOSS_HOST_VARIABLES: Final[Mapping[str, str]] = MappingProxyType(
     {
         "PUINVOICE-REC.IH-DAT": (
@@ -1735,7 +1737,7 @@ def citations() -> tuple[str, ...]:
     """Return every source locator this module was written from.
 
     Published so the traceability document can be generated rather than maintained, in
-    the same shape :meth:`acas_posting.records.file_access.FileAccess.citations` uses.
+    the same shape :func:`acas_posting.records.file_access.citations` uses.
     """
     record_citations = tuple(
         f"{dictionary_key_for(owner, attribute)} :: {cite_for(owner, attribute)}"

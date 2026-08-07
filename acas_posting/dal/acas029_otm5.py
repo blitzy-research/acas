@@ -424,7 +424,7 @@ rather than in whatever context the importing application happens to be carrying
 without this the thirty-character image would be a property of the caller's ambient
 precision instead of the picture at [common/otm5MT.cbl:L227], and two processes would
 not agree on it (rule R-2). The sibling handler states the identical policy at
-``acas_posting/dal/acasirsub4_irs_posting.py:L387``.
+``acas_posting/dal/acasirsub4_irs_posting.py _EDIT_FRACTION_DIGITS``.
 """
 
 with decimal.localcontext(_EDIT_CONTEXT):
@@ -461,7 +461,7 @@ def mysql_edit(value: decimal.Decimal | int) -> str:
     # result would need more digits than `prec` allows. Measured: with the ambient
     # precision at nine digits this function raised rather than rendering
     # `decimal(9,2)`. The sibling handler wraps its own renderer the same way at
-    # `acas_posting/dal/acasirsub4_irs_posting.py:L411`.
+    # `acas_posting/dal/acasirsub4_irs_posting.py _EDIT_CONTEXT`.
     with decimal.localcontext(_EDIT_CONTEXT):
         quantised = decimal.Decimal(value).quantize(
             _EDIT_FRACTION_QUANTUM, rounding=decimal.ROUND_DOWN

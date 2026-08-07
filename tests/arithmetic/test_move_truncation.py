@@ -71,20 +71,26 @@ exactly that picture. Every assertion carries the ``[path:Lnnn]`` it came from.
 **R-6 - compiled behaviour is the tie-breaker.** Expected values come from the audited
 semantics layer, which in turn records what was measured against the compiled oracle.
 Where a question has no compiled answer the assertion is marked
-``xfail(strict=True)`` against a NAMED question id, so the suite stays green today and
-turns RED the moment somebody makes the un-arbitrated reading come true.
+``xfail(strict=True)`` against a NAMED question id, so the suite stays green while the
+question is open and turns RED the moment somebody makes the un-arbitrated reading come
+true. Every question this file names has since been measured, so the policy is recorded
+here and no longer exercised: what stands in its place is an assertion of the reading the
+compiler produced, plus an assertion AGAINST the one it refuted.
 
 Section 0.8.4 also binds: there is no timing assertion and no performance measurement
 anywhere in this file.
 
 ------------------------------------------------------------------------------------
-THE FOUR QUESTION IDS THIS FILE MARKS ``xfail(strict=True)``
+THE FOUR QUESTION IDS THIS FILE OWNS, ALL FOUR NOW MEASURED
 ------------------------------------------------------------------------------------
-Each id is the one ``acas_posting.cobol.move`` itself publishes, not a new label. In
-every case the assertion states the NAIVE reading - what an engineer would guess before
-consulting the compiler - and the audited module contradicts it, so the test fails today
-and reports ``xfailed``. Because ``strict=True``, the day the naive reading starts
-holding, the test XPASSes and the suite goes RED. That is the R-4/R-6 lock working.
+Each id is the one ``acas_posting.cobol.move`` itself publishes, not a new label. Each
+used to be asserted as its NAIVE reading under ``xfail(strict=True)`` - what an engineer
+would guess before consulting the compiler - so that the suite could stay green while
+the question was open. All four have since been measured on GnuCOBOL 3.2.0 (finding
+F-19), THE NAIVE READING WAS REFUTED IN EVERY CASE, and each test now asserts the
+measurement and the refutation. There is no ``xfail`` left in this file, and a change
+back towards a naive reading fails by name rather than passing unnoticed. That is the
+same R-4/R-6 lock, working from the answer rather than from the question.
 
 * **Q-9  - ``MOVE SPACE`` into a numeric receiver.** INEXPRESSIBLE: measured as a
   GnuCOBOL 3.2 compile error, so the statement cannot exist in the compiled system and
@@ -795,37 +801,81 @@ class TestReferenceModificationIsOneBasedOnBothSides:
         # its own span and does not spill into the neighbouring positions.
         assert move.ref_mod_into("ABCDEFGH", 3, 4, "XY") == "ABXY  GH"
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=move.ReferenceModificationOutOfRange,
-        reason=(
-            "Q-10, reference modification past the end of the item: UNREPRODUCIBLE. "
-            "The naive reading asserted here is that the range is clamped to whatever "
-            "fits. It is not: a literal out-of-range range does not compile under "
-            "GnuCOBOL 3.2 ('error: length of ... out of bounds'), and a computed one "
-            "reads ADJACENT STORAGE, which a Python str does not have. So there is no "
-            "value to reproduce and move.ref_mod refuses instead of guessing. strict "
-            "means that if clamping is ever introduced this XPASSes and the suite goes "
-            "RED (R-4, R-6)."
-        ),
-    )
-    def test_a_range_past_the_end_is_not_clamped_q10(self) -> None:
-        # `(9:4)` on a ten-character item wants characters 9 to 12 and only 9 and 10
-        # exist. The clamped reading would be "25".
-        assert move.ref_mod(RUN_DATE_TEXT, 9, 4) == "25"
+    #  Q-10 IS MEASURED, AND THE MEASUREMENT CONFIRMS THE REFUSAL (finding F-19).
+    #
+    #  It was recorded as unreproducible on the reasoning that a computed out-of-range
+    #  range "reads ADJACENT STORAGE, which a Python str does not have". A focused probe
+    #  now shows that is exactly what happens. GnuCOBOL 3.2.0, `cobc -x -free`, default
+    #  flags (so no `-fec=bound-ref-mod` runtime check), with a sentinel placed
+    #  immediately after the item in the SAME group so the adjacency is known:
+    #
+    #      01 the-group.
+    #         05 src-text  pic x(10) value "ABCDEFGHIJ".
+    #         05 sentinel  pic x(10) value "##########".
+    #
+    #      src-text(8:5)  -> H I J # #     <- two bytes of the SENTINEL
+    #      src-text(9:4)  -> I J # #       <- two bytes of the SENTINEL
+    #      src-text(11:2) -> # #           <- entirely inside the SENTINEL
+    #      src-text(0:3)  -> NUL A B       <- one byte BEFORE the item
+    #
+    #  So the value is whatever the program's storage layout happens to place next to the
+    #  item - not a clamp, not spaces, and not an error. It is unreproducible in a Python
+    #  `str` for the reason the refusal states, and it is unreproducible in any
+    #  representation that does not model the whole record's neighbours. A LITERAL
+    #  out-of-range range does not even compile ("error: length of ... out of bounds"),
+    #  so the frozen programs cannot contain one.
+    #
+    #  `move.ref_mod` therefore continues to REFUSE, and these two tests assert the
+    #  refusal - which is the reproduction - instead of asserting a value. Rule R-6 is
+    #  satisfied by the measurement being on record; rule R-4 by nothing being invented.
+    #
+    #  ASSERTED AS A REFUSAL RATHER THAN MARKED XFAIL, and the difference matters. A
+    #  strict xfail over `== "25"` could never do anything but fail: the outcome is
+    #  settled, so the marker promised an alarm that could not ring while reporting a
+    #  settled contract as a pending question. Asserting the refusal locks the contract
+    #  instead - the day someone introduces clamping, these tests FAIL, which is the
+    #  alarm the marker was reaching for.
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=move.ReferenceModificationOutOfRange,
-        reason=(
-            "Q-10 again, on the receiving side and at the other end of the item: the "
-            "naive reading is that offset zero means the first character, as a "
-            "0-based language would have it. Reference modification is 1-BASED, so "
-            "zero is not a position at all and there is no compiled behaviour for it."
-        ),
-    )
-    def test_offset_zero_is_not_the_first_character_q10(self) -> None:
-        assert move.ref_mod(RUN_DATE_TEXT, 0, 2) == "21"
+    def test_a_range_past_the_end_reads_neighbours_and_is_refused_q10(self) -> None:
+        """`(9:4)` on a ten-character item is refused, because its value is adjacency.
+
+        The clamped reading would be "25" and the compiler does not clamp: it hands back
+        the two characters that exist followed by two bytes of whatever sits next in
+        storage. See the measurement above.
+        """
+        with pytest.raises(move.ReferenceModificationOutOfRange) as raised:
+            move.ref_mod(RUN_DATE_TEXT, 9, 4)
+
+        # The refusal names its question, so a traceback is self-explaining (rule R-5).
+        assert "Q-10" in str(raised.value)
+        # And it names what it refused, rather than reporting a generic range error.
+        assert "(9:4)" in str(raised.value)
+        # The clamped answer is nowhere in the message: nothing suggests a value.
+        assert "25" not in str(raised.value).split("Q-10")[0]
+
+        # NOT clamped, which is the specific alternative the measurement rules out.
+        assert RUN_DATE_TEXT[8:] == "25"
+        # And the in-range range at the same end IS available, so the refusal is about
+        # the overrun and not about the position.
+        assert move.ref_mod(RUN_DATE_TEXT, 9, 2) == "25"
+
+    def test_offset_zero_reads_before_the_item_and_is_refused_q10(self) -> None:
+        """Offset zero is refused: it names the byte BEFORE the item, not the first.
+
+        Reference modification is 1-BASED, so zero is not a position in the item at all.
+        The measurement above shows `src-text(0:3)` returning a NUL followed by the
+        item's first two characters - the byte before the field, read as data. The naive
+        reading - that zero means the first character, as a 0-based language would have
+        it, giving "21" - has no compiled counterpart.
+        """
+        with pytest.raises(move.ReferenceModificationOutOfRange) as raised:
+            move.ref_mod(RUN_DATE_TEXT, 0, 2)
+
+        assert "Q-10" in str(raised.value)
+        assert "(0:2)" in str(raised.value)
+
+        # Offset ONE is the first character, which is what zero is not.
+        assert move.ref_mod(RUN_DATE_TEXT, 1, 2) == "21"
 
     def test_an_out_of_range_range_names_the_question_it_ran_into(self) -> None:
         # Asserted unconditionally, because the FAMILY is contract even where the value
@@ -941,24 +991,54 @@ class TestFigurativeConstants:
         ):
             assert not hasattr(move, banned), banned
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=move.FigurativeSpaceIntoNumeric,
-        reason=(
-            "Q-9, MOVE SPACE into a numeric receiver: INEXPRESSIBLE. The naive reading "
-            "asserted here is that the receiver ends up holding spaces. It cannot: "
-            "GnuCOBOL 3.2 rejects the statement at compile time ('error: MOVE of "
-            "figurative constant SPACE to numeric item used'), so it cannot exist in "
-            "the compiled system and there is no representation to reproduce. strict "
-            "means that inventing one later turns the suite RED (R-4, R-6)."
-        ),
-    )
-    def test_space_into_a_numeric_display_receiver_has_no_representation_q9(
-        self,
-    ) -> None:
+    def test_space_into_a_numeric_display_receiver_is_refused_q9(self) -> None:
+        """Q-9 is SETTLED BY THE COMPILER: the statement cannot be compiled at all.
+
+        MEASURED (finding F-19). GnuCOBOL 3.2.0 was given the statement directly:
+
+            01 num-disp pic 9(5) value 12345.
+            ...
+            move spaces to num-disp.
+
+        and refused it -
+
+            error: MOVE of figurative constant SPACE to numeric item used
+            cobc exit=1
+
+        - with default flags AND with `-frelax-syntax-checks`, so there is no flag
+        combination under which the ACAS build could produce such a program. The
+        statement therefore cannot exist in the compiled system, and there is no
+        runtime representation to reproduce: the compiler diagnostic IS the arbitration
+        rule R-6 asks for. The naive reading - that the receiver ends up holding five
+        spaces - has no compiled counterpart at all.
+
+        `move.move` accordingly RAISES rather than inventing a representation, and this
+        test asserts that refusal - which is the faithful reproduction of a statement
+        that does not compile.
+
+        ASSERTED AS A REFUSAL RATHER THAN MARKED XFAIL. The compiler's rejection is a
+        SETTLED fact, not a pending oracle question, so a strict xfail over `== "     "`
+        could only ever fail and its promised alarm could never ring. The refusal is the
+        contract; asserting it means that inventing a representation later turns this
+        test RED, which is what the marker was reaching for.
+        """
         # `05  WS-Batch-Nos       pic 9(5).` [copybooks/wsbatch.cob:L19] is numeric
         # DISPLAY, which is exactly the shape anomaly A-13's class condition tests.
-        assert move.move(move.SPACE, WS_BATCH_NOS) == "     "
+        with pytest.raises(move.FigurativeSpaceIntoNumeric) as raised:
+            move.move(move.SPACE, WS_BATCH_NOS)
+
+        # The refusal names the receiver and quotes the compiler, so the traceback
+        # carries its own evidence (rule R-5).
+        assert "WS-Batch-Nos" in str(raised.value)
+        assert "GnuCOBOL 3.2" in str(raised.value)
+        # It belongs to the family a program module can catch in one place.
+        assert isinstance(raised.value, move.MovementWithNoCompiledAnswer)
+
+        # ZERO into the same receiver is legal and IS reproduced, so the refusal above
+        # is specific to SPACE and not a refusal of figurative constants in general.
+        # The receiver's carrier is `int`, so the reproduced value is the integer 0 and
+        # not a five-character string - which is the point: SPACE has no such value.
+        assert move.move(move.ZERO, WS_BATCH_NOS) == 0
 
     def test_spaces_in_a_numeric_item_fail_the_class_test_without_raising(self) -> None:
         # THIS PART IS CONTRACT, NOT AMBIGUITY, so it is asserted unconditionally.
@@ -1269,28 +1349,63 @@ class TestEditedValueReachingARealColumn:
         )
         assert legend == "0 : Dykegrove Limited           "
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=move.UnobservableEditedPicture,
-        reason=(
-            "Q-14, an edited picture outside the Z-then-9 shape: UNOBSERVABLE. The "
-            "naive reading asserted here is that it renders anyway. Rule R-6 makes "
-            "compiled behaviour the arbiter and arbitration needs an observable, but "
-            "the only observable this migration has is table state, and every edited "
-            "picture other than sl060's `m` receives into a print line - report "
-            "formatting beyond database effects is out of scope by section 0.2.2. "
-            "So no "
-            "experiment can settle it and none is reproduced. strict means that "
-            "inventing a rendering later turns the suite RED."
-        ),
-    )
-    def test_an_edited_picture_outside_z_then_9_is_not_rendered_q14(self) -> None:
-        # `03  l6-balance          pic z(7)9.99cr blank when zero.`
-        # [general/gl072.cbl:L237] - a real declaration carrying an inserted decimal
-        # point, a `CR` credit symbol and a BLANK WHEN ZERO clause, none of which the
-        # Z-then-9 reader implements. It receives into a print line, never a column.
+    def test_an_edited_picture_outside_z_then_9_is_measured_and_refused_q14(
+        self,
+    ) -> None:
+        """Q-14 is MEASURED, and the rendering is DELIBERATELY not implemented.
+
+        Two statements, and they must not be conflated.
+
+        FIRST, THE MEASUREMENT (finding F-19). Q-14 was recorded as unobservable on the
+        reasoning that the only observable this migration has is table state and every
+        such picture receives into a print line. That is true of the SCENARIO tier but
+        not of the compiler: a focused probe can render the picture and print the
+        characters. GnuCOBOL 3.2.0, `cobc -x -free`, default flags, on the exact frozen
+        declaration `03 l6-balance pic z(7)9.99cr blank when zero.`
+        [general/gl072.cbl:L237]:
+
+            function length(l6-balance) -> 13
+             123.45 -> "     123.45  "   (two spaces where CR would go)
+            -123.45 -> "     123.45CR"
+               0.00 -> "             "   (thirteen spaces, BLANK WHEN ZERO)
+
+        So the rendering is known, and it is exactly the string this test used to assert
+        as the "naive reading" - the naive reading was right.
+
+        SECOND, IT IS STILL NOT IMPLEMENTED, AND MUST NOT BE. `l6-balance` is a print
+        line item and reaches no column of any in-scope table, and Agent Action Plan
+        section 0.2.2 puts "report formatting beyond database effects" out of scope. So
+        `move.move_to_edited` continues to REFUSE the shape, and this test asserts the
+        refusal. The reason for the refusal has changed - from "nobody knows" to "we
+        know, and it is out of scope" - and that distinction is what is recorded here.
+
+        EITHER WAY THE STRICT XFAIL WAS THE WRONG INSTRUMENT. A marker promises an alarm
+        when an oracle answers; while the question was thought unobservable no oracle
+        ever could answer, so it was a permanent failure describing a settled decision.
+        The REFUSAL is the decision, and asserting it means inventing a rendering later
+        turns this test RED.
+
+        A SEPARATE SHAPE IS REFUSED BY THE COMPILER ITSELF, which is worth recording
+        beside this one: `pic z9z9`, a Z after a 9 before the decimal point, does not
+        compile at all ("error: a Z or * which is before the decimal point cannot follow
+        9"), so that particular malformation cannot exist in the frozen tree.
+        """
         assert L6_BALANCE.is_edited is True
-        assert move.move_to_edited(Decimal("123.45"), L6_BALANCE) == "     123.45  "
+
+        with pytest.raises(move.UnobservableEditedPicture) as raised:
+            move.move_to_edited(Decimal("123.45"), L6_BALANCE)
+
+        # The refusal names the receiver, quotes the picture it will not render, and
+        # names the shape it does implement - so the traceback says what to do next.
+        assert "l6-balance" in str(raised.value)
+        assert "z(7)9.99cr" in str(raised.value)
+        assert isinstance(raised.value, move.MovementWithNoCompiledAnswer)
+
+        # The Z-then-9 shape the layer DOES implement still renders, so the refusal is
+        # specific to the shapes outside it rather than a blanket refusal of editing.
+        assert move.move_to_edited(Decimal("42"), L4_BATCH) == "   42"
+        # And the one edited picture that does reach a column still renders too.
+        assert move.move_to_edited(Decimal("0"), M_EDITED) == "       0"
 
     def test_the_ordinary_dispatch_also_routes_an_edited_receiver(self) -> None:
         # Asserted unconditionally because the ROUTING is contract even where the
@@ -1473,21 +1588,58 @@ class TestStringShapesAreNotUnified:
         assert legend == " " * 32
         assert pointer == 0
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "Q-11, a STRING pointer beyond the receiver. The naive reading asserted "
-            "here is that the pointer still advances by the source length even though "
-            "nothing was written, which is what an implementation that advanced before "
-            "range-checking would do. The measured behaviour is a complete no-op: "
-            "nothing written AND the pointer unchanged. strict means that if the "
-            "pointer ever starts advancing this XPASSes and the suite goes RED, which "
-            "matters because shape two feeds the pointer to the next statement (R-6)."
-        ),
-    )
-    def test_a_pointer_beyond_the_receiver_does_not_advance_q11(self) -> None:
-        _, pointer = move.string_into(" " * 32, ("XY",), pointer=33)
-        assert pointer == 35
+    def test_a_pointer_beyond_the_receiver_leaves_it_unchanged_q11(self) -> None:
+        """Q-11 is MEASURED: a STRING past the receiver is a complete no-op.
+
+        The question was whether the pointer still ADVANCES by the source length when
+        nothing could be written - which is what an implementation that advanced before
+        range-checking would do - or whether the whole statement is inert. It matters
+        because the pointer feeds the next STRING statement, so an advancing pointer
+        would shift everything after it.
+
+        THE MEASUREMENT (finding F-19). GnuCOBOL 3.2.0, `cobc -x -free`, default flags,
+        `01 recv pic x(5)` pre-filled with `-----`:
+
+            move 9 to ptr;  string "XY" ... into recv with pointer ptr
+                -> overflow RAISED, recv = "-----" (untouched), ptr = 9 (UNCHANGED)
+
+            move 1 to ptr;  string "AB" ... into recv with pointer ptr
+                -> no overflow, recv = "AB---", ptr = 3
+
+            move 5 to ptr;  string "PQ" ... into recv with pointer ptr
+                -> overflow RAISED, recv = "AB--P" (ONE character written), ptr = 6
+
+        So a pointer entirely beyond the receiver writes NOTHING and leaves the pointer
+        exactly where it was; a partial fit writes what fits and advances by that much.
+        Both are what `move.string_into` implements, so the measurement confirms it.
+
+        This test used to assert the REJECTED reading - the pointer advancing to 35 -
+        under `xfail(strict=True)`. Since Q-11 is measured the outcome is settled, so
+        that marker could only ever fail, and the alarm it promised - "if the pointer
+        ever starts advancing, this XPASSes" - is delivered better by a plain assertion,
+        which goes RED on exactly the same change and says what is wrong. So the
+        measured behaviour is asserted, and the rejected value is asserted NOT to hold
+        so a regression in that direction still fails here by name.
+        """
+        receiver, pointer = move.string_into(" " * 32, ("XY",), pointer=33)
+
+        # Entirely beyond the receiver: nothing written, pointer UNCHANGED.
+        assert receiver == " " * 32
+        assert pointer == 33, (
+            f"a STRING whose pointer is beyond the receiver left the pointer at "
+            f"{pointer}. GnuCOBOL 3.2.0 leaves it exactly where it was - the whole "
+            f"statement is inert - because it range-checks before it advances."
+        )
+        # NOT the advance-before-checking reading, which would give 33 + 2. Derived from
+        # the source's own length rather than written as a literal.
+        assert pointer != 33 + len("XY")
+        assert pointer != 35
+
+        # A PARTIAL fit writes what fits and advances by that much, which is what makes
+        # the no-op above a distinct behaviour rather than a special case of clamping.
+        partial, partial_pointer = move.string_into(" " * 5, ("PQ",), pointer=5)
+        assert partial == "    P"
+        assert partial_pointer == 6
 
 
 # ---------------------------------------------------------------------------
@@ -1676,4 +1828,3 @@ class TestCensusesMatchTheFrozenSources:
             move.FIGURATIVE_FILL_CHARACTER[  # type: ignore[index]
                 move.Figurative.ZERO
             ] = "9"
-

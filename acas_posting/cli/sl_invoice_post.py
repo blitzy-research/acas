@@ -49,7 +49,7 @@ sl060 reads a clock, both receive the date through linkage.
 Do not "correct" `load07` back to `load08`. The sibling package marker carries
 the same note [acas_posting/cli/__init__.py], and so does the oracle driver
 script - `'sl_invoice_post:sales:G:load07:sales/sales.cbl:L756-L768'`
-[harness/run_cobol_scenario.sh:L251].
+[harness/run_cobol_scenario.sh ACAS_RUN_OPERATION_MAP].
 
 THE ROUTE, VERBATIM FROM THE FROZEN SOURCE
 ::
@@ -79,10 +79,9 @@ Three properties of that paragraph are load-bearing and are preserved exactly:
     `sl060` and the `load00` head of the chain (L759-L762) is not migrated. It is
     recorded as an omission in the footer rather than silently dropped, and the
     oracle driver script documents the same asymmetry under "THE sl830
-    ASYMMETRY" [harness/run_cobol_scenario.sh:L332-L336].
+    ASYMMETRY" [harness/run_cobol_scenario.sh acas_plan_sl_invoice_post].
 
 THE DISPATCH HELPER, AND ITS FIVE PARAMETERS
-============================================
 Both in-scope dispatches go through `load000.`, the FIVE-parameter shape::
 
     L698  load000.
@@ -118,7 +117,6 @@ which the two tests are complementary. The `> 7` case additionally `goback`s,
 which ends the RUN UNIT - the menu program itself stops.
 
 FOUR GATE FORMS, DELIBERATELY NOT HARMONISED  (rule R-4)
-========================================================
 The predicate here is `not = zero`, and it is not the predicate its siblings use.
 The four forms the frozen source actually contains:
 
@@ -139,7 +137,6 @@ behaviour change is a failure: "A defect reproduced is correct; a defect fixed i
 a failure." Each form is reproduced where the source puts it.
 
 THE FOURTH DIVERGENCE: THE GATE IS LIVE ONLY FOR CODES 1 THROUGH 7
-==================================================================
 `sl055` sets `WS-Term-Code` to EIGHT, and only ever to eight. Its one raise site
 is the branch taken when the GnuCOBOL file-existence built-in it calls at
 [sales/sl055.cbl:L336-L337] reports the analysis extract missing::
@@ -176,19 +173,26 @@ Three consequences, all encoded rather than reasoned away:
     because any other code in that band would diverge.
 
 THE CLOCK CONTRACT  (rule R-6)
-==============================
 The run date enters this route ONCE, as the REQUIRED `--run-date` option, and
 reaches the two programs only through the linkage. Nothing here reads a system
 clock, an elapsed-time counter, an environment variable or an entropy source, and
-neither do the twelve in-scope posting programs: the single clock read in the
-whole call chain lives in the menu shells' date-service copybook
+neither do the twelve in-scope posting programs. The frozen call chain holds
+FOURTEEN ambient date and time reads across six files - six `FUNCTION
+CURRENT-DATE` [common/ACAS.cbl:L353], [general/general.cbl:L371],
+[sales/sales.cbl:L323], [purchase/purchase.cbl:L318], [irs/irs.cbl:L480],
+[copybooks/Proc-ACAS-Mapser-RDB.cob:L72], four `accept ... from time` and four
+`accept ... from date` - and EVERY ONE of them is in an out-of-scope menu shell or
+in the date-service copybook those shells COPY, as the census in
+`acas_posting/clock.py` records. The one that matters to a posting run is
 [copybooks/Proc-ACAS-Mapser-RDB.cob:L72-L80], which builds `to-day` at L77 and
-stores the binary `run-date` at L80. Both observables are pinned by
+stores the binary `run-date` at L80 - and even that runs only on the FIRST-TIME
+capture path `ba010-Capture-Data`; a normal Sales run takes `to-day` from the
+STORED `Run-Date` - `move run-date to u-bin` / `call "maps04"` / `move u-date to
+to-day` [sales/sales.cbl:L409-L411]. Both observables are pinned by
 `acas_posting.clock` through `acas_posting.cli.args.resolve_clock`, so two runs of
 one scenario are byte-identical (Agent Action Plan section 0.8.5).
 
 PIN `--irs-instead` EXPLICITLY ON THIS ROUTE
-============================================
 `SYSTEM-REC IRS-Instead pic x` [copybooks/wssystem.cob:L179] with its two
 condition names, `88 IRS-Used value "Y"` at L180 and `88 IRS-Both-Used value "B"`
 at L181, decides WHICH TABLES the run touches: `sl060` reads it at three sites -
@@ -199,7 +203,6 @@ explicitly, "since leaving it out makes the affected-table list ambiguous". The
 option comes from `args.add_slpl_linkage_arguments` and is not redefined here.
 
 WHAT THIS MODULE MAY AND MAY NOT IMPORT
-=======================================
 MAY, and does: `argparse`, `enum`, `logging`, `collections.abc`, `typing`;
 `acas_posting.cli.args`; and the two program modules this route dispatches. The
 per-directory import table of Agent Action Plan section 0.4.3 allows `cli/*.py`
@@ -225,7 +228,6 @@ rather than merely promised:
     splats without touching.
 
 NO IMPORT-TIME SIDE EFFECTS
-===========================
 Importing this module binds names and creates one logger. It builds no parser,
 configures no logging, opens no file or connection, reads nothing from its
 surroundings and cannot fail for an environmental reason. `logging.basicConfig`
@@ -236,7 +238,6 @@ host application's logging. That is a hard requirement: the scenario test suites
 import this package.
 
 NEITHER CALLEE'S FAILURE IS TRANSLATED
-======================================
 Two exceptions can leave this module, and both are allowed to propagate
 deliberately:
 
@@ -257,7 +258,6 @@ end the process loudly and before any posting, which is the only faithful
 outcome available.
 
 THE RULES THAT BIND THIS FILE
-=============================
 `review_rules` reports NO user rules document for this project, so the binding
 constraints are the Agent Action Plan's own six (section 0.7.2), and enterprise
 best practice applies wherever they are silent. The per-rule verdict is in the
@@ -285,7 +285,6 @@ R-5 Full traceability: paragraph-named functions, a `GO TO` class at every
 R-6 Compiled behaviour is the tie-breaker, so the clock is injected, the run date
     is a required argument, and the three open questions are marked in place
     rather than guessed.
-=======
 ==========================================
 ::
 
@@ -314,7 +313,7 @@ Three properties of that paragraph are load-bearing and are preserved exactly:
     `sl060` and the `load00` head of the chain (L759-L762) is not migrated. It is
     recorded as an omission in the footer rather than silently dropped, and the
     oracle driver script documents the same asymmetry under "THE sl830
-    ASYMMETRY" [run_cobol_scenario.sh:L332-L336].
+    ASYMMETRY" [harness/run_cobol_scenario.sh:L332-L336].
 
 THE DISPATCH HELPER, AND ITS FIVE PARAMETERS
 ============================================
@@ -473,8 +472,10 @@ NO IMPORT-TIME SIDE EFFECTS
 Importing this module binds names and creates one logger. It builds no parser,
 configures no logging, opens no file or connection, reads nothing from its
 surroundings and cannot fail for an environmental reason. `logging.basicConfig`
-is called only inside `main`, so importing the module never reconfigures a host
-application's logging. That is a hard requirement: the scenario test suites
+is not called here AT ALL - the whole package has one call to it, in
+`acas_posting.__main__.configure_logging`, reached only from a process boundary -
+so neither importing this module nor calling `main` as a library reconfigures a
+host application's logging. That is a hard requirement: the scenario test suites
 import this package.
 
 CALLEE FAILURE IS NOT TRANSLATED; THE CONFIGURATION CONTRACT IS
@@ -957,16 +958,20 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     args.add_calling_data_arguments(parser, default_caller=args.WS_CALLER_SALES)
     args.add_slpl_linkage_arguments(parser)
-    #  THE TRANSPORT DECLARATION - one contract, published on every route
-    #  (`args.add_transport_security_arguments`). No COBOL counterpart: the frozen
-    #  bridge's connect passes six values and no transport policy at all
+    #  THE TRANSPORT DECLARATION IS NOT AN OPTION ON THIS ROUTE, AND MUST NOT
+    #  BECOME ONE. The frozen `CALL` publishes the linkage operands and the write
+    #  gating answers, and nothing else; the frozen bridge's connect passes six
+    #  values and no transport policy at all
     #  [copybooks/mysql-procedures.cpy:L72-L77], transport being compiled into
-    #  `cobmysqlapi.c`, so the migration must decide it and the operator is the
-    #  only party that knows. Stating NOTHING leaves the deployment contract to
-    #  decide, which is what makes the migrated cycle behave as the compiled one
-    #  (rule R-3); it decides no posted figure, so it cannot make two runs of one
-    #  scenario differ (rule R-6).
-    args.add_transport_security_arguments(parser)
+    #  `cobmysqlapi.c`. A `--db-tls-*` or `--db-allow-plaintext` option here would
+    #  add a program input and two refusal outcomes the compiled program has not
+    #  got, which rule R-3 forbids - and a certificate path on a command line is a
+    #  process-listing leak besides. Deployment security is resolved ONCE, outside
+    #  the accounting path, from the same contract the six connection parameters
+    #  come from: `args.install_connection_policy` reads it through
+    #  `cli/rdbms_params.resolve_transport_policy` while the linkage is bound, and
+    #  every handler observes the installed policy without being told. It decides
+    #  no posted figure, so it cannot make two runs of one scenario differ (R-6).
     #  Diagnostics only: no COBOL counterpart, no database effect. Shared with
     #  the other six routes so the level policy has one spelling.
     args.add_log_level_argument(parser)
@@ -1230,7 +1235,7 @@ if __name__ == "__main__":
 #     out of scope this route has no caller for it. The oracle driver script
 #     records the same asymmetry, noting that the menu-driven Cobol side WILL run
 #     sl830 and that the two autogen tables are asserted untouched
-#     [harness/run_cobol_scenario.sh:L332-L336].
+#     [harness/run_cobol_scenario.sh acas_plan_sl_invoice_post].
 #
 #   * `display-menu.` (sales/sales.cbl:L478) AND ALL MENU SCREEN I/O, including
 #     the `go to load01 load02 ... depending on z` dispatch table at

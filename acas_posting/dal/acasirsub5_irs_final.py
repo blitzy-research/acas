@@ -17,764 +17,6 @@ COBOL programs that the traceability document must map, and preserves the
 dispatch semantics rather than flattening them."
 
 THREE THINGS TO KNOW BEFORE READING ANY CODE BELOW
-
-**1. THIS HANDLER IS NOT ROW-ORIENTED. ONE COBOL RECORD IS TWENTY-SIX ROWS.**
-`copybooks/irswsfinal.cob` declares `01 Final-Record.` [:L7] as a 655-byte
-structure holding TWO PARALLEL 26-ELEMENT ARRAYS - `05 ar1 pic x(24) occurs 26`
-[:L36] redefining 26 enumerated fields [:L9-L34], and `05 ar2 pic x occurs 26`
-[:L66] redefining another 26 [:L39-L64] - plus a trailing `03 ar3 pic x(5)`
-[:L68]. The arithmetic is exact: 26 * 24 + 26 * 1 + 5 = 655, matching the
-copybook's own `*> rec 655 bytes` [:L6]. The table has THREE columns. So one
-logical `read` REASSEMBLES up to 26 rows into one record and one logical
-`write` EMITS 26 `INSERT`s. The primary-key column `IRS-FINAL-ACC-REC-KEY`
-EXISTS IN NO COPYBOOK: it is the array subscript, and the bridge says so in its
-own comment `*> KEY = table position` [common/irsfinalMT.cbl:L455].
-
-**2. `ar3 pic x(5)` IS SILENTLY DROPPED - VERIFIED BY EXHAUSTIVE SEARCH.**
-A case-insensitive search for `ar3` returns ZERO hits in
-`common/irsfinalMT.cbl`, ZERO in `common/irsfinalMT.scb`, ZERO in
-`common/acasirsub5.cbl` and ZERO in `mysql/ACASDB.sql`; the ONE hit anywhere is
-its declaration at [copybooks/irswsfinal.cob:L68]. There is no column, no host
-variable, no load and no unload. FIVE BYTES OF EVERY RECORD ARE NEVER PERSISTED
-AND NEVER READ BACK. The generated dictionary records the same finding
-independently - `loader.cite("Final-Record.ar3")` renders
-`copybook=copybooks/irswsfinal.cob:L68  bridge=absent  column=absent` - which
-is exactly the cross-source check section 0.4.1.6 asks the generator to
-automate, "flags any field present in one source and absent from another".
-Rule R-4 makes reproducing this mandatory: the field stays in the record
-dataclass and is ABSENT FROM EVERY SQL STATEMENT here. See anomaly A3.
-
-**3. A FAILED WRITE REPORTS SUCCESS - AND IT TAKES TWO DEFECTS TO DO IT.**
-Neither is visible from one file, which is why a reviewer who checked only one
-would pass it:
-
-    (a) THE HANDLER SILENTLY RETRIES A FAILED WRITE AS A REWRITE, HAVING FIRST
-        ERASED THE FAILURE. A single `end-if.` [common/acasirsub5.cbl:L483]
-        closes BOTH the outer `if fn-Write` [:L459] and the inner
-        `if (fs-Reply not = zero or WE-Error not = zero)` [:L475], so the
-        `else / go to ba-RDBMS-Exit` [:L481-L482] binds to the INNER
-        conditional and the failure arm falls THROUGH into the rewrite block at
-        [:L485]. Before falling through it executes
-        `move zero to fs-reply we-error   *> clear if used in write` [:L480].
-
-    (b) THE BRIDGE'S REWRITE UNCONDITIONALLY CLEARS EVERY ERROR FIELD AFTER ITS
-        LOOP. `move zero to FS-Reply WE-Error.` / `move zero to SQL-Err.` /
-        `move spaces to SQL-Msg.` [common/irsfinalMT.cbl:L571-L573], with NO
-        guarding condition. The `move 994 to WE-Error` set at [:L563] is
-        therefore PERMANENTLY UNOBSERVABLE.
-
-    NET EFFECT: a write that fails on all 26 rows returns
-    `(FS-Reply 0, WE-Error 0)` - indistinguishable from success.
-
-This is the IDENTICAL CONSTRUCT CLASS as Agent Action Plan anomaly #1, "A
-missing terminating period nests a second conditional inside the first"
-[sales/sl060.cbl:L1172-L1178]. Here it is a missing `end-if` rather than a
-missing period, but the mechanism and the consequence are the same. And it is
-NOT UNIQUE TO `acasirsub5`: `common/acasirsub3.cbl` carries the same pair with
-`common/irsdfltMT.cbl:L736-L738` as its unguarded reset, so TWO OF THE TWENTY
-HANDLER MODULES SWALLOW WRITE FAILURES. Stated here so the anomaly log records
-it once, correctly, for both. See anomalies A1 and A2.
-
-THE MAINTAINER'S OWN EXPLANATION - WHY OPEN AND CLOSE ARE NO-OPS
-================================================================
-[common/acasirsub5.cbl:L161-L168], verbatim::
-
-    *> WARNING The modules acasirsub5 for Final as well as acasirsub3
-    *> for defaults has to be modified as IRS only does a read or write
-    *>   and not a direct open or close so
-    *>   it has to be done here when processing RDB.
-
-    *>   For Cobol files these have been changed to do the same so direct
-    *>    calls to open and close are not needed or wanted.
-    *>     so return with fs-reply & we-error = zero.
-
-That comment is the design rationale for this whole module. It is why
-`open_`/`open_input`/`open_output`/`open_extend`/`close` published here are
-NO-OPS, and why :func:`dispatch` SYNTHESISES its own open/verb/close triples
-around every read, write and rewrite [common/acasirsub5.cbl:L432-L504]. The
-maintainer labels his own arrangement non-standard at [:L418-L419]: "Here we do
-non standard DAL things to handle open & close pre / post to calls for Read and
-write."
-
-A FIVE-CODE HANDLER, AND THE ONLY PAIR WHERE BOTH SIDES AGREE
-=============================================================
-A census of every `when <n>` across all seventeen in-scope handlers puts this
-module in a class of two:
-
-    acas000                                             1 2 3 4 5 7
-    acas005 006 007 008 013 015 019 029 acasirsub4      1 2 3 4 5 7 8 9
-    acas012 acas022                                     ... + 31
-    acas016 acas026                                     ... + 34
-    acasirsub1                                          ... + 13 15
-    acasirsub3  acasirsub5                              1 2 3 5 7 ONLY
-
-`common/acasirsub5.cbl:L191-L207` dispatches `when 1`, `when 2`, `when 3`,
-`when 5`, `when 7`, `when other` - NO 4, NO 8, NO 9. Codes 1 and 2 are
-DISPATCHED BUT ARE NO-OPS: they `move zero to FS-Reply WE-Error` and
-`go to aa-Exit` [:L192-L199], with the real bodies commented out, and that jump
-BYPASSES `aa999-main-exit` and its logging hook [:L334-L337]. `when 5` FALLS
-THROUGH to `when 7` [:L202-L204] - "write/rewrite can do the same ... as file
-is opened as output." And the bridge dispatches THE SAME FIVE
-[common/irsfinalMT.cbl:L239-L252], which makes this handler/bridge pair the
-ONLY one in the folder where both sides agree on a reduced code set.
-
-The bridge does, however, SEPARATE 5 from 7 where the handler's flat path
-merges them: `when 5 -> ba070-Process-Write` (an `INSERT`) and
-`when 7 -> ba090-Process-Rewrite` (an `UPDATE`). On the RDB path the handler
-therefore sends `fn-Write` (5) first and, on failure, `fn-Re-write` (7) - which
-is the fall-through of anomaly A2.
-
-THE FROZEN SCHEMA - THREE COLUMNS, THE NARROWEST IN-SCOPE TABLE
-===============================================================
-[mysql/ACASDB.sql:L214-L219], verbatim::
-
-    CREATE TABLE `IRSFINAL-REC` (
-      `IRS-FINAL-ACC-REC-KEY` tinyint(2) unsigned NOT NULL,
-      `IRS-AR1` char(24) NOT NULL,
-      `IRS-AR2` char(1) NOT NULL,
-      PRIMARY KEY (`IRS-FINAL-ACC-REC-KEY`)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COLLATE=utf8mb3_general_ci;
-
-Three columns; next narrowest in scope are `SYSDEFLT-REC`, `IRSDFLT-REC` and
-`ANALYSIS-REC` at four. Single-column primary key, ZERO secondary indexes,
-ZERO `AUTO_INCREMENT`, ZERO `TIMESTAMP`, ZERO column `DEFAULT` and - unlike
-`IRSDFLT-REC`, which carries `COMMENT='Defaults table for IRS'` - NO table
-comment. Section 0.6.6 depends on exactly this shape: the harness dump is
-`SELECT * FROM <table> ORDER BY <primary key>` with no tie-breaker.
-
-NOT ONE NUMERIC DATA COLUMN, WHICH IS WHY NO `Decimal` APPEARS BELOW
-====================================================================
-`IRS-AR1` is `char(24)`, `IRS-AR2` is `char(1)`, and the only numeric column is
-the bridge-derived key, `tinyint(2) unsigned` -> `int`. NO MONETARY VALUE PASSES
-THROUGH THIS MODULE AT ALL. Rule R-2 is nonetheless binding and is honoured:
-no `float`, no `complex`, no `math`, no builtin `round` or `abs`, and no
-`numpy`/`pandas` - see the rule section below. Do NOT generalise the absence:
-across this folder `valueMT` loses the sign on three MONETARY fields, `salesMT`
-narrows eleven consecutive fields [common/salesMT.cbl:L302-L312] and `purchMT`
-twelve [common/purchMT.cbl:L295-L306], while `irsnominalMT` and `irsdfltMT`
-have no signed field at all. Every field here is resolved from
-:mod:`acas_posting.dictionary.loader`, never inferred.
-
-THE COLUMN NAMES CARRY AN `IRS-` PREFIX THE COPYBOOK FIELDS DO NOT
-==================================================================
-`ar1` -> `IRS-AR1`, `ar2` -> `IRS-AR2`, and the key is `IRS-FINAL-ACC-REC-KEY`
-where `SYSFINAL-REC`'s equivalent is plain `FINAL-ACC-REC-KEY`. A PREFIX ADDED
-AT THE BRIDGE [common/irsfinalMT.cbl:L172-L174], to disambiguate from the
-non-IRS final-accounts table. Contrast `acas015`/`analMT`, where the bridge
-STRIPS a `WS-` prefix. Prefix handling is PER-BRIDGE and must be read, never
-inferred, so :data:`COLUMNS` is built from the dictionary rather than written
-out by hand. See anomaly A28.
-
-WHY THE COLUMN NAMES CANNOT COME FROM THE FD, EITHER
-====================================================
-The handler's file description is a FLAT, UNSTRUCTURED BYTE BLOB -
-`01 Record-5 pic x(655).` [common/acasirsub5.cbl:L104] under
-`fd Final-File.` [:L102] - and the handler moves the whole 655 bytes between
-`Record-5` and `Final-Record` [:L293, :L318]. `acasirsub3` does the same with
-`01 Record-3 pic x(264)`, and EXACTLY THE TWO HANDLERS THE MAINTAINER'S WARNING
-NAMES have flat-blob FDs, for the same reason: they exchange whole arrays, not
-rows, so there is nothing to structure. Every other handler in the folder
-declares a structured FD. So where `IRSPOSTING-REC` takes its column names from
-an inline `01 Record-4` and `IRSNL-REC` from `copybooks/irsfdwsnl.cob`, THIS
-TABLE'S NAMES COME FROM THE BRIDGE'S HOST VARIABLES ALONE - which is precisely
-section 0.8.2's point, quoted verbatim: "The maintainer's one-way
-COBOL-to-MySQL bridge defines the authoritative record-layout <-> table mapping
-- it is the data dictionary for this migration."
-
-THE COMPLETE DRIFT TABLE
-========================
-    #  column (type)                          host variable          copybook
-    -  ------------------------------------   --------------------   --------
-    1  IRS-FINAL-ACC-REC-KEY                  HV-IRS-FINAL-ACC-      NONE -
-       tinyint(2) unsigned  [ACASDB.sql:L215] REC-KEY 9(03) COMP     the array
-                                              [irsfinalMT.cbl:L172]  subscript
-       drift: bridge-only column; (none) -> 3 digits -> 2; `IRS-` prefix added;
-              written from `move A to HV-...` [irsfinalMT.cbl:L481] and read
-              back as the subscript at [:L455-L456]
-
-    2  IRS-AR1 char(24)     [ACASDB.sql:L216] HV-IRS-AR1 X(24)       ar1-1 ...
-                                              [irsfinalMT.cbl:L173]  ar1-26
-                                                                     [:L9-L34]
-                                                    redefined `ar1 occurs 26`
-                                                    [irswsfinal.cob:L36]
-       drift: 26 copybook fields -> 1 column x 26 rows; width EXACT (no
-              24->32 drift as in `nominalMT`); `IRS-` prefix added
-
-    3  IRS-AR2 char(1)      [ACASDB.sql:L217] HV-IRS-AR2 X(1)        ar2-1 ...
-                                              [irsfinalMT.cbl:L174]  ar2-26
-                                                                     [:L39-L64]
-                                                    redefined `ar2 occurs 26`
-                                                    [irswsfinal.cob:L66]
-       drift: 26 copybook fields -> 1 column x 26 rows; width EXACT; `IRS-`
-              prefix added
-
-    -  NO COLUMN                              NO HOST VARIABLE       ar3 x(5)
-                                                              [irswsfinal.cob:L68]
-       drift: SILENTLY DROPPED - see headline 2 and anomaly A3
-
-THE FIELD-TO-DICTIONARY MAPPING IS UNUSUAL THREE WAYS  (rule R-5)
-=================================================================
-Rule R-5 requires every field to map to a data-dictionary entry, and section
-0.8.1 makes the ordering a directive rather than a preference: "Data dictionary
-first. ... every Python field definition cites its entry. This ordering is a
-directive, not a preference - it is what prevents fields being transcribed by
-eye." All three peculiarities here are recorded in the generated artifact and
-re-read at import time by :data:`COLUMNS`:
-
-    `IRS-FINAL-ACC-REC-KEY`   HAS NO COPYBOOK FIELD. Its entry is one-sided,
-                              `presence(in_copybook=False, in_bridge=True,
-                              in_column=True)`, and carries a derivation note
-                              naming the array subscript as its ONLY source -
-                              `move A to HV-IRS-FINAL-ACC-REC-KEY`
-                              [common/irsfinalMT.cbl:L481] on write, and
-                              `AR1 (HV-IRS-FINAL-ACC-REC-KEY)`
-                              [common/irsfinalMT.cbl:L455-L456] on read.
-    `IRS-AR1` / `IRS-AR2`     EACH MAP TO 26 COPYBOOK FIELDS - `ar1-1` ...
-                              `ar1-26` and `ar2-1` ... `ar2-26` - plus the
-                              `occurs 26` redefines that overlay them.
-    `ar3`                     MAPS TO NOTHING AT ALL. A deliberate omission
-                              with no column, recorded as an omission per
-                              section 0.5.3, "Deliberate omissions are recorded
-                              as omissions."
-
-THE `REDEFINES` PAIR - WHO KEEPS IT IN STEP
-===========================================
-`copybooks/irswsfinal.cob` declares each array TWICE: 26 enumerated fields and
-an `occurs 26` view redefining them [:L8-L36, :L38-L66]. In COBOL those are ONE
-STORAGE, so the question of keeping them in step cannot arise. In Python they
-are two dataclasses, and `records/irs_final.py` deliberately declines to own
-the aliasing - it states that both views are modelled with "no property that
-switches between the two, and no designation of one as primary". So this module
-owns it, and the rule is stated once here:
-
-    * The BRIDGE'S OPERANDS ARE THE ARRAY VIEWS AND ONLY THE ARRAY VIEWS -
-      `AR1 (HV-...)`/`AR2 (HV-...)` on read [common/irsfinalMT.cbl:L455-L456]
-      and `AR1 (A)`/`AR2 (A)` on write [:L484-L485] and rewrite [:L528-L529].
-      Verified: the 52 enumerated names appear NOWHERE in the bridge. So the
-      SQL side reads the array view, exactly as the frozen source does.
-    * `initialize Final-Record with filler.` [common/irsfinalMT.cbl:L395] names
-      THE WHOLE `01` GROUP, so it blanks all five Python members - both array
-      views, both enumerated groups, and `ar3`.
-    * A `move` INTO one entry writes bytes that are addressable through both
-      views, so :func:`read_next` writes the enumerated field as well as the
-      array entry. That is reproducing `REDEFINES` storage aliasing, not adding
-      behaviour: leaving the enumerated view stale would be a DIVERGENCE from
-      compiled behaviour, which rule R-6 settles against.
-    * THE RULE RUNS BOTH WAYS, AND THE WRITE DIRECTION IS THE ONE THAT MATTERS
-      TO A CALLER. The bullet above covers the bridge writing INTO the record;
-      the mirror case is a caller writing into it before a `write` or `rewrite`.
-      In the compiled program `move "Sales" to ar1-7` has already written
-      `AR1 (7)`, so the loads at [:L484-L485] and [:L528-L529] see it. Between
-      two Python objects they do not, so the aliasing is re-established at the
-      head of both loading verbs by `_alias_enumerated_into_array`. Which view
-      leads is settled by the frozen source, not chosen: the enumerated names are
-      what a caller writes - all 52 references outside the copybook are SCREEN
-      `using` clauses [irs/irs020.cbl:L472-L593], and SCREEN `using` is
-      bidirectional - while NOTHING in the frozen codebase writes an array name
-      except the bridge's own read-unload [common/irsfinalMT.cbl:L455-L456]. Full
-      evidence and the R-3 argument are under TRANSLATION CORRECTIONS as C1.
-    * COBOL `OCCURS` subscripts are 1-BASED and Python indexing is 0-BASED.
-      `records/irs_final.py` states that the offset "belongs to whichever layer
-      turns a position into a key value" - that is this module, and the
-      conversion is made explicit at every site.
-
-THIS BRIDGE HAS NO DELETE OF ANY KIND
-=====================================
-No `ba080`, no `ba085`, no `DELETE FROM` anywhere. Verified: the ONLY occurrence
-of the token `delete` in `common/irsfinalMT.cbl` is inside a comment at [:L531],
-`*> 1 = Primary, 2 = Abrev, 3 = Desc (NOT Delete function as can be dups)`. So
-NO `delete` and NO `delete_all` behaviour is published here, and none may be
-added (rule R-3). `dal/status.py` corroborates the shape independently: its
-`FsReply.KEY_NOT_FOUND` documentation records that six bridges have no keyed
-read at all and names `irsfinalMT` among them.
-
-THE PUBLISHED FACADE SURFACE - SIX VERBS, NOT TWELVE
-====================================================
-This handler is reached through the IRS convention,
-`copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob`, whose paragraph `acasirsub5.` [:L81]
-sets `move 1 to File-Key-No.` and then issues the `CALL` [:L84-L91] with the
-parameter order this module's :func:`dispatch` preserves exactly. That copybook
-publishes SIX verbs and no more::
-
-    acasirsub5-Open        [:L287]  fn-open  + fn-i-o
-    acasirsub5-Open-Input  [:L293]  fn-open  + fn-input
-    acasirsub5-Close       [:L299]  Access-Type = 0, fn-Close
-    acasirsub5-Read-Next   [:L304]
-    acasirsub5-Write       [:L309]
-    acasirsub5-ReWrite     [:L314]
-
-No open-output, no open-extend, no start, no delete, no delete-all and no
-read-indexed. The four `open_*` functions below therefore exceed what the
-facade publishes, and that is deliberate and faithful rather than invention:
-the handler's own test is `if fn-open` [common/acasirsub5.cbl:L421], on
-`File-Function` ALONE, so it CANNOT TELL THE FOUR ACCESS TYPES APART and
-ignores all four identically. In particular `open_output` here does NOT
-truncate the table - contrast `acas008`, where `Open-Output` means delete every
-row [common/acas008.cbl:L313-L319].
-
-The convention also adds a per-handler error check the General/Sales/Purchase
-convention has no equivalent for: `irsub5-Check-4-Errors` [:L348-L353] is
-performed ONLY after Open [:L291] and Open-Input [:L297], displays `IR915`,
-performs `acasirsub5-Close` and transfers to `Open-Error-Continued` [:L355],
-which ends in `goback.` [:L364] - a RETURN FROM THE PROGRAM OUTRIGHT, as
-section 0.6.5 records. THAT RECOVERY BELONGS TO THE FACADE, NOT HERE:
-:func:`dispatch` performs NO recovery and simply hands back the status pair,
-exactly as the handler does.
-
-THE ERROR-MESSAGE NAMESPACE, AND WHAT IT CORROBORATES
-=====================================================
-[common/acasirsub5.cbl:L121-L129] declares six messages, `IR901` and `IR902`
-system-wide plus four module-specific::
-
-    IR921  pic x(39)  "IR921 Failure to read Final File rec. !"   [:L126]
-    IR922  pic x(32)  "IR922 Failure to read Final File"          [:L127]
-    IR923  pic x(36)  "IR923 Failure to open o/p Final File"      [:L128]
-    IR924  pic x(33)  "IR924 Failure to write Final File"         [:L129]
-
-The `IR9xx` namespace is partitioned by module WITH GAPS: `acasirsub1` owns
-906-910, `acasirsub3` owns 917-919, `acasirsub5` owns 921-924, and `acasirsub4`
-owns NONE AT ALL; 903-905, 911-916 and 920 are unassigned. That inventory
-corroborates why `copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob` has no error-check
-paragraph for `acasirsub4`. `IR921` ends in `. !` - a trailing
-space-exclamation the other three lack. All four messages are DISPLAY-ONLY and
-reach only the flat-file path, so all four are deliberate omissions here; the
-handler's own save/restore pair carries the comment
-`*> These 2 for acasirsub3 & 5`, naming the family once more.
-
-LOG IDENTITY - THE ONLY UNCOLLIDED FILE NUMBER IN THE FOLDER
-============================================================
-`move 1 to WS-Log-System` [common/acasirsub5.cbl:L158] and
-`move 14 to WS-Log-File-No` [:L159] on the flat path; the RDB path bumps it with
-`move 24 to WS-Log-File-no` [:L364]. The corrected folder-wide census - flat ->
-RDB, with the log system in brackets::
-
-    11 -> 21   acas005 (2), acas012 (3), acas022 (4), acasirsub1 (1)  four-way
-    12 -> 22   acas015 (6), acas016 (3), acasirsub3 (1)               three-way
-    12 -> 12   acas026 (4)                     no increment, unique
-    13 -> 23   acas013 (6), acasirsub4 (1)                            two-way
-    14 -> 24   acasirsub5 (1)                  SOLE OCCUPANT
-    15 -> 25   acas008 (1), acas019 (3), acas029 (4)                  three-way
-
-So `acasirsub5` is the ONLY handler whose file number is unique - every other
-number needs the `(system, file)` pair to disambiguate. The bump to 24 happens
-ONLY on the RDB path, because `ba010-Test-WS-Rec-Size` [:L358] contains nothing
-but that move and the flat path performs `ba012-Test-WS-Rec-Size-2` directly
-[:L180].
-
-ANOMALY REGISTER - REPRODUCED, NEVER FIXED  (rule R-4)
-======================================================
-Rule R-4, verbatim: "There is no test suite: compiled COBOL execution is the
-behavioral specification, defects included. A defect reproduced is correct; a
-defect fixed is a failure." Section 0.7.4 C-4 adds the mechanism: "a comment at
-each reproduction site citing the COBOL locator." A1 to A31 are this module's
-register as enumerated in the migration brief; A32 to A47 were found while
-reading the frozen source for this module and are new. Every entry below either
-has a `[<path>:L<n>]` comment at its reproduction site, or - where it is
-flat-file-only and therefore outside the RDB surface - is named here as a
-deliberate omission with its locator.
-
-    A1   A FAILED WRITE REPORTS SUCCESS. Handler [acasirsub5.cbl:L470-L483];
-         bridge [irsfinalMT.cbl:L563, :L571-L573]. Never surfaced.
-    A2   ONE `end-if.` CLOSES TWO NESTED `if`s, which is what makes the
-         fall-through reachable [acasirsub5.cbl:L483].
-    A3   `ar3 pic x(5)` SILENTLY DROPPED [irswsfinal.cob:L68]; absent from
-         `irsfinalMT.cbl`, `acasirsub5.cbl` and `ACASDB.sql`.
-    A4   AN ARRAY SUBSCRIPT TAKEN DIRECTLY FROM A DATABASE VALUE -
-         `AR1 (HV-IRS-FINAL-ACC-REC-KEY)` where the host variable is `9(03)`
-         and the array is 26 [irsfinalMT.cbl:L455-L456].
-    A5   THE OFFENDING KEY VALUE BECOMES THE ERROR CODE on an out-of-range key,
-         and `FS-Reply` is NOT set [irsfinalMT.cbl:L426-L428].
-    A6   THE STATUS-SQUASHING LOOP - each iteration's failure is stashed and
-         cleared, so only the LAST survives and the loop never stops early
-         [irsfinalMT.cbl:L509-L516]. `ba070` SETS NO `WE-Error` OF ITS OWN -
-         every one of its own status statements writes `FS-Reply` alone - but
-         that does NOT mean a caller sees zero there. `bb200-Insert` performs
-         `MYSQL-1210-COMMAND` [irsfinalMT.cbl:L655], which on a query failure
-         performs `Mysql-1100-Db-Error`
-         [copybooks/mysql-procedures.cpy:L166-L177], and THAT paragraph does
-         `move 99 to fs-Reply` / `move 911 to We-Error` unconditionally
-         [copybooks/mysql-procedures.cpy:L127-L128]. `ba070` then overwrites the
-         `FS-Reply` (to 22 or 99) and leaves the 911 standing, and the squash
-         saves and clears `FS-Reply` only. So a failed write returns
-         `(<last FS-Reply>, 911)` - the 911 belonging to the shared DB-error
-         paragraph rather than to this one, which is why `WE-Error` carries no
-         information about WHICH row failed. Verified by ad-hoc test rather
-         than assumed.
-    A7   THE BLANK-SLOT SKIP IS COMMENTED OUT, so all 26 rows are always
-         written, blank ones included [irsfinalMT.cbl:L477-L480].
-    A8   A READ VERB THAT CREATES THE FILE and writes one all-spaces record when
-         the open fails [acasirsub5.cbl:L255-L263]. FLAT-FILE ONLY =>
-         DELIBERATE OMISSION.
-    A9   CONTRADICTORY ANNOTATIONS ON THE IDENTICAL STATEMENT 11 LINES APART -
-         `move 3 to WE-Error  *> NOT as in irsub5` [acasirsub5.cbl:L268] then
-         `move 3 to WE-Error  *> as in irsub5` [:L279]. Both quoted verbatim;
-         an ambiguity-document entry.
-    A10  ALL FOUR RDB BAIL-OUTS SKIP THE CLOSE, leaking the cursor and the
-         connection - read [acasirsub5.cbl:L437-L440, :L446-L449], write
-         [:L463-L466], rewrite [:L489-L492] - while the write's own close is
-         UNCONDITIONAL [:L471-L472]. Reproduced, leak included.
-    A11  DEAD STATUS ASSIGNMENTS - `move 10 to FS-Reply WE-Error` then
-         `move 3 to WE-Error`, so the effective flat-file EOF pair is
-         `(10, 3)` [acasirsub5.cbl:L266-L268, :L278-L279]. FLAT-FILE ONLY.
-    A12  `move 1 to WS-File-Key` IMMEDIATELY OVERWRITTEN by the descriptive
-         string [acasirsub5.cbl:L295, :L297]. FLAT-FILE ONLY.
-    A13  THE FLAT READ CLEARS `WE-Error` ONLY, NOT `FS-Reply`
-         [acasirsub5.cbl:L296] - and, unlike `acasirsub3`, does NOT clear
-         `Cobol-File-Status`, leaving the EOF latch set. FLAT-FILE ONLY.
-    A14  THE WRITE-FAILURE BRANCH NEITHER CLOSES NOR EXITS while the
-         open-failure branch does both [acasirsub5.cbl:L312-L322]. FLAT-FILE
-         ONLY.
-    A15  CODES 1 AND 2 ARE DISPATCHED BUT ARE NO-OPS that jump to `aa-Exit`,
-         bypassing the logging hook [acasirsub5.cbl:L192-L199, :L334-L337].
-    A16  `when 5` FALLS THROUGH TO `when 7` - one paragraph serves both on the
-         flat path [acasirsub5.cbl:L202-L204].
-    A17  ~35 LINES OF FULLY-FORMED COMMENTED-OUT OPEN/CLOSE carrying trace
-         numbers 201/202 and status codes 35, 997 and 1, including a
-         DOUBLY-COMMENTED dated line `*>*> 27/07/16 16:30 move zeros to
-         FS-Reply WE-Error.` - `acasirsub3` has the same line doubly-commented
-         and `acasirsub4:L287` has it singly-commented and LIVE
-         [acasirsub5.cbl:L212-L246]. DELIBERATE OMISSION, inventoried here.
-    A18  A LIVE `stop "Cobol File EOF"` in a block whose own comment says
-         "should NOT occur" [acasirsub5.cbl:L265, :L272]. FLAT-FILE ONLY;
-         never translated to `sys.exit`, `exit()` or `os._exit`.
-    A19  HANDLER BAD-FUNCTION 999 VS BRIDGE 990 [acasirsub5.cbl:L331-L332;
-         irsfinalMT.cbl:L580-L581] - the FOURTH confirmed pair with this
-         disagreement, after `acas029`/`otm5MT`, `acasirsub3`/`irsdfltMT` and
-         `acasirsub4`/`irspostingMT`. A folder-wide pattern, not reconciled.
-    A20  THE SAME LITERAL COMPARED AT TWO WIDTHS IN ONE FILE - `"0  "` in the
-         write [irsfinalMT.cbl:L491] and `"0   "` in the rewrite [:L558].
-         Compared trimmed here; the discrepancy is recorded.
-    A21  `if Testing-2` WHERE EVERY OTHER TEST IN BOTH FILES USES `Testing-1`
-         [irsfinalMT.cbl:L550] - the same anomaly `irsdfltMT` carries.
-    A22  NO `initialize` OF THE HOST-VARIABLE GROUP BEFORE THE WRITE LOOP,
-         diverging from the convention section 0.6.2 describes and from
-         `irsdfltMT:L625` [irsfinalMT.cbl:L468-L476]. `NOT NULL` is honoured
-         anyway because all three host variables are assigned every iteration.
-    A23  `KOR-offset`/`KOR-length` MOVED TO `K`/`L` AND NEVER USED
-         [irsfinalMT.cbl:L330-L331, :L532-L533]; the rewrite's commented-out
-         `*> Final-Record (K:L)` [:L541] shows where they were meant to go.
-    A24  THE RELATION IS HARD-CODED `" > "` while `MOST-Relation` is declared
-         [irsfinalMT.cbl:L131] and unused on this path [:L338].
-    A25  A QUOTED 3-DIGIT LITERAL `"000"` COMPARED AGAINST A `tinyint(2)`
-         COLUMN [irsfinalMT.cbl:L339]. Quoted as written; ambiguity Q-16.
-    A26  `Ca-Process-Logs` IS ANNOTATED "Not called on DAL access as it does it
-         already" [acasirsub5.cbl:L525] YET IS PERFORMED SIX TIMES in `ba015` -
-         four of them in the read path alone [:L428, :L436, :L445, :L452,
-         :L456, :L478, :L502].
-    A27  A COMMENTED-OUT DUAL-WRITE HOOK in `aa-main-exit`
-         [acasirsub5.cbl:L344-L346]. DELIBERATE OMISSION, recorded.
-    A28  THE `IRS-` PREFIX IS ADDED AT THE BRIDGE [irsfinalMT.cbl:L172-L174]
-         where `analMT` STRIPS a `WS-` prefix. Resolved from the dictionary.
-    A29  COSMETIC EVIDENCE OF COPY-PASTE, preserved as citations: `function
-         Length` then `function length` on adjacent lines
-         [acasirsub5.cbl:L369, :L372]; seven exclamation marks [:L375]; `JC`
-         without the s [:L415]; six question marks on the cursor comment
-         [irsfinalMT.cbl:L388].
-    A30  `initialize ... with filler` IN THE READ [irsfinalMT.cbl:L395] VS NO
-         `initialize` IN THE WRITE [:L468-L476] - the two-semantics
-         inconsistency.
-    A31  A COMMENTED-OUT STATUS CLEAR INSIDE THE WRITE LOOP'S `Testing-1` BLOCK
-         that would have masked errors when logging was on
-         [irsfinalMT.cbl:L506-L507].
-
-    NEW - FOUND WHILE READING THE FROZEN SOURCE FOR THIS MODULE
-    A32  THE READ HAS THE SAME UNCONDITIONAL RESET AS THE REWRITE.
-         `move zero to fs-reply WE-Error.` [irsfinalMT.cbl:L465] sits AFTER the
-         loop with no guard, so EVERY in-loop `exit perform` - end of data
-         [:L423], out-of-range key [:L433] and the zero-count branch [:L453] -
-         has its status ERASED. Only the PRE-LOOP empty-table path, which jumps
-         to `ba998-Free` [:L386], keeps its `(10, 10)`. So A5's
-         `WE-Error = <key>` and the in-loop EOF are set and then wiped: BOTH
-         fan-out verbs of this bridge end in an unconditional reset. Reproduced
-         in full - the in-loop stores happen, because they leave the `WS-File-Key`
-         tags `EOF`/`EOF2`/`EOF3` behind, and then the reset happens.
-    A33  THE SAME STATUS-CLEAR IDIOM IS LIVE IN ONE LOOP AND DEAD IN THE OTHER.
-         `move zeros to FS-Reply SQL-Err` / `move spaces to SQL-Msg` are LIVE
-         in the read loop [irsfinalMT.cbl:L459-L460] and COMMENTED OUT in the
-         write loop [:L506-L507] - that second one being A31. One file, one
-         idiom, two comment states.
-    A34  THE BRIDGE'S OWN COMMENT SAYS 32 ROWS IN A 26-ROW TABLE - "As this is
-         for only one set of 32 rows we will skip this" [irsfinalMT.cbl:L232],
-         copy-pasted from `irsdfltMT`. Corroborates the family.
-    A35  BOTH EOF PATHS SET THE PAIR `(10, 10)`, not `WE-Error` alone -
-         pre-loop [irsfinalMT.cbl:L383-L384] and in-loop [:L417].
-    A36  THE UPDATE RENDERS THE SAME KEY TWO WAYS IN ONE STATEMENT. Its `SET`
-         term takes `TRIM(WS-MYSQL-EDIT(18:03))`, which is UNPADDED - `"1"` -
-         while its own `WHERE` takes `WS-Key`, `pic 99`, which is ZERO-PADDED -
-         `"01"` [irsfinalMT.cbl:L681, :L542]. And the `SET` clause INCLUDES THE
-         PRIMARY KEY, updating it to itself [:L677-L687].
-    A37  A SECOND READ ON AN ALREADY-ACTIVE CURSOR BLANKS THE CALLER'S RECORD
-         AND REPORTS SUCCESS. `if Cursor-Not-Active` [irsfinalMT.cbl:L328]
-         guards the SELECT, `initialize Final-Record with filler` [:L395] is
-         OUTSIDE that guard, and nothing on the success path clears
-         `Most-Cursor-Set` [:L462-L466]. So a repeat call skips the SELECT,
-         finds the stored result exhausted, takes the in-loop EOF - and then
-         A32's unconditional reset turns `(10, 10)` into `(0, 0)`. The caller
-         gets an all-spaces record and a success status. Ambiguity Q-17.
-    A38  THE THREE FAN-OUT VERBS SKIP THE BRIDGE'S OWN END-OF-CALL LOGGING.
-         Read [irsfinalMT.cbl:L466], write [:L517] and rewrite [:L574] all
-         `go to ba999-exit`, jumping past `ba999-end`'s
-         `if Testing-1 / perform Ca-Process-Logs` [:L600-L604]; open, close and
-         bad-function go through it.
-    A39  THE LOCK-RETRY LADDER IS RESET BUT CAN NEVER RUN.
-         `move zero to WS-Mysql-Time-Step WS-SQL-Retry` [irsfinalMT.cbl:L469-L470,
-         :L521-L522] resets state that `Mysql-1210-Command` cannot reach: its
-         whole retry arm, including `perform Mysql-1300-DB-Error` and the
-         `go to Mysql-1210-Command` re-issue, IS COMMENTED OUT
-         [copybooks/mysql-procedures.cpy:L169-L175]. So there is no retry and
-         no sleep - which is also what rule R-6 requires.
-    A40  `MySQL_affected_rows` IS CALLED EVEN AFTER A FAILED STATEMENT.
-         `Mysql-1210-Command` performs the error paragraph and then falls into
-         `call "MySQL_affected_rows"` unconditionally
-         [copybooks/mysql-procedures.cpy:L178], so `WS-MYSQL-Count-Rows` is
-         always written and the `not = 1` test below always has a value.
-    A41  THE PREDICATE IS STORED "For test logging" AND THEN WIPED BEFORE ANY
-         LOG CALL CAN READ IT. `move ws-Where (1:J) to WS-Log-Where` carries
-         that very comment [irsfinalMT.cbl:L349], and `move spaces to
-         WS-Log-Where.` [:L393] clears it before the loop - so all four of the
-         read's `Ca-Process-Logs` sites [:L421, :L431, :L451, :L458] log an
-         EMPTY predicate. It survives on exactly ONE path: the empty-table arm,
-         which leaves by `go to ba998-Free` [:L386] and reaches `ba999-end`'s
-         log [:L602-L604] with [:L393] never executed. The rewrite has the same
-         `*> For test logging` move [:L547] and no such wipe, so there the
-         predicate does reach the log.
-    A42  TWO DEAD DISJUNCTS IN THE READ'S END-OF-DATA TEST.
-         `if return-code = -1 or A > 26 or = zero` [irsfinalMT.cbl:L415-L416]
-         sits inside `perform varying A from 1 by 1 until A > 26` [:L396-L397],
-         so `A > 26` and `A = zero` cannot hold in the body. Only
-         `return-code = -1` can fire. Same class as A23's dead `K`/`L`.
-    A43  THE READ'S IN-LOOP COUNT GUARD CANNOT FIRE ON THE NORMAL PATH.
-         `if WS-MYSQL-Count-Rows = zero` [irsfinalMT.cbl:L437] reads the
-         store-result snapshot's size, which `Mysql-1220-Store-Result` set once
-         [copybooks/mysql-procedures.cpy:L191-L192] and which nothing in the
-         loop re-reads; the zero case already left at [:L386]. Reproduced
-         because a caller arriving on a stale cursor (A37) is the one way in.
-    A44  A STALE WRITE FAILURE IS RE-REPORTED BY EVERY LATER CLEAN WRITE.
-         `03 ws-saved-fs-reply pic 99.` [irsfinalMT.cbl:L147] is written at
-         [:L510] and read at [:L514-L515], and IS NEVER CLEARED - not by
-         `ba010-Initialise` [:L222-L230], not by `ba070`'s own status resets
-         [:L472-L474], and nowhere else in the program: those four lines are its
-         only references. `Program-Id. irsfinalMT.` [:L13] carries no `IS
-         INITIAL`, so working storage persists across `CALL`s, and a single
-         failed row in one write makes every subsequent write return that row's
-         `FS-Reply` for the life of the run. Combined with A1 the effect
-         inverts: the failing write reports success and a later clean one
-         reports the failure.
-    A45  `01 Old-File-Function pic 9 value zero.` [irsfinalMT.cbl:L144] IS
-         DECLARED AND NEVER REFERENCED - that line is its only occurrence.
-         Shared with `irsdfltMT`, the other array-fan-out bridge, presumably to
-         remember a caller's function across the synthesised open and close that
-         these two alone need. Modelled as nothing, because it does nothing.
-    A46  THE REWRITE TRIPLE'S BRIDGE CALL IS ANNOTATED `*> write`
-         [common/acasirsub5.cbl:L494], copied verbatim from the write triple's
-         own `*> write` [:L468] when the block was duplicated - so the only
-         inline label on the rewrite path names the wrong verb. Comment-only,
-         same cosmetic family as A29, and recorded because rule R-5 asks that
-         every difference be visible rather than tidied away in translation.
-    A47  A SUCCESSFUL WRITE IS THE ONLY ONE OF THE THREE TRIPLES THAT LEAVES NO
-         WS-File-Key OF ITS OWN. The read ends `move "Open, Read, Close" to
-         WS-File-key` [common/acasirsub5.cbl:L455] and the rewrite ends
-         `move "Open, Rewrite, Close" to WS-File-key` [:L501], but the write sets
-         `"Open, Write failed, Close"` [:L477] ONLY inside its failure branch and
-         its `else` goes straight to `ba-RDBMS-Exit` [:L481-L482]. So a clean
-         write returns with the key still reading `"CLOSE IRS FINAL"`, which
-         `ba030-Process-Close` put there [common/irsfinalMT.cbl:L307] - the one
-         disposition of the three whose log record does not name the operation
-         that produced it. Reproduced as written; found by ad-hoc test, which
-         asserted the symmetric value and was wrong to.
-
-WHAT IS NOT REPRODUCED, AND WHY  (rule R-5: omissions recorded as omissions)
-===========================================================================
-    * THE ENTIRE FLAT-FILE PATH [common/acasirsub5.cbl:L180-L348]. Rule R-1
-      makes this module SQL-only, and section 0.2.1.1 scopes the migration to
-      the RDB path. With it go A8, A11, A12, A13, A14 and A18, plus the
-      `fd Final-File.`/`01 Record-5 pic x(655)` blob [:L102-L104] and the whole
-      of `aa040-Process-Read-Next` [:L248-L299] and `aa070-Process-Write`
-      [:L301-L325].
-    * THE ~35 DEAD LINES OF `aa020-Process-Open`/`aa030-Process-Close`
-      [:L212-L246] - A17 - and the commented-out dual-write hook [:L344-L346] -
-      A27. Representation-only; section 0.1.2 lists exactly this class.
-    * ALL PRESENTATION. `display IR9xx ... with foreground-color 4`,
-      `display Display-Blk at 2301`, `display IR901 at 2401` and
-      `accept Accept-Reply at 2433` [:L380-L392] plus the bridge's
-      `display Display-Message-1 with erase eos` [irsfinalMT.cbl:L369, :L551].
-      Section 0.3.4's three-way rule applies: these are diagnostics with no
-      database effect, so they become log records; the CONTROL TRANSFER that
-      follows the record-size display IS preserved [:L393].
-    * `Ca-Process-Logs` [:L525, irsfinalMT.cbl:L719-L723]. Both paragraphs do
-      nothing but `call "fhlogger"`, and `common/fhlogger.cbl` is out of scope
-      per section 0.2.2, so rule R-1 forbids the call. The ~six handler sites
-      and the bridge's own become Python log records at debug level. A26
-      records the self-contradiction in its comment.
-    * THE `stop "Cobol File EOF"` [:L272]. Flat-file only; and a process
-      terminator has no place in a library.
-
-TRANSLATION CORRECTIONS - WHERE PYTHON NEEDS A STATEMENT COBOL DID NOT
-======================================================================
-A translation correction is the opposite of an anomaly. An anomaly is behaviour
-the compiled program HAS and this module reproduces; a correction is behaviour
-the compiled program has FOR FREE, from a language feature Python lacks, that
-this module must therefore write out by hand. Correcting one is not "fixing a
-defect" under rule R-4 - failing to write it is the defect, because the compiled
-program's behaviour would not be reproduced. Each is numbered `Cn`, cited at its
-site, and listed here. This module has ONE.
-
-    C1  `REDEFINES` IS ONE BYTE AREA, AND PYTHON HAS TWO OBJECTS. The frozen
-        record declares each array twice - the enumerated group `03 ar1-fields.`
-        with `05 ar1-1 ... ar1-26 pic x(24)` [copybooks/irswsfinal.cob:L8-L34],
-        then `03 filler redefines ar1-fields.` with `05 ar1 pic x(24) occurs 26`
-        [:L35-L36]; and the same pair for `ar2` [:L38-L64, :L65-L66]. In the
-        compiled program `ar1-7` and `AR1 (7)` ARE THE SAME TWENTY-FOUR BYTES, so
-        a write through either name is instantly visible through the other and no
-        statement anywhere synchronises them - there is nothing to synchronise.
-        Section 0.3.1 requires each `REDEFINES` to be modelled as its own view
-        class, so `records/irs_final.py` publishes `Ar1Fields`/`Ar1View` and
-        `Ar2Fields`/`Ar2View` as four independent dataclasses. That is correct as
-        a layout model and inert as a storage model: a caller writing
-        `final.ar1_fields.ar1_7` leaves `final.ar1_view.ar1[6]` untouched.
-
-        WHICH DIRECTION, AND WHY IT IS NOT A GUESS. The frozen codebase is
-        unambiguous about who writes which name. Every reference to an enumerated
-        name outside the copybook - all fifty-two of them - is a SCREEN SECTION
-        `using` clause on the Finished Accounts Setup screen
-        [irs/irs020.cbl:L472-L593], and SCREEN `using` is bidirectional, so those
-        are the names the OPERATOR writes. The array names appear in exactly four
-        places: this bridge's read-unload [common/irsfinalMT.cbl:L455-L456], its
-        write-load [:L484-L485] and rewrite-load [:L528-L529], and two read-only
-        consumers [irs/irs020.cbl:L1018-L1021, irs/irs060.cbl:L1184-L1187].
-        NOTHING in the frozen codebase writes an array name except this bridge's
-        own read-unload. So the enumerated view is the caller's write path and the
-        array view is the bridge's, and the aliasing that has to be re-established
-        runs enumerated -> array, at the two load boundaries.
-
-        WHERE IT IS APPLIED. `_alias_enumerated_into_array` is called at the head
-        of `write` and of `rewrite`, immediately before the loop that reproduces
-        `perform varying A from 1 by 1` [:L476, :L524]. The READ direction needs
-        nothing: `read` already writes both views, matching `initialize
-        Final-Record with filler` [:L395] followed by `move HV-IRS-AR1 to
-        AR1 (...)` [:L455] over shared bytes.
-
-        WHY THIS IS NOT AN ADDED VALIDATION (rule R-3). It adds no bounds check,
-        no field, no column and no width; it does not skip blank slots - A7 keeps
-        all twenty-six rows written - and it does not touch `ar3`, which stays
-        silently dropped per A3. It restores an aliasing property the compiled
-        program already has, and nothing more. A per-slot guard makes a blank
-        enumerated slot yield to whatever the array view already holds, so the
-        array-only calling pattern the read path itself produces is unchanged;
-        without the guard, reading a table and rewriting it would blank every row.
-
-RULE COMPLIANCE  (Agent Action Plan section 0.7.2)
-==================================================
-There is NO user rules document for this project - `review_rules` reports "No
-user rules provided." The six binding rules are the ones section 0.7.2
-enumerates, and each is honoured here as follows.
-
-R-1, NO COBOL AT RUNTIME. No `subprocess`, `os.system`, `os.popen`, `os.exec*`,
-`ctypes` or `cffi`; no `cobc`, `cobcrun` or `cobmysqlapi.o`; no `import
-harness`; and no `fhlogger`. Every construct is reimplemented natively: the
-`SELECT`/`INSERT`/`UPDATE` the bridge assembles as literal text become bound
-statements here, and the handler's synthesised open/verb/close triples become
-Python calls.
-
-R-2, ZERO BINARY FLOATING POINT. There is no numeric DATA column in this table,
-so no `Decimal` is required and no monetary value passes through - but nothing
-here touches `float`, `complex`, `math`, builtin `round`, builtin `abs`,
-`numpy` or `pandas` either. The one numeric value, the subscript-derived key, is
-an `int` and is rendered to text by the two functions that reproduce the
-bridge's own two renderings.
-
-R-3, NOTHING ADDED. Only `SELECT`, `INSERT` and `UPDATE` are issued - and no
-`DELETE`, because the bridge has none. No DDL of any kind, no index, view or
-trigger, no Alembic; no `sessionmaker`, `Session`, `declarative_base`,
-`DeclarativeBase`, `relationship`, `Mapper`, `registry` or `MetaData`; no
-`threading`, `asyncio`, `multiprocessing`, `concurrent.futures` or pooling; and
-no `COMMIT`, `ROLLBACK` or `START TRANSACTION` - `dal/connection.py` owns the
-autocommit policy. No validation is added: no bounds check the source lacks, no
-skip of blank array slots, no `ar3` in any statement, and no check that the rows
-returned are contiguous or complete. Correction C1 is not an exception to this:
-it re-establishes the byte aliasing `redefines` already gives the compiled
-program, and adds no field, width, column, check or skip.
-
-R-4, ANOMALIES REPRODUCED. The forty entries above, each with a locator at its
-reproduction site or a named omission here.
-
-R-5, FULL TRACEABILITY. A named function per bridge and handler paragraph, the
-`CALL` parameter order preserved exactly, :data:`COLUMNS` and every width read
-from :mod:`acas_posting.dictionary.loader` rather than transcribed, and a footer
-mapping every paragraph of both files to its Python function with the `GO TO`
-class annotated at each transfer site. The one statement that has no COBOL
-counterpart is numbered and indexed rather than left unexplained - see
-TRANSLATION CORRECTIONS above and item 10 of the traceability footer.
-
-R-6, COMPILED BEHAVIOUR IS THE TIE-BREAKER. No clock, no `random`, no `uuid`,
-no `os.urandom` and no `time.sleep` - the frozen bridge cannot sleep either, per
-A39. The bridge's explicit `ORDER BY` is reproduced because it is in the source;
-it exists for REASSEMBLY rather than for determinism, and section 0.6.6's "no
-ordering nondeterminism from a secondary index" still holds because the ordering
-column is the primary key. Two questions are marked rather than guessed.
-
-AMBIGUITIES, ARBITRATED AGAINST COMPILED BEHAVIOUR  (rule R-6)
-==============================================================
-Q-16 and Q-17 are the next free numbers in the migration's shared register -
-`cobol/usage` claimed Q-5.1 to Q-5.3, `cobol/move` Q-9 to Q-14 and
-`programs/gl071_batch_sort` Q-15. Both are marked `TODO(oracle)` at their sites
-per section 0.6.8, which lists exactly this class of question.
-
-    Q-16  WHAT THE `tinyint(2) unsigned` COLUMN ACTUALLY HOLDS, AND WHAT THE
-          QUOTED PREDICATE ACTUALLY COMPARES. `HV-IRS-FINAL-ACC-REC-KEY` is
-          `PIC 9(03) COMP` [irsfinalMT.cbl:L172] written into a two-digit
-          column, and the sequential predicate compares that column against the
-          QUOTED THREE-DIGIT STRING `"000"` [:L339] rather than a number. Both
-          the stored value and the comparison semantics are transport-level
-          questions the compiled bridge's C interface settles, and section
-          0.6.8 already lists the general form of this question - "what the
-          resulting stored value IS depends on the conversion the bridge's C
-          interface performs, which must be measured rather than assumed". Both
-          renderings are reproduced exactly as written; nothing is normalised.
-
-    Q-17  WHAT THE TABLE HOLDS, AND WHAT A READ RETURNS, WHEN FEWER THAN 26 ROWS
-          EXIST. The bridge tolerates a short table by design - "having
-          initialised record as some rows may not be present"
-          [irsfinalMT.cbl:L320] - and A32 then erases the status the short read
-          set, while A37 makes a repeat read hand back a blank record and a
-          success status. What a caller therefore observes for a partially
-          populated table is behaviour of the compiled system and is measured,
-          not inferred. Note the state after ANY write is DENSE: A7 keeps the
-          blank-slot skip commented out, so a written table always holds exactly
-          26 rows, blanks stored as spaces rather than absent - which matters to
-          any scenario diff that expects "only the populated rows".
-
-WHAT THIS MODULE MAY IMPORT, AND WHAT IT MUST NOT  (section 0.4.3)
-==================================================================
-May: `dal.connection`, `dal.status`, `dal.cursor_state`, exactly ONE entity
-record module - `records.irs_final` - plus the shared linkage records, and
-`dictionary.loader`. Must not: `programs`, `cli`, ANY OTHER `dal.acas*` (only
-`facade.py` may know every handler), `harness`, and - specifically -
-`acas_posting.cobol.*`: character padding and `occurs` semantics belong to the
-record layer, so the widths and occurrence counts used below are READ OFF the
-descriptors `records.irs_final` already publishes - `Ar1View.FIELDS`,
-`Ar2View.FIELDS` and `IrsFinalRecord.FIELDS` - and off the dictionary, never
-written as a literal and never obtained by importing `cobol.field` or
-`cobol.move`. The descriptor OBJECTS are used; the descriptor CLASS is not
-imported, so the layering boundary holds while the metadata still comes from the
-one place that owns it.
-
-WHERE THE PLAN'S LINE NUMBERS DIFFER FROM THE FROZEN SOURCE
-===========================================================
-Every citation in this module was read from the frozen files rather than copied
-from the brief, and several of the brief's numbers are off by a few lines. The
-differences are recorded here so they are not rediscovered as defects:
-the handler's messages are at [common/acasirsub5.cbl:L121-L129] and not
-L118-L123; `copy "irswsfinal.cob"` is at [:L133] and not L129; the
-`Procedure Division Using` list spans [:L143-L149] and not L147-L152; the log
-identity is at [:L158-L159] and not L156-L157; the dead open/close block is
-[:L212-L246]; the write paragraph is [:L301-L325]; the single `end-if.` of A2 is
-at [:L483] and not L481; the second bad-function site is [:L506-L510]; and
-`ba020-Call-DAL` is [:L512-L517]. On the bridge side the write's status-squash
-is [common/irsfinalMT.cbl:L509-L516] and not L510-L517, and its unconditional
-reset is [:L571-L573] as cited. The brief's own count of "thirty-one" anomalies
-is likewise low by sixteen, per A32 to A47 above.
-=======
 ==================================================
 
 **1. THIS HANDLER IS NOT ROW-ORIENTED. ONE COBOL RECORD IS TWENTY-SIX ROWS.**
@@ -945,30 +187,30 @@ THE COMPLETE DRIFT TABLE
     #  column (type)                          host variable          copybook
     -  ------------------------------------   --------------------   --------
     1  IRS-FINAL-ACC-REC-KEY                  HV-IRS-FINAL-ACC-      NONE -
-       tinyint(2) unsigned  [ACASDB.sql:L215] REC-KEY 9(03) COMP     the array
-                                              [irsfinalMT.cbl:L172]  subscript
+       tinyint(2) unsigned  [mysql/ACASDB.sql:L215] REC-KEY 9(03) COMP     the array
+                                              [common/irsfinalMT.cbl:L172]  subscript
        drift: bridge-only column; (none) -> 3 digits -> 2; `IRS-` prefix added;
-              written from `move A to HV-...` [irsfinalMT.cbl:L481] and read
+              written from `move A to HV-...` [common/irsfinalMT.cbl:L481] and read
               back as the subscript at [:L455-L456]
 
-    2  IRS-AR1 char(24)     [ACASDB.sql:L216] HV-IRS-AR1 X(24)       ar1-1 ...
-                                              [irsfinalMT.cbl:L173]  ar1-26
+    2  IRS-AR1 char(24)     [mysql/ACASDB.sql:L216] HV-IRS-AR1 X(24)       ar1-1 ...
+                                              [common/irsfinalMT.cbl:L173]  ar1-26
                                                                      [:L9-L34]
                                                     redefined `ar1 occurs 26`
-                                                    [irswsfinal.cob:L36]
+                                                    [copybooks/irswsfinal.cob:L36]
        drift: 26 copybook fields -> 1 column x 26 rows; width EXACT (no
               24->32 drift as in `nominalMT`); `IRS-` prefix added
 
-    3  IRS-AR2 char(1)      [ACASDB.sql:L217] HV-IRS-AR2 X(1)        ar2-1 ...
-                                              [irsfinalMT.cbl:L174]  ar2-26
+    3  IRS-AR2 char(1)      [mysql/ACASDB.sql:L217] HV-IRS-AR2 X(1)        ar2-1 ...
+                                              [common/irsfinalMT.cbl:L174]  ar2-26
                                                                      [:L39-L64]
                                                     redefined `ar2 occurs 26`
-                                                    [irswsfinal.cob:L66]
+                                                    [copybooks/irswsfinal.cob:L66]
        drift: 26 copybook fields -> 1 column x 26 rows; width EXACT; `IRS-`
               prefix added
 
     -  NO COLUMN                              NO HOST VARIABLE       ar3 x(5)
-                                                              [irswsfinal.cob:L68]
+                                                              [copybooks/irswsfinal.cob:L68]
        drift: SILENTLY DROPPED - see headline 2 and anomaly A3
 
 THE FIELD-TO-DICTIONARY MAPPING IS UNUSUAL THREE WAYS  (rule R-5)
@@ -1132,23 +374,23 @@ has a `[<path>:L<n>]` comment at its reproduction site, or - where it is
 flat-file-only and therefore outside the RDB surface - is named here as a
 deliberate omission with its locator.
 
-    A1   A FAILED WRITE REPORTS SUCCESS. Handler [acasirsub5.cbl:L470-L483];
+    A1   A FAILED WRITE REPORTS SUCCESS. Handler [common/acasirsub5.cbl:L470-L483];
          bridge [irsfinalMT.cbl:L563, :L571-L573]. Never surfaced.
     A2   ONE `end-if.` CLOSES TWO NESTED `if`s, which is what makes the
-         fall-through reachable [acasirsub5.cbl:L483].
-    A3   `ar3 pic x(5)` SILENTLY DROPPED [irswsfinal.cob:L68]; absent from
+         fall-through reachable [common/acasirsub5.cbl:L483].
+    A3   `ar3 pic x(5)` SILENTLY DROPPED [copybooks/irswsfinal.cob:L68]; absent from
          `irsfinalMT.cbl`, `acasirsub5.cbl` and `ACASDB.sql`.
     A4   AN ARRAY SUBSCRIPT TAKEN DIRECTLY FROM A DATABASE VALUE -
          `AR1 (HV-IRS-FINAL-ACC-REC-KEY)` where the host variable is `9(03)`
-         and the array is 26 [irsfinalMT.cbl:L455-L456].
+         and the array is 26 [common/irsfinalMT.cbl:L455-L456].
     A5   THE OFFENDING KEY VALUE BECOMES THE ERROR CODE on an out-of-range key,
-         and `FS-Reply` is NOT set [irsfinalMT.cbl:L426-L428].
+         and `FS-Reply` is NOT set [common/irsfinalMT.cbl:L426-L428].
     A6   THE STATUS-SQUASHING LOOP - each iteration's failure is stashed and
          cleared, so only the LAST survives and the loop never stops early
-         [irsfinalMT.cbl:L509-L516]. `ba070` SETS NO `WE-Error` OF ITS OWN -
+         [common/irsfinalMT.cbl:L509-L516]. `ba070` SETS NO `WE-Error` OF ITS OWN -
          every one of its own status statements writes `FS-Reply` alone - but
          that does NOT mean a caller sees zero there. `bb200-Insert` performs
-         `MYSQL-1210-COMMAND` [irsfinalMT.cbl:L655], which on a query failure
+         `MYSQL-1210-COMMAND` [common/irsfinalMT.cbl:L655], which on a query failure
          performs `Mysql-1100-Db-Error`
          [copybooks/mysql-procedures.cpy:L166-L177], and THAT paragraph does
          `move 99 to fs-Reply` / `move 911 to We-Error` unconditionally
@@ -1160,12 +402,12 @@ deliberate omission with its locator.
          information about WHICH row failed. Verified by ad-hoc test rather
          than assumed.
     A7   THE BLANK-SLOT SKIP IS COMMENTED OUT, so all 26 rows are always
-         written, blank ones included [irsfinalMT.cbl:L477-L480].
+         written, blank ones included [common/irsfinalMT.cbl:L477-L480].
     A8   A READ VERB THAT CREATES THE FILE and writes one all-spaces record when
-         the open fails [acasirsub5.cbl:L255-L263]. FLAT-FILE ONLY =>
+         the open fails [common/acasirsub5.cbl:L255-L263]. FLAT-FILE ONLY =>
          DELIBERATE OMISSION.
     A9   CONTRADICTORY ANNOTATIONS ON THE IDENTICAL STATEMENT 11 LINES APART -
-         `move 3 to WE-Error  *> NOT as in irsub5` [acasirsub5.cbl:L268] then
+         `move 3 to WE-Error  *> NOT as in irsub5` [common/acasirsub5.cbl:L268] then
          `move 3 to WE-Error  *> as in irsub5` [:L279]. Both quoted verbatim;
          an ambiguity-document entry.
     A10  ALL FOUR RDB BAIL-OUTS SKIP THE CLOSE, leaking the cursor and the
@@ -1178,21 +420,21 @@ deliberate omission with its locator.
     A12  `move 1 to WS-File-Key` IMMEDIATELY OVERWRITTEN by the descriptive
          string [acasirsub5.cbl:L295, :L297]. FLAT-FILE ONLY.
     A13  THE FLAT READ CLEARS `WE-Error` ONLY, NOT `FS-Reply`
-         [acasirsub5.cbl:L296] - and, unlike `acasirsub3`, does NOT clear
+         [common/acasirsub5.cbl:L296] - and, unlike `acasirsub3`, does NOT clear
          `Cobol-File-Status`, leaving the EOF latch set. FLAT-FILE ONLY.
     A14  THE WRITE-FAILURE BRANCH NEITHER CLOSES NOR EXITS while the
-         open-failure branch does both [acasirsub5.cbl:L312-L322]. FLAT-FILE
+         open-failure branch does both [common/acasirsub5.cbl:L312-L322]. FLAT-FILE
          ONLY.
     A15  CODES 1 AND 2 ARE DISPATCHED BUT ARE NO-OPS that jump to `aa-Exit`,
          bypassing the logging hook [acasirsub5.cbl:L192-L199, :L334-L337].
     A16  `when 5` FALLS THROUGH TO `when 7` - one paragraph serves both on the
-         flat path [acasirsub5.cbl:L202-L204].
+         flat path [common/acasirsub5.cbl:L202-L204].
     A17  ~35 LINES OF FULLY-FORMED COMMENTED-OUT OPEN/CLOSE carrying trace
          numbers 201/202 and status codes 35, 997 and 1, including a
          DOUBLY-COMMENTED dated line `*>*> 27/07/16 16:30 move zeros to
          FS-Reply WE-Error.` - `acasirsub3` has the same line doubly-commented
          and `acasirsub4:L287` has it singly-commented and LIVE
-         [acasirsub5.cbl:L212-L246]. DELIBERATE OMISSION, inventoried here.
+         [common/acasirsub5.cbl:L212-L246]. DELIBERATE OMISSION, inventoried here.
     A18  A LIVE `stop "Cobol File EOF"` in a block whose own comment says
          "should NOT occur" [acasirsub5.cbl:L265, :L272]. FLAT-FILE ONLY;
          never translated to `sys.exit`, `exit()` or `os._exit`.
@@ -1201,44 +443,44 @@ deliberate omission with its locator.
          disagreement, after `acas029`/`otm5MT`, `acasirsub3`/`irsdfltMT` and
          `acasirsub4`/`irspostingMT`. A folder-wide pattern, not reconciled.
     A20  THE SAME LITERAL COMPARED AT TWO WIDTHS IN ONE FILE - `"0  "` in the
-         write [irsfinalMT.cbl:L491] and `"0   "` in the rewrite [:L558].
+         write [common/irsfinalMT.cbl:L491] and `"0   "` in the rewrite [:L558].
          Compared trimmed here; the discrepancy is recorded.
     A21  `if Testing-2` WHERE EVERY OTHER TEST IN BOTH FILES USES `Testing-1`
-         [irsfinalMT.cbl:L550] - the same anomaly `irsdfltMT` carries.
+         [common/irsfinalMT.cbl:L550] - the same anomaly `irsdfltMT` carries.
     A22  NO `initialize` OF THE HOST-VARIABLE GROUP BEFORE THE WRITE LOOP,
          diverging from the convention section 0.6.2 describes and from
-         `irsdfltMT:L625` [irsfinalMT.cbl:L468-L476]. `NOT NULL` is honoured
+         `irsdfltMT:L625` [common/irsfinalMT.cbl:L468-L476]. `NOT NULL` is honoured
          anyway because all three host variables are assigned every iteration.
     A23  `KOR-offset`/`KOR-length` MOVED TO `K`/`L` AND NEVER USED
          [irsfinalMT.cbl:L330-L331, :L532-L533]; the rewrite's commented-out
          `*> Final-Record (K:L)` [:L541] shows where they were meant to go.
     A24  THE RELATION IS HARD-CODED `" > "` while `MOST-Relation` is declared
-         [irsfinalMT.cbl:L131] and unused on this path [:L338].
+         [common/irsfinalMT.cbl:L131] and unused on this path [:L338].
     A25  A QUOTED 3-DIGIT LITERAL `"000"` COMPARED AGAINST A `tinyint(2)`
-         COLUMN [irsfinalMT.cbl:L339]. Quoted as written; ambiguity Q-16.
+         COLUMN [common/irsfinalMT.cbl:L339]. Quoted as written; ambiguity Q-16.
     A26  `Ca-Process-Logs` IS ANNOTATED "Not called on DAL access as it does it
-         already" [acasirsub5.cbl:L525] YET IS PERFORMED SIX TIMES in `ba015` -
+         already" [common/acasirsub5.cbl:L525] YET IS PERFORMED SIX TIMES in `ba015` -
          four of them in the read path alone [:L428, :L436, :L445, :L452,
          :L456, :L478, :L502].
     A27  A COMMENTED-OUT DUAL-WRITE HOOK in `aa-main-exit`
-         [acasirsub5.cbl:L344-L346]. DELIBERATE OMISSION, recorded.
-    A28  THE `IRS-` PREFIX IS ADDED AT THE BRIDGE [irsfinalMT.cbl:L172-L174]
+         [common/acasirsub5.cbl:L344-L346]. DELIBERATE OMISSION, recorded.
+    A28  THE `IRS-` PREFIX IS ADDED AT THE BRIDGE [common/irsfinalMT.cbl:L172-L174]
          where `analMT` STRIPS a `WS-` prefix. Resolved from the dictionary.
     A29  COSMETIC EVIDENCE OF COPY-PASTE, preserved as citations: `function
          Length` then `function length` on adjacent lines
          [acasirsub5.cbl:L369, :L372]; seven exclamation marks [:L375]; `JC`
          without the s [:L415]; six question marks on the cursor comment
-         [irsfinalMT.cbl:L388].
-    A30  `initialize ... with filler` IN THE READ [irsfinalMT.cbl:L395] VS NO
+         [common/irsfinalMT.cbl:L388].
+    A30  `initialize ... with filler` IN THE READ [common/irsfinalMT.cbl:L395] VS NO
          `initialize` IN THE WRITE [:L468-L476] - the two-semantics
          inconsistency.
     A31  A COMMENTED-OUT STATUS CLEAR INSIDE THE WRITE LOOP'S `Testing-1` BLOCK
          that would have masked errors when logging was on
-         [irsfinalMT.cbl:L506-L507].
+         [common/irsfinalMT.cbl:L506-L507].
 
     NEW - FOUND WHILE READING THE FROZEN SOURCE FOR THIS MODULE
     A32  THE READ HAS THE SAME UNCONDITIONAL RESET AS THE REWRITE.
-         `move zero to fs-reply WE-Error.` [irsfinalMT.cbl:L465] sits AFTER the
+         `move zero to fs-reply WE-Error.` [common/irsfinalMT.cbl:L465] sits AFTER the
          loop with no guard, so EVERY in-loop `exit perform` - end of data
          [:L423], out-of-range key [:L433] and the zero-count branch [:L453] -
          has its status ERASED. Only the PRE-LOOP empty-table path, which jumps
@@ -1249,21 +491,21 @@ deliberate omission with its locator.
          tags `EOF`/`EOF2`/`EOF3` behind, and then the reset happens.
     A33  THE SAME STATUS-CLEAR IDIOM IS LIVE IN ONE LOOP AND DEAD IN THE OTHER.
          `move zeros to FS-Reply SQL-Err` / `move spaces to SQL-Msg` are LIVE
-         in the read loop [irsfinalMT.cbl:L459-L460] and COMMENTED OUT in the
+         in the read loop [common/irsfinalMT.cbl:L459-L460] and COMMENTED OUT in the
          write loop [:L506-L507] - that second one being A31. One file, one
          idiom, two comment states.
     A34  THE BRIDGE'S OWN COMMENT SAYS 32 ROWS IN A 26-ROW TABLE - "As this is
-         for only one set of 32 rows we will skip this" [irsfinalMT.cbl:L232],
+         for only one set of 32 rows we will skip this" [common/irsfinalMT.cbl:L232],
          copy-pasted from `irsdfltMT`. Corroborates the family.
     A35  BOTH EOF PATHS SET THE PAIR `(10, 10)`, not `WE-Error` alone -
-         pre-loop [irsfinalMT.cbl:L383-L384] and in-loop [:L417].
+         pre-loop [common/irsfinalMT.cbl:L383-L384] and in-loop [:L417].
     A36  THE UPDATE RENDERS THE SAME KEY TWO WAYS IN ONE STATEMENT. Its `SET`
          term takes `TRIM(WS-MYSQL-EDIT(18:03))`, which is UNPADDED - `"1"` -
          while its own `WHERE` takes `WS-Key`, `pic 99`, which is ZERO-PADDED -
          `"01"` [irsfinalMT.cbl:L681, :L542]. And the `SET` clause INCLUDES THE
          PRIMARY KEY, updating it to itself [:L677-L687].
     A37  A SECOND READ ON AN ALREADY-ACTIVE CURSOR BLANKS THE CALLER'S RECORD
-         AND REPORTS SUCCESS. `if Cursor-Not-Active` [irsfinalMT.cbl:L328]
+         AND REPORTS SUCCESS. `if Cursor-Not-Active` [common/irsfinalMT.cbl:L328]
          guards the SELECT, `initialize Final-Record with filler` [:L395] is
          OUTSIDE that guard, and nothing on the success path clears
          `Most-Cursor-Set` [:L462-L466]. So a repeat call skips the SELECT,
@@ -1271,7 +513,7 @@ deliberate omission with its locator.
          A32's unconditional reset turns `(10, 10)` into `(0, 0)`. The caller
          gets an all-spaces record and a success status. Ambiguity Q-17.
     A38  THE THREE FAN-OUT VERBS SKIP THE BRIDGE'S OWN END-OF-CALL LOGGING.
-         Read [irsfinalMT.cbl:L466], write [:L517] and rewrite [:L574] all
+         Read [common/irsfinalMT.cbl:L466], write [:L517] and rewrite [:L574] all
          `go to ba999-exit`, jumping past `ba999-end`'s
          `if Testing-1 / perform Ca-Process-Logs` [:L600-L604]; open, close and
          bad-function go through it.
@@ -1289,7 +531,7 @@ deliberate omission with its locator.
          always written and the `not = 1` test below always has a value.
     A41  THE PREDICATE IS STORED "For test logging" AND THEN WIPED BEFORE ANY
          LOG CALL CAN READ IT. `move ws-Where (1:J) to WS-Log-Where` carries
-         that very comment [irsfinalMT.cbl:L349], and `move spaces to
+         that very comment [common/irsfinalMT.cbl:L349], and `move spaces to
          WS-Log-Where.` [:L393] clears it before the loop - so all four of the
          read's `Ca-Process-Logs` sites [:L421, :L431, :L451, :L458] log an
          EMPTY predicate. It survives on exactly ONE path: the empty-table arm,
@@ -1298,18 +540,18 @@ deliberate omission with its locator.
          `*> For test logging` move [:L547] and no such wipe, so there the
          predicate does reach the log.
     A42  TWO DEAD DISJUNCTS IN THE READ'S END-OF-DATA TEST.
-         `if return-code = -1 or A > 26 or = zero` [irsfinalMT.cbl:L415-L416]
+         `if return-code = -1 or A > 26 or = zero` [common/irsfinalMT.cbl:L415-L416]
          sits inside `perform varying A from 1 by 1 until A > 26` [:L396-L397],
          so `A > 26` and `A = zero` cannot hold in the body. Only
          `return-code = -1` can fire. Same class as A23's dead `K`/`L`.
     A43  THE READ'S IN-LOOP COUNT GUARD CANNOT FIRE ON THE NORMAL PATH.
-         `if WS-MYSQL-Count-Rows = zero` [irsfinalMT.cbl:L437] reads the
+         `if WS-MYSQL-Count-Rows = zero` [common/irsfinalMT.cbl:L437] reads the
          store-result snapshot's size, which `Mysql-1220-Store-Result` set once
          [copybooks/mysql-procedures.cpy:L191-L192] and which nothing in the
          loop re-reads; the zero case already left at [:L386]. Reproduced
          because a caller arriving on a stale cursor (A37) is the one way in.
     A44  A STALE WRITE FAILURE IS RE-REPORTED BY EVERY LATER CLEAN WRITE.
-         `03 ws-saved-fs-reply pic 99.` [irsfinalMT.cbl:L147] is written at
+         `03 ws-saved-fs-reply pic 99.` [common/irsfinalMT.cbl:L147] is written at
          [:L510] and read at [:L514-L515], and IS NEVER CLEARED - not by
          `ba010-Initialise` [:L222-L230], not by `ba070`'s own status resets
          [:L472-L474], and nowhere else in the program: those four lines are its
@@ -1319,7 +561,7 @@ deliberate omission with its locator.
          `FS-Reply` for the life of the run. Combined with A1 the effect
          inverts: the failing write reports success and a later clean one
          reports the failure.
-    A45  `01 Old-File-Function pic 9 value zero.` [irsfinalMT.cbl:L144] IS
+    A45  `01 Old-File-Function pic 9 value zero.` [common/irsfinalMT.cbl:L144] IS
          DECLARED AND NEVER REFERENCED - that line is its only occurrence.
          Shared with `irsdfltMT`, the other array-fan-out bridge, presumably to
          remember a caller's function across the synthesised open and close that
@@ -1516,7 +758,7 @@ changes a line of code - which is what arbitrating rather than guessing was for.
           able to tell", which is true and is not a behavioural question. THE
           BEHAVIOUR IS FULLY DETERMINED: the bridge tolerates a short table by
           design - "having initialised record as some rows may not be present"
-          [irsfinalMT.cbl:L320]; the exhaustion arm sets `(10, 10)` on its way out
+          [common/irsfinalMT.cbl:L320]; the exhaustion arm sets `(10, 10)` on its way out
           [:L417]; and `move zero to fs-reply WE-Error` [:L465] is UNCONDITIONAL
           (A32), so it erases that. The caller therefore observes `(0, 0)` -
           success - together with a record whose unfilled slots hold the spaces
